@@ -1,0 +1,511 @@
+{% extends "ui.html" %}
+{% block title %}Configuration{% endblock %}
+{% block content %}
+
+<div class="container">
+<form id="bulk_action" method="post" role="form">
+
+<div class="card">
+  <div class="card-header">
+    <div class="jumbotron">
+      <div class="container">
+        <h1 class="display-4">Welcome to BTY</h1>
+        <p class="lead">
+        I like to boot it, boot it...
+        I like to boot it, boot it...
+        I like to boot it, boot it...
+        We like to boot it!
+        </p>
+      </div>
+    </div>
+
+    <ul class="nav nav-tabs card-header-tabs" id="myTab" role="tablist">
+      <li class="nav-item">
+        <a class="nav-link active"
+           id="machines-tab"
+           data-toggle="tab"
+           href="#machines"
+           role="tab"
+           aria-controls="machines"
+          aria-selected="true">Machines</a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link"
+           id="pconfigs-tab"
+           data-toggle="tab"
+           href="#pconfigs"
+           role="tab"
+           aria-controls="pconfigs"
+          aria-selected="false">PXE Configs</a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link"
+           id="ptemplates-tab"
+           data-toggle="tab"
+           href="#ptemplates"
+           role="tab"
+           aria-controls="ptemplates"
+          aria-selected="false">PXE Templates</a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link"
+           id="images-tab"
+           data-toggle="tab"
+           href="#images"
+           role="tab"
+           aria-controls="images"
+           aria-selected="false">Images</a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link"
+           id="craw-tab"
+           data-toggle="tab"
+           href="#craw"
+           role="tab"
+           aria-controls="craw"
+           aria-selected="false">Raw</a>
+      </li>
+    </ul>
+  </div>
+
+  <div class="tab-content" id="MyTabContent">
+    <div class="tab-pane show active" id="machines" role="tabpanel"
+      aria-labelledby="machines-tab">
+
+      <div class="card-body">
+        <h5 class="card-title">Machine Management / Configuration</h5>
+        <p class="card-text">
+        This is where you setup and control what to do with discovered machines. Manage them? And if so,
+        then which image should be installed and which PXE template should be used along with the
+        default PXE label.
+        </p>
+      </div>
+
+      <table class="table table-striped" id="machine_list">
+        <thead>
+          <tr>
+            <th>HWA</th>
+            <th>Managed</th>
+            <th>Hostname</th>
+            <th>PXE Tmpl.</th>
+            <th>PXE Lbl.</th>
+            <th>Image</th>
+            <th><input type="checkbox" name="bulk_selector" id="bulk_selector"></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th scope="row" colspan="5">No machines</p></th>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="card-footer text-muted">
+        <button class="btn btn-primary" type="submit" name="action" value="apply">Apply Changes</button>
+        <div class="float-right">
+          or with <b>selected</b> hosts do:
+          <div class="btn-group">
+            <button class="btn btn-danger" type="submit" name="action" value="remove">Remove</button>
+          </div>
+        </div>
+      </div>
+
+    </div> <!-- machines -->
+
+    <div class="tab-pane" id="pconfigs" role="tabpanel" aria-labelledby="pconfigs-tab">
+
+      <div class="card-body">
+        <h5 class="card-title">PXE Configs available to PXE</h5>
+        <p class="card-text">
+        These are the PXE configurations available to PXE, that is, files in <code>{{
+          cfg.pconfigs.root }}</code>.
+        </p>
+      </div>
+
+      <table class="table table-striped" id="pconfig_list">
+        <thead>
+          <tr>
+            <th>Filename</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th scope="row" colspan="1">No Configs</p></th>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="card-footer text-muted">
+        <button class="btn btn-primary" type="submit" name="action" value="pconfigs_refresh">
+          Reload PXE Configs
+        </button>
+      </div>
+    </div> <!-- pconfigs -->
+
+    <div class="tab-pane" id="ptemplates" role="tabpanel" aria-labelledby="ptemplates-tab">
+      <div class="card-body">
+        <h5 class="card-title">PXE Templates available to BTY</h5>
+        <p class="card-text">
+        Add additional in PXE templates directory and then refresh, the PXE template importer will
+        parse <b>LABEL</b> statements from the template and provide them here.
+        </p>
+      </div>
+
+      <table class="table table-striped" id="ptemplate_list">
+        <thead>
+          <tr>
+            <th>Filename</th>
+            <th>Labels</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th scope="row" colspan="2">No templates</p></th>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="card-footer text-muted">
+        <button class="btn btn-primary" type="submit" name="action" value="ptemplates_refresh">
+          Reload PXE Templates
+        </button>
+      </div>
+    </div> <!-- ptemplates -->
+
+    <div class="tab-pane" id="images" role="tabpanel" aria-labelledby="images-tab">
+      <div class="card-body">
+        <h5 class="card-title">Disk Images made available via NFS and HTTP</h5>
+        <p class="card-text">
+        If you want to add additional images then, simply store them in <code>{{ cfg.images.root
+          }}</code>.
+        </p>
+      </div>
+
+      <table class="table table-striped" id="image_list">
+        <thead>
+          <tr>
+            <th>Filename</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th scope="row" colspan="1">No images</p></th>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="card-footer text-muted">
+        <button class="btn btn-primary" type="submit" name="action" value="images_refresh">
+          Reload Disk Images
+        </button>
+      </div>
+    </div> <!-- images -->
+
+    <div class="tab-pane" id="craw" role="tabpanel" aria-labelledby="craw-tab">
+      <div class="card-body">
+        <h5 class="card-title">Raw Configuration dump</h5>
+        <p class="card-text">
+        The BTY UI provides a couple of means view and change the BTY configuration. However, there
+        might be values you want to look at, or intergrate BTY in some other form. For that you can
+        go directly to the JSON representation.
+
+        Click the button below to get the raw configuration.
+        </p>
+      </div>
+
+      <div class="card-footer text-muted">
+        <a href="/cfg" class="btn btn-primary" role="button">Goto Raw Config</a>
+      </div>
+    </div> <!-- craw -->
+
+  </div>
+
+</form>
+</div>
+
+{% endblock %}
+
+{% block script %}
+<script type="text/javascript">
+
+var DEFAULT_SORT_KEY = "hostname";
+var DEFAULT_SORT_DIR = "ASC";
+
+var ptemplates = new Array();   // Datasets the UI uses
+var pconfigs = new Array();
+var machines = new Array();
+var images = new Array();
+
+function init_data(cfg, sort_attr, sort_dir) {
+  $.each(cfg.machines.coll, function(i, machine) {
+    machines.push(machine);
+  });
+
+  $.each(cfg.images.coll, function(i, image) {
+    images.push(image);
+  });
+  images.sort();
+
+  $.each(cfg.ptemplates.coll, function(i, label) {
+    ptemplates.push(label);
+  });
+  ptemplates.sort();
+
+  $.each(cfg.pconfigs.coll, function(i, label) {
+    pconfigs.push(label);
+  });
+  pconfigs.sort();
+}
+
+function init_machines(cfg, sort_attr, sort_dir) {
+
+  function fill() {
+    $("#machine_list").find("tbody").empty();   // Remove tbody content
+
+    machines.sort(function(a, b) {
+      var attrA = String(a[sort_attr]).toUpperCase();
+      var attrB = String(b[sort_attr]).toUpperCase();
+
+      if (sort_dir == "ASC") {
+        if (attrA < attrB)
+          return -1;
+        if (attrA > attrB)
+          return 1;
+      } else {
+        if (attrA > attrB)
+          return -1;
+        if (attrA < attrB)
+          return 1;
+      }
+
+      // names must be equal
+      return 0;
+    });
+
+    $.each(machines, function(i, machine) {     // Populate
+      var row = $("<tr>");
+
+      if (machine && "exists" in machine) {
+        row.addClass(machine.exists ? "success" : "danger");
+      }
+
+      // HWA readonly input
+      row.append($("<th>").append(
+        $("<input>")
+        .prop("type", "text")
+        .prop("name", "hwa")
+        .prop("readonly", "true")
+        .val(String(machine.hwa))
+        .text(String(machine.hwa))
+      ));
+
+      // Manage selector
+      row.append($("<td>").append(
+        $("<select>")
+        .prop("class", "form-control")
+        .prop("name", "managed")
+        .append($("<option>").val("1").text("True"))
+        .append($("<option>").val("0").text("False"))
+        .val(String(machine.managed === true ? "1" : "0"))
+      ));
+
+      // Hostname input
+      row.append($("<td>").append(
+            $("<input>")
+            .prop("type", "text")
+            .prop("name", "hostname")
+            .val(String(machine.hostname))
+      ));
+
+      // PXE Template and Label selector
+      var plabel_id = "plabel_" + machine.hwa;
+      var plabel_selector = $("<select>")
+        .prop("id", plabel_id)
+        .prop("name", "plabel")
+        .prop("class", "form-control")
+
+      var ptemplate_selector = $("<select>")
+      .prop("name", "ptemplate")
+      .prop("class", "form-control");
+
+      $.each(ptemplates, function(i, ptemplate) {
+        $("<option>").val(ptemplate.fname).text(ptemplate.fname).appendTo(ptemplate_selector);
+      });
+
+      ptemplate_selector.change(function() {
+        var ptemplate_fname = $(this).val();
+
+        plabel_selector.empty();
+        $.each(cfg.ptemplates.coll[ptemplate_fname].labels, function(i, lbl) {
+          plabel_selector.append($("<option>").val(lbl).text(lbl));
+        });
+
+        if (ptemplate_fname == machine.ptemplate) {
+          plabel_selector.val(machine.plabel);
+        }
+      });
+
+      row.append($("<td>").append(ptemplate_selector));
+      row.append($("<td>").append(plabel_selector));
+
+      $(ptemplate_selector).val(String(machine.ptemplate)).change();
+
+      // Image selector
+      var image_selector = $("<select>")
+      .prop("name", "image")
+      .prop("class", "form-control");
+
+      $("<option>").val("null").text("null").appendTo(image_selector);
+
+      $.each(images, function(i, image) {
+        $("<option>").val(image).text(image).appendTo(image_selector);
+      });
+      $(image_selector).val(String(machine.image));
+      row.append($("<td>").append(image_selector));
+
+      row.append($("<td>").append(
+        $("<input>")
+        .prop("type", "checkbox")
+        .prop("name", "bulk_ident")
+        .val(machine.hwa)
+      ));
+
+      row.appendTo($("#machine_list tbody"));
+    });
+
+  }
+
+  // Event listeners
+  $("#machine_list thead th").click(function(evt, e) {
+
+    new_sort_attr = String($(this).text().toLowerCase());
+    if (new_sort_attr.length < 3)
+      return;
+
+    if (new_sort_attr == sort_attr) {
+      sort_dir = sort_dir == "DESC" ? "ASC" : "DESC";
+    } else {
+      sort_attr = new_sort_attr;
+      sort_dir = DEFAULT_SORT_DIR
+    }
+
+    fill();
+  });
+
+  $("#bulk_selector").click(function() {
+    $(this)
+    .closest('form')
+    .find(':checkbox')
+    .prop("checked", $(this).prop("checked"));
+  });
+
+  fill();
+}
+
+function init_pconfigs(cfg, sort_attr, sort_dir) {
+
+  function fill() {
+    $("#pconfig_list").find("tbody").empty();   // Remove tbody content
+
+    $.each(pconfigs, function(i, pconfig) {     // Populate
+      var ident = "pconfig_" + pconfig.fname;
+      var curs = "#" + ident;
+
+      var row = $("<tr>")
+      .click(function() {
+        $(curs).toggle("collapse");
+      })
+      .append($("<td>").text(pconfig.fname))
+      .appendTo($("#pconfig_list tbody"));
+
+      var hidden = $("<tr>")
+      .prop("id", ident)
+      .addClass("collapse")
+      .append(
+        $("<td>").append(
+          $("<pre>").append(
+            $("<code>").text(pconfig.content)
+          )
+        )
+      ).appendTo($("#pconfig_list tbody"));
+    });
+  }
+
+  fill();
+}
+
+function init_ptemplates(cfg, sort_attr, sort_dir) {
+
+  function fill() {
+    $("#ptemplate_list").find("tbody").empty(); // Remove tbody content
+
+    $.each(ptemplates, function(i, ptemplate) { // Populate
+      var ident = "ptemplate_" + i;
+      var curs = "#" + ident;
+
+      var row = $("<tr>")
+      .click(function() {
+        $(curs).toggle("collapse");
+      })
+      .append($("<td>").text(ptemplate.fname));
+
+      var label_col = $("<td>");
+      $.each(ptemplate.labels, function(i, lbl) {
+        if (i) {
+          label_col.text(label_col.text() + ", ");
+        }
+        label_col.text(label_col.text() + lbl);
+      });
+      row.append(label_col);
+
+      row.appendTo($("#ptemplate_list tbody"));
+
+      var hidden = $("<tr>")
+      .prop("id", ident)
+      .addClass("collapse")
+      .append(
+        $("<td>").append(
+          $("<pre>").append(
+            $("<code>").text(ptemplate.content)
+          )
+        ).prop("colspan", "2")
+      ).appendTo($("#ptemplate_list tbody"));
+
+    });
+  }
+
+  fill();
+}
+
+function init_images(cfg, sort_attr, sort_dir) {
+
+  function fill() {
+    $("#image_list").find("tbody").empty();     // Remove tbody content
+
+    $.each(images, function(i, image) {         // Populate
+      var row = $("<tr>");
+
+      row.append($("<td>").text(image));
+      row.appendTo($("#image_list tbody"));
+    });
+  }
+
+  fill();
+}
+
+function init_raw(cfg, sort_attr, sort_dir) {
+
+}
+
+function main(cfg) {
+  init_data(cfg, DEFAULT_SORT_KEY, DEFAULT_SORT_DIR);
+  init_machines(cfg, DEFAULT_SORT_KEY, DEFAULT_SORT_DIR);
+  init_pconfigs(cfg, DEFAULT_SORT_KEY, DEFAULT_SORT_DIR);
+  init_ptemplates(cfg, DEFAULT_SORT_KEY, DEFAULT_SORT_DIR);
+  init_images(cfg, DEFAULT_SORT_KEY, DEFAULT_SORT_DIR);
+  init_raw(cfg, DEFAULT_SORT_KEY, DEFAULT_SORT_DIR);
+}
+
+</script>
+{{ super() }}
+{% endblock script %}
