@@ -1,6 +1,6 @@
 UI menu.c32
-DEFAULT boot_hd0
-MENU TITLE options for ${HOSTNAME}
+DEFAULT ___PXE_DEFAULT___
+MENU TITLE Boot otions for ___HOSTNAME___
 MENU AUTOBOOT Starting boot from hd0 with bzImage in # seconds
 TIMEOUT 50
 TOTALTIMEOUT 600
@@ -13,7 +13,7 @@ LABEL boot_hd0
 
 LABEL boot_hd0_bzi
 	MENU LABEL Boot from hd0 with bzImage
-	KERNEL images/${HOSTNAME}.bzImage
+	KERNEL images/___HOSTNAME___.bzImage
 	APPEND root=/dev/sda1 rw console=ttyS1,115200 net.ifnames=0 biosdevname=0
 
 LABEL install
