@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+
+IMAGE_ROOT=/home/partimag
+IMAGE_FNAME=ubuntu1604_qatd.qcow2
+IMAGE_PATH=$IMAGE_ROOT/$IMAGE_FNAME
+
+DEV_NAME=sda
+DEV_PATH=/dev/$DEV_NAME
+
+if [[ ! -d $IMAGE_ROOT ]]; then
+	echo "FAILED: invalid IMAGE_ROOT: '$IMAGE_ROOT'"
+	exit 1
+fi
+
+if [[ ! -f $IMAGE_PATH ]]; then
+	echo "FAILED: invalid IMAGE_PATH: '$IMAGE_PATH'"
+	exit 1
+fi
+
+if [[ ! -f $DEV_PATH ]]; then
+	echo "FAILED: invalid DEV_PATH: '$DEV_PATH'"
+	exit 1
+fi
+
+# Write the image to disk
+qemu-img convert -f qcow2 -O raw -p $IMAGE_PATH $DEV_PATH
+if [[ $? -ne 0 ]]; then
+	echo "FAILED: writing '$IMAGE_PATH' to '$DEV_PATH'"
+	exit 1
+fi
+
+# Mount and change hostname
+
+echo "TODO: Mount and change hostname
+
+exit 0

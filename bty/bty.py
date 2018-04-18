@@ -2,6 +2,7 @@
 from wsgiref.simple_server import make_server
 from subprocess import Popen, PIPE
 import pprint
+import json
 import re
 
 REGEX_HW_ADDR=r".*(([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})).*"
@@ -41,7 +42,6 @@ def application(environ, start_response):
                 ('Content-Length', str(len(output)))
         ]
         start_response(status, response_headers)
-
 
         return [output]
 
