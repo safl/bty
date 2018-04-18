@@ -20,10 +20,13 @@ DEFAULT_HOST = {
 
 CFG_FNAME = "bty.json"
 
-PXE_LABELS = {
-	"boot_hda",
-	"boot_hda_bzi",
-	"install"
+PXE = {
+	"cfg_path": "/srv/tftpboot/pxelinux.cfg",
+	"labels": [
+		"boot_hda",
+		"boot_hda_bzi",
+		"install"
+	],
 }
 
 def ipa_to_hwa(ipa=None):
@@ -34,6 +37,7 @@ def ipa_to_hwa(ipa=None):
         """
 
 	if ipa is None:
+		print("FAILED: ip: %r" % ipa)
 		return None
 
         cmd = ["arp", "-a", ipa]
@@ -46,6 +50,8 @@ def ipa_to_hwa(ipa=None):
         match = re.match(REGEX_HWA, out)
         if match:
                 return match.group(1).upper()
+
+	print("FAILED: out: %r" % out)
 
         return None
 
@@ -167,8 +173,11 @@ def pxe_config_install(environ, cfg, host, pxe):
 	print("pxe_config_install")
 
 	pxe_fname = "01-%s" % host["hwa"].replace(":", "-")
+	pxe_fpath = os.sep.join([PXE["cfg_path"], pxe_fname])
 
-	with open("/tmp/%s" % pxe_fname, "w") as pxe_fd:
+	print("pxe_fpath: %r" % pxe_fpath)
+
+	with open(pxe_fpath, "w") as pxe_fd:
 		pxe_fd.write(pxe)
 
 def wildcard(environ, cfg):
@@ -195,12 +204,14 @@ def application(environ, start_response):
 
 	req_uri = environ.get("REQUEST_URI")
 	if req_uri is None:
-		start_response("404", hdrs())
-		return []
+		print("FAILED: invalid req_uri: %r" % req_uri)
+		start_response("404 NOT FOUND", hdrs(content))
+		return [content]
 
 	hwa = ipa_to_hwa(environ.get("REMOTE_ADDR"))	# Get HWA and set in env
 	if hwa is None:
-		start_response("404", hdrs())
+		print("FAILED: invalid hwa: %r" % hwa)
+		start_response("404 NOT FOUND", hdrs())
 		return []
 
 	environ["REMOTE_HWA"] = hwa
