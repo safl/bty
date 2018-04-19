@@ -19,4 +19,4 @@ LABEL boot_hd0_bzi
 LABEL install
 	MENU LABEL install
 	KERNEL vmlinuz
-	APPEND initrd=cilla/initrd.img boot=live username=user union=overlay config components noswap edd=on nomodeset nodmraid locales=en_US.UTF-8  keyboard-layouts="US" net.ifnames=0 nosplash noprompt fetch=http://ch-bty01/tftpboot/cilla/filesystem.squashfs ocs_repository="nfs://ch-bty01/srv/images" ocs_prerun="wget http://ch-bty01/bty/bootstrap.sh -O bootstrap.sh" ocs_prerun1="sleep 5" ocs_live_run="sudo bash bootstrap.sh; sudo bash" ocs_live_extra_param="" ocs_live_batch=yes
+	APPEND initrd=cilla/initrd.img boot=live username=user union=overlay config components noswap edd=on nomodeset nodmraid locales=en_US.UTF-8  keyboard-layouts="US" net.ifnames=0 nosplash noprompt fetch=http://ch-bty01/tftpboot/cilla/filesystem.squashfs ocs_repository="nfs://ch-bty01/srv/images" ocs_prerun="wget http://ch-bty01/bty/bootstrap.sh -O bootstrap.sh" ocs_prerun1="sleep 2" ocs_live_run="sudo bash bootstrap.sh; sudo reboot" ocs_live_extra_param="" ocs_live_batch=yes
