@@ -141,10 +141,10 @@ def pxe_config(environ, cfg, host):
 	print("pxe_config")
 
 	if not host["managed"]:
-		print ("ERR: host: %r is not managed" % host)
+		host["hostname"] = "unmanaged"
 		return None
 
-	if None in [host["hostname"], host["hwa"], host["image"]]:
+	if None in [host["hostname"], host["hwa"]]:
 		print("ERR: invalid host: %r" % host)
 		return None
 
