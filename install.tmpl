@@ -16,12 +16,25 @@ function exit_msg {
 	exit 1
 }
 
+function wait_msg {
+	MSG=$1
+	if [[ -z "$MSG" ]]; then
+		MSG="Waiting $ERR_WAIT seconds"
+	fi
+
+	echo -n $MSG
+	for i in $(seq 1 $ERR_WAIT); do echo -n "."; sleep 1; done
+	echo ""
+}
+
 IMAGE_ROOT=/home/partimag
 IMAGE_FNAME=ubuntu1604_qatd.qcow2
 IMAGE_PATH=$IMAGE_ROOT/$IMAGE_FNAME
 
 DEV_NAME=sda
 DEV_PATH=/dev/$DEV_NAME
+
+wait_msg "Waiting for devices to settle"
 
 if [[ ! -d $IMAGE_ROOT ]]; then
 	exit_msg "FAILED: invalid IMAGE_ROOT: '$IMAGE_ROOT'"
@@ -31,7 +44,7 @@ if [[ ! -f $IMAGE_PATH ]]; then
 	exit_msg "FAILED: invalid IMAGE_PATH: '$IMAGE_PATH'"
 fi
 
-if [[ ! -f $DEV_PATH ]]; then
+if [[ ! -b $DEV_PATH ]]; then
 	exit_msg "FAILED: invalid DEV_PATH: '$DEV_PATH'"
 fi
 

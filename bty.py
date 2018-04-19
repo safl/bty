@@ -148,6 +148,9 @@ def pxe_config(environ, cfg, host):
 		print("ERR: invalid host: %r" % host)
 		return None
 
+	# TODO: make this configurable
+	host["PXE_DEFAULT"] = "boot_hd0"
+
 	script_filename = environ.get("SCRIPT_FILENAME")
 	tmpl_path = os.sep.join([
 		os.path.dirname(script_filename),
@@ -173,6 +176,7 @@ def pxe_config_install(environ, cfg, host, pxe):
 	print("pxe_config_install")
 
 	pxe_fname = "01-%s" % host["hwa"].replace(":", "-")
+	pxe_fname = pxe_fname.lower()
 	pxe_fpath = os.sep.join([PXE["cfg_path"], pxe_fname])
 
 	print("pxe_fpath: %r" % pxe_fpath)
