@@ -6,7 +6,9 @@ import json
 import copy
 import re
 import os
+from jinja2 import Environment, PackageLoader, select_autoescape
 import bty
+
 
 CFG_FPATH="/tmp/bty.json"
 
@@ -133,8 +135,10 @@ def app_wildcard(state):
 
     return "state: %r" % state
 
-def app_manage(state):
+def app_machines(state):
     """Do some management"""
+
+    state["tpl"].get_template('machines.html').render(state)
 
     return ""
 
@@ -171,10 +175,10 @@ def app(state):
 
     path_info = state["env"].get("PATH_INFO")
 
-    if "bootstrap" in path_info:
+    if "bootstrap.sh" in path_info:
         return app_bootstrap(state)
-    elif "manage" in path_info:
-        return app_manage(state)
+    elif "machines" in path_info:
+        return app_machines(state)
     else:
         return app_wildcard(state)
 
@@ -188,6 +192,7 @@ def state_init(environ):
     state = {
         "env": environ,
         "cfg": None,
+        "tpl": None
     }
 
     state["cfg"] = cfg_load(CFG_FPATH)
@@ -207,6 +212,15 @@ def state_init(environ):
         state["cfg"][hwa]["hwa"] = hwa
 
         cfg_save(CFG_FPATH, state["cfg"])               # Persist CFG changes
+
+    state["tpl"] = Environment(
+        loader=PackageLoader('bty', 'templates'),
+        autoescape=select_autoescape(['html', 'xml'])
+    )
+
+    if state["tpl"] is None:
+        print("FAILED: init, jinja2")
+        return None
 
     return state
 
