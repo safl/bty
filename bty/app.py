@@ -9,7 +9,6 @@ import os
 from jinja2 import Environment, PackageLoader, select_autoescape
 import bty
 
-
 CFG_FPATH="/tmp/bty.json"
 
 def ipa_to_hwa(ipa=None):
@@ -45,7 +44,7 @@ def hdrs(content=None, content_type=None):
         content = b""
 
     if content_type is None:
-        content_type = "text/plain"
+        content_type = "text/html"
 
     return  [
         ('Content-type', content_type),
@@ -128,24 +127,24 @@ def pxe_config_install(environ, cfg, host, pxe):
     with open(pxe_fpath, "w") as pxe_fd:
         pxe_fd.write(pxe)
 
-def app_wildcard(state):
+def app_state(state):
     """Wildcard..."""
 
-    print("# WILDCARD")
+    print("## WILDCARD")
 
-    return "state: %r" % state
+    return state["tpl"].get_template('ui_state.html').render(state=state)
 
 def app_machines(state):
     """Do some management"""
 
-    state["tpl"].get_template('machines.html').render(state)
+    print("## MACHINES")
 
-    return ""
+    return state["tpl"].get_template('ui_machines.html').render(state=state)
 
 def app_bootstrap(state):
     """@returns bootstrap script for the host to run"""
 
-    print("bootstrap")
+    print("## bootstrap")
 
     script_filename = environ.get("SCRIPT_FILENAME")
     tmpl_path = os.sep.join([
@@ -180,7 +179,7 @@ def app(state):
     elif "machines" in path_info:
         return app_machines(state)
     else:
-        return app_wildcard(state)
+        return app_state(state)
 
 def state_init(environ):
     """

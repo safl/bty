@@ -303,14 +303,13 @@ h6 {
   border-radius: 0.2em;
   background-color: #859900;
 }
+{% block head %}
+<div id="title">bty: {% block title %}{% endblock %}</div>
+{% endblock %}
 </style>
 </head>
 <body>
-
-<ul>
-
-</li><li>
-</ul>
-
+  <div id="content">{% block content %}{% endblock %}</div>
+  <div id="footer">{% block footer %}{% endblock %}</div>
 </body>
 </html>
