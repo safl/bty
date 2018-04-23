@@ -138,7 +138,7 @@ def app_manage(state):
 
     return ""
 
-def app_bootstrap(environ, cfg, host):
+def app_bootstrap(state):
     """@returns bootstrap script for the host to run"""
 
     print("bootstrap")
@@ -200,17 +200,13 @@ def state_init(environ):
         return None
 
     hwa = ipa_to_hwa(state["env"].get("REMOTE_ADDR"))   # Get HWA
-    if hwa is None:
-        print("FAILED: invalid hwa: %r" % hwa)
-        return None
-
     state["env"]["REMOTE_HWA"] = hwa
 
-    if hwa not in state["cfg"]["machines"]:             # Add host to CFG
+    if hwa and (hwa not in state["cfg"]["machines"]):   # Add host to CFG
         state["cfg"][hwa] = copy.deepcopy(DEFAULT_HOST)
         state["cfg"][hwa]["hwa"] = hwa
 
-        cfg_save(CFG_FPATH, cfg)                        # Persist CFG changes
+        cfg_save(CFG_FPATH, state["cfg"])               # Persist CFG changes
 
     return state
 
