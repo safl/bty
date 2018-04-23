@@ -15,7 +15,7 @@ WEB_USR='www-data'
 WEB_GRP='www-data'
 
 # Set these up so the '$SYS_USR' can administer them
-chown -R "$SYS_USR":"$SYS_GRP" $TFTP_ROOT
+chown -R "$SYS_USR":"$SYS_GRP" $TFTPBOOT_ROOT
 chown -R "$SYS_USR":"$SYS_GRP" $BTY_ROOT
 
 # Allow anonymous access via NFS
