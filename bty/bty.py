@@ -11,17 +11,21 @@ REGEX_HWA = r".*(([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})).*"
 
 DEFAULT_HOST = {
     "hwa": None,
-    "image": None,
+    "img": None,
     "hostname": None,
     "managed": False,
     "pxe_default": None
 }
 
 DEFAULT = {
-    "paths": {
-        "tftpboot": "/srv/tftpboot",
-        "images": "/srv/images",
-        "bty": "/srv/tbty",
+    "bty": {
+        "root": "/srv/bty",
+    },
+    "pxe": {
+        "root": "/srv/tftpboot/pxelinux.cfg",
+    },
+    "img": {
+        "root": "/srv/images"
     },
     "sys": {
         "usr": "nvm",
@@ -56,20 +60,20 @@ def ipa_to_hwa(ipa=None):
         print("FAILED: ip: %r" % ipa)
         return None
 
-        cmd = ["arp", "-a", ipa]
+    cmd = ["arp", "-a", ipa]
 
-        proc = Popen(cmd, stdout=PIPE, stderr=PIPE)
+    proc = Popen(cmd, stdout=PIPE, stderr=PIPE)
 
-        out, _ = proc.communicate()
-        out = out.lower() if out else ""
+    out, _ = proc.communicate()
+    out = out.lower() if out else ""
 
-        match = re.match(REGEX_HWA, out)
-        if match:
-                return match.group(1).upper()
+    match = re.match(REGEX_HWA, out)
+    if match:
+            return match.group(1).upper()
 
     print("FAILED: out: %r" % out)
 
-        return None
+    return None
 
 def hdrs(content=None, content_type=None):
     """Return headers for the given content"""
@@ -153,7 +157,7 @@ def bootstrap(environ, cfg, host):
 
 def pxe_config(environ, cfg, host):
     """@returns PXE config for the given host on success, None otherwise"""
-    
+
     print("pxe_config")
 
     if not host["managed"]:
@@ -218,13 +222,14 @@ def manage(environ, cfg):
     return ""
 
 def application(environ, start_response):
-        """Application generating and modifying PXE configurations"""
+    """Application generating and modifying PXE configurations"""
 
     print("ENTER!")
 
-    req_uri = environ.get("REQUEST_URI")
-    if req_uri is None:
-        print("FAILED: invalid req_uri: %r" % req_uri)
+    path_info = environ.get("PATH_INFO")
+    if path_info is None:
+        print("FAILED: invalid path_info: %r" % path_info)
+        content = pprint.pformat(environ)
         start_response("404 NOT FOUND", hdrs(content))
         return [content]
 
@@ -242,28 +247,26 @@ def application(environ, start_response):
         cfg[hwa] = copy.deepcopy(DEFAULT_HOST)
         cfg[hwa]["hwa"] = hwa
 
-        cfg_save(environ, cfg)  
+        cfg_save(environ, cfg)
 
     host = cfg[hwa]
 
     print("host: %r" % host)
 
-    if "bootstrap" in req_uri:          # Dispatch
+    if "bootstrap" in path_info:          # Dispatch
         content = bootstrap(environ, cfg, host)
 
         if host["managed"]:         # Create PXE config for host
             pxe = pxe_config(environ, cfg, host)
             pxe_config_install(environ, cfg, host, pxe)
 
-    elif "manage" in req_uri:
+    elif "manage" in path_info:
         content = manage(environ, cfg)
     else:
         content = wildcard(environ, cfg)
 
     encoded = content.encode()
 
-        start_response("200 OK", hdrs(encoded))
+    start_response("200 OK", hdrs(encoded))
 
     return [encoded]
-
-
