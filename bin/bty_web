@@ -1,0 +1,9 @@
+#!/usr/bin/env python
+from wsgiref.simple_server import make_server
+
+if __name__ == "__main__":
+        httpd = make_server('', 8000, application)
+        print("Serving on port 8000...")
+
+        # Serve until process is killed
+        httpd.serve_forever()

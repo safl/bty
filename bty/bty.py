@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 from __future__ import print_function
-from wsgiref.simple_server import make_server
 from subprocess import Popen, PIPE
 import pprint
 import json
@@ -267,9 +266,4 @@ def application(environ, start_response):
 
     return [encoded]
 
-if __name__ == "__main__":
-        httpd = make_server('', 8000, application)
-        print("Serving on port 8000...")
 
-        # Serve until process is killed
-        httpd.serve_forever()
