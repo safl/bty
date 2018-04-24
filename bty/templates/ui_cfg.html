@@ -9,9 +9,9 @@
       <th><input type="checkbox" name="bulk_selector" id="bulk_selector"></th>
       <th>Hostname</th>
       <th>HWA</th>
-      <th>Image</th>
-      <th>PXE Lbl.</th>
       <th>PXE Tmpl.</th>
+      <th>PXE Lbl.</th>
+      <th>Image</th>
       <th>Managed</th>
     </tr>
   </thead>
@@ -36,6 +36,9 @@
 
 {% block script %}
 <script type="text/javascript">
+
+var DEFAULT_SORT_KEY = "hostname";
+var DEFAULT_SORT_DIR = "ASC";
 
 function init_list(cfg, sort_attr, sort_dir) {
 
@@ -157,6 +160,7 @@ function init_list(cfg, sort_attr, sort_dir) {
       sort_dir = sort_dir == "DESC" ? "ASC" : "DESC";
     } else {
       sort_attr = new_sort_attr;
+      sort_dir = DEFAULT_SORT_DIR
     }
 
     fill();
@@ -173,7 +177,7 @@ function init_list(cfg, sort_attr, sort_dir) {
 }
 
 function main(cfg) {
-  init_list(cfg, "hostname", "ASC");
+  init_list(cfg, DEFAULT_SORT_KEY, DEFAULT_SORT_DIR);
 }
 
 </script>
