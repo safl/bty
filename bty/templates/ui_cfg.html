@@ -61,6 +61,13 @@ function init_list(cfg, sort_attr, sort_dir) {
   pxe_labels.push("null");  // Also adding the 'null' / not selected
   pxe_labels.sort();
 
+  var pxe_templates = new Array();
+  $.each(cfg.pxe.templates, function(i, template) {
+    pxe_templates.push(template);
+  });
+  pxe_templates.push("null");  // Also adding the 'null' / not selected
+  pxe_templates.sort();
+
   function fill() {
     $("#machine_list").find("tbody").empty();   // Remove tbody content
 
@@ -113,6 +120,11 @@ function init_list(cfg, sort_attr, sort_dir) {
         .val(String(machine.hwa))
         .text(String(machine.hwa))
       ));
+
+      row.append($("<td>").append($("<select>").prop("name", "pxe_tmpl_fname").prop("class",
+              "form-control")));
+      row.append($("<td>").append($("<select>").prop("name", "pxe_conf_label").prop("class",
+            "form-control")));
 
       // Image selector
       var img_selector = $("<select>").prop("name", "img").prop("class", "form-control");
