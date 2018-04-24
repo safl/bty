@@ -2,36 +2,76 @@
 {% block title %}Configuration{% endblock %}
 {% block content %}
 
+<div class="container">
 <form id="bulk_action" method="post" role="form">
-<table class="table table-striped" id="machine_list">
-  <thead>
-    <tr>
-      <th><input type="checkbox" name="bulk_selector" id="bulk_selector"></th>
-      <th>Hostname</th>
-      <th>HWA</th>
-      <th>PXE Tmpl.</th>
-      <th>PXE Lbl.</th>
-      <th>Image</th>
-      <th>Managed</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <th scope="row" colspan="5">No machines</p></th>
-    </tr>
-  </tbody>
-</table>
+
+<div class="card">
+  <div class="card-header">
+    <div class="jumbotron">
+      <div class="container">
+        <h1 class="display-4">Welcome to BTY</h1>
+        <p class="lead">
+        I like to boot it, boot it...
+        I like to boot it, boot it...
+        I like to boot it, boot it...
+        We like to boot it!
+        </p>
+      </div>
+    </div>
+
+    <ul class="nav nav-tabs card-header-tabs">
+      <li class="nav-item">
+        <a class="nav-link active" href="#">Machines</a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link" href="#">PXE Templates</a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link" href="#">Images</a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link" href="#">Aux</a>
+      </li>
+    </ul>
+  </div>
+  <div class="card-body">
+    <h5 class="card-title">Special title treatment</h5>
+    <p class="card-text">With supporting text below as a natural lead-in to additional content.</p>
+
+    <table class="table table-striped" id="machine_list">
+      <thead>
+        <tr>
+          <th>Hostname</th>
+          <th>HWA</th>
+          <th>PXE Tmpl.</th>
+          <th>PXE Lbl.</th>
+          <th>Image</th>
+          <th>Managed</th>
+          <th><input type="checkbox" name="bulk_selector" id="bulk_selector"></th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <th scope="row" colspan="5">No machines</p></th>
+        </tr>
+      </tbody>
+    </table>
 
 
-<div class="panel-footer">
-  <button class="btn btn-primary" type="submit" name="action" value="apply">Apply All Changes</button>
-  or with selected hosts do:
-  <div class="btn-group">
-    <button class="btn btn-success" type="submit" name="action" value="refresh">(Re)write PXE</button>
-    <button class="btn btn-danger" type="submit" name="action" value="remove">Remove</button>
+  <div class="card-footer text-muted">
+    <button class="btn btn-primary" type="submit" name="action" value="apply">Apply Changes</button>
+    <div class="float-right">
+    or with <b>selected</b> hosts do:
+    <div class="btn-group">
+      <button class="btn btn-success" type="submit" name="action" value="refresh">(Re)write PXE</button>
+      <button class="btn btn-danger" type="submit" name="action" value="remove">Remove</button>
+    </div>
+    </div>
   </div>
 </div>
+
 </form>
+</div>
 
 {% endblock %}
 
@@ -100,13 +140,6 @@ function init_list(cfg, sort_attr, sort_dir) {
       }
 
       row.append($("<td>").append(
-        $("<input>")
-        .prop("type", "checkbox")
-        .prop("name", "bulk_ident")
-        .val(machine.hwa)
-      ));
-
-      row.append($("<td>").append(
             $("<input>")
             .prop("type", "text")
             .prop("name", "hostname")
@@ -155,6 +188,13 @@ function init_list(cfg, sort_attr, sort_dir) {
         .append($("<option>").val("1").text("True"))
         .append($("<option>").val("0").text("False"))
         .val(String(machine.managed === true ? "1" : "0"))
+      ));
+
+      row.append($("<td>").append(
+        $("<input>")
+        .prop("type", "checkbox")
+        .prop("name", "bulk_ident")
+        .val(machine.hwa)
       ));
 
       row.appendTo($("#machine_list tbody"));
