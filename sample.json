@@ -1,10 +1,10 @@
 {
   "bty": {
-    "root": "/srv/bty", 
-  }, 
+    "root": "/srv/bty"
+  },
   "img": {
     "root": "/srv/images"
-  }, 
+  },
   "machines": {
     "0C:C4:7A:9B:63:68": {
       "hostname": "ch-lab-01", 
@@ -61,18 +61,16 @@
       "managed": true, 
       "pxe_default": "boot_hd0"
     }
-  }, 
+  },
   "pxe": {
     "root": "/srv/tftpboot/pxelinux.cfg"
-  }, 
+  },
   "sys": {
-    "grp": "CNEXLABS\\domain^users", 
+    "grp": "CNEXLABS\\domain^users",
     "usr": "nvm"
-  }, 
+  },
   "web": {
-    "grp": "www-data", 
+    "grp": "www-data",
     "usr": "www-data"
   }
 }
-
-
