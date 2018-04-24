@@ -7,7 +7,7 @@ import re
 import os
 import bty
 from subprocess import Popen, PIPE
-from flask import Flask, render_template
+from flask import Flask, render_template, request
 
 REGEX_HWA = r".*(([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})).*"
 
@@ -18,7 +18,10 @@ DEFAULT_HOST = {
     "img": None,
     "hostname": None,
     "managed": False,
-    "pxe_default": None
+    "pxe": {
+        "default": None,
+        "append": ""
+    }
 }
 
 DEFAULT_CFG = {
@@ -202,20 +205,51 @@ if cfg is None:
 def app_slow():
     """Render configuration"""
 
-    print("## SLOW")
-
     time.sleep(5)
 
     return render_template('ui_cfg.html', cfg=cfg)
 
-@app.route("/cfg")
-@app.route("/")
-def app_cfg():
-    """Render configuration"""
+def bulk_remove(form):
+    """Remove entries"""
 
-    print("## STATE")
+    print("# TODO: Process bulk remove")
+    for hwa in form.get("bulk_ident"):
+        print("hwa: %r" % hwa)
+
+    return
+
+def bulk_refresh(form):
+    """Remove entries"""
+
+    print("# TODO: Process bulk refresh")
+    for hwa in form.get("bulk_ident"):
+        print("hwa: %r" % hwa)
+
+    return
+
+@app.route("/", methods=["GET", "POST"])
+def app_cfg_ui():
+    """sdfsd"""
+
+    if request.method == "POST":
+
+        print(pprint.pformat(request.form))
+
+        action = request.form.get("action")
+        if action == "refresh" and "bulk_ident" in request.form:
+            bulk_refresh(dict(request.form))
+        elif action == "remove" and "bulk_ident" in request.form:
+            bulk_remove(dict(request.form))
+        else:
+            print("Process SINGLE update change")
 
     return render_template('ui_cfg.html', cfg=cfg)
+
+@app.route("/cfg")
+def app_cfg():
+    """Provide config as JSON"""
+
+    return json.dumps(cfg)
 
 @app.route("/bootstrap")
 def app_bootstrap():

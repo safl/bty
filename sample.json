@@ -3,20 +3,25 @@
     "root": "/srv/bty"
   },
   "img": {
-    "root": "/srv/images"
+    "root": "/srv/images",
+    "lst": [
+      "qatd-u1604.qcow",
+      "base-u1604.qcow",
+      "wrks-u1604.qcow"
+    ]
   },
   "machines": {
     "0C:C4:7A:9B:63:68": {
       "hostname": "ch-lab-01", 
       "hwa": "0C:C4:7A:9B:63:68", 
-      "image": "ubuntu1604_qatd.qcow", 
+      "image": "qatd-u1604.qcow2", 
       "managed": true, 
       "pxe_default": "boot_hd0"
     }, 
     "0C:C4:7A:9B:63:6E": {
       "hostname": "ch-lab-02", 
       "hwa": "0C:C4:7A:9B:63:6E", 
-      "image": "ubuntu1604_qatd.qcow", 
+      "image": "qatd-u1604.qcow2", 
       "managed": true, 
       "pxe_default": "boot_hd0"
     }, 
@@ -29,35 +34,35 @@
     "52:54:00:93:B7:35": {
       "hostname": "ch-bty-test01", 
       "hwa": "52:54:00:93:B7:35", 
-      "image": "ubuntu1604_qatd.qcow", 
+      "image": "qatd-u1604.qcow2", 
       "managed": true, 
       "pxe_default": "boot_hd0"
     }, 
     "9C:5C:8E:53:50:C5": {
       "hostname": "ch-lab-dragon", 
       "hwa": "9C:5C:8E:53:50:C5", 
-      "image": "ubuntu1604_qatd.qcow", 
+      "image": "qatd-u1604.qcow2", 
       "managed": false, 
       "pxe_default": "boot_hd0_bzi"
     }, 
     "AC:1F:6B:1E:AF:FA": {
       "hostname": "ch-lab-04", 
       "hwa": "AC:1F:6B:1E:AF:FA", 
-      "image": "ubuntu1604_qatd.qcow", 
+      "image": "qatd-u1604.qcow2", 
       "managed": true, 
       "pxe_default": "boot_hd0"
     }, 
     "AC:1F:6B:1E:B0:7E": {
       "hostname": "ch-lab-03", 
       "hwa": "AC:1F:6B:1E:B0:7E", 
-      "image": "ubuntu1604_qatd.qcow", 
+      "image": "qatd-u1604.qcow2", 
       "managed": true, 
       "pxe_default": "boot_hd0"
     }, 
     "D0:50:99:91:31:CD": {
       "hostname": "ch-sensei01", 
       "hwa": "D0:50:99:91:31:CD", 
-      "image": "ubuntu1604_qatd.qcow", 
+      "image": "qatd-u1604.qcow2", 
       "managed": true, 
       "pxe_default": "boot_hd0"
     }

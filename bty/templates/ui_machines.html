@@ -1,9 +1,0 @@
-{% extends "ui.html" %}
-{% block title %}machines{% endblock %}
-{% block content %}
-
-{% for hwa, cfg in state["cfg"]["machines"].iteritems() %}
-{{ cfg }}
-{% endfor %}
-
-{% endblock %}
