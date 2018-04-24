@@ -53,9 +53,6 @@ PXE = {
     ],
 }
 
-app = Flask(__name__)
-#app.config.from_object('websiteconfig')
-
 def ipa_to_hwa(ipa=None):
     """
     Resolve the given IP address to HW address
@@ -172,55 +169,19 @@ def pxe_config_install(environ, cfg, host, pxe):
     with open(pxe_fpath, "w") as pxe_fd:
         pxe_fd.write(pxe)
 
-def state_init(environ):
-    """
-    Initialized application state, load config, parse URI etc.
+app = Flask(__name__)
+#app.config.from_object('websiteconfig')
 
-    @Returns state on success, None otherwise
-    """
+cfg = cfg_load(CFG_FPATH)
 
-    state = {
-        "env": environ,
-        "cfg": None,
-        "tpl": None
-    }
-
-    state["cfg"] = cfg_load(CFG_FPATH)
-    if state["cfg"] is None:
-        print("FAILED: init, could not load config")
-        return None
-
-    if state["env"].get("PATH_INFO") is None:
-        print("FAILED: init, no PATH_INFO in environment")
-        return None
-
-    hwa = ipa_to_hwa(state["env"].get("REMOTE_ADDR"))   # Get HWA
-    state["env"]["REMOTE_HWA"] = hwa
-
-    if hwa and (hwa not in state["cfg"]["machines"]):   # Add host to CFG
-        state["cfg"][hwa] = copy.deepcopy(DEFAULT_HOST)
-        state["cfg"][hwa]["hwa"] = hwa
-
-        cfg_save(CFG_FPATH, state["cfg"])               # Persist CFG changes
-
-    state["tpl"] = Environment(
-        loader=PackageLoader('bty', 'templates'),
-        autoescape=select_autoescape(['html', 'xml'])
-    )
-
-    if state["tpl"] is None:
-        print("FAILED: init, jinja2")
-        return None
-
-    return state
-
-@app.route("/state")
-def app_state():
-    """Wildcard..."""
+@app.route("/cfg")
+@app.route("/")
+def app_cfg():
+    """Render configuration"""
 
     print("## STATE")
 
-    return state["tpl"].get_template('ui_state.html').render(state=state)
+    return render_template('ui_cfg.html', cfg=cfg)
 
 @app.route("/bootstrap")
 def app_bootstrap():
@@ -228,25 +189,12 @@ def app_bootstrap():
 
     print("## bootstrap")
 
-    script_filename = environ.get("SCRIPT_FILENAME")
-    tmpl_path = os.sep.join([
-        os.path.dirname(script_filename),
-        "install.tmpl" if host["managed"] else "reboot.tmpl"
-    ])
-
-    tmpl = ""
-    with open(tmpl_path, "r") as tmpl_fd:
-        tmpl = tmpl_fd.read()
-
-    for key, val in host.items():
-        if val is None:
-            continue
-
-        placeholder = "___%s___" % key.upper()
-        tmpl = tmpl.replace(placeholder, str(val))
-
     if host["managed"]:             # Create PXE config for host
-        pxe = pxe_config(environ, cfg, host)
-        pxe_config_install(environ, cfg, host, pxe)
+        pxe = pxe_config(os.environ, cfg, host)
+        pxe_config_install(os.environ, cfg, host, pxe)
 
-    return tmpl
+    return render_template(
+        "bootstrap.sh" if host["managed"] else "bootstrap_cancel.sh",
+        cfg=cfg,
+        host=host
+    )
