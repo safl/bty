@@ -1,7 +1,6 @@
 {
   "bty": {
     "root": "/srv/bty", 
-    "templates": "/srv/bty/templates"
   }, 
   "img": {
     "root": "/srv/images"

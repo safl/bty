@@ -1,7 +1,18 @@
 {% extends "ui.html" %}
-{% block title %}machines{% endblock %}
+{% block title %}Configuration{% endblock %}
 {% block content %}
-<pre><code>
-{{ cfg }}
-</code></pre>
+
+<h1>Machines</h1>
+{% for hwa, cfg in cfg["machines"].iteritems() %}
+{{ machine }}
+{% endfor %}
+
+<h1>Paths and Users</h1>
+{% for sect in ["web", "img", "bty", "sys", "pxe"] %}
+<h2>{{ sect }}</h2>
+{% for key, val in cfg[sect].iteritems() %}
+{{ key }} : {{ val }}<br />
+{% endfor %}
+{% endfor %}
+
 {% endblock %}

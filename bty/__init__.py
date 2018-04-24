@@ -2,6 +2,7 @@ from __future__ import print_function
 import pprint
 import json
 import copy
+import time
 import re
 import os
 import bty
@@ -196,6 +197,16 @@ cfg = cfg_init(CFG_FPATH)
 if cfg is None:
     print("FAILED: cannot obtain a configuration")
     exit(1)
+
+@app.route("/slow")
+def app_slow():
+    """Render configuration"""
+
+    print("## SLOW")
+
+    time.sleep(5)
+
+    return render_template('ui_cfg.html', cfg=cfg)
 
 @app.route("/cfg")
 @app.route("/")
