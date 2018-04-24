@@ -109,6 +109,22 @@ def cfg_load(cfg_fpath):
 
     return None
 
+def cfg_init(cfg_fpath):
+    """
+    Load config from `cfg_fpath`, use default if it does not exist
+    """
+
+    cfg = cfg_load(CFG_FPATH)
+    if cfg is None:
+        print("FAILED: loading configuration")
+        print("WARNING: using default config")
+        cfg = copy.deepcopy(DEFAULT_CFG)
+
+        if not cfg_save(CFG_FPATH, cfg):
+            print("FAILED: configuration seems severely broken")
+
+    return cfg
+
 def cfg_save(cfg_fpath, cfg):
     """
     Store the given cfg
@@ -116,8 +132,12 @@ def cfg_save(cfg_fpath, cfg):
     @returns True on success, False otherwise
     """
 
-    with open(cfg_fpath, "w") as cfg_fd:
-        cfg = json.dump(cfg, cfg_fd, sort_keys=True, indent=2)
+    try:
+        with open(cfg_fpath, "w") as cfg_fd:
+            cfg = json.dump(cfg, cfg_fd, sort_keys=True, indent=2)
+    except IOError as exc:
+        print("FAILED: persisting cfg")
+        return False
 
     return True
 
@@ -172,7 +192,10 @@ def pxe_config_install(environ, cfg, host, pxe):
 app = Flask(__name__)
 #app.config.from_object('websiteconfig')
 
-cfg = cfg_load(CFG_FPATH)
+cfg = cfg_init(CFG_FPATH)
+if cfg is None:
+    print("FAILED: cannot obtain a configuration")
+    exit(1)
 
 @app.route("/cfg")
 @app.route("/")
