@@ -58,12 +58,12 @@
       </li>
       <li class="nav-item">
         <a class="nav-link"
-           id="aux-tab"
+           id="craw-tab"
            data-toggle="tab"
-           href="#aux"
+           href="#craw"
            role="tab"
-           aria-controls="aux"
-           aria-selected="false">Aux</a>
+           aria-controls="craw"
+           aria-selected="false">Raw</a>
       </li>
     </ul>
   </div>
@@ -201,20 +201,22 @@
       </div>
     </div> <!-- images -->
 
-    <div class="tab-pane" id="aux" role="tabpanel" aria-labelledby="aux-tab">
+    <div class="tab-pane" id="craw" role="tabpanel" aria-labelledby="craw-tab">
       <div class="card-body">
         <h5 class="card-title">Raw Configuration dump</h5>
         <p class="card-text">
-        This is full dump of the configuration as known to BTY.
+        The BTY UI provides a couple of means view and change the BTY configuration. However, there
+        might be values you want to look at, or intergrate BTY in some other form. For that you can
+        go directly to the JSON representation.
+
+        Click the button below to get the raw configuration.
         </p>
       </div>
 
-      <pre><code></code></pre>
-
       <div class="card-footer text-muted">
-        &nbsp;
+        <a href="/cfg" class="btn btn-primary" role="button">Goto Raw Config</a>
       </div>
-    </div> <!-- aux -->
+    </div> <!-- craw -->
 
   </div>
 
