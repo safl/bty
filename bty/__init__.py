@@ -11,51 +11,80 @@ from flask import Flask, render_template, request
 
 REGEX_HWA = r".*(([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})).*"
 
-CFG_FPATH="/tmp/bty.json"
+MACHINE_ATTRS = [
+    "hostname",
+    "hwa",
+    "image",
+    "managed",
+    "plabel"
+    "ptemplate",
+]
+MACHINE_STRUCT = { attr: None for attr in MACHINE_ATTRS }
 
-DEFAULT_HOST = {
-    "hwa": None,
-    "img": None,
-    "hostname": None,
-    "managed": False,
-    "pxe": {
-        "default": None,
-        "append": ""
-    }
-}
-
-DEFAULT_CFG = {
-    "bty": {
-        "root": "/srv/bty",
-        "templates": "/srv/bty/templates"
-    },
-    "pxe": {
+CFG_FNAME = "bty.json"
+CFG_FPATH = "/tmp/%s" % CFG_NAME
+CFG_DEFAULT = {
+    "pconfigs": {
+        "coll": [],
         "root": "/srv/tftpboot/pxelinux.cfg",
     },
-    "img": {
-        "root": "/srv/images"
+
+    "ptemplates": {
+        "coll": {
+            "pxe-c115200.cfg": {
+                "fname": "pxe-c115200.cfg",
+            }
+        },
+        "root": "/srv/bty/bty/templates",
+        "default": "pxe-c115200.cfg",
+        "default_skip": "pxe-skip.cfg",
     },
+
+    "images": {
+        "coll": [],
+        "root": "/srv/images",
+        "default": None,
+    },
+
+    "machines": {
+        "coll": {}
+    }
+
     "sys": {
         "usr": "nvm",
         "grp": 'CNEXLABS\domain^users'
     },
+
     "web": {
         "usr": "www-data",
         "grp": "www-data"
-    },
-    "machines": {}
+    }
 }
 
-CFG_FNAME = "bty.json"
+def machine(cfg, **attrs):
 
-PXE = {
-    "cfg_path": "/srv/tftpboot/pxelinux.cfg",
-    "labels": [
-        "boot_hda",
-        "boot_hda_bzi",
-        "install"
-    ],
-}
+    struct = copy.deepcopy(MACHINE_STRUCT)
+    for attr, val in attrs.items():
+        struct[attr] = val
+
+    if set(struct.keys()) != set(MACHINE_ATTRS):
+        print("invalid struct: %r" % struct)
+        return None
+
+    if struct["hwa"] is None:
+        print("invalid struct: %r" % struct)
+        return None
+
+    if struct["managed"]:       # Construct a managed machine from given info
+        struct["managed"] = True
+        if not struct["image"]:
+            struct["image"] = cfg["images"]["default"]
+
+    else:
+        struct["managed"] = False
+        struct["image"] = cfg["images"]["default_skip"]
+
+    return machine
 
 def ipa_to_hwa(ipa=None):
     """
@@ -122,7 +151,7 @@ def cfg_init(cfg_fpath):
     if cfg is None:
         print("FAILED: loading configuration")
         print("WARNING: using default config")
-        cfg = copy.deepcopy(DEFAULT_CFG)
+        cfg = copy.deepcopy(CFG_DEFAULT)
 
         if not cfg_save(CFG_FPATH, cfg):
             print("FAILED: configuration seems severely broken")

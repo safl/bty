@@ -1,75 +1,69 @@
 {
-  "bty": {
-    "root": "/srv/bty"
+  "pconfigs": {
+	"coll": [],
+    "root": "/srv/tftpboot/pxelinux.cfg",
   },
-  "img": {
-    "root": "/srv/images",
-    "lst": [
-      "qatd-u1604.qcow",
-      "base-u1604.qcow",
-      "wrks-u1604.qcow"
-    ]
-  },
-  "machines": {
-    "0C:C4:7A:9B:63:68": {
-      "hostname": "ch-lab-01", 
-      "hwa": "0C:C4:7A:9B:63:68", 
-      "image": "qatd-u1604.qcow2", 
-      "managed": true, 
-      "pxe_default": "boot_hd0"
-    }, 
-    "0C:C4:7A:9B:63:6E": {
-      "hostname": "ch-lab-02", 
-      "hwa": "0C:C4:7A:9B:63:6E", 
-      "image": "qatd-u1604.qcow2", 
-      "managed": true, 
-      "pxe_default": "boot_hd0"
-    }, 
-    "2C:56:DC:DD:51:D4": {
-      "hostname": null, 
-      "hwa": "2C:56:DC:DD:51:D4", 
-      "image": null, 
-      "managed": false
-    }, 
-    "52:54:00:93:B7:35": {
-      "hostname": "ch-bty-test01", 
-      "hwa": "52:54:00:93:B7:35", 
-      "image": "qatd-u1604.qcow2", 
-      "managed": true, 
-      "pxe_default": "boot_hd0"
-    }, 
-    "9C:5C:8E:53:50:C5": {
-      "hostname": "ch-lab-dragon", 
-      "hwa": "9C:5C:8E:53:50:C5", 
-      "image": "qatd-u1604.qcow2", 
-      "managed": false, 
-      "pxe_default": "boot_hd0_bzi"
-    }, 
-    "AC:1F:6B:1E:AF:FA": {
-      "hostname": "ch-lab-04", 
-      "hwa": "AC:1F:6B:1E:AF:FA", 
-      "image": "qatd-u1604.qcow2", 
-      "managed": true, 
-      "pxe_default": "boot_hd0"
-    }, 
-    "AC:1F:6B:1E:B0:7E": {
-      "hostname": "ch-lab-03", 
-      "hwa": "AC:1F:6B:1E:B0:7E", 
-      "image": "qatd-u1604.qcow2", 
-      "managed": true, 
-      "pxe_default": "boot_hd0"
-    }, 
-    "D0:50:99:91:31:CD": {
-      "hostname": "ch-sensei01", 
-      "hwa": "D0:50:99:91:31:CD", 
-      "image": "qatd-u1604.qcow2", 
-      "managed": true, 
-      "pxe_default": "boot_hd0"
+  "ptemplates": {
+    "root": "/srv/bty",
+    "coll": {
+    	"pxe-c115200.cfg": {
+	    	"fname": "pxe-c115200.cfg",
+	    	"labels": ["boot_hd0", "boot_hd0_bzi", "install"]
+    	},
+    	"pxe-skip.cfg": {
+	    	"fname": "pxe-skip.cfg",
+	    	"labels": ["boot_hd0"]
+    	},
     }
   },
-  "pxe": {
-    "root": "/srv/tftpboot/pxelinux.cfg"
+
+  "images": {
+    "root": "/srv/images",
+    "default": "qatd-u1604.qcow",
+    "coll": [
+      "qatd-u1604.qcow2",
+      "base-u1604.qcow2",
+      "wrks-u1604.qcow2"
+    ]
   },
+
+  "machines": {
+  	"coll": {
+	    "0C:C4:7A:9B:63:68": {
+	      "hostname": "ch-lab-01", 
+	      "hwa": "0C:C4:7A:9B:63:68", 
+	      "image": "qatd-u1604.qcow2", 
+	      "managed": true, 
+		  "ptemplate": "pxe-c115200.cfg",
+	      "plabel": "boot_hd0",
+	    }, 
+	    "0C:C4:7A:9B:63:6E": {
+	      "hostname": "ch-lab-02", 
+	      "hwa": "0C:C4:7A:9B:63:6E", 
+	      "image": "qatd-u1604.qcow2", 
+	      "managed": true, 
+		  "ptemplate": "pxe-c115200.cfg",
+	      "plabel": "boot_hd0",
+	    }, 
+	    "2C:56:DC:DD:51:D4": {
+	      "hostname": null, 
+	      "hwa": "2C:56:DC:DD:51:D4", 
+		  "image": "qatd-u1604.qcow2",
+		  "managed": true, 
+		  "ptemplate": "pxe-skip.cfg",
+	      "plabel": "boot_hd0",
+	    }, 
+	    "9C:5C:8E:53:50:C5": {
+	      "hostname": "ch-lab-dragon", 
+	      "hwa": "9C:5C:8E:53:50:C5", 
+	      "image": "qatd-u1604.qcow2",
+	      "managed": false,
+		  "ptemplate": "pxe-skip.cfg",
+	      "plabel": "boot_hd0",
+	    },     
+	}
+  },
+
   "sys": {
     "grp": "CNEXLABS\\domain^users",
     "usr": "nvm"
