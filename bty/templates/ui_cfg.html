@@ -19,56 +19,204 @@
       </div>
     </div>
 
-    <ul class="nav nav-tabs card-header-tabs">
+    <ul class="nav nav-tabs card-header-tabs" id="myTab" role="tablist">
       <li class="nav-item">
-        <a class="nav-link active" href="#">Machines</a>
+        <a class="nav-link active"
+           id="machines-tab"
+           data-toggle="tab"
+           href="#machines"
+           role="tab"
+           aria-controls="machines"
+          aria-selected="true">Machines</a>
       </li>
       <li class="nav-item">
-        <a class="nav-link" href="#">PXE Templates</a>
+        <a class="nav-link"
+           id="pconfigs-tab"
+           data-toggle="tab"
+           href="#pconfigs"
+           role="tab"
+           aria-controls="pconfigs"
+          aria-selected="false">PXE Configs</a>
       </li>
       <li class="nav-item">
-        <a class="nav-link" href="#">Images</a>
+        <a class="nav-link"
+           id="ptemplates-tab"
+           data-toggle="tab"
+           href="#ptemplates"
+           role="tab"
+           aria-controls="ptemplates"
+          aria-selected="false">PXE Templates</a>
       </li>
       <li class="nav-item">
-        <a class="nav-link" href="#">Aux</a>
+        <a class="nav-link"
+           id="images-tab"
+           data-toggle="tab"
+           href="#images"
+           role="tab"
+           aria-controls="images"
+           aria-selected="false">Images</a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link"
+           id="aux-tab"
+           data-toggle="tab"
+           href="#aux"
+           role="tab"
+           aria-controls="aux"
+           aria-selected="false">Aux</a>
       </li>
     </ul>
   </div>
-  <div class="card-body">
-    <h5 class="card-title">Special title treatment</h5>
-    <p class="card-text">With supporting text below as a natural lead-in to additional content.</p>
 
-    <table class="table table-striped" id="machine_list">
-      <thead>
-        <tr>
-          <th>Hostname</th>
-          <th>HWA</th>
-          <th>PXE Tmpl.</th>
-          <th>PXE Lbl.</th>
-          <th>Image</th>
-          <th>Managed</th>
-          <th><input type="checkbox" name="bulk_selector" id="bulk_selector"></th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <th scope="row" colspan="5">No machines</p></th>
-        </tr>
-      </tbody>
-    </table>
+  <div class="tab-content" id="MyTabContent">
+    <div class="tab-pane show active" id="machines" role="tabpanel"
+      aria-labelledby="machines-tab">
 
+      <div class="card-body">
+        <h5 class="card-title">Machine Management / Configuration</h5>
+        <p class="card-text">
+        This is where you setup and control what to do with discovered machines. Manage them? And if so,
+        then which image should be installed and which PXE template should be used along with the
+        default PXE label.
+        </p>
+      </div>
 
-  <div class="card-footer text-muted">
-    <button class="btn btn-primary" type="submit" name="action" value="apply">Apply Changes</button>
-    <div class="float-right">
-    or with <b>selected</b> hosts do:
-    <div class="btn-group">
-      <button class="btn btn-success" type="submit" name="action" value="refresh">(Re)write PXE</button>
-      <button class="btn btn-danger" type="submit" name="action" value="remove">Remove</button>
-    </div>
-    </div>
+      <table class="table table-striped" id="machine_list">
+        <thead>
+          <tr>
+            <th>Hostname</th>
+            <th>HWA</th>
+            <th>PXE Tmpl.</th>
+            <th>PXE Lbl.</th>
+            <th>Image</th>
+            <th>Managed</th>
+            <th><input type="checkbox" name="bulk_selector" id="bulk_selector"></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th scope="row" colspan="5">No machines</p></th>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="card-footer text-muted">
+        <button class="btn btn-primary" type="submit" name="action" value="apply">Apply Changes</button>
+        <div class="float-right">
+          or with <b>selected</b> hosts do:
+          <div class="btn-group">
+            <button class="btn btn-success" type="submit" name="action" value="refresh">(Re)write PXE</button>
+            <button class="btn btn-danger" type="submit" name="action" value="remove">Remove</button>
+          </div>
+        </div>
+      </div>
+
+    </div> <!-- machines -->
+
+    <div class="tab-pane" id="pconfigs" role="tabpanel" aria-labelledby="pconfigs-tab">
+
+      <div class="card-body">
+        <h5 class="card-title">PXE Configs available to PXE</h5>
+        <p class="card-text">
+        These are the PXE configurations available to PXE, that is.
+        </p>
+      </div>
+
+      <table class="table table-striped" id="ptemplate_list">
+        <thead>
+          <tr>
+            <th>Filename</th>
+            <th>Labels</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th scope="row" colspan="2">No templates</p></th>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="card-footer text-muted">
+        <button class="btn btn-primary" type="submit" name="action" value="pconfigs_reload">
+          Reload PXE Configs
+        </button>
+      </div>
+    </div> <!-- pconfigs -->
+
+    <div class="tab-pane" id="ptemplates" role="tabpanel" aria-labelledby="ptemplates-tab">
+      <div class="card-body">
+        <h5 class="card-title">PXE Templates available to BTY</h5>
+        <p class="card-text">
+        Add additional in PXE templates directory and then reload, the PXE template importer will
+        parse <b>LABEL</b> statements from the template and provide them here.
+        </p>
+      </div>
+
+      <table class="table table-striped" id="ptemplate_list">
+        <thead>
+          <tr>
+            <th>Filename</th>
+            <th>Labels</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th scope="row" colspan="2">No templates</p></th>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="card-footer text-muted">
+        <button class="btn btn-primary" type="submit" name="action" value="ptemplates_reload">
+          Reload PXE Templates
+        </button>
+      </div>
+    </div> <!-- ptemplates -->
+
+    <div class="tab-pane" id="images" role="tabpanel" aria-labelledby="images-tab">
+      <div class="card-body">
+        <h5 class="card-title">Disk Images made available via NFS and HTTP</h5>
+        <p class="card-text">
+        If you want to add additional images then, simply store them in **INSERT_PATH_HERE**.
+        </p>
+      </div>
+
+      <table class="table table-striped" id="ptemplate_list">
+        <thead>
+          <tr>
+            <th>Filename</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th scope="row" colspan="1">No images</p></th>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="card-footer text-muted">
+        <button class="btn btn-primary" type="submit" name="action" value="images_reload">
+          Reload Disk Images
+        </button>
+      </div>
+    </div> <!-- images -->
+
+    <div class="tab-pane" id="aux" role="tabpanel" aria-labelledby="aux-tab">
+      <div class="card-body">
+        <h5 class="card-title">Raw Configuration dump</h5>
+        <p class="card-text">
+        This is full dump of the configuration as known to BTY.
+        </p>
+      </div>
+
+      <pre><code></code></pre>
+
+      <div class="card-footer text-muted">
+        &nbsp;
+      </div>
+    </div> <!-- aux -->
+
   </div>
-</div>
 
 </form>
 </div>
