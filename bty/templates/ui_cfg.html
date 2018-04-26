@@ -84,12 +84,12 @@
       <table class="table table-striped" id="machine_list">
         <thead>
           <tr>
-            <th>Hostname</th>
             <th>HWA</th>
+            <th>Managed</th>
+            <th>Hostname</th>
             <th>PXE Tmpl.</th>
             <th>PXE Lbl.</th>
             <th>Image</th>
-            <th>Managed</th>
             <th><input type="checkbox" name="bulk_selector" id="bulk_selector"></th>
           </tr>
         </thead>
@@ -126,12 +126,11 @@
         <thead>
           <tr>
             <th>Filename</th>
-            <th>Labels</th>
           </tr>
         </thead>
         <tbody>
           <tr>
-            <th scope="row" colspan="2">No templates</p></th>
+            <th scope="row" colspan="1">No Configs</p></th>
           </tr>
         </tbody>
       </table>
@@ -234,30 +233,28 @@ var DEFAULT_SORT_DIR = "ASC";
 function init_list(cfg, sort_attr, sort_dir) {
 
   var machines = new Array();                    // Convert dict of machines to list of machines
-  $.each(cfg.machines, function(i, machine) {
+  $.each(cfg.machines.coll, function(i, machine) {
     machines.push(machine);
   });
 
   var images = new Array();
-  $.each(cfg.img.lst, function(i, image) {
+  $.each(cfg.images.coll, function(i, image) {
     images.push(image);
   });
   images.push("null");  // Also adding the 'null' / not selected
   images.sort();
 
-  var pxe_labels = new Array();
-  $.each(cfg.pxe.labels, function(i, label) {
-    pxe_labels.push(label);
+  var ptemplates = new Array();
+  $.each(cfg.ptemplates.coll, function(i, label) {
+    ptemplates.push(label);
   });
-  pxe_labels.push("null");  // Also adding the 'null' / not selected
-  pxe_labels.sort();
+  ptemplates.sort();
 
-  var pxe_templates = new Array();
-  $.each(cfg.pxe.templates, function(i, template) {
-    pxe_templates.push(template);
+  var pconfigs = new Array();
+  $.each(cfg.pconfigs.coll, function(i, label) {
+    pconfigs.push(label);
   });
-  pxe_templates.push("null");  // Also adding the 'null' / not selected
-  pxe_templates.sort();
+  pconfigs.sort();
 
   function fill() {
     $("#machine_list").find("tbody").empty();   // Remove tbody content
@@ -289,13 +286,7 @@ function init_list(cfg, sort_attr, sort_dir) {
         row.addClass(machine.exists ? "success" : "danger");
       }
 
-      row.append($("<td>").append(
-            $("<input>")
-            .prop("type", "text")
-            .prop("name", "hostname")
-            .val(String(machine.hostname))
-      ));
-
+      // HWA readonly input
       row.append($("<th>").append(
         $("<input>")
         .prop("type", "text")
@@ -305,33 +296,7 @@ function init_list(cfg, sort_attr, sort_dir) {
         .text(String(machine.hwa))
       ));
 
-      row.append($("<td>").append($("<select>").prop("name", "pxe_tmpl_fname").prop("class",
-              "form-control")));
-      row.append($("<td>").append($("<select>").prop("name", "pxe_conf_label").prop("class",
-            "form-control")));
-
-      // Image selector
-      var img_selector = $("<select>").prop("name", "img").prop("class", "form-control");
-
-      $.each(images, function(i, image) {
-        $("<option>").val(image).text(image).appendTo(img_selector);
-      });
-      $(img_selector).val(String(machine.image));
-
-      row.append($("<td>").append(img_selector));
-
-      // PXE selector
-      /*
-      var pxe_selector = $("<select>").prop("name", "pxe").prop("class", "form-control");
-
-      $.each(pxe_labels, function(i, lbl) {
-        $("<option>").val(lbl).text(lbl).appendTo(pxe_selector);
-      });
-      $(pxe_selector).val(String(machine.pxe.lbl));
-
-      row.append($("<td>").append(img_selector));
-      */
-
+      // Manage selector
       row.append($("<td>").append(
         $("<select>")
         .prop("class", "form-control")
@@ -339,6 +304,55 @@ function init_list(cfg, sort_attr, sort_dir) {
         .append($("<option>").val("0").text("False"))
         .val(String(machine.managed === true ? "1" : "0"))
       ));
+
+      // Hostname input
+      row.append($("<td>").append(
+            $("<input>")
+            .prop("type", "text")
+            .prop("name", "hostname")
+            .val(String(machine.hostname))
+      ));
+
+      // PXE Template and Label selector
+      var plabel_id = "plabel_" + machine.hwa;
+      var plabel_selector = $("<select>")
+        .prop("id", plabel_id)
+        .prop("name", "plabel")
+        .prop("class", "form-control")
+
+      var ptemplate_selector = $("<select>")
+      .prop("name", "ptemplate")
+      .prop("class", "form-control");
+
+      $.each(ptemplates, function(i, ptemplate) {
+        $("<option>").val(ptemplate.fname).text(ptemplate.fname).appendTo(ptemplate_selector);
+      });
+
+      ptemplate_selector.change(function() {
+        var ptemplate_fname = $(this).val();
+
+        plabel_selector.empty();
+        $.each(cfg.ptemplates.coll[ptemplate_fname].labels, function(i, lbl) {
+          plabel_selector.append($("<option>").val(lbl).text(lbl));
+        });
+
+        if (ptemplate_fname == machine.ptemplate) {
+          plabel_selector.val(machine.plabel);
+        }
+      });
+
+      row.append($("<td>").append(ptemplate_selector));
+      row.append($("<td>").append(plabel_selector));
+
+      $(ptemplate_selector).val(String(machine.ptemplate)).change();
+
+      // Image selector
+      var image_selector = $("<select>").prop("name", "image").prop("class", "form-control");
+      $.each(images, function(i, image) {
+        $("<option>").val(image).text(image).appendTo(image_selector);
+      });
+      $(image_selector).val(String(machine.image));
+      row.append($("<td>").append(image_selector));
 
       row.append($("<td>").append(
         $("<input>")
