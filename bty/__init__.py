@@ -22,7 +22,7 @@ MACHINE_ATTRS = [
 MACHINE_STRUCT = { attr: None for attr in MACHINE_ATTRS }
 
 CFG_FNAME = "bty.json"
-CFG_FPATH = "/tmp/%s" % CFG_NAME
+CFG_FPATH = "/tmp/%s" % CFG_FNAME
 CFG_DEFAULT = {
     "pconfigs": {
         "coll": [],
@@ -48,7 +48,7 @@ CFG_DEFAULT = {
 
     "machines": {
         "coll": {}
-    }
+    },
 
     "sys": {
         "usr": "nvm",

@@ -1,7 +1,7 @@
 {
   "pconfigs": {
 	"coll": [],
-    "root": "/srv/tftpboot/pxelinux.cfg",
+    "root": "/srv/tftpboot/pxelinux.cfg"
   },
   "ptemplates": {
     "root": "/srv/bty",
@@ -13,7 +13,7 @@
     	"pxe-skip.cfg": {
 	    	"fname": "pxe-skip.cfg",
 	    	"labels": ["boot_hd0"]
-    	},
+    	}
     }
   },
 
@@ -35,15 +35,15 @@
 	      "image": "qatd-u1604.qcow2", 
 	      "managed": true, 
 		  "ptemplate": "pxe-c115200.cfg",
-	      "plabel": "boot_hd0",
-	    }, 
+	      "plabel": "boot_hd0"
+	    },
 	    "0C:C4:7A:9B:63:6E": {
 	      "hostname": "ch-lab-02", 
 	      "hwa": "0C:C4:7A:9B:63:6E", 
 	      "image": "qatd-u1604.qcow2", 
 	      "managed": true, 
 		  "ptemplate": "pxe-c115200.cfg",
-	      "plabel": "boot_hd0",
+	      "plabel": "boot_hd0"
 	    }, 
 	    "2C:56:DC:DD:51:D4": {
 	      "hostname": null, 
@@ -51,7 +51,7 @@
 		  "image": "qatd-u1604.qcow2",
 		  "managed": true, 
 		  "ptemplate": "pxe-skip.cfg",
-	      "plabel": "boot_hd0",
+	      "plabel": "boot_hd0"
 	    }, 
 	    "9C:5C:8E:53:50:C5": {
 	      "hostname": "ch-lab-dragon", 
@@ -59,8 +59,8 @@
 	      "image": "qatd-u1604.qcow2",
 	      "managed": false,
 		  "ptemplate": "pxe-skip.cfg",
-	      "plabel": "boot_hd0",
-	    },     
+	      "plabel": "boot_hd0"
+	    }     
 	}
   },
 
@@ -72,4 +72,5 @@
     "grp": "www-data",
     "usr": "www-data"
   }
-}
+} 
+
