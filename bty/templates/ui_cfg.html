@@ -122,7 +122,7 @@
         </p>
       </div>
 
-      <table class="table table-striped" id="ptemplate_list">
+      <table class="table table-striped" id="pconfig_list">
         <thead>
           <tr>
             <th>Filename</th>
@@ -231,31 +231,33 @@
 var DEFAULT_SORT_KEY = "hostname";
 var DEFAULT_SORT_DIR = "ASC";
 
-function init_list(cfg, sort_attr, sort_dir) {
+var ptemplates = new Array();   // Datasets the UI uses
+var pconfigs = new Array();
+var machines = new Array();
+var images = new Array();
 
-  var machines = new Array();                    // Convert dict of machines to list of machines
+function init_data(cfg, sort_attr, sort_dir) {
   $.each(cfg.machines.coll, function(i, machine) {
     machines.push(machine);
   });
 
-  var images = new Array();
   $.each(cfg.images.coll, function(i, image) {
     images.push(image);
   });
   images.push("null");  // Also adding the 'null' / not selected
-  images.sort();
 
-  var ptemplates = new Array();
   $.each(cfg.ptemplates.coll, function(i, label) {
     ptemplates.push(label);
   });
   ptemplates.sort();
 
-  var pconfigs = new Array();
   $.each(cfg.pconfigs.coll, function(i, label) {
     pconfigs.push(label);
   });
   pconfigs.sort();
+}
+
+function init_machines(cfg, sort_attr, sort_dir) {
 
   function fill() {
     $("#machine_list").find("tbody").empty();   // Remove tbody content
@@ -394,8 +396,65 @@ function init_list(cfg, sort_attr, sort_dir) {
   fill();
 }
 
+function init_pconfigs(cfg, sort_attr, sort_dir) {
+
+  function fill() {
+    $("#pconfig_list").find("tbody").empty();   // Remove tbody content
+
+    $.each(pconfigs, function(i, pconfig) {     // Populate
+      var row = $("<tr>");
+
+      row.append($("<td>").text(pconfig.fname));
+      row.appendTo($("#pconfig_list tbody"));
+    });
+  }
+
+  fill();
+}
+
+function init_ptemplates(cfg, sort_attr, sort_dir) {
+
+  function fill() {
+    $("#ptemplate_list").find("tbody").empty(); // Remove tbody content
+
+    $.each(ptemplates, function(i, ptemplate) { // Populate
+      var row = $("<tr>");
+
+      row.append($("<td>").text(ptemplate.fname));
+      row.appendTo($("#ptemplate_list tbody"));
+    });
+  }
+
+  fill();
+}
+
+function init_images(cfg, sort_attr, sort_dir) {
+
+  function fill() {
+    $("#image_list").find("tbody").empty();     // Remove tbody content
+
+    $.each(images, function(i, image) {         // Populate
+      var row = $("<tr>");
+
+      row.append($("<td>").text(image));
+      row.appendTo($("#image_list tbody"));
+    });
+  }
+
+  fill();
+}
+
+function init_raw(cfg, sort_attr, sort_dir) {
+
+}
+
 function main(cfg) {
-  init_list(cfg, DEFAULT_SORT_KEY, DEFAULT_SORT_DIR);
+  init_data(cfg, DEFAULT_SORT_KEY, DEFAULT_SORT_DIR);
+  init_machines(cfg, DEFAULT_SORT_KEY, DEFAULT_SORT_DIR);
+  init_pconfigs(cfg, DEFAULT_SORT_KEY, DEFAULT_SORT_DIR);
+  init_ptemplates(cfg, DEFAULT_SORT_KEY, DEFAULT_SORT_DIR);
+  init_images(cfg, DEFAULT_SORT_KEY, DEFAULT_SORT_DIR);
+  init_raw(cfg, DEFAULT_SORT_KEY, DEFAULT_SORT_DIR);
 }
 
 </script>
