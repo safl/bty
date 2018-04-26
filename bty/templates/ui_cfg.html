@@ -176,11 +176,12 @@
       <div class="card-body">
         <h5 class="card-title">Disk Images made available via NFS and HTTP</h5>
         <p class="card-text">
-        If you want to add additional images then, simply store them in **INSERT_PATH_HERE**.
+        If you want to add additional images then, simply store them in <code>{{ cfg.images.root
+          }}</code>.
         </p>
       </div>
 
-      <table class="table table-striped" id="ptemplate_list">
+      <table class="table table-striped" id="image_list">
         <thead>
           <tr>
             <th>Filename</th>
