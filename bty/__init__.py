@@ -462,7 +462,7 @@ def web_ui():
         elif action == "pconfigs_refresh":
             cfg_init_pconfigs(CFG)
         elif action == "ptemplates_refresh":
-            cfg_init_ptemplates(CFG)
+            cfg_init_ptemplates(CFG, APP)
         elif action == "images_refresh":
             cfg_init_images(CFG)
         elif action == "apply":
