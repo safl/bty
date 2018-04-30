@@ -19,10 +19,11 @@ MACHINE_ATTRS = [
     "hwa",
     "image",
     "managed",
-    "plabel"
-    "ptemplate",
+    "plabel",
+    "ptemplate"
 ]
 MACHINE_STRUCT = { attr: None for attr in MACHINE_ATTRS }
+MACHINE_STRUCT["hostname"] = ""
 
 PCONFIG_ATTRS = [
     ("fname", str),
@@ -75,7 +76,7 @@ CFG_DEFAULT = {
     }
 }
 
-def machine(cfg, **attrs):
+def machine_create(cfg, **attrs):
 
     struct = copy.deepcopy(MACHINE_STRUCT)
     for attr, val in attrs.items():
@@ -89,16 +90,22 @@ def machine(cfg, **attrs):
         print("invalid struct: %r" % struct)
         return None
 
+    struct["managed"] = bool(int(struct["managed"]))
     if struct["managed"]:       # Construct a managed machine from given info
-        struct["managed"] = True
         if not struct["image"]:
             struct["image"] = cfg["images"]["default"]
-
     else:
-        struct["managed"] = False
-        struct["image"] = cfg["images"]["default_skip"]
+        tmpl = cfg["ptemplates"]["default_skip"]
+        lbls = cfg["ptemplates"]["coll"][tmpl]["labels"]
 
-    return machine
+        struct["managed"] = False
+        struct["ptemplate"] = tmpl
+        struct["plabel"] = lbls[0] if lbls else ""
+
+    if struct["hostname"] is None:
+        struct["hostname"] = ""
+
+    return struct
 
 def ipa_to_hwa(ipa=None):
     """
@@ -357,12 +364,40 @@ def cfg_init(cfg_fpath, app):
 
     return cfg
 
-def cfg_apply_machines(cfg, machines):
+def cfg_apply_machines(cfg, form):
     """Apply config changes to machines"""
 
     print("## cfg_apply_machines")
 
-    pass
+    # MAP 'null' to None in formular
+    for attr in sorted(list(set(MACHINE_ATTRS) - set(["managed"]))):
+        print("JAZZ: %r" % attr)
+        form[attr] = [
+            None if val == "null" else val for val in form[attr]
+        ]
+
+    changes = False
+
+    for hwa, managed, hostname, image, plabel, ptemplate in zip(
+            form["hwa"], form["managed"], form["hostname"], form["image"],
+            form["plabel"], form["ptemplate"]):
+
+        machine = machine_create(cfg,
+            hwa=hwa,
+            managed=managed,
+            hostname=hostname,
+            image=image,
+            plabel=plabel,
+            ptemplate=ptemplate
+        )
+        if not machine:
+            continue
+
+        CFG["machines"]["coll"][hwa] = machine
+        changes = True
+
+    if not cfg_save(CFG_FPATH, CFG):
+        print("FAILED: cfg_apply_machines, could not cfg_save(...)")
 
 APP = Flask(__name__)
 #APP.config.from_object('websiteconfig')

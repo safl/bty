@@ -304,6 +304,7 @@ function init_machines(cfg, sort_attr, sort_dir) {
       row.append($("<td>").append(
         $("<select>")
         .prop("class", "form-control")
+        .prop("name", "managed")
         .append($("<option>").val("1").text("True"))
         .append($("<option>").val("0").text("False"))
         .val(String(machine.managed === true ? "1" : "0"))
