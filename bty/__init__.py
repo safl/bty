@@ -413,12 +413,12 @@ with APP.app_context():
         print("FAILED: cannot obtain a configuration")
         exit(1)
 
-    pxe_default_path = os.sep.join([cfg["pconfigs"]["root"], "default"])
+    pxe_default_path = os.sep.join([CFG["pconfigs"]["root"], "default"])
     if not os.path.exists(pxe_default_path):
-        cfg_init_default_pxe(cfg)
-        cfg_init_pconfigs(cfg)
+        cfg_init_default_pxe(CFG)
+        cfg_init_pconfigs(CFG)
 
-    if not cfg_save(CFG_FPATH, cfg):
+    if not cfg_save(CFG_FPATH, CFG):
         print("FAILED: configuration seems severely broken")
 
 def bulk_remove(cfg, form):
