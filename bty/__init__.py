@@ -438,6 +438,9 @@ def web_bootstrap(hwa=None):
             lbls = CFG["ptemplates"]["coll"][ptmpl]["labels"]
             machine["plabel"] = lbls[0] if lbls else ""
 
+        CFG["machines"]["coll"][hwa] = machine
+        cfg_save(CFG_FPATH, CFG)
+
     if not machine["managed"]:
         return render_template("bootstrap_cancel.sh")
 
