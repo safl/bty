@@ -300,8 +300,10 @@ def cfg_save(cfg_fpath, cfg):
         with open(cfg_fpath, "w") as cfg_fd:
             cfg = json.dump(cfg, cfg_fd, sort_keys=True, indent=2)
     except IOError as exc:
-        print("FAILED: persisting cfg")
+        print("FAILED: cfg_save")
         return False
+
+    print("SUCCESS: cfg_save")
 
     return True
 
@@ -386,9 +388,9 @@ def bulk_remove(cfg, form):
 
     if changed:
         if cfg_save(CFG_FPATH, cfg):
-            print("SUCCESS: cfg_save")
+            print("SUCCESS: bulk_remove")
         else:
-            print("FAILED: cfg_save")
+            print("FAILED: bulk_remove")
 
     return
 
