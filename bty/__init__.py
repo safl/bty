@@ -474,7 +474,7 @@ def web_ui():
             do_cfg_save = False
 
         if do_cfg_save:
-            if not cfg_save(CFG_FPATH, cfg):
+            if not cfg_save(CFG_FPATH, CFG):
                 print("FAILED: configuration seems severely broken")
 
     response = render_template('ui_cfg.html', cfg=CFG)
