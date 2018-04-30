@@ -33,6 +33,7 @@ CFG_DEFAULT = {
         "coll": {
             "pxe-c115200.cfg": {
                 "fname": "pxe-c115200.cfg",
+                "labels": ["boot_hd0", "boot_hd0_bzi", "install"]
             }
         },
         "root": "/srv/bty/bty/templates",
@@ -112,6 +113,23 @@ def ipa_to_hwa(ipa=None):
 
     return None
 
+def hwa_to_host(hwa=None):
+    """Guest the host or die trying"""
+
+    if hwa is None:
+        hwa = ipa_to_hwa(request.remote_addr)
+
+    if hwa is None:
+        print("FAILED: hwa: %r")
+        return None
+
+    host = cfg["machines"]["coll"].get(hwa)
+    if host is None:
+        print("FAILED: machines: %r, host: %r" % (cfg["machines"], host))
+        return None
+
+    return host
+
 def hdrs(content=None, content_type=None):
     """Return headers for the given content"""
 
@@ -174,48 +192,25 @@ def cfg_save(cfg_fpath, cfg):
 
     return True
 
-def pxe_config(environ, cfg, host):
-    """@returns PXE config for the given host on success, None otherwise"""
 
-    print("pxe_config")
+def pxe_config(cfg, host):
+    """Returns the pxe-config for the given host"""
 
-    if not host["managed"]:
-        host["hostname"] = "unmanaged"
+    tmpl = host.get("ptemplate")
+    if tmpl is None:
+        print("FAILED: host: %r, tmpl: %r" % (host, tmpl))
         return None
 
-    if None in [host["hostname"], host["hwa"]]:
-        print("ERR: invalid host: %r" % host)
-        return None
+    return render_template(tmpl, cfg=cfg, host=host)
 
-    host["PXE_DEFAULT"] = "boot_hd0"            # TODO: make this configurable
-
-    script_filename = environ.get("SCRIPT_FILENAME")
-    tmpl_path = os.sep.join([
-        os.path.dirname(script_filename),
-        "pxeconfig.tmpl"
-    ])
-
-    tmpl = ""
-    with open(tmpl_path, "r") as tmpl_fd:
-        tmpl = tmpl_fd.read()
-
-    for key, val in host.items():
-        if val is None:
-            continue
-
-        placeholder = "___%s___" % key.upper()
-        tmpl = tmpl.replace(placeholder, str(val))
-
-    return tmpl
-
-def pxe_config_install(environ, cfg, host, pxe):
+def pxe_config_install(cfg, host, pxe):
     """Install the given pxe config"""
 
     print("pxe_config_install")
 
     pxe_fname = "01-%s" % host["hwa"].replace(":", "-")
     pxe_fname = pxe_fname.lower()
-    pxe_fpath = os.sep.join([PXE["cfg_fpath"], pxe_fname])
+    pxe_fpath = os.sep.join([cfg["pconfigs"]["root"], pxe_fname])
 
     print("pxe_fpath: %r" % pxe_fpath)
 
@@ -256,6 +251,12 @@ def bulk_refresh(form):
 
     return
 
+@app.route("/cfg")
+def app_cfg():
+    """Provide config as JSON"""
+
+    return json.dumps(cfg)
+
 @app.route("/", methods=["GET", "POST"])
 def app_cfg_ui():
     """sdfsd"""
@@ -279,44 +280,48 @@ def app_cfg_ui():
 def app_pxe(hwa=None):
     """sdfsd"""
 
-    if hwa is None:     # Try guessing by HTTP REMOTE ADDR
-        hwa = ipa_to_hwa(request.remote_addr)
-    if hwa is None:
-        print("FAILED: hwa: %r")
+    host = hwa_to_host(hwa)
+    if host is None:
+        print("FAILED: hwa_to_host, hwa: %r" % hwa)
         return "", 404
 
-    print("OK: hwa: %r" % hwa)
+    pcfg = pxe_config(cfg, host)
+    if pcfg is None:
+        print("FAILED: pxe_config" % hwa)
+        return "", 404
+
+    return pcfg
+
+@app.route("/bootstrap.sh")
+@app.route("/bootstrap.sh/<hwa>")
+def app_bootstrap(hwa=None):
+    """@returns bootstrap script for the host to run"""
+
+    host = hwa_to_host(hwa)
+    if host is None:
+        print("FAILED: hwa_to_host, hwa: %r" % hwa)
+        return "", ""
 
     host = cfg["machines"]["coll"].get(hwa)
     if host is None:
         print("FAILED: machines: %r, host: %r" % (cfg["machines"], host))
         return "", 404
 
-    tmpl = host.get("ptemplate")
-    if tmpl is None:
-        print("FAILED: host: %r, tmpl: %r" % (host, tmpl))
-        return "", 404
+    if not host["managed"]:
+        return render_template("bootstrap_cancel.sh")
 
-    return render_template(tmpl, cfg=cfg, host=host)
+    tmpls = cfg["ptemplates"]["coll"]   # Switch to a non-install PXE LABEL
+    ptemplate = host["ptemplate"]
+    labels = [lbl for lbl in tmpls[ptemplate]["labels"] if "install" not in lbl]
+    if labels:
+        labels.sort()
+        host["plabel"] = labels[0]
+        cfg_save(CFG_FPATH, cfg)
 
-@app.route("/cfg")
-def app_cfg():
-    """Provide config as JSON"""
+    pxe = pxe_config(cfg, host)         # Create PXE config for host
+    try:
+        pxe_config_install(cfg, host, pxe)
+    except IOError as exc:
+        print("FAILED: pxe_config_install, err: %r" % exc)
 
-    return json.dumps(cfg)
-
-@app.route("*bootstrap.sh")
-def app_bootstrap():
-    """@returns bootstrap script for the host to run"""
-
-    print("## bootstrap")
-
-    if host["managed"]:             # Create PXE config for host
-        pxe = pxe_config(os.environ, cfg, host)
-        pxe_config_install(os.environ, cfg, host, pxe)
-
-    return render_template(
-        "bootstrap.sh" if host["managed"] else "bootstrap_cancel.sh",
-        cfg=cfg,
-        host=host
-    )
+    return render_template("bootstrap.sh", cfg=cfg, host=host)
