@@ -407,10 +407,26 @@ function init_pconfigs(cfg, sort_attr, sort_dir) {
     $("#pconfig_list").find("tbody").empty();   // Remove tbody content
 
     $.each(pconfigs, function(i, pconfig) {     // Populate
-      var row = $("<tr>");
+      var ident = "pconfig_" + pconfig.fname;
+      var curs = "#" + ident;
 
-      row.append($("<td>").text(pconfig.fname));
-      row.appendTo($("#pconfig_list tbody"));
+      var row = $("<tr>")
+      .click(function() {
+        $(curs).toggle("collapse");
+      })
+      .append($("<td>").text(pconfig.fname))
+      .appendTo($("#pconfig_list tbody"));
+
+      var hidden = $("<tr>")
+      .prop("id", ident)
+      .addClass("collapse")
+      .append(
+        $("<td>").append(
+          $("<pre>").append(
+            $("<code>").text(pconfig.content)
+          )
+        )
+      ).appendTo($("#pconfig_list tbody"));
     });
   }
 
@@ -423,19 +439,37 @@ function init_ptemplates(cfg, sort_attr, sort_dir) {
     $("#ptemplate_list").find("tbody").empty(); // Remove tbody content
 
     $.each(ptemplates, function(i, ptemplate) { // Populate
-      var row = $("<tr>");
+      var ident = "ptemplate_" + i;
+      var curs = "#" + ident;
 
-      row.append($("<td>").text(ptemplate.fname));
+      var row = $("<tr>")
+      .click(function() {
+        $(curs).toggle("collapse");
+      })
+      .append($("<td>").text(ptemplate.fname));
 
       var label_col = $("<td>");
       $.each(ptemplate.labels, function(i, lbl) {
-        if (i)
+        if (i) {
           label_col.text(label_col.text() + ", ");
+        }
         label_col.text(label_col.text() + lbl);
       });
       row.append(label_col);
 
       row.appendTo($("#ptemplate_list tbody"));
+
+      var hidden = $("<tr>")
+      .prop("id", ident)
+      .addClass("collapse")
+      .append(
+        $("<td>").append(
+          $("<pre>").append(
+            $("<code>").text(ptemplate.content)
+          )
+        )
+      ).appendTo($("#ptemplate_list tbody"));
+
     });
   }
 
