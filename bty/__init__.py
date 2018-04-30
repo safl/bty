@@ -296,6 +296,8 @@ def cfg_save(cfg_fpath, cfg):
     @returns True on success, False otherwise
     """
 
+    print("INFO: cfg_fpath: %r" % cfg_fpath)
+
     try:
         with open(cfg_fpath, "w") as cfg_fd:
             cfg = json.dump(cfg, cfg_fd, sort_keys=True, indent=2)
