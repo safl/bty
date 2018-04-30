@@ -28,5 +28,5 @@ sudo chmod g+rwx -R $TFTPBOOT_ROOT/pxelinux.bzi
 sudo setfacl -d -m group:"$SYS_GRP":rwx $TFTPBOOT_ROOT/pxelinux.bzi
 
 # Change such that Apache can modify pxe-configs and bty-config
-chown -R "$WEB_USR":"$WEB_GRP" $BTY_ROOT/bty.json
+chown -R "$WEB_USR":"$WEB_GRP" $BTY_ROOT
 chown -R "$WEB_USR":"$WEB_GRP" $TFTPBOOT_ROOT/pxelinux.cfg
