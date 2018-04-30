@@ -213,6 +213,20 @@ def pxe_deploy(cfg, machine, pxe_fname=None):
 
     return True
 
+def cfg_init_default_pxe(cfg):
+    """Initialize the default PXE config"""
+
+    # Create the PXE default configuration
+    print("WARNING: PXE default config is missing, creating one")
+    machine = copy.deepcopy(MACHINE_STRUCT)
+    machine["hostname"] = "default"
+    machine["image"] = cfg["images"]["default"]
+    machine["ptemplate"] = cfg["ptemplates"]["default"]
+    machine["plabel"] = "olleh"
+
+    if not pxe_deploy(cfg, machine, "default"):
+        print("FAILED: pxe_deploy(...) for machine: %r" % machine)
+
 def cfg_init_pconfigs(cfg):
     """
     Initialize PXE configs by scanning system
@@ -231,19 +245,6 @@ def cfg_init_pconfigs(cfg):
 
         cfg["pconfigs"]["coll"][fname] = pcfg
 
-    if "default" in fnames:     # There is a default config, we can exit
-        return
-
-    # Create the PXE default configuration
-    print("WARNING: PXE default config is missing, creating one")
-    machine = copy.deepcopy(MACHINE_STRUCT)
-    machine["hostname"] = "default"
-    machine["image"] = cfg["images"]["default"]
-    machine["ptemplate"] = cfg["ptemplates"]["default"]
-    machine["plabel"] = "olleh"
-
-    if not pxe_deploy(cfg, machine, "default"):
-        print("FAILED: pxe_deploy(...) for machine: %r" % machine)
 
 def cfg_init_ptemplates(cfg, app):
     """
@@ -358,6 +359,7 @@ def cfg_init(cfg_fpath, app):
     cfg_init_images(cfg)
     cfg_init_ptemplates(cfg, app)
     cfg_init_pconfigs(cfg)
+    cfg_init_default_pxe(cfg)
 
     if not cfg_save(CFG_FPATH, cfg):
         print("FAILED: configuration seems severely broken")
