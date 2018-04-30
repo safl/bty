@@ -244,7 +244,6 @@ function init_data(cfg, sort_attr, sort_dir) {
   $.each(cfg.images.coll, function(i, image) {
     images.push(image);
   });
-  images.push("null");  // Also adding the 'null' / not selected
 
   $.each(cfg.ptemplates.coll, function(i, label) {
     ptemplates.push(label);
@@ -350,7 +349,12 @@ function init_machines(cfg, sort_attr, sort_dir) {
       $(ptemplate_selector).val(String(machine.ptemplate)).change();
 
       // Image selector
-      var image_selector = $("<select>").prop("name", "image").prop("class", "form-control");
+      var image_selector = $("<select>")
+      .prop("name", "image")
+      .prop("class", "form-control");
+
+      $("<option>").val("null").text("null").appendTo(image_selector);
+
       $.each(images, function(i, image) {
         $("<option>").val(image).text(image).appendTo(image_selector);
       });
@@ -421,6 +425,15 @@ function init_ptemplates(cfg, sort_attr, sort_dir) {
       var row = $("<tr>");
 
       row.append($("<td>").text(ptemplate.fname));
+
+      var label_col = $("<td>");
+      $.each(ptemplate.labels, function(i, lbl) {
+        if (i)
+          label_col.text(label_col.text() + ", ");
+        label_col.text(label_col.text() + lbl);
+      });
+      row.append(label_col);
+
       row.appendTo($("#ptemplate_list tbody"));
     });
   }
