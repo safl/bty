@@ -244,6 +244,7 @@ function init_data(cfg, sort_attr, sort_dir) {
   $.each(cfg.images.coll, function(i, image) {
     images.push(image);
   });
+  images.sort();
 
   $.each(cfg.ptemplates.coll, function(i, label) {
     ptemplates.push(label);
