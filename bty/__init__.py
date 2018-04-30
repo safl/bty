@@ -468,7 +468,7 @@ def web_ui():
         elif action == "apply":
             cfg_apply_machines(CFG, dict(request.form))
         else:
-            print("Process SINGLE update change")
+            print("FAILED: form: %r" % request.form)
 
     response = render_template('ui_cfg.html', cfg=CFG)
 
