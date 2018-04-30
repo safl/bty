@@ -274,13 +274,38 @@ def app_cfg_ui():
 
     return render_template('ui_cfg.html', cfg=cfg)
 
+@app.route("/pxe", methods=["GET"])
+@app.route("/pxe/<hwa>", methods=["GET"])
+def app_pxe(hwa=None):
+    """sdfsd"""
+
+    if hwa is None:     # Try guessing by HTTP REMOTE ADDR
+        hwa = ipa_to_hwa(request.remote_addr)
+    if hwa is None:
+        print("FAILED: hwa: %r")
+        return "", 404
+
+    print("OK: hwa: %r" % hwa)
+
+    host = cfg["machines"]["coll"].get(hwa)
+    if host is None:
+        print("FAILED: machines: %r, host: %r" % (cfg["machines"], host))
+        return "", 404
+
+    tmpl = host.get("ptemplate")
+    if tmpl is None:
+        print("FAILED: host: %r, tmpl: %r" % (host, tmpl))
+        return "", 404
+
+    return render_template(tmpl, cfg=cfg, host=host)
+
 @app.route("/cfg")
 def app_cfg():
     """Provide config as JSON"""
 
     return json.dumps(cfg)
 
-@app.route("/bootstrap")
+@app.route("*bootstrap.sh")
 def app_bootstrap():
     """@returns bootstrap script for the host to run"""
 
