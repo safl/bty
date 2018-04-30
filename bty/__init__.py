@@ -245,7 +245,6 @@ def cfg_init_pconfigs(cfg):
 
         cfg["pconfigs"]["coll"][fname] = pcfg
 
-
 def cfg_init_ptemplates(cfg, app):
     """
     Initialize PXE configs by scanning system
@@ -358,8 +357,8 @@ def cfg_init(cfg_fpath, app):
     cfg = copy.deepcopy(CFG_DEFAULT)
     cfg_init_images(cfg)
     cfg_init_ptemplates(cfg, app)
-    cfg_init_pconfigs(cfg)
     cfg_init_default_pxe(cfg)
+    cfg_init_pconfigs(cfg)
 
     if not cfg_save(CFG_FPATH, cfg):
         print("FAILED: configuration seems severely broken")
@@ -413,6 +412,14 @@ with APP.app_context():
     if CFG is None:
         print("FAILED: cannot obtain a configuration")
         exit(1)
+
+    pxe_default_path = os.sep.join([cfg["pconfigs"]["root"], "default"])
+    if not os.path.exists(pxe_default_path):
+        cfg_init_default_pxe(cfg)
+        cfg_init_pconfigs(cfg)
+
+    if not cfg_save(CFG_FPATH, cfg):
+        print("FAILED: configuration seems severely broken")
 
 def bulk_remove(cfg, form):
     """Remove entries"""
