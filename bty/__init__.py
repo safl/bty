@@ -454,6 +454,7 @@ def web_ui():
 
     if request.method == "POST":
 
+        persist_changes = True
         action = request.form.get("action")
         if action == "refresh" and "bulk_ident" in request.form:
             bulk_refresh(CFG, dict(request.form))
@@ -469,6 +470,11 @@ def web_ui():
             cfg_apply_machines(CFG, dict(request.form))
         else:
             print("FAILED: form: %r" % request.form)
+            persist_changes = False
+
+        if persist_changes:
+            if not cfg_save(CFG_FPATH, cfg):
+                print("FAILED: configuration seems severely broken")
 
     response = render_template('ui_cfg.html', cfg=CFG)
 
