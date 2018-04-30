@@ -126,7 +126,7 @@ def ipa_to_hwa(ipa=None):
 
     return None
 
-def hwa_to_machine(hwa=None):
+def hwa_to_machine(cfg, hwa=None):
     """Guest the machine or die trying"""
 
     if hwa is None:
@@ -419,7 +419,7 @@ def web_bootstrap(hwa=None):
     @returns bootstrap script for the machine to execute
     """
 
-    machine = hwa_to_machine(hwa)
+    machine = hwa_to_machine(CFG, hwa)
     if machine is None:
         print("FAILED: hwa_to_machine, hwa: %r" % hwa)
         return "", 404
