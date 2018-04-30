@@ -58,7 +58,7 @@ fi
 # Mount and change hostname
 echo "# Mount and change hostname"
 
-HOSTNAME="___HOSTNAME___"
+HOSTNAME="{{ host.hostname }}"
 MP=jazz
 
 mkdir -p $MP
