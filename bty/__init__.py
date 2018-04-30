@@ -240,7 +240,7 @@ def cfg_init_pconfigs(cfg):
     machine["hostname"] = "default"
     machine["image"] = cfg["images"]["default"]
     machine["ptemplate"] = cfg["ptemplates"]["default"]
-    machine["plabel"] = "install"
+    machine["plabel"] = "olleh"
 
     if not pxe_deploy(cfg, machine, "default"):
         print("FAILED: pxe_deploy(...) for machine: %r" % machine)
