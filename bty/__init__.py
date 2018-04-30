@@ -126,8 +126,8 @@ def ipa_to_hwa(ipa=None):
 
     return None
 
-def hwa_to_host(hwa=None):
-    """Guest the host or die trying"""
+def hwa_to_machine(hwa=None):
+    """Guest the machine or die trying"""
 
     if hwa is None:
         hwa = ipa_to_hwa(request.remote_addr)
@@ -136,12 +136,12 @@ def hwa_to_host(hwa=None):
         print("FAILED: hwa: %r")
         return None
 
-    host = cfg["machines"]["coll"].get(hwa)
-    if host is None:
-        print("FAILED: machines: %r, host: %r" % (cfg["machines"], host))
+    machine = cfg["machines"]["coll"].get(hwa)
+    if machine is None:
+        print("FAILED: machines: %r, machine: %r" % (cfg["machines"], machine))
         return None
 
-    return host
+    return machine
 
 def hdrs(content=None, content_type=None):
     """Return headers for the given content"""
@@ -157,23 +157,23 @@ def hdrs(content=None, content_type=None):
         ('Content-Length', str(len(content)))
     ]
 
-def pxe_config(cfg, host):
-    """Returns the pxe-config for the given host"""
+def pxe_config(cfg, machine):
+    """Returns the pxe-config for the given machine"""
 
-    tmpl = host.get("ptemplate")
+    tmpl = machine.get("ptemplate")
     if tmpl is None:
-        print("FAILED: host: %r, tmpl: %r" % (host, tmpl))
+        print("FAILED: machine: %r, tmpl: %r" % (machine, tmpl))
         return None
 
-    return render_template(tmpl, cfg=cfg, host=host)
+    return render_template(tmpl, cfg=cfg, machine=machine)
 
-def pxe_config_install(cfg, host, pxe_content, pxe_fname=None):
+def pxe_config_install(cfg, machine, pxe_content, pxe_fname=None):
     """Install the given pxe config"""
 
     print("pxe_config_install")
 
     if pxe_fname is None:
-        pxe_fname = "01-%s" % host["hwa"].replace(":", "-")
+        pxe_fname = "01-%s" % machine["hwa"].replace(":", "-")
         pxe_fname = pxe_fname.lower()
 
     pxe_fpath = os.sep.join([cfg["pconfigs"]["root"], pxe_fname])
@@ -204,19 +204,20 @@ def cfg_init_pconfigs(cfg):
     if "default" in fnames:     # There is a default config, we can exit
         return
 
+    # Create the PXE default configuration
     print("WARNING: PXE default config is missing, creating one")
-    host = copy.deepcopy(MACHINE_STRUCT)
-    host["hostname"] = "default"
-    host["image"] = cfg["images"]["default"]
-    host["ptemplate"] = cfg["ptemplates"]["default"]
-    host["plabel"] = "install"
+    machine = copy.deepcopy(MACHINE_STRUCT)
+    machine["hostname"] = "default"
+    machine["image"] = cfg["images"]["default"]
+    machine["ptemplate"] = cfg["ptemplates"]["default"]
+    machine["plabel"] = "install"
 
-    pxe = pxe_config(cfg, host)
+    pxe = pxe_config(cfg, machine)
     if pxe is None:
-        print("FAILED: pxe_config for host: %r" % host)
+        print("FAILED: pxe_config for machine: %r" % machine)
         return
 
-    pxe_config_install(cfg, host, pxe, "default")
+    pxe_config_install(cfg, machine, pxe, "default")
 
 def cfg_init_ptemplates(cfg, app):
     """
@@ -244,7 +245,6 @@ def cfg_init_ptemplates(cfg, app):
 
         tmpl["fname"] = fname
         tmpl["content"], fpath, _ = lodr.get_source(app.jinja_env, fname)
-        # TODO: parse LABELS
 
         annotate_labels(tmpl)
 
@@ -405,53 +405,41 @@ def app_cfg_ui():
 
     return render_template('ui_cfg.html', cfg=CFG)
 
-@APP.route("/pxe", methods=["GET"])
-@APP.route("/pxe/<hwa>", methods=["GET"])
-def app_pxe(hwa=None):
-    """sdfsd"""
-
-    host = hwa_to_host(hwa)
-    if host is None:
-        print("FAILED: hwa_to_host, hwa: %r" % hwa)
-        return "", 404
-
-    pcfg = pxe_config(CFG, host)
-    if pcfg is None:
-        print("FAILED: pxe_config" % hwa)
-        return "", 404
-
-    return pcfg
-
 @APP.route("/bootstrap.sh")
 @APP.route("/bootstrap.sh/<hwa>")
 def app_bootstrap(hwa=None):
-    """@returns bootstrap script for the host to run"""
+    """
+    Creates a bootstrap script and changes machine config
 
-    host = hwa_to_host(hwa)
-    if host is None:
-        print("FAILED: hwa_to_host, hwa: %r" % hwa)
+    @returns bootstrap script for the machine to execute
+    """
+
+    machine = hwa_to_machine(hwa)
+    if machine is None:
+        print("FAILED: hwa_to_machine, hwa: %r" % hwa)
         return "", 404
 
-    host = CFG["machines"]["coll"].get(hwa)
-    if host is None:
-        print("FAILED: machines: %r, host: %r" % (CFG["machines"], host))
+    machine = CFG["machines"]["coll"].get(hwa)
+    if machine is None:
+        print("FAILED: machines: %r, machine: %r" % (CFG["machines"], machine))
         return "", 404
 
-    if not host["managed"]:
+    if not machine["managed"]:
         return render_template("bootstrap_cancel.sh")
 
+    ptemplate = machine["ptemplate"]
+
     tmpls = CFG["ptemplates"]["coll"]   # Switch to a non-install PXE LABEL
-    ptemplate = host["ptemplate"]
     labels = [lbl for lbl in tmpls[ptemplate]["labels"] if "install" not in lbl]
     if labels:
         labels.sort()
-        host["plabel"] = labels[0]
+        machine["plabel"] = labels[0]
         cfg_save(CFG_FPATH, CFG)
 
-    pxe = pxe_config(CFG, host)         # Create PXE config for host
+    pxe = pxe_config(CFG, machine)         # Create PXE config for machine
     try:
-        pxe_config_install(CFG, host, pxe)
+        pxe_config_install(CFG, machine, pxe)
     except IOError as exc:
         print("FAILED: pxe_config_install, err: %r" % exc)
 
-    return render_template("bootstrap.sh", cfg=CFG, host=host)
+    return render_template("bootstrap.sh", cfg=CFG, machine=machine)
