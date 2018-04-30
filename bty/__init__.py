@@ -126,22 +126,25 @@ def ipa_to_hwa(ipa=None):
 
     return None
 
-def hwa_to_machine(cfg, hwa=None):
+def hwa_lookup(cfg, hwa=None):
     """Guest the machine or die trying"""
 
-    if hwa is None:
-        hwa = ipa_to_hwa(request.remote_addr)
+    ipa = request.remote_addr
+    machine = None
 
     if hwa is None:
-        print("FAILED: hwa: %r")
-        return None
+        hwa = ipa_to_hwa(ipa)
+
+    if hwa is None:
+        print("FAILED: hwa_lookup hwa: %r" % hwa)
+        return hwa, ipa, machine
 
     machine = cfg["machines"]["coll"].get(hwa)
     if machine is None:
-        print("FAILED: machines: %r, machine: %r" % (cfg["machines"], machine))
-        return None
+        print("FAILED: hwa_lookup / cfg[...].get")
+        return hwa, ipa, machine
 
-    return machine
+    return hwa, ipa, machine
 
 def hdrs(content=None, content_type=None):
     """Return headers for the given content"""
@@ -419,15 +422,21 @@ def web_bootstrap(hwa=None):
     @returns bootstrap script for the machine to execute
     """
 
-    machine = hwa_to_machine(CFG, hwa)
-    if machine is None:
-        print("FAILED: hwa_to_machine, hwa: %r" % hwa)
+    lookup = hwa, ipa, machine = hwa_lookup(CFG, hwa)
+    if hwa is None:
+        print("FAILED: web_bootstrap, lookup: %r" % lookup)
         return "", 404
 
-    machine = CFG["machines"]["coll"].get(hwa)
-    if machine is None:
-        print("FAILED: machines: %r, machine: %r" % (CFG["machines"], machine))
-        return "", 404
+    if machine is None: # Add unknown machine as unmanaged
+        ptmpl = CFG["ptemplates"]["default_skip"]
+
+        machine = copy.deepcopy(MACHINE_STRUCT)
+        machine["hwa"] = hwa
+        machine["managed"] = False
+        machine["ptemplate"] = ptmpl
+        if ptmpl:
+            lbls = CFG["ptemplates"]["coll"][ptmpl]["labels"]
+            machine["plabel"] = lbls[0] if lbls else ""
 
     if not machine["managed"]:
         return render_template("bootstrap_cancel.sh")
