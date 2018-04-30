@@ -28,7 +28,7 @@ function wait_msg {
 }
 
 IMAGE_ROOT=/home/partimag
-IMAGE_FNAME=ubuntu1604_qatd.qcow2
+IMAGE_FNAME={{ machine.image }}
 IMAGE_PATH=$IMAGE_ROOT/$IMAGE_FNAME
 
 DEV_NAME=sda
