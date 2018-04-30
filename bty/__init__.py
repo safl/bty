@@ -38,7 +38,7 @@ PTEMPLATE_ATTRS = [
 PTEMPLATE_STRUCT = { a: c() for a, c in PTEMPLATE_ATTRS }
 
 CFG_FNAME = "bty.json"
-CFG_FPATH = "/tmp/%s" % CFG_FNAME
+CFG_FPATH = "/srv/bty/%s" % CFG_FNAME
 CFG_DEFAULT = {
     "pconfigs": {
         "coll": {},
