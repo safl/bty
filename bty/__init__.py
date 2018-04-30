@@ -157,7 +157,7 @@ def hdrs(content=None, content_type=None):
         ('Content-Length', str(len(content)))
     ]
 
-def pxe_config(cfg, machine):
+def pxe_config_create(cfg, machine):
     """Returns the pxe-config for the given machine"""
 
     tmpl = machine.get("ptemplate")
@@ -182,6 +182,26 @@ def pxe_config_install(cfg, machine, pxe_content, pxe_fname=None):
 
     with open(pxe_fpath, "w") as pxe_fd:
         pxe_fd.write(pxe_content)
+
+def pxe_deploy(cfg, machine, pxe_fname=None):
+    """
+    Deploy a PXE configuration for the given machine
+
+    @returns True on success, False otherwise
+    """
+
+    pxe_config = pxe_config_create(CFG, machine)
+    if pxe_config is None:
+        print("FAILED: pxe_config_create")
+        return False
+
+    try:
+        pxe_config_install(CFG, machine, pxe_config, pxe_fname)
+    except IOError as exc:
+        print("FAILED: pxe_config_install, err: %r" % exc)
+        return False
+
+    return True
 
 def cfg_init_pconfigs(cfg):
     """
@@ -212,12 +232,8 @@ def cfg_init_pconfigs(cfg):
     machine["ptemplate"] = cfg["ptemplates"]["default"]
     machine["plabel"] = "install"
 
-    pxe = pxe_config(cfg, machine)
-    if pxe is None:
-        print("FAILED: pxe_config for machine: %r" % machine)
-        return
-
-    pxe_config_install(cfg, machine, pxe, "default")
+    if not pxe_deploy(cfg, machine, "default"):
+        print("FAILED: pxe_deploy(...) for machine: %r" % machine)
 
 def cfg_init_ptemplates(cfg, app):
     """
@@ -334,6 +350,13 @@ def cfg_init(cfg_fpath, app):
 
     return cfg
 
+def cfg_apply_machines(cfg, machines):
+    """Apply config changes to machines"""
+
+    print("## cfg_apply_machines")
+
+    pass
+
 APP = Flask(__name__)
 #APP.config.from_object('websiteconfig')
 if APP is None:
@@ -347,21 +370,39 @@ with APP.app_context():
         print("FAILED: cannot obtain a configuration")
         exit(1)
 
-def bulk_remove(form):
+def bulk_remove(cfg, form):
     """Remove entries"""
 
-    print("# TODO: Process bulk remove")
+    print("## bulk_remove")
+
+    changed = False
+
     for hwa in form.get("bulk_ident"):
         print("hwa: %r" % hwa)
+
+        if hwa in cfg["machines"]["coll"]:
+            del cfg["machines"]["coll"][hwa]
+            changed = True
+
+    if changed:
+        if cfg_save(CFG_FPATH, cfg):
+            print("SUCCESS: cfg_save")
+        else:
+            print("FAILED: cfg_save")
 
     return
 
-def bulk_refresh(form):
+def bulk_refresh(cfg, form):
     """Remove entries"""
 
-    print("# TODO: Process bulk refresh")
+    print("## bulk_refresh")
+
     for hwa in form.get("bulk_ident"):
         print("hwa: %r" % hwa)
+
+        machine = cfg["machines"]["coll"].get(hwa)
+        if machine:
+            pxe_deploy(cfg, machine)
 
     return
 
@@ -396,11 +437,8 @@ def web_bootstrap(hwa=None):
         machine["plabel"] = labels[0]
         cfg_save(CFG_FPATH, CFG)
 
-    pxe = pxe_config(CFG, machine)         # Create PXE config for machine
-    try:
-        pxe_config_install(CFG, machine, pxe)
-    except IOError as exc:
-        print("FAILED: pxe_config_install, err: %r" % exc)
+    if not pxe_deploy(CFG, machine):
+        print("FAILED: pxe_deploy")
 
     return render_template("bootstrap.sh", cfg=CFG, machine=machine)
 
@@ -416,20 +454,22 @@ def web_ui():
 
     if request.method == "POST":
 
-        print(pprint.pformat(request.form))
-
         action = request.form.get("action")
         if action == "refresh" and "bulk_ident" in request.form:
-            bulk_refresh(dict(request.form))
+            bulk_refresh(CFG, dict(request.form))
         elif action == "remove" and "bulk_ident" in request.form:
-            bulk_remove(dict(request.form))
+            bulk_remove(CFG, dict(request.form))
         elif action == "pconfigs_refresh":
             cfg_init_pconfigs(CFG)
         elif action == "ptemplates_refresh":
             cfg_init_ptemplates(CFG)
         elif action == "images_refresh":
             cfg_init_images(CFG)
+        elif action == "apply":
+            cfg_apply_machines(CFG, dict(request.form))
         else:
             print("Process SINGLE update change")
 
-    return render_template('ui_cfg.html', cfg=CFG)
+    response = render_template('ui_cfg.html', cfg=CFG)
+
+    return response
