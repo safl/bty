@@ -49,8 +49,8 @@ CFG_DEFAULT = {
         "coll": {},
         "root": "/srv/bty/bty/templates",
         "exts": ["cfg"],
-        "default": "pxe-c115200.cfg",
-        "default_skip": "pxe-skip.cfg",
+        "default": None,
+        "default_skip": None,
     },
 
     "images": {
@@ -397,6 +397,12 @@ def app_cfg_ui():
             bulk_refresh(dict(request.form))
         elif action == "remove" and "bulk_ident" in request.form:
             bulk_remove(dict(request.form))
+        elif action == "pconfigs_refresh":
+            cfg_init_pconfigs(CFG)
+        elif action == "ptemplates_refresh":
+            cfg_init_ptemplates(CFG)
+        elif action == "images_refresh":
+            cfg_init_images(CFG)
         else:
             print("Process SINGLE update change")
 
