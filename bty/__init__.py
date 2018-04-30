@@ -347,16 +347,6 @@ with APP.app_context():
         print("FAILED: cannot obtain a configuration")
         exit(1)
 
-@APP.route("/jazz")
-def app_slow():
-    """This is the jazzy part"""
-
-    #help(app.jinja_env)
-
-    #print()
-
-    return ""
-
 def bulk_remove(form):
     """Remove entries"""
 
@@ -375,39 +365,9 @@ def bulk_refresh(form):
 
     return
 
-@APP.route("/cfg")
-def app_cfg():
-    """Provide config as JSON"""
-
-    return json.dumps(CFG)
-
-@APP.route("/", methods=["GET", "POST"])
-def app_cfg_ui():
-    """Render UI"""
-
-    if request.method == "POST":
-
-        print(pprint.pformat(request.form))
-
-        action = request.form.get("action")
-        if action == "refresh" and "bulk_ident" in request.form:
-            bulk_refresh(dict(request.form))
-        elif action == "remove" and "bulk_ident" in request.form:
-            bulk_remove(dict(request.form))
-        elif action == "pconfigs_refresh":
-            cfg_init_pconfigs(CFG)
-        elif action == "ptemplates_refresh":
-            cfg_init_ptemplates(CFG)
-        elif action == "images_refresh":
-            cfg_init_images(CFG)
-        else:
-            print("Process SINGLE update change")
-
-    return render_template('ui_cfg.html', cfg=CFG)
-
 @APP.route("/bootstrap.sh")
 @APP.route("/bootstrap.sh/<hwa>")
-def app_bootstrap(hwa=None):
+def web_bootstrap(hwa=None):
     """
     Creates a bootstrap script and changes machine config
 
@@ -443,3 +403,33 @@ def app_bootstrap(hwa=None):
         print("FAILED: pxe_config_install, err: %r" % exc)
 
     return render_template("bootstrap.sh", cfg=CFG, machine=machine)
+
+@APP.route("/cfg")
+def web_raw():
+    """Provide config as JSON"""
+
+    return json.dumps(CFG)
+
+@APP.route("/", methods=["GET", "POST"])
+def web_ui():
+    """Render UI"""
+
+    if request.method == "POST":
+
+        print(pprint.pformat(request.form))
+
+        action = request.form.get("action")
+        if action == "refresh" and "bulk_ident" in request.form:
+            bulk_refresh(dict(request.form))
+        elif action == "remove" and "bulk_ident" in request.form:
+            bulk_remove(dict(request.form))
+        elif action == "pconfigs_refresh":
+            cfg_init_pconfigs(CFG)
+        elif action == "ptemplates_refresh":
+            cfg_init_ptemplates(CFG)
+        elif action == "images_refresh":
+            cfg_init_images(CFG)
+        else:
+            print("Process SINGLE update change")
+
+    return render_template('ui_cfg.html', cfg=CFG)
