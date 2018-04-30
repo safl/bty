@@ -467,7 +467,7 @@ function init_ptemplates(cfg, sort_attr, sort_dir) {
           $("<pre>").append(
             $("<code>").text(ptemplate.content)
           )
-        )
+        ).prop("colspan", "2")
       ).appendTo($("#ptemplate_list tbody"));
 
     });

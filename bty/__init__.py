@@ -273,7 +273,6 @@ def cfg_init_images(cfg):
         cfg["images"]["coll"].sort()
         cfg["images"]["default"] = cfg["images"]["coll"][0]
 
-
 def cfg_save(cfg_fpath, cfg):
     """
     Store the given cfg
@@ -330,10 +329,8 @@ def cfg_init(cfg_fpath, app):
     cfg_init_ptemplates(cfg, app)
     cfg_init_pconfigs(cfg)
 
-    pprint.pprint(cfg)
-
-    #if not cfg_save(CFG_FPATH, cfg):
-    #    print("FAILED: configuration seems severely broken")
+    if not cfg_save(CFG_FPATH, cfg):
+        print("FAILED: configuration seems severely broken")
 
     return cfg
 
@@ -433,7 +430,7 @@ def app_bootstrap(hwa=None):
     host = hwa_to_host(hwa)
     if host is None:
         print("FAILED: hwa_to_host, hwa: %r" % hwa)
-        return "", ""
+        return "", 404
 
     host = CFG["machines"]["coll"].get(hwa)
     if host is None:
