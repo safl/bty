@@ -3,11 +3,13 @@ import pprint
 import json
 import copy
 import time
+import glob
 import re
 import os
 import bty
 from subprocess import Popen, PIPE
 from flask import Flask, render_template, request
+from flask import config as fconfig
 
 REGEX_HWA = r".*(([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})).*"
 
@@ -21,22 +23,31 @@ MACHINE_ATTRS = [
 ]
 MACHINE_STRUCT = { attr: None for attr in MACHINE_ATTRS }
 
+PCONFIG_ATTRS = [
+    ("fname", str),
+    ("content", str)
+]
+PCONFIG_STRUCT = { a: c() for a, c in PCONFIG_ATTRS }
+
+PTEMPLATE_ATTRS = [
+    ("fname", str),
+    ("content", str),
+    ("labels", list)
+]
+PTEMPLATE_STRUCT = { a: c() for a, c in PTEMPLATE_ATTRS }
+
 CFG_FNAME = "bty.json"
 CFG_FPATH = "/tmp/%s" % CFG_FNAME
 CFG_DEFAULT = {
     "pconfigs": {
-        "coll": [],
+        "coll": {},
         "root": "/srv/tftpboot/pxelinux.cfg",
     },
 
     "ptemplates": {
-        "coll": {
-            "pxe-c115200.cfg": {
-                "fname": "pxe-c115200.cfg",
-                "labels": ["boot_hd0", "boot_hd0_bzi", "install"]
-            }
-        },
+        "coll": {},
         "root": "/srv/bty/bty/templates",
+        "exts": ["cfg"],
         "default": "pxe-c115200.cfg",
         "default_skip": "pxe-skip.cfg",
     },
@@ -45,6 +56,7 @@ CFG_DEFAULT = {
         "coll": [],
         "root": "/srv/images",
         "default": None,
+        "exts": ["qcow2"]
     },
 
     "machines": {
@@ -160,19 +172,87 @@ def cfg_load(cfg_fpath):
 
     return None
 
+def cfg_init_images(cfg):
+    """
+    Initialize images in configuration
+    """
+
+    cfg["images"]["coll"] = []
+    for ext in cfg["images"]["exts"]:
+        for fpath in glob.glob(os.sep.join([
+            cfg["images"]["root"], "*.%s" % ext]
+        )):
+            fname = os.path.basename(fpath)
+            cfg["images"]["coll"].append(fname)
+
+    if cfg["images"]["coll"]:
+        cfg["images"]["coll"].sort()
+        cfg["images"]["default"] = cfg["images"]["coll"][0]
+
+def cfg_init_pconfigs(cfg):
+    """
+    Initialize PXE configs by scanning system
+    """
+
+    cfg["pconfigs"]["coll"] = {}
+    for fpath in glob.glob(os.sep.join([cfg["pconfigs"]["root"], "*"])):
+        fname = os.path.basename(fpath)
+
+        pcfg = copy.deepcopy(PCONFIG_STRUCT)
+        pcfg["fname"] = fname
+        pcfg["content"] = open(fpath).read()
+
+        cfg["pconfigs"]["coll"][fname] = pcfg
+
+def cfg_init_ptemplates(cfg):
+    """
+    Initialize PXE configs by scanning system
+    """
+
+    jenv = app.jinja_env
+    lodr = jenv.loader
+
+    cfg["ptemplates"]["coll"] = {}
+    for fname in jenv.list_templates(extensions=cfg["ptemplates"]["exts"]):
+        fname = str(fname)
+        tmpl = copy.deepcopy(PTEMPLATE_STRUCT)
+
+        tmpl["fname"] = fname
+        tmpl["content"], fpath, _ = lodr.get_source(app.jinja_env, fname)
+        # TODO: parse LABELS
+
+        cfg["ptemplates"]["coll"][fname] = tmpl
+
+        if not cfg["ptemplates"]["default"] and "skip" not in fname:
+            cfg["ptemplates"]["default"] = fname
+
+        if not cfg["ptemplates"]["default_skip"] and "skip" in fname:
+            cfg["ptemplates"]["default_skip"] = fname
+
 def cfg_init(cfg_fpath):
     """
     Load config from `cfg_fpath`, use default if it does not exist
     """
 
     cfg = cfg_load(CFG_FPATH)
-    if cfg is None:
-        print("FAILED: loading configuration")
-        print("WARNING: using default config")
-        cfg = copy.deepcopy(CFG_DEFAULT)
+    if cfg:
+        return cfg
 
-        if not cfg_save(CFG_FPATH, cfg):
-            print("FAILED: configuration seems severely broken")
+    print("FAILED: loading configuration")
+    print("WARNING: using default config")
+    cfg = copy.deepcopy(CFG_DEFAULT)
+
+    # TODO: set some default paths...
+    # TODO: ... like set the ptemplate["root"] to jinjas search dir
+
+    cfg_init_images(cfg)
+    cfg_init_pconfigs(cfg)
+    cfg_init_ptemplates(cfg)
+
+    pprint.pprint(cfg)
+
+    #if not cfg_save(CFG_FPATH, cfg):
+    #    print("FAILED: configuration seems severely broken")
 
     return cfg
 
@@ -225,13 +305,15 @@ if cfg is None:
     print("FAILED: cannot obtain a configuration")
     exit(1)
 
-@app.route("/slow")
+@app.route("/jazz")
 def app_slow():
-    """Render configuration"""
+    """This is the jazzy part"""
 
-    time.sleep(5)
+    #help(app.jinja_env)
 
-    return render_template('ui_cfg.html', cfg=cfg)
+    #print()
+
+    return ""
 
 def bulk_remove(form):
     """Remove entries"""
