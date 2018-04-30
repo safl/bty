@@ -196,7 +196,7 @@ def pxe_deploy(cfg, machine, pxe_fname=None):
         return False
 
     try:
-        pxe_config_install(CFG, machine, pxe_config, pxe_fname)
+        pxe_config_install(cfg, machine, pxe_config, pxe_fname)
     except IOError as exc:
         print("FAILED: pxe_config_install, err: %r" % exc)
         return False
