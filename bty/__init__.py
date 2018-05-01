@@ -377,8 +377,7 @@ def cfg_apply_machines(cfg, form):
             None if val == "null" else val for val in form[attr]
         ]
 
-    # Make changes to machine configurations
-    changes = False
+    changes = False                         # Make changes
     for hwa, managed, hostname, image, plabel, ptemplate in zip(
             form["hwa"], form["managed"], form["hostname"], form["image"],
             form["plabel"], form["ptemplate"]):
@@ -394,17 +393,19 @@ def cfg_apply_machines(cfg, form):
         if not machine:
             continue
 
-        CFG["machines"]["coll"][hwa] = machine
+        cfg["machines"]["coll"][hwa] = machine
         changes = True
 
-    if not cfg_save(CFG_FPATH, CFG):        # Persist changes
+    if not cfg_save(CFG_FPATH, cfg):        # Persist changes
         print("FAILED: cfg_apply_machines, could not cfg_save(...)")
         return
 
-    for hwa in CFG["machines"]["coll"]:     # (re)write PXE configurations
-        machine = CFG["machines"]["coll"][hwa]
+    for hwa in cfg["machines"]["coll"]:     # (re)write PXE configurations
+        machine = cfg["machines"]["coll"][hwa]
         if machine:
-            pxe_deploy(CFG, machine)
+            pxe_deploy(cfg, machine)
+
+    cfg_init_pconfigs(cfg)                  # Reload PXE configurations
 
 APP = Flask(__name__)
 #APP.config.from_object('websiteconfig')
