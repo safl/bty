@@ -23,17 +23,17 @@ func bty_sh(res http.ResponseWriter, req *http.Request) {
 
 func main() {
 
-	http.Handle(
-		"/assets",
-		http.StripPrefix(
-			"/assets/",
-			http.FileServer(http.Dir("assets")),
-		),
-	)
-
 	http.HandleFunc("/bty.sh", bty_sh)
 
 	http.HandleFunc("/hw", bty_hw)
+
+	http.Handle(
+		"/",
+		http.StripPrefix(
+			"/",
+			http.FileServer(http.Dir("assets")),
+		),
+	)
 
 	http.ListenAndServe(":8080", nil)
 
