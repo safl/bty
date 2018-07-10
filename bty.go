@@ -29,10 +29,7 @@ func main() {
 
 	http.Handle(
 		"/",
-		http.StripPrefix(
-			"/",
-			http.FileServer(http.Dir("assets")),
-		),
+		http.FileServer(http.Dir("assets")),
 	)
 
 	http.ListenAndServe(":8080", nil)
