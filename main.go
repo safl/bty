@@ -10,7 +10,9 @@ import (
 	"os"
 	"io"
 	"github.com/gorilla/mux"
-	"args"
+	"github.com/safl/bty/args"
+	"github.com/safl/bty/state"
+	. "github.com/safl/bty/handlers"
 )
 
 func bty_sh(res http.ResponseWriter, req *http.Request) {
@@ -24,16 +26,22 @@ func bty_sh(res http.ResponseWriter, req *http.Request) {
 func main() {
 	log.Printf("hello there")
 
-	state := State{
+	cfg, err := args.Parse()
+	if err != nil {
+		log.Panic("that's it, we're boned!")
+		os.Exit(1)
+	}
+
+	curs := state.State{
 		Config: cfg,
 	}
-	osis_load(cfg, &state.Osis, 0x0)
-	bzis_load(cfg, &state.Bzis, 0x0)
+	state.LoadOsis(cfg, &curs.Osis, 0x0)
+	state.LoadBzis(cfg, &curs.Bzis, 0x0)
 
 	// Initialize the state
-	STATE_JSON, err := json.MarshalIndent(state, "", "  ")
+	STATE_JSON, err := json.MarshalIndent(curs, "", "  ")
 	if err != nil {
-		log.Fatal("err: %v, json.Marshal(%v), ", err, state)
+		log.Fatal("err: %v, json.Marshal(%v), ", err, curs)
 		return
 	}
 	log.Printf("State below\n%s\n", STATE_JSON)
@@ -72,4 +80,6 @@ func main() {
 	}()
 
 	server.ListenAndServe()
+
+	os.Exit(0)
 }

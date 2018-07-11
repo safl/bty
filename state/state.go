@@ -1,9 +1,11 @@
 package state
 
 import (
-//	"path/filepath"
+	"path/filepath"
 	"time"
+	"log"
 	"os"
+	. "github.com/safl/bty/args"
 )
 
 type Osi struct {
@@ -68,7 +70,7 @@ type State struct {
 
 // Load Operating System Disk Images
 // TODO: fix checksum
-func osis_load(cfg Config, osis *[]Osi, flags int) {
+func LoadOsis(cfg Config, osis *[]Osi, flags int) {
 
 	var fnames, err = filepath.Glob(cfg.Locs.Osis + cfg.Patterns.OsiExt)
 	if err != nil {
@@ -96,7 +98,7 @@ func osis_load(cfg Config, osis *[]Osi, flags int) {
 
 // Load Operating System Disk Images
 // TODO: fix checksum
-func bzis_load(cfg Config, bzis *[]Bzi, flags int) {
+func LoadBzis(cfg Config, bzis *[]Bzi, flags int) {
 
 	var fnames, err = filepath.Glob(cfg.Locs.Bzis + cfg.Patterns.BziExt)
 	if err != nil {

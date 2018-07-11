@@ -7,7 +7,7 @@ import (
 )
 
 // Representation of the BTY configuration
-type Args struct {
+type Config struct {
 	Server struct {
 		Host		string	`json:"host"`
 		Port		int	`json:"port"`
@@ -27,76 +27,77 @@ type Args struct {
 	} `json:"patterns"`
 }
 
-func initialize() {
-	var args = Args {}
+func Parse() (Config, error) {
+	var cfg = Config {}
 
 	// Setup default config here
-	args.Server.Host = "localhost"
-	args.Server.Port = 80
+	cfg.Server.Host = "localhost"
+	cfg.Server.Port = 80
 
-	args.Locs.Osis = "/srv/osis"
-	args.Locs.Bzis = "/srv/tftp/bzi"
+	cfg.Locs.Osis = "/srv/osis"
+	cfg.Locs.Bzis = "/srv/tftp/bzi"
 
-	args.Locs.Pconfigs = "/srv/bty/pconfigs"
-	args.Locs.Ptemplates = "/srv/bty/ptemplates"
-	args.Locs.Templates = "/srv/bty/templates"
+	cfg.Locs.Pconfigs = "/srv/bty/pconfigs"
+	cfg.Locs.Ptemplates = "/srv/bty/ptemplates"
+	cfg.Locs.Templates = "/srv/bty/templates"
 
-	args.Patterns.OsiExt = "/*.qcow2"
-	args.Patterns.BziExt = "/*.bzImage"
+	cfg.Patterns.OsiExt = "/*.qcow2"
+	cfg.Patterns.BziExt = "/*.bzImage"
 
 	// Overwrite default configuration with CLI arguments
 	flag.StringVar(
-		&args.Server.Host,
+		&cfg.Server.Host,
 		"host",
-		args.Server.Host,
+		cfg.Server.Host,
 		"Hostname / Address to listen on",
 	)
 	flag.IntVar(
-		&args.Server.Port,
+		&cfg.Server.Port,
 		"port",
-		args.Server.Port,
+		cfg.Server.Port,
 		"Port to listen on ",
 	)
 	flag.StringVar(
-		&args.Locs.Osis,
+		&cfg.Locs.Osis,
 		"osis",
-		args.Locs.Osis,
+		cfg.Locs.Osis,
 		"Locs to OS DISK images",
 	)
 	flag.StringVar(
-		&args.Locs.Bzis,
+		&cfg.Locs.Bzis,
 		"bzis",
-		args.Locs.Bzis,
+		cfg.Locs.Bzis,
 		"Locs to BZI images",
 	)
 	flag.StringVar(
-		&args.Locs.Ptemplates,
+		&cfg.Locs.Ptemplates,
 		"ptemplates",
-		args.Locs.Ptemplates,
+		cfg.Locs.Ptemplates,
 		"Locs to templates",
 	)
 	flag.StringVar(
-		&args.Locs.Pconfigs,
+		&cfg.Locs.Pconfigs,
 		"pconfigs",
-		args.Locs.Pconfigs,
+		cfg.Locs.Pconfigs,
 		"Locs to pxe-configs",
 	)
 	flag.StringVar(
-		&args.Locs.Templates,
+		&cfg.Locs.Templates,
 		"templates",
-		args.Locs.Templates,
+		cfg.Locs.Templates,
 		"Locs to templates",
 	)
 
 	flag.Parse()
 
 	// Initialize the configuration
-	ARGS_JSON, err := json.MarshalIndent(args, "", "  ")
+	CFG_JSON, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
-		log.Fatal("err: %v, json.Marshal(%v), ", err, args)
-		return
+		log.Fatal("err: %v, json.Marshal(%v), ", err, cfg)
+		return cfg, err
 	}
-	log.Printf("Args below\n%s\n", ARGS_JSON)
+	log.Printf("Config below\n%s\n", CFG_JSON)
 
-	return Args
+	return cfg, nil
 }
+
