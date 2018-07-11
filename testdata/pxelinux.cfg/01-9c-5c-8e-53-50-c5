@@ -1,0 +1,27 @@
+UI menu.c32
+DEFAULT boot_hd0_bzi
+MENU TITLE Boot options for ch-lab-dragon
+MENU AUTOBOOT Starting boot from hd0 with bzImage in # seconds
+TIMEOUT 50
+TOTALTIMEOUT 600
+PROMPT 0
+
+LABEL boot_hd0
+	MENU LABEL Boot from hd0
+	COM32 chain.c32
+	APPEND hd0
+
+LABEL boot_hd0_bzi
+	MENU LABEL Boot from hd0 with bzImage
+	KERNEL pxelinux.bzi/ch-lab-dragon.bzImage
+	APPEND root=/dev/sda1 rw console=ttyS1,57600 net.ifnames=0 biosdevname=0
+
+LABEL install
+	MENU LABEL install
+	KERNEL cilla/vmlinuz
+	APPEND initrd=cilla/initrd.img boot=live username=user union=overlay config components noswap edd=on nomodeset nodmraid locales=en_US.UTF-8  keyboard-layouts="US" net.ifnames=0 nosplash noprompt fetch=http://ch-bty01/tftpboot/cilla/filesystem.squashfs ocs_repository="nfs://ch-bty01/srv/images" ocs_prerun="wget http://ch-bty01/bty/bootstrap.sh -O bootstrap.sh" ocs_prerun1="sleep 2" ocs_live_run="sudo bash bootstrap.sh; sudo reboot" ocs_live_extra_param="" ocs_live_batch=yes
+
+LABEL olleh
+	MENU LABEL olleh
+	KERNEL cilla/vmlinuz
+	APPEND initrd=cilla/initrd.img boot=live username=user union=overlay config components noswap edd=on nomodeset nodmraid locales=en_US.UTF-8  keyboard-layouts="US" net.ifnames=0 nosplash noprompt fetch=http://ch-bty01/tftpboot/cilla/filesystem.squashfs ocs_repository="nfs://ch-bty01/srv/images" ocs_prerun="wget http://ch-bty01/bty/bootstrap.sh -O bootstrap.sh" ocs_prerun1="sleep 2" ocs_live_run="sudo reboot" ocs_live_extra_param="" ocs_live_batch=yes
