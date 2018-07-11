@@ -1,3 +1,5 @@
+package handlers
+
 func BziHandler(resp http.ResponseWriter, req *http.Request) {
 	log.Printf("HUHA")
 

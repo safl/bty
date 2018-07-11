@@ -1,3 +1,11 @@
+package state
+
+import (
+//	"path/filepath"
+	"time"
+	"os"
+)
+
 type Osi struct {
 	Fname		string		`json:"fname"`
 	Fsize		int64		`json:"fsize"`

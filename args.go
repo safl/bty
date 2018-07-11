@@ -1,3 +1,5 @@
+package args
+
 import (
 	"encoding/json"
 	"flag"
@@ -25,7 +27,7 @@ type Args struct {
 	} `json:"patterns"`
 }
 
-func init() {
+func initialize() {
 	var args = Args {}
 
 	// Setup default config here
@@ -95,4 +97,6 @@ func init() {
 		return
 	}
 	log.Printf("Args below\n%s\n", ARGS_JSON)
+
+	return Args
 }

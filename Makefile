@@ -11,7 +11,7 @@ BTY_PATH_TEMPLATES := assets/templates
 build:
 	rm -fr ${BUILD_ROOT}
 	mkdir -p ${BUILD_ROOT}
-	go build -o ${BUILD_ROOT}/bty-wui bty.go
+	go build -o ${BUILD_ROOT}/bty main.go
 
 start:
 	./${BUILD_ROOT}/bty-wui \
