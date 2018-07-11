@@ -228,14 +228,13 @@ func main() {
 
 	flag.Parse()
 
-	JSON, err := json.Marshal(CFG)
+	JSON, err := json.MarshalIndent(CFG, "", "  ")
 	if err != nil {
 		LOG.Fatal("err: %v, json.Marshal(%v), ", err, CFG)
 		return
 	}
 
-	log.Printf("%s\n", JSON)
-	fmt.Printf("%s\n", JSON)
+	log.Printf("Config below\n%s\n", JSON)
 
 	osis := []Osi{}
 
