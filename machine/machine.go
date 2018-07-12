@@ -1,18 +1,18 @@
 package machine
 
 import (
-	. "github.com/safl/bty/osi"
-	. "github.com/safl/bty/bzi"
-	. "github.com/safl/bty/pxe"
+	"github.com/safl/bty/osi"
+	"github.com/safl/bty/bzi"
+	"github.com/safl/bty/pxe"
 )
 
 type Machine struct {
 	hwa		string		`json:"hwa"`
 	Hostname	string		`json:"hostname"`
 	managed		bool		`json:"managed"`
-	osi		Osi		`json:"osi"`
-	bzi		Bzi		`json:"bzi"`
+	osi		osi.Osi		`json:"osi"`
+	bzi		bzi.Bzi		`json:"bzi"`
 	plabel		string		`json:"plabel"`
-	ptemplate	Ptemplate	`json:"ptemplate"`
+	ptemplate	pxe.Ptemplate	`json:"ptemplate"`
 }
 

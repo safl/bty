@@ -2,7 +2,6 @@ package state
 
 import (
 	"github.com/safl/bty/conf"
-	"github.com/safl/bty/finf"
 	"github.com/safl/bty/pxe"
 	"github.com/safl/bty/osi"
 	"github.com/safl/bty/bzi"
@@ -20,14 +19,15 @@ type State struct {
 }
 
 // Initialize the state of BTY using the given configuration
-func Initialize(cfg Conf) (State, error) {
+func Initialize(cfg conf.Conf) (State, error) {
 
 	curs := State{Conf: cfg}
 
-	LoadOsis(cfg, &curs.Osis, 0x0)
-	LoadBzis(cfg, &curs.Bzis, 0x0)
-	LoadPconfigs(cfg, &curs.Pconfigs, 0x0)
-	LoadPtemplates(cfg, &curs.Ptemplates, 0x0)
+	osi.Load(cfg, &curs.Osis, 0x0)
+	bzi.Load(cfg, &curs.Bzis, 0x0)
+	pxe.LoadPconfigs(cfg, &curs.Pconfigs, 0x0)
+	pxe.LoadPtemplates(cfg, &curs.Ptemplates, 0x0)
 
 	return curs, nil
 }
+
