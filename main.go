@@ -24,30 +24,21 @@ func bty_sh(res http.ResponseWriter, req *http.Request) {
 }
 
 func main() {
-	log.Printf("hello there")
+	log.Printf("Welcome to the jungle we've got fun and games")
 
 	cfg, err := args.Parse()
 	if err != nil {
-		log.Panic("that's it, we're boned!")
+		log.Panic("can't parse CLI args; that's it, we're boned!")
 		os.Exit(1)
 	}
 
-	curs := state.State{
-		Conf: cfg,
+	curs, err := state.Initialize(cfg)
+	if (err != nil) {
+		log.Panic("can't initialzie state; that's it, we're boned!")
+		os.Exit(1)
 	}
-	state.LoadOsis(cfg, &curs.Osis, 0x0)
-	state.LoadBzis(cfg, &curs.Bzis, 0x0)
-	state.LoadPconfigs(cfg, &curs.Pconfigs, 0x0)
-	state.LoadPtemplates(cfg, &curs.Ptemplates, 0x0)
 
-	/*
-	STATE_JSON, err := json.MarshalIndent(curs, "", "  ")
-	if err != nil {
-		log.Fatal("err: %v, json.Marshal(%v), ", err, curs)
-		return
-	}
-	log.Printf("State below\n%s\n", STATE_JSON)
-	*/
+	log.Printf("curs: %v", curs)
 
 	// Setup routing
 	r := mux.NewRouter()
@@ -66,24 +57,31 @@ func main() {
 		Addr: fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port),
 	}
 
+	// Graceful shutdown
+	sig_chan := make(chan os.Signal, 1)
+	//signal.Notify(sig_chan, os.Interrupt, os.Kill)
+	signal.Notify(sig_chan)
+
 	go func() {
-		// Graceful shutdown
-		sigquit := make(chan os.Signal, 1)
-		signal.Notify(sigquit, os.Interrupt, os.Kill)
+		for sig := range sig_chan {
+			log.Printf("caught sig: %+v", sig)
 
-		sig := <-sigquit
-		log.Printf("caught sig: %+v", sig)
-		log.Printf("Gracefully shutting down server...")
+			// TODO: make sure state is not being modified
 
-		if err := server.Shutdown(context.Background()); err != nil {
-			log.Printf("Unable to shut down server: %v", err)
-		} else {
-			log.Println("Server stopped")
+			err := server.Shutdown(context.Background())
+			if err != nil {
+				log.Printf("Unable to shut down server: %v", err)
+			} else {
+				log.Println("Server stopped")
+			}
 		}
+
+		log.Println("bla!")
 	}()
 
 	log.Fatal(server.ListenAndServe())
-	log.Printf("done")
 
+	log.Printf("Its gonna bring you down, ha!")
 	os.Exit(0)
 }
+

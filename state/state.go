@@ -46,6 +46,9 @@ type State struct {
 // Load Operating System Disk Images
 func LoadOsis(cfg Conf, osis *[]Osi, flags int) {
 
+	// TODO: load checksum via .md5 file
+	//	 remove from flags and handle here instead of by default method
+
 	finfs := FinfLoad(
 		cfg.Locs.Osis,
 		cfg.Patterns.OsiExt,
@@ -55,10 +58,6 @@ func LoadOsis(cfg Conf, osis *[]Osi, flags int) {
 		*osis = append(*osis, Osi{
 			Finf: finf,
 		})
-
-		// TODO: load checksum via .md5 file
-
-		// TODO: load content
 	}
 }
 
@@ -105,6 +104,17 @@ func LoadPtemplates(cfg Conf, ptemplates *[]Ptemplate, flags int) {
 			Finf: finf,
 		})
 	}
-
 }
 
+// Initialize the state of BTY using the given configuration
+func Initialize(cfg Conf) (State, error) {
+
+	curs := State{Conf: cfg}
+
+	LoadOsis(cfg, &curs.Osis, 0x0)
+	LoadBzis(cfg, &curs.Bzis, 0x0)
+	LoadPconfigs(cfg, &curs.Pconfigs, 0x0)
+	LoadPtemplates(cfg, &curs.Ptemplates, 0x0)
+
+	return curs, nil
+}
