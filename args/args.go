@@ -4,33 +4,11 @@ import (
 	"encoding/json"
 	"flag"
 	"log"
+	. "github.com/safl/bty/conf"
 )
 
-// Representation of the BTY configuration
-type Config struct {
-	Server struct {
-		Host		string	`json:"host"`
-		Port		int	`json:"port"`
-	} `json:"server"`
-
-	Locs struct {
-		Osis		string	`json:"osis"`
-		Bzis		string	`json:"bzis"`
-		Pconfigs	string	`json:"pconfigs"`
-		Ptemplates	string	`json:"ptemplates"`
-		Templates	string	`json:"templates"`
-	} `json:"locs"`
-
-	Patterns struct {
-		OsiExt		string	`json:"osi_ext"`
-		BziExt		string	`json:"bzi_ext"`
-		PconfigExt		string	`json:"pconfig_ext"`
-		PtemplateExt		string	`json:"ptemplate_ext"`
-	} `json:"patterns"`
-}
-
-func Parse() (Config, error) {
-	var cfg = Config {}
+func Parse() (Conf, error) {
+	var cfg = Conf {}
 
 	// Setup default config here
 	cfg.Server.Host = "localhost"
@@ -100,7 +78,7 @@ func Parse() (Config, error) {
 		log.Fatal("err: %v, json.Marshal(%v), ", err, cfg)
 		return cfg, err
 	}
-	log.Printf("Config below\n%s\n", CFG_JSON)
+	log.Printf("Conf below\n%s\n", CFG_JSON)
 
 	return cfg, nil
 }

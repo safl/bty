@@ -33,7 +33,7 @@ func main() {
 	}
 
 	curs := state.State{
-		Config: cfg,
+		Conf: cfg,
 	}
 	state.LoadOsis(cfg, &curs.Osis, 0x0)
 	state.LoadBzis(cfg, &curs.Bzis, 0x0)
