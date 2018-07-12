@@ -4,29 +4,13 @@ import (
 	"encoding/json"
 	"flag"
 	"log"
-	. "github.com/safl/bty/conf"
+	"github.com/safl/bty/conf"
 )
 
-func Parse() (Conf, error) {
-	var cfg = Conf {}
+func Parse() (conf.Conf, error) {
 
-	// Setup default config here
-	cfg.Server.Host = "localhost"
-	cfg.Server.Port = 80
+	cfg := conf.Default()			// Load the default config
 
-	cfg.Locs.Osis = "/srv/osis"
-	cfg.Locs.Bzis = "/srv/tftp/bzi"
-
-	cfg.Locs.Pconfigs = "/srv/bty/pconfigs"
-	cfg.Locs.Ptemplates = "/srv/bty/ptemplates"
-	cfg.Locs.Templates = "/srv/bty/templates"
-
-	cfg.Patterns.OsiExt = "/*.qcow2"
-	cfg.Patterns.BziExt = "/*.bzImage"
-	cfg.Patterns.PconfigExt = "/*"
-	cfg.Patterns.PtemplateExt = "/pxe-*.cfg"
-
-	// Overwrite default configuration with CLI arguments
 	flag.StringVar(
 		&cfg.Server.Host,
 		"host",
@@ -70,7 +54,7 @@ func Parse() (Conf, error) {
 		"Locs to templates",
 	)
 
-	flag.Parse()
+	flag.Parse()				// Parse CLI args and overwrite
 
 	// Initialize the configuration
 	CFG_JSON, err := json.MarshalIndent(cfg, "", "  ")

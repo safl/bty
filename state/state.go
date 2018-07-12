@@ -3,6 +3,7 @@ package state
 import (
 	. "github.com/safl/bty/conf"
 	. "github.com/safl/bty/finf"
+	. "github.com/safl/bty/pxe"
 )
 
 type Osi struct {
@@ -11,16 +12,6 @@ type Osi struct {
 
 type Bzi struct {
 	Finf	Finf	`json:"finf"`
-}
-
-type Pconfig struct {
-	Finf	Finf	`json:"finf"`
-}
-
-type Ptemplate struct {
-	Finf	Finf	`json:"finf"`
-
-	Plabels	[]string	`json:"plabels"`
 }
 
 type Machine struct {
@@ -71,38 +62,6 @@ func LoadBzis(cfg Conf, bzis *[]Bzi, flags int) {
 		*bzis = append(*bzis, Bzi{
 			Finf: finf,
 		})
-	}
-
-}
-
-// Load PXE Configuration files
-func LoadPconfigs(cfg Conf, pconfigs *[]Pconfig, flags int) {
-
-	for _, finf := range FinfLoad(
-		cfg.Locs.Pconfigs,
-		cfg.Patterns.PconfigExt,
-		FINF_CHECKSUM | FINF_CONTENT,
-	) {
-		*pconfigs = append(*pconfigs, Pconfig{
-			Finf: finf,
-		})
-	}
-
-}
-
-// Load PXE Configuration templates
-func LoadPtemplates(cfg Conf, ptemplates *[]Ptemplate, flags int) {
-
-	for _, finf := range FinfLoad(
-		cfg.Locs.Ptemplates,
-		cfg.Patterns.PtemplateExt,
-		FINF_CHECKSUM | FINF_CONTENT,
-	) {
-		*ptemplates = append(*ptemplates, Ptemplate{
-			Finf: finf,
-		})
-
-		// TODO: load labels
 	}
 
 }

@@ -64,11 +64,8 @@ func main() {
 		Addr: fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port),
 	}
 
-	// Graceful shutdown
 	sig_chan := make(chan os.Signal, 1)
-	//signal.Notify(sig_chan, os.Interrupt, os.Kill)
-	signal.Notify(sig_chan)
-
+	signal.Notify(sig_chan)		// Just like Pokemon, gotta catch em all
 	go func() {
 		for sig := range sig_chan {
 			log.Printf("caught sig: %+v", sig)
@@ -82,8 +79,6 @@ func main() {
 				log.Println("Server stopped")
 			}
 		}
-
-		log.Println("bla!")
 	}()
 
 	log.Fatal(server.ListenAndServe())
