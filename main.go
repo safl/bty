@@ -40,6 +40,8 @@ func main() {
 	state.LoadPconfigs(cfg, &curs.Pconfigs, 0x0)
 	state.LoadPtemplates(cfg, &curs.Ptemplates, 0x0)
 
+	// Machine
+
 	// Initialize the state
 	STATE_JSON, err := json.MarshalIndent(curs, "", "  ")
 	if err != nil {
