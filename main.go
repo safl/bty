@@ -37,6 +37,8 @@ func main() {
 	}
 	state.LoadOsis(cfg, &curs.Osis, 0x0)
 	state.LoadBzis(cfg, &curs.Bzis, 0x0)
+	state.LoadPconfigs(cfg, &curs.Pconfigs, 0x0)
+	state.LoadPtemplates(cfg, &curs.Ptemplates, 0x0)
 
 	// Initialize the state
 	STATE_JSON, err := json.MarshalIndent(curs, "", "  ")

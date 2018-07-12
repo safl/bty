@@ -24,6 +24,8 @@ type Config struct {
 	Patterns struct {
 		OsiExt		string	`json:"osi_ext"`
 		BziExt		string	`json:"bzi_ext"`
+		PconfigExt		string	`json:"pconfig_ext"`
+		PtemplateExt		string	`json:"ptemplate_ext"`
 	} `json:"patterns"`
 }
 
@@ -43,6 +45,8 @@ func Parse() (Config, error) {
 
 	cfg.Patterns.OsiExt = "/*.qcow2"
 	cfg.Patterns.BziExt = "/*.bzImage"
+	cfg.Patterns.PconfigExt = "/*"
+	cfg.Patterns.PtemplateExt = "/pxe-*.cfg"
 
 	// Overwrite default configuration with CLI arguments
 	flag.StringVar(

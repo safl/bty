@@ -8,44 +8,33 @@ import (
 	. "github.com/safl/bty/args"
 )
 
-type Osi struct {
-	Fname		string		`json:"fname"`
-	Fsize		int64		`json:"fsize"`
-	Fmode		os.FileMode	`json:"fmode"`
-	Ftmod		time.Time	`json:"ftmod"`
+type Finf struct {
+	Flags		uint8		`json:"flags"`
+	Name		string		`json:"name"`
+	Size		int64		`json:"size"`
+	Mode		os.FileMode	`json:"mode"`
+	ModTime		time.Time	`json:"mod_time"`
 
 	Checksum	string		`json:"checksum"`
+	Content		string		`json:"content"`
+}
+
+type Osi struct {
+	Finf	Finf	`json:"finf"`
 }
 
 type Bzi struct {
-	Fname		string		`json:"fname"`
-	Fsize		int64		`json:"fsize"`
-	Fmode		os.FileMode	`json:"fmode"`
-	Ftmod		time.Time	`json:"ftmod"`
-
-	Checksum	string		`json:"checksum"`
+	Finf	Finf	`json:"finf"`
 }
 
 type Pconfig struct {
-	Fname		string		`json:"fname"`
-	Fsize		int64		`json:"fsize"`
-	Fmode		os.FileMode	`json:"fmode"`
-	Ftmod		time.Time	`json:"ftmod"`
-
-	Checksum	string		`json:"checksum"`
-	Content		string		`json:"content"`
+	Finf	Finf	`json:"finf"`
 }
 
 type Ptemplate struct {
-	Fname		string		`json:"fname"`
-	Fsize		int64		`json:"fsize"`
-	Fmode		os.FileMode	`json:"fmode"`
-	Ftmod		time.Time	`json:"ftmod"`
+	Finf	Finf	`json:"finf"`
 
-	Checksum	string		`json:"checksum"`
-	Content		string		`json:"content"`
-
-	Plabels		[]string	`json:"plabels"`
+	Plabels	[]string	`json:"plabels"`
 }
 
 type Machine struct {
@@ -68,59 +57,123 @@ type State struct {
 	machines	[]Machine	`json:"machines"`
 }
 
-// Load Operating System Disk Images
-// TODO: fix checksum
-func LoadOsis(cfg Config, osis *[]Osi, flags int) {
+const (
+	FINF_CHECKSUM uint8 = 1 << iota
+	FINF_CONTENT
+)
 
-	var fnames, err = filepath.Glob(cfg.Locs.Osis + cfg.Patterns.OsiExt)
+func FinfStat(fpath string, flags uint8) (Finf, error) {
+
+	finf := Finf{Flags: flags};
+
+	info, err := os.Stat(fpath)
 	if err != nil {
 		log.Printf("err: %v", err)
-		return
+		return finf, err
 	}
 
-	for _, fname := range fnames {
-		info, err := os.Stat(fname)
+	finf.Name = info.Name()
+	finf.Size = info.Size()
+	finf.Mode = info.Mode()
+	finf.ModTime = info.ModTime()
+
+	if (flags & FINF_CHECKSUM != 0) {
+		// TODO: implement checksum calculation
+	}
+
+	if (flags & FINF_CONTENT != 0) {
+		// TODO: implement content load
+	}
+
+	return finf, nil
+}
+
+func FinfLoad(dpath string, glob string, flags uint8) []Finf {
+
+	finfs := []Finf{}
+
+	var fpaths, err = filepath.Glob(dpath + glob)
+	if err != nil {
+		log.Printf("filepath.Glob failed with err: %v", err)
+		return finfs
+	}
+
+	for _, fpath := range fpaths {
+		log.Printf("fpath: %s", fpath)
+		finf, err := FinfStat(fpath, flags)
 		if err != nil {
-			log.Printf("err: %v", err)
+			log.Printf("skipping fpath: %s due to err", fpath)
 			continue
 		}
 
-		*osis = append(*osis, Osi{
-			Fname: fname,
-			Fsize: info.Size(),
-			Fmode: info.Mode(),
-			Ftmod: info.ModTime(),
+		finfs = append(finfs, finf)
+	}
 
-			Checksum: "",
+	return finfs
+}
+
+// Load Operating System Disk Images
+func LoadOsis(cfg Config, osis *[]Osi, flags int) {
+
+	finfs := FinfLoad(
+		cfg.Locs.Osis,
+		cfg.Patterns.OsiExt,
+		0x0,
+	)
+	for _, finf := range finfs {
+		*osis = append(*osis, Osi{
+			Finf: finf,
+		})
+
+		// TODO: load checksum via .md5 file
+
+		// TODO: load content
+	}
+}
+
+// Load Operating System Disk Images
+func LoadBzis(cfg Config, bzis *[]Bzi, flags int) {
+
+	finfs := FinfLoad(
+		cfg.Locs.Bzis,
+		cfg.Patterns.BziExt,
+		FINF_CHECKSUM,
+	)
+	for _, finf := range finfs {
+		*bzis = append(*bzis, Bzi{
+			Finf: finf,
 		})
 	}
 }
 
 // Load Operating System Disk Images
-// TODO: fix checksum
-func LoadBzis(cfg Config, bzis *[]Bzi, flags int) {
+func LoadPconfigs(cfg Config, pconfigs *[]Pconfig, flags int) {
 
-	var fnames, err = filepath.Glob(cfg.Locs.Bzis + cfg.Patterns.BziExt)
-	if err != nil {
-		log.Printf("err: %v", err)
-		return
-	}
-
-	for _, fname := range fnames {
-		info, err := os.Stat(fname)
-		if err != nil {
-			log.Printf("err: %v", err)
-			continue
-		}
-
-		*bzis = append(*bzis, Bzi{
-			Fname: fname,
-			Fsize: info.Size(),
-			Fmode: info.Mode(),
-			Ftmod: info.ModTime(),
-
-			Checksum: "",
+	finfs := FinfLoad(
+		cfg.Locs.Pconfigs,
+		cfg.Patterns.PconfigExt,
+		FINF_CHECKSUM | FINF_CONTENT,
+	)
+	for _, finf := range finfs {
+		*pconfigs = append(*pconfigs, Pconfig{
+			Finf: finf,
 		})
 	}
+}
+
+// Load Operating System Disk Images
+func LoadPtemplates(cfg Config, ptemplates *[]Ptemplate, flags int) {
+
+	finfs := FinfLoad(
+		cfg.Locs.Ptemplates,
+		cfg.Patterns.PtemplateExt,
+		FINF_CHECKSUM | FINF_CONTENT,
+	)
+	for _, finf := range finfs {
+		*ptemplates = append(*ptemplates, Ptemplate{
+			Finf: finf,
+		})
+	}
+
 }
 

@@ -14,7 +14,7 @@ build:
 	go build -o ${BUILD_ROOT}/bty main.go
 
 start:
-	./${BUILD_ROOT}/bty-wui \
+	./${BUILD_ROOT}/bty \
 		--host ${BTY_SERVER_HOST} \
 		--port ${BTY_SERVER_PORT} \
 		--osis ${BTY_PATH_OSIS} \
