@@ -4,25 +4,10 @@ import (
 	. "github.com/safl/bty/conf"
 	. "github.com/safl/bty/finf"
 	. "github.com/safl/bty/pxe"
+	. "github.com/safl/bty/osi"
+	. "github.com/safl/bty/bzi"
+	. "github.com/safl/bty/machine"
 )
-
-type Osi struct {
-	Finf	Finf	`json:"finf"`
-}
-
-type Bzi struct {
-	Finf	Finf	`json:"finf"`
-}
-
-type Machine struct {
-	hwa		string		`json:"hwa"`
-	Hostname	string		`json:"hostname"`
-	managed		bool		`json:"managed"`
-	osi		Osi		`json:"osi"`
-	bzi		Bzi		`json:"bzi"`
-	plabel		string		`json:"plabel"`
-	ptemplate	Ptemplate	`json:"ptemlate"`
-}
 
 type State struct {
 	Conf		Conf		`json:"config"`
