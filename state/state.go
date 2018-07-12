@@ -49,12 +49,11 @@ func LoadOsis(cfg Conf, osis *[]Osi, flags int) {
 	// TODO: load checksum via .md5 file
 	//	 remove from flags and handle here instead of by default method
 
-	finfs := FinfLoad(
+	for _, finf := range FinfLoad(
 		cfg.Locs.Osis,
 		cfg.Patterns.OsiExt,
 		0x0,
-	)
-	for _, finf := range finfs {
+	) {
 		*osis = append(*osis, Osi{
 			Finf: finf,
 		})
@@ -64,46 +63,48 @@ func LoadOsis(cfg Conf, osis *[]Osi, flags int) {
 // Load Operating System Disk Images
 func LoadBzis(cfg Conf, bzis *[]Bzi, flags int) {
 
-	finfs := FinfLoad(
+	for _, finf := range FinfLoad(
 		cfg.Locs.Bzis,
 		cfg.Patterns.BziExt,
 		FINF_CHECKSUM,
-	)
-	for _, finf := range finfs {
+	) {
 		*bzis = append(*bzis, Bzi{
 			Finf: finf,
 		})
 	}
+
 }
 
-// Load Operating System Disk Images
+// Load PXE Configuration files
 func LoadPconfigs(cfg Conf, pconfigs *[]Pconfig, flags int) {
 
-	finfs := FinfLoad(
+	for _, finf := range FinfLoad(
 		cfg.Locs.Pconfigs,
 		cfg.Patterns.PconfigExt,
 		FINF_CHECKSUM | FINF_CONTENT,
-	)
-	for _, finf := range finfs {
+	) {
 		*pconfigs = append(*pconfigs, Pconfig{
 			Finf: finf,
 		})
 	}
+
 }
 
-// Load Operating System Disk Images
+// Load PXE Configuration templates
 func LoadPtemplates(cfg Conf, ptemplates *[]Ptemplate, flags int) {
 
-	finfs := FinfLoad(
+	for _, finf := range FinfLoad(
 		cfg.Locs.Ptemplates,
 		cfg.Patterns.PtemplateExt,
 		FINF_CHECKSUM | FINF_CONTENT,
-	)
-	for _, finf := range finfs {
+	) {
 		*ptemplates = append(*ptemplates, Ptemplate{
 			Finf: finf,
 		})
+
+		// TODO: load labels
 	}
+
 }
 
 // Initialize the state of BTY using the given configuration

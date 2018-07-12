@@ -2,9 +2,12 @@ package finf
 
 import (
 	"path/filepath"
+	"io/ioutil"
+	"strings"
 	"time"
 	"log"
 	"os"
+	"os/exec"
 )
 
 type Finf struct {
@@ -15,7 +18,7 @@ type Finf struct {
 	ModTime		time.Time	`json:"mod_time"`
 
 	Checksum	string		`json:"checksum"`
-	Content		string		`json:"content"`
+	Content		[]byte		`json:"content"`
 }
 
 const (
@@ -39,11 +42,21 @@ func FinfStat(fpath string, flags uint8) (Finf, error) {
 	finf.ModTime = info.ModTime()
 
 	if (flags & FINF_CHECKSUM != 0) {
-		// TODO: implement checksum calculation
+		res, err := exec.Command("md5sum", fpath).Output()
+		if err != nil {
+			log.Fatal(err)
+			return finf, err
+		}
+
+		finf.Checksum = strings.Split(string(res), " ")[0]
 	}
 
 	if (flags & FINF_CONTENT != 0) {
-		// TODO: implement content load
+		finf.Content, err = ioutil.ReadFile(fpath)
+		if err != nil {
+			log.Fatal("failed ReadFile(%s) err: %v", fpath, err)
+			return finf, err
+		}
 	}
 
 	return finf, nil
