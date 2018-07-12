@@ -3,6 +3,7 @@ package handlers
 import (
 	"net/http"
 	"log"
+	"io"
 )
 
 func BziHandler(resp http.ResponseWriter, req *http.Request) {
@@ -69,3 +70,12 @@ func StateHandler(resp http.ResponseWriter, req *http.Request) {
 	
 	}
 }
+
+func bty_sh(res http.ResponseWriter, req *http.Request) {
+	res.Header().Set("Content-Type", "text/html")
+	io.WriteString(
+		res,
+		"bty.sh",
+	)
+}
+

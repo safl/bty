@@ -8,20 +8,11 @@ import (
 	"net/http"
 	"os/signal"
 	"os"
-	"io"
 	"github.com/gorilla/mux"
 	"github.com/safl/bty/args"
 	"github.com/safl/bty/state"
 	. "github.com/safl/bty/handlers"
 )
-
-func bty_sh(res http.ResponseWriter, req *http.Request) {
-	res.Header().Set("Content-Type", "text/html")
-	io.WriteString(
-		res,
-		"bty.sh",
-	)
-}
 
 func main() {
 	log.Printf("Welcome to the jungle we've got fun and games")
