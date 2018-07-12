@@ -38,7 +38,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	log.Printf("curs: %v", curs)
+	//log.Printf("curs: %v", curs)
+	for _, tmpl := range curs.Ptemplates {
+		log.Printf("tmpl.checksum: %v", tmpl.Finf.Checksum)
+	}
+
+	for _, pconf := range curs.Pconfigs {
+		log.Printf("pconf.checksum: %v", pconf.Finf.Checksum)
+	}
 
 	// Setup routing
 	r := mux.NewRouter()
