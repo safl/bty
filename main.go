@@ -1,7 +1,7 @@
 package main
 
 import (
-	"encoding/json"
+//	"encoding/json"
 	"context"
 	"fmt"
 	"log"
@@ -40,20 +40,19 @@ func main() {
 	state.LoadPconfigs(cfg, &curs.Pconfigs, 0x0)
 	state.LoadPtemplates(cfg, &curs.Ptemplates, 0x0)
 
-	// Machine
-
-	// Initialize the state
+	/*
 	STATE_JSON, err := json.MarshalIndent(curs, "", "  ")
 	if err != nil {
 		log.Fatal("err: %v, json.Marshal(%v), ", err, curs)
 		return
 	}
 	log.Printf("State below\n%s\n", STATE_JSON)
+	*/
 
 	// Setup routing
 	r := mux.NewRouter()
 
-	r.Handle("/", http.FileServer(http.Dir("assets")))
+	r.Handle("/", http.FileServer(http.Dir("assets/wui")))
 
 	r.HandleFunc("/osis/{ident}", OsiHandler)
 	r.HandleFunc("/bzis/{ident}", BziHandler)
@@ -64,7 +63,7 @@ func main() {
 	http.Handle("/", r)
 
 	server := &http.Server{
-		Addr: fmt.Sprintf("%s:%s", cfg.Server.Host, cfg.Server.Port),
+		Addr: fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port),
 	}
 
 	go func() {
@@ -83,7 +82,8 @@ func main() {
 		}
 	}()
 
-	server.ListenAndServe()
+	log.Fatal(server.ListenAndServe())
+	log.Printf("done")
 
 	os.Exit(0)
 }

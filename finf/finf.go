@@ -60,7 +60,6 @@ func FinfLoad(dpath string, glob string, flags uint8) []Finf {
 	}
 
 	for _, fpath := range fpaths {
-		log.Printf("fpath: %s", fpath)
 		finf, err := FinfStat(fpath, flags)
 		if err != nil {
 			log.Printf("skipping fpath: %s due to err", fpath)
