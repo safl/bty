@@ -2,6 +2,7 @@ package pxe
 
 import (
 	"strings"
+	"regexp"
 	"log"
 	"github.com/safl/bty/conf"
 	"github.com/safl/bty/finf"
@@ -20,10 +21,17 @@ type Ptemplate struct {
 //
 // On the given Ptemplate `tmpl` fill populate the list of labels
 //
-func annotate_labels(tmpl Ptemplate) error {
+func annotate_labels(cfg conf.Conf, tmpl *Ptemplate) error {
+
+	re := regexp.MustCompile(cfg.Patterns.PtemplateLbl)
 
 	for _, line := range strings.Split(string(tmpl.Finf.Content), "\n") {
-		log.Printf("%s", line)
+		match := re.FindStringSubmatch(line)
+		if len(match) != 2 {
+			continue
+		}
+		
+		tmpl.Plabels = append(tmpl.Plabels, match[1])
 	}
 
 	return nil
@@ -37,7 +45,7 @@ func LoadPtemplates(cfg conf.Conf, ptemplates *[]Ptemplate, flags int) {
 		finf.FINF_CHECKSUM | finf.FINF_CONTENT,
 	) {
 		tmpl := Ptemplate{Finf: finf}
-		err := annotate_labels(tmpl)
+		err := annotate_labels(cfg, &tmpl)
 		if err != nil {
 			log.Panic("failed annotating labels")
 			continue

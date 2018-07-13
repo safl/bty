@@ -43,7 +43,7 @@ func Default() Conf {
 	cfg.Patterns.BziExt = "/*.bzImage"
 	cfg.Patterns.PconfigExt = "/*"
 	cfg.Patterns.PtemplateExt = "/pxe-*.cfg"
-	cfg.Patterns.PtemplateLbl = "^LABEL\\s+(.*)$"
+	cfg.Patterns.PtemplateLbl = "^LABEL\\s+(?P<label>[a-zA-Z0-9]*)$"
 
 	return cfg
 }

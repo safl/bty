@@ -32,6 +32,10 @@ func main() {
 	//log.Printf("curs: %v", curs)
 	for _, tmpl := range curs.Ptemplates {
 		log.Printf("tmpl.checksum: %v", tmpl.Finf.Checksum)
+
+		for _, label := range tmpl.Plabels {
+			log.Printf("tmpl.label: %v", label)
+		}
 	}
 
 	for _, pconf := range curs.Pconfigs {
