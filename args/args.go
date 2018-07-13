@@ -7,6 +7,10 @@ import (
 	"github.com/safl/bty/conf"
 )
 
+// Returns a Default configuration with Server and Locs attributes overwritten
+// with CLI arguments
+// NOTE: there is currently no mechanism for changing the Patterns configuration
+// except for modifying the source
 func Parse() (conf.Conf, error) {
 
 	cfg := conf.Default()			// Load the default config

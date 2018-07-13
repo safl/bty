@@ -24,6 +24,7 @@ type Conf struct {
 	} `json:"patterns"`
 }
 
+// Default Configuration for BTY
 func Default() Conf {
 	cfg := Conf{}
 
@@ -46,3 +47,4 @@ func Default() Conf {
 
 	return cfg
 }
+
