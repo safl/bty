@@ -3,22 +3,22 @@ package pxe
 import (
 	"strings"
 	"log"
-	. "github.com/safl/bty/conf"
-	. "github.com/safl/bty/finf"
+	"github.com/safl/bty/conf"
+	"github.com/safl/bty/finf"
 )
 
 type Pconfig struct {
-	Finf	Finf	`json:"finf"`
+	Finf	finf.Finf	`json:"finf"`
 }
 
 type Ptemplate struct {
-	Finf	Finf	`json:"finf"`
+	Finf	finf.Finf	`json:"finf"`
 
 	Plabels	[]string	`json:"plabels"`
 }
 
 //
-// On the given Ptemplate `tmpl` fill the labels attribute
+// On the given Ptemplate `tmpl` fill populate the list of labels
 //
 func annotate_labels(tmpl Ptemplate) error {
 
@@ -30,11 +30,11 @@ func annotate_labels(tmpl Ptemplate) error {
 }
 
 // Load PXE Configuration templates
-func LoadPtemplates(cfg Conf, ptemplates *[]Ptemplate, flags int) {
-	for _, finf := range FinfLoad(
+func LoadPtemplates(cfg conf.Conf, ptemplates *[]Ptemplate, flags int) {
+	for _, finf := range finf.FinfLoad(
 		cfg.Locs.Ptemplates,
 		cfg.Patterns.PtemplateExt,
-		FINF_CHECKSUM | FINF_CONTENT,
+		finf.FINF_CHECKSUM | finf.FINF_CONTENT,
 	) {
 		tmpl := Ptemplate{Finf: finf}
 		err := annotate_labels(tmpl)
@@ -48,11 +48,11 @@ func LoadPtemplates(cfg Conf, ptemplates *[]Ptemplate, flags int) {
 }
 
 // Load PXE Configuration files
-func LoadPconfigs(cfg Conf, pconfigs *[]Pconfig, flags int) {
-	for _, finf := range FinfLoad(
+func LoadPconfigs(cfg conf.Conf, pconfigs *[]Pconfig, flags int) {
+	for _, finf := range finf.FinfLoad(
 		cfg.Locs.Pconfigs,
 		cfg.Patterns.PconfigExt,
-		FINF_CHECKSUM | FINF_CONTENT,
+		finf.FINF_CHECKSUM | finf.FINF_CONTENT,
 	) {
 		*pconfigs = append(*pconfigs, Pconfig{
 			Finf: finf,
