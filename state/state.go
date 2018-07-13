@@ -22,9 +22,8 @@ type State struct {
 func Initialize(cfg conf.Conf) (State, error) {
 
 	curs := State{Conf: cfg}
-
-	osi.Load(cfg, &curs.Osis, 0x0)
-	bzi.Load(cfg, &curs.Bzis, 0x0)
+	curs.Osis = osi.Load(cfg, curs.Osis, 0x0)
+	curs.Bzis = bzi.Load(cfg, curs.Bzis, 0x0)
 	curs.Pconfigs = pxe.LoadPconfigs(cfg, curs.Pconfigs, 0x0)
 	curs.Ptemplates = pxe.LoadPtemplates(cfg, curs.Ptemplates, 0x0)
 

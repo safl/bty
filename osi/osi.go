@@ -10,7 +10,7 @@ type Osi struct {
 }
 
 // Load Operating System Disk Images
-func Load(cfg conf.Conf, osis *[]Osi, flags int) {
+func Load(cfg conf.Conf, osis []Osi, flags int) []Osi {
 
 	// TODO: load checksum via .md5 file
 	//	 remove from flags and handle here instead of by default method
@@ -20,9 +20,9 @@ func Load(cfg conf.Conf, osis *[]Osi, flags int) {
 		cfg.Patterns.OsiExt,
 		0x0,
 	) {
-		*osis = append(*osis, Osi{
-			Finf: osi_finf,
-		})
+		osis = append(osis, Osi{Finf: osi_finf})
 	}
+
+	return osis
 }
 
