@@ -7,12 +7,12 @@ import (
 )
 
 type Machine struct {
-	hwa		string		`json:"hwa"`
+	Hwa		string		`json:"hwa"`
 	Hostname	string		`json:"hostname"`
-	managed		bool		`json:"managed"`
-	osi		osi.Osi		`json:"osi"`
-	bzi		bzi.Bzi		`json:"bzi"`
-	plabel		string		`json:"plabel"`
-	ptemplate	pxe.Ptemplate	`json:"ptemplate"`
+	Managed		bool		`json:"managed"`
+	Osi		osi.Osi		`json:"osi"`
+	Bzi		bzi.Bzi		`json:"bzi"`
+	Plabel		string		`json:"plabel"`
+	Ptemplate	pxe.Ptemplate	`json:"ptemplate"`
 }
 
