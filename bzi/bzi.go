@@ -12,12 +12,12 @@ type Bzi struct {
 // Load Operating System Disk Images
 func Load(cfg conf.Conf, bzis []Bzi, flags int) []Bzi {
 
-	for _, finf := range finf.FinfLoad(
+	for _, bzi_finf := range finf.FinfLoad(
 		cfg.Locs.Bzis,
 		cfg.Patterns.BziExt,
 		finf.FINF_CHECKSUM,
 	) {
-		bzis = append(bzis, Bzi{Finf: finf})
+		bzis = append(bzis, Bzi{Finf: bzi_finf})
 	}
 
 	return bzis
