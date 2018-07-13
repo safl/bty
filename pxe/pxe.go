@@ -8,10 +8,12 @@ import (
 	"github.com/safl/bty/finf"
 )
 
+// PXE Configuration file
 type Pconfig struct {
 	Finf	finf.Finf	`json:"finf"`
 }
 
+// PXE Configuration file template
 type Ptemplate struct {
 	Finf	finf.Finf	`json:"finf"`
 
