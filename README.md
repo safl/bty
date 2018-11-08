@@ -135,6 +135,13 @@ Edit NFS exports, `sudo vim /etc/exports`:
 /srv/images     *(ro,sync,no_subtree_check)
 ```
 
+Enable and start `rpc-statd`:
+
+```bash
+sudo systemctl enable rpc-statd
+sudo systemctl start rpc-statd
+```
+
 # TODO
 
 * Fix hardcoded values
