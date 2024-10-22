@@ -21,22 +21,22 @@ Using an Ubuntu 16 reference environment do the following:
 # Change hostname
 
 # Install system packages
-sudo apt-get install \
-    apache2 \
-    libapache2-mod-wsgi \
-    tftpd-hpa \
+sudo dnf install \
+    dracut \
+    httpd \
+    mod_wsgi \
+    python3-flask \
+    python3-jinja2 \
     syslinux \
-    nfs-kernel-server \
-    initramfs-tools \
-    pxelinux \
+    syslinux-tftpboot \
+    tftp-server \
     -y
 
 # Add odus to www-data group
-sudo usermod -a -G www-data odus
+sudo usermod -a -G apache odus
 
 # Grab bty
 sudo git clone https://github.com/safl/bty.git /srv/bty
-sudo pip install -r /srv/bty/requirements.txt
 
 # Create directory structure
 sudo mkdir /srv/tftp
@@ -83,6 +83,10 @@ Fix permissions:
 sudo /srv/bty/bin/permissions.sh
 ```
 
+```
+sudo dnf install httpd
+```
+
 ### Setup HTTP Server and BTY UI
 
 Change the default config `sudo vim /etc/apache2/sites-enabled/000-default.conf`
@@ -91,12 +95,6 @@ Change the default config `sudo vim /etc/apache2/sites-enabled/000-default.conf`
 <VirtualHost *:80>
         ServerAdmin webmaster@localhost
         DocumentRoot /srv
-
-        # Available loglevels: trace8, ..., trace1, debug, info, notice, warn,
-        # error, crit, alert, emerg.
-        # It is also possible to configure the loglevel for particular
-        # modules, e.g.
-        #LogLevel info ssl:warn
 
         <Directory /srv>
                 Options Indexes FollowSymLinks
@@ -116,14 +114,28 @@ Change the default config `sudo vim /etc/apache2/sites-enabled/000-default.conf`
                 Require all granted
         </Directory>
 
-        ErrorLog ${APACHE_LOG_DIR}/error.log
-        CustomLog ${APACHE_LOG_DIR}/access.log combined
+        Alias /image /srv/images
+        <Directory /srv/images>
+            Options Indexes FollowSymLinks
+            AllowOverride None
+            Require all granted
+
+            Dav On
+
+            # Disable write methods
+            <LimitExcept GET OPTIONS PROPFIND>
+                Require all denied
+            </LimitExcept>
+        </Directory>
+
+        ErrorLog /var/log/httpd/error.log
+        CustomLog /var/log/httpd/access.log combined
 </VirtualHost>
 ```
 
 ```bash
-sudo systemctl reload apache2
-sudo service apache2 restart
+sudo systemctl reload httpd
+sudo service httpd restart
 ```
 
 ### Setup NFS exports for deployment / CloneZilla
