@@ -1,0 +1,39 @@
+[project]
+name = "bty"
+version = "0.1.1"
+description = "A minimal .qcow2 based bare-metal machine provisioner"
+authors = [
+    { name = "Simon A. F. Lund", email = "os@safl.dk" }
+]
+license = { text = "GPL-2.0-only" }
+readme = "README.md"
+keywords = ["pxe", "tftp"]
+classifiers = [
+    "License :: OSI Approved :: GNU General Public License v2 (GPLv2)",
+    "Programming Language :: Python :: 3.10",
+    "Framework :: Flask",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+]
+
+dependencies = [
+    "flask>=2.3.0",
+    "gunicorn>=20.1.0",
+]
+
+
+[project.urls]
+Homepage = "https://github.com/safl/bty"
+Repository = "https://github.com/safl/bty"
+
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project.scripts]
+# CLI command for running the Flask app interactively
+bty-run = "bty:app"
+
+# Command for running the app as a daemon
+bty-daemon = "bty.daemon:start_daemon"
+
