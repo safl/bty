@@ -49,21 +49,29 @@ sudo mkdir /srv/images
 
 ```bash
 # Copy the boot loader and bios into the tftp directory
-sudo cp /usr/lib/PXELINUX/pxelinux.0 /srv/tftp/
-sudo cp /usr/lib/syslinux/modules/bios/ldlinux.c32 /srv/tftp/
-sudo cp /usr/lib/syslinux/modules/bios/chain.c32 /srv/tftp/
-sudo cp /usr/lib/syslinux/modules/bios/libcom32.c32 /srv/tftp/
-sudo cp /usr/lib/syslinux/modules/bios/libutil.c32 /srv/tftp/
-sudo cp /usr/lib/syslinux/modules/bios/menu.c32 /srv/tftp/
+sudo cp /tftpboot/pxelinux.0 /srv/tftp/
+sudo cp /tftpboot/ldlinux.c32 /srv/tftp/
+sudo cp /tftpboot/chain.c32 /srv/tftp/
+sudo cp /tftpboot/libcom32.c32 /srv/tftp/
+sudo cp /tftpboot/libutil.c32 /srv/tftp/
+sudo cp /tftpboot/menu.c32 /srv/tftp/
 ```
 
 Download a CloneZilla AMD64 zip and use it to create the `cilla` PXE env.:
+
+https://clonezilla.org/downloads/download.php?branch=stable
 
 ```bash
 unzip clonezilla-live-2.5.6-22-amd64.zip live/filesystem.squashfs
 unzip clonezilla-live-2.5.6-22-amd64.zip live/initrd.img
 unzip clonezilla-live-2.5.6-22-amd64.zip live/vmlinuz
 sudo mv live /srv/tftp/cilla
+```
+
+Disable SE Linux for ``/srv``:
+
+```bash
+sudo chcon -R -t httpd_sys_content_t /srv
 ```
 
 Enable the TFTP server by editing conf. file: `sudo vim /etc/default/tftpd-hpa`:
