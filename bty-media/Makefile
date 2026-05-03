@@ -1,22 +1,29 @@
-.PHONY: build test clean help
+VARIANT ?= usb
+
+.DEFAULT_GOAL := help
+
+.PHONY: help deps build clean
 
 help:
-	@echo "bty-media — appliance image builder"
+	@echo "bty-media - bty appliance image builder"
 	@echo ""
 	@echo "Targets:"
-	@echo "  build       Build the appliance image (milestone 2)"
-	@echo "  test        Boot-test the built image in QEMU (milestone 2)"
-	@echo "  clean       Remove build artifacts"
+	@echo "  deps     Install build dependencies (cijoe via pipx)"
+	@echo "  build    Build the appliance image (.img.zst)"
+	@echo "  clean    Remove build artifacts"
 	@echo ""
-	@echo "Build wiring is not yet implemented. See ../PLAN.md milestone 2."
+	@echo "Variant: $(VARIANT)  (override with VARIANT=server when that lands)"
+	@echo ""
+	@echo "The build downloads the Debian cloud image, drives cloud-init"
+	@echo "in QEMU to bake the rootfs, converts the result to raw,"
+	@echo "and zstd-compresses to bty-$(VARIANT)-x86_64.img.zst."
+
+deps:
+	pipx install cijoe
+	pipx ensurepath
 
 build:
-	@echo "bty-media build: not yet implemented (milestone 2)"
-	@exit 1
-
-test:
-	@echo "bty-media test: not yet implemented (milestone 2)"
-	@exit 1
+	cijoe tasks/build.yaml --monitor -c configs/$(VARIANT).toml
 
 clean:
-	@echo "bty-media clean: nothing to clean yet"
+	rm -rf cijoe-output cijoe-archive

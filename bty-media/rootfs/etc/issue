@@ -1,0 +1,10 @@
+
+======================================================================
+  bty USB live (scaffold)
+
+  Pipeline materialised; bty content lands in milestone 6+.
+  Rootfs is ephemeral - any changes vanish on reboot (overlayroot).
+======================================================================
+
+Debian \n \l
+

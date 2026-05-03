@@ -1,0 +1,53 @@
+# bty USB live appliance - build configuration
+#
+# Drives a cijoe pipeline that bakes a Debian-13 cloud image via cloud-init
+# in QEMU and emits a dd-able .img.zst suitable for flashing to a USB stick.
+#
+# Usage:
+#   cijoe tasks/build.yaml --config configs/usb.toml --monitor
+
+[bty]
+variant = "usb"
+hostname = "bty-usb"
+timezone = "UTC"
+
+[cijoe.transport.qemu_guest]
+username = "root"
+password = "root"
+hostname = "localhost"
+port = 4200
+
+[cijoe.workflow]
+fail_fast = true
+
+[qemu]
+img_bin = "qemu-img"
+
+[qemu.systems.x86_64]
+bin = "/usr/bin/qemu-system-x86_64"
+
+# Guest used to drive cloud-init during the bake. Boots the cloud-image
+# qcow2 with the seed.iso attached as -cdrom; cloud-init runs once and
+# powers off the VM.
+[qemu.guests.bty-usb-x86_64]
+path = "{{ local.env.HOME }}/system_imaging/guests/bty-usb-x86_64"
+system_label = "x86_64"
+system_image_name = "bty-usb-x86_64"
+system_args.kwa = { cpu = "host", smp = 4, m = "4G", accel = "kvm" }
+system_args.tcp_forward = { host = 4200, guest = 22 }
+
+# System image: Debian 13 cloud image + bty cloud-init customisation.
+[system-imaging.images.bty-usb-x86_64]
+system_label = "x86_64"
+
+cloud.url = "https://cloud.debian.org/images/cloud/trixie/daily/latest/debian-13-generic-amd64-daily.qcow2"
+cloud.path = "{{ local.env.HOME }}/system_imaging/cloud/debian-13-generic-amd64-daily.qcow2"
+cloud.metadata_path = "{{ resources.auxiliary['cloudinit-metadata'] }}"
+cloud.userdata_path = "{{ resources.auxiliary['cloudinit-userdata'] }}"
+
+disk.path = "{{ local.env.HOME }}/system_imaging/disk/bty-usb-x86_64.qcow2"
+
+# Final dd-able artifact: raw + zstd
+publish.raw_path = "{{ local.env.HOME }}/system_imaging/disk/bty-usb-x86_64.img"
+publish.zst_path = "{{ local.env.HOME }}/system_imaging/disk/bty-usb-x86_64.img.zst"
+publish.zstd_level = 19

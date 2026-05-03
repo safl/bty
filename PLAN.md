@@ -377,10 +377,13 @@ Documentation lives in `docs/` and follows the aisio convention:
    optional extras; sibling `bty-media/` directory in the jkab pattern;
    `docs/` wired up to the aisio-style tooling (pipx-installed); reusable
    CI workflows (lint, type-check, test, docs build, release skeleton).
-2. `bty-media` USB live build pipeline — automated, runs in CI on every
-   push to `main`, produces a `dd`-able image artifact. Bty content can be
-   stub-level at this stage; the goal is to materialise the build pipeline
-   first and fill it as later milestones land.
+2. `bty-media` USB live build pipeline — cijoe-driven, mirrors the jkab
+   pattern (Debian cloud-image base, cloud-init bake in QEMU,
+   `qcow2 -> raw -> .img.zst`). Triggered via `workflow_dispatch` and
+   on `media-*` tags rather than every push, since the build is heavy
+   (~15-25 minutes with KVM, ~1 GB compressed artifact). Bty content
+   can be stub-level at this stage; the goal is to materialise the
+   build pipeline first and fill it as later milestones land.
 3. `bty list disks` — block-device discovery.
 4. `bty list images` and `bty inspect image IMAGE` — image catalog and
    metadata.

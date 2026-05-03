@@ -1,0 +1,84 @@
+#cloud-config
+# bty USB live appliance — base cloud-init userdata
+#
+# Tokens substituted by scripts/gen_userdata.py:
+#   __BTY_HOSTNAME__   - hostname for the appliance
+#   __BTY_TIMEZONE__   - IANA timezone
+#
+# Files under rootfs/ are appended as a write_files block by gen_userdata.
+
+hostname: __BTY_HOSTNAME__
+fqdn: __BTY_HOSTNAME__.local
+manage_etc_hosts: true
+
+timezone: __BTY_TIMEZONE__
+
+# Build VM only - the cooked image disables ssh_pwauth and clears the
+# bake password via runcmd below. Operators of the USB live work from
+# the autologin console, not over SSH.
+ssh_pwauth: true
+chpasswd:
+  expire: false
+  list: |
+    root:root
+
+# Don't auto-grow root to fill the disk. We grow it explicitly to 3 GB
+# in runcmd below and reserve the rest for the BTY_IMAGES partition.
+growpart:
+  mode: off
+
+package_update: true
+package_upgrade: false
+packages:
+  # Ephemeral rootfs overlay
+  - overlayroot
+  # Partition + filesystem tools used during the bake and at runtime
+  - parted
+  - gdisk
+  - dosfstools
+  - e2fsprogs
+  - exfatprogs
+  # bty image-flash toolchain
+  - qemu-utils
+  - nvme-cli
+  - pciutils
+  - usbutils
+  - dmidecode
+  - zstd
+  - util-linux
+  # bty runtime + install paths
+  - python3
+  - pipx
+  - git
+
+runcmd:
+  # Grow root to 3 GB so packages and bty have headroom, then carve the
+  # remaining tail (~9 GB on a 12 GB disk) as the BTY_IMAGES exFAT
+  # partition. Operator drops cooked images here on the USB stick; bty
+  # auto-mounts /dev/disk/by-label/BTY_IMAGES at /var/lib/bty/images.
+  - parted -s /dev/sda resizepart 1 3GB
+  - resize2fs /dev/sda1
+  - sgdisk --new=0:0:0 --typecode=0:8300 --change-name=0:BTY_IMAGES /dev/sda
+  - partprobe /dev/sda
+  - mkfs.exfat -L BTY_IMAGES /dev/sda3
+
+  # Strip the bake password and disable password SSH for the cooked image.
+  - passwd -d root
+  - sed -i 's/^#*\s*PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
+
+  # Disable cloud-init for subsequent boots so the USB target does not
+  # try to re-provision. The bake VM's cloud-init has already done its
+  # job by the time this runs.
+  - touch /etc/cloud/cloud-init.disabled
+
+  # Clear cloud-init artefacts so the cooked image is identity-less.
+  - cloud-init clean --logs --seed || true
+
+  # Trim apt caches to keep the image small.
+  - apt-get clean
+  - rm -rf /var/lib/apt/lists/*
+
+power_state:
+  mode: poweroff
+  timeout: 30
+  message: "bty image baked - powering off the build VM"

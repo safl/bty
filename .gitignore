@@ -104,13 +104,15 @@ ENV/
 .pytest_cache/
 .ruff_cache/
 
-# bty-media build artifacts
+# bty-media build artifacts and cijoe runtime output
 bty-media/_build/
 bty-media/*.raw
 bty-media/*.raw.gz
 bty-media/*.raw.zst
 bty-media/*.qcow2
 bty-media/*.iso
+bty-media/cijoe-output/
+bty-media/cijoe-archive/
 
 # IDE
 .idea/

@@ -1,0 +1,58 @@
+name: Media
+
+# bty-media image builds. Driven manually for now: the build is heavy
+# (downloads the Debian cloud image, runs cloud-init in QEMU, compacts
+# and zstd-compresses) and produces an artifact on the order of ~1 GB
+# compressed. We trigger via workflow_dispatch when an operator wants a
+# fresh image, and on tag for releases.
+
+on:
+  workflow_dispatch:
+    inputs:
+      variant:
+        description: "Image variant"
+        required: true
+        type: choice
+        default: "usb"
+        options:
+          - usb
+  push:
+    tags: ["media-*"]
+
+jobs:
+  build-usb:
+    name: Build USB live image
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            qemu-system-x86 \
+            qemu-utils \
+            genisoimage \
+            zstd \
+            cpu-checker
+
+      - name: Verify KVM availability
+        run: |
+          sudo kvm-ok || true
+          ls -l /dev/kvm || true
+
+      - name: Install cijoe
+        run: pipx install cijoe
+
+      - name: Build image
+        working-directory: bty-media
+        run: cijoe tasks/build.yaml --monitor -c configs/usb.toml
+
+      - name: Upload .img.zst artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: bty-usb-x86_64-img-zst
+          path: |
+            ~/system_imaging/disk/bty-usb-x86_64.img.zst
+            ~/system_imaging/disk/bty-usb-x86_64.img.zst.sha256
