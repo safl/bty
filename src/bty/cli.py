@@ -5,6 +5,7 @@ Subcommand structure:
     bty list disks
     bty list images [--image-root PATH]
     bty inspect image PATH
+    bty flash --image PATH --target PATH [--provision MODE] --dry-run
 
 Each leaf command accepts ``--json`` to emit machine-readable output.
 """
@@ -16,7 +17,7 @@ import json
 import sys
 from pathlib import Path
 
-from bty import disks, formatting, images
+from bty import disks, flash, formatting, images
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -66,6 +67,26 @@ def main(argv: list[str] | None = None) -> int:
     )
     p_inspect_image.add_argument("path", type=Path, help="path to the image file")
     p_inspect_image.set_defaults(func=cmd_inspect_image)
+
+    p_flash = sub.add_parser(
+        "flash",
+        parents=[common],
+        help="flash an image to a target disk (--dry-run only at this milestone)",
+    )
+    p_flash.add_argument("--image", type=Path, required=True, help="image file to flash")
+    p_flash.add_argument("--target", type=Path, required=True, help="target block device")
+    p_flash.add_argument(
+        "--provision",
+        choices=flash.PROVISIONING_MODES,
+        default="none",
+        help="post-flash provisioning mode (default: %(default)s)",
+    )
+    p_flash.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="validate without writing to the target (required at milestone 5)",
+    )
+    p_flash.set_defaults(func=cmd_flash)
 
     args = parser.parse_args(argv)
     func = getattr(args, "func", None)
@@ -120,6 +141,40 @@ def cmd_inspect_image(args: argparse.Namespace) -> int:
     else:
         formatting.print_inspect(info)
     return 0
+
+
+def cmd_flash(args: argparse.Namespace) -> int:
+    if not args.dry_run:
+        print(
+            "bty: real flashing lands in milestone 6; pass --dry-run to validate",
+            file=sys.stderr,
+        )
+        return 2
+
+    try:
+        plan = flash.plan_flash(args.image, args.target, args.provision)
+    except FileNotFoundError as exc:
+        print(f"bty: {exc}", file=sys.stderr)
+        return 2
+
+    errors = flash.validate_plan(plan)
+
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "plan": plan.to_dict(),
+                    "errors": errors,
+                    "ok": not errors,
+                },
+                indent=2,
+                default=str,
+            )
+        )
+    else:
+        flash.print_plan(plan, errors)
+
+    return 0 if not errors else 1
 
 
 if __name__ == "__main__":  # pragma: no cover

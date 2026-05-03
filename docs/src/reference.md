@@ -48,6 +48,31 @@ Exit codes:
 - `0` -> success
 - `2` -> the path does not exist (or argparse rejected the invocation)
 
+### `bty flash --image PATH --target PATH [--provision MODE] --dry-run`
+
+Validate that an image can be written to a target disk, without
+performing the write. The actual flash lands in milestone 6; until
+then the `--dry-run` flag is required.
+
+Validation covers:
+
+- Image exists and is a recognised format (`.qcow2` / `.img` / `.img.zst`).
+- Image virtual size (decompressed / qcow2-virtual size, not on-disk
+  size) fits the target. Skipped with a note if the virtual size
+  cannot be determined (e.g. `qemu-img info` failure).
+- Target exists and is a block device.
+- Target has no mounted partitions (refuses to overwrite live storage).
+- Provisioning mode is one of `none`, `cloud-init`, `cijoe`.
+
+Output is a labelled plan plus a `Validation: OK` / `Validation: FAILED`
+line. With `--json`, emits `{"plan": ..., "errors": [...], "ok": bool}`.
+
+Exit codes:
+
+- `0` -> validation passed
+- `1` -> validation failed (one or more errors reported)
+- `2` -> argparse error, missing image, or `--dry-run` not specified
+
 ## Configuration
 
 bty resolves a small set of paths and runtime knobs from the
