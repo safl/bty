@@ -1,170 +1,70 @@
-# bty
+# bty — Boot & Target Utility
 
-## Filesystem
+Bare-metal provisioning toolkit. Flashes pre-built ("cooked") system
+images onto target disks — locally from a USB stick or remotely over
+PXE — and configures them via cloud-init or CIJOE workflows. Designed
+for both ad-hoc one-off provisioning and DevOps fleet operation.
 
-Below is where you find stuff after following the **Host Setup Notes**:
+bty is one Python package with three console-script entry points:
 
-```
-/srv/bty                # BTY repository
-/srv/images             # Reference environments as qcow2 images
-/srv/tftp               # BIOS/syslinux/PXE binaries
-/srv/tftp/pxelinux.bzi  # Kernel Images
-/srv/tftp/pxelinux.cfg  # PXE configurations
-/srv/tftp/cilla         # CloneZilla filesystem, initrd, and Kernel
-```
+- `bty` — main CLI (image inspection, target discovery, flashing,
+  provisioning).
+- `bty-tui` — terminal UI (requires the `tui` extra).
+- `bty-web` — HTTP server with browser UI (requires the `web` extra).
 
-## Host Setup Notes
+Plus a sibling appliance-image builder under `bty-media/` that produces
+the bootable USB live image and the server appliance image.
 
-Using an Ubuntu 16 reference environment do the following:
+## Status
 
-```bash
-# Change hostname
+This is the working tree of an in-progress rewrite. The original Flask
+app and PXE/syslinux configuration have been removed; the new
+foundation is being laid out per [`PLAN.md`](PLAN.md).
 
-# Install system packages
-sudo dnf install \
-    dracut \
-    httpd \
-    mod_wsgi \
-    python3-flask \
-    python3-jinja2 \
-    syslinux \
-    syslinux-tftpboot \
-    tftp-server \
-    -y
+## Planning and design
 
-# Add odus to www-data group
-sudo usermod -a -G apache odus
+- [`PLAN.md`](PLAN.md) — roadmap and design intent.
+- [`docs/`](docs/) — full documentation (Sphinx + MyST).
 
-# Grab bty
-sudo git clone https://github.com/safl/bty.git /srv/bty
+## Development
 
-# Create directory structure
-sudo mkdir /srv/tftp
-sudo mkdir /srv/tftp/pxelinux.bzi
-sudo mkdir /srv/tftp/pxelinux.cfg
-sudo mkdir /srv/images
-```
-
-### Setup TFTP server and boot environment
+`uv` is the project's dependency manager. Install it via pipx if you
+don't already have it:
 
 ```bash
-# Copy the boot loader and bios into the tftp directory
-sudo cp /tftpboot/pxelinux.0 /srv/tftp/
-sudo cp /tftpboot/ldlinux.c32 /srv/tftp/
-sudo cp /tftpboot/chain.c32 /srv/tftp/
-sudo cp /tftpboot/libcom32.c32 /srv/tftp/
-sudo cp /tftpboot/libutil.c32 /srv/tftp/
-sudo cp /tftpboot/menu.c32 /srv/tftp/
+pipx install uv
 ```
 
-Download a CloneZilla AMD64 zip and use it to create the `cilla` PXE env.:
-
-https://clonezilla.org/downloads/download.php?branch=stable
+Then sync the dev environment:
 
 ```bash
-unzip clonezilla-live-2.5.6-22-amd64.zip live/filesystem.squashfs
-unzip clonezilla-live-2.5.6-22-amd64.zip live/initrd.img
-unzip clonezilla-live-2.5.6-22-amd64.zip live/vmlinuz
-sudo mv live /srv/tftp/cilla
+uv sync --all-extras --group dev
 ```
 
-Disable SE Linux for ``/srv``:
+Run the test suite, linter, and type-checker:
 
 ```bash
-sudo chcon -R -t httpd_sys_content_t /srv
+uv run pytest
+uv run ruff check
+uv run mypy src
 ```
 
-Enable the TFTP server by editing conf. file: `sudo vim /etc/default/tftpd-hpa`:
+## Documentation
 
-```
-# /etc/default/tftpd-hpa
-
-TFTP_USERNAME="tftp"
-TFTP_DIRECTORY="/srv/tftp"
-TFTP_ADDRESS=":69"
-TFTP_OPTIONS="--secure -4"
-```
-
-Fix permissions:
+The docs tooling installs as a separate pipx app:
 
 ```bash
-sudo /srv/bty/bin/permissions.sh
+pipx install ./docs/tooling
 ```
 
-```
-sudo dnf install httpd
-```
-
-### Setup HTTP Server and BTY UI
-
-Change the default config `sudo vim /etc/apache2/sites-enabled/000-default.conf`
-
-```
-<VirtualHost *:80>
-        ServerAdmin webmaster@localhost
-        DocumentRoot /srv
-
-        <Directory /srv>
-                Options Indexes FollowSymLinks
-                AllowOverride None
-                Require all granted
-        </Directory>
-
-        WSGIDaemonProcess bty threads=1
-        WSGIScriptAlias /bty /srv/bty/bin/bty_hardcoded.wsgi
-        WSGIScriptReloading On
-
-        <Directory /srv/bty>
-                WSGIProcessGroup bty
-                WSGIApplicationGroup %{GLOBAL}
-                Options Indexes FollowSymLinks
-                AllowOverride None
-                Require all granted
-        </Directory>
-
-        Alias /image /srv/images
-        <Directory /srv/images>
-            Options Indexes FollowSymLinks
-            AllowOverride None
-            Require all granted
-
-            Dav On
-
-            # Disable write methods
-            <LimitExcept GET OPTIONS PROPFIND>
-                Require all denied
-            </LimitExcept>
-        </Directory>
-
-        ErrorLog /var/log/httpd/error.log
-        CustomLog /var/log/httpd/access.log combined
-</VirtualHost>
-```
+Then, from inside `docs/`:
 
 ```bash
-sudo systemctl reload httpd
-sudo service httpd restart
+bty-docs-serve              # live-rebuild dev server on :8000
+bty-docs-build-html         # one-shot HTML build
+bty-docs-build-pdf          # one-shot PDF build (requires LaTeX)
 ```
 
-### Setup NFS exports for deployment / CloneZilla
+## License
 
-Edit NFS exports, `sudo vim /etc/exports`:
-
-```
-/srv/tftp/cilla     *(ro,sync,no_subtree_check)
-/srv/images     *(ro,sync,no_subtree_check)
-```
-
-Enable and start `rpc-statd`:
-
-```bash
-sudo systemctl enable rpc-statd
-sudo systemctl start rpc-statd
-```
-
-# TODO
-
-* Fix hardcoded values
- - hostname
- - paths
- - etc.
+[GPL-3.0-only](LICENSE).

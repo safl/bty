@@ -1,39 +1,75 @@
 [project]
-name = "bty"
-version = "0.1.1"
-description = "A minimal .qcow2 based bare-metal machine provisioner"
-authors = [
-    { name = "Simon A. F. Lund", email = "os@safl.dk" }
-]
-license = { text = "GPL-2.0-only" }
+name = "bty-lab"
+version = "0.1.0.dev0"
+description = "Boot & Target Utility — image flashing and provisioning for bare-metal systems"
 readme = "README.md"
-keywords = ["pxe", "tftp"]
+requires-python = ">=3.11"
+authors = [{ name = "Simon A. F. Lund", email = "os@safl.dk" }]
+license = "GPL-3.0-only"
+keywords = ["provisioning", "imaging", "ipxe", "flashing", "appliance"]
 classifiers = [
-    "License :: OSI Approved :: GNU General Public License v2 (GPLv2)",
-    "Programming Language :: Python :: 3.10",
-    "Framework :: Flask",
-    "Intended Audience :: Developers",
-    "Operating System :: OS Independent",
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: POSIX :: Linux",
+]
+dependencies = []
+
+[project.optional-dependencies]
+tui = ["textual>=0.80"]
+web = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "jinja2>=3.1",
+]
+all = [
+    "textual>=0.80",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "jinja2>=3.1",
 ]
 
-dependencies = [
-    "flask>=2.3.0",
-    "gunicorn>=20.1.0",
-]
-
+[project.scripts]
+bty = "bty.cli:main"
+bty-tui = "bty.tui:main"
+bty-web = "bty.web:main"
 
 [project.urls]
 Homepage = "https://github.com/safl/bty"
 Repository = "https://github.com/safl/bty"
 
 [build-system]
-requires = ["setuptools>=42", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
-[project.scripts]
-# CLI command for running the Flask app interactively
-bty-run = "bty:app"
+[tool.hatch.build.targets.wheel]
+packages = ["src/bty"]
 
-# Command for running the app as a daemon
-bty-daemon = "bty.daemon:start_daemon"
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "ruff>=0.6",
+    "mypy>=1.10",
+]
 
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "docs/tooling/src"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "RUF"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+explicit_package_bases = true
+mypy_path = "src"
+
+[tool.pyright]
+include = ["src", "tests", "docs/tooling/src"]
+extraPaths = ["src", "docs/tooling/src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,7 +1,8 @@
 # bty — Boot & Target Utility
 
-Offline provisioning toolkit for bare-metal systems. Flashes system images to
-target disks and configures them via cloud-init or CIJOE workflows.
+Bare-metal provisioning toolkit. Flashes pre-built ("cooked") system
+images onto target disks — locally from a USB stick or remotely over
+PXE — and configures them via cloud-init or CIJOE workflows.
 
 `bty` is an umbrella project. The repository hosts several independent
 software components that share a name, a goal, and a set of conventions, but
@@ -68,33 +69,46 @@ deployment problem brilliantly but only for NixOS-flavored systems. bty
 sits in the niche NixOS does not cover: the *image* is whatever a vendor or
 upstream produces, with no influence from bty.
 
-## Subprojects
+## Components
 
-Each subproject is independently versioned, packaged, and documented. They
-are designed to be useful on their own and composable with each other. The
-overview chapter in the documentation describes how they weave together;
-each subproject also has its own chapter covering scope, public surface, and
-operational notes.
+bty is **one Python package** (distribution name `bty-lab` on PyPI; the
+importable module stays `bty`) with three console-script entry points and
+optional install extras, plus a sibling appliance-image builder under
+`bty-media/`. Splitting the Python side into
+multiple distributions earned nothing for a single-maintainer project; the
+"different install footprint for different users" need is handled cleanly
+through optional extras.
 
-### `bty`
+The components below are conceptual code areas, not separate distributions.
 
-Python library and command-line tool. The single source of truth for image
+### `bty` (library + main CLI)
+
+The Python library and the `bty` command. Single source of truth for image
 inspection, target-disk discovery, flashing, and provisioning. Everything
 else is a UI or a delivery vehicle for this. Usable standalone from any
-Linux environment with a sufficient runtime.
+Linux environment with a sufficient runtime:
 
-The library and the `bty` command live in the same package; the binary is
-exposed via `[project.scripts]`. There is no separate `bty-cli` subproject —
-the CLI is light enough that splitting it out would buy nothing.
+```bash
+pipx install bty-lab
+```
 
-### `bty-tui`
+Lives at `src/bty/` with the CLI entry point in `src/bty/cli.py`.
 
-Terminal UI on top of `bty`. Targeted at interactive use from a live
+### `bty-tui` (terminal UI)
+
+Terminal UI on top of the library. Targeted at interactive use from a live
 environment where a graphical browser is not appropriate — a serial
 console, an SSH session, or a minimal recovery image. Exposes the same
 operations as the CLI in a navigable form.
 
-### `bty-web`
+Shipped as the `bty-lab[tui]` install extra and exposed as the `bty-tui`
+console script. Lives under `src/bty/tui/`.
+
+```bash
+pipx install "bty-lab[tui]"
+```
+
+### `bty-web` (HTTP server + browser UI)
 
 HTTP server with browser UI. Hosts the MAC-address-keyed assignment of
 image and provisioning mode, renders per-MAC iPXE configurations, serves
@@ -104,22 +118,42 @@ and records the post-workflow state as the machine's known-good baseline.
 Successor to the original Flask UI. Stateful; the system of record for
 both fleet provisioning intent and per-machine known-good state.
 
-State (machine records, MAC ↔ image/provisioning assignments, CIJOE
-workflow references, per-machine known-good baselines, image catalog
-metadata, server settings) is persisted on disk and exposed through the UI
-as **export** (download a single archive) and **import** (upload to
-restore). This makes disaster recovery and migration between server hosts
-a two-click operation.
+Shipped as the `bty-lab[web]` install extra and exposed as the `bty-web`
+console script. Lives under `src/bty/web/`.
+
+```bash
+pipx install "bty-lab[web]"
+```
+
+State (machine records, MAC <-> image/provisioning assignments, CIJOE
+workflow references and run reports, per-machine known-good baselines,
+image catalog metadata, server settings) is persisted on disk and exposed
+through the UI as **export** (download a single archive) and **import**
+(upload to restore). This makes disaster recovery and migration between
+server hosts a two-click operation.
+
+CIJOE produces a structured report on every workflow run. `bty-web`
+captures these reports — both for offline runs (sent back from the live
+environment) and online runs (executed by the server itself) — and exposes
+them in the UI per machine and per run. Reports are downloadable in full,
+so an operator chasing a flaky reflash can inspect the complete log
+without leaving the browser.
 
 The runtime is sized for modest x86 hardware: lightweight Python web
 framework, no heavy front-end build pipeline, no JVM dependencies. Server
 behaviour does not change with hardware tier — an older NUC and a recent
 GMKtec mini-PC run the same code at different scales.
 
-### `bty-media`
+### `bty-media` (appliance-image builder)
 
-Builds the bootable images that turn this toolkit into something an operator
-can carry around or stand up on a server. Two artifacts:
+Sibling directory at the repo root, *not* a Python package. Builds the
+bootable images that turn this toolkit into something an operator can
+carry around or stand up on a server. Follows the layout used by
+`safl/jellyfin-kiosk-appliance-builder` (jkab): cijoe-driven Debian
+appliance build, Makefile-orchestrated, with `configs/`, `rootfs/`,
+`scripts/`, `tasks/`, and `tests/` subdirectories.
+
+Two artifacts:
 
 **USB live image.** A bootable USB stick carrying the `bty` CLI, `bty-tui`,
 and a bundled set of system images. The operator plugs it into a target
@@ -161,8 +195,8 @@ a separate base image and build pipeline, so it is intentionally out of
 scope for the initial roadmap. If there is interest, it can be added as a
 parallel artifact later.
 
-Both artifacts are produced by the same `bty-media` subproject — they share
-the Debian-based build pipeline and the embedded `bty` runtime.
+Both artifacts are produced by the same `bty-media/` directory — they
+share the Debian-based build pipeline and the embedded `bty` runtime.
 
 ## Image formats
 
@@ -222,7 +256,7 @@ sudo bty flash --image IMG --target /dev/sda --provision cloud-init ...
 
 ### Network flash (web)
 
-1. Operator assigns `MAC → image + provisioning` in the web UI.
+1. Operator assigns `MAC -> image + provisioning` in the web UI.
 2. Target machine PXE-boots; iPXE chains into the bty live environment over
    HTTP.
 3. bty live env contacts the server, fetches a per-MAC bootstrap, flashes the
@@ -234,67 +268,74 @@ Both BIOS and UEFI clients are supported via iPXE.
 
 ## Repository layout
 
-The repo is a `uv` workspace. Each subproject is a member with its own
-`pyproject.toml`; the workspace root coordinates the dev environment, the
-lockfile, and CI.
+One Python project at the repo root (src layout, hatchling build backend),
+plus a sibling appliance-image builder and a docs tree. `uv` manages the
+project venv and the lockfile.
 
 ```
 bty/
-├── pyproject.toml          # workspace root: [tool.uv.workspace] members
-├── uv.lock
-├── PLAN.md
-├── README.md
-├── docs/
-│   ├── README.md
-│   ├── src/                # MyST + Sphinx sources
-│   └── tooling/            # bty-docs-* commands (pipx install ./tooling)
-├── bty/                    # library + bty CLI
-│   ├── pyproject.toml
-│   └── src/bty/
-├── bty-tui/
-│   ├── pyproject.toml
-│   └── src/bty_tui/
-├── bty-web/
-│   ├── pyproject.toml
-│   └── src/bty_web/
-├── bty-media/
-│   ├── pyproject.toml
-│   └── src/bty_media/
-└── .github/workflows/
++-- pyproject.toml          # one [project] = "bty-lab" with optional extras
++-- uv.lock                 # committed
++-- PLAN.md
++-- README.md
++-- LICENSE                 # GPL-3.0-only
++-- src/
+|   \-- bty/                # the Python package
+|       +-- __init__.py
+|       +-- cli.py          # bty console script
+|       +-- tui/            # bty-tui console script (extra: tui)
+|       \-- web/            # bty-web console script (extra: web)
++-- tests/
++-- docs/
+|   +-- README.md
+|   +-- src/                # MyST + Sphinx sources
+|   \-- tooling/            # bty-docs-* commands (pipx install ./tooling)
++-- bty-media/              # sibling appliance builder, NOT a Python pkg
+|   +-- README.md
+|   +-- Makefile
+|   +-- configs/
+|   +-- rootfs/
+|   +-- scripts/
+|   +-- tasks/              # cijoe workflows
+|   \-- tests/
+\-- .github/
+    \-- workflows/
 ```
 
-Internal dependencies (e.g. `bty-tui` depending on `bty`) are declared as
-workspace path dependencies, not version-pinned PyPI dependencies. Published
-versions are independent per subproject; tags are scoped, e.g.
-`bty-tui-v0.3.0`.
+There is one wheel (`bty`), one set of console scripts (`bty`, `bty-tui`,
+`bty-web`), and one version. Optional extras (`tui`, `web`, `all`) gate
+the heavier dependencies so a CLI-only install stays light.
 
 ## Continuous integration
 
-CI runs on GitHub Actions. The pipeline is defined as a small set of
-reusable workflows so adding a subproject does not duplicate YAML.
+CI runs on GitHub Actions, organised as three workflows: `ci`, `docs`,
+and `release`.
 
-### Per-PR (and on push to `master`)
+### Per-PR (and on push to `main`)
 
-- **Lint** — `ruff check` across the workspace.
-- **Type-check** — `mypy` per subproject.
-- **Test** — `pytest` per subproject; matrix over supported Python versions.
-- **Docs build** — `bty-docs-build-html` and `bty-docs-build-pdf`. PR builds
-  upload artifacts; `master` builds publish HTML to GitHub Pages.
+- **Lint** — `uv run ruff check` and `uv run ruff format --check`.
+- **Type-check** — `uv run mypy src`.
+- **Test** — `uv run pytest`; matrix over supported Python versions.
+- **Docs build** — `bty-docs-build-html` and `bty-docs-build-pdf` via
+  the pipx-installed docs tooling. PR builds upload both artifacts;
+  pushes to `main` additionally publish HTML to GitHub Pages. The
+  pdflatex toolchain is kept simple by writing sane UTF-8 in the
+  sources (em-dashes and smart quotes fine; no exotic arrows or
+  box-drawing).
 
-### On tag (per subproject)
+### On tag
 
-- **Wheel + sdist** — built via `uv build` for the tagged subproject.
-- **Publish to PyPI** — for `bty`, `bty-tui`, `bty-web`. Optional for
-  `bty-media`.
-- **Media artifacts** — for `bty-media` tags, build both the USB live
-  image and the server image (both `amd64`) and attach them to the GitHub
+- **`v*` tags** — `uv build` produces the wheel and sdist; PyPI publish
+  follow-up uses trusted publishing (configured later).
+- **`media-*` tags** *(once `bty-media` lands)* — build both the USB live
+  image and the server image (`amd64`) and attach them to the GitHub
   release.
 
-### On `master`
+### On `main`
 
 - **Pages deploy** — published documentation (HTML).
-- **Nightly media build** *(optional, later)* — fresh `bty-media` artifacts
-  available as a workflow artifact for testing.
+- **Nightly media build** *(optional, later)* — fresh `bty-media`
+  artifacts available as a workflow artifact for testing.
 
 ## Documentation
 
@@ -309,13 +350,15 @@ Documentation lives in `docs/` and follows the aisio convention:
 
 ### Outline
 
-- **Overview** — what bty is, the umbrella structure, and how the
-  subprojects compose into the direct-flash and network-flash flows.
-- **Per-subproject chapters** — one per subproject (`bty`, `bty-tui`,
-  `bty-web`, `bty-media`). Each covers scope, public surface, configuration,
-  and operational notes.
+- **Overview** — what bty is, the components, and how they compose into
+  the direct-flash and network-flash flows.
 - **Concepts** — image, target, provisioning mode, machine record.
 - **Flows** — direct flash, network flash (BIOS + UEFI via iPXE).
+- **Components** — sections per component (`bty` CLI, `bty-tui`,
+  `bty-web`, `bty-media/`). Scope, public surface, configuration,
+  operational notes.
+- **Related work** — how bty positions against MAAS, FOG, iVentoy,
+  NixOS, and others.
 - **Reference** — CLI, HTTP API, configuration schemas, state
   export/import format.
 
@@ -329,10 +372,11 @@ Documentation lives in `docs/` and follows the aisio convention:
 
 ## Milestones
 
-1. Repo skeleton — clear out legacy; set up the `uv` workspace with one
-   subproject per directory; wire up `docs/` with the aisio-style tooling
-   (installed via pipx); add the reusable CI workflows (lint, type-check,
-   test, docs build, release).
+1. Repo skeleton — clear out legacy; lay out the single Python package
+   (src layout) with `bty`/`bty-tui`/`bty-web` console scripts and
+   optional extras; sibling `bty-media/` directory in the jkab pattern;
+   `docs/` wired up to the aisio-style tooling (pipx-installed); reusable
+   CI workflows (lint, type-check, test, docs build, release skeleton).
 2. `bty-media` USB live build pipeline — automated, runs in CI on every
    push to `main`, produces a `dd`-able image artifact. Bty content can be
    stub-level at this stage; the goal is to materialise the build pipeline
@@ -354,8 +398,8 @@ Documentation lives in `docs/` and follows the aisio convention:
 13. `bty-media` server image — installable disk image hosting `bty-web`,
     iPXE/TFTP/HTTP services, the network-flash live environment, and the
     image library.
-14. Network-flash end-to-end — iPXE → bty live → flash → reboot, BIOS +
-    UEFI.
+14. Network-flash end-to-end — iPXE -> bty live -> flash -> reboot,
+    BIOS + UEFI.
 15. Provisioning: `cijoe` (online mode — `bty-web` triggers a workflow
     against the booted target and records the post-workflow state as the
     machine's known-good baseline).

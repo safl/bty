@@ -99,3 +99,21 @@ ENV/
 
 # mypy
 .mypy_cache/
+
+# pytest / ruff
+.pytest_cache/
+.ruff_cache/
+
+# bty-media build artifacts
+bty-media/_build/
+bty-media/*.raw
+bty-media/*.raw.gz
+bty-media/*.raw.zst
+bty-media/*.qcow2
+bty-media/*.iso
+
+# IDE
+.idea/
+.vscode/
+
+# uv keeps uv.lock under version control — do NOT ignore it.
