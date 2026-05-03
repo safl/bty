@@ -28,6 +28,28 @@ What (if anything) runs on first boot. Three modes:
   known-good state. See the [components](components.md) chapter for the
   offline (USB live) vs. online (PXE/server) execution modes.
 
+## Disk layout (USB live)
+
+When the bty USB live image is `dd`-ed to a stick, the stick carries
+exactly two persistent partitions:
+
+- **Debian root partition** (~3 GB). Holds the bty live env. Mounted
+  read-only at runtime via `overlayroot`; operator changes go to a
+  tmpfs overlay and disappear on reboot. The image on the stick is
+  never mutated by use.
+- **`BTY_IMAGES` partition** (~9 GB, exFAT, GPT label `BTY_IMAGES`).
+  Holds cooked images the operator wants to flash onto target disks.
+
+bty auto-mounts `/dev/disk/by-label/BTY_IMAGES` at `/var/lib/bty/images`
+on boot. The `bty list images` and `bty inspect image` commands read
+from this mount point by default (overridable with `--image-root` or
+`BTY_IMAGE_ROOT`).
+
+Operators populate the partition by mounting it on any Linux / macOS /
+Windows box — exFAT is universally readable — and dropping `.qcow2`,
+`.img`, or `.img.zst` files into it. The partition is *not* under the
+overlayroot tmpfs, so files copied there persist on the stick.
+
 ## Machine record
 
 A `bty-web`-only concept. A persistent entry in the server's state

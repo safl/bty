@@ -48,6 +48,39 @@ Exit codes:
 - `0` -> success
 - `2` -> the path does not exist (or argparse rejected the invocation)
 
+## Configuration
+
+bty resolves a small set of paths and runtime knobs from the
+environment and sensible defaults.
+
+### Environment variables
+
+| Variable          | Purpose                                                        | Default             |
+|-------------------|----------------------------------------------------------------|---------------------|
+| `BTY_IMAGE_ROOT`  | Image root for `bty list images` and `bty inspect image`.      | `/var/lib/bty/images` |
+
+The CLI `--image-root` flag, when given, takes precedence over
+`BTY_IMAGE_ROOT`.
+
+### Default paths
+
+- `/var/lib/bty/images` — image root. The USB live appliance
+  auto-mounts the `BTY_IMAGES` partition here.
+
+## Python API
+
+bty's modules are usable as a library. Stable entry points:
+
+| Module           | Purpose                                                   |
+|------------------|-----------------------------------------------------------|
+| `bty.disks`      | `list_disks() -> list[dict]` — block-device discovery.    |
+| `bty.images`     | `list_images(root)`, `inspect_image(path)`, `Image` dataclass, `detect_format(path)`, `default_image_root()`. |
+| `bty.formatting` | `print_table(rows, columns)`, `print_inspect(info)`.      |
+
+A full sphinx-autodoc surface will land alongside the first non-stub
+public-API consumer (likely `bty-tui` in milestone 10). Until then
+treat any module not listed above as internal.
+
 ## HTTP API
 
 `bty-web` endpoints. Populated as the server lands in milestone 12.

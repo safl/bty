@@ -19,6 +19,7 @@ operation (server image with browser UI and iPXE).
 :caption: Contents
 
 overview
+quickstart
 concepts
 flows
 components
