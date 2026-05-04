@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -71,7 +72,7 @@ def main(argv: list[str] | None = None) -> int:
     p_flash = sub.add_parser(
         "flash",
         parents=[common],
-        help="flash an image to a target disk (--dry-run only at this milestone)",
+        help="flash an image to a target disk",
     )
     p_flash.add_argument("--image", type=Path, required=True, help="image file to flash")
     p_flash.add_argument("--target", type=Path, required=True, help="target block device")
@@ -84,7 +85,12 @@ def main(argv: list[str] | None = None) -> int:
     p_flash.add_argument(
         "--dry-run",
         action="store_true",
-        help="validate without writing to the target (required at milestone 5)",
+        help="validate the plan without writing to the target",
+    )
+    p_flash.add_argument(
+        "--yes",
+        action="store_true",
+        help="confirm the destructive write; required to actually flash the target",
     )
     p_flash.set_defaults(func=cmd_flash)
 
@@ -144,9 +150,9 @@ def cmd_inspect_image(args: argparse.Namespace) -> int:
 
 
 def cmd_flash(args: argparse.Namespace) -> int:
-    if not args.dry_run:
+    if not args.dry_run and not args.yes:
         print(
-            "bty: real flashing lands in milestone 6; pass --dry-run to validate",
+            "bty: pass --dry-run to validate or --yes to actually flash the target",
             file=sys.stderr,
         )
         return 2
@@ -161,22 +167,56 @@ def cmd_flash(args: argparse.Namespace) -> int:
     plan = flash.make_plan(image_info, target_info, args.provision)
     errors = flash.validate_plan(plan)
 
-    if args.json:
-        print(
-            json.dumps(
-                {
-                    "plan": plan.to_dict(),
-                    "errors": errors,
-                    "ok": not errors,
-                },
-                indent=2,
-                default=str,
+    # --dry-run wins over --yes if both were given.
+    if args.dry_run:
+        if args.json:
+            print(
+                json.dumps(
+                    {
+                        "plan": plan.to_dict(),
+                        "errors": errors,
+                        "ok": not errors,
+                    },
+                    indent=2,
+                    default=str,
+                )
             )
-        )
-    else:
-        flash.print_plan(plan, errors)
+        else:
+            flash.print_plan(plan, errors)
+        return 0 if not errors else 1
 
-    return 0 if not errors else 1
+    # --yes path: actually write.
+    if errors:
+        flash.print_plan(plan, errors)
+        return 1
+
+    if os.geteuid() != 0:
+        print(
+            "bty: flash requires root to write to a block device; rerun with sudo",
+            file=sys.stderr,
+        )
+        return 2
+
+    if plan.provisioning_mode != "none":
+        print(
+            f"bty: warning: provisioning mode {plan.provisioning_mode!r} is not yet "
+            "implemented (milestones 7-9); skipping post-flash provisioning",
+            file=sys.stderr,
+        )
+
+    flash.print_plan(plan, errors=[])
+    print()
+    print(f"Writing to {plan.target.path} ...")
+
+    try:
+        flash.execute_plan(plan)
+    except flash.FlashError as exc:
+        print(f"bty: flash failed: {exc}", file=sys.stderr)
+        return 1
+
+    written = plan.image.virtual_size_bytes or plan.image.size_bytes
+    print(f"Done. Wrote ~{written} bytes to {plan.target.path}.")
+    return 0
 
 
 if __name__ == "__main__":  # pragma: no cover

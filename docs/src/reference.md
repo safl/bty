@@ -48,13 +48,22 @@ Exit codes:
 - `0` -> success
 - `2` -> the path does not exist (or argparse rejected the invocation)
 
-### `bty flash --image PATH --target PATH [--provision MODE] --dry-run`
+### `bty flash --image PATH --target PATH [--provision MODE] [--dry-run] [--yes]`
 
-Validate that an image can be written to a target disk, without
-performing the write. The actual flash lands in milestone 6; until
-then the `--dry-run` flag is required.
+Flash an image onto a target block device.
 
-Validation covers:
+Either `--dry-run` or `--yes` is required:
+
+| Flags | Behaviour |
+|---|---|
+| `--dry-run` | Validate the plan; no writes. Exit `0` if valid, `1` if not. |
+| `--yes` | Validate, then write. Requires root. |
+| (neither) | Refuse with exit `2` and a hint pointing at both flags. |
+| `--dry-run --yes` | `--dry-run` wins. |
+
+#### Validation
+
+Both modes start by validating the plan:
 
 - Image exists and is a recognised format (`.qcow2` / `.img` / `.img.zst`).
 - Image virtual size (decompressed / qcow2-virtual size, not on-disk
@@ -64,14 +73,30 @@ Validation covers:
 - Target has no mounted partitions (refuses to overwrite live storage).
 - Provisioning mode is one of `none`, `cloud-init`, `cijoe`.
 
-Output is a labelled plan plus a `Validation: OK` / `Validation: FAILED`
-line. With `--json`, emits `{"plan": ..., "errors": [...], "ok": bool}`.
+#### Write (`--yes` only)
 
-Exit codes:
+If validation passes and `bty` is running as root, the write proceeds
+in a format-specific way:
 
-- `0` -> validation passed
-- `1` -> validation failed (one or more errors reported)
-- `2` -> argparse error, missing image, or `--dry-run` not specified
+- `.img` -> `dd if=IMG of=TARGET bs=4M conv=fsync status=progress`
+- `.img.zst` -> `zstd -d --stdout IMG | dd of=TARGET bs=4M conv=fsync status=progress`
+- `.qcow2` -> `qemu-img convert -p -O raw IMG TARGET`
+
+Immediately before the write, the target is re-probed and re-validated
+to catch races (e.g. the target getting mounted between dry-run and
+flash). On success, `bty` runs `sync` and `partprobe TARGET` so the
+kernel re-reads the new partition table.
+
+Provisioning modes other than `none` are accepted but produce a
+warning ("not yet implemented; skipping post-flash provisioning") at
+this milestone. Real provisioning lands in milestones 7-9.
+
+#### Exit codes
+
+- `0` -> success (validation passed for `--dry-run`; write completed for `--yes`)
+- `1` -> validation failed, or the write subprocess returned non-zero
+- `2` -> argparse error, missing image, neither flag given, or `--yes`
+  was passed without root
 
 ## Configuration
 

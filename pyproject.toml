@@ -73,3 +73,9 @@ extraPaths = ["src", "docs/tooling/src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "integration: tests that exercise real subprocesses / kernel features (loop devices, etc.); require root and run separately in CI",
+]
+# Default run excludes integration tests so dev loops stay fast.
+# Run them explicitly with: pytest -m integration  (must be root for losetup).
+addopts = ["-m", "not integration"]

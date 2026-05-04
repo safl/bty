@@ -92,3 +92,138 @@ def test_default_image_root_respects_env(monkeypatch: pytest.MonkeyPatch) -> Non
 def test_default_image_root_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("BTY_IMAGE_ROOT", raising=False)
     assert images.default_image_root() == images.DEFAULT_IMAGE_ROOT
+
+
+# ---------- bty flash --------------------------------------------------------
+
+
+def test_flash_requires_dry_run_or_yes(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    img = tmp_path / "x.img"
+    img.write_bytes(b"\0")
+    rc = cli.main(["flash", "--image", str(img), "--target", "/dev/null"])
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "--dry-run" in err and "--yes" in err
+
+
+def test_flash_dry_run_still_works(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    img = tmp_path / "x.img"
+    img.write_bytes(b"\0" * 1024)
+    rc = cli.main(["flash", "--image", str(img), "--target", "/dev/null", "--dry-run"])
+    # /dev/null is not a block device; dry-run reports validation failure.
+    assert rc == 1
+    out = capsys.readouterr().out
+    assert "Validation: FAILED" in out
+    assert "not a block device" in out
+
+
+def test_flash_yes_path_refuses_when_not_root(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When validation passes, the --yes path must still refuse without root."""
+    img = tmp_path / "x.img"
+    img.write_bytes(b"\0" * 1024)
+
+    monkeypatch.setattr(
+        "bty.cli.flash.probe_target",
+        lambda p: cli.flash.TargetInfo(
+            path=p,
+            exists=True,
+            is_block_device=True,
+            size_bytes=10**9,
+            mountpoints=[],
+        ),
+    )
+    monkeypatch.setattr("bty.cli.os.geteuid", lambda: 1000)
+
+    rc = cli.main(["flash", "--image", str(img), "--target", "/dev/loop9", "--yes"])
+    assert rc == 2
+    assert "requires root" in capsys.readouterr().err
+
+
+def test_flash_yes_path_invokes_execute_plan_when_root(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    img = tmp_path / "x.img"
+    img.write_bytes(b"\0" * 1024)
+
+    monkeypatch.setattr(
+        "bty.cli.flash.probe_target",
+        lambda p: cli.flash.TargetInfo(
+            path=p,
+            exists=True,
+            is_block_device=True,
+            size_bytes=10**9,
+            mountpoints=[],
+        ),
+    )
+    monkeypatch.setattr("bty.cli.os.geteuid", lambda: 0)
+
+    called = []
+    monkeypatch.setattr(
+        "bty.cli.flash.execute_plan",
+        lambda plan: called.append(plan.target.path),
+    )
+
+    rc = cli.main(["flash", "--image", str(img), "--target", "/dev/loop9", "--yes"])
+    assert rc == 0
+    assert called == [Path("/dev/loop9")]
+    assert "Done" in capsys.readouterr().out
+
+
+def test_flash_yes_path_propagates_validation_failure(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Validation errors stop the write path before the root check."""
+    img = tmp_path / "x.img"
+    img.write_bytes(b"\0" * 1024)
+
+    # /dev/null is not a block device -> validation fails.
+    rc = cli.main(["flash", "--image", str(img), "--target", "/dev/null", "--yes"])
+    assert rc == 1
+    out = capsys.readouterr().out
+    assert "Validation: FAILED" in out
+
+
+def test_flash_provision_non_none_warns_but_proceeds(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    img = tmp_path / "x.img"
+    img.write_bytes(b"\0" * 1024)
+
+    monkeypatch.setattr(
+        "bty.cli.flash.probe_target",
+        lambda p: cli.flash.TargetInfo(
+            path=p,
+            exists=True,
+            is_block_device=True,
+            size_bytes=10**9,
+            mountpoints=[],
+        ),
+    )
+    monkeypatch.setattr("bty.cli.os.geteuid", lambda: 0)
+    monkeypatch.setattr("bty.cli.flash.execute_plan", lambda plan: None)
+
+    rc = cli.main(
+        [
+            "flash",
+            "--image",
+            str(img),
+            "--target",
+            "/dev/loop9",
+            "--provision",
+            "cloud-init",
+            "--yes",
+        ]
+    )
+    assert rc == 0
+    err = capsys.readouterr().err
+    assert "not yet implemented" in err

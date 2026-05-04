@@ -91,19 +91,27 @@ bty list disks --json
 bty inspect image --json /var/lib/bty/images/my-image.qcow2
 ```
 
-*Functional from milestone 5.*
+*Functional from milestones 5+6.*
 
 ```bash
-# Validate that an image can be flashed to a target without writing
+# 1. Validate that an image can be flashed to a target without writing.
 bty flash --image /var/lib/bty/images/my-image.qcow2 \
           --target /dev/sdX \
           --provision none \
           --dry-run
+
+# 2. Once the plan looks right, run for real (requires root):
+sudo bty flash --image /var/lib/bty/images/my-image.qcow2 \
+               --target /dev/sdX \
+               --provision none \
+               --yes
 ```
 
-The dry-run prints a plan and a `Validation: OK` / `Validation: FAILED`
-line. Use `--json` for machine-readable output. The actual write is
-implemented in milestone 6.
+`--dry-run` prints a plan and validates without writing. `--yes` is
+the explicit consent token for the destructive write — `bty flash`
+refuses to do anything without one or the other. Provisioning modes
+other than `none` are accepted but currently warn "not yet
+implemented" (lands in milestones 7-9).
 
 See [Reference > CLI](reference.md#cli) for the full surface.
 
@@ -111,7 +119,6 @@ See [Reference > CLI](reference.md#cli) for the full surface.
 
 | Milestone | Capability |
 |-----------|------------|
-| 6         | `bty flash` (actual write to target disk) |
 | 7-9       | Provisioning: `none`, `cloud-init`, `cijoe` (offline) |
 | 10        | `bty-tui` interactive UI in the live env |
 | 11-12     | `bty-web` server + browser UI |

@@ -232,3 +232,100 @@ def test_probe_target_regular_file(tmp_path: Path) -> None:
     assert info.is_block_device is False
     assert info.size_bytes is None
     assert info.mountpoints == []
+
+
+# ---------- execute_plan: dispatch logic, helpers stubbed --------------------
+
+
+def _stub_block_target(path: Path) -> flash.TargetInfo:
+    return flash.TargetInfo(
+        path=path,
+        exists=True,
+        is_block_device=True,
+        size_bytes=1024 * 1024 * 1024,
+        mountpoints=[],
+    )
+
+
+def test_execute_plan_dispatches_to_img_writer(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[str, Path, Path]] = []
+    monkeypatch.setattr(flash, "probe_target", _stub_block_target)
+    monkeypatch.setattr(flash, "_flash_img", lambda i, t: calls.append(("img", i, t)))
+    monkeypatch.setattr(flash, "_flash_zst", lambda i, t: calls.append(("zst", i, t)))
+    monkeypatch.setattr(flash, "_flash_qcow2", lambda i, t: calls.append(("qcow2", i, t)))
+    monkeypatch.setattr(flash, "_sync_and_partprobe", lambda t: calls.append(("sync", t, t)))
+
+    plan = flash.make_plan(_img(fmt="img"), _tgt(), "none")
+    flash.execute_plan(plan)
+
+    formats = [c[0] for c in calls]
+    assert formats == ["img", "sync"]
+
+
+def test_execute_plan_dispatches_to_zst_writer(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[str] = []
+    monkeypatch.setattr(flash, "probe_target", _stub_block_target)
+    monkeypatch.setattr(flash, "_flash_img", lambda i, t: calls.append("img"))
+    monkeypatch.setattr(flash, "_flash_zst", lambda i, t: calls.append("zst"))
+    monkeypatch.setattr(flash, "_flash_qcow2", lambda i, t: calls.append("qcow2"))
+    monkeypatch.setattr(flash, "_sync_and_partprobe", lambda t: calls.append("sync"))
+
+    plan = flash.make_plan(_img(fmt="img.zst"), _tgt(), "none")
+    flash.execute_plan(plan)
+
+    assert calls == ["zst", "sync"]
+
+
+def test_execute_plan_dispatches_to_qcow2_writer(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[str] = []
+    monkeypatch.setattr(flash, "probe_target", _stub_block_target)
+    monkeypatch.setattr(flash, "_flash_img", lambda i, t: calls.append("img"))
+    monkeypatch.setattr(flash, "_flash_zst", lambda i, t: calls.append("zst"))
+    monkeypatch.setattr(flash, "_flash_qcow2", lambda i, t: calls.append("qcow2"))
+    monkeypatch.setattr(flash, "_sync_and_partprobe", lambda t: calls.append("sync"))
+
+    plan = flash.make_plan(_img(fmt="qcow2"), _tgt(), "none")
+    flash.execute_plan(plan)
+
+    assert calls == ["qcow2", "sync"]
+
+
+def test_execute_plan_refuses_unknown_format(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(flash, "probe_target", _stub_block_target)
+    plan = flash.make_plan(_img(fmt=None), _tgt(), "none")
+    with pytest.raises(flash.FlashError, match="cannot flash image of format"):
+        flash.execute_plan(plan)
+
+
+def test_execute_plan_refuses_when_target_no_longer_block(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Race protection: target was a block device at plan time but isn't now."""
+
+    def now_a_regular_file(path: Path) -> flash.TargetInfo:
+        return flash.TargetInfo(
+            path=path, exists=True, is_block_device=False, size_bytes=None, mountpoints=[]
+        )
+
+    monkeypatch.setattr(flash, "probe_target", now_a_regular_file)
+    plan = flash.make_plan(_img(), _tgt(), "none")
+    with pytest.raises(flash.FlashError, match="no longer a block device"):
+        flash.execute_plan(plan)
+
+
+def test_execute_plan_refuses_when_target_now_mounted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def now_mounted(path: Path) -> flash.TargetInfo:
+        return flash.TargetInfo(
+            path=path,
+            exists=True,
+            is_block_device=True,
+            size_bytes=1024,
+            mountpoints=["/mnt/oops"],
+        )
+
+    monkeypatch.setattr(flash, "probe_target", now_mounted)
+    plan = flash.make_plan(_img(), _tgt(), "none")
+    with pytest.raises(flash.FlashError, match="now has mounted partitions"):
+        flash.execute_plan(plan)

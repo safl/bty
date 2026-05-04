@@ -43,3 +43,21 @@ jobs:
           python-version: ${{ matrix.python }}
       - run: uv sync --all-extras --group dev
       - run: uv run pytest
+
+  flash-integration:
+    name: Flash integration (loop device)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v8.1.0
+        with:
+          python-version: "3.12"
+      - name: Install qemu-utils + zstd for the integration test
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends qemu-utils zstd
+      - run: uv sync --all-extras --group dev
+      # Integration tests use losetup + dd against a real loop device,
+      # so they need root. The default pytest run excludes them via the
+      # addopts in pyproject.toml; override with -m integration here.
+      - run: sudo -E env "PATH=$PATH" uv run pytest -m integration -v

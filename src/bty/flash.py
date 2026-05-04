@@ -248,6 +248,105 @@ def print_plan(
         print("Validation: OK (dry-run; no writes performed)", file=out)
 
 
+# ---------- Real write -------------------------------------------------------
+
+
+class FlashError(RuntimeError):
+    """Raised when ``execute_plan`` cannot complete the write."""
+
+
+def execute_plan(plan: FlashPlan) -> None:
+    """Write ``plan.image`` to ``plan.target``.
+
+    Re-probes the target immediately before writing to catch races
+    (target gets mounted, swapped, or removed between the dry-run and
+    the real flash). Dispatches to the right write strategy based on
+    image format. Synchronises and re-reads the partition table on
+    success.
+
+    Raises :class:`FlashError` for caller-visible failures (target no
+    longer suitable, format unrecognised, write subprocess failed).
+    """
+    fresh_target = probe_target(plan.target.path)
+    if not fresh_target.exists or not fresh_target.is_block_device:
+        raise FlashError(f"target is no longer a block device: {plan.target.path}")
+    if fresh_target.mountpoints:
+        raise FlashError(
+            f"target now has mounted partitions: {', '.join(fresh_target.mountpoints)}"
+        )
+
+    fmt = plan.image.format
+    if fmt == "img":
+        _flash_img(plan.image.path, plan.target.path)
+    elif fmt == "img.zst":
+        _flash_zst(plan.image.path, plan.target.path)
+    elif fmt == "qcow2":
+        _flash_qcow2(plan.image.path, plan.target.path)
+    else:
+        raise FlashError(f"cannot flash image of format {fmt!r}")
+
+    _sync_and_partprobe(plan.target.path)
+
+
+def _flash_img(image: Path, target: Path) -> None:
+    """Write a raw .img to a block device with ``dd``."""
+    cmd = [
+        "dd",
+        f"if={image}",
+        f"of={target}",
+        "bs=4M",
+        "conv=fsync",
+        "status=progress",
+    ]
+    rc = subprocess.run(cmd, check=False).returncode
+    if rc != 0:
+        raise FlashError(f"dd exited {rc} writing {image} -> {target}")
+
+
+def _flash_zst(image: Path, target: Path) -> None:
+    """Pipeline ``zstd -d --stdout IMG | dd of=TARGET ...``."""
+    zstd_proc = subprocess.Popen(
+        ["zstd", "-d", "--stdout", str(image)],
+        stdout=subprocess.PIPE,
+    )
+    try:
+        dd_proc = subprocess.Popen(
+            [
+                "dd",
+                f"of={target}",
+                "bs=4M",
+                "conv=fsync",
+                "status=progress",
+            ],
+            stdin=zstd_proc.stdout,
+        )
+        # Let zstd see SIGPIPE if dd exits early.
+        if zstd_proc.stdout is not None:
+            zstd_proc.stdout.close()
+        dd_rc = dd_proc.wait()
+    finally:
+        zstd_rc = zstd_proc.wait()
+
+    if dd_rc != 0:
+        raise FlashError(f"dd exited {dd_rc} writing {image} -> {target}")
+    if zstd_rc != 0:
+        raise FlashError(f"zstd exited {zstd_rc} decompressing {image}")
+
+
+def _flash_qcow2(image: Path, target: Path) -> None:
+    """Write a qcow2 to a block device by converting to raw in place."""
+    cmd = ["qemu-img", "convert", "-p", "-O", "raw", str(image), str(target)]
+    rc = subprocess.run(cmd, check=False).returncode
+    if rc != 0:
+        raise FlashError(f"qemu-img convert exited {rc} writing {image} -> {target}")
+
+
+def _sync_and_partprobe(target: Path) -> None:
+    """Flush kernel buffers and ask the kernel to re-read ``target``'s partition table."""
+    subprocess.run(["sync"], check=False)
+    subprocess.run(["partprobe", str(target)], check=False)
+
+
 # ---------- Internal helpers --------------------------------------------------
 
 
