@@ -65,7 +65,9 @@ def test_list_disks_json(capsys: pytest.CaptureFixture[str]) -> None:
         rc = cli.main(["list", "disks", "--json"])
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)
-    assert payload == fake_rows
+    assert payload["schema_version"] == "1"
+    assert payload["command"] == "list-disks"
+    assert payload["disks"] == fake_rows
 
 
 def test_list_images_uses_image_root_argument(
@@ -93,8 +95,10 @@ def test_inspect_image_json(tmp_path: Path, capsys: pytest.CaptureFixture[str]) 
     rc = cli.main(["inspect", "image", "--json", str(img)])
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)
-    assert payload["format"] == "img"
-    assert payload["size_bytes"] == 5
+    assert payload["schema_version"] == "1"
+    assert payload["command"] == "inspect-image"
+    assert payload["image"]["format"] == "img"
+    assert payload["image"]["size_bytes"] == 5
 
 
 def test_default_image_root_respects_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -135,7 +139,11 @@ def test_flash_yes_path_refuses_when_not_root(
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """When validation passes, the --yes path must still refuse without root."""
+    """When validation passes, the --yes path must still refuse without root.
+
+    Exit code 3 = "needs root"; distinct from 2 (misuse) so agents can
+    respond to the privilege case specifically.
+    """
     img = tmp_path / "x.img"
     img.write_bytes(b"\0" * 1024)
 
@@ -152,7 +160,7 @@ def test_flash_yes_path_refuses_when_not_root(
     monkeypatch.setattr("bty.cli.os.geteuid", lambda: 1000)
 
     rc = cli.main(["flash", "--image", str(img), "--target", "/dev/loop9", "--yes"])
-    assert rc == 2
+    assert rc == 3
     assert "requires root" in capsys.readouterr().err
 
 
@@ -342,6 +350,69 @@ def test_flash_cijoe_invokes_apply_cijoe(
     assert captured == [(Path("/dev/loop9"), workflow, None)]
     out = capsys.readouterr().out
     assert "Running cijoe workflow" in out
+
+
+def test_flash_yes_path_exit_5_on_race(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Re-probe race during execute_plan -> exit 5."""
+    img = tmp_path / "x.img"
+    img.write_bytes(b"\0" * 1024)
+
+    monkeypatch.setattr(
+        "bty.cli.flash.probe_target",
+        lambda p: cli.flash.TargetInfo(
+            path=p,
+            exists=True,
+            is_block_device=True,
+            size_bytes=10**9,
+            mountpoints=[],
+        ),
+    )
+    monkeypatch.setattr("bty.cli.os.geteuid", lambda: 0)
+
+    def boom(plan: cli.flash.FlashPlan) -> None:
+        raise cli.flash.FlashRaceError("target now has mounted partitions: /mnt/oops")
+
+    monkeypatch.setattr("bty.cli.flash.execute_plan", boom)
+
+    rc = cli.main(["flash", "--image", str(img), "--target", "/dev/loop9", "--yes"])
+    assert rc == 5
+    err = capsys.readouterr().err
+    assert "mounted partitions" in err
+
+
+def test_flash_yes_path_exit_4_on_missing_dependency(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A FlashDependencyError from execute_plan -> exit 4."""
+    img = tmp_path / "x.img"
+    img.write_bytes(b"\0" * 1024)
+
+    monkeypatch.setattr(
+        "bty.cli.flash.probe_target",
+        lambda p: cli.flash.TargetInfo(
+            path=p,
+            exists=True,
+            is_block_device=True,
+            size_bytes=10**9,
+            mountpoints=[],
+        ),
+    )
+    monkeypatch.setattr("bty.cli.os.geteuid", lambda: 0)
+
+    def boom(plan: cli.flash.FlashPlan) -> None:
+        raise cli.flash.FlashDependencyError("some-tool is not installed")
+
+    monkeypatch.setattr("bty.cli.flash.execute_plan", boom)
+
+    rc = cli.main(["flash", "--image", str(img), "--target", "/dev/loop9", "--yes"])
+    assert rc == 4
+    assert "some-tool is not installed" in capsys.readouterr().err
 
 
 def test_flash_cijoe_passes_config_through(

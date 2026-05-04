@@ -11,6 +11,33 @@ human-readable table.
 `bty --version` prints the installed version (sourced from package
 metadata) and exits.
 
+### JSON output envelope
+
+Every `--json` output is wrapped:
+
+```json
+{
+  "schema_version": "1",
+  "command": "<subcommand-name>",
+  ...command-specific fields...
+}
+```
+
+Agents key off `schema_version`; incompatible structural changes bump
+the version. See [`AGENTS.md`](https://github.com/safl/bty/blob/main/AGENTS.md)
+for the full per-command schema reference and the exit-code table.
+
+### Exit codes
+
+| Code | Meaning                                                            |
+|------|--------------------------------------------------------------------|
+| 0    | Success.                                                           |
+| 1    | Operation failed (validation rejected the plan; write subprocess returned non-zero; cloud-init / cijoe step failed). |
+| 2    | Misuse — argparse error, missing required flag, missing input file. |
+| 3    | Privilege required — operation needs root, rerun via `sudo`.       |
+| 4    | Required external tool is not installed (e.g. `cijoe`).            |
+| 5    | Target raced — block device became mounted or otherwise unsuitable between validation and write. |
+
 ### `bty list disks`
 
 List interesting block devices on the local system. Shells out to
@@ -113,12 +140,17 @@ After the flash, `bty` runs the configured post-flash step:
   (`pipx install cijoe`); errors clearly if absent. Workflow exit
   non-zero is propagated as a flash failure.
 
-#### Exit codes
+#### Exit codes (specific to `bty flash`)
 
-- `0` -> success (validation passed for `--dry-run`; write completed for `--yes`)
-- `1` -> validation failed, or the write subprocess returned non-zero
-- `2` -> argparse error, missing image, neither flag given, or `--yes`
-  was passed without root
+- `0` -> success (validation passed for `--dry-run`; write completed for `--yes`).
+- `1` -> validation failed, or a write / provisioning subprocess returned non-zero.
+- `2` -> argparse error, missing image, missing `--user-data` / `--cijoe-workflow`, neither `--dry-run` nor `--yes` given.
+- `3` -> `--yes` was passed without root.
+- `4` -> required external tool missing (e.g. `cijoe` for `--provision cijoe`).
+- `5` -> target raced (became mounted or stopped being a block device between validation and write).
+
+The general exit-code table at the top of this section applies to all
+subcommands.
 
 ## Configuration
 

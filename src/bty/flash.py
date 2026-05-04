@@ -256,7 +256,28 @@ def print_plan(
 
 
 class FlashError(RuntimeError):
-    """Raised when ``execute_plan`` cannot complete the write."""
+    """Raised when a flash-related operation cannot complete.
+
+    Distinct subclasses exist for failure modes that callers (notably
+    the CLI and TUI) may want to surface as different exit codes /
+    user-facing messages:
+
+    - :class:`FlashDependencyError` — a required external tool is missing.
+    - :class:`FlashRaceError` — the target's state changed between the
+      last successful probe and the attempted write (it became mounted,
+      stopped being a block device, etc.).
+
+    Plain :class:`FlashError` is the catch-all for everything else
+    (invalid format, write subprocess returned non-zero, etc.).
+    """
+
+
+class FlashDependencyError(FlashError):
+    """A required external tool (cijoe, mkfs.exfat, ...) is not installed."""
+
+
+class FlashRaceError(FlashError):
+    """The target changed state between probe and write (mounted, removed, ...)."""
 
 
 def execute_plan(plan: FlashPlan) -> None:
@@ -273,9 +294,9 @@ def execute_plan(plan: FlashPlan) -> None:
     """
     fresh_target = probe_target(plan.target.path)
     if not fresh_target.exists or not fresh_target.is_block_device:
-        raise FlashError(f"target is no longer a block device: {plan.target.path}")
+        raise FlashRaceError(f"target is no longer a block device: {plan.target.path}")
     if fresh_target.mountpoints:
-        raise FlashError(
+        raise FlashRaceError(
             f"target now has mounted partitions: {', '.join(fresh_target.mountpoints)}"
         )
 
@@ -507,7 +528,9 @@ def apply_cijoe(
     if config is not None and not config.exists():
         raise FlashError(f"cijoe config not found: {config}")
     if shutil.which("cijoe") is None:
-        raise FlashError("cijoe is not installed; install with `pipx install cijoe` and re-run")
+        raise FlashDependencyError(
+            "cijoe is not installed; install with `pipx install cijoe` and re-run"
+        )
 
     rootfs = _find_largest_partition(target)
 

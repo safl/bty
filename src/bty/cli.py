@@ -8,6 +8,17 @@ Subcommand structure:
     bty flash --image PATH --target PATH [--provision MODE] --dry-run
 
 Each leaf command accepts ``--json`` to emit machine-readable output.
+
+JSON outputs are envelope-wrapped with a stable schema:
+
+    {
+      "schema_version": "1",
+      "command": "<subcommand-name>",
+      ...command-specific fields...
+    }
+
+Agents key off ``schema_version`` and the per-command keys; the format
+does not change without bumping ``SCHEMA_VERSION``.
 """
 
 from __future__ import annotations
@@ -17,8 +28,18 @@ import json
 import os
 import sys
 from pathlib import Path
+from typing import Any
 
 from bty import disks, flash, formatting, images
+
+# Bump this when any --json output structure changes incompatibly.
+# Document the new shape in docs/src/reference.md and AGENTS.md.
+SCHEMA_VERSION = "1"
+
+
+def _envelope(command: str, **fields: Any) -> dict[str, Any]:
+    """Wrap command-specific JSON output in the stable envelope."""
+    return {"schema_version": SCHEMA_VERSION, "command": command, **fields}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -137,7 +158,7 @@ def main(argv: list[str] | None = None) -> int:
 def cmd_list_disks(args: argparse.Namespace) -> int:
     rows = disks.list_disks()
     if args.json:
-        print(json.dumps(rows, indent=2))
+        print(json.dumps(_envelope("list-disks", disks=rows), indent=2))
     else:
         formatting.print_table(
             rows,
@@ -158,7 +179,12 @@ def cmd_list_images(args: argparse.Namespace) -> int:
     found = images.list_images(args.image_root)
     rows = [img.to_dict() for img in found]
     if args.json:
-        print(json.dumps(rows, indent=2))
+        payload = _envelope(
+            "list-images",
+            image_root=str(args.image_root),
+            images=rows,
+        )
+        print(json.dumps(payload, indent=2))
     else:
         formatting.print_table(
             rows,
@@ -174,7 +200,7 @@ def cmd_inspect_image(args: argparse.Namespace) -> int:
         print(f"bty: no such image: {args.path}", file=sys.stderr)
         return 2
     if args.json:
-        print(json.dumps(info, indent=2, default=str))
+        print(json.dumps(_envelope("inspect-image", image=info), indent=2, default=str))
     else:
         formatting.print_inspect(info)
     return 0
@@ -215,17 +241,14 @@ def cmd_flash(args: argparse.Namespace) -> int:
     # --dry-run wins over --yes if both were given.
     if args.dry_run:
         if args.json:
-            print(
-                json.dumps(
-                    {
-                        "plan": plan.to_dict(),
-                        "errors": errors,
-                        "ok": not errors,
-                    },
-                    indent=2,
-                    default=str,
-                )
+            payload = _envelope(
+                "flash",
+                dry_run=True,
+                plan=plan.to_dict(),
+                errors=errors,
+                ok=not errors,
             )
+            print(json.dumps(payload, indent=2, default=str))
         else:
             flash.print_plan(plan, errors)
         return 0 if not errors else 1
@@ -240,7 +263,7 @@ def cmd_flash(args: argparse.Namespace) -> int:
             "bty: flash requires root to write to a block device; rerun with sudo",
             file=sys.stderr,
         )
-        return 2
+        return 3
 
     flash.print_plan(plan, errors=[])
     print()
@@ -248,6 +271,12 @@ def cmd_flash(args: argparse.Namespace) -> int:
 
     try:
         flash.execute_plan(plan)
+    except flash.FlashRaceError as exc:
+        print(f"bty: flash aborted: {exc}", file=sys.stderr)
+        return 5
+    except flash.FlashDependencyError as exc:
+        print(f"bty: flash aborted: {exc}", file=sys.stderr)
+        return 4
     except flash.FlashError as exc:
         print(f"bty: flash failed: {exc}", file=sys.stderr)
         return 1
@@ -260,6 +289,9 @@ def cmd_flash(args: argparse.Namespace) -> int:
                 args.user_data,
                 args.meta_data,
             )
+        except flash.FlashDependencyError as exc:
+            print(f"bty: cloud-init seeding failed: {exc}", file=sys.stderr)
+            return 4
         except flash.FlashError as exc:
             print(f"bty: cloud-init seeding failed: {exc}", file=sys.stderr)
             return 1
@@ -272,6 +304,9 @@ def cmd_flash(args: argparse.Namespace) -> int:
                 args.cijoe_workflow,
                 args.cijoe_config,
             )
+        except flash.FlashDependencyError as exc:
+            print(f"bty: cijoe provisioning failed: {exc}", file=sys.stderr)
+            return 4
         except flash.FlashError as exc:
             print(f"bty: cijoe provisioning failed: {exc}", file=sys.stderr)
             return 1
