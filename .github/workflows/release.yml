@@ -119,7 +119,7 @@ jobs:
           set -eu
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            debootstrap squashfs-tools xorriso
+            debootstrap squashfs-tools xorriso debian-archive-keyring
           POOL=http://ftp.debian.org/debian/pool/main/l/live-build
           LB_DEB=$(curl -s "$POOL/" \
               | grep -oE 'live-build_[0-9][^"<]*\.deb' \
