@@ -159,7 +159,7 @@ def cloud_init_loop_device(tmp_path: Path) -> Iterator[tuple[Path, Path]]:
     rootfs probe should match the partition because it carries the
     cloud-init marker.
     """
-    for tool in ("sgdisk", "mkfs.ext4", "mount", "umount", "partprobe"):
+    for tool in ("sgdisk", "mkfs.ext4", "mount", "umount", "partprobe", "udevadm"):
         if shutil.which(tool) is None:
             pytest.skip(f"{tool} not available")
 
@@ -182,6 +182,9 @@ def cloud_init_loop_device(tmp_path: Path) -> Iterator[tuple[Path, Path]]:
             capture_output=True,
         )
         subprocess.run(["partprobe", str(loop_dev)], check=False, capture_output=True)
+        # Wait for udev to populate the new partition device node so
+        # subsequent ``lsblk`` calls see it.
+        subprocess.run(["udevadm", "settle"], check=False)
         partition = Path(f"{loop_dev}p1")
 
         # Plant ext4 + a /etc/cloud/ marker so apply_cloud_init can find us.

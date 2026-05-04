@@ -345,9 +345,16 @@ def _flash_qcow2(image: Path, target: Path) -> None:
 
 
 def _sync_and_partprobe(target: Path) -> None:
-    """Flush kernel buffers and ask the kernel to re-read ``target``'s partition table."""
+    """Flush kernel buffers and ask the kernel to re-read ``target``'s partition table.
+
+    ``udevadm settle`` is run after ``partprobe`` so subsequent ``lsblk``
+    queries see the new partition tree. Without it, an immediate
+    follow-up (e.g. ``apply_cloud_init`` looking for the rootfs partition)
+    can race the kernel's partition scan and find no children.
+    """
     subprocess.run(["sync"], check=False)
     subprocess.run(["partprobe", str(target)], check=False)
+    subprocess.run(["udevadm", "settle"], check=False)
 
 
 # ---------- Provisioning: cloud-init ----------------------------------------
@@ -408,7 +415,12 @@ def _find_cloud_init_rootfs(target: Path) -> Path:
     Iterates partitions reported by ``lsblk -J``, mounts each read-only,
     and returns the first whose rootfs contains ``/etc/cloud/``. Raises
     :class:`FlashError` if no such partition is found.
+
+    A ``udevadm settle`` is issued first so a freshly-partitioned target
+    is fully visible in sysfs by the time we query it.
     """
+    subprocess.run(["udevadm", "settle"], check=False)
+
     proc = subprocess.run(
         ["lsblk", "-J", "-o", "PATH,TYPE", str(target)],
         capture_output=True,
@@ -433,7 +445,8 @@ def _find_cloud_init_rootfs(target: Path) -> Path:
 
     raise FlashError(
         f"no partition on {target} appears to have cloud-init installed "
-        "(checked for /etc/cloud/ on each partition)"
+        f"(checked for /etc/cloud/ on each partition); lsblk reported: "
+        f"{proc.stdout.strip()!r}"
     )
 
 
