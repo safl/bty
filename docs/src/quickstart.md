@@ -144,13 +144,27 @@ workflow. Workflow tasks reference `$BTY_ROOTFS` to drop config
 files, install seed credentials, etc. Requires `cijoe` on `PATH`
 (install via `pipx install cijoe`).
 
+*Functional from milestone 10.* Interactive flashing via the TUI:
+
+```bash
+sudo bty-tui
+```
+
+The TUI lists available images (left pane) and block devices (right
+pane). Cursor between the panes, select with Enter, then press `F`
+to flash. A modal shows the plan and any validation errors; confirm
+to run. A status modal streams the result.
+
+Without root the TUI still launches in a read-only mode (you can
+inspect lists), but the `F` action refuses with a status message.
+Requires the `[tui]` install extra (`pipx install "bty-lab[tui]"`).
+
 See [Reference > CLI](reference.md#cli) for the full surface.
 
 ## What is coming
 
 | Milestone | Capability |
 |-----------|------------|
-| 10        | `bty-tui` interactive UI in the live env |
 | 11-12     | `bty-web` server + browser UI |
 | 13        | `bty-media` server image |
 | 14        | Network-flash end-to-end over iPXE |

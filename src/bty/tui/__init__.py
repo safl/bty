@@ -1,12 +1,36 @@
 """bty.tui — terminal UI on top of bty.
 
-Requires the ``[tui]`` install extra. Real implementation lands in a later
-milestone; this is a scaffold so the ``bty-tui`` console-script wiring is
-exercised end-to-end.
+This module is intentionally lightweight: it imports nothing from
+:mod:`textual` at module level so a CLI-only install
+(``pipx install bty-lab`` without the ``[tui]`` extra) can still
+``import bty.tui`` for introspection without crashing. The actual
+textual app lives in :mod:`bty.tui._app`, which is loaded only when
+``bty-tui`` is invoked.
 """
+
+from __future__ import annotations
+
+import sys
 
 import bty
 
 
 def main() -> None:
-    print(f"bty-tui {bty.__version__}: scaffold only — TUI lands in milestone 10")
+    """Console-script entry point for ``bty-tui``.
+
+    Defers loading the textual app until invocation time so a missing
+    ``[tui]`` extra produces a clear "reinstall with extras" message
+    rather than a raw ``ModuleNotFoundError``.
+    """
+    try:
+        from bty.tui._app import BtyTui
+    except ImportError as exc:
+        print(
+            f"bty-tui {bty.__version__}: required dependency is not installed "
+            f"({exc.name or exc}); reinstall with "
+            '`pipx install "bty-lab[tui]"`',
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    BtyTui().run()
