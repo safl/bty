@@ -490,9 +490,13 @@ def apply_cijoe(
 
     Mounts the largest partition on ``target`` (heuristic for the
     rootfs), exports ``BTY_ROOTFS`` pointing at the mount, then invokes
-    ``cijoe <workflow> [-c <config>] --monitor``. The workflow's tasks
+    ``cijoe <workflow> -c <config> --monitor``. The workflow's tasks
     can read / mutate the rootfs through ``$BTY_ROOTFS``; bty itself
     does not interpret what the workflow does.
+
+    cijoe requires a config file even for trivial workflows. When the
+    operator does not supply ``--cijoe-config``, bty synthesises a
+    minimal default into the working tempdir so the workflow can run.
 
     Raises :class:`FlashError` if ``cijoe`` is not installed, the
     workflow / config files are missing, the rootfs cannot be mounted,
@@ -507,8 +511,17 @@ def apply_cijoe(
 
     rootfs = _find_largest_partition(target)
 
-    with tempfile.TemporaryDirectory(prefix="bty-cijoe-") as mp:
-        mount_point = Path(mp)
+    with tempfile.TemporaryDirectory(prefix="bty-cijoe-") as workdir:
+        workdir_path = Path(workdir)
+        mount_point = workdir_path / "rootfs"
+        mount_point.mkdir()
+
+        if config is not None:
+            effective_config = config
+        else:
+            effective_config = workdir_path / "cijoe-config.toml"
+            effective_config.write_text(_default_cijoe_config())
+
         rc = subprocess.run(["mount", str(rootfs), str(mount_point)], check=False).returncode
         if rc != 0:
             raise FlashError(f"failed to mount {rootfs} at {mount_point}")
@@ -516,10 +529,13 @@ def apply_cijoe(
             env = os.environ.copy()
             env["BTY_ROOTFS"] = str(mount_point)
 
-            cmd = ["cijoe", str(workflow), "--monitor"]
-            if config is not None:
-                cmd.extend(["-c", str(config)])
-
+            cmd = [
+                "cijoe",
+                str(workflow),
+                "--monitor",
+                "-c",
+                str(effective_config),
+            ]
             rc = subprocess.run(cmd, env=env, check=False).returncode
             if rc != 0:
                 raise FlashError(f"cijoe workflow exited {rc}")
@@ -527,6 +543,11 @@ def apply_cijoe(
             subprocess.run(["sync"], check=False)
         finally:
             subprocess.run(["umount", str(mount_point)], capture_output=True, check=False)
+
+
+def _default_cijoe_config() -> str:
+    """Synthesise the minimum cijoe config that satisfies cijoe's loader."""
+    return "[cijoe.workflow]\nfail_fast = true\n"
 
 
 def _find_largest_partition(target: Path) -> Path:
