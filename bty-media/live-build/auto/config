@@ -16,7 +16,5 @@ lb config noauto \
     --memtest none \
     --apt-recommends false \
     --security false \
-    --updates false \
-    --backports false \
     --bootappend-live "boot=live components quiet noeject" \
     "${@}"
