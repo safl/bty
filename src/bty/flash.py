@@ -21,9 +21,12 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import stat
 import subprocess
 import sys
+import tempfile
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import IO, Any
@@ -345,6 +348,109 @@ def _sync_and_partprobe(target: Path) -> None:
     """Flush kernel buffers and ask the kernel to re-read ``target``'s partition table."""
     subprocess.run(["sync"], check=False)
     subprocess.run(["partprobe", str(target)], check=False)
+
+
+# ---------- Provisioning: cloud-init ----------------------------------------
+
+
+def apply_cloud_init(
+    target: Path,
+    user_data: Path,
+    meta_data: Path | None = None,
+) -> None:
+    """Drop NoCloud seed files into the target's cloud-init-enabled rootfs.
+
+    Mounts the partition on ``target`` whose rootfs contains ``/etc/cloud/``
+    (the unambiguous "cloud-init lives here" marker), writes
+    ``user-data`` and ``meta-data`` under
+    ``/var/lib/cloud/seed/nocloud-net/`` on it, then unmounts. cloud-init
+    picks the seed up on first boot via the NoCloud datasource.
+
+    Raises :class:`FlashError` when the target has no cloud-init-enabled
+    rootfs partition, or when mounting / writing fails.
+    """
+    if not user_data.exists():
+        raise FlashError(f"user-data file not found: {user_data}")
+    if meta_data is not None and not meta_data.exists():
+        raise FlashError(f"meta-data file not found: {meta_data}")
+
+    rootfs = _find_cloud_init_rootfs(target)
+
+    with tempfile.TemporaryDirectory(prefix="bty-cloud-init-") as mp:
+        mount_point = Path(mp)
+        rc = subprocess.run(["mount", str(rootfs), str(mount_point)], check=False).returncode
+        if rc != 0:
+            raise FlashError(f"failed to mount {rootfs} at {mount_point}")
+        try:
+            seed_dir = mount_point / "var" / "lib" / "cloud" / "seed" / "nocloud-net"
+            seed_dir.mkdir(parents=True, exist_ok=True)
+
+            shutil.copy2(user_data, seed_dir / "user-data")
+            if meta_data is not None:
+                shutil.copy2(meta_data, seed_dir / "meta-data")
+            else:
+                (seed_dir / "meta-data").write_text(_default_meta_data())
+
+            subprocess.run(["sync"], check=False)
+        finally:
+            subprocess.run(["umount", str(mount_point)], check=False)
+
+
+def _default_meta_data() -> str:
+    """Synthesise a minimal NoCloud meta-data with a unique instance-id."""
+    instance_id = "bty-" + uuid.uuid4().hex[:12]
+    return f"instance-id: {instance_id}\nlocal-hostname: bty-host\n"
+
+
+def _find_cloud_init_rootfs(target: Path) -> Path:
+    """Return the partition device on ``target`` that has cloud-init installed.
+
+    Iterates partitions reported by ``lsblk -J``, mounts each read-only,
+    and returns the first whose rootfs contains ``/etc/cloud/``. Raises
+    :class:`FlashError` if no such partition is found.
+    """
+    proc = subprocess.run(
+        ["lsblk", "-J", "-o", "PATH,TYPE", str(target)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        raise FlashError(f"lsblk failed for {target}: {proc.stderr.strip()}")
+
+    payload = json.loads(proc.stdout)
+    devices = payload.get("blockdevices", [])
+    if not devices:
+        raise FlashError(f"no block devices reported for {target}")
+
+    children = devices[0].get("children") or []
+    for entry in children:
+        if entry.get("type") != "part":
+            continue
+        part_path = Path(entry["path"])
+        if _partition_has_cloud_init(part_path):
+            return part_path
+
+    raise FlashError(
+        f"no partition on {target} appears to have cloud-init installed "
+        "(checked for /etc/cloud/ on each partition)"
+    )
+
+
+def _partition_has_cloud_init(part: Path) -> bool:
+    """Mount ``part`` read-only briefly; return True if ``/etc/cloud/`` exists."""
+    with tempfile.TemporaryDirectory(prefix="bty-probe-") as mp:
+        rc = subprocess.run(
+            ["mount", "-r", str(part), mp],
+            capture_output=True,
+            check=False,
+        ).returncode
+        if rc != 0:
+            return False
+        try:
+            return (Path(mp) / "etc" / "cloud").is_dir()
+        finally:
+            subprocess.run(["umount", mp], capture_output=True, check=False)
 
 
 # ---------- Internal helpers --------------------------------------------------

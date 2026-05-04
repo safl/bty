@@ -48,7 +48,7 @@ Exit codes:
 - `0` -> success
 - `2` -> the path does not exist (or argparse rejected the invocation)
 
-### `bty flash --image PATH --target PATH [--provision MODE] [--dry-run] [--yes]`
+### `bty flash --image PATH --target PATH [--provision MODE] [--user-data PATH] [--meta-data PATH] [--dry-run] [--yes]`
 
 Flash an image onto a target block device.
 
@@ -87,9 +87,23 @@ to catch races (e.g. the target getting mounted between dry-run and
 flash). On success, `bty` runs `sync` and `partprobe TARGET` so the
 kernel re-reads the new partition table.
 
-Provisioning modes other than `none` are accepted but produce a
-warning ("not yet implemented; skipping post-flash provisioning") at
-this milestone. Real provisioning lands in milestones 7-9.
+#### Provisioning
+
+After the flash, `bty` runs the configured post-flash step:
+
+- **`none`** — no post-flash work; the cooked image is the result.
+- **`cloud-init`** — mounts the partition on the target whose rootfs
+  carries `/etc/cloud/` (the unambiguous "cloud-init lives here"
+  marker), writes operator-supplied `user-data` (and either supplied
+  or auto-synthesised `meta-data`) under
+  `/var/lib/cloud/seed/nocloud-net/` so cloud-init's NoCloud
+  datasource picks them up on first boot. **Requires `--user-data
+  PATH`**; rejects with exit `2` if the flag is missing. Errors
+  loudly if no partition on the target appears to have cloud-init
+  installed, rather than silently writing a seed nothing will read.
+- **`cijoe`** — accepted and validated but not yet implemented;
+  emits a "skipping post-flash provisioning" warning. Lands in
+  milestone 9.
 
 #### Exit codes
 

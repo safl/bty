@@ -92,6 +92,18 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="confirm the destructive write; required to actually flash the target",
     )
+    p_flash.add_argument(
+        "--user-data",
+        type=Path,
+        default=None,
+        help="cloud-init user-data file (required when --provision cloud-init)",
+    )
+    p_flash.add_argument(
+        "--meta-data",
+        type=Path,
+        default=None,
+        help="cloud-init meta-data file (optional; synthesised if omitted)",
+    )
     p_flash.set_defaults(func=cmd_flash)
 
     args = parser.parse_args(argv)
@@ -157,6 +169,13 @@ def cmd_flash(args: argparse.Namespace) -> int:
         )
         return 2
 
+    if args.provision == "cloud-init" and args.user_data is None:
+        print(
+            "bty: --user-data is required when --provision cloud-init",
+            file=sys.stderr,
+        )
+        return 2
+
     try:
         image_info = flash.probe_image(args.image)
     except FileNotFoundError as exc:
@@ -197,10 +216,10 @@ def cmd_flash(args: argparse.Namespace) -> int:
         )
         return 2
 
-    if plan.provisioning_mode != "none":
+    if plan.provisioning_mode == "cijoe":
         print(
-            f"bty: warning: provisioning mode {plan.provisioning_mode!r} is not yet "
-            "implemented (milestones 8-9); skipping post-flash provisioning",
+            "bty: warning: provisioning mode 'cijoe' is not yet "
+            "implemented (milestone 9); skipping post-flash provisioning",
             file=sys.stderr,
         )
 
@@ -213,6 +232,18 @@ def cmd_flash(args: argparse.Namespace) -> int:
     except flash.FlashError as exc:
         print(f"bty: flash failed: {exc}", file=sys.stderr)
         return 1
+
+    if plan.provisioning_mode == "cloud-init":
+        print(f"Applying cloud-init seed to {plan.target.path} ...")
+        try:
+            flash.apply_cloud_init(
+                plan.target.path,
+                args.user_data,
+                args.meta_data,
+            )
+        except flash.FlashError as exc:
+            print(f"bty: cloud-init seeding failed: {exc}", file=sys.stderr)
+            return 1
 
     written = plan.image.virtual_size_bytes or plan.image.size_bytes
     print(f"Done. Wrote ~{written} bytes to {plan.target.path}.")

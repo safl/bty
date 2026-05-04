@@ -10,6 +10,7 @@ can't (and shouldn't) actually run ``qemu-img`` / ``zstd`` / ``lsblk``.
 from __future__ import annotations
 
 import io
+import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -329,3 +330,85 @@ def test_execute_plan_refuses_when_target_now_mounted(
     plan = flash.make_plan(_img(), _tgt(), "none")
     with pytest.raises(flash.FlashError, match="now has mounted partitions"):
         flash.execute_plan(plan)
+
+
+# ---------- apply_cloud_init: arg validation + helper logic ------------------
+
+
+def test_apply_cloud_init_missing_user_data_raises(tmp_path: Path) -> None:
+    with pytest.raises(flash.FlashError, match="user-data file not found"):
+        flash.apply_cloud_init(Path("/dev/null"), tmp_path / "nope.yaml")
+
+
+def test_apply_cloud_init_missing_meta_data_raises(tmp_path: Path) -> None:
+    user = tmp_path / "user-data"
+    user.write_text("#cloud-config\n")
+    with pytest.raises(flash.FlashError, match="meta-data file not found"):
+        flash.apply_cloud_init(Path("/dev/null"), user, tmp_path / "nope.yaml")
+
+
+def test_default_meta_data_has_unique_instance_id() -> None:
+    a = flash._default_meta_data()
+    b = flash._default_meta_data()
+    assert a != b
+    assert a.startswith("instance-id: bty-")
+    assert "local-hostname" in a
+
+
+def test_find_cloud_init_rootfs_returns_partition_with_marker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """First child partition that has /etc/cloud/ wins."""
+    fake_lsblk = MagicMock(
+        returncode=0,
+        stdout=json.dumps(
+            {
+                "blockdevices": [
+                    {
+                        "path": "/dev/loopX",
+                        "type": "disk",
+                        "children": [
+                            {"path": "/dev/loopXp1", "type": "part"},
+                            {"path": "/dev/loopXp2", "type": "part"},
+                        ],
+                    }
+                ]
+            }
+        ),
+    )
+    monkeypatch.setattr(flash.subprocess, "run", lambda *a, **kw: fake_lsblk)
+
+    seen: list[Path] = []
+
+    def fake_marker(part: Path) -> bool:
+        seen.append(part)
+        return part == Path("/dev/loopXp2")
+
+    monkeypatch.setattr(flash, "_partition_has_cloud_init", fake_marker)
+    rootfs = flash._find_cloud_init_rootfs(Path("/dev/loopX"))
+    assert rootfs == Path("/dev/loopXp2")
+    assert seen == [Path("/dev/loopXp1"), Path("/dev/loopXp2")]
+
+
+def test_find_cloud_init_rootfs_raises_when_no_partition_has_marker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_lsblk = MagicMock(
+        returncode=0,
+        stdout=json.dumps(
+            {
+                "blockdevices": [
+                    {
+                        "path": "/dev/loopX",
+                        "type": "disk",
+                        "children": [{"path": "/dev/loopXp1", "type": "part"}],
+                    }
+                ]
+            }
+        ),
+    )
+    monkeypatch.setattr(flash.subprocess, "run", lambda *a, **kw: fake_lsblk)
+    monkeypatch.setattr(flash, "_partition_has_cloud_init", lambda _p: False)
+
+    with pytest.raises(flash.FlashError, match=r"no partition.*has cloud-init"):
+        flash._find_cloud_init_rootfs(Path("/dev/loopX"))

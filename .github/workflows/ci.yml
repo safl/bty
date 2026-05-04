@@ -52,10 +52,15 @@ jobs:
       - uses: astral-sh/setup-uv@v8.1.0
         with:
           python-version: "3.12"
-      - name: Install qemu-utils + zstd for the integration test
+      - name: Install tools the integration tests need
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends qemu-utils zstd
+          sudo apt-get install -y --no-install-recommends \
+            qemu-utils \
+            zstd \
+            gdisk \
+            e2fsprogs \
+            parted
       - run: uv sync --all-extras --group dev
       # Integration tests use losetup + dd against a real loop device,
       # so they need root. The default pytest run excludes them via the

@@ -16,6 +16,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import tempfile
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -145,3 +146,113 @@ def test_flash_zst_to_loop_device_byte_correct(
 
     written = backing.read_bytes()[: len(payload)]
     assert written == payload
+
+
+# ---------- cloud-init application -------------------------------------------
+
+
+@pytest.fixture
+def cloud_init_loop_device(tmp_path: Path) -> Iterator[tuple[Path, Path]]:
+    """A loop-device with one ext4 partition and an ``/etc/cloud/`` marker.
+
+    Yields ``(loop_dev_path, partition_dev_path)``. apply_cloud_init's
+    rootfs probe should match the partition because it carries the
+    cloud-init marker.
+    """
+    for tool in ("sgdisk", "mkfs.ext4", "mount", "umount", "partprobe"):
+        if shutil.which(tool) is None:
+            pytest.skip(f"{tool} not available")
+
+    backing = tmp_path / "backing-ci.img"
+    subprocess.run(["truncate", "-s", "64M", str(backing)], check=True)
+
+    setup = subprocess.run(
+        ["losetup", "-f", "--show", "-P", str(backing)],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    loop_dev = Path(setup.stdout.strip())
+
+    try:
+        # GPT with a single partition filling the device.
+        subprocess.run(
+            ["sgdisk", "--new=1:0:0", "--typecode=1:8300", str(loop_dev)],
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(["partprobe", str(loop_dev)], check=False, capture_output=True)
+        partition = Path(f"{loop_dev}p1")
+
+        # Plant ext4 + a /etc/cloud/ marker so apply_cloud_init can find us.
+        subprocess.run(["mkfs.ext4", "-q", str(partition)], check=True)
+        with tempfile.TemporaryDirectory(prefix="bty-test-mount-") as mp:
+            subprocess.run(["mount", str(partition), mp], check=True)
+            try:
+                (Path(mp) / "etc" / "cloud").mkdir(parents=True)
+            finally:
+                subprocess.run(["umount", mp], check=True)
+
+        yield loop_dev, partition
+    finally:
+        subprocess.run(["losetup", "-d", str(loop_dev)], check=False)
+
+
+def test_apply_cloud_init_writes_seed_files(
+    tmp_path: Path,
+    cloud_init_loop_device: tuple[Path, Path],
+) -> None:
+    loop_dev, partition = cloud_init_loop_device
+
+    user_data = tmp_path / "user-data"
+    user_data.write_text("#cloud-config\nhostname: bty-integration-test\n")
+    meta_data = tmp_path / "meta-data"
+    meta_data.write_text("instance-id: bty-test-001\nlocal-hostname: bty-it\n")
+
+    flash.apply_cloud_init(loop_dev, user_data, meta_data)
+
+    # Mount and verify the seed landed at the canonical NoCloud path.
+    with tempfile.TemporaryDirectory(prefix="bty-verify-") as mp:
+        subprocess.run(["mount", str(partition), mp], check=True)
+        try:
+            seed_dir = Path(mp) / "var" / "lib" / "cloud" / "seed" / "nocloud-net"
+            assert (seed_dir / "user-data").read_text() == user_data.read_text()
+            assert (seed_dir / "meta-data").read_text() == meta_data.read_text()
+        finally:
+            subprocess.run(["umount", mp], check=True)
+
+
+def test_apply_cloud_init_synthesises_meta_data(
+    tmp_path: Path,
+    cloud_init_loop_device: tuple[Path, Path],
+) -> None:
+    loop_dev, partition = cloud_init_loop_device
+
+    user_data = tmp_path / "user-data"
+    user_data.write_text("#cloud-config\n")
+
+    flash.apply_cloud_init(loop_dev, user_data, meta_data=None)
+
+    with tempfile.TemporaryDirectory(prefix="bty-verify-") as mp:
+        subprocess.run(["mount", str(partition), mp], check=True)
+        try:
+            meta = (
+                Path(mp) / "var" / "lib" / "cloud" / "seed" / "nocloud-net" / "meta-data"
+            ).read_text()
+            assert meta.startswith("instance-id: bty-")
+            assert "local-hostname" in meta
+        finally:
+            subprocess.run(["umount", mp], check=True)
+
+
+def test_apply_cloud_init_errors_on_image_without_marker(
+    tmp_path: Path,
+    loop_device: tuple[Path, Path],
+) -> None:
+    """A bare loop device (no /etc/cloud/) is rejected as not cloud-init-enabled."""
+    loop_dev, _ = loop_device
+    user_data = tmp_path / "user-data"
+    user_data.write_text("#cloud-config\n")
+
+    with pytest.raises(flash.FlashError, match="cloud-init"):
+        flash.apply_cloud_init(loop_dev, user_data)

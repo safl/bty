@@ -109,9 +109,23 @@ sudo bty flash --image /var/lib/bty/images/my-image.qcow2 \
 
 `--dry-run` prints a plan and validates without writing. `--yes` is
 the explicit consent token for the destructive write — `bty flash`
-refuses to do anything without one or the other. Provisioning modes
-other than `none` are accepted but currently warn "not yet
-implemented" (lands in milestones 7-9).
+refuses to do anything without one or the other.
+
+*Functional from milestone 8.* Cloud-init seeding after the flash:
+
+```bash
+sudo bty flash --image /var/lib/bty/images/debian.qcow2 \
+               --target /dev/sdX \
+               --provision cloud-init \
+               --user-data ./userdata.yaml \
+               --yes
+```
+
+`bty` mounts the cloud-init-enabled rootfs partition on the target,
+drops `user-data` (and a synthesised `meta-data` if `--meta-data` is
+not supplied) under `/var/lib/cloud/seed/nocloud-net/`, and unmounts.
+On first boot the OS picks up the seed via cloud-init's NoCloud
+datasource.
 
 See [Reference > CLI](reference.md#cli) for the full surface.
 
@@ -119,7 +133,7 @@ See [Reference > CLI](reference.md#cli) for the full surface.
 
 | Milestone | Capability |
 |-----------|------------|
-| 7-9       | Provisioning: `none`, `cloud-init`, `cijoe` (offline) |
+| 9         | Provisioning: `cijoe` (offline mode) |
 | 10        | `bty-tui` interactive UI in the live env |
 | 11-12     | `bty-web` server + browser UI |
 | 13        | `bty-media` server image |

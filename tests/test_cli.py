@@ -191,7 +191,78 @@ def test_flash_yes_path_propagates_validation_failure(
     assert "Validation: FAILED" in out
 
 
-def test_flash_provision_non_none_warns_but_proceeds(
+def test_flash_cloud_init_requires_user_data(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    img = tmp_path / "x.img"
+    img.write_bytes(b"\0")
+    rc = cli.main(
+        [
+            "flash",
+            "--image",
+            str(img),
+            "--target",
+            "/dev/null",
+            "--provision",
+            "cloud-init",
+            "--dry-run",
+        ]
+    )
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "--user-data is required" in err
+
+
+def test_flash_cloud_init_invokes_apply_cloud_init(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    img = tmp_path / "x.img"
+    img.write_bytes(b"\0" * 1024)
+    user_data = tmp_path / "user-data"
+    user_data.write_text("#cloud-config\n")
+
+    monkeypatch.setattr(
+        "bty.cli.flash.probe_target",
+        lambda p: cli.flash.TargetInfo(
+            path=p,
+            exists=True,
+            is_block_device=True,
+            size_bytes=10**9,
+            mountpoints=[],
+        ),
+    )
+    monkeypatch.setattr("bty.cli.os.geteuid", lambda: 0)
+    monkeypatch.setattr("bty.cli.flash.execute_plan", lambda plan: None)
+
+    captured: list[tuple[Path, Path, Path | None]] = []
+    monkeypatch.setattr(
+        "bty.cli.flash.apply_cloud_init",
+        lambda target, ud, md=None: captured.append((target, ud, md)),
+    )
+
+    rc = cli.main(
+        [
+            "flash",
+            "--image",
+            str(img),
+            "--target",
+            "/dev/loop9",
+            "--provision",
+            "cloud-init",
+            "--user-data",
+            str(user_data),
+            "--yes",
+        ]
+    )
+    assert rc == 0
+    assert captured == [(Path("/dev/loop9"), user_data, None)]
+    out = capsys.readouterr().out
+    assert "Applying cloud-init seed" in out
+
+
+def test_flash_cijoe_warns_but_proceeds(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
@@ -220,10 +291,11 @@ def test_flash_provision_non_none_warns_but_proceeds(
             "--target",
             "/dev/loop9",
             "--provision",
-            "cloud-init",
+            "cijoe",
             "--yes",
         ]
     )
     assert rc == 0
     err = capsys.readouterr().err
     assert "not yet implemented" in err
+    assert "milestone 9" in err
