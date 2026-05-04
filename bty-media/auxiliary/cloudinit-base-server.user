@@ -1,0 +1,61 @@
+#cloud-config
+# bty server appliance — base cloud-init userdata
+#
+# Tokens substituted by scripts/gen_userdata.py:
+#   __BTY_HOSTNAME__   - hostname for the appliance
+#   __BTY_TIMEZONE__   - IANA timezone
+#
+# Files under rootfs/common/ and rootfs/server/ are appended as a
+# write_files block by gen_userdata.py.
+
+hostname: __BTY_HOSTNAME__
+fqdn: __BTY_HOSTNAME__.local
+manage_etc_hosts: true
+
+timezone: __BTY_TIMEZONE__
+
+# Build VM only — the cooked image disables ssh_pwauth and clears the
+# bake password via runcmd below. Operators of the bty server work
+# from the browser UI, not over SSH.
+ssh_pwauth: true
+chpasswd:
+  expire: false
+  list: |
+    root:root
+
+# Server is persistent: let cloud-init grow root to fill the disk on
+# first boot. Image library / TFTP / iPXE assets live on the same
+# rootfs (later milestones may carve a separate /var partition).
+package_update: true
+package_upgrade: false
+packages:
+  # bty runtime + install paths (bty-lab[web] lands in phase B).
+  - python3
+  - python3-venv
+  - pipx
+  - git
+  - curl
+  - ca-certificates
+
+runcmd:
+  # Strip the bake password and disable password SSH for the cooked
+  # image. The browser UI is the supported admin surface.
+  - passwd -d root
+  - sed -i 's/^#*\s*PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
+
+  # Disable cloud-init for subsequent boots so the appliance does not
+  # try to re-provision. The bake VM's cloud-init has already done its
+  # job by the time this runs.
+  - touch /etc/cloud/cloud-init.disabled
+
+  # Clear cloud-init artefacts so the cooked image is identity-less.
+  - cloud-init clean --logs --seed || true
+
+  # Trim apt caches to keep the image small.
+  - apt-get clean
+  - rm -rf /var/lib/apt/lists/*
+
+power_state:
+  mode: poweroff
+  timeout: 30
+  message: "bty server image baked - powering off the build VM"

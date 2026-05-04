@@ -1,14 +1,19 @@
 doc: |
-  bty USB live appliance build
-  ============================
+  bty appliance image build
+  =========================
 
-  Build a bty USB-live appliance image from a Debian cloud image.
+  Build a bty appliance image from a Debian cloud image. The variant
+  ("usb" or "server") is selected by the cijoe config supplied with
+  ``-c configs/<variant>.toml`` — every step below derives the image
+  name as ``bty-<variant>-x86_64`` from that config, so this workflow
+  is variant-agnostic.
 
   Steps:
 
   1. ``gen_userdata`` assembles a cloud-init user-data file by inlining
-     every file under ``rootfs/`` as ``write_files`` entries on top of
-     the ``auxiliary/cloudinit-base.user`` template.
+     every file under ``rootfs/common/`` and ``rootfs/<variant>/`` as
+     ``write_files`` entries on top of the per-variant
+     ``auxiliary/cloudinit-base-<variant>.user`` template.
   2. ``diskimage_build`` downloads the Debian cloud image, resizes the
      boot disk, builds the cloud-init seed.iso, and boots QEMU.
      cloud-init provisions the system and powers off; ``qemu-img
@@ -22,10 +27,6 @@ steps:
 
 - name: diskimage_build
   uses: diskimage_build
-  with:
-    image_name: bty-usb-x86_64
 
 - name: img_zst_publish
   uses: img_zst_publish
-  with:
-    image_name: bty-usb-x86_64

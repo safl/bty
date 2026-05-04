@@ -113,6 +113,8 @@ bty-media/*.qcow2
 bty-media/*.iso
 bty-media/cijoe-output/
 bty-media/cijoe-archive/
+# Generated each build by scripts/gen_userdata.py; never edit by hand.
+bty-media/auxiliary/cloudinit-userdata.user
 
 # IDE
 .idea/

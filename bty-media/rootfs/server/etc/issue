@@ -1,0 +1,9 @@
+
+======================================================================
+  bty server (scaffold)
+
+  Pipeline materialised; bty-web service lands in milestone 13 phase B.
+  Browser UI: http://<host>:8080/ui  (once bty-web is wired up)
+======================================================================
+
+Debian \n \l

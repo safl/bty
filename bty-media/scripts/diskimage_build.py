@@ -31,11 +31,17 @@ DISK_SIZE = "12G"
 
 
 def add_args(parser: ArgumentParser):
-    parser.add_argument("--image_name", type=str, required=True)
+    parser.add_argument(
+        "--image_name",
+        type=str,
+        default=None,
+        help="Override the system-imaging image to build. Defaults to "
+        "bty-<variant>-x86_64 (variant from [bty] in the cijoe config).",
+    )
 
 
 def main(args, cijoe):
-    image_name = args.image_name
+    image_name = args.image_name or _default_image_name(cijoe)
     images = cijoe.getconf("system-imaging.images", {})
     image = images.get(image_name)
     if not image:
@@ -125,3 +131,9 @@ def main(args, cijoe):
     cijoe.run_local(f"cat {disk_path}.sha256")
 
     return 0
+
+
+def _default_image_name(cijoe) -> str:
+    bty = cijoe.getconf("bty", {})
+    variant = bty.get("variant", "usb")
+    return f"bty-{variant}-x86_64"
