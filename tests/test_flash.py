@@ -412,3 +412,28 @@ def test_find_cloud_init_rootfs_raises_when_no_partition_has_marker(
 
     with pytest.raises(flash.FlashError, match=r"no partition.*cloud-init installed"):
         flash._find_cloud_init_rootfs(Path("/dev/loopX"))
+
+
+def test_find_cloud_init_rootfs_handles_flat_lsblk_shape(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Some ``lsblk`` versions return the disk and its partitions as siblings
+    at the top level of ``blockdevices`` instead of nesting partitions under
+    ``children``. Verify we cope with that shape too.
+    """
+    fake_lsblk = MagicMock(
+        returncode=0,
+        stdout=json.dumps(
+            {
+                "blockdevices": [
+                    {"path": "/dev/loopX", "type": "loop"},
+                    {"path": "/dev/loopXp1", "type": "part"},
+                ]
+            }
+        ),
+    )
+    monkeypatch.setattr(flash.subprocess, "run", lambda *a, **kw: fake_lsblk)
+    monkeypatch.setattr(flash, "_partition_has_cloud_init", lambda p: p == Path("/dev/loopXp1"))
+
+    rootfs = flash._find_cloud_init_rootfs(Path("/dev/loopX"))
+    assert rootfs == Path("/dev/loopXp1")

@@ -431,15 +431,9 @@ def _find_cloud_init_rootfs(target: Path) -> Path:
         raise FlashError(f"lsblk failed for {target}: {proc.stderr.strip()}")
 
     payload = json.loads(proc.stdout)
-    devices = payload.get("blockdevices", [])
-    if not devices:
-        raise FlashError(f"no block devices reported for {target}")
+    partitions = _collect_partitions(payload.get("blockdevices", []))
 
-    children = devices[0].get("children") or []
-    for entry in children:
-        if entry.get("type") != "part":
-            continue
-        part_path = Path(entry["path"])
+    for part_path in partitions:
         if _partition_has_cloud_init(part_path):
             return part_path
 
@@ -448,6 +442,23 @@ def _find_cloud_init_rootfs(target: Path) -> Path:
         f"(checked for /etc/cloud/ on each partition); lsblk reported: "
         f"{proc.stdout.strip()!r}"
     )
+
+
+def _collect_partitions(entries: list[dict[str, Any]]) -> list[Path]:
+    """Walk an ``lsblk -J`` tree and return every entry of type ``part``.
+
+    Different ``lsblk`` versions / option combinations sometimes return
+    a tree (parent with ``children``) and sometimes a flat sibling list
+    when the user passes a device path; both shapes are handled.
+    """
+    out: list[Path] = []
+    for entry in entries:
+        if entry.get("type") == "part" and entry.get("path"):
+            out.append(Path(entry["path"]))
+        children = entry.get("children")
+        if children:
+            out.extend(_collect_partitions(children))
+    return out
 
 
 def _partition_has_cloud_init(part: Path) -> bool:
