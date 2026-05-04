@@ -3,13 +3,22 @@
 #
 # live-build invokes this script when (re)configuring the build dir
 # (typically the first ``lb build`` run). Encodes our lb config args:
-# Debian trixie, amd64, netboot output (kernel + initrd + squashfs),
-# no debian-installer, no memtest, no apt recommends.
+# Debian bookworm, amd64, netboot output (kernel + initrd + squashfs),
+# no debian-installer, no memtest, no apt recommends, no security.
+#
+# bookworm rather than trixie because the live-build version Ubuntu
+# ships still expects the older top-level ``dists/<release>/Contents-
+# amd64.gz`` URL pattern; trixie publishes that file only under the
+# per-component path (``dists/trixie/main/Contents-amd64.gz``), so
+# live-build's kernel-version probe 404s on trixie. bookworm's repo
+# layout matches what live-build expects. Disk-image variants
+# (usb / server) keep using trixie since they bake the cloud image
+# directly with QEMU and don't invoke live-build at all.
 set -e
 
 lb config noauto \
     --mode debian \
-    --distribution trixie \
+    --distribution bookworm \
     --architectures amd64 \
     --binary-images netboot \
     --debian-installer false \
