@@ -39,7 +39,8 @@ bty-tui = "bty.tui:main"
 bty-web = "bty.web:main"
 
 [project.urls]
-Homepage = "https://github.com/safl/bty"
+Homepage = "https://safl.dk/bty/"
+Documentation = "https://safl.dk/bty/"
 Repository = "https://github.com/safl/bty"
 
 [build-system]
