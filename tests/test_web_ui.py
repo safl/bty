@@ -169,6 +169,82 @@ def test_ui_machine_upsert_via_form(client: TestClient) -> None:
     assert api.status_code == 200
     assert api.json()["image"] == "demo.qcow2"
     assert api.json()["hostname"] == "bty-ui-test"
+    # Form omits boot_policy -> dependency default applies (local).
+    assert api.json()["boot_policy"] == "local"
+
+
+def test_ui_machine_upsert_persists_boot_policy_flash(client: TestClient) -> None:
+    _login(client)
+    r = client.post(
+        "/ui/machines/aa:bb:cc:dd:ee:ff",
+        data={
+            "image": "demo.qcow2",
+            "provisioning_mode": "none",
+            "hostname": "",
+            "cijoe_workflow_ref": "",
+            "boot_policy": "flash",
+        },
+    )
+    assert r.status_code == 303
+    api = client.get(
+        "/machines/aa:bb:cc:dd:ee:ff",
+        headers={"Authorization": f"Bearer {TEST_TOKEN}"},
+    )
+    assert api.json()["boot_policy"] == "flash"
+
+
+def test_ui_machine_upsert_rejects_unknown_boot_policy(client: TestClient) -> None:
+    _login(client)
+    r = client.post(
+        "/ui/machines/aa:bb:cc:dd:ee:ff",
+        data={
+            "image": "demo.qcow2",
+            "provisioning_mode": "none",
+            "boot_policy": "yolo",
+        },
+    )
+    assert r.status_code == 400
+    assert "boot_policy" in r.text
+
+
+def test_ui_machine_detail_renders_boot_policy_dropdown(client: TestClient) -> None:
+    _login(client)
+    client.put(
+        "/machines/aa:bb:cc:dd:ee:ff",
+        json={"image": "demo.qcow2", "boot_policy": "flash"},
+        headers={"Authorization": f"Bearer {TEST_TOKEN}"},
+    )
+    r = client.get("/ui/machines/aa:bb:cc:dd:ee:ff")
+    assert r.status_code == 200
+    body = r.text
+    assert 'name="boot_policy"' in body
+    # Both options present, current value selected.
+    assert ">local</option>" in body
+    assert ">flash</option>" in body
+    assert 'value="flash" selected' in body or 'flash" selected' in body
+
+
+def test_ui_machines_list_shows_boot_policy_badge(client: TestClient) -> None:
+    _login(client)
+    client.put(
+        "/machines/aa:bb:cc:dd:ee:ff",
+        json={"image": "demo.qcow2", "boot_policy": "flash"},
+        headers={"Authorization": f"Bearer {TEST_TOKEN}"},
+    )
+    client.put(
+        "/machines/11:22:33:44:55:66",
+        json={"image": "demo.qcow2", "boot_policy": "local"},
+        headers={"Authorization": f"Bearer {TEST_TOKEN}"},
+    )
+    r = client.get("/ui/machines")
+    assert r.status_code == 200
+    body = r.text
+    # Both badges should appear in the table.
+    assert "bg-danger" in body and ">flash<" in body
+    assert "bg-secondary" in body and ">local<" in body
+    # Table header now has Boot column and Last flashed column.
+    assert "<th>Boot</th>" in body
+    assert "<th>Last flashed</th>" in body
 
 
 def test_ui_machine_delete_via_form(client: TestClient) -> None:

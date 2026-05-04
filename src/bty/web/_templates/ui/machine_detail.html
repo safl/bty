@@ -16,6 +16,8 @@
             <dd class="col-sm-9">{{ m.discovered_at or "—" }}</dd>
             <dt class="col-sm-3">Last seen</dt>
             <dd class="col-sm-9">{{ m.last_seen_at or "—" }}{% if m.last_seen_ip %} from <code>{{ m.last_seen_ip }}</code>{% endif %}</dd>
+            <dt class="col-sm-3">Last flashed</dt>
+            <dd class="col-sm-9">{{ m.last_flashed_at or "—" }}</dd>
             <dt class="col-sm-3">Created</dt>
             <dd class="col-sm-9">{{ m.created_at }}</dd>
             <dt class="col-sm-3">Updated</dt>
@@ -55,6 +57,23 @@
                 <input type="text" name="cijoe_workflow_ref" id="cijoe_workflow_ref"
                        class="form-control" value="{{ m.cijoe_workflow_ref or '' }}"
                        placeholder="(optional, used when provisioning is cijoe)">
+            </div>
+            <div class="mb-3">
+                <label class="form-label" for="boot_policy">Boot policy</label>
+                <select name="boot_policy" id="boot_policy" class="form-select">
+                    {% for policy in boot_policies %}
+                    <option value="{{ policy }}" {% if policy == m.boot_policy %}selected{% endif %}>{{ policy }}</option>
+                    {% endfor %}
+                </select>
+                <div class="form-text">
+                    <code>local</code>: PXE boots return sanboot (production / stable).
+                    <code>flash</code>: PXE boots chain into the live env so the box
+                    re-flashes the assigned image every time (per-job CI cadence).
+                    Completion (<code>POST /pxe/{mac}/done</code>) updates
+                    <em>last flashed</em> but never flips the policy — the operator
+                    flips back to <code>local</code> when they want the box to stop
+                    reflashing.
+                </div>
             </div>
             <div class="d-flex justify-content-between">
                 <button type="submit" class="btn btn-primary">Save</button>

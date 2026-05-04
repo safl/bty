@@ -33,7 +33,7 @@ import bty
 from bty import images as bty_images
 from bty.web import _db
 from bty.web._auth import SESSION_COOKIE, token_matches
-from bty.web._models import PROVISIONING_MODES
+from bty.web._models import BOOT_POLICIES, PROVISIONING_MODES
 
 # How long the browser cookie lives.
 COOKIE_MAX_AGE_SECONDS = 12 * 60 * 60
@@ -178,6 +178,7 @@ def register_ui_routes(
             m=_row_to_dict(row),
             images=bty_images.list_images(image_root),
             provisioning_modes=list(PROVISIONING_MODES),
+            boot_policies=list(BOOT_POLICIES),
         )
 
     @app.post(
@@ -191,11 +192,17 @@ def register_ui_routes(
         provisioning_mode: Annotated[str, Form()] = "none",
         hostname: Annotated[str, Form()] = "",
         cijoe_workflow_ref: Annotated[str, Form()] = "",
+        boot_policy: Annotated[str, Form()] = "local",
     ) -> RedirectResponse:
         if provisioning_mode not in PROVISIONING_MODES:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"invalid provisioning_mode: {provisioning_mode!r}",
+            )
+        if boot_policy not in BOOT_POLICIES:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"invalid boot_policy: {boot_policy!r}",
             )
         normalised = _normalise_mac(mac)
         now = _now_iso()
@@ -208,13 +215,15 @@ def register_ui_routes(
                 """
                 INSERT INTO machines
                     (mac, image, provisioning_mode, hostname,
-                     cijoe_workflow_ref, last_known_good, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, NULL, ?, ?)
+                     cijoe_workflow_ref, last_known_good,
+                     boot_policy, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?)
                 ON CONFLICT(mac) DO UPDATE SET
                     image              = excluded.image,
                     provisioning_mode  = excluded.provisioning_mode,
                     hostname           = excluded.hostname,
                     cijoe_workflow_ref = excluded.cijoe_workflow_ref,
+                    boot_policy        = excluded.boot_policy,
                     updated_at         = excluded.updated_at
                 """,
                 (
@@ -223,6 +232,7 @@ def register_ui_routes(
                     provisioning_mode,
                     hostname or None,
                     cijoe_workflow_ref or None,
+                    boot_policy,
                     created_at,
                     now,
                 ),
