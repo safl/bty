@@ -14,7 +14,7 @@ would defeat the offline-friendly design.
 | `sse.js`            | <https://cdn.jsdelivr.net/npm/htmx-ext-sse@2.2.3/sse.js>                      | 2.2.3   |
 
 All served by FastAPI under ``/static/`` at runtime. Hatchling includes
-this directory in the wheel automatically (no special config needed —
+this directory in the wheel automatically (no special config needed -
 all files under ``src/bty/`` ship by default).
 
 ## Refreshing

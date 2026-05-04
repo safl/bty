@@ -43,18 +43,18 @@ class FlashProgress:
     The ``event`` field is a stable string callers dispatch on. Current
     events:
 
-    - ``started``      — flash beginning; ``total_bytes`` is the image's
+    - ``started``      - flash beginning; ``total_bytes`` is the image's
       virtual size when known.
-    - ``writing``      — about to invoke the format-specific writer
+    - ``writing``      - about to invoke the format-specific writer
       (``dd`` / ``zstd | dd`` / ``qemu-img convert``).
-    - ``synced``       — kernel buffers flushed.
-    - ``partprobed``   — partition table re-read; flash hardware-complete.
-    - ``provisioning`` — emitted by ``cmd_flash`` around an
+    - ``synced``       - kernel buffers flushed.
+    - ``partprobed``   - partition table re-read; flash hardware-complete.
+    - ``provisioning`` - emitted by ``cmd_flash`` around an
       ``apply_cloud_init`` / ``apply_cijoe`` step (``note`` describes
       which mode).
-    - ``done``         — emitted by ``cmd_flash`` after every step
+    - ``done``         - emitted by ``cmd_flash`` after every step
       succeeded.
-    - ``failed``       — emitted on any :class:`FlashError`; ``note``
+    - ``failed``       - emitted on any :class:`FlashError`; ``note``
       carries the exception string. The exception is then re-raised.
 
     ``total_bytes`` is the image's virtual size in bytes when known; it
@@ -305,8 +305,8 @@ class FlashError(RuntimeError):
     the CLI and TUI) may want to surface as different exit codes /
     user-facing messages:
 
-    - :class:`FlashDependencyError` — a required external tool is missing.
-    - :class:`FlashRaceError` — the target's state changed between the
+    - :class:`FlashDependencyError` - a required external tool is missing.
+    - :class:`FlashRaceError` - the target's state changed between the
       last successful probe and the attempted write (it became mounted,
       stopped being a block device, etc.).
 
@@ -644,7 +644,7 @@ def _default_cijoe_config() -> str:
 def _find_largest_partition(target: Path) -> Path:
     """Return the largest partition device on ``target``.
 
-    Heuristic for "the rootfs" — works for typical cooked images where
+    Heuristic for "the rootfs" - works for typical cooked images where
     the root partition dominates the disk. Operators who need a
     different partition will get an explicit selector when one
     becomes necessary.
@@ -675,7 +675,7 @@ def _collect_partition_entries(entries: list[dict[str, Any]]) -> list[dict[str, 
     """Walk an ``lsblk -J`` tree; return raw entries of type ``part``.
 
     Variant of :func:`_collect_partitions` that yields the full entry
-    so callers can read additional fields (e.g. SIZE) — not just the path.
+    so callers can read additional fields (e.g. SIZE) - not just the path.
     """
     out: list[dict[str, Any]] = []
     for entry in entries:

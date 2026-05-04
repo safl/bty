@@ -15,7 +15,7 @@ into a per-variant staging directory:
 The cwd at run time is ``bty-media/`` (the Makefile cd's there before
 invoking cijoe), so the repo root is ``Path.cwd().parent``.
 
-No-op for the ``usb`` variant — the USB live image carries no bty
+No-op for the ``usb`` variant - the USB live image carries no bty
 runtime that needs the wheel.
 
 Retargetable: False
@@ -74,7 +74,7 @@ def main(args, cijoe):
         log.error(f"Expected exactly one wheel; found {len(wheels)}: {wheels}")
         return errno.E2BIG
 
-    # Drop any previously-staged wheel(s) under the target dir — we want
+    # Drop any previously-staged wheel(s) under the target dir - we want
     # exactly one for the consuming step's glob to be unambiguous.
     for stale in target_dir.glob("bty_lab-*.whl"):
         if stale.name != wheels[0].name:

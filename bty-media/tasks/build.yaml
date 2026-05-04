@@ -4,13 +4,13 @@ doc: |
 
   Build a bty appliance image from a Debian cloud image. The variant
   ("usb" or "server") is selected by the cijoe config supplied with
-  ``-c configs/<variant>.toml`` — every step below derives the image
+  ``-c configs/<variant>.toml`` - every step below derives the image
   name as ``bty-<variant>-x86_64`` from that config, so this workflow
   is variant-agnostic.
 
   Steps:
 
-  1. ``bty_wheel_stage`` (server variant only) — builds the bty-lab
+  1. ``bty_wheel_stage`` (server variant only) - builds the bty-lab
      wheel via ``uv build`` from the parent repo and stages it under
      ``rootfs/server/opt/bty/`` so ``gen_userdata`` can inline it.
   2. ``gen_userdata`` assembles a cloud-init user-data file by

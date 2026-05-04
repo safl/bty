@@ -1,6 +1,6 @@
 """SQLite-backed persistence for bty-web.
 
-Uses stdlib :mod:`sqlite3` — no SQLAlchemy or SQLModel dep. The schema
+Uses stdlib :mod:`sqlite3` - no SQLAlchemy or SQLModel dep. The schema
 is small enough to evolve by hand for now; a migration framework can
 be added when the need arises.
 
@@ -50,7 +50,7 @@ CREATE TABLE IF NOT EXISTS machines (
 # Columns that were added to ``machines`` after the original schema landed.
 # ``init_db`` ALTERs the table to add them when an older DB is opened, so
 # upgrades don't require operators to wipe ``state.db``. Each entry is
-# ``(name, sqlite-decl)`` — the decl includes any DEFAULT clause needed
+# ``(name, sqlite-decl)`` - the decl includes any DEFAULT clause needed
 # for the migration to populate existing rows.
 _ADDED_COLUMNS: tuple[tuple[str, str], ...] = (
     ("discovered_at", "TEXT"),

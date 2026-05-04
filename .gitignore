@@ -124,4 +124,4 @@ bty-media/live-build/config/includes.chroot/opt/bty/bty_lab-*.whl
 .idea/
 .vscode/
 
-# uv keeps uv.lock under version control — do NOT ignore it.
+# uv keeps uv.lock under version control - do NOT ignore it.

@@ -1,11 +1,11 @@
-"""bty — Boot & Target Utility.
+"""bty - Boot & Target Utility.
 
 Top-level package. Subpackages:
 
-- ``bty.cli`` — main command-line interface (image inspection, target
+- ``bty.cli`` - main command-line interface (image inspection, target
   discovery, flashing, provisioning).
-- ``bty.tui`` — terminal UI; requires the ``[tui]`` extra.
-- ``bty.web`` — HTTP server with browser UI; requires the ``[web]`` extra.
+- ``bty.tui`` - terminal UI; requires the ``[tui]`` extra.
+- ``bty.web`` - HTTP server with browser UI; requires the ``[web]`` extra.
 """
 
 from __future__ import annotations

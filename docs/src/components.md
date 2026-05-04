@@ -1,7 +1,7 @@
 # Components
 
-bty is one Python package — the `bty` module, distributed on PyPI as
-[`bty-lab`](https://pypi.org/project/bty-lab/) — with three console-script
+bty is one Python package - the `bty` module, distributed on PyPI as
+[`bty-lab`](https://pypi.org/project/bty-lab/) - with three console-script
 entry points, plus a sibling appliance-image builder (`bty-media/`).
 
 ## `bty` (CLI)
@@ -19,7 +19,7 @@ pipx install bty-lab
 ## `bty-tui` (Terminal UI)
 
 Terminal UI on top of the same library. Targeted at interactive use from
-a live environment where a graphical browser is not appropriate — a
+a live environment where a graphical browser is not appropriate - a
 serial console, an SSH session, or a minimal recovery image. Exposes the
 same operations as the CLI in a navigable form.
 
@@ -54,8 +54,8 @@ through the UI as **export** (download a single archive) and **import**
 (upload to restore).
 
 CIJOE produces a structured report on every workflow run. `bty-web`
-captures these reports — both for offline runs (sent back from the live
-environment) and online runs (executed by the server itself) — and
+captures these reports - both for offline runs (sent back from the live
+environment) and online runs (executed by the server itself) - and
 exposes them in the UI per machine and per run. Reports are downloadable
 in full, so an operator chasing a flaky reflash can inspect the
 complete log without leaving the browser.
@@ -88,7 +88,7 @@ The intended operator experience is appliance-grade:
    handful of options that cannot be sensibly defaulted (image library
    location, network interface for PXE serving, admin credential).
 4. From that point on, the server is configured entirely through the
-   web UI — no SSH, no config files, no package installs.
+   web UI - no SSH, no config files, no package installs.
 
 *Hardware targets.* The server image is built for `amd64` only:
 older Intel NUCs, discarded 1U servers, recent GMKtec mini-PCs, and
@@ -109,5 +109,5 @@ vehicle:
 - **Online (PXE / server).** After the target first-boots into its own
   OS, `bty-web` triggers a CIJOE workflow against the running machine
   and records the post-workflow state as that machine's known-good
-  baseline. The server — not the image — becomes the source of truth
+  baseline. The server - not the image - becomes the source of truth
   for "what this box is supposed to look like."

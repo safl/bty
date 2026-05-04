@@ -6,7 +6,7 @@ quickly see where bty overlaps with other tools and where it carves out
 its own niche. None of bty's individual features is unique; the
 *combination* is unusual.
 
-## Heavy fleet orchestrators — MAAS, Foreman, Tinkerbell, OpenStack Ironic
+## Heavy fleet orchestrators - MAAS, Foreman, Tinkerbell, OpenStack Ironic
 
 Same problem domain, an order of magnitude bigger.
 
@@ -21,18 +21,18 @@ Same problem domain, an order of magnitude bigger.
 These scale to data centers. bty fits on a NUC and runs in a homelab.
 Different tier of operator, different tier of complexity tax.
 
-## Image-deploy in similar shape — FOG Project, iVentoy, Clonezilla SE
+## Image-deploy in similar shape - FOG Project, iVentoy, Clonezilla SE
 
 The closest neighborhood.
 
-- **FOG Project** is the strongest direct parallel — MAC-keyed PXE
+- **FOG Project** is the strongest direct parallel - MAC-keyed PXE
   image deploy, web UI, very similar mental model. PHP, dated UX,
   Linux-target-leaning.
 - **iVentoy** is iPXE-based network deploy, lightweight,
   server-image-style. Closer to bty in feel; fewer features, less
   polish, partially closed.
 - **Clonezilla SE** (Server Edition) is what the legacy bty was wrapped
-  around — multicast disk imaging from a server. Powerful but more of a
+  around - multicast disk imaging from a server. Powerful but more of a
   tool than a platform.
 
 bty differs by being modern Python + iPXE, by serving both ad-hoc USB
@@ -40,7 +40,7 @@ and DevOps server in one project, by explicitly supporting non-Linux
 images, and by the online CIJOE post-clone customisation with
 known-good tracking.
 
-## Installer-based provisioners — Cobbler, Microsoft WDS/MDT
+## Installer-based provisioners - Cobbler, Microsoft WDS/MDT
 
 Different model. They orchestrate OS *installers* (kickstart, preseed,
 unattend) rather than deploying disk images. The result is a freshly
@@ -50,7 +50,7 @@ bty deliberately picks the image-clone model for speed and
 reproducibility. "Install Ubuntu from scratch" is too slow for the
 per-job CI cadence that motivates bty.
 
-## OS-specific image platforms — Fedora CoreOS, Flatcar, Bottlerocket, NixOS
+## OS-specific image platforms - Fedora CoreOS, Flatcar, Bottlerocket, NixOS
 
 Same image-deploy philosophy, but each pins you to a specific OS.
 
@@ -59,14 +59,14 @@ is exactly the case NixOS does not cover: when the image is dictated by
 hardware vendor or upstream (Ubuntu+NVIDIA driver tree, FreeBSD,
 Windows). bty lets you deploy whatever someone else has already cooked.
 
-## Image creation — Packer, mkosi, debian-live, jkab
+## Image creation - Packer, mkosi, debian-live, jkab
 
 Complementary, not competing. These build the cooked images that bty
 consumes. `bty-media` is itself in this category for its appliance
 images, but that is an internal concern; users mostly bring their own
 pre-built images for the targets they provision.
 
-## Manual flashers — dd, Etcher, Rufus, Ventoy
+## Manual flashers - dd, Etcher, Rufus, Ventoy
 
 Ventoy is the closest in spirit to bty's USB live (carry images on a
 stick, boot from it). Critical difference: Ventoy boots OS *installers*

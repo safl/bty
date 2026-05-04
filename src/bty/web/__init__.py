@@ -1,4 +1,4 @@
-"""bty.web — HTTP server with browser UI for fleet provisioning.
+"""bty.web - HTTP server with browser UI for fleet provisioning.
 
 This module is intentionally lightweight: it imports nothing from
 :mod:`fastapi` or :mod:`uvicorn` at module level so a CLI-only install

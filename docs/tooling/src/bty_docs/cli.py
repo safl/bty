@@ -19,7 +19,7 @@ def _docs_root() -> Path:
     for candidate in (cwd, cwd.parent):
         if (candidate / "src" / "conf.py").exists():
             return candidate
-    sys.exit("bty-docs: could not find src/conf.py — run from the docs directory (e.g. bty/docs)")
+    sys.exit("bty-docs: could not find src/conf.py - run from the docs directory (e.g. bty/docs)")
 
 
 def build_html() -> None:

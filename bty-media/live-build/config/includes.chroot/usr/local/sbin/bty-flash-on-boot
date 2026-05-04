@@ -11,10 +11,10 @@ operator is booting the live env interactively for debugging), the
 service exits 0 and the live env drops to its console.
 
 Recognised cmdline parameters:
-- ``bty.server=URL``       — base URL of the bty-web server
-- ``bty.mac=MAC``          — this machine's MAC (xx-xx-...)
-- ``bty.image_url=URL``    — direct URL to the image to flash
-- ``bty.provisioning=MODE``— 'none' / 'cloud-init' / 'cijoe'
+- ``bty.server=URL``       - base URL of the bty-web server
+- ``bty.mac=MAC``          - this machine's MAC (xx-xx-...)
+- ``bty.image_url=URL``    - direct URL to the image to flash
+- ``bty.provisioning=MODE``- 'none' / 'cloud-init' / 'cijoe'
                              (defaults to 'none' if absent)
 """
 

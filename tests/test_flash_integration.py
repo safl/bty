@@ -1,7 +1,7 @@
 """Integration tests for ``bty.flash`` against a real loop device.
 
 These tests actually invoke ``losetup``, ``dd``, ``zstd``, ``qemu-img``,
-and ``partprobe`` — the same external tools the production code calls.
+and ``partprobe`` - the same external tools the production code calls.
 They are gated on root and the availability of those binaries because
 ``losetup`` and writing to ``/dev/loopN`` require privileges that
 ordinary contributor checkouts won't have.

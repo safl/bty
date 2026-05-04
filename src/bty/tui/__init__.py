@@ -1,4 +1,4 @@
-"""bty.tui — terminal UI on top of bty.
+"""bty.tui - terminal UI on top of bty.
 
 This module is intentionally lightweight: it imports nothing from
 :mod:`textual` at module level so a CLI-only install

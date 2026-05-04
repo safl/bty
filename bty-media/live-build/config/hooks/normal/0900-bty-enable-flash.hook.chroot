@@ -1,5 +1,5 @@
 #!/bin/sh
-# 0900-bty-enable-flash.hook.chroot — enable the flash-on-boot service.
+# 0900-bty-enable-flash.hook.chroot - enable the flash-on-boot service.
 #
 # Runs after 0500-bty-install (CLI present) and after live-build's
 # default hooks. Creates the multi-user.target.wants symlink so the

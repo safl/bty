@@ -145,7 +145,7 @@ Default mode is `--progress=text` (one human-readable line per event
 on stderr); `--progress=none` silences lifecycle output entirely.
 
 The same callback shape (`bty.flash.ProgressCallback` /
-`bty.flash.FlashProgress`) drives the bty-tui's flash modal — so the
+`bty.flash.FlashProgress`) drives the bty-tui's flash modal - so the
 TUI's UI updates and the CLI's NDJSON stream consume the same event
 sequence.
 
@@ -155,10 +155,10 @@ sequence.
 |------|--------------------------------------------------------------------|
 | 0    | Success.                                                           |
 | 1    | Operation failed (validation rejected the plan; subprocess returned non-zero; cloud-init / cijoe step failed). |
-| 2    | Misuse — argparse error, missing required flag, missing input file (e.g. `--user-data` not on disk). |
-| 3    | Privilege required — operation needs root, run via `sudo`.         |
+| 2    | Misuse - argparse error, missing required flag, missing input file (e.g. `--user-data` not on disk). |
+| 3    | Privilege required - operation needs root, run via `sudo`.         |
 | 4    | Required external tool is not installed (e.g. `cijoe` missing).    |
-| 5    | Target raced — block device became mounted or disappeared between validation and write. |
+| 5    | Target raced - block device became mounted or disappeared between validation and write. |
 
 Agents should treat `0` as success and any other code as failure. Use
 the specific code to decide whether retry is meaningful (e.g. retry
@@ -190,12 +190,12 @@ is lower-case `aa:bb:cc:dd:ee:ff`):
 | `GET /static/*` | |
 
 **HTTP status semantics:**
-- `200` — success with body
-- `204` — success, no body (DELETE)
-- `400` — malformed input (e.g. invalid MAC)
-- `401` — missing or wrong bearer token
-- `404` — protected resource not found (e.g. machine record)
-- `422` — request body failed Pydantic validation (e.g. unknown
+- `200` - success with body
+- `204` - success, no body (DELETE)
+- `400` - malformed input (e.g. invalid MAC)
+- `401` - missing or wrong bearer token
+- `404` - protected resource not found (e.g. machine record)
+- `422` - request body failed Pydantic validation (e.g. unknown
   `provisioning_mode`)
 
 **Schema versioning.** Wire types are documented inline in
@@ -212,15 +212,15 @@ them with `PUT /machines/{mac}`. Subsequent `/pxe` contacts update
 those fields to detect machines that have stopped reporting.
 
 **Boot policy.** Each machine carries a `boot_policy`:
-- `local` (default) — every PXE boot returns the sanboot fallback
+- `local` (default) - every PXE boot returns the sanboot fallback
   even if an image is assigned. Stable / production stance.
-- `flash` — every PXE boot returns the live-env chain (kernel +
+- `flash` - every PXE boot returns the live-env chain (kernel +
   initrd over HTTP, with `bty.{server,mac,image_url,provisioning}`
   cmdline params), so the box reflashes itself every time. Per-job
   CI cadence.
 
 The completion signal `POST /pxe/{mac}/done` updates `last_flashed_at`
-but **never modifies `boot_policy`** — flipping back to `local` is an
+but **never modifies `boot_policy`** - flipping back to `local` is an
 explicit operator action via `PUT /machines/{mac}` so the per-job CI
 cadence survives across reflashes.
 
@@ -245,7 +245,7 @@ stream (auth: same Bearer/cookie dep). Subscribers receive an initial
 one fresh `machines-update` event after every mutation
 (`PUT`/`DELETE` and PXE auto-discovery). Used by the browser UI to
 avoid polling. Agents can subscribe instead of polling
-`GET /machines`, but the canonical state remains the JSON API — the
+`GET /machines`, but the canonical state remains the JSON API - the
 event payload is HTML for browser consumption.
 
 **Offline-friendly.** All client-side assets (Bootstrap CSS, HTMX,
@@ -277,7 +277,7 @@ session pre-copy) and PXE activation (writes
 `/etc/dnsmasq.d/bty-pxe-active.conf` + restarts dnsmasq via
 `bty-web-activate-pxe`). Both helpers live in `/usr/local/sbin/`
 and are invocable by user `bty` via the `/etc/sudoers.d/bty-web`
-NOPASSWD entry — no other privileged operations are exposed.
+NOPASSWD entry - no other privileged operations are exposed.
 
 ## Conventions agents can rely on
 
@@ -296,7 +296,7 @@ NOPASSWD entry — no other privileged operations are exposed.
 ## Don'ts
 
 - Don't parse human-readable table output. Use `--json`.
-- Don't depend on stderr message wording — only on exit codes.
+- Don't depend on stderr message wording - only on exit codes.
 - Don't depend on internal module paths (`bty.tui._app`,
   `bty.flash._partition_has_cloud_init`, etc.). They are private.
 - Don't expect bty to write files outside the configured image root,
@@ -304,8 +304,8 @@ NOPASSWD entry — no other privileged operations are exposed.
 
 ## Where to look next
 
-- [`PLAN.md`](PLAN.md) — roadmap, motivation, OS scope.
-- [`docs/src/reference.md`](docs/src/reference.md) — full CLI
+- [`PLAN.md`](PLAN.md) - roadmap, motivation, OS scope.
+- [`docs/src/reference.md`](docs/src/reference.md) - full CLI
   reference and configuration.
-- [`docs/src/quickstart.md`](docs/src/quickstart.md) — operator
+- [`docs/src/quickstart.md`](docs/src/quickstart.md) - operator
   walk-through.

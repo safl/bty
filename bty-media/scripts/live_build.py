@@ -5,7 +5,7 @@ Build the bty network-flash live env via live-build
 Drives Debian's live-build to produce kernel + initrd + squashfs
 artifacts that bty-server hosts over HTTP for PXE clients to chain
 into. Structurally different from ``diskimage_build`` (which bakes a
-.img.zst via QEMU + cloud-init) — live-build runs debootstrap,
+.img.zst via QEMU + cloud-init) - live-build runs debootstrap,
 mksquashfs, and mkinitramfs directly on the build host, no QEMU.
 
 Workflow:

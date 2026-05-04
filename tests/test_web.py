@@ -326,7 +326,7 @@ def test_secrets_token_urlsafe_acceptable_token() -> None:
 
 
 def test_machine_default_boot_policy_is_local(app_client: TestClient) -> None:
-    """A fresh PUT without an explicit boot_policy gets ``local`` —
+    """A fresh PUT without an explicit boot_policy gets ``local`` -
     operators opt INTO reflashing on every boot."""
     r = app_client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
@@ -374,7 +374,7 @@ def test_pxe_local_policy_assigned_machine_returns_local_template(
     r = app_client.get("/pxe/aa:bb:cc:dd:ee:ff")
     assert r.status_code == 200
     body = r.text
-    # ipxe.j2 (placeholder local template) — explicitly NOT the flash chain
+    # ipxe.j2 (placeholder local template) - explicitly NOT the flash chain
     assert "kernel" not in body
     assert "bty.image_url" not in body
 

@@ -1,7 +1,7 @@
 """Tests for bty.flash.
 
 Validation logic (``make_plan`` / ``validate_plan`` / ``print_plan``) is
-exercised with hand-built ``ImageInfo`` / ``TargetInfo`` dataclasses —
+exercised with hand-built ``ImageInfo`` / ``TargetInfo`` dataclasses -
 no mocking. The probe functions, which actually shell out, get their
 own targeted tests; subprocess calls are patched there because tests
 can't (and shouldn't) actually run ``qemu-img`` / ``zstd`` / ``lsblk``.
@@ -225,7 +225,7 @@ def test_probe_target_missing_path(tmp_path: Path) -> None:
 
 
 def test_probe_target_regular_file(tmp_path: Path) -> None:
-    """A regular file is not a block device — covered without any patching."""
+    """A regular file is not a block device - covered without any patching."""
     target = tmp_path / "regular.txt"
     target.write_text("not a disk")
     info = flash.probe_target(target)

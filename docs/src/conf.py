@@ -27,15 +27,15 @@ exclude_patterns: list[str] = ["_build", "Thumbs.db", ".DS_Store"]
 
 # HTML output
 html_theme = "furo"
-html_title = "bty — Boot & Target Utility"
+html_title = "bty - Boot & Target Utility"
 html_static_path = ["_static"]
 
-# LaTeX / PDF output — pdflatex with sane UTF-8 (inputenc utf8). Avoid
+# LaTeX / PDF output - pdflatex with sane UTF-8 (inputenc utf8). Avoid
 # exotic Unicode (arrows, box-drawing) in docs sources; em-dashes and
 # smart quotes are fine.
 latex_engine = "pdflatex"
 latex_documents = [
-    ("index", "bty.tex", r"bty — Boot \& Target Utility", author, "manual"),
+    ("index", "bty.tex", r"bty - Boot \& Target Utility", author, "manual"),
 ]
 latex_elements = {
     "papersize": "a4paper",

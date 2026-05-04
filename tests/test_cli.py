@@ -1,7 +1,7 @@
 """End-to-end-ish tests for bty.cli.
 
 The flash tests call ``cli.cmd_flash`` directly with explicit
-dependency-injected fakes — no monkeypatching of module-level
+dependency-injected fakes - no monkeypatching of module-level
 references. Argparse-routing tests still go through ``cli.main`` to
 verify the wiring.
 """

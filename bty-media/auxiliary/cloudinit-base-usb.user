@@ -1,5 +1,5 @@
 #cloud-config
-# bty USB live appliance — base cloud-init userdata
+# bty USB live appliance - base cloud-init userdata
 #
 # Tokens substituted by scripts/gen_userdata.py:
 #   __BTY_HOSTNAME__   - hostname for the appliance

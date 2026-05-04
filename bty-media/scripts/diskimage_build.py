@@ -54,7 +54,7 @@ def main(args, cijoe):
 
     # Relative paths in the cijoe config resolve against bty-media/
     # (the cwd at build time). Absolute paths pass through unchanged
-    # — Python's ``Path("/abs") / "/other"`` returns the second path.
+    # - Python's ``Path("/abs") / "/other"`` returns the second path.
     cwd = Path.cwd()
     cloud_image_path = cwd / cloud["path"]
     cloud_image_url = cloud["url"]

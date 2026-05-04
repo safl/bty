@@ -24,11 +24,11 @@ The build downloads the Debian 13 cloud image, drives cloud-init in
 QEMU to bake the rootfs, partitions the disk (3 GB Debian root + 9 GB
 exFAT `BTY_IMAGES`), and emits:
 
-- `~/system_imaging/disk/bty-usb-x86_64.qcow2` — intermediate qcow2
+- `~/system_imaging/disk/bty-usb-x86_64.qcow2` - intermediate qcow2
   (useful for QEMU smoke tests).
-- `~/system_imaging/disk/bty-usb-x86_64.img.zst` — distributable
+- `~/system_imaging/disk/bty-usb-x86_64.img.zst` - distributable
   artifact (the file you `dd` to a USB stick).
-- `~/system_imaging/disk/bty-usb-x86_64.img.zst.sha256` — checksum.
+- `~/system_imaging/disk/bty-usb-x86_64.img.zst.sha256` - checksum.
 
 ## Flash a USB stick
 
@@ -67,7 +67,7 @@ live env auto-logins as root on `tty1` and shows a placeholder banner
 
 The rootfs is mounted read-only with a tmpfs overlay (`overlayroot`),
 so anything you change in the live env vanishes on reboot. The
-`BTY_IMAGES` partition is *not* overlaid — files you copied there
+`BTY_IMAGES` partition is *not* overlaid - files you copied there
 persist.
 
 ## What you can do today
@@ -108,7 +108,7 @@ sudo bty flash --image /var/lib/bty/images/my-image.qcow2 \
 ```
 
 `--dry-run` prints a plan and validates without writing. `--yes` is
-the explicit consent token for the destructive write — `bty flash`
+the explicit consent token for the destructive write - `bty flash`
 refuses to do anything without one or the other.
 
 *Functional from milestone 8.* Cloud-init seeding after the flash:
@@ -161,7 +161,7 @@ Requires the `[tui]` install extra (`pipx install "bty-lab[tui]"`).
 
 See [Reference > CLI](reference.md#cli) for the full surface.
 
-*Functional from milestone 11.* The bty-web HTTP server (no UI yet —
+*Functional from milestone 11.* The bty-web HTTP server (no UI yet -
 that lands in milestone 12). Useful for scripts and the future browser
 UI:
 
@@ -184,12 +184,12 @@ PXE clients hit `GET /pxe/{mac}` (open, no token) for the per-MAC
 iPXE config. End-to-end network flashing wires up in milestone 14.
 
 *Functional from milestone 12.* Browser UI at
-`http://server:8080/ui` — log in with the same token, browse the
+`http://server:8080/ui` - log in with the same token, browse the
 machines table (with a "discovered" badge for unassigned rows), edit
 assignments via the detail page form. The machines table updates
 **live** via Server-Sent Events: PXE-boot a target on the same network
 and the row appears without a refresh. All client-side assets
-(Bootstrap CSS, HTMX) are vendored in the wheel — the appliance does
+(Bootstrap CSS, HTMX) are vendored in the wheel - the appliance does
 not contact any external CDN at runtime.
 
 ## What is coming

@@ -15,10 +15,10 @@ from pydantic import BaseModel, Field
 MAC_PATTERN = r"^[0-9a-f]{2}(:[0-9a-f]{2}){5}$"
 
 # Provisioning modes accepted by ``bty flash`` / the API.
-# - ``none``         — boot the cooked image as-is.
-# - ``cloud-init``   — drop user-data into the seed; OS picks it up on first boot.
-# - ``cijoe``        — offline workflow run from the live env after flash.
-# - ``cijoe-online`` — online workflow run from bty-web after target boots
+# - ``none``         - boot the cooked image as-is.
+# - ``cloud-init``   - drop user-data into the seed; OS picks it up on first boot.
+# - ``cijoe``        - offline workflow run from the live env after flash.
+# - ``cijoe-online`` - online workflow run from bty-web after target boots
 #                      (milestone 15). Triggered by POST /pxe/{mac}/done; cijoe's
 #                      transport-retry handles waiting for SSH to come up.
 PROVISIONING_MODES = ("none", "cloud-init", "cijoe", "cijoe-online")
@@ -29,7 +29,7 @@ WORKFLOW_STATUSES = ("running", "success", "failed")
 WORKFLOW_STATUS_PATTERN = r"^(running|success|failed)$"
 
 # Boot-policy values: what ``GET /pxe/{mac}`` returns for an assigned
-# machine. ``local`` (the default) returns sanboot — the box boots
+# machine. ``local`` (the default) returns sanboot - the box boots
 # whatever is on its disk. ``flash`` returns the live-env chain so the
 # box re-flashes itself on every PXE boot (per-job CI cadence).
 # Decoupled from the completion signal: ``POST /pxe/{mac}/done`` updates
@@ -56,7 +56,7 @@ class MachineUpsert(BaseModel):
 class Machine(BaseModel):
     """A persisted machine record as returned by the API.
 
-    A machine without an ``image`` set is *discovered* but unassigned —
+    A machine without an ``image`` set is *discovered* but unassigned -
     bty-web saw it via ``GET /pxe/{mac}`` and recorded it so the
     operator can claim it. Once the operator ``PUT``s an assignment,
     the machine is *assigned*.

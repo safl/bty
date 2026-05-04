@@ -1,6 +1,6 @@
 """Tests for ``bty.web._sysconfig``.
 
-Subprocess invocations of the privileged helpers are mocked — the
+Subprocess invocations of the privileged helpers are mocked - the
 helpers run as root and we don't want the test suite shelling out
 to sudo. Filesystem helpers (``list_interfaces``, ``pxe_active``)
 are exercised against tmp paths so they don't depend on the host's

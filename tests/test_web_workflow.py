@@ -1,6 +1,6 @@
 """Tests for ``bty.web._workflow.WorkflowRunner``.
 
-Subprocess invocations of cijoe are mocked — a real cijoe binary
+Subprocess invocations of cijoe are mocked - a real cijoe binary
 isn't installed in the dev env's ``[web]`` extras, and we don't
 want the test suite to depend on the network either way. Each test
 seeds an in-memory machine record, kicks off a runner with a

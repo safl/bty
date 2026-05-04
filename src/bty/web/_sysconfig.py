@@ -3,7 +3,7 @@
 Each function shells out to a privileged helper script under
 ``/usr/local/sbin/`` via ``sudo -n``. The sudoers entry shipped on
 the bty server image (``/etc/sudoers.d/bty-web``) allows the ``bty``
-service user to invoke exactly two helpers without a password —
+service user to invoke exactly two helpers without a password -
 nothing else.
 
 The helpers do the actual writes; this module is the trust boundary
@@ -51,7 +51,7 @@ class SysConfigError(Exception):
 def list_interfaces(sysnet: Path = SYSNET_PATH) -> list[Interface]:
     """Return non-loopback network interfaces with their operstate.
 
-    Reads ``/sys/class/net/<iface>/operstate`` directly — no
+    Reads ``/sys/class/net/<iface>/operstate`` directly - no
     subprocess, no privileges. Returns an empty list on hosts where
     ``/sys/class/net`` doesn't exist (containers, tests).
     """
@@ -84,7 +84,7 @@ def pxe_active(active_path: Path = PXE_ACTIVE_PATH) -> PxeConfig | None:
 def rotate_token() -> str:
     """Invoke the rotation helper; return the new token on success.
 
-    Does NOT restart bty-web — by design, the operator copies the
+    Does NOT restart bty-web - by design, the operator copies the
     new token from the UI before triggering a restart so they can
     log back in afterwards.
     """

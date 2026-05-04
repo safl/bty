@@ -6,7 +6,7 @@ server startup. Requests to protected routes must carry
 :func:`secrets.compare_digest`.
 
 If the token is unset at startup, ``main()`` refuses to start the
-server — it fails closed by default.
+server - it fails closed by default.
 """
 
 from __future__ import annotations

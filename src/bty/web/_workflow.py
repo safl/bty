@@ -12,7 +12,7 @@ This module owns that orchestration:
    ``/var/lib/bty/keys/id_ed25519``.
 3. ``cijoe <workflow.yaml> --config <transport.toml> --monitor``
    runs in a daemon worker thread. cijoe's own transport-retry
-   handles waiting for SSH to come up — bty-web doesn't poll. A
+   handles waiting for SSH to come up - bty-web doesn't poll. A
    long timeout (default 30 min) keeps the thread from hanging
    forever if the target never appears.
 4. On exit (or exception), update the record to ``success`` /
@@ -24,7 +24,7 @@ thread-safe per-connection). It calls the ``publish_machines_changed``
 callable from the worker thread; :class:`MachineEventBus` makes that
 safe via the loop captured at app startup.
 
-Phase 1 deliberately keeps history to "last run only" — the older
+Phase 1 deliberately keeps history to "last run only" - the older
 output dirs accumulate under ``BTY_WORKFLOWS_DIR`` for inspection but
 the machine record only points at the most recent. A history table +
 auth-protected ``/workflows/{run_id}`` endpoint is left for phase 2.
@@ -44,7 +44,7 @@ from bty.web import _db
 
 log = logging.getLogger(__name__)
 
-DEFAULT_TIMEOUT_SECONDS = 30 * 60  # 30 min — covers a leisurely first boot.
+DEFAULT_TIMEOUT_SECONDS = 30 * 60  # 30 min - covers a leisurely first boot.
 DEFAULT_SSH_KEY = Path("/var/lib/bty/keys/id_ed25519")
 DEFAULT_WORKFLOWS_DIR = Path("/var/lib/bty/workflows")
 DEFAULT_CIJOE_BIN = str(Path(sys.executable).parent / "cijoe")
@@ -160,7 +160,7 @@ class WorkflowRunner:
                 """,
                 (now, status, str(run_dir), now, mac),
             )
-            # On 'running', also stamp the start time afresh — COALESCE
+            # On 'running', also stamp the start time afresh - COALESCE
             # above keeps the earlier value if a previous row left one
             # behind, but for a fresh kick-off we want the new start.
             if status == "running":

@@ -2,12 +2,12 @@
 
 Builds the bty appliance images. Three variants:
 
-- **USB live image** (`VARIANT=usb`) — bootable USB carrying the bty
+- **USB live image** (`VARIANT=usb`) - bootable USB carrying the bty
   runtime and a bundled image set, for the direct-flash workflow.
   Lands in milestone 2.
-- **Server image** (`VARIANT=server`) — installable disk image for the
+- **Server image** (`VARIANT=server`) - installable disk image for the
   bty provisioning server (`bty-web` + PXE boot stack).
-- **Network-flash live env** (`VARIANT=live`) — kernel + initrd +
+- **Network-flash live env** (`VARIANT=live`) - kernel + initrd +
   squashfs that PXE clients chain into. Carries the bty CLI plus a
   `bty-flash-on-boot.service` oneshot that reads `bty.*` parameters
   from `/proc/cmdline`, fetches the assigned image, runs `bty flash`,
@@ -21,26 +21,26 @@ and `rootfs/` files inlined into the image as cloud-init `write_files`.
 
 ## Layout
 
-- `Makefile` — entry points (`make deps`, `make build`, `make clean`).
+- `Makefile` - entry points (`make deps`, `make build`, `make clean`).
   Dispatches to `tasks/build.yaml` (usb / server) or `tasks/live.yaml`
   (live) based on `VARIANT`.
-- `configs/<variant>.toml` — cijoe config per variant
+- `configs/<variant>.toml` - cijoe config per variant
   (`usb.toml`, `server.toml`, `live.toml`).
-- `tasks/build.yaml` — usb / server pipeline (cloud-init bake in QEMU,
+- `tasks/build.yaml` - usb / server pipeline (cloud-init bake in QEMU,
   emits `.img.zst`).
-- `tasks/live.yaml` — live pipeline (live-build → kernel + initrd +
+- `tasks/live.yaml` - live pipeline (live-build → kernel + initrd +
   squashfs).
-- `scripts/` — Python steps invoked by either pipeline.
-- `auxiliary/cloudinit-base-<variant>.user` — per-variant cloud-init
+- `scripts/` - Python steps invoked by either pipeline.
+- `auxiliary/cloudinit-base-<variant>.user` - per-variant cloud-init
   base template (usb / server only).
-- `auxiliary/cloudinit-metadata.meta` — shared cloud-init metadata.
-- `rootfs/common/` — files baked into every disk-image variant.
-- `rootfs/<variant>/` — files baked into a single disk-image variant.
+- `auxiliary/cloudinit-metadata.meta` - shared cloud-init metadata.
+- `rootfs/common/` - files baked into every disk-image variant.
+- `rootfs/<variant>/` - files baked into a single disk-image variant.
   Each file becomes a cloud-init `write_files` entry whose `path`
   mirrors the file's path under the variant subdirectory. Binary
   files (anything that is not valid UTF-8) are emitted with
   `encoding: b64`.
-- `live-build/` — live-build config tree consumed by the live
+- `live-build/` - live-build config tree consumed by the live
   variant's pipeline (`auto/config`, `config/package-lists/`,
   `config/includes.chroot/`, etc.).
 
@@ -53,19 +53,19 @@ make build [VARIANT=usb|server]
 runs `cijoe tasks/build.yaml --monitor -c configs/$(VARIANT).toml`,
 which executes four steps:
 
-1. **`bty_wheel_stage`** (server variant only) — builds a `bty-lab`
+1. **`bty_wheel_stage`** (server variant only) - builds a `bty-lab`
    wheel from the parent repo via `uv build` and stages it under
    `rootfs/server/opt/bty/`. The wheel is base64-inlined into
    cloud-init by the next step and `pip install`ed into a system
    venv at `/opt/bty/venv` during the bake.
-2. **`gen_userdata`** — assembles the cloud-init userdata file by
+2. **`gen_userdata`** - assembles the cloud-init userdata file by
    inlining files under `rootfs/common/` and `rootfs/<variant>/` as
    `write_files` entries on top of `auxiliary/cloudinit-base-<variant>.user`.
-3. **`diskimage_build`** — downloads the Debian 13 cloud image,
+3. **`diskimage_build`** - downloads the Debian 13 cloud image,
    resizes the qcow2 boot disk, builds the cloud-init seed.iso, and
    boots QEMU. cloud-init provisions the system and powers off; the
    baked qcow2 is compacted via `qemu-img convert -c`.
-4. **`img_zst_publish`** — converts the qcow2 to raw and
+4. **`img_zst_publish`** - converts the qcow2 to raw and
    zstd-compresses the result into a `dd`-able `.img.zst`, alongside a
    sha256sum.
 
@@ -78,14 +78,14 @@ Disk-image variants (usb / server):
 - `zstd`
 - KVM acceleration (configured in `configs/<variant>.toml`); without
   it the cloud-init bake step is impractically slow
-- `uv` (server variant only — used by `bty_wheel_stage` to build the
+- `uv` (server variant only - used by `bty_wheel_stage` to build the
   bty-lab wheel; install with `pipx install uv` if needed)
 
 Live variant:
 - `live-build` (`sudo apt install live-build`)
 - `debootstrap`, `squashfs-tools`, `xorriso` (pulled in by
   `live-build`'s recommends, or install explicitly)
-- Passwordless `sudo` — live-build's chroot operations are
+- Passwordless `sudo` - live-build's chroot operations are
   privileged; CI runners have NOPASSWD by default
 
 All variants:
@@ -94,17 +94,17 @@ All variants:
 ## Output
 
 Disk-image variants (usb / server):
-- `~/system_imaging/disk/bty-<variant>-x86_64.qcow2` — baked, compacted
+- `~/system_imaging/disk/bty-<variant>-x86_64.qcow2` - baked, compacted
   qcow2 (intermediate; useful for QEMU smoke tests).
-- `~/system_imaging/disk/bty-<variant>-x86_64.img.zst` — final
+- `~/system_imaging/disk/bty-<variant>-x86_64.img.zst` - final
   artifact. Decompress with `zstd -d` and pipe to `dd` (or feed to a
   USB-imaging tool / VM disk that accepts `.img.zst`).
 
 Live variant:
-- `~/system_imaging/disk/bty-live-x86_64.vmlinuz` — kernel
-- `~/system_imaging/disk/bty-live-x86_64.initrd` — initramfs
-- `~/system_imaging/disk/bty-live-x86_64.squashfs` — overlay rootfs
-- `~/system_imaging/disk/bty-live-x86_64.sha256` — manifest
+- `~/system_imaging/disk/bty-live-x86_64.vmlinuz` - kernel
+- `~/system_imaging/disk/bty-live-x86_64.initrd` - initramfs
+- `~/system_imaging/disk/bty-live-x86_64.squashfs` - overlay rootfs
+- `~/system_imaging/disk/bty-live-x86_64.sha256` - manifest
 
 ## Status
 

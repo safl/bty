@@ -1,5 +1,5 @@
 #!/bin/sh
-# 0500-bty-install.hook.chroot — install bty-lab into the live env.
+# 0500-bty-install.hook.chroot - install bty-lab into the live env.
 #
 # live-build runs hooks under config/hooks/normal/ inside the chroot
 # during the build. Filenames are sorted; the 0500 prefix puts this
@@ -11,7 +11,7 @@
 #
 # Output: bty CLI on the live env's ``$PATH`` via
 # ``/usr/local/bin/{bty,bty-tui}`` symlinks pointing into a venv at
-# ``/opt/bty/venv``. No [web] / [tui] extras — the live env runs the
+# ``/opt/bty/venv``. No [web] / [tui] extras - the live env runs the
 # CLI only.
 
 set -eu
@@ -31,6 +31,6 @@ done
 ln -sf /opt/bty/venv/bin/bty /usr/local/bin/bty
 ln -sf /opt/bty/venv/bin/bty-tui /usr/local/bin/bty-tui
 
-# Trim pip caches and the build wheel — the appliance only needs the
+# Trim pip caches and the build wheel - the appliance only needs the
 # installed package.
 rm -rf /root/.cache /opt/bty/bty_lab-*-py3-none-any.whl

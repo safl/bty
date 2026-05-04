@@ -1,4 +1,4 @@
-# bty — Boot & Target Utility
+# bty - Boot & Target Utility
 
 ```{only} html
 [![CI](https://github.com/safl/bty/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/safl/bty/actions/workflows/ci.yml)
@@ -9,8 +9,8 @@
 ```
 
 Bare-metal provisioning toolkit. Flashes pre-built ("cooked") system
-images onto target disks — locally from a USB stick or remotely over
-PXE — and configures them via cloud-init or CIJOE workflows. Designed
+images onto target disks - locally from a USB stick or remotely over
+PXE - and configures them via cloud-init or CIJOE workflows. Designed
 for both ad-hoc one-off provisioning (USB live image) and DevOps fleet
 operation (server image with browser UI and iPXE).
 

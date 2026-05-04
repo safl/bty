@@ -412,7 +412,7 @@ def test_static_assets_served_locally(client: TestClient) -> None:
 
 def test_layout_has_no_external_origins(client: TestClient) -> None:
     """The login page (and by extension the layout) must not reference
-    any third-party origin — the appliance runs offline."""
+    any third-party origin - the appliance runs offline."""
     r = client.get("/ui/login")
     assert r.status_code == 200
     assert "cdn.jsdelivr.net" not in r.text
@@ -427,7 +427,7 @@ def test_sse_endpoint_requires_auth(client: TestClient) -> None:
     """The events stream must reject unauthenticated subscribers (same
     bearer/cookie check as the API).
 
-    We don't exercise the body here — TestClient's sync httpx hangs on
+    We don't exercise the body here - TestClient's sync httpx hangs on
     open-ended event streams. The streaming contract itself is covered
     by the unit tests in ``tests/test_web_events.py``.
     """

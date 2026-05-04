@@ -1,5 +1,5 @@
 {% extends "ui/_layout.html" %}
-{% block title %}Settings — bty-web{% endblock %}
+{% block title %}Settings - bty-web{% endblock %}
 {% block content %}
 <h1 class="h3 mb-4">Settings</h1>
 
@@ -10,7 +10,7 @@
         <p class="text-muted">
             Rotation generates a fresh URL-safe random token and writes it to
             <code>/etc/default/bty-web</code>. The change takes effect on the
-            next <code>bty-web</code> restart — until then the current token
+            next <code>bty-web</code> restart - until then the current token
             keeps working. Copy the new value before restarting the service.
         </p>
         {% if new_token %}

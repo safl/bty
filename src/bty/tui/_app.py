@@ -1,4 +1,4 @@
-"""bty.tui — textual terminal UI for image inspection and flashing.
+"""bty.tui - textual terminal UI for image inspection and flashing.
 
 Targeted at interactive use from a live environment (serial console, SSH
 session, minimal recovery image). Exposes the same operations as the
@@ -362,7 +362,7 @@ class BtyTui(App[None]):
     def _set_status(self, message: str) -> None:
         try:
             self.query_one("#status", Static).update(message)
-        except Exception:  # pragma: no cover — defensive during teardown
+        except Exception:  # pragma: no cover - defensive during teardown
             pass
 
     def _initial_status(self) -> str:

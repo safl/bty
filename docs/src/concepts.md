@@ -20,11 +20,11 @@ target machine's primary disk, selected by the live environment.
 
 What (if anything) runs on first boot. Three modes:
 
-- `none` — no post-flash configuration; reboot into the cooked image
+- `none` - no post-flash configuration; reboot into the cooked image
   as-is.
-- `cloud-init` — populate the OS's cloud-init seed (NoCloud datasource);
+- `cloud-init` - populate the OS's cloud-init seed (NoCloud datasource);
   the OS picks it up on first boot.
-- `cijoe` — run a CIJOE workflow that adjusts the deployed system to a
+- `cijoe` - run a CIJOE workflow that adjusts the deployed system to a
   known-good state. See the [components](components.md) chapter for the
   offline (USB live) vs. online (PXE/server) execution modes.
 
@@ -46,7 +46,7 @@ from this mount point by default (overridable with `--image-root` or
 `BTY_IMAGE_ROOT`).
 
 Operators populate the partition by mounting it on any Linux / macOS /
-Windows box — exFAT is universally readable — and dropping `.qcow2`,
+Windows box - exFAT is universally readable - and dropping `.qcow2`,
 `.img`, or `.img.zst` files into it. The partition is *not* under the
 overlayroot tmpfs, so files copied there persist on the stick.
 

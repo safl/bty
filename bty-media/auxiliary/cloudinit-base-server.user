@@ -1,5 +1,5 @@
 #cloud-config
-# bty server appliance — base cloud-init userdata
+# bty server appliance - base cloud-init userdata
 #
 # Tokens substituted by scripts/gen_userdata.py:
 #   __BTY_HOSTNAME__   - hostname for the appliance
@@ -15,7 +15,7 @@ manage_etc_hosts: true
 
 timezone: __BTY_TIMEZONE__
 
-# Build VM only — the cooked image disables ssh_pwauth and clears the
+# Build VM only - the cooked image disables ssh_pwauth and clears the
 # bake password via runcmd below. Operators of the bty server work
 # from the browser UI, not over SSH.
 ssh_pwauth: true
@@ -54,7 +54,7 @@ runcmd:
     for whl in /opt/bty/bty_lab-*-py3-none-any.whl; do
       /opt/bty/venv/bin/pip install --no-cache-dir "${whl}[web]"
     done
-    # Online cijoe (milestone 15) — bty-web shells out to ``cijoe`` to
+    # Online cijoe (milestone 15) - bty-web shells out to ``cijoe`` to
     # run a workflow against freshly-flashed targets. Same venv, same
     # PATH (``Path(sys.executable).parent / 'cijoe'`` resolves to
     # ``/opt/bty/venv/bin/cijoe`` for the runner).
@@ -63,7 +63,7 @@ runcmd:
   # PXE boot stack: stage the iPXE binaries under the TFTP root so
   # dnsmasq can serve them when the operator activates proxy-DHCP.
   # The package layout from `apt install ipxe` puts them under
-  # /usr/lib/ipxe/ — symlink rather than copy so package upgrades
+  # /usr/lib/ipxe/ - symlink rather than copy so package upgrades
   # carry through.
   - install -d -o root -g root -m 0755 /var/lib/tftpboot
   - ln -sf /usr/lib/ipxe/undionly.kpxe /var/lib/tftpboot/undionly.kpxe

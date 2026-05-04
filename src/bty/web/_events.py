@@ -33,7 +33,7 @@ class MachineEventBus:
     publisher: each subscriber's queue is bounded; if it's full when
     the publisher fires, the event is dropped for that subscriber and
     they will catch up on the next mutation. Trade-off favours
-    publisher latency over delivery completeness — acceptable for a
+    publisher latency over delivery completeness - acceptable for a
     UI-refresh stream because every event carries the full snapshot.
 
     ``publish`` may be called from any thread. ``attach`` captures the
@@ -68,7 +68,7 @@ class MachineEventBus:
                 # fall through to direct fanout (no-op for closed bus).
                 pass
         # No loop attached (unit tests for this module) or loop isn't
-        # running — direct fanout is safe in that case.
+        # running - direct fanout is safe in that case.
         self._fanout(event)
 
     def _fanout(self, event: MachineEvent) -> None:

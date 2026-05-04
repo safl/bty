@@ -54,7 +54,7 @@ def create_app(
     @asynccontextmanager
     async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
         # The SSE event bus accepts publishes from worker threads
-        # (WorkflowRunner) — capture the loop now so cross-thread
+        # (WorkflowRunner) - capture the loop now so cross-thread
         # publishes can hop in via call_soon_threadsafe.
         event_bus.attach(asyncio.get_running_loop())
         yield
@@ -160,7 +160,7 @@ def create_app(
         #   - boot_policy == 'flash' AND image       -> chain into live env
         #   - boot_policy == 'local' (default)       -> sanboot
         # Completion signal (POST /pxe/{mac}/done) updates last_flashed_at
-        # but never flips boot_policy — operator does that explicitly.
+        # but never flips boot_policy - operator does that explicitly.
         if machine.get("image") and machine.get("boot_policy") == "flash":
             host = request.headers.get("host", f"{request.url.hostname}:{request.url.port or 8080}")
             template = jinja.get_template("ipxe_flash.j2")
@@ -178,13 +178,13 @@ def create_app(
     def pxe_done(mac: str) -> Response:
         # Open route: the live env hits this from the PXE-booted target,
         # which has no token. Trust model: bty-web is for trusted
-        # networks (homelab / CI), not the open internet — same as the
+        # networks (homelab / CI), not the open internet - same as the
         # other ``/pxe/*`` endpoints.
         #
         # Only updates ``last_flashed_at`` and ``updated_at``. Does NOT
         # touch ``boot_policy``: if the operator wants the box to stop
         # reflashing on every boot they flip the policy themselves.
-        # This decoupling is deliberate — per-job CI cadence wants
+        # This decoupling is deliberate - per-job CI cadence wants
         # boot_policy=flash to stay flash across reflashes.
         normalised = _normalise_mac(mac)
         now = _now_iso()
@@ -205,7 +205,7 @@ def create_app(
         # post-boot provisioning, kick off a workflow run in a worker
         # thread now that the live env says the flash is done. cijoe's
         # transport-retry handles waiting for SSH to come up. The
-        # request still returns 204 immediately — workflow status
+        # request still returns 204 immediately - workflow status
         # surfaces via the SSE machines-update channel as it changes.
         with _db.open_db(state_path) as conn:
             row = conn.execute(
@@ -232,7 +232,7 @@ def create_app(
         # Live-env artifacts (kernel + initrd + squashfs) the iPXE chain
         # references. Open route: PXE clients have no token. Operator
         # populates ``boot_root`` via the UI's "fetch latest release"
-        # action (D-3b) — until the dir has files, this returns 404
+        # action (D-3b) - until the dir has files, this returns 404
         # and the appliance is non-functional for boot_policy=flash.
         return _serve_safe_file(resolved_boot_root, name)
 

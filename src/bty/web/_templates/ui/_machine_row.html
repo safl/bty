@@ -19,7 +19,7 @@
         <span class="badge bg-secondary" title="every PXE boot returns sanboot">local</span>
         {% endif %}
     </td>
-    <td>{{ m.hostname or "—" }}</td>
+    <td>{{ m.hostname or "-" }}</td>
     <td>
         {% if m.last_seen_at %}
         <small class="text-muted" title="{{ m.last_seen_at }}">{{ m.last_seen_at }}</small>
@@ -31,7 +31,7 @@
         {% if m.last_flashed_at %}
         <small class="text-muted" title="{{ m.last_flashed_at }}">{{ m.last_flashed_at }}</small>
         {% else %}
-        <small class="text-muted">—</small>
+        <small class="text-muted">-</small>
         {% endif %}
     </td>
     <td class="text-end">

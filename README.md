@@ -1,4 +1,4 @@
-# bty — Boot & Target Utility
+# bty: Boot & Target Utility
 
 [![CI](https://github.com/safl/bty/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/safl/bty/actions/workflows/ci.yml)
 [![Docs](https://github.com/safl/bty/actions/workflows/docs.yml/badge.svg?branch=main)](https://github.com/safl/bty/actions/workflows/docs.yml)
@@ -8,18 +8,18 @@
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 
 Bare-metal provisioning toolkit. Flashes pre-built ("cooked") system
-images onto target disks — locally from a USB stick or remotely over
-PXE — and configures them via cloud-init or CIJOE workflows. Designed
+images onto target disks (locally from a USB stick or remotely over
+PXE) and configures them via cloud-init or CIJOE workflows. Designed
 for both ad-hoc one-off provisioning and DevOps fleet operation.
 
-bty is one Python package — the `bty` module, distributed on PyPI as
-[`bty-lab`](https://pypi.org/project/bty-lab/) — with three console-script
-entry points:
+bty is one Python package: the `bty` module, distributed on PyPI as
+[`bty-lab`](https://pypi.org/project/bty-lab/), with three
+console-script entry points:
 
-- `bty` — main CLI (image inspection, target discovery, flashing,
+- `bty`: main CLI (image inspection, target discovery, flashing,
   provisioning).
-- `bty-tui` — terminal UI (requires the `tui` extra).
-- `bty-web` — HTTP server with browser UI (requires the `web` extra).
+- `bty-tui`: terminal UI (requires the `tui` extra).
+- `bty-web`: HTTP server with browser UI (requires the `web` extra).
 
 Plus a sibling appliance-image builder under `bty-media/` that produces
 the bootable USB live image and the server appliance image.
@@ -27,7 +27,7 @@ the bootable USB live image and the server appliance image.
 ## Install
 
 ```bash
-pipx install bty-lab            # CLI only — zero third-party Python deps
+pipx install bty-lab            # CLI only, zero third-party Python deps
 pipx install "bty-lab[tui]"     # adds the bty-tui terminal UI
 pipx install "bty-lab[web]"     # adds the bty-web HTTP server (milestone 11+)
 pipx install "bty-lab[all]"     # everything
@@ -46,8 +46,8 @@ foundation is being laid out per [`PLAN.md`](PLAN.md).
 
 ## Planning and design
 
-- [`PLAN.md`](PLAN.md) — roadmap and design intent.
-- [`docs/`](docs/) — full documentation (Sphinx + MyST).
+- [`PLAN.md`](PLAN.md): roadmap and design intent.
+- [`docs/`](docs/): full documentation (Sphinx + MyST).
 
 ## Development
 

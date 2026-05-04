@@ -1,6 +1,6 @@
 """Direct unit tests for the in-process SSE bus and wire format.
 
-Exercising end-to-end SSE through ``TestClient.stream`` is flaky — the
+Exercising end-to-end SSE through ``TestClient.stream`` is flaky - the
 body is open-ended, so reading it sync hangs forever. Test the bus
 behaviour at the source instead. We use ``asyncio.run`` rather than
 adding a ``pytest-asyncio`` dep just for this file.
@@ -66,7 +66,7 @@ def test_event_bus_multi_subscriber_fanout() -> None:
 def test_event_bus_drops_for_full_subscriber() -> None:
     """Slow consumers must not block the publisher.
 
-    Bus is non-blocking by design — over a full queue, events are
+    Bus is non-blocking by design - over a full queue, events are
     dropped for that subscriber rather than back-pressuring the route
     handler. Other subscribers are unaffected.
     """
@@ -76,12 +76,12 @@ def test_event_bus_drops_for_full_subscriber() -> None:
 
         async def slow() -> None:
             async for _ in bus.subscribe():
-                # Never advance — exercise the QueueFull branch.
+                # Never advance - exercise the QueueFull branch.
                 await asyncio.sleep(10)
 
         task = asyncio.create_task(slow())
         await asyncio.sleep(0)
-        # Publish more than queue_size — must not raise or block.
+        # Publish more than queue_size - must not raise or block.
         for i in range(5):
             bus.publish(MachineEvent(name="machines-update", html=f"<tr id={i}/>"))
         task.cancel()
@@ -100,7 +100,7 @@ def test_event_bus_unregisters_on_unsubscribe() -> None:
         gen = bus.subscribe()
         # Drive one iteration so the queue is registered, then close
         # the iterator explicitly. ``aclose`` runs the ``finally`` that
-        # unregisters the subscriber — same lifecycle uvicorn triggers
+        # unregisters the subscriber - same lifecycle uvicorn triggers
         # when the SSE client disconnects.
         publish_task = asyncio.get_event_loop().call_soon(
             bus.publish, MachineEvent(name="machines-update", html="")

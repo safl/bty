@@ -1,5 +1,5 @@
 {% extends "ui/_layout.html" %}
-{% block title %}{{ m.mac }} — bty-web{% endblock %}
+{% block title %}{{ m.mac }} - bty-web{% endblock %}
 {% block content %}
 <nav aria-label="breadcrumb">
     <ol class="breadcrumb">
@@ -13,11 +13,11 @@
         <h1 class="h4 mb-3"><code>{{ m.mac }}</code></h1>
         <dl class="row mb-0">
             <dt class="col-sm-3">Discovered</dt>
-            <dd class="col-sm-9">{{ m.discovered_at or "—" }}</dd>
+            <dd class="col-sm-9">{{ m.discovered_at or "-" }}</dd>
             <dt class="col-sm-3">Last seen</dt>
-            <dd class="col-sm-9">{{ m.last_seen_at or "—" }}{% if m.last_seen_ip %} from <code>{{ m.last_seen_ip }}</code>{% endif %}</dd>
+            <dd class="col-sm-9">{{ m.last_seen_at or "-" }}{% if m.last_seen_ip %} from <code>{{ m.last_seen_ip }}</code>{% endif %}</dd>
             <dt class="col-sm-3">Last flashed</dt>
-            <dd class="col-sm-9">{{ m.last_flashed_at or "—" }}</dd>
+            <dd class="col-sm-9">{{ m.last_flashed_at or "-" }}</dd>
             <dt class="col-sm-3">Last workflow</dt>
             <dd class="col-sm-9">
                 {% if m.last_workflow_status %}
@@ -28,7 +28,7 @@
                 <div class="small text-muted">output: <code>{{ m.last_workflow_output_path }}</code></div>
                 {% endif %}
                 {% else %}
-                —
+                -
                 {% endif %}
             </dd>
             <dt class="col-sm-3">Created</dt>
@@ -46,7 +46,7 @@
             <div class="mb-3">
                 <label class="form-label" for="image">Image</label>
                 <select name="image" id="image" class="form-select">
-                    <option value="">— none (discovered, will boot from local disk) —</option>
+                    <option value="">- none (discovered, will boot from local disk) -</option>
                     {% for img in images %}
                     <option value="{{ img.name }}" {% if img.name == m.image %}selected{% endif %}>{{ img.name }} ({{ img.format }})</option>
                     {% endfor %}
@@ -83,7 +83,7 @@
                     <code>flash</code>: PXE boots chain into the live env so the box
                     re-flashes the assigned image every time (per-job CI cadence).
                     Completion (<code>POST /pxe/{mac}/done</code>) updates
-                    <em>last flashed</em> but never flips the policy — the operator
+                    <em>last flashed</em> but never flips the policy - the operator
                     flips back to <code>local</code> when they want the box to stop
                     reflashing.
                 </div>

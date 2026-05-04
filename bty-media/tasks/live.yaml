@@ -11,11 +11,11 @@ doc: |
 
   Steps:
 
-  1. ``bty_wheel_stage`` — builds the bty-lab wheel from the parent
+  1. ``bty_wheel_stage`` - builds the bty-lab wheel from the parent
      repo and stages it under
      ``live-build/config/includes.chroot/opt/bty/``. live-build's
      chroot hook installs it into ``/opt/bty/venv`` during D-2.
-  2. ``live_build`` — copies ``live-build/`` into a working dir,
+  2. ``live_build`` - copies ``live-build/`` into a working dir,
      runs ``lb clean --all && lb build`` (debootstrap, mksquashfs,
      mkinitramfs), and publishes
      ``bty-live-x86_64.{vmlinuz,initrd,squashfs}`` plus a sha256

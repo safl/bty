@@ -33,10 +33,10 @@ for the full per-command schema reference and the exit-code table.
 |------|--------------------------------------------------------------------|
 | 0    | Success.                                                           |
 | 1    | Operation failed (validation rejected the plan; write subprocess returned non-zero; cloud-init / cijoe step failed). |
-| 2    | Misuse — argparse error, missing required flag, missing input file. |
-| 3    | Privilege required — operation needs root, rerun via `sudo`.       |
+| 2    | Misuse - argparse error, missing required flag, missing input file. |
+| 3    | Privilege required - operation needs root, rerun via `sudo`.       |
 | 4    | Required external tool is not installed (e.g. `cijoe`).            |
-| 5    | Target raced — block device became mounted or otherwise unsuitable between validation and write. |
+| 5    | Target raced - block device became mounted or otherwise unsuitable between validation and write. |
 
 ### `bty list disks`
 
@@ -121,8 +121,8 @@ kernel re-reads the new partition table.
 
 After the flash, `bty` runs the configured post-flash step:
 
-- **`none`** — no post-flash work; the cooked image is the result.
-- **`cloud-init`** — mounts the partition on the target whose rootfs
+- **`none`** - no post-flash work; the cooked image is the result.
+- **`cloud-init`** - mounts the partition on the target whose rootfs
   carries `/etc/cloud/` (the unambiguous "cloud-init lives here"
   marker), writes operator-supplied `user-data` (and either supplied
   or auto-synthesised `meta-data`) under
@@ -131,7 +131,7 @@ After the flash, `bty` runs the configured post-flash step:
   PATH`**; rejects with exit `2` if the flag is missing. Errors
   loudly if no partition on the target appears to have cloud-init
   installed, rather than silently writing a seed nothing will read.
-- **`cijoe`** — mounts the largest partition on the target (heuristic
+- **`cijoe`** - mounts the largest partition on the target (heuristic
   for the rootfs), exports `BTY_ROOTFS` pointing at the mount, then
   invokes `cijoe <workflow> --monitor [-c <config>]`. The workflow's
   tasks read or mutate the rootfs through `$BTY_ROOTFS`; bty itself
@@ -148,16 +148,16 @@ After the flash, `bty` runs the configured post-flash step:
 Lifecycle events: `started`, `writing`, `synced`, `partprobed`,
 `provisioning` (cloud-init / cijoe steps only), `done`, `failed`.
 
-- `text` (default) — one line per event on stderr (`[event] note`).
-- `ndjson` — one JSON object per line on stdout
+- `text` (default) - one line per event on stderr (`[event] note`).
+- `ndjson` - one JSON object per line on stdout
   (`{"event":"started","total_bytes":12345}` etc.). Use this from
   agents and CI scripts.
-- `none` — no lifecycle output. Subprocess noise (`dd status=progress`)
+- `none` - no lifecycle output. Subprocess noise (`dd status=progress`)
   still goes to stderr in all modes; redirect if you want a clean
   channel.
 
 The same callback shape (`bty.flash.ProgressCallback` /
-`bty.flash.FlashProgress`) is used by `bty-tui`'s flash modal — UI
+`bty.flash.FlashProgress`) is used by `bty-tui`'s flash modal - UI
 updates and CLI output share the same event stream.
 
 #### Exit codes (specific to `bty flash`)
@@ -188,7 +188,7 @@ The CLI `--image-root` flag, when given, takes precedence over
 
 ### Default paths
 
-- `/var/lib/bty/images` — image root. The USB live appliance
+- `/var/lib/bty/images` - image root. The USB live appliance
   auto-mounts the `BTY_IMAGES` partition here.
 
 ## Python API
@@ -197,7 +197,7 @@ bty's modules are usable as a library. Stable entry points:
 
 | Module           | Purpose                                                   |
 |------------------|-----------------------------------------------------------|
-| `bty.disks`      | `list_disks() -> list[dict]` — block-device discovery.    |
+| `bty.disks`      | `list_disks() -> list[dict]` - block-device discovery.    |
 | `bty.images`     | `list_images(root)`, `inspect_image(path)`, `Image` dataclass, `detect_format(path)`, `default_image_root()`. |
 | `bty.formatting` | `print_table(rows, columns)`, `print_inspect(info)`.      |
 
@@ -222,12 +222,12 @@ Authorization: Bearer <BTY_WEB_TOKEN>
 refuses to launch otherwise. Generate with
 `python -c 'import secrets; print(secrets.token_urlsafe(32))'`.
 
-Open routes (no token) — these are reachable by PXE clients which
+Open routes (no token) - these are reachable by PXE clients which
 cannot carry a token:
 
-- `GET /healthz` — `{"status": "ok"}`
-- `GET /version` — `{"version": "..."}`
-- `GET /pxe/{mac}` — per-MAC iPXE script (`text/plain`). The
+- `GET /healthz` - `{"status": "ok"}`
+- `GET /version` - `{"version": "..."}`
+- `GET /pxe/{mac}` - per-MAC iPXE script (`text/plain`). The
   response depends on the machine's `boot_policy`:
   - `local` (default) or no image assigned: sanboot fallback ("boot
     from local disk"). Auto-discovery still applies to unknown MACs.
@@ -241,41 +241,41 @@ cannot carry a token:
   sees it in `GET /machines` and can claim it with `PUT
   /machines/{mac}`. Repeat contacts update `last_seen_at` /
   `last_seen_ip`. Trust model: bty-web is meant for a homelab /
-  CI network, not the open internet — anyone reachable can write
+  CI network, not the open internet - anyone reachable can write
   discovery rows.
-- `POST /pxe/{mac}/done` — completion signal from the live env
+- `POST /pxe/{mac}/done` - completion signal from the live env
   after a successful flash. Updates `last_flashed_at`. **Does not
-  modify `boot_policy`** — flipping a machine back to `local` is an
+  modify `boot_policy`** - flipping a machine back to `local` is an
   explicit operator action so the per-job CI cadence (constant
   reflashing) survives across boots. If the machine has
   `provisioning_mode='cijoe-online'` and a `cijoe_workflow_ref`,
   this also kicks off a background workflow run from bty-web
   against the freshly-booted target (milestone 15). Status surfaces
   via `last_workflow_status` and the SSE machines-update channel.
-- `GET /pxe-bootstrap.ipxe` — static iPXE script that dnsmasq points
+- `GET /pxe-bootstrap.ipxe` - static iPXE script that dnsmasq points
   iPXE clients at on their second-stage DHCP. Returns
   `chain http://<host>/pxe/${net0/mac:hexhyp}` where `<host>` is the
   request's `Host` header, so the client always loops back to
   whichever IP / hostname / .local name it used to reach the server.
-- `GET /boot/{name}` — serve a live-env artifact from `BTY_BOOT_DIR`
+- `GET /boot/{name}` - serve a live-env artifact from `BTY_BOOT_DIR`
   (default `/var/lib/bty/boot/`). Same trust model as `/pxe/*`.
   Operators populate the dir via the browser UI (Phase D-3b will
   add a "fetch latest release" button).
-- `GET /images/{name}` — serve image bytes from `BTY_IMAGE_ROOT`.
+- `GET /images/{name}` - serve image bytes from `BTY_IMAGE_ROOT`.
   Used by the live env to download the assigned image; reachable
   by anyone on the network.
-- `POST /bootstrap/{mac}` — bootstrap script for the bty live env
+- `POST /bootstrap/{mac}` - bootstrap script for the bty live env
   (placeholder; the network-flash flow lands in milestone 14)
 
 Protected routes (Bearer required):
 
 | Method | Path | Body | Returns |
 |---|---|---|---|
-| GET | `/machines` | — | array of `Machine` |
-| GET | `/machines/{mac}` | — | `Machine` (404 if missing) |
+| GET | `/machines` | - | array of `Machine` |
+| GET | `/machines/{mac}` | - | `Machine` (404 if missing) |
 | PUT | `/machines/{mac}` | `MachineUpsert` | `Machine` (the new state) |
-| DELETE | `/machines/{mac}` | — | 204 (404 if missing) |
-| GET | `/images` | — | array of `ImageEntry` |
+| DELETE | `/machines/{mac}` | - | 204 (404 if missing) |
+| GET | `/images` | - | array of `ImageEntry` |
 
 MAC addresses are accepted in any case + `:`-or-`-` separated, and
 normalised to lower-case `aa:bb:cc:dd:ee:ff`.
@@ -357,11 +357,11 @@ templates, Bootstrap CSS, HTMX form posts).
   (default `safl/bty`, default tag `latest`); verifies the manifest
   and atomically installs into `BTY_BOOT_DIR`
 - `GET  /ui/settings` -> two-card page:
-  - **Bearer token** — Rotate button calls
+  - **Bearer token** - Rotate button calls
     `bty-web-rotate-token`, displays the new token in a one-time
     flash, leaves the bty-web service running with the old token
     until the operator restarts it manually.
-  - **PXE proxy-DHCP** — interface dropdown (read from
+  - **PXE proxy-DHCP** - interface dropdown (read from
     `/sys/class/net/`) + subnet input (`192.168.1.0` or
     `192.168.1.0/24`). Activate calls `bty-web-activate-pxe`
     which writes `/etc/dnsmasq.d/bty-pxe-active.conf` and
@@ -369,7 +369,7 @@ templates, Bootstrap CSS, HTMX form posts).
 - `POST /ui/settings/rotate-token` / `POST /ui/settings/pxe-activate`
   drive the two helpers above. Both helpers live in
   `/usr/local/sbin/` and are invocable by the `bty` service user
-  via the NOPASSWD entry in `/etc/sudoers.d/bty-web` — the only
+  via the NOPASSWD entry in `/etc/sudoers.d/bty-web` - the only
   sudo grant the appliance gives bty-web.
 
 The Bearer dependency accepts the token via either the
@@ -382,7 +382,7 @@ server treats them the same on the wire.
 
 Bootstrap CSS, HTMX, and the HTMX SSE extension are **vendored** into
 the wheel under `bty.web._static/` and served at `/static/`. The bty
-appliance does not contact any CDN at runtime — all browser code is
+appliance does not contact any CDN at runtime - all browser code is
 served from the same origin. See `src/bty/web/_static/README.md` in
 the source tree for asset versions and the refresh procedure.
 
@@ -402,7 +402,7 @@ admin's edit. The endpoint:
   (`PUT /machines/{mac}`, `DELETE /machines/{mac}`, the corresponding
   `/ui` form posts, and PXE auto-discovery on `/pxe/{mac}`).
 
-The fan-out bus is in-process — slow consumers are silently dropped
+The fan-out bus is in-process - slow consumers are silently dropped
 (every event carries the full snapshot, so they catch up on the next
 mutation). **Single uvicorn worker** is required: a multi-worker
 deployment would need a real broker (Redis pub/sub, NATS, …), which
