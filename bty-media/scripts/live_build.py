@@ -94,25 +94,36 @@ def main(args, cijoe):
         log.error("lb build failed; see live-build.log under the build dir")
         return err
 
-    # Publish.
-    binary_live = build_dir / "binary" / "live"
-    if not binary_live.exists():
-        log.error(f"expected live-build output dir missing: {binary_live}")
-        return errno.ENOENT
+    # Locate the artefacts. live-build's netboot mode has shifted output
+    # paths between versions ('binary/live/' historically; sometimes
+    # tarballed; sometimes split across binary/live/ + a top-level
+    # 'live-image-amd64.tar.xz'). Recursive globs find them wherever
+    # they ended up. Filter ``vmlinuz*`` matches to skip the chroot/boot/
+    # copy that lb leaves behind for caching.
+    def _outside_chroot(p: Path) -> bool:
+        return "chroot" not in p.parts
 
-    kernels = sorted(binary_live.glob("vmlinuz*"))
-    initrds = sorted(binary_live.glob("initrd.img*"))
-    squashfs = binary_live / "filesystem.squashfs"
+    # Dump the build dir for diagnostics; turns out invaluable when
+    # live-build's output layout changes again.
+    cijoe.run_local(f"sudo find {build_dir} -maxdepth 4 -type d 2>/dev/null | head -60")
+
+    kernels = sorted(p for p in build_dir.rglob("vmlinuz*") if _outside_chroot(p))
+    initrds = sorted(p for p in build_dir.rglob("initrd.img*") if _outside_chroot(p))
+    squashfses = sorted(p for p in build_dir.rglob("filesystem.squashfs") if _outside_chroot(p))
 
     if not kernels:
-        log.error(f"no kernel matching vmlinuz* under {binary_live}")
+        log.error(f"no kernel matching vmlinuz* under {build_dir} (excluding chroot)")
+        cijoe.run_local(f"sudo find {build_dir} -name 'vmlinuz*' 2>/dev/null")
         return errno.ENOENT
     if not initrds:
-        log.error(f"no initrd matching initrd.img* under {binary_live}")
+        log.error(f"no initrd matching initrd.img* under {build_dir} (excluding chroot)")
+        cijoe.run_local(f"sudo find {build_dir} -name 'initrd.img*' 2>/dev/null")
         return errno.ENOENT
-    if not squashfs.exists():
-        log.error(f"missing squashfs at {squashfs}")
+    if not squashfses:
+        log.error(f"no filesystem.squashfs under {build_dir}")
+        cijoe.run_local(f"sudo find {build_dir} -name '*.squashfs' 2>/dev/null")
         return errno.ENOENT
+    squashfs = squashfses[0]
 
     publish_map = (
         (kernels[0], publish_dir / PUBLISH_BASENAMES[0]),
