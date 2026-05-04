@@ -104,14 +104,34 @@ jobs:
             cpu-checker
 
       - name: Install build dependencies (live variant)
+        # Ubuntu's ``live-build`` package (20230502 on Noble) still
+        # fetches ``dists/<release>/Contents-amd64.gz`` to resolve the
+        # kernel package - but Debian moved Contents-*.gz under
+        # ``main/`` (per-component) for every active release, so the
+        # top-level URL 404s and the build aborts. Debian trixie
+        # ships live-build 20240208+ with the fixed URL handling.
+        # Pull that .deb directly with ``apt-get download`` (we add
+        # the trixie source just long enough to fetch it, then
+        # install with dpkg so Ubuntu's apt isn't tempted to pull
+        # the rest of trixie). live-build is Architecture: all - pure
+        # shell + perl - so cross-distro install is safe.
         if: matrix.variant == 'live'
         run: |
+          set -eu
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            live-build \
             debootstrap \
             squashfs-tools \
-            xorriso
+            xorriso \
+            debian-archive-keyring
+          echo 'deb http://deb.debian.org/debian trixie main' \
+              | sudo tee /etc/apt/sources.list.d/debian-trixie.list
+          sudo apt-get update
+          mkdir -p /tmp/lb-deb && cd /tmp/lb-deb
+          apt-get download -t trixie live-build
+          sudo dpkg -i ./live-build_*.deb
+          sudo rm /etc/apt/sources.list.d/debian-trixie.list
+          lb --version
 
       - name: Enable KVM access for the runner
         # GHA's hosted Linux runners ship /dev/kvm but the runner user
