@@ -315,6 +315,10 @@ def test_apply_cijoe_runs_workflow_against_mounted_rootfs(
     workflow = tmp_path / "touch.yaml"
     workflow.write_text(
         """\
+doc: |
+  Touch a sentinel file inside $BTY_ROOTFS to prove the rootfs is mounted
+  and the environment variable is exported to the workflow.
+
 steps:
   - name: touch_sentinel
     run: |
