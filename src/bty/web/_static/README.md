@@ -1,0 +1,28 @@
+# bty.web static assets
+
+Vendored client-side assets so the bty-web appliance does **not** need
+internet access at runtime. The bty server image is intended to live on
+homelab / CI networks; pulling resources from a CDN every page load
+would defeat the offline-friendly design.
+
+## What is here
+
+| File                | Source                                                                | Version |
+|---------------------|-----------------------------------------------------------------------|---------|
+| `bootstrap.min.css` | <https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css>     | 5.3.3   |
+| `htmx.min.js`       | <https://cdn.jsdelivr.net/npm/htmx.org@2.0.4/dist/htmx.min.js>                | 2.0.4   |
+| `sse.js`            | <https://cdn.jsdelivr.net/npm/htmx-ext-sse@2.2.3/sse.js>                      | 2.2.3   |
+
+All served by FastAPI under ``/static/`` at runtime. Hatchling includes
+this directory in the wheel automatically (no special config needed —
+all files under ``src/bty/`` ship by default).
+
+## Refreshing
+
+When bumping versions, re-download with the URLs above (e.g.
+``curl -sSfL <url> -o <filename>`` from this directory), bump the
+version row in this table, run the test suite, and commit.
+
+We deliberately do **not** auto-fetch at build time: pinned, committed
+assets keep the build reproducible and let air-gapped contributors
+build the project without internet access.

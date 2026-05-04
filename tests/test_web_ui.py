@@ -204,3 +204,54 @@ def test_cookie_auth_works_on_api_routes_too(client: TestClient) -> None:
     r = client.get("/machines")
     assert r.status_code == 200
     assert r.json() == []
+
+
+# ---------- vendored static assets (no CDN at runtime) ---------------------
+
+
+def test_static_assets_served_locally(client: TestClient) -> None:
+    """The wheel ships Bootstrap CSS, HTMX, and the SSE extension under
+    /static so the appliance has no runtime CDN dependency."""
+    for path, sniff in [
+        ("/static/bootstrap.min.css", b".container"),
+        ("/static/htmx.min.js", b"htmx"),
+        ("/static/sse.js", b"sse"),
+    ]:
+        r = client.get(path)
+        assert r.status_code == 200, f"{path}: {r.status_code}"
+        assert sniff in r.content, f"{path} missing expected marker {sniff!r}"
+
+
+def test_layout_has_no_external_origins(client: TestClient) -> None:
+    """The login page (and by extension the layout) must not reference
+    any third-party origin — the appliance runs offline."""
+    r = client.get("/ui/login")
+    assert r.status_code == 200
+    assert "cdn.jsdelivr.net" not in r.text
+    assert "/static/bootstrap.min.css" in r.text
+    assert "/static/htmx.min.js" in r.text
+
+
+# ---------- SSE live updates -----------------------------------------------
+
+
+def test_sse_endpoint_requires_auth(client: TestClient) -> None:
+    """The events stream must reject unauthenticated subscribers (same
+    bearer/cookie check as the API).
+
+    We don't exercise the body here — TestClient's sync httpx hangs on
+    open-ended event streams. The streaming contract itself is covered
+    by the unit tests in ``tests/test_web_events.py``.
+    """
+    r = client.get("/events/machines")
+    assert r.status_code == 401
+
+
+def test_machines_page_subscribes_via_sse(client: TestClient) -> None:
+    """The machines table must declare its SSE subscription so the
+    browser actually hooks up live updates."""
+    _login(client)
+    r = client.get("/ui/machines")
+    assert r.status_code == 200
+    assert 'sse-connect="/events/machines"' in r.text
+    assert 'sse-swap="machines-update"' in r.text

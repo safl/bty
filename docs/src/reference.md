@@ -297,7 +297,7 @@ ImageEntry = {
 ### Browser UI (`/ui`)
 
 `bty-web` ships a server-rendered browser UI under `/ui` (Jinja
-templates, Bootstrap via CDN, HTMX-friendly form posts).
+templates, Bootstrap CSS, HTMX form posts).
 
 - `GET  /ui` -> 303 redirect to `/ui/dashboard`
 - `GET  /ui/login` -> login form
@@ -307,7 +307,7 @@ templates, Bootstrap via CDN, HTMX-friendly form posts).
 - `GET  /ui/dashboard` -> overview (machine count, discovered count,
   image count)
 - `GET  /ui/machines` -> table of all machines with a "discovered"
-  badge for unassigned rows
+  badge for unassigned rows; auto-refreshes via SSE
 - `GET  /ui/machines/{mac}` -> detail + edit form
 - `POST /ui/machines/{mac}` -> upsert from a form submit
 - `POST /ui/machines/{mac}/delete` -> delete record
@@ -319,8 +319,35 @@ scripts) or the `bty-token` cookie (set by the browser UI's login
 form). API consumers and the browser UI share the same token; the
 server treats them the same on the wire.
 
-Live updates via Server-Sent Events arrive in milestone 12 phase 2.
-For now, refresh the page to see newly-discovered machines.
+#### Static assets (offline-friendly)
+
+Bootstrap CSS, HTMX, and the HTMX SSE extension are **vendored** into
+the wheel under `bty.web._static/` and served at `/static/`. The bty
+appliance does not contact any CDN at runtime — all browser code is
+served from the same origin. See `src/bty/web/_static/README.md` in
+the source tree for asset versions and the refresh procedure.
+
+#### Live updates (`GET /events/machines`)
+
+The machines table subscribes to a Server-Sent Events stream so the
+operator does not have to refresh after PXE auto-discovery or another
+admin's edit. The endpoint:
+
+- Authenticates with the same Bearer/cookie dep as the rest of the
+  API. Browsers carry the cookie automatically; the SSE `EventSource`
+  API does not let you set custom headers.
+- Sends `Content-Type: text/event-stream` and an initial
+  `machines-update` event containing the current `<tbody>` snapshot
+  on connect.
+- Emits a fresh `machines-update` event after every mutation
+  (`PUT /machines/{mac}`, `DELETE /machines/{mac}`, the corresponding
+  `/ui` form posts, and PXE auto-discovery on `/pxe/{mac}`).
+
+The fan-out bus is in-process — slow consumers are silently dropped
+(every event carries the full snapshot, so they catch up on the next
+mutation). **Single uvicorn worker** is required: a multi-worker
+deployment would need a real broker (Redis pub/sub, NATS, …), which
+is overkill for an appliance serving a homelab fleet.
 
 ## Configuration schemas
 

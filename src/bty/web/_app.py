@@ -9,19 +9,23 @@ environment + defaults and hands it to uvicorn.
 from __future__ import annotations
 
 import json
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import PlainTextResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 import bty
 from bty import images
 from bty.web import _db, _models, _ui
 from bty.web._auth import make_token_dep
+from bty.web._events import MachineEvent, MachineEventBus, sse_format
 
 TEMPLATES_DIR = Path(__file__).parent / "_templates"
+STATIC_DIR = Path(__file__).parent / "_static"
 
 
 def create_app(
@@ -37,6 +41,7 @@ def create_app(
     """
     require_token = make_token_dep(bearer_token)
     resolved_image_root: Path = image_root or images.default_image_root()
+    event_bus = MachineEventBus()
 
     jinja = Environment(
         loader=FileSystemLoader(str(TEMPLATES_DIR)),
@@ -49,6 +54,22 @@ def create_app(
     _db.init_db(state_path)
 
     app = FastAPI(title="bty-web", version=bty.__version__)
+
+    # Vendored client-side assets (Bootstrap CSS, HTMX, htmx-ext-sse)
+    # ship inside the wheel so the appliance has no runtime CDN
+    # dependency. See ``_static/README.md`` for provenance.
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+    def render_machines_tbody() -> str:
+        """Render the rows fragment used by /ui/machines and the SSE stream."""
+        with _db.open_db(state_path) as conn:
+            rows = conn.execute("SELECT * FROM machines ORDER BY mac").fetchall()
+        machines = [_ui._row_to_dict(r) for r in rows]
+        return jinja.get_template("ui/_machines_tbody.html").render(machines=machines)
+
+    def publish_machines_changed() -> None:
+        """Publish a fresh tbody snapshot. Mutating routes call this."""
+        event_bus.publish(MachineEvent(name="machines-update", html=render_machines_tbody()))
 
     # ----- Open routes (no auth) ------------------------------------------
 
@@ -100,9 +121,25 @@ def create_app(
 
         assert row is not None
         machine = dict(row)
+        publish_machines_changed()
         template_name = "ipxe.j2" if machine.get("image") else "ipxe_unknown.j2"
         template = jinja.get_template(template_name)
         return template.render(mac=normalised, machine=machine)
+
+    @app.get(
+        "/events/machines",
+        dependencies=[Depends(require_token)],
+        include_in_schema=False,
+    )
+    async def events_machines() -> StreamingResponse:
+        async def stream() -> AsyncIterator[bytes]:
+            # Send the current snapshot on subscribe so the page is
+            # immediately consistent without a separate fetch.
+            yield sse_format("machines-update", render_machines_tbody())
+            async for event in event_bus.subscribe():
+                yield sse_format(event.name, event.html)
+
+        return StreamingResponse(stream(), media_type="text/event-stream")
 
     @app.post("/bootstrap/{mac}", response_class=PlainTextResponse)
     def bootstrap(mac: str) -> str:
@@ -182,6 +219,7 @@ def create_app(
             conn.commit()
             row = conn.execute("SELECT * FROM machines WHERE mac = ?", (normalised,)).fetchone()
         assert row is not None
+        publish_machines_changed()
         return _row_to_machine(row)
 
     @app.delete(
@@ -199,6 +237,7 @@ def create_app(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"no machine record for {normalised}",
             )
+        publish_machines_changed()
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @app.get(
@@ -226,6 +265,7 @@ def create_app(
         state_path=state_path,
         expected_token=bearer_token,
         image_root=resolved_image_root,
+        publish_machines_changed=publish_machines_changed,
     )
 
     return app

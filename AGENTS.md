@@ -183,7 +183,8 @@ is lower-case `aa:bb:cc:dd:ee:ff`):
 | `GET /version` | `GET /machines/{mac}` |
 | `GET /pxe/{mac}` | `PUT /machines/{mac}` (body: MachineUpsert) |
 | `POST /bootstrap/{mac}` | `DELETE /machines/{mac}` |
-| | `GET /images` |
+| `GET /static/*` | `GET /images` |
+| | `GET /events/machines` (Server-Sent Events) |
 
 **HTTP status semantics:**
 - `200` — success with body
@@ -206,6 +207,24 @@ poll `GET /machines` to find newly-discovered MACs and claim them
 with `PUT /machines/{mac}`. Subsequent `/pxe` contacts update
 `last_seen_at` / `last_seen_ip`; agents can use the freshness of
 those fields to detect machines that have stopped reporting.
+
+**Live updates.** `GET /events/machines` is a Server-Sent Events
+stream (auth: same Bearer/cookie dep). Subscribers receive an initial
+`machines-update` event with the rendered `<tbody>` snapshot, then
+one fresh `machines-update` event after every mutation
+(`PUT`/`DELETE` and PXE auto-discovery). Used by the browser UI to
+avoid polling. Agents can subscribe instead of polling
+`GET /machines`, but the canonical state remains the JSON API — the
+event payload is HTML for browser consumption.
+
+**Offline-friendly.** All client-side assets (Bootstrap CSS, HTMX,
+HTMX SSE extension) are vendored in the wheel and served from
+`/static/`. The bty appliance does **not** contact any CDN at
+runtime; agents and PXE clients can run on air-gapped networks.
+
+**Single-worker requirement.** The SSE bus is in-process; run
+`uvicorn` with one worker (the default). Multi-worker would need a
+real broker (Redis pub/sub, NATS), which is out of scope.
 
 ## Conventions agents can rely on
 

@@ -1,0 +1,19 @@
+{# Inner content of <tbody id="machines-tbody">.
+
+   Used both by the initial render (machines.html includes this) and by
+   the SSE stream (_app.py's ``render_machines_tbody`` re-renders this
+   on every machine mutation and pushes it as ``machines-update``).
+   The htmx-ext-sse extension swaps the tbody's innerHTML with whatever
+   we emit here, so this partial must stay framing-free (no <tbody>). #}
+{% if not machines %}
+<tr>
+    <td colspan="6" class="text-muted text-center py-4">
+        No machines yet. PXE-boot a target against this server, or
+        <code>PUT /machines/{mac}</code> to claim one.
+    </td>
+</tr>
+{% else %}
+{% for m in machines %}
+{% include "ui/_machine_row.html" %}
+{% endfor %}
+{% endif %}

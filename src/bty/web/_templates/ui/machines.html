@@ -3,15 +3,11 @@
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
     <h1 class="h3 mb-0">Machines</h1>
-    <span class="text-muted small">{{ machines|length }} total</span>
+    <span class="text-muted small" title="Live-updating via Server-Sent Events">
+        <span id="machines-count">{{ machines|length }}</span> total · live
+    </span>
 </div>
 
-{% if not machines %}
-<div class="alert alert-light border">
-    No machines yet. PXE-boot a target against this server, or
-    <code>PUT /machines/{mac}</code> to claim one.
-</div>
-{% else %}
 <div class="card">
     <div class="table-responsive">
         <table class="table table-hover mb-0 align-middle">
@@ -25,13 +21,17 @@
                     <th></th>
                 </tr>
             </thead>
-            <tbody id="machines-tbody">
-                {% for m in machines %}
-                {% include "ui/_machine_row.html" %}
-                {% endfor %}
+            {# The tbody subscribes to the SSE stream so it auto-updates
+               when the operator (or auto-discovery) mutates machines.
+               The browser carries the bty-token cookie automatically;
+               that is what authenticates the EventSource connection. #}
+            <tbody id="machines-tbody"
+                   hx-ext="sse"
+                   sse-connect="/events/machines"
+                   sse-swap="machines-update">
+                {% include "ui/_machines_tbody.html" %}
             </tbody>
         </table>
     </div>
 </div>
-{% endif %}
 {% endblock %}

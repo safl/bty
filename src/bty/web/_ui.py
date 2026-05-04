@@ -11,6 +11,7 @@ plain server-rendered pages with HTMX-friendly form posts.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any
@@ -56,8 +57,15 @@ def register_ui_routes(
     state_path: Path,
     expected_token: str,
     image_root: Path,
+    publish_machines_changed: Callable[[], None] = lambda: None,
 ) -> None:
-    """Attach the ``/ui`` HTML routes (and exception handler) to ``app``."""
+    """Attach the ``/ui`` HTML routes (and exception handler) to ``app``.
+
+    ``publish_machines_changed`` is invoked after any UI form mutates a
+    machine record, so SSE subscribers see the change immediately. The
+    default no-op makes this module testable in isolation; the real app
+    passes the bus-publishing callable.
+    """
 
     def render(name: str, request: Request, **ctx: Any) -> HTMLResponse:
         ctx.setdefault("version", bty.__version__)
@@ -220,6 +228,7 @@ def register_ui_routes(
                 ),
             )
             conn.commit()
+        publish_machines_changed()
         return RedirectResponse("/ui/machines", status_code=status.HTTP_303_SEE_OTHER)
 
     @app.post(
@@ -232,6 +241,7 @@ def register_ui_routes(
         with _db.open_db(state_path) as conn:
             conn.execute("DELETE FROM machines WHERE mac = ?", (normalised,))
             conn.commit()
+        publish_machines_changed()
         return RedirectResponse("/ui/machines", status_code=status.HTTP_303_SEE_OTHER)
 
     @app.get(
