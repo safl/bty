@@ -27,6 +27,7 @@ import argparse
 import json
 import os
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -215,7 +216,22 @@ def cmd_inspect_image(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_flash(args: argparse.Namespace) -> int:
+def cmd_flash(
+    args: argparse.Namespace,
+    *,
+    probe_image: Callable[[Path], flash.ImageInfo] = flash.probe_image,
+    probe_target: Callable[[Path], flash.TargetInfo] = flash.probe_target,
+    execute_plan: Callable[..., None] = flash.execute_plan,
+    apply_cloud_init: Callable[..., None] = flash.apply_cloud_init,
+    apply_cijoe: Callable[..., None] = flash.apply_cijoe,
+    geteuid: Callable[[], int] = os.geteuid,
+) -> int:
+    """Drive a flash. Outside-world dependencies are kwargs with real defaults.
+
+    Tests pass fakes directly instead of monkey-patching module-level
+    references; production callers (``main()``) use the defaults and the
+    real ``bty.flash`` / ``os`` machinery is invoked.
+    """
     if not args.dry_run and not args.yes:
         print(
             "bty: pass --dry-run to validate or --yes to actually flash the target",
@@ -238,12 +254,12 @@ def cmd_flash(args: argparse.Namespace) -> int:
         return 2
 
     try:
-        image_info = flash.probe_image(args.image)
+        image_info = probe_image(args.image)
     except FileNotFoundError as exc:
         print(f"bty: {exc}", file=sys.stderr)
         return 2
 
-    target_info = flash.probe_target(args.target)
+    target_info = probe_target(args.target)
     plan = flash.make_plan(image_info, target_info, args.provision)
     errors = flash.validate_plan(plan)
 
@@ -267,7 +283,7 @@ def cmd_flash(args: argparse.Namespace) -> int:
         flash.print_plan(plan, errors)
         return 1
 
-    if os.geteuid() != 0:
+    if geteuid() != 0:
         print(
             "bty: flash requires root to write to a block device; rerun with sudo",
             file=sys.stderr,
@@ -281,7 +297,7 @@ def cmd_flash(args: argparse.Namespace) -> int:
     progress_cb = _build_progress_callback(args.progress)
 
     try:
-        flash.execute_plan(plan, progress=progress_cb)
+        execute_plan(plan, progress=progress_cb)
     except flash.FlashRaceError as exc:
         print(f"bty: flash aborted: {exc}", file=sys.stderr)
         return 5
@@ -296,7 +312,7 @@ def cmd_flash(args: argparse.Namespace) -> int:
         if progress_cb is not None:
             progress_cb(flash.FlashProgress(event="provisioning", note="cloud-init"))
         try:
-            flash.apply_cloud_init(
+            apply_cloud_init(
                 plan.target.path,
                 args.user_data,
                 args.meta_data,
@@ -316,7 +332,7 @@ def cmd_flash(args: argparse.Namespace) -> int:
         if progress_cb is not None:
             progress_cb(flash.FlashProgress(event="provisioning", note="cijoe"))
         try:
-            flash.apply_cijoe(
+            apply_cijoe(
                 plan.target.path,
                 args.cijoe_workflow,
                 args.cijoe_config,

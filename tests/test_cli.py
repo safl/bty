@@ -1,7 +1,14 @@
-"""End-to-end-ish tests for bty.cli — modules underneath are mocked."""
+"""End-to-end-ish tests for bty.cli.
+
+The flash tests call ``cli.cmd_flash`` directly with explicit
+dependency-injected fakes — no monkeypatching of module-level
+references. Argparse-routing tests still go through ``cli.main`` to
+verify the wiring.
+"""
 
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
 from unittest.mock import patch
@@ -134,32 +141,74 @@ def test_flash_dry_run_still_works(tmp_path: Path, capsys: pytest.CaptureFixture
     assert "not a block device" in out
 
 
+# ---------- helpers for direct cmd_flash invocation --------------------------
+
+
+def _flash_args(
+    *,
+    image: Path,
+    target: Path = Path("/dev/loop9"),
+    provision: str = "none",
+    dry_run: bool = False,
+    yes: bool = False,
+    user_data: Path | None = None,
+    meta_data: Path | None = None,
+    cijoe_workflow: Path | None = None,
+    cijoe_config: Path | None = None,
+    progress: str = "text",
+    json_out: bool = False,
+) -> argparse.Namespace:
+    """Build the Namespace ``cmd_flash`` expects, without going through argparse."""
+    return argparse.Namespace(
+        image=image,
+        target=target,
+        provision=provision,
+        dry_run=dry_run,
+        yes=yes,
+        user_data=user_data,
+        meta_data=meta_data,
+        cijoe_workflow=cijoe_workflow,
+        cijoe_config=cijoe_config,
+        progress=progress,
+        json=json_out,
+    )
+
+
+def _block_target(path: Path) -> cli.flash.TargetInfo:
+    return cli.flash.TargetInfo(
+        path=path,
+        exists=True,
+        is_block_device=True,
+        size_bytes=10**9,
+        mountpoints=[],
+    )
+
+
+# Shared fake of probe_target that returns a healthy block device for any path.
+def _fake_probe_block_target(p: Path) -> cli.flash.TargetInfo:
+    return _block_target(p)
+
+
+def _no_op_execute(plan: cli.flash.FlashPlan, **_kw: object) -> None:
+    return None
+
+
+# ---------- cmd_flash tests (no monkeypatching) ------------------------------
+
+
 def test_flash_yes_path_refuses_when_not_root(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """When validation passes, the --yes path must still refuse without root.
-
-    Exit code 3 = "needs root"; distinct from 2 (misuse) so agents can
-    respond to the privilege case specifically.
-    """
+    """The --yes path refuses without root with exit 3 (distinct from 2 = misuse)."""
     img = tmp_path / "x.img"
     img.write_bytes(b"\0" * 1024)
 
-    monkeypatch.setattr(
-        "bty.cli.flash.probe_target",
-        lambda p: cli.flash.TargetInfo(
-            path=p,
-            exists=True,
-            is_block_device=True,
-            size_bytes=10**9,
-            mountpoints=[],
-        ),
+    rc = cli.cmd_flash(
+        _flash_args(image=img, yes=True),
+        probe_target=_fake_probe_block_target,
+        geteuid=lambda: 1000,
     )
-    monkeypatch.setattr("bty.cli.os.geteuid", lambda: 1000)
-
-    rc = cli.main(["flash", "--image", str(img), "--target", "/dev/loop9", "--yes"])
     assert rc == 3
     assert "requires root" in capsys.readouterr().err
 
@@ -167,49 +216,40 @@ def test_flash_yes_path_refuses_when_not_root(
 def test_flash_yes_path_invokes_execute_plan_when_root(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     img = tmp_path / "x.img"
     img.write_bytes(b"\0" * 1024)
+    seen_targets: list[Path] = []
 
-    monkeypatch.setattr(
-        "bty.cli.flash.probe_target",
-        lambda p: cli.flash.TargetInfo(
-            path=p,
-            exists=True,
-            is_block_device=True,
-            size_bytes=10**9,
-            mountpoints=[],
-        ),
+    def fake_execute(plan: cli.flash.FlashPlan, **_kw: object) -> None:
+        seen_targets.append(plan.target.path)
+
+    rc = cli.cmd_flash(
+        _flash_args(image=img, yes=True),
+        probe_target=_fake_probe_block_target,
+        execute_plan=fake_execute,
+        geteuid=lambda: 0,
     )
-    monkeypatch.setattr("bty.cli.os.geteuid", lambda: 0)
-
-    called = []
-    monkeypatch.setattr(
-        "bty.cli.flash.execute_plan",
-        lambda plan, **kw: called.append(plan.target.path),
-    )
-
-    rc = cli.main(["flash", "--image", str(img), "--target", "/dev/loop9", "--yes"])
     assert rc == 0
-    assert called == [Path("/dev/loop9")]
+    assert seen_targets == [Path("/dev/loop9")]
     assert "Done" in capsys.readouterr().out
 
 
 def test_flash_yes_path_propagates_validation_failure(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Validation errors stop the write path before the root check."""
+    """Validation errors stop the write path before the root check.
+
+    /dev/null is not a block device → make_plan rejects it. We skip
+    the deps because they are never reached.
+    """
     img = tmp_path / "x.img"
     img.write_bytes(b"\0" * 1024)
 
-    # /dev/null is not a block device -> validation fails.
-    rc = cli.main(["flash", "--image", str(img), "--target", "/dev/null", "--yes"])
+    rc = cli.cmd_flash(_flash_args(image=img, target=Path("/dev/null"), yes=True))
     assert rc == 1
-    out = capsys.readouterr().out
-    assert "Validation: FAILED" in out
+    assert "Validation: FAILED" in capsys.readouterr().out
 
 
 def test_flash_cloud_init_requires_user_data(
@@ -217,70 +257,46 @@ def test_flash_cloud_init_requires_user_data(
 ) -> None:
     img = tmp_path / "x.img"
     img.write_bytes(b"\0")
-    rc = cli.main(
-        [
-            "flash",
-            "--image",
-            str(img),
-            "--target",
-            "/dev/null",
-            "--provision",
-            "cloud-init",
-            "--dry-run",
-        ]
+    rc = cli.cmd_flash(
+        _flash_args(
+            image=img,
+            target=Path("/dev/null"),
+            provision="cloud-init",
+            dry_run=True,
+        )
     )
     assert rc == 2
-    err = capsys.readouterr().err
-    assert "--user-data is required" in err
+    assert "--user-data is required" in capsys.readouterr().err
 
 
 def test_flash_cloud_init_invokes_apply_cloud_init(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     img = tmp_path / "x.img"
     img.write_bytes(b"\0" * 1024)
     user_data = tmp_path / "user-data"
     user_data.write_text("#cloud-config\n")
-
-    monkeypatch.setattr(
-        "bty.cli.flash.probe_target",
-        lambda p: cli.flash.TargetInfo(
-            path=p,
-            exists=True,
-            is_block_device=True,
-            size_bytes=10**9,
-            mountpoints=[],
-        ),
-    )
-    monkeypatch.setattr("bty.cli.os.geteuid", lambda: 0)
-    monkeypatch.setattr("bty.cli.flash.execute_plan", lambda plan, **kw: None)
-
     captured: list[tuple[Path, Path, Path | None]] = []
-    monkeypatch.setattr(
-        "bty.cli.flash.apply_cloud_init",
-        lambda target, ud, md=None: captured.append((target, ud, md)),
-    )
 
-    rc = cli.main(
-        [
-            "flash",
-            "--image",
-            str(img),
-            "--target",
-            "/dev/loop9",
-            "--provision",
-            "cloud-init",
-            "--user-data",
-            str(user_data),
-            "--yes",
-        ]
+    def fake_apply(target: Path, ud: Path, md: Path | None = None) -> None:
+        captured.append((target, ud, md))
+
+    rc = cli.cmd_flash(
+        _flash_args(
+            image=img,
+            provision="cloud-init",
+            user_data=user_data,
+            yes=True,
+        ),
+        probe_target=_fake_probe_block_target,
+        execute_plan=_no_op_execute,
+        apply_cloud_init=fake_apply,
+        geteuid=lambda: 0,
     )
     assert rc == 0
     assert captured == [(Path("/dev/loop9"), user_data, None)]
     captured_io = capsys.readouterr()
-    # Progress events flow to stderr in default text mode.
     assert "[provisioning] cloud-init" in captured_io.err
     assert "Done" in captured_io.out
 
@@ -288,65 +304,42 @@ def test_flash_cloud_init_invokes_apply_cloud_init(
 def test_flash_cijoe_requires_workflow(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     img = tmp_path / "x.img"
     img.write_bytes(b"\0")
-    rc = cli.main(
-        [
-            "flash",
-            "--image",
-            str(img),
-            "--target",
-            "/dev/null",
-            "--provision",
-            "cijoe",
-            "--dry-run",
-        ]
+    rc = cli.cmd_flash(
+        _flash_args(
+            image=img,
+            target=Path("/dev/null"),
+            provision="cijoe",
+            dry_run=True,
+        )
     )
     assert rc == 2
-    err = capsys.readouterr().err
-    assert "--cijoe-workflow is required" in err
+    assert "--cijoe-workflow is required" in capsys.readouterr().err
 
 
 def test_flash_cijoe_invokes_apply_cijoe(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     img = tmp_path / "x.img"
     img.write_bytes(b"\0" * 1024)
     workflow = tmp_path / "wf.yaml"
     workflow.write_text("steps: []\n")
-
-    monkeypatch.setattr(
-        "bty.cli.flash.probe_target",
-        lambda p: cli.flash.TargetInfo(
-            path=p,
-            exists=True,
-            is_block_device=True,
-            size_bytes=10**9,
-            mountpoints=[],
-        ),
-    )
-    monkeypatch.setattr("bty.cli.os.geteuid", lambda: 0)
-    monkeypatch.setattr("bty.cli.flash.execute_plan", lambda plan, **kw: None)
-
     captured: list[tuple[Path, Path, Path | None]] = []
-    monkeypatch.setattr(
-        "bty.cli.flash.apply_cijoe",
-        lambda target, wf, cfg=None: captured.append((target, wf, cfg)),
-    )
 
-    rc = cli.main(
-        [
-            "flash",
-            "--image",
-            str(img),
-            "--target",
-            "/dev/loop9",
-            "--provision",
-            "cijoe",
-            "--cijoe-workflow",
-            str(workflow),
-            "--yes",
-        ]
+    def fake_apply(target: Path, wf: Path, cfg: Path | None = None) -> None:
+        captured.append((target, wf, cfg))
+
+    rc = cli.cmd_flash(
+        _flash_args(
+            image=img,
+            provision="cijoe",
+            cijoe_workflow=workflow,
+            yes=True,
+        ),
+        probe_target=_fake_probe_block_target,
+        execute_plan=_no_op_execute,
+        apply_cijoe=fake_apply,
+        geteuid=lambda: 0,
     )
     assert rc == 0
     assert captured == [(Path("/dev/loop9"), workflow, None)]
@@ -358,55 +351,31 @@ def test_flash_cijoe_invokes_apply_cijoe(
 def test_flash_yes_path_exit_5_on_race(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Re-probe race during execute_plan -> exit 5."""
     img = tmp_path / "x.img"
     img.write_bytes(b"\0" * 1024)
 
-    monkeypatch.setattr(
-        "bty.cli.flash.probe_target",
-        lambda p: cli.flash.TargetInfo(
-            path=p,
-            exists=True,
-            is_block_device=True,
-            size_bytes=10**9,
-            mountpoints=[],
-        ),
-    )
-    monkeypatch.setattr("bty.cli.os.geteuid", lambda: 0)
-
     def boom(plan: cli.flash.FlashPlan, **_kw: object) -> None:
         raise cli.flash.FlashRaceError("target now has mounted partitions: /mnt/oops")
 
-    monkeypatch.setattr("bty.cli.flash.execute_plan", boom)
-
-    rc = cli.main(["flash", "--image", str(img), "--target", "/dev/loop9", "--yes"])
+    rc = cli.cmd_flash(
+        _flash_args(image=img, yes=True),
+        probe_target=_fake_probe_block_target,
+        execute_plan=boom,
+        geteuid=lambda: 0,
+    )
     assert rc == 5
-    err = capsys.readouterr().err
-    assert "mounted partitions" in err
+    assert "mounted partitions" in capsys.readouterr().err
 
 
 def test_flash_progress_ndjson_emits_lifecycle_events(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """``--progress=ndjson`` emits one JSON object per line on stdout."""
     img = tmp_path / "x.img"
     img.write_bytes(b"\0" * 1024)
-
-    monkeypatch.setattr(
-        "bty.cli.flash.probe_target",
-        lambda p: cli.flash.TargetInfo(
-            path=p,
-            exists=True,
-            is_block_device=True,
-            size_bytes=10**9,
-            mountpoints=[],
-        ),
-    )
-    monkeypatch.setattr("bty.cli.os.geteuid", lambda: 0)
 
     def fake_execute(plan: cli.flash.FlashPlan, *, progress: object = None) -> None:
         if callable(progress):
@@ -418,70 +387,35 @@ def test_flash_progress_ndjson_emits_lifecycle_events(
             ):
                 progress(evt)
 
-    monkeypatch.setattr("bty.cli.flash.execute_plan", fake_execute)
-
-    rc = cli.main(
-        [
-            "flash",
-            "--image",
-            str(img),
-            "--target",
-            "/dev/loop9",
-            "--yes",
-            "--progress",
-            "ndjson",
-        ]
+    rc = cli.cmd_flash(
+        _flash_args(image=img, yes=True, progress="ndjson"),
+        probe_target=_fake_probe_block_target,
+        execute_plan=fake_execute,
+        geteuid=lambda: 0,
     )
     assert rc == 0
     out_lines = [line for line in capsys.readouterr().out.splitlines() if line.startswith("{")]
     events = [json.loads(line) for line in out_lines]
     names = [e["event"] for e in events]
-    assert "started" in names
-    assert "writing" in names
-    assert "synced" in names
-    assert "partprobed" in names
+    assert names[:4] == ["started", "writing", "synced", "partprobed"]
     assert names[-1] == "done"
     assert events[0]["total_bytes"] == 1024
 
 
-def test_flash_progress_none_silences_lifecycle(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_flash_progress_none_silences_lifecycle(tmp_path: Path) -> None:
     """``--progress=none`` passes a None callback to execute_plan."""
     img = tmp_path / "x.img"
     img.write_bytes(b"\0" * 1024)
-
-    monkeypatch.setattr(
-        "bty.cli.flash.probe_target",
-        lambda p: cli.flash.TargetInfo(
-            path=p,
-            exists=True,
-            is_block_device=True,
-            size_bytes=10**9,
-            mountpoints=[],
-        ),
-    )
-    monkeypatch.setattr("bty.cli.os.geteuid", lambda: 0)
-
     received: list[object] = []
 
     def fake_execute(plan: cli.flash.FlashPlan, *, progress: object = None) -> None:
         received.append(progress)
 
-    monkeypatch.setattr("bty.cli.flash.execute_plan", fake_execute)
-
-    rc = cli.main(
-        [
-            "flash",
-            "--image",
-            str(img),
-            "--target",
-            "/dev/loop9",
-            "--yes",
-            "--progress",
-            "none",
-        ]
+    rc = cli.cmd_flash(
+        _flash_args(image=img, yes=True, progress="none"),
+        probe_target=_fake_probe_block_target,
+        execute_plan=fake_execute,
+        geteuid=lambda: 0,
     )
     assert rc == 0
     assert received == [None]
@@ -490,79 +424,48 @@ def test_flash_progress_none_silences_lifecycle(
 def test_flash_yes_path_exit_4_on_missing_dependency(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A FlashDependencyError from execute_plan -> exit 4."""
     img = tmp_path / "x.img"
     img.write_bytes(b"\0" * 1024)
 
-    monkeypatch.setattr(
-        "bty.cli.flash.probe_target",
-        lambda p: cli.flash.TargetInfo(
-            path=p,
-            exists=True,
-            is_block_device=True,
-            size_bytes=10**9,
-            mountpoints=[],
-        ),
-    )
-    monkeypatch.setattr("bty.cli.os.geteuid", lambda: 0)
-
     def boom(plan: cli.flash.FlashPlan, **_kw: object) -> None:
         raise cli.flash.FlashDependencyError("some-tool is not installed")
 
-    monkeypatch.setattr("bty.cli.flash.execute_plan", boom)
-
-    rc = cli.main(["flash", "--image", str(img), "--target", "/dev/loop9", "--yes"])
+    rc = cli.cmd_flash(
+        _flash_args(image=img, yes=True),
+        probe_target=_fake_probe_block_target,
+        execute_plan=boom,
+        geteuid=lambda: 0,
+    )
     assert rc == 4
     assert "some-tool is not installed" in capsys.readouterr().err
 
 
-def test_flash_cijoe_passes_config_through(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_flash_cijoe_passes_config_through(tmp_path: Path) -> None:
     img = tmp_path / "x.img"
     img.write_bytes(b"\0" * 1024)
     workflow = tmp_path / "wf.yaml"
     workflow.write_text("steps: []\n")
     config = tmp_path / "cfg.toml"
     config.write_text("[bty]\n")
-
-    monkeypatch.setattr(
-        "bty.cli.flash.probe_target",
-        lambda p: cli.flash.TargetInfo(
-            path=p,
-            exists=True,
-            is_block_device=True,
-            size_bytes=10**9,
-            mountpoints=[],
-        ),
-    )
-    monkeypatch.setattr("bty.cli.os.geteuid", lambda: 0)
-    monkeypatch.setattr("bty.cli.flash.execute_plan", lambda plan, **kw: None)
-
     captured: list[tuple[Path, Path, Path | None]] = []
-    monkeypatch.setattr(
-        "bty.cli.flash.apply_cijoe",
-        lambda target, wf, cfg=None: captured.append((target, wf, cfg)),
-    )
 
-    rc = cli.main(
-        [
-            "flash",
-            "--image",
-            str(img),
-            "--target",
-            "/dev/loop9",
-            "--provision",
-            "cijoe",
-            "--cijoe-workflow",
-            str(workflow),
-            "--cijoe-config",
-            str(config),
-            "--yes",
-        ]
+    def fake_apply(target: Path, wf: Path, cfg: Path | None = None) -> None:
+        captured.append((target, wf, cfg))
+
+    rc = cli.cmd_flash(
+        _flash_args(
+            image=img,
+            provision="cijoe",
+            cijoe_workflow=workflow,
+            cijoe_config=config,
+            yes=True,
+        ),
+        probe_target=_fake_probe_block_target,
+        execute_plan=_no_op_execute,
+        apply_cijoe=fake_apply,
+        geteuid=lambda: 0,
     )
     assert rc == 0
     assert captured == [(Path("/dev/loop9"), workflow, config)]
