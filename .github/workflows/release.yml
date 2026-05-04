@@ -1,9 +1,14 @@
 name: Release
 
-# Publishes ``bty-lab`` to PyPI on ``v*`` tag pushes via PyPA Trusted
-# Publishing. No long-lived API tokens — the publish job authenticates
-# to PyPI with an OIDC token GitHub mints for this workflow + this
-# environment.
+# Single unified release. Pushing a ``v*`` tag:
+#   1. Builds bty-lab's wheel + sdist (``uv build``).
+#   2. Builds all three bty-media variants in parallel (usb, server, live).
+#   3. Attaches every artifact to the GitHub release at the same tag.
+#   4. Publishes the wheel + sdist to PyPI via trusted publishing.
+#
+# ``workflow_dispatch`` runs the wheel build only — a smoke test of
+# the package side. Ad-hoc media builds happen locally via the
+# Makefile (``cd bty-media && make build VARIANT=...``).
 #
 # First publish (claiming the bty-lab name) requires a one-time PyPI
 # setup: register a Pending Publisher on https://pypi.org targeting:
@@ -12,8 +17,8 @@ name: Release
 #   Repository:         bty
 #   Workflow filename:  release.yml
 #   Environment name:   pypi
-# Then push a ``v*`` tag (e.g. ``v0.1.0``) and this workflow
-# claims and uploads the release.
+# Then push a ``v*`` tag (e.g. ``v0.1.0``) and this workflow claims
+# and uploads the release.
 
 on:
   push:
@@ -21,7 +26,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
+  build-wheel:
     name: Build wheel + sdist
     runs-on: ubuntu-latest
     steps:
@@ -36,11 +41,104 @@ jobs:
           path: dist/
           if-no-files-found: error
 
+  build-media:
+    name: Build ${{ matrix.variant }} image
+    # Tag-only — workflow_dispatch builds the wheel only.
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [usb, server, live]
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install build dependencies (disk-image variants)
+        if: matrix.variant != 'live'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            qemu-system-x86 \
+            qemu-utils \
+            genisoimage \
+            zstd \
+            cpu-checker
+
+      - name: Install build dependencies (live variant)
+        if: matrix.variant == 'live'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            live-build \
+            debootstrap \
+            squashfs-tools \
+            xorriso
+
+      - name: Verify KVM availability
+        if: matrix.variant != 'live'
+        run: |
+          sudo kvm-ok || true
+          ls -l /dev/kvm || true
+
+      - name: Install cijoe
+        run: pipx install cijoe
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.1.0
+
+      - name: Build image
+        working-directory: bty-media
+        run: make build VARIANT=${{ matrix.variant }}
+
+      - name: Upload artifact (disk-image variants)
+        if: matrix.variant != 'live'
+        uses: actions/upload-artifact@v7
+        with:
+          name: bty-${{ matrix.variant }}-x86_64-img-zst
+          path: |
+            ~/system_imaging/disk/bty-${{ matrix.variant }}-x86_64.img.zst
+            ~/system_imaging/disk/bty-${{ matrix.variant }}-x86_64.img.zst.sha256
+
+      - name: Upload artifact (live variant)
+        if: matrix.variant == 'live'
+        uses: actions/upload-artifact@v7
+        with:
+          name: bty-live-x86_64-netboot
+          path: |
+            ~/system_imaging/disk/bty-live-x86_64.vmlinuz
+            ~/system_imaging/disk/bty-live-x86_64.initrd
+            ~/system_imaging/disk/bty-live-x86_64.squashfs
+            ~/system_imaging/disk/bty-live-x86_64.sha256
+
+  attach-to-release:
+    name: Attach artifacts to GitHub release
+    needs: [build-wheel, build-media]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      # softprops/action-gh-release creates / updates the release.
+      contents: write
+    steps:
+      - name: Download all workflow artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: gathered/
+      - name: List gathered artifacts
+        run: find gathered -type f | sort
+      - name: Attach to release
+        uses: softprops/action-gh-release@v2
+        with:
+          # Each upload-artifact job lands its files in
+          # ``gathered/<artifact-name>/...``; the recursive glob
+          # picks them all up.
+          files: gathered/**/*
+          fail_on_unmatched_files: true
+
   publish-pypi:
     name: Publish to PyPI
-    needs: build
+    needs: build-wheel
     runs-on: ubuntu-latest
-    # Tag-driven runs only; workflow_dispatch builds but does not publish.
     if: startsWith(github.ref, 'refs/tags/v')
     environment:
       name: pypi

@@ -325,11 +325,12 @@ and `release`.
 
 ### On tag
 
-- **`v*` tags** — `uv build` produces the wheel and sdist; PyPI publish
-  follow-up uses trusted publishing (configured later).
-- **`media-*` tags** *(once `bty-media` lands)* — build both the USB live
-  image and the server image (`amd64`) and attach them to the GitHub
-  release.
+- **`v*` tags** — single unified release. `uv build` produces the wheel
+  and sdist (PyPI publish via trusted publishing); the same workflow
+  builds all three `bty-media` variants in parallel (usb, server, live)
+  and attaches every artifact to the GitHub release at the same tag.
+  Operators get one release page covering the whole stack at one
+  version; `/ui/boot`'s "fetch latest" pulls the matching live trio.
 
 ### On `main`
 
