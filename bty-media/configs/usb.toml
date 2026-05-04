@@ -42,8 +42,11 @@ system_label = "x86_64"
 
 cloud.url = "https://cloud.debian.org/images/cloud/trixie/daily/latest/debian-13-generic-amd64-daily.qcow2"
 cloud.path = "{{ local.env.HOME }}/system_imaging/cloud/debian-13-generic-amd64-daily.qcow2"
-cloud.metadata_path = "{{ resources.auxiliary['cloudinit-metadata'] }}"
-cloud.userdata_path = "{{ resources.auxiliary['cloudinit-userdata'] }}"
+# Paths resolve against bty-media/ (the cwd at build time). Plain
+# relative paths so cijoe's config load doesn't need the userdata
+# file to exist yet — gen_userdata generates it during the run.
+cloud.metadata_path = "auxiliary/cloudinit-metadata.meta"
+cloud.userdata_path = "auxiliary/cloudinit-userdata.user"
 
 disk.path = "{{ local.env.HOME }}/system_imaging/disk/bty-usb-x86_64.qcow2"
 

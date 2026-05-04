@@ -52,10 +52,14 @@ def main(args, cijoe):
     disk = image.get("disk", {})
     system_label = image.get("system_label")
 
-    cloud_image_path = Path(cloud["path"])
+    # Relative paths in the cijoe config resolve against bty-media/
+    # (the cwd at build time). Absolute paths pass through unchanged
+    # — Python's ``Path("/abs") / "/other"`` returns the second path.
+    cwd = Path.cwd()
+    cloud_image_path = cwd / cloud["path"]
     cloud_image_url = cloud["url"]
-    metadata_path = Path(cloud["metadata_path"])
-    userdata_path = Path(cloud["userdata_path"])
+    metadata_path = cwd / cloud["metadata_path"]
+    userdata_path = cwd / cloud["userdata_path"]
 
     if not cloud_image_path.exists():
         cloud_image_path.parent.mkdir(parents=True, exist_ok=True)
