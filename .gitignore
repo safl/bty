@@ -115,9 +115,10 @@ bty-media/cijoe-output/
 bty-media/cijoe-archive/
 # Generated each build by scripts/gen_userdata.py; never edit by hand.
 bty-media/auxiliary/cloudinit-userdata.user
-# Staged by scripts/bty_wheel_stage.py for the server variant.
+# Staged by scripts/bty_wheel_stage.py for variants that bake bty in.
 bty-media/_build/
 bty-media/rootfs/server/opt/bty/bty_lab-*.whl
+bty-media/live-build/config/includes.chroot/opt/bty/bty_lab-*.whl
 
 # IDE
 .idea/

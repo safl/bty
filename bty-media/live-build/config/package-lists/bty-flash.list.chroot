@@ -1,0 +1,23 @@
+# Phase D-2: packages bty needs to flash a target disk and run the
+# flash-on-boot service. Mirrors the runtime requirements documented
+# in PLAN.md (qemu-utils for qemu-img, parted for partitioning,
+# zstd for .img.zst, nvme-cli + util-linux for block-device discovery).
+
+# bty runtime
+python3
+python3-venv
+python3-pip
+git
+curl
+ca-certificates
+
+# bty flash dependencies
+qemu-utils
+nvme-cli
+util-linux
+parted
+gdisk
+dosfstools
+e2fsprogs
+exfatprogs
+zstd

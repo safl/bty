@@ -1,0 +1,36 @@
+#!/bin/sh
+# 0500-bty-install.hook.chroot — install bty-lab into the live env.
+#
+# live-build runs hooks under config/hooks/normal/ inside the chroot
+# during the build. Filenames are sorted; the 0500 prefix puts this
+# after package install (default 0000-*) but before tweaks (0900-*).
+#
+# Inputs: ``config/includes.chroot/opt/bty/bty_lab-*-py3-none-any.whl``
+# was staged by ``scripts/bty_wheel_stage.py`` and copied into the
+# chroot's ``/opt/bty/`` by live-build's includes pipeline.
+#
+# Output: bty CLI on the live env's ``$PATH`` via
+# ``/usr/local/bin/{bty,bty-tui}`` symlinks pointing into a venv at
+# ``/opt/bty/venv``. No [web] / [tui] extras — the live env runs the
+# CLI only.
+
+set -eu
+
+if ! ls /opt/bty/bty_lab-*-py3-none-any.whl >/dev/null 2>&1; then
+    echo "0500-bty-install: no wheel staged at /opt/bty/bty_lab-*.whl" >&2
+    echo "  Did scripts/bty_wheel_stage.py run before live_build?" >&2
+    exit 1
+fi
+
+python3 -m venv /opt/bty/venv
+/opt/bty/venv/bin/pip install --no-cache-dir --upgrade pip
+for whl in /opt/bty/bty_lab-*-py3-none-any.whl; do
+    /opt/bty/venv/bin/pip install --no-cache-dir "${whl}"
+done
+
+ln -sf /opt/bty/venv/bin/bty /usr/local/bin/bty
+ln -sf /opt/bty/venv/bin/bty-tui /usr/local/bin/bty-tui
+
+# Trim pip caches and the build wheel — the appliance only needs the
+# installed package.
+rm -rf /root/.cache /opt/bty/bty_lab-*-py3-none-any.whl

@@ -1,0 +1,21 @@
+[Unit]
+Description=bty network-flash on boot
+Documentation=https://github.com/safl/bty
+# Run after the live env has DHCPed and network is up.
+After=network-online.target
+Wants=network-online.target
+# Don't keep retrying on a fresh boot if the script bailed because no
+# bty.* params were on cmdline (operator booted interactively for
+# debug); in that case it exits 0 and we leave the env alone.
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/bty-flash-on-boot
+RemainAfterExit=yes
+# Mirror stdout/stderr to the active console so the operator watching
+# the bare-metal/VM screen sees flash progress without journalctl.
+StandardOutput=journal+console
+StandardError=journal+console
+
+[Install]
+WantedBy=multi-user.target

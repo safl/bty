@@ -8,8 +8,11 @@ Builds the bty appliance images. Three variants:
 - **Server image** (`VARIANT=server`) — installable disk image for the
   bty provisioning server (`bty-web` + PXE boot stack).
 - **Network-flash live env** (`VARIANT=live`) — kernel + initrd +
-  squashfs that PXE clients chain into. Phase D-1 is the
-  scaffold (boots to a console); Phase D-2 bakes bty in.
+  squashfs that PXE clients chain into. Carries the bty CLI plus a
+  `bty-flash-on-boot.service` oneshot that reads `bty.*` parameters
+  from `/proc/cmdline`, fetches the assigned image, runs `bty flash`,
+  and reboots. The iPXE chain that supplies the cmdline params is
+  built in Phase D-3 (server side).
 
 This directory is not a Python package. It mirrors the `jkab`
 (jellyfin-kiosk-appliance-builder) pattern: cijoe-driven, Debian
@@ -108,11 +111,32 @@ Live variant:
 - USB variant: milestone 2 scaffold. Pipeline materialised, the cooked
   image carries `overlayroot` and a placeholder banner. The actual
   `bty` runtime gets baked into the image starting in milestone 6.
-- Live variant: milestone 14 phase D-1 scaffold. live-build pipeline
-  materialised; the booted env drops to a console with a placeholder
-  banner. Phase D-2 bakes the bty runtime + flash-on-boot logic into
-  the chroot (reads `bty.server=` and `bty.mac=` from the kernel
-  command line).
+- Live variant: milestone 14 phase D-2. The chroot carries the bty
+  CLI installed from a locally-built wheel into `/opt/bty/venv`,
+  plus `bty-flash-on-boot.service` (oneshot, after
+  `network-online.target`). The service reads `bty.server=`,
+  `bty.mac=`, `bty.image_url=`, and `bty.provisioning=` from
+  `/proc/cmdline`; with all three required keys present it
+  downloads the image, runs `bty flash --yes`, signals `POST
+  ${server}/pxe/${mac}/done` (best-effort), and reboots. Without
+  cmdline keys it exits 0 and the env drops to its console.
+
+  Smoke-test recipe (no PXE / iPXE involved): build the artifacts,
+  then in two QEMU windows -
+
+  ```
+  qemu-system-x86_64 -enable-kvm -m 2G -nographic -append \
+    "boot=live components quiet bty.server=http://10.0.2.2:8080 \
+     bty.mac=aa-bb-cc-dd-ee-ff bty.image_url=http://10.0.2.2:8000/test.img \
+     console=ttyS0" \
+    -kernel ~/system_imaging/disk/bty-live-x86_64.vmlinuz \
+    -initrd ~/system_imaging/disk/bty-live-x86_64.initrd \
+    -netdev user,id=n0 -device virtio-net,netdev=n0 \
+    -drive file=blank.qcow2,if=virtio
+  ```
+
+  Phase D-3 will replace this manual recipe with iPXE chain
+  templates that the server hands to PXE clients.
 - Server variant: milestone 13 phase B + milestone 14 phase C.
   Bootable Debian cloud-image hosting `bty-web` from the
   locally-built `bty-lab` wheel, plus the PXE boot-stack scaffold

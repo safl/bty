@@ -1,10 +1,18 @@
 
 ======================================================================
-  bty network-flash live env (Phase D-1 scaffold)
+  bty network-flash live env (Phase D-2)
 
-  This live env is a placeholder. Phase D-2 bakes the bty runtime
-  into the chroot and wires the flash-on-boot logic that reads
-  ``bty.server=`` and ``bty.mac=`` from the kernel command line.
+  This env runs ``bty-flash-on-boot.service`` on every boot. It
+  reads its assignment from the kernel command line:
+
+    bty.server=URL  bty.mac=MAC  bty.image_url=URL  bty.provisioning=MODE
+
+  Without those params the service exits and you land here. With
+  them, the env downloads the image, runs ``bty flash``, signals
+  the server, and reboots. ``journalctl -u bty-flash-on-boot`` for
+  details.
+
+  The iPXE chain that supplies the cmdline params lands in Phase D-3.
 ======================================================================
 
 Debian \n \l

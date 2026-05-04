@@ -1,17 +1,22 @@
 """
-Stage the bty-lab wheel for the server image
-=============================================
+Stage the bty-lab wheel for variants that bake bty into their image
+====================================================================
 
 Builds a wheel from the parent repo via ``uv build`` and copies it
-into ``bty-media/rootfs/server/opt/bty/``. ``gen_userdata.py``
-inlines that file as a base64 ``write_files`` entry; the server's
-runcmd then ``pip install``s the wheel into ``/opt/bty/venv``.
+into a per-variant staging directory:
+
+- ``server`` -> ``rootfs/server/opt/bty/`` (consumed by the cloud-init
+  ``write_files`` block emitted by ``gen_userdata.py``; the server's
+  runcmd ``pip install``s it into ``/opt/bty/venv``).
+- ``live`` -> ``live-build/config/includes.chroot/opt/bty/`` (consumed
+  by the live-build hook ``0500-bty-install.hook.chroot``, which
+  ``pip install``s it into the chroot's ``/opt/bty/venv``).
 
 The cwd at run time is ``bty-media/`` (the Makefile cd's there before
 invoking cijoe), so the repo root is ``Path.cwd().parent``.
 
-Skipped for any variant other than ``server`` — the USB image carries
-no bty-web service.
+No-op for the ``usb`` variant — the USB live image carries no bty
+runtime that needs the wheel.
 
 Retargetable: False
 """
@@ -24,6 +29,13 @@ import shutil
 from argparse import ArgumentParser
 from pathlib import Path
 
+# Variant -> destination directory under bty-media/. Variants not
+# listed here are skipped with rc=0.
+TARGET_DIRS: dict[str, Path] = {
+    "server": Path("rootfs") / "server" / "opt" / "bty",
+    "live": Path("live-build") / "config" / "includes.chroot" / "opt" / "bty",
+}
+
 
 def add_args(parser: ArgumentParser):
     del parser  # no flags; signature kept for cijoe consistency
@@ -35,11 +47,11 @@ def main(args, cijoe):
     repo_root = bty_media.parent
 
     variant = cijoe.getconf("bty", {}).get("variant", "usb")
-    if variant != "server":
-        log.info(f"Skipping wheel stage (variant={variant!r}; only 'server' bakes the wheel)")
+    target_rel = TARGET_DIRS.get(variant)
+    if target_rel is None:
+        log.info(f"Skipping wheel stage (variant={variant!r}; nothing to bake)")
         return 0
-
-    target_dir = bty_media / "rootfs" / "server" / "opt" / "bty"
+    target_dir = bty_media / target_rel
     target_dir.mkdir(parents=True, exist_ok=True)
 
     out_dir = bty_media / "_build" / "wheel"
@@ -62,9 +74,8 @@ def main(args, cijoe):
         log.error(f"Expected exactly one wheel; found {len(wheels)}: {wheels}")
         return errno.E2BIG
 
-    # Strip any previously-staged wheel(s) — we only want one in the
-    # write_files block, and an old wheel left around would also be
-    # installed by the runcmd glob.
+    # Drop any previously-staged wheel(s) under the target dir — we want
+    # exactly one for the consuming step's glob to be unambiguous.
     for stale in target_dir.glob("bty_lab-*.whl"):
         if stale.name != wheels[0].name:
             log.info(f"Removing stale staged wheel {stale}")

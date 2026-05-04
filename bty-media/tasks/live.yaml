@@ -1,24 +1,33 @@
 doc: |
-  bty network-flash live env build (Phase D-1 scaffold)
-  ====================================================
+  bty network-flash live env build (Phase D-2)
+  ============================================
 
   Builds the kernel + initrd + squashfs that PXE clients chain into
-  via the bty server's HTTP boot stack. Phase D-1 produces a bare
-  Debian live env with no bty content; Phase D-2 bakes bty + the
-  flash-on-boot script into the chroot.
+  via the bty server's HTTP boot stack. The chroot carries the bty
+  runtime + a flash-on-boot systemd unit; the iPXE chain (Phase D-3,
+  server side) hands the live env its assignment via kernel command
+  line: ``bty.server=`` ``bty.mac=`` ``bty.image_url=``
+  ``bty.provisioning=``.
 
-  Step:
+  Steps:
 
-  1. ``live_build`` — copies ``live-build/`` into a working dir,
-     runs ``lb clean --all && lb build`` (live-build invokes
-     debootstrap, mksquashfs, and mkinitramfs), and publishes
+  1. ``bty_wheel_stage`` — builds the bty-lab wheel from the parent
+     repo and stages it under
+     ``live-build/config/includes.chroot/opt/bty/``. live-build's
+     chroot hook installs it into ``/opt/bty/venv`` during D-2.
+  2. ``live_build`` — copies ``live-build/`` into a working dir,
+     runs ``lb clean --all && lb build`` (debootstrap, mksquashfs,
+     mkinitramfs), and publishes
      ``bty-live-x86_64.{vmlinuz,initrd,squashfs}`` plus a sha256
      manifest under ``publish.dir``.
 
   Requires: live-build on the build host (``apt install live-build``)
-  and passwordless sudo (live-build's chroot operations are
+  plus passwordless sudo (live-build's chroot operations are
   privileged). CI runners have NOPASSWD; local devs run with sudo.
 
 steps:
+- name: bty_wheel_stage
+  uses: bty_wheel_stage
+
 - name: live_build
   uses: live_build
