@@ -81,6 +81,18 @@ def create_app(
     def version() -> _models.VersionResponse:
         return _models.VersionResponse(version=bty.__version__)
 
+    @app.get("/pxe-bootstrap.ipxe", response_class=PlainTextResponse)
+    def pxe_bootstrap(request: Request) -> str:
+        # Fixed iPXE script that PXE clients hit after their iPXE binary
+        # loads (second-stage DHCP from dnsmasq points here). It chains
+        # to the per-MAC plan endpoint using the Host header, so the
+        # client always loops back to whichever name/IP/port the operator
+        # used to reach this server. Open route: PXE clients have no
+        # tokens.
+        host = request.headers.get("host", f"{request.url.hostname}:{request.url.port or 8080}")
+        template = jinja.get_template("pxe_bootstrap.j2")
+        return template.render(host=host)
+
     @app.get("/pxe/{mac}", response_class=PlainTextResponse)
     def pxe(mac: str, request: Request) -> str:
         normalised = _normalise_mac(mac)

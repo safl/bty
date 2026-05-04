@@ -81,12 +81,14 @@ which executes four steps:
 - USB variant: milestone 2 scaffold. Pipeline materialised, the cooked
   image carries `overlayroot` and a placeholder banner. The actual
   `bty` runtime gets baked into the image starting in milestone 6.
-- Server variant: milestone 13 phase B. Bootable Debian cloud-image
-  hosting `bty-web` from the locally-built `bty-lab` wheel. A
-  `bty-web-init.service` oneshot runs on first boot to generate a
-  random bearer token, write `/etc/default/bty-web`, create the state
-  directory, and rewrite `/etc/issue` so the operator sees the URL
-  and token on the bare-metal/VM console at the login prompt.
+- Server variant: milestone 13 phase B + milestone 14 phase C.
+  Bootable Debian cloud-image hosting `bty-web` from the
+  locally-built `bty-lab` wheel, plus the PXE boot-stack scaffold
+  (dnsmasq + iPXE binaries). A `bty-web-init.service` oneshot runs
+  on first boot to generate a random bearer token, write
+  `/etc/default/bty-web`, create the state directory, and rewrite
+  `/etc/issue` so the operator sees the URL and token on the
+  bare-metal/VM console at the login prompt.
 
   ### Operator first-boot
 
@@ -97,3 +99,14 @@ which executes four steps:
   3. Open the URL in a browser, paste the token, you're in.
   4. Rotate the token by removing `/etc/default/bty-web` and
      rebooting (a future first-boot wizard will replace this flow).
+
+  ### PXE boot stack (Phase C)
+
+  TFTP is up by default and serves `undionly.kpxe` (BIOS) and
+  `ipxe.efi` (UEFI) from `/var/lib/tftpboot/`. The proxy-DHCP +
+  chain directives in `/etc/dnsmasq.d/bty-pxe.conf` are **commented
+  out by default** to avoid disrupting an existing DHCP server on
+  the network. Activate them by uncommenting the block and
+  substituting the operator's PXE subnet, then
+  `systemctl restart dnsmasq`. Phase E (first-boot wizard) will
+  surface this in the browser UI.

@@ -182,9 +182,9 @@ is lower-case `aa:bb:cc:dd:ee:ff`):
 | `GET /healthz` | `GET /machines` |
 | `GET /version` | `GET /machines/{mac}` |
 | `GET /pxe/{mac}` | `PUT /machines/{mac}` (body: MachineUpsert) |
-| `POST /bootstrap/{mac}` | `DELETE /machines/{mac}` |
-| `GET /static/*` | `GET /images` |
-| | `GET /events/machines` (Server-Sent Events) |
+| `GET /pxe-bootstrap.ipxe` | `DELETE /machines/{mac}` |
+| `POST /bootstrap/{mac}` | `GET /images` |
+| `GET /static/*` | `GET /events/machines` (Server-Sent Events) |
 
 **HTTP status semantics:**
 - `200` — success with body
@@ -225,6 +225,17 @@ runtime; agents and PXE clients can run on air-gapped networks.
 **Single-worker requirement.** The SSE bus is in-process; run
 `uvicorn` with one worker (the default). Multi-worker would need a
 real broker (Redis pub/sub, NATS), which is out of scope.
+
+**PXE boot stack (server image).** `bty-media`'s server variant
+ships dnsmasq + the iPXE BIOS/UEFI binaries. TFTP serves
+`undionly.kpxe` and `ipxe.efi` from `/var/lib/tftpboot/`. The
+proxy-DHCP and chain-config block in
+`/etc/dnsmasq.d/bty-pxe.conf` is **commented out by default** so a
+freshly-imaged appliance never disrupts an existing DHCP server;
+the operator activates it (Phase E first-boot wizard, or hand-edit)
+once they've picked which interface to serve PXE on. Two-stage
+chain: PXE ROM -> `undionly.kpxe`/`ipxe.efi` -> bty-web's
+`/pxe-bootstrap.ipxe` -> per-MAC `/pxe/{mac}` plan.
 
 ## Conventions agents can rely on
 

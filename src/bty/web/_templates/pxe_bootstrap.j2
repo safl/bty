@@ -1,0 +1,7 @@
+#!ipxe
+# bty PXE bootstrap — fetched by iPXE clients on second-stage DHCP.
+# Chains to the per-MAC plan endpoint on the same host that served
+# this script (Host header), so the URL stays correct regardless of
+# whether the operator addresses the server by IP, hostname, or
+# .local mDNS name.
+chain http://{{ host }}/pxe/${net0/mac:hexhyp}

@@ -236,6 +236,11 @@ cannot carry a token:
   assignment is made. Trust model: bty-web is meant for a homelab /
   CI network, not the open internet — anyone reachable can write
   discovery rows.
+- `GET /pxe-bootstrap.ipxe` — static iPXE script that dnsmasq points
+  iPXE clients at on their second-stage DHCP. Returns
+  `chain http://<host>/pxe/${net0/mac:hexhyp}` where `<host>` is the
+  request's `Host` header, so the client always loops back to
+  whichever IP / hostname / .local name it used to reach the server.
 - `POST /bootstrap/{mac}` — bootstrap script for the bty live env
   (placeholder until milestone 14 wires the live-env handoff)
 

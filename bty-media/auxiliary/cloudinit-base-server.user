@@ -36,6 +36,10 @@ packages:
   - git
   - curl
   - ca-certificates
+  # PXE boot stack (Phase C). dnsmasq runs TFTP and (when the operator
+  # activates it) proxy-DHCP. ``ipxe`` ships the BIOS + UEFI binaries.
+  - dnsmasq
+  - ipxe
 
 runcmd:
   # Install bty-lab[web] from the staged wheel into a system venv,
@@ -51,11 +55,23 @@ runcmd:
       /opt/bty/venv/bin/pip install --no-cache-dir "${whl}[web]"
     done
 
+  # PXE boot stack: stage the iPXE binaries under the TFTP root so
+  # dnsmasq can serve them when the operator activates proxy-DHCP.
+  # The package layout from `apt install ipxe` puts them under
+  # /usr/lib/ipxe/ — symlink rather than copy so package upgrades
+  # carry through.
+  - install -d -o root -g root -m 0755 /var/lib/tftpboot
+  - ln -sf /usr/lib/ipxe/undionly.kpxe /var/lib/tftpboot/undionly.kpxe
+  - ln -sf /usr/lib/ipxe/ipxe.efi /var/lib/tftpboot/ipxe.efi
+
   # Pick up the staged systemd units. bty-web-init runs once on the
   # cooked image's first boot to generate the token and set up the
-  # state directory; bty-web is the long-running service.
+  # state directory; bty-web is the long-running service. dnsmasq is
+  # enabled so TFTP is up at boot; the proxy-DHCP block in
+  # /etc/dnsmasq.d/bty-pxe.conf stays dormant until the operator
+  # activates it.
   - systemctl daemon-reload
-  - systemctl enable bty-web.service bty-web-init.service
+  - systemctl enable bty-web.service bty-web-init.service dnsmasq.service
 
   # Strip the bake password and disable password SSH for the cooked
   # image. The browser UI is the supported admin surface.
