@@ -5,7 +5,9 @@ Generate cloud-init user-data
 Assembles cloud-init user-data for a bty-media variant by combining a
 per-variant base config with files staged under ``rootfs/``. Each file
 becomes a ``write_files`` entry with path, owner, permissions, and
-content derived from the actual file.
+content derived from the actual file. Binary files (anything that is
+not valid UTF-8) are emitted with ``encoding: b64`` so cloud-init
+restores the bytes on the target.
 
 Reads the ``[bty]`` config from cijoe to:
 
@@ -20,14 +22,21 @@ Retargetable: False
 
 from __future__ import annotations
 
+import base64
 import logging as log
 import stat
 from pathlib import Path
 
 KNOWN_VARIANTS = ("usb", "server")
 
+# Wrap base64 lines at 76 cols so the YAML output is readable rather
+# than a single multi-kilobyte line. Cloud-init concatenates them
+# transparently before decoding.
+_B64_WRAP = 76
+
 
 def main(args, cijoe):
+    del args
     repo_dir = Path.cwd()
     rootfs_dir = repo_dir / "rootfs"
     output_path = repo_dir / "auxiliary" / "cloudinit-userdata.user"
@@ -69,21 +78,42 @@ def main(args, cijoe):
         for filepath in sorted(source_dir.rglob("*")):
             if not filepath.is_file():
                 continue
-
-            target = "/" + str(filepath.relative_to(source_dir))
-            content = filepath.read_text()
-            mode = stat.S_IMODE(filepath.stat().st_mode)
-            perms = f"0{mode:o}"
-
-            lines.append(f"  - path: {target}")
-            lines.append("    owner: root:root")
-            lines.append(f'    permissions: "{perms}"')
-            lines.append("    content: |")
-            for line in content.splitlines():
-                lines.append(f"      {line}")
-            lines.append("")
+            lines.extend(_render_write_file(filepath, source_dir))
 
     output_path.write_text("\n".join(lines) + "\n")
     log.info(f"Generated {output_path} (variant={variant})")
 
     return 0
+
+
+def _render_write_file(filepath: Path, source_dir: Path) -> list[str]:
+    """Render one ``write_files`` entry for ``filepath`` (relative to ``source_dir``).
+
+    Tries UTF-8 text first and emits a literal ``content: |`` block; on
+    decode failure falls back to base64 + ``encoding: b64``.
+    """
+    target = "/" + str(filepath.relative_to(source_dir))
+    mode = stat.S_IMODE(filepath.stat().st_mode)
+    perms = f"0{mode:o}"
+    header = [
+        f"  - path: {target}",
+        "    owner: root:root",
+        f'    permissions: "{perms}"',
+    ]
+
+    raw = filepath.read_bytes()
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        encoded = base64.b64encode(raw).decode("ascii")
+        body = ["    encoding: b64", "    content: |"]
+        for i in range(0, len(encoded), _B64_WRAP):
+            body.append(f"      {encoded[i : i + _B64_WRAP]}")
+        body.append("")
+        return header + body
+
+    body = ["    content: |"]
+    for line in text.splitlines():
+        body.append(f"      {line}")
+    body.append("")
+    return header + body

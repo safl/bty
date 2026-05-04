@@ -1,0 +1,17 @@
+[Unit]
+Description=bty-web first-boot initialisation (token, state dir, login banner)
+Documentation=https://github.com/safl/bty
+# Skip on every boot after the first - the token has been generated and
+# the operator may have edited /etc/default/bty-web.
+ConditionPathExists=!/etc/default/bty-web
+Before=bty-web.service
+DefaultDependencies=no
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/bty-web-init
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -10,18 +10,24 @@ doc: |
 
   Steps:
 
-  1. ``gen_userdata`` assembles a cloud-init user-data file by inlining
-     every file under ``rootfs/common/`` and ``rootfs/<variant>/`` as
-     ``write_files`` entries on top of the per-variant
-     ``auxiliary/cloudinit-base-<variant>.user`` template.
-  2. ``diskimage_build`` downloads the Debian cloud image, resizes the
+  1. ``bty_wheel_stage`` (server variant only) — builds the bty-lab
+     wheel via ``uv build`` from the parent repo and stages it under
+     ``rootfs/server/opt/bty/`` so ``gen_userdata`` can inline it.
+  2. ``gen_userdata`` assembles a cloud-init user-data file by
+     inlining files under ``rootfs/common/`` and ``rootfs/<variant>/``
+     as ``write_files`` entries on top of
+     ``auxiliary/cloudinit-base-<variant>.user``.
+  3. ``diskimage_build`` downloads the Debian cloud image, resizes the
      boot disk, builds the cloud-init seed.iso, and boots QEMU.
      cloud-init provisions the system and powers off; ``qemu-img
      convert -c`` produces a baked qcow2.
-  3. ``img_zst_publish`` converts the qcow2 to raw and zstd-compresses
+  4. ``img_zst_publish`` converts the qcow2 to raw and zstd-compresses
      it into a dd-able ``.img.zst`` artifact, alongside a sha256sum.
 
 steps:
+- name: bty_wheel_stage
+  uses: bty_wheel_stage
+
 - name: gen_userdata
   uses: gen_userdata
 

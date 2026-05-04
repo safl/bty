@@ -1,9 +1,10 @@
 
 ======================================================================
-  bty server (scaffold)
+  bty server appliance
 
-  Pipeline materialised; bty-web service lands in milestone 13 phase B.
-  Browser UI: http://<host>:8080/ui  (once bty-web is wired up)
+  First boot has not yet completed. The bty-web-init unit will
+  rewrite this banner with the URL and bearer token once the
+  oneshot has run. Reboot if you see this on a freshly-imaged disk.
 ======================================================================
 
 Debian \n \l

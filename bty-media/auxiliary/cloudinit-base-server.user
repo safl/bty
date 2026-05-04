@@ -6,7 +6,8 @@
 #   __BTY_TIMEZONE__   - IANA timezone
 #
 # Files under rootfs/common/ and rootfs/server/ are appended as a
-# write_files block by gen_userdata.py.
+# write_files block by gen_userdata.py. The bty-lab wheel staged by
+# scripts/bty_wheel_stage.py rides through there as well.
 
 hostname: __BTY_HOSTNAME__
 fqdn: __BTY_HOSTNAME__.local
@@ -29,15 +30,33 @@ chpasswd:
 package_update: true
 package_upgrade: false
 packages:
-  # bty runtime + install paths (bty-lab[web] lands in phase B).
+  # bty runtime + its [web] extra's transitive build hooks.
   - python3
   - python3-venv
-  - pipx
   - git
   - curl
   - ca-certificates
 
 runcmd:
+  # Install bty-lab[web] from the staged wheel into a system venv,
+  # then create the dedicated 'bty' service user. The wheel filename
+  # carries a version we don't pin here, so we glob for it.
+  - |
+    set -eu
+    useradd --system --no-create-home --shell /usr/sbin/nologin bty
+    install -d -o root -g root -m 0755 /opt/bty
+    python3 -m venv /opt/bty/venv
+    /opt/bty/venv/bin/pip install --no-cache-dir --upgrade pip
+    for whl in /opt/bty/bty_lab-*-py3-none-any.whl; do
+      /opt/bty/venv/bin/pip install --no-cache-dir "${whl}[web]"
+    done
+
+  # Pick up the staged systemd units. bty-web-init runs once on the
+  # cooked image's first boot to generate the token and set up the
+  # state directory; bty-web is the long-running service.
+  - systemctl daemon-reload
+  - systemctl enable bty-web.service bty-web-init.service
+
   # Strip the bake password and disable password SSH for the cooked
   # image. The browser UI is the supported admin surface.
   - passwd -d root
@@ -51,9 +70,10 @@ runcmd:
   # Clear cloud-init artefacts so the cooked image is identity-less.
   - cloud-init clean --logs --seed || true
 
-  # Trim apt caches to keep the image small.
+  # Trim apt + pip caches to keep the image small.
   - apt-get clean
   - rm -rf /var/lib/apt/lists/*
+  - rm -rf /root/.cache /home/*/.cache
 
 power_state:
   mode: poweroff

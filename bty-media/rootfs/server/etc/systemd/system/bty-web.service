@@ -1,0 +1,21 @@
+[Unit]
+Description=bty-web HTTP server
+Documentation=https://github.com/safl/bty
+Requires=bty-web-init.service
+After=network-online.target bty-web-init.service
+Wants=network-online.target
+
+[Service]
+Type=exec
+EnvironmentFile=/etc/default/bty-web
+ExecStart=/opt/bty/venv/bin/bty-web
+Restart=on-failure
+RestartSec=5
+User=bty
+Group=bty
+ProtectSystem=full
+ProtectHome=true
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
