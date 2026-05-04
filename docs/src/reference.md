@@ -78,7 +78,7 @@ Exit codes:
 - `0` -> success
 - `2` -> the path does not exist (or argparse rejected the invocation)
 
-### `bty flash --image PATH --target PATH [--provision MODE] [--user-data PATH] [--meta-data PATH] [--cijoe-workflow PATH] [--cijoe-config PATH] [--dry-run] [--yes]`
+### `bty flash --image PATH --target PATH [--provision MODE] [--user-data PATH] [--meta-data PATH] [--cijoe-workflow PATH] [--cijoe-config PATH] [--progress {text,ndjson,none}] [--dry-run] [--yes]`
 
 Flash an image onto a target block device.
 
@@ -139,6 +139,26 @@ After the flash, `bty` runs the configured post-flash step:
   rejects with exit `2` if missing. **Requires `cijoe` on `PATH`**
   (`pipx install cijoe`); errors clearly if absent. Workflow exit
   non-zero is propagated as a flash failure.
+
+#### Progress
+
+`--progress {text,ndjson,none}` controls lifecycle reporting (default
+`text`).
+
+Lifecycle events: `started`, `writing`, `synced`, `partprobed`,
+`provisioning` (cloud-init / cijoe steps only), `done`, `failed`.
+
+- `text` (default) — one line per event on stderr (`[event] note`).
+- `ndjson` — one JSON object per line on stdout
+  (`{"event":"started","total_bytes":12345}` etc.). Use this from
+  agents and CI scripts.
+- `none` — no lifecycle output. Subprocess noise (`dd status=progress`)
+  still goes to stderr in all modes; redirect if you want a clean
+  channel.
+
+The same callback shape (`bty.flash.ProgressCallback` /
+`bty.flash.FlashProgress`) is used by `bty-tui`'s flash modal — UI
+updates and CLI output share the same event stream.
 
 #### Exit codes (specific to `bty flash`)
 

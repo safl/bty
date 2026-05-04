@@ -187,7 +187,7 @@ def test_flash_yes_path_invokes_execute_plan_when_root(
     called = []
     monkeypatch.setattr(
         "bty.cli.flash.execute_plan",
-        lambda plan: called.append(plan.target.path),
+        lambda plan, **kw: called.append(plan.target.path),
     )
 
     rc = cli.main(["flash", "--image", str(img), "--target", "/dev/loop9", "--yes"])
@@ -255,7 +255,7 @@ def test_flash_cloud_init_invokes_apply_cloud_init(
         ),
     )
     monkeypatch.setattr("bty.cli.os.geteuid", lambda: 0)
-    monkeypatch.setattr("bty.cli.flash.execute_plan", lambda plan: None)
+    monkeypatch.setattr("bty.cli.flash.execute_plan", lambda plan, **kw: None)
 
     captured: list[tuple[Path, Path, Path | None]] = []
     monkeypatch.setattr(
@@ -324,7 +324,7 @@ def test_flash_cijoe_invokes_apply_cijoe(
         ),
     )
     monkeypatch.setattr("bty.cli.os.geteuid", lambda: 0)
-    monkeypatch.setattr("bty.cli.flash.execute_plan", lambda plan: None)
+    monkeypatch.setattr("bty.cli.flash.execute_plan", lambda plan, **kw: None)
 
     captured: list[tuple[Path, Path, Path | None]] = []
     monkeypatch.setattr(
@@ -373,7 +373,7 @@ def test_flash_yes_path_exit_5_on_race(
     )
     monkeypatch.setattr("bty.cli.os.geteuid", lambda: 0)
 
-    def boom(plan: cli.flash.FlashPlan) -> None:
+    def boom(plan: cli.flash.FlashPlan, **_kw: object) -> None:
         raise cli.flash.FlashRaceError("target now has mounted partitions: /mnt/oops")
 
     monkeypatch.setattr("bty.cli.flash.execute_plan", boom)
@@ -382,6 +382,106 @@ def test_flash_yes_path_exit_5_on_race(
     assert rc == 5
     err = capsys.readouterr().err
     assert "mounted partitions" in err
+
+
+def test_flash_progress_ndjson_emits_lifecycle_events(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``--progress=ndjson`` emits one JSON object per line on stdout."""
+    img = tmp_path / "x.img"
+    img.write_bytes(b"\0" * 1024)
+
+    monkeypatch.setattr(
+        "bty.cli.flash.probe_target",
+        lambda p: cli.flash.TargetInfo(
+            path=p,
+            exists=True,
+            is_block_device=True,
+            size_bytes=10**9,
+            mountpoints=[],
+        ),
+    )
+    monkeypatch.setattr("bty.cli.os.geteuid", lambda: 0)
+
+    def fake_execute(plan: cli.flash.FlashPlan, *, progress: object = None) -> None:
+        if callable(progress):
+            for evt in (
+                cli.flash.FlashProgress(event="started", total_bytes=1024),
+                cli.flash.FlashProgress(event="writing", note="img"),
+                cli.flash.FlashProgress(event="synced"),
+                cli.flash.FlashProgress(event="partprobed"),
+            ):
+                progress(evt)
+
+    monkeypatch.setattr("bty.cli.flash.execute_plan", fake_execute)
+
+    rc = cli.main(
+        [
+            "flash",
+            "--image",
+            str(img),
+            "--target",
+            "/dev/loop9",
+            "--yes",
+            "--progress",
+            "ndjson",
+        ]
+    )
+    assert rc == 0
+    out_lines = [line for line in capsys.readouterr().out.splitlines() if line.startswith("{")]
+    events = [json.loads(line) for line in out_lines]
+    names = [e["event"] for e in events]
+    assert "started" in names
+    assert "writing" in names
+    assert "synced" in names
+    assert "partprobed" in names
+    assert names[-1] == "done"
+    assert events[0]["total_bytes"] == 1024
+
+
+def test_flash_progress_none_silences_lifecycle(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``--progress=none`` passes a None callback to execute_plan."""
+    img = tmp_path / "x.img"
+    img.write_bytes(b"\0" * 1024)
+
+    monkeypatch.setattr(
+        "bty.cli.flash.probe_target",
+        lambda p: cli.flash.TargetInfo(
+            path=p,
+            exists=True,
+            is_block_device=True,
+            size_bytes=10**9,
+            mountpoints=[],
+        ),
+    )
+    monkeypatch.setattr("bty.cli.os.geteuid", lambda: 0)
+
+    received: list[object] = []
+
+    def fake_execute(plan: cli.flash.FlashPlan, *, progress: object = None) -> None:
+        received.append(progress)
+
+    monkeypatch.setattr("bty.cli.flash.execute_plan", fake_execute)
+
+    rc = cli.main(
+        [
+            "flash",
+            "--image",
+            str(img),
+            "--target",
+            "/dev/loop9",
+            "--yes",
+            "--progress",
+            "none",
+        ]
+    )
+    assert rc == 0
+    assert received == [None]
 
 
 def test_flash_yes_path_exit_4_on_missing_dependency(
@@ -405,7 +505,7 @@ def test_flash_yes_path_exit_4_on_missing_dependency(
     )
     monkeypatch.setattr("bty.cli.os.geteuid", lambda: 0)
 
-    def boom(plan: cli.flash.FlashPlan) -> None:
+    def boom(plan: cli.flash.FlashPlan, **_kw: object) -> None:
         raise cli.flash.FlashDependencyError("some-tool is not installed")
 
     monkeypatch.setattr("bty.cli.flash.execute_plan", boom)
@@ -437,7 +537,7 @@ def test_flash_cijoe_passes_config_through(
         ),
     )
     monkeypatch.setattr("bty.cli.os.geteuid", lambda: 0)
-    monkeypatch.setattr("bty.cli.flash.execute_plan", lambda plan: None)
+    monkeypatch.setattr("bty.cli.flash.execute_plan", lambda plan, **kw: None)
 
     captured: list[tuple[Path, Path, Path | None]] = []
     monkeypatch.setattr(

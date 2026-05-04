@@ -10,6 +10,7 @@ Requires the ``[tui]`` install extra (pulls in textual).
 from __future__ import annotations
 
 import os
+from collections.abc import Sequence
 from pathlib import Path
 from typing import ClassVar
 
@@ -69,7 +70,7 @@ class FlashConfirmScreen(ModalScreen[bool]):
     }
     """
 
-    BINDINGS: ClassVar[list[Binding]] = [
+    BINDINGS: ClassVar[Sequence[Binding]] = [
         Binding("escape", "dismiss(False)", "Cancel"),
     ]
 
@@ -156,11 +157,22 @@ class FlashStatusScreen(ModalScreen[bool]):
 
     @work(thread=True, exclusive=True)
     def _run_flash(self) -> None:
+        def on_progress(event: flash.FlashProgress) -> None:
+            line = f"[{event.event}]"
+            if event.note:
+                line += f" {event.note}"
+            if event.total_bytes is not None:
+                line += f" total_bytes={event.total_bytes}"
+            self.app.call_from_thread(self._append_log, line)
+
         try:
-            flash.execute_plan(self._plan)
+            flash.execute_plan(self._plan, progress=on_progress)
             self.app.call_from_thread(self._finish, True, "[green]✓ Flash completed.[/]")
         except flash.FlashError as exc:
             self.app.call_from_thread(self._finish, False, f"[red]✗ Flash failed: {exc}[/]")
+
+    def _append_log(self, line: str) -> None:
+        self.query_one(RichLog).write(line)
 
     def _finish(self, success: bool, message: str) -> None:
         log = self.query_one(RichLog)
@@ -180,7 +192,7 @@ class BtyTui(App[None]):
 
     TITLE = "bty"
 
-    BINDINGS: ClassVar[list[Binding]] = [
+    BINDINGS: ClassVar[Sequence[Binding]] = [
         Binding("q", "quit", "Quit"),
         Binding("r", "refresh", "Refresh"),
         Binding("f", "flash", "Flash"),

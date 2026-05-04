@@ -28,11 +28,54 @@ import subprocess
 import sys
 import tempfile
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import IO, Any
 
 from bty import images
+
+
+@dataclass
+class FlashProgress:
+    """One lifecycle event from :func:`execute_plan` / ``cmd_flash``.
+
+    The ``event`` field is a stable string callers dispatch on. Current
+    events:
+
+    - ``started``      — flash beginning; ``total_bytes`` is the image's
+      virtual size when known.
+    - ``writing``      — about to invoke the format-specific writer
+      (``dd`` / ``zstd | dd`` / ``qemu-img convert``).
+    - ``synced``       — kernel buffers flushed.
+    - ``partprobed``   — partition table re-read; flash hardware-complete.
+    - ``provisioning`` — emitted by ``cmd_flash`` around an
+      ``apply_cloud_init`` / ``apply_cijoe`` step (``note`` describes
+      which mode).
+    - ``done``         — emitted by ``cmd_flash`` after every step
+      succeeded.
+    - ``failed``       — emitted on any :class:`FlashError`; ``note``
+      carries the exception string. The exception is then re-raised.
+
+    ``total_bytes`` is the image's virtual size in bytes when known; it
+    is set on the ``started`` event and may be carried on later events
+    in a future byte-level-progress milestone.
+    """
+
+    event: str
+    note: str = ""
+    total_bytes: int | None = None
+
+
+ProgressCallback = Callable[[FlashProgress], None]
+
+
+def _emit(progress: ProgressCallback | None, event: str, **fields: Any) -> None:
+    """Call ``progress`` with a :class:`FlashProgress` if one was provided."""
+    if progress is None:
+        return
+    progress(FlashProgress(event=event, **fields))
+
 
 # Provisioning modes accepted by ``bty flash``. Validation only at this
 # milestone; behaviour lands in milestones 7-9.
@@ -280,7 +323,11 @@ class FlashRaceError(FlashError):
     """The target changed state between probe and write (mounted, removed, ...)."""
 
 
-def execute_plan(plan: FlashPlan) -> None:
+def execute_plan(
+    plan: FlashPlan,
+    *,
+    progress: ProgressCallback | None = None,
+) -> None:
     """Write ``plan.image`` to ``plan.target``.
 
     Re-probes the target immediately before writing to catch races
@@ -289,28 +336,44 @@ def execute_plan(plan: FlashPlan) -> None:
     image format. Synchronises and re-reads the partition table on
     success.
 
+    If ``progress`` is given, lifecycle :class:`FlashProgress` events
+    are emitted: ``started``, ``writing``, ``synced``, ``partprobed``.
+    On any :class:`FlashError`, a ``failed`` event is emitted with the
+    exception string in ``note`` and the exception re-raised.
+
     Raises :class:`FlashError` for caller-visible failures (target no
     longer suitable, format unrecognised, write subprocess failed).
     """
-    fresh_target = probe_target(plan.target.path)
-    if not fresh_target.exists or not fresh_target.is_block_device:
-        raise FlashRaceError(f"target is no longer a block device: {plan.target.path}")
-    if fresh_target.mountpoints:
-        raise FlashRaceError(
-            f"target now has mounted partitions: {', '.join(fresh_target.mountpoints)}"
-        )
+    _emit(progress, "started", total_bytes=plan.image.virtual_size_bytes)
 
-    fmt = plan.image.format
-    if fmt == "img":
-        _flash_img(plan.image.path, plan.target.path)
-    elif fmt == "img.zst":
-        _flash_zst(plan.image.path, plan.target.path)
-    elif fmt == "qcow2":
-        _flash_qcow2(plan.image.path, plan.target.path)
-    else:
-        raise FlashError(f"cannot flash image of format {fmt!r}")
+    try:
+        fresh_target = probe_target(plan.target.path)
+        if not fresh_target.exists or not fresh_target.is_block_device:
+            raise FlashRaceError(f"target is no longer a block device: {plan.target.path}")
+        if fresh_target.mountpoints:
+            raise FlashRaceError(
+                f"target now has mounted partitions: {', '.join(fresh_target.mountpoints)}"
+            )
 
-    _sync_and_partprobe(plan.target.path)
+        fmt = plan.image.format
+        _emit(progress, "writing", note=fmt or "?")
+        if fmt == "img":
+            _flash_img(plan.image.path, plan.target.path)
+        elif fmt == "img.zst":
+            _flash_zst(plan.image.path, plan.target.path)
+        elif fmt == "qcow2":
+            _flash_qcow2(plan.image.path, plan.target.path)
+        else:
+            raise FlashError(f"cannot flash image of format {fmt!r}")
+
+        _sync_target(plan.target.path)
+        _emit(progress, "synced")
+
+        _partprobe_target(plan.target.path)
+        _emit(progress, "partprobed")
+    except FlashError as exc:
+        _emit(progress, "failed", note=str(exc))
+        raise
 
 
 def _flash_img(image: Path, target: Path) -> None:
@@ -366,15 +429,20 @@ def _flash_qcow2(image: Path, target: Path) -> None:
         raise FlashError(f"qemu-img convert exited {rc} writing {image} -> {target}")
 
 
-def _sync_and_partprobe(target: Path) -> None:
-    """Flush kernel buffers and ask the kernel to re-read ``target``'s partition table.
+def _sync_target(target: Path) -> None:
+    """Flush kernel buffers; ``target`` accepted for symmetry with the partprobe sibling."""
+    del target  # informational only at this stage
+    subprocess.run(["sync"], check=False)
+
+
+def _partprobe_target(target: Path) -> None:
+    """Ask the kernel to re-read ``target``'s partition table, then settle udev.
 
     ``udevadm settle`` is run after ``partprobe`` so subsequent ``lsblk``
     queries see the new partition tree. Without it, an immediate
     follow-up (e.g. ``apply_cloud_init`` looking for the rootfs partition)
     can race the kernel's partition scan and find no children.
     """
-    subprocess.run(["sync"], check=False)
     subprocess.run(["partprobe", str(target)], check=False)
     subprocess.run(["udevadm", "settle"], check=False)
 

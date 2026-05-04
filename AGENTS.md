@@ -108,6 +108,47 @@ incompatible structural change increments the version.
 }
 ```
 
+### Streaming progress events: `bty flash --progress=ndjson`
+
+When `bty flash --yes` runs, `--progress=ndjson` streams one JSON
+object per line on stdout for each lifecycle event. Agents tail the
+output and dispatch on the `event` key.
+
+```json
+{"event": "started", "total_bytes": 134217728}
+{"event": "writing", "note": "qcow2"}
+{"event": "synced"}
+{"event": "partprobed"}
+{"event": "provisioning", "note": "cloud-init"}
+{"event": "done"}
+```
+
+On any failure during the flash:
+
+```json
+{"event": "failed", "note": "target is no longer a block device: /dev/sdX"}
+```
+
+Stable event names:
+
+| Event          | Meaning                                                      |
+|----------------|--------------------------------------------------------------|
+| `started`      | Flash beginning. `total_bytes` is the image's virtual size when known. |
+| `writing`      | About to invoke the format-specific writer (`dd` / `zstd \| dd` / `qemu-img convert`). `note` carries the format. |
+| `synced`       | Kernel buffers flushed.                                      |
+| `partprobed`   | Partition table re-read; flash hardware-complete.            |
+| `provisioning` | Provisioning step starting. `note` is `cloud-init` or `cijoe`. |
+| `done`         | All steps succeeded. End of stream.                          |
+| `failed`       | A step raised an error. `note` carries the error message. End of stream. |
+
+Default mode is `--progress=text` (one human-readable line per event
+on stderr); `--progress=none` silences lifecycle output entirely.
+
+The same callback shape (`bty.flash.ProgressCallback` /
+`bty.flash.FlashProgress`) drives the bty-tui's flash modal — so the
+TUI's UI updates and the CLI's NDJSON stream consume the same event
+sequence.
+
 ## Exit codes
 
 | Code | Meaning                                                            |

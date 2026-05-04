@@ -144,6 +144,15 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="cijoe TOML config (optional; passed through as -c)",
     )
+    p_flash.add_argument(
+        "--progress",
+        choices=["text", "ndjson", "none"],
+        default="text",
+        help=(
+            "progress reporting (default: 'text' to stderr; 'ndjson' emits "
+            "one JSON event per line on stdout; 'none' silences lifecycle output)"
+        ),
+    )
     p_flash.set_defaults(func=cmd_flash)
 
     args = parser.parse_args(argv)
@@ -269,8 +278,10 @@ def cmd_flash(args: argparse.Namespace) -> int:
     print()
     print(f"Writing to {plan.target.path} ...")
 
+    progress_cb = _build_progress_callback(args.progress)
+
     try:
-        flash.execute_plan(plan)
+        flash.execute_plan(plan, progress=progress_cb)
     except flash.FlashRaceError as exc:
         print(f"bty: flash aborted: {exc}", file=sys.stderr)
         return 5
@@ -282,7 +293,8 @@ def cmd_flash(args: argparse.Namespace) -> int:
         return 1
 
     if plan.provisioning_mode == "cloud-init":
-        print(f"Applying cloud-init seed to {plan.target.path} ...")
+        if progress_cb is not None:
+            progress_cb(flash.FlashProgress(event="provisioning", note="cloud-init"))
         try:
             flash.apply_cloud_init(
                 plan.target.path,
@@ -290,14 +302,19 @@ def cmd_flash(args: argparse.Namespace) -> int:
                 args.meta_data,
             )
         except flash.FlashDependencyError as exc:
+            if progress_cb is not None:
+                progress_cb(flash.FlashProgress(event="failed", note=str(exc)))
             print(f"bty: cloud-init seeding failed: {exc}", file=sys.stderr)
             return 4
         except flash.FlashError as exc:
+            if progress_cb is not None:
+                progress_cb(flash.FlashProgress(event="failed", note=str(exc)))
             print(f"bty: cloud-init seeding failed: {exc}", file=sys.stderr)
             return 1
 
     if plan.provisioning_mode == "cijoe":
-        print(f"Running cijoe workflow against {plan.target.path} ...")
+        if progress_cb is not None:
+            progress_cb(flash.FlashProgress(event="provisioning", note="cijoe"))
         try:
             flash.apply_cijoe(
                 plan.target.path,
@@ -305,15 +322,51 @@ def cmd_flash(args: argparse.Namespace) -> int:
                 args.cijoe_config,
             )
         except flash.FlashDependencyError as exc:
+            if progress_cb is not None:
+                progress_cb(flash.FlashProgress(event="failed", note=str(exc)))
             print(f"bty: cijoe provisioning failed: {exc}", file=sys.stderr)
             return 4
         except flash.FlashError as exc:
+            if progress_cb is not None:
+                progress_cb(flash.FlashProgress(event="failed", note=str(exc)))
             print(f"bty: cijoe provisioning failed: {exc}", file=sys.stderr)
             return 1
+
+    if progress_cb is not None:
+        progress_cb(flash.FlashProgress(event="done"))
 
     written = plan.image.virtual_size_bytes or plan.image.size_bytes
     print(f"Done. Wrote ~{written} bytes to {plan.target.path}.")
     return 0
+
+
+def _build_progress_callback(mode: str) -> flash.ProgressCallback | None:
+    """Return a progress callback matching ``--progress`` mode, or ``None``."""
+    if mode == "none":
+        return None
+
+    if mode == "ndjson":
+
+        def emit(event: flash.FlashProgress) -> None:
+            payload: dict[str, Any] = {"event": event.event}
+            if event.note:
+                payload["note"] = event.note
+            if event.total_bytes is not None:
+                payload["total_bytes"] = event.total_bytes
+            print(json.dumps(payload), flush=True)
+
+        return emit
+
+    # default text mode
+    def emit_text(event: flash.FlashProgress) -> None:
+        line = f"[{event.event}]"
+        if event.note:
+            line += f" {event.note}"
+        if event.total_bytes is not None:
+            line += f" total_bytes={event.total_bytes}"
+        print(line, file=sys.stderr, flush=True)
+
+    return emit_text
 
 
 if __name__ == "__main__":  # pragma: no cover

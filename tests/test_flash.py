@@ -248,47 +248,86 @@ def _stub_block_target(path: Path) -> flash.TargetInfo:
     )
 
 
+def _stub_post_write(monkeypatch: pytest.MonkeyPatch, calls: list[str]) -> None:
+    monkeypatch.setattr(flash, "_sync_target", lambda _t: calls.append("sync"))
+    monkeypatch.setattr(flash, "_partprobe_target", lambda _t: calls.append("partprobe"))
+
+
 def test_execute_plan_dispatches_to_img_writer(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: list[tuple[str, Path, Path]] = []
+    calls: list[str] = []
     monkeypatch.setattr(flash, "probe_target", _stub_block_target)
-    monkeypatch.setattr(flash, "_flash_img", lambda i, t: calls.append(("img", i, t)))
-    monkeypatch.setattr(flash, "_flash_zst", lambda i, t: calls.append(("zst", i, t)))
-    monkeypatch.setattr(flash, "_flash_qcow2", lambda i, t: calls.append(("qcow2", i, t)))
-    monkeypatch.setattr(flash, "_sync_and_partprobe", lambda t: calls.append(("sync", t, t)))
+    monkeypatch.setattr(flash, "_flash_img", lambda _i, _t: calls.append("img"))
+    monkeypatch.setattr(flash, "_flash_zst", lambda _i, _t: calls.append("zst"))
+    monkeypatch.setattr(flash, "_flash_qcow2", lambda _i, _t: calls.append("qcow2"))
+    _stub_post_write(monkeypatch, calls)
 
     plan = flash.make_plan(_img(fmt="img"), _tgt(), "none")
     flash.execute_plan(plan)
 
-    formats = [c[0] for c in calls]
-    assert formats == ["img", "sync"]
+    assert calls == ["img", "sync", "partprobe"]
 
 
 def test_execute_plan_dispatches_to_zst_writer(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[str] = []
     monkeypatch.setattr(flash, "probe_target", _stub_block_target)
-    monkeypatch.setattr(flash, "_flash_img", lambda i, t: calls.append("img"))
-    monkeypatch.setattr(flash, "_flash_zst", lambda i, t: calls.append("zst"))
-    monkeypatch.setattr(flash, "_flash_qcow2", lambda i, t: calls.append("qcow2"))
-    monkeypatch.setattr(flash, "_sync_and_partprobe", lambda t: calls.append("sync"))
+    monkeypatch.setattr(flash, "_flash_img", lambda _i, _t: calls.append("img"))
+    monkeypatch.setattr(flash, "_flash_zst", lambda _i, _t: calls.append("zst"))
+    monkeypatch.setattr(flash, "_flash_qcow2", lambda _i, _t: calls.append("qcow2"))
+    _stub_post_write(monkeypatch, calls)
 
     plan = flash.make_plan(_img(fmt="img.zst"), _tgt(), "none")
     flash.execute_plan(plan)
 
-    assert calls == ["zst", "sync"]
+    assert calls == ["zst", "sync", "partprobe"]
 
 
 def test_execute_plan_dispatches_to_qcow2_writer(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[str] = []
     monkeypatch.setattr(flash, "probe_target", _stub_block_target)
-    monkeypatch.setattr(flash, "_flash_img", lambda i, t: calls.append("img"))
-    monkeypatch.setattr(flash, "_flash_zst", lambda i, t: calls.append("zst"))
-    monkeypatch.setattr(flash, "_flash_qcow2", lambda i, t: calls.append("qcow2"))
-    monkeypatch.setattr(flash, "_sync_and_partprobe", lambda t: calls.append("sync"))
+    monkeypatch.setattr(flash, "_flash_img", lambda _i, _t: calls.append("img"))
+    monkeypatch.setattr(flash, "_flash_zst", lambda _i, _t: calls.append("zst"))
+    monkeypatch.setattr(flash, "_flash_qcow2", lambda _i, _t: calls.append("qcow2"))
+    _stub_post_write(monkeypatch, calls)
 
     plan = flash.make_plan(_img(fmt="qcow2"), _tgt(), "none")
     flash.execute_plan(plan)
 
-    assert calls == ["qcow2", "sync"]
+    assert calls == ["qcow2", "sync", "partprobe"]
+
+
+def test_execute_plan_emits_lifecycle_events(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Progress callback receives started -> writing -> synced -> partprobed."""
+    calls: list[str] = []
+    monkeypatch.setattr(flash, "probe_target", _stub_block_target)
+    monkeypatch.setattr(flash, "_flash_img", lambda _i, _t: None)
+    _stub_post_write(monkeypatch, calls)  # we don't care about call order here
+
+    events: list[flash.FlashProgress] = []
+    plan = flash.make_plan(_img(fmt="img", virtual=12345), _tgt(), "none")
+    flash.execute_plan(plan, progress=events.append)
+
+    names = [e.event for e in events]
+    assert names == ["started", "writing", "synced", "partprobed"]
+    assert events[0].total_bytes == 12345
+    assert events[1].note == "img"
+
+
+def test_execute_plan_emits_failed_on_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Any FlashError gets a 'failed' progress event before the re-raise."""
+    monkeypatch.setattr(flash, "probe_target", _stub_block_target)
+
+    def boom(_i: Path, _t: Path) -> None:
+        raise flash.FlashError("simulated dd failure")
+
+    monkeypatch.setattr(flash, "_flash_img", boom)
+
+    events: list[flash.FlashProgress] = []
+    plan = flash.make_plan(_img(fmt="img"), _tgt(), "none")
+    with pytest.raises(flash.FlashError):
+        flash.execute_plan(plan, progress=events.append)
+
+    assert events[-1].event == "failed"
+    assert "simulated dd failure" in events[-1].note
 
 
 def test_execute_plan_refuses_unknown_format(monkeypatch: pytest.MonkeyPatch) -> None:
