@@ -183,6 +183,12 @@ curl -H "Authorization: Bearer $TOKEN" -X PUT \
 PXE clients hit `GET /pxe/{mac}` (open, no token) for the per-MAC
 iPXE config. End-to-end network flashing wires up in milestone 14.
 
+*Functional from milestone 12 (phase 1).* Browser UI at
+`http://server:8080/ui` — log in with the same token, browse the
+machines table (with a "discovered" badge for unassigned rows), edit
+assignments via the detail page form. Live updates via SSE come in
+phase 2; refresh for now.
+
 ## What is coming
 
 | Milestone | Capability |

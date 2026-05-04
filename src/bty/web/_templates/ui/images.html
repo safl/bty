@@ -1,0 +1,39 @@
+{% extends "ui/_layout.html" %}
+{% block title %}Images — bty-web{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h3 mb-0">Images</h1>
+    <span class="text-muted small">{{ images|length }} under <code>{{ image_root }}</code></span>
+</div>
+
+{% if not images %}
+<div class="alert alert-light border">
+    No images found under <code>{{ image_root }}</code>. Drop
+    <code>.qcow2</code> / <code>.img</code> / <code>.img.zst</code> files
+    in that directory and refresh.
+</div>
+{% else %}
+<div class="card">
+    <div class="table-responsive">
+        <table class="table table-hover mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th>Name</th>
+                    <th>Format</th>
+                    <th>Size (bytes)</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for img in images %}
+                <tr>
+                    <td>{{ img.name }}</td>
+                    <td>{{ img.format }}</td>
+                    <td><code>{{ img.size_bytes }}</code></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,26 @@
+<tr id="row-{{ m.mac|replace(':', '-') }}">
+    <td>
+        <a href="/ui/machines/{{ m.mac }}" class="text-decoration-none">
+            <code>{{ m.mac }}</code>
+        </a>
+    </td>
+    <td>
+        {% if m.image %}
+        {{ m.image }}
+        {% else %}
+        <span class="badge bg-warning text-dark">discovered</span>
+        {% endif %}
+    </td>
+    <td>{{ m.provisioning_mode }}</td>
+    <td>{{ m.hostname or "—" }}</td>
+    <td>
+        {% if m.last_seen_at %}
+        <small class="text-muted" title="{{ m.last_seen_at }}">{{ m.last_seen_at }}</small>
+        {% else %}
+        <small class="text-muted">never</small>
+        {% endif %}
+    </td>
+    <td class="text-end">
+        <a href="/ui/machines/{{ m.mac }}" class="btn btn-sm btn-outline-secondary">Edit</a>
+    </td>
+</tr>

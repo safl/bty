@@ -14,11 +14,11 @@ from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.responses import PlainTextResponse
-from jinja2 import Environment, FileSystemLoader
+from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 import bty
 from bty import images
-from bty.web import _db, _models
+from bty.web import _db, _models, _ui
 from bty.web._auth import make_token_dep
 
 TEMPLATES_DIR = Path(__file__).parent / "_templates"
@@ -40,7 +40,9 @@ def create_app(
 
     jinja = Environment(
         loader=FileSystemLoader(str(TEMPLATES_DIR)),
-        autoescape=False,  # iPXE scripts are plain text, not HTML
+        # Autoescape only HTML (UI) templates; the iPXE ``.j2`` files
+        # are plain text and would be mangled by escaping.
+        autoescape=select_autoescape(enabled_extensions=("html",)),
         keep_trailing_newline=True,
     )
 
@@ -216,6 +218,15 @@ def create_app(
                 )
             )
         return out
+
+    # Browser UI under /ui/ (Jinja + Bootstrap, cookie-auth).
+    _ui.register_ui_routes(
+        app,
+        jinja=jinja,
+        state_path=state_path,
+        expected_token=bearer_token,
+        image_root=resolved_image_root,
+    )
 
     return app
 

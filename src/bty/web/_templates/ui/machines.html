@@ -1,0 +1,37 @@
+{% extends "ui/_layout.html" %}
+{% block title %}Machines — bty-web{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h3 mb-0">Machines</h1>
+    <span class="text-muted small">{{ machines|length }} total</span>
+</div>
+
+{% if not machines %}
+<div class="alert alert-light border">
+    No machines yet. PXE-boot a target against this server, or
+    <code>PUT /machines/{mac}</code> to claim one.
+</div>
+{% else %}
+<div class="card">
+    <div class="table-responsive">
+        <table class="table table-hover mb-0 align-middle">
+            <thead class="table-light">
+                <tr>
+                    <th>MAC</th>
+                    <th>Image</th>
+                    <th>Provisioning</th>
+                    <th>Hostname</th>
+                    <th>Last seen</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody id="machines-tbody">
+                {% for m in machines %}
+                {% include "ui/_machine_row.html" %}
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

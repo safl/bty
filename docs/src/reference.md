@@ -294,6 +294,34 @@ ImageEntry = {
 | `BTY_WEB_HOST` | uvicorn bind address | `0.0.0.0` |
 | `BTY_WEB_PORT` | uvicorn port | `8080` |
 
+### Browser UI (`/ui`)
+
+`bty-web` ships a server-rendered browser UI under `/ui` (Jinja
+templates, Bootstrap via CDN, HTMX-friendly form posts).
+
+- `GET  /ui` -> 303 redirect to `/ui/dashboard`
+- `GET  /ui/login` -> login form
+- `POST /ui/login` -> validates the token and sets the `bty-token`
+  cookie (HttpOnly, `SameSite=Strict`, `Secure` in production)
+- `POST /ui/logout` -> clears the cookie
+- `GET  /ui/dashboard` -> overview (machine count, discovered count,
+  image count)
+- `GET  /ui/machines` -> table of all machines with a "discovered"
+  badge for unassigned rows
+- `GET  /ui/machines/{mac}` -> detail + edit form
+- `POST /ui/machines/{mac}` -> upsert from a form submit
+- `POST /ui/machines/{mac}/delete` -> delete record
+- `GET  /ui/images` -> read-only image catalog
+
+The Bearer dependency accepts the token via either the
+`Authorization: Bearer ...` header (used by API clients and PXE-flow
+scripts) or the `bty-token` cookie (set by the browser UI's login
+form). API consumers and the browser UI share the same token; the
+server treats them the same on the wire.
+
+Live updates via Server-Sent Events arrive in milestone 12 phase 2.
+For now, refresh the page to see newly-discovered machines.
+
 ## Configuration schemas
 
 Schemas for the on-disk configuration files used by `bty` and

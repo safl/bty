@@ -1,0 +1,70 @@
+{% extends "ui/_layout.html" %}
+{% block title %}{{ m.mac }} — bty-web{% endblock %}
+{% block content %}
+<nav aria-label="breadcrumb">
+    <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="/ui/machines">Machines</a></li>
+        <li class="breadcrumb-item active"><code>{{ m.mac }}</code></li>
+    </ol>
+</nav>
+
+<div class="card mb-4">
+    <div class="card-body">
+        <h1 class="h4 mb-3"><code>{{ m.mac }}</code></h1>
+        <dl class="row mb-0">
+            <dt class="col-sm-3">Discovered</dt>
+            <dd class="col-sm-9">{{ m.discovered_at or "—" }}</dd>
+            <dt class="col-sm-3">Last seen</dt>
+            <dd class="col-sm-9">{{ m.last_seen_at or "—" }}{% if m.last_seen_ip %} from <code>{{ m.last_seen_ip }}</code>{% endif %}</dd>
+            <dt class="col-sm-3">Created</dt>
+            <dd class="col-sm-9">{{ m.created_at }}</dd>
+            <dt class="col-sm-3">Updated</dt>
+            <dd class="col-sm-9">{{ m.updated_at }}</dd>
+        </dl>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-body">
+        <h2 class="h5 mb-3">Assignment</h2>
+        <form action="/ui/machines/{{ m.mac }}" method="post">
+            <div class="mb-3">
+                <label class="form-label" for="image">Image</label>
+                <select name="image" id="image" class="form-select">
+                    <option value="">— none (discovered, will boot from local disk) —</option>
+                    {% for img in images %}
+                    <option value="{{ img.name }}" {% if img.name == m.image %}selected{% endif %}>{{ img.name }} ({{ img.format }})</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="mb-3">
+                <label class="form-label" for="provisioning_mode">Provisioning mode</label>
+                <select name="provisioning_mode" id="provisioning_mode" class="form-select">
+                    {% for mode in provisioning_modes %}
+                    <option value="{{ mode }}" {% if mode == m.provisioning_mode %}selected{% endif %}>{{ mode }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="mb-3">
+                <label class="form-label" for="hostname">Hostname</label>
+                <input type="text" name="hostname" id="hostname" class="form-control"
+                       value="{{ m.hostname or '' }}" placeholder="(optional)">
+            </div>
+            <div class="mb-3">
+                <label class="form-label" for="cijoe_workflow_ref">CIJOE workflow ref</label>
+                <input type="text" name="cijoe_workflow_ref" id="cijoe_workflow_ref"
+                       class="form-control" value="{{ m.cijoe_workflow_ref or '' }}"
+                       placeholder="(optional, used when provisioning is cijoe)">
+            </div>
+            <div class="d-flex justify-content-between">
+                <button type="submit" class="btn btn-primary">Save</button>
+                <button type="submit" formaction="/ui/machines/{{ m.mac }}/delete"
+                        class="btn btn-outline-danger"
+                        onclick="return confirm('Delete machine record for {{ m.mac }}?');">
+                    Delete record
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

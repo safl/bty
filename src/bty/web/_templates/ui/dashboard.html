@@ -1,0 +1,43 @@
+{% extends "ui/_layout.html" %}
+{% block title %}Dashboard — bty-web{% endblock %}
+{% block content %}
+<h1 class="h3 mb-4">Dashboard</h1>
+
+<div class="row g-3 mb-4">
+    <div class="col-md-4">
+        <a href="/ui/machines" class="text-decoration-none">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h2 class="display-6 mb-0">{{ machine_count }}</h2>
+                    <p class="text-muted mb-0">Machines</p>
+                </div>
+            </div>
+        </a>
+    </div>
+    <div class="col-md-4">
+        <a href="/ui/machines?filter=discovered" class="text-decoration-none">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h2 class="display-6 mb-0">{{ discovered_count }}</h2>
+                    <p class="text-muted mb-0">Unassigned (discovered)</p>
+                </div>
+            </div>
+        </a>
+    </div>
+    <div class="col-md-4">
+        <a href="/ui/images" class="text-decoration-none">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h2 class="display-6 mb-0">{{ image_count }}</h2>
+                    <p class="text-muted mb-0">Images</p>
+                </div>
+            </div>
+        </a>
+    </div>
+</div>
+
+<p class="text-muted small">
+    Live updates via Server-Sent Events land in milestone 12 phase 2.
+    For now, refresh to see newly-discovered machines.
+</p>
+{% endblock %}
