@@ -410,5 +410,5 @@ def test_find_cloud_init_rootfs_raises_when_no_partition_has_marker(
     monkeypatch.setattr(flash.subprocess, "run", lambda *a, **kw: fake_lsblk)
     monkeypatch.setattr(flash, "_partition_has_cloud_init", lambda _p: False)
 
-    with pytest.raises(flash.FlashError, match=r"no partition.*has cloud-init"):
+    with pytest.raises(flash.FlashError, match=r"no partition.*cloud-init installed"):
         flash._find_cloud_init_rootfs(Path("/dev/loopX"))
