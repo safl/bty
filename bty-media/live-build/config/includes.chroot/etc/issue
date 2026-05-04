@@ -1,0 +1,10 @@
+
+======================================================================
+  bty network-flash live env (Phase D-1 scaffold)
+
+  This live env is a placeholder. Phase D-2 bakes the bty runtime
+  into the chroot and wires the flash-on-boot logic that reads
+  ``bty.server=`` and ``bty.mac=`` from the kernel command line.
+======================================================================
+
+Debian \n \l

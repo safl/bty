@@ -1,0 +1,19 @@
+#!/bin/sh
+# auto/config - live-build configuration for the bty live env.
+#
+# live-build invokes this script when (re)configuring the build dir
+# (typically the first ``lb build`` run). Encodes our lb config args:
+# Debian trixie, amd64, netboot output (kernel + initrd + squashfs),
+# no debian-installer, no memtest, no apt recommends.
+set -e
+
+lb config noauto \
+    --mode debian \
+    --distribution trixie \
+    --architectures amd64 \
+    --binary-images netboot \
+    --debian-installer false \
+    --memtest none \
+    --apt-recommends false \
+    --bootappend-live "boot=live components quiet noeject" \
+    "${@}"

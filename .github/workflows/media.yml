@@ -1,10 +1,10 @@
 name: Media
 
-# bty-media image builds. Driven manually for now: the build is heavy
-# (downloads the Debian cloud image, runs cloud-init in QEMU, compacts
-# and zstd-compresses) and produces an artifact on the order of ~1 GB
-# compressed. We trigger via workflow_dispatch when an operator wants a
-# fresh image, and on tag for releases (where every variant is built).
+# bty-media image builds. Driven manually for now: the builds are
+# heavy (Debian cloud image bake for usb / server, debootstrap +
+# squashfs + initramfs for live) and produce artifacts on the order
+# of 100 MB to 1 GB. Trigger via workflow_dispatch for one variant or
+# on a media-* tag to build every supported variant in parallel.
 
 on:
   workflow_dispatch:
@@ -17,14 +17,16 @@ on:
         options:
           - usb
           - server
+          - live
   push:
     tags: ["media-*"]
 
 jobs:
   # On workflow_dispatch the operator picks one variant; on a media-*
-  # tag we build every supported variant. Building both in a single
-  # matrix job keeps the YAML compact while letting GitHub schedule
-  # them in parallel.
+  # tag every supported variant is built in parallel. The disk-image
+  # variants (usb, server) and the live variant share scripts/ but
+  # use different cijoe pipelines (build.yaml vs live.yaml); the
+  # Makefile's TASK selector picks the right one.
   build:
     name: Build ${{ matrix.variant }} image
     runs-on: ubuntu-latest
@@ -34,11 +36,12 @@ jobs:
       matrix:
         # workflow_dispatch -> one variant (operator's choice).
         # media-* tag       -> build every supported variant.
-        variant: ${{ fromJSON(github.event_name == 'workflow_dispatch' && format('["{0}"]', inputs.variant) || '["usb","server"]') }}
+        variant: ${{ fromJSON(github.event_name == 'workflow_dispatch' && format('["{0}"]', inputs.variant) || '["usb","server","live"]') }}
     steps:
       - uses: actions/checkout@v6
 
-      - name: Install build dependencies
+      - name: Install build dependencies (disk-image variants)
+        if: matrix.variant != 'live'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
@@ -48,7 +51,18 @@ jobs:
             zstd \
             cpu-checker
 
+      - name: Install build dependencies (live variant)
+        if: matrix.variant == 'live'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            live-build \
+            debootstrap \
+            squashfs-tools \
+            xorriso
+
       - name: Verify KVM availability
+        if: matrix.variant != 'live'
         run: |
           sudo kvm-ok || true
           ls -l /dev/kvm || true
@@ -57,19 +71,31 @@ jobs:
         run: pipx install cijoe
 
       # The server variant builds a bty-lab wheel via ``uv build`` in
-      # the bty_wheel_stage step. The usb variant doesn't need uv but
-      # the install is cheap and keeps the matrix uniform.
+      # the bty_wheel_stage step. The usb / live variants don't need
+      # uv but the install is cheap and keeps the matrix uniform.
       - name: Install uv
         uses: astral-sh/setup-uv@v8.1.0
 
       - name: Build image
         working-directory: bty-media
-        run: cijoe tasks/build.yaml --monitor -c configs/${{ matrix.variant }}.toml
+        run: make build VARIANT=${{ matrix.variant }}
 
-      - name: Upload .img.zst artifact
+      - name: Upload artifact (disk-image variants)
+        if: matrix.variant != 'live'
         uses: actions/upload-artifact@v7
         with:
           name: bty-${{ matrix.variant }}-x86_64-img-zst
           path: |
             ~/system_imaging/disk/bty-${{ matrix.variant }}-x86_64.img.zst
             ~/system_imaging/disk/bty-${{ matrix.variant }}-x86_64.img.zst.sha256
+
+      - name: Upload artifact (live variant)
+        if: matrix.variant == 'live'
+        uses: actions/upload-artifact@v7
+        with:
+          name: bty-live-x86_64-netboot
+          path: |
+            ~/system_imaging/disk/bty-live-x86_64.vmlinuz
+            ~/system_imaging/disk/bty-live-x86_64.initrd
+            ~/system_imaging/disk/bty-live-x86_64.squashfs
+            ~/system_imaging/disk/bty-live-x86_64.sha256

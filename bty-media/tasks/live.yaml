@@ -1,0 +1,24 @@
+doc: |
+  bty network-flash live env build (Phase D-1 scaffold)
+  ====================================================
+
+  Builds the kernel + initrd + squashfs that PXE clients chain into
+  via the bty server's HTTP boot stack. Phase D-1 produces a bare
+  Debian live env with no bty content; Phase D-2 bakes bty + the
+  flash-on-boot script into the chroot.
+
+  Step:
+
+  1. ``live_build`` — copies ``live-build/`` into a working dir,
+     runs ``lb clean --all && lb build`` (live-build invokes
+     debootstrap, mksquashfs, and mkinitramfs), and publishes
+     ``bty-live-x86_64.{vmlinuz,initrd,squashfs}`` plus a sha256
+     manifest under ``publish.dir``.
+
+  Requires: live-build on the build host (``apt install live-build``)
+  and passwordless sudo (live-build's chroot operations are
+  privileged). CI runners have NOPASSWD; local devs run with sudo.
+
+steps:
+- name: live_build
+  uses: live_build
