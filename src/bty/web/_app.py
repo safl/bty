@@ -12,7 +12,7 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, HTTPException, Response, status
+from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.responses import PlainTextResponse
 from jinja2 import Environment, FileSystemLoader
 
@@ -59,13 +59,48 @@ def create_app(
         return _models.VersionResponse(version=bty.__version__)
 
     @app.get("/pxe/{mac}", response_class=PlainTextResponse)
-    def pxe(mac: str) -> str:
+    def pxe(mac: str, request: Request) -> str:
         normalised = _normalise_mac(mac)
+        client_ip = request.client.host if request.client else None
+        now = _now_iso()
         with _db.open_db(state_path) as conn:
             row = conn.execute("SELECT * FROM machines WHERE mac = ?", (normalised,)).fetchone()
-        template_name = "ipxe.j2" if row is not None else "ipxe_unknown.j2"
+            if row is None:
+                # Auto-discovery: record an unassigned machine so the
+                # operator can see this MAC in /machines and decide
+                # what to do with it. PXE clients still get the
+                # "unknown" template (= boot from local disk).
+                conn.execute(
+                    """
+                    INSERT INTO machines
+                        (mac, provisioning_mode, discovered_at,
+                         last_seen_at, last_seen_ip, created_at, updated_at)
+                    VALUES (?, 'none', ?, ?, ?, ?, ?)
+                    """,
+                    (normalised, now, now, client_ip, now, now),
+                )
+                conn.commit()
+                row = conn.execute("SELECT * FROM machines WHERE mac = ?", (normalised,)).fetchone()
+            else:
+                conn.execute(
+                    """
+                    UPDATE machines
+                    SET last_seen_at = ?,
+                        last_seen_ip = ?,
+                        discovered_at = COALESCE(discovered_at, ?),
+                        updated_at = ?
+                    WHERE mac = ?
+                    """,
+                    (now, client_ip, now, now, normalised),
+                )
+                conn.commit()
+                row = conn.execute("SELECT * FROM machines WHERE mac = ?", (normalised,)).fetchone()
+
+        assert row is not None
+        machine = dict(row)
+        template_name = "ipxe.j2" if machine.get("image") else "ipxe_unknown.j2"
         template = jinja.get_template(template_name)
-        return template.render(mac=normalised, machine=dict(row) if row else None)
+        return template.render(mac=normalised, machine=machine)
 
     @app.post("/bootstrap/{mac}", response_class=PlainTextResponse)
     def bootstrap(mac: str) -> str:
@@ -220,9 +255,16 @@ def _row_to_machine(row: object) -> _models.Machine:
         hostname=row["hostname"],  # type: ignore[index]
         cijoe_workflow_ref=row["cijoe_workflow_ref"],  # type: ignore[index]
         last_known_good=last_known_good,
+        discovered_at=_iso_or_none(row["discovered_at"]),  # type: ignore[index]
+        last_seen_at=_iso_or_none(row["last_seen_at"]),  # type: ignore[index]
+        last_seen_ip=row["last_seen_ip"],  # type: ignore[index]
         created_at=datetime.fromisoformat(row["created_at"]),  # type: ignore[index]
         updated_at=datetime.fromisoformat(row["updated_at"]),  # type: ignore[index]
     )
+
+
+def _iso_or_none(value: str | None) -> datetime | None:
+    return datetime.fromisoformat(value) if value else None
 
 
 def _now_iso() -> str:

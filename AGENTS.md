@@ -198,6 +198,15 @@ is lower-case `aa:bb:cc:dd:ee:ff`):
 `reference.md`; breaking changes to those shapes will land under a
 versioned URL prefix (`/v2/...`). Agents key off field names.
 
+**Auto-discovery.** A `GET /pxe/{mac}` for an unknown MAC creates an
+unassigned `Machine` record (`image == null`) with
+`discovered_at` / `last_seen_at` / `last_seen_ip` set, and returns
+the "boot from local disk" fallback template. Operators (or agents)
+poll `GET /machines` to find newly-discovered MACs and claim them
+with `PUT /machines/{mac}`. Subsequent `/pxe` contacts update
+`last_seen_at` / `last_seen_ip`; agents can use the freshness of
+those fields to detect machines that have stopped reporting.
+
 ## Conventions agents can rely on
 
 - **No interactive prompts.** Destructive operations require `--yes`.

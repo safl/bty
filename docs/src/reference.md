@@ -227,7 +227,15 @@ cannot carry a token:
 
 - `GET /healthz` — `{"status": "ok"}`
 - `GET /version` — `{"version": "..."}`
-- `GET /pxe/{mac}` — per-MAC iPXE script (`text/plain`)
+- `GET /pxe/{mac}` — per-MAC iPXE script (`text/plain`). **Auto-discovery:**
+  the first `/pxe/{mac}` contact for an unknown MAC inserts a
+  placeholder record so the operator sees the machine in `GET
+  /machines` and can claim it with `PUT /machines/{mac}`. Repeat
+  contacts update `last_seen_at` / `last_seen_ip`. PXE clients still
+  receive the fallback "boot from local disk" template until an
+  assignment is made. Trust model: bty-web is meant for a homelab /
+  CI network, not the open internet — anyone reachable can write
+  discovery rows.
 - `POST /bootstrap/{mac}` — bootstrap script for the bty live env
   (placeholder until milestone 14 wires the live-env handoff)
 
@@ -249,13 +257,16 @@ normalised to lower-case `aa:bb:cc:dd:ee:ff`.
 ```
 Machine = {
   "mac": "aa:bb:cc:dd:ee:ff",
-  "image": "debian.qcow2" | null,
+  "image": "debian.qcow2" | null,           # null = discovered but unassigned
   "provisioning_mode": "none" | "cloud-init" | "cijoe",
   "hostname": "..." | null,
   "cijoe_workflow_ref": "..." | null,
   "last_known_good": object | null,
-  "created_at": "<ISO 8601>",
-  "updated_at": "<ISO 8601>"
+  "discovered_at": "<ISO 8601>" | null,     # first /pxe contact; null if PUT-only
+  "last_seen_at":  "<ISO 8601>" | null,     # most recent /pxe contact
+  "last_seen_ip":  "203.0.113.42" | null,
+  "created_at":    "<ISO 8601>",
+  "updated_at":    "<ISO 8601>"
 }
 
 MachineUpsert = {

@@ -34,17 +34,38 @@ CREATE TABLE IF NOT EXISTS machines (
     hostname            TEXT,
     cijoe_workflow_ref  TEXT,
     last_known_good     TEXT,        -- JSON blob; NULL until first online cijoe
+    discovered_at       TEXT,        -- first /pxe/{mac} contact (NULL if PUT-created)
+    last_seen_at        TEXT,        -- most recent /pxe/{mac} contact
+    last_seen_ip        TEXT,        -- source IP of most recent /pxe contact
     created_at          TEXT NOT NULL,
     updated_at          TEXT NOT NULL
 );
 """
 
+# Columns that were added to ``machines`` after the original schema landed.
+# ``init_db`` ALTERs the table to add them when an older DB is opened, so
+# upgrades don't require operators to wipe ``state.db``.
+_ADDED_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("discovered_at", "TEXT"),
+    ("last_seen_at", "TEXT"),
+    ("last_seen_ip", "TEXT"),
+)
+
 
 def init_db(path: Path) -> None:
-    """Create ``path`` (and its parent directory) if missing; apply the schema."""
+    """Create ``path`` (and its parent directory) if missing; apply the schema.
+
+    Also applies idempotent additive migrations: any column listed in
+    :data:`_ADDED_COLUMNS` that does not yet exist gets ``ALTER TABLE``'d
+    in. Safe to call repeatedly.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(path) as conn:
         conn.executescript(SCHEMA)
+        existing = {row[1] for row in conn.execute("PRAGMA table_info(machines)")}
+        for column, decl in _ADDED_COLUMNS:
+            if column not in existing:
+                conn.execute(f"ALTER TABLE machines ADD COLUMN {column} {decl}")
         conn.commit()
 
 

@@ -164,6 +164,75 @@ def test_pxe_for_known_mac_uses_assignment_template(app_client: TestClient) -> N
     assert "no bty assignment" not in r.text  # not the fallback
 
 
+# ---------- auto-discovery via /pxe ----------------------------------------
+
+
+def test_pxe_auto_discovers_unknown_mac(app_client: TestClient) -> None:
+    """A /pxe contact for an unknown MAC creates a placeholder record so the
+    operator sees the machine in /machines and can claim it."""
+    mac = "11:22:33:44:55:66"
+
+    # Pre-condition: not in the DB.
+    pre = app_client.get(f"/machines/{mac}", headers=AUTH)
+    assert pre.status_code == 404
+
+    # PXE client (no auth) hits the endpoint.
+    r = app_client.get(f"/pxe/{mac}")
+    assert r.status_code == 200
+    assert "no bty assignment" in r.text  # fallback template
+
+    # Now visible to the operator.
+    found = app_client.get(f"/machines/{mac}", headers=AUTH)
+    assert found.status_code == 200
+    body = found.json()
+    assert body["mac"] == mac
+    assert body["image"] is None  # discovered, not yet assigned
+    assert body["provisioning_mode"] == "none"
+    assert body["discovered_at"] is not None
+    assert body["last_seen_at"] is not None
+
+
+def test_pxe_updates_last_seen_on_repeat_contact(app_client: TestClient) -> None:
+    """Subsequent /pxe contacts update last_seen_at, leave discovered_at fixed."""
+    mac = "11:22:33:44:55:66"
+
+    app_client.get(f"/pxe/{mac}")
+    first = app_client.get(f"/machines/{mac}", headers=AUTH).json()
+    assert first["discovered_at"] == first["last_seen_at"]
+
+    # Tiny pause to make the timestamp difference visible.
+    import time
+
+    time.sleep(0.01)
+    app_client.get(f"/pxe/{mac}")
+    second = app_client.get(f"/machines/{mac}", headers=AUTH).json()
+    # discovered_at is sticky; last_seen_at moves forward.
+    assert second["discovered_at"] == first["discovered_at"]
+    assert second["last_seen_at"] >= first["last_seen_at"]
+
+
+def test_pxe_does_not_overwrite_assignment(app_client: TestClient) -> None:
+    """A PUT-claimed machine that later PXE-boots keeps its assignment;
+    the /pxe contact only updates last_seen_at."""
+    mac = "aa:bb:cc:dd:ee:ff"
+    app_client.put(
+        f"/machines/{mac}",
+        json={"image": "debian.qcow2", "provisioning_mode": "cloud-init"},
+        headers=AUTH,
+    )
+    before = app_client.get(f"/machines/{mac}", headers=AUTH).json()
+    assert before["image"] == "debian.qcow2"
+    assert before["discovered_at"] is None  # PUT-created
+
+    app_client.get(f"/pxe/{mac}")
+    after = app_client.get(f"/machines/{mac}", headers=AUTH).json()
+    assert after["image"] == "debian.qcow2"  # untouched
+    assert after["provisioning_mode"] == "cloud-init"
+    assert after["last_seen_at"] is not None
+    # discovered_at is set on first /pxe contact even for PUT-created rows
+    assert after["discovered_at"] is not None
+
+
 # ---------- images ----------------------------------------------------------
 
 

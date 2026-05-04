@@ -33,7 +33,13 @@ class MachineUpsert(BaseModel):
 
 
 class Machine(BaseModel):
-    """A persisted machine record as returned by the API."""
+    """A persisted machine record as returned by the API.
+
+    A machine without an ``image`` set is *discovered* but unassigned —
+    bty-web saw it via ``GET /pxe/{mac}`` and recorded it so the
+    operator can claim it. Once the operator ``PUT``s an assignment,
+    the machine is *assigned*.
+    """
 
     mac: str = Field(..., pattern=MAC_PATTERN)
     image: str | None = None
@@ -41,6 +47,13 @@ class Machine(BaseModel):
     hostname: str | None = None
     cijoe_workflow_ref: str | None = None
     last_known_good: dict[str, Any] | None = None
+    # Set the first time bty-web sees a ``GET /pxe/{mac}`` for this MAC.
+    # ``None`` for machines that were created via ``PUT`` and have not
+    # yet PXE-booted through bty-web.
+    discovered_at: datetime | None = None
+    # Updated on every ``GET /pxe/{mac}``.
+    last_seen_at: datetime | None = None
+    last_seen_ip: str | None = None
     created_at: datetime
     updated_at: datetime
 
