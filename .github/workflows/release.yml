@@ -105,32 +105,32 @@ jobs:
 
       - name: Install build dependencies (live variant)
         # Ubuntu's ``live-build`` package (20230502 on Noble) still
-        # fetches ``dists/<release>/Contents-amd64.gz`` to resolve the
-        # kernel package - but Debian moved Contents-*.gz under
-        # ``main/`` (per-component) for every active release, so the
-        # top-level URL 404s and the build aborts. Debian trixie
-        # ships live-build 20240208+ with the fixed URL handling.
-        # Pull that .deb directly with ``apt-get download`` (we add
-        # the trixie source just long enough to fetch it, then
-        # install with dpkg so Ubuntu's apt isn't tempted to pull
-        # the rest of trixie). live-build is Architecture: all - pure
-        # shell + perl - so cross-distro install is safe.
+        # fetches ``dists/<release>/Contents-<arch>.gz`` to resolve
+        # which package provides the kernel image - but Debian moved
+        # Contents-*.gz under ``main/`` (per-component) for every
+        # active release, so the top-level URL 404s and the build
+        # aborts. Debian's pool ships a newer live-build (20240208+)
+        # with the fixed URL handling. Grab the latest .deb straight
+        # from the pool via wget + dpkg - skips the apt + GPG dance
+        # since live-build is Architecture: all (shell + perl, no
+        # libc dep) and a one-shot cross-distro install is safe.
         if: matrix.variant == 'live'
         run: |
           set -eu
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            debootstrap \
-            squashfs-tools \
-            xorriso \
-            debian-archive-keyring
-          echo 'deb http://deb.debian.org/debian trixie main' \
-              | sudo tee /etc/apt/sources.list.d/debian-trixie.list
-          sudo apt-get update
-          mkdir -p /tmp/lb-deb && cd /tmp/lb-deb
-          apt-get download -t trixie live-build
-          sudo dpkg -i ./live-build_*.deb
-          sudo rm /etc/apt/sources.list.d/debian-trixie.list
+            debootstrap squashfs-tools xorriso
+          POOL=http://ftp.debian.org/debian/pool/main/l/live-build
+          LB_DEB=$(curl -s "$POOL/" \
+              | grep -oE 'live-build_[0-9][^"<]*\.deb' \
+              | sort -V | tail -1)
+          if [ -z "$LB_DEB" ]; then
+              echo "could not find live-build .deb in $POOL/" >&2
+              exit 1
+          fi
+          echo "Fetching $LB_DEB"
+          wget -q "$POOL/$LB_DEB"
+          sudo dpkg -i "$LB_DEB"
           lb --version
 
       - name: Enable KVM access for the runner
