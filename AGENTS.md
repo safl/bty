@@ -164,6 +164,40 @@ Agents should treat `0` as success and any other code as failure. Use
 the specific code to decide whether retry is meaningful (e.g. retry
 on `5` after re-probing; do not retry on `3` or `4`).
 
+## bty-web HTTP API
+
+`bty-web` exposes a small REST surface backed by SQLite. Documented in
+detail in `docs/src/reference.md`; quick reference for agents:
+
+**Auth.** Bearer-token on protected routes; `BTY_WEB_TOKEN` must be
+set at server start (server refuses to start otherwise). Open routes
+(`/healthz`, `/version`, `/pxe/{mac}`, `/bootstrap/{mac}`) carry no
+auth so PXE clients can use them.
+
+**Routes** (all paths case-insensitive on the MAC; the canonical form
+is lower-case `aa:bb:cc:dd:ee:ff`):
+
+| Open | Protected |
+|---|---|
+| `GET /healthz` | `GET /machines` |
+| `GET /version` | `GET /machines/{mac}` |
+| `GET /pxe/{mac}` | `PUT /machines/{mac}` (body: MachineUpsert) |
+| `POST /bootstrap/{mac}` | `DELETE /machines/{mac}` |
+| | `GET /images` |
+
+**HTTP status semantics:**
+- `200` — success with body
+- `204` — success, no body (DELETE)
+- `400` — malformed input (e.g. invalid MAC)
+- `401` — missing or wrong bearer token
+- `404` — protected resource not found (e.g. machine record)
+- `422` — request body failed Pydantic validation (e.g. unknown
+  `provisioning_mode`)
+
+**Schema versioning.** Wire types are documented inline in
+`reference.md`; breaking changes to those shapes will land under a
+versioned URL prefix (`/v2/...`). Agents key off field names.
+
 ## Conventions agents can rely on
 
 - **No interactive prompts.** Destructive operations require `--yes`.

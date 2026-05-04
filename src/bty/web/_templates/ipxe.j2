@@ -1,0 +1,13 @@
+#!ipxe
+# bty-web — per-MAC iPXE config for {{ mac }}
+# Assignment:
+#   image:             {{ machine.image or "(none)" }}
+#   provisioning mode: {{ machine.provisioning_mode }}
+#   hostname:          {{ machine.hostname or "(none)" }}
+#
+# Milestone 11: this is a placeholder shape. The real boot chain into
+# the bty live environment + bootstrap handoff lands in milestone 14.
+
+echo bty-web placeholder for {{ mac }}; assigned image: {{ machine.image or "(none)" }}
+sleep 5
+exit

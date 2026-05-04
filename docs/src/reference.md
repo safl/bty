@@ -207,7 +207,81 @@ treat any module not listed above as internal.
 
 ## HTTP API
 
-`bty-web` endpoints. Populated as the server lands in milestone 12.
+`bty-web` exposes a FastAPI server. Backed by a single SQLite file at
+`$BTY_STATE_DIR/state.db` (default `/var/lib/bty/state.db`).
+
+### Auth
+
+Bearer-token authentication on protected routes:
+
+```
+Authorization: Bearer <BTY_WEB_TOKEN>
+```
+
+`BTY_WEB_TOKEN` must be set when the server starts; the server
+refuses to launch otherwise. Generate with
+`python -c 'import secrets; print(secrets.token_urlsafe(32))'`.
+
+Open routes (no token) — these are reachable by PXE clients which
+cannot carry a token:
+
+- `GET /healthz` — `{"status": "ok"}`
+- `GET /version` — `{"version": "..."}`
+- `GET /pxe/{mac}` — per-MAC iPXE script (`text/plain`)
+- `POST /bootstrap/{mac}` — bootstrap script for the bty live env
+  (placeholder until milestone 14 wires the live-env handoff)
+
+Protected routes (Bearer required):
+
+| Method | Path | Body | Returns |
+|---|---|---|---|
+| GET | `/machines` | — | array of `Machine` |
+| GET | `/machines/{mac}` | — | `Machine` (404 if missing) |
+| PUT | `/machines/{mac}` | `MachineUpsert` | `Machine` (the new state) |
+| DELETE | `/machines/{mac}` | — | 204 (404 if missing) |
+| GET | `/images` | — | array of `ImageEntry` |
+
+MAC addresses are accepted in any case + `:`-or-`-` separated, and
+normalised to lower-case `aa:bb:cc:dd:ee:ff`.
+
+### Wire types
+
+```
+Machine = {
+  "mac": "aa:bb:cc:dd:ee:ff",
+  "image": "debian.qcow2" | null,
+  "provisioning_mode": "none" | "cloud-init" | "cijoe",
+  "hostname": "..." | null,
+  "cijoe_workflow_ref": "..." | null,
+  "last_known_good": object | null,
+  "created_at": "<ISO 8601>",
+  "updated_at": "<ISO 8601>"
+}
+
+MachineUpsert = {
+  "image": str | null,
+  "provisioning_mode": "none" | "cloud-init" | "cijoe",
+  "hostname": str | null,
+  "cijoe_workflow_ref": str | null
+}
+
+ImageEntry = {
+  "name": "debian.qcow2",
+  "path": "/var/lib/bty/images/debian.qcow2",
+  "format": "qcow2",
+  "size_bytes": 268435456
+}
+```
+
+### Configuration
+
+| Variable | Purpose | Default |
+|---|---|---|
+| `BTY_WEB_TOKEN` | Bearer token (required at startup) | unset, server refuses to start |
+| `BTY_STATE_DIR` | Where `state.db` lives | `/var/lib/bty` |
+| `BTY_IMAGE_ROOT` | Image catalog directory | `/var/lib/bty/images` |
+| `BTY_WEB_HOST` | uvicorn bind address | `0.0.0.0` |
+| `BTY_WEB_PORT` | uvicorn port | `8080` |
 
 ## Configuration schemas
 

@@ -161,11 +161,33 @@ Requires the `[tui]` install extra (`pipx install "bty-lab[tui]"`).
 
 See [Reference > CLI](reference.md#cli) for the full surface.
 
+*Functional from milestone 11.* The bty-web HTTP server (no UI yet —
+that lands in milestone 12). Useful for scripts and the future browser
+UI:
+
+```bash
+# On the server (or any box you're testing on):
+export BTY_WEB_TOKEN="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
+export BTY_STATE_DIR=/var/lib/bty
+bty-web   # listens on 0.0.0.0:8080 by default
+
+# From a workstation:
+TOKEN="..."   # the same token
+curl -H "Authorization: Bearer $TOKEN" http://server:8080/machines
+curl -H "Authorization: Bearer $TOKEN" -X PUT \
+     -H "Content-Type: application/json" \
+     -d '{"image":"debian.qcow2","provisioning_mode":"none"}' \
+     http://server:8080/machines/aa:bb:cc:dd:ee:ff
+```
+
+PXE clients hit `GET /pxe/{mac}` (open, no token) for the per-MAC
+iPXE config. End-to-end network flashing wires up in milestone 14.
+
 ## What is coming
 
 | Milestone | Capability |
 |-----------|------------|
-| 11-12     | `bty-web` server + browser UI |
+| 12        | `bty-web` browser UI + first-boot wizard |
 | 13        | `bty-media` server image |
 | 14        | Network-flash end-to-end over iPXE |
 | 15        | `cijoe` online provisioning (server-driven, post-boot) |

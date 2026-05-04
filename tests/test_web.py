@@ -1,0 +1,224 @@
+"""Tests for ``bty.web``.
+
+Use FastAPI's ``TestClient`` against an app constructed via
+:func:`bty.web._app.create_app` with a ``tmp_path``-backed SQLite and
+a fixed test token. No monkeypatching of module-level globals; each
+test gets its own isolated app + db.
+"""
+
+from __future__ import annotations
+
+import secrets
+from collections.abc import Iterator
+from pathlib import Path
+
+import pytest
+from fastapi.testclient import TestClient
+
+from bty.web._app import create_app
+
+TEST_TOKEN = "test-token-do-not-leak"
+AUTH = {"Authorization": f"Bearer {TEST_TOKEN}"}
+
+
+@pytest.fixture
+def app_client(tmp_path: Path) -> Iterator[TestClient]:
+    """Yield a TestClient against an isolated bty-web app."""
+    state = tmp_path / "state.db"
+    image_root = tmp_path / "images"
+    image_root.mkdir()
+    app = create_app(
+        state_path=state,
+        bearer_token=TEST_TOKEN,
+        image_root=image_root,
+    )
+    with TestClient(app) as client:
+        yield client
+
+
+# ---------- open endpoints (no auth) ----------------------------------------
+
+
+def test_healthz_is_open(app_client: TestClient) -> None:
+    r = app_client.get("/healthz")
+    assert r.status_code == 200
+    assert r.json() == {"status": "ok"}
+
+
+def test_version_is_open(app_client: TestClient) -> None:
+    r = app_client.get("/version")
+    assert r.status_code == 200
+    body = r.json()
+    assert "version" in body and isinstance(body["version"], str) and body["version"]
+
+
+def test_pxe_for_unknown_mac_returns_unknown_template(app_client: TestClient) -> None:
+    r = app_client.get("/pxe/aa:bb:cc:dd:ee:ff")
+    assert r.status_code == 200
+    body = r.text
+    assert "no bty assignment" in body
+    assert "aa:bb:cc:dd:ee:ff" in body
+
+
+def test_pxe_invalid_mac_returns_400(app_client: TestClient) -> None:
+    r = app_client.get("/pxe/not-a-mac")
+    assert r.status_code == 400
+
+
+def test_bootstrap_placeholder(app_client: TestClient) -> None:
+    r = app_client.post("/bootstrap/AA:BB:CC:DD:EE:FF")
+    assert r.status_code == 200
+    assert "aa:bb:cc:dd:ee:ff" in r.text  # MAC is normalised
+
+
+# ---------- auth ------------------------------------------------------------
+
+
+def test_machines_without_token_is_401(app_client: TestClient) -> None:
+    r = app_client.get("/machines")
+    assert r.status_code == 401
+
+
+def test_machines_with_wrong_token_is_401(app_client: TestClient) -> None:
+    r = app_client.get("/machines", headers={"Authorization": "Bearer wrong"})
+    assert r.status_code == 401
+
+
+def test_machines_with_right_token_is_200(app_client: TestClient) -> None:
+    r = app_client.get("/machines", headers=AUTH)
+    assert r.status_code == 200
+    assert r.json() == []
+
+
+# ---------- machine CRUD ----------------------------------------------------
+
+
+def test_machine_crud_round_trip(app_client: TestClient) -> None:
+    mac = "aa:bb:cc:dd:ee:ff"
+    body = {
+        "image": "debian.qcow2",
+        "provisioning_mode": "cloud-init",
+        "hostname": "bty-test-01",
+    }
+
+    # Create / upsert
+    r = app_client.put(f"/machines/{mac}", json=body, headers=AUTH)
+    assert r.status_code == 200
+    created = r.json()
+    assert created["mac"] == mac
+    assert created["image"] == "debian.qcow2"
+    assert created["provisioning_mode"] == "cloud-init"
+    assert created["hostname"] == "bty-test-01"
+
+    # Read back
+    r = app_client.get(f"/machines/{mac}", headers=AUTH)
+    assert r.status_code == 200
+    assert r.json()["mac"] == mac
+
+    # List
+    r = app_client.get("/machines", headers=AUTH)
+    assert r.status_code == 200
+    rows = r.json()
+    assert len(rows) == 1
+    assert rows[0]["mac"] == mac
+
+    # Delete
+    r = app_client.delete(f"/machines/{mac}", headers=AUTH)
+    assert r.status_code == 204
+
+    # 404 after delete
+    r = app_client.get(f"/machines/{mac}", headers=AUTH)
+    assert r.status_code == 404
+
+
+def test_machine_upsert_normalises_mac(app_client: TestClient) -> None:
+    """Upper-case input + dashes get normalised to canonical form."""
+    r = app_client.put(
+        "/machines/AA-BB-CC-DD-EE-FF",
+        json={"provisioning_mode": "none"},
+        headers=AUTH,
+    )
+    assert r.status_code == 200
+    assert r.json()["mac"] == "aa:bb:cc:dd:ee:ff"
+
+
+def test_machine_upsert_rejects_invalid_provisioning_mode(app_client: TestClient) -> None:
+    r = app_client.put(
+        "/machines/aa:bb:cc:dd:ee:ff",
+        json={"provisioning_mode": "garbage"},
+        headers=AUTH,
+    )
+    assert r.status_code == 422  # FastAPI body validation
+
+
+def test_pxe_for_known_mac_uses_assignment_template(app_client: TestClient) -> None:
+    mac = "aa:bb:cc:dd:ee:ff"
+    app_client.put(
+        f"/machines/{mac}",
+        json={"image": "debian.qcow2", "provisioning_mode": "none"},
+        headers=AUTH,
+    )
+    r = app_client.get(f"/pxe/{mac}")
+    assert r.status_code == 200
+    assert "debian.qcow2" in r.text
+    assert "no bty assignment" not in r.text  # not the fallback
+
+
+# ---------- images ----------------------------------------------------------
+
+
+def test_list_images_empty(app_client: TestClient) -> None:
+    r = app_client.get("/images", headers=AUTH)
+    assert r.status_code == 200
+    assert r.json() == []
+
+
+def test_list_images_returns_files_under_image_root(
+    tmp_path: Path,
+) -> None:
+    image_root = tmp_path / "images"
+    image_root.mkdir()
+    (image_root / "alpha.qcow2").write_bytes(b"\0" * 256)
+    (image_root / "beta.img").write_bytes(b"\0" * 512)
+
+    app = create_app(
+        state_path=tmp_path / "state.db",
+        bearer_token=TEST_TOKEN,
+        image_root=image_root,
+    )
+    with TestClient(app) as client:
+        r = client.get("/images", headers=AUTH)
+
+    assert r.status_code == 200
+    rows = r.json()
+    names = {row["name"] for row in rows}
+    assert names == {"alpha.qcow2", "beta.img"}
+
+
+# ---------- create_app sanity ----------------------------------------------
+
+
+def test_create_app_rejects_empty_token(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="non-empty"):
+        create_app(state_path=tmp_path / "state.db", bearer_token="")
+
+
+def test_token_uses_constant_time_compare(app_client: TestClient) -> None:
+    """Mostly-correct prefix is still rejected. Sanity check we are not using
+    string equality in a way that short-circuits and allows timing attacks
+    (functionally the same response either way, but documents intent)."""
+    almost = TEST_TOKEN[:-1] + "x"
+    r = app_client.get("/machines", headers={"Authorization": f"Bearer {almost}"})
+    assert r.status_code == 401
+
+
+def test_secrets_token_urlsafe_acceptable_token() -> None:
+    """The token format we recommend in the docs (secrets.token_urlsafe) round-trips."""
+    token = secrets.token_urlsafe(32)
+    assert len(token) > 30
+    # And constructing the app with it does not raise.
+    app = create_app(
+        state_path=Path("/tmp/_bty_should_not_exist.db"),
+        bearer_token=token,
+    )
+    assert app is not None
