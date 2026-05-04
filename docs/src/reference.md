@@ -227,22 +227,41 @@ cannot carry a token:
 
 - `GET /healthz` — `{"status": "ok"}`
 - `GET /version` — `{"version": "..."}`
-- `GET /pxe/{mac}` — per-MAC iPXE script (`text/plain`). **Auto-discovery:**
-  the first `/pxe/{mac}` contact for an unknown MAC inserts a
-  placeholder record so the operator sees the machine in `GET
-  /machines` and can claim it with `PUT /machines/{mac}`. Repeat
-  contacts update `last_seen_at` / `last_seen_ip`. PXE clients still
-  receive the fallback "boot from local disk" template until an
-  assignment is made. Trust model: bty-web is meant for a homelab /
+- `GET /pxe/{mac}` — per-MAC iPXE script (`text/plain`). The
+  response depends on the machine's `boot_policy`:
+  - `local` (default) or no image assigned: sanboot fallback ("boot
+    from local disk"). Auto-discovery still applies to unknown MACs.
+  - `flash` + image assigned: chain into the live env over HTTP
+    with kernel cmdline params `bty.server`, `bty.mac`,
+    `bty.image_url`, `bty.provisioning` so the live env can flash
+    the assigned image.
+
+  Auto-discovery: the first contact for an unknown MAC inserts a
+  placeholder row (image=null, boot_policy=local) so the operator
+  sees it in `GET /machines` and can claim it with `PUT
+  /machines/{mac}`. Repeat contacts update `last_seen_at` /
+  `last_seen_ip`. Trust model: bty-web is meant for a homelab /
   CI network, not the open internet — anyone reachable can write
   discovery rows.
+- `POST /pxe/{mac}/done` — completion signal from the live env
+  after a successful flash. Updates `last_flashed_at`. **Does not
+  modify `boot_policy`** — flipping a machine back to `local` is an
+  explicit operator action so the per-job CI cadence (constant
+  reflashing) survives across boots.
 - `GET /pxe-bootstrap.ipxe` — static iPXE script that dnsmasq points
   iPXE clients at on their second-stage DHCP. Returns
   `chain http://<host>/pxe/${net0/mac:hexhyp}` where `<host>` is the
   request's `Host` header, so the client always loops back to
   whichever IP / hostname / .local name it used to reach the server.
+- `GET /boot/{name}` — serve a live-env artifact from `BTY_BOOT_DIR`
+  (default `/var/lib/bty/boot/`). Same trust model as `/pxe/*`.
+  Operators populate the dir via the browser UI (Phase D-3b will
+  add a "fetch latest release" button).
+- `GET /images/{name}` — serve image bytes from `BTY_IMAGE_ROOT`.
+  Used by the live env to download the assigned image; reachable
+  by anyone on the network.
 - `POST /bootstrap/{mac}` — bootstrap script for the bty live env
-  (placeholder until milestone 14 wires the live-env handoff)
+  (placeholder; the network-flash flow lands in milestone 14)
 
 Protected routes (Bearer required):
 
@@ -270,6 +289,8 @@ Machine = {
   "discovered_at": "<ISO 8601>" | null,     # first /pxe contact; null if PUT-only
   "last_seen_at":  "<ISO 8601>" | null,     # most recent /pxe contact
   "last_seen_ip":  "203.0.113.42" | null,
+  "boot_policy":   "local" | "flash",       # what /pxe/{mac} returns
+  "last_flashed_at": "<ISO 8601>" | null,   # set by POST /pxe/{mac}/done
   "created_at":    "<ISO 8601>",
   "updated_at":    "<ISO 8601>"
 }
@@ -278,7 +299,8 @@ MachineUpsert = {
   "image": str | null,
   "provisioning_mode": "none" | "cloud-init" | "cijoe",
   "hostname": str | null,
-  "cijoe_workflow_ref": str | null
+  "cijoe_workflow_ref": str | null,
+  "boot_policy": "local" | "flash"          # default "local"
 }
 
 ImageEntry = {
@@ -296,6 +318,7 @@ ImageEntry = {
 | `BTY_WEB_TOKEN` | Bearer token (required at startup) | unset, server refuses to start |
 | `BTY_STATE_DIR` | Where `state.db` lives | `/var/lib/bty` |
 | `BTY_IMAGE_ROOT` | Image catalog directory | `/var/lib/bty/images` |
+| `BTY_BOOT_DIR` | Live-env artifacts (`/boot/{name}` source) | `${BTY_STATE_DIR}/boot` |
 | `BTY_WEB_HOST` | uvicorn bind address | `0.0.0.0` |
 | `BTY_WEB_PORT` | uvicorn port | `8080` |
 

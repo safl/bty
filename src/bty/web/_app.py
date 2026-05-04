@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
-from fastapi.responses import PlainTextResponse, StreamingResponse
+from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
@@ -33,14 +33,19 @@ def create_app(
     state_path: Path,
     bearer_token: str,
     image_root: Path | None = None,
+    boot_root: Path | None = None,
 ) -> FastAPI:
     """Build the FastAPI app. All config flows through this function.
 
     Production callers pass values resolved from the environment;
-    tests pass tmp_path + a test token.
+    tests pass tmp_path + a test token. ``boot_root`` is where the
+    live-env artifacts (kernel + initrd + squashfs) live for the
+    ``GET /boot/{name}`` endpoint; defaults to ``state_path.parent /
+    "boot"`` (i.e. ``/var/lib/bty/boot`` on a stock appliance).
     """
     require_token = make_token_dep(bearer_token)
     resolved_image_root: Path = image_root or images.default_image_root()
+    resolved_boot_root: Path = boot_root or (state_path.parent / "boot")
     event_bus = MachineEventBus()
 
     jinja = Environment(
@@ -134,9 +139,67 @@ def create_app(
         assert row is not None
         machine = dict(row)
         publish_machines_changed()
-        template_name = "ipxe.j2" if machine.get("image") else "ipxe_unknown.j2"
-        template = jinja.get_template(template_name)
+        # Boot-policy decision tree:
+        #   - no image assigned (discovered)         -> sanboot fallback
+        #   - boot_policy == 'flash' AND image       -> chain into live env
+        #   - boot_policy == 'local' (default)       -> sanboot
+        # Completion signal (POST /pxe/{mac}/done) updates last_flashed_at
+        # but never flips boot_policy — operator does that explicitly.
+        if machine.get("image") and machine.get("boot_policy") == "flash":
+            host = request.headers.get("host", f"{request.url.hostname}:{request.url.port or 8080}")
+            template = jinja.get_template("ipxe_flash.j2")
+            return template.render(mac=normalised, machine=machine, host=host)
+        if machine.get("image"):
+            template = jinja.get_template("ipxe.j2")
+            return template.render(mac=normalised, machine=machine)
+        template = jinja.get_template("ipxe_unknown.j2")
         return template.render(mac=normalised, machine=machine)
+
+    @app.post(
+        "/pxe/{mac}/done",
+        status_code=status.HTTP_204_NO_CONTENT,
+    )
+    def pxe_done(mac: str) -> Response:
+        # Open route: the live env hits this from the PXE-booted target,
+        # which has no token. Trust model: bty-web is for trusted
+        # networks (homelab / CI), not the open internet — same as the
+        # other ``/pxe/*`` endpoints.
+        #
+        # Only updates ``last_flashed_at`` and ``updated_at``. Does NOT
+        # touch ``boot_policy``: if the operator wants the box to stop
+        # reflashing on every boot they flip the policy themselves.
+        # This decoupling is deliberate — per-job CI cadence wants
+        # boot_policy=flash to stay flash across reflashes.
+        normalised = _normalise_mac(mac)
+        now = _now_iso()
+        with _db.open_db(state_path) as conn:
+            cur = conn.execute(
+                "UPDATE machines SET last_flashed_at = ?, updated_at = ? WHERE mac = ?",
+                (now, now, normalised),
+            )
+            conn.commit()
+        if cur.rowcount == 0:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"no machine record for {normalised}",
+            )
+        publish_machines_changed()
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    @app.get("/boot/{name}", include_in_schema=False)
+    def boot_artifact(name: str) -> FileResponse:
+        # Live-env artifacts (kernel + initrd + squashfs) the iPXE chain
+        # references. Open route: PXE clients have no token. Operator
+        # populates ``boot_root`` via the UI's "fetch latest release"
+        # action (D-3b) — until the dir has files, this returns 404
+        # and the appliance is non-functional for boot_policy=flash.
+        return _serve_safe_file(resolved_boot_root, name)
+
+    @app.get("/images/{name}", include_in_schema=False)
+    def serve_image(name: str) -> FileResponse:
+        # Same trust model as /boot. The live env curls this to get
+        # the image bytes that ``bty.image_url`` points at.
+        return _serve_safe_file(resolved_image_root, name)
 
     @app.get(
         "/events/machines",
@@ -209,13 +272,15 @@ def create_app(
                 """
                 INSERT INTO machines
                     (mac, image, provisioning_mode, hostname,
-                     cijoe_workflow_ref, last_known_good, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, NULL, ?, ?)
+                     cijoe_workflow_ref, last_known_good,
+                     boot_policy, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?)
                 ON CONFLICT(mac) DO UPDATE SET
                     image              = excluded.image,
                     provisioning_mode  = excluded.provisioning_mode,
                     hostname           = excluded.hostname,
                     cijoe_workflow_ref = excluded.cijoe_workflow_ref,
+                    boot_policy        = excluded.boot_policy,
                     updated_at         = excluded.updated_at
                 """,
                 (
@@ -224,6 +289,7 @@ def create_app(
                     body.provisioning_mode,
                     body.hostname,
                     body.cijoe_workflow_ref,
+                    body.boot_policy,
                     created_at,
                     now,
                 ),
@@ -321,6 +387,8 @@ def _row_to_machine(row: object) -> _models.Machine:
         discovered_at=_iso_or_none(row["discovered_at"]),  # type: ignore[index]
         last_seen_at=_iso_or_none(row["last_seen_at"]),  # type: ignore[index]
         last_seen_ip=row["last_seen_ip"],  # type: ignore[index]
+        boot_policy=row["boot_policy"],  # type: ignore[index]
+        last_flashed_at=_iso_or_none(row["last_flashed_at"]),  # type: ignore[index]
         created_at=datetime.fromisoformat(row["created_at"]),  # type: ignore[index]
         updated_at=datetime.fromisoformat(row["updated_at"]),  # type: ignore[index]
     )
@@ -332,3 +400,23 @@ def _iso_or_none(value: str | None) -> datetime | None:
 
 def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _serve_safe_file(root: Path, name: str) -> FileResponse:
+    """Return a FileResponse for ``root / name`` after path-traversal checks.
+
+    Rejects any name containing slashes, ``..``, or NULs (the
+    fastapi path converter already keeps slashes out, but the explicit
+    check is cheap and survives future routing changes). Returns 404
+    if the resolved file does not exist or is not a regular file.
+    """
+    if not name or "/" in name or "\\" in name or "\x00" in name or name in {".", ".."}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="bad name")
+    candidate = (root / name).resolve()
+    try:
+        candidate.relative_to(root.resolve())
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="bad name") from exc
+    if not candidate.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"no such file: {name}")
+    return FileResponse(candidate, filename=name)

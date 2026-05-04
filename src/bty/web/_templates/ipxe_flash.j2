@@ -1,0 +1,13 @@
+#!ipxe
+# bty network-flash for {{ mac }}
+#   image:             {{ machine.image }}
+#   provisioning mode: {{ machine.provisioning_mode }}
+#
+# Chains into the bty live env. The live env's bty-flash-on-boot
+# service reads bty.* from /proc/cmdline, downloads the image,
+# runs ``bty flash --yes``, signals completion, and reboots.
+
+set bty-base http://{{ host }}
+kernel ${bty-base}/boot/bty-live-x86_64.vmlinuz boot=live components quiet bty.server=${bty-base} bty.mac={{ mac }} bty.image_url=${bty-base}/images/{{ machine.image }} bty.provisioning={{ machine.provisioning_mode }}
+initrd ${bty-base}/boot/bty-live-x86_64.initrd
+boot

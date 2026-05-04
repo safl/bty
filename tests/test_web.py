@@ -27,10 +27,19 @@ def app_client(tmp_path: Path) -> Iterator[TestClient]:
     state = tmp_path / "state.db"
     image_root = tmp_path / "images"
     image_root.mkdir()
+    boot_root = tmp_path / "boot"
+    boot_root.mkdir()
+    # Seed a fake live-env triplet so /boot/{name} tests can hit real files.
+    (boot_root / "bty-live-x86_64.vmlinuz").write_bytes(b"fake-kernel")
+    (boot_root / "bty-live-x86_64.initrd").write_bytes(b"fake-initrd")
+    (boot_root / "bty-live-x86_64.squashfs").write_bytes(b"fake-squashfs")
+    # Seed an image too so /images/{name} tests work.
+    (image_root / "demo.qcow2").write_bytes(b"fake-image")
     app = create_app(
         state_path=state,
         bearer_token=TEST_TOKEN,
         image_root=image_root,
+        boot_root=boot_root,
     )
     with TestClient(app) as client:
         yield client
@@ -252,10 +261,14 @@ def test_pxe_does_not_overwrite_assignment(app_client: TestClient) -> None:
 # ---------- images ----------------------------------------------------------
 
 
-def test_list_images_empty(app_client: TestClient) -> None:
+def test_list_images_returns_seeded_fixture(app_client: TestClient) -> None:
+    """The fixture seeds ``demo.qcow2`` so the file-serving routes
+    have something to return; ``GET /images`` exposes it via the
+    image catalog."""
     r = app_client.get("/images", headers=AUTH)
     assert r.status_code == 200
-    assert r.json() == []
+    rows = r.json()
+    assert {row["name"] for row in rows} == {"demo.qcow2"}
 
 
 def test_list_images_returns_files_under_image_root(
@@ -307,3 +320,148 @@ def test_secrets_token_urlsafe_acceptable_token() -> None:
         bearer_token=token,
     )
     assert app is not None
+
+
+# ---------- boot policy + flash chain (Phase D-3a) --------------------------
+
+
+def test_machine_default_boot_policy_is_local(app_client: TestClient) -> None:
+    """A fresh PUT without an explicit boot_policy gets ``local`` —
+    operators opt INTO reflashing on every boot."""
+    r = app_client.put(
+        "/machines/aa:bb:cc:dd:ee:ff",
+        json={"image": "demo.qcow2", "provisioning_mode": "none"},
+        headers=AUTH,
+    )
+    assert r.status_code == 200
+    assert r.json()["boot_policy"] == "local"
+    assert r.json()["last_flashed_at"] is None
+
+
+def test_machine_upsert_accepts_boot_policy_flash(app_client: TestClient) -> None:
+    r = app_client.put(
+        "/machines/aa:bb:cc:dd:ee:ff",
+        json={
+            "image": "demo.qcow2",
+            "provisioning_mode": "none",
+            "boot_policy": "flash",
+        },
+        headers=AUTH,
+    )
+    assert r.status_code == 200
+    assert r.json()["boot_policy"] == "flash"
+
+
+def test_machine_upsert_rejects_unknown_boot_policy(app_client: TestClient) -> None:
+    r = app_client.put(
+        "/machines/aa:bb:cc:dd:ee:ff",
+        json={"image": "demo.qcow2", "boot_policy": "yolo"},
+        headers=AUTH,
+    )
+    assert r.status_code == 422
+
+
+def test_pxe_local_policy_assigned_machine_returns_local_template(
+    app_client: TestClient,
+) -> None:
+    """boot_policy=local + image assigned: still sanboot. Reflashing is
+    opt-in via boot_policy=flash, not implicit on assignment."""
+    app_client.put(
+        "/machines/aa:bb:cc:dd:ee:ff",
+        json={"image": "demo.qcow2"},
+        headers=AUTH,
+    )
+    r = app_client.get("/pxe/aa:bb:cc:dd:ee:ff")
+    assert r.status_code == 200
+    body = r.text
+    # ipxe.j2 (placeholder local template) — explicitly NOT the flash chain
+    assert "kernel" not in body
+    assert "bty.image_url" not in body
+
+
+def test_pxe_flash_policy_returns_chain_with_args(app_client: TestClient) -> None:
+    """boot_policy=flash + image: chain into kernel/initrd with the
+    four bty.* cmdline params the live env reads."""
+    app_client.put(
+        "/machines/aa:bb:cc:dd:ee:ff",
+        json={
+            "image": "demo.qcow2",
+            "provisioning_mode": "cloud-init",
+            "boot_policy": "flash",
+        },
+        headers=AUTH,
+    )
+    r = app_client.get("/pxe/aa:bb:cc:dd:ee:ff", headers={"Host": "bty.local:8080"})
+    assert r.status_code == 200
+    body = r.text
+    assert body.startswith("#!ipxe"), body
+    # Template uses an iPXE variable for the base URL so the script
+    # reads cleanly; the variable is set from the request's Host.
+    assert "set bty-base http://bty.local:8080" in body
+    assert "kernel ${bty-base}/boot/bty-live-x86_64.vmlinuz" in body
+    assert "initrd ${bty-base}/boot/bty-live-x86_64.initrd" in body
+    # Cmdline params: live env's bty-flash-on-boot reads these.
+    assert "bty.server=${bty-base}" in body
+    assert "bty.mac=aa:bb:cc:dd:ee:ff" in body
+    assert "bty.image_url=${bty-base}/images/demo.qcow2" in body
+    assert "bty.provisioning=cloud-init" in body
+
+
+def test_pxe_done_updates_last_flashed_at(app_client: TestClient) -> None:
+    app_client.put(
+        "/machines/aa:bb:cc:dd:ee:ff",
+        json={"image": "demo.qcow2", "boot_policy": "flash"},
+        headers=AUTH,
+    )
+    before = app_client.get("/machines/aa:bb:cc:dd:ee:ff", headers=AUTH).json()
+    assert before["last_flashed_at"] is None
+
+    r = app_client.post("/pxe/aa:bb:cc:dd:ee:ff/done")
+    assert r.status_code == 204
+
+    after = app_client.get("/machines/aa:bb:cc:dd:ee:ff", headers=AUTH).json()
+    assert after["last_flashed_at"] is not None
+    # Critical: the policy is preserved. Per-job CI cadence stays
+    # boot_policy=flash across reflashes.
+    assert after["boot_policy"] == "flash"
+
+
+def test_pxe_done_404_for_unknown_mac(app_client: TestClient) -> None:
+    r = app_client.post("/pxe/00:11:22:33:44:55/done")
+    assert r.status_code == 404
+
+
+# ---------- /boot and /images file serving (Phase D-3a) --------------------
+
+
+def test_boot_artifact_serves_file(app_client: TestClient) -> None:
+    r = app_client.get("/boot/bty-live-x86_64.vmlinuz")
+    assert r.status_code == 200
+    assert r.content == b"fake-kernel"
+
+
+def test_boot_artifact_404_for_missing(app_client: TestClient) -> None:
+    r = app_client.get("/boot/does-not-exist.bin")
+    assert r.status_code == 404
+
+
+def test_boot_artifact_rejects_traversal(app_client: TestClient) -> None:
+    """Slash in a single-segment ``{name}`` is impossible (FastAPI's
+    path converter splits on /), but the explicit guards reject the
+    edge cases too: empty, dot, dotdot, encoded."""
+    for bad in ("", ".", ".."):
+        r = app_client.get(f"/boot/{bad}")
+        # Some encodings 404 from FastAPI's router before reaching us;
+        # the others should 400 from our guard. Either way: not 200.
+        assert r.status_code != 200
+
+
+def test_serve_image_returns_file_bytes(app_client: TestClient) -> None:
+    r = app_client.get("/images/demo.qcow2")
+    assert r.status_code == 200
+    assert r.content == b"fake-image"
+
+
+def test_serve_image_404_for_missing(app_client: TestClient) -> None:
+    r = app_client.get("/images/does-not-exist.qcow2")
+    assert r.status_code == 404

@@ -37,6 +37,8 @@ CREATE TABLE IF NOT EXISTS machines (
     discovered_at       TEXT,        -- first /pxe/{mac} contact (NULL if PUT-created)
     last_seen_at        TEXT,        -- most recent /pxe/{mac} contact
     last_seen_ip        TEXT,        -- source IP of most recent /pxe contact
+    boot_policy         TEXT NOT NULL DEFAULT 'local',
+    last_flashed_at     TEXT,        -- updated by POST /pxe/{mac}/done
     created_at          TEXT NOT NULL,
     updated_at          TEXT NOT NULL
 );
@@ -44,11 +46,15 @@ CREATE TABLE IF NOT EXISTS machines (
 
 # Columns that were added to ``machines`` after the original schema landed.
 # ``init_db`` ALTERs the table to add them when an older DB is opened, so
-# upgrades don't require operators to wipe ``state.db``.
+# upgrades don't require operators to wipe ``state.db``. Each entry is
+# ``(name, sqlite-decl)`` — the decl includes any DEFAULT clause needed
+# for the migration to populate existing rows.
 _ADDED_COLUMNS: tuple[tuple[str, str], ...] = (
     ("discovered_at", "TEXT"),
     ("last_seen_at", "TEXT"),
     ("last_seen_ip", "TEXT"),
+    ("boot_policy", "TEXT NOT NULL DEFAULT 'local'"),
+    ("last_flashed_at", "TEXT"),
 )
 
 

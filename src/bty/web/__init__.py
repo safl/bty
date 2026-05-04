@@ -53,11 +53,14 @@ def main() -> None:
     state_path = default_state_path()
     image_root_env = os.environ.get("BTY_IMAGE_ROOT")
     image_root = Path(image_root_env) if image_root_env else None
+    boot_root_env = os.environ.get("BTY_BOOT_DIR")
+    boot_root = Path(boot_root_env) if boot_root_env else None
 
     app = create_app(
         state_path=state_path,
         bearer_token=token,
         image_root=image_root,
+        boot_root=boot_root,
     )
 
     host = os.environ.get("BTY_WEB_HOST", "0.0.0.0")

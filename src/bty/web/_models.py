@@ -18,18 +18,29 @@ MAC_PATTERN = r"^[0-9a-f]{2}(:[0-9a-f]{2}){5}$"
 PROVISIONING_MODES = ("none", "cloud-init", "cijoe")
 PROVISIONING_PATTERN = r"^(none|cloud-init|cijoe)$"
 
+# Boot-policy values: what ``GET /pxe/{mac}`` returns for an assigned
+# machine. ``local`` (the default) returns sanboot — the box boots
+# whatever is on its disk. ``flash`` returns the live-env chain so the
+# box re-flashes itself on every PXE boot (per-job CI cadence).
+# Decoupled from the completion signal: ``POST /pxe/{mac}/done`` updates
+# ``last_flashed_at`` regardless of policy and never flips the policy.
+BOOT_POLICIES = ("local", "flash")
+BOOT_POLICY_PATTERN = r"^(local|flash)$"
+
 
 class MachineUpsert(BaseModel):
     """Request body for ``PUT /machines/{mac}``.
 
     All fields are optional except for the implicit ``mac`` from the
-    path; the ``provisioning_mode`` defaults to ``"none"``.
+    path; ``provisioning_mode`` defaults to ``"none"`` and
+    ``boot_policy`` defaults to ``"local"``.
     """
 
     image: str | None = None
     provisioning_mode: str = Field(default="none", pattern=PROVISIONING_PATTERN)
     hostname: str | None = None
     cijoe_workflow_ref: str | None = None
+    boot_policy: str = Field(default="local", pattern=BOOT_POLICY_PATTERN)
 
 
 class Machine(BaseModel):
@@ -54,6 +65,8 @@ class Machine(BaseModel):
     # Updated on every ``GET /pxe/{mac}``.
     last_seen_at: datetime | None = None
     last_seen_ip: str | None = None
+    boot_policy: str = Field(default="local", pattern=BOOT_POLICY_PATTERN)
+    last_flashed_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 

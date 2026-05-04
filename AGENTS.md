@@ -182,9 +182,12 @@ is lower-case `aa:bb:cc:dd:ee:ff`):
 | `GET /healthz` | `GET /machines` |
 | `GET /version` | `GET /machines/{mac}` |
 | `GET /pxe/{mac}` | `PUT /machines/{mac}` (body: MachineUpsert) |
-| `GET /pxe-bootstrap.ipxe` | `DELETE /machines/{mac}` |
-| `POST /bootstrap/{mac}` | `GET /images` |
-| `GET /static/*` | `GET /events/machines` (Server-Sent Events) |
+| `POST /pxe/{mac}/done` | `DELETE /machines/{mac}` |
+| `GET /pxe-bootstrap.ipxe` | `GET /images` |
+| `GET /boot/{name}` | `GET /events/machines` (Server-Sent Events) |
+| `GET /images/{name}` | |
+| `POST /bootstrap/{mac}` | |
+| `GET /static/*` | |
 
 **HTTP status semantics:**
 - `200` — success with body
@@ -200,13 +203,26 @@ is lower-case `aa:bb:cc:dd:ee:ff`):
 versioned URL prefix (`/v2/...`). Agents key off field names.
 
 **Auto-discovery.** A `GET /pxe/{mac}` for an unknown MAC creates an
-unassigned `Machine` record (`image == null`) with
-`discovered_at` / `last_seen_at` / `last_seen_ip` set, and returns
-the "boot from local disk" fallback template. Operators (or agents)
-poll `GET /machines` to find newly-discovered MACs and claim them
-with `PUT /machines/{mac}`. Subsequent `/pxe` contacts update
+unassigned `Machine` record (`image == null`, `boot_policy == 'local'`)
+with `discovered_at` / `last_seen_at` / `last_seen_ip` set, and
+returns the "boot from local disk" fallback template. Operators (or
+agents) poll `GET /machines` to find newly-discovered MACs and claim
+them with `PUT /machines/{mac}`. Subsequent `/pxe` contacts update
 `last_seen_at` / `last_seen_ip`; agents can use the freshness of
 those fields to detect machines that have stopped reporting.
+
+**Boot policy.** Each machine carries a `boot_policy`:
+- `local` (default) — every PXE boot returns the sanboot fallback
+  even if an image is assigned. Stable / production stance.
+- `flash` — every PXE boot returns the live-env chain (kernel +
+  initrd over HTTP, with `bty.{server,mac,image_url,provisioning}`
+  cmdline params), so the box reflashes itself every time. Per-job
+  CI cadence.
+
+The completion signal `POST /pxe/{mac}/done` updates `last_flashed_at`
+but **never modifies `boot_policy`** — flipping back to `local` is an
+explicit operator action via `PUT /machines/{mac}` so the per-job CI
+cadence survives across reflashes.
 
 **Live updates.** `GET /events/machines` is a Server-Sent Events
 stream (auth: same Bearer/cookie dep). Subscribers receive an initial

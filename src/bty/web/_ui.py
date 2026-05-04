@@ -281,6 +281,8 @@ def _row_to_dict(row: Any) -> dict[str, Any]:
         "discovered_at": row["discovered_at"],
         "last_seen_at": row["last_seen_at"],
         "last_seen_ip": row["last_seen_ip"],
+        "boot_policy": row["boot_policy"],
+        "last_flashed_at": row["last_flashed_at"],
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
     }

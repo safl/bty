@@ -16,6 +16,7 @@ TOKEN=$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')
 
 install -d -o bty -g bty -m 0750 /var/lib/bty
 install -d -o bty -g bty -m 0750 /var/lib/bty/images
+install -d -o bty -g bty -m 0750 /var/lib/bty/boot
 
 umask 077
 cat > /etc/default/bty-web <<EOF
@@ -24,6 +25,7 @@ cat > /etc/default/bty-web <<EOF
 BTY_WEB_TOKEN=${TOKEN}
 BTY_STATE_DIR=/var/lib/bty
 BTY_IMAGE_ROOT=/var/lib/bty/images
+BTY_BOOT_DIR=/var/lib/bty/boot
 BTY_WEB_HOST=0.0.0.0
 BTY_WEB_PORT=8080
 EOF
