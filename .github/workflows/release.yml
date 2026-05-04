@@ -1,14 +1,23 @@
 name: Release
 
-# Single unified release. Pushing a ``v*`` tag:
-#   1. Builds bty-lab's wheel + sdist (``uv build``).
-#   2. Builds all three bty-media variants in parallel (usb, server, live).
-#   3. Attaches every artifact to the GitHub release at the same tag.
-#   4. Publishes the wheel + sdist to PyPI via trusted publishing.
+# Single unified release. Pushing a ``v*`` tag runs:
+#   1. ``test``                   - lint + typecheck + pytest matrix.
+#   2. ``build-wheel`` (gated)    - uv build of the bty-lab wheel + sdist.
+#   3. ``build-media`` (gated)    - all three bty-media variants in
+#                                   parallel (usb, server, live).
+#   4. ``attach-to-release``      - downloads every workflow artifact
+#                                   and attaches them to the GitHub
+#                                   release at the same tag.
+#   5. ``publish-pypi`` (last)    - trusted publishing of the wheel
+#                                   + sdist. Strictly gated on every
+#                                   prior job succeeding so PyPI
+#                                   never sees a half-baked release
+#                                   (PyPI is for life: a published
+#                                   version cannot be re-uploaded).
 #
-# ``workflow_dispatch`` runs the wheel build only - a smoke test of
-# the package side. Ad-hoc media builds happen locally via the
-# Makefile (``cd bty-media && make build VARIANT=...``).
+# ``workflow_dispatch`` runs ``test`` + ``build-wheel`` only - smoke
+# test of the package side. Ad-hoc media builds happen locally via
+# the Makefile (``cd bty-media && make build VARIANT=...``).
 #
 # First publish (claiming the bty-lab name) requires a one-time PyPI
 # setup: register a Pending Publisher on https://pypi.org targeting:
@@ -26,8 +35,36 @@ on:
   workflow_dispatch:
 
 jobs:
+  # ---------------- gating -------------------------------------------------
+  test:
+    name: Test (lint + typecheck + pytest ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        python: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v8.1.0
+        with:
+          python-version: ${{ matrix.python }}
+      - run: uv sync --all-extras --group dev
+      # Mirror what ci.yml runs on every push - lint + format + types
+      # + tests. We duplicate the steps inline rather than route
+      # through ``workflow_run`` so the gating dependency graph is
+      # explicit in this one file.
+      - run: uv run ruff check
+      - run: uv run ruff format --check
+      # mypy is single-version; only run it on the 3.12 matrix slot
+      # to avoid duplicating across the matrix.
+      - if: matrix.python == '3.12'
+        run: uv run mypy src
+      - run: uv run pytest
+
+  # ---------------- build --------------------------------------------------
   build-wheel:
     name: Build wheel + sdist
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -43,6 +80,7 @@ jobs:
 
   build-media:
     name: Build ${{ matrix.variant }} image
+    needs: test
     # Tag-only - workflow_dispatch builds the wheel only.
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
@@ -75,11 +113,21 @@ jobs:
             squashfs-tools \
             xorriso
 
-      - name: Verify KVM availability
+      - name: Enable KVM access for the runner
+        # GHA's hosted Linux runners ship /dev/kvm but the runner user
+        # isn't in the kvm group, so QEMU's ``-accel kvm`` fails with
+        # "Permission denied". Drop a udev rule that makes the device
+        # world-accessible (mode 0666). Standard pattern for hosted
+        # runners; without it the cloud-init bake hits a permission
+        # error on the first qemu-system-x86_64 invocation.
         if: matrix.variant != 'live'
         run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+              | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
           sudo kvm-ok || true
-          ls -l /dev/kvm || true
+          ls -l /dev/kvm
 
       - name: Install cijoe
         run: pipx install cijoe
@@ -111,6 +159,7 @@ jobs:
             ~/system_imaging/disk/bty-live-x86_64.squashfs
             ~/system_imaging/disk/bty-live-x86_64.sha256
 
+  # ---------------- ship ---------------------------------------------------
   attach-to-release:
     name: Attach artifacts to GitHub release
     needs: [build-wheel, build-media]
@@ -137,7 +186,11 @@ jobs:
 
   publish-pypi:
     name: Publish to PyPI
-    needs: build-wheel
+    # Strictly last: every prior job (test, build-wheel, build-media,
+    # attach-to-release) must have succeeded. PyPI is for life - a
+    # published version cannot be re-uploaded - so we only ship there
+    # after the whole release-page has gone up cleanly.
+    needs: [attach-to-release]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     environment:
@@ -151,3 +204,8 @@ jobs:
           name: dist
           path: dist/
       - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          # Idempotent on retries - if the version is already on PyPI
+          # (e.g. a previous half-failed run uploaded the wheel and a
+          # later job is retrying), succeed silently rather than fail.
+          skip-existing: true
