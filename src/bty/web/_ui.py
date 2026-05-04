@@ -424,6 +424,9 @@ def _row_to_dict(row: Any) -> dict[str, Any]:
         "last_seen_ip": row["last_seen_ip"],
         "boot_policy": row["boot_policy"],
         "last_flashed_at": row["last_flashed_at"],
+        "last_workflow_run_at": row["last_workflow_run_at"],
+        "last_workflow_status": row["last_workflow_status"],
+        "last_workflow_output_path": row["last_workflow_output_path"],
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
     }

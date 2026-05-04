@@ -18,6 +18,19 @@
             <dd class="col-sm-9">{{ m.last_seen_at or "—" }}{% if m.last_seen_ip %} from <code>{{ m.last_seen_ip }}</code>{% endif %}</dd>
             <dt class="col-sm-3">Last flashed</dt>
             <dd class="col-sm-9">{{ m.last_flashed_at or "—" }}</dd>
+            <dt class="col-sm-3">Last workflow</dt>
+            <dd class="col-sm-9">
+                {% if m.last_workflow_status %}
+                {% set badge = {'running':'bg-info','success':'bg-success','failed':'bg-danger'}[m.last_workflow_status] %}
+                <span class="badge {{ badge }}">{{ m.last_workflow_status }}</span>
+                <small class="text-muted">at {{ m.last_workflow_run_at }}</small>
+                {% if m.last_workflow_output_path %}
+                <div class="small text-muted">output: <code>{{ m.last_workflow_output_path }}</code></div>
+                {% endif %}
+                {% else %}
+                —
+                {% endif %}
+            </dd>
             <dt class="col-sm-3">Created</dt>
             <dd class="col-sm-9">{{ m.created_at }}</dd>
             <dt class="col-sm-3">Updated</dt>

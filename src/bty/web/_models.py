@@ -15,8 +15,18 @@ from pydantic import BaseModel, Field
 MAC_PATTERN = r"^[0-9a-f]{2}(:[0-9a-f]{2}){5}$"
 
 # Provisioning modes accepted by ``bty flash`` / the API.
-PROVISIONING_MODES = ("none", "cloud-init", "cijoe")
-PROVISIONING_PATTERN = r"^(none|cloud-init|cijoe)$"
+# - ``none``         — boot the cooked image as-is.
+# - ``cloud-init``   — drop user-data into the seed; OS picks it up on first boot.
+# - ``cijoe``        — offline workflow run from the live env after flash.
+# - ``cijoe-online`` — online workflow run from bty-web after target boots
+#                      (milestone 15). Triggered by POST /pxe/{mac}/done; cijoe's
+#                      transport-retry handles waiting for SSH to come up.
+PROVISIONING_MODES = ("none", "cloud-init", "cijoe", "cijoe-online")
+PROVISIONING_PATTERN = r"^(none|cloud-init|cijoe|cijoe-online)$"
+
+# Status of the most recent online-cijoe workflow run.
+WORKFLOW_STATUSES = ("running", "success", "failed")
+WORKFLOW_STATUS_PATTERN = r"^(running|success|failed)$"
 
 # Boot-policy values: what ``GET /pxe/{mac}`` returns for an assigned
 # machine. ``local`` (the default) returns sanboot — the box boots
@@ -67,6 +77,9 @@ class Machine(BaseModel):
     last_seen_ip: str | None = None
     boot_policy: str = Field(default="local", pattern=BOOT_POLICY_PATTERN)
     last_flashed_at: datetime | None = None
+    last_workflow_run_at: datetime | None = None
+    last_workflow_status: str | None = Field(default=None, pattern=WORKFLOW_STATUS_PATTERN)
+    last_workflow_output_path: str | None = None
     created_at: datetime
     updated_at: datetime
 

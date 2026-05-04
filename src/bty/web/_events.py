@@ -27,7 +27,7 @@ class MachineEvent:
 
 
 class MachineEventBus:
-    """A tiny fan-out bus. Synchronous publisher, async subscribers.
+    """A tiny fan-out bus. Thread-safe publisher, async subscribers.
 
     Slow consumers are dropped silently rather than blocking the
     publisher: each subscriber's queue is bounded; if it's full when
@@ -35,13 +35,43 @@ class MachineEventBus:
     they will catch up on the next mutation. Trade-off favours
     publisher latency over delivery completeness — acceptable for a
     UI-refresh stream because every event carries the full snapshot.
+
+    ``publish`` may be called from any thread. ``attach`` captures the
+    asyncio loop the SSE consumers are running on; thereafter,
+    cross-thread publishes hop through ``call_soon_threadsafe`` to
+    deliver into ``asyncio.Queue`` safely. Workflow-runner threads in
+    :mod:`bty.web._workflow` rely on this.
     """
 
     def __init__(self, *, queue_size: int = 64) -> None:
         self._subscribers: list[asyncio.Queue[MachineEvent]] = []
         self._queue_size = queue_size
+        self._loop: asyncio.AbstractEventLoop | None = None
+
+    def attach(self, loop: asyncio.AbstractEventLoop) -> None:
+        """Capture the event loop SSE subscribers run on.
+
+        Called once from ``create_app``'s lifespan startup hook so
+        cross-thread publishers (workflow runner) can hop into the
+        loop's thread before touching ``asyncio.Queue`` state.
+        """
+        self._loop = loop
 
     def publish(self, event: MachineEvent) -> None:
+        loop = self._loop
+        if loop is not None and loop.is_running():
+            try:
+                loop.call_soon_threadsafe(self._fanout, event)
+                return
+            except RuntimeError:
+                # Loop closed between is_running check and the call;
+                # fall through to direct fanout (no-op for closed bus).
+                pass
+        # No loop attached (unit tests for this module) or loop isn't
+        # running — direct fanout is safe in that case.
+        self._fanout(event)
+
+    def _fanout(self, event: MachineEvent) -> None:
         for queue in list(self._subscribers):
             try:
                 queue.put_nowait(event)

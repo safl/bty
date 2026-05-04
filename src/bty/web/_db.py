@@ -28,19 +28,22 @@ def default_state_path() -> Path:
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS machines (
-    mac                 TEXT PRIMARY KEY,
-    image               TEXT,
-    provisioning_mode   TEXT NOT NULL DEFAULT 'none',
-    hostname            TEXT,
-    cijoe_workflow_ref  TEXT,
-    last_known_good     TEXT,        -- JSON blob; NULL until first online cijoe
-    discovered_at       TEXT,        -- first /pxe/{mac} contact (NULL if PUT-created)
-    last_seen_at        TEXT,        -- most recent /pxe/{mac} contact
-    last_seen_ip        TEXT,        -- source IP of most recent /pxe contact
-    boot_policy         TEXT NOT NULL DEFAULT 'local',
-    last_flashed_at     TEXT,        -- updated by POST /pxe/{mac}/done
-    created_at          TEXT NOT NULL,
-    updated_at          TEXT NOT NULL
+    mac                       TEXT PRIMARY KEY,
+    image                     TEXT,
+    provisioning_mode         TEXT NOT NULL DEFAULT 'none',
+    hostname                  TEXT,
+    cijoe_workflow_ref        TEXT,
+    last_known_good           TEXT,    -- JSON blob; NULL until first online cijoe
+    discovered_at             TEXT,    -- first /pxe/{mac} contact (NULL if PUT-created)
+    last_seen_at              TEXT,    -- most recent /pxe/{mac} contact
+    last_seen_ip              TEXT,    -- source IP of most recent /pxe contact
+    boot_policy               TEXT NOT NULL DEFAULT 'local',
+    last_flashed_at           TEXT,    -- updated by POST /pxe/{mac}/done
+    last_workflow_run_at      TEXT,    -- start of the most recent workflow run
+    last_workflow_status      TEXT,    -- 'running' / 'success' / 'failed' / NULL
+    last_workflow_output_path TEXT,    -- on-disk dir of the cijoe run
+    created_at                TEXT NOT NULL,
+    updated_at                TEXT NOT NULL
 );
 """
 
@@ -55,6 +58,9 @@ _ADDED_COLUMNS: tuple[tuple[str, str], ...] = (
     ("last_seen_ip", "TEXT"),
     ("boot_policy", "TEXT NOT NULL DEFAULT 'local'"),
     ("last_flashed_at", "TEXT"),
+    ("last_workflow_run_at", "TEXT"),
+    ("last_workflow_status", "TEXT"),
+    ("last_workflow_output_path", "TEXT"),
 )
 
 

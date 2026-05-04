@@ -17,6 +17,10 @@ TOKEN=$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')
 install -d -o bty -g bty -m 0750 /var/lib/bty
 install -d -o bty -g bty -m 0750 /var/lib/bty/images
 install -d -o bty -g bty -m 0750 /var/lib/bty/boot
+install -d -o bty -g bty -m 0750 /var/lib/bty/workflows
+# Operator drops the SSH key for online cijoe at /var/lib/bty/keys/
+# id_ed25519 (milestone 15 phase 1 — key generation lands later).
+install -d -o bty -g bty -m 0700 /var/lib/bty/keys
 
 umask 077
 cat > /etc/default/bty-web <<EOF

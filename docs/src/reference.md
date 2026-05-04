@@ -247,7 +247,11 @@ cannot carry a token:
   after a successful flash. Updates `last_flashed_at`. **Does not
   modify `boot_policy`** — flipping a machine back to `local` is an
   explicit operator action so the per-job CI cadence (constant
-  reflashing) survives across boots.
+  reflashing) survives across boots. If the machine has
+  `provisioning_mode='cijoe-online'` and a `cijoe_workflow_ref`,
+  this also kicks off a background workflow run from bty-web
+  against the freshly-booted target (milestone 15). Status surfaces
+  via `last_workflow_status` and the SSE machines-update channel.
 - `GET /pxe-bootstrap.ipxe` — static iPXE script that dnsmasq points
   iPXE clients at on their second-stage DHCP. Returns
   `chain http://<host>/pxe/${net0/mac:hexhyp}` where `<host>` is the
@@ -291,13 +295,16 @@ Machine = {
   "last_seen_ip":  "203.0.113.42" | null,
   "boot_policy":   "local" | "flash",       # what /pxe/{mac} returns
   "last_flashed_at": "<ISO 8601>" | null,   # set by POST /pxe/{mac}/done
+  "last_workflow_run_at":    "<ISO 8601>" | null,
+  "last_workflow_status":    "running" | "success" | "failed" | null,
+  "last_workflow_output_path": str | null,  # /var/lib/bty/workflows/<mac>/<run-id>
   "created_at":    "<ISO 8601>",
   "updated_at":    "<ISO 8601>"
 }
 
 MachineUpsert = {
   "image": str | null,
-  "provisioning_mode": "none" | "cloud-init" | "cijoe",
+  "provisioning_mode": "none" | "cloud-init" | "cijoe" | "cijoe-online",
   "hostname": str | null,
   "cijoe_workflow_ref": str | null,
   "boot_policy": "local" | "flash"          # default "local"

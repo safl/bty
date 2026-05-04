@@ -8,8 +8,10 @@ environment + defaults and hands it to uvicorn.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -23,6 +25,7 @@ from bty import images
 from bty.web import _db, _models, _ui
 from bty.web._auth import make_token_dep
 from bty.web._events import MachineEvent, MachineEventBus, sse_format
+from bty.web._workflow import WorkflowRunner
 
 TEMPLATES_DIR = Path(__file__).parent / "_templates"
 STATIC_DIR = Path(__file__).parent / "_static"
@@ -48,6 +51,14 @@ def create_app(
     resolved_boot_root: Path = boot_root or (state_path.parent / "boot")
     event_bus = MachineEventBus()
 
+    @asynccontextmanager
+    async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        # The SSE event bus accepts publishes from worker threads
+        # (WorkflowRunner) — capture the loop now so cross-thread
+        # publishes can hop in via call_soon_threadsafe.
+        event_bus.attach(asyncio.get_running_loop())
+        yield
+
     jinja = Environment(
         loader=FileSystemLoader(str(TEMPLATES_DIR)),
         # Autoescape only HTML (UI) templates; the iPXE ``.j2`` files
@@ -58,7 +69,7 @@ def create_app(
 
     _db.init_db(state_path)
 
-    app = FastAPI(title="bty-web", version=bty.__version__)
+    app = FastAPI(title="bty-web", version=bty.__version__, lifespan=_lifespan)
 
     # Vendored client-side assets (Bootstrap CSS, HTMX, htmx-ext-sse)
     # ship inside the wheel so the appliance has no runtime CDN
@@ -75,6 +86,11 @@ def create_app(
     def publish_machines_changed() -> None:
         """Publish a fresh tbody snapshot. Mutating routes call this."""
         event_bus.publish(MachineEvent(name="machines-update", html=render_machines_tbody()))
+
+    workflow_runner = WorkflowRunner(
+        state_path=state_path,
+        publish_machines_changed=publish_machines_changed,
+    )
 
     # ----- Open routes (no auth) ------------------------------------------
 
@@ -184,6 +200,31 @@ def create_app(
                 detail=f"no machine record for {normalised}",
             )
         publish_machines_changed()
+
+        # Online cijoe (milestone 15): if the machine is set up for
+        # post-boot provisioning, kick off a workflow run in a worker
+        # thread now that the live env says the flash is done. cijoe's
+        # transport-retry handles waiting for SSH to come up. The
+        # request still returns 204 immediately — workflow status
+        # surfaces via the SSE machines-update channel as it changes.
+        with _db.open_db(state_path) as conn:
+            row = conn.execute(
+                "SELECT provisioning_mode, cijoe_workflow_ref, last_seen_ip "
+                "FROM machines WHERE mac = ?",
+                (normalised,),
+            ).fetchone()
+        if (
+            row is not None
+            and row["provisioning_mode"] == "cijoe-online"
+            and row["cijoe_workflow_ref"]
+            and row["last_seen_ip"]
+        ):
+            workflow_runner.kick_off(
+                mac=normalised,
+                workflow_ref=row["cijoe_workflow_ref"],
+                target_ip=row["last_seen_ip"],
+            )
+
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @app.get("/boot/{name}", include_in_schema=False)
@@ -390,6 +431,9 @@ def _row_to_machine(row: object) -> _models.Machine:
         last_seen_ip=row["last_seen_ip"],  # type: ignore[index]
         boot_policy=row["boot_policy"],  # type: ignore[index]
         last_flashed_at=_iso_or_none(row["last_flashed_at"]),  # type: ignore[index]
+        last_workflow_run_at=_iso_or_none(row["last_workflow_run_at"]),  # type: ignore[index]
+        last_workflow_status=row["last_workflow_status"],  # type: ignore[index]
+        last_workflow_output_path=row["last_workflow_output_path"],  # type: ignore[index]
         created_at=datetime.fromisoformat(row["created_at"]),  # type: ignore[index]
         updated_at=datetime.fromisoformat(row["updated_at"]),  # type: ignore[index]
     )

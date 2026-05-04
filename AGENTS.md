@@ -224,6 +224,21 @@ but **never modifies `boot_policy`** — flipping back to `local` is an
 explicit operator action via `PUT /machines/{mac}` so the per-job CI
 cadence survives across reflashes.
 
+**Online cijoe (milestone 15).** A machine with
+`provisioning_mode='cijoe-online'` and a `cijoe_workflow_ref` gets
+its workflow run from bty-web automatically when the live env signals
+flash completion. bty-web spawns a daemon thread that ``cijoe
+<workflow.yaml> --config <transport.toml>``s with an SSH transport
+pointing at `last_seen_ip`; cijoe's transport-retry handles waiting
+for SSH to come up. Workflow status (`running` / `success` /
+`failed`) is recorded on the machine as `last_workflow_status` and
+fans out via the SSE machines-update channel as it changes. Per-run
+output dirs accumulate under `/var/lib/bty/workflows/<mac>/<run-id>/`
+(holds `transport.toml`, `cijoe.stdout`, `cijoe.stderr`, and cijoe's
+own `cijoe-output/`). Operator drops the SSH key at
+`/var/lib/bty/keys/id_ed25519` (key generation lands in a future
+phase).
+
 **Live updates.** `GET /events/machines` is a Server-Sent Events
 stream (auth: same Bearer/cookie dep). Subscribers receive an initial
 `machines-update` event with the rendered `<tbody>` snapshot, then
