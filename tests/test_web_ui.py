@@ -224,6 +224,40 @@ def test_ui_machine_detail_renders_boot_policy_dropdown(client: TestClient) -> N
     assert 'value="flash" selected' in body or 'flash" selected' in body
 
 
+def test_ui_boot_page_renders_with_artifact_state(client: TestClient) -> None:
+    """The /ui/boot page must show the configured boot dir and one
+    row per expected artifact (vmlinuz/initrd/squashfs/sha256)."""
+    _login(client)
+    r = client.get("/ui/boot")
+    assert r.status_code == 200
+    body = r.text
+    for name in (
+        "bty-live-x86_64.vmlinuz",
+        "bty-live-x86_64.initrd",
+        "bty-live-x86_64.squashfs",
+        "bty-live-x86_64.sha256",
+    ):
+        assert name in body, name
+    # Empty boot dir => four "missing" badges.
+    assert body.count('class="badge bg-warning text-dark">missing') == 4
+    # The fetch form must reach our route.
+    assert 'action="/ui/boot/fetch-release"' in body
+
+
+def test_ui_boot_requires_auth(client: TestClient) -> None:
+    """Without the cookie, /ui/boot redirects to login like the rest
+    of the UI."""
+    r = client.get("/ui/boot")
+    assert r.status_code == 303
+    assert r.headers["location"] == "/ui/login"
+
+
+def test_ui_boot_fetch_requires_auth(client: TestClient) -> None:
+    r = client.post("/ui/boot/fetch-release", data={"tag": "latest"})
+    assert r.status_code == 303
+    assert r.headers["location"] == "/ui/login"
+
+
 def test_ui_machines_list_shows_boot_policy_badge(client: TestClient) -> None:
     _login(client)
     client.put(

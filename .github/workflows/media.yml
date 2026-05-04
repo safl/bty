@@ -31,6 +31,12 @@ jobs:
     name: Build ${{ matrix.variant }} image
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    # ``softprops/action-gh-release`` (live + media-* tag only) needs
+    # contents:write to create / update the release. Workflow-default
+    # permissions are read-only; the explicit grant keeps the rest of
+    # the steps untouched.
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:
@@ -99,3 +105,19 @@ jobs:
             ~/system_imaging/disk/bty-live-x86_64.initrd
             ~/system_imaging/disk/bty-live-x86_64.squashfs
             ~/system_imaging/disk/bty-live-x86_64.sha256
+
+      # On a media-* tag, attach the live artifacts to a GitHub
+      # release so bty-web's "fetch latest release" UI can pull them
+      # at the predictable /releases/latest/download/<asset> URL.
+      # The disk-image variants stay as workflow artifacts only —
+      # they're too large for releases (~500 MB compressed each).
+      - name: Attach live artifacts to GitHub release
+        if: matrix.variant == 'live' && startsWith(github.ref, 'refs/tags/media-')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ~/system_imaging/disk/bty-live-x86_64.vmlinuz
+            ~/system_imaging/disk/bty-live-x86_64.initrd
+            ~/system_imaging/disk/bty-live-x86_64.squashfs
+            ~/system_imaging/disk/bty-live-x86_64.sha256
+          fail_on_unmatched_files: true

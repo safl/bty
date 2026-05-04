@@ -343,6 +343,7 @@ def create_app(
         state_path=state_path,
         expected_token=bearer_token,
         image_root=resolved_image_root,
+        boot_root=resolved_boot_root,
         publish_machines_changed=publish_machines_changed,
     )
 

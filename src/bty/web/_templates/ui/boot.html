@@ -1,0 +1,82 @@
+{% extends "ui/_layout.html" %}
+{% block title %}Boot artifacts — bty-web{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h3 mb-0">Boot artifacts</h1>
+    <span class="text-muted small"><code>{{ boot_root }}</code></span>
+</div>
+
+<p class="text-muted">
+    The bty live env that PXE clients chain into when their assignment has
+    <code>boot_policy=flash</code>. Until these files are present, machines with
+    <code>boot_policy=flash</code> cannot actually flash. Fetch them from the
+    <a href="https://github.com/{{ release_repo }}/releases" target="_blank" rel="noopener">latest GitHub release</a>
+    of <code>{{ release_repo }}</code>, or drop the files into <code>{{ boot_root }}</code> by hand.
+</p>
+
+<div class="card mb-4">
+    <div class="table-responsive">
+        <table class="table mb-0 align-middle">
+            <thead class="table-light">
+                <tr>
+                    <th>File</th>
+                    <th>Status</th>
+                    <th>Size</th>
+                    <th>Last fetched</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for a in artifacts %}
+                <tr>
+                    <td><code>{{ a.name }}</code></td>
+                    <td>
+                        {% if a.present %}
+                        <span class="badge bg-success">present</span>
+                        {% else %}
+                        <span class="badge bg-warning text-dark">missing</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if a.size is not none %}
+                        <small class="text-muted">{{ "{:,}".format(a.size) }} bytes</small>
+                        {% else %}
+                        <small class="text-muted">—</small>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if a.mtime %}
+                        <small class="text-muted">{{ a.mtime }}</small>
+                        {% else %}
+                        <small class="text-muted">—</small>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-body">
+        <h2 class="h5 mb-3">Fetch from GitHub releases</h2>
+        <form action="/ui/boot/fetch-release" method="post" class="row g-3 align-items-end">
+            <div class="col-sm-8">
+                <label class="form-label" for="tag">Tag</label>
+                <input type="text" name="tag" id="tag" class="form-control"
+                       value="latest" placeholder="latest, or e.g. media-v0.1.0">
+                <div class="form-text">
+                    <code>latest</code> resolves through GitHub's redirect to the most
+                    recent release. The fetch downloads
+                    <code>vmlinuz</code> + <code>initrd</code> + <code>squashfs</code> +
+                    <code>sha256</code>, verifies the manifest, and atomically installs
+                    into <code>{{ boot_root }}</code>.
+                </div>
+            </div>
+            <div class="col-sm-4">
+                <button type="submit" class="btn btn-primary w-100">Fetch</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

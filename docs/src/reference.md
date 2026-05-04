@@ -319,6 +319,7 @@ ImageEntry = {
 | `BTY_STATE_DIR` | Where `state.db` lives | `/var/lib/bty` |
 | `BTY_IMAGE_ROOT` | Image catalog directory | `/var/lib/bty/images` |
 | `BTY_BOOT_DIR` | Live-env artifacts (`/boot/{name}` source) | `${BTY_STATE_DIR}/boot` |
+| `BTY_BOOT_RELEASE_REPO` | GitHub repo (`<owner>/<name>`) the "fetch latest release" UI pulls live-env artifacts from | `safl/bty` |
 | `BTY_WEB_HOST` | uvicorn bind address | `0.0.0.0` |
 | `BTY_WEB_PORT` | uvicorn port | `8080` |
 
@@ -340,6 +341,14 @@ templates, Bootstrap CSS, HTMX form posts).
 - `POST /ui/machines/{mac}` -> upsert from a form submit
 - `POST /ui/machines/{mac}/delete` -> delete record
 - `GET  /ui/images` -> read-only image catalog
+- `GET  /ui/boot` -> live-env boot artifacts: present/missing per
+  artifact, sizes, last-fetched timestamps, "fetch latest release"
+  form
+- `POST /ui/boot/fetch-release` -> downloads
+  `vmlinuz`/`initrd`/`squashfs`/`sha256` from
+  `https://github.com/<BTY_BOOT_RELEASE_REPO>/releases/<tag>/download/`
+  (default `safl/bty`, default tag `latest`); verifies the manifest
+  and atomically installs into `BTY_BOOT_DIR`
 
 The Bearer dependency accepts the token via either the
 `Authorization: Bearer ...` header (used by API clients and PXE-flow
