@@ -1,7 +1,8 @@
 # Components
 
-bty is one Python package (`bty`) with three console-script entry points,
-plus a sibling appliance-image builder (`bty-media/`).
+bty is one Python package — the `bty` module, distributed on PyPI as
+[`bty-lab`](https://pypi.org/project/bty-lab/) — with three console-script
+entry points, plus a sibling appliance-image builder (`bty-media/`).
 
 ## `bty` (CLI)
 

@@ -12,7 +12,9 @@ images onto target disks — locally from a USB stick or remotely over
 PXE — and configures them via cloud-init or CIJOE workflows. Designed
 for both ad-hoc one-off provisioning and DevOps fleet operation.
 
-bty is one Python package with three console-script entry points:
+bty is one Python package — the `bty` module, distributed on PyPI as
+[`bty-lab`](https://pypi.org/project/bty-lab/) — with three console-script
+entry points:
 
 - `bty` — main CLI (image inspection, target discovery, flashing,
   provisioning).
