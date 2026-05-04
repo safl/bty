@@ -116,11 +116,13 @@ def register_ui_routes(
 
     # ----- pages (auth-required) ------------------------------------------
 
-    @app.get("/ui/dashboard", response_class=HTMLResponse, include_in_schema=False)
-    def ui_dashboard(
-        request: Request,
-        _: Annotated[None, Depends(require_ui_auth)],
-    ) -> HTMLResponse:
+    @app.get(
+        "/ui/dashboard",
+        response_class=HTMLResponse,
+        include_in_schema=False,
+        dependencies=[Depends(require_ui_auth)],
+    )
+    def ui_dashboard(request: Request) -> HTMLResponse:
         with _db.open_db(state_path) as conn:
             machine_count = conn.execute("SELECT COUNT(*) FROM machines").fetchone()[0]
             discovered_count = conn.execute(
@@ -135,11 +137,13 @@ def register_ui_routes(
             image_count=image_count,
         )
 
-    @app.get("/ui/machines", response_class=HTMLResponse, include_in_schema=False)
-    def ui_machines(
-        request: Request,
-        _: Annotated[None, Depends(require_ui_auth)],
-    ) -> HTMLResponse:
+    @app.get(
+        "/ui/machines",
+        response_class=HTMLResponse,
+        include_in_schema=False,
+        dependencies=[Depends(require_ui_auth)],
+    )
+    def ui_machines(request: Request) -> HTMLResponse:
         with _db.open_db(state_path) as conn:
             rows = conn.execute("SELECT * FROM machines ORDER BY mac").fetchall()
         machines = [_row_to_dict(r) for r in rows]
@@ -149,12 +153,9 @@ def register_ui_routes(
         "/ui/machines/{mac}",
         response_class=HTMLResponse,
         include_in_schema=False,
+        dependencies=[Depends(require_ui_auth)],
     )
-    def ui_machine_detail(
-        mac: str,
-        request: Request,
-        _: Annotated[None, Depends(require_ui_auth)],
-    ) -> HTMLResponse:
+    def ui_machine_detail(mac: str, request: Request) -> HTMLResponse:
         normalised = _normalise_mac(mac)
         with _db.open_db(state_path) as conn:
             row = conn.execute("SELECT * FROM machines WHERE mac = ?", (normalised,)).fetchone()
@@ -171,14 +172,17 @@ def register_ui_routes(
             provisioning_modes=list(PROVISIONING_MODES),
         )
 
-    @app.post("/ui/machines/{mac}", include_in_schema=False)
+    @app.post(
+        "/ui/machines/{mac}",
+        include_in_schema=False,
+        dependencies=[Depends(require_ui_auth)],
+    )
     def ui_machine_upsert(
         mac: str,
         image: Annotated[str, Form()] = "",
         provisioning_mode: Annotated[str, Form()] = "none",
         hostname: Annotated[str, Form()] = "",
         cijoe_workflow_ref: Annotated[str, Form()] = "",
-        _: Annotated[None, Depends(require_ui_auth)] = None,
     ) -> RedirectResponse:
         if provisioning_mode not in PROVISIONING_MODES:
             raise HTTPException(
@@ -218,22 +222,25 @@ def register_ui_routes(
             conn.commit()
         return RedirectResponse("/ui/machines", status_code=status.HTTP_303_SEE_OTHER)
 
-    @app.post("/ui/machines/{mac}/delete", include_in_schema=False)
-    def ui_machine_delete(
-        mac: str,
-        _: Annotated[None, Depends(require_ui_auth)],
-    ) -> RedirectResponse:
+    @app.post(
+        "/ui/machines/{mac}/delete",
+        include_in_schema=False,
+        dependencies=[Depends(require_ui_auth)],
+    )
+    def ui_machine_delete(mac: str) -> RedirectResponse:
         normalised = _normalise_mac(mac)
         with _db.open_db(state_path) as conn:
             conn.execute("DELETE FROM machines WHERE mac = ?", (normalised,))
             conn.commit()
         return RedirectResponse("/ui/machines", status_code=status.HTTP_303_SEE_OTHER)
 
-    @app.get("/ui/images", response_class=HTMLResponse, include_in_schema=False)
-    def ui_images(
-        request: Request,
-        _: Annotated[None, Depends(require_ui_auth)],
-    ) -> HTMLResponse:
+    @app.get(
+        "/ui/images",
+        response_class=HTMLResponse,
+        include_in_schema=False,
+        dependencies=[Depends(require_ui_auth)],
+    )
+    def ui_images(request: Request) -> HTMLResponse:
         listed = bty_images.list_images(image_root)
         return render(
             "ui/images.html",
@@ -249,7 +256,9 @@ def register_ui_routes(
 def _request_is_authed(request: Request, expected_token: str) -> bool:
     """Used by the layout template to show/hide the nav and logout button."""
     cookie = request.cookies.get(SESSION_COOKIE)
-    return bool(cookie) and token_matches(expected_token, cookie)
+    if cookie is None:
+        return False
+    return token_matches(expected_token, cookie)
 
 
 def _row_to_dict(row: Any) -> dict[str, Any]:
