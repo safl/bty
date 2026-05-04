@@ -1,0 +1,9 @@
+# Allow the bty-web service user to invoke its privileged helpers
+# without a password. The helpers manage /etc/default/bty-web (token
+# rotation) and /etc/dnsmasq.d/bty-pxe-active.conf (PXE activation),
+# both of which require root - and dnsmasq.service restart.
+#
+# Cloud-init writes this file via write_files; the cooked image's
+# runcmd chmods it to 0440 (sudo refuses to load anything with
+# looser perms).
+bty ALL=(root) NOPASSWD: /usr/local/sbin/bty-web-rotate-token, /usr/local/sbin/bty-web-activate-pxe

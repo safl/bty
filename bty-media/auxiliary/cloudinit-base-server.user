@@ -64,6 +64,14 @@ runcmd:
   - ln -sf /usr/lib/ipxe/undionly.kpxe /var/lib/tftpboot/undionly.kpxe
   - ln -sf /usr/lib/ipxe/ipxe.efi /var/lib/tftpboot/ipxe.efi
 
+  # Phase E: privileged helpers + sudoers entry that lets the bty
+  # service user rotate the bearer token and activate the PXE
+  # proxy-DHCP block without a password. sudo refuses to load
+  # /etc/sudoers.d/* unless the file is exactly mode 0440.
+  - chmod 0755 /usr/local/sbin/bty-web-rotate-token /usr/local/sbin/bty-web-activate-pxe
+  - chmod 0440 /etc/sudoers.d/bty-web
+  - chown root:root /etc/sudoers.d/bty-web
+
   # Pick up the staged systemd units. bty-web-init runs once on the
   # cooked image's first boot to generate the token and set up the
   # state directory; bty-web is the long-running service. dnsmasq is

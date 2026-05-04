@@ -32,7 +32,7 @@ from jinja2 import Environment
 
 import bty
 from bty import images as bty_images
-from bty.web import _db, _releases
+from bty.web import _db, _releases, _sysconfig
 from bty.web._auth import SESSION_COOKIE, token_matches
 from bty.web._models import BOOT_POLICIES, PROVISIONING_MODES
 
@@ -297,6 +297,79 @@ def register_ui_routes(
     )
     def ui_boot(request: Request) -> HTMLResponse:
         return _render_boot_page(request)
+
+    # ----- settings (Phase E) ---------------------------------------------
+
+    def _render_settings_page(
+        request: Request,
+        *,
+        new_token: str | None = None,
+        flash: str | None = None,
+        flash_kind: str | None = None,
+    ) -> HTMLResponse:
+        return render(
+            "ui/settings.html",
+            request,
+            interfaces=_sysconfig.list_interfaces(),
+            pxe=_sysconfig.pxe_active(),
+            new_token=new_token,
+            flash=flash,
+            flash_kind=flash_kind,
+        )
+
+    @app.get(
+        "/ui/settings",
+        response_class=HTMLResponse,
+        include_in_schema=False,
+        dependencies=[Depends(require_ui_auth)],
+    )
+    def ui_settings(request: Request) -> HTMLResponse:
+        return _render_settings_page(request)
+
+    @app.post(
+        "/ui/settings/rotate-token",
+        include_in_schema=False,
+        dependencies=[Depends(require_ui_auth)],
+    )
+    def ui_settings_rotate_token(request: Request) -> HTMLResponse:
+        try:
+            new_token = _sysconfig.rotate_token()
+        except _sysconfig.SysConfigError as exc:
+            return _render_settings_page(
+                request, flash=f"Token rotation failed: {exc}", flash_kind="danger"
+            )
+        return _render_settings_page(
+            request,
+            new_token=new_token,
+            flash=(
+                "New token written to /etc/default/bty-web. The change takes "
+                "effect after the next bty-web restart - copy the value below "
+                "first, then restart the service (or reboot)."
+            ),
+            flash_kind="warning",
+        )
+
+    @app.post(
+        "/ui/settings/pxe-activate",
+        include_in_schema=False,
+        dependencies=[Depends(require_ui_auth)],
+    )
+    def ui_settings_pxe_activate(
+        request: Request,
+        interface: Annotated[str, Form()] = "",
+        subnet: Annotated[str, Form()] = "",
+    ) -> HTMLResponse:
+        try:
+            _sysconfig.activate_pxe(interface, subnet)
+        except _sysconfig.SysConfigError as exc:
+            return _render_settings_page(
+                request, flash=f"PXE activation failed: {exc}", flash_kind="danger"
+            )
+        return _render_settings_page(
+            request,
+            flash=f"PXE activated on {interface!r} for {subnet!r}.",
+            flash_kind="success",
+        )
 
     @app.post(
         "/ui/boot/fetch-release",

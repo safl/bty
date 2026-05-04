@@ -248,10 +248,21 @@ ships dnsmasq + the iPXE BIOS/UEFI binaries. TFTP serves
 proxy-DHCP and chain-config block in
 `/etc/dnsmasq.d/bty-pxe.conf` is **commented out by default** so a
 freshly-imaged appliance never disrupts an existing DHCP server;
-the operator activates it (Phase E first-boot wizard, or hand-edit)
-once they've picked which interface to serve PXE on. Two-stage
-chain: PXE ROM -> `undionly.kpxe`/`ipxe.efi` -> bty-web's
+operators activate via the `/ui/settings` page (which writes
+`/etc/dnsmasq.d/bty-pxe-active.conf` and restarts dnsmasq via the
+sudoers-permitted `bty-web-activate-pxe` helper). Two-stage chain:
+PXE ROM -> `undionly.kpxe`/`ipxe.efi` -> bty-web's
 `/pxe-bootstrap.ipxe` -> per-MAC `/pxe/{mac}` plan.
+
+**Settings (`/ui/settings`).** Operator-facing controls for two
+runtime concerns that need root: token rotation (rewrites
+`/etc/default/bty-web` via `bty-web-rotate-token`; bty-web restart
+is operator-driven so the new token doesn't kill the active
+session pre-copy) and PXE activation (writes
+`/etc/dnsmasq.d/bty-pxe-active.conf` + restarts dnsmasq via
+`bty-web-activate-pxe`). Both helpers live in `/usr/local/sbin/`
+and are invocable by user `bty` via the `/etc/sudoers.d/bty-web`
+NOPASSWD entry — no other privileged operations are exposed.
 
 ## Conventions agents can rely on
 

@@ -1,0 +1,90 @@
+{% extends "ui/_layout.html" %}
+{% block title %}Settings — bty-web{% endblock %}
+{% block content %}
+<h1 class="h3 mb-4">Settings</h1>
+
+<!-- ----------------------------------------------------------------- -->
+<div class="card mb-4">
+    <div class="card-body">
+        <h2 class="h5 mb-3">Bearer token</h2>
+        <p class="text-muted">
+            Rotation generates a fresh URL-safe random token and writes it to
+            <code>/etc/default/bty-web</code>. The change takes effect on the
+            next <code>bty-web</code> restart — until then the current token
+            keeps working. Copy the new value before restarting the service.
+        </p>
+        {% if new_token %}
+        <div class="alert alert-info">
+            <strong>New token:</strong>
+            <code class="user-select-all">{{ new_token }}</code>
+            <div class="mt-2 small text-muted">
+                Save this somewhere, then run <code>sudo systemctl restart bty-web</code>
+                on the server (or reboot). Your current session will still work
+                until the restart, after which you'll need to log in with the
+                new token.
+            </div>
+        </div>
+        {% endif %}
+        <form action="/ui/settings/rotate-token" method="post"
+              onsubmit="return confirm('Rotate the bearer token? You will need to log back in with the new value after the next service restart.');">
+            <button type="submit" class="btn btn-warning">Rotate token</button>
+        </form>
+    </div>
+</div>
+
+<!-- ----------------------------------------------------------------- -->
+<div class="card">
+    <div class="card-body">
+        <h2 class="h5 mb-3">PXE proxy-DHCP</h2>
+        <p class="text-muted">
+            Activates the dnsmasq proxy-DHCP block: bty-web responds to PXE
+            queries on the chosen interface. Pick the interface that faces the
+            target machines, supply the subnet they're on, and click Activate.
+            <code>dnsmasq</code> restarts; until then the dnsmasq config shipped
+            with the appliance only serves TFTP.
+        </p>
+        {% if pxe %}
+        <div class="alert alert-info">
+            <strong>Currently active:</strong> interface <code>{{ pxe.interface }}</code>,
+            subnet <code>{{ pxe.subnet }}</code>. Re-submit the form below to change.
+        </div>
+        {% else %}
+        <div class="alert alert-light border">
+            PXE is currently <strong>not</strong> active. Machines with
+            <code>boot_policy=flash</code> won't actually be served until you
+            activate it here (or the operator hand-edits
+            <code>/etc/dnsmasq.d/bty-pxe.conf</code>).
+        </div>
+        {% endif %}
+        <form action="/ui/settings/pxe-activate" method="post" class="row g-3">
+            <div class="col-sm-6">
+                <label class="form-label" for="interface">Interface</label>
+                <select name="interface" id="interface" class="form-select" required>
+                    {% for iface in interfaces %}
+                    <option value="{{ iface.name }}"
+                            {% if pxe and pxe.interface == iface.name %}selected{% endif %}>
+                        {{ iface.name }} ({{ iface.operstate }})
+                    </option>
+                    {% endfor %}
+                    {% if not interfaces %}
+                    <option value="" disabled selected>(no interfaces detected)</option>
+                    {% endif %}
+                </select>
+            </div>
+            <div class="col-sm-6">
+                <label class="form-label" for="subnet">Subnet</label>
+                <input type="text" name="subnet" id="subnet" class="form-control"
+                       placeholder="192.168.1.0 or 192.168.1.0/24"
+                       value="{{ pxe.subnet if pxe else '' }}" required>
+                <div class="form-text">
+                    Network address of the segment PXE clients live on. CIDR is
+                    accepted but only the network part is used.
+                </div>
+            </div>
+            <div class="col-12">
+                <button type="submit" class="btn btn-primary">Activate</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

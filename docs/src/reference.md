@@ -349,6 +349,21 @@ templates, Bootstrap CSS, HTMX form posts).
   `https://github.com/<BTY_BOOT_RELEASE_REPO>/releases/<tag>/download/`
   (default `safl/bty`, default tag `latest`); verifies the manifest
   and atomically installs into `BTY_BOOT_DIR`
+- `GET  /ui/settings` -> two-card page:
+  - **Bearer token** — Rotate button calls
+    `bty-web-rotate-token`, displays the new token in a one-time
+    flash, leaves the bty-web service running with the old token
+    until the operator restarts it manually.
+  - **PXE proxy-DHCP** — interface dropdown (read from
+    `/sys/class/net/`) + subnet input (`192.168.1.0` or
+    `192.168.1.0/24`). Activate calls `bty-web-activate-pxe`
+    which writes `/etc/dnsmasq.d/bty-pxe-active.conf` and
+    restarts dnsmasq.
+- `POST /ui/settings/rotate-token` / `POST /ui/settings/pxe-activate`
+  drive the two helpers above. Both helpers live in
+  `/usr/local/sbin/` and are invocable by the `bty` service user
+  via the NOPASSWD entry in `/etc/sudoers.d/bty-web` — the only
+  sudo grant the appliance gives bty-web.
 
 The Bearer dependency accepts the token via either the
 `Authorization: Bearer ...` header (used by API clients and PXE-flow

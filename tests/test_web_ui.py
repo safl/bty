@@ -244,6 +244,84 @@ def test_ui_boot_page_renders_with_artifact_state(client: TestClient) -> None:
     assert 'action="/ui/boot/fetch-release"' in body
 
 
+# ---------- Phase E: settings page ----------------------------------------
+
+
+def test_ui_settings_requires_auth(client: TestClient) -> None:
+    r = client.get("/ui/settings")
+    assert r.status_code == 303
+    assert r.headers["location"] == "/ui/login"
+
+
+def test_ui_settings_page_renders(client: TestClient) -> None:
+    _login(client)
+    r = client.get("/ui/settings")
+    assert r.status_code == 200
+    body = r.text
+    assert "Bearer token" in body
+    assert "PXE proxy-DHCP" in body
+    # Forms post to the right routes.
+    assert 'action="/ui/settings/rotate-token"' in body
+    assert 'action="/ui/settings/pxe-activate"' in body
+
+
+def test_ui_settings_rotate_token_shows_new_token_in_flash(client: TestClient) -> None:
+    from unittest.mock import patch
+
+    _login(client)
+    with patch("bty.web._sysconfig.rotate_token", return_value="new-token-abc"):
+        r = client.post("/ui/settings/rotate-token")
+    assert r.status_code == 200
+    assert "new-token-abc" in r.text
+    # Warning flash about needing restart.
+    assert "restart" in r.text.lower()
+
+
+def test_ui_settings_rotate_token_failure_shows_danger_flash(client: TestClient) -> None:
+    from unittest.mock import patch
+
+    from bty.web._sysconfig import SysConfigError
+
+    _login(client)
+    with patch("bty.web._sysconfig.rotate_token", side_effect=SysConfigError("sudo blew up")):
+        r = client.post("/ui/settings/rotate-token")
+    assert r.status_code == 200
+    assert "Token rotation failed" in r.text
+    assert "sudo blew up" in r.text
+
+
+def test_ui_settings_pxe_activate_invokes_helper(client: TestClient) -> None:
+    from unittest.mock import patch
+
+    _login(client)
+    with patch("bty.web._sysconfig.activate_pxe") as mock_activate:
+        r = client.post(
+            "/ui/settings/pxe-activate",
+            data={"interface": "eth0", "subnet": "192.168.1.0/24"},
+        )
+    assert r.status_code == 200
+    assert "PXE activated" in r.text
+    mock_activate.assert_called_once_with("eth0", "192.168.1.0/24")
+
+
+def test_ui_settings_pxe_activate_failure_shows_danger_flash(client: TestClient) -> None:
+    from unittest.mock import patch
+
+    from bty.web._sysconfig import SysConfigError
+
+    _login(client)
+    with patch(
+        "bty.web._sysconfig.activate_pxe",
+        side_effect=SysConfigError("invalid subnet"),
+    ):
+        r = client.post(
+            "/ui/settings/pxe-activate",
+            data={"interface": "eth0", "subnet": "garbage"},
+        )
+    assert r.status_code == 200
+    assert "PXE activation failed" in r.text
+
+
 def test_ui_boot_requires_auth(client: TestClient) -> None:
     """Without the cookie, /ui/boot redirects to login like the rest
     of the UI."""
