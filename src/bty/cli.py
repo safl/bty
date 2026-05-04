@@ -200,7 +200,7 @@ def cmd_flash(args: argparse.Namespace) -> int:
     if plan.provisioning_mode != "none":
         print(
             f"bty: warning: provisioning mode {plan.provisioning_mode!r} is not yet "
-            "implemented (milestones 7-9); skipping post-flash provisioning",
+            "implemented (milestones 8-9); skipping post-flash provisioning",
             file=sys.stderr,
         )
 
