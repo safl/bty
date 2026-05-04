@@ -23,12 +23,32 @@ import pytest
 
 from bty import flash
 
-pytestmark = [
-    pytest.mark.integration,
-    pytest.mark.skipif(os.geteuid() != 0, reason="losetup / block-device writes need root"),
-    pytest.mark.skipif(shutil.which("losetup") is None, reason="losetup not available"),
-    pytest.mark.skipif(shutil.which("dd") is None, reason="dd not available"),
-]
+pytestmark = pytest.mark.integration
+
+
+@pytest.fixture(autouse=True)
+def _require_integration_environment() -> None:
+    """Skip when prereqs are missing locally, but fail loudly in CI.
+
+    CI sets ``CI=true``; if integration prereqs are missing there, that is a
+    misconfiguration we want to see, not silently skip. Local contributors
+    without root just get a normal skip.
+    """
+    missing: list[str] = []
+    if os.geteuid() != 0:
+        missing.append("not running as root")
+    if shutil.which("losetup") is None:
+        missing.append("losetup not on PATH")
+    if shutil.which("dd") is None:
+        missing.append("dd not on PATH")
+
+    if not missing:
+        return
+
+    reason = "; ".join(missing)
+    if os.environ.get("CI"):
+        pytest.fail(f"integration prerequisites missing in CI: {reason}", pytrace=False)
+    pytest.skip(reason)
 
 
 @pytest.fixture
