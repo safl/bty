@@ -6,6 +6,8 @@ lands in later milestones. This is a scaffold so the ``bty-web``
 console-script wiring is exercised end-to-end.
 """
 
+import bty
+
 
 def main() -> None:
-    print("bty-web: scaffold only — web server lands in milestone 11")
+    print(f"bty-web {bty.__version__}: scaffold only — web server lands in milestone 11")

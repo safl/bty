@@ -22,9 +22,16 @@ from bty import disks, flash, formatting, images
 
 
 def main(argv: list[str] | None = None) -> int:
+    import bty as _bty  # avoid a top-level import cycle while keeping a single source
+
     parser = argparse.ArgumentParser(
         prog="bty",
         description="bty - Boot & Target Utility",
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"bty {_bty.__version__}",
     )
     sub = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
 

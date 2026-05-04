@@ -17,6 +17,19 @@ def test_main_help_exits_cleanly() -> None:
     assert excinfo.value.code == 0
 
 
+def test_main_version_prints_and_exits_cleanly(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import bty as _bty
+
+    with pytest.raises(SystemExit) as excinfo:
+        cli.main(["--version"])
+    assert excinfo.value.code == 0
+    out = capsys.readouterr().out
+    assert _bty.__version__ in out
+    assert out.startswith("bty ")
+
+
 def test_main_no_subcommand_exits_with_usage() -> None:
     with pytest.raises(SystemExit) as excinfo:
         cli.main([])

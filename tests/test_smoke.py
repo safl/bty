@@ -3,8 +3,10 @@
 import bty
 
 
-def test_version() -> None:
-    assert bty.__version__ == "0.1.0.dev0"
+def test_version_is_a_non_empty_string() -> None:
+    """``bty.__version__`` is sourced from package metadata; assert it's set."""
+    assert isinstance(bty.__version__, str)
+    assert bty.__version__
 
 
 def test_subpackages_import() -> None:

@@ -5,6 +5,8 @@ milestone; this is a scaffold so the ``bty-tui`` console-script wiring is
 exercised end-to-end.
 """
 
+import bty
+
 
 def main() -> None:
-    print("bty-tui: scaffold only — TUI lands in milestone 10")
+    print(f"bty-tui {bty.__version__}: scaffold only — TUI lands in milestone 10")

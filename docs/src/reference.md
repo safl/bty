@@ -8,6 +8,9 @@ The `bty` command groups operations as subcommands. Each leaf command
 accepts `--json` to emit machine-readable output instead of the default
 human-readable table.
 
+`bty --version` prints the installed version (sourced from package
+metadata) and exits.
+
 ### `bty list disks`
 
 List interesting block devices on the local system. Shells out to
