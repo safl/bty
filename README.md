@@ -22,6 +22,20 @@ bty is one Python package with three console-script entry points:
 Plus a sibling appliance-image builder under `bty-media/` that produces
 the bootable USB live image and the server appliance image.
 
+## Install
+
+```bash
+pipx install bty-lab            # CLI only — zero third-party Python deps
+pipx install "bty-lab[tui]"     # adds the bty-tui terminal UI
+pipx install "bty-lab[web]"     # adds the bty-web HTTP server (milestone 11+)
+pipx install "bty-lab[all]"     # everything
+```
+
+The CLI flow (`bty list disks`, `bty inspect image`, `bty flash --dry-run`)
+needs only Python 3.11+ and stdlib; full flashing (`bty flash --yes`)
+relies on system binaries (`dd`, `qemu-img`, `zstd`, `lsblk`, etc.) the
+operator's distribution is expected to provide.
+
 ## Status
 
 This is the working tree of an in-progress rewrite. The original Flask

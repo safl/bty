@@ -10,7 +10,6 @@ Requires the ``[tui]`` install extra (pulls in textual).
 from __future__ import annotations
 
 import os
-from collections.abc import Sequence
 from pathlib import Path
 from typing import ClassVar
 
@@ -70,7 +69,7 @@ class FlashConfirmScreen(ModalScreen[bool]):
     }
     """
 
-    BINDINGS: ClassVar[Sequence[Binding]] = [
+    BINDINGS: ClassVar[list[Binding | tuple[str, str] | tuple[str, str, str]]] = [
         Binding("escape", "dismiss(False)", "Cancel"),
     ]
 
@@ -192,7 +191,7 @@ class BtyTui(App[None]):
 
     TITLE = "bty"
 
-    BINDINGS: ClassVar[Sequence[Binding]] = [
+    BINDINGS: ClassVar[list[Binding | tuple[str, str] | tuple[str, str, str]]] = [
         Binding("q", "quit", "Quit"),
         Binding("r", "refresh", "Refresh"),
         Binding("f", "flash", "Flash"),

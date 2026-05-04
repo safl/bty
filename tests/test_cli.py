@@ -279,8 +279,10 @@ def test_flash_cloud_init_invokes_apply_cloud_init(
     )
     assert rc == 0
     assert captured == [(Path("/dev/loop9"), user_data, None)]
-    out = capsys.readouterr().out
-    assert "Applying cloud-init seed" in out
+    captured_io = capsys.readouterr()
+    # Progress events flow to stderr in default text mode.
+    assert "[provisioning] cloud-init" in captured_io.err
+    assert "Done" in captured_io.out
 
 
 def test_flash_cijoe_requires_workflow(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -348,8 +350,9 @@ def test_flash_cijoe_invokes_apply_cijoe(
     )
     assert rc == 0
     assert captured == [(Path("/dev/loop9"), workflow, None)]
-    out = capsys.readouterr().out
-    assert "Running cijoe workflow" in out
+    captured_io = capsys.readouterr()
+    assert "[provisioning] cijoe" in captured_io.err
+    assert "Done" in captured_io.out
 
 
 def test_flash_yes_path_exit_5_on_race(
