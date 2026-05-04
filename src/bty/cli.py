@@ -104,6 +104,18 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="cloud-init meta-data file (optional; synthesised if omitted)",
     )
+    p_flash.add_argument(
+        "--cijoe-workflow",
+        type=Path,
+        default=None,
+        help="cijoe workflow YAML (required when --provision cijoe)",
+    )
+    p_flash.add_argument(
+        "--cijoe-config",
+        type=Path,
+        default=None,
+        help="cijoe TOML config (optional; passed through as -c)",
+    )
     p_flash.set_defaults(func=cmd_flash)
 
     args = parser.parse_args(argv)
@@ -176,6 +188,13 @@ def cmd_flash(args: argparse.Namespace) -> int:
         )
         return 2
 
+    if args.provision == "cijoe" and args.cijoe_workflow is None:
+        print(
+            "bty: --cijoe-workflow is required when --provision cijoe",
+            file=sys.stderr,
+        )
+        return 2
+
     try:
         image_info = flash.probe_image(args.image)
     except FileNotFoundError as exc:
@@ -216,13 +235,6 @@ def cmd_flash(args: argparse.Namespace) -> int:
         )
         return 2
 
-    if plan.provisioning_mode == "cijoe":
-        print(
-            "bty: warning: provisioning mode 'cijoe' is not yet "
-            "implemented (milestone 9); skipping post-flash provisioning",
-            file=sys.stderr,
-        )
-
     flash.print_plan(plan, errors=[])
     print()
     print(f"Writing to {plan.target.path} ...")
@@ -243,6 +255,18 @@ def cmd_flash(args: argparse.Namespace) -> int:
             )
         except flash.FlashError as exc:
             print(f"bty: cloud-init seeding failed: {exc}", file=sys.stderr)
+            return 1
+
+    if plan.provisioning_mode == "cijoe":
+        print(f"Running cijoe workflow against {plan.target.path} ...")
+        try:
+            flash.apply_cijoe(
+                plan.target.path,
+                args.cijoe_workflow,
+                args.cijoe_config,
+            )
+        except flash.FlashError as exc:
+            print(f"bty: cijoe provisioning failed: {exc}", file=sys.stderr)
             return 1
 
     written = plan.image.virtual_size_bytes or plan.image.size_bytes

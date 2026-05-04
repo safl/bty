@@ -259,3 +259,78 @@ def test_apply_cloud_init_errors_on_image_without_marker(
 
     with pytest.raises(flash.FlashError, match="cloud-init"):
         flash.apply_cloud_init(loop_dev, user_data)
+
+
+# ---------- cijoe application ------------------------------------------------
+
+
+@pytest.fixture
+def partitioned_ext4_loop_device(tmp_path: Path) -> Iterator[tuple[Path, Path]]:
+    """Loop device with one ext4 partition; no cloud-init marker.
+
+    Used by the cijoe integration test: cijoe doesn't need a marker, just a
+    writable rootfs.
+    """
+    for tool in ("sgdisk", "mkfs.ext4", "mount", "umount", "partprobe", "udevadm"):
+        if shutil.which(tool) is None:
+            pytest.skip(f"{tool} not available")
+
+    backing = tmp_path / "backing-cijoe.img"
+    subprocess.run(["truncate", "-s", "64M", str(backing)], check=True)
+    setup = subprocess.run(
+        ["losetup", "-f", "--show", "-P", str(backing)],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    loop_dev = Path(setup.stdout.strip())
+
+    try:
+        subprocess.run(
+            ["sgdisk", "--new=1:0:0", "--typecode=1:8300", str(loop_dev)],
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(["partprobe", str(loop_dev)], check=False, capture_output=True)
+        subprocess.run(["udevadm", "settle"], check=False)
+        partition = Path(f"{loop_dev}p1")
+        subprocess.run(["mkfs.ext4", "-q", str(partition)], check=True)
+        yield loop_dev, partition
+    finally:
+        subprocess.run(["losetup", "-d", str(loop_dev)], check=False)
+
+
+def test_apply_cijoe_runs_workflow_against_mounted_rootfs(
+    tmp_path: Path,
+    partitioned_ext4_loop_device: tuple[Path, Path],
+) -> None:
+    if shutil.which("cijoe") is None:
+        pytest.skip("cijoe not available; install with `pipx install cijoe`")
+
+    loop_dev, partition = partitioned_ext4_loop_device
+
+    # Trivial cijoe workflow: a single shell step that touches a sentinel
+    # file under $BTY_ROOTFS, proving bty mounted the rootfs and exported
+    # the env var to the workflow.
+    workflow = tmp_path / "touch.yaml"
+    workflow.write_text(
+        """\
+steps:
+  - name: touch_sentinel
+    run: |
+      mkdir -p "$BTY_ROOTFS/etc"
+      echo "bty-cijoe-was-here" > "$BTY_ROOTFS/etc/bty-test"
+"""
+    )
+
+    flash.apply_cijoe(loop_dev, workflow)
+
+    # Mount the partition and verify the sentinel landed there.
+    with tempfile.TemporaryDirectory(prefix="bty-verify-cijoe-") as mp:
+        subprocess.run(["mount", str(partition), mp], check=True)
+        try:
+            sentinel = Path(mp) / "etc" / "bty-test"
+            assert sentinel.is_file()
+            assert sentinel.read_text().strip() == "bty-cijoe-was-here"
+        finally:
+            subprocess.run(["umount", mp], check=True)

@@ -437,3 +437,59 @@ def test_find_cloud_init_rootfs_handles_flat_lsblk_shape(
 
     rootfs = flash._find_cloud_init_rootfs(Path("/dev/loopX"))
     assert rootfs == Path("/dev/loopXp1")
+
+
+# ---------- apply_cijoe: arg validation + helpers ----------------------------
+
+
+def test_apply_cijoe_missing_workflow_raises(tmp_path: Path) -> None:
+    with pytest.raises(flash.FlashError, match="cijoe workflow not found"):
+        flash.apply_cijoe(Path("/dev/null"), tmp_path / "missing.yaml")
+
+
+def test_apply_cijoe_missing_config_raises(tmp_path: Path) -> None:
+    wf = tmp_path / "wf.yaml"
+    wf.write_text("steps: []\n")
+    with pytest.raises(flash.FlashError, match="cijoe config not found"):
+        flash.apply_cijoe(Path("/dev/null"), wf, tmp_path / "missing.toml")
+
+
+def test_apply_cijoe_missing_cijoe_binary_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    wf = tmp_path / "wf.yaml"
+    wf.write_text("steps: []\n")
+    monkeypatch.setattr(flash.shutil, "which", lambda _name: None)
+    with pytest.raises(flash.FlashError, match="cijoe is not installed"):
+        flash.apply_cijoe(Path("/dev/null"), wf)
+
+
+def test_find_largest_partition_picks_biggest(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_lsblk = MagicMock(
+        returncode=0,
+        stdout=json.dumps(
+            {
+                "blockdevices": [
+                    {"path": "/dev/loopX", "type": "loop", "size": 0},
+                    {"path": "/dev/loopXp1", "type": "part", "size": 1024},
+                    {"path": "/dev/loopXp2", "type": "part", "size": 8192},
+                    {"path": "/dev/loopXp3", "type": "part", "size": 4096},
+                ]
+            }
+        ),
+    )
+    monkeypatch.setattr(flash.subprocess, "run", lambda *a, **kw: fake_lsblk)
+    chosen = flash._find_largest_partition(Path("/dev/loopX"))
+    assert chosen == Path("/dev/loopXp2")
+
+
+def test_find_largest_partition_raises_when_none_found(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_lsblk = MagicMock(
+        returncode=0,
+        stdout=json.dumps({"blockdevices": [{"path": "/dev/loopX", "type": "loop", "size": 0}]}),
+    )
+    monkeypatch.setattr(flash.subprocess, "run", lambda *a, **kw: fake_lsblk)
+    with pytest.raises(flash.FlashError, match="no partitions found"):
+        flash._find_largest_partition(Path("/dev/loopX"))

@@ -48,7 +48,7 @@ Exit codes:
 - `0` -> success
 - `2` -> the path does not exist (or argparse rejected the invocation)
 
-### `bty flash --image PATH --target PATH [--provision MODE] [--user-data PATH] [--meta-data PATH] [--dry-run] [--yes]`
+### `bty flash --image PATH --target PATH [--provision MODE] [--user-data PATH] [--meta-data PATH] [--cijoe-workflow PATH] [--cijoe-config PATH] [--dry-run] [--yes]`
 
 Flash an image onto a target block device.
 
@@ -101,9 +101,14 @@ After the flash, `bty` runs the configured post-flash step:
   PATH`**; rejects with exit `2` if the flag is missing. Errors
   loudly if no partition on the target appears to have cloud-init
   installed, rather than silently writing a seed nothing will read.
-- **`cijoe`** — accepted and validated but not yet implemented;
-  emits a "skipping post-flash provisioning" warning. Lands in
-  milestone 9.
+- **`cijoe`** — mounts the largest partition on the target (heuristic
+  for the rootfs), exports `BTY_ROOTFS` pointing at the mount, then
+  invokes `cijoe <workflow> --monitor [-c <config>]`. The workflow's
+  tasks read or mutate the rootfs through `$BTY_ROOTFS`; bty itself
+  does not interpret what they do. **Requires `--cijoe-workflow PATH`**;
+  rejects with exit `2` if missing. **Requires `cijoe` on `PATH`**
+  (`pipx install cijoe`); errors clearly if absent. Workflow exit
+  non-zero is propagated as a flash failure.
 
 #### Exit codes
 

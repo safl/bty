@@ -20,6 +20,7 @@ The actual write step lands in milestone 6.
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import stat
@@ -475,6 +476,103 @@ def _partition_has_cloud_init(part: Path) -> bool:
             return (Path(mp) / "etc" / "cloud").is_dir()
         finally:
             subprocess.run(["umount", mp], capture_output=True, check=False)
+
+
+# ---------- Provisioning: cijoe (offline) ------------------------------------
+
+
+def apply_cijoe(
+    target: Path,
+    workflow: Path,
+    config: Path | None = None,
+) -> None:
+    """Run a CIJOE workflow against the target's mounted rootfs.
+
+    Mounts the largest partition on ``target`` (heuristic for the
+    rootfs), exports ``BTY_ROOTFS`` pointing at the mount, then invokes
+    ``cijoe <workflow> [-c <config>] --monitor``. The workflow's tasks
+    can read / mutate the rootfs through ``$BTY_ROOTFS``; bty itself
+    does not interpret what the workflow does.
+
+    Raises :class:`FlashError` if ``cijoe`` is not installed, the
+    workflow / config files are missing, the rootfs cannot be mounted,
+    or the workflow exits non-zero.
+    """
+    if not workflow.exists():
+        raise FlashError(f"cijoe workflow not found: {workflow}")
+    if config is not None and not config.exists():
+        raise FlashError(f"cijoe config not found: {config}")
+    if shutil.which("cijoe") is None:
+        raise FlashError("cijoe is not installed; install with `pipx install cijoe` and re-run")
+
+    rootfs = _find_largest_partition(target)
+
+    with tempfile.TemporaryDirectory(prefix="bty-cijoe-") as mp:
+        mount_point = Path(mp)
+        rc = subprocess.run(["mount", str(rootfs), str(mount_point)], check=False).returncode
+        if rc != 0:
+            raise FlashError(f"failed to mount {rootfs} at {mount_point}")
+        try:
+            env = os.environ.copy()
+            env["BTY_ROOTFS"] = str(mount_point)
+
+            cmd = ["cijoe", str(workflow), "--monitor"]
+            if config is not None:
+                cmd.extend(["-c", str(config)])
+
+            rc = subprocess.run(cmd, env=env, check=False).returncode
+            if rc != 0:
+                raise FlashError(f"cijoe workflow exited {rc}")
+
+            subprocess.run(["sync"], check=False)
+        finally:
+            subprocess.run(["umount", str(mount_point)], capture_output=True, check=False)
+
+
+def _find_largest_partition(target: Path) -> Path:
+    """Return the largest partition device on ``target``.
+
+    Heuristic for "the rootfs" — works for typical cooked images where
+    the root partition dominates the disk. Operators who need a
+    different partition will get an explicit selector when one
+    becomes necessary.
+    """
+    subprocess.run(["udevadm", "settle"], check=False)
+
+    proc = subprocess.run(
+        ["lsblk", "-J", "-b", "-o", "PATH,TYPE,SIZE", str(target)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        raise FlashError(f"lsblk failed for {target}: {proc.stderr.strip()}")
+
+    payload = json.loads(proc.stdout)
+    parts = _collect_partition_entries(payload.get("blockdevices", []))
+    if not parts:
+        raise FlashError(
+            f"no partitions found on {target}; lsblk reported: {proc.stdout.strip()!r}"
+        )
+
+    parts.sort(key=lambda p: int(p.get("size") or 0), reverse=True)
+    return Path(parts[0]["path"])
+
+
+def _collect_partition_entries(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Walk an ``lsblk -J`` tree; return raw entries of type ``part``.
+
+    Variant of :func:`_collect_partitions` that yields the full entry
+    so callers can read additional fields (e.g. SIZE) — not just the path.
+    """
+    out: list[dict[str, Any]] = []
+    for entry in entries:
+        if entry.get("type") == "part":
+            out.append(entry)
+        children = entry.get("children")
+        if children:
+            out.extend(_collect_partition_entries(children))
+    return out
 
 
 # ---------- Internal helpers --------------------------------------------------

@@ -127,18 +127,34 @@ not supplied) under `/var/lib/cloud/seed/nocloud-net/`, and unmounts.
 On first boot the OS picks up the seed via cloud-init's NoCloud
 datasource.
 
+*Functional from milestone 9.* Offline CIJOE provisioning after the
+flash:
+
+```bash
+sudo bty flash --image /var/lib/bty/images/debian.qcow2 \
+               --target /dev/sdX \
+               --provision cijoe \
+               --cijoe-workflow ./tweaks.yaml \
+               --yes
+```
+
+`bty` mounts the largest partition on the target, exports
+`BTY_ROOTFS` pointing at the mount, then runs the supplied cijoe
+workflow. Workflow tasks reference `$BTY_ROOTFS` to drop config
+files, install seed credentials, etc. Requires `cijoe` on `PATH`
+(install via `pipx install cijoe`).
+
 See [Reference > CLI](reference.md#cli) for the full surface.
 
 ## What is coming
 
 | Milestone | Capability |
 |-----------|------------|
-| 9         | Provisioning: `cijoe` (offline mode) |
 | 10        | `bty-tui` interactive UI in the live env |
 | 11-12     | `bty-web` server + browser UI |
 | 13        | `bty-media` server image |
 | 14        | Network-flash end-to-end over iPXE |
-| 15        | `cijoe` online provisioning |
+| 15        | `cijoe` online provisioning (server-driven, post-boot) |
 
 See [`PLAN.md`](https://github.com/safl/bty/blob/main/PLAN.md) for the
 roadmap detail.

@@ -262,13 +262,35 @@ def test_flash_cloud_init_invokes_apply_cloud_init(
     assert "Applying cloud-init seed" in out
 
 
-def test_flash_cijoe_warns_but_proceeds(
+def test_flash_cijoe_requires_workflow(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    img = tmp_path / "x.img"
+    img.write_bytes(b"\0")
+    rc = cli.main(
+        [
+            "flash",
+            "--image",
+            str(img),
+            "--target",
+            "/dev/null",
+            "--provision",
+            "cijoe",
+            "--dry-run",
+        ]
+    )
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "--cijoe-workflow is required" in err
+
+
+def test_flash_cijoe_invokes_apply_cijoe(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     img = tmp_path / "x.img"
     img.write_bytes(b"\0" * 1024)
+    workflow = tmp_path / "wf.yaml"
+    workflow.write_text("steps: []\n")
 
     monkeypatch.setattr(
         "bty.cli.flash.probe_target",
@@ -283,6 +305,12 @@ def test_flash_cijoe_warns_but_proceeds(
     monkeypatch.setattr("bty.cli.os.geteuid", lambda: 0)
     monkeypatch.setattr("bty.cli.flash.execute_plan", lambda plan: None)
 
+    captured: list[tuple[Path, Path, Path | None]] = []
+    monkeypatch.setattr(
+        "bty.cli.flash.apply_cijoe",
+        lambda target, wf, cfg=None: captured.append((target, wf, cfg)),
+    )
+
     rc = cli.main(
         [
             "flash",
@@ -292,10 +320,62 @@ def test_flash_cijoe_warns_but_proceeds(
             "/dev/loop9",
             "--provision",
             "cijoe",
+            "--cijoe-workflow",
+            str(workflow),
             "--yes",
         ]
     )
     assert rc == 0
-    err = capsys.readouterr().err
-    assert "not yet implemented" in err
-    assert "milestone 9" in err
+    assert captured == [(Path("/dev/loop9"), workflow, None)]
+    out = capsys.readouterr().out
+    assert "Running cijoe workflow" in out
+
+
+def test_flash_cijoe_passes_config_through(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    img = tmp_path / "x.img"
+    img.write_bytes(b"\0" * 1024)
+    workflow = tmp_path / "wf.yaml"
+    workflow.write_text("steps: []\n")
+    config = tmp_path / "cfg.toml"
+    config.write_text("[bty]\n")
+
+    monkeypatch.setattr(
+        "bty.cli.flash.probe_target",
+        lambda p: cli.flash.TargetInfo(
+            path=p,
+            exists=True,
+            is_block_device=True,
+            size_bytes=10**9,
+            mountpoints=[],
+        ),
+    )
+    monkeypatch.setattr("bty.cli.os.geteuid", lambda: 0)
+    monkeypatch.setattr("bty.cli.flash.execute_plan", lambda plan: None)
+
+    captured: list[tuple[Path, Path, Path | None]] = []
+    monkeypatch.setattr(
+        "bty.cli.flash.apply_cijoe",
+        lambda target, wf, cfg=None: captured.append((target, wf, cfg)),
+    )
+
+    rc = cli.main(
+        [
+            "flash",
+            "--image",
+            str(img),
+            "--target",
+            "/dev/loop9",
+            "--provision",
+            "cijoe",
+            "--cijoe-workflow",
+            str(workflow),
+            "--cijoe-config",
+            str(config),
+            "--yes",
+        ]
+    )
+    assert rc == 0
+    assert captured == [(Path("/dev/loop9"), workflow, config)]
