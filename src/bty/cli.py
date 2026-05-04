@@ -152,11 +152,13 @@ def cmd_flash(args: argparse.Namespace) -> int:
         return 2
 
     try:
-        plan = flash.plan_flash(args.image, args.target, args.provision)
+        image_info = flash.probe_image(args.image)
     except FileNotFoundError as exc:
         print(f"bty: {exc}", file=sys.stderr)
         return 2
 
+    target_info = flash.probe_target(args.target)
+    plan = flash.make_plan(image_info, target_info, args.provision)
     errors = flash.validate_plan(plan)
 
     if args.json:
