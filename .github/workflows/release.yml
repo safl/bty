@@ -5,10 +5,14 @@ name: Release
 #   2. ``build-wheel`` (gated)    - uv build of the bty-lab wheel + sdist.
 #   3. ``build-media`` (gated)    - all three bty-media variants in
 #                                   parallel (usb, server, live).
-#   4. ``attach-to-release``      - downloads every workflow artifact
+#   4. ``test-pxe`` (gated)       - server + client QEMU VMs;
+#                                   end-to-end PXE chain test
+#                                   against the freshly-built
+#                                   server image + live trio.
+#   5. ``attach-to-release``      - downloads every workflow artifact
 #                                   and attaches them to the GitHub
 #                                   release at the same tag.
-#   5. ``publish-pypi`` (last)    - trusted publishing of the wheel
+#   6. ``publish-pypi`` (last)    - trusted publishing of the wheel
 #                                   + sdist. Strictly gated on every
 #                                   prior job succeeding so PyPI
 #                                   never sees a half-baked release
@@ -178,10 +182,88 @@ jobs:
             ~/system_imaging/disk/bty-live-x86_64.squashfs
             ~/system_imaging/disk/bty-live-x86_64.sha256
 
+  # ---------------- verify ------------------------------------------------
+  test-pxe:
+    name: PXE chain test (server + client QEMU VMs)
+    needs: build-media
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install host tools (qemu, libguestfs, zstd)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            qemu-system-x86 \
+            qemu-utils \
+            zstd \
+            cpu-checker \
+            libguestfs-tools
+
+      - name: Enable KVM access for the runner
+        # virt-customize (libguestfs) spins up its own QEMU appliance,
+        # and the PXE chain test boots two QEMU VMs of its own; both
+        # need /dev/kvm. Same udev workaround as the build-media job.
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+              | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -l /dev/kvm
+
+      - name: Install cijoe
+        run: pipx install cijoe
+
+      - name: Download server image artefact
+        uses: actions/download-artifact@v8
+        with:
+          name: bty-server-x86_64-img-zst
+          path: ~/system_imaging/disk/
+
+      - name: Download live artefacts
+        uses: actions/download-artifact@v8
+        with:
+          name: bty-live-x86_64-netboot
+          path: ~/system_imaging/disk/
+
+      - name: Decompress + convert server image to qcow2
+        # The PXE-test scripts expect ``bty-server-x86_64.qcow2`` at
+        # the artefact dir. The release job uploads the .img.zst
+        # (operator-shippable) form; reconstruct the qcow2 here.
+        run: |
+          cd ~/system_imaging/disk
+          ls -la
+          zstd -d bty-server-x86_64.img.zst
+          qemu-img convert -f raw -O qcow2 \
+              bty-server-x86_64.img bty-server-x86_64.qcow2
+          rm bty-server-x86_64.img
+          ls -la
+
+      - name: Run PXE chain test
+        run: make test-pxe
+
+      - name: Upload cijoe report on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pxe-chain-test-cijoe-output
+          path: cijoe/cijoe-output/
+          if-no-files-found: warn
+
+      - name: Upload test workspace on failure (qcow2, serial logs)
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pxe-chain-test-workspace
+          path: cijoe/_build/test-pxe/
+          if-no-files-found: warn
+
   # ---------------- ship ---------------------------------------------------
   attach-to-release:
     name: Attach artifacts to GitHub release
-    needs: [build-wheel, build-media]
+    needs: [build-wheel, build-media, test-pxe]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
