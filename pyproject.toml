@@ -1,6 +1,6 @@
 [project]
 name = "bty-lab"
-version = "0.1.2"
+version = "0.1.3"
 description = "Boot & Target Utility - image flashing and provisioning for bare-metal systems"
 readme = "README.md"
 requires-python = ">=3.11"
