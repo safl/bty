@@ -1,0 +1,70 @@
+# bty PXE chain test (Phase 2 / Tier 1 verification)
+#
+# End-to-end smoke test of the network-flash chain: server VM runs
+# dnsmasq + bty-web; client VM PXE-boots on a shared L2 segment;
+# script asserts the full chain happens by grepping the client's
+# serial console for marker strings.
+#
+# Usage:
+#   cijoe tasks/test-pxe.yaml --monitor -c configs/test-pxe.toml
+#
+# Pre-conditions:
+# - bty-server-x86_64.qcow2 + bty-live-x86_64.{vmlinuz,initrd,squashfs}
+#   pre-built under ``~/system_imaging/disk/`` (run ``make build
+#   VARIANT=server`` and ``make build VARIANT=live`` first).
+# - ``qemu-system-x86_64`` and ``virt-customize`` on PATH.
+# - KVM accessible (the bake VMs run with ``-enable-kvm``).
+# - Wall clock per run: 5-10 minutes.
+
+[bty]
+variant = "test-pxe"
+
+[cijoe.workflow]
+fail_fast = true
+
+[test.pxe]
+# Pre-built artefacts live here; ``make build VARIANT=...`` populates
+# this dir. Same convention as the disk-image / live build pipelines.
+artifact_dir = "{{ local.env.HOME }}/system_imaging/disk"
+
+# Token baked into the server qcow2 by the customise step - bypasses
+# the runtime first-boot init that would otherwise generate one.
+token = "pxe-chain-test-token"
+
+# Synthesised PXE network. ``-netdev socket`` is just an L2 link with
+# no DHCP server of its own, so the test runs full DHCP (not proxy-
+# DHCP). The server static-IPs its PXE NIC; the client DHCPs into the
+# range below.
+client_mac = "52:54:00:11:22:33"
+pxe_netmask = "255.255.255.0"
+server_pxe_ip = "192.168.99.1"
+dhcp_range_lo = "192.168.99.50"
+dhcp_range_hi = "192.168.99.150"
+
+# QEMU PCI slots pinned so udev's predictable naming gives stable
+# interface names (``enp0s<slot>``) inside the guest.
+mgmt_nic_slot = 3
+pxe_nic_slot = 4
+
+# Markers asserted on the client serial console (must all appear
+# within the chain timeout). The ``/pxe/<mac>`` chain step is added
+# by the script itself from ``client_mac``.
+[[test.pxe.chain_markers]]
+key = "ipxe-loaded"
+needle = "iPXE"
+
+[[test.pxe.chain_markers]]
+key = "ipxe-fetch-bootstrap"
+needle = "pxe-bootstrap.ipxe"
+
+[[test.pxe.chain_markers]]
+key = "kernel-loading"
+needle = "Loading initial ramdisk"
+
+[[test.pxe.chain_markers]]
+key = "live-env-init"
+needle = "bty live env"
+
+[[test.pxe.chain_markers]]
+key = "flash-on-boot-running"
+needle = "bty-flash-on-boot"
