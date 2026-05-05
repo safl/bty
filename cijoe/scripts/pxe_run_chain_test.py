@@ -9,10 +9,11 @@ Boots two QEMU VMs sharing an L2 segment via ``-netdev socket``:
   machine assignment via plain HTTP. The PXE NIC opens a socket
   listener for the client to dial in.
 - Client: single NIC, joined to the server's PXE socket. PXE-boot
-  enabled. Blank virtio disk attached so flash-on-boot has a
-  target (the actual flash will fail because the assigned image
-  doesn't exist on the server - we only assert the chain reaches
-  flash-on-boot, not that bytes land on the disk).
+  enabled. Blank virtio disk attached as the flash target. The
+  customise step bakes a 1 MiB dummy qcow2 into
+  ``/var/lib/bty/images/`` so the live env's bty-flash-on-boot
+  script can pull it, run ``bty flash --yes`` against /dev/vda,
+  and reach the "flash complete; rebooting" marker.
 
 Asserts the chain progresses by tailing the client's serial-console
 log for marker strings configured in ``[test.pxe.chain_markers]``.
@@ -183,13 +184,18 @@ def _start_client_vm(workspace, socket_port, log_path, cfg):
 
 def _build_markers(cfg):
     """Return ``[(key, needle), ...]`` from config, with the per-MAC
-    chain marker derived from the configured client MAC."""
+    chain marker derived from the configured client MAC.
+
+    iPXE prints fetched URLs with the MAC in ``${net0/mac:hexhyp}``
+    form (hyphenated, e.g. ``52-54-00-11-22-33``), not the canonical
+    colon form. Build the marker accordingly so the assertion
+    matches what shows up on the serial console.
+    """
     out = []
     for entry in cfg.get("chain_markers", []):
         out.append((entry["key"], entry["needle"]))
-    # Always assert that the per-MAC plan endpoint was hit. Built
-    # from the configured MAC so config + assertion stay in sync.
-    out.append(("ipxe-fetch-permac", f"/pxe/{cfg['client_mac']}"))
+    mac_hyphen = cfg["client_mac"].replace(":", "-")
+    out.append(("ipxe-fetch-permac", f"/pxe/{mac_hyphen}"))
     return out
 
 
@@ -241,7 +247,7 @@ def _http_ready(host, port):
 def _put_assignment(host, port, cfg):
     body = json.dumps(
         {
-            "image": "test.img",
+            "image": cfg["machine_image"],
             "provisioning_mode": "none",
             "boot_policy": "flash",
         }

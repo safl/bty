@@ -31,6 +31,11 @@ artifact_dir = "{{ local.env.HOME }}/system_imaging/disk"
 # the runtime first-boot init that would otherwise generate one.
 token = "pxe-chain-test-token"
 
+# Image name used for the assignment + the dummy file the customise
+# step bakes into ``/var/lib/bty/images/``. Tiny 1 MiB qcow2 so the
+# flash completes in seconds against the client's 8 GiB blank disk.
+machine_image = "test.img"
+
 # Synthesised PXE network. ``-netdev socket`` is just an L2 link with
 # no DHCP server of its own, so the test runs full DHCP (not proxy-
 # DHCP). The server static-IPs its PXE NIC; the client DHCPs into the
@@ -42,9 +47,13 @@ dhcp_range_lo = "192.168.99.50"
 dhcp_range_hi = "192.168.99.150"
 
 # QEMU PCI slots pinned so udev's predictable naming gives stable
-# interface names (``enp0s<slot>``) inside the guest.
+# interface names inside the guest. On Debian 13 / systemd 257
+# QEMU virtio devices render as ``ens<slot>`` (slot-based hotplug
+# naming), not ``enp0s<slot>`` (PCI bus/slot naming). The script
+# uses the prefix below to compose Match= and interface= entries.
 mgmt_nic_slot = 3
 pxe_nic_slot = 4
+nic_prefix = "ens"
 
 # Markers asserted on the client serial console (must all appear
 # within the chain timeout). The ``/pxe/<mac>`` chain step is added
@@ -57,14 +66,28 @@ needle = "iPXE"
 key = "ipxe-fetch-bootstrap"
 needle = "pxe-bootstrap.ipxe"
 
+# iPXE prints ``http://.../bty-live-x86_64.initrd... ok`` when it
+# pulls the initrd; this is the cleanest proof the kernel+initrd
+# came down via the chain.
 [[test.pxe.chain_markers]]
-key = "kernel-loading"
-needle = "Loading initial ramdisk"
+key = "kernel-initrd-fetched"
+needle = "bty-live-x86_64.initrd"
 
+# live-boot's initramfs HTTP-fetches the squashfs because the kernel
+# cmdline includes ``fetch=...squashfs``. The fetch line names the
+# file as it streams in, so matching this proves boot=live + fetch=
+# actually worked end-to-end.
 [[test.pxe.chain_markers]]
-key = "live-env-init"
-needle = "bty live env"
+key = "squashfs-fetched"
+needle = "bty-live-x86_64.squashfs"
 
 [[test.pxe.chain_markers]]
 key = "flash-on-boot-running"
 needle = "bty-flash-on-boot"
+
+# Printed by bty-flash-on-boot only after ``bty flash --yes`` has
+# returned 0; proves the dummy image landed on /dev/vda and the
+# completion-signal/reboot path is reachable.
+[[test.pxe.chain_markers]]
+key = "flash-complete"
+needle = "flash complete; rebooting"

@@ -228,19 +228,10 @@ jobs:
           name: bty-live-x86_64-netboot
           path: ~/system_imaging/disk/
 
-      - name: Decompress + convert server image to qcow2
-        # The PXE-test scripts expect ``bty-server-x86_64.qcow2`` at
-        # the artefact dir. The release job uploads the .img.zst
-        # (operator-shippable) form; reconstruct the qcow2 here.
-        run: |
-          cd ~/system_imaging/disk
-          ls -la
-          zstd -d bty-server-x86_64.img.zst
-          qemu-img convert -f raw -O qcow2 \
-              bty-server-x86_64.img bty-server-x86_64.qcow2
-          rm bty-server-x86_64.img
-          ls -la
-
+      # The cijoe ``pxe_customize_server`` step rehydrates
+      # ``bty-server-x86_64.qcow2`` from the .img.zst on its own
+      # when the qcow2 is missing, so no separate decompress step is
+      # needed here - same code path as a local ``make test-pxe``.
       - name: Run PXE chain test
         run: make test-pxe
 
