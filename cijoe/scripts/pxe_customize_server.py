@@ -34,6 +34,7 @@ Retargetable: False
 from __future__ import annotations
 
 import errno
+import hashlib
 import logging as log
 import shlex
 import shutil
@@ -115,13 +116,17 @@ def main(args, cijoe):
     nic_prefix = cfg.get("nic_prefix", "ens")
     files = workspace / "customize"
     files.mkdir()
+    # Auth is OS-PAM against the bty service user; no global token in
+    # the env file. The chain test seeds an active session row
+    # directly into ``state.db`` (below) so PUT /machines works
+    # without going through /auth/login (which would need the bty
+    # account to have a real PAM password set in the cooked image).
     (files / "default-bty-web").write_text(
-        "BTY_WEB_TOKEN={token}\n"
         "BTY_STATE_DIR=/var/lib/bty\n"
         "BTY_IMAGE_ROOT=/var/lib/bty/images\n"
         "BTY_BOOT_DIR=/var/lib/bty/boot\n"
         "BTY_WEB_HOST=0.0.0.0\n"
-        "BTY_WEB_PORT=8080\n".format(token=cfg["token"])
+        "BTY_WEB_PORT=8080\n"
     )
     # ``bind-dynamic`` recovers when interfaces come and go or change
     # addresses (as happens when systemd-networkd assigns the static
@@ -205,6 +210,44 @@ def main(args, cijoe):
         cmd.extend(["--copy-in", f"{boot_files / name}:/var/lib/bty/boot/"])
     cmd.extend(["--copy-in", f"{dummy_image}:/var/lib/bty/images/"])
 
+    # Seed an active session row into the qcow2's state.db so the
+    # chain test can hit PUT /machines without going through
+    # /auth/login (which would call PAM and need a real password set
+    # for the bty user). Plaintext token comes from cfg; we hash it
+    # the same way bty.web._db does (sha256 hex). Far-future expiry
+    # so the row is unconditionally valid for the test run.
+    token_hash = hashlib.sha256(cfg["token"].encode("utf-8")).hexdigest()
+    # Stage a tiny Python script as a file so virt-customize doesn't
+    # have to wrestle with shell-escaping the multi-line program.
+    (files / "seed-session.py").write_text(
+        "import sqlite3, sys\n"
+        "conn = sqlite3.connect('/var/lib/bty/state.db')\n"
+        "conn.executescript('''\n"
+        "CREATE TABLE IF NOT EXISTS sessions (\n"
+        "    token_hash   TEXT PRIMARY KEY,\n"
+        "    created_at   TEXT NOT NULL,\n"
+        "    expires_at   TEXT NOT NULL,\n"
+        "    last_used_at TEXT,\n"
+        "    label        TEXT\n"
+        ");\n"
+        "''')\n"
+        "conn.execute(\n"
+        "    'INSERT OR REPLACE INTO sessions(token_hash, created_at, '\n"
+        "    'expires_at, last_used_at, label) VALUES (?, ?, ?, NULL, ?)',\n"
+        f"    ('{token_hash}', '2026-01-01T00:00:00+00:00',\n"
+        "     '2099-01-01T00:00:00+00:00', 'pxe-chain-test'),\n"
+        ")\n"
+        "conn.commit()\n"
+        "conn.close()\n"
+    )
+
+    cmd.extend(
+        [
+            "--copy-in",
+            f"{files / 'seed-session.py'}:/tmp",
+        ]
+    )
+
     cmd.extend(
         [
             "--run-command",
@@ -214,6 +257,13 @@ def main(args, cijoe):
             "mv /etc/default/default-bty-web /etc/default/bty-web && "
             "chown root:bty /etc/default/bty-web && "
             "chmod 0640 /etc/default/bty-web && "
+            "install -d -o bty -g bty -m 0750 /var/lib/bty && "
+            "install -d -o bty -g bty -m 0750 /var/lib/bty/images && "
+            "install -d -o bty -g bty -m 0750 /var/lib/bty/boot && "
+            "python3 /tmp/seed-session.py && "
+            "rm /tmp/seed-session.py && "
+            "chown bty:bty /var/lib/bty/state.db && "
+            "chmod 0640 /var/lib/bty/state.db && "
             "chown -R bty:bty /var/lib/bty && "
             "systemctl enable systemd-networkd",
         ]

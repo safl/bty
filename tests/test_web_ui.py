@@ -1,6 +1,8 @@
-"""Tests for the bty-web browser UI (milestone 12 phase 1).
+"""Tests for the bty-web browser UI.
 
-Cookie-based auth flow, server-rendered pages via TestClient.
+Cookie-based auth flow, server-rendered pages via TestClient. The
+fixture seeds an active session row directly (skipping PAM); tests
+that exercise the login form mock ``pamela.authenticate`` per-test.
 """
 
 from __future__ import annotations
@@ -13,8 +15,13 @@ from fastapi.testclient import TestClient
 
 from bty.web._app import create_app
 from bty.web._auth import SESSION_COOKIE
+from bty.web._db import issue_session, open_db
 
-TEST_TOKEN = "ui-test-token"
+TEST_SERVICE_USER = "ui-test-user"
+
+# Mutated by the fixture so tests calling the API with
+# ``headers=AUTH`` get the freshly-seeded session token.
+AUTH: dict[str, str] = {}
 
 
 @pytest.fixture
@@ -22,21 +29,37 @@ def client(tmp_path: Path) -> Iterator[TestClient]:
     image_root = tmp_path / "images"
     image_root.mkdir()
     (image_root / "demo.qcow2").write_bytes(b"\0" * 16)
+    state = tmp_path / "state.db"
     app = create_app(
-        state_path=tmp_path / "state.db",
-        bearer_token=TEST_TOKEN,
+        state_path=state,
+        service_user=TEST_SERVICE_USER,
         image_root=image_root,
     )
+    with open_db(state) as conn:
+        token, _ = issue_session(conn, label="ui-pytest")
+    AUTH.clear()
+    AUTH["Authorization"] = f"Bearer {token}"
     # ``follow_redirects=False`` so we can assert on 303 hops.
-    with TestClient(app, follow_redirects=False) as c:
-        yield c
+    try:
+        with TestClient(app, follow_redirects=False) as c:
+            # Stash the seeded token on the client so ``_login`` can
+            # set the cookie without hitting /ui/login (which would
+            # call PAM against the test runner's user).
+            c.__dict__["_bty_session_token"] = token
+            yield c
+    finally:
+        AUTH.clear()
 
 
 def _login(client: TestClient) -> None:
-    r = client.post("/ui/login", data={"token": TEST_TOKEN})
-    assert r.status_code == 303
-    assert r.headers["location"] == "/ui/dashboard"
-    assert SESSION_COOKIE in client.cookies
+    """Set the session cookie so authed UI pages render.
+
+    We skip the real ``/ui/login`` POST so PAM never runs in tests;
+    tests that need to exercise the login flow itself mock
+    ``pamela.authenticate`` and call /ui/login explicitly.
+    """
+    token = client.__dict__["_bty_session_token"]
+    client.cookies.set(SESSION_COOKIE, token)
 
 
 # ---------- entry / redirects ----------------------------------------------
@@ -67,18 +90,29 @@ def test_ui_login_form_renders(client: TestClient) -> None:
     r = client.get("/ui/login")
     assert r.status_code == 200
     assert "Log in" in r.text
-    assert 'name="token"' in r.text
+    # Form prompts for the OS password of the service user; the
+    # username is fixed at server-startup so it isn't a form field.
+    assert 'name="password"' in r.text
+    assert TEST_SERVICE_USER in r.text
 
 
-def test_ui_login_invalid_token_re_renders_with_error(client: TestClient) -> None:
-    r = client.post("/ui/login", data={"token": "wrong"})
+def test_ui_login_invalid_password_re_renders_with_error(client: TestClient) -> None:
+    from unittest.mock import patch
+
+    import pamela
+
+    with patch("pamela.authenticate", side_effect=pamela.PAMError("bad password")):
+        r = client.post("/ui/login", data={"password": "wrong"})
     assert r.status_code == 200
-    assert "Invalid token" in r.text
+    assert "Invalid password" in r.text
     assert SESSION_COOKIE not in client.cookies
 
 
-def test_ui_login_valid_token_sets_cookie_and_redirects(client: TestClient) -> None:
-    r = client.post("/ui/login", data={"token": TEST_TOKEN})
+def test_ui_login_valid_password_sets_cookie_and_redirects(client: TestClient) -> None:
+    from unittest.mock import patch
+
+    with patch("pamela.authenticate", return_value=True):
+        r = client.post("/ui/login", data={"password": "hunter2"})
     assert r.status_code == 303
     assert r.headers["location"] == "/ui/dashboard"
     assert SESSION_COOKIE in client.cookies
@@ -111,7 +145,7 @@ def test_ui_machines_lists_known_records(client: TestClient) -> None:
     client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
         json={"image": "demo.qcow2", "provisioning_mode": "none"},
-        headers={"Authorization": f"Bearer {TEST_TOKEN}"},
+        headers=AUTH,
     )
     r = client.get("/ui/machines")
     assert r.status_code == 200
@@ -134,7 +168,7 @@ def test_ui_machine_detail_renders(client: TestClient) -> None:
     client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
         json={"image": "demo.qcow2", "provisioning_mode": "cloud-init"},
-        headers={"Authorization": f"Bearer {TEST_TOKEN}"},
+        headers=AUTH,
     )
     r = client.get("/ui/machines/aa:bb:cc:dd:ee:ff")
     assert r.status_code == 200
@@ -164,7 +198,7 @@ def test_ui_machine_upsert_via_form(client: TestClient) -> None:
     # The record landed.
     api = client.get(
         "/machines/aa:bb:cc:dd:ee:ff",
-        headers={"Authorization": f"Bearer {TEST_TOKEN}"},
+        headers=AUTH,
     )
     assert api.status_code == 200
     assert api.json()["image"] == "demo.qcow2"
@@ -188,7 +222,7 @@ def test_ui_machine_upsert_persists_boot_policy_flash(client: TestClient) -> Non
     assert r.status_code == 303
     api = client.get(
         "/machines/aa:bb:cc:dd:ee:ff",
-        headers={"Authorization": f"Bearer {TEST_TOKEN}"},
+        headers=AUTH,
     )
     assert api.json()["boot_policy"] == "flash"
 
@@ -212,7 +246,7 @@ def test_ui_machine_detail_renders_boot_policy_dropdown(client: TestClient) -> N
     client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
         json={"image": "demo.qcow2", "boot_policy": "flash"},
-        headers={"Authorization": f"Bearer {TEST_TOKEN}"},
+        headers=AUTH,
     )
     r = client.get("/ui/machines/aa:bb:cc:dd:ee:ff")
     assert r.status_code == 200
@@ -258,36 +292,28 @@ def test_ui_settings_page_renders(client: TestClient) -> None:
     r = client.get("/ui/settings")
     assert r.status_code == 200
     body = r.text
-    assert "Bearer token" in body
+    # Settings page advertises both the auth panel + the PXE panel.
+    assert "Authentication" in body
+    assert "passwd" in body  # the "rotate the OS password" hint
     assert "PXE proxy-DHCP" in body
     # Forms post to the right routes.
-    assert 'action="/ui/settings/rotate-token"' in body
+    assert 'action="/ui/settings/revoke-sessions"' in body
     assert 'action="/ui/settings/pxe-activate"' in body
 
 
-def test_ui_settings_rotate_token_shows_new_token_in_flash(client: TestClient) -> None:
-    from unittest.mock import patch
-
+def test_ui_settings_revoke_all_sessions_kills_active_logins(client: TestClient) -> None:
+    """``Revoke all sessions`` empties the sessions table; the cookie
+    presented next becomes a 401 / redirect to /ui/login."""
     _login(client)
-    with patch("bty.web._sysconfig.rotate_token", return_value="new-token-abc"):
-        r = client.post("/ui/settings/rotate-token")
+    # Sanity: cookie works.
+    assert client.get("/machines").status_code == 200
+    r = client.post("/ui/settings/revoke-sessions")
     assert r.status_code == 200
-    assert "new-token-abc" in r.text
-    # Warning flash about needing restart.
-    assert "restart" in r.text.lower()
-
-
-def test_ui_settings_rotate_token_failure_shows_danger_flash(client: TestClient) -> None:
-    from unittest.mock import patch
-
-    from bty.web._sysconfig import SysConfigError
-
-    _login(client)
-    with patch("bty.web._sysconfig.rotate_token", side_effect=SysConfigError("sudo blew up")):
-        r = client.post("/ui/settings/rotate-token")
-    assert r.status_code == 200
-    assert "Token rotation failed" in r.text
-    assert "sudo blew up" in r.text
+    assert "Revoked" in r.text
+    # The cookie's session row is gone now: API + bearer header both
+    # 401 (the cookie's plaintext is no longer in the DB).
+    assert client.get("/machines").status_code == 401
+    assert client.get("/machines", headers=AUTH).status_code == 401
 
 
 def test_ui_settings_pxe_activate_invokes_helper(client: TestClient) -> None:
@@ -341,12 +367,12 @@ def test_ui_machines_list_shows_boot_policy_badge(client: TestClient) -> None:
     client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
         json={"image": "demo.qcow2", "boot_policy": "flash"},
-        headers={"Authorization": f"Bearer {TEST_TOKEN}"},
+        headers=AUTH,
     )
     client.put(
         "/machines/11:22:33:44:55:66",
         json={"image": "demo.qcow2", "boot_policy": "local"},
-        headers={"Authorization": f"Bearer {TEST_TOKEN}"},
+        headers=AUTH,
     )
     r = client.get("/ui/machines")
     assert r.status_code == 200
@@ -364,13 +390,13 @@ def test_ui_machine_delete_via_form(client: TestClient) -> None:
     client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
         json={"image": "demo.qcow2", "provisioning_mode": "none"},
-        headers={"Authorization": f"Bearer {TEST_TOKEN}"},
+        headers=AUTH,
     )
     r = client.post("/ui/machines/aa:bb:cc:dd:ee:ff/delete")
     assert r.status_code == 303
     api = client.get(
         "/machines/aa:bb:cc:dd:ee:ff",
-        headers={"Authorization": f"Bearer {TEST_TOKEN}"},
+        headers=AUTH,
     )
     assert api.status_code == 404
 

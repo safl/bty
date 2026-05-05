@@ -22,7 +22,6 @@ from bty.web._sysconfig import (
     activate_pxe,
     list_interfaces,
     pxe_active,
-    rotate_token,
 )
 
 # ---------- list_interfaces -------------------------------------------------
@@ -76,40 +75,6 @@ def test_pxe_active_returns_none_on_malformed(tmp_path: Path) -> None:
     p = tmp_path / "active.conf"
     p.write_text("# only comments\n")
     assert pxe_active(active_path=p) is None
-
-
-# ---------- rotate_token ---------------------------------------------------
-
-
-def test_rotate_token_returns_helper_stdout() -> None:
-    completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="abc123\n", stderr="")
-    with patch("bty.web._sysconfig.subprocess.run", return_value=completed) as mock_run:
-        assert rotate_token() == "abc123"
-    args, kwargs = mock_run.call_args
-    cmd = args[0] if args else kwargs.get("args")
-    # Must invoke sudo with the canonical helper path.
-    assert cmd[:2] == ["sudo", "-n"]
-    assert cmd[2].endswith("/bty-web-rotate-token")
-
-
-def test_rotate_token_empty_output_raises() -> None:
-    completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="\n", stderr="")
-    with (
-        patch("bty.web._sysconfig.subprocess.run", return_value=completed),
-        pytest.raises(SysConfigError, match="empty"),
-    ):
-        rotate_token()
-
-
-def test_rotate_token_helper_failure_wraps_as_sysconfig_error() -> None:
-    err = subprocess.CalledProcessError(
-        returncode=1, cmd=["sudo"], stderr="sudo: a password is required\n"
-    )
-    with (
-        patch("bty.web._sysconfig.subprocess.run", side_effect=err),
-        pytest.raises(SysConfigError, match="exited 1"),
-    ):
-        rotate_token()
 
 
 # ---------- activate_pxe ---------------------------------------------------

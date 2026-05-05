@@ -25,7 +25,6 @@ from pathlib import Path
 
 PXE_ACTIVE_PATH = Path("/etc/dnsmasq.d/bty-pxe-active.conf")
 SYSNET_PATH = Path("/sys/class/net")
-ROTATE_HELPER = "/usr/local/sbin/bty-web-rotate-token"
 ACTIVATE_PXE_HELPER = "/usr/local/sbin/bty-web-activate-pxe"
 
 # Per the helper's own validation; mirrored here for early rejection.
@@ -79,33 +78,6 @@ def pxe_active(active_path: Path = PXE_ACTIVE_PATH) -> PxeConfig | None:
             interface=iface_match.group(1).strip(), subnet=subnet_match.group(1).strip()
         )
     return None
-
-
-def rotate_token() -> str:
-    """Invoke the rotation helper; return the new token on success.
-
-    Does NOT restart bty-web - by design, the operator copies the
-    new token from the UI before triggering a restart so they can
-    log back in afterwards.
-    """
-    try:
-        result = subprocess.run(
-            ["sudo", "-n", ROTATE_HELPER],
-            capture_output=True,
-            text=True,
-            check=True,
-            timeout=15,
-        )
-    except subprocess.CalledProcessError as exc:
-        raise SysConfigError(
-            f"rotate-token helper exited {exc.returncode}: {(exc.stderr or '').strip()}"
-        ) from exc
-    except (subprocess.TimeoutExpired, FileNotFoundError) as exc:
-        raise SysConfigError(f"rotate-token helper failed: {exc}") from exc
-    new_token = result.stdout.strip()
-    if not new_token:
-        raise SysConfigError("rotate-token helper produced an empty token")
-    return new_token
 
 
 def activate_pxe(interface: str, subnet: str) -> None:

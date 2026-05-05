@@ -24,6 +24,11 @@ web = [
     "jinja2>=3.1",
     # Required by FastAPI's ``Form()`` parsing for the bty-web UI.
     "python-multipart>=0.0.9",
+    # PAM password verification for /auth/login. Pure-Python ctypes
+    # wrapper around libpam (used by JupyterHub); libpam-modules ships
+    # the setuid unix_chkpwd helper that does the privileged shadow
+    # read so the bty service user stays unprivileged.
+    "pamela>=1.1",
 ]
 all = [
     "textual>=0.80",
@@ -31,6 +36,7 @@ all = [
     "uvicorn[standard]>=0.30",
     "jinja2>=3.1",
     "python-multipart>=0.0.9",
+    "pamela>=1.1",
 ]
 
 [project.scripts]
@@ -73,6 +79,13 @@ python_version = "3.11"
 strict = true
 explicit_package_bases = true
 mypy_path = "src"
+
+[[tool.mypy.overrides]]
+# pamela is a pure-Python ctypes wrapper around libpam (no py.typed
+# marker shipped). We only call ``authenticate``; the lack of stubs
+# is fine.
+module = ["pamela", "pamela.*"]
+ignore_missing_imports = true
 
 [tool.pyright]
 include = ["src", "tests", "docs/tooling/src"]

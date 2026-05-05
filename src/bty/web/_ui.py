@@ -33,11 +33,8 @@ from jinja2 import Environment
 import bty
 from bty import images as bty_images
 from bty.web import _db, _releases, _sysconfig
-from bty.web._auth import SESSION_COOKIE, token_matches
+from bty.web._auth import SESSION_COOKIE, authenticate_session
 from bty.web._models import BOOT_POLICIES, PROVISIONING_MODES
-
-# How long the browser cookie lives.
-COOKIE_MAX_AGE_SECONDS = 12 * 60 * 60
 
 
 class NotAuthenticated(Exception):
@@ -56,22 +53,24 @@ def register_ui_routes(
     *,
     jinja: Environment,
     state_path: Path,
-    expected_token: str,
+    service_user: str,
     image_root: Path,
     boot_root: Path,
     publish_machines_changed: Callable[[], None] = lambda: None,
 ) -> None:
     """Attach the ``/ui`` HTML routes (and exception handler) to ``app``.
 
-    ``publish_machines_changed`` is invoked after any UI form mutates a
-    machine record, so SSE subscribers see the change immediately. The
-    default no-op makes this module testable in isolation; the real app
-    passes the bus-publishing callable.
+    ``service_user`` is the Linux account whose OS password gates
+    ``/ui/login``. ``publish_machines_changed`` is invoked after any
+    UI form mutates a machine record, so SSE subscribers see the
+    change immediately. The default no-op makes this module testable
+    in isolation; the real app passes the bus-publishing callable.
     """
 
     def render(name: str, request: Request, **ctx: Any) -> HTMLResponse:
         ctx.setdefault("version", bty.__version__)
-        ctx.setdefault("logged_in", _request_is_authed(request, expected_token))
+        ctx.setdefault("logged_in", _request_is_authed(request, state_path))
+        ctx.setdefault("service_user", service_user)
         ctx.setdefault("flash", None)
         ctx.setdefault("flash_kind", None)
         template = jinja.get_template(name)
@@ -83,7 +82,7 @@ def register_ui_routes(
         return RedirectResponse("/ui/login", status_code=status.HTTP_303_SEE_OTHER)
 
     def require_ui_auth(cookie_token: _UICookie = None) -> None:
-        if not cookie_token or not token_matches(expected_token, cookie_token):
+        if not cookie_token or not authenticate_session(state_path, cookie_token):
             raise NotAuthenticated
 
     # ----- entry / auth ----------------------------------------------------
@@ -99,19 +98,32 @@ def register_ui_routes(
     @app.post("/ui/login", include_in_schema=False)
     def ui_login_submit(
         request: Request,
-        token: Annotated[str, Form()],
+        password: Annotated[str, Form()],
     ) -> Response:
-        if not token_matches(expected_token, token):
+        # Lazily import pamela so missing libpam doesn't break module
+        # import - same pattern as ``/auth/login`` in ``_app.py``.
+        import pamela
+
+        try:
+            pamela.authenticate(service_user, password, service="login")
+        except pamela.PAMError:
             return render(
                 "ui/login.html",
                 request,
-                error="Invalid token; check BTY_WEB_TOKEN on the server.",
+                error=f"Invalid password for {service_user!r}.",
             )
+        # Session token + cookie expiry come from the same source; the
+        # browser cookie inherits the DB row's TTL.
+        with _db.open_db(state_path) as conn:
+            ua = request.headers.get("user-agent")
+            label = f"ui:{ua[:80]}" if ua else "ui:unknown"
+            token, expires = _db.issue_session(conn, label=label)
+        max_age = max(0, int((expires - datetime.now(UTC)).total_seconds()))
         response = RedirectResponse("/ui/dashboard", status_code=status.HTTP_303_SEE_OTHER)
         response.set_cookie(
             key=SESSION_COOKIE,
             value=token,
-            max_age=COOKIE_MAX_AGE_SECONDS,
+            max_age=max_age,
             httponly=True,
             samesite="strict",
             secure=request.url.scheme == "https",
@@ -119,7 +131,10 @@ def register_ui_routes(
         return response
 
     @app.post("/ui/logout", include_in_schema=False)
-    def ui_logout() -> Response:
+    def ui_logout(cookie_token: _UICookie = None) -> Response:
+        if cookie_token:
+            with _db.open_db(state_path) as conn:
+                _db.revoke_session(conn, cookie_token)
         response = RedirectResponse("/ui/login", status_code=status.HTTP_303_SEE_OTHER)
         response.delete_cookie(SESSION_COOKIE)
         return response
@@ -327,24 +342,19 @@ def register_ui_routes(
         return _render_settings_page(request)
 
     @app.post(
-        "/ui/settings/rotate-token",
+        "/ui/settings/revoke-sessions",
         include_in_schema=False,
         dependencies=[Depends(require_ui_auth)],
     )
-    def ui_settings_rotate_token(request: Request) -> HTMLResponse:
-        try:
-            new_token = _sysconfig.rotate_token()
-        except _sysconfig.SysConfigError as exc:
-            return _render_settings_page(
-                request, flash=f"Token rotation failed: {exc}", flash_kind="danger"
-            )
+    def ui_settings_revoke_sessions(request: Request) -> HTMLResponse:
+        with _db.open_db(state_path) as conn:
+            count = _db.revoke_all_sessions(conn)
         return _render_settings_page(
             request,
-            new_token=new_token,
             flash=(
-                "New token written to /etc/default/bty-web. The change takes "
-                "effect after the next bty-web restart - copy the value below "
-                "first, then restart the service (or reboot)."
+                f"Revoked {count} active session(s). All clients (browsers + "
+                f"CLI) need to log in again. Your current cookie was revoked "
+                f"too - the next click will redirect you to /ui/login."
             ),
             flash_kind="warning",
         )
@@ -404,12 +414,12 @@ def register_ui_routes(
 # ---------- helpers ---------------------------------------------------------
 
 
-def _request_is_authed(request: Request, expected_token: str) -> bool:
+def _request_is_authed(request: Request, state_path: Path) -> bool:
     """Used by the layout template to show/hide the nav and logout button."""
     cookie = request.cookies.get(SESSION_COOKIE)
     if cookie is None:
         return False
-    return token_matches(expected_token, cookie)
+    return authenticate_session(state_path, cookie)
 
 
 def _row_to_dict(row: Any) -> dict[str, Any]:

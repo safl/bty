@@ -1,29 +1,33 @@
 """FastAPI application for bty-web.
 
-``create_app(state_path, bearer_token, image_root)`` returns a fully
+``create_app(state_path, service_user, image_root)`` returns a fully
 wired FastAPI instance. Tests construct one with a tmp_path SQLite +
-test token; ``main()`` (in :mod:`bty.web.__init__`) builds one from
-environment + defaults and hands it to uvicorn.
+a fixture service user (PAM gets monkeypatched in those tests).
+``main()`` (in :mod:`bty.web.__init__`) builds one from environment
++ defaults and hands it to uvicorn.
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
+import logging as log
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
+from fastapi import Cookie, Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader, select_autoescape
+from pydantic import BaseModel, Field
 
 import bty
 from bty import images
 from bty.web import _db, _models, _ui
-from bty.web._auth import make_token_dep
+from bty.web._auth import SESSION_COOKIE, make_token_dep
 from bty.web._events import MachineEvent, MachineEventBus, sse_format
 from bty.web._workflow import WorkflowRunner
 
@@ -31,22 +35,36 @@ TEMPLATES_DIR = Path(__file__).parent / "_templates"
 STATIC_DIR = Path(__file__).parent / "_static"
 
 
+class _LoginIn(BaseModel):
+    password: str = Field(..., min_length=1)
+    label: str | None = Field(default=None, max_length=120)
+
+
+class _LoginOut(BaseModel):
+    token: str
+    expires_at: datetime
+
+
 def create_app(
     *,
     state_path: Path,
-    bearer_token: str,
+    service_user: str,
     image_root: Path | None = None,
     boot_root: Path | None = None,
 ) -> FastAPI:
     """Build the FastAPI app. All config flows through this function.
 
-    Production callers pass values resolved from the environment;
-    tests pass tmp_path + a test token. ``boot_root`` is where the
-    live-env artifacts (kernel + initrd + squashfs) live for the
-    ``GET /boot/{name}`` endpoint; defaults to ``state_path.parent /
-    "boot"`` (i.e. ``/var/lib/bty/boot`` on a stock appliance).
+    ``service_user`` is the Linux account whose OS password gates
+    ``POST /auth/login`` - typically the user bty-web is running as
+    (resolved from ``geteuid`` in :func:`bty.web.main`). Tests pass a
+    fixture name and monkeypatch ``pamela.authenticate``.
+
+    ``boot_root`` is where the live-env artifacts (kernel + initrd +
+    squashfs) live for the ``GET /boot/{name}`` endpoint; defaults to
+    ``state_path.parent / "boot"`` (i.e. ``/var/lib/bty/boot`` on a
+    stock appliance).
     """
-    require_token = make_token_dep(bearer_token)
+    require_token = make_token_dep(state_path)
     resolved_image_root: Path = image_root or images.default_image_root()
     resolved_boot_root: Path = boot_root or (state_path.parent / "boot")
     event_bus = MachineEventBus()
@@ -91,6 +109,58 @@ def create_app(
         state_path=state_path,
         publish_machines_changed=publish_machines_changed,
     )
+
+    # ----- Auth (login / logout) -----------------------------------------
+
+    @app.post("/auth/login", response_model=_LoginOut)
+    def auth_login(body: _LoginIn) -> _LoginOut:
+        # Imported lazily so a missing libpam doesn't crash module
+        # import (the rest of bty-web doesn't need it). pamela is in
+        # the ``[web]`` extras alongside fastapi.
+        import pamela
+
+        try:
+            pamela.authenticate(service_user, body.password, service="login")
+        except pamela.PAMError as exc:
+            log.info("auth.login.failure reason=invalid_credentials detail=%r", str(exc))
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="invalid credentials",
+                headers={"WWW-Authenticate": "Bearer"},
+            ) from None
+        with _db.open_db(state_path) as conn:
+            token, expires = _db.issue_session(conn, label=body.label)
+        log.info("auth.login.success label=%r", body.label)
+        return _LoginOut(token=token, expires_at=expires)
+
+    _bearer = HTTPBearer(auto_error=False)
+    _bearer_dep = Depends(_bearer)
+    _cookie_dep = Cookie(default=None, alias=SESSION_COOKIE)
+
+    @app.post("/auth/logout", status_code=status.HTTP_204_NO_CONTENT)
+    def auth_logout(
+        credentials: HTTPAuthorizationCredentials | None = _bearer_dep,
+        cookie_token: str | None = _cookie_dep,
+    ) -> Response:
+        # Same extraction logic as the auth dependency: header first,
+        # cookie second. Whichever the caller used is the one we revoke.
+        token = None
+        if credentials is not None and credentials.scheme.lower() == "bearer":
+            token = credentials.credentials
+        elif cookie_token:
+            token = cookie_token
+        if token is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="missing bearer token",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        with _db.open_db(state_path) as conn:
+            _db.revoke_session(conn, token)
+        log.info("auth.logout")
+        response = Response(status_code=status.HTTP_204_NO_CONTENT)
+        response.delete_cookie(SESSION_COOKIE)
+        return response
 
     # ----- Open routes (no auth) ------------------------------------------
 
@@ -382,7 +452,7 @@ def create_app(
         app,
         jinja=jinja,
         state_path=state_path,
-        expected_token=bearer_token,
+        service_user=service_user,
         image_root=resolved_image_root,
         boot_root=resolved_boot_root,
         publish_machines_changed=publish_machines_changed,

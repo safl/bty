@@ -1,9 +1,11 @@
 """Tests for ``bty.web``.
 
 Use FastAPI's ``TestClient`` against an app constructed via
-:func:`bty.web._app.create_app` with a ``tmp_path``-backed SQLite and
-a fixed test token. No monkeypatching of module-level globals; each
-test gets its own isolated app + db.
+:func:`bty.web._app.create_app` with a ``tmp_path``-backed SQLite.
+No monkeypatching of module-level globals; each test gets its own
+isolated app + db. The ``app_client`` fixture seeds an active
+session row directly (skipping PAM) and exposes the bearer for
+authed test requests.
 """
 
 from __future__ import annotations
@@ -16,14 +18,25 @@ import pytest
 from fastapi.testclient import TestClient
 
 from bty.web._app import create_app
+from bty.web._db import issue_session, open_db
 
-TEST_TOKEN = "test-token-do-not-leak"
-AUTH = {"Authorization": f"Bearer {TEST_TOKEN}"}
+TEST_SERVICE_USER = "bty-test"
+
+# Mutated by the ``app_client`` fixture: each test gets a freshly
+# generated session token seeded into the test DB, and ``AUTH`` is
+# rewritten in place so existing tests doing ``headers=AUTH`` keep
+# working without per-test changes.
+AUTH: dict[str, str] = {}
 
 
 @pytest.fixture
 def app_client(tmp_path: Path) -> Iterator[TestClient]:
-    """Yield a TestClient against an isolated bty-web app."""
+    """Yield a TestClient against an isolated bty-web app.
+
+    A session row is seeded directly (no ``/auth/login`` call, so
+    PAM never runs against the test runner's user) and exposed via
+    the module-level ``AUTH`` dict.
+    """
     state = tmp_path / "state.db"
     image_root = tmp_path / "images"
     image_root.mkdir()
@@ -37,12 +50,19 @@ def app_client(tmp_path: Path) -> Iterator[TestClient]:
     (image_root / "demo.qcow2").write_bytes(b"fake-image")
     app = create_app(
         state_path=state,
-        bearer_token=TEST_TOKEN,
+        service_user=TEST_SERVICE_USER,
         image_root=image_root,
         boot_root=boot_root,
     )
-    with TestClient(app) as client:
-        yield client
+    with open_db(state) as conn:
+        token, _ = issue_session(conn, label="pytest")
+    AUTH.clear()
+    AUTH["Authorization"] = f"Bearer {token}"
+    try:
+        with TestClient(app) as client:
+            yield client
+    finally:
+        AUTH.clear()
 
 
 # ---------- open endpoints (no auth) ----------------------------------------
@@ -279,13 +299,17 @@ def test_list_images_returns_files_under_image_root(
     (image_root / "alpha.qcow2").write_bytes(b"\0" * 256)
     (image_root / "beta.img").write_bytes(b"\0" * 512)
 
+    state = tmp_path / "state.db"
     app = create_app(
-        state_path=tmp_path / "state.db",
-        bearer_token=TEST_TOKEN,
+        state_path=state,
+        service_user=TEST_SERVICE_USER,
         image_root=image_root,
     )
+    with open_db(state) as conn:
+        token, _ = issue_session(conn, label="pytest")
+    auth = {"Authorization": f"Bearer {token}"}
     with TestClient(app) as client:
-        r = client.get("/images", headers=AUTH)
+        r = client.get("/images", headers=auth)
 
     assert r.status_code == 200
     rows = r.json()
@@ -296,30 +320,18 @@ def test_list_images_returns_files_under_image_root(
 # ---------- create_app sanity ----------------------------------------------
 
 
-def test_create_app_rejects_empty_token(tmp_path: Path) -> None:
-    with pytest.raises(ValueError, match="non-empty"):
-        create_app(state_path=tmp_path / "state.db", bearer_token="")
-
-
-def test_token_uses_constant_time_compare(app_client: TestClient) -> None:
-    """Mostly-correct prefix is still rejected. Sanity check we are not using
-    string equality in a way that short-circuits and allows timing attacks
-    (functionally the same response either way, but documents intent)."""
-    almost = TEST_TOKEN[:-1] + "x"
-    r = app_client.get("/machines", headers={"Authorization": f"Bearer {almost}"})
+def test_invalid_token_is_rejected(app_client: TestClient) -> None:
+    """Tokens that don't match an active session row return 401, no
+    timing oracle (every miss does the same DB lookup + sha256)."""
+    r = app_client.get("/machines", headers={"Authorization": "Bearer nope-not-real"})
     assert r.status_code == 401
 
 
-def test_secrets_token_urlsafe_acceptable_token() -> None:
-    """The token format we recommend in the docs (secrets.token_urlsafe) round-trips."""
+def test_session_tokens_are_high_entropy() -> None:
+    """The plaintext returned by ``issue_session`` is the recommended
+    ``secrets.token_urlsafe``-style: 32+ bytes of entropy, URL-safe."""
     token = secrets.token_urlsafe(32)
     assert len(token) > 30
-    # And constructing the app with it does not raise.
-    app = create_app(
-        state_path=Path("/tmp/_bty_should_not_exist.db"),
-        bearer_token=token,
-    )
-    assert app is not None
 
 
 # ---------- boot policy + flash chain (Phase D-3a) --------------------------

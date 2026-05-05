@@ -6,28 +6,19 @@
 <!-- ----------------------------------------------------------------- -->
 <div class="card mb-4">
     <div class="card-body">
-        <h2 class="h5 mb-3">Bearer token</h2>
+        <h2 class="h5 mb-3">Authentication</h2>
         <p class="text-muted">
-            Rotation generates a fresh URL-safe random token and writes it to
-            <code>/etc/default/bty-web</code>. The change takes effect on the
-            next <code>bty-web</code> restart - until then the current token
-            keeps working. Copy the new value before restarting the service.
+            bty-web is gated by the OS password of the
+            <code>{{ service_user }}</code> account. To rotate the credential,
+            run <code>sudo passwd {{ service_user }}</code> on the server.
+            Existing sessions stay valid until they expire or you log them out
+            below.
         </p>
-        {% if new_token %}
-        <div class="alert alert-info">
-            <strong>New token:</strong>
-            <code class="user-select-all">{{ new_token }}</code>
-            <div class="mt-2 small text-muted">
-                Save this somewhere, then run <code>sudo systemctl restart bty-web</code>
-                on the server (or reboot). Your current session will still work
-                until the restart, after which you'll need to log in with the
-                new token.
-            </div>
-        </div>
-        {% endif %}
-        <form action="/ui/settings/rotate-token" method="post"
-              onsubmit="return confirm('Rotate the bearer token? You will need to log back in with the new value after the next service restart.');">
-            <button type="submit" class="btn btn-warning">Rotate token</button>
+        <form action="/ui/settings/revoke-sessions" method="post"
+              onsubmit="return confirm('Revoke every active session (CLI tokens + browsers)? Everyone will need to log in again.');">
+            <button type="submit" class="btn btn-warning">
+                Revoke all sessions
+            </button>
         </form>
     </div>
 </div>
