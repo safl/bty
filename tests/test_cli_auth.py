@@ -1,9 +1,11 @@
-"""Tests for ``bty login`` and ``bty logout``.
+"""Tests for ``bty-cli login`` and ``bty-cli logout``.
 
-These exercise the CLI's HTTP roundtrip against a tmp_path-backed
+These exercise the client's HTTP roundtrip against a tmp_path-backed
 ``bty-web`` app: PAM is mocked, the session token comes back from a
-real /auth/login, and the CLI writes / deletes a real token file
-under a redirected ``$HOME``.
+real /auth/login, and the client writes / deletes a real token file
+under a redirected ``$HOME``. The ``bty-cli`` binary is a sibling to
+the local-flashing ``bty`` command - separate console-script entries
+sharing the same wheel.
 """
 
 from __future__ import annotations
@@ -18,7 +20,7 @@ from unittest.mock import patch
 import pytest
 import uvicorn
 
-from bty.cli import main as cli_main
+from bty.client import main as cli_main
 from bty.web._app import create_app
 
 TEST_SERVICE_USER = "cli-auth-test"

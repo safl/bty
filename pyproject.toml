@@ -41,6 +41,7 @@ all = [
 
 [project.scripts]
 bty = "bty.cli:main"
+bty-cli = "bty.client:main"
 bty-tui = "bty.tui:main"
 bty-web = "bty.web:main"
 
