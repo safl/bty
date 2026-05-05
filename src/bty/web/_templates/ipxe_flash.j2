@@ -8,6 +8,12 @@
 # runs ``bty flash --yes``, signals completion, and reboots.
 
 set bty-base http://{{ host }}
-kernel ${bty-base}/boot/bty-live-x86_64.vmlinuz boot=live components quiet bty.server=${bty-base} bty.mac={{ mac }} bty.image_url=${bty-base}/images/{{ machine.image }} bty.provisioning={{ machine.provisioning_mode }}
+# fetch= tells live-boot's initramfs to download the squashfs over
+# HTTP and mount it as the rootfs (no local disk needed).
+# console=tty0 console=ttyS0,115200 sends kernel + systemd messages
+# to both the screen and the serial port. The serial mirror is
+# essential for headless bare-metal flashing (operator watches via
+# IPMI / serial console) and for the PXE chain test.
+kernel ${bty-base}/boot/bty-live-x86_64.vmlinuz boot=live fetch=${bty-base}/boot/bty-live-x86_64.squashfs components quiet console=tty0 console=ttyS0,115200 bty.server=${bty-base} bty.mac={{ mac }} bty.image_url=${bty-base}/images/{{ machine.image }} bty.provisioning={{ machine.provisioning_mode }}
 initrd ${bty-base}/boot/bty-live-x86_64.initrd
 boot

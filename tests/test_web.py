@@ -400,6 +400,10 @@ def test_pxe_flash_policy_returns_chain_with_args(app_client: TestClient) -> Non
     assert "set bty-base http://bty.local:8080" in body
     assert "kernel ${bty-base}/boot/bty-live-x86_64.vmlinuz" in body
     assert "initrd ${bty-base}/boot/bty-live-x86_64.initrd" in body
+    # live-boot needs ``fetch=`` to know where to grab the squashfs.
+    assert "fetch=${bty-base}/boot/bty-live-x86_64.squashfs" in body
+    # Console mirror to ttyS0 so headless / IPMI / test serial works.
+    assert "console=ttyS0,115200" in body
     # Cmdline params: live env's bty-flash-on-boot reads these.
     assert "bty.server=${bty-base}" in body
     assert "bty.mac=aa:bb:cc:dd:ee:ff" in body
