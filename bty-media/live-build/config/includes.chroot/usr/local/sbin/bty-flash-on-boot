@@ -24,13 +24,28 @@ import json
 import shlex
 import subprocess
 import sys
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
 CMDLINE = Path("/proc/cmdline")
-LOCAL_IMAGE = Path("/var/tmp/bty-flash-on-boot.image")
+LOCAL_IMAGE_DIR = Path("/var/tmp")
 
 REQUIRED = ("bty.server", "bty.mac", "bty.image_url")
+
+
+def local_image_path(image_url: str) -> Path:
+    """Pick a local cache path that preserves the URL's filename.
+
+    ``bty.images.detect_format()`` keys off the file extension
+    (.qcow2, .img, .img.zst) so the on-disk name has to keep it -
+    a fixed ``bty-flash-on-boot.image`` would always fail
+    validation.
+    """
+    parsed_name = Path(urllib.parse.urlparse(image_url).path).name
+    if not parsed_name:
+        parsed_name = "bty-flash-on-boot.img"
+    return LOCAL_IMAGE_DIR / parsed_name
 
 
 def cmdline_args() -> dict[str, str]:
@@ -117,7 +132,8 @@ def main() -> int:
         flush=True,
     )
 
-    download(image_url, LOCAL_IMAGE)
+    local_image = local_image_path(image_url)
+    download(image_url, local_image)
     target = pick_target()
     print(f"bty-flash-on-boot: target disk {target}", flush=True)
 
@@ -126,7 +142,7 @@ def main() -> int:
             "bty",
             "flash",
             "--image",
-            str(LOCAL_IMAGE),
+            str(local_image),
             "--target",
             target,
             "--provision",
