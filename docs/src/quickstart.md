@@ -15,9 +15,8 @@ Prerequisites on the build host: `qemu-system-x86_64`, `qemu-img`,
 From the repo root:
 
 ```bash
-cd bty-media
-make deps      # one-time: pipx install cijoe
-make build     # 15-25 min with KVM
+make media-deps           # one-time: pipx install cijoe
+make build VARIANT=usb    # 15-25 min with KVM
 ```
 
 The build downloads the Debian 13 cloud image, drives cloud-init in

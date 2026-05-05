@@ -1,6 +1,6 @@
 # bty-media
 
-Builds the bty appliance images. Three variants:
+Source content for the bty appliance images. Three variants:
 
 - **USB live image** (`VARIANT=usb`) - bootable USB carrying the bty
   runtime and a bundled image set, for the direct-flash workflow.
@@ -11,26 +11,19 @@ Builds the bty appliance images. Three variants:
   squashfs that PXE clients chain into. Carries the bty CLI plus a
   `bty-flash-on-boot.service` oneshot that reads `bty.*` parameters
   from `/proc/cmdline`, fetches the assigned image, runs `bty flash`,
-  and reboots. The iPXE chain that supplies the cmdline params is
-  built in Phase D-3 (server side).
+  and reboots.
 
-This directory is not a Python package. It mirrors the `jkab`
-(jellyfin-kiosk-appliance-builder) pattern: cijoe-driven, Debian
-cloud-image based, Makefile-orchestrated, with `configs/` per variant
-and `rootfs/` files inlined into the image as cloud-init `write_files`.
+This directory holds the **content** baked into the images: cloud-init
+base templates, rootfs trees that live-build / cloud-init fold in,
+and the live-build config tree. The cijoe **orchestration** (configs,
+tasks, scripts) that consumes this content lives at `cijoe/` at the
+repo root.
+
+Operators drive everything via the top-level Makefile:
+`make build VARIANT=usb|server|live`.
 
 ## Layout
 
-- `Makefile` - entry points (`make deps`, `make build`, `make clean`).
-  Dispatches to `tasks/build.yaml` (usb / server) or `tasks/live.yaml`
-  (live) based on `VARIANT`.
-- `configs/<variant>.toml` - cijoe config per variant
-  (`usb.toml`, `server.toml`, `live.toml`).
-- `tasks/build.yaml` - usb / server pipeline (cloud-init bake in QEMU,
-  emits `.img.zst`).
-- `tasks/live.yaml` - live pipeline (live-build → kernel + initrd +
-  squashfs).
-- `scripts/` - Python steps invoked by either pipeline.
 - `auxiliary/cloudinit-base-<variant>.user` - per-variant cloud-init
   base template (usb / server only).
 - `auxiliary/cloudinit-metadata.meta` - shared cloud-init metadata.
@@ -46,8 +39,10 @@ and `rootfs/` files inlined into the image as cloud-init `write_files`.
 
 ## Pipeline
 
+From the repo root:
+
 ```
-make build [VARIANT=usb|server]
+make build VARIANT=usb|server|live
 ```
 
 runs `cijoe tasks/build.yaml --monitor -c configs/$(VARIANT).toml`,
@@ -89,7 +84,7 @@ Live variant:
   privileged; CI runners have NOPASSWD by default
 
 All variants:
-- `cijoe` (install via `make deps`, which runs `pipx install cijoe`)
+- `cijoe` (install via `make media-deps`, which runs `pipx install cijoe`)
 
 ## Output
 

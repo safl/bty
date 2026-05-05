@@ -11,7 +11,7 @@ mksquashfs, and mkinitramfs directly on the build host, no QEMU.
 Workflow:
 
 1. Copy ``bty-media/live-build/`` (the live-build config tree) into
-   a fresh ``_build/live/`` working dir.
+   a fresh ``cijoe/_build/live/`` working dir.
 2. Run ``sudo lb clean --all`` (idempotency) then ``sudo lb build``.
    live-build needs root for chroot operations; the build host (CI
    runner or local dev) must have passwordless sudo.
@@ -19,6 +19,11 @@ Workflow:
    to the ``publish.dir`` from the cijoe config, renamed to
    ``bty-live-x86_64.{vmlinuz,initrd,squashfs}``.
 4. Write a single sha256 manifest covering all three artifacts.
+
+The cwd at run time is ``cijoe/`` (the Makefile cd's there before
+invoking cijoe), so the bty-media tree lives at
+``Path.cwd().parent / "bty-media"`` and the build scratch dir is
+``Path.cwd() / "_build" / "live"``.
 
 Skipped for any variant other than ``live``.
 
@@ -47,7 +52,8 @@ def add_args(parser: ArgumentParser):
 
 def main(args, cijoe):
     del args
-    bty_media = Path.cwd()
+    cijoe_dir = Path.cwd()
+    bty_media = cijoe_dir.parent / "bty-media"
 
     variant = cijoe.getconf("bty", {}).get("variant", "")
     if variant != "live":
@@ -67,7 +73,7 @@ def main(args, cijoe):
     publish_dir = Path(publish_dir_str)
     publish_dir.mkdir(parents=True, exist_ok=True)
 
-    build_dir = bty_media / "_build" / "live"
+    build_dir = cijoe_dir / "_build" / "live"
     if build_dir.exists():
         # ``lb`` writes a chroot tree owned by root; rm needs sudo.
         err, _ = cijoe.run_local(f"sudo rm -rf {build_dir}")

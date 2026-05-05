@@ -3,17 +3,18 @@ Stage the bty-lab wheel for variants that bake bty into their image
 ====================================================================
 
 Builds a wheel from the parent repo via ``uv build`` and copies it
-into a per-variant staging directory:
+into a per-variant staging directory under ``bty-media/``:
 
-- ``server`` -> ``rootfs/server/opt/bty/`` (consumed by the cloud-init
-  ``write_files`` block emitted by ``gen_userdata.py``; the server's
-  runcmd ``pip install``s it into ``/opt/bty/venv``).
-- ``live`` -> ``live-build/config/includes.chroot/opt/bty/`` (consumed
-  by the live-build hook ``0500-bty-install.hook.chroot``, which
-  ``pip install``s it into the chroot's ``/opt/bty/venv``).
+- ``server`` -> ``bty-media/rootfs/server/opt/bty/`` (consumed by the
+  cloud-init ``write_files`` block emitted by ``gen_userdata.py``;
+  the server's runcmd ``pip install``s it into ``/opt/bty/venv``).
+- ``live`` -> ``bty-media/live-build/config/includes.chroot/opt/bty/``
+  (consumed by the live-build hook ``0500-bty-install.hook.chroot``,
+  which ``pip install``s it into the chroot's ``/opt/bty/venv``).
 
-The cwd at run time is ``bty-media/`` (the Makefile cd's there before
-invoking cijoe), so the repo root is ``Path.cwd().parent``.
+The cwd at run time is ``cijoe/`` (the Makefile cd's there before
+invoking cijoe), so the repo root is ``Path.cwd().parent`` and the
+bty-media tree lives at ``repo_root / "bty-media"``.
 
 No-op for the ``usb`` variant - the USB live image carries no bty
 runtime that needs the wheel.
@@ -29,8 +30,8 @@ import shutil
 from argparse import ArgumentParser
 from pathlib import Path
 
-# Variant -> destination directory under bty-media/. Variants not
-# listed here are skipped with rc=0.
+# Variant -> destination directory relative to ``bty-media/``.
+# Variants not listed here are skipped with rc=0.
 TARGET_DIRS: dict[str, Path] = {
     "server": Path("rootfs") / "server" / "opt" / "bty",
     "live": Path("live-build") / "config" / "includes.chroot" / "opt" / "bty",
@@ -43,8 +44,9 @@ def add_args(parser: ArgumentParser):
 
 def main(args, cijoe):
     del args
-    bty_media = Path.cwd()
-    repo_root = bty_media.parent
+    cijoe_dir = Path.cwd()
+    repo_root = cijoe_dir.parent
+    bty_media = repo_root / "bty-media"
 
     variant = cijoe.getconf("bty", {}).get("variant", "usb")
     target_rel = TARGET_DIRS.get(variant)
@@ -54,7 +56,7 @@ def main(args, cijoe):
     target_dir = bty_media / target_rel
     target_dir.mkdir(parents=True, exist_ok=True)
 
-    out_dir = bty_media / "_build" / "wheel"
+    out_dir = cijoe_dir / "_build" / "wheel"
     if out_dir.exists():
         # Drop any wheel from a prior build so we don't accidentally stage
         # a stale version when the source tree's version bumps.

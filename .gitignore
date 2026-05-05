@@ -104,19 +104,14 @@ ENV/
 .pytest_cache/
 .ruff_cache/
 
-# bty-media build artifacts and cijoe runtime output
-bty-media/_build/
-bty-media/*.raw
-bty-media/*.raw.gz
-bty-media/*.raw.zst
-bty-media/*.qcow2
-bty-media/*.iso
-bty-media/cijoe-output/
-bty-media/cijoe-archive/
-# Generated each build by scripts/gen_userdata.py; never edit by hand.
+# cijoe build artifacts + runtime output (the cwd is cijoe/ when
+# the Makefile invokes ``cijoe ...``).
+cijoe/_build/
+cijoe/cijoe-output/
+cijoe/cijoe-archive/
+# Generated each build by cijoe/scripts/gen_userdata.py; never edit by hand.
 bty-media/auxiliary/cloudinit-userdata.user
-# Staged by scripts/bty_wheel_stage.py for variants that bake bty in.
-bty-media/_build/
+# Staged by cijoe/scripts/bty_wheel_stage.py for variants that bake bty in.
 bty-media/rootfs/server/opt/bty/bty_lab-*.whl
 bty-media/live-build/config/includes.chroot/opt/bty/bty_lab-*.whl
 

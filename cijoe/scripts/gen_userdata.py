@@ -3,19 +3,24 @@ Generate cloud-init user-data
 ==============================
 
 Assembles cloud-init user-data for a bty-media variant by combining a
-per-variant base config with files staged under ``rootfs/``. Each file
-becomes a ``write_files`` entry with path, owner, permissions, and
-content derived from the actual file. Binary files (anything that is
-not valid UTF-8) are emitted with ``encoding: b64`` so cloud-init
-restores the bytes on the target.
+per-variant base config (``bty-media/auxiliary/cloudinit-base-<variant>.user``)
+with files staged under ``bty-media/rootfs/``. Each file becomes a
+``write_files`` entry with path, owner, permissions, and content
+derived from the actual file. Binary files (anything that is not valid
+UTF-8) are emitted with ``encoding: b64`` so cloud-init restores the
+bytes on the target.
 
 Reads the ``[bty]`` config from cijoe to:
 
 - Pick the variant (``bty.variant``: ``"usb"`` or ``"server"``). The
-  variant selects the base file (``auxiliary/cloudinit-base-<variant>.user``)
-  and the rootfs subdirectory (``rootfs/<variant>/``); files under
-  ``rootfs/common/`` are always inlined.
+  variant selects the base file and the rootfs subdirectory
+  (``bty-media/rootfs/<variant>/``); files under
+  ``bty-media/rootfs/common/`` are always inlined.
 - Substitute ``__BTY_HOSTNAME__`` and ``__BTY_TIMEZONE__`` in the base.
+
+The cwd at run time is ``cijoe/`` (the Makefile cd's there before
+invoking cijoe), so the bty-media tree lives at
+``Path.cwd().parent / "bty-media"``.
 
 Retargetable: False
 """
@@ -37,9 +42,10 @@ _B64_WRAP = 76
 
 def main(args, cijoe):
     del args
-    repo_dir = Path.cwd()
-    rootfs_dir = repo_dir / "rootfs"
-    output_path = repo_dir / "auxiliary" / "cloudinit-userdata.user"
+    cijoe_dir = Path.cwd()
+    bty_media = cijoe_dir.parent / "bty-media"
+    rootfs_dir = bty_media / "rootfs"
+    output_path = bty_media / "auxiliary" / "cloudinit-userdata.user"
 
     bty = cijoe.getconf("bty", {})
     if not bty:
@@ -51,7 +57,7 @@ def main(args, cijoe):
         log.error(f"Unknown bty.variant {variant!r}; expected one of {KNOWN_VARIANTS}")
         return 1
 
-    base_path = repo_dir / "auxiliary" / f"cloudinit-base-{variant}.user"
+    base_path = bty_media / "auxiliary" / f"cloudinit-base-{variant}.user"
     if not base_path.exists():
         log.error(f"Base config not found: {base_path}")
         return 1

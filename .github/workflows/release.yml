@@ -17,7 +17,7 @@ name: Release
 #
 # ``workflow_dispatch`` runs ``test`` + ``build-wheel`` only - smoke
 # test of the package side. Ad-hoc media builds happen locally via
-# the Makefile (``cd bty-media && make build VARIANT=...``).
+# the top-level Makefile (``make build VARIANT=usb|server|live``).
 #
 # First publish (claiming the bty-lab name) requires a one-time PyPI
 # setup: register a Pending Publisher on https://pypi.org targeting:
@@ -156,7 +156,6 @@ jobs:
         uses: astral-sh/setup-uv@v8.1.0
 
       - name: Build image
-        working-directory: bty-media
         run: make build VARIANT=${{ matrix.variant }}
 
       - name: Upload artifact (disk-image variants)

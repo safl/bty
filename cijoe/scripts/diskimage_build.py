@@ -52,14 +52,17 @@ def main(args, cijoe):
     disk = image.get("disk", {})
     system_label = image.get("system_label")
 
-    # Relative paths in the cijoe config resolve against bty-media/
-    # (the cwd at build time). Absolute paths pass through unchanged
-    # - Python's ``Path("/abs") / "/other"`` returns the second path.
-    cwd = Path.cwd()
-    cloud_image_path = cwd / cloud["path"]
+    # Relative paths in the cijoe config resolve against the repo
+    # root. cwd at run time is ``cijoe/`` (the Makefile cd's there
+    # before invoking cijoe), so ``Path.cwd().parent`` is the repo
+    # root. Absolute paths (e.g. cloud.path / disk.path with
+    # ``{{ local.env.HOME }}``) pass through unchanged because
+    # Python's ``Path("/abs") / "/other"`` returns the second path.
+    repo_root = Path.cwd().parent
+    cloud_image_path = repo_root / cloud["path"]
     cloud_image_url = cloud["url"]
-    metadata_path = cwd / cloud["metadata_path"]
-    userdata_path = cwd / cloud["userdata_path"]
+    metadata_path = repo_root / cloud["metadata_path"]
+    userdata_path = repo_root / cloud["userdata_path"]
 
     if not cloud_image_path.exists():
         cloud_image_path.parent.mkdir(parents=True, exist_ok=True)
