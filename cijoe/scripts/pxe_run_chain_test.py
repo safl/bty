@@ -19,12 +19,21 @@ Boots two QEMU VMs sharing an L2 segment via ``-netdev socket``:
   uploaded earlier, runs ``bty flash --yes`` against /dev/vda, and
   reaches the "flash complete; rebooting" marker.
 
-The test uses ONLY production paths to stage the appliance for the
-chain - no virt-customize, no DB seeding, no /etc/default baking.
-``POST /auth/login`` uses the default credential, then ``PUT
-/boot/<name>`` and ``PUT /images/<name>`` upload the artefacts,
-``POST /ui/settings/pxe-activate`` (full-DHCP mode) brings up
-dnsmasq, and ``PUT /machines/<mac>`` pins the per-MAC plan.
+The test uses production paths for everything except DHCP setup
+on the synthesised PXE segment. ``POST /auth/login`` uses the
+default credential, ``PUT /boot/<name>`` and ``PUT /images/<name>``
+upload the artefacts, and ``PUT /machines/<mac>`` pins the per-MAC
+plan.
+
+DHCP is the one piece that has to be test-side: the server VM and
+client VM share an isolated ``-netdev socket`` segment with no
+external DHCP server, but bty-web-activate-pxe deliberately only
+supports proxy-DHCP (refusing to be a full-DHCP source is a
+deliberate safety choice - rogue-DHCP on the wrong NIC trashes a
+LAN's lease table). So the test SSHes in as ``odus`` and drops a
+test-only ``/etc/dnsmasq.d/test-fulldhcp.conf`` plus restarts
+dnsmasq. None of that machinery exists in production bty.
+
 Asserts the chain progresses by tailing the client's serial-console
 log for marker strings configured in
 ``[test.pxe.chain_markers]``.
@@ -84,10 +93,11 @@ def main(args, cijoe):
 
     pxe_socket_port = _free_port()
     mgmt_port = _free_port()
+    ssh_port = _free_port()
     server_log = workspace / "server.serial.log"
     client_log = workspace / "client.serial.log"
 
-    server = _start_server_vm(server_qcow2, mgmt_port, pxe_socket_port, server_log, cfg)
+    server = _start_server_vm(server_qcow2, mgmt_port, ssh_port, pxe_socket_port, server_log, cfg)
     client = None
     try:
         log.info(f"Waiting for bty-web /healthz on 127.0.0.1:{mgmt_port}")
@@ -119,21 +129,20 @@ def main(args, cijoe):
             cfg["machine_image"],
         )
 
-        log.info("POST /ui/settings/pxe-activate (full mode)")
-        _post_form(
-            "127.0.0.1",
-            mgmt_port,
-            token,
-            "/ui/settings/pxe-activate",
-            {
-                "interface": f"{cfg.get('nic_prefix', 'ens')}{int(cfg['pxe_nic_slot'])}",
-                "subnet": cfg["server_pxe_ip"].rsplit(".", 1)[0] + ".0",
-                "mode": "full",
-                "range_lo": cfg["dhcp_range_lo"],
-                "range_hi": cfg["dhcp_range_hi"],
-                "netmask": cfg["pxe_netmask"],
-            },
-        )
+        # Wait for sshd to come up + drop the test-only dnsmasq
+        # config that does full DHCP on the synthesised PXE
+        # segment. bty-web-activate-pxe is intentionally proxy-only
+        # (full DHCP would let an operator rogue-DHCP a LAN by
+        # accident), so this step is genuinely test-side machinery.
+        log.info(f"Waiting for sshd on 127.0.0.1:{ssh_port}")
+        if not _wait_until(
+            lambda: _ssh_ready("127.0.0.1", ssh_port),
+            HEALTHZ_TIMEOUT,
+            "sshd",
+        ):
+            return errno.ETIMEDOUT
+        log.info("Configuring full-DHCP for the isolated PXE segment via SSH")
+        _ssh_setup_test_dhcp("127.0.0.1", ssh_port, cfg)
 
         log.info(f"PUT /machines/{cfg['client_mac']} (boot_policy=flash)")
         _put_assignment("127.0.0.1", mgmt_port, token, cfg)
@@ -169,7 +178,7 @@ def main(args, cijoe):
 # ---------- VM lifecycle ---------------------------------------------------
 
 
-def _start_server_vm(qcow2, mgmt_port, socket_port, log_path, cfg):
+def _start_server_vm(qcow2, mgmt_port, ssh_port, socket_port, log_path, cfg):
     cmd = [
         "qemu-system-x86_64",
         "-enable-kvm",
@@ -184,9 +193,17 @@ def _start_server_vm(qcow2, mgmt_port, socket_port, log_path, cfg):
         "-nographic",
         "-serial",
         f"file:{log_path}",
-        # Mgmt NIC: user-mode with host port-forward for HTTP-API access.
+        # Mgmt NIC: user-mode with two host port-forwards: 8080 for
+        # bty-web's HTTP API, 22 for the test-side SSH that drops
+        # the test-only dnsmasq config (the synthesised socket-net
+        # segment has no real DHCP, and bty-web-activate-pxe only
+        # does proxy-DHCP).
         "-netdev",
-        f"user,id=mgmt,hostfwd=tcp:127.0.0.1:{mgmt_port}-:8080",
+        (
+            f"user,id=mgmt,"
+            f"hostfwd=tcp:127.0.0.1:{mgmt_port}-:8080,"
+            f"hostfwd=tcp:127.0.0.1:{ssh_port}-:22"
+        ),
         "-device",
         f"virtio-net,netdev=mgmt,addr=0x{int(cfg['mgmt_nic_slot']):x}",
         # PXE NIC: socket listener for the client to dial in.
@@ -277,22 +294,6 @@ def _put_file(host, port, token, base_path, src_path, name):
                 raise RuntimeError(f"PUT {url} returned {resp.status}")
 
 
-def _post_form(host, port, token, path, data):
-    body = urllib_urlencode(data).encode("utf-8")
-    req = urllib.request.Request(
-        f"http://{host}:{port}{path}",
-        data=body,
-        method="POST",
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/x-www-form-urlencoded",
-        },
-    )
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        if resp.status not in (200, 303):
-            raise RuntimeError(f"POST {path} returned {resp.status}")
-
-
 def _put_assignment(host, port, token, cfg):
     body = json.dumps(
         {
@@ -380,6 +381,87 @@ def _http_ready(host, port):
         return False
 
 
+def _ssh_ready(host, port):
+    """Quick check that sshd is accepting connections on ``port``.
+
+    Doesn't authenticate - just opens a socket and reads the server
+    banner. Used as the wait predicate before we try password auth.
+    """
+    try:
+        with socket.create_connection((host, port), timeout=2) as sock:
+            banner = sock.recv(64)
+        return banner.startswith(b"SSH-")
+    except OSError:
+        return False
+
+
+def _ssh_setup_test_dhcp(host, port, cfg):
+    """SSH in as ``odus``, drop a test-only dnsmasq full-DHCP config,
+    restart dnsmasq.
+
+    bty's production helper writes a proxy-DHCP config (because we
+    don't want an operator accidentally turning bty into a rogue
+    DHCP source on a real LAN). The chain test's PXE segment is a
+    synthesised ``-netdev socket`` with nothing else on it, so we
+    need full DHCP - injected entirely from the test side.
+    """
+    import paramiko
+
+    pxe_iface = f"{cfg.get('nic_prefix', 'ens')}{int(cfg['pxe_nic_slot'])}"
+    overlay = (
+        "# Test-only full-DHCP overlay written by pxe_run_chain_test.\n"
+        "# bty itself does not configure full DHCP - this comes from the\n"
+        "# test, not from bty-web-activate-pxe.\n"
+        "\n"
+        "bind-dynamic\n"
+        f"interface={pxe_iface}\n"
+        f"dhcp-range={cfg['dhcp_range_lo']},{cfg['dhcp_range_hi']},"
+        f"{cfg['pxe_netmask']},1h\n"
+        "\n"
+        "dhcp-match=set:bios,option:client-arch,0\n"
+        "dhcp-match=set:efi,option:client-arch,7\n"
+        "dhcp-match=set:efi,option:client-arch,9\n"
+        "dhcp-userclass=set:ipxe,iPXE\n"
+        "\n"
+        "dhcp-boot=tag:!ipxe,tag:bios,undionly.kpxe\n"
+        "dhcp-boot=tag:!ipxe,tag:efi,ipxe.efi\n"
+        "dhcp-boot=tag:ipxe,http://${next-server}:8080/pxe-bootstrap.ipxe\n"
+    )
+
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    # ``allow_agent=False`` and ``look_for_keys=False`` keep paramiko
+    # from picking up the dev's ssh-agent / id_ed25519 by accident.
+    client.connect(
+        host,
+        port=port,
+        username="odus",
+        password="odus",
+        allow_agent=False,
+        look_for_keys=False,
+        timeout=15,
+    )
+    try:
+        cmd = (
+            f"sudo -n install -d -m 0755 /etc/dnsmasq.d && "
+            f"echo {_quote_for_shell(overlay)} | "
+            f"sudo -n tee /etc/dnsmasq.d/test-fulldhcp.conf > /dev/null && "
+            f"sudo -n systemctl restart dnsmasq.service"
+        )
+        _stdin, stdout, stderr = client.exec_command(cmd, timeout=30)
+        rc = stdout.channel.recv_exit_status()
+        if rc != 0:
+            err = stderr.read().decode("utf-8", "replace")
+            raise RuntimeError(f"dnsmasq overlay failed (rc={rc}): {err}")
+    finally:
+        client.close()
+
+
+def _quote_for_shell(text):
+    """Single-quote ``text`` for safe interpolation into a shell string."""
+    return "'" + text.replace("'", "'\\''") + "'"
+
+
 def _dump_tail(path, lines):
     if not path.is_file():
         log.error(f"{path}: file does not exist")
@@ -388,10 +470,3 @@ def _dump_tail(path, lines):
     log.error(f"--- last {lines} lines of {path} ---")
     for line in body.splitlines()[-lines:]:
         log.error(line)
-
-
-def urllib_urlencode(data):
-    """Local re-export so the imports stay tidy at the top of the file."""
-    from urllib.parse import urlencode
-
-    return urlencode(data)

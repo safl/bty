@@ -47,14 +47,21 @@
             <code>/etc/dnsmasq.d/bty-pxe.conf</code>).
         </div>
         {% endif %}
+        {% set pxe_iface = pxe.interface if pxe else (interfaces[0].name if interfaces else '') %}
+        {% set pxe_subnet = pxe.subnet if pxe else (interfaces[0].subnet if interfaces and interfaces[0].subnet else '') %}
         <form action="/ui/settings/pxe-activate" method="post" class="row g-3">
             <div class="col-sm-6">
                 <label class="form-label" for="interface">Interface</label>
-                <select name="interface" id="interface" class="form-select" required>
+                <select name="interface" id="interface" class="form-select" required
+                        onchange="document.getElementById('subnet').value =
+                                  this.options[this.selectedIndex].dataset.subnet || '';">
                     {% for iface in interfaces %}
                     <option value="{{ iface.name }}"
-                            {% if pxe and pxe.interface == iface.name %}selected{% endif %}>
-                        {{ iface.name }} ({{ iface.operstate }})
+                            data-subnet="{{ iface.subnet or '' }}"
+                            data-netmask="{{ iface.netmask or '' }}"
+                            {% if iface.name == pxe_iface %}selected{% endif %}>
+                        {{ iface.name }} ({{ iface.operstate }}{% if iface.ipv4 %},
+                        {{ iface.ipv4 }}/{{ iface.prefix }}{% endif %})
                     </option>
                     {% endfor %}
                     {% if not interfaces %}
@@ -66,43 +73,23 @@
                 <label class="form-label" for="subnet">Subnet</label>
                 <input type="text" name="subnet" id="subnet" class="form-control"
                        placeholder="192.168.1.0 or 192.168.1.0/24"
-                       value="{{ pxe.subnet if pxe else '' }}" required>
+                       value="{{ pxe_subnet }}" required>
                 <div class="form-text">
-                    Network address of the segment PXE clients live on. CIDR is
-                    accepted but only the network part is used.
+                    Network address of the segment PXE clients live on. Pre-filled
+                    from the selected interface's IPv4 address; edit if needed.
                 </div>
-            </div>
-            <div class="col-sm-12">
-                <label class="form-label" for="mode">Mode</label>
-                <select name="mode" id="mode" class="form-select">
-                    <option value="proxy" selected>proxy-DHCP (other DHCP server already on segment)</option>
-                    <option value="full">full DHCP (bty-server is the only DHCP server)</option>
-                </select>
-                <div class="form-text">
-                    Pick <code>full</code> on isolated networks where no other DHCP
-                    server runs (homelabs, dedicated CI segments). Picks
-                    <code>proxy</code> for typical LANs.
-                </div>
-            </div>
-            <div class="col-sm-4">
-                <label class="form-label" for="range_lo">Range start (full mode)</label>
-                <input type="text" name="range_lo" id="range_lo" class="form-control"
-                       placeholder="192.168.99.50">
-            </div>
-            <div class="col-sm-4">
-                <label class="form-label" for="range_hi">Range end (full mode)</label>
-                <input type="text" name="range_hi" id="range_hi" class="form-control"
-                       placeholder="192.168.99.150">
-            </div>
-            <div class="col-sm-4">
-                <label class="form-label" for="netmask">Netmask (full mode)</label>
-                <input type="text" name="netmask" id="netmask" class="form-control"
-                       placeholder="255.255.255.0">
             </div>
             <div class="col-12">
                 <button type="submit" class="btn btn-primary">Activate</button>
             </div>
         </form>
+        <p class="form-text mt-2">
+            Proxy-DHCP only: bty assumes there is already a DHCP server on
+            this segment. Full DHCP is intentionally not offered here -
+            misconfigured rogue-DHCP would conflict with the LAN's real
+            DHCP server. Run a dedicated DHCP daemon next to bty if you
+            need one.
+        </p>
     </div>
 </div>
 {% endblock %}

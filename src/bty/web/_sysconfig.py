@@ -18,6 +18,7 @@ unprivileged operations done directly here.
 from __future__ import annotations
 
 import ipaddress
+import json
 import re
 import subprocess
 from dataclasses import dataclass
@@ -35,6 +36,34 @@ _INTERFACE_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 class Interface:
     name: str
     operstate: str  # "up" / "down" / "unknown"
+    # First IPv4 address + prefix on the interface, or ``None`` when
+    # the interface has no v4 address. Pre-populates the PXE-activate
+    # form's subnet/netmask fields so the operator doesn't have to
+    # type the segment by hand.
+    ipv4: str | None = None
+    prefix: int | None = None
+
+    @property
+    def subnet(self) -> str | None:
+        """Network address (e.g. ``192.168.1.0`` for ``192.168.1.42/24``)."""
+        if self.ipv4 is None or self.prefix is None:
+            return None
+        try:
+            return str(
+                ipaddress.IPv4Network(f"{self.ipv4}/{self.prefix}", strict=False).network_address
+            )
+        except (ipaddress.AddressValueError, ValueError):
+            return None
+
+    @property
+    def netmask(self) -> str | None:
+        """Dotted-quad netmask derived from the prefix (e.g. ``255.255.255.0``)."""
+        if self.prefix is None:
+            return None
+        try:
+            return str(ipaddress.IPv4Network(f"0.0.0.0/{self.prefix}").netmask)
+        except (ipaddress.AddressValueError, ValueError):
+            return None
 
 
 @dataclass(frozen=True)
@@ -48,11 +77,14 @@ class SysConfigError(Exception):
 
 
 def list_interfaces(sysnet: Path = SYSNET_PATH) -> list[Interface]:
-    """Return non-loopback network interfaces with their operstate.
+    """Return non-loopback network interfaces with operstate + first IPv4.
 
-    Reads ``/sys/class/net/<iface>/operstate`` directly - no
-    subprocess, no privileges. Returns an empty list on hosts where
-    ``/sys/class/net`` doesn't exist (containers, tests).
+    Reads ``/sys/class/net/<iface>/operstate`` for the up/down/unknown
+    state, and shells out to ``ip -j addr show <iface>`` (iproute2 ships
+    with every Debian) to capture the primary IPv4 address + prefix.
+    Returns an empty list on hosts where ``/sys/class/net`` doesn't
+    exist (containers, tests). Failures to read addresses are not
+    fatal - the interface is still listed, just without the IP.
     """
     if not sysnet.is_dir():
         return []
@@ -62,8 +94,43 @@ def list_interfaces(sysnet: Path = SYSNET_PATH) -> list[Interface]:
             continue
         operstate_path = entry / "operstate"
         operstate = operstate_path.read_text().strip() if operstate_path.is_file() else "unknown"
-        out.append(Interface(name=entry.name, operstate=operstate))
+        ipv4, prefix = _first_ipv4(entry.name)
+        out.append(Interface(name=entry.name, operstate=operstate, ipv4=ipv4, prefix=prefix))
     return out
+
+
+def _first_ipv4(iface: str) -> tuple[str | None, int | None]:
+    """Return ``(address, prefix)`` for the interface's first IPv4 address.
+
+    Uses ``ip -j addr show <iface>`` and picks the first ``inet`` entry.
+    ``(None, None)`` when the tool is missing, the interface has no
+    addresses, or the JSON shape doesn't match expectations - the UI
+    treats those as "no info" and lets the operator type values.
+    """
+    try:
+        result = subprocess.run(
+            ["ip", "-j", "addr", "show", iface],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=5,
+        )
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError):
+        return None, None
+    try:
+        payload = json.loads(result.stdout or "[]")
+    except json.JSONDecodeError:
+        return None, None
+    if not payload:
+        return None, None
+    for addr in payload[0].get("addr_info", []):
+        if addr.get("family") != "inet":
+            continue
+        local = addr.get("local")
+        prefixlen = addr.get("prefixlen")
+        if isinstance(local, str) and isinstance(prefixlen, int):
+            return local, prefixlen
+    return None, None
 
 
 def pxe_active(active_path: Path = PXE_ACTIVE_PATH) -> PxeConfig | None:
@@ -80,23 +147,16 @@ def pxe_active(active_path: Path = PXE_ACTIVE_PATH) -> PxeConfig | None:
     return None
 
 
-def activate_pxe(
-    interface: str,
-    subnet: str,
-    mode: str = "proxy",
-    range_lo: str | None = None,
-    range_hi: str | None = None,
-    netmask: str | None = None,
-) -> None:
+def activate_pxe(interface: str, subnet: str) -> None:
     """Validate inputs and invoke the PXE-activation helper.
 
-    ``mode`` is ``proxy`` (default - other DHCP server on segment)
-    or ``full`` (bty-server is the only DHCP server, must hand out
-    IPs as well as PXE info). Full-DHCP mode requires ``range_lo``,
-    ``range_hi``, and ``netmask``.
+    Proxy-DHCP only: bty assumes there is already a DHCP server on
+    the segment handing out IPs. We deliberately do NOT support
+    full DHCP from this UI - the blast radius of a misconfigured
+    bty handing out IPs (rogue DHCP that conflicts with the real
+    LAN router) is high and the actual operator demand is low.
+    Run a dedicated DHCP daemon next to bty if you need one.
     """
-    if mode not in {"proxy", "full"}:
-        raise SysConfigError(f"invalid mode: {mode!r} (expected 'proxy' or 'full')")
     interface = interface.strip()
     subnet = subnet.strip()
     if not _INTERFACE_RE.fullmatch(interface):
@@ -115,25 +175,9 @@ def activate_pxe(
     except (ipaddress.AddressValueError, ValueError) as exc:
         raise SysConfigError(f"invalid subnet: {subnet!r}") from exc
 
-    extra: list[str] = []
-    if mode == "full":
-        if not (range_lo and range_hi and netmask):
-            raise SysConfigError("full mode requires range_lo, range_hi, and netmask")
-        for label, value in (
-            ("range_lo", range_lo),
-            ("range_hi", range_hi),
-            ("netmask", netmask),
-        ):
-            try:
-                ipaddress.IPv4Address(value.strip())
-            except (ipaddress.AddressValueError, ValueError) as exc:
-                raise SysConfigError(f"invalid {label}: {value!r}") from exc
-            extra.append(value.strip())
-
-    cmd = ["sudo", "-n", ACTIVATE_PXE_HELPER, mode, interface, subnet_arg, *extra]
     try:
         subprocess.run(
-            cmd,
+            ["sudo", "-n", ACTIVATE_PXE_HELPER, interface, subnet_arg],
             capture_output=True,
             text=True,
             check=True,

@@ -327,14 +327,7 @@ def test_ui_settings_pxe_activate_invokes_helper(client: TestClient) -> None:
         )
     assert r.status_code == 200
     assert "PXE activated" in r.text
-    mock_activate.assert_called_once_with(
-        "eth0",
-        "192.168.1.0/24",
-        mode="proxy",
-        range_lo=None,
-        range_hi=None,
-        netmask=None,
-    )
+    mock_activate.assert_called_once_with("eth0", "192.168.1.0/24")
 
 
 def test_ui_settings_pxe_activate_failure_shows_danger_flash(client: TestClient) -> None:
