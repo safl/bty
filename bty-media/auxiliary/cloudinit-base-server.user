@@ -101,11 +101,14 @@ runcmd:
   - passwd -d root
   - sed -i 's/^#*\s*PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
 
-  # Clear cloud-init artefacts so the cooked image is identity-less.
-  # Do NOT disable cloud-init: operators may want to feed a NoCloud
-  # ISO at first boot of the cooked image to set the bty password
-  # / SSH keys / hostname. With no datasource cloud-init is a no-op
-  # (a few seconds at boot); with one it does the right thing.
+  # Disable cloud-init for subsequent boots and clear its artefacts.
+  # The cooked image already has its identity (bty user + default
+  # password baked above), so cloud-init has nothing to do at first
+  # boot - and without an attached datasource it can stall systemd's
+  # multi-user.target for minutes while it polls for one. If an
+  # operator wants to (re-)provision via cloud-init they can ``rm
+  # /etc/cloud/cloud-init.disabled`` and attach a NoCloud ISO.
+  - touch /etc/cloud/cloud-init.disabled
   - cloud-init clean --logs --seed || true
 
   # Trim apt + pip caches to keep the image small.
