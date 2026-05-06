@@ -415,8 +415,25 @@ def _ssh_setup_test_dhcp(host, port, cfg):
     # answer. Drop a higher-priority systemd-networkd file alongside
     # the production ``10-bty-default.network`` (which DHCPs
     # everything) so just this one NIC is pinned.
+    # ``ConfigureWithoutCarrier=yes`` makes networkd assign the
+    # static IP even when the link has no carrier. The chain test's
+    # PXE socket-net only gains carrier once the CLIENT VM connects
+    # to it, which happens AFTER this SSH-setup step. Without this
+    # flag, networkd waits for carrier, dnsmasq's ``bind-dynamic``
+    # finds no IP to bind to on ``ens4``, and the client's PXE
+    # DHCPDISCOVER goes unanswered (iPXE prints
+    # ``ipxe.org/040ee119`` and gives up).
     pxe_network = (
-        f"[Match]\nName={pxe_iface}\n\n[Network]\nAddress={cfg['server_pxe_ip']}/24\nDHCP=no\n"
+        "[Match]\n"
+        f"Name={pxe_iface}\n"
+        "\n"
+        "[Link]\n"
+        "RequiredForOnline=no\n"
+        "\n"
+        "[Network]\n"
+        f"Address={cfg['server_pxe_ip']}/24\n"
+        "DHCP=no\n"
+        "ConfigureWithoutCarrier=yes\n"
     )
 
     overlay = (
