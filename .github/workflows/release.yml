@@ -154,7 +154,7 @@ jobs:
           ls -l /dev/kvm
 
       - name: Install cijoe
-        run: pipx install cijoe
+        run: pipx install --force cijoe
 
       - name: Install uv
         uses: astral-sh/setup-uv@v8.1.0
@@ -212,7 +212,7 @@ jobs:
           ls -l /dev/kvm
 
       - name: Install cijoe
-        run: pipx install cijoe
+        run: pipx install --force cijoe
 
       - name: Download server image artefact
         uses: actions/download-artifact@v8
