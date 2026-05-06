@@ -46,7 +46,10 @@
 </div>
 
 <p class="text-muted small">
-    Live updates via Server-Sent Events land in milestone 12 phase 2.
-    For now, refresh to see newly-discovered machines.
+    <i class="bi bi-broadcast text-success me-1"></i>
+    The Machines page subscribes to a Server-Sent Events stream
+    (<code>/events/machines</code>) and updates live as PXE clients
+    self-discover or operators edit assignments. The counters above
+    update on page load only - refresh after a change.
 </p>
 {% endblock %}
