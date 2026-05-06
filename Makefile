@@ -95,28 +95,6 @@ media-deps:
 # (cijoe/tasks/live.yaml) which needs ``live-build`` on the host
 # and passwordless sudo.
 build:
-	@if [ "$$(id -u)" -eq 0 ] && [ -z "$$_BTY_ELEVATED" ]; then \
-		echo "make: drop the 'sudo' prefix. Run 'make build VARIANT=$(VARIANT)' as"; \
-		echo "      your normal user; the Makefile self-elevates for VARIANT=live"; \
-		echo "      and runs other variants unprivileged. Pre-sudo strips PATH so"; \
-		echo "      cijoe (in ~/.local/bin) is not found."; \
-		exit 1; \
-	fi
-	@if [ "$(VARIANT)" = "live" ] && [ "$$(id -u)" -ne 0 ]; then \
-		echo "make: VARIANT=live needs root for live-build's chroot+squashfs;"; \
-		echo "      self-elevating with PATH preserved..."; \
-		exec sudo --preserve-env=PATH \
-			_BTY_ELEVATED=1 \
-			UV_CACHE_DIR="$${UV_CACHE_DIR:-$$HOME/.cache/uv}" \
-			$(MAKE) build VARIANT=live; \
-	fi
-	@# Older cijoe versions (the one /opt/pipx ships on GHA-hosted
-	@# runners with Python 3.12) unconditionally auto-archive the
-	@# output dir at end-of-task via os.rename(cijoe-output ->
-	@# cijoe-archive/<timestamp>). Pre-clean both to avoid stale-
-	@# state EACCES on the rename. Newer cijoe (>=0.9.58 we use
-	@# locally) gates archive on --archive and is unaffected.
-	rm -rf cijoe/cijoe-output cijoe/cijoe-archive
 	cd cijoe && cijoe $(MEDIA_TASK) --monitor -c configs/$(VARIANT).toml
 
 # End-to-end PXE chain test: server + client QEMU VMs sharing an L2
