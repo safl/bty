@@ -5,27 +5,100 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% block title %}bty-web{% endblock %}</title>
     <link rel="stylesheet" href="/static/bootstrap.min.css">
+    <link rel="stylesheet" href="/static/bootstrap-icons.min.css">
+    <style>
+        /* Brand strip: a thin gradient accent above the navbar so the
+           appliance has a recognisable look beyond stock Bootstrap. */
+        .bty-accent {
+            height: 3px;
+            background: linear-gradient(90deg, #0d6efd 0%, #6610f2 50%, #d63384 100%);
+        }
+        .navbar-brand .brand-icon {
+            font-size: 1.4rem;
+            vertical-align: -0.15rem;
+        }
+        .navbar .nav-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            padding: 0.4rem 0.8rem;
+            margin-right: 0.25rem;
+            border-radius: 0.5rem;
+            color: rgba(255, 255, 255, 0.85);
+            text-decoration: none;
+            transition: background-color 0.15s;
+        }
+        .navbar .nav-btn:hover {
+            background-color: rgba(255, 255, 255, 0.10);
+            color: #fff;
+        }
+        .navbar .nav-btn.active {
+            background-color: #0d6efd;
+            color: #fff;
+            box-shadow: 0 0 0 1px rgba(13, 110, 253, 0.6);
+        }
+        .navbar .nav-btn i {
+            font-size: 1.05rem;
+        }
+        .principal-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            padding: 0.3rem 0.7rem;
+            border-radius: 999px;
+            background-color: rgba(255, 255, 255, 0.08);
+            color: rgba(255, 255, 255, 0.9);
+            font-size: 0.85rem;
+        }
+        .principal-pill code {
+            color: #fff;
+            background: transparent;
+            padding: 0;
+        }
+    </style>
     <script src="/static/htmx.min.js"></script>
     <script src="/static/sse.js"></script>
 </head>
 <body class="bg-light">
-<nav class="navbar navbar-expand-md bg-dark navbar-dark">
+<div class="bty-accent"></div>
+<nav class="navbar navbar-expand-md bg-dark navbar-dark py-2">
     <div class="container">
-        <a class="navbar-brand" href="/ui/dashboard">bty-web <small class="text-muted">{{ version }}</small></a>
+        <a class="navbar-brand fw-semibold" href="/ui/dashboard">
+            <i class="bi bi-hdd-network-fill brand-icon text-info me-1"></i>bty-web
+            <span class="badge bg-secondary fw-normal ms-1">{{ version }}</span>
+        </a>
         {% if logged_in %}
-        <ul class="navbar-nav me-auto">
-            <li class="nav-item"><a class="nav-link" href="/ui/dashboard">Dashboard</a></li>
-            <li class="nav-item"><a class="nav-link" href="/ui/machines">Machines</a></li>
-            <li class="nav-item"><a class="nav-link" href="/ui/images">Images</a></li>
-            <li class="nav-item"><a class="nav-link" href="/ui/boot">Boot</a></li>
-            <li class="nav-item"><a class="nav-link" href="/ui/settings">Settings</a></li>
-        </ul>
-        <span class="navbar-text text-light me-3 small">
-            Logged in as <code class="text-light">{{ service_user }}</code>
-        </span>
-        <form action="/ui/logout" method="post" class="d-inline">
-            <button class="btn btn-outline-light btn-sm" type="submit">Log out</button>
-        </form>
+        <div class="d-flex flex-grow-1 align-items-center flex-wrap">
+            <div class="me-auto d-flex flex-wrap">
+                <a class="nav-btn {% if nav_active == 'dashboard' %}active{% endif %}" href="/ui/dashboard">
+                    <i class="bi bi-speedometer2"></i>Dashboard
+                </a>
+                <a class="nav-btn {% if nav_active == 'machines' %}active{% endif %}" href="/ui/machines">
+                    <i class="bi bi-pc-display"></i>Machines
+                </a>
+                <a class="nav-btn {% if nav_active == 'images' %}active{% endif %}" href="/ui/images">
+                    <i class="bi bi-disc"></i>Images
+                </a>
+                <a class="nav-btn {% if nav_active == 'boot' %}active{% endif %}" href="/ui/boot">
+                    <i class="bi bi-box-seam"></i>Boot
+                </a>
+                <a class="nav-btn {% if nav_active == 'settings' %}active{% endif %}" href="/ui/settings">
+                    <i class="bi bi-gear"></i>Settings
+                </a>
+            </div>
+            <div class="d-flex align-items-center gap-2 ms-md-3 mt-2 mt-md-0">
+                <span class="principal-pill" title="OS user that bty-web is running as">
+                    <i class="bi bi-person-circle"></i>
+                    <code>{{ service_user }}</code>
+                </span>
+                <form action="/ui/logout" method="post" class="d-inline">
+                    <button class="btn btn-outline-light btn-sm" type="submit"
+                            title="End this session">
+                        <i class="bi bi-box-arrow-right"></i>
+                    </button>
+                </form>
+            </div>
+        </div>
         {% endif %}
     </div>
 </nav>

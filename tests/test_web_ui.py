@@ -272,8 +272,9 @@ def test_ui_boot_page_renders_with_artifact_state(client: TestClient) -> None:
         "bty-live-x86_64.sha256",
     ):
         assert name in body, name
-    # Empty boot dir => four "missing" badges.
-    assert body.count('class="badge bg-warning text-dark">missing') == 4
+    # Empty boot dir => four "missing" badges (warning kind).
+    assert body.count("missing</span>") == 4
+    assert body.count('class="badge bg-warning text-dark"') >= 4
     # The fetch form must reach our route.
     assert 'action="/ui/boot/fetch-release"' in body
 

@@ -2,12 +2,13 @@
 {% block title %}Images - bty-web{% endblock %}
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
-    <h1 class="h3 mb-0">Images</h1>
+    <h1 class="h3 mb-0"><i class="bi bi-disc me-2"></i>Images</h1>
     <span class="text-muted small">{{ images|length }} under <code>{{ image_root }}</code></span>
 </div>
 
 {% if not images %}
 <div class="alert alert-light border">
+    <i class="bi bi-info-circle me-2"></i>
     No images found under <code>{{ image_root }}</code>. Drop
     <code>.qcow2</code> / <code>.img</code> / <code>.img.zst</code> files
     in that directory and refresh.
@@ -15,7 +16,7 @@
 {% else %}
 <div class="card">
     <div class="table-responsive">
-        <table class="table table-hover mb-0">
+        <table class="table table-hover mb-0 align-middle">
             <thead class="table-light">
                 <tr>
                     <th>Name</th>
@@ -26,8 +27,8 @@
             <tbody>
                 {% for img in images %}
                 <tr>
-                    <td>{{ img.name }}</td>
-                    <td>{{ img.format }}</td>
+                    <td><i class="bi bi-file-earmark-binary text-secondary me-2"></i>{{ img.name }}</td>
+                    <td><span class="badge bg-secondary">{{ img.format }}</span></td>
                     <td><code>{{ img.size_bytes }}</code></td>
                 </tr>
                 {% endfor %}

@@ -71,6 +71,13 @@ def register_ui_routes(
         ctx.setdefault("version", bty.__version__)
         ctx.setdefault("logged_in", _request_is_authed(request, state_path))
         ctx.setdefault("service_user", service_user)
+        # Top-level path segment under /ui/ - the layout uses this to
+        # mark the active nav button. ``request.url.path`` is the full
+        # path; we want just the second segment so e.g. /ui/machines
+        # AND /ui/machines/aa:bb:... both light up "machines".
+        path = request.url.path
+        nav_active = path.split("/")[2] if path.startswith("/ui/") and len(path) > 4 else ""
+        ctx.setdefault("nav_active", nav_active)
         ctx.setdefault("flash", None)
         ctx.setdefault("flash_kind", None)
         template = jinja.get_template(name)
