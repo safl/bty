@@ -485,7 +485,7 @@ def _ssh_setup_test_dhcp(host, port, cfg):
         cmd = (
             f"sudo -n install -d -m 0755 /etc/dnsmasq.d /etc/systemd/network && "
             f"echo {_quote_for_shell(pxe_network)} | "
-            f"sudo -n tee /etc/systemd/network/20-bty-pxe-test.network > /dev/null && "
+            f"sudo -n tee /etc/systemd/network/05-bty-pxe-test.network > /dev/null && "
             f"echo {_quote_for_shell(overlay)} | "
             f"sudo -n tee /etc/dnsmasq.d/test-fulldhcp.conf > /dev/null && "
             f"sudo -n networkctl reload && "
