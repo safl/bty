@@ -12,7 +12,7 @@
 # - bty-server-x86_64.qcow2 + bty-live-x86_64.{vmlinuz,initrd,squashfs}
 #   pre-built under ``~/system_imaging/disk/`` (run ``make build
 #   VARIANT=server`` and ``make build VARIANT=live`` first).
-# - ``qemu-system-x86_64`` and ``virt-customize`` on PATH.
+# - ``qemu-system-x86_64`` + ``genisoimage`` on PATH.
 # - KVM accessible (the bake VMs run with ``-enable-kvm``).
 # - Wall clock per run: 5-10 minutes.
 
@@ -27,14 +27,17 @@ fail_fast = true
 # this dir. Same convention as the disk-image / live build pipelines.
 artifact_dir = "{{ local.env.HOME }}/system_imaging/disk"
 
-# Token baked into the server qcow2 by the customise step - bypasses
-# the runtime first-boot init that would otherwise generate one.
-token = "pxe-chain-test-token"
+# Initial bty-user password seeded into the server VM via cloud-init
+# at first boot. The customise step bakes this into the cidata ISO's
+# user-data; the chain step uses it to ``POST /auth/login`` (same as
+# any operator would after capturing the password from /etc/issue).
+bty_password = "pxe-chain-test-pass"
 
 # Image name used for the assignment + the dummy file the customise
-# step bakes into ``/var/lib/bty/images/``. Tiny 1 MiB qcow2 so the
-# flash completes in seconds against the client's 8 GiB blank disk.
-machine_image = "test.img"
+# step stages locally for the chain step to upload via
+# ``PUT /images/<name>``. Tiny 1 MiB qcow2 so the flash completes
+# in seconds against the client's 8 GiB blank disk.
+machine_image = "test.qcow2"
 
 # Synthesised PXE network. ``-netdev socket`` is just an L2 link with
 # no DHCP server of its own, so the test runs full DHCP (not proxy-

@@ -72,6 +72,33 @@
                     accepted but only the network part is used.
                 </div>
             </div>
+            <div class="col-sm-12">
+                <label class="form-label" for="mode">Mode</label>
+                <select name="mode" id="mode" class="form-select">
+                    <option value="proxy" selected>proxy-DHCP (other DHCP server already on segment)</option>
+                    <option value="full">full DHCP (bty-server is the only DHCP server)</option>
+                </select>
+                <div class="form-text">
+                    Pick <code>full</code> on isolated networks where no other DHCP
+                    server runs (homelabs, dedicated CI segments). Picks
+                    <code>proxy</code> for typical LANs.
+                </div>
+            </div>
+            <div class="col-sm-4">
+                <label class="form-label" for="range_lo">Range start (full mode)</label>
+                <input type="text" name="range_lo" id="range_lo" class="form-control"
+                       placeholder="192.168.99.50">
+            </div>
+            <div class="col-sm-4">
+                <label class="form-label" for="range_hi">Range end (full mode)</label>
+                <input type="text" name="range_hi" id="range_hi" class="form-control"
+                       placeholder="192.168.99.150">
+            </div>
+            <div class="col-sm-4">
+                <label class="form-label" for="netmask">Netmask (full mode)</label>
+                <input type="text" name="netmask" id="netmask" class="form-control"
+                       placeholder="255.255.255.0">
+            </div>
             <div class="col-12">
                 <button type="submit" class="btn btn-primary">Activate</button>
             </div>

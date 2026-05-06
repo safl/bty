@@ -192,7 +192,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Install host tools (qemu, libguestfs, zstd)
+      - name: Install host tools (qemu, zstd, genisoimage)
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
@@ -200,29 +200,17 @@ jobs:
             qemu-utils \
             zstd \
             cpu-checker \
-            libguestfs-tools
+            genisoimage
 
       - name: Enable KVM access for the runner
-        # virt-customize (libguestfs) spins up its own QEMU appliance,
-        # and the PXE chain test boots two QEMU VMs of its own; both
-        # need /dev/kvm. Same udev workaround as the build-media job.
+        # The chain test boots two QEMU VMs that need /dev/kvm. Same
+        # udev workaround as the build-media job.
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
               | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
           ls -l /dev/kvm
-
-      - name: Make /boot/vmlinuz readable for libguestfs
-        # GHA's Ubuntu runners ship /boot/vmlinuz-* as mode 0600
-        # root-only. libguestfs's ``supermin`` appliance needs to
-        # read the host kernel to build its tiny VM, and fails with
-        # "supermin exited with error status 1" otherwise. Standard
-        # fix per the libguestfs FAQ - relax the perms (the runner
-        # is an ephemeral VM, no real exposure).
-        run: |
-          sudo chmod 0644 /boot/vmlinuz-*
-          ls -l /boot/vmlinuz-* | head
 
       - name: Install cijoe
         run: pipx install cijoe

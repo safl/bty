@@ -368,16 +368,27 @@ def register_ui_routes(
         request: Request,
         interface: Annotated[str, Form()] = "",
         subnet: Annotated[str, Form()] = "",
+        mode: Annotated[str, Form()] = "proxy",
+        range_lo: Annotated[str, Form()] = "",
+        range_hi: Annotated[str, Form()] = "",
+        netmask: Annotated[str, Form()] = "",
     ) -> HTMLResponse:
         try:
-            _sysconfig.activate_pxe(interface, subnet)
+            _sysconfig.activate_pxe(
+                interface,
+                subnet,
+                mode=mode,
+                range_lo=range_lo or None,
+                range_hi=range_hi or None,
+                netmask=netmask or None,
+            )
         except _sysconfig.SysConfigError as exc:
             return _render_settings_page(
                 request, flash=f"PXE activation failed: {exc}", flash_kind="danger"
             )
         return _render_settings_page(
             request,
-            flash=f"PXE activated on {interface!r} for {subnet!r}.",
+            flash=f"PXE activated on {interface!r} for {subnet!r} ({mode}).",
             flash_kind="success",
         )
 

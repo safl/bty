@@ -278,6 +278,64 @@ def test_pxe_does_not_overwrite_assignment(app_client: TestClient) -> None:
     assert after["discovered_at"] is not None
 
 
+# ---------- image / boot upload --------------------------------------------
+
+
+def test_put_image_uploads_to_image_root(app_client: TestClient) -> None:
+    """``PUT /images/{name}`` lands the body bytes at
+    ``image_root/<name>`` and the file is round-trippable via the
+    open ``GET /images/{name}``."""
+    body = b"\x01\x02\x03" * 1024
+    r = app_client.put("/images/upload.qcow2", content=body, headers=AUTH)
+    assert r.status_code == 200, r.text
+    payload = r.json()
+    assert payload["name"] == "upload.qcow2"
+    assert payload["size_bytes"] == len(body)
+    # Same bytes flow back via the open serve route.
+    served = app_client.get("/images/upload.qcow2")
+    assert served.status_code == 200
+    assert served.content == body
+
+
+def test_put_image_overwrites_existing(app_client: TestClient) -> None:
+    first = app_client.put("/images/x.qcow2", content=b"old", headers=AUTH)
+    assert first.status_code == 200
+    second = app_client.put("/images/x.qcow2", content=b"newer-bytes", headers=AUTH)
+    assert second.status_code == 200
+    assert second.json()["size_bytes"] == len(b"newer-bytes")
+    assert app_client.get("/images/x.qcow2").content == b"newer-bytes"
+
+
+def test_put_image_rejects_path_traversal(app_client: TestClient) -> None:
+    """``..`` and slashes mustn't escape the image root. FastAPI's
+    path converter already strips raw ``/`` from ``{name}``, but
+    URL-encoded variants and ``..`` need an explicit reject."""
+    r = app_client.put("/images/..%2Fescape.qcow2", content=b"x", headers=AUTH)
+    assert r.status_code in {400, 404}
+
+
+def test_put_image_requires_auth(app_client: TestClient) -> None:
+    r = app_client.put("/images/x.qcow2", content=b"x")
+    assert r.status_code == 401
+
+
+def test_put_boot_uploads_to_boot_root(app_client: TestClient) -> None:
+    """``PUT /boot/{name}`` symmetric to /images/{name} but lands
+    under boot_root - this is how the live trio gets onto the
+    appliance via the API instead of scp / fetch-from-release."""
+    body = b"vmlinuz-bytes-here"
+    r = app_client.put("/boot/bty-live-x86_64.vmlinuz", content=body, headers=AUTH)
+    assert r.status_code == 200
+    served = app_client.get("/boot/bty-live-x86_64.vmlinuz")
+    assert served.status_code == 200
+    assert served.content == body
+
+
+def test_put_boot_requires_auth(app_client: TestClient) -> None:
+    r = app_client.put("/boot/anything", content=b"x")
+    assert r.status_code == 401
+
+
 # ---------- images ----------------------------------------------------------
 
 

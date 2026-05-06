@@ -447,6 +447,35 @@ def create_app(
             )
         return out
 
+    @app.put(
+        "/images/{name}",
+        dependencies=[Depends(require_token)],
+        include_in_schema=False,
+    )
+    async def upload_image(name: str, request: Request) -> dict[str, object]:
+        """Stream-upload an image into the image root.
+
+        Body is the raw image bytes (``Content-Type:
+        application/octet-stream``). Atomic via a ``.partial`` sibling
+        + rename. Returns the resolved path + bytes-written on
+        success; replaces an existing file with the same name.
+        """
+        return await _stream_upload(request, resolved_image_root, name)
+
+    @app.put(
+        "/boot/{name}",
+        dependencies=[Depends(require_token)],
+        include_in_schema=False,
+    )
+    async def upload_boot_artifact(name: str, request: Request) -> dict[str, object]:
+        """Stream-upload a live-env artefact into the boot dir.
+
+        Same shape as ``PUT /images/{name}`` - the live trio
+        (vmlinuz / initrd / squashfs) goes here so the iPXE chain
+        finds it via the open ``GET /boot/{name}`` route.
+        """
+        return await _stream_upload(request, resolved_boot_root, name)
+
     # Browser UI under /ui/ (Jinja + Bootstrap, cookie-auth).
     _ui.register_ui_routes(
         app,
@@ -517,13 +546,12 @@ def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
-def _serve_safe_file(root: Path, name: str) -> FileResponse:
-    """Return a FileResponse for ``root / name`` after path-traversal checks.
+def _safe_path(root: Path, name: str) -> Path:
+    """Resolve ``root / name`` with path-traversal checks, return the path.
 
-    Rejects any name containing slashes, ``..``, or NULs (the
-    fastapi path converter already keeps slashes out, but the explicit
-    check is cheap and survives future routing changes). Returns 404
-    if the resolved file does not exist or is not a regular file.
+    Rejects names with slashes, ``..``, NULs, etc. Caller decides
+    what to do with the resolved path (404 vs. open-for-write); the
+    existing FileResponse helper used to inline this check.
     """
     if not name or "/" in name or "\\" in name or "\x00" in name or name in {".", ".."}:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="bad name")
@@ -532,6 +560,35 @@ def _serve_safe_file(root: Path, name: str) -> FileResponse:
         candidate.relative_to(root.resolve())
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="bad name") from exc
+    return candidate
+
+
+def _serve_safe_file(root: Path, name: str) -> FileResponse:
+    """Return a FileResponse for ``root / name`` after path-traversal checks."""
+    candidate = _safe_path(root, name)
     if not candidate.is_file():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"no such file: {name}")
     return FileResponse(candidate, filename=name)
+
+
+async def _stream_upload(request: Request, root: Path, name: str) -> dict[str, object]:
+    """Stream the request body to ``root / name`` and return basic metadata.
+
+    Atomic via a sibling ``.partial`` file + rename so a torn upload
+    can't leave a half-written image where a previous good copy used
+    to be. The destination directory is created if it doesn't exist
+    (server image's first-boot init creates it for the prod paths,
+    but tests pass tmp_path and we want this to work without an
+    init step).
+    """
+    candidate = _safe_path(root, name)
+    root.mkdir(parents=True, exist_ok=True)
+    partial = candidate.with_suffix(candidate.suffix + ".partial")
+    size = 0
+    with partial.open("wb") as fh:
+        async for chunk in request.stream():
+            if chunk:
+                fh.write(chunk)
+                size += len(chunk)
+    partial.replace(candidate)
+    return {"name": name, "size_bytes": size, "path": str(candidate)}

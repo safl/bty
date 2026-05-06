@@ -80,7 +80,7 @@ def test_pxe_active_returns_none_on_malformed(tmp_path: Path) -> None:
 # ---------- activate_pxe ---------------------------------------------------
 
 
-def test_activate_pxe_passes_validated_args_to_helper() -> None:
+def test_activate_pxe_proxy_mode_passes_validated_args_to_helper() -> None:
     completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
     with patch("bty.web._sysconfig.subprocess.run", return_value=completed) as mock_run:
         activate_pxe("eth0", "192.168.1.0/24")
@@ -88,8 +88,40 @@ def test_activate_pxe_passes_validated_args_to_helper() -> None:
     cmd = args[0]
     assert cmd[:2] == ["sudo", "-n"]
     assert cmd[2].endswith("/bty-web-activate-pxe")
-    # CIDR was canonicalised to the bare network address.
-    assert cmd[-2:] == ["eth0", "192.168.1.0"]
+    # mode + interface + canonicalised network address; no extras.
+    assert cmd[3:] == ["proxy", "eth0", "192.168.1.0"]
+
+
+def test_activate_pxe_full_mode_passes_range_and_netmask() -> None:
+    completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+    with patch("bty.web._sysconfig.subprocess.run", return_value=completed) as mock_run:
+        activate_pxe(
+            "eth0",
+            "192.168.99.0",
+            mode="full",
+            range_lo="192.168.99.50",
+            range_hi="192.168.99.150",
+            netmask="255.255.255.0",
+        )
+    cmd = mock_run.call_args[0][0]
+    assert cmd[3:] == [
+        "full",
+        "eth0",
+        "192.168.99.0",
+        "192.168.99.50",
+        "192.168.99.150",
+        "255.255.255.0",
+    ]
+
+
+def test_activate_pxe_full_mode_requires_range_and_netmask() -> None:
+    with pytest.raises(SysConfigError, match="full mode requires"):
+        activate_pxe("eth0", "10.0.0.0", mode="full")
+
+
+def test_activate_pxe_rejects_unknown_mode() -> None:
+    with pytest.raises(SysConfigError, match="invalid mode"):
+        activate_pxe("eth0", "10.0.0.0", mode="weird")
 
 
 def test_activate_pxe_accepts_bare_network_address() -> None:
@@ -97,7 +129,7 @@ def test_activate_pxe_accepts_bare_network_address() -> None:
     with patch("bty.web._sysconfig.subprocess.run", return_value=completed) as mock_run:
         activate_pxe("eth0", "10.0.0.0")
     cmd = mock_run.call_args[0][0]
-    assert cmd[-2:] == ["eth0", "10.0.0.0"]
+    assert cmd[3:] == ["proxy", "eth0", "10.0.0.0"]
 
 
 def test_activate_pxe_rejects_bad_interface_name() -> None:

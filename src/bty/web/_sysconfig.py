@@ -80,8 +80,23 @@ def pxe_active(active_path: Path = PXE_ACTIVE_PATH) -> PxeConfig | None:
     return None
 
 
-def activate_pxe(interface: str, subnet: str) -> None:
-    """Validate inputs and invoke the PXE-activation helper."""
+def activate_pxe(
+    interface: str,
+    subnet: str,
+    mode: str = "proxy",
+    range_lo: str | None = None,
+    range_hi: str | None = None,
+    netmask: str | None = None,
+) -> None:
+    """Validate inputs and invoke the PXE-activation helper.
+
+    ``mode`` is ``proxy`` (default - other DHCP server on segment)
+    or ``full`` (bty-server is the only DHCP server, must hand out
+    IPs as well as PXE info). Full-DHCP mode requires ``range_lo``,
+    ``range_hi``, and ``netmask``.
+    """
+    if mode not in {"proxy", "full"}:
+        raise SysConfigError(f"invalid mode: {mode!r} (expected 'proxy' or 'full')")
     interface = interface.strip()
     subnet = subnet.strip()
     if not _INTERFACE_RE.fullmatch(interface):
@@ -99,9 +114,26 @@ def activate_pxe(interface: str, subnet: str) -> None:
             subnet_arg = cidr_or_addr
     except (ipaddress.AddressValueError, ValueError) as exc:
         raise SysConfigError(f"invalid subnet: {subnet!r}") from exc
+
+    extra: list[str] = []
+    if mode == "full":
+        if not (range_lo and range_hi and netmask):
+            raise SysConfigError("full mode requires range_lo, range_hi, and netmask")
+        for label, value in (
+            ("range_lo", range_lo),
+            ("range_hi", range_hi),
+            ("netmask", netmask),
+        ):
+            try:
+                ipaddress.IPv4Address(value.strip())
+            except (ipaddress.AddressValueError, ValueError) as exc:
+                raise SysConfigError(f"invalid {label}: {value!r}") from exc
+            extra.append(value.strip())
+
+    cmd = ["sudo", "-n", ACTIVATE_PXE_HELPER, mode, interface, subnet_arg, *extra]
     try:
         subprocess.run(
-            ["sudo", "-n", ACTIVATE_PXE_HELPER, interface, subnet_arg],
+            cmd,
             capture_output=True,
             text=True,
             check=True,

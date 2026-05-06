@@ -1,25 +1,31 @@
 """
-Run the PXE chain test against the customised server qcow2
+Run the PXE chain test against the production server qcow2
 ============================================================
 
 Boots two QEMU VMs sharing an L2 segment via ``-netdev socket``:
 
-- Server: dual NIC. The mgmt NIC is QEMU user-mode with a host
-  port-forward so the script can hit ``/healthz`` and PUT the
-  machine assignment via plain HTTP. The PXE NIC opens a socket
-  listener for the client to dial in.
-- Client: single NIC, joined to the server's PXE socket. PXE-boot
-  enabled. Blank virtio disk attached as the flash target. The
-  customise step bakes a 1 MiB dummy qcow2 into
-  ``/var/lib/bty/images/`` so the live env's bty-flash-on-boot
-  script can pull it, run ``bty flash --yes`` against /dev/vda,
-  and reach the "flash complete; rebooting" marker.
+- Server: dual NIC, plus a NoCloud cidata ISO (``seed.iso``)
+  attached as a CD-ROM. cloud-init at first boot reads the ISO and
+  applies the bty user's password; ``bty-web-init.service`` creates
+  the state dir tree and writes ``/etc/default/bty-web``;
+  ``bty-web.service`` comes up. The mgmt NIC is QEMU user-mode with
+  a host port-forward so the script can drive bty-web's HTTP API.
+  The PXE NIC opens a socket listener for the client to dial in.
 
-Asserts the chain progresses by tailing the client's serial-console
-log for marker strings configured in ``[test.pxe.chain_markers]``.
-On success: returns 0 and leaves the serial logs in the run dir for
-the cijoe report. On failure: returns non-zero and prints which
-markers were missed plus the last 200 lines of the client log.
+- Client: single NIC joined to the server's PXE socket. PXE-boot
+  enabled. Blank virtio disk attached as the flash target. After
+  the chain runs, ``bty-flash-on-boot`` pulls the dummy image we
+  uploaded earlier, runs ``bty flash --yes`` against /dev/vda, and
+  reaches the "flash complete; rebooting" marker.
+
+The test uses ONLY production paths to stage the appliance for the
+chain - no virt-customize, no DB seeding, no /etc/default baking.
+The script logs into bty-web with the cloud-init-set password,
+uploads the live trio + dummy image via the upload routes, activates
+PXE via the same UI-form endpoint operators use, and PUTs the
+machine assignment. Asserts the chain progresses by tailing the
+client's serial-console log for marker strings configured in
+``[test.pxe.chain_markers]``.
 
 Retargetable: False
 """
@@ -32,12 +38,20 @@ import logging as log
 import socket
 import subprocess
 import time
+import urllib.error
 import urllib.request
 from argparse import ArgumentParser
 from pathlib import Path
 
-HEALTHZ_TIMEOUT = 180  # seconds for bty-web to come up
-CHAIN_TIMEOUT = 600  # seconds total for all markers to appear
+ARTIFACT_NAMES = (
+    "bty-live-x86_64.vmlinuz",
+    "bty-live-x86_64.initrd",
+    "bty-live-x86_64.squashfs",
+)
+
+HEALTHZ_TIMEOUT = 300  # cloud-init + bty-web-init + bty-web takes a while
+LOGIN_TIMEOUT = 60  # cloud-init writes the password before sshd, but still
+CHAIN_TIMEOUT = 600  # total for all client-side markers to appear
 
 
 def add_args(parser: ArgumentParser):
@@ -53,17 +67,29 @@ def main(args, cijoe):
 
     workspace = Path.cwd() / "_build" / "test-pxe"
     server_qcow2 = workspace / "server.qcow2"
-    if not server_qcow2.is_file():
-        log.error(f"customised server qcow2 missing: {server_qcow2}")
-        log.error("did pxe_customize_server run?")
-        return errno.ENOENT
+    seed_iso = workspace / "seed.iso"
+    boot_stage = workspace / "boot"
+    dummy_image = workspace / "test-image.qcow2"
+    for path, label in (
+        (server_qcow2, "server qcow2"),
+        (seed_iso, "cidata ISO"),
+        (dummy_image, "dummy image"),
+    ):
+        if not path.is_file():
+            log.error(f"{label} missing: {path}")
+            log.error("did pxe_customize_server run?")
+            return errno.ENOENT
+    for name in ARTIFACT_NAMES:
+        if not (boot_stage / name).is_file():
+            log.error(f"live artefact missing in workspace: {boot_stage / name}")
+            return errno.ENOENT
 
     pxe_socket_port = _free_port()
     mgmt_port = _free_port()
     server_log = workspace / "server.serial.log"
     client_log = workspace / "client.serial.log"
 
-    server = _start_server_vm(server_qcow2, mgmt_port, pxe_socket_port, server_log, cfg)
+    server = _start_server_vm(server_qcow2, seed_iso, mgmt_port, pxe_socket_port, server_log, cfg)
     client = None
     try:
         log.info(f"Waiting for bty-web /healthz on 127.0.0.1:{mgmt_port}")
@@ -74,8 +100,46 @@ def main(args, cijoe):
         ):
             return errno.ETIMEDOUT
 
+        # Log in with the password cloud-init set; retry briefly
+        # because cloud-init may still be running chpasswd when
+        # /healthz first answers.
+        log.info("POST /auth/login (PAM via cloud-init-seeded password)")
+        token = _wait_for_login("127.0.0.1", mgmt_port, cfg, LOGIN_TIMEOUT)
+        if token is None:
+            return errno.EACCES
+
+        log.info("PUT /boot/<live trio>")
+        for name in ARTIFACT_NAMES:
+            _put_file("127.0.0.1", mgmt_port, token, "/boot", boot_stage / name, name)
+
+        log.info(f"PUT /images/{cfg['machine_image']} (1 MiB dummy)")
+        _put_file(
+            "127.0.0.1",
+            mgmt_port,
+            token,
+            "/images",
+            dummy_image,
+            cfg["machine_image"],
+        )
+
+        log.info("POST /ui/settings/pxe-activate (full mode)")
+        _post_form(
+            "127.0.0.1",
+            mgmt_port,
+            token,
+            "/ui/settings/pxe-activate",
+            {
+                "interface": f"{cfg.get('nic_prefix', 'ens')}{int(cfg['pxe_nic_slot'])}",
+                "subnet": cfg["server_pxe_ip"].rsplit(".", 1)[0] + ".0",
+                "mode": "full",
+                "range_lo": cfg["dhcp_range_lo"],
+                "range_hi": cfg["dhcp_range_hi"],
+                "netmask": cfg["pxe_netmask"],
+            },
+        )
+
         log.info(f"PUT /machines/{cfg['client_mac']} (boot_policy=flash)")
-        _put_assignment("127.0.0.1", mgmt_port, cfg)
+        _put_assignment("127.0.0.1", mgmt_port, token, cfg)
 
         log.info(f"Starting client VM (PXE boot, joined to socket :{pxe_socket_port})")
         client = _start_client_vm(workspace, pxe_socket_port, client_log, cfg)
@@ -108,7 +172,7 @@ def main(args, cijoe):
 # ---------- VM lifecycle ---------------------------------------------------
 
 
-def _start_server_vm(qcow2, mgmt_port, socket_port, log_path, cfg):
+def _start_server_vm(qcow2, seed_iso, mgmt_port, socket_port, log_path, cfg):
     cmd = [
         "qemu-system-x86_64",
         "-enable-kvm",
@@ -120,6 +184,11 @@ def _start_server_vm(qcow2, mgmt_port, socket_port, log_path, cfg):
         "2G",
         "-drive",
         f"file={qcow2},if=virtio",
+        # NoCloud cidata ISO. cloud-init's NoCloud datasource scans
+        # attached block devices for a filesystem labeled ``cidata``;
+        # our customise step set that label via genisoimage -volid.
+        "-drive",
+        f"file={seed_iso},media=cdrom,readonly=on",
         "-nographic",
         "-serial",
         f"file:{log_path}",
@@ -177,6 +246,106 @@ def _start_client_vm(workspace, socket_port, log_path, cfg):
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
+
+
+# ---------- HTTP helpers ---------------------------------------------------
+
+
+def _wait_for_login(host, port, cfg, timeout):
+    """Retry POST /auth/login until it succeeds, returning the token.
+
+    cloud-init may still be running chpasswd when /healthz first
+    answers, so login can race with the password landing. We retry
+    on 401 for ``timeout`` seconds before giving up.
+    """
+    deadline = time.monotonic() + timeout
+    last_err = None
+    while time.monotonic() < deadline:
+        try:
+            return _login(host, port, cfg["bty_password"])
+        except urllib.error.HTTPError as exc:
+            last_err = exc
+            if exc.code != 401:
+                log.error(f"/auth/login returned {exc.code} {exc.reason}")
+                return None
+            time.sleep(2)
+        except urllib.error.URLError as exc:
+            last_err = exc
+            time.sleep(2)
+    log.error(f"timed out waiting for /auth/login (last err: {last_err})")
+    return None
+
+
+def _login(host, port, password):
+    body = json.dumps({"password": password, "label": "pxe-chain-test"}).encode("utf-8")
+    req = urllib.request.Request(
+        f"http://{host}:{port}/auth/login",
+        data=body,
+        method="POST",
+        headers={"Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        payload = json.loads(resp.read().decode("utf-8"))
+    return payload["token"]
+
+
+def _put_file(host, port, token, base_path, src_path, name):
+    """``PUT /<base>/<name>`` with the file as the body. Streams to
+    avoid loading large squashfs / kernel artefacts into memory."""
+    url = f"http://{host}:{port}{base_path}/{name}"
+    size = src_path.stat().st_size
+    with src_path.open("rb") as fh:
+        req = urllib.request.Request(
+            url,
+            data=fh,
+            method="PUT",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/octet-stream",
+                "Content-Length": str(size),
+            },
+        )
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            if resp.status != 200:
+                raise RuntimeError(f"PUT {url} returned {resp.status}")
+
+
+def _post_form(host, port, token, path, data):
+    body = urllib_urlencode(data).encode("utf-8")
+    req = urllib.request.Request(
+        f"http://{host}:{port}{path}",
+        data=body,
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/x-www-form-urlencoded",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        if resp.status not in (200, 303):
+            raise RuntimeError(f"POST {path} returned {resp.status}")
+
+
+def _put_assignment(host, port, token, cfg):
+    body = json.dumps(
+        {
+            "image": cfg["machine_image"],
+            "provisioning_mode": "none",
+            "boot_policy": "flash",
+        }
+    ).encode("utf-8")
+    req = urllib.request.Request(
+        f"http://{host}:{port}/machines/{cfg['client_mac']}",
+        data=body,
+        method="PUT",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        if resp.status != 200:
+            raise RuntimeError(f"PUT /machines returned {resp.status}")
 
 
 # ---------- chain markers --------------------------------------------------
@@ -244,28 +413,6 @@ def _http_ready(host, port):
         return False
 
 
-def _put_assignment(host, port, cfg):
-    body = json.dumps(
-        {
-            "image": cfg["machine_image"],
-            "provisioning_mode": "none",
-            "boot_policy": "flash",
-        }
-    ).encode("utf-8")
-    req = urllib.request.Request(
-        f"http://{host}:{port}/machines/{cfg['client_mac']}",
-        data=body,
-        method="PUT",
-        headers={
-            "Authorization": f"Bearer {cfg['token']}",
-            "Content-Type": "application/json",
-        },
-    )
-    with urllib.request.urlopen(req, timeout=10) as resp:
-        if resp.status != 200:
-            raise RuntimeError(f"PUT /machines returned {resp.status}")
-
-
 def _dump_tail(path, lines):
     if not path.is_file():
         log.error(f"{path}: file does not exist")
@@ -274,3 +421,10 @@ def _dump_tail(path, lines):
     log.error(f"--- last {lines} lines of {path} ---")
     for line in body.splitlines()[-lines:]:
         log.error(line)
+
+
+def urllib_urlencode(data):
+    """Local re-export so the imports stay tidy at the top of the file."""
+    from urllib.parse import urlencode
+
+    return urlencode(data)
