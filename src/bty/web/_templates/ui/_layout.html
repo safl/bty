@@ -83,6 +83,35 @@
             color: #fff;
             outline: none;
         }
+
+        /* SSE visual cues. The page-level "live" indicator pulses
+           when an event arrives; the swapped fragment gets a brief
+           green wash so the operator's eye snaps to where the change
+           landed. ``prefers-reduced-motion`` users see no animation. */
+        .live-indicator i {
+            display: inline-block;
+        }
+        @keyframes bty-pulse {
+            0%   { transform: scale(1); }
+            40%  { transform: scale(1.45); }
+            100% { transform: scale(1); }
+        }
+        .live-indicator.pulsing i {
+            animation: bty-pulse 0.45s ease-out;
+        }
+        @keyframes bty-flash {
+            0%   { background-color: rgba(40, 167, 69, 0.20); }
+            100% { background-color: transparent; }
+        }
+        .sse-target.flashing {
+            animation: bty-flash 0.7s ease-out;
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .live-indicator.pulsing i,
+            .sse-target.flashing {
+                animation: none;
+            }
+        }
     </style>
     <script src="/static/htmx.min.js"></script>
     <script src="/static/sse.js"></script>
@@ -139,5 +168,33 @@
     {% endif %}
     {% block content %}{% endblock %}
 </main>
+
+<script>
+// SSE visual cues. ``htmx:sseMessage`` fires once per server event;
+// ``htmx:afterSwap`` fires once the swap has actually rendered. We
+// pulse every ``.live-indicator`` icon on the page when an event
+// arrives, and flash the swap target's background green so the eye
+// snaps to it. Resetting the class with a forced reflow lets the
+// animation re-trigger if events fire faster than the keyframes.
+(function () {
+    function blink(el, cls) {
+        if (!el) return;
+        el.classList.remove(cls);
+        // eslint-disable-next-line no-unused-expressions
+        el.offsetWidth;
+        el.classList.add(cls);
+    }
+    document.body.addEventListener("htmx:sseMessage", function () {
+        document.querySelectorAll(".live-indicator").forEach(function (i) {
+            blink(i, "pulsing");
+        });
+    });
+    document.body.addEventListener("htmx:afterSwap", function (evt) {
+        if (evt.target && evt.target.classList.contains("sse-target")) {
+            blink(evt.target, "flashing");
+        }
+    });
+})();
+</script>
 </body>
 </html>

@@ -3,7 +3,8 @@
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
     <h1 class="h3 mb-0"><i class="bi bi-pc-display me-2"></i>Machines</h1>
-    <span class="text-muted small" title="Live-updating via Server-Sent Events">
+    <span class="live-indicator text-muted small"
+          title="Live-updating via Server-Sent Events">
         <i class="bi bi-broadcast text-success me-1"></i>
         <span id="machines-count">{{ machines|length }}</span> total · live
     </span>
@@ -27,8 +28,10 @@
             {# The tbody subscribes to the SSE stream so it auto-updates
                when the operator (or auto-discovery) mutates machines.
                The browser carries the bty-token cookie automatically;
-               that is what authenticates the EventSource connection. #}
+               that is what authenticates the EventSource connection.
+               ``sse-target`` opts in to the layout-level flash animation. #}
             <tbody id="machines-tbody"
+                   class="sse-target"
                    hx-ext="sse"
                    sse-connect="/events/machines"
                    sse-swap="machines-update">
