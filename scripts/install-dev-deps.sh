@@ -1,0 +1,126 @@
+#!/usr/bin/env bash
+# Install everything needed to develop, test, and build bty on a
+# Debian-family host (Debian 12+, Ubuntu 24.04+).
+#
+# What this covers:
+#   - Python toolchain (uv via pipx; cijoe via pipx)
+#   - bty CLI flash dependencies (qemu-img, zstd, parted, ...)
+#   - bty-web tests (no extra system tooling beyond Python deps)
+#   - PXE chain test (qemu-system + KVM helpers + sshpass for debug)
+#   - bty-media bake pipelines:
+#       * usb / server: qemu-system + genisoimage for cloud-init seed
+#       * live: live-build + debootstrap + squashfs-tools + xorriso
+#                (plus root for the chroot phase - sudo prompts you
+#                interactively when ``sudo make build VARIANT=live``)
+#
+# Idempotent: re-running upgrades package versions when newer ones
+# are available but does no harm if everything is already installed.
+
+set -euo pipefail
+
+if ! command -v apt-get >/dev/null 2>&1; then
+    echo "This script targets Debian / Ubuntu (apt-based)." >&2
+    echo "On other distros, install equivalents of the package list" >&2
+    echo "below by hand:" >&2
+    echo "  qemu-utils qemu-system-x86 zstd genisoimage live-build" >&2
+    echo "  debootstrap squashfs-tools xorriso parted gdisk dosfstools" >&2
+    echo "  e2fsprogs exfatprogs nvme-cli pipx git make python3-venv" >&2
+    exit 1
+fi
+
+# Use sudo only when not already root (e.g. in a CI container running
+# as root, no sudo is needed and may not be installed).
+sudo_if_needed() {
+    if [ "$(id -u)" -eq 0 ]; then
+        "$@"
+    else
+        sudo "$@"
+    fi
+}
+
+PACKAGES=(
+    # Core dev tooling.
+    git
+    make
+    curl
+    ca-certificates
+    jq
+
+    # Python.
+    python3
+    python3-venv
+    pipx
+
+    # ``bty flash`` runtime + integration tests against a real loop
+    # device (gdisk / parted partitioning, dosfstools / e2fsprogs /
+    # exfatprogs filesystem creation, nvme-cli for NVMe inspection,
+    # zstd for ``.img.zst`` decompression, qemu-img for qcow2 ->
+    # raw conversions).
+    qemu-utils
+    zstd
+    parted
+    gdisk
+    dosfstools
+    e2fsprogs
+    exfatprogs
+    nvme-cli
+
+    # PXE chain test:
+    #  - qemu-system-x86 to boot the server + client VMs
+    #  - cpu-checker (kvm-ok) for the KVM sanity check
+    #  - sshpass for the ad-hoc password-SSH used during debug
+    #    (the chain test itself uses paramiko; sshpass is only
+    #    handy when you ssh in by hand to poke a running VM)
+    qemu-system-x86
+    cpu-checker
+    sshpass
+
+    # bty-media bake (usb / server variants - cloud-init in QEMU,
+    # NoCloud cidata ISO).
+    genisoimage
+
+    # bty-media live variant (live-build's debootstrap / chroot /
+    # squashfs pipeline).
+    live-build
+    debootstrap
+    squashfs-tools
+    xorriso
+)
+
+echo "Updating apt index..."
+sudo_if_needed apt-get update -y
+
+echo "Installing ${#PACKAGES[@]} packages..."
+sudo_if_needed apt-get install -y --no-install-recommends "${PACKAGES[@]}"
+
+# pipx-installed user tools. ``|| true`` on each so a re-run that
+# finds them already installed doesn't fail the script.
+echo "Installing pipx tools (cijoe, uv)..."
+pipx install cijoe || pipx upgrade cijoe || true
+pipx install uv    || pipx upgrade uv    || true
+pipx ensurepath >/dev/null 2>&1 || true
+
+cat <<'EOF'
+
+==============================================================
+  bty dev environment ready.
+
+  Next steps:
+
+    uv sync --all-extras --group dev    # project venv + deps
+    uv run pytest                       # unit tests (~7s)
+    make ci                             # lint + types + tests
+    make build VARIANT=usb              # USB live image (~20m)
+    make build VARIANT=server           # server appliance (~15m)
+    sudo make build VARIANT=live        # live trio (~10m, root)
+    make test-pxe                       # end-to-end PXE chain
+
+  Note: ``make build VARIANT=live`` needs root because live-build
+  does a chroot + mount-bind dance; the others run cloud-init in
+  an unprivileged QEMU and don't.
+
+  The ``bty`` user inside the cooked server image defaults to
+  password ``bty`` (rotate with ``passwd bty``). The admin user
+  is ``odus`` / ``odus`` (passwordless sudo).
+==============================================================
+EOF

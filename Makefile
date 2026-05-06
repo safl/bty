@@ -95,6 +95,21 @@ media-deps:
 # (cijoe/tasks/live.yaml) which needs ``live-build`` on the host
 # and passwordless sudo.
 build:
+	@if [ "$$(id -u)" -eq 0 ] && [ -z "$$_BTY_ELEVATED" ]; then \
+		echo "make: drop the 'sudo' prefix. Run 'make build VARIANT=$(VARIANT)' as"; \
+		echo "      your normal user; the Makefile self-elevates for VARIANT=live"; \
+		echo "      and runs other variants unprivileged. Pre-sudo strips PATH so"; \
+		echo "      cijoe (in ~/.local/bin) is not found."; \
+		exit 1; \
+	fi
+	@if [ "$(VARIANT)" = "live" ] && [ "$$(id -u)" -ne 0 ]; then \
+		echo "make: VARIANT=live needs root for live-build's chroot+squashfs;"; \
+		echo "      self-elevating with PATH preserved..."; \
+		exec sudo --preserve-env=PATH \
+			_BTY_ELEVATED=1 \
+			UV_CACHE_DIR="$${UV_CACHE_DIR:-$$HOME/.cache/uv}" \
+			$(MAKE) build VARIANT=live; \
+	fi
 	cd cijoe && cijoe $(MEDIA_TASK) --monitor -c configs/$(VARIANT).toml
 
 # End-to-end PXE chain test: server + client QEMU VMs sharing an L2
