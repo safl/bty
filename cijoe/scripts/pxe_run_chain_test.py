@@ -408,6 +408,17 @@ def _ssh_setup_test_dhcp(host, port, cfg):
     import paramiko
 
     pxe_iface = f"{cfg.get('nic_prefix', 'ens')}{int(cfg['pxe_nic_slot'])}"
+
+    # Static IP for the PXE NIC. dnsmasq's ``bind-dynamic`` only
+    # binds to interfaces that have an address, so without this the
+    # full-DHCP block sits idle and the client's PXE ROM gets no
+    # answer. Drop a higher-priority systemd-networkd file alongside
+    # the production ``10-bty-default.network`` (which DHCPs
+    # everything) so just this one NIC is pinned.
+    pxe_network = (
+        f"[Match]\nName={pxe_iface}\n\n[Network]\nAddress={cfg['server_pxe_ip']}/24\nDHCP=no\n"
+    )
+
     overlay = (
         "# Test-only full-DHCP overlay written by pxe_run_chain_test.\n"
         "# bty itself does not configure full DHCP - this comes from the\n"
@@ -442,10 +453,18 @@ def _ssh_setup_test_dhcp(host, port, cfg):
         timeout=15,
     )
     try:
+        # Drop both the static-IP .network file and the dnsmasq
+        # overlay, then ``networkctl reload`` (picks up the new
+        # .network without restarting networkd) and restart dnsmasq
+        # so it sees the now-bound interface.
         cmd = (
-            f"sudo -n install -d -m 0755 /etc/dnsmasq.d && "
+            f"sudo -n install -d -m 0755 /etc/dnsmasq.d /etc/systemd/network && "
+            f"echo {_quote_for_shell(pxe_network)} | "
+            f"sudo -n tee /etc/systemd/network/20-bty-pxe-test.network > /dev/null && "
             f"echo {_quote_for_shell(overlay)} | "
             f"sudo -n tee /etc/dnsmasq.d/test-fulldhcp.conf > /dev/null && "
+            f"sudo -n networkctl reload && "
+            f"sudo -n networkctl up {pxe_iface} && "
             f"sudo -n systemctl restart dnsmasq.service"
         )
         _stdin, stdout, stderr = client.exec_command(cmd, timeout=30)
