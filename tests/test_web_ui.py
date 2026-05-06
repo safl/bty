@@ -139,6 +139,20 @@ def test_ui_dashboard_renders_after_login(client: TestClient) -> None:
     assert "Machines" in r.text
 
 
+def test_ui_dashboard_subscribes_to_sse_for_live_counts(client: TestClient) -> None:
+    """The counter cards need a ``sse-connect``/``sse-swap`` wrapper
+    so the htmx-ext-sse client routes ``dashboard-counts`` events to
+    them - that's what makes the dashboard a *dashboard* and not a
+    snapshot."""
+    _login(client)
+    r = client.get("/ui/dashboard")
+    assert r.status_code == 200
+    body = r.text
+    assert 'id="dashboard-counts"' in body
+    assert 'sse-connect="/events/machines"' in body
+    assert 'sse-swap="dashboard-counts"' in body
+
+
 def test_ui_machines_lists_known_records(client: TestClient) -> None:
     _login(client)
     # Seed via the API.

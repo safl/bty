@@ -101,9 +101,34 @@ def create_app(
         machines = [_ui._row_to_dict(r) for r in rows]
         return jinja.get_template("ui/_machines_tbody.html").render(machines=machines)
 
-    def publish_machines_changed() -> None:
-        """Publish a fresh tbody snapshot. Mutating routes call this."""
+    def render_dashboard_counts() -> str:
+        """Render the dashboard counter cards as a swappable fragment."""
+        with _db.open_db(state_path) as conn:
+            machine_count = conn.execute("SELECT COUNT(*) FROM machines").fetchone()[0]
+            discovered_count = conn.execute(
+                "SELECT COUNT(*) FROM machines WHERE image IS NULL"
+            ).fetchone()[0]
+        image_count = len(images.list_images(resolved_image_root))
+        return jinja.get_template("ui/_dashboard_counts.html").render(
+            machine_count=machine_count,
+            discovered_count=discovered_count,
+            image_count=image_count,
+        )
+
+    def publish_state_changed() -> None:
+        """Publish fresh snapshots of every SSE-driven UI fragment.
+
+        Mutating routes call this on commit. Subscribers receive all
+        events on the same stream and route to elements with matching
+        ``sse-swap`` attributes - the machines table swaps the
+        ``machines-update`` event, the dashboard counters swap the
+        ``dashboard-counts`` event.
+        """
         event_bus.publish(MachineEvent(name="machines-update", html=render_machines_tbody()))
+        event_bus.publish(MachineEvent(name="dashboard-counts", html=render_dashboard_counts()))
+
+    # Back-compat alias - older internal call sites use this name.
+    publish_machines_changed = publish_state_changed
 
     workflow_runner = WorkflowRunner(
         state_path=state_path,
@@ -319,9 +344,12 @@ def create_app(
     )
     async def events_machines() -> StreamingResponse:
         async def stream() -> AsyncIterator[bytes]:
-            # Send the current snapshot on subscribe so the page is
-            # immediately consistent without a separate fetch.
+            # Send current snapshots on subscribe so each page is
+            # immediately consistent without a separate fetch. Each
+            # event is routed by the htmx-ext-sse client to whichever
+            # element on the page declares ``sse-swap=<name>``.
             yield sse_format("machines-update", render_machines_tbody())
+            yield sse_format("dashboard-counts", render_dashboard_counts())
             async for event in event_bus.subscribe():
                 yield sse_format(event.name, event.html)
 
@@ -464,7 +492,10 @@ def create_app(
         + rename. Returns the resolved path + bytes-written on
         success; replaces an existing file with the same name.
         """
-        return await _stream_upload(request, resolved_image_root, name)
+        result = await _stream_upload(request, resolved_image_root, name)
+        # Image catalog count changes; refresh the dashboard fragment.
+        publish_state_changed()
+        return result
 
     @app.put(
         "/boot/{name}",
