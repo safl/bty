@@ -95,6 +95,14 @@ runcmd:
   # activates it via the UI.
   - systemctl daemon-reload
   - systemctl enable bty-web.service bty-web-init.service dnsmasq.service
+  # systemd-networkd manages NICs via the .network files we ship in
+  # rootfs/server/etc/systemd/network/. The default Debian server
+  # image leaves networkd disabled (cloud-init or ifupdown owns the
+  # NICs); we explicitly enable it because cloud-init is disabled
+  # post-bake. wait-online is the gate ``network-online.target``
+  # waits on - bty-web has ``Wants=network-online.target`` so this
+  # has to be running too.
+  - systemctl enable systemd-networkd.service systemd-networkd-wait-online.service
 
   # Lock root and create an admin user ``odus`` with passwordless
   # sudo so the operator has shell access for hands-on tasks. SSH
@@ -119,6 +127,13 @@ runcmd:
   # /etc/cloud/cloud-init.disabled`` and attach a NoCloud ISO.
   - touch /etc/cloud/cloud-init.disabled
   - cloud-init clean --logs --seed || true
+  # Also remove cloud-init's netplan output so our shipped
+  # /etc/systemd/network/10-bty-default.network is the unambiguous
+  # source of truth for NIC configuration after first boot. Without
+  # this, netplan's cloud-init-generated YAML sticks around and the
+  # next netplan apply (if any) overwrites our config.
+  - rm -f /etc/netplan/50-cloud-init.yaml
+  - rm -f /etc/network/interfaces.d/50-cloud-init.cfg
 
   # Trim apt + pip caches to keep the image small.
   - apt-get clean
