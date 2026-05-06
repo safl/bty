@@ -1,6 +1,6 @@
 
 ======================================================================
-  bty network-flash live env (Phase D-2)
+  bty network-flash live env
 
   This env runs ``bty-flash-on-boot.service`` on every boot. It
   reads its assignment from the kernel command line:
@@ -12,7 +12,9 @@
   the server, and reboots. ``journalctl -u bty-flash-on-boot`` for
   details.
 
-  The iPXE chain that supplies the cmdline params lands in Phase D-3.
+  The iPXE chain that supplies the cmdline params is rendered by
+  the bty-web server's ``ipxe_flash.j2`` template at
+  ``GET /pxe/<mac>``.
 ======================================================================
 
 Debian \n \l

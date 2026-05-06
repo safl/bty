@@ -5,9 +5,12 @@
 #   provisioning mode: {{ machine.provisioning_mode }}
 #   hostname:          {{ machine.hostname or "(none)" }}
 #
-# Milestone 11: this is a placeholder shape. The real boot chain into
-# the bty live environment + bootstrap handoff lands in milestone 14.
+# This template is rendered when the machine has an image assigned
+# but ``boot_policy=local`` - the machine has been provisioned at
+# some point and now boots normally from its disk. ``exit`` returns
+# control to the PXE ROM, which falls through to the next boot
+# device (typically the local disk).
 
-echo bty-web placeholder for {{ mac }}; assigned image: {{ machine.image or "(none)" }}
-sleep 5
+echo bty: {{ mac }} boot_policy=local image={{ machine.image or "(none)" }}, returning to local boot
+sleep 1
 exit

@@ -60,12 +60,13 @@ def cmdline_args() -> dict[str, str]:
 
 
 def pick_target() -> str:
-    """Phase D-2 placeholder: first non-removable, non-readonly disk.
+    """First non-removable, non-readonly disk on the system.
 
-    The bty server's per-MAC plan will supply an explicit target hint
-    in Phase D-3; until then the live env picks whatever the kernel
-    enumerates first. For a bare-metal target with one fixed disk
-    that's the right answer; multi-disk VMs need the D-3 hint.
+    bty-web doesn't yet send an explicit target hint in the per-MAC
+    plan, so the live env picks whatever the kernel enumerates
+    first. Right answer for a bare-metal target with one fixed
+    disk; a future ``bty.target=`` cmdline param could let the
+    server override for multi-disk hosts.
     """
     out = subprocess.run(
         ["bty", "list", "disks", "--json"],

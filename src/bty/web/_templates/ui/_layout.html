@@ -40,20 +40,48 @@
         .navbar .nav-btn i {
             font-size: 1.05rem;
         }
-        .principal-pill {
+        /* User-bar: a single pill containing username + logout, with a
+           thin vertical divider between them. Visually one widget,
+           but two click targets and zero JavaScript. */
+        .user-bar {
+            display: inline-flex;
+            align-items: stretch;
+            border-radius: 999px;
+            background-color: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            overflow: hidden;
+            font-size: 0.85rem;
+        }
+        .user-bar-name {
             display: inline-flex;
             align-items: center;
             gap: 0.4rem;
-            padding: 0.3rem 0.7rem;
-            border-radius: 999px;
-            background-color: rgba(255, 255, 255, 0.08);
-            color: rgba(255, 255, 255, 0.9);
-            font-size: 0.85rem;
+            padding: 0.35rem 0.8rem;
+            color: rgba(255, 255, 255, 0.92);
         }
-        .principal-pill code {
+        .user-bar-name code {
             color: #fff;
             background: transparent;
             padding: 0;
+        }
+        .user-bar-divider {
+            width: 1px;
+            background-color: rgba(255, 255, 255, 0.18);
+        }
+        .user-bar-logout {
+            display: inline-flex;
+            align-items: center;
+            padding: 0.35rem 0.7rem;
+            background: transparent;
+            border: none;
+            color: rgba(255, 255, 255, 0.85);
+            transition: background-color 0.15s, color 0.15s;
+        }
+        .user-bar-logout:hover,
+        .user-bar-logout:focus {
+            background-color: rgba(220, 53, 69, 0.65); /* danger red on hover */
+            color: #fff;
+            outline: none;
         }
     </style>
     <script src="/static/htmx.min.js"></script>
@@ -86,14 +114,16 @@
                     <i class="bi bi-gear"></i>Settings
                 </a>
             </div>
-            <div class="d-flex align-items-center gap-2 ms-md-3 mt-2 mt-md-0">
-                <span class="principal-pill" title="OS user that bty-web is running as">
+            <div class="user-bar ms-md-3 mt-2 mt-md-0"
+                 title="OS user that bty-web is running as (PAM auth)">
+                <span class="user-bar-name">
                     <i class="bi bi-person-circle"></i>
                     <code>{{ service_user }}</code>
                 </span>
-                <form action="/ui/logout" method="post" class="d-inline">
-                    <button class="btn btn-outline-light btn-sm" type="submit"
-                            title="End this session">
+                <span class="user-bar-divider"></span>
+                <form action="/ui/logout" method="post" class="m-0 d-inline-flex">
+                    <button type="submit" class="user-bar-logout"
+                            title="Sign out">
                         <i class="bi bi-box-arrow-right"></i>
                     </button>
                 </form>

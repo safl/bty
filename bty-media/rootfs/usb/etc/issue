@@ -1,8 +1,12 @@
 
 ======================================================================
-  bty USB live (scaffold)
+  bty USB live
 
-  Pipeline materialised; bty content lands in milestone 6+.
+  Read-only USB live boot of bty's CLI + flashing tools. Plug into
+  a target machine, boot from this stick, run ``bty list disks`` /
+  ``bty flash`` against the host's drives without touching the
+  drive you booted from.
+
   Rootfs is ephemeral - any changes vanish on reboot (overlayroot).
 ======================================================================
 

@@ -1,12 +1,11 @@
-"""Browser UI routes for bty-web (Jinja + Bootstrap, milestone 12 phase 1).
+"""Browser UI routes for bty-web (Jinja + Bootstrap + HTMX).
 
 Routes live under ``/ui``. They render server-side HTML and use cookie
 auth (the ``bty-token`` cookie set by ``POST /ui/login``); the API
 surface at ``/`` is unchanged. ``register_ui_routes(app, ...)``
-attaches all the UI handlers to an existing FastAPI app.
-
-Live updates via SSE arrive in milestone 12 phase 2; this iteration is
-plain server-rendered pages with HTMX-friendly form posts.
+attaches all the UI handlers to an existing FastAPI app. The
+``/ui/machines`` table subscribes to ``/events/machines`` (HTMX SSE
+extension) for live updates.
 """
 
 from __future__ import annotations
@@ -293,7 +292,7 @@ def register_ui_routes(
             image_root=str(image_root),
         )
 
-    # ----- boot artifacts (Phase D-3b.2) ----------------------------------
+    # ----- boot artifacts ------------------------------------------------
 
     def _render_boot_page(
         request: Request,
@@ -320,7 +319,7 @@ def register_ui_routes(
     def ui_boot(request: Request) -> HTMLResponse:
         return _render_boot_page(request)
 
-    # ----- settings (Phase E) ---------------------------------------------
+    # ----- settings -------------------------------------------------------
 
     def _render_settings_page(
         request: Request,

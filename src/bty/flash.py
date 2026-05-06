@@ -8,13 +8,15 @@ cover the validation logic:
   plain :class:`ImageInfo` / :class:`TargetInfo` dataclasses.
 - ``make_plan`` is pure: it bundles probed info into a :class:`FlashPlan`.
 - ``validate_plan`` is pure: it returns a list of error strings.
+- ``execute_plan`` does the destructive write (qemu-img convert /
+  zstd -d / dd as appropriate for the image format) and applies
+  the chosen post-flash provisioning mode (cloud-init, cijoe, none).
 
 The CLI calls all four. Tests construct ``ImageInfo`` / ``TargetInfo``
 directly and exercise ``make_plan`` / ``validate_plan`` without mocks.
-The probe functions get their own targeted tests for the
-subprocess-shelling-out parts.
-
-The actual write step lands in milestone 6.
+The probe and write functions have their own targeted tests for the
+subprocess-shelling-out parts; integration tests against a real
+loop device live in ``tests/test_flash_integration.py``.
 """
 
 from __future__ import annotations
@@ -58,8 +60,8 @@ class FlashProgress:
       carries the exception string. The exception is then re-raised.
 
     ``total_bytes`` is the image's virtual size in bytes when known; it
-    is set on the ``started`` event and may be carried on later events
-    in a future byte-level-progress milestone.
+    is set on the ``started`` event. Per-byte progress could later
+    populate it on the ``writing`` event too.
     """
 
     event: str
@@ -77,8 +79,12 @@ def _emit(progress: ProgressCallback | None, event: str, **fields: Any) -> None:
     progress(FlashProgress(event=event, **fields))
 
 
-# Provisioning modes accepted by ``bty flash``. Validation only at this
-# milestone; behaviour lands in milestones 7-9.
+# Provisioning modes accepted by ``bty flash``. ``none`` skips post-
+# flash setup; ``cloud-init`` writes a NoCloud seed partition;
+# ``cijoe`` runs a cijoe workflow (offline / one-shot) against the
+# fresh image. ``cijoe-online`` is the bty-web variant where the
+# server kicks off cijoe against a network-reachable target after
+# the live env signals completion.
 PROVISIONING_MODES: tuple[str, ...] = ("none", "cloud-init", "cijoe")
 
 _ZSTD_SIZE_UNITS: dict[str, int] = {

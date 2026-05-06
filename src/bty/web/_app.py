@@ -330,12 +330,16 @@ def create_app(
     @app.post("/bootstrap/{mac}", response_class=PlainTextResponse)
     def bootstrap(mac: str) -> str:
         normalised = _normalise_mac(mac)
-        # Stub for milestone 11. The real bootstrap script (live env's
-        # post-PXE handoff) is wired up in milestone 14.
+        # Vestigial stub from an earlier design (a shell-script handoff
+        # the live env would curl post-PXE). The real handoff is the
+        # iPXE chain itself: /pxe-bootstrap.ipxe -> /pxe/{mac} ->
+        # ipxe_flash.j2 -> kernel/initrd over HTTP, plus the live env's
+        # bty-flash-on-boot service. This endpoint stays only because a
+        # test still exercises it; safe to delete in a future cleanup.
         return (
             "#!/bin/sh\n"
             f"# bty-web bootstrap placeholder for {normalised}\n"
-            "echo 'milestone 14 wires the real bootstrap'\n"
+            "echo 'use the iPXE chain (/pxe/<mac>) for the real boot handoff'\n"
         )
 
     # ----- Protected routes (Bearer required) -----------------------------
