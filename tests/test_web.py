@@ -107,7 +107,6 @@ def test_pxe_bootstrap_returns_self_referential_chain(app_client: TestClient) ->
     # Self-referential chain: the URL uses the Host header.
     assert "chain http://192.0.2.1:8080/pxe/${net0/mac:hexhyp}" in body
     # No auth required (PXE clients have no token).
-    # Same call without auth dependency in any form must succeed.
 
 
 # ---------- auth ------------------------------------------------------------
