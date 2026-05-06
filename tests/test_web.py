@@ -110,12 +110,6 @@ def test_pxe_bootstrap_returns_self_referential_chain(app_client: TestClient) ->
     # Same call without auth dependency in any form must succeed.
 
 
-def test_bootstrap_placeholder(app_client: TestClient) -> None:
-    r = app_client.post("/bootstrap/AA:BB:CC:DD:EE:FF")
-    assert r.status_code == 200
-    assert "aa:bb:cc:dd:ee:ff" in r.text  # MAC is normalised
-
-
 # ---------- auth ------------------------------------------------------------
 
 

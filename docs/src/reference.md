@@ -271,9 +271,6 @@ cannot carry a token:
   Used by the live env to download the assigned image; reachable
   by anyone on the network. Companion auth-gated upload route at
   `PUT /images/{name}` for operators / scripts.
-- `POST /bootstrap/{mac}` - vestigial stub from an early design;
-  the real boot handoff is the iPXE chain at `/pxe/{mac}`.
-
 Protected routes (Bearer required):
 
 | Method | Path | Body | Returns |

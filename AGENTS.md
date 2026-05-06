@@ -169,25 +169,29 @@ on `5` after re-probing; do not retry on `3` or `4`).
 `bty-web` exposes a small REST surface backed by SQLite. Documented in
 detail in `docs/src/reference.md`; quick reference for agents:
 
-**Auth.** Bearer-token on protected routes; `BTY_WEB_TOKEN` must be
-set at server start (server refuses to start otherwise). Open routes
-(`/healthz`, `/version`, `/pxe/{mac}`, `/bootstrap/{mac}`) carry no
-auth so PXE clients can use them.
+**Auth.** Single-tenant PAM against the bty service user (the OS
+account ``bty-web`` runs as; ``bty / bty`` by default on the cooked
+appliance). ``POST /auth/login`` issues an opaque session token
+whose sha256 is persisted in the ``sessions`` table; protected
+routes accept it via ``Authorization: Bearer ...`` (API) or the
+``bty-token`` cookie (UI). ``POST /auth/logout`` revokes. Open
+routes (no token) are reachable by PXE clients which can't carry
+one.
 
 **Routes** (all paths case-insensitive on the MAC; the canonical form
 is lower-case `aa:bb:cc:dd:ee:ff`):
 
 | Open | Protected |
 |---|---|
-| `GET /healthz` | `GET /machines` |
-| `GET /version` | `GET /machines/{mac}` |
+| `GET /healthz` | `POST /auth/logout` |
+| `GET /version` | `GET /machines` |
+| `POST /auth/login` | `GET /machines/{mac}` |
 | `GET /pxe/{mac}` | `PUT /machines/{mac}` (body: MachineUpsert) |
 | `POST /pxe/{mac}/done` | `DELETE /machines/{mac}` |
 | `GET /pxe-bootstrap.ipxe` | `GET /images` |
-| `GET /boot/{name}` | `GET /events/machines` (Server-Sent Events) |
-| `GET /images/{name}` | |
-| `POST /bootstrap/{mac}` | |
-| `GET /static/*` | |
+| `GET /boot/{name}` | `PUT /images/{name}` (stream upload) |
+| `GET /images/{name}` | `PUT /boot/{name}` (stream upload) |
+| `GET /static/*` | `GET /events/machines` (Server-Sent Events) |
 
 **HTTP status semantics:**
 - `200` - success with body
