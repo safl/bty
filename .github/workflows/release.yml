@@ -192,15 +192,14 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Install host tools (qemu, zstd, genisoimage)
+      - name: Install host tools (qemu, zstd)
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             qemu-system-x86 \
             qemu-utils \
             zstd \
-            cpu-checker \
-            genisoimage
+            cpu-checker
 
       - name: Enable KVM access for the runner
         # The chain test boots two QEMU VMs that need /dev/kvm. Same

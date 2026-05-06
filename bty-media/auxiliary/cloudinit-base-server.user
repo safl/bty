@@ -45,9 +45,20 @@ runcmd:
   # Install bty-lab[web] from the staged wheel into a system venv,
   # then create the dedicated 'bty' service user. The wheel filename
   # carries a version we don't pin here, so we glob for it.
+  #
+  # Default credentials: ``bty / bty``. PAM auth gates ``bty-web``,
+  # so the appliance ships with a known login the operator can use
+  # immediately - same model as PiKVM (admin/admin), Raspberry Pi OS
+  # (pi/raspberry), Octoprint, etc. Rotate with ``sudo passwd bty``
+  # before exposing the appliance to anything beyond a trusted
+  # network. The shell is left as ``/usr/sbin/nologin`` (standard
+  # service-user shape); PAM's ``login`` service used by bty-web's
+  # ``pamela.authenticate`` doesn't check the shell - it just reads
+  # /etc/shadow to verify the password.
   - |
     set -eu
     useradd --system --no-create-home --shell /usr/sbin/nologin bty
+    echo 'bty:bty' | chpasswd
     install -d -o root -g root -m 0755 /opt/bty
     python3 -m venv /opt/bty/venv
     /opt/bty/venv/bin/pip install --no-cache-dir --upgrade pip

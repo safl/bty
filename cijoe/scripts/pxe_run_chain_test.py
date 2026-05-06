@@ -4,13 +4,14 @@ Run the PXE chain test against the production server qcow2
 
 Boots two QEMU VMs sharing an L2 segment via ``-netdev socket``:
 
-- Server: dual NIC, plus a NoCloud cidata ISO (``seed.iso``)
-  attached as a CD-ROM. cloud-init at first boot reads the ISO and
-  applies the bty user's password; ``bty-web-init.service`` creates
-  the state dir tree and writes ``/etc/default/bty-web``;
-  ``bty-web.service`` comes up. The mgmt NIC is QEMU user-mode with
+- Server: dual NIC. ``bty-web-init.service`` creates the state dir
+  tree on first boot and writes ``/etc/default/bty-web``;
+  ``bty-web.service`` starts. The mgmt NIC is QEMU user-mode with
   a host port-forward so the script can drive bty-web's HTTP API.
   The PXE NIC opens a socket listener for the client to dial in.
+  Auth uses the appliance's baked-in default credential
+  (``bty / bty``, set by ``cloudinit-base-server.user`` at image
+  build time) - same model as PiKVM, Octoprint, etc.
 
 - Client: single NIC joined to the server's PXE socket. PXE-boot
   enabled. Blank virtio disk attached as the flash target. After
@@ -20,11 +21,12 @@ Boots two QEMU VMs sharing an L2 segment via ``-netdev socket``:
 
 The test uses ONLY production paths to stage the appliance for the
 chain - no virt-customize, no DB seeding, no /etc/default baking.
-The script logs into bty-web with the cloud-init-set password,
-uploads the live trio + dummy image via the upload routes, activates
-PXE via the same UI-form endpoint operators use, and PUTs the
-machine assignment. Asserts the chain progresses by tailing the
-client's serial-console log for marker strings configured in
+``POST /auth/login`` uses the default credential, then ``PUT
+/boot/<name>`` and ``PUT /images/<name>`` upload the artefacts,
+``POST /ui/settings/pxe-activate`` (full-DHCP mode) brings up
+dnsmasq, and ``PUT /machines/<mac>`` pins the per-MAC plan.
+Asserts the chain progresses by tailing the client's serial-console
+log for marker strings configured in
 ``[test.pxe.chain_markers]``.
 
 Retargetable: False
@@ -38,7 +40,6 @@ import logging as log
 import socket
 import subprocess
 import time
-import urllib.error
 import urllib.request
 from argparse import ArgumentParser
 from pathlib import Path
@@ -50,7 +51,6 @@ ARTIFACT_NAMES = (
 )
 
 HEALTHZ_TIMEOUT = 300  # cloud-init + bty-web-init + bty-web takes a while
-LOGIN_TIMEOUT = 60  # cloud-init writes the password before sshd, but still
 CHAIN_TIMEOUT = 600  # total for all client-side markers to appear
 
 
@@ -67,12 +67,10 @@ def main(args, cijoe):
 
     workspace = Path.cwd() / "_build" / "test-pxe"
     server_qcow2 = workspace / "server.qcow2"
-    seed_iso = workspace / "seed.iso"
     boot_stage = workspace / "boot"
     dummy_image = workspace / "test-image.qcow2"
     for path, label in (
         (server_qcow2, "server qcow2"),
-        (seed_iso, "cidata ISO"),
         (dummy_image, "dummy image"),
     ):
         if not path.is_file():
@@ -89,7 +87,7 @@ def main(args, cijoe):
     server_log = workspace / "server.serial.log"
     client_log = workspace / "client.serial.log"
 
-    server = _start_server_vm(server_qcow2, seed_iso, mgmt_port, pxe_socket_port, server_log, cfg)
+    server = _start_server_vm(server_qcow2, mgmt_port, pxe_socket_port, server_log, cfg)
     client = None
     try:
         log.info(f"Waiting for bty-web /healthz on 127.0.0.1:{mgmt_port}")
@@ -100,12 +98,11 @@ def main(args, cijoe):
         ):
             return errno.ETIMEDOUT
 
-        # Log in with the password cloud-init set; retry briefly
-        # because cloud-init may still be running chpasswd when
-        # /healthz first answers.
-        log.info("POST /auth/login (PAM via cloud-init-seeded password)")
-        token = _wait_for_login("127.0.0.1", mgmt_port, cfg, LOGIN_TIMEOUT)
-        if token is None:
+        log.info("POST /auth/login (PAM, default appliance credential)")
+        try:
+            token = _login("127.0.0.1", mgmt_port, cfg["bty_password"])
+        except Exception as exc:
+            log.error(f"login failed: {exc}")
             return errno.EACCES
 
         log.info("PUT /boot/<live trio>")
@@ -172,7 +169,7 @@ def main(args, cijoe):
 # ---------- VM lifecycle ---------------------------------------------------
 
 
-def _start_server_vm(qcow2, seed_iso, mgmt_port, socket_port, log_path, cfg):
+def _start_server_vm(qcow2, mgmt_port, socket_port, log_path, cfg):
     cmd = [
         "qemu-system-x86_64",
         "-enable-kvm",
@@ -184,11 +181,6 @@ def _start_server_vm(qcow2, seed_iso, mgmt_port, socket_port, log_path, cfg):
         "2G",
         "-drive",
         f"file={qcow2},if=virtio",
-        # NoCloud cidata ISO. cloud-init's NoCloud datasource scans
-        # attached block devices for a filesystem labeled ``cidata``;
-        # our customise step set that label via genisoimage -volid.
-        "-drive",
-        f"file={seed_iso},media=cdrom,readonly=on",
         "-nographic",
         "-serial",
         f"file:{log_path}",
@@ -249,31 +241,6 @@ def _start_client_vm(workspace, socket_port, log_path, cfg):
 
 
 # ---------- HTTP helpers ---------------------------------------------------
-
-
-def _wait_for_login(host, port, cfg, timeout):
-    """Retry POST /auth/login until it succeeds, returning the token.
-
-    cloud-init may still be running chpasswd when /healthz first
-    answers, so login can race with the password landing. We retry
-    on 401 for ``timeout`` seconds before giving up.
-    """
-    deadline = time.monotonic() + timeout
-    last_err = None
-    while time.monotonic() < deadline:
-        try:
-            return _login(host, port, cfg["bty_password"])
-        except urllib.error.HTTPError as exc:
-            last_err = exc
-            if exc.code != 401:
-                log.error(f"/auth/login returned {exc.code} {exc.reason}")
-                return None
-            time.sleep(2)
-        except urllib.error.URLError as exc:
-            last_err = exc
-            time.sleep(2)
-    log.error(f"timed out waiting for /auth/login (last err: {last_err})")
-    return None
 
 
 def _login(host, port, password):

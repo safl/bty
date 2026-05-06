@@ -1,27 +1,22 @@
 """
-Generate a NoCloud cidata ISO for the PXE chain test
-=====================================================
+Stage the workspace for the PXE chain test
+============================================
 
-The test boots the unmodified production server qcow2 with a small
-cidata ISO attached as a CD-ROM. cloud-init at first boot reads the
-ISO and applies a known bty password (so the next chain step can
-``POST /auth/login`` deterministically). Everything else - state
-dirs, /etc/default/bty-web, /etc/issue, dnsmasq active config, the
-live trio under /var/lib/bty/boot/, the dummy image under
-/var/lib/bty/images/ - happens via the same mechanisms an operator
-would use: ``bty-web-init.service`` for first-boot dirs, the
-``PUT /boot/<name>`` and ``PUT /images/<name>`` upload routes for
-artefact staging, and ``POST /ui/settings/pxe-activate`` for
-dnsmasq. No virt-customize, no qcow2 mutation, no test-only state
-seeding.
+The server appliance ships with a known default credential
+(``bty / bty``, baked at image-build time) so the test can boot the
+production qcow2 unmodified and ``POST /auth/login`` directly. No
+NoCloud overlay, no virt-customize, no DB seeding.
 
-Outputs into ``cijoe/_build/test-pxe/``:
+This step just lays out the test workspace under
+``cijoe/_build/test-pxe/``:
 
-- ``server.qcow2``  - copy of the production qcow2 (rehydrated from
-                      .img.zst when only that's present)
-- ``seed.iso``      - NoCloud cidata ISO carrying user-data
-- ``test-image.qcow2`` - 1 MiB dummy qcow2 for the run step to
-                         upload via ``PUT /images/<name>``
+- ``server.qcow2``       - working copy of the production qcow2
+                          (rehydrated from .img.zst when only that's
+                          present, the CI artefact shape).
+- ``test-image.qcow2``   - 1 MiB dummy qcow2 the chain step uploads
+                          to ``PUT /images/<name>``.
+- ``boot/{vmlinuz,...}`` - copies of the live trio for the chain
+                          step to upload to ``PUT /boot/<name>``.
 
 Retargetable: False
 """
@@ -56,11 +51,10 @@ def main(args, cijoe):
     server_qcow2_src = artifact_dir / "bty-server-x86_64.qcow2"
     server_zst = artifact_dir / "bty-server-x86_64.img.zst"
 
-    # Reconstitute the qcow2 from .img.zst when it's missing - same
-    # CI shape as before (release.yml uploads only the operator-
+    # Reconstitute the qcow2 from .img.zst when only the .zst is
+    # present (CI shape: release.yml uploads only the operator-
     # shippable .img.zst). Locally a fresh ``make build VARIANT=
-    # server`` leaves the qcow2 next to the .zst, so the rehydrate
-    # is a no-op.
+    # server`` leaves the qcow2 next to the .zst, so this is a no-op.
     if not server_qcow2_src.is_file():
         if not server_zst.is_file():
             log.error(
@@ -97,8 +91,9 @@ def main(args, cijoe):
         shutil.rmtree(workspace)
     workspace.mkdir(parents=True)
 
-    # Working copy of the server qcow2 (read-only base; the chain
-    # step boots this directly + the cidata ISO).
+    # Working copy of the server qcow2 - the chain step boots this
+    # directly. No mutation: PAM auth uses the baked-in default
+    # credential (bty/bty).
     server_dst = workspace / "server.qcow2"
     log.info(f"Copying {server_qcow2_src} -> {server_dst}")
     err, _ = cijoe.run_local(f"qemu-img convert -f qcow2 -O qcow2 {server_qcow2_src} {server_dst}")
@@ -106,51 +101,16 @@ def main(args, cijoe):
         log.error("qemu-img convert failed (server.qcow2 copy)")
         return err
 
-    # Stage the cidata ISO. NoCloud expects two files at the FS root:
-    # ``meta-data`` (instance-id is the only required field) and
-    # ``user-data`` (#cloud-config style YAML). cloud-init reads them
-    # at first boot and applies what we put in. ``mkisofs -V cidata``
-    # is what cloud-init's NoCloud datasource looks for - the volume
-    # label is how it discovers the ISO.
-    seed_dir = workspace / "cidata"
-    seed_dir.mkdir()
-    (seed_dir / "meta-data").write_text("instance-id: bty-pxe-test\nlocal-hostname: bty\n")
-
-    # ``chpasswd`` syntax: list of lines ``user:password``. We only
-    # set the bty user's password. ``ssh_pwauth: True`` is harmless
-    # (cooked image already disables SSH password auth in sshd_config)
-    # but documents intent. ``users: []`` keeps cloud-init from
-    # creating extra accounts.
-    user_data = (
-        "#cloud-config\n"
-        "users: []\n"
-        "chpasswd:\n"
-        "  expire: false\n"
-        "  list: |\n"
-        f"    bty:{cfg['bty_password']}\n"
-        "ssh_pwauth: false\n"
-    )
-    (seed_dir / "user-data").write_text(user_data)
-
-    seed_iso = workspace / "seed.iso"
-    err, _ = cijoe.run_local(
-        f"genisoimage -output {seed_iso} -volid cidata -joliet -rock {seed_dir}"
-    )
-    if err:
-        log.error("genisoimage failed (cidata ISO)")
-        return err
-
-    # 1 MiB dummy qcow2 the chain step will PUT to /images/<name>.
-    # Production-realistic: operators upload images the same way.
+    # 1 MiB dummy qcow2 the chain step PUTs to /images/<name>.
     dummy_image = workspace / "test-image.qcow2"
     err, _ = cijoe.run_local(f"qemu-img create -f qcow2 {dummy_image} 1M")
     if err:
         log.error("qemu-img create failed (dummy flash image)")
         return err
 
-    # Stage the live trio next to the workspace so the run step can
-    # PUT each via the upload route - the artefact dir itself is
-    # left untouched.
+    # Stage the live trio so the chain step can PUT each via
+    # ``PUT /boot/<name>``. The artefact dir itself is left
+    # untouched.
     boot_stage = workspace / "boot"
     boot_stage.mkdir()
     for name in ARTIFACT_NAMES:
@@ -158,7 +118,6 @@ def main(args, cijoe):
 
     log.info(f"Workspace ready at {workspace}")
     log.info(f"  server qcow2: {server_dst}")
-    log.info(f"  cidata ISO:   {seed_iso}")
     log.info(f"  dummy image:  {dummy_image}")
     log.info(f"  live trio:    {boot_stage}")
     return 0

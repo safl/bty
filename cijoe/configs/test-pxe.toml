@@ -27,11 +27,11 @@ fail_fast = true
 # this dir. Same convention as the disk-image / live build pipelines.
 artifact_dir = "{{ local.env.HOME }}/system_imaging/disk"
 
-# Initial bty-user password seeded into the server VM via cloud-init
-# at first boot. The customise step bakes this into the cidata ISO's
-# user-data; the chain step uses it to ``POST /auth/login`` (same as
-# any operator would after capturing the password from /etc/issue).
-bty_password = "pxe-chain-test-pass"
+# Default appliance credential. The server image bakes ``bty:bty``
+# at build time (cloudinit-base-server.user runs chpasswd); the
+# chain step uses it to ``POST /auth/login`` exactly the way any
+# operator would on a freshly booted appliance.
+bty_password = "bty"
 
 # Image name used for the assignment + the dummy file the customise
 # step stages locally for the chain step to upload via
