@@ -16,10 +16,17 @@ operation (server image with browser UI and iPXE).
 
 ```{toctree}
 :maxdepth: 2
-:caption: Contents
+:caption: Get started
 
 overview
 quickstart
+walkthrough-usb
+```
+
+```{toctree}
+:maxdepth: 2
+:caption: Reference
+
 concepts
 flows
 components
