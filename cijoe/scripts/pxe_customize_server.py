@@ -79,9 +79,7 @@ def main(args, cijoe):
         if err:
             log.error("zstd decompress failed")
             return err
-        err, _ = cijoe.run_local(
-            f"qemu-img convert -f raw -O qcow2 {server_raw} {server_qcow2}"
-        )
+        err, _ = cijoe.run_local(f"qemu-img convert -f raw -O qcow2 {server_raw} {server_qcow2}")
         if err:
             log.error("qemu-img convert raw -> qcow2 failed")
             return err
@@ -151,11 +149,7 @@ def main(args, cijoe):
     # forward can talk to bty-web. The PXE NIC gets a static IP for
     # dnsmasq to serve from.
     (files / "00-bty-mgmt.network").write_text(
-        "[Match]\n"
-        f"Name={nic_prefix}{mgmt_nic_slot}\n"
-        "\n"
-        "[Network]\n"
-        "DHCP=yes\n"
+        f"[Match]\nName={nic_prefix}{mgmt_nic_slot}\n\n[Network]\nDHCP=yes\n"
     )
     (files / "10-bty-pxe.network").write_text(
         "[Match]\n"
@@ -180,9 +174,7 @@ def main(args, cijoe):
     images_dir = files / "images"
     images_dir.mkdir(exist_ok=True)
     dummy_image = images_dir / cfg["machine_image"]
-    err, _ = cijoe.run_local(
-        f"qemu-img create -f qcow2 {dummy_image} 1M"
-    )
+    err, _ = cijoe.run_local(f"qemu-img create -f qcow2 {dummy_image} 1M")
     if err:
         log.error("qemu-img create failed (dummy flash image)")
         return err
