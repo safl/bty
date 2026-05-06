@@ -5,7 +5,7 @@ The fastest path to "I just bty-flashed a box":
 1. **Build** the bty USB live image once on a host that has KVM.
 2. **Write** it to a USB stick with `dd`.
 3. **Drop** the system image you want to flash onto the stick's
-   `BTY_IMAGES` partition.
+ `BTY_IMAGES` partition.
 4. **Boot** the target machine from the stick.
 5. **Flash** with `bty-tui` (interactive) or `bty flash` (scripted).
 6. **Reboot** the target into the freshly-flashed image.
@@ -60,7 +60,7 @@ For a recorded walkthrough of the build, see
 
 ## Step 2: Write the image to a USB stick
 
-**Identify the device first** — this step is destructive:
+**Identify the device first** - this step is destructive:
 
 ```bash
 lsblk
@@ -172,15 +172,15 @@ the image bytes are on the target disk.
 ```
 
 ```{note}
-Without root the TUI launches in **read-only mode** — you can browse
+Without root the TUI launches in **read-only mode** - you can browse
 images and disks, but `F` refuses with a status message. Use
 ``sudo bty-tui`` if you need to flash.
 ```
 
 ## Step 5b: Flash with `bty` (scriptable)
 
-If you'd rather drive the flash from a shell — e.g. you want to
-script a fleet of identical boxes — the same operations are
+If you'd rather drive the flash from a shell - e.g. you want to
+script a fleet of identical boxes - the same operations are
 available as CLI commands.
 
 ```bash
@@ -207,7 +207,7 @@ sudo bty flash \
 ```
 
 `--dry-run` prints the flash plan and validates without writing.
-`--yes` is the explicit consent token for the destructive write —
+`--yes` is the explicit consent token for the destructive write - 
 `bty flash` refuses to do anything without one or the other, so you
 never accidentally wipe a disk.
 
@@ -231,30 +231,30 @@ If it doesn't, see **Troubleshooting** below.
 ### The target won't boot from USB
 
 * Confirm the stick is bootable on a different machine.
-* Check the target's BIOS/UEFI for "secure boot" — bty's live image
-  is unsigned and won't boot under secure boot. Disable it (or
-  switch to legacy / CSM mode) for the bty live env.
+* Check the target's BIOS/UEFI for "secure boot" - bty's live image
+ is unsigned and won't boot under secure boot. Disable it (or
+ switch to legacy / CSM mode) for the bty live env.
 * On older BIOSes, USB 3.0 sticks sometimes only enumerate from
-  USB 2.0 ports. Try a different port.
+ USB 2.0 ports. Try a different port.
 
 ### `bty list disks` shows the USB stick but not the target's internal disk
 
 * The kernel may not have a driver for an unusual storage controller
-  (e.g. some embedded NVMe-over-PCIe paths on consumer mini-PCs).
-  `dmesg | tail` from the live env shows what was probed.
+ (e.g. some embedded NVMe-over-PCIe paths on consumer mini-PCs).
+ `dmesg | tail` from the live env shows what was probed.
 * If the disk is hidden behind a hardware RAID, you'll need to
-  configure the RAID for JBOD / passthrough first.
+ configure the RAID for JBOD / passthrough first.
 
 ### Flash succeeds but the target doesn't boot
 
 * Confirm the image's format is right for what you wanted. A qcow2
-  flashed onto a disk creates a qcow2-formatted disk, not a
-  bootable filesystem. For a bootable target, use a raw `.img` or
-  let `bty flash` convert the qcow2 (which it does automatically:
-  `bty inspect image` shows the resulting on-disk format).
+ flashed onto a disk creates a qcow2-formatted disk, not a
+ bootable filesystem. For a bootable target, use a raw `.img` or
+ let `bty flash` convert the qcow2 (which it does automatically:
+ `bty inspect image` shows the resulting on-disk format).
 * If the image was built for UEFI but the target is configured for
-  legacy BIOS (or vice versa), the firmware won't find a bootloader.
-  Check the target's BIOS settings.
+ legacy BIOS (or vice versa), the firmware won't find a bootloader.
+ Check the target's BIOS settings.
 
 ### Validation fails with "image format not recognised"
 
@@ -275,6 +275,6 @@ sudo umount /dev/sdX*
 ## What's next
 
 * For provisioning many machines at once over the network, see
-  [Walkthrough: server appliance](walkthrough-server.md) (todo).
+ [Walkthrough: server appliance](walkthrough-server.md) (todo).
 * For the full CLI surface, see [Reference](reference.md).
 * For how the live env works under the hood, see [Concepts](concepts.md).

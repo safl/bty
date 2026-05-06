@@ -110,6 +110,13 @@ build:
 			UV_CACHE_DIR="$${UV_CACHE_DIR:-$$HOME/.cache/uv}" \
 			$(MAKE) build VARIANT=live; \
 	fi
+	@# Older cijoe versions (the one /opt/pipx ships on GHA-hosted
+	@# runners with Python 3.12) unconditionally auto-archive the
+	@# output dir at end-of-task via os.rename(cijoe-output ->
+	@# cijoe-archive/<timestamp>). Pre-clean both to avoid stale-
+	@# state EACCES on the rename. Newer cijoe (>=0.9.58 we use
+	@# locally) gates archive on --archive and is unaffected.
+	rm -rf cijoe/cijoe-output cijoe/cijoe-archive
 	cd cijoe && cijoe $(MEDIA_TASK) --monitor -c configs/$(VARIANT).toml
 
 # End-to-end PXE chain test: server + client QEMU VMs sharing an L2
