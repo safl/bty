@@ -474,6 +474,14 @@ def _ssh_setup_test_dhcp(host, port, cfg):
         # overlay, then ``networkctl reload`` (picks up the new
         # .network without restarting networkd) and restart dnsmasq
         # so it sees the now-bound interface.
+        # ``networkctl reload`` picks up new .network files, but it
+        # does NOT re-match existing links against the new files -
+        # ``ens4`` was already bound to the catch-all
+        # 10-bty-default.network at boot. ``networkctl reconfigure
+        # <link>`` forces networkd to re-evaluate which .network
+        # applies (now picking the higher-priority 20-bty-pxe-test
+        # we just dropped) and re-apply it. Then a brief settle so
+        # the address shows up before dnsmasq restarts.
         cmd = (
             f"sudo -n install -d -m 0755 /etc/dnsmasq.d /etc/systemd/network && "
             f"echo {_quote_for_shell(pxe_network)} | "
@@ -481,7 +489,11 @@ def _ssh_setup_test_dhcp(host, port, cfg):
             f"echo {_quote_for_shell(overlay)} | "
             f"sudo -n tee /etc/dnsmasq.d/test-fulldhcp.conf > /dev/null && "
             f"sudo -n networkctl reload && "
-            f"sudo -n networkctl up {pxe_iface} && "
+            f"sudo -n networkctl reconfigure {pxe_iface} && "
+            f"for i in 1 2 3 4 5; do "
+            f"  ip -4 -br addr show {pxe_iface} | grep -q 192.168.99.1/ && break; "
+            f"  sleep 1; "
+            f"done && "
             f"sudo -n systemctl restart dnsmasq.service"
         )
         _stdin, stdout, stderr = client.exec_command(cmd, timeout=30)
