@@ -44,11 +44,13 @@ cat > /etc/issue <<'EOF'
 ======================================================================
   bty server appliance
 
-  Browser UI:        http://\4:8080/ui
+  Browser UI:    http://\4:8080/ui     login: bty / bty
+  SSH admin:     ssh odus@\4           login: odus / odus
+                 (odus has passwordless sudo)
 
-  Default login:     bty / bty   <-- CHANGE BEFORE EXPOSING
+  CHANGE THESE BEFORE EXPOSING TO ANY UNTRUSTED NETWORK:
+    sudo passwd bty   ; sudo passwd odus
 
-  Rotate the credential with ``sudo passwd bty``.
 ======================================================================
 
 Debian \n \l

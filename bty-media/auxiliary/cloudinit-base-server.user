@@ -96,10 +96,19 @@ runcmd:
   - systemctl daemon-reload
   - systemctl enable bty-web.service bty-web-init.service dnsmasq.service
 
-  # Strip the bake password and disable password SSH for the cooked
-  # image. The browser UI is the supported admin surface.
-  - passwd -d root
-  - sed -i 's/^#*\s*PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
+  # Lock root and create an admin user ``odus`` with passwordless
+  # sudo so the operator has shell access for hands-on tasks. SSH
+  # password auth stays enabled - the cooked image ships with
+  # ``odus:odus`` (and ``bty:bty`` for the web UI). Same model as
+  # PiKVM and friends; rotate before exposing.
+  - passwd -l root
+  - useradd --create-home --shell /bin/bash --groups sudo odus
+  - echo 'odus:odus' | chpasswd
+  - |
+    set -eu
+    printf 'odus ALL=(ALL) NOPASSWD:ALL\n' > /etc/sudoers.d/odus
+    chown root:root /etc/sudoers.d/odus
+    chmod 0440 /etc/sudoers.d/odus
 
   # Disable cloud-init for subsequent boots and clear its artefacts.
   # The cooked image already has its identity (bty user + default
