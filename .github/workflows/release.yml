@@ -213,6 +213,17 @@ jobs:
           sudo udevadm trigger --name-match=kvm
           ls -l /dev/kvm
 
+      - name: Make /boot/vmlinuz readable for libguestfs
+        # GHA's Ubuntu runners ship /boot/vmlinuz-* as mode 0600
+        # root-only. libguestfs's ``supermin`` appliance needs to
+        # read the host kernel to build its tiny VM, and fails with
+        # "supermin exited with error status 1" otherwise. Standard
+        # fix per the libguestfs FAQ - relax the perms (the runner
+        # is an ephemeral VM, no real exposure).
+        run: |
+          sudo chmod 0644 /boot/vmlinuz-*
+          ls -l /boot/vmlinuz-* | head
+
       - name: Install cijoe
         run: pipx install cijoe
 
