@@ -201,9 +201,8 @@ bty's modules are usable as a library. Stable entry points:
 | `bty.images`     | `list_images(root)`, `inspect_image(path)`, `Image` dataclass, `detect_format(path)`, `default_image_root()`. |
 | `bty.formatting` | `print_table(rows, columns)`, `print_inspect(info)`.      |
 
-A full sphinx-autodoc surface will land alongside the first non-stub
-public-API consumer (likely `bty-tui` in milestone 10). Until then
-treat any module not listed above as internal.
+A full sphinx-autodoc surface is on the roadmap. Until then treat
+any module not listed above as internal.
 
 ## HTTP API
 
@@ -212,15 +211,21 @@ treat any module not listed above as internal.
 
 ### Auth
 
-Bearer-token authentication on protected routes:
+Single-tenant PAM authentication. bty-web runs as a Linux service
+user (typically ``bty``); the only credential is **that user's OS
+password**. ``passwd bty`` rotates it. ``POST /auth/login`` with
+``{"password": "..."}`` issues an opaque session token whose hash
+is persisted in the ``sessions`` table; subsequent requests carry
+the plaintext via ``Authorization: Bearer ...`` (API) or the
+``bty-token`` cookie (browser UI). ``POST /auth/logout`` revokes
+the presenting session.
 
 ```
-Authorization: Bearer <BTY_WEB_TOKEN>
+Authorization: Bearer <session-token>
 ```
 
-`BTY_WEB_TOKEN` must be set when the server starts; the server
-refuses to launch otherwise. Generate with
-`python -c 'import secrets; print(secrets.token_urlsafe(32))'`.
+CLI clients use ``bty-cli login`` to fetch and cache a token at
+``~/.config/bty/token`` (mode 0600); ``bty-cli logout`` revokes it.
 
 Open routes (no token) - these are reachable by PXE clients which
 cannot carry a token:
@@ -259,13 +264,15 @@ cannot carry a token:
   whichever IP / hostname / .local name it used to reach the server.
 - `GET /boot/{name}` - serve a live-env artifact from `BTY_BOOT_DIR`
   (default `/var/lib/bty/boot/`). Same trust model as `/pxe/*`.
-  Operators populate the dir via the browser UI (Phase D-3b will
-  add a "fetch latest release" button).
+  Operators populate the dir via the browser UI's "fetch latest
+  release" button on the Boot page, or with the auth-gated
+  `PUT /boot/{name}` upload route.
 - `GET /images/{name}` - serve image bytes from `BTY_IMAGE_ROOT`.
   Used by the live env to download the assigned image; reachable
-  by anyone on the network.
-- `POST /bootstrap/{mac}` - bootstrap script for the bty live env
-  (placeholder; the network-flash flow lands in milestone 14)
+  by anyone on the network. Companion auth-gated upload route at
+  `PUT /images/{name}` for operators / scripts.
+- `POST /bootstrap/{mac}` - vestigial stub from an early design;
+  the real boot handoff is the iPXE chain at `/pxe/{mac}`.
 
 Protected routes (Bearer required):
 

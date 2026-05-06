@@ -18,6 +18,8 @@ console-script entry points:
 
 - `bty`: main CLI (image inspection, target discovery, flashing,
   provisioning).
+- `bty-cli`: command-line client for a remote `bty-web` server
+  (`bty-cli login`, `bty-cli logout`, future fleet ops).
 - `bty-tui`: terminal UI (requires the `tui` extra).
 - `bty-web`: HTTP server with browser UI (requires the `web` extra).
 
@@ -27,9 +29,9 @@ the bootable USB live image and the server appliance image.
 ## Install
 
 ```bash
-pipx install bty-lab            # CLI only, zero third-party Python deps
+pipx install bty-lab            # CLI + bty-cli, zero third-party Python deps
 pipx install "bty-lab[tui]"     # adds the bty-tui terminal UI
-pipx install "bty-lab[web]"     # adds the bty-web HTTP server (milestone 11+)
+pipx install "bty-lab[web]"     # adds the bty-web HTTP server
 pipx install "bty-lab[all]"     # everything
 ```
 

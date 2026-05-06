@@ -1,12 +1,11 @@
 # Quickstart
 
-A walk-through of what bty can do today. Each step is tagged with the
-milestone it lands in so it is clear what is functional, what is
-scaffolded, and what is forward-looking.
+A walk-through of what bty can do today, ordered roughly the way an
+operator would meet it: build a delivery medium, boot a target,
+flash, optionally provision, and finally drive a fleet over the
+network via the bty-web server.
 
 ## Build the USB live image
-
-*Functional from milestone 2.*
 
 Prerequisites on the build host: `qemu-system-x86_64`, `qemu-img`,
 `mkisofs` (Debian package: `genisoimage`), `zstd`, `cijoe`
@@ -61,8 +60,9 @@ Concepts for the convention bty expects.
 ## Boot a target machine
 
 Insert the USB stick into the target machine and boot from it. The bty
-live env auto-logins as root on `tty1` and shows a placeholder banner
-(milestone 2 scaffolding; the real `bty-tui` lands in milestone 10).
+live env auto-logins as root on `tty1`. From there you can run the CLI
+(`bty list disks`, `bty flash ...`) or `bty-tui` for an interactive
+terminal UI.
 
 The rootfs is mounted read-only with a tmpfs overlay (`overlayroot`),
 so anything you change in the live env vanishes on reboot. The
@@ -71,7 +71,7 @@ persist.
 
 ## What you can do today
 
-*Functional from milestones 3+4.*
+### Inspect
 
 Inside the live env (or on any Linux box where `bty` is installed):
 
@@ -90,7 +90,7 @@ bty list disks --json
 bty inspect image --json /var/lib/bty/images/my-image.qcow2
 ```
 
-*Functional from milestones 5+6.*
+### Flash a target disk
 
 ```bash
 # 1. Validate that an image can be flashed to a target without writing.
@@ -110,7 +110,10 @@ sudo bty flash --image /var/lib/bty/images/my-image.qcow2 \
 the explicit consent token for the destructive write - `bty flash`
 refuses to do anything without one or the other.
 
-*Functional from milestone 8.* Cloud-init seeding after the flash:
+### Cloud-init provisioning
+
+Seed cloud-init's NoCloud datasource onto the freshly-flashed disk
+so the target self-configures on first boot:
 
 ```bash
 sudo bty flash --image /var/lib/bty/images/debian.qcow2 \
@@ -126,8 +129,10 @@ not supplied) under `/var/lib/cloud/seed/nocloud-net/`, and unmounts.
 On first boot the OS picks up the seed via cloud-init's NoCloud
 datasource.
 
-*Functional from milestone 9.* Offline CIJOE provisioning after the
-flash:
+### CIJOE provisioning (offline)
+
+Run a cijoe workflow against the freshly-flashed filesystem before
+the target reboots:
 
 ```bash
 sudo bty flash --image /var/lib/bty/images/debian.qcow2 \
@@ -143,7 +148,7 @@ workflow. Workflow tasks reference `$BTY_ROOTFS` to drop config
 files, install seed credentials, etc. Requires `cijoe` on `PATH`
 (install via `pipx install cijoe`).
 
-*Functional from milestone 10.* Interactive flashing via the TUI:
+Interactive flashing via the TUI:
 
 ```bash
 sudo bty-tui
@@ -160,45 +165,56 @@ Requires the `[tui]` install extra (`pipx install "bty-lab[tui]"`).
 
 See [Reference > CLI](reference.md#cli) for the full surface.
 
-*Functional from milestone 11.* The bty-web HTTP server (no UI yet -
-that lands in milestone 12). Useful for scripts and the future browser
-UI:
+### Network flashing via the bty-web server
+
+`bty-web` is the HTTP server side of bty - browser UI + REST API +
+the iPXE chain a target boots into for network-flash. The server
+appliance image (`make build VARIANT=server`) ships preconfigured;
+for a quick local test you can run it directly:
 
 ```bash
 # On the server (or any box you're testing on):
-export BTY_WEB_TOKEN="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
 export BTY_STATE_DIR=/var/lib/bty
 bty-web   # listens on 0.0.0.0:8080 by default
+```
 
-# From a workstation:
-TOKEN="..."   # the same token
-curl -H "Authorization: Bearer $TOKEN" http://server:8080/machines
-curl -H "Authorization: Bearer $TOKEN" -X PUT \
+Auth is OS-PAM against the bty service user (the account bty-web
+runs as). On the appliance image the default is `bty / bty`; rotate
+with `sudo passwd bty` before exposing. From a workstation:
+
+```bash
+# Get a session token:
+bty-cli login --server http://server:8080
+# (token saved to ~/.config/bty/token, mode 0600)
+
+curl -H "Authorization: Bearer $(cat ~/.config/bty/token)" \
+     http://server:8080/machines
+curl -H "Authorization: Bearer $(cat ~/.config/bty/token)" -X PUT \
      -H "Content-Type: application/json" \
-     -d '{"image":"debian.qcow2","provisioning_mode":"none"}' \
+     -d '{"image":"debian.qcow2","provisioning_mode":"none","boot_policy":"flash"}' \
      http://server:8080/machines/aa:bb:cc:dd:ee:ff
 ```
 
 PXE clients hit `GET /pxe/{mac}` (open, no token) for the per-MAC
-iPXE config. End-to-end network flashing wires up in milestone 14.
+iPXE config and chain into the live env, which downloads the assigned
+image and flashes the target's local disk.
 
-*Functional from milestone 12.* Browser UI at
-`http://server:8080/ui` - log in with the same token, browse the
-machines table (with a "discovered" badge for unassigned rows), edit
-assignments via the detail page form. The machines table updates
-**live** via Server-Sent Events: PXE-boot a target on the same network
-and the row appears without a refresh. All client-side assets
-(Bootstrap CSS, HTMX) are vendored in the wheel - the appliance does
-not contact any external CDN at runtime.
+### Browser UI
+
+`http://server:8080/ui/login` - the same `bty / bty` credential
+gets you a cookie-backed session. The dashboard shows machine /
+image counts; the **Machines** page is a live table that updates
+via Server-Sent Events as PXE clients self-discover. The
+**Settings** page activates the dnsmasq proxy-DHCP block when
+you're ready to start serving PXE.
+
+All client-side assets (Bootstrap CSS, Bootstrap Icons, HTMX,
+htmx-ext-sse) are vendored in the wheel - the appliance does not
+contact any external CDN at runtime.
 
 ## What is coming
 
-| Milestone | Capability |
-|-----------|------------|
-| 12        | `bty-web` browser UI + first-boot wizard |
-| 13        | `bty-media` server image |
-| 14        | Network-flash end-to-end over iPXE |
-| 15        | `cijoe` online provisioning (server-driven, post-boot) |
-
-See [`PLAN.md`](https://github.com/safl/bty/blob/main/PLAN.md) for the
-roadmap detail.
+See [`PLAN.md`](https://github.com/safl/bty/blob/main/PLAN.md) for
+the live roadmap (per-machine cijoe online provisioning, image
+catalog upload via the UI, target-disk hints in the per-MAC plan,
+etc.).
