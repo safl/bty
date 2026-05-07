@@ -179,8 +179,15 @@ jobs:
         run: |
           set -eu
           sudo apt-get update
+          # ``debootstrap squashfs-tools xorriso debian-archive-keyring``
+          # are live-build's required deps. ``gdisk`` (sgdisk) and
+          # ``exfatprogs`` (mkfs.exfat) are needed by the usb-iso
+          # variant's post-build step that appends a writable BTY_IMAGES
+          # partition to the cooked hybrid ISO; harmless on the
+          # live-x86 build that doesn't run that step.
           sudo apt-get install -y --no-install-recommends \
-            debootstrap squashfs-tools xorriso debian-archive-keyring
+            debootstrap squashfs-tools xorriso debian-archive-keyring \
+            gdisk exfatprogs
           POOL=http://ftp.debian.org/debian/pool/main/l/live-build
           LB_DEB=$(curl -s "$POOL/" \
               | grep -oE 'live-build_[0-9][^"<]*\.deb' \

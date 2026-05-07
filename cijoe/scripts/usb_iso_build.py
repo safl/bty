@@ -45,6 +45,15 @@ from pathlib import Path
 
 PUBLISH_BASENAME = "bty-usb-x86_64.iso"
 
+# Pre-allocate this much trailing space inside the cooked ISO for an
+# exFAT partition labelled BTY_IMAGES. The legacy ``usb-x86``
+# cloud-init bake carved a ``BTY_IMAGES`` exFAT at the same path; this
+# is the live-build equivalent. Operators dd the ISO to a stick, drop
+# ``*.img.zst`` files into the writable exFAT partition from any host
+# OS, then boot. ``bty-grow-images-partition.service`` (M19 phase 4)
+# extends this partition to fill the rest of the stick on first boot.
+TRAILING_EXFAT_GIB = 4
+
 
 def add_args(parser: ArgumentParser):
     del parser  # no flags; signature kept for cijoe consistency
@@ -58,7 +67,9 @@ def main(args, cijoe):
     variant = cijoe.getconf("bty", {}).get("variant", "")
     role = variant.split("-")[0]
     if role != "usb":
-        log.info(f"Skipping usb_iso_build (variant={variant!r}; only the 'usb' role runs lb iso-hybrid)")
+        log.info(
+            f"Skipping usb_iso_build (variant={variant!r}; only the 'usb' role runs lb iso-hybrid)"
+        )
         return 0
 
     images = cijoe.getconf("system-imaging.images", {})
@@ -114,7 +125,7 @@ def main(args, cijoe):
         f"sh -c 'cd {build_dir} && sudo ./auto/config "
         "--binary-images iso-hybrid "
         "--bootloaders syslinux,grub-efi "
-        "--bootappend-live \"boot=live components quiet noeject bty.mode=interactive\"'"
+        '--bootappend-live "boot=live components quiet noeject bty.mode=interactive"\''
     )
     if err:
         log.error("auto/config (iso-hybrid override) failed")
@@ -159,6 +170,16 @@ def main(args, cijoe):
     cijoe.run_local(f"sudo chown {uid}:{gid} {dst}")
     log.info(f"published {dst}")
 
+    # Extend the published ISO with a trailing exFAT partition so the
+    # cooked image is dd-ready WITH a writable image-catalog area.
+    # The hybrid ISO carries a GPT (with a protective MBR); we just
+    # append a partition entry, the front of the file stays byte-
+    # identical so the boot path is unchanged. dd / Etcher / Rufus
+    # all do byte-for-byte writes and handle the larger artifact.
+    err = _extend_with_exfat(cijoe, dst)
+    if err:
+        return err
+
     sha256_path = publish_dir / "bty-usb-x86_64-iso.sha256"
     err, _ = cijoe.run_local(
         f"sh -c 'cd {publish_dir} && sha256sum {PUBLISH_BASENAME} > {sha256_path}'"
@@ -170,4 +191,94 @@ def main(args, cijoe):
     cijoe.run_local(f"cat {sha256_path}")
     cijoe.run_local(f"ls -la {dst}")
 
+    return 0
+
+
+def _extend_with_exfat(cijoe, iso_path: Path) -> int:
+    """Append a trailing exFAT partition labelled BTY_IMAGES to ``iso_path``.
+
+    Steps:
+
+    1. ``truncate -s +<N>G`` extends the file by ``TRAILING_EXFAT_GIB``
+       gigabytes; the new bytes are sparse zeros until exFAT writes to
+       them.
+    2. ``sgdisk --move-second-header`` rewrites the GPT secondary
+       header at the new EOF (live-build's ISO has it at the original
+       end; without this sgdisk would refuse to add a partition past
+       the secondary header).
+    3. ``sgdisk --new=0:0:0`` adds a partition spanning the freshly-
+       added space (typecode 0700 = "Microsoft basic data", the right
+       code for exFAT/FAT/NTFS), labelled ``BTY_IMAGES`` to match
+       what the legacy cloud-init bake used.
+    4. ``losetup -fP`` attaches the file as a loopback block device
+       and scans the partition table so ``${LOOP}p<N>`` exists.
+    5. ``mkfs.exfat`` formats the new partition.
+    6. ``losetup -d`` detaches.
+
+    The new partition number is whatever sgdisk picked (typically 3
+    after live-build's existing data + ESP partitions); we read it
+    back from ``sgdisk --print``.
+    """
+    log.info(f"Extending {iso_path} with +{TRAILING_EXFAT_GIB} GiB BTY_IMAGES exFAT")
+
+    err, _ = cijoe.run_local(f"truncate -s +{TRAILING_EXFAT_GIB}G {iso_path}")
+    if err:
+        log.error(f"truncate +{TRAILING_EXFAT_GIB}G failed on {iso_path}")
+        return err
+
+    err, _ = cijoe.run_local(f"sudo sgdisk --move-second-header {iso_path}")
+    if err:
+        log.error("sgdisk --move-second-header failed")
+        return err
+
+    err, _ = cijoe.run_local(
+        f"sudo sgdisk --new=0:0:0 --typecode=0:0700 --change-name=0:BTY_IMAGES {iso_path}"
+    )
+    if err:
+        log.error("sgdisk --new BTY_IMAGES failed")
+        return err
+
+    # Find which partition number sgdisk assigned. ``sgdisk --print``
+    # output has columns: Number Start End Size Code Name. Match by
+    # name so we don't depend on hybrid-ISO partition layout.
+    err, out = cijoe.run_local(f"sudo sgdisk --print {iso_path}")
+    if err:
+        log.error("sgdisk --print failed")
+        return err
+    part_num = None
+    for line in out.splitlines():
+        fields = line.split()
+        if len(fields) >= 6 and fields[-1] == "BTY_IMAGES" and fields[0].isdigit():
+            part_num = fields[0]
+            break
+    if part_num is None:
+        log.error(f"could not locate BTY_IMAGES partition in sgdisk --print output:\n{out}")
+        return errno.EIO
+    log.info(f"BTY_IMAGES is partition #{part_num}")
+
+    err, out = cijoe.run_local(f"sudo losetup -fP --show {iso_path}")
+    if err:
+        log.error(f"losetup -fP {iso_path} failed")
+        return err
+    loop = out.strip().splitlines()[-1].strip()
+    if not loop.startswith("/dev/loop"):
+        log.error(f"unexpected losetup output: {out!r}")
+        return errno.EIO
+
+    # Loop device partitions follow the ``loopNpM`` naming
+    # (no nvme-style boundary case here).
+    part_dev = f"{loop}p{part_num}"
+    cijoe.run_local("sudo udevadm settle")
+    err, _ = cijoe.run_local(f"sudo mkfs.exfat -L BTY_IMAGES {part_dev}")
+    if err:
+        cijoe.run_local(f"sudo losetup -d {loop}")
+        log.error(f"mkfs.exfat {part_dev} failed")
+        return err
+
+    err, _ = cijoe.run_local(f"sudo losetup -d {loop}")
+    if err:
+        log.error(f"losetup -d {loop} failed")
+        return err
+
+    log.info(f"Extended {iso_path} with BTY_IMAGES exFAT partition (p{part_num})")
     return 0
