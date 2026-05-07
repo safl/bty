@@ -28,14 +28,22 @@ PROVISIONING_PATTERN = r"^(none|cloud-init|cijoe|cijoe-online)$"
 WORKFLOW_STATUSES = ("running", "success", "failed")
 WORKFLOW_STATUS_PATTERN = r"^(running|success|failed)$"
 
-# Boot-policy values: what ``GET /pxe/{mac}`` returns for an assigned
-# machine. ``local`` (the default) returns sanboot - the box boots
-# whatever is on its disk. ``flash`` returns the live-env chain so the
-# box re-flashes itself on every PXE boot (per-job CI cadence).
+# Boot-policy values: what ``GET /pxe/{mac}`` returns.
+#
+# - ``local`` returns sanboot; the box boots whatever is on its disk.
+#   This is the explicit-PUT default for assigned machines.
+# - ``flash`` returns the live-env chain so the box re-flashes itself
+#   on every PXE boot (per-job CI cadence).
+# - ``tui`` returns the live-env chain in interactive mode; the live
+#   env launches ``bty-tui`` on tty1 instead of auto-flashing, so the
+#   operator picks an image from the server's catalog by hand. This is
+#   the auto-discovery default for unknown MACs that PXE-boot through
+#   the server.
+#
 # Decoupled from the completion signal: ``POST /pxe/{mac}/done`` updates
 # ``last_flashed_at`` regardless of policy and never flips the policy.
-BOOT_POLICIES = ("local", "flash")
-BOOT_POLICY_PATTERN = r"^(local|flash)$"
+BOOT_POLICIES = ("local", "flash", "tui")
+BOOT_POLICY_PATTERN = r"^(local|flash|tui)$"
 
 
 class MachineUpsert(BaseModel):

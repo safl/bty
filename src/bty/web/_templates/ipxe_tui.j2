@@ -1,0 +1,17 @@
+#!ipxe
+# bty network-flash for {{ mac }} - interactive TUI mode
+#
+# ``boot_policy=tui``: chain into the bty live env with
+# ``bty.mode=interactive`` so the flash-on-boot oneshot short-circuits
+# and ``bty-tui`` is launched on tty1 instead. The TUI fetches the
+# image catalog from ``GET <bty.server>/images`` and lets the operator
+# pick + flash without needing a server-side per-MAC assignment.
+#
+# This is the default for unknown MACs that PXE-boot through the
+# server: anyone on the segment lands at "bty-on-a-USB-but-over-the-
+# network" without prior configuration.
+
+set bty-base http://{{ host }}
+kernel ${bty-base}/boot/bty-live-x86_64.vmlinuz boot=live fetch=${bty-base}/boot/bty-live-x86_64.squashfs components quiet console=tty0 console=ttyS0,115200 bty.mode=interactive bty.server=${bty-base} bty.mac={{ mac }}
+initrd ${bty-base}/boot/bty-live-x86_64.initrd
+boot

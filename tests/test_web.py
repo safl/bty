@@ -81,12 +81,17 @@ def test_version_is_open(app_client: TestClient) -> None:
     assert "version" in body and isinstance(body["version"], str) and body["version"]
 
 
-def test_pxe_for_unknown_mac_returns_unknown_template(app_client: TestClient) -> None:
+def test_pxe_for_unknown_mac_returns_tui_template(app_client: TestClient) -> None:
+    """An unknown MAC auto-discovers with ``boot_policy=tui`` and is
+    served the interactive-live-env iPXE chain. This is "bty-on-a-USB
+    but over the network": first PXE contact lands the operator at
+    bty-tui without any prior server-side configuration."""
     r = app_client.get("/pxe/aa:bb:cc:dd:ee:ff")
     assert r.status_code == 200
     body = r.text
-    assert "no bty assignment" in body
+    assert "bty.mode=interactive" in body
     assert "aa:bb:cc:dd:ee:ff" in body
+    assert "kernel" in body  # chains into the live env
 
 
 def test_pxe_invalid_mac_returns_400(app_client: TestClient) -> None:
@@ -207,7 +212,10 @@ def test_pxe_for_known_mac_uses_assignment_template(app_client: TestClient) -> N
 
 def test_pxe_auto_discovers_unknown_mac(app_client: TestClient) -> None:
     """A /pxe contact for an unknown MAC creates a placeholder record so the
-    operator sees the machine in /machines and can claim it."""
+    operator sees the machine in /machines and can claim it. The default
+    ``boot_policy`` is ``tui``: the unknown MAC chains into the live env in
+    interactive mode (bty-tui), letting the operator pick + flash an image
+    by hand without prior server-side configuration."""
     mac = "11:22:33:44:55:66"
 
     # Pre-condition: not in the DB.
@@ -217,7 +225,7 @@ def test_pxe_auto_discovers_unknown_mac(app_client: TestClient) -> None:
     # PXE client (no auth) hits the endpoint.
     r = app_client.get(f"/pxe/{mac}")
     assert r.status_code == 200
-    assert "no bty assignment" in r.text  # fallback template
+    assert "bty.mode=interactive" in r.text  # tui template
 
     # Now visible to the operator.
     found = app_client.get(f"/machines/{mac}", headers=AUTH)
@@ -226,6 +234,7 @@ def test_pxe_auto_discovers_unknown_mac(app_client: TestClient) -> None:
     assert body["mac"] == mac
     assert body["image"] is None  # discovered, not yet assigned
     assert body["provisioning_mode"] == "none"
+    assert body["boot_policy"] == "tui"  # auto-discovery default
     assert body["discovered_at"] is not None
     assert body["last_seen_at"] is not None
 
@@ -472,6 +481,44 @@ def test_pxe_flash_policy_returns_chain_with_args(app_client: TestClient) -> Non
     assert "bty.mac=aa:bb:cc:dd:ee:ff" in body
     assert "bty.image_url=${bty-base}/images/demo.qcow2" in body
     assert "bty.provisioning=cloud-init" in body
+
+
+def test_pxe_tui_policy_returns_interactive_chain(app_client: TestClient) -> None:
+    """boot_policy=tui: chain into the live env with bty.mode=interactive
+    so the live env launches bty-tui on tty1 instead of auto-flashing.
+    No image / no provisioning cmdline params - the operator picks at
+    run time."""
+    app_client.put(
+        "/machines/aa:bb:cc:dd:ee:ff",
+        json={"boot_policy": "tui"},
+        headers=AUTH,
+    )
+    r = app_client.get("/pxe/aa:bb:cc:dd:ee:ff", headers={"Host": "bty.local:8080"})
+    assert r.status_code == 200
+    body = r.text
+    assert body.startswith("#!ipxe"), body
+    assert "set bty-base http://bty.local:8080" in body
+    assert "kernel ${bty-base}/boot/bty-live-x86_64.vmlinuz" in body
+    assert "initrd ${bty-base}/boot/bty-live-x86_64.initrd" in body
+    assert "bty.mode=interactive" in body
+    assert "bty.server=${bty-base}" in body
+    assert "bty.mac=aa:bb:cc:dd:ee:ff" in body
+    # Interactive mode must NOT pre-decide image / provisioning - those
+    # come from the operator's TUI selection.
+    assert "bty.image_url" not in body
+    assert "bty.provisioning" not in body
+
+
+def test_machine_upsert_accepts_boot_policy_tui(app_client: TestClient) -> None:
+    """``boot_policy='tui'`` is accepted by Pydantic validation alongside
+    ``local`` and ``flash``."""
+    r = app_client.put(
+        "/machines/aa:bb:cc:dd:ee:ff",
+        json={"boot_policy": "tui"},
+        headers=AUTH,
+    )
+    assert r.status_code == 200
+    assert r.json()["boot_policy"] == "tui"
 
 
 def test_pxe_done_updates_last_flashed_at(app_client: TestClient) -> None:

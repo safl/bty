@@ -219,14 +219,18 @@ def create_app(
             if row is None:
                 # Auto-discovery: record an unassigned machine so the
                 # operator can see this MAC in /machines and decide
-                # what to do with it. PXE clients still get the
-                # "unknown" template (= boot from local disk).
+                # what to do with it. ``boot_policy='tui'`` makes
+                # the unknown MAC chain into the live env in
+                # interactive mode (bty-tui) - "bty-on-a-USB but
+                # over the network" - so first contact is useful
+                # without prior server-side configuration.
                 conn.execute(
                     """
                     INSERT INTO machines
-                        (mac, provisioning_mode, discovered_at,
-                         last_seen_at, last_seen_ip, created_at, updated_at)
-                    VALUES (?, 'none', ?, ?, ?, ?, ?)
+                        (mac, provisioning_mode, boot_policy,
+                         discovered_at, last_seen_at, last_seen_ip,
+                         created_at, updated_at)
+                    VALUES (?, 'none', 'tui', ?, ?, ?, ?, ?)
                     """,
                     (normalised, now, now, client_ip, now, now),
                 )
@@ -250,14 +254,18 @@ def create_app(
         assert row is not None
         machine = dict(row)
         publish_machines_changed()
-        # Boot-policy decision tree:
-        #   - no image assigned (discovered)         -> sanboot fallback
-        #   - boot_policy == 'flash' AND image       -> chain into live env
-        #   - boot_policy == 'local' (default)       -> sanboot
+        # Boot-policy decision tree (highest priority first):
+        #   - boot_policy == 'tui'                   -> live env in interactive mode
+        #   - boot_policy == 'flash' AND image       -> live env auto-flash
+        #   - boot_policy == 'local' AND image       -> sanboot (already provisioned)
+        #   - else (no image, boot_policy == 'local')-> sanboot fallback
         # Completion signal (POST /pxe/{mac}/done) updates last_flashed_at
         # but never flips boot_policy - operator does that explicitly.
+        host = request.headers.get("host", f"{request.url.hostname}:{request.url.port or 8080}")
+        if machine.get("boot_policy") == "tui":
+            template = jinja.get_template("ipxe_tui.j2")
+            return template.render(mac=normalised, machine=machine, host=host)
         if machine.get("image") and machine.get("boot_policy") == "flash":
-            host = request.headers.get("host", f"{request.url.hostname}:{request.url.port or 8080}")
             template = jinja.get_template("ipxe_flash.j2")
             return template.render(mac=normalised, machine=machine, host=host)
         if machine.get("image"):

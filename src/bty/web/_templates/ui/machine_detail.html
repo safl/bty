@@ -82,7 +82,11 @@
                     <code>local</code>: PXE boots return sanboot (production / stable).
                     <code>flash</code>: PXE boots chain into the live env so the box
                     re-flashes the assigned image every time (per-job CI cadence).
-                    Completion (<code>POST /pxe/{mac}/done</code>) updates
+                    <code>tui</code>: PXE boots chain into the live env in interactive
+                    mode (<code>bty-tui</code> on tty1) so the operator picks an image
+                    from the server's catalog by hand. The auto-discovery default for
+                    unknown MACs is <code>tui</code>; you can flip a known machine
+                    here. Completion (<code>POST /pxe/{mac}/done</code>) updates
                     <em>last flashed</em> but never flips the policy - the operator
                     flips back to <code>local</code> when they want the box to stop
                     reflashing.
