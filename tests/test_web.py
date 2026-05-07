@@ -351,6 +351,15 @@ def test_list_images_returns_seeded_fixture(app_client: TestClient) -> None:
     assert {row["name"] for row in rows} == {"demo.qcow2"}
 
 
+def test_list_images_is_open_for_pxe_clients(app_client: TestClient) -> None:
+    """``GET /images`` is an open route: the bty-tui-on-PXE flow needs
+    to enumerate the catalog from inside the live env without first
+    bootstrapping a session. Same trust model as ``GET /images/{name}``
+    (already open) and the other ``/pxe/`` routes."""
+    r = app_client.get("/images")  # no Authorization header
+    assert r.status_code == 200
+
+
 def test_list_images_returns_files_under_image_root(
     tmp_path: Path,
 ) -> None:

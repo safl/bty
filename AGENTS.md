@@ -188,10 +188,11 @@ is lower-case `aa:bb:cc:dd:ee:ff`):
 | `POST /auth/login` | `GET /machines/{mac}` |
 | `GET /pxe/{mac}` | `PUT /machines/{mac}` (body: MachineUpsert) |
 | `POST /pxe/{mac}/done` | `DELETE /machines/{mac}` |
-| `GET /pxe-bootstrap.ipxe` | `GET /images` |
-| `GET /boot/{name}` | `PUT /images/{name}` (stream upload) |
-| `GET /images/{name}` | `PUT /boot/{name}` (stream upload) |
-| `GET /static/*` | `GET /events/machines` (Server-Sent Events) |
+| `GET /pxe-bootstrap.ipxe` | `PUT /images/{name}` (stream upload) |
+| `GET /boot/{name}` | `PUT /boot/{name}` (stream upload) |
+| `GET /images/{name}` | `GET /events/machines` (Server-Sent Events) |
+| `GET /images` (catalog list) | |
+| `GET /static/*` | |
 
 **HTTP status semantics:**
 - `200` - success with body

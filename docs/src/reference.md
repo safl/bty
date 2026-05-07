@@ -291,6 +291,12 @@ cannot carry a token:
  Used by the live env to download the assigned image; reachable
  by anyone on the network. Companion auth-gated upload route at
  `PUT /images/{name}` for operators / scripts.
+- `GET /images` - list the catalog (array of `ImageEntry`). Open for
+ the same reason as `GET /images/{name}`: the bty-tui-on-PXE flow
+ needs to enumerate from inside the live env without first
+ bootstrapping a session, and discovery adds no capability beyond
+ what the already-open byte-serving route provides.
+
 Protected routes (Bearer required):
 
 | Method | Path | Body | Returns |
@@ -299,7 +305,6 @@ Protected routes (Bearer required):
 | GET | `/machines/{mac}` | - | `Machine` (404 if missing) |
 | PUT | `/machines/{mac}` | `MachineUpsert` | `Machine` (the new state) |
 | DELETE | `/machines/{mac}` | - | 204 (404 if missing) |
-| GET | `/images` | - | array of `ImageEntry` |
 
 MAC addresses are accepted in any case + `:`-or-`-` separated, and
 normalised to lower-case `aa:bb:cc:dd:ee:ff`.

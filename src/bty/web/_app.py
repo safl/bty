@@ -454,12 +454,16 @@ def create_app(
         publish_machines_changed()
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
-    @app.get(
-        "/images",
-        response_model=list[_models.ImageEntry],
-        dependencies=[Depends(require_token)],
-    )
+    @app.get("/images", response_model=list[_models.ImageEntry])
     def list_images() -> list[_models.ImageEntry]:
+        # Open route: the bty-tui-on-PXE flow needs to enumerate the
+        # catalog without first bootstrapping auth. The byte-serving
+        # route ``GET /images/{name}`` is already open (PXE clients
+        # download images during the live env's flash phase), so
+        # leaving the listing protected only added discovery friction
+        # without changing the trust model. Same homelab-network
+        # assumption as the other /pxe / /boot / /images/{name}
+        # endpoints.
         out: list[_models.ImageEntry] = []
         for img in images.list_images(resolved_image_root):
             out.append(
