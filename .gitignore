@@ -120,3 +120,8 @@ bty-media/live-build/config/includes.chroot/opt/bty/bty_lab-*.whl
 .vscode/
 
 # uv keeps uv.lock under version control - do NOT ignore it.
+
+# docs tooling is consumed via pipx install ./docs/tooling, which doesn't
+# read uv.lock. The file gets created if someone runs 'uv run --project
+# ./docs/tooling' for ad-hoc dev; we don't track it.
+docs/tooling/uv.lock
