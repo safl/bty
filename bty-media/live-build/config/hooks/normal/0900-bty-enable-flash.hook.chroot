@@ -19,8 +19,13 @@
 #   only fires on usb-iso boots where the cooked artifact ships a
 #   pre-allocated BTY_IMAGES partition; expands it to fill the
 #   stick on first boot, then becomes a no-op on subsequent boots.
+# - ``var-lib-bty-images.mount`` mounts the BTY_IMAGES partition
+#   at /var/lib/bty/images (RO) so bty-tui sees it as the local
+#   image catalog. Same ConditionPathExists gate; ordered after
+#   the grow service so we mount the resized partition.
 
 set -eu
 systemctl enable bty-flash-on-boot.service
 systemctl enable bty-tui-on-tty1.service
 systemctl enable bty-grow-images-partition.service
+systemctl enable var-lib-bty-images.mount

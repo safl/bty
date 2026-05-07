@@ -1,0 +1,35 @@
+[Unit]
+Description=Mount BTY_IMAGES partition at /var/lib/bty/images
+Documentation=https://github.com/safl/bty
+# systemd mount unit names must match the mount path with ``/``
+# replaced by ``-``; this unit's filename is therefore
+# ``var-lib-bty-images.mount`` and ``Where=`` MUST be
+# ``/var/lib/bty/images`` (systemd refuses to load the unit
+# otherwise).
+#
+# Gated on the BTY_IMAGES partition existing. Skipped on netboot
+# live-x86 (no such partition) and on Ventoy / loopback boots
+# (the operator's catalog lives somewhere else; phase 5
+# auto-discovery will handle those).
+ConditionPathExists=/dev/disk/by-label/BTY_IMAGES
+
+# Order: after bty-grow-images-partition has had a chance to
+# resize+reformat the partition (so we mount the GROWN exFAT, not
+# the pre-allocated 4 GiB one). Before the TUI / flash services
+# so the catalog is in place when they look at /var/lib/bty/images.
+After=bty-grow-images-partition.service
+Before=bty-tui-on-tty1.service bty-flash-on-boot.service
+
+[Mount]
+What=/dev/disk/by-label/BTY_IMAGES
+Where=/var/lib/bty/images
+Type=exfat
+# Read-only on purpose. The bty flash flow only ever reads images;
+# mounting RW would let a buggy run trash the operator's catalog.
+# To add or remove images the operator unmounts and edits from a
+# host OS (the typical workflow) - the partition is exFAT so any
+# host can read+write it.
+Options=ro,noatime
+
+[Install]
+WantedBy=multi-user.target
