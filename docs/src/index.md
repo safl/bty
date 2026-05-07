@@ -14,11 +14,10 @@
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://github.com/safl/bty/blob/main/LICENSE)
 ```
 
-Bare-metal provisioning toolkit. Flashes pre-built ("cooked") system
-images onto target disks - locally from a USB stick or remotely over
-PXE - and configures them via cloud-init or CIJOE workflows. Designed
-for both ad-hoc one-off provisioning (USB live image) and DevOps fleet
-operation (server image with browser UI and iPXE).
+Image-flash provisioning toolkit for bare-metal and virtual targets.
+Writes pre-built ("cooked") system images onto target disks - locally
+from a USB live stick or remotely over PXE - and configures the
+deployed system on first boot via cloud-init or CIJOE workflows.
 
 ```{toctree}
 :maxdepth: 2
