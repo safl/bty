@@ -124,14 +124,14 @@ Live variant:
 
 ## Status
 
-All four variants build. usb-x86, server-x86, and live-x86 ship with
-every tagged release on the
-[GitHub releases page](https://github.com/safl/bty/releases) and are
-covered by the end-to-end PXE chain test in CI. server-rpi is
-experimental: the build runs in CI under
-``continue-on-error: true`` and its artifact is available on the
-workflow run page, but it isn't promoted to the public Release page
-yet. Most operators never run this build pipeline themselves -
+All four variants ship on every tagged release at
+[the GitHub releases page](https://github.com/safl/bty/releases).
+The end-to-end PXE chain test (``make test-pxe``) gates each release
+on usb-x86, server-x86, and live-x86 building cleanly and the
+chain working end to end. server-rpi (Raspberry Pi 4 / 5) builds in
+the same matrix but isn't covered by the PXE chain test (which is
+amd64-only); first-boot smoke-testing happens out-of-band on real
+hardware. Most operators never run this build pipeline themselves -
 ``bty-media/`` exists for contributors who want to modify the image.
 
 - **usb-x86.** The cooked `.img.zst` boots into a Debian live
