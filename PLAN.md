@@ -1,4 +1,4 @@
-# bty - Boot & Target Utility
+# bty - flash images onto target disks, locally or over PXE
 
 Bare-metal provisioning toolkit. Flashes pre-built ("cooked") system
 images onto target disks - locally from a USB stick or remotely over

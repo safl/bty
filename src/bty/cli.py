@@ -48,7 +48,7 @@ def main(argv: list[str] | None = None) -> int:
 
     parser = argparse.ArgumentParser(
         prog="bty",
-        description="bty - Boot & Target Utility",
+        description="bty - flash images onto target disks, locally or over PXE",
     )
     parser.add_argument(
         "--version",

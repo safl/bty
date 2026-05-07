@@ -4,7 +4,7 @@
 :align: center
 ```
 
-# bty - Boot & Target Utility
+# bty - flash images onto target disks, locally or over PXE
 
 ```{only} html
 [![CI](https://github.com/safl/bty/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/safl/bty/actions/workflows/ci.yml)
