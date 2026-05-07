@@ -90,34 +90,27 @@ table, and you should now see the second partition labeled
 ## Step 3: Drop your image(s) onto BTY_IMAGES
 
 The `BTY_IMAGES` partition is **exFAT** so you can mount it on Linux,
-macOS, or Windows. From any host:
+macOS, or Windows.
 
-::::{tab-set}
+**Linux:**
 
-:::{tab-item} Linux
 ```bash
 sudo mkdir -p /mnt/bty
 sudo mount /dev/disk/by-label/BTY_IMAGES /mnt/bty
 sudo cp /path/to/my-image.qcow2 /mnt/bty/
 sudo umount /mnt/bty
 ```
-:::
 
-:::{tab-item} macOS
-The stick auto-mounts at `/Volumes/BTY_IMAGES`. Drag images in via
-Finder, or:
+**macOS:** the stick auto-mounts at `/Volumes/BTY_IMAGES`. Drag
+images in via Finder, or:
+
 ```bash
 cp /path/to/my-image.qcow2 /Volumes/BTY_IMAGES/
 diskutil unmount /Volumes/BTY_IMAGES
 ```
-:::
 
-:::{tab-item} Windows
-The stick gets a drive letter (typically `D:` or `E:`). Copy images
-in via Explorer.
-:::
-
-::::
+**Windows:** the stick gets a drive letter (typically `D:` or `E:`).
+Copy images in via Explorer.
 
 You can drop **multiple images** onto the stick if you'll be flashing
 several different OSes from the same boot media. The TUI lists every
@@ -165,11 +158,12 @@ you've picked an image and a target disk:
 A status modal streams the result. When it says **`flash complete`**,
 the image bytes are on the target disk.
 
-```{image} _static/screenshot-tui-flashing.png
-:alt: bty-tui mid-flash, showing the progress modal
-:width: 720px
-:align: center
-```
+<!--
+A screenshot of bty-tui mid-flash will land at
+``_static/screenshot-tui-flashing.png`` once the asciinema /
+screenshot capture pass is done.
+-->
+
 
 ```{note}
 Without root the TUI launches in **read-only mode** - you can browse
