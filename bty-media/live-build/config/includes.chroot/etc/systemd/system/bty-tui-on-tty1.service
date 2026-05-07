@@ -1,0 +1,29 @@
+[Unit]
+Description=bty-tui interactive flash on tty1
+Documentation=https://github.com/safl/bty
+# Only fire when the server told us to land in interactive mode.
+# ``ipxe_tui.j2`` (boot_policy=tui) sets this; ``ipxe_flash.j2``
+# (boot_policy=flash) does not.
+ConditionKernelCommandLine=bty.mode=interactive
+# Take over tty1: the live env's auto-login agetty is the default
+# session there; we want to BE the session, not run inside it.
+Conflicts=getty@tty1.service
+After=getty@tty1.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=idle
+ExecStart=/usr/local/sbin/bty-tui-on-tty1
+Restart=on-failure
+RestartSec=5
+# Plumb tty1 in as the controlling terminal so textual's input loop
+# works (cursor keys, function keys, etc.).
+StandardInput=tty
+StandardOutput=tty
+StandardError=tty
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+
+[Install]
+WantedBy=multi-user.target

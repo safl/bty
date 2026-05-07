@@ -16,6 +16,11 @@ Recognised cmdline parameters:
 - ``bty.image_url=URL``    - direct URL to the image to flash
 - ``bty.provisioning=MODE``- 'none' / 'cloud-init' / 'cijoe'
                              (defaults to 'none' if absent)
+- ``bty.mode=interactive`` - short-circuit; ``bty-tui-on-tty1.service``
+                             handles the interactive flash flow on
+                             tty1 instead. Set by the server's
+                             ``ipxe_tui.j2`` for ``boot_policy=tui``
+                             (default for unknown MACs).
 """
 
 from __future__ import annotations
@@ -113,6 +118,19 @@ def signal_done(server: str, mac: str) -> None:
 
 def main() -> int:
     args = cmdline_args()
+
+    # Interactive mode (boot_policy=tui on the server side) -> defer
+    # to bty-tui-on-tty1.service; that unit owns tty1 and runs
+    # bty-tui --server URL --mac MAC for the operator. Trying to
+    # flash here would race the TUI session.
+    if args.get("bty.mode") == "interactive":
+        print(
+            "bty-flash-on-boot: bty.mode=interactive on cmdline; "
+            "bty-tui-on-tty1.service handles this boot",
+            flush=True,
+        )
+        return 0
+
     missing = [k for k in REQUIRED if k not in args]
     if missing:
         print(

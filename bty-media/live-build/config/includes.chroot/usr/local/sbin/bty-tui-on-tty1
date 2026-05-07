@@ -1,0 +1,42 @@
+#!/bin/sh
+# bty-tui-on-tty1: launch bty-tui on tty1 in PXE-interactive mode.
+#
+# Driven by ``bty-tui-on-tty1.service``, gated on
+# ``bty.mode=interactive`` via ``ConditionKernelCommandLine``. We're
+# the tty1 session in this mode (the unit conflicts with
+# ``getty@tty1.service``); systemd hands us /dev/tty1 as stdio.
+#
+# Reads ``bty.server`` and ``bty.mac`` from /proc/cmdline (set by the
+# server's ``ipxe_tui.j2`` template) and forwards them to
+# ``bty-tui --server`` / ``--mac``. The TUI fetches the image catalog
+# from the server's ``GET /images`` and lets the operator pick an
+# image to flash. Successful flashes ``POST <server>/pxe/<mac>/done``
+# back to the server.
+#
+# Cmdline parsing is intentionally simple (tr+sed): bty.* tokens
+# never contain spaces, so word-splitting is safe. Mirrors the
+# convention in ``bty-flash-on-boot`` which also reads
+# ``/proc/cmdline`` directly.
+
+set -eu
+
+CMDLINE=$(cat /proc/cmdline)
+
+# shellcheck disable=SC2086 # word-split is intended for cmdline tokens
+SERVER=$(printf '%s\n' $CMDLINE | tr ' ' '\n' | sed -n 's/^bty\.server=//p' | head -1)
+# shellcheck disable=SC2086
+MAC=$(printf '%s\n' $CMDLINE | tr ' ' '\n' | sed -n 's/^bty\.mac=//p' | head -1)
+
+ARGS=""
+if [ -n "$SERVER" ]; then
+    ARGS="$ARGS --server $SERVER"
+fi
+if [ -n "$MAC" ]; then
+    ARGS="$ARGS --mac $MAC"
+fi
+
+# We're already root in the live env (auto-login + systemd service);
+# no sudo needed. ``exec`` so signals from systemd reach bty-tui
+# directly.
+# shellcheck disable=SC2086 # ARGS is intentionally word-split
+exec /usr/local/bin/bty-tui $ARGS

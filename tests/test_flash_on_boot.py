@@ -21,6 +21,8 @@ import importlib.util
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPT_PATH = (
     REPO_ROOT
@@ -87,3 +89,88 @@ def test_local_image_path_extension_recognised_by_detect_format():
     ):
         p = mod.local_image_path(url)
         assert images.detect_format(p) is not None, (url, p)
+
+
+# ---------- bty.mode=interactive short-circuit ------------------------------
+
+
+def test_main_short_circuits_on_interactive_mode(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """When ``bty.mode=interactive`` is on /proc/cmdline, the
+    flash-on-boot oneshot exits 0 immediately and leaves the work to
+    ``bty-tui-on-tty1.service``. No download attempt, no flash, no
+    reboot - the script must not race the TUI session that owns
+    tty1 in interactive mode."""
+    mod = _load_module()
+
+    # Synthesise a /proc/cmdline file with interactive mode.
+    fake_cmdline = tmp_path / "cmdline"
+    fake_cmdline.write_text(
+        "boot=live components quiet bty.mode=interactive "
+        "bty.server=http://srv:8080 bty.mac=aa:bb:cc:dd:ee:ff\n"
+    )
+    monkeypatch.setattr(mod, "CMDLINE", fake_cmdline)
+
+    # Belt-and-braces: if the short-circuit doesn't fire and we end up
+    # in the flash path, blow up loudly instead of trying to download
+    # / shell out to ``bty list disks`` from inside the test.
+    def _explode(*_a: object, **_kw: object) -> None:
+        raise AssertionError("flash-path side-effect should not run in interactive mode")
+
+    monkeypatch.setattr(mod, "download", _explode)
+    monkeypatch.setattr(mod, "pick_target", _explode)
+    monkeypatch.setattr(mod, "signal_done", _explode)
+
+    rc = mod.main()
+    assert rc == 0
+    captured = capsys.readouterr()
+    assert "bty.mode=interactive" in captured.out
+    assert "bty-tui-on-tty1.service" in captured.out
+
+
+def test_main_runs_flash_path_when_interactive_mode_absent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The interactive short-circuit only fires for ``bty.mode=interactive``.
+    A cmdline with the standard flash-mode keys still drives the
+    flash path. (We monkeypatch the side-effect helpers to no-ops so
+    the test doesn't actually shell out.)"""
+    mod = _load_module()
+
+    fake_cmdline = tmp_path / "cmdline"
+    fake_cmdline.write_text(
+        "boot=live bty.server=http://srv bty.mac=aa:bb:cc:dd:ee:ff "
+        "bty.image_url=http://srv/images/foo.img\n"
+    )
+    monkeypatch.setattr(mod, "CMDLINE", fake_cmdline)
+
+    visited: list[str] = []
+    monkeypatch.setattr(mod, "download", lambda _u, _d: visited.append("download"))
+    monkeypatch.setattr(mod, "pick_target", lambda: (visited.append("pick"), "/dev/sda")[1])
+    monkeypatch.setattr(mod, "signal_done", lambda _s, _m: visited.append("signal"))
+
+    # subprocess.run is called by main() for ``bty flash`` + sleep + reboot;
+    # stub it out so we don't actually spawn anything.
+    monkeypatch.setattr(
+        mod.subprocess,
+        "run",
+        lambda *_a, **_kw: visited.append("subprocess") or _DummyCompleted(),
+    )
+
+    rc = mod.main()
+    assert rc == 0
+    assert "download" in visited
+    assert "pick" in visited
+    assert "signal" in visited
+
+
+class _DummyCompleted:
+    """Stand-in for subprocess.CompletedProcess; the script only checks rc."""
+
+    returncode = 0
+    stdout = ""
+    stderr = ""

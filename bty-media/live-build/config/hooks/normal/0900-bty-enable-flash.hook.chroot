@@ -1,11 +1,19 @@
 #!/bin/sh
-# 0900-bty-enable-flash.hook.chroot - enable the flash-on-boot service.
+# 0900-bty-enable-flash.hook.chroot - enable bty live-env services.
 #
 # Runs after 0500-bty-install (CLI present) and after live-build's
-# default hooks. Creates the multi-user.target.wants symlink so the
-# service starts automatically on every boot of the live env. The
-# service itself exits 0 with no work if /proc/cmdline lacks the
-# bty.* parameters (interactive / debug boot).
+# default hooks. Creates the multi-user.target.wants symlinks so the
+# services start automatically on every boot of the live env. Each
+# unit decides at runtime whether it actually has work to do:
+#
+# - ``bty-flash-on-boot.service`` exits 0 when /proc/cmdline lacks
+#   the required bty.* keys, OR when ``bty.mode=interactive`` is
+#   set (in which case the TUI service handles the boot instead).
+# - ``bty-tui-on-tty1.service`` is gated by
+#   ``ConditionKernelCommandLine=bty.mode=interactive`` and runs
+#   ``bty-tui --server URL --mac MAC`` in place of the agetty on
+#   tty1 when the server's ipxe_tui.j2 set that mode.
 
 set -eu
 systemctl enable bty-flash-on-boot.service
+systemctl enable bty-tui-on-tty1.service

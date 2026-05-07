@@ -9,10 +9,13 @@
 # was staged by ``scripts/bty_wheel_stage.py`` and copied into the
 # chroot's ``/opt/bty/`` by live-build's includes pipeline.
 #
-# Output: bty CLI on the live env's ``$PATH`` via
-# ``/usr/local/bin/{bty,bty-tui}`` symlinks pointing into a venv at
-# ``/opt/bty/venv``. No [web] / [tui] extras - the live env runs the
-# CLI only.
+# Output: bty CLI + TUI on the live env's ``$PATH`` via
+# ``/usr/local/bin/{bty,bty-tui,bty-ctl}`` symlinks pointing into a
+# venv at ``/opt/bty/venv``. The ``[tui]`` extra is needed because
+# the TUI-on-PXE flow (``boot_policy=tui``, default for unknown
+# MACs) lands at ``bty-tui --server URL --mac MAC`` on tty1; the
+# ``[web]`` extra is intentionally NOT installed - the live env is
+# never an HTTP server.
 
 set -eu
 
@@ -25,11 +28,12 @@ fi
 python3 -m venv /opt/bty/venv
 /opt/bty/venv/bin/pip install --no-cache-dir --upgrade pip
 for whl in /opt/bty/bty_lab-*-py3-none-any.whl; do
-    /opt/bty/venv/bin/pip install --no-cache-dir "${whl}"
+    /opt/bty/venv/bin/pip install --no-cache-dir "${whl}[tui]"
 done
 
 ln -sf /opt/bty/venv/bin/bty /usr/local/bin/bty
 ln -sf /opt/bty/venv/bin/bty-tui /usr/local/bin/bty-tui
+ln -sf /opt/bty/venv/bin/bty-ctl /usr/local/bin/bty-ctl
 
 # Trim pip caches and the build wheel - the appliance only needs the
 # installed package.
