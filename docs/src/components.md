@@ -80,23 +80,38 @@ pipx install bty-lab
 
 ## `bty-media/` (appliance-image builder)
 
-Sibling directory at the repo root. Not a Python package. Builds the
-two appliance images:
+Sibling directory at the repo root. Not a Python package. Builds four
+appliance variants from a shared rootfs overlay:
 
-**USB live image.** Bootable USB stick carrying the `bty` runtime and a
-bundled set of system images. Operator plugs it in, boots a target,
-runs `bty flash` against the local disk. Self-contained and offline.
-Direct-flash delivery vehicle.
+**USB live image (`usb-x86`).** Bootable USB stick carrying the `bty`
+runtime and an exFAT `BTY_IMAGES` partition for cooked images. Operator
+plugs it in, boots a target, runs `bty flash` against the local disk.
+Self-contained and offline. Direct-flash delivery vehicle.
 
-**Server image.** Installable disk image that, when written to a host's
-disk and booted, runs the bty provisioning server (`bty-web`, the
-iPXE/TFTP/HTTP services that PXE clients chain through, the
-network-flash live environment those clients boot into, and a storage
-layout for the image library). One artifact, ready to serve a fleet.
+**Server image, x86_64 (`server-x86`).** Installable disk image that,
+when written to a host's disk and booted, runs the bty provisioning
+server (`bty-web`, the iPXE/TFTP/HTTP services that PXE clients chain
+through, the network-flash live environment those clients boot into,
+and a storage layout for the image library). One artifact, ready to
+serve a fleet.
+
+**Server image, Raspberry Pi 4 / 5 (`server-rpi`).** Same appliance
+role, delivered as an SD-card image for arm64. Built by mounting the
+upstream Raspberry Pi OS Lite image and customising it in a
+`qemu-aarch64-static` chroot. Operator `dd`'s the resulting `.img.zst`
+to an SD card and boots a Pi 4 or Pi 5; first-boot ends at the same
+`bty / bty` credential as the x86 server image.
+
+**Network-flash live env (`live-x86`).** Kernel + initrd + squashfs
+trio that PXE clients chain into. Built via Debian's `live-build`. The
+chroot ships a `bty-flash-on-boot.service` oneshot that reads its
+assignment from `/proc/cmdline`, downloads the assigned image, runs
+`bty flash`, signals completion, and reboots.
 
 The intended operator experience is appliance-grade:
 
-1. `dd` (or `bty flash`) the image onto the server host's disk.
+1. `dd` (or `bty flash`) the image onto the server host's disk (or SD
+   card, for the Pi variant).
 2. Boot. Network comes up via DHCP; the appliance auto-starts
    `bty-web` on `:8080` with a default `bty / bty` credential and an
    `odus` admin user with passwordless sudo.
@@ -107,12 +122,11 @@ The intended operator experience is appliance-grade:
    assignments, image catalog, boot artifacts) is browser-driven from
    that point on.
 
-*Hardware targets.* The server image is built for `amd64` only:
-older Intel NUCs, discarded 1U servers, recent GMKtec mini-PCs, and
-similar small x86 boxes. The same artifact also boots as a VM disk.
-An `arm64` variant for Raspberry Pi or other SBCs is feasible but
-intentionally out of scope for the initial roadmap; if there is
-interest, it can be added later.
+*Hardware targets.* `server-x86` runs on any amd64 box that boots a
+Debian cloud image: older Intel NUCs, discarded 1U servers, recent
+GMKtec mini-PCs. The same artifact also boots as a VM disk.
+`server-rpi` targets the 64-bit Raspberry Pis (4 and 5); both boot the
+SD-card image natively.
 
 ## CIJOE provisioning modes
 
