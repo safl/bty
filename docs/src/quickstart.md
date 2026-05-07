@@ -197,7 +197,7 @@ with `sudo passwd bty` before exposing. From a workstation:
 
 ```bash
 # Get a session token:
-bty-cli login --server http://server:8080
+bty-ctl login --server http://server:8080
 # (token saved to ~/.config/bty/token, mode 0600)
 
 curl -H "Authorization: Bearer $(cat ~/.config/bty/token)" \

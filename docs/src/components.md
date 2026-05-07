@@ -1,7 +1,7 @@
 # Components
 
 bty is one Python package - the `bty` module, distributed on PyPI as
-[`bty-lab`](https://pypi.org/project/bty-lab/) - with three console-script
+[`bty-lab`](https://pypi.org/project/bty-lab/) - with four console-script
 entry points, plus a sibling appliance-image builder (`bty-media/`).
 
 ## `bty` (CLI)
@@ -11,6 +11,21 @@ inspection, target-disk discovery, flashing, and provisioning. Every
 other component is a UI or delivery vehicle for what `bty` does.
 
 Installable on any Linux environment with a sufficient Python runtime:
+
+```bash
+pipx install bty-lab
+```
+
+## `bty-ctl` (CLI client for the remote server)
+
+Companion CLI for a remote `bty-web` deployment. `bty-ctl login`
+authenticates against the server's PAM, caches a session token at
+`~/.config/bty/token` (mode 0600), and `bty-ctl logout` revokes it.
+Future subcommands will surface fleet-level operations (list machines,
+assign images, drive provisioning) without requiring shell access on
+the server.
+
+Ships with the base install - no extra needed:
 
 ```bash
 pipx install bty-lab
@@ -49,9 +64,9 @@ pipx install "bty-lab[web]"
 
 State (machine records, MAC <-> image/provisioning assignments, CIJOE
 workflow references and run reports, known-good baselines, image
-catalog metadata, server settings) is persisted on disk and exposed
-through the UI as **export** (download a single archive) and **import**
-(upload to restore).
+catalog metadata, server settings, sessions) is persisted in a
+single SQLite database under the configured `BTY_STATE_DIR`. Backup
+or migrate by copying the file.
 
 CIJOE produces a structured report on every workflow run. `bty-web`
 captures these reports - both for offline runs (sent back from the live
@@ -82,13 +97,15 @@ layout for the image library). One artifact, ready to serve a fleet.
 The intended operator experience is appliance-grade:
 
 1. `dd` (or `bty flash`) the image onto the server host's disk.
-2. Boot. Network comes up via DHCP; cloud-init handles the bare
-   minimum (hostname, SSH key) on first boot.
-3. Open the web UI in a browser. A first-boot wizard captures the
-   handful of options that cannot be sensibly defaulted (image library
-   location, network interface for PXE serving, admin credential).
-4. From that point on, the server is configured entirely through the
-   web UI - no SSH, no config files, no package installs.
+2. Boot. Network comes up via DHCP; the appliance auto-starts
+   `bty-web` on `:8080` with a default `bty / bty` credential and an
+   `odus` admin user with passwordless sudo.
+3. SSH in once to rotate the password (`sudo passwd bty`) and then
+   open `/ui/login` in a browser.
+4. The Settings page activates the dnsmasq proxy-DHCP block when
+   you're ready to start serving PXE; everything else (machine
+   assignments, image catalog, boot artifacts) is browser-driven from
+   that point on.
 
 *Hardware targets.* The server image is built for `amd64` only:
 older Intel NUCs, discarded 1U servers, recent GMKtec mini-PCs, and

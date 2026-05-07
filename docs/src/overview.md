@@ -43,11 +43,13 @@ NixOS, MAAS, FOG, iVentoy, and others.
 ## Components
 
 bty is one Python package - the `bty` module, distributed on PyPI as
-[`bty-lab`](https://pypi.org/project/bty-lab/) - with three console-script
+[`bty-lab`](https://pypi.org/project/bty-lab/) - with four console-script
 entry points, plus a sibling appliance-image builder:
 
 - `bty` - main CLI for image inspection, target discovery, flashing,
   provisioning.
+- `bty-ctl` - command-line client for a remote `bty-web` server
+  (login/logout, future fleet ops).
 - `bty-tui` - terminal UI for interactive use from a live environment.
 - `bty-web` - HTTP server + browser UI for fleet provisioning.
 - `bty-media/` - sibling directory (not a Python package); a

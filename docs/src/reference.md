@@ -242,8 +242,8 @@ the presenting session.
 Authorization: Bearer <session-token>
 ```
 
-CLI clients use ``bty-cli login`` to fetch and cache a token at
-``~/.config/bty/token`` (mode 0600); ``bty-cli logout`` revokes it.
+CLI clients use ``bty-ctl login`` to fetch and cache a token at
+``~/.config/bty/token`` (mode 0600); ``bty-ctl logout`` revokes it.
 
 Open routes (no token) - these are reachable by PXE clients which
 cannot carry a token:

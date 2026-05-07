@@ -103,61 +103,46 @@ Live variant:
 
 ## Status
 
-- USB variant: milestone 2 scaffold. Pipeline materialised, the cooked
-  image carries `overlayroot` and a placeholder banner. The actual
-  `bty` runtime gets baked into the image starting in milestone 6.
-- Live variant: milestone 14 phase D-2. The chroot carries the bty
-  CLI installed from a locally-built wheel into `/opt/bty/venv`,
-  plus `bty-flash-on-boot.service` (oneshot, after
-  `network-online.target`). The service reads `bty.server=`,
-  `bty.mac=`, `bty.image_url=`, and `bty.provisioning=` from
-  `/proc/cmdline`; with all three required keys present it
-  downloads the image, runs `bty flash --yes`, signals `POST
-  ${server}/pxe/${mac}/done` (best-effort), and reboots. Without
-  cmdline keys it exits 0 and the env drops to its console.
+All three variants are shipping. Each tagged release publishes the
+finished artifacts to the [GitHub releases page](https://github.com/safl/bty/releases),
+so most operators never run this build pipeline themselves - it
+exists for contributors who want to modify the image.
 
-  Smoke-test recipe (no PXE / iPXE involved): build the artifacts,
-  then in two QEMU windows -
+- **USB variant.** The cooked `.img.zst` boots into a Debian live
+  environment with `overlayroot` (RAM-tmpfs overlay over a read-only
+  rootfs), the `bty` CLI + TUI installed into `/opt/bty/venv`, and an
+  exFAT `BTY_IMAGES` partition for cooked images. End-to-end use
+  case in [Walkthrough: USB](../docs/src/walkthrough-usb.md).
+- **Live variant.** Kernel + initrd + squashfs trio used by PXE
+  clients. The chroot ships `bty-flash-on-boot.service` (oneshot,
+  after `network-online.target`); it reads `bty.server=`, `bty.mac=`,
+  `bty.image_url=`, and `bty.provisioning=` from `/proc/cmdline`,
+  downloads the image, runs `bty flash --yes`, signals
+  `POST ${server}/pxe/${mac}/done`, and reboots. Without those
+  cmdline keys it exits 0 and drops to a console.
 
-  ```
-  qemu-system-x86_64 -enable-kvm -m 2G -nographic -append \
-    "boot=live components quiet bty.server=http://10.0.2.2:8080 \
-     bty.mac=aa-bb-cc-dd-ee-ff bty.image_url=http://10.0.2.2:8000/test.img \
-     console=ttyS0" \
-    -kernel ~/system_imaging/disk/bty-live-x86_64.vmlinuz \
-    -initrd ~/system_imaging/disk/bty-live-x86_64.initrd \
-    -netdev user,id=n0 -device virtio-net,netdev=n0 \
-    -drive file=blank.qcow2,if=virtio
-  ```
-
-  Phase D-3 will replace this manual recipe with iPXE chain
-  templates that the server hands to PXE clients.
-- Server variant: milestone 13 phase B + milestone 14 phase C.
-  Bootable Debian cloud-image hosting `bty-web` from the
-  locally-built `bty-lab` wheel, plus the PXE boot-stack scaffold
-  (dnsmasq + iPXE binaries). A `bty-web-init.service` oneshot runs
-  on first boot to generate a random bearer token, write
-  `/etc/default/bty-web`, create the state directory, and rewrite
-  `/etc/issue` so the operator sees the URL and token on the
-  bare-metal/VM console at the login prompt.
+  The end-to-end PXE chain (server hands a per-MAC iPXE plan, client
+  loads the live trio, flashes a target disk, signals done) is
+  exercised by `make test-pxe` and runs in CI on every push.
+- **Server variant.** Bootable Debian cloud-image hosting `bty-web`
+  with single-tenant PAM auth: the `bty` service user is the sole
+  principal, default credential `bty / bty`, rotated on the appliance
+  with `sudo passwd bty`. An `odus` admin user is also baked in (with
+  passwordless sudo) for SSH-side maintenance. The server image's
+  `bty-web-init.service` oneshot creates `BTY_STATE_DIR`, initialises
+  the SQLite schema, and rewrites `/etc/issue` to point operators at
+  `http://<ip>:8080/ui`. The dnsmasq PXE block is shipped commented
+  out and activated from the browser UI's Settings page (no shell
+  edits required).
 
   ### Operator first-boot
 
   1. Write the `.img.zst` to the server's disk (or attach as a VM
-     disk).
-  2. Boot. The login prompt's banner shows
-     `Browser UI: http://<ip>:8080/ui` and `Bearer token: <value>`.
-  3. Open the URL in a browser, paste the token, you're in.
-  4. Rotate the token by removing `/etc/default/bty-web` and
-     rebooting (a future first-boot wizard will replace this flow).
-
-  ### PXE boot stack (Phase C)
-
-  TFTP is up by default and serves `undionly.kpxe` (BIOS) and
-  `ipxe.efi` (UEFI) from `/var/lib/tftpboot/`. The proxy-DHCP +
-  chain directives in `/etc/dnsmasq.d/bty-pxe.conf` are **commented
-  out by default** to avoid disrupting an existing DHCP server on
-  the network. Activate them by uncommenting the block and
-  substituting the operator's PXE subnet, then
-  `systemctl restart dnsmasq`. Phase E (first-boot wizard) will
-  surface this in the browser UI.
+     disk). Pre-built artifacts at
+     <https://github.com/safl/bty/releases/latest/download/bty-server-x86_64.img.zst>.
+  2. Boot. The login prompt's banner shows the browser UI URL.
+  3. Log in to `/ui/login` with `bty / bty` (or rotate first via
+     `sudo passwd bty` on the appliance).
+  4. From `/ui/settings`, pick the interface + subnet for PXE and
+     click Activate. dnsmasq restarts; PXE clients on that segment
+     will now chain through bty-web.

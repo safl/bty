@@ -1,9 +1,9 @@
-"""Tests for ``bty-cli login`` and ``bty-cli logout``.
+"""Tests for ``bty-ctl login`` and ``bty-ctl logout``.
 
 These exercise the client's HTTP roundtrip against a tmp_path-backed
 ``bty-web`` app: PAM is mocked, the session token comes back from a
 real /auth/login, and the client writes / deletes a real token file
-under a redirected ``$HOME``. The ``bty-cli`` binary is a sibling to
+under a redirected ``$HOME``. The ``bty-ctl`` binary is a sibling to
 the local-flashing ``bty`` command - separate console-script entries
 sharing the same wheel.
 """

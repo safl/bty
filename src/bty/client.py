@@ -1,15 +1,15 @@
-"""``bty-cli`` - command-line client for a remote bty-web server.
+"""``bty-ctl`` - command-line client for a remote bty-web server.
 
 Sibling to the local-flashing ``bty`` tool. The split mirrors how
 ``git`` and ``kubectl`` separate local-state operations from
 remote-API operations: ``bty list / inspect / flash`` work on the
-host they're invoked from, while ``bty-cli login / logout / ...``
+host they're invoked from, while ``bty-ctl login / logout / ...``
 talk to a bty-web server over HTTP.
 
 Subcommands:
 
-    bty-cli login [--server URL] [--password-stdin] [--token-out PATH]
-    bty-cli logout [--server URL] [--token-file PATH]
+    bty-ctl login [--server URL] [--password-stdin] [--token-out PATH]
+    bty-ctl logout [--server URL] [--token-file PATH]
 
 Auth is OS-PAM against the bty-web service user's password (the
 account bty-web is running as on the server). On success, ``login``
@@ -33,13 +33,13 @@ import bty
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        prog="bty-cli",
-        description="bty-cli - command-line client for a bty-web server",
+        prog="bty-ctl",
+        description="bty-ctl - command-line client for a bty-web server",
     )
     parser.add_argument(
         "--version",
         action="version",
-        version=f"bty-cli {bty.__version__}",
+        version=f"bty-ctl {bty.__version__}",
     )
     sub = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
 
@@ -121,7 +121,7 @@ def cmd_login(args: argparse.Namespace) -> int:
     else:
         password = getpass.getpass(f"bty-web password ({args.server}): ")
     if not password:
-        print("bty-cli: no password provided; aborting", file=sys.stderr)
+        print("bty-ctl: no password provided; aborting", file=sys.stderr)
         return 1
 
     body = json.dumps({"password": password, "label": args.label}).encode("utf-8")
@@ -137,12 +137,12 @@ def cmd_login(args: argparse.Namespace) -> int:
             payload = json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         if exc.code == 401:
-            print("bty-cli: invalid credentials", file=sys.stderr)
+            print("bty-ctl: invalid credentials", file=sys.stderr)
             return 1
-        print(f"bty-cli: login failed: HTTP {exc.code} {exc.reason}", file=sys.stderr)
+        print(f"bty-ctl: login failed: HTTP {exc.code} {exc.reason}", file=sys.stderr)
         return 1
     except urllib.error.URLError as exc:
-        print(f"bty-cli: cannot reach {url}: {exc.reason}", file=sys.stderr)
+        print(f"bty-ctl: cannot reach {url}: {exc.reason}", file=sys.stderr)
         return 1
 
     token = payload["token"]
@@ -153,7 +153,7 @@ def cmd_login(args: argparse.Namespace) -> int:
     out_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     out_path.write_text(token + "\n")
     out_path.chmod(0o600)
-    print(f"bty-cli: saved session token to {out_path} (expires {payload['expires_at']})")
+    print(f"bty-ctl: saved session token to {out_path} (expires {payload['expires_at']})")
     return 0
 
 
@@ -161,12 +161,12 @@ def cmd_logout(args: argparse.Namespace) -> int:
     """POST /auth/logout to revoke the saved token, then delete the file."""
     token_file = args.token_file or default_token_path()
     if not token_file.is_file():
-        print(f"bty-cli: no token file at {token_file}; nothing to do")
+        print(f"bty-ctl: no token file at {token_file}; nothing to do")
         return 0
     token = token_file.read_text().strip()
     if not token:
         token_file.unlink(missing_ok=True)
-        print(f"bty-cli: empty token file {token_file} removed")
+        print(f"bty-ctl: empty token file {token_file} removed")
         return 0
     url = f"{args.server.rstrip('/')}/auth/logout"
     req = urllib.request.Request(
@@ -182,13 +182,13 @@ def cmd_logout(args: argparse.Namespace) -> int:
         # invalid (expired / revoked elsewhere) - still proceed to
         # delete the local file.
         if exc.code != 401:
-            print(f"bty-cli: logout failed: HTTP {exc.code} {exc.reason}", file=sys.stderr)
+            print(f"bty-ctl: logout failed: HTTP {exc.code} {exc.reason}", file=sys.stderr)
             return 1
     except urllib.error.URLError as exc:
-        print(f"bty-cli: cannot reach {url}: {exc.reason}", file=sys.stderr)
+        print(f"bty-ctl: cannot reach {url}: {exc.reason}", file=sys.stderr)
         return 1
     token_file.unlink(missing_ok=True)
-    print(f"bty-cli: removed {token_file}")
+    print(f"bty-ctl: removed {token_file}")
     return 0
 
 
