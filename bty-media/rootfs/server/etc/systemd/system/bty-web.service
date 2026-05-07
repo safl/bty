@@ -16,12 +16,12 @@ Group=bty
 ProtectSystem=full
 ProtectHome=true
 # Intentionally NOT setting NoNewPrivileges=true: bty-web's
-# /auth/login authenticates via PAM (pamela -> libpam -> pam_unix
-# -> setgid unix_chkpwd to read /etc/shadow). NoNewPrivileges
-# blocks the setgid privilege gain that pam_unix needs, so every
-# login would fail "authentication failure" with the correct
-# password. The bty user is already unprivileged; the additional
-# defense-in-depth NNP would offer is small, and breaks PAM.
+# /ui/login authenticates via PAM (pamela -> libpam -> pam_unix ->
+# setgid unix_chkpwd to read /etc/shadow). NoNewPrivileges blocks
+# the setgid privilege gain that pam_unix needs, so every login
+# would fail "authentication failure" with the correct password.
+# The bty user is already unprivileged; the additional defense-in-
+# depth NNP would offer is small, and breaks PAM.
 
 [Install]
 WantedBy=multi-user.target
