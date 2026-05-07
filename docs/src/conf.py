@@ -35,7 +35,7 @@ html_static_path = ["_static"]
 # smart quotes are fine.
 latex_engine = "pdflatex"
 latex_documents = [
-    ("index", "bty.tex", r"bty - Boot \& Target Utility", author, "manual"),
+    ("index", "bty.tex", "bty - flash images onto target disks", author, "manual"),
 ]
 latex_elements = {
     "papersize": "a4paper",
