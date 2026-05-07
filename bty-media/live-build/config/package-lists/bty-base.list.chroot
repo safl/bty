@@ -1,8 +1,7 @@
-# Minimum packages for a netboot live env.
-#
-# Phase D-1: just enough to boot to a console. Phase D-2 adds the
-# bty runtime + flash dependencies (qemu-utils, nvme-cli, parted,
-# zstd, python3, etc.) via a separate package list.
+# Minimum packages for a netboot live env: just enough to boot to a
+# console. The bty runtime + flash dependencies (qemu-utils,
+# nvme-cli, parted, zstd, python3, etc.) come from
+# ``bty-flash.list.chroot``.
 linux-image-amd64
 live-boot
 live-config

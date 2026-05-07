@@ -425,7 +425,7 @@ def test_list_images_returns_files_under_image_root(
 # ---------- create_app sanity ----------------------------------------------
 
 
-# ---------- boot policy + flash chain (Phase D-3a) --------------------------
+# ---------- boot policy + flash chain --------------------------
 
 
 def test_machine_default_boot_policy_is_local(app_client: TestClient) -> None:
@@ -665,7 +665,7 @@ def test_machine_response_includes_workflow_columns(app_client: TestClient) -> N
     assert body["last_workflow_output_path"] is None
 
 
-# ---------- /boot and /images file serving (Phase D-3a) --------------------
+# ---------- /boot and /images file serving --------------------
 
 
 def test_boot_artifact_serves_file(app_client: TestClient) -> None:
