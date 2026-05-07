@@ -385,10 +385,12 @@ templates, Bootstrap CSS, HTMX form posts).
 
 - `GET /ui` -> 303 redirect to `/ui/dashboard`
 - `GET /ui/login` -> login form
-- `POST /ui/login` -> validates the password against PAM, issues a
- session token, and sets the `bty-token` cookie (HttpOnly,
- `SameSite=Strict`, `Secure` in production)
-- `POST /ui/logout` -> clears the cookie
+- `POST /ui/login` -> validates the password against PAM and flips
+ ``request.session["bty_authed"] = True``; SessionMiddleware emits
+ the signed `bty-token` cookie on the redirect response
+ (``SameSite=Strict``).
+- `POST /ui/logout` -> ``request.session.clear()``; SessionMiddleware
+ emits a deletion cookie.
 - `GET /ui/dashboard` -> overview (machine count, discovered count,
  image count)
 - `GET /ui/machines` -> table of all machines with a "discovered"

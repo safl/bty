@@ -324,7 +324,7 @@ def _render_install_script(wheel_filename: str) -> str:
         rm -rf /var/lib/apt/lists/*
 
         # 3. Users. ``bty`` is the unprivileged service principal whose
-        #    OS password gates /auth/login (PAM); ``odus`` is the SSH
+        #    OS password gates /ui/login (PAM); ``odus`` is the SSH
         #    admin with passwordless sudo. Same model as the x86 server
         #    image. Operators rotate both with ``passwd``.
         if ! id bty >/dev/null 2>&1; then

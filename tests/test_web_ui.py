@@ -1,8 +1,10 @@
 """Tests for the bty-web browser UI.
 
 Cookie-based auth flow, server-rendered pages via TestClient. The
-fixture seeds an active session row directly (skipping PAM); tests
-that exercise the login form mock ``pamela.authenticate`` per-test.
+fixture monkeypatches ``pamela.authenticate`` to always succeed and
+drives ``POST /ui/login`` once to mint a real session cookie; tests
+opt in to the authenticated path via ``cookies=AUTH`` (or call
+``_login(client)`` for the sticky form).
 """
 
 from __future__ import annotations
