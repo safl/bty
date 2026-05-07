@@ -307,27 +307,30 @@ jobs:
       # softprops/action-gh-release creates / updates the release.
       contents: write
     steps:
-      - name: Download all workflow artifacts
+      - name: Download release artifacts
+        # Explicit allow-list: only the artifacts that belong on the
+        # GitHub Release page. Skip ``docs-html`` (hundreds of files,
+        # served by Pages instead) and skip the on-failure-only
+        # ``pxe-chain-test-*`` debugging artifacts.
         uses: actions/download-artifact@v8
         with:
           path: gathered/
-      - name: Prune empty files
-        # GitHub's release-asset upload rejects 0-byte files with
-        # "size must be greater than or equal to 1" - which kills
-        # the whole attach step (action-gh-release uploads files
-        # one at a time and dies on the first rejected one).
-        # Sphinx HTML output sometimes contains a marker file or
-        # two with no body; drop them before uploading.
-        run: find gathered -type f -empty -delete
+          pattern: '{dist,bty-*-img-zst,bty-live-x86_64-netboot,docs-pdf}'
       - name: List gathered artifacts
         run: find gathered -type f | sort
       - name: Attach to release
         uses: softprops/action-gh-release@v2
         with:
           # Each upload-artifact job lands its files in
-          # ``gathered/<artifact-name>/...``; the recursive glob
-          # picks them all up.
-          files: gathered/**/*
+          # ``gathered/<artifact-name>/...``. Listed explicitly so a
+          # new artifact added by a future job doesn't silently leak
+          # onto the public Release page.
+          files: |
+            gathered/dist/*
+            gathered/bty-usb-x86_64-img-zst/*
+            gathered/bty-server-x86_64-img-zst/*
+            gathered/bty-live-x86_64-netboot/*
+            gathered/docs-pdf/*
           fail_on_unmatched_files: true
 
   publish-pypi:
