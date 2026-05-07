@@ -31,9 +31,28 @@ work if you can install the equivalents of `qemu-system-x86`,
 install script for Debian-family at
 [`scripts/install-dev-deps.sh`](https://github.com/safl/bty/blob/main/scripts/install-dev-deps.sh).
 
-## Step 1: Build the USB image
+## Step 1: Get the USB image
 
-From a checkout of the bty repo:
+You have two options - download a pre-built one, or build from source.
+
+### Option A: Download the latest pre-built image (fastest)
+
+Each tagged release publishes the USB image as a GitHub release asset.
+The `releases/latest/download/<name>` URLs always redirect to the
+newest version, so you can pin to "latest" or to a specific tag.
+
+```bash
+mkdir -p ~/system_imaging/disk && cd ~/system_imaging/disk
+
+curl -fLO https://github.com/safl/bty/releases/latest/download/bty-usb-x86_64.img.zst
+curl -fLO https://github.com/safl/bty/releases/latest/download/bty-usb-x86_64.img.zst.sha256
+sha256sum -c bty-usb-x86_64.img.zst.sha256
+```
+
+For a specific version, swap `latest` for the tag (e.g. `v0.2.7`).
+Browse all releases at <https://github.com/safl/bty/releases>.
+
+### Option B: Build from a checkout (when you want to modify it)
 
 ```bash
 make media-deps           # one-time: pipx installs cijoe

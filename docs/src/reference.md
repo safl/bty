@@ -2,6 +2,24 @@
 
 Reference material for bty's surfaces. Filled in as features land.
 
+## Pre-built release artifacts
+
+Each tagged release publishes a fixed set of assets to GitHub. The
+`releases/latest/download/<filename>` URLs always 302 to the newest
+tag's copy of that file; substitute `latest` for a specific tag (e.g.
+`v0.2.7`) to pin.
+
+| Asset | What it is | URL (latest) |
+|---|---|---|
+| `bty-usb-x86_64.img.zst` (+ `.sha256`) | Bootable USB live image. Write with `dd`. | <https://github.com/safl/bty/releases/latest/download/bty-usb-x86_64.img.zst> |
+| `bty-server-x86_64.img.zst` (+ `.sha256`) | Server appliance image (browser UI + iPXE + dnsmasq). Boot in QEMU or `dd` to a disk. | <https://github.com/safl/bty/releases/latest/download/bty-server-x86_64.img.zst> |
+| `bty-live-x86_64.{vmlinuz,initrd,squashfs}` (+ `bty-live-x86_64.sha256`) | Netboot trio for PXE-flash clients. Drop into the server's `BTY_BOOT_DIR` (or click "fetch latest release" on `/ui/boot`). | <https://github.com/safl/bty/releases/latest/download/bty-live-x86_64.vmlinuz> |
+| `bty.pdf` | Offline copy of the docs (this site, rendered by Sphinx + LaTeX). | <https://github.com/safl/bty/releases/latest/download/bty.pdf> |
+| `bty_lab-X.Y.Z-py3-none-any.whl` / `.tar.gz` | Python wheel + sdist. Mirrored on PyPI as [`bty-lab`](https://pypi.org/project/bty-lab/) - prefer `pipx install bty-lab` over downloading by hand. | <https://github.com/safl/bty/releases> |
+
+The browser path is <https://github.com/safl/bty/releases>; the JSON
+API for build automation is `GET /repos/safl/bty/releases/latest`.
+
 ## CLI
 
 The `bty` command groups operations as subcommands. Each leaf command

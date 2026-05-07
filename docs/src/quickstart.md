@@ -5,15 +5,28 @@ operator would meet it: build a delivery medium, boot a target,
 flash, optionally provision, and finally drive a fleet over the
 network via the bty-web server.
 
-## Build the USB live image
+## Get the USB live image
 
-Prerequisites on the build host: `qemu-system-x86_64`, `qemu-img`,
-`mkisofs` (Debian package: `genisoimage`), `zstd`, `cijoe`
-(`pipx install cijoe`), and KVM acceleration.
+Either download a pre-built one from the GitHub release, or build
+from a checkout.
 
-From the repo root:
+**Pre-built (fastest):**
 
 ```bash
+mkdir -p ~/system_imaging/disk && cd ~/system_imaging/disk
+curl -fLO https://github.com/safl/bty/releases/latest/download/bty-usb-x86_64.img.zst
+curl -fLO https://github.com/safl/bty/releases/latest/download/bty-usb-x86_64.img.zst.sha256
+sha256sum -c bty-usb-x86_64.img.zst.sha256
+```
+
+`releases/latest/download/<name>` always points at the newest tag;
+swap `latest` for a specific tag (e.g. `v0.2.7`) if you want to pin.
+
+**Build from source** (when you need to modify the image):
+
+```bash
+# prerequisites: qemu-system-x86_64, qemu-img, genisoimage, zstd,
+# pipx, KVM acceleration
 make media-deps           # one-time: pipx install cijoe
 make build VARIANT=usb    # 15-25 min with KVM
 ```
