@@ -104,3 +104,11 @@ markers = [
 # Default run excludes integration tests so dev loops stay fast.
 # Run them explicitly with: pytest -m integration  (must be root for losetup).
 addopts = ["-m", "not integration"]
+# Silence Starlette's TestClient deprecation about per-request
+# ``cookies=`` kwargs - the auth fixtures still use it (rewriting all
+# 55 call sites isn't worth the diff-noise). When httpx eventually
+# hard-removes the kwarg, the test suite will break loudly and we'll
+# do the rewrite then.
+filterwarnings = [
+    "ignore:Setting per-request cookies.*:DeprecationWarning",
+]
