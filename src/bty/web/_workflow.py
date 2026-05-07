@@ -25,9 +25,11 @@ callable from the worker thread; :class:`MachineEventBus` makes that
 safe via the loop captured at app startup.
 
 Phase 1 deliberately keeps history to "last run only" - the older
-output dirs accumulate under ``BTY_WORKFLOWS_DIR`` for inspection but
-the machine record only points at the most recent. A history table +
-auth-protected ``/workflows/{run_id}`` endpoint is left for phase 2.
+output dirs accumulate under ``DEFAULT_WORKFLOWS_DIR``
+(``/var/lib/bty/workflows``, overridable per :class:`WorkflowRunner`
+constructor arg) for inspection but the machine record only points
+at the most recent. A history table + auth-protected
+``/workflows/{run_id}`` endpoint is left for phase 2.
 """
 
 from __future__ import annotations

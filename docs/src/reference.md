@@ -200,9 +200,11 @@ environment and sensible defaults.
 | Variable | Purpose | Default |
 |-------------------|----------------------------------------------------------------|---------------------|
 | `BTY_IMAGE_ROOT` | Image root for `bty list images` and `bty inspect image`. | `/var/lib/bty/images` |
+| `BTY_SERVER` | Default bty-web server URL for `bty-ctl login` / `bty-ctl logout`. | `http://localhost:8080` |
 
-The CLI `--image-root` flag, when given, takes precedence over
-`BTY_IMAGE_ROOT`.
+The `bty --image-root` flag (when given) takes precedence over
+`BTY_IMAGE_ROOT`; `bty-ctl --server` (when given) takes precedence
+over `BTY_SERVER`.
 
 ### Default paths
 
