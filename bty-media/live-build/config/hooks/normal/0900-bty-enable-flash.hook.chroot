@@ -12,8 +12,15 @@
 # - ``bty-tui-on-tty1.service`` is gated by
 #   ``ConditionKernelCommandLine=bty.mode=interactive`` and runs
 #   ``bty-tui --server URL --mac MAC`` in place of the agetty on
-#   tty1 when the server's ipxe_tui.j2 set that mode.
+#   tty1 when the server's ipxe_tui.j2 set that mode (or when the
+#   usb-iso bake set it via ``--bootappend-live``).
+# - ``bty-grow-images-partition.service`` is gated by
+#   ``ConditionPathExists=/dev/disk/by-label/BTY_IMAGES`` so it
+#   only fires on usb-iso boots where the cooked artifact ships a
+#   pre-allocated BTY_IMAGES partition; expands it to fill the
+#   stick on first boot, then becomes a no-op on subsequent boots.
 
 set -eu
 systemctl enable bty-flash-on-boot.service
 systemctl enable bty-tui-on-tty1.service
+systemctl enable bty-grow-images-partition.service

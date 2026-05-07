@@ -1,0 +1,172 @@
+#!/bin/sh
+# bty-grow-images-partition - extend the BTY_IMAGES exFAT partition to
+# fill the boot stick on first boot.
+#
+# The cooked usb-iso ISO ships with a pre-allocated 4 GiB exFAT
+# partition labelled BTY_IMAGES at the trailing edge of the hybrid
+# ISO. After ``dd`` to a stick larger than the artifact, everything
+# past the original 4 GiB is unallocated. This script claims that
+# tail by deleting + recreating partition #BTY_IMAGES at full disk
+# size and re-running mkfs.exfat.
+#
+# Driven by ``bty-grow-images-partition.service``, runs once before
+# ``bty-tui-on-tty1.service`` and ``bty-flash-on-boot.service`` so
+# the grown partition is in place by the time the TUI scans for
+# images.
+#
+# Safety gates (any failure exits 0; this is best-effort):
+#
+#   1. The script we booted from must be a real block device (skip
+#      Ventoy / loopback / netboot - their boot medium is a file
+#      inside another fs, growing the host stick would be wrong).
+#   2. The BTY_IMAGES partition must live on the same physical disk
+#      as the live medium (skip if BTY_IMAGES is on a separate
+#      operator-supplied stick - that's their data, not ours to
+#      reformat).
+#   3. The partition must already be at less than the disk's last
+#      usable sector (skip if already grown - idempotent across
+#      reboots).
+#   4. The partition must be empty (no ``*.img.zst`` / ``*.qcow2`` /
+#      ``*.img`` files present - skip if the operator has already
+#      dropped images, since exFAT online-grow isn't available on
+#      Debian and we'd lose their data).
+
+set -eu
+
+log() {
+    printf 'bty-grow-images-partition: %s\n' "$*"
+}
+
+# --- 1. Find the live medium's block device ---------------------------------
+#
+# live-boot mounts the medium at /run/live/medium. ``findmnt`` reads
+# the source from /proc/self/mountinfo and gives us /dev/sdXN. If
+# /run/live/medium isn't a mountpoint (netboot - kernel/initrd loaded
+# over HTTP, no boot medium block device), bail.
+
+medium_src=$(findmnt -no SOURCE /run/live/medium 2>/dev/null || true)
+if [ -z "$medium_src" ]; then
+    log "no live medium mounted at /run/live/medium; nothing to grow"
+    exit 0
+fi
+if [ ! -b "$medium_src" ]; then
+    log "live medium ($medium_src) is not a block device (Ventoy / loopback?); not growing"
+    exit 0
+fi
+
+medium_disk_name=$(lsblk -no PKNAME "$medium_src" 2>/dev/null || true)
+if [ -z "$medium_disk_name" ]; then
+    log "could not resolve parent disk of $medium_src; not growing"
+    exit 0
+fi
+medium_disk="/dev/${medium_disk_name}"
+log "live medium $medium_src is on disk $medium_disk"
+
+# --- 2. Locate BTY_IMAGES on the same disk ----------------------------------
+
+images_dev=$(blkid -L BTY_IMAGES 2>/dev/null || true)
+if [ -z "$images_dev" ]; then
+    log "no partition labelled BTY_IMAGES; nothing to grow"
+    exit 0
+fi
+images_disk_name=$(lsblk -no PKNAME "$images_dev" 2>/dev/null || true)
+if [ "$images_disk_name" != "$medium_disk_name" ]; then
+    log "BTY_IMAGES ($images_dev) is on $images_disk_name, not boot disk $medium_disk_name; not growing"
+    exit 0
+fi
+log "BTY_IMAGES is at $images_dev (same disk as live medium)"
+
+# --- 3. Pull the partition number, current end, and disk end ----------------
+
+# sgdisk --print emits one line per partition with columns:
+#   Number  Start   End  Size  Code  Name
+# Match by name (BTY_IMAGES) so we don't depend on a fixed index.
+part_info=$(sgdisk --print "$medium_disk" \
+    | awk '$NF == "BTY_IMAGES" && $1 ~ /^[0-9]+$/ { print $1, $3 }')
+if [ -z "$part_info" ]; then
+    log "BTY_IMAGES not found in $medium_disk's GPT; not growing"
+    exit 0
+fi
+part_num=$(echo "$part_info" | awk '{print $1}')
+part_end=$(echo "$part_info" | awk '{print $2}')
+
+# Disk size in 512-byte sectors. The GPT secondary header occupies
+# the last 33 sectors; the last usable sector is therefore
+# (disk_size - 34). If part_end is already at or past that, we have
+# nothing to do.
+disk_size=$(blockdev --getsz "$medium_disk")
+last_usable=$((disk_size - 34))
+slack=$((last_usable - part_end))
+log "disk_size=$disk_size last_usable=$last_usable part_end=$part_end slack=$slack"
+
+# Allow a small slack tolerance: a freshly-baked artifact may have
+# already taken the file to its full extent (the operator dd'd onto a
+# stick exactly the artifact's size). Anything under 1 MiB (2048
+# sectors) of unallocated tail isn't worth reformatting.
+if [ "$slack" -lt 2048 ]; then
+    log "BTY_IMAGES already at (or near) the disk's last usable sector; nothing to grow"
+    exit 0
+fi
+
+# --- 4. Confirm the partition is empty before destroying it -----------------
+
+mp=$(mktemp -d)
+# shellcheck disable=SC2064
+trap "umount '$mp' 2>/dev/null || true; rmdir '$mp' 2>/dev/null || true" EXIT
+if ! mount -o ro "$images_dev" "$mp" 2>/dev/null; then
+    log "could not mount $images_dev RO for emptiness check; not growing"
+    exit 0
+fi
+non_empty=""
+for ext in img.zst qcow2 img iso; do
+    if find "$mp" -maxdepth 2 -type f -name "*.${ext}" -print -quit 2>/dev/null | grep -q .; then
+        non_empty="found *.${ext} files"
+        break
+    fi
+done
+umount "$mp" 2>/dev/null || true
+rmdir "$mp" 2>/dev/null || true
+trap - EXIT
+
+if [ -n "$non_empty" ]; then
+    log "BTY_IMAGES is NOT empty ($non_empty); preserving operator data, not growing"
+    exit 0
+fi
+
+# --- 5. Grow: relocate GPT secondary, recreate the partition, mkfs.exfat ----
+
+log "growing BTY_IMAGES (partition $part_num) on $medium_disk to fill the disk"
+
+# Relocate the GPT secondary header to the new EOF; live-build's
+# bake step did this, but we redo it here defensively in case the
+# stick is larger than the artifact (then the secondary header is
+# at the artifact's end, not the stick's end).
+sgdisk --move-second-header "$medium_disk" >/dev/null
+
+sgdisk --delete="${part_num}" "$medium_disk" >/dev/null
+sgdisk --new="${part_num}":0:0 \
+       --typecode="${part_num}":0700 \
+       --change-name="${part_num}":BTY_IMAGES \
+       "$medium_disk" >/dev/null
+
+partprobe "$medium_disk" 2>/dev/null || true
+udevadm settle
+
+# Resolve the new partition's device path. /dev/sdb -> /dev/sdb3,
+# but /dev/nvme0n1 -> /dev/nvme0n1p3, and same for /dev/mmcblk*.
+case "$medium_disk_name" in
+    nvme*|mmcblk*|loop*)
+        new_dev="${medium_disk}p${part_num}"
+        ;;
+    *)
+        new_dev="${medium_disk}${part_num}"
+        ;;
+esac
+
+if [ ! -b "$new_dev" ]; then
+    log "expected new partition at $new_dev not present after partprobe; aborting"
+    exit 0
+fi
+
+mkfs.exfat -L BTY_IMAGES "$new_dev"
+log "BTY_IMAGES is now $new_dev, full disk size"
