@@ -1,17 +1,25 @@
 #!/bin/sh
-# bty-tui-on-tty1: launch bty-tui on tty1 in PXE-interactive mode.
+# bty-tui-on-tty1: launch bty-tui on tty1 in interactive mode.
 #
 # Driven by ``bty-tui-on-tty1.service``, gated on
 # ``bty.mode=interactive`` via ``ConditionKernelCommandLine``. We're
 # the tty1 session in this mode (the unit conflicts with
 # ``getty@tty1.service``); systemd hands us /dev/tty1 as stdio.
 #
-# Reads ``bty.server`` and ``bty.mac`` from /proc/cmdline (set by the
-# server's ``ipxe_tui.j2`` template) and forwards them to
-# ``bty-tui --server`` / ``--mac``. The TUI fetches the image catalog
-# from the server's ``GET /images`` and lets the operator pick an
-# image to flash. Successful flashes ``POST <server>/pxe/<mac>/done``
-# back to the server.
+# Two boot scenarios put ``bty.mode=interactive`` on the cmdline:
+#
+# 1. PXE-tui (server's ``ipxe_tui.j2`` template, ``boot_policy=tui``):
+#    cmdline also carries ``bty.server=`` and ``bty.mac=``. We forward
+#    those to ``bty-tui --server URL --mac MAC`` so the TUI fetches
+#    the catalog from ``GET <server>/images`` and ``POST``s
+#    ``<server>/pxe/<mac>/done`` after a successful flash.
+#
+# 2. USB-local (M19 phase 2): the live-build iso-hybrid bake sets
+#    ``bty.mode=interactive`` directly via ``--bootappend-live`` so
+#    the same service fires when the operator boots the USB stick
+#    on bare metal with no PXE involvement. No ``bty.server`` or
+#    ``bty.mac`` is set; we forward no flags and ``bty-tui`` falls
+#    back to scanning the local image-root directory.
 #
 # Cmdline parsing is intentionally simple (tr+sed): bty.* tokens
 # never contain spaces, so word-splitting is safe. Mirrors the

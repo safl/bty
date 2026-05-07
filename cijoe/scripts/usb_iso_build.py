@@ -99,11 +99,22 @@ def main(args, cijoe):
     # trailing "${@}" forwards the extras into ``lb config noauto``,
     # and lb config processes args left-to-right with last-wins
     # semantics for repeated options.
+    #
+    # ``bty.mode=interactive`` on the kernel cmdline fires
+    # ``bty-tui-on-tty1.service`` (its ``ConditionKernelCommandLine``
+    # is keyed on this), which is the same unit the PXE-tui flow
+    # uses. With no ``bty.server`` / ``bty.mac`` on the cmdline the
+    # wrapper script forwards no flags and ``bty-tui`` falls back
+    # to scanning the local image-root - the offline USB-boot mode
+    # (M19 phase 2). ``bty-flash-on-boot.service`` short-circuits
+    # cleanly when it sees ``bty.mode=interactive``, so the two
+    # services don't race over tty1.
     log.info(f"Reconfiguring live-build for iso-hybrid in {build_dir}")
     err, _ = cijoe.run_local(
         f"sh -c 'cd {build_dir} && sudo ./auto/config "
         "--binary-images iso-hybrid "
-        "--bootloaders syslinux,grub-efi'"
+        "--bootloaders syslinux,grub-efi "
+        "--bootappend-live \"boot=live components quiet noeject bty.mode=interactive\"'"
     )
     if err:
         log.error("auto/config (iso-hybrid override) failed")
