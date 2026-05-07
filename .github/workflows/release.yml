@@ -311,6 +311,14 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           path: gathered/
+      - name: Prune empty files
+        # GitHub's release-asset upload rejects 0-byte files with
+        # "size must be greater than or equal to 1" - which kills
+        # the whole attach step (action-gh-release uploads files
+        # one at a time and dies on the first rejected one).
+        # Sphinx HTML output sometimes contains a marker file or
+        # two with no body; drop them before uploading.
+        run: find gathered -type f -empty -delete
       - name: List gathered artifacts
         run: find gathered -type f | sort
       - name: Attach to release
