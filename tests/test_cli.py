@@ -146,7 +146,7 @@ def test_flash_dry_run_still_works(tmp_path: Path, capsys: pytest.CaptureFixture
 
 def _flash_args(
     *,
-    image: Path,
+    image: Path | str,
     target: Path = Path("/dev/loop9"),
     provision: str = "none",
     dry_run: bool = False,
@@ -233,6 +233,35 @@ def test_flash_yes_path_invokes_execute_plan_when_root(
     assert rc == 0
     assert seen_targets == [Path("/dev/loop9")]
     assert "Done" in capsys.readouterr().out
+
+
+def test_flash_dispatches_to_url_probe_for_http_image() -> None:
+    """``--image http://...`` routes through ``probe_image_url``; the
+    local-file ``probe_image`` is not called."""
+    seen: dict[str, str] = {}
+
+    def fake_probe_url(url: str) -> cli.flash.ImageInfo:
+        seen["url"] = url
+        return cli.flash.ImageInfo(
+            path=None,
+            url=url,
+            format="img.zst",
+            size_bytes=4096,
+            virtual_size_bytes=8192,
+        )
+
+    def fake_probe_local(_p: Path) -> cli.flash.ImageInfo:
+        seen["local"] = "should-not-be-called"
+        raise AssertionError("probe_image was called for a URL --image arg")
+
+    rc = cli.cmd_flash(
+        _flash_args(image="http://server/foo.img.zst", dry_run=True),
+        probe_image=fake_probe_local,
+        probe_image_url=fake_probe_url,
+        probe_target=_fake_probe_block_target,
+    )
+    assert rc == 0
+    assert seen == {"url": "http://server/foo.img.zst"}
 
 
 def test_flash_yes_path_propagates_validation_failure(

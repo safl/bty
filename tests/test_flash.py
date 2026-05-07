@@ -12,6 +12,7 @@ from __future__ import annotations
 import io
 import json
 from pathlib import Path
+from typing import ClassVar
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -335,6 +336,131 @@ def test_execute_plan_refuses_unknown_format(monkeypatch: pytest.MonkeyPatch) ->
     plan = flash.make_plan(_img(fmt=None), _tgt(), "none")
     with pytest.raises(flash.FlashError, match="cannot flash image of format"):
         flash.execute_plan(plan)
+
+
+# ---------- URL-sourced images ----------------------------------------------
+
+
+def _img_url(
+    *,
+    fmt: str | None = "img.zst",
+    url: str = "http://server.local:8080/images/test.img.zst",
+    size: int = 1024,
+    virtual: int | None = None,
+) -> flash.ImageInfo:
+    return flash.ImageInfo(
+        path=None,
+        url=url,
+        format=fmt,
+        size_bytes=size,
+        virtual_size_bytes=virtual,
+    )
+
+
+def test_image_info_display_uses_url_when_set() -> None:
+    info = _img_url(url="http://server/foo.img.zst")
+    assert info.display == "http://server/foo.img.zst"
+
+
+def test_image_info_display_uses_path_when_url_unset() -> None:
+    info = _img(path=Path("/var/lib/bty/images/foo.img"))
+    assert info.display == "/var/lib/bty/images/foo.img"
+
+
+def test_to_dict_includes_url_for_url_sourced_image() -> None:
+    plan = flash.make_plan(_img_url(fmt="img.zst", virtual=2048), _tgt(), "none")
+    d = plan.to_dict()
+    assert d["image"]["url"] == "http://server.local:8080/images/test.img.zst"
+    assert d["image"]["path"] is None
+
+
+def test_probe_image_url_parses_format_from_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Format detection works off the URL path's filename extension."""
+
+    class _FakeResp:
+        headers: ClassVar[dict[str, str]] = {"Content-Length": "12345"}
+
+        def __enter__(self) -> _FakeResp:
+            return self
+
+        def __exit__(self, *a: object) -> None:
+            pass
+
+    monkeypatch.setattr(
+        "urllib.request.urlopen",
+        lambda *_args, **_kw: _FakeResp(),
+    )
+    info = flash.probe_image_url("http://server/foo.img.zst")
+    assert info.url == "http://server/foo.img.zst"
+    assert info.path is None
+    assert info.format == "img.zst"
+    assert info.size_bytes == 12345
+    # .img.zst can't determine virtual size from HEAD alone.
+    assert info.virtual_size_bytes is None
+
+
+def test_probe_image_url_raw_img_uses_content_length_as_virtual(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """For raw .img URLs the source size IS the virtual size."""
+
+    class _FakeResp:
+        headers: ClassVar[dict[str, str]] = {"Content-Length": "98765"}
+
+        def __enter__(self) -> _FakeResp:
+            return self
+
+        def __exit__(self, *a: object) -> None:
+            pass
+
+    monkeypatch.setattr("urllib.request.urlopen", lambda *_a, **_kw: _FakeResp())
+    info = flash.probe_image_url("http://server/foo.img")
+    assert info.format == "img"
+    assert info.size_bytes == 98765
+    assert info.virtual_size_bytes == 98765
+
+
+def test_probe_image_url_unreachable_raises_filenotfound(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import urllib.error
+
+    def _boom(*_a: object, **_kw: object) -> None:
+        raise urllib.error.URLError("connection refused")
+
+    monkeypatch.setattr("urllib.request.urlopen", _boom)
+    with pytest.raises(FileNotFoundError, match="not reachable"):
+        flash.probe_image_url("http://nowhere.example/foo.img")
+
+
+def test_probe_image_url_rejects_non_http_scheme() -> None:
+    with pytest.raises(ValueError, match="must be http or https"):
+        flash.probe_image_url("ftp://server/foo.img")
+
+
+def test_execute_plan_dispatches_to_url_writers_for_url_images(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When ``image.url`` is set, execute_plan calls the streaming
+    helpers (``_flash_*_from_url``) instead of the local-path ones."""
+    calls: list[str] = []
+    monkeypatch.setattr(flash, "probe_target", _stub_block_target)
+    monkeypatch.setattr(flash, "_flash_img", lambda _i, _t: calls.append("img-local"))
+    monkeypatch.setattr(flash, "_flash_zst", lambda _i, _t: calls.append("zst-local"))
+    monkeypatch.setattr(flash, "_flash_qcow2", lambda _i, _t: calls.append("qcow2-local"))
+    monkeypatch.setattr(flash, "_flash_img_from_url", lambda _u, _t: calls.append("img-url"))
+    monkeypatch.setattr(flash, "_flash_zst_from_url", lambda _u, _t: calls.append("zst-url"))
+    monkeypatch.setattr(flash, "_flash_qcow2_from_url", lambda _u, _t: calls.append("qcow2-url"))
+    _stub_post_write(monkeypatch, calls)
+
+    for fmt, expected in (("img", "img-url"), ("img.zst", "zst-url"), ("qcow2", "qcow2-url")):
+        calls.clear()
+        plan = flash.make_plan(_img_url(fmt=fmt), _tgt(), "none")
+        flash.execute_plan(plan)
+        assert expected in calls
+        assert "img-local" not in calls
+        assert "zst-local" not in calls
+        assert "qcow2-local" not in calls
 
 
 def test_execute_plan_refuses_when_target_no_longer_block(

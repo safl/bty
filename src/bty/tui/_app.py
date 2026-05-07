@@ -97,7 +97,7 @@ class FlashConfirmScreen(ModalScreen[bool]):
         plan = self._plan
         return "\n".join(
             [
-                f"Image:      {plan.image.path}",
+                f"Image:      {plan.image.display}",
                 f"Format:     {plan.image.format}",
                 f"Size:       {plan.image.virtual_size_bytes} bytes (virtual)",
                 f"Target:     {plan.target.path}",
@@ -145,7 +145,7 @@ class FlashStatusScreen(ModalScreen[bool]):
 
     def compose(self) -> ComposeResult:
         with Vertical():
-            yield Static(f"Flashing {self._plan.image.path} -> {self._plan.target.path}")
+            yield Static(f"Flashing {self._plan.image.display} -> {self._plan.target.path}")
             yield RichLog(highlight=False, markup=True, id="flash_log")
             yield Button("Close", id="close", variant="default", disabled=True)
 

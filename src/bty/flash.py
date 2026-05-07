@@ -100,12 +100,25 @@ _ZSTD_SIZE_RE = re.compile(r"([\d.]+)\s+(B|KiB|MiB|GiB|TiB)")
 
 @dataclass
 class ImageInfo:
-    """Probed metadata for an image file."""
+    """Probed metadata for an image source.
 
-    path: Path
+    Either ``path`` (a local file) or ``url`` (an HTTP/HTTPS URL) is
+    set; never both. URL-sourced images stream through curl directly
+    to the target disk for ``.img`` / ``.img.zst`` (no temp file); for
+    ``.qcow2`` they get downloaded to a temp file first because qcow2
+    is random-access.
+    """
+
+    path: Path | None
     format: str | None
     size_bytes: int
     virtual_size_bytes: int | None  # what would be written to disk; None = unknown
+    url: str | None = None
+
+    @property
+    def display(self) -> str:
+        """User-facing identifier (URL or path string)."""
+        return self.url if self.url is not None else str(self.path)
 
 
 @dataclass
@@ -131,7 +144,8 @@ class FlashPlan:
     def to_dict(self) -> dict[str, Any]:
         return {
             "image": {
-                "path": str(self.image.path),
+                "path": str(self.image.path) if self.image.path is not None else None,
+                "url": self.image.url,
                 "format": self.image.format,
                 "size_bytes": self.image.size_bytes,
                 "virtual_size_bytes": self.image.virtual_size_bytes,
@@ -161,6 +175,53 @@ def probe_image(path: Path) -> ImageInfo:
         format=fmt,
         size_bytes=path.stat().st_size,
         virtual_size_bytes=_image_virtual_size(path, fmt),
+    )
+
+
+def probe_image_url(url: str) -> ImageInfo:
+    """Inspect an image at an HTTP/HTTPS URL via a HEAD request.
+
+    Format is derived from the URL path's filename extension. Source size
+    is read from ``Content-Length`` if present. Virtual size (what gets
+    written to disk) can only be determined for raw ``.img`` URLs from
+    HEAD; ``.img.zst`` and ``.qcow2`` URLs return ``virtual_size_bytes
+    = None`` because computing it would require pulling part of the
+    body. Validation handles ``None`` by skipping the size-fits-target
+    check with a note.
+
+    Raises ``FileNotFoundError`` if the server doesn't respond or
+    returns 4xx / 5xx for the HEAD.
+    """
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(f"image URL must be http or https: {url}")
+    filename = Path(parsed.path).name or "image"
+    fmt = images.detect_format(Path(filename))
+
+    size_bytes = 0
+    virtual_size_bytes: int | None = None
+    req = urllib.request.Request(url, method="HEAD")
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            cl = resp.headers.get("Content-Length")
+            if cl is not None:
+                size_bytes = int(cl)
+                if fmt == "img":
+                    # Raw .img: source size == virtual size.
+                    virtual_size_bytes = size_bytes
+    except (urllib.error.URLError, ConnectionError, TimeoutError) as exc:
+        raise FileNotFoundError(f"image URL not reachable: {url} ({exc})") from exc
+
+    return ImageInfo(
+        path=None,
+        url=url,
+        format=fmt,
+        size_bytes=size_bytes,
+        virtual_size_bytes=virtual_size_bytes,
     )
 
 
@@ -232,7 +293,7 @@ def validate_plan(plan: FlashPlan) -> list[str]:
 
     if plan.image.format is None:
         errors.append(
-            f"image format not recognised: {plan.image.path} (supported: .qcow2, .img, .img.zst)"
+            f"image format not recognised: {plan.image.display} (supported: .qcow2, .img, .img.zst)"
         )
 
     if not plan.target.exists:
@@ -276,7 +337,7 @@ def print_plan(
     mounts = ", ".join(plan.target.mountpoints) if plan.target.mountpoints else "(none)"
 
     print("Flash plan:", file=out)
-    print(f"  image:               {plan.image.path}", file=out)
+    print(f"  image:               {plan.image.display}", file=out)
     print(f"  image format:        {plan.image.format}", file=out)
     print(f"  image size on disk:  {plan.image.size_bytes} bytes", file=out)
     print(f"  image virtual size:  {virtual}", file=out)
@@ -363,14 +424,29 @@ def execute_plan(
 
         fmt = plan.image.format
         _emit(progress, "writing", note=fmt or "?")
-        if fmt == "img":
-            _flash_img(plan.image.path, plan.target.path)
-        elif fmt == "img.zst":
-            _flash_zst(plan.image.path, plan.target.path)
-        elif fmt == "qcow2":
-            _flash_qcow2(plan.image.path, plan.target.path)
+        if plan.image.url is not None:
+            # Streaming pipeline: curl URL | (optional zstd -d) | dd -> target.
+            # qcow2 can't stream-convert (random-access), so it's downloaded
+            # to a temp file first and then handed to the existing local
+            # qcow2 path.
+            if fmt == "img":
+                _flash_img_from_url(plan.image.url, plan.target.path)
+            elif fmt == "img.zst":
+                _flash_zst_from_url(plan.image.url, plan.target.path)
+            elif fmt == "qcow2":
+                _flash_qcow2_from_url(plan.image.url, plan.target.path)
+            else:
+                raise FlashError(f"cannot flash image of format {fmt!r}")
         else:
-            raise FlashError(f"cannot flash image of format {fmt!r}")
+            assert plan.image.path is not None  # typer narrows; validate_plan guarantees
+            if fmt == "img":
+                _flash_img(plan.image.path, plan.target.path)
+            elif fmt == "img.zst":
+                _flash_zst(plan.image.path, plan.target.path)
+            elif fmt == "qcow2":
+                _flash_qcow2(plan.image.path, plan.target.path)
+            else:
+                raise FlashError(f"cannot flash image of format {fmt!r}")
 
         _sync_target(plan.target.path)
         _emit(progress, "synced")
@@ -433,6 +509,102 @@ def _flash_qcow2(image: Path, target: Path) -> None:
     rc = subprocess.run(cmd, check=False).returncode
     if rc != 0:
         raise FlashError(f"qemu-img convert exited {rc} writing {image} -> {target}")
+
+
+# ---------- URL-streaming variants -------------------------------------------
+#
+# curl is used as the HTTP downloader: it's the same tool the live env's
+# bty-flash-on-boot service uses to fetch images, it's available on every
+# Debian/Ubuntu/macOS host the project supports, and its ``--retry`` flag
+# handles flaky network gracefully. The pipelines mirror the local-file
+# flash functions but with curl on the front instead of an open(file).
+
+
+_CURL_BASE = ("curl", "-fSL", "--retry", "3", "--retry-connrefused")
+
+
+def _flash_img_from_url(url: str, target: Path) -> None:
+    """Stream a raw .img from URL straight to a block device with dd."""
+    curl_proc = subprocess.Popen([*_CURL_BASE, url], stdout=subprocess.PIPE)
+    try:
+        dd_proc = subprocess.Popen(
+            ["dd", f"of={target}", "bs=4M", "conv=fsync", "status=progress"],
+            stdin=curl_proc.stdout,
+        )
+        # Hand the read end fully to dd; closing our copy lets the kernel
+        # propagate EOF / SIGPIPE correctly when one end finishes first.
+        if curl_proc.stdout is not None:
+            curl_proc.stdout.close()
+        dd_rc = dd_proc.wait()
+    finally:
+        curl_rc = curl_proc.wait()
+    if curl_rc != 0:
+        raise FlashError(f"curl exited {curl_rc} fetching {url}")
+    if dd_rc != 0:
+        raise FlashError(f"dd exited {dd_rc} writing {url} -> {target}")
+
+
+def _flash_zst_from_url(url: str, target: Path) -> None:
+    """Pipeline ``curl URL | zstd -d --stdout | dd of=TARGET ...``.
+
+    Decompresses on the fly. The compressed bytes never land on the
+    local filesystem; only the raw image touches the target disk. This
+    is the path the TUI-on-PXE flow uses by default since most operator
+    images ship as ``.img.zst``.
+    """
+    curl_proc = subprocess.Popen([*_CURL_BASE, url], stdout=subprocess.PIPE)
+    try:
+        zstd_proc = subprocess.Popen(
+            ["zstd", "-d", "--stdout"],
+            stdin=curl_proc.stdout,
+            stdout=subprocess.PIPE,
+        )
+        if curl_proc.stdout is not None:
+            curl_proc.stdout.close()
+        try:
+            dd_proc = subprocess.Popen(
+                ["dd", f"of={target}", "bs=4M", "conv=fsync", "status=progress"],
+                stdin=zstd_proc.stdout,
+            )
+            if zstd_proc.stdout is not None:
+                zstd_proc.stdout.close()
+            dd_rc = dd_proc.wait()
+        finally:
+            zstd_rc = zstd_proc.wait()
+    finally:
+        curl_rc = curl_proc.wait()
+    if curl_rc != 0:
+        raise FlashError(f"curl exited {curl_rc} fetching {url}")
+    if zstd_rc != 0:
+        raise FlashError(f"zstd -d exited {zstd_rc} decompressing {url}")
+    if dd_rc != 0:
+        raise FlashError(f"dd exited {dd_rc} writing {url} -> {target}")
+
+
+def _flash_qcow2_from_url(url: str, target: Path) -> None:
+    """Download a qcow2 to a temp file, then ``qemu-img convert`` it.
+
+    qcow2 is random-access (the converter seeks all over the source),
+    so it cannot stream. We download the whole file to a temp location
+    first and reuse the existing local-qcow2 flash path.
+    """
+    import tempfile
+
+    with tempfile.NamedTemporaryFile(suffix=".qcow2", delete=False) as tmp:
+        tmp_path = Path(tmp.name)
+    try:
+        rc = subprocess.run(
+            [*_CURL_BASE, "--output", str(tmp_path), url],
+            check=False,
+        ).returncode
+        if rc != 0:
+            raise FlashError(f"curl exited {rc} fetching {url}")
+        _flash_qcow2(tmp_path, target)
+    finally:
+        try:
+            tmp_path.unlink()
+        except FileNotFoundError:
+            pass
 
 
 def _sync_target(target: Path) -> None:

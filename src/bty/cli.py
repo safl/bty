@@ -103,7 +103,16 @@ def main(argv: list[str] | None = None) -> int:
         parents=[common],
         help="flash an image to a target disk",
     )
-    p_flash.add_argument("--image", type=Path, required=True, help="image file to flash")
+    p_flash.add_argument(
+        "--image",
+        type=str,
+        required=True,
+        help="image to flash. Either a local file path "
+        "(``/path/to/image.qcow2``) or an HTTP/HTTPS URL "
+        "(``http://server/images/foo.img.zst``); URLs stream "
+        "directly to disk for ``.img`` / ``.img.zst`` and download "
+        "to a temp file first for ``.qcow2``.",
+    )
     p_flash.add_argument("--target", type=Path, required=True, help="target block device")
     p_flash.add_argument(
         "--provision",
@@ -220,6 +229,7 @@ def cmd_flash(
     args: argparse.Namespace,
     *,
     probe_image: Callable[[Path], flash.ImageInfo] = flash.probe_image,
+    probe_image_url: Callable[[str], flash.ImageInfo] = flash.probe_image_url,
     probe_target: Callable[[Path], flash.TargetInfo] = flash.probe_target,
     execute_plan: Callable[..., None] = flash.execute_plan,
     apply_cloud_init: Callable[..., None] = flash.apply_cloud_init,
@@ -254,8 +264,11 @@ def cmd_flash(
         return 2
 
     try:
-        image_info = probe_image(args.image)
-    except FileNotFoundError as exc:
+        if isinstance(args.image, str) and args.image.startswith(("http://", "https://")):
+            image_info = probe_image_url(args.image)
+        else:
+            image_info = probe_image(Path(args.image))
+    except (FileNotFoundError, ValueError) as exc:
         print(f"bty: {exc}", file=sys.stderr)
         return 2
 
