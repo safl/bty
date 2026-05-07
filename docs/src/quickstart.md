@@ -28,7 +28,7 @@ swap `latest` for a specific tag (e.g. `v0.2.7`) if you want to pin.
 # prerequisites: qemu-system-x86_64, qemu-img, genisoimage, zstd,
 # pipx, KVM acceleration
 make media-deps           # one-time: pipx install cijoe
-make build VARIANT=usb    # 15-25 min with KVM
+make build VARIANT=usb-x86    # 15-25 min with KVM
 ```
 
 The build downloads the Debian 13 cloud image, drives cloud-init in
@@ -182,7 +182,7 @@ See [Reference > CLI](reference.md#cli) for the full surface.
 
 `bty-web` is the HTTP server side of bty - browser UI + REST API +
 the iPXE chain a target boots into for network-flash. The server
-appliance image (`make build VARIANT=server`) ships preconfigured;
+appliance image (`make build VARIANT=server-x86`) ships preconfigured;
 for a quick local test you can run it directly:
 
 ```bash

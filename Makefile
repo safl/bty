@@ -2,15 +2,20 @@
 #
 # All common operations in one place; ``make help`` lists them.
 # Operators run everything from the repo root: ``make build
-# VARIANT=server``, ``make test``, ``make ci``, etc.
+# VARIANT=server-x86``, ``make test``, ``make ci``, etc.
 
 UV      ?= uv
-VARIANT ?= usb
+VARIANT ?= usb-x86
 
-# Per-variant cijoe workflow file under cijoe/tasks/. usb / server share
-# the cloud-init-in-QEMU bake; live uses the live-build pipeline.
-ifeq ($(VARIANT),live)
+# Per-variant cijoe workflow file under cijoe/tasks/.
+#  - usb-x86 / server-x86 share the cloud-init-in-QEMU bake (build.yaml)
+#  - live-x86 uses the live-build pipeline (live.yaml)
+#  - server-rpi mounts a Raspberry Pi OS image and chroots via
+#    qemu-aarch64-static (build-rpi.yaml)
+ifeq ($(VARIANT),live-x86)
 MEDIA_TASK := tasks/live.yaml
+else ifeq ($(VARIANT),server-rpi)
+MEDIA_TASK := tasks/build-rpi.yaml
 else
 MEDIA_TASK := tasks/build.yaml
 endif
@@ -41,10 +46,11 @@ help:
 	@echo "  build         build a media image (override VARIANT below)"
 	@echo "  test-pxe      end-to-end PXE chain test against pre-built artefacts"
 	@echo ""
-	@echo "Variant: $(VARIANT)  (override with VARIANT=server or VARIANT=live)"
-	@echo "  usb     - bootable USB live image (.img.zst)"
-	@echo "  server  - server appliance image (.img.zst)"
-	@echo "  live    - kernel + initrd + squashfs for PXE-flash clients"
+	@echo "Variant: $(VARIANT)  (override with VARIANT=server-x86, server-rpi, live-x86, ...)"
+	@echo "  usb-x86     - bootable USB live image (.img.zst, x86_64)"
+	@echo "  server-x86  - server appliance image (.img.zst, x86_64)"
+	@echo "  server-rpi  - server appliance image for Raspberry Pi 4/5 (.img.zst, arm64)"
+	@echo "  live-x86    - kernel + initrd + squashfs for PXE-flash clients (x86_64)"
 	@echo ""
 	@echo "Docs (bty-docs sibling; ``pipx install ./docs/tooling`` first):"
 	@echo "  docs-html     bty-docs-build-html"
@@ -86,14 +92,18 @@ media-deps:
 	pipx ensurepath
 
 # Build a media image. Pick the variant via ``VARIANT=...``:
-#   make build VARIANT=usb     - bootable USB live image (.img.zst)
-#   make build VARIANT=server  - server appliance (.img.zst)
-#   make build VARIANT=live    - kernel + initrd + squashfs for PXE clients
+#   make build VARIANT=usb-x86     - bootable USB live image (.img.zst, x86_64)
+#   make build VARIANT=server-x86  - server appliance (.img.zst, x86_64)
+#   make build VARIANT=server-rpi  - server appliance for RPi 4/5 (.img.zst, arm64)
+#   make build VARIANT=live-x86    - kernel + initrd + squashfs for PXE clients
 #
-# usb / server use cloud-init in QEMU (cijoe/tasks/build.yaml) and
-# need ``qemu-system-x86_64`` + KVM accessible. live uses live-build
-# (cijoe/tasks/live.yaml) which needs ``live-build`` on the host
-# and passwordless sudo.
+# usb-x86 / server-x86 use cloud-init in QEMU (cijoe/tasks/build.yaml)
+# and need ``qemu-system-x86_64`` + KVM accessible. live-x86 uses
+# live-build (cijoe/tasks/live.yaml) which needs ``live-build`` on the
+# host and passwordless sudo. server-rpi (cijoe/tasks/build-rpi.yaml)
+# customises Raspberry Pi OS Lite arm64 via losetup +
+# qemu-aarch64-static chroot; needs ``qemu-user-static`` + binfmt_misc
+# + passwordless sudo.
 build:
 	cd cijoe && cijoe $(MEDIA_TASK) --monitor -c configs/$(VARIANT).toml
 

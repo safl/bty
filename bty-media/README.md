@@ -2,12 +2,12 @@
 
 Source content for the bty appliance images. Three variants:
 
-- **USB live image** (`VARIANT=usb`) - bootable USB carrying the bty
+- **USB live image** (`VARIANT=usb-x86`) - bootable USB carrying the bty
   runtime and a bundled image set, for the direct-flash workflow.
   Lands in milestone 2.
-- **Server image** (`VARIANT=server`) - installable disk image for the
+- **Server image** (`VARIANT=server-x86`) - installable disk image for the
   bty provisioning server (`bty-web` + PXE boot stack).
-- **Network-flash live env** (`VARIANT=live`) - kernel + initrd +
+- **Network-flash live env** (`VARIANT=live-x86`) - kernel + initrd +
   squashfs that PXE clients chain into. Carries the bty CLI plus a
   `bty-flash-on-boot.service` oneshot that reads `bty.*` parameters
   from `/proc/cmdline`, fetches the assigned image, runs `bty flash`,
@@ -20,17 +20,19 @@ tasks, scripts) that consumes this content lives at `cijoe/` at the
 repo root.
 
 Operators drive everything via the top-level Makefile:
-`make build VARIANT=usb|server|live`.
+`make build VARIANT=usb-x86|server-x86|live-x86`.
 
 ## Layout
 
-- `auxiliary/cloudinit-base-<variant>.user` - per-variant cloud-init
-  base template (usb / server only).
+- `auxiliary/cloudinit-base-<role>.user` - per-role cloud-init base
+  template (`usb` / `server`). The arch suffix on the variant name
+  (e.g. `usb-x86`) is stripped when looking these up, so x86 and any
+  future arm variants share the same role-named template.
 - `auxiliary/cloudinit-metadata.meta` - shared cloud-init metadata.
 - `rootfs/common/` - files baked into every disk-image variant.
-- `rootfs/<variant>/` - files baked into a single disk-image variant.
+- `rootfs/<role>/` - files baked into a single role's disk image.
   Each file becomes a cloud-init `write_files` entry whose `path`
-  mirrors the file's path under the variant subdirectory. Binary
+  mirrors the file's path under the role subdirectory. Binary
   files (anything that is not valid UTF-8) are emitted with
   `encoding: b64`.
 - `live-build/` - live-build config tree consumed by the live
@@ -42,7 +44,7 @@ Operators drive everything via the top-level Makefile:
 From the repo root:
 
 ```
-make build VARIANT=usb|server|live
+make build VARIANT=usb-x86|server-x86|live-x86
 ```
 
 runs `cijoe tasks/build.yaml --monitor -c configs/$(VARIANT).toml`,
@@ -54,8 +56,9 @@ which executes four steps:
    cloud-init by the next step and `pip install`ed into a system
    venv at `/opt/bty/venv` during the bake.
 2. **`gen_userdata`** - assembles the cloud-init userdata file by
-   inlining files under `rootfs/common/` and `rootfs/<variant>/` as
-   `write_files` entries on top of `auxiliary/cloudinit-base-<variant>.user`.
+   inlining files under `rootfs/common/` and `rootfs/<role>/` as
+   `write_files` entries on top of `auxiliary/cloudinit-base-<role>.user`
+   (variant -> role: arch suffix stripped).
 3. **`diskimage_build`** - downloads the Debian 13 cloud image,
    resizes the qcow2 boot disk, builds the cloud-init seed.iso, and
    boots QEMU. cloud-init provisions the system and powers off; the

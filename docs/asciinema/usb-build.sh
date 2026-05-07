@@ -43,7 +43,7 @@ prompt 'cd ~/git/bty'
 
 prompt 'make media-deps      # one-time: pipx install cijoe'
 
-prompt 'make build VARIANT=usb'
+prompt 'make build VARIANT=usb-x86'
 
 prompt 'ls -lh ~/system_imaging/disk/bty-usb-x86_64.img.zst'
 

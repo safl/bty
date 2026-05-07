@@ -29,7 +29,7 @@ name: Release
 #
 # ``workflow_dispatch`` runs ``test`` + ``build-wheel`` only - smoke
 # test of the package side. Ad-hoc media builds happen locally via
-# the top-level Makefile (``make build VARIANT=usb|server|live``).
+# the top-level Makefile (``make build VARIANT=usb-x86|server-x86|live-x86``).
 #
 # First publish (claiming the bty-lab name) requires a one-time PyPI
 # setup: register a Pending Publisher on https://pypi.org targeting:
@@ -100,12 +100,26 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: [usb, server, live]
+        # ``variant`` is the user-facing name (``make build VARIANT=...``);
+        # ``role`` is the arch-stripped role used to derive image config
+        # keys and artifact filenames; ``kind`` selects the right deps and
+        # upload step. ``server-rpi`` is intentionally excluded for now -
+        # adding it after the local build path lands cleanly.
+        include:
+          - variant: usb-x86
+            role: usb
+            kind: disk
+          - variant: server-x86
+            role: server
+            kind: disk
+          - variant: live-x86
+            role: live
+            kind: live
     steps:
       - uses: actions/checkout@v6
 
       - name: Install build dependencies (disk-image variants)
-        if: matrix.variant != 'live'
+        if: matrix.kind == 'disk'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
@@ -126,7 +140,7 @@ jobs:
         # from the pool via wget + dpkg - skips the apt + GPG dance
         # since live-build is Architecture: all (shell + perl, no
         # libc dep) and a one-shot cross-distro install is safe.
-        if: matrix.variant == 'live'
+        if: matrix.kind == 'live'
         run: |
           set -eu
           sudo apt-get update
@@ -152,7 +166,7 @@ jobs:
         # world-accessible (mode 0666). Standard pattern for hosted
         # runners; without it the cloud-init bake hits a permission
         # error on the first qemu-system-x86_64 invocation.
-        if: matrix.variant != 'live'
+        if: matrix.kind == 'disk'
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
               | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -171,16 +185,16 @@ jobs:
         run: make build VARIANT=${{ matrix.variant }}
 
       - name: Upload artifact (disk-image variants)
-        if: matrix.variant != 'live'
+        if: matrix.kind == 'disk'
         uses: actions/upload-artifact@v7
         with:
-          name: bty-${{ matrix.variant }}-x86_64-img-zst
+          name: bty-${{ matrix.role }}-x86_64-img-zst
           path: |
-            ~/system_imaging/disk/bty-${{ matrix.variant }}-x86_64.img.zst
-            ~/system_imaging/disk/bty-${{ matrix.variant }}-x86_64.img.zst.sha256
+            ~/system_imaging/disk/bty-${{ matrix.role }}-x86_64.img.zst
+            ~/system_imaging/disk/bty-${{ matrix.role }}-x86_64.img.zst.sha256
 
       - name: Upload artifact (live variant)
-        if: matrix.variant == 'live'
+        if: matrix.kind == 'live'
         uses: actions/upload-artifact@v7
         with:
           name: bty-live-x86_64-netboot

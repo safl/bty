@@ -11,7 +11,7 @@
 # Pre-conditions:
 # - bty-server-x86_64.qcow2 + bty-live-x86_64.{vmlinuz,initrd,squashfs}
 #   pre-built under ``~/system_imaging/disk/`` (run ``make build
-#   VARIANT=server`` and ``make build VARIANT=live`` first).
+#   VARIANT=server-x86`` and ``make build VARIANT=live-x86`` first).
 # - ``qemu-system-x86_64`` + ``genisoimage`` on PATH.
 # - KVM accessible (the bake VMs run with ``-enable-kvm``).
 # - Wall clock per run: 5-10 minutes.

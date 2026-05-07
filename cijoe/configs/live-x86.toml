@@ -6,11 +6,11 @@
 # QEMU bake, no cloud-init, no .img.zst output.
 #
 # Usage:
-#   cijoe tasks/live.yaml --config configs/live.toml --monitor
-# (or via the Makefile dispatcher: ``make build VARIANT=live``)
+#   cijoe tasks/live.yaml --config configs/live-x86.toml --monitor
+# (or via the Makefile dispatcher: ``make build VARIANT=live-x86``)
 
 [bty]
-variant = "live"
+variant = "live-x86"
 hostname = "bty-live"
 timezone = "UTC"
 

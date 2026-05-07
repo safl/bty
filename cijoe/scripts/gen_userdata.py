@@ -12,9 +12,11 @@ bytes on the target.
 
 Reads the ``[bty]`` config from cijoe to:
 
-- Pick the variant (``bty.variant``: ``"usb"`` or ``"server"``). The
-  variant selects the base file and the rootfs subdirectory
-  (``bty-media/rootfs/<variant>/``); files under
+- Pick the variant (``bty.variant``: e.g. ``"usb-x86"`` or
+  ``"server-x86"``). The arch suffix is stripped to derive the *role*
+  (``"usb"`` / ``"server"``); the role then selects the base file
+  (``bty-media/auxiliary/cloudinit-base-<role>.user``) and the rootfs
+  subdirectory (``bty-media/rootfs/<role>/``). Files under
   ``bty-media/rootfs/common/`` are always inlined.
 - Substitute ``__BTY_HOSTNAME__`` and ``__BTY_TIMEZONE__`` in the base.
 
@@ -32,7 +34,7 @@ import logging as log
 import stat
 from pathlib import Path
 
-KNOWN_VARIANTS = ("usb", "server")
+KNOWN_ROLES = ("usb", "server")
 
 # Wrap base64 lines at 76 cols so the YAML output is readable rather
 # than a single multi-kilobyte line. Cloud-init concatenates them
@@ -52,21 +54,27 @@ def main(args, cijoe):
         log.error("No [bty] section found in config")
         return 1
 
-    variant = bty.get("variant", "usb")
-    if variant not in KNOWN_VARIANTS:
-        log.error(f"Unknown bty.variant {variant!r}; expected one of {KNOWN_VARIANTS}")
+    variant = bty.get("variant", "usb-x86")
+    # Strip arch suffix to derive the role: "server-x86" -> "server",
+    # "usb-x86" -> "usb". Variants with no suffix map to themselves.
+    role = variant.split("-")[0]
+    if role not in KNOWN_ROLES:
+        log.error(
+            f"Unknown variant role {role!r} (variant={variant!r}); "
+            f"expected first segment to be one of {KNOWN_ROLES}"
+        )
         return 1
 
-    base_path = bty_media / "auxiliary" / f"cloudinit-base-{variant}.user"
+    base_path = bty_media / "auxiliary" / f"cloudinit-base-{role}.user"
     if not base_path.exists():
         log.error(f"Base config not found: {base_path}")
         return 1
 
-    # Variant rootfs is required to exist (even if empty); common is optional.
-    variant_rootfs = rootfs_dir / variant
+    # Role rootfs is required to exist (even if empty); common is optional.
+    role_rootfs = rootfs_dir / role
     common_rootfs = rootfs_dir / "common"
-    if not variant_rootfs.exists():
-        log.error(f"rootfs/{variant} directory not found: {variant_rootfs}")
+    if not role_rootfs.exists():
+        log.error(f"rootfs/{role} directory not found: {role_rootfs}")
         return 1
 
     base = base_path.read_text()
@@ -75,10 +83,10 @@ def main(args, cijoe):
 
     lines = [base, "", "write_files:"]
 
-    # Order: common first, then variant. ``cloud-init`` write_files are
-    # applied in document order, so a variant-specific file with the
+    # Order: common first, then role-specific. ``cloud-init`` write_files
+    # are applied in document order, so a role-specific file with the
     # same target path overrides the common one.
-    for source_dir in (common_rootfs, variant_rootfs):
+    for source_dir in (common_rootfs, role_rootfs):
         if not source_dir.exists():
             continue
         for filepath in sorted(source_dir.rglob("*")):

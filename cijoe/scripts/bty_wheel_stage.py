@@ -30,8 +30,10 @@ import shutil
 from argparse import ArgumentParser
 from pathlib import Path
 
-# Variant -> destination directory relative to ``bty-media/``.
-# Variants not listed here are skipped with rc=0.
+# Role -> destination directory relative to ``bty-media/``.
+# Roles not listed here are skipped with rc=0. The variant supplied by
+# the cijoe config (e.g. ``server-x86``, ``server-rpi``) is mapped to a
+# role by stripping the arch suffix.
 TARGET_DIRS: dict[str, Path] = {
     "server": Path("rootfs") / "server" / "opt" / "bty",
     "live": Path("live-build") / "config" / "includes.chroot" / "opt" / "bty",
@@ -48,10 +50,11 @@ def main(args, cijoe):
     repo_root = cijoe_dir.parent
     bty_media = repo_root / "bty-media"
 
-    variant = cijoe.getconf("bty", {}).get("variant", "usb")
-    target_rel = TARGET_DIRS.get(variant)
+    variant = cijoe.getconf("bty", {}).get("variant", "usb-x86")
+    role = variant.split("-")[0]
+    target_rel = TARGET_DIRS.get(role)
     if target_rel is None:
-        log.info(f"Skipping wheel stage (variant={variant!r}; nothing to bake)")
+        log.info(f"Skipping wheel stage (variant={variant!r}, role={role!r}; nothing to bake)")
         return 0
     target_dir = bty_media / target_rel
     target_dir.mkdir(parents=True, exist_ok=True)

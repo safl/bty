@@ -11,7 +11,10 @@
 #       * usb / server: qemu-system + genisoimage for cloud-init seed
 #       * live: live-build + debootstrap + squashfs-tools + xorriso
 #                (plus root for the chroot phase - sudo prompts you
-#                interactively when ``sudo make build VARIANT=live``)
+#                interactively when ``sudo make build VARIANT=live-x86``)
+#       * server-rpi: qemu-user-static + binfmt-support + xz-utils
+#                for the arm64 chroot customisation of Raspberry Pi
+#                OS Lite
 #
 # Idempotent: re-running upgrades package versions when newer ones
 # are available but does no harm if everything is already installed.
@@ -85,6 +88,15 @@ PACKAGES=(
     debootstrap
     squashfs-tools
     xorriso
+
+    # bty-media server-rpi variant (Raspberry Pi 4/5). The build
+    # mounts a Pi OS Lite arm64 image, chroots into it via
+    # qemu-aarch64-static (registered transparently by
+    # binfmt-support), and customises in place. xz-utils for the
+    # upstream image's .xz compression.
+    qemu-user-static
+    binfmt-support
+    xz-utils
 )
 
 echo "Updating apt index..."
@@ -110,12 +122,13 @@ cat <<'EOF'
     uv sync --all-extras --group dev    # project venv + deps
     uv run pytest                       # unit tests (~7s)
     make ci                             # lint + types + tests
-    make build VARIANT=usb              # USB live image (~20m)
-    make build VARIANT=server           # server appliance (~15m)
-    sudo make build VARIANT=live        # live trio (~10m, root)
+    make build VARIANT=usb-x86              # USB live image (~20m)
+    make build VARIANT=server-x86           # server appliance (~15m)
+    make build VARIANT=server-rpi           # RPi 4/5 server appliance
+    sudo make build VARIANT=live-x86        # live trio (~10m, root)
     make test-pxe                       # end-to-end PXE chain
 
-  Note: ``make build VARIANT=live`` needs root because live-build
+  Note: ``make build VARIANT=live-x86`` needs root because live-build
   does a chroot + mount-bind dance; the others run cloud-init in
   an unprivileged QEMU and don't.
 

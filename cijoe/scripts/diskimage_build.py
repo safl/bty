@@ -142,5 +142,9 @@ def main(args, cijoe):
 
 def _default_image_name(cijoe) -> str:
     bty = cijoe.getconf("bty", {})
-    variant = bty.get("variant", "usb")
-    return f"bty-{variant}-x86_64"
+    variant = bty.get("variant", "usb-x86")
+    # Strip arch suffix to derive the role; image config keys stay
+    # role-named (``bty-server-x86_64``) so published download URLs
+    # don't churn when variant strings change.
+    role = variant.split("-")[0]
+    return f"bty-{role}-x86_64"

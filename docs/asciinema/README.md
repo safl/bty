@@ -55,7 +55,7 @@ PyPI package to ``docs/tooling`` if you want first-class support.
 
 | Script | Type | Walkthrough |
 |---|---|---|
-| `usb-build.sh` | canned | Step 1 of [walkthrough-usb](../src/walkthrough-usb.md): `make build VARIANT=usb` summary |
+| `usb-build.sh` | canned | Step 1 of [walkthrough-usb](../src/walkthrough-usb.md): `make build VARIANT=usb-x86` summary |
 | `usb-flash-cli.sh` | canned | Step 5b: ``bty list / inspect / flash --dry-run / flash --yes`` |
 | `usb-flash-tui.md` | live notes | Step 5a: keystroke recipe for recording the TUI by hand |
 

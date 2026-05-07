@@ -2,7 +2,7 @@
 
 The script lives at
 ``bty-media/live-build/config/includes.chroot/usr/local/sbin/bty-flash-on-boot``
-- it gets baked into the live squashfs by ``make build VARIANT=live``
+- it gets baked into the live squashfs by ``make build VARIANT=live-x86``
 and runs at every boot in the live env. It's a standalone executable
 (``#!/usr/bin/env python3``), not a member of the ``bty`` package, so
 we import it via ``importlib`` for testing.

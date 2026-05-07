@@ -56,8 +56,9 @@ def main(args, cijoe):
     bty_media = cijoe_dir.parent / "bty-media"
 
     variant = cijoe.getconf("bty", {}).get("variant", "")
-    if variant != "live":
-        log.info(f"Skipping live_build (variant={variant!r}; only 'live' runs lb build)")
+    role = variant.split("-")[0]
+    if role != "live":
+        log.info(f"Skipping live_build (variant={variant!r}; only the 'live' role runs lb build)")
         return 0
 
     images = cijoe.getconf("system-imaging.images", {})

@@ -1,0 +1,31 @@
+doc: |
+  bty server appliance image build (Raspberry Pi 4/5)
+  ===================================================
+
+  Customise a Raspberry Pi OS Lite arm64 image into a bty-server SD-card
+  image. Distinct from ``tasks/build.yaml`` (which uses cloud-init in
+  QEMU on a Debian cloud image): the Pi build mounts the upstream image
+  via losetup, chroots in via ``qemu-aarch64-static``, and customises in
+  place.
+
+  Steps:
+
+  1. ``bty_wheel_stage`` builds the bty-lab wheel via ``uv build`` from
+     the parent repo and stages it under ``rootfs/server/opt/bty/`` so
+     the chroot install can pick it up.
+  2. ``rpi_image_customize`` downloads Raspberry Pi OS Lite arm64,
+     grows the image, mounts the partitions, drops the bty rootfs
+     overlay, runs the apt + venv + users + service-enable script
+     inside the arm64 chroot, then re-compresses the result to
+     ``bty-server-rpi-arm64.img.zst`` with a sha256 manifest.
+
+  Output (on success):
+   - ``~/system_imaging/disk/bty-server-rpi-arm64.img.zst``
+   - ``~/system_imaging/disk/bty-server-rpi-arm64.img.zst.sha256``
+
+steps:
+- name: bty_wheel_stage
+  uses: bty_wheel_stage
+
+- name: rpi_image_customize
+  uses: rpi_image_customize

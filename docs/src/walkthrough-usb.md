@@ -56,7 +56,7 @@ Browse all releases at <https://github.com/safl/bty/releases>.
 
 ```bash
 make media-deps           # one-time: pipx installs cijoe
-make build VARIANT=usb    # ~20 minutes with KVM
+make build VARIANT=usb-x86    # ~20 minutes with KVM
 ```
 
 What this does: drives a Debian 13 cloud-image through cloud-init in

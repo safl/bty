@@ -53,14 +53,15 @@ def main(args, cijoe):
 
     # Reconstitute the qcow2 from .img.zst when only the .zst is
     # present (CI shape: release.yml uploads only the operator-
-    # shippable .img.zst). Locally a fresh ``make build VARIANT=
-    # server`` leaves the qcow2 next to the .zst, so this is a no-op.
+    # shippable .img.zst). Locally a fresh ``make build
+    # VARIANT=server-x86`` leaves the qcow2 next to the .zst, so this
+    # is a no-op.
     if not server_qcow2_src.is_file():
         if not server_zst.is_file():
             log.error(
                 f"neither {server_qcow2_src.name} nor {server_zst.name} found in {artifact_dir}"
             )
-            log.error("Run `make build VARIANT=server` from the repo root first")
+            log.error("Run `make build VARIANT=server-x86` from the repo root first")
             return errno.ENOENT
         server_raw = artifact_dir / "bty-server-x86_64.img"
         log.info(f"Rehydrating {server_zst.name} -> {server_qcow2_src.name}")
@@ -79,7 +80,7 @@ def main(args, cijoe):
     for name in ARTIFACT_NAMES:
         if not (artifact_dir / name).is_file():
             log.error(f"live artefact missing: {artifact_dir / name}")
-            log.error("Run `make build VARIANT=live` from the repo root first")
+            log.error("Run `make build VARIANT=live-x86` from the repo root first")
             return errno.ENOENT
 
     # Workspace: ``cijoe/_build/test-pxe/`` (gitignored alongside the
