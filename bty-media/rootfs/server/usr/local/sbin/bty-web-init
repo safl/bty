@@ -57,7 +57,7 @@ cat > /etc/issue <<'EOF'
 ======================================================================
   bty server appliance
 
-  Browser UI:    http://\4:8080/ui     login: bty / bty
+  Browser UI:    http://\4:8080        login: bty / bty
   SSH admin:     ssh odus@\4           login: odus / odus
                  (odus has passwordless sudo)
 
