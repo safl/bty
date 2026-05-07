@@ -9,10 +9,18 @@ name: Release
 #                                   end-to-end PXE chain test
 #                                   against the freshly-built
 #                                   server image + live trio.
-#   5. ``attach-to-release``      - downloads every workflow artifact
+#   5. ``docs`` (gated)           - HTML + PDF build. Part of the
+#                                   release chain so a broken PDF
+#                                   (e.g. an unsupported MyST
+#                                   directive or a non-ASCII char
+#                                   that pdflatex won't render)
+#                                   blocks the publish - docs.yml
+#                                   on its own only runs on push,
+#                                   not on tag.
+#   6. ``attach-to-release``      - downloads every workflow artifact
 #                                   and attaches them to the GitHub
 #                                   release at the same tag.
-#   6. ``publish-pypi`` (last)    - trusted publishing of the wheel
+#   7. ``publish-pypi`` (last)    - trusted publishing of the wheel
 #                                   + sdist. Strictly gated on every
 #                                   prior job succeeding so PyPI
 #                                   never sees a half-baked release
@@ -249,10 +257,50 @@ jobs:
           path: cijoe/_build/test-pxe/
           if-no-files-found: warn
 
+  # ---------------- docs (gates the release) -------------------------------
+  docs:
+    name: Build docs (HTML + PDF)
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v8.1.0
+        with:
+          python-version: "3.12"
+      # Same package set as docs.yml's standalone build, so a tag
+      # push exercises identical machinery to a main-push docs run.
+      - name: Install LaTeX (for PDF build)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            texlive-latex-recommended \
+            texlive-latex-extra \
+            texlive-fonts-recommended \
+            tex-gyre \
+            fonts-freefont-otf \
+            latexmk \
+            make
+      - name: Install docs tooling
+        run: uv tool install ./docs/tooling
+      - name: Build HTML
+        working-directory: docs
+        run: bty-docs-build-html
+      - name: Build PDF
+        working-directory: docs
+        run: bty-docs-build-pdf
+      - uses: actions/upload-artifact@v7
+        with:
+          name: docs-html
+          path: docs/_build/html
+      - uses: actions/upload-artifact@v7
+        with:
+          name: docs-pdf
+          path: docs/_build/latex/bty.pdf
+
   # ---------------- ship ---------------------------------------------------
   attach-to-release:
     name: Attach artifacts to GitHub release
-    needs: [build-wheel, build-media, test-pxe]
+    needs: [build-wheel, build-media, test-pxe, docs]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
@@ -277,9 +325,12 @@ jobs:
   publish-pypi:
     name: Publish to PyPI
     # Strictly last: every prior job (test, build-wheel, build-media,
-    # attach-to-release) must have succeeded. PyPI is for life - a
-    # published version cannot be re-uploaded - so we only ship there
-    # after the whole release-page has gone up cleanly.
+    # test-pxe, docs, attach-to-release) must have succeeded. PyPI is
+    # for life - a published version cannot be re-uploaded - so we
+    # only ship there after the whole release-page has gone up
+    # cleanly. The ``docs`` job is part of this chain so a broken
+    # PDF build (e.g. a stray non-ASCII char that pdflatex chokes
+    # on) doesn't ship a wheel that won't have docs alongside.
     needs: [attach-to-release]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')

@@ -1,6 +1,6 @@
 [project]
 name = "bty-docs"
-version = "0.2.4"
+version = "0.2.5"
 description = "Documentation build tooling for the bty project"
 readme = "README.md"
 requires-python = ">=3.11"

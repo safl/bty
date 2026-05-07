@@ -1,3 +1,3 @@
 """bty-docs - documentation build tooling for the bty project."""
 
-__version__ = "0.2.4"
+__version__ = "0.2.5"
