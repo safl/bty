@@ -114,8 +114,10 @@ def main(args, cijoe):
     if raw_path.exists():
         raw_path.unlink()
     log.info(f"Decompressing {source_path} -> {raw_path}")
-    if _run(["xz", "--decompress", "--keep", "--stdout", str(source_path)],
-            stdout_path=raw_path) != 0:
+    if (
+        _run(["xz", "--decompress", "--keep", "--stdout", str(source_path)], stdout_path=raw_path)
+        != 0
+    ):
         return errno.EIO
     log.info(f"Growing {raw_path} to {target_size_gib} GiB")
     if _run(["truncate", "--size", f"{target_size_gib}G", str(raw_path)]) != 0:
@@ -130,10 +132,19 @@ def main(args, cijoe):
     log.info(f"Compressing {raw_path} -> {zst_path} (zstd -{zstd_level})")
     if zst_path.exists():
         zst_path.unlink()
-    if _run([
-        "zstd", f"-{zstd_level}", "--no-progress",
-        "-o", str(zst_path), str(raw_path),
-    ]) != 0:
+    if (
+        _run(
+            [
+                "zstd",
+                f"-{zstd_level}",
+                "--no-progress",
+                "-o",
+                str(zst_path),
+                str(raw_path),
+            ]
+        )
+        != 0
+    ):
         return errno.EIO
 
     # 5. sha256 manifest
@@ -159,10 +170,19 @@ def _customize(raw_path: Path, bty_media: Path) -> int:
         # ext4 rootfs (p2). Grow p2 to fill the space we created with
         # ``truncate``, then resize the filesystem to match.
         log.info(f"Growing rootfs partition on {loop}p2")
-        if _run_sudo([
-            "parted", "--script", loop,
-            "resizepart", "2", "100%",
-        ]) != 0:
+        if (
+            _run_sudo(
+                [
+                    "parted",
+                    "--script",
+                    loop,
+                    "resizepart",
+                    "2",
+                    "100%",
+                ]
+            )
+            != 0
+        ):
             return errno.EIO
         if _run_sudo(["e2fsck", "-fy", f"{loop}p2"]) not in (0, 1):
             return errno.EIO
@@ -211,9 +231,17 @@ def _stage_and_chroot(mnt: Path, bty_media: Path) -> int:
     # Bulk-copy the overlay tree into the mounted rootfs. ``cp -a`` keeps
     # ownership/perms; we'll fix per-file ownership inside the chroot.
     log.info(f"Copying overlay {rootfs_server}/* into chroot")
-    if _run_sudo([
-        "cp", "-a", f"{rootfs_server}/.", str(mnt),
-    ]) != 0:
+    if (
+        _run_sudo(
+            [
+                "cp",
+                "-a",
+                f"{rootfs_server}/.",
+                str(mnt),
+            ]
+        )
+        != 0
+    ):
         return errno.EIO
 
     # qemu-aarch64-static lets binfmt_misc execve arm64 binaries on the
@@ -249,10 +277,14 @@ def _stage_and_chroot(mnt: Path, bty_media: Path) -> int:
         _run_sudo(["chmod", "0755", str(script_path)])
 
         log.info("Running chroot bty install (apt + venv + users + services)")
-        rc = _run_sudo([
-            "chroot", str(mnt),
-            "/bin/bash", "/tmp/bty-rpi-install.sh",
-        ])
+        rc = _run_sudo(
+            [
+                "chroot",
+                str(mnt),
+                "/bin/bash",
+                "/tmp/bty-rpi-install.sh",
+            ]
+        )
         _run_sudo(["rm", "-f", str(script_path)])
         if rc != 0:
             return errno.EIO
@@ -268,8 +300,7 @@ def _render_install_script(wheel_filename: str) -> str:
     """Bash script that runs *inside* the arm64 chroot."""
 
     state_dir_lines = "\n".join(
-        f"install -d -o bty -g bty -m {mode} {path}"
-        for path, mode in STATE_DIRS
+        f"install -d -o bty -g bty -m {mode} {path}" for path, mode in STATE_DIRS
     )
 
     return textwrap.dedent(f"""
@@ -288,7 +319,7 @@ def _render_install_script(wheel_filename: str) -> str:
 
         # 2. apt packages.
         apt-get update
-        apt-get install -y --no-install-recommends {' '.join(APT_PACKAGES)}
+        apt-get install -y --no-install-recommends {" ".join(APT_PACKAGES)}
         apt-get clean
         rm -rf /var/lib/apt/lists/*
 
@@ -372,7 +403,9 @@ def _losetup_attach(raw_path: Path) -> tuple[int, str]:
     # ``losetup --find --show --partscan`` prints the assigned device.
     proc = subprocess.run(
         ["sudo", "losetup", "--find", "--show", "--partscan", str(raw_path)],
-        capture_output=True, text=True, check=False,
+        capture_output=True,
+        text=True,
+        check=False,
     )
     if proc.returncode != 0:
         log.error(f"losetup attach failed: {proc.stderr.strip()}")
