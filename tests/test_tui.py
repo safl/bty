@@ -1,21 +1,76 @@
-"""Tests for the bty-tui free helpers.
+"""Tests for the bty-tui module.
 
-Driving the textual ``App`` itself in unit tests is painful (event-loop
-+ DOM-renderer setup); we cover the helpers around it instead. The
-helpers (``fetch_remote_catalog``, ``post_pxe_done``) are the
-network-touching pieces and are where remote-mode logic lives.
+Two layers:
+
+1. Free helpers (``fetch_remote_catalog``, ``post_pxe_done``) covered
+   without instantiating textual at all - they're just HTTP wrappers.
+2. End-to-end interaction with the textual ``BtyTui`` app via
+   ``App.run_test()`` (textual's headless test harness). The Pilot
+   drives key presses and click events; assertions look at widget
+   state via ``app.query_one(...)``. ``asyncio.run`` is used to drive
+   the async test body so we don't have to take a pytest-asyncio
+   dependency.
+
+Data sources (``images.list_images``, ``disks.list_disks``,
+``fetch_remote_catalog``) are monkeypatched in the per-test fixtures
+to return synthetic rows; the goal is to verify the wiring in
+``_populate_images`` / ``_populate_disks`` / ``_load_images`` /
+``action_refresh`` / ``_initial_status``, not to re-test the
+underlying functions (those have their own coverage).
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import urllib.error
+from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
 
+from bty import images
 from bty.tui import _app as tui_app
+
+
+def _run(coro: Any) -> Any:
+    """Drive an async test body without pulling in pytest-asyncio."""
+    return asyncio.run(coro)
+
+
+def _fake_image(
+    name: str = "demo.qcow2",
+    fmt: str = "qcow2",
+    size: int = 1024,
+) -> images.Image:
+    """Synthetic ``images.Image`` for monkeypatched list_images."""
+    return images.Image(
+        path=Path("/fake/images") / name,
+        name=name,
+        format=fmt,
+        size_bytes=size,
+    )
+
+
+def _fake_disk(
+    path: str = "/dev/sda",
+    size: str = "500G",
+    model: str = "Test Disk",
+) -> dict[str, Any]:
+    """Synthetic disk row matching ``disks.list_disks`` output shape."""
+    return {
+        "path": path,
+        "size": size,
+        "type": "disk",
+        "vendor": "ATA",
+        "model": model,
+        "serial": "TEST123",
+        "tran": "sata",
+        "removable": False,
+        "readonly": False,
+        "mountpoints": [],
+    }
 
 
 def _fake_resp(payload: Any) -> MagicMock:
@@ -190,3 +245,206 @@ def test_main_accepts_server_and_mac_flags(monkeypatch: pytest.MonkeyPatch) -> N
     assert captured["server_url"] == "http://srv:8080"
     assert captured["mac"] == "aa:bb:cc:dd:ee:ff"
     assert captured["ran"] is True
+
+
+# ---------- end-to-end: BtyTui driven via textual's Pilot ------------------
+#
+# These run the actual textual ``App`` headless in pytest. The Pilot
+# simulates key presses; assertions look at widget state via
+# ``app.query_one(...)``. Data sources are monkeypatched on the
+# ``bty.tui._app`` module references so the app sees synthetic rows
+# without touching the real filesystem / lsblk / network.
+
+
+def _patch_data_sources(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    images_list: list[images.Image] | None = None,
+    disks_list: list[dict[str, Any]] | None = None,
+    remote_catalog: list[Any] | None = None,
+    geteuid: int = 0,
+) -> None:
+    """Wire fake data into the module-level references the TUI uses.
+
+    ``images_list`` / ``disks_list`` feed the local-mode populate paths.
+    ``remote_catalog`` feeds the remote-mode catalog fetch.
+    ``geteuid`` controls the read-only-vs-flashable status string.
+    """
+    monkeypatch.setattr(tui_app.os, "geteuid", lambda: geteuid)
+    monkeypatch.setattr(
+        tui_app.images,
+        "list_images",
+        lambda _root: list(images_list or []),
+    )
+    monkeypatch.setattr(
+        tui_app.disks,
+        "list_disks",
+        lambda: list(disks_list or []),
+    )
+    if remote_catalog is not None:
+        monkeypatch.setattr(
+            tui_app,
+            "fetch_remote_catalog",
+            lambda _url: list(remote_catalog),
+        )
+
+
+def _spy_status(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Capture every ``_set_status`` call. Cleaner than poking textual
+    Static internals (the rendered-text accessor is private)."""
+    captured: list[str] = []
+    original = tui_app.BtyTui._set_status
+
+    def _capturing(self: tui_app.BtyTui, message: str) -> None:
+        captured.append(message)
+        original(self, message)
+
+    monkeypatch.setattr(tui_app.BtyTui, "_set_status", _capturing)
+    return captured
+
+
+def test_app_renders_local_panes_with_seeded_data(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Launch the app with one seeded image + one seeded disk; both
+    DataTables populate and the initial status surfaces the
+    flash-allowed prompt (geteuid=0)."""
+    _patch_data_sources(
+        monkeypatch,
+        images_list=[_fake_image(name="alpha.qcow2", size=4096)],
+        disks_list=[_fake_disk(path="/dev/sda")],
+    )
+
+    app = tui_app.BtyTui(image_root=tmp_path / "images")
+
+    async def _drive() -> None:
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            from textual.widgets import DataTable
+
+            images_table = app.query_one("#images_table", DataTable)
+            disks_table = app.query_one("#disks_table", DataTable)
+            assert images_table.row_count == 1
+            assert disks_table.row_count == 1
+            assert "press F to flash" in app._initial_status()  # type: ignore[reportPrivateUsage]
+
+    _run(_drive())
+
+
+def test_app_shows_no_images_message_when_local_root_is_empty(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Empty image root -> ``_set_status`` is called with the
+    "No images at <path>; press R to refresh" message during the
+    initial populate."""
+    statuses = _spy_status(monkeypatch)
+    _patch_data_sources(monkeypatch, images_list=[], disks_list=[_fake_disk()])
+
+    app = tui_app.BtyTui(image_root=tmp_path / "empty")
+
+    async def _drive() -> None:
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+    _run(_drive())
+    assert any("No images at" in s and "press R to refresh" in s for s in statuses)
+
+
+def test_app_refresh_action_repopulates(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pressing ``r`` re-runs the populate path. First call returns an
+    empty list, second call returns one image; after the keypress the
+    images table has the new row and ``Refreshed.`` shows in status."""
+    statuses = _spy_status(monkeypatch)
+    images_returns = [
+        [],  # first populate (on mount)
+        [_fake_image()],  # second populate (after R)
+    ]
+    call_count = 0
+
+    def _list_images(_root: Path) -> list[images.Image]:
+        nonlocal call_count
+        call_count += 1
+        return images_returns.pop(0) if images_returns else []
+
+    monkeypatch.setattr(tui_app.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(tui_app.images, "list_images", _list_images)
+    monkeypatch.setattr(tui_app.disks, "list_disks", lambda: [_fake_disk()])
+
+    app = tui_app.BtyTui(image_root=tmp_path / "images")
+
+    async def _drive() -> None:
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            from textual.widgets import DataTable
+
+            images_table = app.query_one("#images_table", DataTable)
+            assert images_table.row_count == 0  # initial: empty
+
+            await pilot.press("r")
+            await pilot.pause()
+
+            assert images_table.row_count == 1  # second populate landed
+
+    _run(_drive())
+    assert call_count == 2  # populate ran on mount + on refresh
+    assert any("Refreshed" in s for s in statuses)
+
+
+def test_app_non_root_status_says_read_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Without root (geteuid != 0), ``_initial_status`` returns the
+    read-only message so the operator knows ``F`` won't work."""
+    _patch_data_sources(
+        monkeypatch,
+        images_list=[_fake_image()],
+        disks_list=[_fake_disk()],
+        geteuid=1000,
+    )
+
+    app = tui_app.BtyTui(image_root=tmp_path / "images")
+
+    async def _drive() -> None:
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            assert "Read-only mode" in app._initial_status()  # type: ignore[reportPrivateUsage]
+
+    _run(_drive())
+
+
+def test_app_remote_mode_renders_catalog_from_server(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``--server URL`` swaps the local image-root scan for
+    ``fetch_remote_catalog``. The Images pane title shows the server
+    URL; the table populates from the mocked remote catalog."""
+    remote_rows = [
+        tui_app._TuiImage(
+            name="remote.img.zst",
+            fmt="img.zst",
+            size_bytes=8192,
+            url="http://server:8080/images/remote.img.zst",
+        )
+    ]
+    _patch_data_sources(
+        monkeypatch,
+        disks_list=[_fake_disk()],
+        remote_catalog=remote_rows,
+    )
+
+    app = tui_app.BtyTui(server_url="http://server:8080")
+
+    async def _drive() -> None:
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            from textual.widgets import DataTable
+
+            images_table = app.query_one("#images_table", DataTable)
+            assert images_table.row_count == 1
+            # The remote URL is the row key (used to drive the URL flash
+            # path in action_flash); confirm the entry round-trips.
+            row = next(iter(app._images_by_key.values()))  # type: ignore[reportPrivateUsage]
+            assert row.url == "http://server:8080/images/remote.img.zst"
+            assert row.path is None  # remote rows never carry a local path
+
+    _run(_drive())
