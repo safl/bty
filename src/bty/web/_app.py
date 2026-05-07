@@ -152,6 +152,16 @@ def create_app(
 
     # ----- Open routes (no auth) ------------------------------------------
 
+    @app.get("/", include_in_schema=False)
+    def root() -> Response:
+        """Bare-host hit (``http://bty-server:8080/``) lands the
+        operator at the login screen. Already-authed visitors get
+        bounced from there to the dashboard via ``ui_login_form``."""
+        return Response(
+            status_code=status.HTTP_303_SEE_OTHER,
+            headers={"Location": "/ui/login"},
+        )
+
     @app.get("/healthz", response_model=_models.HealthResponse)
     def healthz() -> _models.HealthResponse:
         return _models.HealthResponse()

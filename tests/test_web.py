@@ -83,6 +83,27 @@ def app_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Test
 # ---------- open endpoints (no auth) ----------------------------------------
 
 
+def test_root_redirects_to_login(app_client: TestClient) -> None:
+    """``http://server/`` 303s to ``/ui/login`` so an operator typing the
+    bare hostname lands at a useful page (rather than a 404). Already-
+    authed visitors get bounced from there to ``/ui/dashboard``."""
+    r = app_client.get("/", follow_redirects=False)
+    assert r.status_code == 303
+    assert r.headers["location"] == "/ui/login"
+
+
+def test_login_form_redirects_authed_visitors_to_dashboard(
+    app_client: TestClient,
+) -> None:
+    """``GET /ui/login`` skips the form when the visitor is already
+    authenticated; this is what makes ``GET /`` -> ``/ui/login`` smart
+    for both authed and unauthed cases."""
+    # The fixture's AUTH cookie was minted via /ui/login already.
+    r = app_client.get("/ui/login", cookies=AUTH, follow_redirects=False)
+    assert r.status_code == 303
+    assert r.headers["location"] == "/ui/dashboard"
+
+
 def test_healthz_is_open(app_client: TestClient) -> None:
     r = app_client.get("/healthz")
     assert r.status_code == 200
@@ -661,11 +682,19 @@ def test_boot_artifact_404_for_missing(app_client: TestClient) -> None:
 def test_boot_artifact_rejects_traversal(app_client: TestClient) -> None:
     """Slash in a single-segment ``{name}`` is impossible (FastAPI's
     path converter splits on /), but the explicit guards reject the
-    edge cases too: empty, dot, dotdot, encoded."""
+    edge cases too: empty, dot, dotdot, encoded.
+
+    ``follow_redirects=False`` because some httpx URL-normalisations
+    on ``..`` resolve to ``/`` which now 303s to ``/ui/login`` (the
+    root-redirect for usability). The boot handler never serves a
+    file; that's what we're asserting."""
     for bad in ("", ".", ".."):
-        r = app_client.get(f"/boot/{bad}")
-        # Some encodings 404 from FastAPI's router before reaching us;
-        # the others should 400 from our guard. Either way: not 200.
+        r = app_client.get(f"/boot/{bad}", follow_redirects=False)
+        # Some encodings 404 / 422 from FastAPI's router before reaching
+        # the boot handler; others 400 from our guard; ``..`` URL-
+        # normalises to ``/`` which 303s. None of these are 200 from
+        # the boot handler - that's the only thing this test cares
+        # about.
         assert r.status_code != 200
 
 

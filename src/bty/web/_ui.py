@@ -94,8 +94,14 @@ def register_ui_routes(
     def ui_root() -> RedirectResponse:
         return RedirectResponse("/ui/dashboard", status_code=status.HTTP_303_SEE_OTHER)
 
-    @app.get("/ui/login", response_class=HTMLResponse, include_in_schema=False)
-    def ui_login_form(request: Request) -> HTMLResponse:
+    @app.get("/ui/login", include_in_schema=False)
+    def ui_login_form(request: Request) -> Response:
+        # Already authed -> skip the form entirely. Lets ``GET /``
+        # (which 303s here) act as a smart entry point: unauthed
+        # visitors see the login form, authed visitors land at the
+        # dashboard.
+        if request.session.get(SESSION_AUTHED_KEY):
+            return RedirectResponse("/ui/dashboard", status_code=status.HTTP_303_SEE_OTHER)
         return render("ui/login.html", request)
 
     @app.post("/ui/login", include_in_schema=False)
