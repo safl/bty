@@ -287,7 +287,9 @@ sudo umount /dev/sdX*
 
 ## What's next
 
-* For provisioning many machines at once over the network, see
- [Walkthrough: server appliance](walkthrough-server.md) (todo).
+* For provisioning many machines at once over the network, see the
+ server-appliance section in [Quickstart](quickstart.md#network-flashing-via-the-bty-web-server).
+ (A full server-appliance walkthrough is queued; until then the
+ quickstart covers the same ground at lower depth.)
 * For the full CLI surface, see [Reference](reference.md).
 * For how the live env works under the hood, see [Concepts](concepts.md).
