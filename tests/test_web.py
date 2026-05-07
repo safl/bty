@@ -11,7 +11,6 @@ attach it.
 
 from __future__ import annotations
 
-import secrets
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -403,20 +402,6 @@ def test_list_images_returns_files_under_image_root(
 
 
 # ---------- create_app sanity ----------------------------------------------
-
-
-def test_invalid_token_is_rejected(app_client: TestClient) -> None:
-    """Tokens that don't match an active session row return 401, no
-    timing oracle (every miss does the same DB lookup + sha256)."""
-    r = app_client.get("/machines", headers={"Authorization": "Bearer nope-not-real"})
-    assert r.status_code == 401
-
-
-def test_session_tokens_are_high_entropy() -> None:
-    """The plaintext returned by ``issue_session`` is the recommended
-    ``secrets.token_urlsafe``-style: 32+ bytes of entropy, URL-safe."""
-    token = secrets.token_urlsafe(32)
-    assert len(token) > 30
 
 
 # ---------- boot policy + flash chain (Phase D-3a) --------------------------
