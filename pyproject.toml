@@ -41,9 +41,9 @@ all = [
 
 [project.scripts]
 bty = "bty.cli:main"
-bty-ctl = "bty.client:main"
 bty-tui = "bty.tui:main"
 bty-web = "bty.web:main"
+bty-ctl = "bty.client:main"
 
 [project.urls]
 Homepage = "https://safl.dk/bty/"

@@ -48,10 +48,10 @@ entry points, plus a sibling appliance-image builder:
 
 - `bty` - main CLI for image inspection, target discovery, flashing,
   provisioning.
-- `bty-ctl` - command-line client for a remote `bty-web` server
-  (login/logout, future fleet ops).
 - `bty-tui` - terminal UI for interactive use from a live environment.
 - `bty-web` - HTTP server + browser UI for fleet provisioning.
+- `bty-ctl` - command-line client for a remote `bty-web` server
+  (login/logout, future fleet ops).
 - `bty-media/` - sibling directory (not a Python package); a
   cijoe-driven Debian appliance-image builder that produces the USB live
   and server images.

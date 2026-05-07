@@ -16,21 +16,6 @@ Installable on any Linux environment with a sufficient Python runtime:
 pipx install bty-lab
 ```
 
-## `bty-ctl` (CLI client for the remote server)
-
-Companion CLI for a remote `bty-web` deployment. `bty-ctl login`
-authenticates against the server's PAM, caches a session token at
-`~/.config/bty/token` (mode 0600), and `bty-ctl logout` revokes it.
-Future subcommands will surface fleet-level operations (list machines,
-assign images, drive provisioning) without requiring shell access on
-the server.
-
-Ships with the base install - no extra needed:
-
-```bash
-pipx install bty-lab
-```
-
 ## `bty-tui` (Terminal UI)
 
 Terminal UI on top of the same library. Targeted at interactive use from
@@ -77,6 +62,21 @@ complete log without leaving the browser.
 
 The runtime is sized for modest x86 hardware: lightweight Python web
 framework, no heavy front-end build pipeline, no JVM dependencies.
+
+## `bty-ctl` (CLI client for the remote server)
+
+Companion CLI for a remote `bty-web` deployment. `bty-ctl login`
+authenticates against the server's PAM, caches a session token at
+`~/.config/bty/token` (mode 0600), and `bty-ctl logout` revokes it.
+Future subcommands will surface fleet-level operations (list machines,
+assign images, drive provisioning) without requiring shell access on
+the server.
+
+Ships with the base install - no extra needed:
+
+```bash
+pipx install bty-lab
+```
 
 ## `bty-media/` (appliance-image builder)
 

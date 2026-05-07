@@ -22,10 +22,10 @@ console-script entry points:
 
 - `bty`: main CLI (image inspection, target discovery, flashing,
   provisioning).
-- `bty-ctl`: command-line client for a remote `bty-web` server
-  (`bty-ctl login`, `bty-ctl logout`, future fleet ops).
 - `bty-tui`: terminal UI (requires the `tui` extra).
 - `bty-web`: HTTP server with browser UI (requires the `web` extra).
+- `bty-ctl`: command-line client for a remote `bty-web` server
+  (`bty-ctl login`, `bty-ctl logout`, future fleet ops).
 
 Plus a sibling appliance-image builder under `bty-media/` that produces
 the bootable USB live image and the server appliance image.
