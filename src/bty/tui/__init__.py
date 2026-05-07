@@ -10,18 +10,30 @@ textual app lives in :mod:`bty.tui._app`, which is loaded only when
 
 from __future__ import annotations
 
+import argparse
 import sys
 
 import bty
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     """Console-script entry point for ``bty-tui``.
 
     Defers loading the textual app until invocation time so a missing
     ``[tui]`` extra produces a clear "reinstall with extras" message
     rather than a raw ``ModuleNotFoundError``.
     """
+    parser = argparse.ArgumentParser(
+        prog="bty-tui",
+        description="bty-tui - terminal UI for image inspection and flashing",
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"bty-tui {bty.__version__}",
+    )
+    parser.parse_args(argv)
+
     try:
         from bty.tui._app import BtyTui
     except ImportError as exc:

@@ -37,8 +37,35 @@ def test_bty_tui_main_handles_missing_extras(
     import bty.tui as tui_mod
 
     with pytest.raises(SystemExit) as excinfo:
-        tui_mod.main()
+        # Pass empty argv so argparse doesn't pick up pytest's args.
+        tui_mod.main([])
 
     assert excinfo.value.code == 1
     err = capsys.readouterr().err
     assert "bty-lab[tui]" in err
+
+
+def test_bty_tui_main_version_flag(capsys: pytest.CaptureFixture[str]) -> None:
+    """``bty-tui --version`` exits 0 with ``bty-tui <version>`` on stdout."""
+    import bty.tui as tui_mod
+
+    with pytest.raises(SystemExit) as excinfo:
+        tui_mod.main(["--version"])
+
+    assert excinfo.value.code == 0
+    out = capsys.readouterr().out
+    assert out.startswith("bty-tui ")
+    assert bty.__version__ in out
+
+
+def test_bty_web_main_version_flag(capsys: pytest.CaptureFixture[str]) -> None:
+    """``bty-web --version`` exits 0 with ``bty-web <version>`` on stdout."""
+    import bty.web as web_mod
+
+    with pytest.raises(SystemExit) as excinfo:
+        web_mod.main(["--version"])
+
+    assert excinfo.value.code == 0
+    out = capsys.readouterr().out
+    assert out.startswith("bty-web ")
+    assert bty.__version__ in out

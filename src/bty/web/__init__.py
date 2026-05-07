@@ -10,6 +10,7 @@ FastAPI app lives in :mod:`bty.web._app`, which is loaded only when
 
 from __future__ import annotations
 
+import argparse
 import os
 import pwd
 import sys
@@ -18,7 +19,7 @@ from pathlib import Path
 import bty
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     """Console-script entry point for ``bty-web``.
 
     Defers loading the FastAPI app until invocation time so a missing
@@ -27,6 +28,17 @@ def main() -> None:
     captured from ``geteuid`` and used as the principal whose OS
     password gates ``/auth/login``.
     """
+    parser = argparse.ArgumentParser(
+        prog="bty-web",
+        description="bty-web - HTTP server with browser UI for fleet provisioning",
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"bty-web {bty.__version__}",
+    )
+    parser.parse_args(argv)
+
     try:
         import uvicorn
 
