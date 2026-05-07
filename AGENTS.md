@@ -172,12 +172,12 @@ detail in `docs/src/reference.md`; quick reference for agents:
 **Auth.** Single-tenant PAM against the bty service user (the OS
 account ``bty-web`` runs as; ``bty / bty`` by default on the cooked
 appliance). ``POST /ui/login`` (form-encoded ``password=...``) PAM-
-checks the password, issues an opaque session token whose sha256
-is persisted in the ``sessions`` table, and sets a ``bty-token``
-cookie on the response. Protected routes look up the cookie value
-via the auth dependency; ``POST /ui/logout`` revokes. Open routes
-(no cookie) are reachable by PXE clients and live-env tooling which
-can't carry one.
+checks the password and flips ``request.session["bty_authed"] =
+True``; the session is a server-signed cookie via Starlette's
+``SessionMiddleware`` (cookie name ``bty-token``). Protected routes
+read the session via the auth dependency; ``POST /ui/logout`` clears
+it. Open routes (no cookie) are reachable by PXE clients and live-
+env tooling which can't carry one.
 
 **Routes** (all paths case-insensitive on the MAC; the canonical form
 is lower-case `aa:bb:cc:dd:ee:ff`):
@@ -285,15 +285,15 @@ sudoers-permitted `bty-web-activate-pxe` helper). Two-stage chain:
 PXE ROM -> `undionly.kpxe`/`ipxe.efi` -> bty-web's
 `/pxe-bootstrap.ipxe` -> per-MAC `/pxe/{mac}` plan.
 
-**Settings (`/ui/settings`).** Operator-facing controls for two
-runtime concerns: session revocation (`POST /ui/settings/revoke-
-sessions` truncates the `sessions` table so every active CLI
-token and browser cookie is invalidated; the credential itself is
-rotated out-of-band with `sudo passwd bty` on the appliance) and
-PXE activation (writes `/etc/dnsmasq.d/bty-pxe-active.conf` +
-restarts dnsmasq via `bty-web-activate-pxe`). The PXE helper
-lives in `/usr/local/sbin/` and is invocable by user `bty` via
-the `/etc/sudoers.d/bty-web` NOPASSWD entry - the only privileged
+**Settings (`/ui/settings`).** Operator-facing controls for PXE
+activation (writes `/etc/dnsmasq.d/bty-pxe-active.conf` + restarts
+dnsmasq via `bty-web-activate-pxe`). The credential is rotated
+out-of-band with `sudo passwd bty` on the appliance; sessions
+invalidate on cookie expiry (7-day sliding TTL) or by rotating the
+session-cookie secret at `/var/lib/bty/session-secret` (delete +
+``systemctl restart bty-web``). The PXE helper lives in
+`/usr/local/sbin/` and is invocable by user `bty` via the
+`/etc/sudoers.d/bty-web` NOPASSWD entry - the only privileged
 operation bty-web is granted.
 
 ## Conventions agents can rely on

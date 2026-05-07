@@ -1,11 +1,12 @@
 """Browser UI routes for bty-web (Jinja + Bootstrap + HTMX).
 
-Routes live under ``/ui``. They render server-side HTML and use cookie
-auth (the ``bty-token`` cookie set by ``POST /ui/login``); the API
-surface at ``/`` is unchanged. ``register_ui_routes(app, ...)``
-attaches all the UI handlers to an existing FastAPI app. The
-``/ui/machines`` table subscribes to ``/events/machines`` (HTMX SSE
-extension) for live updates.
+Routes live under ``/ui``. They render server-side HTML and gate on
+the session cookie set by ``POST /ui/login`` (a Starlette
+SessionMiddleware-managed signed cookie); the API surface at ``/`` is
+unchanged. ``register_ui_routes(app, ...)`` attaches all the UI
+handlers to an existing FastAPI app. The ``/ui/machines`` table
+subscribes to ``/events/machines`` (HTMX SSE extension) for live
+updates.
 """
 
 from __future__ import annotations
@@ -17,7 +18,6 @@ from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import (
-    Cookie,
     Depends,
     FastAPI,
     Form,
@@ -32,19 +32,16 @@ from jinja2 import Environment
 import bty
 from bty import images as bty_images
 from bty.web import _db, _releases, _sysconfig
-from bty.web._auth import SESSION_COOKIE, authenticate_session
+from bty.web._auth import SESSION_AUTHED_KEY
 from bty.web._models import BOOT_POLICIES, PROVISIONING_MODES
 
 
 class NotAuthenticated(Exception):
-    """Raised by UI dependencies when the request lacks a valid session cookie.
+    """Raised by UI dependencies when the request lacks an authed session.
 
     The exception handler redirects to ``/ui/login``; UI requests get
     a redirect, API requests would still hit the regular 401 dependency.
     """
-
-
-_UICookie = Annotated[str | None, Cookie(alias=SESSION_COOKIE)]
 
 
 def register_ui_routes(
@@ -68,7 +65,7 @@ def register_ui_routes(
 
     def render(name: str, request: Request, **ctx: Any) -> HTMLResponse:
         ctx.setdefault("version", bty.__version__)
-        ctx.setdefault("logged_in", _request_is_authed(request, state_path))
+        ctx.setdefault("logged_in", bool(request.session.get(SESSION_AUTHED_KEY)))
         ctx.setdefault("service_user", service_user)
         # Top-level path segment under /ui/ - the layout uses this to
         # mark the active nav button. ``request.url.path`` is the full
@@ -87,8 +84,8 @@ def register_ui_routes(
         del request, exc
         return RedirectResponse("/ui/login", status_code=status.HTTP_303_SEE_OTHER)
 
-    def require_ui_auth(cookie_token: _UICookie = None) -> None:
-        if not cookie_token or not authenticate_session(state_path, cookie_token):
+    def require_ui_auth(request: Request) -> None:
+        if not request.session.get(SESSION_AUTHED_KEY):
             raise NotAuthenticated
 
     # ----- entry / auth ----------------------------------------------------
@@ -107,7 +104,7 @@ def register_ui_routes(
         password: Annotated[str, Form()],
     ) -> Response:
         # Lazily import pamela so missing libpam doesn't break module
-        # import - same pattern as ``/auth/login`` in ``_app.py``.
+        # import. pamela is in the ``[web]`` extras alongside fastapi.
         import pamela
 
         try:
@@ -118,32 +115,17 @@ def register_ui_routes(
                 request,
                 error=f"Invalid password for {service_user!r}.",
             )
-        # Session token + cookie expiry come from the same source; the
-        # browser cookie inherits the DB row's TTL.
-        with _db.open_db(state_path) as conn:
-            ua = request.headers.get("user-agent")
-            label = f"ui:{ua[:80]}" if ua else "ui:unknown"
-            token, expires = _db.issue_session(conn, label=label)
-        max_age = max(0, int((expires - datetime.now(UTC)).total_seconds()))
-        response = RedirectResponse("/ui/dashboard", status_code=status.HTTP_303_SEE_OTHER)
-        response.set_cookie(
-            key=SESSION_COOKIE,
-            value=token,
-            max_age=max_age,
-            httponly=True,
-            samesite="strict",
-            secure=request.url.scheme == "https",
-        )
-        return response
+        # SessionMiddleware re-signs and re-attaches the cookie on the
+        # response; we just flip the authed flag in the session dict.
+        request.session[SESSION_AUTHED_KEY] = True
+        return RedirectResponse("/ui/dashboard", status_code=status.HTTP_303_SEE_OTHER)
 
     @app.post("/ui/logout", include_in_schema=False)
-    def ui_logout(cookie_token: _UICookie = None) -> Response:
-        if cookie_token:
-            with _db.open_db(state_path) as conn:
-                _db.revoke_session(conn, cookie_token)
-        response = RedirectResponse("/ui/login", status_code=status.HTTP_303_SEE_OTHER)
-        response.delete_cookie(SESSION_COOKIE)
-        return response
+    def ui_logout(request: Request) -> Response:
+        # ``clear()`` empties the session dict; SessionMiddleware then
+        # emits an empty (deletion) cookie on the response.
+        request.session.clear()
+        return RedirectResponse("/ui/login", status_code=status.HTTP_303_SEE_OTHER)
 
     # ----- pages (auth-required) ------------------------------------------
 
@@ -348,24 +330,6 @@ def register_ui_routes(
         return _render_settings_page(request)
 
     @app.post(
-        "/ui/settings/revoke-sessions",
-        include_in_schema=False,
-        dependencies=[Depends(require_ui_auth)],
-    )
-    def ui_settings_revoke_sessions(request: Request) -> HTMLResponse:
-        with _db.open_db(state_path) as conn:
-            count = _db.revoke_all_sessions(conn)
-        return _render_settings_page(
-            request,
-            flash=(
-                f"Revoked {count} active session(s). All clients (browsers + "
-                f"CLI) need to log in again. Your current cookie was revoked "
-                f"too - the next click will redirect you to /ui/login."
-            ),
-            flash_kind="warning",
-        )
-
-    @app.post(
         "/ui/settings/pxe-activate",
         include_in_schema=False,
         dependencies=[Depends(require_ui_auth)],
@@ -418,14 +382,6 @@ def register_ui_routes(
 
 
 # ---------- helpers ---------------------------------------------------------
-
-
-def _request_is_authed(request: Request, state_path: Path) -> bool:
-    """Used by the layout template to show/hide the nav and logout button."""
-    cookie = request.cookies.get(SESSION_COOKIE)
-    if cookie is None:
-        return False
-    return authenticate_session(state_path, cookie)
 
 
 def _row_to_dict(row: Any) -> dict[str, Any]:

@@ -20,13 +20,19 @@ from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader, select_autoescape
+from starlette.middleware.sessions import SessionMiddleware
 
 import bty
 from bty import images
 from bty.web import _db, _models, _ui
-from bty.web._auth import make_token_dep
+from bty.web._auth import SESSION_COOKIE, require_auth
 from bty.web._events import MachineEvent, MachineEventBus, sse_format
 from bty.web._workflow import WorkflowRunner
+
+# Session cookie max-age. Sliding TTL on the browser side; Starlette's
+# SessionMiddleware refreshes the cookie on each authed response, so
+# active sessions stay alive while idle ones eventually expire.
+_SESSION_MAX_AGE = 7 * 24 * 60 * 60  # 7 days
 
 TEMPLATES_DIR = Path(__file__).parent / "_templates"
 STATIC_DIR = Path(__file__).parent / "_static"
@@ -36,6 +42,7 @@ def create_app(
     *,
     state_path: Path,
     service_user: str,
+    secret_key: str,
     image_root: Path | None = None,
     boot_root: Path | None = None,
 ) -> FastAPI:
@@ -46,12 +53,19 @@ def create_app(
     (resolved from ``geteuid`` in :func:`bty.web.main`). Tests pass a
     fixture name and monkeypatch ``pamela.authenticate``.
 
+    ``secret_key`` is the per-appliance random key used by Starlette's
+    :class:`SessionMiddleware` to sign session cookies. It must persist
+    across bty-web restarts (otherwise every restart logs everyone out)
+    and must be unique per appliance (otherwise a cookie minted by one
+    server is valid on another). On the cooked appliance,
+    ``bty-web-init`` writes a 32-byte random key to
+    ``/var/lib/bty/session-secret`` on first boot.
+
     ``boot_root`` is where the live-env artifacts (kernel + initrd +
     squashfs) live for the ``GET /boot/{name}`` endpoint; defaults to
     ``state_path.parent / "boot"`` (i.e. ``/var/lib/bty/boot`` on a
     stock appliance).
     """
-    require_token = make_token_dep(state_path)
     resolved_image_root: Path = image_root or images.default_image_root()
     resolved_boot_root: Path = boot_root or (state_path.parent / "boot")
     event_bus = MachineEventBus()
@@ -75,6 +89,20 @@ def create_app(
     _db.init_db(state_path)
 
     app = FastAPI(title="bty-web", version=bty.__version__, lifespan=_lifespan)
+
+    # Server-signed session cookie via Starlette's SessionMiddleware.
+    # Cookie name kept as ``bty-token`` so existing operator scripts
+    # (and the PXE chain test) that captured Set-Cookie don't break.
+    # ``same_site="strict"`` blocks cross-site cookie attachment;
+    # browsers won't auto-send the cookie on third-party requests.
+    app.add_middleware(
+        SessionMiddleware,
+        secret_key=secret_key,
+        session_cookie=SESSION_COOKIE,
+        max_age=_SESSION_MAX_AGE,
+        same_site="strict",
+        https_only=False,  # appliance is plain HTTP on a homelab segment
+    )
 
     # Vendored client-side assets (Bootstrap CSS, HTMX, htmx-ext-sse)
     # ship inside the wheel so the appliance has no runtime CDN
@@ -282,7 +310,7 @@ def create_app(
 
     @app.get(
         "/events/machines",
-        dependencies=[Depends(require_token)],
+        dependencies=[Depends(require_auth)],
         include_in_schema=False,
     )
     async def events_machines() -> StreamingResponse:
@@ -303,7 +331,7 @@ def create_app(
     @app.get(
         "/machines",
         response_model=list[_models.Machine],
-        dependencies=[Depends(require_token)],
+        dependencies=[Depends(require_auth)],
     )
     def list_machines() -> list[_models.Machine]:
         with _db.open_db(state_path) as conn:
@@ -313,7 +341,7 @@ def create_app(
     @app.get(
         "/machines/{mac}",
         response_model=_models.Machine,
-        dependencies=[Depends(require_token)],
+        dependencies=[Depends(require_auth)],
     )
     def get_machine(mac: str) -> _models.Machine:
         normalised = _normalise_mac(mac)
@@ -329,7 +357,7 @@ def create_app(
     @app.put(
         "/machines/{mac}",
         response_model=_models.Machine,
-        dependencies=[Depends(require_token)],
+        dependencies=[Depends(require_auth)],
     )
     def upsert_machine(mac: str, body: _models.MachineUpsert) -> _models.Machine:
         normalised = _normalise_mac(mac)
@@ -374,7 +402,7 @@ def create_app(
     @app.delete(
         "/machines/{mac}",
         status_code=status.HTTP_204_NO_CONTENT,
-        dependencies=[Depends(require_token)],
+        dependencies=[Depends(require_auth)],
     )
     def delete_machine(mac: str) -> Response:
         normalised = _normalise_mac(mac)
@@ -413,7 +441,7 @@ def create_app(
 
     @app.put(
         "/images/{name}",
-        dependencies=[Depends(require_token)],
+        dependencies=[Depends(require_auth)],
         include_in_schema=False,
     )
     async def upload_image(name: str, request: Request) -> dict[str, object]:
@@ -431,7 +459,7 @@ def create_app(
 
     @app.put(
         "/boot/{name}",
-        dependencies=[Depends(require_token)],
+        dependencies=[Depends(require_auth)],
         include_in_schema=False,
     )
     async def upload_boot_artifact(name: str, request: Request) -> dict[str, object]:

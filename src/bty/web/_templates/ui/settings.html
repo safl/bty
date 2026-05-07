@@ -7,19 +7,17 @@
 <div class="card mb-4">
     <div class="card-body">
         <h2 class="h5 mb-3"><i class="bi bi-shield-lock me-2"></i>Authentication</h2>
-        <p class="text-muted">
+        <p class="text-muted mb-0">
             bty-web is gated by the OS password of the
             <code>{{ service_user }}</code> account. To rotate the credential,
             run <code>sudo passwd {{ service_user }}</code> on the server.
-            Existing sessions stay valid until they expire or you log them out
-            below.
+            Sessions are server-signed cookies (Starlette's
+            <code>SessionMiddleware</code>) with a sliding 7-day TTL. To
+            invalidate every existing session in one shot, rotate the
+            session secret with
+            <code>sudo rm /var/lib/bty/session-secret &amp;&amp; sudo systemctl
+            restart bty-web</code> and reboot once.
         </p>
-        <form action="/ui/settings/revoke-sessions" method="post"
-              onsubmit="return confirm('Revoke every active session (CLI tokens + browsers)? Everyone will need to log in again.');">
-            <button type="submit" class="btn btn-warning">
-                <i class="bi bi-x-circle me-1"></i>Revoke all sessions
-            </button>
-        </form>
     </div>
 </div>
 

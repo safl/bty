@@ -3,9 +3,10 @@
 Use FastAPI's ``TestClient`` against an app constructed via
 :func:`bty.web._app.create_app` with a ``tmp_path``-backed SQLite.
 No monkeypatching of module-level globals; each test gets its own
-isolated app + db. The ``app_client`` fixture seeds an active
-session row directly (skipping PAM) and exposes the bearer for
-authed test requests.
+isolated app + db. The ``app_client`` fixture drives ``POST /ui/login``
+with PAM monkeypatched to always succeed, captures the resulting
+session cookie, and exposes it via ``AUTH`` for tests that explicitly
+attach it.
 """
 
 from __future__ import annotations
@@ -18,25 +19,25 @@ import pytest
 from fastapi.testclient import TestClient
 
 from bty.web._app import create_app
-from bty.web._db import issue_session, open_db
 
 TEST_SERVICE_USER = "bty-test"
+TEST_SECRET_KEY = "test-secret-not-for-prod-use"
 
-# Mutated by the ``app_client`` fixture: each test gets a freshly
-# generated session token seeded into the test DB, and ``AUTH`` is
-# rewritten in place as a cookies dict so existing tests doing
-# ``cookies=AUTH`` keep working without per-test changes.
+# Mutated by the ``app_client`` fixture: tests authenticate via
+# ``cookies=AUTH`` (a dict like ``{"bty-token": "..."}``); requests
+# without the cookie hit the real auth dep and 401.
 AUTH: dict[str, str] = {}
 
 
 @pytest.fixture
-def app_client(tmp_path: Path) -> Iterator[TestClient]:
+def app_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     """Yield a TestClient against an isolated bty-web app.
 
-    A session row is seeded directly (no ``/ui/login`` call, so PAM
-    never runs against the test runner's user) and exposed via the
-    module-level ``AUTH`` dict (cookies form: ``{"bty-token":
-    "..."}``).
+    PAM is monkeypatched to always succeed; the fixture POSTs
+    ``/ui/login`` once to mint a real session cookie, captures it for
+    ``cookies=AUTH``, then clears the client's sticky cookies so each
+    test opts in to authentication explicitly via ``cookies=AUTH`` (or
+    omits it to test the unauthed path).
     """
     state = tmp_path / "state.db"
     image_root = tmp_path / "images"
@@ -52,18 +53,32 @@ def app_client(tmp_path: Path) -> Iterator[TestClient]:
     app = create_app(
         state_path=state,
         service_user=TEST_SERVICE_USER,
+        secret_key=TEST_SECRET_KEY,
         image_root=image_root,
         boot_root=boot_root,
     )
-    with open_db(state) as conn:
-        token, _ = issue_session(conn, label="pytest")
-    AUTH.clear()
-    AUTH["bty-token"] = token
-    try:
-        with TestClient(app) as client:
-            yield client
-    finally:
+
+    import pamela
+
+    monkeypatch.setattr(pamela, "authenticate", lambda *a, **kw: True)
+
+    with TestClient(app) as client:
+        r = client.post(
+            "/ui/login",
+            data={"password": "pytest-password"},
+            follow_redirects=False,
+        )
+        assert r.status_code == 303, r.text
+        cookie_value = r.cookies.get("bty-token")
+        assert cookie_value is not None
         AUTH.clear()
+        AUTH["bty-token"] = cookie_value
+        # Drop sticky cookies so unauthed-path tests aren't accidentally authed.
+        client.cookies.clear()
+        try:
+            yield client
+        finally:
+            AUTH.clear()
 
 
 # ---------- open endpoints (no auth) ----------------------------------------
@@ -373,15 +388,12 @@ def test_list_images_returns_files_under_image_root(
     app = create_app(
         state_path=state,
         service_user=TEST_SERVICE_USER,
+        secret_key=TEST_SECRET_KEY,
         image_root=image_root,
     )
-    with open_db(state) as conn:
-        token, _ = issue_session(conn, label="pytest")
     with TestClient(app) as client:
-        # ``/images`` is open after the TUI-on-PXE prerequisite; no
-        # need to attach the cookie. The fact this fixture seeds a
-        # session is leftover from when listing was protected.
-        del token
+        # ``/images`` is open (the TUI-on-PXE flow needs to enumerate
+        # without auth), so no session-cookie setup needed.
         r = client.get("/images")
 
     assert r.status_code == 200

@@ -14,18 +14,17 @@ import pytest
 from fastapi.testclient import TestClient
 
 from bty.web._app import create_app
-from bty.web._auth import SESSION_COOKIE
-from bty.web._db import issue_session, open_db
 
 TEST_SERVICE_USER = "ui-test-user"
+TEST_SECRET_KEY = "test-secret-not-for-prod-use"
 
 # Mutated by the fixture so tests calling the API with
-# ``cookies=AUTH`` get the freshly-seeded session token.
+# ``cookies=AUTH`` get the cookie they need.
 AUTH: dict[str, str] = {}
 
 
 @pytest.fixture
-def client(tmp_path: Path) -> Iterator[TestClient]:
+def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     image_root = tmp_path / "images"
     image_root.mkdir()
     (image_root / "demo.qcow2").write_bytes(b"\0" * 16)
@@ -33,33 +32,41 @@ def client(tmp_path: Path) -> Iterator[TestClient]:
     app = create_app(
         state_path=state,
         service_user=TEST_SERVICE_USER,
+        secret_key=TEST_SECRET_KEY,
         image_root=image_root,
     )
-    with open_db(state) as conn:
-        token, _ = issue_session(conn, label="ui-pytest")
-    AUTH.clear()
-    AUTH["bty-token"] = token
+
+    import pamela
+
+    monkeypatch.setattr(pamela, "authenticate", lambda *a, **kw: True)
+
     # ``follow_redirects=False`` so we can assert on 303 hops.
-    try:
-        with TestClient(app, follow_redirects=False) as c:
-            # Stash the seeded token on the client so ``_login`` can
-            # set the cookie without hitting /ui/login (which would
-            # call PAM against the test runner's user).
-            c.__dict__["_bty_session_token"] = token
-            yield c
-    finally:
+    with TestClient(app, follow_redirects=False) as c:
+        # Drive /ui/login once with PAM monkeypatched so we have a
+        # real session cookie value tests can re-attach via
+        # ``cookies=AUTH``. Don't leave it sticky on the client -
+        # tests opt in by passing ``cookies=AUTH`` (matches the
+        # ``_login(client)`` helper below for tests that want the
+        # sticky form).
+        r = c.post("/ui/login", data={"password": "x"}, follow_redirects=False)
+        assert r.status_code == 303, r.text
+        cookie_value = r.cookies.get("bty-token")
+        assert cookie_value is not None
         AUTH.clear()
+        AUTH["bty-token"] = cookie_value
+        c.cookies.clear()
+        try:
+            yield c
+        finally:
+            AUTH.clear()
 
 
 def _login(client: TestClient) -> None:
-    """Set the session cookie so authed UI pages render.
-
-    We skip the real ``/ui/login`` POST so PAM never runs in tests;
-    tests that need to exercise the login flow itself mock
-    ``pamela.authenticate`` and call /ui/login explicitly.
-    """
-    token = client.__dict__["_bty_session_token"]
-    client.cookies.set(SESSION_COOKIE, token)
+    """Make subsequent requests on ``client`` carry the authed
+    session cookie. The fixture has already minted one via /ui/login;
+    we just attach it sticky so tests don't have to repeat
+    ``cookies=AUTH`` on every call."""
+    client.cookies.set("bty-token", AUTH["bty-token"])
 
 
 # ---------- entry / redirects ----------------------------------------------
@@ -105,7 +112,7 @@ def test_ui_login_invalid_password_re_renders_with_error(client: TestClient) -> 
         r = client.post("/ui/login", data={"password": "wrong"})
     assert r.status_code == 200
     assert "Invalid password" in r.text
-    assert SESSION_COOKIE not in client.cookies
+    assert "bty-token" not in client.cookies
 
 
 def test_ui_login_valid_password_sets_cookie_and_redirects(client: TestClient) -> None:
@@ -115,7 +122,7 @@ def test_ui_login_valid_password_sets_cookie_and_redirects(client: TestClient) -
         r = client.post("/ui/login", data={"password": "hunter2"})
     assert r.status_code == 303
     assert r.headers["location"] == "/ui/dashboard"
-    assert SESSION_COOKIE in client.cookies
+    assert "bty-token" in client.cookies
 
 
 def test_ui_logout_clears_cookie(client: TestClient) -> None:
@@ -125,7 +132,7 @@ def test_ui_logout_clears_cookie(client: TestClient) -> None:
     assert r.headers["location"] == "/ui/login"
     # The Set-Cookie header carries an empty value + Max-Age=0.
     set_cookie = r.headers.get("set-cookie", "")
-    assert SESSION_COOKIE in set_cookie
+    assert "bty-token" in set_cookie
 
 
 # ---------- pages (auth'd) --------------------------------------------------
@@ -311,24 +318,10 @@ def test_ui_settings_page_renders(client: TestClient) -> None:
     assert "Authentication" in body
     assert "passwd" in body  # the "rotate the OS password" hint
     assert "PXE proxy-DHCP" in body
-    # Forms post to the right routes.
-    assert 'action="/ui/settings/revoke-sessions"' in body
+    # Only one form on the Settings page now (PXE activate); the
+    # SessionMiddleware swap removed the Revoke-sessions card since
+    # invalidation now happens via secret-key rotation, not a button.
     assert 'action="/ui/settings/pxe-activate"' in body
-
-
-def test_ui_settings_revoke_all_sessions_kills_active_logins(client: TestClient) -> None:
-    """``Revoke all sessions`` empties the sessions table; the cookie
-    presented next becomes a 401 / redirect to /ui/login."""
-    _login(client)
-    # Sanity: cookie works.
-    assert client.get("/machines").status_code == 200
-    r = client.post("/ui/settings/revoke-sessions")
-    assert r.status_code == 200
-    assert "Revoked" in r.text
-    # The cookie's session row is gone now: API + bearer header both
-    # 401 (the cookie's plaintext is no longer in the DB).
-    assert client.get("/machines").status_code == 401
-    assert client.get("/machines", cookies=AUTH).status_code == 401
 
 
 def test_ui_settings_pxe_activate_invokes_helper(client: TestClient) -> None:

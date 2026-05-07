@@ -24,11 +24,15 @@ web = [
     "jinja2>=3.1",
     # Required by FastAPI's ``Form()`` parsing for the bty-web UI.
     "python-multipart>=0.0.9",
-    # PAM password verification for /auth/login. Pure-Python ctypes
+    # PAM password verification for /ui/login. Pure-Python ctypes
     # wrapper around libpam (used by JupyterHub); libpam-modules ships
     # the setuid unix_chkpwd helper that does the privileged shadow
     # read so the bty service user stays unprivileged.
     "pamela>=1.1",
+    # Required by Starlette's SessionMiddleware to sign the session
+    # cookie. Pulled in as a transitive of fastapi sometimes; pin
+    # explicitly so the cookie path can't disappear on a slim install.
+    "itsdangerous>=2.1",
 ]
 all = [
     "textual>=0.80",
@@ -37,6 +41,7 @@ all = [
     "jinja2>=3.1",
     "python-multipart>=0.0.9",
     "pamela>=1.1",
+    "itsdangerous>=2.1",
 ]
 
 [project.scripts]

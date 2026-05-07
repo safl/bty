@@ -10,17 +10,13 @@ State lives at ``$BTY_STATE_DIR/state.db`` (default
 
 from __future__ import annotations
 
-import hashlib
 import os
-import secrets
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 DEFAULT_STATE_DIR = Path("/var/lib/bty")
-DEFAULT_SESSION_TTL = timedelta(days=30)
 
 
 def default_state_path() -> Path:
@@ -48,14 +44,6 @@ CREATE TABLE IF NOT EXISTS machines (
     last_workflow_output_path TEXT,    -- on-disk dir of the cijoe run
     created_at                TEXT NOT NULL,
     updated_at                TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS sessions (
-    token_hash   TEXT PRIMARY KEY,    -- sha256 hex of the bearer; plaintext never persisted
-    created_at   TEXT NOT NULL,
-    expires_at   TEXT NOT NULL,       -- ISO; expired rows ignored on lookup
-    last_used_at TEXT,
-    label        TEXT                 -- optional UA / device hint set at login
 );
 """
 
@@ -103,95 +91,3 @@ def open_db(path: Path) -> Iterator[sqlite3.Connection]:
         yield conn
     finally:
         conn.close()
-
-
-# ---------- session helpers -------------------------------------------------
-
-
-def _hash_token(token: str) -> str:
-    return hashlib.sha256(token.encode("utf-8")).hexdigest()
-
-
-def _now() -> datetime:
-    return datetime.now(UTC)
-
-
-def issue_session(
-    conn: sqlite3.Connection,
-    *,
-    ttl: timedelta = DEFAULT_SESSION_TTL,
-    label: str | None = None,
-) -> tuple[str, datetime]:
-    """Generate a new opaque bearer token, persist its hash, return ``(token, expires_at)``.
-
-    Plaintext is returned to the caller exactly once - nothing in the
-    DB can recover it, only verify a presented value via
-    :func:`find_active_session`.
-    """
-    token = secrets.token_urlsafe(32)
-    now = _now()
-    expires = now + ttl
-    conn.execute(
-        "INSERT INTO sessions(token_hash, created_at, expires_at, last_used_at, label) "
-        "VALUES (?, ?, ?, NULL, ?)",
-        (_hash_token(token), now.isoformat(), expires.isoformat(), label),
-    )
-    conn.commit()
-    return token, expires
-
-
-def find_active_session(conn: sqlite3.Connection, token: str) -> bool:
-    """Return True if ``token`` matches an unexpired session row.
-
-    Updates ``last_used_at`` on the matched row (best-effort; not
-    fatal if the connection is busy).
-    """
-    h = _hash_token(token)
-    now = _now().isoformat()
-    row = conn.execute(
-        "SELECT 1 FROM sessions WHERE token_hash = ? AND expires_at > ?",
-        (h, now),
-    ).fetchone()
-    if row is None:
-        return False
-    try:
-        conn.execute(
-            "UPDATE sessions SET last_used_at = ? WHERE token_hash = ?",
-            (now, h),
-        )
-        conn.commit()
-    except sqlite3.OperationalError:
-        # Concurrent locker - the session is still valid; skip the
-        # last_used_at touch rather than fail auth.
-        pass
-    return True
-
-
-def revoke_session(conn: sqlite3.Connection, token: str) -> bool:
-    """Delete the row matching ``token``; return True if a row was deleted."""
-    cur = conn.execute("DELETE FROM sessions WHERE token_hash = ?", (_hash_token(token),))
-    conn.commit()
-    return cur.rowcount > 0
-
-
-def revoke_all_sessions(conn: sqlite3.Connection) -> int:
-    """Delete every session row; return the number deleted."""
-    cur = conn.execute("DELETE FROM sessions")
-    conn.commit()
-    return cur.rowcount
-
-
-def purge_expired_sessions(conn: sqlite3.Connection) -> int:
-    """Delete rows whose ``expires_at`` is in the past; return the count."""
-    cur = conn.execute("DELETE FROM sessions WHERE expires_at <= ?", (_now().isoformat(),))
-    conn.commit()
-    return cur.rowcount
-
-
-def has_active_sessions(conn: sqlite3.Connection) -> bool:
-    """True if any unexpired session row exists."""
-    row = conn.execute(
-        "SELECT 1 FROM sessions WHERE expires_at > ? LIMIT 1",
-        (_now().isoformat(),),
-    ).fetchone()
-    return row is not None
