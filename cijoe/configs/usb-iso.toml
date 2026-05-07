@@ -1,0 +1,29 @@
+# bty USB live appliance (live-build iso-hybrid) - build configuration
+#
+# Drives Debian's live-build to produce a hybrid ISO that boots both
+# from CD media and from a USB stick (BIOS + UEFI). Operators write
+# the resulting ``bty-usb-x86_64.iso`` to a stick with their existing
+# tooling (``dd``, Balena Etcher, Rufus) or drop it onto a Ventoy
+# stick alongside other rescue ISOs.
+#
+# This is the M19 replacement for the legacy ``usb-x86`` cloud-init
+# bake. Both paths coexist while the live-build path is being proven;
+# Phase 5 of M19 retires the cloud-init path and frees up the
+# ``usb-x86`` variant name.
+#
+# Usage:
+#   cijoe tasks/usb.yaml --config configs/usb-iso.toml --monitor
+# (or via the Makefile dispatcher: ``make build VARIANT=usb-iso``)
+
+[bty]
+variant = "usb-iso"
+hostname = "bty-usb"
+timezone = "UTC"
+
+[cijoe.workflow]
+fail_fast = true
+
+# Where the published artifact lands. Mirrors the live-x86 / usb-x86 /
+# server-x86 variants' default so all images live under one tree.
+[system-imaging.images.bty-usb-x86_64-iso]
+publish.dir = "{{ local.env.HOME }}/system_imaging/disk"

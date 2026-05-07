@@ -441,6 +441,38 @@ Landed after the original 1.0 list:
     Bearer scheme, and the custom `sessions` SQLite table. Replaced
     with Starlette's `SessionMiddleware` (server-signed cookie, no
     DB hop). Net ~760 LOC deleted with no browser-flow regression.
+19. **[planned]** Port `usb-x86` from cloud-init + `overlayroot` to
+    live-build. The current path stitches a stock Debian cloud
+    image, an ext4 rootfs, and the `overlayroot` package's
+    initramfs hook; that hook is fragile across kernel / hardware
+    combos (kernel panic on GMKtec MiniBoxXS, kernel
+    6.12.85+deb13-amd64). live-boot's SquashFS + tmpfs overlay is
+    the canonical Debian path for ephemeral live media and is
+    already what `live-x86` uses. Phases:
+
+    1. Add an `iso-hybrid` output target to the existing live-build
+       config (parallel to the current `--binary-images netboot`
+       output). Output: `bty-usb.iso`. Most of the chroot is shared
+       with `live-x86` - this is genuinely a packaging variant.
+    2. Make `bty-tui-on-tty1.service` graceful when no `bty.server`
+       / `bty.mac` is on the kernel cmdline: scan a local catalog
+       instead of phoning a remote server. Same service, two modes
+       (PXE-driven remote, USB-driven local).
+    3. Catalog auto-discovery: `bty` learns to scan visible exFAT
+       partitions for `*.img.zst` (or a sentinel file) rather than
+       requiring a `BTY_IMAGES`-labelled partition. Existing
+       `BTY_IMAGES`-labelled sticks continue to work as a special
+       case.
+    4. Document delivery options: `bty-usb.iso` is a stock
+       hybrid ISO. Operators write it with their existing tooling
+       (`dd`, Balena Etcher, Rufus) or drop it onto an existing
+       Ventoy stick alongside their other rescue ISOs. The
+       project does not ship a stick-writing tool of its own.
+    5. Retire the `overlayroot` dependency,
+       `bty-media/auxiliary/cloudinit-base-usb.user`,
+       `bty-media/rootfs/usb/`, and the cijoe usb-bake scripts.
+       `usb-x86` stops being a separate cloud-init bake path and
+       becomes a packaging variant of the live-build output.
 
 ## Preserved from legacy bty
 
