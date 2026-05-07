@@ -1,12 +1,14 @@
 # bty-media
 
-Source content for the bty appliance images. Three variants:
+Source content for the bty appliance images. Four variants:
 
 - **USB live image** (`VARIANT=usb-x86`) - bootable USB carrying the bty
-  runtime and a bundled image set, for the direct-flash workflow.
-  Lands in milestone 2.
-- **Server image** (`VARIANT=server-x86`) - installable disk image for the
-  bty provisioning server (`bty-web` + PXE boot stack).
+  runtime and an exFAT `BTY_IMAGES` partition for cooked images, for
+  the direct-flash workflow.
+- **Server image, x86_64** (`VARIANT=server-x86`) - installable disk
+  image for the bty provisioning server (`bty-web` + PXE boot stack).
+- **Server image, Raspberry Pi 4/5** (`VARIANT=server-rpi`) - same
+  appliance role on arm64 for SD-card delivery to a Pi.
 - **Network-flash live env** (`VARIANT=live-x86`) - kernel + initrd +
   squashfs that PXE clients chain into. Carries the bty CLI plus a
   `bty-flash-on-boot.service` oneshot that reads `bty.*` parameters
@@ -20,7 +22,7 @@ tasks, scripts) that consumes this content lives at `cijoe/` at the
 repo root.
 
 Operators drive everything via the top-level Makefile:
-`make build VARIANT=usb-x86|server-x86|live-x86`.
+`make build VARIANT=usb-x86|server-x86|server-rpi|live-x86`.
 
 ## Layout
 
@@ -44,28 +46,44 @@ Operators drive everything via the top-level Makefile:
 From the repo root:
 
 ```
-make build VARIANT=usb-x86|server-x86|live-x86
+make build VARIANT=usb-x86|server-x86|server-rpi|live-x86
 ```
 
-runs `cijoe tasks/build.yaml --monitor -c configs/$(VARIANT).toml`,
-which executes four steps:
+dispatches to one of three cijoe task files. The Makefile picks the
+right one based on the variant:
 
-1. **`bty_wheel_stage`** (server variant only) - builds a `bty-lab`
-   wheel from the parent repo via `uv build` and stages it under
-   `rootfs/server/opt/bty/`. The wheel is base64-inlined into
-   cloud-init by the next step and `pip install`ed into a system
-   venv at `/opt/bty/venv` during the bake.
-2. **`gen_userdata`** - assembles the cloud-init userdata file by
-   inlining files under `rootfs/common/` and `rootfs/<role>/` as
-   `write_files` entries on top of `auxiliary/cloudinit-base-<role>.user`
-   (variant -> role: arch suffix stripped).
-3. **`diskimage_build`** - downloads the Debian 13 cloud image,
-   resizes the qcow2 boot disk, builds the cloud-init seed.iso, and
-   boots QEMU. cloud-init provisions the system and powers off; the
-   baked qcow2 is compacted via `qemu-img convert -c`.
-4. **`img_zst_publish`** - converts the qcow2 to raw and
-   zstd-compresses the result into a `dd`-able `.img.zst`, alongside a
-   sha256sum.
+- `usb-x86` and `server-x86` -> `cijoe tasks/build.yaml` (cloud-init
+  bake of a Debian cloud image inside QEMU). Steps:
+
+  1. **`bty_wheel_stage`** (server only) - builds a `bty-lab` wheel
+     from the parent repo via `uv build` and stages it under
+     `rootfs/server/opt/bty/`. The wheel is base64-inlined into
+     cloud-init by the next step and `pip install`ed into a system
+     venv at `/opt/bty/venv` during the bake.
+  2. **`gen_userdata`** - assembles the cloud-init userdata file by
+     inlining files under `rootfs/common/` and `rootfs/<role>/` as
+     `write_files` entries on top of
+     `auxiliary/cloudinit-base-<role>.user` (variant -> role: arch
+     suffix stripped).
+  3. **`diskimage_build`** - downloads the Debian 13 cloud image,
+     resizes the qcow2 boot disk, builds the cloud-init seed.iso,
+     and boots QEMU. cloud-init provisions the system and powers
+     off; the baked qcow2 is compacted via `qemu-img convert -c`.
+  4. **`img_zst_publish`** - converts the qcow2 to raw and
+     zstd-compresses the result into a `dd`-able `.img.zst`,
+     alongside a sha256sum.
+
+- `server-rpi` -> `cijoe tasks/build-rpi.yaml`. Customises Raspberry
+  Pi OS Lite arm64 in place: download upstream image, grow + losetup-
+  mount, drop the `rootfs/server/` overlay, chroot via
+  `qemu-aarch64-static` to install packages + create users + install
+  the bty-lab venv, then re-compress to `.img.zst`. Two steps:
+  `bty_wheel_stage` then `rpi_image_customize`.
+
+- `live-x86` -> `cijoe tasks/live.yaml`. Drives Debian's `live-build`
+  (debootstrap + mksquashfs + mkinitramfs) directly on the build
+  host - no QEMU, no cloud-init. Output is the kernel + initrd +
+  squashfs trio.
 
 ## Build prerequisites
 
@@ -106,19 +124,24 @@ Live variant:
 
 ## Status
 
-All three variants are shipping. Each tagged release publishes the
-finished artifacts to the [GitHub releases page](https://github.com/safl/bty/releases),
-so most operators never run this build pipeline themselves - it
-exists for contributors who want to modify the image.
+All four variants build. usb-x86, server-x86, and live-x86 ship with
+every tagged release on the
+[GitHub releases page](https://github.com/safl/bty/releases) and are
+covered by the end-to-end PXE chain test in CI. server-rpi is
+experimental: the build runs in CI under
+``continue-on-error: true`` and its artifact is available on the
+workflow run page, but it isn't promoted to the public Release page
+yet. Most operators never run this build pipeline themselves -
+``bty-media/`` exists for contributors who want to modify the image.
 
-- **USB variant.** The cooked `.img.zst` boots into a Debian live
+- **usb-x86.** The cooked `.img.zst` boots into a Debian live
   environment with `overlayroot` (RAM-tmpfs overlay over a read-only
   rootfs), the `bty` CLI + TUI installed into `/opt/bty/venv`, and an
   exFAT `BTY_IMAGES` partition for cooked images. End-to-end use
   case in [Walkthrough: USB](../docs/src/walkthrough-usb.md).
-- **Live variant.** Kernel + initrd + squashfs trio used by PXE
-  clients. The chroot ships `bty-flash-on-boot.service` (oneshot,
-  after `network-online.target`); it reads `bty.server=`, `bty.mac=`,
+- **live-x86.** Kernel + initrd + squashfs trio used by PXE clients.
+  The chroot ships `bty-flash-on-boot.service` (oneshot, after
+  `network-online.target`); it reads `bty.server=`, `bty.mac=`,
   `bty.image_url=`, and `bty.provisioning=` from `/proc/cmdline`,
   downloads the image, runs `bty flash --yes`, signals
   `POST ${server}/pxe/${mac}/done`, and reboots. Without those
@@ -127,8 +150,8 @@ exists for contributors who want to modify the image.
   The end-to-end PXE chain (server hands a per-MAC iPXE plan, client
   loads the live trio, flashes a target disk, signals done) is
   exercised by `make test-pxe` and runs in CI on every push.
-- **Server variant.** Bootable Debian cloud-image hosting `bty-web`
-  with single-tenant PAM auth: the `bty` service user is the sole
+- **server-x86.** Bootable Debian cloud-image hosting `bty-web` with
+  single-tenant PAM auth: the `bty` service user is the sole
   principal, default credential `bty / bty`, rotated on the appliance
   with `sudo passwd bty`. An `odus` admin user is also baked in (with
   passwordless sudo) for SSH-side maintenance. The server image's
@@ -137,6 +160,13 @@ exists for contributors who want to modify the image.
   `http://<ip>:8080/ui`. The dnsmasq PXE block is shipped commented
   out and activated from the browser UI's Settings page (no shell
   edits required).
+- **server-rpi.** Same appliance role on arm64, delivered as an SD-card
+  image for Raspberry Pi 4 / 5. Built by mounting the upstream
+  Raspberry Pi OS Lite arm64 image via losetup and customising it in a
+  qemu-aarch64-static chroot (no QEMU full-system bake): apt install,
+  bty + odus user creation, bty-lab venv install, service enables.
+  Same `bty / bty` PAM credential and `odus / odus` SSH admin as the
+  x86 server image; same `bty-web-init.service` first-boot.
 
   ### Operator first-boot
 
