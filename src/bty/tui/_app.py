@@ -4,12 +4,28 @@ Targeted at interactive use from a live environment (serial console, SSH
 session, minimal recovery image). Exposes the same operations as the
 ``bty`` CLI in a navigable, two-pane form.
 
+Two image-source modes:
+
+- **Local** (default). Scans an image-root directory (USB live env's
+  ``BTY_IMAGES`` partition or any local path).
+- **Remote** (``--server URL``). Fetches the catalog from a running
+  ``bty-web`` over HTTP; selecting an image streams it from the server
+  straight to the target disk via ``flash.probe_image_url`` /
+  ``execute_plan``. This is the path the TUI-on-PXE flow uses: an
+  unknown MAC PXE-boots, lands at the live env in interactive mode,
+  and the operator picks an image from the server's catalog without
+  prior server-side configuration.
+
 Requires the ``[tui]`` install extra (pulls in textual).
 """
 
 from __future__ import annotations
 
+import json
 import os
+import urllib.error
+import urllib.request
+from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar
 
@@ -29,6 +45,66 @@ from textual.widgets import (
 
 import bty
 from bty import disks, flash, images
+
+
+@dataclass
+class _TuiImage:
+    """Unified representation of a TUI catalog row.
+
+    Either ``path`` (local) or ``url`` (remote) is set. Used as the
+    common shape between the local image-root scan and the remote
+    ``GET /images`` catalog so the rest of the TUI doesn't have to
+    branch.
+    """
+
+    name: str
+    fmt: str | None
+    size_bytes: int
+    path: Path | None = None
+    url: str | None = None
+
+
+def fetch_remote_catalog(server_url: str, *, timeout: float = 30.0) -> list[_TuiImage]:
+    """``GET <server_url>/images`` and return ``_TuiImage`` rows.
+
+    Free function so unit tests can mock ``urllib.request.urlopen``
+    without instantiating a textual ``App``. Raises
+    ``urllib.error.URLError`` / ``ValueError`` for surface-level
+    problems; the caller (the TUI's image-pane refresh) catches and
+    surfaces them in the status bar.
+    """
+    base = server_url.rstrip("/")
+    catalog_url = f"{base}/images"
+    with urllib.request.urlopen(catalog_url, timeout=timeout) as resp:
+        payload = json.loads(resp.read().decode("utf-8"))
+    if not isinstance(payload, list):
+        raise ValueError(f"unexpected /images payload from {server_url}: not a list")
+    out: list[_TuiImage] = []
+    for entry in payload:
+        if not isinstance(entry, dict):
+            continue
+        name = str(entry.get("name", ""))
+        if not name:
+            continue
+        out.append(
+            _TuiImage(
+                name=name,
+                fmt=entry.get("format") or None,
+                size_bytes=int(entry.get("size_bytes") or 0),
+                url=f"{base}/images/{name}",
+            )
+        )
+    return out
+
+
+def post_pxe_done(server_url: str, mac: str, *, timeout: float = 10.0) -> None:
+    """Best-effort ``POST <server>/pxe/{mac}/done`` after a successful
+    remote flash. Silent on success; raises ``urllib.error.URLError``
+    on transport failure (caller decides whether to surface)."""
+    base = server_url.rstrip("/")
+    req = urllib.request.Request(f"{base}/pxe/{mac}/done", method="POST")
+    with urllib.request.urlopen(req, timeout=timeout):
+        pass
 
 
 class FlashConfirmScreen(ModalScreen[bool]):
@@ -230,17 +306,31 @@ class BtyTui(App[None]):
     }
     """
 
-    def __init__(self, image_root: Path | None = None) -> None:
+    def __init__(
+        self,
+        image_root: Path | None = None,
+        *,
+        server_url: str | None = None,
+        mac: str | None = None,
+    ) -> None:
         super().__init__()
+        self._server_url: str | None = server_url.rstrip("/") if server_url else None
+        self._mac: str | None = mac
         self._image_root: Path = image_root or images.default_image_root()
-        self._images_by_key: dict[str, images.Image] = {}
+        # Unified shape so the row-selected-> flash path doesn't branch.
+        self._images_by_key: dict[str, _TuiImage] = {}
         self._disks_by_key: dict[str, dict[str, object]] = {}
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
+        source_label = (
+            f"Images @ {self._server_url}/images"
+            if self._server_url is not None
+            else f"Images @ {self._image_root}"
+        )
         with Horizontal(id="panes"):
             with Vertical(classes="pane"):
-                yield Static(f"Images @ {self._image_root}", classes="pane-title")
+                yield Static(source_label, classes="pane-title")
                 yield DataTable(id="images_table", cursor_type="row")
             with Vertical(classes="pane"):
                 yield Static("Disks", classes="pane-title")
@@ -260,18 +350,46 @@ class BtyTui(App[None]):
         table.clear(columns=True)
         table.add_columns("Name", "Format", "Size (B)")
         self._images_by_key.clear()
+
         try:
-            entries = images.list_images(self._image_root)
+            entries = self._load_images()
         except OSError as exc:
             self._set_status(f"Error reading images: {exc}")
             return
-        if not entries:
-            self._set_status(f"No images under {self._image_root}; press R to refresh.")
+        except (urllib.error.URLError, ValueError) as exc:
+            self._set_status(f"Error fetching catalog: {exc}")
             return
-        for img in entries:
-            key = str(img.path)
-            self._images_by_key[key] = img
-            table.add_row(img.name, img.format or "?", str(img.size_bytes), key=key)
+
+        if not entries:
+            source = self._server_url or str(self._image_root)
+            self._set_status(f"No images at {source}; press R to refresh.")
+            return
+        for tui_img in entries:
+            # Remote rows use the URL as their key (also passed verbatim to
+            # ``flash.probe_image_url`` later); local rows use the path string.
+            key = tui_img.url if tui_img.url is not None else str(tui_img.path)
+            self._images_by_key[key] = tui_img
+            table.add_row(
+                tui_img.name,
+                tui_img.fmt or "?",
+                str(tui_img.size_bytes),
+                key=key,
+            )
+
+    def _load_images(self) -> list[_TuiImage]:
+        """Load the catalog from either a remote bty-web or the local
+        image root, returning a unified ``_TuiImage`` list."""
+        if self._server_url is not None:
+            return fetch_remote_catalog(self._server_url)
+        return [
+            _TuiImage(
+                name=img.name,
+                fmt=img.format,
+                size_bytes=img.size_bytes,
+                path=img.path,
+            )
+            for img in images.list_images(self._image_root)
+        ]
 
     def _populate_disks(self) -> None:
         table = self.query_one("#disks_table", DataTable)
@@ -308,8 +426,12 @@ class BtyTui(App[None]):
         image, disk_path = selection
 
         try:
-            image_info = flash.probe_image(image.path)
-        except FileNotFoundError as exc:
+            if image.url is not None:
+                image_info = flash.probe_image_url(image.url)
+            else:
+                assert image.path is not None  # local row guarantees a path
+                image_info = flash.probe_image(image.path)
+        except (FileNotFoundError, ValueError) as exc:
             self._set_status(f"Image probe failed: {exc}")
             return
 
@@ -323,13 +445,23 @@ class BtyTui(App[None]):
             return
 
         success = await self.push_screen_wait(FlashStatusScreen(plan))
+        if success and self._server_url is not None and self._mac is not None:
+            # Remote flow: signal completion so the server's
+            # ``last_flashed_at`` is updated. Best-effort - a failed
+            # signal doesn't undo a successful flash.
+            try:
+                post_pxe_done(self._server_url, self._mac)
+            except urllib.error.URLError as exc:
+                self._set_status(f"Flash done but POST /pxe/{self._mac}/done failed: {exc}")
+                self._populate_disks()
+                return
         self._set_status("Flash completed." if success else "Flash failed; see status modal log.")
         # Disks may have new partition tables now; refresh.
         self._populate_disks()
 
     # ---------- helpers ------------------------------------------------------
 
-    def _current_selection(self) -> tuple[images.Image, Path] | None:
+    def _current_selection(self) -> tuple[_TuiImage, Path] | None:
         images_table = self.query_one("#images_table", DataTable)
         disks_table = self.query_one("#disks_table", DataTable)
         if images_table.row_count == 0 or disks_table.row_count == 0:

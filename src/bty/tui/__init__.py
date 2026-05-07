@@ -32,7 +32,27 @@ def main(argv: list[str] | None = None) -> None:
         action="version",
         version=f"bty-tui {bty.__version__}",
     )
-    parser.parse_args(argv)
+    parser.add_argument(
+        "--server",
+        type=str,
+        default=None,
+        help="bty-web server URL (e.g. ``http://server:8080``). When set, "
+        "the TUI fetches the image catalog from the server's "
+        "``GET /images`` and streams images straight from the server "
+        "to the target disk. Without it, the TUI scans a local "
+        "image-root directory.",
+    )
+    parser.add_argument(
+        "--mac",
+        type=str,
+        default=None,
+        help="Self-MAC of this client (e.g. from the live env's "
+        "``bty.mac=`` cmdline param). When set together with "
+        "``--server``, the TUI ``POST``s ``<server>/pxe/<mac>/done`` "
+        "after a successful flash so the server's ``last_flashed_at`` "
+        "is updated.",
+    )
+    args = parser.parse_args(argv)
 
     try:
         from bty.tui._app import BtyTui
@@ -45,4 +65,4 @@ def main(argv: list[str] | None = None) -> None:
         )
         sys.exit(1)
 
-    BtyTui().run()
+    BtyTui(server_url=args.server, mac=args.mac).run()
