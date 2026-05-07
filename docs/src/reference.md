@@ -336,14 +336,14 @@ normalised to lower-case `aa:bb:cc:dd:ee:ff`.
 Machine = {
   "mac": "aa:bb:cc:dd:ee:ff",
   "image": "debian.qcow2" | null,           # null = discovered but unassigned
-  "provisioning_mode": "none" | "cloud-init" | "cijoe",
+  "provisioning_mode": "none" | "cloud-init" | "cijoe" | "cijoe-online",
   "hostname": "..." | null,
   "cijoe_workflow_ref": "..." | null,
   "last_known_good": object | null,
   "discovered_at": "<ISO 8601>" | null,     # first /pxe contact; null if PUT-only
   "last_seen_at":  "<ISO 8601>" | null,     # most recent /pxe contact
   "last_seen_ip":  "203.0.113.42" | null,
-  "boot_policy":   "local" | "flash",       # what /pxe/{mac} returns
+  "boot_policy":   "local" | "flash" | "tui",  # what /pxe/{mac} returns
   "last_flashed_at": "<ISO 8601>" | null,   # set by POST /pxe/{mac}/done
   "last_workflow_run_at":    "<ISO 8601>" | null,
   "last_workflow_status":    "running" | "success" | "failed" | null,
@@ -357,7 +357,8 @@ MachineUpsert = {
   "provisioning_mode": "none" | "cloud-init" | "cijoe" | "cijoe-online",
   "hostname": str | null,
   "cijoe_workflow_ref": str | null,
-  "boot_policy": "local" | "flash"          # default "local"
+  "boot_policy": "local" | "flash" | "tui"  # default "local" on PUT;
+                                            # auto-discovery sets "tui"
 }
 
 ImageEntry = {
