@@ -3,8 +3,9 @@
   bty server appliance
 
   First boot has not yet completed. The bty-web-init unit will
-  rewrite this banner with the URL and bearer token once the
-  oneshot has run. Reboot if you see this on a freshly-imaged disk.
+  rewrite this banner with the browser-UI URL and the default
+  ``bty / bty`` credential once the oneshot has run. Reboot if you
+  still see this banner on a freshly-imaged disk.
 ======================================================================
 
 Debian \n \l

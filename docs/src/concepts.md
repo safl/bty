@@ -18,15 +18,26 @@ target machine's primary disk, selected by the live environment.
 
 ## Provisioning mode
 
-What (if anything) runs on first boot. Three modes:
+What (if anything) configures the deployed system after the bytes
+land. Four modes:
 
 - `none` - no post-flash configuration; reboot into the cooked image
   as-is.
-- `cloud-init` - populate the OS's cloud-init seed (NoCloud datasource);
-  the OS picks it up on first boot.
-- `cijoe` - run a CIJOE workflow that adjusts the deployed system to a
-  known-good state. See the [components](components.md) chapter for the
-  offline (USB live) vs. online (PXE/server) execution modes.
+- `cloud-init` - populate the OS's cloud-init seed (NoCloud datasource)
+  before the target reboots; the OS picks it up on first boot.
+- `cijoe` - run a CIJOE workflow against the freshly-flashed filesystem
+  (mount, edit, unmount) before the target reboots. Constrained to
+  filesystem-level customisation.
+- `cijoe-online` - bty-web only. After the target first-boots into its
+  own OS, `bty-web` runs a CIJOE workflow against the running machine
+  and records the post-workflow state as that machine's known-good
+  baseline. The server, not the image, becomes the source of truth
+  for "what this box should look like."
+
+`bty flash` understands the first three modes (offline,
+filesystem-level). The fourth runs server-side; see the
+[components](components.md) chapter and the
+[reference](reference.md#wire-types) for the wire shape.
 
 ## Disk layout (USB live)
 

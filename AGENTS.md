@@ -7,9 +7,9 @@ automated agents (LLM tool-callers, scripts, CI runners). It complements
 
 ## Scope of stability
 
-- The CLI surface (`bty`, `bty-tui`, `bty-web` console scripts, their
-  flags, exit codes, and `--json` output schemas) is stable within a
-  given `schema_version`.
+- The CLI surface (`bty`, `bty-tui`, `bty-web`, `bty-ctl` console
+  scripts, their flags, exit codes, and `--json` output schemas) is
+  stable within a given `schema_version`.
 - The Python API exposed by `bty` (the modules listed under
   *Reference > Python API* in the docs) is stable within a given
   `bty.__version__` minor release.
