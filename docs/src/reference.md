@@ -190,6 +190,44 @@ updates and CLI output share the same event stream.
 The general exit-code table at the top of this section applies to all
 subcommands.
 
+### `bty-tui [--server URL] [--mac MAC]`
+
+Two-pane terminal UI for picking an image + a target disk and
+flashing. Same flash machinery as the CLI; the TUI is a thin wrapper
+around `bty.flash.execute_plan`.
+
+Two image-source modes:
+
+- **Local** (default). Scans an image-root directory (USB live env's
+  `BTY_IMAGES` partition, or whatever path
+  [`BTY_IMAGE_ROOT`](#environment-variables) points at).
+- **Remote** (`--server URL`). Fetches the catalog from a running
+  `bty-web` via `GET /images`. Selecting an image streams it from
+  the server's `GET /images/{name}` straight to the target disk -
+  no local download. The TUI's pane title shows the server URL so
+  the operator can see at a glance where the catalog comes from.
+
+`--mac MAC` is used together with `--server`: after a successful
+flash the TUI `POST`s `<server>/pxe/<mac>/done` so the server's
+`last_flashed_at` updates. Best-effort - a failed signal surfaces
+in the status bar but doesn't undo the flash.
+
+The TUI-on-PXE flow uses both flags: the live env reads `bty.server`
+and `bty.mac` from `/proc/cmdline` and assembles the matching CLI
+invocation in `/usr/local/sbin/bty-tui-on-tty1`.
+
+### `bty-ctl <login | logout> [--server URL] [...]`
+
+Command-line client for a remote `bty-web` server. Issues a
+`POST /auth/login` with the operator's password and caches the
+returned session token at `~/.config/bty/token` (mode 0600).
+`bty-ctl logout` revokes the cached token via `POST /auth/logout`
+and removes the file.
+
+`--server URL` defaults to `$BTY_SERVER` (see
+[Environment variables](#environment-variables)) which itself
+defaults to `http://localhost:8080`.
+
 ## Configuration
 
 bty resolves a small set of paths and runtime knobs from the

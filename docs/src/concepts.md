@@ -68,3 +68,26 @@ keyed by MAC address that captures: assigned image, provisioning mode,
 optional hostname, references to CIJOE workflows, and (after first boot)
 the post-workflow known-good baseline. The server uses machine records
 to render per-MAC iPXE configurations and to drive online CIJOE runs.
+
+## Boot policy
+
+A field on the [machine record](#machine-record) that decides what
+``GET /pxe/{mac}`` serves the target on every PXE contact. Three
+values:
+
+- `local` - sanboot fallback; the target boots whatever is on its
+  local disk. Stable / production stance, the explicit-PUT default.
+- `flash` - chain the live env in auto-flash mode. The target
+  re-flashes the assigned image on every PXE boot - the per-job CI
+  cadence.
+- `tui` - chain the live env in interactive mode. The target lands
+  at `bty-tui` on tty1 and the operator picks an image from the
+  server's catalog by hand.
+
+The auto-discovery default for unknown MACs is `tui`, so a new box
+PXE-booting against a fresh server appliance becomes a useful TUI
+session immediately - no per-MAC server-side configuration needed.
+
+The completion signal `POST /pxe/{mac}/done` updates `last_flashed_at`
+but never modifies `boot_policy`. Flipping back to `local` after a
+flash is an explicit operator action.
