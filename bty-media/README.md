@@ -1,6 +1,7 @@
 # bty-media
 
-Source content for the bty appliance images. Four variants:
+Source content for the bty appliance images. Four variants in the
+shipping matrix plus one experimental replacement (M19 in PLAN.md):
 
 - **USB live image** (`VARIANT=usb-x86`) - bootable USB carrying the bty
   runtime and an exFAT `BTY_IMAGES` partition for cooked images, for
@@ -14,6 +15,12 @@ Source content for the bty appliance images. Four variants:
   `bty-flash-on-boot.service` oneshot that reads `bty.*` parameters
   from `/proc/cmdline`, fetches the assigned image, runs `bty flash`,
   and reboots.
+- **USB live ISO** (`VARIANT=usb-iso`, *experimental*) - the M19
+  replacement for `usb-x86`. Same content, but built via live-build
+  (`iso-hybrid` output) rather than cloud-init in QEMU. Sidesteps the
+  fragile `overlayroot` initramfs hook on the legacy path. Coexists
+  with `usb-x86` while being proven; phase 6 of M19 retires the
+  cloud-init bake.
 
 This directory holds the **content** baked into the images: cloud-init
 base templates, rootfs trees that live-build / cloud-init fold in,

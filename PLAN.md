@@ -441,7 +441,7 @@ Landed after the original 1.0 list:
     Bearer scheme, and the custom `sessions` SQLite table. Replaced
     with Starlette's `SessionMiddleware` (server-signed cookie, no
     DB hop). Net ~760 LOC deleted with no browser-flow regression.
-19. **[planned]** Port `usb-x86` from cloud-init + `overlayroot` to
+19. **[wip]** Port `usb-x86` from cloud-init + `overlayroot` to
     live-build. The current path stitches a stock Debian cloud
     image, an ext4 rootfs, and the `overlayroot` package's
     initramfs hook; that hook is fragile across kernel / hardware
@@ -450,29 +450,52 @@ Landed after the original 1.0 list:
     the canonical Debian path for ephemeral live media and is
     already what `live-x86` uses. Phases:
 
-    1. Add an `iso-hybrid` output target to the existing live-build
-       config (parallel to the current `--binary-images netboot`
-       output). Output: `bty-usb.iso`. Most of the chroot is shared
-       with `live-x86` - this is genuinely a packaging variant.
-    2. Make `bty-tui-on-tty1.service` graceful when no `bty.server`
-       / `bty.mac` is on the kernel cmdline: scan a local catalog
-       instead of phoning a remote server. Same service, two modes
-       (PXE-driven remote, USB-driven local).
-    3. Catalog auto-discovery: `bty` learns to scan visible exFAT
-       partitions for `*.img.zst` (or a sentinel file) rather than
-       requiring a `BTY_IMAGES`-labelled partition. Existing
-       `BTY_IMAGES`-labelled sticks continue to work as a special
-       case.
-    4. Document delivery options: `bty-usb.iso` is a stock
-       hybrid ISO. Operators write it with their existing tooling
-       (`dd`, Balena Etcher, Rufus) or drop it onto an existing
-       Ventoy stick alongside their other rescue ISOs. The
-       project does not ship a stick-writing tool of its own.
-    5. Retire the `overlayroot` dependency,
+    1. **[done]** Add an `iso-hybrid` output target to the existing
+       live-build config (parallel to the current `--binary-images
+       netboot` output). Output: `bty-usb-x86_64.iso`. Most of the
+       chroot is shared with `live-x86` - this is genuinely a
+       packaging variant. Driven by a new `usb-iso` cijoe variant
+       (`cijoe/configs/usb-iso.toml`, `cijoe/tasks/usb.yaml`,
+       `cijoe/scripts/usb_iso_build.py`); marked experimental in
+       the release.yml media matrix until proven on real hardware.
+    2. **[done]** Make `bty-tui-on-tty1.service` graceful when no
+       `bty.server` / `bty.mac` is on the kernel cmdline: the
+       wrapper script forwards no flags and `bty-tui` falls back
+       to scanning the local image-root. Same service, two modes
+       (PXE-driven remote, USB-driven local). The usb-iso bake
+       sets `bty.mode=interactive` directly via `--bootappend-live`
+       so the existing service fires on USB boot the same way it
+       fires for the PXE-tui flow.
+    3. **[done]** Bake a writable `BTY_IMAGES` exFAT partition
+       into the cooked ISO. Post-process the live-build output:
+       `truncate +4G` to extend the file, `sgdisk
+       --move-second-header` + `--new` to add the partition entry
+       to the GPT, `losetup -fP` + `mkfs.exfat` to format. The
+       single artifact `dd`'s onto a stick with a writable area
+       the operator can drop `*.img.zst` files onto from any host
+       OS - same UX the legacy cloud-init `usb-x86` provided, but
+       baked statically instead of carved by cloud-init runcmd.
+    4. **[done]** First-boot grow + mount.
+       `bty-grow-images-partition.service` extends `BTY_IMAGES` to
+       fill the rest of the stick (only when empty so operator
+       data is preserved; multiple safety gates short-circuit the
+       grow on Ventoy / loopback / netboot / already-grown
+       sticks). `var-lib-bty-images.mount` then mounts the
+       partition RO at `/var/lib/bty/images` so `bty-tui` and the
+       flash flow find it at the default image-root path - no
+       runtime auto-discovery needed.
+    5. Document delivery options: stock hybrid ISO with built-in
+       writable area; operators write it with their existing
+       tooling (`dd`, Balena Etcher, Rufus) or drop it onto an
+       existing Ventoy stick alongside their other rescue ISOs.
+       The project does not ship a stick-writing tool of its own.
+    6. Retire the `overlayroot` dependency,
        `bty-media/auxiliary/cloudinit-base-usb.user`,
        `bty-media/rootfs/usb/`, and the cijoe usb-bake scripts.
        `usb-x86` stops being a separate cloud-init bake path and
        becomes a packaging variant of the live-build output.
+       Gated on the experimental usb-iso build going green on a
+       real tag run.
 
 ## Preserved from legacy bty
 
