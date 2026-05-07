@@ -1,20 +1,23 @@
 doc: |
-  bty network-flash live env build (Phase D-2)
-  ============================================
+  bty network-flash live env build
+  ================================
 
   Builds the kernel + initrd + squashfs that PXE clients chain into
   via the bty server's HTTP boot stack. The chroot carries the bty
-  runtime + a flash-on-boot systemd unit; the iPXE chain (Phase D-3,
-  server side) hands the live env its assignment via kernel command
-  line: ``bty.server=`` ``bty.mac=`` ``bty.image_url=``
-  ``bty.provisioning=``.
+  runtime, ``bty-flash-on-boot.service`` (auto-flash mode), and
+  ``bty-tui-on-tty1.service`` (interactive mode). The server's iPXE
+  chain hands the live env its mode via kernel command line:
+  ``bty.server=``, ``bty.mac=``, plus either ``bty.image_url=`` +
+  ``bty.provisioning=`` (auto-flash, ``boot_policy=flash``) or
+  ``bty.mode=interactive`` (TUI, ``boot_policy=tui``).
 
   Steps:
 
   1. ``bty_wheel_stage`` - builds the bty-lab wheel from the parent
      repo and stages it under
      ``live-build/config/includes.chroot/opt/bty/``. live-build's
-     chroot hook installs it into ``/opt/bty/venv`` during D-2.
+     chroot hook installs it (with the ``[tui]`` extra) into
+     ``/opt/bty/venv``.
   2. ``live_build`` - copies ``live-build/`` into a working dir,
      runs ``lb clean --all && lb build`` (debootstrap, mksquashfs,
      mkinitramfs), and publishes
