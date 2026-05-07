@@ -7,9 +7,9 @@ automated agents (LLM tool-callers, scripts, CI runners). It complements
 
 ## Scope of stability
 
-- The CLI surface (`bty`, `bty-tui`, `bty-web`, `bty-ctl` console
-  scripts, their flags, exit codes, and `--json` output schemas) is
-  stable within a given `schema_version`.
+- The CLI surface (`bty`, `bty-tui`, `bty-web` console scripts,
+  their flags, exit codes, and `--json` output schemas) is stable
+  within a given `schema_version`.
 - The Python API exposed by `bty` (the modules listed under
   *Reference > Python API* in the docs) is stable within a given
   `bty.__version__` minor release.
@@ -171,21 +171,21 @@ detail in `docs/src/reference.md`; quick reference for agents:
 
 **Auth.** Single-tenant PAM against the bty service user (the OS
 account ``bty-web`` runs as; ``bty / bty`` by default on the cooked
-appliance). ``POST /auth/login`` issues an opaque session token
-whose sha256 is persisted in the ``sessions`` table; protected
-routes accept it via ``Authorization: Bearer ...`` (API) or the
-``bty-token`` cookie (UI). ``POST /auth/logout`` revokes. Open
-routes (no token) are reachable by PXE clients which can't carry
-one.
+appliance). ``POST /ui/login`` (form-encoded ``password=...``) PAM-
+checks the password, issues an opaque session token whose sha256
+is persisted in the ``sessions`` table, and sets a ``bty-token``
+cookie on the response. Protected routes look up the cookie value
+via the auth dependency; ``POST /ui/logout`` revokes. Open routes
+(no cookie) are reachable by PXE clients and live-env tooling which
+can't carry one.
 
 **Routes** (all paths case-insensitive on the MAC; the canonical form
 is lower-case `aa:bb:cc:dd:ee:ff`):
 
 | Open | Protected |
 |---|---|
-| `GET /healthz` | `POST /auth/logout` |
-| `GET /version` | `GET /machines` |
-| `POST /auth/login` | `GET /machines/{mac}` |
+| `GET /healthz` | `GET /machines` |
+| `GET /version` | `GET /machines/{mac}` |
 | `GET /pxe/{mac}` | `PUT /machines/{mac}` (body: MachineUpsert) |
 | `POST /pxe/{mac}/done` | `DELETE /machines/{mac}` |
 | `GET /pxe-bootstrap.ipxe` | `PUT /images/{name}` (stream upload) |
@@ -256,7 +256,7 @@ own `cijoe-output/`). Operator drops the SSH key at
 phase).
 
 **Live updates.** `GET /events/machines` is a Server-Sent Events
-stream (auth: same Bearer/cookie dep). Subscribers receive an initial
+stream (auth: same session-cookie dep). Subscribers receive an initial
 `machines-update` event with the rendered `<tbody>` snapshot, then
 one fresh `machines-update` event after every mutation
 (`PUT`/`DELETE` and PXE auto-discovery). Used by the browser UI to

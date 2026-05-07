@@ -72,8 +72,8 @@ upstream produces, with no influence from bty.
 ## Components
 
 bty is **one Python package** (distribution name `bty-lab` on PyPI; the
-importable module stays `bty`) with four console-script entry points
-(`bty`, `bty-tui`, `bty-web`, `bty-ctl`) and optional install extras,
+importable module stays `bty`) with three console-script entry points
+(`bty`, `bty-tui`, `bty-web`) and optional install extras,
 plus a sibling appliance-image builder under `bty-media/`. Splitting
 the Python side into multiple distributions earned nothing for a
 single-maintainer project; the "different install footprint for

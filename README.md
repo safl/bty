@@ -17,15 +17,15 @@ from a USB live stick or remotely over PXE - and configures the
 deployed system on first boot via cloud-init or CIJOE workflows.
 
 bty is one Python package: the `bty` module, distributed on PyPI as
-[`bty-lab`](https://pypi.org/project/bty-lab/), with four
+[`bty-lab`](https://pypi.org/project/bty-lab/), with three
 console-script entry points:
 
 - `bty`: main CLI (image inspection, target discovery, flashing,
   provisioning).
-- `bty-tui`: terminal UI (requires the `tui` extra).
+- `bty-tui`: terminal UI (requires the `tui` extra). With
+  `--server URL` it doubles as a remote-flash client against a
+  running `bty-web`.
 - `bty-web`: HTTP server with browser UI (requires the `web` extra).
-- `bty-ctl`: command-line client for a remote `bty-web` server
-  (`bty-ctl login`, `bty-ctl logout`, future fleet ops).
 
 Plus a sibling appliance-image builder under `bty-media/` that produces
 the bootable USB live image and the server appliance image.
@@ -33,7 +33,7 @@ the bootable USB live image and the server appliance image.
 ## Install
 
 ```bash
-pipx install bty-lab            # CLI + bty-ctl, zero third-party Python deps
+pipx install bty-lab            # CLI, zero third-party Python deps
 pipx install "bty-lab[tui]"     # adds the bty-tui terminal UI
 pipx install "bty-lab[web]"     # adds the bty-web HTTP server
 pipx install "bty-lab[all]"     # everything

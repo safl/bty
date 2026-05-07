@@ -193,24 +193,29 @@ bty-web   # listens on 0.0.0.0:8080 by default
 
 Auth is OS-PAM against the bty service user (the account bty-web
 runs as). On the appliance image the default is `bty / bty`; rotate
-with `sudo passwd bty` before exposing. From a workstation:
+with `sudo passwd bty` before exposing. The browser UI at
+`http://server:8080/ui/login` is the primary operator entry point;
+``GET /pxe/{mac}`` (the route PXE clients hit) is open and needs no
+auth.
+
+If you want to script mutations from a shell, drive `/ui/login` once
+to get the cookie, then attach it on subsequent requests:
 
 ```bash
-# Get a session token:
-bty-ctl login --server http://server:8080
-# (token saved to ~/.config/bty/token, mode 0600)
+COOKIE=$(curl -sS -i -X POST -d "password=bty" \
+   http://server:8080/ui/login \
+   | grep -i '^set-cookie:.*bty-token' | sed 's/.*bty-token=\([^;]*\).*/\1/')
 
-curl -H "Authorization: Bearer $(cat ~/.config/bty/token)" \
-     http://server:8080/machines
-curl -H "Authorization: Bearer $(cat ~/.config/bty/token)" -X PUT \
+curl -H "Cookie: bty-token=$COOKIE" http://server:8080/machines
+curl -H "Cookie: bty-token=$COOKIE" -X PUT \
      -H "Content-Type: application/json" \
      -d '{"image":"debian.qcow2","provisioning_mode":"none","boot_policy":"flash"}' \
      http://server:8080/machines/aa:bb:cc:dd:ee:ff
 ```
 
-PXE clients hit `GET /pxe/{mac}` (open, no token) for the per-MAC
-iPXE config and chain into the live env, which downloads the assigned
-image and flashes the target's local disk.
+PXE clients hit `GET /pxe/{mac}` (open, no auth) for the per-MAC
+iPXE config and chain into the live env, which downloads the
+assigned image and flashes the target's local disk.
 
 ### Browser UI
 

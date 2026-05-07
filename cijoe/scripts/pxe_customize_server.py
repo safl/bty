@@ -4,7 +4,7 @@ Stage the workspace for the PXE chain test
 
 The server appliance ships with a known default credential
 (``bty / bty``, baked at image-build time) so the test can boot the
-production qcow2 unmodified and ``POST /auth/login`` directly. No
+production qcow2 unmodified and ``POST /ui/login`` directly. No
 NoCloud overlay, no virt-customize, no DB seeding.
 
 This step just lays out the test workspace under

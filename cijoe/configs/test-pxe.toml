@@ -29,7 +29,7 @@ artifact_dir = "{{ local.env.HOME }}/system_imaging/disk"
 
 # Default appliance credential. The server image bakes ``bty:bty``
 # at build time (cloudinit-base-server.user runs chpasswd); the
-# chain step uses it to ``POST /auth/login`` exactly the way any
+# chain step uses it to ``POST /ui/login`` exactly the way any
 # operator would on a freshly booted appliance.
 bty_password = "bty"
 

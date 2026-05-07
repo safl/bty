@@ -1,9 +1,14 @@
-"""Tests for bty-web's PAM-backed auth flow.
+"""Tests for bty-web's session-cookie auth.
 
 PAM never actually runs in tests - we monkeypatch
-``pamela.authenticate`` per-test so login outcomes are deterministic.
-The session DB is real; tests cover token issuance, header/cookie
-parity, expiry, and revocation.
+``pamela.authenticate`` per-test where the login endpoint is
+exercised. The session DB is real; tests cover token issuance,
+cookie auth, expiry, and revocation.
+
+The browser-flow ``POST /ui/login`` lives in ``tests/test_web_ui.py``;
+this file focuses on the auth dependency itself: cookie present /
+absent / wrong / expired, plus the ``revoke_all_sessions`` server
+lever.
 """
 
 from __future__ import annotations
@@ -11,9 +16,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from unittest.mock import patch
 
-import pamela
 import pytest
 from fastapi.testclient import TestClient
 
@@ -49,55 +52,12 @@ def client(tmp_path: Path) -> Iterator[TestClient]:
         yield c
 
 
-# ---------- /auth/login -----------------------------------------------------
-
-
-def test_login_with_valid_password_returns_token(client: TestClient) -> None:
-    with patch("pamela.authenticate", return_value=True) as mock_pam:
-        r = client.post("/auth/login", json={"password": "hunter2"})
-    assert r.status_code == 200
-    body = r.json()
-    assert "token" in body and len(body["token"]) > 20
-    assert "expires_at" in body
-    # PAM was called with the service user the app was built with -
-    # not anything from the request body.
-    mock_pam.assert_called_once()
-    args, kwargs = mock_pam.call_args
-    user_arg = args[0] if args else kwargs.get("username")
-    assert user_arg == TEST_SERVICE_USER
-
-
-def test_login_with_invalid_password_is_401(client: TestClient) -> None:
-    with patch("pamela.authenticate", side_effect=pamela.PAMError("bad")):
-        r = client.post("/auth/login", json={"password": "wrong"})
-    assert r.status_code == 401
-    assert r.headers.get("www-authenticate", "").startswith("Bearer")
-
-
-def test_login_label_is_persisted_on_session(client: TestClient) -> None:
-    state = client.__dict__["_bty_state_path"]
-    with patch("pamela.authenticate", return_value=True):
-        r = client.post(
-            "/auth/login",
-            json={"password": "hunter2", "label": "alice@laptop"},
-        )
-    assert r.status_code == 200
-    with open_db(state) as conn:
-        row = conn.execute("SELECT label FROM sessions").fetchone()
-    assert row["label"] == "alice@laptop"
-
-
-# ---------- bearer / cookie parity ------------------------------------------
-
-
-def test_seeded_session_authenticates_via_bearer(client: TestClient) -> None:
-    with open_db(client.__dict__["_bty_state_path"]) as conn:
-        token, _ = issue_session(conn, label="pytest")
-    r = client.get("/machines", headers={"Authorization": f"Bearer {token}"})
-    assert r.status_code == 200
+# ---------- session cookie auth --------------------------------------------
 
 
 def test_seeded_session_authenticates_via_cookie(client: TestClient) -> None:
+    """A session row inserted directly in the DB authenticates a
+    request whose ``bty-token`` cookie carries the matching token."""
     with open_db(client.__dict__["_bty_state_path"]) as conn:
         token, _ = issue_session(conn, label="pytest")
     client.cookies.set(SESSION_COOKIE, token)
@@ -105,8 +65,16 @@ def test_seeded_session_authenticates_via_cookie(client: TestClient) -> None:
     assert r.status_code == 200
 
 
-def test_unknown_bearer_is_401(client: TestClient) -> None:
-    r = client.get("/machines", headers={"Authorization": "Bearer never-issued"})
+def test_missing_cookie_is_401(client: TestClient) -> None:
+    r = client.get("/machines")
+    assert r.status_code == 401
+
+
+def test_unknown_cookie_is_401(client: TestClient) -> None:
+    """A cookie value that doesn't match any active session row 401s.
+    Same DB lookup path as a missing cookie - no timing oracle."""
+    client.cookies.set(SESSION_COOKIE, "never-issued-not-a-real-token")
+    r = client.get("/machines")
     assert r.status_code == 401
 
 
@@ -114,55 +82,49 @@ def test_unknown_bearer_is_401(client: TestClient) -> None:
 
 
 def test_expired_session_is_rejected(client: TestClient) -> None:
-    """A session whose ``expires_at`` is in the past authenticates as 401."""
+    """A session whose ``expires_at`` is in the past 401s. The auth
+    dep filters on ``expires_at > now()`` so an expired row is
+    invisible to the lookup."""
     state = client.__dict__["_bty_state_path"]
     with open_db(state) as conn:
         token, _ = issue_session(conn, label="will-expire")
-        # Force the row's expiry into the past. The auth dependency
-        # filters on expires_at > now() so this row is invisible.
         past = (datetime.now(UTC) - timedelta(seconds=1)).isoformat()
         conn.execute(
             "UPDATE sessions SET expires_at = ? WHERE token_hash = ?",
             (past, _sha256(token)),
         )
         conn.commit()
-    r = client.get("/machines", headers={"Authorization": f"Bearer {token}"})
+    client.cookies.set(SESSION_COOKIE, token)
+    r = client.get("/machines")
     assert r.status_code == 401
 
 
-# ---------- /auth/logout + revocation --------------------------------------
-
-
-def test_logout_revokes_the_presenting_token(client: TestClient) -> None:
-    with open_db(client.__dict__["_bty_state_path"]) as conn:
-        token, _ = issue_session(conn, label="will-logout")
-    auth = {"Authorization": f"Bearer {token}"}
-    assert client.get("/machines", headers=auth).status_code == 200
-    r = client.post("/auth/logout", headers=auth)
-    assert r.status_code == 204
-    # Same token now 401s.
-    assert client.get("/machines", headers=auth).status_code == 401
-
-
-def test_logout_without_token_is_401(client: TestClient) -> None:
-    r = client.post("/auth/logout")
-    assert r.status_code == 401
+# ---------- revoke_all_sessions ---------------------------------------------
 
 
 def test_revoke_all_sessions_kills_every_active_token(client: TestClient) -> None:
+    """``revoke_all_sessions`` is the server-side "log everyone out"
+    lever (used by the ``/ui/settings/revoke-sessions`` form). After
+    truncation every previously-valid session cookie 401s."""
     state = client.__dict__["_bty_state_path"]
     with open_db(state) as conn:
         token_a, _ = issue_session(conn, label="a")
         token_b, _ = issue_session(conn, label="b")
-    auth_a = {"Authorization": f"Bearer {token_a}"}
-    auth_b = {"Authorization": f"Bearer {token_b}"}
-    assert client.get("/machines", headers=auth_a).status_code == 200
-    assert client.get("/machines", headers=auth_b).status_code == 200
+
+    # Sanity: both authenticate before revoke.
+    client.cookies.set(SESSION_COOKIE, token_a)
+    assert client.get("/machines").status_code == 200
+    client.cookies.set(SESSION_COOKIE, token_b)
+    assert client.get("/machines").status_code == 200
+
     with open_db(state) as conn:
         count = revoke_all_sessions(conn)
     assert count == 2
-    assert client.get("/machines", headers=auth_a).status_code == 401
-    assert client.get("/machines", headers=auth_b).status_code == 401
+
+    client.cookies.set(SESSION_COOKIE, token_a)
+    assert client.get("/machines").status_code == 401
+    client.cookies.set(SESSION_COOKIE, token_b)
+    assert client.get("/machines").status_code == 401
 
 
 def _sha256(token: str) -> str:

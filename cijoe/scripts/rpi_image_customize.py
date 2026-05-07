@@ -351,7 +351,7 @@ def _render_install_script(wheel_filename: str) -> str:
         /opt/bty/venv/bin/pip install --no-cache-dir \\
             "/opt/bty/{wheel_filename}[web]"
         # Symlinks so /usr/local/bin is on PATH for everyone.
-        for cmd in bty bty-tui bty-web bty-ctl; do
+        for cmd in bty bty-tui bty-web; do
             ln -sf /opt/bty/venv/bin/$cmd /usr/local/bin/$cmd
         done
 

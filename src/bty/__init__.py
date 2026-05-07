@@ -6,8 +6,6 @@ Top-level package. Subpackages:
   discovery, flashing, provisioning).
 - ``bty.tui`` - terminal UI; requires the ``[tui]`` extra.
 - ``bty.web`` - HTTP server with browser UI; requires the ``[web]`` extra.
-- ``bty.client`` - ``bty-ctl`` command-line client for a remote
-  ``bty-web`` server.
 """
 
 from __future__ import annotations

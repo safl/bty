@@ -24,8 +24,8 @@ TEST_SERVICE_USER = "bty-test"
 
 # Mutated by the ``app_client`` fixture: each test gets a freshly
 # generated session token seeded into the test DB, and ``AUTH`` is
-# rewritten in place so existing tests doing ``headers=AUTH`` keep
-# working without per-test changes.
+# rewritten in place as a cookies dict so existing tests doing
+# ``cookies=AUTH`` keep working without per-test changes.
 AUTH: dict[str, str] = {}
 
 
@@ -33,9 +33,10 @@ AUTH: dict[str, str] = {}
 def app_client(tmp_path: Path) -> Iterator[TestClient]:
     """Yield a TestClient against an isolated bty-web app.
 
-    A session row is seeded directly (no ``/auth/login`` call, so
-    PAM never runs against the test runner's user) and exposed via
-    the module-level ``AUTH`` dict.
+    A session row is seeded directly (no ``/ui/login`` call, so PAM
+    never runs against the test runner's user) and exposed via the
+    module-level ``AUTH`` dict (cookies form: ``{"bty-token":
+    "..."}``).
     """
     state = tmp_path / "state.db"
     image_root = tmp_path / "images"
@@ -57,7 +58,7 @@ def app_client(tmp_path: Path) -> Iterator[TestClient]:
     with open_db(state) as conn:
         token, _ = issue_session(conn, label="pytest")
     AUTH.clear()
-    AUTH["Authorization"] = f"Bearer {token}"
+    AUTH["bty-token"] = token
     try:
         with TestClient(app) as client:
             yield client
@@ -123,12 +124,12 @@ def test_machines_without_token_is_401(app_client: TestClient) -> None:
 
 
 def test_machines_with_wrong_token_is_401(app_client: TestClient) -> None:
-    r = app_client.get("/machines", headers={"Authorization": "Bearer wrong"})
+    r = app_client.get("/machines", cookies={"bty-token": "wrong-not-a-real-token"})
     assert r.status_code == 401
 
 
 def test_machines_with_right_token_is_200(app_client: TestClient) -> None:
-    r = app_client.get("/machines", headers=AUTH)
+    r = app_client.get("/machines", cookies=AUTH)
     assert r.status_code == 200
     assert r.json() == []
 
@@ -145,7 +146,7 @@ def test_machine_crud_round_trip(app_client: TestClient) -> None:
     }
 
     # Create / upsert
-    r = app_client.put(f"/machines/{mac}", json=body, headers=AUTH)
+    r = app_client.put(f"/machines/{mac}", json=body, cookies=AUTH)
     assert r.status_code == 200
     created = r.json()
     assert created["mac"] == mac
@@ -154,23 +155,23 @@ def test_machine_crud_round_trip(app_client: TestClient) -> None:
     assert created["hostname"] == "bty-test-01"
 
     # Read back
-    r = app_client.get(f"/machines/{mac}", headers=AUTH)
+    r = app_client.get(f"/machines/{mac}", cookies=AUTH)
     assert r.status_code == 200
     assert r.json()["mac"] == mac
 
     # List
-    r = app_client.get("/machines", headers=AUTH)
+    r = app_client.get("/machines", cookies=AUTH)
     assert r.status_code == 200
     rows = r.json()
     assert len(rows) == 1
     assert rows[0]["mac"] == mac
 
     # Delete
-    r = app_client.delete(f"/machines/{mac}", headers=AUTH)
+    r = app_client.delete(f"/machines/{mac}", cookies=AUTH)
     assert r.status_code == 204
 
     # 404 after delete
-    r = app_client.get(f"/machines/{mac}", headers=AUTH)
+    r = app_client.get(f"/machines/{mac}", cookies=AUTH)
     assert r.status_code == 404
 
 
@@ -179,7 +180,7 @@ def test_machine_upsert_normalises_mac(app_client: TestClient) -> None:
     r = app_client.put(
         "/machines/AA-BB-CC-DD-EE-FF",
         json={"provisioning_mode": "none"},
-        headers=AUTH,
+        cookies=AUTH,
     )
     assert r.status_code == 200
     assert r.json()["mac"] == "aa:bb:cc:dd:ee:ff"
@@ -189,7 +190,7 @@ def test_machine_upsert_rejects_invalid_provisioning_mode(app_client: TestClient
     r = app_client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
         json={"provisioning_mode": "garbage"},
-        headers=AUTH,
+        cookies=AUTH,
     )
     assert r.status_code == 422  # FastAPI body validation
 
@@ -199,7 +200,7 @@ def test_pxe_for_known_mac_uses_assignment_template(app_client: TestClient) -> N
     app_client.put(
         f"/machines/{mac}",
         json={"image": "debian.qcow2", "provisioning_mode": "none"},
-        headers=AUTH,
+        cookies=AUTH,
     )
     r = app_client.get(f"/pxe/{mac}")
     assert r.status_code == 200
@@ -219,7 +220,7 @@ def test_pxe_auto_discovers_unknown_mac(app_client: TestClient) -> None:
     mac = "11:22:33:44:55:66"
 
     # Pre-condition: not in the DB.
-    pre = app_client.get(f"/machines/{mac}", headers=AUTH)
+    pre = app_client.get(f"/machines/{mac}", cookies=AUTH)
     assert pre.status_code == 404
 
     # PXE client (no auth) hits the endpoint.
@@ -228,7 +229,7 @@ def test_pxe_auto_discovers_unknown_mac(app_client: TestClient) -> None:
     assert "bty.mode=interactive" in r.text  # tui template
 
     # Now visible to the operator.
-    found = app_client.get(f"/machines/{mac}", headers=AUTH)
+    found = app_client.get(f"/machines/{mac}", cookies=AUTH)
     assert found.status_code == 200
     body = found.json()
     assert body["mac"] == mac
@@ -244,7 +245,7 @@ def test_pxe_updates_last_seen_on_repeat_contact(app_client: TestClient) -> None
     mac = "11:22:33:44:55:66"
 
     app_client.get(f"/pxe/{mac}")
-    first = app_client.get(f"/machines/{mac}", headers=AUTH).json()
+    first = app_client.get(f"/machines/{mac}", cookies=AUTH).json()
     assert first["discovered_at"] == first["last_seen_at"]
 
     # Tiny pause to make the timestamp difference visible.
@@ -252,7 +253,7 @@ def test_pxe_updates_last_seen_on_repeat_contact(app_client: TestClient) -> None
 
     time.sleep(0.01)
     app_client.get(f"/pxe/{mac}")
-    second = app_client.get(f"/machines/{mac}", headers=AUTH).json()
+    second = app_client.get(f"/machines/{mac}", cookies=AUTH).json()
     # discovered_at is sticky; last_seen_at moves forward.
     assert second["discovered_at"] == first["discovered_at"]
     assert second["last_seen_at"] >= first["last_seen_at"]
@@ -265,14 +266,14 @@ def test_pxe_does_not_overwrite_assignment(app_client: TestClient) -> None:
     app_client.put(
         f"/machines/{mac}",
         json={"image": "debian.qcow2", "provisioning_mode": "cloud-init"},
-        headers=AUTH,
+        cookies=AUTH,
     )
-    before = app_client.get(f"/machines/{mac}", headers=AUTH).json()
+    before = app_client.get(f"/machines/{mac}", cookies=AUTH).json()
     assert before["image"] == "debian.qcow2"
     assert before["discovered_at"] is None  # PUT-created
 
     app_client.get(f"/pxe/{mac}")
-    after = app_client.get(f"/machines/{mac}", headers=AUTH).json()
+    after = app_client.get(f"/machines/{mac}", cookies=AUTH).json()
     assert after["image"] == "debian.qcow2"  # untouched
     assert after["provisioning_mode"] == "cloud-init"
     assert after["last_seen_at"] is not None
@@ -288,7 +289,7 @@ def test_put_image_uploads_to_image_root(app_client: TestClient) -> None:
     ``image_root/<name>`` and the file is round-trippable via the
     open ``GET /images/{name}``."""
     body = b"\x01\x02\x03" * 1024
-    r = app_client.put("/images/upload.qcow2", content=body, headers=AUTH)
+    r = app_client.put("/images/upload.qcow2", content=body, cookies=AUTH)
     assert r.status_code == 200, r.text
     payload = r.json()
     assert payload["name"] == "upload.qcow2"
@@ -300,9 +301,9 @@ def test_put_image_uploads_to_image_root(app_client: TestClient) -> None:
 
 
 def test_put_image_overwrites_existing(app_client: TestClient) -> None:
-    first = app_client.put("/images/x.qcow2", content=b"old", headers=AUTH)
+    first = app_client.put("/images/x.qcow2", content=b"old", cookies=AUTH)
     assert first.status_code == 200
-    second = app_client.put("/images/x.qcow2", content=b"newer-bytes", headers=AUTH)
+    second = app_client.put("/images/x.qcow2", content=b"newer-bytes", cookies=AUTH)
     assert second.status_code == 200
     assert second.json()["size_bytes"] == len(b"newer-bytes")
     assert app_client.get("/images/x.qcow2").content == b"newer-bytes"
@@ -312,7 +313,7 @@ def test_put_image_rejects_path_traversal(app_client: TestClient) -> None:
     """``..`` and slashes mustn't escape the image root. FastAPI's
     path converter already strips raw ``/`` from ``{name}``, but
     URL-encoded variants and ``..`` need an explicit reject."""
-    r = app_client.put("/images/..%2Fescape.qcow2", content=b"x", headers=AUTH)
+    r = app_client.put("/images/..%2Fescape.qcow2", content=b"x", cookies=AUTH)
     assert r.status_code in {400, 404}
 
 
@@ -326,7 +327,7 @@ def test_put_boot_uploads_to_boot_root(app_client: TestClient) -> None:
     under boot_root - this is how the live trio gets onto the
     appliance via the API instead of scp / fetch-from-release."""
     body = b"vmlinuz-bytes-here"
-    r = app_client.put("/boot/bty-live-x86_64.vmlinuz", content=body, headers=AUTH)
+    r = app_client.put("/boot/bty-live-x86_64.vmlinuz", content=body, cookies=AUTH)
     assert r.status_code == 200
     served = app_client.get("/boot/bty-live-x86_64.vmlinuz")
     assert served.status_code == 200
@@ -345,7 +346,7 @@ def test_list_images_returns_seeded_fixture(app_client: TestClient) -> None:
     """The fixture seeds ``demo.qcow2`` so the file-serving routes
     have something to return; ``GET /images`` exposes it via the
     image catalog."""
-    r = app_client.get("/images", headers=AUTH)
+    r = app_client.get("/images", cookies=AUTH)
     assert r.status_code == 200
     rows = r.json()
     assert {row["name"] for row in rows} == {"demo.qcow2"}
@@ -376,9 +377,12 @@ def test_list_images_returns_files_under_image_root(
     )
     with open_db(state) as conn:
         token, _ = issue_session(conn, label="pytest")
-    auth = {"Authorization": f"Bearer {token}"}
     with TestClient(app) as client:
-        r = client.get("/images", headers=auth)
+        # ``/images`` is open after the TUI-on-PXE prerequisite; no
+        # need to attach the cookie. The fact this fixture seeds a
+        # session is leftover from when listing was protected.
+        del token
+        r = client.get("/images")
 
     assert r.status_code == 200
     rows = r.json()
@@ -412,7 +416,7 @@ def test_machine_default_boot_policy_is_local(app_client: TestClient) -> None:
     r = app_client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
         json={"image": "demo.qcow2", "provisioning_mode": "none"},
-        headers=AUTH,
+        cookies=AUTH,
     )
     assert r.status_code == 200
     assert r.json()["boot_policy"] == "local"
@@ -427,7 +431,7 @@ def test_machine_upsert_accepts_boot_policy_flash(app_client: TestClient) -> Non
             "provisioning_mode": "none",
             "boot_policy": "flash",
         },
-        headers=AUTH,
+        cookies=AUTH,
     )
     assert r.status_code == 200
     assert r.json()["boot_policy"] == "flash"
@@ -437,7 +441,7 @@ def test_machine_upsert_rejects_unknown_boot_policy(app_client: TestClient) -> N
     r = app_client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
         json={"image": "demo.qcow2", "boot_policy": "yolo"},
-        headers=AUTH,
+        cookies=AUTH,
     )
     assert r.status_code == 422
 
@@ -450,7 +454,7 @@ def test_pxe_local_policy_assigned_machine_returns_local_template(
     app_client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
         json={"image": "demo.qcow2"},
-        headers=AUTH,
+        cookies=AUTH,
     )
     r = app_client.get("/pxe/aa:bb:cc:dd:ee:ff")
     assert r.status_code == 200
@@ -470,7 +474,7 @@ def test_pxe_flash_policy_returns_chain_with_args(app_client: TestClient) -> Non
             "provisioning_mode": "cloud-init",
             "boot_policy": "flash",
         },
-        headers=AUTH,
+        cookies=AUTH,
     )
     r = app_client.get("/pxe/aa:bb:cc:dd:ee:ff", headers={"Host": "bty.local:8080"})
     assert r.status_code == 200
@@ -500,7 +504,7 @@ def test_pxe_tui_policy_returns_interactive_chain(app_client: TestClient) -> Non
     app_client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
         json={"boot_policy": "tui"},
-        headers=AUTH,
+        cookies=AUTH,
     )
     r = app_client.get("/pxe/aa:bb:cc:dd:ee:ff", headers={"Host": "bty.local:8080"})
     assert r.status_code == 200
@@ -524,7 +528,7 @@ def test_machine_upsert_accepts_boot_policy_tui(app_client: TestClient) -> None:
     r = app_client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
         json={"boot_policy": "tui"},
-        headers=AUTH,
+        cookies=AUTH,
     )
     assert r.status_code == 200
     assert r.json()["boot_policy"] == "tui"
@@ -534,15 +538,15 @@ def test_pxe_done_updates_last_flashed_at(app_client: TestClient) -> None:
     app_client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
         json={"image": "demo.qcow2", "boot_policy": "flash"},
-        headers=AUTH,
+        cookies=AUTH,
     )
-    before = app_client.get("/machines/aa:bb:cc:dd:ee:ff", headers=AUTH).json()
+    before = app_client.get("/machines/aa:bb:cc:dd:ee:ff", cookies=AUTH).json()
     assert before["last_flashed_at"] is None
 
     r = app_client.post("/pxe/aa:bb:cc:dd:ee:ff/done")
     assert r.status_code == 204
 
-    after = app_client.get("/machines/aa:bb:cc:dd:ee:ff", headers=AUTH).json()
+    after = app_client.get("/machines/aa:bb:cc:dd:ee:ff", cookies=AUTH).json()
     assert after["last_flashed_at"] is not None
     # Critical: the policy is preserved. Per-job CI cadence stays
     # boot_policy=flash across reflashes.
@@ -572,7 +576,7 @@ def test_pxe_done_triggers_online_workflow_when_configured(app_client: TestClien
             "provisioning_mode": "cijoe-online",
             "cijoe_workflow_ref": "/var/lib/bty/workflows/post-flash.yaml",
         },
-        headers=AUTH,
+        cookies=AUTH,
     )
     # PXE contact populates last_seen_ip.
     app_client.get("/pxe/aa:bb:cc:dd:ee:ff")
@@ -602,7 +606,7 @@ def test_pxe_done_does_not_trigger_when_provisioning_mode_is_other(app_client: T
             "provisioning_mode": "none",
             "cijoe_workflow_ref": "/var/lib/bty/workflows/post-flash.yaml",
         },
-        headers=AUTH,
+        cookies=AUTH,
     )
     app_client.get("/pxe/aa:bb:cc:dd:ee:ff")
     with patch("bty.web._workflow.WorkflowRunner.kick_off") as mock_kick:
@@ -621,7 +625,7 @@ def test_pxe_done_does_not_trigger_when_workflow_ref_missing(app_client: TestCli
             "provisioning_mode": "cijoe-online",
             # no cijoe_workflow_ref
         },
-        headers=AUTH,
+        cookies=AUTH,
     )
     app_client.get("/pxe/aa:bb:cc:dd:ee:ff")
     with patch("bty.web._workflow.WorkflowRunner.kick_off") as mock_kick:
@@ -635,9 +639,9 @@ def test_machine_response_includes_workflow_columns(app_client: TestClient) -> N
     app_client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
         json={"image": "demo.qcow2"},
-        headers=AUTH,
+        cookies=AUTH,
     )
-    body = app_client.get("/machines/aa:bb:cc:dd:ee:ff", headers=AUTH).json()
+    body = app_client.get("/machines/aa:bb:cc:dd:ee:ff", cookies=AUTH).json()
     assert body["last_workflow_run_at"] is None
     assert body["last_workflow_status"] is None
     assert body["last_workflow_output_path"] is None

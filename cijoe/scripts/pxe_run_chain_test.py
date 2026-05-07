@@ -20,7 +20,7 @@ Boots two QEMU VMs sharing an L2 segment via ``-netdev socket``:
   reaches the "flash complete; rebooting" marker.
 
 The test uses production paths for everything except DHCP setup
-on the synthesised PXE segment. ``POST /auth/login`` uses the
+on the synthesised PXE segment. ``POST /ui/login`` uses the
 default credential, ``PUT /boot/<name>`` and ``PUT /images/<name>``
 upload the artefacts, and ``PUT /machines/<mac>`` pins the per-MAC
 plan.
@@ -49,6 +49,7 @@ import logging as log
 import socket
 import subprocess
 import time
+import urllib.error
 import urllib.request
 from argparse import ArgumentParser
 from pathlib import Path
@@ -108,7 +109,7 @@ def main(args, cijoe):
         ):
             return errno.ETIMEDOUT
 
-        log.info("POST /auth/login (PAM, default appliance credential)")
+        log.info("POST /ui/login (PAM, default appliance credential)")
         try:
             token = _login("127.0.0.1", mgmt_port, cfg["bty_password"])
         except Exception as exc:
@@ -260,17 +261,45 @@ def _start_client_vm(workspace, socket_port, log_path, cfg):
 # ---------- HTTP helpers ---------------------------------------------------
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """``/ui/login`` returns 303; we want the Set-Cookie header from
+    that response, not the redirect target. Disable urllib's default
+    redirect-follow."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        del req, fp, code, msg, headers, newurl
+        return None
+
+
 def _login(host, port, password):
-    body = json.dumps({"password": password, "label": "pxe-chain-test"}).encode("utf-8")
+    """Drive ``POST /ui/login`` with the appliance password and capture
+    the ``bty-token`` cookie from the Set-Cookie header. Same flow a
+    browser does when the operator submits the login form."""
+    import http.cookies
+    import urllib.parse
+
+    body = urllib.parse.urlencode({"password": password}).encode("utf-8")
     req = urllib.request.Request(
-        f"http://{host}:{port}/auth/login",
+        f"http://{host}:{port}/ui/login",
         data=body,
         method="POST",
-        headers={"Content-Type": "application/json"},
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
     )
-    with urllib.request.urlopen(req, timeout=10) as resp:
-        payload = json.loads(resp.read().decode("utf-8"))
-    return payload["token"]
+    opener = urllib.request.build_opener(_NoRedirect())
+    try:
+        resp = opener.open(req, timeout=10)
+        status = resp.status
+        set_cookie = resp.headers.get("Set-Cookie", "")
+    except urllib.error.HTTPError as exc:
+        status = exc.code
+        set_cookie = exc.headers.get("Set-Cookie", "") if exc.headers else ""
+    if status not in (200, 303):
+        raise RuntimeError(f"/ui/login returned {status}")
+    cookie = http.cookies.SimpleCookie()
+    cookie.load(set_cookie)
+    if "bty-token" not in cookie:
+        raise RuntimeError(f"/ui/login did not return a bty-token cookie: {set_cookie!r}")
+    return cookie["bty-token"].value
 
 
 def _put_file(host, port, token, base_path, src_path, name):
@@ -284,7 +313,7 @@ def _put_file(host, port, token, base_path, src_path, name):
             data=fh,
             method="PUT",
             headers={
-                "Authorization": f"Bearer {token}",
+                "Cookie": f"bty-token={token}",
                 "Content-Type": "application/octet-stream",
                 "Content-Length": str(size),
             },
@@ -307,7 +336,7 @@ def _put_assignment(host, port, token, cfg):
         data=body,
         method="PUT",
         headers={
-            "Authorization": f"Bearer {token}",
+            "Cookie": f"bty-token={token}",
             "Content-Type": "application/json",
         },
     )

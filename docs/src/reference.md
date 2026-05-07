@@ -216,18 +216,6 @@ The TUI-on-PXE flow uses both flags: the live env reads `bty.server`
 and `bty.mac` from `/proc/cmdline` and assembles the matching CLI
 invocation in `/usr/local/sbin/bty-tui-on-tty1`.
 
-### `bty-ctl <login | logout> [--server URL] [...]`
-
-Command-line client for a remote `bty-web` server. Issues a
-`POST /auth/login` with the operator's password and caches the
-returned session token at `~/.config/bty/token` (mode 0600).
-`bty-ctl logout` revokes the cached token via `POST /auth/logout`
-and removes the file.
-
-`--server URL` defaults to `$BTY_SERVER` (see
-[Environment variables](#environment-variables)) which itself
-defaults to `http://localhost:8080`.
-
 ## Configuration
 
 bty resolves a small set of paths and runtime knobs from the
@@ -238,11 +226,9 @@ environment and sensible defaults.
 | Variable | Purpose | Default |
 |-------------------|----------------------------------------------------------------|---------------------|
 | `BTY_IMAGE_ROOT` | Image root for `bty list images` and `bty inspect image`. | `/var/lib/bty/images` |
-| `BTY_SERVER` | Default bty-web server URL for `bty-ctl login` / `bty-ctl logout`. | `http://localhost:8080` |
 
 The `bty --image-root` flag (when given) takes precedence over
-`BTY_IMAGE_ROOT`; `bty-ctl --server` (when given) takes precedence
-over `BTY_SERVER`.
+`BTY_IMAGE_ROOT`.
 
 ### Default paths
 
@@ -271,22 +257,15 @@ any module not listed above as internal.
 
 Single-tenant PAM authentication. bty-web runs as a Linux service
 user (typically ``bty``); the only credential is **that user's OS
-password**. ``passwd bty`` rotates it. ``POST /auth/login`` with
-``{"password": "..."}`` issues an opaque session token whose hash
-is persisted in the ``sessions`` table; subsequent requests carry
-the plaintext via ``Authorization: Bearer ...`` (API) or the
-``bty-token`` cookie (browser UI). ``POST /auth/logout`` revokes
-the presenting session.
+password**. ``passwd bty`` rotates it. ``POST /ui/login`` (form-
+encoded ``password=...``) issues an opaque session token whose hash
+is persisted in the ``sessions`` table and sets a ``bty-token``
+cookie on the response. Subsequent requests carry the cookie;
+mutating routes look it up via the auth dependency. ``POST
+/ui/logout`` clears it.
 
-```
-Authorization: Bearer <session-token>
-```
-
-CLI clients use ``bty-ctl login`` to fetch and cache a token at
-``~/.config/bty/token`` (mode 0600); ``bty-ctl logout`` revokes it.
-
-Open routes (no token) - these are reachable by PXE clients which
-cannot carry a token:
+Open routes - these are reachable by PXE clients and other live-env
+tooling which can't carry a session cookie:
 
 - `GET /healthz` - `{"status": "ok"}`
 - `GET /version` - `{"version": "..."}`
@@ -335,7 +314,7 @@ cannot carry a token:
  bootstrapping a session, and discovery adds no capability beyond
  what the already-open byte-serving route provides.
 
-Protected routes (Bearer required):
+Protected routes (session cookie required):
 
 | Method | Path | Body | Returns |
 |---|---|---|---|
@@ -443,15 +422,11 @@ templates, Bootstrap CSS, HTMX form posts).
  NOPASSWD entry in `/etc/sudoers.d/bty-web` is the only sudo
  grant the appliance gives bty-web.
 
-The auth dependency accepts a session token via either the
-`Authorization: Bearer ...` header (used by API clients and PXE-flow
-scripts) or the `bty-token` cookie (set by the browser UI's login
-form). Each `/auth/login` or `/ui/login` issues a separate session
-row, but server-side they're equivalent: the dep hashes whatever
-token is presented and looks it up in the `sessions` table. Logging
-out (or revoking all sessions from the Settings page) deletes the
-row, instantly invalidating the credential without a service
-restart.
+The auth dependency reads the `bty-token` cookie (set by
+`POST /ui/login`), hashes its value, and looks the session row up in
+the `sessions` table. Logging out (or revoking all sessions from the
+Settings page) deletes the row, instantly invalidating the
+credential without a service restart.
 
 #### Static assets (offline-friendly)
 
@@ -467,7 +442,7 @@ The machines table subscribes to a Server-Sent Events stream so the
 operator does not have to refresh after PXE auto-discovery or another
 admin's edit. The endpoint:
 
-- Authenticates with the same Bearer/cookie dep as the rest of the
+- Authenticates with the same session-cookie dep as the rest of the
  API. Browsers carry the cookie automatically; the SSE `EventSource`
  API does not let you set custom headers.
 - Sends `Content-Type: text/event-stream` and an initial

@@ -20,7 +20,7 @@ from bty.web._db import issue_session, open_db
 TEST_SERVICE_USER = "ui-test-user"
 
 # Mutated by the fixture so tests calling the API with
-# ``headers=AUTH`` get the freshly-seeded session token.
+# ``cookies=AUTH`` get the freshly-seeded session token.
 AUTH: dict[str, str] = {}
 
 
@@ -38,7 +38,7 @@ def client(tmp_path: Path) -> Iterator[TestClient]:
     with open_db(state) as conn:
         token, _ = issue_session(conn, label="ui-pytest")
     AUTH.clear()
-    AUTH["Authorization"] = f"Bearer {token}"
+    AUTH["bty-token"] = token
     # ``follow_redirects=False`` so we can assert on 303 hops.
     try:
         with TestClient(app, follow_redirects=False) as c:
@@ -159,7 +159,7 @@ def test_ui_machines_lists_known_records(client: TestClient) -> None:
     client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
         json={"image": "demo.qcow2", "provisioning_mode": "none"},
-        headers=AUTH,
+        cookies=AUTH,
     )
     r = client.get("/ui/machines")
     assert r.status_code == 200
@@ -182,7 +182,7 @@ def test_ui_machine_detail_renders(client: TestClient) -> None:
     client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
         json={"image": "demo.qcow2", "provisioning_mode": "cloud-init"},
-        headers=AUTH,
+        cookies=AUTH,
     )
     r = client.get("/ui/machines/aa:bb:cc:dd:ee:ff")
     assert r.status_code == 200
@@ -212,7 +212,7 @@ def test_ui_machine_upsert_via_form(client: TestClient) -> None:
     # The record landed.
     api = client.get(
         "/machines/aa:bb:cc:dd:ee:ff",
-        headers=AUTH,
+        cookies=AUTH,
     )
     assert api.status_code == 200
     assert api.json()["image"] == "demo.qcow2"
@@ -236,7 +236,7 @@ def test_ui_machine_upsert_persists_boot_policy_flash(client: TestClient) -> Non
     assert r.status_code == 303
     api = client.get(
         "/machines/aa:bb:cc:dd:ee:ff",
-        headers=AUTH,
+        cookies=AUTH,
     )
     assert api.json()["boot_policy"] == "flash"
 
@@ -260,7 +260,7 @@ def test_ui_machine_detail_renders_boot_policy_dropdown(client: TestClient) -> N
     client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
         json={"image": "demo.qcow2", "boot_policy": "flash"},
-        headers=AUTH,
+        cookies=AUTH,
     )
     r = client.get("/ui/machines/aa:bb:cc:dd:ee:ff")
     assert r.status_code == 200
@@ -328,7 +328,7 @@ def test_ui_settings_revoke_all_sessions_kills_active_logins(client: TestClient)
     # The cookie's session row is gone now: API + bearer header both
     # 401 (the cookie's plaintext is no longer in the DB).
     assert client.get("/machines").status_code == 401
-    assert client.get("/machines", headers=AUTH).status_code == 401
+    assert client.get("/machines", cookies=AUTH).status_code == 401
 
 
 def test_ui_settings_pxe_activate_invokes_helper(client: TestClient) -> None:
@@ -382,12 +382,12 @@ def test_ui_machines_list_shows_boot_policy_badge(client: TestClient) -> None:
     client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
         json={"image": "demo.qcow2", "boot_policy": "flash"},
-        headers=AUTH,
+        cookies=AUTH,
     )
     client.put(
         "/machines/11:22:33:44:55:66",
         json={"image": "demo.qcow2", "boot_policy": "local"},
-        headers=AUTH,
+        cookies=AUTH,
     )
     r = client.get("/ui/machines")
     assert r.status_code == 200
@@ -405,13 +405,13 @@ def test_ui_machine_delete_via_form(client: TestClient) -> None:
     client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
         json={"image": "demo.qcow2", "provisioning_mode": "none"},
-        headers=AUTH,
+        cookies=AUTH,
     )
     r = client.post("/ui/machines/aa:bb:cc:dd:ee:ff/delete")
     assert r.status_code == 303
     api = client.get(
         "/machines/aa:bb:cc:dd:ee:ff",
-        headers=AUTH,
+        cookies=AUTH,
     )
     assert api.status_code == 404
 
