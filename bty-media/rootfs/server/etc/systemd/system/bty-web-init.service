@@ -1,8 +1,8 @@
 [Unit]
-Description=bty-web first-boot initialisation (token, state dir, login banner)
+Description=bty-web first-boot initialisation (state dir, /etc/default/bty-web, login banner)
 Documentation=https://github.com/safl/bty
-# Skip on every boot after the first - the token has been generated and
-# the operator may have edited /etc/default/bty-web.
+# Skip on every boot after the first - the env file has been written
+# and the operator may have edited it.
 ConditionPathExists=!/etc/default/bty-web
 Before=bty-web.service
 DefaultDependencies=no
