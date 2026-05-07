@@ -274,14 +274,15 @@ PXE ROM -> `undionly.kpxe`/`ipxe.efi` -> bty-web's
 `/pxe-bootstrap.ipxe` -> per-MAC `/pxe/{mac}` plan.
 
 **Settings (`/ui/settings`).** Operator-facing controls for two
-runtime concerns that need root: token rotation (rewrites
-`/etc/default/bty-web` via `bty-web-rotate-token`; bty-web restart
-is operator-driven so the new token doesn't kill the active
-session pre-copy) and PXE activation (writes
-`/etc/dnsmasq.d/bty-pxe-active.conf` + restarts dnsmasq via
-`bty-web-activate-pxe`). Both helpers live in `/usr/local/sbin/`
-and are invocable by user `bty` via the `/etc/sudoers.d/bty-web`
-NOPASSWD entry - no other privileged operations are exposed.
+runtime concerns: session revocation (`POST /ui/settings/revoke-
+sessions` truncates the `sessions` table so every active CLI
+token and browser cookie is invalidated; the credential itself is
+rotated out-of-band with `sudo passwd bty` on the appliance) and
+PXE activation (writes `/etc/dnsmasq.d/bty-pxe-active.conf` +
+restarts dnsmasq via `bty-web-activate-pxe`). The PXE helper
+lives in `/usr/local/sbin/` and is invocable by user `bty` via
+the `/etc/sudoers.d/bty-web` NOPASSWD entry - the only privileged
+operation bty-web is granted.
 
 ## Conventions agents can rely on
 

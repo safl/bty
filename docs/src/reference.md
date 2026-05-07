@@ -326,7 +326,6 @@ ImageEntry = {
 
 | Variable | Purpose | Default |
 |---|---|---|
-| `BTY_WEB_TOKEN` | Bearer token (required at startup) | unset, server refuses to start |
 | `BTY_STATE_DIR` | Where `state.db` lives | `/var/lib/bty` |
 | `BTY_IMAGE_ROOT` | Image catalog directory | `/var/lib/bty/images` |
 | `BTY_BOOT_DIR` | Live-env artifacts (`/boot/{name}` source) | `${BTY_STATE_DIR}/boot` |
@@ -341,8 +340,9 @@ templates, Bootstrap CSS, HTMX form posts).
 
 - `GET /ui` -> 303 redirect to `/ui/dashboard`
 - `GET /ui/login` -> login form
-- `POST /ui/login` -> validates the token and sets the `bty-token`
- cookie (HttpOnly, `SameSite=Strict`, `Secure` in production)
+- `POST /ui/login` -> validates the password against PAM, issues a
+ session token, and sets the `bty-token` cookie (HttpOnly,
+ `SameSite=Strict`, `Secure` in production)
 - `POST /ui/logout` -> clears the cookie
 - `GET /ui/dashboard` -> overview (machine count, discovered count,
  image count)
@@ -361,26 +361,34 @@ templates, Bootstrap CSS, HTMX form posts).
  (default `safl/bty`, default tag `latest`); verifies the manifest
  and atomically installs into `BTY_BOOT_DIR`
 - `GET /ui/settings` -> two-card page:
- - **Bearer token** - Rotate button calls
- `bty-web-rotate-token`, displays the new token in a one-time
- flash, leaves the bty-web service running with the old token
- until the operator restarts it manually.
+ - **Authentication** - explanatory text + a "Revoke all
+ sessions" button that wipes the `sessions` table. The
+ credential itself is the OS password of the bty service user;
+ the operator rotates it with `sudo passwd bty` on the
+ appliance.
  - **PXE proxy-DHCP** - interface dropdown (read from
  `/sys/class/net/`) + subnet input (`192.168.1.0` or
  `192.168.1.0/24`). Activate calls `bty-web-activate-pxe`
  which writes `/etc/dnsmasq.d/bty-pxe-active.conf` and
  restarts dnsmasq.
-- `POST /ui/settings/rotate-token` / `POST /ui/settings/pxe-activate`
- drive the two helpers above. Both helpers live in
- `/usr/local/sbin/` and are invocable by the `bty` service user
- via the NOPASSWD entry in `/etc/sudoers.d/bty-web` - the only
- sudo grant the appliance gives bty-web.
+- `POST /ui/settings/revoke-sessions` -> truncates the `sessions`
+ table; every active CLI token and browser cookie becomes invalid
+ immediately. No sudo needed (pure DB operation).
+- `POST /ui/settings/pxe-activate` -> drives `bty-web-activate-pxe`,
+ a sudoers-permitted helper in `/usr/local/sbin/` that writes
+ `/etc/dnsmasq.d/bty-pxe-active.conf` and restarts dnsmasq. The
+ NOPASSWD entry in `/etc/sudoers.d/bty-web` is the only sudo
+ grant the appliance gives bty-web.
 
-The Bearer dependency accepts the token via either the
+The auth dependency accepts a session token via either the
 `Authorization: Bearer ...` header (used by API clients and PXE-flow
 scripts) or the `bty-token` cookie (set by the browser UI's login
-form). API consumers and the browser UI share the same token; the
-server treats them the same on the wire.
+form). Each `/auth/login` or `/ui/login` issues a separate session
+row, but server-side they're equivalent: the dep hashes whatever
+token is presented and looks it up in the `sessions` table. Logging
+out (or revoking all sessions from the Settings page) deletes the
+row, instantly invalidating the credential without a service
+restart.
 
 #### Static assets (offline-friendly)
 
