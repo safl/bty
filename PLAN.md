@@ -1,8 +1,9 @@
 # bty - flash images onto target disks, locally or over PXE
 
-Bare-metal provisioning toolkit. Flashes pre-built ("cooked") system
-images onto target disks - locally from a USB stick or remotely over
-PXE - and configures them via cloud-init or CIJOE workflows.
+Image-flash provisioning toolkit for bare-metal and virtual targets.
+Writes pre-built ("cooked") system images onto target disks - locally
+from a USB live stick or remotely over PXE - and configures the
+deployed system on first boot via cloud-init or CIJOE workflows.
 
 `bty` is an umbrella project. The repository hosts several independent
 software components that share a name, a goal, and a set of conventions, but
@@ -27,9 +28,8 @@ treats as routine rather than exceptional:
   without operator hand-holding.
 
 Every design choice in this plan - the appliance-style server image, the
-MAC-keyed assignment model, the no-SSH web UX, the iPXE network flash, the
-state export/import - exists to make those three cadences cheap, fast, and
-boring.
+MAC-keyed assignment model, the no-SSH web UX, the iPXE network flash -
+exists to make those three cadences cheap, fast, and boring.
 
 bty is shaped to serve both ends of the spectrum:
 
@@ -127,10 +127,9 @@ pipx install "bty-lab[web]"
 
 State (machine records, MAC <-> image/provisioning assignments, CIJOE
 workflow references and run reports, per-machine known-good baselines,
-image catalog metadata, server settings) is persisted on disk and exposed
-through the UI as **export** (download a single archive) and **import**
-(upload to restore). This makes disaster recovery and migration between
-server hosts a two-click operation.
+image catalog metadata, server settings) is persisted in a single
+SQLite database under `BTY_STATE_DIR`. Backup or migration is just
+copying the file.
 
 CIJOE produces a structured report on every workflow run. `bty-web`
 captures these reports - both for offline runs (sent back from the live
@@ -149,54 +148,57 @@ GMKtec mini-PC run the same code at different scales.
 Sibling directory at the repo root, *not* a Python package. Builds the
 bootable images that turn this toolkit into something an operator can
 carry around or stand up on a server. Follows the layout used by
-`safl/jellyfin-kiosk-appliance-builder` (jkab): cijoe-driven Debian
-appliance build, Makefile-orchestrated, with `configs/`, `rootfs/`,
-`scripts/`, `tasks/`, and `tests/` subdirectories.
+`safl/jellyfin-kiosk-appliance-builder` (jkab); the cijoe orchestration
+(configs, scripts, tasks) lives at the top-level `cijoe/` directory in
+this repo and consumes the `bty-media/` content (rootfs trees,
+cloud-init bases, live-build config).
 
-Two artifacts:
+Four shipping variants:
 
-**USB live image.** A bootable USB stick carrying the `bty` CLI, `bty-tui`,
-and a bundled set of system images. The operator plugs it into a target
-machine, boots it, and runs `bty flash` against the target's local disk
-using images sourced from the stick itself. Self-contained and offline -
-no network or external server required. This is the direct-flash flow's
-delivery vehicle.
+**`usb-x86`** - bootable USB stick carrying the `bty` CLI, `bty-tui`,
+and an exFAT `BTY_IMAGES` partition for cooked images. The operator
+plugs it into a target machine, boots it, and runs `bty flash` against
+the target's local disk using images sourced from the stick itself.
+Self-contained and offline. The direct-flash flow's delivery vehicle.
 
-**Server image.** An installable disk image that, when written to a host's
-disk and booted, runs the bty provisioning server: `bty-web`, the iPXE /
-TFTP / HTTP services that PXE clients chain through, the network-flash live
-environment those clients boot into, and a storage layout for the image
-library. One artifact, ready to serve a fleet. This is the network-flash
-flow's delivery vehicle.
+**`server-x86`** - installable disk image (amd64) that, when written
+to a host's disk and booted, runs the bty provisioning server:
+`bty-web`, the iPXE / TFTP / HTTP services that PXE clients chain
+through, and the storage layout for the image library. The
+network-flash flow's delivery vehicle for x86 servers.
 
-The intended operator experience is appliance-grade:
+**`server-rpi`** - same appliance role on arm64, delivered as an
+SD-card image for Raspberry Pi 4 / 5. Built by mounting the upstream
+Raspberry Pi OS Lite image and customising it in a
+`qemu-aarch64-static` chroot (no QEMU full-system bake needed).
+Booting a Pi off SD is the homelab-friendliest server-deployment path.
 
-1. `dd` (or `bty flash`) the image onto the server host's disk.
-2. Boot. Network comes up via DHCP; cloud-init handles the bare minimum
-   (hostname, SSH key) on first boot.
-3. Open the web UI in a browser. A first-boot wizard captures the handful
-   of options that cannot be sensibly defaulted (image library location,
-   network interface for PXE serving, admin credential).
-4. From that point on, the server is configured entirely through the web
-   UI - no SSH, no config files, no package installs. State is persisted
-   on disk and recoverable via the export/import flow described under
-   `bty-web`.
+**`live-x86`** - kernel + initrd + squashfs trio that PXE clients
+chain into via the server's HTTP boot stack. The chroot ships
+`bty-flash-on-boot.service` (auto-flash mode) and
+`bty-tui-on-tty1.service` (interactive `bty-tui` on tty1), with the
+mode picked by kernel cmdline params from the server's iPXE chain.
 
-*Hardware targets.* The server image is built for `amd64` only. Targeted
-hardware is the kind of small x86 box that already lives in homelabs and
-labs: older Intel NUCs, discarded 1U servers, recent GMKtec mini-PCs, and
-similar. The same artifact also boots as a VM disk for operators who would
-rather not dedicate hardware. The image format is `.img.zst` so a single
-download covers `dd`-to-disk and virtual-disk deployment alike.
+The intended operator experience for the server variants is
+appliance-grade:
 
-*On `arm64`.* Building an arm64 variant (for Raspberry Pi or other SBCs)
-is a feasible extension - the runtime itself is portable - but it requires
-a separate base image and build pipeline, so it is intentionally out of
-scope for the initial roadmap. If there is interest, it can be added as a
-parallel artifact later.
+1. `dd` (or `bty flash`) the image onto the server host's disk
+   (or SD card, for the Pi).
+2. Boot. Network comes up via DHCP; the appliance auto-starts
+   `bty-web` on `:8080` with the default `bty / bty` PAM credential
+   and an `odus` SSH admin user (passwordless sudo).
+3. Open `http://<host>:8080/` in a browser - the bare host redirects
+   to the login form. Default `bty / bty` credential gets you in;
+   rotate with `sudo passwd bty` on the appliance before exposing.
+4. From that point on, the server is driven entirely through the web
+   UI for fleet operations (machine assignments, image catalog, boot
+   artifacts). The Settings page activates the dnsmasq proxy-DHCP
+   block when ready to serve PXE.
 
-Both artifacts are produced by the same `bty-media/` directory - they
-share the Debian-based build pipeline and the embedded `bty` runtime.
+All four variants are produced by the cijoe orchestration in
+`cijoe/` consuming the content under `bty-media/` - they share a
+single `bty` wheel and a single `rootfs/server/` overlay (for the
+two server variants).
 
 ## Image formats
 
@@ -205,7 +207,7 @@ share the Debian-based build pipeline and the embedded `bty` runtime.
 ## Provisioning modes
 
 After the image is written to disk, bty can hand off to a first-boot
-configuration mechanism. Three modes:
+configuration mechanism. Four modes:
 
 - **`none`** - no post-flash configuration. Reboot into the cooked image
   as-is.
@@ -213,56 +215,74 @@ configuration mechanism. Three modes:
   datasource) with operator-supplied user-data and meta-data; the OS picks
   it up on first boot. Linux and FreeBSD today; the Windows analogue
   (unattend) occupies the same slot when Windows lands.
-- **`cijoe`** - run a CIJOE workflow that adjusts the deployed system to a
-  known-good state. CIJOE is bty's official extension point for deviations
-  from a stock image: vendor-specific tweaks, licence files, IPMI
-  credentials, fleet-specific tuning that should not be baked into the
-  image itself.
-
-`cijoe` runs in one of two execution modes depending on the deployment
-vehicle:
-
-- **Offline (USB live).** The workflow runs from the live environment
-  after the flash, against the freshly-written filesystem (mount, edit,
-  unmount), before the target reboots. Customisation is constrained to
-  what is possible by manipulating the filesystem from the outside - file
+- **`cijoe`** - run a CIJOE workflow against the freshly-written
+  filesystem (mount, edit, unmount) before the target reboots. The
+  USB live env's offline customisation path. Constrained to what is
+  possible by manipulating the filesystem from the outside - file
   edits, package staging, seed-file drops.
-- **Online (PXE / server).** After the target first-boots into its own
-  OS, `bty-web` triggers a CIJOE workflow against the running machine and
-  records the post-workflow state as that machine's known-good baseline.
-  The server - not the image - becomes the source of truth for *"what this
-  box is supposed to look like,"* which is what closes the loop on the
-  per-job and on-failure cadences from the Motivation section.
+- **`cijoe-online`** - bty-web only. After the target first-boots into
+  its own OS, `bty-web` triggers a CIJOE workflow against the running
+  machine and records the post-workflow state as that machine's
+  known-good baseline. The server - not the image - becomes the source
+  of truth for *"what this box is supposed to look like,"* which is
+  what closes the loop on the per-job and on-failure cadences from
+  the Motivation section.
+
+CIJOE is bty's official extension point for deviations from a stock
+image: vendor-specific tweaks, licence files, IPMI credentials, fleet-
+specific tuning that should not be baked into the image itself.
 
 ## Concepts
 
-- **Image** - a system image file in one of the supported formats, residing
-  in a configured image root.
+- **Image** - a system image file in one of the supported formats,
+  residing in a configured image root (or fetched from an HTTP URL via
+  `bty flash --image http://...`).
 - **Target** - a block device on the machine being provisioned.
 - **Provisioning mode** - what (if anything) runs on first boot.
-- **Machine record** (web only) - MAC-address-keyed assignment of image +
-  provisioning mode + optional hostname.
+- **Machine record** (web only) - MAC-address-keyed assignment of image
+  + provisioning mode + optional hostname + boot policy.
+- **Boot policy** (web only) - what `GET /pxe/{mac}` returns: `local`
+  (sanboot), `flash` (auto-flash chain), or `tui` (interactive
+  `bty-tui` on tty1; the auto-discovery default for unknown MACs).
 
 ## Flows
 
-### Direct flash (CLI/TUI)
+### Direct flash (CLI / TUI)
 
-Operator boots the target machine from bty live media (USB or network),
-then runs `bty` locally:
+Operator boots the target machine from bty live media (USB), then
+runs `bty` locally:
 
 ```
 sudo bty flash --image IMG --target /dev/sda --provision cloud-init ...
 ```
 
-### Network flash (web)
+`bty flash --image` also accepts an HTTP/HTTPS URL, in which case
+the bytes stream from the URL through `zstd -d | dd` straight to
+the target disk - no temp file for `.img.zst` / `.img`.
 
-1. Operator assigns `MAC -> image + provisioning` in the web UI.
-2. Target machine PXE-boots; iPXE chains into the bty live environment over
+### Interactive PXE flash (`boot_policy=tui`)
+
+The default for unknown MACs that PXE-boot through the server. The
+client lands in the live env in interactive mode; `bty-tui-on-tty1`
+launches `bty-tui --server URL --mac MAC` which fetches the catalog
+from `GET /images` and streams the operator-picked image straight to
+the target disk via `bty flash --image URL`. On success, the TUI
+`POST`s `/pxe/{mac}/done` so `last_flashed_at` updates server-side.
+"bty-on-a-USB but over the network" - first PXE contact lands a
+useful UI without prior server-side configuration.
+
+### Server-driven PXE flash (`boot_policy=flash`)
+
+1. Operator assigns `MAC -> image + provisioning + boot_policy=flash`
+   in the web UI.
+2. Target machine PXE-boots; iPXE chains into the bty live env over
    HTTP.
-3. bty live env contacts the server, fetches a per-MAC bootstrap, flashes the
-   target disk, applies provisioning.
-4. Server rewrites the per-MAC iPXE config to "boot local disk" so subsequent
-   reboots do not reflash.
+3. bty live env's `bty-flash-on-boot.service` reads kernel cmdline
+   params, fetches the assigned image, flashes the target disk,
+   applies provisioning, signals `/pxe/{mac}/done`, reboots.
+4. Per-job CI cadences leave `boot_policy=flash` so every boot
+   reflashes; one-shot deployments flip to `local` after the first
+   successful flash.
 
 Both BIOS and UEFI clients are supported via iPXE.
 
@@ -276,8 +296,10 @@ project venv and the lockfile.
 bty/
 +-- pyproject.toml          # one [project] = "bty-lab" with optional extras
 +-- uv.lock                 # committed
++-- Makefile                # one-stop driver (deps / test / build / docs)
 +-- PLAN.md
 +-- README.md
++-- AGENTS.md
 +-- LICENSE                 # GPL-3.0-only
 +-- src/
 |   \-- bty/                # the Python package
@@ -287,19 +309,20 @@ bty/
 |       \-- web/            # bty-web console script (extra: web)
 +-- tests/
 +-- docs/
-|   +-- README.md
 |   +-- src/                # MyST + Sphinx sources
 |   \-- tooling/            # bty-docs-* commands (pipx install ./tooling)
-+-- bty-media/              # sibling appliance builder, NOT a Python pkg
-|   +-- README.md
-|   +-- Makefile
-|   +-- configs/
-|   +-- rootfs/
-|   +-- scripts/
-|   +-- tasks/              # cijoe workflows
-|   \-- tests/
++-- bty-media/              # appliance-image content (rootfs trees,
+|   +-- README.md           #   cloud-init bases, live-build config).
+|   +-- auxiliary/          #   NOT a Python package.
+|   +-- rootfs/             #   {common,usb,server}/ overlays
+|   \-- live-build/         #   debian-live config tree
++-- cijoe/                  # appliance-image build orchestration
+|   +-- configs/            #   per-variant TOML
+|   +-- scripts/            #   cijoe scripts (download, customise, publish)
+|   \-- tasks/              #   per-variant task pipelines (build /
+|                           #   build-rpi / live / test-pxe)
 \-- .github/
-    \-- workflows/
+    \-- workflows/          # ci / docs / release
 ```
 
 There is one wheel (`bty`), one set of console scripts (`bty`, `bty-tui`,
@@ -325,12 +348,15 @@ and `release`.
 
 ### On tag
 
-- **`v*` tags** - single unified release. `uv build` produces the wheel
-  and sdist (PyPI publish via trusted publishing); the same workflow
-  builds all three `bty-media` variants in parallel (usb, server, live)
-  and attaches every artifact to the GitHub release at the same tag.
-  Operators get one release page covering the whole stack at one
-  version; `/ui/boot`'s "fetch latest" pulls the matching live trio.
+- **`v*` tags** - single unified release. `uv build` produces the
+  wheel and sdist (PyPI publish via trusted publishing); the same
+  workflow builds the four `bty-media` variants in parallel
+  (`usb-x86`, `server-x86`, `server-rpi`, `live-x86`), runs the
+  end-to-end PXE chain test against the freshly-built artefacts,
+  builds HTML + PDF docs, and attaches every release-bound artifact
+  to the GitHub release at the same tag. Operators get one release
+  page covering the whole stack at one version; `/ui/boot`'s "fetch
+  latest" on the appliance pulls the matching live trio.
 
 ### On `main`
 
@@ -373,40 +399,48 @@ Documentation lives in `docs/` and follows the aisio convention:
 
 ## Milestones
 
-1. Repo skeleton - clear out legacy; lay out the single Python package
-   (src layout) with `bty`/`bty-tui`/`bty-web` console scripts and
-   optional extras; sibling `bty-media/` directory in the jkab pattern;
-   `docs/` wired up to the aisio-style tooling (pipx-installed); reusable
-   CI workflows (lint, type-check, test, docs build, release skeleton).
-2. `bty-media` USB live build pipeline - cijoe-driven, mirrors the jkab
-   pattern (Debian cloud-image base, cloud-init bake in QEMU,
-   `qcow2 -> raw -> .img.zst`). Triggered via `workflow_dispatch` and
-   on `media-*` tags rather than every push, since the build is heavy
-   (~15-25 minutes with KVM, ~1 GB compressed artifact). Bty content
-   can be stub-level at this stage; the goal is to materialise the
-   build pipeline first and fill it as later milestones land.
-3. `bty list disks` - block-device discovery.
-4. `bty list images` and `bty inspect image IMAGE` - image catalog and
-   metadata.
-5. `bty flash --dry-run` - validation without writing.
-6. `bty flash` - real flashing for `.qcow2`, `.img`, `.img.zst`. From this
-   milestone onward the USB live image produced by milestone 2 is genuinely
-   useful for direct flashing.
-7. Provisioning: `none`.
-8. Provisioning: `cloud-init`.
-9. Provisioning: `cijoe` (offline mode - filesystem manipulation from the
-   USB live env).
-10. `bty-tui`.
-11. `bty-web` server - MAC-keyed assignment, per-MAC iPXE config rendering.
-12. `bty-web` UI - browser front-end for the server.
-13. `bty-media` server image - installable disk image hosting `bty-web`,
-    iPXE/TFTP/HTTP services, the network-flash live environment, and the
-    image library.
-14. Network-flash end-to-end - iPXE -> bty live -> flash -> reboot,
-    BIOS + UEFI.
-15. Provisioning: `cijoe` (online mode - `bty-web` triggers a workflow
-    against the booted target and records the post-workflow state as the
-    machine's known-good baseline).
+The original 1.0 roadmap. All shipping in current releases; kept here
+as historical record of the build-out order.
+
+1. **[done]** Repo skeleton - single Python package, sibling
+   `bty-media/`, docs tooling, CI workflows.
+2. **[done]** `bty-media` USB live build pipeline (cijoe + Debian
+   cloud-image + QEMU bake).
+3. **[done]** `bty list disks` - block-device discovery.
+4. **[done]** `bty list images` + `bty inspect image`.
+5. **[done]** `bty flash --dry-run` validation.
+6. **[done]** `bty flash` write path for `.qcow2` / `.img` / `.img.zst`.
+7. **[done]** Provisioning: `none`.
+8. **[done]** Provisioning: `cloud-init`.
+9. **[done]** Provisioning: `cijoe` (offline).
+10. **[done]** `bty-tui`.
+11. **[done]** `bty-web` server - MAC-keyed assignment, iPXE rendering.
+12. **[done]** `bty-web` UI - browser front-end.
+13. **[done]** `bty-media` server image (`server-x86` variant).
+14. **[done]** Network-flash end-to-end (iPXE -> bty live -> flash ->
+    reboot, BIOS + UEFI).
+15. **[done]** Provisioning: `cijoe-online` - server triggers a workflow
+    against the booted target and records the known-good baseline.
+
+### Post-roadmap milestones
+
+Landed after the original 1.0 list:
+
+16. **[done]** TUI-on-PXE flow - new `boot_policy=tui` (default for
+    auto-discovered MACs), `ipxe_tui.j2` template, streaming
+    `bty flash --image URL`, `bty-tui --server URL --mac MAC` remote
+    mode, `bty-tui-on-tty1.service` in the live env. First PXE
+    contact lands the operator at the TUI without prior server-side
+    configuration ("bty-on-a-USB but over the network").
+17. **[done]** `server-rpi` variant - SD-card image for Raspberry Pi
+    4 / 5. Built by chrooting into Raspberry Pi OS Lite arm64 via
+    `qemu-aarch64-static`. Same `bty / bty` PAM credential and
+    `odus / odus` SSH admin as the x86 server image.
+18. **[done]** Auth simplification - dropped the `bty-ctl` console
+    script, the `/auth/login` / `/auth/logout` HTTP endpoints, the
+    Bearer scheme, and the custom `sessions` SQLite table. Replaced
+    with Starlette's `SessionMiddleware` (server-signed cookie, no
+    DB hop). Net ~760 LOC deleted with no browser-flow regression.
 
 ## Preserved from legacy bty
 
