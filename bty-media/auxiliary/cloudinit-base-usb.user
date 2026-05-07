@@ -66,6 +66,18 @@ runcmd:
   - passwd -d root
   - sed -i 's/^#*\s*PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
 
+  # Mask default Debian timers / services that aren't useful on a
+  # one-shot live env and slow boot down badly on slow USB sticks.
+  # Each of these wakes up around boot time and competes with kernel
+  # / systemd / overlayroot init for the USB controller's IO budget.
+  # Masking is a real boot-time win on cheap sticks.
+  - systemctl mask apt-daily.service apt-daily.timer
+  - systemctl mask apt-daily-upgrade.service apt-daily-upgrade.timer
+  - systemctl mask fwupd.service fwupd-refresh.service fwupd-refresh.timer
+  - systemctl mask motd-news.service motd-news.timer
+  - systemctl mask man-db.service man-db.timer
+  - systemctl mask e2scrub_all.service e2scrub_all.timer e2scrub_reap.service
+
   # Disable cloud-init for subsequent boots so the USB target does not
   # try to re-provision. The bake VM's cloud-init has already done its
   # job by the time this runs.

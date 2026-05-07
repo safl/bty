@@ -118,6 +118,22 @@ runcmd:
     chown root:root /etc/sudoers.d/odus
     chmod 0440 /etc/sudoers.d/odus
 
+  # Mask default Debian timers / services that aren't useful on an
+  # appliance and slow boot down significantly when reading from
+  # slow media (USB sticks, SD cards). Each of these does something
+  # the operator never asked for: refresh apt indexes / firmware
+  # metadata / motd news / man-db cache / fs scrubbing. None of them
+  # block the bty-web service starting, but on a stock Debian boot
+  # they all wake up around the same time and the kernel/systemd are
+  # competing with them for IO. Masking shaves boot time off
+  # noticeably on slower hardware.
+  - systemctl mask apt-daily.service apt-daily.timer
+  - systemctl mask apt-daily-upgrade.service apt-daily-upgrade.timer
+  - systemctl mask fwupd.service fwupd-refresh.service fwupd-refresh.timer
+  - systemctl mask motd-news.service motd-news.timer
+  - systemctl mask man-db.service man-db.timer
+  - systemctl mask e2scrub_all.service e2scrub_all.timer e2scrub_reap.service
+
   # Disable cloud-init for subsequent boots and clear its artefacts.
   # The cooked image already has its identity (bty user + default
   # password baked above), so cloud-init has nothing to do at first
