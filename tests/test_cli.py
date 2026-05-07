@@ -241,7 +241,7 @@ def test_flash_yes_path_propagates_validation_failure(
 ) -> None:
     """Validation errors stop the write path before the root check.
 
-    /dev/null is not a block device → make_plan rejects it. We skip
+    /dev/null is not a block device, so make_plan rejects it. We skip
     the deps because they are never reached.
     """
     img = tmp_path / "x.img"

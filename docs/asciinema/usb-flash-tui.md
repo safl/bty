@@ -1,6 +1,6 @@
 # `bty-tui` interactive flash - keystroke recipe
 
-The TUI is, well, interactive — there's no canned shell script that
+The TUI is, well, interactive - there's no canned shell script that
 captures the keystroke-by-keystroke flow. Use this recipe to record
 a clean walkthrough by hand under `asciinema rec`.
 
