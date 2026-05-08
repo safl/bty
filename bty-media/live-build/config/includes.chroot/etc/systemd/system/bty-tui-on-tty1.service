@@ -11,8 +11,22 @@ Documentation=https://github.com/safl/bty
 ConditionKernelCommandLine=bty.mode=interactive
 # Take over tty1: the live env's auto-login agetty is the default
 # session there; we want to BE the session, not run inside it.
+# ``Before=getty@tty1.service`` (combined with ``Conflicts=``) means
+# bty-tui starts BEFORE getty has a chance to render its login
+# prompt -- otherwise the operator sees the agetty login flash on
+# screen for the seconds it takes us to take over, which they read
+# as "boot didn't go directly to the TUI". With Before+Conflicts,
+# getty never gets a chance to start in the first place.
 Conflicts=getty@tty1.service
-After=getty@tty1.service network-online.target
+Before=getty@tty1.service
+# ``Wants=network-online.target`` (without a matching ``After=``)
+# pulls network up in parallel rather than blocking the TUI on it.
+# USB-local mode (``bty-tui-on-tty1`` with no ``bty.server=``) doesn't
+# need network at all; PXE-tui mode catalogs over the network but
+# the operator typically takes longer to navigate the menu than
+# DHCP+linkup take to settle, so racing them is fine. If the
+# initial catalog fetch fires before network is up, ``bty-tui``'s
+# refresh binding (``r``) retries.
 Wants=network-online.target
 
 [Service]
