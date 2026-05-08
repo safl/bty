@@ -29,6 +29,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -45,28 +46,36 @@ class FlashProgress:
     The ``event`` field is a stable string callers dispatch on. Current
     events:
 
-    - ``started``      - flash beginning; ``total_bytes`` is the image's
-      virtual size when known.
-    - ``writing``      - about to invoke the format-specific writer
-      (``dd`` / ``zstd | dd`` / ``qemu-img convert``).
-    - ``synced``       - kernel buffers flushed.
-    - ``partprobed``   - partition table re-read; flash hardware-complete.
-    - ``provisioning`` - emitted by ``cmd_flash`` around an
-      ``apply_cloud_init`` / ``apply_cijoe`` step (``note`` describes
-      which mode).
-    - ``done``         - emitted by ``cmd_flash`` after every step
-      succeeded.
-    - ``failed``       - emitted on any :class:`FlashError`; ``note``
-      carries the exception string. The exception is then re-raised.
+    - ``started``           - flash beginning; ``total_bytes`` is the
+      image's virtual size when known.
+    - ``writing``           - about to invoke the format-specific
+      writer (``dd`` / ``zstd | dd`` / ``qemu-img convert``).
+    - ``writing_progress``  - byte-level progress from the running
+      writer; ``bytes_written`` is set, ``total_bytes`` carries
+      through from ``started`` so consumers can compute percent /
+      ETA without holding state. Emitted ~1/sec from a daemon
+      thread that parses ``dd``'s ``status=progress`` stderr.
+    - ``synced``            - kernel buffers flushed.
+    - ``partprobed``        - partition table re-read; flash
+      hardware-complete.
+    - ``provisioning``      - emitted by ``cmd_flash`` around an
+      ``apply_cloud_init`` / ``apply_cijoe`` step (``note``
+      describes which mode).
+    - ``done``              - emitted by ``cmd_flash`` after every
+      step succeeded.
+    - ``failed``            - emitted on any :class:`FlashError`;
+      ``note`` carries the exception string. The exception is then
+      re-raised.
 
-    ``total_bytes`` is the image's virtual size in bytes when known; it
-    is set on the ``started`` event. Per-byte progress could later
-    populate it on the ``writing`` event too.
+    ``total_bytes`` is the image's virtual size when known (set on
+    ``started`` and carried on ``writing_progress``). ``bytes_written``
+    is set only on ``writing_progress``.
     """
 
     event: str
     note: str = ""
     total_bytes: int | None = None
+    bytes_written: int | None = None
 
 
 ProgressCallback = Callable[[FlashProgress], None]
@@ -77,6 +86,69 @@ def _emit(progress: ProgressCallback | None, event: str, **fields: Any) -> None:
     if progress is None:
         return
     progress(FlashProgress(event=event, **fields))
+
+
+# ``dd status=progress`` writes a periodic line to stderr like:
+#   13312000 bytes (13 MB, 13 MiB) copied, 0.103 s, 129 MB/s
+# preceded by a ``\r`` so terminals overwrite the prior line. We parse
+# the leading byte count and emit a ``writing_progress`` event ~1/sec.
+_DD_PROGRESS_RE = re.compile(r"^(\d+)\s+bytes\b")
+
+
+def _pump_dd_progress(
+    stream: IO[str],
+    progress: ProgressCallback,
+    total_bytes: int | None,
+) -> None:
+    """Read ``dd``'s stderr and emit ``writing_progress`` events.
+
+    Designed to run in a daemon thread alongside the writer process.
+    ``dd`` separates progress lines with ``\\r`` (so each line
+    overwrites the previous one in a terminal); we replace ``\\r``
+    with ``\\n`` before splitting so we get one progress line per
+    chunk regardless of terminal-style behaviour.
+
+    Returns when ``stream`` closes (i.e. dd has exited).
+    """
+    buf = ""
+    while True:
+        chunk = stream.read(256)
+        if not chunk:
+            # Drain whatever's left in the buffer.
+            for line in buf.replace("\r", "\n").splitlines():
+                m = _DD_PROGRESS_RE.match(line.strip())
+                if m:
+                    _emit(
+                        progress,
+                        "writing_progress",
+                        bytes_written=int(m.group(1)),
+                        total_bytes=total_bytes,
+                    )
+            return
+        buf += chunk
+        # Use the LAST progress line in the buffer as the most recent
+        # snapshot. dd emits monotonically-increasing byte counts so
+        # rendering only the latest is fine.
+        lines = buf.replace("\r", "\n").splitlines()
+        if not lines:
+            continue
+        # Keep the partial trailing line for the next read.
+        if buf.endswith("\n") or buf.endswith("\r"):
+            buf = ""
+        else:
+            buf = lines[-1]
+            lines = lines[:-1]
+        # Find the most recent line that matches the byte-count pattern.
+        for line in reversed(lines):
+            m = _DD_PROGRESS_RE.match(line.strip())
+            if m:
+                _emit(
+                    progress,
+                    "writing_progress",
+                    bytes_written=int(m.group(1)),
+                    total_bytes=total_bytes,
+                )
+                break
 
 
 # Provisioning modes accepted by ``bty flash``. ``none`` skips post-
@@ -423,6 +495,7 @@ def execute_plan(
             )
 
         fmt = plan.image.format
+        total_bytes = plan.image.virtual_size_bytes
         _emit(progress, "writing", note=fmt or "?")
         if plan.image.url is not None:
             # Streaming pipeline: curl URL | (optional zstd -d) | dd -> target.
@@ -430,9 +503,19 @@ def execute_plan(
             # to a temp file first and then handed to the existing local
             # qcow2 path.
             if fmt == "img":
-                _flash_img_from_url(plan.image.url, plan.target.path)
+                _flash_img_from_url(
+                    plan.image.url,
+                    plan.target.path,
+                    progress=progress,
+                    total_bytes=total_bytes,
+                )
             elif fmt == "img.zst":
-                _flash_zst_from_url(plan.image.url, plan.target.path)
+                _flash_zst_from_url(
+                    plan.image.url,
+                    plan.target.path,
+                    progress=progress,
+                    total_bytes=total_bytes,
+                )
             elif fmt == "qcow2":
                 _flash_qcow2_from_url(plan.image.url, plan.target.path)
             else:
@@ -440,9 +523,19 @@ def execute_plan(
         else:
             assert plan.image.path is not None  # typer narrows; validate_plan guarantees
             if fmt == "img":
-                _flash_img(plan.image.path, plan.target.path)
+                _flash_img(
+                    plan.image.path,
+                    plan.target.path,
+                    progress=progress,
+                    total_bytes=total_bytes,
+                )
             elif fmt == "img.zst":
-                _flash_zst(plan.image.path, plan.target.path)
+                _flash_zst(
+                    plan.image.path,
+                    plan.target.path,
+                    progress=progress,
+                    total_bytes=total_bytes,
+                )
             elif fmt == "qcow2":
                 _flash_qcow2(plan.image.path, plan.target.path)
             else:
@@ -458,7 +551,36 @@ def execute_plan(
         raise
 
 
-def _flash_img(image: Path, target: Path) -> None:
+def _start_dd_progress_thread(
+    proc: subprocess.Popen[str],
+    progress: ProgressCallback | None,
+    total_bytes: int | None,
+) -> threading.Thread | None:
+    """Spawn the dd-stderr pump if a progress callback is provided.
+
+    Returns the thread (so the caller can ``.join()`` after dd exits)
+    or ``None`` if no callback was given. When ``progress`` is ``None``
+    the caller leaves dd's stderr inherited and dd's status=progress
+    output goes to the operator's terminal as before.
+    """
+    if progress is None or proc.stderr is None:
+        return None
+    thread = threading.Thread(
+        target=_pump_dd_progress,
+        args=(proc.stderr, progress, total_bytes),
+        daemon=True,
+    )
+    thread.start()
+    return thread
+
+
+def _flash_img(
+    image: Path,
+    target: Path,
+    *,
+    progress: ProgressCallback | None = None,
+    total_bytes: int | None = None,
+) -> None:
     """Write a raw .img to a block device with ``dd``."""
     cmd = [
         "dd",
@@ -468,18 +590,30 @@ def _flash_img(image: Path, target: Path) -> None:
         "conv=fsync",
         "status=progress",
     ]
-    rc = subprocess.run(cmd, check=False).returncode
+    stderr = subprocess.PIPE if progress is not None else None
+    proc = subprocess.Popen(cmd, stderr=stderr, text=True)
+    pump = _start_dd_progress_thread(proc, progress, total_bytes)
+    rc = proc.wait()
+    if pump is not None:
+        pump.join(timeout=2)
     if rc != 0:
         raise FlashError(f"dd exited {rc} writing {image} -> {target}")
 
 
-def _flash_zst(image: Path, target: Path) -> None:
+def _flash_zst(
+    image: Path,
+    target: Path,
+    *,
+    progress: ProgressCallback | None = None,
+    total_bytes: int | None = None,
+) -> None:
     """Pipeline ``zstd -d --stdout IMG | dd of=TARGET ...``."""
     zstd_proc = subprocess.Popen(
         ["zstd", "-d", "--stdout", str(image)],
         stdout=subprocess.PIPE,
     )
     try:
+        stderr = subprocess.PIPE if progress is not None else None
         dd_proc = subprocess.Popen(
             [
                 "dd",
@@ -489,11 +623,16 @@ def _flash_zst(image: Path, target: Path) -> None:
                 "status=progress",
             ],
             stdin=zstd_proc.stdout,
+            stderr=stderr,
+            text=True,
         )
+        pump = _start_dd_progress_thread(dd_proc, progress, total_bytes)
         # Let zstd see SIGPIPE if dd exits early.
         if zstd_proc.stdout is not None:
             zstd_proc.stdout.close()
         dd_rc = dd_proc.wait()
+        if pump is not None:
+            pump.join(timeout=2)
     finally:
         zstd_rc = zstd_proc.wait()
 
@@ -504,7 +643,12 @@ def _flash_zst(image: Path, target: Path) -> None:
 
 
 def _flash_qcow2(image: Path, target: Path) -> None:
-    """Write a qcow2 to a block device by converting to raw in place."""
+    """Write a qcow2 to a block device by converting to raw in place.
+
+    qemu-img convert ``-p`` emits percentage-based progress to stderr
+    in a different format than ``dd``; byte-level progress for qcow2
+    is not yet plumbed through to the ``writing_progress`` event.
+    """
     cmd = ["qemu-img", "convert", "-p", "-O", "raw", str(image), str(target)]
     rc = subprocess.run(cmd, check=False).returncode
     if rc != 0:
@@ -523,19 +667,31 @@ def _flash_qcow2(image: Path, target: Path) -> None:
 _CURL_BASE = ("curl", "-fSL", "--retry", "3", "--retry-connrefused")
 
 
-def _flash_img_from_url(url: str, target: Path) -> None:
+def _flash_img_from_url(
+    url: str,
+    target: Path,
+    *,
+    progress: ProgressCallback | None = None,
+    total_bytes: int | None = None,
+) -> None:
     """Stream a raw .img from URL straight to a block device with dd."""
     curl_proc = subprocess.Popen([*_CURL_BASE, url], stdout=subprocess.PIPE)
     try:
+        stderr = subprocess.PIPE if progress is not None else None
         dd_proc = subprocess.Popen(
             ["dd", f"of={target}", "bs=4M", "conv=fsync", "status=progress"],
             stdin=curl_proc.stdout,
+            stderr=stderr,
+            text=True,
         )
+        pump = _start_dd_progress_thread(dd_proc, progress, total_bytes)
         # Hand the read end fully to dd; closing our copy lets the kernel
         # propagate EOF / SIGPIPE correctly when one end finishes first.
         if curl_proc.stdout is not None:
             curl_proc.stdout.close()
         dd_rc = dd_proc.wait()
+        if pump is not None:
+            pump.join(timeout=2)
     finally:
         curl_rc = curl_proc.wait()
     if curl_rc != 0:
@@ -544,7 +700,13 @@ def _flash_img_from_url(url: str, target: Path) -> None:
         raise FlashError(f"dd exited {dd_rc} writing {url} -> {target}")
 
 
-def _flash_zst_from_url(url: str, target: Path) -> None:
+def _flash_zst_from_url(
+    url: str,
+    target: Path,
+    *,
+    progress: ProgressCallback | None = None,
+    total_bytes: int | None = None,
+) -> None:
     """Pipeline ``curl URL | zstd -d --stdout | dd of=TARGET ...``.
 
     Decompresses on the fly. The compressed bytes never land on the
@@ -562,13 +724,19 @@ def _flash_zst_from_url(url: str, target: Path) -> None:
         if curl_proc.stdout is not None:
             curl_proc.stdout.close()
         try:
+            stderr = subprocess.PIPE if progress is not None else None
             dd_proc = subprocess.Popen(
                 ["dd", f"of={target}", "bs=4M", "conv=fsync", "status=progress"],
                 stdin=zstd_proc.stdout,
+                stderr=stderr,
+                text=True,
             )
+            pump = _start_dd_progress_thread(dd_proc, progress, total_bytes)
             if zstd_proc.stdout is not None:
                 zstd_proc.stdout.close()
             dd_rc = dd_proc.wait()
+            if pump is not None:
+                pump.join(timeout=2)
         finally:
             zstd_rc = zstd_proc.wait()
     finally:

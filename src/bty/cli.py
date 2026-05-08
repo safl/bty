@@ -382,6 +382,8 @@ def _build_progress_callback(mode: str) -> flash.ProgressCallback | None:
                 payload["note"] = event.note
             if event.total_bytes is not None:
                 payload["total_bytes"] = event.total_bytes
+            if event.bytes_written is not None:
+                payload["bytes_written"] = event.bytes_written
             print(json.dumps(payload), flush=True)
 
         return emit
@@ -391,7 +393,16 @@ def _build_progress_callback(mode: str) -> flash.ProgressCallback | None:
         line = f"[{event.event}]"
         if event.note:
             line += f" {event.note}"
-        if event.total_bytes is not None:
+        # writing_progress emits ~1/sec while dd is running. Show
+        # bytes_written / total_bytes (if known) so the operator
+        # gets live feedback. The other events fire once each so
+        # one line per event is fine.
+        if event.bytes_written is not None and event.total_bytes:
+            pct = 100.0 * event.bytes_written / event.total_bytes
+            line += f" {event.bytes_written}/{event.total_bytes} bytes ({pct:.1f}%)"
+        elif event.bytes_written is not None:
+            line += f" {event.bytes_written} bytes"
+        elif event.total_bytes is not None:
             line += f" total_bytes={event.total_bytes}"
         print(line, file=sys.stderr, flush=True)
 

@@ -12,7 +12,7 @@ from __future__ import annotations
 import io
 import json
 from pathlib import Path
-from typing import ClassVar
+from typing import Any, ClassVar
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -257,8 +257,8 @@ def _stub_post_write(monkeypatch: pytest.MonkeyPatch, calls: list[str]) -> None:
 def test_execute_plan_dispatches_to_img_writer(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[str] = []
     monkeypatch.setattr(flash, "probe_target", _stub_block_target)
-    monkeypatch.setattr(flash, "_flash_img", lambda _i, _t: calls.append("img"))
-    monkeypatch.setattr(flash, "_flash_zst", lambda _i, _t: calls.append("zst"))
+    monkeypatch.setattr(flash, "_flash_img", lambda _i, _t, **_kw: calls.append("img"))
+    monkeypatch.setattr(flash, "_flash_zst", lambda _i, _t, **_kw: calls.append("zst"))
     monkeypatch.setattr(flash, "_flash_qcow2", lambda _i, _t: calls.append("qcow2"))
     _stub_post_write(monkeypatch, calls)
 
@@ -271,8 +271,8 @@ def test_execute_plan_dispatches_to_img_writer(monkeypatch: pytest.MonkeyPatch) 
 def test_execute_plan_dispatches_to_zst_writer(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[str] = []
     monkeypatch.setattr(flash, "probe_target", _stub_block_target)
-    monkeypatch.setattr(flash, "_flash_img", lambda _i, _t: calls.append("img"))
-    monkeypatch.setattr(flash, "_flash_zst", lambda _i, _t: calls.append("zst"))
+    monkeypatch.setattr(flash, "_flash_img", lambda _i, _t, **_kw: calls.append("img"))
+    monkeypatch.setattr(flash, "_flash_zst", lambda _i, _t, **_kw: calls.append("zst"))
     monkeypatch.setattr(flash, "_flash_qcow2", lambda _i, _t: calls.append("qcow2"))
     _stub_post_write(monkeypatch, calls)
 
@@ -285,8 +285,8 @@ def test_execute_plan_dispatches_to_zst_writer(monkeypatch: pytest.MonkeyPatch) 
 def test_execute_plan_dispatches_to_qcow2_writer(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[str] = []
     monkeypatch.setattr(flash, "probe_target", _stub_block_target)
-    monkeypatch.setattr(flash, "_flash_img", lambda _i, _t: calls.append("img"))
-    monkeypatch.setattr(flash, "_flash_zst", lambda _i, _t: calls.append("zst"))
+    monkeypatch.setattr(flash, "_flash_img", lambda _i, _t, **_kw: calls.append("img"))
+    monkeypatch.setattr(flash, "_flash_zst", lambda _i, _t, **_kw: calls.append("zst"))
     monkeypatch.setattr(flash, "_flash_qcow2", lambda _i, _t: calls.append("qcow2"))
     _stub_post_write(monkeypatch, calls)
 
@@ -300,7 +300,7 @@ def test_execute_plan_emits_lifecycle_events(monkeypatch: pytest.MonkeyPatch) ->
     """Progress callback receives started -> writing -> synced -> partprobed."""
     calls: list[str] = []
     monkeypatch.setattr(flash, "probe_target", _stub_block_target)
-    monkeypatch.setattr(flash, "_flash_img", lambda _i, _t: None)
+    monkeypatch.setattr(flash, "_flash_img", lambda _i, _t, **_kw: None)
     _stub_post_write(monkeypatch, calls)  # we don't care about call order here
 
     events: list[flash.FlashProgress] = []
@@ -317,7 +317,7 @@ def test_execute_plan_emits_failed_on_error(monkeypatch: pytest.MonkeyPatch) -> 
     """Any FlashError gets a 'failed' progress event before the re-raise."""
     monkeypatch.setattr(flash, "probe_target", _stub_block_target)
 
-    def boom(_i: Path, _t: Path) -> None:
+    def boom(_i: Path, _t: Path, **_kw: Any) -> None:
         raise flash.FlashError("simulated dd failure")
 
     monkeypatch.setattr(flash, "_flash_img", boom)
@@ -445,11 +445,19 @@ def test_execute_plan_dispatches_to_url_writers_for_url_images(
     helpers (``_flash_*_from_url``) instead of the local-path ones."""
     calls: list[str] = []
     monkeypatch.setattr(flash, "probe_target", _stub_block_target)
-    monkeypatch.setattr(flash, "_flash_img", lambda _i, _t: calls.append("img-local"))
-    monkeypatch.setattr(flash, "_flash_zst", lambda _i, _t: calls.append("zst-local"))
+    monkeypatch.setattr(flash, "_flash_img", lambda _i, _t, **_kw: calls.append("img-local"))
+    monkeypatch.setattr(flash, "_flash_zst", lambda _i, _t, **_kw: calls.append("zst-local"))
     monkeypatch.setattr(flash, "_flash_qcow2", lambda _i, _t: calls.append("qcow2-local"))
-    monkeypatch.setattr(flash, "_flash_img_from_url", lambda _u, _t: calls.append("img-url"))
-    monkeypatch.setattr(flash, "_flash_zst_from_url", lambda _u, _t: calls.append("zst-url"))
+    monkeypatch.setattr(
+        flash,
+        "_flash_img_from_url",
+        lambda _u, _t, **_kw: calls.append("img-url"),
+    )
+    monkeypatch.setattr(
+        flash,
+        "_flash_zst_from_url",
+        lambda _u, _t, **_kw: calls.append("zst-url"),
+    )
     monkeypatch.setattr(flash, "_flash_qcow2_from_url", lambda _u, _t: calls.append("qcow2-url"))
     _stub_post_write(monkeypatch, calls)
 
@@ -658,3 +666,58 @@ def test_find_largest_partition_raises_when_none_found(
     monkeypatch.setattr(flash.subprocess, "run", lambda *a, **kw: fake_lsblk)
     with pytest.raises(flash.FlashError, match="no partitions found"):
         flash._find_largest_partition(Path("/dev/loopX"))
+
+
+# ----- _pump_dd_progress: parse dd's status=progress stderr stream ---------
+
+
+def test_pump_dd_progress_emits_most_recent_progress_per_chunk() -> None:
+    """Feed a synthetic dd-stderr stream into the pump. dd progress is
+    monotonically increasing; if multiple progress lines arrive in a
+    single read (terminal-style burst flush), the pump emits only the
+    MOST RECENT to keep the consumer's render loop quiet. ``total_bytes``
+    is carried through so the consumer can compute percent / ETA without
+    holding state."""
+    import io
+
+    stream = io.StringIO(
+        "1048576 bytes (1.0 MB, 1.0 MiB) copied, 0.5 s, 2.0 MB/s\r"
+        "2097152 bytes (2.1 MB, 2.0 MiB) copied, 1.0 s, 2.1 MB/s\r"
+    )
+    events: list[flash.FlashProgress] = []
+    flash._pump_dd_progress(stream, events.append, total_bytes=4194304)
+
+    # Single emit with the latest byte count.
+    assert [e.event for e in events] == ["writing_progress"]
+    assert events[0].bytes_written == 2097152
+    assert events[0].total_bytes == 4194304
+
+
+def test_pump_dd_progress_skips_non_progress_dd_lines() -> None:
+    """dd also emits ``records in/out`` summary lines and warnings;
+    only lines matching the ``<int> bytes`` prefix should fire
+    progress events."""
+    import io
+
+    stream = io.StringIO(
+        "1+0 records in\n"
+        "1+0 records out\n"
+        "524288 bytes (524 kB, 512 KiB) copied, 0.1 s, 5.2 MB/s\r"
+    )
+    events: list[flash.FlashProgress] = []
+    flash._pump_dd_progress(stream, events.append, total_bytes=None)
+
+    assert len(events) == 1
+    assert events[0].event == "writing_progress"
+    assert events[0].bytes_written == 524288
+    assert events[0].total_bytes is None  # caller didn't know
+
+
+def test_pump_dd_progress_handles_empty_stream() -> None:
+    """An empty stream (dd never emitted progress, e.g. immediate
+    failure) should return without raising and without emitting."""
+    import io
+
+    events: list[flash.FlashProgress] = []
+    flash._pump_dd_progress(io.StringIO(""), events.append, total_bytes=100)
+    assert events == []

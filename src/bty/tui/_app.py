@@ -59,6 +59,7 @@ from textual.widgets import (
     Footer,
     Header,
     Input,
+    ProgressBar,
     RichLog,
     Static,
 )
@@ -291,6 +292,22 @@ class FlashStatusScreen(ModalScreen[bool]):
         text-style: bold;
     }
 
+    .flash-progress {
+        height: auto;
+        margin-bottom: 1;
+    }
+
+    .flash-progress-summary {
+        height: 1;
+        color: $text-muted;
+        padding-left: 1;
+    }
+
+    #flash-progress-bar {
+        height: 1;
+        margin-top: 0;
+    }
+
     RichLog {
         height: 1fr;
         border: tall $primary 50%;
@@ -308,6 +325,10 @@ class FlashStatusScreen(ModalScreen[bool]):
         self._plan = plan
         self._result: bool | None = None
         self._completed_stages: set[str] = set()
+        # Used to compute MB/s as ``writing_progress`` events arrive.
+        # Set on first event; reset on each successful run.
+        self._progress_start_t: float | None = None
+        self._progress_start_bytes: int | None = None
 
     def compose(self) -> ComposeResult:
         with Vertical():
@@ -326,6 +347,17 @@ class FlashStatusScreen(ModalScreen[bool]):
                         id=f"stage-{event_name}",
                         classes="flash-stage pending",
                     )
+            with Vertical(classes="flash-progress"):
+                # ProgressBar renders an indeterminate bar until total
+                # is set; once we know the image's virtual_size_bytes
+                # (from the ``started`` event) we set total and the
+                # ``writing_progress`` events drive the percent.
+                yield ProgressBar(
+                    id="flash-progress-bar",
+                    show_eta=True,
+                    show_percentage=True,
+                )
+                yield Static("", id="flash-progress-summary", classes="flash-progress-summary")
             yield RichLog(highlight=False, markup=True, id="flash_log")
             with Horizontal(id="flash-actions"):
                 yield Button("Close", id="close", variant="default", disabled=True)
@@ -338,6 +370,15 @@ class FlashStatusScreen(ModalScreen[bool]):
     @work(thread=True, exclusive=True)
     def _run_flash(self) -> None:
         def on_progress(event: flash.FlashProgress) -> None:
+            # ``writing_progress`` fires ~1/sec from a daemon thread
+            # parsing dd's stderr. Don't append to the log on every
+            # tick (would flood); only update the progress bar +
+            # summary line. The other events fire once each, so we
+            # log them.
+            if event.event == "writing_progress":
+                self.app.call_from_thread(self._update_progress_bar, event)
+                return
+
             line = f"[{event.event}]"
             if event.note:
                 line += f" {event.note}"
@@ -345,6 +386,10 @@ class FlashStatusScreen(ModalScreen[bool]):
                 line += f" total_bytes={event.total_bytes}"
             self.app.call_from_thread(self._append_log, line)
             self.app.call_from_thread(self._mark_stage_active, event.event)
+            # ``started`` carries total_bytes; latch it onto the bar so
+            # subsequent writing_progress ticks show real percent + ETA.
+            if event.event == "started" and event.total_bytes is not None:
+                self.app.call_from_thread(self._set_progress_total, event.total_bytes)
 
         try:
             flash.execute_plan(self._plan, progress=on_progress)
@@ -356,6 +401,57 @@ class FlashStatusScreen(ModalScreen[bool]):
 
     def _append_log(self, line: str) -> None:
         self.query_one(RichLog).write(line)
+
+    def _set_progress_total(self, total_bytes: int) -> None:
+        try:
+            bar = self.query_one("#flash-progress-bar", ProgressBar)
+        except Exception:  # pragma: no cover - defensive
+            return
+        bar.update(total=total_bytes, progress=0)
+
+    def _update_progress_bar(self, event: flash.FlashProgress) -> None:
+        """Advance the bar + summary line as dd reports byte progress.
+
+        ``event.bytes_written`` is the cumulative count from the start
+        of the write. Speed is computed as a moving average from the
+        first observed (bytes, t) snapshot of this run -- enough to
+        smooth out jitter without keeping a long ring buffer.
+        """
+        if event.bytes_written is None:
+            return
+        try:
+            bar = self.query_one("#flash-progress-bar", ProgressBar)
+            summary = self.query_one("#flash-progress-summary", Static)
+        except Exception:  # pragma: no cover - defensive
+            return
+
+        import time
+
+        now = time.monotonic()
+        if self._progress_start_t is None:
+            self._progress_start_t = now
+            self._progress_start_bytes = event.bytes_written
+
+        elapsed = max(now - self._progress_start_t, 0.001)
+        delta_bytes = event.bytes_written - (self._progress_start_bytes or 0)
+        bytes_per_sec = delta_bytes / elapsed
+        mb_per_sec = bytes_per_sec / (1024 * 1024)
+
+        # Update the textual ProgressBar. ``progress`` is the absolute
+        # value (not a delta) - textual handles the rendering. If we
+        # don't know total (qcow2 / unknown source size), the bar
+        # stays indeterminate and only the summary line shows
+        # bytes + speed.
+        if event.total_bytes:
+            bar.update(progress=event.bytes_written)
+
+        gib_written = event.bytes_written / (1024**3)
+        if event.total_bytes:
+            gib_total = event.total_bytes / (1024**3)
+            summary_text = f"  {gib_written:.2f} / {gib_total:.2f} GiB · {mb_per_sec:.1f} MB/s"
+        else:
+            summary_text = f"  {gib_written:.2f} GiB · {mb_per_sec:.1f} MB/s"
+        summary.update(summary_text)
 
     def _mark_stage_active(self, event_name: str) -> None:
         """Tick the stage tracker: previous active becomes done, this one becomes active.
