@@ -18,15 +18,34 @@ Two image-source modes:
   and the operator picks an image from the server's catalog without
   prior server-side configuration.
 
-Keymap (single-key direct bindings; no modifier-key prefixes, no
-modal navigation -- bty has so few actions that the helix-style
-``space``-prefix is overkill):
+Keymap (Zellij-style: a status bar at the bottom shows current
+stage segments + key hints; bindings vary by stage):
 
-- ``q``   quit
-- ``r``   refresh catalogs
-- ``f``   flash the highlighted image to the highlighted disk
-- ``/``   filter the image catalog by substring (helix-style)
-- ``escape`` clear the active filter
+- ``Enter``  forward (commit row / trigger active step)
+- ``Esc``    back (clear most recent commit, or clear filter
+             if one is active)
+- ``q``      quit
+- ``r``      refresh catalogs
+- ``t``      open theme picker
+- ``/``      filter the image catalog by substring
+- ``1`` / ``2``       focus Images / Disks pane
+- ``Left`` / ``h``    cycle focus left
+- ``Right`` / ``l``   cycle focus right
+- ``f``               flash shortcut (alias for Enter at Stage 3)
+- ``Shift+R``         reboot shortcut (alias for Enter at Stage 4)
+
+Wizard flow (4 stages, derived from selection state):
+
+1. Stage 1: select an image (Enter on a row) -> auto-advance to
+   Stage 2 with focus on Disks.
+2. Stage 2: select a disk (Enter on a row) -> auto-advance to
+   Stage 3 with focus on the Flash status-bar segment.
+3. Stage 3: Enter on segment 3 (or ``f``) -> FlashConfirmScreen
+   -> FlashStatusScreen.
+4. Stage 4 (post-flash success): Enter on segment 4 (or
+   ``Shift+R``) -> ``systemctl reboot``. ``Esc`` from here
+   returns to Stage 2 keeping the image so the operator can
+   flash the same image to a different disk.
 
 Empty catalogs render an onboarding panel with actionable next
 steps (drop ``*.img.zst`` onto BTY_IMAGES, or PUT to the server's
@@ -42,9 +61,11 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from enum import IntEnum
 from pathlib import Path
 from typing import ClassVar
 
@@ -56,16 +77,30 @@ from textual.screen import ModalScreen
 from textual.widgets import (
     Button,
     DataTable,
-    Footer,
     Header,
     Input,
+    OptionList,
     ProgressBar,
     RichLog,
     Static,
 )
+from textual.widgets.option_list import Option
 
 import bty
 from bty import disks, flash, images
+
+
+class _WizardStage(IntEnum):
+    """The four stages of the flash wizard.
+
+    Derived from ``BtyTui`` selection state -- never stored directly.
+    See ``BtyTui._stage``.
+    """
+
+    SELECT_IMAGE = 1
+    SELECT_DISK = 2
+    CONFIRM_FLASH = 3
+    REBOOT_OR_DONE = 4
 
 
 @dataclass
@@ -83,6 +118,52 @@ class _TuiImage:
     size_bytes: int
     path: Path | None = None
     url: str | None = None
+
+
+def _format_mib(size_bytes: int) -> str:
+    """Format a size in bytes as a comma-grouped MiB string.
+
+    Used for both the images-table size column and the disk-details
+    body so all size displays in the TUI share one format.
+    """
+    if size_bytes < 0:
+        return "?"
+    return f"{size_bytes / (1 << 20):,.1f} MiB"
+
+
+_SIZE_SUFFIX_MULTIPLIERS = {
+    "K": 1 << 10,
+    "M": 1 << 20,
+    "G": 1 << 30,
+    "T": 1 << 40,
+    "P": 1 << 50,
+}
+
+
+def _parse_size_to_bytes(s: str) -> int:
+    """Parse an lsblk-style human-readable size ("500G", "1.5T") to
+    bytes.
+
+    lsblk emits human-readable units by default; bty's CLI + web-UI
+    consumers expect that string form, so we parse to bytes only at
+    the TUI display layer rather than changing ``disks.list_disks``.
+    Empty / unrecognised input returns 0 (caller can format as "?").
+    """
+    s = s.strip().upper()
+    if not s:
+        return 0
+    # Suffix-trailing form: "500G" / "1.5T" / "8G" / "9.1G".
+    if s[-1] in _SIZE_SUFFIX_MULTIPLIERS:
+        try:
+            n = float(s[:-1])
+        except ValueError:
+            return 0
+        return int(n * _SIZE_SUFFIX_MULTIPLIERS[s[-1]])
+    # Plain integer-bytes form (lsblk -b).
+    try:
+        return int(s)
+    except ValueError:
+        return 0
 
 
 def fetch_remote_catalog(server_url: str, *, timeout: float = 30.0) -> list[_TuiImage]:
@@ -140,29 +221,36 @@ class FlashConfirmScreen(ModalScreen[bool]):
         align: center middle;
     }
 
+    /* Floating panel with rounded border + ``Flash plan`` label in
+       the border-title (harlequin / posting style). Matches the
+       main app's border treatment so the modal feels like a
+       layered piece of the same UI. */
     FlashConfirmScreen > Vertical {
         width: 80;
         height: auto;
         padding: 1 2;
-        background: $surface;
-        border: thick $primary;
-    }
-
-    .header {
-        height: 1;
-        background: $primary;
-        color: auto;
-        text-align: center;
+        background: $panel;
+        border: round $accent;
+        border-title-style: bold;
+        border-title-color: $accent;
+        border-title-align: left;
     }
 
     .errors {
         color: $error;
         margin: 1 0;
+        padding: 1;
+        border: round $error 50%;
     }
 
     .actions {
         height: 3;
         align: right middle;
+        margin-top: 1;
+    }
+
+    .actions Button {
+        margin-left: 2;
     }
     """
 
@@ -176,8 +264,8 @@ class FlashConfirmScreen(ModalScreen[bool]):
         self._errors = errors
 
     def compose(self) -> ComposeResult:
-        with Vertical():
-            yield Static("Flash plan", classes="header")
+        with Vertical() as panel:
+            panel.border_title = "  Flash plan  "
             yield Static(self._plan_text())
             if self._errors:
                 yield Static(self._errors_text(), classes="errors")
@@ -244,8 +332,11 @@ class FlashStatusScreen(ModalScreen[bool]):
         width: 90;
         height: 30;
         padding: 1 2;
-        background: $surface;
-        border: thick $warning;
+        background: $panel;
+        border: round $warning;
+        border-title-style: bold;
+        border-title-color: $warning;
+        border-title-align: left;
     }
 
     .flash-warning {
@@ -331,9 +422,10 @@ class FlashStatusScreen(ModalScreen[bool]):
         self._progress_start_bytes: int | None = None
 
     def compose(self) -> ComposeResult:
-        with Vertical():
+        with Vertical() as panel:
+            panel.border_title = "  Flashing  "
             yield Static(
-                "FLASHING — DO NOT REMOVE STICK OR DISCONNECT",
+                "FLASHING - DO NOT REMOVE STICK OR DISCONNECT",
                 classes="flash-warning",
             )
             yield Static(
@@ -517,6 +609,101 @@ class FlashStatusScreen(ModalScreen[bool]):
             self.dismiss(self._result is True)
 
 
+class ThemeSelectScreen(ModalScreen[str | None]):
+    """Modal showing the available Textual themes; Enter applies, Esc dismisses.
+
+    Triggered from ``BtyTui.action_theme`` (``t`` binding). The
+    list comes from ``App.available_themes`` (Textual's built-in
+    catalog: textual-dark, textual-light, nord, gruvbox,
+    catppuccin-mocha, dracula, tokyo-night, monokai). The
+    currently active theme is pre-highlighted so the operator
+    can confirm or change with arrow keys + Enter; Esc bails
+    without changing anything.
+
+    Returns the selected theme name on Enter, or ``None`` on Esc.
+    """
+
+    DEFAULT_CSS = """
+    ThemeSelectScreen {
+        align: center middle;
+    }
+
+    ThemeSelectScreen > Vertical {
+        width: 50;
+        height: auto;
+        max-height: 80%;
+        padding: 1 2;
+        background: $panel;
+        border: round $accent;
+        border-title-style: bold;
+        border-title-color: $accent;
+        border-title-align: left;
+    }
+
+    ThemeSelectScreen OptionList {
+        height: auto;
+        max-height: 20;
+        background: transparent;
+        border: none;
+    }
+
+    .theme-help {
+        height: 1;
+        color: $text-muted;
+        margin-top: 1;
+    }
+    """
+
+    BINDINGS: ClassVar[list[Binding | tuple[str, str] | tuple[str, str, str]]] = [
+        Binding("escape", "dismiss(None)", "Cancel"),
+        Binding("enter", "apply", "Apply"),
+    ]
+
+    def __init__(self, current_theme: str, available: list[str]) -> None:
+        super().__init__()
+        self._current = current_theme
+        self._available = sorted(available)
+
+    def compose(self) -> ComposeResult:
+        with Vertical() as panel:
+            panel.border_title = "  Select theme  "
+            options = [
+                Option(
+                    f"  {name}{'  *' if name == self._current else ''}",
+                    id=name,
+                )
+                for name in self._available
+            ]
+            yield OptionList(*options, id="theme-list")
+            yield Static("Enter to apply, Esc to cancel", classes="theme-help")
+
+    def on_mount(self) -> None:
+        # Pre-highlight the active theme so the operator sees what's
+        # in effect without scrolling.
+        ol = self.query_one("#theme-list", OptionList)
+        try:
+            idx = self._available.index(self._current)
+            ol.highlighted = idx
+        except ValueError:
+            pass
+        ol.focus()
+
+    def action_apply(self) -> None:
+        ol = self.query_one("#theme-list", OptionList)
+        if ol.highlighted is None:
+            self.dismiss(None)
+            return
+        self.dismiss(self._available[ol.highlighted])
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        # Pressing Enter on a highlighted row also applies; this fires
+        # in addition to ``action_apply`` for explicit Enter, but
+        # ``ModalScreen.dismiss`` is idempotent so the second call is
+        # a no-op once the screen is gone.
+        if event.option.id is not None:
+            self.dismiss(event.option.id)
+
+
 class BtyTui(App[None]):
     """The bty terminal UI.
 
@@ -535,24 +722,56 @@ class BtyTui(App[None]):
     BINDINGS: ClassVar[list[Binding | tuple[str, str] | tuple[str, str, str]]] = [
         Binding("q", "quit", "Quit"),
         Binding("r", "refresh", "Refresh"),
-        Binding("f", "flash", "Flash"),
+        Binding("f", "flash", "Flash", show=False),
+        Binding("R", "reboot", "Reboot", show=False),
+        Binding("t", "theme", "Theme"),
         Binding("slash", "focus_filter", "Filter"),
-        Binding("escape", "clear_filter", "Clear filter", show=False),
+        # Wizard-flow bindings: ``1`` / ``2`` jump focus to the
+        # respective panes; arrows + ``h`` / ``l`` cycle. Esc on
+        # the main screen acts as "back one wizard stage" (the
+        # filter Input has its own Esc that clears the filter,
+        # which takes precedence when it has focus).
+        Binding("1", "focus_images", "Images"),
+        Binding("2", "focus_disks", "Disks"),
+        Binding("left", "focus_prev_pane", "Prev pane", show=False),
+        Binding("right", "focus_next_pane", "Next pane", show=False),
+        Binding("h", "focus_prev_pane", "Prev pane", show=False),
+        Binding("l", "focus_next_pane", "Next pane", show=False),
+        Binding("escape", "wizard_back", "Back", show=False),
     ]
 
     DEFAULT_CSS = """
     Screen {
         layout: vertical;
+        background: $background;
     }
 
     #panes {
         height: 1fr;
         layout: horizontal;
+        padding: 1 1 0 1;
     }
 
+    /* Each pane: rounded panel with a dimmed border by default;
+       the focused pane brightens via ``:focus-within`` so the
+       operator always knows where keystrokes land. Pane titles
+       sit in the border itself (set via ``border_title`` in
+       ``on_mount``) -- no separate title row, so the panel
+       reads as one piece. Mirrors the harlequin / posting
+       visual style. */
     .pane {
         layout: vertical;
-        border: tall $primary;
+        border: round $primary 40%;
+        background: $panel;
+        margin: 0 1 0 0;
+        border-title-style: bold;
+        border-title-color: $primary;
+        border-title-align: left;
+    }
+
+    .pane:focus-within {
+        border: round $accent;
+        border-title-color: $accent;
     }
 
     #images-pane, #disks-pane {
@@ -561,29 +780,33 @@ class BtyTui(App[None]):
 
     #details-pane {
         width: 3fr;
+        margin-right: 0;
     }
 
-    .pane-title {
-        height: 1;
-        background: $primary;
-        color: auto;
-        text-align: center;
-    }
-
+    /* DataTable styling left to the active theme on purpose --
+       overriding component classes (.datatable--header, etc.) is
+       fragile across Textual minor versions and risks visibility
+       regressions on hardware tty1. The theme's defaults already
+       hit the visual target inside our rounded panels. */
     DataTable {
         height: 1fr;
+        background: transparent;
     }
 
     #filter-input {
         height: 3;
-        margin: 0;
-        border: none;
-        background: $surface;
+        margin: 0 1 0 1;
+        border: round $primary 40%;
+        background: transparent;
         display: none;
     }
 
     #filter-input.active {
         display: block;
+    }
+
+    #filter-input:focus {
+        border: round $accent;
     }
 
     #welcome {
@@ -599,7 +822,47 @@ class BtyTui(App[None]):
 
     #status {
         height: 1;
+        padding: 0 2;
+        color: $text-muted;
+        background: $boost;
+    }
+
+    /* Zellij-style status bar: a single row of flat segments
+       (one per wizard stage) on the left, key hints right-aligned.
+       The active stage gets ``text-style: reverse`` via the
+       ``.active`` class. Buttons are real Buttons so they can be
+       focused as the auto-advance target after table commits, but
+       styled flat (no chunky borders / panel bg) so they read as
+       text segments. */
+    #status-bar {
+        height: 1;
         padding: 0 1;
+    }
+
+    #status-bar Button.segment {
+        min-width: 0;
+        height: 1;
+        padding: 0;
+        margin: 0 1 0 0;
+        background: $background;
+        color: $text-muted;
+        border: none;
+        text-style: none;
+    }
+
+    #status-bar Button.segment:focus {
+        text-style: bold;
+    }
+
+    #status-bar Button.segment.active {
+        text-style: reverse bold;
+        color: $accent;
+    }
+
+    #key-hints {
+        width: 1fr;
+        height: 1;
+        content-align: right middle;
         color: $text-muted;
     }
     """
@@ -621,17 +884,17 @@ class BtyTui(App[None]):
         # Filter state: when set, _populate_images includes only rows
         # whose name contains this substring (case-insensitive).
         self._filter: str = ""
+        # Wizard state. The current stage is *derived* from these
+        # bools via the ``_stage`` property -- numeric jumps and Esc
+        # both stay coherent because we never store stage directly.
+        self._selected_image: _TuiImage | None = None
+        self._selected_disk: dict[str, object] | None = None
+        self._post_flash: bool = False  # set on FlashStatusScreen success
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
-        source_label = (
-            f"Images @ {self._server_url}/images"
-            if self._server_url is not None
-            else f"Images @ {self._image_root}"
-        )
         with Horizontal(id="panes"):
             with Vertical(classes="pane", id="images-pane"):
-                yield Static(source_label, classes="pane-title")
                 yield Input(
                     placeholder="filter (substring match on name)",
                     id="filter-input",
@@ -639,24 +902,55 @@ class BtyTui(App[None]):
                 yield DataTable(id="images_table", cursor_type="row")
                 yield Static("", id="welcome")
             with Vertical(classes="pane", id="disks-pane"):
-                yield Static("Disks", classes="pane-title")
                 yield DataTable(id="disks_table", cursor_type="row")
             with Vertical(classes="pane", id="details-pane"):
-                yield Static("Details", classes="pane-title")
                 yield Static("(select an image or disk)", id="details-body")
+        # Zellij-style status bar: four flat segment Buttons (one per
+        # wizard stage) on the left, key-hint Static right-aligned.
+        # The active segment gets reverse-video via a CSS class. The
+        # segments are real Buttons so they can be the auto-advance
+        # focus target after row commits and so a click works too;
+        # their CSS strips the chunky default button look so they
+        # read as flat text segments. Labels update via
+        # ``_render_status`` on every state transition.
+        with Horizontal(id="status-bar"):
+            yield Button(" 1 Image ", id="seg-1", classes="segment")
+            yield Button(" 2 Disk ", id="seg-2", classes="segment")
+            yield Button(" 3 Flash ", id="seg-3", classes="segment")
+            yield Button(" 4 Reboot ", id="seg-4", classes="segment")
+            yield Static("", id="key-hints")
         yield Static(self._initial_status(), id="status")
-        yield Footer()
 
     def on_mount(self) -> None:
         # Tokyo Night picks up the navy + warm-yellow palette of the
         # bty mascot (saturated cool background, yellow accents).
+        # Operators can swap themes at runtime via the ``t`` binding
+        # (ThemeSelectScreen).
         self.theme = "tokyo-night"
         self.sub_title = bty.__version__
-        self._populate_images()
+        # Border-title labels on each pane (harlequin / posting style:
+        # the title sits in the top-border, not as a separate Static
+        # row, so the panel feels like one piece). The images label
+        # carries the source so the operator can see where the catalog
+        # is coming from at a glance.
+        source_label = (
+            f"  Images @ {self._server_url}/images  "
+            if self._server_url is not None
+            else f"  Images @ {self._image_root}  "
+        )
+        self.query_one("#images-pane", Vertical).border_title = source_label
+        self.query_one("#disks-pane", Vertical).border_title = "  Disks  "
+        self.query_one("#details-pane", Vertical).border_title = "  Details  "
+        # Populate disks first so the images table's RowHighlighted
+        # fires last and the details pane shows the image (the primary
+        # pane) by default rather than a disk.
         self._populate_disks()
-        # Focus the images table so global key bindings (q/r/f/...)
-        # fire instead of being eaten by the filter Input. The Input
-        # only takes focus when the operator explicitly presses ``/``.
+        self._populate_images()
+        # Initial status-bar render: Stage 1 active, no selections,
+        # key hints shown.
+        self._render_status()
+        # Focus the images table so the wizard starts on Stage 1
+        # with the operator able to immediately Enter on a row.
         try:
             self.query_one("#images_table", DataTable).focus()
         except Exception:  # pragma: no cover - defensive
@@ -668,7 +962,10 @@ class BtyTui(App[None]):
         table = self.query_one("#images_table", DataTable)
         welcome = self.query_one("#welcome", Static)
         table.clear(columns=True)
-        table.add_columns("Name", "Format", "Size (B)")
+        # Header is just "Size"; the cell carries the unit ("MiB") so
+        # both the images table and the disk-details body align on
+        # the same format. See user-confirmed UX choice in plan.
+        table.add_columns("Name", "Format", "Size")
         self._images_by_key.clear()
 
         try:
@@ -713,7 +1010,7 @@ class BtyTui(App[None]):
             table.add_row(
                 tui_img.name,
                 tui_img.fmt or "?",
-                str(tui_img.size_bytes),
+                _format_mib(tui_img.size_bytes),
                 key=key,
             )
 
@@ -764,7 +1061,14 @@ class BtyTui(App[None]):
     def _populate_disks(self) -> None:
         table = self.query_one("#disks_table", DataTable)
         table.clear(columns=True)
-        table.add_columns("Path", "Size", "Model")
+        # Trim to the columns operators actually need to make a flash
+        # decision: where the disk is, how big, what kind of drive.
+        # Removable / Read-only got dropped per the plan -- they're
+        # binary attributes that rarely change the decision; Transport
+        # already conveys the "is this a USB stick or an internal
+        # disk" signal in the form most operators recognise (usb /
+        # sata / nvme / sd).
+        table.add_columns("Path", "Size", "Model", "Transport", "Serial")
         self._disks_by_key.clear()
         try:
             entries = disks.list_disks()
@@ -774,9 +1078,27 @@ class BtyTui(App[None]):
         for d in entries:
             key = str(d["path"])
             self._disks_by_key[key] = d
-            model = (d.get("model") or "").strip() if isinstance(d.get("model"), str) else ""
-            size = d.get("size") or ""
-            table.add_row(str(d["path"]), str(size), model, key=key)
+
+            def _str(field: str, _disk: dict[str, object] = d) -> str:
+                v = _disk.get(field)
+                return v.strip() if isinstance(v, str) else ""
+
+            model = _str("model")
+            transport = _str("tran")
+            serial = _str("serial")
+            # ``disks.list_disks`` returns lsblk's human-readable size
+            # ("500G", "8G", "1T"). Convert to MiB at display time so
+            # all size cells across the TUI share one format.
+            size_str = d.get("size")
+            size_mib = _format_mib(_parse_size_to_bytes(str(size_str))) if size_str else "-"
+            table.add_row(
+                str(d["path"]),
+                size_mib,
+                model or "-",
+                transport or "-",
+                serial or "-",
+                key=key,
+            )
 
     # ---------- actions ------------------------------------------------------
 
@@ -784,6 +1106,107 @@ class BtyTui(App[None]):
         self._populate_images()
         self._populate_disks()
         self._set_status("Refreshed.")
+
+    # ---------- wizard navigation -------------------------------------------
+
+    def action_focus_images(self) -> None:
+        """``1`` binding: focus the Images table."""
+        try:
+            self.query_one("#images_table", DataTable).focus()
+        except Exception:
+            pass
+
+    def action_focus_disks(self) -> None:
+        """``2`` binding: focus the Disks table."""
+        try:
+            self.query_one("#disks_table", DataTable).focus()
+        except Exception:
+            pass
+
+    def action_focus_prev_pane(self) -> None:
+        """``Left`` / ``h`` binding: cycle focus left in the pane row.
+
+        The Details pane is read-only output and not part of the focus
+        cycle; only Images <-> Disks.
+        """
+        # Cycle: Disks -> Images -> Disks (wrapping). If focus is
+        # elsewhere (e.g. a segment button), land on Images.
+        focused = self.focused
+        target_id = "#images_table"
+        if focused is not None and focused.id == "images_table":
+            target_id = "#disks_table"  # already at left edge -> wrap
+        try:
+            self.query_one(target_id, DataTable).focus()
+        except Exception:
+            pass
+
+    def action_focus_next_pane(self) -> None:
+        """``Right`` / ``l`` binding: cycle focus right in the pane row."""
+        focused = self.focused
+        target_id = "#disks_table"
+        if focused is not None and focused.id == "disks_table":
+            target_id = "#images_table"  # already at right edge -> wrap
+        try:
+            self.query_one(target_id, DataTable).focus()
+        except Exception:
+            pass
+
+    def action_wizard_back(self) -> None:
+        """``Esc`` binding: route based on app state.
+
+        Priority order:
+        1. If a filter is active, Esc clears it (legacy behavior --
+           operators expect the Input's escape semantics).
+        2. Otherwise undo the most recent wizard commit and return
+           one stage.
+        """
+        if self._filter:
+            self.action_clear_filter()
+            return
+        stage = self._stage
+        if stage == _WizardStage.REBOOT_OR_DONE:
+            # Clear post-flash + drive, keep image so the operator
+            # can flash the same image to a different drive.
+            self._post_flash = False
+            self._selected_disk = None
+            self._render_status()
+            try:
+                self.query_one("#disks_table", DataTable).focus()
+            except Exception:
+                pass
+            return
+        if stage == _WizardStage.CONFIRM_FLASH:
+            self._selected_disk = None
+            self._render_status()
+            try:
+                self.query_one("#disks_table", DataTable).focus()
+            except Exception:
+                pass
+            return
+        if stage == _WizardStage.SELECT_DISK:
+            self._selected_image = None
+            self._render_status()
+            try:
+                self.query_one("#images_table", DataTable).focus()
+            except Exception:
+                pass
+            return
+        # Stage 1: nothing to undo.
+
+    def action_reboot(self) -> None:
+        """``Shift+R`` binding (or click on seg-4 / Enter when seg-4
+        is focused): dispatch a graceful reboot if Stage 4 is reached.
+        No-op otherwise so an accidental press at the wrong moment
+        doesn't reboot the dev box.
+        """
+        if self._stage != _WizardStage.REBOOT_OR_DONE:
+            self._set_status("Reboot is only available after a successful flash.")
+            return
+        self._set_status("Rebooting...")
+        try:
+            subprocess.run(["systemctl", "reboot"], check=False, timeout=5)
+        except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+            self._set_status(f"Reboot failed to dispatch: {exc}")
 
     def action_focus_filter(self) -> None:
         """Show + focus the filter input. ``/`` triggers this, helix-style."""
@@ -839,24 +1262,146 @@ class BtyTui(App[None]):
             if disk is not None:
                 self._show_disk_details(disk)
 
+    @property
+    def _stage(self) -> _WizardStage:
+        """Derived wizard stage. We never store the stage directly so
+        numeric jumps and Esc back-nav stay coherent (any change to
+        the underlying selection state is automatically reflected).
+        """
+        if self._post_flash:
+            return _WizardStage.REBOOT_OR_DONE
+        if self._selected_image is None:
+            return _WizardStage.SELECT_IMAGE
+        if self._selected_disk is None:
+            return _WizardStage.SELECT_DISK
+        return _WizardStage.CONFIRM_FLASH
+
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        """Wizard-flow forward: Enter on a row commits and auto-advances.
+
+        - Image row Enter -> store image, focus disks pane (if previously
+          on Stage 1).
+        - Disk row Enter -> store disk, focus Stage 3 segment (if
+          previously on Stage 2).
+
+        Re-committing on a re-focused table (operator pressed `1`/`2`
+        to go back) updates the value but does NOT auto-advance --
+        the operator stays on the table they're working with.
+        """
+        prev_stage = self._stage
+        table_id = event.data_table.id
+        if event.row_key is None or event.row_key.value is None:
+            return
+        key = event.row_key.value
+        if table_id == "images_table":
+            tui_img = self._images_by_key.get(key)
+            if tui_img is None:
+                return
+            self._selected_image = tui_img
+            self._render_status()
+            if prev_stage == _WizardStage.SELECT_IMAGE:
+                try:
+                    self.query_one("#disks_table", DataTable).focus()
+                except Exception:
+                    pass
+        elif table_id == "disks_table":
+            disk = self._disks_by_key.get(key)
+            if disk is None:
+                return
+            self._selected_disk = disk
+            self._render_status()
+            if prev_stage == _WizardStage.SELECT_DISK:
+                try:
+                    self.query_one("#seg-3", Button).focus()
+                except Exception:
+                    pass
+
+    def _render_status(self) -> None:
+        """Update segment labels + active-class + key-hints for the
+        current wizard stage. Idempotent; safe to call after any
+        state change.
+        """
+        stage = self._stage
+        try:
+            seg1 = self.query_one("#seg-1", Button)
+            seg2 = self.query_one("#seg-2", Button)
+            seg3 = self.query_one("#seg-3", Button)
+            seg4 = self.query_one("#seg-4", Button)
+            hints = self.query_one("#key-hints", Static)
+        except Exception:
+            return
+        seg1.label = (
+            f" 1 Image: {self._selected_image.name} "
+            if self._selected_image is not None
+            else " 1 Image "
+        )
+        disk_path = (
+            self._selected_disk.get("path", "?") if self._selected_disk is not None else None
+        )
+        seg2.label = f" 2 Disk: {disk_path} " if disk_path else " 2 Disk "
+        seg3.label = " 3 Flash done " if self._post_flash else " 3 Flash "
+        seg4.label = " 4 Reboot "
+        for n, seg in enumerate((seg1, seg2, seg3, seg4), start=1):
+            seg.set_class(stage.value == n, "active")
+        hints.update(self._hints_for(stage))
+
+    def _hints_for(self, stage: _WizardStage) -> str:
+        if stage == _WizardStage.SELECT_IMAGE:
+            return "<Enter> select  <q> quit  <t> theme  <r> refresh"
+        if stage == _WizardStage.SELECT_DISK:
+            return "<Enter> select  <Esc> back  <q> quit  <t> theme  <r> refresh"
+        if stage == _WizardStage.CONFIRM_FLASH:
+            return "<Enter> flash  <Esc> back  <q> quit  <t> theme"
+        return "<Enter> reboot  <Esc> stay  <q> quit"
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Status-bar segments are clickable: clicking / Enter on a
+        focused segment performs the segment's primary action.
+
+        - seg-1 -> focus Images table.
+        - seg-2 -> focus Disks table.
+        - seg-3 -> trigger flash if Stage 3 reached, else no-op.
+        - seg-4 -> trigger reboot if Stage 4 reached, else no-op.
+        """
+        if event.button.id == "seg-1":
+            try:
+                self.query_one("#images_table", DataTable).focus()
+            except Exception:
+                pass
+        elif event.button.id == "seg-2":
+            try:
+                self.query_one("#disks_table", DataTable).focus()
+            except Exception:
+                pass
+        elif event.button.id == "seg-3":
+            if self._stage == _WizardStage.CONFIRM_FLASH:
+                self.action_flash()
+        elif event.button.id == "seg-4":
+            if self._stage == _WizardStage.REBOOT_OR_DONE:
+                self.action_reboot()
+
     def _show_image_details(self, tui_img: _TuiImage) -> None:
+        # The images table already shows Name / Format / Size; the
+        # details body adds the unique-to-this-row info: where the
+        # image is sourced from (local path or remote URL). Keeping
+        # the body short avoids duplicating what's already on screen.
         try:
             body = self.query_one("#details-body", Static)
         except Exception:
             return
-        lines = [
-            "[b]Image[/]",
-            f"  Name:    {tui_img.name}",
-            f"  Format:  {tui_img.fmt or '?'}",
-            f"  Size:    {tui_img.size_bytes:,} bytes ({tui_img.size_bytes / (1 << 30):.2f} GiB)",
-        ]
         if tui_img.url is not None:
-            lines.append(f"  Source:  remote ({tui_img.url})")
+            source = f"remote ({tui_img.url})"
         else:
-            lines.append(f"  Source:  local ({tui_img.path})")
-        body.update("\n".join(lines))
+            source = f"local ({tui_img.path})"
+        body.update(f"[b]Image[/]\n  Source: {source}")
 
     def _show_disk_details(self, disk: dict[str, object]) -> None:
+        # Trim to fields that complement the disks table without
+        # duplicating it. The table shows Path / Size / Model /
+        # Transport / Serial; the details body re-renders the same
+        # five (handy when the operator's eye is on the details
+        # pane already) but in a labeled-vertical form. Removable /
+        # Read-only / Vendor are dropped per user-confirmed plan.
         try:
             body = self.query_one("#details-body", Static)
         except Exception:
@@ -867,25 +1412,38 @@ class BtyTui(App[None]):
             return v.strip() if isinstance(v, str) else ""
 
         path = _str("path") or "?"
-        size = _str("size") or "?"
+        size_str = disk.get("size")
+        size = _format_mib(_parse_size_to_bytes(str(size_str))) if size_str else "?"
         model = _str("model")
-        vendor = _str("vendor")
         tran = _str("tran")
         serial = _str("serial")
-        readonly = disk.get("readonly", False)
-        removable = disk.get("removable", False)
         lines = [
             "[b]Disk[/]",
             f"  Path:      {path}",
             f"  Size:      {size}",
-            f"  Vendor:    {vendor or '-'}",
             f"  Model:     {model or '-'}",
             f"  Transport: {tran or '-'}",
             f"  Serial:    {serial or '-'}",
-            f"  Removable: {removable}",
-            f"  Read-only: {readonly}",
         ]
         body.update("\n".join(lines))
+
+    @work(exclusive=True)
+    async def action_theme(self) -> None:
+        """Open the theme picker; apply the selected theme on dismiss.
+
+        ``@work(exclusive=True)`` for the same reason as
+        ``action_flash`` -- ``push_screen_wait`` requires worker
+        context. Operators have asked for theme switching at
+        runtime since the default Tokyo Night palette doesn't
+        suit every hardware terminal; the picker lists every
+        theme Textual ships and applies on Enter / dismisses
+        without change on Esc.
+        """
+        available = list(self.available_themes.keys())
+        selected = await self.push_screen_wait(ThemeSelectScreen(self.theme, available))
+        if selected is not None and selected != self.theme:
+            self.theme = selected
+            self._set_status(f"Theme: {selected}")
 
     @work(exclusive=True)
     async def action_flash(self) -> None:
@@ -900,10 +1458,21 @@ class BtyTui(App[None]):
             self._set_status("bty-tui must run as root to flash; relaunch with sudo.")
             return
 
-        selection = self._current_selection()
-        if selection is None:
-            return
-        image, disk_path = selection
+        # Prefer the wizard-flow committed selection (Enter on rows
+        # populates ``_selected_image`` / ``_selected_disk``); fall
+        # back to whatever the cursor is on for the ``f``-shortcut
+        # path that bypasses the wizard.
+        if self._selected_image is not None and self._selected_disk is not None:
+            image = self._selected_image
+            disk_path_str = self._selected_disk.get("path", "")
+            if not isinstance(disk_path_str, str) or not disk_path_str:
+                return
+            disk_path = Path(disk_path_str)
+        else:
+            selection = self._current_selection()
+            if selection is None:
+                return
+            image, disk_path = selection
 
         try:
             if image.url is not None:
@@ -938,6 +1507,17 @@ class BtyTui(App[None]):
         self._set_status("Flash completed." if success else "Flash failed; see status modal log.")
         # Disks may have new partition tables now; refresh.
         self._populate_disks()
+        # On success, transition the wizard to Stage 4 (no separate
+        # modal; the status bar's segment 4 becomes active and the
+        # operator can press Enter / Shift+R to reboot or Esc to
+        # stay).
+        if success:
+            self._post_flash = True
+            self._render_status()
+            try:
+                self.query_one("#seg-4", Button).focus()
+            except Exception:
+                pass
 
     # ---------- helpers ------------------------------------------------------
 

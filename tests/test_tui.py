@@ -654,7 +654,12 @@ def test_app_details_pane_updates_on_image_row_highlight(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Moving the cursor to an image row updates the details pane
-    with the image's name + format + size + source."""
+    with the image's source (path or URL).
+
+    The Name / Format / Size fields are NOT in the details body --
+    they're already in the images table columns; the body only
+    adds the source path/URL so it doesn't duplicate the table.
+    """
     _patch_data_sources(
         monkeypatch,
         images_list=[_fake_image(name="my-image.qcow2", fmt="qcow2", size=1024)],
@@ -669,12 +674,12 @@ def test_app_details_pane_updates_on_image_row_highlight(
             from textual.widgets import Static
 
             # The first image row is highlighted by default after
-            # populate; the details pane should already reflect it.
+            # populate; the details pane should already reflect it
+            # via the source path. Filename appears in the path.
             body = app.query_one("#details-body", Static)
             text_str = str(body.content)
             assert "my-image.qcow2" in text_str
-            assert "qcow2" in text_str
-            assert "1,024 bytes" in text_str  # comma-grouped formatting
+            assert "local" in text_str  # source label
 
     _run(_drive())
 
@@ -682,10 +687,11 @@ def test_app_details_pane_updates_on_image_row_highlight(
 def test_app_details_pane_renders_disk_metadata(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """``_show_disk_details`` renders vendor / model / transport /
-    serial / removable / readonly into the details pane. The rendering
-    logic is the contract; the textual ``RowHighlighted`` message
-    routing that calls it is textual's job, not ours to retest."""
+    """``_show_disk_details`` renders the trimmed disk fields:
+    Path, Size (in MiB), Model, Transport, Serial. Vendor /
+    Removable / Read-only are not in the body any more (the
+    table covers them or they're rarely useful in isolation
+    per the wizard-flow plan)."""
     _patch_data_sources(
         monkeypatch,
         images_list=[_fake_image()],
@@ -707,8 +713,12 @@ def test_app_details_pane_renders_disk_metadata(
             text_str = str(body.content)
             assert "/dev/sdb" in text_str
             assert "Acme NVMe" in text_str
-            assert "2T" in text_str
-            assert "ATA" in text_str  # vendor (default in _fake_disk)
+            # Size now formatted as MiB (2T = 2,097,152.0 MiB).
+            assert "MiB" in text_str
+            assert "Transport" in text_str  # column kept
+            # Vendor is NOT in the body any more; sanity-check the
+            # trim by asserting the default "ATA" string is gone.
+            assert "ATA" not in text_str
 
     _run(_drive())
 
@@ -906,5 +916,147 @@ def test_action_flash_pushes_confirm_modal_without_crashing(
                 top.dismiss(False)
                 for _ in range(10):
                     await pilot.pause()
+
+    _run(_drive())
+
+
+def test_wizard_advances_on_image_row_enter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Pressing Enter on an image row commits the selection,
+    advances the wizard to Stage 2 (SELECT_DISK), and moves focus
+    to the Disks table."""
+    _patch_data_sources(
+        monkeypatch,
+        images_list=[_fake_image(name="advance.qcow2")],
+        disks_list=[_fake_disk()],
+    )
+    app = tui_app.BtyTui(image_root=tmp_path / "images")
+
+    async def _drive() -> None:
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            from textual.widgets import Button
+
+            # Initial state: Stage 1, focus on images_table.
+            assert app._stage == tui_app._WizardStage.SELECT_IMAGE  # type: ignore[reportPrivateUsage]
+            assert app.focused is not None
+            assert app.focused.id == "images_table"
+
+            await pilot.press("enter")
+            await pilot.pause()
+
+            assert app._selected_image is not None  # type: ignore[reportPrivateUsage]
+            assert app._selected_image.name == "advance.qcow2"  # type: ignore[reportPrivateUsage]
+            assert app._stage == tui_app._WizardStage.SELECT_DISK  # type: ignore[reportPrivateUsage]
+            assert app.focused is not None
+            assert app.focused.id == "disks_table"
+            # Segment 2 is now active in the status bar.
+            seg2 = app.query_one("#seg-2", Button)
+            assert "active" in seg2.classes
+
+    _run(_drive())
+
+
+def test_wizard_back_clears_disk_selection(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """From Stage 3, Esc clears _selected_disk and returns the
+    wizard to Stage 2 with focus on the Disks table."""
+    _patch_data_sources(
+        monkeypatch,
+        images_list=[_fake_image(name="back.qcow2")],
+        disks_list=[_fake_disk()],
+    )
+    app = tui_app.BtyTui(image_root=tmp_path / "images")
+
+    async def _drive() -> None:
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            # Drive to Stage 3 by committing image then disk.
+            await pilot.press("enter")  # Stage 1 -> Stage 2
+            await pilot.pause()
+            await pilot.press("enter")  # Stage 2 -> Stage 3
+            await pilot.pause()
+            assert app._stage == tui_app._WizardStage.CONFIRM_FLASH  # type: ignore[reportPrivateUsage]
+
+            # Esc -> back to Stage 2.
+            await pilot.press("escape")
+            await pilot.pause()
+            assert app._selected_disk is None  # type: ignore[reportPrivateUsage]
+            assert app._selected_image is not None  # type: ignore[reportPrivateUsage]  # image preserved
+            assert app._stage == tui_app._WizardStage.SELECT_DISK  # type: ignore[reportPrivateUsage]
+            assert app.focused is not None
+            assert app.focused.id == "disks_table"
+
+    _run(_drive())
+
+
+def test_theme_picker_opens_and_dismisses_cleanly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Pressing ``t`` pushes a ThemeSelectScreen modal; pressing
+    Esc dismisses it without changing the active theme.
+
+    Same regression-class as ``test_action_flash_pushes_confirm_modal_*``
+    -- guards against the ``@work`` decorator being dropped from
+    ``action_theme`` (Textual 8.x requires worker context for
+    ``push_screen_wait``).
+    """
+    _patch_data_sources(
+        monkeypatch,
+        images_list=[_fake_image()],
+        disks_list=[_fake_disk()],
+    )
+    app = tui_app.BtyTui(image_root=tmp_path / "images")
+
+    async def _drive() -> None:
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            initial_theme = app.theme
+
+            await pilot.press("t")
+            for _ in range(10):
+                await pilot.pause()
+
+            top = app.screen
+            assert isinstance(top, tui_app.ThemeSelectScreen), (
+                f"expected ThemeSelectScreen, got {type(top).__name__}"
+            )
+            top.dismiss(None)
+            for _ in range(10):
+                await pilot.pause()
+            # Active theme unchanged when dismissed without selection.
+            assert app.theme == initial_theme
+
+    _run(_drive())
+
+
+def test_numeric_pane_jumps_focus_correctly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``1`` focuses the Images table; ``2`` focuses the Disks
+    table. Numeric jumps don't advance / regress the wizard."""
+    _patch_data_sources(
+        monkeypatch,
+        images_list=[_fake_image()],
+        disks_list=[_fake_disk()],
+    )
+    app = tui_app.BtyTui(image_root=tmp_path / "images")
+
+    async def _drive() -> None:
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("2")
+            await pilot.pause()
+            assert app.focused is not None
+            assert app.focused.id == "disks_table"
+
+            await pilot.press("1")
+            await pilot.pause()
+            assert app.focused is not None
+            assert app.focused.id == "images_table"
+
+            # Stage didn't change.
+            assert app._stage == tui_app._WizardStage.SELECT_IMAGE  # type: ignore[reportPrivateUsage]
 
     _run(_drive())
