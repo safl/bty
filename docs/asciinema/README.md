@@ -21,8 +21,8 @@ pipx install asciinema
 
 # Record a flow (replace SCRIPT.sh + OUT.cast)
 asciinema rec --cols 100 --rows 28 \
-    --title "bty: USB build walkthrough" \
-    -c './usb-build.sh' usb-build.cast
+    --title "bty: USB flash walkthrough" \
+    -c './usb-flash-cli.sh' usb-flash-cli.cast
 ```
 
 `--cols` / `--rows` matter: the embedded player honours the cast's
@@ -34,7 +34,7 @@ horizontal scroll.
 Upload to <https://asciinema.org/>:
 
 ```bash
-asciinema upload usb-build.cast
+asciinema upload usb-flash-cli.cast
 ```
 
 It returns a URL like `https://asciinema.org/a/123456`. Embed in

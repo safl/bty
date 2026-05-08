@@ -80,9 +80,12 @@ def main(args, cijoe):
         log.error(f"rootfs/{role} directory not found: {role_rootfs}")
         return 1
 
+    bty_version = _read_bty_version(cijoe_dir)
+
     base = base_path.read_text()
     base = base.replace("__BTY_TIMEZONE__", bty.get("timezone", "UTC"))
     base = base.replace("__BTY_HOSTNAME__", bty.get("hostname", "bty"))
+    base = base.replace("__BTY_VERSION__", bty_version)
 
     lines = [base, "", "write_files:"]
 
@@ -95,7 +98,7 @@ def main(args, cijoe):
         for filepath in sorted(source_dir.rglob("*")):
             if not filepath.is_file():
                 continue
-            lines.extend(_render_write_file(filepath, source_dir))
+            lines.extend(_render_write_file(filepath, source_dir, bty_version))
 
     output_path.write_text("\n".join(lines) + "\n")
     log.info(f"Generated {output_path} (variant={variant})")
@@ -103,11 +106,16 @@ def main(args, cijoe):
     return 0
 
 
-def _render_write_file(filepath: Path, source_dir: Path) -> list[str]:
+def _render_write_file(filepath: Path, source_dir: Path, bty_version: str) -> list[str]:
     """Render one ``write_files`` entry for ``filepath`` (relative to ``source_dir``).
 
     Tries UTF-8 text first and emits a literal ``content: |`` block; on
     decode failure falls back to base64 + ``encoding: b64``.
+
+    Text content gets ``__BTY_VERSION__`` substituted to the bty-lab
+    version, mirroring the live-build hook so the bty-server's
+    ``/etc/issue`` / ``/etc/motd`` / ``/etc/profile.d/bty-version.sh``
+    can carry the same kind of version stamp.
     """
     target = "/" + str(filepath.relative_to(source_dir))
     mode = stat.S_IMODE(filepath.stat().st_mode)
@@ -129,8 +137,25 @@ def _render_write_file(filepath: Path, source_dir: Path) -> list[str]:
         body.append("")
         return header + body
 
+    text = text.replace("__BTY_VERSION__", bty_version)
     body = ["    content: |"]
     for line in text.splitlines():
         body.append(f"      {line}")
     body.append("")
     return header + body
+
+
+def _read_bty_version(cijoe_dir: Path) -> str:
+    """Read the bty-lab version from the repo's top-level pyproject.toml.
+
+    Mirrors the helper in ``usb_iso_build.py`` -- one source of truth
+    is the wheel's version string, surfaced into the cooked image's
+    ``/etc/issue`` / motd / profile.d files via the same
+    ``__BTY_VERSION__`` placeholder convention.
+    """
+    pyproject = cijoe_dir.parent / "pyproject.toml"
+    for line in pyproject.read_text().splitlines():
+        stripped = line.strip()
+        if stripped.startswith("version") and "=" in stripped:
+            return stripped.split("=", 1)[1].strip().strip('"').strip("'")
+    raise RuntimeError(f"could not find version line in {pyproject}")

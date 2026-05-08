@@ -1,6 +1,6 @@
 
 ======================================================================
-  bty server appliance
+  bty __BTY_VERSION__ server appliance
 
   First boot has not yet completed. The bty-web-init unit will
   rewrite this banner with the browser-UI URL and the default
@@ -8,4 +8,4 @@
   still see this banner on a freshly-imaged disk.
 ======================================================================
 
-Debian \n \l
+bty __BTY_VERSION__ on \n (\l)
