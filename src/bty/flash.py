@@ -364,11 +364,25 @@ def validate_plan(plan: FlashPlan) -> list[str]:
     errors: list[str] = []
 
     if plan.image.format is None:
-        errors.append(
-            f"image format not recognised: {plan.image.display} "
-            f"(supported: .qcow2, .img, .img.zst, .img.xz, .img.gz, "
-            f".img.bz2)"
-        )
+        # Specific guidance when the operator dropped a tarball on
+        # BTY_IMAGES: those wrap the actual image inside per-file TAR
+        # headers, and bty's flash code is single-stream-only. A
+        # generic "format not recognised" would leave operators
+        # confused; tell them what to do.
+        if images.is_tarball_extension(plan.image.display):
+            errors.append(
+                f"image is a tarball, not a single-file image: "
+                f"{plan.image.display}. Extract first "
+                f"(``tar -xf {plan.image.display}``) and drop the "
+                f"resulting .img / .qcow2 / .img.zst / .img.xz / "
+                f".img.gz / .img.bz2 onto BTY_IMAGES."
+            )
+        else:
+            errors.append(
+                f"image format not recognised: {plan.image.display} "
+                f"(supported: .qcow2, .img, .img.zst, .img.xz, "
+                f".img.gz, .img.bz2)"
+            )
 
     if not plan.target.exists:
         errors.append(f"target does not exist: {plan.target.path}")

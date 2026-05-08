@@ -204,7 +204,11 @@ two server variants).
 
 ## Image formats
 
-`.qcow2`, `.img`, `.img.zst`
+`.qcow2`, `.img`, `.img.zst`, `.img.xz`, `.img.gz`, `.img.bz2`.
+Tarballs (`.tar.gz` etc.) are not flashable directly; the flash
+code refuses them with a specific "extract first" message
+because dd'ing a tar stream into a target's MBR would be
+catastrophic.
 
 ## Provisioning modes
 

@@ -43,9 +43,9 @@ def local_image_path(image_url: str) -> Path:
     """Pick a local cache path that preserves the URL's filename.
 
     ``bty.images.detect_format()`` keys off the file extension
-    (.qcow2, .img, .img.zst) so the on-disk name has to keep it -
-    a fixed ``bty-flash-on-boot.image`` would always fail
-    validation.
+    (.qcow2, .img, .img.{zst,xz,gz,bz2}) so the on-disk name has
+    to keep it -- a fixed ``bty-flash-on-boot.image`` would
+    always fail validation.
     """
     parsed_name = Path(urllib.parse.urlparse(image_url).path).name
     if not parsed_name:

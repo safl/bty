@@ -43,7 +43,7 @@ between each step (~2-3 seconds) so the cast is followable.
 Before hitting `asciinema rec`:
 
 - [ ] `BTY_IMAGES` is mounted and has at least one supported image
-      (`.qcow2` / `.img` / `.img.zst`).
+      (`.qcow2`, `.img`, or `.img.{zst,xz,gz,bz2}`).
 - [ ] The target disk is **not** mounted (`bty flash` refuses to flash
       a mounted disk; the TUI surfaces the same error in red, which
       can be intentional content for the recording but is usually a

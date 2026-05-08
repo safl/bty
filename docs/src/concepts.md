@@ -6,8 +6,10 @@ The vocabulary used throughout the rest of the documentation.
 
 A pre-built system image: the bytes that go on the target disk. bty
 treats images as sealed artifacts and never authors their contents.
-Supported formats: `.qcow2`, `.img`, `.img.zst`. Images live under a
-configured *image root*.
+Supported formats: `.qcow2`, `.img`, `.img.zst`, `.img.xz`,
+`.img.gz`, `.img.bz2`. Tarballs (`.tar.gz` etc.) are not flashable
+directly; extract first. Images live under a configured *image
+root*.
 
 ## Target
 

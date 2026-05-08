@@ -84,6 +84,22 @@ def test_validate_unknown_format() -> None:
     assert any("image format not recognised" in e for e in errors)
 
 
+def test_validate_tarball_gives_specific_extract_first_message() -> None:
+    """Operators dropping a .tar.gz / .tgz / .tar.xz on BTY_IMAGES
+    get a specific guidance message ("extract first") rather than
+    the generic "format not recognised" -- tarballs are common
+    enough in image-distribution channels that the specific hint
+    saves the next confused operator a debugging round."""
+    tarball = _img(fmt=None, path=Path("/fake/images/raspbian.tar.gz"))
+    plan = flash.make_plan(tarball, _tgt(), "none")
+    errors = flash.validate_plan(plan)
+    assert any("tarball" in e and "Extract first" in e for e in errors)
+    # And the generic "format not recognised" message must NOT
+    # also fire for the same tarball -- one specific error is
+    # better than two confusing ones.
+    assert not any("format not recognised" in e for e in errors)
+
+
 def test_validate_target_missing() -> None:
     plan = flash.make_plan(_img(), _tgt(exists=False, is_block=False, size=None), "none")
     errors = flash.validate_plan(plan)
