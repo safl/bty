@@ -854,14 +854,14 @@ class BtyTui(App[None]):
         border-title-align: left;
     }
 
-    /* Focused pane: border + interior both highlight, so the whole
-       pane reads as the active region rather than just the border
-       outline. The 1-char padding (above) gives the highlight room
-       to wrap around the content. */
+    /* Focused pane: only the border + title color shift to the
+       accent color; interior background stays the same as the
+       unfocused state. The pane-line switch alone is enough
+       signal without the background tint, which competed with
+       the DataTable's row-cursor highlight. */
     .pane:focus-within {
         border: round $accent;
         border-title-color: $accent;
-        background: $boost;
     }
 
     #pane-1 {
@@ -1561,7 +1561,7 @@ class BtyTui(App[None]):
     def _initial_status(self) -> str:
         if os.geteuid() != 0:
             return "Read-only mode (not root). Select to inspect; flashing requires sudo."
-        return "Select an image and a disk; press F to flash."
+        return ""
 
 
 def main() -> None:

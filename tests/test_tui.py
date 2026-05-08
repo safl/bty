@@ -342,8 +342,9 @@ def test_app_renders_local_panes_with_seeded_data(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Launch the app with one seeded image + one seeded disk; both
-    DataTables populate and the initial status surfaces the
-    flash-allowed prompt (geteuid=0)."""
+    DataTables populate. Initial status is empty when running as
+    root (the wizard's pane labels carry the prompt instead);
+    non-root surfaces the read-only mode message instead."""
     _patch_data_sources(
         monkeypatch,
         images_list=[_fake_image(name="alpha.qcow2", size=4096)],
@@ -361,7 +362,10 @@ def test_app_renders_local_panes_with_seeded_data(
             disks_table = app.query_one("#disks_table", DataTable)
             assert images_table.row_count == 1
             assert disks_table.row_count == 1
-            assert "press F to flash" in app._initial_status()  # type: ignore[reportPrivateUsage]
+            # Root user: initial status is empty (no nudge text;
+            # the verbose pane border-titles carry the wizard
+            # prompts instead).
+            assert app._initial_status() == ""  # type: ignore[reportPrivateUsage]
 
     _run(_drive())
 
@@ -1065,5 +1069,47 @@ def test_action_flash_success_flips_button_to_reboot(
             # next press fires the reboot action instead of flash.
             assert str(flash_btn.label) == "Reboot"
             assert flash_btn.disabled is False
+
+    _run(_drive())
+
+
+def test_source_picker_opens_and_dismisses_cleanly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Pressing ``s`` pushes a SourceSelectScreen modal; pressing
+    Esc dismisses it without changing the active source.
+
+    Same regression-class as ``test_theme_picker_*`` and
+    ``test_action_flash_*`` -- guards against the ``@work``
+    decorator being dropped from ``action_source`` (Textual 8.x
+    requires worker context for ``push_screen_wait``).
+    """
+    _patch_data_sources(
+        monkeypatch,
+        images_list=[_fake_image()],
+        disks_list=[_fake_disk()],
+    )
+    app = tui_app.BtyTui(image_root=tmp_path / "images")
+
+    async def _drive() -> None:
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            initial_root = app._image_root  # type: ignore[reportPrivateUsage]
+            initial_server = app._server_url  # type: ignore[reportPrivateUsage]
+
+            await pilot.press("s")
+            for _ in range(10):
+                await pilot.pause()
+
+            top = app.screen
+            assert isinstance(top, tui_app.SourceSelectScreen), (
+                f"expected SourceSelectScreen, got {type(top).__name__}"
+            )
+            top.dismiss(None)
+            for _ in range(10):
+                await pilot.pause()
+            # Source unchanged when dismissed without selection.
+            assert app._image_root == initial_root  # type: ignore[reportPrivateUsage]
+            assert app._server_url == initial_server  # type: ignore[reportPrivateUsage]
 
     _run(_drive())
