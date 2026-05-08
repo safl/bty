@@ -251,10 +251,14 @@ def _extend_with_exfat(cijoe, iso_path: Path) -> int:
 
     # Sanity check + partition number resolution. ``sfdisk --json``
     # emits a parseable structure under ``.partitiontable.partitions``.
-    err, out = cijoe.run_local(f"sudo sfdisk --json {iso_path}")
+    # ``cijoe.run_local`` returns ``(err, CommandState)``; the captured
+    # stdout/stderr is exposed via ``CommandState.output()`` (a method
+    # that reads back the Tee'd output file).
+    err, state = cijoe.run_local(f"sudo sfdisk --json {iso_path}")
     if err:
         log.error("sfdisk --json failed")
         return err
+    out = state.output()
     try:
         table = json.loads(out)
         partitions = table["partitiontable"]["partitions"]
@@ -282,10 +286,11 @@ def _extend_with_exfat(cijoe, iso_path: Path) -> int:
         return errno.EIO
     log.info(f"BTY_IMAGES is partition #{part_num}")
 
-    err, out = cijoe.run_local(f"sudo losetup -fP --show {iso_path}")
+    err, state = cijoe.run_local(f"sudo losetup -fP --show {iso_path}")
     if err:
         log.error(f"losetup -fP {iso_path} failed")
         return err
+    out = state.output()
     loop = out.strip().splitlines()[-1].strip()
     if not loop.startswith("/dev/loop"):
         log.error(f"unexpected losetup output: {out!r}")
