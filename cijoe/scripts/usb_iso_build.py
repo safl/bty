@@ -370,26 +370,20 @@ def _verify_iso(cijoe, iso_path: Path) -> int:
     loop = state.output().strip().splitlines()[-1].strip()
     cijoe.run_local("sudo udevadm settle")
 
+    # blkid recognizes the exFAT signature and reports the label
+    # without needing the kernel to mount it -- crucial for CI
+    # runners that ship ``exfatprogs`` (for mkfs.exfat) but lack
+    # the ``exfat`` kernel module / FUSE driver. An actual ``mount
+    # -t exfat`` here would fail on every GHA build despite the
+    # filesystem being structurally fine.
     err, state = cijoe.run_local(f"sudo blkid -o value -s LABEL {loop}p3")
     label = state.output().strip() if not err else ""
+    cijoe.run_local(f"sudo losetup -d {loop}")
     if err or label != "BTY_IMAGES":
-        cijoe.run_local(f"sudo losetup -d {loop}")
         log.error(f"p3 label expected BTY_IMAGES, got {label!r}")
         return errno.EIO
 
-    mount_dir = iso_path.parent / "_verify_mount"
-    mount_dir.mkdir(exist_ok=True)
-    err, _ = cijoe.run_local(f"sudo mount -o ro -t exfat {loop}p3 {mount_dir}")
-    if err:
-        cijoe.run_local(f"sudo losetup -d {loop}")
-        mount_dir.rmdir()
-        log.error("mount -t exfat p3 failed")
-        return err
-    cijoe.run_local(f"sudo umount {mount_dir}")
-    mount_dir.rmdir()
-    cijoe.run_local(f"sudo losetup -d {loop}")
-
-    log.info("ISO structure OK: 3 non-overlapping partitions, p3 mounts as exFAT BTY_IMAGES")
+    log.info("ISO structure OK: 3 non-overlapping partitions, p3 labeled BTY_IMAGES")
     return 0
 
 
