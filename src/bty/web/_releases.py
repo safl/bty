@@ -29,14 +29,14 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-# Names match the artifacts ``bty-media``'s ``live`` variant publishes
-# (see ``bty-media/scripts/live_build.py::PUBLISH_BASENAMES``).
+# Names match the artifacts the ``netboot-x86`` variant publishes
+# (see ``cijoe/scripts/live_build.py::PUBLISH_BASENAMES``).
 ARTIFACT_NAMES: tuple[str, ...] = (
-    "bty-live-x86_64.vmlinuz",
-    "bty-live-x86_64.initrd",
-    "bty-live-x86_64.squashfs",
+    "bty-netboot-x86_64.vmlinuz",
+    "bty-netboot-x86_64.initrd",
+    "bty-netboot-x86_64.squashfs",
 )
-SHA256_NAME = "bty-live-x86_64.sha256"
+SHA256_NAME = "bty-netboot-x86_64.sha256"
 ALL_NAMES = (*ARTIFACT_NAMES, SHA256_NAME)
 
 DEFAULT_REPO = "safl/bty"

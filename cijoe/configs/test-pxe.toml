@@ -9,9 +9,9 @@
 #   cijoe tasks/test-pxe.yaml --monitor -c configs/test-pxe.toml
 #
 # Pre-conditions:
-# - bty-server-x86_64.qcow2 + bty-live-x86_64.{vmlinuz,initrd,squashfs}
+# - bty-server-x86_64.qcow2 + bty-netboot-x86_64.{vmlinuz,initrd,squashfs}
 #   pre-built under ``~/system_imaging/disk/`` (run ``make build
-#   VARIANT=server-x86`` and ``make build VARIANT=live-x86`` first).
+#   VARIANT=server-x86`` and ``make build VARIANT=netboot-x86`` first).
 # - ``qemu-system-x86_64`` + ``genisoimage`` on PATH.
 # - KVM accessible (the bake VMs run with ``-enable-kvm``).
 # - Wall clock per run: 5-10 minutes.
@@ -69,12 +69,12 @@ needle = "iPXE"
 key = "ipxe-fetch-bootstrap"
 needle = "pxe-bootstrap.ipxe"
 
-# iPXE prints ``http://.../bty-live-x86_64.initrd... ok`` when it
+# iPXE prints ``http://.../bty-netboot-x86_64.initrd... ok`` when it
 # pulls the initrd; this is the cleanest proof the kernel+initrd
 # came down via the chain.
 [[test.pxe.chain_markers]]
 key = "kernel-initrd-fetched"
-needle = "bty-live-x86_64.initrd"
+needle = "bty-netboot-x86_64.initrd"
 
 # live-boot's initramfs HTTP-fetches the squashfs because the kernel
 # cmdline includes ``fetch=...squashfs``. The fetch line names the
@@ -82,7 +82,7 @@ needle = "bty-live-x86_64.initrd"
 # actually worked end-to-end.
 [[test.pxe.chain_markers]]
 key = "squashfs-fetched"
-needle = "bty-live-x86_64.squashfs"
+needle = "bty-netboot-x86_64.squashfs"
 
 [[test.pxe.chain_markers]]
 key = "flash-on-boot-running"

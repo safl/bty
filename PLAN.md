@@ -173,11 +173,13 @@ Raspberry Pi OS Lite image and customising it in a
 `qemu-aarch64-static` chroot (no QEMU full-system bake needed).
 Booting a Pi off SD is the homelab-friendliest server-deployment path.
 
-**`live-x86`** - kernel + initrd + squashfs trio that PXE clients
-chain into via the server's HTTP boot stack. The chroot ships
-`bty-flash-on-boot.service` (auto-flash mode) and
-`bty-tui-on-tty1.service` (interactive `bty-tui` on tty1), with the
-mode picked by kernel cmdline params from the server's iPXE chain.
+**`netboot-x86`** - kernel + initrd + squashfs trio that PXE
+clients chain into via the server's HTTP boot stack. The chroot
+ships `bty-flash-on-boot.service` (auto-flash mode) and
+`bty-tui-on-tty1.service` (interactive `bty-tui` on tty1), with
+the mode picked by kernel cmdline params from the server's iPXE
+chain. Renamed from `live-x86` in M19 phase 5 to disambiguate
+from `usb-x86` (which is also a live image).
 
 The intended operator experience for the server variants is
 appliance-grade:
@@ -351,7 +353,7 @@ and `release`.
 - **`v*` tags** - single unified release. `uv build` produces the
   wheel and sdist (PyPI publish via trusted publishing); the same
   workflow builds the four `bty-media` variants in parallel
-  (`usb-x86`, `server-x86`, `server-rpi`, `live-x86`), runs the
+  (`usb-x86`, `server-x86`, `server-rpi`, `netboot-x86`), runs the
   end-to-end PXE chain test against the freshly-built artefacts,
   builds HTML + PDF docs, and attaches every release-bound artifact
   to the GitHub release at the same tag. Operators get one release
@@ -448,14 +450,13 @@ Landed after the original 1.0 list:
     combos (kernel panic on GMKtec MiniBoxXS, kernel
     6.12.85+deb13-amd64). live-boot's SquashFS + tmpfs overlay is
     the canonical Debian path for ephemeral live media and is what
-    `live-x86` already uses. Phases 1-4 + 6 are done; phase 5
-    (delivery docs) and phase 7 (Windows-friendly partition
-    layout) are open.
+    `netboot-x86` already uses. Phases 1-6 are done; phase 7
+    (Windows-friendly partition layout) is open.
 
     1. **[done]** Add an `iso-hybrid` output target to the existing
        live-build config (parallel to the current `--binary-images
        netboot` output). Output: `bty-usb-x86_64.iso`. Most of the
-       chroot is shared with `live-x86` - this is genuinely a
+       chroot is shared with `netboot-x86` - this is genuinely a
        packaging variant. Driven by a new `usb-iso` cijoe variant
        (`cijoe/configs/usb-iso.toml`, `cijoe/tasks/usb.yaml`,
        `cijoe/scripts/usb_iso_build.py`); marked experimental in
@@ -486,11 +487,20 @@ Landed after the original 1.0 list:
        partition RO at `/var/lib/bty/images` so `bty-tui` and the
        flash flow find it at the default image-root path - no
        runtime auto-discovery needed.
-    5. Document delivery options: stock hybrid ISO with built-in
+    5. **[done]** Documented delivery options + renamed
+       `live-x86` -> `netboot-x86` (both deferred work folded
+       into the same commit). Stock hybrid ISO with built-in
        writable area; operators write it with their existing
        tooling (`dd`, Balena Etcher, Rufus) or drop it onto an
        existing Ventoy stick alongside their other rescue ISOs.
-       The project does not ship a stick-writing tool of its own.
+       The project does not ship a stick-writing tool of its
+       own. The `live-x86` rename addressed a long-standing
+       naming bug: both `usb-x86` and `live-x86` produced live
+       envs, so calling one "live" was ambiguous; the actual
+       distinguishing axis is delivery mechanism (USB vs PXE).
+       Artifact name dropped the redundant `-netboot` suffix:
+       `bty-live-x86_64-netboot/bty-live-x86_64.*` ->
+       `bty-netboot-x86_64/bty-netboot-x86_64.*`.
     6. **[done]** Retired the `overlayroot` dependency, the
        cloud-init usb-x86 bake (`cloudinit-base-usb.user`,
        `rootfs/usb/`, the cloud-init `usb-x86.toml` config,

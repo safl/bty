@@ -14,9 +14,9 @@ from a checkout.
 
 ```bash
 mkdir -p ~/system_imaging/disk && cd ~/system_imaging/disk
-curl -fLO https://github.com/safl/bty/releases/latest/download/bty-usb-x86_64.img.zst
-curl -fLO https://github.com/safl/bty/releases/latest/download/bty-usb-x86_64.img.zst.sha256
-sha256sum -c bty-usb-x86_64.img.zst.sha256
+curl -fLO https://github.com/safl/bty/releases/latest/download/bty-usb-x86_64.iso.zst
+curl -fLO https://github.com/safl/bty/releases/latest/download/bty-usb-x86_64.iso.zst.sha256
+sha256sum -c bty-usb-x86_64.iso.zst.sha256
 ```
 
 `releases/latest/download/<name>` always points at the newest tag;
@@ -25,21 +25,20 @@ swap `latest` for a specific tag (e.g. `v0.2.7`) if you want to pin.
 **Build from source** (when you need to modify the image):
 
 ```bash
-# prerequisites: qemu-system-x86_64, qemu-img, genisoimage, zstd,
-# pipx, KVM acceleration
-make media-deps           # one-time: pipx install cijoe
-make build VARIANT=usb-x86    # 15-25 min with KVM
+# prerequisites: live-build, debootstrap, squashfs-tools, xorriso,
+# exfatprogs, zstd, pipx, passwordless sudo
+make media-deps                    # one-time: pipx install cijoe
+sudo make build VARIANT=usb-x86    # 15-25 min
 ```
 
-The build downloads the Debian 13 cloud image, drives cloud-init in
-QEMU to bake the rootfs, partitions the disk (3 GB Debian root + 9 GB
-exFAT `BTY_IMAGES`), and emits:
+The build runs Debian's `live-build` (debootstrap + mksquashfs +
+mkinitramfs) to produce a hybrid ISO, post-processes it to append
+a writable `BTY_IMAGES` exFAT partition, and zstd-compresses the
+result. Emits:
 
-- `~/system_imaging/disk/bty-usb-x86_64.qcow2` - intermediate qcow2
-  (useful for QEMU smoke tests).
-- `~/system_imaging/disk/bty-usb-x86_64.img.zst` - distributable
-  artifact (the file you `dd` to a USB stick).
-- `~/system_imaging/disk/bty-usb-x86_64.img.zst.sha256` - checksum.
+- `~/system_imaging/disk/bty-usb-x86_64.iso.zst` - distributable
+  artifact (the file you decompress + `dd` to a USB stick).
+- `~/system_imaging/disk/bty-usb-x86_64-iso-zst.sha256` - checksum.
 
 ## Flash a USB stick
 
@@ -48,13 +47,16 @@ exFAT `BTY_IMAGES`), and emits:
 lsblk
 
 # /dev/sdX is the USB stick (NOT your local system disk).
-zstd -d --stdout ~/system_imaging/disk/bty-usb-x86_64.img.zst | \
+zstd -d --stdout ~/system_imaging/disk/bty-usb-x86_64.iso.zst | \
   sudo dd of=/dev/sdX bs=4M status=progress conv=fsync
 sync
 ```
 
-The stick now has the bty Debian rootfs partition plus an empty exFAT
-partition labelled `BTY_IMAGES`.
+The stick now has the bty live-boot ISO9660 + EFI partitions plus
+an empty exFAT partition labelled `BTY_IMAGES`. On first boot, a
+one-shot service grows `BTY_IMAGES` to fill the rest of the stick
+(only when empty - operator data is preserved on subsequent
+boots).
 
 ## Drop images onto the stick
 
@@ -77,10 +79,11 @@ live env auto-logins as root on `tty1`. From there you can run the CLI
 (`bty list disks`, `bty flash ...`) or `bty-tui` for an interactive
 terminal UI.
 
-The rootfs is mounted read-only with a tmpfs overlay (`overlayroot`),
-so anything you change in the live env vanishes on reboot. The
-`BTY_IMAGES` partition is *not* overlaid - files you copied there
-persist.
+The rootfs is a read-only SquashFS with a tmpfs overlay (live-boot's
+default), so anything you change in the live env vanishes on
+reboot. The `BTY_IMAGES` partition is mounted RO at
+`/var/lib/bty/images` inside the live env (read-write from any host
+OS when the stick is removed) - files you copied there persist.
 
 ## What you can do today
 

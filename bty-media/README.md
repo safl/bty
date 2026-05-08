@@ -12,7 +12,7 @@ Source content for the bty appliance images. Four variants:
 - **Server image, Raspberry Pi 4/5** (`VARIANT=server-rpi`) - same
   appliance role on arm64 for SD-card delivery to a Pi. Built via
   losetup-mount + chroot in `qemu-aarch64-static`.
-- **Network-flash live env** (`VARIANT=live-x86`) - kernel + initrd +
+- **Network-flash live env** (`VARIANT=netboot-x86`) - kernel + initrd +
   squashfs that PXE clients chain into. Built via live-build
   (`netboot` output). Carries the bty CLI plus a
   `bty-flash-on-boot.service` oneshot that reads `bty.*` parameters
@@ -26,7 +26,7 @@ cloud-init fold in, and the live-build config tree. The cijoe
 content lives at `cijoe/` at the repo root.
 
 Operators drive everything via the top-level Makefile:
-`make build VARIANT=usb-x86|server-x86|server-rpi|live-x86`.
+`make build VARIANT=usb-x86|server-x86|server-rpi|netboot-x86`.
 
 ## Layout
 
@@ -40,7 +40,7 @@ Operators drive everything via the top-level Makefile:
   file's path under the role subdirectory. Binary files (anything
   that is not valid UTF-8) are emitted with `encoding: b64`.
 - `live-build/` - live-build config tree shared by `usb-x86` (which
-  uses `iso-hybrid` output) and `live-x86` (which uses `netboot`
+  uses `iso-hybrid` output) and `netboot-x86` (which uses `netboot`
   output). The `BTY_USB_ISO=1` env var switches `auto/config`
   between the two modes.
 
@@ -49,7 +49,7 @@ Operators drive everything via the top-level Makefile:
 From the repo root:
 
 ```
-make build VARIANT=usb-x86|server-x86|server-rpi|live-x86
+make build VARIANT=usb-x86|server-x86|server-rpi|netboot-x86
 ```
 
 dispatches to one of four cijoe task files. The Makefile picks the
@@ -89,7 +89,7 @@ right one based on the variant:
   the bty-lab venv, then re-compress to `.img.zst`. Two steps:
   `bty_wheel_stage` then `rpi_image_customize`.
 
-- `live-x86` -> `cijoe tasks/live.yaml`. Drives Debian's `live-build`
+- `netboot-x86` -> `cijoe tasks/netboot.yaml`. Drives Debian's `live-build`
   (debootstrap + mksquashfs + mkinitramfs) directly on the build
   host - no QEMU, no cloud-init. Output is the kernel + initrd +
   squashfs trio for PXE chain-boot.
@@ -106,7 +106,7 @@ server-x86 (cloud-init bake):
 - `uv` for `bty_wheel_stage` to build the bty-lab wheel; install
   with `pipx install uv` if needed
 
-usb-x86 + live-x86 (live-build):
+usb-x86 + netboot-x86 (live-build):
 - `live-build` (`sudo apt install live-build`)
 - `debootstrap`, `squashfs-tools`, `xorriso` (pulled in by
   `live-build`'s recommends, or install explicitly)
@@ -143,18 +143,18 @@ server-rpi:
 - `~/system_imaging/disk/bty-server-rpi-arm64.img.zst` - final
   artifact for `dd` to an SD card.
 
-live-x86:
-- `~/system_imaging/disk/bty-live-x86_64.vmlinuz` - kernel
-- `~/system_imaging/disk/bty-live-x86_64.initrd` - initramfs
-- `~/system_imaging/disk/bty-live-x86_64.squashfs` - overlay rootfs
-- `~/system_imaging/disk/bty-live-x86_64.sha256` - manifest
+netboot-x86:
+- `~/system_imaging/disk/bty-netboot-x86_64.vmlinuz` - kernel
+- `~/system_imaging/disk/bty-netboot-x86_64.initrd` - initramfs
+- `~/system_imaging/disk/bty-netboot-x86_64.squashfs` - overlay rootfs
+- `~/system_imaging/disk/bty-netboot-x86_64.sha256` - manifest
 
 ## Status
 
 All four variants ship on every tagged release at
 [the GitHub releases page](https://github.com/safl/bty/releases).
 The end-to-end PXE chain test (``make test-pxe``) gates each release
-on usb-x86, server-x86, and live-x86 building cleanly and the
+on usb-x86, server-x86, and netboot-x86 building cleanly and the
 chain working end to end. server-rpi (Raspberry Pi 4 / 5) builds in
 the same matrix but isn't covered by the PXE chain test (which is
 amd64-only); first-boot smoke-testing happens out-of-band on real
@@ -169,7 +169,7 @@ hardware. Most operators never run this build pipeline themselves -
   phase 6 retired the cloud-init bake that depended on it).
   End-to-end use case in
   [Walkthrough: USB](../docs/src/walkthrough-usb.md).
-- **live-x86.** Kernel + initrd + squashfs trio used by PXE clients.
+- **netboot-x86.** Kernel + initrd + squashfs trio used by PXE clients.
   The chroot ships `bty-flash-on-boot.service` (oneshot, after
   `network-online.target`); it reads `bty.server=`, `bty.mac=`,
   `bty.image_url=`, and `bty.provisioning=` from `/proc/cmdline`,

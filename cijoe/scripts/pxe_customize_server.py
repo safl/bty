@@ -30,9 +30,9 @@ from argparse import ArgumentParser
 from pathlib import Path
 
 ARTIFACT_NAMES = (
-    "bty-live-x86_64.vmlinuz",
-    "bty-live-x86_64.initrd",
-    "bty-live-x86_64.squashfs",
+    "bty-netboot-x86_64.vmlinuz",
+    "bty-netboot-x86_64.initrd",
+    "bty-netboot-x86_64.squashfs",
 )
 
 
@@ -80,7 +80,7 @@ def main(args, cijoe):
     for name in ARTIFACT_NAMES:
         if not (artifact_dir / name).is_file():
             log.error(f"live artefact missing: {artifact_dir / name}")
-            log.error("Run `make build VARIANT=live-x86` from the repo root first")
+            log.error("Run `make build VARIANT=netboot-x86` from the repo root first")
             return errno.ENOENT
 
     # Workspace: ``cijoe/_build/test-pxe/`` (gitignored alongside the

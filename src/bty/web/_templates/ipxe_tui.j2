@@ -12,6 +12,6 @@
 # network" without prior configuration.
 
 set bty-base http://{{ host }}
-kernel ${bty-base}/boot/bty-live-x86_64.vmlinuz boot=live fetch=${bty-base}/boot/bty-live-x86_64.squashfs components quiet console=tty0 console=ttyS0,115200 bty.mode=interactive bty.server=${bty-base} bty.mac={{ mac }}
-initrd ${bty-base}/boot/bty-live-x86_64.initrd
+kernel ${bty-base}/boot/bty-netboot-x86_64.vmlinuz boot=live fetch=${bty-base}/boot/bty-netboot-x86_64.squashfs components quiet console=tty0 console=ttyS0,115200 bty.mode=interactive bty.server=${bty-base} bty.mac={{ mac }}
+initrd ${bty-base}/boot/bty-netboot-x86_64.initrd
 boot

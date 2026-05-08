@@ -87,7 +87,7 @@ upstream Raspberry Pi OS Lite image and customising it in a
 to an SD card and boots a Pi 4 or Pi 5; first-boot ends at the same
 `bty / bty` credential as the x86 server image.
 
-**Network-flash live env (`live-x86`).** Kernel + initrd + squashfs
+**Network-flash live env (`netboot-x86`).** Kernel + initrd + squashfs
 trio that PXE clients chain into. Built via Debian's `live-build`. The
 chroot ships a `bty-flash-on-boot.service` oneshot that reads its
 assignment from `/proc/cmdline`, downloads the assigned image, runs

@@ -29,7 +29,7 @@ name: Release
 #
 # ``workflow_dispatch`` runs ``test`` + ``build-wheel`` only - smoke
 # test of the package side. Ad-hoc media builds happen locally via
-# the top-level Makefile (``make build VARIANT=usb-x86|server-x86|live-x86``).
+# the top-level Makefile (``make build VARIANT=usb-x86|server-x86|netboot-x86``).
 #
 # First publish (claiming the bty-lab name) requires a one-time PyPI
 # setup: register a Pending Publisher on https://pypi.org targeting:
@@ -108,7 +108,7 @@ jobs:
         include:
           - variant: server-x86
             kind: disk
-          - variant: live-x86
+          - variant: netboot-x86
             kind: live
           - variant: usb-x86
             kind: live
@@ -167,7 +167,7 @@ jobs:
           # are live-build's required deps. ``exfatprogs`` (mkfs.exfat)
           # is needed by the usb-x86 variant's post-build step that
           # appends a writable BTY_IMAGES partition to the cooked
-          # hybrid ISO; harmless on the live-x86 build that doesn't
+          # hybrid ISO; harmless on the netboot-x86 build that doesn't
           # run that step. (sfdisk used by the same step is in
           # util-linux, always present on Ubuntu runners.)
           sudo apt-get install -y --no-install-recommends \
@@ -229,16 +229,16 @@ jobs:
             ~/system_imaging/disk/bty-server-rpi-arm64.img.zst
             ~/system_imaging/disk/bty-server-rpi-arm64.img.zst.sha256
 
-      - name: Upload artifact (live variant)
-        if: matrix.variant == 'live-x86'
+      - name: Upload artifact (netboot-x86 variant)
+        if: matrix.variant == 'netboot-x86'
         uses: actions/upload-artifact@v7
         with:
-          name: bty-live-x86_64-netboot
+          name: bty-netboot-x86_64
           path: |
-            ~/system_imaging/disk/bty-live-x86_64.vmlinuz
-            ~/system_imaging/disk/bty-live-x86_64.initrd
-            ~/system_imaging/disk/bty-live-x86_64.squashfs
-            ~/system_imaging/disk/bty-live-x86_64.sha256
+            ~/system_imaging/disk/bty-netboot-x86_64.vmlinuz
+            ~/system_imaging/disk/bty-netboot-x86_64.initrd
+            ~/system_imaging/disk/bty-netboot-x86_64.squashfs
+            ~/system_imaging/disk/bty-netboot-x86_64.sha256
 
       - name: Upload artifact (usb-x86 variant)
         if: matrix.variant == 'usb-x86'
@@ -287,10 +287,10 @@ jobs:
           name: bty-server-x86_64-img-zst
           path: ~/system_imaging/disk/
 
-      - name: Download live artefacts
+      - name: Download netboot artefacts
         uses: actions/download-artifact@v8
         with:
-          name: bty-live-x86_64-netboot
+          name: bty-netboot-x86_64
           path: ~/system_imaging/disk/
 
       # The cijoe ``pxe_customize_server`` step rehydrates
@@ -374,7 +374,7 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           path: gathered/
-          pattern: '{dist,bty-*-img-zst,bty-live-x86_64-netboot,bty-usb-x86_64-iso-zst,docs-pdf}'
+          pattern: '{dist,bty-*-img-zst,bty-netboot-x86_64,bty-usb-x86_64-iso-zst,docs-pdf}'
       - name: List gathered artifacts
         run: find gathered -type f | sort
       - name: Attach to release
@@ -389,7 +389,7 @@ jobs:
             gathered/bty-usb-x86_64-iso-zst/*
             gathered/bty-server-x86_64-img-zst/*
             gathered/bty-server-rpi-arm64-img-zst/*
-            gathered/bty-live-x86_64-netboot/*
+            gathered/bty-netboot-x86_64/*
             gathered/docs-pdf/*
           fail_on_unmatched_files: true
 

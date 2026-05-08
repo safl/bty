@@ -9,7 +9,7 @@ into a per-variant staging directory under ``bty-media/``:
   ``bty-media/rootfs/server/opt/bty/`` (consumed by the cloud-init
   ``write_files`` block emitted by ``gen_userdata.py``; the server's
   runcmd ``pip install``s it into ``/opt/bty/venv``).
-- ``live-x86`` / ``usb-x86`` ->
+- ``netboot-x86`` / ``usb-x86`` ->
   ``bty-media/live-build/config/includes.chroot/opt/bty/`` (consumed
   by the live-build hook ``0500-bty-install.hook.chroot``, which
   ``pip install``s it into the chroot's ``/opt/bty/venv``).
@@ -36,7 +36,7 @@ from pathlib import Path
 TARGET_DIRS: dict[str, Path] = {
     "server-x86": Path("rootfs") / "server" / "opt" / "bty",
     "server-rpi": Path("rootfs") / "server" / "opt" / "bty",
-    "live-x86": Path("live-build") / "config" / "includes.chroot" / "opt" / "bty",
+    "netboot-x86": Path("live-build") / "config" / "includes.chroot" / "opt" / "bty",
     "usb-x86": Path("live-build") / "config" / "includes.chroot" / "opt" / "bty",
 }
 

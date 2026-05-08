@@ -8,10 +8,12 @@
 #   - bty-web tests (no extra system tooling beyond Python deps)
 #   - PXE chain test (qemu-system + KVM helpers + sshpass for debug)
 #   - bty-media bake pipelines:
-#       * usb / server: qemu-system + genisoimage for cloud-init seed
-#       * live: live-build + debootstrap + squashfs-tools + xorriso
-#                (plus root for the chroot phase - sudo prompts you
-#                interactively when ``sudo make build VARIANT=live-x86``)
+#       * server-x86: qemu-system + genisoimage for cloud-init seed
+#       * usb-x86 / netboot-x86: live-build + debootstrap +
+#                squashfs-tools + xorriso + exfatprogs (plus root for
+#                the chroot phase - sudo prompts you interactively
+#                when ``sudo make build VARIANT=usb-x86`` /
+#                ``netboot-x86``)
 #       * server-rpi: qemu-user-static + binfmt-support + xz-utils
 #                for the arm64 chroot customisation of Raspberry Pi
 #                OS Lite
@@ -125,10 +127,10 @@ cat <<'EOF'
     sudo make build VARIANT=usb-x86         # USB live ISO via live-build (~15m, root)
     make build VARIANT=server-x86           # server appliance (~15m, cloud-init)
     make build VARIANT=server-rpi           # RPi 4/5 server appliance
-    sudo make build VARIANT=live-x86        # PXE live trio (~10m, root)
+    sudo make build VARIANT=netboot-x86     # PXE netboot trio (~10m, root)
     make test-pxe                       # end-to-end PXE chain
 
-  Note: ``make build VARIANT=usb-x86`` and ``live-x86`` need root
+  Note: ``make build VARIANT=usb-x86`` and ``netboot-x86`` need root
   because live-build does a chroot + mount-bind dance; ``server-x86``
   and ``server-rpi`` don't (cloud-init in QEMU and qemu-user-static
   chroot, both unprivileged).

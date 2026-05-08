@@ -1,31 +1,33 @@
 """
-Build the bty network-flash live env via live-build
-====================================================
+Build the bty network-boot live env via live-build
+==================================================
 
 Drives Debian's live-build to produce kernel + initrd + squashfs
 artifacts that bty-server hosts over HTTP for PXE clients to chain
-into. Structurally different from ``diskimage_build`` (which bakes a
-.img.zst via QEMU + cloud-init) - live-build runs debootstrap,
-mksquashfs, and mkinitramfs directly on the build host, no QEMU.
+into via iPXE. Structurally different from ``diskimage_build``
+(which bakes a .img.zst via QEMU + cloud-init) - live-build runs
+debootstrap, mksquashfs, and mkinitramfs directly on the build
+host, no QEMU. Same chroot config tree as ``usb_iso_build``; only
+the binary-images output mode differs.
 
 Workflow:
 
 1. Copy ``bty-media/live-build/`` (the live-build config tree) into
-   a fresh ``cijoe/_build/live/`` working dir.
+   a fresh ``cijoe/_build/netboot/`` working dir.
 2. Run ``sudo lb clean --all`` (idempotency) then ``sudo lb build``.
    live-build needs root for chroot operations; the build host (CI
    runner or local dev) must have passwordless sudo.
 3. Publish ``binary/live/{vmlinuz,initrd.img,filesystem.squashfs}``
    to the ``publish.dir`` from the cijoe config, renamed to
-   ``bty-live-x86_64.{vmlinuz,initrd,squashfs}``.
+   ``bty-netboot-x86_64.{vmlinuz,initrd,squashfs}``.
 4. Write a single sha256 manifest covering all three artifacts.
 
 The cwd at run time is ``cijoe/`` (the Makefile cd's there before
 invoking cijoe), so the bty-media tree lives at
 ``Path.cwd().parent / "bty-media"`` and the build scratch dir is
-``Path.cwd() / "_build" / "live"``.
+``Path.cwd() / "_build" / "netboot"``.
 
-Skipped for any variant other than ``live``.
+Skipped for any variant other than ``netboot-x86``.
 
 Retargetable: False
 """
@@ -40,9 +42,9 @@ from argparse import ArgumentParser
 from pathlib import Path
 
 PUBLISH_BASENAMES = (
-    "bty-live-x86_64.vmlinuz",
-    "bty-live-x86_64.initrd",
-    "bty-live-x86_64.squashfs",
+    "bty-netboot-x86_64.vmlinuz",
+    "bty-netboot-x86_64.initrd",
+    "bty-netboot-x86_64.squashfs",
 )
 
 
@@ -56,25 +58,24 @@ def main(args, cijoe):
     bty_media = cijoe_dir.parent / "bty-media"
 
     variant = cijoe.getconf("bty", {}).get("variant", "")
-    role = variant.split("-")[0]
-    if role != "live":
-        log.info(f"Skipping live_build (variant={variant!r}; only the 'live' role runs lb build)")
+    if variant != "netboot-x86":
+        log.info(f"Skipping live_build (variant={variant!r}; only 'netboot-x86' runs lb netboot)")
         return 0
 
     images = cijoe.getconf("system-imaging.images", {})
-    image = images.get("bty-live-x86_64")
+    image = images.get("bty-netboot-x86_64")
     if not image:
-        log.error("missing system-imaging.images.bty-live-x86_64 in config")
+        log.error("missing system-imaging.images.bty-netboot-x86_64 in config")
         return errno.EINVAL
 
     publish_dir_str = image.get("publish", {}).get("dir")
     if not publish_dir_str:
-        log.error("system-imaging.images.bty-live-x86_64.publish.dir is unset")
+        log.error("system-imaging.images.bty-netboot-x86_64.publish.dir is unset")
         return errno.EINVAL
     publish_dir = Path(publish_dir_str)
     publish_dir.mkdir(parents=True, exist_ok=True)
 
-    build_dir = cijoe_dir / "_build" / "live"
+    build_dir = cijoe_dir / "_build" / "netboot"
     if build_dir.exists():
         # ``lb`` writes a chroot tree owned by root; rm needs sudo.
         err, _ = cijoe.run_local(f"sudo rm -rf {build_dir}")
@@ -151,7 +152,7 @@ def main(args, cijoe):
         cijoe.run_local(f"sudo chown {uid}:{gid} {dst}")
         log.info(f"published {dst}")
 
-    sha256_path = publish_dir / "bty-live-x86_64.sha256"
+    sha256_path = publish_dir / "bty-netboot-x86_64.sha256"
     err, _ = cijoe.run_local(
         f"sh -c 'cd {publish_dir} && sha256sum {' '.join(PUBLISH_BASENAMES)} > {sha256_path}'"
     )
@@ -160,6 +161,6 @@ def main(args, cijoe):
         return err
 
     cijoe.run_local(f"cat {sha256_path}")
-    cijoe.run_local(f"ls -la {publish_dir}/bty-live-x86_64.*")
+    cijoe.run_local(f"ls -la {publish_dir}/bty-netboot-x86_64.*")
 
     return 0

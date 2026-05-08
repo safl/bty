@@ -28,7 +28,7 @@ timezone = "UTC"
 [cijoe.workflow]
 fail_fast = true
 
-# Where the published artifact lands. Mirrors the live-x86 /
+# Where the published artifact lands. Mirrors the netboot-x86 /
 # server-x86 variants' default so all images live under one tree.
 [system-imaging.images.bty-usb-x86_64-iso]
 publish.dir = "{{ local.env.HOME }}/system_imaging/disk"

@@ -55,9 +55,9 @@ from argparse import ArgumentParser
 from pathlib import Path
 
 ARTIFACT_NAMES = (
-    "bty-live-x86_64.vmlinuz",
-    "bty-live-x86_64.initrd",
-    "bty-live-x86_64.squashfs",
+    "bty-netboot-x86_64.vmlinuz",
+    "bty-netboot-x86_64.initrd",
+    "bty-netboot-x86_64.squashfs",
 )
 
 HEALTHZ_TIMEOUT = 300  # cloud-init + bty-web-init + bty-web takes a while

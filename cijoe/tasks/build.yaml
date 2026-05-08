@@ -29,7 +29,7 @@ doc: |
 
   ``server-rpi`` uses ``tasks/build-rpi.yaml`` instead (chroot-via-
   qemu-aarch64-static, no QEMU full-system bake). ``usb-x86`` and
-  ``live-x86`` use ``tasks/usb.yaml`` / ``tasks/live.yaml``
+  ``netboot-x86`` use ``tasks/usb.yaml`` / ``tasks/netboot.yaml``
   respectively (live-build, no QEMU full-system bake either).
 
 steps:

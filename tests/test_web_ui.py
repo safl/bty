@@ -289,10 +289,10 @@ def test_ui_boot_page_renders_with_artifact_state(client: TestClient) -> None:
     assert r.status_code == 200
     body = r.text
     for name in (
-        "bty-live-x86_64.vmlinuz",
-        "bty-live-x86_64.initrd",
-        "bty-live-x86_64.squashfs",
-        "bty-live-x86_64.sha256",
+        "bty-netboot-x86_64.vmlinuz",
+        "bty-netboot-x86_64.initrd",
+        "bty-netboot-x86_64.squashfs",
+        "bty-netboot-x86_64.sha256",
     ):
         assert name in body, name
     # Empty boot dir => four "missing" badges (warning kind).

@@ -1,15 +1,19 @@
 doc: |
-  bty network-flash live env build
-  ================================
+  bty network-boot live env build
+  ===============================
 
-  Builds the kernel + initrd + squashfs that PXE clients chain into
-  via the bty server's HTTP boot stack. The chroot carries the bty
-  runtime, ``bty-flash-on-boot.service`` (auto-flash mode), and
+  Builds the kernel + initrd + squashfs trio that PXE clients chain
+  into via the bty server's HTTP boot stack. The chroot carries the
+  bty runtime, ``bty-flash-on-boot.service`` (auto-flash mode), and
   ``bty-tui-on-tty1.service`` (interactive mode). The server's iPXE
   chain hands the live env its mode via kernel command line:
   ``bty.server=``, ``bty.mac=``, plus either ``bty.image_url=`` +
   ``bty.provisioning=`` (auto-flash, ``boot_policy=flash``) or
   ``bty.mode=interactive`` (TUI, ``boot_policy=tui``).
+
+  Renamed from ``tasks/live.yaml`` to ``tasks/netboot.yaml`` in M19
+  phase 5: the variant moved from ``live-x86`` to ``netboot-x86``
+  to disambiguate from ``usb-x86`` (which is also a live image).
 
   Steps:
 
@@ -21,7 +25,7 @@ doc: |
   2. ``live_build`` - copies ``live-build/`` into a working dir,
      runs ``lb clean --all && lb build`` (debootstrap, mksquashfs,
      mkinitramfs), and publishes
-     ``bty-live-x86_64.{vmlinuz,initrd,squashfs}`` plus a sha256
+     ``bty-netboot-x86_64.{vmlinuz,initrd,squashfs}`` plus a sha256
      manifest under ``publish.dir``.
 
   Requires: live-build on the build host (``apt install live-build``)

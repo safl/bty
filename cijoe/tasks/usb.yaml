@@ -3,7 +3,7 @@ doc: |
   ===============================================
 
   Builds a hybrid ISO from the same live-build chroot that produces
-  the netboot artifacts for ``live-x86``. The output is a stock
+  the netboot artifacts for ``netboot-x86``. The output is a stock
   bootable ISO image (BIOS + UEFI) that operators write to a USB
   stick with whatever tool they prefer (``dd``, Balena Etcher,
   Rufus) or drop onto a Ventoy stick alongside other rescue ISOs.

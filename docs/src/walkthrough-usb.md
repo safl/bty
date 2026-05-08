@@ -44,9 +44,9 @@ newest version, so you can pin to "latest" or to a specific tag.
 ```bash
 mkdir -p ~/system_imaging/disk && cd ~/system_imaging/disk
 
-curl -fLO https://github.com/safl/bty/releases/latest/download/bty-usb-x86_64.img.zst
-curl -fLO https://github.com/safl/bty/releases/latest/download/bty-usb-x86_64.img.zst.sha256
-sha256sum -c bty-usb-x86_64.img.zst.sha256
+curl -fLO https://github.com/safl/bty/releases/latest/download/bty-usb-x86_64.iso.zst
+curl -fLO https://github.com/safl/bty/releases/latest/download/bty-usb-x86_64.iso.zst.sha256
+sha256sum -c bty-usb-x86_64.iso.zst.sha256
 ```
 
 For a specific version, swap `latest` for the tag (e.g. `v0.2.7`).
@@ -55,26 +55,22 @@ Browse all releases at <https://github.com/safl/bty/releases>.
 ### Option B: Build from a checkout (when you want to modify it)
 
 ```bash
-make media-deps           # one-time: pipx installs cijoe
-make build VARIANT=usb-x86    # ~20 minutes with KVM
+make media-deps                    # one-time: pipx installs cijoe
+sudo make build VARIANT=usb-x86    # ~15 minutes
 ```
 
-What this does: drives a Debian 13 cloud-image through cloud-init in
-QEMU, partitions the disk into a 3 GiB Debian root + a 9 GiB exFAT
-`BTY_IMAGES` volume, installs the bty CLI + TUI into the root, and
-emits an `.img.zst` distributable.
+What this does: runs Debian's `live-build` (debootstrap + mksquashfs
++ mkinitramfs) directly on the build host (no QEMU, no cloud-init)
+to produce a hybrid ISO carrying the bty CLI + TUI, then post-
+processes the ISO to append a writable `BTY_IMAGES` exFAT partition,
+and zstd-compresses the result.
 
 When it finishes:
 
 ```text
 ~/system_imaging/disk/
-  bty-usb-x86_64.img.zst         <- the file you'll write to the stick
-  bty-usb-x86_64.img.zst.sha256
-```
-
-```{note}
-For a recorded walkthrough of the build, see
-[`docs/asciinema/usb-build.sh`](https://github.com/safl/bty/blob/main/docs/asciinema/usb-build.sh).
+  bty-usb-x86_64.iso.zst             <- the file you'll write to the stick
+  bty-usb-x86_64-iso-zst.sha256
 ```
 
 ## Step 2: Write the image to a USB stick
@@ -92,7 +88,7 @@ internal disk.
 Decompress + write in one pipeline:
 
 ```bash
-zstd -d --stdout ~/system_imaging/disk/bty-usb-x86_64.img.zst | \
+zstd -d --stdout ~/system_imaging/disk/bty-usb-x86_64.iso.zst | \
   sudo dd of=/dev/sdX bs=4M status=progress conv=fsync
 sync
 ```

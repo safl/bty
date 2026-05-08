@@ -44,9 +44,9 @@ def app_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Test
     boot_root = tmp_path / "boot"
     boot_root.mkdir()
     # Seed a fake live-env triplet so /boot/{name} tests can hit real files.
-    (boot_root / "bty-live-x86_64.vmlinuz").write_bytes(b"fake-kernel")
-    (boot_root / "bty-live-x86_64.initrd").write_bytes(b"fake-initrd")
-    (boot_root / "bty-live-x86_64.squashfs").write_bytes(b"fake-squashfs")
+    (boot_root / "bty-netboot-x86_64.vmlinuz").write_bytes(b"fake-kernel")
+    (boot_root / "bty-netboot-x86_64.initrd").write_bytes(b"fake-initrd")
+    (boot_root / "bty-netboot-x86_64.squashfs").write_bytes(b"fake-squashfs")
     # Seed an image too so /images/{name} tests work.
     (image_root / "demo.qcow2").write_bytes(b"fake-image")
     app = create_app(
@@ -362,9 +362,9 @@ def test_put_boot_uploads_to_boot_root(app_client: TestClient) -> None:
     under boot_root - this is how the live trio gets onto the
     appliance via the API instead of scp / fetch-from-release."""
     body = b"vmlinuz-bytes-here"
-    r = app_client.put("/boot/bty-live-x86_64.vmlinuz", content=body, cookies=AUTH)
+    r = app_client.put("/boot/bty-netboot-x86_64.vmlinuz", content=body, cookies=AUTH)
     assert r.status_code == 200
-    served = app_client.get("/boot/bty-live-x86_64.vmlinuz")
+    served = app_client.get("/boot/bty-netboot-x86_64.vmlinuz")
     assert served.status_code == 200
     assert served.content == body
 
@@ -501,10 +501,10 @@ def test_pxe_flash_policy_returns_chain_with_args(app_client: TestClient) -> Non
     # Template uses an iPXE variable for the base URL so the script
     # reads cleanly; the variable is set from the request's Host.
     assert "set bty-base http://bty.local:8080" in body
-    assert "kernel ${bty-base}/boot/bty-live-x86_64.vmlinuz" in body
-    assert "initrd ${bty-base}/boot/bty-live-x86_64.initrd" in body
+    assert "kernel ${bty-base}/boot/bty-netboot-x86_64.vmlinuz" in body
+    assert "initrd ${bty-base}/boot/bty-netboot-x86_64.initrd" in body
     # live-boot needs ``fetch=`` to know where to grab the squashfs.
-    assert "fetch=${bty-base}/boot/bty-live-x86_64.squashfs" in body
+    assert "fetch=${bty-base}/boot/bty-netboot-x86_64.squashfs" in body
     # Console mirror to ttyS0 so headless / IPMI / test serial works.
     assert "console=ttyS0,115200" in body
     # Cmdline params: live env's bty-flash-on-boot reads these.
@@ -529,8 +529,8 @@ def test_pxe_tui_policy_returns_interactive_chain(app_client: TestClient) -> Non
     body = r.text
     assert body.startswith("#!ipxe"), body
     assert "set bty-base http://bty.local:8080" in body
-    assert "kernel ${bty-base}/boot/bty-live-x86_64.vmlinuz" in body
-    assert "initrd ${bty-base}/boot/bty-live-x86_64.initrd" in body
+    assert "kernel ${bty-base}/boot/bty-netboot-x86_64.vmlinuz" in body
+    assert "initrd ${bty-base}/boot/bty-netboot-x86_64.initrd" in body
     assert "bty.mode=interactive" in body
     assert "bty.server=${bty-base}" in body
     assert "bty.mac=aa:bb:cc:dd:ee:ff" in body
@@ -669,7 +669,7 @@ def test_machine_response_includes_workflow_columns(app_client: TestClient) -> N
 
 
 def test_boot_artifact_serves_file(app_client: TestClient) -> None:
-    r = app_client.get("/boot/bty-live-x86_64.vmlinuz")
+    r = app_client.get("/boot/bty-netboot-x86_64.vmlinuz")
     assert r.status_code == 200
     assert r.content == b"fake-kernel"
 
