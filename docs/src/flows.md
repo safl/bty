@@ -60,7 +60,7 @@ zero per-MAC configuration.
    target is happy with what it's running).
 
 This flow is also useful for the operator who just wants a
-one-off remote flash without standing up a USB stick: any unknown
+one-off remote flash without preparing a USB stick: any unknown
 MAC on the segment becomes a TUI session reachable via IPMI / serial
 console.
 

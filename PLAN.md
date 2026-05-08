@@ -35,10 +35,10 @@ bty is shaped to serve both ends of the spectrum:
 
 - **Ad-hoc.** An operator with a single box and no infrastructure should
   be able to grab the USB live image, plug it in, flash, walk away. No
-  server to stand up, no MAC registration, no network to wire. That path
+  server to set up, no MAC registration, no network to wire. That path
   is owned by `bty-media`'s USB live image, plus `bty` and `bty-tui`.
 - **DevOps infrastructure.** A lab or CI environment with a fleet should
-  be able to stand up a single provisioning server, register machines by
+  be able to set up a single provisioning server, register machines by
   MAC, and let reflashes happen on schedule, on demand, or on failure
   without operator involvement. That path is owned by `bty-media`'s
   server image, plus `bty-web`.
@@ -147,7 +147,7 @@ GMKtec mini-PC run the same code at different scales.
 
 Sibling directory at the repo root, *not* a Python package. Builds the
 bootable images that turn this toolkit into something an operator can
-carry around or stand up on a server. Follows the layout used by
+carry around or set up on a server. Follows the layout used by
 `safl/jellyfin-kiosk-appliance-builder` (jkab); the cijoe orchestration
 (configs, scripts, tasks) lives at the top-level `cijoe/` directory in
 this repo and consumes the `bty-media/` content (rootfs trees,

@@ -20,7 +20,7 @@ fast, and boring.
 bty serves both ends of the operator spectrum:
 
 - **Ad-hoc.** USB live image carrying the `bty` runtime and bundled
-  images. Plug in, boot, flash, walk away. No server to stand up.
+  images. Plug in, boot, flash, walk away. No server to set up.
 - **DevOps infrastructure.** Server image that runs `bty-web` and the
   iPXE/TFTP/HTTP services. Fleet members are registered by MAC address;
   reflashes happen on schedule, on demand, or on failure without operator
