@@ -1095,3 +1095,64 @@ def test_numeric_pane_jumps_focus_correctly(
             assert app._stage == tui_app._WizardStage.SELECT_IMAGE  # type: ignore[reportPrivateUsage]
 
     _run(_drive())
+
+
+def test_action_flash_success_transitions_to_stage_4(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """End-to-end happy path: when both modals dismiss with True,
+    ``action_flash`` transitions the wizard to Stage 4
+    (REBOOT_OR_DONE) and focuses the seg-4 Reboot button.
+
+    Avoids the full modal interaction by stubbing
+    ``push_screen_wait`` to return the True sequence. The flash
+    pipeline (probe / make_plan / validate_plan) gets stubbed out
+    so we only test the wizard's post-success transition.
+    """
+    _patch_data_sources(
+        monkeypatch,
+        images_list=[_fake_image()],
+        disks_list=[_fake_disk()],
+    )
+    plan = _fake_flash_plan()
+    monkeypatch.setattr(tui_app.flash, "probe_image", lambda _path: plan.image)
+    monkeypatch.setattr(tui_app.flash, "probe_target", lambda _path: plan.target)
+
+    app = tui_app.BtyTui(image_root=tmp_path / "images")
+
+    # Stub push_screen_wait to skip both modals and return True
+    # twice (FlashConfirmScreen confirmed -> True, FlashStatusScreen
+    # success -> True). Lets us test the wizard transition without
+    # threading the full modal interactions.
+    confirmed_then_success = iter([True, True])
+
+    async def _fake_push_screen_wait(_screen: object) -> bool:
+        return next(confirmed_then_success)
+
+    monkeypatch.setattr(app, "push_screen_wait", _fake_push_screen_wait)
+
+    async def _drive() -> None:
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            # Pre-commit a wizard selection so action_flash has
+            # something to work with (skip the manual Enter on
+            # rows; we're testing the post-flash transition).
+            app._selected_image = next(  # type: ignore[reportPrivateUsage]
+                iter(app._images_by_key.values())  # type: ignore[reportPrivateUsage]
+            )
+            app._selected_disk = next(  # type: ignore[reportPrivateUsage]
+                iter(app._disks_by_key.values())  # type: ignore[reportPrivateUsage]
+            )
+            app._render_status()  # type: ignore[reportPrivateUsage]
+            assert app._stage == tui_app._WizardStage.CONFIRM_FLASH  # type: ignore[reportPrivateUsage]
+
+            app.action_flash()  # type: ignore[unused-coroutine]
+            for _ in range(20):
+                await pilot.pause()
+
+            # Both modals "succeeded" via the stub -> wizard should
+            # be at Stage 4.
+            assert app._post_flash is True  # type: ignore[reportPrivateUsage]
+            assert app._stage == tui_app._WizardStage.REBOOT_OR_DONE  # type: ignore[reportPrivateUsage]
+
+    _run(_drive())
