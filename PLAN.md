@@ -486,15 +486,16 @@ Landed after the original 1.0 list:
        the operator can drop `*.img.zst` files onto from any host
        OS - same UX the legacy cloud-init `usb-x86` provided, but
        baked statically instead of carved by cloud-init runcmd.
-    4. **[done]** First-boot grow + mount.
-       `bty-grow-images-partition.service` extends `BTY_IMAGES` to
-       fill the rest of the stick (only when empty so operator
-       data is preserved; multiple safety gates short-circuit the
-       grow on Ventoy / loopback / netboot / already-grown
-       sticks). `var-lib-bty-images.mount` then mounts the
-       partition RO at `/var/lib/bty/images` so `bty-tui` and the
-       flash flow find it at the default image-root path - no
-       runtime auto-discovery needed.
+    4. **[done]** Mount BTY_IMAGES at boot.
+       `var-lib-bty-images.mount` mounts the partition RO at
+       `/var/lib/bty/images` so `bty-tui` and the flash flow
+       find it at the default image-root path - no runtime
+       auto-discovery needed. (An auto-grow service used to live
+       here; removed in v0.5.11 -- the live env's tmpfs sentinel
+       didn't survive reboots, so the service ran every boot and
+       destroyed operator data dropped between boots. Sticks now
+       ship at the baked 4 GiB BTY_IMAGES size; operators who
+       want more grow with gparted on their host.)
     5. **[done]** Documented delivery options + renamed
        `live-x86` -> `netboot-x86` (both deferred work folded
        into the same commit). Stock hybrid ISO with built-in

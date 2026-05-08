@@ -4,6 +4,46 @@ bty is one Python package - the `bty` module, distributed on PyPI as
 [`bty-lab`](https://pypi.org/project/bty-lab/) - with three console-script
 entry points, plus a sibling appliance-image builder (`bty-media/`).
 
+## How the pieces connect
+
+Two delivery flows, the same `bty` library at the centre of both:
+
+```
+      USB-stick flow                       Network-flash flow
+      (ad-hoc, no infra)                   (DevOps fleet)
+
+      operator's box                       operator's workstation
+      |                                    | browser
+      v                                    v
+ +----------------+                  +-----------------+
+ |  bty-usb       |                  |  bty-server     |
+ |  live env      |                  |  (appliance)    |
+ |                |                  |                 |
+ | +------------+ |    iPXE chain    | +-------------+ |
+ | | bty-tui    | |<-----------------+ | bty-web     | |
+ | | bty-flash- | |   (kernel + initrd | | iPXE/TFTP/  | |
+ | | on-boot    | |    + squashfs over | | dnsmasq    | |
+ | +------------+ |    HTTP)           | +------+-----+ |
+ +-------+--------+                  +--------+-+------+
+         |                                    | |
+         | bty flash                          | | PXE chain to
+         |  (write image to                   | | targets
+         |   target's disk)                   v v
+         v                            +---------------+
+   +-----------+                      | target machine|
+   | target    |                      |               |
+   | machine   |                      | bty-flash-on- |
+   |           |                      | boot.service  |
+   | local disk|                      | -> local disk |
+   +-----------+                      +---------------+
+```
+
+The `bty` library implements the flashing logic (`bty.flash`, `bty.images`,
+`bty.disks`) consumed by both flows. `bty-tui` and `bty-web` are UI
+shells; `bty-flash-on-boot` is the systemd service that runs the flash
+unattended after a PXE boot. Same operations, different delivery
+vehicles.
+
 ## `bty` (CLI)
 
 Main command-line interface. The single source of truth for image

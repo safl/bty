@@ -976,6 +976,46 @@ def test_wizard_back_clears_disk_selection(tmp_path: Path, monkeypatch: pytest.M
     _run(_drive())
 
 
+def test_wizard_back_via_backspace_all_the_way(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Backspace is wired as an alias for Esc on the back binding;
+    pressing it twice from Stage 3 should clear both selections
+    and land on Stage 1 with focus on the Images table.
+    """
+    _patch_data_sources(
+        monkeypatch,
+        images_list=[_fake_image(name="back.qcow2")],
+        disks_list=[_fake_disk()],
+    )
+    app = tui_app.BtyTui(image_root=tmp_path / "images")
+
+    async def _drive() -> None:
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            assert app._stage == tui_app._WizardStage.CONFIRM_FLASH  # type: ignore[reportPrivateUsage]
+
+            # Backspace #1: Stage 3 -> Stage 2.
+            await pilot.press("backspace")
+            await pilot.pause()
+            assert app._stage == tui_app._WizardStage.SELECT_DISK  # type: ignore[reportPrivateUsage]
+
+            # Backspace #2: Stage 2 -> Stage 1.
+            await pilot.press("backspace")
+            await pilot.pause()
+            assert app._stage == tui_app._WizardStage.SELECT_IMAGE  # type: ignore[reportPrivateUsage]
+            assert app._selected_image is None  # type: ignore[reportPrivateUsage]
+            assert app._selected_disk is None  # type: ignore[reportPrivateUsage]
+            assert app.focused is not None
+            assert app.focused.id == "images_table"
+
+    _run(_drive())
+
+
 def test_theme_picker_opens_and_dismisses_cleanly(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
