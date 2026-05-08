@@ -11,10 +11,12 @@ detail block).
 Format-choice rationale (load-bearing for the CI-pipeline use case
 that drove bty's design):
 
-- The **USB stick image** ships as ``.iso.xz``. Operators write
+- The **USB stick image** ships as ``.iso.gz``. Operators write
   it host-side via Etcher / Rufus / Raspberry Pi Imager, which
-  decompress .xz natively but not .zst -- that one-step UX is
-  the deciding factor. Stick prep is a one-shot, host-side cost;
+  decompress .gz natively in every flasher we tested (xz tripped
+  Etcher's bundled decompressor regardless of how the file was
+  shaped; gzip is the universally-supported lowest common
+  denominator). Stick prep is a one-shot, host-side cost;
   decompression speed at flash time doesn't matter (the host
   decompresses on its own beefy CPU once, not in a hot loop).
 - The **target images** bty ships

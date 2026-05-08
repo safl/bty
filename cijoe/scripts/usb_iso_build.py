@@ -25,12 +25,15 @@ Workflow:
    edge of the artifact (sfdisk + losetup + mkfs.exfat) so the
    single dd-able file carries both the boot path and the
    operator's image catalog.
-5. Compress the cooked ISO with ``xz -9 --extreme -T0`` to get
-   under GitHub's 2 GiB per-release-asset upload limit. xz is
-   chosen over zstd because Etcher / Rufus / Raspberry Pi Imager
-   all decompress .xz natively (no extra step for GUI flashers);
-   zstd lacks that ecosystem support today.
-6. Write a sha256 manifest covering the .iso.xz.
+5. Compress the cooked ISO with ``gzip -9`` to get under GitHub's
+   2 GiB per-release-asset upload limit. gzip is chosen over xz
+   because Etcher's bundled xz decompressor fails on our output
+   regardless of how the .iso.xz is shaped (single-stream,
+   single-block, lower preset, none of it helps); gzip is
+   universally supported by Etcher / Rufus / Raspberry Pi Imager
+   / dd. Cost: ~50-100 MB larger output, no operator-side
+   downside.
+6. Write a sha256 manifest covering the .iso.gz.
 
 The cwd at run time is ``cijoe/`` (the Makefile cd's there before
 invoking cijoe), so the bty-media tree lives at
@@ -53,12 +56,12 @@ from argparse import ArgumentParser
 from pathlib import Path
 
 PUBLISH_BASENAME = "bty-usb-x86_64.iso"
-PUBLISH_XZ_BASENAME = "bty-usb-x86_64.iso.xz"
+PUBLISH_GZ_BASENAME = "bty-usb-x86_64.iso.gz"
 
 # Pre-allocate this much trailing space inside the cooked ISO for
 # an exFAT partition labelled BTY_IMAGES. Operators ``dd`` the
 # cooked artifact to a stick (Etcher / RPi Imager / Rufus DD-mode
-# read .iso.xz natively, no decompress step needed), drop
+# read .iso.gz natively, no decompress step needed), drop
 # ``*.img.zst`` files into the writable exFAT partition from any
 # host OS, then boot.
 #
@@ -87,25 +90,22 @@ PUBLISH_XZ_BASENAME = "bty-usb-x86_64.iso.xz"
 # stick, so we can't depend on a first-boot grow step.
 TRAILING_EXFAT_GIB = 4
 
-# Compress the cooked ISO with xz instead of zstd: Etcher / Rufus /
-# RPi Imager all decompress .xz natively but NOT .zstd, so .iso.xz
-# lets operators flash directly without a manual decompress step.
+# Compress the cooked ISO with gzip. We tried xz first (zstd lacks
+# GUI flasher support) but Etcher's bundled xz decompressor failed
+# on our output even after dropping ``-T0`` for single-stream /
+# single-block layout, and even after lowering preset levels. The
+# specific error -- "if a compressed image, please check that the
+# archive is not corrupted" -- fires regardless of how the .iso.xz
+# is shaped, so xz is effectively unsupported by Etcher in our
+# environment.
 #
-# **No ``-T0``.** Multi-threaded xz emits one xz stream per thread
-# chunk and concatenates them; the result is RFC-valid multi-stream
-# xz, but Etcher's bundled decompressor (and a few others) only
-# handle single-stream files reliably -- it dies with a misleading
-# "if a compressed image, please check that the archive is not
-# corrupted" message on multi-stream input. Single-thread compression
-# emits one stream and is universally readable. CI cost: bake step
-# goes from ~1-2 min to ~3-5 min, fine for the operator-side
-# compatibility win.
-#
-# ``-9 --extreme`` is max compression. On our zero-heavy file
-# (4 GiB sparse exFAT region) this still finishes well under 10 min
-# on a CI runner; the operator-side savings (no decompress step,
-# every download) compound across the project.
-XZ_FLAGS = ["-9", "--extreme"]
+# Gzip is universally supported by Etcher / Rufus / Raspberry Pi
+# Imager / dd / Windows / macOS -- there's no Electron-bundled JS
+# gzip impl that misbehaves the way the xz one does. Trade-off vs
+# xz on our 4.4 GiB sparse-zero file: gzip output is ~50-100 MB
+# larger (~150 MB vs ~80 MB) but compatibility approaches 100%.
+# Bake time is comparable (~1-2 min on a CI runner).
+GZ_FLAGS = ["-9"]
 
 
 def add_args(parser: ArgumentParser):
@@ -253,32 +253,32 @@ def main(args, cijoe):
     if err:
         return err
 
-    # Compress to .iso.xz. The raw 4.4 GiB ISO exceeds GitHub's 2 GiB
-    # per-release-asset upload limit; most of the trailing exFAT is
-    # zero-fill so xz -9 --extreme brings it to a few hundred MiB.
-    # Operator UX: Etcher / RPi Imager / Rufus DD-mode read .iso.xz
+    # Compress to .iso.gz. The raw 4.4 GiB ISO exceeds GitHub's 2 GiB
+    # per-release-asset upload limit; gzip on our zero-heavy file
+    # (4 GiB sparse exFAT region) brings it to a few hundred MiB.
+    # Operator UX: Etcher / RPi Imager / Rufus DD-mode read .iso.gz
     # directly (no decompress step). For CLI:
-    #   xz -d --stdout bty-usb-x86_64.iso.xz | sudo dd of=/dev/sdX bs=4M
-    xz_dst = publish_dir / PUBLISH_XZ_BASENAME
-    xz_args = " ".join(XZ_FLAGS)
-    log.info(f"Compressing {dst} -> {xz_dst} (xz {xz_args})")
-    # xz writes ``<dst>.xz`` and removes ``<dst>`` on success (no
-    # ``--keep``); ``-f`` overwrites any pre-existing ``<dst>.xz``.
-    err, _ = cijoe.run_local(f"xz {xz_args} -f {dst}")
+    #   gunzip -d --stdout bty-usb-x86_64.iso.gz | sudo dd of=/dev/sdX bs=4M
+    gz_dst = publish_dir / PUBLISH_GZ_BASENAME
+    gz_args = " ".join(GZ_FLAGS)
+    log.info(f"Compressing {dst} -> {gz_dst} (gzip {gz_args})")
+    # gzip writes ``<dst>.gz`` and removes ``<dst>`` on success;
+    # ``-f`` overwrites any pre-existing ``<dst>.gz``.
+    err, _ = cijoe.run_local(f"gzip {gz_args} -f {dst}")
     if err:
-        log.error(f"xz {xz_args} {dst} failed")
+        log.error(f"gzip {gz_args} {dst} failed")
         return err
 
-    sha256_path = publish_dir / "bty-usb-x86_64-iso-xz.sha256"
+    sha256_path = publish_dir / "bty-usb-x86_64-iso-gz.sha256"
     err, _ = cijoe.run_local(
-        f"sh -c 'cd {publish_dir} && sha256sum {PUBLISH_XZ_BASENAME} > {sha256_path}'"
+        f"sh -c 'cd {publish_dir} && sha256sum {PUBLISH_GZ_BASENAME} > {sha256_path}'"
     )
     if err:
         log.error("failed computing sha256 manifest")
         return err
 
     cijoe.run_local(f"cat {sha256_path}")
-    cijoe.run_local(f"ls -la {xz_dst}")
+    cijoe.run_local(f"ls -la {gz_dst}")
 
     return 0
 

@@ -82,8 +82,9 @@ PACKAGES=(
     genisoimage
 
     # bty-media usb-x86 + netboot-x86 bakes (live-build's debootstrap
-    # / chroot / squashfs / xorriso pipeline). xz-utils is also used
-    # by usb_iso_build.py to compress the cooked ISO to .iso.xz.
+    # / chroot / squashfs / xorriso pipeline). xz-utils is kept for
+    # the server-rpi variant below (Pi OS Lite ships .xz); usb-x86
+    # now publishes .iso.gz (gzip ships in coreutils, no extra dep).
     live-build
     debootstrap
     squashfs-tools

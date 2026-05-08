@@ -14,9 +14,9 @@ from a checkout.
 
 ```bash
 mkdir -p ~/system_imaging/disk && cd ~/system_imaging/disk
-curl -fLO https://github.com/safl/bty/releases/latest/download/bty-usb-x86_64.iso.xz
-curl -fLO https://github.com/safl/bty/releases/latest/download/bty-usb-x86_64.iso.xz.sha256
-sha256sum -c bty-usb-x86_64.iso.xz.sha256
+curl -fLO https://github.com/safl/bty/releases/latest/download/bty-usb-x86_64.iso.gz
+curl -fLO https://github.com/safl/bty/releases/latest/download/bty-usb-x86_64.iso.gz.sha256
+sha256sum -c bty-usb-x86_64.iso.gz.sha256
 ```
 
 `releases/latest/download/<name>` always points at the newest tag;
@@ -36,9 +36,9 @@ mkinitramfs) to produce a hybrid ISO, post-processes it to append
 a writable `BTY_IMAGES` exFAT partition, and xz-compresses the
 result. Emits:
 
-- `~/system_imaging/disk/bty-usb-x86_64.iso.xz` - distributable
+- `~/system_imaging/disk/bty-usb-x86_64.iso.gz` - distributable
   artifact (the file you decompress + `dd` to a USB stick).
-- `~/system_imaging/disk/bty-usb-x86_64-iso-xz.sha256` - checksum.
+- `~/system_imaging/disk/bty-usb-x86_64-iso-gz.sha256` - checksum.
 
 ## Flash a USB stick
 
@@ -47,7 +47,7 @@ result. Emits:
 lsblk
 
 # /dev/sdX is the USB stick (NOT your local system disk).
-xz -d --stdout ~/system_imaging/disk/bty-usb-x86_64.iso.xz | \
+gunzip -d --stdout ~/system_imaging/disk/bty-usb-x86_64.iso.gz | \
   sudo dd of=/dev/sdX bs=4M status=progress conv=fsync
 sync
 ```

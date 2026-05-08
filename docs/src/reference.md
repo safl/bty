@@ -11,7 +11,7 @@ tag's copy of that file; substitute `latest` for a specific tag (e.g.
 
 | Asset | What it is | URL (latest) |
 |---|---|---|
-| `bty-usb-x86_64.iso.xz` (+ `.sha256`) | Bootable USB live ISO with built-in writable `BTY_IMAGES` exFAT partition for the operator's image catalog. Open in Balena Etcher / Raspberry Pi Imager / Rufus DD-mode (decompresses `.xz` natively). CLI: `xz -d --stdout bty-usb-x86_64.iso.xz \| sudo dd of=/dev/sdX bs=4M`. | <https://github.com/safl/bty/releases/latest/download/bty-usb-x86_64.iso.xz> |
+| `bty-usb-x86_64.iso.gz` (+ `.sha256`) | Bootable USB live ISO with built-in writable `BTY_IMAGES` exFAT partition for the operator's image catalog. Open in Balena Etcher / Raspberry Pi Imager / Rufus DD-mode (decompresses `.gz` natively). CLI: `gunzip -d --stdout bty-usb-x86_64.iso.gz \| sudo dd of=/dev/sdX bs=4M`. | <https://github.com/safl/bty/releases/latest/download/bty-usb-x86_64.iso.gz> |
 | `bty-server-x86_64.img.zst` (+ `.sha256`) | Server appliance image, x86_64 (browser UI + iPXE + dnsmasq). Boot in QEMU or `dd` to a disk. | <https://github.com/safl/bty/releases/latest/download/bty-server-x86_64.img.zst> |
 | `bty-server-rpi-arm64.img.zst` (+ `.sha256`) | Server appliance image for Raspberry Pi 4 / 5 (arm64). Write with `dd` to an SD card. | <https://github.com/safl/bty/releases/latest/download/bty-server-rpi-arm64.img.zst> |
 | `bty-netboot-x86_64.{vmlinuz,initrd,squashfs}` (+ `bty-netboot-x86_64.sha256`) | Netboot trio for PXE-flash clients. Drop into the server's `BTY_BOOT_DIR` (or click "fetch latest release" on `/ui/boot`). | <https://github.com/safl/bty/releases/latest/download/bty-netboot-x86_64.vmlinuz> |
@@ -82,10 +82,11 @@ decompression is on the hot path of the per-job CI reflash use
 case (zstd decompresses at ~800-1500 MB/s and saturates the
 target disk; xz at ~50-100 MB/s would bottleneck flash by ~7x in
 absolute terms, ~80s extra per CI job). The bty USB stick image
-(`bty-usb-x86_64.iso.xz`) ships as xz because Etcher / Rufus /
-Raspberry Pi Imager all decompress .xz natively for host-side
-stick-prep but lack .zst support — that's a one-off host
-operation, not a hot-path concern. The flash code accepts all
+(`bty-usb-x86_64.iso.gz`) ships as gzip because Etcher's bundled
+xz decompressor fails on our output regardless of how it's
+shaped, while every flasher we tested handles gzip natively for
+host-side stick-prep — that's a one-off host operation, not a
+hot-path concern. The flash code accepts all
 of `.img.zst` / `.img.xz` / `.img.gz` / `.img.bz2` for
 operator-supplied images so neither format choice is forced on
 you. Decompression speed ranking (rough): zstd > gzip > xz > bzip2.

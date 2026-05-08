@@ -5,8 +5,9 @@ Source content for the bty appliance images. Four variants:
 - **USB live image** (`VARIANT=usb-x86`) - bootable USB carrying the
   bty runtime + a writable exFAT `BTY_IMAGES` partition for cooked
   images. Built via Debian's live-build (`iso-hybrid` output);
-  shipped xz-compressed as `bty-usb-x86_64.iso.xz` (Etcher / Rufus
-  / Raspberry Pi Imager all decompress `.xz` natively).
+  shipped gzip-compressed as `bty-usb-x86_64.iso.gz` (Etcher / Rufus
+  / Raspberry Pi Imager all decompress `.gz` natively; xz tripped
+  Etcher's bundled handler regardless of preset).
 - **Server image, x86_64** (`VARIANT=server-x86`) - installable disk
   image for the bty provisioning server (`bty-web` + PXE boot stack).
   Cloud-init bake in QEMU.
@@ -80,7 +81,7 @@ right one based on the variant:
   with `BTY_USB_ISO=1` selecting `iso-hybrid` output, then post-
   processes the cooked ISO to append a writable exFAT `BTY_IMAGES`
   partition (`sfdisk --append`, `losetup -fP`, `mkfs.exfat`) and
-  xz-compresses it. Output is `bty-usb-x86_64.iso.xz`. No QEMU
+  gzip-compresses it. Output is `bty-usb-x86_64.iso.gz`. No QEMU
   full-system bake.
 
 - `server-rpi` -> `cijoe tasks/build-rpi.yaml`. Customises Raspberry
@@ -137,11 +138,11 @@ server-x86:
   artifact. Decompress with `zstd -d` and pipe to `dd`.
 
 usb-x86:
-- `~/system_imaging/disk/bty-usb-x86_64.iso.xz` - final artifact.
+- `~/system_imaging/disk/bty-usb-x86_64.iso.gz` - final artifact.
   Open in Balena Etcher / Raspberry Pi Imager / Rufus DD-mode
-  (those tools decompress `.xz` natively), or pipe via CLI:
-  `xz -d --stdout bty-usb-x86_64.iso.xz | sudo dd of=/dev/sdX bs=4M`.
-  Decompress to `.iso` first (`xz -d ...`) before dropping onto a
+  (those tools decompress `.gz` natively), or pipe via CLI:
+  `gunzip -d --stdout bty-usb-x86_64.iso.gz | sudo dd of=/dev/sdX bs=4M`.
+  Decompress to `.iso` first (`gunzip ...`) before dropping onto a
   Ventoy stick; Ventoy doesn't auto-decompress.
 
 server-rpi:
@@ -166,7 +167,7 @@ amd64-only); first-boot smoke-testing happens out-of-band on real
 hardware. Most operators never run this build pipeline themselves -
 ``bty-media/`` exists for contributors who want to modify the image.
 
-- **usb-x86.** The cooked `.iso.xz` decompresses to a hybrid ISO
+- **usb-x86.** The cooked `.iso.gz` decompresses to a hybrid ISO
   that boots into a Debian live environment with the `bty` CLI +
   TUI installed into `/opt/bty/venv`, and an exFAT `BTY_IMAGES`
   partition for cooked images. live-boot's SquashFS + tmpfs overlay

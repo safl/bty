@@ -44,9 +44,9 @@ newest version, so you can pin to "latest" or to a specific tag.
 ```bash
 mkdir -p ~/system_imaging/disk && cd ~/system_imaging/disk
 
-curl -fLO https://github.com/safl/bty/releases/latest/download/bty-usb-x86_64.iso.xz
-curl -fLO https://github.com/safl/bty/releases/latest/download/bty-usb-x86_64.iso.xz.sha256
-sha256sum -c bty-usb-x86_64.iso.xz.sha256
+curl -fLO https://github.com/safl/bty/releases/latest/download/bty-usb-x86_64.iso.gz
+curl -fLO https://github.com/safl/bty/releases/latest/download/bty-usb-x86_64.iso.gz.sha256
+sha256sum -c bty-usb-x86_64.iso.gz.sha256
 ```
 
 For a specific version, swap `latest` for the tag (e.g. `v0.2.7`).
@@ -69,8 +69,8 @@ When it finishes:
 
 ```text
 ~/system_imaging/disk/
-  bty-usb-x86_64.iso.xz             <- the file you'll write to the stick
-  bty-usb-x86_64-iso-xz.sha256
+  bty-usb-x86_64.iso.gz             <- the file you'll write to the stick
+  bty-usb-x86_64-iso-gz.sha256
 ```
 
 ## Step 2: Write the image to a USB stick
@@ -88,13 +88,13 @@ internal disk.
 Two ways to write it:
 
 **GUI flashers** (Balena Etcher, Raspberry Pi Imager, Rufus in DD
-mode): open `bty-usb-x86_64.iso.xz` directly. They decompress
-`.xz` natively, no extra step.
+mode): open `bty-usb-x86_64.iso.gz` directly. They decompress
+`.gz` natively, no extra step.
 
 **Command line:**
 
 ```bash
-xz -d --stdout ~/system_imaging/disk/bty-usb-x86_64.iso.xz | \
+gunzip -d --stdout ~/system_imaging/disk/bty-usb-x86_64.iso.gz | \
   sudo dd of=/dev/sdX bs=4M status=progress conv=fsync
 sync
 ```

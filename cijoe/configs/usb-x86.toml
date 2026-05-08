@@ -2,17 +2,16 @@
 #
 # Drives Debian's live-build to produce a hybrid ISO that boots both
 # from CD media and from a USB stick (BIOS + UEFI). The ISO ships
-# xz-compressed (``bty-usb-x86_64.iso.xz``) because the raw
+# gzip-compressed (``bty-usb-x86_64.iso.gz``) because the raw
 # artifact - including the trailing 4 GiB BTY_IMAGES exFAT
 # partition - exceeds GitHub's 2 GiB per-release-asset upload limit.
 # Operators on a GUI flasher (Balena Etcher / Raspberry Pi Imager /
-# Rufus DD-mode) open the .iso.xz directly: those tools decompress
-# .xz natively, no extra step needed. CLI flow is the same shape
-# as the existing .img.zst variants, just with xz:
+# Rufus DD-mode) open the .iso.gz directly: those tools decompress
+# .gz natively, no extra step needed. CLI:
 #
-#     xz -d --stdout bty-usb-x86_64.iso.xz | sudo dd of=/dev/sdX bs=4M
+#     gunzip -d --stdout bty-usb-x86_64.iso.gz | sudo dd of=/dev/sdX bs=4M
 #
-# Decompress to .iso first (``xz -d bty-usb-x86_64.iso.xz``) before
+# Decompress to .iso first (``gunzip bty-usb-x86_64.iso.gz``) before
 # dropping onto a Ventoy stick; Ventoy doesn't auto-decompress.
 #
 # This is the M19 live-build replacement for the previous cloud-init
