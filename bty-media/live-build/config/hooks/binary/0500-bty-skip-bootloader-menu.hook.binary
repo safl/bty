@@ -1,0 +1,92 @@
+#!/bin/sh
+# 0500-bty-skip-bootloader-menu.hook.binary - skip the live-build
+# default Debian boot menu and go straight to the bty live env.
+#
+# Problem this fixes: live-build's default bootloader configs
+# render a Debian-branded menu ("Live system" / "Live system
+# (failsafe)" / etc.) with a 30-second auto-boot countdown.
+# Operators see "Debian Trixie" first and wonder if they put bty
+# on the stick at all -- bad first impression for what's
+# supposed to be the bty USB image.
+#
+# Fix: make the menu invisible on UEFI (grub-efi
+# ``timeout_style=hidden`` + ``timeout=0``) and effectively
+# instant on legacy BIOS (syslinux ``timeout 1`` =  0.1s + ``prompt
+# 0``). The default boot entry that live-build emits is the
+# normal "Live system" path, which is what we want; we just
+# don't want operators to see / wait through a Debian menu to
+# get there. Operators who need recovery boots (rescue, edit
+# kernel cmdline) can hold Esc / Shift during firmware POST to
+# interrupt; modern grub respects that even with hidden menus.
+#
+# Re-brands menu titles too (``Debian Live`` -> ``bty``) so
+# any flash of the menu that does render identifies as bty,
+# not Debian. The splash image is overridden separately via
+# ``config/bootloaders/syslinux/splash.png`` and
+# ``config/bootloaders/grub-efi/splash.png`` (both files are
+# copies of ``src/bty/web/_static/bty-mascot.png``); live-build
+# copies those into the binary-stage bootloader directories
+# during its normal build flow, no edit needed in this hook.
+#
+# Hook stage: ``binary``. Runs after live-build has assembled
+# ``binary/isolinux/`` and ``binary/boot/grub/`` from its
+# bootloader templates, before xorriso wraps everything into
+# the hybrid ISO. No-op on the netboot-x86 build since that
+# variant doesn't use a bootloader menu at all (PXE chain
+# loads the kernel directly).
+
+set -eu
+
+# ---- syslinux / isolinux (legacy BIOS) -------------------------------------
+#
+# ``timeout 1`` = 0.1s auto-boot. ``prompt 0`` skips the
+# textual ``boot:`` prompt so the menu doesn't flash for that
+# either.
+
+for cfg in \
+    binary/isolinux/menu.cfg \
+    binary/isolinux/live.cfg \
+    binary/isolinux/stdmenu.cfg \
+    binary/syslinux/menu.cfg \
+    binary/syslinux/live.cfg \
+    binary/syslinux/stdmenu.cfg
+do
+    [ -f "$cfg" ] || continue
+    sed -i \
+        -e 's/^[[:space:]]*timeout[[:space:]].*/timeout 1/' \
+        -e 's/^[[:space:]]*prompt[[:space:]].*/prompt 0/' \
+        "$cfg"
+    # Re-brand any menu title that still says "Debian" so the
+    # flash of menu (if any) shows bty.
+    sed -i \
+        -e 's/Debian Live/bty/g' \
+        -e 's/Debian GNU\/Linux/bty/g' \
+        "$cfg"
+done
+
+# ---- grub-efi (UEFI) -------------------------------------------------------
+#
+# ``timeout=0`` boots default immediately;
+# ``timeout_style=hidden`` skips menu render entirely so there's
+# nothing for the operator to see, not even a flash. The
+# default entry (the live-system one) is what gets booted.
+
+GRUB_CFG=binary/boot/grub/grub.cfg
+if [ -f "$GRUB_CFG" ]; then
+    sed -i 's/^set timeout=.*/set timeout=0/' "$GRUB_CFG"
+    if grep -q '^set timeout_style=' "$GRUB_CFG"; then
+        sed -i 's/^set timeout_style=.*/set timeout_style=hidden/' "$GRUB_CFG"
+    else
+        # Insert ``set timeout_style=hidden`` right after the
+        # ``set timeout=`` line so both directives sit together
+        # at the top of the config.
+        sed -i '/^set timeout=0/a set timeout_style=hidden' "$GRUB_CFG"
+    fi
+    # Re-brand any menu entry title; grub.cfg lines look like
+    # ``menuentry "Debian GNU/Linux Live (kernel ...)" ...``.
+    sed -i \
+        -e 's/Debian GNU\/Linux Live/bty/g' \
+        -e 's/Debian GNU\/Linux/bty/g' \
+        -e 's/Debian Live/bty/g' \
+        "$GRUB_CFG"
+fi
