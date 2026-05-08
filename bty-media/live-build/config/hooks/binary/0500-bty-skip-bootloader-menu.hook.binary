@@ -39,10 +39,60 @@ set -eu
 
 # ---- syslinux / isolinux (legacy BIOS) -------------------------------------
 #
-# ``timeout 1`` = 0.1s auto-boot. ``prompt 0`` skips the
-# textual ``boot:`` prompt so the menu doesn't flash for that
-# either.
+# Two layers in play here that earlier hook versions handled
+# only partly:
+#
+#   1. ``isolinux.cfg`` / ``syslinux.cfg`` -- the master config
+#      that syslinux loads first. Contains the ``UI``,
+#      ``DEFAULT``, ``TIMEOUT``, ``PROMPT`` directives that
+#      decide whether a menu renders at all and which graphical
+#      backend renders it. Earlier hook versions never touched
+#      this file -> ``UI gfxboot.c32 bootlogo`` stayed in place
+#      and Debian's "yellow hard hat + Debian Trixie" splash
+#      rendered regardless of what we did to the included
+#      menu.cfg files.
+#   2. ``menu.cfg`` / ``live.cfg`` / ``stdmenu.cfg`` -- INCLUDEd
+#      from isolinux.cfg, contain the actual menu entries +
+#      submenu timeouts. Earlier hook versions edited these.
+#
+# Fix: replace ``UI gfxboot.c32 ...`` with ``UI menu.c32``. That
+# drops gfxboot entirely (no graphical splash from its embedded
+# bootlogo artwork) and falls back to the plain syslinux text
+# menu. Then force ``TIMEOUT 1`` + ``PROMPT 0`` in the master
+# config so the menu auto-boots in 0.1s without ever showing
+# the ``boot:`` prompt. Combined with the per-included-file
+# timeout edits we already did, this fully suppresses the
+# menu render on BIOS boot.
+#
+# Operators who want recovery boots (rescue / edit kernel
+# cmdline) can still hit Esc / Tab during the brief (sub-100ms)
+# window; modern syslinux respects that even with TIMEOUT 1.
 
+# Master config: nuke gfxboot, force timeout 1 + prompt 0.
+for cfg in \
+    binary/isolinux/isolinux.cfg \
+    binary/syslinux/syslinux.cfg
+do
+    [ -f "$cfg" ] || continue
+    echo "0500-bty-skip-bootloader-menu: editing $cfg" >&2
+    # Drop gfxboot.c32 in favour of plain menu.c32 (text-mode).
+    # Pattern handles ``UI gfxboot.c32 bootlogo`` (with arg) and
+    # bare ``UI gfxboot.c32`` (newer).
+    sed -i \
+        -e 's/^[[:space:]]*UI[[:space:]]\+gfxboot\.c32.*/UI menu.c32/' \
+        -e 's/^[[:space:]]*ui[[:space:]]\+gfxboot\.c32.*/ui menu.c32/' \
+        "$cfg"
+    # Force timeout + prompt regardless of what live-build set.
+    sed -i \
+        -e 's/^[[:space:]]*TIMEOUT[[:space:]].*/TIMEOUT 1/' \
+        -e 's/^[[:space:]]*timeout[[:space:]].*/timeout 1/' \
+        -e 's/^[[:space:]]*PROMPT[[:space:]].*/PROMPT 0/' \
+        -e 's/^[[:space:]]*prompt[[:space:]].*/prompt 0/' \
+        "$cfg"
+done
+
+# Included menu configs: same timeout/prompt enforcement +
+# re-brand any leftover "Debian" titles.
 for cfg in \
     binary/isolinux/menu.cfg \
     binary/isolinux/live.cfg \
@@ -56,12 +106,21 @@ do
         -e 's/^[[:space:]]*timeout[[:space:]].*/timeout 1/' \
         -e 's/^[[:space:]]*prompt[[:space:]].*/prompt 0/' \
         "$cfg"
-    # Re-brand any menu title that still says "Debian" so the
-    # flash of menu (if any) shows bty.
     sed -i \
         -e 's/Debian Live/bty __BTY_VERSION__/g' \
         -e 's/Debian GNU\/Linux/bty __BTY_VERSION__/g' \
         "$cfg"
+done
+
+# Diagnostic dump: master configs first, then a list of every
+# included menu file in case a future regex miss strikes.
+for cfg in \
+    binary/isolinux/isolinux.cfg \
+    binary/syslinux/syslinux.cfg
+do
+    [ -f "$cfg" ] || continue
+    echo "==== $cfg (first 30 lines) ====" >&2
+    head -n 30 "$cfg" >&2 || true
 done
 
 # ---- grub-efi (UEFI) -------------------------------------------------------
