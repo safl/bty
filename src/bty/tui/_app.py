@@ -55,6 +55,7 @@ Requires the ``[tui]`` install extra (pulls in textual).
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import subprocess
@@ -1481,19 +1482,26 @@ class BtyTui(App[None]):
                 return
             image, disk_path = selection
 
+        # ``flash.probe_image`` / ``flash.probe_target`` shell out to
+        # ``qemu-img info`` / ``blockdev`` / ``lsblk`` and block. Run
+        # them in a thread pool via ``asyncio.to_thread`` so the
+        # event loop stays responsive: key events keep being
+        # processed, the status-line updates above actually render,
+        # and the Flash button doesn't appear frozen while we wait
+        # for ``qemu-img`` to inspect a multi-GiB image.
         self._set_status(f"Flash: probing image {image.name}...")
         try:
             if image.url is not None:
-                image_info = flash.probe_image_url(image.url)
+                image_info = await asyncio.to_thread(flash.probe_image_url, image.url)
             else:
                 assert image.path is not None  # local row guarantees a path
-                image_info = flash.probe_image(image.path)
+                image_info = await asyncio.to_thread(flash.probe_image, image.path)
         except (FileNotFoundError, ValueError) as exc:
             self._set_status(f"Image probe failed: {exc}")
             return
 
         self._set_status(f"Flash: probing target {disk_path}...")
-        target_info = flash.probe_target(disk_path)
+        target_info = await asyncio.to_thread(flash.probe_target, disk_path)
         plan = flash.make_plan(image_info, target_info, "none")
         errors = flash.validate_plan(plan)
 
