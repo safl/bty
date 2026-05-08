@@ -107,13 +107,15 @@ fi
 # a venv at /opt/bty/venv). Emit ``<start> <size>`` on a single line
 # for partition #${part_num}; empty string if not found.
 parsed=$(printf '%s' "$sfdisk_json" | python3 -c '
-import json, sys
+import json, re, sys
 table = json.load(sys.stdin)["partitiontable"]
 target = sys.argv[1]
 for p in table["partitions"]:
     node = p.get("node", "")
-    digits = "".join(c for c in node[::-1] if c.isdigit())[::-1]
-    if digits == target:
+    # Trailing digits only; "x86_64" digits in the path must NOT
+    # contribute (would yield e.g. 86643 instead of 3).
+    m = re.search(r"(\d+)$", node)
+    if m and m.group(1) == target:
         print(p["start"], p["size"])
         sys.exit(0)
 sys.exit(1)

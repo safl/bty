@@ -43,6 +43,7 @@ import errno
 import json
 import logging as log
 import os
+import re
 import shutil
 from argparse import ArgumentParser
 from pathlib import Path
@@ -274,12 +275,15 @@ def _extend_with_exfat(cijoe, iso_path: Path) -> int:
         # ``type`` is the hex string e.g. "7" or "07" (sfdisk emits
         # without leading zero).
         if str(p.get("type", "")).lstrip("0").lower() == "7":
-            # Extract trailing digits of the partition node name,
-            # e.g. "/path/to/iso3" -> "3".
+            # Extract the trailing run of digits at the end of the
+            # node path. The naive "all digits anywhere" approach
+            # breaks on paths like ``bty-usb-x86_64.iso3`` where the
+            # ``86_64`` portion contributes spurious digits and would
+            # yield part 86643 instead of 3.
             node = p.get("node", "")
-            digits = "".join(ch for ch in node[::-1] if ch.isdigit())[::-1]
-            if digits:
-                part_num = digits
+            m = re.search(r"(\d+)$", node)
+            if m:
+                part_num = m.group(1)
                 break
     if part_num is None:
         log.error(f"could not locate BTY_IMAGES (type 07) in sfdisk --json output:\n{out}")
