@@ -26,6 +26,7 @@ deployed system on first boot via cloud-init or CIJOE workflows.
 overview
 quickstart
 walkthrough-usb
+walkthrough-server
 ```
 
 ```{toctree}
