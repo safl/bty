@@ -27,7 +27,14 @@ from pathlib import Path
 from cijoe.core.misc import download
 from cijoe.qemu.wrapper import Guest
 
-DISK_SIZE = "12G"
+# Bake-time disk size for the cloud-init build VM. The base Debian
+# cloud image grows to fill, then we apt-install bty-lab[web]'s
+# deps + dnsmasq + iPXE, then trim caches. Final on-disk usage is
+# ~1.7 GB; 6 GiB gives ~4 GiB transient headroom for apt + pip
+# working space during the install. The cooked image expands to
+# the operator's actual disk size on first boot via
+# ``bty-grow-rootfs.service``.
+DISK_SIZE = "6G"
 
 
 def add_args(parser: ArgumentParser):

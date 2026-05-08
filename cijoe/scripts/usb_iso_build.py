@@ -64,21 +64,17 @@ PUBLISH_XZ_BASENAME = "bty-usb-x86_64.iso.xz"
 # phase 4) extends this partition to fill the rest of the stick
 # on first boot.
 #
-# Sized at 16 GiB so the bootstrap-the-server-from-usb case works
-# in a single dd, even when the operator drops the DECOMPRESSED
-# server image (~12 GB on disk; the canonical .img.zst form is
-# ~450 MB but Windows operators sometimes work with the raw .img
-# because Windows lacks native .zst tooling). 16 GiB pre-alloc +
-# exFAT overhead (~50 MiB) gives ~15.95 GiB usable -- room for a
-# 12 GB image with ~4 GiB slack. Total artifact (~16.4 GiB)
-# excludes 16 GB physical sticks (~14.9 GiB usable); operators
-# on those sticks have the .img.zst path which the bty live env
-# decompresses on-the-fly during flash. 32 GB+ sticks are
-# unaffected -- ``bty-grow-images-partition.service`` (M19 phase
-# 4) still expands BTY_IMAGES to fill on first boot. The
-# compressed .iso.xz is barely affected by this bump (the extra
-# trailing space is sparse zeros that xz crushes to a few MB).
-TRAILING_EXFAT_GIB = 16
+# Sized at 14 GiB so the cooked artifact fits on a 16 GB stick
+# (~14.9 GiB usable): 14 GiB BTY_IMAGES + ~400 MB ISO front-matter
+# = ~14.4 GiB total. exFAT overhead (~50 MiB) leaves ~13.95 GiB
+# usable inside BTY_IMAGES -- room for a 6 GiB server image (the
+# default DISK_SIZE in diskimage_build.py post-shrink) with ~8 GiB
+# slack for additional images. 32 GB+ sticks unaffected:
+# ``bty-grow-images-partition.service`` (M19 phase 4) still
+# expands BTY_IMAGES to fill on first boot. The compressed
+# .iso.xz is barely affected by this size (the trailing space is
+# sparse zeros that xz crushes to a few MB).
+TRAILING_EXFAT_GIB = 14
 
 # Compress the cooked ISO with xz instead of zstd: Etcher / Rufus /
 # RPi Imager all decompress .xz natively but NOT .zstd, so .iso.xz

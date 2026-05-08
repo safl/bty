@@ -1,0 +1,26 @@
+[Unit]
+Description=Grow bty server rootfs to fill the disk on first boot
+Documentation=https://github.com/safl/bty
+# The cooked server appliance is baked at a fixed 6 GiB disk size
+# (see ``cijoe/scripts/diskimage_build.py::DISK_SIZE``) so the
+# .img.zst stays small. On first boot after dd to a real server
+# disk we expand the rootfs partition + filesystem to fill the
+# actual disk size. Sentinel-gated so the work happens exactly
+# once over the appliance's lifetime.
+ConditionPathExists=!/var/lib/bty/.rootfs-grown
+
+# Must run before bty-web-init (which creates state.db etc.) and
+# before any service that might write to the rootfs at scale.
+After=local-fs.target
+Before=bty-web-init.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/bty-grow-rootfs
+ExecStartPost=/bin/sh -c "mkdir -p /var/lib/bty && touch /var/lib/bty/.rootfs-grown"
+RemainAfterExit=yes
+StandardOutput=journal+console
+StandardError=journal+console
+
+[Install]
+WantedBy=multi-user.target

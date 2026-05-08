@@ -40,6 +40,10 @@ packages:
   # activates it) proxy-DHCP. ``ipxe`` ships the BIOS + UEFI binaries.
   - dnsmasq
   - ipxe
+  # ``cloud-utils`` ships ``growpart`` which ``bty-grow-rootfs.service``
+  # uses on first boot to expand the rootfs partition to fill the
+  # operator's disk (the cooked image is baked at a fixed 6 GiB).
+  - cloud-utils
 
 runcmd:
   # Install bty-lab[web] from the staged wheel into a system venv,
@@ -94,6 +98,12 @@ runcmd:
   # in /etc/dnsmasq.d/bty-pxe.conf stays dormant until the operator
   # activates it via the UI.
   - systemctl daemon-reload
+  # ``bty-grow-rootfs.service`` runs once on first boot of the
+  # cooked image (sentinel-gated on /var/lib/bty/.rootfs-grown)
+  # and expands the rootfs partition to fill the operator's
+  # actual disk size. Without it the appliance is stuck at 6 GiB
+  # rootfs no matter how big the server's disk is.
+  - systemctl enable bty-grow-rootfs.service
   - systemctl enable bty-web.service bty-web-init.service dnsmasq.service
   # systemd-networkd manages NICs via the .network files we ship in
   # rootfs/server/etc/systemd/network/. The default Debian server
