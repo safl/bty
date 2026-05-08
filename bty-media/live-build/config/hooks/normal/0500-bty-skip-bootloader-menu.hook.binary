@@ -71,9 +71,17 @@ touch binary/.bty-bootloader-hook-ran
 # location had moved. ``-print -delete`` lets us see what got
 # deleted in the build log.
 
-echo "0500-bty-skip-bootloader-menu: searching binary/ for gfxboot artefacts..." >&2
+echo "0500-bty-skip-bootloader-menu: searching binary/ for menu binaries..." >&2
+# ``vesamenu.c32`` is what trixie's live-build actually uses
+# (the ``default vesamenu.c32`` line in
+# ``/usr/share/live/build/bootloaders/isolinux/isolinux.cfg``).
+# Delete it AND the legacy gfxboot path. Without these, syslinux
+# falls through to its built-in text-mode prompt, which our
+# ``TIMEOUT 1 / PROMPT 0`` settings boot immediately.
 find binary -type f \
-    \( -name 'gfxboot.c32' -o -name 'bootlogo' -o -name 'bootlogo.*' \) \
+    \( -name 'gfxboot.c32' -o -name 'vesamenu.c32' \
+       -o -name 'menu.c32' \
+       -o -name 'bootlogo' -o -name 'bootlogo.*' \) \
     -print -delete 2>/dev/null || true
 
 # Diagnostic dump: list every file under binary/isolinux/ and
@@ -122,12 +130,17 @@ for cfg in \
 do
     [ -f "$cfg" ] || continue
     echo "0500-bty-skip-bootloader-menu: editing $cfg" >&2
-    # Drop gfxboot.c32 in favour of plain menu.c32 (text-mode).
-    # Pattern handles ``UI gfxboot.c32 bootlogo`` (with arg) and
-    # bare ``UI gfxboot.c32`` (newer).
+    # Strip the menu UI directives so syslinux falls through to
+    # its built-in text-mode behaviour (which our TIMEOUT 1 /
+    # PROMPT 0 settings boot immediately). Live-build's default
+    # template uses ``default vesamenu.c32`` -- in syslinux that
+    # loads vesamenu as the UI module. We just deleted vesamenu.c32
+    # above, so leaving the directive errors out at boot. Replace
+    # it with ``default live`` (the LABEL defined in menu.cfg /
+    # live.cfg), so syslinux boots that label directly.
     sed -i \
-        -e 's/^[[:space:]]*UI[[:space:]]\+gfxboot\.c32.*/UI menu.c32/' \
-        -e 's/^[[:space:]]*ui[[:space:]]\+gfxboot\.c32.*/ui menu.c32/' \
+        -e 's/^[[:space:]]*UI[[:space:]]\+\(gfxboot\|vesamenu\|menu\)\.c32.*//I' \
+        -e 's/^[[:space:]]*default[[:space:]]\+\(gfxboot\|vesamenu\|menu\)\.c32.*/default live/I' \
         "$cfg"
     # Force timeout + prompt regardless of what live-build set.
     sed -i \
