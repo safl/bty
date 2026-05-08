@@ -746,41 +746,51 @@ class BtyTui(App[None]):
         background: $background;
     }
 
-    #panes {
-        height: 1fr;
-        layout: horizontal;
-        padding: 1 1 0 1;
-    }
-
-    /* Each pane: rounded panel with a dimmed border by default;
-       the focused pane brightens via ``:focus-within`` so the
-       operator always knows where keystrokes land. Pane titles
-       sit in the border itself (set via ``border_title`` in
-       ``on_mount``) -- no separate title row, so the panel
-       reads as one piece. Mirrors the harlequin / posting
-       visual style. */
+    /* Four numbered panes stacked vertically, harlequin/posting
+       style: rounded border with the stage label in the top-
+       border (set via ``border_title`` in ``on_mount``). Images
+       and Disks get the bulk of the height (1fr each, flexible);
+       Flash and Reboot are small action panels with fixed
+       heights so they don't waste room on a TTY. Focused pane
+       lights up in $accent so the operator always knows where
+       keystrokes land. */
     .pane {
         layout: vertical;
         border: round $primary 40%;
         background: $panel;
-        margin: 0 1 0 0;
+        margin: 0 1 0 1;
+        padding: 0 1;
         border-title-style: bold;
         border-title-color: $primary;
         border-title-align: left;
     }
 
+    /* Focused pane: border + interior both highlight, so the whole
+       pane reads as the active region rather than just the border
+       outline. The 1-char padding (above) gives the highlight room
+       to wrap around the content. */
     .pane:focus-within {
         border: round $accent;
         border-title-color: $accent;
+        background: $boost;
     }
 
-    #images-pane, #disks-pane {
-        width: 2fr;
+    #pane-1 {
+        height: 1fr;
+        margin-top: 1;
     }
 
-    #details-pane {
-        width: 3fr;
-        margin-right: 0;
+    #pane-2 {
+        height: 1fr;
+    }
+
+    #pane-3 {
+        height: 5;
+    }
+
+    #pane-4 {
+        height: 5;
+        margin-bottom: 0;
     }
 
     /* DataTable styling left to the active theme on purpose --
@@ -815,25 +825,20 @@ class BtyTui(App[None]):
         color: $text-muted;
     }
 
-    #details-body {
-        height: 1fr;
-        padding: 1 2;
+    /* Action-pane content: a big full-width button that fills
+       the pane body. The pane's border-title carries the stage
+       label; the button is the operator's commit handle. */
+    .action-button {
+        width: 1fr;
+        height: 3;
+        margin: 0 1;
     }
 
-    #status {
-        height: 1;
-        padding: 0 2;
-        color: $text-muted;
-        background: $boost;
-    }
-
-    /* Zellij-style status bar: a single row of flat segments
-       (one per wizard stage) on the left, key hints right-aligned.
-       The active stage gets ``text-style: reverse`` via the
-       ``.active`` class. Buttons are real Buttons so they can be
-       focused as the auto-advance target after table commits, but
-       styled flat (no chunky borders / panel bg) so they read as
-       text segments. */
+    /* Zellij-style progress bar at the bottom: four flat segments,
+       one per stage, that progress left-to-right as the wizard
+       advances. The active segment gets reverse-video via the
+       ``.active`` class; completed segments stay highlighted
+       slightly so the operator can see the trail. */
     #status-bar {
         height: 1;
         padding: 0 1;
@@ -857,6 +862,13 @@ class BtyTui(App[None]):
     #status-bar Button.segment.active {
         text-style: reverse bold;
         color: $accent;
+    }
+
+    #status {
+        height: 1;
+        padding: 0 2;
+        color: $text-muted;
+        background: $boost;
     }
 
     #key-hints {
@@ -893,26 +905,39 @@ class BtyTui(App[None]):
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
-        with Horizontal(id="panes"):
-            with Vertical(classes="pane", id="images-pane"):
-                yield Input(
-                    placeholder="filter (substring match on name)",
-                    id="filter-input",
-                )
-                yield DataTable(id="images_table", cursor_type="row")
-                yield Static("", id="welcome")
-            with Vertical(classes="pane", id="disks-pane"):
-                yield DataTable(id="disks_table", cursor_type="row")
-            with Vertical(classes="pane", id="details-pane"):
-                yield Static("(select an image or disk)", id="details-body")
-        # Zellij-style status bar: four flat segment Buttons (one per
-        # wizard stage) on the left, key-hint Static right-aligned.
-        # The active segment gets reverse-video via a CSS class. The
-        # segments are real Buttons so they can be the auto-advance
-        # focus target after row commits and so a click works too;
-        # their CSS strips the chunky default button look so they
-        # read as flat text segments. Labels update via
-        # ``_render_status`` on every state transition.
+        # Four numbered panes stacked vertically. Each pane carries
+        # the stage name + number in its top-border (set in
+        # on_mount), and the focused pane lights up in $accent so
+        # the operator always knows where keystrokes land.
+        with Vertical(classes="pane", id="pane-1"):
+            yield Input(
+                placeholder="filter (substring match on name)",
+                id="filter-input",
+            )
+            yield DataTable(id="images_table", cursor_type="row")
+            yield Static("", id="welcome")
+        with Vertical(classes="pane", id="pane-2"):
+            yield DataTable(id="disks_table", cursor_type="row")
+        # Stage 3 / Stage 4 panes hold a single big primary button
+        # each. The flash button is disabled until both image + disk
+        # are committed; the reboot button is disabled until a flash
+        # has succeeded. Pressing either button (or Enter on it) is
+        # the operator's commit handle for that stage.
+        with Vertical(classes="pane", id="pane-3"):
+            yield Button("Flash!", id="flash-btn", variant="primary", classes="action-button")
+        with Vertical(classes="pane", id="pane-4"):
+            yield Button(
+                "Reboot",
+                id="reboot-btn",
+                variant="primary",
+                classes="action-button",
+                disabled=True,
+            )
+        # Bottom Zellij-style status bar: segments progress left-to-
+        # right as the wizard advances; the active stage is in
+        # reverse-video. Segments are also clickable / focusable so
+        # an auto-advance after a row commit lands focus naturally
+        # on the next interactive thing.
         with Horizontal(id="status-bar"):
             yield Button(" 1 Image ", id="seg-1", classes="segment")
             yield Button(" 2 Disk ", id="seg-2", classes="segment")
@@ -933,14 +958,13 @@ class BtyTui(App[None]):
         # row, so the panel feels like one piece). The images label
         # carries the source so the operator can see where the catalog
         # is coming from at a glance.
-        source_label = (
-            f"  Images @ {self._server_url}/images  "
-            if self._server_url is not None
-            else f"  Images @ {self._image_root}  "
+        source = (
+            f"{self._server_url}/images" if self._server_url is not None else str(self._image_root)
         )
-        self.query_one("#images-pane", Vertical).border_title = source_label
-        self.query_one("#disks-pane", Vertical).border_title = "  Disks  "
-        self.query_one("#details-pane", Vertical).border_title = "  Details  "
+        self.query_one("#pane-1", Vertical).border_title = f"  1: Images @ {source}  "
+        self.query_one("#pane-2", Vertical).border_title = "  2: Disks  "
+        self.query_one("#pane-3", Vertical).border_title = "  3: Flash  "
+        self.query_one("#pane-4", Vertical).border_title = "  4: Reboot  "
         # Populate disks first so the images table's RowHighlighted
         # fires last and the details pane shows the image (the primary
         # pane) by default rather than a disk.
@@ -1247,21 +1271,6 @@ class BtyTui(App[None]):
         except Exception:
             pass
 
-    def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
-        """Update the details pane when the operator moves the cursor."""
-        table_id = event.data_table.id
-        if event.row_key is None or event.row_key.value is None:
-            return
-        key = event.row_key.value
-        if table_id == "images_table":
-            tui_img = self._images_by_key.get(key)
-            if tui_img is not None:
-                self._show_image_details(tui_img)
-        elif table_id == "disks_table":
-            disk = self._disks_by_key.get(key)
-            if disk is not None:
-                self._show_disk_details(disk)
-
     @property
     def _stage(self) -> _WizardStage:
         """Derived wizard stage. We never store the stage directly so
@@ -1312,14 +1321,14 @@ class BtyTui(App[None]):
             self._render_status()
             if prev_stage == _WizardStage.SELECT_DISK:
                 try:
-                    self.query_one("#seg-3", Button).focus()
+                    self.query_one("#flash-btn", Button).focus()
                 except Exception:
                     pass
 
     def _render_status(self) -> None:
-        """Update segment labels + active-class + key-hints for the
-        current wizard stage. Idempotent; safe to call after any
-        state change.
+        """Update bottom-bar segment labels + active class + key
+        hints, plus the action-pane button enabled states. Called
+        on every state change so the UI always reflects ``_stage``.
         """
         stage = self._stage
         try:
@@ -1328,6 +1337,8 @@ class BtyTui(App[None]):
             seg3 = self.query_one("#seg-3", Button)
             seg4 = self.query_one("#seg-4", Button)
             hints = self.query_one("#key-hints", Static)
+            flash_btn = self.query_one("#flash-btn", Button)
+            reboot_btn = self.query_one("#reboot-btn", Button)
         except Exception:
             return
         seg1.label = (
@@ -1344,6 +1355,12 @@ class BtyTui(App[None]):
         for n, seg in enumerate((seg1, seg2, seg3, seg4), start=1):
             seg.set_class(stage.value == n, "active")
         hints.update(self._hints_for(stage))
+        # Action-pane buttons: Flash disabled until both image and
+        # disk are committed; Reboot disabled until a flash succeeded.
+        # The disabled state is the safety net that prevents an
+        # accidental click on a half-configured plan.
+        flash_btn.disabled = stage != _WizardStage.CONFIRM_FLASH
+        reboot_btn.disabled = stage != _WizardStage.REBOOT_OR_DONE
 
     def _hints_for(self, stage: _WizardStage) -> str:
         if stage == _WizardStage.SELECT_IMAGE:
@@ -1355,77 +1372,47 @@ class BtyTui(App[None]):
         return "<Enter> reboot  <Esc> stay  <q> quit"
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        """Status-bar segments are clickable: clicking / Enter on a
-        focused segment performs the segment's primary action.
+        """All buttons in the app:
 
-        - seg-1 -> focus Images table.
-        - seg-2 -> focus Disks table.
-        - seg-3 -> trigger flash if Stage 3 reached, else no-op.
-        - seg-4 -> trigger reboot if Stage 4 reached, else no-op.
+        - ``flash-btn`` (pane 3): triggers flash via ``action_flash``
+          (which goes through the FlashConfirmScreen + FlashStatusScreen
+          modals for safety + progress visibility).
+        - ``reboot-btn`` (pane 4): dispatches reboot via
+          ``action_reboot``.
+        - ``seg-N`` (bottom bar): focus shortcuts to a stage's
+          interactive element. Clicking seg-1 / seg-2 focuses the
+          corresponding table; seg-3 / seg-4 focus the action-pane
+          button if that stage is reached.
         """
-        if event.button.id == "seg-1":
+        bid = event.button.id
+        if bid == "flash-btn":
+            if self._stage == _WizardStage.CONFIRM_FLASH:
+                self.action_flash()  # @work decorator -> Worker
+        elif bid == "reboot-btn":
+            if self._stage == _WizardStage.REBOOT_OR_DONE:
+                self.action_reboot()
+        elif bid == "seg-1":
             try:
                 self.query_one("#images_table", DataTable).focus()
             except Exception:
                 pass
-        elif event.button.id == "seg-2":
+        elif bid == "seg-2":
             try:
                 self.query_one("#disks_table", DataTable).focus()
             except Exception:
                 pass
-        elif event.button.id == "seg-3":
+        elif bid == "seg-3":
             if self._stage == _WizardStage.CONFIRM_FLASH:
-                self.action_flash()
-        elif event.button.id == "seg-4":
+                try:
+                    self.query_one("#flash-btn", Button).focus()
+                except Exception:
+                    pass
+        elif bid == "seg-4":
             if self._stage == _WizardStage.REBOOT_OR_DONE:
-                self.action_reboot()
-
-    def _show_image_details(self, tui_img: _TuiImage) -> None:
-        # The images table already shows Name / Format / Size; the
-        # details body adds the unique-to-this-row info: where the
-        # image is sourced from (local path or remote URL). Keeping
-        # the body short avoids duplicating what's already on screen.
-        try:
-            body = self.query_one("#details-body", Static)
-        except Exception:
-            return
-        if tui_img.url is not None:
-            source = f"remote ({tui_img.url})"
-        else:
-            source = f"local ({tui_img.path})"
-        body.update(f"[b]Image[/]\n  Source: {source}")
-
-    def _show_disk_details(self, disk: dict[str, object]) -> None:
-        # Trim to fields that complement the disks table without
-        # duplicating it. The table shows Path / Size / Model /
-        # Transport / Serial; the details body re-renders the same
-        # five (handy when the operator's eye is on the details
-        # pane already) but in a labeled-vertical form. Removable /
-        # Read-only / Vendor are dropped per user-confirmed plan.
-        try:
-            body = self.query_one("#details-body", Static)
-        except Exception:
-            return
-
-        def _str(key: str) -> str:
-            v = disk.get(key)
-            return v.strip() if isinstance(v, str) else ""
-
-        path = _str("path") or "?"
-        size_str = disk.get("size")
-        size = _format_mib(_parse_size_to_bytes(str(size_str))) if size_str else "?"
-        model = _str("model")
-        tran = _str("tran")
-        serial = _str("serial")
-        lines = [
-            "[b]Disk[/]",
-            f"  Path:      {path}",
-            f"  Size:      {size}",
-            f"  Model:     {model or '-'}",
-            f"  Transport: {tran or '-'}",
-            f"  Serial:    {serial or '-'}",
-        ]
-        body.update("\n".join(lines))
+                try:
+                    self.query_one("#reboot-btn", Button).focus()
+                except Exception:
+                    pass
 
     @work(exclusive=True)
     async def action_theme(self) -> None:
@@ -1515,7 +1502,7 @@ class BtyTui(App[None]):
             self._post_flash = True
             self._render_status()
             try:
-                self.query_one("#seg-4", Button).focus()
+                self.query_one("#reboot-btn", Button).focus()
             except Exception:
                 pass
 

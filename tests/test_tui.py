@@ -685,75 +685,25 @@ def test_app_filter_escape_clears_and_repopulates(
     _run(_drive())
 
 
-def test_app_details_pane_updates_on_image_row_highlight(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Moving the cursor to an image row updates the details pane
-    with the image's source (path or URL).
-
-    The Name / Format / Size fields are NOT in the details body --
-    they're already in the images table columns; the body only
-    adds the source path/URL so it doesn't duplicate the table.
+def test_app_no_details_pane(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The Details pane was removed in v0.5.x to give the two
+    interactive panes (Images / Disks) more horizontal room.
+    Verify the layout no longer mounts a ``#details-pane`` /
+    ``#details-body`` so future regressions that re-introduce
+    duplicated table-vs-body rendering surface immediately.
     """
     _patch_data_sources(
         monkeypatch,
-        images_list=[_fake_image(name="my-image.qcow2", fmt="qcow2", size=1024)],
+        images_list=[_fake_image()],
         disks_list=[_fake_disk()],
     )
-
     app = tui_app.BtyTui(image_root=tmp_path / "images")
 
     async def _drive() -> None:
         async with app.run_test() as pilot:
             await pilot.pause()
-            from textual.widgets import Static
-
-            # The first image row is highlighted by default after
-            # populate; the details pane should already reflect it
-            # via the source path. Filename appears in the path.
-            body = app.query_one("#details-body", Static)
-            text_str = str(body.content)
-            assert "my-image.qcow2" in text_str
-            assert "local" in text_str  # source label
-
-    _run(_drive())
-
-
-def test_app_details_pane_renders_disk_metadata(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """``_show_disk_details`` renders the trimmed disk fields:
-    Path, Size (in MiB), Model, Transport, Serial. Vendor /
-    Removable / Read-only are not in the body any more (the
-    table covers them or they're rarely useful in isolation
-    per the wizard-flow plan)."""
-    _patch_data_sources(
-        monkeypatch,
-        images_list=[_fake_image()],
-        disks_list=[_fake_disk(path="/dev/sdb", model="Acme NVMe", size="2T")],
-    )
-
-    app = tui_app.BtyTui(image_root=tmp_path / "images")
-
-    async def _drive() -> None:
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            from textual.widgets import Static
-
-            disk = next(iter(app._disks_by_key.values()))  # type: ignore[reportPrivateUsage]
-            app._show_disk_details(disk)  # type: ignore[reportPrivateUsage]
-            await pilot.pause()
-
-            body = app.query_one("#details-body", Static)
-            text_str = str(body.content)
-            assert "/dev/sdb" in text_str
-            assert "Acme NVMe" in text_str
-            # Size now formatted as MiB (2T = 2,097,152.0 MiB).
-            assert "MiB" in text_str
-            assert "Transport" in text_str  # column kept
-            # Vendor is NOT in the body any more; sanity-check the
-            # trim by asserting the default "ATA" string is gone.
-            assert "ATA" not in text_str
+            assert not app.query("#details-pane")
+            assert not app.query("#details-body")
 
     _run(_drive())
 
