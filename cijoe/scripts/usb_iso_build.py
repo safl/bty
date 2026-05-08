@@ -90,14 +90,22 @@ TRAILING_EXFAT_GIB = 4
 # Compress the cooked ISO with xz instead of zstd: Etcher / Rufus /
 # RPi Imager all decompress .xz natively but NOT .zstd, so .iso.xz
 # lets operators flash directly without a manual decompress step.
-# Compression ratio on our zero-heavy file (4 GiB sparse exFAT
-# region) is comparable to zstd-19 or slightly better; xz's
-# decompression is slower (~50-100 MB/s) but that's fine for a
-# one-shot write. ``-9 --extreme`` is max compression; ``-T0``
-# uses all build-host cores. Compress takes ~1-2 min on a CI
-# runner; the operator-side savings (no decompress step) compound
-# every download.
-XZ_FLAGS = ["-9", "--extreme", "-T0"]
+#
+# **No ``-T0``.** Multi-threaded xz emits one xz stream per thread
+# chunk and concatenates them; the result is RFC-valid multi-stream
+# xz, but Etcher's bundled decompressor (and a few others) only
+# handle single-stream files reliably -- it dies with a misleading
+# "if a compressed image, please check that the archive is not
+# corrupted" message on multi-stream input. Single-thread compression
+# emits one stream and is universally readable. CI cost: bake step
+# goes from ~1-2 min to ~3-5 min, fine for the operator-side
+# compatibility win.
+#
+# ``-9 --extreme`` is max compression. On our zero-heavy file
+# (4 GiB sparse exFAT region) this still finishes well under 10 min
+# on a CI runner; the operator-side savings (no decompress step,
+# every download) compound across the project.
+XZ_FLAGS = ["-9", "--extreme"]
 
 
 def add_args(parser: ArgumentParser):
