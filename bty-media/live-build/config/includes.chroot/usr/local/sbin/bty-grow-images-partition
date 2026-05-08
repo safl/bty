@@ -9,6 +9,11 @@
 # tail by deleting + recreating partition #BTY_IMAGES at full disk
 # size and re-running mkfs.exfat.
 #
+# The hybrid ISO is MBR-only (live-build's ``--bootloaders
+# syslinux,grub-efi`` produces an isohdpfx-style hybrid, not GPT),
+# so this script uses sfdisk throughout. MBR has no secondary
+# partition table to relocate.
+#
 # Driven by ``bty-grow-images-partition.service``, runs once before
 # ``bty-tui-on-tty1.service`` and ``bty-flash-on-boot.service`` so
 # the grown partition is in place by the time the TUI scans for
@@ -77,31 +82,61 @@ fi
 log "BTY_IMAGES is at $images_dev (same disk as live medium)"
 
 # --- 3. Pull the partition number, current end, and disk end ----------------
-
-# sgdisk --print emits one line per partition with columns:
-#   Number  Start   End  Size  Code  Name
-# Match by name (BTY_IMAGES) so we don't depend on a fixed index.
-part_info=$(sgdisk --print "$medium_disk" \
-    | awk '$NF == "BTY_IMAGES" && $1 ~ /^[0-9]+$/ { print $1, $3 }')
-if [ -z "$part_info" ]; then
-    log "BTY_IMAGES not found in $medium_disk's GPT; not growing"
+#
+# blkid resolved the partition to a device path like /dev/sdb3.
+# Extract the trailing digits as the partition number; same approach
+# handles /dev/nvme0n1p3 (extracts "3") and /dev/sdb3 (extracts "3").
+part_num=$(printf '%s\n' "$images_dev" | sed -E 's/^.*[^0-9]([0-9]+)$/\1/')
+if ! [ "$part_num" -gt 0 ] 2>/dev/null; then
+    log "could not extract partition number from $images_dev; not growing"
     exit 0
 fi
-part_num=$(echo "$part_info" | awk '{print $1}')
-part_end=$(echo "$part_info" | awk '{print $2}')
 
-# Disk size in 512-byte sectors. The GPT secondary header occupies
-# the last 33 sectors; the last usable sector is therefore
-# (disk_size - 34). If part_end is already at or past that, we have
-# nothing to do.
+# Disk size in 512-byte sectors. The current end-sector of the
+# partition comes from sfdisk --json (start + size - 1).
 disk_size=$(blockdev --getsz "$medium_disk")
-last_usable=$((disk_size - 34))
+sfdisk_json=$(sfdisk --json "$medium_disk" 2>/dev/null || true)
+if [ -z "$sfdisk_json" ]; then
+    log "sfdisk --json $medium_disk failed; not growing"
+    exit 0
+fi
+
+# The grow script can't take a hard jq dependency (not in our chroot
+# package list and live-build images stay lean). Use a tiny python3
+# one-liner instead - python3 IS in the chroot (we install bty into
+# a venv at /opt/bty/venv). Emit ``<start> <size>`` on a single line
+# for partition #${part_num}; empty string if not found.
+parsed=$(printf '%s' "$sfdisk_json" | python3 -c '
+import json, sys
+table = json.load(sys.stdin)["partitiontable"]
+target = sys.argv[1]
+for p in table["partitions"]:
+    node = p.get("node", "")
+    digits = "".join(c for c in node[::-1] if c.isdigit())[::-1]
+    if digits == target:
+        print(p["start"], p["size"])
+        sys.exit(0)
+sys.exit(1)
+' "$part_num" 2>/dev/null || true)
+if [ -z "$parsed" ]; then
+    log "could not parse partition $part_num from sfdisk JSON; not growing"
+    exit 0
+fi
+# parsed is "<start> <size>"; split via POSIX parameter expansion.
+part_start=${parsed%% *}
+part_size=${parsed##* }
+part_end=$((part_start + part_size - 1))
+
+# Reserve a small slop at the very end (1 MiB = 2048 sectors) -
+# matches MBR alignment conventions and avoids corner cases where
+# the disk's reported size is one sector short of the actual end.
+last_usable=$((disk_size - 2048))
 slack=$((last_usable - part_end))
-log "disk_size=$disk_size last_usable=$last_usable part_end=$part_end slack=$slack"
+log "disk_size=$disk_size last_usable=$last_usable part_start=$part_start part_end=$part_end slack=$slack"
 
 # Allow a small slack tolerance: a freshly-baked artifact may have
-# already taken the file to its full extent (the operator dd'd onto a
-# stick exactly the artifact's size). Anything under 1 MiB (2048
+# already taken the file to its full extent (the operator dd'd onto
+# a stick exactly the artifact's size). Anything under 1 MiB (2048
 # sectors) of unallocated tail isn't worth reformatting.
 if [ "$slack" -lt 2048 ]; then
     log "BTY_IMAGES already at (or near) the disk's last usable sector; nothing to grow"
@@ -133,21 +168,17 @@ if [ -n "$non_empty" ]; then
     exit 0
 fi
 
-# --- 5. Grow: relocate GPT secondary, recreate the partition, mkfs.exfat ----
+# --- 5. Grow: delete the partition, append a fresh one, mkfs.exfat ----------
 
 log "growing BTY_IMAGES (partition $part_num) on $medium_disk to fill the disk"
 
-# Relocate the GPT secondary header to the new EOF; live-build's
-# bake step did this, but we redo it here defensively in case the
-# stick is larger than the artifact (then the secondary header is
-# at the artifact's end, not the stick's end).
-sgdisk --move-second-header "$medium_disk" >/dev/null
-
-sgdisk --delete="${part_num}" "$medium_disk" >/dev/null
-sgdisk --new="${part_num}":0:0 \
-       --typecode="${part_num}":0700 \
-       --change-name="${part_num}":BTY_IMAGES \
-       "$medium_disk" >/dev/null
+# sfdisk --delete removes the partition entry; the freed slot is
+# reusable. ``--append`` then drops a fresh entry in the next free
+# slot at the default start (next free sector after partition 2)
+# spanning the rest of the disk. Spec ``,,07`` -> default start,
+# default size, type 0x07 (NTFS/exFAT).
+sfdisk --delete "$medium_disk" "$part_num"
+echo ",,07" | sfdisk --append "$medium_disk"
 
 partprobe "$medium_disk" 2>/dev/null || true
 udevadm settle

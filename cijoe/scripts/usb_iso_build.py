@@ -12,16 +12,19 @@ Workflow:
 
 1. Copy ``bty-media/live-build/`` (the live-build config tree) into
    a fresh ``cijoe/_build/usb-iso/`` working dir.
-2. Re-run ``./auto/config`` with ``--binary-images iso-hybrid`` and
-   ``--bootloaders syslinux,grub-efi`` to override the netboot
-   defaults baked into the script for the ``live-x86`` variant.
-   ``auto/config`` forwards extra args to its trailing ``lb config
-   noauto ... "${@}"``, so later flags override earlier ones.
-3. Run ``sudo lb clean --all`` (idempotency) then ``sudo lb build``.
-   live-build needs root for chroot operations; the build host (CI
-   runner or local dev) must have passwordless sudo.
-4. Publish the resulting hybrid ISO to ``publish.dir`` from the
+2. Run ``sudo env BTY_USB_ISO=1 lb clean --all && lb build``. The
+   env var drives ``auto/config`` into iso-hybrid mode (binary
+   images, bootloaders, kernel cmdline appendices); ``sudo env``
+   is needed because sudo strips the environment by default. The
+   var must be present at every lb invocation because ``lb build``
+   internally re-runs ``lb config`` (which re-invokes
+   ``auto/config``).
+3. Publish the resulting hybrid ISO to ``publish.dir`` from the
    cijoe config, renamed to ``bty-usb-x86_64.iso``.
+4. Append a writable BTY_IMAGES exFAT partition to the trailing
+   edge of the artifact (sfdisk + losetup + mkfs.exfat) so the
+   single dd-able file carries both the boot path and the
+   operator's image catalog.
 5. Write a sha256 manifest covering the ISO.
 
 The cwd at run time is ``cijoe/`` (the Makefile cd's there before
@@ -37,6 +40,7 @@ Retargetable: False
 from __future__ import annotations
 
 import errno
+import json
 import logging as log
 import os
 import shutil
@@ -174,10 +178,12 @@ def main(args, cijoe):
 
     # Extend the published ISO with a trailing exFAT partition so the
     # cooked image is dd-ready WITH a writable image-catalog area.
-    # The hybrid ISO carries a GPT (with a protective MBR); we just
-    # append a partition entry, the front of the file stays byte-
-    # identical so the boot path is unchanged. dd / Etcher / Rufus
-    # all do byte-for-byte writes and handle the larger artifact.
+    # The hybrid ISO is MBR-only (live-build's ``--bootloaders
+    # syslinux,grub-efi`` uses ``isohdpfx.bin`` for the System Area,
+    # not GPT); we append a fresh MBR partition entry via sfdisk.
+    # The front of the file stays byte-identical so the boot path
+    # is unchanged. dd / Etcher / Rufus all do byte-for-byte writes
+    # and handle the larger artifact.
     err = _extend_with_exfat(cijoe, dst)
     if err:
         return err
@@ -199,27 +205,35 @@ def main(args, cijoe):
 def _extend_with_exfat(cijoe, iso_path: Path) -> int:
     """Append a trailing exFAT partition labelled BTY_IMAGES to ``iso_path``.
 
+    The live-build hybrid ISO uses ``isohdpfx.bin`` for its System
+    Area, producing an MBR-only isohybrid layout (no GPT). This is
+    the consequence of ``--bootloaders syslinux,grub-efi``: syslinux
+    needs the legacy MBR boot path. So we work the MBR via
+    ``sfdisk`` rather than ``sgdisk``.
+
     Steps:
 
     1. ``truncate -s +<N>G`` extends the file by ``TRAILING_EXFAT_GIB``
        gigabytes; the new bytes are sparse zeros until exFAT writes to
        them.
-    2. ``sgdisk --move-second-header`` rewrites the GPT secondary
-       header at the new EOF (live-build's ISO has it at the original
-       end; without this sgdisk would refuse to add a partition past
-       the secondary header).
-    3. ``sgdisk --new=0:0:0`` adds a partition spanning the freshly-
-       added space (typecode 0700 = "Microsoft basic data", the right
-       code for exFAT/FAT/NTFS), labelled ``BTY_IMAGES`` to match
-       what the legacy cloud-init bake used.
-    4. ``losetup -fP`` attaches the file as a loopback block device
+    2. ``sfdisk --append`` adds a new MBR partition entry covering the
+       freshly-added space. Spec ``,,07`` -> default start, default
+       size (fill remaining), type 0x07 ("NTFS/exFAT/HPFS" MBR
+       partition type code).
+    3. ``losetup -fP`` attaches the file as a loopback block device
        and scans the partition table so ``${LOOP}p<N>`` exists.
-    5. ``mkfs.exfat`` formats the new partition.
-    6. ``losetup -d`` detaches.
+    4. ``mkfs.exfat -L BTY_IMAGES`` formats the new partition. The
+       label is set on the FILESYSTEM (read by udev/blkid for the
+       ``/dev/disk/by-label/BTY_IMAGES`` symlink); MBR has no
+       partition labels of its own.
+    5. ``losetup -d`` detaches.
 
-    The new partition number is whatever sgdisk picked (typically 3
-    after live-build's existing data + ESP partitions); we read it
-    back from ``sgdisk --print``.
+    The new partition number is whatever sfdisk auto-assigned. MBR
+    isohybrid layout from live-build is typically:
+      - p1: ISO9660 data (the squashfs etc.)
+      - p2: EFI System partition
+      - p3: BTY_IMAGES (added here)
+    We assume p3 with a sanity check via ``sfdisk --json``.
     """
     log.info(f"Extending {iso_path} with +{TRAILING_EXFAT_GIB} GiB BTY_IMAGES exFAT")
 
@@ -228,33 +242,43 @@ def _extend_with_exfat(cijoe, iso_path: Path) -> int:
         log.error(f"truncate +{TRAILING_EXFAT_GIB}G failed on {iso_path}")
         return err
 
-    err, _ = cijoe.run_local(f"sudo sgdisk --move-second-header {iso_path}")
+    # sfdisk --append reads the partition spec from stdin. ``,,07`` =
+    # default start, default size (fill remaining), type 0x07.
+    err, _ = cijoe.run_local(f"sh -c 'echo \",,07\" | sudo sfdisk --append {iso_path}'")
     if err:
-        log.error("sgdisk --move-second-header failed")
+        log.error("sfdisk --append BTY_IMAGES failed")
         return err
 
-    err, _ = cijoe.run_local(
-        f"sudo sgdisk --new=0:0:0 --typecode=0:0700 --change-name=0:BTY_IMAGES {iso_path}"
-    )
+    # Sanity check + partition number resolution. ``sfdisk --json``
+    # emits a parseable structure under ``.partitiontable.partitions``.
+    err, out = cijoe.run_local(f"sudo sfdisk --json {iso_path}")
     if err:
-        log.error("sgdisk --new BTY_IMAGES failed")
+        log.error("sfdisk --json failed")
         return err
+    try:
+        table = json.loads(out)
+        partitions = table["partitiontable"]["partitions"]
+    except (json.JSONDecodeError, KeyError) as exc:
+        log.error(f"could not parse sfdisk --json output: {exc}\n{out}")
+        return errno.EIO
 
-    # Find which partition number sgdisk assigned. ``sgdisk --print``
-    # output has columns: Number Start End Size Code Name. Match by
-    # name so we don't depend on hybrid-ISO partition layout.
-    err, out = cijoe.run_local(f"sudo sgdisk --print {iso_path}")
-    if err:
-        log.error("sgdisk --print failed")
-        return err
+    # The newest entry is the one we just appended. sfdisk numbers
+    # by 1-based index in the partition table. Match by partition
+    # type 0x07 (we just added the only one).
     part_num = None
-    for line in out.splitlines():
-        fields = line.split()
-        if len(fields) >= 6 and fields[-1] == "BTY_IMAGES" and fields[0].isdigit():
-            part_num = fields[0]
-            break
+    for p in partitions:
+        # ``type`` is the hex string e.g. "7" or "07" (sfdisk emits
+        # without leading zero).
+        if str(p.get("type", "")).lstrip("0").lower() == "7":
+            # Extract trailing digits of the partition node name,
+            # e.g. "/path/to/iso3" -> "3".
+            node = p.get("node", "")
+            digits = "".join(ch for ch in node[::-1] if ch.isdigit())[::-1]
+            if digits:
+                part_num = digits
+                break
     if part_num is None:
-        log.error(f"could not locate BTY_IMAGES partition in sgdisk --print output:\n{out}")
+        log.error(f"could not locate BTY_IMAGES (type 07) in sfdisk --json output:\n{out}")
         return errno.EIO
     log.info(f"BTY_IMAGES is partition #{part_num}")
 
