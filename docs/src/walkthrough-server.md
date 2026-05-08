@@ -91,8 +91,19 @@ sync
 
 **On Raspberry Pi 4/5:**
 
-Plug the SD card into a Linux/macOS/Windows host (NOT the Pi
-itself). Then:
+Plug the SD card (8 GiB or larger) into a Linux/macOS/Windows
+host (NOT the Pi itself - the Pi can't write its own boot
+medium). The image goes onto the SD card; you then move the
+SD card to the Pi and power it on.
+
+*Identify the SD card first.* It's the device that appeared
+when you plugged it in. Easy way: run `lsblk` (Linux),
+`diskutil list` (macOS), or `wmic diskdrive list brief`
+(Windows PowerShell) before and after inserting the card; the
+new entry is the SD card. Sizes match the card's marketed
+capacity, give or take a GiB.
+
+*Linux*:
 
 ```bash
 gunzip -d --stdout ~/system_imaging/disk/bty-server-rpi-arm64.img.gz | \
@@ -100,8 +111,33 @@ gunzip -d --stdout ~/system_imaging/disk/bty-server-rpi-arm64.img.gz | \
 sync
 ```
 
-Or use Raspberry Pi Imager: pick "Use custom" and feed it the
-`.img.gz`.
+Replace `/dev/sdX` with the SD card's device node (often
+`/dev/mmcblk0` on a built-in card reader). Double-check with
+`lsblk` - flashing the wrong disk wipes whatever is on it.
+
+*macOS*:
+
+```bash
+diskutil list                                # find the SD card (e.g. /dev/disk4)
+diskutil unmountDisk /dev/diskN              # unmount, don't eject
+gunzip -d --stdout ~/system_imaging/disk/bty-server-rpi-arm64.img.gz | \
+  sudo dd of=/dev/rdiskN bs=4m               # note the ``r`` prefix - raw device, much faster
+sync
+diskutil eject /dev/diskN
+```
+
+*Windows*: use Raspberry Pi Imager (recommended) or balenaEtcher.
+Both accept `.img.gz` directly without manual decompression.
+
+- **Raspberry Pi Imager**: choose `Operating System -> Use
+  custom`, pick the `.img.gz`, choose your SD card under
+  `Storage`, then Write. Imager handles the gunzip step
+  internally; do NOT pre-decompress.
+- **balenaEtcher**: Flash from file -> pick the `.img.gz` ->
+  Select target -> Flash.
+
+(Imager is also available on Linux and macOS if you'd rather
+not type the `dd` line.)
 
 **On a VM:**
 

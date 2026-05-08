@@ -1118,7 +1118,8 @@ class BtyTui(App[None]):
                 "an image directly:\n"
                 "  [dim]curl -X PUT --upload-file my.qcow2 \\\n"
                 "       http://server:8080/images/my.qcow2[/]\n\n"
-                "Then press [b]r[/] in this TUI to refresh."
+                "Then press [b]r[/] to refresh, or [b]s[/] to switch to a\n"
+                "different catalog source."
             )
         return (
             "[b]No images in the catalog yet.[/]\n\n"
@@ -1128,7 +1129,8 @@ class BtyTui(App[None]):
             "(Linux / macOS / Windows all read exFAT):\n\n"
             "  [dim]cp my-image.img.zst /path/to/BTY_IMAGES/[/]\n"
             "  [dim]cp my-image.qcow2  /path/to/BTY_IMAGES/[/]\n\n"
-            "Then press [b]r[/] in this TUI to refresh."
+            "Then press [b]r[/] to refresh, or [b]s[/] to point this TUI at\n"
+            "a remote bty-web catalog instead."
         )
 
     def _load_images(self) -> list[_TuiImage]:
@@ -1193,7 +1195,7 @@ class BtyTui(App[None]):
     def action_refresh(self) -> None:
         self._populate_images()
         self._populate_disks()
-        self._set_status("Refreshed.")
+        self._set_status_transient("Refreshed.")
 
     # ---------- wizard navigation -------------------------------------------
 
@@ -1275,7 +1277,7 @@ class BtyTui(App[None]):
         filter_input.remove_class("active")
         self._filter = ""
         self._populate_images()
-        self._set_status("Filter cleared.")
+        self._set_status_transient("Filter cleared.")
         # Return focus to the catalog so navigation keys work again.
         try:
             self.query_one("#images_table", DataTable).focus()
@@ -1426,7 +1428,7 @@ class BtyTui(App[None]):
             self.query_one("#images_table", DataTable).focus()
         except Exception:
             pass
-        self._set_status(f"Source: {source}")
+        self._set_status_transient(f"Source: {source}")
 
     @work(exclusive=True)
     async def action_theme(self) -> None:
@@ -1444,7 +1446,7 @@ class BtyTui(App[None]):
         selected = await self.push_screen_wait(ThemeSelectScreen(self.theme, available))
         if selected is not None and selected != self.theme:
             self.theme = selected
-            self._set_status(f"Theme: {selected}")
+            self._set_status_transient(f"Theme: {selected}")
 
     @work(exclusive=True)
     async def action_flash(self) -> None:
@@ -1522,7 +1524,10 @@ class BtyTui(App[None]):
                 self._set_status(f"Flash done but POST /pxe/{self._mac}/done failed: {exc}")
                 self._populate_disks()
                 return
-        self._set_status("Flash completed." if success else "Flash failed; see status modal log.")
+        if success:
+            self._set_status_transient("Flash completed.")
+        else:
+            self._set_status("Flash failed; see status modal log.")
         # Disks may have new partition tables now; refresh.
         self._populate_disks()
         # On success: the action-pane button transforms into a
@@ -1575,6 +1580,28 @@ class BtyTui(App[None]):
             self.query_one("#status", Static).update(message)
         except Exception:  # pragma: no cover - defensive during teardown
             pass
+
+    def _set_status_transient(self, message: str, *, delay: float = 4.0) -> None:
+        """Show a status message that auto-clears after ``delay`` seconds.
+
+        Used for post-action confirmations ("Refreshed.", "Theme: nord",
+        "Flash completed.") where leaving the message up indefinitely
+        clutters the bottom row. Errors keep using ``_set_status`` so
+        they stay visible until the operator does something else.
+        """
+        self._set_status(message)
+        self.set_timer(delay, lambda: self._clear_status_if(message))
+
+    def _clear_status_if(self, expected: str) -> None:
+        """Clear the status line iff it still shows ``expected``. Avoids
+        racing newer messages: if the operator triggered a fresh action
+        before the timer fired, that newer message stays."""
+        try:
+            current = str(self.query_one("#status", Static).renderable)
+        except Exception:
+            return
+        if current == expected:
+            self._set_status("")
 
     def _initial_status(self) -> str:
         if os.geteuid() != 0:

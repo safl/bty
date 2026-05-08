@@ -498,3 +498,29 @@ def test_flash_cijoe_passes_config_through(tmp_path: Path) -> None:
     )
     assert rc == 0
     assert captured == [(Path("/dev/loop9"), workflow, config)]
+
+
+def test_bty_tui_help_exits_cleanly() -> None:
+    """Smoke test: ``bty-tui --help`` must import + run without
+    raising. Regression catch for any future textual / pamela /
+    bty.tui import-chain breakage.
+    """
+    from bty import tui as tui_mod
+
+    with pytest.raises(SystemExit) as excinfo:
+        tui_mod.main(["--help"])
+    assert excinfo.value.code == 0
+
+
+def test_bty_web_help_exits_cleanly() -> None:
+    """Smoke test: ``bty-web --help`` must import + run without
+    raising. Regression catch for any future fastapi / starlette /
+    pamela / bty.web import-chain breakage. The ``[web]`` extra is
+    pulled in by the dev group in ``pyproject.toml``, so this runs
+    in CI.
+    """
+    from bty import web as web_mod
+
+    with pytest.raises(SystemExit) as excinfo:
+        web_mod.main(["--help"])
+    assert excinfo.value.code == 0
