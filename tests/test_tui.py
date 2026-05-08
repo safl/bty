@@ -448,3 +448,398 @@ def test_app_remote_mode_renders_catalog_from_server(
             assert row.path is None  # remote rows never carry a local path
 
     _run(_drive())
+
+
+# --------------------------------------------------------------------------
+# M20: TUI polish (theme, filter, welcome panel, details pane, flash modal)
+# --------------------------------------------------------------------------
+
+
+def test_app_uses_tokyo_night_theme(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The app picks Tokyo Night on mount (matches the bty mascot's
+    navy + warm-yellow palette)."""
+    _patch_data_sources(
+        monkeypatch,
+        images_list=[_fake_image()],
+        disks_list=[_fake_disk()],
+    )
+
+    app = tui_app.BtyTui(image_root=tmp_path / "images")
+
+    async def _drive() -> None:
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            assert app.theme == "tokyo-night"
+
+    _run(_drive())
+
+
+def test_app_welcome_panel_has_local_onboarding_text_when_empty(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Empty local catalog -> welcome Static is populated with
+    local-mode onboarding (BTY_IMAGES partition guidance)."""
+    _patch_data_sources(monkeypatch, images_list=[], disks_list=[_fake_disk()])
+
+    app = tui_app.BtyTui(image_root=tmp_path / "empty")
+
+    async def _drive() -> None:
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            from textual.widgets import Static
+
+            welcome = app.query_one("#welcome", Static)
+            text_str = str(welcome.content)
+            # Local-mode markers: BTY_IMAGES partition + image-root path
+            assert "BTY_IMAGES" in text_str
+            assert str(tmp_path / "empty") in text_str
+
+    _run(_drive())
+
+
+def test_app_welcome_panel_has_remote_onboarding_text_when_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Empty remote catalog -> welcome Static is populated with
+    remote-mode onboarding (PUT /images guidance)."""
+    _patch_data_sources(monkeypatch, disks_list=[_fake_disk()], remote_catalog=[])
+
+    app = tui_app.BtyTui(server_url="http://server:8080")
+
+    async def _drive() -> None:
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            from textual.widgets import Static
+
+            welcome = app.query_one("#welcome", Static)
+            text_str = str(welcome.content)
+            # Remote-mode markers: server URL + the PUT example
+            assert "http://server:8080/images" in text_str
+            assert "curl -X PUT" in text_str
+
+    _run(_drive())
+
+
+def test_app_welcome_panel_clears_when_catalog_populated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Non-empty catalog -> welcome Static is cleared so the panel
+    collapses and the table fills the space."""
+    _patch_data_sources(
+        monkeypatch,
+        images_list=[_fake_image()],
+        disks_list=[_fake_disk()],
+    )
+
+    app = tui_app.BtyTui(image_root=tmp_path / "images")
+
+    async def _drive() -> None:
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            from textual.widgets import Static
+
+            welcome = app.query_one("#welcome", Static)
+            text_str = str(welcome.content)
+            assert text_str == ""
+
+    _run(_drive())
+
+
+def test_app_filter_action_focuses_input(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """``/`` makes the filter Input visible + focused so the operator
+    can type a substring. Pressing it from the table (initial focus)
+    should not type ``/`` into the table."""
+    _patch_data_sources(
+        monkeypatch,
+        images_list=[_fake_image()],
+        disks_list=[_fake_disk()],
+    )
+
+    app = tui_app.BtyTui(image_root=tmp_path / "images")
+
+    async def _drive() -> None:
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            from textual.widgets import Input
+
+            await pilot.press("slash")
+            await pilot.pause()
+            filter_input = app.query_one("#filter-input", Input)
+            assert filter_input.has_class("active")
+            assert filter_input.has_focus
+
+    _run(_drive())
+
+
+def test_app_filter_narrows_catalog_to_matching_substring(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Submitting the filter Input narrows the images table to rows
+    whose name contains the substring (case-insensitive). Other
+    rows go away; non-matching filter -> empty table."""
+    _patch_data_sources(
+        monkeypatch,
+        images_list=[
+            _fake_image(name="alpha.qcow2"),
+            _fake_image(name="beta.img.zst"),
+            _fake_image(name="gamma.qcow2"),
+        ],
+        disks_list=[_fake_disk()],
+    )
+
+    app = tui_app.BtyTui(image_root=tmp_path / "images")
+
+    async def _drive() -> None:
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            from textual.widgets import DataTable, Input
+
+            images_table = app.query_one("#images_table", DataTable)
+            assert images_table.row_count == 3  # all three pre-filter
+
+            # Apply the filter via the Input's value (instead of
+            # typing each character through pilot, which is slow and
+            # easy to fight focus on).
+            filter_input = app.query_one("#filter-input", Input)
+            filter_input.value = "qcow2"
+            # Trigger the submitted handler the way Enter does.
+            app._filter = "qcow2"  # type: ignore[reportPrivateUsage]
+            app._populate_images()  # type: ignore[reportPrivateUsage]
+            await pilot.pause()
+            assert images_table.row_count == 2  # alpha + gamma match qcow2
+
+    _run(_drive())
+
+
+def test_app_filter_escape_clears_and_repopulates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``escape`` clears the active filter, re-populates the catalog,
+    and emits a ``Filter cleared.`` status."""
+    _patch_data_sources(
+        monkeypatch,
+        images_list=[
+            _fake_image(name="alpha.qcow2"),
+            _fake_image(name="beta.img.zst"),
+        ],
+        disks_list=[_fake_disk()],
+    )
+    statuses = _spy_status(monkeypatch)
+
+    app = tui_app.BtyTui(image_root=tmp_path / "images")
+
+    async def _drive() -> None:
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            from textual.widgets import DataTable
+
+            # Apply a filter that excludes ``beta``
+            app._filter = "alpha"  # type: ignore[reportPrivateUsage]
+            app._populate_images()  # type: ignore[reportPrivateUsage]
+            await pilot.pause()
+            images_table = app.query_one("#images_table", DataTable)
+            assert images_table.row_count == 1
+
+            # escape should clear the filter
+            await pilot.press("escape")
+            await pilot.pause()
+            assert app._filter == ""  # type: ignore[reportPrivateUsage]
+            assert images_table.row_count == 2  # both rows back
+            assert any("Filter cleared" in s for s in statuses)
+
+    _run(_drive())
+
+
+def test_app_details_pane_updates_on_image_row_highlight(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Moving the cursor to an image row updates the details pane
+    with the image's name + format + size + source."""
+    _patch_data_sources(
+        monkeypatch,
+        images_list=[_fake_image(name="my-image.qcow2", fmt="qcow2", size=1024)],
+        disks_list=[_fake_disk()],
+    )
+
+    app = tui_app.BtyTui(image_root=tmp_path / "images")
+
+    async def _drive() -> None:
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            from textual.widgets import Static
+
+            # The first image row is highlighted by default after
+            # populate; the details pane should already reflect it.
+            body = app.query_one("#details-body", Static)
+            text_str = str(body.content)
+            assert "my-image.qcow2" in text_str
+            assert "qcow2" in text_str
+            assert "1,024 bytes" in text_str  # comma-grouped formatting
+
+    _run(_drive())
+
+
+def test_app_details_pane_renders_disk_metadata(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``_show_disk_details`` renders vendor / model / transport /
+    serial / removable / readonly into the details pane. The rendering
+    logic is the contract; the textual ``RowHighlighted`` message
+    routing that calls it is textual's job, not ours to retest."""
+    _patch_data_sources(
+        monkeypatch,
+        images_list=[_fake_image()],
+        disks_list=[_fake_disk(path="/dev/sdb", model="Acme NVMe", size="2T")],
+    )
+
+    app = tui_app.BtyTui(image_root=tmp_path / "images")
+
+    async def _drive() -> None:
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            from textual.widgets import Static
+
+            disk = next(iter(app._disks_by_key.values()))  # type: ignore[reportPrivateUsage]
+            app._show_disk_details(disk)  # type: ignore[reportPrivateUsage]
+            await pilot.pause()
+
+            body = app.query_one("#details-body", Static)
+            text_str = str(body.content)
+            assert "/dev/sdb" in text_str
+            assert "Acme NVMe" in text_str
+            assert "2T" in text_str
+            assert "ATA" in text_str  # vendor (default in _fake_disk)
+
+    _run(_drive())
+
+
+# --------------------------------------------------------------------------
+# FlashStatusScreen stage tracker (M20)
+# --------------------------------------------------------------------------
+
+
+def _fake_flash_plan() -> tui_app.flash.FlashPlan:
+    """Synthesize a minimal FlashPlan for FlashStatusScreen tests.
+
+    The plan's content doesn't matter; we mock ``flash.execute_plan``
+    so it never actually touches the disk.
+    """
+    image = tui_app.flash.ImageInfo(
+        path=Path("/fake/images/demo.qcow2"),
+        format="qcow2",
+        size_bytes=1024,
+        virtual_size_bytes=2048,
+    )
+    target = tui_app.flash.TargetInfo(
+        path=Path("/dev/sdz"),
+        exists=True,
+        is_block_device=True,
+        size_bytes=8192,
+        mountpoints=[],
+    )
+    return tui_app.flash.FlashPlan(
+        image=image,
+        target=target,
+        provisioning_mode="none",
+    )
+
+
+def test_flash_status_screen_ticks_stages_on_success(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """As ``flash.execute_plan`` emits each lifecycle event the stage
+    tracker advances: prior stages get ``done``, the active one gets
+    ``active``. After completion all five stages (started, writing,
+    synced, partprobed, done) are marked ``done``."""
+    _patch_data_sources(
+        monkeypatch,
+        images_list=[_fake_image()],
+        disks_list=[_fake_disk()],
+    )
+
+    def _fake_execute_plan(plan: Any, progress: Any = None) -> None:
+        # Walk through the four lifecycle events the screen renders
+        # as stages (the fifth, ``done``, is ticked by the screen
+        # itself after execute_plan returns).
+        if progress is None:
+            return
+        for ev in ("started", "writing", "synced", "partprobed"):
+            progress(tui_app.flash.FlashProgress(event=ev))
+
+    monkeypatch.setattr(tui_app.flash, "execute_plan", _fake_execute_plan)
+
+    plan = _fake_flash_plan()
+    app = tui_app.BtyTui(image_root=tmp_path / "images")
+
+    async def _drive() -> None:
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            from textual.widgets import Button, Static
+
+            screen = tui_app.FlashStatusScreen(plan)
+            app.push_screen(screen)
+            # Drain the worker thread + queued call_from_thread updates.
+            for _ in range(20):
+                await pilot.pause()
+
+            # All five stages should be done.
+            for ev_name, _ in tui_app.FlashStatusScreen._STAGES:  # type: ignore[reportPrivateUsage]
+                widget = screen.query_one(f"#stage-{ev_name}", Static)
+                assert "done" in widget.classes, (
+                    f"stage {ev_name} not marked done: classes={widget.classes}"
+                )
+
+            # Close button is now enabled (worker reported success).
+            close_btn = screen.query_one("#close", Button)
+            assert close_btn.disabled is False
+
+    _run(_drive())
+
+
+def test_flash_status_screen_marks_failed_stage_on_FlashError(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When ``flash.execute_plan`` raises a ``FlashError`` partway
+    through, the currently-active stage is marked ``failed`` (not
+    done) and the close button enables so the operator can dismiss."""
+    _patch_data_sources(
+        monkeypatch,
+        images_list=[_fake_image()],
+        disks_list=[_fake_disk()],
+    )
+
+    def _fake_execute_plan(plan: Any, progress: Any = None) -> None:
+        if progress is not None:
+            progress(tui_app.flash.FlashProgress(event="started"))
+            progress(tui_app.flash.FlashProgress(event="writing"))
+        raise tui_app.flash.FlashError("boom: simulated write failure")
+
+    monkeypatch.setattr(tui_app.flash, "execute_plan", _fake_execute_plan)
+
+    plan = _fake_flash_plan()
+    app = tui_app.BtyTui(image_root=tmp_path / "images")
+
+    async def _drive() -> None:
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            from textual.widgets import Button, Static
+
+            screen = tui_app.FlashStatusScreen(plan)
+            app.push_screen(screen)
+            for _ in range(20):
+                await pilot.pause()
+
+            # ``writing`` was active when the failure landed; expect
+            # it marked ``failed``. Earlier ``started`` is ``done``;
+            # later stages are still ``pending``.
+            started = screen.query_one("#stage-started", Static)
+            writing = screen.query_one("#stage-writing", Static)
+            synced = screen.query_one("#stage-synced", Static)
+            assert "done" in started.classes
+            assert "failed" in writing.classes
+            assert "pending" in synced.classes
+
+            close_btn = screen.query_one("#close", Button)
+            assert close_btn.disabled is False  # enabled to let operator dismiss
+
+    _run(_drive())

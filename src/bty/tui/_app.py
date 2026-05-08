@@ -360,18 +360,27 @@ class FlashStatusScreen(ModalScreen[bool]):
     def _mark_stage_active(self, event_name: str) -> None:
         """Tick the stage tracker: previous active becomes done, this one becomes active.
 
-        ``event_name`` may be a stage we don't render (e.g. ``provisioning``);
-        in that case the tracker doesn't change.
+        Special case: when ``event_name`` is the LAST stage (``done``),
+        we mark it as ``done`` itself rather than ``active`` -- the
+        final stage represents "the flash succeeded", not "still
+        running this stage". So at the end of a successful run all
+        stages are marked ``done``.
+
+        ``event_name`` may be a stage we don't render (e.g.
+        ``provisioning``); in that case the tracker doesn't change.
         """
         stage_ids = {name for name, _ in self._STAGES}
         if event_name not in stage_ids:
             return
-        # Mark all prior stages as done; this one as active.
+        is_final = event_name == self._STAGES[-1][0]
         seen_current = False
         for name, label in self._STAGES:
             if name == event_name:
                 seen_current = True
-                self._set_stage_class(name, "active", marker="*", label=label)
+                if is_final:
+                    self._set_stage_class(name, "done", marker="✓", label=label)
+                else:
+                    self._set_stage_class(name, "active", marker="*", label=label)
                 self._completed_stages.add(name)
             elif not seen_current:
                 # Earlier stage; mark done if not already.
