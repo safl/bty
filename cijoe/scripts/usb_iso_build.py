@@ -106,33 +106,35 @@ def main(args, cijoe):
         else:
             shutil.copy2(entry, dest)
 
-    # Re-run auto/config with iso-hybrid overrides. The script's
-    # trailing "${@}" forwards the extras into ``lb config noauto``,
-    # and lb config processes args left-to-right with last-wins
-    # semantics for repeated options.
+    # Drive auto/config into iso-hybrid mode via the ``BTY_USB_ISO``
+    # env var (``BTY_USB_ISO=1`` selects iso-hybrid + syslinux,grub-efi
+    # + ``bty.mode=interactive`` on the kernel cmdline; unset selects
+    # netboot for live-x86). The env var has to be set in the
+    # invocation environment of every ``lb`` call, because ``lb build``
+    # re-runs ``lb config`` (which re-runs ``auto/config``) during its
+    # own setup; flag-based overrides at the initial config call get
+    # clobbered by that re-run.
     #
-    # ``bty.mode=interactive`` on the kernel cmdline fires
-    # ``bty-tui-on-tty1.service`` (its ``ConditionKernelCommandLine``
-    # is keyed on this), which is the same unit the PXE-tui flow
-    # uses. With no ``bty.server`` / ``bty.mac`` on the cmdline the
-    # wrapper script forwards no flags and ``bty-tui`` falls back
-    # to scanning the local image-root - the offline USB-boot mode
-    # (M19 phase 2). ``bty-flash-on-boot.service`` short-circuits
-    # cleanly when it sees ``bty.mode=interactive``, so the two
-    # services don't race over tty1.
-    log.info(f"Reconfiguring live-build for iso-hybrid in {build_dir}")
+    # ``bty.mode=interactive`` fires ``bty-tui-on-tty1.service`` (its
+    # ``ConditionKernelCommandLine`` is keyed on this), which is the
+    # same unit the PXE-tui flow uses. With no ``bty.server`` /
+    # ``bty.mac`` on the cmdline the wrapper script forwards no flags
+    # and ``bty-tui`` falls back to scanning the local image-root -
+    # the offline USB-boot mode (M19 phase 2).
+    # ``bty-flash-on-boot.service`` short-circuits cleanly when it
+    # sees ``bty.mode=interactive``, so the two services don't race
+    # over tty1.
+    #
+    # ``sudo env`` is used (instead of ``sudo`` with shell variable
+    # assignment) because sudo strips environment by default; ``env``
+    # ensures BTY_USB_ISO is in the invoked process's environment
+    # under root rather than the caller's.
+    log.info(f"Running lb build in {build_dir} (BTY_USB_ISO=1)")
     err, _ = cijoe.run_local(
-        f"sh -c 'cd {build_dir} && sudo ./auto/config "
-        "--binary-images iso-hybrid "
-        "--bootloaders syslinux,grub-efi "
-        '--bootappend-live "boot=live components quiet noeject bty.mode=interactive"\''
+        f"sh -c 'cd {build_dir} && "
+        "sudo env BTY_USB_ISO=1 lb clean --all && "
+        "sudo env BTY_USB_ISO=1 lb build'"
     )
-    if err:
-        log.error("auto/config (iso-hybrid override) failed")
-        return err
-
-    log.info(f"Running lb build in {build_dir}")
-    err, _ = cijoe.run_local(f"sh -c 'cd {build_dir} && sudo lb clean --all && sudo lb build'")
     if err:
         log.error("lb build failed; see live-build.log under the build dir")
         return err

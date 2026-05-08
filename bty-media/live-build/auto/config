@@ -2,9 +2,30 @@
 # auto/config - live-build configuration for the bty live env.
 #
 # live-build invokes this script when (re)configuring the build dir
-# (typically the first ``lb build`` run). Encodes our lb config args:
-# Debian trixie, amd64, netboot output (kernel + initrd + squashfs),
-# no debian-installer, no memtest, no apt recommends, no security.
+# (typically the first ``lb build`` run, and again whenever ``lb build``
+# itself calls ``lb config``). Encodes our lb config args: Debian
+# trixie, amd64, no debian-installer, no memtest, no apt recommends,
+# no security.
+#
+# Two output modes, switched by the ``BTY_USB_ISO`` environment
+# variable:
+#
+#   - **default (netboot)**: kernel + initrd + squashfs trio for the
+#     ``live-x86`` PXE-flash flow. Server hosts these three files
+#     over HTTP and clients chain into them via iPXE.
+#   - **BTY_USB_ISO=1 (iso-hybrid)**: hybrid ISO image bootable from
+#     CD or USB stick (BIOS + UEFI). Used by the ``usb-iso`` variant.
+#     Adds ``--bootloaders syslinux,grub-efi`` for dual-firmware boot
+#     and ``bty.mode=interactive`` to the kernel cmdline so
+#     ``bty-tui-on-tty1.service`` fires on USB boot the same way it
+#     fires for the PXE-tui flow.
+#
+# Both modes use the same chroot package set + hooks; only the binary
+# packaging differs. ``lb build`` re-runs this script during its
+# internal ``lb config`` step, so the env var must be set in the
+# build invocation's environment - not just at the initial config
+# call. ``cijoe/scripts/usb_iso_build.py`` does this via ``sudo env
+# BTY_USB_ISO=1 lb build``.
 #
 # Requires live-build 20240208+ (Debian trixie or newer) which
 # fetches ``dists/<release>/main/Contents-<arch>.gz`` from the
@@ -14,14 +35,26 @@
 # pulls the trixie .deb explicitly to work around that.
 set -e
 
+if [ "${BTY_USB_ISO:-}" = "1" ]; then
+    BINARY_IMAGES=iso-hybrid
+    BOOTLOADERS_OPTS="--bootloaders syslinux,grub-efi"
+    BOOTAPPEND="boot=live components quiet noeject bty.mode=interactive"
+else
+    BINARY_IMAGES=netboot
+    BOOTLOADERS_OPTS=""
+    BOOTAPPEND="boot=live components quiet noeject"
+fi
+
+# shellcheck disable=SC2086 # BOOTLOADERS_OPTS is intentionally word-split
 lb config noauto \
     --mode debian \
     --distribution trixie \
     --architectures amd64 \
-    --binary-images netboot \
-    --debian-installer false \
+    --binary-images "${BINARY_IMAGES}" \
+    --debian-installer none \
     --memtest none \
     --apt-recommends false \
     --security false \
-    --bootappend-live "boot=live components quiet noeject" \
+    ${BOOTLOADERS_OPTS} \
+    --bootappend-live "${BOOTAPPEND}" \
     "${@}"
