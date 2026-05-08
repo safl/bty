@@ -977,6 +977,11 @@ class BtyTui(App[None]):
         # freshly flashed disk) is one keypress away. Esc /
         # Backspace clears it.
         self._post_flash: bool = False
+        # Last message passed to ``_set_status_transient``. The
+        # auto-clear timer compares against this rather than reading
+        # the widget back, so the typing stays clean and the clear
+        # is robust to any future rich/markup the status line picks up.
+        self._transient_status: str | None = None
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
@@ -1576,6 +1581,11 @@ class BtyTui(App[None]):
         return row_key.value if row_key is not None else None
 
     def _set_status(self, message: str) -> None:
+        # Any plain ``_set_status`` call invalidates the transient
+        # tracking: a sticky error / state message has now taken
+        # over the bottom row, and a stale auto-clear timer must
+        # not wipe it out a few seconds later.
+        self._transient_status = None
         try:
             self.query_one("#status", Static).update(message)
         except Exception:  # pragma: no cover - defensive during teardown
@@ -1588,20 +1598,27 @@ class BtyTui(App[None]):
         "Flash completed.") where leaving the message up indefinitely
         clutters the bottom row. Errors keep using ``_set_status`` so
         they stay visible until the operator does something else.
+
+        Routes through ``_set_status`` (which resets the transient
+        marker to ``None``) and then sets the marker to this message
+        so ``_clear_status_if`` can recognise it later. Tests that spy
+        on ``_set_status`` continue to see transient messages.
         """
         self._set_status(message)
+        self._transient_status = message
         self.set_timer(delay, lambda: self._clear_status_if(message))
 
     def _clear_status_if(self, expected: str) -> None:
-        """Clear the status line iff it still shows ``expected``. Avoids
-        racing newer messages: if the operator triggered a fresh action
-        before the timer fired, that newer message stays."""
-        try:
-            current = str(self.query_one("#status", Static).renderable)
-        except Exception:
+        """Clear the status line iff it still matches the most recent
+        transient message. If a newer message (transient or sticky)
+        has replaced it, leave the line alone."""
+        if self._transient_status != expected:
             return
-        if current == expected:
-            self._set_status("")
+        self._transient_status = None
+        try:
+            self.query_one("#status", Static).update("")
+        except Exception:  # pragma: no cover - defensive during teardown
+            pass
 
     def _initial_status(self) -> str:
         if os.geteuid() != 0:
