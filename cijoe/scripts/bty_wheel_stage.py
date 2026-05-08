@@ -5,19 +5,23 @@ Stage the bty-lab wheel for variants that bake bty into their image
 Builds a wheel from the parent repo via ``uv build`` and copies it
 into a per-variant staging directory under ``bty-media/``:
 
-- ``server`` -> ``bty-media/rootfs/server/opt/bty/`` (consumed by the
-  cloud-init ``write_files`` block emitted by ``gen_userdata.py``;
-  the server's runcmd ``pip install``s it into ``/opt/bty/venv``).
-- ``live`` -> ``bty-media/live-build/config/includes.chroot/opt/bty/``
-  (consumed by the live-build hook ``0500-bty-install.hook.chroot``,
-  which ``pip install``s it into the chroot's ``/opt/bty/venv``).
+- ``server-x86`` / ``server-rpi`` ->
+  ``bty-media/rootfs/server/opt/bty/`` (consumed by the cloud-init
+  ``write_files`` block emitted by ``gen_userdata.py``; the server's
+  runcmd ``pip install``s it into ``/opt/bty/venv``).
+- ``live-x86`` / ``usb-iso`` ->
+  ``bty-media/live-build/config/includes.chroot/opt/bty/`` (consumed
+  by the live-build hook ``0500-bty-install.hook.chroot``, which
+  ``pip install``s it into the chroot's ``/opt/bty/venv``).
 
 The cwd at run time is ``cijoe/`` (the Makefile cd's there before
 invoking cijoe), so the repo root is ``Path.cwd().parent`` and the
 bty-media tree lives at ``repo_root / "bty-media"``.
 
-No-op for the ``usb`` variant - the USB live image carries no bty
-runtime that needs the wheel.
+No-op for the legacy ``usb-x86`` variant - that bake produces a
+basic flash environment (parted, gdisk, qemu-img, etc.) without
+bty itself. Retired by M19 phase 6 in favour of ``usb-iso``, which
+DOES bake bty (same chroot path as ``live-x86``).
 
 Retargetable: False
 """
@@ -30,13 +34,16 @@ import shutil
 from argparse import ArgumentParser
 from pathlib import Path
 
-# Role -> destination directory relative to ``bty-media/``.
-# Roles not listed here are skipped with rc=0. The variant supplied by
-# the cijoe config (e.g. ``server-x86``, ``server-rpi``) is mapped to a
-# role by stripping the arch suffix.
+# Variant -> destination directory relative to ``bty-media/``.
+# Variants not listed here are skipped with rc=0. Keyed by full
+# variant name (rather than role-stripped name) because the ``usb``
+# role is split: legacy ``usb-x86`` doesn't bake the wheel; the M19
+# replacement ``usb-iso`` does.
 TARGET_DIRS: dict[str, Path] = {
-    "server": Path("rootfs") / "server" / "opt" / "bty",
-    "live": Path("live-build") / "config" / "includes.chroot" / "opt" / "bty",
+    "server-x86": Path("rootfs") / "server" / "opt" / "bty",
+    "server-rpi": Path("rootfs") / "server" / "opt" / "bty",
+    "live-x86": Path("live-build") / "config" / "includes.chroot" / "opt" / "bty",
+    "usb-iso": Path("live-build") / "config" / "includes.chroot" / "opt" / "bty",
 }
 
 
@@ -51,10 +58,9 @@ def main(args, cijoe):
     bty_media = repo_root / "bty-media"
 
     variant = cijoe.getconf("bty", {}).get("variant", "usb-x86")
-    role = variant.split("-")[0]
-    target_rel = TARGET_DIRS.get(role)
+    target_rel = TARGET_DIRS.get(variant)
     if target_rel is None:
-        log.info(f"Skipping wheel stage (variant={variant!r}, role={role!r}; nothing to bake)")
+        log.info(f"Skipping wheel stage (variant={variant!r}; nothing to bake)")
         return 0
     target_dir = bty_media / target_rel
     target_dir.mkdir(parents=True, exist_ok=True)
