@@ -921,7 +921,6 @@ def test_wizard_advances_on_image_row_enter(
     async def _drive() -> None:
         async with app.run_test() as pilot:
             await pilot.pause()
-            from textual.widgets import Button
 
             # Initial state: Stage 1, focus on images_table.
             assert app._stage == tui_app._WizardStage.SELECT_IMAGE  # type: ignore[reportPrivateUsage]
@@ -936,9 +935,6 @@ def test_wizard_advances_on_image_row_enter(
             assert app._stage == tui_app._WizardStage.SELECT_DISK  # type: ignore[reportPrivateUsage]
             assert app.focused is not None
             assert app.focused.id == "disks_table"
-            # Segment 2 is now active in the status bar.
-            seg2 = app.query_one("#seg-2", Button)
-            assert "active" in seg2.classes
 
     _run(_drive())
 
@@ -1016,48 +1012,16 @@ def test_theme_picker_opens_and_dismisses_cleanly(
     _run(_drive())
 
 
-def test_numeric_pane_jumps_focus_correctly(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """``1`` focuses the Images table; ``2`` focuses the Disks
-    table. Numeric jumps don't advance / regress the wizard."""
-    _patch_data_sources(
-        monkeypatch,
-        images_list=[_fake_image()],
-        disks_list=[_fake_disk()],
-    )
-    app = tui_app.BtyTui(image_root=tmp_path / "images")
-
-    async def _drive() -> None:
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            await pilot.press("2")
-            await pilot.pause()
-            assert app.focused is not None
-            assert app.focused.id == "disks_table"
-
-            await pilot.press("1")
-            await pilot.pause()
-            assert app.focused is not None
-            assert app.focused.id == "images_table"
-
-            # Stage didn't change.
-            assert app._stage == tui_app._WizardStage.SELECT_IMAGE  # type: ignore[reportPrivateUsage]
-
-    _run(_drive())
-
-
-def test_action_flash_success_transitions_to_stage_4(
+def test_action_flash_success_flips_button_to_reboot(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """End-to-end happy path: when both modals dismiss with True,
-    ``action_flash`` transitions the wizard to Stage 4
-    (REBOOT_OR_DONE) and focuses the seg-4 Reboot button.
+    ``action_flash`` flips ``_post_flash`` and the action-pane
+    button transforms from ``Flash!`` into ``Reboot``.
 
-    Avoids the full modal interaction by stubbing
-    ``push_screen_wait`` to return the True sequence. The flash
-    pipeline (probe / make_plan / validate_plan) gets stubbed out
-    so we only test the wizard's post-success transition.
+    Stubs ``push_screen_wait`` to skip the modals; flash pipeline
+    (probe / make_plan / validate_plan) stubbed so the test
+    isolates the post-success state transition.
     """
     _patch_data_sources(
         monkeypatch,
@@ -1070,10 +1034,6 @@ def test_action_flash_success_transitions_to_stage_4(
 
     app = tui_app.BtyTui(image_root=tmp_path / "images")
 
-    # Stub push_screen_wait to skip both modals and return True
-    # twice (FlashConfirmScreen confirmed -> True, FlashStatusScreen
-    # success -> True). Lets us test the wizard transition without
-    # threading the full modal interactions.
     confirmed_then_success = iter([True, True])
 
     async def _fake_push_screen_wait(_screen: object) -> bool:
@@ -1082,11 +1042,10 @@ def test_action_flash_success_transitions_to_stage_4(
     monkeypatch.setattr(app, "push_screen_wait", _fake_push_screen_wait)
 
     async def _drive() -> None:
+        from textual.widgets import Button
+
         async with app.run_test() as pilot:
             await pilot.pause()
-            # Pre-commit a wizard selection so action_flash has
-            # something to work with (skip the manual Enter on
-            # rows; we're testing the post-flash transition).
             app._selected_image = next(  # type: ignore[reportPrivateUsage]
                 iter(app._images_by_key.values())  # type: ignore[reportPrivateUsage]
             )
@@ -1100,9 +1059,11 @@ def test_action_flash_success_transitions_to_stage_4(
             for _ in range(20):
                 await pilot.pause()
 
-            # Both modals "succeeded" via the stub -> wizard should
-            # be at Stage 4.
             assert app._post_flash is True  # type: ignore[reportPrivateUsage]
-            assert app._stage == tui_app._WizardStage.REBOOT_OR_DONE  # type: ignore[reportPrivateUsage]
+            flash_btn = app.query_one("#flash-btn", Button)
+            # Button label flipped to "Reboot" so the operator's
+            # next press fires the reboot action instead of flash.
+            assert str(flash_btn.label) == "Reboot"
+            assert flash_btn.disabled is False
 
     _run(_drive())

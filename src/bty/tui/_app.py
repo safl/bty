@@ -18,34 +18,30 @@ Two image-source modes:
   and the operator picks an image from the server's catalog without
   prior server-side configuration.
 
-Keymap (Zellij-style: a status bar at the bottom shows current
-stage segments + key hints; bindings vary by stage):
+Keymap (forward navigation is automatic on Enter-to-commit;
+the keys below cover everything else):
 
-- ``Enter``  forward (commit row / trigger active step)
-- ``Esc``    back (clear most recent commit, or clear filter
-             if one is active)
-- ``q``      quit
-- ``r``      refresh catalogs
-- ``t``      open theme picker
-- ``/``      filter the image catalog by substring
-- ``1`` / ``2``       focus Images / Disks pane
-- ``Left`` / ``h``    cycle focus left
-- ``Right`` / ``l``   cycle focus right
-- ``f``               flash shortcut (alias for Enter at Stage 3)
-- ``Shift+R``         reboot shortcut (alias for Enter at Stage 4)
+- ``Enter``       forward (commit row, trigger active button)
+- ``Esc`` / ``Backspace``  back (clear most recent commit, or
+                  clear filter if one is active)
+- ``q``           quit
+- ``r``           refresh catalogs
+- ``Shift+R``     reboot the machine running bty-tui
+- ``s``           switch image source (local <-> remote bty-web)
+- ``t``           theme picker
+- ``/``           filter the image catalog by substring
+- ``f``           flash shortcut (equivalent to Enter on Flash button)
 
-Wizard flow (4 stages, derived from selection state):
+Wizard flow (3 stages, derived from selection state):
 
 1. Stage 1: select an image (Enter on a row) -> auto-advance to
    Stage 2 with focus on Disks.
 2. Stage 2: select a disk (Enter on a row) -> auto-advance to
-   Stage 3 with focus on the Flash status-bar segment.
-3. Stage 3: Enter on segment 3 (or ``f``) -> FlashConfirmScreen
-   -> FlashStatusScreen.
-4. Stage 4 (post-flash success): Enter on segment 4 (or
-   ``Shift+R``) -> ``systemctl reboot``. ``Esc`` from here
-   returns to Stage 2 keeping the image so the operator can
-   flash the same image to a different disk.
+   Stage 3 with focus on the Flash button.
+3. Stage 3: Enter on the ``Flash!`` button (or ``f``) ->
+   FlashConfirmScreen -> FlashStatusScreen. On success the
+   action-pane button transforms into ``Reboot`` (label + handler
+   swap) so the natural next step is one keypress away.
 
 Empty catalogs render an onboarding panel with actionable next
 steps (drop ``*.img.zst`` onto BTY_IMAGES, or PUT to the server's
@@ -91,7 +87,7 @@ from bty import disks, flash, images
 
 
 class _WizardStage(IntEnum):
-    """The four stages of the flash wizard.
+    """The three stages of the flash wizard.
 
     Derived from ``BtyTui`` selection state -- never stored directly.
     See ``BtyTui._stage``.
@@ -100,7 +96,6 @@ class _WizardStage(IntEnum):
     SELECT_IMAGE = 1
     SELECT_DISK = 2
     CONFIRM_FLASH = 3
-    REBOOT_OR_DONE = 4
 
 
 @dataclass
@@ -609,6 +604,105 @@ class FlashStatusScreen(ModalScreen[bool]):
             self.dismiss(self._result is True)
 
 
+class SourceSelectScreen(ModalScreen["str | Path | None"]):
+    """Modal for switching between local image-root and remote
+    bty-web server as the catalog source.
+
+    Returns:
+    - ``str`` (server URL) when the operator picks Remote and confirms.
+    - ``Path`` (local image root) when they pick Local + confirm.
+    - ``None`` on Esc.
+
+    The current source is pre-filled in the input. Apply re-populates
+    pane-1 and updates its border-title via the caller.
+    """
+
+    DEFAULT_CSS = """
+    SourceSelectScreen {
+        align: center middle;
+    }
+
+    SourceSelectScreen > Vertical {
+        width: 70;
+        height: auto;
+        padding: 1 2;
+        background: $panel;
+        border: round $accent;
+        border-title-style: bold;
+        border-title-color: $accent;
+        border-title-align: left;
+    }
+
+    SourceSelectScreen Input {
+        margin-top: 1;
+    }
+
+    .source-help {
+        color: $text-muted;
+        margin-top: 1;
+    }
+
+    .source-actions {
+        height: 3;
+        align: right middle;
+        margin-top: 1;
+    }
+
+    .source-actions Button {
+        margin-left: 2;
+    }
+    """
+
+    BINDINGS: ClassVar[list[Binding | tuple[str, str] | tuple[str, str, str]]] = [
+        Binding("escape", "dismiss(None)", "Cancel"),
+    ]
+
+    def __init__(self, current_server: str | None, current_image_root: Path) -> None:
+        super().__init__()
+        self._current_server = current_server
+        self._current_image_root = current_image_root
+
+    def compose(self) -> ComposeResult:
+        with Vertical() as panel:
+            panel.border_title = "  Switch image source  "
+            yield Static("Server URL (blank = local image-root):")
+            initial = self._current_server if self._current_server else ""
+            yield Input(
+                value=initial,
+                placeholder="http://server:8080",
+                id="source-url",
+            )
+            yield Static(
+                f"Local image-root: {self._current_image_root}",
+                classes="source-help",
+            )
+            with Horizontal(classes="source-actions"):
+                yield Button("Cancel", id="source-cancel", variant="default")
+                yield Button("Apply", id="source-apply", variant="primary")
+
+    def on_mount(self) -> None:
+        self.query_one("#source-url", Input).focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "source-cancel":
+            self.dismiss(None)
+            return
+        if event.button.id == "source-apply":
+            self._apply()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        # Enter on the URL field is the natural "apply" gesture.
+        if event.input.id == "source-url":
+            self._apply()
+
+    def _apply(self) -> None:
+        url = self.query_one("#source-url", Input).value.strip()
+        if not url:
+            self.dismiss(self._current_image_root)
+        else:
+            self.dismiss(url)
+
+
 class ThemeSelectScreen(ModalScreen[str | None]):
     """Modal showing the available Textual themes; Enter applies, Esc dismisses.
 
@@ -721,23 +815,18 @@ class BtyTui(App[None]):
 
     BINDINGS: ClassVar[list[Binding | tuple[str, str] | tuple[str, str, str]]] = [
         Binding("q", "quit", "Quit"),
-        Binding("r", "refresh", "Refresh"),
+        Binding("r", "refresh", "Refresh", show=False),
         Binding("f", "flash", "Flash", show=False),
         Binding("R", "reboot", "Reboot", show=False),
-        Binding("t", "theme", "Theme"),
-        Binding("slash", "focus_filter", "Filter"),
-        # Wizard-flow bindings: ``1`` / ``2`` jump focus to the
-        # respective panes; arrows + ``h`` / ``l`` cycle. Esc on
-        # the main screen acts as "back one wizard stage" (the
-        # filter Input has its own Esc that clears the filter,
-        # which takes precedence when it has focus).
-        Binding("1", "focus_images", "Images"),
-        Binding("2", "focus_disks", "Disks"),
-        Binding("left", "focus_prev_pane", "Prev pane", show=False),
-        Binding("right", "focus_next_pane", "Next pane", show=False),
-        Binding("h", "focus_prev_pane", "Prev pane", show=False),
-        Binding("l", "focus_next_pane", "Next pane", show=False),
+        Binding("t", "theme", "Theme", show=False),
+        Binding("s", "source", "Source", show=False),
+        Binding("slash", "focus_filter", "Filter", show=False),
+        # Wizard-back binding. Esc / Backspace clear the most-recent
+        # commit and return one stage. Forward advance happens
+        # automatically when a row is committed via Enter -- no
+        # separate pane-jump bindings needed.
         Binding("escape", "wizard_back", "Back", show=False),
+        Binding("backspace", "wizard_back", "Back", show=False),
     ]
 
     DEFAULT_CSS = """
@@ -759,7 +848,7 @@ class BtyTui(App[None]):
         border: round $primary 40%;
         background: $panel;
         margin: 0 1 0 1;
-        padding: 0 1;
+        padding: 0 2;
         border-title-style: bold;
         border-title-color: $primary;
         border-title-align: left;
@@ -784,12 +873,13 @@ class BtyTui(App[None]):
         height: 1fr;
     }
 
+    /* Action pane (Flash): the big primary button is centered
+       both axes via ``align: center middle`` on the parent.
+       Height: 5 rows = 2 for the rounded border + 3 for the
+       button. */
     #pane-3 {
         height: 5;
-    }
-
-    #pane-4 {
-        height: 5;
+        align: center middle;
         margin-bottom: 0;
     }
 
@@ -825,43 +915,22 @@ class BtyTui(App[None]):
         color: $text-muted;
     }
 
-    /* Action-pane content: a big full-width button that fills
-       the pane body. The pane's border-title carries the stage
-       label; the button is the operator's commit handle. */
+    /* Action-pane content: a fixed-width primary button centered
+       in the pane body via the parent's ``align: center middle``.
+       The pane's border-title carries the stage label; the button
+       is the operator's commit handle. */
     .action-button {
-        width: 1fr;
+        width: 24;
         height: 3;
-        margin: 0 1;
     }
 
-    /* Zellij-style progress bar at the bottom: four flat segments,
-       one per stage, that progress left-to-right as the wizard
-       advances. The active segment gets reverse-video via the
-       ``.active`` class; completed segments stay highlighted
-       slightly so the operator can see the trail. */
+    /* Bottom nav: a single line with three key-hint groups
+       (quit, reboot, nav). No per-stage variation -- these
+       three are always available. */
     #status-bar {
         height: 1;
-        padding: 0 1;
-    }
-
-    #status-bar Button.segment {
-        min-width: 0;
-        height: 1;
-        padding: 0;
-        margin: 0 1 0 0;
-        background: $background;
+        padding: 0 2;
         color: $text-muted;
-        border: none;
-        text-style: none;
-    }
-
-    #status-bar Button.segment:focus {
-        text-style: bold;
-    }
-
-    #status-bar Button.segment.active {
-        text-style: reverse bold;
-        color: $accent;
     }
 
     #status {
@@ -901,7 +970,12 @@ class BtyTui(App[None]):
         # both stay coherent because we never store stage directly.
         self._selected_image: _TuiImage | None = None
         self._selected_disk: dict[str, object] | None = None
-        self._post_flash: bool = False  # set on FlashStatusScreen success
+        # ``_post_flash`` flips True when a flash returns success;
+        # the action pane's button transforms from ``Flash!`` into
+        # ``Reboot`` so the operator's natural next step (boot the
+        # freshly flashed disk) is one keypress away. Esc /
+        # Backspace clears it.
+        self._post_flash: bool = False
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
@@ -918,32 +992,17 @@ class BtyTui(App[None]):
             yield Static("", id="welcome")
         with Vertical(classes="pane", id="pane-2"):
             yield DataTable(id="disks_table", cursor_type="row")
-        # Stage 3 / Stage 4 panes hold a single big primary button
-        # each. The flash button is disabled until both image + disk
-        # are committed; the reboot button is disabled until a flash
-        # has succeeded. Pressing either button (or Enter on it) is
-        # the operator's commit handle for that stage.
+        # Stage 3 pane: a single big ``Flash!`` button centered in
+        # the pane body. Disabled until both image + disk are
+        # committed (the safety net against an accidental click on
+        # an incomplete plan).
         with Vertical(classes="pane", id="pane-3"):
             yield Button("Flash!", id="flash-btn", variant="primary", classes="action-button")
-        with Vertical(classes="pane", id="pane-4"):
-            yield Button(
-                "Reboot",
-                id="reboot-btn",
-                variant="primary",
-                classes="action-button",
-                disabled=True,
-            )
-        # Bottom Zellij-style status bar: segments progress left-to-
-        # right as the wizard advances; the active stage is in
-        # reverse-video. Segments are also clickable / focusable so
-        # an auto-advance after a row commit lands focus naturally
-        # on the next interactive thing.
-        with Horizontal(id="status-bar"):
-            yield Button(" 1 Image ", id="seg-1", classes="segment")
-            yield Button(" 2 Disk ", id="seg-2", classes="segment")
-            yield Button(" 3 Flash ", id="seg-3", classes="segment")
-            yield Button(" 4 Reboot ", id="seg-4", classes="segment")
-            yield Static("", id="key-hints")
+        # Bottom nav: a single line with three universal hint
+        # groups -- quit, reboot, nav. Stage-aware hints would be
+        # more information-dense but the simpler layout is
+        # explicitly user-preferred.
+        yield Static(self._nav_text(), id="status-bar")
         yield Static(self._initial_status(), id="status")
 
     def on_mount(self) -> None:
@@ -961,10 +1020,14 @@ class BtyTui(App[None]):
         source = (
             f"{self._server_url}/images" if self._server_url is not None else str(self._image_root)
         )
-        self.query_one("#pane-1", Vertical).border_title = f"  1: Images @ {source}  "
-        self.query_one("#pane-2", Vertical).border_title = "  2: Disks  "
-        self.query_one("#pane-3", Vertical).border_title = "  3: Flash  "
-        self.query_one("#pane-4", Vertical).border_title = "  4: Reboot  "
+        self.query_one("#pane-1", Vertical).border_title = f"  1: Pick an image from {source}  "
+        self.query_one(
+            "#pane-2", Vertical
+        ).border_title = "  2: Select disk to write the image to  "
+        # Pane-3's title flips post-flash via ``_render_status``;
+        # set the pre-flash variant here so the initial render is
+        # consistent.
+        self.query_one("#pane-3", Vertical).border_title = "  3: Flash! Actually write the image!  "
         # Populate disks first so the images table's RowHighlighted
         # fires last and the details pane shows the image (the primary
         # pane) by default rather than a disk.
@@ -1133,48 +1196,6 @@ class BtyTui(App[None]):
 
     # ---------- wizard navigation -------------------------------------------
 
-    def action_focus_images(self) -> None:
-        """``1`` binding: focus the Images table."""
-        try:
-            self.query_one("#images_table", DataTable).focus()
-        except Exception:
-            pass
-
-    def action_focus_disks(self) -> None:
-        """``2`` binding: focus the Disks table."""
-        try:
-            self.query_one("#disks_table", DataTable).focus()
-        except Exception:
-            pass
-
-    def action_focus_prev_pane(self) -> None:
-        """``Left`` / ``h`` binding: cycle focus left in the pane row.
-
-        The Details pane is read-only output and not part of the focus
-        cycle; only Images <-> Disks.
-        """
-        # Cycle: Disks -> Images -> Disks (wrapping). If focus is
-        # elsewhere (e.g. a segment button), land on Images.
-        focused = self.focused
-        target_id = "#images_table"
-        if focused is not None and focused.id == "images_table":
-            target_id = "#disks_table"  # already at left edge -> wrap
-        try:
-            self.query_one(target_id, DataTable).focus()
-        except Exception:
-            pass
-
-    def action_focus_next_pane(self) -> None:
-        """``Right`` / ``l`` binding: cycle focus right in the pane row."""
-        focused = self.focused
-        target_id = "#disks_table"
-        if focused is not None and focused.id == "disks_table":
-            target_id = "#images_table"  # already at right edge -> wrap
-        try:
-            self.query_one(target_id, DataTable).focus()
-        except Exception:
-            pass
-
     def action_wizard_back(self) -> None:
         """``Esc`` binding: route based on app state.
 
@@ -1187,10 +1208,10 @@ class BtyTui(App[None]):
         if self._filter:
             self.action_clear_filter()
             return
-        stage = self._stage
-        if stage == _WizardStage.REBOOT_OR_DONE:
-            # Clear post-flash + drive, keep image so the operator
-            # can flash the same image to a different drive.
+        # Post-flash: Esc clears the success state + the disk
+        # selection, returning to Stage 2 so the operator can flash
+        # the same image to a different disk on the same machine.
+        if self._post_flash:
             self._post_flash = False
             self._selected_disk = None
             self._render_status()
@@ -1199,6 +1220,7 @@ class BtyTui(App[None]):
             except Exception:
                 pass
             return
+        stage = self._stage
         if stage == _WizardStage.CONFIRM_FLASH:
             self._selected_disk = None
             self._render_status()
@@ -1218,14 +1240,13 @@ class BtyTui(App[None]):
         # Stage 1: nothing to undo.
 
     def action_reboot(self) -> None:
-        """``Shift+R`` binding (or click on seg-4 / Enter when seg-4
-        is focused): dispatch a graceful reboot if Stage 4 is reached.
-        No-op otherwise so an accidental press at the wrong moment
-        doesn't reboot the dev box.
+        """``Shift+R`` binding: dispatch a graceful reboot of the
+        machine running bty-tui. Always available (the operator may
+        be running bty-tui on the same box they want to reboot --
+        e.g. the bty-usb live env after a flash). Non-root invocations
+        get a status message; ``systemctl reboot`` itself enforces the
+        privilege check.
         """
-        if self._stage != _WizardStage.REBOOT_OR_DONE:
-            self._set_status("Reboot is only available after a successful flash.")
-            return
         self._set_status("Rebooting...")
         try:
             subprocess.run(["systemctl", "reboot"], check=False, timeout=5)
@@ -1274,11 +1295,9 @@ class BtyTui(App[None]):
     @property
     def _stage(self) -> _WizardStage:
         """Derived wizard stage. We never store the stage directly so
-        numeric jumps and Esc back-nav stay coherent (any change to
-        the underlying selection state is automatically reflected).
+        Esc back-nav stays coherent (clearing one bit of state
+        always lands the operator on the right stage).
         """
-        if self._post_flash:
-            return _WizardStage.REBOOT_OR_DONE
         if self._selected_image is None:
             return _WizardStage.SELECT_IMAGE
         if self._selected_disk is None:
@@ -1326,93 +1345,87 @@ class BtyTui(App[None]):
                     pass
 
     def _render_status(self) -> None:
-        """Update bottom-bar segment labels + active class + key
-        hints, plus the action-pane button enabled states. Called
-        on every state change so the UI always reflects ``_stage``.
+        """Refresh the action-pane state.
+
+        Pre-flash: button reads ``Flash!``, disabled until both image
+        and disk are committed. Post-flash: button reads ``Reboot``,
+        always enabled (the natural next step after a successful
+        flash). Pane border-title flips between "3: Flash" and
+        "3: Reboot" too.
         """
-        stage = self._stage
         try:
-            seg1 = self.query_one("#seg-1", Button)
-            seg2 = self.query_one("#seg-2", Button)
-            seg3 = self.query_one("#seg-3", Button)
-            seg4 = self.query_one("#seg-4", Button)
-            hints = self.query_one("#key-hints", Static)
             flash_btn = self.query_one("#flash-btn", Button)
-            reboot_btn = self.query_one("#reboot-btn", Button)
+            pane3 = self.query_one("#pane-3", Vertical)
         except Exception:
             return
-        seg1.label = (
-            f" 1 Image: {self._selected_image.name} "
-            if self._selected_image is not None
-            else " 1 Image "
-        )
-        disk_path = (
-            self._selected_disk.get("path", "?") if self._selected_disk is not None else None
-        )
-        seg2.label = f" 2 Disk: {disk_path} " if disk_path else " 2 Disk "
-        seg3.label = " 3 Flash done " if self._post_flash else " 3 Flash "
-        seg4.label = " 4 Reboot "
-        for n, seg in enumerate((seg1, seg2, seg3, seg4), start=1):
-            seg.set_class(stage.value == n, "active")
-        hints.update(self._hints_for(stage))
-        # Action-pane buttons: Flash disabled until both image and
-        # disk are committed; Reboot disabled until a flash succeeded.
-        # The disabled state is the safety net that prevents an
-        # accidental click on a half-configured plan.
-        flash_btn.disabled = stage != _WizardStage.CONFIRM_FLASH
-        reboot_btn.disabled = stage != _WizardStage.REBOOT_OR_DONE
+        if self._post_flash:
+            flash_btn.label = "Reboot"
+            flash_btn.disabled = False
+            pane3.border_title = "  3: Reboot to use the freshly written image  "
+        else:
+            flash_btn.label = "Flash!"
+            flash_btn.disabled = self._stage != _WizardStage.CONFIRM_FLASH
+            pane3.border_title = "  3: Flash! Actually write the image!  "
 
-    def _hints_for(self, stage: _WizardStage) -> str:
-        if stage == _WizardStage.SELECT_IMAGE:
-            return "<Enter> select  <q> quit  <t> theme  <r> refresh"
-        if stage == _WizardStage.SELECT_DISK:
-            return "<Enter> select  <Esc> back  <q> quit  <t> theme  <r> refresh"
-        if stage == _WizardStage.CONFIRM_FLASH:
-            return "<Enter> flash  <Esc> back  <q> quit  <t> theme"
-        return "<Enter> reboot  <Esc> stay  <q> quit"
+    def _nav_text(self) -> str:
+        """Static bottom-nav hint text. Forward navigation happens
+        automatically when a row is committed via Enter; the keys
+        listed here are only for actions that have no other
+        natural affordance.
+        """
+        return (
+            "<q> quit       <Shift+R> reboot       <s> source       "
+            "<t> theme       <Esc/Backspace> back"
+        )
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        """All buttons in the app:
-
-        - ``flash-btn`` (pane 3): triggers flash via ``action_flash``
-          (which goes through the FlashConfirmScreen + FlashStatusScreen
-          modals for safety + progress visibility).
-        - ``reboot-btn`` (pane 4): dispatches reboot via
-          ``action_reboot``.
-        - ``seg-N`` (bottom bar): focus shortcuts to a stage's
-          interactive element. Clicking seg-1 / seg-2 focuses the
-          corresponding table; seg-3 / seg-4 focus the action-pane
-          button if that stage is reached.
+        """The action-pane button. Pre-flash: triggers flash via
+        ``action_flash`` (FlashConfirmScreen + FlashStatusScreen
+        modals). Post-flash: triggers reboot. The label flips in
+        ``_render_status`` so the visual matches the action.
         """
-        bid = event.button.id
-        if bid == "flash-btn":
-            if self._stage == _WizardStage.CONFIRM_FLASH:
-                self.action_flash()  # @work decorator -> Worker
-        elif bid == "reboot-btn":
-            if self._stage == _WizardStage.REBOOT_OR_DONE:
+        if event.button.id == "flash-btn":
+            if self._post_flash:
                 self.action_reboot()
-        elif bid == "seg-1":
-            try:
-                self.query_one("#images_table", DataTable).focus()
-            except Exception:
-                pass
-        elif bid == "seg-2":
-            try:
-                self.query_one("#disks_table", DataTable).focus()
-            except Exception:
-                pass
-        elif bid == "seg-3":
-            if self._stage == _WizardStage.CONFIRM_FLASH:
-                try:
-                    self.query_one("#flash-btn", Button).focus()
-                except Exception:
-                    pass
-        elif bid == "seg-4":
-            if self._stage == _WizardStage.REBOOT_OR_DONE:
-                try:
-                    self.query_one("#reboot-btn", Button).focus()
-                except Exception:
-                    pass
+            elif self._stage == _WizardStage.CONFIRM_FLASH:
+                self.action_flash()  # @work decorator -> Worker
+
+    @work(exclusive=True)
+    async def action_source(self) -> None:
+        """Open the SourceSelectScreen modal so the operator can
+        switch between local image-root and a remote bty-web server
+        without restarting the TUI. ``@work`` for the
+        push_screen_wait worker-context requirement (same as the
+        flash + theme actions).
+        """
+        result = await self.push_screen_wait(SourceSelectScreen(self._server_url, self._image_root))
+        if result is None:
+            return
+        if isinstance(result, str):
+            self._server_url = result.rstrip("/")
+        else:
+            self._server_url = None
+            self._image_root = result
+        # Update the pane-1 border-title to reflect the new source
+        # and re-populate.
+        source = (
+            f"{self._server_url}/images" if self._server_url is not None else str(self._image_root)
+        )
+        try:
+            self.query_one("#pane-1", Vertical).border_title = f"  1: Pick an image from {source}  "
+        except Exception:
+            pass
+        # Clear any in-flight selection since the catalog changed.
+        self._selected_image = None
+        self._selected_disk = None
+        self._post_flash = False
+        self._populate_images()
+        self._render_status()
+        try:
+            self.query_one("#images_table", DataTable).focus()
+        except Exception:
+            pass
+        self._set_status(f"Source: {source}")
 
     @work(exclusive=True)
     async def action_theme(self) -> None:
@@ -1494,15 +1507,16 @@ class BtyTui(App[None]):
         self._set_status("Flash completed." if success else "Flash failed; see status modal log.")
         # Disks may have new partition tables now; refresh.
         self._populate_disks()
-        # On success, transition the wizard to Stage 4 (no separate
-        # modal; the status bar's segment 4 becomes active and the
-        # operator can press Enter / Shift+R to reboot or Esc to
-        # stay).
+        # On success: the action-pane button transforms into a
+        # ``Reboot`` button (label + handler swap, see
+        # ``_render_status`` and ``on_button_pressed``). Operator's
+        # natural next step is to boot the freshly flashed disk;
+        # one Enter does it.
         if success:
             self._post_flash = True
             self._render_status()
             try:
-                self.query_one("#reboot-btn", Button).focus()
+                self.query_one("#flash-btn", Button).focus()
             except Exception:
                 pass
 
