@@ -37,6 +37,16 @@
 
 set -eu
 
+# Hook-ran sentinel. ``cijoe/scripts/usb_iso_build.py``'s verify
+# step asserts this file exists post-build, catching the "hook
+# didn't actually execute" class of bugs (the same one that
+# silently bit v0.5.2..v0.5.9 -- hook lived at the wrong path and
+# never ran). If a future move drops the marker, the verify
+# step fails the bake locally instead of the operator
+# discovering it on hardware.
+mkdir -p binary
+touch binary/.bty-bootloader-hook-ran
+
 # ---- nuke gfxboot's binary entirely ----------------------------------------
 #
 # Belt-and-suspenders: regardless of whether the sed below catches

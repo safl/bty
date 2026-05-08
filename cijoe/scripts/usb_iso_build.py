@@ -208,6 +208,15 @@ def main(args, cijoe):
         log.error("lb build failed; see live-build.log under the build dir")
         return err
 
+    # Verify the binary-stage hook actually ran + the bootloader
+    # menus are suppressed. Catches the "hook silently doesn't
+    # execute" class of bugs (the dir-mismatch saga that bit
+    # v0.5.2..v0.5.9 before the hook was moved from
+    # ``config/hooks/binary/`` to ``config/hooks/normal/``).
+    err = _verify_bootloader_suppression(cijoe, build_dir)
+    if err:
+        return err
+
     # Locate the artifact. live-build's iso-hybrid output naming has
     # drifted between releases: historically ``binary.hybrid.iso``,
     # later ``live-image-amd64.hybrid.iso``. Recursive glob picks up
@@ -292,6 +301,94 @@ def main(args, cijoe):
     cijoe.run_local(f"cat {sha256_path}")
     cijoe.run_local(f"ls -la {gz_dst}")
 
+    return 0
+
+
+def _verify_bootloader_suppression(cijoe, build_dir: Path) -> int:
+    """Assert the binary-stage hook ran + bootloader menus are
+    suppressed in the cooked binary tree.
+
+    Catches the "hook silently doesn't execute" class of failures
+    (v0.5.2..v0.5.9 saga: hook lived at the wrong path, never ran,
+    every "fix the bootloader menu" iteration was a no-op).
+    Runs against ``_build/usb-x86/binary/`` after ``lb build``
+    completes so we fail the bake locally instead of waiting for
+    a hardware test to surface the issue.
+
+    Checks (each fails the bake with a specific error message):
+
+    1. ``binary/.bty-bootloader-hook-ran`` sentinel exists. Hook
+       writes this on entry; missing means live-build didn't
+       discover the hook (path / suffix wrong) or the hook
+       errored before reaching ``touch``.
+    2. No ``gfxboot.c32`` / ``vesamenu.c32`` / ``bootlogo`` files
+       under ``binary/``. The hook deletes them; presence means
+       the deletion didn't happen.
+    3. ``binary/isolinux/isolinux.cfg`` (if present) has
+       ``timeout 1`` (BIOS path). Default is ``timeout 0`` =
+       wait-forever in syslinux.
+    4. ``binary/boot/grub/grub.cfg`` (if present) has
+       ``set timeout=0`` and ``set timeout_style=hidden`` (UEFI
+       path).
+    """
+    binary_dir = build_dir / "binary"
+
+    # 1. Sentinel.
+    sentinel = binary_dir / ".bty-bootloader-hook-ran"
+    err, _ = cijoe.run_local(f"sudo test -f {sentinel}")
+    if err:
+        log.error(
+            f"BOOTLOADER VERIFY: hook sentinel missing ({sentinel}); "
+            "the binary-stage hook didn't execute. Check that the "
+            "hook lives at ``config/hooks/normal/*.binary`` (NOT "
+            "``config/hooks/binary/...``)."
+        )
+        return errno.EIO
+
+    # 2. No graphical-menu binaries left.
+    err, state = cijoe.run_local(
+        f"sudo find {binary_dir} -type f "
+        r"\( -name 'gfxboot.c32' -o -name 'vesamenu.c32' -o -name 'bootlogo*' \) "
+        "2>/dev/null"
+    )
+    leftovers = state.output().strip() if not err else ""
+    if leftovers:
+        log.error(f"BOOTLOADER VERIFY: graphical menu binaries not deleted:\n{leftovers}")
+        return errno.EIO
+
+    # 3. isolinux.cfg timeout.
+    iso_cfg = binary_dir / "isolinux" / "isolinux.cfg"
+    err, _ = cijoe.run_local(f"sudo test -f {iso_cfg}")
+    if not err:
+        err, state = cijoe.run_local(f"sudo cat {iso_cfg}")
+        body = state.output() if not err else ""
+        if "timeout 0" in body.lower() or "timeout 30" in body.lower():
+            log.error(
+                f"BOOTLOADER VERIFY: {iso_cfg} still has a non-suppressed "
+                f"timeout (lines below).\n{body[:500]}"
+            )
+            return errno.EIO
+
+    # 4. grub.cfg suppression.
+    grub_cfg = binary_dir / "boot" / "grub" / "grub.cfg"
+    err, _ = cijoe.run_local(f"sudo test -f {grub_cfg}")
+    if not err:
+        err, state = cijoe.run_local(f"sudo cat {grub_cfg}")
+        body = state.output() if not err else ""
+        if "set timeout=0" not in body:
+            log.error(
+                f"BOOTLOADER VERIFY: {grub_cfg} missing 'set timeout=0' "
+                f"(first 500 chars):\n{body[:500]}"
+            )
+            return errno.EIO
+        if "set timeout_style=hidden" not in body:
+            log.error(
+                f"BOOTLOADER VERIFY: {grub_cfg} missing "
+                f"'set timeout_style=hidden' (first 500 chars):\n{body[:500]}"
+            )
+            return errno.EIO
+
+    log.info("BOOTLOADER VERIFY: hook ran, gfxboot/vesamenu deleted, timeouts suppressed.")
     return 0
 
 
