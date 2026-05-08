@@ -27,9 +27,7 @@ if ! command -v apt-get >/dev/null 2>&1; then
     echo "This script targets Debian / Ubuntu (apt-based)." >&2
     echo "On other distros, install equivalents of the package list" >&2
     echo "below by hand:" >&2
-    echo "  qemu-utils qemu-system-x86 zstd genisoimage live-build" >&2
-    echo "  debootstrap squashfs-tools xorriso parted gdisk dosfstools" >&2
-    echo "  e2fsprogs exfatprogs nvme-cli pipx git make python3-venv" >&2
+    echo "See the PACKAGES array later in this file for the canonical list." >&2
     exit 1
 fi
 
@@ -80,25 +78,25 @@ PACKAGES=(
     cpu-checker
     sshpass
 
-    # bty-media bake (usb / server variants - cloud-init in QEMU,
-    # NoCloud cidata ISO).
+    # bty-media server-x86 bake (cloud-init in QEMU + NoCloud cidata ISO).
     genisoimage
 
-    # bty-media live variant (live-build's debootstrap / chroot /
-    # squashfs pipeline).
+    # bty-media usb-x86 + netboot-x86 bakes (live-build's debootstrap
+    # / chroot / squashfs / xorriso pipeline). xz-utils is also used
+    # by usb_iso_build.py to compress the cooked ISO to .iso.xz.
     live-build
     debootstrap
     squashfs-tools
     xorriso
+    xz-utils
 
     # bty-media server-rpi variant (Raspberry Pi 4/5). The build
     # mounts a Pi OS Lite arm64 image, chroots into it via
     # qemu-aarch64-static (registered transparently by
-    # binfmt-support), and customises in place. xz-utils for the
-    # upstream image's .xz compression.
+    # binfmt-support), and customises in place. xz-utils (above)
+    # also handles the upstream image's .xz compression.
     qemu-user-static
     binfmt-support
-    xz-utils
 )
 
 echo "Updating apt index..."
