@@ -11,7 +11,7 @@ This step just lays out the test workspace under
 ``cijoe/_build/test-pxe/``:
 
 - ``server.qcow2``       - working copy of the production qcow2
-                          (rehydrated from .img.zst when only that's
+                          (rehydrated from .img.gz when only that's
                           present, the CI artefact shape).
 - ``test-image.qcow2``   - 1 MiB dummy qcow2 the chain step uploads
                           to ``PUT /images/<name>``.
@@ -49,25 +49,25 @@ def main(args, cijoe):
 
     artifact_dir = Path(cfg["artifact_dir"])
     server_qcow2_src = artifact_dir / "bty-server-x86_64.qcow2"
-    server_zst = artifact_dir / "bty-server-x86_64.img.zst"
+    server_gz = artifact_dir / "bty-server-x86_64.img.gz"
 
-    # Reconstitute the qcow2 from .img.zst when only the .zst is
+    # Reconstitute the qcow2 from .img.gz when only the .gz is
     # present (CI shape: release.yml uploads only the operator-
-    # shippable .img.zst). Locally a fresh ``make build
-    # VARIANT=server-x86`` leaves the qcow2 next to the .zst, so this
+    # shippable .img.gz). Locally a fresh ``make build
+    # VARIANT=server-x86`` leaves the qcow2 next to the .gz, so this
     # is a no-op.
     if not server_qcow2_src.is_file():
-        if not server_zst.is_file():
+        if not server_gz.is_file():
             log.error(
-                f"neither {server_qcow2_src.name} nor {server_zst.name} found in {artifact_dir}"
+                f"neither {server_qcow2_src.name} nor {server_gz.name} found in {artifact_dir}"
             )
             log.error("Run `make build VARIANT=server-x86` from the repo root first")
             return errno.ENOENT
         server_raw = artifact_dir / "bty-server-x86_64.img"
-        log.info(f"Rehydrating {server_zst.name} -> {server_qcow2_src.name}")
-        err, _ = cijoe.run_local(f"zstd -d -k {server_zst} -o {server_raw}")
+        log.info(f"Rehydrating {server_gz.name} -> {server_qcow2_src.name}")
+        err, _ = cijoe.run_local(f"sh -c 'gunzip -d -c {server_gz} > {server_raw}'")
         if err:
-            log.error("zstd decompress failed")
+            log.error("gunzip decompress failed")
             return err
         err, _ = cijoe.run_local(
             f"qemu-img convert -f raw -O qcow2 {server_raw} {server_qcow2_src}"

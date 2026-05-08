@@ -17,7 +17,7 @@ Drives a Pi-friendly equivalent of the x86 ``diskimage_build`` flow:
    ``odus`` users with default passwords, the bty-lab venv, service
    enables.
 7. Tear down mounts, detach the loop device, ``zstd`` the raw image
-   into ``bty-server-rpi-arm64.img.zst``, and write a sha256 manifest.
+   into ``bty-server-rpi-arm64.img.gz``, and write a sha256 manifest.
 
 Build-host requirements: passwordless sudo, ``qemu-aarch64-static``,
 ``binfmt_misc`` registered for arm64, ``losetup``, ``parted``,
@@ -97,8 +97,8 @@ def main(args, cijoe):
     source_path = Path(image["source"]["path"])
     raw_path = Path(image["disk"]["raw_path"])
     target_size_gib = int(image["disk"]["target_size_gib"])
-    zst_path = Path(image["publish"]["zst_path"])
-    zstd_level = int(image["publish"].get("zstd_level", 19))
+    gz_path = Path(image["publish"]["gz_path"])
+    gzip_level = int(image["publish"].get("gzip_level", 9))
 
     # 1. Download
     if not source_path.exists():
@@ -128,29 +128,29 @@ def main(args, cijoe):
     if rc != 0:
         return rc
 
-    # 4. Compress the customised image
-    log.info(f"Compressing {raw_path} -> {zst_path} (zstd -{zstd_level})")
-    if zst_path.exists():
-        zst_path.unlink()
+    # 4. Compress the customised image with gzip. v0.5.x switched
+    # bty's shipped images from .zst to .gz for universal flasher
+    # compat (see ``feedback_verify_flasher_compat`` memory note);
+    # operator-supplied images are still accepted in any of
+    # .img.{zst,xz,gz,bz2} via the bty flash code.
+    log.info(f"Compressing {raw_path} -> {gz_path} (gzip -{gzip_level})")
+    if gz_path.exists():
+        gz_path.unlink()
+    # ``gzip -<level> -c`` writes to stdout; redirect captures the
+    # output. Single-stream output is what every flasher / OS
+    # tooling handles uniformly.
     if (
-        _run(
-            [
-                "zstd",
-                f"-{zstd_level}",
-                "--no-progress",
-                "-o",
-                str(zst_path),
-                str(raw_path),
-            ]
+        _run_shell(
+            f"gzip -{gzip_level} -c {raw_path} > {gz_path}",
         )
         != 0
     ):
         return errno.EIO
 
     # 5. sha256 manifest
-    sha256_path = zst_path.with_suffix(zst_path.suffix + ".sha256")
-    digest = _sha256(zst_path)
-    sha256_path.write_text(f"{digest}  {zst_path.name}\n")
+    sha256_path = gz_path.with_suffix(gz_path.suffix + ".sha256")
+    digest = _sha256(gz_path)
+    sha256_path.write_text(f"{digest}  {gz_path.name}\n")
     log.info(f"sha256 -> {sha256_path}")
 
     return 0
@@ -391,6 +391,16 @@ def _run(cmd: list[str], stdout_path: Path | None = None) -> int:
         with stdout_path.open("wb") as fh:
             return subprocess.call(cmd, stdout=fh)
     return subprocess.call(cmd)
+
+
+def _run_shell(cmdline: str) -> int:
+    """Run a command via the shell so redirections (``>``, ``|``) work.
+
+    Used for the gzip-to-stdout-redirected-to-file pattern where the
+    gzip CLI's ``-c`` doesn't have an ``-o`` equivalent.
+    """
+    log.debug(f"sh -c '{cmdline}'")
+    return subprocess.call(["sh", "-c", cmdline])
 
 
 def _run_sudo(cmd: list[str]) -> int:

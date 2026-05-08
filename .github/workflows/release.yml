@@ -133,7 +133,7 @@ jobs:
         # losetup-mount, chroot in via qemu-aarch64-static (binfmt-support
         # auto-registers the handler on install). xz-utils for the
         # upstream image's .xz; parted/e2fsprogs to grow the rootfs
-        # partition; zstd for the final ``.img.zst``.
+        # partition; gzip ships in coreutils for the final ``.img.gz``.
         if: matrix.kind == 'disk-rpi'
         run: |
           sudo apt-get update
@@ -216,19 +216,19 @@ jobs:
         if: matrix.kind == 'disk'
         uses: actions/upload-artifact@v7
         with:
-          name: bty-server-x86_64-img-zst
+          name: bty-server-x86_64-img-gz
           path: |
-            ~/system_imaging/disk/bty-server-x86_64.img.zst
-            ~/system_imaging/disk/bty-server-x86_64.img.zst.sha256
+            ~/system_imaging/disk/bty-server-x86_64.img.gz
+            ~/system_imaging/disk/bty-server-x86_64.img.gz.sha256
 
       - name: Upload artifact (server-rpi variant)
         if: matrix.kind == 'disk-rpi'
         uses: actions/upload-artifact@v7
         with:
-          name: bty-server-rpi-arm64-img-zst
+          name: bty-server-rpi-arm64-img-gz
           path: |
-            ~/system_imaging/disk/bty-server-rpi-arm64.img.zst
-            ~/system_imaging/disk/bty-server-rpi-arm64.img.zst.sha256
+            ~/system_imaging/disk/bty-server-rpi-arm64.img.gz
+            ~/system_imaging/disk/bty-server-rpi-arm64.img.gz.sha256
 
       - name: Upload artifact (netboot-x86 variant)
         if: matrix.variant == 'netboot-x86'
@@ -285,7 +285,7 @@ jobs:
       - name: Download server image artefact
         uses: actions/download-artifact@v8
         with:
-          name: bty-server-x86_64-img-zst
+          name: bty-server-x86_64-img-gz
           path: ~/system_imaging/disk/
 
       - name: Download netboot artefacts
@@ -295,7 +295,7 @@ jobs:
           path: ~/system_imaging/disk/
 
       # The cijoe ``pxe_customize_server`` step rehydrates
-      # ``bty-server-x86_64.qcow2`` from the .img.zst on its own
+      # ``bty-server-x86_64.qcow2`` from the .img.gz on its own
       # when the qcow2 is missing, so no separate decompress step is
       # needed here - same code path as a local ``make test-pxe``.
       - name: Run PXE chain test
@@ -375,7 +375,7 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           path: gathered/
-          pattern: '{dist,bty-*-img-zst,bty-netboot-x86_64,bty-usb-x86_64-iso-gz,docs-pdf}'
+          pattern: '{dist,bty-*-img-gz,bty-netboot-x86_64,bty-usb-x86_64-iso-gz,docs-pdf}'
       - name: List gathered artifacts
         run: find gathered -type f | sort
       - name: Attach to release
@@ -388,8 +388,8 @@ jobs:
           files: |
             gathered/dist/*
             gathered/bty-usb-x86_64-iso-gz/*
-            gathered/bty-server-x86_64-img-zst/*
-            gathered/bty-server-rpi-arm64-img-zst/*
+            gathered/bty-server-x86_64-img-gz/*
+            gathered/bty-server-rpi-arm64-img-gz/*
             gathered/bty-netboot-x86_64/*
             gathered/docs-pdf/*
           fail_on_unmatched_files: true

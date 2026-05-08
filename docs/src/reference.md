@@ -12,8 +12,8 @@ tag's copy of that file; substitute `latest` for a specific tag (e.g.
 | Asset | What it is | URL (latest) |
 |---|---|---|
 | `bty-usb-x86_64.iso.gz` (+ `.sha256`) | Bootable USB live ISO with built-in writable `BTY_IMAGES` exFAT partition for the operator's image catalog. Open in Balena Etcher / Raspberry Pi Imager / Rufus DD-mode (decompresses `.gz` natively). CLI: `gunzip -d --stdout bty-usb-x86_64.iso.gz \| sudo dd of=/dev/sdX bs=4M`. | <https://github.com/safl/bty/releases/latest/download/bty-usb-x86_64.iso.gz> |
-| `bty-server-x86_64.img.zst` (+ `.sha256`) | Server appliance image, x86_64 (browser UI + iPXE + dnsmasq). Boot in QEMU or `dd` to a disk. | <https://github.com/safl/bty/releases/latest/download/bty-server-x86_64.img.zst> |
-| `bty-server-rpi-arm64.img.zst` (+ `.sha256`) | Server appliance image for Raspberry Pi 4 / 5 (arm64). Write with `dd` to an SD card. | <https://github.com/safl/bty/releases/latest/download/bty-server-rpi-arm64.img.zst> |
+| `bty-server-x86_64.img.gz` (+ `.sha256`) | Server appliance image, x86_64 (browser UI + iPXE + dnsmasq). Boot in QEMU or `dd` to a disk. | <https://github.com/safl/bty/releases/latest/download/bty-server-x86_64.img.gz> |
+| `bty-server-rpi-arm64.img.gz` (+ `.sha256`) | Server appliance image for Raspberry Pi 4 / 5 (arm64). Write with `dd` to an SD card. | <https://github.com/safl/bty/releases/latest/download/bty-server-rpi-arm64.img.gz> |
 | `bty-netboot-x86_64.{vmlinuz,initrd,squashfs}` (+ `bty-netboot-x86_64.sha256`) | Netboot trio for PXE-flash clients. Drop into the server's `BTY_BOOT_DIR` (or click "fetch latest release" on `/ui/boot`). | <https://github.com/safl/bty/releases/latest/download/bty-netboot-x86_64.vmlinuz> |
 | `bty.pdf` | Offline copy of the docs (this site, rendered by Sphinx + LaTeX). | <https://github.com/safl/bty/releases/latest/download/bty.pdf> |
 | `bty_lab-X.Y.Z-py3-none-any.whl` / `.tar.gz` | Python wheel + sdist. Mirrored on PyPI as [`bty-lab`](https://pypi.org/project/bty-lab/) - prefer `pipx install bty-lab` over downloading by hand. | <https://github.com/safl/bty/releases> |
@@ -76,20 +76,23 @@ List supported images directly under the image root (non-recursive).
 Recognised formats: `.qcow2`, `.img`, `.img.zst`, `.img.xz`,
 `.img.gz`, `.img.bz2`.
 
-bty itself ships its target images (`bty-server-x86_64.img.zst`,
-`bty-server-rpi-arm64.img.zst`) as `.img.zst` because flash-time
-decompression is on the hot path of the per-job CI reflash use
-case (zstd decompresses at ~800-1500 MB/s and saturates the
-target disk; xz at ~50-100 MB/s would bottleneck flash by ~7x in
-absolute terms, ~80s extra per CI job). The bty USB stick image
-(`bty-usb-x86_64.iso.gz`) ships as gzip because Etcher's bundled
-xz decompressor fails on our output regardless of how it's
-shaped, while every flasher we tested handles gzip natively for
-host-side stick-prep — that's a one-off host operation, not a
-hot-path concern. The flash code accepts all
-of `.img.zst` / `.img.xz` / `.img.gz` / `.img.bz2` for
-operator-supplied images so neither format choice is forced on
-you. Decompression speed ranking (rough): zstd > gzip > xz > bzip2.
+bty itself ships all of its dd-able images
+(`bty-server-x86_64.img.gz`, `bty-server-rpi-arm64.img.gz`,
+`bty-usb-x86_64.iso.gz`) as gzip for universal flasher support
+— Etcher / Rufus / Imager / dd / Windows / macOS all decompress
+gzip natively without the version-cliff or implementation-bug
+issues that bit us with xz (Etcher's bundled xz handler) and
+zstd (older Etcher pre-1.18). Stick prep / appliance setup is
+a one-shot host operation, not a hot-path concern; gzip's
+universal compatibility wins over the marginal speed advantage
+of zstd on a one-shot decompress.
+
+The flash code still accepts `.img.zst` / `.img.xz` / `.img.gz`
+/ `.img.bz2` for operator-supplied target images, so an operator
+running per-job CI reflash on a fast disk can pick `.img.zst`
+for the speed advantage without bty-shipped artifacts forcing
+that choice. Decompression speed ranking (rough): zstd > gzip >
+xz > bzip2.
 
 **Tarballs are NOT supported.** `.tar.gz` / `.tar.xz` / `.tgz` /
 `.tar.bz2` etc. wrap one or more files in TAR headers; running

@@ -1,17 +1,28 @@
 """
-Publish a baked qcow2 as a dd-able .img.zst
-============================================
+Publish a baked qcow2 as a dd-able .img.gz
+===========================================
 
-Converts the qcow2 produced by ``diskimage_build`` to raw, zstd-compresses
-the result, and writes a sha256sum alongside. The .img.zst is the final
-artifact an operator pipes through ``zstd -d`` and ``dd`` (or any USB
-flasher tool that handles zstd) onto a USB stick.
+Converts the qcow2 produced by ``diskimage_build`` to raw,
+gzip-compresses the result, and writes a sha256sum alongside.
+The .img.gz is the final artifact an operator pipes through
+``gunzip -d`` and ``dd`` (or any flasher tool that handles
+gzip - all of them) onto a target disk.
+
+Why gzip rather than zstd: bty-shipped appliance images are
+flashed once during operator setup, not on a per-job CI hot
+path. The flash-time decompression-speed argument that
+originally drove .zst applies to operator-supplied target
+images (which the bty flash code still accepts in any of
+.img.{zst,xz,gz,bz2}); for the appliance itself, gzip's
+universal flasher / OS / tooling support wins over zstd's
+marginal speed advantage on a one-shot setup. Same rationale
+that drove the .iso.xz -> .iso.gz switch in v0.5.4.
 
 Reads the ``publish`` section of ``system-imaging.images.<image_name>``:
 
   publish.raw_path    output path for the intermediate raw image
-  publish.zst_path    output path for the .img.zst artifact
-  publish.zstd_level  compression level (1..19; 19 is the default)
+  publish.gz_path     output path for the .img.gz artifact
+  publish.gzip_level  compression level (1..9; 9 is the default)
 
 Retargetable: False
 """
@@ -50,15 +61,15 @@ def main(args, cijoe):
 
     qcow2_path = Path(disk["path"])
     raw_path = Path(publish["raw_path"])
-    zst_path = Path(publish["zst_path"])
-    level = int(publish.get("zstd_level", 19))
+    gz_path = Path(publish["gz_path"])
+    level = int(publish.get("gzip_level", 9))
 
     if not qcow2_path.exists():
         log.error(f"Baked qcow2 not found: {qcow2_path}")
         return errno.ENOENT
 
     raw_path.parent.mkdir(parents=True, exist_ok=True)
-    zst_path.parent.mkdir(parents=True, exist_ok=True)
+    gz_path.parent.mkdir(parents=True, exist_ok=True)
 
     log.info(f"Converting {qcow2_path} -> {raw_path} (raw)")
     err, _ = cijoe.run_local(f"qemu-img convert -O raw {qcow2_path} {raw_path}")
@@ -66,19 +77,23 @@ def main(args, cijoe):
         log.error("Failed converting qcow2 to raw")
         return err
 
-    log.info(f"Compressing {raw_path} -> {zst_path} (zstd -{level})")
-    err, _ = cijoe.run_local(f"zstd -{level} -T0 -f {raw_path} -o {zst_path}")
+    # ``gzip -<level> -c`` writes to stdout; ``-f`` overwrites the
+    # destination. Single-stream output is what every flasher / OS
+    # tooling handles uniformly (the lesson from v0.5.4's .iso.gz
+    # switch carried over).
+    log.info(f"Compressing {raw_path} -> {gz_path} (gzip -{level})")
+    err, _ = cijoe.run_local(f"sh -c 'gzip -{level} -c {raw_path} > {gz_path}'")
     if err:
-        log.error("Failed zstd-compressing raw image")
+        log.error("Failed gzip-compressing raw image")
         return err
 
-    err, _ = cijoe.run_local(f"sha256sum {zst_path} > {zst_path}.sha256")
+    err, _ = cijoe.run_local(f"sha256sum {gz_path} > {gz_path}.sha256")
     if err:
         log.error("Failed computing sha256sum")
         return err
 
-    cijoe.run_local(f"ls -la {zst_path}")
-    cijoe.run_local(f"cat {zst_path}.sha256")
+    cijoe.run_local(f"ls -la {gz_path}")
+    cijoe.run_local(f"cat {gz_path}.sha256")
 
     return 0
 

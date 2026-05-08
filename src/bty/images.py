@@ -8,38 +8,38 @@ qcow2, ``zstd -l`` / ``xz -l`` / ``gzip -l`` for the corresponding
 compressed raws; bzip2 has no listing tool so .img.bz2 has no
 detail block).
 
-Format-choice rationale (load-bearing for the CI-pipeline use case
-that drove bty's design):
+Format-choice rationale: bty-shipped images all use **gzip** for
+universal flasher / OS / tooling support. The flash code accepts
+**any** of ``.img``, ``.img.zst``, ``.img.xz``, ``.img.gz``,
+``.img.bz2`` for operator-supplied images so format choice is
+not forced on operators with their own pipelines.
 
 - The **USB stick image** ships as ``.iso.gz``. Operators write
   it host-side via Etcher / Rufus / Raspberry Pi Imager, which
-  decompress .gz natively in every flasher we tested (xz tripped
-  Etcher's bundled decompressor regardless of how the file was
-  shaped; gzip is the universally-supported lowest common
-  denominator). Stick prep is a one-shot, host-side cost;
-  decompression speed at flash time doesn't matter (the host
-  decompresses on its own beefy CPU once, not in a hot loop).
-- The **target images** bty ships
-  (``bty-server-x86_64.img.zst``,
-  ``bty-server-rpi-arm64.img.zst``) are zstd-compressed because
-  flash-time decompression is on the hot path. For per-job
-  CI reflash (the primary bty use case: every CI job that
-  starts on a target machine reflashes it to a known clean
-  baseline first), the flash time is added to every job's
-  bring-up. zstd decompresses at ~800-1500 MB/s and saturates
-  the target disk; xz decompresses at ~50-100 MB/s and
-  bottlenecks the flash by ~7x (~80 seconds extra per job in
-  absolute terms). At even 50 CI jobs/day per target that's
-  ~70 minutes/day of wasted compute time per target, scaling
-  linearly with target count. The cost is real and recurrent;
-  zstd is the right call for the hot path.
-- For parallel PXE fleet flash (one-time ``new-image`` reflash
-  across N machines): the difference is just the slowest
-  per-machine wall-clock, ~80s. Each target decompresses on its
-  own CPU in parallel, so the cost doesn't multiply by N.
-- bty's flash code accepts ``.img``, ``.img.zst``, AND
-  ``.img.xz`` regardless of what bty itself ships, so operators
-  who arrive with their own xz-compressed images aren't blocked.
+  decompress .gz natively (xz tripped Etcher's bundled
+  decompressor regardless of how the file was shaped; gzip has
+  no equivalent quirk). Stick prep is a one-shot, host-side cost.
+- The **server appliance images** ship as ``.img.gz``
+  (``bty-server-x86_64.img.gz``,
+  ``bty-server-rpi-arm64.img.gz``). The earlier rationale that
+  drove .img.zst here -- "flash-time decompression is on the hot
+  path of per-job CI reflash" -- conflated two different cases:
+  the per-job reflash hot path applies to operator-supplied
+  target images (any of the 4 compressed forms work), NOT to
+  the bty-server appliance itself, which is flashed once during
+  initial setup. Universal flasher compat wins for one-shot
+  setup; the speed advantage of zstd was buying nothing for the
+  bty-shipped artifacts.
+- Operators running per-job CI reflash on a fast disk can pick
+  ``.img.zst`` for their own images and the flash code will
+  stream-decompress at zstd's ~800-1500 MB/s. zstd's only
+  downside is the version-cliff in some host-side flasher
+  ecosystems, which doesn't apply to bty's flash code -- it
+  shells out to the system ``zstd`` binary, which is universal
+  on Linux.
+- Decompression speed ranking (rough): zstd > gzip > xz > bzip2.
+  Pick based on workload: gzip for one-shot delivery, zstd for
+  hot-path reflash.
 """
 
 from __future__ import annotations

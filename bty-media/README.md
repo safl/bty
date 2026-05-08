@@ -73,8 +73,8 @@ right one based on the variant:
      resizes the qcow2 boot disk, builds the cloud-init seed.iso,
      and boots QEMU. cloud-init provisions the system and powers
      off; the baked qcow2 is compacted via `qemu-img convert -c`.
-  4. **`img_zst_publish`** - converts the qcow2 to raw and
-     zstd-compresses the result into a `dd`-able `.img.zst`,
+  4. **`img_gz_publish`** - converts the qcow2 to raw and
+     gzip-compresses the result into a `dd`-able `.img.gz`,
      alongside a sha256sum.
 
 - `usb-x86` -> `cijoe tasks/usb.yaml`. Drives Debian's `live-build`
@@ -88,7 +88,7 @@ right one based on the variant:
   Pi OS Lite arm64 in place: download upstream image, grow + losetup-
   mount, drop the `rootfs/server/` overlay, chroot via
   `qemu-aarch64-static` to install packages + create users + install
-  the bty-lab venv, then re-compress to `.img.zst`. Two steps:
+  the bty-lab venv, then re-compress to `.img.gz`. Two steps:
   `bty_wheel_stage` then `rpi_image_customize`.
 
 - `netboot-x86` -> `cijoe tasks/netboot.yaml`. Drives Debian's `live-build`
@@ -134,8 +134,9 @@ All variants:
 server-x86:
 - `~/system_imaging/disk/bty-server-x86_64.qcow2` - baked, compacted
   qcow2 (intermediate; useful for QEMU smoke tests).
-- `~/system_imaging/disk/bty-server-x86_64.img.zst` - final
-  artifact. Decompress with `zstd -d` and pipe to `dd`.
+- `~/system_imaging/disk/bty-server-x86_64.img.gz` - final
+  artifact. Decompress with `gunzip` and pipe to `dd` (or feed
+  directly to Etcher / Raspberry Pi Imager / Rufus DD-mode).
 
 usb-x86:
 - `~/system_imaging/disk/bty-usb-x86_64.iso.gz` - final artifact.
@@ -146,7 +147,7 @@ usb-x86:
   Ventoy stick; Ventoy doesn't auto-decompress.
 
 server-rpi:
-- `~/system_imaging/disk/bty-server-rpi-arm64.img.zst` - final
+- `~/system_imaging/disk/bty-server-rpi-arm64.img.gz` - final
   artifact for `dd` to an SD card.
 
 netboot-x86:
@@ -206,9 +207,9 @@ hardware. Most operators never run this build pipeline themselves -
 
   ### Operator first-boot
 
-  1. Write the `.img.zst` to the server's disk (or attach as a VM
+  1. Write the `.img.gz` to the server's disk (or attach as a VM
      disk). Pre-built artifacts at
-     <https://github.com/safl/bty/releases/latest/download/bty-server-x86_64.img.zst>.
+     <https://github.com/safl/bty/releases/latest/download/bty-server-x86_64.img.gz>.
   2. Boot. The login prompt's banner shows the browser UI URL.
   3. Log in to `/ui/login` with `bty / bty` (or rotate first via
      `sudo passwd bty` on the appliance).

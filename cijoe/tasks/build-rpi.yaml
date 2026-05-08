@@ -17,11 +17,11 @@ doc: |
      grows the image, mounts the partitions, drops the bty rootfs
      overlay, runs the apt + venv + users + service-enable script
      inside the arm64 chroot, then re-compresses the result to
-     ``bty-server-rpi-arm64.img.zst`` with a sha256 manifest.
+     ``bty-server-rpi-arm64.img.gz`` with a sha256 manifest.
 
   Output (on success):
-   - ``~/system_imaging/disk/bty-server-rpi-arm64.img.zst``
-   - ``~/system_imaging/disk/bty-server-rpi-arm64.img.zst.sha256``
+   - ``~/system_imaging/disk/bty-server-rpi-arm64.img.gz``
+   - ``~/system_imaging/disk/bty-server-rpi-arm64.img.gz.sha256``
 
 steps:
 - name: bty_wheel_stage

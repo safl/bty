@@ -4,16 +4,19 @@
 # image. Structurally different from the x86 server build (no QEMU
 # cloud-init bake): we mount the downloaded image via losetup, chroot
 # in via ``qemu-aarch64-static``, install packages, drop the bty rootfs
-# overlay, enable services, then unmount and zstd-compress.
+# overlay, enable services, then unmount and gzip-compress.
 #
-# Output: ``bty-server-rpi-arm64.img.zst`` (dd onto an SD card; works on
-# Raspberry Pi 4 and 5).
+# Output: ``bty-server-rpi-arm64.img.gz`` (dd onto an SD card; works on
+# Raspberry Pi 4 and 5). Gzip rather than zstd for universal flasher
+# compat (Etcher / Imager / dd) -- same rationale that drove the .iso.gz
+# switch in v0.5.4.
 #
 # Build host requirements:
 #   - amd64 Linux with ``binfmt_misc`` and ``qemu-user-static`` (so the
 #     arm64 chroot runs transparently)
 #   - passwordless sudo (mount/chroot need root)
-#   - ``zstd``, ``losetup``, ``parted``, ``e2fsprogs``, ``xz-utils``
+#   - ``gzip``, ``losetup``, ``parted``, ``e2fsprogs``, ``xz-utils``
+#     (xz is for the upstream Pi OS .img.xz download)
 #
 # Usage:
 #   make build VARIANT=server-rpi
@@ -44,6 +47,6 @@ disk.raw_path = "{{ local.env.HOME }}/system_imaging/disk/bty-server-rpi-arm64.i
 #   * room for overlays ~0.3 GiB
 disk.target_size_gib = 4
 
-# Final dd-able artifact: raw + zstd
-publish.zst_path = "{{ local.env.HOME }}/system_imaging/disk/bty-server-rpi-arm64.img.zst"
-publish.zstd_level = 19
+# Final dd-able artifact: raw + gzip.
+publish.gz_path = "{{ local.env.HOME }}/system_imaging/disk/bty-server-rpi-arm64.img.gz"
+publish.gzip_level = 9
