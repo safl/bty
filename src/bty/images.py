@@ -1,9 +1,41 @@
 """Image catalog discovery and inspection.
 
 Recognises the supported on-disk image formats (``.qcow2``, ``.img``,
-``.img.zst``), lists them under a configured image root, and extracts
-detail metadata for individual images via the appropriate tool
-(``qemu-img info`` for qcow2, ``zstd -l`` for zstd-compressed raws).
+``.img.zst``, ``.img.xz``), lists them under a configured image
+root, and extracts detail metadata for individual images via the
+appropriate tool (``qemu-img info`` for qcow2, ``zstd -l`` for
+zstd-compressed raws, ``xz -l`` for xz-compressed raws).
+
+Format-choice rationale (load-bearing for the CI-pipeline use case
+that drove bty's design):
+
+- The **USB stick image** ships as ``.iso.xz``. Operators write
+  it host-side via Etcher / Rufus / Raspberry Pi Imager, which
+  decompress .xz natively but not .zst -- that one-step UX is
+  the deciding factor. Stick prep is a one-shot, host-side cost;
+  decompression speed at flash time doesn't matter (the host
+  decompresses on its own beefy CPU once, not in a hot loop).
+- The **target images** bty ships
+  (``bty-server-x86_64.img.zst``,
+  ``bty-server-rpi-arm64.img.zst``) are zstd-compressed because
+  flash-time decompression is on the hot path. For per-job
+  CI reflash (the primary bty use case: every CI job that
+  starts on a target machine reflashes it to a known clean
+  baseline first), the flash time is added to every job's
+  bring-up. zstd decompresses at ~800-1500 MB/s and saturates
+  the target disk; xz decompresses at ~50-100 MB/s and
+  bottlenecks the flash by ~7x (~80 seconds extra per job in
+  absolute terms). At even 50 CI jobs/day per target that's
+  ~70 minutes/day of wasted compute time per target, scaling
+  linearly with target count. The cost is real and recurrent;
+  zstd is the right call for the hot path.
+- For parallel PXE fleet flash (one-time ``new-image`` reflash
+  across N machines): the difference is just the slowest
+  per-machine wall-clock, ~80s. Each target decompresses on its
+  own CPU in parallel, so the cost doesn't multiply by N.
+- bty's flash code accepts ``.img``, ``.img.zst``, AND
+  ``.img.xz`` regardless of what bty itself ships, so operators
+  who arrive with their own xz-compressed images aren't blocked.
 """
 
 from __future__ import annotations
@@ -20,10 +52,11 @@ from typing import Any
 # the BTY_IMAGES partition here.
 DEFAULT_IMAGE_ROOT = Path("/var/lib/bty/images")
 
-# Supported extensions, ordered most-specific first so ``.img.zst`` wins
-# over ``.img``.
+# Supported extensions, ordered most-specific first so ``.img.zst``
+# / ``.img.xz`` win over ``.img``.
 _EXTENSIONS: tuple[tuple[str, str], ...] = (
     (".img.zst", "img.zst"),
+    (".img.xz", "img.xz"),
     (".qcow2", "qcow2"),
     (".img", "img"),
 )
@@ -96,6 +129,7 @@ def inspect_image(path: Path) -> dict[str, Any]:
 
     - ``qcow2`` -> the JSON output of ``qemu-img info --output=json``
     - ``img.zst`` -> the textual output of ``zstd -l``
+    - ``img.xz`` -> the textual output of ``xz -l``
     """
     if not path.exists():
         raise FileNotFoundError(path)
@@ -121,6 +155,17 @@ def inspect_image(path: Path) -> dict[str, Any]:
     elif fmt == "img.zst":
         proc = subprocess.run(
             ["zstd", "-l", str(path)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if proc.returncode == 0:
+            info["detail"] = proc.stdout.strip()
+        else:
+            info["detail_error"] = proc.stderr.strip()
+    elif fmt == "img.xz":
+        proc = subprocess.run(
+            ["xz", "-l", str(path)],
             capture_output=True,
             text=True,
             check=False,

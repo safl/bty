@@ -192,6 +192,37 @@ def test_probe_image_zst_parses_zstd_output(tmp_path: Path) -> None:
     assert info.virtual_size_bytes == 1024 * 1024
 
 
+def test_probe_image_xz_parses_xz_output(tmp_path: Path) -> None:
+    """``xz -l`` output has a different header but the same
+    ``<value> <unit>`` pair shape, so the shared listing parser
+    extracts the uncompressed size correctly."""
+    img = tmp_path / "x.img.xz"
+    img.write_bytes(b"\0" * 128)
+    xz_output = (
+        "Strms  Blocks   Compressed Uncompressed  Ratio  Check   Filename\n"
+        "    1       1     12.0 MiB    140.4 MiB  0.085  CRC64   x.img.xz\n"
+    )
+    fake_proc = MagicMock(returncode=0, stdout=xz_output)
+    with patch("bty.flash.subprocess.run", return_value=fake_proc):
+        info = flash.probe_image(img)
+    assert info.format == "img.xz"
+    # 140.4 MiB = 140.4 * 1024^2 bytes
+    assert info.virtual_size_bytes == int(140.4 * 1024 * 1024)
+
+
+def test_probe_image_xz_xz_failure_returns_unknown(tmp_path: Path) -> None:
+    """``xz -l`` returning non-zero leaves virtual_size_bytes None;
+    validate_plan falls back to the size-fits-target skip note
+    rather than blocking the flash."""
+    img = tmp_path / "x.img.xz"
+    img.write_bytes(b"\0")
+    fake_proc = MagicMock(returncode=1, stdout="", stderr="xz: file is corrupt")
+    with patch("bty.flash.subprocess.run", return_value=fake_proc):
+        info = flash.probe_image(img)
+    assert info.format == "img.xz"
+    assert info.virtual_size_bytes is None
+
+
 def test_probe_image_qcow2_qemu_img_failure_returns_unknown(tmp_path: Path) -> None:
     img = tmp_path / "x.qcow2"
     img.write_bytes(b"\0")
@@ -282,11 +313,30 @@ def test_execute_plan_dispatches_to_zst_writer(monkeypatch: pytest.MonkeyPatch) 
     assert calls == ["zst", "sync", "partprobe"]
 
 
+def test_execute_plan_dispatches_to_xz_writer(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``.img.xz`` source dispatches to ``_flash_xz`` (mirrors the
+    .img.zst path; bty's flash code accepts both compression formats
+    even though bty itself ships .img.zst for hot-path flash speed)."""
+    calls: list[str] = []
+    monkeypatch.setattr(flash, "probe_target", _stub_block_target)
+    monkeypatch.setattr(flash, "_flash_img", lambda _i, _t, **_kw: calls.append("img"))
+    monkeypatch.setattr(flash, "_flash_zst", lambda _i, _t, **_kw: calls.append("zst"))
+    monkeypatch.setattr(flash, "_flash_xz", lambda _i, _t, **_kw: calls.append("xz"))
+    monkeypatch.setattr(flash, "_flash_qcow2", lambda _i, _t: calls.append("qcow2"))
+    _stub_post_write(monkeypatch, calls)
+
+    plan = flash.make_plan(_img(fmt="img.xz"), _tgt(), "none")
+    flash.execute_plan(plan)
+
+    assert calls == ["xz", "sync", "partprobe"]
+
+
 def test_execute_plan_dispatches_to_qcow2_writer(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[str] = []
     monkeypatch.setattr(flash, "probe_target", _stub_block_target)
     monkeypatch.setattr(flash, "_flash_img", lambda _i, _t, **_kw: calls.append("img"))
     monkeypatch.setattr(flash, "_flash_zst", lambda _i, _t, **_kw: calls.append("zst"))
+    monkeypatch.setattr(flash, "_flash_xz", lambda _i, _t, **_kw: calls.append("xz"))
     monkeypatch.setattr(flash, "_flash_qcow2", lambda _i, _t: calls.append("qcow2"))
     _stub_post_write(monkeypatch, calls)
 
@@ -447,6 +497,7 @@ def test_execute_plan_dispatches_to_url_writers_for_url_images(
     monkeypatch.setattr(flash, "probe_target", _stub_block_target)
     monkeypatch.setattr(flash, "_flash_img", lambda _i, _t, **_kw: calls.append("img-local"))
     monkeypatch.setattr(flash, "_flash_zst", lambda _i, _t, **_kw: calls.append("zst-local"))
+    monkeypatch.setattr(flash, "_flash_xz", lambda _i, _t, **_kw: calls.append("xz-local"))
     monkeypatch.setattr(flash, "_flash_qcow2", lambda _i, _t: calls.append("qcow2-local"))
     monkeypatch.setattr(
         flash,
@@ -458,16 +509,27 @@ def test_execute_plan_dispatches_to_url_writers_for_url_images(
         "_flash_zst_from_url",
         lambda _u, _t, **_kw: calls.append("zst-url"),
     )
+    monkeypatch.setattr(
+        flash,
+        "_flash_xz_from_url",
+        lambda _u, _t, **_kw: calls.append("xz-url"),
+    )
     monkeypatch.setattr(flash, "_flash_qcow2_from_url", lambda _u, _t: calls.append("qcow2-url"))
     _stub_post_write(monkeypatch, calls)
 
-    for fmt, expected in (("img", "img-url"), ("img.zst", "zst-url"), ("qcow2", "qcow2-url")):
+    for fmt, expected in (
+        ("img", "img-url"),
+        ("img.zst", "zst-url"),
+        ("img.xz", "xz-url"),
+        ("qcow2", "qcow2-url"),
+    ):
         calls.clear()
         plan = flash.make_plan(_img_url(fmt=fmt), _tgt(), "none")
         flash.execute_plan(plan)
         assert expected in calls
         assert "img-local" not in calls
         assert "zst-local" not in calls
+        assert "xz-local" not in calls
         assert "qcow2-local" not in calls
 
 

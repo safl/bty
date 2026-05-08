@@ -365,7 +365,8 @@ def validate_plan(plan: FlashPlan) -> list[str]:
 
     if plan.image.format is None:
         errors.append(
-            f"image format not recognised: {plan.image.display} (supported: .qcow2, .img, .img.zst)"
+            f"image format not recognised: {plan.image.display} "
+            f"(supported: .qcow2, .img, .img.zst, .img.xz)"
         )
 
     if not plan.target.exists:
@@ -516,6 +517,13 @@ def execute_plan(
                     progress=progress,
                     total_bytes=total_bytes,
                 )
+            elif fmt == "img.xz":
+                _flash_xz_from_url(
+                    plan.image.url,
+                    plan.target.path,
+                    progress=progress,
+                    total_bytes=total_bytes,
+                )
             elif fmt == "qcow2":
                 _flash_qcow2_from_url(plan.image.url, plan.target.path)
             else:
@@ -531,6 +539,13 @@ def execute_plan(
                 )
             elif fmt == "img.zst":
                 _flash_zst(
+                    plan.image.path,
+                    plan.target.path,
+                    progress=progress,
+                    total_bytes=total_bytes,
+                )
+            elif fmt == "img.xz":
+                _flash_xz(
                     plan.image.path,
                     plan.target.path,
                     progress=progress,
@@ -642,6 +657,56 @@ def _flash_zst(
         raise FlashError(f"zstd exited {zstd_rc} decompressing {image}")
 
 
+def _flash_xz(
+    image: Path,
+    target: Path,
+    *,
+    progress: ProgressCallback | None = None,
+    total_bytes: int | None = None,
+) -> None:
+    """Pipeline ``xz -d --stdout IMG | dd of=TARGET ...``.
+
+    Mirrors ``_flash_zst``: the only structural difference is the
+    decompression tool. xz decompresses at ~50-100 MB/s vs zstd's
+    ~800-1500 MB/s -- this writer is here for operators who arrive
+    with .img.xz images, but bty itself ships target images as
+    .img.zst because the hot-path flash speed wins for the per-job
+    CI reflash use case.
+    """
+    xz_proc = subprocess.Popen(
+        ["xz", "-d", "--stdout", str(image)],
+        stdout=subprocess.PIPE,
+    )
+    try:
+        stderr = subprocess.PIPE if progress is not None else None
+        dd_proc = subprocess.Popen(
+            [
+                "dd",
+                f"of={target}",
+                "bs=4M",
+                "conv=fsync",
+                "status=progress",
+            ],
+            stdin=xz_proc.stdout,
+            stderr=stderr,
+            text=True,
+        )
+        pump = _start_dd_progress_thread(dd_proc, progress, total_bytes)
+        # Let xz see SIGPIPE if dd exits early.
+        if xz_proc.stdout is not None:
+            xz_proc.stdout.close()
+        dd_rc = dd_proc.wait()
+        if pump is not None:
+            pump.join(timeout=2)
+    finally:
+        xz_rc = xz_proc.wait()
+
+    if dd_rc != 0:
+        raise FlashError(f"dd exited {dd_rc} writing {image} -> {target}")
+    if xz_rc != 0:
+        raise FlashError(f"xz exited {xz_rc} decompressing {image}")
+
+
 def _flash_qcow2(image: Path, target: Path) -> None:
     """Write a qcow2 to a block device by converting to raw in place.
 
@@ -745,6 +810,53 @@ def _flash_zst_from_url(
         raise FlashError(f"curl exited {curl_rc} fetching {url}")
     if zstd_rc != 0:
         raise FlashError(f"zstd -d exited {zstd_rc} decompressing {url}")
+    if dd_rc != 0:
+        raise FlashError(f"dd exited {dd_rc} writing {url} -> {target}")
+
+
+def _flash_xz_from_url(
+    url: str,
+    target: Path,
+    *,
+    progress: ProgressCallback | None = None,
+    total_bytes: int | None = None,
+) -> None:
+    """Pipeline ``curl URL | xz -d --stdout | dd of=TARGET ...``.
+
+    Same shape as ``_flash_zst_from_url`` but with xz on the
+    decompression stage.
+    """
+    curl_proc = subprocess.Popen([*_CURL_BASE, url], stdout=subprocess.PIPE)
+    try:
+        xz_proc = subprocess.Popen(
+            ["xz", "-d", "--stdout"],
+            stdin=curl_proc.stdout,
+            stdout=subprocess.PIPE,
+        )
+        if curl_proc.stdout is not None:
+            curl_proc.stdout.close()
+        try:
+            stderr = subprocess.PIPE if progress is not None else None
+            dd_proc = subprocess.Popen(
+                ["dd", f"of={target}", "bs=4M", "conv=fsync", "status=progress"],
+                stdin=xz_proc.stdout,
+                stderr=stderr,
+                text=True,
+            )
+            pump = _start_dd_progress_thread(dd_proc, progress, total_bytes)
+            if xz_proc.stdout is not None:
+                xz_proc.stdout.close()
+            dd_rc = dd_proc.wait()
+            if pump is not None:
+                pump.join(timeout=2)
+        finally:
+            xz_rc = xz_proc.wait()
+    finally:
+        curl_rc = curl_proc.wait()
+    if curl_rc != 0:
+        raise FlashError(f"curl exited {curl_rc} fetching {url}")
+    if xz_rc != 0:
+        raise FlashError(f"xz -d exited {xz_rc} decompressing {url}")
     if dd_rc != 0:
         raise FlashError(f"dd exited {dd_rc} writing {url} -> {target}")
 
@@ -1070,15 +1182,38 @@ def _image_virtual_size(path: Path, image_format: str | None) -> int | None:
         )
         if proc.returncode != 0:
             return None
-        return _parse_zstd_uncompressed(proc.stdout)
+        return _parse_compressed_listing(proc.stdout, header_prefix="Frames")
+
+    if image_format == "img.xz":
+        proc = subprocess.run(
+            ["xz", "-l", str(path)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if proc.returncode != 0:
+            return None
+        # ``xz -l`` shares the ``Compressed Uncompressed`` two-cell
+        # column layout with ``zstd -l``, so the same parser works.
+        # Header line for xz is ``Strms Blocks Compressed Uncompressed
+        # Ratio Check Filename``.
+        return _parse_compressed_listing(proc.stdout, header_prefix="Strms")
 
     return None
 
 
-def _parse_zstd_uncompressed(zstd_output: str) -> int | None:
-    """Best-effort extraction of the uncompressed size from ``zstd -l``."""
-    for line in zstd_output.splitlines():
-        if not line.strip() or line.lstrip().startswith(("Frames", "-")):
+def _parse_compressed_listing(listing: str, *, header_prefix: str) -> int | None:
+    """Best-effort extraction of the uncompressed size from
+    ``zstd -l`` or ``xz -l`` output.
+
+    Both tools emit a header line (``Frames Skips Compressed Uncompressed
+    ...`` for zstd, ``Strms Blocks Compressed Uncompressed ...`` for xz)
+    followed by a row whose 2nd ``<value> <unit>`` pair is the
+    uncompressed size. ``header_prefix`` selects which header line
+    to skip when scanning for the data row.
+    """
+    for line in listing.splitlines():
+        if not line.strip() or line.lstrip().startswith((header_prefix, "-")):
             continue
         cells = _ZSTD_SIZE_RE.findall(line)
         if len(cells) >= 2:
@@ -1090,6 +1225,13 @@ def _parse_zstd_uncompressed(zstd_output: str) -> int | None:
             multiplier = _ZSTD_SIZE_UNITS.get(unit)
             return int(value * multiplier) if multiplier is not None else None
     return None
+
+
+# Back-compat alias for the original zstd-only name; tests / external
+# code may still import this. New code uses the generic
+# ``_parse_compressed_listing`` form.
+def _parse_zstd_uncompressed(zstd_output: str) -> int | None:
+    return _parse_compressed_listing(zstd_output, header_prefix="Frames")
 
 
 def _lsblk_target_size(target: Path) -> int | None:

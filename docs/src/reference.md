@@ -73,7 +73,20 @@ PATH          SIZE  TRAN  VENDOR  MODEL              SERIAL          REMOVABLE
 ### `bty list images [--image-root PATH]`
 
 List supported images directly under the image root (non-recursive).
-Recognised formats: `.qcow2`, `.img`, `.img.zst`.
+Recognised formats: `.qcow2`, `.img`, `.img.zst`, `.img.xz`.
+
+bty itself ships its target images (`bty-server-x86_64.img.zst`,
+`bty-server-rpi-arm64.img.zst`) as `.img.zst` because flash-time
+decompression is on the hot path of the per-job CI reflash use
+case (zstd decompresses at ~800-1500 MB/s and saturates the
+target disk; xz at ~50-100 MB/s would bottleneck flash by ~7x in
+absolute terms, ~80s extra per CI job). The bty USB stick image
+(`bty-usb-x86_64.iso.xz`) ships as xz because Etcher / Rufus /
+Raspberry Pi Imager all decompress .xz natively for host-side
+stick-prep but lack .zst support — that's a one-off host
+operation, not a hot-path concern. The flash code accepts both
+.img.zst and .img.xz for operator-supplied images so neither
+format choice is forced on you.
 
 The image root is resolved in this order:
 
@@ -114,7 +127,7 @@ Either `--dry-run` or `--yes` is required:
 
 Both modes start by validating the plan:
 
-- Image exists and is a recognised format (`.qcow2` / `.img` / `.img.zst`).
+- Image exists and is a recognised format (`.qcow2` / `.img` / `.img.zst` / `.img.xz`).
 - Image virtual size (decompressed / qcow2-virtual size, not on-disk
  size) fits the target. Skipped with a note if the virtual size
  cannot be determined (e.g. `qemu-img info` failure).
