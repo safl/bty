@@ -253,6 +253,18 @@ def main(args, cijoe):
     if err:
         return err
 
+    # Linux-side post-bake verification. Catches structural
+    # regressions in the cooked ISO (partition count / types /
+    # overlap / BTY_IMAGES label / exFAT mountability) before
+    # we waste CI cycles on the gzip step. Necessary but not
+    # sufficient -- doesn't catch host-OS handler bugs (e.g.
+    # Etcher's xz decompressor through v0.4.1-v0.5.3); those
+    # need hardware verification per
+    # ``feedback_verify_flasher_compat`` discipline.
+    err = _verify_iso(cijoe, dst)
+    if err:
+        return err
+
     # Compress to .iso.gz. The raw 4.4 GiB ISO exceeds GitHub's 2 GiB
     # per-release-asset upload limit; gzip on our zero-heavy file
     # (4 GiB sparse exFAT region) brings it to a few hundred MiB.
@@ -280,6 +292,104 @@ def main(args, cijoe):
     cijoe.run_local(f"cat {sha256_path}")
     cijoe.run_local(f"ls -la {gz_dst}")
 
+    return 0
+
+
+def _verify_iso(cijoe, iso_path: Path) -> int:
+    """Linux-side post-bake structural checks on the cooked ISO.
+
+    Catches the layout regressions we've broken before:
+
+    - 3 partitions in the MBR (was 2 before M19 phase 7's relocation;
+      regressed silently from v0.4.1 onward when xz-related churn
+      moved attention away from layout testing).
+    - Non-overlapping byte ranges (M19 phase 7 invariant; Windows
+      enumeration breaks if violated).
+    - p1 type 0 + bootable flag (live-build's iso-hybrid + isohdpfx.bin).
+    - p2 type ef (EFI ESP).
+    - p3 type 07 (exFAT) labeled BTY_IMAGES, mountable as exFAT on
+      Linux (proves mkfs.exfat completed and the FAT/bitmap/root are
+      coherent).
+
+    Necessary but not sufficient. Doesn't catch host-OS handler
+    bugs -- Etcher's xz decompressor failed for ~4 releases despite
+    every Linux-side check passing. Hardware verification on a real
+    flasher is still required before tagging any publish-format
+    change (see ``feedback_verify_flasher_compat`` in memory).
+    """
+    log.info(f"Verifying cooked ISO structure: {iso_path}")
+
+    err, state = cijoe.run_local(f"sudo sfdisk --json {iso_path}")
+    if err:
+        log.error("sfdisk --json failed during verification")
+        return err
+    try:
+        table = json.loads(state.output())
+        partitions = table["partitiontable"]["partitions"]
+    except (json.JSONDecodeError, KeyError) as exc:
+        log.error(f"could not parse sfdisk --json: {exc}")
+        return errno.EIO
+
+    if len(partitions) != 3:
+        log.error(f"expected 3 partitions, found {len(partitions)}")
+        return errno.EIO
+
+    expected = [
+        ("0", True, "ISO9660"),
+        ("ef", False, "EFI ESP"),
+        ("7", False, "BTY_IMAGES exFAT"),
+    ]
+    for i, (p, (etype, ebootable, name)) in enumerate(
+        zip(partitions, expected, strict=True), start=1
+    ):
+        # Normalize: sfdisk emits MBR types as bare hex without
+        # leading zeros, so "0", "00", "ef", "7", "07" are all
+        # in play. Strip leading zeros for comparison.
+        ptype = str(p.get("type", "")).lower().lstrip("0") or "0"
+        if ptype != etype:
+            log.error(f"p{i} ({name}): expected type {etype}, got {p.get('type')!r}")
+            return errno.EIO
+        actual_bootable = bool(p.get("bootable", False))
+        if actual_bootable != ebootable:
+            log.error(f"p{i} ({name}): expected bootable={ebootable}, got {actual_bootable}")
+            return errno.EIO
+
+    for i in range(len(partitions)):
+        for j in range(i + 1, len(partitions)):
+            pa, pb = partitions[i], partitions[j]
+            a_start, a_end = pa["start"], pa["start"] + pa["size"]
+            b_start, b_end = pb["start"], pb["start"] + pb["size"]
+            if a_start < b_end and b_start < a_end:
+                log.error(f"p{i + 1} [{a_start}..{a_end}) overlaps p{j + 1} [{b_start}..{b_end})")
+                return errno.EIO
+
+    err, state = cijoe.run_local(f"sudo losetup -fP --show {iso_path}")
+    if err:
+        log.error("losetup -fP failed during verification")
+        return err
+    loop = state.output().strip().splitlines()[-1].strip()
+    cijoe.run_local("sudo udevadm settle")
+
+    err, state = cijoe.run_local(f"sudo blkid -o value -s LABEL {loop}p3")
+    label = state.output().strip() if not err else ""
+    if err or label != "BTY_IMAGES":
+        cijoe.run_local(f"sudo losetup -d {loop}")
+        log.error(f"p3 label expected BTY_IMAGES, got {label!r}")
+        return errno.EIO
+
+    mount_dir = iso_path.parent / "_verify_mount"
+    mount_dir.mkdir(exist_ok=True)
+    err, _ = cijoe.run_local(f"sudo mount -o ro -t exfat {loop}p3 {mount_dir}")
+    if err:
+        cijoe.run_local(f"sudo losetup -d {loop}")
+        mount_dir.rmdir()
+        log.error("mount -t exfat p3 failed")
+        return err
+    cijoe.run_local(f"sudo umount {mount_dir}")
+    mount_dir.rmdir()
+    cijoe.run_local(f"sudo losetup -d {loop}")
+
+    log.info("ISO structure OK: 3 non-overlapping partitions, p3 mounts as exFAT BTY_IMAGES")
     return 0
 
 

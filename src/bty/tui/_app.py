@@ -887,7 +887,15 @@ class BtyTui(App[None]):
         ]
         body.update("\n".join(lines))
 
+    @work(exclusive=True)
     async def action_flash(self) -> None:
+        # ``@work(exclusive=True)`` runs this in a worker context so
+        # the ``push_screen_wait`` calls below are legal: Textual
+        # 8.x rejects ``push_screen_wait`` outside a worker with
+        # "screen must be from a worker when wait_for_dismiss is True".
+        # ``exclusive=True`` cancels any prior in-flight flash worker
+        # if the operator triggers the action again, matching the
+        # single-flash-at-a-time semantics of the existing modal.
         if os.geteuid() != 0:
             self._set_status("bty-tui must run as root to flash; relaunch with sudo.")
             return
