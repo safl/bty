@@ -161,23 +161,37 @@ the CLI (scriptable).
 bty-tui
 ```
 
-The TUI shows two panes:
+The TUI is a three-pane wizard: pick an image, pick a disk,
+flash. Each `Enter` commits the current step and advances to
+the next; `Esc` (or `Backspace`) walks back.
 
-| Left pane | Right pane |
+| Pane | Contents |
 |---|---|
-| **Images** found on `BTY_IMAGES` | **Disks** detected on the target |
+| **1: Images** | Cooked images found on `BTY_IMAGES` (or on a remote `bty-web` if you launched with `--server URL`) |
+| **2: Disks** | Block devices detected on this machine |
+| **3: Flash** | A big `Flash!` button (becomes `Reboot` after a successful flash) |
 
-Tab between panes, arrow keys to navigate, `Enter` to select. Once
-you've picked an image and a target disk:
+Common keys:
 
 | Key | What happens |
 |---|---|
-| `F` | Show the flash plan (image format, target size, validation) |
-| `Enter` (in the modal) | Confirm and run the flash |
-| `q` | Cancel any modal / quit the TUI |
+| `1` / `2` | Jump focus back to the Images / Disks pane |
+| Arrow keys / `h` `l` | Cycle focus between panes |
+| `Enter` | Commit the focused row, advance to the next pane (on the Flash button: trigger the flash) |
+| `Esc` / `Backspace` | Undo the most recent commit, return one step |
+| `f` | Trigger the flash from anywhere once both image and disk are picked |
+| `Shift+R` | Reboot (active after a successful flash) |
+| `r` | Refresh the catalog and disk list |
+| `s` | Switch the catalog source (local path or remote `bty-web`) |
+| `t` | Open the theme picker |
+| `/` | Filter the image catalog by substring |
+| `q` | Quit the TUI |
 
-A status modal streams the result. When it says **`flash complete`**,
-the image bytes are on the target disk.
+A confirmation modal shows the flash plan (image format, target
+size, validation). `Enter` runs it; `Esc` cancels. A status modal
+then streams the write progress; when it closes, the Flash pane's
+button transforms into `Reboot` so you can boot into the
+freshly-written image with a single keystroke.
 
 <!--
 A screenshot of bty-tui mid-flash will land at
@@ -187,9 +201,10 @@ screenshot capture pass is done.
 
 
 ```{note}
-Without root the TUI launches in **read-only mode** - you can browse
-images and disks, but `F` refuses with a status message. Use
-``sudo bty-tui`` if you need to flash.
+Without root the TUI launches in **read-only mode** - you can
+browse images and disks, but the Flash button is disabled and
+`f` refuses with a status message. Use ``sudo bty-tui`` if you
+need to flash.
 ```
 
 ## Step 5b: Flash with `bty` (scriptable)
