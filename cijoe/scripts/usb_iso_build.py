@@ -11,7 +11,7 @@ target (``iso-hybrid`` vs ``netboot``) and the bootloader selection.
 Workflow:
 
 1. Copy ``bty-media/live-build/`` (the live-build config tree) into
-   a fresh ``cijoe/_build/usb-iso/`` working dir.
+   a fresh ``cijoe/_build/usb-x86/`` working dir.
 2. Run ``sudo env BTY_USB_ISO=1 lb clean --all && lb build``. The
    env var drives ``auto/config`` into iso-hybrid mode (binary
    images, bootloaders, kernel cmdline appendices); ``sudo env``
@@ -30,9 +30,9 @@ Workflow:
 The cwd at run time is ``cijoe/`` (the Makefile cd's there before
 invoking cijoe), so the bty-media tree lives at
 ``Path.cwd().parent / "bty-media"`` and the build scratch dir is
-``Path.cwd() / "_build" / "usb-iso"``.
+``Path.cwd() / "_build" / "usb-x86"``.
 
-Skipped for any variant whose role isn't ``usb``.
+Skipped for any variant other than ``usb-x86``.
 
 Retargetable: False
 """
@@ -79,11 +79,8 @@ def main(args, cijoe):
     bty_media = cijoe_dir.parent / "bty-media"
 
     variant = cijoe.getconf("bty", {}).get("variant", "")
-    role = variant.split("-")[0]
-    if role != "usb":
-        log.info(
-            f"Skipping usb_iso_build (variant={variant!r}; only the 'usb' role runs lb iso-hybrid)"
-        )
+    if variant != "usb-x86":
+        log.info(f"Skipping usb_iso_build (variant={variant!r}; only 'usb-x86' runs lb iso-hybrid)")
         return 0
 
     images = cijoe.getconf("system-imaging.images", {})
@@ -99,7 +96,7 @@ def main(args, cijoe):
     publish_dir = Path(publish_dir_str)
     publish_dir.mkdir(parents=True, exist_ok=True)
 
-    build_dir = cijoe_dir / "_build" / "usb-iso"
+    build_dir = cijoe_dir / "_build" / "usb-x86"
     if build_dir.exists():
         # ``lb`` writes a chroot tree owned by root; rm needs sudo.
         err, _ = cijoe.run_local(f"sudo rm -rf {build_dir}")

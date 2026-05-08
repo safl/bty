@@ -9,7 +9,7 @@ into a per-variant staging directory under ``bty-media/``:
   ``bty-media/rootfs/server/opt/bty/`` (consumed by the cloud-init
   ``write_files`` block emitted by ``gen_userdata.py``; the server's
   runcmd ``pip install``s it into ``/opt/bty/venv``).
-- ``live-x86`` / ``usb-iso`` ->
+- ``live-x86`` / ``usb-x86`` ->
   ``bty-media/live-build/config/includes.chroot/opt/bty/`` (consumed
   by the live-build hook ``0500-bty-install.hook.chroot``, which
   ``pip install``s it into the chroot's ``/opt/bty/venv``).
@@ -18,10 +18,7 @@ The cwd at run time is ``cijoe/`` (the Makefile cd's there before
 invoking cijoe), so the repo root is ``Path.cwd().parent`` and the
 bty-media tree lives at ``repo_root / "bty-media"``.
 
-No-op for the legacy ``usb-x86`` variant - that bake produces a
-basic flash environment (parted, gdisk, qemu-img, etc.) without
-bty itself. Retired by M19 phase 6 in favour of ``usb-iso``, which
-DOES bake bty (same chroot path as ``live-x86``).
+Variants not in the table are skipped with rc=0.
 
 Retargetable: False
 """
@@ -35,15 +32,12 @@ from argparse import ArgumentParser
 from pathlib import Path
 
 # Variant -> destination directory relative to ``bty-media/``.
-# Variants not listed here are skipped with rc=0. Keyed by full
-# variant name (rather than role-stripped name) because the ``usb``
-# role is split: legacy ``usb-x86`` doesn't bake the wheel; the M19
-# replacement ``usb-iso`` does.
+# Variants not listed here are skipped with rc=0.
 TARGET_DIRS: dict[str, Path] = {
     "server-x86": Path("rootfs") / "server" / "opt" / "bty",
     "server-rpi": Path("rootfs") / "server" / "opt" / "bty",
     "live-x86": Path("live-build") / "config" / "includes.chroot" / "opt" / "bty",
-    "usb-iso": Path("live-build") / "config" / "includes.chroot" / "opt" / "bty",
+    "usb-x86": Path("live-build") / "config" / "includes.chroot" / "opt" / "bty",
 }
 
 

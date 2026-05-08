@@ -101,29 +101,19 @@ jobs:
       fail-fast: false
       matrix:
         # ``variant`` is the user-facing name (``make build VARIANT=...``);
-        # ``role`` is the arch-stripped role used to derive image config
-        # keys and artifact filenames; ``kind`` selects the right deps and
-        # upload step.
+        # ``kind`` selects the right deps and upload step.
+        # M19 phase 6 retired the ``usb-x86`` cloud-init bake; the
+        # ``usb-x86`` variant is now the live-build iso-hybrid path
+        # (kind: live).
         include:
-          - variant: usb-x86
-            role: usb
-            kind: disk
           - variant: server-x86
-            role: server
             kind: disk
           - variant: live-x86
-            role: live
+            kind: live
+          - variant: usb-x86
             kind: live
           - variant: server-rpi
-            role: server-rpi
             kind: disk-rpi
-          # M19: USB image rebuilt as a hybrid ISO via live-build.
-          # Coexists with the legacy ``usb-x86`` cloud-init bake while
-          # the cloud-init path is being retired (M19 phase 6); both
-          # ship to the GH release page.
-          - variant: usb-iso
-            role: usb-iso
-            kind: live
     steps:
       - uses: actions/checkout@v6
 
@@ -175,7 +165,7 @@ jobs:
           sudo apt-get update
           # ``debootstrap squashfs-tools xorriso debian-archive-keyring``
           # are live-build's required deps. ``exfatprogs`` (mkfs.exfat)
-          # is needed by the usb-iso variant's post-build step that
+          # is needed by the usb-x86 variant's post-build step that
           # appends a writable BTY_IMAGES partition to the cooked
           # hybrid ISO; harmless on the live-x86 build that doesn't
           # run that step. (sfdisk used by the same step is in
@@ -221,14 +211,14 @@ jobs:
       - name: Build image
         run: make build VARIANT=${{ matrix.variant }}
 
-      - name: Upload artifact (disk-image variants)
+      - name: Upload artifact (server-x86 variant)
         if: matrix.kind == 'disk'
         uses: actions/upload-artifact@v7
         with:
-          name: bty-${{ matrix.role }}-x86_64-img-zst
+          name: bty-server-x86_64-img-zst
           path: |
-            ~/system_imaging/disk/bty-${{ matrix.role }}-x86_64.img.zst
-            ~/system_imaging/disk/bty-${{ matrix.role }}-x86_64.img.zst.sha256
+            ~/system_imaging/disk/bty-server-x86_64.img.zst
+            ~/system_imaging/disk/bty-server-x86_64.img.zst.sha256
 
       - name: Upload artifact (server-rpi variant)
         if: matrix.kind == 'disk-rpi'
@@ -250,8 +240,8 @@ jobs:
             ~/system_imaging/disk/bty-live-x86_64.squashfs
             ~/system_imaging/disk/bty-live-x86_64.sha256
 
-      - name: Upload artifact (usb-iso variant)
-        if: matrix.variant == 'usb-iso'
+      - name: Upload artifact (usb-x86 variant)
+        if: matrix.variant == 'usb-x86'
         uses: actions/upload-artifact@v7
         with:
           name: bty-usb-x86_64-iso-zst
@@ -396,7 +386,6 @@ jobs:
           # onto the public Release page.
           files: |
             gathered/dist/*
-            gathered/bty-usb-x86_64-img-zst/*
             gathered/bty-usb-x86_64-iso-zst/*
             gathered/bty-server-x86_64-img-zst/*
             gathered/bty-server-rpi-arm64-img-zst/*

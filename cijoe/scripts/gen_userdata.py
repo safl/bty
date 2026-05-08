@@ -12,11 +12,14 @@ bytes on the target.
 
 Reads the ``[bty]`` config from cijoe to:
 
-- Pick the variant (``bty.variant``: e.g. ``"usb-x86"`` or
-  ``"server-x86"``). The arch suffix is stripped to derive the *role*
-  (``"usb"`` / ``"server"``); the role then selects the base file
-  (``bty-media/auxiliary/cloudinit-base-<role>.user``) and the rootfs
-  subdirectory (``bty-media/rootfs/<role>/``). Files under
+- Pick the variant (``bty.variant``: ``"server-x86"`` is the only
+  cloud-init bake variant after M19 phase 6 retired the
+  ``usb-x86`` cloud-init path; ``server-rpi`` uses
+  ``build-rpi.yaml`` and doesn't go through this script). The arch
+  suffix is stripped to derive the *role* (``"server"``); the role
+  then selects the base file
+  (``bty-media/auxiliary/cloudinit-base-<role>.user``) and the
+  rootfs subdirectory (``bty-media/rootfs/<role>/``). Files under
   ``bty-media/rootfs/common/`` are always inlined.
 - Substitute ``__BTY_HOSTNAME__`` and ``__BTY_TIMEZONE__`` in the base.
 
@@ -34,7 +37,7 @@ import logging as log
 import stat
 from pathlib import Path
 
-KNOWN_ROLES = ("usb", "server")
+KNOWN_ROLES = ("server",)
 
 # Wrap base64 lines at 76 cols so the YAML output is readable rather
 # than a single multi-kilobyte line. Cloud-init concatenates them
@@ -54,9 +57,9 @@ def main(args, cijoe):
         log.error("No [bty] section found in config")
         return 1
 
-    variant = bty.get("variant", "usb-x86")
-    # Strip arch suffix to derive the role: "server-x86" -> "server",
-    # "usb-x86" -> "usb". Variants with no suffix map to themselves.
+    variant = bty.get("variant", "server-x86")
+    # Strip arch suffix to derive the role: "server-x86" -> "server".
+    # Variants with no suffix map to themselves.
     role = variant.split("-")[0]
     if role not in KNOWN_ROLES:
         log.error(

@@ -441,14 +441,16 @@ Landed after the original 1.0 list:
     Bearer scheme, and the custom `sessions` SQLite table. Replaced
     with Starlette's `SessionMiddleware` (server-signed cookie, no
     DB hop). Net ~760 LOC deleted with no browser-flow regression.
-19. **[wip]** Port `usb-x86` from cloud-init + `overlayroot` to
-    live-build. The current path stitches a stock Debian cloud
+19. **[wip]** Ported `usb-x86` from cloud-init + `overlayroot` to
+    live-build. The previous path stitched a stock Debian cloud
     image, an ext4 rootfs, and the `overlayroot` package's
-    initramfs hook; that hook is fragile across kernel / hardware
+    initramfs hook; that hook was fragile across kernel / hardware
     combos (kernel panic on GMKtec MiniBoxXS, kernel
     6.12.85+deb13-amd64). live-boot's SquashFS + tmpfs overlay is
-    the canonical Debian path for ephemeral live media and is
-    already what `live-x86` uses. Phases:
+    the canonical Debian path for ephemeral live media and is what
+    `live-x86` already uses. Phases 1-4 + 6 are done; phase 5
+    (delivery docs) and phase 7 (Windows-friendly partition
+    layout) are open.
 
     1. **[done]** Add an `iso-hybrid` output target to the existing
        live-build config (parallel to the current `--binary-images
@@ -489,13 +491,18 @@ Landed after the original 1.0 list:
        tooling (`dd`, Balena Etcher, Rufus) or drop it onto an
        existing Ventoy stick alongside their other rescue ISOs.
        The project does not ship a stick-writing tool of its own.
-    6. Retire the `overlayroot` dependency,
-       `bty-media/auxiliary/cloudinit-base-usb.user`,
-       `bty-media/rootfs/usb/`, and the cijoe usb-bake scripts.
-       `usb-x86` stops being a separate cloud-init bake path and
-       becomes a packaging variant of the live-build output.
-       Gated on the experimental usb-iso build going green on a
-       real tag run.
+    6. **[done]** Retired the `overlayroot` dependency, the
+       cloud-init usb-x86 bake (`cloudinit-base-usb.user`,
+       `rootfs/usb/`, the cloud-init `usb-x86.toml` config,
+       `docs/asciinema/usb-build.sh`), and the legacy
+       `bty-usb-x86_64-img-zst` release artifact. The `usb-x86`
+       variant name now points at the live-build path that was
+       called `usb-iso` during phases 1-5; the cijoe config moved
+       from `usb-iso.toml` to `usb-x86.toml`. Gated on hardware
+       verification of the v0.2.20 release; landed after the
+       GMKtec MiniBoxXS booted cleanly with the live-build
+       artifact and the BTY_IMAGES partition mounted at
+       `/var/lib/bty/images`.
     7. Make `BTY_IMAGES` visible to Windows. Discovered on
        hardware verification of v0.2.20: when the dd'd stick is
        plugged into a Windows host, the operator can read the

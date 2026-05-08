@@ -122,15 +122,16 @@ cat <<'EOF'
     uv sync --all-extras --group dev    # project venv + deps
     uv run pytest                       # unit tests (~7s)
     make ci                             # lint + types + tests
-    make build VARIANT=usb-x86              # USB live image (~20m)
-    make build VARIANT=server-x86           # server appliance (~15m)
+    sudo make build VARIANT=usb-x86         # USB live ISO via live-build (~15m, root)
+    make build VARIANT=server-x86           # server appliance (~15m, cloud-init)
     make build VARIANT=server-rpi           # RPi 4/5 server appliance
-    sudo make build VARIANT=live-x86        # live trio (~10m, root)
+    sudo make build VARIANT=live-x86        # PXE live trio (~10m, root)
     make test-pxe                       # end-to-end PXE chain
 
-  Note: ``make build VARIANT=live-x86`` needs root because live-build
-  does a chroot + mount-bind dance; the others run cloud-init in
-  an unprivileged QEMU and don't.
+  Note: ``make build VARIANT=usb-x86`` and ``live-x86`` need root
+  because live-build does a chroot + mount-bind dance; ``server-x86``
+  and ``server-rpi`` don't (cloud-init in QEMU and qemu-user-static
+  chroot, both unprivileged).
 
   The ``bty`` user inside the cooked server image defaults to
   password ``bty`` (rotate with ``passwd bty``). The admin user
