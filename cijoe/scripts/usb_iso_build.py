@@ -55,14 +55,27 @@ from pathlib import Path
 PUBLISH_BASENAME = "bty-usb-x86_64.iso"
 PUBLISH_XZ_BASENAME = "bty-usb-x86_64.iso.xz"
 
-# Pre-allocate this much trailing space inside the cooked ISO for an
-# exFAT partition labelled BTY_IMAGES. Operators ``dd`` the cooked
-# artifact to a stick (Etcher / RPi Imager / Rufus DD-mode read
-# .iso.xz natively, no decompress step needed), drop ``*.img.zst``
-# files into the writable exFAT partition from any host OS, then
-# boot. ``bty-grow-images-partition.service`` (M19 phase 4) extends
-# this partition to fill the rest of the stick on first boot.
-TRAILING_EXFAT_GIB = 4
+# Pre-allocate this much trailing space inside the cooked ISO for
+# an exFAT partition labelled BTY_IMAGES. Operators ``dd`` the
+# cooked artifact to a stick (Etcher / RPi Imager / Rufus DD-mode
+# read .iso.xz natively, no decompress step needed), drop
+# ``*.img.zst`` files into the writable exFAT partition from any
+# host OS, then boot. ``bty-grow-images-partition.service`` (M19
+# phase 4) extends this partition to fill the rest of the stick
+# on first boot.
+#
+# Sized at 12 GiB so the bootstrap-the-server-from-usb case works
+# in a single dd: the cooked ``bty-server-x86_64.img.zst`` is
+# small (~450 MB compressed) but operators sometimes carry a
+# decompressed or custom server image up to 10 GB, and forcing a
+# two-boot workflow ("boot stick first to let BTY_IMAGES grow,
+# power off, drop image, boot again") is bad UX. 12 GiB +
+# ~400 MB ISO front-matter = ~12.4 GiB total; fits comfortably on
+# a 16 GB stick (~14.9 GiB usable). Larger sticks still benefit
+# from the grow service expanding BTY_IMAGES further on first
+# boot. The compressed .iso.xz is barely affected by this
+# (the extra 8 GiB is sparse zeros that xz crushes to a few MB).
+TRAILING_EXFAT_GIB = 12
 
 # Compress the cooked ISO with xz instead of zstd: Etcher / Rufus /
 # RPi Imager all decompress .xz natively but NOT .zstd, so .iso.xz
