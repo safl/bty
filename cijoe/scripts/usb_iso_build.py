@@ -43,7 +43,6 @@ import errno
 import json
 import logging as log
 import os
-import re
 import shutil
 from argparse import ArgumentParser
 from pathlib import Path
@@ -229,90 +228,147 @@ def main(args, cijoe):
 
 
 def _extend_with_exfat(cijoe, iso_path: Path) -> int:
-    """Append a trailing exFAT partition labelled BTY_IMAGES to ``iso_path``.
+    """Relocate the EFI partition out of the iso-hybrid overlap, then
+    append a trailing exFAT partition labelled BTY_IMAGES (M19 phase 7).
 
-    The live-build hybrid ISO uses ``isohdpfx.bin`` for its System
-    Area, producing an MBR-only isohybrid layout (no GPT). This is
-    the consequence of ``--bootloaders syslinux,grub-efi``: syslinux
-    needs the legacy MBR boot path. So we work the MBR via
-    ``sfdisk`` rather than ``sgdisk``.
+    live-build's iso-hybrid output puts the EFI partition entry
+    *inside* the ISO9660 partition's byte range (the EFI FAT image is
+    embedded in the ISO9660 stream, and the MBR partition entry just
+    points at where it lives). Linux handles overlapping MBR entries
+    fine, but Windows refuses to enumerate partitions past the
+    overlap, so the BTY_IMAGES partition we append is invisible to
+    Windows operators.
 
-    Steps:
+    Fix: copy the EFI FAT bytes to a non-overlapping location after
+    the ISO9660 partition, then rewrite the MBR with three
+    non-overlapping partitions:
 
-    1. ``truncate -s +<N>G`` extends the file by ``TRAILING_EXFAT_GIB``
-       gigabytes; the new bytes are sparse zeros until exFAT writes to
-       them.
-    2. ``sfdisk --append`` adds a new MBR partition entry covering the
-       freshly-added space. Spec ``,,07`` -> default start, default
-       size (fill remaining), type 0x07 ("NTFS/exFAT/HPFS" MBR
-       partition type code).
-    3. ``losetup -fP`` attaches the file as a loopback block device
-       and scans the partition table so ``${LOOP}p<N>`` exists.
-    4. ``mkfs.exfat -L BTY_IMAGES`` formats the new partition. The
-       label is set on the FILESYSTEM (read by udev/blkid for the
-       ``/dev/disk/by-label/BTY_IMAGES`` symlink); MBR has no
-       partition labels of its own.
-    5. ``losetup -d`` detaches.
+      - p1: ISO9660 (covers live-build's ISO9660 portion, unchanged)
+      - p2: EFI ESP, relocated to the byte range right after p1
+      - p3: BTY_IMAGES exFAT, fills the rest of the file
 
-    The new partition number is whatever sfdisk auto-assigned. MBR
-    isohybrid layout from live-build is typically:
-      - p1: ISO9660 data (the squashfs etc.)
-      - p2: EFI System partition
-      - p3: BTY_IMAGES (added here)
-    We assume p3 with a sanity check via ``sfdisk --json``.
+    The El Torito catalog inside the ISO9660 still has its embedded
+    EFI image for CD-style UEFI boot; the relocated MBR partition
+    entry handles USB-style UEFI boot. BIOS boot via ``isohdpfx.bin``
+    in MBR sectors 0..432 is untouched (sfdisk only edits the
+    partition-table area at offsets 446..510).
+
+    Workflow:
+
+    1. ``truncate -s +<N>G`` extends the file with sparse zeros.
+    2. Read the existing MBR via ``sfdisk --json``; locate the
+       ISO9660 (type 0) and EFI (type ef) entries.
+    3. ``dd`` the EFI FAT bytes from the current overlapping
+       location to a non-overlapping position right after the
+       ISO9660 partition (8-sector aligned).
+    4. Rewrite the MBR partition table via ``sfdisk`` stdin form so
+       all three entries land at non-overlapping byte ranges in
+       a single atomic operation. Bootable flag preserved on p1.
+    5. ``losetup -fP`` + ``mkfs.exfat -L BTY_IMAGES`` on p3.
+    6. ``losetup -d``.
     """
     log.info(f"Extending {iso_path} with +{TRAILING_EXFAT_GIB} GiB BTY_IMAGES exFAT")
+    log.info("Layout: ISO9660 + relocated EFI + BTY_IMAGES (non-overlapping for Windows)")
 
     err, _ = cijoe.run_local(f"truncate -s +{TRAILING_EXFAT_GIB}G {iso_path}")
     if err:
         log.error(f"truncate +{TRAILING_EXFAT_GIB}G failed on {iso_path}")
         return err
 
-    # sfdisk --append reads the partition spec from stdin. ``,,07`` =
-    # default start, default size (fill remaining), type 0x07.
-    err, _ = cijoe.run_local(f"sh -c 'echo \",,07\" | sudo sfdisk --append {iso_path}'")
-    if err:
-        log.error("sfdisk --append BTY_IMAGES failed")
-        return err
-
-    # Sanity check + partition number resolution. ``sfdisk --json``
-    # emits a parseable structure under ``.partitiontable.partitions``.
-    # ``cijoe.run_local`` returns ``(err, CommandState)``; the captured
-    # stdout/stderr is exposed via ``CommandState.output()`` (a method
-    # that reads back the Tee'd output file).
+    # Read the current MBR.
     err, state = cijoe.run_local(f"sudo sfdisk --json {iso_path}")
     if err:
         log.error("sfdisk --json failed")
         return err
-    out = state.output()
     try:
-        table = json.loads(out)
+        table = json.loads(state.output())
         partitions = table["partitiontable"]["partitions"]
     except (json.JSONDecodeError, KeyError) as exc:
-        log.error(f"could not parse sfdisk --json output: {exc}\n{out}")
+        log.error(f"could not parse sfdisk --json output: {exc}")
         return errno.EIO
 
-    # The newest entry is the one we just appended. sfdisk numbers
-    # by 1-based index in the partition table. Match by partition
-    # type 0x07 (we just added the only one).
-    part_num = None
+    iso_part = None
+    efi_part = None
     for p in partitions:
-        # ``type`` is the hex string e.g. "7" or "07" (sfdisk emits
-        # without leading zero).
-        if str(p.get("type", "")).lstrip("0").lower() == "7":
-            # Extract the trailing run of digits at the end of the
-            # node path. The naive "all digits anywhere" approach
-            # breaks on paths like ``bty-usb-x86_64.iso3`` where the
-            # ``86_64`` portion contributes spurious digits and would
-            # yield part 86643 instead of 3.
-            node = p.get("node", "")
-            m = re.search(r"(\d+)$", node)
-            if m:
-                part_num = m.group(1)
-                break
-    if part_num is None:
-        log.error(f"could not locate BTY_IMAGES (type 07) in sfdisk --json output:\n{out}")
+        # sfdisk emits MBR types as bare hex without leading zeros:
+        # ISO9660 partition typically registers as type "0" or "00";
+        # EFI System partition is "ef".
+        ptype = str(p.get("type", "")).lower()
+        if ptype.lstrip("0") == "" or ptype.lstrip("0") == "0":
+            iso_part = p
+        elif ptype == "ef":
+            efi_part = p
+    if iso_part is None:
+        log.error("could not find ISO9660 partition (type 0) in MBR")
         return errno.EIO
+    if efi_part is None:
+        log.error("could not find EFI partition (type ef) in MBR")
+        return errno.EIO
+    log.info(f"ISO9660 at sectors {iso_part['start']}..{iso_part['start'] + iso_part['size'] - 1}")
+    log.info(
+        f"EFI currently at sectors {efi_part['start']}..{efi_part['start'] + efi_part['size'] - 1} "
+        f"(overlapping ISO9660)"
+    )
+
+    # Compute new non-overlapping layout.
+    iso_end = iso_part["start"] + iso_part["size"]  # next sector after p1
+    efi_size = efi_part["size"]
+    # Align to 8-sector (4 KiB) boundary.
+    new_efi_start = ((iso_end + 7) // 8) * 8
+    new_bty_start = ((new_efi_start + efi_size + 7) // 8) * 8
+
+    # File size in sectors.
+    err, state = cijoe.run_local(f"stat -c %s {iso_path}")
+    if err:
+        log.error("stat failed on iso file")
+        return err
+    file_bytes = int(state.output().strip())
+    file_sectors = file_bytes // 512
+    new_bty_size = file_sectors - new_bty_start
+    if new_bty_size <= 0:
+        log.error(
+            f"no room for BTY_IMAGES: file_sectors={file_sectors}, new_bty_start={new_bty_start}"
+        )
+        return errno.EIO
+
+    log.info(f"Relocating EFI to sectors {new_efi_start}..{new_efi_start + efi_size - 1}")
+    log.info(f"BTY_IMAGES at sectors {new_bty_start}..{new_bty_start + new_bty_size - 1}")
+
+    # Copy EFI FAT bytes from old overlapping location to new
+    # non-overlapping location. The new region is currently sparse
+    # zeros (truncate just extended the file); writing the FAT image
+    # populates it. ``conv=notrunc`` keeps the rest of the file
+    # untouched; ``conv=fsync`` flushes before sfdisk writes the new
+    # MBR (defensive against reordering).
+    err, _ = cijoe.run_local(
+        f"sudo dd if={iso_path} of={iso_path} bs=512 "
+        f"skip={efi_part['start']} seek={new_efi_start} count={efi_size} "
+        f"conv=notrunc,fsync 2>&1"
+    )
+    if err:
+        log.error("dd EFI FAT image to new location failed")
+        return err
+
+    # Rewrite the partition table with three non-overlapping entries.
+    # sfdisk's stdin form replaces the entire table in one shot.
+    # The ``bootable`` flag on p1 is what isohdpfx.bin's BIOS code
+    # looks for; preserve it.
+    sfdisk_script = iso_path.parent / "_mbr.sfdisk"
+    sfdisk_script.write_text(
+        f"label: dos\n"
+        f"unit: sectors\n"
+        f"\n"
+        f"start={iso_part['start']}, size={iso_part['size']}, type=0, bootable\n"
+        f"start={new_efi_start}, size={efi_size}, type=ef\n"
+        f"start={new_bty_start}, size={new_bty_size}, type=07\n"
+    )
+    err, _ = cijoe.run_local(f"sh -c 'sudo sfdisk {iso_path} < {sfdisk_script}'")
+    sfdisk_script.unlink(missing_ok=True)
+    if err:
+        log.error("sfdisk partition-table rewrite failed")
+        return err
+
+    part_num = "3"  # BTY_IMAGES is partition 3 in the rewritten table
     log.info(f"BTY_IMAGES is partition #{part_num}")
 
     err, state = cijoe.run_local(f"sudo losetup -fP --show {iso_path}")
