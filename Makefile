@@ -51,7 +51,7 @@ help:
 	@echo "  test-pxe      end-to-end PXE chain test against pre-built artefacts"
 	@echo ""
 	@echo "Variant: $(VARIANT)  (override with VARIANT=server-x86, server-rpi, netboot-x86, ...)"
-	@echo "  usb-x86      - bootable USB live ISO via live-build (.iso.zst, x86_64)"
+	@echo "  usb-x86      - bootable USB live ISO via live-build (.iso.xz, x86_64)"
 	@echo "  server-x86   - server appliance image (.img.zst, x86_64)"
 	@echo "  server-rpi   - server appliance image for Raspberry Pi 4/5 (.img.zst, arm64)"
 	@echo "  netboot-x86  - kernel + initrd + squashfs for PXE-flash clients (x86_64)"
@@ -96,7 +96,7 @@ media-deps:
 	pipx ensurepath
 
 # Build a media image. Pick the variant via ``VARIANT=...``:
-#   make build VARIANT=usb-x86      - bootable USB live ISO (.iso.zst, x86_64)
+#   make build VARIANT=usb-x86      - bootable USB live ISO (.iso.xz, x86_64)
 #   make build VARIANT=server-x86   - server appliance (.img.zst, x86_64)
 #   make build VARIANT=server-rpi   - server appliance for RPi 4/5 (.img.zst, arm64)
 #   make build VARIANT=netboot-x86  - kernel + initrd + squashfs for PXE clients

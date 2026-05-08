@@ -14,9 +14,9 @@ from a checkout.
 
 ```bash
 mkdir -p ~/system_imaging/disk && cd ~/system_imaging/disk
-curl -fLO https://github.com/safl/bty/releases/latest/download/bty-usb-x86_64.iso.zst
-curl -fLO https://github.com/safl/bty/releases/latest/download/bty-usb-x86_64.iso.zst.sha256
-sha256sum -c bty-usb-x86_64.iso.zst.sha256
+curl -fLO https://github.com/safl/bty/releases/latest/download/bty-usb-x86_64.iso.xz
+curl -fLO https://github.com/safl/bty/releases/latest/download/bty-usb-x86_64.iso.xz.sha256
+sha256sum -c bty-usb-x86_64.iso.xz.sha256
 ```
 
 `releases/latest/download/<name>` always points at the newest tag;
@@ -26,19 +26,19 @@ swap `latest` for a specific tag (e.g. `v0.2.7`) if you want to pin.
 
 ```bash
 # prerequisites: live-build, debootstrap, squashfs-tools, xorriso,
-# exfatprogs, zstd, pipx, passwordless sudo
+# exfatprogs, xz-utils, pipx, passwordless sudo
 make media-deps                    # one-time: pipx install cijoe
 sudo make build VARIANT=usb-x86    # 15-25 min
 ```
 
 The build runs Debian's `live-build` (debootstrap + mksquashfs +
 mkinitramfs) to produce a hybrid ISO, post-processes it to append
-a writable `BTY_IMAGES` exFAT partition, and zstd-compresses the
+a writable `BTY_IMAGES` exFAT partition, and xz-compresses the
 result. Emits:
 
-- `~/system_imaging/disk/bty-usb-x86_64.iso.zst` - distributable
+- `~/system_imaging/disk/bty-usb-x86_64.iso.xz` - distributable
   artifact (the file you decompress + `dd` to a USB stick).
-- `~/system_imaging/disk/bty-usb-x86_64-iso-zst.sha256` - checksum.
+- `~/system_imaging/disk/bty-usb-x86_64-iso-xz.sha256` - checksum.
 
 ## Flash a USB stick
 
@@ -47,7 +47,7 @@ result. Emits:
 lsblk
 
 # /dev/sdX is the USB stick (NOT your local system disk).
-zstd -d --stdout ~/system_imaging/disk/bty-usb-x86_64.iso.zst | \
+xz -d --stdout ~/system_imaging/disk/bty-usb-x86_64.iso.xz | \
   sudo dd of=/dev/sdX bs=4M status=progress conv=fsync
 sync
 ```

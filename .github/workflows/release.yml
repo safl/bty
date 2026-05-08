@@ -168,8 +168,9 @@ jobs:
           # is needed by the usb-x86 variant's post-build step that
           # appends a writable BTY_IMAGES partition to the cooked
           # hybrid ISO; harmless on the netboot-x86 build that doesn't
-          # run that step. (sfdisk used by the same step is in
-          # util-linux, always present on Ubuntu runners.)
+          # run that step. (sfdisk + xz, also used by the post-build
+          # step, are in util-linux + xz-utils, always present on
+          # Ubuntu runners.)
           sudo apt-get install -y --no-install-recommends \
             debootstrap squashfs-tools xorriso debian-archive-keyring \
             exfatprogs
@@ -244,10 +245,10 @@ jobs:
         if: matrix.variant == 'usb-x86'
         uses: actions/upload-artifact@v7
         with:
-          name: bty-usb-x86_64-iso-zst
+          name: bty-usb-x86_64-iso-xz
           path: |
-            ~/system_imaging/disk/bty-usb-x86_64.iso.zst
-            ~/system_imaging/disk/bty-usb-x86_64-iso-zst.sha256
+            ~/system_imaging/disk/bty-usb-x86_64.iso.xz
+            ~/system_imaging/disk/bty-usb-x86_64-iso-xz.sha256
 
   # ---------------- verify ------------------------------------------------
   test-pxe:
@@ -374,7 +375,7 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           path: gathered/
-          pattern: '{dist,bty-*-img-zst,bty-netboot-x86_64,bty-usb-x86_64-iso-zst,docs-pdf}'
+          pattern: '{dist,bty-*-img-zst,bty-netboot-x86_64,bty-usb-x86_64-iso-xz,docs-pdf}'
       - name: List gathered artifacts
         run: find gathered -type f | sort
       - name: Attach to release
@@ -386,7 +387,7 @@ jobs:
           # onto the public Release page.
           files: |
             gathered/dist/*
-            gathered/bty-usb-x86_64-iso-zst/*
+            gathered/bty-usb-x86_64-iso-xz/*
             gathered/bty-server-x86_64-img-zst/*
             gathered/bty-server-rpi-arm64-img-zst/*
             gathered/bty-netboot-x86_64/*

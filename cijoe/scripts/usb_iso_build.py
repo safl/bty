@@ -25,7 +25,12 @@ Workflow:
    edge of the artifact (sfdisk + losetup + mkfs.exfat) so the
    single dd-able file carries both the boot path and the
    operator's image catalog.
-5. Write a sha256 manifest covering the ISO.
+5. Compress the cooked ISO with ``xz -9 --extreme -T0`` to get
+   under GitHub's 2 GiB per-release-asset upload limit. xz is
+   chosen over zstd because Etcher / Rufus / Raspberry Pi Imager
+   all decompress .xz natively (no extra step for GUI flashers);
+   zstd lacks that ecosystem support today.
+6. Write a sha256 manifest covering the .iso.xz.
 
 The cwd at run time is ``cijoe/`` (the Makefile cd's there before
 invoking cijoe), so the bty-media tree lives at
@@ -48,24 +53,28 @@ from argparse import ArgumentParser
 from pathlib import Path
 
 PUBLISH_BASENAME = "bty-usb-x86_64.iso"
-PUBLISH_ZST_BASENAME = "bty-usb-x86_64.iso.zst"
+PUBLISH_XZ_BASENAME = "bty-usb-x86_64.iso.xz"
 
 # Pre-allocate this much trailing space inside the cooked ISO for an
-# exFAT partition labelled BTY_IMAGES. The legacy ``usb-x86``
-# cloud-init bake carved a ``BTY_IMAGES`` exFAT at the same path; this
-# is the live-build equivalent. Operators ``zstd -d`` the artifact and
-# ``dd`` to a stick (or pipe in one step), drop ``*.img.zst`` files
-# into the writable exFAT partition from any host OS, then boot.
-# ``bty-grow-images-partition.service`` (M19 phase 4) extends this
-# partition to fill the rest of the stick on first boot.
+# exFAT partition labelled BTY_IMAGES. Operators ``dd`` the cooked
+# artifact to a stick (Etcher / RPi Imager / Rufus DD-mode read
+# .iso.xz natively, no decompress step needed), drop ``*.img.zst``
+# files into the writable exFAT partition from any host OS, then
+# boot. ``bty-grow-images-partition.service`` (M19 phase 4) extends
+# this partition to fill the rest of the stick on first boot.
 TRAILING_EXFAT_GIB = 4
 
-# zstd compression level for the published .iso.zst. The trailing
-# exFAT is sparse zeros so the compression ratio is huge (4.4 GiB
-# raw -> few hundred MiB compressed). 19 is the maximum standard
-# level; matches what ``img_zst_publish`` uses for the .img.zst
-# variants.
-ZSTD_LEVEL = 19
+# Compress the cooked ISO with xz instead of zstd: Etcher / Rufus /
+# RPi Imager all decompress .xz natively but NOT .zstd, so .iso.xz
+# lets operators flash directly without a manual decompress step.
+# Compression ratio on our zero-heavy file (4 GiB sparse exFAT
+# region) is comparable to zstd-19 or slightly better; xz's
+# decompression is slower (~50-100 MB/s) but that's fine for a
+# one-shot write. ``-9 --extreme`` is max compression; ``-T0``
+# uses all build-host cores. Compress takes ~1-2 min on a CI
+# runner; the operator-side savings (no decompress step) compound
+# every download.
+XZ_FLAGS = ["-9", "--extreme", "-T0"]
 
 
 def add_args(parser: ArgumentParser):
@@ -194,35 +203,32 @@ def main(args, cijoe):
     if err:
         return err
 
-    # Compress to .iso.zst. The raw 4.4 GiB ISO exceeds GitHub's 2 GiB
-    # per-release-asset upload limit, and most of the trailing exFAT
-    # is zero-fill so compression brings it to a few hundred MiB. The
-    # operator UX matches the existing .img.zst variants:
-    #   zstd -d --stdout bty-usb-x86_64.iso.zst | sudo dd of=/dev/sdX bs=4M
-    zst_dst = publish_dir / PUBLISH_ZST_BASENAME
-    log.info(f"Compressing {dst} -> {zst_dst} (zstd -{ZSTD_LEVEL} -T0)")
-    err, _ = cijoe.run_local(f"zstd -{ZSTD_LEVEL} -T0 -f {dst} -o {zst_dst}")
+    # Compress to .iso.xz. The raw 4.4 GiB ISO exceeds GitHub's 2 GiB
+    # per-release-asset upload limit; most of the trailing exFAT is
+    # zero-fill so xz -9 --extreme brings it to a few hundred MiB.
+    # Operator UX: Etcher / RPi Imager / Rufus DD-mode read .iso.xz
+    # directly (no decompress step). For CLI:
+    #   xz -d --stdout bty-usb-x86_64.iso.xz | sudo dd of=/dev/sdX bs=4M
+    xz_dst = publish_dir / PUBLISH_XZ_BASENAME
+    xz_args = " ".join(XZ_FLAGS)
+    log.info(f"Compressing {dst} -> {xz_dst} (xz {xz_args})")
+    # xz writes ``<dst>.xz`` and removes ``<dst>`` on success (no
+    # ``--keep``); ``-f`` overwrites any pre-existing ``<dst>.xz``.
+    err, _ = cijoe.run_local(f"xz {xz_args} -f {dst}")
     if err:
-        log.error(f"zstd -{ZSTD_LEVEL} {dst} -> {zst_dst} failed")
-        return err
-    # Drop the uncompressed file - it's too big to ship and we have
-    # the .zst now. Local devs who want the .iso for inspection can
-    # ``zstd -d`` it back.
-    err, _ = cijoe.run_local(f"rm -f {dst}")
-    if err:
-        log.error(f"failed to remove uncompressed {dst}")
+        log.error(f"xz {xz_args} {dst} failed")
         return err
 
-    sha256_path = publish_dir / "bty-usb-x86_64-iso-zst.sha256"
+    sha256_path = publish_dir / "bty-usb-x86_64-iso-xz.sha256"
     err, _ = cijoe.run_local(
-        f"sh -c 'cd {publish_dir} && sha256sum {PUBLISH_ZST_BASENAME} > {sha256_path}'"
+        f"sh -c 'cd {publish_dir} && sha256sum {PUBLISH_XZ_BASENAME} > {sha256_path}'"
     )
     if err:
         log.error("failed computing sha256 manifest")
         return err
 
     cijoe.run_local(f"cat {sha256_path}")
-    cijoe.run_local(f"ls -la {zst_dst}")
+    cijoe.run_local(f"ls -la {xz_dst}")
 
     return 0
 

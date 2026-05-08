@@ -11,7 +11,7 @@ tag's copy of that file; substitute `latest` for a specific tag (e.g.
 
 | Asset | What it is | URL (latest) |
 |---|---|---|
-| `bty-usb-x86_64.iso.zst` (+ `.sha256`) | Bootable USB live ISO with built-in writable `BTY_IMAGES` exFAT partition for the operator's image catalog. Decompress + dd: `zstd -d --stdout bty-usb-x86_64.iso.zst \| sudo dd of=/dev/sdX bs=4M`. | <https://github.com/safl/bty/releases/latest/download/bty-usb-x86_64.iso.zst> |
+| `bty-usb-x86_64.iso.xz` (+ `.sha256`) | Bootable USB live ISO with built-in writable `BTY_IMAGES` exFAT partition for the operator's image catalog. Open in Balena Etcher / Raspberry Pi Imager / Rufus DD-mode (decompresses `.xz` natively). CLI: `xz -d --stdout bty-usb-x86_64.iso.xz \| sudo dd of=/dev/sdX bs=4M`. | <https://github.com/safl/bty/releases/latest/download/bty-usb-x86_64.iso.xz> |
 | `bty-server-x86_64.img.zst` (+ `.sha256`) | Server appliance image, x86_64 (browser UI + iPXE + dnsmasq). Boot in QEMU or `dd` to a disk. | <https://github.com/safl/bty/releases/latest/download/bty-server-x86_64.img.zst> |
 | `bty-server-rpi-arm64.img.zst` (+ `.sha256`) | Server appliance image for Raspberry Pi 4 / 5 (arm64). Write with `dd` to an SD card. | <https://github.com/safl/bty/releases/latest/download/bty-server-rpi-arm64.img.zst> |
 | `bty-netboot-x86_64.{vmlinuz,initrd,squashfs}` (+ `bty-netboot-x86_64.sha256`) | Netboot trio for PXE-flash clients. Drop into the server's `BTY_BOOT_DIR` (or click "fetch latest release" on `/ui/boot`). | <https://github.com/safl/bty/releases/latest/download/bty-netboot-x86_64.vmlinuz> |

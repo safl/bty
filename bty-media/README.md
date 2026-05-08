@@ -5,7 +5,8 @@ Source content for the bty appliance images. Four variants:
 - **USB live image** (`VARIANT=usb-x86`) - bootable USB carrying the
   bty runtime + a writable exFAT `BTY_IMAGES` partition for cooked
   images. Built via Debian's live-build (`iso-hybrid` output);
-  shipped zstd-compressed as `bty-usb-x86_64.iso.zst`.
+  shipped xz-compressed as `bty-usb-x86_64.iso.xz` (Etcher / Rufus
+  / Raspberry Pi Imager all decompress `.xz` natively).
 - **Server image, x86_64** (`VARIANT=server-x86`) - installable disk
   image for the bty provisioning server (`bty-web` + PXE boot stack).
   Cloud-init bake in QEMU.
@@ -79,7 +80,7 @@ right one based on the variant:
   with `BTY_USB_ISO=1` selecting `iso-hybrid` output, then post-
   processes the cooked ISO to append a writable exFAT `BTY_IMAGES`
   partition (`sfdisk --append`, `losetup -fP`, `mkfs.exfat`) and
-  zstd-compresses it. Output is `bty-usb-x86_64.iso.zst`. No QEMU
+  xz-compresses it. Output is `bty-usb-x86_64.iso.xz`. No QEMU
   full-system bake.
 
 - `server-rpi` -> `cijoe tasks/build-rpi.yaml`. Customises Raspberry
@@ -112,6 +113,8 @@ usb-x86 + netboot-x86 (live-build):
   `live-build`'s recommends, or install explicitly)
 - `exfatprogs` for the usb-x86 post-build BTY_IMAGES exFAT step
   (`mkfs.exfat`)
+- `xz-utils` for compressing the final usb-x86 artifact (always
+  present on Ubuntu/Debian; listed for completeness)
 - Passwordless `sudo` - live-build's chroot operations are
   privileged; CI runners have NOPASSWD by default
 
@@ -134,10 +137,12 @@ server-x86:
   artifact. Decompress with `zstd -d` and pipe to `dd`.
 
 usb-x86:
-- `~/system_imaging/disk/bty-usb-x86_64.iso.zst` - final artifact.
-  Decompress with `zstd -d` and pipe to `dd`, or unpack to a file
-  first and feed Balena Etcher / Rufus, or drop the unpacked
-  `.iso` onto a Ventoy stick alongside other rescue ISOs.
+- `~/system_imaging/disk/bty-usb-x86_64.iso.xz` - final artifact.
+  Open in Balena Etcher / Raspberry Pi Imager / Rufus DD-mode
+  (those tools decompress `.xz` natively), or pipe via CLI:
+  `xz -d --stdout bty-usb-x86_64.iso.xz | sudo dd of=/dev/sdX bs=4M`.
+  Decompress to `.iso` first (`xz -d ...`) before dropping onto a
+  Ventoy stick; Ventoy doesn't auto-decompress.
 
 server-rpi:
 - `~/system_imaging/disk/bty-server-rpi-arm64.img.zst` - final
@@ -161,7 +166,7 @@ amd64-only); first-boot smoke-testing happens out-of-band on real
 hardware. Most operators never run this build pipeline themselves -
 ``bty-media/`` exists for contributors who want to modify the image.
 
-- **usb-x86.** The cooked `.iso.zst` decompresses to a hybrid ISO
+- **usb-x86.** The cooked `.iso.xz` decompresses to a hybrid ISO
   that boots into a Debian live environment with the `bty` CLI +
   TUI installed into `/opt/bty/venv`, and an exFAT `BTY_IMAGES`
   partition for cooked images. live-boot's SquashFS + tmpfs overlay

@@ -20,14 +20,14 @@ USB build, ~20 minutes), and under 5 minutes for any subsequent flash.
 
 | You need | Notes |
 |---|---|
-| A **build host** with KVM | The image is baked inside QEMU. Any Linux box with `/dev/kvm` works; WSL2 with KVM enabled also works. |
-| A **USB stick**, 16 GiB or larger | The image is ~12 GiB raw and includes a 9 GiB exFAT partition for your images. |
+| A **build host** with passwordless sudo | live-build runs a chroot, which needs root. Any Linux box works (no KVM required after M19; we no longer bake in QEMU). |
+| A **USB stick**, 16 GiB or larger | The cooked image is ~4-5 GiB; the trailing `BTY_IMAGES` exFAT partition grows on first boot to fill whatever stick you write it to. |
 | A **target machine** with a free disk | This is the box that will get flashed. UEFI or legacy BIOS, x86_64. |
 | A **system image** to flash | `.qcow2`, raw `.img`, or `.img.zst`. Any cooked OS image of yours; bty doesn't ship one. |
 
 The build host runs Debian 12+ or Ubuntu 24.04+. Other Linux distros
-work if you can install the equivalents of `qemu-system-x86`,
-`qemu-utils`, `genisoimage`, `zstd`, and `pipx`. There's a one-shot
+work if you can install `live-build`, `debootstrap`, `squashfs-tools`,
+`xorriso`, `exfatprogs`, `xz-utils`, and `pipx`. There's a one-shot
 install script for Debian-family at
 [`scripts/install-dev-deps.sh`](https://github.com/safl/bty/blob/main/scripts/install-dev-deps.sh).
 
@@ -44,9 +44,9 @@ newest version, so you can pin to "latest" or to a specific tag.
 ```bash
 mkdir -p ~/system_imaging/disk && cd ~/system_imaging/disk
 
-curl -fLO https://github.com/safl/bty/releases/latest/download/bty-usb-x86_64.iso.zst
-curl -fLO https://github.com/safl/bty/releases/latest/download/bty-usb-x86_64.iso.zst.sha256
-sha256sum -c bty-usb-x86_64.iso.zst.sha256
+curl -fLO https://github.com/safl/bty/releases/latest/download/bty-usb-x86_64.iso.xz
+curl -fLO https://github.com/safl/bty/releases/latest/download/bty-usb-x86_64.iso.xz.sha256
+sha256sum -c bty-usb-x86_64.iso.xz.sha256
 ```
 
 For a specific version, swap `latest` for the tag (e.g. `v0.2.7`).
@@ -63,14 +63,14 @@ What this does: runs Debian's `live-build` (debootstrap + mksquashfs
 + mkinitramfs) directly on the build host (no QEMU, no cloud-init)
 to produce a hybrid ISO carrying the bty CLI + TUI, then post-
 processes the ISO to append a writable `BTY_IMAGES` exFAT partition,
-and zstd-compresses the result.
+and xz-compresses the result.
 
 When it finishes:
 
 ```text
 ~/system_imaging/disk/
-  bty-usb-x86_64.iso.zst             <- the file you'll write to the stick
-  bty-usb-x86_64-iso-zst.sha256
+  bty-usb-x86_64.iso.xz             <- the file you'll write to the stick
+  bty-usb-x86_64-iso-xz.sha256
 ```
 
 ## Step 2: Write the image to a USB stick
@@ -85,10 +85,16 @@ Find the USB stick. It'll typically show as `sda` or `sdb` and have
 the size of your stick. **Do not** confuse it with your laptop's
 internal disk.
 
-Decompress + write in one pipeline:
+Two ways to write it:
+
+**GUI flashers** (Balena Etcher, Raspberry Pi Imager, Rufus in DD
+mode): open `bty-usb-x86_64.iso.xz` directly. They decompress
+`.xz` natively, no extra step.
+
+**Command line:**
 
 ```bash
-zstd -d --stdout ~/system_imaging/disk/bty-usb-x86_64.iso.zst | \
+xz -d --stdout ~/system_imaging/disk/bty-usb-x86_64.iso.xz | \
   sudo dd of=/dev/sdX bs=4M status=progress conv=fsync
 sync
 ```
