@@ -70,18 +70,56 @@ done
 # ``timeout_style=hidden`` skips menu render entirely so there's
 # nothing for the operator to see, not even a flash. The
 # default entry (the live-system one) is what gets booted.
+#
+# Live-build's grub-efi pipeline emits multiple grub configs and
+# the version drifts release-to-release: the primary used to be
+# ``binary/boot/grub/grub.cfg``, but recent live-build also ships
+# ``binary/boot/grub/loopback.cfg`` (used when grub chain-loads
+# the iso from a Ventoy-style stick) and may stage a stub at
+# ``binary/EFI/boot/grub.cfg``. Earlier hook versions only edited
+# the primary, so on hardware where firmware loaded a different
+# config (or the primary's pattern didn't match) the menu still
+# rendered. Iterate over every ``grub.cfg`` / ``loopback.cfg``
+# under ``binary/`` and apply the same edits to all.
 
-GRUB_CFG=binary/boot/grub/grub.cfg
-if [ -f "$GRUB_CFG" ]; then
-    sed -i 's/^set timeout=.*/set timeout=0/' "$GRUB_CFG"
-    if grep -q '^set timeout_style=' "$GRUB_CFG"; then
-        sed -i 's/^set timeout_style=.*/set timeout_style=hidden/' "$GRUB_CFG"
-    else
-        # Insert ``set timeout_style=hidden`` right after the
-        # ``set timeout=`` line so both directives sit together
-        # at the top of the config.
-        sed -i '/^set timeout=0/a set timeout_style=hidden' "$GRUB_CFG"
+GRUB_CFGS=$(find binary -type f \( -name 'grub.cfg' -o -name 'loopback.cfg' \) 2>/dev/null || true)
+
+if [ -z "$GRUB_CFGS" ]; then
+    echo "0500-bty-skip-bootloader-menu: no grub.cfg / loopback.cfg under binary/ (BIOS-only build?)" >&2
+fi
+
+for GRUB_CFG in $GRUB_CFGS; do
+    echo "0500-bty-skip-bootloader-menu: editing $GRUB_CFG" >&2
+
+    # Force timeout=0. Patterns we've seen across live-build versions:
+    #   set timeout=30
+    #   set timeout='30'
+    #   timeout=30
+    # Run all three sed forms; whichever matches takes effect, the
+    # others are no-ops. Use a permissive regex on the right-hand
+    # side so any value (quoted or not) gets replaced.
+    sed -i \
+        -e "s/^[[:space:]]*set[[:space:]]\+timeout[[:space:]]*=.*/set timeout=0/" \
+        -e "s/^[[:space:]]*timeout[[:space:]]*=.*/timeout=0/" \
+        "$GRUB_CFG"
+
+    # Force timeout_style=hidden. Same pattern variants.
+    sed -i \
+        -e "s/^[[:space:]]*set[[:space:]]\+timeout_style[[:space:]]*=.*/set timeout_style=hidden/" \
+        -e "s/^[[:space:]]*timeout_style[[:space:]]*=.*/timeout_style=hidden/" \
+        "$GRUB_CFG"
+
+    # Belt + braces: if neither timeout nor timeout_style appears
+    # in the config (some loopback.cfg variants omit them and
+    # inherit defaults from grub itself), prepend both at the top.
+    if ! grep -q '^set timeout=0' "$GRUB_CFG" && ! grep -q '^timeout=0' "$GRUB_CFG"; then
+        sed -i '1i set timeout=0' "$GRUB_CFG"
     fi
+    if ! grep -q '^set timeout_style=hidden' "$GRUB_CFG" \
+       && ! grep -q '^timeout_style=hidden' "$GRUB_CFG"; then
+        sed -i '1i set timeout_style=hidden' "$GRUB_CFG"
+    fi
+
     # Re-brand any menu entry title; grub.cfg lines look like
     # ``menuentry "Debian GNU/Linux Live (kernel ...)" ...``.
     sed -i \
@@ -89,4 +127,12 @@ if [ -f "$GRUB_CFG" ]; then
         -e 's/Debian GNU\/Linux/bty __BTY_VERSION__/g' \
         -e 's/Debian Live/bty __BTY_VERSION__/g' \
         "$GRUB_CFG"
-fi
+done
+
+# Diagnostic dump: print the first 30 lines of every grub config
+# so the build log shows exactly what landed in the cooked ISO.
+# Cheap and invaluable when a regex pattern miss strikes again.
+for GRUB_CFG in $GRUB_CFGS; do
+    echo "==== $GRUB_CFG (first 30 lines) ====" >&2
+    head -n 30 "$GRUB_CFG" >&2 || true
+done
