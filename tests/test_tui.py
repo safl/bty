@@ -247,6 +247,41 @@ def test_main_accepts_server_and_mac_flags(monkeypatch: pytest.MonkeyPatch) -> N
     assert captured["ran"] is True
 
 
+def test_main_accepts_image_root_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``bty-tui --image-root /path`` reaches ``BtyTui(image_root=Path(...))``.
+
+    The flag overrides ``BTY_IMAGE_ROOT`` env var and the live env
+    default; useful for local development where the operator is
+    running from a checkout, not the bty live env.
+    """
+    captured: dict[str, object] = {}
+
+    class _FakeBtyTui:
+        def __init__(
+            self,
+            image_root: object = None,
+            *,
+            server_url: object = None,
+            mac: object = None,
+        ) -> None:
+            captured["image_root"] = image_root
+            captured["server_url"] = server_url
+            captured["mac"] = mac
+
+        def run(self) -> None:
+            captured["ran"] = True
+
+    monkeypatch.setattr(tui_app, "BtyTui", _FakeBtyTui)
+    import bty.tui as tui_mod
+
+    tui_mod.main(["--image-root", "/tmp/bty-images"])
+
+    assert captured["image_root"] == Path("/tmp/bty-images")
+    assert captured["server_url"] is None
+    assert captured["mac"] is None
+    assert captured["ran"] is True
+
+
 # ---------- end-to-end: BtyTui driven via textual's Pilot ------------------
 #
 # These run the actual textual ``App`` headless in pytest. The Pilot

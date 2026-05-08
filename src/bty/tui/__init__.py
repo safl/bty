@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 
 import bty
 
@@ -52,6 +53,15 @@ def main(argv: list[str] | None = None) -> None:
         "after a successful flash so the server's ``last_flashed_at`` "
         "is updated.",
     )
+    parser.add_argument(
+        "--image-root",
+        type=Path,
+        default=None,
+        help="Local directory to scan for images (overrides the "
+        "``BTY_IMAGE_ROOT`` env var and the live env default of "
+        "``/var/lib/bty/images``). Ignored when ``--server`` is set "
+        "(the catalog comes from the server in remote mode).",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -65,4 +75,4 @@ def main(argv: list[str] | None = None) -> None:
         )
         sys.exit(1)
 
-    BtyTui(server_url=args.server, mac=args.mac).run()
+    BtyTui(image_root=args.image_root, server_url=args.server, mac=args.mac).run()
