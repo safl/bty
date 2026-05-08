@@ -30,8 +30,9 @@ doc: |
      reconfigures it for ``--binary-images iso-hybrid`` with both
      ``syslinux`` (BIOS) and ``grub-efi`` (UEFI) bootloaders,
      runs ``lb clean --all && lb build``, and publishes
-     ``bty-usb-x86_64.iso`` plus a sha256 manifest under
-     ``publish.dir``.
+     ``bty-usb-x86_64.iso.zst`` plus a sha256 manifest under
+     ``publish.dir`` (the raw .iso is dropped after compression -
+     it exceeds GitHub's 2 GiB per-release-asset upload limit).
 
   Requires: live-build on the build host (``apt install live-build``)
   plus passwordless sudo (live-build's chroot operations are

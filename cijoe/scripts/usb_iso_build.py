@@ -49,15 +49,24 @@ from argparse import ArgumentParser
 from pathlib import Path
 
 PUBLISH_BASENAME = "bty-usb-x86_64.iso"
+PUBLISH_ZST_BASENAME = "bty-usb-x86_64.iso.zst"
 
 # Pre-allocate this much trailing space inside the cooked ISO for an
 # exFAT partition labelled BTY_IMAGES. The legacy ``usb-x86``
 # cloud-init bake carved a ``BTY_IMAGES`` exFAT at the same path; this
-# is the live-build equivalent. Operators dd the ISO to a stick, drop
-# ``*.img.zst`` files into the writable exFAT partition from any host
-# OS, then boot. ``bty-grow-images-partition.service`` (M19 phase 4)
-# extends this partition to fill the rest of the stick on first boot.
+# is the live-build equivalent. Operators ``zstd -d`` the artifact and
+# ``dd`` to a stick (or pipe in one step), drop ``*.img.zst`` files
+# into the writable exFAT partition from any host OS, then boot.
+# ``bty-grow-images-partition.service`` (M19 phase 4) extends this
+# partition to fill the rest of the stick on first boot.
 TRAILING_EXFAT_GIB = 4
+
+# zstd compression level for the published .iso.zst. The trailing
+# exFAT is sparse zeros so the compression ratio is huge (4.4 GiB
+# raw -> few hundred MiB compressed). 19 is the maximum standard
+# level; matches what ``img_zst_publish`` uses for the .img.zst
+# variants.
+ZSTD_LEVEL = 19
 
 
 def add_args(parser: ArgumentParser):
@@ -189,16 +198,35 @@ def main(args, cijoe):
     if err:
         return err
 
-    sha256_path = publish_dir / "bty-usb-x86_64-iso.sha256"
+    # Compress to .iso.zst. The raw 4.4 GiB ISO exceeds GitHub's 2 GiB
+    # per-release-asset upload limit, and most of the trailing exFAT
+    # is zero-fill so compression brings it to a few hundred MiB. The
+    # operator UX matches the existing .img.zst variants:
+    #   zstd -d --stdout bty-usb-x86_64.iso.zst | sudo dd of=/dev/sdX bs=4M
+    zst_dst = publish_dir / PUBLISH_ZST_BASENAME
+    log.info(f"Compressing {dst} -> {zst_dst} (zstd -{ZSTD_LEVEL} -T0)")
+    err, _ = cijoe.run_local(f"zstd -{ZSTD_LEVEL} -T0 -f {dst} -o {zst_dst}")
+    if err:
+        log.error(f"zstd -{ZSTD_LEVEL} {dst} -> {zst_dst} failed")
+        return err
+    # Drop the uncompressed file - it's too big to ship and we have
+    # the .zst now. Local devs who want the .iso for inspection can
+    # ``zstd -d`` it back.
+    err, _ = cijoe.run_local(f"rm -f {dst}")
+    if err:
+        log.error(f"failed to remove uncompressed {dst}")
+        return err
+
+    sha256_path = publish_dir / "bty-usb-x86_64-iso-zst.sha256"
     err, _ = cijoe.run_local(
-        f"sh -c 'cd {publish_dir} && sha256sum {PUBLISH_BASENAME} > {sha256_path}'"
+        f"sh -c 'cd {publish_dir} && sha256sum {PUBLISH_ZST_BASENAME} > {sha256_path}'"
     )
     if err:
         log.error("failed computing sha256 manifest")
         return err
 
     cijoe.run_local(f"cat {sha256_path}")
-    cijoe.run_local(f"ls -la {dst}")
+    cijoe.run_local(f"ls -la {zst_dst}")
 
     return 0
 

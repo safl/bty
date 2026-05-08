@@ -254,10 +254,10 @@ jobs:
         if: matrix.variant == 'usb-iso'
         uses: actions/upload-artifact@v7
         with:
-          name: bty-usb-x86_64-iso
+          name: bty-usb-x86_64-iso-zst
           path: |
-            ~/system_imaging/disk/bty-usb-x86_64.iso
-            ~/system_imaging/disk/bty-usb-x86_64-iso.sha256
+            ~/system_imaging/disk/bty-usb-x86_64.iso.zst
+            ~/system_imaging/disk/bty-usb-x86_64-iso-zst.sha256
 
   # ---------------- verify ------------------------------------------------
   test-pxe:
@@ -384,7 +384,7 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           path: gathered/
-          pattern: '{dist,bty-*-img-zst,bty-live-x86_64-netboot,bty-usb-x86_64-iso,docs-pdf}'
+          pattern: '{dist,bty-*-img-zst,bty-live-x86_64-netboot,bty-usb-x86_64-iso-zst,docs-pdf}'
       - name: List gathered artifacts
         run: find gathered -type f | sort
       - name: Attach to release
@@ -397,7 +397,7 @@ jobs:
           files: |
             gathered/dist/*
             gathered/bty-usb-x86_64-img-zst/*
-            gathered/bty-usb-x86_64-iso/*
+            gathered/bty-usb-x86_64-iso-zst/*
             gathered/bty-server-x86_64-img-zst/*
             gathered/bty-server-rpi-arm64-img-zst/*
             gathered/bty-live-x86_64-netboot/*
