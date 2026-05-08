@@ -1,10 +1,12 @@
 """Image catalog discovery and inspection.
 
 Recognises the supported on-disk image formats (``.qcow2``, ``.img``,
-``.img.zst``, ``.img.xz``), lists them under a configured image
-root, and extracts detail metadata for individual images via the
-appropriate tool (``qemu-img info`` for qcow2, ``zstd -l`` for
-zstd-compressed raws, ``xz -l`` for xz-compressed raws).
+``.img.zst``, ``.img.xz``, ``.img.gz``, ``.img.bz2``), lists them
+under a configured image root, and extracts detail metadata for
+individual images via the appropriate tool (``qemu-img info`` for
+qcow2, ``zstd -l`` / ``xz -l`` / ``gzip -l`` for the corresponding
+compressed raws; bzip2 has no listing tool so .img.bz2 has no
+detail block).
 
 Format-choice rationale (load-bearing for the CI-pipeline use case
 that drove bty's design):

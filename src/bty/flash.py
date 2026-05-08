@@ -1387,13 +1387,6 @@ def _parse_compressed_listing(listing: str, *, header_prefix: str) -> int | None
     return None
 
 
-# Back-compat alias for the original zstd-only name; tests / external
-# code may still import this. New code uses the generic
-# ``_parse_compressed_listing`` form.
-def _parse_zstd_uncompressed(zstd_output: str) -> int | None:
-    return _parse_compressed_listing(zstd_output, header_prefix="Frames")
-
-
 def _parse_gzip_listing(gzip_output: str) -> int | None:
     """Best-effort uncompressed-size extraction from ``gzip -l`` output.
 

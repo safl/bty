@@ -263,8 +263,12 @@ sudo bty flash --image IMG --target /dev/sda --provision cloud-init ...
 ```
 
 `bty flash --image` also accepts an HTTP/HTTPS URL, in which case
-the bytes stream from the URL through `zstd -d | dd` straight to
-the target disk - no temp file for `.img.zst` / `.img`.
+the bytes stream from the URL through the appropriate
+decompressor (`zstd -d` / `xz -d` / `gzip -d` / `bzip2 -d`)
+piped to `dd` straight to the target disk - no temp file for
+streamable formats (`.img`, `.img.zst`, `.img.xz`, `.img.gz`,
+`.img.bz2`). Only `.qcow2` URLs are downloaded to a temp file
+first because qcow2 needs random-access reads during conversion.
 
 ### Interactive PXE flash (`boot_policy=tui`)
 

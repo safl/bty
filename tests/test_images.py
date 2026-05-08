@@ -20,12 +20,23 @@ def test_detect_format() -> None:
     assert images.detect_format(Path("foo.qcow2")) == "qcow2"
     assert images.detect_format(Path("foo.img")) == "img"
     assert images.detect_format(Path("foo.img.zst")) == "img.zst"
+    assert images.detect_format(Path("foo.img.xz")) == "img.xz"
+    assert images.detect_format(Path("foo.img.gz")) == "img.gz"
+    assert images.detect_format(Path("foo.img.bz2")) == "img.bz2"
     assert images.detect_format(Path("foo.iso")) is None
     assert images.detect_format(Path("Foo.QCOW2")) == "qcow2"
 
 
-def test_detect_format_prefers_img_zst_over_img() -> None:
+def test_detect_format_prefers_multi_suffix_over_bare_img() -> None:
+    """When the filename ends in ``.img.<algo>``, the multi-suffix
+    entry wins over the bare ``.img`` entry. Important for the
+    flash-code dispatcher: detecting "img" on a "debian.img.gz"
+    would route through the raw-img writer and dd compressed bytes
+    onto the target."""
     assert images.detect_format(Path("debian.img.zst")) == "img.zst"
+    assert images.detect_format(Path("debian.img.xz")) == "img.xz"
+    assert images.detect_format(Path("debian.img.gz")) == "img.gz"
+    assert images.detect_format(Path("debian.img.bz2")) == "img.bz2"
 
 
 def test_list_images_walks_root(tmp_path: Path) -> None:
