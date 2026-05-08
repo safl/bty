@@ -1,8 +1,10 @@
 """bty.tui - textual terminal UI for image inspection and flashing.
 
-Targeted at interactive use from a live environment (serial console, SSH
-session, minimal recovery image). Exposes the same operations as the
-``bty`` CLI in a navigable, two-pane form.
+Targeted at interactive use from a live environment (serial console,
+SSH session, minimal recovery image). Exposes the same operations as
+the ``bty`` CLI in a navigable, three-pane form (images | disks |
+details), styled with the Tokyo Night theme to match the bty mascot's
+navy + warm-yellow palette.
 
 Two image-source modes:
 
@@ -15,6 +17,23 @@ Two image-source modes:
   unknown MAC PXE-boots, lands at the live env in interactive mode,
   and the operator picks an image from the server's catalog without
   prior server-side configuration.
+
+Keymap (single-key direct bindings; no modifier-key prefixes, no
+modal navigation -- bty has so few actions that the helix-style
+``space``-prefix is overkill):
+
+- ``q``   quit
+- ``r``   refresh catalogs
+- ``f``   flash the highlighted image to the highlighted disk
+- ``/``   filter the image catalog by substring (helix-style)
+- ``escape`` clear the active filter
+
+Empty catalogs render an onboarding panel with actionable next
+steps (drop ``*.img.zst`` onto BTY_IMAGES, or PUT to the server's
+``/images`` endpoint) instead of a blank table. The flash modal is
+a stop-the-world floating overlay that disables Close until the
+flash completes or fails -- the operator can't accidentally bail
+mid-write.
 
 Requires the ``[tui]`` install extra (pulls in textual).
 """
@@ -39,6 +58,7 @@ from textual.widgets import (
     DataTable,
     Footer,
     Header,
+    Input,
     RichLog,
     Static,
 )
@@ -190,11 +210,29 @@ class FlashConfirmScreen(ModalScreen[bool]):
 
 
 class FlashStatusScreen(ModalScreen[bool]):
-    """Modal that runs the flash in a worker and reports the result.
+    """Floating modal that runs the flash in a worker and reports progress.
 
-    Returns ``True`` on success, ``False`` on failure. Operator can close
-    with the Close button once the run completes.
+    Designed to feel like helix/zellij modals: bold stop-the-world
+    "DO NOT REMOVE STICK" framing, a visual stage track that ticks
+    as ``flash.execute_plan`` emits each lifecycle event, and a
+    streaming event log below. The Close button is disabled until
+    the flash either completes or fails -- the operator can't bail
+    out mid-flash.
+
+    Returns ``True`` on success, ``False`` on failure.
     """
+
+    # Stable order of FlashProgress.event values that this modal
+    # treats as "stages" with a visible row in the tracker. Anything
+    # else (``provisioning``, intermediate notes) lands in the log
+    # but doesn't tick a stage.
+    _STAGES: ClassVar[tuple[tuple[str, str], ...]] = (
+        ("started", "Validating plan"),
+        ("writing", "Writing image to disk"),
+        ("synced", "Flushing kernel buffers"),
+        ("partprobed", "Re-reading partition table"),
+        ("done", "Done"),
+    )
 
     DEFAULT_CSS = """
     FlashStatusScreen {
@@ -202,15 +240,66 @@ class FlashStatusScreen(ModalScreen[bool]):
     }
 
     FlashStatusScreen > Vertical {
-        width: 80;
-        height: 22;
+        width: 90;
+        height: 30;
         padding: 1 2;
         background: $surface;
-        border: thick $primary;
+        border: thick $warning;
+    }
+
+    .flash-warning {
+        height: 3;
+        content-align: center middle;
+        background: $warning 30%;
+        color: $warning;
+        text-style: bold;
+        margin-bottom: 1;
+    }
+
+    .flash-target {
+        height: 1;
+        content-align: center middle;
+        color: $text-muted;
+        margin-bottom: 1;
+    }
+
+    .flash-stages {
+        height: auto;
+        margin-bottom: 1;
+    }
+
+    .flash-stage {
+        height: 1;
+        padding-left: 1;
+    }
+
+    .flash-stage.done {
+        color: $success;
+    }
+
+    .flash-stage.active {
+        color: $accent;
+        text-style: bold;
+    }
+
+    .flash-stage.pending {
+        color: $text-muted;
+    }
+
+    .flash-stage.failed {
+        color: $error;
+        text-style: bold;
     }
 
     RichLog {
         height: 1fr;
+        border: tall $primary 50%;
+    }
+
+    #flash-actions {
+        height: 3;
+        align: right middle;
+        margin-top: 1;
     }
     """
 
@@ -218,16 +307,32 @@ class FlashStatusScreen(ModalScreen[bool]):
         super().__init__()
         self._plan = plan
         self._result: bool | None = None
+        self._completed_stages: set[str] = set()
 
     def compose(self) -> ComposeResult:
         with Vertical():
-            yield Static(f"Flashing {self._plan.image.display} -> {self._plan.target.path}")
+            yield Static(
+                "FLASHING — DO NOT REMOVE STICK OR DISCONNECT",
+                classes="flash-warning",
+            )
+            yield Static(
+                f"{self._plan.image.display} → {self._plan.target.path}",
+                classes="flash-target",
+            )
+            with Vertical(classes="flash-stages"):
+                for event_name, label in self._STAGES:
+                    yield Static(
+                        f"[ ] {label}",
+                        id=f"stage-{event_name}",
+                        classes="flash-stage pending",
+                    )
             yield RichLog(highlight=False, markup=True, id="flash_log")
-            yield Button("Close", id="close", variant="default", disabled=True)
+            with Horizontal(id="flash-actions"):
+                yield Button("Close", id="close", variant="default", disabled=True)
 
     def on_mount(self) -> None:
         log = self.query_one(RichLog)
-        log.write("Starting flash...")
+        log.write("[dim]Starting flash...[/]")
         self._run_flash()
 
     @work(thread=True, exclusive=True)
@@ -239,15 +344,60 @@ class FlashStatusScreen(ModalScreen[bool]):
             if event.total_bytes is not None:
                 line += f" total_bytes={event.total_bytes}"
             self.app.call_from_thread(self._append_log, line)
+            self.app.call_from_thread(self._mark_stage_active, event.event)
 
         try:
             flash.execute_plan(self._plan, progress=on_progress)
+            self.app.call_from_thread(self._mark_stage_active, "done")
             self.app.call_from_thread(self._finish, True, "[green]✓ Flash completed.[/]")
         except flash.FlashError as exc:
+            self.app.call_from_thread(self._mark_stage_failed)
             self.app.call_from_thread(self._finish, False, f"[red]✗ Flash failed: {exc}[/]")
 
     def _append_log(self, line: str) -> None:
         self.query_one(RichLog).write(line)
+
+    def _mark_stage_active(self, event_name: str) -> None:
+        """Tick the stage tracker: previous active becomes done, this one becomes active.
+
+        ``event_name`` may be a stage we don't render (e.g. ``provisioning``);
+        in that case the tracker doesn't change.
+        """
+        stage_ids = {name for name, _ in self._STAGES}
+        if event_name not in stage_ids:
+            return
+        # Mark all prior stages as done; this one as active.
+        seen_current = False
+        for name, label in self._STAGES:
+            if name == event_name:
+                seen_current = True
+                self._set_stage_class(name, "active", marker="*", label=label)
+                self._completed_stages.add(name)
+            elif not seen_current:
+                # Earlier stage; mark done if not already.
+                self._set_stage_class(name, "done", marker="✓", label=label)
+                self._completed_stages.add(name)
+            else:
+                self._set_stage_class(name, "pending", marker=" ", label=label)
+
+    def _mark_stage_failed(self) -> None:
+        """Mark the currently-active stage as failed; leave earlier as done."""
+        for name, label in self._STAGES:
+            try:
+                widget = self.query_one(f"#stage-{name}", Static)
+            except Exception:  # pragma: no cover - defensive
+                continue
+            if "active" in widget.classes:
+                self._set_stage_class(name, "failed", marker="✗", label=label)
+                return
+
+    def _set_stage_class(self, name: str, state: str, *, marker: str, label: str) -> None:
+        try:
+            widget = self.query_one(f"#stage-{name}", Static)
+        except Exception:  # pragma: no cover - defensive
+            return
+        widget.update(f"[{marker}] {label}")
+        widget.set_classes(f"flash-stage {state}")
 
     def _finish(self, success: bool, message: str) -> None:
         log = self.query_one(RichLog)
@@ -263,7 +413,17 @@ class FlashStatusScreen(ModalScreen[bool]):
 
 
 class BtyTui(App[None]):
-    """The bty terminal UI."""
+    """The bty terminal UI.
+
+    Layout: three columns -- images (left), disks (middle), details
+    (right; updates with whatever's currently focused). Filter the
+    images list with ``/`` (helix-style; press ``escape`` to clear).
+    Empty catalogs render an onboarding panel instead of a blank
+    table.
+
+    No modifier keys, no modal navigation -- bty has so few actions
+    that direct single-key bindings cover the surface.
+    """
 
     TITLE = "bty"
 
@@ -271,6 +431,8 @@ class BtyTui(App[None]):
         Binding("q", "quit", "Quit"),
         Binding("r", "refresh", "Refresh"),
         Binding("f", "flash", "Flash"),
+        Binding("slash", "focus_filter", "Filter"),
+        Binding("escape", "clear_filter", "Clear filter", show=False),
     ]
 
     DEFAULT_CSS = """
@@ -284,9 +446,16 @@ class BtyTui(App[None]):
     }
 
     .pane {
-        width: 1fr;
         layout: vertical;
         border: tall $primary;
+    }
+
+    #images-pane, #disks-pane {
+        width: 2fr;
+    }
+
+    #details-pane {
+        width: 3fr;
     }
 
     .pane-title {
@@ -300,9 +469,33 @@ class BtyTui(App[None]):
         height: 1fr;
     }
 
-    #status {
+    #filter-input {
         height: 3;
+        margin: 0;
+        border: none;
+        background: $surface;
+        display: none;
+    }
+
+    #filter-input.active {
+        display: block;
+    }
+
+    #welcome {
+        height: auto;
+        padding: 1 2;
+        color: $text-muted;
+    }
+
+    #details-body {
+        height: 1fr;
+        padding: 1 2;
+    }
+
+    #status {
+        height: 1;
         padding: 0 1;
+        color: $text-muted;
     }
     """
 
@@ -320,6 +513,9 @@ class BtyTui(App[None]):
         # Unified shape so the row-selected-> flash path doesn't branch.
         self._images_by_key: dict[str, _TuiImage] = {}
         self._disks_by_key: dict[str, dict[str, object]] = {}
+        # Filter state: when set, _populate_images includes only rows
+        # whose name contains this substring (case-insensitive).
+        self._filter: str = ""
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
@@ -329,24 +525,43 @@ class BtyTui(App[None]):
             else f"Images @ {self._image_root}"
         )
         with Horizontal(id="panes"):
-            with Vertical(classes="pane"):
+            with Vertical(classes="pane", id="images-pane"):
                 yield Static(source_label, classes="pane-title")
+                yield Input(
+                    placeholder="filter (substring match on name)",
+                    id="filter-input",
+                )
                 yield DataTable(id="images_table", cursor_type="row")
-            with Vertical(classes="pane"):
+                yield Static("", id="welcome")
+            with Vertical(classes="pane", id="disks-pane"):
                 yield Static("Disks", classes="pane-title")
                 yield DataTable(id="disks_table", cursor_type="row")
+            with Vertical(classes="pane", id="details-pane"):
+                yield Static("Details", classes="pane-title")
+                yield Static("(select an image or disk)", id="details-body")
         yield Static(self._initial_status(), id="status")
         yield Footer()
 
     def on_mount(self) -> None:
+        # Tokyo Night picks up the navy + warm-yellow palette of the
+        # bty mascot (saturated cool background, yellow accents).
+        self.theme = "tokyo-night"
         self.sub_title = bty.__version__
         self._populate_images()
         self._populate_disks()
+        # Focus the images table so global key bindings (q/r/f/...)
+        # fire instead of being eaten by the filter Input. The Input
+        # only takes focus when the operator explicitly presses ``/``.
+        try:
+            self.query_one("#images_table", DataTable).focus()
+        except Exception:  # pragma: no cover - defensive
+            pass
 
     # ---------- data refresh ------------------------------------------------
 
     def _populate_images(self) -> None:
         table = self.query_one("#images_table", DataTable)
+        welcome = self.query_one("#welcome", Static)
         table.clear(columns=True)
         table.add_columns("Name", "Format", "Size (B)")
         self._images_by_key.clear()
@@ -355,16 +570,37 @@ class BtyTui(App[None]):
             entries = self._load_images()
         except OSError as exc:
             self._set_status(f"Error reading images: {exc}")
+            welcome.update("")
             return
         except (urllib.error.URLError, ValueError) as exc:
             self._set_status(f"Error fetching catalog: {exc}")
+            welcome.update("")
             return
 
         if not entries:
+            # Empty catalog: keep the (empty) data table visible but
+            # populate the welcome panel below it with actionable
+            # next steps. Status line keeps the legacy short form so
+            # tests / scripts have a stable hook.
+            welcome.update(self._welcome_text())
             source = self._server_url or str(self._image_root)
             self._set_status(f"No images at {source}; press R to refresh.")
             return
-        for tui_img in entries:
+
+        # Apply filter if set.
+        filtered = entries
+        if self._filter:
+            needle = self._filter.lower()
+            filtered = [e for e in entries if needle in e.name.lower()]
+
+        if not filtered:
+            welcome.update("")
+            self._set_status(f"No images match {self._filter!r}; press Escape to clear the filter.")
+            return
+
+        # Non-empty: clear the onboarding panel and let the table fill the space.
+        welcome.update("")
+        for tui_img in filtered:
             # Remote rows use the URL as their key (also passed verbatim to
             # ``flash.probe_image_url`` later); local rows use the path string.
             key = tui_img.url if tui_img.url is not None else str(tui_img.path)
@@ -375,6 +611,35 @@ class BtyTui(App[None]):
                 str(tui_img.size_bytes),
                 key=key,
             )
+
+    def _welcome_text(self) -> str:
+        """Compose onboarding text shown when the catalog is empty.
+
+        Differs by source so the operator gets actionable next steps:
+        local catalog -> "drop images onto BTY_IMAGES from a host OS";
+        remote catalog -> "the server has no images; upload via the
+        web UI or PUT /images".
+        """
+        if self._server_url is not None:
+            return (
+                "[b]No images on the server yet.[/]\n\n"
+                f"Catalog endpoint: [accent]{self._server_url}/images[/]\n\n"
+                "Upload via the bty-web Images page in your browser, or PUT\n"
+                "an image directly:\n"
+                "  [dim]curl -X PUT --upload-file my.qcow2 \\\n"
+                "       http://server:8080/images/my.qcow2[/]\n\n"
+                "Then press [b]r[/] in this TUI to refresh."
+            )
+        return (
+            "[b]No images in the catalog yet.[/]\n\n"
+            f"Local catalog: [accent]{self._image_root}[/]\n\n"
+            "On the bty USB stick, this directory is the BTY_IMAGES exFAT\n"
+            "partition. Drop your cooked images onto it from any host OS\n"
+            "(Linux / macOS / Windows all read exFAT):\n\n"
+            "  [dim]cp my-image.img.zst /path/to/BTY_IMAGES/[/]\n"
+            "  [dim]cp my-image.qcow2  /path/to/BTY_IMAGES/[/]\n\n"
+            "Then press [b]r[/] in this TUI to refresh."
+        )
 
     def _load_images(self) -> list[_TuiImage]:
         """Load the catalog from either a remote bty-web or the local
@@ -414,6 +679,108 @@ class BtyTui(App[None]):
         self._populate_images()
         self._populate_disks()
         self._set_status("Refreshed.")
+
+    def action_focus_filter(self) -> None:
+        """Show + focus the filter input. ``/`` triggers this, helix-style."""
+        try:
+            filter_input = self.query_one("#filter-input", Input)
+        except Exception:  # pragma: no cover - defensive during teardown
+            return
+        filter_input.add_class("active")
+        filter_input.focus()
+
+    def action_clear_filter(self) -> None:
+        """Clear the active filter and re-populate the catalog."""
+        if not self._filter:
+            return
+        try:
+            filter_input = self.query_one("#filter-input", Input)
+        except Exception:
+            return
+        filter_input.value = ""
+        filter_input.remove_class("active")
+        self._filter = ""
+        self._populate_images()
+        self._set_status("Filter cleared.")
+        # Return focus to the catalog so navigation keys work again.
+        try:
+            self.query_one("#images_table", DataTable).focus()
+        except Exception:
+            pass
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        if event.input.id != "filter-input":
+            return
+        self._filter = event.value.strip()
+        self._populate_images()
+        # Move focus back to the table so navigation keys work.
+        try:
+            self.query_one("#images_table", DataTable).focus()
+        except Exception:
+            pass
+
+    def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
+        """Update the details pane when the operator moves the cursor."""
+        table_id = event.data_table.id
+        if event.row_key is None or event.row_key.value is None:
+            return
+        key = event.row_key.value
+        if table_id == "images_table":
+            tui_img = self._images_by_key.get(key)
+            if tui_img is not None:
+                self._show_image_details(tui_img)
+        elif table_id == "disks_table":
+            disk = self._disks_by_key.get(key)
+            if disk is not None:
+                self._show_disk_details(disk)
+
+    def _show_image_details(self, tui_img: _TuiImage) -> None:
+        try:
+            body = self.query_one("#details-body", Static)
+        except Exception:
+            return
+        lines = [
+            "[b]Image[/]",
+            f"  Name:    {tui_img.name}",
+            f"  Format:  {tui_img.fmt or '?'}",
+            f"  Size:    {tui_img.size_bytes:,} bytes ({tui_img.size_bytes / (1 << 30):.2f} GiB)",
+        ]
+        if tui_img.url is not None:
+            lines.append(f"  Source:  remote ({tui_img.url})")
+        else:
+            lines.append(f"  Source:  local ({tui_img.path})")
+        body.update("\n".join(lines))
+
+    def _show_disk_details(self, disk: dict[str, object]) -> None:
+        try:
+            body = self.query_one("#details-body", Static)
+        except Exception:
+            return
+
+        def _str(key: str) -> str:
+            v = disk.get(key)
+            return v.strip() if isinstance(v, str) else ""
+
+        path = _str("path") or "?"
+        size = _str("size") or "?"
+        model = _str("model")
+        vendor = _str("vendor")
+        tran = _str("tran")
+        serial = _str("serial")
+        readonly = disk.get("readonly", False)
+        removable = disk.get("removable", False)
+        lines = [
+            "[b]Disk[/]",
+            f"  Path:      {path}",
+            f"  Size:      {size}",
+            f"  Vendor:    {vendor or '-'}",
+            f"  Model:     {model or '-'}",
+            f"  Transport: {tran or '-'}",
+            f"  Serial:    {serial or '-'}",
+            f"  Removable: {removable}",
+            f"  Read-only: {readonly}",
+        ]
+        body.update("\n".join(lines))
 
     async def action_flash(self) -> None:
         if os.geteuid() != 0:
