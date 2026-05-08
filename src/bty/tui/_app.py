@@ -1454,6 +1454,12 @@ class BtyTui(App[None]):
         # ``exclusive=True`` cancels any prior in-flight flash worker
         # if the operator triggers the action again, matching the
         # single-flash-at-a-time semantics of the existing modal.
+        #
+        # Status pulses at each stage so the operator can see where
+        # execution gets to if something silently fails (e.g. probe
+        # hangs on a slow remote URL, validate_plan rejects with an
+        # error displayed in the modal but the modal didn't render).
+        self._set_status("Flash: triggered.")
         if os.geteuid() != 0:
             self._set_status("bty-tui must run as root to flash; relaunch with sudo.")
             return
@@ -1466,6 +1472,7 @@ class BtyTui(App[None]):
             image = self._selected_image
             disk_path_str = self._selected_disk.get("path", "")
             if not isinstance(disk_path_str, str) or not disk_path_str:
+                self._set_status("Flash: selected disk has no path; refresh and retry.")
                 return
             disk_path = Path(disk_path_str)
         else:
@@ -1474,6 +1481,7 @@ class BtyTui(App[None]):
                 return
             image, disk_path = selection
 
+        self._set_status(f"Flash: probing image {image.name}...")
         try:
             if image.url is not None:
                 image_info = flash.probe_image_url(image.url)
@@ -1484,10 +1492,12 @@ class BtyTui(App[None]):
             self._set_status(f"Image probe failed: {exc}")
             return
 
+        self._set_status(f"Flash: probing target {disk_path}...")
         target_info = flash.probe_target(disk_path)
         plan = flash.make_plan(image_info, target_info, "none")
         errors = flash.validate_plan(plan)
 
+        self._set_status("Flash: confirm to proceed.")
         confirmed = await self.push_screen_wait(FlashConfirmScreen(plan, errors))
         if not confirmed:
             self._set_status("Flash cancelled.")

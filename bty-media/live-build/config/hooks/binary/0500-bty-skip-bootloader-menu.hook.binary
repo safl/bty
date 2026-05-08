@@ -37,6 +37,28 @@
 
 set -eu
 
+# ---- nuke gfxboot's binary entirely ----------------------------------------
+#
+# Belt-and-suspenders: regardless of whether the sed below catches
+# the ``UI gfxboot.c32 ...`` directive, just delete the gfxboot
+# module + its bootlogo asset from the binary tree. Without
+# ``gfxboot.c32`` syslinux can't load it, so any ``UI`` directive
+# we miss falls through to text-mode rendering automatically. The
+# ``-f`` keeps the hook idempotent (no error if a future live-build
+# stops emitting one of these paths).
+
+for f in \
+    binary/isolinux/gfxboot.c32 \
+    binary/isolinux/bootlogo \
+    binary/syslinux/gfxboot.c32 \
+    binary/syslinux/bootlogo
+do
+    if [ -e "$f" ]; then
+        echo "0500-bty-skip-bootloader-menu: removing $f" >&2
+        rm -f "$f"
+    fi
+done
+
 # ---- syslinux / isolinux (legacy BIOS) -------------------------------------
 #
 # Two layers in play here that earlier hook versions handled
