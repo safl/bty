@@ -50,18 +50,6 @@ else
     BOOTAPPEND="boot=live components quiet splash noeject bty.version=__BTY_VERSION__"
 fi
 
-# ``--syslinux-timeout 1`` = 0.1s autoboot. live-build emits this
-# value into ``binary/isolinux/isolinux.cfg``'s ``TIMEOUT`` directive
-# directly during the binary stage, so it's the recommended /
-# documented way to suppress the gfxboot menu's 30s default. Earlier
-# attempts to sed the value out of the cfg post-generation kept
-# missing because live-build's output structure drifts; passing the
-# flag at config time is the canonical path.
-SYSLINUX_TIMEOUT_OPT=""
-if [ "${BTY_USB_ISO:-}" = "1" ]; then
-    SYSLINUX_TIMEOUT_OPT="--syslinux-timeout 1"
-fi
-
 # shellcheck disable=SC2086 # BOOTLOADERS_OPTS is intentionally word-split
 lb config noauto \
     --mode debian \
@@ -73,6 +61,10 @@ lb config noauto \
     --apt-recommends false \
     --security false \
     ${BOOTLOADERS_OPTS} \
-    ${SYSLINUX_TIMEOUT_OPT} \
     --bootappend-live "${BOOTAPPEND}" \
     "${@}"
+# Note: an earlier iteration tried ``--syslinux-timeout 1`` here per
+# advice from elsewhere; live-build trixie (20250814) doesn't
+# recognise that flag and ``lb config`` errors out. Bootloader-menu
+# suppression is handled in
+# ``hooks/binary/0500-bty-skip-bootloader-menu.hook.binary`` instead.

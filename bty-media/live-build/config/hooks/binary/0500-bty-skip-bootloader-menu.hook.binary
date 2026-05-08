@@ -40,24 +40,30 @@ set -eu
 # ---- nuke gfxboot's binary entirely ----------------------------------------
 #
 # Belt-and-suspenders: regardless of whether the sed below catches
-# the ``UI gfxboot.c32 ...`` directive, just delete the gfxboot
-# module + its bootlogo asset from the binary tree. Without
-# ``gfxboot.c32`` syslinux can't load it, so any ``UI`` directive
-# we miss falls through to text-mode rendering automatically. The
-# ``-f`` keeps the hook idempotent (no error if a future live-build
-# stops emitting one of these paths).
+# the ``UI gfxboot.c32 ...`` directive, search the whole binary
+# tree for the gfxboot module + its bootlogo asset and delete them.
+# Without ``gfxboot.c32`` syslinux can't load it, so any ``UI``
+# directive we miss falls through to text-mode rendering
+# automatically.
+#
+# The ``find`` form covers any subdirectory live-build's binary
+# stage might emit (path drifts release-to-release); earlier hook
+# versions enumerated specific paths and missed because the actual
+# location had moved. ``-print -delete`` lets us see what got
+# deleted in the build log.
 
-for f in \
-    binary/isolinux/gfxboot.c32 \
-    binary/isolinux/bootlogo \
-    binary/syslinux/gfxboot.c32 \
-    binary/syslinux/bootlogo
-do
-    if [ -e "$f" ]; then
-        echo "0500-bty-skip-bootloader-menu: removing $f" >&2
-        rm -f "$f"
-    fi
-done
+echo "0500-bty-skip-bootloader-menu: searching binary/ for gfxboot artefacts..." >&2
+find binary -type f \
+    \( -name 'gfxboot.c32' -o -name 'bootlogo' -o -name 'bootlogo.*' \) \
+    -print -delete 2>/dev/null || true
+
+# Diagnostic dump: list every file under binary/isolinux/ and
+# binary/syslinux/ so a future regex / path-pattern miss surfaces
+# in the build log instead of waiting for a hardware test to fail.
+echo "==== binary/isolinux/ contents ====" >&2
+ls -la binary/isolinux/ 2>&1 | head -40 >&2 || true
+echo "==== binary/syslinux/ contents (if any) ====" >&2
+ls -la binary/syslinux/ 2>&1 | head -40 >&2 || true
 
 # ---- syslinux / isolinux (legacy BIOS) -------------------------------------
 #
