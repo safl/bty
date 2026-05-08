@@ -44,14 +44,18 @@ filesystem-level). The fourth runs server-side; see the
 ## Disk layout (USB live)
 
 When the bty USB live image is `dd`-ed to a stick, the stick carries
-exactly two persistent partitions:
+three partitions in an MBR isohybrid layout:
 
-- **Debian root partition** (~3 GB). Holds the bty live env. Mounted
-  read-only at runtime via `overlayroot`; operator changes go to a
-  tmpfs overlay and disappear on reboot. The image on the stick is
-  never mutated by use.
-- **`BTY_IMAGES` partition** (~9 GB, exFAT, GPT label `BTY_IMAGES`).
+- **ISO9660 partition** (~400 MB). Holds the bty live env (kernel,
+  initrd, squashfs). Read-only by definition; live-boot uses a tmpfs
+  overlay, so operator changes vanish on reboot. The image on the
+  stick is never mutated by use.
+- **EFI ESP** (~3 MB). UEFI bootloader; relocated to a non-overlapping
+  region so Windows hosts enumerate the stick correctly.
+- **`BTY_IMAGES` partition** (4 GiB, exFAT, MBR label `BTY_IMAGES`).
   Holds cooked images the operator wants to flash onto target disks.
+  Sized for the dominant single-image `bty-server` flash use case;
+  grow with gparted on your host if you need more.
 
 bty auto-mounts `/dev/disk/by-label/BTY_IMAGES` at `/var/lib/bty/images`
 on boot. The `bty list images` and `bty inspect image` commands read

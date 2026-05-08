@@ -60,21 +60,32 @@ PUBLISH_XZ_BASENAME = "bty-usb-x86_64.iso.xz"
 # cooked artifact to a stick (Etcher / RPi Imager / Rufus DD-mode
 # read .iso.xz natively, no decompress step needed), drop
 # ``*.img.zst`` files into the writable exFAT partition from any
-# host OS, then boot. ``bty-grow-images-partition.service`` (M19
-# phase 4) extends this partition to fill the rest of the stick
-# on first boot.
+# host OS, then boot.
 #
-# Sized at 14 GiB so the cooked artifact fits on a 16 GB stick
-# (~14.9 GiB usable): 14 GiB BTY_IMAGES + ~400 MB ISO front-matter
-# = ~14.4 GiB total. exFAT overhead (~50 MiB) leaves ~13.95 GiB
-# usable inside BTY_IMAGES -- room for a 6 GiB server image (the
-# default DISK_SIZE in diskimage_build.py post-shrink) with ~8 GiB
-# slack for additional images. 32 GB+ sticks unaffected:
-# ``bty-grow-images-partition.service`` (M19 phase 4) still
-# expands BTY_IMAGES to fill on first boot. The compressed
-# .iso.xz is barely affected by this size (the trailing space is
-# sparse zeros that xz crushes to a few MB).
-TRAILING_EXFAT_GIB = 14
+# Sized at 4 GiB to keep the dd-to-stick step fast: the .iso file
+# is mostly the BTY_IMAGES region, so each pre-allocated GiB is a
+# GiB of bytes the operator's host has to actually write to the
+# stick (BalenaEtcher / dd / Rufus do not sparsify -- the xz
+# decompressor produces real zero bytes that get streamed to USB
+# at the stick's full write speed). 4 GiB writes in ~50-100 sec
+# on a typical USB-3 stick; the previous 14 GiB target took ~5
+# minutes per stick and operators flash sticks frequently.
+#
+# Why 4 GiB specifically: the dominant bty use case is flashing
+# the bty-server appliance from a freshly written stick. A
+# zstd-compressed bty-server image is ~1.0-1.5 GiB; 4 GiB leaves
+# room for the server image plus 1-2 additional images (e.g. a
+# workstation variant) with comfortable headroom. Operators who
+# need more can grow the partition on their host with gparted
+# after dd-ing the stick -- no need to rebuild the .iso. For the
+# bty-server flash use case this is rarely needed.
+#
+# bty-server first-boot grows its rootfs to fill the operator's
+# real disk via ``bty-grow-rootfs.service``. The bty-usb stick
+# is intentionally "what you dd is what you get": the operator
+# may drop image files onto BTY_IMAGES before ever booting the
+# stick, so we can't depend on a first-boot grow step.
+TRAILING_EXFAT_GIB = 4
 
 # Compress the cooked ISO with xz instead of zstd: Etcher / Rufus /
 # RPi Imager all decompress .xz natively but NOT .zstd, so .iso.xz

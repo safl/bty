@@ -53,10 +53,11 @@ sync
 ```
 
 The stick now has the bty live-boot ISO9660 + EFI partitions plus
-an empty exFAT partition labelled `BTY_IMAGES`. On first boot, a
-one-shot service grows `BTY_IMAGES` to fill the rest of the stick
-(only when empty - operator data is preserved on subsequent
-boots).
+an empty 4 GiB exFAT partition labelled `BTY_IMAGES` -- room for
+a typical `bty-server` image (~1-1.5 GiB compressed) plus
+headroom. If you need more space (multi-distro carry-all etc.),
+grow `BTY_IMAGES` on your host with gparted after writing the
+stick.
 
 ## Drop images onto the stick
 

@@ -21,7 +21,7 @@ USB build, ~20 minutes), and under 5 minutes for any subsequent flash.
 | You need | Notes |
 |---|---|
 | A **build host** with passwordless sudo | live-build runs a chroot, which needs root. Any Linux box works (no KVM required after M19; we no longer bake in QEMU). |
-| A **USB stick**, 16 GiB or larger | The cooked image is ~4-5 GiB; the trailing `BTY_IMAGES` exFAT partition grows on first boot to fill whatever stick you write it to. |
+| A **USB stick**, 8 GiB or larger | The cooked image is ~4.4 GiB (~400 MB live boot + 4 GiB exFAT `BTY_IMAGES`). Larger sticks just leave the tail unallocated; grow `BTY_IMAGES` with gparted on your host afterwards if you want it. |
 | A **target machine** with a free disk | This is the box that will get flashed. UEFI or legacy BIOS, x86_64. |
 | A **system image** to flash | `.qcow2`, raw `.img`, or `.img.{zst,xz,gz,bz2}`. Any cooked OS image of yours; bty doesn't ship one. |
 
