@@ -366,7 +366,8 @@ def validate_plan(plan: FlashPlan) -> list[str]:
     if plan.image.format is None:
         errors.append(
             f"image format not recognised: {plan.image.display} "
-            f"(supported: .qcow2, .img, .img.zst, .img.xz)"
+            f"(supported: .qcow2, .img, .img.zst, .img.xz, .img.gz, "
+            f".img.bz2)"
         )
 
     if not plan.target.exists:
@@ -524,6 +525,20 @@ def execute_plan(
                     progress=progress,
                     total_bytes=total_bytes,
                 )
+            elif fmt == "img.gz":
+                _flash_gz_from_url(
+                    plan.image.url,
+                    plan.target.path,
+                    progress=progress,
+                    total_bytes=total_bytes,
+                )
+            elif fmt == "img.bz2":
+                _flash_bz2_from_url(
+                    plan.image.url,
+                    plan.target.path,
+                    progress=progress,
+                    total_bytes=total_bytes,
+                )
             elif fmt == "qcow2":
                 _flash_qcow2_from_url(plan.image.url, plan.target.path)
             else:
@@ -546,6 +561,20 @@ def execute_plan(
                 )
             elif fmt == "img.xz":
                 _flash_xz(
+                    plan.image.path,
+                    plan.target.path,
+                    progress=progress,
+                    total_bytes=total_bytes,
+                )
+            elif fmt == "img.gz":
+                _flash_gz(
+                    plan.image.path,
+                    plan.target.path,
+                    progress=progress,
+                    total_bytes=total_bytes,
+                )
+            elif fmt == "img.bz2":
+                _flash_bz2(
                     plan.image.path,
                     plan.target.path,
                     progress=progress,
@@ -615,18 +644,32 @@ def _flash_img(
         raise FlashError(f"dd exited {rc} writing {image} -> {target}")
 
 
-def _flash_zst(
+def _flash_compressed(
     image: Path,
     target: Path,
+    decompress_cmd: list[str],
+    decompress_name: str,
     *,
     progress: ProgressCallback | None = None,
     total_bytes: int | None = None,
 ) -> None:
-    """Pipeline ``zstd -d --stdout IMG | dd of=TARGET ...``."""
-    zstd_proc = subprocess.Popen(
-        ["zstd", "-d", "--stdout", str(image)],
-        stdout=subprocess.PIPE,
-    )
+    """Pipeline ``<decompress_cmd> | dd of=TARGET ...``.
+
+    Generic single-file-decompressor + dd pipeline used by every
+    ``.img.<algo>`` writer. ``decompress_cmd`` reads the image
+    (typically as a positional arg or via ``--stdout``-style flag)
+    and writes raw decompressed bytes to its stdout, which dd
+    consumes. ``decompress_name`` is used in error messages.
+
+    NOTE: this only handles SINGLE-FILE compression streams (zstd,
+    xz, gzip, bzip2). It does NOT handle ``.tar.gz`` /
+    ``.tar.xz`` / ``.zip`` containers -- those wrap one-or-many
+    files inside metadata, and dd'ing a decompressed tar stream
+    would write tar headers into the target's MBR. Format
+    detection in ``images.py`` deliberately rejects tarball
+    extensions.
+    """
+    decomp_proc = subprocess.Popen(decompress_cmd, stdout=subprocess.PIPE)
     try:
         stderr = subprocess.PIPE if progress is not None else None
         dd_proc = subprocess.Popen(
@@ -637,24 +680,42 @@ def _flash_zst(
                 "conv=fsync",
                 "status=progress",
             ],
-            stdin=zstd_proc.stdout,
+            stdin=decomp_proc.stdout,
             stderr=stderr,
             text=True,
         )
         pump = _start_dd_progress_thread(dd_proc, progress, total_bytes)
-        # Let zstd see SIGPIPE if dd exits early.
-        if zstd_proc.stdout is not None:
-            zstd_proc.stdout.close()
+        # Let the decompressor see SIGPIPE if dd exits early.
+        if decomp_proc.stdout is not None:
+            decomp_proc.stdout.close()
         dd_rc = dd_proc.wait()
         if pump is not None:
             pump.join(timeout=2)
     finally:
-        zstd_rc = zstd_proc.wait()
+        decomp_rc = decomp_proc.wait()
 
     if dd_rc != 0:
         raise FlashError(f"dd exited {dd_rc} writing {image} -> {target}")
-    if zstd_rc != 0:
-        raise FlashError(f"zstd exited {zstd_rc} decompressing {image}")
+    if decomp_rc != 0:
+        raise FlashError(f"{decompress_name} exited {decomp_rc} decompressing {image}")
+
+
+def _flash_zst(
+    image: Path,
+    target: Path,
+    *,
+    progress: ProgressCallback | None = None,
+    total_bytes: int | None = None,
+) -> None:
+    """Pipeline ``zstd -d --stdout IMG | dd of=TARGET ...``."""
+    _flash_compressed(
+        image,
+        target,
+        ["zstd", "-d", "--stdout", str(image)],
+        "zstd",
+        progress=progress,
+        total_bytes=total_bytes,
+    )
 
 
 def _flash_xz(
@@ -666,45 +727,70 @@ def _flash_xz(
 ) -> None:
     """Pipeline ``xz -d --stdout IMG | dd of=TARGET ...``.
 
-    Mirrors ``_flash_zst``: the only structural difference is the
-    decompression tool. xz decompresses at ~50-100 MB/s vs zstd's
-    ~800-1500 MB/s -- this writer is here for operators who arrive
-    with .img.xz images, but bty itself ships target images as
-    .img.zst because the hot-path flash speed wins for the per-job
-    CI reflash use case.
+    xz decompresses at ~50-100 MB/s vs zstd's ~800-1500 MB/s;
+    bty's own target images ship as .img.zst for the per-job
+    CI reflash hot path, but this writer accepts operator-supplied
+    .img.xz so neither format is forced on operators.
     """
-    xz_proc = subprocess.Popen(
+    _flash_compressed(
+        image,
+        target,
         ["xz", "-d", "--stdout", str(image)],
-        stdout=subprocess.PIPE,
+        "xz",
+        progress=progress,
+        total_bytes=total_bytes,
     )
-    try:
-        stderr = subprocess.PIPE if progress is not None else None
-        dd_proc = subprocess.Popen(
-            [
-                "dd",
-                f"of={target}",
-                "bs=4M",
-                "conv=fsync",
-                "status=progress",
-            ],
-            stdin=xz_proc.stdout,
-            stderr=stderr,
-            text=True,
-        )
-        pump = _start_dd_progress_thread(dd_proc, progress, total_bytes)
-        # Let xz see SIGPIPE if dd exits early.
-        if xz_proc.stdout is not None:
-            xz_proc.stdout.close()
-        dd_rc = dd_proc.wait()
-        if pump is not None:
-            pump.join(timeout=2)
-    finally:
-        xz_rc = xz_proc.wait()
 
-    if dd_rc != 0:
-        raise FlashError(f"dd exited {dd_rc} writing {image} -> {target}")
-    if xz_rc != 0:
-        raise FlashError(f"xz exited {xz_rc} decompressing {image}")
+
+def _flash_gz(
+    image: Path,
+    target: Path,
+    *,
+    progress: ProgressCallback | None = None,
+    total_bytes: int | None = None,
+) -> None:
+    """Pipeline ``gzip -d --stdout IMG | dd of=TARGET ...``.
+
+    gzip is universally available and many older distro images
+    still ship as .img.gz (Raspberry Pi OS pre-2022, older
+    Ubuntu Server cloud images, vendor appliance bundles).
+    Decompression is fast (~300-500 MB/s) but compression ratio
+    is weaker than xz/zstd on zero-heavy images.
+    """
+    _flash_compressed(
+        image,
+        target,
+        ["gzip", "-d", "--stdout", str(image)],
+        "gzip",
+        progress=progress,
+        total_bytes=total_bytes,
+    )
+
+
+def _flash_bz2(
+    image: Path,
+    target: Path,
+    *,
+    progress: ProgressCallback | None = None,
+    total_bytes: int | None = None,
+) -> None:
+    """Pipeline ``bzip2 -d --stdout IMG | dd of=TARGET ...``.
+
+    bzip2 is mostly legacy at this point but appears occasionally
+    in older appliance image bundles. Decompression is the
+    slowest of the supported formats (~10-30 MB/s) and bz2 lacks
+    a metadata header for uncompressed size, so
+    ``virtual_size_bytes`` is always ``None`` for .img.bz2 and
+    validate_plan skips the size-fits-target check with a note.
+    """
+    _flash_compressed(
+        image,
+        target,
+        ["bzip2", "-d", "--stdout", str(image)],
+        "bzip2",
+        progress=progress,
+        total_bytes=total_bytes,
+    )
 
 
 def _flash_qcow2(image: Path, target: Path) -> None:
@@ -765,6 +851,59 @@ def _flash_img_from_url(
         raise FlashError(f"dd exited {dd_rc} writing {url} -> {target}")
 
 
+def _flash_compressed_from_url(
+    url: str,
+    target: Path,
+    decompress_cmd: list[str],
+    decompress_name: str,
+    *,
+    progress: ProgressCallback | None = None,
+    total_bytes: int | None = None,
+) -> None:
+    """Pipeline ``curl URL | <decompress_cmd> | dd of=TARGET ...``.
+
+    Generic version of the URL-streaming compressed flash path used
+    by every ``.img.<algo>`` URL writer. ``decompress_cmd`` reads
+    from stdin (no positional file arg).
+
+    Same single-file caveat as ``_flash_compressed``: tarballs and
+    other multi-file containers must NOT be flashed through here.
+    """
+    curl_proc = subprocess.Popen([*_CURL_BASE, url], stdout=subprocess.PIPE)
+    try:
+        decomp_proc = subprocess.Popen(
+            decompress_cmd,
+            stdin=curl_proc.stdout,
+            stdout=subprocess.PIPE,
+        )
+        if curl_proc.stdout is not None:
+            curl_proc.stdout.close()
+        try:
+            stderr = subprocess.PIPE if progress is not None else None
+            dd_proc = subprocess.Popen(
+                ["dd", f"of={target}", "bs=4M", "conv=fsync", "status=progress"],
+                stdin=decomp_proc.stdout,
+                stderr=stderr,
+                text=True,
+            )
+            pump = _start_dd_progress_thread(dd_proc, progress, total_bytes)
+            if decomp_proc.stdout is not None:
+                decomp_proc.stdout.close()
+            dd_rc = dd_proc.wait()
+            if pump is not None:
+                pump.join(timeout=2)
+        finally:
+            decomp_rc = decomp_proc.wait()
+    finally:
+        curl_rc = curl_proc.wait()
+    if curl_rc != 0:
+        raise FlashError(f"curl exited {curl_rc} fetching {url}")
+    if decomp_rc != 0:
+        raise FlashError(f"{decompress_name} -d exited {decomp_rc} decompressing {url}")
+    if dd_rc != 0:
+        raise FlashError(f"dd exited {dd_rc} writing {url} -> {target}")
+
+
 def _flash_zst_from_url(
     url: str,
     target: Path,
@@ -774,44 +913,19 @@ def _flash_zst_from_url(
 ) -> None:
     """Pipeline ``curl URL | zstd -d --stdout | dd of=TARGET ...``.
 
-    Decompresses on the fly. The compressed bytes never land on the
-    local filesystem; only the raw image touches the target disk. This
-    is the path the TUI-on-PXE flow uses by default since most operator
-    images ship as ``.img.zst``.
+    Decompresses on the fly. The compressed bytes never land on
+    the local filesystem; only the raw image touches the target
+    disk. This is the path the TUI-on-PXE flow uses by default
+    since bty's own target images ship as ``.img.zst``.
     """
-    curl_proc = subprocess.Popen([*_CURL_BASE, url], stdout=subprocess.PIPE)
-    try:
-        zstd_proc = subprocess.Popen(
-            ["zstd", "-d", "--stdout"],
-            stdin=curl_proc.stdout,
-            stdout=subprocess.PIPE,
-        )
-        if curl_proc.stdout is not None:
-            curl_proc.stdout.close()
-        try:
-            stderr = subprocess.PIPE if progress is not None else None
-            dd_proc = subprocess.Popen(
-                ["dd", f"of={target}", "bs=4M", "conv=fsync", "status=progress"],
-                stdin=zstd_proc.stdout,
-                stderr=stderr,
-                text=True,
-            )
-            pump = _start_dd_progress_thread(dd_proc, progress, total_bytes)
-            if zstd_proc.stdout is not None:
-                zstd_proc.stdout.close()
-            dd_rc = dd_proc.wait()
-            if pump is not None:
-                pump.join(timeout=2)
-        finally:
-            zstd_rc = zstd_proc.wait()
-    finally:
-        curl_rc = curl_proc.wait()
-    if curl_rc != 0:
-        raise FlashError(f"curl exited {curl_rc} fetching {url}")
-    if zstd_rc != 0:
-        raise FlashError(f"zstd -d exited {zstd_rc} decompressing {url}")
-    if dd_rc != 0:
-        raise FlashError(f"dd exited {dd_rc} writing {url} -> {target}")
+    _flash_compressed_from_url(
+        url,
+        target,
+        ["zstd", "-d", "--stdout"],
+        "zstd",
+        progress=progress,
+        total_bytes=total_bytes,
+    )
 
 
 def _flash_xz_from_url(
@@ -821,44 +935,51 @@ def _flash_xz_from_url(
     progress: ProgressCallback | None = None,
     total_bytes: int | None = None,
 ) -> None:
-    """Pipeline ``curl URL | xz -d --stdout | dd of=TARGET ...``.
+    """Pipeline ``curl URL | xz -d --stdout | dd of=TARGET ...``."""
+    _flash_compressed_from_url(
+        url,
+        target,
+        ["xz", "-d", "--stdout"],
+        "xz",
+        progress=progress,
+        total_bytes=total_bytes,
+    )
 
-    Same shape as ``_flash_zst_from_url`` but with xz on the
-    decompression stage.
-    """
-    curl_proc = subprocess.Popen([*_CURL_BASE, url], stdout=subprocess.PIPE)
-    try:
-        xz_proc = subprocess.Popen(
-            ["xz", "-d", "--stdout"],
-            stdin=curl_proc.stdout,
-            stdout=subprocess.PIPE,
-        )
-        if curl_proc.stdout is not None:
-            curl_proc.stdout.close()
-        try:
-            stderr = subprocess.PIPE if progress is not None else None
-            dd_proc = subprocess.Popen(
-                ["dd", f"of={target}", "bs=4M", "conv=fsync", "status=progress"],
-                stdin=xz_proc.stdout,
-                stderr=stderr,
-                text=True,
-            )
-            pump = _start_dd_progress_thread(dd_proc, progress, total_bytes)
-            if xz_proc.stdout is not None:
-                xz_proc.stdout.close()
-            dd_rc = dd_proc.wait()
-            if pump is not None:
-                pump.join(timeout=2)
-        finally:
-            xz_rc = xz_proc.wait()
-    finally:
-        curl_rc = curl_proc.wait()
-    if curl_rc != 0:
-        raise FlashError(f"curl exited {curl_rc} fetching {url}")
-    if xz_rc != 0:
-        raise FlashError(f"xz -d exited {xz_rc} decompressing {url}")
-    if dd_rc != 0:
-        raise FlashError(f"dd exited {dd_rc} writing {url} -> {target}")
+
+def _flash_gz_from_url(
+    url: str,
+    target: Path,
+    *,
+    progress: ProgressCallback | None = None,
+    total_bytes: int | None = None,
+) -> None:
+    """Pipeline ``curl URL | gzip -d --stdout | dd of=TARGET ...``."""
+    _flash_compressed_from_url(
+        url,
+        target,
+        ["gzip", "-d", "--stdout"],
+        "gzip",
+        progress=progress,
+        total_bytes=total_bytes,
+    )
+
+
+def _flash_bz2_from_url(
+    url: str,
+    target: Path,
+    *,
+    progress: ProgressCallback | None = None,
+    total_bytes: int | None = None,
+) -> None:
+    """Pipeline ``curl URL | bzip2 -d --stdout | dd of=TARGET ...``."""
+    _flash_compressed_from_url(
+        url,
+        target,
+        ["bzip2", "-d", "--stdout"],
+        "bzip2",
+        progress=progress,
+        total_bytes=total_bytes,
+    )
 
 
 def _flash_qcow2_from_url(url: str, target: Path) -> None:
@@ -1199,6 +1320,31 @@ def _image_virtual_size(path: Path, image_format: str | None) -> int | None:
         # Ratio Check Filename``.
         return _parse_compressed_listing(proc.stdout, header_prefix="Strms")
 
+    if image_format == "img.gz":
+        # ``gzip -l`` (a.k.a. ``gunzip -l``) emits unit-less byte
+        # counts in two columns: ``compressed uncompressed ratio
+        # name``. Note: gzip stores the uncompressed size mod 4 GiB
+        # in the trailer, so for files >= 4 GiB the reported size
+        # wraps and is wrong. validate_plan treats the result as a
+        # best-effort hint; if wrong the size-fits-target check
+        # might miss but the actual flash still proceeds correctly
+        # since dd reads the real stream.
+        proc = subprocess.run(
+            ["gzip", "-l", str(path)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if proc.returncode != 0:
+            return None
+        return _parse_gzip_listing(proc.stdout)
+
+    if image_format == "img.bz2":
+        # bzip2 stores no uncompressed size header. Returning None
+        # tells validate_plan to skip the size-fits-target check
+        # with a note; flash itself proceeds normally.
+        return None
+
     return None
 
 
@@ -1232,6 +1378,35 @@ def _parse_compressed_listing(listing: str, *, header_prefix: str) -> int | None
 # ``_parse_compressed_listing`` form.
 def _parse_zstd_uncompressed(zstd_output: str) -> int | None:
     return _parse_compressed_listing(zstd_output, header_prefix="Frames")
+
+
+def _parse_gzip_listing(gzip_output: str) -> int | None:
+    """Best-effort uncompressed-size extraction from ``gzip -l`` output.
+
+    Output shape (no units, just decimal bytes):
+
+        compressed        uncompressed  ratio uncompressed_name
+                73                  37 -34.4% file
+
+    Skips the header line and any lines that don't have at least
+    two integer columns. Returns the second integer column.
+    Returns ``None`` if parsing fails. Note: gzip stores the
+    uncompressed size mod 4 GiB in the file trailer, so for files
+    >= 4 GiB this returns a wrapped (wrong) value -- the caller
+    treats it as a best-effort hint, not authoritative.
+    """
+    for line in gzip_output.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith(("compressed", "-")):
+            continue
+        cells = stripped.split()
+        if len(cells) < 2:
+            continue
+        try:
+            return int(cells[1])
+        except ValueError:
+            continue
+    return None
 
 
 def _lsblk_target_size(target: Path) -> int | None:

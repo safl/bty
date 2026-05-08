@@ -52,14 +52,43 @@ from typing import Any
 # the BTY_IMAGES partition here.
 DEFAULT_IMAGE_ROOT = Path("/var/lib/bty/images")
 
-# Supported extensions, ordered most-specific first so ``.img.zst``
-# / ``.img.xz`` win over ``.img``.
+# Supported extensions, ordered most-specific first so multi-suffix
+# variants (``.img.zst``, ``.img.xz``, ``.img.gz``, ``.img.bz2``)
+# win over the bare ``.img``.
 _EXTENSIONS: tuple[tuple[str, str], ...] = (
     (".img.zst", "img.zst"),
     (".img.xz", "img.xz"),
+    (".img.gz", "img.gz"),
+    (".img.bz2", "img.bz2"),
     (".qcow2", "qcow2"),
     (".img", "img"),
 )
+
+# Extensions explicitly NOT supported by the single-stream flash
+# pipeline. Tarballs wrap the actual image inside per-file headers;
+# decompressing the gzip/xz layer doesn't yield raw image bytes,
+# it yields a tar stream. dd'ing that into a target disk would
+# write tar headers into the MBR. Operators with these files must
+# extract first (``tar -xzf foo.tar.gz`` etc.) and drop the
+# resulting .img onto BTY_IMAGES.
+_TARBALL_HINT_EXTS: tuple[str, ...] = (
+    ".tar.gz",
+    ".tar.xz",
+    ".tar.bz2",
+    ".tar.zst",
+    ".tgz",
+    ".txz",
+    ".tbz2",
+    ".tzst",
+)
+
+
+def is_tarball_extension(name: str) -> bool:
+    """Return True if ``name`` looks like a tar archive that bty
+    cannot flash directly (caller should hint the operator to
+    extract first)."""
+    lower = name.lower()
+    return any(lower.endswith(ext) for ext in _TARBALL_HINT_EXTS)
 
 
 @dataclass(frozen=True)
@@ -130,6 +159,8 @@ def inspect_image(path: Path) -> dict[str, Any]:
     - ``qcow2`` -> the JSON output of ``qemu-img info --output=json``
     - ``img.zst`` -> the textual output of ``zstd -l``
     - ``img.xz`` -> the textual output of ``xz -l``
+    - ``img.gz`` -> the textual output of ``gzip -l``
+    - ``img.bz2`` -> nothing (bzip2 has no listing tool)
     """
     if not path.exists():
         raise FileNotFoundError(path)
@@ -174,5 +205,18 @@ def inspect_image(path: Path) -> dict[str, Any]:
             info["detail"] = proc.stdout.strip()
         else:
             info["detail_error"] = proc.stderr.strip()
+    elif fmt == "img.gz":
+        proc = subprocess.run(
+            ["gzip", "-l", str(path)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if proc.returncode == 0:
+            info["detail"] = proc.stdout.strip()
+        else:
+            info["detail_error"] = proc.stderr.strip()
+    # img.bz2: no listing tool ships with bzip2; ``detail`` block
+    # is intentionally omitted.
 
     return info

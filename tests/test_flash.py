@@ -223,6 +223,55 @@ def test_probe_image_xz_xz_failure_returns_unknown(tmp_path: Path) -> None:
     assert info.virtual_size_bytes is None
 
 
+def test_probe_image_gz_parses_gzip_listing(tmp_path: Path) -> None:
+    """``gzip -l`` emits unit-less byte counts in two columns
+    (compressed uncompressed). The shared listing parser doesn't
+    apply here -- gzip uses a separate ``_parse_gzip_listing``
+    helper that splits on whitespace and takes the second cell."""
+    img = tmp_path / "x.img.gz"
+    img.write_bytes(b"\0" * 64)
+    gzip_output = (
+        "         compressed        uncompressed  ratio uncompressed_name\n"
+        "                 73                  37 -34.4% x.img\n"
+    )
+    fake_proc = MagicMock(returncode=0, stdout=gzip_output)
+    with patch("bty.flash.subprocess.run", return_value=fake_proc):
+        info = flash.probe_image(img)
+    assert info.format == "img.gz"
+    assert info.virtual_size_bytes == 37
+
+
+def test_probe_image_bz2_returns_unknown_virtual_size(tmp_path: Path) -> None:
+    """bzip2 has no listing tool that reports the uncompressed size,
+    so ``virtual_size_bytes`` is always ``None`` and validate_plan
+    skips the size-fits-target check with a note."""
+    img = tmp_path / "x.img.bz2"
+    img.write_bytes(b"\0" * 64)
+    info = flash.probe_image(img)
+    assert info.format == "img.bz2"
+    assert info.virtual_size_bytes is None
+
+
+def test_is_tarball_extension_detects_common_tarballs() -> None:
+    """``.tar.gz`` / ``.tgz`` / ``.tar.xz`` etc. must NOT be flashed
+    directly -- they're container formats, not single-stream
+    compression. ``is_tarball_extension`` is the helper that lets
+    callers warn operators (rather than silently ignoring) when
+    they drop a tarball onto BTY_IMAGES."""
+    from bty import images
+
+    for name in (
+        "img.tar.gz",
+        "appliance.tar.xz",
+        "raspbian.img.tgz",
+        "thing.tar.bz2",
+        "BUILD.tzst",
+    ):
+        assert images.is_tarball_extension(name), name
+    for name in ("img.gz", "x.img.zst", "y.qcow2", "raw.img"):
+        assert not images.is_tarball_extension(name), name
+
+
 def test_probe_image_qcow2_qemu_img_failure_returns_unknown(tmp_path: Path) -> None:
     img = tmp_path / "x.qcow2"
     img.write_bytes(b"\0")
@@ -322,6 +371,8 @@ def test_execute_plan_dispatches_to_xz_writer(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(flash, "_flash_img", lambda _i, _t, **_kw: calls.append("img"))
     monkeypatch.setattr(flash, "_flash_zst", lambda _i, _t, **_kw: calls.append("zst"))
     monkeypatch.setattr(flash, "_flash_xz", lambda _i, _t, **_kw: calls.append("xz"))
+    monkeypatch.setattr(flash, "_flash_gz", lambda _i, _t, **_kw: calls.append("gz"))
+    monkeypatch.setattr(flash, "_flash_bz2", lambda _i, _t, **_kw: calls.append("bz2"))
     monkeypatch.setattr(flash, "_flash_qcow2", lambda _i, _t: calls.append("qcow2"))
     _stub_post_write(monkeypatch, calls)
 
@@ -329,6 +380,46 @@ def test_execute_plan_dispatches_to_xz_writer(monkeypatch: pytest.MonkeyPatch) -
     flash.execute_plan(plan)
 
     assert calls == ["xz", "sync", "partprobe"]
+
+
+def test_execute_plan_dispatches_to_gz_writer(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``.img.gz`` (universal legacy format -- older Ubuntu / RPi OS,
+    appliance vendor bundles) dispatches to ``_flash_gz``."""
+    calls: list[str] = []
+    monkeypatch.setattr(flash, "probe_target", _stub_block_target)
+    monkeypatch.setattr(flash, "_flash_img", lambda _i, _t, **_kw: calls.append("img"))
+    monkeypatch.setattr(flash, "_flash_zst", lambda _i, _t, **_kw: calls.append("zst"))
+    monkeypatch.setattr(flash, "_flash_xz", lambda _i, _t, **_kw: calls.append("xz"))
+    monkeypatch.setattr(flash, "_flash_gz", lambda _i, _t, **_kw: calls.append("gz"))
+    monkeypatch.setattr(flash, "_flash_bz2", lambda _i, _t, **_kw: calls.append("bz2"))
+    monkeypatch.setattr(flash, "_flash_qcow2", lambda _i, _t: calls.append("qcow2"))
+    _stub_post_write(monkeypatch, calls)
+
+    plan = flash.make_plan(_img(fmt="img.gz"), _tgt(), "none")
+    flash.execute_plan(plan)
+
+    assert calls == ["gz", "sync", "partprobe"]
+
+
+def test_execute_plan_dispatches_to_bz2_writer(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``.img.bz2`` (legacy / archival format) dispatches to
+    ``_flash_bz2``. Note bz2 has no metadata header for uncompressed
+    size, so ``virtual_size_bytes`` is None and the validation
+    size-fits-target check is skipped with a note."""
+    calls: list[str] = []
+    monkeypatch.setattr(flash, "probe_target", _stub_block_target)
+    monkeypatch.setattr(flash, "_flash_img", lambda _i, _t, **_kw: calls.append("img"))
+    monkeypatch.setattr(flash, "_flash_zst", lambda _i, _t, **_kw: calls.append("zst"))
+    monkeypatch.setattr(flash, "_flash_xz", lambda _i, _t, **_kw: calls.append("xz"))
+    monkeypatch.setattr(flash, "_flash_gz", lambda _i, _t, **_kw: calls.append("gz"))
+    monkeypatch.setattr(flash, "_flash_bz2", lambda _i, _t, **_kw: calls.append("bz2"))
+    monkeypatch.setattr(flash, "_flash_qcow2", lambda _i, _t: calls.append("qcow2"))
+    _stub_post_write(monkeypatch, calls)
+
+    plan = flash.make_plan(_img(fmt="img.bz2", virtual=None), _tgt(), "none")
+    flash.execute_plan(plan)
+
+    assert calls == ["bz2", "sync", "partprobe"]
 
 
 def test_execute_plan_dispatches_to_qcow2_writer(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -498,6 +589,8 @@ def test_execute_plan_dispatches_to_url_writers_for_url_images(
     monkeypatch.setattr(flash, "_flash_img", lambda _i, _t, **_kw: calls.append("img-local"))
     monkeypatch.setattr(flash, "_flash_zst", lambda _i, _t, **_kw: calls.append("zst-local"))
     monkeypatch.setattr(flash, "_flash_xz", lambda _i, _t, **_kw: calls.append("xz-local"))
+    monkeypatch.setattr(flash, "_flash_gz", lambda _i, _t, **_kw: calls.append("gz-local"))
+    monkeypatch.setattr(flash, "_flash_bz2", lambda _i, _t, **_kw: calls.append("bz2-local"))
     monkeypatch.setattr(flash, "_flash_qcow2", lambda _i, _t: calls.append("qcow2-local"))
     monkeypatch.setattr(
         flash,
@@ -514,6 +607,16 @@ def test_execute_plan_dispatches_to_url_writers_for_url_images(
         "_flash_xz_from_url",
         lambda _u, _t, **_kw: calls.append("xz-url"),
     )
+    monkeypatch.setattr(
+        flash,
+        "_flash_gz_from_url",
+        lambda _u, _t, **_kw: calls.append("gz-url"),
+    )
+    monkeypatch.setattr(
+        flash,
+        "_flash_bz2_from_url",
+        lambda _u, _t, **_kw: calls.append("bz2-url"),
+    )
     monkeypatch.setattr(flash, "_flash_qcow2_from_url", lambda _u, _t: calls.append("qcow2-url"))
     _stub_post_write(monkeypatch, calls)
 
@@ -521,16 +624,23 @@ def test_execute_plan_dispatches_to_url_writers_for_url_images(
         ("img", "img-url"),
         ("img.zst", "zst-url"),
         ("img.xz", "xz-url"),
+        ("img.gz", "gz-url"),
+        ("img.bz2", "bz2-url"),
         ("qcow2", "qcow2-url"),
     ):
         calls.clear()
         plan = flash.make_plan(_img_url(fmt=fmt), _tgt(), "none")
         flash.execute_plan(plan)
         assert expected in calls
-        assert "img-local" not in calls
-        assert "zst-local" not in calls
-        assert "xz-local" not in calls
-        assert "qcow2-local" not in calls
+        for local_marker in (
+            "img-local",
+            "zst-local",
+            "xz-local",
+            "gz-local",
+            "bz2-local",
+            "qcow2-local",
+        ):
+            assert local_marker not in calls
 
 
 def test_execute_plan_refuses_when_target_no_longer_block(

@@ -73,7 +73,8 @@ PATH          SIZE  TRAN  VENDOR  MODEL              SERIAL          REMOVABLE
 ### `bty list images [--image-root PATH]`
 
 List supported images directly under the image root (non-recursive).
-Recognised formats: `.qcow2`, `.img`, `.img.zst`, `.img.xz`.
+Recognised formats: `.qcow2`, `.img`, `.img.zst`, `.img.xz`,
+`.img.gz`, `.img.bz2`.
 
 bty itself ships its target images (`bty-server-x86_64.img.zst`,
 `bty-server-rpi-arm64.img.zst`) as `.img.zst` because flash-time
@@ -84,9 +85,17 @@ absolute terms, ~80s extra per CI job). The bty USB stick image
 (`bty-usb-x86_64.iso.xz`) ships as xz because Etcher / Rufus /
 Raspberry Pi Imager all decompress .xz natively for host-side
 stick-prep but lack .zst support — that's a one-off host
-operation, not a hot-path concern. The flash code accepts both
-.img.zst and .img.xz for operator-supplied images so neither
-format choice is forced on you.
+operation, not a hot-path concern. The flash code accepts all
+of `.img.zst` / `.img.xz` / `.img.gz` / `.img.bz2` for
+operator-supplied images so neither format choice is forced on
+you. Decompression speed ranking (rough): zstd > gzip > xz > bzip2.
+
+**Tarballs are NOT supported.** `.tar.gz` / `.tar.xz` / `.tgz` /
+`.tar.bz2` etc. wrap one or more files in TAR headers; running
+the gzip/xz/bzip2 layer on them yields a TAR stream, not an
+image. dd'ing that into a target disk would write tar headers
+into the MBR. Extract first (`tar -xzf foo.tar.gz`) and drop the
+resulting `.img` onto BTY_IMAGES.
 
 The image root is resolved in this order:
 
