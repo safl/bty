@@ -496,6 +496,75 @@ Landed after the original 1.0 list:
        becomes a packaging variant of the live-build output.
        Gated on the experimental usb-iso build going green on a
        real tag run.
+    7. Make `BTY_IMAGES` visible to Windows. Discovered on
+       hardware verification of v0.2.20: when the dd'd stick is
+       plugged into a Windows host, the operator can read the
+       ISO9660 (drive `D:`) and sees the EFI partition + an
+       "Unallocated" trailing region in Disk Management. The
+       trailing region IS the BTY_IMAGES exFAT - Windows refuses
+       to enumerate it because the EFI partition entry (#2) sits
+       *inside* the ISO9660 partition's byte range (an artifact
+       of how live-build's `iso-hybrid` mode embeds the EFI
+       FAT image in the ISO9660 stream). Linux mounts BTY_IMAGES
+       fine; Windows / Mac don't, breaking the "drop images from
+       any host OS" UX promise from phase 3.
+
+       Recommended fix: **relocate the EFI partition entry out
+       of the overlap**.
+
+         a. After `lb build` produces the hybrid ISO, parse the
+            existing MBR to find the EFI partition's current
+            byte range (sectors 540..7067 by default; ~3 MiB).
+            Read those bytes - the FAT image of the EFI boot
+            payload.
+         b. Append a fresh copy of the EFI FAT image to the
+            iso file at a non-overlapping location (right
+            after the ISO9660, before BTY_IMAGES).
+         c. Rewrite the MBR partition table:
+            - p1: ISO9660 (covers the live-build output, no
+              change)
+            - p2: EFI System partition pointing at the NEW
+              location (non-overlapping with p1)
+            - p3: BTY_IMAGES exFAT (current trailing 4 GiB)
+         d. The El Torito catalog inside the ISO9660 still
+            has its embedded EFI image for CD-style UEFI boot;
+            the relocated MBR partition entry handles USB-style
+            UEFI boot. BIOS boot via the existing `isohdpfx.bin`
+            in MBR sectors 0..432 is untouched.
+
+       Result: Windows enumerates all three partitions cleanly,
+       auto-mounts (or lets Disk Management mount) BTY_IMAGES,
+       operators drop `*.img.zst` from any host OS as advertised.
+
+       **Alternatives considered:**
+
+       - Drop the MBR EFI partition entry entirely; rely on El
+         Torito's embedded EFI image for both CD and USB UEFI
+         boot. Simpler change, but compatibility risk: some
+         older UEFI firmware needs the MBR/GPT EFI partition
+         entry to recognize the USB stick as bootable.
+       - Switch to `--binary-images hdd` instead of
+         `iso-hybrid`. live-build's hdd mode produces a regular
+         disk image with non-overlapping partitions, but the
+         BIOS boot path differs and may need additional
+         bootloader-config plumbing.
+       - Use Rufus's "ISO Image" mode (rebuilds the layout into
+         a single FAT32 partition). Operator-side workaround
+         only; doesn't fix the artifact and discards
+         BTY_IMAGES.
+
+       Critical files:
+       - `cijoe/scripts/usb_iso_build.py::_extend_with_exfat` -
+         add the EFI relocation step before / alongside the
+         BTY_IMAGES partition append.
+       - `bty-media/live-build/auto/config` - no change
+         expected; the EFI bootloader stays the same, only its
+         on-disk location moves.
+
+       Not blocking phase 6 (cloud-init `usb-x86` retire);
+       phase 6 depends on the boot path working on hardware,
+       which it now does. Windows-side catalog management is a
+       UX improvement on top of a working appliance.
 
 ## Preserved from legacy bty
 
