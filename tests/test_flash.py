@@ -700,9 +700,7 @@ def test_pump_dd_progress_skips_non_progress_dd_lines() -> None:
     import io
 
     stream = io.StringIO(
-        "1+0 records in\n"
-        "1+0 records out\n"
-        "524288 bytes (524 kB, 512 KiB) copied, 0.1 s, 5.2 MB/s\r"
+        "1+0 records in\n1+0 records out\n524288 bytes (524 kB, 512 KiB) copied, 0.1 s, 5.2 MB/s\r"
     )
     events: list[flash.FlashProgress] = []
     flash._pump_dd_progress(stream, events.append, total_bytes=None)
