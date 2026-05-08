@@ -1,0 +1,53 @@
+#!/bin/sh
+# 0950-bty-plymouth.hook.chroot - register the bty plymouth theme
+# as the default and rebuild the initramfs so plymouth + the
+# theme files are present in the early-boot environment.
+#
+# Plymouth runs during the kernel boot (after the bootloader
+# hands off to the kernel, before systemd-tty1 takes over). It
+# requires:
+#
+#   1. The plymouth + theme packages installed in the chroot
+#      (see ``package-lists/bty-base.list.chroot``).
+#   2. The bty theme files staged at
+#      ``/usr/share/plymouth/themes/bty/`` (via
+#      ``includes.chroot/`` in this config tree).
+#   3. ``plymouth-set-default-theme`` to register the theme so
+#      plymouth picks it on boot. This also calls
+#      ``update-initramfs -u`` under the hood, but we re-run it
+#      after to be belt+braces (theme file changes inside the
+#      chroot don't always trigger an automatic rebuild).
+#   4. ``splash`` on the kernel cmdline, which is set in
+#      ``auto/config``'s ``BOOTAPPEND``. Without ``splash`` the
+#      kernel renders boot messages instead of the plymouth UI.
+#
+# If plymouth fails to start at boot (missing DRM driver, fbcon
+# disabled, etc.) the kernel falls back to text-mode boot
+# messages cleanly -- the splash is decoration, not load-bearing
+# for any subsequent service.
+#
+# Hook order: 0950 runs after 0900-bty-enable-flash, which is
+# fine because plymouth setup is independent of the bty service
+# enables. Picked in the 09xx range to land late so plymouth
+# package install (from the package-list step) is complete.
+
+set -eu
+
+# Sanity check: theme files staged?
+if ! [ -f /usr/share/plymouth/themes/bty/bty.plymouth ]; then
+    echo "0950-bty-plymouth: bty theme not staged at /usr/share/plymouth/themes/bty/" >&2
+    echo "  Did includes.chroot/usr/share/plymouth/themes/bty/ get copied in?" >&2
+    exit 1
+fi
+
+# Register + select the theme. ``plymouth-set-default-theme -R``
+# would set + rebuild initramfs in one call, but we split for
+# clarity and so the rebuild error path is distinguishable.
+plymouth-set-default-theme bty
+
+# Force initramfs rebuild so plymouth + the theme files are
+# present in the squashfs's early-boot environment. ``-u``
+# updates all installed kernels.
+update-initramfs -u
+
+echo "0950-bty-plymouth: bty theme registered as default; initramfs rebuilt"

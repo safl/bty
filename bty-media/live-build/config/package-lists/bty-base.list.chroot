@@ -6,3 +6,11 @@ linux-image-amd64
 live-boot
 live-config
 live-tools
+# Plymouth provides the kernel-stage graphical splash (see
+# ``hooks/normal/0950-bty-plymouth.hook.chroot`` for theme setup).
+# ``plymouth-themes`` ships extra base themes; we only need the
+# script module from ``plymouth`` itself for the bty theme but
+# pulling -themes in too keeps the alternative chooser happy if
+# an operator wants to fall back to a stock theme.
+plymouth
+plymouth-themes
