@@ -13,11 +13,8 @@ Documentation=https://github.com/safl/bty
 # auto-discovery will handle those).
 ConditionPathExists=/dev/disk/by-label/BTY_IMAGES
 
-# Order: after bty-grow-images-partition has had a chance to
-# resize+reformat the partition (so we mount the GROWN exFAT, not
-# the pre-allocated 4 GiB one). Before the TUI / flash services
-# so the catalog is in place when they look at /var/lib/bty/images.
-After=bty-grow-images-partition.service
+# Mount before the TUI / flash services so the catalog is in
+# place when they scan /var/lib/bty/images.
 Before=bty-tui-on-tty1.service bty-flash-on-boot.service
 
 [Mount]

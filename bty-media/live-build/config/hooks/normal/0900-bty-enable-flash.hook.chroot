@@ -14,18 +14,23 @@
 #   ``bty-tui --server URL --mac MAC`` in place of the agetty on
 #   tty1 when the server's ipxe_tui.j2 set that mode (or when the
 #   usb-iso bake set it via ``--bootappend-live``).
-# - ``bty-grow-images-partition.service`` is gated by
-#   ``ConditionPathExists=/dev/disk/by-label/BTY_IMAGES`` so it
-#   only fires on usb-iso boots where the cooked artifact ships a
-#   pre-allocated BTY_IMAGES partition; expands it to fill the
-#   stick on first boot, then becomes a no-op on subsequent boots.
 # - ``var-lib-bty-images.mount`` mounts the BTY_IMAGES partition
 #   at /var/lib/bty/images (RO) so bty-tui sees it as the local
-#   image catalog. Same ConditionPathExists gate; ordered after
-#   the grow service so we mount the resized partition.
+#   image catalog. Gated on
+#   ``ConditionPathExists=/dev/disk/by-label/BTY_IMAGES`` so it
+#   no-ops cleanly when the operator booted from a stick that
+#   doesn't have a BTY_IMAGES partition (e.g. netboot env).
+#
+# An auto-grow service used to live here too -- bty-grow-images
+# -partition. Removed because the live env's tmpfs sentinel
+# didn't survive reboots, so the service ran every boot and
+# destroyed operator data dropped between boots. Per repeated
+# user direction: bty-usb sticks ship at the baked 4 GiB
+# BTY_IMAGES size; if an operator wants more, gparted on the
+# host is the right escape hatch (a one-shot manual operation,
+# not something the live env should be doing on its own).
 
 set -eu
 systemctl enable bty-flash-on-boot.service
 systemctl enable bty-tui-on-tty1.service
-systemctl enable bty-grow-images-partition.service
 systemctl enable var-lib-bty-images.mount
