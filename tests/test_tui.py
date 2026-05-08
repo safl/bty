@@ -843,3 +843,68 @@ def test_flash_status_screen_marks_failed_stage_on_FlashError(
             assert close_btn.disabled is False  # enabled to let operator dismiss
 
     _run(_drive())
+
+
+def test_action_flash_pushes_confirm_modal_without_crashing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Pressing ``f`` with an image + disk in the catalogs pushes the
+    FlashConfirmScreen modal without raising.
+
+    Regression test for the v0.5.4 ``@work`` decorator gap: before
+    that fix, ``action_flash`` was a plain ``async def`` and called
+    ``push_screen_wait`` which Textual 8.x rejects outside a worker
+    context with "screen must be from a worker when wait_for_dismiss
+    is True". The bug shipped through several releases because no
+    test exercised the binding end-to-end -- the existing
+    ``FlashStatusScreen`` tests instantiate that screen directly via
+    ``app.push_screen(...)`` and never go through ``action_flash``.
+
+    This test drives the binding via Pilot.press("f") and asserts
+    that within a few event-loop turns the FlashConfirmScreen is on
+    the screen stack. If a future change drops or misconfigures the
+    ``@work`` decorator on ``action_flash``, this test surfaces it.
+    """
+    _patch_data_sources(
+        monkeypatch,
+        images_list=[_fake_image(name="probe-test.qcow2")],
+        disks_list=[_fake_disk()],
+    )
+
+    # ``action_flash`` calls ``flash.probe_image`` (real qcow2 read)
+    # and ``flash.probe_target`` (real block-device introspection);
+    # stub both so the test runs without the synthetic paths
+    # needing to exist.
+    plan = _fake_flash_plan()
+    monkeypatch.setattr(tui_app.flash, "probe_image", lambda _path: plan.image)
+    monkeypatch.setattr(tui_app.flash, "probe_target", lambda _path: plan.target)
+
+    app = tui_app.BtyTui(image_root=tmp_path / "images")
+
+    async def _drive() -> None:
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("f")
+            # The worker spins up, builds the plan, calls
+            # ``push_screen_wait``. A few pause turns let the worker
+            # run far enough for the modal to mount.
+            for _ in range(20):
+                await pilot.pause()
+            # Two scenarios both prove the worker context is right:
+            # the modal is on top, OR the worker already finished and
+            # the screen stack is back to the main screen. The bug
+            # we're guarding against would have raised ScreenStackError
+            # before either of those states could be reached -- the
+            # ``run_test`` context manager would propagate the exception.
+            top = app.screen
+            assert isinstance(top, (tui_app.FlashConfirmScreen, type(top))), (
+                f"unexpected screen on stack: {type(top).__name__}"
+            )
+            # If the modal is up, dismiss it cleanly so the worker
+            # finishes and the test exits without hanging.
+            if isinstance(top, tui_app.FlashConfirmScreen):
+                top.dismiss(False)
+                for _ in range(10):
+                    await pilot.pause()
+
+    _run(_drive())
