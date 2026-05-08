@@ -44,6 +44,12 @@ packages:
   # uses on first boot to expand the rootfs partition to fill the
   # operator's disk (the cooked image is baked at a fixed 6 GiB).
   - cloud-utils
+  # Plymouth provides the kernel-stage bty boot splash (theme files
+  # are written to /usr/share/plymouth/themes/bty/ via the
+  # rootfs/server/ tree; the runcmd block below registers the
+  # theme as default and rebuilds the initramfs).
+  - plymouth
+  - plymouth-themes
 
 runcmd:
   # Install bty-lab[web] from the staged wheel into a system venv,
@@ -90,6 +96,30 @@ runcmd:
   - chmod 0755 /usr/local/sbin/bty-web-activate-pxe
   - chmod 0440 /etc/sudoers.d/bty-web
   - chown root:root /etc/sudoers.d/bty-web
+
+  # Plymouth boot splash. Theme files were written to
+  # /usr/share/plymouth/themes/bty/ via the rootfs/server/ tree;
+  # this block registers ``bty`` as the default theme, rebuilds
+  # the initramfs so plymouth + the theme are present in
+  # early-boot, and adds ``splash`` to the kernel cmdline via
+  # /etc/default/grub so plymouth actually starts on subsequent
+  # boots. Failure mode: if plymouth can't initialize on the
+  # operator's hardware (missing DRM driver etc.) the kernel
+  # falls back to text-mode messages cleanly.
+  - plymouth-set-default-theme bty
+  - |
+    set -eu
+    if grep -q '^GRUB_CMDLINE_LINUX_DEFAULT=' /etc/default/grub; then
+      # Append ``splash`` to the existing default cmdline if
+      # it's not already there.
+      if ! grep -q 'GRUB_CMDLINE_LINUX_DEFAULT=.*splash' /etc/default/grub; then
+        sed -i 's/^GRUB_CMDLINE_LINUX_DEFAULT="\(.*\)"$/GRUB_CMDLINE_LINUX_DEFAULT="\1 splash"/' /etc/default/grub
+      fi
+    else
+      printf '\nGRUB_CMDLINE_LINUX_DEFAULT="quiet splash"\n' >> /etc/default/grub
+    fi
+    update-grub
+    update-initramfs -u
 
   # Pick up the staged systemd units. bty-web-init runs once on the
   # cooked image's first boot to set up the state directory tree and
