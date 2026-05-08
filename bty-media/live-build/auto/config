@@ -38,11 +38,11 @@ set -e
 if [ "${BTY_USB_ISO:-}" = "1" ]; then
     BINARY_IMAGES=iso-hybrid
     BOOTLOADERS_OPTS="--bootloaders syslinux,grub-efi"
-    BOOTAPPEND="boot=live components quiet noeject bty.mode=interactive"
+    BOOTAPPEND="boot=live components quiet noeject bty.mode=interactive bty.version=__BTY_VERSION__"
 else
     BINARY_IMAGES=netboot
     BOOTLOADERS_OPTS=""
-    BOOTAPPEND="boot=live components quiet noeject"
+    BOOTAPPEND="boot=live components quiet noeject bty.version=__BTY_VERSION__"
 fi
 
 # shellcheck disable=SC2086 # BOOTLOADERS_OPTS is intentionally word-split

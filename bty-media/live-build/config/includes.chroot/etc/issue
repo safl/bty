@@ -1,20 +1,21 @@
 
 ======================================================================
-  bty network-flash live env
+  bty __BTY_VERSION__ live env
 
-  This env runs ``bty-flash-on-boot.service`` on every boot. It
-  reads its assignment from the kernel command line:
+  Two boot modes, selected by the kernel command line:
 
-    bty.server=URL  bty.mac=MAC  bty.image_url=URL  bty.provisioning=MODE
+    bty.mode=interactive
+        Land in ``bty-tui`` on tty1 (USB-stick interactive flow).
 
-  Without those params the service exits and you land here. With
-  them, the env downloads the image, runs ``bty flash``, signals
-  the server, and reboots. ``journalctl -u bty-flash-on-boot`` for
-  details.
+    bty.server=URL bty.mac=MAC bty.image_url=URL bty.provisioning=MODE
+        Run ``bty-flash-on-boot.service`` -- download image, flash,
+        signal the server, reboot (PXE network-flash flow).
 
-  The iPXE chain that supplies the cmdline params is rendered by
-  the bty-web server's ``ipxe_flash.j2`` template at
-  ``GET /pxe/<mac>``.
+  With neither set, both services exit and you land here. See
+  ``journalctl -u bty-flash-on-boot`` or ``journalctl -u
+  bty-tui-on-tty1`` for details. The iPXE chain that supplies the
+  cmdline params is rendered by the bty-web server's
+  ``ipxe_flash.j2`` / ``ipxe_tui.j2`` templates at ``GET /pxe/<mac>``.
 ======================================================================
 
-Debian \n \l
+bty __BTY_VERSION__ on \n (\l)

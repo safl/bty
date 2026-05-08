@@ -148,6 +148,25 @@ def main(args, cijoe):
         else:
             shutil.copy2(entry, dest)
 
+    # Stamp the bty version into every ``__BTY_VERSION__`` placeholder
+    # in the copied tree before ``lb build`` runs. Files that pick up
+    # the stamp: ``auto/config`` (kernel cmdline), the binary-stage
+    # bootloader hook (syslinux + grub menu titles), ``/etc/issue``
+    # (login banner), ``/etc/motd`` (post-login), and
+    # ``/etc/profile.d/bty-version.sh`` (interactive shell). Operators
+    # see the version in at least one of these at every boot moment
+    # -- bootloader menu, kernel boot, login, shell -- so the cooked
+    # stick can always be matched back to a release.
+    bty_version = _read_bty_version(cijoe_dir)
+    log.info(f"Stamping bty version {bty_version} into live-build tree")
+    err, _ = cijoe.run_local(
+        f"sh -c 'grep -rlF __BTY_VERSION__ {build_dir} | "
+        f"xargs --no-run-if-empty sed -i s/__BTY_VERSION__/{bty_version}/g'"
+    )
+    if err:
+        log.error("__BTY_VERSION__ substitution failed")
+        return err
+
     # Drive auto/config into iso-hybrid mode via the ``BTY_USB_ISO``
     # env var (``BTY_USB_ISO=1`` selects iso-hybrid + syslinux,grub-efi
     # + ``bty.mode=interactive`` on the kernel cmdline; unset selects
@@ -254,6 +273,24 @@ def main(args, cijoe):
     cijoe.run_local(f"ls -la {xz_dst}")
 
     return 0
+
+
+def _read_bty_version(cijoe_dir: Path) -> str:
+    """Read the bty-lab version from the repo's top-level pyproject.toml.
+
+    The cooked live env stamps this string into the bootloader menu,
+    kernel cmdline, login banner, motd, and shell-startup file so
+    operators can read the version at every boot moment. Reading
+    pyproject.toml directly (rather than ``importlib.metadata``)
+    keeps the bake script independent of whether bty-lab is
+    installed in the cijoe runner's env.
+    """
+    pyproject = cijoe_dir.parent / "pyproject.toml"
+    for line in pyproject.read_text().splitlines():
+        stripped = line.strip()
+        if stripped.startswith("version") and "=" in stripped:
+            return stripped.split("=", 1)[1].strip().strip('"').strip("'")
+    raise RuntimeError(f"could not find version line in {pyproject}")
 
 
 def _extend_with_exfat(cijoe, iso_path: Path) -> int:

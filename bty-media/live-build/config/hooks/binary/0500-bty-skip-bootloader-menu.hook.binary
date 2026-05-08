@@ -59,8 +59,8 @@ do
     # Re-brand any menu title that still says "Debian" so the
     # flash of menu (if any) shows bty.
     sed -i \
-        -e 's/Debian Live/bty/g' \
-        -e 's/Debian GNU\/Linux/bty/g' \
+        -e 's/Debian Live/bty __BTY_VERSION__/g' \
+        -e 's/Debian GNU\/Linux/bty __BTY_VERSION__/g' \
         "$cfg"
 done
 
@@ -85,8 +85,8 @@ if [ -f "$GRUB_CFG" ]; then
     # Re-brand any menu entry title; grub.cfg lines look like
     # ``menuentry "Debian GNU/Linux Live (kernel ...)" ...``.
     sed -i \
-        -e 's/Debian GNU\/Linux Live/bty/g' \
-        -e 's/Debian GNU\/Linux/bty/g' \
-        -e 's/Debian Live/bty/g' \
+        -e 's/Debian GNU\/Linux Live/bty __BTY_VERSION__/g' \
+        -e 's/Debian GNU\/Linux/bty __BTY_VERSION__/g' \
+        -e 's/Debian Live/bty __BTY_VERSION__/g' \
         "$GRUB_CFG"
 fi
