@@ -66,6 +66,18 @@ def test_list_disks_table(capsys: pytest.CaptureFixture[str]) -> None:
     assert "PATH" in out  # uppercased header
 
 
+def test_list_disks_handles_missing_lsblk(capsys: pytest.CaptureFixture[str]) -> None:
+    """lsblk is in util-linux, missing only on minimal containers /
+    macOS / Windows. Surface a friendly stderr line + exit 2 rather
+    than a raw FileNotFoundError traceback."""
+    with patch("bty.cli.disks.list_disks", side_effect=FileNotFoundError):
+        rc = cli.main(["list", "disks"])
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "lsblk not found" in err
+    assert "util-linux" in err
+
+
 def test_list_disks_json(capsys: pytest.CaptureFixture[str]) -> None:
     fake_rows = [{"path": "/dev/sda", "size": "500G"}]
     with patch("bty.cli.disks.list_disks", return_value=fake_rows):

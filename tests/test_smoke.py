@@ -138,8 +138,16 @@ def test_etc_issue_uses_only_documented_agetty_escapes() -> None:
                     f"emits VT100 escapes onto ``console=ttyS0``)"
                 )
 
-    issue_path = repo_root / "bty-media" / "rootfs" / "server" / "etc" / "issue"
-    _check_issue_body(issue_path.read_text(), str(issue_path))
+    # All shipped /etc/issue files: the server bake's
+    # pre-first-boot one, and the USB live-env's. The runtime
+    # issue bty-web-init writes on first boot is checked
+    # separately below.
+    for relpath in (
+        "bty-media/rootfs/server/etc/issue",
+        "bty-media/live-build/config/includes.chroot/etc/issue",
+    ):
+        path = repo_root / relpath
+        _check_issue_body(path.read_text(), str(path))
 
     # bty-web-init writes a runtime /etc/issue via heredoc; extract
     # the heredoc body and check it the same way.
@@ -148,6 +156,34 @@ def test_etc_issue_uses_only_documented_agetty_escapes() -> None:
     m = re.search(r"cat > /etc/issue <<'EOF'\n(.*?)\nEOF", body, flags=re.DOTALL)
     assert m is not None, "bty-web-init no longer writes /etc/issue via heredoc -- update this test"
     _check_issue_body(m.group(1), f"{web_init}:/etc/issue heredoc")
+
+
+def test_shipped_bri_descriptors_parse() -> None:
+    """The ``.bri`` files baked into the bty-usb chroot at
+    ``/usr/share/bty/bri/`` ship as part of every USB stick;
+    a malformed one would silently disappear from the catalog
+    (``list_remote_images`` skips bad descriptors). Pin
+    parseability here so a future edit that breaks one is
+    caught at unit-test time."""
+    from pathlib import Path
+
+    from bty import images
+
+    repo_root = Path(__file__).resolve().parents[1]
+    bri_dir = repo_root / "bty-media/live-build/config/includes.chroot/usr/share/bty/bri"
+    assert bri_dir.is_dir(), f"shipped bri dir missing: {bri_dir}"
+    bris = sorted(bri_dir.glob("*.bri"))
+    assert bris, f"no .bri files under {bri_dir}; bake will ship without bootstrap entries"
+    for bri in bris:
+        # Re-raises BriError on malformed contents -- pytest
+        # surfaces the path + reason directly.
+        descriptor = images.read_bri(bri)
+        # All shipped descriptors must point at https URLs (the
+        # GitHub releases redirect chain). http would be a typo
+        # / regression worth catching.
+        assert descriptor.url.startswith("https://"), (
+            f"{bri}: shipped .bri must use https, got {descriptor.url!r}"
+        )
 
 
 def test_server_cloudinit_does_not_install_plymouth() -> None:

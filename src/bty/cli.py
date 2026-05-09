@@ -228,7 +228,17 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def cmd_list_disks(args: argparse.Namespace) -> int:
-    rows = disks.list_disks()
+    try:
+        rows = disks.list_disks()
+    except FileNotFoundError:
+        # lsblk lives in util-linux; missing only on extremely
+        # minimal containers, macOS, etc. Friendly message beats a
+        # raw FileNotFoundError traceback.
+        print(
+            "bty: lsblk not found; install ``util-linux`` to list block devices",
+            file=sys.stderr,
+        )
+        return 2
     if args.json:
         print(json.dumps(_envelope("list-disks", disks=rows), indent=2))
     else:
@@ -284,6 +294,7 @@ def cmd_list_images(args: argparse.Namespace) -> int:
             "url": r.url,
             "path": str(r.path),
             "sha256": r.sha256,
+            "description": r.description,
         }
         for r in remotes
     ]
