@@ -561,6 +561,20 @@ Landed after the original 1.0 list:
     actions that helix-style modal navigation would be
     overkill.
 
+21. **[done, v0.5.13]** Docker container for `bty-web`. Multi-arch
+    (amd64 + arm64) image at `ghcr.io/safl/bty-web`, published
+    by the same release workflow that ships PyPI + the appliance
+    images. Image catalog + machine registry + browser UI only;
+    no dnsmasq / TFTP / iPXE proxy-DHCP, because docker bridge
+    networking can't relay L2 broadcasts and host networking is
+    Linux-only. The container is the lowest-barrier-to-try shape
+    (``docker run -p 8080:8080 ...`` and the UI is up) and adds
+    a third deployment lane: USB live stick + network-shared
+    catalog. Operators run the container on a workstation,
+    point ``bty-tui --server URL`` at it, and pick images from
+    the catalog without flashing the catalog onto every stick.
+    The PXE flow stays in the bare-metal `bty-server` appliance.
+
 ## Preserved from legacy bty
 
 These behaviors from the pre-rewrite version are load-bearing requirements,

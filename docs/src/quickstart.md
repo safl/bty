@@ -5,6 +5,31 @@ operator would meet it: build a delivery medium, boot a target,
 flash, optionally provision, and finally drive a fleet over the
 network via the bty-web server.
 
+## Lowest-barrier trial: bty-web in Docker
+
+If you just want to poke at the browser UI before committing to a
+USB stick or an appliance, pull the published container:
+
+```bash
+docker run -d --name bty-web \
+  -p 8080:8080 \
+  -v "$PWD/bty-data":/var/lib/bty \
+  ghcr.io/safl/bty-web:latest
+# -> http://localhost:8080/ui   (login: bty / bty)
+```
+
+Drop `.qcow2` / `.img.zst` / `.img.gz` files into `./bty-data/images/`
+and they show up in the catalog. From a USB live stick or a
+workstation, point `bty-tui --server http://<host>:8080` at it to
+flash from a network-shared catalog without burning images onto
+every stick.
+
+The container has no dnsmasq / TFTP / iPXE - it's the catalog +
+UI shape, not the PXE shape. For PXE-driven unattended flashing,
+keep reading and build (or download) the bty-server appliance
+image. Full details and rotation guidance:
+[walkthrough-server-docker.md](walkthrough-server-docker.md).
+
 ## Get the USB live image
 
 Either download a pre-built one from the GitHub release, or build

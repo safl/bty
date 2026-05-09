@@ -6,43 +6,57 @@ entry points, plus a sibling appliance-image builder (`bty-media/`).
 
 ## How the pieces connect
 
-Two delivery flows, the same `bty` library at the centre of both:
+Three delivery shapes, the same `bty` library at the centre of all
+three:
 
 ```
-      USB-stick flow                       Network-flash flow
-      (ad-hoc, no infra)                   (DevOps fleet)
+   Self-contained USB        USB + network catalog        PXE-driven (no operator)
+   (no infra)                (light infra)                (full appliance)
 
-      operator's box                       operator's workstation
-      |                                    | browser
-      v                                    v
- +----------------+                  +-----------------+
- |  bty-usb       |                  |  bty-server     |
- |  live env      |                  |  (appliance)    |
- |                |                  |                 |
- | +------------+ |    iPXE chain    | +-------------+ |
- | | bty-tui    | |<-----------------+ | bty-web     | |
- | | bty-flash- | |   (kernel + initrd | | iPXE/TFTP/  | |
- | | on-boot    | |    + squashfs over | | dnsmasq    | |
- | +------------+ |    HTTP)           | +------+-----+ |
- +-------+--------+                  +--------+-+------+
-         |                                    | |
-         | bty flash                          | | PXE chain to
-         |  (write image to                   | | targets
-         |   target's disk)                   v v
-         v                            +---------------+
-   +-----------+                      | target machine|
-   | target    |                      |               |
-   | machine   |                      | bty-flash-on- |
-   |           |                      | boot.service  |
-   | local disk|                      | -> local disk |
-   +-----------+                      +---------------+
+   operator's box            operator's box               operator's workstation
+   |                         |                            | browser
+   v                         v                            v
+ +----------------+      +----------------+            +-----------------+
+ |  bty-usb       |      |  bty-usb       |            |  bty-server     |
+ |  live env      |      |  live env      |            |  appliance      |
+ |                |      |                |            |                 |
+ | +------------+ |      | +------------+ |            | +-------------+ |
+ | | bty-tui    | |      | | bty-tui    | |    HTTP    | | bty-web     | |
+ | | (local     | |      | | --server   +-+----------->+ | iPXE/TFTP/  | |
+ | |  catalog)  | |      | |   URL)     | | (catalog)  | | dnsmasq     | |
+ | +-----+------+ |      | +-----+------+ |            | +------+------+ |
+ +-------+--------+      +-------+--------+            +--------+--------+
+         |                       |                              |
+         | bty flash             | bty flash                    | iPXE
+         | (BTY_IMAGES)          | (image fetched               | chain to
+         |                       |   from catalog               | target +
+         v                       |   server)                    | flash-on-
+   +-----------+                 v                              | boot
+   | target    |           +-----------+                        v
+   | machine   |           | target    |                  +---------------+
+   | local     |           | machine   |                  | target machine|
+   | disk      |           | local     |                  | netboot env   |
+   +-----------+           | disk      |                  | -> local disk |
+                           +-----------+                  +---------------+
+
+                              ^                                  ^
+                              | network catalog                  | full PXE
+                              | source (one of):                 | server
+                              |                                  |
+                              | * ghcr.io/safl/bty-web           | bty-server-x86
+                              |   (Docker; trial / small team)   | bty-server-rpi
+                              | * bty-server appliance           |
+                              |   (also serves catalog over HTTP)|
 ```
 
-The `bty` library implements the flashing logic (`bty.flash`, `bty.images`,
-`bty.disks`) consumed by both flows. `bty-tui` and `bty-web` are UI
-shells; `bty-flash-on-boot` is the systemd service that runs the flash
-unattended after a PXE boot. Same operations, different delivery
-vehicles.
+The `bty` library implements the flashing logic (`bty.flash`,
+`bty.images`, `bty.disks`) consumed by all three flows. `bty-tui` and
+`bty-web` are UI shells; `bty-flash-on-boot` is the systemd service
+that runs the flash unattended after a PXE boot. Same operations,
+different delivery vehicles. The middle shape (`--server URL`) is
+where the Docker container fits naturally - a single command on a
+workstation gives a small team a shared image catalog without
+standing up the appliance.
 
 ## `bty` (CLI)
 
