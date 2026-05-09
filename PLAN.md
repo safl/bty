@@ -690,9 +690,27 @@ Landed after the original 1.0 list:
       for v1 and bty-web has no other websocket / event-stream
       dependency.
     - CLI: ``bty catalog list``, ``bty catalog fetch <name>``,
-      ``bty catalog validate <file>``. ``bty list images``
-      grows a SHA-prefix column; ``bty flash --image`` accepts
-      ``sha256:<prefix>`` as well as a path or URL.
+      ``bty catalog validate <file>`` for server-side manifest
+      management. The local CLI (``bty list images``,
+      ``bty flash --image``) stays intentionally simple --
+      directory scan only, no SHA / manifest awareness in
+      operator-facing flags. (v0.6.0 briefly grew a
+      ``ref:<prefix>`` resolver and a SHA column; v0.6.1
+      reshaped that out: the catalog story is a server
+      concern, not part of the local CLI surface.)
+    - **Auto-import on bty-web startup** (added v0.6.1):
+      walks ``BTY_IMAGE_ROOT`` once and enqueues a hash job
+      for every dir-scan file without a sidecar. Files
+      become flashable (visible in ``/images``) once
+      imported. HashManager runs serially by default
+      (``BTY_HASH_MAX_PARALLEL=1``); a Pi 4 with 10 unhashed
+      images doesn't get hammered.
+    - **Client/server shape (v0.6.1)**: ``GET /images``
+      returns one entry per SHA with a single ``url`` field
+      that the client (``bty-tui --server URL``, any HTTP
+      consumer) flashes from. Server URL when cached / imported,
+      upstream URL when manifest+uncached. The client never
+      reasons about cache state.
     - Public URLs only (HTTP / HTTPS, no auth).
     - Cache is unbounded; manual `rm` for eviction, documented
       under a hardening / maintenance section.

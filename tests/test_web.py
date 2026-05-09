@@ -414,6 +414,53 @@ def test_list_images_is_open_for_pxe_clients(app_client: TestClient) -> None:
     assert r.status_code == 200
 
 
+def test_auto_import_hashes_unhashed_dir_scan_files(tmp_path: Path) -> None:
+    """bty-web's lifespan walks ``BTY_IMAGE_ROOT`` at startup and
+    enqueues a hash job for every file without a ``.sha256``
+    sidecar. After the hashing settles, the file is listable via
+    ``/images`` with a server URL.
+
+    Asserts the auto-import path fires; uses tiny payloads + a
+    short polling loop for the sidecar to avoid flake on slow CI.
+    """
+    import hashlib
+    import time
+
+    image_root = tmp_path / "images"
+    image_root.mkdir()
+    payload = b"auto-import me"
+    expected_sha = hashlib.sha256(payload).hexdigest()
+    img_path = image_root / "fresh.img"
+    img_path.write_bytes(payload)
+    sidecar = image_root / "fresh.img.sha256"
+    assert not sidecar.exists()
+
+    state = tmp_path / "state.db"
+    app = create_app(
+        state_path=state,
+        service_user=TEST_SERVICE_USER,
+        secret_key=TEST_SECRET_KEY,
+        image_root=image_root,
+    )
+    with TestClient(app) as client:
+        # The lifespan's auto-import enqueues the hash job; the
+        # HashManager processes it in a worker thread. Wait briefly
+        # for the sidecar to land (tiny file -> ms-scale).
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline and not sidecar.exists():
+            time.sleep(0.05)
+        assert sidecar.exists(), "auto-import didn't write the sidecar"
+        # Sidecar carries the right digest.
+        assert sidecar.read_text().strip().split()[0] == expected_sha
+        # /images now lists the entry with a server URL.
+        r = client.get("/images")
+        rows = r.json()
+        names = {row["name"] for row in rows}
+        assert "fresh.img" in names
+        entry = next(row for row in rows if row["name"] == "fresh.img")
+        assert entry["url"].endswith(f"/images/{expected_sha}")
+
+
 def test_list_images_returns_files_under_image_root(
     tmp_path: Path,
 ) -> None:
