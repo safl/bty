@@ -201,12 +201,18 @@ class CatalogEntryAdd(BaseModel):
     is URL-only -- flashable via the URL pipeline, not bindable
     to a machine.
 
-    Both URLs must be ``http://`` or ``https://``; arbitrary
-    schemes are rejected at validation time so a typo doesn't
-    land an entry that can never be flashed.
+    Both URLs must be ``http://`` or ``https://`` and must carry
+    a host segment; arbitrary schemes and host-less inputs like
+    ``https://?`` are rejected at validation time so a typo
+    doesn't land an entry that can never be flashed.
+
+    The host pattern (``[^\\s/?#]+``) requires at least one
+    non-separator char before any path / query / fragment, which
+    is the same rule WHATWG URL parsing applies to the host
+    component.
     """
 
     model_config = {"extra": "forbid"}
 
-    image_url: str = Field(..., pattern=r"^https?://.+")
-    sha_url: str | None = Field(default=None, pattern=r"^https?://.+")
+    image_url: str = Field(..., pattern=r"^https?://[^\s/?#]+(?:[/?#]\S*)?$")
+    sha_url: str | None = Field(default=None, pattern=r"^https?://[^\s/?#]+(?:[/?#]\S*)?$")

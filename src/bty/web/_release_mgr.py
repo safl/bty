@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import re
 import threading
 import time
 from dataclasses import dataclass, field
@@ -37,6 +38,13 @@ from bty.web import _releases
 # Default cap on simultaneous release fetches. Tuned for "one
 # release at a time" semantics; bumping is unusual.
 DEFAULT_MAX_PARALLEL = 1
+
+# Tag shape mirrors :class:`bty.web._models.ReleaseFetchRequest.tag`'s
+# Pydantic regex. Manager-side enforcement catches direct
+# ``manager.enqueue("../etc/passwd")`` / etc. from non-API call
+# sites (tests, future internal callers) so a malformed tag can
+# never reach the GitHub URL builder.
+_TAG_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 
 
 @dataclass
@@ -132,7 +140,16 @@ class ReleaseFetchManager:
         Idempotent: returns the existing state if already
         queued / running / completed. ``cancelled`` / ``failed``
         states allow a fresh attempt.
+
+        Raises :class:`ValueError` if ``tag`` is not a plausible
+        GitHub release tag (alnum + ``.`` ``_`` ``-``). The HTTP
+        layer's Pydantic model already rejects this shape; the
+        check here protects non-API callers (tests, future
+        internal use) from slipping a slash through to the URL
+        builder.
         """
+        if not _TAG_RE.match(tag):
+            raise ValueError(f"invalid release tag {tag!r}: must match [A-Za-z0-9._-]+")
         if self._boot_root is None:
             raise RuntimeError("ReleaseFetchManager not started")
         async with self._lock:

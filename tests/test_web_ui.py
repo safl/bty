@@ -319,6 +319,23 @@ def test_ui_boot_page_renders_with_artifact_state(client: TestClient) -> None:
     # progress. Pin both shapes.
     assert 'id="enqueue-fetch-btn"' in body
     assert "/boot/releases" in body
+    # v0.7.25: the boot-page polling JS used to (a) reference a
+    # never-set ``_just_completed_marker`` field and (b) wrap
+    # ``refresh`` to do a second ``fetch /boot/releases`` per
+    # poll cycle, doubling load. Both were folded out -- pin the
+    # cleaned-up shape so a future copy-paste doesn't reintroduce
+    # them.
+    assert "_just_completed_marker" not in body
+    # The bare-quoted ``"/boot/releases"`` (closing quote, no
+    # trailing slash) appears in exactly two places: the refresh
+    # GET and the enqueue POST. The cancel DELETE uses
+    # ``"/boot/releases/" + encodeURIComponent(tag)`` (trailing
+    # slash, different literal). A third bare-quoted occurrence
+    # means the double-fetch ``origRefresh`` wrapper crept back.
+    bare_count = body.count('"/boot/releases"')
+    assert bare_count == 2, (
+        f"expected exactly 2 references (refresh GET + enqueue POST); got {bare_count}"
+    )
 
 
 # ---------- Phase E: settings page ----------------------------------------

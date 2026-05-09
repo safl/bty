@@ -115,6 +115,14 @@
     var pollHandle = null;
     var POLL_INTERVAL_MS = 2000;
 
+    // Reload the page when a previously-running fetch hits
+    // "completed" so the top "Boot artifacts" table reflects the
+    // newly-present files. Tracks the previous snapshot of fetches
+    // and reloads once on the running -> completed transition for
+    // a given tag.
+    var seenCompleted = new Set();
+    var lastFetchesSnapshot = null;
+
     function fmtBytes(n) {
         if (n === null || n === undefined) return "?";
         var mib = n / (1024 * 1024);
@@ -161,15 +169,31 @@
         return '<span class="text-muted small">-</span>';
     }
 
+    function detectCompletion(fetches) {
+        if (lastFetchesSnapshot) {
+            fetches.forEach(function (s) {
+                if (s.status === "completed" && !seenCompleted.has(s.tag)) {
+                    var prior = lastFetchesSnapshot.find(function (p) { return p.tag === s.tag; });
+                    if (prior && prior.status === "running") {
+                        seenCompleted.add(s.tag);
+                        window.location.reload();
+                    }
+                }
+            });
+        }
+        lastFetchesSnapshot = fetches;
+    }
+
     function refresh() {
         return fetch("/boot/releases", { credentials: "same-origin" })
             .then(function (r) { return r.json(); })
             .then(function (data) {
                 var tbody = document.getElementById("fetches-tbody");
-                if (!data.fetches || !data.fetches.length) {
+                var fetches = data.fetches || [];
+                if (!fetches.length) {
                     tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-3"><em>No fetches yet.</em></td></tr>';
                 } else {
-                    var rows = data.fetches.map(function (s) {
+                    var rows = fetches.map(function (s) {
                         return "<tr>" +
                                "<td><code>" + s.tag + "</code></td>" +
                                "<td>" + statusBadge(s.status) + "</td>" +
@@ -181,12 +205,7 @@
                     tbody.innerHTML = rows;
                 }
                 document.querySelector(".bty-poll-status").textContent = "updated " + new Date().toLocaleTimeString();
-                // If anything completed since the last refresh, reload
-                // the page so the artefact-status table at the top
-                // reflects the new "present" rows.
-                if (data.fetches.some(function (s) { return s.status === "completed" && s._just_completed_marker; })) {
-                    window.location.reload();
-                }
+                detectCompletion(fetches);
             });
     }
 
@@ -233,36 +252,6 @@
             }).then(refresh);
         }
     });
-
-    // Reload the page when a previously-running fetch hits
-    // "completed" so the top "Boot artifacts" table reflects the
-    // newly-present files. We track the last-seen status set;
-    // when any tag transitions to completed, reload once.
-    var seenCompleted = new Set();
-    var lastFetchesSnapshot = null;
-    function detectCompletion(data) {
-        if (lastFetchesSnapshot) {
-            data.fetches.forEach(function (s) {
-                if (s.status === "completed" && !seenCompleted.has(s.tag)) {
-                    var prior = lastFetchesSnapshot.find(function (p) { return p.tag === s.tag; });
-                    if (prior && prior.status === "running") {
-                        seenCompleted.add(s.tag);
-                        window.location.reload();
-                    }
-                }
-            });
-        }
-        lastFetchesSnapshot = data.fetches;
-    }
-    // Attach completion-detection by chaining onto refresh.
-    var origRefresh = refresh;
-    refresh = function () {
-        return origRefresh().then(function () {
-            return fetch("/boot/releases", { credentials: "same-origin" })
-                .then(function (r) { return r.json(); })
-                .then(detectCompletion);
-        });
-    };
 
     startPolling();
 })();

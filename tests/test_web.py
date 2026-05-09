@@ -1307,3 +1307,45 @@ def test_release_fetch_unknown_extra_field_422(app_client: TestClient) -> None:
         cookies=AUTH,
     )
     assert r.status_code == 422
+
+
+def test_release_fetch_manager_enqueue_rejects_malformed_tag() -> None:
+    """``ReleaseFetchManager.enqueue`` validates the tag shape
+    even for non-API callers (tests, future internal use). The
+    HTTP layer's Pydantic model already covers the public path,
+    but the manager must guard its own boundary so a slash-
+    bearing tag can never reach the GitHub URL builder."""
+    import asyncio
+
+    from bty.web import _release_mgr
+
+    mgr = _release_mgr.ReleaseFetchManager()
+
+    async def go() -> None:
+        # ``start`` would normally be called by the FastAPI lifespan;
+        # the validator runs before the boot-root check so a
+        # well-formed tag check requires no event-loop wiring.
+        with pytest.raises(ValueError, match=r"invalid release tag"):
+            await mgr.enqueue("../etc/passwd")
+        with pytest.raises(ValueError, match=r"invalid release tag"):
+            await mgr.enqueue("with/slash")
+        with pytest.raises(ValueError, match=r"invalid release tag"):
+            await mgr.enqueue("")
+
+    asyncio.run(go())
+
+
+def test_catalog_entries_add_rejects_url_without_host(
+    app_client: TestClient,
+) -> None:
+    """``image_url`` regex requires a host segment. ``https://?``
+    (empty host) and ``http:///path`` (host-less) must 422 at
+    the Pydantic layer; the previous lax ``https?://.+`` would
+    have accepted both."""
+    for bad in ("https://?", "http:///path", "https://"):
+        r = app_client.post(
+            "/catalog/entries",
+            json={"image_url": bad},
+            cookies=AUTH,
+        )
+        assert r.status_code == 422, f"expected 422 for {bad!r}, got {r.status_code}"
