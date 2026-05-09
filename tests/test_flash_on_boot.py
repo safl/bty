@@ -86,6 +86,12 @@ def test_local_image_path_extension_recognised_by_detect_format():
         "http://srv/images/disk.qcow2",
         "http://srv/images/raw.img",
         "http://srv/images/release.img.zst",
+        # M22.1 URL shape from the unified /images endpoint:
+        # ``/images/<sha>/<filename>`` where the trailing
+        # filename carries the format. The decorative-name
+        # design exists exactly so this works.
+        "http://srv/images/" + "a" * 64 + "/release.img.zst",
+        "http://srv/images/" + "f" * 64 + "/disk.qcow2",
     ):
         p = mod.local_image_path(url)
         assert images.detect_format(p) is not None, (url, p)
