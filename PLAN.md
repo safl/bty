@@ -575,6 +575,28 @@ Landed after the original 1.0 list:
     the catalog without flashing the catalog onto every stick.
     The PXE flow stays in the bare-metal `bty-server` appliance.
 
+## Future work (not yet scheduled)
+
+These are forward-looking ideas captured for the roadmap; no
+implementation is in flight.
+
+- **PXE-boot a kernel image (no flash).** Today's PXE flow is
+  always "boot the netboot live env, run `bty flash`, reboot
+  into local disk". A complementary mode would PXE-boot a
+  kernel + initrd + squashfs trio that the target *runs*
+  persistently from the network, never writing to local disk.
+  Use cases: diskless CI runners that fetch a fresh OS every
+  job (no state to drift); rescue / recovery boots to a
+  known-good environment; lab benchmarking on machines that
+  have no disk or shouldn't be written to. The artefacts
+  already exist (`netboot-x86` variant) and `bty-web`'s
+  per-MAC `boot_policy` field already routes to different
+  iPXE scripts; this mode would add a new policy value (e.g.
+  `boot_policy=netrun`) that renders an iPXE script that
+  hands off to the kernel without scheduling a flash. The
+  trickier piece is what the hand-off OS *does* on the
+  network-mounted root, which is downstream of bty itself.
+
 ## Preserved from legacy bty
 
 These behaviors from the pre-rewrite version are load-bearing requirements,
