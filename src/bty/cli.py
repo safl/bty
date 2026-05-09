@@ -263,6 +263,15 @@ def cmd_list_images(args: argparse.Namespace) -> int:
     rows alongside local images so operators see the full set of
     flashable references in one place.
     """
+    # Distinguish "image root doesn't exist" from "exists but empty"
+    # so operators don't silently get an empty listing for a typo'd
+    # ``--image-root`` path. Stderr warning preserves stdout for the
+    # JSON / table consumer.
+    if not args.image_root.exists():
+        print(
+            f"bty: image root {args.image_root} does not exist; listing empty",
+            file=sys.stderr,
+        )
     found = images.list_images(args.image_root)
     remotes = images.list_all_remote_images(args.image_root)
     local_rows = [{**img.to_dict(), "source": "local"} for img in found]

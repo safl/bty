@@ -83,18 +83,30 @@ def test_server_cloudinit_does_not_install_plymouth() -> None:
     so a third "let's add the splash back" cycle gets caught by
     tests instead of by an operator watching a fresh appliance
     boot.
+
+    Two layers of defense are pinned here:
+
+    1. Plymouth is not in the ``packages:`` list (so cloud-init
+       doesn't ADD it).
+    2. ``apt-get -y purge plymouth`` is in ``runcmd:`` (so
+       plymouth is REMOVED if the Debian-13 daily cloud-image
+       baseline pre-installed it -- which is what happened in
+       v0.7.2's bake despite the packages-list removal).
     """
     from pathlib import Path
 
     repo_root = Path(__file__).resolve().parents[1]
     base = repo_root / "bty-media" / "auxiliary" / "cloudinit-base-server.user"
     body = base.read_text()
-    # ``- plymouth`` and ``- plymouth-themes`` are the YAML
-    # list-item forms in the ``packages:`` block; ``plymouth-set-
-    # default-theme`` is the runcmd handle. Each is a clear
-    # signal of plymouth being installed / configured. Inline
-    # comments using the word are fine (the comment block in the
-    # file documents *why* plymouth isn't shipped).
+    # Layer 1: ``- plymouth`` / ``- plymouth-themes`` are the YAML
+    # list-item forms in the ``packages:`` block;
+    # ``plymouth-set-default-theme`` is the runcmd handle. Each is
+    # a clear signal of plymouth being installed / configured.
+    # Inline comments using the word are fine (the comment block
+    # documents *why* plymouth isn't shipped).
     assert "\n  - plymouth\n" not in body
     assert "\n  - plymouth-themes\n" not in body
     assert "plymouth-set-default-theme" not in body
+    # Layer 2: defensive purge in runcmd. Pin the literal command
+    # so a refactor that "tidies" the runcmd block doesn't drop it.
+    assert "apt-get -y purge plymouth" in body

@@ -87,6 +87,20 @@ def test_list_images_uses_image_root_argument(
     assert "alpha.qcow2" in out
 
 
+def test_list_images_warns_on_missing_image_root(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A typo'd ``--image-root`` path silently returning an empty
+    list looks indistinguishable from a populated-but-empty
+    BTY_IMAGES; stderr-warn so the operator catches the mistake
+    without polluting stdout (which JSON / table consumers parse)."""
+    rc = cli.main(["list", "images", "--image-root", str(tmp_path / "nope")])
+    assert rc == 0
+    captured = capsys.readouterr()
+    assert "does not exist" in captured.err
+    assert "listing empty" in captured.err
+
+
 def test_list_images_includes_bri_descriptors(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
