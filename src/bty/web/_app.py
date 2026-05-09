@@ -603,10 +603,27 @@ def create_app(
         application/octet-stream``). Atomic via a ``.partial`` sibling
         + rename. Returns the resolved path + bytes-written on
         success; replaces an existing file with the same name.
+
+        Auto-enqueues a hash job after the write so the new image
+        appears in the unified ``/images`` listing on the next
+        request without waiting for a server restart. The
+        HashManager runs a single worker by default; the upload
+        returns immediately and the operator can watch progress
+        via ``/catalog/hashes``.
         """
         result = await _stream_upload(request, resolved_image_root, name)
         # Image catalog count changes; refresh the dashboard fragment.
         publish_state_changed()
+        # Trigger an import for the just-uploaded file. If a
+        # ``.sha256`` sidecar was uploaded alongside (or already
+        # existed), enqueue is a no-op via the immediate-complete
+        # shortcut.
+        try:
+            await hash_manager.enqueue(name)
+        except FileNotFoundError:
+            # ``_stream_upload`` raised earlier if the write failed,
+            # so this should never happen -- guarded for safety.
+            pass
         return result
 
     @app.put(

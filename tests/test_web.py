@@ -380,6 +380,38 @@ def test_put_image_requires_auth(app_client: TestClient) -> None:
     assert r.status_code == 401
 
 
+def test_put_image_triggers_hash_so_entry_appears_in_listing(
+    app_client: TestClient,
+    tmp_path: Path,
+) -> None:
+    """A successful PUT /images/{name} enqueues a hash job so the
+    image surfaces in /images on the next request without waiting
+    for the next server restart's auto-import sweep. Without this,
+    operators uploading via the API would see the file land but
+    bty-tui --server clients would not see it as flashable until
+    bty-web bounced.
+    """
+    import hashlib
+    import time
+
+    payload = b"upload-and-hash"
+    expected_sha = hashlib.sha256(payload).hexdigest()
+    r = app_client.put("/images/uploaded.img", content=payload, cookies=AUTH)
+    assert r.status_code == 200
+    # The hash runs in a worker; poll briefly.
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline:
+        r2 = app_client.get("/images")
+        names = {row["name"] for row in r2.json()}
+        if "uploaded.img" in names:
+            break
+        time.sleep(0.05)
+    rows = r2.json()
+    by_name = {row["name"]: row for row in rows}
+    assert "uploaded.img" in by_name, "upload didn't trigger an auto-hash"
+    assert by_name["uploaded.img"]["url"].endswith(f"/images/{expected_sha}/uploaded.img")
+
+
 def test_put_boot_uploads_to_boot_root(app_client: TestClient) -> None:
     """``PUT /boot/{name}`` symmetric to /images/{name} but lands
     under boot_root - this is how the live trio gets onto the
