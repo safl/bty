@@ -228,6 +228,8 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def cmd_list_disks(args: argparse.Namespace) -> int:
+    import subprocess
+
     try:
         rows = disks.list_disks()
     except FileNotFoundError:
@@ -238,6 +240,22 @@ def cmd_list_disks(args: argparse.Namespace) -> int:
             "bty: lsblk not found; install ``util-linux`` to list block devices",
             file=sys.stderr,
         )
+        return 2
+    except subprocess.TimeoutExpired:
+        # Stuck IO subsystem (failing disk, hung udev) -- surface a
+        # clear timeout instead of a raw subprocess.TimeoutExpired
+        # traceback. Operator can rerun once the underlying issue
+        # is sorted; bty itself has no recourse here.
+        print(
+            "bty: lsblk timed out; check for stuck / failing disks via ``dmesg``",
+            file=sys.stderr,
+        )
+        return 2
+    except subprocess.CalledProcessError as exc:
+        # lsblk exits non-zero on permission denied (rare), bad
+        # column spec, etc. Print stderr for diagnosis.
+        msg = (exc.stderr or "").strip() or f"lsblk exited {exc.returncode}"
+        print(f"bty: lsblk failed: {msg}", file=sys.stderr)
         return 2
     if args.json:
         print(json.dumps(_envelope("list-disks", disks=rows), indent=2))

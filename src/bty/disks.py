@@ -30,6 +30,11 @@ def list_disks() -> list[dict[str, Any]]:
         capture_output=True,
         text=True,
         check=True,
+        # Bound the call so a stuck IO subsystem (failing disk
+        # responding slowly to udev queries) can't hang the CLI /
+        # TUI indefinitely. 10s is generous; healthy lsblk returns
+        # in <100ms on every box I've tested.
+        timeout=10,
     )
     payload = json.loads(proc.stdout)
     devices: list[dict[str, Any]] = payload.get("blockdevices", [])

@@ -90,14 +90,33 @@ def pick_target() -> str:
 
 
 def download(url: str, dest: Path) -> None:
+    """Stream ``url`` into ``dest``.
+
+    Atomic via a sibling ``.partial`` file + rename so a torn
+    download (server hangup, OOM kill, kernel panic) can't leave
+    a half-written file where ``bty flash --yes`` would read it
+    as a complete image. ``timeout=300`` on the HTTP read keeps
+    the boot from hanging indefinitely on a misconfigured server.
+    """
     print(f"bty-flash-on-boot: downloading {url} -> {dest}", flush=True)
     dest.parent.mkdir(parents=True, exist_ok=True)
-    with urllib.request.urlopen(url) as resp, dest.open("wb") as f:
-        while True:
-            chunk = resp.read(1 << 20)
-            if not chunk:
-                break
-            f.write(chunk)
+    tmp = dest.with_suffix(dest.suffix + ".partial")
+    try:
+        with urllib.request.urlopen(url, timeout=300) as resp, tmp.open("wb") as f:
+            while True:
+                chunk = resp.read(1 << 20)
+                if not chunk:
+                    break
+                f.write(chunk)
+        tmp.replace(dest)
+    except BaseException:
+        # Clean up the partial on any failure -- including
+        # KeyboardInterrupt -- so a re-attempted boot starts fresh.
+        try:
+            tmp.unlink()
+        except FileNotFoundError:
+            pass
+        raise
 
 
 def signal_done(server: str, mac: str) -> None:
