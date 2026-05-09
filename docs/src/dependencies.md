@@ -117,8 +117,11 @@ or ``ENV`` block (Dockerfile) covers every component.
 | `BTY_QUIET` | container entrypoint | unset | Suppress the start-up banner with default credentials |
 
 `bty-tui` also accepts `--image-root /path` and `--server URL`
-flags directly; the CLI accepts `--image-root /path` on
-`bty list images` and `bty inspect`.
+flags directly. On the CLI, `bty list images --image-root /path`
+overrides for that command; `bty inspect image PATH` and
+`bty flash --image PATH_OR_URL` take the image as a direct
+argument (path for inspect; path or `http(s)://...` for flash)
+and don't read the image root.
 
 ## To run the test-pxe end-to-end check
 
