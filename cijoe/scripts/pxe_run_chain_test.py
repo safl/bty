@@ -44,6 +44,7 @@ Retargetable: False
 from __future__ import annotations
 
 import errno
+import hashlib
 import json
 import logging as log
 import socket
@@ -129,6 +130,24 @@ def main(args, cijoe):
             dummy_image,
             cfg["machine_image"],
         )
+        # M22 switched machine bindings from filename to content
+        # (image_sha256). Compute the dummy's SHA locally and
+        # upload a sidecar so the dir-scan finds the SHA
+        # immediately; without this, bty-web's async hash worker
+        # might still be running when the client PXE-boots and
+        # ``/pxe/<mac>`` would race-fail to resolve the SHA.
+        dummy_sha = _sha256_file(dummy_image)
+        sidecar_name = f"{cfg['machine_image']}.sha256"
+        sidecar_body = f"{dummy_sha}  {cfg['machine_image']}\n".encode()
+        log.info(f"PUT /images/{sidecar_name} (pin SHA synchronously)")
+        _put_bytes(
+            "127.0.0.1",
+            mgmt_port,
+            token,
+            "/images",
+            sidecar_body,
+            sidecar_name,
+        )
 
         # Wait for sshd to come up + drop the test-only dnsmasq
         # config that does full DHCP on the synthesised PXE
@@ -146,7 +165,7 @@ def main(args, cijoe):
         _ssh_setup_test_dhcp("127.0.0.1", ssh_port, cfg)
 
         log.info(f"PUT /machines/{cfg['client_mac']} (boot_policy=flash)")
-        _put_assignment("127.0.0.1", mgmt_port, token, cfg)
+        _put_assignment("127.0.0.1", mgmt_port, token, cfg, dummy_sha)
 
         log.info(f"Starting client VM (PXE boot, joined to socket :{pxe_socket_port})")
         client = _start_client_vm(workspace, pxe_socket_port, client_log, cfg)
@@ -323,10 +342,10 @@ def _put_file(host, port, token, base_path, src_path, name):
                 raise RuntimeError(f"PUT {url} returned {resp.status}")
 
 
-def _put_assignment(host, port, token, cfg):
+def _put_assignment(host, port, token, cfg, image_sha256):
     body = json.dumps(
         {
-            "image": cfg["machine_image"],
+            "image_sha256": image_sha256,
             "provisioning_mode": "none",
             "boot_policy": "flash",
         }
@@ -343,6 +362,37 @@ def _put_assignment(host, port, token, cfg):
     with urllib.request.urlopen(req, timeout=10) as resp:
         if resp.status != 200:
             raise RuntimeError(f"PUT /machines returned {resp.status}")
+
+
+def _put_bytes(host, port, token, base_path, body, name):
+    """``PUT /<base>/<name>`` with ``body`` (bytes) as the request
+    body. Sibling of ``_put_file`` for in-memory payloads (sidecars,
+    etc.) where the file isn't on disk."""
+    url = f"http://{host}:{port}{base_path}/{name}"
+    req = urllib.request.Request(
+        url,
+        data=body,
+        method="PUT",
+        headers={
+            "Cookie": f"bty-token={token}",
+            "Content-Type": "application/octet-stream",
+            "Content-Length": str(len(body)),
+        },
+    )
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        if resp.status not in (200, 201):
+            raise RuntimeError(f"PUT {url} returned {resp.status}")
+
+
+def _sha256_file(path):
+    """SHA-256 of ``path``'s bytes as a 64-char lower-case hex
+    string. Streamed read so a multi-GiB target image doesn't
+    pin all of RAM."""
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
 
 
 # ---------- chain markers --------------------------------------------------
