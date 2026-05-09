@@ -176,6 +176,20 @@ class CatalogEnqueueRequest(BaseModel):
     name: str = Field(..., description="image name as declared in the manifest")
 
 
+class ReleaseFetchRequest(BaseModel):
+    """``POST /boot/releases`` body: enqueue a release-fetch job
+    by tag. ``"latest"`` resolves via GitHub's
+    ``releases/latest/download`` redirect; explicit tags use
+    ``releases/download/<tag>/`` directly. Tag must be non-empty
+    + a reasonable shape: tag identifiers in GitHub release
+    URLs are URL-path segments and shouldn't carry slashes.
+    """
+
+    model_config = {"extra": "forbid"}
+
+    tag: str = Field(default="latest", min_length=1, pattern=r"^[A-Za-z0-9._-]+$")
+
+
 class CatalogEntryAdd(BaseModel):
     """``POST /catalog/entries`` body: add an operator-curated
     catalog entry by URL.

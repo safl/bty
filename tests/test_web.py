@@ -1246,3 +1246,64 @@ class _MockResp:
 
     def decode(self, *_a: object) -> str:
         return self._body.decode()
+
+
+# ---------- release-fetch manager (M24) ------------------------------------
+
+
+def test_release_fetch_enqueue_returns_state(
+    app_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``POST /boot/releases`` enqueues a fetch and returns the
+    initial state. The actual fetch is mocked out so the test
+    runs offline + fast."""
+
+    # Patch the worker so it just records + returns success.
+    def fake_fetch(boot_dir, *_a, **_kw):  # type: ignore[no-untyped-def]
+        from bty.web._releases import FetchResult
+
+        return FetchResult(base_url="https://test.invalid/x", artifacts=("a",), total_bytes=42)
+
+    monkeypatch.setattr("bty.web._releases.fetch_release", fake_fetch)
+    r = app_client.post(
+        "/boot/releases",
+        json={"tag": "latest"},
+        cookies=AUTH,
+    )
+    assert r.status_code == 202, r.text
+    body = r.json()
+    assert body["tag"] == "latest"
+    assert body["status"] in ("queued", "running", "completed")
+
+
+def test_release_fetch_list_returns_states(app_client: TestClient) -> None:
+    r = app_client.get("/boot/releases", cookies=AUTH)
+    assert r.status_code == 200
+    body = r.json()
+    assert "fetches" in body
+    assert "boot_root" in body
+    assert "max_parallel" in body
+
+
+def test_release_fetch_cancel_unknown_tag_404(app_client: TestClient) -> None:
+    r = app_client.delete("/boot/releases/never-was", cookies=AUTH)
+    assert r.status_code == 404
+
+
+def test_release_fetch_invalid_tag_422(app_client: TestClient) -> None:
+    """Tag must match the URL-segment-friendly pattern."""
+    r = app_client.post(
+        "/boot/releases",
+        json={"tag": "with/slashes"},
+        cookies=AUTH,
+    )
+    assert r.status_code == 422
+
+
+def test_release_fetch_unknown_extra_field_422(app_client: TestClient) -> None:
+    r = app_client.post(
+        "/boot/releases",
+        json={"tag": "latest", "stale_field": "x"},
+        cookies=AUTH,
+    )
+    assert r.status_code == 422

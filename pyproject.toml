@@ -1,6 +1,6 @@
 [project]
 name = "bty-lab"
-version = "0.7.23"
+version = "0.7.24"
 description = "Flash images onto target disks, locally or over PXE"
 readme = "README.md"
 requires-python = ">=3.11"

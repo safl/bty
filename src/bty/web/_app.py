@@ -33,7 +33,7 @@ import bty
 from bty import catalog as _catalog
 from bty import images
 from bty.web import _catalog as _web_catalog
-from bty.web import _db, _hash, _models, _ui
+from bty.web import _db, _hash, _models, _release_mgr, _ui
 from bty.web._auth import SESSION_COOKIE, require_auth
 from bty.web._events import MachineEvent, MachineEventBus, sse_format
 from bty.web._workflow import WorkflowRunner
@@ -100,6 +100,7 @@ def create_app(
             parsed_catalog = None
     download_manager = _web_catalog.DownloadManager()
     hash_manager = _hash.HashManager()
+    release_fetch_manager = _release_mgr.ReleaseFetchManager()
 
     @asynccontextmanager
     async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -115,6 +116,12 @@ def create_app(
         # so a Pi-class box doesn't get hammered if multiple big
         # images need importing at once.
         hash_manager.start(resolved_image_root)
+        # Release-fetch manager: powers the trackable
+        # /boot/releases endpoints (and the /ui/boot page's
+        # progress + cancel buttons). Default parallelism is 1
+        # because fetching two GitHub releases in parallel is
+        # operator-confusing and bandwidth-saturating.
+        release_fetch_manager.start(resolved_boot_root)
         # Auto-import: enqueue every dir-scan file without a
         # ``.sha256`` sidecar so the HashManager processes them
         # in the background. Once a sidecar lands, ``/images``
@@ -134,6 +141,7 @@ def create_app(
             if parsed_catalog is not None:
                 await download_manager.stop()
             await hash_manager.stop()
+            await release_fetch_manager.stop()
 
     jinja = Environment(
         loader=FileSystemLoader(str(TEMPLATES_DIR)),
@@ -371,6 +379,41 @@ def create_app(
             )
 
         return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    # ---------- release-fetch manager (M24, v0.7.24) ---------------------------
+    # Registered BEFORE the ``GET /boot/{name}`` catch-all so
+    # ``/boot/releases`` doesn't get eaten as a missing artefact name.
+    # Powers the trackable "Fetch from GitHub releases" action on
+    # /ui/boot: ``POST /boot/releases`` enqueues, ``GET /boot/releases``
+    # polls, ``DELETE /boot/releases/{tag}`` cancels.
+
+    @app.get("/boot/releases", dependencies=[Depends(require_auth)])
+    async def list_release_fetches() -> dict[str, Any]:
+        states = await release_fetch_manager.list()
+        return {
+            "boot_root": str(resolved_boot_root),
+            "max_parallel": release_fetch_manager.max_parallel,
+            "fetches": [s.to_dict() for s in states],
+        }
+
+    @app.post(
+        "/boot/releases",
+        status_code=status.HTTP_202_ACCEPTED,
+        dependencies=[Depends(require_auth)],
+    )
+    async def enqueue_release_fetch(body: _models.ReleaseFetchRequest) -> dict[str, Any]:
+        state = await release_fetch_manager.enqueue(body.tag)
+        return state.to_dict()
+
+    @app.delete("/boot/releases/{tag}", dependencies=[Depends(require_auth)])
+    async def cancel_release_fetch(tag: str) -> dict[str, Any]:
+        state = await release_fetch_manager.cancel(tag)
+        if state is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"no active release fetch for tag {tag!r}",
+            )
+        return state.to_dict()
 
     @app.get("/boot/{name}", include_in_schema=False)
     def boot_artifact(name: str) -> FileResponse:

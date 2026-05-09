@@ -41,6 +41,98 @@
     </div>
 </div>
 
+<div class="card mb-3">
+    <div class="card-header bg-light fw-semibold">
+        <i class="bi bi-upload me-1"></i>Upload image file
+    </div>
+    <div class="card-body">
+        {# Streams the file via XHR PUT to /images/<name> -- the
+           existing API endpoint that takes ``application/octet-
+           stream``. JS handles progress + auth (cookie, same-
+           origin); on success we reload so the new file shows
+           up in the catalog table below. The HashManager picks
+           up the upload via PUT /images/<name>'s post-write
+           hook (auto-enqueue), so a SHA appears in seconds. #}
+        <div class="row g-2 align-items-end">
+            <div class="col-md-9">
+                <label for="upload-file" class="form-label small mb-1">Local image file</label>
+                <input type="file" class="form-control" id="upload-file"
+                       accept=".qcow2,.img,.img.zst,.img.xz,.img.gz,.img.bz2,.iso,.iso.gz">
+            </div>
+            <div class="col-md-3">
+                <button type="button" class="btn btn-primary w-100" id="upload-btn"
+                        onclick="uploadSelectedFile();" disabled>
+                    <i class="bi bi-upload me-1"></i>Upload
+                </button>
+            </div>
+        </div>
+        <div class="progress mt-2 d-none" id="upload-progress" style="height: 1.25rem;">
+            <div class="progress-bar progress-bar-striped progress-bar-animated"
+                 role="progressbar" style="width: 0%;" id="upload-progress-bar">0%</div>
+        </div>
+        <div class="form-text small mt-2" id="upload-status">
+            Pick a file -- it streams directly into the image root via
+            <code>PUT /images/&lt;name&gt;</code>. SHA-256 is auto-computed
+            in the background after upload completes.
+        </div>
+    </div>
+</div>
+
+<script>
+    (function () {
+        var input = document.getElementById("upload-file");
+        var btn = document.getElementById("upload-btn");
+        input.addEventListener("change", function () {
+            btn.disabled = !input.files || input.files.length === 0;
+        });
+    })();
+
+    function uploadSelectedFile() {
+        var input = document.getElementById("upload-file");
+        var btn = document.getElementById("upload-btn");
+        var progress = document.getElementById("upload-progress");
+        var bar = document.getElementById("upload-progress-bar");
+        var status = document.getElementById("upload-status");
+        if (!input.files || !input.files.length) return;
+        var file = input.files[0];
+        // PUT /images/<filename> takes raw bytes. Server uses the
+        // path-segment name; ``filename`` from <input type=file> is
+        // already just the basename in browsers.
+        var url = "/images/" + encodeURIComponent(file.name);
+        var xhr = new XMLHttpRequest();
+        xhr.open("PUT", url, true);
+        xhr.setRequestHeader("Content-Type", "application/octet-stream");
+        xhr.withCredentials = true;
+        xhr.upload.onprogress = function (ev) {
+            if (!ev.lengthComputable) return;
+            var pct = Math.round(ev.loaded * 100 / ev.total);
+            bar.style.width = pct + "%";
+            bar.textContent = pct + "%";
+        };
+        xhr.onload = function () {
+            if (xhr.status >= 200 && xhr.status < 300) {
+                status.textContent = "Upload complete; reloading catalog...";
+                setTimeout(function () { window.location.reload(); }, 600);
+            } else {
+                status.textContent = "Upload failed: HTTP " + xhr.status + " " + xhr.responseText;
+                btn.disabled = false;
+                progress.classList.add("d-none");
+            }
+        };
+        xhr.onerror = function () {
+            status.textContent = "Upload failed: network error";
+            btn.disabled = false;
+            progress.classList.add("d-none");
+        };
+        btn.disabled = true;
+        progress.classList.remove("d-none");
+        bar.style.width = "0%";
+        bar.textContent = "0%";
+        status.textContent = "Uploading " + file.name + " (" + file.size.toLocaleString() + " bytes)...";
+        xhr.send(file);
+    }
+</script>
+
 {% if not unified %}
 <div class="alert alert-light border">
     <i class="bi bi-info-circle me-2"></i>

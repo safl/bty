@@ -57,13 +57,15 @@
     </div>
 </div>
 
-<div class="card">
+<div class="card mb-4">
+    <div class="card-header bg-light fw-semibold">
+        <i class="bi bi-cloud-download me-1"></i>Fetch from GitHub releases
+    </div>
     <div class="card-body">
-        <h2 class="h5 mb-3">Fetch from GitHub releases</h2>
-        <form action="/ui/boot/fetch-release" method="post" class="row g-3 align-items-end">
+        <div class="row g-3 align-items-end">
             <div class="col-sm-8">
                 <label class="form-label" for="tag">Tag</label>
-                <input type="text" name="tag" id="tag" class="form-control"
+                <input type="text" id="tag" class="form-control"
                        value="latest" placeholder="latest, or e.g. media-v0.1.0">
                 <div class="form-text">
                     <code>latest</code> resolves through GitHub's redirect to the most
@@ -74,11 +76,195 @@
                 </div>
             </div>
             <div class="col-sm-4">
-                <button type="submit" class="btn btn-primary w-100">
+                <button type="button" class="btn btn-primary w-100" id="enqueue-fetch-btn"
+                        onclick="enqueueFetch();">
                     <i class="bi bi-cloud-download me-1"></i>Fetch
                 </button>
             </div>
-        </form>
+        </div>
     </div>
 </div>
+
+<div class="card">
+    <div class="card-header bg-light fw-semibold d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-arrow-down-circle me-1"></i>Active + recent fetches</span>
+        <span class="text-muted small bty-poll-status">refreshing...</span>
+    </div>
+    <div class="table-responsive">
+        <table class="table mb-0 align-middle">
+            <thead class="table-light">
+                <tr>
+                    <th>Tag</th>
+                    <th>Status</th>
+                    <th>Progress</th>
+                    <th>Started</th>
+                    <th class="text-end" style="width: 1%; white-space: nowrap;">Action</th>
+                </tr>
+            </thead>
+            <tbody id="fetches-tbody">
+                <tr><td colspan="5" class="text-center text-muted py-3">
+                    <em>Loading...</em>
+                </td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+(function () {
+    var pollHandle = null;
+    var POLL_INTERVAL_MS = 2000;
+
+    function fmtBytes(n) {
+        if (n === null || n === undefined) return "?";
+        var mib = n / (1024 * 1024);
+        if (mib < 1024) return mib.toFixed(1) + " MiB";
+        return (mib / 1024).toFixed(2) + " GiB";
+    }
+
+    function fmtTime(ts) {
+        if (!ts) return "-";
+        return new Date(ts * 1000).toLocaleTimeString();
+    }
+
+    function statusBadge(s) {
+        var cls = {
+            queued: "bg-secondary",
+            running: "bg-primary",
+            completed: "bg-success",
+            cancelled: "bg-warning text-dark",
+            failed: "bg-danger",
+        }[s] || "bg-light text-dark border";
+        return '<span class="badge ' + cls + '">' + s + '</span>';
+    }
+
+    function progressCell(s) {
+        if (s.status !== "running") {
+            if (s.status === "completed") return '<span class="text-muted small">' + fmtBytes(s.bytes_done) + '</span>';
+            if (s.status === "failed" && s.error) return '<span class="text-danger small">' + s.error + '</span>';
+            return '<span class="text-muted small">-</span>';
+        }
+        var pct = s.bytes_total ? Math.round(s.bytes_done * 100 / s.bytes_total) : null;
+        var label = (s.artefact || "...") + " - " + fmtBytes(s.bytes_done);
+        if (pct !== null) label += " / " + fmtBytes(s.bytes_total) + " (" + pct + "%)";
+        var bar = '<div class="progress" style="height: 0.85rem;">' +
+                  '<div class="progress-bar progress-bar-striped progress-bar-animated" ' +
+                  'style="width: ' + (pct === null ? 100 : pct) + '%;"></div></div>';
+        return '<div class="small">' + label + '</div>' + bar;
+    }
+
+    function actionCell(s) {
+        if (s.status === "queued" || s.status === "running") {
+            return '<button class="btn btn-sm btn-outline-danger bty-cancel-fetch-btn" data-tag="' +
+                   s.tag + '"><i class="bi bi-x-circle me-1"></i>Cancel</button>';
+        }
+        return '<span class="text-muted small">-</span>';
+    }
+
+    function refresh() {
+        return fetch("/boot/releases", { credentials: "same-origin" })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                var tbody = document.getElementById("fetches-tbody");
+                if (!data.fetches || !data.fetches.length) {
+                    tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-3"><em>No fetches yet.</em></td></tr>';
+                } else {
+                    var rows = data.fetches.map(function (s) {
+                        return "<tr>" +
+                               "<td><code>" + s.tag + "</code></td>" +
+                               "<td>" + statusBadge(s.status) + "</td>" +
+                               "<td>" + progressCell(s) + "</td>" +
+                               "<td><small>" + fmtTime(s.started_at) + "</small></td>" +
+                               '<td class="text-end">' + actionCell(s) + "</td>" +
+                               "</tr>";
+                    }).join("");
+                    tbody.innerHTML = rows;
+                }
+                document.querySelector(".bty-poll-status").textContent = "updated " + new Date().toLocaleTimeString();
+                // If anything completed since the last refresh, reload
+                // the page so the artefact-status table at the top
+                // reflects the new "present" rows.
+                if (data.fetches.some(function (s) { return s.status === "completed" && s._just_completed_marker; })) {
+                    window.location.reload();
+                }
+            });
+    }
+
+    function startPolling() {
+        if (pollHandle) return;
+        refresh();
+        pollHandle = setInterval(refresh, POLL_INTERVAL_MS);
+    }
+    function stopPolling() {
+        if (pollHandle) { clearInterval(pollHandle); pollHandle = null; }
+    }
+    document.addEventListener("visibilitychange", function () {
+        if (document.hidden) stopPolling(); else startPolling();
+    });
+
+    window.enqueueFetch = function () {
+        var tag = document.getElementById("tag").value.trim() || "latest";
+        var btn = document.getElementById("enqueue-fetch-btn");
+        btn.disabled = true;
+        fetch("/boot/releases", {
+            method: "POST",
+            credentials: "same-origin",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ tag: tag }),
+        }).then(function (r) {
+            if (!r.ok) throw new Error("HTTP " + r.status);
+            refresh();
+        }).catch(function (e) {
+            alert("Enqueue failed: " + e.message);
+        }).finally(function () {
+            btn.disabled = false;
+        });
+    };
+
+    document.addEventListener("click", function (ev) {
+        var cancelBtn = ev.target.closest(".bty-cancel-fetch-btn");
+        if (cancelBtn) {
+            ev.preventDefault();
+            var tag = cancelBtn.getAttribute("data-tag");
+            cancelBtn.disabled = true;
+            fetch("/boot/releases/" + encodeURIComponent(tag), {
+                method: "DELETE",
+                credentials: "same-origin",
+            }).then(refresh);
+        }
+    });
+
+    // Reload the page when a previously-running fetch hits
+    // "completed" so the top "Boot artifacts" table reflects the
+    // newly-present files. We track the last-seen status set;
+    // when any tag transitions to completed, reload once.
+    var seenCompleted = new Set();
+    var lastFetchesSnapshot = null;
+    function detectCompletion(data) {
+        if (lastFetchesSnapshot) {
+            data.fetches.forEach(function (s) {
+                if (s.status === "completed" && !seenCompleted.has(s.tag)) {
+                    var prior = lastFetchesSnapshot.find(function (p) { return p.tag === s.tag; });
+                    if (prior && prior.status === "running") {
+                        seenCompleted.add(s.tag);
+                        window.location.reload();
+                    }
+                }
+            });
+        }
+        lastFetchesSnapshot = data.fetches;
+    }
+    // Attach completion-detection by chaining onto refresh.
+    var origRefresh = refresh;
+    refresh = function () {
+        return origRefresh().then(function () {
+            return fetch("/boot/releases", { credentials: "same-origin" })
+                .then(function (r) { return r.json(); })
+                .then(detectCompletion);
+        });
+    };
+
+    startPolling();
+})();
+</script>
 {% endblock %}

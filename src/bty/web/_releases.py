@@ -25,9 +25,11 @@ import os
 import tempfile
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TypeAlias
 
 # Names match the artifacts the ``netboot-x86`` variant publishes
 # (see ``cijoe/scripts/live_build.py::PUBLISH_BASENAMES``).
@@ -66,6 +68,29 @@ class FetchError(Exception):
     """Wraps an upstream failure (network / HTTP / verification)."""
 
 
+class FetchCancelled(Exception):
+    """Raised by :func:`fetch_release` when the supplied ``cancel``
+    callback returns ``True`` between chunks. Distinct from
+    :class:`FetchError` so callers can treat operator-cancellation
+    as a normal control-flow signal, not an error condition."""
+
+
+# Type aliases mirror :mod:`bty.catalog`'s ``fetch_to_cache`` shape so
+# the manager wiring is structurally identical to DownloadManager /
+# HashManager / ReleaseFetchManager.
+FetchProgressCallback: TypeAlias = Callable[[int, "int | None"], None]
+"""Signature: ``progress(bytes_done, total_bytes_or_None)``. Called
+once per chunk written for the *currently-streaming* artefact.
+``total_bytes`` is the upstream ``Content-Length`` if the server
+sent one (most do), else ``None``."""
+
+FetchCancelCheck: TypeAlias = Callable[[], bool]
+"""Signature: ``cancel() -> bool``. Polled between chunks; returning
+``True`` raises :class:`FetchCancelled`. Used with
+``threading.Event.is_set`` so the manager (running the fetcher in
+a worker thread) can abort from outside."""
+
+
 def inspect_boot_dir(boot_dir: Path) -> list[ArtifactState]:
     """Return the present/missing state of each expected artifact."""
     out: list[ArtifactState] = []
@@ -92,6 +117,8 @@ def fetch_release(
     repo: str | None = None,
     tag: str = "latest",
     base_url: str | None = None,
+    progress: FetchProgressCallback | None = None,
+    cancel: FetchCancelCheck | None = None,
 ) -> FetchResult:
     """Download all expected artifacts for ``tag`` into ``boot_dir``.
 
@@ -99,6 +126,12 @@ def fetch_release(
     to point at a local ``http.server`` instead of github.com).
     Raises :class:`FetchError` on any failure; on success the boot dir
     is bit-for-bit identical to the release's manifest.
+
+    ``progress(bytes_done, total)`` and ``cancel()`` enable the
+    :class:`bty.web._release_mgr.ReleaseFetchManager` UI: progress
+    is called per-chunk during each artefact's stream, and cancel
+    is polled so the operator's "Cancel" button lands within
+    seconds.
     """
     repo = repo or os.environ.get("BTY_BOOT_RELEASE_REPO") or DEFAULT_REPO
     if base_url is None:
@@ -114,7 +147,9 @@ def fetch_release(
         for name in ALL_NAMES:
             url = f"{base_url}/{name}"
             try:
-                total += _stream(url, tmp_path / name)
+                total += _stream(url, tmp_path / name, progress=progress, cancel=cancel)
+            except FetchCancelled:
+                raise
             except urllib.error.HTTPError as exc:
                 raise FetchError(f"GET {url} returned HTTP {exc.code} {exc.reason}") from exc
             except urllib.error.URLError as exc:
@@ -136,24 +171,43 @@ def fetch_release(
     return FetchResult(base_url=base_url, artifacts=ALL_NAMES, total_bytes=total)
 
 
-def _stream(url: str, dest: Path) -> int:
+def _stream(
+    url: str,
+    dest: Path,
+    *,
+    progress: FetchProgressCallback | None = None,
+    cancel: FetchCancelCheck | None = None,
+) -> int:
     """Stream ``url`` to ``dest`` in 1 MiB chunks; return bytes written.
 
     ``timeout=300`` so a flaky GitHub mirror (or a network blip mid-
     artefact) doesn't wedge the bty-web ``fetch latest release``
-    action indefinitely. Five minutes is generous for a
-    ~150 MiB squashfs at typical link speeds; tempdir cleanup on
-    failure is handled by the caller's ``TemporaryDirectory``.
+    action indefinitely.
+
+    ``progress`` is called per-chunk with cumulative bytes written
+    for *this artefact* (not the whole release); ``cancel`` is
+    polled per-chunk and raises :class:`FetchCancelled` on True.
     """
     req = urllib.request.Request(url, headers={"User-Agent": DEFAULT_USER_AGENT})
     written = 0
     with urllib.request.urlopen(req, timeout=300) as resp, dest.open("wb") as f:
+        try:
+            cl = resp.headers.get("Content-Length")
+            content_length: int | None = int(cl) if cl is not None else None
+        except (ValueError, AttributeError):
+            content_length = None
+        if progress is not None:
+            progress(0, content_length)
         while True:
+            if cancel is not None and cancel():
+                raise FetchCancelled("fetch cancelled by caller")
             chunk = resp.read(1 << 20)
             if not chunk:
                 break
             f.write(chunk)
             written += len(chunk)
+            if progress is not None:
+                progress(written, content_length)
     return written
 
 

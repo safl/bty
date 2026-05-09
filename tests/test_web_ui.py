@@ -312,8 +312,13 @@ def test_ui_boot_page_renders_with_artifact_state(client: TestClient) -> None:
     # Empty boot dir => four "missing" badges (warning kind).
     assert body.count("missing</span>") == 4
     assert body.count('class="badge bg-warning text-dark"') >= 4
-    # The fetch form must reach our route.
-    assert 'action="/ui/boot/fetch-release"' in body
+    # v0.7.24 swapped the synchronous form-post for an
+    # HTMX-style background trigger; the page now wires a
+    # button that POSTs to /boot/releases (the trackable
+    # release-fetch endpoint) and polls /boot/releases for
+    # progress. Pin both shapes.
+    assert 'id="enqueue-fetch-btn"' in body
+    assert "/boot/releases" in body
 
 
 # ---------- Phase E: settings page ----------------------------------------
