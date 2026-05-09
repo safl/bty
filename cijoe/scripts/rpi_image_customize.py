@@ -367,9 +367,10 @@ def _render_install_script(wheel_filename: str) -> str:
         # 7. Service enables. ``ssh`` so odus can SSH; ``systemd-networkd``
         #    is preferred over Pi OS's NetworkManager for predictable
         #    ``en*`` matching. ``bty-web``/``bty-web-init`` come from the
-        #    overlay drop.
+        #    overlay drop. ``bty-ssh-host-keys`` regenerates host keys on
+        #    first boot (we delete the bake-time keys below).
         systemctl enable ssh systemd-networkd systemd-networkd-wait-online
-        systemctl enable bty-web bty-web-init
+        systemctl enable bty-web bty-web-init bty-ssh-host-keys
         systemctl disable NetworkManager 2>/dev/null || true
         systemctl disable dhcpcd 2>/dev/null || true
 
@@ -379,6 +380,14 @@ def _render_install_script(wheel_filename: str) -> str:
             mv /etc/dnsmasq.conf /etc/dnsmasq.conf.dist
             : > /etc/dnsmasq.conf
         fi
+
+        # 9. SSH host-key hygiene. Pi OS's openssh-server postinst
+        #    generated host keys during the upstream image build; remove
+        #    them now so every operator who downloads
+        #    bty-server-rpi-arm64.img.gz does NOT share an identical set
+        #    of host keys with every other operator. bty-ssh-host-keys
+        #    regenerates per-instance keys on first boot.
+        rm -f /etc/ssh/ssh_host_*
     """).lstrip()
 
 

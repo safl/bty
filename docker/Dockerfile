@@ -58,13 +58,21 @@ RUN set -eu; \
 # the cooked image needs a known password the operator can use the
 # moment the container is up. Same model the appliance uses; same
 # rotation responsibility (rotate before exposing).
+#
+# The bty user runs the bty-web process at runtime (see USER below).
+# pamela's auth path goes through pam_unix -> the setgid-shadow
+# ``unix_chkpwd`` binary, which can read /etc/shadow without bty-
+# web itself having shadow-group access. Same pattern the appliance
+# uses (``User=bty`` in bty-web.service); aligning the container
+# avoids divergent privilege levels between deployment shapes.
 RUN useradd --system --no-create-home --shell /usr/sbin/nologin bty \
  && echo 'bty:bty' | chpasswd
 
 # State + image directories. Operator volume-mounts ``/var/lib/bty``;
 # bty-web writes ``state.db``, ``session-secret``, and the image
-# catalog under that root.
-RUN install -d -o root -g root -m 0755 /var/lib/bty /var/lib/bty/images
+# catalog under that root. Owned by bty so the unprivileged service
+# user can write without needing chown at every container start.
+RUN install -d -o bty -g bty -m 0750 /var/lib/bty /var/lib/bty/images
 VOLUME /var/lib/bty
 
 # bty-web reads these env vars; defaults match the on-image
@@ -79,7 +87,11 @@ EXPOSE 8080
 COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod 0755 /entrypoint.sh
 
-# Running as root because pamela needs to read /etc/shadow.
-# tini reaps zombies and forwards signals so SIGTERM lands on
-# bty-web within ~100ms instead of the 10s docker-stop timeout.
+# Run as the unprivileged bty user (matches the appliance's
+# ``User=bty`` in bty-web.service). PAM authentication still works:
+# pam_unix delegates to the setgid-shadow ``unix_chkpwd`` binary
+# which reads /etc/shadow on bty-web's behalf. tini reaps zombies
+# and forwards signals so SIGTERM lands on bty-web within ~100ms
+# instead of the 10s docker-stop timeout.
+USER bty
 ENTRYPOINT ["/usr/bin/tini", "--", "/entrypoint.sh"]

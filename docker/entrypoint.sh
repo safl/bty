@@ -15,8 +15,36 @@
 
 set -eu
 
-mkdir -p "${BTY_STATE_DIR:-/var/lib/bty}" \
-         "${BTY_IMAGE_ROOT:-/var/lib/bty/images}"
+STATE_DIR="${BTY_STATE_DIR:-/var/lib/bty}"
+IMAGE_ROOT="${BTY_IMAGE_ROOT:-/var/lib/bty/images}"
+
+# Volume-permission preflight. The container runs bty-web as the
+# unprivileged ``bty`` user (uid 999) so it matches the appliance
+# layout. Bind mounts inherit host ownership, so a bare
+# ``-v ./bty-data:/var/lib/bty`` from a host where the dir is
+# root-owned blocks bty-web's first write to ``state.db`` /
+# ``session-secret`` and the container would crash 30 frames
+# deep in Python with a confusing PermissionError. Detect the
+# unwritable case here and exit with a one-line fix.
+if ! mkdir -p "$STATE_DIR" "$IMAGE_ROOT" 2>/dev/null \
+   || ! [ -w "$STATE_DIR" ] || ! [ -w "$IMAGE_ROOT" ]; then
+    cat >&2 <<EOF
+
+bty-web container: cannot write to ${STATE_DIR}.
+
+The container runs as uid $(id -u) (the bty user). Your bind mount
+appears to be owned by a different uid. Pre-chown the host dir:
+
+    sudo chown -R $(id -u):$(id -g) ./bty-data
+
+Or use a docker-managed volume (which inherits the image's
+ownership):
+
+    docker run -v bty-data:/var/lib/bty ...
+
+EOF
+    exit 1
+fi
 
 if [ -z "${BTY_QUIET:-}" ]; then
     cat >&2 <<EOF

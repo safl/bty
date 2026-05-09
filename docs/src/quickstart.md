@@ -13,16 +13,20 @@ USB stick or an appliance, pull the published container:
 ```bash
 docker run -d --name bty-web \
   -p 8080:8080 \
-  -v "$PWD/bty-data":/var/lib/bty \
+  -v bty-data:/var/lib/bty \
   ghcr.io/safl/bty-web:latest
 # -> http://localhost:8080/ui   (login: bty / bty)
 ```
 
-Drop `.qcow2` / `.img.zst` / `.img.gz` files into `./bty-data/images/`
-and they show up in the catalog. From a USB live stick or a
-workstation, point `bty-tui --server http://<host>:8080` at it to
-flash from a network-shared catalog without burning images onto
-every stick.
+Use the docker-managed volume (`-v bty-data:/var/lib/bty`) for
+the simplest start; the in-container bty user owns it. If you
+prefer bind-mounts so files show up in the host filesystem,
+pre-chown the dir to uid 999 (the bty user) - the entrypoint
+checks and exits with a clear hint if it cannot write.
+
+Connect a `bty-tui --server http://<host>:8080` from a USB live
+stick or a workstation to flash from this catalog without burning
+images onto every stick.
 
 The container has no dnsmasq / TFTP / iPXE - it's the catalog +
 UI shape, not the PXE shape. For PXE-driven unattended flashing,

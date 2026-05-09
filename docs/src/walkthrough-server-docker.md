@@ -27,17 +27,36 @@ the bty-server appliance instead.
 
 ## Quick start
 
+The container runs `bty-web` as the unprivileged `bty` user (uid
+999), matching the bare-metal appliance. Pre-create the host data
+dir with that ownership before starting (one-time, host-side):
+
 ```bash
+mkdir -p ./bty-data
+sudo chown -R 999:999 ./bty-data    # match the in-container bty user
 docker run -d --name bty-web \
   -p 8080:8080 \
   -v "$PWD/bty-data":/var/lib/bty \
   ghcr.io/safl/bty-web:latest
 ```
 
-That is the whole thing. Open <http://localhost:8080/ui> and log in
-with `bty / bty`. Drop `.img.zst` / `.qcow2` / `.img.gz` files into
-`./bty-data/images/` (created on first start) and they appear in
-the catalog after a refresh.
+Or skip the chown by using a docker-managed volume (inherits the
+image's ownership automatically):
+
+```bash
+docker run -d --name bty-web \
+  -p 8080:8080 \
+  -v bty-data:/var/lib/bty \
+  ghcr.io/safl/bty-web:latest
+```
+
+Open <http://localhost:8080/ui> and log in with `bty / bty`. Drop
+`.img.zst` / `.qcow2` / `.img.gz` files into the data directory's
+`images/` subfolder and they appear in the catalog after a refresh.
+
+If the bind-mount permission isn't right, the entrypoint exits
+with a one-line fix command instead of letting bty-web crash deep
+in a Python traceback.
 
 ## Compose
 

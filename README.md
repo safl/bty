@@ -42,14 +42,15 @@ anything, a multi-arch container is published to
 on every release:
 
 ```bash
-docker run -d --name bty-web -p 8080:8080 -v "$PWD/bty-data":/var/lib/bty \
+docker run -d --name bty-web -p 8080:8080 -v bty-data:/var/lib/bty \
   ghcr.io/safl/bty-web:latest
 # -> http://localhost:8080/ui   (login: bty / bty)
 ```
 
 Image catalog only - no DHCP / TFTP / PXE proxy in the container
 (those need bare-metal LAN access; use the appliance for that).
-See [`docs/src/walkthrough-server-docker.md`](docs/src/walkthrough-server-docker.md).
+See [`docs/src/walkthrough-server-docker.md`](docs/src/walkthrough-server-docker.md)
+for bind-mount permissions, env vars, and password rotation.
 
 ## Install
 

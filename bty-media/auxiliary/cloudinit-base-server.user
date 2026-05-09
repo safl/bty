@@ -15,9 +15,12 @@ manage_etc_hosts: true
 
 timezone: __BTY_TIMEZONE__
 
-# Build VM only - the cooked image disables ssh_pwauth and clears the
-# bake password via runcmd below. Operators of the bty server work
-# from the browser UI, not over SSH.
+# Build VM only - the cooked image's runcmd locks the bake-VM root
+# password (``passwd -l root``) so this seed credential cannot be
+# used after the bake. ``ssh_pwauth: true`` here just lets cloud-
+# init complete; sshd's PasswordAuthentication setting on the
+# cooked image is unchanged from Debian's default (yes, so
+# operators can ``ssh odus@<ip>`` per /etc/issue).
 ssh_pwauth: true
 chpasswd:
   expire: false
@@ -114,6 +117,7 @@ runcmd:
   # actual disk size. Without it the appliance is stuck at 6 GiB
   # rootfs no matter how big the server's disk is.
   - systemctl enable bty-grow-rootfs.service
+  - systemctl enable bty-ssh-host-keys.service
   - systemctl enable bty-web.service bty-web-init.service dnsmasq.service
   # systemd-networkd manages NICs via the .network files we ship in
   # rootfs/server/etc/systemd/network/. The default Debian server
@@ -170,6 +174,15 @@ runcmd:
   # next netplan apply (if any) overwrites our config.
   - rm -f /etc/netplan/50-cloud-init.yaml
   - rm -f /etc/network/interfaces.d/50-cloud-init.cfg
+
+  # SSH host-key hygiene. openssh-server's postinst generated host
+  # keys during ``apt install``; remove them now so the cooked
+  # image does NOT carry per-bake keys that every operator's
+  # downloaded appliance would otherwise share. ``bty-ssh-host-
+  # keys.service`` (enabled above) regenerates a unique set on
+  # first boot of each cooked instance, gated on the ed25519 key
+  # being absent.
+  - rm -f /etc/ssh/ssh_host_*
 
   # Trim apt + pip caches to keep the image small.
   - apt-get clean
