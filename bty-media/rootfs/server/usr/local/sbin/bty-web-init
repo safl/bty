@@ -54,8 +54,12 @@ chmod 0640 /etc/default/bty-web
 # is whatever DHCP / the operator gave the box.
 cat > /etc/issue <<'EOF'
 
-======================================================================
-  bty server appliance
+     _      _
+    | |__  | |_  _   _
+    | '_ \ | __|| | | |
+    | |_) || |_ | |_| |
+    |_.__/  \__| \__, |    server appliance
+                 |___/
 
   Browser UI:    http://\4:8080        login: bty / bty
   SSH admin:     ssh odus@\4           login: odus / odus
@@ -63,8 +67,6 @@ cat > /etc/issue <<'EOF'
 
   CHANGE THESE BEFORE EXPOSING TO ANY UNTRUSTED NETWORK:
     sudo passwd bty   ; sudo passwd odus
-
-======================================================================
 
 Debian \n \l
 EOF

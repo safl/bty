@@ -1,5 +1,10 @@
 
-  bty __BTY_VERSION__ server appliance
+     _      _
+    | |__  | |_  _   _
+    | '_ \ | __|| | | |
+    | |_) || |_ | |_| |
+    |_.__/  \__| \__, |    __BTY_VERSION__  server appliance
+                 |___/
 
   Browser UI:    http://<server-ip>:8080
   Default login: bty / bty   (rotate before exposing this server)
