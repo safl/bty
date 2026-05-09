@@ -360,6 +360,32 @@ def test_system_bri_root_returns_none_when_missing(
     assert images.system_bri_root() is None
 
 
+def test_merge_with_catalog_does_not_pick_up_bri_files(tmp_path: Path) -> None:
+    """``.bri`` files in the image_root must not silently appear as
+    SHA-less ``UnifiedImage`` entries. They have their own listing
+    function (``list_all_remote_images``) and a different identity
+    model (URL pointer, no SHA), so accidental inclusion would
+    produce a malformed ``UnifiedImage`` with no flashable source."""
+    image_root = tmp_path / "imgs"
+    cache_dir = tmp_path / "cache"
+    image_root.mkdir()
+    cache_dir.mkdir()
+    (image_root / "remote.bri").write_text('url = "https://example.invalid/foo.img.gz"\n')
+    merged = images.merge_with_catalog(image_root, [], cache_dir)
+    assert merged == []
+
+
+def test_list_remote_images_is_case_insensitive(tmp_path: Path) -> None:
+    """``.BRI`` (e.g. from a FAT32 stick prepared on Windows) is
+    accepted alongside lowercase ``.bri`` -- mirrors the
+    case-insensitive convention ``detect_format`` already uses for
+    image extensions."""
+    (tmp_path / "ALPHA.BRI").write_text('url = "https://example.invalid/a.img.gz"\n')
+    (tmp_path / "beta.bri").write_text('url = "https://example.invalid/b.img.gz"\n')
+    found = images.list_remote_images(tmp_path)
+    assert len(found) == 2
+
+
 def test_list_images_does_not_pick_up_bri_files(tmp_path: Path) -> None:
     """``.bri`` files are descriptors, not flashable bytes -- they
     must not show up in the local-image listing or dd would try to

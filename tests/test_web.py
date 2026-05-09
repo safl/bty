@@ -578,6 +578,43 @@ def test_list_images_surfaces_bri_descriptors(tmp_path: Path) -> None:
     assert by_name["Demo"]["format"] == "img.gz"
 
 
+def test_list_images_dedupes_bri_against_manifest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """If a ``.bri`` URL collides with a manifest entry's ``src``
+    (and the manifest entry is uncached so the URL flows through
+    verbatim), the catalog must not surface the same upstream
+    twice. Same-URL rows would confuse the operator and double-
+    count storage estimates in the UI."""
+    image_root = tmp_path / "images"
+    image_root.mkdir()
+
+    # .bri pointing at the same URL the manifest will declare.
+    upstream = "https://example.invalid/shared.img.gz"
+    (image_root / "from-bri.bri").write_text(f'url = "{upstream}"\nname = "Shared"\n')
+    manifest_path = tmp_path / "catalog.toml"
+    manifest_path.write_text(
+        f'version = 1\n\n[[images]]\nname = "shared.img.gz"\n'
+        f'src = "{upstream}"\nsha256 = "{"a" * 64}"\nformat = "img.gz"\n'
+    )
+    monkeypatch.setenv("BTY_CATALOG_FILE", str(manifest_path))
+
+    state = tmp_path / "state.db"
+    app = create_app(
+        state_path=state,
+        service_user=TEST_SERVICE_USER,
+        secret_key=TEST_SECRET_KEY,
+        image_root=image_root,
+    )
+    with TestClient(app) as client:
+        r = client.get("/images")
+
+    assert r.status_code == 200
+    rows = r.json()
+    urls = [row["url"] for row in rows]
+    assert urls.count(upstream) == 1
+
+
 # ---------- create_app sanity ----------------------------------------------
 
 

@@ -300,6 +300,9 @@ def cmd_inspect_image(args: argparse.Namespace) -> int:
     except FileNotFoundError:
         print(f"bty: no such image: {args.path}", file=sys.stderr)
         return 2
+    except images.BriError as exc:
+        print(f"bty: malformed .bri descriptor: {exc}", file=sys.stderr)
+        return 2
     if args.json:
         print(json.dumps(_envelope("inspect-image", image=info), indent=2, default=str))
     else:
@@ -351,7 +354,7 @@ def cmd_flash(
         # whose ``url`` field is the real source. Resolve here so
         # the rest of the flash path treats it as a regular URL
         # flash with no extra branching downstream.
-        if image_str.endswith(images.BRI_EXTENSION) and Path(image_str).is_file():
+        if image_str.lower().endswith(images.BRI_EXTENSION) and Path(image_str).is_file():
             descriptor = images.read_bri(Path(image_str))
             image_str = descriptor.url
         if image_str.startswith(("http://", "https://")):

@@ -595,7 +595,16 @@ def create_app(
         # uncached-manifest case: ``cached=False`` so the client
         # streams from upstream rather than asking the server for
         # bytes it doesn't host.
+        #
+        # Dedup against the SHA-keyed pass above by upstream URL:
+        # if an operator drops a ``.bri`` whose ``url`` matches a
+        # manifest entry's ``src`` (and the manifest entry isn't
+        # cached locally yet, so the URL flowed through verbatim),
+        # we'd otherwise emit two rows pointing at the same bytes.
+        emitted_urls = {entry.url for entry in out}
         for r in images.list_all_remote_images(resolved_image_root):
+            if r.url in emitted_urls:
+                continue
             out.append(
                 _models.ImageEntry(
                     name=r.name,

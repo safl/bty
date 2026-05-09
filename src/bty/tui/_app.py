@@ -1406,11 +1406,13 @@ class BtyTui(App[None]):
             _TuiImage(
                 name=r.name,
                 fmt=r.format,
-                # ``size_bytes`` is optional in the descriptor; the
-                # table column expects an int, so unknown -> 0 (the
-                # cell still renders, just shows ``0 B`` until the
-                # operator fetches and the size is known).
-                size_bytes=r.size_bytes or 0,
+                # ``size_bytes`` is optional in the descriptor;
+                # ``-1`` is the unknown-size sentinel that
+                # ``_format_mib`` renders as ``?`` (rather than a
+                # misleading ``0.0 MiB``). When the operator
+                # supplies ``size_bytes`` in the .bri the real
+                # number wins.
+                size_bytes=r.size_bytes if r.size_bytes is not None else -1,
                 url=r.url,
             )
             for r in images.list_all_remote_images(self._image_root)

@@ -321,7 +321,10 @@ def list_remote_images(root: Path) -> list[RemoteImage]:
         return []
     out: list[RemoteImage] = []
     for p in sorted(root.iterdir()):
-        if not p.is_file() or p.suffix != BRI_EXTENSION:
+        # Match the case-insensitive extension convention used by
+        # ``detect_format``; a stick prepared on Windows might
+        # surface ``.BRI`` from FAT32-style uppercasing.
+        if not p.is_file() or p.suffix.lower() != BRI_EXTENSION:
             continue
         try:
             out.append(read_bri(p))
@@ -499,6 +502,15 @@ def merge_with_catalog(
     seen only in one source produce single-name single-source
     entries. Unhashed dir-scan files get one entry each, keyed
     by name (no SHA available to dedupe).
+
+    ``.bri`` (bty Remote Image) descriptors are deliberately NOT
+    folded in here. A ``.bri`` is a name/URL pointer with no SHA,
+    so it cannot dedupe against SHA-keyed entries; it also cannot
+    be a machine-binding target until its bytes have been fetched
+    + hashed (machine.image_sha256 binds bytes by content). The
+    catalog endpoint and the TUI surface ``.bri`` rows separately
+    via :func:`list_all_remote_images`; the operator hashes a
+    ``.bri`` (by fetching it) before binding it to a machine.
     """
     by_sha: dict[str, UnifiedImage] = {}
     unhashed: list[UnifiedImage] = []
@@ -678,11 +690,14 @@ def inspect_image(path: Path) -> dict[str, Any]:
       ``format`` set to ``"bri"`` (the descriptor itself is metadata,
       not the image bytes; ``size_bytes`` is the descriptor file's
       size, not the upstream image's).
+
+    Raises :class:`FileNotFoundError` if the path does not exist,
+    or :class:`BriError` if it's a malformed ``.bri`` descriptor.
     """
     if not path.exists():
         raise FileNotFoundError(path)
 
-    if path.suffix == BRI_EXTENSION:
+    if path.suffix.lower() == BRI_EXTENSION:
         descriptor = read_bri(path)
         return {
             "path": str(path),

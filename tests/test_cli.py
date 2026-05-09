@@ -104,6 +104,20 @@ def test_list_images_includes_bri_descriptors(
     assert remote["format"] == "img.gz"
 
 
+def test_inspect_image_malformed_bri_returns_two(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``bty inspect image bad.bri`` surfaces a friendly stderr
+    message + exit 2 instead of dumping a BriError traceback."""
+    bri = tmp_path / "bad.bri"
+    bri.write_text('not_url = "missing-the-url-key"\n')
+    rc = cli.main(["inspect", "image", str(bri)])
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "malformed .bri" in err
+    assert "url" in err
+
+
 def test_inspect_image_missing_returns_two(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
