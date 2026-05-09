@@ -51,10 +51,15 @@ class MachineUpsert(BaseModel):
 
     All fields are optional except for the implicit ``mac`` from the
     path; ``provisioning_mode`` defaults to ``"none"`` and
-    ``boot_policy`` defaults to ``"local"``.
+    ``boot_policy`` defaults to ``"local"``. Image identity is the
+    SHA-256 of the image bytes (M22): the operator picks an image
+    from the unified catalog (which dedupes dir-scan files and
+    manifest entries by content hash) and bty stores the SHA, not
+    a filename. Renaming or replacing the underlying file does not
+    affect the binding.
     """
 
-    image: str | None = None
+    image_sha256: str | None = None
     provisioning_mode: str = Field(default="none", pattern=PROVISIONING_PATTERN)
     hostname: str | None = None
     cijoe_workflow_ref: str | None = None
@@ -64,14 +69,14 @@ class MachineUpsert(BaseModel):
 class Machine(BaseModel):
     """A persisted machine record as returned by the API.
 
-    A machine without an ``image`` set is *discovered* but unassigned -
-    bty-web saw it via ``GET /pxe/{mac}`` and recorded it so the
-    operator can claim it. Once the operator ``PUT``s an assignment,
-    the machine is *assigned*.
+    A machine without ``image_sha256`` set is *discovered* but
+    unassigned - bty-web saw it via ``GET /pxe/{mac}`` and recorded
+    it so the operator can claim it. Once the operator ``PUT``s an
+    assignment, the machine is *assigned*.
     """
 
     mac: str = Field(..., pattern=MAC_PATTERN)
-    image: str | None = None
+    image_sha256: str | None = None
     provisioning_mode: str = Field(default="none", pattern=PROVISIONING_PATTERN)
     hostname: str | None = None
     cijoe_workflow_ref: str | None = None

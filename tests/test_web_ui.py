@@ -167,13 +167,18 @@ def test_ui_machines_lists_known_records(client: TestClient) -> None:
     # Seed via the API.
     client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
-        json={"image": "demo.qcow2", "provisioning_mode": "none"},
+        json={
+            "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "provisioning_mode": "none",
+        },
         cookies=AUTH,
     )
     r = client.get("/ui/machines")
     assert r.status_code == 200
     assert "aa:bb:cc:dd:ee:ff" in r.text
-    assert "demo.qcow2" in r.text
+    # SHA short-prefix (first 12 hex chars) renders into the row's
+    # image cell. The full SHA is in the title= attribute.
+    assert "0123456789ab" in r.text
 
 
 def test_ui_machines_table_shows_discovered_badge(client: TestClient) -> None:
@@ -190,7 +195,10 @@ def test_ui_machine_detail_renders(client: TestClient) -> None:
     _login(client)
     client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
-        json={"image": "demo.qcow2", "provisioning_mode": "cloud-init"},
+        json={
+            "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "provisioning_mode": "cloud-init",
+        },
         cookies=AUTH,
     )
     r = client.get("/ui/machines/aa:bb:cc:dd:ee:ff")
@@ -210,7 +218,7 @@ def test_ui_machine_upsert_via_form(client: TestClient) -> None:
     r = client.post(
         "/ui/machines/aa:bb:cc:dd:ee:ff",
         data={
-            "image": "demo.qcow2",
+            "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
             "provisioning_mode": "none",
             "hostname": "bty-ui-test",
             "cijoe_workflow_ref": "",
@@ -224,7 +232,10 @@ def test_ui_machine_upsert_via_form(client: TestClient) -> None:
         cookies=AUTH,
     )
     assert api.status_code == 200
-    assert api.json()["image"] == "demo.qcow2"
+    assert (
+        api.json()["image_sha256"]
+        == "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    )
     assert api.json()["hostname"] == "bty-ui-test"
     # Form omits boot_policy -> dependency default applies (local).
     assert api.json()["boot_policy"] == "local"
@@ -235,7 +246,7 @@ def test_ui_machine_upsert_persists_boot_policy_flash(client: TestClient) -> Non
     r = client.post(
         "/ui/machines/aa:bb:cc:dd:ee:ff",
         data={
-            "image": "demo.qcow2",
+            "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
             "provisioning_mode": "none",
             "hostname": "",
             "cijoe_workflow_ref": "",
@@ -255,7 +266,7 @@ def test_ui_machine_upsert_rejects_unknown_boot_policy(client: TestClient) -> No
     r = client.post(
         "/ui/machines/aa:bb:cc:dd:ee:ff",
         data={
-            "image": "demo.qcow2",
+            "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
             "provisioning_mode": "none",
             "boot_policy": "yolo",
         },
@@ -268,7 +279,10 @@ def test_ui_machine_detail_renders_boot_policy_dropdown(client: TestClient) -> N
     _login(client)
     client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
-        json={"image": "demo.qcow2", "boot_policy": "flash"},
+        json={
+            "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "boot_policy": "flash",
+        },
         cookies=AUTH,
     )
     r = client.get("/ui/machines/aa:bb:cc:dd:ee:ff")
@@ -376,12 +390,18 @@ def test_ui_machines_list_shows_boot_policy_badge(client: TestClient) -> None:
     _login(client)
     client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
-        json={"image": "demo.qcow2", "boot_policy": "flash"},
+        json={
+            "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "boot_policy": "flash",
+        },
         cookies=AUTH,
     )
     client.put(
         "/machines/11:22:33:44:55:66",
-        json={"image": "demo.qcow2", "boot_policy": "local"},
+        json={
+            "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "boot_policy": "local",
+        },
         cookies=AUTH,
     )
     r = client.get("/ui/machines")
@@ -399,7 +419,10 @@ def test_ui_machine_delete_via_form(client: TestClient) -> None:
     _login(client)
     client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
-        json={"image": "demo.qcow2", "provisioning_mode": "none"},
+        json={
+            "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "provisioning_mode": "none",
+        },
         cookies=AUTH,
     )
     r = client.post("/ui/machines/aa:bb:cc:dd:ee:ff/delete")

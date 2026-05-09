@@ -175,7 +175,7 @@ def test_machines_with_right_token_is_200(app_client: TestClient) -> None:
 def test_machine_crud_round_trip(app_client: TestClient) -> None:
     mac = "aa:bb:cc:dd:ee:ff"
     body = {
-        "image": "debian.qcow2",
+        "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
         "provisioning_mode": "cloud-init",
         "hostname": "bty-test-01",
     }
@@ -185,7 +185,10 @@ def test_machine_crud_round_trip(app_client: TestClient) -> None:
     assert r.status_code == 200
     created = r.json()
     assert created["mac"] == mac
-    assert created["image"] == "debian.qcow2"
+    assert (
+        created["image_sha256"]
+        == "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    )
     assert created["provisioning_mode"] == "cloud-init"
     assert created["hostname"] == "bty-test-01"
 
@@ -234,12 +237,20 @@ def test_pxe_for_known_mac_uses_assignment_template(app_client: TestClient) -> N
     mac = "aa:bb:cc:dd:ee:ff"
     app_client.put(
         f"/machines/{mac}",
-        json={"image": "debian.qcow2", "provisioning_mode": "none"},
+        json={
+            "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "provisioning_mode": "none",
+        },
         cookies=AUTH,
     )
     r = app_client.get(f"/pxe/{mac}")
     assert r.status_code == 200
-    assert "debian.qcow2" in r.text
+    # The SHA-keyed machine record renders the short SHA prefix
+    # (first 12 hex chars) into the iPXE comment block, not the
+    # legacy image filename. The "no bty assignment" check below
+    # catches the more interesting regression: that we are not
+    # falling through to the unknown-MAC template.
+    assert "0123456789ab" in r.text
     assert "no bty assignment" not in r.text  # not the fallback
 
 
@@ -268,7 +279,7 @@ def test_pxe_auto_discovers_unknown_mac(app_client: TestClient) -> None:
     assert found.status_code == 200
     body = found.json()
     assert body["mac"] == mac
-    assert body["image"] is None  # discovered, not yet assigned
+    assert body["image_sha256"] is None  # discovered, not yet assigned
     assert body["provisioning_mode"] == "none"
     assert body["boot_policy"] == "tui"  # auto-discovery default
     assert body["discovered_at"] is not None
@@ -300,16 +311,23 @@ def test_pxe_does_not_overwrite_assignment(app_client: TestClient) -> None:
     mac = "aa:bb:cc:dd:ee:ff"
     app_client.put(
         f"/machines/{mac}",
-        json={"image": "debian.qcow2", "provisioning_mode": "cloud-init"},
+        json={
+            "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "provisioning_mode": "cloud-init",
+        },
         cookies=AUTH,
     )
     before = app_client.get(f"/machines/{mac}", cookies=AUTH).json()
-    assert before["image"] == "debian.qcow2"
+    assert (
+        before["image_sha256"] == "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    )
     assert before["discovered_at"] is None  # PUT-created
 
     app_client.get(f"/pxe/{mac}")
     after = app_client.get(f"/machines/{mac}", cookies=AUTH).json()
-    assert after["image"] == "debian.qcow2"  # untouched
+    assert (
+        after["image_sha256"] == "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    )  # untouched
     assert after["provisioning_mode"] == "cloud-init"
     assert after["last_seen_at"] is not None
     # discovered_at is set on first /pxe contact even for PUT-created rows
@@ -433,7 +451,10 @@ def test_machine_default_boot_policy_is_local(app_client: TestClient) -> None:
     operators opt INTO reflashing on every boot."""
     r = app_client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
-        json={"image": "demo.qcow2", "provisioning_mode": "none"},
+        json={
+            "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "provisioning_mode": "none",
+        },
         cookies=AUTH,
     )
     assert r.status_code == 200
@@ -445,7 +466,7 @@ def test_machine_upsert_accepts_boot_policy_flash(app_client: TestClient) -> Non
     r = app_client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
         json={
-            "image": "demo.qcow2",
+            "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
             "provisioning_mode": "none",
             "boot_policy": "flash",
         },
@@ -458,7 +479,10 @@ def test_machine_upsert_accepts_boot_policy_flash(app_client: TestClient) -> Non
 def test_machine_upsert_rejects_unknown_boot_policy(app_client: TestClient) -> None:
     r = app_client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
-        json={"image": "demo.qcow2", "boot_policy": "yolo"},
+        json={
+            "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "boot_policy": "yolo",
+        },
         cookies=AUTH,
     )
     assert r.status_code == 422
@@ -471,7 +495,7 @@ def test_pxe_local_policy_assigned_machine_returns_local_template(
     opt-in via boot_policy=flash, not implicit on assignment."""
     app_client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
-        json={"image": "demo.qcow2"},
+        json={"image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"},
         cookies=AUTH,
     )
     r = app_client.get("/pxe/aa:bb:cc:dd:ee:ff")
@@ -488,7 +512,7 @@ def test_pxe_flash_policy_returns_chain_with_args(app_client: TestClient) -> Non
     app_client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
         json={
-            "image": "demo.qcow2",
+            "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
             "provisioning_mode": "cloud-init",
             "boot_policy": "flash",
         },
@@ -510,7 +534,10 @@ def test_pxe_flash_policy_returns_chain_with_args(app_client: TestClient) -> Non
     # Cmdline params: live env's bty-flash-on-boot reads these.
     assert "bty.server=${bty-base}" in body
     assert "bty.mac=aa:bb:cc:dd:ee:ff" in body
-    assert "bty.image_url=${bty-base}/images/demo.qcow2" in body
+    assert (
+        "bty.image_url=${bty-base}/images/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+        in body
+    )
     assert "bty.provisioning=cloud-init" in body
 
 
@@ -555,7 +582,10 @@ def test_machine_upsert_accepts_boot_policy_tui(app_client: TestClient) -> None:
 def test_pxe_done_updates_last_flashed_at(app_client: TestClient) -> None:
     app_client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
-        json={"image": "demo.qcow2", "boot_policy": "flash"},
+        json={
+            "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "boot_policy": "flash",
+        },
         cookies=AUTH,
     )
     before = app_client.get("/machines/aa:bb:cc:dd:ee:ff", cookies=AUTH).json()
@@ -590,7 +620,7 @@ def test_pxe_done_triggers_online_workflow_when_configured(app_client: TestClien
     app_client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
         json={
-            "image": "demo.qcow2",
+            "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
             "provisioning_mode": "cijoe-online",
             "cijoe_workflow_ref": "/var/lib/bty/workflows/post-flash.yaml",
         },
@@ -620,7 +650,7 @@ def test_pxe_done_does_not_trigger_when_provisioning_mode_is_other(app_client: T
     app_client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
         json={
-            "image": "demo.qcow2",
+            "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
             "provisioning_mode": "none",
             "cijoe_workflow_ref": "/var/lib/bty/workflows/post-flash.yaml",
         },
@@ -639,7 +669,7 @@ def test_pxe_done_does_not_trigger_when_workflow_ref_missing(app_client: TestCli
     app_client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
         json={
-            "image": "demo.qcow2",
+            "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
             "provisioning_mode": "cijoe-online",
             # no cijoe_workflow_ref
         },
@@ -656,7 +686,7 @@ def test_machine_response_includes_workflow_columns(app_client: TestClient) -> N
     """Schema migration: new columns exposed via the wire model."""
     app_client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
-        json={"image": "demo.qcow2"},
+        json={"image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"},
         cookies=AUTH,
     )
     body = app_client.get("/machines/aa:bb:cc:dd:ee:ff", cookies=AUTH).json()

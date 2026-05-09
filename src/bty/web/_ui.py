@@ -53,6 +53,7 @@ def register_ui_routes(
     image_root: Path,
     boot_root: Path,
     publish_machines_changed: Callable[[], None] = lambda: None,
+    list_unified_images: Callable[[], list[bty_images.UnifiedImage]] | None = None,
 ) -> None:
     """Attach the ``/ui`` HTML routes (and exception handler) to ``app``.
 
@@ -145,7 +146,7 @@ def register_ui_routes(
         with _db.open_db(state_path) as conn:
             machine_count = conn.execute("SELECT COUNT(*) FROM machines").fetchone()[0]
             discovered_count = conn.execute(
-                "SELECT COUNT(*) FROM machines WHERE image IS NULL"
+                "SELECT COUNT(*) FROM machines WHERE image_sha256 IS NULL"
             ).fetchone()[0]
         image_count = len(bty_images.list_images(image_root))
         return render(
@@ -183,11 +184,19 @@ def register_ui_routes(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"no machine record for {normalised}",
             )
+        # Picker shows the unified catalog: dir-scan files with a
+        # SHA sidecar AND manifest entries, deduped by content
+        # hash. Unhashed dir-scan files are filtered out -- they
+        # cannot be selected (no SHA to bind to).
+        if list_unified_images is not None:
+            unified = [u for u in list_unified_images() if u.sha256 is not None]
+        else:
+            unified = []
         return render(
             "ui/machine_detail.html",
             request,
             m=_row_to_dict(row),
-            images=bty_images.list_images(image_root),
+            images=unified,
             provisioning_modes=list(PROVISIONING_MODES),
             boot_policies=list(BOOT_POLICIES),
         )
@@ -199,7 +208,7 @@ def register_ui_routes(
     )
     def ui_machine_upsert(
         mac: str,
-        image: Annotated[str, Form()] = "",
+        image_sha256: Annotated[str, Form()] = "",
         provisioning_mode: Annotated[str, Form()] = "none",
         hostname: Annotated[str, Form()] = "",
         cijoe_workflow_ref: Annotated[str, Form()] = "",
@@ -225,12 +234,12 @@ def register_ui_routes(
             conn.execute(
                 """
                 INSERT INTO machines
-                    (mac, image, provisioning_mode, hostname,
+                    (mac, image_sha256, provisioning_mode, hostname,
                      cijoe_workflow_ref, last_known_good,
                      boot_policy, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?)
                 ON CONFLICT(mac) DO UPDATE SET
-                    image              = excluded.image,
+                    image_sha256       = excluded.image_sha256,
                     provisioning_mode  = excluded.provisioning_mode,
                     hostname           = excluded.hostname,
                     cijoe_workflow_ref = excluded.cijoe_workflow_ref,
@@ -239,7 +248,7 @@ def register_ui_routes(
                 """,
                 (
                     normalised,
-                    image or None,
+                    image_sha256 or None,
                     provisioning_mode,
                     hostname or None,
                     cijoe_workflow_ref or None,
@@ -393,7 +402,7 @@ def register_ui_routes(
 def _row_to_dict(row: Any) -> dict[str, Any]:
     return {
         "mac": row["mac"],
-        "image": row["image"],
+        "image_sha256": row["image_sha256"],
         "provisioning_mode": row["provisioning_mode"],
         "hostname": row["hostname"],
         "cijoe_workflow_ref": row["cijoe_workflow_ref"],

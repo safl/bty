@@ -29,7 +29,7 @@ def default_state_path() -> Path:
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS machines (
     mac                       TEXT PRIMARY KEY,
-    image                     TEXT,
+    image_sha256              TEXT,    -- content-addressed image identity (M22)
     provisioning_mode         TEXT NOT NULL DEFAULT 'none',
     hostname                  TEXT,
     cijoe_workflow_ref        TEXT,

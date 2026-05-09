@@ -152,7 +152,7 @@ def create_app(
         with _db.open_db(state_path) as conn:
             machine_count = conn.execute("SELECT COUNT(*) FROM machines").fetchone()[0]
             discovered_count = conn.execute(
-                "SELECT COUNT(*) FROM machines WHERE image IS NULL"
+                "SELECT COUNT(*) FROM machines WHERE image_sha256 IS NULL"
             ).fetchone()[0]
         image_count = len(images.list_images(resolved_image_root))
         return jinja.get_template("ui/_dashboard_counts.html").render(
@@ -269,10 +269,10 @@ def create_app(
         if machine.get("boot_policy") == "tui":
             template = jinja.get_template("ipxe_tui.j2")
             return template.render(mac=normalised, machine=machine, host=host)
-        if machine.get("image") and machine.get("boot_policy") == "flash":
+        if machine.get("image_sha256") and machine.get("boot_policy") == "flash":
             template = jinja.get_template("ipxe_flash.j2")
             return template.render(mac=normalised, machine=machine, host=host)
-        if machine.get("image"):
+        if machine.get("image_sha256"):
             template = jinja.get_template("ipxe.j2")
             return template.render(mac=normalised, machine=machine)
         template = jinja.get_template("ipxe_unknown.j2")
@@ -411,12 +411,12 @@ def create_app(
             conn.execute(
                 """
                 INSERT INTO machines
-                    (mac, image, provisioning_mode, hostname,
+                    (mac, image_sha256, provisioning_mode, hostname,
                      cijoe_workflow_ref, last_known_good,
                      boot_policy, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?)
                 ON CONFLICT(mac) DO UPDATE SET
-                    image              = excluded.image,
+                    image_sha256       = excluded.image_sha256,
                     provisioning_mode  = excluded.provisioning_mode,
                     hostname           = excluded.hostname,
                     cijoe_workflow_ref = excluded.cijoe_workflow_ref,
@@ -425,7 +425,7 @@ def create_app(
                 """,
                 (
                     normalised,
-                    body.image,
+                    body.image_sha256,
                     body.provisioning_mode,
                     body.hostname,
                     body.cijoe_workflow_ref,
@@ -513,6 +513,17 @@ def create_app(
         return await _stream_upload(request, resolved_boot_root, name)
 
     # Browser UI under /ui/ (Jinja + Bootstrap, cookie-auth).
+
+    def _list_unified_images() -> list[images.UnifiedImage]:
+        """SHA-keyed merge of dir-scan + catalog manifest entries.
+
+        Recomputed per call so an operator who drops new files into
+        BTY_IMAGE_ROOT (or whose catalog fetch just completed) sees
+        the change on the next page load without restarting bty-web.
+        """
+        manifest_entries = parsed_catalog.entries if parsed_catalog else ()
+        return images.merge_with_catalog(resolved_image_root, manifest_entries, catalog_cache_dir)
+
     _ui.register_ui_routes(
         app,
         jinja=jinja,
@@ -521,6 +532,7 @@ def create_app(
         image_root=resolved_image_root,
         boot_root=resolved_boot_root,
         publish_machines_changed=publish_machines_changed,
+        list_unified_images=_list_unified_images,
     )
 
     # ---------- catalog download manager ----------------------------------
@@ -610,7 +622,7 @@ def _row_to_machine(row: object) -> _models.Machine:
             last_known_good = decoded
     return _models.Machine(
         mac=row["mac"],  # type: ignore[index]
-        image=row["image"],  # type: ignore[index]
+        image_sha256=row["image_sha256"],  # type: ignore[index]
         provisioning_mode=row["provisioning_mode"],  # type: ignore[index]
         hostname=row["hostname"],  # type: ignore[index]
         cijoe_workflow_ref=row["cijoe_workflow_ref"],  # type: ignore[index]

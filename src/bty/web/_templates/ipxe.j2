@@ -1,7 +1,7 @@
 #!ipxe
 # bty-web - per-MAC iPXE config for {{ mac }}
 # Assignment:
-#   image:             {{ machine.image or "(none)" }}
+#   image (sha256):    {{ machine.image_sha256 or "(none)" }}
 #   provisioning mode: {{ machine.provisioning_mode }}
 #   hostname:          {{ machine.hostname or "(none)" }}
 #
@@ -11,6 +11,6 @@
 # control to the PXE ROM, which falls through to the next boot
 # device (typically the local disk).
 
-echo bty: {{ mac }} boot_policy=local image={{ machine.image or "(none)" }}, returning to local boot
+echo bty: {{ mac }} boot_policy=local sha256={{ (machine.image_sha256 or "none")[:12] }}..., returning to local boot
 sleep 1
 exit

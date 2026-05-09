@@ -44,11 +44,18 @@
         <h2 class="h5 mb-3">Assignment</h2>
         <form action="/ui/machines/{{ m.mac }}" method="post">
             <div class="mb-3">
-                <label class="form-label" for="image">Image</label>
-                <select name="image" id="image" class="form-select">
+                <label class="form-label" for="image_sha256">Image</label>
+                <select name="image_sha256" id="image_sha256" class="form-select">
                     <option value="">- none (discovered, will boot from local disk) -</option>
                     {% for img in images %}
-                    <option value="{{ img.name }}" {% if img.name == m.image %}selected{% endif %}>{{ img.name }} ({{ img.format }})</option>
+                    {# img is bty.images.UnifiedImage: SHA-keyed,
+                       with names[] (filenames + manifest names) and
+                       a list of sources. Show the first name as the
+                       primary label and the short SHA so operators
+                       can disambiguate same-named entries. #}
+                    <option value="{{ img.sha256 }}" {% if img.sha256 == m.image_sha256 %}selected{% endif %}>
+                        {{ img.names[0] }} ({{ img.format or "?" }}, sha256:{{ img.sha256[:12] }})
+                    </option>
                     {% endfor %}
                 </select>
             </div>
