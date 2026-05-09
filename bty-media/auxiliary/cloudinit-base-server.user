@@ -291,19 +291,11 @@ runcmd:
   - cloud-init clean --logs --seed || true
   # Also remove cloud-init's netplan output so our shipped
   # /etc/systemd/network/10-bty-default.network is the unambiguous
-  # source of truth for NIC configuration after first boot.
+  # source of truth for NIC configuration after first boot. Without
+  # this, netplan's cloud-init-generated YAML sticks around and the
+  # next netplan apply (if any) overwrites our config.
   - rm -f /etc/netplan/50-cloud-init.yaml
   - rm -f /etc/network/interfaces.d/50-cloud-init.cfg
-  # Purge the whole netplan layer. The Debian cloud image installs
-  # netplan.io as a network-config front-end; with cloud-init
-  # disabled it stops generating netplan YAML, but the netplan
-  # tooling can still re-render configs at random later (e.g. an
-  # operator running ``netplan generate`` while debugging). With
-  # netplan gone, ``/etc/systemd/network/*.network`` is the only
-  # NIC-management source -- predictable, debuggable, networkctl-
-  # inspectable. Operators who want netplan back can install it.
-  - apt-get -y purge netplan.io 2>/dev/null || true
-  - apt-get -y autoremove --purge 2>/dev/null || true
 
   # SSH host-key hygiene. openssh-server's postinst generated host
   # keys during ``apt install``; remove them now so the cooked
