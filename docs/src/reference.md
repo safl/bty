@@ -109,13 +109,9 @@ The image root is resolved in this order:
  the `BTY_IMAGES` partition at).
 
 The listing also includes any `.bri` (bty Remote Image) descriptors
-present in the image root and in the system bri root
-(`/usr/share/bty/bri/`, overridable via `BTY_SYSTEM_BRI_ROOT`).
-Operator entries win on filename collision so an operator can
-pin a specific release URL by dropping their own `.bri` into
-`BTY_IMAGES`. Each remote row carries a `source = "remote"`
-field plus `url` (the upstream HTTP/HTTPS location); local rows
-carry `source = "local"` and `path`.
+present in the image root. Each remote row carries a
+`source = "remote"` field plus `url` (the upstream HTTP/HTTPS
+location); local rows carry `source = "local"` and `path`.
 
 A `.bri` is a tiny TOML file:
 
@@ -125,11 +121,11 @@ url = "https://github.com/safl/bty/releases/latest/download/bty-server-x86_64.im
 ```
 
 Only `url` is required; everything else is inferred from the URL
-or left null. The bty-usb stick ships
-`bty-server-x86_64.bri` and `bty-server-rpi-arm64.bri` under
-`/usr/share/bty/bri/` so an operator with a fresh stick sees
-the latest server appliance images in the catalog without
-needing to set up infrastructure first.
+or left null. The bty-usb stick bake drops a starter
+`bty-server-x86_64.bri` directly into the BTY_IMAGES exFAT
+partition so an operator browsing the partition from a host OS
+sees the file format up front and can copy / edit / delete it
+freely.
 
 ### `bty inspect image PATH`
 
@@ -284,7 +280,6 @@ environment and sensible defaults.
 | Variable | Purpose | Default |
 |-------------------|----------------------------------------------------------------|---------------------|
 | `BTY_IMAGE_ROOT` | Image root for `bty list images` and `bty inspect image`. | `/var/lib/bty/images` |
-| `BTY_SYSTEM_BRI_ROOT` | System-wide directory of `.bri` (bty Remote Image) descriptors merged into the catalog after the image root. Empty / missing directory is silently skipped. | `/usr/share/bty/bri` |
 
 The `bty --image-root` flag (when given) takes precedence over
 `BTY_IMAGE_ROOT`.
@@ -301,7 +296,7 @@ bty's modules are usable as a library. Stable entry points:
 | Module | Purpose |
 |------------------|-----------------------------------------------------------|
 | `bty.disks` | `list_disks() -> list[dict]` - block-device discovery. |
-| `bty.images` | `list_images(root)`, `inspect_image(path)`, `Image` dataclass, `detect_format(path)`, `default_image_root()`, `read_bri(path)`, `list_remote_images(root)`, `list_all_remote_images(root)`, `RemoteImage` / `BriError`, `system_bri_root()`. |
+| `bty.images` | `list_images(root)`, `inspect_image(path)`, `Image` dataclass, `detect_format(path)`, `default_image_root()`, `read_bri(path)`, `list_remote_images(root)`, `RemoteImage` / `BriError`. |
 | `bty.formatting` | `print_table(rows, columns)`, `print_inspect(info)`. |
 
 A full sphinx-autodoc surface is on the roadmap. Until then treat

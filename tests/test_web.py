@@ -548,11 +548,13 @@ def test_list_images_returns_files_under_image_root(
     assert by_name["alpha.qcow2"]["cached"] is True
 
 
-def test_list_images_surfaces_bri_descriptors(tmp_path: Path) -> None:
-    """A ``.bri`` file in the image root appears in ``GET /images``
-    so a remote-mode bty-tui sees the same operator-pointed URL the
-    local CLI does. ``cached=False`` because the bytes live
-    upstream, not on the bty-web server."""
+def test_list_images_does_not_surface_bri_descriptors(tmp_path: Path) -> None:
+    """``.bri`` is the bty-usb / bty-tui ad-hoc local-catalog
+    format; bty-web is the SHA-keyed managed-catalog model. A
+    ``.bri`` dropped into the server's image root must NOT
+    appear in ``GET /images`` -- it can't bind to a machine
+    (no SHA), so surfacing it would invite the operator to
+    bind something they then can't flash."""
     image_root = tmp_path / "images"
     image_root.mkdir()
     (image_root / "demo.bri").write_text(
@@ -571,48 +573,9 @@ def test_list_images_surfaces_bri_descriptors(tmp_path: Path) -> None:
 
     assert r.status_code == 200
     rows = r.json()
-    by_name = {row["name"]: row for row in rows}
-    assert "Demo" in by_name
-    assert by_name["Demo"]["url"] == "https://example.invalid/demo.img.gz"
-    assert by_name["Demo"]["cached"] is False
-    assert by_name["Demo"]["format"] == "img.gz"
-
-
-def test_list_images_dedupes_bri_against_manifest(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """If a ``.bri`` URL collides with a manifest entry's ``src``
-    (and the manifest entry is uncached so the URL flows through
-    verbatim), the catalog must not surface the same upstream
-    twice. Same-URL rows would confuse the operator and double-
-    count storage estimates in the UI."""
-    image_root = tmp_path / "images"
-    image_root.mkdir()
-
-    # .bri pointing at the same URL the manifest will declare.
-    upstream = "https://example.invalid/shared.img.gz"
-    (image_root / "from-bri.bri").write_text(f'url = "{upstream}"\nname = "Shared"\n')
-    manifest_path = tmp_path / "catalog.toml"
-    manifest_path.write_text(
-        f'version = 1\n\n[[images]]\nname = "shared.img.gz"\n'
-        f'src = "{upstream}"\nsha256 = "{"a" * 64}"\nformat = "img.gz"\n'
+    assert all("Demo" != row["name"] for row in rows), (
+        f"unexpected .bri row in bty-web /images output: {rows}"
     )
-    monkeypatch.setenv("BTY_CATALOG_FILE", str(manifest_path))
-
-    state = tmp_path / "state.db"
-    app = create_app(
-        state_path=state,
-        service_user=TEST_SERVICE_USER,
-        secret_key=TEST_SECRET_KEY,
-        image_root=image_root,
-    )
-    with TestClient(app) as client:
-        r = client.get("/images")
-
-    assert r.status_code == 200
-    rows = r.json()
-    urls = [row["url"] for row in rows]
-    assert urls.count(upstream) == 1
 
 
 # ---------- create_app sanity ----------------------------------------------

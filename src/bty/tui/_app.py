@@ -1415,7 +1415,7 @@ class BtyTui(App[None]):
                 size_bytes=r.size_bytes if r.size_bytes is not None else -1,
                 url=r.url,
             )
-            for r in images.list_all_remote_images(self._image_root)
+            for r in images.list_remote_images(self._image_root)
         ]
         return local + remote
 

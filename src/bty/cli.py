@@ -283,7 +283,7 @@ def cmd_list_images(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
     found = images.list_images(args.image_root)
-    remotes = images.list_all_remote_images(args.image_root)
+    remotes = images.list_remote_images(args.image_root)
     local_rows = [{**img.to_dict(), "source": "local"} for img in found]
     remote_rows = [
         {

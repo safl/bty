@@ -326,9 +326,6 @@ def _patch_data_sources(
         "list_remote_images",
         lambda _root: list(remote_images_list or []),
     )
-    # Ignore any system-wide bri root (e.g. ``/usr/share/bty/bri``)
-    # when the dev / CI box happens to have one populated.
-    monkeypatch.setattr(tui_app.images, "system_bri_root", lambda: None)
     monkeypatch.setattr(
         tui_app.disks,
         "list_disks",

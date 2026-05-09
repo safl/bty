@@ -694,17 +694,23 @@ def _populate_bty_images_partition(cijoe, part_dev: str) -> None:
     """Mount the freshly-mkfs'd BTY_IMAGES exFAT partition and drop
     a default ``bty-server-x86_64.bri`` into it. Best-effort: a mount
     failure logs a warning and returns; the partition stays empty
-    (same as pre-v0.7.x sticks)."""
-    mount_dir = "/tmp/bty-images-bake"
-    cijoe.run_local(f"sudo mkdir -p {mount_dir}")
+    (same as pre-v0.7.9 sticks)."""
+    # ``mktemp -d`` over a hardcoded path so parallel bake runs (CI
+    # matrix, two operators on one box, etc.) don't collide on the
+    # mountpoint. Collision would manifest as the second run mounting
+    # over the first's still-mounted partition; rare but ugly.
+    err, state = cijoe.run_local("mktemp -d")
+    if err:
+        log.warning("mktemp -d failed; BTY_IMAGES partition will ship empty")
+        return
+    mount_dir = state.output().strip().splitlines()[-1].strip()
     err, _ = cijoe.run_local(f"sudo mount -t exfat {part_dev} {mount_dir}")
     if err:
         log.warning(
             f"could not mount {part_dev} as exfat ({mount_dir}); "
-            f"BTY_IMAGES partition will ship empty -- "
-            f"rootfs /usr/share/bty/bri/*.bri still merges into catalog"
+            f"BTY_IMAGES partition will ship empty"
         )
-        cijoe.run_local(f"sudo rmdir {mount_dir} 2>/dev/null || true")
+        cijoe.run_local(f"rmdir {mount_dir} 2>/dev/null || true")
         return
     try:
         # Match the rootfs-shipped pointer at the bty-server release.
@@ -734,4 +740,4 @@ def _populate_bty_images_partition(cijoe, part_dev: str) -> None:
         log.info(f"Wrote bootstrap .bri to BTY_IMAGES partition: {bri_path}")
     finally:
         cijoe.run_local(f"sudo umount {mount_dir}")
-        cijoe.run_local(f"sudo rmdir {mount_dir} 2>/dev/null || true")
+        cijoe.run_local(f"rmdir {mount_dir} 2>/dev/null || true")

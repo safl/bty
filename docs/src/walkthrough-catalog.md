@@ -128,9 +128,10 @@ into BTY_IMAGES alongside your local files and it shows up in
 ``bty list images`` next to them, with ``source = remote`` and
 the upstream URL. ``bty flash --image foo.bri`` resolves the
 descriptor and falls into the URL flash path. The bty-usb stick
-ships descriptors at ``/usr/share/bty/bri/`` pointing at the
-latest published bty-server appliance images, so a fresh boot
-shows a server-bootstrap entry without further setup.
+bake drops a starter ``bty-server-x86_64.bri`` directly into the
+BTY_IMAGES exFAT partition so an operator browsing the partition
+from a host OS sees the format up front and can copy / edit /
+delete it freely.
 
 ```toml
 # ~/BTY_IMAGES/bty-server.bri

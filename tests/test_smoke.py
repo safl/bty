@@ -158,32 +158,51 @@ def test_etc_issue_uses_only_documented_agetty_escapes() -> None:
     _check_issue_body(m.group(1), f"{web_init}:/etc/issue heredoc")
 
 
-def test_shipped_bri_descriptors_parse() -> None:
-    """The ``.bri`` files baked into the bty-usb chroot at
-    ``/usr/share/bty/bri/`` ship as part of every USB stick;
-    a malformed one would silently disappear from the catalog
-    (``list_remote_images`` skips bad descriptors). Pin
-    parseability here so a future edit that breaks one is
-    caught at unit-test time."""
+def test_bake_bri_in_usb_iso_build_parses_as_toml() -> None:
+    """The bty-usb bake drops a starter ``.bri`` into the
+    BTY_IMAGES exFAT partition (see ``cijoe/scripts/usb_iso_build
+    .py::_populate_bty_images_partition``). The descriptor is
+    embedded as a Python string-concat literal in the script; if
+    a future edit breaks its TOML, the bake silently writes an
+    unparseable file and the catalog ships with no starter
+    entry. Extract the literal via ``ast`` and round-trip it
+    through ``read_bri`` to pin parseability + the https-URL
+    invariant."""
+    import ast
+    import tempfile
     from pathlib import Path
 
     from bty import images
 
     repo_root = Path(__file__).resolve().parents[1]
-    bri_dir = repo_root / "bty-media/live-build/config/includes.chroot/usr/share/bty/bri"
-    assert bri_dir.is_dir(), f"shipped bri dir missing: {bri_dir}"
-    bris = sorted(bri_dir.glob("*.bri"))
-    assert bris, f"no .bri files under {bri_dir}; bake will ship without bootstrap entries"
-    for bri in bris:
-        # Re-raises BriError on malformed contents -- pytest
-        # surfaces the path + reason directly.
-        descriptor = images.read_bri(bri)
-        # All shipped descriptors must point at https URLs (the
-        # GitHub releases redirect chain). http would be a typo
-        # / regression worth catching.
-        assert descriptor.url.startswith("https://"), (
-            f"{bri}: shipped .bri must use https, got {descriptor.url!r}"
-        )
+    script = repo_root / "cijoe/scripts/usb_iso_build.py"
+    tree = ast.parse(script.read_text())
+    bri_text: str | None = None
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            for tgt in node.targets:
+                if isinstance(tgt, ast.Name) and tgt.id == "bri_body":
+                    # The RHS is wrapped in parens so it parses as a
+                    # bare expression; ``ast.literal_eval`` handles
+                    # the implicit string concatenation.
+                    bri_text = ast.literal_eval(node.value)
+                    break
+            if bri_text is not None:
+                break
+    assert bri_text is not None, (
+        "could not locate ``bri_body = ...`` in usb_iso_build.py -- "
+        "update this test if the literal was refactored"
+    )
+    with tempfile.NamedTemporaryFile("w", suffix=".bri", delete=False) as tf:
+        tf.write(bri_text)
+        tmp_path = Path(tf.name)
+    try:
+        descriptor = images.read_bri(tmp_path)
+    finally:
+        tmp_path.unlink()
+    assert descriptor.url.startswith("https://"), (
+        f"baked .bri must use https, got {descriptor.url!r}"
+    )
 
 
 def test_server_cloudinit_does_not_install_plymouth() -> None:

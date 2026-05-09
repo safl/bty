@@ -356,48 +356,6 @@ def list_remote_images(root: Path) -> list[RemoteImage]:
     return out
 
 
-# Where the live env (and any installed bty package) ships built-in
-# ``.bri`` descriptors. Distinct from BTY_IMAGES (the operator's
-# catalog) so the bake-time bootstrap pointers don't get hidden by
-# the operator's read-only exFAT mount over /var/lib/bty/images.
-# Operators can drop their own ``.bri`` into BTY_IMAGES with the
-# same name to override a system entry (operator wins).
-DEFAULT_SYSTEM_BRI_ROOT = Path("/usr/share/bty/bri")
-
-
-def system_bri_root() -> Path | None:
-    """Resolve the system-wide ``.bri`` directory if present.
-
-    Order: ``$BTY_SYSTEM_BRI_ROOT`` env var, else
-    :data:`DEFAULT_SYSTEM_BRI_ROOT`. Returns ``None`` if neither
-    exists -- a missing system bri root is not an error, just "no
-    bake-time bootstrap pointers shipped".
-    """
-    candidate = Path(os.environ.get("BTY_SYSTEM_BRI_ROOT", str(DEFAULT_SYSTEM_BRI_ROOT)))
-    return candidate if candidate.is_dir() else None
-
-
-def list_all_remote_images(image_root: Path) -> list[RemoteImage]:
-    """Operator-supplied + system-shipped ``.bri`` descriptors,
-    merged. Used by the CLI and TUI catalog so the bty-server
-    bootstrap pointer (shipped under ``/usr/share/bty/bri/``) is
-    visible on a fresh USB stick boot, alongside whatever the
-    operator dropped into BTY_IMAGES.
-
-    Dedupe rule: operator entries win on filename collision -- if
-    the operator dropped their own ``bty-server.bri`` into
-    BTY_IMAGES, the system one is hidden so the operator can pin
-    a specific release URL without editing the rootfs.
-    """
-    primary = list_remote_images(image_root)
-    sys_root = system_bri_root()
-    if sys_root is None or sys_root == image_root:
-        return primary
-    seen_names = {r.path.name for r in primary}
-    extras = [r for r in list_remote_images(sys_root) if r.path.name not in seen_names]
-    return primary + extras
-
-
 def _sidecar_path(image_path: Path) -> Path:
     """Where the SHA-256 sidecar for ``image_path`` lives.
 
@@ -532,7 +490,7 @@ def merge_with_catalog(
     be a machine-binding target until its bytes have been fetched
     + hashed (machine.image_sha256 binds bytes by content). The
     catalog endpoint and the TUI surface ``.bri`` rows separately
-    via :func:`list_all_remote_images`; the operator hashes a
+    via :func:`list_remote_images`; the operator hashes a
     ``.bri`` (by fetching it) before binding it to a machine.
     """
     by_sha: dict[str, UnifiedImage] = {}

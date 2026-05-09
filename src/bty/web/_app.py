@@ -622,32 +622,16 @@ def create_app(
                     cached=u.cached,
                 )
             )
-        # ``.bri`` (bty Remote Image) descriptors in the image root
-        # are surfaced as their own catalog rows pointing at the
-        # operator-declared upstream URL. Same dispatch as the
-        # uncached-manifest case: ``cached=False`` so the client
-        # streams from upstream rather than asking the server for
-        # bytes it doesn't host.
-        #
-        # Dedup against the SHA-keyed pass above by upstream URL:
-        # if an operator drops a ``.bri`` whose ``url`` matches a
-        # manifest entry's ``src`` (and the manifest entry isn't
-        # cached locally yet, so the URL flowed through verbatim),
-        # we'd otherwise emit two rows pointing at the same bytes.
-        emitted_urls = {entry.url for entry in out}
-        for r in images.list_all_remote_images(resolved_image_root):
-            if r.url in emitted_urls:
-                continue
-            out.append(
-                _models.ImageEntry(
-                    name=r.name,
-                    format=r.format or "",
-                    size_bytes=r.size_bytes or 0,
-                    url=r.url,
-                    ref=None,
-                    cached=False,
-                )
-            )
+        # ``.bri`` (bty Remote Image) descriptors are deliberately
+        # NOT surfaced here. ``.bri`` is the bty-usb / bty-tui ad-hoc
+        # local-catalog format -- a tiny pointer file an operator
+        # drops next to their .img.gz files for quick "flash this
+        # URL" workflows. bty-web is the SHA-keyed managed-catalog
+        # model: machine bindings store ``image_sha256``, not URL
+        # pointers, so a ``.bri`` can't bind to a machine without
+        # being fetched + hashed first. Mixing the two surfaces here
+        # would invite the operator to bind a ``.bri`` they then
+        # can't actually flash.
         return out
 
     @app.put(

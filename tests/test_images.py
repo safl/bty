@@ -356,44 +356,10 @@ def test_list_remote_images_returns_descriptors(tmp_path: Path) -> None:
     assert names == ["Beta", "alpha.img.gz"]
 
 
-def test_list_all_remote_images_merges_system_root(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """``list_all_remote_images`` unions the operator's image_root
-    with the system bri root; operator entries win on filename
-    collision so they can override a shipped descriptor."""
-    operator_root = tmp_path / "operator"
-    system_root = tmp_path / "system"
-    operator_root.mkdir()
-    system_root.mkdir()
-
-    # Operator overrides the bty-server entry with their own URL.
-    (operator_root / "bty-server.bri").write_text(
-        'url = "https://example.invalid/operator-pinned.img.gz"\nname = "Operator Server"\n'
-    )
-    # System ships two: the bty-server one (overridden) + an extra.
-    (system_root / "bty-server.bri").write_text(
-        'url = "https://example.invalid/system-default.img.gz"\nname = "System Server"\n'
-    )
-    (system_root / "extra.bri").write_text('url = "https://example.invalid/extra.img.gz"\n')
-
-    monkeypatch.setenv("BTY_SYSTEM_BRI_ROOT", str(system_root))
-    merged = images.list_all_remote_images(operator_root)
-    names = sorted(r.name for r in merged)
-    assert names == ["Operator Server", "extra.img.gz"]
-
-
-def test_system_bri_root_returns_none_when_missing(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("BTY_SYSTEM_BRI_ROOT", str(tmp_path / "nonexistent"))
-    assert images.system_bri_root() is None
-
-
 def test_merge_with_catalog_does_not_pick_up_bri_files(tmp_path: Path) -> None:
     """``.bri`` files in the image_root must not silently appear as
     SHA-less ``UnifiedImage`` entries. They have their own listing
-    function (``list_all_remote_images``) and a different identity
+    function (``list_remote_images``) and a different identity
     model (URL pointer, no SHA), so accidental inclusion would
     produce a malformed ``UnifiedImage`` with no flashable source."""
     image_root = tmp_path / "imgs"
