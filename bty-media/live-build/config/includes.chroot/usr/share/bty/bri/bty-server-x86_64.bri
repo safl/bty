@@ -1,0 +1,21 @@
+# bty Remote Image (.bri) descriptor -- shipped on the bty-usb stick.
+#
+# Pointer at the latest published bty-server appliance image
+# for x86_64 hardware. ``releases/latest/download/<name>`` is a
+# stable GitHub redirect that resolves to whichever release tag
+# is current, so a USB stick built today still hands the operator
+# a current appliance image months later.
+#
+# Lives at /usr/share/bty/bri/ (not /var/lib/bty/images/) so the
+# operator's read-only exFAT mount over BTY_IMAGES doesn't hide
+# this descriptor on a typical USB stick boot. The TUI / CLI
+# merge this with the operator's BTY_IMAGES catalog at runtime.
+#
+# Operators who want to pin a specific release can drop their own
+# ``bty-server-x86_64.bri`` (same filename) into BTY_IMAGES; the
+# operator entry wins on collision.
+
+name = "bty-server (x86_64, latest)"
+url = "https://github.com/safl/bty/releases/latest/download/bty-server-x86_64.img.gz"
+format = "img.gz"
+description = "Latest published bty-server appliance for x86_64 (GitHub redirect)"

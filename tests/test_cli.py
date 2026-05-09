@@ -87,6 +87,23 @@ def test_list_images_uses_image_root_argument(
     assert "alpha.qcow2" in out
 
 
+def test_list_images_includes_bri_descriptors(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``.bri`` files should appear in ``bty list images`` so the
+    catalog reflects local + remote pointers in one view."""
+    (tmp_path / "local.qcow2").write_bytes(b"")
+    (tmp_path / "remote.bri").write_text('url = "https://example.invalid/server.img.gz"\n')
+    rc = cli.main(["list", "images", "--json", "--image-root", str(tmp_path)])
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    sources = sorted(img["source"] for img in payload["images"])
+    assert sources == ["local", "remote"]
+    remote = next(i for i in payload["images"] if i["source"] == "remote")
+    assert remote["url"] == "https://example.invalid/server.img.gz"
+    assert remote["format"] == "img.gz"
+
+
 def test_inspect_image_missing_returns_two(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -262,6 +279,36 @@ def test_flash_dispatches_to_url_probe_for_http_image() -> None:
     )
     assert rc == 0
     assert seen == {"url": "http://server/foo.img.zst"}
+
+
+def test_flash_dispatches_to_url_probe_for_bri_descriptor(tmp_path: Path) -> None:
+    """``--image foo.bri`` resolves the descriptor's ``url`` and
+    routes through ``probe_image_url`` like a direct URL flash."""
+    bri = tmp_path / "bty-server.bri"
+    bri.write_text('url = "https://example.invalid/bty-server-x86_64.img.gz"\n')
+    seen: dict[str, str] = {}
+
+    def fake_probe_url(url: str) -> cli.flash.ImageInfo:
+        seen["url"] = url
+        return cli.flash.ImageInfo(
+            path=None,
+            url=url,
+            format="img.gz",
+            size_bytes=0,
+            virtual_size_bytes=0,
+        )
+
+    def fake_probe_local(_p: Path) -> cli.flash.ImageInfo:
+        raise AssertionError("probe_image was called for a .bri --image arg")
+
+    rc = cli.cmd_flash(
+        _flash_args(image=str(bri), dry_run=True),
+        probe_image=fake_probe_local,
+        probe_image_url=fake_probe_url,
+        probe_target=_fake_probe_block_target,
+    )
+    assert rc == 0
+    assert seen == {"url": "https://example.invalid/bty-server-x86_64.img.gz"}
 
 
 def test_flash_yes_path_propagates_validation_failure(

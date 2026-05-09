@@ -258,9 +258,27 @@ def cmd_list_images(args: argparse.Namespace) -> int:
     a URL the server provides. ``bty list images`` answers the
     question "what flashable files are sitting in this
     directory?" and nothing more.
+
+    Includes ``.bri`` (bty Remote Image) descriptors as ``remote``
+    rows alongside local images so operators see the full set of
+    flashable references in one place.
     """
     found = images.list_images(args.image_root)
-    rows = [img.to_dict() for img in found]
+    remotes = images.list_all_remote_images(args.image_root)
+    local_rows = [{**img.to_dict(), "source": "local"} for img in found]
+    remote_rows = [
+        {
+            "name": r.name,
+            "format": r.format,
+            "size_bytes": r.size_bytes,
+            "source": "remote",
+            "url": r.url,
+            "path": str(r.path),
+            "sha256": r.sha256,
+        }
+        for r in remotes
+    ]
+    rows = local_rows + remote_rows
     if args.json:
         payload = _envelope(
             "list-images",
@@ -271,7 +289,7 @@ def cmd_list_images(args: argparse.Namespace) -> int:
     else:
         formatting.print_table(
             rows,
-            columns=["name", "format", "size_bytes"],
+            columns=["name", "format", "size_bytes", "source"],
         )
     return 0
 
@@ -329,11 +347,18 @@ def cmd_flash(
 
     try:
         image_str = str(args.image)
+        # ``.bri`` (bty Remote Image) descriptor: tiny TOML file
+        # whose ``url`` field is the real source. Resolve here so
+        # the rest of the flash path treats it as a regular URL
+        # flash with no extra branching downstream.
+        if image_str.endswith(images.BRI_EXTENSION) and Path(image_str).is_file():
+            descriptor = images.read_bri(Path(image_str))
+            image_str = descriptor.url
         if image_str.startswith(("http://", "https://")):
             image_info = probe_image_url(image_str)
         else:
             image_info = probe_image(Path(image_str))
-    except (FileNotFoundError, ValueError) as exc:
+    except (FileNotFoundError, ValueError, images.BriError) as exc:
         print(f"bty: {exc}", file=sys.stderr)
         return 2
 

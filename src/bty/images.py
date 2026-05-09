@@ -47,10 +47,12 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import tomllib
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 # Default image root. Operators override via ``--image-root`` or the
 # ``BTY_IMAGE_ROOT`` environment variable. The USB live appliance mounts
@@ -174,6 +176,194 @@ def list_images(root: Path) -> list[Image]:
             )
         )
     return out
+
+
+# bty Remote Image (.bri) descriptor file extension. A tiny TOML
+# file the operator drops into BTY_IMAGES to advertise an image
+# that lives on the network rather than on the local filesystem.
+# Mailable / Slackable: an operator can attach a ``.bri`` to a
+# message and the recipient drops it into their own BTY_IMAGES to
+# get the same flashable entry. Used at bty-usb bake time to ship
+# a default pointer at the latest bty-server release on GitHub.
+BRI_EXTENSION = ".bri"
+
+
+@dataclass(frozen=True)
+class RemoteImage:
+    """A bty Remote Image (.bri) descriptor.
+
+    Loaded from a tiny TOML file. The descriptor file path itself
+    lives on the local filesystem under BTY_IMAGES; the *image
+    bytes* it points at live at ``url``. Same role as :class:`Image`
+    but for over-the-network sources, so the catalog UI can show
+    "fetchable" images alongside local ones.
+
+    Required fields: ``url`` (the bytes' upstream HTTP(S) location).
+    Everything else is optional with sensible defaults: ``name``
+    falls back to the URL's last path segment, ``format`` to the
+    extension-derived format, ``size_bytes`` and ``sha256`` stay
+    ``None`` until the operator (or a bty-side fetcher) materialises
+    them.
+    """
+
+    name: str
+    url: str
+    path: Path  # the .bri descriptor file's location on disk
+    format: str | None = None
+    size_bytes: int | None = None
+    sha256: str | None = None
+    description: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "url": self.url,
+            "path": str(self.path),
+            "format": self.format,
+            "size_bytes": self.size_bytes,
+            "sha256": self.sha256,
+            "description": self.description,
+        }
+
+
+class BriError(Exception):
+    """Raised when a ``.bri`` descriptor fails to parse or validate.
+    Distinct from generic exceptions so callers (CLI / TUI / tests)
+    can surface a friendly per-file error without crashing the whole
+    listing."""
+
+
+def _name_from_url(url: str) -> str:
+    """Derive a display name from a URL by taking its last path
+    segment. ``https://host/path/foo.img.gz`` -> ``foo.img.gz``.
+    Empty or trailing-slash paths fall back to the netloc so the
+    operator at least sees *something* identifiable."""
+    parsed = urlparse(url)
+    last = parsed.path.rsplit("/", 1)[-1]
+    return last or parsed.netloc or url
+
+
+def read_bri(path: Path) -> RemoteImage:
+    """Parse one ``.bri`` TOML file into a :class:`RemoteImage`.
+    Raises :class:`BriError` on missing required fields or bad TOML.
+    """
+    try:
+        with path.open("rb") as fh:
+            raw = tomllib.load(fh)
+    except tomllib.TOMLDecodeError as exc:
+        raise BriError(f"{path}: not valid TOML: {exc}") from exc
+    if not isinstance(raw, dict):
+        raise BriError(f"{path}: top-level must be a table")
+    url = raw.get("url")
+    if not isinstance(url, str) or not url.strip():
+        raise BriError(f"{path}: missing required field: url")
+    url = url.strip()
+
+    name = raw.get("name")
+    if name is None:
+        name = _name_from_url(url)
+    elif not isinstance(name, str):
+        raise BriError(f"{path}: name must be a string")
+
+    fmt = raw.get("format")
+    if fmt is None:
+        # Try to infer from URL last path segment so "img.gz",
+        # "iso.gz", etc. flow through the same detect_format logic
+        # used for local files.
+        fmt = detect_format(Path(_name_from_url(url)))
+    elif not isinstance(fmt, str):
+        raise BriError(f"{path}: format must be a string")
+
+    size_bytes = raw.get("size_bytes")
+    if size_bytes is not None and not isinstance(size_bytes, int):
+        raise BriError(f"{path}: size_bytes must be an integer")
+
+    sha = raw.get("sha256")
+    if sha is not None:
+        if not isinstance(sha, str):
+            raise BriError(f"{path}: sha256 must be a string")
+        sha = sha.strip().lower()
+        if len(sha) != 64 or not all(c in _SHA_HEX for c in sha):
+            raise BriError(f"{path}: sha256 must be a 64-char lower-case hex string")
+
+    description = raw.get("description")
+    if description is not None and not isinstance(description, str):
+        raise BriError(f"{path}: description must be a string")
+
+    return RemoteImage(
+        name=str(name),
+        url=url,
+        path=path,
+        format=fmt,
+        size_bytes=size_bytes,
+        sha256=sha,
+        description=description,
+    )
+
+
+def list_remote_images(root: Path) -> list[RemoteImage]:
+    """List ``.bri`` descriptor files directly under ``root``
+    (non-recursive).
+
+    Mirrors :func:`list_images`'s shape but for the remote half of
+    the catalog. Malformed ``.bri`` files are silently skipped so
+    one bad descriptor doesn't break the whole listing -- a
+    standalone ``bty bri inspect`` (TODO) is the place to surface
+    parse errors loudly.
+    """
+    if not root.exists() or not root.is_dir():
+        return []
+    out: list[RemoteImage] = []
+    for p in sorted(root.iterdir()):
+        if not p.is_file() or p.suffix != BRI_EXTENSION:
+            continue
+        try:
+            out.append(read_bri(p))
+        except BriError:
+            continue
+    return out
+
+
+# Where the live env (and any installed bty package) ships built-in
+# ``.bri`` descriptors. Distinct from BTY_IMAGES (the operator's
+# catalog) so the bake-time bootstrap pointers don't get hidden by
+# the operator's read-only exFAT mount over /var/lib/bty/images.
+# Operators can drop their own ``.bri`` into BTY_IMAGES with the
+# same name to override a system entry (operator wins).
+DEFAULT_SYSTEM_BRI_ROOT = Path("/usr/share/bty/bri")
+
+
+def system_bri_root() -> Path | None:
+    """Resolve the system-wide ``.bri`` directory if present.
+
+    Order: ``$BTY_SYSTEM_BRI_ROOT`` env var, else
+    :data:`DEFAULT_SYSTEM_BRI_ROOT`. Returns ``None`` if neither
+    exists -- a missing system bri root is not an error, just "no
+    bake-time bootstrap pointers shipped".
+    """
+    candidate = Path(os.environ.get("BTY_SYSTEM_BRI_ROOT", str(DEFAULT_SYSTEM_BRI_ROOT)))
+    return candidate if candidate.is_dir() else None
+
+
+def list_all_remote_images(image_root: Path) -> list[RemoteImage]:
+    """Operator-supplied + system-shipped ``.bri`` descriptors,
+    merged. Used by the CLI and TUI catalog so the bty-server
+    bootstrap pointer (shipped under ``/usr/share/bty/bri/``) is
+    visible on a fresh USB stick boot, alongside whatever the
+    operator dropped into BTY_IMAGES.
+
+    Dedupe rule: operator entries win on filename collision -- if
+    the operator dropped their own ``bty-server.bri`` into
+    BTY_IMAGES, the system one is hidden so the operator can pin
+    a specific release URL without editing the rootfs.
+    """
+    primary = list_remote_images(image_root)
+    sys_root = system_bri_root()
+    if sys_root is None or sys_root == image_root:
+        return primary
+    seen_names = {r.path.name for r in primary}
+    extras = [r for r in list_remote_images(sys_root) if r.path.name not in seen_names]
+    return primary + extras
 
 
 def _sidecar_path(image_path: Path) -> Path:

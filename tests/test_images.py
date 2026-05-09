@@ -232,6 +232,109 @@ def test_merge_with_catalog_manifest_only_uses_cache_dir(tmp_path: Path) -> None
     assert merged2[0].cached is False
 
 
+def test_read_bri_minimal(tmp_path: Path) -> None:
+    """A ``.bri`` with just ``url`` parses; name + format are
+    inferred from the URL."""
+    bri = tmp_path / "bty-server.bri"
+    bri.write_text('url = "https://example.invalid/bty-server-x86_64.img.gz"\n')
+    remote = images.read_bri(bri)
+    assert remote.url == "https://example.invalid/bty-server-x86_64.img.gz"
+    assert remote.name == "bty-server-x86_64.img.gz"
+    assert remote.format == "img.gz"
+    assert remote.path == bri
+    assert remote.size_bytes is None
+    assert remote.sha256 is None
+
+
+def test_read_bri_full(tmp_path: Path) -> None:
+    """All optional fields populate when supplied."""
+    bri = tmp_path / "demo.bri"
+    bri.write_text(
+        'url = "https://example.invalid/demo.img.zst"\n'
+        'name = "Demo Server"\n'
+        'format = "img.zst"\n'
+        "size_bytes = 12345\n"
+        f'sha256 = "{"a" * 64}"\n'
+        'description = "demo build"\n'
+    )
+    remote = images.read_bri(bri)
+    assert remote.name == "Demo Server"
+    assert remote.size_bytes == 12345
+    assert remote.sha256 == "a" * 64
+    assert remote.description == "demo build"
+
+
+def test_read_bri_missing_url_raises(tmp_path: Path) -> None:
+    bri = tmp_path / "bad.bri"
+    bri.write_text('name = "no-url"\n')
+    with pytest.raises(images.BriError, match="url"):
+        images.read_bri(bri)
+
+
+def test_read_bri_invalid_sha_raises(tmp_path: Path) -> None:
+    bri = tmp_path / "bad.bri"
+    bri.write_text('url = "https://example.invalid/x.img.gz"\nsha256 = "not-a-hex-digest"\n')
+    with pytest.raises(images.BriError, match="sha256"):
+        images.read_bri(bri)
+
+
+def test_list_remote_images_returns_descriptors(tmp_path: Path) -> None:
+    (tmp_path / "alpha.bri").write_text('url = "https://example.invalid/alpha.img.gz"\n')
+    (tmp_path / "beta.bri").write_text(
+        'url = "https://example.invalid/beta.iso.gz"\nname = "Beta"\n'
+    )
+    # Malformed file is skipped silently by the listing.
+    (tmp_path / "broken.bri").write_text("not toml = { unterminated\n")
+    # Non-.bri file ignored.
+    (tmp_path / "real.img.gz").write_bytes(b"\0" * 16)
+
+    remotes = images.list_remote_images(tmp_path)
+    names = sorted(r.name for r in remotes)
+    assert names == ["Beta", "alpha.img.gz"]
+
+
+def test_list_all_remote_images_merges_system_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``list_all_remote_images`` unions the operator's image_root
+    with the system bri root; operator entries win on filename
+    collision so they can override a shipped descriptor."""
+    operator_root = tmp_path / "operator"
+    system_root = tmp_path / "system"
+    operator_root.mkdir()
+    system_root.mkdir()
+
+    # Operator overrides the bty-server entry with their own URL.
+    (operator_root / "bty-server.bri").write_text(
+        'url = "https://example.invalid/operator-pinned.img.gz"\nname = "Operator Server"\n'
+    )
+    # System ships two: the bty-server one (overridden) + an extra.
+    (system_root / "bty-server.bri").write_text(
+        'url = "https://example.invalid/system-default.img.gz"\nname = "System Server"\n'
+    )
+    (system_root / "extra.bri").write_text('url = "https://example.invalid/extra.img.gz"\n')
+
+    monkeypatch.setenv("BTY_SYSTEM_BRI_ROOT", str(system_root))
+    merged = images.list_all_remote_images(operator_root)
+    names = sorted(r.name for r in merged)
+    assert names == ["Operator Server", "extra.img.gz"]
+
+
+def test_system_bri_root_returns_none_when_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("BTY_SYSTEM_BRI_ROOT", str(tmp_path / "nonexistent"))
+    assert images.system_bri_root() is None
+
+
+def test_list_images_does_not_pick_up_bri_files(tmp_path: Path) -> None:
+    """``.bri`` files are descriptors, not flashable bytes -- they
+    must not show up in the local-image listing or dd would try to
+    write a tiny TOML file as a disk image."""
+    (tmp_path / "x.bri").write_text('url = "https://example.invalid/x.img.gz"\n')
+    assert images.list_images(tmp_path) == []
+
+
 def test_ensure_sha256_computes_and_writes_sidecar(tmp_path: Path) -> None:
     """First call hashes the file + writes the sidecar; second call
     is O(1) because the sidecar is cached."""

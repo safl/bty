@@ -1,0 +1,17 @@
+# bty Remote Image (.bri) descriptor -- shipped on the bty-usb stick.
+#
+# Pointer at the latest published bty-server appliance image
+# for Raspberry Pi (arm64). Same release-channel redirect pattern
+# as the x86_64 sibling .bri.
+#
+# Why ship an arm64 .bri on an x86_64 USB stick: the bty-usb stick
+# typically lives on the operator's workstation and gets used to
+# flash the bty-server image onto whatever hardware they're
+# standing up. That hardware might be a Pi, in which case the
+# operator picks this .bri, bty downloads + flashes the arm64
+# image to the SD card, done.
+
+name = "bty-server (rpi, arm64, latest)"
+url = "https://github.com/safl/bty/releases/latest/download/bty-server-rpi-arm64.img.gz"
+format = "img.gz"
+description = "Latest published bty-server appliance for Raspberry Pi (arm64)"

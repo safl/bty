@@ -303,6 +303,7 @@ def _patch_data_sources(
     monkeypatch: pytest.MonkeyPatch,
     *,
     images_list: list[images.Image] | None = None,
+    remote_images_list: list[images.RemoteImage] | None = None,
     disks_list: list[dict[str, Any]] | None = None,
     remote_catalog: list[Any] | None = None,
     geteuid: int = 0,
@@ -310,6 +311,7 @@ def _patch_data_sources(
     """Wire fake data into the module-level references the TUI uses.
 
     ``images_list`` / ``disks_list`` feed the local-mode populate paths.
+    ``remote_images_list`` feeds the local-mode ``.bri`` scan.
     ``remote_catalog`` feeds the remote-mode catalog fetch.
     ``geteuid`` controls the read-only-vs-flashable status string.
     """
@@ -319,6 +321,14 @@ def _patch_data_sources(
         "list_images",
         lambda _root: list(images_list or []),
     )
+    monkeypatch.setattr(
+        tui_app.images,
+        "list_remote_images",
+        lambda _root: list(remote_images_list or []),
+    )
+    # Ignore any system-wide bri root (e.g. ``/usr/share/bty/bri``)
+    # when the dev / CI box happens to have one populated.
+    monkeypatch.setattr(tui_app.images, "system_bri_root", lambda: None)
     monkeypatch.setattr(
         tui_app.disks,
         "list_disks",
@@ -374,6 +384,45 @@ def test_app_renders_local_panes_with_seeded_data(
             # the verbose pane border-titles carry the wizard
             # prompts instead).
             assert app._initial_status() == ""  # type: ignore[reportPrivateUsage]
+
+    _run(_drive())
+
+
+def test_app_local_mode_renders_bri_descriptors_alongside_local(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``.bri`` descriptors in BTY_IMAGES surface as catalog rows
+    next to local images, with ``url`` populated rather than
+    ``path`` so flash dispatch can branch on origin."""
+    bri_path = tmp_path / "images" / "bty-server.bri"
+    remote = images.RemoteImage(
+        name="bty-server.img.gz",
+        url="https://example.invalid/bty-server.img.gz",
+        path=bri_path,
+        format="img.gz",
+    )
+    _patch_data_sources(
+        monkeypatch,
+        images_list=[_fake_image(name="alpha.qcow2", size=4096)],
+        remote_images_list=[remote],
+        disks_list=[_fake_disk(path="/dev/sda")],
+    )
+
+    app = tui_app.BtyTui(image_root=tmp_path / "images")
+
+    async def _drive() -> None:
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            from textual.widgets import DataTable
+
+            images_table = app.query_one("#images_table", DataTable)
+            assert images_table.row_count == 2
+            # _images_by_key should have one local + one remote entry.
+            keys = list(app._images_by_key.values())  # type: ignore[reportPrivateUsage]
+            urls = [k.url for k in keys]
+            paths = [k.path for k in keys]
+            assert "https://example.invalid/bty-server.img.gz" in urls
+            assert any(p is not None for p in paths)
 
     _run(_drive())
 

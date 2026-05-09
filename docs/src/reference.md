@@ -108,6 +108,29 @@ The image root is resolved in this order:
 3. `/var/lib/bty/images` (the path the bty USB live appliance auto-mounts
  the `BTY_IMAGES` partition at).
 
+The listing also includes any `.bri` (bty Remote Image) descriptors
+present in the image root and in the system bri root
+(`/usr/share/bty/bri/`, overridable via `BTY_SYSTEM_BRI_ROOT`).
+Operator entries win on filename collision so an operator can
+pin a specific release URL by dropping their own `.bri` into
+`BTY_IMAGES`. Each remote row carries a `source = "remote"`
+field plus `url` (the upstream HTTP/HTTPS location); local rows
+carry `source = "local"` and `path`.
+
+A `.bri` is a tiny TOML file:
+
+```toml
+url = "https://github.com/safl/bty/releases/latest/download/bty-server-x86_64.img.gz"
+# Optional: name, format, size_bytes, sha256, description
+```
+
+Only `url` is required; everything else is inferred from the URL
+or left null. The bty-usb stick ships
+`bty-server-x86_64.bri` and `bty-server-rpi-arm64.bri` under
+`/usr/share/bty/bri/` so an operator with a fresh stick sees
+the latest server appliance images in the catalog without
+needing to set up infrastructure first.
+
 ### `bty inspect image PATH`
 
 Print detailed metadata for a single image file. Always reports
@@ -126,6 +149,14 @@ Exit codes:
 ### `bty flash --image PATH --target PATH [--provision MODE] [--user-data PATH] [--meta-data PATH] [--cijoe-workflow PATH] [--cijoe-config PATH] [--progress {text,ndjson,none}] [--dry-run] [--yes]`
 
 Flash an image onto a target block device.
+
+`--image` accepts three forms:
+
+- A local file path (`/path/to/foo.img.gz`).
+- An HTTP/HTTPS URL (`https://server/foo.img.gz`); raw `.img` and
+  compressed `.img.*` URLs stream straight to disk.
+- A `.bri` descriptor path; bty resolves the descriptor's `url`
+  field and falls into the URL flash path automatically.
 
 Either `--dry-run` or `--yes` is required:
 

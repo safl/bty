@@ -1383,10 +1383,17 @@ class BtyTui(App[None]):
 
     def _load_images(self) -> list[_TuiImage]:
         """Load the catalog from either a remote bty-web or the local
-        image root, returning a unified ``_TuiImage`` list."""
+        image root, returning a unified ``_TuiImage`` list.
+
+        In local mode, the directory scan is followed by a scan for
+        ``.bri`` (bty Remote Image) descriptors; each descriptor
+        becomes a ``_TuiImage`` with ``url`` set so the operator can
+        flash from a URL pointer dropped into BTY_IMAGES (used for
+        the bty-server bootstrap on a fresh USB stick).
+        """
         if self._server_url is not None:
             return fetch_remote_catalog(self._server_url)
-        return [
+        local = [
             _TuiImage(
                 name=img.name,
                 fmt=img.format,
@@ -1395,6 +1402,20 @@ class BtyTui(App[None]):
             )
             for img in images.list_images(self._image_root)
         ]
+        remote = [
+            _TuiImage(
+                name=r.name,
+                fmt=r.format,
+                # ``size_bytes`` is optional in the descriptor; the
+                # table column expects an int, so unknown -> 0 (the
+                # cell still renders, just shows ``0 B`` until the
+                # operator fetches and the size is known).
+                size_bytes=r.size_bytes or 0,
+                url=r.url,
+            )
+            for r in images.list_all_remote_images(self._image_root)
+        ]
+        return local + remote
 
     def _populate_disks(self) -> None:
         table = self.query_one("#disks_table", DataTable)
