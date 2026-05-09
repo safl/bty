@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -228,8 +229,6 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def cmd_list_disks(args: argparse.Namespace) -> int:
-    import subprocess
-
     try:
         rows = disks.list_disks()
     except FileNotFoundError:

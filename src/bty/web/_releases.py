@@ -137,10 +137,17 @@ def fetch_release(
 
 
 def _stream(url: str, dest: Path) -> int:
-    """Stream ``url`` to ``dest`` in 1 MiB chunks; return bytes written."""
+    """Stream ``url`` to ``dest`` in 1 MiB chunks; return bytes written.
+
+    ``timeout=300`` so a flaky GitHub mirror (or a network blip mid-
+    artefact) doesn't wedge the bty-web ``fetch latest release``
+    action indefinitely. Five minutes is generous for a
+    ~150 MiB squashfs at typical link speeds; tempdir cleanup on
+    failure is handled by the caller's ``TemporaryDirectory``.
+    """
     req = urllib.request.Request(url, headers={"User-Agent": DEFAULT_USER_AGENT})
     written = 0
-    with urllib.request.urlopen(req) as resp, dest.open("wb") as f:
+    with urllib.request.urlopen(req, timeout=300) as resp, dest.open("wb") as f:
         while True:
             chunk = resp.read(1 << 20)
             if not chunk:
