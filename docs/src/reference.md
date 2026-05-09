@@ -79,7 +79,7 @@ Recognised formats: `.qcow2`, `.img`, `.img.zst`, `.img.xz`,
 bty itself ships all of its dd-able images
 (`bty-server-x86_64.img.gz`, `bty-server-rpi-arm64.img.gz`,
 `bty-usb-x86_64.iso.gz`) as gzip for universal flasher support
-— Etcher / Rufus / Imager / dd / Windows / macOS all decompress
+- Etcher / Rufus / Imager / dd / Windows / macOS all decompress
 gzip natively without the version-cliff or implementation-bug
 issues that bit us with xz (Etcher's bundled xz handler) and
 zstd (older Etcher pre-1.18). Stick prep / appliance setup is
