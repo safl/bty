@@ -132,9 +132,10 @@ when written to a host's disk and booted, runs the bty provisioning
 server (`bty-web`, the iPXE/TFTP/HTTP services that PXE clients chain
 through, the network-flash live environment those clients boot into,
 and a storage layout for the image library). One artifact, ready to
-serve a fleet. Boots with the same plymouth bty splash the USB live
-env shows; a `/etc/issue` + `/etc/motd` figlet banner takes over on
-the console + over SSH.
+serve a fleet. Headless: a `/etc/issue` + `/etc/motd` figlet banner
+identifies the appliance on the console and over SSH; no graphical
+boot splash (a server is most often watched via the serial console
+or SSH, not a local display).
 
 **Server image, Raspberry Pi 4 / 5 (`server-rpi`).** Same appliance
 role, delivered as an SD-card image for arm64. Built by mounting the

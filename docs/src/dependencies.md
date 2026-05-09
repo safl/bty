@@ -73,7 +73,7 @@ your own.
 | `systemd-networkd` | NIC management on the appliance |
 | `cloud-init` | first-boot user / password / network setup |
 | `cloud-utils` | `growpart` for `bty-grow-rootfs.service` |
-| `plymouth` + `plymouth-themes` | bty-themed boot splash on tty1 |
+| `plymouth` + `plymouth-themes` | bty-themed boot splash on tty1 (USB live env only -- not on the headless server appliance) |
 | `cijoe` | optional online provisioning workflows after a target first-boots |
 
 The appliance is the **only** delivery shape that exercises the PXE

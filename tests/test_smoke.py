@@ -69,3 +69,32 @@ def test_bty_web_main_version_flag(capsys: pytest.CaptureFixture[str]) -> None:
     out = capsys.readouterr().out
     assert out.startswith("bty-web ")
     assert bty.__version__ in out
+
+
+def test_server_cloudinit_does_not_install_plymouth() -> None:
+    """The bty-server cloudinit base must not (re-)introduce
+    plymouth: its quit/teardown leaks VT100 escape sequences onto
+    ``console=ttyS0`` serial consoles, which is the operator's
+    primary boot-watch surface for headless servers.
+
+    Plymouth has been added-then-dropped twice already (v0.4.x
+    added, v0.5.12 dropped, post-v0.5.14 restored, v0.7.2 dropped
+    again after the serial-console regression resurfaced). Pin it
+    so a third "let's add the splash back" cycle gets caught by
+    tests instead of by an operator watching a fresh appliance
+    boot.
+    """
+    from pathlib import Path
+
+    repo_root = Path(__file__).resolve().parents[1]
+    base = repo_root / "bty-media" / "auxiliary" / "cloudinit-base-server.user"
+    body = base.read_text()
+    # ``- plymouth`` and ``- plymouth-themes`` are the YAML
+    # list-item forms in the ``packages:`` block; ``plymouth-set-
+    # default-theme`` is the runcmd handle. Each is a clear
+    # signal of plymouth being installed / configured. Inline
+    # comments using the word are fine (the comment block in the
+    # file documents *why* plymouth isn't shipped).
+    assert "\n  - plymouth\n" not in body
+    assert "\n  - plymouth-themes\n" not in body
+    assert "plymouth-set-default-theme" not in body
