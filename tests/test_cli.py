@@ -524,3 +524,54 @@ def test_bty_web_help_exits_cleanly() -> None:
     with pytest.raises(SystemExit) as excinfo:
         web_mod.main(["--help"])
     assert excinfo.value.code == 0
+
+
+# ---------- M22: --image sha256:<prefix> resolver ---------------------------
+
+
+def test_resolve_flash_image_passthrough_for_path() -> None:
+    """A bare path string is returned unchanged."""
+    assert cli._resolve_flash_image("/abs/path/foo.img.zst") == "/abs/path/foo.img.zst"
+
+
+def test_resolve_flash_image_passthrough_for_url() -> None:
+    """An HTTP/HTTPS URL is returned unchanged."""
+    url = "http://server:8080/images/foo.img.zst"
+    assert cli._resolve_flash_image(url) == url
+
+
+def test_resolve_flash_image_sha_prefix_finds_local_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A ``sha256:<prefix>`` resolves via the unified merge to the
+    first matching local source. The file's sidecar provides the SHA;
+    no manifest needed."""
+    import hashlib
+
+    img_root = tmp_path / "imgs"
+    img_root.mkdir()
+    payload = b"resolve-me"
+    sha = hashlib.sha256(payload).hexdigest()
+    (img_root / "demo.img").write_bytes(payload)
+    (img_root / "demo.img.sha256").write_text(f"{sha}  demo.img\n")
+
+    monkeypatch.setenv("BTY_IMAGE_ROOT", str(img_root))
+    monkeypatch.setenv("BTY_STATE_DIR", str(tmp_path / "state"))
+    resolved = cli._resolve_flash_image(f"sha256:{sha[:12]}")
+    assert resolved == str(img_root / "demo.img")
+
+
+def test_resolve_flash_image_sha_prefix_unknown_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A prefix that matches nothing -> FileNotFoundError."""
+    monkeypatch.setenv("BTY_IMAGE_ROOT", str(tmp_path / "empty"))
+    monkeypatch.setenv("BTY_STATE_DIR", str(tmp_path / "state"))
+    with pytest.raises(FileNotFoundError, match="no image with sha256 prefix"):
+        cli._resolve_flash_image("sha256:deadbeef")
+
+
+def test_resolve_flash_image_sha_prefix_empty_raises() -> None:
+    """``sha256:`` with no hex after it is a usage error."""
+    with pytest.raises(ValueError, match="hex prefix"):
+        cli._resolve_flash_image("sha256:")

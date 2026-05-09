@@ -107,11 +107,13 @@ def main(argv: list[str] | None = None) -> int:
         "--image",
         type=str,
         required=True,
-        help="image to flash. Either a local file path "
-        "(``/path/to/image.qcow2``) or an HTTP/HTTPS URL "
-        "(``http://server/images/foo.img.zst``); URLs stream "
-        "directly to disk for ``.img`` / ``.img.zst`` and download "
-        "to a temp file first for ``.qcow2``.",
+        help="image to flash. Accepts: a local file path "
+        "(``/path/to/image.qcow2``), an HTTP/HTTPS URL "
+        "(``http://server/images/foo.img.zst``), or a SHA-256 "
+        "prefix (``sha256:abc123...``) resolved against the "
+        "unified catalog (dir-scan + manifest). URLs stream "
+        "directly to disk for ``.img`` / ``.img.zst`` and "
+        "download to a temp file first for ``.qcow2``.",
     )
     p_flash.add_argument("--target", type=Path, required=True, help="target block device")
     p_flash.add_argument(
@@ -245,19 +247,57 @@ def cmd_list_disks(args: argparse.Namespace) -> int:
 
 
 def cmd_list_images(args: argparse.Namespace) -> int:
-    found = images.list_images(args.image_root)
-    rows = [img.to_dict() for img in found]
+    """List images under ``--image-root``, merged with the catalog
+    manifest if one is configured (``BTY_CATALOG_FILE`` or
+    ``${BTY_STATE_DIR}/catalog.toml``). Output is SHA-keyed so an
+    image present in both the directory and the manifest renders
+    as one row with ``names`` and ``sources`` arrays. Unhashed
+    dir-scan files (no ``.sha256`` sidecar) appear with a
+    ``sha256: null`` entry so the operator can spot them and run
+    ``bty catalog hash <name>`` (or use the bty-web Hash button).
+    """
+    manifest_path = catalog.default_manifest_path()
+    cache_dir = catalog.default_cache_dir()
+    manifest_entries: list[catalog.CatalogEntry] = []
+    if manifest_path is not None:
+        try:
+            manifest_entries = list(catalog.load(manifest_path).entries)
+        except catalog.CatalogError as exc:
+            # Don't refuse to list dir-scan results just because
+            # the manifest is malformed; warn and continue.
+            print(f"bty: catalog manifest at {manifest_path}: {exc}", file=sys.stderr)
+    unified = images.merge_with_catalog(args.image_root, manifest_entries, cache_dir)
+    rows = [u.to_dict() for u in unified]
     if args.json:
         payload = _envelope(
             "list-images",
             image_root=str(args.image_root),
+            manifest=str(manifest_path) if manifest_path else None,
+            cache_dir=str(cache_dir),
             images=rows,
         )
         print(json.dumps(payload, indent=2))
     else:
+        # Flatten ``names`` + ``sources`` for table display so each
+        # column is a single string. SHA-prefix is shown rather than
+        # the full hash to keep the table readable.
+        flat = []
+        for u in unified:
+            sha_short = (u.sha256[:12] + "...") if u.sha256 else "(unhashed)"
+            sources = ", ".join(s.kind for s in u.sources)
+            flat.append(
+                {
+                    "sha256": sha_short,
+                    "names": ", ".join(u.names),
+                    "format": u.format or "?",
+                    "size_bytes": u.size_bytes if u.size_bytes is not None else "?",
+                    "cached": "yes" if u.cached else "no",
+                    "sources": sources,
+                }
+            )
         formatting.print_table(
-            rows,
-            columns=["name", "format", "size_bytes"],
+            flat,
+            columns=["sha256", "names", "format", "size_bytes", "cached", "sources"],
         )
     return 0
 
@@ -314,10 +354,11 @@ def cmd_flash(
         return 2
 
     try:
-        if isinstance(args.image, str) and args.image.startswith(("http://", "https://")):
-            image_info = probe_image_url(args.image)
+        resolved_image = _resolve_flash_image(args.image)
+        if isinstance(resolved_image, str) and resolved_image.startswith(("http://", "https://")):
+            image_info = probe_image_url(resolved_image)
         else:
-            image_info = probe_image(Path(args.image))
+            image_info = probe_image(Path(resolved_image))
     except (FileNotFoundError, ValueError) as exc:
         print(f"bty: {exc}", file=sys.stderr)
         return 2
@@ -457,6 +498,64 @@ def _build_progress_callback(mode: str) -> flash.ProgressCallback | None:
         print(line, file=sys.stderr, flush=True)
 
     return emit_text
+
+
+def _resolve_flash_image(image: str | Path) -> str:
+    """Resolve ``--image`` to a path or URL.
+
+    Accepts:
+
+      * Absolute / relative file path (``str`` or ``Path``) --
+        returned unchanged as a string.
+      * ``http://`` / ``https://`` URL -- returned unchanged.
+      * ``sha256:<prefix>`` -- looked up against the unified
+        catalog (dir-scan + manifest from the configured manifest
+        path); the entry's first source (local file, else manifest
+        URL) is returned. Raises ``FileNotFoundError`` if no entry
+        matches the prefix and ``ValueError`` if the prefix is
+        ambiguous (matches multiple entries).
+    """
+    image_str = str(image)
+    if not image_str.startswith("sha256:"):
+        return image_str
+    prefix = image_str.removeprefix("sha256:").strip().lower()
+    if not prefix:
+        raise ValueError("--image sha256: requires a hex prefix (got empty)")
+    manifest_path = catalog.default_manifest_path()
+    cache_dir = catalog.default_cache_dir()
+    manifest_entries: list[catalog.CatalogEntry] = []
+    if manifest_path is not None:
+        try:
+            manifest_entries = list(catalog.load(manifest_path).entries)
+        except catalog.CatalogError:
+            # Bad manifest is annoying, not fatal -- a SHA prefix
+            # may still resolve via a local sidecar.
+            manifest_entries = []
+    image_root = images.default_image_root()
+    unified = images.merge_with_catalog(image_root, manifest_entries, cache_dir)
+    matches = [u for u in unified if u.sha256 and u.sha256.startswith(prefix)]
+    if not matches:
+        raise FileNotFoundError(
+            f"no image with sha256 prefix {prefix!r} (manifest={manifest_path}, "
+            f"image_root={image_root})"
+        )
+    if len(matches) > 1:
+        names = ", ".join(",".join(u.names) for u in matches)
+        raise ValueError(
+            f"ambiguous sha256 prefix {prefix!r} matches {len(matches)} entries: {names}"
+        )
+    entry = matches[0]
+    # Prefer a local source (zero-cost); fall back to the first
+    # manifest URL. The flash code can stream both.
+    for src in entry.sources:
+        if src.kind == "local":
+            return src.location
+    for src in entry.sources:
+        if src.kind == "manifest":
+            return src.location
+    raise FileNotFoundError(
+        f"sha256:{prefix} matched {entry.names} but it has no resolvable source"
+    )
 
 
 def cmd_catalog_validate(args: argparse.Namespace) -> int:
