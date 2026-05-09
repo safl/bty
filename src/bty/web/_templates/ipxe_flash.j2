@@ -15,10 +15,13 @@ set bty-base http://{{ host }}
 # essential for headless bare-metal flashing (operator watches via
 # IPMI / serial console) and for the PXE chain test.
 #
-# bty.image_url is content-addressed: ``/images/<ref>`` resolves
-# via the unified image listing (local file or content-addressed
-# cache populated from the catalog manifest) so renaming a file
-# does not break the binding.
-kernel ${bty-base}/boot/bty-netboot-x86_64.vmlinuz boot=live fetch=${bty-base}/boot/bty-netboot-x86_64.squashfs components quiet console=tty0 console=ttyS0,115200 bty.server=${bty-base} bty.mac={{ mac }} bty.image_url=${bty-base}/images/{{ machine.image_sha256 }} bty.provisioning={{ machine.provisioning_mode }}
+# bty.image_url is content-addressed: ``/images/<ref>/<name>``
+# resolves via the unified image listing (local file or content-
+# addressed cache populated from the catalog manifest) so
+# renaming a file does not break the binding. The trailing
+# ``/<name>`` is decorative -- the SHA binds the bytes; the name
+# preserves format-by-extension on the live-env side
+# (``bty.flash.probe_image_url`` keys off the URL filename).
+kernel ${bty-base}/boot/bty-netboot-x86_64.vmlinuz boot=live fetch=${bty-base}/boot/bty-netboot-x86_64.squashfs components quiet console=tty0 console=ttyS0,115200 bty.server=${bty-base} bty.mac={{ mac }} bty.image_url=${bty-base}/images/{{ machine.image_sha256 }}/{{ image_name }} bty.provisioning={{ machine.provisioning_mode }}
 initrd ${bty-base}/boot/bty-netboot-x86_64.initrd
 boot

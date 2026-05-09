@@ -294,7 +294,19 @@ def create_app(
             return template.render(mac=normalised, machine=machine, host=host)
         if machine.get("image_sha256") and machine.get("boot_policy") == "flash":
             template = jinja.get_template("ipxe_flash.j2")
-            return template.render(mac=normalised, machine=machine, host=host)
+            # Resolve the image's display name so the iPXE URL ends
+            # in ``/images/<sha>/<name>`` instead of ``/images/<sha>``.
+            # The trailing /<name> is decorative for the client side
+            # (``bty.flash.probe_image_url`` reads format from the URL
+            # filename extension); without it the live env's local
+            # cache file gets named after the bare SHA and format
+            # detection falls over. Falls back to ``image.img`` only
+            # if the lookup yields nothing -- an unflashable name but
+            # at least one the server-side handler accepts.
+            image_name = _image_name_for_sha(machine["image_sha256"]) or "image.img"
+            return template.render(
+                mac=normalised, machine=machine, host=host, image_name=image_name
+            )
         if machine.get("image_sha256"):
             template = jinja.get_template("ipxe.j2")
             return template.render(mac=normalised, machine=machine)
@@ -393,6 +405,27 @@ def create_app(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"no such image: {key}",
         )
+
+    def _image_name_for_sha(sha: str) -> str | None:
+        """Find a display name for the image whose bytes hash to
+        ``sha``. Used by the iPXE flash-template renderer to build
+        ``/images/<sha>/<name>`` URLs that preserve the filename's
+        format-by-extension semantics on the live-env client side.
+
+        Resolution: dir-scan first (operator-supplied images take
+        precedence), then catalog manifest (cached or upstream).
+        Returns ``None`` if no entry matches the SHA -- caller's
+        responsibility to fall back to a safe default.
+        """
+        sha = sha.lower()
+        for img in images.list_images(resolved_image_root):
+            if img.sha256 == sha:
+                return img.name
+        if parsed_catalog is not None:
+            for entry in parsed_catalog.entries:
+                if entry.sha256 == sha:
+                    return entry.name
+        return None
 
     @app.get("/images/{key}", include_in_schema=False)
     def serve_image(key: str) -> FileResponse:

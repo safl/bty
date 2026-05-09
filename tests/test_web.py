@@ -735,8 +735,13 @@ def test_pxe_flash_policy_returns_chain_with_args(app_client: TestClient) -> Non
     # Cmdline params: live env's bty-flash-on-boot reads these.
     assert "bty.server=${bty-base}" in body
     assert "bty.mac=aa:bb:cc:dd:ee:ff" in body
+    # URL shape is ``/images/<sha>/<name>``: the SHA binds the
+    # bytes; the trailing /<name> preserves format-by-extension on
+    # the live-env side. Without /<name> the live env's local
+    # cache file gets named after the bare SHA and
+    # ``bty.images.detect_format`` returns None for it.
     assert (
-        "bty.image_url=${bty-base}/images/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+        "bty.image_url=${bty-base}/images/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef/"
         in body
     )
     assert "bty.provisioning=cloud-init" in body
