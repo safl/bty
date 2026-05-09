@@ -27,6 +27,7 @@ overview
 quickstart
 walkthrough-usb
 walkthrough-server
+walkthrough-server-docker
 ```
 
 ```{toctree}

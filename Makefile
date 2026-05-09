@@ -29,6 +29,7 @@ endif
 .PHONY: help \
         deps test lint format format-check typecheck ci wheel \
         media-deps build test-pxe \
+        docker-build docker-run \
         docs-html docs-pdf docs-serve \
         clean
 
@@ -57,6 +58,10 @@ help:
 	@echo "  server-x86   - server appliance image (.img.zst, x86_64; needs qemu-system-x86_64 + KVM)"
 	@echo "  server-rpi   - server appliance for Raspberry Pi 4/5 (.img.zst, arm64; needs qemu-user-static + binfmt_misc)"
 	@echo "  netboot-x86  - kernel + initrd + squashfs for PXE-flash clients (.tar.zst, x86_64)"
+	@echo ""
+	@echo "Docker (trial / image-library bty-web container):"
+	@echo "  docker-build  uv build + docker build -> bty-web:dev (single-arch, local)"
+	@echo "  docker-run    run bty-web:dev with ./bty-data/ bind-mount on :8080"
 	@echo ""
 	@echo "Docs (bty-docs sibling; ``pipx install ./docs/tooling`` first):"
 	@echo "  docs-html     bty-docs-build-html  -> docs/_build/html/"
@@ -119,6 +124,28 @@ build:
 # ~/system_imaging/disk/. Wall clock 5-10 min per run.
 test-pxe:
 	cd cijoe && cijoe tasks/test-pxe.yaml --monitor -c configs/test-pxe.toml
+
+# ---------- Docker ------------------------------------------------------
+
+# Local single-arch build of the bty-web container. Stages the
+# wheel into ./dist/ first so the Dockerfile's COPY finds it.
+# Multi-arch + push lives in .github/workflows/release.yml --
+# this target is the "smoke test it on my laptop" path.
+.PHONY: docker-build docker-run
+
+docker-build:
+	$(UV) build
+	docker build -f docker/Dockerfile -t bty-web:dev .
+
+# Trial run with a host-side data dir so dropped images persist
+# across container restarts. Background + log tail so the operator
+# can ^C without killing the container.
+docker-run:
+	mkdir -p bty-data/images
+	docker run -d --name bty-web --rm -p 8080:8080 \
+	    -v "$(CURDIR)/bty-data":/var/lib/bty bty-web:dev
+	@echo "bty-web running on http://localhost:8080/ui (login: bty / bty)"
+	@echo "logs: docker logs -f bty-web ; stop: docker stop bty-web"
 
 # ---------- Docs --------------------------------------------------------
 

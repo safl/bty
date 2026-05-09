@@ -33,6 +33,21 @@ USB live image (`usb-x86`), the x86 server appliance (`server-x86`),
 the Raspberry Pi 4 / 5 server appliance (`server-rpi`), and the
 PXE-chain network-flash live env (`netboot-x86`).
 
+For a low-friction trial of the bty-web UI without flashing
+anything, a multi-arch container is published to
+[`ghcr.io/safl/bty-web`](https://github.com/safl/bty/pkgs/container/bty-web)
+on every release:
+
+```bash
+docker run -d --name bty-web -p 8080:8080 -v "$PWD/bty-data":/var/lib/bty \
+  ghcr.io/safl/bty-web:latest
+# -> http://localhost:8080/ui   (login: bty / bty)
+```
+
+Image catalog only - no DHCP / TFTP / PXE proxy in the container
+(those need bare-metal LAN access; use the appliance for that).
+See [`docs/src/walkthrough-server-docker.md`](docs/src/walkthrough-server-docker.md).
+
 ## Install
 
 ```bash

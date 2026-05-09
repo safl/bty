@@ -1,0 +1,85 @@
+# bty-web container.
+#
+# What this is: a minimal HTTP-server image hosting the bty image
+# catalog + machine registry + browser UI. Operators run it as a
+# trial / network-reachable image library; ``bty-tui --server URL``
+# clients (running from the USB live env or a workstation) connect
+# here and pick images from the catalog.
+#
+# What this is NOT: the full bty-server appliance. There is no
+# dnsmasq / TFTP / iPXE proxy-DHCP stack in this image -- those
+# need bare-metal access to L2 broadcasts on the LAN, which docker
+# bridge networking can't do, and host networking is Linux-only.
+# The PXE flow lives in ``bty-media/`` (see
+# docs/walkthrough-server.md). This container is the easy way in;
+# the appliance is the production deployment.
+#
+# Built off the local wheel produced by ``uv build``; the GHA
+# workflow stages ``dist/bty_lab-*.whl`` into the build context
+# before invoking buildx, so the container's bty-web is exactly
+# the version published to PyPI for the same tag.
+
+FROM python:3.13-slim-bookworm AS runtime
+
+# System deps:
+#   libpam0g + libpam-modules: pamela uses pam_unix.so to verify
+#     /etc/shadow on /ui/login.
+#   qemu-utils: ``bty.flash.probe_image`` shells out to qemu-img
+#     when bty-web inspects an uploaded image.
+#   tini: PID-1 init that forwards SIGTERM cleanly so
+#     ``docker stop`` doesn't fall back to SIGKILL after 10s.
+#   ca-certificates: HTTPS uploads / downloads.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+        libpam0g \
+        libpam-modules \
+        qemu-utils \
+        tini \
+        ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+
+# Install bty-lab[web] from the wheel staged by the workflow into
+# ./dist/. The wheel is platform-independent (pure Python), so
+# the same dist/ works for amd64 and arm64 buildx targets.
+#
+# The two-step shell-glob expansion is deliberate: pip parses
+# ``bty_lab-*-py3-none-any.whl[web]`` as a literal filename + extra
+# spec, but in /bin/sh the trailing ``[web]`` is a glob bracket
+# pattern (any one of w/e/b), which doesn't match anything and
+# leaves pip with the literal ``*`` in the filename. Resolve the
+# wheel name first, then concatenate the ``[web]`` extra.
+COPY dist/bty_lab-*-py3-none-any.whl /tmp/wheels/
+RUN set -eu; \
+    WHL=$(ls /tmp/wheels/bty_lab-*-py3-none-any.whl | head -1); \
+    pip install --no-cache-dir "${WHL}[web]"; \
+    rm -rf /tmp/wheels
+
+# Default credentials: ``bty / bty``. PAM auth gates ``/ui/login``;
+# the cooked image needs a known password the operator can use the
+# moment the container is up. Same model the appliance uses; same
+# rotation responsibility (rotate before exposing).
+RUN useradd --system --no-create-home --shell /usr/sbin/nologin bty \
+ && echo 'bty:bty' | chpasswd
+
+# State + image directories. Operator volume-mounts ``/var/lib/bty``;
+# bty-web writes ``state.db``, ``session-secret``, and the image
+# catalog under that root.
+RUN install -d -o root -g root -m 0755 /var/lib/bty /var/lib/bty/images
+VOLUME /var/lib/bty
+
+# bty-web reads these env vars; defaults match the on-image
+# directory layout above.
+ENV BTY_STATE_DIR=/var/lib/bty \
+    BTY_IMAGE_ROOT=/var/lib/bty/images \
+    BTY_WEB_HOST=0.0.0.0 \
+    BTY_WEB_PORT=8080
+
+EXPOSE 8080
+
+COPY docker/entrypoint.sh /entrypoint.sh
+RUN chmod 0755 /entrypoint.sh
+
+# Running as root because pamela needs to read /etc/shadow.
+# tini reaps zombies and forwards signals so SIGTERM lands on
+# bty-web within ~100ms instead of the 10s docker-stop timeout.
+ENTRYPOINT ["/usr/bin/tini", "--", "/entrypoint.sh"]

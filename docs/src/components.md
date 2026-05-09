@@ -133,6 +133,28 @@ chroot ships a `bty-flash-on-boot.service` oneshot that reads its
 assignment from `/proc/cmdline`, downloads the assigned image, runs
 `bty flash`, signals completion, and reboots.
 
+## `ghcr.io/safl/bty-web` (Docker container)
+
+A multi-arch container (`linux/amd64` + `linux/arm64`) built from
+the same `bty-lab[web]` wheel and published to
+[GitHub Container Registry](https://github.com/safl/bty/pkgs/container/bty-web)
+on every tagged release. Hosts `bty-web` only - **no** dnsmasq,
+TFTP, or iPXE proxy-DHCP, because Docker bridge networking cannot
+relay L2 broadcasts.
+
+Use cases:
+
+- Trial / kicking-the-tires deploys: `docker run -p 8080:8080
+  ghcr.io/safl/bty-web:latest` and the browser UI is up in seconds.
+- Network-shared image catalog: a fleet of operators with bty USB
+  sticks all point `bty-tui --server URL` at the same container.
+- Local development backend for `bty-tui --server` work.
+
+For PXE-boot provisioning, deploy the bare-metal `bty-server`
+appliance instead. See
+[`walkthrough-server-docker.md`](walkthrough-server-docker.md)
+for the full operator guide.
+
 The intended operator experience is appliance-grade:
 
 1. `dd` (or `bty flash`) the image onto the server host's disk (or SD

@@ -1,0 +1,13 @@
+# Keep the build context minimal: only the wheel under dist/ and
+# the docker/ tree (which has the entrypoint that the Dockerfile
+# COPYs in). Everything else (source tree, tests, docs, bty-media,
+# cijoe pipelines) is irrelevant for the container build and just
+# slows the COPY phase.
+
+*
+
+!dist/
+!docker/
+
+dist/*
+!dist/bty_lab-*-py3-none-any.whl

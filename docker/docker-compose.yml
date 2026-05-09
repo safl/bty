@@ -1,0 +1,27 @@
+# Convenience compose file for trying the bty-web container.
+#
+# Usage:
+#   docker compose -f docker/docker-compose.yml up
+#   -> http://localhost:8080/ui   (login: bty / bty)
+#
+# Volumes are bind-mounted under ``./bty-data/`` in the working
+# directory so an operator can drop ``.img.zst`` / ``.qcow2`` /
+# ``.img.gz`` files into ``./bty-data/images/`` from the host
+# and they'll show up in the catalog after a refresh.
+#
+# Production deploys should use the bty-server appliance instead
+# (this is a trial / image-library shape; no PXE proxy-DHCP).
+
+services:
+  bty-web:
+    image: ghcr.io/safl/bty-web:latest
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./bty-data:/var/lib/bty
+    # Override defaults if you want to point clients at a public
+    # hostname or change the port -- BTY_WEB_HOST / BTY_WEB_PORT
+    # are read at startup.
+    # environment:
+    #   BTY_WEB_PORT: "8080"
