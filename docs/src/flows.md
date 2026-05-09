@@ -77,6 +77,74 @@ therefore live anywhere reachable - operator's laptop, an EC2
 instance, anywhere with HTTP. The cost: the operator still has to
 plug in the USB stick and stand at the target.
 
+### Sub-case: virtual USB via IP-KVM (PiKVM, JetKVM)
+
+The "USB live stick" in step 2 above does not have to be a
+physical stick. IP-KVM appliances (PiKVM, JetKVM, BMC IPMI virtual
+media, vendor-specific OoB consoles) can mount the bty `.iso.gz`
+artifact and expose it to the target as if it were a USB or
+CD-ROM device. The target boots into the bty live env exactly as
+it would from a physical stick; bty-tui auto-launches on tty1;
+the operator types `s`, fills in `http://<host>:8080`, picks an
+image, picks a target disk, flashes. The whole sequence runs
+through the IP-KVM session - no one has to be at the rack.
+
+Practical notes:
+
+- Use the `.iso.gz` artifact. Decompress it host-side first if
+  your IP-KVM only accepts plain `.iso` (most do).
+- bty's hybrid ISO works as either USB or CD-ROM; pick whichever
+  your IP-KVM offers and the target's BIOS/UEFI prefers.
+- Keystroke latency over IP-KVM is real; the wizard's `Enter`-
+  forward / `Esc`-back UX keeps the per-step input minimal.
+- The bty live env's tty1 framebuffer renders cleanly through
+  every IP-KVM I have tested (PSF console fonts, no nerd-font /
+  emoji dependencies). The figlet banner and the bty-tui rounded
+  panels both render identically over IP-KVM and locally.
+
+This is what "bare-metal provisioning over the internet" looks
+like in practice for a small fleet without PXE infrastructure: a
+PiKVM at each site, a `bty-web` container somewhere with the
+catalog, and an operator at home with a browser tab.
+
+### Sub-case: Ventoy multi-ISO stick
+
+[Ventoy](https://www.ventoy.net/) replaces the bootloader on a
+USB stick with a menu that boots any `.iso` dropped onto its
+data partition. bty-usb.iso works there: boot the stick, pick
+`bty-usb-x86_64.iso` from the Ventoy menu, the target boots
+into the bty live env exactly as if it had been `dd`'d directly.
+
+Two ways to use Ventoy with bty:
+
+1. **bty-usb plus a remote catalog.** Same shape as the IP-KVM
+   sub-case above: bty-tui auto-launches, the operator presses
+   `s` and types the `bty-web` URL. Ventoy is just a different
+   boot mechanism; the catalog source is unchanged.
+
+2. **bty-usb plus images on the same Ventoy partition.** Drop
+   `.img.zst` / `.qcow2` / `.img.gz` files onto the Ventoy data
+   partition next to the bty ISO. After bty boots, the
+   partition is still attached to the host (it's the physical
+   USB stick the live env booted from). Mount it and point
+   bty-tui at the path:
+
+   ```bash
+   # On the booted bty live env's tty1 (drop to a shell first):
+   mount /dev/sdaN /mnt          # Ventoy data partition
+   bty-tui --image-root /mnt
+   ```
+
+   No `bty-web` server needed for this variant - same
+   self-contained shape as a stock bty-usb stick, just with
+   Ventoy's multi-ISO bootloader replacing the bty bootloader.
+
+The auto-mount of `BTY_IMAGES` that a stock bty-usb stick uses
+relies on the partition label; Ventoy's data partition is labeled
+`Ventoy` by default, so the auto-mount does not trigger. Either
+relabel that partition `BTY_IMAGES` (if you want auto-mount) or
+mount it manually as in option 2.
+
 ## Interactive PXE flash (`boot_policy=tui`)
 
 The "bty-on-a-USB but over the network" path. Default behaviour for
