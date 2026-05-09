@@ -1349,10 +1349,13 @@ class BtyTui(App[None]):
             return (
                 "[b]No images on the server yet.[/]\n\n"
                 f"Catalog endpoint: [accent]{self._server_url}/images[/]\n\n"
-                "Upload via the bty-web Images page in your browser, or PUT\n"
-                "an image directly:\n"
-                "  [dim]curl -X PUT --upload-file my.qcow2 \\\n"
-                "       http://server:8080/images/my.qcow2[/]\n\n"
+                "Three ways to add images:\n"
+                "  - Browser: bty-web Images page on the server's UI.\n"
+                "  - HTTP PUT: [dim]curl -X PUT --upload-file my.qcow2 \\\n"
+                "    http://server:8080/images/my.qcow2[/]\n"
+                "  - Volume mount (Docker / appliance): drop files into\n"
+                "    [dim]/var/lib/bty/images/[/] on the server's host\n"
+                "    filesystem (or its bind-mounted dir / managed volume).\n\n"
                 "Then press [b]r[/] to refresh, or [b]s[/] to switch to a\n"
                 "different catalog source."
             )

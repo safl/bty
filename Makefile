@@ -29,7 +29,7 @@ endif
 .PHONY: help \
         deps test lint format format-check typecheck ci wheel \
         media-deps build test-pxe \
-        docker-build docker-run \
+        docker-build docker-run docker-clean \
         docs-html docs-pdf docs-serve \
         clean
 
@@ -62,6 +62,7 @@ help:
 	@echo "Docker (trial / image-library bty-web container):"
 	@echo "  docker-build  uv build + docker build -> bty-web:dev (single-arch, local)"
 	@echo "  docker-run    run bty-web:dev with ./bty-data/ bind-mount on :8080"
+	@echo "  docker-clean  stop container, remove bty-web:dev image, wipe ./bty-data/"
 	@echo ""
 	@echo "Docs (bty-docs sibling; ``pipx install ./docs/tooling`` first):"
 	@echo "  docs-html     bty-docs-build-html  -> docs/_build/html/"
@@ -152,6 +153,17 @@ docker-run:
 	    -v "$(CURDIR)/bty-data":/var/lib/bty bty-web:dev
 	@echo "bty-web running on http://localhost:8080/ui (login: bty / bty)"
 	@echo "logs: docker logs -f bty-web ; stop: docker stop bty-web"
+
+# Stop a running ``bty-web`` container, remove the local
+# ``bty-web:dev`` image, and (with sudo) wipe the host-side
+# data dir. Keeps the docker-build / docker-run / docker-clean
+# triplet symmetric. Operators occasionally want to rebuild
+# fresh after a Dockerfile change without leftover state from
+# a prior run.
+docker-clean:
+	-docker stop bty-web 2>/dev/null
+	-docker image rm bty-web:dev 2>/dev/null
+	-sudo rm -rf bty-data
 
 # ---------- Docs --------------------------------------------------------
 
