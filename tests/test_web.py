@@ -367,7 +367,12 @@ def test_put_image_rejects_path_traversal(app_client: TestClient) -> None:
     path converter already strips raw ``/`` from ``{name}``, but
     URL-encoded variants and ``..`` need an explicit reject."""
     r = app_client.put("/images/..%2Fescape.qcow2", content=b"x", cookies=AUTH)
-    assert r.status_code in {400, 404}
+    # Three valid rejects: 400 (explicit traversal-reject), 404 (no
+    # such file), 405 (URL-decoded path becomes ``..%2F...`` which
+    # routes onto the GET /images/{key}/{name:path} pattern and
+    # PUT isn't allowed there). All three deny the upload; the
+    # vulnerability would be a 200 + actual write outside image_root.
+    assert r.status_code in {400, 404, 405}
 
 
 def test_put_image_requires_auth(app_client: TestClient) -> None:
@@ -458,7 +463,7 @@ def test_auto_import_hashes_unhashed_dir_scan_files(tmp_path: Path) -> None:
         names = {row["name"] for row in rows}
         assert "fresh.img" in names
         entry = next(row for row in rows if row["name"] == "fresh.img")
-        assert entry["url"].endswith(f"/images/{expected_sha}")
+        assert entry["url"].endswith(f"/images/{expected_sha}/fresh.img")
 
 
 def test_list_images_returns_files_under_image_root(
@@ -503,8 +508,11 @@ def test_list_images_returns_files_under_image_root(
     # flashes from. For dir-scan images the URL points at the
     # bty-web server's ``/images/<sha>`` endpoint.
     by_name = {row["name"]: row for row in rows}
-    assert by_name["alpha.qcow2"]["url"].endswith(f"/images/{alpha_sha}")
-    assert by_name["beta.img"]["url"].endswith(f"/images/{beta_sha}")
+    # URL shape is ``/images/<sha>/<filename>``: the sha binds the
+    # content, the filename is decorative so format-by-extension
+    # keeps working on the client.
+    assert by_name["alpha.qcow2"]["url"].endswith(f"/images/{alpha_sha}/alpha.qcow2")
+    assert by_name["beta.img"]["url"].endswith(f"/images/{beta_sha}/beta.img")
     assert by_name["alpha.qcow2"]["cached"] is True
 
 
@@ -873,6 +881,42 @@ def test_serve_image_404_for_unknown_sha(app_client: TestClient) -> None:
     dir-scan SHA returns 404 cleanly (not a server error)."""
     r = app_client.get("/images/" + "0" * 64)
     assert r.status_code == 404
+
+
+def test_serve_image_with_name_resolves_by_sha(tmp_path: Path) -> None:
+    """``GET /images/<sha>/<filename>`` resolves by SHA; the
+    ``<filename>`` is informational only -- it's there so URL-
+    filename-extension format detection (used by
+    ``bty.flash.probe_image_url`` and ``bty-flash-on-boot``)
+    sees ``foo.img.zst`` rather than a bare 64-hex digest. This
+    is what ``GET /images`` actually advertises now (was
+    ``/images/<sha>`` flat, which 404'd format detection)."""
+    import hashlib
+
+    image_root = tmp_path / "images"
+    image_root.mkdir()
+    payload = b"sha-with-name"
+    sha = hashlib.sha256(payload).hexdigest()
+    (image_root / "demo.img").write_bytes(payload)
+    (image_root / "demo.img.sha256").write_text(f"{sha}  demo.img\n")
+
+    state = tmp_path / "state.db"
+    app = create_app(
+        state_path=state,
+        service_user=TEST_SERVICE_USER,
+        secret_key=TEST_SECRET_KEY,
+        image_root=image_root,
+    )
+    with TestClient(app) as client:
+        # Trailing decorative name -- server ignores it.
+        r = client.get(f"/images/{sha}/whatever-filename.img.zst")
+        assert r.status_code == 200
+        assert r.content == payload
+        # Same SHA, no trailing name -- still works (back-compat
+        # for older clients that hit the bare-SHA URL).
+        r2 = client.get(f"/images/{sha}")
+        assert r2.status_code == 200
+        assert r2.content == payload
 
 
 # ---------- /catalog endpoints (M22) ---------------------------------------

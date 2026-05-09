@@ -366,42 +366,26 @@ def create_app(
         # and the appliance is non-functional for boot_policy=flash.
         return _serve_safe_file(resolved_boot_root, name)
 
-    @app.get("/images/{key}", include_in_schema=False)
-    def serve_image(key: str) -> FileResponse:
-        """Serve image bytes by filename OR by SHA-256.
+    def _serve_image_by_key(key: str) -> FileResponse:
+        """Resolve ``key`` (filename OR SHA-256) to bytes.
 
-        The /images listing now advertises content-addressed URLs
-        (``/images/<sha>``) so a remote client (bty-tui --server,
-        the iPXE flash live env) can flash an image without
-        knowing its filename. Resolution order:
+        Resolution order:
 
-          1. Literal filename under ``image_root`` -- the legacy
-             path; preserved so existing /images/<name> URLs in
-             logs / scripts keep working.
-          2. SHA-256 (64 hex chars):
-             a. Catalog cache: ``cache_dir/<sha>`` -- manifest
-                blobs that were fetched.
-             b. Dir-scan: a file under ``image_root`` whose
-                ``.sha256`` sidecar contains this digest.
-
-        Same trust model as /boot. The live env curls this to
-        get the bytes that ``bty.image_url`` points at.
+          1. Literal filename under ``image_root`` -- legacy path.
+          2. SHA-256 (64 lower-hex):
+             a. Catalog cache: ``cache_dir/<sha>``.
+             b. Dir-scan: file whose ``.sha256`` sidecar holds
+                this digest.
         """
-        # 1. Literal-name fast path. Matches the v0.5.x behaviour
-        #    so old URLs keep resolving.
         try:
             return _serve_safe_file(resolved_image_root, key)
         except HTTPException:
             pass
-        # 2. SHA-256 path. Reject anything that isn't 64 lower-hex
-        #    so we don't accidentally treat a typo as a SHA.
         if len(key) == 64 and all(c in "0123456789abcdef" for c in key.lower()):
             sha = key.lower()
-            # 2a. Catalog cache.
             cached = catalog_cache_dir / sha
             if cached.is_file():
                 return FileResponse(cached, media_type="application/octet-stream")
-            # 2b. Dir-scan: walk image_root, match sidecar SHAs.
             for img in images.list_images(resolved_image_root):
                 if img.sha256 == sha:
                     return FileResponse(img.path, media_type="application/octet-stream")
@@ -409,6 +393,29 @@ def create_app(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"no such image: {key}",
         )
+
+    @app.get("/images/{key}", include_in_schema=False)
+    def serve_image(key: str) -> FileResponse:
+        """Serve image bytes by filename OR by SHA-256.
+
+        Same trust model as /boot. The live env curls this to
+        get the bytes that ``bty.image_url`` points at.
+        """
+        return _serve_image_by_key(key)
+
+    @app.get("/images/{key}/{name:path}", include_in_schema=False)
+    def serve_image_with_name(key: str, name: str) -> FileResponse:
+        """``/images/<sha>/<filename>`` form. The ``key`` (SHA-256)
+        binds the bytes; ``name`` is purely decorative -- it lets
+        clients that derive image format from URL filename
+        extension (the live env's ``bty-flash-on-boot``,
+        ``bty.flash.probe_image_url``) keep working when bty-web
+        emits SHA-keyed URLs. The server ignores ``name`` for the
+        actual lookup; it's there so ``Path(url.path).name``
+        returns ``foo.img.zst`` instead of a bare 64-hex SHA.
+        """
+        del name  # informational only; lookup is by ``key``
+        return _serve_image_by_key(key)
 
     @app.get(
         "/events/machines",
@@ -550,8 +557,15 @@ def create_app(
                 continue
             if u.cached:
                 # Local file or cached manifest blob -- bty-web
-                # serves the bytes via ``/images/<sha>``.
-                url = f"{scheme}://{host}/images/{u.sha256}"
+                # serves the bytes. URL shape is
+                # ``/images/<sha>/<name>``: the SHA binds the
+                # content; the trailing name is decorative so a
+                # client that derives format from URL filename
+                # extension (the live env's bty-flash-on-boot,
+                # ``bty.flash.probe_image_url``) gets ``foo.img.zst``
+                # instead of a bare 64-hex digest. The server
+                # route ignores ``<name>`` for the lookup.
+                url = f"{scheme}://{host}/images/{u.sha256}/{u.names[0]}"
             else:
                 # Manifest entry not yet cached -- the client
                 # streams directly from upstream. First manifest
