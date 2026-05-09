@@ -98,6 +98,28 @@ that need:
 packages (or your distro's equivalent) that the build will check
 for at runtime.
 
+## Environment variables
+
+Quick reference of every env var bty's runtime reads, with which
+process consumes it and the default. The CLI / TUI / web all read
+from the same set so a single ``/etc/default/bty-web`` (appliance)
+or ``ENV`` block (Dockerfile) covers every component.
+
+| Var | Read by | Default | Purpose |
+|---|---|---|---|
+| `BTY_IMAGE_ROOT` | `bty`, `bty-tui`, `bty-web` | `/var/lib/bty/images` | Image catalog directory |
+| `BTY_STATE_DIR` | `bty-web` | `/var/lib/bty` | Where `state.db`, `session-secret`, etc. live |
+| `BTY_BOOT_DIR` | `bty-web` | `${BTY_STATE_DIR}/boot` | Kernel / initrd / squashfs (PXE boot artifacts) |
+| `BTY_WEB_HOST` | `bty-web` | `0.0.0.0` | Listen address |
+| `BTY_WEB_PORT` | `bty-web` | `8080` | Listen port |
+| `BTY_SESSION_SECRET` | `bty-web` | (generated, persisted under `BTY_STATE_DIR`) | Cookie key override; useful for multi-instance |
+| `BTY_BOOT_RELEASE_REPO` | `bty-web` | `safl/bty` | GitHub releases repo to fetch boot artifacts from |
+| `BTY_QUIET` | container entrypoint | unset | Suppress the start-up banner with default credentials |
+
+`bty-tui` also accepts `--image-root /path` and `--server URL`
+flags directly; the CLI accepts `--image-root /path` on
+`bty list images` and `bty inspect`.
+
 ## To run the test-pxe end-to-end check
 
 ```bash
