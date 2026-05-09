@@ -241,6 +241,24 @@ sudo bty flash \
 `bty flash` refuses to do anything without one or the other, so you
 never accidentally wipe a disk.
 
+`--image` accepts an HTTP/HTTPS URL too, not just a local path.
+Useful for scripted flashes from a remote `bty-web` (the appliance
+or the `ghcr.io/safl/bty-web` Docker container) without pre-staging
+the image:
+
+```bash
+sudo bty flash \
+    --image  http://server:8080/images/my-image.img.zst \
+    --target /dev/sda \
+    --provision none \
+    --yes
+```
+
+`.img` and `.img.zst` URLs stream straight from the network through
+`zstd -d | dd` to disk; `.qcow2` URLs download to a temp file first
+(qemu-img needs random access to convert to raw bytes). Either way,
+no operator copy step.
+
 `--provision` controls what happens after the bytes land:
 
 | `--provision` | What it does |
