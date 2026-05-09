@@ -33,7 +33,7 @@ import os
 import tempfile
 import tomllib
 import urllib.request
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import IO, Any
@@ -51,6 +51,17 @@ class CatalogError(Exception):
 
     Subclassed only when call sites need to discriminate (rare so
     far -- the CLI just prints the message).
+    """
+
+
+class CatalogCancelled(Exception):
+    """Raised by :func:`fetch_to_cache` when a caller-supplied
+    cancel callback returns ``True`` between chunks.
+
+    Distinct from :class:`CatalogError` because cancellation is
+    a normal control flow (the operator clicked Cancel), not an
+    error condition. Callers that want to treat both alike can
+    ``except (CatalogError, CatalogCancelled)``.
     """
 
 
@@ -212,26 +223,52 @@ def is_cached(entry: CatalogEntry, cache_dir: Path) -> bool:
     return cached.is_file()
 
 
+ProgressCallback = Callable[[int, "int | None"], None]
+"""Signature: ``progress(bytes_downloaded, total_bytes_or_None)``.
+Called once per chunk written. ``total_bytes`` is the upstream
+``Content-Length`` if the server sent one (most do), else ``None``."""
+
+CancelCheck = Callable[[], bool]
+"""Signature: ``cancel() -> bool``. Polled between chunks; returning
+``True`` raises :class:`CatalogCancelled`. Use this with
+``threading.Event.is_set`` or ``asyncio.Event.is_set`` so the
+fetcher (running in a worker thread) can be aborted from outside."""
+
+
 def fetch_to_cache(
     entry: CatalogEntry,
     cache_dir: Path,
     *,
     timeout: float = 300.0,
     chunk_size: int = 1 << 20,  # 1 MiB
+    progress: ProgressCallback | None = None,
+    cancel: CancelCheck | None = None,
 ) -> Path:
     """Download ``entry.src`` into ``cache_dir/<sha>``, verifying
     SHA-256 against ``entry.sha256``.
 
     Idempotent: if the cached file already exists, no-op (we trust
-    that we wrote it under the correct SHA). On SHA mismatch the
-    temp file is removed before raising; the cache is never left
-    in a half-written state. Atomic via ``os.replace`` after the
-    SHA check passes.
+    that we wrote it under the correct SHA). On SHA mismatch or
+    cancellation the temp file is removed before raising; the cache
+    is never left in a half-written state. Atomic via ``os.replace``
+    after the SHA check passes.
+
+    ``progress(downloaded, total_or_none)`` is called once per chunk
+    written, with ``total`` from the upstream ``Content-Length`` if
+    available. ``cancel()`` is polled between chunks; returning
+    ``True`` raises :class:`CatalogCancelled`. Both are optional; the
+    CLI's offline ``bty catalog fetch`` doesn't pass them.
 
     Returns the cached path on success.
     """
     cached = entry.cached_path(cache_dir)
     if cached.is_file():
+        # Even a cached entry should announce itself as "100% done"
+        # so a UI that registered the request before the cache check
+        # gets a clean terminal state.
+        if progress is not None:
+            size = cached.stat().st_size
+            progress(size, size)
         return cached
 
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -245,7 +282,22 @@ def fetch_to_cache(
         digest = hashlib.sha256()
         with os.fdopen(fd, "wb") as out:
             with urllib.request.urlopen(entry.src, timeout=timeout) as resp:
-                _stream_with_digest(resp, out, digest, chunk_size)
+                # Try to extract Content-Length; not all servers send it.
+                total: int | None
+                try:
+                    cl = resp.headers.get("Content-Length")
+                    total = int(cl) if cl is not None else None
+                except (ValueError, AttributeError):
+                    total = None
+                _stream_with_digest(
+                    resp,
+                    out,
+                    digest,
+                    chunk_size,
+                    progress=progress,
+                    cancel=cancel,
+                    total=total,
+                )
         actual = digest.hexdigest()
         if actual != entry.sha256:
             raise CatalogError(
@@ -255,8 +307,8 @@ def fetch_to_cache(
         os.replace(tmp_path, cached)
         return cached
     except BaseException:
-        # Any failure (network, SHA mismatch, KeyboardInterrupt) leaves
-        # no half-written cache entry behind.
+        # Any failure (network, SHA mismatch, cancellation,
+        # KeyboardInterrupt) leaves no half-written cache entry behind.
         try:
             tmp_path.unlink()
         except FileNotFoundError:
@@ -269,13 +321,29 @@ def _stream_with_digest(
     dst: IO[bytes],
     digest: hashlib._Hash,
     chunk_size: int,
+    *,
+    progress: ProgressCallback | None,
+    cancel: CancelCheck | None,
+    total: int | None,
 ) -> None:
     """Pump bytes from ``src`` to ``dst`` in chunks while updating
     the running SHA. Caller owns the ``digest.hexdigest()`` check.
+
+    Polls ``cancel()`` between chunks (1 MiB granularity by
+    default -- a multi-GiB download cancels within seconds, not
+    minutes), and reports ``progress(downloaded, total)`` per chunk.
     """
+    downloaded = 0
+    if progress is not None:
+        progress(0, total)
     while True:
+        if cancel is not None and cancel():
+            raise CatalogCancelled("fetch cancelled by caller")
         chunk = src.read(chunk_size)
         if not chunk:
             return
         dst.write(chunk)
         digest.update(chunk)
+        downloaded += len(chunk)
+        if progress is not None:
+            progress(downloaded, total)

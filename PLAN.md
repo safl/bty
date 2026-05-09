@@ -623,14 +623,39 @@ Landed after the original 1.0 list:
     - Cache module: download, SHA-verify, atomic write,
       content-addressed storage at `cache/<sha>`. Block-and-
       serve on first fetch (no streaming-while-verifying).
+    - **Download manager** -- a small in-memory scheduler that
+      tracks every active fetch (entry name, status, bytes
+      downloaded, total bytes, error / cancel reason),
+      enforces a parallelism cap (default 2, env-overridable
+      via `BTY_CATALOG_MAX_PARALLEL`), and supports cooperative
+      cancellation (a downloader checks a cancel-flag between
+      1 MiB chunks; aborts cleanly within seconds, leaves no
+      half-written cache file). State is in-memory; server
+      restart loses the queue but the cache directory remains
+      the source of truth for "what's cached".
     - `bty-web` integration: merged `/images` listing,
-      lazy fetch on `/images/{name}` GET.
+      lazy fetch on `/images/{name}` GET routed through the
+      manager (so a flash request doesn't bypass the queue
+      and start a Nth parallel download). New endpoints:
+      `POST /catalog/downloads` to enqueue,
+      `GET /catalog/downloads` to list active + recent,
+      `DELETE /catalog/downloads/{name}` to cancel.
+    - **Catalog page** in the browser UI: table of in-flight +
+      queued + recent downloads, per-row progress bar
+      (bytes / total + percent + ETA when total is known),
+      Cancel button, and a "fetch this image" button on each
+      catalog row that hasn't been cached yet. Auto-refreshes
+      every ~2s via polling -- simpler than SSE for v1 and
+      bty-web has no other websocket / event-stream dependency.
     - CLI: `bty catalog list`, `bty catalog fetch <name>`,
-      `bty catalog validate <file>`.
+      `bty catalog validate <file>`. The CLI's ``fetch`` runs
+      synchronously via the same ``bty.catalog.fetch_to_cache``
+      core (no manager dependency for offline use).
     - Public URLs only (HTTP / HTTPS, no auth).
     - Cache is unbounded; manual `rm` for eviction, documented
       under a hardening / maintenance section.
-    - Walkthrough doc.
+    - Walkthrough doc covering manifest authoring + the UI
+      flow + the env knobs.
 
     **Out of scope for v1, captured in Future work**:
 

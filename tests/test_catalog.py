@@ -226,6 +226,86 @@ def test_is_cached_true_when_file_present(tmp_path: Path) -> None:
     assert catalog.is_cached(entry, cache_dir)
 
 
+def test_fetch_to_cache_progress_callback(tmp_path: Path) -> None:
+    """``progress(downloaded, total)`` is called once per chunk;
+    final call reports the full size. ``total`` reflects the
+    Content-Length when the upstream provides it."""
+    payload = b"a" * (1 << 20) * 3 + b"tail"  # 3 MiB + 4 bytes
+    entry = _entry(payload)
+    cache_dir = tmp_path / "cache"
+    progress_log: list[tuple[int, int | None]] = []
+
+    class _RespWithCL:
+        def __init__(self, data: bytes) -> None:
+            self._buf = io.BytesIO(data)
+            # Mimic urllib's ``addinfourl`` which exposes
+            # response headers via ``.headers``.
+            self.headers = {"Content-Length": str(len(data))}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            self._buf.close()
+            return False
+
+        # urlopen returns an object that implements .read(), which
+        # _stream_with_digest reads from directly.
+        def read(self, n: int = -1) -> bytes:
+            return self._buf.read(n)
+
+    with patch("urllib.request.urlopen", lambda *_a, **_kw: _RespWithCL(payload)):
+        catalog.fetch_to_cache(
+            entry,
+            cache_dir,
+            progress=lambda d, t: progress_log.append((d, t)),
+            chunk_size=1 << 20,
+        )
+
+    # First call is (0, total) "starting"; final is (len, total).
+    assert progress_log[0] == (0, len(payload))
+    assert progress_log[-1] == (len(payload), len(payload))
+    # All total values agree (we only check Content-Length once).
+    assert all(t == len(payload) for _, t in progress_log)
+
+
+def test_fetch_to_cache_cancel_aborts_cleanly(tmp_path: Path) -> None:
+    """``cancel()`` returning True between chunks raises
+    CatalogCancelled and leaves no half-written cache file."""
+    payload = b"x" * (1 << 21)  # 2 MiB so we get >1 chunk
+    entry = _entry(payload)
+    cache_dir = tmp_path / "cache"
+
+    # Cancel after the first chunk is read.
+    state = {"polls": 0}
+
+    def _cancel() -> bool:
+        state["polls"] += 1
+        return state["polls"] > 1  # let the first chunk through
+
+    with patch("urllib.request.urlopen", _mock_urlopen(payload)):
+        with pytest.raises(catalog.CatalogCancelled):
+            catalog.fetch_to_cache(entry, cache_dir, cancel=_cancel, chunk_size=1 << 20)
+    leftovers = list(cache_dir.iterdir()) if cache_dir.exists() else []
+    assert leftovers == []
+
+
+def test_fetch_to_cache_cached_entry_emits_terminal_progress(
+    tmp_path: Path,
+) -> None:
+    """An already-cached entry still emits a ``progress(size, size)``
+    so a UI that registered the request before the cache check sees
+    a clean 100% terminal state instead of a stuck 0%."""
+    payload = b"already-here"
+    entry = _entry(payload)
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+    (cache_dir / entry.sha256).write_bytes(payload)
+    progress_log: list[tuple[int, int | None]] = []
+    catalog.fetch_to_cache(entry, cache_dir, progress=lambda d, t: progress_log.append((d, t)))
+    assert progress_log == [(len(payload), len(payload))]
+
+
 # -----------------------------------------------------------------------
 # default_manifest_path() / default_cache_dir() env precedence
 # -----------------------------------------------------------------------
