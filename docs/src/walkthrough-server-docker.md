@@ -91,12 +91,14 @@ poking at the UI immediately. **Rotate before exposing past a
 trusted LAN.**
 
 ```bash
-docker exec -it bty-web passwd bty
+docker exec -it -u root bty-web passwd bty
 ```
 
-The new hash lands in `/etc/shadow` inside the container.
-Restart-resilient: pamela reads `/etc/shadow` directly on every
-auth call, so subsequent restarts pick up the new password.
+The `-u root` runs `passwd` as root inside the container so it
+prompts only for the new password (skipping "current password"
+the way `passwd bty` would when invoked as the bty user). The new
+hash lands in `/etc/shadow` inside the container; restart-resilient,
+since pamela reads `/etc/shadow` directly on every auth call.
 
 > If you rebuild or pull a fresh image, the password resets to
 > `bty / bty` because the new container's `/etc/shadow` comes
