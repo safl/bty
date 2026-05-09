@@ -47,7 +47,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -385,7 +385,31 @@ def merge_with_catalog(
     return sha_keyed + unhashed
 
 
-def ensure_sha256(image_path: Path, *, chunk_size: int = 1 << 20) -> str:
+class HashCancelled(Exception):
+    """Raised by :func:`ensure_sha256` when a caller-supplied
+    cancel callback returns ``True`` between chunks. Distinct
+    from generic exceptions so the hash manager can translate
+    cleanly into ``status="cancelled"``."""
+
+
+HashProgressCallback = "Callable[[int, int], None]"
+"""Signature: ``progress(bytes_hashed, total_bytes)``. Called once
+per chunk processed; ``total_bytes`` is the file's pre-hash size
+(``Path.stat().st_size``)."""
+
+HashCancelCheck = "Callable[[], bool]"
+"""Signature: ``cancel() -> bool``. Polled between chunks; returning
+``True`` raises :class:`HashCancelled`. Same shape as the cancel
+callback :func:`bty.catalog.fetch_to_cache` accepts."""
+
+
+def ensure_sha256(
+    image_path: Path,
+    *,
+    chunk_size: int = 1 << 20,
+    progress: Callable[[int, int], None] | None = None,
+    cancel: Callable[[], bool] | None = None,
+) -> str:
     """Return the SHA-256 of ``image_path``, computing + caching
     if not already cached.
 
@@ -393,25 +417,48 @@ def ensure_sha256(image_path: Path, *, chunk_size: int = 1 << 20) -> str:
 
       1. Sidecar ``<file>.sha256`` -- O(1).
       2. Otherwise: stream the file through ``hashlib.sha256``
-         (~60s per 8 GiB on a typical NVMe). Write the resulting
-         digest to the sidecar so the next call is O(1).
+         (~60s per 8 GiB on a typical NVMe; minutes on a Pi /
+         old NUC). Write the resulting digest to the sidecar so
+         the next call is O(1).
 
     The sidecar is written atomically (write to ``.tmp``,
     ``os.replace``) so a crash during compute doesn't leave a
     half-written file masquerading as a valid sidecar.
+
+    Optional callbacks (same contract as
+    :func:`bty.catalog.fetch_to_cache`):
+
+    - ``progress(downloaded, total)`` is called once per chunk
+      processed; ``total`` is the file size from ``stat()``.
+    - ``cancel()`` is polled between chunks; returning ``True``
+      raises :class:`HashCancelled`. The hash manager wires
+      this to a ``threading.Event`` so the operator can cancel
+      a running hash from the UI.
     """
     cached = _read_sidecar_sha(image_path)
     if cached is not None:
+        if progress is not None:
+            size = image_path.stat().st_size
+            progress(size, size)
         return cached
     import hashlib
 
+    total = image_path.stat().st_size
     digest = hashlib.sha256()
+    hashed = 0
+    if progress is not None:
+        progress(0, total)
     with image_path.open("rb") as fh:
         while True:
+            if cancel is not None and cancel():
+                raise HashCancelled("hash cancelled by caller")
             chunk = fh.read(chunk_size)
             if not chunk:
                 break
             digest.update(chunk)
+            hashed += len(chunk)
+            if progress is not None:
+                progress(hashed, total)
     hex_digest = digest.hexdigest()
     sidecar = _sidecar_path(image_path)
     tmp = sidecar.with_suffix(sidecar.suffix + ".tmp")

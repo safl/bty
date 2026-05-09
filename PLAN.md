@@ -640,11 +640,29 @@ Landed after the original 1.0 list:
       names attached (a local filename, a manifest entry name,
       or both). Directory-scan images get a sidecar
       ``<file>.sha256`` written on first discovery (computed
-      lazily; subsequent calls read the sidecar). Manifest
-      entries already have SHA from the manifest. Same content-
-      addressed cache: the live env / target fetches by SHA,
-      not by name; renaming a file in ``BTY_IMAGE_ROOT`` does
-      not break a binding.
+      lazily via the hash manager below; subsequent calls read
+      the sidecar). Manifest entries already have SHA from the
+      manifest. Same content-addressed cache: the live env /
+      target fetches by SHA, not by name; renaming a file in
+      ``BTY_IMAGE_ROOT`` does not break a binding.
+    - **Hash manager (background, single worker)**. Computing
+      SHA-256 on multi-GiB images takes minutes on small
+      hardware (Pi 4, old NUCs, mini-PCs); inline hashing on
+      the request path would block bty-web for minutes per
+      operator click. A new ``HashManager`` (parallel structure
+      to ``DownloadManager`` from Layer 2) enqueues hash jobs,
+      runs them in a worker thread, surfaces per-job progress
+      (bytes hashed / total) + cancel via the same UI shape.
+      Default parallelism is **1**: two simultaneous hashes
+      saturate CPU + IO on small hardware and both finish at
+      half speed; serial uses the same wall clock without
+      tanking responsiveness. Env-overridable via
+      ``BTY_HASH_MAX_PARALLEL`` for operators on fast hosts.
+      New endpoints: ``POST /catalog/hashes`` to enqueue,
+      ``GET /catalog/hashes`` to list, ``DELETE
+      /catalog/hashes/{name}`` to cancel. UI: "Hash" button on
+      unhashed dir-scan rows, status row in the same downloads
+      pane (or a sibling pane with a Job Type column).
     - **``machines.image`` becomes ``machines.image_sha256``**.
       One-shot migration on bty-web startup: rows with
       ``image IS NOT NULL AND image_sha256 IS NULL`` get the

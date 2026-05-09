@@ -72,7 +72,16 @@
                         {% endif %}
                     </td>
                     <td class="text-end">
-                        {% if u.sha256 and not u.cached %}
+                        {% if not u.sha256 %}
+                        {# Unhashed dir-scan file: a hash button
+                           enqueues via the HashManager (background,
+                           single-worker by default). #}
+                        <button type="button"
+                                class="btn btn-sm btn-warning bty-hash-btn"
+                                data-name="{{ u.names[0] }}">
+                            <i class="bi bi-hash me-1"></i>Hash
+                        </button>
+                        {% elif not u.cached %}
                         {# Manifest-only entry not yet in cache: a fetch
                            button enqueues via the DownloadManager. #}
                         <button type="button"
@@ -91,7 +100,7 @@
     </div>
 </div>
 
-<div class="card">
+<div class="card mb-3">
     <div class="card-header bg-light fw-semibold d-flex justify-content-between align-items-center">
         <span><i class="bi bi-arrow-down-circle me-1"></i>Downloads</span>
         <span class="text-muted small bty-poll-status">refreshing...</span>
@@ -109,6 +118,29 @@
             </thead>
             <tbody class="bty-downloads-tbody">
                 <tr><td colspan="5" class="text-muted">No downloads yet.</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header bg-light fw-semibold">
+        <i class="bi bi-hash me-1"></i>Hashes
+        <small class="text-muted ms-2">background SHA-256 of dir-scan files; default 1 at a time so small hardware (Pi / NUC) stays responsive</small>
+    </div>
+    <div class="table-responsive">
+        <table class="table mb-0 align-middle">
+            <thead class="table-light">
+                <tr>
+                    <th>Name</th>
+                    <th>Status</th>
+                    <th style="width: 30%;">Progress</th>
+                    <th>Bytes</th>
+                    <th class="text-end" style="width: 1%; white-space: nowrap;">Action</th>
+                </tr>
+            </thead>
+            <tbody class="bty-hashes-tbody">
+                <tr><td colspan="5" class="text-muted">No hashes yet.</td></tr>
             </tbody>
         </table>
     </div>
@@ -154,10 +186,49 @@
                pct.toFixed(1) + '%;">' + pct.toFixed(1) + '%</div></div>';
     }
 
-    function actionCell(d) {
+    function renderJobs(tbody, jobs, byteField, cancelEndpoint, emptyMsg) {
+        if (!tbody) return;
+        if (jobs.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5" class="text-muted">' +
+                              emptyMsg + '</td></tr>';
+            return;
+        }
+        var order = { "running": 0, "queued": 1, "failed": 2, "cancelled": 3, "completed": 4 };
+        jobs.sort(function (a, b) {
+            return (order[a.status] || 9) - (order[b.status] || 9);
+        });
+        var rows = jobs.map(function (d) {
+            var dl = d[byteField] || 0;
+            var bytes = fmtBytes(dl);
+            // Both download + hash carry bytes_total, but the
+            // download mode allows null (Content-Length absent)
+            // whereas hashing always knows the size from stat().
+            if (d.bytes_total !== null && d.bytes_total !== undefined) {
+                bytes += " / " + fmtBytes(d.bytes_total);
+            }
+            // Adapt progress shape to the renderer (which keys on
+            // ``bytes_downloaded``).
+            var pdata = {
+                bytes_downloaded: dl,
+                bytes_total: d.bytes_total,
+                status: d.status,
+            };
+            return "<tr>" +
+                   "<td><code>" + d.name + "</code></td>" +
+                   "<td>" + statusBadge(d.status) + "</td>" +
+                   "<td>" + progressBar(pdata) + "</td>" +
+                   "<td class=\"small\">" + bytes + "</td>" +
+                   "<td class=\"text-end\">" + actionCellFor(d, cancelEndpoint) + "</td>" +
+                   "</tr>";
+        });
+        tbody.innerHTML = rows.join("");
+    }
+
+    function actionCellFor(d, cancelEndpoint) {
         if (d.status === "queued" || d.status === "running") {
             return '<button type="button" class="btn btn-sm btn-outline-danger bty-cancel-btn" ' +
-                   'data-name="' + d.name + '"><i class="bi bi-x-circle me-1"></i>Cancel</button>';
+                   'data-name="' + d.name + '" data-endpoint="' + cancelEndpoint + '">' +
+                   '<i class="bi bi-x-circle me-1"></i>Cancel</button>';
         }
         if (d.status === "failed") {
             return '<span class="text-danger small" title="' + (d.error || "") + '">' +
@@ -167,69 +238,70 @@
         return "";
     }
 
-    function render(downloads) {
-        var tbody = document.querySelector(".bty-downloads-tbody");
-        if (!tbody) return;
-        if (downloads.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="5" class="text-muted">No downloads yet.</td></tr>';
-            return;
-        }
-        var order = { "running": 0, "queued": 1, "failed": 2, "cancelled": 3, "completed": 4 };
-        downloads.sort(function (a, b) {
-            return (order[a.status] || 9) - (order[b.status] || 9);
-        });
-        var rows = downloads.map(function (d) {
-            var bytes = fmtBytes(d.bytes_downloaded);
-            if (d.bytes_total !== null && d.bytes_total !== undefined) {
-                bytes += " / " + fmtBytes(d.bytes_total);
-            }
-            return "<tr>" +
-                   "<td><code>" + d.name + "</code></td>" +
-                   "<td>" + statusBadge(d.status) + "</td>" +
-                   "<td>" + progressBar(d) + "</td>" +
-                   "<td class=\"small\">" + bytes + "</td>" +
-                   "<td class=\"text-end\">" + actionCell(d) + "</td>" +
-                   "</tr>";
-        });
-        tbody.innerHTML = rows.join("");
-    }
-
     var pollHandle = null;
-    var lastSeenCompleted = new Set();
+    var lastSeenCompleted = new Set();  // download:<name> | hash:<name>
     var firstPoll = true;
     function refresh() {
         var statusEl = document.querySelector(".bty-poll-status");
-        return fetch("/catalog/downloads", { credentials: "same-origin" })
+        // Both endpoints in parallel; render whichever returns
+        // first without blocking the other.
+        var pDl = fetch("/catalog/downloads", { credentials: "same-origin" })
             .then(function (r) { return r.json(); })
             .then(function (data) {
                 var downloads = data.downloads || [];
-                render(downloads);
-                if (statusEl) statusEl.textContent = "updated " +
-                    new Date().toLocaleTimeString();
-                // On first poll, snapshot the already-completed set so
-                // we don't reload immediately for entries that were
-                // already done when the page loaded.
-                if (firstPoll) {
-                    downloads.forEach(function (d) {
-                        if (d.status === "completed") lastSeenCompleted.add(d.name);
-                    });
-                    firstPoll = false;
-                    return;
-                }
-                // A newly-completed download means a catalog row's
-                // ``cached`` state just flipped; reload so the table
-                // picks it up. Defer briefly so the user sees the
-                // 100% bar before the page refreshes.
-                downloads.forEach(function (d) {
-                    if (d.status === "completed" && !lastSeenCompleted.has(d.name)) {
-                        lastSeenCompleted.add(d.name);
-                        setTimeout(function () { window.location.reload(); }, 800);
+                renderJobs(
+                    document.querySelector(".bty-downloads-tbody"),
+                    downloads,
+                    "bytes_downloaded",
+                    "/catalog/downloads/",
+                    "No downloads yet."
+                );
+                return downloads.map(function (d) {
+                    return { kind: "download", name: d.name, status: d.status };
+                });
+            }).catch(function () { return []; });
+        var pHa = fetch("/catalog/hashes", { credentials: "same-origin" })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                var hashes = data.hashes || [];
+                renderJobs(
+                    document.querySelector(".bty-hashes-tbody"),
+                    hashes,
+                    "bytes_hashed",
+                    "/catalog/hashes/",
+                    "No hashes yet."
+                );
+                return hashes.map(function (h) {
+                    return { kind: "hash", name: h.name, status: h.status };
+                });
+            }).catch(function () { return []; });
+        return Promise.all([pDl, pHa]).then(function (results) {
+            var jobs = results[0].concat(results[1]);
+            if (statusEl) statusEl.textContent = "updated " +
+                new Date().toLocaleTimeString();
+            if (firstPoll) {
+                jobs.forEach(function (j) {
+                    if (j.status === "completed") {
+                        lastSeenCompleted.add(j.kind + ":" + j.name);
                     }
                 });
-            })
-            .catch(function (err) {
-                if (statusEl) statusEl.textContent = "poll failed: " + err.message;
+                firstPoll = false;
+                return;
+            }
+            // A newly-completed download means a catalog row's
+            // ``cached`` flipped; a newly-completed hash means an
+            // image's ``sha256`` flipped. Either way the catalog
+            // table needs to reload to pick the change up.
+            jobs.forEach(function (j) {
+                var key = j.kind + ":" + j.name;
+                if (j.status === "completed" && !lastSeenCompleted.has(key)) {
+                    lastSeenCompleted.add(key);
+                    setTimeout(function () { window.location.reload(); }, 800);
+                }
             });
+        }).catch(function (err) {
+            if (statusEl) statusEl.textContent = "poll failed: " + err.message;
+        });
     }
 
     function startPolling() {
@@ -260,12 +332,29 @@
             });
             return;
         }
+        var hashBtn = ev.target.closest(".bty-hash-btn");
+        if (hashBtn) {
+            ev.preventDefault();
+            var name = hashBtn.getAttribute("data-name");
+            hashBtn.disabled = true;
+            fetch("/catalog/hashes", {
+                method: "POST",
+                credentials: "same-origin",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ name: name }),
+            }).then(refresh).catch(function () {
+                hashBtn.disabled = false;
+            });
+            return;
+        }
         var cancelBtn = ev.target.closest(".bty-cancel-btn");
         if (cancelBtn) {
             ev.preventDefault();
             var name = cancelBtn.getAttribute("data-name");
+            var endpoint = cancelBtn.getAttribute("data-endpoint") ||
+                           "/catalog/downloads/";
             cancelBtn.disabled = true;
-            fetch("/catalog/downloads/" + encodeURIComponent(name), {
+            fetch(endpoint + encodeURIComponent(name), {
                 method: "DELETE",
                 credentials: "same-origin",
             }).then(refresh);

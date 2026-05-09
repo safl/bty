@@ -28,7 +28,7 @@ import bty
 from bty import catalog as _catalog
 from bty import images
 from bty.web import _catalog as _web_catalog
-from bty.web import _db, _models, _ui
+from bty.web import _db, _hash, _models, _ui
 from bty.web._auth import SESSION_COOKIE, require_auth
 from bty.web._events import MachineEvent, MachineEventBus, sse_format
 from bty.web._workflow import WorkflowRunner
@@ -94,6 +94,7 @@ def create_app(
             print(f"bty-web: catalog manifest at {manifest_path}: {exc}", file=sys.stderr)
             parsed_catalog = None
     download_manager = _web_catalog.DownloadManager()
+    hash_manager = _hash.HashManager()
 
     @asynccontextmanager
     async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -103,11 +104,18 @@ def create_app(
         event_bus.attach(asyncio.get_running_loop())
         if parsed_catalog is not None:
             download_manager.start(parsed_catalog, catalog_cache_dir)
+        # The hash manager always starts -- it operates on
+        # ``image_root``, which exists for every bty-web shape
+        # (appliance, container, dev). Default parallelism is 1
+        # so a Pi-class box doesn't get hammered if the operator
+        # queues several big images.
+        hash_manager.start(resolved_image_root)
         try:
             yield
         finally:
             if parsed_catalog is not None:
                 await download_manager.stop()
+            await hash_manager.stop()
 
     jinja = Environment(
         loader=FileSystemLoader(str(TEMPLATES_DIR)),
@@ -586,6 +594,47 @@ def create_app(
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"no active download named {name!r}",
+            )
+        return state.to_dict()
+
+    # ---------- catalog hash manager --------------------------------------
+    # Hashing is independent of the manifest -- always available so
+    # an operator can compute SHA-256 sidecars for dir-scan files
+    # whether or not they author a catalog.toml.
+
+    @app.get("/catalog/hashes")
+    async def list_hashes(_: str = Depends(require_auth)) -> dict[str, Any]:
+        states = await hash_manager.list()
+        return {
+            "image_root": str(resolved_image_root),
+            "max_parallel": hash_manager.max_parallel,
+            "hashes": [s.to_dict() for s in states],
+        }
+
+    @app.post("/catalog/hashes", status_code=status.HTTP_202_ACCEPTED)
+    async def enqueue_hash(
+        body: _models.CatalogEnqueueRequest,
+        _: str = Depends(require_auth),
+    ) -> dict[str, Any]:
+        try:
+            state = await hash_manager.enqueue(body.name)
+        except FileNotFoundError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=str(exc),
+            ) from exc
+        return state.to_dict()
+
+    @app.delete("/catalog/hashes/{name}")
+    async def cancel_hash(
+        name: str,
+        _: str = Depends(require_auth),
+    ) -> dict[str, Any]:
+        state = await hash_manager.cancel(name)
+        if state is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"no active hash named {name!r}",
             )
         return state.to_dict()
 
