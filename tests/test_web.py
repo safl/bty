@@ -805,3 +805,70 @@ def test_serve_image_returns_file_bytes(app_client: TestClient) -> None:
 def test_serve_image_404_for_missing(app_client: TestClient) -> None:
     r = app_client.get("/images/does-not-exist.qcow2")
     assert r.status_code == 404
+
+
+# ---------- /catalog endpoints (M22) ---------------------------------------
+
+
+def test_catalog_downloads_requires_auth(app_client: TestClient) -> None:
+    r = app_client.get("/catalog/downloads")
+    assert r.status_code == 401
+
+
+def test_catalog_downloads_no_manifest_returns_empty(app_client: TestClient) -> None:
+    """The fixture's app has no ``catalog.toml`` -- the endpoint
+    returns ``{"manifest": null, "downloads": []}`` rather than
+    404, so the UI's polling loop has something stable to render.
+    """
+    r = app_client.get("/catalog/downloads", cookies=AUTH)
+    assert r.status_code == 200
+    body = r.json()
+    assert body == {"manifest": None, "downloads": []}
+
+
+def test_catalog_downloads_post_without_manifest_404(app_client: TestClient) -> None:
+    """POSTing an enqueue against a server without a manifest is a
+    404 with a clear message -- the operator hasn't authored a
+    catalog yet."""
+    r = app_client.post(
+        "/catalog/downloads",
+        json={"name": "anything"},
+        cookies=AUTH,
+    )
+    assert r.status_code == 404
+    assert "no catalog manifest" in r.json()["detail"]
+
+
+def test_catalog_hashes_requires_auth(app_client: TestClient) -> None:
+    r = app_client.get("/catalog/hashes")
+    assert r.status_code == 401
+
+
+def test_catalog_hashes_listing_includes_max_parallel(
+    app_client: TestClient,
+) -> None:
+    """``GET /catalog/hashes`` always returns ``image_root`` +
+    ``max_parallel`` + ``hashes``. Lets the UI render the
+    bty-web hash-pane caption without a separate config endpoint.
+    """
+    r = app_client.get("/catalog/hashes", cookies=AUTH)
+    assert r.status_code == 200
+    body = r.json()
+    assert "image_root" in body
+    assert body["max_parallel"] >= 1
+    assert isinstance(body["hashes"], list)
+
+
+def test_catalog_hashes_post_unknown_file_404(app_client: TestClient) -> None:
+    r = app_client.post(
+        "/catalog/hashes",
+        json={"name": "no-such-file.img"},
+        cookies=AUTH,
+    )
+    assert r.status_code == 404
+    assert "no image file" in r.json()["detail"]
+
+
+def test_catalog_hashes_cancel_unknown_404(app_client: TestClient) -> None:
+    r = app_client.delete("/catalog/hashes/never-was", cookies=AUTH)
+    assert r.status_code == 404

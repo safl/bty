@@ -11,6 +11,6 @@
 # control to the PXE ROM, which falls through to the next boot
 # device (typically the local disk).
 
-echo bty: {{ mac }} boot_policy=local sha256={{ (machine.image_sha256 or "none")[:12] }}..., returning to local boot
+echo bty: {{ mac }} boot_policy=local ref={{ (machine.image_sha256 or "none")[:12] }}..., returning to local boot
 sleep 1
 exit

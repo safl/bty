@@ -31,7 +31,7 @@ import asyncio
 import os
 import threading
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -67,9 +67,20 @@ class HashState:
     _cancel: threading.Event = field(default_factory=threading.Event, repr=False)
 
     def to_dict(self) -> dict[str, Any]:
-        d = asdict(self)
-        d.pop("_cancel", None)
-        return d
+        # Build manually rather than via ``dataclasses.asdict`` --
+        # that helper deep-copies every field, and threading.Event
+        # contains a ``_thread.lock`` which cannot be pickled.
+        return {
+            "name": self.name,
+            "path": self.path,
+            "status": self.status,
+            "bytes_hashed": self.bytes_hashed,
+            "bytes_total": self.bytes_total,
+            "sha256": self.sha256,
+            "started_at": self.started_at,
+            "finished_at": self.finished_at,
+            "error": self.error,
+        }
 
 
 class HashManager:

@@ -15,7 +15,7 @@ set bty-base http://{{ host }}
 # essential for headless bare-metal flashing (operator watches via
 # IPMI / serial console) and for the PXE chain test.
 #
-# bty.image_url is content-addressed: ``/images/<sha256>`` resolves
+# bty.image_url is content-addressed: ``/images/<ref>`` resolves
 # via the unified image listing (local file or content-addressed
 # cache populated from the catalog manifest) so renaming a file
 # does not break the binding.

@@ -114,6 +114,10 @@ or ``ENV`` block (Dockerfile) covers every component.
 | `BTY_WEB_PORT` | `bty-web` | `8080` | Listen port |
 | `BTY_SESSION_SECRET` | `bty-web` | (generated, persisted under `BTY_STATE_DIR`) | Cookie key override; useful for multi-instance |
 | `BTY_BOOT_RELEASE_REPO` | `bty-web` | `safl/bty` | GitHub releases repo to fetch boot artifacts from |
+| `BTY_CATALOG_FILE` | `bty-web`, `bty catalog` | `${BTY_STATE_DIR}/catalog.toml` | Manifest path (TOML; see walkthrough-catalog.md) |
+| `BTY_CATALOG_CACHE_DIR` | `bty-web`, `bty catalog` | `${BTY_STATE_DIR}/cache` | Content-addressed blob cache |
+| `BTY_CATALOG_MAX_PARALLEL` | `bty-web` | `2` | Concurrent catalog downloads |
+| `BTY_HASH_MAX_PARALLEL` | `bty-web` | `1` | Concurrent SHA-256 hashes (low: Pi/NUC-friendly) |
 | `BTY_QUIET` | container entrypoint | unset | Suppress the start-up banner with default credentials |
 
 `bty-tui` also accepts `--image-root /path` and `--server URL`
