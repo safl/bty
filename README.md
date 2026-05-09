@@ -68,16 +68,17 @@ operator's distribution is expected to provide.
 
 ## Status
 
-Pre-1.0 but actively shipping. Wheels and appliance images publish
-to PyPI + [GitHub Releases](https://github.com/safl/bty/releases) on
-every tag, and the server + client + PXE-chain end-to-end flow runs
-in CI on every push. The CLI surface (`bty list`, `bty inspect`,
-`bty flash`) and the bty-web HTTP/iPXE/PAM-auth surfaces are stable
-enough to use in homelab / CI fleets. Wire formats and CLI flags
-may still shift between minor versions until 1.0; the schema_version
-field on `--json` output and the `Machine` wire type are the things
-to watch. See [`PLAN.md`](PLAN.md) for the milestone-by-milestone
-roadmap.
+Pre-1.0 but actively shipping. Wheels (PyPI), appliance images
+([GitHub Releases](https://github.com/safl/bty/releases)), and
+the bty-web container ([`ghcr.io/safl/bty-web`](https://github.com/safl/bty/pkgs/container/bty-web))
+all publish on every tag, and the server + client + PXE-chain
+end-to-end flow runs in CI on every push. The CLI surface (`bty
+list`, `bty inspect`, `bty flash`) and the bty-web HTTP/iPXE/PAM-
+auth surfaces are stable enough to use in homelab / CI fleets.
+Wire formats and CLI flags may still shift between minor versions
+until 1.0; the schema_version field on `--json` output and the
+`Machine` wire type are the things to watch. See [`PLAN.md`](PLAN.md)
+for the milestone-by-milestone roadmap.
 
 ## Planning and design
 

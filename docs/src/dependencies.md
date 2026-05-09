@@ -72,6 +72,8 @@ your own.
 | `ipxe` | the iPXE BIOS / UEFI ROMs (`undionly.kpxe`, `ipxe.efi`) chain-loaded by booting clients |
 | `systemd-networkd` | NIC management on the appliance |
 | `cloud-init` | first-boot user / password / network setup |
+| `cloud-utils` | `growpart` for `bty-grow-rootfs.service` |
+| `plymouth` + `plymouth-themes` | bty-themed boot splash on tty1 |
 | `cijoe` | optional online provisioning workflows after a target first-boots |
 
 The appliance is the **only** delivery shape that exercises the PXE
