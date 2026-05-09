@@ -935,6 +935,88 @@ class ThemeSelectScreen(ModalScreen[str | None]):
             self.dismiss(event.option.id)
 
 
+class HelpScreen(ModalScreen[None]):
+    """Cheat sheet of every bty-tui keybinding.
+
+    Triggered by ``?`` from the main screen. The operator on the bty
+    USB live env has no docs at hand -- this modal is the only
+    discovery surface for the wizard / source / theme / filter
+    bindings. ``Esc``, ``q``, or ``?`` again all close it.
+    """
+
+    DEFAULT_CSS = """
+    HelpScreen {
+        align: center middle;
+    }
+
+    HelpScreen > Vertical {
+        width: 70;
+        height: auto;
+        padding: 1 2;
+        background: $panel;
+        border: round $accent;
+        border-title-style: bold;
+        border-title-color: $accent;
+        border-title-align: left;
+    }
+
+    .help-section {
+        color: $accent;
+        text-style: bold;
+        margin-top: 1;
+    }
+
+    .help-row {
+        height: 1;
+    }
+
+    .help-footer {
+        color: $text-muted;
+        margin-top: 1;
+    }
+    """
+
+    BINDINGS: ClassVar[list[Binding | tuple[str, str] | tuple[str, str, str]]] = [
+        Binding("escape", "dismiss(None)", "Close"),
+        Binding("q", "dismiss(None)", "Close"),
+        Binding("question_mark", "dismiss(None)", "Close"),
+    ]
+
+    def compose(self) -> ComposeResult:
+        with Vertical() as panel:
+            panel.border_title = "  bty-tui keybindings  "
+            yield Static("Wizard", classes="help-section")
+            yield Static("  Enter         commit selection, advance one stage", classes="help-row")
+            yield Static("  Esc / Bksp    undo last commit, return one stage", classes="help-row")
+            yield Static("  f             trigger Flash (Stage 3+)", classes="help-row")
+            yield Static("  Shift+R       reboot (after a successful flash)", classes="help-row")
+            yield Static("Navigation", classes="help-section")
+            yield Static("  1 / 2         jump focus to Images / Disks pane", classes="help-row")
+            yield Static("  h / Left      cycle focus to previous pane", classes="help-row")
+            yield Static("  l / Right     cycle focus to next pane", classes="help-row")
+            yield Static("  Up / Down     navigate rows in the focused table", classes="help-row")
+            yield Static("Actions", classes="help-section")
+            yield Static(
+                "  r             refresh image catalog + disks",
+                classes="help-row",
+            )
+            yield Static(
+                "  s             switch source (local path / remote bty-web)",
+                classes="help-row",
+            )
+            yield Static(
+                "  t             open the theme picker",
+                classes="help-row",
+            )
+            yield Static(
+                "  /             filter the image catalog by substring",
+                classes="help-row",
+            )
+            yield Static("  ?             this help", classes="help-row")
+            yield Static("  q             quit", classes="help-row")
+            yield Static("Esc, q, or ? to close.", classes="help-footer")
+
+
 class BtyTui(App[None]):
     """The bty terminal UI.
 
@@ -958,6 +1040,11 @@ class BtyTui(App[None]):
         Binding("t", "theme", "Theme", show=False),
         Binding("s", "source", "Source", show=False),
         Binding("slash", "focus_filter", "Filter", show=False),
+        # ``?`` pops a help modal listing every keybinding. Common
+        # TUI convention (helix, k9s, lazygit); the operator on the
+        # bty live env has no docs at hand -- this is the cheat
+        # sheet.
+        Binding("question_mark", "help", "Help", show=False),
         # Wizard-back binding. Esc / Backspace clear the most-recent
         # commit and return one stage. Forward advance happens
         # automatically when a row is committed via Enter -- no
@@ -1345,6 +1432,15 @@ class BtyTui(App[None]):
         self._populate_disks()
         self._set_status_transient("Refreshed.")
 
+    def action_help(self) -> None:
+        """``?`` binding: pop the keybinding cheat sheet.
+
+        Plain ``push_screen`` (no ``push_screen_wait``) since we don't
+        need the dismiss result -- the modal manages its own close
+        via ``Esc`` / ``q`` / ``?`` bindings.
+        """
+        self.push_screen(HelpScreen())
+
     # ---------- wizard navigation -------------------------------------------
 
     def action_wizard_back(self) -> None:
@@ -1525,8 +1621,8 @@ class BtyTui(App[None]):
         natural affordance.
         """
         return (
-            "<q> quit       <Shift+R> reboot       <s> source       "
-            "<t> theme       <Esc/Backspace> back"
+            "<?> help       <q> quit       <Shift+R> reboot       "
+            "<s> source       <t> theme       <Esc/Backspace> back"
         )
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
@@ -1539,7 +1635,13 @@ class BtyTui(App[None]):
             if self._post_flash:
                 self.action_reboot()
             elif self._stage == _WizardStage.CONFIRM_FLASH:
-                self.action_flash()  # @work decorator -> Worker
+                # ``@work(exclusive=True)`` rewrites this call: at runtime
+                # ``action_flash()`` returns a ``Worker`` rather than a
+                # coroutine, so the result is correctly fire-and-forget
+                # (the worker drives the modal sequence on its own
+                # event-loop task). Pyright sees ``async def`` and
+                # cannot follow the decorator's transformation.
+                self.action_flash()  # pyright: ignore[reportUnusedCoroutine]
 
     @work(exclusive=True)
     async def action_source(self) -> None:

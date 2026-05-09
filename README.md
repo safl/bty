@@ -27,8 +27,11 @@ console-script entry points:
   running `bty-web`.
 - `bty-web`: HTTP server with browser UI (requires the `web` extra).
 
-Plus a sibling appliance-image builder under `bty-media/` that produces
-the bootable USB live image and the server appliance image.
+Plus a sibling appliance-image builder under `bty-media/` that
+produces four variants from a shared rootfs overlay: the bootable
+USB live image (`usb-x86`), the x86 server appliance (`server-x86`),
+the Raspberry Pi 4 / 5 server appliance (`server-rpi`), and the
+PXE-chain network-flash live env (`netboot-x86`).
 
 ## Install
 
