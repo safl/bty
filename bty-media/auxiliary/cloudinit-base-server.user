@@ -47,19 +47,17 @@ packages:
   # uses on first boot to expand the rootfs partition to fill the
   # operator's disk (the cooked image is baked at a fixed 6 GiB).
   - cloud-utils
-  # Plymouth provides the kernel-stage bty boot splash on the server,
-  # mirroring the bty-usb live env. v0.5.12 dropped this out of
-  # caution after a second-boot hang in the USB live env, but that
-  # turned out to be specific to ``bty-tui-on-tty1.service`` racing
-  # plymouth for tty1; standard ``getty@tty1.service`` (what the
-  # server uses) already orders correctly via plymouth-quit-wait.
-  # The "fails on no-DRM hardware" worry was largely hypothetical:
-  # NUCs / 1U servers / virt (i915 / AMD / ast / virtio-gpu) all
-  # have DRM/KMS in stock Debian kernels, and plymouth's text-mode
-  # fallback handles the truly-no-DRM edge case cleanly. Boot-time
-  # cost (~4-8s) is small for an appliance that reboots rarely.
-  - plymouth
-  - plymouth-themes
+  # Plymouth is intentionally NOT installed on the server appliance.
+  # It was tried twice (added in v0.4.x, dropped in v0.5.12, restored
+  # post-v0.5.14, dropped again in v0.7.x). Each time the same issue
+  # surfaces: plymouth's quit/teardown emits VT100 escape sequences
+  # to ``/dev/console``, and on a server with the standard
+  # ``console=ttyS0,115200 console=tty0`` kernel cmdline that means
+  # garbage like ``[?7h[6;32766H`` lands on the serial console
+  # right before agetty draws the login banner. The figlet banner
+  # in /etc/issue + /etc/motd is the appliance's identity layer for
+  # the headless case; a graphical splash adds no operational value
+  # on a box the operator interacts with via SSH or the browser UI.
 
 runcmd:
   # Install bty-lab[web] from the staged wheel into a system venv,
@@ -106,28 +104,6 @@ runcmd:
   - chmod 0755 /usr/local/sbin/bty-web-activate-pxe
   - chmod 0440 /etc/sudoers.d/bty-web
   - chown root:root /etc/sudoers.d/bty-web
-
-  # Plymouth boot splash. Theme files live in
-  # /usr/share/plymouth/themes/bty/ via the rootfs/server/ tree
-  # (bty.plymouth, bty.script, logo.png -- copied verbatim from
-  # the USB live env's chroot for visual parity). This block
-  # registers ``bty`` as the default theme, rebuilds the initramfs
-  # so plymouth + the theme are present in early-boot, and adds
-  # ``splash`` to the kernel cmdline via /etc/default/grub. The
-  # theme's ``bty.script`` is harmless if plymouth's DRM init
-  # fails (text-mode fallback).
-  - plymouth-set-default-theme bty
-  - |
-    set -eu
-    if grep -q '^GRUB_CMDLINE_LINUX_DEFAULT=' /etc/default/grub; then
-      if ! grep -q 'GRUB_CMDLINE_LINUX_DEFAULT=.*splash' /etc/default/grub; then
-        sed -i 's/^GRUB_CMDLINE_LINUX_DEFAULT="\(.*\)"$/GRUB_CMDLINE_LINUX_DEFAULT="\1 splash"/' /etc/default/grub
-      fi
-    else
-      printf '\nGRUB_CMDLINE_LINUX_DEFAULT="quiet splash"\n' >> /etc/default/grub
-    fi
-    update-grub
-    update-initramfs -u
 
   # Pick up the staged systemd units. bty-web-init runs once on the
   # cooked image's first boot to set up the state directory tree and

@@ -284,6 +284,7 @@ environment and sensible defaults.
 | Variable | Purpose | Default |
 |-------------------|----------------------------------------------------------------|---------------------|
 | `BTY_IMAGE_ROOT` | Image root for `bty list images` and `bty inspect image`. | `/var/lib/bty/images` |
+| `BTY_SYSTEM_BRI_ROOT` | System-wide directory of `.bri` (bty Remote Image) descriptors merged into the catalog after the image root. Empty / missing directory is silently skipped. | `/usr/share/bty/bri` |
 
 The `bty --image-root` flag (when given) takes precedence over
 `BTY_IMAGE_ROOT`.
@@ -300,7 +301,7 @@ bty's modules are usable as a library. Stable entry points:
 | Module | Purpose |
 |------------------|-----------------------------------------------------------|
 | `bty.disks` | `list_disks() -> list[dict]` - block-device discovery. |
-| `bty.images` | `list_images(root)`, `inspect_image(path)`, `Image` dataclass, `detect_format(path)`, `default_image_root()`. |
+| `bty.images` | `list_images(root)`, `inspect_image(path)`, `Image` dataclass, `detect_format(path)`, `default_image_root()`, `read_bri(path)`, `list_remote_images(root)`, `list_all_remote_images(root)`, `RemoteImage` / `BriError`, `system_bri_root()`. |
 | `bty.formatting` | `print_table(rows, columns)`, `print_inspect(info)`. |
 
 A full sphinx-autodoc surface is on the roadmap. Until then treat
