@@ -47,6 +47,17 @@ packages:
   # uses on first boot to expand the rootfs partition to fill the
   # operator's disk (the cooked image is baked at a fixed 6 GiB).
   - cloud-utils
+  # Userspace entropy fallback. Modern x86 CPUs (Ivy Bridge / Alder
+  # Lake / etc.) have RDRAND and Debian's kernel ships
+  # ``CONFIG_RANDOM_TRUST_CPU=y`` so the CSPRNG fills before
+  # userspace starts. But: a VM without virtio-rng, an old
+  # CPU without RDRAND, or a kernel built with CONFIG_RANDOM_TRUST_
+  # CPU=n can leave services blocking on ``getrandom()`` for
+  # minutes during early boot. ``haveged`` runs as a tiny daemon,
+  # generates entropy from CPU jitter, and feeds the kernel pool
+  # so ``getrandom()`` never blocks. Defense-in-depth; no harm
+  # on hardware that already has plenty of entropy.
+  - haveged
   # Plymouth is intentionally NOT installed on the server appliance.
   # It was tried twice (added in v0.4.x, dropped in v0.5.12, restored
   # post-v0.5.14, dropped again in v0.7.2). Each time the same issue
@@ -186,12 +197,33 @@ runcmd:
   # are more invasive than this kernel arg.
   - |
     set -eu
+    # Two cmdline args go in here:
+    #   plymouth.enable=0           -- belt-and-braces against a
+    #                                  baseline pulling plymouth
+    #                                  back in via Recommends.
+    #   random.trust_cpu=on
+    #   random.trust_bootloader=on  -- tell the kernel to seed the
+    #                                  CSPRNG from RDRAND / EFI's
+    #                                  RngProtocol. Defaults are
+    #                                  ``on`` for Debian-built
+    #                                  kernels with CONFIG_RANDOM_
+    #                                  TRUST_CPU=y but we set them
+    #                                  explicitly so an operator
+    #                                  rebuilding from a custom
+    #                                  kernel doesn't accidentally
+    #                                  reintroduce the v0.7.16-era
+    #                                  "20-minute boot waiting on
+    #                                  getrandom()" failure mode.
+    EXTRA="plymouth.enable=0 random.trust_cpu=on random.trust_bootloader=on"
     if grep -q '^GRUB_CMDLINE_LINUX_DEFAULT=' /etc/default/grub; then
-      if ! grep -q 'GRUB_CMDLINE_LINUX_DEFAULT=.*plymouth.enable' /etc/default/grub; then
-        sed -i 's/^GRUB_CMDLINE_LINUX_DEFAULT="\(.*\)"$/GRUB_CMDLINE_LINUX_DEFAULT="\1 plymouth.enable=0"/' /etc/default/grub
-      fi
+      for arg in $EXTRA; do
+        key=${arg%%=*}
+        if ! grep -q "GRUB_CMDLINE_LINUX_DEFAULT=.*${key}=" /etc/default/grub; then
+          sed -i "s/^GRUB_CMDLINE_LINUX_DEFAULT=\"\(.*\)\"$/GRUB_CMDLINE_LINUX_DEFAULT=\"\1 ${arg}\"/" /etc/default/grub
+        fi
+      done
     else
-      printf '\nGRUB_CMDLINE_LINUX_DEFAULT="plymouth.enable=0"\n' >> /etc/default/grub
+      printf '\nGRUB_CMDLINE_LINUX_DEFAULT="%s"\n' "$EXTRA" >> /etc/default/grub
     fi
     update-grub
     # No ``update-initramfs -u`` here: changing the grub cmdline
@@ -199,6 +231,12 @@ runcmd:
     # already triggered any initramfs rebuild a postinst would
     # require. Skipping shaves ~10s of bake time + a few hundred
     # lines of console-mirrored output.
+
+  # Enable haveged so it starts early in multi-user.target;
+  # ``haveged`` ships its own systemd unit via the package's
+  # postinst, but explicitly enabling here is paranoia-friendly
+  # (matches the pattern used for systemd-networkd / dnsmasq).
+  - systemctl enable haveged.service
 
   # Disable cloud-init for subsequent boots and clear its artefacts.
   # The cooked image already has its identity (bty user + default

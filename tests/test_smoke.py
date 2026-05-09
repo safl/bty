@@ -244,3 +244,24 @@ def test_server_cloudinit_does_not_install_plymouth() -> None:
     # Layer 2: defensive purge in runcmd. Pin the literal command
     # so a refactor that "tidies" the runcmd block doesn't drop it.
     assert "apt-get -y purge plymouth" in body
+
+
+def test_server_cloudinit_ships_haveged() -> None:
+    """v0.7.16's bake-VM showed a 20-minute systemd-journald start
+    on N97 hardware; entropy starvation is the prime suspect even
+    on RDRAND-capable CPUs (kernel CSPRNG can briefly block on
+    ``getrandom()`` before the trust-cpu logic settles). v0.7.17
+    adds ``haveged`` (CPU-jitter entropy daemon) + explicit
+    ``random.trust_cpu=on random.trust_bootloader=on`` cmdline
+    flags so the boot doesn't depend on the kernel's compile-time
+    defaults. Pin both layers."""
+    from pathlib import Path
+
+    repo_root = Path(__file__).resolve().parents[1]
+    base = repo_root / "bty-media" / "auxiliary" / "cloudinit-base-server.user"
+    body = base.read_text()
+    # Layer 1: ``- haveged`` in the packages list.
+    assert "\n  - haveged\n" in body
+    # Layer 2: kernel cmdline trust hints.
+    assert "random.trust_cpu=on" in body
+    assert "random.trust_bootloader=on" in body
