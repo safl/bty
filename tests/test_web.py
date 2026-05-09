@@ -417,10 +417,24 @@ def test_list_images_is_open_for_pxe_clients(app_client: TestClient) -> None:
 def test_list_images_returns_files_under_image_root(
     tmp_path: Path,
 ) -> None:
+    """``/images`` returns one entry per SHA-keyed image with a ``url``
+    field. Files with sidecars surface immediately as server URLs;
+    the bytes are served via ``/images/<sha>`` regardless of the
+    on-disk filename."""
+    import hashlib
+
     image_root = tmp_path / "images"
     image_root.mkdir()
-    (image_root / "alpha.qcow2").write_bytes(b"\0" * 256)
-    (image_root / "beta.img").write_bytes(b"\0" * 512)
+    alpha_payload = b"\0" * 256
+    beta_payload = b"\0" * 512
+    (image_root / "alpha.qcow2").write_bytes(alpha_payload)
+    (image_root / "beta.img").write_bytes(beta_payload)
+    # Pre-create sidecars so the entries are immediately listable
+    # rather than queued for auto-import.
+    alpha_sha = hashlib.sha256(alpha_payload).hexdigest()
+    beta_sha = hashlib.sha256(beta_payload).hexdigest()
+    (image_root / "alpha.qcow2.sha256").write_text(f"{alpha_sha}  alpha.qcow2\n")
+    (image_root / "beta.img.sha256").write_text(f"{beta_sha}  beta.img\n")
 
     state = tmp_path / "state.db"
     app = create_app(
@@ -438,6 +452,13 @@ def test_list_images_returns_files_under_image_root(
     rows = r.json()
     names = {row["name"] for row in rows}
     assert names == {"alpha.qcow2", "beta.img"}
+    # Each entry carries a ``url`` that the client (TUI / CLI)
+    # flashes from. For dir-scan images the URL points at the
+    # bty-web server's ``/images/<sha>`` endpoint.
+    by_name = {row["name"]: row for row in rows}
+    assert by_name["alpha.qcow2"]["url"].endswith(f"/images/{alpha_sha}")
+    assert by_name["beta.img"]["url"].endswith(f"/images/{beta_sha}")
+    assert by_name["alpha.qcow2"]["cached"] is True
 
 
 # ---------- create_app sanity ----------------------------------------------

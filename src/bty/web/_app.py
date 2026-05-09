@@ -107,9 +107,24 @@ def create_app(
         # The hash manager always starts -- it operates on
         # ``image_root``, which exists for every bty-web shape
         # (appliance, container, dev). Default parallelism is 1
-        # so a Pi-class box doesn't get hammered if the operator
-        # queues several big images.
+        # so a Pi-class box doesn't get hammered if multiple big
+        # images need importing at once.
         hash_manager.start(resolved_image_root)
+        # Auto-import: enqueue every dir-scan file without a
+        # ``.sha256`` sidecar so the HashManager processes them
+        # in the background. Once a sidecar lands, ``/images``
+        # picks the entry up with a server URL on the next call.
+        # Operator-initiated work is unaffected -- they queue
+        # behind the auto-import jobs by FIFO order, but the
+        # parallelism cap (default 1) keeps the box responsive.
+        for img in images.list_images(resolved_image_root):
+            if img.sha256 is None:
+                try:
+                    await hash_manager.enqueue(img.name)
+                except FileNotFoundError:
+                    # File vanished between the list_images scan
+                    # and the enqueue; harmless.
+                    pass
         try:
             yield
         finally:
@@ -467,23 +482,59 @@ def create_app(
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @app.get("/images", response_model=list[_models.ImageEntry])
-    def list_images() -> list[_models.ImageEntry]:
-        # Open route: the bty-tui-on-PXE flow needs to enumerate the
-        # catalog without first bootstrapping auth. The byte-serving
-        # route ``GET /images/{name}`` is already open (PXE clients
-        # download images during the live env's flash phase), so
-        # leaving the listing protected only added discovery friction
-        # without changing the trust model. Same homelab-network
-        # assumption as the other /pxe / /boot / /images/{name}
-        # endpoints.
+    def list_images_endpoint(request: Request) -> list[_models.ImageEntry]:
+        """Unified catalog listing.
+
+        Each entry carries a single ``url``: server URL for
+        cached / imported / dir-scan-with-sidecar images,
+        upstream URL for manifest entries that have not been
+        cached yet. The client just flashes from ``url`` --
+        no need to know about manifests, sidecars, or cache.
+
+        Open route: the bty-tui-on-PXE flow needs to enumerate
+        the catalog without first bootstrapping auth. The
+        byte-serving route ``GET /images/{name}`` is already
+        open. Same homelab-network trust model as /pxe / /boot.
+        """
+        manifest_entries = parsed_catalog.entries if parsed_catalog else ()
+        unified = images.merge_with_catalog(
+            resolved_image_root, manifest_entries, catalog_cache_dir
+        )
+        host = request.headers.get("host", f"{request.url.hostname}:{request.url.port or 8080}")
+        scheme = request.url.scheme or "http"
         out: list[_models.ImageEntry] = []
-        for img in images.list_images(resolved_image_root):
+        for u in unified:
+            # Skip entries we cannot point at: dir-scan files
+            # without a sidecar AND no manifest entry. The
+            # auto-import on startup will hash them and they will
+            # appear in the next listing.
+            if u.sha256 is None:
+                continue
+            if u.cached:
+                # Local file or cached manifest blob -- bty-web
+                # serves the bytes via ``/images/<sha>``.
+                url = f"{scheme}://{host}/images/{u.sha256}"
+            else:
+                # Manifest entry not yet cached -- the client
+                # streams directly from upstream. First manifest
+                # source wins.
+                upstream = next(
+                    (s.location for s in u.sources if s.kind == "manifest"),
+                    None,
+                )
+                if upstream is None:
+                    # No manifest source AND not cached -- nothing
+                    # we can hand the client. Skip.
+                    continue
+                url = upstream
             out.append(
                 _models.ImageEntry(
-                    name=img.name,
-                    path=str(img.path),
-                    format=img.format or "",
-                    size_bytes=img.size_bytes,
+                    name=u.names[0],
+                    format=u.format or "",
+                    size_bytes=u.size_bytes or 0,
+                    url=url,
+                    ref=u.sha256[:12] if u.sha256 else None,
+                    cached=u.cached,
                 )
             )
         return out

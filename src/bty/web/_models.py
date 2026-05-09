@@ -98,12 +98,44 @@ class Machine(BaseModel):
 
 
 class ImageEntry(BaseModel):
-    """A discovered image in the server-side image catalog."""
+    """One image in the server-side image catalog.
+
+    Each entry carries a single ``url`` -- the place a client
+    should fetch the bytes from. The server resolves it based on
+    cache state so the client (e.g. ``bty-tui --server URL``)
+    does not need to know about catalog manifests, sidecars, or
+    cache layout: it just flashes from ``url``.
+
+    Resolution rule:
+
+    * Dir-scan file with ``.sha256`` sidecar (or auto-imported)
+      -> ``url`` points at the bty-web server (``/images/<sha>``);
+      the server serves the bytes.
+    * Manifest entry that has been fetched + cached -> same as
+      above, ``url`` points at the bty-web server.
+    * Manifest entry not yet cached -> ``url`` is the upstream
+      manifest ``src``; the client streams bytes directly from
+      upstream during flash. The operator can hit "Fetch" in the
+      browser UI to populate the cache, after which the entry's
+      ``url`` flips to the server form on the next listing.
+    * Dir-scan file without a sidecar AND no manifest entry ->
+      excluded from the listing until bty-web's auto-import
+      computes its SHA in the background. The HashManager picks
+      these up at startup with a single worker so a Pi 4 does
+      not get hammered.
+
+    ``ref`` is a 12-char short SHA prefix for display only --
+    used by the browser UI to disambiguate same-named entries.
+    Operators do not paste it anywhere; bty-web speaks URLs,
+    machines bind by SHA, the CLI takes paths or URLs.
+    """
 
     name: str
-    path: str
     format: str
     size_bytes: int
+    url: str
+    ref: str | None = None
+    cached: bool = False
 
 
 class HealthResponse(BaseModel):

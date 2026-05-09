@@ -83,11 +83,28 @@ def _fake_resp(payload: Any) -> MagicMock:
 
 
 def test_fetch_remote_catalog_parses_image_entries(monkeypatch: pytest.MonkeyPatch) -> None:
-    """``GET /images`` returns ``ImageEntry[]``; we wrap them as
-    ``_TuiImage`` rows with the URL synthesised from ``<server>/images/<name>``."""
+    """``GET /images`` returns ImageEntry[] with a single ``url``
+    each. The TUI just unpacks it -- the server already chose
+    server-vs-upstream based on cache state. Mixed shape here
+    (one server URL, one upstream URL) verifies neither side
+    gets special-cased on the client."""
     payload = [
-        {"name": "demo.qcow2", "format": "qcow2", "size_bytes": 1024, "path": "/x"},
-        {"name": "live.img.zst", "format": "img.zst", "size_bytes": 4096, "path": "/y"},
+        {
+            "name": "demo.qcow2",
+            "format": "qcow2",
+            "size_bytes": 1024,
+            "url": "http://server:8080/images/abc123def456",
+            "ref": "abc123def456",
+            "cached": True,
+        },
+        {
+            "name": "live.img.zst",
+            "format": "img.zst",
+            "size_bytes": 4096,
+            "url": "https://github.com/safl/bty-images/releases/download/v1/live.img.zst",
+            "ref": "fedcba987654",
+            "cached": False,
+        },
     ]
     monkeypatch.setattr(
         tui_app.urllib.request,
@@ -101,32 +118,22 @@ def test_fetch_remote_catalog_parses_image_entries(monkeypatch: pytest.MonkeyPat
     assert rows[0].name == "demo.qcow2"
     assert rows[0].fmt == "qcow2"
     assert rows[0].size_bytes == 1024
-    assert rows[0].url == "http://server:8080/images/demo.qcow2"
+    assert rows[0].url == "http://server:8080/images/abc123def456"
     assert rows[0].path is None  # remote rows never get a local path
-    assert rows[1].url == "http://server:8080/images/live.img.zst"
+    assert rows[1].url == "https://github.com/safl/bty-images/releases/download/v1/live.img.zst"
 
 
-def test_fetch_remote_catalog_strips_trailing_slash(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Server URLs with a trailing slash get normalised; the synthesised
-    image URLs are stable regardless of how the operator typed it."""
-    payload = [{"name": "demo.qcow2", "format": "qcow2", "size_bytes": 1}]
-    monkeypatch.setattr(
-        tui_app.urllib.request,
-        "urlopen",
-        lambda *_a, **_kw: _fake_resp(payload),
-    )
-
-    rows = tui_app.fetch_remote_catalog("http://server:8080/")
-    assert rows[0].url == "http://server:8080/images/demo.qcow2"
-
-
-def test_fetch_remote_catalog_skips_malformed_entries(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Entries that are not dicts or have no name are skipped; the rest
-    are returned. Defensive against a server emitting a partial schema."""
+def test_fetch_remote_catalog_skips_entries_without_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Entries without a ``url`` (or with an empty one) are skipped --
+    the server is supposed to elide them too, but the client is
+    defensive. Same for entries that aren't dicts or have no name."""
     payload = [
         "not-a-dict",
-        {"name": "", "format": "img"},  # blank name
-        {"name": "ok.img", "format": "img", "size_bytes": 100},
+        {"name": "", "url": "http://x"},  # blank name
+        {"name": "no-url", "format": "img"},  # no url
+        {"name": "ok.img", "format": "img", "size_bytes": 100, "url": "http://x/ok"},
     ]
     monkeypatch.setattr(
         tui_app.urllib.request,
@@ -136,6 +143,7 @@ def test_fetch_remote_catalog_skips_malformed_entries(monkeypatch: pytest.Monkey
 
     rows = tui_app.fetch_remote_catalog("http://server")
     assert [r.name for r in rows] == ["ok.img"]
+    assert rows[0].url == "http://x/ok"
 
 
 def test_fetch_remote_catalog_rejects_non_list_payload(monkeypatch: pytest.MonkeyPatch) -> None:

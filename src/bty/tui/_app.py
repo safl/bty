@@ -165,11 +165,17 @@ def _parse_size_to_bytes(s: str) -> int:
 def fetch_remote_catalog(server_url: str, *, timeout: float = 30.0) -> list[_TuiImage]:
     """``GET <server_url>/images`` and return ``_TuiImage`` rows.
 
+    Each row's ``url`` is whatever the server provided directly --
+    server URL when the bytes are cached / imported on the server,
+    upstream URL when a manifest entry has not yet been cached.
+    The TUI does not need to reason about cache state: it just
+    flashes from ``url``.
+
     Free function so unit tests can mock ``urllib.request.urlopen``
     without instantiating a textual ``App``. Raises
     ``urllib.error.URLError`` / ``ValueError`` for surface-level
-    problems; the caller (the TUI's image-pane refresh) catches and
-    surfaces them in the status bar.
+    problems; the caller (the TUI's image-pane refresh) catches
+    and surfaces them in the status bar.
     """
     base = server_url.rstrip("/")
     catalog_url = f"{base}/images"
@@ -182,14 +188,15 @@ def fetch_remote_catalog(server_url: str, *, timeout: float = 30.0) -> list[_Tui
         if not isinstance(entry, dict):
             continue
         name = str(entry.get("name", ""))
-        if not name:
+        url = str(entry.get("url", ""))
+        if not name or not url:
             continue
         out.append(
             _TuiImage(
                 name=name,
                 fmt=entry.get("format") or None,
                 size_bytes=int(entry.get("size_bytes") or 0),
-                url=f"{base}/images/{name}",
+                url=url,
             )
         )
     return out
