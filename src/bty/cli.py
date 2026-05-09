@@ -31,7 +31,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from bty import disks, flash, formatting, images
+from bty import catalog, disks, flash, formatting, images
 
 # Bump this when any --json output structure changes incompatibly.
 # Document the new shape in docs/src/reference.md and AGENTS.md.
@@ -164,6 +164,56 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     p_flash.set_defaults(func=cmd_flash)
+
+    p_catalog = sub.add_parser(
+        "catalog",
+        help="manage the bty-web catalog manifest (TOML) + local SHA-verified cache",
+    )
+    catalog_sub = p_catalog.add_subparsers(dest="catalog_what", required=True, metavar="ACTION")
+
+    p_catalog_validate = catalog_sub.add_parser(
+        "validate",
+        parents=[common],
+        help="parse a manifest and report any schema / field errors",
+    )
+    p_catalog_validate.add_argument(
+        "path",
+        type=Path,
+        nargs="?",
+        default=None,
+        help=("manifest path (default: $BTY_CATALOG_FILE or ${BTY_STATE_DIR}/catalog.toml)"),
+    )
+    p_catalog_validate.set_defaults(func=cmd_catalog_validate)
+
+    p_catalog_list = catalog_sub.add_parser(
+        "list",
+        parents=[common],
+        help="list manifest entries with cached / available status",
+    )
+    p_catalog_list.add_argument(
+        "--manifest",
+        type=Path,
+        default=None,
+        help="manifest path (default: env-derived; see ``catalog validate``)",
+    )
+    p_catalog_list.set_defaults(func=cmd_catalog_list)
+
+    p_catalog_fetch = catalog_sub.add_parser(
+        "fetch",
+        parents=[common],
+        help="download a manifest entry's bytes into the SHA-keyed cache",
+    )
+    p_catalog_fetch.add_argument(
+        "name",
+        help="image name as declared in the manifest",
+    )
+    p_catalog_fetch.add_argument(
+        "--manifest",
+        type=Path,
+        default=None,
+        help="manifest path (default: env-derived; see ``catalog validate``)",
+    )
+    p_catalog_fetch.set_defaults(func=cmd_catalog_fetch)
 
     args = parser.parse_args(argv)
     func = getattr(args, "func", None)
@@ -407,6 +457,154 @@ def _build_progress_callback(mode: str) -> flash.ProgressCallback | None:
         print(line, file=sys.stderr, flush=True)
 
     return emit_text
+
+
+def cmd_catalog_validate(args: argparse.Namespace) -> int:
+    """Load a manifest and report any errors.
+
+    Exit 0 on a clean parse + schema check; exit 1 on
+    ``CatalogError`` with the message printed to stderr. JSON
+    mode emits an envelope with ``valid`` / ``error`` so a
+    script can branch.
+    """
+    path = args.path or catalog.default_manifest_path()
+    if path is None:
+        print(
+            "no manifest configured (set BTY_CATALOG_FILE or place ${BTY_STATE_DIR}/catalog.toml)",
+            file=sys.stderr,
+        )
+        return 1
+    try:
+        cat = catalog.load(path)
+    except catalog.CatalogError as exc:
+        if args.json:
+            print(
+                json.dumps(
+                    _envelope("catalog-validate", path=str(path), valid=False, error=str(exc)),
+                    indent=2,
+                )
+            )
+        else:
+            print(f"catalog: {exc}", file=sys.stderr)
+        return 1
+    if args.json:
+        print(
+            json.dumps(
+                _envelope("catalog-validate", path=str(path), valid=True, count=len(cat)), indent=2
+            )
+        )
+    else:
+        print(f"catalog at {path}: ok ({len(cat)} entr{'y' if len(cat) == 1 else 'ies'})")
+    return 0
+
+
+def cmd_catalog_list(args: argparse.Namespace) -> int:
+    """Print each manifest entry with its cached / available status.
+
+    Cache lookup is by SHA only -- no re-hashing of the cached file
+    on every list, since that would be expensive for multi-GiB
+    images. Trust is "we wrote this under the right SHA".
+    """
+    path = args.manifest or catalog.default_manifest_path()
+    if path is None:
+        print(
+            "no manifest configured (set BTY_CATALOG_FILE or place ${BTY_STATE_DIR}/catalog.toml)",
+            file=sys.stderr,
+        )
+        return 1
+    try:
+        cat = catalog.load(path)
+    except catalog.CatalogError as exc:
+        print(f"catalog: {exc}", file=sys.stderr)
+        return 1
+    cache_dir = catalog.default_cache_dir()
+    if args.json:
+        rows = [
+            {
+                "name": e.name,
+                "src": e.src,
+                "sha256": e.sha256,
+                "format": e.format,
+                "size_bytes": e.size_bytes,
+                "description": e.description,
+                "cached": catalog.is_cached(e, cache_dir),
+            }
+            for e in cat
+        ]
+        print(
+            json.dumps(
+                _envelope(
+                    "catalog-list",
+                    manifest=str(path),
+                    cache_dir=str(cache_dir),
+                    entries=rows,
+                ),
+                indent=2,
+            )
+        )
+    else:
+        print(f"catalog: {path}    cache: {cache_dir}\n")
+        formatting.print_table(
+            [
+                {
+                    "Name": e.name,
+                    "Format": e.format or "-",
+                    "Status": "cached" if catalog.is_cached(e, cache_dir) else "available",
+                    "Source": e.src,
+                }
+                for e in cat
+            ],
+            ["Name", "Format", "Status", "Source"],
+        )
+    return 0
+
+
+def cmd_catalog_fetch(args: argparse.Namespace) -> int:
+    """Download a single named entry into the cache.
+
+    Idempotent: if the entry is already cached, prints a no-op
+    note and exits 0.
+    """
+    path = args.manifest or catalog.default_manifest_path()
+    if path is None:
+        print(
+            "no manifest configured (set BTY_CATALOG_FILE or place ${BTY_STATE_DIR}/catalog.toml)",
+            file=sys.stderr,
+        )
+        return 1
+    try:
+        cat = catalog.load(path)
+    except catalog.CatalogError as exc:
+        print(f"catalog: {exc}", file=sys.stderr)
+        return 1
+    entry = cat.by_name(args.name)
+    if entry is None:
+        print(f"catalog: no entry named {args.name!r} in {path}", file=sys.stderr)
+        return 1
+    cache_dir = catalog.default_cache_dir()
+    try:
+        cached = catalog.fetch_to_cache(entry, cache_dir)
+    except catalog.CatalogError as exc:
+        print(f"catalog fetch: {exc}", file=sys.stderr)
+        return 1
+    except OSError as exc:
+        print(f"catalog fetch: I/O error: {exc}", file=sys.stderr)
+        return 1
+    if args.json:
+        print(
+            json.dumps(
+                _envelope(
+                    "catalog-fetch",
+                    name=entry.name,
+                    sha256=entry.sha256,
+                    cached_path=str(cached),
+                ),
+                indent=2,
+            )
+        )
+    else:
+        print(f"cached: {cached}")
+    return 0
 
 
 if __name__ == "__main__":  # pragma: no cover
