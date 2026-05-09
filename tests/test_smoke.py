@@ -273,3 +273,11 @@ def test_server_cloudinit_ships_haveged() -> None:
     assert "\n  - firmware-misc-nonfree\n" in body
     assert "\n  - firmware-realtek\n" in body
     assert "noresume" in body
+    # v0.7.19: ``MODULES=most`` initramfs rebuild for broad bare-
+    # metal driver coverage. The cloud image's default
+    # ``MODULES=dep`` initrd was the actual cause of the N97 slow
+    # boot (driver probes timing out for hardware that wasn't in
+    # the bake VM). Pin the rebuild so a future "this is
+    # confusing, let's revert" doesn't restore the regression.
+    assert "MODULES=most" in body
+    assert "update-initramfs -u" in body

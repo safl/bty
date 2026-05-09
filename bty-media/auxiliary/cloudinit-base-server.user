@@ -250,11 +250,29 @@ runcmd:
       printf '\nGRUB_CMDLINE_LINUX_DEFAULT="%s"\n' "$EXTRA" >> /etc/default/grub
     fi
     update-grub
-    # No ``update-initramfs -u`` here: changing the grub cmdline
-    # doesn't touch the initramfs, and the bake's package install
-    # already triggered any initramfs rebuild a postinst would
-    # require. Skipping shaves ~10s of bake time + a few hundred
-    # lines of console-mirrored output.
+
+  # Rebuild the initramfs with ``MODULES=most`` so the cooked
+  # image boots cleanly on bare-metal hardware that the bake VM
+  # never sees. The Debian cloud image's default
+  # initramfs.conf uses ``MODULES=dep`` (just what was needed to
+  # boot the bake VM on virtio), which produces a minimal initrd
+  # missing real-hardware drivers like Intel I225/I226 NICs,
+  # NVMe controllers with quirks, or AHCI variants. On real
+  # hardware the kernel's early-init then waits 60-120s per
+  # missing driver before falling through to the on-disk
+  # ``/lib/modules`` set -- compounded across several devices,
+  # this is the ~20-minute slow-boot regression observed on N97
+  # mini-PCs in v0.7.x. ``MODULES=most`` packs everything
+  # initramfs-tools knows might be needed for boot; ~30 MB of
+  # extra initrd, fast-probes on every box.
+  - |
+    set -eu
+    if [ -f /etc/initramfs-tools/initramfs.conf ]; then
+      sed -i 's/^MODULES=.*/MODULES=most/' /etc/initramfs-tools/initramfs.conf
+      grep -q '^MODULES=' /etc/initramfs-tools/initramfs.conf || \
+        printf '\nMODULES=most\n' >> /etc/initramfs-tools/initramfs.conf
+      update-initramfs -u
+    fi
 
   # Enable haveged so it starts early in multi-user.target;
   # ``haveged`` ships its own systemd unit via the package's
