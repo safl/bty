@@ -187,3 +187,24 @@ def test_cancel_unknown_returns_none(tmp_path: Path) -> None:
             await mgr.stop()
 
     _run(_drive())
+
+
+def test_download_state_to_dict_omits_unpicklable_event() -> None:
+    """``DownloadState.to_dict`` must not emit the
+    ``threading.Event`` (which contains an unpicklable
+    ``_thread.lock``) -- otherwise FastAPI's response serialiser
+    raises ``TypeError: cannot pickle '_thread.lock' object`` the
+    moment the manager has any state. The fix uses an explicit
+    field list rather than ``dataclasses.asdict``; this test
+    pins it so a future field addition that re-introduces the
+    bug fails fast."""
+    from bty.web._catalog import DownloadState
+
+    state = DownloadState(name="x", sha256="a" * 64, src="http://x")
+    d = state.to_dict()
+    assert "_cancel" not in d
+    # Round-trip through json to mirror what FastAPI does.
+    import json
+
+    encoded = json.dumps(d)
+    assert "name" in json.loads(encoded)

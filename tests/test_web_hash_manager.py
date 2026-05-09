@@ -103,3 +103,19 @@ def test_cancel_unknown_returns_none(tmp_path: Path) -> None:
             await mgr.stop()
 
     _run(_drive())
+
+
+def test_hash_state_to_dict_omits_unpicklable_event() -> None:
+    """``HashState.to_dict`` must JSON-serialise without the
+    ``threading.Event`` slipping through (which would explode
+    on FastAPI's response serialiser; see the matching test in
+    test_web_catalog_manager)."""
+    from bty.web._hash import HashState
+
+    state = HashState(name="x.img", path="/var/lib/bty/images/x.img")
+    d = state.to_dict()
+    assert "_cancel" not in d
+    import json
+
+    encoded = json.dumps(d)
+    assert json.loads(encoded)["name"] == "x.img"
