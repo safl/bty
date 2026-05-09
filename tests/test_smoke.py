@@ -265,3 +265,11 @@ def test_server_cloudinit_ships_haveged() -> None:
     # Layer 2: kernel cmdline trust hints.
     assert "random.trust_cpu=on" in body
     assert "random.trust_bootloader=on" in body
+    # v0.7.18 added bare-metal firmware blobs + ``noresume`` for
+    # N97-class hardware that was hitting firmware-probe timeouts +
+    # hibernation-resume waits during early boot. Pin both so a
+    # future "tidy the packages list" attempt doesn't drop them.
+    assert "\n  - firmware-linux-free\n" in body
+    assert "\n  - firmware-misc-nonfree\n" in body
+    assert "\n  - firmware-realtek\n" in body
+    assert "noresume" in body

@@ -58,6 +58,19 @@ packages:
   # so ``getrandom()`` never blocks. Defense-in-depth; no harm
   # on hardware that already has plenty of entropy.
   - haveged
+  # Firmware blobs for the bare-metal hardware bty-server is most
+  # likely to land on (NUC-class boxes, Intel mini-PCs, ASUS
+  # PN-series, etc.). The cloud-image baseline doesn't include
+  # these because cloud VMs don't need wireless / GPU / Realtek
+  # NIC firmware. On bare metal, the kernel probes the device,
+  # waits for the firmware file, times out after 60-120s per
+  # device, retries -- which compounds to many minutes of
+  # unexplained early-boot wait. Including the meta-packages
+  # is cheap (~150 MB) and removes a whole class of "boot is
+  # really slow on this specific hardware" reports.
+  - firmware-linux-free
+  - firmware-misc-nonfree
+  - firmware-realtek
   # Plymouth is intentionally NOT installed on the server appliance.
   # It was tried twice (added in v0.4.x, dropped in v0.5.12, restored
   # post-v0.5.14, dropped again in v0.7.2). Each time the same issue
@@ -197,28 +210,39 @@ runcmd:
   # are more invasive than this kernel arg.
   - |
     set -eu
-    # Two cmdline args go in here:
-    #   plymouth.enable=0           -- belt-and-braces against a
-    #                                  baseline pulling plymouth
-    #                                  back in via Recommends.
+    # Cmdline hardening (each entry is idempotently inserted into
+    # GRUB_CMDLINE_LINUX_DEFAULT below):
+    #   plymouth.enable=0           -- no graphical splash on the
+    #                                  headless server. Defense
+    #                                  against a future baseline
+    #                                  pulling plymouth back in.
     #   random.trust_cpu=on
-    #   random.trust_bootloader=on  -- tell the kernel to seed the
-    #                                  CSPRNG from RDRAND / EFI's
-    #                                  RngProtocol. Defaults are
-    #                                  ``on`` for Debian-built
-    #                                  kernels with CONFIG_RANDOM_
-    #                                  TRUST_CPU=y but we set them
-    #                                  explicitly so an operator
-    #                                  rebuilding from a custom
-    #                                  kernel doesn't accidentally
-    #                                  reintroduce the v0.7.16-era
-    #                                  "20-minute boot waiting on
-    #                                  getrandom()" failure mode.
-    EXTRA="plymouth.enable=0 random.trust_cpu=on random.trust_bootloader=on"
+    #   random.trust_bootloader=on  -- seed CSPRNG from RDRAND /
+    #                                  EFI's RngProtocol. Defaults
+    #                                  are ``on`` for stock Debian
+    #                                  kernels but setting them
+    #                                  explicitly closes the gap
+    #                                  if an operator rebuilds a
+    #                                  custom kernel without
+    #                                  CONFIG_RANDOM_TRUST_CPU=y.
+    #                                  Mitigates the v0.7.16 ~20-
+    #                                  minute boot waiting on
+    #                                  getrandom() symptom.
+    #   noresume                    -- skip hibernation-image probe
+    #                                  on a fresh-flashed disk
+    #                                  with no swap. Without it
+    #                                  the kernel waits ~30s for
+    #                                  the resume device to
+    #                                  appear; bty-server doesn't
+    #                                  hibernate so always skip.
+    EXTRA="plymouth.enable=0 random.trust_cpu=on random.trust_bootloader=on noresume"
     if grep -q '^GRUB_CMDLINE_LINUX_DEFAULT=' /etc/default/grub; then
       for arg in $EXTRA; do
-        key=${arg%%=*}
-        if ! grep -q "GRUB_CMDLINE_LINUX_DEFAULT=.*${key}=" /etc/default/grub; then
+        # ``arg`` is either ``key=value`` or a bare flag (e.g.
+        # ``noresume``). The grep token ``\b<arg>\b`` matches
+        # both shapes idempotently, so re-running this block
+        # never duplicates an entry.
+        if ! grep -q "GRUB_CMDLINE_LINUX_DEFAULT=.*\\b${arg}\\b" /etc/default/grub; then
           sed -i "s/^GRUB_CMDLINE_LINUX_DEFAULT=\"\(.*\)\"$/GRUB_CMDLINE_LINUX_DEFAULT=\"\1 ${arg}\"/" /etc/default/grub
         fi
       done
