@@ -137,11 +137,17 @@ docker-build:
 	$(UV) build
 	docker build -f docker/Dockerfile -t bty-web:dev .
 
-# Trial run with a host-side data dir so dropped images persist
-# across container restarts. Background + log tail so the operator
-# can ^C without killing the container.
+# Trial run with a host-side data dir so dropped images show up in
+# the container catalog. The bty-web container runs as uid 999
+# (the bty user, mirroring the appliance's ``User=bty`` for PAM
+# auth via setgid unix_chkpwd); a bare bind-mount the operator
+# owns would fail the entrypoint's writability preflight, so we
+# chown the dir to 999:999 first. Requires sudo; alternative is
+# ``docker run -v bty-data:/var/lib/bty ...`` with a managed
+# volume (no chown needed, harder to inspect from the host).
 docker-run:
 	mkdir -p bty-data/images
+	sudo chown -R 999:999 bty-data
 	docker run -d --name bty-web --rm -p 8080:8080 \
 	    -v "$(CURDIR)/bty-data":/var/lib/bty bty-web:dev
 	@echo "bty-web running on http://localhost:8080/ui (login: bty / bty)"

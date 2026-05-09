@@ -80,9 +80,13 @@ RUN install -d -o bty -g bty -m 0750 /var/lib/bty /var/lib/bty/images
 VOLUME /var/lib/bty
 
 # bty-web reads these env vars; defaults match the on-image
-# directory layout above.
+# directory layout above. ``BTY_BOOT_DIR`` is set explicitly (the
+# code would default it to ``state_dir/boot`` anyway, but spelling
+# it out keeps the container's env in sync with the appliance's
+# ``/etc/default/bty-web`` so drift is harder to introduce.)
 ENV BTY_STATE_DIR=/var/lib/bty \
     BTY_IMAGE_ROOT=/var/lib/bty/images \
+    BTY_BOOT_DIR=/var/lib/bty/boot \
     BTY_WEB_HOST=0.0.0.0 \
     BTY_WEB_PORT=8080
 

@@ -580,6 +580,28 @@ Landed after the original 1.0 list:
 These are forward-looking ideas captured for the roadmap; no
 implementation is in flight.
 
+- **`bty.dhcp` library (proxy-DHCP + TFTP in pure Python).** Not as
+  a wholesale dnsmasq replacement -- dnsmasq has decades of
+  edge-case wrangling for weird PXE ROMs, multi-arch (DHCP option
+  93: BIOS / UEFI / UEFI-ARM), and the rogue-DHCP guard that keeps
+  proxy mode from breaking other clients on the LAN. The appliance
+  keeps using dnsmasq. But a focused ~700 LoC Python responder
+  (parse DISCOVER, gate on PXEClient option 60, build OFFER with
+  siaddr + boot-file, optional per-MAC) plus a small TFTP server
+  would be valuable as a building block with two specific
+  consumers: (1) a test fixture that lets ``make test-pxe`` and
+  new unit tests drive PXE flows in pure Python with mocked sockets,
+  vs. spinning up a full server VM with dnsmasq; and (2) an opt-in
+  ``BTY_DHCP_BUILTIN=1`` mode for the Docker container, useful in
+  the standalone-trial / single-laptop-reflash scenario where
+  pulling in dnsmasq is awkward. Trade-off: ~700 LoC of carefully-
+  tested code with focused fuzzing of the matched-on-vendor-class
+  invariant so it never responds to non-PXE DISCOVERs. Worth doing
+  if either (a) test-pxe slowness becomes a felt pain or (b) the
+  standalone-trial Docker-with-PXE story grows into a real
+  use-case; otherwise it's solving a problem that does not exist
+  yet.
+
 - **PXE-boot a kernel image (no flash).** Today's PXE flow is
   always "boot the netboot live env, run `bty flash`, reboot
   into local disk". A complementary mode would PXE-boot a
