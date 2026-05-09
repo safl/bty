@@ -158,6 +158,13 @@ def list_images(root: Path) -> list[Image]:
 
     out: list[Image] = []
     for p in sorted(root.iterdir()):
+        # Symlinks could point outside ``root``; the bytes would
+        # then be served via ``GET /images/<sha>`` even though
+        # they live outside the operator-configured image root.
+        # Reject symlinks defensively -- operators who really
+        # want to share files across roots can copy or hardlink.
+        if p.is_symlink():
+            continue
         if not p.is_file():
             continue
         # Skip sidecar files; they're not images themselves.
@@ -166,12 +173,19 @@ def list_images(root: Path) -> list[Image]:
         fmt = detect_format(p)
         if fmt is None:
             continue
+        # ``stat`` can race with concurrent unlink (operator drops
+        # a file out of BTY_IMAGES between iterdir and stat).
+        # Skip rather than crash the listing.
+        try:
+            size_bytes = p.stat().st_size
+        except FileNotFoundError:
+            continue
         out.append(
             Image(
                 name=p.name,
                 path=p,
                 format=fmt,
-                size_bytes=p.stat().st_size,
+                size_bytes=size_bytes,
                 sha256=_read_sidecar_sha(p),
             )
         )
@@ -323,6 +337,13 @@ def list_remote_images(root: Path) -> list[RemoteImage]:
         return []
     out: list[RemoteImage] = []
     for p in sorted(root.iterdir()):
+        # Same symlink defense as ``list_images`` -- a ``.bri``
+        # symlink could point at an arbitrary TOML file outside
+        # ``root``; even though the descriptor itself is harmless
+        # to read, keeping the listing strictly intra-root makes
+        # the catalog's contents predictable.
+        if p.is_symlink():
+            continue
         # Match the case-insensitive extension convention used by
         # ``detect_format``; a stick prepared on Windows might
         # surface ``.BRI`` from FAT32-style uppercasing.
@@ -719,6 +740,17 @@ def inspect_image(path: Path) -> dict[str, Any]:
         "format": fmt,
         "size_bytes": path.stat().st_size,
     }
+
+    # Tarballs aren't flashable -- the inspection helper points
+    # the operator at the right next step instead of returning a
+    # blank ``format: ''`` record that looks like a bty bug.
+    if fmt is None and is_tarball_extension(path.name):
+        info["detail_error"] = (
+            "tarball; not directly flashable -- extract first "
+            f"(e.g. ``tar -xf {path.name}``) and drop the resulting "
+            "``.img`` / ``.qcow2`` onto BTY_IMAGES"
+        )
+        return info
 
     if fmt == "qcow2":
         proc = subprocess.run(

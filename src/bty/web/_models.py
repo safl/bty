@@ -71,7 +71,11 @@ class MachineUpsert(BaseModel):
 
     model_config = {"extra": "forbid"}
 
-    image_sha256: str | None = None
+    # 64 lower-case hex chars; ``None`` = discovered-but-unassigned.
+    # Validating the shape here catches operator typos at PUT time
+    # rather than letting bogus SHAs land in state.db and surface
+    # as silent "no /pxe/<mac>" mismatches later.
+    image_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     provisioning_mode: str = Field(default="none", pattern=PROVISIONING_PATTERN)
     hostname: str | None = None
     cijoe_workflow_ref: str | None = None

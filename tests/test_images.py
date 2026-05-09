@@ -57,6 +57,24 @@ def test_list_images_walks_root(tmp_path: Path) -> None:
     assert by_name["alpha.qcow2"].size_bytes == 1024
 
 
+def test_list_images_skips_symlinks(tmp_path: Path) -> None:
+    """Symlinks could point outside ``root``; serving their bytes
+    via ``GET /images/<sha>`` would let the operator inadvertently
+    expose files outside the configured image root. Listing skips
+    them defensively."""
+    real = tmp_path / "outside"
+    real.mkdir()
+    (real / "secret.qcow2").write_bytes(b"\0" * 16)
+    inside = tmp_path / "images"
+    inside.mkdir()
+    (inside / "real.qcow2").write_bytes(b"\0" * 16)
+    (inside / "linked.qcow2").symlink_to(real / "secret.qcow2")
+
+    found = images.list_images(inside)
+    names = [img.name for img in found]
+    assert names == ["real.qcow2"]
+
+
 def test_list_images_returns_empty_for_missing_root(tmp_path: Path) -> None:
     assert images.list_images(tmp_path / "nonexistent") == []
 
@@ -93,6 +111,18 @@ def test_inspect_image_raw_img_no_external_tool(tmp_path: Path) -> None:
     run.assert_not_called()
     assert info["format"] == "img"
     assert info["size_bytes"] == 10
+
+
+def test_inspect_image_hints_about_tarballs(tmp_path: Path) -> None:
+    """``bty inspect image foo.tar.gz`` doesn't return a confusing
+    blank record; instead it surfaces a friendly ``detail_error``
+    that tells the operator to extract first."""
+    tarball = tmp_path / "ubuntu-22.04.tar.gz"
+    tarball.write_bytes(b"\x1f\x8b" + b"\0" * 30)  # gzip magic + padding
+    info = images.inspect_image(tarball)
+    assert info["format"] is None
+    assert "tarball" in info.get("detail_error", "").lower()
+    assert "extract" in info["detail_error"].lower()
 
 
 def test_inspect_image_handles_bri_descriptor(tmp_path: Path) -> None:

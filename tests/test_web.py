@@ -637,6 +637,25 @@ def test_machine_default_boot_policy_is_local(app_client: TestClient) -> None:
     assert r.json()["last_flashed_at"] is None
 
 
+def test_machine_upsert_rejects_malformed_sha256(app_client: TestClient) -> None:
+    """``image_sha256`` must be 64 lower-case hex chars. A typo
+    (uppercase, wrong length, non-hex) used to land in state.db
+    verbatim and surface as a silent ``GET /pxe/<mac>`` lookup
+    miss later. Validate at PUT time."""
+    for bad in (
+        "0123",  # too short
+        "GHIJ" * 16,  # non-hex
+        "0123456789abcdef" * 4 + "extra",  # too long
+        "0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF",  # uppercase
+    ):
+        r = app_client.put(
+            "/machines/aa:bb:cc:dd:ee:ff",
+            json={"image_sha256": bad, "boot_policy": "flash"},
+            cookies=AUTH,
+        )
+        assert r.status_code == 422, f"expected 422 for {bad!r}, got {r.status_code}"
+
+
 def test_machine_upsert_rejects_unknown_fields(app_client: TestClient) -> None:
     """``MachineUpsert(extra="forbid")`` -- a stale client (or
     operator typo) sending the pre-M22 ``image`` field instead of
