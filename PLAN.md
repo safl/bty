@@ -602,6 +602,26 @@ implementation is in flight.
   use-case; otherwise it's solving a problem that does not exist
   yet.
 
+- **Repeatable ``--image-root`` (multi-root catalogs).** Today
+  ``bty-tui`` and the ``bty`` CLI accept exactly one image root.
+  Operators with images split across locations -- a stock USB
+  stick's ``BTY_IMAGES`` plus a Ventoy partition mounted at
+  ``/mnt``, a workstation install plus a downloads dir, etc. --
+  have to merge directories by hand. The natural fix is making
+  the flag repeatable (``--image-root /a --image-root /b``,
+  argparse ``action="append"``) and having ``bty.images``
+  accept an iterable; the catalog pane shows the merged rows.
+  Open question on name collisions: easiest rule is first-root-
+  wins with a one-line ``foo.qcow2: shadowed in /mnt/ventoy``
+  status note so accidents surface; alternatively show the
+  parent dir as a column. Server-side ``BTY_IMAGE_ROOT`` stays
+  singular for now -- multi-root would need URL-disambiguation
+  rules at the ``/images/{name}`` endpoint, a bigger
+  conversation. Estimated scope: ~2 hours including tests +
+  welcome-panel update. Implement when an operator actually
+  hits the multi-source pain; today's workaround is a manual
+  ``cp`` or symlink.
+
 - **`.btycatalog` marker for opt-in catalog auto-discovery.**
   Today bty finds image catalogs by either an explicit
   ``--image-root`` / ``BTY_IMAGE_ROOT`` / well-known appliance
