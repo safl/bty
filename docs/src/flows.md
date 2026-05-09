@@ -99,8 +99,9 @@ Practical notes:
   forward / `Esc`-back UX keeps the per-step input minimal.
 - The bty live env's tty1 framebuffer renders cleanly through
   every IP-KVM I have tested (PSF console fonts, no nerd-font /
-  emoji dependencies). The figlet banner and the bty-tui rounded
-  panels both render identically over IP-KVM and locally.
+  emoji dependencies). The plain-ASCII /etc/issue banner and the
+  bty-tui rounded panels both render identically over IP-KVM and
+  locally.
 
 This is what "bare-metal provisioning over the internet" looks
 like in practice for a small fleet without PXE infrastructure: a

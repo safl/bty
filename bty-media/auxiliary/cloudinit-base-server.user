@@ -194,7 +194,11 @@ runcmd:
       printf '\nGRUB_CMDLINE_LINUX_DEFAULT="plymouth.enable=0"\n' >> /etc/default/grub
     fi
     update-grub
-    update-initramfs -u
+    # No ``update-initramfs -u`` here: changing the grub cmdline
+    # doesn't touch the initramfs, and the bake's package install
+    # already triggered any initramfs rebuild a postinst would
+    # require. Skipping shaves ~10s of bake time + a few hundred
+    # lines of console-mirrored output.
 
   # Disable cloud-init for subsequent boots and clear its artefacts.
   # The cooked image already has its identity (bty user + default

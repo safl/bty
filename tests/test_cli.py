@@ -118,6 +118,19 @@ def test_list_images_includes_bri_descriptors(
     assert remote["format"] == "img.gz"
 
 
+def test_inspect_image_directory_returns_two(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``bty inspect image <directory>`` used to silently return a
+    bogus record (``format: ''``, ``size_bytes`` = the dir-entry
+    inode size). Reject directories with a friendly message + exit
+    2 so the operator catches the typo immediately."""
+    rc = cli.main(["inspect", "image", str(tmp_path)])
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "not a file" in err
+
+
 def test_inspect_image_malformed_bri_returns_two(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

@@ -694,10 +694,15 @@ def inspect_image(path: Path) -> dict[str, Any]:
       size, not the upstream image's).
 
     Raises :class:`FileNotFoundError` if the path does not exist,
-    or :class:`BriError` if it's a malformed ``.bri`` descriptor.
+    :class:`IsADirectoryError` if the path is a directory (operator
+    almost certainly meant a file inside; surfacing a "format='',
+    size_bytes=40" record for a directory was misleading), or
+    :class:`BriError` if it's a malformed ``.bri`` descriptor.
     """
     if not path.exists():
         raise FileNotFoundError(path)
+    if path.is_dir():
+        raise IsADirectoryError(path)
 
     if path.suffix.lower() == BRI_EXTENSION:
         descriptor = read_bri(path)

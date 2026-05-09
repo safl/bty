@@ -309,6 +309,9 @@ def cmd_inspect_image(args: argparse.Namespace) -> int:
     except FileNotFoundError:
         print(f"bty: no such image: {args.path}", file=sys.stderr)
         return 2
+    except IsADirectoryError:
+        print(f"bty: not a file: {args.path}", file=sys.stderr)
+        return 2
     except images.BriError as exc:
         print(f"bty: malformed .bri descriptor: {exc}", file=sys.stderr)
         return 2

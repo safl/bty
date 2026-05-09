@@ -71,6 +71,85 @@ def test_bty_web_main_version_flag(capsys: pytest.CaptureFixture[str]) -> None:
     assert bty.__version__ in out
 
 
+def test_server_cloudinit_base_is_valid_yaml() -> None:
+    """``bty-media/auxiliary/cloudinit-base-server.user`` is read by
+    cloud-init at bake time -- a YAML syntax error means the bake VM
+    fails to start cloud-init and the operator gets to find out via
+    a 30-minute CI run instead of in seconds locally.
+
+    Pin parseability so any future runcmd / packages edit that
+    breaks indentation or quoting fails fast. PyYAML is available
+    via the dev group (transitive via uv); skip if it isn't.
+    """
+    try:
+        import yaml
+    except ImportError:
+        pytest.skip("PyYAML not installed in this environment")
+
+    from pathlib import Path
+
+    repo_root = Path(__file__).resolve().parents[1]
+    base = repo_root / "bty-media" / "auxiliary" / "cloudinit-base-server.user"
+    data = yaml.safe_load(base.read_text())
+    assert isinstance(data, dict), (
+        f"cloud-config must parse to a top-level mapping; got {type(data).__name__}"
+    )
+    # The two blocks the bake actually relies on -- if a future
+    # edit accidentally drops them, the bake silently produces a
+    # broken appliance. Pin minimal structure.
+    assert "packages" in data and isinstance(data["packages"], list)
+    assert "runcmd" in data and isinstance(data["runcmd"], list)
+
+
+def test_etc_issue_uses_only_documented_agetty_escapes() -> None:
+    """``/etc/issue`` is rendered by agetty at login-prompt time;
+    every ``\\<char>`` sequence in the file is interpreted by
+    agetty's escape parser. v0.7.4 caught a regression where
+    figlet ASCII art (``\\__|``, ``\\__,``) confused the parser
+    and emitted VT100 control bytes onto the serial console
+    right before the login banner.
+
+    Pin both the rootfs-shipped /etc/issue AND the heredoc
+    bty-web-init writes on first boot so a future "let's spice
+    up the banner" attempt with backslash-laden ASCII gets
+    caught here instead of by an operator watching CI logs.
+
+    Allowed escapes: the agetty(8)-documented set
+    (``\\b \\d \\e \\l \\m \\n \\o \\r \\s \\t \\u \\U \\v
+    \\4 \\6 \\S``) plus ``\\\\`` (literal backslash). Anything
+    else outside of comments fails the test.
+    """
+    import re
+    from pathlib import Path
+
+    repo_root = Path(__file__).resolve().parents[1]
+    # ``\S{...}`` is multi-char; treat as one allowed token.
+    allowed = set("bdelmnorstuUv46S\\")
+
+    def _check_issue_body(body: str, source: str) -> None:
+        # ``\<char>`` after any non-backslash; strict — every
+        # escape in the rendered issue body must be allowed.
+        for match in re.finditer(r"(?<!\\)\\(.)", body):
+            ch = match.group(1)
+            if ch not in allowed:
+                raise AssertionError(
+                    f"{source}: disallowed agetty escape ``\\{ch}`` "
+                    f"-- use a plain ASCII alternative (this regression "
+                    f"emits VT100 escapes onto ``console=ttyS0``)"
+                )
+
+    issue_path = repo_root / "bty-media" / "rootfs" / "server" / "etc" / "issue"
+    _check_issue_body(issue_path.read_text(), str(issue_path))
+
+    # bty-web-init writes a runtime /etc/issue via heredoc; extract
+    # the heredoc body and check it the same way.
+    web_init = repo_root / "bty-media/rootfs/server/usr/local/sbin/bty-web-init"
+    body = web_init.read_text()
+    m = re.search(r"cat > /etc/issue <<'EOF'\n(.*?)\nEOF", body, flags=re.DOTALL)
+    assert m is not None, "bty-web-init no longer writes /etc/issue via heredoc -- update this test"
+    _check_issue_body(m.group(1), f"{web_init}:/etc/issue heredoc")
+
+
 def test_server_cloudinit_does_not_install_plymouth() -> None:
     """The bty-server cloudinit base must not (re-)introduce
     plymouth: its quit/teardown leaks VT100 escape sequences onto
