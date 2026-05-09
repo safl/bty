@@ -109,11 +109,11 @@ def main(argv: list[str] | None = None) -> int:
         required=True,
         help="image to flash. Accepts: a local file path "
         "(``/path/to/image.qcow2``), an HTTP/HTTPS URL "
-        "(``http://server/images/foo.img.zst``), or a SHA-256 "
-        "prefix (``sha256:abc123...``) resolved against the "
-        "unified catalog (dir-scan + manifest). URLs stream "
-        "directly to disk for ``.img`` / ``.img.zst`` and "
-        "download to a temp file first for ``.qcow2``.",
+        "(``http://server/images/foo.img.zst``), or a catalog "
+        "ref (``ref:abc123...``) resolved against the unified "
+        "catalog (dir-scan + manifest). URLs stream directly to "
+        "disk for ``.img`` / ``.img.zst`` and download to a temp "
+        "file first for ``.qcow2``.",
     )
     p_flash.add_argument("--target", type=Path, required=True, help="target block device")
     p_flash.add_argument(
@@ -249,12 +249,15 @@ def cmd_list_disks(args: argparse.Namespace) -> int:
 def cmd_list_images(args: argparse.Namespace) -> int:
     """List images under ``--image-root``, merged with the catalog
     manifest if one is configured (``BTY_CATALOG_FILE`` or
-    ``${BTY_STATE_DIR}/catalog.toml``). Output is SHA-keyed so an
-    image present in both the directory and the manifest renders
-    as one row with ``names`` and ``sources`` arrays. Unhashed
-    dir-scan files (no ``.sha256`` sidecar) appear with a
-    ``sha256: null`` entry so the operator can spot them and run
-    ``bty catalog hash <name>`` (or use the bty-web Hash button).
+    ``${BTY_STATE_DIR}/catalog.toml``). Output is content-keyed:
+    an image present in both the directory and the manifest
+    renders as one row with ``names`` and ``sources`` arrays.
+    Unhashed dir-scan files (no ``.sha256`` sidecar) appear with
+    ``(unhashed)`` in the ref column so the operator can spot
+    them and trigger hashing (browser UI's Hash button or
+    operator-side ``sha256sum``). The catalog identifies images
+    by SHA-256 today; ``ref:<prefix>`` is the operator-facing
+    handle for ``bty flash --image``.
     """
     manifest_path = catalog.default_manifest_path()
     cache_dir = catalog.default_cache_dir()
@@ -283,11 +286,11 @@ def cmd_list_images(args: argparse.Namespace) -> int:
         # the full hash to keep the table readable.
         flat = []
         for u in unified:
-            sha_short = (u.sha256[:12] + "...") if u.sha256 else "(unhashed)"
+            ref_short = (u.sha256[:12] + "...") if u.sha256 else "(unhashed)"
             sources = ", ".join(s.kind for s in u.sources)
             flat.append(
                 {
-                    "sha256": sha_short,
+                    "ref": ref_short,
                     "names": ", ".join(u.names),
                     "format": u.format or "?",
                     "size_bytes": u.size_bytes if u.size_bytes is not None else "?",
@@ -297,7 +300,7 @@ def cmd_list_images(args: argparse.Namespace) -> int:
             )
         formatting.print_table(
             flat,
-            columns=["sha256", "names", "format", "size_bytes", "cached", "sources"],
+            columns=["ref", "names", "format", "size_bytes", "cached", "sources"],
         )
     return 0
 
@@ -508,19 +511,22 @@ def _resolve_flash_image(image: str | Path) -> str:
       * Absolute / relative file path (``str`` or ``Path``) --
         returned unchanged as a string.
       * ``http://`` / ``https://`` URL -- returned unchanged.
-      * ``sha256:<prefix>`` -- looked up against the unified
-        catalog (dir-scan + manifest from the configured manifest
-        path); the entry's first source (local file, else manifest
-        URL) is returned. Raises ``FileNotFoundError`` if no entry
+      * ``ref:<prefix>`` -- looked up against the unified catalog
+        (dir-scan + manifest from the configured manifest path);
+        the entry's first source (local file, else manifest URL)
+        is returned. Raises ``FileNotFoundError`` if no entry
         matches the prefix and ``ValueError`` if the prefix is
-        ambiguous (matches multiple entries).
+        ambiguous (matches multiple entries). The catalog
+        identifies images by SHA-256 today; ``ref:`` keeps that
+        as an implementation detail so the CLI surface does not
+        change if a future bty switches algorithms.
     """
     image_str = str(image)
-    if not image_str.startswith("sha256:"):
+    if not image_str.startswith("ref:"):
         return image_str
-    prefix = image_str.removeprefix("sha256:").strip().lower()
+    prefix = image_str.removeprefix("ref:").strip().lower()
     if not prefix:
-        raise ValueError("--image sha256: requires a hex prefix (got empty)")
+        raise ValueError("--image ref: requires a ref prefix (got empty)")
     manifest_path = catalog.default_manifest_path()
     cache_dir = catalog.default_cache_dir()
     manifest_entries: list[catalog.CatalogEntry] = []
@@ -536,14 +542,12 @@ def _resolve_flash_image(image: str | Path) -> str:
     matches = [u for u in unified if u.sha256 and u.sha256.startswith(prefix)]
     if not matches:
         raise FileNotFoundError(
-            f"no image with sha256 prefix {prefix!r} (manifest={manifest_path}, "
+            f"no image with ref prefix {prefix!r} (manifest={manifest_path}, "
             f"image_root={image_root})"
         )
     if len(matches) > 1:
         names = ", ".join(",".join(u.names) for u in matches)
-        raise ValueError(
-            f"ambiguous sha256 prefix {prefix!r} matches {len(matches)} entries: {names}"
-        )
+        raise ValueError(f"ambiguous ref prefix {prefix!r} matches {len(matches)} entries: {names}")
     entry = matches[0]
     # Prefer a local source (zero-cost); fall back to the first
     # manifest URL. The flash code can stream both.
@@ -553,9 +557,7 @@ def _resolve_flash_image(image: str | Path) -> str:
     for src in entry.sources:
         if src.kind == "manifest":
             return src.location
-    raise FileNotFoundError(
-        f"sha256:{prefix} matched {entry.names} but it has no resolvable source"
-    )
+    raise FileNotFoundError(f"ref:{prefix} matched {entry.names} but it has no resolvable source")
 
 
 def cmd_catalog_validate(args: argparse.Namespace) -> int:

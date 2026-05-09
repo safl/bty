@@ -54,7 +54,7 @@
                        primary label and the short SHA so operators
                        can disambiguate same-named entries. #}
                     <option value="{{ img.sha256 }}" {% if img.sha256 == m.image_sha256 %}selected{% endif %}>
-                        {{ img.names[0] }} ({{ img.format or "?" }}, sha256:{{ img.sha256[:12] }})
+                        {{ img.names[0] }} ({{ img.format or "?" }}, ref:{{ img.sha256[:12] }})
                     </option>
                     {% endfor %}
                 </select>

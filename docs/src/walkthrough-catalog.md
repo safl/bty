@@ -112,23 +112,30 @@ bty catalog validate [PATH]
 bty catalog list [--manifest PATH]
 bty catalog fetch <name>          # blocks while downloading
 
-bty list images [--image-root PATH]   # SHA-keyed unified view
+bty list images [--image-root PATH]   # content-keyed unified view
 bty inspect image <path>
-bty flash --image sha256:<prefix> --target /dev/sdX --yes
+bty flash --image ref:<prefix> --target /dev/sdX --yes
 ```
 
-`bty list images` shows a SHA-prefix column and a `sources`
-column. Unhashed dir-scan files appear with `(unhashed)` in the
-SHA column so operators know they need to be hashed before
-binding to a machine.
+`bty list images` shows a `ref` column (12-char prefix of the
+content hash) and a `sources` column. Unhashed dir-scan files
+appear as `(unhashed)` in the ref column so operators know they
+need to be hashed before binding to a machine.
 
 `bty flash --image` accepts three forms:
 
 - a local path: `--image /var/lib/bty/images/foo.img.zst`
 - an HTTP URL: `--image http://server:8080/images/foo.img.zst`
-- a SHA prefix: `--image sha256:0123456789ab` -- resolved via
-  the unified catalog. The CLI prefers a local source if one
-  exists; otherwise the first manifest URL.
+- a catalog ref: `--image ref:0123456789ab` -- resolved via the
+  unified catalog. The CLI prefers a local source if one exists;
+  otherwise the first manifest URL.
+
+The `ref:` prefix keeps the hash algorithm an implementation
+detail of bty's catalog -- today it is SHA-256 (the same string
+your `sha256sum` produces, written into the `<file>.sha256`
+sidecar) but the operator interface does not bake that in. A
+future bty could swap to BLAKE3 (or whatever) without changing
+the CLI surface.
 
 ## HTTP API
 
