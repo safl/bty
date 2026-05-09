@@ -52,6 +52,7 @@ import json
 import logging as log
 import os
 import shutil
+import tempfile
 from argparse import ArgumentParser
 from pathlib import Path
 
@@ -669,17 +670,17 @@ def _extend_with_exfat(cijoe, iso_path: Path) -> int:
     # Drop a default ``.bri`` into the exFAT partition pointing at
     # the latest bty-server release on GitHub. This is the only
     # bootstrap entry visible from a host OS browsing the BTY_IMAGES
-    # partition (the rootfs ``/usr/share/bty/bri/*.bri`` siblings are
-    # buried inside the squashfs and only surface inside the live
-    # env). Operators can edit / delete / replace the .bri freely
-    # from any host with exFAT support.
+    # partition. Operators can edit / delete / replace the .bri
+    # freely from any host with exFAT support.
     #
-    # Best-effort: if exfat mount fails on this build runner (some
-    # minimal CI images lack the kernel module + fuse fallback), we
-    # log a warning and ship the partition empty -- functionally the
-    # same as v0.7.x baked sticks, with the rootfs-shipped descriptors
-    # still merging into the catalog at runtime.
-    _populate_bty_images_partition(cijoe, part_dev)
+    # Hard requirement now (v0.7.16): if the populate fails, the
+    # bake fails. Earlier "best-effort, log warning" handling was
+    # masking real mount / tee / sync issues -- repeated user
+    # reports of "no .bri in BTY_IMAGES" forced the change.
+    err = _populate_bty_images_partition(cijoe, part_dev)
+    if err:
+        cijoe.run_local(f"sudo losetup -d {loop}")
+        return err
 
     err, _ = cijoe.run_local(f"sudo losetup -d {loop}")
     if err:
@@ -690,54 +691,83 @@ def _extend_with_exfat(cijoe, iso_path: Path) -> int:
     return 0
 
 
-def _populate_bty_images_partition(cijoe, part_dev: str) -> None:
+def _populate_bty_images_partition(cijoe, part_dev: str) -> int:
     """Mount the freshly-mkfs'd BTY_IMAGES exFAT partition and drop
-    a default ``bty-server-x86_64.bri`` into it. Best-effort: a mount
-    failure logs a warning and returns; the partition stays empty
-    (same as pre-v0.7.9 sticks)."""
-    # ``mktemp -d`` over a hardcoded path so parallel bake runs (CI
-    # matrix, two operators on one box, etc.) don't collide on the
-    # mountpoint. Collision would manifest as the second run mounting
-    # over the first's still-mounted partition; rare but ugly.
-    err, state = cijoe.run_local("mktemp -d")
+    a default ``bty-server-x86_64.bri`` into it. Returns 0 on
+    success, errno-style int on failure. Each step's stderr lands
+    in the bake log so operators can diagnose CI breakages.
+
+    Hardened against the silent-empty-partition failure mode v0.7.9
+    .. v0.7.15 shipped: stage the bri body to a temp file before
+    mount (avoids heredoc-via-cijoe-shell quoting questions),
+    explicit ``sync`` + ``ls`` round-trip after write, ``ls`` again
+    after mount before declaring success.
+    """
+    # Stage the .bri body locally first so we don't depend on
+    # heredoc-via-cijoe-shell semantics (which were the prime
+    # suspect for v0.7.9..v0.7.15's silent empty-partition bug).
+    bri_body = (
+        "# bty Remote Image (.bri) descriptor.\n"
+        "#\n"
+        "# Drop your own .bri files alongside this one to advertise\n"
+        "# remote flashable images via bty's catalog. Format is\n"
+        "# minimal TOML: ``url`` is the only required field.\n"
+        "# See ``bty inspect image <path>.bri`` for full syntax.\n"
+        "\n"
+        'name = "bty-server (x86_64, latest)"\n'
+        'url = "https://github.com/safl/bty/releases/latest/download/'
+        'bty-server-x86_64.img.gz"\n'
+        'format = "img.gz"\n'
+        'description = "Latest published bty-server appliance for x86_64"\n'
+    )
+    src_path = Path(tempfile.mkstemp(prefix="bty-server-x86_64.bri.", suffix=".tmp")[1])
+    src_path.write_text(bri_body)
+
+    # ``mktemp -d`` for the mountpoint over a hardcoded path so
+    # parallel bake runs (CI matrix, two operators on one box,
+    # etc.) don't collide.
+    err, state = cijoe.run_local("mktemp -d -t bty-images-bake.XXXXXX")
     if err:
-        log.warning("mktemp -d failed; BTY_IMAGES partition will ship empty")
-        return
+        log.error("mktemp -d failed; cannot populate BTY_IMAGES partition")
+        src_path.unlink(missing_ok=True)
+        return errno.EIO
     mount_dir = state.output().strip().splitlines()[-1].strip()
+
+    # Try kernel exfat first; fall back to fuse-exfat. GHA's
+    # ubuntu-latest carries the kernel module; some minimal images
+    # need the fuse helper instead.
     err, _ = cijoe.run_local(f"sudo mount -t exfat {part_dev} {mount_dir}")
     if err:
-        log.warning(
+        err, _ = cijoe.run_local(f"sudo mount.exfat-fuse {part_dev} {mount_dir}")
+    if err:
+        log.error(
             f"could not mount {part_dev} as exfat ({mount_dir}); "
-            f"BTY_IMAGES partition will ship empty"
+            f"BTY_IMAGES populate FAILED -- check exfat / exfat-fuse on the bake runner"
         )
         cijoe.run_local(f"rmdir {mount_dir} 2>/dev/null || true")
-        return
+        src_path.unlink(missing_ok=True)
+        return errno.ENODEV
     try:
-        # Match the rootfs-shipped pointer at the bty-server release.
-        # Same URL pattern (releases/latest/download) so a stick built
-        # today still hands the operator a current image months later.
-        bri_body = (
-            "# bty Remote Image (.bri) descriptor.\n"
-            "#\n"
-            "# Drop your own .bri files alongside this one to advertise\n"
-            "# remote flashable images via bty's catalog. Format is\n"
-            "# minimal TOML: ``url`` is the only required field.\n"
-            "# See ``bty inspect image <path>.bri`` for full syntax.\n"
-            "\n"
-            'name = "bty-server (x86_64, latest)"\n'
-            'url = "https://github.com/safl/bty/releases/latest/download/'
-            'bty-server-x86_64.img.gz"\n'
-            'format = "img.gz"\n'
-            'description = "Latest published bty-server appliance for x86_64"\n'
-        )
         bri_path = f"{mount_dir}/bty-server-x86_64.bri"
-        # ``tee`` is the simplest sudo-write idiom; here-string keeps
-        # quoting straight without a temp file.
-        err, _ = cijoe.run_local(f"sudo tee {bri_path} > /dev/null <<'EOF'\n{bri_body}EOF\n")
+        err, _ = cijoe.run_local(f"sudo cp {src_path} {bri_path}")
         if err:
-            log.warning(f"writing {bri_path} failed; partition kept empty")
-            return
+            log.error(f"cp {src_path} -> {bri_path} failed")
+            return errno.EIO
+        # Force the bytes to disk before umount so a subsequent
+        # ``losetup -d`` (or kernel buffer dirty-on-detach quirk)
+        # can't drop the write.
+        err, _ = cijoe.run_local(f"sudo sync {bri_path}")
+        if err:
+            log.error(f"sync {bri_path} failed")
+            return errno.EIO
+        # Visible verification in the bake log so silent
+        # zero-byte writes can't pass the next CI bake either.
+        cijoe.run_local(f"ls -la {mount_dir}")
+        cijoe.run_local(f"sudo cat {bri_path}")
         log.info(f"Wrote bootstrap .bri to BTY_IMAGES partition: {bri_path}")
+        return 0
     finally:
+        # Always umount + drop tempdir + drop staged source.
         cijoe.run_local(f"sudo umount {mount_dir}")
         cijoe.run_local(f"rmdir {mount_dir} 2>/dev/null || true")
+        src_path.unlink(missing_ok=True)

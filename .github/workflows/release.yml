@@ -170,10 +170,13 @@ jobs:
           # hybrid ISO; harmless on the netboot-x86 build that doesn't
           # run that step. (sfdisk + xz, also used by the post-build
           # step, are in util-linux + xz-utils, always present on
-          # Ubuntu runners.)
+          # Ubuntu runners.) ``exfat-fuse`` (the FUSE mount helper)
+          # is the fallback path when the kernel exfat module isn't
+          # loadable on the runner; the bake's BTY_IMAGES populate
+          # step tries kernel-mount first, then ``mount.exfat-fuse``.
           sudo apt-get install -y --no-install-recommends \
             debootstrap squashfs-tools xorriso debian-archive-keyring \
-            exfatprogs
+            exfatprogs exfat-fuse
           POOL=http://ftp.debian.org/debian/pool/main/l/live-build
           LB_DEB=$(curl -s "$POOL/" \
               | grep -oE 'live-build_[0-9][^"<]*\.deb' \
