@@ -77,7 +77,13 @@ class MachineUpsert(BaseModel):
     # as silent "no /pxe/<mac>" mismatches later.
     image_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     provisioning_mode: str = Field(default="none", pattern=PROVISIONING_PATTERN)
-    hostname: str | None = None
+    # ``\S{name}`` agetty escape lets operators set the cooked
+    # hostname per machine; empty string is meaningless and would
+    # land in state.db where ``hostname || mac`` rendering shows
+    # blank rows. Constrain to a permissive RFC-1123-ish shape:
+    # letters, digits, hyphen, dot. ``min_length=1`` rejects the
+    # explicit empty-string case Pydantic would otherwise accept.
+    hostname: str | None = Field(default=None, min_length=1, pattern=r"^[a-zA-Z0-9.-]+$")
     cijoe_workflow_ref: str | None = None
     boot_policy: str = Field(default="local", pattern=BOOT_POLICY_PATTERN)
 

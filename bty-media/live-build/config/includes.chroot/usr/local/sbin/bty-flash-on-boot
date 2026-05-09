@@ -175,7 +175,12 @@ def main() -> int:
 
     print("bty-flash-on-boot: flash complete; rebooting in 5s", flush=True)
     subprocess.run(["sleep", "5"], check=False)
-    subprocess.run(["systemctl", "reboot"], check=False)
+    # ``check=True`` so a failing ``systemctl reboot`` (no-systemd,
+    # permission-denied, transition-blocked, ...) crashes the script
+    # loudly instead of leaving the operator with a "flash complete;
+    # rebooting in 5s" marker on the serial console followed by
+    # nothing happening forever.
+    subprocess.run(["systemctl", "reboot"], check=True)
     return 0
 
 

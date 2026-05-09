@@ -619,6 +619,21 @@ def test_machine_upsert_rejects_malformed_sha256(app_client: TestClient) -> None
         assert r.status_code == 422, f"expected 422 for {bad!r}, got {r.status_code}"
 
 
+def test_machine_upsert_rejects_empty_hostname(app_client: TestClient) -> None:
+    """``hostname = ""`` would land in state.db blank and surface
+    in the dashboard / banner as a meaningless empty cell. Reject
+    explicit empty strings (a missing field still gets ``None``)."""
+    r = app_client.put(
+        "/machines/aa:bb:cc:dd:ee:ff",
+        json={
+            "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "hostname": "",
+        },
+        cookies=AUTH,
+    )
+    assert r.status_code == 422
+
+
 def test_machine_upsert_rejects_unknown_fields(app_client: TestClient) -> None:
     """``MachineUpsert(extra="forbid")`` -- a stale client (or
     operator typo) sending the pre-M22 ``image`` field instead of

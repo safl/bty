@@ -100,8 +100,17 @@ def main(args, cijoe):
 
     guest_metadata = guest.guest_path / "meta-data"
     guest_userdata = guest.guest_path / "user-data"
-    cijoe.run_local(f"cp {metadata_path} {guest_metadata}")
-    cijoe.run_local(f"cp {userdata_path} {guest_userdata}")
+    # Check the cp outcomes -- a missing source (e.g. gen_userdata
+    # didn't run) would otherwise surface as a confusing mkisofs
+    # "input file missing" several lines below.
+    err, _ = cijoe.run_local(f"cp {metadata_path} {guest_metadata}")
+    if err:
+        log.error(f"Failed copying metadata {metadata_path} -> {guest_metadata}")
+        return err
+    err, _ = cijoe.run_local(f"cp {userdata_path} {guest_userdata}")
+    if err:
+        log.error(f"Failed copying userdata {userdata_path} -> {guest_userdata}")
+        return err
 
     seed_img = guest.guest_path / "seed.img"
     mkisofs_cmd = " ".join(
