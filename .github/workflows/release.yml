@@ -466,6 +466,11 @@ jobs:
           tags: |
             ghcr.io/safl/bty-web:${{ steps.version.outputs.version }}
             ghcr.io/safl/bty-web:latest
+          # Stamp the OCI image-version label so ``docker inspect``
+          # reports the bty-lab version the image was built from
+          # (matches the wheel installed inside).
+          build-args: |
+            BTY_VERSION=${{ steps.version.outputs.version }}
           # Cache layers across runs so subsequent tags only rebuild
           # what changed (typically just the wheel install layer).
           cache-from: type=gha

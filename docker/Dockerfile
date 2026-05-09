@@ -21,6 +21,20 @@
 
 FROM python:3.13-slim-bookworm AS runtime
 
+# OCI image metadata. The version label is filled by the GHA
+# release workflow's build-push-action via ``--label`` or by the
+# Dockerfile-internal ARG below if a future build invokes ``docker
+# build --build-arg BTY_VERSION=...`` directly. Other labels are
+# static identity for the bty project.
+ARG BTY_VERSION=dev
+LABEL org.opencontainers.image.title="bty-web" \
+      org.opencontainers.image.description="bty-web - HTTP server with browser UI for bty image catalog + machine registry" \
+      org.opencontainers.image.source="https://github.com/safl/bty" \
+      org.opencontainers.image.url="https://github.com/safl/bty" \
+      org.opencontainers.image.documentation="https://safl.dk/bty" \
+      org.opencontainers.image.licenses="GPL-3.0-only" \
+      org.opencontainers.image.version="${BTY_VERSION}"
+
 # System deps:
 #   libpam0g + libpam-modules: pamela uses pam_unix.so to verify
 #     /etc/shadow on /ui/login.
@@ -92,13 +106,14 @@ ENV BTY_STATE_DIR=/var/lib/bty \
 
 EXPOSE 8080
 
-# ``GET /`` redirects (303) to /ui/login on a healthy server, which
-# curl -f treats as success. A wedged uvicorn or a process that
-# crashed with the port held would fail to respond. 30s start-period
-# covers cold-start (Python import, sqlite migrations); after that,
-# probe every 30s, 5s timeout, three failures = unhealthy.
+# Purpose-built health endpoint. Lighter than probing ``/`` (no
+# template rendering, no redirect) and explicit about its intent.
+# 30s start-period covers cold-start (Python import + sqlite
+# migrations); after that, probe every 30s, 5s timeout, three
+# failures = unhealthy. Catches a wedged uvicorn or a process
+# that crashed with the port still held.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
-    CMD curl -fsS http://127.0.0.1:8080/ -o /dev/null || exit 1
+    CMD curl -fsS http://127.0.0.1:8080/healthz -o /dev/null || exit 1
 
 COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod 0755 /entrypoint.sh
