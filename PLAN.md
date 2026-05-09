@@ -575,6 +575,79 @@ Landed after the original 1.0 list:
     the catalog without flashing the catalog onto every stick.
     The PXE flow stays in the bare-metal `bty-server` appliance.
 
+22. **[planned, v0.6.x]** `bty-web` catalog manifest with `src`
+    URLs + local SHA-verified cache. Today `/images` enumerates
+    whatever lives under `BTY_IMAGE_ROOT`; an operator who wants
+    to share images across a fleet has to copy bytes onto every
+    `bty-web` instance. The shape of M22:
+
+    A YAML manifest (default `${BTY_STATE_DIR}/catalog.yaml`,
+    overridable via `BTY_CATALOG_FILE`) lists named images with
+    upstream `src` URLs and pinned `sha256` digests:
+
+    ```yaml
+    version: 1
+    images:
+      - name: ubuntu-server-22.04-bty.img.zst
+        src: https://github.com/safl/bty-images/releases/download/v0.1/ubuntu-22.04.img.zst
+        sha256: abc123...
+        format: img.zst
+      - name: freebsd-14-test.img.zst
+        src: https://github.com/someone/bty-freebsd/releases/download/v3/freebsd-14.img.zst
+        sha256: def456...
+        format: img.zst
+    ```
+
+    `bty-web`'s `/images` endpoint merges directory-scan
+    entries with manifest entries (the directory scan stays the
+    primary source for files dropped on a volume mount; the
+    manifest adds named-with-src entries on top). On first
+    request for a manifest entry, `bty-web` downloads the blob,
+    verifies SHA-256 against the manifest, atomically writes it
+    into `${BTY_STATE_DIR}/cache/<sha>` (cache keyed by SHA so
+    duplicate hashes across manifest entries dedupe naturally),
+    and serves from there. Subsequent requests hit the cache
+    directly.
+
+    This unlocks the **super-catalog pattern**: a `catalog.yaml`
+    published at a stable URL (a github repo, an internal
+    artifact server, anywhere) referencing artifacts spread
+    across many other locations. A fleet of `bty-web` instances
+    pulls the same manifest and lazily caches the blobs each
+    actually flashes. Adding a new image is a manifest PR,
+    not a "copy bytes to every server" exercise.
+
+    **v1 scope** (M22 first release):
+
+    - Schema + parser + validator (`bty catalog validate`).
+    - Cache module: download, SHA-verify, atomic write,
+      content-addressed storage at `cache/<sha>`. Block-and-
+      serve on first fetch (no streaming-while-verifying).
+    - `bty-web` integration: merged `/images` listing,
+      lazy fetch on `/images/{name}` GET.
+    - CLI: `bty catalog list`, `bty catalog fetch <name>`,
+      `bty catalog validate <file>`.
+    - Public URLs only (HTTP / HTTPS, no auth).
+    - Cache is unbounded; manual `rm` for eviction, documented
+      under a hardening / maintenance section.
+    - Walkthrough doc.
+
+    **Out of scope for v1, captured in Future work**:
+
+    - Streaming-with-SHA-tee for big images (faster first
+      fetch; v1's block-and-serve is fine for most paths).
+    - Authenticated `src` (bearer tokens for private GitHub
+      repos, S3 credentials, etc.).
+    - Signed catalogs (sigstore / cosign / PGP). v1 ships
+      unsigned; trust model is "the operator authored / curated
+      the manifest themselves, or trusts whoever did". Worth
+      tightening before bty becomes attractive to attackers.
+    - OCI artifact / OCI distribution spec as an alternate
+      transport. Gives signing + content-addressing for free
+      but is a significantly bigger lift.
+
+    Estimated scope: ~1.5-2 days for the v1 slice.
+
 ## Future work (not yet scheduled)
 
 These are forward-looking ideas captured for the roadmap; no
