@@ -107,3 +107,9 @@ class HealthResponse(BaseModel):
 
 class VersionResponse(BaseModel):
     version: str
+
+
+class CatalogEnqueueRequest(BaseModel):
+    """POST /catalog/downloads body: enqueue a manifest entry by name."""
+
+    name: str = Field(..., description="image name as declared in the manifest")

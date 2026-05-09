@@ -11,10 +11,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse
@@ -23,7 +25,9 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 from starlette.middleware.sessions import SessionMiddleware
 
 import bty
+from bty import catalog as _catalog
 from bty import images
+from bty.web import _catalog as _web_catalog
 from bty.web import _db, _models, _ui
 from bty.web._auth import SESSION_COOKIE, require_auth
 from bty.web._events import MachineEvent, MachineEventBus, sse_format
@@ -70,13 +74,40 @@ def create_app(
     resolved_boot_root: Path = boot_root or (state_path.parent / "boot")
     event_bus = MachineEventBus()
 
+    # Catalog manifest + cache + download manager. Optional: if no
+    # manifest is configured (operator hasn't authored one), the
+    # ``DownloadManager`` simply isn't started and the
+    # ``/catalog/...`` endpoints return 404. ``BTY_CATALOG_FILE``
+    # and ``BTY_CATALOG_CACHE_DIR`` override the defaults derived
+    # from ``BTY_STATE_DIR``.
+    manifest_path = _catalog.default_manifest_path()
+    catalog_cache_dir = _catalog.default_cache_dir()
+    parsed_catalog: _catalog.Catalog | None = None
+    if manifest_path is not None:
+        try:
+            parsed_catalog = _catalog.load(manifest_path)
+        except _catalog.CatalogError as exc:
+            # Don't crash bty-web startup over a malformed manifest;
+            # log it and proceed without the catalog feature. The
+            # operator sees the empty catalog page + can fix the
+            # manifest then restart.
+            print(f"bty-web: catalog manifest at {manifest_path}: {exc}", file=sys.stderr)
+            parsed_catalog = None
+    download_manager = _web_catalog.DownloadManager()
+
     @asynccontextmanager
     async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
         # The SSE event bus accepts publishes from worker threads
         # (WorkflowRunner) - capture the loop now so cross-thread
         # publishes can hop in via call_soon_threadsafe.
         event_bus.attach(asyncio.get_running_loop())
-        yield
+        if parsed_catalog is not None:
+            download_manager.start(parsed_catalog, catalog_cache_dir)
+        try:
+            yield
+        finally:
+            if parsed_catalog is not None:
+                await download_manager.stop()
 
     jinja = Environment(
         loader=FileSystemLoader(str(TEMPLATES_DIR)),
@@ -491,6 +522,60 @@ def create_app(
         boot_root=resolved_boot_root,
         publish_machines_changed=publish_machines_changed,
     )
+
+    # ---------- catalog download manager ----------------------------------
+    # Authenticated endpoints; only operators logged into the bty-web
+    # UI can enqueue / cancel fetches. Skipped silently when no
+    # manifest is configured.
+
+    @app.get("/catalog/downloads")
+    async def list_downloads(_: str = Depends(require_auth)) -> dict[str, Any]:
+        if parsed_catalog is None:
+            return {"manifest": None, "downloads": []}
+        states = await download_manager.list()
+        return {
+            "manifest": str(manifest_path),
+            "cache_dir": str(catalog_cache_dir),
+            "max_parallel": download_manager.max_parallel,
+            "downloads": [s.to_dict() for s in states],
+        }
+
+    @app.post("/catalog/downloads", status_code=status.HTTP_202_ACCEPTED)
+    async def enqueue_download(
+        body: _models.CatalogEnqueueRequest,
+        _: str = Depends(require_auth),
+    ) -> dict[str, Any]:
+        if parsed_catalog is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="no catalog manifest configured",
+            )
+        try:
+            state = await download_manager.enqueue(body.name)
+        except KeyError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=str(exc),
+            ) from exc
+        return state.to_dict()
+
+    @app.delete("/catalog/downloads/{name}")
+    async def cancel_download(
+        name: str,
+        _: str = Depends(require_auth),
+    ) -> dict[str, Any]:
+        if parsed_catalog is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="no catalog manifest configured",
+            )
+        state = await download_manager.cancel(name)
+        if state is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"no active download named {name!r}",
+            )
+        return state.to_dict()
 
     return app
 
