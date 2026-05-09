@@ -15,19 +15,31 @@ at three different cadences:
 Every design choice in bty exists to make those three cadences cheap,
 fast, and boring.
 
-## Two delivery modes
+## Three deployment shapes
 
-bty serves both ends of the operator spectrum:
+bty serves both ends of the operator spectrum, with a middle shape
+that bridges the two:
 
-- **Ad-hoc.** USB live image carrying the `bty` runtime and bundled
-  images. Plug in, boot, flash, walk away. No server to set up.
-- **DevOps infrastructure.** Server image that runs `bty-web` and the
-  iPXE/TFTP/HTTP services. Fleet members are registered by MAC address;
-  reflashes happen on schedule, on demand, or on failure without operator
-  involvement.
+- **Self-contained USB.** USB live image carrying the `bty` runtime
+  and bundled images on its own exFAT partition. Plug in, boot, flash,
+  walk away. No server to set up. Best for the field-tech / one-off
+  reflash.
+- **USB + network catalog.** Same USB live image, but `bty-tui --server
+  URL` pulls the image catalog from a `bty-web` instance on the LAN
+  (commonly the `ghcr.io/safl/bty-web` Docker container running on
+  someone's workstation). Flash still happens locally on the operator's
+  hardware; only the catalog is centralised. Best for a small team
+  sharing cooked images without standing up a full PXE server.
+- **PXE-driven (no operator).** Full `bty-server` appliance running
+  `bty-web` and the iPXE/TFTP/HTTP services. Fleet members are
+  registered by MAC address; reflashes happen on schedule, on demand,
+  or on failure without operator involvement at the target. Best for
+  CI fleets and lab automation.
 
-Both modes wrap the same `bty` runtime - same image catalog, same
-target-disk operations, same provisioning modes.
+All three wrap the same `bty` runtime - same image catalog format,
+same target-disk operations, same provisioning modes. The difference
+is whether the catalog ships on the stick, lives on a server clients
+pull from, or drives the whole flash unattended.
 
 ## OS scope
 

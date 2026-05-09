@@ -1,0 +1,113 @@
+# Dependencies
+
+What bty needs at runtime, organised by what you're trying to do.
+The `bty-lab` PyPI package itself has no third-party Python
+dependencies for the core CLI, and lazy-loads the bigger pieces
+(textual for the TUI, fastapi for the web server) only when those
+entry points are actually used.
+
+## To install bty itself
+
+The Python package and one of its CLI / TUI / web entry points:
+
+```bash
+pipx install bty-lab            # bty CLI only, stdlib-only Python
+pipx install "bty-lab[tui]"     # adds bty-tui (textual)
+pipx install "bty-lab[web]"     # adds bty-web (fastapi, uvicorn, pamela)
+pipx install "bty-lab[all]"     # everything
+```
+
+Python 3.11+ is the only hard requirement. PyPI hosts pure-Python
+wheels; the `[tui]` / `[web]` extras pull in their own pure-Python
+deps with no native build step on install.
+
+## To inspect or flash on a Linux host
+
+`bty inspect` and `bty flash` shell out to a handful of system
+binaries that almost every Linux distribution already has:
+
+| Binary | Used for | Debian/Ubuntu pkg |
+|---|---|---|
+| `qemu-img` | inspect image format / virtual size | `qemu-utils` |
+| `lsblk` | enumerate target disks | `util-linux` (always present) |
+| `blockdev` | target disk size | `util-linux` |
+| `dd` | the actual write | `coreutils` (always present) |
+| `partprobe` | re-read partition table after flash | `parted` |
+| `zstd` | decompress `.img.zst` images | `zstd` |
+| `gzip` | decompress `.img.gz` images | `gzip` (always present) |
+| `xz` | decompress `.img.xz` images | `xz-utils` |
+
+Flashing a real disk requires root (`sudo bty flash` or running
+inside the bty live env where root is already there).
+
+## To run bty-tui
+
+Same set of binaries as above (the TUI delegates flashing to the
+same `bty.flash` library), plus the `[tui]` extra. The `--server
+URL` mode (pull catalog from a remote `bty-web`) doesn't add anything
+host-side - it's a plain HTTP client.
+
+## To run bty-web
+
+The `[web]` extra (fastapi, uvicorn, pamela, jinja2 are pulled in by
+pip) plus:
+
+- `libpam0g` + `libpam-modules` if you want PAM-based `/ui/login`
+  (this is the default; the appliance and the Docker container both
+  ship it).
+- A user account on the host whose password you'll log in with
+  (the appliance + container ship `bty / bty` and tell you to
+  rotate it).
+- `qemu-img` (above) so the server can inspect uploaded images.
+
+## To use the bty-server appliance for PXE
+
+The shipped `server-x86` and `server-rpi` appliance images bundle
+everything needed; this list is for reference if you're rebuilding
+your own.
+
+| Binary / package | Used for |
+|---|---|
+| `dnsmasq` | proxy-DHCP + TFTP for the PXE chain |
+| `ipxe` | the iPXE BIOS / UEFI ROMs (`undionly.kpxe`, `ipxe.efi`) chain-loaded by booting clients |
+| `systemd-networkd` | NIC management on the appliance |
+| `cloud-init` | first-boot user / password / network setup |
+| `cijoe` | optional online provisioning workflows after a target first-boots |
+
+The appliance is the **only** delivery shape that exercises the PXE
+stack. The Docker container (`ghcr.io/safl/bty-web`) deliberately
+omits dnsmasq + iPXE because Docker bridge networking can't relay
+the L2 broadcasts proxy-DHCP needs.
+
+## To build the appliance images yourself
+
+`make build VARIANT=...` under `bty-media/` runs cijoe pipelines
+that need:
+
+| Dependency | Used by which variant |
+|---|---|
+| `live-build` + `debootstrap` + `squashfs-tools` + `xorriso` + `exfatprogs` + `xz-utils` | `usb-x86`, `netboot-x86` |
+| `qemu-system-x86_64` + KVM + `cloud-image-utils` | `server-x86` (cloud-init bake in QEMU) |
+| `qemu-user-static` + `binfmt_misc` + `losetup` | `server-rpi` (mount + chroot Raspberry Pi OS) |
+| `cijoe` | all variants (orchestration) |
+| Passwordless `sudo` | all variants (live-build / loopback mounts / mkfs need it) |
+
+`make media-deps` installs `cijoe` via pipx; the rest are apt
+packages (or your distro's equivalent) that the build will check
+for at runtime.
+
+## To run the test-pxe end-to-end check
+
+```bash
+make test-pxe
+```
+
+Spins up a server VM + a client VM sharing an L2 segment and runs
+the full PXE chain against pre-built artefacts. Adds:
+
+| Dependency | Used for |
+|---|---|
+| `qemu-system-x86_64` + KVM | both VMs |
+| `cijoe` | orchestrating the test sequence |
+
+Wall clock ~5-10 min per run.

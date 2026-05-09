@@ -2,7 +2,7 @@
   <img src="docs/src/_static/bty-mascot.png" alt="bty mascot - a blue bat holding a PXE handshake card and a disk labelled .qcow2 / .img / .raw" width="240">
 </p>
 
-# bty - flash images onto target disks, locally or over PXE
+# bty - flash images onto target disks, from local or network sources
 
 [![CI](https://github.com/safl/bty/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/safl/bty/actions/workflows/ci.yml)
 [![Docs](https://github.com/safl/bty/actions/workflows/docs.yml/badge.svg?branch=main)](https://github.com/safl/bty/actions/workflows/docs.yml)
@@ -12,8 +12,10 @@
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 
 Image-flash provisioning toolkit for bare-metal and virtual targets.
-Writes pre-built ("cooked") system images onto target disks - locally
-from a USB live stick or remotely over PXE - and configures the
+Writes pre-built ("cooked") system images onto target disks. Three
+delivery shapes from the same runtime: a self-contained USB live
+stick, a USB stick pulling from a network-shared image catalog, or
+a PXE-boot server that flashes targets unattended. Configures the
 deployed system on first boot via cloud-init or CIJOE workflows.
 
 bty is one Python package: the `bty` module, distributed on PyPI as
