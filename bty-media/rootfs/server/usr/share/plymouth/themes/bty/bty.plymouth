@@ -1,8 +1,0 @@
-[Plymouth Theme]
-Name=bty
-Description=bty boot splash (mascot centered, no animation)
-ModuleName=script
-
-[script]
-ImageDir=/usr/share/plymouth/themes/bty
-ScriptFile=/usr/share/plymouth/themes/bty/bty.script

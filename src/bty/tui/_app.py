@@ -245,8 +245,19 @@ class FlashConfirmScreen(ModalScreen[bool]):
         margin-top: 1;
     }
 
+    /* Buttons get a minimum width so short labels don't render as
+       tiny squares, and an explicit focus style (``bold reverse``,
+       which renders identically on tty1 / xterm / SSH consoles)
+       so the operator can never mistake which button Enter is
+       about to trigger. The default textual focus shading is too
+       subtle on a framebuffer. */
     .actions Button {
         margin-left: 2;
+        min-width: 14;
+    }
+
+    .actions Button:focus {
+        text-style: bold reverse;
     }
     """
 
@@ -266,6 +277,12 @@ class FlashConfirmScreen(ModalScreen[bool]):
             if self._errors:
                 yield Static(self._errors_text(), classes="errors")
             with Horizontal(classes="actions"):
+                # Conventional dialog layout: Cancel on the left,
+                # primary action on the right. Default focus is set
+                # explicitly in ``on_mount`` (Confirm, unless errors
+                # disabled it) -- DOM order would otherwise default
+                # to Cancel, and the operator just clicked Flash to
+                # get here, so Enter should advance not cancel.
                 yield Button("Cancel", id="cancel", variant="default")
                 yield Button(
                     "Flash now",
@@ -273,6 +290,24 @@ class FlashConfirmScreen(ModalScreen[bool]):
                     variant="primary",
                     disabled=bool(self._errors),
                 )
+
+    def on_mount(self) -> None:
+        # Belt-and-braces: explicitly focus the confirm button if it's
+        # enabled, fall back to cancel if validation errors disabled
+        # it. Don't trust DOM-order focus; users hitting Enter twice
+        # in quick succession (once on Flash!, once on the modal)
+        # were accidentally cancelling.
+        try:
+            confirm = self.query_one("#confirm", Button)
+        except Exception:
+            return
+        if confirm.disabled:
+            try:
+                self.query_one("#cancel", Button).focus()
+            except Exception:
+                pass
+        else:
+            confirm.focus()
 
     def _plan_text(self) -> str:
         plan = self._plan
@@ -292,6 +327,94 @@ class FlashConfirmScreen(ModalScreen[bool]):
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         self.dismiss(event.button.id == "confirm")
+
+
+class ProbingScreen(ModalScreen[None]):
+    """Lightweight floating modal shown while ``flash.probe_image`` and
+    ``flash.probe_target`` run.
+
+    The probe phase runs ``qemu-img info`` and ``blockdev --getsize64``
+    in worker threads -- normally fast, but on a slow USB target or a
+    large qcow2 the operator was left staring at a static
+    ``Flash: probing image foo.qcow2...`` status line with no visible
+    motion. That read as a freeze.
+
+    This modal pops immediately on Flash trigger, animates an ASCII
+    spinner (``|/-\\`` -- tty1-safe, no Unicode), and ticks the row's
+    state to ``[X] done`` as each probe completes. The caller dismisses
+    it once the plan is built; the ``FlashConfirmScreen`` then takes
+    over.
+    """
+
+    DEFAULT_CSS = """
+    ProbingScreen {
+        align: center middle;
+    }
+
+    ProbingScreen > Vertical {
+        width: 60;
+        height: 7;
+        padding: 1 2;
+        background: $panel;
+        border: round $accent;
+        border-title-style: bold;
+        border-title-color: $accent;
+        border-title-align: left;
+    }
+
+    .probe-row {
+        height: 1;
+    }
+    """
+
+    _SPINNER: ClassVar[str] = "|/-\\"
+
+    def __init__(self, image_name: str, target_path: str) -> None:
+        super().__init__()
+        self._image_name = image_name
+        self._target_path = target_path
+        self._image_done = False
+        self._target_done = False
+        self._frame = 0
+
+    def compose(self) -> ComposeResult:
+        with Vertical() as panel:
+            panel.border_title = "  Probing  "
+            yield Static("", id="probe-image", classes="probe-row")
+            yield Static("", id="probe-target", classes="probe-row")
+
+    def on_mount(self) -> None:
+        self._redraw()
+        # 150ms tick rate: fast enough that motion reads as "working",
+        # slow enough that the framebuffer console isn't redrawing
+        # constantly.
+        self.set_interval(0.15, self._tick)
+
+    def _tick(self) -> None:
+        self._frame = (self._frame + 1) % len(self._SPINNER)
+        self._redraw()
+
+    def _redraw(self) -> None:
+        spin = self._SPINNER[self._frame]
+        img_state = "[X] done" if self._image_done else f"[ ] {spin}   "
+        tgt_state = "[X] done" if self._target_done else f"[ ] {spin}   "
+        try:
+            self.query_one("#probe-image", Static).update(
+                f"{img_state}  Image:  {self._image_name}"
+            )
+            self.query_one("#probe-target", Static).update(
+                f"{tgt_state}  Target: {self._target_path}"
+            )
+        except Exception:  # pragma: no cover - defensive during teardown
+            pass
+
+    def image_done(self) -> None:
+        self._image_done = True
+        self._redraw()
+
+    def target_done(self) -> None:
+        self._target_done = True
+        self._redraw()
 
 
 class FlashStatusScreen(ModalScreen[bool]):
@@ -405,6 +528,14 @@ class FlashStatusScreen(ModalScreen[bool]):
         align: right middle;
         margin-top: 1;
     }
+
+    #flash-actions Button {
+        min-width: 14;
+    }
+
+    #flash-actions Button:focus {
+        text-style: bold reverse;
+    }
     """
 
     def __init__(self, plan: flash.FlashPlan) -> None:
@@ -425,7 +556,7 @@ class FlashStatusScreen(ModalScreen[bool]):
                 classes="flash-warning",
             )
             yield Static(
-                f"{self._plan.image.display} → {self._plan.target.path}",
+                f"{self._plan.image.display} -> {self._plan.target.path}",
                 classes="flash-target",
             )
             with Vertical(classes="flash-stages"):
@@ -651,6 +782,11 @@ class SourceSelectScreen(ModalScreen["str | Path | None"]):
 
     .source-actions Button {
         margin-left: 2;
+        min-width: 14;
+    }
+
+    .source-actions Button:focus {
+        text-style: bold reverse;
     }
     """
 
@@ -919,10 +1055,17 @@ class BtyTui(App[None]):
     /* Action-pane content: a fixed-width primary button centered
        in the pane body via the parent's ``align: center middle``.
        The pane's border-title carries the stage label; the button
-       is the operator's commit handle. */
+       is the operator's commit handle. ``bold reverse`` on focus
+       so the operator can never mistake which Enter target is
+       active -- the textual default focus shading is too subtle
+       on a framebuffer console. */
     .action-button {
         width: 24;
         height: 3;
+    }
+
+    .action-button:focus {
+        text-style: bold reverse;
     }
 
     /* Bottom nav: a single line with three key-hint groups
@@ -1492,11 +1635,12 @@ class BtyTui(App[None]):
         # ``flash.probe_image`` / ``flash.probe_target`` shell out to
         # ``qemu-img info`` / ``blockdev`` / ``lsblk`` and block. Run
         # them in a thread pool via ``asyncio.to_thread`` so the
-        # event loop stays responsive: key events keep being
-        # processed, the status-line updates above actually render,
-        # and the Flash button doesn't appear frozen while we wait
-        # for ``qemu-img`` to inspect a multi-GiB image.
-        self._set_status(f"Flash: probing image {image.name}...")
+        # event loop stays responsive, and pop a ``ProbingScreen``
+        # modal so the operator sees an animated spinner during the
+        # probe instead of staring at a static status line that
+        # reads as a freeze.
+        probing = ProbingScreen(image.name, str(disk_path))
+        self.push_screen(probing)
         try:
             if image.url is not None:
                 image_info = await asyncio.to_thread(flash.probe_image_url, image.url)
@@ -1504,15 +1648,22 @@ class BtyTui(App[None]):
                 assert image.path is not None  # local row guarantees a path
                 image_info = await asyncio.to_thread(flash.probe_image, image.path)
         except (FileNotFoundError, ValueError) as exc:
+            probing.dismiss(None)
             self._set_status(f"Image probe failed: {exc}")
             return
+        probing.image_done()
 
-        self._set_status(f"Flash: probing target {disk_path}...")
         target_info = await asyncio.to_thread(flash.probe_target, disk_path)
+        probing.target_done()
         plan = flash.make_plan(image_info, target_info, "none")
         errors = flash.validate_plan(plan)
 
-        self._set_status("Flash: confirm to proceed.")
+        # Brief hold so the operator sees both rows tick to
+        # ``[X] done`` before the modal closes -- otherwise the
+        # transition to FlashConfirmScreen feels like a flicker.
+        await asyncio.sleep(0.25)
+        probing.dismiss(None)
+
         confirmed = await self.push_screen_wait(FlashConfirmScreen(plan, errors))
         if not confirmed:
             self._set_status("Flash cancelled.")
