@@ -1,22 +1,38 @@
 # Default networking for the bty server appliance.
 #
-# DHCP any predictably-named ethernet interface (Debian 13 / systemd
-# 257 renders QEMU virtio NICs as ``ens<slot>`` and physical NICs as
-# ``eno*`` / ``enp*``). The first interface to get a lease becomes
-# bty-web's reachable address; additional NICs are still managed but
-# are NOT required to be "online" before ``network-online.target``,
-# so a homelab box with one cable plugged in (or a test VM with
-# only its mgmt link wired) doesn't stall the boot for two minutes
-# while ``systemd-networkd-wait-online`` polls a dead NIC.
+# DHCP every Ethernet interface, regardless of how the kernel + udev
+# named it. Match=Type=ether covers the full set:
+#   ``en*``   -- predictable names (eno0, ens3, enp193s0, ...)
+#   ``eth*``  -- legacy / kernel-style (uncommon on modern Debian
+#                but resurfaces on cmdline ``net.ifnames=0`` boots
+#                or on hardware with broken DMI/ACPI tables)
+#   virtio NICs in QEMU / KVM / VirtualBox guests
+#   the dominant Mellanox / Intel / Realtek / Broadcom families
+#
+# Name negations skip virtual / loopback / docker / podman / wireguard
+# interfaces that would otherwise match Type=ether and pull a DHCP
+# lease they don't need. Matching by Type instead of by name means an
+# operator with a weirdly-named NIC (custom udev rule, nonconforming
+# DMI table, vendor-specific renaming) doesn't have to author a new
+# .network file -- bty just DHCPs whatever the kernel says is an
+# Ethernet device.
+#
+# The first interface to get a lease becomes bty-web's reachable
+# address; additional NICs are still managed but are NOT required
+# to be "online" before ``network-online.target``, so a homelab box
+# with one cable plugged in (or a test VM with only its mgmt link
+# wired) doesn't stall the boot while ``systemd-networkd-wait-online``
+# polls a dead NIC. ``--timeout=30`` lives in the .service.d override
+# next to this file.
 #
 # Operators who want a static IP / a specific NIC to be the PXE
 # segment / etc. drop their own ``.network`` file with a more
-# specific [Match] - systemd-networkd uses the lexically-first match
-# and ours is intentionally low-priority (Match wildcards lose to
-# any explicit Name=).
+# specific [Match]. systemd-networkd uses lexically-first match;
+# any operator file ordered before ``10-bty-default.network`` wins.
 
 [Match]
-Name=en*
+Type=ether
+Name=!docker* !veth* !br-* !virbr* !wg* !tun* !tap*
 
 [Network]
 DHCP=yes
