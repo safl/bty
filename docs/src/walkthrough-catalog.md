@@ -120,7 +120,23 @@ bty flash --image PATH_OR_URL --target /dev/sdX --yes
 The local CLI is dir-scan only -- no manifest, no SHA, no
 catalog. ``bty list images`` answers "what flashable files are
 in this directory?" and stops there. ``bty flash --image``
-accepts a path or an HTTP URL.
+accepts a path, an HTTP URL, or a ``.bri`` (bty Remote Image)
+descriptor file.
+
+A ``.bri`` is a tiny TOML pointer at a remote image. Drop one
+into BTY_IMAGES alongside your local files and it shows up in
+``bty list images`` next to them, with ``source = remote`` and
+the upstream URL. ``bty flash --image foo.bri`` resolves the
+descriptor and falls into the URL flash path. The bty-usb stick
+ships descriptors at ``/usr/share/bty/bri/`` pointing at the
+latest published bty-server appliance images, so a fresh boot
+shows a server-bootstrap entry without further setup.
+
+```toml
+# ~/BTY_IMAGES/bty-server.bri
+url = "https://github.com/safl/bty/releases/latest/download/bty-server-x86_64.img.gz"
+# Optional: name, format, size_bytes, sha256, description
+```
 
 That's deliberate: the catalog story is a **server** concern.
 Operators who want the unified catalog (manifest + dir-scan +

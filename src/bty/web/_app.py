@@ -589,6 +589,23 @@ def create_app(
                     cached=u.cached,
                 )
             )
+        # ``.bri`` (bty Remote Image) descriptors in the image root
+        # are surfaced as their own catalog rows pointing at the
+        # operator-declared upstream URL. Same dispatch as the
+        # uncached-manifest case: ``cached=False`` so the client
+        # streams from upstream rather than asking the server for
+        # bytes it doesn't host.
+        for r in images.list_all_remote_images(resolved_image_root):
+            out.append(
+                _models.ImageEntry(
+                    name=r.name,
+                    format=r.format or "",
+                    size_bytes=r.size_bytes or 0,
+                    url=r.url,
+                    ref=None,
+                    cached=False,
+                )
+            )
         return out
 
     @app.put(

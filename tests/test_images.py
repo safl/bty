@@ -95,6 +95,21 @@ def test_inspect_image_raw_img_no_external_tool(tmp_path: Path) -> None:
     assert info["size_bytes"] == 10
 
 
+def test_inspect_image_handles_bri_descriptor(tmp_path: Path) -> None:
+    """``bty inspect image foo.bri`` returns the descriptor's
+    parsed contents under ``detail`` rather than blowing up the way
+    a regular image probe would on a non-image extension."""
+    bri = tmp_path / "demo.bri"
+    bri.write_text(
+        'url = "https://example.invalid/demo.img.gz"\nname = "Demo"\ndescription = "demo"\n'
+    )
+    info = images.inspect_image(bri)
+    assert info["format"] == "bri"
+    assert info["detail"]["url"] == "https://example.invalid/demo.img.gz"
+    assert info["detail"]["name"] == "Demo"
+    assert info["size_bytes"] > 0  # the descriptor file itself
+
+
 def test_inspect_image_missing_path_raises(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError):
         images.inspect_image(tmp_path / "nope.qcow2")
@@ -268,6 +283,24 @@ def test_read_bri_missing_url_raises(tmp_path: Path) -> None:
     bri = tmp_path / "bad.bri"
     bri.write_text('name = "no-url"\n')
     with pytest.raises(images.BriError, match="url"):
+        images.read_bri(bri)
+
+
+def test_read_bri_rejects_non_http_url(tmp_path: Path) -> None:
+    """A bare hostname or ``ftp://`` URL would silently break flash;
+    require explicit http(s) scheme."""
+    bri = tmp_path / "bad.bri"
+    bri.write_text('url = "ftp://example.invalid/x.img.gz"\n')
+    with pytest.raises(images.BriError, match="http"):
+        images.read_bri(bri)
+
+
+def test_read_bri_rejects_empty_name(tmp_path: Path) -> None:
+    """``name = ""`` would produce a blank catalog row; reject it
+    rather than silently surfacing a broken display value."""
+    bri = tmp_path / "bad.bri"
+    bri.write_text('url = "https://example.invalid/x.img.gz"\nname = "   "\n')
+    with pytest.raises(images.BriError, match="name"):
         images.read_bri(bri)
 
 

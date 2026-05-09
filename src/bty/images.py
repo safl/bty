@@ -258,12 +258,18 @@ def read_bri(path: Path) -> RemoteImage:
     if not isinstance(url, str) or not url.strip():
         raise BriError(f"{path}: missing required field: url")
     url = url.strip()
+    if not (url.startswith("http://") or url.startswith("https://")):
+        raise BriError(f"{path}: url must start with http:// or https://, got {url!r}")
 
     name = raw.get("name")
     if name is None:
         name = _name_from_url(url)
     elif not isinstance(name, str):
         raise BriError(f"{path}: name must be a string")
+    elif not name.strip():
+        raise BriError(f"{path}: name must not be empty")
+    else:
+        name = name.strip()
 
     fmt = raw.get("format")
     if fmt is None:
@@ -668,9 +674,22 @@ def inspect_image(path: Path) -> dict[str, Any]:
     - ``img.xz`` -> the textual output of ``xz -l``
     - ``img.gz`` -> the textual output of ``gzip -l``
     - ``img.bz2`` -> nothing (bzip2 has no listing tool)
+    - ``.bri`` -> the parsed descriptor contents under ``detail`` and
+      ``format`` set to ``"bri"`` (the descriptor itself is metadata,
+      not the image bytes; ``size_bytes`` is the descriptor file's
+      size, not the upstream image's).
     """
     if not path.exists():
         raise FileNotFoundError(path)
+
+    if path.suffix == BRI_EXTENSION:
+        descriptor = read_bri(path)
+        return {
+            "path": str(path),
+            "format": "bri",
+            "size_bytes": path.stat().st_size,
+            "detail": descriptor.to_dict(),
+        }
 
     fmt = detect_format(path)
     info: dict[str, Any] = {

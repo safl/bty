@@ -548,6 +548,36 @@ def test_list_images_returns_files_under_image_root(
     assert by_name["alpha.qcow2"]["cached"] is True
 
 
+def test_list_images_surfaces_bri_descriptors(tmp_path: Path) -> None:
+    """A ``.bri`` file in the image root appears in ``GET /images``
+    so a remote-mode bty-tui sees the same operator-pointed URL the
+    local CLI does. ``cached=False`` because the bytes live
+    upstream, not on the bty-web server."""
+    image_root = tmp_path / "images"
+    image_root.mkdir()
+    (image_root / "demo.bri").write_text(
+        'url = "https://example.invalid/demo.img.gz"\nname = "Demo"\n'
+    )
+
+    state = tmp_path / "state.db"
+    app = create_app(
+        state_path=state,
+        service_user=TEST_SERVICE_USER,
+        secret_key=TEST_SECRET_KEY,
+        image_root=image_root,
+    )
+    with TestClient(app) as client:
+        r = client.get("/images")
+
+    assert r.status_code == 200
+    rows = r.json()
+    by_name = {row["name"]: row for row in rows}
+    assert "Demo" in by_name
+    assert by_name["Demo"]["url"] == "https://example.invalid/demo.img.gz"
+    assert by_name["Demo"]["cached"] is False
+    assert by_name["Demo"]["format"] == "img.gz"
+
+
 # ---------- create_app sanity ----------------------------------------------
 
 
