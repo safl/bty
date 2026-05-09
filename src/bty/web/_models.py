@@ -174,3 +174,25 @@ class CatalogEnqueueRequest(BaseModel):
     model_config = {"extra": "forbid"}
 
     name: str = Field(..., description="image name as declared in the manifest")
+
+
+class CatalogEntryAdd(BaseModel):
+    """``POST /catalog/entries`` body: add an operator-curated
+    catalog entry by URL.
+
+    ``image_url`` is required: the upstream URL the bytes live at.
+    ``sha_url`` is optional: if given, server fetches and parses
+    the sha256-manifest body, picks the digest matching
+    ``image_url``'s filename, and stores it. Without it the entry
+    is URL-only -- flashable via the URL pipeline, not bindable
+    to a machine.
+
+    Both URLs must be ``http://`` or ``https://``; arbitrary
+    schemes are rejected at validation time so a typo doesn't
+    land an entry that can never be flashed.
+    """
+
+    model_config = {"extra": "forbid"}
+
+    image_url: str = Field(..., pattern=r"^https?://.+")
+    sha_url: str | None = Field(default=None, pattern=r"^https?://.+")

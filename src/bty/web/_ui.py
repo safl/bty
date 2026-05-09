@@ -12,6 +12,7 @@ updates.
 from __future__ import annotations
 
 import os
+import sqlite3
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -296,6 +297,62 @@ def register_ui_routes(
             unified=unified,
             image_root=str(image_root),
         )
+
+    @app.post(
+        "/ui/catalog/entries",
+        include_in_schema=False,
+        dependencies=[Depends(require_ui_auth)],
+    )
+    def ui_catalog_entry_add(
+        image_url: Annotated[str, Form()],
+        sha_url: Annotated[str, Form()] = "",
+    ) -> RedirectResponse:
+        """Form-style POST behind the "Add image by URL" form on
+        /ui/images. Routes through the same logic as the JSON API
+        ``POST /catalog/entries``: optional sha_url resolves to a
+        sha256, optional ``Content-Length`` HEAD probes size, the
+        row lands in ``catalog_entries``. Operator-friendly empty-
+        string in ``sha_url`` is treated as None."""
+        from bty import catalog as _catalog
+        from bty.web._app import _head_content_length  # local import: avoid cycle at module load
+
+        cleaned_sha_url = sha_url.strip() or None
+        sha256: str | None = None
+        if cleaned_sha_url is not None:
+            try:
+                sha256 = _catalog.fetch_sha256_for_url(image_url, cleaned_sha_url)
+            except _catalog.CatalogError as exc:
+                # On validation error, surface back on /ui/images via
+                # a flash query-param the template renders.
+                return RedirectResponse(
+                    f"/ui/images?error=sha+resolve+failed%3A+{exc}",
+                    status_code=status.HTTP_303_SEE_OTHER,
+                )
+
+        from urllib.parse import urlparse
+
+        name = Path(urlparse(image_url).path).name or image_url
+        fmt = bty_images.detect_format(Path(name))
+        size_bytes = _head_content_length(image_url)
+        from datetime import UTC, datetime
+
+        now = datetime.now(UTC).isoformat()
+        with _db.open_db(state_path) as conn:
+            try:
+                conn.execute(
+                    "INSERT INTO catalog_entries "
+                    "(src, sha256, name, sha_url, format, size_bytes, "
+                    "description, added_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (image_url, sha256, name, cleaned_sha_url, fmt, size_bytes, None, now),
+                )
+                conn.commit()
+            except sqlite3.IntegrityError:
+                return RedirectResponse(
+                    "/ui/images?error=already+exists",
+                    status_code=status.HTTP_303_SEE_OTHER,
+                )
+        return RedirectResponse("/ui/images", status_code=status.HTTP_303_SEE_OTHER)
 
     # ----- boot artifacts ------------------------------------------------
 

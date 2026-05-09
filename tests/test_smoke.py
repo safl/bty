@@ -246,6 +246,23 @@ def test_server_cloudinit_does_not_install_plymouth() -> None:
     assert "apt-get -y purge plymouth" in body
 
 
+def test_activate_pxe_helper_uses_same_fs_tempfile() -> None:
+    """``bty-web-activate-pxe`` writes a config to /etc/dnsmasq.d/.
+    Earlier versions used the default ``mktemp`` (which lands in
+    ``$TMPDIR`` = /tmp on tmpfs), then ``mv``'d cross-filesystem to
+    /etc/dnsmasq.d/. mv falls back to copy-then-unlink across
+    filesystems, and that path failed in the wild with
+    ``unable to remove target: Read-only file system``. Pin the
+    same-fs tempfile so the regression doesn't sneak back in."""
+    from pathlib import Path
+
+    repo_root = Path(__file__).resolve().parents[1]
+    body = (repo_root / "bty-media/rootfs/server/usr/local/sbin/bty-web-activate-pxe").read_text()
+    # ``mktemp -p /etc/dnsmasq.d ...`` keeps source + target on the
+    # same filesystem, so the final ``mv`` is an atomic rename.
+    assert "mktemp -p /etc/dnsmasq.d" in body
+
+
 def test_server_cloudinit_ships_haveged() -> None:
     """v0.7.16's bake-VM showed a 20-minute systemd-journald start
     on N97 hardware; entropy starvation is the prime suspect even

@@ -12,7 +12,10 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import sqlite3
 import sys
+import urllib.error
+import urllib.request
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -573,20 +576,11 @@ def create_app(
         byte-serving route ``GET /images/{name}`` is already
         open. Same homelab-network trust model as /pxe / /boot.
         """
-        manifest_entries = parsed_catalog.entries if parsed_catalog else ()
-        unified = images.merge_with_catalog(
-            resolved_image_root, manifest_entries, catalog_cache_dir
-        )
+        unified = _list_unified_images()
         host = request.headers.get("host", f"{request.url.hostname}:{request.url.port or 8080}")
         scheme = request.url.scheme or "http"
         out: list[_models.ImageEntry] = []
         for u in unified:
-            # Skip entries we cannot point at: dir-scan files
-            # without a sidecar AND no manifest entry. The
-            # auto-import on startup will hash them and they will
-            # appear in the next listing.
-            if u.sha256 is None:
-                continue
             if u.cached:
                 # Local file or cached manifest blob -- bty-web
                 # serves the bytes. URL shape is
@@ -597,18 +591,22 @@ def create_app(
                 # ``bty.flash.probe_image_url``) gets ``foo.img.zst``
                 # instead of a bare 64-hex digest. The server
                 # route ignores ``<name>`` for the lookup.
+                if u.sha256 is None:
+                    continue  # cached + no sha is impossible; defensive
                 url = f"{scheme}://{host}/images/{u.sha256}/{u.names[0]}"
             else:
-                # Manifest entry not yet cached -- the client
-                # streams directly from upstream. First manifest
-                # source wins.
+                # Not cached: the client streams directly from
+                # upstream. Try manifest source first, then ``url``
+                # source (operator-curated catalog_entries row).
+                # Skip dir-scan-only entries with no sha + no
+                # upstream URL -- the auto-import on startup will
+                # hash them and they'll re-surface as cached in the
+                # next listing.
                 upstream = next(
-                    (s.location for s in u.sources if s.kind == "manifest"),
+                    (s.location for s in u.sources if s.kind in ("manifest", "url")),
                     None,
                 )
                 if upstream is None:
-                    # No manifest source AND not cached -- nothing
-                    # we can hand the client. Skip.
                     continue
                 url = upstream
             out.append(
@@ -687,15 +685,69 @@ def create_app(
 
     # Browser UI under /ui/ (Jinja + Bootstrap, cookie-auth).
 
+    def _load_db_catalog_split() -> tuple[
+        tuple[_catalog.CatalogEntry, ...],
+        tuple[images.UnifiedImage, ...],
+    ]:
+        """Load operator-curated catalog rows from state.db, split
+        by whether they carry a sha256:
+
+        - Sha-keyed rows -> :class:`bty.catalog.CatalogEntry` for
+          the SHA-keyed merge pipeline (so they dedupe with
+          dir-scan files / manifest entries that share the hash).
+        - URL-only rows (operator added without a sha_url) ->
+          :class:`bty.images.UnifiedImage` with ``sha256=None``,
+          surfaced verbatim. Flashable via the URL streaming
+          pipeline; not bindable to a machine.
+        """
+        with _db.open_db(state_path) as conn:
+            rows = conn.execute(
+                "SELECT sha256, name, src, format, size_bytes, description FROM catalog_entries"
+            ).fetchall()
+        sha_keyed: list[_catalog.CatalogEntry] = []
+        url_only: list[images.UnifiedImage] = []
+        for row in rows:
+            if row["sha256"]:
+                sha_keyed.append(
+                    _catalog.CatalogEntry(
+                        name=row["name"],
+                        src=row["src"],
+                        sha256=row["sha256"],
+                        format=row["format"],
+                        size_bytes=row["size_bytes"],
+                        description=row["description"],
+                    )
+                )
+            else:
+                url_only.append(
+                    images.UnifiedImage(
+                        sha256=None,
+                        names=(row["name"],),
+                        format=row["format"],
+                        size_bytes=row["size_bytes"],
+                        sources=(images.ImageSource(kind="url", location=row["src"]),),
+                        cached=False,
+                    )
+                )
+        return tuple(sha_keyed), tuple(url_only)
+
     def _list_unified_images() -> list[images.UnifiedImage]:
-        """SHA-keyed merge of dir-scan + catalog manifest entries.
+        """SHA-keyed merge of dir-scan + catalog manifest entries +
+        operator-curated catalog_entries rows.
 
         Recomputed per call so an operator who drops new files into
-        BTY_IMAGE_ROOT (or whose catalog fetch just completed) sees
-        the change on the next page load without restarting bty-web.
+        BTY_IMAGE_ROOT (or whose catalog fetch just completed, or who
+        added a URL via the UI) sees the change on the next page load
+        without restarting bty-web.
         """
         manifest_entries = parsed_catalog.entries if parsed_catalog else ()
-        return images.merge_with_catalog(resolved_image_root, manifest_entries, catalog_cache_dir)
+        sha_keyed, url_only = _load_db_catalog_split()
+        merged = images.merge_with_catalog(
+            resolved_image_root,
+            (*manifest_entries, *sha_keyed),
+            catalog_cache_dir,
+        )
+        return [*merged, *url_only]
 
     _ui.register_ui_routes(
         app,
@@ -707,6 +759,110 @@ def create_app(
         publish_machines_changed=publish_machines_changed,
         list_unified_images=_list_unified_images,
     )
+
+    # ---------- operator-curated catalog entries (M23) -----------------------
+    # ``catalog_entries`` table in state.db backs a UI form where the
+    # operator pastes ``image-url`` + optional ``sha-url`` and hits
+    # Add. The shape mirrors a catalog.toml manifest entry, so once
+    # written the row flows through ``merge_with_catalog`` and shows
+    # in the operator's catalog page like any other entry. No
+    # filesystem dance; no TOML editing.
+
+    @app.post(
+        "/catalog/entries",
+        status_code=status.HTTP_201_CREATED,
+        dependencies=[Depends(require_auth)],
+    )
+    def add_catalog_entry(body: _models.CatalogEntryAdd) -> dict[str, Any]:
+        """Add an operator-curated catalog entry by URL.
+
+        Body: ``{"image_url": "...", "sha_url": "..." | null}``.
+
+        - If ``sha_url`` is given: fetches it, parses, picks the
+          digest matching the image-URL filename (or the only
+          digest if the manifest carries one entry). The entry is
+          SHA-keyed and can bind to a machine.
+        - If ``sha_url`` is null: the entry is URL-only. Flashable
+          via the URL streaming pipeline; not bindable to a
+          machine (M22 SHA-keyed binding requires a known SHA).
+
+        - HEADs ``image_url`` for ``Content-Length`` (best-effort).
+        - Inserts a row keyed by image_url.
+
+        409 if a row with the same image_url already exists.
+        """
+        sha256: str | None = None
+        if body.sha_url is not None:
+            try:
+                sha256 = _catalog.fetch_sha256_for_url(body.image_url, body.sha_url)
+            except _catalog.CatalogError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"could not resolve sha256: {exc}",
+                ) from exc
+
+        from urllib.parse import urlparse
+
+        parsed = urlparse(body.image_url)
+        name = Path(parsed.path).name or body.image_url
+        fmt = images.detect_format(Path(name))
+        size_bytes = _head_content_length(body.image_url)
+        now = _now_iso()
+        with _db.open_db(state_path) as conn:
+            try:
+                conn.execute(
+                    "INSERT INTO catalog_entries "
+                    "(src, sha256, name, sha_url, format, size_bytes, description, added_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (body.image_url, sha256, name, body.sha_url, fmt, size_bytes, None, now),
+                )
+                conn.commit()
+            except sqlite3.IntegrityError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"catalog entry with src={body.image_url} already exists",
+                ) from exc
+        return {
+            "src": body.image_url,
+            "sha256": sha256,
+            "name": name,
+            "sha_url": body.sha_url,
+            "format": fmt,
+            "size_bytes": size_bytes,
+            "added_at": now,
+        }
+
+    @app.get(
+        "/catalog/entries",
+        dependencies=[Depends(require_auth)],
+    )
+    def list_catalog_entries() -> list[dict[str, Any]]:
+        with _db.open_db(state_path) as conn:
+            rows = conn.execute(
+                "SELECT src, sha256, name, sha_url, format, size_bytes, "
+                "description, added_at "
+                "FROM catalog_entries ORDER BY added_at"
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    @app.delete(
+        "/catalog/entries",
+        status_code=status.HTTP_204_NO_CONTENT,
+        dependencies=[Depends(require_auth)],
+    )
+    def delete_catalog_entry(src: str) -> Response:
+        """Delete via ``?src=<url>`` query param. URL-as-path-param
+        would require percent-encoding the schema and slashes,
+        which is operator-hostile; query param is cleaner."""
+        with _db.open_db(state_path) as conn:
+            cur = conn.execute("DELETE FROM catalog_entries WHERE src = ?", (src,))
+            conn.commit()
+        if cur.rowcount == 0:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"no catalog entry with src={src}",
+            )
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     # ---------- catalog download manager ----------------------------------
     # Authenticated endpoints; only operators logged into the bty-web
@@ -856,6 +1012,21 @@ def _row_to_machine(row: object) -> _models.Machine:
 
 def _iso_or_none(value: str | None) -> datetime | None:
     return datetime.fromisoformat(value) if value else None
+
+
+def _head_content_length(url: str, *, timeout: float = 10.0) -> int | None:
+    """HEAD ``url`` and return the upstream ``Content-Length`` if
+    the server provided one, else ``None``. Best-effort: any
+    network error returns ``None`` rather than raising -- the
+    operator's catalog-add doesn't fail if the upstream doesn't
+    support HEAD or the network is flaky."""
+    try:
+        req = urllib.request.Request(url, method="HEAD")
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            cl = resp.headers.get("Content-Length")
+            return int(cl) if cl is not None else None
+    except (urllib.error.URLError, ConnectionError, TimeoutError, ValueError, OSError):
+        return None
 
 
 def _now_iso() -> str:

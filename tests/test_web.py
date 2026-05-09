@@ -1111,3 +1111,138 @@ def test_catalog_hashes_post_unknown_file_404(app_client: TestClient) -> None:
 def test_catalog_hashes_cancel_unknown_404(app_client: TestClient) -> None:
     r = app_client.delete("/catalog/hashes/never-was", cookies=AUTH)
     assert r.status_code == 404
+
+
+# ---------- operator-curated catalog entries (M23) -------------------------
+
+
+def test_catalog_entries_add_with_sha_url_resolves_sha(
+    app_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``POST /catalog/entries`` with both image_url + sha_url:
+    server fetches sha_url, parses, picks the digest matching the
+    image-URL filename, stores the entry."""
+    sha = "a" * 64
+    manifest_body = f"{sha}  ubuntu-22.04.img.gz\n{'b' * 64}  other.img.gz\n"
+
+    def fake_urlopen(req, *_a, **_kw):  # type: ignore[no-untyped-def]
+        url = req if isinstance(req, str) else req.full_url
+        if url.endswith(".sha256"):
+            return _MockResp(manifest_body.encode())
+        # HEAD on the image URL: return Content-Length.
+        return _MockResp(b"", headers={"Content-Length": "12345"})
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    r = app_client.post(
+        "/catalog/entries",
+        json={
+            "image_url": "https://example.invalid/ubuntu-22.04.img.gz",
+            "sha_url": "https://example.invalid/SHA256SUMS.sha256",
+        },
+        cookies=AUTH,
+    )
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["sha256"] == sha
+    assert body["src"] == "https://example.invalid/ubuntu-22.04.img.gz"
+    assert body["name"] == "ubuntu-22.04.img.gz"
+    assert body["format"] == "img.gz"
+    assert body["size_bytes"] == 12345
+
+
+def test_catalog_entries_add_without_sha_url_is_url_only(
+    app_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """sha_url is optional; without it the entry stores
+    sha256=NULL. Surfaces in /images as a URL-only row."""
+
+    def fake_urlopen(*_a, **_kw):  # type: ignore[no-untyped-def]
+        return _MockResp(b"", headers={"Content-Length": "999"})
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    r = app_client.post(
+        "/catalog/entries",
+        json={"image_url": "https://example.invalid/foo.img.gz"},
+        cookies=AUTH,
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["sha256"] is None
+
+    r2 = app_client.get("/images")
+    rows = r2.json()
+    by_name = {row["name"]: row for row in rows}
+    assert "foo.img.gz" in by_name
+    assert by_name["foo.img.gz"]["url"] == "https://example.invalid/foo.img.gz"
+    assert by_name["foo.img.gz"]["ref"] is None  # sha256 unknown
+
+
+def test_catalog_entries_add_rejects_non_https(app_client: TestClient) -> None:
+    """``image_url`` / ``sha_url`` must be http(s); a typo with
+    a different scheme should 422 at the Pydantic layer rather
+    than land an unflashable entry."""
+    r = app_client.post(
+        "/catalog/entries",
+        json={"image_url": "ftp://example.invalid/foo.img.gz"},
+        cookies=AUTH,
+    )
+    assert r.status_code == 422
+
+
+def test_catalog_entries_add_duplicate_src_409(
+    app_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Same image_url posted twice: 409. Operator must DELETE
+    first to replace."""
+
+    def fake_urlopen(*_a, **_kw):  # type: ignore[no-untyped-def]
+        return _MockResp(b"", headers={"Content-Length": "111"})
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    body = {"image_url": "https://example.invalid/dup.img.gz"}
+    r1 = app_client.post("/catalog/entries", json=body, cookies=AUTH)
+    assert r1.status_code == 201
+    r2 = app_client.post("/catalog/entries", json=body, cookies=AUTH)
+    assert r2.status_code == 409
+
+
+def test_catalog_entries_list_and_delete(
+    app_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fake_urlopen(*_a, **_kw):  # type: ignore[no-untyped-def]
+        return _MockResp(b"", headers={"Content-Length": "0"})
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    url = "https://example.invalid/del.img.gz"
+    app_client.post("/catalog/entries", json={"image_url": url}, cookies=AUTH)
+
+    r = app_client.get("/catalog/entries", cookies=AUTH)
+    assert r.status_code == 200
+    rows = r.json()
+    assert len(rows) == 1
+    assert rows[0]["src"] == url
+
+    r = app_client.delete("/catalog/entries", params={"src": url}, cookies=AUTH)
+    assert r.status_code == 204
+
+    r = app_client.get("/catalog/entries", cookies=AUTH)
+    assert r.json() == []
+
+
+class _MockResp:
+    """Tiny urllib.request.urlopen response stand-in for tests."""
+
+    def __init__(self, body: bytes, headers: dict[str, str] | None = None) -> None:
+        self._body = body
+        self.headers = headers or {}
+
+    def __enter__(self) -> _MockResp:
+        return self
+
+    def __exit__(self, *_a: object) -> None:
+        pass
+
+    def read(self, *_a: object) -> bytes:
+        return self._body
+
+    def decode(self, *_a: object) -> str:
+        return self._body.decode()

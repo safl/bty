@@ -45,6 +45,28 @@ CREATE TABLE IF NOT EXISTS machines (
     created_at                TEXT NOT NULL,
     updated_at                TEXT NOT NULL
 );
+
+-- Operator-curated catalog entries (M23).
+-- Lets the operator add image URLs via the bty-web UI form
+-- (``image-url`` + optional ``sha-url``) without authoring a
+-- catalog.toml file or dropping bytes into BTY_IMAGES. The URL
+-- is the canonical key; ``sha256`` is optional metadata that
+-- enables SHA-keyed machine binding when known. Without a sha,
+-- the entry can still be flashed (URL streaming pipeline) but
+-- cannot be bound to a machine (machines.image_sha256 binds by
+-- content). Operators with vendors that don't publish sha256
+-- manifests still get a managed catalog; operators with strict
+-- integrity requirements provide ``sha_url`` and get the SHA.
+CREATE TABLE IF NOT EXISTS catalog_entries (
+    src          TEXT PRIMARY KEY,    -- the operator-typed image URL (canonical key)
+    sha256       TEXT,                -- 64 lower-hex; NULL if no sha_url given
+    name         TEXT NOT NULL,       -- display name (URL filename)
+    sha_url      TEXT,                -- the operator-typed sha256-manifest URL (or NULL)
+    format       TEXT,                -- detect_format(name); NULL if unrecognised
+    size_bytes   INTEGER,             -- HEAD ``Content-Length`` at add time, or NULL
+    description  TEXT,                -- free-form operator note
+    added_at     TEXT NOT NULL
+);
 """
 
 # Columns that were added to ``machines`` after the original schema landed.

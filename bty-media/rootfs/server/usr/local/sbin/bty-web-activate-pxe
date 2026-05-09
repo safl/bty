@@ -44,7 +44,16 @@ case "$SUBNET" in
 esac
 
 ACTIVE=/etc/dnsmasq.d/bty-pxe-active.conf
-TMP=$(mktemp)
+# Same-filesystem tempfile so the final ``mv`` is an atomic
+# rename, not a cross-device copy-then-unlink. ``mktemp`` defaulted
+# to ``$TMPDIR`` (typically /tmp on tmpfs) which is a different
+# filesystem from /etc/dnsmasq.d/, so coreutils' mv fell back to
+# copy-then-unlink-source-then-unlink-target. If the target file
+# already existed and the target dir's filesystem rejected the
+# unlink for any reason ("Read-only file system" was the reported
+# v0.7.21 symptom), the whole activation failed mid-sequence.
+# Same-dir tempfile sidesteps the cross-device path entirely.
+TMP=$(mktemp -p /etc/dnsmasq.d "bty-pxe-active.conf.XXXXXX")
 trap 'rm -f "$TMP"' EXIT
 
 # ``bind-dynamic`` (instead of bind-interfaces) tolerates the

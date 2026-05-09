@@ -33,6 +33,8 @@ import hashlib
 import os
 import tempfile
 import tomllib
+import urllib.error
+import urllib.parse
 import urllib.request
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
@@ -348,3 +350,65 @@ def _stream_with_digest(
         downloaded += len(chunk)
         if progress is not None:
             progress(downloaded, total)
+
+
+def parse_sha256_manifest(text: str, target_name: str | None = None) -> str:
+    """Parse a sha256sum-style manifest body and return the matching
+    digest.
+
+    Accepted shapes:
+
+    - Single-line bare digest: ``"abc123...def\\n"`` (64 lower-hex).
+    - sha256sum output: ``"<digest>  <filename>\\n"`` -- one or more
+      lines, with two-space or whitespace separator. ``*`` and
+      ``./`` filename prefixes are stripped (sha256sum binary-mode
+      marker / relative-path noise).
+
+    If ``target_name`` is given, return the digest whose filename
+    matches; otherwise return the digest of the first usable line.
+    Raises :class:`CatalogError` on empty input, malformed digests,
+    or a missing target filename.
+    """
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if not lines:
+        raise CatalogError("empty sha256 manifest")
+
+    candidates: list[tuple[str, str | None]] = []
+    for raw in lines:
+        parts = raw.split(maxsplit=1)
+        digest = parts[0].strip().lower()
+        if len(digest) != 64 or not all(c in "0123456789abcdef" for c in digest):
+            raise CatalogError(f"malformed sha256 line in manifest: {raw!r}")
+        name = parts[1].lstrip("*./").strip() if len(parts) == 2 else None
+        candidates.append((digest, name))
+
+    if target_name is not None:
+        for digest, name in candidates:
+            if name == target_name:
+                return digest
+        raise CatalogError(
+            f"sha256 manifest does not list a digest for {target_name!r}; "
+            f"available names: {sorted(n for _, n in candidates if n)}"
+        )
+    # No target requested: take the first line. Caller's choice.
+    return candidates[0][0]
+
+
+def fetch_sha256_for_url(image_url: str, sha_url: str, *, timeout: float = 30.0) -> str:
+    """Fetch ``sha_url``, parse it, and return the sha256 digest of
+    the file that ``image_url`` would download.
+
+    The match is filename-based: ``Path(urlparse(image_url).path).name``
+    is the target. Most upstream conventions ship a per-artifact
+    sha256 manifest with that exact filename, so the lookup is
+    direct. If the manifest only carries one entry, that entry is
+    returned regardless of name.
+    """
+    target = Path(urllib.parse.urlparse(image_url).path).name
+    req = urllib.request.Request(sha_url)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = resp.read().decode("utf-8")
+    except (urllib.error.URLError, ConnectionError, TimeoutError) as exc:
+        raise CatalogError(f"GET {sha_url} failed: {exc}") from exc
+    return parse_sha256_manifest(body, target_name=target if target else None)
