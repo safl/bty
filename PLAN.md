@@ -633,29 +633,54 @@ Landed after the original 1.0 list:
       half-written cache file). State is in-memory; server
       restart loses the queue but the cache directory remains
       the source of truth for "what's cached".
-    - `bty-web` integration: merged `/images` listing,
-      lazy fetch on `/images/{name}` GET routed through the
+    - **SHA-keyed image identity (unified)**. Both directory-
+      scan images (under ``BTY_IMAGE_ROOT``) and manifest
+      entries are merged under a single concept: an *image* is
+      identified by its SHA-256, optionally with one or more
+      names attached (a local filename, a manifest entry name,
+      or both). Directory-scan images get a sidecar
+      ``<file>.sha256`` written on first discovery (computed
+      lazily; subsequent calls read the sidecar). Manifest
+      entries already have SHA from the manifest. Same content-
+      addressed cache: the live env / target fetches by SHA,
+      not by name; renaming a file in ``BTY_IMAGE_ROOT`` does
+      not break a binding.
+    - **``machines.image`` becomes ``machines.image_sha256``**.
+      One-shot migration on bty-web startup: rows with
+      ``image IS NOT NULL AND image_sha256 IS NULL`` get the
+      SHA computed from the named file (or marked unresolved
+      if the file is gone, with a UI banner asking the
+      operator to re-bind). iPXE rendering looks up by SHA,
+      falls back to ``ipxe_unknown`` if the cache is empty
+      and no manifest entry can supply it.
+    - `bty-web` integration: merged `/images` listing returns
+      one entry per SHA with ``names: [...]`` and ``sources:
+      [...]`` arrays, plus ``cached: bool``. Lazy fetch on
+      ``/images/{sha256_or_name}`` GET routed through the
       manager (so a flash request doesn't bypass the queue
       and start a Nth parallel download). New endpoints:
-      `POST /catalog/downloads` to enqueue,
-      `GET /catalog/downloads` to list active + recent,
-      `DELETE /catalog/downloads/{name}` to cancel.
-    - **Catalog page** in the browser UI: table of in-flight +
-      queued + recent downloads, per-row progress bar
-      (bytes / total + percent + ETA when total is known),
-      Cancel button, and a "fetch this image" button on each
-      catalog row that hasn't been cached yet. Auto-refreshes
-      every ~2s via polling -- simpler than SSE for v1 and
-      bty-web has no other websocket / event-stream dependency.
-    - CLI: `bty catalog list`, `bty catalog fetch <name>`,
-      `bty catalog validate <file>`. The CLI's ``fetch`` runs
-      synchronously via the same ``bty.catalog.fetch_to_cache``
-      core (no manager dependency for offline use).
+      ``POST /catalog/downloads`` to enqueue,
+      ``GET /catalog/downloads`` to list active + recent,
+      ``DELETE /catalog/downloads/{name}`` to cancel.
+    - **Unified Images page** in the browser UI: drop the
+      legacy ``/ui/images`` (filename-only) and the proposed
+      ``/ui/catalog`` separate page; one ``/ui/images`` table
+      with columns SHA prefix / Name(s) / Format / Source(s) /
+      Cached / Action. Live downloads table at the bottom of
+      the same page with progress bars + Cancel button.
+      Auto-refreshes every ~2s via polling -- simpler than SSE
+      for v1 and bty-web has no other websocket / event-stream
+      dependency.
+    - CLI: ``bty catalog list``, ``bty catalog fetch <name>``,
+      ``bty catalog validate <file>``. ``bty list images``
+      grows a SHA-prefix column; ``bty flash --image`` accepts
+      ``sha256:<prefix>`` as well as a path or URL.
     - Public URLs only (HTTP / HTTPS, no auth).
     - Cache is unbounded; manual `rm` for eviction, documented
       under a hardening / maintenance section.
     - Walkthrough doc covering manifest authoring + the UI
-      flow + the env knobs.
+      flow + the env knobs + the SHA-binding migration story
+      for upgrading operators.
 
     **Out of scope for v1, captured in Future work**:
 

@@ -97,12 +97,20 @@ def is_tarball_extension(name: str) -> bool:
 
 @dataclass(frozen=True)
 class Image:
-    """A discovered image file. Plain bytes-on-disk metadata only."""
+    """A discovered image file. Plain bytes-on-disk metadata only.
+
+    ``sha256`` is the lower-case hex SHA-256 of the image bytes when
+    a cached value is available (sidecar ``.sha256`` file or
+    in-memory). ``None`` means "not yet computed" -- callers that
+    need it (machine binding, manifest cross-ref) call
+    :func:`ensure_sha256` to materialise it lazily.
+    """
 
     name: str
     path: Path
     format: str
     size_bytes: int
+    sha256: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -110,6 +118,7 @@ class Image:
             "path": str(self.path),
             "format": self.format,
             "size_bytes": self.size_bytes,
+            "sha256": self.sha256,
         }
 
 
@@ -132,13 +141,24 @@ def detect_format(path: Path) -> str | None:
 
 
 def list_images(root: Path) -> list[Image]:
-    """List supported images directly under ``root`` (non-recursive)."""
+    """List supported images directly under ``root`` (non-recursive).
+
+    Reads any cached SHA from the sidecar ``<file>.sha256`` if
+    present (cheap; the operator may have written it themselves
+    or a prior :func:`ensure_sha256` call did). Does NOT compute
+    SHA on the fly -- multi-GiB hashing on every catalog list
+    would be punishing. Callers that need the SHA call
+    :func:`ensure_sha256` for the entries that matter.
+    """
     if not root.exists() or not root.is_dir():
         return []
 
     out: list[Image] = []
     for p in sorted(root.iterdir()):
         if not p.is_file():
+            continue
+        # Skip sidecar files; they're not images themselves.
+        if p.name.endswith(".sha256"):
             continue
         fmt = detect_format(p)
         if fmt is None:
@@ -149,9 +169,87 @@ def list_images(root: Path) -> list[Image]:
                 path=p,
                 format=fmt,
                 size_bytes=p.stat().st_size,
+                sha256=_read_sidecar_sha(p),
             )
         )
     return out
+
+
+def _sidecar_path(image_path: Path) -> Path:
+    """Where the SHA-256 sidecar for ``image_path`` lives.
+
+    Convention: ``foo.img.zst`` -> ``foo.img.zst.sha256``. Matches
+    the sha256sum-style sidecar most release artifacts ship with
+    so an operator can verify manually:
+
+        sha256sum -c foo.img.zst.sha256
+    """
+    return image_path.with_name(image_path.name + ".sha256")
+
+
+_SHA_HEX = frozenset("0123456789abcdef")
+
+
+def _read_sidecar_sha(image_path: Path) -> str | None:
+    """Read a sidecar ``<file>.sha256`` if present + parseable.
+
+    Tolerates two common shapes:
+
+      * Just the hex digest on one line (``abc123...``).
+      * ``sha256sum`` output: ``abc123...  filename`` (we take
+        the first whitespace-separated token).
+
+    Returns ``None`` (not an error) if the sidecar is missing,
+    unreadable, or the digest doesn't look like a 64-char lower-
+    case hex string. The caller will treat None as "not yet
+    computed" and fall back to :func:`ensure_sha256` if it cares.
+    """
+    sidecar = _sidecar_path(image_path)
+    try:
+        head = sidecar.read_text().strip().split(maxsplit=1)
+    except (FileNotFoundError, IsADirectoryError, PermissionError):
+        return None
+    if not head:
+        return None
+    digest = head[0].strip().lower()
+    if len(digest) != 64 or not all(c in _SHA_HEX for c in digest):
+        return None
+    return digest
+
+
+def ensure_sha256(image_path: Path, *, chunk_size: int = 1 << 20) -> str:
+    """Return the SHA-256 of ``image_path``, computing + caching
+    if not already cached.
+
+    Read order:
+
+      1. Sidecar ``<file>.sha256`` -- O(1).
+      2. Otherwise: stream the file through ``hashlib.sha256``
+         (~60s per 8 GiB on a typical NVMe). Write the resulting
+         digest to the sidecar so the next call is O(1).
+
+    The sidecar is written atomically (write to ``.tmp``,
+    ``os.replace``) so a crash during compute doesn't leave a
+    half-written file masquerading as a valid sidecar.
+    """
+    cached = _read_sidecar_sha(image_path)
+    if cached is not None:
+        return cached
+    import hashlib
+
+    digest = hashlib.sha256()
+    with image_path.open("rb") as fh:
+        while True:
+            chunk = fh.read(chunk_size)
+            if not chunk:
+                break
+            digest.update(chunk)
+    hex_digest = digest.hexdigest()
+    sidecar = _sidecar_path(image_path)
+    tmp = sidecar.with_suffix(sidecar.suffix + ".tmp")
+    tmp.write_text(f"{hex_digest}  {image_path.name}\n")
+    os.replace(tmp, sidecar)
+    return hex_digest
 
 
 def inspect_image(path: Path) -> dict[str, Any]:
