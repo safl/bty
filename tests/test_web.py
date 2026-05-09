@@ -807,6 +807,74 @@ def test_serve_image_404_for_missing(app_client: TestClient) -> None:
     assert r.status_code == 404
 
 
+def test_serve_image_resolves_by_sha_dir_scan(tmp_path: Path) -> None:
+    """``GET /images/<sha>`` resolves to the dir-scan file whose
+    ``.sha256`` sidecar holds that digest. Without this, the
+    server-side URLs the /images listing emits would 404 for
+    every bty-tui --server flash."""
+    import hashlib
+
+    image_root = tmp_path / "images"
+    image_root.mkdir()
+    payload = b"fetch-by-sha-dir-scan"
+    sha = hashlib.sha256(payload).hexdigest()
+    (image_root / "demo.img").write_bytes(payload)
+    (image_root / "demo.img.sha256").write_text(f"{sha}  demo.img\n")
+
+    state = tmp_path / "state.db"
+    app = create_app(
+        state_path=state,
+        service_user=TEST_SERVICE_USER,
+        secret_key=TEST_SECRET_KEY,
+        image_root=image_root,
+    )
+    with TestClient(app) as client:
+        r = client.get(f"/images/{sha}")
+        assert r.status_code == 200
+        assert r.content == payload
+
+
+def test_serve_image_resolves_by_sha_cache(tmp_path: Path) -> None:
+    """``GET /images/<sha>`` resolves to the catalog cache when
+    the SHA is present there (manifest blobs that were fetched)."""
+    import hashlib
+
+    image_root = tmp_path / "images"
+    image_root.mkdir()
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    cache_dir = state_dir / "cache"
+    cache_dir.mkdir()
+    payload = b"fetch-by-sha-cache"
+    sha = hashlib.sha256(payload).hexdigest()
+    (cache_dir / sha).write_bytes(payload)
+
+    state = state_dir / "state.db"
+    import os
+
+    os.environ["BTY_STATE_DIR"] = str(state_dir)
+    try:
+        app = create_app(
+            state_path=state,
+            service_user=TEST_SERVICE_USER,
+            secret_key=TEST_SECRET_KEY,
+            image_root=image_root,
+        )
+        with TestClient(app) as client:
+            r = client.get(f"/images/{sha}")
+            assert r.status_code == 200
+            assert r.content == payload
+    finally:
+        os.environ.pop("BTY_STATE_DIR", None)
+
+
+def test_serve_image_404_for_unknown_sha(app_client: TestClient) -> None:
+    """A 64-hex-char key that doesn't match any cached or
+    dir-scan SHA returns 404 cleanly (not a server error)."""
+    r = app_client.get("/images/" + "0" * 64)
+    assert r.status_code == 404
+
+
 # ---------- /catalog endpoints (M22) ---------------------------------------
 
 

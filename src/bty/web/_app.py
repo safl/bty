@@ -366,11 +366,49 @@ def create_app(
         # and the appliance is non-functional for boot_policy=flash.
         return _serve_safe_file(resolved_boot_root, name)
 
-    @app.get("/images/{name}", include_in_schema=False)
-    def serve_image(name: str) -> FileResponse:
-        # Same trust model as /boot. The live env curls this to get
-        # the image bytes that ``bty.image_url`` points at.
-        return _serve_safe_file(resolved_image_root, name)
+    @app.get("/images/{key}", include_in_schema=False)
+    def serve_image(key: str) -> FileResponse:
+        """Serve image bytes by filename OR by SHA-256.
+
+        The /images listing now advertises content-addressed URLs
+        (``/images/<sha>``) so a remote client (bty-tui --server,
+        the iPXE flash live env) can flash an image without
+        knowing its filename. Resolution order:
+
+          1. Literal filename under ``image_root`` -- the legacy
+             path; preserved so existing /images/<name> URLs in
+             logs / scripts keep working.
+          2. SHA-256 (64 hex chars):
+             a. Catalog cache: ``cache_dir/<sha>`` -- manifest
+                blobs that were fetched.
+             b. Dir-scan: a file under ``image_root`` whose
+                ``.sha256`` sidecar contains this digest.
+
+        Same trust model as /boot. The live env curls this to
+        get the bytes that ``bty.image_url`` points at.
+        """
+        # 1. Literal-name fast path. Matches the v0.5.x behaviour
+        #    so old URLs keep resolving.
+        try:
+            return _serve_safe_file(resolved_image_root, key)
+        except HTTPException:
+            pass
+        # 2. SHA-256 path. Reject anything that isn't 64 lower-hex
+        #    so we don't accidentally treat a typo as a SHA.
+        if len(key) == 64 and all(c in "0123456789abcdef" for c in key.lower()):
+            sha = key.lower()
+            # 2a. Catalog cache.
+            cached = catalog_cache_dir / sha
+            if cached.is_file():
+                return FileResponse(cached, media_type="application/octet-stream")
+            # 2b. Dir-scan: walk image_root, match sidecar SHAs.
+            for img in images.list_images(resolved_image_root):
+                if img.sha256 == sha:
+                    return FileResponse(img.path, media_type="application/octet-stream")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"no such image: {key}",
+        )
 
     @app.get(
         "/events/machines",
