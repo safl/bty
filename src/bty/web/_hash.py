@@ -28,6 +28,7 @@ would lock in a shape before the second use case proves out.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import threading
 import time
@@ -126,10 +127,8 @@ class HashManager:
         for w in self._workers:
             w.cancel()
         for w in self._workers:
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await w
-            except asyncio.CancelledError:
-                pass
         self._workers.clear()
 
     async def enqueue(self, name: str) -> HashState:

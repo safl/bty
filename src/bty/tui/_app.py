@@ -56,6 +56,7 @@ Requires the ``[tui]`` install extra (pulls in textual).
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 import subprocess
@@ -309,10 +310,8 @@ class FlashConfirmScreen(ModalScreen[bool]):
         except Exception:
             return
         if confirm.disabled:
-            try:
+            with contextlib.suppress(Exception):
                 self.query_one("#cancel", Button).focus()
-            except Exception:
-                pass
         else:
             confirm.focus()
 
@@ -1498,27 +1497,21 @@ class BtyTui(App[None]):
             self._post_flash = False
             self._selected_disk = None
             self._render_status()
-            try:
+            with contextlib.suppress(Exception):
                 self.query_one("#disks_table", DataTable).focus()
-            except Exception:
-                pass
             return
         stage = self._stage
         if stage == _WizardStage.CONFIRM_FLASH:
             self._selected_disk = None
             self._render_status()
-            try:
+            with contextlib.suppress(Exception):
                 self.query_one("#disks_table", DataTable).focus()
-            except Exception:
-                pass
             return
         if stage == _WizardStage.SELECT_DISK:
             self._selected_image = None
             self._render_status()
-            try:
+            with contextlib.suppress(Exception):
                 self.query_one("#images_table", DataTable).focus()
-            except Exception:
-                pass
             return
         # Stage 1: nothing to undo.
 
@@ -1559,10 +1552,8 @@ class BtyTui(App[None]):
         self._populate_images()
         self._set_status_transient("Filter cleared.")
         # Return focus to the catalog so navigation keys work again.
-        try:
+        with contextlib.suppress(Exception):
             self.query_one("#images_table", DataTable).focus()
-        except Exception:
-            pass
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         if event.input.id != "filter-input":
@@ -1570,10 +1561,8 @@ class BtyTui(App[None]):
         self._filter = event.value.strip()
         self._populate_images()
         # Move focus back to the table so navigation keys work.
-        try:
+        with contextlib.suppress(Exception):
             self.query_one("#images_table", DataTable).focus()
-        except Exception:
-            pass
 
     @property
     def _stage(self) -> _WizardStage:
@@ -1611,10 +1600,8 @@ class BtyTui(App[None]):
             self._selected_image = tui_img
             self._render_status()
             if prev_stage == _WizardStage.SELECT_IMAGE:
-                try:
+                with contextlib.suppress(Exception):
                     self.query_one("#disks_table", DataTable).focus()
-                except Exception:
-                    pass
         elif table_id == "disks_table":
             disk = self._disks_by_key.get(key)
             if disk is None:
@@ -1622,10 +1609,8 @@ class BtyTui(App[None]):
             self._selected_disk = disk
             self._render_status()
             if prev_stage == _WizardStage.SELECT_DISK:
-                try:
+                with contextlib.suppress(Exception):
                     self.query_one("#flash-btn", Button).focus()
-                except Exception:
-                    pass
 
     def _render_status(self) -> None:
         """Refresh the action-pane state.
@@ -1700,20 +1685,16 @@ class BtyTui(App[None]):
         source = (
             f"{self._server_url}/images" if self._server_url is not None else str(self._image_root)
         )
-        try:
+        with contextlib.suppress(Exception):
             self.query_one("#pane-1", Vertical).border_title = f"  1: Pick an image from {source}  "
-        except Exception:
-            pass
         # Clear any in-flight selection since the catalog changed.
         self._selected_image = None
         self._selected_disk = None
         self._post_flash = False
         self._populate_images()
         self._render_status()
-        try:
+        with contextlib.suppress(Exception):
             self.query_one("#images_table", DataTable).focus()
-        except Exception:
-            pass
         self._set_status_transient(f"Source: {source}")
 
     @work(exclusive=True)
@@ -1832,10 +1813,8 @@ class BtyTui(App[None]):
         if success:
             self._post_flash = True
             self._render_status()
-            try:
+            with contextlib.suppress(Exception):
                 self.query_one("#flash-btn", Button).focus()
-            except Exception:
-                pass
 
     # ---------- helpers ------------------------------------------------------
 

@@ -14,6 +14,7 @@ appliance serving a homelab fleet.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 
@@ -73,10 +74,8 @@ class MachineEventBus:
 
     def _fanout(self, event: MachineEvent) -> None:
         for queue in list(self._subscribers):
-            try:
+            with contextlib.suppress(asyncio.QueueFull):
                 queue.put_nowait(event)
-            except asyncio.QueueFull:
-                pass
 
     async def subscribe(self) -> AsyncGenerator[MachineEvent, None]:
         """Yield events for one subscriber. Cleans up on cancellation."""
@@ -86,10 +85,8 @@ class MachineEventBus:
             while True:
                 yield await queue.get()
         finally:
-            try:
+            with contextlib.suppress(ValueError):
                 self._subscribers.remove(queue)
-            except ValueError:
-                pass
 
 
 def sse_format(event_name: str, data: str) -> bytes:

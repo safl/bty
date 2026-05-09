@@ -51,7 +51,7 @@ import tomllib
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeAlias
 from urllib.parse import urlparse
 
 # Default image root. Operators override via ``--image-root`` or the
@@ -272,7 +272,7 @@ def read_bri(path: Path) -> RemoteImage:
     if not isinstance(url, str) or not url.strip():
         raise BriError(f"{path}: missing required field: url")
     url = url.strip()
-    if not (url.startswith("http://") or url.startswith("https://")):
+    if not (url.startswith(("http://", "https://"))):
         raise BriError(f"{path}: url must start with http:// or https://, got {url!r}")
 
     name = raw.get("name")
@@ -581,12 +581,12 @@ class HashCancelled(Exception):
     cleanly into ``status="cancelled"``."""
 
 
-HashProgressCallback = "Callable[[int, int], None]"
+HashProgressCallback: TypeAlias = Callable[[int, int], None]
 """Signature: ``progress(bytes_hashed, total_bytes)``. Called once
 per chunk processed; ``total_bytes`` is the file's pre-hash size
 (``Path.stat().st_size``)."""
 
-HashCancelCheck = "Callable[[], bool]"
+HashCancelCheck: TypeAlias = Callable[[], bool]
 """Signature: ``cancel() -> bool``. Polled between chunks; returning
 ``True`` raises :class:`HashCancelled`. Same shape as the cancel
 callback :func:`bty.catalog.fetch_to_cache` accepts."""

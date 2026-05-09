@@ -573,7 +573,7 @@ def test_list_images_does_not_surface_bri_descriptors(tmp_path: Path) -> None:
 
     assert r.status_code == 200
     rows = r.json()
-    assert all("Demo" != row["name"] for row in rows), (
+    assert all(row["name"] != "Demo" for row in rows), (
         f"unexpected .bri row in bty-web /images output: {rows}"
     )
 

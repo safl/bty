@@ -31,6 +31,7 @@ Retargetable: False
 
 from __future__ import annotations
 
+import contextlib
 import errno
 import hashlib
 import logging as log
@@ -201,10 +202,8 @@ def _customize(raw_path: Path, bty_media: Path) -> int:
         finally:
             _run_sudo(["umount", str(boot_mnt)])
             _run_sudo(["umount", str(mnt)])
-            try:
+            with contextlib.suppress(OSError):
                 mnt.rmdir()
-            except OSError:
-                pass
         return rc
     finally:
         _run_sudo(["losetup", "--detach", loop])

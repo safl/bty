@@ -27,6 +27,7 @@ of any asyncio dependency.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import threading
 import time
@@ -148,10 +149,8 @@ class DownloadManager:
         for w in self._workers:
             w.cancel()
         for w in self._workers:
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await w
-            except asyncio.CancelledError:
-                pass
         self._workers.clear()
 
     async def enqueue(self, name: str) -> DownloadState:

@@ -21,6 +21,7 @@ loop device live in ``tests/test_flash_integration.py``.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
@@ -34,7 +35,7 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import IO, Any
+from typing import IO, Any, TypeAlias
 
 from bty import images
 
@@ -78,7 +79,7 @@ class FlashProgress:
     bytes_written: int | None = None
 
 
-ProgressCallback = Callable[[FlashProgress], None]
+ProgressCallback: TypeAlias = Callable[[FlashProgress], None]
 
 
 def _emit(progress: ProgressCallback | None, event: str, **fields: Any) -> None:
@@ -133,7 +134,7 @@ def _pump_dd_progress(
         if not lines:
             continue
         # Keep the partial trailing line for the next read.
-        if buf.endswith("\n") or buf.endswith("\r"):
+        if buf.endswith(("\n", "\r")):
             buf = ""
         else:
             buf = lines[-1]
@@ -1016,10 +1017,8 @@ def _flash_qcow2_from_url(url: str, target: Path) -> None:
             raise FlashError(f"curl exited {rc} fetching {url}")
         _flash_qcow2(tmp_path, target)
     finally:
-        try:
+        with contextlib.suppress(FileNotFoundError):
             tmp_path.unlink()
-        except FileNotFoundError:
-            pass
 
 
 def _sync_target(target: Path) -> None:

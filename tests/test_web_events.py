@@ -9,6 +9,7 @@ adding a ``pytest-asyncio`` dep just for this file.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 
 from bty.web._events import MachineEvent, MachineEventBus, sse_format
 
@@ -85,10 +86,8 @@ def test_event_bus_drops_for_full_subscriber() -> None:
         for i in range(5):
             bus.publish(MachineEvent(name="machines-update", html=f"<tr id={i}/>"))
         task.cancel()
-        try:
+        with contextlib.suppress(asyncio.CancelledError):
             await task
-        except asyncio.CancelledError:
-            pass
 
     asyncio.run(scenario())
 

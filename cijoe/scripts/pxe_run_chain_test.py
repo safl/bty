@@ -287,7 +287,6 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         del req, fp, code, msg, headers, newurl
-        return None
 
 
 def _login(host, port, password):

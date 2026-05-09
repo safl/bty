@@ -28,6 +28,7 @@ module from the CLI does NOT pull in fastapi or textual.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import os
 import tempfile
@@ -36,7 +37,7 @@ import urllib.request
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import IO, Any
+from typing import IO, Any, Self, TypeAlias
 
 from bty import images as _images
 
@@ -85,7 +86,7 @@ class CatalogEntry:
     description: str | None = None
 
     @classmethod
-    def from_dict(cls, raw: dict[str, Any]) -> CatalogEntry:
+    def from_dict(cls, raw: dict[str, Any]) -> Self:
         for required in ("name", "src", "sha256"):
             if required not in raw:
                 raise CatalogError(
@@ -223,12 +224,12 @@ def is_cached(entry: CatalogEntry, cache_dir: Path) -> bool:
     return cached.is_file()
 
 
-ProgressCallback = Callable[[int, "int | None"], None]
+ProgressCallback: TypeAlias = Callable[[int, "int | None"], None]
 """Signature: ``progress(bytes_downloaded, total_bytes_or_None)``.
 Called once per chunk written. ``total_bytes`` is the upstream
 ``Content-Length`` if the server sent one (most do), else ``None``."""
 
-CancelCheck = Callable[[], bool]
+CancelCheck: TypeAlias = Callable[[], bool]
 """Signature: ``cancel() -> bool``. Polled between chunks; returning
 ``True`` raises :class:`CatalogCancelled`. Use this with
 ``threading.Event.is_set`` or ``asyncio.Event.is_set`` so the
@@ -309,10 +310,8 @@ def fetch_to_cache(
     except BaseException:
         # Any failure (network, SHA mismatch, cancellation,
         # KeyboardInterrupt) leaves no half-written cache entry behind.
-        try:
+        with contextlib.suppress(FileNotFoundError):
             tmp_path.unlink()
-        except FileNotFoundError:
-            pass
         raise
 
 
