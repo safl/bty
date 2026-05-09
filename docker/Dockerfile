@@ -29,6 +29,9 @@ FROM python:3.13-slim-bookworm AS runtime
 #   tini: PID-1 init that forwards SIGTERM cleanly so
 #     ``docker stop`` doesn't fall back to SIGKILL after 10s.
 #   ca-certificates: HTTPS uploads / downloads.
+#   curl: HEALTHCHECK probes ``/`` so docker/orchestrators detect a
+#     wedged uvicorn (Python deadlock, OOM, etc.) without needing
+#     to add curl per-deployment.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
         libpam0g \
@@ -36,6 +39,7 @@ RUN apt-get update \
         qemu-utils \
         tini \
         ca-certificates \
+        curl \
  && rm -rf /var/lib/apt/lists/*
 
 # Install bty-lab[web] from the wheel staged by the workflow into
@@ -83,6 +87,14 @@ ENV BTY_STATE_DIR=/var/lib/bty \
     BTY_WEB_PORT=8080
 
 EXPOSE 8080
+
+# ``GET /`` redirects (303) to /ui/login on a healthy server, which
+# curl -f treats as success. A wedged uvicorn or a process that
+# crashed with the port held would fail to respond. 30s start-period
+# covers cold-start (Python import, sqlite migrations); after that,
+# probe every 30s, 5s timeout, three failures = unhealthy.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+    CMD curl -fsS http://127.0.0.1:8080/ -o /dev/null || exit 1
 
 COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod 0755 /entrypoint.sh

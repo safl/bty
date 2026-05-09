@@ -263,6 +263,38 @@ provisions to.
   end up at the same `bty-tui` / `bty flash` interface.
 - Swap images per-target without rebooting the server.
 
+## Post-deploy hardening
+
+The cooked image ships with appliance defaults that prioritise
+"works on first boot" over "locked down for the open internet".
+A few things to address before exposing the server beyond a
+trusted LAN:
+
+- **Default credentials.** Rotate `bty / bty` (browser UI) and
+  `odus / odus` (SSH admin) on first login: `sudo passwd bty`,
+  `sudo passwd odus`. The `/etc/issue` banner reminds you on
+  every console login.
+- **Per-instance SSH host keys.** `bty-ssh-host-keys.service`
+  runs `ssh-keygen -A` on first boot of each cooked instance, so
+  every appliance has unique host keys (added in v0.5.14;
+  pre-v0.5.14 deployments share the bake-time keys -- rotate
+  manually with `sudo rm /etc/ssh/ssh_host_* && sudo ssh-keygen
+  -A && sudo systemctl restart ssh`).
+- **No built-in firewall.** The image does not ship with `ufw` or
+  `nftables` rules. Listening ports out of the box: `:8080`
+  (bty-web HTTP), `:22` (sshd), `:69` UDP (TFTP, dormant until a
+  PXE client asks), and `:67` UDP (DHCP-proxy, dormant until you
+  click "Activate" in Settings). For an internet-exposed deploy,
+  put the appliance behind a reverse proxy / VPN, or `apt
+  install ufw` and constrain inbound to your management IP.
+- **Manual security upgrades.** The image masks `apt-daily.timer`
+  and `apt-daily-upgrade.timer` so a stock Debian boot does not
+  wake up doing 30s of disk IO that competes with the bty
+  services. Trade-off: you do `sudo apt update && sudo apt
+  upgrade` yourself on whatever cadence you choose. Schedule a
+  cron / systemd-timer if you want it automatic on long-running
+  installs.
+
 ## Known limitations
 
 - **PXE proxy-DHCP** assumes the existing LAN already has a real

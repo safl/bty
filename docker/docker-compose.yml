@@ -4,10 +4,14 @@
 #   docker compose -f docker/docker-compose.yml up
 #   -> http://localhost:8080/ui   (login: bty / bty)
 #
-# Volumes are bind-mounted under ``./bty-data/`` in the working
-# directory so an operator can drop ``.img.zst`` / ``.qcow2`` /
-# ``.img.gz`` files into ``./bty-data/images/`` from the host
-# and they'll show up in the catalog after a refresh.
+# Uses a docker-managed named volume (``bty-data``) so the in-
+# container bty user (uid 999) owns it without any host-side
+# chown step. To inspect or feed images from the host filesystem
+# instead:
+#
+#   1. Pre-create the dir owned by uid 999 ("the bty user"):
+#        mkdir -p ./bty-data && sudo chown -R 999:999 ./bty-data
+#   2. Replace the volume line with: ``- ./bty-data:/var/lib/bty``
 #
 # Production deploys should use the bty-server appliance instead
 # (this is a trial / image-library shape; no PXE proxy-DHCP).
@@ -19,9 +23,12 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - ./bty-data:/var/lib/bty
+      - bty-data:/var/lib/bty
     # Override defaults if you want to point clients at a public
     # hostname or change the port -- BTY_WEB_HOST / BTY_WEB_PORT
     # are read at startup.
     # environment:
     #   BTY_WEB_PORT: "8080"
+
+volumes:
+  bty-data:
