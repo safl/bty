@@ -139,6 +139,99 @@ def test_list_images_rejects_bad_sidecar(tmp_path: Path) -> None:
     assert found[0].sha256 is None
 
 
+def test_merge_with_catalog_dedupes_by_sha(tmp_path: Path) -> None:
+    """A directory-scan image and a manifest entry with the same
+    SHA collapse into one ``UnifiedImage`` whose ``names`` and
+    ``sources`` arrays carry both sides."""
+    # Stub catalog entry shape; merge_with_catalog uses structural
+    # access (``entry.sha256`` / ``entry.name`` / ``entry.src`` /
+    # ``entry.format`` / ``entry.size_bytes``) so a plain
+    # SimpleNamespace is enough.
+    from types import SimpleNamespace
+
+    image_root = tmp_path / "imgs"
+    cache_dir = tmp_path / "cache"
+    image_root.mkdir()
+    cache_dir.mkdir()
+    sha = "a" * 64
+    _touch(image_root / "local.img", size=8)
+    (image_root / "local.img.sha256").write_text(f"{sha}  local.img\n")
+
+    manifest = SimpleNamespace(
+        sha256=sha,
+        name="upstream.img",
+        src="https://example.com/upstream.img",
+        format="img",
+        size_bytes=8,
+    )
+    merged = images.merge_with_catalog(image_root, [manifest], cache_dir)
+    assert len(merged) == 1
+    u = merged[0]
+    assert u.sha256 == sha
+    assert set(u.names) == {"local.img", "upstream.img"}
+    kinds = sorted(s.kind for s in u.sources)
+    assert kinds == ["local", "manifest"]
+    assert u.cached is True  # local file makes it cached
+
+
+def test_merge_with_catalog_unhashed_dirscan_kept_separate(tmp_path: Path) -> None:
+    """An unhashed dir-scan file (no sidecar) becomes its own
+    UnifiedImage entry with sha256=None. Cannot dedupe by SHA so
+    we keep it visible -- the operator can find it + trigger
+    hashing -- but it sorts after the SHA-keyed entries."""
+    from types import SimpleNamespace
+
+    image_root = tmp_path / "imgs"
+    cache_dir = tmp_path / "cache"
+    image_root.mkdir()
+    cache_dir.mkdir()
+    _touch(image_root / "fresh.img", size=8)  # no sidecar
+
+    manifest_sha = "b" * 64
+    manifest = SimpleNamespace(
+        sha256=manifest_sha,
+        name="other.img",
+        src="https://example.com/other.img",
+        format="img",
+        size_bytes=64,
+    )
+    merged = images.merge_with_catalog(image_root, [manifest], cache_dir)
+    # SHA-keyed first, unhashed last.
+    assert merged[0].sha256 == manifest_sha
+    assert merged[1].sha256 is None
+    assert merged[1].names == ("fresh.img",)
+
+
+def test_merge_with_catalog_manifest_only_uses_cache_dir(tmp_path: Path) -> None:
+    """A manifest entry with no matching local file shows
+    ``cached=True`` iff the SHA exists under the content-
+    addressed cache directory."""
+    from types import SimpleNamespace
+
+    image_root = tmp_path / "imgs"
+    cache_dir = tmp_path / "cache"
+    image_root.mkdir()
+    cache_dir.mkdir()
+    sha = "c" * 64
+    (cache_dir / sha).write_bytes(b"cached blob")
+
+    manifest = SimpleNamespace(
+        sha256=sha,
+        name="cached.img",
+        src="https://example.com/cached.img",
+        format="img",
+        size_bytes=11,
+    )
+    merged = images.merge_with_catalog(image_root, [manifest], cache_dir)
+    assert merged[0].sha256 == sha
+    assert merged[0].cached is True
+
+    # Same manifest entry but the cache file is absent.
+    (cache_dir / sha).unlink()
+    merged2 = images.merge_with_catalog(image_root, [manifest], cache_dir)
+    assert merged2[0].cached is False
+
+
 def test_ensure_sha256_computes_and_writes_sidecar(tmp_path: Path) -> None:
     """First call hashes the file + writes the sidecar; second call
     is O(1) because the sidecar is cached."""

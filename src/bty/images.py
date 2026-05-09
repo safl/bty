@@ -47,6 +47,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -215,6 +216,173 @@ def _read_sidecar_sha(image_path: Path) -> str | None:
     if len(digest) != 64 or not all(c in _SHA_HEX for c in digest):
         return None
     return digest
+
+
+@dataclass(frozen=True)
+class ImageSource:
+    """One way to obtain an image's bytes.
+
+    ``kind`` distinguishes between an on-disk file (``"local"``,
+    ``location`` is an absolute filesystem path) and a manifest
+    entry (``"manifest"``, ``location`` is the upstream HTTP URL).
+    A single :class:`UnifiedImage` may carry multiple sources --
+    the same SHA-256 could be present locally AND declared in the
+    catalog manifest, in which case both sources are listed and
+    flash code is free to pick whichever is nearest.
+    """
+
+    kind: str  # "local" | "manifest"
+    location: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"kind": self.kind, "location": self.location}
+
+
+@dataclass(frozen=True)
+class UnifiedImage:
+    """SHA-keyed image record. Merges directory-scan + catalog
+    manifest entries that share a content hash so the API / UI /
+    machine bindings see one row per actual image, not one per
+    name-where-it-was-found.
+
+    ``sha256`` is the durable identity (None for an
+    unhashed-dir-scan-only entry the operator hasn't yet
+    materialised; the row exists so the operator can find it +
+    trigger hashing, but it cannot be bound to a machine until
+    the SHA is computed). ``names`` collects every label the
+    image goes by -- typically one (filename or manifest entry
+    name), occasionally two when a dir-scan file's SHA matches a
+    manifest entry. ``sources`` lists every fetch path; ``cached``
+    is True if either a local file exists or the content-addressed
+    cache holds the SHA.
+    """
+
+    sha256: str | None
+    names: tuple[str, ...]
+    format: str | None
+    size_bytes: int | None
+    sources: tuple[ImageSource, ...]
+    cached: bool
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "sha256": self.sha256,
+            "names": list(self.names),
+            "format": self.format,
+            "size_bytes": self.size_bytes,
+            "sources": [s.to_dict() for s in self.sources],
+            "cached": self.cached,
+        }
+
+
+def merge_with_catalog(
+    image_root: Path,
+    manifest_entries: Iterable[Any],
+    cache_dir: Path,
+) -> list[UnifiedImage]:
+    """Build the SHA-keyed unified image listing.
+
+    Inputs:
+
+      * ``image_root``: directory scanned via :func:`list_images`.
+        Files with a sidecar ``<file>.sha256`` get their SHA
+        populated; files without remain unhashed (sha256=None
+        in the result).
+      * ``manifest_entries``: iterable of
+        ``bty.catalog.CatalogEntry`` objects (passed by structural
+        type so this module does not import ``bty.catalog`` --
+        keeps the dependency graph one-directional: ``bty.catalog``
+        knows about ``bty.images``, never the reverse).
+      * ``cache_dir``: where the content-addressed cache lives
+        (``${BTY_STATE_DIR}/cache``). Used to determine ``cached``
+        for SHAs that are NOT present as a local file.
+
+    Merge rule: directory-scan images and manifest entries with
+    the same SHA-256 collapse into one ``UnifiedImage`` whose
+    ``names`` and ``sources`` arrays contain both sides. SHAs
+    seen only in one source produce single-name single-source
+    entries. Unhashed dir-scan files get one entry each, keyed
+    by name (no SHA available to dedupe).
+    """
+    by_sha: dict[str, UnifiedImage] = {}
+    unhashed: list[UnifiedImage] = []
+
+    # Pass 1: directory scan.
+    for img in list_images(image_root):
+        local = ImageSource(kind="local", location=str(img.path))
+        if img.sha256 is None:
+            unhashed.append(
+                UnifiedImage(
+                    sha256=None,
+                    names=(img.name,),
+                    format=img.format,
+                    size_bytes=img.size_bytes,
+                    sources=(local,),
+                    cached=True,  # the local file IS its own cache
+                )
+            )
+            continue
+        existing = by_sha.get(img.sha256)
+        if existing is None:
+            by_sha[img.sha256] = UnifiedImage(
+                sha256=img.sha256,
+                names=(img.name,),
+                format=img.format,
+                size_bytes=img.size_bytes,
+                sources=(local,),
+                cached=True,
+            )
+        else:
+            # Multiple local files with the same SHA (rare but
+            # possible if the operator copied an image). Merge.
+            new_names = (
+                existing.names if img.name in existing.names else (*existing.names, img.name)
+            )
+            by_sha[img.sha256] = UnifiedImage(
+                sha256=existing.sha256,
+                names=new_names,
+                format=existing.format or img.format,
+                size_bytes=existing.size_bytes or img.size_bytes,
+                sources=(*existing.sources, local),
+                cached=True,
+            )
+
+    # Pass 2: catalog manifest entries.
+    for entry in manifest_entries:
+        manifest_src = ImageSource(kind="manifest", location=str(entry.src))
+        cache_hit = (cache_dir / entry.sha256).is_file()
+        existing = by_sha.get(entry.sha256)
+        if existing is None:
+            by_sha[entry.sha256] = UnifiedImage(
+                sha256=entry.sha256,
+                names=(entry.name,),
+                format=entry.format,
+                size_bytes=entry.size_bytes,
+                sources=(manifest_src,),
+                cached=cache_hit,
+            )
+        else:
+            new_names = (
+                existing.names if entry.name in existing.names else (*existing.names, entry.name)
+            )
+            by_sha[entry.sha256] = UnifiedImage(
+                sha256=existing.sha256,
+                names=new_names,
+                format=existing.format or entry.format,
+                size_bytes=existing.size_bytes or entry.size_bytes,
+                sources=(*existing.sources, manifest_src),
+                # Cached if EITHER a local file exists (already
+                # marked True in pass 1) OR the content-addressed
+                # cache holds the SHA.
+                cached=existing.cached or cache_hit,
+            )
+
+    # Stable order: SHA-keyed entries by first name, then unhashed
+    # dir-scan tail also by name, so the UI / CLI / API output is
+    # deterministic across runs.
+    sha_keyed = sorted(by_sha.values(), key=lambda u: u.names[0])
+    unhashed.sort(key=lambda u: u.names[0])
+    return sha_keyed + unhashed
 
 
 def ensure_sha256(image_path: Path, *, chunk_size: int = 1 << 20) -> str:
