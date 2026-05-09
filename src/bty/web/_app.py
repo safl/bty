@@ -614,16 +614,21 @@ def create_app(
         result = await _stream_upload(request, resolved_image_root, name)
         # Image catalog count changes; refresh the dashboard fragment.
         publish_state_changed()
-        # Trigger an import for the just-uploaded file. If a
-        # ``.sha256`` sidecar was uploaded alongside (or already
-        # existed), enqueue is a no-op via the immediate-complete
-        # shortcut.
-        try:
-            await hash_manager.enqueue(name)
-        except FileNotFoundError:
-            # ``_stream_upload`` raised earlier if the write failed,
-            # so this should never happen -- guarded for safety.
-            pass
+        # Trigger an import for the just-uploaded file UNLESS it's
+        # itself a sidecar (operators occasionally upload the
+        # ``<file>.sha256`` after the image): hashing a sidecar
+        # would be nonsense + would write a ``.sha256.sha256``
+        # cousin. ``list_images`` already filters sidecars; the
+        # auto-import lifespan would have skipped this entry, so
+        # we mirror that guard here.
+        if not name.endswith(".sha256"):
+            try:
+                await hash_manager.enqueue(name)
+            except FileNotFoundError:
+                # ``_stream_upload`` raised earlier if the write
+                # failed, so this should never happen -- guarded
+                # for safety.
+                pass
         return result
 
     @app.put(
