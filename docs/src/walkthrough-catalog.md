@@ -67,25 +67,29 @@ operator can verify by hand:
 sha256sum -c demo.img.zst.sha256
 ```
 
-Three ways to populate the sidecar:
+bty-web **auto-imports** at startup: it walks `BTY_IMAGE_ROOT`
+once and enqueues a hash job for every file without a sidecar.
+The HashManager runs them serially in the background (default
+parallelism is **1** -- on small hardware like a Pi 4 or an old
+NUC, two simultaneous SHA-256 computations saturate IO + CPU
+and both finish at half speed, so serial uses the same wall
+clock without tanking responsiveness; override via
+`BTY_HASH_MAX_PARALLEL` on fast hosts). Until a file's sidecar
+lands, the file does not appear in `/images` listings -- it
+becomes flashable once imported.
 
-1. **The bty-web Hash button.** On `/ui/images`, unhashed rows
-   show a yellow "Hash" button. Clicking enqueues a background
-   hash job (visible in the Hashes pane below the catalog table)
-   that writes the sidecar atomically. Default parallelism is **1**:
-   on small hardware (Pi 4, old NUCs) two simultaneous SHA-256
-   computations saturate IO + CPU and both finish at half speed,
-   so serialising costs nothing in wall time and keeps the box
-   responsive. Override via `BTY_HASH_MAX_PARALLEL` on fast hosts.
-2. **`sha256sum`.** Operator-side, before dropping the file into
-   `BTY_IMAGE_ROOT`:
+Operators who drop a file *after* server startup can either:
 
-   ```bash
-   sha256sum demo.img.zst > demo.img.zst.sha256
-   ```
-3. **Lazy compute.** `bty.images.ensure_sha256(path)` -- called
-   internally by various code paths -- writes the sidecar on
-   first need.
+- Restart bty-web (the next startup picks the new file up).
+- Pre-compute the sidecar with `sha256sum` before dropping --
+  the auto-import skips it as already-hashed:
+
+  ```bash
+  sha256sum demo.img.zst > demo.img.zst.sha256
+  ```
+- Hit the Hash button in the bty-web UI for an explicit
+  re-trigger (useful when you want to confirm the bytes you
+  copied across haven't been corrupted by the transfer).
 
 ## Browser UI
 
@@ -105,37 +109,38 @@ auto-reloads (after a brief delay so the 100% bar renders) so
 the catalog table picks up the new `cached` / `sha256` state
 without manual refresh.
 
-## CLI
+## CLI (local mode -- intentionally simple)
 
 ```bash
-bty catalog validate [PATH]
-bty catalog list [--manifest PATH]
-bty catalog fetch <name>          # blocks while downloading
-
-bty list images [--image-root PATH]   # content-keyed unified view
+bty list images [--image-root PATH]
 bty inspect image <path>
-bty flash --image ref:<prefix> --target /dev/sdX --yes
+bty flash --image PATH_OR_URL --target /dev/sdX --yes
 ```
 
-`bty list images` shows a `ref` column (12-char prefix of the
-content hash) and a `sources` column. Unhashed dir-scan files
-appear as `(unhashed)` in the ref column so operators know they
-need to be hashed before binding to a machine.
+The local CLI is dir-scan only -- no manifest, no SHA, no
+catalog. ``bty list images`` answers "what flashable files are
+in this directory?" and stops there. ``bty flash --image``
+accepts a path or an HTTP URL.
 
-`bty flash --image` accepts three forms:
+That's deliberate: the catalog story is a **server** concern.
+Operators who want the unified catalog (manifest + dir-scan +
+auto-imported sidecars) interact with it through bty-web -- in
+the browser, or via ``bty-tui --server URL`` which consumes
+``GET /images`` and gets a single ``url`` per entry that the
+client just flashes from. No client-side resolution logic.
 
-- a local path: `--image /var/lib/bty/images/foo.img.zst`
-- an HTTP URL: `--image http://server:8080/images/foo.img.zst`
-- a catalog ref: `--image ref:0123456789ab` -- resolved via the
-  unified catalog. The CLI prefers a local source if one exists;
-  otherwise the first manifest URL.
+For server-side manifest management:
 
-The `ref:` prefix keeps the hash algorithm an implementation
-detail of bty's catalog -- today it is SHA-256 (the same string
-your `sha256sum` produces, written into the `<file>.sha256`
-sidecar) but the operator interface does not bake that in. A
-future bty could swap to BLAKE3 (or whatever) without changing
-the CLI surface.
+```bash
+bty catalog validate [PATH]   # parse + schema-check a TOML manifest
+bty catalog list              # show entries with cached state
+bty catalog fetch <name>      # blocks while downloading; useful for
+                              #   batch / scripted cache-warming
+```
+
+These run against the configured manifest path
+(``BTY_CATALOG_FILE`` or ``${BTY_STATE_DIR}/catalog.toml``); they
+are administrative tools, not part of the operator's flash flow.
 
 ## HTTP API
 
