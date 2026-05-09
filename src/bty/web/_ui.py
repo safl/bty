@@ -281,11 +281,19 @@ def register_ui_routes(
         dependencies=[Depends(require_ui_auth)],
     )
     def ui_images(request: Request) -> HTMLResponse:
-        listed = bty_images.list_images(image_root)
+        """Unified images page: SHA-keyed merge of dir-scan +
+        catalog manifest entries, plus the live downloads pane
+        (table of in-flight + recent fetches with progress + cancel).
+
+        The page renders the catalog + downloads via embedded JS
+        polling ``/catalog/downloads`` every ~2s so an operator
+        watches a fetch finish without manually refreshing.
+        """
+        unified = list_unified_images() if list_unified_images is not None else []
         return render(
             "ui/images.html",
             request,
-            images=listed,
+            unified=unified,
             image_root=str(image_root),
         )
 

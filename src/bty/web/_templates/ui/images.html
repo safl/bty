@@ -3,39 +3,278 @@
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
     <h1 class="h3 mb-0"><i class="bi bi-disc me-2"></i>Images</h1>
-    <span class="text-muted small">{{ images|length }} under <code>{{ image_root }}</code></span>
+    <span class="text-muted small">
+        {{ unified|length }} entr{{ "y" if unified|length == 1 else "ies" }}
+        | image-root <code>{{ image_root }}</code>
+    </span>
 </div>
 
-{% if not images %}
+{% if not unified %}
 <div class="alert alert-light border">
     <i class="bi bi-info-circle me-2"></i>
-    No images found under <code>{{ image_root }}</code>. Drop
-    <code>.qcow2</code> / <code>.img</code> / <code>.img.zst</code> /
-    <code>.img.xz</code> / <code>.img.gz</code> / <code>.img.bz2</code>
-    files in that directory and refresh.
+    No images found. Drop <code>.qcow2</code> / <code>.img</code> /
+    <code>.img.zst</code> / <code>.img.xz</code> / <code>.img.gz</code> /
+    <code>.img.bz2</code> files under <code>{{ image_root }}</code>, or
+    author a <code>catalog.toml</code> with manifest entries pointing at
+    upstream URLs (see the bty docs for the schema). Refresh the page
+    after either to see them here.
 </div>
 {% else %}
-<div class="card">
+
+<div class="card mb-3">
+    <div class="card-header bg-light fw-semibold">
+        <i class="bi bi-list-ul me-1"></i>Unified catalog (dir scan + manifest, SHA-keyed)
+    </div>
     <div class="table-responsive">
         <table class="table table-hover mb-0 align-middle">
             <thead class="table-light">
                 <tr>
-                    <th>Name</th>
+                    <th>Name(s)</th>
+                    <th>SHA-256</th>
                     <th>Format</th>
-                    <th>Size (bytes)</th>
+                    <th>Sources</th>
+                    <th>Cached</th>
+                    <th class="text-end" style="width: 1%; white-space: nowrap;">Action</th>
                 </tr>
             </thead>
             <tbody>
-                {% for img in images %}
+                {% for u in unified %}
                 <tr>
-                    <td><i class="bi bi-file-earmark-binary text-secondary me-2"></i>{{ img.name }}</td>
-                    <td><span class="badge bg-secondary">{{ img.format }}</span></td>
-                    <td><code>{{ img.size_bytes }}</code></td>
+                    <td>
+                        <i class="bi bi-file-earmark-binary text-secondary me-1"></i>
+                        {% for n in u.names %}
+                        <code>{{ n }}</code>{% if not loop.last %}, {% endif %}
+                        {% endfor %}
+                    </td>
+                    <td>
+                        {% if u.sha256 %}
+                        <code title="{{ u.sha256 }}">{{ u.sha256[:12] }}...</code>
+                        {% else %}
+                        <span class="badge bg-warning text-dark" title="no .sha256 sidecar yet; cannot bind to a machine until hashed">unhashed</span>
+                        {% endif %}
+                    </td>
+                    <td><span class="badge bg-secondary">{{ u.format or "?" }}</span></td>
+                    <td class="small">
+                        {% for s in u.sources %}
+                        {% if s.kind == "local" %}
+                        <i class="bi bi-hdd text-muted me-1" title="local file"></i><code>{{ s.location }}</code>
+                        {% else %}
+                        <i class="bi bi-cloud text-muted me-1" title="manifest src"></i><code>{{ s.location }}</code>
+                        {% endif %}
+                        {% if not loop.last %}<br>{% endif %}
+                        {% endfor %}
+                    </td>
+                    <td>
+                        {% if u.cached %}
+                        <span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>cached</span>
+                        {% else %}
+                        <span class="badge bg-light text-dark border">available</span>
+                        {% endif %}
+                    </td>
+                    <td class="text-end">
+                        {% if u.sha256 and not u.cached %}
+                        {# Manifest-only entry not yet in cache: a fetch
+                           button enqueues via the DownloadManager. #}
+                        <button type="button"
+                                class="btn btn-sm btn-primary bty-fetch-btn"
+                                data-name="{{ u.names[0] }}">
+                            <i class="bi bi-cloud-arrow-down me-1"></i>Fetch
+                        </button>
+                        {% else %}
+                        <span class="text-muted small">-</span>
+                        {% endif %}
+                    </td>
                 </tr>
                 {% endfor %}
             </tbody>
         </table>
     </div>
 </div>
+
+<div class="card">
+    <div class="card-header bg-light fw-semibold d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-arrow-down-circle me-1"></i>Downloads</span>
+        <span class="text-muted small bty-poll-status">refreshing...</span>
+    </div>
+    <div class="table-responsive">
+        <table class="table mb-0 align-middle">
+            <thead class="table-light">
+                <tr>
+                    <th>Name</th>
+                    <th>Status</th>
+                    <th style="width: 30%;">Progress</th>
+                    <th>Bytes</th>
+                    <th class="text-end" style="width: 1%; white-space: nowrap;">Action</th>
+                </tr>
+            </thead>
+            <tbody class="bty-downloads-tbody">
+                <tr><td colspan="5" class="text-muted">No downloads yet.</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+(function () {
+    "use strict";
+
+    function fmtBytes(n) {
+        if (n === null || n === undefined) return "-";
+        if (n < 1024) return n + " B";
+        var units = ["KiB", "MiB", "GiB", "TiB"];
+        var v = n / 1024;
+        var i = 0;
+        while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+        return v.toFixed(1) + " " + units[i];
+    }
+
+    function statusBadge(status) {
+        var cls = {
+            "queued":    "bg-secondary",
+            "running":   "bg-primary",
+            "completed": "bg-success",
+            "cancelled": "bg-warning text-dark",
+            "failed":    "bg-danger",
+        }[status] || "bg-secondary";
+        return '<span class="badge ' + cls + '">' + status + '</span>';
+    }
+
+    function progressBar(d) {
+        if (d.bytes_total === null || d.bytes_total === undefined) {
+            return '<div class="progress" style="height: 16px;">' +
+                   '<div class="progress-bar progress-bar-striped progress-bar-animated" ' +
+                   'style="width: 100%;">' + (d.status === "running" ? "..." : "") + '</div></div>';
+        }
+        var pct = d.bytes_total > 0 ? (100 * d.bytes_downloaded / d.bytes_total) : 0;
+        var color = d.status === "completed" ? "bg-success" :
+                    d.status === "failed"    ? "bg-danger"  :
+                    d.status === "cancelled" ? "bg-warning" : "";
+        return '<div class="progress" style="height: 16px;">' +
+               '<div class="progress-bar ' + color + '" style="width: ' +
+               pct.toFixed(1) + '%;">' + pct.toFixed(1) + '%</div></div>';
+    }
+
+    function actionCell(d) {
+        if (d.status === "queued" || d.status === "running") {
+            return '<button type="button" class="btn btn-sm btn-outline-danger bty-cancel-btn" ' +
+                   'data-name="' + d.name + '"><i class="bi bi-x-circle me-1"></i>Cancel</button>';
+        }
+        if (d.status === "failed") {
+            return '<span class="text-danger small" title="' + (d.error || "") + '">' +
+                   '<i class="bi bi-exclamation-triangle me-1"></i>' +
+                   (d.error || "failed").substring(0, 60) + '</span>';
+        }
+        return "";
+    }
+
+    function render(downloads) {
+        var tbody = document.querySelector(".bty-downloads-tbody");
+        if (!tbody) return;
+        if (downloads.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5" class="text-muted">No downloads yet.</td></tr>';
+            return;
+        }
+        var order = { "running": 0, "queued": 1, "failed": 2, "cancelled": 3, "completed": 4 };
+        downloads.sort(function (a, b) {
+            return (order[a.status] || 9) - (order[b.status] || 9);
+        });
+        var rows = downloads.map(function (d) {
+            var bytes = fmtBytes(d.bytes_downloaded);
+            if (d.bytes_total !== null && d.bytes_total !== undefined) {
+                bytes += " / " + fmtBytes(d.bytes_total);
+            }
+            return "<tr>" +
+                   "<td><code>" + d.name + "</code></td>" +
+                   "<td>" + statusBadge(d.status) + "</td>" +
+                   "<td>" + progressBar(d) + "</td>" +
+                   "<td class=\"small\">" + bytes + "</td>" +
+                   "<td class=\"text-end\">" + actionCell(d) + "</td>" +
+                   "</tr>";
+        });
+        tbody.innerHTML = rows.join("");
+    }
+
+    var pollHandle = null;
+    var lastSeenCompleted = new Set();
+    var firstPoll = true;
+    function refresh() {
+        var statusEl = document.querySelector(".bty-poll-status");
+        return fetch("/catalog/downloads", { credentials: "same-origin" })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                var downloads = data.downloads || [];
+                render(downloads);
+                if (statusEl) statusEl.textContent = "updated " +
+                    new Date().toLocaleTimeString();
+                // On first poll, snapshot the already-completed set so
+                // we don't reload immediately for entries that were
+                // already done when the page loaded.
+                if (firstPoll) {
+                    downloads.forEach(function (d) {
+                        if (d.status === "completed") lastSeenCompleted.add(d.name);
+                    });
+                    firstPoll = false;
+                    return;
+                }
+                // A newly-completed download means a catalog row's
+                // ``cached`` state just flipped; reload so the table
+                // picks it up. Defer briefly so the user sees the
+                // 100% bar before the page refreshes.
+                downloads.forEach(function (d) {
+                    if (d.status === "completed" && !lastSeenCompleted.has(d.name)) {
+                        lastSeenCompleted.add(d.name);
+                        setTimeout(function () { window.location.reload(); }, 800);
+                    }
+                });
+            })
+            .catch(function (err) {
+                if (statusEl) statusEl.textContent = "poll failed: " + err.message;
+            });
+    }
+
+    function startPolling() {
+        refresh();
+        pollHandle = setInterval(refresh, 2000);
+    }
+    function stopPolling() {
+        if (pollHandle !== null) clearInterval(pollHandle);
+        pollHandle = null;
+    }
+    document.addEventListener("visibilitychange", function () {
+        if (document.hidden) stopPolling(); else startPolling();
+    });
+
+    document.addEventListener("click", function (ev) {
+        var fetchBtn = ev.target.closest(".bty-fetch-btn");
+        if (fetchBtn) {
+            ev.preventDefault();
+            var name = fetchBtn.getAttribute("data-name");
+            fetchBtn.disabled = true;
+            fetch("/catalog/downloads", {
+                method: "POST",
+                credentials: "same-origin",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ name: name }),
+            }).then(refresh).catch(function () {
+                fetchBtn.disabled = false;
+            });
+            return;
+        }
+        var cancelBtn = ev.target.closest(".bty-cancel-btn");
+        if (cancelBtn) {
+            ev.preventDefault();
+            var name = cancelBtn.getAttribute("data-name");
+            cancelBtn.disabled = true;
+            fetch("/catalog/downloads/" + encodeURIComponent(name), {
+                method: "DELETE",
+                credentials: "same-origin",
+            }).then(refresh);
+        }
+    });
+
+    startPolling();
+})();
+</script>
+
 {% endif %}
 {% endblock %}
