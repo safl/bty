@@ -281,24 +281,26 @@ def fetch_to_cache(
     tmp_path = Path(tmp_name)
     try:
         digest = hashlib.sha256()
-        with os.fdopen(fd, "wb") as out:
-            with urllib.request.urlopen(entry.src, timeout=timeout) as resp:
-                # Try to extract Content-Length; not all servers send it.
-                total: int | None
-                try:
-                    cl = resp.headers.get("Content-Length")
-                    total = int(cl) if cl is not None else None
-                except (ValueError, AttributeError):
-                    total = None
-                _stream_with_digest(
-                    resp,
-                    out,
-                    digest,
-                    chunk_size,
-                    progress=progress,
-                    cancel=cancel,
-                    total=total,
-                )
+        with (
+            os.fdopen(fd, "wb") as out,
+            urllib.request.urlopen(entry.src, timeout=timeout) as resp,
+        ):
+            # Try to extract Content-Length; not all servers send it.
+            total: int | None
+            try:
+                cl = resp.headers.get("Content-Length")
+                total = int(cl) if cl is not None else None
+            except (ValueError, AttributeError):
+                total = None
+            _stream_with_digest(
+                resp,
+                out,
+                digest,
+                chunk_size,
+                progress=progress,
+                cancel=cancel,
+                total=total,
+            )
         actual = digest.hexdigest()
         if actual != entry.sha256:
             raise CatalogError(

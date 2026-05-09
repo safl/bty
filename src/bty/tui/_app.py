@@ -1280,10 +1280,8 @@ class BtyTui(App[None]):
         self._render_status()
         # Focus the images table so the wizard starts on Stage 1
         # with the operator able to immediately Enter on a row.
-        try:
+        with contextlib.suppress(Exception):  # pragma: no cover - defensive
             self.query_one("#images_table", DataTable).focus()
-        except Exception:  # pragma: no cover - defensive
-            pass
 
     # ---------- data refresh ------------------------------------------------
 
@@ -1854,10 +1852,8 @@ class BtyTui(App[None]):
         # over the bottom row, and a stale auto-clear timer must
         # not wipe it out a few seconds later.
         self._transient_status = None
-        try:
+        with contextlib.suppress(Exception):  # pragma: no cover - defensive during teardown
             self.query_one("#status", Static).update(message)
-        except Exception:  # pragma: no cover - defensive during teardown
-            pass
 
     def _set_status_transient(self, message: str, *, delay: float = 4.0) -> None:
         """Show a status message that auto-clears after ``delay`` seconds.
@@ -1883,10 +1879,8 @@ class BtyTui(App[None]):
         if self._transient_status != expected:
             return
         self._transient_status = None
-        try:
+        with contextlib.suppress(Exception):  # pragma: no cover - defensive during teardown
             self.query_one("#status", Static).update("")
-        except Exception:  # pragma: no cover - defensive during teardown
-            pass
 
     def _initial_status(self) -> str:
         if os.geteuid() != 0:

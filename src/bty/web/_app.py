@@ -10,6 +10,7 @@ a fixture service user (PAM gets monkeypatched in those tests).
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import sys
 from collections.abc import AsyncIterator
@@ -119,12 +120,10 @@ def create_app(
         # parallelism cap (default 1) keeps the box responsive.
         for img in images.list_images(resolved_image_root):
             if img.sha256 is None:
-                try:
+                # File vanished between the list_images scan and
+                # the enqueue: harmless.
+                with contextlib.suppress(FileNotFoundError):
                     await hash_manager.enqueue(img.name)
-                except FileNotFoundError:
-                    # File vanished between the list_images scan
-                    # and the enqueue; harmless.
-                    pass
         try:
             yield
         finally:
@@ -665,13 +664,11 @@ def create_app(
         # auto-import lifespan would have skipped this entry, so
         # we mirror that guard here.
         if not name.endswith(".sha256"):
-            try:
+            # ``_stream_upload`` raised earlier if the write
+            # failed, so FileNotFoundError shouldn't happen here --
+            # guarded for safety.
+            with contextlib.suppress(FileNotFoundError):
                 await hash_manager.enqueue(name)
-            except FileNotFoundError:
-                # ``_stream_upload`` raised earlier if the write
-                # failed, so this should never happen -- guarded
-                # for safety.
-                pass
         return result
 
     @app.put(

@@ -209,9 +209,11 @@ def test_fetch_to_cache_sha_mismatch_discards_temp(tmp_path: Path) -> None:
         sha256="0" * 64,
     )
     cache_dir = tmp_path / "cache"
-    with patch("urllib.request.urlopen", _mock_urlopen(payload)):
-        with pytest.raises(catalog.CatalogError, match="sha256 mismatch"):
-            catalog.fetch_to_cache(entry, cache_dir)
+    with (
+        patch("urllib.request.urlopen", _mock_urlopen(payload)),
+        pytest.raises(catalog.CatalogError, match="sha256 mismatch"),
+    ):
+        catalog.fetch_to_cache(entry, cache_dir)
     # Critical invariant: no half-written cache file remains.
     leftovers = list(cache_dir.iterdir()) if cache_dir.exists() else []
     assert leftovers == []
@@ -283,9 +285,11 @@ def test_fetch_to_cache_cancel_aborts_cleanly(tmp_path: Path) -> None:
         state["polls"] += 1
         return state["polls"] > 1  # let the first chunk through
 
-    with patch("urllib.request.urlopen", _mock_urlopen(payload)):
-        with pytest.raises(catalog.CatalogCancelled):
-            catalog.fetch_to_cache(entry, cache_dir, cancel=_cancel, chunk_size=1 << 20)
+    with (
+        patch("urllib.request.urlopen", _mock_urlopen(payload)),
+        pytest.raises(catalog.CatalogCancelled),
+    ):
+        catalog.fetch_to_cache(entry, cache_dir, cancel=_cancel, chunk_size=1 << 20)
     leftovers = list(cache_dir.iterdir()) if cache_dir.exists() else []
     assert leftovers == []
 

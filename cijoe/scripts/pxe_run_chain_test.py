@@ -406,9 +406,7 @@ def _build_markers(cfg):
     colon form. Build the marker accordingly so the assertion
     matches what shows up on the serial console.
     """
-    out = []
-    for entry in cfg.get("chain_markers", []):
-        out.append((entry["key"], entry["needle"]))
+    out = [(entry["key"], entry["needle"]) for entry in cfg.get("chain_markers", [])]
     mac_hyphen = cfg["client_mac"].replace(":", "-")
     out.append(("ipxe-fetch-permac", f"/pxe/{mac_hyphen}"))
     return out

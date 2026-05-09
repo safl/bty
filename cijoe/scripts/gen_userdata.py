@@ -132,15 +132,15 @@ def _render_write_file(filepath: Path, source_dir: Path, bty_version: str) -> li
     except UnicodeDecodeError:
         encoded = base64.b64encode(raw).decode("ascii")
         body = ["    encoding: b64", "    content: |"]
-        for i in range(0, len(encoded), _B64_WRAP):
-            body.append(f"      {encoded[i : i + _B64_WRAP]}")
+        body.extend(
+            f"      {encoded[i : i + _B64_WRAP]}" for i in range(0, len(encoded), _B64_WRAP)
+        )
         body.append("")
         return header + body
 
     text = text.replace("__BTY_VERSION__", bty_version)
     body = ["    content: |"]
-    for line in text.splitlines():
-        body.append(f"      {line}")
+    body.extend(f"      {line}" for line in text.splitlines())
     body.append("")
     return header + body
 

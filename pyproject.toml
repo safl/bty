@@ -1,6 +1,6 @@
 [project]
 name = "bty-lab"
-version = "0.7.13"
+version = "0.7.14"
 description = "Flash images onto target disks, locally or over PXE"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -79,7 +79,11 @@ target-version = "py311"
 src = ["src", "docs/tooling/src"]
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "B", "UP", "RUF"]
+select = ["E", "F", "W", "I", "B", "UP", "RUF", "SIM", "PERF", "RET", "PIE", "C4"]
+# RET504 / RET505: too noisy for "explicit-is-better-than-implicit"
+# control flow we already prefer (e.g. ``if cond: return X``
+# followed by ``return Y`` rather than collapsing into a ternary).
+ignore = ["RET504", "RET505"]
 
 [tool.mypy]
 python_version = "3.11"
