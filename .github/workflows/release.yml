@@ -393,6 +393,11 @@ jobs:
             gathered/bty-netboot-x86_64/*
             gathered/docs-pdf/*
           fail_on_unmatched_files: true
+          # Auto-populate the release body with a list of merged
+          # commits / PRs since the previous tag. Without this the
+          # GitHub Releases page has empty bodies; readers had to
+          # ``git log v0.5.14..v0.5.15`` to see what changed.
+          generate_release_notes: true
 
   publish-pypi:
     name: Publish to PyPI
