@@ -602,6 +602,31 @@ implementation is in flight.
   use-case; otherwise it's solving a problem that does not exist
   yet.
 
+- **`.btycatalog` marker for opt-in catalog auto-discovery.**
+  Today bty finds image catalogs by either an explicit
+  ``--image-root`` / ``BTY_IMAGE_ROOT`` / well-known appliance
+  path, or by partition label (``BTY_IMAGES``). That covers
+  stock USB sticks and the appliance, but breaks down for
+  multi-mount scenarios -- Ventoy data partitions (labeled
+  ``Ventoy``), IP-KVM mounts of additional disks, operators
+  with several catalogs in different directories, etc. A
+  ``.btycatalog`` sentinel file in any directory would mark it
+  as an intended bty catalog; the live env's startup hook
+  would scan attached USB partitions for the marker, mount
+  any that have it, and merge their contents as catalog
+  sources. Important nuance: extension scanning stays in
+  charge inside already-pointed-at directories so a directly-
+  configured ``--image-root /mnt`` does not need the marker.
+  The marker is only meaningful for the auto-discovery path.
+  Empty file is fine v1; the file can later carry metadata
+  (display name, default provisioning mode, target-arch hint)
+  the way ``Cargo.toml`` / ``package.json`` accreted features
+  over time. Estimated scope: half-day -- ``bty.images``
+  helper + live-env mount hook + tests + doc convention.
+  Worth doing if the Ventoy / multi-source scenario actually
+  shows up in operator practice; otherwise it solves a
+  problem that does not yet exist.
+
 - **PXE-boot a kernel image (no flash).** Today's PXE flow is
   always "boot the netboot live env, run `bty flash`, reboot
   into local disk". A complementary mode would PXE-boot a
