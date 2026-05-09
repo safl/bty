@@ -10,6 +10,91 @@
     </span>
 </div>
 
+<div class="card mb-3">
+    <div class="card-header bg-light fw-semibold">
+        <i class="bi bi-plus-circle me-1"></i>Add machine
+    </div>
+    <div class="card-body">
+        {# The form posts to /ui/machines/<mac>; the existing
+           upsert handler creates the row with ``discovered_at=NULL``
+           if the MAC isn't known yet. Once the box PXE-boots,
+           ``discovered_at`` flips to the first-seen timestamp and
+           the boot_policy already configured here takes effect on
+           that first ``GET /pxe/<mac>``. Lets operators stage a
+           machine + its image binding before the box is even
+           racked. #}
+        <form id="add-machine-form" class="row g-2 align-items-end"
+              onsubmit="return submitAddMachine(event);">
+            <div class="col-md-3">
+                <label for="add-mac" class="form-label small mb-1">MAC address</label>
+                <input type="text" required class="form-control font-monospace"
+                       id="add-mac" name="mac"
+                       pattern="^([0-9a-fA-F]{2}[:-]){5}[0-9a-fA-F]{2}$"
+                       placeholder="aa:bb:cc:dd:ee:ff">
+            </div>
+            <div class="col-md-3">
+                <label for="add-hostname" class="form-label small mb-1">Hostname <span class="text-muted">(optional)</span></label>
+                <input type="text" class="form-control" id="add-hostname" name="hostname"
+                       pattern="^[a-zA-Z0-9.-]+$" placeholder="lab-01">
+            </div>
+            <div class="col-md-2">
+                <label for="add-boot-policy" class="form-label small mb-1">Boot policy</label>
+                <select class="form-select" id="add-boot-policy" name="boot_policy">
+                    <option value="local" selected>local (don't reflash)</option>
+                    <option value="tui">tui (operator picks)</option>
+                    <option value="flash">flash (every boot)</option>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label for="add-provisioning-mode" class="form-label small mb-1">Provisioning</label>
+                <select class="form-select" id="add-provisioning-mode" name="provisioning_mode">
+                    <option value="none" selected>none</option>
+                    <option value="cloud-init">cloud-init</option>
+                    <option value="cijoe">cijoe</option>
+                    <option value="cijoe-online">cijoe-online</option>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <button type="submit" class="btn btn-primary w-100">
+                    <i class="bi bi-plus-lg me-1"></i>Add
+                </button>
+            </div>
+        </form>
+        <div class="form-text small mt-2">
+            MAC is the only required field. Image binding is set per-machine on
+            the detail page (click the row); flash policy and per-machine boot
+            mode default to "local" / "none" so a freshly added machine doesn't
+            re-flash itself unexpectedly on first boot.
+        </div>
+    </div>
+</div>
+
+<script>
+    function submitAddMachine(ev) {
+        ev.preventDefault();
+        var f = ev.target;
+        var mac = f.querySelector("#add-mac").value.trim().toLowerCase();
+        var data = new FormData();
+        data.append("hostname", f.querySelector("#add-hostname").value);
+        data.append("boot_policy", f.querySelector("#add-boot-policy").value);
+        data.append("provisioning_mode", f.querySelector("#add-provisioning-mode").value);
+        // Submit via the existing form-handler endpoint -- /ui/machines/<mac>.
+        fetch("/ui/machines/" + encodeURIComponent(mac), {
+            method: "POST",
+            credentials: "same-origin",
+            body: data,
+        }).then(function (r) {
+            if (!r.ok) throw new Error("HTTP " + r.status);
+            // The SSE stream will re-render the table; clear the form so
+            // the operator can immediately add another.
+            f.reset();
+        }).catch(function (e) {
+            alert("Add machine failed: " + e.message);
+        });
+        return false;
+    }
+</script>
+
 <div class="card">
     <div class="table-responsive">
         <table class="table table-hover mb-0 align-middle">

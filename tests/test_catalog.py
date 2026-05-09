@@ -336,3 +336,47 @@ def test_default_cache_dir_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     assert catalog.default_cache_dir() == tmp_path / "cache"
     monkeypatch.setenv("BTY_CATALOG_CACHE_DIR", "/var/cache/bty")
     assert catalog.default_cache_dir() == Path("/var/cache/bty")
+
+
+# ---------- sha256 manifest parsing (M23) ----------------------------------
+
+
+def test_parse_sha256_manifest_single_bare_digest() -> None:
+    """A manifest with one bare digest line (no filename column)
+    parses; with no target_name, return that digest."""
+    sha = "a" * 64
+    assert catalog.parse_sha256_manifest(f"{sha}\n") == sha
+
+
+def test_parse_sha256_manifest_sha256sum_format() -> None:
+    """Standard ``<digest>  <filename>`` lines parse and a
+    ``target_name`` lookup picks the right one."""
+    body = (
+        f"{'a' * 64}  ubuntu-22.04.img.gz\n"
+        f"{'b' * 64}  debian-13.img.gz\n"
+        f"{'c' * 64}  *./other.img.gz\n"
+    )
+    assert catalog.parse_sha256_manifest(body, "ubuntu-22.04.img.gz") == "a" * 64
+    assert catalog.parse_sha256_manifest(body, "debian-13.img.gz") == "b" * 64
+    # ``./`` and ``*`` filename prefixes are stripped (sha256sum
+    # binary-mode marker / relative-path noise).
+    assert catalog.parse_sha256_manifest(body, "other.img.gz") == "c" * 64
+
+
+def test_parse_sha256_manifest_target_not_found_raises() -> None:
+    body = f"{'a' * 64}  ubuntu.img.gz\n"
+    with pytest.raises(catalog.CatalogError, match="does not list a digest"):
+        catalog.parse_sha256_manifest(body, "missing.img.gz")
+
+
+def test_parse_sha256_manifest_empty_raises() -> None:
+    with pytest.raises(catalog.CatalogError, match="empty"):
+        catalog.parse_sha256_manifest("\n\n  \n")
+
+
+def test_parse_sha256_manifest_malformed_digest_raises() -> None:
+    """A line whose first token isn't 64 hex chars rejects the
+    whole manifest -- catches typos / wrong file uploaded as
+    sha256-manifest."""
+    with pytest.raises(catalog.CatalogError, match="malformed"):
+        catalog.parse_sha256_manifest("not-a-digest  foo\n")

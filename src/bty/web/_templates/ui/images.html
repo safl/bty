@@ -89,6 +89,8 @@
                         {% for s in u.sources %}
                         {% if s.kind == "local" %}
                         <i class="bi bi-hdd text-muted me-1" title="local file"></i><code>{{ s.location }}</code>
+                        {% elif s.kind == "url" %}
+                        <i class="bi bi-cloud-plus text-muted me-1" title="operator-added URL"></i><code>{{ s.location }}</code>
                         {% else %}
                         <i class="bi bi-cloud text-muted me-1" title="manifest src"></i><code>{{ s.location }}</code>
                         {% endif %}
@@ -122,6 +124,19 @@
                         </button>
                         {% else %}
                         <span class="text-muted small">-</span>
+                        {% endif %}
+                        {# Operator-added catalog_entries rows are
+                           identified by a ``url``-kind source. Show
+                           a Delete button to remove via the
+                           ``DELETE /catalog/entries?src=...`` API. #}
+                        {% set url_src = u.sources|selectattr('kind','equalto','url')|map(attribute='location')|first %}
+                        {% if url_src %}
+                        <button type="button"
+                                class="btn btn-sm btn-outline-danger ms-1 bty-catalog-entry-delete-btn"
+                                data-src="{{ url_src }}"
+                                title="Remove this URL from the catalog">
+                            <i class="bi bi-trash"></i>
+                        </button>
                         {% endif %}
                     </td>
                 </tr>
@@ -389,6 +404,25 @@
                 method: "DELETE",
                 credentials: "same-origin",
             }).then(refresh);
+            return;
+        }
+        var entryDeleteBtn = ev.target.closest(".bty-catalog-entry-delete-btn");
+        if (entryDeleteBtn) {
+            ev.preventDefault();
+            var src = entryDeleteBtn.getAttribute("data-src");
+            if (!confirm("Remove this URL from the catalog?\n\n" + src)) return;
+            entryDeleteBtn.disabled = true;
+            fetch("/catalog/entries?src=" + encodeURIComponent(src), {
+                method: "DELETE",
+                credentials: "same-origin",
+            }).then(function () {
+                // Full reload so the row disappears + flash banner
+                // (if any) renders. Refresh just hits the polling
+                // endpoints; we want the page tree re-rendered.
+                window.location.reload();
+            }).catch(function () {
+                entryDeleteBtn.disabled = false;
+            });
         }
     });
 

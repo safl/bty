@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import urllib.parse
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -329,13 +330,9 @@ def register_ui_routes(
                     status_code=status.HTTP_303_SEE_OTHER,
                 )
 
-        from urllib.parse import urlparse
-
-        name = Path(urlparse(image_url).path).name or image_url
+        name = Path(urllib.parse.urlparse(image_url).path).name or image_url
         fmt = bty_images.detect_format(Path(name))
         size_bytes = _head_content_length(image_url)
-        from datetime import UTC, datetime
-
         now = datetime.now(UTC).isoformat()
         with _db.open_db(state_path) as conn:
             try:

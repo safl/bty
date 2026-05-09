@@ -15,6 +15,7 @@ import json
 import sqlite3
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -801,9 +802,7 @@ def create_app(
                     detail=f"could not resolve sha256: {exc}",
                 ) from exc
 
-        from urllib.parse import urlparse
-
-        parsed = urlparse(body.image_url)
+        parsed = urllib.parse.urlparse(body.image_url)
         name = Path(parsed.path).name or body.image_url
         fmt = images.detect_format(Path(name))
         size_bytes = _head_content_length(body.image_url)
