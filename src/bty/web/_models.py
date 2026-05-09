@@ -57,7 +57,19 @@ class MachineUpsert(BaseModel):
     manifest entries by content hash) and bty stores the SHA, not
     a filename. Renaming or replacing the underlying file does not
     affect the binding.
+
+    ``model_config = {"extra": "forbid"}``: unknown fields raise a
+    422 instead of being silently dropped. The previous "ignore"
+    default cost the cijoe PXE chain test a release-cycle of
+    silent failure -- it was sending the pre-M22 ``image`` field
+    (now renamed to ``image_sha256``), Pydantic accepted the
+    unknown key, the assignment landed with ``image_sha256=NULL``,
+    and ``GET /pxe/<mac>`` returned "no assignment". Loud failure
+    catches operator typos + stale clients at the edge instead of
+    after the chain completes.
     """
+
+    model_config = {"extra": "forbid"}
 
     image_sha256: str | None = None
     provisioning_mode: str = Field(default="none", pattern=PROVISIONING_PATTERN)
@@ -148,5 +160,7 @@ class VersionResponse(BaseModel):
 
 class CatalogEnqueueRequest(BaseModel):
     """POST /catalog/downloads body: enqueue a manifest entry by name."""
+
+    model_config = {"extra": "forbid"}
 
     name: str = Field(..., description="image name as declared in the manifest")

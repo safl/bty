@@ -637,6 +637,32 @@ def test_machine_default_boot_policy_is_local(app_client: TestClient) -> None:
     assert r.json()["last_flashed_at"] is None
 
 
+def test_machine_upsert_rejects_unknown_fields(app_client: TestClient) -> None:
+    """``MachineUpsert(extra="forbid")`` -- a stale client (or
+    operator typo) sending the pre-M22 ``image`` field instead of
+    ``image_sha256`` must 422 loudly. The previous default
+    silently accepted unknown keys + landed an assignment with
+    ``image_sha256=NULL``, which then surfaced as "no bty
+    assignment" at PXE-chain time. This regression test pins the
+    strict-extra contract so the failure surfaces at PUT time."""
+    r = app_client.put(
+        "/machines/aa:bb:cc:dd:ee:ff",
+        json={
+            "image": "stale-pre-m22-filename.qcow2",
+            "boot_policy": "flash",
+        },
+        cookies=AUTH,
+    )
+    assert r.status_code == 422
+    body = r.json()
+    # Pydantic v2's "extra fields" diagnostic carries the offending
+    # key in the loc + an "Extra inputs are not permitted" message.
+    assert any(
+        "image" in str(err.get("loc", "")) and "extra" in err.get("type", "")
+        for err in body.get("detail", [])
+    )
+
+
 def test_machine_upsert_accepts_boot_policy_flash(app_client: TestClient) -> None:
     r = app_client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
