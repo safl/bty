@@ -84,6 +84,27 @@ The catalog pane fills with whatever the server has under
 flash. The server is the catalog source; the actual write happens
 on the local machine running `bty-tui`.
 
+## Scripted flash via URL (no TUI)
+
+For batch / CI workflows the `bty` CLI accepts an HTTP URL
+directly as `--image`, so a script doesn't need to download
+images first:
+
+```bash
+sudo bty flash \
+    --image  http://<host>:8080/images/my-image.img.zst \
+    --target /dev/sda \
+    --provision none \
+    --yes
+```
+
+`.img` and `.img.zst` URLs stream straight from the container
+through `zstd -d | dd` to disk; `.qcow2` URLs download to a temp
+file first. Combined with the container running on a teammate's
+workstation, this turns "flash this box from the shared catalog"
+into a single command - no operator copy step, no preconfigured
+client.
+
 ## Rotating the default credentials
 
 The cooked image ships with `bty / bty` so the operator can start
