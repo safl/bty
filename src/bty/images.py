@@ -313,9 +313,11 @@ def list_remote_images(root: Path) -> list[RemoteImage]:
 
     Mirrors :func:`list_images`'s shape but for the remote half of
     the catalog. Malformed ``.bri`` files are silently skipped so
-    one bad descriptor doesn't break the whole listing -- a
-    standalone ``bty bri inspect`` (TODO) is the place to surface
-    parse errors loudly.
+    one bad descriptor doesn't break the whole listing.
+    ``bty inspect image foo.bri`` is the place to surface parse
+    errors loudly: it goes through :func:`inspect_image`, which
+    re-raises :class:`BriError` so the CLI can render it as a
+    friendly stderr line instead of swallowing the symptom.
     """
     if not root.exists() or not root.is_dir():
         return []
