@@ -575,7 +575,7 @@ Landed after the original 1.0 list:
     the catalog without flashing the catalog onto every stick.
     The PXE flow stays in the bare-metal `bty-server` appliance.
 
-22. **[planned, v0.6.x]** `bty-web` catalog manifest with `src`
+22. **[done, v0.6.0]** `bty-web` catalog manifest with `src`
     URLs + local SHA-verified cache. Today `/images` enumerates
     whatever lives under `BTY_IMAGE_ROOT`; an operator who wants
     to share images across a fleet has to copy bytes onto every
