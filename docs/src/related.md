@@ -40,15 +40,33 @@ and DevOps server in one project, by explicitly supporting non-Linux
 images, and by the online CIJOE post-clone customisation with
 known-good tracking.
 
-## Installer-based provisioners - Cobbler, Microsoft WDS/MDT
+## Installer-based provisioners - netboot.xyz, Cobbler, Microsoft WDS/MDT
 
 Different model. They orchestrate OS *installers* (kickstart, preseed,
 unattend) rather than deploying disk images. The result is a freshly
 installed OS, not a bit-identical clone.
 
-bty deliberately picks the image-clone model for speed and
-reproducibility. "Install Ubuntu from scratch" is too slow for the
-per-job CI cadence that motivates bty.
+[**netboot.xyz**](https://netboot.xyz/) is the closest in tier and
+ecosystem -- iPXE-based, homelab-friendly, often the first thing a
+new operator reaches for. It serves a community-maintained menu that
+chains into the upstream installer for Debian, Ubuntu, Fedora, Arch,
+Windows, recovery distros, etc., letting an operator boot "any OS
+installer over the network" from a single iPXE entry point. Use it
+when the goal is *installing* an OS from its official installer with
+the operator answering questions interactively, the way one would
+from a freshly burned ISO -- once.
+
+bty's goal is the opposite cadence: a cooked image goes onto disk
+unchanged, in seconds, with no operator at the keyboard, and is
+expected to be rewritten next week. CI fleets and lab automation,
+not "I am setting up my new homelab box". The two coexist cleanly --
+netboot.xyz for one-off OS installs, bty for the cooked-image
+reflash loop.
+
+Cobbler / WDS / MDT play in the same installer-driven space at
+different scales (Cobbler for the Red Hat universe, WDS/MDT for
+Windows imaging at enterprise scale). Same conclusion: install-
+once is too slow for the per-job CI cadence bty exists for.
 
 ## OS-specific image platforms - Fedora CoreOS, Flatcar, Bottlerocket, NixOS
 
