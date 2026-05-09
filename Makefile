@@ -136,7 +136,9 @@ test-pxe:
 
 docker-build:
 	$(UV) build
-	docker build -f docker/Dockerfile -t bty-web:dev .
+	docker build \
+	    --build-arg BTY_VERSION=$$(awk -F'"' '/^version =/ {print $$2; exit}' pyproject.toml) \
+	    -f docker/Dockerfile -t bty-web:dev .
 
 # Trial run with a host-side data dir so dropped images show up in
 # the container catalog. The bty-web container runs as uid 999
