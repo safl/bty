@@ -514,6 +514,7 @@ def create_app(
         subject_id: str | None = None,
         actor: str | None = None,
         source_ip: str | None = None,
+        failed: str | None = None,
         before_id: int | None = None,
         limit: int = 50,
     ) -> dict[str, Any]:
@@ -525,6 +526,7 @@ def create_app(
                 subject_id=subject_id,
                 actor=actor,
                 source_ip=source_ip,
+                failed_only=bool(failed),
                 before_id=before_id,
                 limit=limit,
             )

@@ -597,6 +597,7 @@ def register_ui_routes(
         subject_id: str | None = None,
         actor: str | None = None,
         source_ip: str | None = None,
+        failed: str | None = None,
         before_id: int | None = None,
     ) -> HTMLResponse:
         """Event log page.
@@ -618,6 +619,10 @@ def register_ui_routes(
         subject_id_norm = subject_id or None
         actor_norm = actor or None
         source_ip_norm = source_ip or None
+        # ``?failed=1`` is the cross-kind "show me all failures"
+        # toggle. Anything truthy enables it; absent / empty
+        # leaves it off.
+        failed_only = bool(failed)
         with _db.open_db(state_path) as conn:
             events = _events_log.list_events(
                 conn,
@@ -626,6 +631,7 @@ def register_ui_routes(
                 subject_id=subject_id_norm,
                 actor=actor_norm,
                 source_ip=source_ip_norm,
+                failed_only=failed_only,
                 before_id=before_id,
                 limit=page_size,
             )
@@ -640,6 +646,7 @@ def register_ui_routes(
                 "subject_id": subject_id_norm or "",
                 "actor": actor_norm or "",
                 "source_ip": source_ip_norm or "",
+                "failed": "1" if failed_only else "",
                 "before_id": str(events[-1].id),
             }
             non_empty = {k: v for k, v in params.items() if v}
@@ -653,6 +660,7 @@ def register_ui_routes(
             subject_id=subject_id_norm,
             actor=actor_norm,
             source_ip=source_ip_norm,
+            failed_only=failed_only,
             known_kinds=KNOWN_EVENT_KINDS,
             known_subject_kinds=KNOWN_SUBJECT_KINDS,
             known_actors=KNOWN_ACTORS,

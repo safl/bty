@@ -214,6 +214,7 @@ def list_events(
     subject_id: str | None = None,
     actor: str | None = None,
     source_ip: str | None = None,
+    failed_only: bool = False,
     before_id: int | None = None,
     limit: int = 50,
 ) -> list[Event]:
@@ -253,6 +254,16 @@ def list_events(
     if source_ip is not None:
         where.append("source_ip = ?")
         args.append(source_ip)
+    if failed_only:
+        # Failure kinds end either in ``.failed`` (e.g.
+        # ``machine.task.failed``) or ``_failed`` (e.g.
+        # ``image.hash_failed``). LIKE matches both via the
+        # ``%failed`` suffix; a stricter check would need an
+        # OR of two LIKE clauses but the simpler form is
+        # sufficient here -- ``failed`` is rare enough as a
+        # full-token suffix that false positives are unlikely.
+        where.append("kind LIKE ?")
+        args.append("%failed")
     if before_id is not None:
         where.append("id < ?")
         args.append(before_id)

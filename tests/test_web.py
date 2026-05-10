@@ -1206,6 +1206,35 @@ def test_events_carry_source_ip(app_client: TestClient) -> None:
     assert upsert["source_ip"] == "testclient"
 
 
+def test_events_filter_failed_only_returns_only_failure_kinds(
+    app_client: TestClient,
+) -> None:
+    """``?failed=1`` returns only events whose kind ends in
+    ``.failed`` or ``_failed``. Cross-kind shortcut for the
+    operator's "show me everything that broke" triage view --
+    one toggle instead of cycling through 6+ failure kinds in
+    the per-kind dropdown."""
+    # Force a settings.pxe.activate_failed event (deterministic).
+    app_client.post(
+        "/ui/settings/pxe-activate",
+        data={"interface": "!!!", "subnet": "10.0.0.0/24"},
+        cookies=AUTH,
+        follow_redirects=False,
+    )
+    # Ensure at least one non-failure event exists too (auto-import).
+    r = app_client.get("/events", params={"failed": "1"}, cookies=AUTH)
+    events = r.json()["events"]
+    assert events
+    assert all(e["kind"].endswith(".failed") or e["kind"].endswith("_failed") for e in events), [
+        e["kind"] for e in events
+    ]
+
+    # Without failed=1, the auto-import image.hashed event is in the
+    # mix, so the filtered slice is strictly smaller.
+    r_all = app_client.get("/events", cookies=AUTH)
+    assert len(r_all.json()["events"]) > len(events)
+
+
 def test_events_filter_by_actor(app_client: TestClient) -> None:
     """``GET /events?actor=operator`` returns only operator-driven
     rows; ``actor=pxe-client`` only PXE check-ins. Powers the

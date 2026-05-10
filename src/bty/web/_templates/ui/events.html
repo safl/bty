@@ -61,6 +61,16 @@
                     <i class="bi bi-x-lg"></i>
                 </a>
             </div>
+            <div class="col-12">
+                <div class="form-check small">
+                    <input class="form-check-input" type="checkbox" name="failed" value="1"
+                           id="failed-only" {% if failed_only %}checked{% endif %}>
+                    <label class="form-check-label text-muted" for="failed-only">
+                        Failures only (any kind ending in <code>.failed</code> /
+                        <code>_failed</code>)
+                    </label>
+                </div>
+            </div>
         </form>
     </div>
 </div>
@@ -68,7 +78,7 @@
 {% if not events %}
 <div class="alert alert-light border">
     <i class="bi bi-info-circle me-2"></i>
-    {% if kind or subject_kind or subject_id or actor or source_ip %}
+    {% if kind or subject_kind or subject_id or actor or source_ip or failed_only %}
     No events match the current filter.
     <a href="/ui/events" class="ms-1">Clear filter</a>
     to see all events.
@@ -110,6 +120,7 @@
                             'catalog': 'bg-secondary',
                             'boot': 'bg-warning text-dark',
                             'settings': 'bg-dark',
+                            'auth': 'bg-success',
                         } %}
                         {% if e.kind.endswith('.failed') or e.kind.endswith('_failed') %}
                         {% set badge = 'bg-danger' %}
@@ -177,7 +188,7 @@
     </div>
     <div class="card-footer d-flex justify-content-between small">
         <span class="text-muted">
-            Showing {{ events|length }} event{{ "s" if events|length != 1 else "" }}{% if kind or subject_kind or subject_id or actor or source_ip %} (filtered){% endif %}.
+            Showing {{ events|length }} event{{ "s" if events|length != 1 else "" }}{% if kind or subject_kind or subject_id or actor or source_ip or failed_only %} (filtered){% endif %}.
         </span>
         {% if older_url %}
         <a href="{{ older_url }}" class="text-decoration-none">
