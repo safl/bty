@@ -288,6 +288,24 @@
 (function () {
     "use strict";
 
+    // HTML-escape arbitrary strings before innerHTML interpolation.
+    // ``d.name`` is operator-controlled (catalog manifest entries
+    // and operator-added URL entries), and Pydantic's
+    // ``CatalogEnqueueRequest`` only blocks path-traversal chars
+    // (``/`` ``\`` NUL) -- not HTML metacharacters. Without esc()
+    // an authenticated operator could craft a catalog entry whose
+    // name embeds ``<script>``; with esc() that just renders as
+    // visible text. Defence-in-depth.
+    function esc(v) {
+        if (v === null || v === undefined) return "";
+        return String(v)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#39;");
+    }
+
     function fmtBytes(n) {
         if (n === null || n === undefined) return "-";
         if (n < 1024) return n + " B";
@@ -306,7 +324,7 @@
             "cancelled": "bg-warning text-dark",
             "failed":    "bg-danger",
         }[status] || "bg-secondary";
-        return '<span class="badge ' + cls + '">' + status + '</span>';
+        return '<span class="badge ' + cls + '">' + esc(status) + '</span>';
     }
 
     function progressBar(d) {
@@ -352,10 +370,10 @@
                 status: d.status,
             };
             return "<tr>" +
-                   "<td><code>" + d.name + "</code></td>" +
+                   "<td><code>" + esc(d.name) + "</code></td>" +
                    "<td>" + statusBadge(d.status) + "</td>" +
                    "<td>" + progressBar(pdata) + "</td>" +
-                   "<td class=\"small\">" + bytes + "</td>" +
+                   "<td class=\"small\">" + esc(bytes) + "</td>" +
                    "<td class=\"text-end\">" + actionCellFor(d, cancelEndpoint) + "</td>" +
                    "</tr>";
         });
@@ -365,13 +383,13 @@
     function actionCellFor(d, cancelEndpoint) {
         if (d.status === "queued" || d.status === "running") {
             return '<button type="button" class="btn btn-sm btn-outline-danger bty-cancel-btn" ' +
-                   'data-name="' + d.name + '" data-endpoint="' + cancelEndpoint + '">' +
+                   'data-name="' + esc(d.name) + '" data-endpoint="' + esc(cancelEndpoint) + '">' +
                    '<i class="bi bi-x-circle me-1"></i>Cancel</button>';
         }
         if (d.status === "failed") {
-            return '<span class="text-danger small" title="' + (d.error || "") + '">' +
+            return '<span class="text-danger small" title="' + esc(d.error || "") + '">' +
                    '<i class="bi bi-exclamation-triangle me-1"></i>' +
-                   (d.error || "failed").substring(0, 60) + '</span>';
+                   esc((d.error || "failed").substring(0, 60)) + '</span>';
         }
         return "";
     }

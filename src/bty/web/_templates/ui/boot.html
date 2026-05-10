@@ -123,6 +123,21 @@
     var seenCompleted = new Set();
     var lastFetchesSnapshot = null;
 
+    // HTML-escape arbitrary strings before innerHTML interpolation.
+    // Server-side errors (``s.error``) and operator-controlled tags
+    // (``s.tag``) are pattern-validated, but defense-in-depth: a
+    // future code path that surfaces less-validated content here
+    // shouldn't introduce an XSS regression.
+    function esc(v) {
+        if (v === null || v === undefined) return "";
+        return String(v)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#39;");
+    }
+
     function fmtBytes(n) {
         if (n === null || n === undefined) return "?";
         var mib = n / (1024 * 1024);
@@ -143,13 +158,13 @@
             cancelled: "bg-warning text-dark",
             failed: "bg-danger",
         }[s] || "bg-light text-dark border";
-        return '<span class="badge ' + cls + '">' + s + '</span>';
+        return '<span class="badge ' + cls + '">' + esc(s) + '</span>';
     }
 
     function progressCell(s) {
         if (s.status !== "running") {
-            if (s.status === "completed") return '<span class="text-muted small">' + fmtBytes(s.bytes_done) + '</span>';
-            if (s.status === "failed" && s.error) return '<span class="text-danger small">' + s.error + '</span>';
+            if (s.status === "completed") return '<span class="text-muted small">' + esc(fmtBytes(s.bytes_done)) + '</span>';
+            if (s.status === "failed" && s.error) return '<span class="text-danger small">' + esc(s.error) + '</span>';
             return '<span class="text-muted small">-</span>';
         }
         var pct = s.bytes_total ? Math.round(s.bytes_done * 100 / s.bytes_total) : null;
@@ -158,13 +173,13 @@
         var bar = '<div class="progress" style="height: 0.85rem;">' +
                   '<div class="progress-bar progress-bar-striped progress-bar-animated" ' +
                   'style="width: ' + (pct === null ? 100 : pct) + '%;"></div></div>';
-        return '<div class="small">' + label + '</div>' + bar;
+        return '<div class="small">' + esc(label) + '</div>' + bar;
     }
 
     function actionCell(s) {
         if (s.status === "queued" || s.status === "running") {
             return '<button class="btn btn-sm btn-outline-danger bty-cancel-fetch-btn" data-tag="' +
-                   s.tag + '"><i class="bi bi-x-circle me-1"></i>Cancel</button>';
+                   esc(s.tag) + '"><i class="bi bi-x-circle me-1"></i>Cancel</button>';
         }
         return '<span class="text-muted small">-</span>';
     }
@@ -195,10 +210,10 @@
                 } else {
                     var rows = fetches.map(function (s) {
                         return "<tr>" +
-                               "<td><code>" + s.tag + "</code></td>" +
+                               "<td><code>" + esc(s.tag) + "</code></td>" +
                                "<td>" + statusBadge(s.status) + "</td>" +
                                "<td>" + progressCell(s) + "</td>" +
-                               "<td><small>" + fmtTime(s.started_at) + "</small></td>" +
+                               "<td><small>" + esc(fmtTime(s.started_at)) + "</small></td>" +
                                '<td class="text-end">' + actionCell(s) + "</td>" +
                                "</tr>";
                     }).join("");

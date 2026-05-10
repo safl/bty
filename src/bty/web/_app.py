@@ -859,7 +859,23 @@ def create_app(
                 ) from exc
 
         parsed = urllib.parse.urlparse(body.image_url)
-        name = Path(parsed.path).name or body.image_url
+        name = Path(parsed.path).name
+        if not name:
+            # ``https://example.com`` (no path) and ``https://example.com/foo/``
+            # (trailing slash) both surface as empty ``Path.name``. Without a
+            # filename component there's nothing meaningful to display in the
+            # catalog table and the URL streaming pipeline can't pick a cache
+            # key. Refuse at the API boundary rather than silently falling back
+            # to "the whole URL is the name", which makes the UI render
+            # ``<code>https://...</code>`` as the entry's display label.
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=(
+                    "image_url must end in a filename component "
+                    "(e.g. https://example.com/path/foo.img.gz); "
+                    f"got {body.image_url!r} which has no basename"
+                ),
+            )
         fmt = images.detect_format(Path(name))
         size_bytes = _head_content_length(body.image_url)
         now = _now_iso()

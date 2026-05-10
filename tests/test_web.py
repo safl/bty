@@ -1427,6 +1427,36 @@ def test_catalog_entries_add_rejects_url_without_host(
         assert r.status_code == 422, f"expected 422 for {bad!r}, got {r.status_code}"
 
 
+def test_catalog_entries_add_rejects_url_without_filename(
+    app_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``image_url`` must end in a filename component. URLs that
+    have a host but no path (``https://example.com``) or a
+    trailing-slash path (``https://example.com/foo/``) used to
+    fall through and store the entire URL as the entry's
+    ``name`` -- the catalog table then rendered ``<code>https://
+    example.com</code>`` as the display label, which was useless.
+    Reject at validation time instead."""
+
+    def fake_urlopen(*_a: object, **_kw: object) -> _MockResp:
+        return _MockResp(b"", headers={"Content-Length": "0"})
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    # ``Path("/foo/").name`` is ``"foo"`` (pathlib normalises the
+    # trailing slash), so URLs like ``https://example.com/foo/``
+    # have a basename and remain accepted. The reject-list here
+    # is the genuinely-no-basename forms: bare host, bare host +
+    # ``/``.
+    for bad in ("https://example.com", "https://example.com/"):
+        r = app_client.post(
+            "/catalog/entries",
+            json={"image_url": bad},
+            cookies=AUTH,
+        )
+        assert r.status_code == 422, f"expected 422 for {bad!r}, got {r.status_code}"
+        assert "filename component" in r.text
+
+
 def test_catalog_enqueue_request_rejects_traversal_name(app_client: TestClient) -> None:
     """``CatalogEnqueueRequest.name`` (used by both
     ``POST /catalog/downloads`` and ``POST /catalog/hashes``)
