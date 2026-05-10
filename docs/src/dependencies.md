@@ -118,6 +118,10 @@ or ``ENV`` block (Dockerfile) covers every component.
 | `BTY_CATALOG_CACHE_DIR` | `bty-web`, `bty catalog` | `${BTY_STATE_DIR}/cache` | Content-addressed blob cache |
 | `BTY_CATALOG_MAX_PARALLEL` | `bty-web` | `2` | Concurrent catalog downloads |
 | `BTY_HASH_MAX_PARALLEL` | `bty-web` | `1` | Concurrent SHA-256 hashes (low: Pi/NUC-friendly) |
+| `BTY_MAX_UPLOAD_BYTES` | `bty-web` | `200 GiB` | Hard cap on `PUT /images/{name}` body size; rejected uploads land an `image.upload_failed` audit row |
+| `BTY_CIJOE_SSH_PORT` | `bty-web` | `22` | SSH port for cijoe-task transport; out-of-range / non-numeric values fall back to 22 silently |
+| `BTY_CIJOE_USER_CONFIG` | `bty-web` | `/var/lib/bty/cijoe-user-config.toml` | Operator-supplied cijoe config layered alongside bty-web's auto-generated transport TOML |
+| `BTY_TRUSTED_PROXY` | `bty-web` | unset | When set (any truthy), read client IP from `X-Forwarded-For`; only enable behind a reverse proxy that strips inbound X-F-F |
 | `BTY_QUIET` | container entrypoint | unset | Suppress the start-up banner with default credentials |
 
 `bty-tui` also accepts `--image-root /path` and `--server URL`

@@ -95,7 +95,7 @@ class CatalogEntry:
                     f"manifest entry missing required field: {required!r} (entry: {raw!r})"
                 )
         sha = str(raw["sha256"]).strip().lower()
-        if len(sha) != 64 or not all(c in "0123456789abcdef" for c in sha):
+        if not _images.is_sha256_hex(sha):
             raise CatalogError(
                 f"manifest entry {raw['name']!r}: sha256 must be a 64-char "
                 f"lower-case hex string, got {sha!r}"
@@ -377,7 +377,7 @@ def parse_sha256_manifest(text: str, target_name: str | None = None) -> str:
     for raw in lines:
         parts = raw.split(maxsplit=1)
         digest = parts[0].strip().lower()
-        if len(digest) != 64 or not all(c in "0123456789abcdef" for c in digest):
+        if not _images.is_sha256_hex(digest):
             raise CatalogError(f"malformed sha256 line in manifest: {raw!r}")
         name = parts[1].lstrip("*./").strip() if len(parts) == 2 else None
         candidates.append((digest, name))

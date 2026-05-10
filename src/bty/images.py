@@ -325,7 +325,7 @@ def read_bri(path: Path) -> RemoteImage:
         if not isinstance(sha, str):
             raise BriError(f"{path}: sha256 must be a string")
         sha = sha.strip().lower()
-        if len(sha) != 64 or not all(c in _SHA_HEX for c in sha):
+        if not is_sha256_hex(sha):
             raise BriError(f"{path}: sha256 must be a 64-char lower-case hex string")
 
     description = raw.get("description")
@@ -390,7 +390,18 @@ def _sidecar_path(image_path: Path) -> Path:
     return image_path.with_name(image_path.name + ".sha256")
 
 
+SHA256_HEX_LEN = 64
 _SHA_HEX = frozenset("0123456789abcdef")
+
+
+def is_sha256_hex(s: str) -> bool:
+    """Return ``True`` iff ``s`` is a lower-case 64-char SHA-256
+    hex digest. Single predicate shared by sidecar parsing,
+    manifest validation, and the URL-key dispatch in bty-web --
+    every callsite was previously a separate inline copy of
+    ``len(s) == 64 and all(c in '0123456789abcdef' for c in s)``.
+    """
+    return len(s) == SHA256_HEX_LEN and all(c in _SHA_HEX for c in s)
 
 
 def _read_sidecar_sha(image_path: Path) -> str | None:
@@ -415,7 +426,7 @@ def _read_sidecar_sha(image_path: Path) -> str | None:
     if not head:
         return None
     digest = head[0].strip().lower()
-    if len(digest) != 64 or not all(c in _SHA_HEX for c in digest):
+    if not is_sha256_hex(digest):
         return None
     return digest
 

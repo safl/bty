@@ -583,8 +583,8 @@ def create_app(
             return _serve_safe_file(resolved_image_root, key)
         except HTTPException:
             pass
-        if len(key) == 64 and all(c in "0123456789abcdef" for c in key.lower()):
-            sha = key.lower()
+        sha = key.lower()
+        if images.is_sha256_hex(sha):
             cached = catalog_cache_dir / sha
             if cached.is_file():
                 return FileResponse(cached, media_type="application/octet-stream")
