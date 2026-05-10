@@ -131,9 +131,15 @@ def create_app(
         # parallelism cap (default 1) keeps the box responsive.
         for img in images.list_images(resolved_image_root):
             if img.sha256 is None:
-                # File vanished between the list_images scan and
-                # the enqueue: harmless.
-                with contextlib.suppress(FileNotFoundError):
+                # ``FileNotFoundError`` -- file vanished between the
+                # ``list_images`` scan and the enqueue (harmless).
+                # ``ValueError`` -- the v0.7.26 traversal guard in
+                # ``HashManager.enqueue`` rejects suspect basenames;
+                # ``list_images`` shouldn't surface any (it returns
+                # ``iterdir`` basenames) but a freshly-created file
+                # named ``..`` (impossible) or ``.`` (likewise)
+                # would crash startup without this suppression.
+                with contextlib.suppress(FileNotFoundError, ValueError):
                     await hash_manager.enqueue(img.name)
         try:
             yield
@@ -745,8 +751,15 @@ def create_app(
           pipeline; not bindable to a machine.
         """
         with _db.open_db(state_path) as conn:
+            # ``ORDER BY added_at`` matches the ``list_catalog_entries``
+            # API endpoint so the UI's catalog table renders in the
+            # same insertion order regardless of which code path
+            # populated the page (display merge vs. raw API listing).
+            # Without it, SQLite returns rows in unspecified order
+            # and a page-refresh can shuffle the table.
             rows = conn.execute(
-                "SELECT sha256, name, src, format, size_bytes, description FROM catalog_entries"
+                "SELECT sha256, name, src, format, size_bytes, description "
+                "FROM catalog_entries ORDER BY added_at"
             ).fetchall()
         sha_keyed: list[_catalog.CatalogEntry] = []
         url_only: list[images.UnifiedImage] = []

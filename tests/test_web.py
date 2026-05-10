@@ -1228,6 +1228,47 @@ def test_catalog_entries_list_and_delete(
     assert r.json() == []
 
 
+def test_ui_images_renders_catalog_entries_in_added_at_order(
+    app_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The /ui/images page reads ``catalog_entries`` via
+    ``_load_db_catalog_split``; that query must use the same
+    ``ORDER BY added_at`` as the public ``GET /catalog/entries``
+    listing so a page refresh doesn't reorder rows. SQLite's
+    default row order is unspecified -- without ``ORDER BY``,
+    a refresh can shuffle the URL-only entries even though
+    nothing changed."""
+
+    def fake_urlopen(*_a: object, **_kw: object) -> _MockResp:
+        return _MockResp(b"", headers={"Content-Length": "0"})
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    # Insert three URL-only entries with distinct names. The
+    # ``added_at`` column is set server-side via ``_now_iso()``,
+    # so insertion order = added_at order, and an ORDER BY
+    # ensures the displayed order matches.
+    for url in (
+        "https://example.invalid/alpha.img.gz",
+        "https://example.invalid/bravo.img.gz",
+        "https://example.invalid/charlie.img.gz",
+    ):
+        r = app_client.post("/catalog/entries", json={"image_url": url}, cookies=AUTH)
+        assert r.status_code == 201
+
+    r = app_client.get("/ui/images", cookies=AUTH)
+    assert r.status_code == 200
+    body = r.text
+    # The three names appear in the rendered table in insertion
+    # order. ``find()`` returns the byte offset; each later name
+    # must appear at a higher offset than the prior.
+    pos_alpha = body.find("alpha.img.gz")
+    pos_bravo = body.find("bravo.img.gz")
+    pos_charlie = body.find("charlie.img.gz")
+    assert 0 < pos_alpha < pos_bravo < pos_charlie, (
+        f"catalog rows out of order: alpha={pos_alpha} bravo={pos_bravo} charlie={pos_charlie}"
+    )
+
+
 class _MockResp:
     """Tiny urllib.request.urlopen response stand-in for tests."""
 
