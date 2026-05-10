@@ -1,9 +1,10 @@
 # bty - flash images onto target disks, locally or over PXE
 
-Image-flash provisioning toolkit for bare-metal and virtual targets.
-Writes pre-built ("cooked") system images onto target disks - locally
-from a USB live stick or remotely over PXE - and configures the
-deployed system on first boot via cloud-init or CIJOE workflows.
+Image-flash toolkit for bare-metal and virtual targets. Writes
+pre-built ("cooked") system images onto target disks - locally from a
+USB live stick or remotely over PXE. First-boot bring-up is the image
+cooker's job; bty-web optionally runs a small CIJOE task over SSH
+after the target reboots, for managed-MAC post-flash hooks.
 
 `bty` is an umbrella project. The repository hosts several independent
 software components that share a name, a goal, and a set of conventions, but
@@ -212,31 +213,22 @@ catastrophic.
 
 ## Provisioning modes
 
-After the image is written to disk, bty can hand off to a first-boot
-configuration mechanism. Four modes:
+bty is a flasher, not a cooker. First-boot bring-up (users, network,
+packages, hostnames) is the image cooker's job upstream. Two modes:
 
-- **`none`** - no post-flash configuration. Reboot into the cooked image
-  as-is.
-- **`cloud-init`** - populate the OS's cloud-init seed (NoCloud
-  datasource) with operator-supplied user-data and meta-data; the OS picks
-  it up on first boot. Linux and FreeBSD today; the Windows analogue
-  (unattend) occupies the same slot when Windows lands.
-- **`cijoe`** - run a CIJOE workflow against the freshly-written
-  filesystem (mount, edit, unmount) before the target reboots. The
-  USB live env's offline customisation path. Constrained to what is
-  possible by manipulating the filesystem from the outside - file
-  edits, package staging, seed-file drops.
+- **`none`** - no post-flash configuration. Reboot into the cooked
+  image as-is. The default.
 - **`cijoe-task`** - bty-web only. After the target first-boots into
-  its own OS, `bty-web` triggers a CIJOE workflow against the running
-  machine and records the post-workflow state as that machine's
-  known-good baseline. The server - not the image - becomes the source
-  of truth for *"what this box is supposed to look like,"* which is
-  what closes the loop on the per-job and on-failure cadences from
-  the Motivation section.
+  its own OS, `bty-web` SSHes in and runs a small CIJOE task against
+  the running machine. Steps use cijoe's built-in scripts or inline
+  commands - bty-web does not install third-party cijoe script
+  packages; the intent is light post-flash scripting (set hostname,
+  trigger reboot, drop one config file), not configuration management.
+  Requires a managed MAC (server-side machine record with
+  `cijoe_task_ref` and `last_seen_ip`).
 
-CIJOE is bty's official extension point for deviations from a stock
-image: vendor-specific tweaks, licence files, IPMI credentials, fleet-
-specific tuning that should not be baked into the image itself.
+CIJOE is the official extension point for small fleet-specific tweaks
+that don't belong in the image itself.
 
 ## Concepts
 
@@ -259,7 +251,7 @@ Operator boots the target machine from bty live media (USB), then
 runs `bty` locally:
 
 ```
-sudo bty flash --image IMG --target /dev/sda --provision cloud-init ...
+sudo bty flash --image IMG --target /dev/sda --yes
 ```
 
 `bty flash --image` also accepts an HTTP/HTTPS URL, in which case

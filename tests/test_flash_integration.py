@@ -147,8 +147,6 @@ def test_flash_zst_to_loop_device_byte_correct(
     assert written == payload
 
 
-# v0.7.39 dropped the offline cloud-init / cijoe provisioning
-# arms; the corresponding integration tests are gone. Image-side
-# first-boot bring-up is now the image cooker's responsibility,
-# and post-boot config is bty-web's cijoe-task flow (covered
-# by tests/test_web_task.py).
+# bty has no offline post-flash provisioning. Image-side first-boot
+# bring-up is the image cooker's job; post-boot config is bty-web's
+# cijoe-task flow (covered by tests/test_web_task.py).

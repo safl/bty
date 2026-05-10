@@ -176,9 +176,6 @@ def test_machine_crud_round_trip(app_client: TestClient) -> None:
     mac = "aa:bb:cc:dd:ee:ff"
     body = {
         "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-        # v0.7.39 narrowed provisioning modes; ``cijoe-task`` is
-        # the canonical "machine has post-boot config attached"
-        # value (replaces the prior ``cloud-init`` test seed).
         "provisioning_mode": "cijoe-task",
         "hostname": "bty-test-01",
     }
@@ -650,6 +647,40 @@ def test_machine_upsert_rejects_malformed_sha256(app_client: TestClient) -> None
         assert r.status_code == 422, f"expected 422 for {bad!r}, got {r.status_code}"
 
 
+def test_machine_upsert_rejects_pathological_cijoe_task_ref(app_client: TestClient) -> None:
+    """``cijoe_task_ref`` rejects NUL / newline / empty inputs at
+    the Pydantic layer so they can't reach the subprocess launch
+    or the audit log. Regular operator paths (absolute, relative,
+    with spaces) stay accepted."""
+    valid_sha = "0" * 64
+    for bad in ("", "with\x00nul", "with\nnewline", "with\rcr"):
+        r = app_client.put(
+            "/machines/aa:bb:cc:dd:ee:ff",
+            json={
+                "image_sha256": valid_sha,
+                "cijoe_task_ref": bad,
+            },
+            cookies=AUTH,
+        )
+        assert r.status_code == 422, f"expected 422 for {bad!r}, got {r.status_code}"
+
+    # Sanity: real operator-shaped paths still pass.
+    for ok in (
+        "/var/lib/bty/tasks/post-flash.yaml",
+        "tasks/relative-path.yaml",
+        "/path with spaces/foo.yaml",
+    ):
+        r = app_client.put(
+            "/machines/aa:bb:cc:dd:ee:ff",
+            json={
+                "image_sha256": valid_sha,
+                "cijoe_task_ref": ok,
+            },
+            cookies=AUTH,
+        )
+        assert r.status_code == 200, f"expected 200 for {ok!r}, got {r.status_code} {r.text}"
+
+
 def test_machine_upsert_rejects_empty_hostname(app_client: TestClient) -> None:
     """``hostname = ""`` would land in state.db blank and surface
     in the dashboard / banner as a meaningless empty cell. Reject
@@ -818,7 +849,10 @@ def test_pxe_flash_policy_returns_chain_with_args(app_client: TestClient) -> Non
         "bty.image_url=${bty-base}/images/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef/"
         in body
     )
-    assert "bty.provisioning=cijoe-task" in body
+    # ``bty.provisioning`` is no longer emitted on the cmdline --
+    # post-flash provisioning is server-driven via cijoe-task,
+    # not live-env-driven.
+    assert "bty.provisioning" not in body
 
 
 def test_pxe_tui_policy_returns_interactive_chain(app_client: TestClient) -> None:
@@ -956,6 +990,33 @@ def test_pxe_done_does_not_trigger_when_task_ref_missing(app_client: TestClient)
         cookies=AUTH,
     )
     app_client.get("/pxe/aa:bb:cc:dd:ee:ff")
+    with patch("bty.web._task.TaskManager.kick_off") as mock_kick:
+        r = app_client.post("/pxe/aa:bb:cc:dd:ee:ff/done")
+    assert r.status_code == 204
+    mock_kick.assert_not_called()
+
+
+def test_pxe_done_does_not_trigger_when_last_seen_ip_missing(app_client: TestClient) -> None:
+    """A PUT-only machine (operator created the record but the box
+    has never PXE-contacted) has no ``last_seen_ip`` to SSH at, so
+    cijoe-task must not kick off on the spurious ``/pxe/{mac}/done``
+    that arrives when the box eventually does flash through bty-web
+    -- but the kick-off guard is a clean three-condition check
+    (provisioning_mode == cijoe-task AND cijoe_task_ref AND
+    last_seen_ip), and this test pins the third condition."""
+    from unittest.mock import patch
+
+    app_client.put(
+        "/machines/aa:bb:cc:dd:ee:ff",
+        json={
+            "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "provisioning_mode": "cijoe-task",
+            "cijoe_task_ref": "/var/lib/bty/tasks/post-flash.yaml",
+        },
+        cookies=AUTH,
+    )
+    # Crucially: NO ``GET /pxe/{mac}`` here. Without that contact,
+    # ``last_seen_ip`` stays NULL.
     with patch("bty.web._task.TaskManager.kick_off") as mock_kick:
         r = app_client.post("/pxe/aa:bb:cc:dd:ee:ff/done")
     assert r.status_code == 204
@@ -1578,7 +1639,7 @@ def test_release_fetch_manager_run_fetch_cancel_overrides_fetch_error(
                 raise _releases.FetchError("connection reset")
 
             with unittest.mock.patch.object(_releases, "fetch_release", boom):
-                await mgr._run_fetch(state)
+                await mgr._run_one(state)
 
             assert state.status == "cancelled"
             assert state.error is None

@@ -119,7 +119,6 @@ output and dispatch on the `event` key.
 {"event": "writing", "note": "qcow2"}
 {"event": "synced"}
 {"event": "partprobed"}
-{"event": "provisioning", "note": "cloud-init"}
 {"event": "done"}
 ```
 
@@ -137,7 +136,6 @@ Stable event names:
 | `writing`      | About to invoke the format-specific writer (`dd` / `zstd \| dd` / `qemu-img convert`). `note` carries the format. |
 | `synced`       | Kernel buffers flushed.                                      |
 | `partprobed`   | Partition table re-read; flash hardware-complete.            |
-| `provisioning` | Provisioning step starting. `note` is `cloud-init` or `cijoe`. |
 | `done`         | All steps succeeded. End of stream.                          |
 | `failed`       | A step raised an error. `note` carries the error message. End of stream. |
 
@@ -154,10 +152,10 @@ sequence.
 | Code | Meaning                                                            |
 |------|--------------------------------------------------------------------|
 | 0    | Success.                                                           |
-| 1    | Operation failed (validation rejected the plan; subprocess returned non-zero; cloud-init / cijoe step failed). |
-| 2    | Misuse - argparse error, missing required flag, missing input file (e.g. `--user-data` not on disk). |
+| 1    | Operation failed (validation rejected the plan; write subprocess returned non-zero). |
+| 2    | Misuse - argparse error, missing required flag, missing input file. |
 | 3    | Privilege required - operation needs root, run via `sudo`.         |
-| 4    | Required external tool is not installed (e.g. `cijoe` missing).    |
+| 4    | Required external tool is not installed (e.g. `qemu-img` for `.qcow2`). |
 | 5    | Target raced - block device became mounted or disappeared between validation and write. |
 
 Agents should treat `0` as success and any other code as failure. Use

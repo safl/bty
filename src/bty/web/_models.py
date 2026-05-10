@@ -54,53 +54,44 @@ class MachineUpsert(BaseModel):
     All fields are optional except for the implicit ``mac`` from the
     path; ``provisioning_mode`` defaults to ``"none"`` and
     ``boot_policy`` defaults to ``"local"``. Image identity is the
-    SHA-256 of the image bytes (M22): the operator picks an image
-    from the unified catalog (which dedupes dir-scan files and
-    manifest entries by content hash) and bty stores the SHA, not
-    a filename. Renaming or replacing the underlying file does not
-    affect the binding.
+    SHA-256 of the image bytes: the operator picks an image from the
+    unified catalog (which dedupes dir-scan files and manifest
+    entries by content hash) and bty stores the SHA, not a filename.
+    Renaming or replacing the underlying file does not affect the
+    binding.
 
-    ``model_config = {"extra": "forbid"}``: unknown fields raise a
-    422 instead of being silently dropped. The previous "ignore"
-    default cost the cijoe PXE chain test a release-cycle of
-    silent failure -- it was sending the pre-M22 ``image`` field
-    (now renamed to ``image_sha256``), Pydantic accepted the
-    unknown key, the assignment landed with ``image_sha256=NULL``,
-    and ``GET /pxe/<mac>`` returned "no assignment". Loud failure
-    catches operator typos + stale clients at the edge instead of
-    after the chain completes.
+    ``extra="forbid"`` so unknown fields fail loud at the edge with
+    a 422 -- silent drops let a stale client put a row with
+    ``image_sha256=NULL`` and the next PXE chain fall through to
+    "no assignment", which is a debugging trap.
     """
 
     model_config = {"extra": "forbid"}
 
     # 64 lower-case hex chars; ``None`` = discovered-but-unassigned.
-    # Validating the shape here catches operator typos at PUT time
-    # rather than letting bogus SHAs land in state.db and surface
-    # as silent "no /pxe/<mac>" mismatches later.
     image_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     provisioning_mode: str = Field(default="none", pattern=PROVISIONING_PATTERN)
-    # ``\S{name}`` agetty escape lets operators set the cooked
-    # hostname per machine; the previous loose pattern
-    # (``[a-zA-Z0-9.-]+``) accepted invalid shapes like ``-foo``
-    # (leading hyphen), ``foo..bar`` (double dot), ``.foo``
-    # (leading dot), and bare ``-``. Tightened to RFC-1123-ish
-    # without going full-blown DNS-spec (which would need
-    # length-per-label limits and is overkill for a homelab
-    # display name): each dot-separated label is alnum, may
-    # contain hyphens internally, and may not start or end
-    # with a hyphen. ``max_length=253`` matches DNS's overall
-    # name limit so a hostile push of a 100 KB string can't
-    # land. Existing rows with invalid hostnames stay as-is
-    # (the pattern only fires on PUT; the SELECT-and-render
-    # path doesn't re-validate) but operators can no longer
-    # land new bad ones.
+    # RFC-1123-ish: each dot-separated label is alnum, hyphen-
+    # internal-only (no leading / trailing / bare hyphen, no
+    # consecutive dots). ``max_length=253`` matches DNS.
     hostname: str | None = Field(
         default=None,
         min_length=1,
         max_length=253,
         pattern=r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$",
     )
-    cijoe_task_ref: str | None = None
+    # Path to the cijoe task YAML, evaluated server-side when bty-web
+    # SSHes in after first boot. Defensive pattern: reject NUL bytes
+    # and newlines (those would crash the subprocess launch / corrupt
+    # the audit log) but don't constrain path syntax otherwise -- both
+    # absolute and relative paths are valid; operator-friendly path
+    # characters like spaces stay allowed.
+    cijoe_task_ref: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=4096,
+        pattern=r"^[^\x00\r\n]+$",
+    )
     boot_policy: str = Field(default="local", pattern=BOOT_POLICY_PATTERN)
 
 
@@ -114,10 +105,12 @@ class Machine(BaseModel):
     """
 
     mac: str = Field(..., pattern=MAC_PATTERN)
-    image_sha256: str | None = None
+    image_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     provisioning_mode: str = Field(default="none", pattern=PROVISIONING_PATTERN)
     hostname: str | None = None
-    cijoe_task_ref: str | None = None
+    cijoe_task_ref: str | None = Field(
+        default=None, min_length=1, max_length=4096, pattern=r"^[^\x00\r\n]+$"
+    )
     # Set the first time bty-web sees a ``GET /pxe/{mac}`` for this MAC.
     # ``None`` for machines that were created via ``PUT`` and have not
     # yet PXE-booted through bty-web.

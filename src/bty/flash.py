@@ -9,8 +9,9 @@ cover the validation logic:
 - ``make_plan`` is pure: it bundles probed info into a :class:`FlashPlan`.
 - ``validate_plan`` is pure: it returns a list of error strings.
 - ``execute_plan`` does the destructive write (qemu-img convert /
-  zstd -d / dd as appropriate for the image format) and applies
-  the chosen post-flash provisioning mode (cloud-init, cijoe, none).
+  zstd -d / dd as appropriate for the image format). bty has no
+  post-flash provisioning step -- first-boot bring-up belongs in
+  the image cooker, post-boot config in bty-web's ``cijoe-task``.
 
 The CLI calls all four. Tests construct ``ImageInfo`` / ``TargetInfo``
 directly and exercise ``make_plan`` / ``validate_plan`` without mocks.

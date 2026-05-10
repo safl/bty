@@ -14,8 +14,6 @@ Recognised cmdline parameters:
 - ``bty.server=URL``       - base URL of the bty-web server
 - ``bty.mac=MAC``          - this machine's MAC (xx-xx-...)
 - ``bty.image_url=URL``    - direct URL to the image to flash
-- ``bty.provisioning=MODE``- 'none' / 'cloud-init' / 'cijoe'
-                             (defaults to 'none' if absent)
 - ``bty.mode=interactive`` - short-circuit; ``bty-tui-on-tty1.service``
                              handles the interactive flash flow on
                              tty1 instead. Set by the server's
@@ -163,17 +161,8 @@ def main() -> int:
     server = args["bty.server"].rstrip("/")
     mac = args["bty.mac"]
     image_url = args["bty.image_url"]
-    # ``bty.provisioning`` on the cmdline is documentation-only as far
-    # as the live env is concerned. ``none`` is a no-op; ``cijoe-task``
-    # is server-driven (bty-web fires the task from
-    # ``POST /pxe/{mac}/done``, which we signal below) -- nothing for
-    # this script to do either way.
-    provisioning = args.get("bty.provisioning", "none")
 
-    print(
-        f"bty-flash-on-boot: server={server} mac={mac} provisioning={provisioning}",
-        flush=True,
-    )
+    print(f"bty-flash-on-boot: server={server} mac={mac}", flush=True)
 
     local_image = local_image_path(image_url)
     download(image_url, local_image)

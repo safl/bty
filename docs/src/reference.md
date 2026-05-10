@@ -51,10 +51,10 @@ for the full per-command schema reference and the exit-code table.
 | Code | Meaning |
 |------|--------------------------------------------------------------------|
 | 0 | Success. |
-| 1 | Operation failed (validation rejected the plan; write subprocess returned non-zero; cloud-init / cijoe step failed). |
+| 1 | Operation failed (validation rejected the plan; write subprocess returned non-zero). |
 | 2 | Misuse - argparse error, missing required flag, missing input file. |
 | 3 | Privilege required - operation needs root, rerun via `sudo`. |
-| 4 | Required external tool is not installed (e.g. `cijoe`). |
+| 4 | Required external tool is not installed (e.g. `qemu-img` for `.qcow2`). |
 | 5 | Target raced - block device became mounted or otherwise unsuitable between validation and write. |
 
 ### `bty list disks`
@@ -144,11 +144,10 @@ Exit codes:
 
 ### `bty flash --image PATH --target PATH [--progress {text,ndjson,none}] [--dry-run] [--yes]`
 
-Flash an image onto a target block device. v0.7.39 narrowed bty's
-surface to "flasher only" -- offline cloud-init / cijoe
-provisioning is image-creation territory and lives in the cooker
-upstream. Post-boot configuration on PXE-managed machines is the
-bty-web ``cijoe-task`` flow, not a `bty flash` mode.
+Flash an image onto a target block device. ``bty flash`` is a
+flasher only -- first-boot bring-up belongs in the image cooker
+upstream, post-boot configuration belongs in bty-web's
+``cijoe-task`` flow. There are no provisioning flags here.
 
 `--image` accepts three forms:
 
@@ -368,26 +367,25 @@ normalised to lower-case `aa:bb:cc:dd:ee:ff`.
 ```
 Machine = {
   "mac": "aa:bb:cc:dd:ee:ff",
-  "image": "debian.qcow2" | null,           # null = discovered but unassigned
-  "provisioning_mode": "none" | "cloud-init" | "cijoe" | "cijoe-task",
+  "image_sha256": "<64-hex>" | null,         # null = discovered but unassigned
+  "provisioning_mode": "none" | "cijoe-task",
   "hostname": "..." | null,
   "cijoe_task_ref": "..." | null,
-  "last_known_good": object | null,
-  "discovered_at": "<ISO 8601>" | null,     # first /pxe contact; null if PUT-only
-  "last_seen_at":  "<ISO 8601>" | null,     # most recent /pxe contact
+  "discovered_at": "<ISO 8601>" | null,      # first /pxe contact; null if PUT-only
+  "last_seen_at":  "<ISO 8601>" | null,      # most recent /pxe contact
   "last_seen_ip":  "203.0.113.42" | null,
-  "boot_policy":   "local" | "flash" | "tui",  # what /pxe/{mac} returns
-  "last_flashed_at": "<ISO 8601>" | null,   # set by POST /pxe/{mac}/done
+  "boot_policy":   "local" | "flash" | "tui", # what /pxe/{mac} returns
+  "last_flashed_at": "<ISO 8601>" | null,    # set by POST /pxe/{mac}/done
   "last_task_run_at":    "<ISO 8601>" | null,
-  "last_task_status":    "running" | "success" | "failed" | null,
-  "last_task_output_path": str | null,      # /var/lib/bty/tasks/<mac>/<run-id>
+  "last_task_status":    "running" | "completed" | "cancelled" | "failed" | null,
+  "last_task_output_path": str | null,       # /var/lib/bty/tasks/<mac>/<run-id>
   "created_at":    "<ISO 8601>",
   "updated_at":    "<ISO 8601>"
 }
 
 MachineUpsert = {
-  "image": str | null,
-  "provisioning_mode": "none" | "cloud-init" | "cijoe" | "cijoe-task",
+  "image_sha256": "<64-hex>" | null,
+  "provisioning_mode": "none" | "cijoe-task",
   "hostname": str | null,
   "cijoe_task_ref": str | null,
   "boot_policy": "local" | "flash" | "tui"  # default "local" on PUT;

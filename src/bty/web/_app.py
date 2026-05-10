@@ -407,7 +407,7 @@ def create_app(
             )
         publish_machines_changed()
 
-        # Online cijoe (milestone 15): if the machine is set up for
+        # Online cijoe: if the machine is set up for
         # post-boot provisioning, kick off a task run in a worker
         # thread now that the live env says the flash is done. cijoe's
         # transport-retry handles waiting for SSH to come up. The

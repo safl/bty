@@ -1,4 +1,4 @@
-"""bty-web download manager for the catalog (M22).
+"""bty-web download manager for the catalog.
 
 Routes catalog fetches through an asyncio-supervised worker pool
 so the operator can:
@@ -22,12 +22,13 @@ Module is layered on top of ``bty.catalog``: this file holds the
 async + state machinery, ``bty.catalog`` holds the byte-pumping +
 SHA verification. Keeps the CLI path (``bty catalog fetch``) free
 of any asyncio dependency.
+
+Lifecycle plumbing lives in :class:`bty.web._jobs._BaseAsyncManager`.
 """
 
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import os
 import threading
 import time
@@ -36,6 +37,7 @@ from pathlib import Path
 from typing import Any
 
 from bty import catalog as _catalog
+from bty.web._jobs import _BaseAsyncManager
 
 # Default cap on simultaneous downloads. Tuned so a typical homelab
 # uplink isn't saturated by N parallel fetches; bumpable via env.
@@ -94,75 +96,25 @@ class DownloadState:
         }
 
 
-class DownloadManager:
+class DownloadManager(_BaseAsyncManager[DownloadState]):
     """Async worker-pool scheduler for catalog fetches.
 
-    Lifecycle:
-
-      1. ``start(catalog, cache_dir)`` spawns ``max_parallel``
-         worker coroutines, each pulling names off the queue.
-      2. ``enqueue(name)`` validates the name against the catalog
-         and either returns the existing state (if already
-         queued / running / completed) or registers a new
-         ``DownloadState`` and pushes the name onto the queue.
-      3. ``cancel(name)`` flips the per-download cancel event;
-         the worker thread sees it on the next chunk boundary
-         and raises ``CatalogCancelled``, which we translate to
-         ``status="cancelled"``.
-      4. ``stop()`` cancels every queued download and signals the
-         workers to drain. Called from the FastAPI shutdown hook.
+    ``start(catalog, cache_dir)`` spawns workers, ``enqueue(name)``
+    queues a job (idempotent on already-queued / completed /
+    running), ``cancel(name)`` flips the per-job event, ``stop()``
+    drains.
     """
 
     def __init__(self, max_parallel: int | None = None) -> None:
-        self._max_parallel = max_parallel or _resolve_max_parallel()
+        super().__init__(max_parallel or _resolve_max_parallel())
         self._catalog: _catalog.Catalog | None = None
         self._cache_dir: Path | None = None
-        self._states: dict[str, DownloadState] = {}
-        self._queue: asyncio.Queue[str] = asyncio.Queue()
-        self._workers: list[asyncio.Task[None]] = []
-        # Lock for read-modify-write of ``_states`` from API
-        # handlers (which run in the event-loop thread alongside
-        # workers). asyncio.Lock is sufficient since all mutation
-        # happens in the event loop.
-        self._lock = asyncio.Lock()
-        self._stopping = False
-
-    @property
-    def max_parallel(self) -> int:
-        return self._max_parallel
 
     def start(self, catalog: _catalog.Catalog, cache_dir: Path) -> None:
-        """Bind the manager to a manifest + cache dir and spawn workers.
-
-        Idempotent within a process: a second ``start`` after
-        ``stop`` would need to reset ``_stopping`` -- we don't
-        support hot manifest reload here in v1.
-        """
-        if self._workers:
-            raise RuntimeError("DownloadManager already started")
+        """Bind the manager to a manifest + cache dir and spawn workers."""
         self._catalog = catalog
         self._cache_dir = cache_dir
-        self._stopping = False
-        for n in range(self._max_parallel):
-            self._workers.append(asyncio.create_task(self._worker(n)))
-
-    async def stop(self) -> None:
-        """Cancel queued downloads, signal in-flight ones to abort,
-        and wait for workers to drain. Idempotent."""
-        self._stopping = True
-        async with self._lock:
-            for st in self._states.values():
-                if st.status in ("queued", "running"):
-                    st._cancel.set()
-                    if st.status == "queued":
-                        st.status = "cancelled"
-                        st.finished_at = time.time()
-        for w in self._workers:
-            w.cancel()
-        for w in self._workers:
-            with contextlib.suppress(asyncio.CancelledError):
-                await w
-        self._workers.clear()
+        self._spawn_workers()
 
     async def enqueue(self, name: str) -> DownloadState:
         """Look up the entry, create / re-use a state, and push
@@ -188,12 +140,9 @@ class DownloadManager:
 
         async with self._lock:
             existing = self._states.get(name)
-            if existing is not None:
-                if existing.status in ("queued", "running"):
-                    return existing
-                if existing.status == "completed":
-                    return existing
-                # ``cancelled`` / ``failed`` -- allow a fresh attempt.
+            if existing is not None and existing.status in ("queued", "running", "completed"):
+                return existing
+            # ``cancelled`` / ``failed`` (or no existing state) -- create a fresh one.
             state = DownloadState(
                 name=entry.name,
                 sha256=entry.sha256,
@@ -213,88 +162,24 @@ class DownloadManager:
             await self._queue.put(name)
             return state
 
-    async def cancel(self, name: str) -> DownloadState | None:
-        """Flip the cancel flag for an active download.
-
-        Returns the (now-updated) state on success, ``None`` if no
-        such download exists or it is already finished.
-        """
-        async with self._lock:
-            state = self._states.get(name)
-            if state is None:
-                return None
-            if state.status not in ("queued", "running"):
-                return state
-            state._cancel.set()
-            # Queued downloads never reached the worker; mark them
-            # cancelled inline so the operator sees the state flip
-            # immediately. Running downloads transition in the
-            # worker after the next chunk-boundary cancel poll.
-            if state.status == "queued":
-                state.status = "cancelled"
-                state.finished_at = time.time()
-            return state
-
-    async def list(self) -> list[DownloadState]:
-        """Snapshot of every download the manager knows about.
-
-        Returns a list copy so callers can iterate without holding
-        the lock; the underlying ``DownloadState`` objects are
-        still mutated by workers, but the list itself is stable.
-        """
-        async with self._lock:
-            return list(self._states.values())
-
-    async def _worker(self, _idx: int) -> None:
-        """Worker coroutine. Loops pulling names off the queue.
-
-        Each iteration:
-
-          1. ``await self._queue.get()``.
-          2. Look up the state + entry. If state is no longer
-             ``queued`` (operator cancelled before pickup), skip.
-          3. Mark ``running``, delegate to ``_run_fetch`` which
-             dispatches ``fetch_to_cache`` on a worker thread.
-          4. Update final status based on outcome (completed /
-             cancelled / failed). Save error message on failure.
-        """
+    async def _run_one(self, state: DownloadState) -> None:
+        """Run a single fetch in a worker thread, snapshot the
+        result back into ``state``."""
         assert self._catalog is not None
         assert self._cache_dir is not None
-        while not self._stopping:
-            try:
-                name = await self._queue.get()
-            except asyncio.CancelledError:
-                return
-            try:
-                async with self._lock:
-                    state = self._states.get(name)
-                    if state is None or state.status != "queued":
-                        # Cancelled before pickup; nothing to do.
-                        continue
-                    entry = self._catalog.by_name(name)
-                    if entry is None:
-                        state.status = "failed"
-                        state.error = "manifest entry vanished"
-                        state.finished_at = time.time()
-                        continue
-                    state.status = "running"
-                    state.started_at = time.time()
-                # Past the lock, ``state`` and ``entry`` are
-                # concrete; pass them by argument so the helper's
-                # closures bind cleanly without mypy gymnastics.
-                await self._run_fetch(state, entry)
-            except asyncio.CancelledError:
-                return
-
-    async def _run_fetch(self, state: DownloadState, entry: _catalog.CatalogEntry) -> None:
-        """Run a single fetch in a worker thread, then snapshot
-        the result back into ``state``. Split out of ``_worker``
-        so the progress / cancel closures bind to non-Optional
-        argument types -- otherwise mypy refuses the default-arg
-        binding trick that B023 forces us to use.
-        """
-        assert self._cache_dir is not None
         cancel_event = state._cancel
+
+        # Re-resolve the entry inside the worker. ``enqueue`` looked
+        # it up at submit time, but the manifest could in theory
+        # have been reloaded between then and now; re-resolving
+        # at run time keeps us honest and is cheap.
+        entry = self._catalog.by_name(state.name)
+        if entry is None:
+            async with self._lock:
+                state.status = "failed"
+                state.error = "manifest entry vanished"
+                state.finished_at = time.time()
+            return
 
         def _progress(downloaded: int, total: int | None) -> None:
             state.bytes_downloaded = downloaded
@@ -318,11 +203,10 @@ class DownloadManager:
             final_status = "cancelled"
             error = None
         except (_catalog.CatalogError, Exception) as exc:
-            # Same cancel-vs-IO-error race the other managers
-            # have: if the cancel flag fired between chunks but
-            # urllib raised before the chunk-boundary cancel
-            # check, treat it as cancellation rather than a
-            # failed download. The operator's intent was "stop".
+            # Cancel-vs-IO-error race: if the cancel flag fired
+            # between chunks but urllib raised before the chunk
+            # boundary's cancel check, treat as cancellation
+            # rather than failure.
             if cancel_event.is_set():
                 final_status = "cancelled"
                 error = None
@@ -350,6 +234,4 @@ def _resolve_max_parallel() -> int:
             raise ValueError
         return n
     except ValueError:
-        # Bad value silently falls back to the default rather than
-        # blocking server startup; logged elsewhere.
         return DEFAULT_MAX_PARALLEL

@@ -1,8 +1,7 @@
-"""bty-web hash manager (M22 layer 5+).
+"""bty-web hash manager.
 
-Mirrors :mod:`bty.web._catalog`'s ``DownloadManager``: an asyncio-
-supervised worker pool that runs SHA-256 hashing of image files in
-the background so the operator can:
+Asyncio-supervised worker pool that runs SHA-256 hashing of image
+files in the background so the operator can:
 
   * watch live progress (bytes hashed / total / percent) for every
     active hash via ``GET /catalog/hashes``,
@@ -18,17 +17,15 @@ speed; serial uses the same total wall clock without tanking
 responsiveness elsewhere. Operators on fast hosts can bump via
 ``BTY_HASH_MAX_PARALLEL``.
 
-Why a separate manager and not a generic JobManager: different
-parallelism defaults, different state semantics (hashing has no
-network failure modes; downloading has no file-not-found failure
-mode), and "two managers" is a clean v1 -- premature abstraction
-would lock in a shape before the second use case proves out.
+The lifecycle plumbing (``stop``, ``cancel``, ``list``, the
+``_worker`` queue loop) lives in :class:`bty.web._jobs._BaseAsyncManager`;
+this module owns the hash-specific state shape, the ``enqueue``
+sidecar-cached short-circuit, and the ``_run_one`` body.
 """
 
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import os
 import threading
 import time
@@ -37,6 +34,7 @@ from pathlib import Path
 from typing import Any
 
 from bty import images as _images
+from bty.web._jobs import _BaseAsyncManager
 
 # Default cap on simultaneous hashes. Tuned for small homelab
 # hardware (Pi 4, old NUCs, mini-PCs); env-overridable.
@@ -98,52 +96,21 @@ class HashState:
         }
 
 
-class HashManager:
+class HashManager(_BaseAsyncManager[HashState]):
     """Async worker-pool scheduler for SHA-256 hash jobs.
 
-    Lifecycle: identical to :class:`bty.web._catalog.DownloadManager`
-    -- ``start(image_root)`` spawns workers, ``enqueue(filename)``
-    queues a job (idempotent on already-queued / completed /
-    running), ``cancel(filename)`` flips the per-job event, ``stop()``
-    drains.
+    ``start(image_root)`` spawns workers, ``enqueue(filename)`` queues
+    a job (idempotent on already-queued / completed / running),
+    ``cancel(filename)`` flips the per-job event, ``stop()`` drains.
     """
 
     def __init__(self, max_parallel: int | None = None) -> None:
-        self._max_parallel = max_parallel or _resolve_max_parallel()
+        super().__init__(max_parallel or _resolve_max_parallel())
         self._image_root: Path | None = None
-        self._states: dict[str, HashState] = {}
-        self._queue: asyncio.Queue[str] = asyncio.Queue()
-        self._workers: list[asyncio.Task[None]] = []
-        self._lock = asyncio.Lock()
-        self._stopping = False
-
-    @property
-    def max_parallel(self) -> int:
-        return self._max_parallel
 
     def start(self, image_root: Path) -> None:
-        if self._workers:
-            raise RuntimeError("HashManager already started")
         self._image_root = image_root
-        self._stopping = False
-        for n in range(self._max_parallel):
-            self._workers.append(asyncio.create_task(self._worker(n)))
-
-    async def stop(self) -> None:
-        self._stopping = True
-        async with self._lock:
-            for st in self._states.values():
-                if st.status in ("queued", "running"):
-                    st._cancel.set()
-                    if st.status == "queued":
-                        st.status = "cancelled"
-                        st.finished_at = time.time()
-        for w in self._workers:
-            w.cancel()
-        for w in self._workers:
-            with contextlib.suppress(asyncio.CancelledError):
-                await w
-        self._workers.clear()
+        self._spawn_workers()
 
     async def enqueue(self, name: str) -> HashState:
         """Queue a hash job for ``image_root / name``.
@@ -192,47 +159,10 @@ class HashManager:
             await self._queue.put(name)
             return state
 
-    async def cancel(self, name: str) -> HashState | None:
-        async with self._lock:
-            state = self._states.get(name)
-            if state is None:
-                return None
-            if state.status not in ("queued", "running"):
-                return state
-            state._cancel.set()
-            if state.status == "queued":
-                state.status = "cancelled"
-                state.finished_at = time.time()
-            return state
-
-    async def list(self) -> list[HashState]:
-        async with self._lock:
-            return list(self._states.values())
-
-    async def _worker(self, _idx: int) -> None:
-        assert self._image_root is not None
-        while not self._stopping:
-            try:
-                name = await self._queue.get()
-            except asyncio.CancelledError:
-                return
-            try:
-                async with self._lock:
-                    state = self._states.get(name)
-                    if state is None or state.status != "queued":
-                        continue
-                    state.status = "running"
-                    state.started_at = time.time()
-                target = self._image_root / name
-                await self._run_hash(state, target)
-            except asyncio.CancelledError:
-                return
-
-    async def _run_hash(self, state: HashState, target: Path) -> None:
-        """Run a single hash in a worker thread, then snapshot the
-        result back into ``state``. Same split-out-of-_worker
-        pattern as ``DownloadManager._run_fetch`` -- the closures
-        bind to non-Optional argument types, which mypy accepts."""
+    async def _run_one(self, state: HashState) -> None:
+        """Run a single hash in a worker thread, snapshot the result
+        back into ``state``."""
+        target = Path(state.path)
         cancel_event = state._cancel
 
         def _progress(hashed: int, total: int) -> None:
@@ -256,12 +186,11 @@ class HashManager:
             error = None
             sha = None
         except Exception as exc:
-            # Same cancel-vs-IO-error race as in
-            # :class:`bty.web._release_mgr.ReleaseFetchManager`:
-            # if the cancel flag fired between chunks but the
-            # ``ensure_sha256`` worker hit a transient OSError
-            # before reaching its cancel-check, the operator-
-            # initiated stop should not surface as "failed".
+            # Cancel-vs-IO-error race: if the cancel flag fired
+            # between chunks but the ``ensure_sha256`` worker hit
+            # a transient OSError before reaching its cancel
+            # check, the operator-initiated stop should not
+            # surface as "failed".
             sha = None
             if cancel_event.is_set():
                 final_status = "cancelled"

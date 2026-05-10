@@ -259,13 +259,12 @@ sudo bty flash \
 (qemu-img needs random access to convert to raw bytes). Either way,
 no operator copy step.
 
-`--provision` controls what happens after the bytes land:
-
-| `--provision` | What it does |
-|---|---|
-| `none` | Just write the image. Target boots into whatever the image was cooked with. |
-| `cloud-init` | Drop a NoCloud `user-data` seed onto the freshly-flashed rootfs. Target self-configures on first boot. Requires `--user-data ./userdata.yaml`. |
-| `cijoe` | Mount the rootfs, run a `cijoe` task against it. Useful for one-off image tweaks (drop SSH keys, set hostname, etc.). Requires `--cijoe-task ./task.yaml` (legacy ``--cijoe-workflow`` accepted). |
+`bty flash` writes the bytes and stops. There's no
+post-flash provisioning step -- first-boot bring-up (users,
+network, packages, hostnames) is the image cooker's job. If the
+target is managed by bty-web with a ``cijoe-task`` configured,
+the server runs a small CIJOE task over SSH after the target
+first-boots; see [components](components.md) for that flow.
 
 ## Step 6: Reboot
 

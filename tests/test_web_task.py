@@ -7,10 +7,9 @@ seeds an in-memory machine record, drives ``_run`` synchronously
 (no thread spawn) on a constructed :class:`TaskState`, and asserts
 the resulting state-dict + DB shape.
 
-v0.7.37 promoted ``TaskRunner`` to a cancelable ``TaskManager``
-that mirrors :class:`bty.web._hash.HashManager` and friends; the
-status vocabulary is now ``running`` / ``completed`` / ``cancelled``
-/ ``failed`` instead of the pre-rename ``success`` / ``failed``.
+Status vocabulary mirrors the other manager-driven jobs (hashes,
+downloads, release-fetches): ``running`` / ``completed`` /
+``cancelled`` / ``failed``.
 """
 
 from __future__ import annotations

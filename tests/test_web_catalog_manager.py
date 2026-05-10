@@ -216,7 +216,7 @@ def test_run_fetch_cancel_with_concurrent_catalog_error_marks_cancelled(
                 raise _catalog.CatalogError("connection reset")
 
             with unittest.mock.patch.object(_catalog, "fetch_to_cache", boom):
-                await mgr._run_fetch(state, entry)
+                await mgr._run_one(state)
 
             assert state.status == "cancelled"
             assert state.error is None

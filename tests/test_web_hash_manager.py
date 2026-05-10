@@ -152,7 +152,7 @@ def test_run_hash_cancel_with_concurrent_oserror_marks_cancelled(tmp_path: Path)
                 raise OSError("transient IO error")
 
             with unittest.mock.patch.object(_images, "ensure_sha256", boom):
-                await mgr._run_hash(state, target)
+                await mgr._run_one(state)
 
             assert state.status == "cancelled"
             assert state.error is None

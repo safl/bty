@@ -1,4 +1,4 @@
-"""Tests for ``bty.web._events_log`` (slim audit-log v0.7.38).
+"""Tests for ``bty.web._events_log`` (slim audit log).
 
 Covers the recording helper + the listing API + the cursor
 pagination invariant (newer rows have larger ids; ``before_id``

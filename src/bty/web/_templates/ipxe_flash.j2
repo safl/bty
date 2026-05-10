@@ -1,7 +1,6 @@
 #!ipxe
 # bty network-flash for {{ mac }}
-#   image (ref):       {{ machine.image_sha256 }}
-#   provisioning mode: {{ machine.provisioning_mode }}
+#   image (ref): {{ machine.image_sha256 }}
 #
 # Chains into the bty live env. The live env's bty-flash-on-boot
 # service reads bty.* from /proc/cmdline, downloads the image,
@@ -22,6 +21,6 @@ set bty-base http://{{ host }}
 # ``/<name>`` is decorative -- the SHA binds the bytes; the name
 # preserves format-by-extension on the live-env side
 # (``bty.flash.probe_image_url`` keys off the URL filename).
-kernel ${bty-base}/boot/bty-netboot-x86_64.vmlinuz boot=live fetch=${bty-base}/boot/bty-netboot-x86_64.squashfs components quiet console=tty0 console=ttyS0,115200 bty.server=${bty-base} bty.mac={{ mac }} bty.image_url=${bty-base}/images/{{ machine.image_sha256 }}/{{ image_name }} bty.provisioning={{ machine.provisioning_mode }}
+kernel ${bty-base}/boot/bty-netboot-x86_64.vmlinuz boot=live fetch=${bty-base}/boot/bty-netboot-x86_64.squashfs components quiet console=tty0 console=ttyS0,115200 bty.server=${bty-base} bty.mac={{ mac }} bty.image_url=${bty-base}/images/{{ machine.image_sha256 }}/{{ image_name }}
 initrd ${bty-base}/boot/bty-netboot-x86_64.initrd
 boot

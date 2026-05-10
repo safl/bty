@@ -1,9 +1,8 @@
 """bty-web release-fetch manager.
 
-Mirrors :class:`bty.web._hash.HashManager` and
-:class:`bty.web._catalog.DownloadManager`: an asyncio-supervised
-worker pool that runs :func:`bty.web._releases.fetch_release` in
-the background so the operator can:
+Asyncio-supervised worker pool that runs
+:func:`bty.web._releases.fetch_release` in the background so the
+operator can:
 
   * watch live progress (bytes done / total / percent) for the
     currently-running fetch via ``GET /boot/releases``,
@@ -20,12 +19,13 @@ Default parallelism is **1**: fetching two GitHub releases in
 parallel is operator-confusing (which one wins on rename?),
 saturates link bandwidth, and the use case is "I want this one
 release in BTY_BOOT_DIR" rather than "I want to fan-out N tags".
+
+Lifecycle plumbing lives in :class:`bty.web._jobs._BaseAsyncManager`.
 """
 
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import re
 import threading
 import time
@@ -34,6 +34,7 @@ from pathlib import Path
 from typing import Any
 
 from bty.web import _releases
+from bty.web._jobs import _BaseAsyncManager
 
 # Default cap on simultaneous release fetches. Tuned for "one
 # release at a time" semantics; bumping is unusual.
@@ -88,51 +89,21 @@ class ReleaseFetchState:
         }
 
 
-class ReleaseFetchManager:
+class ReleaseFetchManager(_BaseAsyncManager[ReleaseFetchState]):
     """Async worker-pool scheduler for release-fetch jobs.
 
-    Lifecycle: identical to ``HashManager``. ``start(boot_root)``
-    spawns workers, ``enqueue(tag)`` queues a job (idempotent on
-    already-queued / running / completed), ``cancel(tag)`` flips
-    the per-job event, ``stop()`` drains.
+    ``start(boot_root)`` spawns workers, ``enqueue(tag)`` queues a
+    job (idempotent on already-queued / running / completed),
+    ``cancel(tag)`` flips the per-job event, ``stop()`` drains.
     """
 
     def __init__(self, max_parallel: int | None = None) -> None:
-        self._max_parallel = max_parallel or DEFAULT_MAX_PARALLEL
+        super().__init__(max_parallel or DEFAULT_MAX_PARALLEL)
         self._boot_root: Path | None = None
-        self._states: dict[str, ReleaseFetchState] = {}
-        self._queue: asyncio.Queue[str] = asyncio.Queue()
-        self._workers: list[asyncio.Task[None]] = []
-        self._lock = asyncio.Lock()
-        self._stopping = False
-
-    @property
-    def max_parallel(self) -> int:
-        return self._max_parallel
 
     def start(self, boot_root: Path) -> None:
-        if self._workers:
-            raise RuntimeError("ReleaseFetchManager already started")
         self._boot_root = boot_root
-        self._stopping = False
-        for n in range(self._max_parallel):
-            self._workers.append(asyncio.create_task(self._worker(n)))
-
-    async def stop(self) -> None:
-        self._stopping = True
-        async with self._lock:
-            for st in self._states.values():
-                if st.status in ("queued", "running"):
-                    st._cancel.set()
-                    if st.status == "queued":
-                        st.status = "cancelled"
-                        st.finished_at = time.time()
-        for w in self._workers:
-            w.cancel()
-        for w in self._workers:
-            with contextlib.suppress(asyncio.CancelledError):
-                await w
-        self._workers.clear()
+        self._spawn_workers()
 
     async def enqueue(self, tag: str) -> ReleaseFetchState:
         """Queue a release fetch for ``tag``.
@@ -161,45 +132,9 @@ class ReleaseFetchManager:
             await self._queue.put(tag)
             return state
 
-    async def cancel(self, tag: str) -> ReleaseFetchState | None:
-        async with self._lock:
-            state = self._states.get(tag)
-            if state is None:
-                return None
-            if state.status not in ("queued", "running"):
-                return state
-            state._cancel.set()
-            if state.status == "queued":
-                state.status = "cancelled"
-                state.finished_at = time.time()
-            return state
-
-    async def list(self) -> list[ReleaseFetchState]:
-        async with self._lock:
-            return list(self._states.values())
-
-    async def _worker(self, _idx: int) -> None:
-        assert self._boot_root is not None
-        while not self._stopping:
-            try:
-                tag = await self._queue.get()
-            except asyncio.CancelledError:
-                return
-            try:
-                async with self._lock:
-                    state = self._states.get(tag)
-                    if state is None or state.status != "queued":
-                        continue
-                    state.status = "running"
-                    state.started_at = time.time()
-                await self._run_fetch(state)
-            except asyncio.CancelledError:
-                return
-
-    async def _run_fetch(self, state: ReleaseFetchState) -> None:
-        """Run one fetch in a worker thread, snapshotting the
-        result back into ``state``. Same split-out pattern as
-        ``HashManager._run_hash``."""
+    async def _run_one(self, state: ReleaseFetchState) -> None:
+        """Run one fetch in a worker thread, snapshot the result
+        back into ``state``."""
         assert self._boot_root is not None
         cancel_event = state._cancel
         boot_root = self._boot_root
@@ -227,14 +162,12 @@ class ReleaseFetchManager:
             error = None
             base_url = None
         except (_releases.FetchError, Exception) as exc:
-            # If the cancel flag fired while urllib happened to be
-            # mid-syscall, the worker raises ``URLError`` (wrapped
-            # as ``FetchError``) before the next chunk-boundary
-            # cancel check gets a chance to translate it into
-            # ``FetchCancelled``. Treat that as cancellation, not
-            # failure -- the operator's intent was "stop", and
-            # showing a "failed: connection reset" badge for a
-            # user-initiated cancel is misleading.
+            # Cancel-vs-IO-error race: if the cancel flag fired
+            # while urllib happened to be mid-syscall, the worker
+            # raises ``URLError`` (wrapped as ``FetchError``)
+            # before the next chunk-boundary cancel check gets a
+            # chance to translate it into ``FetchCancelled``.
+            # Treat that as cancellation, not failure.
             if cancel_event.is_set():
                 final_status = "cancelled"
                 error = None
@@ -243,7 +176,7 @@ class ReleaseFetchManager:
                 error = (
                     str(exc)
                     if isinstance(exc, _releases.FetchError)
-                    else (f"{type(exc).__name__}: {exc}")
+                    else f"{type(exc).__name__}: {exc}"
                 )
             base_url = None
 
