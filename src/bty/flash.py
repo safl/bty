@@ -1186,10 +1186,14 @@ def apply_cijoe(
     task / config files are missing, the rootfs cannot be mounted,
     or the task exits non-zero.
     """
-    if not task.exists():
-        raise FlashError(f"cijoe task not found: {task}")
-    if config is not None and not config.exists():
-        raise FlashError(f"cijoe config not found: {config}")
+    if not task.is_file():
+        # ``exists()`` would accept a directory and let cijoe fall over
+        # with a confusing YAML-parse error; ``is_file()`` surfaces a
+        # clear bty-side error for the typo case (operator pointed
+        # ``--cijoe-task`` at a dir instead of the YAML inside it).
+        raise FlashError(f"cijoe task not found or not a file: {task}")
+    if config is not None and not config.is_file():
+        raise FlashError(f"cijoe config not found or not a file: {config}")
     if shutil.which("cijoe") is None:
         raise FlashDependencyError(
             "cijoe is not installed; install with `pipx install cijoe` and re-run"

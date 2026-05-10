@@ -808,6 +808,18 @@ def test_apply_cijoe_missing_task_raises(tmp_path: Path) -> None:
         flash.apply_cijoe(Path("/dev/null"), tmp_path / "missing.yaml")
 
 
+def test_apply_cijoe_directory_as_task_raises(tmp_path: Path) -> None:
+    """Operator typo: passes a *directory* (e.g. the dir containing the
+    YAML) to ``--cijoe-task`` instead of the YAML file itself. The
+    pre-v0.7.36 ``Path.exists()`` check accepted directories and let
+    cijoe fall over with a confusing YAML-parse error; ``is_file()``
+    surfaces a clear bty-side message instead."""
+    a_dir = tmp_path / "wf-dir"
+    a_dir.mkdir()
+    with pytest.raises(flash.FlashError, match="not a file"):
+        flash.apply_cijoe(Path("/dev/null"), a_dir)
+
+
 def test_apply_cijoe_missing_config_raises(tmp_path: Path) -> None:
     wf = tmp_path / "wf.yaml"
     wf.write_text("steps: []\n")

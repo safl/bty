@@ -102,12 +102,12 @@ pipx install "bty-lab[web]"
 ```
 
 State (machine records, MAC <-> image/provisioning assignments, CIJOE
-workflow references and run reports, known-good baselines, image
+task references and run reports, known-good baselines, image
 catalog metadata, server settings, sessions) is persisted in a
 single SQLite database under the configured `BTY_STATE_DIR`. Backup
 or migrate by copying the file.
 
-CIJOE produces a structured report on every workflow run. `bty-web`
+CIJOE produces a structured report on every task run. `bty-web`
 captures these reports - both for offline runs (sent back from the live
 environment) and online runs (executed by the server itself) - and
 exposes them in the UI per machine and per run. Reports are downloadable
@@ -198,12 +198,12 @@ SD-card image natively.
 `cijoe` runs in one of two execution modes depending on the deployment
 vehicle:
 
-- **Offline (USB live).** The workflow runs from the live environment
+- **Offline (USB live).** The task runs from the live environment
   after the flash, against the freshly-written filesystem (mount, edit,
   unmount), before the target reboots. Customisation is constrained to
   what is possible by manipulating the filesystem from the outside.
 - **Online (PXE / server).** After the target first-boots into its own
-  OS, `bty-web` triggers a CIJOE workflow against the running machine
-  and records the post-workflow state as that machine's known-good
+  OS, `bty-web` triggers a CIJOE task against the running machine
+  and records the post-task state as that machine's known-good
   baseline. The server - not the image - becomes the source of truth
   for "what this box is supposed to look like."

@@ -81,12 +81,26 @@ class MachineUpsert(BaseModel):
     image_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     provisioning_mode: str = Field(default="none", pattern=PROVISIONING_PATTERN)
     # ``\S{name}`` agetty escape lets operators set the cooked
-    # hostname per machine; empty string is meaningless and would
-    # land in state.db where ``hostname || mac`` rendering shows
-    # blank rows. Constrain to a permissive RFC-1123-ish shape:
-    # letters, digits, hyphen, dot. ``min_length=1`` rejects the
-    # explicit empty-string case Pydantic would otherwise accept.
-    hostname: str | None = Field(default=None, min_length=1, pattern=r"^[a-zA-Z0-9.-]+$")
+    # hostname per machine; the previous loose pattern
+    # (``[a-zA-Z0-9.-]+``) accepted invalid shapes like ``-foo``
+    # (leading hyphen), ``foo..bar`` (double dot), ``.foo``
+    # (leading dot), and bare ``-``. Tightened to RFC-1123-ish
+    # without going full-blown DNS-spec (which would need
+    # length-per-label limits and is overkill for a homelab
+    # display name): each dot-separated label is alnum, may
+    # contain hyphens internally, and may not start or end
+    # with a hyphen. ``max_length=253`` matches DNS's overall
+    # name limit so a hostile push of a 100 KB string can't
+    # land. Existing rows with invalid hostnames stay as-is
+    # (the pattern only fires on PUT; the SELECT-and-render
+    # path doesn't re-validate) but operators can no longer
+    # land new bad ones.
+    hostname: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=253,
+        pattern=r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$",
+    )
     cijoe_task_ref: str | None = None
     boot_policy: str = Field(default="local", pattern=BOOT_POLICY_PATTERN)
 

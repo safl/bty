@@ -2,7 +2,7 @@
   <img src="docs/src/_static/bty-mascot.png" alt="bty mascot - a blue bat holding a PXE handshake card and a disk labelled .qcow2 / .img / .raw" width="240">
 </p>
 
-# bty - flash images onto target disks, from local or network sources
+# bty - flash a fleet without leaving your chair
 
 [![CI](https://github.com/safl/bty/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/safl/bty/actions/workflows/ci.yml)
 [![Docs](https://github.com/safl/bty/actions/workflows/docs.yml/badge.svg?branch=main)](https://github.com/safl/bty/actions/workflows/docs.yml)
@@ -10,36 +10,58 @@
 [![PyPI](https://img.shields.io/pypi/v/bty-lab.svg)](https://pypi.org/project/bty-lab/)
 [![Python](https://img.shields.io/pypi/pyversions/bty-lab.svg)](https://pypi.org/project/bty-lab/)
 [![Container](https://img.shields.io/badge/container-ghcr.io%2Fsafl%2Fbty--web-blue)](https://github.com/safl/bty/pkgs/container/bty-web)
-[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 
-Image-flash provisioning toolkit for bare-metal and virtual targets.
-Writes pre-built ("cooked") system images onto target disks. Three
-delivery shapes from the same runtime: a self-contained USB live
-stick, a USB stick pulling from a network-shared image catalog, or
-a PXE-boot server that flashes targets unattended. Configures the
-deployed system on first boot via cloud-init or CIJOE workflows.
+Reflash a homelab box, a CI runner, or a rack of bare-metal targets in
+the time it takes to make coffee. bty writes pre-built ("cooked") system
+images onto disks - locally over USB or remotely over PXE - then hands
+the freshly-booted system to cloud-init or a CIJOE task for first-boot
+configuration. No imperative configuration management, no idempotency
+mind games: rebuild the image, reflash the target.
 
-bty is one Python package: the `bty` module, distributed on PyPI as
-[`bty-lab`](https://pypi.org/project/bty-lab/), with three
-console-script entry points:
+```bash
+# Local: USB stick into target, two arrows + Enter, done.
+bty-tui
 
-- `bty`: main CLI (image inspection, target discovery, flashing,
-  provisioning).
-- `bty-tui`: terminal UI (requires the `tui` extra). With
-  `--server URL` it doubles as a remote-flash client against a
-  running `bty-web`.
-- `bty-web`: HTTP server with browser UI (requires the `web` extra).
+# Remote: bind a MAC to an image, the next PXE boot reflashes itself.
+curl -X PUT http://bty-server:8080/machines/aa:bb:cc:dd:ee:ff \
+  -d '{"image_sha256":"<sha>","boot_policy":"flash"}'
 
-Plus a sibling appliance-image builder under `bty-media/` that
-produces four variants from a shared rootfs overlay: the bootable
-USB live image (`usb-x86`), the x86 server appliance (`server-x86`),
-the Raspberry Pi 4 / 5 server appliance (`server-rpi`), and the
-PXE-chain network-flash live env (`netboot-x86`).
+# Per-job CI: every job a clean OS, no drift, no snowflakes.
+```
 
-For a low-friction trial of the bty-web UI without flashing
-anything, a multi-arch container is published to
-[`ghcr.io/safl/bty-web`](https://github.com/safl/bty/pkgs/container/bty-web)
-on every release:
+## Three delivery shapes, one runtime
+
+| Shape | What it is | When it fits |
+|---|---|---|
+| **USB live stick** | bty boots from a flash drive, runs `bty-tui`, flashes the box it's plugged into | Single-machine local imaging |
+| **USB + server catalog** | Same stick, but the image list comes from `bty-web --server URL` | A handful of boxes, shared image library |
+| **PXE-boot appliance** | bty-web on a Pi or x86 box runs DHCP/TFTP/HTTP; targets PXE-chain into a netboot live env that flashes them unattended | CI fleets, racks, anything you don't want to walk to |
+
+All three share the same Python codebase, the same image catalog, the
+same SHA-keyed machine bindings.
+
+## Why bty
+
+- **Reflash on every CI job.** Per-job cadence: each job lands on a
+  freshly-imaged target, runs, gets reflashed for the next job. No
+  state leaks. No snowflakes. No "works on my machine" because the
+  machine is bit-identical to the manifest every single boot.
+- **Cooked images, not recipes.** You build the image once (in your
+  build system of choice), bty writes the bytes. Provisioning is
+  cloud-init or a CIJOE task on first boot - small, declarative,
+  inspectable. No agent, no daemon, no convergence loops.
+- **OS-agnostic by design.** Linux, FreeBSD, Windows - if it boots
+  from a disk image, bty can flash it. macOS targets are out (Apple
+  Silicon's boot story isn't friendly to imaging).
+- **Trust model is explicit.** PXE / live-env routes are open
+  (clients have no token); operator routes (`/machines`,
+  `/catalog/*`, `/boot/releases`) require a session cookie. bty-web
+  is for trusted networks (homelab, CI segment), not the open
+  internet.
+
+## Try it without flashing anything
+
+A multi-arch container is published on every release:
 
 ```bash
 docker run -d --name bty-web -p 8080:8080 -v bty-data:/var/lib/bty \
@@ -54,76 +76,57 @@ for bind-mount permissions, env vars, and password rotation.
 
 ## Install
 
+bty is one Python package - [`bty-lab`](https://pypi.org/project/bty-lab/) on
+PyPI - with three console scripts:
+
 ```bash
-pipx install bty-lab            # CLI, zero third-party Python deps
-pipx install "bty-lab[tui]"     # adds the bty-tui terminal UI
-pipx install "bty-lab[web]"     # adds the bty-web HTTP server
+pipx install bty-lab            # `bty` CLI, zero third-party deps
+pipx install "bty-lab[tui]"     # adds `bty-tui` (Textual)
+pipx install "bty-lab[web]"     # adds `bty-web` (FastAPI + Pydantic)
 pipx install "bty-lab[all]"     # everything
 ```
 
-The CLI flow (`bty list disks`, `bty inspect image`, `bty flash --dry-run`)
-needs only Python 3.11+ and stdlib; full flashing (`bty flash --yes`)
-relies on system binaries (`dd`, `qemu-img`, `zstd`, `lsblk`, etc.) the
-operator's distribution is expected to provide.
+`bty list disks`, `bty inspect image`, `bty flash --dry-run` need only
+Python 3.11+ and stdlib. `bty flash --yes` shells out to `dd`,
+`qemu-img`, `zstd`, `lsblk`, and friends - your distro provides those.
+
+For an appliance you can boot directly (USB stick, server image,
+PXE-chain live env), grab the bake from
+[GitHub Releases](https://github.com/safl/bty/releases). The
+appliance builder lives under [`bty-media/`](bty-media/).
 
 ## Status
 
-Pre-1.0 but actively shipping. Wheels (PyPI), appliance images
-([GitHub Releases](https://github.com/safl/bty/releases)), and
-the bty-web container ([`ghcr.io/safl/bty-web`](https://github.com/safl/bty/pkgs/container/bty-web))
-all publish on every tag, and the server + client + PXE-chain
-end-to-end flow runs in CI on every push. The CLI surface (`bty
-list`, `bty inspect`, `bty flash`) and the bty-web HTTP/iPXE/PAM-
-auth surfaces are stable enough to use in homelab / CI fleets.
-Wire formats and CLI flags may still shift between minor versions
-until 1.0; the schema_version field on `--json` output and the
-`Machine` wire type are the things to watch. See [`PLAN.md`](PLAN.md)
-for the milestone-by-milestone roadmap.
-
-## Planning and design
-
-- [`PLAN.md`](PLAN.md): roadmap and design intent.
-- [`docs/`](docs/): full documentation (Sphinx + MyST).
+Pre-1.0 but actively shipping. Every tag publishes wheels (PyPI),
+appliance images, and the bty-web container. The end-to-end PXE flow
+(server + netboot live env + target flash + completion signal) runs
+in CI on every push. CLI flags and wire formats may still shift
+between minor versions until 1.0 - watch the `schema_version` field
+on `--json` output and the `Machine` wire type. The
+[`PLAN.md`](PLAN.md) tracks the roadmap milestone by milestone.
 
 ## Development
 
-`uv` is the project's dependency manager. Install it via pipx if you
-don't already have it:
-
 ```bash
 pipx install uv
-```
-
-Then sync the dev environment:
-
-```bash
 uv sync --all-extras --group dev
+uv run pytest                    # full suite
+uv run ruff check                # lint
+uv run mypy src                  # types
 ```
 
-Run the test suite, linter, and type-checker:
-
-```bash
-uv run pytest
-uv run ruff check
-uv run mypy src
-```
-
-## Documentation
-
-The docs tooling installs as a separate pipx app:
+The docs tooling installs separately:
 
 ```bash
 pipx install ./docs/tooling
+cd docs
+bty-docs-serve                   # live-rebuild dev server on :8000
+bty-docs-build-html              # one-shot HTML build
+bty-docs-build-pdf               # one-shot PDF (requires LaTeX)
 ```
 
-Then, from inside `docs/`:
+## More
 
-```bash
-bty-docs-serve              # live-rebuild dev server on :8000
-bty-docs-build-html         # one-shot HTML build
-bty-docs-build-pdf          # one-shot PDF build (requires LaTeX)
-```
-
-## License
-
-[GPL-3.0-only](LICENSE).
+- [`PLAN.md`](PLAN.md) - roadmap and design intent.
+- [`docs/`](docs/) - full documentation (Sphinx + MyST), also at
+  [`safl.dk/bty`](https://safl.dk/bty).

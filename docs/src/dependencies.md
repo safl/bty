@@ -74,7 +74,7 @@ your own.
 | `cloud-init` | first-boot user / password / network setup |
 | `cloud-utils` | `growpart` for `bty-grow-rootfs.service` |
 | `plymouth` + `plymouth-themes` | bty-themed boot splash on tty1 (USB live env only -- not on the headless server appliance) |
-| `cijoe` | optional online provisioning workflows after a target first-boots |
+| `cijoe` | optional online provisioning tasks after a target first-boots |
 
 The appliance is the **only** delivery shape that exercises the PXE
 stack. The Docker container (`ghcr.io/safl/bty-web`) deliberately

@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import os
 import sqlite3
 import sys
 import urllib.error
@@ -1129,6 +1130,27 @@ def _serve_safe_file(root: Path, name: str) -> FileResponse:
     return FileResponse(candidate, filename=name)
 
 
+# Default max upload-body size (200 GiB). Generous for plausible
+# real OS images (decompressed Windows is the largest target at
+# ~50 GiB; everything Linux-y fits in single-digit GB) but caps
+# the worst case at "the disk fills up before bty-web does
+# anything useful". Operators can raise via ``BTY_MAX_UPLOAD_BYTES``
+# if they have a legitimate use case for bigger images.
+_DEFAULT_MAX_UPLOAD_BYTES = 200 * 1024 * 1024 * 1024
+
+
+def _max_upload_bytes() -> int:
+    """Resolve the upload size cap from ``BTY_MAX_UPLOAD_BYTES`` or default."""
+    raw = os.environ.get("BTY_MAX_UPLOAD_BYTES")
+    if raw is None:
+        return _DEFAULT_MAX_UPLOAD_BYTES
+    try:
+        value = int(raw)
+    except ValueError:
+        return _DEFAULT_MAX_UPLOAD_BYTES
+    return value if value > 0 else _DEFAULT_MAX_UPLOAD_BYTES
+
+
 async def _stream_upload(request: Request, root: Path, name: str) -> dict[str, object]:
     """Stream the request body to ``root / name`` and return basic metadata.
 
@@ -1144,10 +1166,18 @@ async def _stream_upload(request: Request, root: Path, name: str) -> dict[str, o
     pollute future ``list_images`` / hash auto-import passes. The
     only path that survives is the success path: rename ``.partial``
     -> final name.
+
+    Caps the body at :data:`_DEFAULT_MAX_UPLOAD_BYTES` (200 GiB by
+    default; ``BTY_MAX_UPLOAD_BYTES`` overrides). A runaway script
+    or hostile request that streams forever otherwise fills the
+    image-root partition; the cap kills the upload + unlinks the
+    partial well before that. The pre-cleanup partial unlink
+    covers the cancellation case.
     """
     candidate = _safe_path(root, name)
     root.mkdir(parents=True, exist_ok=True)
     partial = candidate.with_suffix(candidate.suffix + ".partial")
+    max_bytes = _max_upload_bytes()
     size = 0
     try:
         with partial.open("wb") as fh:
@@ -1155,6 +1185,14 @@ async def _stream_upload(request: Request, root: Path, name: str) -> dict[str, o
                 if chunk:
                     fh.write(chunk)
                     size += len(chunk)
+                    if size > max_bytes:
+                        raise HTTPException(
+                            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                            detail=(
+                                f"upload exceeded {max_bytes} bytes "
+                                f"(BTY_MAX_UPLOAD_BYTES). Aborted at {size} bytes."
+                            ),
+                        )
         partial.replace(candidate)
     except BaseException:
         # ``BaseException`` so an asyncio.CancelledError (client

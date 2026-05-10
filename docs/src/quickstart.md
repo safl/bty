@@ -177,22 +177,23 @@ datasource.
 
 ### CIJOE provisioning (offline)
 
-Run a cijoe workflow against the freshly-flashed filesystem before
+Run a cijoe task against the freshly-flashed filesystem before
 the target reboots:
 
 ```bash
 sudo bty flash --image /var/lib/bty/images/debian.qcow2 \
                --target /dev/sdX \
                --provision cijoe \
-               --cijoe-workflow ./tweaks.yaml \
+               --cijoe-task ./tweaks.yaml \
                --yes
 ```
 
 `bty` mounts the largest partition on the target, exports
 `BTY_ROOTFS` pointing at the mount, then runs the supplied cijoe
-workflow. Workflow tasks reference `$BTY_ROOTFS` to drop config
+task. The task's steps reference `$BTY_ROOTFS` to drop config
 files, install seed credentials, etc. Requires `cijoe` on `PATH`
-(install via `pipx install cijoe`).
+(install via `pipx install cijoe`). The legacy
+``--cijoe-workflow`` spelling is accepted as an alias.
 
 Interactive flashing via the TUI:
 

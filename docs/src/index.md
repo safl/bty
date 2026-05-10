@@ -17,7 +17,7 @@
 Image-flash provisioning toolkit for bare-metal and virtual targets.
 Writes pre-built ("cooked") system images onto target disks - locally
 from a USB live stick or remotely over PXE - and configures the
-deployed system on first boot via cloud-init or CIJOE workflows.
+deployed system on first boot via cloud-init or CIJOE tasks.
 
 ```{toctree}
 :maxdepth: 2

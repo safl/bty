@@ -27,12 +27,12 @@ land. Four modes:
   as-is.
 - `cloud-init` - populate the OS's cloud-init seed (NoCloud datasource)
   before the target reboots; the OS picks it up on first boot.
-- `cijoe` - run a CIJOE workflow against the freshly-flashed filesystem
+- `cijoe` - run a CIJOE task against the freshly-flashed filesystem
   (mount, edit, unmount) before the target reboots. Constrained to
   filesystem-level customisation.
 - `cijoe-online` - bty-web only. After the target first-boots into its
-  own OS, `bty-web` runs a CIJOE workflow against the running machine
-  and records the post-workflow state as that machine's known-good
+  own OS, `bty-web` runs a CIJOE task against the running machine
+  and records the post-task state as that machine's known-good
   baseline. The server, not the image, becomes the source of truth
   for "what this box should look like."
 
@@ -71,8 +71,8 @@ overlayroot tmpfs, so files copied there persist on the stick.
 
 A `bty-web`-only concept. A persistent entry in the server's state
 keyed by MAC address that captures: assigned image, provisioning mode,
-optional hostname, references to CIJOE workflows, and (after first boot)
-the post-workflow known-good baseline. The server uses machine records
+optional hostname, references to CIJOE tasks, and (after first boot)
+the post-task known-good baseline. The server uses machine records
 to render per-MAC iPXE configurations and to drive online CIJOE runs.
 
 ## Boot policy

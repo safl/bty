@@ -265,7 +265,7 @@ no operator copy step.
 |---|---|
 | `none` | Just write the image. Target boots into whatever the image was cooked with. |
 | `cloud-init` | Drop a NoCloud `user-data` seed onto the freshly-flashed rootfs. Target self-configures on first boot. Requires `--user-data ./userdata.yaml`. |
-| `cijoe` | Mount the rootfs, run a `cijoe` workflow against it. Useful for one-off image tweaks (drop SSH keys, set hostname, etc.). Requires `--cijoe-workflow ./workflow.yaml`. |
+| `cijoe` | Mount the rootfs, run a `cijoe` task against it. Useful for one-off image tweaks (drop SSH keys, set hostname, etc.). Requires `--cijoe-task ./task.yaml` (legacy ``--cijoe-workflow`` accepted). |
 
 ## Step 6: Reboot
 

@@ -380,6 +380,34 @@ def test_put_image_requires_auth(app_client: TestClient) -> None:
     assert r.status_code == 401
 
 
+def test_put_image_rejects_oversized_upload(
+    app_client: TestClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``_stream_upload`` caps the body at ``BTY_MAX_UPLOAD_BYTES``
+    (default 200 GiB; tunable via env). Without the cap a runaway
+    script or hostile request that streams forever would fill the
+    image-root partition. The cap kills the upload mid-stream, the
+    .partial cleanup branch unlinks the half-written file, and the
+    response is 413."""
+    # Set a tiny cap so the test doesn't actually need to push GiBs.
+    monkeypatch.setenv("BTY_MAX_UPLOAD_BYTES", "16")
+
+    # 64-byte payload, well past the 16-byte cap.
+    payload = b"a" * 64
+    r = app_client.put("/images/oversized.img", content=payload, cookies=AUTH)
+    assert r.status_code == 413
+    # Partial cleanup: no oversized.img or oversized.img.partial
+    # left in the image-root. ``demo.qcow2`` from the fixture is
+    # expected; its ``.sha256`` sidecar may also be present
+    # (auto-import races the test). Anything ``oversized*`` would
+    # be the bug.
+    image_root = tmp_path / "images"
+    leftovers = sorted(p.name for p in image_root.iterdir() if p.name.startswith("oversized"))
+    assert leftovers == [], f"upload cap left behind: {leftovers}"
+
+
 def test_put_image_triggers_hash_so_entry_appears_in_listing(
     app_client: TestClient,
     tmp_path: Path,
@@ -632,6 +660,52 @@ def test_machine_upsert_rejects_empty_hostname(app_client: TestClient) -> None:
         cookies=AUTH,
     )
     assert r.status_code == 422
+
+
+def test_machine_upsert_rejects_invalid_hostname_shapes(app_client: TestClient) -> None:
+    """The pre-v0.7.36 hostname pattern (``[a-zA-Z0-9.-]+``) accepted
+    invalid shapes like ``-foo`` (leading hyphen), ``foo-`` (trailing),
+    ``..``, ``.foo``, and bare ``-``. Tightened to RFC-1123-ish:
+    each label is alnum, hyphen-internal-only, dot-separated. These
+    used to land in state.db where they confused the agetty
+    \\S{name} renderer at console banner time; now rejected at PUT."""
+    valid_sha = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    for bad in (
+        "-foo",  # leading hyphen
+        "foo-",  # trailing hyphen
+        ".foo",  # leading dot
+        "foo.",  # trailing dot
+        "foo..bar",  # consecutive dots
+        "-",  # bare hyphen
+        "..",  # bare dots
+        "host_with_underscore",  # underscore not in pattern
+    ):
+        r = app_client.put(
+            "/machines/aa:bb:cc:dd:ee:ff",
+            json={"image_sha256": valid_sha, "hostname": bad},
+            cookies=AUTH,
+        )
+        assert r.status_code == 422, f"expected 422 for {bad!r}, got {r.status_code}"
+
+
+def test_machine_upsert_accepts_real_hostname_shapes(app_client: TestClient) -> None:
+    """The tightened pattern still accepts shapes operators
+    actually use: short alnum, hyphenated, FQDN, single-label."""
+    valid_sha = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    for ok in (
+        "host",
+        "host01",
+        "rack-01",
+        "node-1.lab.example.org",
+        "single",
+        "a",  # one-char label
+    ):
+        r = app_client.put(
+            "/machines/aa:bb:cc:dd:ee:ff",
+            json={"image_sha256": valid_sha, "hostname": ok},
+            cookies=AUTH,
+        )
+        assert r.status_code == 200, f"expected 200 for {ok!r}, got {r.status_code} {r.text}"
 
 
 def test_machine_upsert_rejects_unknown_fields(app_client: TestClient) -> None:

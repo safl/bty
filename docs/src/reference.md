@@ -142,7 +142,7 @@ Exit codes:
 - `0` -> success
 - `2` -> the path does not exist (or argparse rejected the invocation)
 
-### `bty flash --image PATH --target PATH [--provision MODE] [--user-data PATH] [--meta-data PATH] [--cijoe-workflow PATH] [--cijoe-config PATH] [--progress {text,ndjson,none}] [--dry-run] [--yes]`
+### `bty flash --image PATH --target PATH [--provision MODE] [--user-data PATH] [--meta-data PATH] [--cijoe-task PATH] [--cijoe-config PATH] [--progress {text,ndjson,none}] [--dry-run] [--yes]`
 
 Flash an image onto a target block device.
 
@@ -205,11 +205,12 @@ After the flash, `bty` runs the configured post-flash step:
  installed, rather than silently writing a seed nothing will read.
 - **`cijoe`** - mounts the largest partition on the target (heuristic
  for the rootfs), exports `BTY_ROOTFS` pointing at the mount, then
- invokes `cijoe <workflow> --monitor [-c <config>]`. The workflow's
- tasks read or mutate the rootfs through `$BTY_ROOTFS`; bty itself
- does not interpret what they do. **Requires `--cijoe-workflow PATH`**;
+ invokes `cijoe <task> --monitor [-c <config>]`. The task's steps
+ read or mutate the rootfs through `$BTY_ROOTFS`; bty itself does
+ not interpret what they do. **Requires `--cijoe-task PATH`**
+ (``--cijoe-workflow`` accepted as a backwards-compatible alias);
  rejects with exit `2` if missing. **Requires `cijoe` on `PATH`**
- (`pipx install cijoe`); errors clearly if absent. Workflow exit
+ (`pipx install cijoe`); errors clearly if absent. Task exit
  non-zero is propagated as a flash failure.
 
 #### Progress
@@ -236,7 +237,7 @@ updates and CLI output share the same event stream.
 
 - `0` -> success (validation passed for `--dry-run`; write completed for `--yes`).
 - `1` -> validation failed, or a write / provisioning subprocess returned non-zero.
-- `2` -> argparse error, missing image, missing `--user-data` / `--cijoe-workflow`, neither `--dry-run` nor `--yes` given.
+- `2` -> argparse error, missing image, missing `--user-data` / `--cijoe-task`, neither `--dry-run` nor `--yes` given.
 - `3` -> `--yes` was passed without root.
 - `4` -> required external tool missing (e.g. `cijoe` for `--provision cijoe`).
 - `5` -> target raced (became mounted or stopped being a block device between validation and write).
@@ -347,10 +348,10 @@ tooling which can't carry a session cookie:
  modify `boot_policy`** - flipping a machine back to `local` is an
  explicit operator action so the per-job CI cadence (constant
  reflashing) survives across boots. If the machine has
- `provisioning_mode='cijoe-online'` and a `cijoe_workflow_ref`,
- this also kicks off a background workflow run from bty-web
+ `provisioning_mode='cijoe-online'` and a `cijoe_task_ref`,
+ this also kicks off a background CIJOE task run from bty-web
  against the freshly-booted target (milestone 15). Status surfaces
- via `last_workflow_status` and the SSE machines-update channel.
+ via `last_task_status` and the SSE machines-update channel.
 - `GET /pxe-bootstrap.ipxe` - static iPXE script that dnsmasq points
  iPXE clients at on their second-stage DHCP. Returns
  `chain http://<host>/pxe/${net0/mac:hexhyp}` where `<host>` is the
@@ -391,16 +392,16 @@ Machine = {
   "image": "debian.qcow2" | null,           # null = discovered but unassigned
   "provisioning_mode": "none" | "cloud-init" | "cijoe" | "cijoe-online",
   "hostname": "..." | null,
-  "cijoe_workflow_ref": "..." | null,
+  "cijoe_task_ref": "..." | null,
   "last_known_good": object | null,
   "discovered_at": "<ISO 8601>" | null,     # first /pxe contact; null if PUT-only
   "last_seen_at":  "<ISO 8601>" | null,     # most recent /pxe contact
   "last_seen_ip":  "203.0.113.42" | null,
   "boot_policy":   "local" | "flash" | "tui",  # what /pxe/{mac} returns
   "last_flashed_at": "<ISO 8601>" | null,   # set by POST /pxe/{mac}/done
-  "last_workflow_run_at":    "<ISO 8601>" | null,
-  "last_workflow_status":    "running" | "success" | "failed" | null,
-  "last_workflow_output_path": str | null,  # /var/lib/bty/workflows/<mac>/<run-id>
+  "last_task_run_at":    "<ISO 8601>" | null,
+  "last_task_status":    "running" | "success" | "failed" | null,
+  "last_task_output_path": str | null,      # /var/lib/bty/tasks/<mac>/<run-id>
   "created_at":    "<ISO 8601>",
   "updated_at":    "<ISO 8601>"
 }
@@ -409,7 +410,7 @@ MachineUpsert = {
   "image": str | null,
   "provisioning_mode": "none" | "cloud-init" | "cijoe" | "cijoe-online",
   "hostname": str | null,
-  "cijoe_workflow_ref": str | null,
+  "cijoe_task_ref": str | null,
   "boot_policy": "local" | "flash" | "tui"  # default "local" on PUT;
                                             # auto-discovery sets "tui"
 }
