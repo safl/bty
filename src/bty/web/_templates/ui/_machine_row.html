@@ -16,6 +16,8 @@
     <td>
         {% if m.boot_policy == 'flash' %}
         <span class="badge bg-danger" title="every PXE boot reflashes the image"><i class="bi bi-arrow-clockwise me-1"></i>flash</span>
+        {% elif m.boot_policy == 'tui' %}
+        <span class="badge bg-info text-dark" title="every PXE boot lands at bty-tui on tty1 (operator picks an image)"><i class="bi bi-display me-1"></i>tui</span>
         {% else %}
         <span class="badge bg-secondary" title="every PXE boot returns sanboot"><i class="bi bi-hdd me-1"></i>local</span>
         {% endif %}
@@ -31,6 +33,22 @@
     <td>
         {% if m.last_flashed_at %}
         <small class="text-muted" title="{{ m.last_flashed_at }}">{{ m.last_flashed_at }}</small>
+        {% else %}
+        <small class="text-muted">-</small>
+        {% endif %}
+    </td>
+    <td>
+        {# Last cijoe-task status. Same badge palette as the
+           per-machine detail page so the at-a-glance view and
+           the drill-in view tell the same story. #}
+        {% if m.last_task_status == 'running' %}
+        <span class="badge bg-info text-dark"><i class="bi bi-hourglass-split me-1"></i>running</span>
+        {% elif m.last_task_status == 'completed' %}
+        <span class="badge bg-success"><i class="bi bi-check-lg me-1"></i>completed</span>
+        {% elif m.last_task_status == 'cancelled' %}
+        <span class="badge bg-warning text-dark"><i class="bi bi-x-lg me-1"></i>cancelled</span>
+        {% elif m.last_task_status == 'failed' %}
+        <span class="badge bg-danger"><i class="bi bi-exclamation-triangle me-1"></i>failed</span>
         {% else %}
         <small class="text-muted">-</small>
         {% endif %}

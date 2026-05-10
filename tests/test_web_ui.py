@@ -665,15 +665,21 @@ def test_ui_machines_list_shows_boot_policy_badge(client: TestClient) -> None:
         },
         cookies=AUTH,
     )
+    # Auto-discovery via /pxe lands a third row with boot_policy=tui
+    # so we can exercise all three badge variants in one table.
+    client.get("/pxe/aa:bb:cc:dd:ee:01")
     r = client.get("/ui/machines")
     assert r.status_code == 200
     body = r.text
-    # Both badges should appear in the table.
+    # All three boot-policy badges should appear in the table.
     assert "bg-danger" in body and ">flash<" in body
     assert "bg-secondary" in body and ">local<" in body
-    # Table header now has Boot column and Last flashed column.
+    assert "bg-info text-dark" in body and ">tui<" in body
+    # Table header now has Boot column, Last flashed column, and
+    # Task column (the new last_task_status badge).
     assert "<th>Boot</th>" in body
     assert "<th>Last flashed</th>" in body
+    assert "<th>Task</th>" in body
 
 
 def test_ui_machine_delete_via_form(client: TestClient) -> None:

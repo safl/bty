@@ -1300,6 +1300,33 @@ def test_ui_events_page_image_subject_links_to_filter(app_client: TestClient) ->
     assert "/ui/events?subject_kind=image&amp;subject_id=demo.qcow2" in body
 
 
+def test_ui_events_page_footer_shows_filtered_when_filter_active(
+    app_client: TestClient,
+) -> None:
+    """When any filter param is active the footer appends
+    ``(filtered)`` so the operator can tell whether ``Showing N
+    events`` is the full set or a slice. Important on long
+    timelines where a small N is ambiguous without context."""
+    # Trigger both an operator event and a pxe-client event so each
+    # filtered slice has at least one row (the footer only renders
+    # when ``events`` is truthy).
+    app_client.get("/pxe/aa:bb:cc:dd:ee:f9")
+    app_client.put(
+        "/machines/aa:bb:cc:dd:ee:f9",
+        json={"boot_policy": "local"},
+        cookies=AUTH,
+    )
+    # Unfiltered view: no "(filtered)" suffix.
+    r = app_client.get("/ui/events", cookies=AUTH)
+    assert "Showing" in r.text
+    assert "(filtered)" not in r.text
+    # Filtered view: suffix appears.
+    r = app_client.get("/ui/events", params={"actor": "operator"}, cookies=AUTH)
+    body = r.text
+    assert "Showing" in body
+    assert "(filtered)" in body
+
+
 def test_ui_events_page_renders_failure_with_danger_badge(app_client: TestClient) -> None:
     """Failure-kind events (anything ending ``.failed`` or
     ``_failed``) render with the ``bg-danger`` Bootstrap badge so
