@@ -790,11 +790,7 @@ def _fake_flash_plan() -> tui_app.flash.FlashPlan:
         size_bytes=8192,
         mountpoints=[],
     )
-    return tui_app.flash.FlashPlan(
-        image=image,
-        target=target,
-        provisioning_mode="none",
-    )
+    return tui_app.flash.FlashPlan(image=image, target=target)
 
 
 def test_flash_status_screen_ticks_stages_on_success(

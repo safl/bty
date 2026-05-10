@@ -40,7 +40,7 @@ from bty.web._auth import SESSION_COOKIE, require_auth
 from bty.web._events import MachineEvent, MachineEventBus, sse_format
 from bty.web._events_log import list_events as _list_events
 from bty.web._events_log import record as _log_event
-from bty.web._task import TaskRunner
+from bty.web._task import TaskManager
 
 # Session cookie max-age. Sliding TTL on the browser side; Starlette's
 # SessionMiddleware refreshes the cookie on each authed response, so
@@ -109,7 +109,7 @@ def create_app(
     @asynccontextmanager
     async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
         # The SSE event bus accepts publishes from worker threads
-        # (TaskRunner) - capture the loop now so cross-thread
+        # (TaskManager) - capture the loop now so cross-thread
         # publishes can hop in via call_soon_threadsafe.
         event_bus.attach(asyncio.get_running_loop())
         if parsed_catalog is not None:
@@ -126,7 +126,7 @@ def create_app(
         # because fetching two GitHub releases in parallel is
         # operator-confusing and bandwidth-saturating.
         release_fetch_manager.start(resolved_boot_root)
-        # Task manager: cancelable cijoe-online runs. ``start()``
+        # Task manager: cancelable cijoe-task runs. ``start()``
         # sweeps stale ``running`` rows in state.db (left by
         # in-flight tasks at the previous bty-web shutdown) so the
         # UI doesn't show a perma-running badge that never
@@ -238,7 +238,7 @@ def create_app(
         Path(user_cfg_env) if user_cfg_env else _task_module.DEFAULT_USER_CONFIG_PATH
     )
 
-    task_runner = TaskRunner(
+    task_runner = TaskManager(
         state_path=state_path,
         publish_machines_changed=publish_machines_changed,
         user_config_path=user_config_path,
@@ -422,7 +422,7 @@ def create_app(
             ).fetchone()
         if (
             row is not None
-            and row["provisioning_mode"] == "cijoe-online"
+            and row["provisioning_mode"] == "cijoe-task"
             and row["cijoe_task_ref"]
             and row["last_seen_ip"]
         ):
@@ -469,9 +469,9 @@ def create_app(
             )
         return state.to_dict()
 
-    # ---------- task manager (cijoe-online runs, v0.7.37) -----------------------
+    # ---------- task manager (cijoe-task runs, v0.7.37) -----------------------
     # Mirrors the release-fetch / hash / download manager surfaces.
-    # ``/tasks`` is keyed by MAC because the cijoe-online lifecycle is
+    # ``/tasks`` is keyed by MAC because the cijoe-task lifecycle is
     # per-machine: a flash-completion signal triggers one task; the
     # operator may want to abort it via the UI or API. The manager
     # is the only authoritative source for in-flight state (state.db's

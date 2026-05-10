@@ -162,7 +162,7 @@ bty doesn't do offline provisioning. First-boot bring-up (users,
 network, packages, hostnames) gets baked into the image by the
 cooker upstream -- bty just writes the bytes. For post-boot
 configuration on PXE-managed machines, see the bty-web flow's
-``cijoe-online`` mode (covered in the [components](components.md)
+``cijoe-task`` mode (covered in the [components](components.md)
 chapter).
 
 Interactive flashing via the TUI:

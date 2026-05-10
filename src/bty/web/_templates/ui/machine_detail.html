@@ -114,7 +114,16 @@
                 <label class="form-label" for="cijoe_task_ref">CIJOE task ref</label>
                 <input type="text" name="cijoe_task_ref" id="cijoe_task_ref"
                        class="form-control" value="{{ m.cijoe_task_ref or '' }}"
-                       placeholder="(optional, used when provisioning is cijoe)">
+                       placeholder="path/to/post-flash.yaml (only used when provisioning is cijoe-task)">
+                <div class="form-text small">
+                    Light post-flash scripting only. Use cijoe's built-in
+                    commands + the standard <code>include</code> step;
+                    bty-web does not install third-party cijoe script
+                    packages. The intent is "set hostname / trigger
+                    reboot / drop one config file" - not configuration
+                    management. If you need more, bake it into the
+                    image instead.
+                </div>
             </div>
             <div class="mb-3">
                 <label class="form-label" for="boot_policy">Boot policy</label>

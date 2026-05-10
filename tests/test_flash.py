@@ -56,29 +56,29 @@ def _tgt(
 
 
 def test_make_plan_records_no_notes_when_virtual_size_known() -> None:
-    plan = flash.make_plan(_img(), _tgt(), "none")
+    plan = flash.make_plan(_img(), _tgt())
     assert plan.notes == []
 
 
 def test_make_plan_notes_unknown_virtual_size() -> None:
-    plan = flash.make_plan(_img(virtual=None), _tgt(), "none")
+    plan = flash.make_plan(_img(virtual=None), _tgt())
     assert any("size-fits-target check skipped" in n for n in plan.notes)
 
 
 def test_make_plan_skips_note_when_format_is_unrecognised() -> None:
     """Unrecognised format already yields a validation error;
     we don't double-report it as a 'virtual size unknown' note."""
-    plan = flash.make_plan(_img(fmt=None, virtual=None), _tgt(), "none")
+    plan = flash.make_plan(_img(fmt=None, virtual=None), _tgt())
     assert all("size-fits-target check skipped" not in n for n in plan.notes)
 
 
 def test_validate_ok_for_sane_plan() -> None:
-    plan = flash.make_plan(_img(virtual=1024), _tgt(size=1024 * 1024), "none")
+    plan = flash.make_plan(_img(virtual=1024), _tgt(size=1024 * 1024))
     assert flash.validate_plan(plan) == []
 
 
 def test_validate_unknown_format() -> None:
-    plan = flash.make_plan(_img(fmt=None), _tgt(), "none")
+    plan = flash.make_plan(_img(fmt=None), _tgt())
     errors = flash.validate_plan(plan)
     assert any("image format not recognised" in e for e in errors)
 
@@ -90,7 +90,7 @@ def test_validate_tarball_gives_specific_extract_first_message() -> None:
     enough in image-distribution channels that the specific hint
     saves the next confused operator a debugging round."""
     tarball = _img(fmt=None, path=Path("/fake/images/raspbian.tar.gz"))
-    plan = flash.make_plan(tarball, _tgt(), "none")
+    plan = flash.make_plan(tarball, _tgt())
     errors = flash.validate_plan(plan)
     assert any("tarball" in e and "Extract first" in e for e in errors)
     # And the generic "format not recognised" message must NOT
@@ -100,43 +100,37 @@ def test_validate_tarball_gives_specific_extract_first_message() -> None:
 
 
 def test_validate_target_missing() -> None:
-    plan = flash.make_plan(_img(), _tgt(exists=False, is_block=False, size=None), "none")
+    plan = flash.make_plan(_img(), _tgt(exists=False, is_block=False, size=None))
     errors = flash.validate_plan(plan)
     assert any("does not exist" in e for e in errors)
 
 
 def test_validate_target_not_block() -> None:
-    plan = flash.make_plan(_img(), _tgt(is_block=False, size=None), "none")
+    plan = flash.make_plan(_img(), _tgt(is_block=False, size=None))
     errors = flash.validate_plan(plan)
     assert any("not a block device" in e for e in errors)
 
 
 def test_validate_target_too_small() -> None:
-    plan = flash.make_plan(_img(virtual=10_000), _tgt(size=1_000), "none")
+    plan = flash.make_plan(_img(virtual=10_000), _tgt(size=1_000))
     errors = flash.validate_plan(plan)
     assert any("larger than target" in e for e in errors)
 
 
 def test_validate_target_mounted() -> None:
-    plan = flash.make_plan(_img(), _tgt(mountpoints=["/", "/boot"]), "none")
+    plan = flash.make_plan(_img(), _tgt(mountpoints=["/", "/boot"]))
     errors = flash.validate_plan(plan)
     assert any("mounted partitions" in e for e in errors)
 
 
-def test_validate_unknown_provisioning_mode() -> None:
-    plan = flash.make_plan(_img(), _tgt(), "garbage")
-    errors = flash.validate_plan(plan)
-    assert any("unknown provisioning mode" in e for e in errors)
-
-
 def test_validate_skips_size_check_when_virtual_unknown() -> None:
-    plan = flash.make_plan(_img(virtual=None), _tgt(size=1), "none")
+    plan = flash.make_plan(_img(virtual=None), _tgt(size=1))
     errors = flash.validate_plan(plan)
     assert all("larger than target" not in e for e in errors)
 
 
 def test_print_plan_renders_validation_status() -> None:
-    plan = flash.make_plan(_img(), _tgt(), "none")
+    plan = flash.make_plan(_img(), _tgt())
     out = io.StringIO()
     flash.print_plan(plan, errors=[], file=out)
     text = out.getvalue()
@@ -145,7 +139,7 @@ def test_print_plan_renders_validation_status() -> None:
 
 
 def test_print_plan_lists_errors() -> None:
-    plan = flash.make_plan(_img(virtual=10_000), _tgt(size=1), "none")
+    plan = flash.make_plan(_img(virtual=10_000), _tgt(size=1))
     errors = flash.validate_plan(plan)
     out = io.StringIO()
     flash.print_plan(plan, errors=errors, file=out)
@@ -155,7 +149,7 @@ def test_print_plan_lists_errors() -> None:
 
 
 def test_print_plan_renders_notes() -> None:
-    plan = flash.make_plan(_img(virtual=None), _tgt(), "none")
+    plan = flash.make_plan(_img(virtual=None), _tgt())
     out = io.StringIO()
     flash.print_plan(plan, errors=[], file=out)
     text = out.getvalue()
@@ -164,11 +158,11 @@ def test_print_plan_renders_notes() -> None:
 
 
 def test_to_dict_round_trips_plain_types() -> None:
-    plan = flash.make_plan(_img(), _tgt(mountpoints=["/"]), "none")
+    plan = flash.make_plan(_img(), _tgt(mountpoints=["/"]))
     payload = plan.to_dict()
     assert payload["image"]["format"] == "img"
     assert payload["target"]["mountpoints"] == ["/"]
-    assert payload["provisioning_mode"] == "none"
+    assert "provisioning_mode" not in payload
 
 
 # ---------- probe_image: subprocess shelling, mocked ------------------------
@@ -357,7 +351,7 @@ def test_execute_plan_dispatches_to_img_writer(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(flash, "_flash_qcow2", lambda _i, _t: calls.append("qcow2"))
     _stub_post_write(monkeypatch, calls)
 
-    plan = flash.make_plan(_img(fmt="img"), _tgt(), "none")
+    plan = flash.make_plan(_img(fmt="img"), _tgt())
     flash.execute_plan(plan)
 
     assert calls == ["img", "sync", "partprobe"]
@@ -371,7 +365,7 @@ def test_execute_plan_dispatches_to_zst_writer(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(flash, "_flash_qcow2", lambda _i, _t: calls.append("qcow2"))
     _stub_post_write(monkeypatch, calls)
 
-    plan = flash.make_plan(_img(fmt="img.zst"), _tgt(), "none")
+    plan = flash.make_plan(_img(fmt="img.zst"), _tgt())
     flash.execute_plan(plan)
 
     assert calls == ["zst", "sync", "partprobe"]
@@ -391,7 +385,7 @@ def test_execute_plan_dispatches_to_xz_writer(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(flash, "_flash_qcow2", lambda _i, _t: calls.append("qcow2"))
     _stub_post_write(monkeypatch, calls)
 
-    plan = flash.make_plan(_img(fmt="img.xz"), _tgt(), "none")
+    plan = flash.make_plan(_img(fmt="img.xz"), _tgt())
     flash.execute_plan(plan)
 
     assert calls == ["xz", "sync", "partprobe"]
@@ -410,7 +404,7 @@ def test_execute_plan_dispatches_to_gz_writer(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(flash, "_flash_qcow2", lambda _i, _t: calls.append("qcow2"))
     _stub_post_write(monkeypatch, calls)
 
-    plan = flash.make_plan(_img(fmt="img.gz"), _tgt(), "none")
+    plan = flash.make_plan(_img(fmt="img.gz"), _tgt())
     flash.execute_plan(plan)
 
     assert calls == ["gz", "sync", "partprobe"]
@@ -431,7 +425,7 @@ def test_execute_plan_dispatches_to_bz2_writer(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(flash, "_flash_qcow2", lambda _i, _t: calls.append("qcow2"))
     _stub_post_write(monkeypatch, calls)
 
-    plan = flash.make_plan(_img(fmt="img.bz2", virtual=None), _tgt(), "none")
+    plan = flash.make_plan(_img(fmt="img.bz2", virtual=None), _tgt())
     flash.execute_plan(plan)
 
     assert calls == ["bz2", "sync", "partprobe"]
@@ -446,7 +440,7 @@ def test_execute_plan_dispatches_to_qcow2_writer(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(flash, "_flash_qcow2", lambda _i, _t: calls.append("qcow2"))
     _stub_post_write(monkeypatch, calls)
 
-    plan = flash.make_plan(_img(fmt="qcow2"), _tgt(), "none")
+    plan = flash.make_plan(_img(fmt="qcow2"), _tgt())
     flash.execute_plan(plan)
 
     assert calls == ["qcow2", "sync", "partprobe"]
@@ -460,7 +454,7 @@ def test_execute_plan_emits_lifecycle_events(monkeypatch: pytest.MonkeyPatch) ->
     _stub_post_write(monkeypatch, calls)  # we don't care about call order here
 
     events: list[flash.FlashProgress] = []
-    plan = flash.make_plan(_img(fmt="img", virtual=12345), _tgt(), "none")
+    plan = flash.make_plan(_img(fmt="img", virtual=12345), _tgt())
     flash.execute_plan(plan, progress=events.append)
 
     names = [e.event for e in events]
@@ -479,7 +473,7 @@ def test_execute_plan_emits_failed_on_error(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(flash, "_flash_img", boom)
 
     events: list[flash.FlashProgress] = []
-    plan = flash.make_plan(_img(fmt="img"), _tgt(), "none")
+    plan = flash.make_plan(_img(fmt="img"), _tgt())
     with pytest.raises(flash.FlashError):
         flash.execute_plan(plan, progress=events.append)
 
@@ -489,7 +483,7 @@ def test_execute_plan_emits_failed_on_error(monkeypatch: pytest.MonkeyPatch) -> 
 
 def test_execute_plan_refuses_unknown_format(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(flash, "probe_target", _stub_block_target)
-    plan = flash.make_plan(_img(fmt=None), _tgt(), "none")
+    plan = flash.make_plan(_img(fmt=None), _tgt())
     with pytest.raises(flash.FlashError, match="cannot flash image of format"):
         flash.execute_plan(plan)
 
@@ -524,7 +518,7 @@ def test_image_info_display_uses_path_when_url_unset() -> None:
 
 
 def test_to_dict_includes_url_for_url_sourced_image() -> None:
-    plan = flash.make_plan(_img_url(fmt="img.zst", virtual=2048), _tgt(), "none")
+    plan = flash.make_plan(_img_url(fmt="img.zst", virtual=2048), _tgt())
     d = plan.to_dict()
     assert d["image"]["url"] == "http://server.local:8080/images/test.img.zst"
     assert d["image"]["path"] is None
@@ -644,7 +638,7 @@ def test_execute_plan_dispatches_to_url_writers_for_url_images(
         ("qcow2", "qcow2-url"),
     ):
         calls.clear()
-        plan = flash.make_plan(_img_url(fmt=fmt), _tgt(), "none")
+        plan = flash.make_plan(_img_url(fmt=fmt), _tgt())
         flash.execute_plan(plan)
         assert expected in calls
         for local_marker in (
@@ -669,7 +663,7 @@ def test_execute_plan_refuses_when_target_no_longer_block(
         )
 
     monkeypatch.setattr(flash, "probe_target", now_a_regular_file)
-    plan = flash.make_plan(_img(), _tgt(), "none")
+    plan = flash.make_plan(_img(), _tgt())
     with pytest.raises(flash.FlashError, match="no longer a block device"):
         flash.execute_plan(plan)
 
@@ -687,7 +681,7 @@ def test_execute_plan_refuses_when_target_now_mounted(
         )
 
     monkeypatch.setattr(flash, "probe_target", now_mounted)
-    plan = flash.make_plan(_img(), _tgt(), "none")
+    plan = flash.make_plan(_img(), _tgt())
     with pytest.raises(flash.FlashError, match="now has mounted partitions"):
         flash.execute_plan(plan)
 

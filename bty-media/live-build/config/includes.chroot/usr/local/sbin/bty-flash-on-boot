@@ -163,33 +163,12 @@ def main() -> int:
     server = args["bty.server"].rstrip("/")
     mac = args["bty.mac"]
     image_url = args["bty.image_url"]
+    # ``bty.provisioning`` on the cmdline is documentation-only as far
+    # as the live env is concerned. ``none`` is a no-op; ``cijoe-task``
+    # is server-driven (bty-web fires the task from
+    # ``POST /pxe/{mac}/done``, which we signal below) -- nothing for
+    # this script to do either way.
     provisioning = args.get("bty.provisioning", "none")
-
-    # The PXE flow supports two provisioning modes only:
-    #   - ``none`` -- boot the cooked image as-is.
-    #   - ``cijoe-online`` -- bty-web will SSH in after first boot
-    #     (this script doesn't handle it; the trigger lives on the
-    #     server side, kicked off by ``POST /pxe/{mac}/done``).
-    # ``cloud-init`` and ``cijoe`` (offline) require operator-supplied
-    # ``--user-data`` / ``--cijoe-task`` paths that the live env has
-    # no way to fetch. bty-web's UI omits them from the PXE-machine
-    # dropdown, but a stale bty-web or a hand-edited record could
-    # still send them through. Degrade gracefully to ``none`` and log
-    # a clear warning rather than crashing the flash with exit 2.
-    # First-boot cloud-init is the image cooker's job: bake user-data
-    # into the cooked image, or use NoCloud-CIDATA on a sidecar
-    # partition the image already knows how to read.
-    pxe_compatible = ("none", "cijoe-online")
-    if provisioning not in pxe_compatible:
-        print(
-            f"bty-flash-on-boot: provisioning={provisioning!r} is not "
-            f"PXE-compatible (only {pxe_compatible} are); the operator "
-            "must bake cloud-init / cijoe customisation into the image "
-            "or use cijoe-online for post-boot work. Treating as 'none'.",
-            file=sys.stderr,
-            flush=True,
-        )
-        provisioning = "none"
 
     print(
         f"bty-flash-on-boot: server={server} mac={mac} provisioning={provisioning}",
@@ -201,13 +180,6 @@ def main() -> int:
     target = pick_target()
     print(f"bty-flash-on-boot: target disk {target}", flush=True)
 
-    # ``cijoe-online`` is server-driven: the live env's job is just
-    # to flash + signal /pxe/{mac}/done. cijoe runs on bty-web's
-    # side after the target first-boots. So from this script's
-    # perspective both 'none' and 'cijoe-online' map to ``--provision
-    # none`` here.
-    flash_provision = "none"
-
     subprocess.run(
         [
             "bty",
@@ -216,8 +188,6 @@ def main() -> int:
             str(local_image),
             "--target",
             target,
-            "--provision",
-            flash_provision,
             "--yes",
         ],
         check=True,

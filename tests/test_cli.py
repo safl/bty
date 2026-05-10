@@ -218,24 +218,15 @@ def _flash_args(
     *,
     image: Path | str,
     target: Path = Path("/dev/loop9"),
-    provision: str = "none",
     dry_run: bool = False,
     yes: bool = False,
     progress: str = "text",
     json_out: bool = False,
 ) -> argparse.Namespace:
-    """Build the Namespace ``cmd_flash`` expects, without going through argparse.
-
-    v0.7.39: bty flash dropped the offline cloud-init / cijoe
-    arms; ``--user-data`` / ``--meta-data`` / ``--cijoe-task`` /
-    ``--cijoe-config`` are gone. ``provision`` is kept (only
-    ``none`` valid) so the namespace shape still matches the
-    real argparse output.
-    """
+    """Build the Namespace ``cmd_flash`` expects, without going through argparse."""
     return argparse.Namespace(
         image=image,
         target=target,
-        provision=provision,
         dry_run=dry_run,
         yes=yes,
         progress=progress,
@@ -378,32 +369,6 @@ def test_flash_yes_path_propagates_validation_failure(
     rc = cli.cmd_flash(_flash_args(image=img, target=Path("/dev/null"), yes=True))
     assert rc == 1
     assert "Validation: FAILED" in capsys.readouterr().out
-
-
-def test_flash_rejects_unknown_provision_value(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """v0.7.39 narrowed ``--provision`` to ``none`` only. The legacy
-    ``cloud-init`` / ``cijoe`` values are gone -- a stale operator
-    script that passes them gets argparse's ``invalid choice``
-    error rather than silently kicking off a non-existent
-    provisioning code path."""
-    img = tmp_path / "x.img"
-    img.write_bytes(b"\0")
-    with pytest.raises(SystemExit):
-        cli.main(
-            [
-                "flash",
-                "--image",
-                str(img),
-                "--target",
-                "/dev/loop9",
-                "--provision",
-                "cloud-init",
-                "--dry-run",
-            ]
-        )
-    assert "invalid choice" in capsys.readouterr().err
 
 
 def test_flash_yes_path_exit_5_on_race(

@@ -241,7 +241,7 @@ explicit operator action via `PUT /machines/{mac}` so the per-job CI
 cadence survives across reflashes.
 
 **Online cijoe (milestone 15).** A machine with
-`provisioning_mode='cijoe-online'` and a `cijoe_workflow_ref` gets
+`provisioning_mode='cijoe-task'` and a `cijoe_workflow_ref` gets
 its workflow run from bty-web automatically when the live env signals
 flash completion. bty-web spawns a daemon thread that ``cijoe
 <workflow.yaml> --config <transport.toml>``s with an SSH transport

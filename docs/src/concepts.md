@@ -26,17 +26,26 @@ land. Four modes:
 - `none` - no post-flash configuration; reboot into the cooked image
   as-is. The default. First-boot bring-up (users, network, packages,
   hostnames) is baked into the image by the cooker upstream.
-- `cijoe-online` - bty-web only. After the target first-boots into its
+- `cijoe-task` - bty-web only. After the target first-boots into its
   own OS, `bty-web` SSHes in and runs a CIJOE task against the
   running machine. Requires a managed MAC -- bty-web has to know
   the target via a server-side machine record (`cijoe_task_ref` +
   `last_seen_ip`). The server, not the image, becomes the source of
   truth for "what this box should look like."
 
-That's the whole list. v0.7.39 dropped the offline `cloud-init`
-and `cijoe` modes that the pre-rename `bty flash` accepted: those
-were image-creation territory and live in the image cooker now.
-bty is a flasher, not a cooker.
+  **Scope: simple scripting only.** The intent is short post-flash
+  hooks ("set hostname", "trigger a reboot", "write one config
+  file") -- not full configuration management. The cijoe task
+  YAML uses ONLY cijoe's built-in commands and the standard
+  `include` step; bty-web does not install third-party cijoe
+  script packages. If you find yourself reaching for one, the
+  job belongs in the image cooker, not here. bty-web ships a
+  base cijoe install on the appliance and provides the SSH
+  transport config; the rest is whatever fits in a small YAML.
+
+That's the whole list. bty is a flasher, not a cooker. Image
+creation (users, network, packages, hostnames) belongs upstream
+in the image-builder project; bty just writes the bytes.
 
 ## Disk layout (USB live)
 

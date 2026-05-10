@@ -82,7 +82,7 @@ def test_flash_raw_img_to_loop_device_byte_correct(
 
     image_info = flash.probe_image(ref)
     target_info = flash.probe_target(loop_dev)
-    plan = flash.make_plan(image_info, target_info, "none")
+    plan = flash.make_plan(image_info, target_info)
     assert flash.validate_plan(plan) == []
 
     flash.execute_plan(plan)
@@ -112,7 +112,7 @@ def test_flash_qcow2_to_loop_device_byte_correct(
 
     image_info = flash.probe_image(qcow2)
     target_info = flash.probe_target(loop_dev)
-    plan = flash.make_plan(image_info, target_info, "none")
+    plan = flash.make_plan(image_info, target_info)
     assert flash.validate_plan(plan) == []
 
     flash.execute_plan(plan)
@@ -138,7 +138,7 @@ def test_flash_zst_to_loop_device_byte_correct(
 
     image_info = flash.probe_image(zst)
     target_info = flash.probe_target(loop_dev)
-    plan = flash.make_plan(image_info, target_info, "none")
+    plan = flash.make_plan(image_info, target_info)
     assert flash.validate_plan(plan) == []
 
     flash.execute_plan(plan)
@@ -150,5 +150,5 @@ def test_flash_zst_to_loop_device_byte_correct(
 # v0.7.39 dropped the offline cloud-init / cijoe provisioning
 # arms; the corresponding integration tests are gone. Image-side
 # first-boot bring-up is now the image cooker's responsibility,
-# and post-boot config is bty-web's cijoe-online flow (covered
+# and post-boot config is bty-web's cijoe-task flow (covered
 # by tests/test_web_task.py).

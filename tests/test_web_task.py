@@ -33,7 +33,7 @@ def _seed_machine(state_path: Path, mac: str = "aa:bb:cc:dd:ee:ff") -> None:
             """
             INSERT INTO machines
                 (mac, provisioning_mode, boot_policy, created_at, updated_at)
-            VALUES (?, 'cijoe-online', 'flash', ?, ?)
+            VALUES (?, 'cijoe-task', 'flash', ?, ?)
             """,
             (mac, "2026-01-01T00:00:00+00:00", "2026-01-01T00:00:00+00:00"),
         )
@@ -436,7 +436,7 @@ def test_start_sweeps_stale_running_rows(runner) -> None:
             INSERT INTO machines
                 (mac, provisioning_mode, last_task_status,
                  boot_policy, created_at, updated_at)
-            VALUES ('aa:bb:cc:dd:ee:ff', 'cijoe-online', 'running',
+            VALUES ('aa:bb:cc:dd:ee:ff', 'cijoe-task', 'running',
                     'flash', ?, ?)
             """,
             ("2026-01-01T00:00:00+00:00", "2026-01-01T00:00:00+00:00"),

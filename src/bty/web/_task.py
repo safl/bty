@@ -1,6 +1,6 @@
 """Online cijoe provisioning runner (cijoe "task" runs).
 
-When a machine has ``provisioning_mode == 'cijoe-online'``, a
+When a machine has ``provisioning_mode == 'cijoe-task'``, a
 successful flash (signalled by ``POST /pxe/{mac}/done``) kicks off a
 cijoe task run from bty-web against the freshly-booted target. This
 module owns that orchestration.
@@ -133,7 +133,7 @@ class TaskState:
 
 
 class TaskManager:
-    """Per-MAC manager for cijoe-online task runs.
+    """Per-MAC manager for cijoe-task task runs.
 
     Lifecycle: ``kick_off(mac, task_ref, target_ip)`` enqueues a
     new task (idempotent on already-running for the same mac),
@@ -491,11 +491,3 @@ class TaskManager:
             self._publish()
         except Exception:
             log.exception("task %s: SSE publish failed", state.mac)
-
-
-# Backwards-compatibility shim. The pre-v0.7.37 module exposed
-# ``TaskRunner`` (no manager methods, just ``kick_off``); a few
-# tests + an internal call site reference it. The new
-# :class:`TaskManager` is a strict superset, so the alias keeps
-# the import path working while we migrate.
-TaskRunner = TaskManager

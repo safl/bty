@@ -146,13 +146,6 @@ def _pump_dd_progress(
                 break
 
 
-# Provisioning modes accepted by ``bty flash``. v0.7.39 narrowed
-# the surface to ``none`` only -- offline cloud-init / cijoe
-# provisioning was image-creation territory and lives in the
-# image cooker now. ``cijoe-online`` is server-driven (bty-web
-# kicks it off after first boot) so doesn't appear here either.
-PROVISIONING_MODES: tuple[str, ...] = ("none",)
-
 _ZSTD_SIZE_UNITS: dict[str, int] = {
     "B": 1,
     "KiB": 1024,
@@ -204,7 +197,6 @@ class FlashPlan:
 
     image: ImageInfo
     target: TargetInfo
-    provisioning_mode: str
     notes: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -223,7 +215,6 @@ class FlashPlan:
                 "size_bytes": self.target.size_bytes,
                 "mountpoints": list(self.target.mountpoints),
             },
-            "provisioning_mode": self.provisioning_mode,
             "notes": list(self.notes),
         }
 
@@ -335,13 +326,9 @@ def probe_target(path: Path) -> TargetInfo:
 # ---------- Pure plan building + validation ----------------------------------
 
 
-def make_plan(
-    image: ImageInfo,
-    target: TargetInfo,
-    provisioning_mode: str,
-) -> FlashPlan:
+def make_plan(image: ImageInfo, target: TargetInfo) -> FlashPlan:
     """Bundle probed info into a :class:`FlashPlan`. Pure; no I/O."""
-    plan = FlashPlan(image=image, target=target, provisioning_mode=provisioning_mode)
+    plan = FlashPlan(image=image, target=target)
     if image.virtual_size_bytes is None and image.format is not None:
         plan.notes.append(
             "image virtual size could not be determined; size-fits-target check skipped"
@@ -396,12 +383,6 @@ def validate_plan(plan: FlashPlan) -> list[str]:
             f"is larger than target ({plan.target.size_bytes} bytes)"
         )
 
-    if plan.provisioning_mode not in PROVISIONING_MODES:
-        errors.append(
-            f"unknown provisioning mode: {plan.provisioning_mode!r} "
-            f"(supported: {', '.join(PROVISIONING_MODES)})"
-        )
-
     return errors
 
 
@@ -427,7 +408,6 @@ def print_plan(
     print(f"  target is block:     {plan.target.is_block_device}", file=out)
     print(f"  target size:         {target_size}", file=out)
     print(f"  target mountpoints:  {mounts}", file=out)
-    print(f"  provisioning mode:   {plan.provisioning_mode}", file=out)
 
     if plan.notes:
         print(file=out)

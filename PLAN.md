@@ -226,7 +226,7 @@ configuration mechanism. Four modes:
   USB live env's offline customisation path. Constrained to what is
   possible by manipulating the filesystem from the outside - file
   edits, package staging, seed-file drops.
-- **`cijoe-online`** - bty-web only. After the target first-boots into
+- **`cijoe-task`** - bty-web only. After the target first-boots into
   its own OS, `bty-web` triggers a CIJOE workflow against the running
   machine and records the post-workflow state as that machine's
   known-good baseline. The server - not the image - becomes the source
@@ -429,7 +429,7 @@ as historical record of the build-out order.
 13. **[done]** `bty-media` server image (`server-x86` variant).
 14. **[done]** Network-flash end-to-end (iPXE -> bty live -> flash ->
     reboot, BIOS + UEFI).
-15. **[done]** Provisioning: `cijoe-online` - server triggers a workflow
+15. **[done]** Provisioning: `cijoe-task` - server triggers a workflow
     against the booted target and records the known-good baseline.
 
 ### Post-roadmap milestones

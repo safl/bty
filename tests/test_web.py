@@ -176,10 +176,10 @@ def test_machine_crud_round_trip(app_client: TestClient) -> None:
     mac = "aa:bb:cc:dd:ee:ff"
     body = {
         "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-        # v0.7.39 narrowed provisioning modes; ``cijoe-online`` is
+        # v0.7.39 narrowed provisioning modes; ``cijoe-task`` is
         # the canonical "machine has post-boot config attached"
         # value (replaces the prior ``cloud-init`` test seed).
-        "provisioning_mode": "cijoe-online",
+        "provisioning_mode": "cijoe-task",
         "hostname": "bty-test-01",
     }
 
@@ -192,7 +192,7 @@ def test_machine_crud_round_trip(app_client: TestClient) -> None:
         created["image_sha256"]
         == "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
     )
-    assert created["provisioning_mode"] == "cijoe-online"
+    assert created["provisioning_mode"] == "cijoe-task"
     assert created["hostname"] == "bty-test-01"
 
     # Read back
@@ -316,7 +316,7 @@ def test_pxe_does_not_overwrite_assignment(app_client: TestClient) -> None:
         f"/machines/{mac}",
         json={
             "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            "provisioning_mode": "cijoe-online",
+            "provisioning_mode": "cijoe-task",
         },
         cookies=AUTH,
     )
@@ -331,7 +331,7 @@ def test_pxe_does_not_overwrite_assignment(app_client: TestClient) -> None:
     assert (
         after["image_sha256"] == "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
     )  # untouched
-    assert after["provisioning_mode"] == "cijoe-online"
+    assert after["provisioning_mode"] == "cijoe-task"
     assert after["last_seen_at"] is not None
     # discovered_at is set on first /pxe contact even for PUT-created rows
     assert after["discovered_at"] is not None
@@ -788,7 +788,7 @@ def test_pxe_flash_policy_returns_chain_with_args(app_client: TestClient) -> Non
         "/machines/aa:bb:cc:dd:ee:ff",
         json={
             "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            "provisioning_mode": "cijoe-online",
+            "provisioning_mode": "cijoe-task",
             "boot_policy": "flash",
         },
         cookies=AUTH,
@@ -818,7 +818,7 @@ def test_pxe_flash_policy_returns_chain_with_args(app_client: TestClient) -> Non
         "bty.image_url=${bty-base}/images/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef/"
         in body
     )
-    assert "bty.provisioning=cijoe-online" in body
+    assert "bty.provisioning=cijoe-task" in body
 
 
 def test_pxe_tui_policy_returns_interactive_chain(app_client: TestClient) -> None:
@@ -890,9 +890,9 @@ def test_pxe_done_404_for_unknown_mac(app_client: TestClient) -> None:
 
 
 def test_pxe_done_triggers_online_task_when_configured(app_client: TestClient) -> None:
-    """``provisioning_mode='cijoe-online'`` + task ref + last_seen_ip
+    """``provisioning_mode='cijoe-task'`` + task ref + last_seen_ip
     means the completion signal kicks off a task run via
-    TaskRunner. The runner's ``kick_off`` should be called with
+    TaskManager. The runner's ``kick_off`` should be called with
     the assigned task + the IP the live env was last seen from."""
     from unittest.mock import patch
 
@@ -901,7 +901,7 @@ def test_pxe_done_triggers_online_task_when_configured(app_client: TestClient) -
         "/machines/aa:bb:cc:dd:ee:ff",
         json={
             "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            "provisioning_mode": "cijoe-online",
+            "provisioning_mode": "cijoe-task",
             "cijoe_task_ref": "/var/lib/bty/tasks/post-flash.yaml",
         },
         cookies=AUTH,
@@ -910,7 +910,7 @@ def test_pxe_done_triggers_online_task_when_configured(app_client: TestClient) -
     app_client.get("/pxe/aa:bb:cc:dd:ee:ff")
 
     with patch(
-        "bty.web._task.TaskRunner.kick_off",
+        "bty.web._task.TaskManager.kick_off",
     ) as mock_kick:
         r = app_client.post("/pxe/aa:bb:cc:dd:ee:ff/done")
 
@@ -937,7 +937,7 @@ def test_pxe_done_does_not_trigger_when_provisioning_mode_is_other(app_client: T
         cookies=AUTH,
     )
     app_client.get("/pxe/aa:bb:cc:dd:ee:ff")
-    with patch("bty.web._task.TaskRunner.kick_off") as mock_kick:
+    with patch("bty.web._task.TaskManager.kick_off") as mock_kick:
         r = app_client.post("/pxe/aa:bb:cc:dd:ee:ff/done")
     assert r.status_code == 204
     mock_kick.assert_not_called()
@@ -950,13 +950,13 @@ def test_pxe_done_does_not_trigger_when_task_ref_missing(app_client: TestClient)
         "/machines/aa:bb:cc:dd:ee:ff",
         json={
             "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            "provisioning_mode": "cijoe-online",
+            "provisioning_mode": "cijoe-task",
             # no cijoe_task_ref
         },
         cookies=AUTH,
     )
     app_client.get("/pxe/aa:bb:cc:dd:ee:ff")
-    with patch("bty.web._task.TaskRunner.kick_off") as mock_kick:
+    with patch("bty.web._task.TaskManager.kick_off") as mock_kick:
         r = app_client.post("/pxe/aa:bb:cc:dd:ee:ff/done")
     assert r.status_code == 204
     mock_kick.assert_not_called()

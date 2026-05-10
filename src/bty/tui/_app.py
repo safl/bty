@@ -370,7 +370,6 @@ class FlashConfirmScreen(ModalScreen[bool]):
                 f"Size:       {plan.image.virtual_size_bytes} bytes (virtual)",
                 f"Target:     {plan.target.path}",
                 f"Target sz:  {plan.target.size_bytes} bytes",
-                f"Provision:  {plan.provisioning_mode}",
             ]
         )
 
@@ -1818,7 +1817,7 @@ class BtyTui(App[None]):
 
         target_info = await asyncio.to_thread(flash.probe_target, disk_path)
         probing.target_done()
-        plan = flash.make_plan(image_info, target_info, "none")
+        plan = flash.make_plan(image_info, target_info)
         errors = flash.validate_plan(plan)
 
         # Brief hold so the operator sees both rows tick to

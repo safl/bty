@@ -148,7 +148,7 @@ Flash an image onto a target block device. v0.7.39 narrowed bty's
 surface to "flasher only" -- offline cloud-init / cijoe
 provisioning is image-creation territory and lives in the cooker
 upstream. Post-boot configuration on PXE-managed machines is the
-bty-web ``cijoe-online`` flow, not a `bty flash` mode.
+bty-web ``cijoe-task`` flow, not a `bty flash` mode.
 
 `--image` accepts three forms:
 
@@ -327,7 +327,7 @@ tooling which can't carry a session cookie:
  modify `boot_policy`** - flipping a machine back to `local` is an
  explicit operator action so the per-job CI cadence (constant
  reflashing) survives across boots. If the machine has
- `provisioning_mode='cijoe-online'` and a `cijoe_task_ref`,
+ `provisioning_mode='cijoe-task'` and a `cijoe_task_ref`,
  this also kicks off a background CIJOE task run from bty-web
  against the freshly-booted target (milestone 15). Status surfaces
  via `last_task_status` and the SSE machines-update channel.
@@ -369,7 +369,7 @@ normalised to lower-case `aa:bb:cc:dd:ee:ff`.
 Machine = {
   "mac": "aa:bb:cc:dd:ee:ff",
   "image": "debian.qcow2" | null,           # null = discovered but unassigned
-  "provisioning_mode": "none" | "cloud-init" | "cijoe" | "cijoe-online",
+  "provisioning_mode": "none" | "cloud-init" | "cijoe" | "cijoe-task",
   "hostname": "..." | null,
   "cijoe_task_ref": "..." | null,
   "last_known_good": object | null,
@@ -387,7 +387,7 @@ Machine = {
 
 MachineUpsert = {
   "image": str | null,
-  "provisioning_mode": "none" | "cloud-init" | "cijoe" | "cijoe-online",
+  "provisioning_mode": "none" | "cloud-init" | "cijoe" | "cijoe-task",
   "hostname": str | null,
   "cijoe_task_ref": str | null,
   "boot_policy": "local" | "flash" | "tui"  # default "local" on PUT;

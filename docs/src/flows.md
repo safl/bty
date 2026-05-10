@@ -201,7 +201,7 @@ schedule, on demand, or on failure.
 5. The next reboot still chains the live env unless the operator
    flips the machine to `boot_policy=local`. Per-job CI cadences
    that want every boot to reflash leave the policy on `flash`.
-6. If the assigned provisioning mode is `cijoe-online`, `bty-web`
+6. If the assigned provisioning mode is `cijoe-task`, `bty-web`
    triggers the CIJOE task against the booted target and records
    the post-task state as the machine's known-good baseline.
 

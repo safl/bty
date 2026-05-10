@@ -118,18 +118,6 @@ def main(argv: list[str] | None = None) -> int:
         "upstream based on cache state.",
     )
     p_flash.add_argument("--target", type=Path, required=True, help="target block device")
-    # v0.7.39 narrowed bty's surface to "flasher only". The CLI no
-    # longer drives offline cloud-init / cijoe provisioning -- those
-    # were image-creation territory and live in the image cooker.
-    # ``--provision`` is retained at ``none`` (the only valid value)
-    # so existing scripts that pass it explicitly don't error; the
-    # flag is hidden from --help.
-    p_flash.add_argument(
-        "--provision",
-        choices=("none",),
-        default="none",
-        help=argparse.SUPPRESS,
-    )
     p_flash.add_argument(
         "--dry-run",
         action="store_true",
@@ -351,7 +339,7 @@ def cmd_flash(
     arms: bty is a flasher, not a provisioner. First-boot bring-up
     (users, network, packages, hostnames) is the image cooker's
     job; bake it in upstream. Post-boot configuration via
-    ``cijoe-online`` is bty-web's territory and runs server-side.
+    ``cijoe-task`` is bty-web's territory and runs server-side.
     """
     if not args.dry_run and not args.yes:
         print(
@@ -378,7 +366,7 @@ def cmd_flash(
         return 2
 
     target_info = probe_target(args.target)
-    plan = flash.make_plan(image_info, target_info, args.provision)
+    plan = flash.make_plan(image_info, target_info)
     errors = flash.validate_plan(plan)
 
     # --dry-run wins over --yes if both were given.
@@ -429,7 +417,7 @@ def cmd_flash(
     # v0.7.39: no post-flash provisioning step. ``--provision`` is
     # accepted only as ``none`` (the default). First-boot bring-up
     # belongs in the image; post-boot config belongs in bty-web's
-    # cijoe-online flow.
+    # cijoe-task flow.
 
     if progress_cb is not None:
         progress_cb(flash.FlashProgress(event="done"))

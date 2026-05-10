@@ -24,10 +24,15 @@ bty is a flasher, not a cooker:
   upstream with cloud-init / kickstart / preseed / your favourite
   cooker. Use the [companion image-builder](https://github.com/safl/jellyfin-kiosk-appliance-builder)
   pattern, or your own. bty just writes the bytes.
-- **Post-boot configuration is `cijoe-online`.** For machines whose
-  MAC bty-web manages, the server SSHes into the freshly-booted target
-  and runs a `cijoe` task. Cancelable from the browser UI; events
-  visible in the audit log.
+- **Post-boot configuration is `cijoe-task`.** For machines whose
+  MAC bty-web manages, the server SSHes into the freshly-booted
+  target and runs a small CIJOE task using only cijoe's built-in
+  commands + the standard `include` step. The intent is light
+  post-flash scripting (set a hostname, trigger a reboot, drop a
+  config file) -- not configuration management. No third-party
+  cijoe script packages; if you need one, the job belongs in the
+  cooker. Cancelable from the browser UI; events visible in the
+  audit log.
 
 ```bash
 # Local: USB stick into target, two arrows + Enter, done.
