@@ -189,6 +189,43 @@ def test_cancel_unknown_returns_none(tmp_path: Path) -> None:
     _run(_drive())
 
 
+def test_run_fetch_cancel_with_concurrent_catalog_error_marks_cancelled(
+    tmp_path: Path,
+) -> None:
+    """If the operator cancels mid-fetch and urllib happens to
+    raise (e.g. server tore the connection on cancel), the
+    DownloadManager must report cancellation, not failure --
+    surface UX matters: an error badge for what was actually
+    a cancel button is a lie."""
+    import unittest.mock
+
+    from bty.web._catalog import DownloadManager, DownloadState
+
+    payload = b"unused"
+    entry = _entry(payload, name="demo.img.zst")
+
+    async def _drive() -> None:
+        cat = _catalog.Catalog(version=1, entries=(entry,))
+        mgr = DownloadManager()
+        mgr.start(cat, tmp_path / "cache")
+        try:
+            state = DownloadState(name=entry.name, sha256=entry.sha256, src=entry.src)
+            state._cancel.set()  # simulate operator cancel before the error
+
+            def boom(*_a: object, **_kw: object) -> None:
+                raise _catalog.CatalogError("connection reset")
+
+            with unittest.mock.patch.object(_catalog, "fetch_to_cache", boom):
+                await mgr._run_fetch(state, entry)
+
+            assert state.status == "cancelled"
+            assert state.error is None
+        finally:
+            await mgr.stop()
+
+    _run(_drive())
+
+
 def test_enqueue_rejects_traversal_names(tmp_path: Path) -> None:
     """``DownloadManager.enqueue`` must reject names with path
     separators or traversal segments at the manager boundary,

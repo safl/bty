@@ -169,11 +169,29 @@ class VersionResponse(BaseModel):
 
 
 class CatalogEnqueueRequest(BaseModel):
-    """POST /catalog/downloads body: enqueue a manifest entry by name."""
+    """POST /catalog/downloads body: enqueue a manifest entry by name.
+
+    Also reused for ``POST /catalog/hashes`` (HashManager enqueues
+    by basename). Both managers reject path-traversal characters at
+    the manager boundary; the Pydantic pattern here mirrors that
+    rule so a malformed name surfaces as a clean 422 instead of a
+    500 from the manager's ``ValueError``.
+
+    Pattern: any non-empty string that does NOT contain ``/``,
+    ``\\``, or NUL. The manager additionally rejects bare ``.``
+    and ``..`` (pydantic-core's regex engine does not support
+    lookahead, so layering both checks is cleaner than cramming
+    the negative match into a single regex).
+    """
 
     model_config = {"extra": "forbid"}
 
-    name: str = Field(..., description="image name as declared in the manifest")
+    name: str = Field(
+        ...,
+        description="image name as declared in the manifest",
+        min_length=1,
+        pattern=r"^[^/\\\x00]+$",
+    )
 
 
 class ReleaseFetchRequest(BaseModel):

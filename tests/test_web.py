@@ -1309,6 +1309,41 @@ def test_release_fetch_unknown_extra_field_422(app_client: TestClient) -> None:
     assert r.status_code == 422
 
 
+def test_release_fetch_manager_run_fetch_cancel_overrides_fetch_error(
+    tmp_path: Path,
+) -> None:
+    """If urllib raises ``URLError`` (wrapped as ``FetchError``)
+    while the cancel flag is already set, the manager must record
+    the result as ``cancelled``, not ``failed`` -- the operator's
+    intent was "stop", and a "failed: connection reset" badge for
+    a deliberate cancel is misleading."""
+    import asyncio
+    import unittest.mock
+
+    from bty.web import _release_mgr, _releases
+
+    async def go() -> None:
+        boot_root = tmp_path / "boot"
+        mgr = _release_mgr.ReleaseFetchManager()
+        mgr.start(boot_root)
+        try:
+            state = _release_mgr.ReleaseFetchState(tag="v1.0")
+            state._cancel.set()
+
+            def boom(*_a: object, **_kw: object) -> None:
+                raise _releases.FetchError("connection reset")
+
+            with unittest.mock.patch.object(_releases, "fetch_release", boom):
+                await mgr._run_fetch(state)
+
+            assert state.status == "cancelled"
+            assert state.error is None
+        finally:
+            await mgr.stop()
+
+    asyncio.run(go())
+
+
 def test_release_fetch_manager_enqueue_rejects_malformed_tag() -> None:
     """``ReleaseFetchManager.enqueue`` validates the tag shape
     even for non-API callers (tests, future internal use). The
@@ -1346,6 +1381,28 @@ def test_catalog_entries_add_rejects_url_without_host(
         r = app_client.post(
             "/catalog/entries",
             json={"image_url": bad},
+            cookies=AUTH,
+        )
+        assert r.status_code == 422, f"expected 422 for {bad!r}, got {r.status_code}"
+
+
+def test_catalog_enqueue_request_rejects_traversal_name(app_client: TestClient) -> None:
+    """``CatalogEnqueueRequest.name`` (used by both
+    ``POST /catalog/downloads`` and ``POST /catalog/hashes``)
+    rejects path-traversal characters at the Pydantic layer.
+    With the manager-side check shipped in v0.7.26, a bad name
+    used to surface as a 500 from ``ValueError``; now both
+    layers return a clean 422."""
+    for bad in ("../etc/passwd", "foo/bar", "name\\with\\backslash", "with\0nul"):
+        r = app_client.post(
+            "/catalog/hashes",
+            json={"name": bad},
+            cookies=AUTH,
+        )
+        assert r.status_code == 422, f"expected 422 for {bad!r}, got {r.status_code}"
+        r = app_client.post(
+            "/catalog/downloads",
+            json={"name": bad},
             cookies=AUTH,
         )
         assert r.status_code == 422, f"expected 422 for {bad!r}, got {r.status_code}"

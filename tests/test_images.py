@@ -334,6 +334,19 @@ def test_read_bri_rejects_empty_name(tmp_path: Path) -> None:
         images.read_bri(bri)
 
 
+def test_read_bri_rejects_oversized_file(tmp_path: Path) -> None:
+    """A ``.bri`` file larger than the 64 KiB cap must be rejected
+    without being parsed. Defends against an image accidentally
+    renamed to ``.bri`` (or a malicious huge file): without the
+    cap, ``tomllib.load`` would buffer the whole body before
+    failing as 'not valid TOML', OOM-ing on small hardware."""
+    bri = tmp_path / "huge.bri"
+    # 128 KiB of garbage; well past the 64 KiB cap.
+    bri.write_bytes(b"x" * (128 * 1024))
+    with pytest.raises(images.BriError, match="larger than"):
+        images.read_bri(bri)
+
+
 def test_read_bri_invalid_sha_raises(tmp_path: Path) -> None:
     bri = tmp_path / "bad.bri"
     bri.write_text('url = "https://example.invalid/x.img.gz"\nsha256 = "not-a-hex-digest"\n')

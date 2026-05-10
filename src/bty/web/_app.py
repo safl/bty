@@ -1109,15 +1109,31 @@ async def _stream_upload(request: Request, root: Path, name: str) -> dict[str, o
     (server image's first-boot init creates it for the prod paths,
     but tests pass tmp_path and we want this to work without an
     init step).
+
+    On any exception during the stream (client disconnect, write
+    failure, etc.), the ``.partial`` file is unlinked so it cannot
+    pollute future ``list_images`` / hash auto-import passes. The
+    only path that survives is the success path: rename ``.partial``
+    -> final name.
     """
     candidate = _safe_path(root, name)
     root.mkdir(parents=True, exist_ok=True)
     partial = candidate.with_suffix(candidate.suffix + ".partial")
     size = 0
-    with partial.open("wb") as fh:
-        async for chunk in request.stream():
-            if chunk:
-                fh.write(chunk)
-                size += len(chunk)
-    partial.replace(candidate)
+    try:
+        with partial.open("wb") as fh:
+            async for chunk in request.stream():
+                if chunk:
+                    fh.write(chunk)
+                    size += len(chunk)
+        partial.replace(candidate)
+    except BaseException:
+        # ``BaseException`` so an asyncio.CancelledError (client
+        # dropped the connection) also triggers cleanup. The
+        # ``with contextlib.suppress(FileNotFoundError)`` covers
+        # the rare case where the .partial was never created
+        # (mkdir succeeded but open() failed before any write).
+        with contextlib.suppress(FileNotFoundError):
+            partial.unlink()
+        raise
     return {"name": name, "size_bytes": size, "path": str(candidate)}

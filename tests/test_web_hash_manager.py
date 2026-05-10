@@ -125,6 +125,43 @@ def test_cancel_unknown_returns_none(tmp_path: Path) -> None:
     _run(_drive())
 
 
+def test_run_hash_cancel_with_concurrent_oserror_marks_cancelled(tmp_path: Path) -> None:
+    """If the cancel flag fires while the worker thread happens
+    to be mid-syscall, ``ensure_sha256`` may raise ``OSError``
+    before its own chunk-boundary cancel-check translates it
+    into ``HashCancelled``. The manager must treat that as
+    operator cancellation, not a failed hash. Without the
+    override, the UI shows "failed: <syscall>" for what was
+    actually the operator's stop request."""
+    import unittest.mock
+
+    from bty import images as _images
+    from bty.web._hash import HashManager, HashState
+
+    target = tmp_path / "demo.img"
+    target.write_bytes(b"x" * 64)
+
+    async def _drive() -> None:
+        mgr = HashManager()
+        mgr.start(tmp_path)
+        try:
+            state = HashState(name="demo.img", path=str(target), bytes_total=64)
+            state._cancel.set()  # simulate operator cancel before the IO error
+
+            def boom(*_a: object, **_kw: object) -> str:
+                raise OSError("transient IO error")
+
+            with unittest.mock.patch.object(_images, "ensure_sha256", boom):
+                await mgr._run_hash(state, target)
+
+            assert state.status == "cancelled"
+            assert state.error is None
+        finally:
+            await mgr.stop()
+
+    _run(_drive())
+
+
 def test_hash_state_to_dict_omits_unpicklable_event() -> None:
     """``HashState.to_dict`` must JSON-serialise without the
     ``threading.Event`` slipping through (which would explode

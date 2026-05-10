@@ -255,10 +255,20 @@ class HashManager:
             final_status = "cancelled"
             error = None
             sha = None
-        except (FileNotFoundError, OSError, Exception) as exc:
-            final_status = "failed"
-            error = f"{type(exc).__name__}: {exc}"
+        except Exception as exc:
+            # Same cancel-vs-IO-error race as in
+            # :class:`bty.web._release_mgr.ReleaseFetchManager`:
+            # if the cancel flag fired between chunks but the
+            # ``ensure_sha256`` worker hit a transient OSError
+            # before reaching its cancel-check, the operator-
+            # initiated stop should not surface as "failed".
             sha = None
+            if cancel_event.is_set():
+                final_status = "cancelled"
+                error = None
+            else:
+                final_status = "failed"
+                error = f"{type(exc).__name__}: {exc}"
 
         async with self._lock:
             state.status = final_status

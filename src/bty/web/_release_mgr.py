@@ -226,13 +226,25 @@ class ReleaseFetchManager:
             final_status = "cancelled"
             error = None
             base_url = None
-        except _releases.FetchError as exc:
-            final_status = "failed"
-            error = str(exc)
-            base_url = None
-        except Exception as exc:
-            final_status = "failed"
-            error = f"{type(exc).__name__}: {exc}"
+        except (_releases.FetchError, Exception) as exc:
+            # If the cancel flag fired while urllib happened to be
+            # mid-syscall, the worker raises ``URLError`` (wrapped
+            # as ``FetchError``) before the next chunk-boundary
+            # cancel check gets a chance to translate it into
+            # ``FetchCancelled``. Treat that as cancellation, not
+            # failure -- the operator's intent was "stop", and
+            # showing a "failed: connection reset" badge for a
+            # user-initiated cancel is misleading.
+            if cancel_event.is_set():
+                final_status = "cancelled"
+                error = None
+            else:
+                final_status = "failed"
+                error = (
+                    str(exc)
+                    if isinstance(exc, _releases.FetchError)
+                    else (f"{type(exc).__name__}: {exc}")
+                )
             base_url = None
 
         async with self._lock:

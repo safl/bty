@@ -247,6 +247,15 @@ class BriError(Exception):
     listing."""
 
 
+# .bri files are tiny key/value descriptors -- in practice a few
+# hundred bytes. 64 KiB caps a maliciously-large or wrong-file
+# (operator pasted an image into a .bri filename) without
+# rejecting any plausible real descriptor. Without this cap,
+# a 1 GiB file gets fully buffered into memory before tomllib
+# notices it isn't TOML.
+_BRI_MAX_BYTES = 64 * 1024
+
+
 def _name_from_url(url: str) -> str:
     """Derive a display name from a URL by taking its last path
     segment. ``https://host/path/foo.img.gz`` -> ``foo.img.gz``.
@@ -260,7 +269,20 @@ def _name_from_url(url: str) -> str:
 def read_bri(path: Path) -> RemoteImage:
     """Parse one ``.bri`` TOML file into a :class:`RemoteImage`.
     Raises :class:`BriError` on missing required fields or bad TOML.
+
+    Refuses files larger than :data:`_BRI_MAX_BYTES` so a wrong
+    file (e.g. an image accidentally renamed to ``.bri``) cannot
+    OOM the parser via ``tomllib.load``.
     """
+    try:
+        size = path.stat().st_size
+    except OSError as exc:
+        raise BriError(f"{path}: cannot stat: {exc}") from exc
+    if size > _BRI_MAX_BYTES:
+        raise BriError(
+            f"{path}: file is {size} bytes, larger than the {_BRI_MAX_BYTES}-byte "
+            f".bri limit (this is likely not a descriptor)"
+        )
     try:
         with path.open("rb") as fh:
             raw = tomllib.load(fh)

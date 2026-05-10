@@ -317,12 +317,22 @@ class DownloadManager:
         except _catalog.CatalogCancelled:
             final_status = "cancelled"
             error = None
-        except _catalog.CatalogError as exc:
-            final_status = "failed"
-            error = str(exc)
-        except (OSError, Exception) as exc:  # network, IO, anything else
-            final_status = "failed"
-            error = f"{type(exc).__name__}: {exc}"
+        except (_catalog.CatalogError, Exception) as exc:
+            # Same cancel-vs-IO-error race the other managers
+            # have: if the cancel flag fired between chunks but
+            # urllib raised before the chunk-boundary cancel
+            # check, treat it as cancellation rather than a
+            # failed download. The operator's intent was "stop".
+            if cancel_event.is_set():
+                final_status = "cancelled"
+                error = None
+            else:
+                final_status = "failed"
+                error = (
+                    str(exc)
+                    if isinstance(exc, _catalog.CatalogError)
+                    else f"{type(exc).__name__}: {exc}"
+                )
 
         async with self._lock:
             state.status = final_status
