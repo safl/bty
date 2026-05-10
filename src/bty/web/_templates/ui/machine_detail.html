@@ -23,10 +23,8 @@
                 {% if m.last_task_status %}
                 {# Badge mapping: running=info (in flight), completed=
                    success (rc=0), cancelled=warning (operator abort),
-                   failed=danger (rc!=0 / timeout). v0.7.37 renamed
-                   ``success`` -> ``completed`` and added ``cancelled``
-                   so the vocabulary lines up with the other
-                   manager-driven jobs (hashes, downloads,
+                   failed=danger (rc!=0 / timeout). Same vocabulary as
+                   the other manager-driven jobs (hashes, downloads,
                    release-fetches). #}
                 {% set badge_map = {
                     'running': 'bg-info',
@@ -116,8 +114,8 @@
                        class="form-control" value="{{ m.cijoe_task_ref or '' }}"
                        placeholder="path/to/post-flash.yaml (only used when provisioning is cijoe-task)">
                 <div class="form-text small">
-                    Light post-flash scripting only. Use cijoe's built-in
-                    commands + the standard <code>include</code> step;
+                    Light post-flash scripting only. Each step uses a
+                    cijoe built-in script or an inline command;
                     bty-web does not install third-party cijoe script
                     packages. The intent is "set hostname / trigger
                     reboot / drop one config file" - not configuration

@@ -7,52 +7,26 @@ are decoded into / encoded from these models on the boundary.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
 
 from pydantic import BaseModel, Field
 
 # Canonical lower-case ``aa:bb:cc:dd:ee:ff`` MAC address.
 MAC_PATTERN = r"^[0-9a-f]{2}(:[0-9a-f]{2}){5}$"
 
-# Provisioning modes accepted by ``bty flash`` / the API.
-# - ``none``         - boot the cooked image as-is.
-# - ``cloud-init``   - drop user-data into the seed; OS picks it up on first boot.
-# - ``cijoe``        - offline cijoe task run from the live env after flash.
-# - ``cijoe-task`` - online cijoe task run from bty-web after target boots
-#                      (milestone 15). Triggered by POST /pxe/{mac}/done; cijoe's
-#                      transport-retry handles waiting for SSH to come up.
-# Provisioning modes. v0.7.39 narrowed bty's surface: bty is a
-# flasher, not a provisioner. First-boot configuration (users,
-# network, packages, hostnames) is the image cooker's job -- bake
-# cloud-init / kickstart / preseed into the image upstream. bty
-# only handles:
-#
-# - ``none``         -- write the bytes, reboot. The default.
-# - ``cijoe-task`` -- bty-web only. After the target first-boots
-#                       into its own OS, ``bty-web`` SSHes in (via
-#                       the operator-supplied key) and runs a
-#                       ``cijoe`` task against the running system.
-#                       Requires a managed MAC (server-side machine
-#                       record) so the ``cijoe_task_ref`` and
-#                       ``last_seen_ip`` are known.
-#
-# The pre-v0.7.39 ``cloud-init`` and ``cijoe`` (offline) modes were
-# image-creation territory; they're gone. Existing state.db rows
-# carrying those values are migrated to ``none`` by ``init_db``.
+# Provisioning modes:
+#   - ``none``       -- write the bytes, reboot. The default.
+#   - ``cijoe-task`` -- bty-web SSHes in after first boot and runs a
+#                       small cijoe task against the running system
+#                       (built-in scripts + inline commands only).
 PROVISIONING_MODES = ("none", "cijoe-task")
 PROVISIONING_PATTERN = r"^(none|cijoe-task)$"
 
-# Status of the most recent online-cijoe task run. v0.7.37 promoted
-# TaskRunner to a cancelable TaskManager that mirrors the other
-# managers' state vocabulary: ``running`` while the cijoe subprocess
-# is in flight, ``completed`` on rc=0, ``cancelled`` on operator
-# abort (DELETE /tasks/{mac}), ``failed`` on rc!=0 / timeout /
-# subprocess error. The pre-v0.7.37 ``success`` was renamed to
-# ``completed`` for parity with HashState / DownloadState /
-# ReleaseFetchState. CIJOE renamed their "workflow" concept to
-# "task" in 2026; bty mirrors the vocabulary for clarity. The CIJOE
-# CLI is backwards-compatible so existing operators don't see a
-# behavioural change.
+# Status of the most recent cijoe-task run. Mirrors the other
+# manager-driven vocabulary (HashState / DownloadState /
+# ReleaseFetchState): ``running`` while the cijoe subprocess is in
+# flight, ``completed`` on rc=0, ``cancelled`` on operator abort
+# (DELETE /tasks/{mac}), ``failed`` on rc!=0 / timeout / subprocess
+# error.
 TASK_STATUSES = ("running", "completed", "cancelled", "failed")
 TASK_STATUS_PATTERN = r"^(running|completed|cancelled|failed)$"
 
@@ -144,7 +118,6 @@ class Machine(BaseModel):
     provisioning_mode: str = Field(default="none", pattern=PROVISIONING_PATTERN)
     hostname: str | None = None
     cijoe_task_ref: str | None = None
-    last_known_good: dict[str, Any] | None = None
     # Set the first time bty-web sees a ``GET /pxe/{mac}`` for this MAC.
     # ``None`` for machines that were created via ``PUT`` and have not
     # yet PXE-booted through bty-web.

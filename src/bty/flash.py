@@ -56,8 +56,7 @@ class FlashProgress:
     - ``partprobed``        - partition table re-read; flash
       hardware-complete.
     - ``done``              - emitted by ``cmd_flash`` after the
-      flash succeeded. v0.7.39 dropped the offline-provisioning
-      step; the ``provisioning`` event is gone.
+      flash succeeded.
     - ``failed``            - emitted on any :class:`FlashError`;
       ``note`` carries the exception string. The exception is then
       re-raised.
@@ -430,22 +429,11 @@ def print_plan(
 class FlashError(RuntimeError):
     """Raised when a flash-related operation cannot complete.
 
-    Distinct subclasses exist for failure modes that callers (notably
-    the CLI and TUI) may want to surface as different exit codes /
-    user-facing messages:
-
-    - :class:`FlashDependencyError` - a required external tool is missing.
-    - :class:`FlashRaceError` - the target's state changed between the
-      last successful probe and the attempted write (it became mounted,
-      stopped being a block device, etc.).
-
-    Plain :class:`FlashError` is the catch-all for everything else
-    (invalid format, write subprocess returned non-zero, etc.).
+    :class:`FlashRaceError` is a subclass for the specific case where
+    the target's state changed between the last successful probe and
+    the attempted write (it became mounted, stopped being a block
+    device, etc.) -- the CLI surfaces that as exit code 5.
     """
-
-
-class FlashDependencyError(FlashError):
-    """A required external tool (cijoe, mkfs.exfat, ...) is not installed."""
 
 
 class FlashRaceError(FlashError):

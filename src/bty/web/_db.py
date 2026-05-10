@@ -40,7 +40,6 @@ CREATE TABLE IF NOT EXISTS machines (
     provisioning_mode         TEXT NOT NULL DEFAULT 'none',
     hostname                  TEXT,
     cijoe_task_ref            TEXT,
-    last_known_good           TEXT,    -- JSON blob; NULL until first online cijoe
     discovered_at             TEXT,    -- first /pxe/{mac} contact (NULL if PUT-created)
     last_seen_at              TEXT,    -- most recent /pxe/{mac} contact
     last_seen_ip              TEXT,    -- source IP of most recent /pxe contact

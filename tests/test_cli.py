@@ -444,27 +444,6 @@ def test_flash_progress_none_silences_lifecycle(tmp_path: Path) -> None:
     assert received == [None]
 
 
-def test_flash_yes_path_exit_4_on_missing_dependency(
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """A FlashDependencyError from execute_plan -> exit 4."""
-    img = tmp_path / "x.img"
-    img.write_bytes(b"\0" * 1024)
-
-    def boom(plan: cli.flash.FlashPlan, **_kw: object) -> None:
-        raise cli.flash.FlashDependencyError("some-tool is not installed")
-
-    rc = cli.cmd_flash(
-        _flash_args(image=img, yes=True),
-        probe_target=_fake_probe_block_target,
-        execute_plan=boom,
-        geteuid=lambda: 0,
-    )
-    assert rc == 4
-    assert "some-tool is not installed" in capsys.readouterr().err
-
-
 def test_bty_tui_help_exits_cleanly() -> None:
     """Smoke test: ``bty-tui --help`` must import + run without
     raising. Regression catch for any future textual / pamela /

@@ -278,7 +278,7 @@ class TaskManager:
     def _run(self, state: TaskState) -> None:
         """Worker thread entry point.
 
-        Identical to the pre-v0.7.37 ``TaskRunner._run`` except:
+        Notes on the implementation choices:
         - subprocess invocation switched to :class:`subprocess.Popen`
           + ``Popen.wait(timeout=...)`` so :meth:`cancel` can call
           ``Popen.terminate()`` on the stored handle.

@@ -24,7 +24,6 @@ def test_init_db_creates_machines_table(tmp_path: Path) -> None:
         "provisioning_mode",
         "hostname",
         "cijoe_task_ref",
-        "last_known_good",
         "discovered_at",
         "last_seen_at",
         "last_seen_ip",

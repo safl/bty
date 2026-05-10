@@ -335,10 +335,8 @@ def cmd_flash(
     references; production callers (``main()``) use the defaults and the
     real ``bty.flash`` / ``os`` machinery is invoked.
 
-    v0.7.39 dropped the offline cloud-init / cijoe provisioning
-    arms: bty is a flasher, not a provisioner. First-boot bring-up
-    (users, network, packages, hostnames) is the image cooker's
-    job; bake it in upstream. Post-boot configuration via
+    bty is a flasher, not a provisioner: first-boot bring-up belongs
+    in the image cooker upstream; post-boot configuration via
     ``cijoe-task`` is bty-web's territory and runs server-side.
     """
     if not args.dry_run and not args.yes:
@@ -407,15 +405,11 @@ def cmd_flash(
     except flash.FlashRaceError as exc:
         print(f"bty: flash aborted: {exc}", file=sys.stderr)
         return 5
-    except flash.FlashDependencyError as exc:
-        print(f"bty: flash aborted: {exc}", file=sys.stderr)
-        return 4
     except flash.FlashError as exc:
         print(f"bty: flash failed: {exc}", file=sys.stderr)
         return 1
 
-    # v0.7.39: no post-flash provisioning step. ``--provision`` is
-    # accepted only as ``none`` (the default). First-boot bring-up
+    # No post-flash provisioning step here. First-boot bring-up
     # belongs in the image; post-boot config belongs in bty-web's
     # cijoe-task flow.
 

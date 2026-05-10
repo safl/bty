@@ -35,9 +35,9 @@ land. Four modes:
 
   **Scope: simple scripting only.** The intent is short post-flash
   hooks ("set hostname", "trigger a reboot", "write one config
-  file") -- not full configuration management. The cijoe task
-  YAML uses ONLY cijoe's built-in commands and the standard
-  `include` step; bty-web does not install third-party cijoe
+  file") -- not full configuration management. Each step in the
+  task YAML uses either a cijoe built-in script or an inline
+  shell command; bty-web does not install third-party cijoe
   script packages. If you find yourself reaching for one, the
   job belongs in the image cooker, not here. bty-web ships a
   base cijoe install on the appliance and provides the SSH

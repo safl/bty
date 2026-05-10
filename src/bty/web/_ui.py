@@ -309,14 +309,13 @@ def register_ui_routes(
                 """
                 INSERT INTO machines
                     (mac, image_sha256, provisioning_mode, hostname,
-                     cijoe_task_ref, last_known_good,
-                     boot_policy, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?)
+                     cijoe_task_ref, boot_policy, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(mac) DO UPDATE SET
                     image_sha256       = excluded.image_sha256,
                     provisioning_mode  = excluded.provisioning_mode,
                     hostname           = excluded.hostname,
-                    cijoe_task_ref = excluded.cijoe_task_ref,
+                    cijoe_task_ref     = excluded.cijoe_task_ref,
                     boot_policy        = excluded.boot_policy,
                     updated_at         = excluded.updated_at
                 """,
@@ -437,7 +436,7 @@ def register_ui_routes(
         cleaned_sha_url = validated.sha_url
 
         # Filename-required: same rule as the JSON ``add_catalog_entry``
-        # endpoint (v0.7.29). ``https://example.com`` and
+        # endpoint. ``https://example.com`` and
         # ``https://example.com/`` produce empty ``Path.name`` and
         # leave the catalog row with no useful display label.
         name = Path(urllib.parse.urlparse(image_url).path).name

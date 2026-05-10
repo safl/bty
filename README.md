@@ -26,10 +26,10 @@ bty is a flasher, not a cooker:
   pattern, or your own. bty just writes the bytes.
 - **Post-boot configuration is `cijoe-task`.** For machines whose
   MAC bty-web manages, the server SSHes into the freshly-booted
-  target and runs a small CIJOE task using only cijoe's built-in
-  commands + the standard `include` step. The intent is light
+  target and runs a small CIJOE task. Steps use cijoe's built-in
+  scripts or inline commands -- nothing else. The intent is light
   post-flash scripting (set a hostname, trigger a reboot, drop a
-  config file) -- not configuration management. No third-party
+  config file), not configuration management. No third-party
   cijoe script packages; if you need one, the job belongs in the
   cooker. Cancelable from the browser UI; events visible in the
   audit log.

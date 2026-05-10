@@ -1,4 +1,4 @@
-"""Slim audit log of bty-web activity (v0.7.38).
+"""Slim audit log of bty-web activity.
 
 A single append-only ``events`` table in state.db captures the
 "who did what when" timeline that the operator wants visible in

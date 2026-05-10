@@ -57,7 +57,7 @@ class ReleaseFetchState:
     ``GET /boot/releases``.
     """
 
-    tag: str  # the tag the operator requested ("latest", "v0.7.16", ...) -- the job key
+    tag: str  # the tag the operator requested ("latest" or e.g. "v1.2.3") -- the job key
     status: str = "queued"  # queued | running | completed | cancelled | failed
     bytes_done: int = 0  # cumulative bytes for the artefact currently streaming
     bytes_total: int | None = None  # Content-Length of the artefact currently streaming

@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import json
 import os
 import sqlite3
 import sys
@@ -143,12 +142,12 @@ def create_app(
             if img.sha256 is None:
                 # ``FileNotFoundError`` -- file vanished between the
                 # ``list_images`` scan and the enqueue (harmless).
-                # ``ValueError`` -- the v0.7.26 traversal guard in
+                # ``ValueError`` -- the traversal guard in
                 # ``HashManager.enqueue`` rejects suspect basenames;
-                # ``list_images`` shouldn't surface any (it returns
-                # ``iterdir`` basenames) but a freshly-created file
-                # named ``..`` (impossible) or ``.`` (likewise)
-                # would crash startup without this suppression.
+                # ``list_images`` shouldn't surface any but a freshly-
+                # created file named ``..`` (impossible) or ``.``
+                # (likewise) would crash startup without this
+                # suppression.
                 with contextlib.suppress(FileNotFoundError, ValueError):
                     await hash_manager.enqueue(img.name)
         try:
@@ -434,7 +433,7 @@ def create_app(
 
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
-    # ---------- release-fetch manager (M24, v0.7.24) ---------------------------
+    # ---------- release-fetch manager ---------------------------
     # Registered BEFORE the ``GET /boot/{name}`` catch-all so
     # ``/boot/releases`` doesn't get eaten as a missing artefact name.
     # Powers the trackable "Fetch from GitHub releases" action on
@@ -469,7 +468,7 @@ def create_app(
             )
         return state.to_dict()
 
-    # ---------- task manager (cijoe-task runs, v0.7.37) -----------------------
+    # ---------- task manager (cijoe-task runs) -----------------------
     # Mirrors the release-fetch / hash / download manager surfaces.
     # ``/tasks`` is keyed by MAC because the cijoe-task lifecycle is
     # per-machine: a flash-completion signal triggers one task; the
@@ -482,7 +481,7 @@ def create_app(
     def list_tasks() -> dict[str, Any]:
         return {"tasks": [s.to_dict() for s in task_runner.list()]}
 
-    # ---------- event log (v0.7.38) ---------------------------------------
+    # ---------- event log ---------------------------------------
     # Slim audit log of operator + machine activity. Backs the
     # /ui/events page + per-subject embedded lists on
     # /ui/machines/{mac} and /ui/images.
@@ -676,14 +675,13 @@ def create_app(
                 """
                 INSERT INTO machines
                     (mac, image_sha256, provisioning_mode, hostname,
-                     cijoe_task_ref, last_known_good,
-                     boot_policy, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?)
+                     cijoe_task_ref, boot_policy, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(mac) DO UPDATE SET
                     image_sha256       = excluded.image_sha256,
                     provisioning_mode  = excluded.provisioning_mode,
                     hostname           = excluded.hostname,
-                    cijoe_task_ref = excluded.cijoe_task_ref,
+                    cijoe_task_ref     = excluded.cijoe_task_ref,
                     boot_policy        = excluded.boot_policy,
                     updated_at         = excluded.updated_at
                 """,
@@ -963,7 +961,7 @@ def create_app(
         list_unified_images=_list_unified_images,
     )
 
-    # ---------- operator-curated catalog entries (M23) -----------------------
+    # ---------- operator-curated catalog entries -----------------------
     # ``catalog_entries`` table in state.db backs a UI form where the
     # operator pastes ``image-url`` + optional ``sha-url`` and hits
     # Add. The shape mirrors a catalog.toml manifest entry, so once
@@ -986,8 +984,8 @@ def create_app(
           digest if the manifest carries one entry). The entry is
           SHA-keyed and can bind to a machine.
         - If ``sha_url`` is null: the entry is URL-only. Flashable
-          via the URL streaming pipeline; not bindable to a
-          machine (M22 SHA-keyed binding requires a known SHA).
+          via the URL streaming pipeline; not bindable to a machine
+          (machine binding is content-addressed; needs a known SHA).
 
         - HEADs ``image_url`` for ``Content-Length`` (best-effort).
         - Inserts a row keyed by image_url.
@@ -1221,22 +1219,12 @@ def _normalise_mac(raw: str) -> str:
 
 def _row_to_machine(row: object) -> _models.Machine:
     """Decode a sqlite3.Row into a ``_models.Machine``."""
-    raw_known_good = row["last_known_good"]  # type: ignore[index]
-    last_known_good: dict[str, object] | None = None
-    if raw_known_good:
-        try:
-            decoded = json.loads(raw_known_good)
-        except json.JSONDecodeError:
-            decoded = None
-        if isinstance(decoded, dict):
-            last_known_good = decoded
     return _models.Machine(
         mac=row["mac"],  # type: ignore[index]
         image_sha256=row["image_sha256"],  # type: ignore[index]
         provisioning_mode=row["provisioning_mode"],  # type: ignore[index]
         hostname=row["hostname"],  # type: ignore[index]
         cijoe_task_ref=row["cijoe_task_ref"],  # type: ignore[index]
-        last_known_good=last_known_good,
         discovered_at=_iso_or_none(row["discovered_at"]),  # type: ignore[index]
         last_seen_at=_iso_or_none(row["last_seen_at"]),  # type: ignore[index]
         last_seen_ip=row["last_seen_ip"],  # type: ignore[index]
