@@ -94,15 +94,65 @@ CREATE INDEX IF NOT EXISTS events_subject_idx  ON events(subject_kind, subject_i
 """
 
 
+class StaleSchemaError(RuntimeError):
+    """Raised when state.db exists but is missing columns added in
+    newer bty-web versions. Pre-1.0 has no migrations apparatus;
+    the fix is to wipe state.db. The error message names the
+    missing columns + path so an operator can act without
+    grepping the source."""
+
+
+# Columns that were added to existing tables after the initial
+# schema landed. Each entry is checked on every ``init_db`` call;
+# a missing column raises :class:`StaleSchemaError` with an
+# operator-actionable message instead of letting the first
+# subsequent ``SELECT`` blow up with ``no such column``.
+_REQUIRED_COLUMNS: dict[str, tuple[str, ...]] = {
+    "machines": ("last_task_status", "last_task_run_at", "last_task_output_path"),
+    "events": ("source_ip",),
+}
+
+
+def _detect_stale_schema(conn: sqlite3.Connection, path: Path) -> None:
+    """Raise :class:`StaleSchemaError` if any expected column is
+    missing on an existing table. Pre-1.0: the recovery is ``rm
+    <state.db>`` and let bty-web recreate it.
+
+    Tables that don't exist yet (fresh DB) are skipped; the
+    ``CREATE TABLE IF NOT EXISTS`` in :data:`SCHEMA` will create
+    them with the current shape.
+    """
+    for table, required in _REQUIRED_COLUMNS.items():
+        rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+        if not rows:
+            continue  # table doesn't exist yet -- SCHEMA will create it
+        existing = {r[1] for r in rows}
+        missing = [c for c in required if c not in existing]
+        if missing:
+            raise StaleSchemaError(
+                f"bty-web state.db at {path} is missing columns "
+                f"{missing!r} on table {table!r}. Pre-1.0 has no "
+                f"migrations apparatus -- delete the file "
+                f"(``rm {path}``) and let bty-web recreate it on "
+                f"next startup. Existing machine records will be "
+                f"lost; auto-discovery will re-populate from "
+                f"first PXE contact."
+            )
+
+
 def init_db(path: Path) -> None:
     """Create ``path`` (and its parent directory) if missing; apply the schema.
 
     Pre-1.0: no migrations. The schema is whatever :data:`SCHEMA`
     says. Idempotent for first-init / fresh-create; calling against
-    an existing DB is a no-op for the tables already there.
+    an existing DB is a no-op for the tables already there. If an
+    existing DB has tables with missing columns (a stale schema
+    from an older bty-web), :class:`StaleSchemaError` is raised
+    with operator-actionable recovery instructions.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(path) as conn:
+        _detect_stale_schema(conn, path)
         conn.executescript(SCHEMA)
         conn.commit()
 

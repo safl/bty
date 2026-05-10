@@ -1206,6 +1206,30 @@ def test_events_filter_by_source_ip(app_client: TestClient) -> None:
     assert all(e["source_ip"] == "testclient" for e in events)
 
 
+def test_image_upload_oversized_logs_failure_event(
+    app_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An upload that exceeds ``BTY_MAX_UPLOAD_BYTES`` lands an
+    ``image.upload_failed`` event so the audit trail is symmetric
+    with the success path's ``image.uploaded``. Force the cap
+    very low so the test fixture's ~10-byte payload trips it."""
+    monkeypatch.setenv("BTY_MAX_UPLOAD_BYTES", "5")
+    r = app_client.put(
+        "/images/big.qcow2",
+        content=b"this is more than 5 bytes",
+        cookies=AUTH,
+    )
+    assert r.status_code == 413
+    r = app_client.get("/events", params={"kind": "image.upload_failed"}, cookies=AUTH)
+    events = r.json()["events"]
+    assert len(events) == 1
+    row = events[0]
+    assert row["actor"] == "operator"
+    assert row["subject_kind"] == "image"
+    assert row["subject_id"] == "big.qcow2"
+    assert row["details"]["status_code"] == 413
+
+
 def test_settings_pxe_activate_failure_logs_event(app_client: TestClient) -> None:
     """A failed PXE activation must land a
     ``settings.pxe.activate_failed`` event so the audit trail is

@@ -857,8 +857,28 @@ def create_app(
         HashManager runs a single worker by default; the upload
         returns immediately and the operator can watch progress
         via ``/catalog/hashes``.
+
+        Failure path logs ``image.upload_failed`` so the audit log
+        is symmetric with the success path's ``image.uploaded``.
+        Operators scanning /ui/events see "this upload was tried
+        and rejected" with the underlying error.
         """
-        result = await _stream_upload(request, resolved_image_root, name)
+        try:
+            result = await _stream_upload(request, resolved_image_root, name)
+        except HTTPException as exc:
+            with _db.open_db(state_path) as conn:
+                _log_event(
+                    conn,
+                    kind="image.upload_failed",
+                    summary=f"image {name!r} upload failed: {exc.detail}",
+                    subject_kind="image",
+                    subject_id=name,
+                    actor="operator",
+                    source_ip=_client_ip(request),
+                    details={"status_code": exc.status_code, "error": str(exc.detail)},
+                )
+                conn.commit()
+            raise
         # Image catalog count changes; refresh the dashboard fragment.
         publish_state_changed()
         # Trigger an import for the just-uploaded file UNLESS it's
@@ -1022,6 +1042,22 @@ def create_app(
             try:
                 sha256 = _catalog.fetch_sha256_for_url(body.image_url, body.sha_url)
             except _catalog.CatalogError as exc:
+                with _db.open_db(state_path) as conn:
+                    _log_event(
+                        conn,
+                        kind="catalog.entry.add_failed",
+                        summary=f"catalog entry add failed for {body.image_url!r}: {exc}",
+                        subject_kind="catalog",
+                        subject_id=body.image_url,
+                        actor="operator",
+                        source_ip=_client_ip(request),
+                        details={
+                            "image_url": body.image_url,
+                            "sha_url": body.sha_url,
+                            "error": str(exc),
+                        },
+                    )
+                    conn.commit()
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"could not resolve sha256: {exc}",

@@ -59,3 +59,34 @@ def test_init_db_idempotent(tmp_path: Path) -> None:
     state = tmp_path / "state.db"
     _db.init_db(state)
     _db.init_db(state)  # second call must not raise
+
+
+def test_init_db_raises_on_stale_schema(tmp_path: Path) -> None:
+    """If state.db exists from an older bty-web (missing
+    columns added in a later release), :func:`init_db` raises
+    :class:`StaleSchemaError` with operator-actionable recovery
+    instructions instead of letting a later ``SELECT`` blow up
+    with ``no such column``. This was the silent failure mode
+    a long-running bty-web hit when its on-disk DB was older
+    than the running code."""
+    import sqlite3
+
+    import pytest
+
+    state = tmp_path / "state.db"
+    # Create an older-style machines table missing
+    # ``last_task_status`` (added with the cancelable cijoe-task
+    # work in v0.7.36).
+    with sqlite3.connect(state) as conn:
+        conn.execute(
+            """
+            CREATE TABLE machines (
+                mac           TEXT PRIMARY KEY,
+                created_at    TEXT NOT NULL,
+                updated_at    TEXT NOT NULL
+            )
+            """
+        )
+        conn.commit()
+    with pytest.raises(_db.StaleSchemaError, match="last_task_status"):
+        _db.init_db(state)
