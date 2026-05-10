@@ -118,11 +118,17 @@ def main(argv: list[str] | None = None) -> int:
         "upstream based on cache state.",
     )
     p_flash.add_argument("--target", type=Path, required=True, help="target block device")
+    # v0.7.39 narrowed bty's surface to "flasher only". The CLI no
+    # longer drives offline cloud-init / cijoe provisioning -- those
+    # were image-creation territory and live in the image cooker.
+    # ``--provision`` is retained at ``none`` (the only valid value)
+    # so existing scripts that pass it explicitly don't error; the
+    # flag is hidden from --help.
     p_flash.add_argument(
         "--provision",
-        choices=flash.PROVISIONING_MODES,
+        choices=("none",),
         default="none",
-        help="post-flash provisioning mode (default: %(default)s)",
+        help=argparse.SUPPRESS,
     )
     p_flash.add_argument(
         "--dry-run",
@@ -133,37 +139,6 @@ def main(argv: list[str] | None = None) -> int:
         "--yes",
         action="store_true",
         help="confirm the destructive write; required to actually flash the target",
-    )
-    p_flash.add_argument(
-        "--user-data",
-        type=Path,
-        default=None,
-        help="cloud-init user-data file (required when --provision cloud-init)",
-    )
-    p_flash.add_argument(
-        "--meta-data",
-        type=Path,
-        default=None,
-        help="cloud-init meta-data file (optional; synthesised if omitted)",
-    )
-    p_flash.add_argument(
-        "--cijoe-task",
-        # ``--cijoe-workflow`` kept as a backwards-compatible alias.
-        # CIJOE renamed their "workflow" concept to "task" in 2026
-        # and bty mirrors the vocabulary; existing scripts that pass
-        # ``--cijoe-workflow`` keep working because argparse routes
-        # both names to ``args.cijoe_task``.
-        "--cijoe-workflow",
-        type=Path,
-        default=None,
-        dest="cijoe_task",
-        help="cijoe task YAML (required when --provision cijoe)",
-    )
-    p_flash.add_argument(
-        "--cijoe-config",
-        type=Path,
-        default=None,
-        help="cijoe TOML config (optional; passed through as -c)",
     )
     p_flash.add_argument(
         "--progress",
@@ -364,8 +339,6 @@ def cmd_flash(
     probe_image_url: Callable[[str], flash.ImageInfo] = flash.probe_image_url,
     probe_target: Callable[[Path], flash.TargetInfo] = flash.probe_target,
     execute_plan: Callable[..., None] = flash.execute_plan,
-    apply_cloud_init: Callable[..., None] = flash.apply_cloud_init,
-    apply_cijoe: Callable[..., None] = flash.apply_cijoe,
     geteuid: Callable[[], int] = os.geteuid,
 ) -> int:
     """Drive a flash. Outside-world dependencies are kwargs with real defaults.
@@ -373,24 +346,16 @@ def cmd_flash(
     Tests pass fakes directly instead of monkey-patching module-level
     references; production callers (``main()``) use the defaults and the
     real ``bty.flash`` / ``os`` machinery is invoked.
+
+    v0.7.39 dropped the offline cloud-init / cijoe provisioning
+    arms: bty is a flasher, not a provisioner. First-boot bring-up
+    (users, network, packages, hostnames) is the image cooker's
+    job; bake it in upstream. Post-boot configuration via
+    ``cijoe-online`` is bty-web's territory and runs server-side.
     """
     if not args.dry_run and not args.yes:
         print(
             "bty: pass --dry-run to validate or --yes to actually flash the target",
-            file=sys.stderr,
-        )
-        return 2
-
-    if args.provision == "cloud-init" and args.user_data is None:
-        print(
-            "bty: --user-data is required when --provision cloud-init",
-            file=sys.stderr,
-        )
-        return 2
-
-    if args.provision == "cijoe" and args.cijoe_task is None:
-        print(
-            "bty: --cijoe-task is required when --provision cijoe",
             file=sys.stderr,
         )
         return 2
@@ -461,45 +426,10 @@ def cmd_flash(
         print(f"bty: flash failed: {exc}", file=sys.stderr)
         return 1
 
-    if plan.provisioning_mode == "cloud-init":
-        if progress_cb is not None:
-            progress_cb(flash.FlashProgress(event="provisioning", note="cloud-init"))
-        try:
-            apply_cloud_init(
-                plan.target.path,
-                args.user_data,
-                args.meta_data,
-            )
-        except flash.FlashDependencyError as exc:
-            if progress_cb is not None:
-                progress_cb(flash.FlashProgress(event="failed", note=str(exc)))
-            print(f"bty: cloud-init seeding failed: {exc}", file=sys.stderr)
-            return 4
-        except flash.FlashError as exc:
-            if progress_cb is not None:
-                progress_cb(flash.FlashProgress(event="failed", note=str(exc)))
-            print(f"bty: cloud-init seeding failed: {exc}", file=sys.stderr)
-            return 1
-
-    if plan.provisioning_mode == "cijoe":
-        if progress_cb is not None:
-            progress_cb(flash.FlashProgress(event="provisioning", note="cijoe"))
-        try:
-            apply_cijoe(
-                plan.target.path,
-                args.cijoe_task,
-                args.cijoe_config,
-            )
-        except flash.FlashDependencyError as exc:
-            if progress_cb is not None:
-                progress_cb(flash.FlashProgress(event="failed", note=str(exc)))
-            print(f"bty: cijoe provisioning failed: {exc}", file=sys.stderr)
-            return 4
-        except flash.FlashError as exc:
-            if progress_cb is not None:
-                progress_cb(flash.FlashProgress(event="failed", note=str(exc)))
-            print(f"bty: cijoe provisioning failed: {exc}", file=sys.stderr)
-            return 1
+    # v0.7.39: no post-flash provisioning step. ``--provision`` is
+    # accepted only as ``none`` (the default). First-boot bring-up
+    # belongs in the image; post-boot config belongs in bty-web's
+    # cijoe-online flow.
 
     if progress_cb is not None:
         progress_cb(flash.FlashProgress(event="done"))

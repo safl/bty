@@ -203,6 +203,76 @@ def test_task_manager_invokes_cijoe_with_task_and_config(runner) -> None:
     assert kwargs["cwd"]
 
 
+def test_task_manager_layers_user_config_when_present(tmp_path: Path) -> None:
+    """v0.7.39: bty-web always provides the SSH transport config,
+    but the operator can drop a ``cijoe-user-config.toml`` next to
+    state.db with their own task-specific knobs / additional named
+    transports. cijoe accepts ``--config`` repeatedly; bty-web
+    layers them as ``[user-config, transport.toml]`` so the SSH
+    transport in ``transport.toml`` (loaded LAST) overrides any
+    redefinition the operator might have put in their config.
+
+    This test pins the ordering: user-config first, transport
+    last.
+    """
+    state_db = tmp_path / "state.db"
+    _db.init_db(state_db)
+    _seed_machine(state_db)
+
+    user_cfg = tmp_path / "user.toml"
+    user_cfg.write_text("[cijoe.workflow]\nfail_fast = false\n")
+
+    runner_obj = TaskManager(
+        state_path=state_db,
+        publish_machines_changed=lambda: None,
+        tasks_dir=tmp_path / "tasks",
+        ssh_key_path=tmp_path / "key",
+        cijoe_bin="cijoe-fake",
+        user_config_path=user_cfg,
+    )
+
+    proc = _fake_proc(0)
+    with patch("bty.web._task.subprocess.Popen", return_value=proc) as mock_popen:
+        runner_obj._run(_seed_state())
+
+    cmd = mock_popen.call_args.args[0]
+    # Two ``--config`` flags should appear, in this order: user
+    # config first, transport TOML last.
+    config_idxs = [i for i, tok in enumerate(cmd) if tok == "--config"]
+    assert len(config_idxs) == 2, f"expected 2 --config flags, got cmd={cmd}"
+    user_pos = cmd.index(str(user_cfg))
+    # The transport.toml is generated under ``run_dir / transport.toml``;
+    # its absolute path appears AFTER the user config in the cmd.
+    transport_pos = next(i for i, tok in enumerate(cmd) if tok.endswith("transport.toml"))
+    assert user_pos < transport_pos
+
+
+def test_task_manager_skips_user_config_when_missing(tmp_path: Path) -> None:
+    """If ``user_config_path`` points at a missing file (operator
+    hasn't dropped one), the runner just passes its own transport
+    config. No spurious ``--config`` flag, no error."""
+    state_db = tmp_path / "state.db"
+    _db.init_db(state_db)
+    _seed_machine(state_db)
+
+    runner_obj = TaskManager(
+        state_path=state_db,
+        publish_machines_changed=lambda: None,
+        tasks_dir=tmp_path / "tasks",
+        ssh_key_path=tmp_path / "key",
+        cijoe_bin="cijoe-fake",
+        user_config_path=tmp_path / "does-not-exist.toml",
+    )
+
+    proc = _fake_proc(0)
+    with patch("bty.web._task.subprocess.Popen", return_value=proc) as mock_popen:
+        runner_obj._run(_seed_state())
+
+    cmd = mock_popen.call_args.args[0]
+    config_idxs = [i for i, tok in enumerate(cmd) if tok == "--config"]
+    assert len(config_idxs) == 1, f"expected exactly 1 --config flag, got cmd={cmd}"
+
+
 # ---------- cancellation ----------------------------------------------------
 
 

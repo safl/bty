@@ -24,22 +24,19 @@ What (if anything) configures the deployed system after the bytes
 land. Four modes:
 
 - `none` - no post-flash configuration; reboot into the cooked image
-  as-is.
-- `cloud-init` - populate the OS's cloud-init seed (NoCloud datasource)
-  before the target reboots; the OS picks it up on first boot.
-- `cijoe` - run a CIJOE task against the freshly-flashed filesystem
-  (mount, edit, unmount) before the target reboots. Constrained to
-  filesystem-level customisation.
+  as-is. The default. First-boot bring-up (users, network, packages,
+  hostnames) is baked into the image by the cooker upstream.
 - `cijoe-online` - bty-web only. After the target first-boots into its
-  own OS, `bty-web` runs a CIJOE task against the running machine
-  and records the post-task state as that machine's known-good
-  baseline. The server, not the image, becomes the source of truth
-  for "what this box should look like."
+  own OS, `bty-web` SSHes in and runs a CIJOE task against the
+  running machine. Requires a managed MAC -- bty-web has to know
+  the target via a server-side machine record (`cijoe_task_ref` +
+  `last_seen_ip`). The server, not the image, becomes the source of
+  truth for "what this box should look like."
 
-`bty flash` understands the first three modes (offline,
-filesystem-level). The fourth runs server-side; see the
-[components](components.md) chapter and the
-[reference](reference.md#wire-types) for the wire shape.
+That's the whole list. v0.7.39 dropped the offline `cloud-init`
+and `cijoe` modes that the pre-rename `bty flash` accepted: those
+were image-creation territory and live in the image cooker now.
+bty is a flasher, not a cooker.
 
 ## Disk layout (USB live)
 

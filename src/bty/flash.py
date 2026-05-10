@@ -23,15 +23,11 @@ from __future__ import annotations
 
 import contextlib
 import json
-import os
 import re
-import shutil
 import stat
 import subprocess
 import sys
-import tempfile
 import threading
-import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -59,11 +55,9 @@ class FlashProgress:
     - ``synced``            - kernel buffers flushed.
     - ``partprobed``        - partition table re-read; flash
       hardware-complete.
-    - ``provisioning``      - emitted by ``cmd_flash`` around an
-      ``apply_cloud_init`` / ``apply_cijoe`` step (``note``
-      describes which mode).
-    - ``done``              - emitted by ``cmd_flash`` after every
-      step succeeded.
+    - ``done``              - emitted by ``cmd_flash`` after the
+      flash succeeded. v0.7.39 dropped the offline-provisioning
+      step; the ``provisioning`` event is gone.
     - ``failed``            - emitted on any :class:`FlashError`;
       ``note`` carries the exception string. The exception is then
       re-raised.
@@ -152,13 +146,12 @@ def _pump_dd_progress(
                 break
 
 
-# Provisioning modes accepted by ``bty flash``. ``none`` skips post-
-# flash setup; ``cloud-init`` writes a NoCloud seed partition;
-# ``cijoe`` runs a cijoe task (offline / one-shot) against the
-# fresh image. ``cijoe-online`` is the bty-web variant where the
-# server kicks off cijoe against a network-reachable target after
-# the live env signals completion.
-PROVISIONING_MODES: tuple[str, ...] = ("none", "cloud-init", "cijoe")
+# Provisioning modes accepted by ``bty flash``. v0.7.39 narrowed
+# the surface to ``none`` only -- offline cloud-init / cijoe
+# provisioning was image-creation territory and lives in the
+# image cooker now. ``cijoe-online`` is server-driven (bty-web
+# kicks it off after first boot) so doesn't appear here either.
+PROVISIONING_MODES: tuple[str, ...] = ("none",)
 
 _ZSTD_SIZE_UNITS: dict[str, int] = {
     "B": 1,
@@ -1032,263 +1025,11 @@ def _partprobe_target(target: Path) -> None:
 
     ``udevadm settle`` is run after ``partprobe`` so subsequent ``lsblk``
     queries see the new partition tree. Without it, an immediate
-    follow-up (e.g. ``apply_cloud_init`` looking for the rootfs partition)
+    follow-up (e.g. an external tool looking at partition labels)
     can race the kernel's partition scan and find no children.
     """
     subprocess.run(["partprobe", str(target)], check=False)
     subprocess.run(["udevadm", "settle"], check=False)
-
-
-# ---------- Provisioning: cloud-init ----------------------------------------
-
-
-def apply_cloud_init(
-    target: Path,
-    user_data: Path,
-    meta_data: Path | None = None,
-) -> None:
-    """Drop NoCloud seed files into the target's cloud-init-enabled rootfs.
-
-    Mounts the partition on ``target`` whose rootfs contains ``/etc/cloud/``
-    (the unambiguous "cloud-init lives here" marker), writes
-    ``user-data`` and ``meta-data`` under
-    ``/var/lib/cloud/seed/nocloud-net/`` on it, then unmounts. cloud-init
-    picks the seed up on first boot via the NoCloud datasource.
-
-    Raises :class:`FlashError` when the target has no cloud-init-enabled
-    rootfs partition, or when mounting / writing fails.
-    """
-    if not user_data.exists():
-        raise FlashError(f"user-data file not found: {user_data}")
-    if meta_data is not None and not meta_data.exists():
-        raise FlashError(f"meta-data file not found: {meta_data}")
-
-    rootfs = _find_cloud_init_rootfs(target)
-
-    with tempfile.TemporaryDirectory(prefix="bty-cloud-init-") as mp:
-        mount_point = Path(mp)
-        rc = subprocess.run(["mount", str(rootfs), str(mount_point)], check=False).returncode
-        if rc != 0:
-            raise FlashError(f"failed to mount {rootfs} at {mount_point}")
-        try:
-            seed_dir = mount_point / "var" / "lib" / "cloud" / "seed" / "nocloud-net"
-            seed_dir.mkdir(parents=True, exist_ok=True)
-
-            shutil.copy2(user_data, seed_dir / "user-data")
-            if meta_data is not None:
-                shutil.copy2(meta_data, seed_dir / "meta-data")
-            else:
-                (seed_dir / "meta-data").write_text(_default_meta_data())
-
-            subprocess.run(["sync"], check=False)
-        finally:
-            subprocess.run(["umount", str(mount_point)], check=False)
-
-
-def _default_meta_data() -> str:
-    """Synthesise a minimal NoCloud meta-data with a unique instance-id."""
-    instance_id = "bty-" + uuid.uuid4().hex[:12]
-    return f"instance-id: {instance_id}\nlocal-hostname: bty-host\n"
-
-
-def _find_cloud_init_rootfs(target: Path) -> Path:
-    """Return the partition device on ``target`` that has cloud-init installed.
-
-    Iterates partitions reported by ``lsblk -J``, mounts each read-only,
-    and returns the first whose rootfs contains ``/etc/cloud/``. Raises
-    :class:`FlashError` if no such partition is found.
-
-    A ``udevadm settle`` is issued first so a freshly-partitioned target
-    is fully visible in sysfs by the time we query it.
-    """
-    subprocess.run(["udevadm", "settle"], check=False)
-
-    proc = subprocess.run(
-        ["lsblk", "-J", "-o", "PATH,TYPE", str(target)],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if proc.returncode != 0:
-        raise FlashError(f"lsblk failed for {target}: {proc.stderr.strip()}")
-
-    payload = json.loads(proc.stdout)
-    partitions = _collect_partitions(payload.get("blockdevices", []))
-
-    for part_path in partitions:
-        if _partition_has_cloud_init(part_path):
-            return part_path
-
-    raise FlashError(
-        f"no partition on {target} appears to have cloud-init installed "
-        f"(checked for /etc/cloud/ on each partition); lsblk reported: "
-        f"{proc.stdout.strip()!r}"
-    )
-
-
-def _collect_partitions(entries: list[dict[str, Any]]) -> list[Path]:
-    """Walk an ``lsblk -J`` tree and return every entry of type ``part``.
-
-    Different ``lsblk`` versions / option combinations sometimes return
-    a tree (parent with ``children``) and sometimes a flat sibling list
-    when the user passes a device path; both shapes are handled.
-    """
-    out: list[Path] = []
-    for entry in entries:
-        if entry.get("type") == "part" and entry.get("path"):
-            out.append(Path(entry["path"]))
-        children = entry.get("children")
-        if children:
-            out.extend(_collect_partitions(children))
-    return out
-
-
-def _partition_has_cloud_init(part: Path) -> bool:
-    """Mount ``part`` read-only briefly; return True if ``/etc/cloud/`` exists."""
-    with tempfile.TemporaryDirectory(prefix="bty-probe-") as mp:
-        rc = subprocess.run(
-            ["mount", "-r", str(part), mp],
-            capture_output=True,
-            check=False,
-        ).returncode
-        if rc != 0:
-            return False
-        try:
-            return (Path(mp) / "etc" / "cloud").is_dir()
-        finally:
-            subprocess.run(["umount", mp], capture_output=True, check=False)
-
-
-# ---------- Provisioning: cijoe (offline) ------------------------------------
-
-
-def apply_cijoe(
-    target: Path,
-    task: Path,
-    config: Path | None = None,
-) -> None:
-    """Run a CIJOE task against the target's mounted rootfs.
-
-    Mounts the largest partition on ``target`` (heuristic for the
-    rootfs), exports ``BTY_ROOTFS`` pointing at the mount, then invokes
-    ``cijoe <task> -c <config> --monitor``. The task's steps can
-    read / mutate the rootfs through ``$BTY_ROOTFS``; bty itself does
-    not interpret what the task does.
-
-    cijoe requires a config file even for trivial tasks. When the
-    operator does not supply ``--cijoe-config``, bty synthesises a
-    minimal default into the working tempdir so the task can run.
-
-    The CIJOE TOML config still uses the ``[cijoe.workflow]`` section
-    name (CIJOE schema-side; their CLI is backwards-compatible).
-
-    Raises :class:`FlashError` if ``cijoe`` is not installed, the
-    task / config files are missing, the rootfs cannot be mounted,
-    or the task exits non-zero.
-    """
-    if not task.is_file():
-        # ``exists()`` would accept a directory and let cijoe fall over
-        # with a confusing YAML-parse error; ``is_file()`` surfaces a
-        # clear bty-side error for the typo case (operator pointed
-        # ``--cijoe-task`` at a dir instead of the YAML inside it).
-        raise FlashError(f"cijoe task not found or not a file: {task}")
-    if config is not None and not config.is_file():
-        raise FlashError(f"cijoe config not found or not a file: {config}")
-    if shutil.which("cijoe") is None:
-        raise FlashDependencyError(
-            "cijoe is not installed; install with `pipx install cijoe` and re-run"
-        )
-
-    rootfs = _find_largest_partition(target)
-
-    with tempfile.TemporaryDirectory(prefix="bty-cijoe-") as workdir:
-        workdir_path = Path(workdir)
-        mount_point = workdir_path / "rootfs"
-        mount_point.mkdir()
-
-        if config is not None:
-            effective_config = config
-        else:
-            effective_config = workdir_path / "cijoe-config.toml"
-            effective_config.write_text(_default_cijoe_config())
-
-        rc = subprocess.run(["mount", str(rootfs), str(mount_point)], check=False).returncode
-        if rc != 0:
-            raise FlashError(f"failed to mount {rootfs} at {mount_point}")
-        try:
-            env = os.environ.copy()
-            env["BTY_ROOTFS"] = str(mount_point)
-
-            cmd = [
-                "cijoe",
-                str(task),
-                "--monitor",
-                "-c",
-                str(effective_config),
-            ]
-            rc = subprocess.run(cmd, env=env, check=False).returncode
-            if rc != 0:
-                raise FlashError(f"cijoe task exited {rc}")
-
-            subprocess.run(["sync"], check=False)
-        finally:
-            subprocess.run(["umount", str(mount_point)], capture_output=True, check=False)
-
-
-def _default_cijoe_config() -> str:
-    """Synthesise the minimum cijoe config that satisfies cijoe's loader.
-
-    The ``[cijoe.workflow]`` section name is CIJOE's schema-side
-    naming -- their CLI is backwards-compatible across the
-    workflow->task rename so this still works.
-    """
-    return "[cijoe.workflow]\nfail_fast = true\n"
-
-
-def _find_largest_partition(target: Path) -> Path:
-    """Return the largest partition device on ``target``.
-
-    Heuristic for "the rootfs" - works for typical cooked images where
-    the root partition dominates the disk. Operators who need a
-    different partition will get an explicit selector when one
-    becomes necessary.
-    """
-    subprocess.run(["udevadm", "settle"], check=False)
-
-    proc = subprocess.run(
-        ["lsblk", "-J", "-b", "-o", "PATH,TYPE,SIZE", str(target)],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if proc.returncode != 0:
-        raise FlashError(f"lsblk failed for {target}: {proc.stderr.strip()}")
-
-    payload = json.loads(proc.stdout)
-    parts = _collect_partition_entries(payload.get("blockdevices", []))
-    if not parts:
-        raise FlashError(
-            f"no partitions found on {target}; lsblk reported: {proc.stdout.strip()!r}"
-        )
-
-    parts.sort(key=lambda p: int(p.get("size") or 0), reverse=True)
-    return Path(parts[0]["path"])
-
-
-def _collect_partition_entries(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Walk an ``lsblk -J`` tree; return raw entries of type ``part``.
-
-    Variant of :func:`_collect_partitions` that yields the full entry
-    so callers can read additional fields (e.g. SIZE) - not just the path.
-    """
-    out: list[dict[str, Any]] = []
-    for entry in entries:
-        if entry.get("type") == "part":
-            out.append(entry)
-        children = entry.get("children")
-        if children:
-            out.extend(_collect_partition_entries(children))
-    return out
 
 
 # ---------- Internal helpers --------------------------------------------------

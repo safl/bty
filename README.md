@@ -13,10 +13,21 @@
 
 Reflash a homelab box, a CI runner, or a rack of bare-metal targets in
 the time it takes to make coffee. bty writes pre-built ("cooked") system
-images onto disks - locally over USB or remotely over PXE - then hands
-the freshly-booted system to cloud-init or a CIJOE task for first-boot
-configuration. No imperative configuration management, no idempotency
-mind games: rebuild the image, reflash the target.
+images onto disks - locally over USB or remotely over PXE. The image is
+the source of truth: rebuild the image, reflash the target. No
+imperative configuration management, no idempotency mind games.
+
+bty is a flasher, not a cooker:
+
+- **Image creation is somebody else's project.** First-boot bring-up
+  (users, network, packages, hostnames) gets baked into the image
+  upstream with cloud-init / kickstart / preseed / your favourite
+  cooker. Use the [companion image-builder](https://github.com/safl/jellyfin-kiosk-appliance-builder)
+  pattern, or your own. bty just writes the bytes.
+- **Post-boot configuration is `cijoe-online`.** For machines whose
+  MAC bty-web manages, the server SSHes into the freshly-booted target
+  and runs a `cijoe` task. Cancelable from the browser UI; events
+  visible in the audit log.
 
 ```bash
 # Local: USB stick into target, two arrows + Enter, done.

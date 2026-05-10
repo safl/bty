@@ -35,6 +35,7 @@ from bty import catalog as _catalog
 from bty import images
 from bty.web import _catalog as _web_catalog
 from bty.web import _db, _hash, _models, _release_mgr, _ui
+from bty.web import _task as _task_module
 from bty.web._auth import SESSION_COOKIE, require_auth
 from bty.web._events import MachineEvent, MachineEventBus, sse_format
 from bty.web._events_log import list_events as _list_events
@@ -225,9 +226,22 @@ def create_app(
     # Back-compat alias - older internal call sites use this name.
     publish_machines_changed = publish_state_changed
 
+    # Operator-supplied cijoe config (optional). If
+    # ``BTY_CIJOE_USER_CONFIG`` points at an existing file (or the
+    # default ``/var/lib/bty/cijoe-user-config.toml`` exists) it
+    # gets passed to ``cijoe`` as a ``--config`` argument alongside
+    # bty-web's auto-generated transport TOML. Resolved at run time
+    # (not construction) so the operator can drop the file in / out
+    # without bouncing bty-web.
+    user_cfg_env = os.environ.get("BTY_CIJOE_USER_CONFIG")
+    user_config_path: Path | None = (
+        Path(user_cfg_env) if user_cfg_env else _task_module.DEFAULT_USER_CONFIG_PATH
+    )
+
     task_runner = TaskRunner(
         state_path=state_path,
         publish_machines_changed=publish_machines_changed,
+        user_config_path=user_config_path,
     )
 
     # ----- Open routes (no auth) ------------------------------------------

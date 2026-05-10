@@ -142,9 +142,13 @@ Exit codes:
 - `0` -> success
 - `2` -> the path does not exist (or argparse rejected the invocation)
 
-### `bty flash --image PATH --target PATH [--provision MODE] [--user-data PATH] [--meta-data PATH] [--cijoe-task PATH] [--cijoe-config PATH] [--progress {text,ndjson,none}] [--dry-run] [--yes]`
+### `bty flash --image PATH --target PATH [--progress {text,ndjson,none}] [--dry-run] [--yes]`
 
-Flash an image onto a target block device.
+Flash an image onto a target block device. v0.7.39 narrowed bty's
+surface to "flasher only" -- offline cloud-init / cijoe
+provisioning is image-creation territory and lives in the cooker
+upstream. Post-boot configuration on PXE-managed machines is the
+bty-web ``cijoe-online`` flow, not a `bty flash` mode.
 
 `--image` accepts three forms:
 
@@ -173,7 +177,6 @@ Both modes start by validating the plan:
  cannot be determined (e.g. `qemu-img info` failure).
 - Target exists and is a block device.
 - Target has no mounted partitions (refuses to overwrite live storage).
-- Provisioning mode is one of `none`, `cloud-init`, `cijoe`.
 
 #### Write (`--yes` only)
 
@@ -189,37 +192,13 @@ to catch races (e.g. the target getting mounted between dry-run and
 flash). On success, `bty` runs `sync` and `partprobe TARGET` so the
 kernel re-reads the new partition table.
 
-#### Provisioning
-
-After the flash, `bty` runs the configured post-flash step:
-
-- **`none`** - no post-flash work; the cooked image is the result.
-- **`cloud-init`** - mounts the partition on the target whose rootfs
- carries `/etc/cloud/` (the unambiguous "cloud-init lives here"
- marker), writes operator-supplied `user-data` (and either supplied
- or auto-synthesised `meta-data`) under
- `/var/lib/cloud/seed/nocloud-net/` so cloud-init's NoCloud
- datasource picks them up on first boot. **Requires `--user-data
- PATH`**; rejects with exit `2` if the flag is missing. Errors
- loudly if no partition on the target appears to have cloud-init
- installed, rather than silently writing a seed nothing will read.
-- **`cijoe`** - mounts the largest partition on the target (heuristic
- for the rootfs), exports `BTY_ROOTFS` pointing at the mount, then
- invokes `cijoe <task> --monitor [-c <config>]`. The task's steps
- read or mutate the rootfs through `$BTY_ROOTFS`; bty itself does
- not interpret what they do. **Requires `--cijoe-task PATH`**
- (``--cijoe-workflow`` accepted as a backwards-compatible alias);
- rejects with exit `2` if missing. **Requires `cijoe` on `PATH`**
- (`pipx install cijoe`); errors clearly if absent. Task exit
- non-zero is propagated as a flash failure.
-
 #### Progress
 
 `--progress {text,ndjson,none}` controls lifecycle reporting (default
 `text`).
 
 Lifecycle events: `started`, `writing`, `synced`, `partprobed`,
-`provisioning` (cloud-init / cijoe steps only), `done`, `failed`.
+`done`, `failed`.
 
 - `text` (default) - one line per event on stderr (`[event] note`).
 - `ndjson` - one JSON object per line on stdout
@@ -236,10 +215,10 @@ updates and CLI output share the same event stream.
 #### Exit codes (specific to `bty flash`)
 
 - `0` -> success (validation passed for `--dry-run`; write completed for `--yes`).
-- `1` -> validation failed, or a write / provisioning subprocess returned non-zero.
-- `2` -> argparse error, missing image, missing `--user-data` / `--cijoe-task`, neither `--dry-run` nor `--yes` given.
+- `1` -> validation failed, or the write subprocess returned non-zero.
+- `2` -> argparse error, missing image, neither `--dry-run` nor `--yes` given.
 - `3` -> `--yes` was passed without root.
-- `4` -> required external tool missing (e.g. `cijoe` for `--provision cijoe`).
+- `4` -> required external tool missing (e.g. `qemu-img` for `.qcow2`).
 - `5` -> target raced (became mounted or stopped being a block device between validation and write).
 
 The general exit-code table at the top of this section applies to all

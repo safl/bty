@@ -197,14 +197,14 @@ def test_ui_machine_detail_renders(client: TestClient) -> None:
         "/machines/aa:bb:cc:dd:ee:ff",
         json={
             "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            "provisioning_mode": "cloud-init",
+            "provisioning_mode": "cijoe-online",
         },
         cookies=AUTH,
     )
     r = client.get("/ui/machines/aa:bb:cc:dd:ee:ff")
     assert r.status_code == 200
     assert "aa:bb:cc:dd:ee:ff" in r.text
-    assert 'value="cloud-init" selected' in r.text or "cloud-init</option>" in r.text
+    assert 'value="cijoe-online" selected' in r.text or "cijoe-online</option>" in r.text
 
 
 def test_ui_machine_detail_404(client: TestClient) -> None:

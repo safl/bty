@@ -17,7 +17,9 @@
 Image-flash provisioning toolkit for bare-metal and virtual targets.
 Writes pre-built ("cooked") system images onto target disks - locally
 from a USB live stick or remotely over PXE - and configures the
-deployed system on first boot via cloud-init or CIJOE tasks.
+image. First-boot bring-up (users, network, packages) is baked into
+the image upstream by the cooker; post-boot config (when the MAC is
+managed by bty-web) runs as a CIJOE task over SSH.
 
 ```{toctree}
 :maxdepth: 2

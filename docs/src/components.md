@@ -193,17 +193,36 @@ GMKtec mini-PCs. The same artifact also boots as a VM disk.
 `server-rpi` targets the 64-bit Raspberry Pis (4 and 5); both boot the
 SD-card image natively.
 
-## CIJOE provisioning modes
+## CIJOE provisioning (post-boot only)
 
-`cijoe` runs in one of two execution modes depending on the deployment
-vehicle:
+After the target first-boots into the freshly-flashed OS,
+`bty-web` SSHes in and runs a CIJOE task against the running
+machine. v0.7.39 narrowed bty's CIJOE surface to this
+server-driven mode only -- offline image-mounting is the image
+cooker's job.
 
-- **Offline (USB live).** The task runs from the live environment
-  after the flash, against the freshly-written filesystem (mount, edit,
-  unmount), before the target reboots. Customisation is constrained to
-  what is possible by manipulating the filesystem from the outside.
-- **Online (PXE / server).** After the target first-boots into its own
-  OS, `bty-web` triggers a CIJOE task against the running machine
-  and records the post-task state as that machine's known-good
-  baseline. The server - not the image - becomes the source of truth
-  for "what this box is supposed to look like."
+**Transport config layering.** bty-web always synthesises a
+`transport.toml` with `[cijoe.transport.ssh]` pinned at the
+target's `last_seen_ip` + the operator-supplied SSH key at
+`/var/lib/bty/keys/id_ed25519`. The operator can drop a second
+config file at `/var/lib/bty/cijoe-user-config.toml`
+(overridable via `BTY_CIJOE_USER_CONFIG`) with task-specific
+settings, additional named transports, environment variables,
+etc. cijoe is invoked as:
+
+```
+cijoe <task.yaml> --config <user-config> --config <transport.toml> --monitor
+```
+
+The user config loads first; bty-web's transport TOML loads
+LAST and wins on conflicts -- so the SSH transport that targets
+the right machine is always under bty-web's control. The
+operator can layer extra named transports / settings on top
+without redirecting commands to the wrong host.
+
+**Cancelable.** The operator can DELETE `/tasks/{mac}` from the
+UI's "Cancel running task" button; bty-web flips a
+`threading.Event` and `Popen.terminate()`s the cijoe subprocess.
+Status surfaces via `last_task_status` and the SSE
+machines-update channel; lifecycle events land in the audit log
+(`/ui/events`).

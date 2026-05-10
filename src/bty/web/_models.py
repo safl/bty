@@ -21,8 +21,26 @@ MAC_PATTERN = r"^[0-9a-f]{2}(:[0-9a-f]{2}){5}$"
 # - ``cijoe-online`` - online cijoe task run from bty-web after target boots
 #                      (milestone 15). Triggered by POST /pxe/{mac}/done; cijoe's
 #                      transport-retry handles waiting for SSH to come up.
-PROVISIONING_MODES = ("none", "cloud-init", "cijoe", "cijoe-online")
-PROVISIONING_PATTERN = r"^(none|cloud-init|cijoe|cijoe-online)$"
+# Provisioning modes. v0.7.39 narrowed bty's surface: bty is a
+# flasher, not a provisioner. First-boot configuration (users,
+# network, packages, hostnames) is the image cooker's job -- bake
+# cloud-init / kickstart / preseed into the image upstream. bty
+# only handles:
+#
+# - ``none``         -- write the bytes, reboot. The default.
+# - ``cijoe-online`` -- bty-web only. After the target first-boots
+#                       into its own OS, ``bty-web`` SSHes in (via
+#                       the operator-supplied key) and runs a
+#                       ``cijoe`` task against the running system.
+#                       Requires a managed MAC (server-side machine
+#                       record) so the ``cijoe_task_ref`` and
+#                       ``last_seen_ip`` are known.
+#
+# The pre-v0.7.39 ``cloud-init`` and ``cijoe`` (offline) modes were
+# image-creation territory; they're gone. Existing state.db rows
+# carrying those values are migrated to ``none`` by ``init_db``.
+PROVISIONING_MODES = ("none", "cijoe-online")
+PROVISIONING_PATTERN = r"^(none|cijoe-online)$"
 
 # Status of the most recent online-cijoe task run. v0.7.37 promoted
 # TaskRunner to a cancelable TaskManager that mirrors the other
@@ -123,7 +141,13 @@ class Machine(BaseModel):
 
     mac: str = Field(..., pattern=MAC_PATTERN)
     image_sha256: str | None = None
-    provisioning_mode: str = Field(default="none", pattern=PROVISIONING_PATTERN)
+    # Read-side: no pattern. v0.7.39 narrowed the write-side
+    # (MachineUpsert) to ``{none, cijoe-online}`` but didn't
+    # migrate state.db, so older rows may carry the legacy
+    # ``cloud-init`` / ``cijoe`` values. Those still pass through
+    # GET unchanged; the operator's next PUT validates against
+    # the new pattern and trims to the supported set.
+    provisioning_mode: str = "none"
     hostname: str | None = None
     cijoe_task_ref: str | None = None
     last_known_good: dict[str, Any] | None = None

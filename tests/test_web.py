@@ -176,7 +176,10 @@ def test_machine_crud_round_trip(app_client: TestClient) -> None:
     mac = "aa:bb:cc:dd:ee:ff"
     body = {
         "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-        "provisioning_mode": "cloud-init",
+        # v0.7.39 narrowed provisioning modes; ``cijoe-online`` is
+        # the canonical "machine has post-boot config attached"
+        # value (replaces the prior ``cloud-init`` test seed).
+        "provisioning_mode": "cijoe-online",
         "hostname": "bty-test-01",
     }
 
@@ -189,7 +192,7 @@ def test_machine_crud_round_trip(app_client: TestClient) -> None:
         created["image_sha256"]
         == "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
     )
-    assert created["provisioning_mode"] == "cloud-init"
+    assert created["provisioning_mode"] == "cijoe-online"
     assert created["hostname"] == "bty-test-01"
 
     # Read back
@@ -313,7 +316,7 @@ def test_pxe_does_not_overwrite_assignment(app_client: TestClient) -> None:
         f"/machines/{mac}",
         json={
             "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            "provisioning_mode": "cloud-init",
+            "provisioning_mode": "cijoe-online",
         },
         cookies=AUTH,
     )
@@ -328,7 +331,7 @@ def test_pxe_does_not_overwrite_assignment(app_client: TestClient) -> None:
     assert (
         after["image_sha256"] == "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
     )  # untouched
-    assert after["provisioning_mode"] == "cloud-init"
+    assert after["provisioning_mode"] == "cijoe-online"
     assert after["last_seen_at"] is not None
     # discovered_at is set on first /pxe contact even for PUT-created rows
     assert after["discovered_at"] is not None
@@ -785,7 +788,7 @@ def test_pxe_flash_policy_returns_chain_with_args(app_client: TestClient) -> Non
         "/machines/aa:bb:cc:dd:ee:ff",
         json={
             "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            "provisioning_mode": "cloud-init",
+            "provisioning_mode": "cijoe-online",
             "boot_policy": "flash",
         },
         cookies=AUTH,
@@ -815,7 +818,7 @@ def test_pxe_flash_policy_returns_chain_with_args(app_client: TestClient) -> Non
         "bty.image_url=${bty-base}/images/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef/"
         in body
     )
-    assert "bty.provisioning=cloud-init" in body
+    assert "bty.provisioning=cijoe-online" in body
 
 
 def test_pxe_tui_policy_returns_interactive_chain(app_client: TestClient) -> None:

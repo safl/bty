@@ -78,6 +78,13 @@ DEFAULT_TIMEOUT_SECONDS = 30 * 60  # 30 min - covers a leisurely first boot.
 DEFAULT_SSH_KEY = Path("/var/lib/bty/keys/id_ed25519")
 DEFAULT_TASKS_DIR = Path("/var/lib/bty/tasks")
 DEFAULT_CIJOE_BIN = str(Path(sys.executable).parent / "cijoe")
+# Optional operator-supplied cijoe config that gets passed alongside
+# bty-web's auto-generated transport TOML. cijoe's ``--config`` flag
+# accepts multiple invocations and merges the result; bty-web puts
+# its transport config LAST so the SSH transport always points at
+# the right machine even if the operator's config tries to redefine
+# ``[cijoe.transport.ssh]``. ``BTY_CIJOE_USER_CONFIG`` overrides.
+DEFAULT_USER_CONFIG_PATH = Path("/var/lib/bty/cijoe-user-config.toml")
 
 # Grace period after ``terminate()`` before falling back to ``kill``.
 # cijoe's --monitor mode forwards the signal to its own children; a
@@ -151,6 +158,7 @@ class TaskManager:
         ssh_username: str = "root",
         timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
         cijoe_bin: str = DEFAULT_CIJOE_BIN,
+        user_config_path: Path | None = DEFAULT_USER_CONFIG_PATH,
     ) -> None:
         self._state_path = state_path
         self._publish = publish_machines_changed
@@ -159,6 +167,11 @@ class TaskManager:
         self._ssh_username = ssh_username
         self._timeout_seconds = timeout_seconds
         self._cijoe_bin = cijoe_bin
+        # Resolved at run time (not construction): the operator may
+        # drop / remove the config file while bty-web is running,
+        # and we want changes to land on the next task without
+        # requiring a restart.
+        self._user_config_path = user_config_path
         self._states: dict[str, TaskState] = {}
         # ``threading.Lock`` rather than ``asyncio.Lock`` because the
         # consumers are worker threads; FastAPI handlers also touch
@@ -294,13 +307,17 @@ class TaskManager:
         config_path = run_dir / "transport.toml"
         config_path.write_text(self._render_config(state.target_ip))
 
-        cmd = [
-            self._cijoe_bin,
-            str(state.task_ref),
-            "--config",
-            str(config_path),
-            "--monitor",
-        ]
+        # cijoe's ``--config`` accepts multiple files; the
+        # operator's config (if any) goes FIRST, bty-web's
+        # transport TOML LAST. cijoe merges with last-wins
+        # semantics, so the SSH transport (host + key + user)
+        # always points at the right machine even if the
+        # operator's config tries to redefine
+        # ``[cijoe.transport.ssh]``.
+        cmd = [self._cijoe_bin, str(state.task_ref)]
+        if self._user_config_path is not None and self._user_config_path.is_file():
+            cmd.extend(["--config", str(self._user_config_path)])
+        cmd.extend(["--config", str(config_path), "--monitor"])
         try:
             proc = subprocess.Popen(
                 cmd,

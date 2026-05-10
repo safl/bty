@@ -156,44 +156,14 @@ sudo bty flash --image /var/lib/bty/images/my-image.qcow2 \
 the explicit consent token for the destructive write - `bty flash`
 refuses to do anything without one or the other.
 
-### Cloud-init provisioning
+### Provisioning?
 
-Seed cloud-init's NoCloud datasource onto the freshly-flashed disk
-so the target self-configures on first boot:
-
-```bash
-sudo bty flash --image /var/lib/bty/images/debian.qcow2 \
-               --target /dev/sdX \
-               --provision cloud-init \
-               --user-data ./userdata.yaml \
-               --yes
-```
-
-`bty` mounts the cloud-init-enabled rootfs partition on the target,
-drops `user-data` (and a synthesised `meta-data` if `--meta-data` is
-not supplied) under `/var/lib/cloud/seed/nocloud-net/`, and unmounts.
-On first boot the OS picks up the seed via cloud-init's NoCloud
-datasource.
-
-### CIJOE provisioning (offline)
-
-Run a cijoe task against the freshly-flashed filesystem before
-the target reboots:
-
-```bash
-sudo bty flash --image /var/lib/bty/images/debian.qcow2 \
-               --target /dev/sdX \
-               --provision cijoe \
-               --cijoe-task ./tweaks.yaml \
-               --yes
-```
-
-`bty` mounts the largest partition on the target, exports
-`BTY_ROOTFS` pointing at the mount, then runs the supplied cijoe
-task. The task's steps reference `$BTY_ROOTFS` to drop config
-files, install seed credentials, etc. Requires `cijoe` on `PATH`
-(install via `pipx install cijoe`). The legacy
-``--cijoe-workflow`` spelling is accepted as an alias.
+bty doesn't do offline provisioning. First-boot bring-up (users,
+network, packages, hostnames) gets baked into the image by the
+cooker upstream -- bty just writes the bytes. For post-boot
+configuration on PXE-managed machines, see the bty-web flow's
+``cijoe-online`` mode (covered in the [components](components.md)
+chapter).
 
 Interactive flashing via the TUI:
 
