@@ -119,6 +119,7 @@ def fetch_release(
     base_url: str | None = None,
     progress: FetchProgressCallback | None = None,
     cancel: FetchCancelCheck | None = None,
+    on_artefact_start: Callable[[str], None] | None = None,
 ) -> FetchResult:
     """Download all expected artifacts for ``tag`` into ``boot_dir``.
 
@@ -132,6 +133,13 @@ def fetch_release(
     is called per-chunk during each artefact's stream, and cancel
     is polled so the operator's "Cancel" button lands within
     seconds.
+
+    ``on_artefact_start(name)`` is called once at the start of each
+    individual artefact's stream so the manager can update the
+    ``state.artefact`` field for the live UI. Without this hook
+    the /ui/boot page rendered ``"... - N MiB / M MiB"`` because
+    the artefact field stayed None across the whole multi-file
+    fetch.
     """
     repo = repo or os.environ.get("BTY_BOOT_RELEASE_REPO") or DEFAULT_REPO
     if base_url is None:
@@ -141,11 +149,20 @@ def fetch_release(
             base_url = f"https://github.com/{repo}/releases/download/{tag}"
     base_url = base_url.rstrip("/")
 
+    # The tempdir lives *inside* ``boot_dir`` (rather than the system
+    # default ``/tmp``) so the final ``Path.replace`` is a same-
+    # filesystem rename. Crossing mounts (the prod layout has
+    # ``/var/lib/bty`` on its own volume on cooked appliances)
+    # raises ``OSError 18 Invalid cross-device link`` from the
+    # rename syscall.
+    boot_dir.mkdir(parents=True, exist_ok=True)
     total = 0
-    with tempfile.TemporaryDirectory(prefix="bty-boot-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="bty-boot-", dir=boot_dir) as tmp:
         tmp_path = Path(tmp)
         for name in ALL_NAMES:
             url = f"{base_url}/{name}"
+            if on_artefact_start is not None:
+                on_artefact_start(name)
             try:
                 total += _stream(url, tmp_path / name, progress=progress, cancel=cancel)
             except FetchCancelled:
@@ -163,8 +180,8 @@ def fetch_release(
             raise FetchError(str(exc)) from exc
 
         # Atomic install: rename each artifact into the live boot_dir
-        # only after the manifest has verified.
-        boot_dir.mkdir(parents=True, exist_ok=True)
+        # only after the manifest has verified. Same-filesystem
+        # guaranteed by the ``dir=boot_dir`` above.
         for name in ALL_NAMES:
             (tmp_path / name).replace(boot_dir / name)
 

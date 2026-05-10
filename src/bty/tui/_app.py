@@ -775,6 +775,21 @@ class FlashStatusScreen(ModalScreen[bool]):
         log = self.query_one(RichLog)
         log.write(message)
         self._result = success
+        # Stop the progress bar's animation. When ``total`` was
+        # never set (image lacked a known virtual_size_bytes, or
+        # the flash failed before the ``started`` event), the bar
+        # stays in indeterminate mode and continues to bounce
+        # back-and-forth even though the flash is done. Force the
+        # bar to a finished determinate state so it freezes at
+        # 100% (or 0% on failure).
+        try:
+            bar = self.query_one("#flash-progress-bar", ProgressBar)
+            if bar.total is None:
+                bar.update(total=1, progress=(1 if success else 0))
+            elif success:
+                bar.update(progress=bar.total)
+        except Exception:  # pragma: no cover - defensive
+            pass
         close_btn = self.query_one("#close", Button)
         close_btn.disabled = False
         close_btn.focus()

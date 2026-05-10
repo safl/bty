@@ -154,6 +154,15 @@ class ReleaseFetchManager(_BaseAsyncManager[ReleaseFetchState]):
         def _cancel() -> bool:
             return cancel_event.is_set()
 
+        def _on_artefact_start(name: str) -> None:
+            # Reset bytes counters at each new artefact so the
+            # /ui/boot live UI ticks per-file rather than carrying
+            # the previous file's terminal value into the next
+            # file's "0 / total" initial render.
+            state.artefact = name
+            state.bytes_done = 0
+            state.bytes_total = None
+
         try:
             result = await asyncio.to_thread(
                 _releases.fetch_release,
@@ -161,6 +170,7 @@ class ReleaseFetchManager(_BaseAsyncManager[ReleaseFetchState]):
                 tag=state.tag,
                 progress=_progress,
                 cancel=_cancel,
+                on_artefact_start=_on_artefact_start,
             )
             final_status = "completed"
             error = None
