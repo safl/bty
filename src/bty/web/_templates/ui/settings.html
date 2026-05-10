@@ -92,4 +92,12 @@
         </p>
     </div>
 </div>
+
+{# Recent activity for settings: PXE activate / activate-failed
+   via the per-subject events card. #}
+{% with events=settings_events,
+        title="Recent settings activity",
+        link_to_full="/ui/events?subject_kind=settings" %}
+{% include "ui/_events_card.html" %}
+{% endwith %}
 {% endblock %}

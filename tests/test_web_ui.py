@@ -177,6 +177,65 @@ def test_ui_dashboard_subscribes_to_sse_for_live_counts(client: TestClient) -> N
     assert 'sse-swap="dashboard-counts"' in body
 
 
+def test_ui_boot_page_shows_recent_activity_card(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The /ui/boot page reuses ``_events_card.html`` to show the
+    last 10 boot.* events (release fetches + fetch failures).
+    Trigger a successful sync fetch first so a row exists."""
+    _login(client)
+
+    def fake_fetch(boot_dir, *_a, **_kw):  # type: ignore[no-untyped-def]
+        from bty.web._releases import FetchResult
+
+        return FetchResult(base_url="https://test.invalid/x", artifacts=("a",), total_bytes=42)
+
+    monkeypatch.setattr("bty.web._releases.fetch_release", fake_fetch)
+    client.post("/ui/boot/fetch-release", data={"tag": "v0.0.1"})
+    r = client.get("/ui/boot")
+    assert r.status_code == 200
+    body = r.text
+    assert "Recent boot-artefact activity" in body
+    assert "boot.release.fetched" in body
+
+
+def test_ui_machines_filter_assigned_excludes_discovered(client: TestClient) -> None:
+    """``?filter=assigned`` is the symmetric pivot for
+    ``?filter=discovered``: only machines bound to an image."""
+    _login(client)
+    client.get("/pxe/aa:bb:cc:dd:ee:03")  # discovered (no image)
+    client.put(
+        "/machines/aa:bb:cc:dd:ee:04",
+        json={
+            "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        },
+    )
+    r = client.get("/ui/machines?filter=assigned")
+    assert r.status_code == 200
+    body = r.text
+    assert "aa:bb:cc:dd:ee:04" in body
+    assert "aa:bb:cc:dd:ee:03" not in body
+    assert "filter:" in body
+
+
+def test_ui_machines_filter_unrecognised_value_falls_back_to_full_list(
+    client: TestClient,
+) -> None:
+    """An unrecognised ``?filter=foo`` shows the full list and
+    suppresses the active-filter banner -- defensive so a typo'd
+    URL doesn't render a confusing "filter: foo" chip with no
+    filtering applied."""
+    _login(client)
+    client.get("/pxe/aa:bb:cc:dd:ee:05")
+    r = client.get("/ui/machines?filter=garbage")
+    assert r.status_code == 200
+    body = r.text
+    assert "aa:bb:cc:dd:ee:05" in body
+    assert "filter:" not in body
+    # SSE wiring restored when no filter active.
+    assert 'sse-connect="/events/machines"' in body
+
+
 def test_ui_machines_filter_discovered_excludes_assigned(client: TestClient) -> None:
     """``?filter=discovered`` (the dashboard counter card link)
     only shows machines without an assigned image, and drops the

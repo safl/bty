@@ -271,4 +271,12 @@
     startPolling();
 })();
 </script>
+
+{# Recent activity for boot artefacts: release fetches +
+   fetch failures via the per-subject events card. #}
+{% with events=boot_events,
+        title="Recent boot-artefact activity",
+        link_to_full="/ui/events?subject_kind=boot" %}
+{% include "ui/_events_card.html" %}
+{% endwith %}
 {% endblock %}

@@ -171,7 +171,7 @@
     </div>
     <div class="card-footer d-flex justify-content-between small">
         <span class="text-muted">
-            Showing {{ events|length }} event{{ "s" if events|length != 1 else "" }}.
+            Showing {{ events|length }} event{{ "s" if events|length != 1 else "" }}{% if kind or subject_kind or subject_id or actor or source_ip %} (filtered){% endif %}.
         </span>
         {% if older_url %}
         <a href="{{ older_url }}" class="text-decoration-none">

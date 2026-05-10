@@ -188,17 +188,23 @@ def register_ui_routes(
         # ``?filter=discovered`` -- only unassigned machines (no
         # image_sha256 yet). Powered by the dashboard's
         # "Unassigned (discovered)" counter card so clicking it
-        # lands on a pre-filtered list. Anything else (no filter,
-        # ``?filter=`` empty, an unrecognised value) shows the
-        # full list.
+        # lands on a pre-filtered list. ``?filter=assigned`` --
+        # symmetric "operator-bound" view. Anything else (no
+        # filter, empty value, an unrecognised value) shows the
+        # full list and surfaces no active-filter banner.
         if filter == "discovered":
             sql = "SELECT * FROM machines WHERE image_sha256 IS NULL ORDER BY mac"
+            active_filter: str | None = filter
+        elif filter == "assigned":
+            sql = "SELECT * FROM machines WHERE image_sha256 IS NOT NULL ORDER BY mac"
+            active_filter = filter
         else:
             sql = "SELECT * FROM machines ORDER BY mac"
+            active_filter = None
         with _db.open_db(state_path) as conn:
             rows = conn.execute(sql).fetchall()
         machines = [_row_to_dict(r) for r in rows]
-        return render("ui/machines.html", request, machines=machines, active_filter=filter)
+        return render("ui/machines.html", request, machines=machines, active_filter=active_filter)
 
     @app.get(
         "/ui/machines/{mac}",
@@ -495,12 +501,17 @@ def register_ui_routes(
         flash: str | None = None,
         flash_kind: str | None = None,
     ) -> HTMLResponse:
+        # Recent activity for boot artefacts: release fetches /
+        # fetch failures.
+        with _db.open_db(state_path) as conn:
+            boot_events = _events_log.list_events(conn, subject_kind="boot", limit=10)
         return render(
             "ui/boot.html",
             request,
             boot_root=str(boot_root),
             artifacts=_releases.inspect_boot_dir(boot_root),
             release_repo=os.environ.get("BTY_BOOT_RELEASE_REPO") or _releases.DEFAULT_REPO,
+            boot_events=boot_events,
             flash=flash,
             flash_kind=flash_kind,
         )
@@ -600,12 +611,17 @@ def register_ui_routes(
         flash: str | None = None,
         flash_kind: str | None = None,
     ) -> HTMLResponse:
+        # Recent activity for settings: PXE activate / activate-
+        # failed.
+        with _db.open_db(state_path) as conn:
+            settings_events = _events_log.list_events(conn, subject_kind="settings", limit=10)
         return render(
             "ui/settings.html",
             request,
             interfaces=_sysconfig.list_interfaces(),
             pxe=_sysconfig.pxe_active(),
             new_token=new_token,
+            settings_events=settings_events,
             flash=flash,
             flash_kind=flash_kind,
         )
