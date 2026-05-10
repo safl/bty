@@ -35,7 +35,7 @@ import bty
 from bty import images as bty_images
 from bty.web import _db, _releases, _sysconfig
 from bty.web._auth import SESSION_AUTHED_KEY
-from bty.web._models import BOOT_POLICIES, PROVISIONING_MODES
+from bty.web._models import BOOT_POLICIES, PROVISIONING_MODES, CatalogEntryAdd
 
 
 class NotAuthenticated(Exception):
@@ -313,24 +313,62 @@ def register_ui_routes(
         ``POST /catalog/entries``: optional sha_url resolves to a
         sha256, optional ``Content-Length`` HEAD probes size, the
         row lands in ``catalog_entries``. Operator-friendly empty-
-        string in ``sha_url`` is treated as None."""
+        string in ``sha_url`` is treated as None.
+
+        Validation runs through the same :class:`CatalogEntryAdd`
+        Pydantic model the JSON endpoint uses, so the form rejects
+        ``ftp://`` / host-less URLs / non-http schemes identically
+        -- previously the form path skipped pattern validation
+        entirely and would land arbitrary strings in the DB.
+        """
         from bty import catalog as _catalog
         from bty.web._app import _head_content_length  # local import: avoid cycle at module load
 
         cleaned_sha_url = sha_url.strip() or None
+        # Apply the same Pydantic validation the JSON API uses
+        # (URL scheme + host pattern, both fields). Pydantic
+        # raises a ``ValidationError`` (subclass of ``ValueError``)
+        # if a pattern doesn't match.
+        try:
+            validated = CatalogEntryAdd(image_url=image_url, sha_url=cleaned_sha_url)
+        except ValueError as exc:
+            return RedirectResponse(
+                "/ui/images?error=" + urllib.parse.quote(f"validation failed: {exc}", safe=""),
+                status_code=status.HTTP_303_SEE_OTHER,
+            )
+        image_url = validated.image_url
+        cleaned_sha_url = validated.sha_url
+
+        # Filename-required: same rule as the JSON ``add_catalog_entry``
+        # endpoint (v0.7.29). ``https://example.com`` and
+        # ``https://example.com/`` produce empty ``Path.name`` and
+        # leave the catalog row with no useful display label.
+        name = Path(urllib.parse.urlparse(image_url).path).name
+        if not name:
+            return RedirectResponse(
+                "/ui/images?error="
+                + urllib.parse.quote(
+                    "image_url must end in a filename component "
+                    "(e.g. https://example.com/path/foo.img.gz)",
+                    safe="",
+                ),
+                status_code=status.HTTP_303_SEE_OTHER,
+            )
+
         sha256: str | None = None
         if cleaned_sha_url is not None:
             try:
                 sha256 = _catalog.fetch_sha256_for_url(image_url, cleaned_sha_url)
             except _catalog.CatalogError as exc:
-                # On validation error, surface back on /ui/images via
-                # a flash query-param the template renders.
+                # ``urllib.parse.quote`` so the redirect URL is
+                # well-formed regardless of the exception text
+                # (which can carry spaces, special chars, or even
+                # newlines if upstream's reason phrase is weird).
                 return RedirectResponse(
-                    f"/ui/images?error=sha+resolve+failed%3A+{exc}",
+                    "/ui/images?error=" + urllib.parse.quote(f"sha resolve failed: {exc}", safe=""),
                     status_code=status.HTTP_303_SEE_OTHER,
                 )
 
-        name = Path(urllib.parse.urlparse(image_url).path).name or image_url
         fmt = bty_images.detect_format(Path(name))
         size_bytes = _head_content_length(image_url)
         now = datetime.now(UTC).isoformat()

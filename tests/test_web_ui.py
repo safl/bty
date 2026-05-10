@@ -213,6 +213,43 @@ def test_ui_machine_detail_404(client: TestClient) -> None:
     assert r.status_code == 404
 
 
+def test_ui_catalog_entry_form_rejects_bad_url(client: TestClient) -> None:
+    """The form-style endpoint at ``POST /ui/catalog/entries``
+    must apply the same Pydantic ``CatalogEntryAdd`` validation
+    as the JSON ``POST /catalog/entries`` endpoint -- the form
+    used to skip pattern validation entirely, accepting
+    ``ftp://`` and host-less URLs that the API rejects.
+
+    On validation failure the form 303s back to /ui/images with
+    a URL-encoded ``?error=`` query param; the redirect must be
+    well-formed regardless of the exception text. We follow the
+    redirect manually and assert the URL shape."""
+    _login(client)
+    r = client.post(
+        "/ui/catalog/entries",
+        data={"image_url": "ftp://example.invalid/foo.img.gz", "sha_url": ""},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    location = r.headers["location"]
+    assert location.startswith("/ui/images?error="), location
+    # URL-encoded payload: spaces and special chars become %xx,
+    # so a raw space would be a sign of the un-quoted bug.
+    assert " " not in location
+
+    # Bare-host URL (no filename) should also bounce with a
+    # ``filename component`` flash.
+    r = client.post(
+        "/ui/catalog/entries",
+        data={"image_url": "https://example.invalid", "sha_url": ""},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    location = r.headers["location"]
+    assert location.startswith("/ui/images?error="), location
+    assert "filename%20component" in location or "filename+component" in location
+
+
 def test_ui_machine_upsert_via_form(client: TestClient) -> None:
     _login(client)
     r = client.post(
