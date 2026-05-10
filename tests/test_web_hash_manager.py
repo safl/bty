@@ -162,6 +162,52 @@ def test_run_hash_cancel_with_concurrent_oserror_marks_cancelled(tmp_path: Path)
     _run(_drive())
 
 
+def test_hash_failed_event_is_recorded(tmp_path: Path) -> None:
+    """A genuinely-failed hash (IO error, not operator cancel)
+    must land an ``image.hash_failed`` event in the audit log
+    so /ui/events shows the operator "this file tried to import
+    and crashed" without polling /catalog/hashes. The matching
+    success path emits ``image.hashed``; symmetric coverage."""
+    import unittest.mock
+
+    from bty import images as _images
+    from bty.web import _db
+    from bty.web._events_log import list_events
+    from bty.web._hash import HashManager, HashState
+
+    state_db = tmp_path / "state.db"
+    _db.init_db(state_db)
+    target = tmp_path / "demo.img"
+    target.write_bytes(b"x" * 64)
+
+    async def _drive() -> None:
+        mgr = HashManager()
+        mgr.start(tmp_path, state_path=state_db)
+        try:
+            state = HashState(name="demo.img", path=str(target), bytes_total=64)
+
+            def boom(*_a: object, **_kw: object) -> str:
+                raise OSError("disk on fire")
+
+            with unittest.mock.patch.object(_images, "ensure_sha256", boom):
+                await mgr._run_one(state)
+            assert state.status == "failed"
+        finally:
+            await mgr.stop()
+
+    _run(_drive())
+
+    with _db.open_db(state_db) as conn:
+        rows = list_events(conn, kind="image.hash_failed")
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.subject_kind == "image"
+    assert row.subject_id == "demo.img"
+    assert row.actor == "system"
+    assert row.details is not None
+    assert "disk on fire" in row.details["error"]
+
+
 def test_hash_state_to_dict_omits_unpicklable_event() -> None:
     """``HashState.to_dict`` must JSON-serialise without the
     ``threading.Event`` slipping through (which would explode

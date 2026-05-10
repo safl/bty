@@ -1172,6 +1172,29 @@ def test_events_carry_source_ip(app_client: TestClient) -> None:
     assert upsert["source_ip"] == "testclient"
 
 
+def test_events_filter_by_actor(app_client: TestClient) -> None:
+    """``GET /events?actor=operator`` returns only operator-driven
+    rows; ``actor=pxe-client`` only PXE check-ins. Powers the
+    /ui/events actor dropdown for triaging "show me what
+    operators did" vs "show me what targets phoned home"."""
+    mac = "aa:bb:cc:dd:ee:fb"
+    app_client.get(f"/pxe/{mac}")  # pxe-client: machine.discovered
+    app_client.put(  # operator: machine.upserted
+        f"/machines/{mac}",
+        json={"boot_policy": "local"},
+        cookies=AUTH,
+    )
+    r = app_client.get("/events", params={"actor": "operator"}, cookies=AUTH)
+    events = r.json()["events"]
+    assert events
+    assert all(e["actor"] == "operator" for e in events)
+
+    r = app_client.get("/events", params={"actor": "pxe-client"}, cookies=AUTH)
+    events = r.json()["events"]
+    assert events
+    assert all(e["actor"] == "pxe-client" for e in events)
+
+
 def test_events_filter_by_source_ip(app_client: TestClient) -> None:
     """``GET /events?source_ip=<ip>`` returns only rows recorded
     with that IP -- the API mirror of the /ui/events filter pivot."""
@@ -1181,6 +1204,37 @@ def test_events_filter_by_source_ip(app_client: TestClient) -> None:
     events = r.json()["events"]
     assert events  # at least one
     assert all(e["source_ip"] == "testclient" for e in events)
+
+
+def test_settings_pxe_activate_failure_logs_event(app_client: TestClient) -> None:
+    """A failed PXE activation must land a
+    ``settings.pxe.activate_failed`` event so the audit trail is
+    symmetric with the success path. Posting an invalid interface
+    name (regex-rejected before the helper is even shelled out)
+    is the deterministic failure trigger that doesn't depend on
+    sudo / helper presence."""
+    r = app_client.post(
+        "/ui/settings/pxe-activate",
+        data={"interface": "!!!", "subnet": "192.168.1.0/24"},
+        cookies=AUTH,
+        follow_redirects=False,
+    )
+    # Settings page re-renders with the red flash.
+    assert r.status_code == 200
+    r = app_client.get(
+        "/events",
+        params={"kind": "settings.pxe.activate_failed"},
+        cookies=AUTH,
+    )
+    assert r.status_code == 200
+    events = r.json()["events"]
+    assert len(events) == 1
+    row = events[0]
+    assert row["actor"] == "operator"
+    assert row["subject_kind"] == "settings"
+    assert row["subject_id"] == "pxe"
+    assert row["details"] is not None
+    assert "invalid interface name" in row["details"]["error"]
 
 
 def test_events_filter_by_subject_id(app_client: TestClient) -> None:
@@ -1226,6 +1280,48 @@ def test_ui_events_page_renders_filtered(app_client: TestClient) -> None:
     body = r.text
     assert "machine.discovered" in body
     assert "aa:bb:cc:dd:ee:ff" in body
+
+
+def test_ui_events_page_renders_failure_with_danger_badge(app_client: TestClient) -> None:
+    """Failure-kind events (anything ending ``.failed`` or
+    ``_failed``) render with the ``bg-danger`` Bootstrap badge so
+    they pop in a long log instead of blending in with their
+    success siblings (``image.hashed`` vs ``image.hash_failed``,
+    same family / different colour). Guards the
+    failed-kind branch in the events / per-machine templates
+    against a future refactor of the badge map."""
+    # Trigger a settings.pxe.activate_failed event with a regex-
+    # rejected interface name (deterministic, no helper needed).
+    app_client.post(
+        "/ui/settings/pxe-activate",
+        data={"interface": "!!!", "subnet": "10.0.0.0/24"},
+        cookies=AUTH,
+        follow_redirects=False,
+    )
+    r = app_client.get(
+        "/ui/events",
+        params={"kind": "settings.pxe.activate_failed"},
+        cookies=AUTH,
+    )
+    assert r.status_code == 200
+    body = r.text
+    assert "settings.pxe.activate_failed" in body
+    # Danger badge appears in the rendered row.
+    assert "bg-danger" in body
+
+
+def test_ui_events_page_shows_source_ip_column(app_client: TestClient) -> None:
+    """The ``Source IP`` column is in the table header and populated
+    cells render as click-pivot links to ``/ui/events?source_ip=...``
+    so the operator can drill into a single client's activity."""
+    app_client.get("/pxe/aa:bb:cc:dd:ee:fc")
+    r = app_client.get("/ui/events", cookies=AUTH)
+    assert r.status_code == 200
+    body = r.text
+    # Column header.
+    assert "Source IP" in body
+    # Click-pivot link with the test client's host.
+    assert "/ui/events?source_ip=testclient" in body
 
 
 # ---------- /boot and /images file serving --------------------
@@ -1713,6 +1809,50 @@ def test_release_fetch_manager_run_fetch_cancel_overrides_fetch_error(
             await mgr.stop()
 
     asyncio.run(go())
+
+
+def test_release_fetch_manager_failure_logs_event(tmp_path: Path) -> None:
+    """A genuinely-failed fetch (urllib error, not operator cancel)
+    must land a ``boot.release.fetch_failed`` event in the audit
+    log. Symmetric with the success path's ``boot.release.fetched``
+    so the operator can see "this fetch tried + crashed" via
+    /ui/events instead of polling /boot/releases."""
+    import asyncio
+    import unittest.mock
+
+    from bty.web import _db, _release_mgr, _releases
+    from bty.web._events_log import list_events
+
+    state_db = tmp_path / "state.db"
+    _db.init_db(state_db)
+    boot_root = tmp_path / "boot"
+
+    async def go() -> None:
+        mgr = _release_mgr.ReleaseFetchManager()
+        mgr.start(boot_root, state_path=state_db)
+        try:
+            state = _release_mgr.ReleaseFetchState(tag="v9.9.9")
+
+            def boom(*_a: object, **_kw: object) -> None:
+                raise _releases.FetchError("upstream 500")
+
+            with unittest.mock.patch.object(_releases, "fetch_release", boom):
+                await mgr._run_one(state)
+            assert state.status == "failed"
+        finally:
+            await mgr.stop()
+
+    asyncio.run(go())
+
+    with _db.open_db(state_db) as conn:
+        rows = list_events(conn, kind="boot.release.fetch_failed")
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.subject_kind == "boot"
+    assert row.subject_id == "v9.9.9"
+    assert row.actor == "system"
+    assert row.details is not None
+    assert "upstream 500" in row.details["error"]
 
 
 def test_release_fetch_manager_enqueue_rejects_malformed_tag() -> None:

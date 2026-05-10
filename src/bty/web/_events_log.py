@@ -24,13 +24,15 @@ Conventions:
   panel-name. Either may be ``None`` for global events
   (``settings.pxe.activated``).
 - ``actor`` distinguishes operator-initiated changes from
-  system-initiated ones (auto-discovery, hash completion). Free-
-  form string; ``"operator"``, ``"system"``, ``"pxe-client"`` are
-  the conventional values.
+  system-initiated ones (auto-discovery, hash completion).
+  See :data:`KNOWN_ACTORS` for the catalogue of conventional
+  values; ``record`` does not enforce the set so an unrecognised
+  actor still flows through, it just won't appear in the
+  /ui/events filter dropdown.
 - ``details`` is an optional JSON blob with kind-specific extras
-  (return code, error text, etc.) -- not surfaced in the table
-  view but rendered as a collapsible <details> in the detail
-  view.
+  (return code, error text, etc.) -- not currently surfaced in
+  the UI table; the JSON ``GET /events`` API returns it so an
+  operator can drill in via curl / scripting if needed.
 
 Retention: append-only, no automatic trimming. The table is small
 (a few KB / event) so years of homelab activity fit without
@@ -118,6 +120,17 @@ KNOWN_SUBJECT_KINDS: tuple[str, ...] = (
     "settings",
 )
 
+# Catalogue of ``actor`` values the rest of bty-web emits. Powers
+# the /ui/events actor filter dropdown. Like the other catalogues
+# in this module it's a soft list -- callers may pass any string
+# and ``record`` won't reject it; the catalogue exists so the UI
+# has a fixed set of options to advertise.
+KNOWN_ACTORS: tuple[str, ...] = (
+    "operator",
+    "system",
+    "pxe-client",
+)
+
 
 @dataclass(frozen=True)
 class Event:
@@ -193,6 +206,7 @@ def list_events(
     kind: str | None = None,
     subject_kind: str | None = None,
     subject_id: str | None = None,
+    actor: str | None = None,
     source_ip: str | None = None,
     before_id: int | None = None,
     limit: int = 50,
@@ -227,6 +241,9 @@ def list_events(
     if subject_id is not None:
         where.append("subject_id = ?")
         args.append(subject_id)
+    if actor is not None:
+        where.append("actor = ?")
+        args.append(actor)
     if source_ip is not None:
         where.append("source_ip = ?")
         args.append(source_ip)

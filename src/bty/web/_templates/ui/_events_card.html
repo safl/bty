@@ -42,7 +42,11 @@
                             'boot': 'bg-warning text-dark',
                             'settings': 'bg-dark',
                         } %}
+                        {% if e.kind.endswith('.failed') or e.kind.endswith('_failed') %}
+                        {% set badge = 'bg-danger' %}
+                        {% else %}
                         {% set badge = badge_map.get(family, 'bg-light text-dark border') %}
+                        {% endif %}
                         <span class="badge {{ badge }} small">{{ e.kind }}</span>
                     </td>
                     <td><small>{{ e.summary }}</small></td>

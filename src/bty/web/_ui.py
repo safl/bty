@@ -35,7 +35,7 @@ import bty
 from bty import images as bty_images
 from bty.web import _db, _events_log, _releases, _sysconfig
 from bty.web._auth import SESSION_AUTHED_KEY
-from bty.web._events_log import KNOWN_EVENT_KINDS, KNOWN_SUBJECT_KINDS
+from bty.web._events_log import KNOWN_ACTORS, KNOWN_EVENT_KINDS, KNOWN_SUBJECT_KINDS
 from bty.web._events_log import normalize_ip as _normalize_ip
 from bty.web._models import (
     BOOT_POLICIES,
@@ -507,6 +507,7 @@ def register_ui_routes(
         kind: str | None = None,
         subject_kind: str | None = None,
         subject_id: str | None = None,
+        actor: str | None = None,
         source_ip: str | None = None,
         before_id: int | None = None,
     ) -> HTMLResponse:
@@ -527,6 +528,7 @@ def register_ui_routes(
         kind_norm = kind or None
         subject_kind_norm = subject_kind or None
         subject_id_norm = subject_id or None
+        actor_norm = actor or None
         source_ip_norm = source_ip or None
         with _db.open_db(state_path) as conn:
             events = _events_log.list_events(
@@ -534,6 +536,7 @@ def register_ui_routes(
                 kind=kind_norm,
                 subject_kind=subject_kind_norm,
                 subject_id=subject_id_norm,
+                actor=actor_norm,
                 source_ip=source_ip_norm,
                 before_id=before_id,
                 limit=page_size,
@@ -547,6 +550,7 @@ def register_ui_routes(
                 "kind": kind_norm or "",
                 "subject_kind": subject_kind_norm or "",
                 "subject_id": subject_id_norm or "",
+                "actor": actor_norm or "",
                 "source_ip": source_ip_norm or "",
                 "before_id": str(events[-1].id),
             }
@@ -559,9 +563,11 @@ def register_ui_routes(
             kind=kind_norm,
             subject_kind=subject_kind_norm,
             subject_id=subject_id_norm,
+            actor=actor_norm,
             source_ip=source_ip_norm,
             known_kinds=KNOWN_EVENT_KINDS,
             known_subject_kinds=KNOWN_SUBJECT_KINDS,
+            known_actors=KNOWN_ACTORS,
             older_url=older_url,
         )
 
@@ -686,7 +692,7 @@ def register_ui_routes(
             _events_log.record(
                 conn,
                 kind="boot.release.fetched",
-                summary=(f"Fetched {len(result.artifacts)} boot artifacts from {result.base_url}"),
+                summary=f"boot release {resolved_tag!r} fetched from {result.base_url}",
                 subject_kind="boot",
                 subject_id=resolved_tag,
                 actor="operator",
