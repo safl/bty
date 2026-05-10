@@ -148,6 +148,21 @@ def test_ui_dashboard_renders_after_login(client: TestClient) -> None:
     assert "Machines" in r.text
 
 
+def test_ui_dashboard_shows_recent_activity_after_a_pxe_event(client: TestClient) -> None:
+    """The dashboard re-uses ``_events_card.html`` to surface the
+    last 10 events. Trigger a PXE check-in so there's a row, then
+    assert the card title + the event kind appear in the dashboard
+    body. The full timeline link should also be present."""
+    _login(client)
+    client.get("/pxe/aa:bb:cc:dd:ee:fa")
+    r = client.get("/ui/dashboard")
+    assert r.status_code == 200
+    body = r.text
+    assert "Recent activity" in body
+    assert "machine.discovered" in body
+    assert 'href="/ui/events"' in body
+
+
 def test_ui_dashboard_subscribes_to_sse_for_live_counts(client: TestClient) -> None:
     """The counter cards need a ``sse-connect``/``sse-swap`` wrapper
     so the htmx-ext-sse client routes ``dashboard-counts`` events to
@@ -160,6 +175,33 @@ def test_ui_dashboard_subscribes_to_sse_for_live_counts(client: TestClient) -> N
     assert 'id="dashboard-counts"' in body
     assert 'sse-connect="/events/machines"' in body
     assert 'sse-swap="dashboard-counts"' in body
+
+
+def test_ui_machines_filter_discovered_excludes_assigned(client: TestClient) -> None:
+    """``?filter=discovered`` (the dashboard counter card link)
+    only shows machines without an assigned image, and drops the
+    SSE auto-refresh wiring so the filter isn't immediately
+    overwritten by the next ``machines-update`` event."""
+    _login(client)
+    # Discovered (auto-discovery, no image bound).
+    client.get("/pxe/aa:bb:cc:dd:ee:01")
+    # Assigned (operator PUT with image_sha256).
+    client.put(
+        "/machines/aa:bb:cc:dd:ee:02",
+        json={
+            "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        },
+    )
+
+    r = client.get("/ui/machines?filter=discovered")
+    assert r.status_code == 200
+    body = r.text
+    assert "aa:bb:cc:dd:ee:01" in body
+    assert "aa:bb:cc:dd:ee:02" not in body
+    # Active-filter banner; SSE wiring suppressed.
+    assert "filter:" in body
+    assert "show all" in body
+    assert 'sse-connect="/events/machines"' not in body
 
 
 def test_ui_machines_lists_known_records(client: TestClient) -> None:

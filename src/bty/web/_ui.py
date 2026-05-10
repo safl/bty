@@ -159,6 +159,12 @@ def register_ui_routes(
             discovered_count = conn.execute(
                 "SELECT COUNT(*) FROM machines WHERE image_sha256 IS NULL"
             ).fetchone()[0]
+            # Recent activity slice for the dashboard's "what just
+            # happened?" widget. Reuses ``_events_card.html`` so the
+            # styling matches the per-machine and per-image cards;
+            # the dashboard renders at request time only (no SSE
+            # update) so a reload is the refresh gesture.
+            recent_events = _events_log.list_events(conn, limit=10)
         image_count = len(bty_images.list_images(image_root))
         return render(
             "ui/dashboard.html",
@@ -166,6 +172,7 @@ def register_ui_routes(
             machine_count=machine_count,
             discovered_count=discovered_count,
             image_count=image_count,
+            recent_events=recent_events,
         )
 
     @app.get(
@@ -174,11 +181,24 @@ def register_ui_routes(
         include_in_schema=False,
         dependencies=[Depends(require_ui_auth)],
     )
-    def ui_machines(request: Request) -> HTMLResponse:
+    def ui_machines(
+        request: Request,
+        filter: str | None = None,
+    ) -> HTMLResponse:
+        # ``?filter=discovered`` -- only unassigned machines (no
+        # image_sha256 yet). Powered by the dashboard's
+        # "Unassigned (discovered)" counter card so clicking it
+        # lands on a pre-filtered list. Anything else (no filter,
+        # ``?filter=`` empty, an unrecognised value) shows the
+        # full list.
+        if filter == "discovered":
+            sql = "SELECT * FROM machines WHERE image_sha256 IS NULL ORDER BY mac"
+        else:
+            sql = "SELECT * FROM machines ORDER BY mac"
         with _db.open_db(state_path) as conn:
-            rows = conn.execute("SELECT * FROM machines ORDER BY mac").fetchall()
+            rows = conn.execute(sql).fetchall()
         machines = [_row_to_dict(r) for r in rows]
-        return render("ui/machines.html", request, machines=machines)
+        return render("ui/machines.html", request, machines=machines, active_filter=filter)
 
     @app.get(
         "/ui/machines/{mac}",

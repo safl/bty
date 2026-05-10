@@ -1282,6 +1282,24 @@ def test_ui_events_page_renders_filtered(app_client: TestClient) -> None:
     assert "aa:bb:cc:dd:ee:ff" in body
 
 
+def test_ui_events_page_image_subject_links_to_filter(app_client: TestClient) -> None:
+    """Non-machine subjects (image / catalog / boot / settings)
+    have no detail page, so the subject_id cell pivots into the
+    timeline filtered by that subject. Regression-class: an
+    earlier version rendered them as plain ``<code>`` text with
+    no pivot, leaving operators with no way to see "everything
+    that touched this image"."""
+    # Auto-import seeds an image.hashed event with subject_kind=image
+    # and subject_id="demo.qcow2" via the lifespan startup.
+    r = app_client.get("/ui/events", params={"kind": "image.hashed"}, cookies=AUTH)
+    assert r.status_code == 200
+    body = r.text
+    assert "demo.qcow2" in body
+    # Pivot URL: subject_kind + subject_id both URL-encoded.
+    # ``&amp;`` between params (HTML-compliant escape).
+    assert "/ui/events?subject_kind=image&amp;subject_id=demo.qcow2" in body
+
+
 def test_ui_events_page_renders_failure_with_danger_badge(app_client: TestClient) -> None:
     """Failure-kind events (anything ending ``.failed`` or
     ``_failed``) render with the ``bg-danger`` Bootstrap badge so

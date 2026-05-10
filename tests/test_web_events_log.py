@@ -134,6 +134,26 @@ def test_list_filters_by_subject(tmp_path: Path) -> None:
     assert rows[0].subject_id == "aa:bb:cc:dd:ee:01"
 
 
+def test_list_filters_by_actor(tmp_path: Path) -> None:
+    """``actor=<actor>`` returns only rows recorded with that actor,
+    powering the /ui/events ``Actor`` dropdown for triage views
+    like 'show me everything operators did'."""
+    state = tmp_path / "state.db"
+    _db.init_db(state)
+    conn, close = _open(state)
+    try:
+        _events_log.record(conn, kind="machine.upserted", summary="from operator", actor="operator")
+        _events_log.record(conn, kind="machine.discovered", summary="from pxe", actor="pxe-client")
+        _events_log.record(
+            conn, kind="machine.task.completed", summary="from system", actor="system"
+        )
+        conn.commit()
+        rows = _events_log.list_events(conn, actor="operator")
+    finally:
+        close()
+    assert [r.summary for r in rows] == ["from operator"]
+
+
 def test_list_filters_by_source_ip(tmp_path: Path) -> None:
     """``source_ip=<ip>`` returns only rows recorded with that IP, so
     the /ui/events filter pivot lands on a clean slice."""

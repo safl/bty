@@ -115,11 +115,23 @@
                     <td>{{ e.summary }}</td>
                     <td>
                         {% if e.subject_kind == "machine" and e.subject_id %}
+                        {# Machine subjects link directly to the
+                           per-machine detail page (the per-machine
+                           events card is already there). #}
                         <a class="text-decoration-none" href="/ui/machines/{{ e.subject_id }}">
                             <code>{{ e.subject_id }}</code>
                         </a>
                         {% elif e.subject_id %}
-                        <code title="{{ e.subject_kind }}">{{ e.subject_id }}</code>
+                        {# Non-machine subjects (image, catalog,
+                           boot, settings) don't have a detail page;
+                           pivot to the timeline filtered by this
+                           subject so the operator can see
+                           everything that touched it. #}
+                        <a class="text-decoration-none"
+                           href="/ui/events?subject_kind={{ e.subject_kind|urlencode }}&amp;subject_id={{ e.subject_id|urlencode }}"
+                           title="Filter by this {{ e.subject_kind }}">
+                            <code>{{ e.subject_id }}</code>
+                        </a>
                         {% else %}
                         <span class="text-muted small">-</span>
                         {% endif %}

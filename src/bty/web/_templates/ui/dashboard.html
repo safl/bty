@@ -21,4 +21,13 @@
      sse-swap="dashboard-counts">
     {% include "ui/_dashboard_counts.html" %}
 </div>
+
+{# Recent activity slice -- reuses the per-subject events card.
+   Static at request time (reload to refresh); the live SSE
+   stream is wired to the counters above, not here. #}
+{% with events=recent_events,
+        title="Recent activity",
+        link_to_full="/ui/events" %}
+{% include "ui/_events_card.html" %}
+{% endwith %}
 {% endblock %}

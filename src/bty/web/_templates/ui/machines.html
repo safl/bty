@@ -3,11 +3,19 @@
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
     <h1 class="h3 mb-0"><i class="bi bi-pc-display me-2"></i>Machines</h1>
+    {% if active_filter %}
+    <span class="text-muted small">
+        <i class="bi bi-funnel me-1"></i>
+        filter: <code>{{ active_filter }}</code>
+        <a href="/ui/machines" class="ms-2">show all</a>
+    </span>
+    {% else %}
     <span class="live-indicator text-muted small"
           title="Live-updating via Server-Sent Events">
         <i class="bi bi-broadcast text-success me-1"></i>
         <span id="machines-count">{{ machines|length }}</span> total · live
     </span>
+    {% endif %}
 </div>
 
 <div class="card mb-3">
@@ -120,12 +128,20 @@
                when the operator (or auto-discovery) mutates machines.
                The browser carries the bty-token cookie automatically;
                that is what authenticates the EventSource connection.
-               ``sse-target`` opts in to the layout-level flash animation. #}
+               ``sse-target`` opts in to the layout-level flash animation.
+
+               When a server-side filter is active (``?filter=...``)
+               the SSE wiring is dropped: the next ``machines-update``
+               would replace the filtered tbody with the full
+               un-filtered list, which is operator-confusing. The page
+               becomes static under filter; reload to refresh. #}
             <tbody id="machines-tbody"
                    class="sse-target"
+                   {% if not active_filter %}
                    hx-ext="sse"
                    sse-connect="/events/machines"
-                   sse-swap="machines-update">
+                   sse-swap="machines-update"
+                   {% endif %}>
                 {% include "ui/_machines_tbody.html" %}
             </tbody>
         </table>
