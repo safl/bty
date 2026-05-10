@@ -204,10 +204,14 @@ def create_app(
             discovered_count = conn.execute(
                 "SELECT COUNT(*) FROM machines WHERE image_sha256 IS NULL"
             ).fetchone()[0]
+            task_failed_count = conn.execute(
+                "SELECT COUNT(*) FROM machines WHERE last_task_status = 'failed'"
+            ).fetchone()[0]
         image_count = len(images.list_images(resolved_image_root))
         return jinja.get_template("ui/_dashboard_counts.html").render(
             machine_count=machine_count,
             discovered_count=discovered_count,
+            task_failed_count=task_failed_count,
             image_count=image_count,
         )
 

@@ -163,6 +163,39 @@ def test_ui_dashboard_shows_recent_activity_after_a_pxe_event(client: TestClient
     assert 'href="/ui/events"' in body
 
 
+def test_ui_dashboard_failed_task_counter_appears_when_count_positive(
+    client: TestClient, tmp_path: Path
+) -> None:
+    """When at least one machine has ``last_task_status='failed'``,
+    the dashboard surfaces a danger-tinted counter card linking to
+    ``/ui/machines?filter=task-failed``. With zero failures the
+    card stays hidden so a healthy fleet doesn't show a red box
+    permanently."""
+    _login(client)
+    # Zero failures: counter card hidden.
+    r = client.get("/ui/dashboard")
+    assert r.status_code == 200
+    assert "Failed cijoe-tasks" not in r.text
+
+    # Seed a failed-task machine via state.db poke (no public API
+    # writes ``last_task_status``).
+    client.put(
+        "/machines/aa:bb:cc:dd:ee:99",
+        json={"image_sha256": "0" * 64},
+    )
+    from bty.web import _db
+
+    with _db.open_db(tmp_path / "state.db") as conn:
+        conn.execute(
+            "UPDATE machines SET last_task_status = 'failed' WHERE mac = 'aa:bb:cc:dd:ee:99'"
+        )
+        conn.commit()
+    r = client.get("/ui/dashboard")
+    assert "Failed cijoe-tasks" in r.text
+    assert "/ui/machines?filter=task-failed" in r.text
+    assert "border-danger" in r.text
+
+
 def test_ui_dashboard_subscribes_to_sse_for_live_counts(client: TestClient) -> None:
     """The counter cards need a ``sse-connect``/``sse-swap`` wrapper
     so the htmx-ext-sse client routes ``dashboard-counts`` events to
@@ -197,6 +230,42 @@ def test_ui_boot_page_shows_recent_activity_card(
     body = r.text
     assert "Recent boot-artefact activity" in body
     assert "boot.release.fetched" in body
+
+
+def test_ui_machines_filter_task_failed(client: TestClient, tmp_path: Path) -> None:
+    """``?filter=task-failed`` shows only machines whose last
+    cijoe-task run failed, for fast triage of "which boxes need
+    attention". Machines with a successful last run, no run yet,
+    or a still-running task are excluded.
+
+    No public API surface to seed ``last_task_status`` (tasks set
+    it via the worker thread); poke state.db directly. The
+    fixture's ``state.db`` lives at ``tmp_path / 'state.db'``."""
+    _login(client)
+    for mac in ("aa:bb:cc:dd:ee:11", "aa:bb:cc:dd:ee:22", "aa:bb:cc:dd:ee:33"):
+        client.put(
+            f"/machines/{mac}",
+            json={"image_sha256": "0" * 64},
+        )
+    from bty.web import _db
+
+    with _db.open_db(tmp_path / "state.db") as conn:
+        conn.execute(
+            "UPDATE machines SET last_task_status = 'failed' WHERE mac = 'aa:bb:cc:dd:ee:11'"
+        )
+        conn.execute(
+            "UPDATE machines SET last_task_status = 'completed' WHERE mac = 'aa:bb:cc:dd:ee:22'"
+        )
+        # 33: no last_task_status (NULL) -- never ran a task.
+        conn.commit()
+
+    r = client.get("/ui/machines?filter=task-failed")
+    assert r.status_code == 200
+    body = r.text
+    assert "aa:bb:cc:dd:ee:11" in body
+    assert "aa:bb:cc:dd:ee:22" not in body
+    assert "aa:bb:cc:dd:ee:33" not in body
+    assert "filter:" in body
 
 
 def test_ui_machines_filter_assigned_excludes_discovered(client: TestClient) -> None:

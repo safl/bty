@@ -206,6 +206,9 @@ def register_ui_routes(
             discovered_count = conn.execute(
                 "SELECT COUNT(*) FROM machines WHERE image_sha256 IS NULL"
             ).fetchone()[0]
+            task_failed_count = conn.execute(
+                "SELECT COUNT(*) FROM machines WHERE last_task_status = 'failed'"
+            ).fetchone()[0]
             # Recent activity slice for the dashboard's "what just
             # happened?" widget. Reuses ``_events_card.html`` so the
             # styling matches the per-machine and per-image cards;
@@ -218,6 +221,7 @@ def register_ui_routes(
             request,
             machine_count=machine_count,
             discovered_count=discovered_count,
+            task_failed_count=task_failed_count,
             image_count=image_count,
             recent_events=recent_events,
         )
@@ -236,14 +240,20 @@ def register_ui_routes(
         # image_sha256 yet). Powered by the dashboard's
         # "Unassigned (discovered)" counter card so clicking it
         # lands on a pre-filtered list. ``?filter=assigned`` --
-        # symmetric "operator-bound" view. Anything else (no
-        # filter, empty value, an unrecognised value) shows the
-        # full list and surfaces no active-filter banner.
+        # symmetric "operator-bound" view. ``?filter=task-failed``
+        # -- machines whose last cijoe-task run failed; an operator
+        # triage shortcut for "which boxes need attention?".
+        # Anything else (no filter, empty value, an unrecognised
+        # value) shows the full list and surfaces no active-filter
+        # banner.
         if filter == "discovered":
             sql = "SELECT * FROM machines WHERE image_sha256 IS NULL ORDER BY mac"
             active_filter: str | None = filter
         elif filter == "assigned":
             sql = "SELECT * FROM machines WHERE image_sha256 IS NOT NULL ORDER BY mac"
+            active_filter = filter
+        elif filter == "task-failed":
+            sql = "SELECT * FROM machines WHERE last_task_status = 'failed' ORDER BY mac"
             active_filter = filter
         else:
             sql = "SELECT * FROM machines ORDER BY mac"
