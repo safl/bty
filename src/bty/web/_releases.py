@@ -237,7 +237,17 @@ def _verify_sha256_manifest(manifest_path: Path, files_dir: Path) -> None:
         target = files_dir / name
         if not target.is_file():
             raise ValueError(f"manifest references missing file: {name}")
-        actual = hashlib.sha256(target.read_bytes()).hexdigest()
+        # Stream-hash instead of ``target.read_bytes()``: the squashfs
+        # artefact alone is ~300 MiB; a Pi 4 / small NUC running
+        # bty-web can OOM if N artefacts get fully buffered. 1 MiB
+        # chunks keep peak memory bounded regardless of artefact
+        # size; performance is identical to read_bytes() for small
+        # files (a single chunk).
+        h = hashlib.sha256()
+        with target.open("rb") as fh:
+            for chunk in iter(lambda: fh.read(1 << 20), b""):
+                h.update(chunk)
+        actual = h.hexdigest()
         if actual.lower() != digest_expected.lower():
             raise ValueError(
                 f"sha256 mismatch for {name}: expected {digest_expected}, got {actual}"

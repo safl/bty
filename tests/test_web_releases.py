@@ -127,6 +127,42 @@ def test_fetch_release_atomic_install(serve_artifacts: tuple[str, Path], tmp_pat
     assert sentinel.read_bytes() == b"old-kernel"
 
 
+def test_verify_sha256_manifest_streams_large_files(tmp_path: Path) -> None:
+    """``_verify_sha256_manifest`` must hash artefacts in chunks
+    rather than via ``Path.read_bytes()``. A Pi 4 / small NUC
+    running bty-web has limited RAM, and the squashfs alone is
+    ~300 MiB; if the hash were buffered as a single bytes object,
+    a future larger artefact could OOM the verifier.
+
+    We can't directly assert "didn't read whole file" without
+    instrumentation, but we CAN assert the function happily
+    verifies a file larger than the chunk size (1 MiB) -- which
+    exercises the streaming loop's iteration."""
+    import hashlib
+
+    from bty.web._releases import SHA256_NAME, _verify_sha256_manifest
+
+    files_dir = tmp_path
+    # 3 MiB of varied bytes so the streaming loop runs 3 chunks.
+    large = bytes(range(256)) * (3 * 1024 * 4)
+    assert len(large) > 1 << 20
+    artefact = files_dir / "bty-netboot-x86_64.vmlinuz"
+    artefact.write_bytes(large)
+    digest = hashlib.sha256(large).hexdigest()
+    (files_dir / SHA256_NAME).write_text(f"{digest}  bty-netboot-x86_64.vmlinuz\n")
+
+    # Should succeed; bad checksum would raise.
+    _verify_sha256_manifest(files_dir / SHA256_NAME, files_dir)
+
+    # Tamper one byte (flip the last byte to something different)
+    # and expect a mismatch on re-verify.
+    tampered = bytearray(large)
+    tampered[-1] ^= 0xFF
+    artefact.write_bytes(bytes(tampered))
+    with pytest.raises(ValueError, match="mismatch"):
+        _verify_sha256_manifest(files_dir / SHA256_NAME, files_dir)
+
+
 def test_inspect_boot_dir_reports_present_and_missing(tmp_path: Path) -> None:
     boot_dir = tmp_path / "boot"
     boot_dir.mkdir()
