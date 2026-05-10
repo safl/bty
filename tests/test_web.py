@@ -1150,6 +1150,40 @@ def test_events_include_image_hashed_from_auto_import(app_client: TestClient) ->
     assert len(row["details"]["sha256"]) == 64
 
 
+def test_source_ip_uses_x_forwarded_for_when_trusted_proxy(
+    app_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When ``BTY_TRUSTED_PROXY`` is set, ``_client_ip`` reads the
+    leftmost ``X-Forwarded-For`` value instead of
+    ``request.client.host``. This is what bty-web operators behind
+    nginx / caddy need so audit rows show the real client IP, not
+    the proxy's loopback."""
+    monkeypatch.setenv("BTY_TRUSTED_PROXY", "1")
+    mac = "aa:bb:cc:dd:ee:f8"
+    app_client.get(f"/pxe/{mac}", headers={"X-Forwarded-For": "192.168.1.42, 10.0.0.1"})
+    r = app_client.get("/events", params={"kind": "machine.discovered"}, cookies=AUTH)
+    events = r.json()["events"]
+    assert events
+    assert events[0]["source_ip"] == "192.168.1.42"
+
+
+def test_source_ip_ignores_x_forwarded_for_when_proxy_not_trusted(
+    app_client: TestClient,
+) -> None:
+    """Without ``BTY_TRUSTED_PROXY``, ``X-Forwarded-For`` is ignored
+    (the header is client-spoofable). Defensive default: we trust
+    only the connection-level ``request.client.host``."""
+    mac = "aa:bb:cc:dd:ee:f7"
+    app_client.get(f"/pxe/{mac}", headers={"X-Forwarded-For": "1.2.3.4"})
+    r = app_client.get("/events", params={"kind": "machine.discovered"}, cookies=AUTH)
+    events = r.json()["events"]
+    assert events
+    # The TestClient connects locally; ``request.client.host`` is
+    # ``testclient`` (Starlette default) -- definitely not the
+    # spoofed X-F-F value.
+    assert events[0]["source_ip"] != "1.2.3.4"
+
+
 def test_events_carry_source_ip(app_client: TestClient) -> None:
     """Operator + pxe-client events both record the request's
     client host into ``source_ip`` so the audit log can answer

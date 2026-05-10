@@ -1349,7 +1349,22 @@ def _client_ip(request: Request) -> str | None:
     Starlette returns when bty-web binds on ``::`` and a v4 client
     connects) collapses to the bare v4 form. Without this, the
     same client shows up as two distinct rows in the audit log.
+
+    When ``BTY_TRUSTED_PROXY`` is set in the environment (any
+    truthy value), the leftmost ``X-Forwarded-For`` entry takes
+    precedence so audit rows reflect the real client IP rather
+    than the reverse-proxy's loopback. Off by default because
+    the header is client-spoofable: only enable it when bty-web
+    is configured behind a proxy that strips inbound X-F-F.
     """
+    if os.environ.get("BTY_TRUSTED_PROXY"):
+        xff = request.headers.get("x-forwarded-for")
+        if xff:
+            # X-F-F is a comma-separated chain (proxy-near-client
+            # first); the leftmost entry is the originating client.
+            first = xff.split(",", 1)[0].strip()
+            if first:
+                return _normalize_ip(first)
     return _normalize_ip(request.client.host if request.client else None)
 
 

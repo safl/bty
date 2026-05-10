@@ -253,6 +253,13 @@ only; no auto-trimming -- the table is a few KB per event so
 years of homelab activity fit. Operators with strict retention
 needs run `DELETE FROM events WHERE ts < ?` themselves.
 
+**Behind a reverse proxy.** When bty-web sits behind nginx /
+caddy / Traefik, set `BTY_TRUSTED_PROXY=1` so audit rows
+record the real client IP from `X-Forwarded-For` rather than
+the proxy's loopback. Off by default because the header is
+client-spoofable -- only enable it when the proxy strips
+inbound `X-Forwarded-For` from external requests.
+
 **Failure symmetry.** Every async-manager + operator-driven
 action that can fail emits a paired `<kind>_failed` event
 (`image.upload_failed`, `image.hash_failed`,

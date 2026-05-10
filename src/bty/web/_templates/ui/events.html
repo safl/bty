@@ -68,9 +68,15 @@
 {% if not events %}
 <div class="alert alert-light border">
     <i class="bi bi-info-circle me-2"></i>
-    No events match the current filter. The log starts populating as
-    machines check in and operators make changes; if you've just
+    {% if kind or subject_kind or subject_id or actor or source_ip %}
+    No events match the current filter.
+    <a href="/ui/events" class="ms-1">Clear filter</a>
+    to see all events.
+    {% else %}
+    The log is empty. Rows appear as machines check in, operators
+    make changes, and async-managers complete. If you've just
     started bty-web, hit a few endpoints and refresh.
+    {% endif %}
 </div>
 {% else %}
 

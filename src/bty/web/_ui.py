@@ -825,8 +825,16 @@ def _client_ip(request: Request) -> str | None:
     """Mirror of ``bty.web._app._client_ip``: read the request's
     client host and feed it through :func:`_events_log.normalize_ip`
     so v4-mapped-v6 addresses collapse to bare v4 before hitting
-    the audit log. Duplicated here rather than imported because
-    ``_app`` already imports this module (circular)."""
+    the audit log. ``BTY_TRUSTED_PROXY`` opts into reading
+    ``X-Forwarded-For`` for deployments behind a reverse proxy.
+    Duplicated here rather than imported because ``_app`` already
+    imports this module (circular)."""
+    if os.environ.get("BTY_TRUSTED_PROXY"):
+        xff = request.headers.get("x-forwarded-for")
+        if xff:
+            first = xff.split(",", 1)[0].strip()
+            if first:
+                return _normalize_ip(first)
     return _normalize_ip(request.client.host if request.client else None)
 
 
