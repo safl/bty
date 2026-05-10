@@ -33,13 +33,35 @@ from jinja2 import Environment
 
 import bty
 from bty import images as bty_images
-from bty.web import _db, _releases, _sysconfig
+from bty.web import _db, _events_log, _releases, _sysconfig
 from bty.web._auth import SESSION_AUTHED_KEY
 from bty.web._models import (
     BOOT_POLICIES,
     PROVISIONING_MODES,
     CatalogEntryAdd,
     MachineUpsert,
+)
+
+# Event kinds the /ui/events filter dropdown advertises. Keep in
+# sync with the ``_log_event(kind=...)`` callsites in _app.py +
+# _task.py + _ui.py. New kinds added here surface in the dropdown
+# even if no row carries them yet, which is fine.
+_KNOWN_EVENT_KINDS: tuple[str, ...] = (
+    "machine.discovered",
+    "machine.created",
+    "machine.upserted",
+    "machine.deleted",
+    "machine.flashed",
+    "machine.task.running",
+    "machine.task.completed",
+    "machine.task.cancelled",
+    "machine.task.failed",
+    "image.uploaded",
+    "image.hashed",
+    "catalog.entry.added",
+    "catalog.entry.deleted",
+    "boot.release.fetched",
+    "settings.pxe.activated",
 )
 
 
@@ -204,6 +226,17 @@ def register_ui_routes(
         # /ui/images: Jinja autoescape covers ``flash`` so a
         # hostile error text cannot inject HTML.
         flash = request.query_params.get("error")
+        # Per-machine event slice. ``subject_id=normalised`` filters
+        # to events that touch this MAC (discovered, upserted,
+        # flashed, task.*, etc.). Top 20 keeps the page short; the
+        # full timeline lives at /ui/events.
+        with _db.open_db(state_path) as conn:
+            machine_events = _events_log.list_events(
+                conn,
+                subject_kind="machine",
+                subject_id=normalised,
+                limit=20,
+            )
         return render(
             "ui/machine_detail.html",
             request,
@@ -211,6 +244,7 @@ def register_ui_routes(
             images=unified,
             provisioning_modes=list(PROVISIONING_MODES),
             boot_policies=list(BOOT_POLICIES),
+            machine_events=machine_events,
             flash=flash,
             flash_kind="danger" if flash else None,
         )
@@ -342,11 +376,22 @@ def register_ui_routes(
         """
         unified = list_unified_images() if list_unified_images is not None else []
         flash = request.query_params.get("error")
+        # Image-relevant slice of the event log: uploads, hash
+        # completions, catalog entry add/delete. Top 15 keeps the
+        # page short; full timeline at /ui/events.
+        with _db.open_db(state_path) as conn:
+            image_events = []
+            for kind in ("image", "catalog"):
+                image_events.extend(_events_log.list_events(conn, subject_kind=kind, limit=10))
+        # Sort by id desc and clip to top 15.
+        image_events.sort(key=lambda e: e.id, reverse=True)
+        image_events = image_events[:15]
         return render(
             "ui/images.html",
             request,
             unified=unified,
             image_root=str(image_root),
+            image_events=image_events,
             flash=flash,
             flash_kind="danger" if flash else None,
         )
@@ -467,6 +512,71 @@ def register_ui_routes(
     )
     def ui_boot(request: Request) -> HTMLResponse:
         return _render_boot_page(request)
+
+    # ----- event log -----------------------------------------------------
+
+    @app.get(
+        "/ui/events",
+        response_class=HTMLResponse,
+        include_in_schema=False,
+        dependencies=[Depends(require_ui_auth)],
+    )
+    def ui_events(
+        request: Request,
+        kind: str | None = None,
+        subject_kind: str | None = None,
+        subject_id: str | None = None,
+        before_id: int | None = None,
+    ) -> HTMLResponse:
+        """Event log page.
+
+        Cursor pagination: each page shows ``_PAGE_SIZE`` rows;
+        the "Older" link carries ``before_id`` = the smallest id
+        on the current page so the next page picks up where this
+        one ended. New events arriving while the operator pages
+        through don't disturb the cursor (they get id values
+        higher than the cursor and would only appear on page 1).
+
+        Empty filter values come in as empty strings from the form;
+        normalise them to ``None`` so the SQL builder skips the
+        clause.
+        """
+        page_size = 50
+        kind_norm = kind or None
+        subject_kind_norm = subject_kind or None
+        subject_id_norm = subject_id or None
+        with _db.open_db(state_path) as conn:
+            events = _events_log.list_events(
+                conn,
+                kind=kind_norm,
+                subject_kind=subject_kind_norm,
+                subject_id=subject_id_norm,
+                before_id=before_id,
+                limit=page_size,
+            )
+        # The "Older" link is meaningful only if we got a full
+        # page of results; if we got fewer, there's nothing
+        # older to fetch.
+        older_url: str | None = None
+        if len(events) == page_size:
+            params = {
+                "kind": kind_norm or "",
+                "subject_kind": subject_kind_norm or "",
+                "subject_id": subject_id_norm or "",
+                "before_id": str(events[-1].id),
+            }
+            non_empty = {k: v for k, v in params.items() if v}
+            older_url = "/ui/events?" + urllib.parse.urlencode(non_empty)
+        return render(
+            "ui/events.html",
+            request,
+            events=events,
+            kind=kind_norm,
+            subject_kind=subject_kind_norm,
+            subject_id=subject_id_norm,
+            known_kinds=_KNOWN_EVENT_KINDS,
+            older_url=older_url,
+        )
 
     # ----- settings -------------------------------------------------------
 

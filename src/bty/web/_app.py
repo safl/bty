@@ -37,6 +37,8 @@ from bty.web import _catalog as _web_catalog
 from bty.web import _db, _hash, _models, _release_mgr, _ui
 from bty.web._auth import SESSION_COOKIE, require_auth
 from bty.web._events import MachineEvent, MachineEventBus, sse_format
+from bty.web._events_log import list_events as _list_events
+from bty.web._events_log import record as _log_event
 from bty.web._task import TaskRunner
 
 # Session cookie max-age. Sliding TTL on the browser side; Starlette's
@@ -285,6 +287,22 @@ def create_app(
                     """,
                     (normalised, now, now, client_ip, now, now),
                 )
+                # First /pxe contact = the moment a machine becomes
+                # visible to the operator. Worth a row in the audit
+                # log so they can see "this MAC first checked in at
+                # X" without paging through stale records. Only
+                # logged on the discovery path (the else branch
+                # below is "we've seen this MAC before" -- too
+                # noisy to log every chain into the live env).
+                _log_event(
+                    conn,
+                    kind="machine.discovered",
+                    summary=f"{normalised} first contacted /pxe from {client_ip or 'unknown IP'}",
+                    subject_kind="machine",
+                    subject_id=normalised,
+                    actor="pxe-client",
+                    details={"client_ip": client_ip},
+                )
                 conn.commit()
                 row = conn.execute("SELECT * FROM machines WHERE mac = ?", (normalised,)).fetchone()
             else:
@@ -359,6 +377,15 @@ def create_app(
                 "UPDATE machines SET last_flashed_at = ?, updated_at = ? WHERE mac = ?",
                 (now, now, normalised),
             )
+            if cur.rowcount > 0:
+                _log_event(
+                    conn,
+                    kind="machine.flashed",
+                    summary=f"{normalised} signalled flash completion",
+                    subject_kind="machine",
+                    subject_id=normalised,
+                    actor="pxe-client",
+                )
             conn.commit()
         if cur.rowcount == 0:
             raise HTTPException(
@@ -441,6 +468,30 @@ def create_app(
     def list_tasks() -> dict[str, Any]:
         return {"tasks": [s.to_dict() for s in task_runner.list()]}
 
+    # ---------- event log (v0.7.38) ---------------------------------------
+    # Slim audit log of operator + machine activity. Backs the
+    # /ui/events page + per-subject embedded lists on
+    # /ui/machines/{mac} and /ui/images.
+
+    @app.get("/events", dependencies=[Depends(require_auth)])
+    def list_events_endpoint(
+        kind: str | None = None,
+        subject_kind: str | None = None,
+        subject_id: str | None = None,
+        before_id: int | None = None,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        with _db.open_db(state_path) as conn:
+            events = _list_events(
+                conn,
+                kind=kind,
+                subject_kind=subject_kind,
+                subject_id=subject_id,
+                before_id=before_id,
+                limit=limit,
+            )
+        return {"events": [e.to_dict() for e in events]}
+
     @app.delete("/tasks/{mac}", dependencies=[Depends(require_auth)])
     def cancel_task(mac: str) -> dict[str, Any]:
         normalised = _normalise_mac(mac)
@@ -450,6 +501,21 @@ def create_app(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"no task known for mac {normalised!r}",
             )
+        # Only log when the cancel actually flipped state (queued/running ->
+        # cancelled). A no-op cancel of a completed/failed task shouldn't
+        # spam the audit log.
+        if state.status == "cancelled":
+            with _db.open_db(state_path) as conn:
+                _log_event(
+                    conn,
+                    kind="machine.task.cancelled",
+                    summary=f"task on {normalised} cancelled by operator",
+                    subject_kind="machine",
+                    subject_id=normalised,
+                    actor="operator",
+                    details={"task_ref": state.task_ref},
+                )
+                conn.commit()
         return state.to_dict()
 
     @app.get("/boot/{name}", include_in_schema=False)
@@ -618,6 +684,21 @@ def create_app(
                     now,
                 ),
             )
+            _log_event(
+                conn,
+                kind="machine.created" if existing is None else "machine.upserted",
+                summary=(f"{normalised} created" if existing is None else f"{normalised} updated"),
+                subject_kind="machine",
+                subject_id=normalised,
+                actor="operator",
+                details={
+                    "image_sha256": body.image_sha256,
+                    "provisioning_mode": body.provisioning_mode,
+                    "boot_policy": body.boot_policy,
+                    "hostname": body.hostname,
+                    "cijoe_task_ref": body.cijoe_task_ref,
+                },
+            )
             conn.commit()
             row = conn.execute("SELECT * FROM machines WHERE mac = ?", (normalised,)).fetchone()
         assert row is not None
@@ -633,6 +714,15 @@ def create_app(
         normalised = _normalise_mac(mac)
         with _db.open_db(state_path) as conn:
             cur = conn.execute("DELETE FROM machines WHERE mac = ?", (normalised,))
+            if cur.rowcount > 0:
+                _log_event(
+                    conn,
+                    kind="machine.deleted",
+                    summary=f"{normalised} deleted",
+                    subject_kind="machine",
+                    subject_id=normalised,
+                    actor="operator",
+                )
             conn.commit()
         if cur.rowcount == 0:
             raise HTTPException(
@@ -748,6 +838,17 @@ def create_app(
             # guarded for safety.
             with contextlib.suppress(FileNotFoundError):
                 await hash_manager.enqueue(name)
+            with _db.open_db(state_path) as conn:
+                _log_event(
+                    conn,
+                    kind="image.uploaded",
+                    summary=f"image {name!r} uploaded ({result['size_bytes']} bytes)",
+                    subject_kind="image",
+                    subject_id=name,
+                    actor="operator",
+                    details={"size_bytes": result["size_bytes"]},
+                )
+                conn.commit()
         return result
 
     @app.put(
@@ -918,6 +1019,20 @@ def create_app(
                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                     (body.image_url, sha256, name, body.sha_url, fmt, size_bytes, None, now),
                 )
+                _log_event(
+                    conn,
+                    kind="catalog.entry.added",
+                    summary=f"catalog entry added: {name}",
+                    subject_kind="catalog",
+                    subject_id=body.image_url,
+                    actor="operator",
+                    details={
+                        "name": name,
+                        "sha256": sha256,
+                        "format": fmt,
+                        "size_bytes": size_bytes,
+                    },
+                )
                 conn.commit()
             except sqlite3.IntegrityError as exc:
                 raise HTTPException(
@@ -958,6 +1073,15 @@ def create_app(
         which is operator-hostile; query param is cleaner."""
         with _db.open_db(state_path) as conn:
             cur = conn.execute("DELETE FROM catalog_entries WHERE src = ?", (src,))
+            if cur.rowcount > 0:
+                _log_event(
+                    conn,
+                    kind="catalog.entry.deleted",
+                    summary=f"catalog entry deleted: {src}",
+                    subject_kind="catalog",
+                    subject_id=src,
+                    actor="operator",
+                )
             conn.commit()
         if cur.rowcount == 0:
             raise HTTPException(

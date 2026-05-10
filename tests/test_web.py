@@ -1008,6 +1008,96 @@ def test_tasks_cancel_invalid_mac_returns_400(app_client: TestClient) -> None:
 # and ``test_tasks_list_requires_auth`` above.
 
 
+# ---------- /events API (v0.7.38 audit log) -----------------------------
+
+
+def test_events_list_requires_auth(app_client: TestClient) -> None:
+    r = app_client.get("/events")
+    assert r.status_code == 401
+
+
+def test_events_list_empty_initially(app_client: TestClient) -> None:
+    r = app_client.get("/events", cookies=AUTH)
+    assert r.status_code == 200
+    assert r.json() == {"events": []}
+
+
+def test_events_list_includes_machine_lifecycle(app_client: TestClient) -> None:
+    """End-to-end: a /pxe contact + a /machines PUT + a /pxe done
+    should each land an event row. Verifies that the recording
+    hooks in the handlers actually fire."""
+    mac = "aa:bb:cc:dd:ee:ff"
+    # Auto-discovery via /pxe -> machine.discovered
+    app_client.get(f"/pxe/{mac}")
+    # Operator upsert -> machine.upserted (existing record, so not "created")
+    app_client.put(
+        f"/machines/{mac}",
+        json={
+            "image_sha256": "0" * 64,
+            "boot_policy": "flash",
+        },
+        cookies=AUTH,
+    )
+    # PXE-done signal -> machine.flashed
+    app_client.post(f"/pxe/{mac}/done")
+
+    r = app_client.get("/events", cookies=AUTH)
+    assert r.status_code == 200
+    kinds = [e["kind"] for e in r.json()["events"]]
+    # Newest first: discovered came first chronologically, so it's last.
+    assert "machine.discovered" in kinds
+    assert "machine.upserted" in kinds
+    assert "machine.flashed" in kinds
+    # All three reference the MAC.
+    for e in r.json()["events"]:
+        if e["subject_kind"] == "machine":
+            assert e["subject_id"] == mac
+
+
+def test_events_filter_by_subject_id(app_client: TestClient) -> None:
+    """The per-MAC embedded card on /ui/machines/{mac} drives this
+    filter -- only events for the given MAC come back."""
+    app_client.get("/pxe/aa:bb:cc:dd:ee:01")
+    app_client.get("/pxe/aa:bb:cc:dd:ee:02")
+    r = app_client.get(
+        "/events",
+        params={"subject_kind": "machine", "subject_id": "aa:bb:cc:dd:ee:01"},
+        cookies=AUTH,
+    )
+    assert r.status_code == 200
+    events = r.json()["events"]
+    assert len(events) == 1
+    assert events[0]["subject_id"] == "aa:bb:cc:dd:ee:01"
+
+
+def test_ui_events_page_renders(app_client: TestClient) -> None:
+    """The /ui/events page renders without 500-ing even before any
+    events exist. The empty-state branch surfaces a friendly
+    'no events match' alert."""
+    r = app_client.get("/ui/events", cookies=AUTH)
+    assert r.status_code == 200
+    body = r.text
+    # Title + filter form land in the markup.
+    assert "Event log" in body
+    assert "/ui/events" in body
+    # Empty-state alert.
+    assert "No events match" in body
+
+
+def test_ui_events_page_renders_filtered(app_client: TestClient) -> None:
+    """A populated page shows the row + the kind badge."""
+    app_client.get("/pxe/aa:bb:cc:dd:ee:ff")
+    r = app_client.get(
+        "/ui/events",
+        params={"kind": "machine.discovered"},
+        cookies=AUTH,
+    )
+    assert r.status_code == 200
+    body = r.text
+    assert "machine.discovered" in body
+    assert "aa:bb:cc:dd:ee:ff" in body
+
+
 # ---------- /boot and /images file serving --------------------
 
 

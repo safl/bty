@@ -148,4 +148,13 @@
         </form>
     </div>
 </div>
+
+{# Per-MAC event slice. Filtered to ``subject_kind=machine`` +
+   ``subject_id=this MAC`` server-side; the link forwards the
+   same filter to /ui/events for drill-down. #}
+{% with events=machine_events,
+        title="Recent activity for this machine",
+        link_to_full="/ui/events?subject_kind=machine&subject_id=" + m.mac %}
+{% include "ui/_events_card.html" %}
+{% endwith %}
 {% endblock %}

@@ -1,0 +1,54 @@
+{# Reusable per-subject event card.
+
+   Caller passes:
+     - ``events`` -- iterable of bty.web._events_log.Event
+     - ``title`` -- card title (e.g. "Recent activity")
+     - ``link_to_full`` -- /ui/events URL (with subject filter applied)
+       so the operator can drill into the full timeline.
+
+   Renders nothing if ``events`` is empty so the parent page
+   doesn't grow an empty card.
+#}
+{% if events %}
+<div class="card mb-3">
+    <div class="card-header bg-light fw-semibold d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-clock-history me-1"></i>{{ title }}</span>
+        {% if link_to_full %}
+        <a href="{{ link_to_full }}" class="text-decoration-none small">
+            full timeline <i class="bi bi-arrow-right"></i>
+        </a>
+        {% endif %}
+    </div>
+    <div class="table-responsive">
+        <table class="table table-sm mb-0 align-middle">
+            <thead class="table-light">
+                <tr>
+                    <th style="width: 1%; white-space: nowrap;">When</th>
+                    <th style="width: 1%; white-space: nowrap;">Kind</th>
+                    <th>Summary</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for e in events %}
+                <tr>
+                    <td><small class="text-muted">{{ e.ts }}</small></td>
+                    <td>
+                        {% set family = e.kind.split('.')[0] %}
+                        {% set badge_map = {
+                            'machine': 'bg-info text-dark',
+                            'image': 'bg-primary',
+                            'catalog': 'bg-secondary',
+                            'boot': 'bg-warning text-dark',
+                            'settings': 'bg-dark',
+                        } %}
+                        {% set badge = badge_map.get(family, 'bg-light text-dark border') %}
+                        <span class="badge {{ badge }} small">{{ e.kind }}</span>
+                    </td>
+                    <td><small>{{ e.summary }}</small></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}

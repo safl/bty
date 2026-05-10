@@ -541,4 +541,14 @@
 </script>
 
 {% endif %}
+
+{# Image-relevant event slice (uploads, hashes, catalog adds /
+   deletes). The /ui/events drill-down filters to subject_kind=
+   image; catalog rows are picked up via the broader filter at
+   /ui/events itself. #}
+{% with events=image_events,
+        title="Recent image-catalog activity",
+        link_to_full="/ui/events?subject_kind=image" %}
+{% include "ui/_events_card.html" %}
+{% endwith %}
 {% endblock %}

@@ -70,6 +70,7 @@ from pathlib import Path
 from typing import Any
 
 from bty.web import _db
+from bty.web._events_log import record as _log_event
 
 log = logging.getLogger(__name__)
 
@@ -442,6 +443,32 @@ class TaskManager:
                     "UPDATE machines SET last_task_run_at = ? WHERE mac = ?",
                     (now_iso, state.mac),
                 )
+            # Audit log: capture every status transition so the
+            # /ui/events timeline shows ``task started``, ``task
+            # completed`` (or failed/cancelled). Skip ``running``
+            # if the operator already saw a kick_off event from the
+            # PXE-done handler -- but the kick_off itself is logged
+            # by the API layer, so the running record here is the
+            # informative one.
+            kind = f"machine.task.{status}"
+            summary = f"task on {state.mac} {status}" + (
+                f" (rc={state.returncode})" if state.returncode is not None else ""
+            )
+            _log_event(
+                conn,
+                kind=kind,
+                summary=summary,
+                subject_kind="machine",
+                subject_id=state.mac,
+                actor="system",
+                details={
+                    "task_ref": state.task_ref,
+                    "target_ip": state.target_ip,
+                    "returncode": state.returncode,
+                    "error": state.error,
+                    "run_dir": str(run_dir),
+                },
+            )
             conn.commit()
         try:
             self._publish()

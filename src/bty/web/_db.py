@@ -67,6 +67,38 @@ CREATE TABLE IF NOT EXISTS catalog_entries (
     description  TEXT,                -- free-form operator note
     added_at     TEXT NOT NULL
 );
+
+-- Slim audit log of operator + machine activity (v0.7.38).
+-- Ad-hoc, append-only, queryable. Supports a /ui/events page +
+-- per-subject embedded lists on /ui/machines/{mac} and /ui/images.
+-- Retention is "until you VACUUM" -- the table is small enough
+-- (a few KB per event) that homelab cadences accumulate years of
+-- history without trouble. The id is monotonic so cursor
+-- pagination ("show events older than this id") avoids the
+-- offset-pagination drift problem when new events arrive.
+-- Columns:
+--   ts            ISO 8601 UTC.
+--   kind          dotted namespace ('machine.discovered',
+--                 'image.uploaded', etc.).
+--   subject_kind  'machine' / 'image' / 'catalog' / 'boot' /
+--                 'settings'; NULL for global events.
+--   subject_id    mac / sha / catalog-src / tag; NULL for global.
+--   actor         'operator' / 'system' / 'pxe-client'; NULL ok.
+--   summary       one-line human-readable description.
+--   details       JSON blob with kind-specific extras (or NULL).
+CREATE TABLE IF NOT EXISTS events (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts            TEXT NOT NULL,
+    kind          TEXT NOT NULL,
+    subject_kind  TEXT,
+    subject_id    TEXT,
+    actor         TEXT,
+    summary       TEXT NOT NULL,
+    details       TEXT
+);
+CREATE INDEX IF NOT EXISTS events_ts_idx       ON events(ts);
+CREATE INDEX IF NOT EXISTS events_kind_idx     ON events(kind);
+CREATE INDEX IF NOT EXISTS events_subject_idx  ON events(subject_kind, subject_id);
 """
 
 # Columns that were added to ``machines`` after the original schema landed.
