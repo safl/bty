@@ -250,6 +250,76 @@ def test_ui_catalog_entry_form_rejects_bad_url(client: TestClient) -> None:
     assert "filename%20component" in location or "filename+component" in location
 
 
+def test_ui_machine_upsert_form_rejects_non_hex_sha256(client: TestClient) -> None:
+    """The form-style ``POST /ui/machines/{mac}`` must apply the
+    same Pydantic ``MachineUpsert`` validation as the JSON
+    ``PUT /machines/{mac}``. Previously the form accepted any
+    string for ``image_sha256`` and silently landed garbage in
+    state.db; the JSON API rejected the same value with 422.
+
+    On validation failure the form 303s to /ui/machines/{mac}
+    with a URL-encoded ``?error=`` flash, matching the catalog
+    form pattern from round 6."""
+    _login(client)
+    # Create a machine first so the detail page exists.
+    client.put(
+        "/machines/aa:bb:cc:dd:ee:ff",
+        json={
+            "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        },
+        cookies=AUTH,
+    )
+    # Submit a non-hex SHA via the form.
+    r = client.post(
+        "/ui/machines/aa:bb:cc:dd:ee:ff",
+        data={
+            "image_sha256": "not-a-real-sha-just-garbage",
+            "provisioning_mode": "none",
+            "boot_policy": "local",
+        },
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    location = r.headers["location"]
+    assert location.startswith("/ui/machines/aa:bb:cc:dd:ee:ff?error="), location
+    # The well-formed-URL invariant: no raw spaces.
+    assert " " not in location
+
+    # The machine record was NOT updated -- the bad SHA didn't
+    # land in state.db. (The original good SHA from the seed PUT
+    # is still there.)
+    r = client.get("/machines/aa:bb:cc:dd:ee:ff", cookies=AUTH)
+    assert r.status_code == 200
+    assert (
+        r.json()["image_sha256"]
+        == "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    )
+
+
+def test_ui_machine_detail_renders_error_query_param_as_flash_banner(
+    client: TestClient,
+) -> None:
+    """``/ui/machines/{mac}`` reads ``?error=<msg>`` so the
+    upsert form's validation-failure bounce surfaces as a
+    flash banner instead of a silent redirect."""
+    _login(client)
+    client.put(
+        "/machines/aa:bb:cc:dd:ee:ff",
+        json={
+            "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        },
+        cookies=AUTH,
+    )
+    r = client.get(
+        "/ui/machines/aa:bb:cc:dd:ee:ff?error=validation+failed%3A+test",
+        follow_redirects=False,
+    )
+    assert r.status_code == 200
+    body = r.text
+    assert 'class="alert alert-danger"' in body
+    assert "validation failed: test" in body
+
+
 def test_ui_images_renders_error_query_param_as_flash_banner(
     client: TestClient,
 ) -> None:
@@ -322,6 +392,11 @@ def test_ui_machine_upsert_persists_boot_policy_flash(client: TestClient) -> Non
 
 
 def test_ui_machine_upsert_rejects_unknown_boot_policy(client: TestClient) -> None:
+    """v0.7.32 routed form upsert through Pydantic ``MachineUpsert``;
+    invalid ``boot_policy`` now produces a 303 with an error flash
+    instead of a 400 page. The previous 400-from-explicit-set-check
+    contract was a worse UX (lost form context, no flash); the new
+    bounce-back-with-flash matches the catalog-form pattern."""
     _login(client)
     r = client.post(
         "/ui/machines/aa:bb:cc:dd:ee:ff",
@@ -330,9 +405,12 @@ def test_ui_machine_upsert_rejects_unknown_boot_policy(client: TestClient) -> No
             "provisioning_mode": "none",
             "boot_policy": "yolo",
         },
+        follow_redirects=False,
     )
-    assert r.status_code == 400
-    assert "boot_policy" in r.text
+    assert r.status_code == 303
+    location = r.headers["location"]
+    assert location.startswith("/ui/machines/aa:bb:cc:dd:ee:ff?error="), location
+    assert "boot_policy" in location
 
 
 def test_ui_machine_detail_renders_boot_policy_dropdown(client: TestClient) -> None:

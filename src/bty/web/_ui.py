@@ -35,7 +35,12 @@ import bty
 from bty import images as bty_images
 from bty.web import _db, _releases, _sysconfig
 from bty.web._auth import SESSION_AUTHED_KEY
-from bty.web._models import BOOT_POLICIES, PROVISIONING_MODES, CatalogEntryAdd
+from bty.web._models import (
+    BOOT_POLICIES,
+    PROVISIONING_MODES,
+    CatalogEntryAdd,
+    MachineUpsert,
+)
 
 
 class NotAuthenticated(Exception):
@@ -194,6 +199,11 @@ def register_ui_routes(
             unified = [u for u in list_unified_images() if u.sha256 is not None]
         else:
             unified = []
+        # Reads ``?error=<msg>`` so the upsert form's bounce-on-
+        # validation-failure renders a flash banner. Same shape as
+        # /ui/images: Jinja autoescape covers ``flash`` so a
+        # hostile error text cannot inject HTML.
+        flash = request.query_params.get("error")
         return render(
             "ui/machine_detail.html",
             request,
@@ -201,6 +211,8 @@ def register_ui_routes(
             images=unified,
             provisioning_modes=list(PROVISIONING_MODES),
             boot_policies=list(BOOT_POLICIES),
+            flash=flash,
+            flash_kind="danger" if flash else None,
         )
 
     @app.post(
@@ -216,17 +228,43 @@ def register_ui_routes(
         cijoe_workflow_ref: Annotated[str, Form()] = "",
         boot_policy: Annotated[str, Form()] = "local",
     ) -> RedirectResponse:
-        if provisioning_mode not in PROVISIONING_MODES:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"invalid provisioning_mode: {provisioning_mode!r}",
-            )
-        if boot_policy not in BOOT_POLICIES:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"invalid boot_policy: {boot_policy!r}",
-            )
         normalised = _normalise_mac(mac)
+        # Run the form inputs through the same Pydantic model the
+        # JSON ``PUT /machines/{mac}`` uses so we don't drift: the
+        # API rejects non-hex ``image_sha256`` (``pattern=
+        # r"^[0-9a-f]{64}$"``) and out-of-shape ``hostname`` shapes,
+        # while the form path used to accept any string. Empty-form
+        # fields normalise to ``None`` (Pydantic accepts ``None``
+        # for optional fields, and sqlite stores NULL).
+        try:
+            validated = MachineUpsert(
+                image_sha256=image_sha256 or None,
+                provisioning_mode=provisioning_mode,
+                hostname=hostname or None,
+                cijoe_workflow_ref=cijoe_workflow_ref or None,
+                boot_policy=boot_policy,
+            )
+        except ValueError as exc:
+            return RedirectResponse(
+                f"/ui/machines/{normalised}?error="
+                + urllib.parse.quote(f"validation failed: {exc}", safe=""),
+                status_code=status.HTTP_303_SEE_OTHER,
+            )
+        # ``provisioning_mode`` / ``boot_policy`` are pattern-checked
+        # by Pydantic above; the explicit set membership check is
+        # therefore redundant but kept for the legacy enum-style
+        # error wording (covers any future drift between the regex
+        # patterns and the documented set).
+        if validated.provisioning_mode not in PROVISIONING_MODES:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"invalid provisioning_mode: {validated.provisioning_mode!r}",
+            )
+        if validated.boot_policy not in BOOT_POLICIES:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"invalid boot_policy: {validated.boot_policy!r}",
+            )
         now = _now_iso()
         with _db.open_db(state_path) as conn:
             existing = conn.execute(
@@ -250,11 +288,11 @@ def register_ui_routes(
                 """,
                 (
                     normalised,
-                    image_sha256 or None,
-                    provisioning_mode,
-                    hostname or None,
-                    cijoe_workflow_ref or None,
-                    boot_policy,
+                    validated.image_sha256,
+                    validated.provisioning_mode,
+                    validated.hostname,
+                    validated.cijoe_workflow_ref,
+                    validated.boot_policy,
                     created_at,
                     now,
                 ),
