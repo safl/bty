@@ -250,6 +250,29 @@ def test_ui_catalog_entry_form_rejects_bad_url(client: TestClient) -> None:
     assert "filename%20component" in location or "filename+component" in location
 
 
+def test_ui_images_renders_error_query_param_as_flash_banner(
+    client: TestClient,
+) -> None:
+    """The form-style ``POST /ui/catalog/entries`` 303s back to
+    /ui/images with a ``?error=...`` query param on validation
+    failure / sha-resolve failure / duplicate-409. The page
+    handler must read the param into the layout's flash slot,
+    otherwise the operator gets a silent bounce with no reason
+    visible. Round 6 added the redirect; this test pins that
+    round 7's page handler renders it."""
+    _login(client)
+    r = client.get(
+        "/ui/images?error=validation+failed%3A+test+message",
+        follow_redirects=False,
+    )
+    assert r.status_code == 200
+    body = r.text
+    # The layout renders the flash inside an alert div.
+    assert 'class="alert alert-danger"' in body
+    # The decoded message appears in the rendered page.
+    assert "validation failed: test message" in body
+
+
 def test_ui_machine_upsert_via_form(client: TestClient) -> None:
     _login(client)
     r = client.post(

@@ -290,13 +290,27 @@ def register_ui_routes(
         The page renders the catalog + downloads via embedded JS
         polling ``/catalog/downloads`` every ~2s so an operator
         watches a fetch finish without manually refreshing.
+
+        Reads ``?error=<msg>`` from the query string into the
+        layout's flash slot. The form-style ``POST /ui/catalog/
+        entries`` 303s back here with that param on validation
+        failure, sha-resolve failure, or duplicate-src 409 --
+        without this read, the flash banner renders but the
+        operator never sees a reason for the bounce.
+        ``request.query_params.get`` returns ``None`` for an
+        absent param, which the layout treats as "no banner".
+        Jinja autoescapes ``flash`` so a hostile ``?error=`` value
+        cannot inject HTML.
         """
         unified = list_unified_images() if list_unified_images is not None else []
+        flash = request.query_params.get("error")
         return render(
             "ui/images.html",
             request,
             unified=unified,
             image_root=str(image_root),
+            flash=flash,
+            flash_kind="danger" if flash else None,
         )
 
     @app.post(
