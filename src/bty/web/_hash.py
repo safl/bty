@@ -214,11 +214,17 @@ class HashManager(_BaseAsyncManager[HashState]):
             if sha is not None:
                 state.sha256 = sha
 
-        # Log only successful hashes -- cancelled / failed runs
-        # are visible via /catalog/hashes and don't add audit
-        # value. ``state_path`` is optional so unit tests of the
-        # manager can stay db-free.
-        if final_status == "completed" and sha is not None and self._state_path is not None:
+        # Log terminal outcomes so the audit trail is symmetric:
+        # successful hashes land ``image.hashed`` with the sha;
+        # failures land ``image.hash_failed`` with the error so an
+        # operator scanning /ui/events can see "this file was
+        # supposed to import but couldn't" without having to
+        # poll /catalog/hashes. Cancelled hashes are operator-
+        # initiated and not logged. ``state_path`` is optional so
+        # unit tests of the manager can stay db-free.
+        if self._state_path is None:
+            return
+        if final_status == "completed" and sha is not None:
             with _db.open_db(self._state_path) as conn:
                 _log_event(
                     conn,
@@ -231,6 +237,21 @@ class HashManager(_BaseAsyncManager[HashState]):
                         "name": state.name,
                         "sha256": sha,
                         "bytes": state.bytes_total,
+                    },
+                )
+                conn.commit()
+        elif final_status == "failed":
+            with _db.open_db(self._state_path) as conn:
+                _log_event(
+                    conn,
+                    kind="image.hash_failed",
+                    summary=f"image {state.name!r} hash failed: {error or 'unknown error'}",
+                    subject_kind="image",
+                    subject_id=state.name,
+                    actor="system",
+                    details={
+                        "name": state.name,
+                        "error": error,
                     },
                 )
                 conn.commit()

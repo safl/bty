@@ -603,9 +603,30 @@ def register_ui_routes(
         interface: Annotated[str, Form()] = "",
         subnet: Annotated[str, Form()] = "",
     ) -> HTMLResponse:
+        client_ip = _client_ip(request)
         try:
             _sysconfig.activate_pxe(interface, subnet)
         except _sysconfig.SysConfigError as exc:
+            # Log the failure so the audit trail is symmetric with
+            # the success path -- a failed activation is operator
+            # activity worth recording (failed sudo, malformed
+            # subnet, missing interface, etc.).
+            with _db.open_db(state_path) as conn:
+                _events_log.record(
+                    conn,
+                    kind="settings.pxe.activate_failed",
+                    summary=f"PXE activation failed on {interface!r} for {subnet!r}: {exc}",
+                    subject_kind="settings",
+                    subject_id="pxe",
+                    actor="operator",
+                    source_ip=client_ip,
+                    details={
+                        "interface": interface,
+                        "subnet": subnet,
+                        "error": str(exc),
+                    },
+                )
+                conn.commit()
             return _render_settings_page(
                 request, flash=f"PXE activation failed: {exc}", flash_kind="danger"
             )
@@ -617,7 +638,7 @@ def register_ui_routes(
                 subject_kind="settings",
                 subject_id="pxe",
                 actor="operator",
-                source_ip=_client_ip(request),
+                source_ip=client_ip,
                 details={"interface": interface, "subnet": subnet},
             )
             conn.commit()
@@ -640,9 +661,22 @@ def register_ui_routes(
         # flash, on failure with a red one. We do NOT propagate the
         # underlying urllib / network exception further.
         resolved_tag = tag or "latest"
+        client_ip = _client_ip(request)
         try:
             result = _releases.fetch_release(boot_root, tag=resolved_tag)
         except _releases.FetchError as exc:
+            with _db.open_db(state_path) as conn:
+                _events_log.record(
+                    conn,
+                    kind="boot.release.fetch_failed",
+                    summary=f"boot release {resolved_tag!r} fetch failed: {exc}",
+                    subject_kind="boot",
+                    subject_id=resolved_tag,
+                    actor="operator",
+                    source_ip=client_ip,
+                    details={"tag": resolved_tag, "error": str(exc)},
+                )
+                conn.commit()
             return _render_boot_page(
                 request,
                 flash=f"Fetch failed: {exc}",
@@ -656,7 +690,7 @@ def register_ui_routes(
                 subject_kind="boot",
                 subject_id=resolved_tag,
                 actor="operator",
-                source_ip=_client_ip(request),
+                source_ip=client_ip,
                 details={
                     "tag": resolved_tag,
                     "base_url": result.base_url,

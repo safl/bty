@@ -195,11 +195,17 @@ class ReleaseFetchManager(_BaseAsyncManager[ReleaseFetchState]):
             if base_url is not None:
                 state.base_url = base_url
 
-        # Log only successful fetches -- the operator drove the
-        # cancel themselves (no audit value) and failures already
-        # surface in /boot/releases. ``state_path`` is optional
-        # so unit tests of the manager can stay db-free.
-        if final_status == "completed" and self._state_path is not None:
+        # Log terminal outcomes so the audit trail is symmetric:
+        # successful fetches land ``boot.release.fetched``, failures
+        # land ``boot.release.fetch_failed`` with the error so the
+        # operator can see "this fetch tried + crashed" in
+        # /ui/events without polling /boot/releases. Cancelled
+        # fetches are operator-initiated and not logged.
+        # ``state_path`` is optional so unit tests of the manager
+        # can stay db-free.
+        if self._state_path is None:
+            return
+        if final_status == "completed":
             with _db.open_db(self._state_path) as conn:
                 _log_event(
                     conn,
@@ -211,6 +217,21 @@ class ReleaseFetchManager(_BaseAsyncManager[ReleaseFetchState]):
                     details={
                         "tag": state.tag,
                         "base_url": state.base_url,
+                    },
+                )
+                conn.commit()
+        elif final_status == "failed":
+            with _db.open_db(self._state_path) as conn:
+                _log_event(
+                    conn,
+                    kind="boot.release.fetch_failed",
+                    summary=f"boot release {state.tag!r} fetch failed: {error or 'unknown error'}",
+                    subject_kind="boot",
+                    subject_id=state.tag,
+                    actor="system",
+                    details={
+                        "tag": state.tag,
+                        "error": error,
                     },
                 )
                 conn.commit()

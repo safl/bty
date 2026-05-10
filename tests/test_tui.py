@@ -1066,46 +1066,6 @@ def test_wizard_back_via_backspace_all_the_way(
     _run(_drive())
 
 
-def test_theme_picker_opens_and_dismisses_cleanly(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Pressing ``t`` pushes a ThemeSelectScreen modal; pressing
-    Esc dismisses it without changing the active theme.
-
-    Same regression-class as ``test_action_flash_pushes_confirm_modal_*``
-    -- guards against the ``@work`` decorator being dropped from
-    ``action_theme`` (Textual 8.x requires worker context for
-    ``push_screen_wait``).
-    """
-    _patch_data_sources(
-        monkeypatch,
-        images_list=[_fake_image()],
-        disks_list=[_fake_disk()],
-    )
-    app = tui_app.BtyTui(image_root=tmp_path / "images")
-
-    async def _drive() -> None:
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            initial_theme = app.theme
-
-            await pilot.press("t")
-            for _ in range(10):
-                await pilot.pause()
-
-            top = app.screen
-            assert isinstance(top, tui_app.ThemeSelectScreen), (
-                f"expected ThemeSelectScreen, got {type(top).__name__}"
-            )
-            top.dismiss(None)
-            for _ in range(10):
-                await pilot.pause()
-            # Active theme unchanged when dismissed without selection.
-            assert app.theme == initial_theme
-
-    _run(_drive())
-
-
 def test_action_flash_success_flips_button_to_reboot(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

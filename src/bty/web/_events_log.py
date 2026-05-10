@@ -96,10 +96,13 @@ KNOWN_EVENT_KINDS: tuple[str, ...] = (
     "machine.task.failed",
     "image.uploaded",
     "image.hashed",
+    "image.hash_failed",
     "catalog.entry.added",
     "catalog.entry.deleted",
     "boot.release.fetched",
+    "boot.release.fetch_failed",
     "settings.pxe.activated",
+    "settings.pxe.activate_failed",
 )
 
 # Catalogue of ``subject_kind`` values. Powers the /ui/events

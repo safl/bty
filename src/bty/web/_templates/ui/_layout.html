@@ -8,15 +8,22 @@
     <link rel="stylesheet" href="/static/bootstrap.min.css">
     <link rel="stylesheet" href="/static/bootstrap-icons.min.css">
     <style>
-        /* Brand strip: a thin gradient accent above the navbar so the
-           appliance has a recognisable look beyond stock Bootstrap. */
+        /* Brand strip: a thin gradient accent above the navbar.
+           tokyo-night.css overrides the gradient to Tokyo Night
+           accent hues; the height is kept here so the strip
+           still works if the theme CSS fails to load. */
         .bty-accent {
             height: 3px;
             background: linear-gradient(90deg, #0d6efd 0%, #6610f2 50%, #d63384 100%);
         }
         .navbar-brand .brand-icon {
-            font-size: 1.4rem;
-            vertical-align: -0.15rem;
+            /* The bty bat mascot, used in place of a Bootstrap icon
+               so the brand pill reads as "this product" rather than
+               "some generic networking thing". Sized to align with
+               the badge / nav-btn baseline. */
+            width: 1.6rem;
+            height: 1.6rem;
+            vertical-align: -0.4rem;
         }
         .navbar .nav-btn {
             display: inline-flex;
@@ -122,7 +129,7 @@
 <nav class="navbar navbar-expand-md bg-dark navbar-dark py-2">
     <div class="container">
         <a class="navbar-brand fw-semibold" href="/ui/dashboard">
-            <i class="bi bi-hdd-network-fill brand-icon text-info me-1"></i>bty-web
+            <img src="/static/bty-favicon.png" alt="" class="brand-icon me-1">bty-web
             <span class="badge bg-secondary fw-normal ms-1">{{ version }}</span>
         </a>
         {% if logged_in %}

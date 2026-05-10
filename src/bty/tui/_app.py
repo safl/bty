@@ -28,7 +28,6 @@ the keys below cover everything else):
 - ``r``           refresh catalogs
 - ``Shift+R``     reboot the machine running bty-tui
 - ``s``           switch image source (local <-> remote bty-web)
-- ``t``           theme picker
 - ``/``           filter the image catalog by substring
 - ``f``           flash shortcut (equivalent to Enter on Flash button)
 
@@ -78,12 +77,10 @@ from textual.widgets import (
     DataTable,
     Header,
     Input,
-    OptionList,
     ProgressBar,
     RichLog,
     Static,
 )
-from textual.widgets.option_list import Option
 
 import bty
 from bty import disks, flash, images
@@ -891,107 +888,12 @@ class SourceSelectScreen(ModalScreen["str | Path | None"]):
             self.dismiss(url)
 
 
-class ThemeSelectScreen(ModalScreen[str | None]):
-    """Modal showing the available Textual themes; Enter applies, Esc dismisses.
-
-    Triggered from ``BtyTui.action_theme`` (``t`` binding). The
-    list comes from ``App.available_themes`` (Textual's built-in
-    catalog: textual-dark, textual-light, nord, gruvbox,
-    catppuccin-mocha, dracula, tokyo-night, monokai). The
-    currently active theme is pre-highlighted so the operator
-    can confirm or change with arrow keys + Enter; Esc bails
-    without changing anything.
-
-    Returns the selected theme name on Enter, or ``None`` on Esc.
-    """
-
-    DEFAULT_CSS = """
-    ThemeSelectScreen {
-        align: center middle;
-    }
-
-    ThemeSelectScreen > Vertical {
-        width: 50;
-        height: auto;
-        max-height: 80%;
-        padding: 1 2;
-        background: $panel;
-        border: round $accent;
-        border-title-style: bold;
-        border-title-color: $accent;
-        border-title-align: left;
-    }
-
-    ThemeSelectScreen OptionList {
-        height: auto;
-        max-height: 20;
-        background: transparent;
-        border: none;
-    }
-
-    .theme-help {
-        height: 1;
-        color: $text-muted;
-        margin-top: 1;
-    }
-    """
-
-    BINDINGS: ClassVar[list[Binding | tuple[str, str] | tuple[str, str, str]]] = [
-        Binding("escape", "dismiss(None)", "Cancel"),
-        Binding("enter", "apply", "Apply"),
-    ]
-
-    def __init__(self, current_theme: str, available: list[str]) -> None:
-        super().__init__()
-        self._current = current_theme
-        self._available = sorted(available)
-
-    def compose(self) -> ComposeResult:
-        with Vertical() as panel:
-            panel.border_title = "  Select theme  "
-            options = [
-                Option(
-                    f"  {name}{'  *' if name == self._current else ''}",
-                    id=name,
-                )
-                for name in self._available
-            ]
-            yield OptionList(*options, id="theme-list")
-            yield Static("Enter to apply, Esc to cancel", classes="theme-help")
-
-    def on_mount(self) -> None:
-        # Pre-highlight the active theme so the operator sees what's
-        # in effect without scrolling.
-        ol = self.query_one("#theme-list", OptionList)
-        try:
-            idx = self._available.index(self._current)
-            ol.highlighted = idx
-        except ValueError:
-            pass
-        ol.focus()
-
-    def action_apply(self) -> None:
-        ol = self.query_one("#theme-list", OptionList)
-        if ol.highlighted is None:
-            self.dismiss(None)
-            return
-        self.dismiss(self._available[ol.highlighted])
-
-    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
-        # Pressing Enter on a highlighted row also applies; this fires
-        # in addition to ``action_apply`` for explicit Enter, but
-        # ``ModalScreen.dismiss`` is idempotent so the second call is
-        # a no-op once the screen is gone.
-        if event.option.id is not None:
-            self.dismiss(event.option.id)
-
-
 class HelpScreen(ModalScreen[None]):
     """Cheat sheet of every bty-tui keybinding.
 
     Triggered by ``?`` from the main screen. The operator on the bty
     USB live env has no docs at hand -- this modal is the only
-    discovery surface for the wizard / source / theme / filter
+    discovery surface for the wizard / source / filter
     bindings. ``Esc``, ``q``, or ``?`` again all close it.
     """
 
@@ -1056,10 +958,6 @@ class HelpScreen(ModalScreen[None]):
                 classes="help-row",
             )
             yield Static(
-                "  t             open the theme picker",
-                classes="help-row",
-            )
-            yield Static(
                 "  /             filter the image catalog by substring",
                 classes="help-row",
             )
@@ -1088,7 +986,6 @@ class BtyTui(App[None]):
         Binding("r", "refresh", "Refresh", show=False),
         Binding("f", "flash", "Flash", show=False),
         Binding("R", "reboot", "Reboot", show=False),
-        Binding("t", "theme", "Theme", show=False),
         Binding("s", "source", "Source", show=False),
         Binding("slash", "focus_filter", "Filter", show=False),
         # ``?`` pops a help modal listing every keybinding. Common
@@ -1295,8 +1192,7 @@ class BtyTui(App[None]):
     def on_mount(self) -> None:
         # Tokyo Night picks up the navy + warm-yellow palette of the
         # bty mascot (saturated cool background, yellow accents).
-        # Operators can swap themes at runtime via the ``t`` binding
-        # (ThemeSelectScreen).
+        # Single fixed theme: no runtime picker.
         self.theme = "tokyo-night"
         self.sub_title = bty.__version__
         # Border-title labels on each pane (harlequin / posting style:
@@ -1739,24 +1635,6 @@ class BtyTui(App[None]):
         with contextlib.suppress(Exception):
             self.query_one("#images_table", DataTable).focus()
         self._set_status_transient(f"Source: {source}")
-
-    @work(exclusive=True)
-    async def action_theme(self) -> None:
-        """Open the theme picker; apply the selected theme on dismiss.
-
-        ``@work(exclusive=True)`` for the same reason as
-        ``action_flash`` -- ``push_screen_wait`` requires worker
-        context. Operators have asked for theme switching at
-        runtime since the default Tokyo Night palette doesn't
-        suit every hardware terminal; the picker lists every
-        theme Textual ships and applies on Enter / dismisses
-        without change on Esc.
-        """
-        available = list(self.available_themes.keys())
-        selected = await self.push_screen_wait(ThemeSelectScreen(self.theme, available))
-        if selected is not None and selected != self.theme:
-            self.theme = selected
-            self._set_status_transient(f"Theme: {selected}")
 
     @work(exclusive=True)
     async def action_flash(self) -> None:
