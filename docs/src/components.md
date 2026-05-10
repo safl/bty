@@ -234,3 +234,42 @@ UI's "Cancel running task" button; bty-web flips a
 Status surfaces via `last_task_status` and the SSE
 machines-update channel; lifecycle events land in the audit log
 (`/ui/events`).
+
+## Audit log
+
+bty-web records "who did what when" rows to a slim `events`
+table in `state.db` and surfaces them at `/ui/events` (HTML
+table) and `GET /events` (JSON API). Every operator action,
+PXE-client check-in, and async-manager terminal status lands
+a row.
+
+**Schema:** `kind` (dotted namespace e.g. `machine.discovered`,
+`image.hashed`), `subject_kind` + `subject_id` (the entity
+the event is about), `actor` (`operator` / `system` /
+`pxe-client`), `source_ip` (request client host or target IP,
+v4-mapped-v6 normalised to bare v4), `summary` (operator-
+readable string), `details` (JSON blob with extras). Append-
+only; no auto-trimming -- the table is a few KB per event so
+years of homelab activity fit. Operators with strict retention
+needs run `DELETE FROM events WHERE ts < ?` themselves.
+
+**Failure symmetry.** Every async-manager + operator-driven
+action that can fail emits a paired `<kind>_failed` event
+(`image.upload_failed`, `image.hash_failed`,
+`boot.release.fetch_failed`, `settings.pxe.activate_failed`,
+`catalog.entry.add_failed`). Failed kinds render in the
+events table with a danger-coloured badge so they pop in a
+long log.
+
+**Filtering.** The `/ui/events` filter form and the JSON API
+both accept `kind`, `subject_kind`, `subject_id`, `actor`,
+`source_ip`. Click-pivot links on each cell of the events
+table jump to the timeline filtered by that value, so an
+operator can ask "everything from 192.168.1.5" or "everything
+that touched image X" with one click.
+
+**Recent-activity cards** on `/ui/dashboard`, `/ui/machines/
+{mac}`, `/ui/images`, `/ui/boot`, and `/ui/settings` all
+embed the same `_events_card.html` partial filtered to the
+relevant subject so each page has a short timeline of
+context-relevant rows.

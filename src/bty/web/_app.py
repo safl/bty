@@ -879,6 +879,23 @@ def create_app(
                 )
                 conn.commit()
             raise
+        except OSError as exc:
+            # Disk full / read-only filesystem / etc. ``_stream_upload``
+            # already cleaned up the .partial; we just record the
+            # failure and let it propagate to a 500 response.
+            with _db.open_db(state_path) as conn:
+                _log_event(
+                    conn,
+                    kind="image.upload_failed",
+                    summary=f"image {name!r} upload failed: {type(exc).__name__}: {exc}",
+                    subject_kind="image",
+                    subject_id=name,
+                    actor="operator",
+                    source_ip=_client_ip(request),
+                    details={"status_code": 500, "error": f"{type(exc).__name__}: {exc}"},
+                )
+                conn.commit()
+            raise
         # Image catalog count changes; refresh the dashboard fragment.
         publish_state_changed()
         # Trigger an import for the just-uploaded file UNLESS it's

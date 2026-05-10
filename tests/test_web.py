@@ -1206,6 +1206,40 @@ def test_events_filter_by_source_ip(app_client: TestClient) -> None:
     assert all(e["source_ip"] == "testclient" for e in events)
 
 
+def test_catalog_entry_add_sha_failure_logs_event(
+    app_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When ``POST /catalog/entries`` is given an image_url +
+    sha_url and the sha resolution fails (CatalogError from
+    bty.catalog.fetch_sha256_for_url), a
+    ``catalog.entry.add_failed`` event lands in the audit log
+    instead of just a bare 400 response."""
+    from bty import catalog as _catalog
+
+    def boom(*_a: object, **_kw: object) -> str:
+        raise _catalog.CatalogError("upstream gave 404")
+
+    monkeypatch.setattr(_catalog, "fetch_sha256_for_url", boom)
+    r = app_client.post(
+        "/catalog/entries",
+        json={
+            "image_url": "https://example.com/foo.img.gz",
+            "sha_url": "https://example.com/foo.sha256",
+        },
+        cookies=AUTH,
+    )
+    assert r.status_code == 400
+    r = app_client.get("/events", params={"kind": "catalog.entry.add_failed"}, cookies=AUTH)
+    events = r.json()["events"]
+    assert len(events) == 1
+    row = events[0]
+    assert row["actor"] == "operator"
+    assert row["subject_kind"] == "catalog"
+    assert row["subject_id"] == "https://example.com/foo.img.gz"
+    assert row["details"] is not None
+    assert "upstream gave 404" in row["details"]["error"]
+
+
 def test_image_upload_oversized_logs_failure_event(
     app_client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1228,6 +1262,37 @@ def test_image_upload_oversized_logs_failure_event(
     assert row["subject_kind"] == "image"
     assert row["subject_id"] == "big.qcow2"
     assert row["details"]["status_code"] == 413
+
+
+def test_image_upload_oserror_logs_failure_event(
+    app_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An OSError mid-upload (disk full, read-only fs, etc.) also
+    lands an ``image.upload_failed`` event so the audit trail
+    isn't only HTTPException-shaped failures.
+
+    Starlette's TestClient re-raises server exceptions by default
+    (``raise_server_exceptions=True``); we accept the OSError
+    propagating in-test and assert the event was recorded
+    *before* the re-raise."""
+    from bty.web import _app
+
+    async def boom(*_a: object, **_kw: object) -> dict[str, object]:
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(_app, "_stream_upload", boom)
+    with pytest.raises(OSError, match="No space left on device"):
+        app_client.put(
+            "/images/whatever.qcow2",
+            content=b"...",
+            cookies=AUTH,
+        )
+    r = app_client.get("/events", params={"kind": "image.upload_failed"}, cookies=AUTH)
+    events = r.json()["events"]
+    assert len(events) == 1
+    row = events[0]
+    assert row["details"]["status_code"] == 500
+    assert "No space left on device" in row["details"]["error"]
 
 
 def test_settings_pxe_activate_failure_logs_event(app_client: TestClient) -> None:
