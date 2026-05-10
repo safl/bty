@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS machines (
     boot_policy               TEXT NOT NULL DEFAULT 'local',
     last_flashed_at           TEXT,    -- updated by POST /pxe/{mac}/done
     last_task_run_at          TEXT,    -- start of the most recent task run
-    last_task_status          TEXT,    -- 'running' / 'completed' / 'cancelled' / 'failed' / NULL
+    last_task_status          TEXT,    -- one of bty.web._models.TASK_STATUSES, or NULL
     last_task_output_path     TEXT,    -- on-disk dir of the cijoe run
     created_at                TEXT NOT NULL,
     updated_at                TEXT NOT NULL
@@ -79,6 +79,12 @@ CREATE TABLE IF NOT EXISTS events (
     subject_kind  TEXT,                 -- 'machine' / 'image' / 'catalog' / NULL
     subject_id    TEXT,                 -- mac / sha / src / NULL
     actor         TEXT,                 -- 'operator' / 'system' / 'pxe-client' / NULL
+    -- IP that initiated / observed the event. For operator events,
+    -- the request's client host (operator's browser / curl). For
+    -- pxe-client events, the target's IP at check-in. For
+    -- task-runner system events, the target's last_seen_ip we
+    -- SSHed to. NULL for events with no meaningful source IP.
+    source_ip     TEXT,
     summary       TEXT NOT NULL,
     details       TEXT                  -- JSON blob with kind-specific extras
 );

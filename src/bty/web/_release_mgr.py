@@ -33,8 +33,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from bty.web import _releases
-from bty.web._jobs import _BaseAsyncManager
+from bty.web import _db, _releases
+from bty.web._events_log import record as _log_event
+from bty.web._jobs import ENQUEUE_DEDUP_STATES, _BaseAsyncManager
 
 # Default cap on simultaneous release fetches. Tuned for "one
 # release at a time" semantics; bumping is unusual.
@@ -100,9 +101,16 @@ class ReleaseFetchManager(_BaseAsyncManager[ReleaseFetchState]):
     def __init__(self, max_parallel: int | None = None) -> None:
         super().__init__(max_parallel or DEFAULT_MAX_PARALLEL)
         self._boot_root: Path | None = None
+        self._state_path: Path | None = None
 
-    def start(self, boot_root: Path) -> None:
+    def start(self, boot_root: Path, state_path: Path | None = None) -> None:
+        """Spawn the worker pool. ``state_path`` is optional: when
+        given, terminal status transitions (completed / failed)
+        log a ``boot.release.fetched`` event to the audit table
+        so async fetches surface in /ui/events alongside the
+        synchronous /ui/boot/fetch-release path. Tests omit it."""
         self._boot_root = boot_root
+        self._state_path = state_path
         self._spawn_workers()
 
     async def enqueue(self, tag: str) -> ReleaseFetchState:
@@ -125,7 +133,7 @@ class ReleaseFetchManager(_BaseAsyncManager[ReleaseFetchState]):
             raise RuntimeError("ReleaseFetchManager not started")
         async with self._lock:
             existing = self._states.get(tag)
-            if existing is not None and existing.status in ("queued", "running", "completed"):
+            if existing is not None and existing.status in ENQUEUE_DEDUP_STATES:
                 return existing
             state = ReleaseFetchState(tag=tag)
             self._states[tag] = state
@@ -186,3 +194,23 @@ class ReleaseFetchManager(_BaseAsyncManager[ReleaseFetchState]):
             state.error = error
             if base_url is not None:
                 state.base_url = base_url
+
+        # Log only successful fetches -- the operator drove the
+        # cancel themselves (no audit value) and failures already
+        # surface in /boot/releases. ``state_path`` is optional
+        # so unit tests of the manager can stay db-free.
+        if final_status == "completed" and self._state_path is not None:
+            with _db.open_db(self._state_path) as conn:
+                _log_event(
+                    conn,
+                    kind="boot.release.fetched",
+                    summary=f"boot release {state.tag!r} fetched from {state.base_url}",
+                    subject_kind="boot",
+                    subject_id=state.tag,
+                    actor="system",
+                    details={
+                        "tag": state.tag,
+                        "base_url": state.base_url,
+                    },
+                )
+                conn.commit()

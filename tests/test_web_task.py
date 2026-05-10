@@ -178,6 +178,41 @@ def test_task_manager_renders_transport_config(runner) -> None:
     assert 'hostname = "10.0.0.5"' in config
     assert "cijoe.transport.ssh" in config
     assert 'username = "root"' in config
+    # Default SSH port is 22.
+    assert "port = 22" in config
+
+
+def test_task_manager_renders_custom_ssh_port(tmp_path: Path) -> None:
+    """``ssh_port=`` constructor arg flows into the synthesised
+    transport TOML. Operators with port-forwarded targets (sshd
+    on 2222 etc.) configure via ``BTY_CIJOE_SSH_PORT`` at the
+    ``create_app`` boundary; this test pins the underlying
+    plumbing."""
+    state_db = tmp_path / "state.db"
+    _db.init_db(state_db)
+    _seed_machine(state_db)
+
+    runner_obj = TaskManager(
+        state_path=state_db,
+        publish_machines_changed=lambda: None,
+        tasks_dir=tmp_path / "tasks",
+        ssh_key_path=tmp_path / "key",
+        cijoe_bin="cijoe-fake",
+        ssh_port=2222,
+    )
+
+    proc = _fake_proc(0)
+    with patch("bty.web._task.subprocess.Popen", return_value=proc):
+        runner_obj._run(_seed_state())
+
+    with _db.open_db(state_db) as conn:
+        row = conn.execute(
+            "SELECT last_task_output_path FROM machines WHERE mac = ?",
+            ("aa:bb:cc:dd:ee:ff",),
+        ).fetchone()
+    config = (Path(row["last_task_output_path"]) / "transport.toml").read_text()
+    assert "port = 2222" in config
+    assert "port = 22\n" not in config  # the default isn't lurking somewhere
 
 
 # ---------- subprocess invocation -------------------------------------------

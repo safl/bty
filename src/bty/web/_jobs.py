@@ -31,8 +31,7 @@ Subclasses MUST:
 
 State dataclasses MUST carry attributes:
 
-  * ``status: str`` -- one of ``"queued" | "running" | "completed"
-    | "cancelled" | "failed"``.
+  * ``status: str`` -- one of :data:`JOB_STATES`.
   * ``started_at: float | None``.
   * ``finished_at: float | None``.
   * ``_cancel: threading.Event`` -- set by the API's cancel
@@ -47,6 +46,19 @@ import asyncio
 import contextlib
 import time
 from typing import Generic, Protocol, TypeVar
+
+# Lifecycle states a queued job may carry. ``queued`` and
+# ``running`` are non-terminal; the rest are terminal. Cancellable
+# only while non-terminal -- :meth:`_BaseAsyncManager.cancel` keys
+# off ``_PENDING_STATES`` to short-circuit cancels of already-done
+# jobs.
+JOB_STATES: tuple[str, ...] = ("queued", "running", "completed", "cancelled", "failed")
+PENDING_STATES: frozenset[str] = frozenset(("queued", "running"))
+# "Already done successfully or about to be" -- the per-key dedup
+# guard in DownloadManager / HashManager / ReleaseFetchManager
+# uses this to short-circuit re-enqueues. Cancelled / failed are
+# excluded so an operator can retry.
+ENQUEUE_DEDUP_STATES: frozenset[str] = frozenset(("queued", "running", "completed"))
 
 
 class _CancelableState(Protocol):
@@ -93,7 +105,7 @@ class _BaseAsyncManager(Generic[StateT]):
         self._stopping = True
         async with self._lock:
             for st in self._states.values():
-                if st.status in ("queued", "running"):
+                if st.status in PENDING_STATES:
                     st._cancel.set()  # type: ignore[attr-defined]
                     if st.status == "queued":
                         st.status = "cancelled"
@@ -115,7 +127,7 @@ class _BaseAsyncManager(Generic[StateT]):
             state = self._states.get(key)
             if state is None:
                 return None
-            if state.status not in ("queued", "running"):
+            if state.status not in PENDING_STATES:
                 return state
             state._cancel.set()  # type: ignore[attr-defined]
             if state.status == "queued":

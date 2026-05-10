@@ -220,6 +220,14 @@ the right machine is always under bty-web's control. The
 operator can layer extra named transports / settings on top
 without redirecting commands to the wrong host.
 
+**Non-default SSH port.** Targets that listen on something
+other than 22 (a separate IPMI host, an SSH jumpbox, a homelab
+NAT-mapped port) configure via `BTY_CIJOE_SSH_PORT` at the
+bty-web service level. Out-of-range or non-numeric values fall
+back to 22 silently so a typo doesn't break every task run; set
+it once in `/etc/default/bty-web` (or the systemd unit's
+`Environment=`) for the whole appliance.
+
 **Cancelable.** The operator can DELETE `/tasks/{mac}` from the
 UI's "Cancel running task" button; bty-web flips a
 `threading.Event` and `Popen.terminate()`s the cijoe subprocess.

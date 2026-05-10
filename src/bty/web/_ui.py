@@ -35,33 +35,15 @@ import bty
 from bty import images as bty_images
 from bty.web import _db, _events_log, _releases, _sysconfig
 from bty.web._auth import SESSION_AUTHED_KEY
+from bty.web._events_log import KNOWN_EVENT_KINDS, KNOWN_SUBJECT_KINDS
+from bty.web._events_log import normalize_ip as _normalize_ip
 from bty.web._models import (
     BOOT_POLICIES,
+    DEFAULT_BOOT_POLICY,
+    DEFAULT_PROVISIONING_MODE,
     PROVISIONING_MODES,
     CatalogEntryAdd,
     MachineUpsert,
-)
-
-# Event kinds the /ui/events filter dropdown advertises. Keep in
-# sync with the ``_log_event(kind=...)`` callsites in _app.py +
-# _task.py + _ui.py. New kinds added here surface in the dropdown
-# even if no row carries them yet, which is fine.
-_KNOWN_EVENT_KINDS: tuple[str, ...] = (
-    "machine.discovered",
-    "machine.created",
-    "machine.upserted",
-    "machine.deleted",
-    "machine.flashed",
-    "machine.task.running",
-    "machine.task.completed",
-    "machine.task.cancelled",
-    "machine.task.failed",
-    "image.uploaded",
-    "image.hashed",
-    "catalog.entry.added",
-    "catalog.entry.deleted",
-    "boot.release.fetched",
-    "settings.pxe.activated",
 )
 
 
@@ -257,10 +239,10 @@ def register_ui_routes(
     def ui_machine_upsert(
         mac: str,
         image_sha256: Annotated[str, Form()] = "",
-        provisioning_mode: Annotated[str, Form()] = "none",
+        provisioning_mode: Annotated[str, Form()] = DEFAULT_PROVISIONING_MODE,
         hostname: Annotated[str, Form()] = "",
         cijoe_task_ref: Annotated[str, Form()] = "",
-        boot_policy: Annotated[str, Form()] = "local",
+        boot_policy: Annotated[str, Form()] = DEFAULT_BOOT_POLICY,
     ) -> RedirectResponse:
         normalised = _normalise_mac(mac)
         # Run the form inputs through the same Pydantic model the
@@ -525,6 +507,7 @@ def register_ui_routes(
         kind: str | None = None,
         subject_kind: str | None = None,
         subject_id: str | None = None,
+        source_ip: str | None = None,
         before_id: int | None = None,
     ) -> HTMLResponse:
         """Event log page.
@@ -544,12 +527,14 @@ def register_ui_routes(
         kind_norm = kind or None
         subject_kind_norm = subject_kind or None
         subject_id_norm = subject_id or None
+        source_ip_norm = source_ip or None
         with _db.open_db(state_path) as conn:
             events = _events_log.list_events(
                 conn,
                 kind=kind_norm,
                 subject_kind=subject_kind_norm,
                 subject_id=subject_id_norm,
+                source_ip=source_ip_norm,
                 before_id=before_id,
                 limit=page_size,
             )
@@ -562,6 +547,7 @@ def register_ui_routes(
                 "kind": kind_norm or "",
                 "subject_kind": subject_kind_norm or "",
                 "subject_id": subject_id_norm or "",
+                "source_ip": source_ip_norm or "",
                 "before_id": str(events[-1].id),
             }
             non_empty = {k: v for k, v in params.items() if v}
@@ -573,7 +559,9 @@ def register_ui_routes(
             kind=kind_norm,
             subject_kind=subject_kind_norm,
             subject_id=subject_id_norm,
-            known_kinds=_KNOWN_EVENT_KINDS,
+            source_ip=source_ip_norm,
+            known_kinds=KNOWN_EVENT_KINDS,
+            known_subject_kinds=KNOWN_SUBJECT_KINDS,
             older_url=older_url,
         )
 
@@ -621,6 +609,18 @@ def register_ui_routes(
             return _render_settings_page(
                 request, flash=f"PXE activation failed: {exc}", flash_kind="danger"
             )
+        with _db.open_db(state_path) as conn:
+            _events_log.record(
+                conn,
+                kind="settings.pxe.activated",
+                summary=f"PXE activated on {interface!r} for {subnet!r}",
+                subject_kind="settings",
+                subject_id="pxe",
+                actor="operator",
+                source_ip=_client_ip(request),
+                details={"interface": interface, "subnet": subnet},
+            )
+            conn.commit()
         return _render_settings_page(
             request,
             flash=f"PXE activated on {interface!r} for {subnet!r}.",
@@ -639,14 +639,32 @@ def register_ui_routes(
         # Best-effort fetch; on success render the page with a green
         # flash, on failure with a red one. We do NOT propagate the
         # underlying urllib / network exception further.
+        resolved_tag = tag or "latest"
         try:
-            result = _releases.fetch_release(boot_root, tag=tag or "latest")
+            result = _releases.fetch_release(boot_root, tag=resolved_tag)
         except _releases.FetchError as exc:
             return _render_boot_page(
                 request,
                 flash=f"Fetch failed: {exc}",
                 flash_kind="danger",
             )
+        with _db.open_db(state_path) as conn:
+            _events_log.record(
+                conn,
+                kind="boot.release.fetched",
+                summary=(f"Fetched {len(result.artifacts)} boot artifacts from {result.base_url}"),
+                subject_kind="boot",
+                subject_id=resolved_tag,
+                actor="operator",
+                source_ip=_client_ip(request),
+                details={
+                    "tag": resolved_tag,
+                    "base_url": result.base_url,
+                    "total_bytes": result.total_bytes,
+                    "artifacts": list(result.artifacts),
+                },
+            )
+            conn.commit()
         return _render_boot_page(
             request,
             flash=(
@@ -678,6 +696,15 @@ def _row_to_dict(row: Any) -> dict[str, Any]:
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
     }
+
+
+def _client_ip(request: Request) -> str | None:
+    """Mirror of ``bty.web._app._client_ip``: read the request's
+    client host and feed it through :func:`_events_log.normalize_ip`
+    so v4-mapped-v6 addresses collapse to bare v4 before hitting
+    the audit log. Duplicated here rather than imported because
+    ``_app`` already imports this module (circular)."""
+    return _normalize_ip(request.client.host if request.client else None)
 
 
 def _normalise_mac(raw: str) -> str:

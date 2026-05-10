@@ -15,7 +15,7 @@
             <dt class="col-sm-3">Discovered</dt>
             <dd class="col-sm-9">{{ m.discovered_at or "-" }}</dd>
             <dt class="col-sm-3">Last seen</dt>
-            <dd class="col-sm-9">{{ m.last_seen_at or "-" }}{% if m.last_seen_ip %} from <code>{{ m.last_seen_ip }}</code>{% endif %}</dd>
+            <dd class="col-sm-9">{{ m.last_seen_at or "-" }}{% if m.last_seen_ip %} from <a class="text-decoration-none" href="/ui/events?source_ip={{ m.last_seen_ip|urlencode }}" title="Show every event from this IP"><code>{{ m.last_seen_ip }}</code></a>{% endif %}</dd>
             <dt class="col-sm-3">Last flashed</dt>
             <dd class="col-sm-9">{{ m.last_flashed_at or "-" }}</dd>
             <dt class="col-sm-3">Last task</dt>

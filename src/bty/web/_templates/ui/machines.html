@@ -34,8 +34,16 @@
             </div>
             <div class="col-md-3">
                 <label for="add-hostname" class="form-label small mb-1">Hostname <span class="text-muted">(optional)</span></label>
+                {# Pattern mirrors the server-side Pydantic regex on
+                   ``MachineUpsert.hostname``: each dot-separated label
+                   is alnum, hyphen-internal-only, no leading/trailing
+                   hyphen, no consecutive dots. Browser-side validation
+                   gives the operator an inline error before the form
+                   posts; without this match, the server returns 422
+                   and the operator hits the form-flash redirect. #}
                 <input type="text" class="form-control" id="add-hostname" name="hostname"
-                       pattern="^[a-zA-Z0-9.-]+$" placeholder="lab-01">
+                       pattern="^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$"
+                       placeholder="lab-01">
             </div>
             <div class="col-md-2">
                 <label for="add-boot-policy" class="form-label small mb-1">Boot policy</label>

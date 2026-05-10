@@ -40,11 +40,80 @@ trouble. Operators with strict retention requirements run
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
+
+
+def normalize_ip(host: str | None) -> str | None:
+    """Canonicalise a client IP string for storage / filtering.
+
+    Starlette returns whatever the connection used: when bty-web
+    binds dual-stack (``::``) and a v4 client connects, the host
+    arrives as the v4-mapped-v6 form ``::ffff:192.168.1.5``.
+    Storing both forms in ``events.source_ip`` and
+    ``machines.last_seen_ip`` would split the operator's view of
+    one client across two rows; the filter pivot on /ui/events
+    would silently miss half the activity.
+
+    Returns the bare v4 form for v4-mapped addresses, the
+    compressed form for v6 (e.g. ``2001:db8::1``), and the
+    input unchanged for anything ``ipaddress`` doesn't recognise
+    (so unusual transports / unix socket paths still flow
+    through).
+    """
+    if host is None or not host:
+        return host
+    try:
+        addr = ipaddress.ip_address(host)
+    except ValueError:
+        return host
+    if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped is not None:
+        return str(addr.ipv4_mapped)
+    return str(addr)
+
+
+# Catalogue of every ``kind`` value the rest of bty-web is allowed
+# to pass to :func:`record`. Owned here so the callsites (in
+# ``_app.py`` / ``_task.py`` / ``_ui.py``) and the ``/ui/events``
+# filter dropdown share one source. Adding a new event class is a
+# two-step change: append a constant here, then use it at the
+# callsite. :func:`record` no-ops the runtime check when a kind is
+# not in this set -- the goal is centralisation, not enforcement;
+# we don't want a typo in a logging call to crash a request flow.
+KNOWN_EVENT_KINDS: tuple[str, ...] = (
+    "machine.discovered",
+    "machine.created",
+    "machine.upserted",
+    "machine.deleted",
+    "machine.flashed",
+    "machine.task.running",
+    "machine.task.completed",
+    "machine.task.cancelled",
+    "machine.task.failed",
+    "image.uploaded",
+    "image.hashed",
+    "catalog.entry.added",
+    "catalog.entry.deleted",
+    "boot.release.fetched",
+    "settings.pxe.activated",
+)
+
+# Catalogue of ``subject_kind`` values. Powers the /ui/events
+# subject-kind filter dropdown so adding a new subject (say,
+# ``token`` or ``backup``) is a one-place change. Like
+# ``KNOWN_EVENT_KINDS``, it's a soft catalogue: ``record`` does
+# not enforce membership so a typo can't 500 a request.
+KNOWN_SUBJECT_KINDS: tuple[str, ...] = (
+    "machine",
+    "image",
+    "catalog",
+    "boot",
+    "settings",
+)
 
 
 @dataclass(frozen=True)
@@ -57,6 +126,7 @@ class Event:
     subject_kind: str | None
     subject_id: str | None
     actor: str | None
+    source_ip: str | None
     summary: str
     details: dict[str, Any] | None
 
@@ -68,6 +138,7 @@ class Event:
             "subject_kind": self.subject_kind,
             "subject_id": self.subject_id,
             "actor": self.actor,
+            "source_ip": self.source_ip,
             "summary": self.summary,
             "details": self.details,
         }
@@ -81,6 +152,7 @@ def record(
     subject_kind: str | None = None,
     subject_id: str | None = None,
     actor: str | None = None,
+    source_ip: str | None = None,
     details: dict[str, Any] | None = None,
 ) -> int:
     """Insert one event row. Returns the new row id.
@@ -91,16 +163,23 @@ def record(
     UPDATE / INSERT pair). If the caller doesn't manage their own
     transaction, the surrounding ``open_db`` ``conn.commit()`` at
     the end of the with-block flushes the row.
+
+    ``source_ip`` is the IP that initiated / observed the event:
+    the operator's request client host for operator events, the
+    target's IP at check-in for ``pxe-client`` events, and the
+    target's ``last_seen_ip`` for task-runner system events.
+    NULL when there is no meaningful source IP (e.g. CLI-driven
+    events where the bty-web process self-initiates).
     """
     ts = datetime.now(UTC).isoformat()
     details_json = json.dumps(details) if details is not None else None
     cur = conn.execute(
         """
         INSERT INTO events
-            (ts, kind, subject_kind, subject_id, actor, summary, details)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+            (ts, kind, subject_kind, subject_id, actor, source_ip, summary, details)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (ts, kind, subject_kind, subject_id, actor, summary, details_json),
+        (ts, kind, subject_kind, subject_id, actor, source_ip, summary, details_json),
     )
     return int(cur.lastrowid or 0)
 
@@ -111,6 +190,7 @@ def list_events(
     kind: str | None = None,
     subject_kind: str | None = None,
     subject_id: str | None = None,
+    source_ip: str | None = None,
     before_id: int | None = None,
     limit: int = 50,
 ) -> list[Event]:
@@ -120,6 +200,10 @@ def list_events(
     can paginate by carrying the smallest-id-on-the-page through
     "Older" links. Without it, the most recent ``limit`` events
     are returned.
+
+    ``source_ip`` filters to events recorded with that exact
+    client IP. Powers the /ui/events "filter by IP" field so an
+    operator can pull every change made from a given workstation.
 
     ``limit`` is clamped to ``[1, 500]`` to avoid pathological
     response sizes from a hand-edited URL; 50 is the UI default.
@@ -140,6 +224,9 @@ def list_events(
     if subject_id is not None:
         where.append("subject_id = ?")
         args.append(subject_id)
+    if source_ip is not None:
+        where.append("source_ip = ?")
+        args.append(source_ip)
     if before_id is not None:
         where.append("id < ?")
         args.append(before_id)
@@ -171,6 +258,7 @@ def _row_to_event(row: sqlite3.Row) -> Event:
         subject_kind=row["subject_kind"],
         subject_id=row["subject_id"],
         actor=row["actor"],
+        source_ip=row["source_ip"],
         summary=row["summary"],
         details=details,
     )

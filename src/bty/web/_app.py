@@ -38,6 +38,7 @@ from bty.web import _task as _task_module
 from bty.web._auth import SESSION_COOKIE, require_auth
 from bty.web._events import MachineEvent, MachineEventBus, sse_format
 from bty.web._events_log import list_events as _list_events
+from bty.web._events_log import normalize_ip as _normalize_ip
 from bty.web._events_log import record as _log_event
 from bty.web._task import TaskManager
 
@@ -118,13 +119,13 @@ def create_app(
         # (appliance, container, dev). Default parallelism is 1
         # so a Pi-class box doesn't get hammered if multiple big
         # images need importing at once.
-        hash_manager.start(resolved_image_root)
+        hash_manager.start(resolved_image_root, state_path=state_path)
         # Release-fetch manager: powers the trackable
         # /boot/releases endpoints (and the /ui/boot page's
         # progress + cancel buttons). Default parallelism is 1
         # because fetching two GitHub releases in parallel is
         # operator-confusing and bandwidth-saturating.
-        release_fetch_manager.start(resolved_boot_root)
+        release_fetch_manager.start(resolved_boot_root, state_path=state_path)
         # Task manager: cancelable cijoe-task runs. ``start()``
         # sweeps stale ``running`` rows in state.db (left by
         # in-flight tasks at the previous bty-web shutdown) so the
@@ -237,10 +238,24 @@ def create_app(
         Path(user_cfg_env) if user_cfg_env else _task_module.DEFAULT_USER_CONFIG_PATH
     )
 
+    # SSH port for the cijoe-task transport. Defaults to 22; operators
+    # with port-forwarded targets (or anyone running sshd on a non-
+    # standard port) can override via ``BTY_CIJOE_SSH_PORT``. Falls
+    # back to 22 silently on a malformed value rather than blocking
+    # bty-web startup.
+    ssh_port = _task_module.DEFAULT_SSH_PORT
+    raw_port = os.environ.get("BTY_CIJOE_SSH_PORT")
+    if raw_port is not None:
+        with contextlib.suppress(ValueError):
+            parsed = int(raw_port)
+            if 1 <= parsed <= 65535:
+                ssh_port = parsed
+
     task_runner = TaskManager(
         state_path=state_path,
         publish_machines_changed=publish_machines_changed,
         user_config_path=user_config_path,
+        ssh_port=ssh_port,
     )
 
     # ----- Open routes (no auth) ------------------------------------------
@@ -278,7 +293,7 @@ def create_app(
     @app.get("/pxe/{mac}", response_class=PlainTextResponse)
     def pxe(mac: str, request: Request) -> str:
         normalised = _normalise_mac(mac)
-        client_ip = request.client.host if request.client else None
+        client_ip = _client_ip(request)
         now = _now_iso()
         with _db.open_db(state_path) as conn:
             row = conn.execute("SELECT * FROM machines WHERE mac = ?", (normalised,)).fetchone()
@@ -314,7 +329,7 @@ def create_app(
                     subject_kind="machine",
                     subject_id=normalised,
                     actor="pxe-client",
-                    details={"client_ip": client_ip},
+                    source_ip=client_ip,
                 )
                 conn.commit()
                 row = conn.execute("SELECT * FROM machines WHERE mac = ?", (normalised,)).fetchone()
@@ -372,7 +387,7 @@ def create_app(
         "/pxe/{mac}/done",
         status_code=status.HTTP_204_NO_CONTENT,
     )
-    def pxe_done(mac: str) -> Response:
+    def pxe_done(mac: str, request: Request) -> Response:
         # Open route: the live env hits this from the PXE-booted target,
         # which has no token. Trust model: bty-web is for trusted
         # networks (homelab / CI), not the open internet - same as the
@@ -385,6 +400,7 @@ def create_app(
         # boot_policy=flash to stay flash across reflashes.
         normalised = _normalise_mac(mac)
         now = _now_iso()
+        client_ip = _client_ip(request)
         with _db.open_db(state_path) as conn:
             cur = conn.execute(
                 "UPDATE machines SET last_flashed_at = ?, updated_at = ? WHERE mac = ?",
@@ -398,6 +414,7 @@ def create_app(
                     subject_kind="machine",
                     subject_id=normalised,
                     actor="pxe-client",
+                    source_ip=client_ip,
                 )
             conn.commit()
         if cur.rowcount == 0:
@@ -491,6 +508,7 @@ def create_app(
         kind: str | None = None,
         subject_kind: str | None = None,
         subject_id: str | None = None,
+        source_ip: str | None = None,
         before_id: int | None = None,
         limit: int = 50,
     ) -> dict[str, Any]:
@@ -500,13 +518,14 @@ def create_app(
                 kind=kind,
                 subject_kind=subject_kind,
                 subject_id=subject_id,
+                source_ip=source_ip,
                 before_id=before_id,
                 limit=limit,
             )
         return {"events": [e.to_dict() for e in events]}
 
     @app.delete("/tasks/{mac}", dependencies=[Depends(require_auth)])
-    def cancel_task(mac: str) -> dict[str, Any]:
+    def cancel_task(mac: str, request: Request) -> dict[str, Any]:
         normalised = _normalise_mac(mac)
         state = task_runner.cancel(normalised)
         if state is None:
@@ -526,6 +545,7 @@ def create_app(
                     subject_kind="machine",
                     subject_id=normalised,
                     actor="operator",
+                    source_ip=_client_ip(request),
                     details={"task_ref": state.task_ref},
                 )
                 conn.commit()
@@ -663,7 +683,7 @@ def create_app(
         response_model=_models.Machine,
         dependencies=[Depends(require_auth)],
     )
-    def upsert_machine(mac: str, body: _models.MachineUpsert) -> _models.Machine:
+    def upsert_machine(mac: str, body: _models.MachineUpsert, request: Request) -> _models.Machine:
         normalised = _normalise_mac(mac)
         now = _now_iso()
         with _db.open_db(state_path) as conn:
@@ -703,6 +723,7 @@ def create_app(
                 subject_kind="machine",
                 subject_id=normalised,
                 actor="operator",
+                source_ip=_client_ip(request),
                 details={
                     "image_sha256": body.image_sha256,
                     "provisioning_mode": body.provisioning_mode,
@@ -722,7 +743,7 @@ def create_app(
         status_code=status.HTTP_204_NO_CONTENT,
         dependencies=[Depends(require_auth)],
     )
-    def delete_machine(mac: str) -> Response:
+    def delete_machine(mac: str, request: Request) -> Response:
         normalised = _normalise_mac(mac)
         with _db.open_db(state_path) as conn:
             cur = conn.execute("DELETE FROM machines WHERE mac = ?", (normalised,))
@@ -734,6 +755,7 @@ def create_app(
                     subject_kind="machine",
                     subject_id=normalised,
                     actor="operator",
+                    source_ip=_client_ip(request),
                 )
             conn.commit()
         if cur.rowcount == 0:
@@ -858,6 +880,7 @@ def create_app(
                     subject_kind="image",
                     subject_id=name,
                     actor="operator",
+                    source_ip=_client_ip(request),
                     details={"size_bytes": result["size_bytes"]},
                 )
                 conn.commit()
@@ -974,7 +997,7 @@ def create_app(
         status_code=status.HTTP_201_CREATED,
         dependencies=[Depends(require_auth)],
     )
-    def add_catalog_entry(body: _models.CatalogEntryAdd) -> dict[str, Any]:
+    def add_catalog_entry(body: _models.CatalogEntryAdd, request: Request) -> dict[str, Any]:
         """Add an operator-curated catalog entry by URL.
 
         Body: ``{"image_url": "...", "sha_url": "..." | null}``.
@@ -1038,6 +1061,7 @@ def create_app(
                     subject_kind="catalog",
                     subject_id=body.image_url,
                     actor="operator",
+                    source_ip=_client_ip(request),
                     details={
                         "name": name,
                         "sha256": sha256,
@@ -1079,7 +1103,7 @@ def create_app(
         status_code=status.HTTP_204_NO_CONTENT,
         dependencies=[Depends(require_auth)],
     )
-    def delete_catalog_entry(src: str) -> Response:
+    def delete_catalog_entry(src: str, request: Request) -> Response:
         """Delete via ``?src=<url>`` query param. URL-as-path-param
         would require percent-encoding the schema and slashes,
         which is operator-hostile; query param is cleaner."""
@@ -1093,6 +1117,7 @@ def create_app(
                     subject_kind="catalog",
                     subject_id=src,
                     actor="operator",
+                    source_ip=_client_ip(request),
                 )
             conn.commit()
         if cur.rowcount == 0:
@@ -1259,6 +1284,18 @@ def _head_content_length(url: str, *, timeout: float = 10.0) -> int | None:
 
 def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _client_ip(request: Request) -> str | None:
+    """Return the request's client IP, normalised for storage.
+
+    Wraps ``request.client.host`` in ``_events_log.normalize_ip``
+    so a v4-mapped-v6 address (``::ffff:192.168.1.5`` -- the form
+    Starlette returns when bty-web binds on ``::`` and a v4 client
+    connects) collapses to the bare v4 form. Without this, the
+    same client shows up as two distinct rows in the audit log.
+    """
+    return _normalize_ip(request.client.host if request.client else None)
 
 
 def _safe_path(root: Path, name: str) -> Path:

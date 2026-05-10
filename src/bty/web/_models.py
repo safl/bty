@@ -6,9 +6,18 @@ are decoded into / encoded from these models on the boundary.
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 
 from pydantic import BaseModel, Field
+
+
+def _enum_pattern(values: tuple[str, ...]) -> str:
+    """Build a Pydantic ``pattern=`` regex matching exactly the given
+    string set. Auto-derived from the tuple so a new value can be
+    added in one place without the regex drifting out of sync."""
+    return "^(" + "|".join(re.escape(v) for v in values) + ")$"
+
 
 # Canonical lower-case ``aa:bb:cc:dd:ee:ff`` MAC address.
 MAC_PATTERN = r"^[0-9a-f]{2}(:[0-9a-f]{2}){5}$"
@@ -19,7 +28,8 @@ MAC_PATTERN = r"^[0-9a-f]{2}(:[0-9a-f]{2}){5}$"
 #                       small cijoe task against the running system
 #                       (built-in scripts + inline commands only).
 PROVISIONING_MODES = ("none", "cijoe-task")
-PROVISIONING_PATTERN = r"^(none|cijoe-task)$"
+PROVISIONING_PATTERN = _enum_pattern(PROVISIONING_MODES)
+DEFAULT_PROVISIONING_MODE = PROVISIONING_MODES[0]
 
 # Status of the most recent cijoe-task run. Mirrors the other
 # manager-driven vocabulary (HashState / DownloadState /
@@ -28,7 +38,7 @@ PROVISIONING_PATTERN = r"^(none|cijoe-task)$"
 # (DELETE /tasks/{mac}), ``failed`` on rc!=0 / timeout / subprocess
 # error.
 TASK_STATUSES = ("running", "completed", "cancelled", "failed")
-TASK_STATUS_PATTERN = r"^(running|completed|cancelled|failed)$"
+TASK_STATUS_PATTERN = _enum_pattern(TASK_STATUSES)
 
 # Boot-policy values: what ``GET /pxe/{mac}`` returns.
 #
@@ -45,7 +55,8 @@ TASK_STATUS_PATTERN = r"^(running|completed|cancelled|failed)$"
 # Decoupled from the completion signal: ``POST /pxe/{mac}/done`` updates
 # ``last_flashed_at`` regardless of policy and never flips the policy.
 BOOT_POLICIES = ("local", "flash", "tui")
-BOOT_POLICY_PATTERN = r"^(local|flash|tui)$"
+BOOT_POLICY_PATTERN = _enum_pattern(BOOT_POLICIES)
+DEFAULT_BOOT_POLICY = BOOT_POLICIES[0]
 
 
 class MachineUpsert(BaseModel):
@@ -70,7 +81,7 @@ class MachineUpsert(BaseModel):
 
     # 64 lower-case hex chars; ``None`` = discovered-but-unassigned.
     image_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
-    provisioning_mode: str = Field(default="none", pattern=PROVISIONING_PATTERN)
+    provisioning_mode: str = Field(default=DEFAULT_PROVISIONING_MODE, pattern=PROVISIONING_PATTERN)
     # RFC-1123-ish: each dot-separated label is alnum, hyphen-
     # internal-only (no leading / trailing / bare hyphen, no
     # consecutive dots). ``max_length=253`` matches DNS.
@@ -92,7 +103,7 @@ class MachineUpsert(BaseModel):
         max_length=4096,
         pattern=r"^[^\x00\r\n]+$",
     )
-    boot_policy: str = Field(default="local", pattern=BOOT_POLICY_PATTERN)
+    boot_policy: str = Field(default=DEFAULT_BOOT_POLICY, pattern=BOOT_POLICY_PATTERN)
 
 
 class Machine(BaseModel):
@@ -106,7 +117,7 @@ class Machine(BaseModel):
 
     mac: str = Field(..., pattern=MAC_PATTERN)
     image_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
-    provisioning_mode: str = Field(default="none", pattern=PROVISIONING_PATTERN)
+    provisioning_mode: str = Field(default=DEFAULT_PROVISIONING_MODE, pattern=PROVISIONING_PATTERN)
     hostname: str | None = None
     cijoe_task_ref: str | None = Field(
         default=None, min_length=1, max_length=4096, pattern=r"^[^\x00\r\n]+$"
@@ -118,7 +129,7 @@ class Machine(BaseModel):
     # Updated on every ``GET /pxe/{mac}``.
     last_seen_at: datetime | None = None
     last_seen_ip: str | None = None
-    boot_policy: str = Field(default="local", pattern=BOOT_POLICY_PATTERN)
+    boot_policy: str = Field(default=DEFAULT_BOOT_POLICY, pattern=BOOT_POLICY_PATTERN)
     last_flashed_at: datetime | None = None
     last_task_run_at: datetime | None = None
     last_task_status: str | None = Field(default=None, pattern=TASK_STATUS_PATTERN)

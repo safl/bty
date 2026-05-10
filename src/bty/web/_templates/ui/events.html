@@ -23,23 +23,29 @@
                 <label for="subject_kind" class="form-label small mb-1">Subject kind</label>
                 <select name="subject_kind" id="subject_kind" class="form-select form-select-sm">
                     <option value="" {% if not subject_kind %}selected{% endif %}>(any)</option>
-                    <option value="machine" {% if subject_kind == "machine" %}selected{% endif %}>machine</option>
-                    <option value="image" {% if subject_kind == "image" %}selected{% endif %}>image</option>
-                    <option value="catalog" {% if subject_kind == "catalog" %}selected{% endif %}>catalog</option>
-                    <option value="boot" {% if subject_kind == "boot" %}selected{% endif %}>boot</option>
-                    <option value="settings" {% if subject_kind == "settings" %}selected{% endif %}>settings</option>
+                    {% for sk in known_subject_kinds %}
+                    <option value="{{ sk }}" {% if sk == subject_kind %}selected{% endif %}>{{ sk }}</option>
+                    {% endfor %}
                 </select>
             </div>
-            <div class="col-md-4">
+            <div class="col-md-3">
                 <label for="subject_id" class="form-label small mb-1">Subject id (e.g. MAC, image name)</label>
                 <input type="text" name="subject_id" id="subject_id"
                        class="form-control form-control-sm"
                        value="{{ subject_id or '' }}"
                        placeholder="aa:bb:cc:dd:ee:ff">
             </div>
-            <div class="col-md-2 d-flex gap-2">
-                <button type="submit" class="btn btn-sm btn-primary flex-grow-1">
-                    <i class="bi bi-funnel me-1"></i>Filter
+            <div class="col-md-2">
+                <label for="source_ip" class="form-label small mb-1">Source IP</label>
+                <input type="text" name="source_ip" id="source_ip"
+                       class="form-control form-control-sm font-monospace"
+                       value="{{ source_ip or '' }}"
+                       placeholder="192.168.1.5">
+            </div>
+            <div class="col-md-1 d-flex gap-2">
+                <button type="submit" class="btn btn-sm btn-primary flex-grow-1"
+                        title="Filter">
+                    <i class="bi bi-funnel"></i>
                 </button>
                 <a href="/ui/events" class="btn btn-sm btn-outline-secondary"
                    title="Clear filters">
@@ -69,6 +75,7 @@
                     <th>Summary</th>
                     <th style="width: 1%; white-space: nowrap;">Subject</th>
                     <th style="width: 1%; white-space: nowrap;">Actor</th>
+                    <th style="width: 1%; white-space: nowrap;">Source IP</th>
                 </tr>
             </thead>
             <tbody>
@@ -105,6 +112,20 @@
                     <td>
                         {% if e.actor %}
                         <small class="text-muted">{{ e.actor }}</small>
+                        {% else %}
+                        <span class="text-muted small">-</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if e.source_ip %}
+                        {# Click to pivot: same /ui/events page filtered
+                           down to this IP. Useful for "what else did
+                           this workstation / target do?". #}
+                        <a class="text-decoration-none"
+                           href="/ui/events?source_ip={{ e.source_ip|urlencode }}"
+                           title="Filter by this IP">
+                            <code class="small">{{ e.source_ip }}</code>
+                        </a>
                         {% else %}
                         <span class="text-muted small">-</span>
                         {% endif %}

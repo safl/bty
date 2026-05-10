@@ -34,7 +34,9 @@ from pathlib import Path
 from typing import Any
 
 from bty import images as _images
-from bty.web._jobs import _BaseAsyncManager
+from bty.web import _db
+from bty.web._events_log import record as _log_event
+from bty.web._jobs import ENQUEUE_DEDUP_STATES, _BaseAsyncManager
 
 # Default cap on simultaneous hashes. Tuned for small homelab
 # hardware (Pi 4, old NUCs, mini-PCs); env-overridable.
@@ -107,9 +109,15 @@ class HashManager(_BaseAsyncManager[HashState]):
     def __init__(self, max_parallel: int | None = None) -> None:
         super().__init__(max_parallel or _resolve_max_parallel())
         self._image_root: Path | None = None
+        self._state_path: Path | None = None
 
-    def start(self, image_root: Path) -> None:
+    def start(self, image_root: Path, state_path: Path | None = None) -> None:
+        """Spawn the worker pool. ``state_path`` is optional: when
+        given, successful hash completions log an ``image.hashed``
+        event to the audit table so the operator can see SHA
+        availability roll forward in /ui/events. Tests omit it."""
         self._image_root = image_root
+        self._state_path = state_path
         self._spawn_workers()
 
     async def enqueue(self, name: str) -> HashState:
@@ -136,7 +144,7 @@ class HashManager(_BaseAsyncManager[HashState]):
 
         async with self._lock:
             existing = self._states.get(name)
-            if existing is not None and existing.status in ("queued", "running", "completed"):
+            if existing is not None and existing.status in ENQUEUE_DEDUP_STATES:
                 return existing
             state = HashState(
                 name=name,
@@ -205,6 +213,27 @@ class HashManager(_BaseAsyncManager[HashState]):
             state.error = error
             if sha is not None:
                 state.sha256 = sha
+
+        # Log only successful hashes -- cancelled / failed runs
+        # are visible via /catalog/hashes and don't add audit
+        # value. ``state_path`` is optional so unit tests of the
+        # manager can stay db-free.
+        if final_status == "completed" and sha is not None and self._state_path is not None:
+            with _db.open_db(self._state_path) as conn:
+                _log_event(
+                    conn,
+                    kind="image.hashed",
+                    summary=f"image {state.name!r} hashed (sha256={sha[:12]}...)",
+                    subject_kind="image",
+                    subject_id=state.name,
+                    actor="system",
+                    details={
+                        "name": state.name,
+                        "sha256": sha,
+                        "bytes": state.bytes_total,
+                    },
+                )
+                conn.commit()
 
 
 def _resolve_max_parallel() -> int:

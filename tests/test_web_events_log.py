@@ -21,6 +21,31 @@ def _open(state_path: Path):
     return conn, lambda: cm.__exit__(None, None, None)
 
 
+def test_normalize_ip() -> None:
+    """``normalize_ip`` collapses v4-mapped-v6 (the form Starlette
+    returns when bty-web binds dual-stack and a v4 client connects)
+    into the bare v4 form, leaves real v4 / v6 untouched, and
+    passes through unrecognised inputs (e.g. unix socket paths).
+
+    Without this normalisation, the same workstation behind a
+    ``::ffff:`` mapping and through a v4-only socket would record
+    under two different IPs and split the audit trail across them.
+    """
+    # v4-mapped v6 -> bare v4 (the bug case).
+    assert _events_log.normalize_ip("::ffff:192.168.1.42") == "192.168.1.42"
+    # Bare v4 stays bare v4.
+    assert _events_log.normalize_ip("192.168.1.42") == "192.168.1.42"
+    # Real v6 returns the compressed canonical form.
+    assert _events_log.normalize_ip("2001:0db8:0000::1") == "2001:db8::1"
+    assert _events_log.normalize_ip("::1") == "::1"
+    # None / empty pass through unchanged.
+    assert _events_log.normalize_ip(None) is None
+    assert _events_log.normalize_ip("") == ""
+    # Garbage / non-IP transports flow through unchanged so the
+    # audit log doesn't drop unusual sources silently.
+    assert _events_log.normalize_ip("not-an-ip") == "not-an-ip"
+
+
 def test_record_returns_monotonic_id(tmp_path: Path) -> None:
     """The ``id`` column is AUTOINCREMENT, so successive records
     return strictly-increasing ids. Cursor pagination relies on
@@ -109,6 +134,27 @@ def test_list_filters_by_subject(tmp_path: Path) -> None:
     assert rows[0].subject_id == "aa:bb:cc:dd:ee:01"
 
 
+def test_list_filters_by_source_ip(tmp_path: Path) -> None:
+    """``source_ip=<ip>`` returns only rows recorded with that IP, so
+    the /ui/events filter pivot lands on a clean slice."""
+    state = tmp_path / "state.db"
+    _db.init_db(state)
+    conn, close = _open(state)
+    try:
+        _events_log.record(
+            conn, kind="machine.upserted", summary="from .42", source_ip="192.168.1.42"
+        )
+        _events_log.record(
+            conn, kind="machine.upserted", summary="from .55", source_ip="192.168.1.55"
+        )
+        _events_log.record(conn, kind="machine.task.completed", summary="system, no IP")
+        conn.commit()
+        rows = _events_log.list_events(conn, source_ip="192.168.1.42")
+    finally:
+        close()
+    assert [r.summary for r in rows] == ["from .42"]
+
+
 def test_list_cursor_pagination(tmp_path: Path) -> None:
     """``before_id`` returns rows older than the cursor, newest
     first. The "Older" link on /ui/events plumbs the smallest-id
@@ -151,6 +197,46 @@ def test_list_clamps_limit(tmp_path: Path) -> None:
     finally:
         close()
     assert len(rows) == 500
+
+
+def test_source_ip_round_trip(tmp_path: Path) -> None:
+    """``source_ip`` is persisted on write and surfaced on read, so the
+    /ui/events table can show which IP made the change. ``None`` is
+    valid (system-initiated events with no meaningful source).
+    """
+    state = tmp_path / "state.db"
+    _db.init_db(state)
+    conn, close = _open(state)
+    try:
+        _events_log.record(
+            conn,
+            kind="machine.discovered",
+            summary="from PXE client",
+            actor="pxe-client",
+            source_ip="192.168.1.42",
+        )
+        _events_log.record(
+            conn,
+            kind="machine.upserted",
+            summary="from operator browser",
+            actor="operator",
+            source_ip="10.0.0.5",
+        )
+        _events_log.record(
+            conn,
+            kind="machine.task.completed",
+            summary="system event with no source",
+            actor="system",
+            # source_ip omitted -> NULL
+        )
+        conn.commit()
+        rows = _events_log.list_events(conn, limit=10)
+    finally:
+        close()
+    by_kind = {r.kind: r for r in rows}
+    assert by_kind["machine.discovered"].source_ip == "192.168.1.42"
+    assert by_kind["machine.upserted"].source_ip == "10.0.0.5"
+    assert by_kind["machine.task.completed"].source_ip is None
 
 
 def test_details_round_trip(tmp_path: Path) -> None:

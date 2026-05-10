@@ -37,7 +37,7 @@ from pathlib import Path
 from typing import Any
 
 from bty import catalog as _catalog
-from bty.web._jobs import _BaseAsyncManager
+from bty.web._jobs import ENQUEUE_DEDUP_STATES, _BaseAsyncManager
 
 # Default cap on simultaneous downloads. Tuned so a typical homelab
 # uplink isn't saturated by N parallel fetches; bumpable via env.
@@ -140,7 +140,7 @@ class DownloadManager(_BaseAsyncManager[DownloadState]):
 
         async with self._lock:
             existing = self._states.get(name)
-            if existing is not None and existing.status in ("queued", "running", "completed"):
+            if existing is not None and existing.status in ENQUEUE_DEDUP_STATES:
                 return existing
             # ``cancelled`` / ``failed`` (or no existing state) -- create a fresh one.
             state = DownloadState(

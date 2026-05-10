@@ -1080,10 +1080,17 @@ def test_events_list_requires_auth(app_client: TestClient) -> None:
     assert r.status_code == 401
 
 
-def test_events_list_empty_initially(app_client: TestClient) -> None:
+def test_events_list_no_operator_or_pxe_activity_initially(app_client: TestClient) -> None:
+    """Before any operator / PXE activity, the only rows the audit
+    log has are auto-import side-effects (the lifespan hashes
+    seeded images and emits ``image.hashed``). The test fixture
+    seeds ``demo.qcow2`` so that one is expected; everything
+    else should be absent."""
     r = app_client.get("/events", cookies=AUTH)
     assert r.status_code == 200
-    assert r.json() == {"events": []}
+    events = r.json()["events"]
+    # No operator-driven or pxe-client-driven rows yet.
+    assert all(e["actor"] not in {"operator", "pxe-client"} for e in events)
 
 
 def test_events_list_includes_machine_lifecycle(app_client: TestClient) -> None:
@@ -1118,6 +1125,64 @@ def test_events_list_includes_machine_lifecycle(app_client: TestClient) -> None:
             assert e["subject_id"] == mac
 
 
+def test_events_include_image_hashed_from_auto_import(app_client: TestClient) -> None:
+    """The lifespan startup auto-imports image_root files without
+    sidecars; the HashManager logs ``image.hashed`` as ``actor=
+    'system'`` once each completes. The fixture seeds
+    ``demo.qcow2`` so a row should be present by the time the
+    test runs.
+
+    Filter by kind to dodge the bare-list ordering -- relying on
+    "the first event" would be brittle if the lifespan grew more
+    auto-import work.
+    """
+    r = app_client.get("/events", params={"kind": "image.hashed"}, cookies=AUTH)
+    assert r.status_code == 200
+    events = r.json()["events"]
+    assert events, "expected an image.hashed row from auto-import"
+    row = events[0]
+    assert row["actor"] == "system"
+    assert row["subject_kind"] == "image"
+    assert row["subject_id"] == "demo.qcow2"
+    # Sha lands in details.
+    assert row["details"] is not None
+    assert isinstance(row["details"]["sha256"], str)
+    assert len(row["details"]["sha256"]) == 64
+
+
+def test_events_carry_source_ip(app_client: TestClient) -> None:
+    """Operator + pxe-client events both record the request's
+    client host into ``source_ip`` so the audit log can answer
+    "what did this IP do?" end-to-end. FastAPI's TestClient sets
+    ``request.client.host == 'testclient'``; that flows through
+    :func:`normalize_ip` (a no-op for non-IP transports) and
+    lands in the row.
+    """
+    mac = "aa:bb:cc:dd:ee:fe"
+    app_client.get(f"/pxe/{mac}")
+    app_client.put(f"/machines/{mac}", json={"boot_policy": "local"}, cookies=AUTH)
+    r = app_client.get("/events", cookies=AUTH)
+    assert r.status_code == 200
+    by_kind = {e["kind"]: e for e in r.json()["events"]}
+    # Both pxe-client and operator events carry the same
+    # testclient host (the ASGI default for httpx TestClient).
+    assert by_kind["machine.discovered"]["source_ip"] == "testclient"
+    upsert = by_kind.get("machine.created") or by_kind.get("machine.upserted")
+    assert upsert is not None
+    assert upsert["source_ip"] == "testclient"
+
+
+def test_events_filter_by_source_ip(app_client: TestClient) -> None:
+    """``GET /events?source_ip=<ip>`` returns only rows recorded
+    with that IP -- the API mirror of the /ui/events filter pivot."""
+    app_client.get("/pxe/aa:bb:cc:dd:ee:fd")
+    r = app_client.get("/events", params={"source_ip": "testclient"}, cookies=AUTH)
+    assert r.status_code == 200
+    events = r.json()["events"]
+    assert events  # at least one
+    assert all(e["source_ip"] == "testclient" for e in events)
+
+
 def test_events_filter_by_subject_id(app_client: TestClient) -> None:
     """The per-MAC embedded card on /ui/machines/{mac} drives this
     filter -- only events for the given MAC come back."""
@@ -1135,10 +1200,11 @@ def test_events_filter_by_subject_id(app_client: TestClient) -> None:
 
 
 def test_ui_events_page_renders(app_client: TestClient) -> None:
-    """The /ui/events page renders without 500-ing even before any
-    events exist. The empty-state branch surfaces a friendly
-    'no events match' alert."""
-    r = app_client.get("/ui/events", cookies=AUTH)
+    """The /ui/events page renders without 500-ing. Filter the view
+    down to a kind that has no rows yet to exercise the empty-state
+    'no events match' branch (auto-import emits ``image.hashed`` so
+    the unfiltered list isn't empty)."""
+    r = app_client.get("/ui/events", params={"kind": "machine.deleted"}, cookies=AUTH)
     assert r.status_code == 200
     body = r.text
     # Title + filter form land in the markup.

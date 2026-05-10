@@ -26,6 +26,7 @@
                     <th style="width: 1%; white-space: nowrap;">When</th>
                     <th style="width: 1%; white-space: nowrap;">Kind</th>
                     <th>Summary</th>
+                    <th style="width: 1%; white-space: nowrap;">Source IP</th>
                 </tr>
             </thead>
             <tbody>
@@ -45,6 +46,17 @@
                         <span class="badge {{ badge }} small">{{ e.kind }}</span>
                     </td>
                     <td><small>{{ e.summary }}</small></td>
+                    <td>
+                        {% if e.source_ip %}
+                        <a class="text-decoration-none"
+                           href="/ui/events?source_ip={{ e.source_ip|urlencode }}"
+                           title="Filter by this IP">
+                            <code class="small">{{ e.source_ip }}</code>
+                        </a>
+                        {% else %}
+                        <span class="text-muted small">-</span>
+                        {% endif %}
+                    </td>
                 </tr>
                 {% endfor %}
             </tbody>

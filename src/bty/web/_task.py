@@ -71,6 +71,7 @@ from typing import Any
 
 from bty.web import _db
 from bty.web._events_log import record as _log_event
+from bty.web._jobs import PENDING_STATES
 
 log = logging.getLogger(__name__)
 
@@ -78,6 +79,11 @@ DEFAULT_TIMEOUT_SECONDS = 30 * 60  # 30 min - covers a leisurely first boot.
 DEFAULT_SSH_KEY = Path("/var/lib/bty/keys/id_ed25519")
 DEFAULT_TASKS_DIR = Path("/var/lib/bty/tasks")
 DEFAULT_CIJOE_BIN = str(Path(sys.executable).parent / "cijoe")
+# Default SSH port the cijoe-task transport connects on. Most homelab
+# / CI targets use 22; operators with port-forwarded or non-standard
+# setups override via the constructor (or BTY_CIJOE_SSH_PORT in
+# ``create_app``).
+DEFAULT_SSH_PORT = 22
 # Optional operator-supplied cijoe config that gets passed alongside
 # bty-web's auto-generated transport TOML. cijoe's ``--config`` flag
 # accepts multiple invocations and merges the result; bty-web puts
@@ -156,6 +162,7 @@ class TaskManager:
         tasks_dir: Path = DEFAULT_TASKS_DIR,
         ssh_key_path: Path = DEFAULT_SSH_KEY,
         ssh_username: str = "root",
+        ssh_port: int = DEFAULT_SSH_PORT,
         timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
         cijoe_bin: str = DEFAULT_CIJOE_BIN,
         user_config_path: Path | None = DEFAULT_USER_CONFIG_PATH,
@@ -165,6 +172,7 @@ class TaskManager:
         self._tasks_dir = tasks_dir
         self._ssh_key_path = ssh_key_path
         self._ssh_username = ssh_username
+        self._ssh_port = ssh_port
         self._timeout_seconds = timeout_seconds
         self._cijoe_bin = cijoe_bin
         # Resolved at run time (not construction): the operator may
@@ -227,7 +235,7 @@ class TaskManager:
             return None
         with self._lock:
             existing = self._states.get(mac)
-            if existing is not None and existing.status in ("queued", "running"):
+            if existing is not None and existing.status in PENDING_STATES:
                 return existing
             state = TaskState(mac=mac, task_ref=task_ref, target_ip=target_ip)
             self._states[mac] = state
@@ -257,7 +265,7 @@ class TaskManager:
             state = self._states.get(mac)
             if state is None:
                 return None
-            if state.status not in ("queued", "running"):
+            if state.status not in PENDING_STATES:
                 return state
             state._cancel.set()
             proc = state._proc
@@ -414,7 +422,7 @@ class TaskManager:
             "[cijoe.transport.ssh]\n"
             f'hostname = "{target_ip}"\n'
             f'username = "{self._ssh_username}"\n'
-            "port = 22\n"
+            f"port = {self._ssh_port}\n"
             f'key = "{self._ssh_key_path}"\n'
         )
 
@@ -478,9 +486,9 @@ class TaskManager:
                 subject_kind="machine",
                 subject_id=state.mac,
                 actor="system",
+                source_ip=state.target_ip,
                 details={
                     "task_ref": state.task_ref,
-                    "target_ip": state.target_ip,
                     "returncode": state.returncode,
                     "error": state.error,
                     "run_dir": str(run_dir),
