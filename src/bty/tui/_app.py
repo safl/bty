@@ -61,6 +61,7 @@ import json
 import os
 import subprocess
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from enum import IntEnum
@@ -163,6 +164,38 @@ def _parse_size_to_bytes(s: str) -> int:
         return 0
 
 
+# Catalog JSON is small in practice: one entry per image, ~200 bytes
+# each. 4 MiB caps it at "definitely a misconfiguration or hostile
+# server" without rejecting any plausible real catalog (operator
+# would need 20,000+ entries to exceed this). Matters because
+# ``fetch_remote_catalog`` is called from the bty-tui live env on
+# tty1, where the OS image is read-only and there's no swap; an
+# OOM would wedge the operator's flashing flow at the worst
+# possible moment.
+_REMOTE_CATALOG_MAX_BYTES = 4 * 1024 * 1024
+
+
+def _validate_server_url(server_url: str) -> None:
+    """Reject ``--server`` URLs whose scheme isn't ``http``/``https``.
+
+    Without this, urllib would happily handle ``file://`` (and the
+    system handlers for ``ftp:``, ``data:``, etc. that may or may
+    not be installed). bty-tui's operator-typed-URL surface is
+    not a security boundary -- the operator can read any file
+    they want directly -- but a clear error beats a confusing
+    "FileNotFoundError: /etc/passwd is missing the BTY images
+    JSON" trace.
+    """
+    parsed = urllib.parse.urlparse(server_url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(
+            f"--server URL must be http:// or https://; got "
+            f"{server_url!r} (scheme {parsed.scheme!r})"
+        )
+    if not parsed.netloc:
+        raise ValueError(f"--server URL is missing a host: {server_url!r}")
+
+
 def fetch_remote_catalog(server_url: str, *, timeout: float = 30.0) -> list[_TuiImage]:
     """``GET <server_url>/images`` and return ``_TuiImage`` rows.
 
@@ -177,11 +210,23 @@ def fetch_remote_catalog(server_url: str, *, timeout: float = 30.0) -> list[_Tui
     ``urllib.error.URLError`` / ``ValueError`` for surface-level
     problems; the caller (the TUI's image-pane refresh) catches
     and surfaces them in the status bar.
+
+    Caps the response body at :data:`_REMOTE_CATALOG_MAX_BYTES` so
+    a misconfigured / hostile server cannot OOM the live env via
+    a multi-GiB response. Validates the URL scheme so a typo can't
+    silently turn into a file:// read.
     """
+    _validate_server_url(server_url)
     base = server_url.rstrip("/")
     catalog_url = f"{base}/images"
     with urllib.request.urlopen(catalog_url, timeout=timeout) as resp:
-        payload = json.loads(resp.read().decode("utf-8"))
+        raw = resp.read(_REMOTE_CATALOG_MAX_BYTES + 1)
+    if len(raw) > _REMOTE_CATALOG_MAX_BYTES:
+        raise ValueError(
+            f"/images response from {server_url} exceeded "
+            f"{_REMOTE_CATALOG_MAX_BYTES} bytes; refusing to parse"
+        )
+    payload = json.loads(raw.decode("utf-8"))
     if not isinstance(payload, list):
         raise ValueError(f"unexpected /images payload from {server_url}: not a list")
     out: list[_TuiImage] = []
@@ -207,6 +252,7 @@ def post_pxe_done(server_url: str, mac: str, *, timeout: float = 10.0) -> None:
     """Best-effort ``POST <server>/pxe/{mac}/done`` after a successful
     remote flash. Silent on success; raises ``urllib.error.URLError``
     on transport failure (caller decides whether to surface)."""
+    _validate_server_url(server_url)
     base = server_url.rstrip("/")
     req = urllib.request.Request(f"{base}/pxe/{mac}/done", method="POST")
     with urllib.request.urlopen(req, timeout=timeout):

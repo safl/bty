@@ -21,11 +21,49 @@
             <dt class="col-sm-3">Last task</dt>
             <dd class="col-sm-9">
                 {% if m.last_task_status %}
-                {% set badge = {'running':'bg-info','success':'bg-success','failed':'bg-danger'}[m.last_task_status] %}
+                {# Badge mapping: running=info (in flight), completed=
+                   success (rc=0), cancelled=warning (operator abort),
+                   failed=danger (rc!=0 / timeout). v0.7.37 renamed
+                   ``success`` -> ``completed`` and added ``cancelled``
+                   so the vocabulary lines up with the other
+                   manager-driven jobs (hashes, downloads,
+                   release-fetches). #}
+                {% set badge_map = {
+                    'running': 'bg-info',
+                    'completed': 'bg-success',
+                    'cancelled': 'bg-warning text-dark',
+                    'failed': 'bg-danger',
+                } %}
+                {% set badge = badge_map.get(m.last_task_status, 'bg-light text-dark border') %}
                 <span class="badge {{ badge }}">{{ m.last_task_status }}</span>
                 <small class="text-muted">at {{ m.last_task_run_at }}</small>
                 {% if m.last_task_output_path %}
                 <div class="small text-muted">output: <code>{{ m.last_task_output_path }}</code></div>
+                {% endif %}
+                {# Cancel button when a task is in flight. Hits
+                   ``DELETE /tasks/{mac}``; the manager's cancel()
+                   sets the per-task threading.Event and SIGTERMs
+                   the cijoe subprocess. #}
+                {% if m.last_task_status == 'running' %}
+                <button type="button" class="btn btn-sm btn-outline-warning mt-2 bty-cancel-task-btn"
+                        data-mac="{{ m.mac }}">
+                    <i class="bi bi-stop-circle me-1"></i>Cancel running task
+                </button>
+                <script>
+                (function () {
+                    document.querySelectorAll(".bty-cancel-task-btn").forEach(function (btn) {
+                        btn.addEventListener("click", function () {
+                            if (!confirm("Cancel the running cijoe task on " + btn.dataset.mac + "?")) return;
+                            btn.disabled = true;
+                            fetch("/tasks/" + encodeURIComponent(btn.dataset.mac), {
+                                method: "DELETE",
+                                credentials: "same-origin",
+                            }).then(function () { window.location.reload(); })
+                              .catch(function () { btn.disabled = false; });
+                        });
+                    });
+                })();
+                </script>
                 {% endif %}
                 {% else %}
                 -

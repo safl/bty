@@ -1,23 +1,29 @@
-"""Tests for ``bty.web._task.TaskRunner``.
+"""Tests for ``bty.web._task.TaskManager``.
 
 Subprocess invocations of cijoe are mocked - a real cijoe binary
 isn't installed in the dev env's ``[web]`` extras, and we don't
 want the test suite to depend on the network either way. Each test
-seeds an in-memory machine record, kicks off a runner with a
-synchronous fake (no thread spawn) for the actual ``_run`` body,
-and asserts the resulting DB state.
+seeds an in-memory machine record, drives ``_run`` synchronously
+(no thread spawn) on a constructed :class:`TaskState`, and asserts
+the resulting state-dict + DB shape.
+
+v0.7.37 promoted ``TaskRunner`` to a cancelable ``TaskManager``
+that mirrors :class:`bty.web._hash.HashManager` and friends; the
+status vocabulary is now ``running`` / ``completed`` / ``cancelled``
+/ ``failed`` instead of the pre-rename ``success`` / ``failed``.
 """
 
 from __future__ import annotations
 
 import subprocess
 from pathlib import Path
-from unittest.mock import patch
+from typing import Any
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from bty.web import _db
-from bty.web._task import TaskRunner
+from bty.web._task import TaskManager, TaskState
 
 
 def _seed_machine(state_path: Path, mac: str = "aa:bb:cc:dd:ee:ff") -> None:
@@ -39,7 +45,7 @@ def runner(tmp_path: Path):
     state = tmp_path / "state.db"
     _db.init_db(state)
     publishes: list[None] = []
-    runner = TaskRunner(
+    runner = TaskManager(
         state_path=state,
         publish_machines_changed=lambda: publishes.append(None),
         tasks_dir=tmp_path / "tasks",
@@ -49,42 +55,57 @@ def runner(tmp_path: Path):
     return runner, state, publishes
 
 
+def _fake_proc(returncode: int, stdout: str = "", stderr: str = "") -> Any:
+    """Build a Popen-shape mock that ``_run`` can call ``communicate`` on."""
+    proc = MagicMock(spec=subprocess.Popen)
+    proc.returncode = returncode
+    proc.communicate.return_value = (stdout, stderr)
+    return proc
+
+
+def _seed_state(mac: str = "aa:bb:cc:dd:ee:ff") -> TaskState:
+    return TaskState(
+        mac=mac,
+        task_ref="/path/to/wf.yaml",
+        target_ip="10.0.0.5",
+    )
+
+
 # ---------- _run synchronous path ------------------------------------------
 
 
-def test_task_runner_records_success(runner) -> None:
-    runner_obj, state, publishes = runner
-    _seed_machine(state)
+def test_task_manager_records_completed(runner) -> None:
+    runner_obj, state_db, publishes = runner
+    _seed_machine(state_db)
 
-    completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="ok\n", stderr="")
-    with patch("bty.web._task.subprocess.run", return_value=completed):
-        runner_obj._run("aa:bb:cc:dd:ee:ff", "/path/to/wf.yaml", "10.0.0.5")
+    proc = _fake_proc(0, stdout="ok\n")
+    with patch("bty.web._task.subprocess.Popen", return_value=proc):
+        runner_obj._run(_seed_state())
 
-    with _db.open_db(state) as conn:
+    with _db.open_db(state_db) as conn:
         row = conn.execute(
             "SELECT last_task_status, last_task_run_at, last_task_output_path "
             "FROM machines WHERE mac = ?",
             ("aa:bb:cc:dd:ee:ff",),
         ).fetchone()
-    assert row["last_task_status"] == "success"
+    assert row["last_task_status"] == "completed"
     assert row["last_task_run_at"] is not None
     assert row["last_task_output_path"]
     out_dir = Path(row["last_task_output_path"])
-    # cijoe stdout/stderr captured as sidecars next to the run dir.
     assert (out_dir / "cijoe.stdout").read_text() == "ok\n"
-    # Two SSE publishes: running, then success.
+    # Two SSE publishes: running, then completed.
     assert len(publishes) == 2
 
 
-def test_task_runner_records_failed_on_nonzero_exit(runner) -> None:
-    runner_obj, state, _ = runner
-    _seed_machine(state)
+def test_task_manager_records_failed_on_nonzero_exit(runner) -> None:
+    runner_obj, state_db, _ = runner
+    _seed_machine(state_db)
 
-    completed = subprocess.CompletedProcess(args=[], returncode=2, stdout="", stderr="boom\n")
-    with patch("bty.web._task.subprocess.run", return_value=completed):
-        runner_obj._run("aa:bb:cc:dd:ee:ff", "/path/to/wf.yaml", "10.0.0.5")
+    proc = _fake_proc(2, stderr="boom\n")
+    with patch("bty.web._task.subprocess.Popen", return_value=proc):
+        runner_obj._run(_seed_state())
 
-    with _db.open_db(state) as conn:
+    with _db.open_db(state_db) as conn:
         row = conn.execute(
             "SELECT last_task_status FROM machines WHERE mac = ?",
             ("aa:bb:cc:dd:ee:ff",),
@@ -92,15 +113,23 @@ def test_task_runner_records_failed_on_nonzero_exit(runner) -> None:
     assert row["last_task_status"] == "failed"
 
 
-def test_task_runner_records_failed_on_timeout(runner) -> None:
-    runner_obj, state, _ = runner
-    _seed_machine(state)
+def test_task_manager_records_failed_on_timeout(runner) -> None:
+    runner_obj, state_db, _ = runner
+    _seed_machine(state_db)
 
-    err = subprocess.TimeoutExpired(cmd=["cijoe"], timeout=10)
-    with patch("bty.web._task.subprocess.run", side_effect=err):
-        runner_obj._run("aa:bb:cc:dd:ee:ff", "/path/to/wf.yaml", "10.0.0.5")
+    proc = MagicMock(spec=subprocess.Popen)
+    proc.returncode = -15  # SIGTERM after our terminate()
+    # Two communicate calls: first raises TimeoutExpired (the
+    # main wait), second returns the buffered output (the post-
+    # terminate cleanup wait).
+    proc.communicate.side_effect = [
+        subprocess.TimeoutExpired(cmd=["cijoe"], timeout=10),
+        ("partial-stdout\n", "partial-stderr\n"),
+    ]
+    with patch("bty.web._task.subprocess.Popen", return_value=proc):
+        runner_obj._run(_seed_state())
 
-    with _db.open_db(state) as conn:
+    with _db.open_db(state_db) as conn:
         row = conn.execute(
             "SELECT last_task_status, last_task_output_path FROM machines WHERE mac = ?",
             ("aa:bb:cc:dd:ee:ff",),
@@ -111,15 +140,15 @@ def test_task_runner_records_failed_on_timeout(runner) -> None:
     )
 
 
-def test_task_runner_records_failed_on_missing_binary(runner) -> None:
-    runner_obj, state, _ = runner
-    _seed_machine(state)
+def test_task_manager_records_failed_on_missing_binary(runner) -> None:
+    runner_obj, state_db, _ = runner
+    _seed_machine(state_db)
 
     err = FileNotFoundError("[Errno 2] No such file: 'cijoe-fake'")
-    with patch("bty.web._task.subprocess.run", side_effect=err):
-        runner_obj._run("aa:bb:cc:dd:ee:ff", "/path/to/wf.yaml", "10.0.0.5")
+    with patch("bty.web._task.subprocess.Popen", side_effect=err):
+        runner_obj._run(_seed_state())
 
-    with _db.open_db(state) as conn:
+    with _db.open_db(state_db) as conn:
         row = conn.execute(
             "SELECT last_task_status, last_task_output_path FROM machines WHERE mac = ?",
             ("aa:bb:cc:dd:ee:ff",),
@@ -133,15 +162,15 @@ def test_task_runner_records_failed_on_missing_binary(runner) -> None:
 # ---------- transport config ------------------------------------------------
 
 
-def test_task_runner_renders_transport_config(runner) -> None:
-    runner_obj, state, _ = runner
-    _seed_machine(state)
+def test_task_manager_renders_transport_config(runner) -> None:
+    runner_obj, state_db, _ = runner
+    _seed_machine(state_db)
 
-    completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
-    with patch("bty.web._task.subprocess.run", return_value=completed):
-        runner_obj._run("aa:bb:cc:dd:ee:ff", "/path/to/wf.yaml", "10.0.0.5")
+    proc = _fake_proc(0)
+    with patch("bty.web._task.subprocess.Popen", return_value=proc):
+        runner_obj._run(_seed_state())
 
-    with _db.open_db(state) as conn:
+    with _db.open_db(state_db) as conn:
         row = conn.execute(
             "SELECT last_task_output_path FROM machines WHERE mac = ?",
             ("aa:bb:cc:dd:ee:ff",),
@@ -155,15 +184,15 @@ def test_task_runner_renders_transport_config(runner) -> None:
 # ---------- subprocess invocation -------------------------------------------
 
 
-def test_task_runner_invokes_cijoe_with_task_and_config(runner) -> None:
-    runner_obj, state, _ = runner
-    _seed_machine(state)
+def test_task_manager_invokes_cijoe_with_task_and_config(runner) -> None:
+    runner_obj, state_db, _ = runner
+    _seed_machine(state_db)
 
-    completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
-    with patch("bty.web._task.subprocess.run", return_value=completed) as mock_run:
-        runner_obj._run("aa:bb:cc:dd:ee:ff", "/path/to/wf.yaml", "10.0.0.5")
+    proc = _fake_proc(0)
+    with patch("bty.web._task.subprocess.Popen", return_value=proc) as mock_popen:
+        runner_obj._run(_seed_state())
 
-    args, kwargs = mock_run.call_args
+    args, kwargs = mock_popen.call_args
     cmd = args[0]
     assert cmd[0] == "cijoe-fake"
     assert cmd[1] == "/path/to/wf.yaml"
@@ -174,31 +203,181 @@ def test_task_runner_invokes_cijoe_with_task_and_config(runner) -> None:
     assert kwargs["cwd"]
 
 
+# ---------- cancellation ----------------------------------------------------
+
+
 def test_kick_off_refuses_non_ip_target(runner) -> None:
     """``kick_off`` validates ``target_ip`` is a real IPv4/v6
-    address before spawning the worker thread. Currently
-    ``last_seen_ip`` is set from ``request.client.host`` (TCP
-    source IP, network-layer guaranteed) so a non-IP value
-    cannot reach this code path -- but :func:`_render_config`
-    interpolates ``target_ip`` into a TOML string with f-strings,
-    and a future code path that lets a header populate the field
-    without validation would otherwise enable TOML injection.
-    The boundary check protects regardless."""
-    runner_obj, state, _ = runner
-    _seed_machine(state)
+    address before spawning the worker thread. TOML-injection
+    defence at the boundary."""
+    runner_obj, state_db, _ = runner
+    _seed_machine(state_db)
 
-    # No real subprocess; if kick_off doesn't short-circuit, the
-    # spawned thread would try to invoke cijoe.
-    with patch("bty.web._task.subprocess.run") as mock_run:
+    with patch("bty.web._task.subprocess.Popen") as mock_popen:
         for bad in (
-            'host"; injected="x',  # break out of TOML string
-            "10.0.0.1\n[evil]\nx = 1",  # newline-injected TOML key
+            'host"; injected="x',
+            "10.0.0.1\n[evil]\nx = 1",
             "not-an-ip",
             "",
         ):
-            runner_obj.kick_off(
+            result = runner_obj.kick_off(
                 mac="aa:bb:cc:dd:ee:ff",
                 task_ref="/path/to/wf.yaml",
                 target_ip=bad,
             )
-    assert not mock_run.called
+            assert result is None, f"non-IP {bad!r} should have been refused"
+    assert not mock_popen.called
+
+
+def test_kick_off_idempotent_for_running_mac(runner) -> None:
+    """A second ``kick_off`` for a mac whose task is already in
+    flight returns the existing state and does NOT spawn a new
+    worker thread. Per-MAC parallelism is 1 -- protects against
+    a flapping target rapid-firing /pxe/{mac}/done and queueing
+    redundant runs."""
+    runner_obj, state_db, _ = runner
+    _seed_machine(state_db)
+
+    # Pre-populate _states with a running task for this mac, so
+    # the second kick_off sees an existing in-flight job.
+    pre = TaskState(
+        mac="aa:bb:cc:dd:ee:ff",
+        task_ref="/wf.yaml",
+        target_ip="10.0.0.5",
+        status="running",
+    )
+    with runner_obj._lock:
+        runner_obj._states["aa:bb:cc:dd:ee:ff"] = pre
+
+    with patch("bty.web._task.subprocess.Popen") as mock_popen:
+        result = runner_obj.kick_off(
+            mac="aa:bb:cc:dd:ee:ff",
+            task_ref="/different.yaml",
+            target_ip="10.0.0.5",
+        )
+    assert result is pre
+    # No subprocess spawned: kick_off returned early.
+    assert not mock_popen.called
+
+
+def test_cancel_unknown_mac_returns_none(runner) -> None:
+    runner_obj, _, _ = runner
+    assert runner_obj.cancel("aa:bb:cc:dd:ee:ff") is None
+
+
+def test_cancel_running_terminates_subprocess(runner) -> None:
+    """``cancel`` flips the threading.Event AND calls
+    ``proc.terminate()`` so the cijoe subprocess actually stops.
+    Without the terminate call, the worker would block on
+    ``proc.communicate(timeout=...)`` until the cijoe binary
+    exits on its own (potentially the full 30-min timeout)."""
+    runner_obj, _, _ = runner
+
+    pre = TaskState(
+        mac="aa:bb:cc:dd:ee:ff",
+        task_ref="/wf.yaml",
+        target_ip="10.0.0.5",
+        status="running",
+    )
+    fake_proc = MagicMock()
+    pre._proc = fake_proc
+    with runner_obj._lock:
+        runner_obj._states["aa:bb:cc:dd:ee:ff"] = pre
+
+    result = runner_obj.cancel("aa:bb:cc:dd:ee:ff")
+    assert result is pre
+    assert pre._cancel.is_set()
+    fake_proc.terminate.assert_called_once()
+
+
+def test_cancel_already_finished_is_noop(runner) -> None:
+    """Cancelling a ``completed`` / ``cancelled`` / ``failed`` task
+    returns the existing state without mutation, so the API can
+    treat DELETE as idempotent."""
+    runner_obj, _, _ = runner
+    pre = TaskState(
+        mac="aa:bb:cc:dd:ee:ff",
+        task_ref="/wf.yaml",
+        target_ip="10.0.0.5",
+        status="completed",
+    )
+    with runner_obj._lock:
+        runner_obj._states["aa:bb:cc:dd:ee:ff"] = pre
+
+    result = runner_obj.cancel("aa:bb:cc:dd:ee:ff")
+    assert result is pre
+    assert not pre._cancel.is_set()  # not flipped
+
+
+def test_run_records_cancelled_when_event_set(runner) -> None:
+    """After ``cancel()`` flips the event and terminates the
+    subprocess, the worker thread's ``_run`` sees a non-zero
+    return code AND a set cancel event. It must record the
+    result as ``cancelled`` (not ``failed``); otherwise the UI
+    shows a misleading red badge for what was an operator-
+    initiated stop."""
+    runner_obj, state_db, _ = runner
+    _seed_machine(state_db)
+
+    state = _seed_state()
+    state._cancel.set()  # simulate operator cancel before run
+    proc = _fake_proc(-15)  # rc from SIGTERM
+    with patch("bty.web._task.subprocess.Popen", return_value=proc):
+        runner_obj._run(state)
+
+    assert state.status == "cancelled"
+    with _db.open_db(state_db) as conn:
+        row = conn.execute(
+            "SELECT last_task_status FROM machines WHERE mac = ?",
+            ("aa:bb:cc:dd:ee:ff",),
+        ).fetchone()
+    assert row["last_task_status"] == "cancelled"
+
+
+def test_list_returns_snapshot(runner) -> None:
+    runner_obj, _, _ = runner
+    pre = TaskState(
+        mac="aa:bb:cc:dd:ee:ff",
+        task_ref="/wf.yaml",
+        target_ip="10.0.0.5",
+        status="running",
+    )
+    with runner_obj._lock:
+        runner_obj._states["aa:bb:cc:dd:ee:ff"] = pre
+
+    snapshot = runner_obj.list()
+    assert len(snapshot) == 1
+    assert snapshot[0].mac == "aa:bb:cc:dd:ee:ff"
+
+
+# ---------- start sweeps stale running rows ---------------------------------
+
+
+def test_start_sweeps_stale_running_rows(runner) -> None:
+    """``TaskManager.start()`` is called once at bty-web lifespan
+    startup and rewrites any ``last_task_status='running'`` row
+    in state.db to ``failed`` (the in-flight task died with the
+    previous bty-web process). Without this, the UI shows a
+    perma-running badge that never resolves."""
+    runner_obj, state_db, _ = runner
+    with _db.open_db(state_db) as conn:
+        conn.execute(
+            """
+            INSERT INTO machines
+                (mac, provisioning_mode, last_task_status,
+                 boot_policy, created_at, updated_at)
+            VALUES ('aa:bb:cc:dd:ee:ff', 'cijoe-online', 'running',
+                    'flash', ?, ?)
+            """,
+            ("2026-01-01T00:00:00+00:00", "2026-01-01T00:00:00+00:00"),
+        )
+        conn.commit()
+
+    runner_obj.start()
+
+    with _db.open_db(state_db) as conn:
+        row = conn.execute(
+            "SELECT last_task_status FROM machines WHERE mac = ?",
+            ("aa:bb:cc:dd:ee:ff",),
+        ).fetchone()
+    assert row["last_task_status"] == "failed"

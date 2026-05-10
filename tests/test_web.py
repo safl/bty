@@ -972,6 +972,42 @@ def test_machine_response_includes_task_columns(app_client: TestClient) -> None:
     assert body["last_task_output_path"] is None
 
 
+# ---------- /tasks API (v0.7.37 cancelable runs) ---------------------------
+
+
+def test_tasks_list_requires_auth(app_client: TestClient) -> None:
+    """``/tasks`` is operator-only (mirrors /catalog/* / /boot/releases)."""
+    r = app_client.get("/tasks")
+    assert r.status_code == 401
+
+
+def test_tasks_list_returns_empty_initially(app_client: TestClient) -> None:
+    r = app_client.get("/tasks", cookies=AUTH)
+    assert r.status_code == 200
+    body = r.json()
+    assert body == {"tasks": []}
+
+
+def test_tasks_cancel_unknown_mac_returns_404(app_client: TestClient) -> None:
+    r = app_client.delete("/tasks/aa:bb:cc:dd:ee:ff", cookies=AUTH)
+    assert r.status_code == 404
+
+
+def test_tasks_cancel_invalid_mac_returns_400(app_client: TestClient) -> None:
+    """``_normalise_mac`` rejects malformed MACs at the boundary."""
+    r = app_client.delete("/tasks/not-a-mac", cookies=AUTH)
+    assert r.status_code == 400
+
+
+# Note: surfacing of in-flight task state via ``GET /tasks`` is
+# covered by ``test_web_task.py::test_list_returns_snapshot``,
+# which exercises the manager directly without needing a real
+# cijoe subprocess + a TestClient that fakes a routable client IP.
+# The integration shape (``GET`` returns 200 with a ``tasks`` key)
+# is already covered by ``test_tasks_list_returns_empty_initially``
+# and ``test_tasks_list_requires_auth`` above.
+
+
 # ---------- /boot and /images file serving --------------------
 
 

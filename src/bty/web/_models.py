@@ -24,12 +24,19 @@ MAC_PATTERN = r"^[0-9a-f]{2}(:[0-9a-f]{2}){5}$"
 PROVISIONING_MODES = ("none", "cloud-init", "cijoe", "cijoe-online")
 PROVISIONING_PATTERN = r"^(none|cloud-init|cijoe|cijoe-online)$"
 
-# Status of the most recent online-cijoe task run. (CIJOE renamed
-# their "workflow" concept to "task" in 2026; bty mirrors the
-# vocabulary for clarity. The CIJOE CLI is backwards-compatible
-# so existing operators don't see a behavioural change.)
-TASK_STATUSES = ("running", "success", "failed")
-TASK_STATUS_PATTERN = r"^(running|success|failed)$"
+# Status of the most recent online-cijoe task run. v0.7.37 promoted
+# TaskRunner to a cancelable TaskManager that mirrors the other
+# managers' state vocabulary: ``running`` while the cijoe subprocess
+# is in flight, ``completed`` on rc=0, ``cancelled`` on operator
+# abort (DELETE /tasks/{mac}), ``failed`` on rc!=0 / timeout /
+# subprocess error. The pre-v0.7.37 ``success`` was renamed to
+# ``completed`` for parity with HashState / DownloadState /
+# ReleaseFetchState. CIJOE renamed their "workflow" concept to
+# "task" in 2026; bty mirrors the vocabulary for clarity. The CIJOE
+# CLI is backwards-compatible so existing operators don't see a
+# behavioural change.
+TASK_STATUSES = ("running", "completed", "cancelled", "failed")
+TASK_STATUS_PATTERN = r"^(running|completed|cancelled|failed)$"
 
 # Boot-policy values: what ``GET /pxe/{mac}`` returns.
 #

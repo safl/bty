@@ -123,6 +123,12 @@ def create_app(
         # because fetching two GitHub releases in parallel is
         # operator-confusing and bandwidth-saturating.
         release_fetch_manager.start(resolved_boot_root)
+        # Task manager: cancelable cijoe-online runs. ``start()``
+        # sweeps stale ``running`` rows in state.db (left by
+        # in-flight tasks at the previous bty-web shutdown) so the
+        # UI doesn't show a perma-running badge that never
+        # resolves.
+        task_runner.start()
         # Auto-import: enqueue every dir-scan file without a
         # ``.sha256`` sidecar so the HashManager processes them
         # in the background. Once a sidecar lands, ``/images``
@@ -419,6 +425,30 @@ def create_app(
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"no active release fetch for tag {tag!r}",
+            )
+        return state.to_dict()
+
+    # ---------- task manager (cijoe-online runs, v0.7.37) -----------------------
+    # Mirrors the release-fetch / hash / download manager surfaces.
+    # ``/tasks`` is keyed by MAC because the cijoe-online lifecycle is
+    # per-machine: a flash-completion signal triggers one task; the
+    # operator may want to abort it via the UI or API. The manager
+    # is the only authoritative source for in-flight state (state.db's
+    # ``last_task_status`` lags slightly because workers update it
+    # at status transitions, not continuously).
+
+    @app.get("/tasks", dependencies=[Depends(require_auth)])
+    def list_tasks() -> dict[str, Any]:
+        return {"tasks": [s.to_dict() for s in task_runner.list()]}
+
+    @app.delete("/tasks/{mac}", dependencies=[Depends(require_auth)])
+    def cancel_task(mac: str) -> dict[str, Any]:
+        normalised = _normalise_mac(mac)
+        state = task_runner.cancel(normalised)
+        if state is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"no task known for mac {normalised!r}",
             )
         return state.to_dict()
 
