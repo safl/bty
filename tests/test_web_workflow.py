@@ -175,3 +175,33 @@ def test_workflow_runner_invokes_cijoe_with_workflow_and_config(runner) -> None:
     # Subprocess runs with cwd set to the run dir so cijoe's
     # cijoe-output/ lands there.
     assert kwargs["cwd"]
+
+
+def test_kick_off_refuses_non_ip_target(runner) -> None:
+    """``kick_off`` validates ``target_ip`` is a real IPv4/v6
+    address before spawning the worker thread. Currently
+    ``last_seen_ip`` is set from ``request.client.host`` (TCP
+    source IP, network-layer guaranteed) so a non-IP value
+    cannot reach this code path -- but :func:`_render_config`
+    interpolates ``target_ip`` into a TOML string with f-strings,
+    and a future code path that lets a header populate the field
+    without validation would otherwise enable TOML injection.
+    The boundary check protects regardless."""
+    runner_obj, state, _ = runner
+    _seed_machine(state)
+
+    # No real subprocess; if kick_off doesn't short-circuit, the
+    # spawned thread would try to invoke cijoe.
+    with patch("bty.web._workflow.subprocess.run") as mock_run:
+        for bad in (
+            'host"; injected="x',  # break out of TOML string
+            "10.0.0.1\n[evil]\nx = 1",  # newline-injected TOML key
+            "not-an-ip",
+            "",
+        ):
+            runner_obj.kick_off(
+                mac="aa:bb:cc:dd:ee:ff",
+                workflow_ref="/path/to/wf.yaml",
+                target_ip=bad,
+            )
+    assert not mock_run.called

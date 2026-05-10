@@ -34,6 +34,7 @@ at the most recent. A history table + auth-protected
 
 from __future__ import annotations
 
+import ipaddress
 import logging
 import subprocess
 import sys
@@ -75,7 +76,28 @@ class WorkflowRunner:
         self._cijoe_bin = cijoe_bin
 
     def kick_off(self, mac: str, workflow_ref: str, target_ip: str) -> None:
-        """Start a worker thread for this run and return immediately."""
+        """Start a worker thread for this run and return immediately.
+
+        Validates ``target_ip`` is a real IPv4 / IPv6 address before
+        spawning the thread. ``last_seen_ip`` is currently populated
+        from ``request.client.host`` (TCP source IP, network-layer
+        guaranteed) so a non-IP value cannot reach this code path,
+        but :func:`_render_config` interpolates ``target_ip`` into
+        a TOML string with f-strings -- a future code path that
+        ever populates ``last_seen_ip`` from a header (X-Forwarded-
+        For, etc.) without validation would otherwise enable TOML
+        injection. ``ipaddress.ip_address`` rejects anything but
+        a literal IP, including stray quotes / newlines.
+        """
+        try:
+            ipaddress.ip_address(target_ip)
+        except ValueError:
+            log.error(
+                "workflow %s: refusing to kick off with non-IP target_ip %r",
+                mac,
+                target_ip,
+            )
+            return
         thread = threading.Thread(
             target=self._run,
             args=(mac, workflow_ref, target_ip),
