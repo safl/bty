@@ -17,7 +17,12 @@ set -eu
 install -d -o bty -g bty -m 0750 /var/lib/bty
 install -d -o bty -g bty -m 0750 /var/lib/bty/images
 install -d -o bty -g bty -m 0750 /var/lib/bty/boot
-install -d -o bty -g bty -m 0750 /var/lib/bty/workflows
+install -d -o bty -g bty -m 0750 /var/lib/bty/tasks
+# Legacy /var/lib/bty/workflows (renamed to /tasks/ in v0.7.35
+# alongside CIJOE's workflow->task vocabulary change). Existing
+# appliance images may still have the old dir from previous
+# bakes; bty-web no longer writes there but we leave it in place
+# so the operator can inspect old run output.
 # Operator drops the SSH key for online cijoe at /var/lib/bty/keys/
 # id_ed25519 (milestone 15 phase 1 - key generation lands later).
 install -d -o bty -g bty -m 0700 /var/lib/bty/keys

@@ -18,14 +18,14 @@
             <dd class="col-sm-9">{{ m.last_seen_at or "-" }}{% if m.last_seen_ip %} from <code>{{ m.last_seen_ip }}</code>{% endif %}</dd>
             <dt class="col-sm-3">Last flashed</dt>
             <dd class="col-sm-9">{{ m.last_flashed_at or "-" }}</dd>
-            <dt class="col-sm-3">Last workflow</dt>
+            <dt class="col-sm-3">Last task</dt>
             <dd class="col-sm-9">
-                {% if m.last_workflow_status %}
-                {% set badge = {'running':'bg-info','success':'bg-success','failed':'bg-danger'}[m.last_workflow_status] %}
-                <span class="badge {{ badge }}">{{ m.last_workflow_status }}</span>
-                <small class="text-muted">at {{ m.last_workflow_run_at }}</small>
-                {% if m.last_workflow_output_path %}
-                <div class="small text-muted">output: <code>{{ m.last_workflow_output_path }}</code></div>
+                {% if m.last_task_status %}
+                {% set badge = {'running':'bg-info','success':'bg-success','failed':'bg-danger'}[m.last_task_status] %}
+                <span class="badge {{ badge }}">{{ m.last_task_status }}</span>
+                <small class="text-muted">at {{ m.last_task_run_at }}</small>
+                {% if m.last_task_output_path %}
+                <div class="small text-muted">output: <code>{{ m.last_task_output_path }}</code></div>
                 {% endif %}
                 {% else %}
                 -
@@ -73,9 +73,9 @@
                        value="{{ m.hostname or '' }}" placeholder="(optional)">
             </div>
             <div class="mb-3">
-                <label class="form-label" for="cijoe_workflow_ref">CIJOE workflow ref</label>
-                <input type="text" name="cijoe_workflow_ref" id="cijoe_workflow_ref"
-                       class="form-control" value="{{ m.cijoe_workflow_ref or '' }}"
+                <label class="form-label" for="cijoe_task_ref">CIJOE task ref</label>
+                <input type="text" name="cijoe_task_ref" id="cijoe_task_ref"
+                       class="form-control" value="{{ m.cijoe_task_ref or '' }}"
                        placeholder="(optional, used when provisioning is cijoe)">
             </div>
             <div class="mb-3">

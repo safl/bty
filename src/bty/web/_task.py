@@ -1,16 +1,16 @@
-"""Online cijoe provisioning runner.
+"""Online cijoe provisioning runner (cijoe "task" runs).
 
 When a machine has ``provisioning_mode == 'cijoe-online'``, a
 successful flash (signalled by ``POST /pxe/{mac}/done``) kicks off a
-cijoe workflow run from bty-web against the freshly-booted target.
-This module owns that orchestration:
+cijoe task run from bty-web against the freshly-booted target. This
+module owns that orchestration:
 
-1. Update the machine record's ``last_workflow_status`` to
+1. Update the machine record's ``last_task_status`` to
    ``running`` and publish a machines-update SSE event.
 2. Synthesise a per-run cijoe transport config pointing at
    ``last_seen_ip`` over SSH using the operator-supplied key at
    ``/var/lib/bty/keys/id_ed25519``.
-3. ``cijoe <workflow.yaml> --config <transport.toml> --monitor``
+3. ``cijoe <task.yaml> --config <transport.toml> --monitor``
    runs in a daemon worker thread. cijoe's own transport-retry
    handles waiting for SSH to come up - bty-web doesn't poll. A
    long timeout (default 30 min) keeps the thread from hanging
@@ -25,11 +25,17 @@ callable from the worker thread; :class:`MachineEventBus` makes that
 safe via the loop captured at app startup.
 
 Phase 1 deliberately keeps history to "last run only" - the older
-output dirs accumulate under ``DEFAULT_WORKFLOWS_DIR``
-(``/var/lib/bty/workflows``, overridable per :class:`WorkflowRunner`
+output dirs accumulate under ``DEFAULT_TASKS_DIR``
+(``/var/lib/bty/tasks``, overridable per :class:`TaskRunner`
 constructor arg) for inspection but the machine record only points
 at the most recent. A history table + auth-protected
-``/workflows/{run_id}`` endpoint is left for phase 2.
+``/tasks/{run_id}`` endpoint is left for phase 2.
+
+Naming: CIJOE renamed their "workflow" concept to "task" in 2026;
+bty mirrors that vocabulary. The CIJOE CLI accepts the same
+positional argument shape as before, so ``cijoe <task.yaml>`` is
+the same invocation as ``cijoe <workflow.yaml>`` was -- the rename
+is purely vocabulary.
 """
 
 from __future__ import annotations
@@ -49,19 +55,19 @@ log = logging.getLogger(__name__)
 
 DEFAULT_TIMEOUT_SECONDS = 30 * 60  # 30 min - covers a leisurely first boot.
 DEFAULT_SSH_KEY = Path("/var/lib/bty/keys/id_ed25519")
-DEFAULT_WORKFLOWS_DIR = Path("/var/lib/bty/workflows")
+DEFAULT_TASKS_DIR = Path("/var/lib/bty/tasks")
 DEFAULT_CIJOE_BIN = str(Path(sys.executable).parent / "cijoe")
 
 
-class WorkflowRunner:
-    """Runs a cijoe workflow against a target machine in a worker thread."""
+class TaskRunner:
+    """Runs a cijoe task against a target machine in a worker thread."""
 
     def __init__(
         self,
         *,
         state_path: Path,
         publish_machines_changed: Callable[[], None],
-        workflows_dir: Path = DEFAULT_WORKFLOWS_DIR,
+        tasks_dir: Path = DEFAULT_TASKS_DIR,
         ssh_key_path: Path = DEFAULT_SSH_KEY,
         ssh_username: str = "root",
         timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
@@ -69,13 +75,13 @@ class WorkflowRunner:
     ) -> None:
         self._state_path = state_path
         self._publish = publish_machines_changed
-        self._workflows_dir = workflows_dir
+        self._tasks_dir = tasks_dir
         self._ssh_key_path = ssh_key_path
         self._ssh_username = ssh_username
         self._timeout_seconds = timeout_seconds
         self._cijoe_bin = cijoe_bin
 
-    def kick_off(self, mac: str, workflow_ref: str, target_ip: str) -> None:
+    def kick_off(self, mac: str, task_ref: str, target_ip: str) -> None:
         """Start a worker thread for this run and return immediately.
 
         Validates ``target_ip`` is a real IPv4 / IPv6 address before
@@ -93,28 +99,28 @@ class WorkflowRunner:
             ipaddress.ip_address(target_ip)
         except ValueError:
             log.error(
-                "workflow %s: refusing to kick off with non-IP target_ip %r",
+                "task %s: refusing to kick off with non-IP target_ip %r",
                 mac,
                 target_ip,
             )
             return
         thread = threading.Thread(
             target=self._run,
-            args=(mac, workflow_ref, target_ip),
+            args=(mac, task_ref, target_ip),
             daemon=True,
-            name=f"bty-workflow-{mac}",
+            name=f"bty-task-{mac}",
         )
         thread.start()
 
     # ----- worker -----------------------------------------------------------
 
-    def _run(self, mac: str, workflow_ref: str, target_ip: str) -> None:
+    def _run(self, mac: str, task_ref: str, target_ip: str) -> None:
         run_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-        run_dir = self._workflows_dir / mac / run_id
+        run_dir = self._tasks_dir / mac / run_id
         try:
             run_dir.mkdir(parents=True, exist_ok=True)
         except OSError as exc:
-            log.error("workflow %s: cannot create %s: %s", mac, run_dir, exc)
+            log.error("task %s: cannot create %s: %s", mac, run_dir, exc)
             self._record_status(mac, status="failed", run_dir=run_dir)
             return
 
@@ -128,7 +134,7 @@ class WorkflowRunner:
             result = subprocess.run(
                 [
                     self._cijoe_bin,
-                    str(workflow_ref),
+                    str(task_ref),
                     "--config",
                     str(config_path),
                     "--monitor",
@@ -144,22 +150,28 @@ class WorkflowRunner:
             status = "success" if result.returncode == 0 else "failed"
         except subprocess.TimeoutExpired:
             (run_dir / "error.txt").write_text(f"cijoe timed out after {self._timeout_seconds}s\n")
-            log.error("workflow %s: timed out after %ds", mac, self._timeout_seconds)
+            log.error("task %s: timed out after %ds", mac, self._timeout_seconds)
         except FileNotFoundError as exc:
             (run_dir / "error.txt").write_text(f"cijoe binary not found: {exc}\n")
-            log.error("workflow %s: cijoe binary not found: %s", mac, exc)
+            log.error("task %s: cijoe binary not found: %s", mac, exc)
         except OSError as exc:
             (run_dir / "error.txt").write_text(f"OSError: {exc}\n")
-            log.exception("workflow %s: subprocess failed", mac)
+            log.exception("task %s: subprocess failed", mac)
 
         self._record_status(mac, status=status, run_dir=run_dir)
 
     # ----- helpers ----------------------------------------------------------
 
     def _render_config(self, target_ip: str) -> str:
-        """Synthesise a cijoe SSH transport config for this run."""
+        """Synthesise a cijoe SSH transport config for this run.
+
+        The ``[cijoe.workflow]`` section name is kept as-is: CIJOE's
+        config schema still recognises that section in the
+        backwards-compatible CLI; bty doesn't get a say in the upstream
+        TOML key. Only bty's own vocabulary (file/class/db) renamed.
+        """
         return (
-            "# Generated by bty-web for a single online-cijoe run.\n"
+            "# Generated by bty-web for a single online-cijoe task run.\n"
             "[cijoe.workflow]\n"
             "fail_fast = true\n"
             "\n"
@@ -176,10 +188,10 @@ class WorkflowRunner:
             conn.execute(
                 """
                 UPDATE machines
-                SET last_workflow_run_at      = COALESCE(last_workflow_run_at, ?),
-                    last_workflow_status      = ?,
-                    last_workflow_output_path = ?,
-                    updated_at                = ?
+                SET last_task_run_at      = COALESCE(last_task_run_at, ?),
+                    last_task_status      = ?,
+                    last_task_output_path = ?,
+                    updated_at            = ?
                 WHERE mac = ?
                 """,
                 (now, status, str(run_dir), now, mac),
@@ -189,11 +201,11 @@ class WorkflowRunner:
             # behind, but for a fresh kick-off we want the new start.
             if status == "running":
                 conn.execute(
-                    "UPDATE machines SET last_workflow_run_at = ? WHERE mac = ?",
+                    "UPDATE machines SET last_task_run_at = ? WHERE mac = ?",
                     (now, mac),
                 )
             conn.commit()
         try:
             self._publish()
         except Exception:
-            log.exception("workflow %s: SSE publish failed", mac)
+            log.exception("task %s: SSE publish failed", mac)

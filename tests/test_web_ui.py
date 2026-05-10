@@ -351,7 +351,7 @@ def test_ui_machine_upsert_via_form(client: TestClient) -> None:
             "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
             "provisioning_mode": "none",
             "hostname": "bty-ui-test",
-            "cijoe_workflow_ref": "",
+            "cijoe_task_ref": "",
         },
     )
     assert r.status_code == 303
@@ -379,7 +379,7 @@ def test_ui_machine_upsert_persists_boot_policy_flash(client: TestClient) -> Non
             "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
             "provisioning_mode": "none",
             "hostname": "",
-            "cijoe_workflow_ref": "",
+            "cijoe_task_ref": "",
             "boot_policy": "flash",
         },
     )

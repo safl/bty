@@ -812,20 +812,20 @@ def test_pxe_done_404_for_unknown_mac(app_client: TestClient) -> None:
 # ---------- online cijoe auto-trigger (milestone 15) ----------------------
 
 
-def test_pxe_done_triggers_online_workflow_when_configured(app_client: TestClient) -> None:
-    """``provisioning_mode='cijoe-online'`` + workflow ref + last_seen_ip
-    means the completion signal kicks off a workflow run via
-    WorkflowRunner. The runner's ``kick_off`` should be called with
-    the assigned workflow + the IP the live env was last seen from."""
+def test_pxe_done_triggers_online_task_when_configured(app_client: TestClient) -> None:
+    """``provisioning_mode='cijoe-online'`` + task ref + last_seen_ip
+    means the completion signal kicks off a task run via
+    TaskRunner. The runner's ``kick_off`` should be called with
+    the assigned task + the IP the live env was last seen from."""
     from unittest.mock import patch
 
-    # Seed via API (sets cijoe_workflow_ref + provisioning_mode).
+    # Seed via API (sets cijoe_task_ref + provisioning_mode).
     app_client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
         json={
             "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
             "provisioning_mode": "cijoe-online",
-            "cijoe_workflow_ref": "/var/lib/bty/workflows/post-flash.yaml",
+            "cijoe_task_ref": "/var/lib/bty/tasks/post-flash.yaml",
         },
         cookies=AUTH,
     )
@@ -833,7 +833,7 @@ def test_pxe_done_triggers_online_workflow_when_configured(app_client: TestClien
     app_client.get("/pxe/aa:bb:cc:dd:ee:ff")
 
     with patch(
-        "bty.web._workflow.WorkflowRunner.kick_off",
+        "bty.web._task.TaskRunner.kick_off",
     ) as mock_kick:
         r = app_client.post("/pxe/aa:bb:cc:dd:ee:ff/done")
 
@@ -841,7 +841,7 @@ def test_pxe_done_triggers_online_workflow_when_configured(app_client: TestClien
     mock_kick.assert_called_once()
     kwargs = mock_kick.call_args.kwargs
     assert kwargs["mac"] == "aa:bb:cc:dd:ee:ff"
-    assert kwargs["workflow_ref"] == "/var/lib/bty/workflows/post-flash.yaml"
+    assert kwargs["task_ref"] == "/var/lib/bty/tasks/post-flash.yaml"
     # last_seen_ip from the GET above; TestClient uses 'testclient'
     # as the client host.
     assert kwargs["target_ip"] == "testclient"
@@ -855,18 +855,18 @@ def test_pxe_done_does_not_trigger_when_provisioning_mode_is_other(app_client: T
         json={
             "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
             "provisioning_mode": "none",
-            "cijoe_workflow_ref": "/var/lib/bty/workflows/post-flash.yaml",
+            "cijoe_task_ref": "/var/lib/bty/tasks/post-flash.yaml",
         },
         cookies=AUTH,
     )
     app_client.get("/pxe/aa:bb:cc:dd:ee:ff")
-    with patch("bty.web._workflow.WorkflowRunner.kick_off") as mock_kick:
+    with patch("bty.web._task.TaskRunner.kick_off") as mock_kick:
         r = app_client.post("/pxe/aa:bb:cc:dd:ee:ff/done")
     assert r.status_code == 204
     mock_kick.assert_not_called()
 
 
-def test_pxe_done_does_not_trigger_when_workflow_ref_missing(app_client: TestClient) -> None:
+def test_pxe_done_does_not_trigger_when_task_ref_missing(app_client: TestClient) -> None:
     from unittest.mock import patch
 
     app_client.put(
@@ -874,18 +874,18 @@ def test_pxe_done_does_not_trigger_when_workflow_ref_missing(app_client: TestCli
         json={
             "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
             "provisioning_mode": "cijoe-online",
-            # no cijoe_workflow_ref
+            # no cijoe_task_ref
         },
         cookies=AUTH,
     )
     app_client.get("/pxe/aa:bb:cc:dd:ee:ff")
-    with patch("bty.web._workflow.WorkflowRunner.kick_off") as mock_kick:
+    with patch("bty.web._task.TaskRunner.kick_off") as mock_kick:
         r = app_client.post("/pxe/aa:bb:cc:dd:ee:ff/done")
     assert r.status_code == 204
     mock_kick.assert_not_called()
 
 
-def test_machine_response_includes_workflow_columns(app_client: TestClient) -> None:
+def test_machine_response_includes_task_columns(app_client: TestClient) -> None:
     """Schema migration: new columns exposed via the wire model."""
     app_client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
@@ -893,9 +893,9 @@ def test_machine_response_includes_workflow_columns(app_client: TestClient) -> N
         cookies=AUTH,
     )
     body = app_client.get("/machines/aa:bb:cc:dd:ee:ff", cookies=AUTH).json()
-    assert body["last_workflow_run_at"] is None
-    assert body["last_workflow_status"] is None
-    assert body["last_workflow_output_path"] is None
+    assert body["last_task_run_at"] is None
+    assert body["last_task_status"] is None
+    assert body["last_task_output_path"] is None
 
 
 # ---------- /boot and /images file serving --------------------

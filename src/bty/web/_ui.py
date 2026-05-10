@@ -225,7 +225,7 @@ def register_ui_routes(
         image_sha256: Annotated[str, Form()] = "",
         provisioning_mode: Annotated[str, Form()] = "none",
         hostname: Annotated[str, Form()] = "",
-        cijoe_workflow_ref: Annotated[str, Form()] = "",
+        cijoe_task_ref: Annotated[str, Form()] = "",
         boot_policy: Annotated[str, Form()] = "local",
     ) -> RedirectResponse:
         normalised = _normalise_mac(mac)
@@ -241,7 +241,7 @@ def register_ui_routes(
                 image_sha256=image_sha256 or None,
                 provisioning_mode=provisioning_mode,
                 hostname=hostname or None,
-                cijoe_workflow_ref=cijoe_workflow_ref or None,
+                cijoe_task_ref=cijoe_task_ref or None,
                 boot_policy=boot_policy,
             )
         except ValueError as exc:
@@ -275,14 +275,14 @@ def register_ui_routes(
                 """
                 INSERT INTO machines
                     (mac, image_sha256, provisioning_mode, hostname,
-                     cijoe_workflow_ref, last_known_good,
+                     cijoe_task_ref, last_known_good,
                      boot_policy, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?)
                 ON CONFLICT(mac) DO UPDATE SET
                     image_sha256       = excluded.image_sha256,
                     provisioning_mode  = excluded.provisioning_mode,
                     hostname           = excluded.hostname,
-                    cijoe_workflow_ref = excluded.cijoe_workflow_ref,
+                    cijoe_task_ref = excluded.cijoe_task_ref,
                     boot_policy        = excluded.boot_policy,
                     updated_at         = excluded.updated_at
                 """,
@@ -291,7 +291,7 @@ def register_ui_routes(
                     validated.image_sha256,
                     validated.provisioning_mode,
                     validated.hostname,
-                    validated.cijoe_workflow_ref,
+                    validated.cijoe_task_ref,
                     validated.boot_policy,
                     created_at,
                     now,
@@ -557,15 +557,15 @@ def _row_to_dict(row: Any) -> dict[str, Any]:
         "image_sha256": row["image_sha256"],
         "provisioning_mode": row["provisioning_mode"],
         "hostname": row["hostname"],
-        "cijoe_workflow_ref": row["cijoe_workflow_ref"],
+        "cijoe_task_ref": row["cijoe_task_ref"],
         "discovered_at": row["discovered_at"],
         "last_seen_at": row["last_seen_at"],
         "last_seen_ip": row["last_seen_ip"],
         "boot_policy": row["boot_policy"],
         "last_flashed_at": row["last_flashed_at"],
-        "last_workflow_run_at": row["last_workflow_run_at"],
-        "last_workflow_status": row["last_workflow_status"],
-        "last_workflow_output_path": row["last_workflow_output_path"],
+        "last_task_run_at": row["last_task_run_at"],
+        "last_task_status": row["last_task_status"],
+        "last_task_output_path": row["last_task_output_path"],
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
     }

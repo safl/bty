@@ -803,8 +803,8 @@ def test_find_cloud_init_rootfs_handles_flat_lsblk_shape(
 # ---------- apply_cijoe: arg validation + helpers ----------------------------
 
 
-def test_apply_cijoe_missing_workflow_raises(tmp_path: Path) -> None:
-    with pytest.raises(flash.FlashError, match="cijoe workflow not found"):
+def test_apply_cijoe_missing_task_raises(tmp_path: Path) -> None:
+    with pytest.raises(flash.FlashError, match="cijoe task not found"):
         flash.apply_cijoe(Path("/dev/null"), tmp_path / "missing.yaml")
 
 

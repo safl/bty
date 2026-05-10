@@ -36,7 +36,7 @@ from bty.web import _catalog as _web_catalog
 from bty.web import _db, _hash, _models, _release_mgr, _ui
 from bty.web._auth import SESSION_COOKIE, require_auth
 from bty.web._events import MachineEvent, MachineEventBus, sse_format
-from bty.web._workflow import WorkflowRunner
+from bty.web._task import TaskRunner
 
 # Session cookie max-age. Sliding TTL on the browser side; Starlette's
 # SessionMiddleware refreshes the cookie on each authed response, so
@@ -105,7 +105,7 @@ def create_app(
     @asynccontextmanager
     async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
         # The SSE event bus accepts publishes from worker threads
-        # (WorkflowRunner) - capture the loop now so cross-thread
+        # (TaskRunner) - capture the loop now so cross-thread
         # publishes can hop in via call_soon_threadsafe.
         event_bus.attach(asyncio.get_running_loop())
         if parsed_catalog is not None:
@@ -216,7 +216,7 @@ def create_app(
     # Back-compat alias - older internal call sites use this name.
     publish_machines_changed = publish_state_changed
 
-    workflow_runner = WorkflowRunner(
+    task_runner = TaskRunner(
         state_path=state_path,
         publish_machines_changed=publish_machines_changed,
     )
@@ -361,26 +361,26 @@ def create_app(
         publish_machines_changed()
 
         # Online cijoe (milestone 15): if the machine is set up for
-        # post-boot provisioning, kick off a workflow run in a worker
+        # post-boot provisioning, kick off a task run in a worker
         # thread now that the live env says the flash is done. cijoe's
         # transport-retry handles waiting for SSH to come up. The
-        # request still returns 204 immediately - workflow status
+        # request still returns 204 immediately - task status
         # surfaces via the SSE machines-update channel as it changes.
         with _db.open_db(state_path) as conn:
             row = conn.execute(
-                "SELECT provisioning_mode, cijoe_workflow_ref, last_seen_ip "
+                "SELECT provisioning_mode, cijoe_task_ref, last_seen_ip "
                 "FROM machines WHERE mac = ?",
                 (normalised,),
             ).fetchone()
         if (
             row is not None
             and row["provisioning_mode"] == "cijoe-online"
-            and row["cijoe_workflow_ref"]
+            and row["cijoe_task_ref"]
             and row["last_seen_ip"]
         ):
-            workflow_runner.kick_off(
+            task_runner.kick_off(
                 mac=normalised,
-                workflow_ref=row["cijoe_workflow_ref"],
+                task_ref=row["cijoe_task_ref"],
                 target_ip=row["last_seen_ip"],
             )
 
@@ -565,14 +565,14 @@ def create_app(
                 """
                 INSERT INTO machines
                     (mac, image_sha256, provisioning_mode, hostname,
-                     cijoe_workflow_ref, last_known_good,
+                     cijoe_task_ref, last_known_good,
                      boot_policy, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?)
                 ON CONFLICT(mac) DO UPDATE SET
                     image_sha256       = excluded.image_sha256,
                     provisioning_mode  = excluded.provisioning_mode,
                     hostname           = excluded.hostname,
-                    cijoe_workflow_ref = excluded.cijoe_workflow_ref,
+                    cijoe_task_ref = excluded.cijoe_task_ref,
                     boot_policy        = excluded.boot_policy,
                     updated_at         = excluded.updated_at
                 """,
@@ -581,7 +581,7 @@ def create_app(
                     body.image_sha256,
                     body.provisioning_mode,
                     body.hostname,
-                    body.cijoe_workflow_ref,
+                    body.cijoe_task_ref,
                     body.boot_policy,
                     created_at,
                     now,
@@ -1066,16 +1066,16 @@ def _row_to_machine(row: object) -> _models.Machine:
         image_sha256=row["image_sha256"],  # type: ignore[index]
         provisioning_mode=row["provisioning_mode"],  # type: ignore[index]
         hostname=row["hostname"],  # type: ignore[index]
-        cijoe_workflow_ref=row["cijoe_workflow_ref"],  # type: ignore[index]
+        cijoe_task_ref=row["cijoe_task_ref"],  # type: ignore[index]
         last_known_good=last_known_good,
         discovered_at=_iso_or_none(row["discovered_at"]),  # type: ignore[index]
         last_seen_at=_iso_or_none(row["last_seen_at"]),  # type: ignore[index]
         last_seen_ip=row["last_seen_ip"],  # type: ignore[index]
         boot_policy=row["boot_policy"],  # type: ignore[index]
         last_flashed_at=_iso_or_none(row["last_flashed_at"]),  # type: ignore[index]
-        last_workflow_run_at=_iso_or_none(row["last_workflow_run_at"]),  # type: ignore[index]
-        last_workflow_status=row["last_workflow_status"],  # type: ignore[index]
-        last_workflow_output_path=row["last_workflow_output_path"],  # type: ignore[index]
+        last_task_run_at=_iso_or_none(row["last_task_run_at"]),  # type: ignore[index]
+        last_task_status=row["last_task_status"],  # type: ignore[index]
+        last_task_output_path=row["last_task_output_path"],  # type: ignore[index]
         created_at=datetime.fromisoformat(row["created_at"]),  # type: ignore[index]
         updated_at=datetime.fromisoformat(row["updated_at"]),  # type: ignore[index]
     )

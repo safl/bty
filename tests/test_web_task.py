@@ -1,4 +1,4 @@
-"""Tests for ``bty.web._workflow.WorkflowRunner``.
+"""Tests for ``bty.web._task.TaskRunner``.
 
 Subprocess invocations of cijoe are mocked - a real cijoe binary
 isn't installed in the dev env's ``[web]`` extras, and we don't
@@ -17,7 +17,7 @@ from unittest.mock import patch
 import pytest
 
 from bty.web import _db
-from bty.web._workflow import WorkflowRunner
+from bty.web._task import TaskRunner
 
 
 def _seed_machine(state_path: Path, mac: str = "aa:bb:cc:dd:ee:ff") -> None:
@@ -39,10 +39,10 @@ def runner(tmp_path: Path):
     state = tmp_path / "state.db"
     _db.init_db(state)
     publishes: list[None] = []
-    runner = WorkflowRunner(
+    runner = TaskRunner(
         state_path=state,
         publish_machines_changed=lambda: publishes.append(None),
-        workflows_dir=tmp_path / "workflows",
+        tasks_dir=tmp_path / "tasks",
         ssh_key_path=tmp_path / "key",
         cijoe_bin="cijoe-fake",
     )
@@ -52,104 +52,101 @@ def runner(tmp_path: Path):
 # ---------- _run synchronous path ------------------------------------------
 
 
-def test_workflow_runner_records_success(runner) -> None:
+def test_task_runner_records_success(runner) -> None:
     runner_obj, state, publishes = runner
     _seed_machine(state)
 
     completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="ok\n", stderr="")
-    with patch("bty.web._workflow.subprocess.run", return_value=completed):
+    with patch("bty.web._task.subprocess.run", return_value=completed):
         runner_obj._run("aa:bb:cc:dd:ee:ff", "/path/to/wf.yaml", "10.0.0.5")
 
     with _db.open_db(state) as conn:
         row = conn.execute(
-            "SELECT last_workflow_status, last_workflow_run_at, last_workflow_output_path "
+            "SELECT last_task_status, last_task_run_at, last_task_output_path "
             "FROM machines WHERE mac = ?",
             ("aa:bb:cc:dd:ee:ff",),
         ).fetchone()
-    assert row["last_workflow_status"] == "success"
-    assert row["last_workflow_run_at"] is not None
-    assert row["last_workflow_output_path"]
-    out_dir = Path(row["last_workflow_output_path"])
+    assert row["last_task_status"] == "success"
+    assert row["last_task_run_at"] is not None
+    assert row["last_task_output_path"]
+    out_dir = Path(row["last_task_output_path"])
     # cijoe stdout/stderr captured as sidecars next to the run dir.
     assert (out_dir / "cijoe.stdout").read_text() == "ok\n"
     # Two SSE publishes: running, then success.
     assert len(publishes) == 2
 
 
-def test_workflow_runner_records_failed_on_nonzero_exit(runner) -> None:
+def test_task_runner_records_failed_on_nonzero_exit(runner) -> None:
     runner_obj, state, _ = runner
     _seed_machine(state)
 
     completed = subprocess.CompletedProcess(args=[], returncode=2, stdout="", stderr="boom\n")
-    with patch("bty.web._workflow.subprocess.run", return_value=completed):
+    with patch("bty.web._task.subprocess.run", return_value=completed):
         runner_obj._run("aa:bb:cc:dd:ee:ff", "/path/to/wf.yaml", "10.0.0.5")
 
     with _db.open_db(state) as conn:
         row = conn.execute(
-            "SELECT last_workflow_status FROM machines WHERE mac = ?",
+            "SELECT last_task_status FROM machines WHERE mac = ?",
             ("aa:bb:cc:dd:ee:ff",),
         ).fetchone()
-    assert row["last_workflow_status"] == "failed"
+    assert row["last_task_status"] == "failed"
 
 
-def test_workflow_runner_records_failed_on_timeout(runner) -> None:
+def test_task_runner_records_failed_on_timeout(runner) -> None:
     runner_obj, state, _ = runner
     _seed_machine(state)
 
     err = subprocess.TimeoutExpired(cmd=["cijoe"], timeout=10)
-    with patch("bty.web._workflow.subprocess.run", side_effect=err):
+    with patch("bty.web._task.subprocess.run", side_effect=err):
         runner_obj._run("aa:bb:cc:dd:ee:ff", "/path/to/wf.yaml", "10.0.0.5")
 
     with _db.open_db(state) as conn:
         row = conn.execute(
-            "SELECT last_workflow_status, last_workflow_output_path FROM machines WHERE mac = ?",
+            "SELECT last_task_status, last_task_output_path FROM machines WHERE mac = ?",
             ("aa:bb:cc:dd:ee:ff",),
         ).fetchone()
-    assert row["last_workflow_status"] == "failed"
+    assert row["last_task_status"] == "failed"
     assert (
-        (Path(row["last_workflow_output_path"]) / "error.txt")
-        .read_text()
-        .startswith("cijoe timed out")
+        (Path(row["last_task_output_path"]) / "error.txt").read_text().startswith("cijoe timed out")
     )
 
 
-def test_workflow_runner_records_failed_on_missing_binary(runner) -> None:
+def test_task_runner_records_failed_on_missing_binary(runner) -> None:
     runner_obj, state, _ = runner
     _seed_machine(state)
 
     err = FileNotFoundError("[Errno 2] No such file: 'cijoe-fake'")
-    with patch("bty.web._workflow.subprocess.run", side_effect=err):
+    with patch("bty.web._task.subprocess.run", side_effect=err):
         runner_obj._run("aa:bb:cc:dd:ee:ff", "/path/to/wf.yaml", "10.0.0.5")
 
     with _db.open_db(state) as conn:
         row = conn.execute(
-            "SELECT last_workflow_status, last_workflow_output_path FROM machines WHERE mac = ?",
+            "SELECT last_task_status, last_task_output_path FROM machines WHERE mac = ?",
             ("aa:bb:cc:dd:ee:ff",),
         ).fetchone()
-    assert row["last_workflow_status"] == "failed"
+    assert row["last_task_status"] == "failed"
     assert (
-        "cijoe binary not found"
-        in (Path(row["last_workflow_output_path"]) / "error.txt").read_text()
+        "cijoe binary not found" in (Path(row["last_task_output_path"]) / "error.txt").read_text()
     )
 
 
 # ---------- transport config ------------------------------------------------
 
 
-def test_workflow_runner_renders_transport_config(runner) -> None:
+def test_task_runner_renders_transport_config(runner) -> None:
     runner_obj, state, _ = runner
     _seed_machine(state)
 
     completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
-    with patch("bty.web._workflow.subprocess.run", return_value=completed):
+    with patch("bty.web._task.subprocess.run", return_value=completed):
         runner_obj._run("aa:bb:cc:dd:ee:ff", "/path/to/wf.yaml", "10.0.0.5")
 
     with _db.open_db(state) as conn:
         row = conn.execute(
-            "SELECT last_workflow_output_path FROM machines WHERE mac = ?",
+            "SELECT last_task_output_path FROM machines WHERE mac = ?",
             ("aa:bb:cc:dd:ee:ff",),
         ).fetchone()
-    config = (Path(row["last_workflow_output_path"]) / "transport.toml").read_text()
+    config = (Path(row["last_task_output_path"]) / "transport.toml").read_text()
     assert 'hostname = "10.0.0.5"' in config
     assert "cijoe.transport.ssh" in config
     assert 'username = "root"' in config
@@ -158,12 +155,12 @@ def test_workflow_runner_renders_transport_config(runner) -> None:
 # ---------- subprocess invocation -------------------------------------------
 
 
-def test_workflow_runner_invokes_cijoe_with_workflow_and_config(runner) -> None:
+def test_task_runner_invokes_cijoe_with_task_and_config(runner) -> None:
     runner_obj, state, _ = runner
     _seed_machine(state)
 
     completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
-    with patch("bty.web._workflow.subprocess.run", return_value=completed) as mock_run:
+    with patch("bty.web._task.subprocess.run", return_value=completed) as mock_run:
         runner_obj._run("aa:bb:cc:dd:ee:ff", "/path/to/wf.yaml", "10.0.0.5")
 
     args, kwargs = mock_run.call_args
@@ -192,7 +189,7 @@ def test_kick_off_refuses_non_ip_target(runner) -> None:
 
     # No real subprocess; if kick_off doesn't short-circuit, the
     # spawned thread would try to invoke cijoe.
-    with patch("bty.web._workflow.subprocess.run") as mock_run:
+    with patch("bty.web._task.subprocess.run") as mock_run:
         for bad in (
             'host"; injected="x',  # break out of TOML string
             "10.0.0.1\n[evil]\nx = 1",  # newline-injected TOML key
@@ -201,7 +198,7 @@ def test_kick_off_refuses_non_ip_target(runner) -> None:
         ):
             runner_obj.kick_off(
                 mac="aa:bb:cc:dd:ee:ff",
-                workflow_ref="/path/to/wf.yaml",
+                task_ref="/path/to/wf.yaml",
                 target_ip=bad,
             )
     assert not mock_run.called

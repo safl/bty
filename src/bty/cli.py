@@ -147,10 +147,17 @@ def main(argv: list[str] | None = None) -> int:
         help="cloud-init meta-data file (optional; synthesised if omitted)",
     )
     p_flash.add_argument(
+        "--cijoe-task",
+        # ``--cijoe-workflow`` kept as a backwards-compatible alias.
+        # CIJOE renamed their "workflow" concept to "task" in 2026
+        # and bty mirrors the vocabulary; existing scripts that pass
+        # ``--cijoe-workflow`` keep working because argparse routes
+        # both names to ``args.cijoe_task``.
         "--cijoe-workflow",
         type=Path,
         default=None,
-        help="cijoe workflow YAML (required when --provision cijoe)",
+        dest="cijoe_task",
+        help="cijoe task YAML (required when --provision cijoe)",
     )
     p_flash.add_argument(
         "--cijoe-config",
@@ -381,9 +388,9 @@ def cmd_flash(
         )
         return 2
 
-    if args.provision == "cijoe" and args.cijoe_workflow is None:
+    if args.provision == "cijoe" and args.cijoe_task is None:
         print(
-            "bty: --cijoe-workflow is required when --provision cijoe",
+            "bty: --cijoe-task is required when --provision cijoe",
             file=sys.stderr,
         )
         return 2
@@ -480,7 +487,7 @@ def cmd_flash(
         try:
             apply_cijoe(
                 plan.target.path,
-                args.cijoe_workflow,
+                args.cijoe_task,
                 args.cijoe_config,
             )
         except flash.FlashDependencyError as exc:

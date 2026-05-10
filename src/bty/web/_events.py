@@ -40,8 +40,8 @@ class MachineEventBus:
     ``publish`` may be called from any thread. ``attach`` captures the
     asyncio loop the SSE consumers are running on; thereafter,
     cross-thread publishes hop through ``call_soon_threadsafe`` to
-    deliver into ``asyncio.Queue`` safely. Workflow-runner threads in
-    :mod:`bty.web._workflow` rely on this.
+    deliver into ``asyncio.Queue`` safely. Task-runner threads in
+    :mod:`bty.web._task` rely on this.
     """
 
     def __init__(self, *, queue_size: int = 64) -> None:
@@ -53,7 +53,7 @@ class MachineEventBus:
         """Capture the event loop SSE subscribers run on.
 
         Called once from ``create_app``'s lifespan startup hook so
-        cross-thread publishers (workflow runner) can hop into the
+        cross-thread publishers (task runner) can hop into the
         loop's thread before touching ``asyncio.Queue`` state.
         """
         self._loop = loop

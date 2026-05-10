@@ -154,7 +154,7 @@ def _pump_dd_progress(
 
 # Provisioning modes accepted by ``bty flash``. ``none`` skips post-
 # flash setup; ``cloud-init`` writes a NoCloud seed partition;
-# ``cijoe`` runs a cijoe workflow (offline / one-shot) against the
+# ``cijoe`` runs a cijoe task (offline / one-shot) against the
 # fresh image. ``cijoe-online`` is the bty-web variant where the
 # server kicks off cijoe against a network-reachable target after
 # the live env signals completion.
@@ -1164,27 +1164,30 @@ def _partition_has_cloud_init(part: Path) -> bool:
 
 def apply_cijoe(
     target: Path,
-    workflow: Path,
+    task: Path,
     config: Path | None = None,
 ) -> None:
-    """Run a CIJOE workflow against the target's mounted rootfs.
+    """Run a CIJOE task against the target's mounted rootfs.
 
     Mounts the largest partition on ``target`` (heuristic for the
     rootfs), exports ``BTY_ROOTFS`` pointing at the mount, then invokes
-    ``cijoe <workflow> -c <config> --monitor``. The workflow's tasks
-    can read / mutate the rootfs through ``$BTY_ROOTFS``; bty itself
-    does not interpret what the workflow does.
+    ``cijoe <task> -c <config> --monitor``. The task's steps can
+    read / mutate the rootfs through ``$BTY_ROOTFS``; bty itself does
+    not interpret what the task does.
 
-    cijoe requires a config file even for trivial workflows. When the
+    cijoe requires a config file even for trivial tasks. When the
     operator does not supply ``--cijoe-config``, bty synthesises a
-    minimal default into the working tempdir so the workflow can run.
+    minimal default into the working tempdir so the task can run.
+
+    The CIJOE TOML config still uses the ``[cijoe.workflow]`` section
+    name (CIJOE schema-side; their CLI is backwards-compatible).
 
     Raises :class:`FlashError` if ``cijoe`` is not installed, the
-    workflow / config files are missing, the rootfs cannot be mounted,
-    or the workflow exits non-zero.
+    task / config files are missing, the rootfs cannot be mounted,
+    or the task exits non-zero.
     """
-    if not workflow.exists():
-        raise FlashError(f"cijoe workflow not found: {workflow}")
+    if not task.exists():
+        raise FlashError(f"cijoe task not found: {task}")
     if config is not None and not config.exists():
         raise FlashError(f"cijoe config not found: {config}")
     if shutil.which("cijoe") is None:
@@ -1214,14 +1217,14 @@ def apply_cijoe(
 
             cmd = [
                 "cijoe",
-                str(workflow),
+                str(task),
                 "--monitor",
                 "-c",
                 str(effective_config),
             ]
             rc = subprocess.run(cmd, env=env, check=False).returncode
             if rc != 0:
-                raise FlashError(f"cijoe workflow exited {rc}")
+                raise FlashError(f"cijoe task exited {rc}")
 
             subprocess.run(["sync"], check=False)
         finally:
@@ -1229,7 +1232,12 @@ def apply_cijoe(
 
 
 def _default_cijoe_config() -> str:
-    """Synthesise the minimum cijoe config that satisfies cijoe's loader."""
+    """Synthesise the minimum cijoe config that satisfies cijoe's loader.
+
+    The ``[cijoe.workflow]`` section name is CIJOE's schema-side
+    naming -- their CLI is backwards-compatible across the
+    workflow->task rename so this still works.
+    """
     return "[cijoe.workflow]\nfail_fast = true\n"
 
 

@@ -223,7 +223,7 @@ def _flash_args(
     yes: bool = False,
     user_data: Path | None = None,
     meta_data: Path | None = None,
-    cijoe_workflow: Path | None = None,
+    cijoe_task: Path | None = None,
     cijoe_config: Path | None = None,
     progress: str = "text",
     json_out: bool = False,
@@ -237,7 +237,7 @@ def _flash_args(
         yes=yes,
         user_data=user_data,
         meta_data=meta_data,
-        cijoe_workflow=cijoe_workflow,
+        cijoe_task=cijoe_task,
         cijoe_config=cijoe_config,
         progress=progress,
         json=json_out,
@@ -430,7 +430,7 @@ def test_flash_cloud_init_invokes_apply_cloud_init(
     assert "Done" in captured_io.out
 
 
-def test_flash_cijoe_requires_workflow(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_flash_cijoe_requires_task(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     img = tmp_path / "x.img"
     img.write_bytes(b"\0")
     rc = cli.cmd_flash(
@@ -442,7 +442,7 @@ def test_flash_cijoe_requires_workflow(tmp_path: Path, capsys: pytest.CaptureFix
         )
     )
     assert rc == 2
-    assert "--cijoe-workflow is required" in capsys.readouterr().err
+    assert "--cijoe-task is required" in capsys.readouterr().err
 
 
 def test_flash_cijoe_invokes_apply_cijoe(
@@ -462,7 +462,7 @@ def test_flash_cijoe_invokes_apply_cijoe(
         _flash_args(
             image=img,
             provision="cijoe",
-            cijoe_workflow=workflow,
+            cijoe_task=workflow,
             yes=True,
         ),
         probe_target=_fake_probe_block_target,
@@ -475,6 +475,54 @@ def test_flash_cijoe_invokes_apply_cijoe(
     captured_io = capsys.readouterr()
     assert "[provisioning] cijoe" in captured_io.err
     assert "Done" in captured_io.out
+
+
+def test_flash_cijoe_workflow_alias_still_works(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``--cijoe-workflow`` is kept as a backwards-compatible alias
+    for ``--cijoe-task``. v0.7.35 mirrored CIJOE's "workflow"->
+    "task" rename in bty's CLI surface; existing operator scripts
+    that pass ``--cijoe-workflow`` must keep working unchanged.
+    Argparse routes both flag names to ``args.cijoe_task``.
+
+    We exercise the alias via ``cli.main`` (the real argparse
+    pipeline) rather than constructing a parser by hand, so the
+    test breaks if the alias is ever dropped from
+    ``add_argument(...)``."""
+    img = tmp_path / "x.img"
+    img.write_bytes(b"\0" * 1024)
+    workflow = tmp_path / "wf.yaml"
+    workflow.write_text("steps: []\n")
+
+    # Parse only -- ``--dry-run`` short-circuits the flash steps
+    # before any actual subprocess work, but argparse still has to
+    # accept the alias name. We rely on the rc check rather than
+    # patching internals: an unrecognised flag would cause
+    # argparse to exit with rc=2 + a usage error.
+    cli.main(
+        [
+            "flash",
+            "--image",
+            str(img),
+            "--target",
+            "/dev/loop9",
+            "--provision",
+            "cijoe",
+            "--cijoe-workflow",  # the legacy spelling
+            str(workflow),
+            "--yes",
+            "--dry-run",
+        ]
+    )
+    err = capsys.readouterr().err
+    # Parsing succeeded if the legacy spelling didn't trigger
+    # ``error: unrecognized arguments``. The test does NOT assert
+    # rc == 0 because the dry-run path still requires loop9 to be
+    # a real device; it asserts the alias resolution at argparse
+    # level, which is the rename-regression bait.
+    assert "unrecognized arguments" not in err
+    assert "--cijoe-workflow" not in err
 
 
 def test_flash_yes_path_exit_5_on_race(
@@ -587,7 +635,7 @@ def test_flash_cijoe_passes_config_through(tmp_path: Path) -> None:
         _flash_args(
             image=img,
             provision="cijoe",
-            cijoe_workflow=workflow,
+            cijoe_task=workflow,
             cijoe_config=config,
             yes=True,
         ),

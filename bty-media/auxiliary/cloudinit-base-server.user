@@ -111,7 +111,7 @@ runcmd:
       /opt/bty/venv/bin/pip install --no-cache-dir "${whl}[web]"
     done
     # Online cijoe (milestone 15) - bty-web shells out to ``cijoe`` to
-    # run a workflow against freshly-flashed targets. Same venv, same
+    # run a task against freshly-flashed targets. Same venv, same
     # PATH (``Path(sys.executable).parent / 'cijoe'`` resolves to
     # ``/opt/bty/venv/bin/cijoe`` for the runner).
     /opt/bty/venv/bin/pip install --no-cache-dir cijoe

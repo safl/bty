@@ -17,16 +17,19 @@ MAC_PATTERN = r"^[0-9a-f]{2}(:[0-9a-f]{2}){5}$"
 # Provisioning modes accepted by ``bty flash`` / the API.
 # - ``none``         - boot the cooked image as-is.
 # - ``cloud-init``   - drop user-data into the seed; OS picks it up on first boot.
-# - ``cijoe``        - offline workflow run from the live env after flash.
-# - ``cijoe-online`` - online workflow run from bty-web after target boots
+# - ``cijoe``        - offline cijoe task run from the live env after flash.
+# - ``cijoe-online`` - online cijoe task run from bty-web after target boots
 #                      (milestone 15). Triggered by POST /pxe/{mac}/done; cijoe's
 #                      transport-retry handles waiting for SSH to come up.
 PROVISIONING_MODES = ("none", "cloud-init", "cijoe", "cijoe-online")
 PROVISIONING_PATTERN = r"^(none|cloud-init|cijoe|cijoe-online)$"
 
-# Status of the most recent online-cijoe workflow run.
-WORKFLOW_STATUSES = ("running", "success", "failed")
-WORKFLOW_STATUS_PATTERN = r"^(running|success|failed)$"
+# Status of the most recent online-cijoe task run. (CIJOE renamed
+# their "workflow" concept to "task" in 2026; bty mirrors the
+# vocabulary for clarity. The CIJOE CLI is backwards-compatible
+# so existing operators don't see a behavioural change.)
+TASK_STATUSES = ("running", "success", "failed")
+TASK_STATUS_PATTERN = r"^(running|success|failed)$"
 
 # Boot-policy values: what ``GET /pxe/{mac}`` returns.
 #
@@ -84,7 +87,7 @@ class MachineUpsert(BaseModel):
     # letters, digits, hyphen, dot. ``min_length=1`` rejects the
     # explicit empty-string case Pydantic would otherwise accept.
     hostname: str | None = Field(default=None, min_length=1, pattern=r"^[a-zA-Z0-9.-]+$")
-    cijoe_workflow_ref: str | None = None
+    cijoe_task_ref: str | None = None
     boot_policy: str = Field(default="local", pattern=BOOT_POLICY_PATTERN)
 
 
@@ -101,7 +104,7 @@ class Machine(BaseModel):
     image_sha256: str | None = None
     provisioning_mode: str = Field(default="none", pattern=PROVISIONING_PATTERN)
     hostname: str | None = None
-    cijoe_workflow_ref: str | None = None
+    cijoe_task_ref: str | None = None
     last_known_good: dict[str, Any] | None = None
     # Set the first time bty-web sees a ``GET /pxe/{mac}`` for this MAC.
     # ``None`` for machines that were created via ``PUT`` and have not
@@ -112,9 +115,9 @@ class Machine(BaseModel):
     last_seen_ip: str | None = None
     boot_policy: str = Field(default="local", pattern=BOOT_POLICY_PATTERN)
     last_flashed_at: datetime | None = None
-    last_workflow_run_at: datetime | None = None
-    last_workflow_status: str | None = Field(default=None, pattern=WORKFLOW_STATUS_PATTERN)
-    last_workflow_output_path: str | None = None
+    last_task_run_at: datetime | None = None
+    last_task_status: str | None = Field(default=None, pattern=TASK_STATUS_PATTERN)
+    last_task_output_path: str | None = None
     created_at: datetime
     updated_at: datetime
 

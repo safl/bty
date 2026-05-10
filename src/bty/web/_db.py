@@ -32,16 +32,16 @@ CREATE TABLE IF NOT EXISTS machines (
     image_sha256              TEXT,    -- content-addressed image identity (M22)
     provisioning_mode         TEXT NOT NULL DEFAULT 'none',
     hostname                  TEXT,
-    cijoe_workflow_ref        TEXT,
+    cijoe_task_ref            TEXT,    -- (renamed from cijoe_workflow_ref in v0.7.35)
     last_known_good           TEXT,    -- JSON blob; NULL until first online cijoe
     discovered_at             TEXT,    -- first /pxe/{mac} contact (NULL if PUT-created)
     last_seen_at              TEXT,    -- most recent /pxe/{mac} contact
     last_seen_ip              TEXT,    -- source IP of most recent /pxe contact
     boot_policy               TEXT NOT NULL DEFAULT 'local',
     last_flashed_at           TEXT,    -- updated by POST /pxe/{mac}/done
-    last_workflow_run_at      TEXT,    -- start of the most recent workflow run
-    last_workflow_status      TEXT,    -- 'running' / 'success' / 'failed' / NULL
-    last_workflow_output_path TEXT,    -- on-disk dir of the cijoe run
+    last_task_run_at          TEXT,    -- start of the most recent task run
+    last_task_status          TEXT,    -- 'running' / 'success' / 'failed' / NULL
+    last_task_output_path     TEXT,    -- on-disk dir of the cijoe run
     created_at                TEXT NOT NULL,
     updated_at                TEXT NOT NULL
 );
@@ -80,21 +80,52 @@ _ADDED_COLUMNS: tuple[tuple[str, str], ...] = (
     ("last_seen_ip", "TEXT"),
     ("boot_policy", "TEXT NOT NULL DEFAULT 'local'"),
     ("last_flashed_at", "TEXT"),
-    ("last_workflow_run_at", "TEXT"),
-    ("last_workflow_status", "TEXT"),
-    ("last_workflow_output_path", "TEXT"),
+    ("last_task_run_at", "TEXT"),
+    ("last_task_status", "TEXT"),
+    ("last_task_output_path", "TEXT"),
+    ("cijoe_task_ref", "TEXT"),
+)
+
+# Columns renamed (non-additive). SQLite supports
+# ``ALTER TABLE ... RENAME COLUMN`` since 3.25 (2018), well below
+# bty's Python 3.11 floor (which ships sqlite3 3.40+ on every
+# supported platform). Each entry is ``(old_name, new_name)``;
+# ``init_db`` issues the rename when the old column still exists
+# AND the new one does not, so the migration is idempotent across
+# repeated startups.
+_RENAMED_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("cijoe_workflow_ref", "cijoe_task_ref"),
+    ("last_workflow_run_at", "last_task_run_at"),
+    ("last_workflow_status", "last_task_status"),
+    ("last_workflow_output_path", "last_task_output_path"),
 )
 
 
 def init_db(path: Path) -> None:
     """Create ``path`` (and its parent directory) if missing; apply the schema.
 
-    Also applies idempotent additive migrations: any column listed in
-    :data:`_ADDED_COLUMNS` that does not yet exist gets ``ALTER TABLE``'d
-    in. Safe to call repeatedly.
+    Also applies idempotent migrations:
+
+    * additive: any column listed in :data:`_ADDED_COLUMNS` that
+      does not yet exist gets ``ALTER TABLE``'d in.
+    * renamed: any column listed in :data:`_RENAMED_COLUMNS` whose
+      old name still exists gets renamed in place. v0.7.35 mirrored
+      CIJOE's "workflow"->"task" terminology rename.
+
+    Safe to call repeatedly.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(path) as conn:
+        # Renames must happen BEFORE the ``CREATE TABLE IF NOT EXISTS``
+        # path adds the new-name column; if both exist, the rename
+        # would conflict. Order: read-existing -> rename old->new
+        # (only when old exists and new doesn't) -> apply schema ->
+        # add any still-missing columns.
+        existing = {row[1] for row in conn.execute("PRAGMA table_info(machines)")}
+        if existing:  # table existed pre-this-init (legacy state.db)
+            for old, new in _RENAMED_COLUMNS:
+                if old in existing and new not in existing:
+                    conn.execute(f"ALTER TABLE machines RENAME COLUMN {old} TO {new}")
         conn.executescript(SCHEMA)
         existing = {row[1] for row in conn.execute("PRAGMA table_info(machines)")}
         for column, decl in _ADDED_COLUMNS:
