@@ -43,6 +43,20 @@ from bty import images as _images
 DEFAULT_MAX_PARALLEL = 1
 
 
+def _reject_traversal_name(name: str) -> None:
+    """Reject anything that's not a plain basename.
+
+    The FastAPI layer's ``_safe_path`` rejects these on public
+    routes; mirroring the check at the manager boundary means a
+    direct call from a non-API caller (auto-import, tests, future
+    internal use) can never resolve outside ``image_root``.
+    """
+    if not name or name in (".", "..") or "/" in name or "\\" in name or "\0" in name:
+        raise ValueError(
+            f"invalid name {name!r}: must be a basename without path separators or NUL bytes"
+        )
+
+
 @dataclass
 class HashState:
     """Live state of a single hash job.
@@ -137,7 +151,16 @@ class HashManager:
         Idempotent: returns the existing state if already
         queued / running / completed. ``cancelled`` / ``failed``
         states allow a fresh attempt.
+
+        Raises :class:`ValueError` if ``name`` carries path-
+        traversal characters (``/``, ``\\``, ``..``, NUL). The
+        FastAPI layer's ``_safe_path`` already rejects these on
+        the public PUT route; the check here defends non-API
+        callers (auto-import lifespan, tests, future internal
+        use) so a malformed name can never reach the
+        filesystem.
         """
+        _reject_traversal_name(name)
         if self._image_root is None:
             raise RuntimeError("HashManager not started")
         target = self._image_root / name

@@ -394,6 +394,15 @@ def parse_sha256_manifest(text: str, target_name: str | None = None) -> str:
     return candidates[0][0]
 
 
+# sha256sum-style manifests are tiny in practice: one line per
+# artefact at ~80 bytes each. 1 MiB caps a maliciously-large or
+# wrong-URL response without rejecting any plausible real
+# manifest. Without this cap, a ``sha_url`` that points at a
+# multi-GB file (operator typo into the image url field) reads
+# the whole body into memory.
+_SHA_MANIFEST_MAX_BYTES = 1 << 20
+
+
 def fetch_sha256_for_url(image_url: str, sha_url: str, *, timeout: float = 30.0) -> str:
     """Fetch ``sha_url``, parse it, and return the sha256 digest of
     the file that ``image_url`` would download.
@@ -403,12 +412,26 @@ def fetch_sha256_for_url(image_url: str, sha_url: str, *, timeout: float = 30.0)
     sha256 manifest with that exact filename, so the lookup is
     direct. If the manifest only carries one entry, that entry is
     returned regardless of name.
+
+    Raises :class:`CatalogError` if the body is larger than
+    :data:`_SHA_MANIFEST_MAX_BYTES` (defends against the operator
+    pasting an *image* URL into the sha_url field by accident).
     """
     target = Path(urllib.parse.urlparse(image_url).path).name
     req = urllib.request.Request(sha_url)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            body = resp.read().decode("utf-8")
+            # Read one byte past the cap so we can distinguish
+            # "fits in the cap" from "exceeded the cap"; the OS
+            # short-reads aren't reliable here.
+            raw = resp.read(_SHA_MANIFEST_MAX_BYTES + 1)
     except (urllib.error.URLError, ConnectionError, TimeoutError) as exc:
         raise CatalogError(f"GET {sha_url} failed: {exc}") from exc
+    if len(raw) > _SHA_MANIFEST_MAX_BYTES:
+        raise CatalogError(
+            f"sha256 manifest at {sha_url} is larger than "
+            f"{_SHA_MANIFEST_MAX_BYTES} bytes; refusing to parse "
+            f"(did you paste an image URL into the sha_url field?)"
+        )
+    body = raw.decode("utf-8")
     return parse_sha256_manifest(body, target_name=target if target else None)

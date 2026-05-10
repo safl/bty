@@ -189,6 +189,25 @@ def test_cancel_unknown_returns_none(tmp_path: Path) -> None:
     _run(_drive())
 
 
+def test_enqueue_rejects_traversal_names(tmp_path: Path) -> None:
+    """``DownloadManager.enqueue`` must reject names with path
+    separators or traversal segments at the manager boundary,
+    matching the same defence on ``HashManager``."""
+
+    async def _drive() -> None:
+        cat = _catalog.Catalog(version=1, entries=())
+        mgr = DownloadManager()
+        mgr.start(cat, tmp_path / "cache")
+        try:
+            for bad in ("../etc/passwd", "foo/bar", "..", ".", "", "a\\b", "a\0b"):
+                with pytest.raises(ValueError, match=r"invalid name"):
+                    await mgr.enqueue(bad)
+        finally:
+            await mgr.stop()
+
+    _run(_drive())
+
+
 def test_download_state_to_dict_omits_unpicklable_event() -> None:
     """``DownloadState.to_dict`` must not emit the
     ``threading.Event`` (which contains an unpicklable

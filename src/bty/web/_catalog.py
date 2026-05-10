@@ -42,6 +42,17 @@ from bty import catalog as _catalog
 DEFAULT_MAX_PARALLEL = 2
 
 
+def _reject_traversal_name(name: str) -> None:
+    """Reject anything that's not a plain basename. Mirrors the
+    same check on :class:`bty.web._hash.HashManager` so a
+    non-API caller can't slip a path-traversal name past the
+    catalog lookup."""
+    if not name or name in (".", "..") or "/" in name or "\\" in name or "\0" in name:
+        raise ValueError(
+            f"invalid name {name!r}: must be a basename without path separators or NUL bytes"
+        )
+
+
 @dataclass
 class DownloadState:
     """Live state of a single catalog fetch.
@@ -160,7 +171,15 @@ class DownloadManager:
         Returns the current ``DownloadState`` (which may already be
         ``running`` / ``completed`` / ``cancelled``). Callers expect
         idempotency on repeat enqueues for the same name.
+
+        Raises :class:`ValueError` if ``name`` carries path-
+        traversal characters. The catalog lookup at
+        :meth:`bty.catalog.ParsedCatalog.by_name` would already
+        return ``None`` for those (no catalog entry matches), but
+        rejecting at the boundary makes the failure mode explicit
+        and lines up with :class:`bty.web._hash.HashManager`.
         """
+        _reject_traversal_name(name)
         if self._catalog is None or self._cache_dir is None:
             raise RuntimeError("DownloadManager not started")
         entry = self._catalog.by_name(name)

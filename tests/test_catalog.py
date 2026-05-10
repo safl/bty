@@ -380,3 +380,42 @@ def test_parse_sha256_manifest_malformed_digest_raises() -> None:
     sha256-manifest."""
     with pytest.raises(catalog.CatalogError, match="malformed"):
         catalog.parse_sha256_manifest("not-a-digest  foo\n")
+
+
+def test_fetch_sha256_for_url_rejects_oversized_body(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A ``sha_url`` that returns >1 MiB must be rejected without
+    being parsed. Defends against the operator pasting an *image*
+    URL into the sha_url field by accident: without the cap,
+    a multi-GiB body would be read into memory before the parser
+    rejected it as 'malformed digest'."""
+
+    class _OversizeResp:
+        def __init__(self, payload: bytes) -> None:
+            self._payload = payload
+            self._pos = 0
+
+        def __enter__(self) -> _OversizeResp:
+            return self
+
+        def __exit__(self, *_a: object) -> None:
+            return None
+
+        def read(self, n: int = -1) -> bytes:
+            if n < 0 or n >= len(self._payload) - self._pos:
+                chunk = self._payload[self._pos :]
+                self._pos = len(self._payload)
+                return chunk
+            chunk = self._payload[self._pos : self._pos + n]
+            self._pos += n
+            return chunk
+
+    # 2 MiB of garbage; the manager should bail at the cap.
+    huge = b"x" * (2 * 1024 * 1024)
+    monkeypatch.setattr("urllib.request.urlopen", lambda *_a, **_kw: _OversizeResp(huge))
+    with pytest.raises(catalog.CatalogError, match="larger than"):
+        catalog.fetch_sha256_for_url(
+            "https://example.invalid/foo.img.gz",
+            "https://example.invalid/foo.img.gz.sha256",
+        )

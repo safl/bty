@@ -34,6 +34,26 @@ def test_enqueue_unknown_filename_raises(tmp_path: Path) -> None:
     _run(_drive())
 
 
+def test_enqueue_rejects_traversal_names(tmp_path: Path) -> None:
+    """``HashManager.enqueue`` must reject names with path
+    separators or traversal segments before touching the
+    filesystem. The HTTP layer's ``_safe_path`` already covers
+    public routes; this defends non-API callers (auto-import,
+    tests, future internal use)."""
+
+    async def _drive() -> None:
+        mgr = HashManager()
+        mgr.start(tmp_path)
+        try:
+            for bad in ("../etc/passwd", "foo/bar", "..", ".", "", "a\\b", "a\0b"):
+                with pytest.raises(ValueError, match=r"invalid name"):
+                    await mgr.enqueue(bad)
+        finally:
+            await mgr.stop()
+
+    _run(_drive())
+
+
 def test_enqueue_already_hashed_shortcut(tmp_path: Path) -> None:
     """An image whose .sha256 sidecar already exists lands as
     ``completed`` immediately, no worker round-trip."""
