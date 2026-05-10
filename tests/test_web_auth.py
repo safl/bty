@@ -86,6 +86,59 @@ def test_login_with_invalid_password_returns_form_with_error(
     assert r.cookies.get("bty-token") is None
 
 
+def test_login_success_records_audit_event(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Each successful login lands an ``auth.login.succeeded`` row
+    in the audit log so the operator can see session boundaries
+    in /ui/events."""
+    import pamela
+
+    monkeypatch.setattr(pamela, "authenticate", lambda *a, **kw: True)
+    r = client.post("/ui/login", data={"password": "ok"}, follow_redirects=False)
+    assert r.status_code == 303
+    cookie = r.cookies.get("bty-token")
+    r = client.get(
+        "/events",
+        params={"kind": "auth.login.succeeded"},
+        cookies={"bty-token": cookie} if cookie else None,
+    )
+    events = r.json()["events"]
+    assert len(events) == 1
+    row = events[0]
+    assert row["subject_kind"] == "auth"
+    assert row["subject_id"] == TEST_SERVICE_USER
+    assert row["actor"] == TEST_SERVICE_USER
+
+
+def test_login_failure_records_audit_event(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Each failed PAM check lands an ``auth.login.failed`` row.
+    Operators want to see brute-force attempts in /ui/events."""
+    import pamela
+
+    def _reject(*_a: object, **_kw: object) -> None:
+        raise pamela.PAMError("bad password")
+
+    monkeypatch.setattr(pamela, "authenticate", _reject)
+    client.post("/ui/login", data={"password": "wrong"}, follow_redirects=False)
+
+    # Now log in successfully to read /events.
+    monkeypatch.setattr(pamela, "authenticate", lambda *a, **kw: True)
+    r = client.post("/ui/login", data={"password": "ok"}, follow_redirects=False)
+    cookie = r.cookies.get("bty-token")
+    r = client.get(
+        "/events",
+        params={"kind": "auth.login.failed"},
+        cookies={"bty-token": cookie} if cookie else None,
+    )
+    events = r.json()["events"]
+    assert len(events) == 1
+    assert events[0]["subject_kind"] == "auth"
+    assert events[0]["subject_id"] == TEST_SERVICE_USER
+
+
 # ---------- session cookie auth --------------------------------------------
 
 

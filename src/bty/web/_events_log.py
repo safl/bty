@@ -107,6 +107,9 @@ KNOWN_EVENT_KINDS: tuple[str, ...] = (
     "boot.release.fetch_failed",
     "settings.pxe.activated",
     "settings.pxe.activate_failed",
+    "auth.login.succeeded",
+    "auth.login.failed",
+    "auth.logout",
 )
 
 # Catalogue of ``subject_kind`` values. Powers the /ui/events
@@ -120,6 +123,7 @@ KNOWN_SUBJECT_KINDS: tuple[str, ...] = (
     "catalog",
     "boot",
     "settings",
+    "auth",
 )
 
 # Catalogue of ``actor`` values the rest of bty-web emits. Powers

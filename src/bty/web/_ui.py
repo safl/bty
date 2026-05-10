@@ -125,14 +125,45 @@ def register_ui_routes(
         # import. pamela is in the ``[web]`` extras alongside fastapi.
         import pamela
 
+        client_ip = _client_ip(request)
         try:
             pamela.authenticate(service_user, password, service="login")
         except pamela.PAMError:
+            # Failed login: record so an operator scanning
+            # /ui/events sees brute-force attempts. Subject is the
+            # OS username we tried to authenticate; source_ip is
+            # the request client. Actor is the username (best
+            # available) -- we don't know who they really are.
+            with _db.open_db(state_path) as conn:
+                _events_log.record(
+                    conn,
+                    kind="auth.login.failed",
+                    summary=f"login failed for user {service_user!r}",
+                    subject_kind="auth",
+                    subject_id=service_user,
+                    actor=service_user,
+                    source_ip=client_ip,
+                )
+                conn.commit()
             return render(
                 "ui/login.html",
                 request,
                 error=f"Invalid password for {service_user!r}.",
             )
+        # Success path. Record so the audit log shows session
+        # boundaries (operator may correlate "this IP did X
+        # between Y and Z" with login + logout pairs).
+        with _db.open_db(state_path) as conn:
+            _events_log.record(
+                conn,
+                kind="auth.login.succeeded",
+                summary=f"login succeeded for user {service_user!r}",
+                subject_kind="auth",
+                subject_id=service_user,
+                actor=service_user,
+                source_ip=client_ip,
+            )
+            conn.commit()
         # SessionMiddleware re-signs and re-attaches the cookie on the
         # response; we just flip the authed flag in the session dict.
         request.session[SESSION_AUTHED_KEY] = True
@@ -140,9 +171,25 @@ def register_ui_routes(
 
     @app.post("/ui/logout", include_in_schema=False)
     def ui_logout(request: Request) -> Response:
+        # Record the logout *before* clearing the session so the
+        # actor reflects who was logged in. Auth-event symmetry
+        # with the login.succeeded / login.failed pair.
+        was_authed = bool(request.session.get(SESSION_AUTHED_KEY))
         # ``clear()`` empties the session dict; SessionMiddleware then
         # emits an empty (deletion) cookie on the response.
         request.session.clear()
+        if was_authed:
+            with _db.open_db(state_path) as conn:
+                _events_log.record(
+                    conn,
+                    kind="auth.logout",
+                    summary=f"logout for user {service_user!r}",
+                    subject_kind="auth",
+                    subject_id=service_user,
+                    actor=service_user,
+                    source_ip=_client_ip(request),
+                )
+                conn.commit()
         return RedirectResponse("/ui/login", status_code=status.HTTP_303_SEE_OTHER)
 
     # ----- pages (auth-required) ------------------------------------------
