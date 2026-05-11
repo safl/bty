@@ -427,7 +427,7 @@ def test_app_local_mode_renders_bri_descriptors_alongside_local(
 def test_action_install_bty_server_preselects_image_and_focuses_disks(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Pressing ``b`` pre-selects the GitHub-latest bty-server image
+    """Pressing ``i`` pre-selects the GitHub-latest bty-server image
     and focuses the disks pane so the next Enter commits a disk.
     The flash flow from there is the same as any URL-backed image."""
     _patch_data_sources(
@@ -441,7 +441,7 @@ def test_action_install_bty_server_preselects_image_and_focuses_disks(
     async def _drive() -> None:
         async with app.run_test() as pilot:
             await pilot.pause()
-            await pilot.press("b")
+            await pilot.press("i")
             await pilot.pause()
             from textual.widgets import DataTable
 
@@ -1157,15 +1157,15 @@ def test_action_flash_success_flips_button_to_reboot(
     _run(_drive())
 
 
-def test_source_picker_opens_and_dismisses_cleanly(
+def test_catalog_picker_opens_and_dismisses_cleanly(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Pressing ``s`` pushes a SourceSelectScreen modal; pressing
-    Esc dismisses it without changing the active source.
+    """Pressing ``c`` pushes a CatalogSelectScreen modal; pressing
+    Esc dismisses it without changing the active catalog.
 
     Same regression-class as ``test_theme_picker_*`` and
     ``test_action_flash_*`` -- guards against the ``@work``
-    decorator being dropped from ``action_source`` (Textual 8.x
+    decorator being dropped from ``action_catalog`` (Textual 8.x
     requires worker context for ``push_screen_wait``).
     """
     _patch_data_sources(
@@ -1181,18 +1181,18 @@ def test_source_picker_opens_and_dismisses_cleanly(
             initial_root = app._image_root  # type: ignore[reportPrivateUsage]
             initial_server = app._server_url  # type: ignore[reportPrivateUsage]
 
-            await pilot.press("s")
+            await pilot.press("c")
             for _ in range(10):
                 await pilot.pause()
 
             top = app.screen
-            assert isinstance(top, tui_app.SourceSelectScreen), (
-                f"expected SourceSelectScreen, got {type(top).__name__}"
+            assert isinstance(top, tui_app.CatalogSelectScreen), (
+                f"expected CatalogSelectScreen, got {type(top).__name__}"
             )
             top.dismiss(None)
             for _ in range(10):
                 await pilot.pause()
-            # Source unchanged when dismissed without selection.
+            # Catalog unchanged when dismissed without selection.
             assert app._image_root == initial_root  # type: ignore[reportPrivateUsage]
             assert app._server_url == initial_server  # type: ignore[reportPrivateUsage]
 

@@ -180,12 +180,17 @@ Common keys:
 | `Enter` | Commit the focused row, advance to the next pane (on the Flash button: trigger the flash) |
 | `Esc` / `Backspace` | Undo the most recent commit, return one step |
 | `f` | Trigger the flash from anywhere once both image and disk are picked |
-| `Shift+R` | Reboot (active after a successful flash) |
 | `r` | Refresh the catalog and disk list |
-| `s` | Switch the catalog source (local path or remote `bty-web`) |
+| `c` | Switch the catalog (local path or remote `bty-web`) |
+| `i` | Install `bty-server` (latest from GitHub releases) |
 | `t` | Open the theme picker |
 | `/` | Filter the image catalog by substring |
 | `q` | Quit the TUI |
+
+After a successful flash the action-pane button flips from "Flash"
+to "Reboot"; hit Enter on the focused button to reboot. There is no
+single-key reboot shortcut (the old `Shift+R` binding was dropped
+because it shoulder-rubbed `r` for refresh).
 
 A confirmation modal shows the flash plan (image format, target
 size, validation). `Enter` runs it; `Esc` cancels. A status modal
@@ -327,7 +332,7 @@ CD-ROM and there is no local storage to put image files on.
 **Always-available bty-server install shortcut.** Regardless of
 which delivery shape you use, `bty-tui` has a built-in `b`
 shortcut that pre-selects the latest `bty-server-x86_64.img.gz`
-from GitHub releases. From the TUI: press `b`, pick a target disk,
+from GitHub releases. From the TUI: press `i`, pick a target disk,
 hit Flash. The image streams directly from GitHub through the live
 env to the target's disk; no local staging is needed.
 
@@ -500,7 +505,7 @@ In the piKVM web UI:
 The local catalog is empty (no images on the piKVM). Switch to the
 remote `bty-web` from inside the TUI:
 
-1. Press `s` (Source).
+1. Press `c` (Catalog).
 2. In the modal, pick "Remote".
 3. Enter the server URL: `http://10.0.0.5:8080` (substitute your
    host).
@@ -512,7 +517,7 @@ on Flash). The image streams directly from `bty-web` through the
 live env to the target's disk; piKVM only carried the boot env.
 
 If you don't yet have a `bty-web` instance running (chicken-and-
-egg case for setting up the very first one), press `b` instead:
+egg case for setting up the very first one), press `i` instead:
 that's the built-in shortcut to install `bty-server` straight
 from GitHub. Once it boots, point subsequent piKVM-driven
 flashes at the new server.
@@ -557,13 +562,13 @@ In the JetKVM web UI:
 
 #### Step 5: Point `bty-tui` at the remote `bty-web` catalog
 
-Same as piKVM Step 5. Press `s`, pick Remote, paste the server
+Same as piKVM Step 5. Press `c`, pick Remote, paste the server
 URL (e.g. `http://10.0.0.5:8080`), click Apply. The catalog
 populates from the server, images stream through the JetKVM-
 booted live env to the target's disk.
 
 To bootstrap the very first `bty-server` (no existing one to point
-at), press `b` instead of `s`: the built-in shortcut installs
+at), press `i` instead of `c`: the built-in shortcut installs
 `bty-server` directly from GitHub's latest release.
 
 ## What's next

@@ -26,7 +26,8 @@ the keys below cover everything else):
                   clear filter if one is active)
 - ``q``           quit
 - ``r``           refresh catalogs
-- ``s``           switch image source (local <-> remote bty-web)
+- ``c``           switch catalog (local image-root <-> remote bty-web)
+- ``i``           install bty-server (latest from GitHub releases)
 - ``/``           filter the image catalog by substring
 - ``f``           flash shortcut (equivalent to Enter on Flash button)
 
@@ -820,7 +821,7 @@ class FlashStatusScreen(ModalScreen[bool]):
             self.dismiss(self._result is True)
 
 
-class SourceSelectScreen(ModalScreen["str | Path | None"]):
+class CatalogSelectScreen(ModalScreen["str | Path | None"]):
     """Modal for switching between local image-root and remote
     bty-web server as the catalog source.
 
@@ -834,11 +835,11 @@ class SourceSelectScreen(ModalScreen["str | Path | None"]):
     """
 
     DEFAULT_CSS = """
-    SourceSelectScreen {
+    CatalogSelectScreen {
         align: center middle;
     }
 
-    SourceSelectScreen > Vertical {
+    CatalogSelectScreen > Vertical {
         width: 70;
         height: auto;
         padding: 1 2;
@@ -849,7 +850,7 @@ class SourceSelectScreen(ModalScreen["str | Path | None"]):
         border-title-align: left;
     }
 
-    SourceSelectScreen Input {
+    CatalogSelectScreen Input {
         margin-top: 1;
     }
 
@@ -993,11 +994,11 @@ class HelpScreen(ModalScreen[None]):
                 classes="help-row",
             )
             yield Static(
-                "  s             switch source (local path / remote bty-web)",
+                "  c             switch catalog (local path / remote bty-web)",
                 classes="help-row",
             )
             yield Static(
-                "  b             install bty-server (latest from GitHub)",
+                "  i             install bty-server (latest from GitHub)",
                 classes="help-row",
             )
             yield Static(
@@ -1033,8 +1034,8 @@ class BtyTui(App[None]):
         # successful flash (see ``on_button_pressed``). Pairing a one-
         # keypress refresh (lowercase ``r``) with a one-keypress reboot
         # (``R`` aka shift+r) was a real fat-finger trap.
-        Binding("b", "install_bty_server", "Install bty-server", show=False),
-        Binding("s", "source", "Source", show=False),
+        Binding("i", "install_bty_server", "Install bty-server", show=False),
+        Binding("c", "catalog", "Catalog", show=False),
         Binding("slash", "focus_filter", "Filter", show=False),
         # ``?`` pops a help modal listing every keybinding. Common
         # TUI convention (helix, k9s, lazygit); the operator on the
@@ -1356,11 +1357,11 @@ class BtyTui(App[None]):
                 "     - Volume mount: drop files into\n"
                 "       [dim]/var/lib/bty/images/[/] on the server's host.\n"
                 "     Then press [b]r[/] to refresh.\n"
-                "  2. [b]Switch source[/]: press [b]s[/] to point this\n"
+                "  2. [b]Switch catalog[/]: press [b]c[/] to point this\n"
                 "     TUI at a different bty-web catalog or back at a\n"
                 "     local path.\n"
                 "  3. [b]Install bty-server[/] on this box from the\n"
-                "     latest GitHub release: press [b]b[/], pick a\n"
+                "     latest GitHub release: press [b]i[/], pick a\n"
                 "     disk, hit Flash."
             )
         return (
@@ -1381,10 +1382,10 @@ class BtyTui(App[None]):
             "     Live-env paths are read-only; power-cycle to\n"
             "     pick up files added after boot.\n"
             "  2. [b]Flash from a remote bty-web catalog[/]:\n"
-            "     press [b]s[/] and enter the server URL\n"
+            "     press [b]c[/] and enter the server URL\n"
             "     (e.g. [dim]http://server:8080[/]).\n"
             "  3. [b]Install bty-server[/] on this box from the\n"
-            "     latest GitHub release: press [b]b[/], pick a\n"
+            "     latest GitHub release: press [b]i[/], pick a\n"
             "     disk, hit Flash.\n\n"
             "[dim]Alt+F2 .. Alt+F6 drop into a root shell on the\n"
             "alternate VTs for diagnostics; Alt+F1 returns here.[/]"
@@ -1693,7 +1694,7 @@ class BtyTui(App[None]):
         """
         return (
             "<?> help       <q> quit       <r> refresh       "
-            "<s> source       <b> install bty-server       "
+            "<c> catalog       <i> install bty-server       "
             "<t> theme       <Esc/Backspace> back"
         )
 
@@ -1716,14 +1717,16 @@ class BtyTui(App[None]):
                 self.action_flash()  # pyright: ignore[reportUnusedCoroutine]
 
     @work(exclusive=True)
-    async def action_source(self) -> None:
-        """Open the SourceSelectScreen modal so the operator can
-        switch between local image-root and a remote bty-web server
-        without restarting the TUI. ``@work`` for the
+    async def action_catalog(self) -> None:
+        """``c`` binding: open :class:`CatalogSelectScreen` so the
+        operator can switch between local image-root and a remote
+        bty-web server without restarting the TUI. ``@work`` for the
         push_screen_wait worker-context requirement (same as the
         flash + theme actions).
         """
-        result = await self.push_screen_wait(SourceSelectScreen(self._server_url, self._image_root))
+        result = await self.push_screen_wait(
+            CatalogSelectScreen(self._server_url, self._image_root)
+        )
         if result is None:
             return
         if isinstance(result, str):
@@ -1746,7 +1749,7 @@ class BtyTui(App[None]):
         self._render_status()
         with contextlib.suppress(Exception):
             self.query_one("#images_table", DataTable).focus()
-        self._set_status_transient(f"Source: {source}")
+        self._set_status_transient(f"Catalog: {source}")
 
     @work(exclusive=True)
     async def action_flash(self) -> None:

@@ -31,8 +31,8 @@
 #
 # Best-effort: no candidate partition is fine, the live env just
 # starts with an empty catalog and the operator can use the bty-tui
-# ``b`` shortcut to install a fresh bty-server from GitHub or press
-# ``s`` to connect to an existing bty-web catalog. NTFS isn't
+# ``i`` shortcut to install a fresh bty-server from GitHub or press
+# ``c`` to connect to an existing bty-web catalog. NTFS isn't
 # probed; Ventoy's default data partition is exFAT and that covers
 # the common case.
 #
