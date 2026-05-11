@@ -234,10 +234,11 @@ inbound `X-Forwarded-For` from external requests.
 
 **Failure symmetry.** Every async-manager + operator-driven
 action that can fail emits a paired `<kind>_failed` event
-(`image.upload_failed`, `image.hash_failed`,
+(`auth.login.failed`, `image.upload_failed`, `image.hash_failed`,
 `boot.release.fetch_failed`, `settings.pxe.activate_failed`,
-`catalog.entry.add_failed`). Failed kinds render in the
-events table with a danger-coloured badge so they pop in a
+`settings.pxe.deactivate_failed`, `catalog.entry.add_failed`).
+Failed kinds render in the events table with a danger-coloured
+badge so they pop in a
 long log.
 
 **Filtering.** The `/ui/events` filter form and the JSON API

@@ -470,8 +470,9 @@ Landed after the original 1.0 list:
        here; removed in v0.5.11 -- the live env's tmpfs sentinel
        didn't survive reboots, so the service ran every boot and
        destroyed operator data dropped between boots. Sticks now
-       ship at the baked 4 GiB BTY_IMAGES size; operators who
-       want more grow with gparted on their host.)
+       ship at the baked 2.1 GiB BTY_IMAGES size (shrunk from 4 GiB
+       in v0.8.0 for Ventoy / piKVM / JetKVM friendliness); operators
+       who want more grow with gparted on their host.)
     5. **[done]** Documented delivery options + renamed
        `live-x86` -> `netboot-x86` (both deferred work folded
        into the same commit). Stock hybrid ISO with built-in

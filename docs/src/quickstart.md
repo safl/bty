@@ -2,8 +2,8 @@
 
 A walk-through of what bty can do today, ordered roughly the way an
 operator would meet it: build a delivery medium, boot a target,
-flash, optionally provision, and finally drive a fleet over the
-network via the bty-web server.
+flash a disk, and finally drive a fleet over the network via the
+bty-web server.
 
 ## Lowest-barrier trial: bty-web in Docker
 
@@ -49,7 +49,7 @@ sha256sum -c bty-usb-x86_64.iso.gz.sha256
 ```
 
 `releases/latest/download/<name>` always points at the newest tag;
-swap `latest` for a specific tag (e.g. `v0.2.7`) if you want to pin.
+swap `latest` for a specific tag (e.g. `v0.8.2`) if you want to pin.
 
 **Build from source** (when you need to modify the image):
 
@@ -62,7 +62,7 @@ sudo make build VARIANT=usb-x86    # 15-25 min
 
 The build runs Debian's `live-build` (debootstrap + mksquashfs +
 mkinitramfs) to produce a hybrid ISO, post-processes it to append
-a writable `BTY_IMAGES` exFAT partition, and xz-compresses the
+a writable `BTY_IMAGES` exFAT partition, and gzip-compresses the
 result. Emits:
 
 - `~/system_imaging/disk/bty-usb-x86_64.iso.gz` - distributable
@@ -82,11 +82,12 @@ sync
 ```
 
 The stick now has the bty live-boot ISO9660 + EFI partitions plus
-an empty 4 GiB exFAT partition labelled `BTY_IMAGES` -- room for
-a typical `bty-server` image (~1-1.5 GiB compressed) plus
-headroom. If you need more space (multi-distro carry-all etc.),
-grow `BTY_IMAGES` on your host with gparted after writing the
-stick.
+an empty 2.1 GiB exFAT partition labelled `BTY_IMAGES` -- room for
+a typical `bty-server` image (~1-1.5 GiB compressed) plus headroom.
+The smaller partition makes the .iso friendlier to Ventoy hosts and
+KVM-over-IP shims (piKVM / JetKVM). If you need more space (multi-
+distro carry-all etc.), grow `BTY_IMAGES` on your host with gparted
+after writing the stick.
 
 ## Drop images onto the stick
 
@@ -142,13 +143,11 @@ bty inspect image --json /var/lib/bty/images/my-image.qcow2
 # 1. Validate that an image can be flashed to a target without writing.
 bty flash --image /var/lib/bty/images/my-image.qcow2 \
           --target /dev/sdX \
-          --provision none \
           --dry-run
 
 # 2. Once the plan looks right, run for real (requires root):
 sudo bty flash --image /var/lib/bty/images/my-image.qcow2 \
                --target /dev/sdX \
-               --provision none \
                --yes
 ```
 
@@ -156,9 +155,9 @@ sudo bty flash --image /var/lib/bty/images/my-image.qcow2 \
 the explicit consent token for the destructive write - `bty flash`
 refuses to do anything without one or the other.
 
-### Provisioning?
+### No post-flash provisioning
 
-bty doesn't do any provisioning. First-boot bring-up (users,
+bty is a flasher, not a provisioner. First-boot bring-up (users,
 network, packages, hostnames) gets baked into the image by the
 cooker upstream via cloud-init / NoCloud user-data -- bty just
 writes the bytes.

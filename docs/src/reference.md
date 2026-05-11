@@ -7,7 +7,7 @@ Reference material for bty's surfaces. Filled in as features land.
 Each tagged release publishes a fixed set of assets to GitHub. The
 `releases/latest/download/<filename>` URLs always 302 to the newest
 tag's copy of that file; substitute `latest` for a specific tag (e.g.
-`v0.2.7`) to pin.
+`v0.8.2`) to pin.
 
 | Asset | What it is | URL (latest) |
 |---|---|---|
@@ -440,12 +440,21 @@ templates, Bootstrap CSS, HTMX form posts).
  `/sys/class/net/`) + subnet input (`192.168.1.0` or
  `192.168.1.0/24`). Activate calls `bty-web-activate-pxe`
  which writes `/etc/dnsmasq.d/bty-pxe-active.conf` and
- restarts dnsmasq.
+ restarts dnsmasq. A separate Deactivate button calls
+ `bty-web-deactivate-pxe` to remove that file and restart
+ dnsmasq back to TFTP-only. When the configured interface
+ is no longer present (NIC renamed across reboot, USB
+ ethernet unplugged), the panel flags the broken binding so
+ the operator can deactivate and re-bind.
 - `POST /ui/settings/pxe-activate` -> drives `bty-web-activate-pxe`,
  a sudoers-permitted helper in `/usr/local/sbin/` that writes
- `/etc/dnsmasq.d/bty-pxe-active.conf` and restarts dnsmasq. The
- NOPASSWD entry in `/etc/sudoers.d/bty-web` is the only sudo
- grant the appliance gives bty-web.
+ `/etc/dnsmasq.d/bty-pxe-active.conf` and restarts dnsmasq.
+- `POST /ui/settings/pxe-deactivate` -> drives `bty-web-deactivate-pxe`,
+ the sibling helper that removes the active config and restarts
+ dnsmasq. Idempotent: a missing active config is reported as
+ already-deactivated. The two NOPASSWD entries in
+ `/etc/sudoers.d/bty-web` are the only sudo grants the appliance
+ gives bty-web.
 
 The auth dependency checks ``request.session.get("bty_authed")``;
 the session is a Starlette ``SessionMiddleware``-signed payload

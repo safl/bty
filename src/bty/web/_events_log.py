@@ -2,9 +2,9 @@
 
 A single append-only ``events`` table in state.db captures the
 "who did what when" timeline that the operator wants visible in
-the UI: machines checking in, configuration changes, image
-uploads, task lifecycles, etc. Three rendering surfaces consume
-the same rows:
+the UI: machines checking in, machines being flashed, image
+uploads, catalog adds / deletes, settings changes, auth attempts.
+Three rendering surfaces consume the same rows:
 
 1. ``/ui/events`` -- top-level page with filter + pagination.
 2. ``/ui/machines/{mac}`` -- the most recent events touching this

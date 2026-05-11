@@ -289,9 +289,10 @@ def main(args, cijoe):
     if err:
         return err
 
-    # Compress to .iso.gz. The raw 4.4 GiB ISO exceeds GitHub's 2 GiB
-    # per-release-asset upload limit; gzip on our zero-heavy file
-    # (4 GiB sparse exFAT region) brings it to a few hundred MiB.
+    # Compress to .iso.gz. The raw ~2.5 GiB ISO would exceed GitHub's
+    # 2 GiB per-release-asset upload limit even at this shrunk size;
+    # gzip on our zero-heavy file (sparse exFAT region) brings it to
+    # a few hundred MiB.
     # Operator UX: Etcher / RPi Imager / Rufus DD-mode read .iso.gz
     # directly (no decompress step). For CLI:
     #   gunzip -d --stdout bty-usb-x86_64.iso.gz | sudo dd of=/dev/sdX bs=4M

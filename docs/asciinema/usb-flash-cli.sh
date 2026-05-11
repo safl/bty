@@ -48,7 +48,7 @@ prompt "bty list images --image-root '$IMAGE_ROOT'"
 
 prompt "bty inspect image '$IMAGE'"
 
-prompt "bty flash --image '$IMAGE' --target '$TARGET' --provision none --dry-run"
+prompt "bty flash --image '$IMAGE' --target '$TARGET' --dry-run"
 
 cat <<'GAP'
 
@@ -60,7 +60,7 @@ cat <<'GAP'
 GAP
 sleep 4
 
-prompt "sudo bty flash --image '$IMAGE' --target '$TARGET' --provision none --yes"
+prompt "sudo bty flash --image '$IMAGE' --target '$TARGET' --yes"
 
 cat <<'TAIL'
 

@@ -21,7 +21,7 @@ USB build, ~20 minutes), and under 5 minutes for any subsequent flash.
 | You need | Notes |
 |---|---|
 | A **build host** with passwordless sudo | live-build runs a chroot, which needs root. Any Linux box works (no KVM required after M19; we no longer bake in QEMU). |
-| A **USB stick**, 8 GiB or larger | The cooked image is ~4.4 GiB (~400 MB live boot + 4 GiB exFAT `BTY_IMAGES`). Larger sticks just leave the tail unallocated; grow `BTY_IMAGES` with gparted on your host afterwards if you want it. |
+| A **USB stick**, 4 GiB or larger | The cooked image is ~2.5 GiB (~400 MB live boot + 2.1 GiB exFAT `BTY_IMAGES`). Larger sticks just leave the tail unallocated; grow `BTY_IMAGES` with gparted on your host afterwards if you want it. |
 | A **target machine** with a free disk | This is the box that will get flashed. UEFI or legacy BIOS, x86_64. |
 | A **system image** to flash | `.qcow2`, raw `.img`, or `.img.{zst,xz,gz,bz2}`. Any cooked OS image of yours; bty doesn't ship one. |
 
@@ -49,7 +49,7 @@ curl -fLO https://github.com/safl/bty/releases/latest/download/bty-usb-x86_64.is
 sha256sum -c bty-usb-x86_64.iso.gz.sha256
 ```
 
-For a specific version, swap `latest` for the tag (e.g. `v0.2.7`).
+For a specific version, swap `latest` for the tag (e.g. `v0.8.2`).
 Browse all releases at <https://github.com/safl/bty/releases>.
 
 ### Option B: Build from a checkout (when you want to modify it)
@@ -225,14 +225,12 @@ bty inspect image /mnt/BTY_IMAGES/my-image.qcow2
 bty flash \
     --image  /mnt/BTY_IMAGES/my-image.qcow2 \
     --target /dev/sda \
-    --provision none \
     --dry-run
 
 # 4. Run for real (requires root)
 sudo bty flash \
     --image  /mnt/BTY_IMAGES/my-image.qcow2 \
     --target /dev/sda \
-    --provision none \
     --yes
 ```
 
@@ -250,7 +248,6 @@ the image:
 sudo bty flash \
     --image  http://server:8080/images/my-image.img.zst \
     --target /dev/sda \
-    --provision none \
     --yes
 ```
 

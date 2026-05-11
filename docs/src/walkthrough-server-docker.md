@@ -94,7 +94,6 @@ images first:
 sudo bty flash \
     --image  http://<host>:8080/images/my-image.img.zst \
     --target /dev/sda \
-    --provision none \
     --yes
 ```
 

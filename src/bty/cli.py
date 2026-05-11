@@ -5,7 +5,7 @@ Subcommand structure:
     bty list disks
     bty list images [--image-root PATH]
     bty inspect image PATH
-    bty flash --image PATH --target PATH [--provision MODE] --dry-run
+    bty flash --image PATH --target PATH --dry-run
 
 Each leaf command accepts ``--json`` to emit machine-readable output.
 
