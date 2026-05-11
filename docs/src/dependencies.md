@@ -87,9 +87,9 @@ that need:
 
 | Dependency | Used by which variant |
 |---|---|
-| `live-build` + `debootstrap` + `squashfs-tools` + `xorriso` + `exfatprogs` + `xz-utils` | `usb-x86`, `netboot-x86` |
+| `live-build` + `debootstrap` + `squashfs-tools` + `xorriso` + `exfatprogs` | `usb-x86`, `netboot-x86` |
 | `qemu-system-x86_64` + KVM + `cloud-image-utils` | `server-x86` (cloud-init bake in QEMU) |
-| `qemu-user-static` + `binfmt_misc` + `losetup` | `server-rpi` (mount + chroot Raspberry Pi OS) |
+| `qemu-user-static` + `binfmt_misc` + `losetup` + `xz-utils` | `server-rpi` (mount + chroot Raspberry Pi OS Lite, which ships as `.img.xz`) |
 | `cijoe` | all variants (orchestration) |
 | Passwordless `sudo` | all variants (live-build / loopback mounts / mkfs need it) |
 

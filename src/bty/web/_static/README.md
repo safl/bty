@@ -22,18 +22,30 @@ All served by FastAPI under ``/static/`` at runtime. Hatchling includes
 this directory in the wheel automatically (no special config needed -
 all files under ``src/bty/`` ship by default).
 
-**Caveat:** the bundled Sandstone CSS starts with an
-``@import url(https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap)``
-declaration. Browsers on networks with internet access will pull
-Roboto from Google Fonts; air-gapped browsers fall back to the
-system sans-serif. The appliance itself never reaches out -- only
-the operator's browser does, and only for the font.
+**Strict no-CDN guarantee.** Neither the appliance nor the operator's
+browser fetches anything from a third-party origin while using
+bty-web. Specifically, the upstream Bootswatch Sandstone CSS ships
+with an ``@import url(https://fonts.googleapis.com/...)`` declaration
+for Roboto at the very top of the file; we **strip that line** when
+vendoring so the browser falls back to the system sans-serif stack
+and never reaches out to fonts.googleapis.com. The remaining ``http``
+URLs in the vendored assets are all in license comments
+(``getbootstrap.com``, ``bootswatch.com``, ``github.com``) or the
+SVG namespace identifier (``www.w3.org/2000/svg``); none get fetched.
+
+A regression test in ``tests/test_web_ui.py`` checks the bundled CSS
+for a re-introduced ``@import url(http...)`` so a future refresh
+can't quietly bring the Google Fonts call back.
 
 ## Refreshing
 
 When bumping versions, re-download with the URLs above (e.g.
 ``curl -sSfL <url> -o <filename>`` from this directory), bump the
-version row in this table, run the test suite, and commit.
+version row in this table, run the test suite, and commit. **For
+``bootstrap.min.css``**: after downloading, strip the leading
+``@import url(https://fonts.googleapis.com/...)`` line. The
+regression test in ``tests/test_web_ui.py`` will fail if you
+forget.
 
 We deliberately do **not** auto-fetch at build time: pinned, committed
 assets keep the build reproducible and let air-gapped contributors

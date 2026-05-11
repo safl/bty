@@ -852,13 +852,39 @@ def test_static_assets_served_locally(client: TestClient) -> None:
 
 
 def test_layout_has_no_external_origins(client: TestClient) -> None:
-    """The login page (and by extension the layout) must not reference
-    any third-party origin - the appliance runs offline."""
+    """The login HTML (and by extension the layout) loads its
+    JS / CSS from ``/static/*`` only, not from a CDN."""
     r = client.get("/ui/login")
     assert r.status_code == 200
     assert "cdn.jsdelivr.net" not in r.text
     assert "/static/bootstrap.min.css" in r.text
     assert "/static/htmx.min.js" in r.text
+
+
+def test_vendored_css_has_no_runtime_external_fetches(client: TestClient) -> None:
+    """Strict no-CDN guarantee: the operator's browser must not be
+    able to reach out to any third-party origin while using bty-web.
+    The upstream Bootswatch Sandstone CSS ships with an
+    ``@import url(https://fonts.googleapis.com/...)`` for Roboto at
+    the top of the file; we strip that line when vendoring so the
+    browser falls back to the system sans-serif. This test guards
+    against a future refresh quietly re-introducing it.
+
+    Other URLs in the bundled CSS are all in ``/* ... */`` license
+    comments (CSS parsers ignore those) or the SVG XML namespace
+    identifier (``http://www.w3.org/2000/svg``, never fetched).
+    """
+    for path in ("/static/bootstrap.min.css", "/static/bootstrap-icons.min.css"):
+        r = client.get(path)
+        assert r.status_code == 200, f"{path}: {r.status_code}"
+        body = r.text
+        assert "@import url(http" not in body, (
+            f"{path} contains an @import that would trigger a runtime "
+            f"external fetch; strip it when vendoring."
+        )
+        assert "fonts.googleapis.com" not in body, (
+            f"{path} still references fonts.googleapis.com; strip the @import line."
+        )
 
 
 # ---------- SSE live updates -----------------------------------------------

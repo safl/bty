@@ -55,7 +55,7 @@ swap `latest` for a specific tag (e.g. `v0.8.2`) if you want to pin.
 
 ```bash
 # prerequisites: live-build, debootstrap, squashfs-tools, xorriso,
-# exfatprogs, xz-utils, pipx, passwordless sudo
+# exfatprogs, pipx, passwordless sudo
 make media-deps                    # one-time: pipx install cijoe
 sudo make build VARIANT=usb-x86    # 15-25 min
 ```

@@ -61,8 +61,6 @@ jobs:
             gdisk \
             e2fsprogs \
             parted
-      - name: Install cijoe (for the cijoe-provisioning integration test)
-        run: pipx install cijoe
       - run: uv sync --all-extras --group dev
       # Integration tests use losetup + dd against a real loop device,
       # so they need root. The default pytest run excludes them via the

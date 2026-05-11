@@ -27,8 +27,8 @@ USB build, ~20 minutes), and under 5 minutes for any subsequent flash.
 
 The build host runs Debian 12+ or Ubuntu 24.04+. Other Linux distros
 work if you can install `live-build`, `debootstrap`, `squashfs-tools`,
-`xorriso`, `exfatprogs`, `xz-utils`, and `pipx`. There's a one-shot
-install script for Debian-family at
+`xorriso`, `exfatprogs`, and `pipx`. There's a one-shot install
+script for Debian-family at
 [`scripts/install-dev-deps.sh`](https://github.com/safl/bty/blob/main/scripts/install-dev-deps.sh).
 
 ## Step 1: Get the USB image
