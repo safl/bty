@@ -176,13 +176,18 @@ def _parse_size_to_bytes(s: str) -> int:
 _REMOTE_CATALOG_MAX_BYTES = 4 * 1024 * 1024
 
 
-# Read-only path scanned alongside the configured image-root for
-# bake-time-shipped ``.bri`` pointers (currently: "Install latest
-# bty-server"). The bty-usb live env's chroot drops files here from
-# the ``includes.chroot/usr/local/share/bty/images-builtin/`` tree;
-# workstation installs typically don't have this directory, so the
-# scan is a no-op there.
-_BUILTIN_IMAGES_PATH = Path("/usr/local/share/bty/images-builtin")
+# The bty-server bootstrap shortcut (``b`` in the TUI) flashes this
+# URL. ``releases/latest/download/<name>`` is GitHub's stable
+# redirect-to-newest-tag pattern, so the shortcut tracks new
+# releases without rebaking the live env. Network constraint: the
+# live env needs HTTPS reachability to github.com /
+# objects.githubusercontent.com at flash time. Air-gapped operators
+# ship their own .img.gz through the BTY_IMAGES / Ventoy
+# ``bty-images/`` folder path instead.
+_BTY_SERVER_LATEST_URL = (
+    "https://github.com/safl/bty/releases/latest/download/bty-server-x86_64.img.gz"
+)
+_BTY_SERVER_LATEST_NAME = "bty-server (latest from GitHub)"
 
 
 def _validate_server_url(server_url: str) -> None:
@@ -992,6 +997,10 @@ class HelpScreen(ModalScreen[None]):
                 classes="help-row",
             )
             yield Static(
+                "  b             install bty-server (latest from GitHub)",
+                classes="help-row",
+            )
+            yield Static(
                 "  /             filter the image catalog by substring",
                 classes="help-row",
             )
@@ -1024,6 +1033,7 @@ class BtyTui(App[None]):
         # successful flash (see ``on_button_pressed``). Pairing a one-
         # keypress refresh (lowercase ``r``) with a one-keypress reboot
         # (``R`` aka shift+r) was a real fat-finger trap.
+        Binding("b", "install_bty_server", "Install bty-server", show=False),
         Binding("s", "source", "Source", show=False),
         Binding("slash", "focus_filter", "Filter", show=False),
         # ``?`` pops a help modal listing every keybinding. Common
@@ -1323,53 +1333,59 @@ class BtyTui(App[None]):
     def _welcome_text(self) -> str:
         """Compose onboarding text shown when the catalog is empty.
 
-        Concrete next-step suggestions, mode-aware:
-        local catalog -> "drop images at this path (with host-OS path
-        recipes for the common stick / Ventoy / workstation cases),
-        or press s to switch to a remote bty-web".
-        remote catalog -> "upload via the server's UI or HTTP PUT,
-        then press r to refresh; or press s to switch source".
+        Three concrete next steps the operator can take from here:
+        1. Flash an image you've staged locally (BTY_IMAGES /
+           Ventoy ``bty-images/`` / workstation ``--image-root``).
+        2. Flash from a remote bty-web catalog (press ``s``).
+        3. Install a bty-server appliance on this box from the
+           latest GitHub release (press ``b``).
 
-        Refresh is genuinely useful in the remote case (server-side
-        uploads happen async) and the workstation-local case (operator
-        drops a file in the same dir bty-tui is watching). In the
-        live-env-local case re-scanning the same empty read-only dir
-        won't help, so we anchor that flavour on "add files, then
-        reboot or press s" instead.
+        The remote-catalog variant gets a tighter version of the
+        text because it only has options 2 + 3 plus the upload
+        recipes; the local variant gets the full three-way menu.
         """
         if self._server_url is not None:
             return (
                 "[b]No images on the server yet.[/]\n\n"
                 f"Catalog endpoint: [accent]{self._server_url}/images[/]\n\n"
-                "Add images via one of:\n"
-                "  - Browser: bty-web Images page on the server's UI.\n"
-                "  - HTTP PUT: [dim]curl -X PUT --upload-file my.qcow2 \\\n"
-                "    http://server:8080/images/my.qcow2[/]\n"
-                "  - Volume mount (Docker / appliance): drop files into\n"
-                "    [dim]/var/lib/bty/images/[/] on the server's host\n"
-                "    filesystem (or its bind-mounted dir / managed volume).\n\n"
-                "Press [b]r[/] to refresh once uploads complete, or [b]s[/]\n"
-                "to switch to a different catalog source."
+                "Three ways forward from here:\n"
+                "  1. [b]Add images to this server[/] via one of:\n"
+                "     - Browser: bty-web Images page on the server's UI.\n"
+                "     - HTTP PUT: [dim]curl -X PUT --upload-file my.qcow2 \\\n"
+                "       http://server:8080/images/my.qcow2[/]\n"
+                "     - Volume mount: drop files into\n"
+                "       [dim]/var/lib/bty/images/[/] on the server's host.\n"
+                "     Then press [b]r[/] to refresh.\n"
+                "  2. [b]Switch source[/]: press [b]s[/] to point this\n"
+                "     TUI at a different bty-web catalog or back at a\n"
+                "     local path.\n"
+                "  3. [b]Install bty-server[/] on this box from the\n"
+                "     latest GitHub release: press [b]b[/], pick a\n"
+                "     disk, hit Flash."
             )
         return (
             "[b]No images in the catalog yet.[/]\n\n"
             f"Local catalog: [accent]{self._image_root}[/]\n\n"
-            "Add images via one of:\n"
-            "  - [b]bty-usb stick (dd'd directly)[/]: mount the\n"
-            "    [b]BTY_IMAGES[/] exFAT partition on any host OS and\n"
-            "    copy [dim]*.img.gz[/] / [dim]*.qcow2[/] / [dim]*.bri[/]\n"
-            "    files at its root.\n"
-            "  - [b]Ventoy / piKVM / JetKVM[/]: drop a\n"
-            "    [b]bty-images/[/] folder on the surrounding stick's\n"
-            "    data partition; the live env's discovery service\n"
-            "    bind-mounts it at boot.\n"
-            "  - [b]Workstation[/]: copy files at the path above\n"
-            "    (override the default with [b]--image-root /path[/]\n"
-            "    or [b]BTY_IMAGE_ROOT[/]); press [b]r[/] to re-scan.\n\n"
-            "Power off and back on to pick up newly-dropped files on\n"
-            "the bty-usb / Ventoy paths (the live-env mount is read-\n"
-            "only). Or press [b]s[/] to point this TUI at a remote\n"
-            "bty-web catalog instead.\n\n"
+            "Three ways forward from here:\n"
+            "  1. [b]Flash an image you stage locally[/].\n"
+            "     - bty-usb stick (dd'd directly): mount the\n"
+            "       [b]BTY_IMAGES[/] exFAT partition on any host OS\n"
+            "       and copy [dim]*.img.gz[/] / [dim]*.qcow2[/] /\n"
+            "       [dim]*.bri[/] files at its root.\n"
+            "     - Ventoy / piKVM / JetKVM: drop those files at the\n"
+            "       root of the surrounding stick's data partition\n"
+            "       (or in a [b]bty-images/[/] subfolder there).\n"
+            "     - Workstation: copy files at the path above\n"
+            "       (override with [b]--image-root /path[/] or\n"
+            "       [b]BTY_IMAGE_ROOT[/]); press [b]r[/] to re-scan.\n"
+            "     Live-env paths are read-only; power-cycle to\n"
+            "     pick up files added after boot.\n"
+            "  2. [b]Flash from a remote bty-web catalog[/]:\n"
+            "     press [b]s[/] and enter the server URL\n"
+            "     (e.g. [dim]http://server:8080[/]).\n"
+            "  3. [b]Install bty-server[/] on this box from the\n"
+            "     latest GitHub release: press [b]b[/], pick a\n"
+            "     disk, hit Flash.\n\n"
             "[dim]Alt+F2 .. Alt+F6 drop into a root shell on the\n"
             "alternate VTs for diagnostics; Alt+F1 returns here.[/]"
         )
@@ -1378,16 +1394,16 @@ class BtyTui(App[None]):
         """Load the catalog from either a remote bty-web or the local
         image root, returning a unified ``_TuiImage`` list.
 
-        In local mode the catalog is the union of three sources:
-        1. ``self._image_root`` scanned for ``.img.*`` / ``.qcow2``
-           image files,
-        2. the same directory scanned for ``.bri`` (bty Remote Image)
-           pointer files dropped by the operator,
-        3. :data:`_BUILTIN_IMAGES_PATH` scanned for ``.bri`` pointers
-           baked into the live env at build time -- ``Install latest
-           bty-server`` lives there, so a fresh-from-Ventoy operator
-           with no catalog of their own still has at least one
-           always-available flash target.
+        In local mode, the directory scan is followed by a scan for
+        ``.bri`` (bty Remote Image) descriptors; each descriptor
+        becomes a ``_TuiImage`` with ``url`` set so the operator can
+        flash from a URL pointer dropped into BTY_IMAGES.
+
+        The bty-server bootstrap is NOT in this list -- it's reached
+        via the ``b`` keyboard shortcut (see ``action_install_bty_
+        server``) so it doesn't clutter the regular catalog and is
+        always available regardless of what's been dropped on the
+        BTY_IMAGES / Ventoy stick.
         """
         if self._server_url is not None:
             return fetch_remote_catalog(self._server_url)
@@ -1413,18 +1429,7 @@ class BtyTui(App[None]):
             )
             for r in images.list_remote_images(self._image_root)
         ]
-        builtins: list[_TuiImage] = []
-        if _BUILTIN_IMAGES_PATH.is_dir():
-            builtins = [
-                _TuiImage(
-                    name=r.name,
-                    fmt=r.format,
-                    size_bytes=r.size_bytes if r.size_bytes is not None else -1,
-                    url=r.url,
-                )
-                for r in images.list_remote_images(_BUILTIN_IMAGES_PATH)
-            ]
-        return local + remote + builtins
+        return local + remote
 
     def _populate_disks(self) -> None:
         table = self.query_one("#disks_table", DataTable)
@@ -1474,6 +1479,39 @@ class BtyTui(App[None]):
         self._populate_images()
         self._populate_disks()
         self._set_status_transient("Refreshed.")
+
+    def action_install_bty_server(self) -> None:
+        """``b`` binding: pre-select the bty-server bootstrap image
+        and advance the wizard to disk selection.
+
+        The bty-server image (``releases/latest/download/bty-server-
+        x86_64.img.gz`` on GitHub) is not in the regular image
+        catalog -- it's a built-in shortcut so a fresh-from-Ventoy
+        operator with no catalog of their own can still go straight
+        to a working bty-server install. From here the flow is the
+        same as any other URL-backed image: pick a disk, hit Flash.
+
+        Network constraint: flash time needs HTTPS to github.com /
+        objects.githubusercontent.com. ``execute_plan`` will surface
+        a clean error if reachability is missing.
+        """
+        self._selected_image = _TuiImage(
+            name=_BTY_SERVER_LATEST_NAME,
+            fmt="img.gz",
+            size_bytes=-1,
+            url=_BTY_SERVER_LATEST_URL,
+        )
+        # _post_flash carries over a stale "Reboot" button state if
+        # the operator chose ``b`` right after a previous flash;
+        # reset so the wizard derives Stage 2 / 3 cleanly.
+        self._post_flash = False
+        self._render_status()
+        # Focus the disks pane so the next Enter commits the disk.
+        with contextlib.suppress(Exception):  # pragma: no cover - defensive
+            self.query_one("#disks_table", DataTable).focus()
+        self._set_status_transient(
+            f"Selected {_BTY_SERVER_LATEST_NAME}; pick a disk to install on."
+        )
 
     def action_help(self) -> None:
         """``?`` binding: pop the keybinding cheat sheet.
@@ -1655,7 +1693,8 @@ class BtyTui(App[None]):
         """
         return (
             "<?> help       <q> quit       <r> refresh       "
-            "<s> source       <t> theme       <Esc/Backspace> back"
+            "<s> source       <b> install bty-server       "
+            "<t> theme       <Esc/Backspace> back"
         )
 
     def on_button_pressed(self, event: Button.Pressed) -> None:

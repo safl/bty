@@ -15,24 +15,26 @@
 #   not enumerated. The operator's image catalog instead lives on
 #   the surrounding shim's data partition.
 #
-# Discovery contract (strict, single convention):
-#   We look for a ``bty-images/`` directory at the root of every
-#   attached vfat / exfat partition. First match gets bind-mounted
-#   at ``/var/lib/bty/images``. The directory must:
-#     * be named exactly ``bty-images`` (lowercase),
-#     * sit at the root of the partition (not nested),
-#     * contain at least one ``*.bri`` / ``*.img.*`` / ``*.qcow2``
-#       file at its own root.
-#   We deliberately do NOT fall back to scanning the partition root
-#   itself -- that surface was ambiguous (operators sometimes saw it
-#   work, sometimes not) and the bake-time bootstrap .bri at
-#   ``/usr/local/share/bty/images-builtin/`` already covers the
-#   "no operator-supplied images" case.
+# Discovery contract:
+#   We look at every attached vfat / exfat partition in two places,
+#   in order:
+#     1. ``<partition>/bty-images/`` -- the preferred operator-
+#        managed convention (clean separation from whatever else
+#        the surrounding Ventoy / IP-KVM stick carries),
+#     2. ``<partition>/`` (the partition root) -- the quick-drop
+#        layout for an operator who just wants to put a few image
+#        files next to the bty-usb.iso on a Ventoy stick without
+#        making a subfolder.
+#   First match with at least one usable file (``*.bri`` /
+#   ``*.img.*`` / ``*.qcow2``) wins, and that directory gets bind-
+#   mounted at ``/var/lib/bty/images``.
 #
 # Best-effort: no candidate partition is fine, the live env just
-# starts with the built-in bootstrap catalog and the operator can
-# pass ``--image-root`` explicitly. NTFS isn't probed; Ventoy's
-# default data partition is exFAT and that covers the common case.
+# starts with an empty catalog and the operator can use the bty-tui
+# ``b`` shortcut to install a fresh bty-server from GitHub or press
+# ``s`` to connect to an existing bty-web catalog. NTFS isn't
+# probed; Ventoy's default data partition is exFAT and that covers
+# the common case.
 #
 # Diagnostics: every candidate partition + the reason it was kept
 # or skipped is logged to journalctl. ``Alt+F2`` then
@@ -94,23 +96,27 @@ while IFS= read -r line; do
         continue
     fi
 
-    sub="$SOURCE/bty-images"
-    if [ ! -d "$sub" ]; then
-        echo "bty-images-discover: skip $name ($fstype, no bty-images/ folder at root)"
+    # Try ``bty-images/`` subfolder first, then the partition root.
+    bound=0
+    for sub in "$SOURCE/bty-images" "$SOURCE"; do
+        [ -d "$sub" ] || continue
+        if ! find "$sub" -maxdepth 1 -type f \
+            \( -name '*.bri' -o -name '*.img' -o -name '*.img.*' \
+            -o -name '*.qcow2' \) \
+            -print -quit 2>/dev/null | grep -q .; then
+            continue
+        fi
+        mount --bind "$sub" "$TARGET"
+        echo "bty-images-discover: bound $sub (on $name, $fstype) -> $TARGET"
+        bound=1
+        found=1
+        break
+    done
+    if [ "$bound" -eq 0 ]; then
+        echo "bty-images-discover: skip $name ($fstype, no usable files at root or bty-images/)"
         umount "$SOURCE" || true
         continue
     fi
-    if ! find "$sub" -maxdepth 1 -type f \
-        \( -name '*.bri' -o -name '*.img' -o -name '*.img.*' \
-        -o -name '*.qcow2' \) \
-        -print -quit 2>/dev/null | grep -q .; then
-        echo "bty-images-discover: skip $name ($fstype, bty-images/ folder is empty of usable files)"
-        umount "$SOURCE" || true
-        continue
-    fi
-    mount --bind "$sub" "$TARGET"
-    echo "bty-images-discover: bound $sub (on $name, $fstype) -> $TARGET"
-    found=1
     break
 done <<EOF
 $list

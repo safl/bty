@@ -324,19 +324,17 @@ carries the image catalog; the IP-KVM paths use a remote `bty-web`
 for the catalog because IP-KVMs expose the `.iso` as a single
 CD-ROM and there is no local storage to put image files on.
 
-**Always-available bootstrap entry.** Regardless of which delivery
-shape you use, `bty-tui` always offers one built-in row:
+**Always-available bty-server install shortcut.** Regardless of
+which delivery shape you use, `bty-tui` has a built-in `b`
+shortcut that pre-selects the latest `bty-server-x86_64.img.gz`
+from GitHub releases. From the TUI: press `b`, pick a target disk,
+hit Flash. The image streams directly from GitHub through the live
+env to the target's disk; no local staging is needed.
 
-> `bty-server (latest from GitHub)` -
-> `https://github.com/safl/bty/releases/latest/download/bty-server-x86_64.img.gz`
-
-This is a bake-time `.bri` pointer shipped inside the live env at
-`/usr/local/share/bty/images-builtin/bty-server-x86_64.bri`. Pick
-it and flash to set up a fresh `bty-server` appliance from scratch
-without staging the image yourself. The flow streams bytes directly
-from GitHub through the live env to the target's disk, so the live
-env needs internet access at flash time (DNS + HTTPS to
-`github.com` / `objects.githubusercontent.com`).
+Network constraint: the live env needs HTTPS reachability to
+`github.com` / `objects.githubusercontent.com` at flash time.
+Air-gapped operators should ship their own `bty-server.img.gz`
+via the Ventoy `bty-images/` folder path described below instead.
 
 ### Ventoy
 
@@ -391,12 +389,21 @@ sudo cp /path/to/ubuntu-26.04-server.img.gz /mnt/bty-images/
 sudo umount /mnt
 ```
 
-The directory name `bty-images/` and its location (top of the
-Ventoy partition) are what the live env's discovery service looks
-for. **Don't rename or nest it.** The service exclusively scans
-for `bty-images/` at the partition root; a `.bri` dropped
-alongside `bty-usb-x86_64.iso` (not inside `bty-images/`) won't
-be picked up.
+The discovery service accepts either layout:
+
+1. **Recommended**: a `bty-images/` subfolder at the partition
+   root, with your `.img.gz` / `.qcow2` / `.bri` files inside.
+   Keeps your cooked images visually separate from the `.iso`
+   files Ventoy is booting.
+2. **Quick-drop**: the same files at the partition root,
+   alongside `bty-usb-x86_64.iso`. Less tidy but supported -- the
+   discovery service falls through to the root if no
+   `bty-images/` subfolder exists.
+
+The service tries the subfolder first, then falls back to the
+root. First match with at least one supported file (`.bri` /
+`.img*` / `.qcow2`) wins, gets bind-mounted at
+`/var/lib/bty/images`, and the TUI picks it up from there.
 
 #### Step 4: Boot the target
 
@@ -504,6 +511,12 @@ Pick an image (Enter), pick the target disk (Enter), flash (Enter
 on Flash). The image streams directly from `bty-web` through the
 live env to the target's disk; piKVM only carried the boot env.
 
+If you don't yet have a `bty-web` instance running (chicken-and-
+egg case for setting up the very first one), press `b` instead:
+that's the built-in shortcut to install `bty-server` straight
+from GitHub. Once it boots, point subsequent piKVM-driven
+flashes at the new server.
+
 ### JetKVM (remote catalog only)
 
 [JetKVM](https://jetkvm.com) is a compact commercial IP-KVM
@@ -548,6 +561,10 @@ Same as piKVM Step 5. Press `s`, pick Remote, paste the server
 URL (e.g. `http://10.0.0.5:8080`), click Apply. The catalog
 populates from the server, images stream through the JetKVM-
 booted live env to the target's disk.
+
+To bootstrap the very first `bty-server` (no existing one to point
+at), press `b` instead of `s`: the built-in shortcut installs
+`bty-server` directly from GitHub's latest release.
 
 ## What's next
 
