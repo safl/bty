@@ -49,7 +49,7 @@ without setting up the appliance + PXE stack.
      ghcr.io/safl/bty-web:latest
    ```
 
-   Cooked images get dropped into the volume; they show up in the
+   Pre-built images get dropped into the volume; they show up in the
    `/images` endpoint. The bare-metal `bty-server` appliance also
    serves `/images` and works identically as a catalog source -
    any `bty-web` instance does.

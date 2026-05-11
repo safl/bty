@@ -2,7 +2,7 @@
 
 The fastest path to "I just bty-flashed a box":
 
-1. **Build** the bty USB live image once on a host that has KVM.
+1. **Build** the bty USB live image once on a Linux host.
 2. **Write** it to a USB stick with `dd`.
 3. **Drop** the system image you want to flash onto the stick's
  `BTY_IMAGES` partition.
@@ -63,7 +63,7 @@ What this does: runs Debian's `live-build` (debootstrap + mksquashfs
 + mkinitramfs) directly on the build host (no QEMU, no cloud-init)
 to produce a hybrid ISO carrying the bty CLI + TUI, then post-
 processes the ISO to append a writable `BTY_IMAGES` exFAT partition,
-and xz-compresses the result.
+and gzip-compresses the result.
 
 When it finishes:
 
@@ -167,7 +167,7 @@ the next; `Esc` (or `Backspace`) walks back.
 
 | Pane | Contents |
 |---|---|
-| **1: Images** | Cooked images found on `BTY_IMAGES` (or on a remote `bty-web` if you launched with `--server URL`) |
+| **1: Images** | Pre-built images found on `BTY_IMAGES` (or on a remote `bty-web` if you launched with `--server URL`) |
 | **2: Disks** | Block devices detected on this machine |
 | **3: Flash** | A big `Flash!` button (becomes `Reboot` after a successful flash) |
 

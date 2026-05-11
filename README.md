@@ -61,7 +61,7 @@ same SHA-keyed machine bindings.
   freshly-imaged target, runs, gets reflashed for the next job. No
   state leaks. No snowflakes. No "works on my machine" because the
   machine is bit-identical to the manifest every single boot.
-- **Cooked images, not recipes.** You build the image once (in your
+- **Pre-built images, not recipes.** You build the image once (in your
   build system of choice), bty writes the bytes. Provisioning is
   cloud-init or a CIJOE task on first boot - small, declarative,
   inspectable. No agent, no daemon, no convergence loops.
