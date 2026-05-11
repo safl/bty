@@ -126,18 +126,10 @@ console script. Lives under `src/bty/web/`.
 pipx install "bty-lab[web]"
 ```
 
-State (machine records, MAC <-> image/provisioning assignments, CIJOE
-workflow references and run reports, per-machine known-good baselines,
-image catalog metadata, server settings) is persisted in a single
-SQLite database under `BTY_STATE_DIR`. Backup or migration is just
-copying the file.
-
-CIJOE produces a structured report on every workflow run. `bty-web`
-captures these reports - both for offline runs (sent back from the live
-environment) and online runs (executed by the server itself) - and exposes
-them in the UI per machine and per run. Reports are downloadable in full,
-so an operator chasing a flaky reflash can inspect the complete log
-without leaving the browser.
+State (machine records, MAC <-> image / boot-policy assignments,
+image catalog metadata, audit-log events, server settings) is
+persisted in a single SQLite database under `BTY_STATE_DIR`. Backup
+or migration is just copying the file.
 
 The runtime is sized for modest x86 hardware: lightweight Python web
 framework, no heavy front-end build pipeline, no JVM dependencies. Server

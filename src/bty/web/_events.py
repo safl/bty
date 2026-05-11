@@ -53,8 +53,9 @@ class MachineEventBus:
         """Capture the event loop SSE subscribers run on.
 
         Called once from ``create_app``'s lifespan startup hook so
-        cross-thread publishers (task runner) can hop into the
-        loop's thread before touching ``asyncio.Queue`` state.
+        cross-thread publishers (the hash worker, the release-
+        manager fetcher) can hop into the loop's thread before
+        touching ``asyncio.Queue`` state.
         """
         self._loop = loop
 

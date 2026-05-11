@@ -14,9 +14,10 @@
             Sessions are server-signed cookies (Starlette's
             <code>SessionMiddleware</code>) with a sliding 7-day TTL. To
             invalidate every existing session in one shot, rotate the
-            session secret with
+            session secret:
             <code>sudo rm /var/lib/bty/session-secret &amp;&amp; sudo systemctl
-            restart bty-web</code> and reboot once.
+            restart bty-web</code>. The restart regenerates the secret on
+            startup; no reboot needed.
         </p>
     </div>
 </div>
@@ -26,11 +27,11 @@
     <div class="card-body">
         <h2 class="h5 mb-3"><i class="bi bi-hdd-network me-2"></i>PXE proxy-DHCP</h2>
         <p class="text-muted">
-            Activates the dnsmasq proxy-DHCP block: bty-web responds to PXE
-            queries on the chosen interface. Pick the interface that faces the
-            target machines, supply the subnet they're on, and click Activate.
-            <code>dnsmasq</code> restarts; until then the dnsmasq config shipped
-            with the appliance only serves TFTP.
+            Controls the dnsmasq proxy-DHCP block: when active, bty-web
+            responds to PXE queries on the chosen interface. Pick the
+            interface facing the target machines, supply the subnet they're
+            on, and click Activate. Deactivate removes the active config
+            and restarts <code>dnsmasq</code> back to TFTP-only.
         </p>
 
         {% if pxe %}
@@ -60,8 +61,8 @@
                     <i class="bi bi-exclamation-triangle-fill me-1"></i>
                     PXE is configured for interface
                     <code>{{ pxe.interface }}</code> but that interface is
-                    <strong>not currently present</strong>. ``dnsmasq`` is
-                    failing to bind. Deactivate and re-activate on a present
+                    <strong>not currently present</strong>. <code>dnsmasq</code>
+                    is failing to bind. Deactivate and re-activate on a present
                     interface below.
                 </div>
                 <form action="/ui/settings/pxe-deactivate" method="post" class="m-0">
@@ -81,8 +82,12 @@
         {% endif %}
 
         <h3 class="h6 mt-4">{% if pxe %}Change binding{% else %}Activate{% endif %}</h3>
-        {% set pxe_iface = pxe.interface if (pxe and pxe_iface_present) else (interfaces[0].name if interfaces else '') %}
-        {% set pxe_subnet = pxe.subnet if pxe else (interfaces[0].subnet if interfaces and interfaces[0].subnet else '') %}
+        {# ``form_interface`` / ``form_subnet`` are set by the activate-
+           failed path so the operator's typed values survive the
+           re-render. Falls through to the active config, otherwise
+           to the first detected interface's auto-detected subnet. #}
+        {% set pxe_iface = form_interface or (pxe.interface if (pxe and pxe_iface_present) else (interfaces[0].name if interfaces else '')) %}
+        {% set pxe_subnet = form_subnet or (pxe.subnet if pxe else (interfaces[0].subnet if interfaces and interfaces[0].subnet else '')) %}
         <form action="/ui/settings/pxe-activate" method="post" class="row g-3">
             <div class="col-sm-6">
                 <label class="form-label" for="interface">Interface</label>

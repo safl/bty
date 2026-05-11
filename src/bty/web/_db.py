@@ -76,9 +76,9 @@ CREATE TABLE IF NOT EXISTS events (
     actor         TEXT,                 -- 'operator' / 'system' / 'pxe-client' / NULL
     -- IP that initiated / observed the event. For operator events,
     -- the request's client host (operator's browser / curl). For
-    -- pxe-client events, the target's IP at check-in. For
-    -- task-runner system events, the target's last_seen_ip we
-    -- SSHed to. NULL for events with no meaningful source IP.
+    -- pxe-client events, the target's IP at check-in. NULL for
+    -- events with no meaningful source IP (e.g. CLI-driven events
+    -- where the bty-web process self-initiates).
     source_ip     TEXT,
     summary       TEXT NOT NULL,
     details       TEXT                  -- JSON blob with kind-specific extras

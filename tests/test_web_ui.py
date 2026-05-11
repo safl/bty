@@ -148,6 +148,56 @@ def test_ui_dashboard_renders_after_login(client: TestClient) -> None:
     assert "Machines" in r.text
 
 
+def test_ui_dashboard_shows_pxe_state_tile(client: TestClient) -> None:
+    """The 4th dashboard tile reflects PXE proxy-DHCP state and links
+    to /ui/settings. Three flavours: inactive (default in test env),
+    active+healthy, active+nic-gone."""
+    from unittest.mock import patch
+
+    from bty.web._sysconfig import Interface, PxeConfig
+
+    _login(client)
+
+    # Inactive: no config file means the "inactive" flavour.
+    r = client.get("/ui/dashboard")
+    assert r.status_code == 200
+    assert "PXE inactive" in r.text
+    assert 'href="/ui/settings"' in r.text
+
+    # Active + NIC present: green tile, interface + subnet visible.
+    with (
+        patch(
+            "bty.web._sysconfig.pxe_active",
+            return_value=PxeConfig(interface="eth0", subnet="192.168.1.0"),
+        ),
+        patch(
+            "bty.web._sysconfig.list_interfaces",
+            return_value=[Interface(name="eth0", operstate="up", ipv4="192.168.1.5", prefix=24)],
+        ),
+    ):
+        r = client.get("/ui/dashboard")
+    assert r.status_code == 200
+    assert "PXE active" in r.text
+    assert "<code>eth0</code>" in r.text
+    assert "192.168.1.0" in r.text
+
+    # Active + NIC gone: yellow warning tile.
+    with (
+        patch(
+            "bty.web._sysconfig.pxe_active",
+            return_value=PxeConfig(interface="usb0", subnet="192.168.50.0"),
+        ),
+        patch(
+            "bty.web._sysconfig.list_interfaces",
+            return_value=[Interface(name="eth0", operstate="up")],
+        ),
+    ):
+        r = client.get("/ui/dashboard")
+    assert r.status_code == 200
+    assert "PXE: NIC gone" in r.text
+    assert "<code>usb0</code>" in r.text
+
+
 def test_ui_dashboard_shows_recent_activity_after_a_pxe_event(client: TestClient) -> None:
     """The dashboard re-uses ``_events_card.html`` to surface the
     last 10 events. Trigger a PXE check-in so there's a row, then
@@ -622,6 +672,56 @@ def test_ui_settings_pxe_activate_failure_shows_danger_flash(client: TestClient)
         )
     assert r.status_code == 200
     assert "PXE activation failed" in r.text
+
+
+def test_ui_settings_pxe_activate_failure_preserves_form_input(client: TestClient) -> None:
+    """On activate-failure the operator's typed values survive the
+    re-render so they can fix the typo instead of starting over."""
+    from unittest.mock import patch
+
+    from bty.web._sysconfig import SysConfigError
+
+    _login(client)
+    with patch(
+        "bty.web._sysconfig.activate_pxe",
+        side_effect=SysConfigError("invalid subnet"),
+    ):
+        r = client.post(
+            "/ui/settings/pxe-activate",
+            data={"interface": "eth0", "subnet": "10.20.30.0/garbage"},
+        )
+    assert r.status_code == 200
+    # Subnet input keeps the typed-but-bad value (not reset to the
+    # auto-detected subnet of the first interface).
+    assert 'value="10.20.30.0/garbage"' in r.text
+
+
+def test_ui_settings_pxe_panel_warns_when_configured_iface_is_gone(client: TestClient) -> None:
+    """When dnsmasq is bound to a NIC that no longer exists (renamed
+    across reboot, USB ethernet unplugged), the Settings panel shows
+    the warning state, not the success state."""
+    from unittest.mock import patch
+
+    from bty.web._sysconfig import Interface, PxeConfig
+
+    _login(client)
+    with (
+        patch(
+            "bty.web._sysconfig.pxe_active",
+            return_value=PxeConfig(interface="usb0", subnet="192.168.50.0"),
+        ),
+        patch(
+            "bty.web._sysconfig.list_interfaces",
+            return_value=[Interface(name="eth0", operstate="up", ipv4="10.0.0.5", prefix=24)],
+        ),
+    ):
+        r = client.get("/ui/settings")
+    assert r.status_code == 200
+    body = r.text
+    assert "not currently present" in body
+    # The configured-but-gone NIC name is shown so the operator
+    # can match it against what they previously activated.
+    assert "<code>usb0</code>" in body
 
 
 def test_ui_settings_pxe_deactivate_invokes_helper(client: TestClient) -> None:

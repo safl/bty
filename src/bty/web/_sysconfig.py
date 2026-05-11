@@ -73,8 +73,38 @@ class PxeConfig:
     subnet: str
 
 
+@dataclass(frozen=True)
+class PxeState:
+    """Combined view of the active PXE config + NIC presence.
+
+    ``config`` is the parsed active config (``None`` when PXE is
+    deactivated). ``iface_present`` is True iff ``config.interface``
+    appears in :func:`list_interfaces` -- false means dnsmasq is
+    bound to a NIC that has since gone away (USB ethernet adapter
+    unplugged, systemd predictable-name churn across reboot).
+    """
+
+    config: PxeConfig | None
+    iface_present: bool
+
+
 class SysConfigError(Exception):
     """Helper failed; the message is safe to surface to the UI."""
+
+
+def pxe_state() -> PxeState:
+    """Read the active PXE config + check the bound NIC still exists.
+
+    Two callsites (the /ui/dashboard initial render and the SSE
+    counts-refresh fragment in ``_app.py``) need exactly this pair,
+    and they MUST agree -- one source of truth keeps the dashboard
+    tile coherent across refresh paths.
+    """
+    config = pxe_active()
+    if config is None:
+        return PxeState(config=None, iface_present=False)
+    iface_present = any(i.name == config.interface for i in list_interfaces())
+    return PxeState(config=config, iface_present=iface_present)
 
 
 def list_interfaces(sysnet: Path = SYSNET_PATH) -> list[Interface]:

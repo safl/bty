@@ -186,10 +186,9 @@ def record(
 
     ``source_ip`` is the IP that initiated / observed the event:
     the operator's request client host for operator events, the
-    target's IP at check-in for ``pxe-client`` events, and the
-    target's ``last_seen_ip`` for task-runner system events.
-    NULL when there is no meaningful source IP (e.g. CLI-driven
-    events where the bty-web process self-initiates).
+    target's IP at check-in for ``pxe-client`` events. NULL when
+    there is no meaningful source IP (e.g. CLI-driven events where
+    the bty-web process self-initiates).
     """
     ts = datetime.now(UTC).isoformat()
     details_json = json.dumps(details) if details is not None else None

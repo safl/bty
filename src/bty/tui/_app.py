@@ -479,9 +479,8 @@ class FlashStatusScreen(ModalScreen[bool]):
     """
 
     # Stable order of FlashProgress.event values that this modal
-    # treats as "stages" with a visible row in the tracker. Anything
-    # else (``provisioning``, intermediate notes) lands in the log
-    # but doesn't tick a stage.
+    # treats as "stages" with a visible row in the tracker. Any
+    # other event lands in the log but doesn't tick a stage.
     _STAGES: ClassVar[tuple[tuple[str, str], ...]] = (
         ("started", "Validating plan"),
         ("writing", "Writing image to disk"),
@@ -729,8 +728,8 @@ class FlashStatusScreen(ModalScreen[bool]):
         running this stage". So at the end of a successful run all
         stages are marked ``done``.
 
-        ``event_name`` may be a stage we don't render (e.g.
-        ``provisioning``); in that case the tracker doesn't change.
+        ``event_name`` may be an event we don't render as a stage;
+        in that case the tracker doesn't change.
         """
         stage_ids = {name for name, _ in self._STAGES}
         if event_name not in stage_ids:

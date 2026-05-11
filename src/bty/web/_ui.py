@@ -211,12 +211,21 @@ def register_ui_routes(
             # update) so a reload is the refresh gesture.
             recent_events = _events_log.list_events(conn, limit=10)
         image_count = len(bty_images.list_images(image_root))
+        # PXE proxy-DHCP state for the 4th counter tile. ``pxe_state``
+        # is shared with the SSE refresh fragment in ``_app.py`` so the
+        # initial render and SSE updates agree. The bus fires on
+        # machine + image mutations only -- PXE state changes from
+        # /ui/settings won't push here, so the tile refreshes on next
+        # page reload.
+        pxe_state = _sysconfig.pxe_state()
         return render(
             "ui/dashboard.html",
             request,
             machine_count=machine_count,
             discovered_count=discovered_count,
             image_count=image_count,
+            pxe=pxe_state.config,
+            pxe_iface_present=pxe_state.iface_present,
             recent_events=recent_events,
         )
 
@@ -647,6 +656,8 @@ def register_ui_routes(
         new_token: str | None = None,
         flash: str | None = None,
         flash_kind: str | None = None,
+        form_interface: str | None = None,
+        form_subnet: str | None = None,
     ) -> HTMLResponse:
         # Recent activity for settings: PXE activate / activate-
         # failed / deactivate / deactivate-failed.
@@ -670,6 +681,8 @@ def register_ui_routes(
             settings_events=settings_events,
             flash=flash,
             flash_kind=flash_kind,
+            form_interface=form_interface,
+            form_subnet=form_subnet,
         )
 
     @app.get(
@@ -716,7 +729,11 @@ def register_ui_routes(
                 )
                 conn.commit()
             return _render_settings_page(
-                request, flash=f"PXE activation failed: {exc}", flash_kind="danger"
+                request,
+                flash=f"PXE activation failed: {exc}",
+                flash_kind="danger",
+                form_interface=interface,
+                form_subnet=subnet,
             )
         with _db.open_db(state_path) as conn:
             _events_log.record(
