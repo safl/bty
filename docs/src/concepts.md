@@ -57,9 +57,10 @@ from this mount point by default (overridable with `--image-root` or
 `BTY_IMAGE_ROOT`).
 
 Operators populate the partition by mounting it on any Linux / macOS /
-Windows box - exFAT is universally readable - and dropping `.qcow2`,
-`.img`, or `.img.zst` files into it. The partition is *not* under the
-overlayroot tmpfs, so files copied there persist on the stick.
+Windows box - exFAT is read/write on all three - and dropping
+`.img.gz`, `.qcow2`, `.img.zst`, or `.bri` files into it. The
+partition is *not* under the overlayroot tmpfs, so files copied
+there persist on the stick.
 
 ## Machine record
 

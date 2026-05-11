@@ -48,8 +48,8 @@ curl -X PUT http://bty-server:8080/machines/aa:bb:cc:dd:ee:ff \
 
 | Shape | What it is | When it fits |
 |---|---|---|
-| **USB live stick** | bty boots from a flash drive, runs `bty-tui`, flashes the box it's plugged into | Single-machine local imaging |
-| **USB + server catalog** | Same stick, but the image list comes from `bty-web --server URL` | A handful of boxes, shared image library |
+| **USB live stick** | bty boots from a flash drive, runs `bty tui`, flashes the box it's plugged into | Single-machine local imaging |
+| **USB + server catalog** | Same stick, but the operator presses `c` in the TUI and the image list comes from a running `bty-web` over HTTP | A handful of boxes, shared image library |
 | **PXE-boot appliance** | bty-web on a Pi or x86 box runs DHCP/TFTP/HTTP; targets PXE-chain into a netboot live env that flashes them unattended | CI fleets, racks, anything you don't want to walk to |
 
 All three share the same Python codebase, the same image catalog, the

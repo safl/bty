@@ -92,11 +92,12 @@ after writing the stick.
 ## Drop images onto the stick
 
 Mount the `BTY_IMAGES` partition on any Linux / macOS / Windows box
-(exFAT is universally readable) and copy your cooked images into it:
+(exFAT is read/write on all three) and copy your cooked images
+into it:
 
 ```bash
 sudo mount /dev/disk/by-label/BTY_IMAGES /mnt
-sudo cp /path/to/my-image.qcow2 /mnt/
+sudo cp /path/to/my-image.img.gz /mnt/
 sudo umount /mnt
 ```
 
@@ -130,21 +131,21 @@ lsblk -d -e7
 bty images
 
 # Inspect a specific image in detail
-bty inspect /var/lib/bty/images/my-image.qcow2
+bty inspect /var/lib/bty/images/my-image.img.gz
 
 # Each leaf command also accepts --json
 lsblk -d -e7 -J
-bty inspect --json /var/lib/bty/images/my-image.qcow2
+bty inspect --json /var/lib/bty/images/my-image.img.gz
 ```
 
 ### Flash a target disk
 
 ```bash
 # 1. Validate that an image can be flashed to a target without writing.
-bty flash /var/lib/bty/images/my-image.qcow2 /dev/sdX --dry-run
+bty flash /var/lib/bty/images/my-image.img.gz /dev/sdX --dry-run
 
 # 2. Once the plan looks right, run for real (requires root):
-sudo bty flash /var/lib/bty/images/my-image.qcow2 /dev/sdX --yes
+sudo bty flash /var/lib/bty/images/my-image.img.gz /dev/sdX --yes
 ```
 
 `--dry-run` prints a plan and validates without writing. `--yes` is
@@ -164,14 +165,15 @@ Interactive flashing via the TUI:
 sudo bty tui
 ```
 
-The TUI lists available images (left pane) and block devices (right
-pane). Cursor between the panes, select with Enter, then press `F`
-to flash. A modal shows the plan and any validation errors; confirm
-to run. A status modal streams the result.
+The TUI is a wizard: pick an image (Enter), pick a disk (Enter),
+hit the Flash button (Enter, or `f` from anywhere). A modal shows
+the plan and any validation errors; confirm to run. A status modal
+streams the result.
 
 Without root the TUI still launches in a read-only mode (you can
-inspect lists), but the `F` action refuses with a status message.
-Requires the `[tui]` install extra (`pipx install "bty-lab[tui]"`).
+browse images + disks) but flashing refuses with a status-bar
+message. Requires the `[tui]` install extra
+(`pipx install "bty-lab[tui]"`).
 
 See [Reference > CLI](reference.md#cli) for the full surface.
 

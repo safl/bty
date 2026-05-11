@@ -142,9 +142,7 @@ def test_tui_subcommand_calls_tui_main() -> None:
     )
 
 
-def test_inspect_image_directory_returns_two(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_inspect_directory_returns_two(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """``bty inspect <directory>`` used to silently return a
     bogus record (``format: ''``, ``size_bytes`` = the dir-entry
     inode size). Reject directories with a friendly message + exit
@@ -155,7 +153,7 @@ def test_inspect_image_directory_returns_two(
     assert "not a file" in err
 
 
-def test_inspect_image_malformed_bri_returns_two(
+def test_inspect_malformed_bri_returns_two(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """``bty inspect bad.bri`` surfaces a friendly stderr
@@ -169,23 +167,21 @@ def test_inspect_image_malformed_bri_returns_two(
     assert "url" in err
 
 
-def test_inspect_image_missing_returns_two(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_inspect_missing_returns_two(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     rc = cli.main(["inspect", str(tmp_path / "nope.qcow2")])
     assert rc == 2
     err = capsys.readouterr().err
     assert "no such image" in err
 
 
-def test_inspect_image_json(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_inspect_json(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     img = tmp_path / "x.img"
     img.write_bytes(b"\0" * 5)
     rc = cli.main(["inspect", "--json", str(img)])
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["schema_version"] == "1"
-    assert payload["command"] == "inspect-image"
+    assert payload["command"] == "inspect"
     assert payload["image"]["format"] == "img"
     assert payload["image"]["size_bytes"] == 5
 

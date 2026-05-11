@@ -85,7 +85,7 @@ image-side operations.
 ```json
 {
   "schema_version": "1",
-  "command": "inspect-image",
+  "command": "inspect",
   "image": {
     "path": "/var/lib/bty/images/debian.qcow2",
     "format": "qcow2",

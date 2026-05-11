@@ -6,8 +6,11 @@ Subcommand structure:
     bty inspect PATH
     bty flash IMAGE TARGET [--dry-run | --yes]
     bty tui [--server URL --mac MAC]
+    bty catalog ACTION ...
 
-Each leaf command accepts ``--json`` to emit machine-readable output.
+Each subcommand except ``tui`` accepts ``--json`` to emit machine-
+readable output (``tui`` is a forwarder to the textual app; its
+output is the interactive terminal session itself).
 
 JSON outputs are envelope-wrapped with a stable schema:
 
@@ -133,7 +136,7 @@ def main(argv: list[str] | None = None) -> int:
         help="inspect an image file or .bri descriptor",
     )
     p_inspect.add_argument("path", type=Path, help="path to the image or .bri file")
-    p_inspect.set_defaults(func=cmd_inspect_image)
+    p_inspect.set_defaults(func=cmd_inspect)
 
     p_flash = sub.add_parser(
         "flash",
@@ -378,7 +381,7 @@ def _cmd_images_remote(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_inspect_image(args: argparse.Namespace) -> int:
+def cmd_inspect(args: argparse.Namespace) -> int:
     try:
         info = images.inspect_image(args.path)
     except FileNotFoundError:
@@ -391,7 +394,7 @@ def cmd_inspect_image(args: argparse.Namespace) -> int:
         print(f"bty: malformed .bri descriptor: {exc}", file=sys.stderr)
         return 2
     if args.json:
-        print(json.dumps(_envelope("inspect-image", image=info), indent=2, default=str))
+        print(json.dumps(_envelope("inspect", image=info), indent=2, default=str))
     else:
         formatting.print_inspect(info)
     return 0

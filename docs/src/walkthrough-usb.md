@@ -118,7 +118,7 @@ macOS, or Windows.
 ```bash
 sudo mkdir -p /mnt/bty
 sudo mount /dev/disk/by-label/BTY_IMAGES /mnt/bty
-sudo cp /path/to/my-image.qcow2 /mnt/bty/
+sudo cp /path/to/my-image.img.gz /mnt/bty/
 sudo umount /mnt/bty
 ```
 
@@ -126,7 +126,7 @@ sudo umount /mnt/bty
 images in via Finder, or:
 
 ```bash
-cp /path/to/my-image.qcow2 /Volumes/BTY_IMAGES/
+cp /path/to/my-image.img.gz /Volumes/BTY_IMAGES/
 diskutil unmount /Volumes/BTY_IMAGES
 ```
 
@@ -219,23 +219,17 @@ available as CLI commands.
 
 ```bash
 # 1. List what's on the system
-lsblk -d -e7                          # block devices on the target
+lsblk -d -e7                              # block devices on the target
 bty images --image-root /mnt/BTY_IMAGES   # images on the stick
 
 # 2. Inspect a specific image
-bty inspect /mnt/BTY_IMAGES/my-image.qcow2
+bty inspect /mnt/BTY_IMAGES/my-image.img.gz
 
 # 3. Dry-run the flash to validate the plan without writing
-bty flash \
-    --image  /mnt/BTY_IMAGES/my-image.qcow2 \
-    --target /dev/sda \
-    --dry-run
+bty flash /mnt/BTY_IMAGES/my-image.img.gz /dev/sda --dry-run
 
 # 4. Run for real (requires root)
-sudo bty flash \
-    --image  /mnt/BTY_IMAGES/my-image.qcow2 \
-    --target /dev/sda \
-    --yes
+sudo bty flash /mnt/BTY_IMAGES/my-image.img.gz /dev/sda --yes
 ```
 
 `--dry-run` prints the flash plan and validates without writing.
@@ -243,16 +237,13 @@ sudo bty flash \
 `bty flash` refuses to do anything without one or the other, so you
 never accidentally wipe a disk.
 
-`--image` accepts an HTTP/HTTPS URL too, not just a local path.
-Useful for scripted flashes from a remote `bty-web` (the appliance
-or the `ghcr.io/safl/bty-web` Docker container) without pre-staging
-the image:
+The `IMAGE` positional accepts an HTTP/HTTPS URL too, not just a
+local path. Useful for scripted flashes from a remote `bty-web`
+(the appliance or the `ghcr.io/safl/bty-web` Docker container)
+without pre-staging the image:
 
 ```bash
-sudo bty flash \
-    --image  http://server:8080/images/my-image.img.zst \
-    --target /dev/sda \
-    --yes
+sudo bty flash http://server:8080/images/my-image.img.zst /dev/sda --yes
 ```
 
 `.img` and `.img.zst` URLs stream straight from the network through

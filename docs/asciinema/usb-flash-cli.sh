@@ -15,7 +15,7 @@
 
 set -eu
 
-IMAGE="${IMAGE:-/mnt/BTY_IMAGES/my-image.qcow2}"
+IMAGE="${IMAGE:-/mnt/BTY_IMAGES/my-image.img.gz}"
 TARGET="${TARGET:-/dev/sda}"
 IMAGE_ROOT="${IMAGE_ROOT:-/mnt/BTY_IMAGES}"
 
