@@ -440,7 +440,7 @@ def test_app_shows_no_images_message_when_local_root_is_empty(
             await pilot.pause()
 
     _run(_drive())
-    assert any("No images at" in s and "press R to refresh" in s for s in statuses)
+    assert any("No images at" in s and "how to add some" in s for s in statuses)
 
 
 def test_app_refresh_action_repopulates(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

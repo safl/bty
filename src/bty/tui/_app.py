@@ -26,7 +26,6 @@ the keys below cover everything else):
                   clear filter if one is active)
 - ``q``           quit
 - ``r``           refresh catalogs
-- ``Shift+R``     reboot the machine running bty-tui
 - ``s``           switch image source (local <-> remote bty-web)
 - ``/``           filter the image catalog by substring
 - ``f``           flash shortcut (equivalent to Enter on Flash button)
@@ -956,7 +955,10 @@ class HelpScreen(ModalScreen[None]):
             yield Static("  Enter         commit selection, advance one stage", classes="help-row")
             yield Static("  Esc / Bksp    undo last commit, return one stage", classes="help-row")
             yield Static("  f             trigger Flash (Stage 3+)", classes="help-row")
-            yield Static("  Shift+R       reboot (after a successful flash)", classes="help-row")
+            yield Static(
+                "  Reboot        action-pane button (after a successful flash)",
+                classes="help-row",
+            )
             yield Static("Navigation", classes="help-section")
             yield Static("  1 / 2         jump focus to Images / Disks pane", classes="help-row")
             yield Static("  h / Left      cycle focus to previous pane", classes="help-row")
@@ -999,7 +1001,11 @@ class BtyTui(App[None]):
         Binding("q", "quit", "Quit"),
         Binding("r", "refresh", "Refresh", show=False),
         Binding("f", "flash", "Flash", show=False),
-        Binding("R", "reboot", "Reboot", show=False),
+        # No standalone reboot key-binding. Reboot is exclusively reached
+        # via the action-pane button that flips to "Reboot" after a
+        # successful flash (see ``on_button_pressed``). Pairing a one-
+        # keypress refresh (lowercase ``r``) with a one-keypress reboot
+        # (``R`` aka shift+r) was a real fat-finger trap.
         Binding("s", "source", "Source", show=False),
         Binding("slash", "focus_filter", "Filter", show=False),
         # ``?`` pops a help modal listing every keybinding. Common
@@ -1268,7 +1274,7 @@ class BtyTui(App[None]):
             # tests / scripts have a stable hook.
             welcome.update(self._welcome_text())
             source = self._server_url or str(self._image_root)
-            self._set_status(f"No images at {source}; press R to refresh.")
+            self._set_status(f"No images at {source}. See screen for how to add some.")
             return
 
         # Apply filter if set.
@@ -1299,38 +1305,55 @@ class BtyTui(App[None]):
     def _welcome_text(self) -> str:
         """Compose onboarding text shown when the catalog is empty.
 
-        Differs by source so the operator gets actionable next steps:
-        local catalog -> "drop images onto BTY_IMAGES from a host OS";
-        remote catalog -> "the server has no images; upload via the
-        web UI or PUT /images".
+        Concrete next-step suggestions, mode-aware:
+        local catalog -> "drop images at this path (with host-OS path
+        recipes for the common stick / Ventoy / workstation cases),
+        or press s to switch to a remote bty-web".
+        remote catalog -> "upload via the server's UI or HTTP PUT,
+        then press r to refresh; or press s to switch source".
+
+        Refresh is genuinely useful in the remote case (server-side
+        uploads happen async) and the workstation-local case (operator
+        drops a file in the same dir bty-tui is watching). In the
+        live-env-local case re-scanning the same empty read-only dir
+        won't help, so we anchor that flavour on "add files, then
+        reboot or press s" instead.
         """
         if self._server_url is not None:
             return (
                 "[b]No images on the server yet.[/]\n\n"
                 f"Catalog endpoint: [accent]{self._server_url}/images[/]\n\n"
-                "Three ways to add images:\n"
+                "Add images via one of:\n"
                 "  - Browser: bty-web Images page on the server's UI.\n"
                 "  - HTTP PUT: [dim]curl -X PUT --upload-file my.qcow2 \\\n"
                 "    http://server:8080/images/my.qcow2[/]\n"
                 "  - Volume mount (Docker / appliance): drop files into\n"
                 "    [dim]/var/lib/bty/images/[/] on the server's host\n"
                 "    filesystem (or its bind-mounted dir / managed volume).\n\n"
-                "Then press [b]r[/] to refresh, or [b]s[/] to switch to a\n"
-                "different catalog source."
+                "Press [b]r[/] to refresh once uploads complete, or [b]s[/]\n"
+                "to switch to a different catalog source."
             )
         return (
             "[b]No images in the catalog yet.[/]\n\n"
             f"Local catalog: [accent]{self._image_root}[/]\n\n"
-            "Drop cooked images at that path. On the bty USB stick this\n"
-            "is the [b]BTY_IMAGES[/] exFAT partition (mountable from any\n"
-            "host OS); on a workstation install, override the location\n"
-            "with [b]--image-root /path[/] or the [b]BTY_IMAGE_ROOT[/]\n"
-            "env var (default is [dim]/var/lib/bty/images[/], which\n"
-            "matches the appliance / Docker layout).\n\n"
-            "  [dim]cp my-image.img.zst /path/to/BTY_IMAGES/[/]\n"
-            "  [dim]cp my-image.qcow2  /path/to/BTY_IMAGES/[/]\n\n"
-            "Then press [b]r[/] to refresh, or [b]s[/] to point this TUI at\n"
-            "a remote bty-web catalog instead."
+            "Add images via one of:\n"
+            "  - [b]bty-usb stick (dd'd directly)[/]: mount the\n"
+            "    [b]BTY_IMAGES[/] exFAT partition on any host OS and\n"
+            "    copy [dim]*.img.gz[/] / [dim]*.qcow2[/] / [dim]*.bri[/]\n"
+            "    files at its root.\n"
+            "  - [b]Ventoy / piKVM / JetKVM[/]: drop a\n"
+            "    [b]bty-images/[/] folder on the surrounding stick's\n"
+            "    data partition; the live env's discovery service\n"
+            "    bind-mounts it at boot.\n"
+            "  - [b]Workstation[/]: copy files at the path above\n"
+            "    (override the default with [b]--image-root /path[/]\n"
+            "    or [b]BTY_IMAGE_ROOT[/]); press [b]r[/] to re-scan.\n\n"
+            "Power off and back on to pick up newly-dropped files on\n"
+            "the bty-usb / Ventoy paths (the live-env mount is read-\n"
+            "only). Or press [b]s[/] to point this TUI at a remote\n"
+            "bty-web catalog instead.\n\n"
+            "[dim]Alt+F2 .. Alt+F6 drop into a root shell on the\n"
+            "alternate VTs for diagnostics; Alt+F1 returns here.[/]"
         )
 
     def _load_images(self) -> list[_TuiImage]:
@@ -1469,12 +1492,16 @@ class BtyTui(App[None]):
         # Stage 1: nothing to undo.
 
     def action_reboot(self) -> None:
-        """``Shift+R`` binding: dispatch a graceful reboot of the
-        machine running bty-tui. Always available (the operator may
-        be running bty-tui on the same box they want to reboot --
-        e.g. the bty-usb live env after a flash). Non-root invocations
-        get a status message; ``systemctl reboot`` itself enforces the
-        privilege check.
+        """Dispatch a graceful reboot of the machine running bty-tui.
+
+        Reached only via the action-pane button, which flips to
+        "Reboot" after a successful flash (see ``on_button_pressed``).
+        We deliberately do NOT bind this to a single keystroke because
+        ``r``/``R`` would shoulder-rub the refresh shortcut (a real
+        fat-finger trap on the live env).
+
+        Non-root invocations get a status message; ``systemctl reboot``
+        itself enforces the privilege check.
         """
         self._set_status("Rebooting...")
         try:
@@ -1595,7 +1622,7 @@ class BtyTui(App[None]):
         natural affordance.
         """
         return (
-            "<?> help       <q> quit       <Shift+R> reboot       "
+            "<?> help       <q> quit       <r> refresh       "
             "<s> source       <t> theme       <Esc/Backspace> back"
         )
 
