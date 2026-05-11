@@ -59,7 +59,7 @@ if [ -z "${BTY_QUIET:-}" ]; then
   State dir:     ${BTY_STATE_DIR:-/var/lib/bty}
   Browser UI:    http://<host>:${BTY_WEB_PORT:-8080}/ui
 
-  Connect bty-tui clients with:
+  Connect bty tui clients with:
        bty tui --server http://<host>:${BTY_WEB_PORT:-8080}
 
   No dnsmasq / TFTP / PXE proxy-DHCP in this container -- those

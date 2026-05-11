@@ -2,7 +2,7 @@
 #
 # What this is: a minimal HTTP-server image hosting the bty image
 # catalog + machine registry + browser UI. Operators run it as a
-# trial / network-reachable image library; ``bty-tui --server URL``
+# trial / network-reachable image library; ``bty tui --server URL``
 # clients (running from the USB live env or a workstation) connect
 # here and pick images from the catalog.
 #
