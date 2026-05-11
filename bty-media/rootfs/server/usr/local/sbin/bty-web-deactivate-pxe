@@ -1,0 +1,26 @@
+#!/bin/sh
+# bty-web PXE deactivation helper.
+#
+# Invoked by the ``bty`` service user via the entry in
+# ``/etc/sudoers.d/bty-web``. Removes the active proxy-DHCP config
+# at ``/etc/dnsmasq.d/bty-pxe-active.conf`` and restarts
+# ``dnsmasq.service`` so the change takes effect.
+#
+# Idempotent: a missing config file is treated as success
+# ("already deactivated") so the operator can click Deactivate
+# from a clean state without seeing an error.
+#
+# Pairs with ``bty-web-activate-pxe``; the shipped commented
+# example at ``/etc/dnsmasq.d/bty-pxe.conf`` is left untouched.
+
+set -eu
+
+ACTIVE=/etc/dnsmasq.d/bty-pxe-active.conf
+
+if [ -f "$ACTIVE" ]; then
+    rm -f "$ACTIVE"
+    systemctl restart dnsmasq.service
+    printf 'PXE deactivated (removed %s, restarted dnsmasq)\n' "$ACTIVE"
+else
+    printf 'PXE already inactive (no %s)\n' "$ACTIVE"
+fi

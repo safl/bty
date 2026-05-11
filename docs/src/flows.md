@@ -24,11 +24,9 @@ the network.
 2. The live environment auto-logins as root on `tty1`. The operator
    runs `bty-tui` for an interactive flow, or invokes `bty` directly
    from the shell.
-3. Operator selects an image (sourced from the USB stick itself), a
-   target disk (block device on the booted machine), and a provisioning
-   mode.
-4. `bty flash` writes the image, applies the provisioning mode, and
-   reports success.
+3. Operator selects an image (sourced from the USB stick itself) and a
+   target disk (block device on the booted machine).
+4. `bty flash` writes the image and reports success.
 5. Operator removes the USB stick and reboots; the target boots into the
    freshly-flashed image.
 
@@ -188,10 +186,9 @@ schedule, on demand, or on failure.
 
 1. Server appliance is already up (same setup as the interactive
    flow above).
-2. Operator assigns `MAC -> image + provisioning mode + boot policy`
-   in the web UI. `boot_policy=flash` arms the auto-flash;
-   `boot_policy=local` lets the target PXE-boot through to its own
-   disk untouched.
+2. Operator assigns `MAC -> image + boot policy` in the web UI.
+   `boot_policy=flash` arms the auto-flash; `boot_policy=local` lets
+   the target PXE-boot through to its own disk untouched.
 3. Target machine PXE-boots; iPXE chains into the bty live
    environment served over HTTP by `bty-web`.
 4. The live env's `bty-flash-on-boot.service` fetches the assigned

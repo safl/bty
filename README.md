@@ -4,6 +4,9 @@
 
 # bty - flash a fleet without leaving your chair
 
+> Pronounced "battie" (rhymes with "batty") - the blue bat up top is the
+> mascot, so when in doubt say it like the critter.
+
 [![CI](https://github.com/safl/bty/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/safl/bty/actions/workflows/ci.yml)
 [![Docs](https://github.com/safl/bty/actions/workflows/docs.yml/badge.svg?branch=main)](https://github.com/safl/bty/actions/workflows/docs.yml)
 [![Documentation](https://img.shields.io/badge/docs-safl.dk%2Fbty-blue)](https://safl.dk/bty)
@@ -24,15 +27,11 @@ bty is a flasher, not a cooker:
   upstream with cloud-init / kickstart / preseed / your favourite
   cooker. Use the [companion image-builder](https://github.com/safl/jellyfin-kiosk-appliance-builder)
   pattern, or your own. bty just writes the bytes.
-- **Post-boot configuration is `cijoe-task`.** For machines whose
-  MAC bty-web manages, the server SSHes into the freshly-booted
-  target and runs a small CIJOE task. Steps use cijoe's built-in
-  scripts or inline commands -- nothing else. The intent is light
-  post-flash scripting (set a hostname, trigger a reboot, drop a
-  config file), not configuration management. No third-party
-  cijoe script packages; if you need one, the job belongs in the
-  cooker. Cancelable from the browser UI; events visible in the
-  audit log.
+- **No post-boot configuration management either.** Anything that
+  needs to be true on the running target (users, hostnames, config
+  files, packages) belongs in the cooker, not in bty. The server
+  does not hold creds for any target it has provisioned -- that
+  blast radius is intentionally absent.
 
 ```bash
 # Local: USB stick into target, two arrows + Enter, done.

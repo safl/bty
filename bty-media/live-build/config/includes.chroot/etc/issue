@@ -7,7 +7,7 @@
     bty.mode=interactive
         Land in ``bty-tui`` on tty1 (USB-stick interactive flow).
 
-    bty.server=URL bty.mac=MAC bty.image_url=URL bty.provisioning=MODE
+    bty.server=URL bty.mac=MAC bty.image_url=URL
         Run ``bty-flash-on-boot.service`` -- download image, flash,
         signal the server, reboot (PXE network-flash flow).
 

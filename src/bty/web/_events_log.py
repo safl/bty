@@ -103,6 +103,8 @@ KNOWN_EVENT_KINDS: tuple[str, ...] = (
     "boot.release.fetch_failed",
     "settings.pxe.activated",
     "settings.pxe.activate_failed",
+    "settings.pxe.deactivated",
+    "settings.pxe.deactivate_failed",
     "auth.login.succeeded",
     "auth.login.failed",
     "auth.logout",

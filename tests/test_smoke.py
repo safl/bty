@@ -127,7 +127,7 @@ def test_etc_issue_uses_only_documented_agetty_escapes() -> None:
     allowed = set("bdelmnorstuUv46S\\")
 
     def _check_issue_body(body: str, source: str) -> None:
-        # ``\<char>`` after any non-backslash; strict — every
+        # ``\<char>`` after any non-backslash; strict: every
         # escape in the rendered issue body must be allowed.
         for match in re.finditer(r"(?<!\\)\\(.)", body):
             ch = match.group(1)

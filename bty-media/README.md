@@ -179,8 +179,8 @@ hardware. Most operators never run this build pipeline themselves -
 - **netboot-x86.** Kernel + initrd + squashfs trio used by PXE clients.
   The chroot ships `bty-flash-on-boot.service` (oneshot, after
   `network-online.target`); it reads `bty.server=`, `bty.mac=`,
-  `bty.image_url=`, and `bty.provisioning=` from `/proc/cmdline`,
-  downloads the image, runs `bty flash --yes`, signals
+  and `bty.image_url=` from `/proc/cmdline`, downloads the
+  image, runs `bty flash --yes`, signals
   `POST ${server}/pxe/${mac}/done`, and reboots. Without those
   cmdline keys it exits 0 and drops to a console.
 

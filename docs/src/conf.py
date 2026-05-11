@@ -31,7 +31,7 @@ html_title = "bty - flash images onto target disks, locally or over PXE"
 html_static_path = ["_static"]
 
 # LaTeX / PDF output - pdflatex with sane UTF-8 (inputenc utf8). Avoid
-# exotic Unicode (arrows, box-drawing) in docs sources; em-dashes and
+# exotic Unicode (arrows, box-drawing, em-dashes) in docs sources;
 # smart quotes are fine.
 latex_engine = "pdflatex"
 latex_documents = [

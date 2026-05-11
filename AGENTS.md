@@ -102,7 +102,6 @@ incompatible structural change increments the version.
   "plan": {
     "image": { ... },
     "target": { ... },
-    "provisioning_mode": "none",
     "notes": []
   }
 }
@@ -198,8 +197,8 @@ is lower-case `aa:bb:cc:dd:ee:ff`):
 - `400` - malformed input (e.g. invalid MAC)
 - `401` - missing or wrong bearer token
 - `404` - protected resource not found (e.g. machine record)
-- `422` - request body failed Pydantic validation (e.g. unknown
-  `provisioning_mode`)
+- `422` - request body failed Pydantic validation (e.g. malformed
+  `image_sha256`)
 
 **Schema versioning.** Wire types are documented inline in
 `reference.md`; breaking changes to those shapes will land under a
@@ -222,9 +221,9 @@ stopped reporting.
   image is assigned. Stable / production stance; the explicit-PUT
   default for assigned machines.
 - `flash` - every PXE boot returns the live-env chain (kernel +
-  initrd over HTTP, with `bty.{server,mac,image_url,provisioning}`
-  cmdline params), so the box reflashes itself every time. Per-job
-  CI cadence.
+  initrd over HTTP, with `bty.{server,mac,image_url}` cmdline
+  params), so the box reflashes itself every time. Per-job CI
+  cadence.
 - `tui` - every PXE boot returns the live-env chain in interactive
   mode (`bty.mode=interactive bty.server=URL bty.mac=MAC` cmdline
   params); the live env launches `bty-tui` on tty1 in place of
@@ -237,21 +236,6 @@ The completion signal `POST /pxe/{mac}/done` updates `last_flashed_at`
 but **never modifies `boot_policy`** - flipping back to `local` is an
 explicit operator action via `PUT /machines/{mac}` so the per-job CI
 cadence survives across reflashes.
-
-**Online cijoe (milestone 15).** A machine with
-`provisioning_mode='cijoe-task'` and a `cijoe_workflow_ref` gets
-its workflow run from bty-web automatically when the live env signals
-flash completion. bty-web spawns a daemon thread that ``cijoe
-<workflow.yaml> --config <transport.toml>``s with an SSH transport
-pointing at `last_seen_ip`; cijoe's transport-retry handles waiting
-for SSH to come up. Workflow status (`running` / `success` /
-`failed`) is recorded on the machine as `last_workflow_status` and
-fans out via the SSE machines-update channel as it changes. Per-run
-output dirs accumulate under `/var/lib/bty/workflows/<mac>/<run-id>/`
-(holds `transport.toml`, `cijoe.stdout`, `cijoe.stderr`, and cijoe's
-own `cijoe-output/`). Operator drops the SSH key at
-`/var/lib/bty/keys/id_ed25519` (key generation lands in a future
-phase).
 
 **Live updates.** `GET /events/machines` is a Server-Sent Events
 stream (auth: same session-cookie dep). Subscribers receive an initial
@@ -285,14 +269,17 @@ PXE ROM -> `undionly.kpxe`/`ipxe.efi` -> bty-web's
 
 **Settings (`/ui/settings`).** Operator-facing controls for PXE
 activation (writes `/etc/dnsmasq.d/bty-pxe-active.conf` + restarts
-dnsmasq via `bty-web-activate-pxe`). The credential is rotated
+dnsmasq via `bty-web-activate-pxe`) and deactivation (removes the
+same file via `bty-web-deactivate-pxe`). The panel also warns when
+the configured interface is no longer present (NIC renamed across
+reboot, USB ethernet adapter unplugged). The credential is rotated
 out-of-band with `sudo passwd bty` on the appliance; sessions
 invalidate on cookie expiry (7-day sliding TTL) or by rotating the
 session-cookie secret at `/var/lib/bty/session-secret` (delete +
-``systemctl restart bty-web``). The PXE helper lives in
-`/usr/local/sbin/` and is invocable by user `bty` via the
-`/etc/sudoers.d/bty-web` NOPASSWD entry - the only privileged
-operation bty-web is granted.
+``systemctl restart bty-web``). The PXE helpers live in
+`/usr/local/sbin/` and are invocable by user `bty` via the
+`/etc/sudoers.d/bty-web` NOPASSWD entries - the only privileged
+operations bty-web is granted.
 
 ## Conventions agents can rely on
 

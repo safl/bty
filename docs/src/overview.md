@@ -37,9 +37,9 @@ that bridges the two:
   CI fleets and lab automation.
 
 All three wrap the same `bty` runtime - same image catalog format,
-same target-disk operations, same provisioning modes. The difference
-is whether the catalog ships on the stick, lives on a server clients
-pull from, or drives the whole flash unattended.
+same target-disk operations. The difference is whether the catalog
+ships on the stick, lives on a server clients pull from, or drives
+the whole flash unattended.
 
 ## OS scope
 

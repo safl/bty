@@ -207,7 +207,7 @@ sudo passwd bty
 Initial UI tour:
 
 - **`/ui/machines`** - register targets by MAC. Each machine
-  gets a row with assigned image + provisioning mode.
+  gets a row with assigned image + boot policy.
 - **`/ui/images`** - upload `*.img.zst` / `*.img.gz` / `*.img.xz`
   / `*.img.bz2` / `*.qcow2` images via PUT or drag-and-drop.
   These end up under `/var/lib/bty/images/` on the server and

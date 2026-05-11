@@ -7,9 +7,9 @@ doc: |
   bty runtime, ``bty-flash-on-boot.service`` (auto-flash mode), and
   ``bty-tui-on-tty1.service`` (interactive mode). The server's iPXE
   chain hands the live env its mode via kernel command line:
-  ``bty.server=``, ``bty.mac=``, plus either ``bty.image_url=`` +
-  ``bty.provisioning=`` (auto-flash, ``boot_policy=flash``) or
-  ``bty.mode=interactive`` (TUI, ``boot_policy=tui``).
+  ``bty.server=``, ``bty.mac=``, plus either ``bty.image_url=``
+  (auto-flash, ``boot_policy=flash``) or ``bty.mode=interactive``
+  (TUI, ``boot_policy=tui``).
 
   Renamed from ``tasks/live.yaml`` to ``tasks/netboot.yaml`` in M19
   phase 5: the variant moved from ``live-x86`` to ``netboot-x86``

@@ -649,14 +649,23 @@ def register_ui_routes(
         flash_kind: str | None = None,
     ) -> HTMLResponse:
         # Recent activity for settings: PXE activate / activate-
-        # failed.
+        # failed / deactivate / deactivate-failed.
         with _db.open_db(state_path) as conn:
             settings_events = _events_log.list_events(conn, subject_kind="settings", limit=10)
+        interfaces = _sysconfig.list_interfaces()
+        pxe = _sysconfig.pxe_active()
+        # NIC-gone detection: the configured interface may have
+        # been renamed across a reboot (USB ethernet adapters,
+        # systemd predictable-name updates, etc.). Flag in the
+        # UI so the operator can deactivate + re-bind instead
+        # of chasing why dnsmasq is silently failing.
+        pxe_iface_present = pxe is not None and any(i.name == pxe.interface for i in interfaces)
         return render(
             "ui/settings.html",
             request,
-            interfaces=_sysconfig.list_interfaces(),
-            pxe=_sysconfig.pxe_active(),
+            interfaces=interfaces,
+            pxe=pxe,
+            pxe_iface_present=pxe_iface_present,
             new_token=new_token,
             settings_events=settings_events,
             flash=flash,
@@ -724,6 +733,52 @@ def register_ui_routes(
         return _render_settings_page(
             request,
             flash=f"PXE activated on {interface!r} for {subnet!r}.",
+            flash_kind="success",
+        )
+
+    @app.post(
+        "/ui/settings/pxe-deactivate",
+        include_in_schema=False,
+        dependencies=[Depends(require_ui_auth)],
+    )
+    def ui_settings_pxe_deactivate(request: Request) -> HTMLResponse:
+        # Symmetric pair with ``pxe-activate``. Idempotent on the
+        # helper side: a missing config file is reported as
+        # already-deactivated and we still log the operator's
+        # intent.
+        client_ip = _client_ip(request)
+        try:
+            _sysconfig.deactivate_pxe()
+        except _sysconfig.SysConfigError as exc:
+            with _db.open_db(state_path) as conn:
+                _events_log.record(
+                    conn,
+                    kind="settings.pxe.deactivate_failed",
+                    summary=f"PXE deactivation failed: {exc}",
+                    subject_kind="settings",
+                    subject_id="pxe",
+                    actor="operator",
+                    source_ip=client_ip,
+                    details={"error": str(exc)},
+                )
+                conn.commit()
+            return _render_settings_page(
+                request, flash=f"PXE deactivation failed: {exc}", flash_kind="danger"
+            )
+        with _db.open_db(state_path) as conn:
+            _events_log.record(
+                conn,
+                kind="settings.pxe.deactivated",
+                summary="PXE proxy-DHCP deactivated",
+                subject_kind="settings",
+                subject_id="pxe",
+                actor="operator",
+                source_ip=client_ip,
+            )
+            conn.commit()
+        return _render_settings_page(
+            request,
+            flash="PXE proxy-DHCP deactivated.",
             flash_kind="success",
         )
 

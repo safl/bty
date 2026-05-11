@@ -624,6 +624,32 @@ def test_ui_settings_pxe_activate_failure_shows_danger_flash(client: TestClient)
     assert "PXE activation failed" in r.text
 
 
+def test_ui_settings_pxe_deactivate_invokes_helper(client: TestClient) -> None:
+    from unittest.mock import patch
+
+    _login(client)
+    with patch("bty.web._sysconfig.deactivate_pxe") as mock_deactivate:
+        r = client.post("/ui/settings/pxe-deactivate")
+    assert r.status_code == 200
+    assert "PXE proxy-DHCP deactivated" in r.text
+    mock_deactivate.assert_called_once_with()
+
+
+def test_ui_settings_pxe_deactivate_failure_shows_danger_flash(client: TestClient) -> None:
+    from unittest.mock import patch
+
+    from bty.web._sysconfig import SysConfigError
+
+    _login(client)
+    with patch(
+        "bty.web._sysconfig.deactivate_pxe",
+        side_effect=SysConfigError("helper missing"),
+    ):
+        r = client.post("/ui/settings/pxe-deactivate")
+    assert r.status_code == 200
+    assert "PXE deactivation failed" in r.text
+
+
 def test_ui_boot_requires_auth(client: TestClient) -> None:
     """Without the cookie, /ui/boot redirects to login like the rest
     of the UI."""

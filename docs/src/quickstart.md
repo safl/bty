@@ -211,7 +211,7 @@ COOKIE=$(curl -sS -i -X POST -d "password=bty" \
 curl -H "Cookie: bty-token=$COOKIE" http://server:8080/machines
 curl -H "Cookie: bty-token=$COOKIE" -X PUT \
      -H "Content-Type: application/json" \
-     -d '{"image":"debian.qcow2","provisioning_mode":"none","boot_policy":"flash"}' \
+     -d '{"image_sha256":"<64-hex>","boot_policy":"flash"}' \
      http://server:8080/machines/aa:bb:cc:dd:ee:ff
 ```
 
@@ -235,6 +235,6 @@ contact any external CDN at runtime.
 ## What is coming
 
 See [`PLAN.md`](https://github.com/safl/bty/blob/main/PLAN.md) for
-the live roadmap (per-machine cijoe online provisioning, image
-catalog upload via the UI, target-disk hints in the per-MAC plan,
-etc.).
+the live roadmap. First-boot bring-up of flashed targets is the
+image cooker's job (cloud-init / NoCloud user-data); bty itself
+stays a flasher.

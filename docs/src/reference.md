@@ -310,9 +310,8 @@ tooling which can't carry a session cookie:
  - `local` (default) or no image assigned: sanboot fallback ("boot
  from local disk"). Auto-discovery still applies to unknown MACs.
  - `flash` + image assigned: chain into the live env over HTTP
- with kernel cmdline params `bty.server`, `bty.mac`,
- `bty.image_url`, `bty.provisioning` so the live env can flash
- the assigned image.
+ with kernel cmdline params `bty.server`, `bty.mac`, and
+ `bty.image_url` so the live env can flash the assigned image.
 
  Auto-discovery: the first contact for an unknown MAC inserts a
  placeholder row (image=null, boot_policy=local) so the operator

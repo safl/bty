@@ -1,9 +1,11 @@
 # Allow the bty-web service user to invoke its privileged helpers
-# without a password. The only helper today is bty-web-activate-pxe,
-# which manages /etc/dnsmasq.d/bty-pxe-active.conf and restarts
-# dnsmasq.service from the UI's "Activate PXE" form.
+# without a password. Two PXE helpers today:
+#   * ``bty-web-activate-pxe``   - writes /etc/dnsmasq.d/bty-pxe-active.conf
+#   * ``bty-web-deactivate-pxe`` - removes the same file
+# both restart ``dnsmasq.service`` so the change takes effect.
 #
 # Cloud-init writes this file via write_files; the cooked image's
 # runcmd chmods it to 0440 (sudo refuses to load anything with
 # looser perms).
 bty ALL=(root) NOPASSWD: /usr/local/sbin/bty-web-activate-pxe
+bty ALL=(root) NOPASSWD: /usr/local/sbin/bty-web-deactivate-pxe

@@ -45,8 +45,8 @@ bty is shaped to serve both ends of the spectrum:
   server image, plus `bty-web`.
 
 The same `bty` runtime sits at the centre of both - same image catalog,
-same target-disk operations, same provisioning modes - so the two paths
-are different surfaces over one core, not two parallel implementations.
+same target-disk operations - so the two paths are different surfaces
+over one core, not two parallel implementations.
 
 ## Scope
 
@@ -112,10 +112,10 @@ pipx install "bty-lab[tui]"
 ### `bty-web` (HTTP server + browser UI)
 
 HTTP server with browser UI. Hosts the MAC-address-keyed assignment of
-image and provisioning mode, renders per-MAC iPXE configurations, serves
-the bootstrap requests issued by the bty live environment during a network
-flash, and - after the target first-boots - drives the online CIJOE step
-and records the post-workflow state as the machine's known-good baseline.
+image + boot policy, renders per-MAC iPXE configurations, serves the
+bootstrap requests issued by the bty live environment during a network
+flash, and records last-seen / last-flashed timestamps as the per-MAC
+audit trail.
 Successor to the original Flask UI. Stateful; the system of record for
 both fleet provisioning intent and per-machine known-good state.
 
@@ -211,24 +211,14 @@ code refuses them with a specific "extract first" message
 because dd'ing a tar stream into a target's MBR would be
 catastrophic.
 
-## Provisioning modes
+## Post-boot configuration
 
 bty is a flasher, not a cooker. First-boot bring-up (users, network,
-packages, hostnames) is the image cooker's job upstream. Two modes:
-
-- **`none`** - no post-flash configuration. Reboot into the cooked
-  image as-is. The default.
-- **`cijoe-task`** - bty-web only. After the target first-boots into
-  its own OS, `bty-web` SSHes in and runs a small CIJOE task against
-  the running machine. Steps use cijoe's built-in scripts or inline
-  commands - bty-web does not install third-party cijoe script
-  packages; the intent is light post-flash scripting (set hostname,
-  trigger reboot, drop one config file), not configuration management.
-  Requires a managed MAC (server-side machine record with
-  `cijoe_task_ref` and `last_seen_ip`).
-
-CIJOE is the official extension point for small fleet-specific tweaks
-that don't belong in the image itself.
+packages, hostnames) is the image cooker's job upstream. The reboot
+after flashing is unconfigured by design: the target comes up as
+whatever the cooked image declared. bty-web does not hold creds for
+any target it has provisioned, and there is no post-flash workflow
+runner; if you need fleet-specific tweaks, bake them into the image.
 
 ## Concepts
 
@@ -236,9 +226,8 @@ that don't belong in the image itself.
   residing in a configured image root (or fetched from an HTTP URL via
   `bty flash --image http://...`).
 - **Target** - a block device on the machine being provisioned.
-- **Provisioning mode** - what (if anything) runs on first boot.
 - **Machine record** (web only) - MAC-address-keyed assignment of image
-  + provisioning mode + optional hostname + boot policy.
+  + optional hostname + boot policy.
 - **Boot policy** (web only) - what `GET /pxe/{mac}` returns: `local`
   (sanboot), `flash` (auto-flash chain), or `tui` (interactive
   `bty-tui` on tty1; the auto-discovery default for unknown MACs).
@@ -345,8 +334,8 @@ and `release`.
   the pipx-installed docs tooling. PR builds upload both artifacts;
   pushes to `main` additionally publish HTML to GitHub Pages. The
   pdflatex toolchain is kept simple by writing sane UTF-8 in the
-  sources (em-dashes and smart quotes fine; no exotic arrows or
-  box-drawing).
+  sources: smart quotes fine; no em-dashes, exotic arrows, or
+  box-drawing.
 
 ### On tag
 
@@ -381,7 +370,7 @@ Documentation lives in `docs/` and follows the aisio convention:
 
 - **Overview** - what bty is, the components, and how they compose into
   the direct-flash and network-flash flows.
-- **Concepts** - image, target, provisioning mode, machine record.
+- **Concepts** - image, target, machine record, boot policy.
 - **Flows** - direct flash, network flash (BIOS + UEFI via iPXE).
 - **Components** - sections per component (`bty` CLI, `bty-tui`,
   `bty-web`, `bty-media/`). Scope, public surface, configuration,
@@ -421,8 +410,11 @@ as historical record of the build-out order.
 13. **[done]** `bty-media` server image (`server-x86` variant).
 14. **[done]** Network-flash end-to-end (iPXE -> bty live -> flash ->
     reboot, BIOS + UEFI).
-15. **[done]** Provisioning: `cijoe-task` - server triggers a workflow
-    against the booted target and records the known-good baseline.
+15. **[done, then removed v0.8.0]** Provisioning: `cijoe-task` -
+    server triggered a workflow against the booted target. Pulled
+    because bty-web holding root creds on every provisioned machine
+    is the wrong blast radius; fleet-specific tweaks belong in the
+    cooker now.
 
 ### Post-roadmap milestones
 
@@ -790,7 +782,7 @@ implementation is in flight.
   configured ``--image-root /mnt`` does not need the marker.
   The marker is only meaningful for the auto-discovery path.
   Empty file is fine v1; the file can later carry metadata
-  (display name, default provisioning mode, target-arch hint)
+  (display name, target-arch hint, default boot policy)
   the way ``Cargo.toml`` / ``package.json`` accreted features
   over time. Estimated scope: half-day -- ``bty.images``
   helper + live-env mount hook + tests + doc convention.

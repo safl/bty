@@ -32,20 +32,56 @@
             <code>dnsmasq</code> restarts; until then the dnsmasq config shipped
             with the appliance only serves TFTP.
         </p>
+
         {% if pxe %}
-        <div class="alert alert-info">
-            <strong>Currently active:</strong> interface <code>{{ pxe.interface }}</code>,
-            subnet <code>{{ pxe.subnet }}</code>. Re-submit the form below to change.
-        </div>
+            {% if pxe_iface_present %}
+            {# Healthy active state: configured interface still exists. #}
+            <div class="alert alert-success d-flex justify-content-between align-items-center">
+                <div>
+                    <i class="bi bi-check-circle-fill me-1"></i>
+                    <strong>Active</strong> on interface
+                    <code>{{ pxe.interface }}</code>, subnet
+                    <code>{{ pxe.subnet }}</code>.
+                </div>
+                <form action="/ui/settings/pxe-deactivate" method="post" class="m-0">
+                    <button type="submit" class="btn btn-sm btn-outline-danger"
+                            onclick="return confirm('Deactivate PXE proxy-DHCP on {{ pxe.interface }}?');">
+                        <i class="bi bi-stop-circle me-1"></i>Deactivate
+                    </button>
+                </form>
+            </div>
+            {% else %}
+            {# NIC-gone state: configured interface is no longer present.
+               Likely renamed across a reboot (USB ethernet adapters,
+               systemd predictable-name churn). dnsmasq is failing to
+               bind silently in the background. #}
+            <div class="alert alert-warning d-flex justify-content-between align-items-center">
+                <div>
+                    <i class="bi bi-exclamation-triangle-fill me-1"></i>
+                    PXE is configured for interface
+                    <code>{{ pxe.interface }}</code> but that interface is
+                    <strong>not currently present</strong>. ``dnsmasq`` is
+                    failing to bind. Deactivate and re-activate on a present
+                    interface below.
+                </div>
+                <form action="/ui/settings/pxe-deactivate" method="post" class="m-0">
+                    <button type="submit" class="btn btn-sm btn-outline-danger">
+                        <i class="bi bi-stop-circle me-1"></i>Deactivate
+                    </button>
+                </form>
+            </div>
+            {% endif %}
         {% else %}
         <div class="alert alert-light border">
+            <i class="bi bi-info-circle me-1"></i>
             PXE is currently <strong>not</strong> active. Machines with
             <code>boot_policy=flash</code> won't actually be served until you
-            activate it here (or the operator hand-edits
-            <code>/etc/dnsmasq.d/bty-pxe.conf</code>).
+            activate it here.
         </div>
         {% endif %}
-        {% set pxe_iface = pxe.interface if pxe else (interfaces[0].name if interfaces else '') %}
+
+        <h3 class="h6 mt-4">{% if pxe %}Change binding{% else %}Activate{% endif %}</h3>
+        {% set pxe_iface = pxe.interface if (pxe and pxe_iface_present) else (interfaces[0].name if interfaces else '') %}
         {% set pxe_subnet = pxe.subnet if pxe else (interfaces[0].subnet if interfaces and interfaces[0].subnet else '') %}
         <form action="/ui/settings/pxe-activate" method="post" class="row g-3">
             <div class="col-sm-6">
@@ -79,7 +115,11 @@
             </div>
             <div class="col-12">
                 <button type="submit" class="btn btn-primary">
+                    {% if pxe %}
+                    <i class="bi bi-arrow-clockwise me-1"></i>Re-bind
+                    {% else %}
                     <i class="bi bi-play-circle me-1"></i>Activate
+                    {% endif %}
                 </button>
             </div>
         </form>

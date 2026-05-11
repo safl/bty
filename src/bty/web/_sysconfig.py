@@ -27,6 +27,7 @@ from pathlib import Path
 PXE_ACTIVE_PATH = Path("/etc/dnsmasq.d/bty-pxe-active.conf")
 SYSNET_PATH = Path("/sys/class/net")
 ACTIVATE_PXE_HELPER = "/usr/local/sbin/bty-web-activate-pxe"
+DEACTIVATE_PXE_HELPER = "/usr/local/sbin/bty-web-deactivate-pxe"
 
 # Per the helper's own validation; mirrored here for early rejection.
 _INTERFACE_RE = re.compile(r"^[A-Za-z0-9_-]+$")
@@ -189,3 +190,27 @@ def activate_pxe(interface: str, subnet: str) -> None:
         ) from exc
     except (subprocess.TimeoutExpired, FileNotFoundError) as exc:
         raise SysConfigError(f"activate-pxe helper failed: {exc}") from exc
+
+
+def deactivate_pxe() -> None:
+    """Invoke the PXE-deactivation helper.
+
+    Idempotent on the helper side: a missing
+    ``/etc/dnsmasq.d/bty-pxe-active.conf`` is reported as
+    "already inactive", which the operator can ignore.
+    Restarts ``dnsmasq.service`` so the change takes effect.
+    """
+    try:
+        subprocess.run(
+            ["sudo", "-n", DEACTIVATE_PXE_HELPER],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=30,
+        )
+    except subprocess.CalledProcessError as exc:
+        raise SysConfigError(
+            f"deactivate-pxe helper exited {exc.returncode}: {(exc.stderr or '').strip()}"
+        ) from exc
+    except (subprocess.TimeoutExpired, FileNotFoundError) as exc:
+        raise SysConfigError(f"deactivate-pxe helper failed: {exc}") from exc

@@ -345,7 +345,6 @@ def _put_assignment(host, port, token, cfg, image_sha256):
     body = json.dumps(
         {
             "image_sha256": image_sha256,
-            "provisioning_mode": "none",
             "boot_policy": "flash",
         }
     ).encode("utf-8")
