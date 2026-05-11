@@ -114,13 +114,18 @@ class _TuiImage:
     url: str | None = None
 
 
-def _format_mib(size_bytes: int) -> str:
+def _format_mib(size_bytes: int | None) -> str:
     """Format a size in bytes as a comma-grouped MiB string.
+
+    ``None`` and negative inputs render as ``?`` so an image whose
+    format probe couldn't determine a virtual size (e.g. a streamed
+    raw URL whose Content-Length the server didn't advertise) shows
+    a clean placeholder instead of crashing the modal.
 
     Used for both the images-table size column and the disk-details
     body so all size displays in the TUI share one format.
     """
-    if size_bytes < 0:
+    if size_bytes is None or size_bytes < 0:
         return "?"
     return f"{size_bytes / (1 << 20):,.1f} MiB"
 
@@ -358,14 +363,18 @@ class FlashConfirmScreen(ModalScreen[bool]):
             confirm.focus()
 
     def _plan_text(self) -> str:
+        # MiB rather than raw-byte counts so the operator can compare
+        # image-virtual vs target-size at a glance in the modal -- the
+        # decision moment doesn't benefit from billions-of-bytes
+        # precision.
         plan = self._plan
         return "\n".join(
             [
                 f"Image:      {plan.image.display}",
                 f"Format:     {plan.image.format}",
-                f"Size:       {plan.image.virtual_size_bytes} bytes (virtual)",
+                f"Size:       {_format_mib(plan.image.virtual_size_bytes)} (virtual)",
                 f"Target:     {plan.target.path}",
-                f"Target sz:  {plan.target.size_bytes} bytes",
+                f"Target sz:  {_format_mib(plan.target.size_bytes)}",
             ]
         )
 
@@ -659,10 +668,10 @@ class FlashStatusScreen(ModalScreen[bool]):
         try:
             flash.execute_plan(self._plan, progress=on_progress)
             self.app.call_from_thread(self._mark_stage_active, "done")
-            self.app.call_from_thread(self._finish, True, "[green]✓ Flash completed.[/]")
+            self.app.call_from_thread(self._finish, True, "[green][OK] Flash completed.[/]")
         except flash.FlashError as exc:
             self.app.call_from_thread(self._mark_stage_failed)
-            self.app.call_from_thread(self._finish, False, f"[red]✗ Flash failed: {exc}[/]")
+            self.app.call_from_thread(self._finish, False, f"[red][FAIL] Flash failed: {exc}[/]")
 
     def _append_log(self, line: str) -> None:
         self.query_one(RichLog).write(line)
@@ -739,13 +748,13 @@ class FlashStatusScreen(ModalScreen[bool]):
             if name == event_name:
                 seen_current = True
                 if is_final:
-                    self._set_stage_class(name, "done", marker="✓", label=label)
+                    self._set_stage_class(name, "done", marker="X", label=label)
                 else:
                     self._set_stage_class(name, "active", marker="*", label=label)
                 self._completed_stages.add(name)
             elif not seen_current:
                 # Earlier stage; mark done if not already.
-                self._set_stage_class(name, "done", marker="✓", label=label)
+                self._set_stage_class(name, "done", marker="X", label=label)
                 self._completed_stages.add(name)
             else:
                 self._set_stage_class(name, "pending", marker=" ", label=label)
@@ -758,7 +767,7 @@ class FlashStatusScreen(ModalScreen[bool]):
             except Exception:  # pragma: no cover - defensive
                 continue
             if "active" in widget.classes:
-                self._set_stage_class(name, "failed", marker="✗", label=label)
+                self._set_stage_class(name, "failed", marker="!", label=label)
                 return
 
     def _set_stage_class(self, name: str, state: str, *, marker: str, label: str) -> None:
