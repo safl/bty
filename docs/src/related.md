@@ -90,8 +90,7 @@ Ventoy is the closest in spirit to bty's USB live (carry images on a
 stick, boot from it). Critical difference: Ventoy boots OS *installers*
 from a stick; bty's USB live carries `bty` plus images and *flashes* a
 target disk. Ventoy is "I want to install Linux on this laptop"; bty
-is "I want this disk to look exactly like my reference image, fast,
-with optional first-boot tuning."
+is "I want this disk to look exactly like my reference image, fast".
 
 ## What makes bty distinct
 

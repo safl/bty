@@ -743,6 +743,17 @@ def inspect_image(path: Path) -> dict[str, Any]:
         )
         return info
 
+    # Any other unrecognised extension: same shape as the tarball
+    # branch, just a generic "this isn't a format bty knows about"
+    # message listing what IS supported. Without this, ``bty inspect
+    # README.md`` returned a confusing blank record with format=''.
+    if fmt is None:
+        supported = ", ".join(ext for ext, _ in _EXTENSIONS) + ", .bri"
+        info["detail_error"] = (
+            f"unrecognised format for {path.name!r}; supported extensions: {supported}"
+        )
+        return info
+
     if fmt == "qcow2":
         proc = subprocess.run(
             ["qemu-img", "info", "--output=json", str(path)],

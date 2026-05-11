@@ -125,6 +125,23 @@ def test_inspect_image_hints_about_tarballs(tmp_path: Path) -> None:
     assert "extract" in info["detail_error"].lower()
 
 
+def test_inspect_image_hints_about_unrecognised_extensions(tmp_path: Path) -> None:
+    """``bty inspect README.md`` (a real but non-image file) returns
+    a clear ``detail_error`` naming the supported extensions, rather
+    than a confusing blank ``format: ''`` record. The CLI prints
+    ``detail_error`` so the operator sees the actionable hint."""
+    other = tmp_path / "README.md"
+    other.write_text("# notes\n")
+    info = images.inspect_image(other)
+    assert info["format"] is None
+    err = info.get("detail_error", "").lower()
+    assert "unrecognised" in err
+    # The hint lists at least the main supported formats.
+    assert ".qcow2" in err
+    assert ".img.gz" in err
+    assert ".bri" in err
+
+
 def test_inspect_image_handles_bri_descriptor(tmp_path: Path) -> None:
     """``bty inspect foo.bri`` returns the descriptor's
     parsed contents under ``detail`` rather than blowing up the way

@@ -203,26 +203,3 @@ A future release may add LRU + size-cap eviction; until then,
 plan for cache size = sum of every image you've fetched since
 last manual rm.
 
-## Upgrading from pre-M22 (pre-v0.5.16)
-
-**Breaking schema change**: `machines.image` (filename) was
-replaced by `machines.image_sha256` (content hash). Existing
-state.db files do not migrate automatically. Two paths:
-
-1. **Wipe + re-bind.** Easiest for homelab / CI deployments
-   where the machine list is short:
-
-   ```bash
-   sudo systemctl stop bty-web
-   sudo rm /var/lib/bty/state.db
-   sudo systemctl start bty-web
-   ```
-   Then re-add machines via the browser UI; the picker now
-   binds by SHA, so each machine ends up bound to a specific
-   image content rather than a filename.
-2. **Hand-migrate**: open `state.db` with `sqlite3`,
-   `ALTER TABLE machines RENAME COLUMN image TO image_old;
-   ALTER TABLE machines ADD image_sha256 TEXT;`, populate
-   `image_sha256` per row by hashing the named file, then
-   `ALTER TABLE machines DROP COLUMN image_old`. Tedious;
-   wipe + re-bind is usually faster.

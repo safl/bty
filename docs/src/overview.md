@@ -1,8 +1,8 @@
 # Overview
 
 bty is shaped around one job: take a pre-built system image and put it on
-a target disk, fast and repeatably, with optional first-boot tuning. The
-driving use case is CI infrastructure where reflashing is a routine event
+a target disk, fast and repeatably. The driving use case is CI
+infrastructure where reflashing is a routine event
 at three different cadences:
 
 - **Per-job** - wipe and reflash between CI runs so each job starts from a
