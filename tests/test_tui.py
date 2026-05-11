@@ -424,6 +424,78 @@ def test_app_local_mode_renders_bri_descriptors_alongside_local(
     _run(_drive())
 
 
+def test_app_includes_builtin_bri_when_path_exists(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The live env's ``/usr/local/share/bty/images-builtin/`` is
+    scanned in addition to ``--image-root`` so a fresh-from-Ventoy
+    operator with no catalog of their own still sees the bake-time
+    ``Install latest bty-server`` row. Monkeypatches the constant to
+    a tmp dir to keep the test workstation-independent."""
+    # Construct a fake builtins dir + a fake .bri descriptor.
+    builtins = tmp_path / "builtins"
+    builtins.mkdir()
+    (builtins / "bty-server-x86_64.bri").write_text(
+        'name = "bty-server (latest)"\n'
+        'url = "https://example.invalid/bty-server.img.gz"\n'
+        'format = "img.gz"\n'
+    )
+
+    image_root = tmp_path / "images"
+    image_root.mkdir()
+
+    # Don't fake list_remote_images: we want the REAL parser to walk
+    # the on-disk builtins dir and surface the row. list_images +
+    # list_disks still get the empty-fixture treatment so the only
+    # row that appears is the builtin.
+    monkeypatch.setattr(tui_app.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(tui_app.images, "list_images", lambda _root: [])
+    monkeypatch.setattr(tui_app.disks, "list_disks", list)
+    monkeypatch.setattr(tui_app, "_BUILTIN_IMAGES_PATH", builtins)
+
+    app = tui_app.BtyTui(image_root=image_root)
+
+    async def _drive() -> None:
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            from textual.widgets import DataTable
+
+            images_table = app.query_one("#images_table", DataTable)
+            assert images_table.row_count == 1
+            urls = [k.url for k in app._images_by_key.values()]  # type: ignore[reportPrivateUsage]
+            assert "https://example.invalid/bty-server.img.gz" in urls
+
+    _run(_drive())
+
+
+def test_app_skips_builtins_when_path_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When the builtins path doesn't exist (typical workstation
+    install), ``_load_images`` quietly skips that scan -- no crash,
+    no extra rows."""
+    _patch_data_sources(
+        monkeypatch,
+        images_list=[_fake_image(name="local.qcow2")],
+        disks_list=[_fake_disk()],
+    )
+    monkeypatch.setattr(tui_app, "_BUILTIN_IMAGES_PATH", tmp_path / "does-not-exist")
+
+    app = tui_app.BtyTui(image_root=tmp_path / "images")
+
+    async def _drive() -> None:
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            from textual.widgets import DataTable
+
+            images_table = app.query_one("#images_table", DataTable)
+            # Only the one local image -- the missing builtins dir
+            # adds nothing.
+            assert images_table.row_count == 1
+
+    _run(_drive())
+
+
 def test_app_shows_no_images_message_when_local_root_is_empty(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

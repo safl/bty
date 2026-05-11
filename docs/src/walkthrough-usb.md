@@ -317,173 +317,237 @@ sudo umount /dev/sdX*
 
 ## Alternative delivery shapes
 
-If you don't want to dedicate a USB stick to bty-usb (operator on
-the go with many ISOs, remote-only access via IP-KVM, lab-server
-out-of-band management), three patterns let you deliver the same
-`bty-usb-x86_64.iso` through a multi-boot stick or a virtual mass-
-storage shim. All three rely on the
-`bty-images-discover.service` shipped with the live env: when the
-internal `BTY_IMAGES` partition isn't enumerated by the kernel
-(because the shim presents the .iso as a single CD-ROM), the
-service scans every attached vfat / exfat partition for a
-`bty-images/` folder or top-level `.img.*` / `.qcow2` / `.bri`
-files and bind-mounts the first hit at `/var/lib/bty/images`.
+Three concrete ways to deliver the bty live image without
+dedicating a USB stick to it: a multi-boot stick via Ventoy, or
+remote boot via an IP-KVM (piKVM, JetKVM). The Ventoy path also
+carries the image catalog; the IP-KVM paths use a remote `bty-web`
+for the catalog because IP-KVMs expose the `.iso` as a single
+CD-ROM and there is no local storage to put image files on.
 
-### Ventoy (multi-ISO USB stick)
+**Always-available bootstrap entry.** Regardless of which delivery
+shape you use, `bty-tui` always offers one built-in row:
 
-[Ventoy](https://www.ventoy.net) lets a single USB stick boot any
-of dozens of `.iso` files, picked from a menu at boot time. Drop
-`bty-usb-x86_64.iso` onto a Ventoy stick alongside your other
-rescue / installer ISOs and Ventoy boots it like any other entry.
+> `bty-server (latest from GitHub)` -
+> `https://github.com/safl/bty/releases/latest/download/bty-server-x86_64.img.gz`
 
-**Setup (one-time):**
+This is a bake-time `.bri` pointer shipped inside the live env at
+`/usr/local/share/bty/images-builtin/bty-server-x86_64.bri`. Pick
+it and flash to set up a fresh `bty-server` appliance from scratch
+without staging the image yourself. The flow streams bytes directly
+from GitHub through the live env to the target's disk, so the live
+env needs internet access at flash time (DNS + HTTPS to
+`github.com` / `objects.githubusercontent.com`).
+
+### Ventoy
+
+[Ventoy](https://www.ventoy.net) lets one USB stick boot any of
+dozens of `.iso` files via a menu at power-on. The Ventoy data
+partition doubles as exFAT-formatted scratch space, which bty's
+live env auto-discovers and uses as the image catalog.
+
+#### Step 1: Install Ventoy on a USB stick
 
 ```bash
-# Install Ventoy on the stick (DESTRUCTIVE - check /dev/sdX!).
-# Ventoy's installer is upstream; their docs cover Windows + Linux
-# + macOS. On Linux:
+# DESTRUCTIVE: this wipes /dev/sdX. Verify the device with lsblk
+# first.
 sudo Ventoy2Disk.sh -i /dev/sdX
 ```
 
-This leaves the stick with two partitions: a small EFI/bootloader
-partition and a large exFAT data partition. The data partition is
-where you drop ISOs.
+Ventoy's installer is upstream; their docs cover Windows + Linux +
+macOS. After install, the stick has two partitions: an EFI /
+bootloader partition (small) and an exFAT data partition labelled
+`Ventoy` (large; uses the rest of the stick).
 
-**Stage bty + its image catalog on the Ventoy data partition:**
+#### Step 2: Stage `bty-usb-x86_64.iso` on the Ventoy partition
 
 ```bash
-# Mount the data partition (Linux example; on Windows / macOS just
-# open the stick in the file manager and drop files in).
+# Mount the Ventoy data partition.
 sudo mount /dev/disk/by-label/Ventoy /mnt
 
-# Decompress the bty .iso.gz - Ventoy doesn't decompress on the fly.
+# Decompress the bty .iso.gz - Ventoy boots .iso, not .iso.gz.
 gunzip -k ~/system_imaging/disk/bty-usb-x86_64.iso.gz
+
+# Copy the .iso to the Ventoy data partition.
 sudo cp ~/system_imaging/disk/bty-usb-x86_64.iso /mnt/
+```
 
-# Drop your cooked images in a top-level ``bty-images/`` folder.
-# This is the convention the discovery service looks for; it falls
-# back to the partition root if the folder doesn't exist, but the
-# subdir is cleaner.
+The `.iso` can sit at the root of the Ventoy partition or in any
+subdirectory. Ventoy's menu lists every `.iso` it finds anywhere
+on the partition.
+
+#### Step 3: Stage your cooked images in `bty-images/`
+
+```bash
+# Create the bty-images/ folder at the root of the Ventoy partition.
 sudo mkdir -p /mnt/bty-images
-sudo cp /path/to/my-image.img.gz /mnt/bty-images/
-sudo cp /path/to/my-image.qcow2  /mnt/bty-images/
 
+# Copy as many cooked images as you need. Supported extensions:
+# *.img.gz / *.img.zst / *.img.xz / *.img.bz2 / *.qcow2 / *.bri
+# (bri is a tiny TOML pointer at a remote image URL).
+sudo cp /path/to/debian-13-server.img.gz /mnt/bty-images/
+sudo cp /path/to/ubuntu-26.04-server.img.gz /mnt/bty-images/
+
+# Unmount so the writes flush.
 sudo umount /mnt
 ```
 
-**Boot a target:**
+The directory name `bty-images/` and its location (top of the
+Ventoy partition) are what the live env's discovery service looks
+for. **Don't rename or nest it.** The service exclusively scans
+for `bty-images/` at the partition root; a `.bri` dropped
+alongside `bty-usb-x86_64.iso` (not inside `bty-images/`) won't
+be picked up.
 
-1. Plug the Ventoy stick into the target.
-2. Boot, enter the Ventoy menu, pick `bty-usb-x86_64.iso`.
-3. The bty live env starts; `bty-images-discover.service` finds
- `/mnt/bty-images/` on the Ventoy data partition and bind-mounts
- it at `/var/lib/bty/images`.
-4. `bty-tui` lands on tty1 with your catalog already populated.
+#### Step 4: Boot the target
 
-If the discovery service doesn't find your files, the empty-state
-welcome panel inside the TUI walks through the layout it expects
-(top-level files OR a `bty-images/` subdir, vfat or exFAT, no NTFS).
-Drop into a root shell via Alt+F2 and run
-`journalctl -u bty-images-discover` to see exactly what was scanned.
+1. Plug the Ventoy stick into the target machine.
+2. Power-cycle the target, enter the BIOS/UEFI boot menu, pick the
+   Ventoy stick.
+3. Ventoy's menu appears. Pick `bty-usb-x86_64.iso`.
+4. bty live env boots. `bty-images-discover.service` scans the
+   attached partitions, finds `bty-images/` on the Ventoy stick,
+   and bind-mounts it at `/var/lib/bty/images`.
+5. `bty-tui` opens on tty1 with your image catalog already
+   populated.
 
-### piKVM (IP-KVM with mass-storage emulation)
+#### Troubleshooting
+
+If `bty-tui` shows "No images in the catalog yet":
+
+1. Press `Alt+F2` for a root shell on the alternate VT.
+2. Run `journalctl -u bty-images-discover` to see exactly which
+   partitions were scanned and which it skipped (and why).
+3. Confirm the Ventoy partition's filesystem is exFAT (NTFS isn't
+   probed): `lsblk -f`.
+4. Confirm the folder is exactly `bty-images/` at the partition
+   root (not `Bty-Images/`, not nested).
+5. `Alt+F1` returns to `bty-tui`; press `r` once you've fixed the
+   layout to re-scan.
+
+### piKVM (remote catalog only)
 
 [piKVM](https://pikvm.org) is a Raspberry-Pi-based IP-KVM. It
-exposes the target's HDMI + USB as a web UI, and can emulate a
-USB mass-storage device so the target boots from an .iso the
-operator uploaded over the network. Useful for remote racks where
-nobody can plug a stick in.
+exposes a target machine's HDMI + USB over the network and can
+emulate a USB mass-storage device, so the target boots from an
+`.iso` an operator uploaded via the piKVM web UI.
 
-**Setup (one-time):**
+**piKVM hosts the `.iso` as a single CD-ROM.** The kernel inside
+the bty live env cannot reach the `.iso`'s internal partitions, so
+there is no place on the piKVM to put image files. Use a remote
+`bty-web` instance for the catalog instead.
 
-1. Cable the piKVM to the target: HDMI from target -> piKVM HDMI
- in, USB OTG cable from piKVM USB-C -> target USB.
-2. Connect piKVM to your LAN; reach its web UI in a browser.
-3. Decompress `bty-usb-x86_64.iso.gz` on your workstation (piKVM
- needs the raw `.iso`).
+#### Step 1: Stand up a `bty-web` server reachable from the target
 
-**Upload the bty .iso to piKVM:**
+The simplest option is the trial container; see
+[walkthrough-server-docker.md](walkthrough-server-docker.md) for
+the full setup. On any host that the target can reach over the
+LAN:
+
+```bash
+docker run -d --name bty-web \
+  -p 8080:8080 \
+  -v bty-data:/var/lib/bty \
+  ghcr.io/safl/bty-web:latest
+```
+
+The default credentials are `bty / bty`. Note the host's IP
+address (e.g. `10.0.0.5`); the target needs to reach it on TCP
+8080.
+
+Upload your cooked images to the server via the bty-web Images
+page (`http://10.0.0.5:8080/ui/images`).
+
+#### Step 2: Connect piKVM to the target
+
+1. HDMI: target's HDMI out -> piKVM HDMI in.
+2. USB: piKVM's USB-C OTG port -> target's USB port.
+3. Network: piKVM to your LAN.
+4. Open piKVM's web UI in a browser.
+
+#### Step 3: Upload `bty-usb-x86_64.iso` to piKVM
+
+```bash
+# Decompress on your workstation before uploading; piKVM doesn't
+# unzip on the fly.
+gunzip -k ~/system_imaging/disk/bty-usb-x86_64.iso.gz
+```
 
 In the piKVM web UI:
 
 1. Open the "Storage" page.
-2. Click "Upload" and pick `bty-usb-x86_64.iso`.
-3. Set "Mode" to **CD-ROM** (or "Flash drive" - either works; CD-ROM
- mode is closer to how a real bty-usb stick presents).
-4. Click "Connect".
+2. Click "Upload" and select `bty-usb-x86_64.iso`.
+3. Wait for the upload to finish.
+4. Pick the entry; in the dialog, set "Mode" to **CD-ROM**.
+5. Click "Connect" (or the analogous "Attach" button).
 
-**Boot the target:**
+#### Step 4: Boot the target
 
-1. From the piKVM "Power" page, power-cycle the target.
-2. Enter the target's BIOS/UEFI boot menu, pick the piKVM virtual
- mass-storage device.
-3. bty live env boots; you see it in the piKVM HDMI viewer.
+1. From piKVM's "Power" page, power-cycle the target.
+2. In the piKVM HDMI viewer, watch the target's BIOS/UEFI come up.
+3. Enter the target's boot menu, pick the piKVM virtual storage
+   device.
+4. The bty live env boots; `bty-tui` opens on tty1.
 
-**Image catalog source - three options:**
+#### Step 5: Point `bty-tui` at the remote `bty-web` catalog
 
-a) **Remote `bty-web` (recommended for piKVM).** Run a `bty-web`
- instance somewhere on the same LAN as the target (e.g. the
- trial container; see the [server-Docker
- walkthrough](walkthrough-server-docker.md)). Inside the TUI press
- `s`, pick "Remote", paste the server URL (e.g. `http://10.0.0.5:8080`),
- click Apply. The catalog is fetched live; images stream from the
- server straight through the live env to the target disk. No
- image storage on the piKVM is needed.
+The local catalog is empty (no images on the piKVM). Switch to the
+remote `bty-web` from inside the TUI:
 
-b) **piKVM secondary writable partition.** Some piKVM versions
- expose an additional writable area (a "Storage" drive separate
- from the CD-ROM) that you can format as exFAT and populate with
- a `bty-images/` folder. The live env's discovery service picks
- it up automatically. Check your piKVM version's docs for the
- "MSD" / "MSD drives" feature.
+1. Press `s` (Source).
+2. In the modal, pick "Remote".
+3. Enter the server URL: `http://10.0.0.5:8080` (substitute your
+   host).
+4. Click "Apply".
 
-c) **`.bri` descriptors.** Drop tiny `.bri` TOML pointer files
- wherever option (a) or (b) would put images; each `.bri` carries
- a `url = "..."` pointing at an `.img.gz` / `.qcow2` somewhere
- reachable from the target. `bty-tui` resolves the URL at flash
- time. Smallest payload to ship through the piKVM.
+`bty-tui` fetches the catalog from `GET /images` on the server.
+Pick an image (Enter), pick the target disk (Enter), flash (Enter
+on Flash). The image streams directly from `bty-web` through the
+live env to the target's disk; piKVM only carried the boot env.
 
-### JetKVM (commercial IP-KVM)
+### JetKVM (remote catalog only)
 
 [JetKVM](https://jetkvm.com) is a compact commercial IP-KVM
-(USB-stick-shaped device) that ships the same mass-storage-
-emulation feature as piKVM, with a polished hosted control plane.
-The bty live env doesn't know the difference between piKVM and
-JetKVM - both look like a CD-ROM to the booted kernel.
+(USB-stick-shaped device) with mass-storage emulation. Same
+constraint as piKVM: the `.iso` is hosted as a single CD-ROM, so
+there is no local storage on the JetKVM to put image files.
+Use a remote `bty-web` for the catalog.
 
-**Setup (one-time):**
+#### Step 1: Stand up a `bty-web` server reachable from the target
 
-1. Cable the JetKVM to the target per the JetKVM quickstart.
-2. Pair it with your account, reach the web UI.
-3. Decompress `bty-usb-x86_64.iso.gz` on your workstation.
+Same as piKVM Step 1 above. Run a `bty-web` instance somewhere on
+the LAN; note its IP and port.
 
-**Upload the bty .iso:**
+#### Step 2: Connect JetKVM to the target
+
+Cable per the JetKVM quickstart (USB-C from JetKVM to target;
+JetKVM to LAN). Pair the device with your JetKVM account, reach
+its web UI.
+
+#### Step 3: Upload `bty-usb-x86_64.iso` to JetKVM
+
+```bash
+gunzip -k ~/system_imaging/disk/bty-usb-x86_64.iso.gz
+```
 
 In the JetKVM web UI:
 
-1. Open the device's "Virtual Media" panel.
+1. Open the "Virtual Media" panel.
 2. Upload `bty-usb-x86_64.iso`.
-3. Mount it as a virtual CD-ROM.
+3. Mount the uploaded image as a virtual CD-ROM.
 
-**Boot the target:**
+#### Step 4: Boot the target
 
-Same flow as piKVM - power-cycle, BIOS boot menu, pick the
-virtual mass-storage device.
+1. Power-cycle the target via JetKVM's power-control page.
+2. In the HDMI viewer, enter the target's boot menu and pick the
+   JetKVM virtual storage device.
+3. The bty live env boots; `bty-tui` opens on tty1.
 
-**Image catalog source:**
+#### Step 5: Point `bty-tui` at the remote `bty-web` catalog
 
-JetKVM's onboard storage is small (the device is fundamentally
-a network-attached USB shim, not a multi-purpose Pi), so option
-(b) from the piKVM list is less relevant here.
-
-Recommended: **remote `bty-web` via `s` in the TUI** (option (a) of
-the piKVM list above). The catalog and the image bytes both come
-from `bty-web` over the network; the JetKVM's job is just to deliver
-the boot environment.
-
-If a remote `bty-web` isn't an option, drop `.bri` descriptors on
-whatever writable storage the JetKVM exposes (option (c)) and let
-them point at HTTP-served images.
+Same as piKVM Step 5. Press `s`, pick Remote, paste the server
+URL (e.g. `http://10.0.0.5:8080`), click Apply. The catalog
+populates from the server, images stream through the JetKVM-
+booted live env to the target's disk.
 
 ## What's next
 

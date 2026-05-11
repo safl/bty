@@ -176,6 +176,15 @@ def _parse_size_to_bytes(s: str) -> int:
 _REMOTE_CATALOG_MAX_BYTES = 4 * 1024 * 1024
 
 
+# Read-only path scanned alongside the configured image-root for
+# bake-time-shipped ``.bri`` pointers (currently: "Install latest
+# bty-server"). The bty-usb live env's chroot drops files here from
+# the ``includes.chroot/usr/local/share/bty/images-builtin/`` tree;
+# workstation installs typically don't have this directory, so the
+# scan is a no-op there.
+_BUILTIN_IMAGES_PATH = Path("/usr/local/share/bty/images-builtin")
+
+
 def _validate_server_url(server_url: str) -> None:
     """Reject ``--server`` URLs whose scheme isn't ``http``/``https``.
 
@@ -1369,11 +1378,16 @@ class BtyTui(App[None]):
         """Load the catalog from either a remote bty-web or the local
         image root, returning a unified ``_TuiImage`` list.
 
-        In local mode, the directory scan is followed by a scan for
-        ``.bri`` (bty Remote Image) descriptors; each descriptor
-        becomes a ``_TuiImage`` with ``url`` set so the operator can
-        flash from a URL pointer dropped into BTY_IMAGES (used for
-        the bty-server bootstrap on a fresh USB stick).
+        In local mode the catalog is the union of three sources:
+        1. ``self._image_root`` scanned for ``.img.*`` / ``.qcow2``
+           image files,
+        2. the same directory scanned for ``.bri`` (bty Remote Image)
+           pointer files dropped by the operator,
+        3. :data:`_BUILTIN_IMAGES_PATH` scanned for ``.bri`` pointers
+           baked into the live env at build time -- ``Install latest
+           bty-server`` lives there, so a fresh-from-Ventoy operator
+           with no catalog of their own still has at least one
+           always-available flash target.
         """
         if self._server_url is not None:
             return fetch_remote_catalog(self._server_url)
@@ -1386,22 +1400,31 @@ class BtyTui(App[None]):
             )
             for img in images.list_images(self._image_root)
         ]
+        # ``size_bytes`` on a .bri is optional; ``-1`` is the
+        # unknown-size sentinel that ``_format_mib`` renders as
+        # ``?`` (rather than a misleading ``0.0 MiB``). The real
+        # number wins when the .bri supplies it.
         remote = [
             _TuiImage(
                 name=r.name,
                 fmt=r.format,
-                # ``size_bytes`` is optional in the descriptor;
-                # ``-1`` is the unknown-size sentinel that
-                # ``_format_mib`` renders as ``?`` (rather than a
-                # misleading ``0.0 MiB``). When the operator
-                # supplies ``size_bytes`` in the .bri the real
-                # number wins.
                 size_bytes=r.size_bytes if r.size_bytes is not None else -1,
                 url=r.url,
             )
             for r in images.list_remote_images(self._image_root)
         ]
-        return local + remote
+        builtins: list[_TuiImage] = []
+        if _BUILTIN_IMAGES_PATH.is_dir():
+            builtins = [
+                _TuiImage(
+                    name=r.name,
+                    fmt=r.format,
+                    size_bytes=r.size_bytes if r.size_bytes is not None else -1,
+                    url=r.url,
+                )
+                for r in images.list_remote_images(_BUILTIN_IMAGES_PATH)
+            ]
+        return local + remote + builtins
 
     def _populate_disks(self) -> None:
         table = self.query_one("#disks_table", DataTable)
