@@ -62,9 +62,11 @@ same SHA-keyed machine bindings.
   state leaks. No snowflakes. No "works on my machine" because the
   machine is bit-identical to the manifest every single boot.
 - **Pre-built images, not recipes.** You build the image once (in your
-  build system of choice), bty writes the bytes. Provisioning is
-  cloud-init or a CIJOE task on first boot - small, declarative,
-  inspectable. No agent, no daemon, no convergence loops.
+  build system of choice), bty writes the bytes. Any first-boot
+  bring-up (users, networking, hostnames) is baked into the image by
+  the image builder upstream via cloud-init / NoCloud user-data.
+  bty itself doesn't run a provisioning step -- no agent, no daemon,
+  no convergence loops.
 - **OS-agnostic by design.** Linux, FreeBSD, Windows - if it boots
   from a disk image, bty can flash it. macOS targets are out (Apple
   Silicon's boot story isn't friendly to imaging).

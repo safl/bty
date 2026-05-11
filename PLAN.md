@@ -39,8 +39,8 @@ bty is shaped to serve both ends of the spectrum:
   server to set up, no MAC registration, no network to wire. That path
   is owned by `bty-media`'s USB live image, plus `bty` and `bty-tui`.
 - **DevOps infrastructure.** A lab or CI environment with a fleet should
-  be able to set up a single provisioning server, register machines by
-  MAC, and let reflashes happen on schedule, on demand, or on failure
+  be able to set up a single bty server appliance, register machines
+  by MAC, and let reflashes happen on schedule, on demand, or on failure
   without operator involvement. That path is owned by `bty-media`'s
   server image, plus `bty-web`.
 
@@ -155,7 +155,7 @@ the target's local disk using images sourced from the stick itself.
 Self-contained and offline. The direct-flash flow's delivery vehicle.
 
 **`server-x86`** - installable disk image (amd64) that, when written
-to a host's disk and booted, runs the bty provisioning server:
+to a host's disk and booted, runs the bty server appliance:
 `bty-web`, the iPXE / TFTP / HTTP services that PXE clients chain
 through, and the storage layout for the image library. The
 network-flash flow's delivery vehicle for x86 servers.

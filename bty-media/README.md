@@ -9,7 +9,7 @@ Source content for the bty appliance images. Four variants:
   / Raspberry Pi Imager all decompress `.gz` natively; xz tripped
   Etcher's bundled handler regardless of preset).
 - **Server image, x86_64** (`VARIANT=server-x86`) - installable disk
-  image for the bty provisioning server (`bty-web` + PXE boot stack).
+  image for the bty server appliance (`bty-web` + PXE boot stack).
   Cloud-init bake in QEMU.
 - **Server image, Raspberry Pi 4/5** (`VARIANT=server-rpi`) - same
   appliance role on arm64 for SD-card delivery to a Pi. Built via

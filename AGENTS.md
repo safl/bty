@@ -305,7 +305,8 @@ operations bty-web is granted.
 - Don't parse human-readable table output. Use `--json`.
 - Don't depend on stderr message wording - only on exit codes.
 - Don't depend on internal module paths (`bty.tui._app`,
-  `bty.flash._partition_has_cloud_init`, etc.). They are private.
+  `bty.flash._flash_compressed`, etc.). Anything with a
+  leading underscore is private and may be renamed without notice.
 - Don't expect bty to write files outside the configured image root,
   the target block device, or the bty configuration / state areas.
 
