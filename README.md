@@ -35,7 +35,7 @@ bty is a flasher, not an image builder:
 
 ```bash
 # Local: USB stick into target, two arrows + Enter, done.
-bty-tui
+bty tui
 
 # Remote: bind a MAC to an image, the next PXE boot reflashes itself.
 curl -X PUT http://bty-server:8080/machines/aa:bb:cc:dd:ee:ff \

@@ -71,7 +71,7 @@ docker compose up -d
 Same defaults: `:8080` published, `./bty-data/` bind-mounted as the
 volume, `restart: unless-stopped`.
 
-## Connecting bty-tui
+## Connecting `bty tui`
 
 From a workstation or the USB live env:
 
@@ -82,19 +82,16 @@ bty tui --server http://<host>:8080
 The catalog pane fills with whatever the server has under
 `/var/lib/bty/images`. Pick a row with `Enter`, pick a target disk,
 flash. The server is the catalog source; the actual write happens
-on the local machine running `bty-tui`.
+on the local machine running `bty tui`.
 
 ## Scripted flash via URL (no TUI)
 
-For batch / CI workflows the `bty` CLI accepts an HTTP URL
-directly as `--image`, so a script doesn't need to download
+For batch / CI workflows the `bty flash` IMAGE positional accepts
+an HTTP URL directly, so a script doesn't need to download
 images first:
 
 ```bash
-sudo bty flash \
-    --image  http://<host>:8080/images/my-image.img.zst \
-    --target /dev/sda \
-    --yes
+sudo bty flash http://<host>:8080/images/my-image.img.gz /dev/sda --yes
 ```
 
 `.img` and `.img.zst` URLs stream straight from the container

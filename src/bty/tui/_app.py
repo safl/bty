@@ -1767,7 +1767,7 @@ class BtyTui(App[None]):
         # error displayed in the modal but the modal didn't render).
         self._set_status("Flash: triggered.")
         if os.geteuid() != 0:
-            self._set_status("bty-tui must run as root to flash; relaunch with sudo.")
+            self._set_status("bty tui must run as root to flash; relaunch with sudo.")
             return
 
         # Prefer the wizard-flow committed selection (Enter on rows

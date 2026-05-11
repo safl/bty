@@ -22,7 +22,7 @@ the network.
 1. Operator boots the target machine from the bty USB live image
    (built by `bty-media`).
 2. The live environment auto-logins as root on `tty1`. The operator
-   runs `bty-tui` for an interactive flow, or invokes `bty` directly
+   runs `bty tui` for an interactive flow, or invokes `bty` directly
    from the shell.
 3. Operator selects an image (sourced from the USB stick itself) and a
    target disk (block device on the booted machine).
@@ -126,7 +126,7 @@ Two ways to use Ventoy with bty:
    partition next to the bty ISO. After bty boots, the
    partition is still attached to the host (it's the physical
    USB stick the live env booted from). Mount it and point
-   bty-tui at the path:
+   `bty tui` at the path:
 
    ```bash
    # On the booted bty live env's tty1 (drop to a shell first):

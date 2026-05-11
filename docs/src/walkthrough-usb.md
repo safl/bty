@@ -7,7 +7,7 @@ The fastest path to "I just bty-flashed a box":
 3. **Drop** the system image you want to flash onto the stick's
  `BTY_IMAGES` partition.
 4. **Boot** the target machine from the stick.
-5. **Flash** with `bty-tui` (interactive) or `bty flash` (scripted).
+5. **Flash** with `bty tui` (interactive) or `bty flash` (scripted).
 6. **Reboot** the target into the freshly-flashed image.
 
 End state: the target's local disk has whatever image you copied onto
@@ -207,7 +207,7 @@ screenshot capture pass is done.
 ```{note}
 Without root the TUI launches in **read-only mode** - you can
 browse images and disks, but the Flash button is disabled and
-`f` refuses with a status message. Use ``sudo bty-tui`` if you
+`f` refuses with a status message. Use ``sudo bty tui`` if you
 need to flash.
 ```
 
@@ -320,7 +320,7 @@ for the catalog because IP-KVMs expose the `.iso` as a single
 CD-ROM and there is no local storage to put image files on.
 
 **Always-available bty-server install shortcut.** Regardless of
-which delivery shape you use, `bty-tui` has a built-in `b`
+which delivery shape you use, `bty tui` has a built-in `i`
 shortcut that pre-selects the latest `bty-server-x86_64.img.gz`
 from GitHub releases. From the TUI: press `i`, pick a target disk,
 hit Flash. The image streams directly from GitHub through the live
