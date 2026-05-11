@@ -52,7 +52,6 @@ import json
 import logging as log
 import os
 import shutil
-import tempfile
 from argparse import ArgumentParser
 from pathlib import Path
 
@@ -701,21 +700,13 @@ def _extend_with_exfat(cijoe, iso_path: Path) -> int:
         log.error(f"mkfs.exfat {part_dev} failed")
         return err
 
-    # Drop a default ``.bri`` into the exFAT partition pointing at
-    # the latest bty-server release on GitHub. This is the only
-    # bootstrap entry visible from a host OS browsing the BTY_IMAGES
-    # partition. Operators can edit / delete / replace the .bri
-    # freely from any host with exFAT support.
-    #
-    # Hard requirement now (v0.7.16): if the populate fails, the
-    # bake fails. Earlier "best-effort, log warning" handling was
-    # masking real mount / tee / sync issues -- repeated user
-    # reports of "no .bri in BTY_IMAGES" forced the change.
-    err = _populate_bty_images_partition(cijoe, part_dev)
-    if err:
-        cijoe.run_local(f"sudo losetup -d {loop}")
-        return err
-
+    # No bake-time content in BTY_IMAGES. v0.7.16..v0.8.3 dropped a
+    # default ``bty-server-x86_64.bri`` here as a bootstrap entry;
+    # v0.8.4 moved the bootstrap to the TUI's ``i`` keybinding
+    # (which flashes the same GitHub release URL on demand), so the
+    # baked-in pointer was redundant. Operators with their own
+    # cooked images drop them onto BTY_IMAGES themselves from a host
+    # OS; the partition ships empty.
     err, _ = cijoe.run_local(f"sudo losetup -d {loop}")
     if err:
         log.error(f"losetup -d {loop} failed")
@@ -723,85 +714,3 @@ def _extend_with_exfat(cijoe, iso_path: Path) -> int:
 
     log.info(f"Extended {iso_path} with BTY_IMAGES exFAT partition (p{part_num})")
     return 0
-
-
-def _populate_bty_images_partition(cijoe, part_dev: str) -> int:
-    """Mount the freshly-mkfs'd BTY_IMAGES exFAT partition and drop
-    a default ``bty-server-x86_64.bri`` into it. Returns 0 on
-    success, errno-style int on failure. Each step's stderr lands
-    in the bake log so operators can diagnose CI breakages.
-
-    Hardened against the silent-empty-partition failure mode v0.7.9
-    .. v0.7.15 shipped: stage the bri body to a temp file before
-    mount (avoids heredoc-via-cijoe-shell quoting questions),
-    explicit ``sync`` + ``ls`` round-trip after write, ``ls`` again
-    after mount before declaring success.
-    """
-    # Stage the .bri body locally first so we don't depend on
-    # heredoc-via-cijoe-shell semantics (which were the prime
-    # suspect for v0.7.9..v0.7.15's silent empty-partition bug).
-    bri_body = (
-        "# bty Remote Image (.bri) descriptor.\n"
-        "#\n"
-        "# Drop your own .bri files alongside this one to advertise\n"
-        "# remote flashable images via bty's catalog. Format is\n"
-        "# minimal TOML: ``url`` is the only required field.\n"
-        "# See ``bty inspect image <path>.bri`` for full syntax.\n"
-        "\n"
-        'name = "bty-server (x86_64, latest)"\n'
-        'url = "https://github.com/safl/bty/releases/latest/download/'
-        'bty-server-x86_64.img.gz"\n'
-        'format = "img.gz"\n'
-        'description = "Latest published bty-server appliance for x86_64"\n'
-    )
-    src_path = Path(tempfile.mkstemp(prefix="bty-server-x86_64.bri.", suffix=".tmp")[1])
-    src_path.write_text(bri_body)
-
-    # ``mktemp -d`` for the mountpoint over a hardcoded path so
-    # parallel bake runs (CI matrix, two operators on one box,
-    # etc.) don't collide.
-    err, state = cijoe.run_local("mktemp -d -t bty-images-bake.XXXXXX")
-    if err:
-        log.error("mktemp -d failed; cannot populate BTY_IMAGES partition")
-        src_path.unlink(missing_ok=True)
-        return errno.EIO
-    mount_dir = state.output().strip().splitlines()[-1].strip()
-
-    # Try kernel exfat first; fall back to fuse-exfat. GHA's
-    # ubuntu-latest carries the kernel module; some minimal images
-    # need the fuse helper instead.
-    err, _ = cijoe.run_local(f"sudo mount -t exfat {part_dev} {mount_dir}")
-    if err:
-        err, _ = cijoe.run_local(f"sudo mount.exfat-fuse {part_dev} {mount_dir}")
-    if err:
-        log.error(
-            f"could not mount {part_dev} as exfat ({mount_dir}); "
-            f"BTY_IMAGES populate FAILED -- check exfat / exfat-fuse on the bake runner"
-        )
-        cijoe.run_local(f"rmdir {mount_dir} 2>/dev/null || true")
-        src_path.unlink(missing_ok=True)
-        return errno.ENODEV
-    try:
-        bri_path = f"{mount_dir}/bty-server-x86_64.bri"
-        err, _ = cijoe.run_local(f"sudo cp {src_path} {bri_path}")
-        if err:
-            log.error(f"cp {src_path} -> {bri_path} failed")
-            return errno.EIO
-        # Force the bytes to disk before umount so a subsequent
-        # ``losetup -d`` (or kernel buffer dirty-on-detach quirk)
-        # can't drop the write.
-        err, _ = cijoe.run_local(f"sudo sync {bri_path}")
-        if err:
-            log.error(f"sync {bri_path} failed")
-            return errno.EIO
-        # Visible verification in the bake log so silent
-        # zero-byte writes can't pass the next CI bake either.
-        cijoe.run_local(f"ls -la {mount_dir}")
-        cijoe.run_local(f"sudo cat {bri_path}")
-        log.info(f"Wrote bootstrap .bri to BTY_IMAGES partition: {bri_path}")
-        return 0
-    finally:
-        # Always umount + drop tempdir + drop staged source.
-        cijoe.run_local(f"sudo umount {mount_dir}")
-        cijoe.run_local(f"rmdir {mount_dir} 2>/dev/null || true")
-        src_path.unlink(missing_ok=True)
