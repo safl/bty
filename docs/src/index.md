@@ -15,7 +15,7 @@
 ```
 
 Image-flasher for bare-metal and virtual targets. Writes pre-built
- system images onto target disks -- locally from a USB
+system images onto target disks -- locally from a USB
 live stick or remotely over PXE. First-boot bring-up (users, network,
 packages, hostnames) is baked into the image upstream by the image builder
 via cloud-init / NoCloud user-data; bty itself only writes bytes.

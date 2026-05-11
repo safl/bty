@@ -134,7 +134,7 @@ shipping is needed: `bty tui` has an `i` keybinding that flashes
 the latest `bty-server-x86_64.img.gz` from
 `https://github.com/safl/bty/releases/latest/...` directly. The
 `.bri` mechanism is for operator-supplied URL pointers (private
-mirrors, custom-pre-built images, etc.), not for the bty-server
+mirrors, custom-built images, etc.), not for the bty-server
 bootstrap.
 
 ### `bty inspect PATH`

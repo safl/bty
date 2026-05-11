@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 authors = [{ name = "Simon A. F. Lund", email = "os@safl.dk" }]
 license = "GPL-3.0-only"
-keywords = ["provisioning", "imaging", "ipxe", "flashing", "appliance"]
+keywords = ["bare-metal", "imaging", "ipxe", "pxe", "flashing", "appliance"]
 classifiers = [
     "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
     "Programming Language :: Python :: 3",

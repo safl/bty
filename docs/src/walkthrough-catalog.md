@@ -138,10 +138,10 @@ url = "https://my.example.com/images/debian-13-server.img.gz"
 ```
 
 To install ``bty-server`` specifically, no ``.bri`` is needed:
-``bty-tui`` has an ``i`` keybinding that flashes the latest
+``bty tui`` has an ``i`` keybinding that flashes the latest
 ``bty-server-x86_64.img.gz`` from GitHub releases directly. The
 ``.bri`` mechanism exists for operator-supplied URL pointers
-(private mirrors, custom-pre-built images, etc.), not for the
+(private mirrors, custom-built images, etc.), not for the
 bty-server bootstrap.
 
 That's deliberate: the catalog story is a **server** concern.

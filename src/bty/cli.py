@@ -148,10 +148,10 @@ def main(argv: list[str] | None = None) -> int:
         type=str,
         help=(
             "image to flash. Either a local file path "
-            "(``/path/to/image.qcow2``) or an HTTP/HTTPS URL "
-            "(``http://server/images/foo.img.zst``); URLs stream "
-            "directly to disk for ``.img`` / ``.img.zst`` and "
-            "download to a temp file first for ``.qcow2``. "
+            "(``/path/to/image.img.gz``) or an HTTP/HTTPS URL "
+            "(``http://server/images/foo.img.gz``); URLs stream "
+            "directly to disk for ``.img`` / ``.img.{gz,zst,xz,bz2}`` "
+            "and download to a temp file first for ``.qcow2``. "
             "``bty tui --server`` operators get the URL from the "
             "server's catalog listing; the server picks server-vs-"
             "upstream based on cache state."

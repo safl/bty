@@ -12,8 +12,8 @@ The Python package and one of its CLI / TUI / web entry points:
 
 ```bash
 pipx install bty-lab            # bty CLI only, stdlib-only Python
-pipx install "bty-lab[tui]"     # adds bty-tui (textual)
-pipx install "bty-lab[web]"     # adds bty-web (fastapi, uvicorn, pamela)
+pipx install "bty-lab[tui]"     # adds bty-tui (Textual)
+pipx install "bty-lab[web]"     # adds bty-web (FastAPI, Uvicorn, pamela)
 pipx install "bty-lab[all]"     # everything
 ```
 
