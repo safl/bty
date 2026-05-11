@@ -1,4 +1,4 @@
-"""bty.web - HTTP server with browser UI for fleet provisioning.
+"""bty.web - HTTP server with browser UI for fleet image flashing.
 
 This module is intentionally lightweight: it imports nothing from
 :mod:`fastapi` or :mod:`uvicorn` at module level so a CLI-only install
@@ -54,7 +54,7 @@ def main(argv: list[str] | None = None) -> None:
     """
     parser = argparse.ArgumentParser(
         prog="bty-web",
-        description="bty-web - HTTP server with browser UI for fleet provisioning",
+        description="bty-web - HTTP server with browser UI for fleet image flashing",
     )
     parser.add_argument(
         "--version",

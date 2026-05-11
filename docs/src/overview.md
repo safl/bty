@@ -58,12 +58,11 @@ bty is one Python package - the `bty` module, distributed on PyPI as
 [`bty-lab`](https://pypi.org/project/bty-lab/) - with three console-script
 entry points, plus a sibling appliance-image builder:
 
-- `bty` - main CLI for image inspection, target discovery, flashing,
-  provisioning.
+- `bty` - main CLI for image inspection, target discovery, flashing.
 - `bty-tui` - terminal UI for interactive use from a live environment.
   With ``--server URL`` it also drives a remote flash against a
   running ``bty-web``.
-- `bty-web` - HTTP server + browser UI for fleet provisioning.
+- `bty-web` - HTTP server + browser UI for fleet image flashing.
 - `bty-media/` - sibling directory (not a Python package); a
   cijoe-driven Debian appliance-image builder that produces the USB live
   and server images.

@@ -3,7 +3,7 @@
 Top-level package. Subpackages:
 
 - ``bty.cli`` - main command-line interface (image inspection, target
-  discovery, flashing, provisioning).
+  discovery, flashing).
 - ``bty.tui`` - terminal UI; requires the ``[tui]`` extra.
 - ``bty.web`` - HTTP server with browser UI; requires the ``[web]`` extra.
 """

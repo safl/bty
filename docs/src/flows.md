@@ -11,7 +11,7 @@ you have:
   workstation). Same flash mechanics, shared catalog. No PXE.
 - **Interactive PXE flash** - server is up, operator picks an image
   from the TUI on first PXE contact (default for unknown MACs).
-- **Server-driven PXE flash** - fleet provisioning, machines reflash
+- **Server-driven PXE flash** - fleet image flashing, machines reflash
   themselves on schedule / on demand / on failure.
 
 ## Direct flash (CLI / TUI)

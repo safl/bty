@@ -49,15 +49,15 @@ help:
 	@echo "Media (cijoe pipelines under cijoe/; require passwordless sudo):"
 	@echo "  media-deps    pipx install cijoe"
 	@echo "  build         build a media image (override VARIANT below)"
-	@echo "                  -> bty-media/output/<variant>-X.Y.Z.{iso.gz,img.zst,tar.zst}"
+	@echo "                  -> ~/system_imaging/disk/bty-<variant>.*"
 	@echo "  test-pxe      end-to-end PXE chain test against pre-built artefacts"
 	@echo "                  (needs QEMU + KVM; ~5-10 min wall clock)"
 	@echo ""
 	@echo "Variant: $(VARIANT)  (override with VARIANT=server-x86, server-rpi, netboot-x86, ...)"
 	@echo "  usb-x86      - bootable USB live ISO via live-build (.iso.gz, x86_64)"
-	@echo "  server-x86   - server appliance image (.img.zst, x86_64; needs qemu-system-x86_64 + KVM)"
-	@echo "  server-rpi   - server appliance for Raspberry Pi 4/5 (.img.zst, arm64; needs qemu-user-static + binfmt_misc)"
-	@echo "  netboot-x86  - kernel + initrd + squashfs for PXE-flash clients (.tar.zst, x86_64)"
+	@echo "  server-x86   - server appliance image (.img.gz, x86_64; needs qemu-system-x86_64 + KVM)"
+	@echo "  server-rpi   - server appliance for Raspberry Pi 4/5 (.img.gz, arm64; needs qemu-user-static + binfmt_misc)"
+	@echo "  netboot-x86  - kernel + initrd + squashfs trio for PXE-flash clients (x86_64)"
 	@echo ""
 	@echo "Docker (trial / image-library bty-web container):"
 	@echo "  docker-build  uv build + docker build -> bty-web:dev (single-arch, local)"
@@ -104,9 +104,9 @@ media-deps:
 	pipx ensurepath
 
 # Build a media image. Pick the variant via ``VARIANT=...``:
-#   make build VARIANT=usb-x86      - bootable USB live ISO (.iso.xz, x86_64)
-#   make build VARIANT=server-x86   - server appliance (.img.zst, x86_64)
-#   make build VARIANT=server-rpi   - server appliance for RPi 4/5 (.img.zst, arm64)
+#   make build VARIANT=usb-x86      - bootable USB live ISO (.iso.gz, x86_64)
+#   make build VARIANT=server-x86   - server appliance (.img.gz, x86_64)
+#   make build VARIANT=server-rpi   - server appliance for RPi 4/5 (.img.gz, arm64)
 #   make build VARIANT=netboot-x86  - kernel + initrd + squashfs for PXE clients
 #
 # server-x86 uses cloud-init in QEMU (cijoe/tasks/build.yaml) and

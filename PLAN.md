@@ -117,7 +117,7 @@ bootstrap requests issued by the bty live environment during a network
 flash, and records last-seen / last-flashed timestamps as the per-MAC
 audit trail.
 Successor to the original Flask UI. Stateful; the system of record for
-both fleet provisioning intent and per-machine known-good state.
+per-MAC image + boot-policy assignments and the audit-log timeline.
 
 Shipped as the `bty-lab[web]` install extra and exposed as the `bty-web`
 console script. Lives under `src/bty/web/`.
