@@ -37,8 +37,8 @@ The closest neighborhood.
 
 bty differs by being modern Python + iPXE, by serving both ad-hoc USB
 and DevOps server in one project, by explicitly supporting non-Linux
-images, and by the online CIJOE post-clone customisation with
-known-good tracking.
+images, and by being strictly a flasher: post-flash bring-up is the
+image cooker's job, not bty's.
 
 ## Installer-based provisioners - netboot.xyz, Cobbler, Microsoft WDS/MDT
 
@@ -102,8 +102,9 @@ The combination:
 3. Single-appliance-server topology (homelab-scale, not data-center).
 4. Both ad-hoc USB and DevOps server in one project (most pick one).
 5. Modern, lightweight stack (NUC-class hardware, not a cluster).
-6. CIJOE-driven post-clone customisation with server-tracked known-good
-   state (most image-deploy tools stop at "bytes on disk").
+6. Flasher only -- post-flash bring-up is the image cooker's job
+   (cloud-init / NoCloud user-data), and bty-web holds zero
+   credentials against the targets it flashes.
 
 That combination does not have a clean drop-in alternative.
 "MAAS-without-the-MAAS-overhead, OS-agnostic, dual-mode" is the niche.

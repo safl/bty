@@ -61,14 +61,7 @@
                     <option value="flash">flash (every boot)</option>
                 </select>
             </div>
-            <div class="col-md-2">
-                <label for="add-provisioning-mode" class="form-label small mb-1">Provisioning</label>
-                <select class="form-select" id="add-provisioning-mode" name="provisioning_mode">
-                    <option value="none" selected>none</option>
-                    <option value="cijoe-task">cijoe-task</option>
-                </select>
-            </div>
-            <div class="col-md-2">
+            <div class="col-md-4">
                 <button type="submit" class="btn btn-primary w-100">
                     <i class="bi bi-plus-lg me-1"></i>Add
                 </button>
@@ -76,9 +69,9 @@
         </form>
         <div class="form-text small mt-2">
             MAC is the only required field. Image binding is set per-machine on
-            the detail page (click the row); flash policy and per-machine boot
-            mode default to "local" / "none" so a freshly added machine doesn't
-            re-flash itself unexpectedly on first boot.
+            the detail page (click the row); the boot policy defaults to
+            "local" so a freshly added machine doesn't re-flash itself
+            unexpectedly on first boot.
         </div>
     </div>
 </div>
@@ -91,7 +84,6 @@
         var data = new FormData();
         data.append("hostname", f.querySelector("#add-hostname").value);
         data.append("boot_policy", f.querySelector("#add-boot-policy").value);
-        data.append("provisioning_mode", f.querySelector("#add-provisioning-mode").value);
         // Submit via the existing form-handler endpoint -- /ui/machines/<mac>.
         fetch("/ui/machines/" + encodeURIComponent(mac), {
             method: "POST",
@@ -116,12 +108,10 @@
                 <tr>
                     <th>MAC</th>
                     <th>Image</th>
-                    <th>Provisioning</th>
                     <th>Boot</th>
                     <th>Hostname</th>
                     <th>Last seen</th>
                     <th>Last flashed</th>
-                    <th>Task</th>
                     <th></th>
                 </tr>
             </thead>

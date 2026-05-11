@@ -147,6 +147,6 @@ def test_flash_zst_to_loop_device_byte_correct(
     assert written == payload
 
 
-# bty has no offline post-flash provisioning. Image-side first-boot
-# bring-up is the image cooker's job; post-boot config is bty-web's
-# cijoe-task flow (covered by tests/test_web_task.py).
+# bty has no post-flash provisioning step. Image-side first-boot
+# bring-up is the image cooker's job (cloud-init / NoCloud);
+# bty itself only writes bytes.

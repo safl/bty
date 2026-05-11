@@ -34,13 +34,11 @@ from bty import catalog as _catalog
 from bty import images
 from bty.web import _catalog as _web_catalog
 from bty.web import _db, _hash, _models, _release_mgr, _ui
-from bty.web import _task as _task_module
 from bty.web._auth import SESSION_COOKIE, require_auth
 from bty.web._events import MachineEvent, MachineEventBus, sse_format
 from bty.web._events_log import list_events as _list_events
 from bty.web._events_log import normalize_ip as _normalize_ip
 from bty.web._events_log import record as _log_event
-from bty.web._task import TaskManager
 
 # Session cookie max-age. Sliding TTL on the browser side; Starlette's
 # SessionMiddleware refreshes the cookie on each authed response, so
@@ -108,9 +106,9 @@ def create_app(
 
     @asynccontextmanager
     async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
-        # The SSE event bus accepts publishes from worker threads
-        # (TaskManager) - capture the loop now so cross-thread
-        # publishes can hop in via call_soon_threadsafe.
+        # The SSE event bus accepts publishes from worker threads -
+        # capture the loop now so cross-thread publishes can hop in
+        # via call_soon_threadsafe.
         event_bus.attach(asyncio.get_running_loop())
         if parsed_catalog is not None:
             download_manager.start(parsed_catalog, catalog_cache_dir)
@@ -126,12 +124,6 @@ def create_app(
         # because fetching two GitHub releases in parallel is
         # operator-confusing and bandwidth-saturating.
         release_fetch_manager.start(resolved_boot_root, state_path=state_path)
-        # Task manager: cancelable cijoe-task runs. ``start()``
-        # sweeps stale ``running`` rows in state.db (left by
-        # in-flight tasks at the previous bty-web shutdown) so the
-        # UI doesn't show a perma-running badge that never
-        # resolves.
-        task_runner.start()
         # Auto-import: enqueue every dir-scan file without a
         # ``.sha256`` sidecar so the HashManager processes them
         # in the background. Once a sidecar lands, ``/images``
@@ -204,14 +196,10 @@ def create_app(
             discovered_count = conn.execute(
                 "SELECT COUNT(*) FROM machines WHERE image_sha256 IS NULL"
             ).fetchone()[0]
-            task_failed_count = conn.execute(
-                "SELECT COUNT(*) FROM machines WHERE last_task_status = 'failed'"
-            ).fetchone()[0]
         image_count = len(images.list_images(resolved_image_root))
         return jinja.get_template("ui/_dashboard_counts.html").render(
             machine_count=machine_count,
             discovered_count=discovered_count,
-            task_failed_count=task_failed_count,
             image_count=image_count,
         )
 
@@ -229,38 +217,6 @@ def create_app(
 
     # Back-compat alias - older internal call sites use this name.
     publish_machines_changed = publish_state_changed
-
-    # Operator-supplied cijoe config (optional). If
-    # ``BTY_CIJOE_USER_CONFIG`` points at an existing file (or the
-    # default ``/var/lib/bty/cijoe-user-config.toml`` exists) it
-    # gets passed to ``cijoe`` as a ``--config`` argument alongside
-    # bty-web's auto-generated transport TOML. Resolved at run time
-    # (not construction) so the operator can drop the file in / out
-    # without bouncing bty-web.
-    user_cfg_env = os.environ.get("BTY_CIJOE_USER_CONFIG")
-    user_config_path: Path | None = (
-        Path(user_cfg_env) if user_cfg_env else _task_module.DEFAULT_USER_CONFIG_PATH
-    )
-
-    # SSH port for the cijoe-task transport. Defaults to 22; operators
-    # with port-forwarded targets (or anyone running sshd on a non-
-    # standard port) can override via ``BTY_CIJOE_SSH_PORT``. Falls
-    # back to 22 silently on a malformed value rather than blocking
-    # bty-web startup.
-    ssh_port = _task_module.DEFAULT_SSH_PORT
-    raw_port = os.environ.get("BTY_CIJOE_SSH_PORT")
-    if raw_port is not None:
-        with contextlib.suppress(ValueError):
-            parsed = int(raw_port)
-            if 1 <= parsed <= 65535:
-                ssh_port = parsed
-
-    task_runner = TaskManager(
-        state_path=state_path,
-        publish_machines_changed=publish_machines_changed,
-        user_config_path=user_config_path,
-        ssh_port=ssh_port,
-    )
 
     # ----- Open routes (no auth) ------------------------------------------
 
@@ -312,10 +268,10 @@ def create_app(
                 conn.execute(
                     """
                     INSERT INTO machines
-                        (mac, provisioning_mode, boot_policy,
+                        (mac, boot_policy,
                          discovered_at, last_seen_at, last_seen_ip,
                          created_at, updated_at)
-                    VALUES (?, 'none', 'tui', ?, ?, ?, ?, ?)
+                    VALUES (?, 'tui', ?, ?, ?, ?, ?)
                     """,
                     (normalised, now, now, client_ip, now, now),
                 )
@@ -427,31 +383,6 @@ def create_app(
                 detail=f"no machine record for {normalised}",
             )
         publish_machines_changed()
-
-        # Online cijoe: if the machine is set up for
-        # post-boot provisioning, kick off a task run in a worker
-        # thread now that the live env says the flash is done. cijoe's
-        # transport-retry handles waiting for SSH to come up. The
-        # request still returns 204 immediately - task status
-        # surfaces via the SSE machines-update channel as it changes.
-        with _db.open_db(state_path) as conn:
-            row = conn.execute(
-                "SELECT provisioning_mode, cijoe_task_ref, last_seen_ip "
-                "FROM machines WHERE mac = ?",
-                (normalised,),
-            ).fetchone()
-        if (
-            row is not None
-            and row["provisioning_mode"] == "cijoe-task"
-            and row["cijoe_task_ref"]
-            and row["last_seen_ip"]
-        ):
-            task_runner.kick_off(
-                mac=normalised,
-                task_ref=row["cijoe_task_ref"],
-                target_ip=row["last_seen_ip"],
-            )
-
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     # ---------- release-fetch manager ---------------------------
@@ -489,19 +420,6 @@ def create_app(
             )
         return state.to_dict()
 
-    # ---------- task manager (cijoe-task runs) -----------------------
-    # Mirrors the release-fetch / hash / download manager surfaces.
-    # ``/tasks`` is keyed by MAC because the cijoe-task lifecycle is
-    # per-machine: a flash-completion signal triggers one task; the
-    # operator may want to abort it via the UI or API. The manager
-    # is the only authoritative source for in-flight state (state.db's
-    # ``last_task_status`` lags slightly because workers update it
-    # at status transitions, not continuously).
-
-    @app.get("/tasks", dependencies=[Depends(require_auth)])
-    def list_tasks() -> dict[str, Any]:
-        return {"tasks": [s.to_dict() for s in task_runner.list()]}
-
     # ---------- event log ---------------------------------------
     # Slim audit log of operator + machine activity. Backs the
     # /ui/events page + per-subject embedded lists on
@@ -531,33 +449,6 @@ def create_app(
                 limit=limit,
             )
         return {"events": [e.to_dict() for e in events]}
-
-    @app.delete("/tasks/{mac}", dependencies=[Depends(require_auth)])
-    def cancel_task(mac: str, request: Request) -> dict[str, Any]:
-        normalised = _normalise_mac(mac)
-        state = task_runner.cancel(normalised)
-        if state is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"no task known for mac {normalised!r}",
-            )
-        # Only log when the cancel actually flipped state (queued/running ->
-        # cancelled). A no-op cancel of a completed/failed task shouldn't
-        # spam the audit log.
-        if state.status == "cancelled":
-            with _db.open_db(state_path) as conn:
-                _log_event(
-                    conn,
-                    kind="machine.task.cancelled",
-                    summary=f"task on {normalised} cancelled by operator",
-                    subject_kind="machine",
-                    subject_id=normalised,
-                    actor="operator",
-                    source_ip=_client_ip(request),
-                    details={"task_ref": state.task_ref},
-                )
-                conn.commit()
-        return state.to_dict()
 
     @app.get("/boot/{name}", include_in_schema=False)
     def boot_artifact(name: str) -> FileResponse:
@@ -702,23 +593,19 @@ def create_app(
             conn.execute(
                 """
                 INSERT INTO machines
-                    (mac, image_sha256, provisioning_mode, hostname,
-                     cijoe_task_ref, boot_policy, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    (mac, image_sha256, hostname, boot_policy,
+                     created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT(mac) DO UPDATE SET
-                    image_sha256       = excluded.image_sha256,
-                    provisioning_mode  = excluded.provisioning_mode,
-                    hostname           = excluded.hostname,
-                    cijoe_task_ref     = excluded.cijoe_task_ref,
-                    boot_policy        = excluded.boot_policy,
-                    updated_at         = excluded.updated_at
+                    image_sha256 = excluded.image_sha256,
+                    hostname     = excluded.hostname,
+                    boot_policy  = excluded.boot_policy,
+                    updated_at   = excluded.updated_at
                 """,
                 (
                     normalised,
                     body.image_sha256,
-                    body.provisioning_mode,
                     body.hostname,
-                    body.cijoe_task_ref,
                     body.boot_policy,
                     created_at,
                     now,
@@ -734,10 +621,8 @@ def create_app(
                 source_ip=_client_ip(request),
                 details={
                     "image_sha256": body.image_sha256,
-                    "provisioning_mode": body.provisioning_mode,
                     "boot_policy": body.boot_policy,
                     "hostname": body.hostname,
-                    "cijoe_task_ref": body.cijoe_task_ref,
                 },
             )
             conn.commit()
@@ -1308,17 +1193,12 @@ def _row_to_machine(row: object) -> _models.Machine:
     return _models.Machine(
         mac=row["mac"],  # type: ignore[index]
         image_sha256=row["image_sha256"],  # type: ignore[index]
-        provisioning_mode=row["provisioning_mode"],  # type: ignore[index]
         hostname=row["hostname"],  # type: ignore[index]
-        cijoe_task_ref=row["cijoe_task_ref"],  # type: ignore[index]
         discovered_at=_iso_or_none(row["discovered_at"]),  # type: ignore[index]
         last_seen_at=_iso_or_none(row["last_seen_at"]),  # type: ignore[index]
         last_seen_ip=row["last_seen_ip"],  # type: ignore[index]
         boot_policy=row["boot_policy"],  # type: ignore[index]
         last_flashed_at=_iso_or_none(row["last_flashed_at"]),  # type: ignore[index]
-        last_task_run_at=_iso_or_none(row["last_task_run_at"]),  # type: ignore[index]
-        last_task_status=row["last_task_status"],  # type: ignore[index]
-        last_task_output_path=row["last_task_output_path"],  # type: ignore[index]
         created_at=datetime.fromisoformat(row["created_at"]),  # type: ignore[index]
         updated_at=datetime.fromisoformat(row["updated_at"]),  # type: ignore[index]
     )

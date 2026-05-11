@@ -40,8 +40,6 @@ from bty.web._events_log import normalize_ip as _normalize_ip
 from bty.web._models import (
     BOOT_POLICIES,
     DEFAULT_BOOT_POLICY,
-    DEFAULT_PROVISIONING_MODE,
-    PROVISIONING_MODES,
     CatalogEntryAdd,
     MachineUpsert,
 )
@@ -206,9 +204,6 @@ def register_ui_routes(
             discovered_count = conn.execute(
                 "SELECT COUNT(*) FROM machines WHERE image_sha256 IS NULL"
             ).fetchone()[0]
-            task_failed_count = conn.execute(
-                "SELECT COUNT(*) FROM machines WHERE last_task_status = 'failed'"
-            ).fetchone()[0]
             # Recent activity slice for the dashboard's "what just
             # happened?" widget. Reuses ``_events_card.html`` so the
             # styling matches the per-machine and per-image cards;
@@ -221,7 +216,6 @@ def register_ui_routes(
             request,
             machine_count=machine_count,
             discovered_count=discovered_count,
-            task_failed_count=task_failed_count,
             image_count=image_count,
             recent_events=recent_events,
         )
@@ -240,20 +234,14 @@ def register_ui_routes(
         # image_sha256 yet). Powered by the dashboard's
         # "Unassigned (discovered)" counter card so clicking it
         # lands on a pre-filtered list. ``?filter=assigned`` --
-        # symmetric "operator-bound" view. ``?filter=task-failed``
-        # -- machines whose last cijoe-task run failed; an operator
-        # triage shortcut for "which boxes need attention?".
-        # Anything else (no filter, empty value, an unrecognised
-        # value) shows the full list and surfaces no active-filter
-        # banner.
+        # symmetric "operator-bound" view. Anything else (no
+        # filter, empty value, an unrecognised value) shows the
+        # full list and surfaces no active-filter banner.
         if filter == "discovered":
             sql = "SELECT * FROM machines WHERE image_sha256 IS NULL ORDER BY mac"
             active_filter: str | None = filter
         elif filter == "assigned":
             sql = "SELECT * FROM machines WHERE image_sha256 IS NOT NULL ORDER BY mac"
-            active_filter = filter
-        elif filter == "task-failed":
-            sql = "SELECT * FROM machines WHERE last_task_status = 'failed' ORDER BY mac"
             active_filter = filter
         else:
             sql = "SELECT * FROM machines ORDER BY mac"
@@ -307,7 +295,6 @@ def register_ui_routes(
             request,
             m=_row_to_dict(row),
             images=unified,
-            provisioning_modes=list(PROVISIONING_MODES),
             boot_policies=list(BOOT_POLICIES),
             machine_events=machine_events,
             flash=flash,
@@ -322,9 +309,7 @@ def register_ui_routes(
     def ui_machine_upsert(
         mac: str,
         image_sha256: Annotated[str, Form()] = "",
-        provisioning_mode: Annotated[str, Form()] = DEFAULT_PROVISIONING_MODE,
         hostname: Annotated[str, Form()] = "",
-        cijoe_task_ref: Annotated[str, Form()] = "",
         boot_policy: Annotated[str, Form()] = DEFAULT_BOOT_POLICY,
     ) -> RedirectResponse:
         normalised = _normalise_mac(mac)
@@ -338,9 +323,7 @@ def register_ui_routes(
         try:
             validated = MachineUpsert(
                 image_sha256=image_sha256 or None,
-                provisioning_mode=provisioning_mode,
                 hostname=hostname or None,
-                cijoe_task_ref=cijoe_task_ref or None,
                 boot_policy=boot_policy,
             )
         except ValueError as exc:
@@ -349,16 +332,9 @@ def register_ui_routes(
                 + urllib.parse.quote(f"validation failed: {exc}", safe=""),
                 status_code=status.HTTP_303_SEE_OTHER,
             )
-        # ``provisioning_mode`` / ``boot_policy`` are pattern-checked
-        # by Pydantic above; the explicit set membership check is
-        # therefore redundant but kept for the legacy enum-style
-        # error wording (covers any future drift between the regex
-        # patterns and the documented set).
-        if validated.provisioning_mode not in PROVISIONING_MODES:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"invalid provisioning_mode: {validated.provisioning_mode!r}",
-            )
+        # ``boot_policy`` is pattern-checked by Pydantic above; the
+        # explicit set membership check is therefore redundant but
+        # kept for the legacy enum-style error wording.
         if validated.boot_policy not in BOOT_POLICIES:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -373,23 +349,19 @@ def register_ui_routes(
             conn.execute(
                 """
                 INSERT INTO machines
-                    (mac, image_sha256, provisioning_mode, hostname,
-                     cijoe_task_ref, boot_policy, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    (mac, image_sha256, hostname, boot_policy,
+                     created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT(mac) DO UPDATE SET
-                    image_sha256       = excluded.image_sha256,
-                    provisioning_mode  = excluded.provisioning_mode,
-                    hostname           = excluded.hostname,
-                    cijoe_task_ref     = excluded.cijoe_task_ref,
-                    boot_policy        = excluded.boot_policy,
-                    updated_at         = excluded.updated_at
+                    image_sha256 = excluded.image_sha256,
+                    hostname     = excluded.hostname,
+                    boot_policy  = excluded.boot_policy,
+                    updated_at   = excluded.updated_at
                 """,
                 (
                     normalised,
                     validated.image_sha256,
-                    validated.provisioning_mode,
                     validated.hostname,
-                    validated.cijoe_task_ref,
                     validated.boot_policy,
                     created_at,
                     now,
@@ -823,17 +795,12 @@ def _row_to_dict(row: Any) -> dict[str, Any]:
     return {
         "mac": row["mac"],
         "image_sha256": row["image_sha256"],
-        "provisioning_mode": row["provisioning_mode"],
         "hostname": row["hostname"],
-        "cijoe_task_ref": row["cijoe_task_ref"],
         "discovered_at": row["discovered_at"],
         "last_seen_at": row["last_seen_at"],
         "last_seen_ip": row["last_seen_ip"],
         "boot_policy": row["boot_policy"],
         "last_flashed_at": row["last_flashed_at"],
-        "last_task_run_at": row["last_task_run_at"],
-        "last_task_status": row["last_task_status"],
-        "last_task_output_path": row["last_task_output_path"],
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
     }

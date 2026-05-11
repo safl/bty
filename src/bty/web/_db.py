@@ -37,17 +37,12 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS machines (
     mac                       TEXT PRIMARY KEY,
     image_sha256              TEXT,    -- content-addressed image identity
-    provisioning_mode         TEXT NOT NULL DEFAULT 'none',
     hostname                  TEXT,
-    cijoe_task_ref            TEXT,
     discovered_at             TEXT,    -- first /pxe/{mac} contact (NULL if PUT-created)
     last_seen_at              TEXT,    -- most recent /pxe/{mac} contact
     last_seen_ip              TEXT,    -- source IP of most recent /pxe contact
     boot_policy               TEXT NOT NULL DEFAULT 'local',
     last_flashed_at           TEXT,    -- updated by POST /pxe/{mac}/done
-    last_task_run_at          TEXT,    -- start of the most recent task run
-    last_task_status          TEXT,    -- one of bty.web._models.TASK_STATUSES, or NULL
-    last_task_output_path     TEXT,    -- on-disk dir of the cijoe run
     created_at                TEXT NOT NULL,
     updated_at                TEXT NOT NULL
 );
@@ -108,7 +103,6 @@ class StaleSchemaError(RuntimeError):
 # operator-actionable message instead of letting the first
 # subsequent ``SELECT`` blow up with ``no such column``.
 _REQUIRED_COLUMNS: dict[str, tuple[str, ...]] = {
-    "machines": ("last_task_status", "last_task_run_at", "last_task_output_path"),
     "events": ("source_ip",),
 }
 

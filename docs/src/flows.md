@@ -195,14 +195,14 @@ schedule, on demand, or on failure.
 3. Target machine PXE-boots; iPXE chains into the bty live
    environment served over HTTP by `bty-web`.
 4. The live env's `bty-flash-on-boot.service` fetches the assigned
-   image from `GET /images/{name}`, runs `bty flash`, applies the
-   provisioning mode, and `POST`s `/pxe/{mac}/done` to update
-   `last_flashed_at`. Then it reboots automatically.
+   image from `GET /images/{name}`, runs `bty flash`, and `POST`s
+   `/pxe/{mac}/done` to update `last_flashed_at`. Then it reboots
+   automatically.
 5. The next reboot still chains the live env unless the operator
    flips the machine to `boot_policy=local`. Per-job CI cadences
    that want every boot to reflash leave the policy on `flash`.
-6. If the assigned provisioning mode is `cijoe-task`, `bty-web`
-   triggers the CIJOE task against the booted target and records
-   the post-task state as the machine's known-good baseline.
+6. First-boot bring-up (users, network, packages, hostnames) is the
+   cooked image's job, baked in via cloud-init / NoCloud user-data
+   at image-build time. bty has no online provisioning step.
 
 Both BIOS and UEFI clients are supported via iPXE.

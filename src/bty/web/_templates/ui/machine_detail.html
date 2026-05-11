@@ -18,55 +18,6 @@
             <dd class="col-sm-9">{{ m.last_seen_at or "-" }}{% if m.last_seen_ip %} from <a class="text-decoration-none" href="/ui/events?source_ip={{ m.last_seen_ip|urlencode }}" title="Show every event from this IP"><code>{{ m.last_seen_ip }}</code></a>{% endif %}</dd>
             <dt class="col-sm-3">Last flashed</dt>
             <dd class="col-sm-9">{{ m.last_flashed_at or "-" }}</dd>
-            <dt class="col-sm-3">Last task</dt>
-            <dd class="col-sm-9">
-                {% if m.last_task_status %}
-                {# Badge mapping: running=info (in flight), completed=
-                   success (rc=0), cancelled=warning (operator abort),
-                   failed=danger (rc!=0 / timeout). Same vocabulary as
-                   the other manager-driven jobs (hashes, downloads,
-                   release-fetches). #}
-                {% set badge_map = {
-                    'running': 'bg-info',
-                    'completed': 'bg-success',
-                    'cancelled': 'bg-warning text-dark',
-                    'failed': 'bg-danger',
-                } %}
-                {% set badge = badge_map.get(m.last_task_status, 'bg-light text-dark border') %}
-                <span class="badge {{ badge }}">{{ m.last_task_status }}</span>
-                <small class="text-muted">at {{ m.last_task_run_at }}</small>
-                {% if m.last_task_output_path %}
-                <div class="small text-muted">output: <code>{{ m.last_task_output_path }}</code></div>
-                {% endif %}
-                {# Cancel button when a task is in flight. Hits
-                   ``DELETE /tasks/{mac}``; the manager's cancel()
-                   sets the per-task threading.Event and SIGTERMs
-                   the cijoe subprocess. #}
-                {% if m.last_task_status == 'running' %}
-                <button type="button" class="btn btn-sm btn-outline-warning mt-2 bty-cancel-task-btn"
-                        data-mac="{{ m.mac }}">
-                    <i class="bi bi-stop-circle me-1"></i>Cancel running task
-                </button>
-                <script>
-                (function () {
-                    document.querySelectorAll(".bty-cancel-task-btn").forEach(function (btn) {
-                        btn.addEventListener("click", function () {
-                            if (!confirm("Cancel the running cijoe task on " + btn.dataset.mac + "?")) return;
-                            btn.disabled = true;
-                            fetch("/tasks/" + encodeURIComponent(btn.dataset.mac), {
-                                method: "DELETE",
-                                credentials: "same-origin",
-                            }).then(function () { window.location.reload(); })
-                              .catch(function () { btn.disabled = false; });
-                        });
-                    });
-                })();
-                </script>
-                {% endif %}
-                {% else %}
-                -
-                {% endif %}
-            </dd>
             <dt class="col-sm-3">Created</dt>
             <dd class="col-sm-9">{{ m.created_at }}</dd>
             <dt class="col-sm-3">Updated</dt>
@@ -96,32 +47,9 @@
                 </select>
             </div>
             <div class="mb-3">
-                <label class="form-label" for="provisioning_mode">Provisioning mode</label>
-                <select name="provisioning_mode" id="provisioning_mode" class="form-select">
-                    {% for mode in provisioning_modes %}
-                    <option value="{{ mode }}" {% if mode == m.provisioning_mode %}selected{% endif %}>{{ mode }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div class="mb-3">
                 <label class="form-label" for="hostname">Hostname</label>
                 <input type="text" name="hostname" id="hostname" class="form-control"
                        value="{{ m.hostname or '' }}" placeholder="(optional)">
-            </div>
-            <div class="mb-3">
-                <label class="form-label" for="cijoe_task_ref">CIJOE task ref</label>
-                <input type="text" name="cijoe_task_ref" id="cijoe_task_ref"
-                       class="form-control" value="{{ m.cijoe_task_ref or '' }}"
-                       placeholder="path/to/post-flash.yaml (only used when provisioning is cijoe-task)">
-                <div class="form-text small">
-                    Light post-flash scripting only. Each step uses a
-                    cijoe built-in script or an inline command;
-                    bty-web does not install third-party cijoe script
-                    packages. The intent is "set hostname / trigger
-                    reboot / drop one config file" - not configuration
-                    management. If you need more, bake it into the
-                    image instead.
-                </div>
             </div>
             <div class="mb-3">
                 <label class="form-label" for="boot_policy">Boot policy</label>

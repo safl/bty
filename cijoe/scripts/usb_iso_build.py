@@ -89,7 +89,16 @@ PUBLISH_GZ_BASENAME = "bty-usb-x86_64.iso.gz"
 # is intentionally "what you dd is what you get": the operator
 # may drop image files onto BTY_IMAGES before ever booting the
 # stick, so we can't depend on a first-boot grow step.
-TRAILING_EXFAT_GIB = 4
+# 2.1 GiB target: enough room for a fleet of small ``.bri``
+# descriptors plus either one large ``.img.gz`` (e.g. a Debian
+# server image) or several smaller ones. Smaller than the original
+# 4 GiB so the bty.iso plays nicely with Ventoy (which hosts the
+# images on its own data partition) and KVM-over-IP shims like
+# piKVM / JetKVM (which rely on the .bri-pointer flow rather than
+# embedded blobs). Operators who want more can grow the partition
+# on their host via ``gparted`` post-flash; the live env reads
+# whatever exFAT size it finds.
+TRAILING_EXFAT_SIZE = "2.1G"
 
 # Compress the cooked ISO with gzip. We tried xz first (zstd lacks
 # GUI flasher support) but Etcher's bundled xz decompressor failed
@@ -543,12 +552,12 @@ def _extend_with_exfat(cijoe, iso_path: Path) -> int:
     5. ``losetup -fP`` + ``mkfs.exfat -L BTY_IMAGES`` on p3.
     6. ``losetup -d``.
     """
-    log.info(f"Extending {iso_path} with +{TRAILING_EXFAT_GIB} GiB BTY_IMAGES exFAT")
+    log.info(f"Extending {iso_path} with +{TRAILING_EXFAT_SIZE} BTY_IMAGES exFAT")
     log.info("Layout: ISO9660 + relocated EFI + BTY_IMAGES (non-overlapping for Windows)")
 
-    err, _ = cijoe.run_local(f"truncate -s +{TRAILING_EXFAT_GIB}G {iso_path}")
+    err, _ = cijoe.run_local(f"truncate -s +{TRAILING_EXFAT_SIZE} {iso_path}")
     if err:
-        log.error(f"truncate +{TRAILING_EXFAT_GIB}G failed on {iso_path}")
+        log.error(f"truncate +{TRAILING_EXFAT_SIZE} failed on {iso_path}")
         return err
 
     # Read the current MBR.

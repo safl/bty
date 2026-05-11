@@ -261,10 +261,9 @@ no operator copy step.
 
 `bty flash` writes the bytes and stops. There's no
 post-flash provisioning step -- first-boot bring-up (users,
-network, packages, hostnames) is the image cooker's job. If the
-target is managed by bty-web with a ``cijoe-task`` configured,
-the server runs a small CIJOE task over SSH after the target
-first-boots; see [components](components.md) for that flow.
+network, packages, hostnames) is the image cooker's job, baked
+in via cloud-init / NoCloud user-data at image-build time. bty
+itself only writes bytes.
 
 ## Step 6: Reboot
 

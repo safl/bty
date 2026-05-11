@@ -18,34 +18,18 @@ flow this is the local disk seen by the live environment (typically
 `/dev/nvme0n1` or `/dev/sda`). For the network-flash flow it is the
 target machine's primary disk, selected by the live environment.
 
-## Provisioning mode
+## No post-flash provisioning
 
-What (if anything) configures the deployed system after the bytes
-land. Four modes:
+bty has no provisioning surface at all -- after the bytes land,
+bty is done. The target reboots into whatever the cooked image
+brings up by itself.
 
-- `none` - no post-flash configuration; reboot into the cooked image
-  as-is. The default. First-boot bring-up (users, network, packages,
-  hostnames) is baked into the image by the cooker upstream.
-- `cijoe-task` - bty-web only. After the target first-boots into its
-  own OS, `bty-web` SSHes in and runs a CIJOE task against the
-  running machine. Requires a managed MAC -- bty-web has to know
-  the target via a server-side machine record (`cijoe_task_ref` +
-  `last_seen_ip`). The server, not the image, becomes the source of
-  truth for "what this box should look like."
-
-  **Scope: simple scripting only.** The intent is short post-flash
-  hooks ("set hostname", "trigger a reboot", "write one config
-  file") -- not full configuration management. Each step in the
-  task YAML uses either a cijoe built-in script or an inline
-  shell command; bty-web does not install third-party cijoe
-  script packages. If you find yourself reaching for one, the
-  job belongs in the image cooker, not here. bty-web ships a
-  base cijoe install on the appliance and provides the SSH
-  transport config; the rest is whatever fits in a small YAML.
-
-That's the whole list. bty is a flasher, not a cooker. Image
-creation (users, network, packages, hostnames) belongs upstream
-in the image-builder project; bty just writes the bytes.
+First-boot bring-up (users, network, packages, hostnames) is the
+image cooker's job, baked in at build time via cloud-init /
+NoCloud user-data. Post-boot config management is whatever you
+run from the target itself (ansible, cijoe over SSH from your
+workstation, hand-edits) -- not from bty-web. The flasher never
+holds credentials against the machines it flashes.
 
 ## Disk layout (USB live)
 
@@ -58,10 +42,14 @@ three partitions in an MBR isohybrid layout:
   stick is never mutated by use.
 - **EFI ESP** (~3 MB). UEFI bootloader; relocated to a non-overlapping
   region so Windows hosts enumerate the stick correctly.
-- **`BTY_IMAGES` partition** (4 GiB, exFAT, MBR label `BTY_IMAGES`).
-  Holds cooked images the operator wants to flash onto target disks.
-  Sized for the dominant single-image `bty-server` flash use case;
-  grow with gparted on your host if you need more.
+- **`BTY_IMAGES` partition** (2.1 GiB, exFAT, MBR label `BTY_IMAGES`).
+  Holds cooked images the operator wants to flash onto target disks
+  -- room for a fleet of small `.bri` descriptors plus one large
+  `.img.gz` or a few smaller ones. Sized to play nicely with
+  Ventoy (which hosts the blobs on its own data partition) and
+  KVM-over-IP shims like piKVM / JetKVM (which rely on `.bri`
+  pointers rather than bundled blobs). Grow with gparted on your
+  host if you need more.
 
 bty auto-mounts `/dev/disk/by-label/BTY_IMAGES` at `/var/lib/bty/images`
 on boot. The `bty list images` and `bty inspect image` commands read
@@ -76,10 +64,10 @@ overlayroot tmpfs, so files copied there persist on the stick.
 ## Machine record
 
 A `bty-web`-only concept. A persistent entry in the server's state
-keyed by MAC address that captures: assigned image, provisioning mode,
-optional hostname, references to CIJOE tasks, and (after first boot)
-the post-task known-good baseline. The server uses machine records
-to render per-MAC iPXE configurations and to drive online CIJOE runs.
+keyed by MAC address that captures: assigned image, optional
+hostname, boot policy, and (after first PXE contact) last-seen IP +
+discovery timestamp. The server uses machine records to render
+per-MAC iPXE configurations.
 
 ## Boot policy
 

@@ -11,7 +11,7 @@ cover the validation logic:
 - ``execute_plan`` does the destructive write (qemu-img convert /
   zstd -d / dd as appropriate for the image format). bty has no
   post-flash provisioning step -- first-boot bring-up belongs in
-  the image cooker, post-boot config in bty-web's ``cijoe-task``.
+  the image cooker (cloud-init / NoCloud); bty only writes bytes.
 
 The CLI calls all four. Tests construct ``ImageInfo`` / ``TargetInfo``
 directly and exercise ``make_plan`` / ``validate_plan`` without mocks.

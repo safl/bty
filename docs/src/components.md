@@ -88,12 +88,12 @@ pipx install "bty-lab[tui]"
 HTTP server with a browser UI, intended to run on the bty server
 appliance. Hosts:
 
-- MAC-address-keyed assignment of image and provisioning mode.
+- MAC-address-keyed assignment of image to machine.
 - Per-MAC iPXE configuration rendering.
 - Bootstrap requests issued by the bty live environment during a
   network flash.
-- Online CIJOE orchestration after a target first-boots, with
-  per-machine known-good state tracking.
+- An audit log of operator + machine activity (see "Audit log"
+  section below).
 
 Requires the `web` extra:
 
@@ -101,18 +101,16 @@ Requires the `web` extra:
 pipx install "bty-lab[web]"
 ```
 
-State (machine records, MAC <-> image/provisioning assignments, CIJOE
-task references and run reports, known-good baselines, image
-catalog metadata, server settings, sessions) is persisted in a
-single SQLite database under the configured `BTY_STATE_DIR`. Backup
-or migrate by copying the file.
+`bty-web` is intentionally a flasher only -- it writes bytes,
+records what was flashed when, and never opens an SSH session to a
+flashed target. First-boot bring-up belongs in the image cooker
+(cloud-init / NoCloud user-data baked at image-build time); bty-web
+holds zero credentials against the targets it flashes.
 
-CIJOE produces a structured report on every task run. `bty-web`
-captures these reports - both for offline runs (sent back from the live
-environment) and online runs (executed by the server itself) - and
-exposes them in the UI per machine and per run. Reports are downloadable
-in full, so an operator chasing a flaky reflash can inspect the
-complete log without leaving the browser.
+State (machine records, MAC <-> image assignments, image catalog
+metadata, server settings, sessions, audit-log events) is persisted
+in a single SQLite database under the configured `BTY_STATE_DIR`.
+Backup or migrate by copying the file.
 
 The runtime is sized for modest x86 hardware: lightweight Python web
 framework, no heavy front-end build pipeline, no JVM dependencies.
@@ -193,47 +191,21 @@ GMKtec mini-PCs. The same artifact also boots as a VM disk.
 `server-rpi` targets the 64-bit Raspberry Pis (4 and 5); both boot the
 SD-card image natively.
 
-## CIJOE provisioning (post-boot only)
+## No post-flash provisioning
 
-After the target first-boots into the freshly-flashed OS,
-`bty-web` SSHes in and runs a CIJOE task against the running
-machine. v0.7.39 narrowed bty's CIJOE surface to this
-server-driven mode only -- offline image-mounting is the image
-cooker's job.
+bty has no online provisioning surface. The bty-web server is a
+flasher: it writes bytes, records when bytes were written, and
+never opens an SSH session to a flashed target. Earlier versions
+(through v0.7.56) shipped an optional cijoe-task runner that
+SSH'd into post-flash targets; that surface was removed because
+"the flasher holds root creds on every machine it ever
+provisioned" is a bad security shape.
 
-**Transport config layering.** bty-web always synthesises a
-`transport.toml` with `[cijoe.transport.ssh]` pinned at the
-target's `last_seen_ip` + the operator-supplied SSH key at
-`/var/lib/bty/keys/id_ed25519`. The operator can drop a second
-config file at `/var/lib/bty/cijoe-user-config.toml`
-(overridable via `BTY_CIJOE_USER_CONFIG`) with task-specific
-settings, additional named transports, environment variables,
-etc. cijoe is invoked as:
-
-```
-cijoe <task.yaml> --config <user-config> --config <transport.toml> --monitor
-```
-
-The user config loads first; bty-web's transport TOML loads
-LAST and wins on conflicts -- so the SSH transport that targets
-the right machine is always under bty-web's control. The
-operator can layer extra named transports / settings on top
-without redirecting commands to the wrong host.
-
-**Non-default SSH port.** Targets that listen on something
-other than 22 (a separate IPMI host, an SSH jumpbox, a homelab
-NAT-mapped port) configure via `BTY_CIJOE_SSH_PORT` at the
-bty-web service level. Out-of-range or non-numeric values fall
-back to 22 silently so a typo doesn't break every task run; set
-it once in `/etc/default/bty-web` (or the systemd unit's
-`Environment=`) for the whole appliance.
-
-**Cancelable.** The operator can DELETE `/tasks/{mac}` from the
-UI's "Cancel running task" button; bty-web flips a
-`threading.Event` and `Popen.terminate()`s the cijoe subprocess.
-Status surfaces via `last_task_status` and the SSE
-machines-update channel; lifecycle events land in the audit log
-(`/ui/events`).
+First-boot bring-up belongs in the image cooker -- cloud-init /
+NoCloud user-data baked into the image at build time. Post-boot
+config management is anything you run from the target itself
+(cijoe over SSH from your workstation, ansible, etc.), not from
+bty-web.
 
 ## Audit log
 

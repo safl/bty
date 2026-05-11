@@ -17,10 +17,6 @@ set -eu
 install -d -o bty -g bty -m 0750 /var/lib/bty
 install -d -o bty -g bty -m 0750 /var/lib/bty/images
 install -d -o bty -g bty -m 0750 /var/lib/bty/boot
-install -d -o bty -g bty -m 0750 /var/lib/bty/tasks
-# Operator drops the SSH key for cijoe-task at /var/lib/bty/keys/
-# id_ed25519 (key generation lands later).
-install -d -o bty -g bty -m 0700 /var/lib/bty/keys
 
 # Per-appliance session-cookie secret. Used by Starlette's
 # SessionMiddleware to sign the bty-token cookie. The file persists

@@ -146,8 +146,8 @@ Exit codes:
 
 Flash an image onto a target block device. ``bty flash`` is a
 flasher only -- first-boot bring-up belongs in the image cooker
-upstream, post-boot configuration belongs in bty-web's
-``cijoe-task`` flow. There are no provisioning flags here.
+upstream (cloud-init / NoCloud user-data baked at image-build
+time). There are no provisioning flags here.
 
 `--image` accepts three forms:
 
@@ -325,11 +325,9 @@ tooling which can't carry a session cookie:
  after a successful flash. Updates `last_flashed_at`. **Does not
  modify `boot_policy`** - flipping a machine back to `local` is an
  explicit operator action so the per-job CI cadence (constant
- reflashing) survives across boots. If the machine has
- `provisioning_mode='cijoe-task'` and a `cijoe_task_ref`,
- this also kicks off a background CIJOE task run from bty-web
- against the freshly-booted target (milestone 15). Status surfaces
- via `last_task_status` and the SSE machines-update channel.
+ reflashing) survives across boots. bty-web does *not* run any
+ post-flash provisioning -- the target reboots into whatever the
+ cooked image brings up via cloud-init.
 - `GET /pxe-bootstrap.ipxe` - static iPXE script that dnsmasq points
  iPXE clients at on their second-stage DHCP. Returns
  `chain http://<host>/pxe/${net0/mac:hexhyp}` where `<host>` is the
@@ -368,26 +366,19 @@ normalised to lower-case `aa:bb:cc:dd:ee:ff`.
 Machine = {
   "mac": "aa:bb:cc:dd:ee:ff",
   "image_sha256": "<64-hex>" | null,         # null = discovered but unassigned
-  "provisioning_mode": "none" | "cijoe-task",
   "hostname": "..." | null,
-  "cijoe_task_ref": "..." | null,
   "discovered_at": "<ISO 8601>" | null,      # first /pxe contact; null if PUT-only
   "last_seen_at":  "<ISO 8601>" | null,      # most recent /pxe contact
   "last_seen_ip":  "203.0.113.42" | null,
   "boot_policy":   "local" | "flash" | "tui", # what /pxe/{mac} returns
   "last_flashed_at": "<ISO 8601>" | null,    # set by POST /pxe/{mac}/done
-  "last_task_run_at":    "<ISO 8601>" | null,
-  "last_task_status":    "running" | "completed" | "cancelled" | "failed" | null,
-  "last_task_output_path": str | null,       # /var/lib/bty/tasks/<mac>/<run-id>
   "created_at":    "<ISO 8601>",
   "updated_at":    "<ISO 8601>"
 }
 
 MachineUpsert = {
   "image_sha256": "<64-hex>" | null,
-  "provisioning_mode": "none" | "cijoe-task",
   "hostname": str | null,
-  "cijoe_task_ref": str | null,
   "boot_policy": "local" | "flash" | "tui"  # default "local" on PUT;
                                             # auto-discovery sets "tui"
 }

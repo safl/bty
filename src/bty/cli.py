@@ -336,8 +336,8 @@ def cmd_flash(
     real ``bty.flash`` / ``os`` machinery is invoked.
 
     bty is a flasher, not a provisioner: first-boot bring-up belongs
-    in the image cooker upstream; post-boot configuration via
-    ``cijoe-task`` is bty-web's territory and runs server-side.
+    in the image cooker upstream (cloud-init / NoCloud / whatever
+    the operator bakes in). bty itself only writes bytes.
     """
     if not args.dry_run and not args.yes:
         print(
@@ -410,8 +410,8 @@ def cmd_flash(
         return 1
 
     # No post-flash provisioning step here. First-boot bring-up
-    # belongs in the image; post-boot config belongs in bty-web's
-    # cijoe-task flow.
+    # belongs in the image (cloud-init / NoCloud); bty itself
+    # only writes bytes.
 
     if progress_cb is not None:
         progress_cb(flash.FlashProgress(event="done"))

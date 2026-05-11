@@ -158,12 +158,10 @@ refuses to do anything without one or the other.
 
 ### Provisioning?
 
-bty doesn't do offline provisioning. First-boot bring-up (users,
+bty doesn't do any provisioning. First-boot bring-up (users,
 network, packages, hostnames) gets baked into the image by the
-cooker upstream -- bty just writes the bytes. For post-boot
-configuration on PXE-managed machines, see the bty-web flow's
-``cijoe-task`` mode (covered in the [components](components.md)
-chapter).
+cooker upstream via cloud-init / NoCloud user-data -- bty just
+writes the bytes.
 
 Interactive flashing via the TUI:
 

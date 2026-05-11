@@ -144,9 +144,7 @@ def test_list_filters_by_actor(tmp_path: Path) -> None:
     try:
         _events_log.record(conn, kind="machine.upserted", summary="from operator", actor="operator")
         _events_log.record(conn, kind="machine.discovered", summary="from pxe", actor="pxe-client")
-        _events_log.record(
-            conn, kind="machine.task.completed", summary="from system", actor="system"
-        )
+        _events_log.record(conn, kind="machine.flashed", summary="from system", actor="system")
         conn.commit()
         rows = _events_log.list_events(conn, actor="operator")
     finally:
@@ -167,7 +165,7 @@ def test_list_filters_by_source_ip(tmp_path: Path) -> None:
         _events_log.record(
             conn, kind="machine.upserted", summary="from .55", source_ip="192.168.1.55"
         )
-        _events_log.record(conn, kind="machine.task.completed", summary="system, no IP")
+        _events_log.record(conn, kind="machine.flashed", summary="system, no IP")
         conn.commit()
         rows = _events_log.list_events(conn, source_ip="192.168.1.42")
     finally:
@@ -244,7 +242,7 @@ def test_source_ip_round_trip(tmp_path: Path) -> None:
         )
         _events_log.record(
             conn,
-            kind="machine.task.completed",
+            kind="machine.flashed",
             summary="system event with no source",
             actor="system",
             # source_ip omitted -> NULL
@@ -256,7 +254,7 @@ def test_source_ip_round_trip(tmp_path: Path) -> None:
     by_kind = {r.kind: r for r in rows}
     assert by_kind["machine.discovered"].source_ip == "192.168.1.42"
     assert by_kind["machine.upserted"].source_ip == "10.0.0.5"
-    assert by_kind["machine.task.completed"].source_ip is None
+    assert by_kind["machine.flashed"].source_ip is None
 
 
 def test_details_round_trip(tmp_path: Path) -> None:

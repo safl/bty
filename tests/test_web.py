@@ -176,7 +176,6 @@ def test_machine_crud_round_trip(app_client: TestClient) -> None:
     mac = "aa:bb:cc:dd:ee:ff"
     body = {
         "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-        "provisioning_mode": "cijoe-task",
         "hostname": "bty-test-01",
     }
 
@@ -189,7 +188,6 @@ def test_machine_crud_round_trip(app_client: TestClient) -> None:
         created["image_sha256"]
         == "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
     )
-    assert created["provisioning_mode"] == "cijoe-task"
     assert created["hostname"] == "bty-test-01"
 
     # Read back
@@ -217,20 +215,11 @@ def test_machine_upsert_normalises_mac(app_client: TestClient) -> None:
     """Upper-case input + dashes get normalised to canonical form."""
     r = app_client.put(
         "/machines/AA-BB-CC-DD-EE-FF",
-        json={"provisioning_mode": "none"},
+        json={"hostname": "n"},
         cookies=AUTH,
     )
     assert r.status_code == 200
     assert r.json()["mac"] == "aa:bb:cc:dd:ee:ff"
-
-
-def test_machine_upsert_rejects_invalid_provisioning_mode(app_client: TestClient) -> None:
-    r = app_client.put(
-        "/machines/aa:bb:cc:dd:ee:ff",
-        json={"provisioning_mode": "garbage"},
-        cookies=AUTH,
-    )
-    assert r.status_code == 422  # FastAPI body validation
 
 
 def test_pxe_for_known_mac_uses_assignment_template(app_client: TestClient) -> None:
@@ -239,7 +228,6 @@ def test_pxe_for_known_mac_uses_assignment_template(app_client: TestClient) -> N
         f"/machines/{mac}",
         json={
             "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            "provisioning_mode": "none",
         },
         cookies=AUTH,
     )
@@ -280,7 +268,6 @@ def test_pxe_auto_discovers_unknown_mac(app_client: TestClient) -> None:
     body = found.json()
     assert body["mac"] == mac
     assert body["image_sha256"] is None  # discovered, not yet assigned
-    assert body["provisioning_mode"] == "none"
     assert body["boot_policy"] == "tui"  # auto-discovery default
     assert body["discovered_at"] is not None
     assert body["last_seen_at"] is not None
@@ -313,7 +300,6 @@ def test_pxe_does_not_overwrite_assignment(app_client: TestClient) -> None:
         f"/machines/{mac}",
         json={
             "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            "provisioning_mode": "cijoe-task",
         },
         cookies=AUTH,
     )
@@ -328,7 +314,6 @@ def test_pxe_does_not_overwrite_assignment(app_client: TestClient) -> None:
     assert (
         after["image_sha256"] == "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
     )  # untouched
-    assert after["provisioning_mode"] == "cijoe-task"
     assert after["last_seen_at"] is not None
     # discovered_at is set on first /pxe contact even for PUT-created rows
     assert after["discovered_at"] is not None
@@ -619,7 +604,6 @@ def test_machine_default_boot_policy_is_local(app_client: TestClient) -> None:
         "/machines/aa:bb:cc:dd:ee:ff",
         json={
             "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            "provisioning_mode": "none",
         },
         cookies=AUTH,
     )
@@ -645,40 +629,6 @@ def test_machine_upsert_rejects_malformed_sha256(app_client: TestClient) -> None
             cookies=AUTH,
         )
         assert r.status_code == 422, f"expected 422 for {bad!r}, got {r.status_code}"
-
-
-def test_machine_upsert_rejects_pathological_cijoe_task_ref(app_client: TestClient) -> None:
-    """``cijoe_task_ref`` rejects NUL / newline / empty inputs at
-    the Pydantic layer so they can't reach the subprocess launch
-    or the audit log. Regular operator paths (absolute, relative,
-    with spaces) stay accepted."""
-    valid_sha = "0" * 64
-    for bad in ("", "with\x00nul", "with\nnewline", "with\rcr"):
-        r = app_client.put(
-            "/machines/aa:bb:cc:dd:ee:ff",
-            json={
-                "image_sha256": valid_sha,
-                "cijoe_task_ref": bad,
-            },
-            cookies=AUTH,
-        )
-        assert r.status_code == 422, f"expected 422 for {bad!r}, got {r.status_code}"
-
-    # Sanity: real operator-shaped paths still pass.
-    for ok in (
-        "/var/lib/bty/tasks/post-flash.yaml",
-        "tasks/relative-path.yaml",
-        "/path with spaces/foo.yaml",
-    ):
-        r = app_client.put(
-            "/machines/aa:bb:cc:dd:ee:ff",
-            json={
-                "image_sha256": valid_sha,
-                "cijoe_task_ref": ok,
-            },
-            cookies=AUTH,
-        )
-        assert r.status_code == 200, f"expected 200 for {ok!r}, got {r.status_code} {r.text}"
 
 
 def test_machine_upsert_rejects_empty_hostname(app_client: TestClient) -> None:
@@ -773,7 +723,6 @@ def test_machine_upsert_accepts_boot_policy_flash(app_client: TestClient) -> Non
         "/machines/aa:bb:cc:dd:ee:ff",
         json={
             "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            "provisioning_mode": "none",
             "boot_policy": "flash",
         },
         cookies=AUTH,
@@ -819,7 +768,6 @@ def test_pxe_flash_policy_returns_chain_with_args(app_client: TestClient) -> Non
         "/machines/aa:bb:cc:dd:ee:ff",
         json={
             "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            "provisioning_mode": "cijoe-task",
             "boot_policy": "flash",
         },
         cookies=AUTH,
@@ -849,9 +797,8 @@ def test_pxe_flash_policy_returns_chain_with_args(app_client: TestClient) -> Non
         "bty.image_url=${bty-base}/images/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef/"
         in body
     )
-    # ``bty.provisioning`` is no longer emitted on the cmdline --
-    # post-flash provisioning is server-driven via cijoe-task,
-    # not live-env-driven.
+    # ``bty.provisioning`` is not emitted on the cmdline -- bty
+    # has no post-flash provisioning step.
     assert "bty.provisioning" not in body
 
 
@@ -918,158 +865,6 @@ def test_pxe_done_updates_last_flashed_at(app_client: TestClient) -> None:
 def test_pxe_done_404_for_unknown_mac(app_client: TestClient) -> None:
     r = app_client.post("/pxe/00:11:22:33:44:55/done")
     assert r.status_code == 404
-
-
-# ---------- online cijoe auto-trigger (milestone 15) ----------------------
-
-
-def test_pxe_done_triggers_online_task_when_configured(app_client: TestClient) -> None:
-    """``provisioning_mode='cijoe-task'`` + task ref + last_seen_ip
-    means the completion signal kicks off a task run via
-    TaskManager. The runner's ``kick_off`` should be called with
-    the assigned task + the IP the live env was last seen from."""
-    from unittest.mock import patch
-
-    # Seed via API (sets cijoe_task_ref + provisioning_mode).
-    app_client.put(
-        "/machines/aa:bb:cc:dd:ee:ff",
-        json={
-            "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            "provisioning_mode": "cijoe-task",
-            "cijoe_task_ref": "/var/lib/bty/tasks/post-flash.yaml",
-        },
-        cookies=AUTH,
-    )
-    # PXE contact populates last_seen_ip.
-    app_client.get("/pxe/aa:bb:cc:dd:ee:ff")
-
-    with patch(
-        "bty.web._task.TaskManager.kick_off",
-    ) as mock_kick:
-        r = app_client.post("/pxe/aa:bb:cc:dd:ee:ff/done")
-
-    assert r.status_code == 204
-    mock_kick.assert_called_once()
-    kwargs = mock_kick.call_args.kwargs
-    assert kwargs["mac"] == "aa:bb:cc:dd:ee:ff"
-    assert kwargs["task_ref"] == "/var/lib/bty/tasks/post-flash.yaml"
-    # last_seen_ip from the GET above; TestClient uses 'testclient'
-    # as the client host.
-    assert kwargs["target_ip"] == "testclient"
-
-
-def test_pxe_done_does_not_trigger_when_provisioning_mode_is_other(app_client: TestClient) -> None:
-    from unittest.mock import patch
-
-    app_client.put(
-        "/machines/aa:bb:cc:dd:ee:ff",
-        json={
-            "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            "provisioning_mode": "none",
-            "cijoe_task_ref": "/var/lib/bty/tasks/post-flash.yaml",
-        },
-        cookies=AUTH,
-    )
-    app_client.get("/pxe/aa:bb:cc:dd:ee:ff")
-    with patch("bty.web._task.TaskManager.kick_off") as mock_kick:
-        r = app_client.post("/pxe/aa:bb:cc:dd:ee:ff/done")
-    assert r.status_code == 204
-    mock_kick.assert_not_called()
-
-
-def test_pxe_done_does_not_trigger_when_task_ref_missing(app_client: TestClient) -> None:
-    from unittest.mock import patch
-
-    app_client.put(
-        "/machines/aa:bb:cc:dd:ee:ff",
-        json={
-            "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            "provisioning_mode": "cijoe-task",
-            # no cijoe_task_ref
-        },
-        cookies=AUTH,
-    )
-    app_client.get("/pxe/aa:bb:cc:dd:ee:ff")
-    with patch("bty.web._task.TaskManager.kick_off") as mock_kick:
-        r = app_client.post("/pxe/aa:bb:cc:dd:ee:ff/done")
-    assert r.status_code == 204
-    mock_kick.assert_not_called()
-
-
-def test_pxe_done_does_not_trigger_when_last_seen_ip_missing(app_client: TestClient) -> None:
-    """A PUT-only machine (operator created the record but the box
-    has never PXE-contacted) has no ``last_seen_ip`` to SSH at, so
-    cijoe-task must not kick off on the spurious ``/pxe/{mac}/done``
-    that arrives when the box eventually does flash through bty-web
-    -- but the kick-off guard is a clean three-condition check
-    (provisioning_mode == cijoe-task AND cijoe_task_ref AND
-    last_seen_ip), and this test pins the third condition."""
-    from unittest.mock import patch
-
-    app_client.put(
-        "/machines/aa:bb:cc:dd:ee:ff",
-        json={
-            "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            "provisioning_mode": "cijoe-task",
-            "cijoe_task_ref": "/var/lib/bty/tasks/post-flash.yaml",
-        },
-        cookies=AUTH,
-    )
-    # Crucially: NO ``GET /pxe/{mac}`` here. Without that contact,
-    # ``last_seen_ip`` stays NULL.
-    with patch("bty.web._task.TaskManager.kick_off") as mock_kick:
-        r = app_client.post("/pxe/aa:bb:cc:dd:ee:ff/done")
-    assert r.status_code == 204
-    mock_kick.assert_not_called()
-
-
-def test_machine_response_includes_task_columns(app_client: TestClient) -> None:
-    """Schema migration: new columns exposed via the wire model."""
-    app_client.put(
-        "/machines/aa:bb:cc:dd:ee:ff",
-        json={"image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"},
-        cookies=AUTH,
-    )
-    body = app_client.get("/machines/aa:bb:cc:dd:ee:ff", cookies=AUTH).json()
-    assert body["last_task_run_at"] is None
-    assert body["last_task_status"] is None
-    assert body["last_task_output_path"] is None
-
-
-# ---------- /tasks API (v0.7.37 cancelable runs) ---------------------------
-
-
-def test_tasks_list_requires_auth(app_client: TestClient) -> None:
-    """``/tasks`` is operator-only (mirrors /catalog/* / /boot/releases)."""
-    r = app_client.get("/tasks")
-    assert r.status_code == 401
-
-
-def test_tasks_list_returns_empty_initially(app_client: TestClient) -> None:
-    r = app_client.get("/tasks", cookies=AUTH)
-    assert r.status_code == 200
-    body = r.json()
-    assert body == {"tasks": []}
-
-
-def test_tasks_cancel_unknown_mac_returns_404(app_client: TestClient) -> None:
-    r = app_client.delete("/tasks/aa:bb:cc:dd:ee:ff", cookies=AUTH)
-    assert r.status_code == 404
-
-
-def test_tasks_cancel_invalid_mac_returns_400(app_client: TestClient) -> None:
-    """``_normalise_mac`` rejects malformed MACs at the boundary."""
-    r = app_client.delete("/tasks/not-a-mac", cookies=AUTH)
-    assert r.status_code == 400
-
-
-# Note: surfacing of in-flight task state via ``GET /tasks`` is
-# covered by ``test_web_task.py::test_list_returns_snapshot``,
-# which exercises the manager directly without needing a real
-# cijoe subprocess + a TestClient that fakes a routable client IP.
-# The integration shape (``GET`` returns 200 with a ``tasks`` key)
-# is already covered by ``test_tasks_list_returns_empty_initially``
-# and ``test_tasks_list_requires_auth`` above.
 
 
 # ---------- /events API (v0.7.38 audit log) -----------------------------

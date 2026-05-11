@@ -22,24 +22,6 @@ def _enum_pattern(values: tuple[str, ...]) -> str:
 # Canonical lower-case ``aa:bb:cc:dd:ee:ff`` MAC address.
 MAC_PATTERN = r"^[0-9a-f]{2}(:[0-9a-f]{2}){5}$"
 
-# Provisioning modes:
-#   - ``none``       -- write the bytes, reboot. The default.
-#   - ``cijoe-task`` -- bty-web SSHes in after first boot and runs a
-#                       small cijoe task against the running system
-#                       (built-in scripts + inline commands only).
-PROVISIONING_MODES = ("none", "cijoe-task")
-PROVISIONING_PATTERN = _enum_pattern(PROVISIONING_MODES)
-DEFAULT_PROVISIONING_MODE = PROVISIONING_MODES[0]
-
-# Status of the most recent cijoe-task run. Mirrors the other
-# manager-driven vocabulary (HashState / DownloadState /
-# ReleaseFetchState): ``running`` while the cijoe subprocess is in
-# flight, ``completed`` on rc=0, ``cancelled`` on operator abort
-# (DELETE /tasks/{mac}), ``failed`` on rc!=0 / timeout / subprocess
-# error.
-TASK_STATUSES = ("running", "completed", "cancelled", "failed")
-TASK_STATUS_PATTERN = _enum_pattern(TASK_STATUSES)
-
 # Boot-policy values: what ``GET /pxe/{mac}`` returns.
 #
 # - ``local`` returns sanboot; the box boots whatever is on its disk.
@@ -63,10 +45,9 @@ class MachineUpsert(BaseModel):
     """Request body for ``PUT /machines/{mac}``.
 
     All fields are optional except for the implicit ``mac`` from the
-    path; ``provisioning_mode`` defaults to ``"none"`` and
-    ``boot_policy`` defaults to ``"local"``. Image identity is the
-    SHA-256 of the image bytes: the operator picks an image from the
-    unified catalog (which dedupes dir-scan files and manifest
+    path; ``boot_policy`` defaults to ``"local"``. Image identity is
+    the SHA-256 of the image bytes: the operator picks an image from
+    the unified catalog (which dedupes dir-scan files and manifest
     entries by content hash) and bty stores the SHA, not a filename.
     Renaming or replacing the underlying file does not affect the
     binding.
@@ -81,7 +62,6 @@ class MachineUpsert(BaseModel):
 
     # 64 lower-case hex chars; ``None`` = discovered-but-unassigned.
     image_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
-    provisioning_mode: str = Field(default=DEFAULT_PROVISIONING_MODE, pattern=PROVISIONING_PATTERN)
     # RFC-1123-ish: each dot-separated label is alnum, hyphen-
     # internal-only (no leading / trailing / bare hyphen, no
     # consecutive dots). ``max_length=253`` matches DNS.
@@ -90,18 +70,6 @@ class MachineUpsert(BaseModel):
         min_length=1,
         max_length=253,
         pattern=r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$",
-    )
-    # Path to the cijoe task YAML, evaluated server-side when bty-web
-    # SSHes in after first boot. Defensive pattern: reject NUL bytes
-    # and newlines (those would crash the subprocess launch / corrupt
-    # the audit log) but don't constrain path syntax otherwise -- both
-    # absolute and relative paths are valid; operator-friendly path
-    # characters like spaces stay allowed.
-    cijoe_task_ref: str | None = Field(
-        default=None,
-        min_length=1,
-        max_length=4096,
-        pattern=r"^[^\x00\r\n]+$",
     )
     boot_policy: str = Field(default=DEFAULT_BOOT_POLICY, pattern=BOOT_POLICY_PATTERN)
 
@@ -117,11 +85,7 @@ class Machine(BaseModel):
 
     mac: str = Field(..., pattern=MAC_PATTERN)
     image_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
-    provisioning_mode: str = Field(default=DEFAULT_PROVISIONING_MODE, pattern=PROVISIONING_PATTERN)
     hostname: str | None = None
-    cijoe_task_ref: str | None = Field(
-        default=None, min_length=1, max_length=4096, pattern=r"^[^\x00\r\n]+$"
-    )
     # Set the first time bty-web sees a ``GET /pxe/{mac}`` for this MAC.
     # ``None`` for machines that were created via ``PUT`` and have not
     # yet PXE-booted through bty-web.
@@ -131,9 +95,6 @@ class Machine(BaseModel):
     last_seen_ip: str | None = None
     boot_policy: str = Field(default=DEFAULT_BOOT_POLICY, pattern=BOOT_POLICY_PATTERN)
     last_flashed_at: datetime | None = None
-    last_task_run_at: datetime | None = None
-    last_task_status: str | None = Field(default=None, pattern=TASK_STATUS_PATTERN)
-    last_task_output_path: str | None = None
     created_at: datetime
     updated_at: datetime
 

@@ -163,39 +163,6 @@ def test_ui_dashboard_shows_recent_activity_after_a_pxe_event(client: TestClient
     assert 'href="/ui/events"' in body
 
 
-def test_ui_dashboard_failed_task_counter_appears_when_count_positive(
-    client: TestClient, tmp_path: Path
-) -> None:
-    """When at least one machine has ``last_task_status='failed'``,
-    the dashboard surfaces a danger-tinted counter card linking to
-    ``/ui/machines?filter=task-failed``. With zero failures the
-    card stays hidden so a healthy fleet doesn't show a red box
-    permanently."""
-    _login(client)
-    # Zero failures: counter card hidden.
-    r = client.get("/ui/dashboard")
-    assert r.status_code == 200
-    assert "Failed cijoe-tasks" not in r.text
-
-    # Seed a failed-task machine via state.db poke (no public API
-    # writes ``last_task_status``).
-    client.put(
-        "/machines/aa:bb:cc:dd:ee:99",
-        json={"image_sha256": "0" * 64},
-    )
-    from bty.web import _db
-
-    with _db.open_db(tmp_path / "state.db") as conn:
-        conn.execute(
-            "UPDATE machines SET last_task_status = 'failed' WHERE mac = 'aa:bb:cc:dd:ee:99'"
-        )
-        conn.commit()
-    r = client.get("/ui/dashboard")
-    assert "Failed cijoe-tasks" in r.text
-    assert "/ui/machines?filter=task-failed" in r.text
-    assert "border-danger" in r.text
-
-
 def test_ui_dashboard_subscribes_to_sse_for_live_counts(client: TestClient) -> None:
     """The counter cards need a ``sse-connect``/``sse-swap`` wrapper
     so the htmx-ext-sse client routes ``dashboard-counts`` events to
@@ -230,42 +197,6 @@ def test_ui_boot_page_shows_recent_activity_card(
     body = r.text
     assert "Recent boot-artefact activity" in body
     assert "boot.release.fetched" in body
-
-
-def test_ui_machines_filter_task_failed(client: TestClient, tmp_path: Path) -> None:
-    """``?filter=task-failed`` shows only machines whose last
-    cijoe-task run failed, for fast triage of "which boxes need
-    attention". Machines with a successful last run, no run yet,
-    or a still-running task are excluded.
-
-    No public API surface to seed ``last_task_status`` (tasks set
-    it via the worker thread); poke state.db directly. The
-    fixture's ``state.db`` lives at ``tmp_path / 'state.db'``."""
-    _login(client)
-    for mac in ("aa:bb:cc:dd:ee:11", "aa:bb:cc:dd:ee:22", "aa:bb:cc:dd:ee:33"):
-        client.put(
-            f"/machines/{mac}",
-            json={"image_sha256": "0" * 64},
-        )
-    from bty.web import _db
-
-    with _db.open_db(tmp_path / "state.db") as conn:
-        conn.execute(
-            "UPDATE machines SET last_task_status = 'failed' WHERE mac = 'aa:bb:cc:dd:ee:11'"
-        )
-        conn.execute(
-            "UPDATE machines SET last_task_status = 'completed' WHERE mac = 'aa:bb:cc:dd:ee:22'"
-        )
-        # 33: no last_task_status (NULL) -- never ran a task.
-        conn.commit()
-
-    r = client.get("/ui/machines?filter=task-failed")
-    assert r.status_code == 200
-    body = r.text
-    assert "aa:bb:cc:dd:ee:11" in body
-    assert "aa:bb:cc:dd:ee:22" not in body
-    assert "aa:bb:cc:dd:ee:33" not in body
-    assert "filter:" in body
 
 
 def test_ui_machines_filter_assigned_excludes_discovered(client: TestClient) -> None:
@@ -339,7 +270,6 @@ def test_ui_machines_lists_known_records(client: TestClient) -> None:
         "/machines/aa:bb:cc:dd:ee:ff",
         json={
             "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            "provisioning_mode": "none",
         },
         cookies=AUTH,
     )
@@ -367,14 +297,12 @@ def test_ui_machine_detail_renders(client: TestClient) -> None:
         "/machines/aa:bb:cc:dd:ee:ff",
         json={
             "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            "provisioning_mode": "cijoe-task",
         },
         cookies=AUTH,
     )
     r = client.get("/ui/machines/aa:bb:cc:dd:ee:ff")
     assert r.status_code == 200
     assert "aa:bb:cc:dd:ee:ff" in r.text
-    assert 'value="cijoe-task" selected' in r.text or "cijoe-task</option>" in r.text
 
 
 def test_ui_machine_detail_404(client: TestClient) -> None:
@@ -444,7 +372,6 @@ def test_ui_machine_upsert_form_rejects_non_hex_sha256(client: TestClient) -> No
         "/ui/machines/aa:bb:cc:dd:ee:ff",
         data={
             "image_sha256": "not-a-real-sha-just-garbage",
-            "provisioning_mode": "none",
             "boot_policy": "local",
         },
         follow_redirects=False,
@@ -519,9 +446,7 @@ def test_ui_machine_upsert_via_form(client: TestClient) -> None:
         "/ui/machines/aa:bb:cc:dd:ee:ff",
         data={
             "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            "provisioning_mode": "none",
             "hostname": "bty-ui-test",
-            "cijoe_task_ref": "",
         },
     )
     assert r.status_code == 303
@@ -547,9 +472,7 @@ def test_ui_machine_upsert_persists_boot_policy_flash(client: TestClient) -> Non
         "/ui/machines/aa:bb:cc:dd:ee:ff",
         data={
             "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            "provisioning_mode": "none",
             "hostname": "",
-            "cijoe_task_ref": "",
             "boot_policy": "flash",
         },
     )
@@ -572,7 +495,6 @@ def test_ui_machine_upsert_rejects_unknown_boot_policy(client: TestClient) -> No
         "/ui/machines/aa:bb:cc:dd:ee:ff",
         data={
             "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            "provisioning_mode": "none",
             "boot_policy": "yolo",
         },
         follow_redirects=False,
@@ -744,11 +666,9 @@ def test_ui_machines_list_shows_boot_policy_badge(client: TestClient) -> None:
     assert "bg-danger" in body and ">flash<" in body
     assert "bg-secondary" in body and ">local<" in body
     assert "bg-info text-dark" in body and ">tui<" in body
-    # Table header now has Boot column, Last flashed column, and
-    # Task column (the new last_task_status badge).
+    # Table header has Boot column + Last flashed column.
     assert "<th>Boot</th>" in body
     assert "<th>Last flashed</th>" in body
-    assert "<th>Task</th>" in body
 
 
 def test_ui_machine_delete_via_form(client: TestClient) -> None:
@@ -757,7 +677,6 @@ def test_ui_machine_delete_via_form(client: TestClient) -> None:
         "/machines/aa:bb:cc:dd:ee:ff",
         json={
             "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            "provisioning_mode": "none",
         },
         cookies=AUTH,
     )
