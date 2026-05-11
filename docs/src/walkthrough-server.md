@@ -49,7 +49,7 @@ curl -fLO https://github.com/safl/bty/releases/latest/download/bty-server-rpi-ar
 sha256sum -c bty-server-rpi-arm64.img.gz.sha256
 ```
 
-For a specific version, swap `latest` for a tag (e.g. `v0.8.2`).
+For a specific version, swap `latest` for a tag (e.g. `v0.8.3`).
 
 ### Option B: Build from source (when you want to modify it)
 

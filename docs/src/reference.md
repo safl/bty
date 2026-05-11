@@ -7,7 +7,7 @@ Reference material for bty's surfaces. Filled in as features land.
 Each tagged release publishes a fixed set of assets to GitHub. The
 `releases/latest/download/<filename>` URLs always 302 to the newest
 tag's copy of that file; substitute `latest` for a specific tag (e.g.
-`v0.8.2`) to pin.
+`v0.8.3`) to pin.
 
 | Asset | What it is | URL (latest) |
 |---|---|---|

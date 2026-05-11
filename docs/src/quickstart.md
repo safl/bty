@@ -49,7 +49,7 @@ sha256sum -c bty-usb-x86_64.iso.gz.sha256
 ```
 
 `releases/latest/download/<name>` always points at the newest tag;
-swap `latest` for a specific tag (e.g. `v0.8.2`) if you want to pin.
+swap `latest` for a specific tag (e.g. `v0.8.3`) if you want to pin.
 
 **Build from source** (when you need to modify the image):
 
@@ -154,10 +154,10 @@ refuses to do anything without one or the other.
 
 ### No post-flash provisioning
 
-bty is a flasher, not a provisioner. First-boot bring-up (users,
-network, packages, hostnames) gets baked into the image by the
-image builder upstream via cloud-init / NoCloud user-data -- bty just
-writes the bytes.
+bty is a flasher, not an image builder. First-boot bring-up
+(users, network, packages, hostnames) gets baked into the image by
+the image builder upstream via cloud-init / NoCloud user-data --
+bty just writes the bytes.
 
 Interactive flashing via the TUI:
 

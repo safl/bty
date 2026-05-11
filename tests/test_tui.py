@@ -462,8 +462,9 @@ def test_app_shows_no_images_message_when_local_root_is_empty(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Empty image root -> ``_set_status`` is called with the
-    "No images at <path>; press R to refresh" message during the
-    initial populate."""
+    "No images at <path>. See screen for how to add some." message
+    during the initial populate; the welcome panel carries the
+    actionable detail."""
     statuses = _spy_status(monkeypatch)
     _patch_data_sources(monkeypatch, images_list=[], disks_list=[_fake_disk()])
 
