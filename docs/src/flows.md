@@ -38,7 +38,7 @@ A middle shape between the strictly-offline direct flash and the
 PXE-driven flows. The operator boots from the same USB live stick
 but points the TUI at a network-shared `bty-web` for the catalog.
 Useful for a small team that wants one place to keep pre-built images
-without standing up the appliance + PXE stack.
+without setting up the appliance + PXE stack.
 
 1. Someone (operator's workstation, a homelab server, a dev box)
    runs `bty-web`. The lowest-friction shape is the published

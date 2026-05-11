@@ -438,7 +438,7 @@ the bty live env cannot reach the `.iso`'s internal partitions, so
 there is no place on the piKVM to put image files. Use a remote
 `bty-web` instance for the catalog instead.
 
-#### Step 1: Stand up a `bty-web` server reachable from the target
+#### Step 1: Set up a `bty-web` server reachable from the target
 
 The simplest option is the trial container; see
 [walkthrough-server-docker.md](walkthrough-server-docker.md) for
@@ -520,7 +520,7 @@ constraint as piKVM: the `.iso` is hosted as a single CD-ROM, so
 there is no local storage on the JetKVM to put image files.
 Use a remote `bty-web` for the catalog.
 
-#### Step 1: Stand up a `bty-web` server reachable from the target
+#### Step 1: Set up a `bty-web` server reachable from the target
 
 Same as piKVM Step 1 above. Run a `bty-web` instance somewhere on
 the LAN; note its IP and port.

@@ -29,7 +29,7 @@ that bridges the two:
   (commonly the `ghcr.io/safl/bty-web` Docker container running on
   someone's workstation). Flash still happens locally on the operator's
   hardware; only the catalog is centralised. Best for a small team
-  sharing pre-built images without standing up a full PXE server.
+  sharing pre-built images without setting up a full PXE server.
 - **PXE-driven (no operator).** Full `bty-server` appliance running
   `bty-web` and the iPXE/TFTP/HTTP services. Fleet members are
   registered by MAC address; reflashes happen on schedule, on demand,

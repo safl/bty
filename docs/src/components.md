@@ -56,7 +56,7 @@ that runs the flash unattended after a PXE boot. Same operations,
 different delivery vehicles. The middle shape (`--server URL`) is
 where the Docker container fits naturally - a single command on a
 workstation gives a small team a shared image catalog without
-standing up the appliance.
+setting up the appliance.
 
 ## `bty` (CLI)
 

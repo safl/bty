@@ -1,4 +1,4 @@
-# Stand up a bty server appliance
+# Set up a bty server appliance
 
 The bty server appliance is the network-flash flow's delivery
 vehicle: a turnkey image you `dd` onto a small box (or VM, or
