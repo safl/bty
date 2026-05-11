@@ -1695,7 +1695,7 @@ class BtyTui(App[None]):
         return (
             "<?> help       <q> quit       <r> refresh       "
             "<c> catalog       <i> install bty-server       "
-            "<t> theme       <Esc/Backspace> back"
+            "<Esc/Backspace> back"
         )
 
     def on_button_pressed(self, event: Button.Pressed) -> None:

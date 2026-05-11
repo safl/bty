@@ -34,48 +34,53 @@ incompatible structural change increments the version.
 
 ### Per-command schemas
 
-`bty list disks --json`
+**Block-device discovery is NOT a bty command.** A pre-v0.8.4
+``bty list disks`` wrapper was dropped because ``lsblk -d -e7 -J``
+already produces structured output an agent can parse. Use that
+directly for disk discovery; bty's CLI is the right tool only for
+image-side operations.
+
+`bty images --json` (local mode, dir-scan)
 
 ```json
 {
   "schema_version": "1",
-  "command": "list-disks",
-  "disks": [
-    {
-      "path": "/dev/sda",
-      "size": "500G",
-      "type": "disk",
-      "vendor": "ATA",
-      "model": "Samsung SSD 870",
-      "serial": "S5SUNG0123456",
-      "tran": "sata",
-      "removable": false,
-      "readonly": false,
-      "mountpoints": []
-    }
-  ]
-}
-```
-
-`bty list images --json`
-
-```json
-{
-  "schema_version": "1",
-  "command": "list-images",
+  "command": "images",
   "image_root": "/var/lib/bty/images",
   "images": [
     {
       "name": "debian.qcow2",
       "path": "/var/lib/bty/images/debian.qcow2",
       "format": "qcow2",
-      "size_bytes": 268435456
+      "size_bytes": 268435456,
+      "source": "local"
     }
   ]
 }
 ```
 
-`bty inspect image PATH --json`
+`bty images --server URL --json` (remote mode, ``GET /images``)
+
+```json
+{
+  "schema_version": "1",
+  "command": "images",
+  "server": "http://server:8080",
+  "images": [
+    {
+      "name": "debian-13-server.img.gz",
+      "format": "img.gz",
+      "size_bytes": 1234567890,
+      "source": "remote",
+      "url": "http://server:8080/images/abc123def456",
+      "ref": "abc123def456",
+      "cached": true
+    }
+  ]
+}
+```
+
+`bty inspect PATH --json`
 
 ```json
 {
@@ -292,7 +297,7 @@ operations bty-web is granted.
   metadata) and exits 0.
 - **`bty --help`** and `bty <subcommand> --help` document the surface;
   argparse's standard help output.
-- **Idempotent reads.** `bty list ...` and `bty inspect ...` have no
+- **Idempotent reads.** `bty images` and `bty inspect ...` have no
   side effects; safe to call repeatedly.
 
 ## Don'ts

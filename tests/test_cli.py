@@ -44,83 +44,38 @@ def test_main_no_subcommand_exits_with_usage() -> None:
     assert excinfo.value.code == 2
 
 
-def test_list_disks_table(capsys: pytest.CaptureFixture[str]) -> None:
-    with patch(
-        "bty.cli.disks.list_disks",
-        return_value=[
-            {
-                "path": "/dev/sda",
-                "size": "500G",
-                "tran": "sata",
-                "vendor": "ATA",
-                "model": "Samsung SSD",
-                "serial": "ABC",
-                "removable": False,
-            },
-        ],
-    ):
-        rc = cli.main(["list", "disks"])
-    assert rc == 0
-    out = capsys.readouterr().out
-    assert "/dev/sda" in out
-    assert "PATH" in out  # uppercased header
-
-
-def test_list_disks_handles_missing_lsblk(capsys: pytest.CaptureFixture[str]) -> None:
-    """lsblk is in util-linux, missing only on minimal containers /
-    macOS / Windows. Surface a friendly stderr line + exit 2 rather
-    than a raw FileNotFoundError traceback."""
-    with patch("bty.cli.disks.list_disks", side_effect=FileNotFoundError):
-        rc = cli.main(["list", "disks"])
-    assert rc == 2
-    err = capsys.readouterr().err
-    assert "lsblk not found" in err
-    assert "util-linux" in err
-
-
-def test_list_disks_json(capsys: pytest.CaptureFixture[str]) -> None:
-    fake_rows = [{"path": "/dev/sda", "size": "500G"}]
-    with patch("bty.cli.disks.list_disks", return_value=fake_rows):
-        rc = cli.main(["list", "disks", "--json"])
-    assert rc == 0
-    payload = json.loads(capsys.readouterr().out)
-    assert payload["schema_version"] == "1"
-    assert payload["command"] == "list-disks"
-    assert payload["disks"] == fake_rows
-
-
-def test_list_images_uses_image_root_argument(
+def test_images_uses_image_root_argument(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     (tmp_path / "alpha.qcow2").write_bytes(b"")
-    rc = cli.main(["list", "images", "--image-root", str(tmp_path)])
+    rc = cli.main(["images", "--image-root", str(tmp_path)])
     assert rc == 0
     out = capsys.readouterr().out
     assert "alpha.qcow2" in out
 
 
-def test_list_images_warns_on_missing_image_root(
+def test_images_warns_on_missing_image_root(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """A typo'd ``--image-root`` path silently returning an empty
     list looks indistinguishable from a populated-but-empty
     BTY_IMAGES; stderr-warn so the operator catches the mistake
     without polluting stdout (which JSON / table consumers parse)."""
-    rc = cli.main(["list", "images", "--image-root", str(tmp_path / "nope")])
+    rc = cli.main(["images", "--image-root", str(tmp_path / "nope")])
     assert rc == 0
     captured = capsys.readouterr()
     assert "does not exist" in captured.err
     assert "listing empty" in captured.err
 
 
-def test_list_images_includes_bri_descriptors(
+def test_images_includes_bri_descriptors(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """``.bri`` files should appear in ``bty list images`` so the
+    """``.bri`` files should appear in ``bty images`` so the
     catalog reflects local + remote pointers in one view."""
     (tmp_path / "local.qcow2").write_bytes(b"")
     (tmp_path / "remote.bri").write_text('url = "https://example.invalid/server.img.gz"\n')
-    rc = cli.main(["list", "images", "--json", "--image-root", str(tmp_path)])
+    rc = cli.main(["images", "--json", "--image-root", str(tmp_path)])
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)
     sources = sorted(img["source"] for img in payload["images"])
@@ -130,14 +85,70 @@ def test_list_images_includes_bri_descriptors(
     assert remote["format"] == "img.gz"
 
 
+def test_images_server_mode_fetches_catalog(capsys: pytest.CaptureFixture[str]) -> None:
+    """``bty images --server URL`` fetches ``GET <URL>/images`` and
+    renders the catalog. Same row shape as local mode so a script
+    can pipe ``--json`` through ``jq`` without branching on mode."""
+    from io import BytesIO
+    from unittest.mock import MagicMock
+
+    payload = [
+        {
+            "name": "debian-13-server.img.gz",
+            "format": "img.gz",
+            "size_bytes": 1024,
+            "url": "http://server:8080/images/abc123",
+            "ref": "abc123def456",
+            "cached": True,
+        },
+    ]
+    fake_resp = MagicMock()
+    fake_resp.read = BytesIO(json.dumps(payload).encode("utf-8")).read
+    fake_resp.__enter__ = MagicMock(return_value=fake_resp)
+    fake_resp.__exit__ = MagicMock(return_value=False)
+
+    with patch("urllib.request.urlopen", return_value=fake_resp):
+        rc = cli.main(["images", "--server", "http://server:8080", "--json"])
+
+    assert rc == 0
+    out_payload = json.loads(capsys.readouterr().out)
+    assert out_payload["schema_version"] == "1"
+    assert out_payload["command"] == "images"
+    assert out_payload["server"] == "http://server:8080"
+    assert len(out_payload["images"]) == 1
+    row = out_payload["images"][0]
+    assert row["name"] == "debian-13-server.img.gz"
+    assert row["url"] == "http://server:8080/images/abc123"
+    assert row["source"] == "remote"
+    assert row["cached"] is True
+
+
+def test_images_server_mode_rejects_non_http_scheme(capsys: pytest.CaptureFixture[str]) -> None:
+    rc = cli.main(["images", "--server", "file:///etc/passwd"])
+    assert rc == 2
+    assert "must be http://" in capsys.readouterr().err
+
+
+def test_tui_subcommand_calls_tui_main() -> None:
+    """``bty tui`` is a thin forwarder to ``bty.tui.main``; the test
+    confirms argv pass-through works (the TUI's own argparse handles
+    --server / --mac / --image-root)."""
+    with patch("bty.tui.main") as mock_main:
+        rc = cli.main(["tui", "--server", "http://localhost:8080", "--mac", "aa:bb:cc:dd:ee:ff"])
+    assert rc == 0
+    mock_main.assert_called_once_with(
+        ["--server", "http://localhost:8080", "--mac", "aa:bb:cc:dd:ee:ff"]
+    )
+
+
 def test_inspect_image_directory_returns_two(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """``bty inspect image <directory>`` used to silently return a
+    """``bty inspect <directory>`` used to silently return a
     bogus record (``format: ''``, ``size_bytes`` = the dir-entry
     inode size). Reject directories with a friendly message + exit
     2 so the operator catches the typo immediately."""
-    rc = cli.main(["inspect", "image", str(tmp_path)])
+    rc = cli.main(["inspect", str(tmp_path)])
     assert rc == 2
     err = capsys.readouterr().err
     assert "not a file" in err
@@ -146,11 +157,11 @@ def test_inspect_image_directory_returns_two(
 def test_inspect_image_malformed_bri_returns_two(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """``bty inspect image bad.bri`` surfaces a friendly stderr
+    """``bty inspect bad.bri`` surfaces a friendly stderr
     message + exit 2 instead of dumping a BriError traceback."""
     bri = tmp_path / "bad.bri"
     bri.write_text('not_url = "missing-the-url-key"\n')
-    rc = cli.main(["inspect", "image", str(bri)])
+    rc = cli.main(["inspect", str(bri)])
     assert rc == 2
     err = capsys.readouterr().err
     assert "malformed .bri" in err
@@ -160,7 +171,7 @@ def test_inspect_image_malformed_bri_returns_two(
 def test_inspect_image_missing_returns_two(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    rc = cli.main(["inspect", "image", str(tmp_path / "nope.qcow2")])
+    rc = cli.main(["inspect", str(tmp_path / "nope.qcow2")])
     assert rc == 2
     err = capsys.readouterr().err
     assert "no such image" in err
@@ -169,7 +180,7 @@ def test_inspect_image_missing_returns_two(
 def test_inspect_image_json(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     img = tmp_path / "x.img"
     img.write_bytes(b"\0" * 5)
-    rc = cli.main(["inspect", "image", "--json", str(img)])
+    rc = cli.main(["inspect", "--json", str(img)])
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["schema_version"] == "1"
@@ -194,7 +205,7 @@ def test_default_image_root_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_flash_requires_dry_run_or_yes(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     img = tmp_path / "x.img"
     img.write_bytes(b"\0")
-    rc = cli.main(["flash", "--image", str(img), "--target", "/dev/null"])
+    rc = cli.main(["flash", str(img), "/dev/null"])
     assert rc == 2
     err = capsys.readouterr().err
     assert "--dry-run" in err and "--yes" in err
@@ -203,7 +214,7 @@ def test_flash_requires_dry_run_or_yes(tmp_path: Path, capsys: pytest.CaptureFix
 def test_flash_dry_run_still_works(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     img = tmp_path / "x.img"
     img.write_bytes(b"\0" * 1024)
-    rc = cli.main(["flash", "--image", str(img), "--target", "/dev/null", "--dry-run"])
+    rc = cli.main(["flash", str(img), "/dev/null", "--dry-run"])
     # /dev/null is not a block device; dry-run reports validation failure.
     assert rc == 1
     out = capsys.readouterr().out

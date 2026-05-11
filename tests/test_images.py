@@ -114,7 +114,7 @@ def test_inspect_image_raw_img_no_external_tool(tmp_path: Path) -> None:
 
 
 def test_inspect_image_hints_about_tarballs(tmp_path: Path) -> None:
-    """``bty inspect image foo.tar.gz`` doesn't return a confusing
+    """``bty inspect foo.tar.gz`` doesn't return a confusing
     blank record; instead it surfaces a friendly ``detail_error``
     that tells the operator to extract first."""
     tarball = tmp_path / "ubuntu-22.04.tar.gz"
@@ -126,7 +126,7 @@ def test_inspect_image_hints_about_tarballs(tmp_path: Path) -> None:
 
 
 def test_inspect_image_handles_bri_descriptor(tmp_path: Path) -> None:
-    """``bty inspect image foo.bri`` returns the descriptor's
+    """``bty inspect foo.bri`` returns the descriptor's
     parsed contents under ``detail`` rather than blowing up the way
     a regular image probe would on a non-image extension."""
     bri = tmp_path / "demo.bri"

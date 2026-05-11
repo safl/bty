@@ -101,7 +101,7 @@ pipx install "bty-lab[web]"     # adds `bty-web` (FastAPI + Pydantic)
 pipx install "bty-lab[all]"     # everything
 ```
 
-`bty list disks`, `bty inspect image`, `bty flash --dry-run` need only
+`lsblk -d -e7`, `bty inspect`, `bty flash --dry-run` need only
 Python 3.11+ and stdlib. `bty flash --yes` shells out to `dd`,
 `qemu-img`, `zstd`, `lsblk`, and friends - your distro provides those.
 

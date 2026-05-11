@@ -122,7 +122,7 @@ def test_main_short_circuits_on_interactive_mode(
 
     # Belt-and-braces: if the short-circuit doesn't fire and we end up
     # in the flash path, blow up loudly instead of trying to download
-    # / shell out to ``bty list disks`` from inside the test.
+    # / shell out to ``lsblk`` from inside the test.
     def _explode(*_a: object, **_kw: object) -> None:
         raise AssertionError("flash-path side-effect should not run in interactive mode")
 

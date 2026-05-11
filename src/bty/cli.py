@@ -2,10 +2,10 @@
 
 Subcommand structure:
 
-    bty list disks
-    bty list images [--image-root PATH]
-    bty inspect image PATH
-    bty flash --image PATH --target PATH --dry-run
+    bty images [--image-root PATH | --server URL]
+    bty inspect PATH
+    bty flash IMAGE TARGET [--dry-run | --yes]
+    bty tui [--server URL --mac MAC]
 
 Each leaf command accepts ``--json`` to emit machine-readable output.
 
@@ -26,13 +26,12 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import subprocess
 import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from bty import catalog, disks, flash, formatting, images
+from bty import catalog, flash, formatting, images
 
 # Bump this when any --json output structure changes incompatibly.
 # Document the new shape in docs/src/reference.md and AGENTS.md.
@@ -46,6 +45,26 @@ def _envelope(command: str, **fields: Any) -> dict[str, Any]:
 
 def main(argv: list[str] | None = None) -> int:
     import bty as _bty  # avoid a top-level import cycle while keeping a single source
+
+    args_list = list(argv) if argv is not None else sys.argv[1:]
+    # Forward ``bty tui ...`` directly to the TUI's own argparse.
+    # ``argparse.REMAINDER`` mishandles ``--flag VALUE`` positionals
+    # (Python bug 17050 / 28543), so we route around the main argparse
+    # for this one subcommand. Side benefit: ``bty tui --help`` shows
+    # the TUI's own help.
+    if args_list and args_list[0] == "tui":
+        try:
+            from bty.tui import main as tui_main
+        except ImportError as exc:
+            print(
+                f"bty tui: failed to import the TUI ({exc}); "
+                f"reinstall bty-lab with the ``[tui]`` extra "
+                f"(e.g. ``pipx install 'bty-lab[tui]'``).",
+                file=sys.stderr,
+            )
+            return 2
+        tui_main(args_list[1:])
+        return 0
 
     parser = argparse.ArgumentParser(
         prog="bty",
@@ -65,39 +84,56 @@ def main(argv: list[str] | None = None) -> int:
         help="emit machine-readable JSON instead of a human-readable table",
     )
 
-    p_list = sub.add_parser("list", help="list things")
-    list_sub = p_list.add_subparsers(dest="list_what", required=True, metavar="THING")
+    # Note: ``bty list disks`` and ``bty list images`` were flattened
+    # to ``bty images`` (and ``bty list disks`` dropped entirely) in
+    # v0.8.4. ``lsblk -d -e7`` is the equivalent for the disk side;
+    # bty's wrapper added little beyond a schema-versioned JSON
+    # envelope. ``bty.disks.list_disks()`` remains as a Python helper
+    # for ``bty-tui`` + the flash validator.
 
-    p_list_disks = list_sub.add_parser(
-        "disks",
-        parents=[common],
-        help="list block devices on the local system",
-    )
-    p_list_disks.set_defaults(func=cmd_list_disks)
-
-    p_list_images = list_sub.add_parser(
+    p_images = sub.add_parser(
         "images",
         parents=[common],
-        help="list supported images under the image root",
+        help="list supported images under the image root OR on a remote bty-web",
     )
-    p_list_images.add_argument(
+    p_images.add_argument(
         "--image-root",
         type=Path,
         default=images.default_image_root(),
-        help="directory containing image files (default: $BTY_IMAGE_ROOT or %(default)s)",
+        help=(
+            "directory containing image files (default: $BTY_IMAGE_ROOT or "
+            "%(default)s). Ignored when --server is set."
+        ),
     )
-    p_list_images.set_defaults(func=cmd_list_images)
+    p_images.add_argument(
+        "--server",
+        type=str,
+        default=None,
+        help=(
+            "fetch the catalog from a running bty-web server instead of "
+            "scanning a local directory. Hits ``GET <URL>/images`` (the "
+            "same endpoint ``bty tui --server`` uses). Example: "
+            "``http://server:8080``."
+        ),
+    )
+    p_images.set_defaults(func=cmd_images)
 
-    p_inspect = sub.add_parser("inspect", help="inspect things in detail")
-    inspect_sub = p_inspect.add_subparsers(dest="inspect_what", required=True, metavar="THING")
+    # ``bty tui`` is handled at the top of ``main`` (before argparse
+    # is built) because ``argparse.REMAINDER`` mishandles ``--flag``
+    # positionals. The subparser exists here purely for ``bty --help``
+    # listings; the actual dispatch never reaches its ``func``.
+    sub.add_parser(
+        "tui",
+        help="launch the bty terminal UI (requires the ``[tui]`` extra)",
+    )
 
-    p_inspect_image = inspect_sub.add_parser(
-        "image",
+    p_inspect = sub.add_parser(
+        "inspect",
         parents=[common],
-        help="inspect an image file",
+        help="inspect an image file or .bri descriptor",
     )
-    p_inspect_image.add_argument("path", type=Path, help="path to the image file")
-    p_inspect_image.set_defaults(func=cmd_inspect_image)
+    p_inspect.add_argument("path", type=Path, help="path to the image or .bri file")
+    p_inspect.set_defaults(func=cmd_inspect_image)
 
     p_flash = sub.add_parser(
         "flash",
@@ -105,19 +141,20 @@ def main(argv: list[str] | None = None) -> int:
         help="flash an image to a target disk",
     )
     p_flash.add_argument(
-        "--image",
+        "image",
         type=str,
-        required=True,
-        help="image to flash. Either a local file path "
-        "(``/path/to/image.qcow2``) or an HTTP/HTTPS URL "
-        "(``http://server/images/foo.img.zst``); URLs stream "
-        "directly to disk for ``.img`` / ``.img.zst`` and "
-        "download to a temp file first for ``.qcow2``. "
-        "``bty-tui --server`` operators get the URL from the "
-        "server's catalog listing; the server picks server-vs-"
-        "upstream based on cache state.",
+        help=(
+            "image to flash. Either a local file path "
+            "(``/path/to/image.qcow2``) or an HTTP/HTTPS URL "
+            "(``http://server/images/foo.img.zst``); URLs stream "
+            "directly to disk for ``.img`` / ``.img.zst`` and "
+            "download to a temp file first for ``.qcow2``. "
+            "``bty tui --server`` operators get the URL from the "
+            "server's catalog listing; the server picks server-vs-"
+            "upstream based on cache state."
+        ),
     )
-    p_flash.add_argument("--target", type=Path, required=True, help="target block device")
+    p_flash.add_argument("target", type=Path, help="target block device")
     p_flash.add_argument(
         "--dry-run",
         action="store_true",
@@ -198,68 +235,29 @@ def main(argv: list[str] | None = None) -> int:
     return 0 if result is None else int(result)
 
 
-def cmd_list_disks(args: argparse.Namespace) -> int:
-    try:
-        rows = disks.list_disks()
-    except FileNotFoundError:
-        # lsblk lives in util-linux; missing only on extremely
-        # minimal containers, macOS, etc. Friendly message beats a
-        # raw FileNotFoundError traceback.
-        print(
-            "bty: lsblk not found; install ``util-linux`` to list block devices",
-            file=sys.stderr,
-        )
-        return 2
-    except subprocess.TimeoutExpired:
-        # Stuck IO subsystem (failing disk, hung udev) -- surface a
-        # clear timeout instead of a raw subprocess.TimeoutExpired
-        # traceback. Operator can rerun once the underlying issue
-        # is sorted; bty itself has no recourse here.
-        print(
-            "bty: lsblk timed out; check for stuck / failing disks via ``dmesg``",
-            file=sys.stderr,
-        )
-        return 2
-    except subprocess.CalledProcessError as exc:
-        # lsblk exits non-zero on permission denied (rare), bad
-        # column spec, etc. Print stderr for diagnosis.
-        msg = (exc.stderr or "").strip() or f"lsblk exited {exc.returncode}"
-        print(f"bty: lsblk failed: {msg}", file=sys.stderr)
-        return 2
-    if args.json:
-        print(json.dumps(_envelope("list-disks", disks=rows), indent=2))
-    else:
-        formatting.print_table(
-            rows,
-            columns=[
-                "path",
-                "size",
-                "tran",
-                "vendor",
-                "model",
-                "serial",
-                "removable",
-            ],
-        )
-    return 0
+def cmd_images(args: argparse.Namespace) -> int:
+    """List images either from a local image-root or a remote bty-web.
 
+    Local mode (default): dir-scan, no catalog manifest, no content-
+    hash merge. Includes ``.bri`` (bty Remote Image) descriptors as
+    ``remote`` rows alongside local images. Operators who want the
+    unified catalog look at the bty-web browser UI; this command
+    answers "what flashable files are sitting in this directory?"
+    and nothing more.
 
-def cmd_list_images(args: argparse.Namespace) -> int:
-    """List images under ``--image-root``.
-
-    Local-mode CLI is deliberately simple: dir-scan only, no
-    catalog manifest, no content-hash merge. Operators who want
-    the unified catalog (manifest + dir-scan + cached state)
-    look at the bty-web browser UI; operators who want
-    content-addressed flashing point ``bty flash --image`` at
-    a URL the server provides. ``bty list images`` answers the
-    question "what flashable files are sitting in this
-    directory?" and nothing more.
-
-    Includes ``.bri`` (bty Remote Image) descriptors as ``remote``
-    rows alongside local images so operators see the full set of
-    flashable references in one place.
+    Server mode (``--server URL``): hits ``GET <URL>/images`` and
+    renders the catalog the server exposes (the same endpoint
+    bty-tui --server uses). Each row's ``url`` is whatever the
+    server provides directly -- server URL when the bytes are cached
+    / imported, upstream URL when a manifest entry hasn't been
+    cached yet.
     """
+    if args.server is not None:
+        return _cmd_images_remote(args)
+    return _cmd_images_local(args)
+
+
+def _cmd_images_local(args: argparse.Namespace) -> int:
     # Distinguish "image root doesn't exist" from "exists but empty"
     # so operators don't silently get an empty listing for a typo'd
     # ``--image-root`` path. Stderr warning preserves stdout for the
@@ -288,11 +286,90 @@ def cmd_list_images(args: argparse.Namespace) -> int:
     rows = local_rows + remote_rows
     if args.json:
         payload = _envelope(
-            "list-images",
+            "images",
             image_root=str(args.image_root),
             images=rows,
         )
         print(json.dumps(payload, indent=2))
+    else:
+        formatting.print_table(
+            rows,
+            columns=["name", "format", "size_bytes", "source"],
+        )
+    return 0
+
+
+def _cmd_images_remote(args: argparse.Namespace) -> int:
+    """``--server URL`` path: fetch the catalog from bty-web's
+    ``GET /images`` and render it. Same row shape as local mode so a
+    script can ``bty images --server $URL --json | jq ...``
+    without branching."""
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+
+    parsed = urllib.parse.urlparse(args.server)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        print(
+            f"bty: --server URL must be http:// or https://; got {args.server!r}",
+            file=sys.stderr,
+        )
+        return 2
+    base = args.server.rstrip("/")
+    catalog_url = f"{base}/images"
+    # 4 MiB cap mirrors bty-tui's fetch_remote_catalog; a misconfigured
+    # / hostile server cannot OOM the CLI with a multi-GiB blob.
+    max_bytes = 4 * 1024 * 1024
+    try:
+        with urllib.request.urlopen(catalog_url, timeout=30.0) as resp:
+            raw = resp.read(max_bytes + 1)
+    except urllib.error.URLError as exc:
+        print(f"bty: GET {catalog_url} failed: {exc}", file=sys.stderr)
+        return 2
+    if len(raw) > max_bytes:
+        print(
+            f"bty: /images response from {args.server} exceeded {max_bytes} bytes; "
+            f"refusing to parse",
+            file=sys.stderr,
+        )
+        return 2
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        print(f"bty: /images response not valid JSON: {exc}", file=sys.stderr)
+        return 2
+    if not isinstance(payload, list):
+        print(
+            f"bty: unexpected /images payload from {args.server}: not a list",
+            file=sys.stderr,
+        )
+        return 2
+    rows: list[dict[str, object]] = []
+    for entry in payload:
+        if not isinstance(entry, dict):
+            continue
+        name = entry.get("name")
+        url = entry.get("url")
+        if not isinstance(name, str) or not name or not isinstance(url, str) or not url:
+            continue
+        rows.append(
+            {
+                "name": name,
+                "format": entry.get("format"),
+                "size_bytes": entry.get("size_bytes"),
+                "source": "remote",
+                "url": url,
+                "ref": entry.get("ref"),
+                "cached": entry.get("cached"),
+            }
+        )
+    if args.json:
+        payload_out = _envelope(
+            "images",
+            server=args.server,
+            images=rows,
+        )
+        print(json.dumps(payload_out, indent=2))
     else:
         formatting.print_table(
             rows,

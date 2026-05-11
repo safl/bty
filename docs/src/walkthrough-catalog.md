@@ -112,32 +112,37 @@ without manual refresh.
 ## CLI (local mode -- intentionally simple)
 
 ```bash
-bty list images [--image-root PATH]
-bty inspect image <path>
-bty flash --image PATH_OR_URL --target /dev/sdX --yes
+bty images [--image-root PATH | --server URL]
+bty inspect <path>
+bty flash PATH_OR_URL /dev/sdX --yes
 ```
 
 The local CLI is dir-scan only -- no manifest, no SHA, no
-catalog. ``bty list images`` answers "what flashable files are
-in this directory?" and stops there. ``bty flash --image``
-accepts a path, an HTTP URL, or a ``.bri`` (bty Remote Image)
-descriptor file.
+catalog. ``bty images`` answers "what flashable files are
+in this directory?" and stops there. ``bty flash``'s IMAGE
+positional accepts a path, an HTTP URL, or a ``.bri`` (bty
+Remote Image) descriptor file.
 
 A ``.bri`` is a tiny TOML pointer at a remote image. Drop one
-into BTY_IMAGES alongside your local files and it shows up in
-``bty list images`` next to them, with ``source = remote`` and
-the upstream URL. ``bty flash --image foo.bri`` resolves the
-descriptor and falls into the URL flash path. The bty-usb stick
-bake drops a starter ``bty-server-x86_64.bri`` directly into the
-BTY_IMAGES exFAT partition so an operator browsing the partition
-from a host OS sees the format up front and can copy / edit /
-delete it freely.
+into BTY_IMAGES (or, on a Ventoy / IP-KVM delivery, at the
+surrounding stick's partition root or in a ``bty-images/``
+subfolder there) alongside your local files and it shows up in
+``bty images`` next to them, with ``source = remote`` and
+the upstream URL. ``bty flash foo.bri /dev/sdX --yes`` resolves
+the descriptor and falls into the URL flash path.
 
 ```toml
-# ~/BTY_IMAGES/bty-server.bri
-url = "https://github.com/safl/bty/releases/latest/download/bty-server-x86_64.img.gz"
+# example .bri shape
+url = "https://my.example.com/images/debian-13-server.img.gz"
 # Optional: name, format, size_bytes, sha256, description
 ```
+
+To install ``bty-server`` specifically, no ``.bri`` is needed:
+``bty-tui`` has an ``i`` keybinding that flashes the latest
+``bty-server-x86_64.img.gz`` from GitHub releases directly. The
+``.bri`` mechanism exists for operator-supplied URL pointers
+(private mirrors, custom-cooked images, etc.), not for the
+bty-server bootstrap.
 
 That's deliberate: the catalog story is a **server** concern.
 Operators who want the unified catalog (manifest + dir-scan +

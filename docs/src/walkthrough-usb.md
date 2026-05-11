@@ -183,7 +183,6 @@ Common keys:
 | `r` | Refresh the catalog and disk list |
 | `c` | Switch the catalog (local path or remote `bty-web`) |
 | `i` | Install `bty-server` (latest from GitHub releases) |
-| `t` | Open the theme picker |
 | `/` | Filter the image catalog by substring |
 | `q` | Quit the TUI |
 
@@ -220,11 +219,11 @@ available as CLI commands.
 
 ```bash
 # 1. List what's on the system
-bty list disks                          # block devices on the target
-bty list images --image-root /mnt/BTY_IMAGES   # images on the stick
+lsblk -d -e7                          # block devices on the target
+bty images --image-root /mnt/BTY_IMAGES   # images on the stick
 
 # 2. Inspect a specific image
-bty inspect image /mnt/BTY_IMAGES/my-image.qcow2
+bty inspect /mnt/BTY_IMAGES/my-image.qcow2
 
 # 3. Dry-run the flash to validate the plan without writing
 bty flash \
@@ -285,7 +284,7 @@ If it doesn't, see **Troubleshooting** below.
 * On older BIOSes, USB 3.0 sticks sometimes only enumerate from
  USB 2.0 ports. Try a different port.
 
-### `bty list disks` shows the USB stick but not the target's internal disk
+### `lsblk` shows the USB stick but not the target's internal disk
 
 * The kernel may not have a driver for an unusual storage controller
  (e.g. some embedded NVMe-over-PCIe paths on consumer mini-PCs).
@@ -299,7 +298,7 @@ If it doesn't, see **Troubleshooting** below.
  flashed onto a disk creates a qcow2-formatted disk, not a
  bootable filesystem. For a bootable target, use a raw `.img` or
  let `bty flash` convert the qcow2 (which it does automatically:
- `bty inspect image` shows the resulting on-disk format).
+ `bty inspect` shows the resulting on-disk format).
 * If the image was built for UEFI but the target is configured for
  legacy BIOS (or vice versa), the firmware won't find a bootloader.
  Check the target's BIOS settings.

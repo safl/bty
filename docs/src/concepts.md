@@ -52,7 +52,7 @@ three partitions in an MBR isohybrid layout:
   host if you need more.
 
 bty auto-mounts `/dev/disk/by-label/BTY_IMAGES` at `/var/lib/bty/images`
-on boot. The `bty list images` and `bty inspect image` commands read
+on boot. The `bty images` and `bty inspect` commands read
 from this mount point by default (overridable with `--image-root` or
 `BTY_IMAGE_ROOT`).
 

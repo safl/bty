@@ -57,20 +57,23 @@ for the full per-command schema reference and the exit-code table.
 | 4 | Required external tool is not installed (e.g. `qemu-img` for `.qcow2`). |
 | 5 | Target raced - block device became mounted or otherwise unsuitable between validation and write. |
 
-### `bty list disks`
+### Block-device discovery: use `lsblk`
 
-List interesting block devices on the local system. Shells out to
-`lsblk -J` and projects useful columns: `path`, `size`, `tran` (bus
-transport), `vendor`, `model`, `serial`, `removable`.
+bty doesn't ship its own block-device-listing command (a `bty list
+disks` wrapper existed pre-v0.8.4 but added little over what
+`lsblk` already does). Use `lsblk -d -e7` to see the candidate
+disks at a glance:
 
 ```text
-PATH          SIZE  TRAN  VENDOR  MODEL              SERIAL          REMOVABLE
-------------  ----  ----  ------  -----------------  --------------  ---------
-/dev/nvme0n1  1T    nvme          Samsung 980 PRO    NVME0X000001    False
-/dev/sda      500G  sata  ATA     Samsung SSD 870    S5SUNG0123456   False
+$ lsblk -d -e7
+NAME    MAJ:MIN  RM   SIZE  RO  TYPE  MOUNTPOINTS
+nvme0n1  259:0    0    1T   0   disk
+sda        8:0    0  500G   0   disk
 ```
 
-### `bty list images [--image-root PATH]`
+`-d` strips partitions, `-e7` excludes loop devices.
+
+### `bty images [--image-root PATH | --server URL]`
 
 List supported images directly under the image root (non-recursive).
 Recognised formats: `.qcow2`, `.img`, `.img.zst`, `.img.xz`,
@@ -121,13 +124,20 @@ url = "https://github.com/safl/bty/releases/latest/download/bty-server-x86_64.im
 ```
 
 Only `url` is required; everything else is inferred from the URL
-or left null. The bty-usb stick bake drops a starter
-`bty-server-x86_64.bri` directly into the BTY_IMAGES exFAT
-partition so an operator browsing the partition from a host OS
-sees the file format up front and can copy / edit / delete it
-freely.
+or left null. Operators can drop `.bri` files alongside `.img.gz`
+/ `.qcow2` files in BTY_IMAGES (or, on Ventoy / IP-KVM
+deliveries, at the surrounding stick's partition root or in a
+`bty-images/` subfolder there).
 
-### `bty inspect image PATH`
+To install the bty-server appliance specifically, no `.bri`
+shipping is needed: `bty-tui` has an `i` keybinding that flashes
+the latest `bty-server-x86_64.img.gz` from
+`https://github.com/safl/bty/releases/latest/...` directly. The
+`.bri` mechanism is for operator-supplied URL pointers (private
+mirrors, custom-cooked images, etc.), not for the bty-server
+bootstrap.
+
+### `bty inspect PATH`
 
 Print detailed metadata for a single image file. Always reports
 `path`, `format`, and `size_bytes`. Adds a format-specific `detail`
@@ -142,14 +152,14 @@ Exit codes:
 - `0` -> success
 - `2` -> the path does not exist (or argparse rejected the invocation)
 
-### `bty flash --image PATH --target PATH [--progress {text,ndjson,none}] [--dry-run] [--yes]`
+### `bty flash IMAGE TARGET [--progress {text,ndjson,none}] [--dry-run] [--yes]`
 
 Flash an image onto a target block device. ``bty flash`` is a
 flasher only -- first-boot bring-up belongs in the image cooker
 upstream (cloud-init / NoCloud user-data baked at image-build
 time). There are no provisioning flags here.
 
-`--image` accepts three forms:
+`IMAGE` (positional) accepts three forms:
 
 - A local file path (`/path/to/foo.img.gz`).
 - An HTTP/HTTPS URL (`https://server/foo.img.gz`); raw `.img` and
@@ -258,7 +268,7 @@ environment and sensible defaults.
 
 | Variable | Purpose | Default |
 |-------------------|----------------------------------------------------------------|---------------------|
-| `BTY_IMAGE_ROOT` | Image root for `bty list images` and `bty inspect image`. | `/var/lib/bty/images` |
+| `BTY_IMAGE_ROOT` | Image root for `bty images` and `bty inspect`. | `/var/lib/bty/images` |
 
 The `bty --image-root` flag (when given) takes precedence over
 `BTY_IMAGE_ROOT`.

@@ -107,7 +107,7 @@ Concepts for the convention bty expects.
 
 Insert the USB stick into the target machine and boot from it. The bty
 live env auto-logins as root on `tty1`. From there you can run the CLI
-(`bty list disks`, `bty flash ...`) or `bty-tui` for an interactive
+(`lsblk -d -e7`, `bty flash ...`) or `bty-tui` for an interactive
 terminal UI.
 
 The rootfs is a read-only SquashFS with a tmpfs overlay (live-boot's
@@ -124,31 +124,27 @@ Inside the live env (or on any Linux box where `bty` is installed):
 
 ```bash
 # List interesting block devices on the system
-bty list disks
+lsblk -d -e7
 
 # List images available under /var/lib/bty/images (or BTY_IMAGE_ROOT)
-bty list images
+bty images
 
 # Inspect a specific image in detail
-bty inspect image /var/lib/bty/images/my-image.qcow2
+bty inspect /var/lib/bty/images/my-image.qcow2
 
 # Each leaf command also accepts --json
-bty list disks --json
-bty inspect image --json /var/lib/bty/images/my-image.qcow2
+lsblk -d -e7 -J
+bty inspect --json /var/lib/bty/images/my-image.qcow2
 ```
 
 ### Flash a target disk
 
 ```bash
 # 1. Validate that an image can be flashed to a target without writing.
-bty flash --image /var/lib/bty/images/my-image.qcow2 \
-          --target /dev/sdX \
-          --dry-run
+bty flash /var/lib/bty/images/my-image.qcow2 /dev/sdX --dry-run
 
 # 2. Once the plan looks right, run for real (requires root):
-sudo bty flash --image /var/lib/bty/images/my-image.qcow2 \
-               --target /dev/sdX \
-               --yes
+sudo bty flash /var/lib/bty/images/my-image.qcow2 /dev/sdX --yes
 ```
 
 `--dry-run` prints a plan and validates without writing. `--yes` is

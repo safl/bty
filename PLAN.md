@@ -216,7 +216,7 @@ runner; if you need fleet-specific tweaks, bake them into the image.
 
 - **Image** - a system image file in one of the supported formats,
   residing in a configured image root (or fetched from an HTTP URL via
-  `bty flash --image http://...`).
+  `bty flash http://... /dev/sdX`).
 - **Target** - a block device on the machine being flashed.
 - **Machine record** (web only) - MAC-address-keyed assignment of image
   + optional hostname + boot policy.
@@ -232,10 +232,10 @@ Operator boots the target machine from bty live media (USB), then
 runs `bty` locally:
 
 ```
-sudo bty flash --image IMG --target /dev/sda --yes
+sudo bty flash IMG /dev/sda --yes
 ```
 
-`bty flash --image` also accepts an HTTP/HTTPS URL, in which case
+`bty flash` also accepts an HTTP/HTTPS URL, in which case
 the bytes stream from the URL through the appropriate
 decompressor (`zstd -d` / `xz -d` / `gzip -d` / `bzip2 -d`)
 piped to `dd` straight to the target disk - no temp file for
@@ -249,7 +249,7 @@ The default for unknown MACs that PXE-boot through the server. The
 client lands in the live env in interactive mode; `bty-tui-on-tty1`
 launches `bty-tui --server URL --mac MAC` which fetches the catalog
 from `GET /images` and streams the operator-picked image straight to
-the target disk via `bty flash --image URL`. On success, the TUI
+the target disk via `bty flash URL /dev/sdX`. On success, the TUI
 `POST`s `/pxe/{mac}/done` so `last_flashed_at` updates server-side.
 "bty-on-a-USB but over the network" - first PXE contact lands a
 useful UI without prior server-side configuration.
@@ -389,8 +389,8 @@ as historical record of the build-out order.
    `bty-media/`, docs tooling, CI workflows.
 2. **[done]** `bty-media` USB live build pipeline (cijoe + Debian
    cloud-image + QEMU bake).
-3. **[done]** `bty list disks` - block-device discovery.
-4. **[done]** `bty list images` + `bty inspect image`.
+3. **[done]** `lsblk -d -e7` - block-device discovery.
+4. **[done]** `bty images` + `bty inspect`.
 5. **[done]** `bty flash --dry-run` validation.
 6. **[done]** `bty flash` write path for `.qcow2` / `.img` / `.img.zst`.
 7. **[done]** Provisioning: `none`.
@@ -414,7 +414,7 @@ Landed after the original 1.0 list:
 
 16. **[done]** TUI-on-PXE flow - new `boot_policy=tui` (default for
     auto-discovered MACs), `ipxe_tui.j2` template, streaming
-    `bty flash --image URL`, `bty-tui --server URL --mac MAC` remote
+    `bty flash URL /dev/sdX`, `bty-tui --server URL --mac MAC` remote
     mode, `bty-tui-on-tty1.service` in the live env. First PXE
     contact lands the operator at the TUI without prior server-side
     configuration ("bty-on-a-USB but over the network").
@@ -668,8 +668,8 @@ Landed after the original 1.0 list:
       dependency.
     - CLI: ``bty catalog list``, ``bty catalog fetch <name>``,
       ``bty catalog validate <file>`` for server-side manifest
-      management. The local CLI (``bty list images``,
-      ``bty flash --image``) stays intentionally simple --
+      management. The local CLI (``bty images``,
+      ``bty flash``) stays intentionally simple --
       directory scan only, no SHA / manifest awareness in
       operator-facing flags. (v0.6.0 briefly grew a
       ``ref:<prefix>`` resolver and a SHA column; v0.6.1
