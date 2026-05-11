@@ -1,10 +1,10 @@
 # bty - flash images onto target disks, locally or over PXE
 
 Image-flash toolkit for bare-metal and virtual targets. Writes
-pre-built ("cooked") system images onto target disks - locally from a
-USB live stick or remotely over PXE. First-boot bring-up is the image
-cooker's job; bty-web optionally runs a small CIJOE task over SSH
-after the target reboots, for managed-MAC post-flash hooks.
+pre-built system images onto target disks - locally from a
+USB live stick or remotely over PXE. First-boot bring-up is the
+image builder's job (cloud-init / NoCloud user-data baked in at
+build time); bty itself only writes bytes.
 
 `bty` is an umbrella project. The repository hosts several independent
 software components that share a name, a goal, and a set of conventions, but
@@ -12,7 +12,7 @@ are otherwise developed and consumed on their own terms.
 
 ## Motivation
 
-The overarching goal is to make it trivial to deploy pre-built ("cooked")
+The overarching goal is to make it trivial to deploy pre-built
 system images onto bare metal, appliance-style. The driving use case is CI:
 labs and pipelines where a box's role is "be a fresh, known-good
 environment for the next job," and the cheapest way to get there is to
@@ -23,7 +23,7 @@ treats as routine rather than exceptional:
 
 - **Per-job** - wipe and reflash between CI runs, so each job starts from a
   bit-identical baseline.
-- **On new image** - promote a freshly-cooked image and roll it out across
+- **On new image** - promote a freshly-built image and roll it out across
   the relevant fleet members.
 - **On failure** - a deployed instance has gone bad; reflash recovers it
   without operator hand-holding.
@@ -65,7 +65,7 @@ bootable disk image,"* not *"what bty has special knowledge of."*
   automation hooks at the disk-image level; if that changes, the door is
   open.
 
-This is a deliberate contrast with NixOS, which solves the cooked-image
+This is a deliberate contrast with NixOS, which solves the pre-built-image
 deployment problem brilliantly but only for NixOS-flavored systems. bty
 sits in the niche NixOS does not cover: the *image* is whatever a vendor or
 upstream produces, with no influence from bty.
@@ -149,7 +149,7 @@ cloud-init bases, live-build config).
 Four shipping variants:
 
 **`usb-x86`** - bootable USB stick carrying the `bty` CLI, `bty-tui`,
-and an exFAT `BTY_IMAGES` partition for cooked images. The operator
+and an exFAT `BTY_IMAGES` partition for pre-built images. The operator
 plugs it into a target machine, boots it, and runs `bty flash` against
 the target's local disk using images sourced from the stick itself.
 Self-contained and offline. The direct-flash flow's delivery vehicle.
@@ -205,10 +205,10 @@ catastrophic.
 
 ## Post-boot configuration
 
-bty is a flasher, not a cooker. First-boot bring-up (users, network,
-packages, hostnames) is the image cooker's job upstream. The reboot
+bty is a flasher, not an image builder. First-boot bring-up (users, network,
+packages, hostnames) is the image builder's job upstream. The reboot
 after flashing is unconfigured by design: the target comes up as
-whatever the cooked image declared. bty-web does not hold creds for
+whatever the pre-built image declared. bty-web does not hold creds for
 any target it has provisioned, and there is no post-flash workflow
 runner; if you need fleet-specific tweaks, bake them into the image.
 
@@ -406,7 +406,7 @@ as historical record of the build-out order.
     server triggered a workflow against the booted target. Pulled
     because bty-web holding root creds on every provisioned machine
     is the wrong blast radius; fleet-specific tweaks belong in the
-    cooker now.
+    image builder now.
 
 ### Post-roadmap milestones
 
@@ -454,7 +454,7 @@ Landed after the original 1.0 list:
        so the existing service fires on USB boot the same way it
        fires for the PXE-tui flow.
     3. **[done]** Bake a writable `BTY_IMAGES` exFAT partition
-       into the cooked ISO. Post-process the live-build output:
+       into the pre-built ISO. Post-process the live-build output:
        `truncate +4G` to extend the file, `sgdisk
        --move-second-header` + `--new` to add the partition entry
        to the GPT, `losetup -fP` + `mkfs.exfat` to format. The

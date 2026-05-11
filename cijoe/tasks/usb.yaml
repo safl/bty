@@ -10,7 +10,7 @@ doc: |
 
   The chroot carries the bty runtime, ``bty-flash-on-boot.service``
   (auto-flash mode), and ``bty-tui-on-tty1.service`` (interactive
-  mode). The cooked artifact ships a writable ``BTY_IMAGES`` exFAT
+  mode). The pre-built artifact ships a writable ``BTY_IMAGES`` exFAT
   partition (M19 phase 3) that ``var-lib-bty-images.mount``
   attaches at ``/var/lib/bty/images`` (M19 phase 4). When booted
   from USB with no ``bty.server`` / ``bty.mac`` on the kernel

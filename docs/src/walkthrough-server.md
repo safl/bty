@@ -268,7 +268,7 @@ provisions to.
 
 ## Post-deploy hardening
 
-The cooked image ships with appliance defaults that prioritise
+The pre-built image ships with appliance defaults that prioritise
 "works on first boot" over "locked down for the open internet".
 A few things to address before exposing the server beyond a
 trusted LAN:
@@ -278,7 +278,7 @@ trusted LAN:
   `sudo passwd odus`. The `/etc/issue` banner reminds you on
   every console login.
 - **Per-instance SSH host keys.** `bty-ssh-host-keys.service`
-  runs `ssh-keygen -A` on first boot of each cooked instance, so
+  runs `ssh-keygen -A` on first boot of each freshly-flashed instance, so
   every appliance has unique host keys (added in v0.5.14;
   pre-v0.5.14 deployments share the bake-time keys -- rotate
   manually with `sudo rm /etc/ssh/ssh_host_* && sudo ssh-keygen

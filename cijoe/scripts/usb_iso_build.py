@@ -25,7 +25,7 @@ Workflow:
    edge of the artifact (sfdisk + losetup + mkfs.exfat) so the
    single dd-able file carries both the boot path and the
    operator's image catalog.
-5. Compress the cooked ISO with ``gzip -9`` to get under GitHub's
+5. Compress the pre-built ISO with ``gzip -9`` to get under GitHub's
    2 GiB per-release-asset upload limit. gzip is chosen over xz
    because Etcher's bundled xz decompressor fails on our output
    regardless of how the .iso.xz is shaped (single-stream,
@@ -58,9 +58,9 @@ from pathlib import Path
 PUBLISH_BASENAME = "bty-usb-x86_64.iso"
 PUBLISH_GZ_BASENAME = "bty-usb-x86_64.iso.gz"
 
-# Pre-allocate this much trailing space inside the cooked ISO for
+# Pre-allocate this much trailing space inside the pre-built ISO for
 # an exFAT partition labelled BTY_IMAGES. Operators ``dd`` the
-# cooked artifact to a stick (Etcher / RPi Imager / Rufus DD-mode
+# pre-built artifact to a stick (Etcher / RPi Imager / Rufus DD-mode
 # read .iso.gz natively, no decompress step needed), drop
 # ``*.img.zst`` files into the writable exFAT partition from any
 # host OS, then boot.
@@ -123,7 +123,7 @@ PUBLISH_GZ_BASENAME = "bty-usb-x86_64.iso.gz"
 # is preserved with zero added complexity for the operator.
 TRAILING_EXFAT_SIZE = "2150M"
 
-# Compress the cooked ISO with gzip. We tried xz first (zstd lacks
+# Compress the pre-built ISO with gzip. We tried xz first (zstd lacks
 # GUI flasher support) but Etcher's bundled xz decompressor failed
 # on our output even after dropping ``-T0`` for single-stream /
 # single-block layout, and even after lowering preset levels. The
@@ -196,7 +196,7 @@ def main(args, cijoe):
     # (login banner), ``/etc/motd`` (post-login), and
     # ``/etc/profile.d/bty-version.sh`` (interactive shell). Operators
     # see the version in at least one of these at every boot moment
-    # -- bootloader menu, kernel boot, login, shell -- so the cooked
+    # -- bootloader menu, kernel boot, login, shell -- so the pre-built
     # stick can always be matched back to a release.
     bty_version = _read_bty_version(cijoe_dir)
     log.info(f"Stamping bty version {bty_version} into live-build tree")
@@ -284,7 +284,7 @@ def main(args, cijoe):
     log.info(f"published {dst}")
 
     # Extend the published ISO with a trailing exFAT partition so the
-    # cooked image is dd-ready WITH a writable image-catalog area.
+    # pre-built image is dd-ready WITH a writable image-catalog area.
     # The hybrid ISO is MBR-only (live-build's ``--bootloaders
     # syslinux,grub-efi`` uses ``isohdpfx.bin`` for the System Area,
     # not GPT); we append a fresh MBR partition entry via sfdisk.
@@ -296,7 +296,7 @@ def main(args, cijoe):
         return err
 
     # Linux-side post-bake verification. Catches structural
-    # regressions in the cooked ISO (partition count / types /
+    # regressions in the pre-built ISO (partition count / types /
     # overlap / BTY_IMAGES label / exFAT mountability) before
     # we waste CI cycles on the gzip step. Necessary but not
     # sufficient -- doesn't catch host-OS handler bugs (e.g.
@@ -340,7 +340,7 @@ def main(args, cijoe):
 
 def _verify_bootloader_suppression(cijoe, build_dir: Path) -> int:
     """Assert the binary-stage hook ran + bootloader menus are
-    suppressed in the cooked binary tree.
+    suppressed in the pre-built binary tree.
 
     Catches the "hook silently doesn't execute" class of failures
     (v0.5.2..v0.5.9 saga: hook lived at the wrong path, never ran,
@@ -427,7 +427,7 @@ def _verify_bootloader_suppression(cijoe, build_dir: Path) -> int:
 
 
 def _verify_iso(cijoe, iso_path: Path) -> int:
-    """Linux-side post-bake structural checks on the cooked ISO.
+    """Linux-side post-bake structural checks on the pre-built ISO.
 
     Catches the layout regressions we've broken before:
 
@@ -448,7 +448,7 @@ def _verify_iso(cijoe, iso_path: Path) -> int:
     flasher is still required before tagging any publish-format
     change (see ``feedback_verify_flasher_compat`` in memory).
     """
-    log.info(f"Verifying cooked ISO structure: {iso_path}")
+    log.info(f"Verifying pre-built ISO structure: {iso_path}")
 
     err, state = cijoe.run_local(f"sudo sfdisk --json {iso_path}")
     if err:
@@ -521,7 +521,7 @@ def _verify_iso(cijoe, iso_path: Path) -> int:
 def _read_bty_version(cijoe_dir: Path) -> str:
     """Read the bty-lab version from the repo's top-level pyproject.toml.
 
-    The cooked live env stamps this string into the bootloader menu,
+    The pre-built live env stamps this string into the bootloader menu,
     kernel cmdline, login banner, motd, and shell-startup file so
     operators can read the version at every boot moment. Reading
     pyproject.toml directly (rather than ``importlib.metadata``)
@@ -705,7 +705,7 @@ def _extend_with_exfat(cijoe, iso_path: Path) -> int:
     # v0.8.4 moved the bootstrap to the TUI's ``i`` keybinding
     # (which flashes the same GitHub release URL on demand), so the
     # baked-in pointer was redundant. Operators with their own
-    # cooked images drop them onto BTY_IMAGES themselves from a host
+    # pre-built images drop them onto BTY_IMAGES themselves from a host
     # OS; the partition ships empty.
     err, _ = cijoe.run_local(f"sudo losetup -d {loop}")
     if err:

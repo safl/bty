@@ -3,7 +3,7 @@
 Source content for the bty appliance images. Four variants:
 
 - **USB live image** (`VARIANT=usb-x86`) - bootable USB carrying the
-  bty runtime + a writable exFAT `BTY_IMAGES` partition for cooked
+  bty runtime + a writable exFAT `BTY_IMAGES` partition for pre-built
   images. Built via Debian's live-build (`iso-hybrid` output);
   shipped gzip-compressed as `bty-usb-x86_64.iso.gz` (Etcher / Rufus
   / Raspberry Pi Imager all decompress `.gz` natively; xz tripped
@@ -79,7 +79,7 @@ right one based on the variant:
 
 - `usb-x86` -> `cijoe tasks/usb.yaml`. Drives Debian's `live-build`
   with `BTY_USB_ISO=1` selecting `iso-hybrid` output, then post-
-  processes the cooked ISO to append a writable exFAT `BTY_IMAGES`
+  processes the pre-built ISO to append a writable exFAT `BTY_IMAGES`
   partition (`sfdisk --append`, `losetup -fP`, `mkfs.exfat`) and
   gzip-compresses it. Output is `bty-usb-x86_64.iso.gz`. No QEMU
   full-system bake.
@@ -168,10 +168,10 @@ amd64-only); first-boot smoke-testing happens out-of-band on real
 hardware. Most operators never run this build pipeline themselves -
 ``bty-media/`` exists for contributors who want to modify the image.
 
-- **usb-x86.** The cooked `.iso.gz` decompresses to a hybrid ISO
+- **usb-x86.** The `.iso.gz` decompresses to a hybrid ISO
   that boots into a Debian live environment with the `bty` CLI +
   TUI installed into `/opt/bty/venv`, and an exFAT `BTY_IMAGES`
-  partition for cooked images. live-boot's SquashFS + tmpfs overlay
+  partition for pre-built images. live-boot's SquashFS + tmpfs overlay
   provides the ephemeral rootfs (no `overlayroot` package; M19
   phase 6 retired the cloud-init bake that depended on it).
   End-to-end use case in

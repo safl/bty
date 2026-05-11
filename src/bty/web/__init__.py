@@ -26,7 +26,7 @@ def _resolve_secret_key(state_dir: Path) -> str:
     Read from ``$BTY_SESSION_SECRET`` if set (CI tests, debugging);
     otherwise from ``<state_dir>/session-secret``. If neither exists,
     generate a 32-byte URL-safe key, persist it under ``state_dir``
-    with mode 0640, and return it. The cooked appliance pre-creates
+    with mode 0640, and return it. The appliance pre-creates
     this file in ``bty-web-init``; this fallback covers fresh dev /
     local installs where bty-web is launched without that step.
     """

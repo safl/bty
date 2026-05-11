@@ -134,7 +134,7 @@ cat <<'EOF'
   and ``server-rpi`` don't (cloud-init in QEMU and qemu-user-static
   chroot, both unprivileged).
 
-  The ``bty`` user inside the cooked server image defaults to
+  The ``bty`` user inside the pre-built server image defaults to
   password ``bty`` (rotate with ``passwd bty``). The admin user
   is ``odus`` / ``odus`` (passwordless sudo).
 ==============================================================

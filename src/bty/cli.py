@@ -416,7 +416,7 @@ def cmd_flash(
     real ``bty.flash`` / ``os`` machinery is invoked.
 
     bty is a flasher, not a provisioner: first-boot bring-up belongs
-    in the image cooker upstream (cloud-init / NoCloud / whatever
+    in the image builder upstream (cloud-init / NoCloud / whatever
     the operator bakes in). bty itself only writes bytes.
     """
     if not args.dry_run and not args.yes:

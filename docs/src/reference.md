@@ -134,7 +134,7 @@ shipping is needed: `bty-tui` has an `i` keybinding that flashes
 the latest `bty-server-x86_64.img.gz` from
 `https://github.com/safl/bty/releases/latest/...` directly. The
 `.bri` mechanism is for operator-supplied URL pointers (private
-mirrors, custom-cooked images, etc.), not for the bty-server
+mirrors, custom-pre-built images, etc.), not for the bty-server
 bootstrap.
 
 ### `bty inspect PATH`
@@ -155,7 +155,7 @@ Exit codes:
 ### `bty flash IMAGE TARGET [--progress {text,ndjson,none}] [--dry-run] [--yes]`
 
 Flash an image onto a target block device. ``bty flash`` is a
-flasher only -- first-boot bring-up belongs in the image cooker
+flasher only -- first-boot bring-up belongs in the image builder
 upstream (cloud-init / NoCloud user-data baked at image-build
 time). There are no provisioning flags here.
 
@@ -336,7 +336,7 @@ tooling which can't carry a session cookie:
  explicit operator action so the per-job CI cadence (constant
  reflashing) survives across boots. bty-web does *not* run any
  post-flash provisioning -- the target reboots into whatever the
- cooked image brings up via cloud-init.
+ pre-built image brings up via cloud-init.
 - `GET /pxe-bootstrap.ipxe` - static iPXE script that dnsmasq points
  iPXE clients at on their second-stage DHCP. Returns
  `chain http://<host>/pxe/${net0/mac:hexhyp}` where `<host>` is the

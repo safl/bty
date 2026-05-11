@@ -38,7 +38,7 @@ The closest neighborhood.
 bty differs by being modern Python + iPXE, by serving both ad-hoc USB
 and DevOps server in one project, by explicitly supporting non-Linux
 images, and by being strictly a flasher: post-flash bring-up is the
-image cooker's job, not bty's.
+image builder's job, not bty's.
 
 ## Installer-based provisioners - netboot.xyz, Cobbler, Microsoft WDS/MDT
 
@@ -56,11 +56,11 @@ when the goal is *installing* an OS from its official installer with
 the operator answering questions interactively, the way one would
 from a freshly burned ISO -- once.
 
-bty's goal is the opposite cadence: a cooked image goes onto disk
+bty's goal is the opposite cadence: a pre-built image goes onto disk
 unchanged, in seconds, with no operator at the keyboard, and is
 expected to be rewritten next week. CI fleets and lab automation,
 not "I am setting up my new homelab box". The two coexist cleanly --
-netboot.xyz for one-off OS installs, bty for the cooked-image
+netboot.xyz for one-off OS installs, bty for the pre-built-image
 reflash loop.
 
 Cobbler / WDS / MDT play in the same installer-driven space at
@@ -75,11 +75,11 @@ Same image-deploy philosophy, but each pins you to a specific OS.
 NixOS is the most capable of the bunch in this niche. bty's positioning
 is exactly the case NixOS does not cover: when the image is dictated by
 hardware vendor or upstream (Ubuntu+NVIDIA driver tree, FreeBSD,
-Windows). bty lets you deploy whatever someone else has already cooked.
+Windows). bty lets you deploy whatever someone else has already built.
 
 ## Image creation - Packer, mkosi, debian-live, jkab
 
-Complementary, not competing. These build the cooked images that bty
+Complementary, not competing. These build the pre-built images that bty
 consumes. `bty-media` is itself in this category for its appliance
 images, but that is an internal concern; users mostly bring their own
 pre-built images for the targets they provision.
@@ -101,7 +101,7 @@ The combination:
 3. Single-appliance-server topology (homelab-scale, not data-center).
 4. Both ad-hoc USB and DevOps server in one project (most pick one).
 5. Modern, lightweight stack (NUC-class hardware, not a cluster).
-6. Flasher only -- post-flash bring-up is the image cooker's job
+6. Flasher only -- post-flash bring-up is the image builder's job
    (cloud-init / NoCloud user-data), and bty-web holds zero
    credentials against the targets it flashes.
 

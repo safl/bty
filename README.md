@@ -15,21 +15,21 @@
 [![Container](https://img.shields.io/badge/container-ghcr.io%2Fsafl%2Fbty--web-blue)](https://github.com/safl/bty/pkgs/container/bty-web)
 
 Reflash a homelab box, a CI runner, or a rack of bare-metal targets in
-the time it takes to make coffee. bty writes pre-built ("cooked") system
+the time it takes to make coffee. bty writes pre-built system
 images onto disks - locally over USB or remotely over PXE. The image is
 the source of truth: rebuild the image, reflash the target. No
 imperative configuration management, no idempotency mind games.
 
-bty is a flasher, not a cooker:
+bty is a flasher, not an image builder:
 
 - **Image creation is somebody else's project.** First-boot bring-up
   (users, network, packages, hostnames) gets baked into the image
   upstream with cloud-init / kickstart / preseed / your favourite
-  cooker. Use the [companion image-builder](https://github.com/safl/jellyfin-kiosk-appliance-builder)
+  image builder. Use the [companion image-builder](https://github.com/safl/jellyfin-kiosk-appliance-builder)
   pattern, or your own. bty just writes the bytes.
 - **No post-boot configuration management either.** Anything that
   needs to be true on the running target (users, hostnames, config
-  files, packages) belongs in the cooker, not in bty. The server
+  files, packages) belongs in the image builder, not in bty. The server
   does not hold creds for any target it has provisioned -- that
   blast radius is intentionally absent.
 

@@ -68,7 +68,7 @@ def create_app(
     :class:`SessionMiddleware` to sign session cookies. It must persist
     across bty-web restarts (otherwise every restart logs everyone out)
     and must be unique per appliance (otherwise a cookie minted by one
-    server is valid on another). On the cooked appliance,
+    server is valid on another). On the appliance,
     ``bty-web-init`` writes a 32-byte random key to
     ``/var/lib/bty/session-secret`` on first boot.
 

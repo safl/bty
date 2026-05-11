@@ -103,7 +103,7 @@ pipx install "bty-lab[web]"
 
 `bty-web` is intentionally a flasher only -- it writes bytes,
 records what was flashed when, and never opens an SSH session to a
-flashed target. First-boot bring-up belongs in the image cooker
+flashed target. First-boot bring-up belongs in the image builder
 (cloud-init / NoCloud user-data baked at image-build time); bty-web
 holds zero credentials against the targets it flashes.
 
@@ -121,7 +121,7 @@ Sibling directory at the repo root. Not a Python package. Builds four
 appliance variants from a shared rootfs overlay:
 
 **USB live image (`usb-x86`).** Bootable USB stick carrying the `bty`
-runtime and an exFAT `BTY_IMAGES` partition for cooked images. Operator
+runtime and an exFAT `BTY_IMAGES` partition for pre-built images. Operator
 plugs it in, boots a target, runs `bty flash` against the local disk.
 Self-contained and offline. Direct-flash delivery vehicle.
 
@@ -201,7 +201,7 @@ SSH'd into post-flash targets; that surface was removed because
 "the flasher holds root creds on every machine it ever
 provisioned" is a bad security shape.
 
-First-boot bring-up belongs in the image cooker -- cloud-init /
+First-boot bring-up belongs in the image builder -- cloud-init /
 NoCloud user-data baked into the image at build time. Post-boot
 config management is anything you run from the target itself
 (cijoe over SSH from your workstation, ansible, etc.), not from

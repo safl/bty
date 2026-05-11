@@ -18,7 +18,7 @@ appliance image (see [walkthrough-server.md](walkthrough-server.md)).
 - **Trial / kicking the tires**: you want to poke at the bty-web UI
   without flashing an SD card or burning a NUC.
 - **Image library**: you have a fleet of operators who all carry
-  bty USB sticks and want a network-shared catalog of cooked
+  bty USB sticks and want a network-shared catalog of pre-built
   images instead of copying files to every stick.
 - **Local-dev backend** for `bty tui --server` work.
 
@@ -106,7 +106,7 @@ client.
 
 ## Rotating the default credentials
 
-The cooked image ships with `bty / bty` so the operator can start
+The pre-built image ships with `bty / bty` so the operator can start
 poking at the UI immediately. **Rotate before exposing past a
 trusted LAN.**
 
@@ -134,7 +134,7 @@ The container expects a single volume at `/var/lib/bty`:
 /var/lib/bty/
   state.db           SQLite: machines, MAC -> image bindings, sessions
   session-secret     bty-web cookie key (generated on first start)
-  images/            cooked image catalog (bind-mountable from host)
+  images/            pre-built image catalog (bind-mountable from host)
   boot/              kernel / initrd / squashfs (only used by PXE flow)
 ```
 

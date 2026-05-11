@@ -21,9 +21,9 @@ USB build, ~20 minutes), and under 5 minutes for any subsequent flash.
 | You need | Notes |
 |---|---|
 | A **build host** with passwordless sudo | live-build runs a chroot, which needs root. Any Linux box works (no KVM required after M19; we no longer bake in QEMU). |
-| A **USB stick**, 4 GiB or larger | The cooked image is ~2.5 GiB (~400 MB live boot + 2.1 GiB exFAT `BTY_IMAGES`). Larger sticks just leave the tail unallocated; grow `BTY_IMAGES` with gparted on your host afterwards if you want it. |
+| A **USB stick**, 4 GiB or larger | The pre-built image is ~2.5 GiB (~400 MB live boot + 2.1 GiB exFAT `BTY_IMAGES`). Larger sticks just leave the tail unallocated; grow `BTY_IMAGES` with gparted on your host afterwards if you want it. |
 | A **target machine** with a free disk | This is the box that will get flashed. UEFI or legacy BIOS, x86_64. |
-| A **system image** to flash | `.qcow2`, raw `.img`, or `.img.{zst,xz,gz,bz2}`. Any cooked OS image of yours; bty doesn't ship one. |
+| A **system image** to flash | `.qcow2`, raw `.img`, or `.img.{zst,xz,gz,bz2}`. Any pre-built OS image of yours; bty doesn't ship one. |
 
 The build host runs Debian 12+ or Ubuntu 24.04+. Other Linux distros
 work if you can install `live-build`, `debootstrap`, `squashfs-tools`,
@@ -253,7 +253,7 @@ no operator copy step.
 
 `bty flash` writes the bytes and stops. There's no
 post-flash provisioning step -- first-boot bring-up (users,
-network, packages, hostnames) is the image cooker's job, baked
+network, packages, hostnames) is the image builder's job, baked
 in via cloud-init / NoCloud user-data at image-build time. bty
 itself only writes bytes.
 
@@ -368,13 +368,13 @@ The `.iso` can sit at the root of the Ventoy partition or in any
 subdirectory. Ventoy's menu lists every `.iso` it finds anywhere
 on the partition.
 
-#### Step 3: Stage your cooked images in `bty-images/`
+#### Step 3: Stage your pre-built images in `bty-images/`
 
 ```bash
 # Create the bty-images/ folder at the root of the Ventoy partition.
 sudo mkdir -p /mnt/bty-images
 
-# Copy as many cooked images as you need. Supported extensions:
+# Copy as many pre-built images as you need. Supported extensions:
 # *.img.gz / *.img.zst / *.img.xz / *.img.bz2 / *.qcow2 / *.bri
 # (bri is a tiny TOML pointer at a remote image URL).
 sudo cp /path/to/debian-13-server.img.gz /mnt/bty-images/
@@ -388,7 +388,7 @@ The discovery service accepts either layout:
 
 1. **Recommended**: a `bty-images/` subfolder at the partition
    root, with your `.img.gz` / `.qcow2` / `.bri` files inside.
-   Keeps your cooked images visually separate from the `.iso`
+   Keeps your pre-built images visually separate from the `.iso`
    files Ventoy is booting.
 2. **Quick-drop**: the same files at the partition root,
    alongside `bty-usb-x86_64.iso`. Less tidy but supported -- the
@@ -456,7 +456,7 @@ The default credentials are `bty / bty`. Note the host's IP
 address (e.g. `10.0.0.5`); the target needs to reach it on TCP
 8080.
 
-Upload your cooked images to the server via the bty-web Images
+Upload your pre-built images to the server via the bty-web Images
 page (`http://10.0.0.5:8080/ui/images`).
 
 #### Step 2: Connect piKVM to the target

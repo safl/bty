@@ -172,7 +172,7 @@ on `5` after re-probing; do not retry on `3` or `4`).
 detail in `docs/src/reference.md`; quick reference for agents:
 
 **Auth.** Single-tenant PAM against the bty service user (the OS
-account ``bty-web`` runs as; ``bty / bty`` by default on the cooked
+account ``bty-web`` runs as; ``bty / bty`` by default on the
 appliance). ``POST /ui/login`` (form-encoded ``password=...``) PAM-
 checks the password and flips ``request.session["bty_authed"] =
 True``; the session is a server-signed cookie via Starlette's

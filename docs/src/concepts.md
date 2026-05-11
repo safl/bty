@@ -21,11 +21,11 @@ target machine's primary disk, selected by the live environment.
 ## No post-flash provisioning
 
 bty has no provisioning surface at all -- after the bytes land,
-bty is done. The target reboots into whatever the cooked image
+bty is done. The target reboots into whatever the pre-built image
 brings up by itself.
 
 First-boot bring-up (users, network, packages, hostnames) is the
-image cooker's job, baked in at build time via cloud-init /
+image builder's job, baked in at build time via cloud-init /
 NoCloud user-data. Post-boot config management is whatever you
 run from the target itself (ansible, cijoe over SSH from your
 workstation, hand-edits) -- not from bty-web. The flasher never
@@ -43,7 +43,7 @@ three partitions in an MBR isohybrid layout:
 - **EFI ESP** (~3 MB). UEFI bootloader; relocated to a non-overlapping
   region so Windows hosts enumerate the stick correctly.
 - **`BTY_IMAGES` partition** (2.1 GiB, exFAT, MBR label `BTY_IMAGES`).
-  Holds cooked images the operator wants to flash onto target disks
+  Holds pre-built images the operator wants to flash onto target disks
   -- room for a fleet of small `.bri` descriptors plus one large
   `.img.gz` or a few smaller ones. Sized to play nicely with
   Ventoy (which hosts the blobs on its own data partition) and

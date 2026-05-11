@@ -7,7 +7,7 @@ at three different cadences:
 
 - **Per-job** - wipe and reflash between CI runs so each job starts from a
   bit-identical baseline.
-- **On new image** - promote a freshly-cooked image and roll it out across
+- **On new image** - promote a freshly-built image and roll it out across
   the relevant fleet members.
 - **On failure** - a deployed instance has gone bad; reflash recovers it
   without operator hand-holding.
@@ -29,7 +29,7 @@ that bridges the two:
   (commonly the `ghcr.io/safl/bty-web` Docker container running on
   someone's workstation). Flash still happens locally on the operator's
   hardware; only the catalog is centralised. Best for a small team
-  sharing cooked images without standing up a full PXE server.
+  sharing pre-built images without standing up a full PXE server.
 - **PXE-driven (no operator).** Full `bty-server` appliance running
   `bty-web` and the iPXE/TFTP/HTTP services. Fleet members are
   registered by MAC address; reflashes happen on schedule, on demand,

@@ -92,7 +92,7 @@ after writing the stick.
 ## Drop images onto the stick
 
 Mount the `BTY_IMAGES` partition on any Linux / macOS / Windows box
-(exFAT is read/write on all three) and copy your cooked images
+(exFAT is read/write on all three) and copy your pre-built images
 into it:
 
 ```bash
@@ -156,7 +156,7 @@ refuses to do anything without one or the other.
 
 bty is a flasher, not a provisioner. First-boot bring-up (users,
 network, packages, hostnames) gets baked into the image by the
-cooker upstream via cloud-init / NoCloud user-data -- bty just
+image builder upstream via cloud-init / NoCloud user-data -- bty just
 writes the bytes.
 
 Interactive flashing via the TUI:
@@ -233,5 +233,5 @@ contact any external CDN at runtime.
 
 See [`PLAN.md`](https://github.com/safl/bty/blob/main/PLAN.md) for
 the live roadmap. First-boot bring-up of flashed targets is the
-image cooker's job (cloud-init / NoCloud user-data); bty itself
+image builder's job (cloud-init / NoCloud user-data); bty itself
 stays a flasher.

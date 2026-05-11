@@ -37,7 +37,7 @@ The whole flow runs offline. No network, no server, no MAC registration.
 A middle shape between the strictly-offline direct flash and the
 PXE-driven flows. The operator boots from the same USB live stick
 but points the TUI at a network-shared `bty-web` for the catalog.
-Useful for a small team that wants one place to keep cooked images
+Useful for a small team that wants one place to keep pre-built images
 without standing up the appliance + PXE stack.
 
 1. Someone (operator's workstation, a homelab server, a dev box)
@@ -199,7 +199,7 @@ schedule, on demand, or on failure.
    flips the machine to `boot_policy=local`. Per-job CI cadences
    that want every boot to reflash leave the policy on `flash`.
 6. First-boot bring-up (users, network, packages, hostnames) is the
-   cooked image's job, baked in via cloud-init / NoCloud user-data
+   pre-built image's job, baked in via cloud-init / NoCloud user-data
    at image-build time. bty has no online provisioning step.
 
 Both BIOS and UEFI clients are supported via iPXE.

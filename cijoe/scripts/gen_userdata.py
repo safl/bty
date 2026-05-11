@@ -149,7 +149,7 @@ def _read_bty_version(cijoe_dir: Path) -> str:
     """Read the bty-lab version from the repo's top-level pyproject.toml.
 
     Mirrors the helper in ``usb_iso_build.py`` -- one source of truth
-    is the wheel's version string, surfaced into the cooked image's
+    is the wheel's version string, surfaced into the pre-built image's
     ``/etc/issue`` / motd / profile.d files via the same
     ``__BTY_VERSION__`` placeholder convention.
     """

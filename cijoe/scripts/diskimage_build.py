@@ -31,7 +31,7 @@ from cijoe.qemu.wrapper import Guest
 # cloud image grows to fill, then we apt-install bty-lab[web]'s
 # deps + dnsmasq + iPXE, then trim caches. Final on-disk usage is
 # ~1.7 GB; 6 GiB gives ~4 GiB transient headroom for apt + pip
-# working space during the install. The cooked image expands to
+# working space during the install. The pre-built image expands to
 # the operator's actual disk size on first boot via
 # ``bty-grow-rootfs.service``.
 DISK_SIZE = "6G"

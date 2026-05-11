@@ -148,5 +148,5 @@ def test_flash_zst_to_loop_device_byte_correct(
 
 
 # bty has no post-flash provisioning step. Image-side first-boot
-# bring-up is the image cooker's job (cloud-init / NoCloud);
+# bring-up is the image builder's job (cloud-init / NoCloud);
 # bty itself only writes bytes.
