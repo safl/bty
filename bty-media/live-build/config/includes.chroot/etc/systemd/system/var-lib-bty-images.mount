@@ -21,12 +21,20 @@ Before=bty-tui-on-tty1.service bty-flash-on-boot.service
 What=/dev/disk/by-label/BTY_IMAGES
 Where=/var/lib/bty/images
 Type=exfat
-# Read-only on purpose. The bty flash flow only ever reads images;
-# mounting RW would let a buggy run trash the operator's catalog.
-# To add or remove images the operator unmounts and edits from a
-# host OS (the typical workflow) - the partition is exFAT so any
-# host can read+write it.
-Options=ro,noatime
+# - ``ro,noatime``: read-only on purpose. The bty flash flow only
+#   ever reads images; mounting RW would let a buggy run trash the
+#   operator's catalog. To add or remove images the operator
+#   unmounts and edits from a host OS (the typical workflow) - the
+#   partition is exFAT so any host can read+write it.
+# - ``nofail``: downgrades systemd's auto-generated ``Requires=`` on
+#   ``dev-disk-by\x2dlabel-BTY_IMAGES.device`` to a ``Wants=``.
+#   Without it, the netboot live env (which has no BTY_IMAGES
+#   partition) wastes 90s of every boot waiting for a device that
+#   will never appear, then prints a confusing FAILED line for the
+#   mount unit even though ``ConditionPathExists`` already skips
+#   the execution path. With ``nofail`` the device timeout is
+#   non-fatal and the mount unit just stays inactive on netboot.
+Options=ro,noatime,nofail
 
 [Install]
 WantedBy=multi-user.target
