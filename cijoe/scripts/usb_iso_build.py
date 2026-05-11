@@ -98,7 +98,12 @@ PUBLISH_GZ_BASENAME = "bty-usb-x86_64.iso.gz"
 # embedded blobs). Operators who want more can grow the partition
 # on their host via ``gparted`` post-flash; the live env reads
 # whatever exFAT size it finds.
-TRAILING_EXFAT_SIZE = "2.1G"
+#
+# Encoded as ``2150M`` (mebibytes) rather than ``2.1G`` because GNU
+# ``truncate`` rejects fractional sizes -- ``+2.1G`` would error out
+# with ``Invalid number``. 2150 MiB is 2.0996 GiB, close enough to
+# the stated 2.1 GiB target.
+TRAILING_EXFAT_SIZE = "2150M"
 
 # Compress the cooked ISO with gzip. We tried xz first (zstd lacks
 # GUI flasher support) but Etcher's bundled xz decompressor failed
