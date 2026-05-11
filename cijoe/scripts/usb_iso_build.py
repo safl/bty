@@ -103,6 +103,25 @@ PUBLISH_GZ_BASENAME = "bty-usb-x86_64.iso.gz"
 # ``truncate`` rejects fractional sizes -- ``+2.1G`` would error out
 # with ``Invalid number``. 2150 MiB is 2.0996 GiB, close enough to
 # the stated 2.1 GiB target.
+#
+# We've revisited the "drop / shrink BTY_IMAGES" question (most
+# recently in v0.8.4 design): the raw ``.iso`` is ~4.5 GiB
+# (~2.4 GiB live env + ~2.1 GiB sparse BTY_IMAGES) which is paid in
+# full on every transfer to Ventoy / piKVM / JetKVM, even though
+# those paths can't reach the partition. Compressed ``.iso.gz`` is
+# ~410 MiB (sparse zeros gzip near-flat). We considered (a) dropping
+# the partition entirely, (b) shrinking to ~1 GiB, (c) tiny-with-
+# grow-on-demand. The single-stick offline workflow (operator
+# carries one stick to an air-gapped target, e.g. updating a family
+# member's box) is the use case that uniquely depends on this
+# partition; the shim paths (Ventoy + IP-KVMs) have alternative
+# routes (the ``bty-images-discover`` service finds external sticks,
+# the TUI's ``i`` shortcut bootstraps bty-server from GitHub, the
+# TUI's ``c`` shortcut switches to a remote bty-web catalog).
+# Decision: keep at 2.1 GiB. The transfer-cost-for-no-benefit on
+# the shim paths is paid once at piKVM image-library setup (then
+# amortized across many flashes); the single-stick offline workflow
+# is preserved with zero added complexity for the operator.
 TRAILING_EXFAT_SIZE = "2150M"
 
 # Compress the cooked ISO with gzip. We tried xz first (zstd lacks
