@@ -175,7 +175,7 @@ Tty1 ends up showing something like:
 
 ```
 ======================================================================
-  bty 0.5.7 server appliance
+  bty 0.8.2 server appliance
 
   Browser UI:    http://192.168.1.42:8080
   Default login: bty / bty (rotate before exposing this server)
@@ -185,7 +185,7 @@ Tty1 ends up showing something like:
   you're ready to PXE-boot targets on this LAN.
 ======================================================================
 
-bty 0.5.7 on bty-server (tty1)
+bty 0.8.2 on bty-server (tty1)
 
 bty-server login: _
 ```
@@ -216,8 +216,11 @@ Initial UI tour:
   `initrd`, `squashfs`). The server can fetch the latest from
   the bty release page directly via the "Fetch latest release"
   button, or you can upload your own.
-- **`/ui/settings`** - activates PXE proxy-DHCP on the
-  operator's chosen interface + subnet.
+- **`/ui/settings`** - activates / deactivates PXE proxy-DHCP
+  on the operator's chosen interface + subnet. Also flags when
+  the configured interface goes missing across a reboot (USB
+  ethernet adapter unplugged, systemd NIC-name churn) so the
+  operator can re-bind without chasing a silent dnsmasq failure.
 
 ## Step 5: Flash a target over PXE
 

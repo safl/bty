@@ -217,7 +217,7 @@ runner; if you need fleet-specific tweaks, bake them into the image.
 - **Image** - a system image file in one of the supported formats,
   residing in a configured image root (or fetched from an HTTP URL via
   `bty flash --image http://...`).
-- **Target** - a block device on the machine being provisioned.
+- **Target** - a block device on the machine being flashed.
 - **Machine record** (web only) - MAC-address-keyed assignment of image
   + optional hostname + boot policy.
 - **Boot policy** (web only) - what `GET /pxe/{mac}` returns: `local`

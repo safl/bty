@@ -172,7 +172,7 @@ are administrative tools, not part of the operator's flash flow.
 | `/images` | GET | unified catalog listing |
 
 All endpoints are auth-gated (the same session cookie as the
-browser UI). The schemas are stable in the v0.5.x series; the
+browser UI). The schemas have been stable since v0.5.x; the
 shape will be locked in for 1.0.
 
 ## Environment variables

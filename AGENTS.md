@@ -195,7 +195,7 @@ is lower-case `aa:bb:cc:dd:ee:ff`):
 - `200` - success with body
 - `204` - success, no body (DELETE)
 - `400` - malformed input (e.g. invalid MAC)
-- `401` - missing or wrong bearer token
+- `401` - missing or invalid session cookie on a protected route
 - `404` - protected resource not found (e.g. machine record)
 - `422` - request body failed Pydantic validation (e.g. malformed
   `image_sha256`)

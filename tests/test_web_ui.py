@@ -826,8 +826,9 @@ def test_ui_images_renders(client: TestClient) -> None:
 
 
 def test_cookie_auth_works_on_api_routes_too(client: TestClient) -> None:
-    """The bearer dep accepts the cookie, so a logged-in browser can hit
-    /machines (the API) without an Authorization header."""
+    """The session cookie set by /ui/login also authenticates the JSON
+    API, so a logged-in browser (or scripted shell) can hit /machines
+    without a separate auth step."""
     _login(client)
     r = client.get("/machines")
     assert r.status_code == 200
@@ -865,7 +866,7 @@ def test_layout_has_no_external_origins(client: TestClient) -> None:
 
 def test_sse_endpoint_requires_auth(client: TestClient) -> None:
     """The events stream must reject unauthenticated subscribers (same
-    bearer/cookie check as the API).
+    session-cookie check as the rest of the API).
 
     We don't exercise the body here - TestClient's sync httpx hangs on
     open-ended event streams. The streaming contract itself is covered

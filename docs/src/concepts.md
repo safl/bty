@@ -13,7 +13,7 @@ root*.
 
 ## Target
 
-The block device on the machine being provisioned. For the direct-flash
+The block device on the machine being flashed. For the direct-flash
 flow this is the local disk seen by the live environment (typically
 `/dev/nvme0n1` or `/dev/sda`). For the network-flash flow it is the
 target machine's primary disk, selected by the live environment.
