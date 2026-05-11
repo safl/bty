@@ -15,6 +15,16 @@ User=bty
 Group=bty
 ProtectSystem=full
 ProtectHome=true
+# bty-web's "Activate PXE" button shells out to the sudo'd
+# helper ``/usr/local/sbin/bty-web-activate-pxe`` which writes
+# ``/etc/dnsmasq.d/bty-pxe-active.conf``. ``ProtectSystem=full``
+# bind-mounts ``/etc`` as read-only into this unit's namespace,
+# and ``sudo`` elevates UID but NOT the mount namespace -- so
+# the helper, even as root, sees ``/etc`` as read-only and fails
+# with ``mktemp: ... Read-only file system``. Punch a single
+# read-write hole for the dnsmasq config dir; everything else
+# in /etc stays protected.
+ReadWritePaths=/etc/dnsmasq.d
 # Intentionally NOT setting NoNewPrivileges=true: bty-web's
 # /ui/login authenticates via PAM (pamela -> libpam -> pam_unix ->
 # setgid unix_chkpwd to read /etc/shadow). NoNewPrivileges blocks
