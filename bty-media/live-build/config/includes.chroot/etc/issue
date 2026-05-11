@@ -16,6 +16,9 @@
   bty-tui-on-tty1`` for details. The iPXE chain that supplies the
   cmdline params is rendered by the bty-web server's
   ``ipxe_flash.j2`` / ``ipxe_tui.j2`` templates at ``GET /pxe/<mac>``.
+
+  Alt+F2 (through Alt+F6) drops into a root shell on the alternate
+  VTs for diagnostics; Alt+F1 returns to bty-tui.
 ======================================================================
 
 bty __BTY_VERSION__ on \n (\l)

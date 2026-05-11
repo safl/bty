@@ -1,0 +1,87 @@
+#!/bin/sh
+# bty-images-discover: locate the operator's image catalog.
+#
+# Primary case (NOT handled here):
+#   The bty-usb stick was dd'd directly to the device; its trailing
+#   exFAT partition is labelled ``BTY_IMAGES`` and gets mounted at
+#   ``/var/lib/bty/images`` by the path-existence-conditional
+#   ``var-lib-bty-images.mount`` unit. This script exits early when
+#   that mount already happened.
+#
+# Secondary case (this script):
+#   The bty-usb.iso was loaded via Ventoy (or another loop-mount
+#   shim like piKVM / JetKVM). The kernel sees the .iso as a single
+#   CD-ROM device; the internal partitions including BTY_IMAGES are
+#   not enumerated. The operator's image catalog instead lives on
+#   the surrounding shim's data partition. We scan every attached
+#   vfat / exfat partition for content matching:
+#     * top-level ``*.bri`` / ``*.img*`` / ``*.qcow2`` / ``*.iso``, or
+#     * a ``bty-images/`` subdirectory carrying the same.
+#   First hit gets bind-mounted at ``/var/lib/bty/images`` so the
+#   TUI's local-image-root scan finds it.
+#
+# Best-effort: no candidate partition is fine, the live env just
+# starts with an empty catalog and the operator can pass
+# ``--image-root`` explicitly. NTFS isn't probed; Ventoy's default
+# data partition is exFAT and that covers the common case.
+
+set -eu
+
+TARGET=/var/lib/bty/images
+SOURCE=/run/bty-images-source
+
+mkdir -p "$TARGET"
+mkdir -p "$SOURCE"
+
+# If the BTY_IMAGES mount already happened (dd'd-direct USB) we're
+# done; don't step on it.
+if mountpoint -q "$TARGET"; then
+    exit 0
+fi
+
+# Build the candidate list up-front so the inner read-loop runs in
+# the current shell (not a piped subshell) and ``exit`` propagates.
+list=$(lsblk -lnpo NAME,TYPE,FSTYPE 2>/dev/null || true)
+
+while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    name=$(printf '%s\n' "$line" | awk '{print $1}')
+    type=$(printf '%s\n' "$line" | awk '{print $2}')
+    fstype=$(printf '%s\n' "$line" | awk '{print $3}')
+
+    [ "$type" = "part" ] || continue
+    case "$fstype" in
+        vfat|exfat) ;;
+        *) continue ;;
+    esac
+    case "$name" in
+        /dev/sr*|/dev/loop*) continue ;;
+    esac
+
+    if mountpoint -q "$SOURCE"; then
+        umount "$SOURCE" || true
+    fi
+    mount -o ro "$name" "$SOURCE" 2>/dev/null || continue
+
+    # ``bty-images/`` subdir is the preferred operator-managed
+    # convention; the partition root is the legacy / quick-drop
+    # layout that also works.
+    for sub in "$SOURCE/bty-images" "$SOURCE"; do
+        [ -d "$sub" ] || continue
+        if find "$sub" -maxdepth 1 -type f \
+            \( -name '*.bri' -o -name '*.img' -o -name '*.img.*' \
+            -o -name '*.qcow2' -o -name '*.iso' \) \
+            -print -quit 2>/dev/null | grep -q .; then
+            mount --bind "$sub" "$TARGET"
+            echo "bty-images-discover: bound $sub (on $name, $fstype) -> $TARGET"
+            exit 0
+        fi
+    done
+
+    umount "$SOURCE" || true
+done <<EOF
+$list
+EOF
+
+echo "bty-images-discover: no image catalog found on any block device"
+exit 0

@@ -19,18 +19,29 @@
 #   image catalog. Gated on
 #   ``ConditionPathExists=/dev/disk/by-label/BTY_IMAGES`` so it
 #   no-ops cleanly when the operator booted from a stick that
-#   doesn't have a BTY_IMAGES partition (e.g. netboot env).
+#   doesn't have a BTY_IMAGES partition (e.g. netboot env, or
+#   the same .iso loaded via Ventoy where the internal partitions
+#   aren't enumerated).
+# - ``bty-images-discover.service`` handles the case the previous
+#   line just described: it runs AFTER var-lib-bty-images.mount,
+#   exits early if that mount succeeded, otherwise scans every
+#   attached vfat / exfat partition for image content and bind-
+#   mounts the first match at /var/lib/bty/images. Covers Ventoy,
+#   piKVM, JetKVM, and any other loop-mount shim that hides the
+#   bty.iso's internal partitions from the booted kernel.
 #
 # An auto-grow service used to live here too -- bty-grow-images
 # -partition. Removed because the live env's tmpfs sentinel
 # didn't survive reboots, so the service ran every boot and
 # destroyed operator data dropped between boots. Per repeated
-# user direction: bty-usb sticks ship at the baked 4 GiB
-# BTY_IMAGES size; if an operator wants more, gparted on the
-# host is the right escape hatch (a one-shot manual operation,
-# not something the live env should be doing on its own).
+# user direction: bty-usb sticks ship at the baked 2.1 GiB
+# BTY_IMAGES size (shrunk from 4 GiB in v0.8.0); if an operator
+# wants more, gparted on the host is the right escape hatch (a
+# one-shot manual operation, not something the live env should
+# be doing on its own).
 
 set -eu
 systemctl enable bty-flash-on-boot.service
 systemctl enable bty-tui-on-tty1.service
+systemctl enable bty-images-discover.service
 systemctl enable var-lib-bty-images.mount

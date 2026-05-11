@@ -1,0 +1,30 @@
+[Unit]
+Description=Discover bty image catalog on attached block devices
+Documentation=https://github.com/safl/bty
+# Best-effort discovery for the case where the live env is loaded
+# via Ventoy / piKVM / JetKVM and the bty.iso's internal
+# BTY_IMAGES partition isn't enumerated by the booted kernel. The
+# script scans all attached vfat / exfat partitions for image
+# content and bind-mounts the first hit at /var/lib/bty/images.
+#
+# ``var-lib-bty-images.mount`` handles the directly-dd'd-USB case
+# via a path-existence condition on /dev/disk/by-label/BTY_IMAGES;
+# we explicitly run AFTER that unit so its mount wins when both
+# fire (the script exits early when the target is already a
+# mountpoint).
+After=local-fs.target var-lib-bty-images.mount
+# Block bty-tui / bty-flash-on-boot until discovery is done so they
+# see the populated catalog on their first scan.
+Before=bty-tui-on-tty1.service bty-flash-on-boot.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/bty-images-discover
+# A scan that fails to mount or finds nothing is not an error -- the
+# operator may have launched the live env without a catalog stick
+# attached.
+SuccessExitStatus=0
+
+[Install]
+WantedBy=multi-user.target

@@ -1,6 +1,17 @@
 name: Release
 
 # Single unified release. Pushing a ``v*`` tag runs:
+#   0. ``check-not-published``    - aborts the workflow before any
+#                                   artifact is rebuilt if PyPI
+#                                   already has the tag's version.
+#                                   This is what prevents drift:
+#                                   without it, a retag-after-PyPI
+#                                   would rebuild GH release assets +
+#                                   ghcr.io container from a newer
+#                                   commit while PyPI is frozen at
+#                                   the original publish, leaving
+#                                   the artifact destinations out
+#                                   of sync.
 #   1. ``test``                   - lint + typecheck + pytest matrix.
 #   2. ``build-wheel`` (gated)    - uv build of the bty-lab wheel + sdist.
 #   3. ``build-media`` (gated)    - all three bty-media variants in
@@ -47,9 +58,40 @@ on:
   workflow_dispatch:
 
 jobs:
+  # ---------------- release-integrity preflight ----------------------------
+  check-not-published:
+    name: Refuse to release a version PyPI already has
+    runs-on: ubuntu-latest
+    steps:
+      - name: Abort if PyPI already has this version
+        # Tag pushes only: workflow_dispatch builds the wheel for a
+        # smoke check and doesn't touch any release destination, so
+        # the integrity check is a no-op there.
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          echo "Checking PyPI for bty-lab==${version}..."
+          payload=$(curl -sfL "https://pypi.org/pypi/bty-lab/json")
+          if echo "$payload" | python3 -c "import sys, json; d = json.load(sys.stdin); sys.exit(0 if '${version}' in d['releases'] else 1)"; then
+            echo
+            echo "::error::PyPI already has bty-lab==${version}. Refusing to re-release."
+            echo
+            echo "Releases are immutable: PyPI cannot be overwritten, but the"
+            echo "GitHub release page assets and the ghcr.io container would be"
+            echo "rebuilt from this newer commit and silently drift away from"
+            echo "the wheel on PyPI. Bump pyproject.toml to a new version,"
+            echo "retag, and push."
+            exit 1
+          fi
+          echo "OK: PyPI does not have bty-lab==${version} yet; release continues."
+
   # ---------------- gating -------------------------------------------------
   test:
     name: Test (lint + typecheck + pytest ${{ matrix.python }})
+    needs: check-not-published
     runs-on: ubuntu-latest
     strategy:
       fail-fast: true
