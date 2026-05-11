@@ -17,21 +17,25 @@ from pathlib import Path
 import bty
 
 
-def main(argv: list[str] | None = None) -> None:
-    """Console-script entry point for ``bty-tui``.
+def main(argv: list[str] | None = None, *, prog: str = "bty-tui") -> None:
+    """Console-script entry point for ``bty-tui`` (or ``bty tui``).
 
     Defers loading the textual app until invocation time so a missing
     ``[tui]`` extra produces a clear "reinstall with extras" message
-    rather than a raw ``ModuleNotFoundError``.
+    rather than a raw ``ModuleNotFoundError``. ``prog`` controls how
+    the program identifies itself in ``--help`` and ``--version`` so
+    the same code path serves both the standalone ``bty-tui`` console
+    script and ``bty tui``'s argparse bypass (cli.py passes
+    ``prog="bty tui"``).
     """
     parser = argparse.ArgumentParser(
-        prog="bty-tui",
-        description="bty-tui - terminal UI for image inspection and flashing",
+        prog=prog,
+        description=f"{prog} - terminal UI for image inspection and flashing",
     )
     parser.add_argument(
         "--version",
         action="version",
-        version=f"bty-tui {bty.__version__}",
+        version=f"{prog} {bty.__version__}",
     )
     parser.add_argument(
         "--server",

@@ -233,7 +233,7 @@ updates and CLI output share the same event stream.
 The general exit-code table at the top of this section applies to all
 subcommands.
 
-### `bty-tui [--server URL] [--mac MAC]`
+### `bty tui [--server URL] [--mac MAC]`
 
 Two-pane terminal UI for picking an image + a target disk and
 flashing. Same flash machinery as the CLI; the TUI is a thin wrapper

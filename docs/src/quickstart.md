@@ -24,7 +24,7 @@ prefer bind-mounts so files show up in the host filesystem,
 pre-chown the dir to uid 999 (the bty user) - the entrypoint
 checks and exits with a clear hint if it cannot write.
 
-Connect a `bty-tui --server http://<host>:8080` from a USB live
+Connect a `bty tui --server http://<host>:8080` from a USB live
 stick or a workstation to flash from this catalog without burning
 images onto every stick.
 
@@ -107,7 +107,7 @@ Concepts for the convention bty expects.
 
 Insert the USB stick into the target machine and boot from it. The bty
 live env auto-logins as root on `tty1`. From there you can run the CLI
-(`lsblk -d -e7`, `bty flash ...`) or `bty-tui` for an interactive
+(`lsblk -d -e7`, `bty flash ...`) or `bty tui` for an interactive
 terminal UI.
 
 The rootfs is a read-only SquashFS with a tmpfs overlay (live-boot's
@@ -161,7 +161,7 @@ writes the bytes.
 Interactive flashing via the TUI:
 
 ```bash
-sudo bty-tui
+sudo bty tui
 ```
 
 The TUI lists available images (left pane) and block devices (right

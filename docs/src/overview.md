@@ -24,7 +24,7 @@ that bridges the two:
   and bundled images on its own exFAT partition. Plug in, boot, flash,
   walk away. No server to set up. Best for the field-tech / one-off
   reflash.
-- **USB + network catalog.** Same USB live image, but `bty-tui --server
+- **USB + network catalog.** Same USB live image, but `bty tui --server
   URL` pulls the image catalog from a `bty-web` instance on the LAN
   (commonly the `ghcr.io/safl/bty-web` Docker container running on
   someone's workstation). Flash still happens locally on the operator's

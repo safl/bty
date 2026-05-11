@@ -104,7 +104,7 @@ class ImageEntry(BaseModel):
 
     Each entry carries a single ``url`` -- the place a client
     should fetch the bytes from. The server resolves it based on
-    cache state so the client (e.g. ``bty-tui --server URL``)
+    cache state so the client (e.g. ``bty tui --server URL``)
     does not need to know about catalog manifests, sidecars, or
     cache layout: it just flashes from ``url``.
 

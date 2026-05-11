@@ -137,7 +137,8 @@ def test_tui_subcommand_calls_tui_main() -> None:
         rc = cli.main(["tui", "--server", "http://localhost:8080", "--mac", "aa:bb:cc:dd:ee:ff"])
     assert rc == 0
     mock_main.assert_called_once_with(
-        ["--server", "http://localhost:8080", "--mac", "aa:bb:cc:dd:ee:ff"]
+        ["--server", "http://localhost:8080", "--mac", "aa:bb:cc:dd:ee:ff"],
+        prog="bty tui",
     )
 
 
@@ -456,7 +457,7 @@ def test_flash_progress_none_silences_lifecycle(tmp_path: Path) -> None:
 
 
 def test_bty_tui_help_exits_cleanly() -> None:
-    """Smoke test: ``bty-tui --help`` must import + run without
+    """Smoke test: ``bty tui --help`` must import + run without
     raising. Regression catch for any future textual / pamela /
     bty.tui import-chain breakage.
     """

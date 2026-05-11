@@ -163,8 +163,8 @@ Use cases:
 - Trial / kicking-the-tires deploys: `docker run -p 8080:8080
   ghcr.io/safl/bty-web:latest` and the browser UI is up in seconds.
 - Network-shared image catalog: a fleet of operators with bty USB
-  sticks all point `bty-tui --server URL` at the same container.
-- Local development backend for `bty-tui --server` work.
+  sticks all point `bty tui --server URL` at the same container.
+- Local development backend for `bty tui --server` work.
 
 For PXE-boot provisioning, deploy the bare-metal `bty-server`
 appliance instead. See

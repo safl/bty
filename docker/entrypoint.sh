@@ -60,7 +60,7 @@ if [ -z "${BTY_QUIET:-}" ]; then
   Browser UI:    http://<host>:${BTY_WEB_PORT:-8080}/ui
 
   Connect bty-tui clients with:
-       bty-tui --server http://<host>:${BTY_WEB_PORT:-8080}
+       bty tui --server http://<host>:${BTY_WEB_PORT:-8080}
 
   No dnsmasq / TFTP / PXE proxy-DHCP in this container -- those
   need bare-metal LAN access. Use the bty-server appliance for

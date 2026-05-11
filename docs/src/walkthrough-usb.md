@@ -155,10 +155,10 @@ The bty live env auto-logins as `root` on `tty1`. From there you have
 two ways to flash: the TUI (interactive, recommended for one-offs) or
 the CLI (scriptable).
 
-## Step 5a: Flash with `bty-tui` (interactive)
+## Step 5a: Flash with `bty tui` (interactive)
 
 ```bash
-bty-tui
+bty tui
 ```
 
 The TUI is a three-pane wizard: pick an image, pick a disk,

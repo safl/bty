@@ -63,7 +63,7 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
             return 2
-        tui_main(args_list[1:])
+        tui_main(args_list[1:], prog="bty tui")
         return 0
 
     parser = argparse.ArgumentParser(
@@ -247,7 +247,7 @@ def cmd_images(args: argparse.Namespace) -> int:
 
     Server mode (``--server URL``): hits ``GET <URL>/images`` and
     renders the catalog the server exposes (the same endpoint
-    bty-tui --server uses). Each row's ``url`` is whatever the
+    ``bty tui --server`` uses). Each row's ``url`` is whatever the
     server provides directly -- server URL when the bytes are cached
     / imported, upstream URL when a manifest entry hasn't been
     cached yet.
