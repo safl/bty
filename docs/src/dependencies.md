@@ -44,9 +44,10 @@ inside the bty live env where root is already there).
 ## To run bty-tui
 
 Same set of binaries as above (the TUI delegates flashing to the
-same `bty.flash` library), plus the `[tui]` extra. The `--server
-URL` mode (pull catalog from a remote `bty-web`) doesn't add anything
-host-side - it's a plain HTTP client.
+same `bty.flash` library), plus the `[tui]` extra. The `--catalog
+SOURCE` mode (a local TOML path, HTTP URL, or `oras://` reference)
+adds nothing host-side -- it's a plain HTTP client; `oras://` uses
+stdlib urllib through `bty.oras`.
 
 ## To run bty-web
 
@@ -122,12 +123,13 @@ or ``ENV`` block (Dockerfile) covers every component.
 | `BTY_TRUSTED_PROXY` | `bty-web` | unset | When set (any truthy), read client IP from `X-Forwarded-For`; only enable behind a reverse proxy that strips inbound X-F-F |
 | `BTY_QUIET` | container entrypoint | unset | Suppress the start-up banner with default credentials |
 
-`bty tui` also accepts `--image-root /path` and `--server URL`
+`bty tui` also accepts `--image-root /path` and `--catalog SOURCE`
 flags directly. On the CLI, `bty images --image-root /path`
 overrides for that command; `bty inspect PATH` and
 `bty flash IMAGE TARGET` take the image as a direct positional
-argument (path for inspect; path or `http(s)://...` for flash's
-IMAGE) and don't read the image root.
+argument (path for inspect; path, `http(s)://...`, `oras://...`,
+or `.bri` descriptor path for flash's IMAGE) and don't read the
+image root.
 
 ## To run the test-pxe end-to-end check
 

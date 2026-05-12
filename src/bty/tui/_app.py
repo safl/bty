@@ -6,17 +6,23 @@ the ``bty`` CLI in a navigable, three-pane form (images | disks |
 details), styled with the Tokyo Night theme to match the bty mascot's
 navy + warm-yellow palette.
 
-Two image-source modes:
+Catalog sources (combine freely):
 
-- **Local** (default). Scans an image-root directory (USB live env's
-  ``BTY_IMAGES`` partition or any local path).
-- **Remote** (``--server URL``). Fetches the catalog from a running
-  ``bty-web`` over HTTP; selecting an image streams it from the server
-  straight to the target disk via ``flash.probe_image_url`` /
-  ``execute_plan``. This is the path the TUI-on-PXE flow uses: an
-  unknown MAC PXE-boots, lands at the live env in interactive mode,
-  and the operator picks an image from the server's catalog without
-  prior server-side configuration.
+- **Local image-root** (always scanned). Files + ``.bri`` descriptors
+  under the configured root (USB live env's ``BTY_IMAGES`` partition,
+  ``BTY_IMAGE_ROOT`` env, or ``--image-root /path``).
+- **Catalog overlay** (``--catalog SOURCE``). One additional source --
+  a local TOML file or an http(s):// / oras:// URL pointing at a TOML
+  catalog. Fetched once at startup, cached in memory; the catalog's
+  entries surface in the catalog table alongside the local files.
+  Selecting any row -- local file, .bri descriptor, catalog entry --
+  flashes through the same URL-or-path pipeline.
+
+The remote / PXE-interactive use case: ``--catalog
+http://bty-server:8080/catalog.toml`` for the bty-web instance, plus
+``--mac <MAC>`` so the TUI POSTs back to the server's
+``/pxe/<mac>/done`` endpoint on successful flash (derived from the
+catalog URL's host).
 
 Keymap (forward navigation is automatic on Enter-to-commit;
 the keys below cover everything else):
@@ -26,7 +32,7 @@ the keys below cover everything else):
                   clear filter if one is active)
 - ``q``           quit
 - ``r``           refresh catalogs
-- ``c``           switch catalog (local image-root <-> remote bty-web)
+- ``c``           switch catalog source (path / URL / blank for local-only)
 - ``i``           install bty-server (latest from GitHub releases)
 - ``/``           filter the image catalog by substring
 - ``f``           flash shortcut (equivalent to Enter on Flash button)
@@ -56,7 +62,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import json
 import os
 import subprocess
 import urllib.error
@@ -83,6 +88,7 @@ from textual.widgets import (
 )
 
 import bty
+from bty import catalog as _catalog
 from bty import disks, flash, images
 
 
@@ -191,85 +197,126 @@ _BTY_SERVER_LATEST_URL = (
 _BTY_SERVER_LATEST_NAME = "bty-server (latest from GitHub)"
 
 
-def _validate_server_url(server_url: str) -> None:
-    """Reject ``--server`` URLs whose scheme isn't ``http``/``https``.
+def _classify_catalog_source(source: str) -> str:
+    """Return the dispatch kind for a ``--catalog`` source: ``"path"``,
+    ``"http"``, or ``"oras"``. Raises ``ValueError`` for anything else.
 
-    Without this, urllib would happily handle ``file://`` (and the
-    system handlers for ``ftp:``, ``data:``, etc. that may or may
-    not be installed). bty-tui's operator-typed-URL surface is
-    not a security boundary -- the operator can read any file
-    they want directly -- but a clear error beats a confusing
-    "FileNotFoundError: /etc/passwd is missing the BTY images
-    JSON" trace.
+    Heuristic: an explicit ``http://`` / ``https://`` / ``oras://`` /
+    ``file://`` scheme dispatches by scheme. Everything else (bare
+    paths like ``./catalog.toml`` or ``/etc/bty/catalog.toml``) is
+    treated as a filesystem path. The ``file://`` scheme also maps to
+    ``"path"``; ``urllib.parse.urlparse`` exposes the path component.
     """
-    parsed = urllib.parse.urlparse(server_url)
-    if parsed.scheme not in ("http", "https"):
-        raise ValueError(
-            f"--server URL must be http:// or https://; got "
-            f"{server_url!r} (scheme {parsed.scheme!r})"
-        )
-    if not parsed.netloc:
-        raise ValueError(f"--server URL is missing a host: {server_url!r}")
+    parsed = urllib.parse.urlparse(source)
+    if parsed.scheme in ("http", "https"):
+        if not parsed.netloc:
+            raise ValueError(
+                f"--catalog URL missing a host: {source!r} (expected http(s)://<host>/<path>)"
+            )
+        return "http"
+    if parsed.scheme == "oras":
+        return "oras"
+    if parsed.scheme in ("", "file"):
+        return "path"
+    raise ValueError(
+        f"--catalog source must be a local path or http(s):// / oras:// URL; "
+        f"got scheme {parsed.scheme!r} in {source!r}"
+    )
 
 
-def fetch_remote_catalog(server_url: str, *, timeout: float = 30.0) -> list[_TuiImage]:
-    """``GET <server_url>/images`` and return ``_TuiImage`` rows.
+def _read_catalog_bytes(source: str, *, timeout: float = 30.0) -> bytes:
+    """Fetch a catalog TOML's raw bytes from a path or URL.
 
-    Each row's ``url`` is whatever the server provided directly --
-    server URL when the bytes are cached / imported on the server,
-    upstream URL when a manifest entry has not yet been cached.
-    The TUI does not need to reason about cache state: it just
-    flashes from ``url``.
-
-    Free function so unit tests can mock ``urllib.request.urlopen``
-    without instantiating a textual ``App``. Raises
-    ``urllib.error.URLError`` / ``ValueError`` for surface-level
-    problems; the caller (the TUI's image-pane refresh) catches
-    and surfaces them in the status bar.
-
-    Caps the response body at :data:`_REMOTE_CATALOG_MAX_BYTES` so
-    a misconfigured / hostile server cannot OOM the live env via
-    a multi-GiB response. Validates the URL scheme so a typo can't
-    silently turn into a file:// read.
+    Caps the response body at :data:`_REMOTE_CATALOG_MAX_BYTES` so a
+    misconfigured / hostile remote cannot OOM the live env via a
+    multi-GiB response. Local-file reads are uncapped (operator's
+    own filesystem, not a hostile boundary).
     """
-    _validate_server_url(server_url)
-    base = server_url.rstrip("/")
-    catalog_url = f"{base}/images"
-    with urllib.request.urlopen(catalog_url, timeout=timeout) as resp:
-        raw = resp.read(_REMOTE_CATALOG_MAX_BYTES + 1)
+    kind = _classify_catalog_source(source)
+    if kind == "path":
+        parsed = urllib.parse.urlparse(source)
+        path = Path(parsed.path) if parsed.scheme == "file" else Path(source)
+        return path.read_bytes()
+    if kind == "oras":
+        # Defer the import so a TUI without ORAS in flight doesn't
+        # pay the import cost just for the type-stripped helper to
+        # exist. (bty.oras IS pure-stdlib, so this is mostly cosmetic.)
+        from bty import oras as _oras
+
+        resolved = _oras.resolve_ref(source, timeout=timeout)
+        req = urllib.request.Request(resolved.blob_url, headers=resolved.headers)
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read(_REMOTE_CATALOG_MAX_BYTES + 1)
+    else:  # kind == "http"
+        with urllib.request.urlopen(source, timeout=timeout) as resp:
+            raw = resp.read(_REMOTE_CATALOG_MAX_BYTES + 1)
     if len(raw) > _REMOTE_CATALOG_MAX_BYTES:
         raise ValueError(
-            f"/images response from {server_url} exceeded "
+            f"catalog response from {source} exceeded "
             f"{_REMOTE_CATALOG_MAX_BYTES} bytes; refusing to parse"
         )
-    payload = json.loads(raw.decode("utf-8"))
-    if not isinstance(payload, list):
-        raise ValueError(f"unexpected /images payload from {server_url}: not a list")
-    out: list[_TuiImage] = []
-    for entry in payload:
-        if not isinstance(entry, dict):
-            continue
-        name = str(entry.get("name", ""))
-        url = str(entry.get("url", ""))
-        if not name or not url:
-            continue
-        out.append(
-            _TuiImage(
-                name=name,
-                fmt=entry.get("format") or None,
-                size_bytes=int(entry.get("size_bytes") or 0),
-                url=url,
-            )
+    # urllib's ``resp.read(n)`` is typed as ``Any`` in the stdlib stubs;
+    # ``bytes()`` round-trip nails it down for mypy.
+    return bytes(raw)
+
+
+def load_catalog_from_source(source: str, *, timeout: float = 30.0) -> list[_TuiImage]:
+    """Load catalog rows from a local path or remote URL into the TUI shape.
+
+    Source can be:
+
+    - a local file path (``./catalog.toml``, ``/etc/bty/catalog.toml``,
+      ``file:///path/to/catalog.toml``)
+    - an HTTP(S) URL serving a TOML catalog
+      (``https://example.com/catalog.toml``, or a bty-web instance's
+      ``http://server:8080/catalog.toml``)
+    - an ``oras://`` reference whose layer is a TOML catalog
+      (``oras://ghcr.io/owner/bty-catalog:latest``)
+
+    Parses through ``bty.catalog.load_bytes`` (or ``load`` for the
+    path case) and projects into ``_TuiImage`` rows using each entry's
+    ``src`` as the flashable URL. Free function so unit tests can
+    mock ``urllib.request.urlopen`` without instantiating a textual
+    ``App``.
+    """
+    raw = _read_catalog_bytes(source, timeout=timeout)
+    parsed_catalog = _catalog.load_bytes(raw, source=source)
+    return [
+        _TuiImage(
+            name=entry.name,
+            fmt=entry.format,
+            size_bytes=entry.size_bytes or 0,
+            url=entry.src,
         )
-    return out
+        for entry in parsed_catalog.entries
+    ]
 
 
-def post_pxe_done(server_url: str, mac: str, *, timeout: float = 10.0) -> None:
-    """Best-effort ``POST <server>/pxe/{mac}/done`` after a successful
-    remote flash. Silent on success; raises ``urllib.error.URLError``
-    on transport failure (caller decides whether to surface)."""
-    _validate_server_url(server_url)
-    base = server_url.rstrip("/")
+def _pxe_done_base_from_source(source: str | None) -> str | None:
+    """Derive a bty-web base URL for the pxe-done POST from a
+    ``--catalog`` source. Returns ``None`` when the source isn't an
+    http(s) URL (static file / ``oras://`` -> no pxe-done signal).
+
+    Best-effort: if the catalog source's scheme+host pair turns out
+    not to be a bty-web after all, the POST simply fails harmlessly
+    in :func:`post_pxe_done`.
+    """
+    if source is None:
+        return None
+    parsed = urllib.parse.urlparse(source)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        return None
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
+def post_pxe_done(pxe_done_base: str, mac: str, *, timeout: float = 10.0) -> None:
+    """Best-effort ``POST <pxe_done_base>/pxe/{mac}/done`` after a
+    successful remote flash. Silent on success; raises
+    ``urllib.error.URLError`` on transport failure (caller decides
+    whether to surface). ``pxe_done_base`` is the pre-derived
+    scheme+host pair from :func:`_pxe_done_base_from_source`; no
+    further validation here."""
+    base = pxe_done_base.rstrip("/")
     req = urllib.request.Request(f"{base}/pxe/{mac}/done", method="POST")
     with urllib.request.urlopen(req, timeout=timeout):
         pass
@@ -822,12 +869,13 @@ class FlashStatusScreen(ModalScreen[bool]):
 
 
 class CatalogSelectScreen(ModalScreen["str | Path | None"]):
-    """Modal for switching between local image-root and remote
-    bty-web server as the catalog source.
+    """Modal for switching the catalog source mid-session.
 
     Returns:
-    - ``str`` (server URL) when the operator picks Remote and confirms.
-    - ``Path`` (local image root) when they pick Local + confirm.
+    - ``str`` (catalog SOURCE -- local path or http/https/oras URL) when
+      the operator enters a value and confirms.
+    - ``Path`` (local image root) when they clear the input + confirm
+      (local-only mode).
     - ``None`` on Esc.
 
     The current source is pre-filled in the input. Apply re-populates
@@ -879,19 +927,22 @@ class CatalogSelectScreen(ModalScreen["str | Path | None"]):
         Binding("escape", "dismiss(None)", "Cancel"),
     ]
 
-    def __init__(self, current_server: str | None, current_image_root: Path) -> None:
+    def __init__(self, current_source: str | None, current_image_root: Path) -> None:
         super().__init__()
-        self._current_server = current_server
+        self._current_source = current_source
         self._current_image_root = current_image_root
 
     def compose(self) -> ComposeResult:
         with Vertical() as panel:
-            panel.border_title = "  Switch image source  "
-            yield Static("Server URL (blank = local image-root):")
-            initial = self._current_server if self._current_server else ""
+            panel.border_title = "  Switch catalog source  "
+            yield Static("Catalog source (path or URL; blank = local-only):")
+            initial = self._current_source if self._current_source else ""
             yield Input(
                 value=initial,
-                placeholder="http://server:8080",
+                placeholder=(
+                    "/path/to/catalog.toml | https://host/catalog.toml | "
+                    "oras://ghcr.io/owner/repo:tag"
+                ),
                 id="source-url",
             )
             yield Static(
@@ -994,7 +1045,7 @@ class HelpScreen(ModalScreen[None]):
                 classes="help-row",
             )
             yield Static(
-                "  c             switch catalog (local path / remote bty-web)",
+                "  c             switch catalog source (path / URL / blank for local-only)",
                 classes="help-row",
             )
             yield Static(
@@ -1180,11 +1231,26 @@ class BtyTui(App[None]):
         self,
         image_root: Path | None = None,
         *,
-        server_url: str | None = None,
+        catalog_source: str | None = None,
         mac: str | None = None,
     ) -> None:
         super().__init__()
-        self._server_url: str | None = server_url.rstrip("/") if server_url else None
+        # ``catalog_source`` is the operator's ``--catalog`` value:
+        # a local path or an http(s):// / oras:// URL pointing at a
+        # TOML catalog. Stored verbatim (no rstrip "/"): URLs need
+        # the full filename suffix and paths might legitimately end
+        # in ``/`` (treated as a dir error downstream).
+        self._catalog_source: str | None = catalog_source
+        # ``_pxe_done_base`` is auto-derived from the catalog source
+        # when it's http(s)://. Used by the PXE interactive-mode TUI
+        # to POST a completion signal back to bty-web. Static-file
+        # and oras:// sources -> None -> no POST.
+        self._pxe_done_base: str | None = _pxe_done_base_from_source(catalog_source)
+        # Catalog entries fetched ONCE at startup (per the operator-
+        # confirmed model: refresh re-scans local image-root only;
+        # the remote catalog is point-in-time). Lazy-loaded on first
+        # populate so __init__ stays IO-free.
+        self._cached_remote_catalog: list[_TuiImage] | None = None
         self._mac: str | None = mac
         self._image_root: Path = image_root or images.default_image_root()
         # Unified shape so the row-selected-> flash path doesn't branch.
@@ -1249,10 +1315,16 @@ class BtyTui(App[None]):
         # row, so the panel feels like one piece). The images label
         # carries the source so the operator can see where the catalog
         # is coming from at a glance.
-        source = (
-            f"{self._server_url}/images" if self._server_url is not None else str(self._image_root)
-        )
-        self.query_one("#pane-1", Vertical).border_title = f"  1: Pick an image from {source}  "
+        # Source label: local image-root by default, with the catalog
+        # source overlay appended when --catalog is set so the operator
+        # sees both feeds at a glance.
+        if self._catalog_source is not None:
+            source_label = f"{self._image_root} + {self._catalog_source}"
+        else:
+            source_label = str(self._image_root)
+        self.query_one(
+            "#pane-1", Vertical
+        ).border_title = f"  1: Pick an image from {source_label}  "
         self.query_one(
             "#pane-2", Vertical
         ).border_title = "  2: Select disk to write the image to  "
@@ -1302,7 +1374,7 @@ class BtyTui(App[None]):
             # next steps. Status line keeps the legacy short form so
             # tests / scripts have a stable hook.
             welcome.update(self._welcome_text())
-            source = self._server_url or str(self._image_root)
+            source = self._catalog_source or str(self._image_root)
             self._set_status(f"No images at {source}. See screen for how to add some.")
             return
 
@@ -1345,21 +1417,22 @@ class BtyTui(App[None]):
         text because it only has options 2 + 3 plus the upload
         recipes; the local variant gets the full three-way menu.
         """
-        if self._server_url is not None:
+        if self._catalog_source is not None:
             return (
-                "[b]No images on the server yet.[/]\n\n"
-                f"Catalog endpoint: [accent]{self._server_url}/images[/]\n\n"
+                "[b]No images in the catalog yet.[/]\n\n"
+                f"Catalog source: [accent]{self._catalog_source}[/]\n"
+                f"Local root: [accent]{self._image_root}[/]\n\n"
                 "Three ways forward from here:\n"
-                "  1. [b]Add images to this server[/] via one of:\n"
-                "     - Browser: bty-web Images page on the server's UI.\n"
-                "     - HTTP PUT: [dim]curl -X PUT --upload-file my.qcow2 \\\n"
-                "       http://server:8080/images/my.qcow2[/]\n"
-                "     - Volume mount: drop files into\n"
-                "       [dim]/var/lib/bty/images/[/] on the server's host.\n"
-                "     Then press [b]r[/] to refresh.\n"
+                "  1. [b]Add entries to the catalog source[/]:\n"
+                "     - If the source is a bty-web instance, drop\n"
+                "       files into [dim]/var/lib/bty/images/[/] on the\n"
+                "       server's host (or use the bty-web Images page).\n"
+                "     - If the source is a static catalog.toml, edit\n"
+                "       the file and re-publish.\n"
+                "     Then press [b]c[/] to re-fetch.\n"
                 "  2. [b]Switch catalog[/]: press [b]c[/] to point this\n"
-                "     TUI at a different bty-web catalog or back at a\n"
-                "     local path.\n"
+                "     TUI at a different catalog source or back to\n"
+                "     local-only.\n"
                 "  3. [b]Install bty-server[/] on this box from the\n"
                 "     latest GitHub release: press [b]i[/], pick a\n"
                 "     disk, hit Flash."
@@ -1406,8 +1479,7 @@ class BtyTui(App[None]):
         always available regardless of what's been dropped on the
         BTY_IMAGES / Ventoy stick.
         """
-        if self._server_url is not None:
-            return fetch_remote_catalog(self._server_url)
+        # Always scan the local image-root (files + .bri descriptors).
         local = [
             _TuiImage(
                 name=img.name,
@@ -1430,7 +1502,22 @@ class BtyTui(App[None]):
             )
             for r in images.list_remote_images(self._image_root)
         ]
-        return local + remote
+        # Overlay the --catalog source's entries. Fetched once and
+        # cached in memory; ``r``-refresh re-scans local only,
+        # ``c``-switch invalidates ``_cached_remote_catalog`` to force
+        # a re-fetch on the next populate.
+        catalog_rows: list[_TuiImage] = []
+        if self._catalog_source is not None:
+            if self._cached_remote_catalog is None:
+                try:
+                    self._cached_remote_catalog = load_catalog_from_source(self._catalog_source)
+                except (OSError, ValueError, _catalog.CatalogError) as exc:
+                    # Surface in the status line but don't let a flaky
+                    # catalog source block local-only operation.
+                    self._set_status_transient(f"--catalog {self._catalog_source} failed: {exc}")
+                    self._cached_remote_catalog = []
+            catalog_rows = list(self._cached_remote_catalog)
+        return local + remote + catalog_rows
 
     def _populate_disks(self) -> None:
         table = self.query_one("#disks_table", DataTable)
@@ -1719,28 +1806,36 @@ class BtyTui(App[None]):
     @work(exclusive=True)
     async def action_catalog(self) -> None:
         """``c`` binding: open :class:`CatalogSelectScreen` so the
-        operator can switch between local image-root and a remote
-        bty-web server without restarting the TUI. ``@work`` for the
+        operator can swap the catalog source (a local path or a
+        URL) without restarting the TUI. ``@work`` for the
         push_screen_wait worker-context requirement (same as the
         flash + theme actions).
         """
         result = await self.push_screen_wait(
-            CatalogSelectScreen(self._server_url, self._image_root)
+            CatalogSelectScreen(self._catalog_source, self._image_root)
         )
         if result is None:
             return
         if isinstance(result, str):
-            self._server_url = result.rstrip("/")
+            self._catalog_source = result
+            self._pxe_done_base = _pxe_done_base_from_source(result)
         else:
-            self._server_url = None
+            self._catalog_source = None
+            self._pxe_done_base = None
             self._image_root = result
+        # Invalidate the cached remote catalog so the next populate
+        # re-fetches from the new source.
+        self._cached_remote_catalog = None
         # Update the pane-1 border-title to reflect the new source
         # and re-populate.
-        source = (
-            f"{self._server_url}/images" if self._server_url is not None else str(self._image_root)
-        )
+        if self._catalog_source is not None:
+            source_label = f"{self._image_root} + {self._catalog_source}"
+        else:
+            source_label = str(self._image_root)
         with contextlib.suppress(Exception):
-            self.query_one("#pane-1", Vertical).border_title = f"  1: Pick an image from {source}  "
+            self.query_one(
+                "#pane-1", Vertical
+            ).border_title = f"  1: Pick an image from {source_label}  "
         # Clear any in-flight selection since the catalog changed.
         self._selected_image = None
         self._selected_disk = None
@@ -1749,7 +1844,7 @@ class BtyTui(App[None]):
         self._render_status()
         with contextlib.suppress(Exception):
             self.query_one("#images_table", DataTable).focus()
-        self._set_status_transient(f"Catalog: {source}")
+        self._set_status_transient(f"Catalog: {source_label}")
 
     @work(exclusive=True)
     async def action_flash(self) -> None:
@@ -1825,12 +1920,14 @@ class BtyTui(App[None]):
             return
 
         success = await self.push_screen_wait(FlashStatusScreen(plan))
-        if success and self._server_url is not None and self._mac is not None:
-            # Remote flow: signal completion so the server's
-            # ``last_flashed_at`` is updated. Best-effort - a failed
-            # signal doesn't undo a successful flash.
+        if success and self._pxe_done_base is not None and self._mac is not None:
+            # Catalog source was an http(s) URL; the derived base
+            # might be a bty-web instance. POST the completion signal
+            # so the server's ``last_flashed_at`` updates. Best-
+            # effort - a failed signal (404 / non-bty-web host) is
+            # logged but doesn't undo a successful flash.
             try:
-                post_pxe_done(self._server_url, self._mac)
+                post_pxe_done(self._pxe_done_base, self._mac)
             except urllib.error.URLError as exc:
                 self._set_status(f"Flash done but POST /pxe/{self._mac}/done failed: {exc}")
                 self._populate_disks()

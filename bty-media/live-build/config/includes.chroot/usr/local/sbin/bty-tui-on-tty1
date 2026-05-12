@@ -9,10 +9,14 @@
 # Two boot scenarios put ``bty.mode=interactive`` on the cmdline:
 #
 # 1. PXE-tui (server's ``ipxe_tui.j2`` template, ``boot_policy=tui``):
-#    cmdline also carries ``bty.server=`` and ``bty.mac=``. We forward
-#    those to ``bty-tui --server URL --mac MAC`` so the TUI fetches
-#    the catalog from ``GET <server>/images`` and ``POST``s
-#    ``<server>/pxe/<mac>/done`` after a successful flash.
+#    cmdline also carries ``bty.server=`` and ``bty.mac=``. We rewrite
+#    the bty.server URL into a ``--catalog <URL>/catalog.toml`` flag
+#    (the bty-web instance serves a TOML catalog there matching the
+#    operator's ``--catalog`` URL elsewhere) plus ``--mac MAC`` so
+#    the TUI POSTs ``<server>/pxe/<mac>/done`` after a successful
+#    flash. The pxe-done base is auto-derived from the catalog URL's
+#    scheme+host, so the bty.server cmdline param only needs to be
+#    the bty-web instance's base URL.
 #
 # 2. USB-local (M19 phase 2): the live-build iso-hybrid bake sets
 #    ``bty.mode=interactive`` directly via ``--bootappend-live`` so
@@ -37,7 +41,12 @@ MAC=$(printf '%s\n' $CMDLINE | tr ' ' '\n' | sed -n 's/^bty\.mac=//p' | head -1)
 
 ARGS=""
 if [ -n "$SERVER" ]; then
-    ARGS="$ARGS --server $SERVER"
+    # Rewrite the bty-web base URL into a --catalog <base>/catalog.toml
+    # so the TUI consumes the static TOML view (same code path used
+    # for static / oras catalogs). The pxe-done base is auto-derived
+    # from the URL's scheme+host inside the TUI.
+    CATALOG_URL="${SERVER%/}/catalog.toml"
+    ARGS="$ARGS --catalog $CATALOG_URL"
 fi
 if [ -n "$MAC" ]; then
     ARGS="$ARGS --mac $MAC"

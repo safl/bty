@@ -3,7 +3,7 @@
 A pre-built bty-web container is published to
 [`ghcr.io/safl/bty-web`](https://github.com/safl/bty/pkgs/container/bty-web)
 on every tagged release. It hosts the **image catalog**, **machine
-registry**, and **browser UI** of bty-web. `bty tui --server URL`
+registry**, and **browser UI** of bty-web. `bty tui --catalog SOURCE`
 clients (running from the USB live env or a workstation) connect
 to it and pick images for flashing.
 
@@ -20,7 +20,7 @@ appliance image (see [walkthrough-server.md](walkthrough-server.md)).
 - **Image library**: you have a fleet of operators who all carry
   bty USB sticks and want a network-shared catalog of pre-built
   images instead of copying files to every stick.
-- **Local-dev backend** for `bty tui --server` work.
+- **Local-dev backend** for `bty tui --catalog` work.
 
 If your goal is to PXE-boot targets onto network-flash, you need
 the bty-server appliance instead.
@@ -76,7 +76,7 @@ volume, `restart: unless-stopped`.
 From a workstation or the USB live env:
 
 ```bash
-bty tui --server http://<host>:8080
+bty tui --catalog http://<host>:8080/catalog.toml
 ```
 
 The catalog pane fills with whatever the server has under

@@ -38,24 +38,28 @@ def main(argv: list[str] | None = None, *, prog: str = "bty-tui") -> None:
         version=f"{prog} {bty.__version__}",
     )
     parser.add_argument(
-        "--server",
+        "--catalog",
         type=str,
         default=None,
-        help="bty-web server URL (e.g. ``http://server:8080``). When set, "
-        "the TUI fetches the image catalog from the server's "
-        "``GET /images`` and streams images straight from the server "
-        "to the target disk. Without it, the TUI scans a local "
-        "image-root directory.",
+        help="Catalog source. Accepts a local TOML file path "
+        "(``./catalog.toml`` or ``/var/lib/bty/catalog.toml``) or "
+        "a URL (``http://server:8080/catalog.toml``, "
+        "``https://example.com/catalog.toml``, "
+        "``oras://ghcr.io/owner/repo:tag``). Fetched once at startup "
+        "and held in memory; pressing ``r`` only re-scans the local "
+        "image-root, not the remote catalog. Without --catalog, "
+        "the TUI scans a local image-root directory only.",
     )
     parser.add_argument(
         "--mac",
         type=str,
         default=None,
         help="Self-MAC of this client (e.g. from the live env's "
-        "``bty.mac=`` cmdline param). When set together with "
-        "``--server``, the TUI ``POST``s ``<server>/pxe/<mac>/done`` "
-        "after a successful flash so the server's ``last_flashed_at`` "
-        "is updated.",
+        "``bty.mac=`` cmdline param). When set together with a "
+        "``--catalog`` URL whose base looks like a bty-web instance, "
+        "the TUI ``POST``s ``<base>/pxe/<mac>/done`` after a "
+        "successful flash. Best-effort: a non-bty-web catalog "
+        "source (static file, oras://) skips the POST.",
     )
     parser.add_argument(
         "--image-root",
@@ -63,8 +67,8 @@ def main(argv: list[str] | None = None, *, prog: str = "bty-tui") -> None:
         default=None,
         help="Local directory to scan for images (overrides the "
         "``BTY_IMAGE_ROOT`` env var and the live env default of "
-        "``/var/lib/bty/images``). Ignored when ``--server`` is set "
-        "(the catalog comes from the server in remote mode).",
+        "``/var/lib/bty/images``). Local images and the --catalog "
+        "entries surface together in the TUI's catalog table.",
     )
     args = parser.parse_args(argv)
 
@@ -79,4 +83,4 @@ def main(argv: list[str] | None = None, *, prog: str = "bty-tui") -> None:
         )
         sys.exit(1)
 
-    BtyTui(image_root=args.image_root, server_url=args.server, mac=args.mac).run()
+    BtyTui(image_root=args.image_root, catalog_source=args.catalog, mac=args.mac).run()

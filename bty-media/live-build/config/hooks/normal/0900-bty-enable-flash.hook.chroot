@@ -11,9 +11,12 @@
 #   set (in which case the TUI service handles the boot instead).
 # - ``bty-tui-on-tty1.service`` is gated by
 #   ``ConditionKernelCommandLine=bty.mode=interactive`` and runs
-#   ``bty-tui --server URL --mac MAC`` in place of the agetty on
-#   tty1 when the server's ipxe_tui.j2 set that mode (or when the
-#   usb-iso bake set it via ``--bootappend-live``).
+#   ``bty-tui --catalog <bty.server>/catalog.toml --mac MAC`` in
+#   place of the agetty on tty1 when the server's ipxe_tui.j2 set
+#   that mode (or when the usb-iso bake set it via
+#   ``--bootappend-live``). The wrapper script
+#   ``/usr/local/sbin/bty-tui-on-tty1`` does the URL rewriting; the
+#   bty.server cmdline param is still the bty-web base URL.
 # - ``var-lib-bty-images.mount`` mounts the BTY_IMAGES partition
 #   at /var/lib/bty/images (RO) so bty-tui sees it as the local
 #   image catalog. Gated on

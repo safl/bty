@@ -22,8 +22,8 @@ three:
  |                |      |                |            |                 |
  | +------------+ |      | +------------+ |            | +-------------+ |
  | | bty-tui    | |      | | bty-tui    | |    HTTP    | | bty-web     | |
- | | (local     | |      | | --server   +-+----------->+ | iPXE/TFTP/  | |
- | |  catalog)  | |      | |   URL)     | | (catalog)  | | dnsmasq     | |
+ | | (local     | |      | | --catalog  +-+----------->+ | iPXE/TFTP/  | |
+ | |  catalog)  | |      | |   SOURCE)  | | (catalog)  | | dnsmasq     | |
  | +-----+------+ |      | +-----+------+ |            | +------+------+ |
  +-------+--------+      +-------+--------+            +--------+--------+
          |                       |                              |
@@ -53,8 +53,9 @@ The `bty` library implements the flashing logic (`bty.flash`,
 `bty.images`, `bty.disks`) consumed by all three flows. `bty-tui` and
 `bty-web` are UI shells; `bty-flash-on-boot` is the systemd service
 that runs the flash unattended after a PXE boot. Same operations,
-different delivery vehicles. The middle shape (`--server URL`) is
-where the Docker container fits naturally - a single command on a
+different delivery vehicles. The middle shape (`--catalog SOURCE`,
+typically pointed at a bty-web instance's `/catalog.toml`) is where
+the Docker container fits naturally - a single command on a
 workstation gives a small team a shared image catalog without
 setting up the appliance.
 
@@ -163,8 +164,8 @@ Use cases:
 - Trial / kicking-the-tires deploys: `docker run -p 8080:8080
   ghcr.io/safl/bty-web:latest` and the browser UI is up in seconds.
 - Network-shared image catalog: a fleet of operators with bty USB
-  sticks all point `bty tui --server URL` at the same container.
-- Local development backend for `bty tui --server` work.
+  sticks all point `bty tui --catalog SOURCE` at the same container.
+- Local development backend for `bty tui --catalog` work.
 
 For PXE-boot provisioning, deploy the bare-metal `bty-server`
 appliance instead. See

@@ -291,31 +291,36 @@ updates and CLI output share the same event stream.
 The general exit-code table at the top of this section applies to all
 subcommands.
 
-### `bty tui [--server URL] [--mac MAC]`
+### `bty tui [--catalog SOURCE] [--image-root PATH] [--mac MAC]`
 
-Two-pane terminal UI for picking an image + a target disk and
-flashing. Same flash machinery as the CLI; the TUI is a thin wrapper
-around `bty.flash.execute_plan`.
+Terminal UI for picking an image + a target disk and flashing. Same
+flash machinery as the CLI; the TUI is a thin wrapper around
+`bty.flash.execute_plan`.
 
-Two image-source modes:
+Catalog sources (combine freely):
 
-- **Local** (default). Scans an image-root directory (USB live env's
-  `BTY_IMAGES` partition, or whatever path
-  [`BTY_IMAGE_ROOT`](#environment-variables) points at).
-- **Remote** (`--server URL`). Fetches the catalog from a running
-  `bty-web` via `GET /images`. Selecting an image streams it from
-  the server's `GET /images/{name}` straight to the target disk -
-  no local download. The TUI's pane title shows the server URL so
-  the operator can see at a glance where the catalog comes from.
+- **Local image-root** (always scanned). Files + `.bri` descriptors
+  under the configured root (USB live env's `BTY_IMAGES` partition,
+  `BTY_IMAGE_ROOT` env, or `--image-root /path`).
+- **Catalog overlay** (`--catalog SOURCE`). One additional source:
+  a local TOML file (`/path/to/catalog.toml`), an HTTP URL
+  (`https://example.com/catalog.toml`), an `oras://` reference
+  (`oras://ghcr.io/owner/bty-catalog:latest`), or a `bty-web`
+  instance's TOML endpoint (`http://server:8080/catalog.toml`).
+  Fetched once at startup and held in memory; pressing `r` re-scans
+  only the local image-root, not the remote catalog. The TUI's pane
+  title shows the merged source label.
 
-`--mac MAC` is used together with `--server`: after a successful
-flash the TUI `POST`s `<server>/pxe/<mac>/done` so the server's
-`last_flashed_at` updates. Best-effort - a failed signal surfaces
-in the status bar but doesn't undo the flash.
+`--mac MAC` is the self-MAC. Combined with an http(s) `--catalog`,
+the TUI auto-derives the URL's `scheme://host` as the pxe-done base
+and `POST`s `<base>/pxe/<mac>/done` after a successful flash so a
+bty-web's `last_flashed_at` updates. Best-effort: a non-bty-web
+catalog source (static file, `oras://`) skips the POST.
 
 The TUI-on-PXE flow uses both flags: the live env reads `bty.server`
-and `bty.mac` from `/proc/cmdline` and assembles the matching CLI
-invocation in `/usr/local/sbin/bty-tui-on-tty1`.
+and `bty.mac` from `/proc/cmdline` and the
+`/usr/local/sbin/bty-tui-on-tty1` wrapper rewrites the bty.server
+base URL into `--catalog <base>/catalog.toml`.
 
 ## Configuration
 

@@ -4,7 +4,10 @@
 :align: center
 ```
 
-# bty - flash images onto target disks, locally or over PXE
+# bty - flash a fleet without leaving your chair
+
+> Pronounced "battie" (rhymes with "batty") - the blue bat up top is the
+> mascot, so when in doubt say it like the critter.
 
 ```{only} html
 [![CI](https://github.com/safl/bty/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/safl/bty/actions/workflows/ci.yml)
@@ -14,11 +17,100 @@
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://github.com/safl/bty/blob/main/LICENSE)
 ```
 
-Image-flasher for bare-metal and virtual targets. Writes pre-built
-system images onto target disks -- locally from a USB
-live stick or remotely over PXE. First-boot bring-up (users, network,
-packages, hostnames) is baked into the image upstream by the image builder
-via cloud-init / NoCloud user-data; bty itself only writes bytes.
+Reflash a homelab box, a CI runner, or a rack of bare-metal targets in
+the time it takes to make coffee. bty writes pre-built system images
+onto disks -- locally over USB or remotely over PXE. The image is the
+source of truth: rebuild the image, reflash the target. No imperative
+configuration management, no idempotency mind games.
+
+bty is a flasher, not an image builder:
+
+- **Image creation is somebody else's project.** First-boot bring-up
+  (users, network, packages, hostnames) gets baked into the image
+  upstream with cloud-init / kickstart / preseed / your favourite
+  image builder. Use the [companion image-builder](https://github.com/safl/nosi)
+  (`safl/nosi` -- builds Debian / Ubuntu / Fedora sysdev images and
+  publishes them to GHCR as ORAS artefacts that bty flashes via
+  `oras://`), or your own. bty just writes the bytes.
+- **No post-boot configuration management either.** Anything that
+  needs to be true on the running target (users, hostnames, config
+  files, packages) belongs in the image builder, not in bty. The
+  server does not hold creds for any target it has provisioned --
+  that blast radius is intentionally absent.
+
+```bash
+# Local: USB stick into target, two arrows + Enter, done.
+bty tui
+
+# Remote: bind a MAC to an image, the next PXE boot reflashes itself.
+# (See the bty-web HTTP API reference for the full surface.)
+
+# Per-job CI: every job a clean OS, no drift, no snowflakes.
+```
+
+## Three delivery shapes, one runtime
+
+| Shape | What it is | When it fits |
+|---|---|---|
+| **USB live stick** | bty boots from a flash drive, runs `bty tui`, flashes the box it's plugged into. Fresh sticks ship with four starter `.bri` pointers (Debian / Ubuntu / Fedora sysdev images via `oras://ghcr.io/safl/nosi/...`, plus bty-server) so the catalog is non-empty out of the box. | Single-machine local imaging |
+| **USB + portable catalog** | Same stick, plus `bty tui --catalog <SOURCE>` pointed at a TOML catalog hosted anywhere (a local file, an HTTP URL, an `oras://` reference, or a bty-web instance's `/catalog.toml`). | A handful of boxes, shared image library |
+| **PXE-boot appliance** | bty-web on a Pi or x86 box runs DHCP/TFTP/HTTP; targets PXE-chain into a netboot live env that flashes them unattended | CI fleets, racks, anything you don't want to walk to |
+
+All three share the same Python codebase, the same image catalog, the
+same SHA-keyed machine bindings.
+
+## ORAS-published images and portable catalogs
+
+bty consumes images and catalogs as **OCI artefacts** published with
+[ORAS](https://oras.land/) (OCI Registry As Storage -- the spec for
+non-container artefacts in a container registry). The end-to-end
+story:
+
+- **Images live in a registry.** [`safl/nosi`](https://github.com/safl/nosi)
+  publishes Debian / Ubuntu / Fedora disk images to `ghcr.io/safl/nosi/<variant>:latest`.
+  `bty flash oras://ghcr.io/safl/nosi/debian-sysdev:latest /dev/sdX --yes`
+  resolves the manifest, picks the disk-image layer, and streams the
+  blob straight to the target via the same `curl | dd` pipeline as
+  any HTTP URL. Anonymous-pull only -- no PAT, no docker login.
+- **Catalogs are portable TOML files.** A catalog is a small TOML
+  manifest listing named images with `src` URLs (any combination of
+  `http(s)://`, `oras://`, or `file://`). `bty tui --catalog
+  <SOURCE>` accepts a local path, an HTTP URL, or an `oras://`
+  reference. Operators can publish a catalog on GitHub Releases, an
+  S3 bucket, a private registry, or alongside images in GHCR --
+  whatever they already have. `bty-web` instances serve the same
+  shape at `GET /catalog.toml`, so a running server is "just another
+  catalog source".
+- **`.bri` descriptors are the per-stick analogue.** A USB stick's
+  `BTY_IMAGES` partition can carry `.bri` files (one-image-per-file
+  TOML pointers, including `oras://` URLs). The TUI merges them
+  with whatever `--catalog` source the operator passed.
+
+Why this shape: images and catalog metadata are content-addressed
+artefacts, not container images. The OCI ecosystem already solves
+"distribute signed, versioned, content-addressed blobs"; bty just
+piggybacks on that without dragging in the docker / podman runtime.
+
+## Why bty
+
+- **Reflash on every CI job.** Per-job cadence: each job lands on a
+  freshly-imaged target, runs, gets reflashed for the next job. No
+  state leaks. No snowflakes. No "works on my machine" because the
+  machine is bit-identical to the manifest every single boot.
+- **Pre-built images, not recipes.** You build the image once (in
+  your build system of choice), bty writes the bytes. Any first-boot
+  bring-up (users, networking, hostnames) is baked into the image by
+  the image builder upstream via cloud-init / NoCloud user-data.
+  bty itself doesn't run a provisioning step -- no agent, no daemon,
+  no convergence loops.
+- **OS-agnostic by design.** Linux, FreeBSD, Windows -- if it boots
+  from a disk image, bty can flash it. macOS targets are out (Apple
+  Silicon's boot story isn't friendly to imaging).
+- **Trust model is explicit.** PXE / live-env routes are open
+  (clients have no token); operator routes (`/machines`,
+  `/catalog/*`, `/boot/releases`) require a session cookie. bty-web
+  is for trusted networks (homelab, CI segment), not the open
+  internet.
 
 ```{toctree}
 :maxdepth: 2

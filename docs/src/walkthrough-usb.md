@@ -183,7 +183,7 @@ the next; `Esc` (or `Backspace`) walks back.
 
 | Pane | Contents |
 |---|---|
-| **1: Images** | Pre-built images found on `BTY_IMAGES` (or on a remote `bty-web` if you launched with `--server URL`) |
+| **1: Images** | Pre-built images found on `BTY_IMAGES` plus any entries from the catalog source passed to `--catalog SOURCE` (a local TOML path, HTTP URL, or `oras://` reference) |
 | **2: Disks** | Block devices detected on this machine |
 | **3: Flash** | A big `Flash!` button (becomes `Reboot` after a successful flash) |
 

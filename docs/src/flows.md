@@ -32,7 +32,7 @@ the network.
 
 The whole flow runs offline. No network, no server, no MAC registration.
 
-## USB + network catalog (`bty tui --server URL`)
+## USB + network catalog (`bty tui --catalog SOURCE`)
 
 A middle shape between the strictly-offline direct flash and the
 PXE-driven flows. The operator boots from the same USB live stick
@@ -55,7 +55,7 @@ without setting up the appliance + PXE stack.
    any `bty-web` instance does.
 
 2. Operator boots a target from the bty USB live stick and runs
-   `bty tui --server http://<host>:8080` (either inline at the
+   `bty tui --catalog http://<host>:8080/catalog.toml` (either inline at the
    tty1 prompt or by relaunching the auto-started TUI with that
    flag).
 
@@ -163,7 +163,7 @@ zero per-MAC configuration.
    cmdline. `bty-flash-on-boot.service` sees the interactive flag
    and short-circuits; `bty-tui-on-tty1.service` takes over tty1 in
    place of the agetty and launches
-   `bty tui --server URL --mac MAC`.
+   `bty tui --catalog SOURCE --mac MAC`.
 4. The TUI fetches the catalog from `GET /images`, the operator
    picks an image and a target disk, and confirms the flash. Image
    bytes stream from `GET /images/{name}` straight through

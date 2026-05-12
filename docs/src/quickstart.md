@@ -24,7 +24,7 @@ prefer bind-mounts so files show up in the host filesystem,
 pre-chown the dir to uid 999 (the bty user) - the entrypoint
 checks and exits with a clear hint if it cannot write.
 
-Connect a `bty tui --server http://<host>:8080` from a USB live
+Connect a `bty tui --catalog http://<host>:8080/catalog.toml` from a USB live
 stick or a workstation to flash from this catalog without burning
 images onto every stick.
 
@@ -83,7 +83,7 @@ sync
 
 The stick now has the bty live-boot ISO9660 + EFI partitions plus
 a 2.1 GiB exFAT partition labelled `BTY_IMAGES` -- pre-staged with
-four starter `.bri` descriptors (nosi Debian / Ubuntu / Fedora sysdev
+four starter `.bri` descriptors (nosi Debian / Ubuntu / Fedora
 sysdev images via `oras://ghcr.io/safl/nosi/...`, plus bty-server) so the
 catalog is non-empty out of the box, with room for a typical
 `bty-server` image (~1-1.5 GiB compressed) plus headroom. The

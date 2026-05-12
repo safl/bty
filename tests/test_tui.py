@@ -82,37 +82,55 @@ def _fake_resp(payload: Any) -> MagicMock:
     return resp
 
 
-def test_fetch_remote_catalog_parses_image_entries(monkeypatch: pytest.MonkeyPatch) -> None:
-    """``GET /images`` returns ImageEntry[] with a single ``url``
-    each. The TUI just unpacks it -- the server already chose
-    server-vs-upstream based on cache state. Mixed shape here
-    (one server URL, one upstream URL) verifies neither side
-    gets special-cased on the client."""
-    payload = [
-        {
-            "name": "demo.qcow2",
-            "format": "qcow2",
-            "size_bytes": 1024,
-            "url": "http://server:8080/images/abc123def456",
-            "ref": "abc123def456",
-            "cached": True,
-        },
-        {
-            "name": "live.img.zst",
-            "format": "img.zst",
-            "size_bytes": 4096,
-            "url": "https://github.com/safl/bty-images/releases/download/v1/live.img.zst",
-            "ref": "fedcba987654",
-            "cached": False,
-        },
-    ]
+_VALID_CATALOG_TOML = b"""\
+version = 1
+
+[[images]]
+name = "demo.qcow2"
+src = "http://server:8080/images/abc123def456"
+sha256 = "abc123abc123abc123abc123abc123abc123abc123abc123abc123abc123def4"
+format = "qcow2"
+size_bytes = 1024
+
+[[images]]
+name = "live.img.zst"
+src = "https://github.com/safl/bty-images/releases/download/v1/live.img.zst"
+sha256 = "fedcba98fedcba98fedcba98fedcba98fedcba98fedcba98fedcba98fedcba98"
+format = "img.zst"
+size_bytes = 4096
+"""
+
+
+def _fake_bytes_resp(raw: bytes):
+    """urllib.request.urlopen replacement that returns ``raw`` as the
+    response body. Compatible with the ``with urlopen(...) as resp``
+    + ``resp.read(n)`` pattern."""
+
+    class _Resp:
+        def __enter__(self) -> _Resp:
+            return self
+
+        def __exit__(self, *_a: object) -> None:
+            pass
+
+        def read(self, _n: int = -1) -> bytes:
+            return raw
+
+    return _Resp()
+
+
+def test_load_catalog_from_source_parses_http_toml(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``load_catalog_from_source(http://...)`` issues a GET, parses the
+    response body as TOML (via ``bty.catalog.load_bytes``), and emits
+    one ``_TuiImage`` per ``[[images]]`` entry. ``src`` becomes the
+    flashable URL the TUI later hands to the URL pipeline."""
     monkeypatch.setattr(
         tui_app.urllib.request,
         "urlopen",
-        lambda *_args, **_kw: _fake_resp(payload),
+        lambda *_a, **_kw: _fake_bytes_resp(_VALID_CATALOG_TOML),
     )
 
-    rows = tui_app.fetch_remote_catalog("http://server:8080")
+    rows = tui_app.load_catalog_from_source("http://server:8080/catalog.toml")
 
     assert len(rows) == 2
     assert rows[0].name == "demo.qcow2"
@@ -123,48 +141,57 @@ def test_fetch_remote_catalog_parses_image_entries(monkeypatch: pytest.MonkeyPat
     assert rows[1].url == "https://github.com/safl/bty-images/releases/download/v1/live.img.zst"
 
 
-def test_fetch_remote_catalog_skips_entries_without_url(
+def test_load_catalog_from_source_parses_local_path(tmp_path: Path) -> None:
+    """Bare path (no scheme) goes through the local read path,
+    parses identically to the HTTP path."""
+    catalog_file = tmp_path / "catalog.toml"
+    catalog_file.write_bytes(_VALID_CATALOG_TOML)
+
+    rows = tui_app.load_catalog_from_source(str(catalog_file))
+    assert [r.name for r in rows] == ["demo.qcow2", "live.img.zst"]
+
+
+def test_load_catalog_from_source_rejects_invalid_toml(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Entries without a ``url`` (or with an empty one) are skipped --
-    the server is supposed to elide them too, but the client is
-    defensive. Same for entries that aren't dicts or have no name."""
-    payload = [
-        "not-a-dict",
-        {"name": "", "url": "http://x"},  # blank name
-        {"name": "no-url", "format": "img"},  # no url
-        {"name": "ok.img", "format": "img", "size_bytes": 100, "url": "http://x/ok"},
-    ]
+    """Garbage bytes -> ``CatalogError`` (catalog.load_bytes wraps
+    tomllib's TOMLDecodeError). Same behaviour for local paths and
+    URL fetches."""
     monkeypatch.setattr(
         tui_app.urllib.request,
         "urlopen",
-        lambda *_a, **_kw: _fake_resp(payload),
+        lambda *_a, **_kw: _fake_bytes_resp(b"not valid toml at all <<<"),
     )
-
-    rows = tui_app.fetch_remote_catalog("http://server")
-    assert [r.name for r in rows] == ["ok.img"]
-    assert rows[0].url == "http://x/ok"
+    with pytest.raises(tui_app._catalog.CatalogError):
+        tui_app.load_catalog_from_source("http://server/catalog.toml")
 
 
-def test_fetch_remote_catalog_rejects_non_list_payload(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        tui_app.urllib.request,
-        "urlopen",
-        lambda *_a, **_kw: _fake_resp({"oops": "not a list"}),
-    )
-
-    with pytest.raises(ValueError, match="not a list"):
-        tui_app.fetch_remote_catalog("http://server")
-
-
-def test_fetch_remote_catalog_propagates_url_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_load_catalog_from_source_propagates_url_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     def _boom(*_a: object, **_kw: object) -> None:
         raise urllib.error.URLError("connection refused")
 
     monkeypatch.setattr(tui_app.urllib.request, "urlopen", _boom)
 
     with pytest.raises(urllib.error.URLError):
-        tui_app.fetch_remote_catalog("http://server")
+        tui_app.load_catalog_from_source("http://server/catalog.toml")
+
+
+def test_pxe_done_base_from_source_for_http() -> None:
+    """A http(s):// catalog URL derives scheme://host[:port] as the
+    pxe-done base. Static-file and oras:// sources -> None (no POST)."""
+    assert (
+        tui_app._pxe_done_base_from_source("http://server:8080/catalog.toml")
+        == "http://server:8080"
+    )
+    assert (
+        tui_app._pxe_done_base_from_source("https://example.com/path/catalog.toml")
+        == "https://example.com"
+    )
+    assert tui_app._pxe_done_base_from_source(None) is None
+    assert tui_app._pxe_done_base_from_source("oras://ghcr.io/owner/repo:tag") is None
+    assert tui_app._pxe_done_base_from_source("/local/catalog.toml") is None
 
 
 def test_post_pxe_done_sends_post(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -222,8 +249,8 @@ def test_post_pxe_done_propagates_url_errors(monkeypatch: pytest.MonkeyPatch) ->
         tui_app.post_pxe_done("http://server", "aa:bb:cc:dd:ee:ff")
 
 
-def test_main_accepts_server_and_mac_flags(monkeypatch: pytest.MonkeyPatch) -> None:
-    """``bty-tui --server URL --mac MAC`` reaches ``BtyTui(...)`` with
+def test_main_accepts_catalog_and_mac_flags(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``bty-tui --catalog URL --mac MAC`` reaches ``BtyTui(...)`` with
     the right kwargs. The actual ``run()`` is monkeypatched so we
     don't try to launch a real TUI from a unit test."""
     captured: dict[str, object] = {}
@@ -233,11 +260,11 @@ def test_main_accepts_server_and_mac_flags(monkeypatch: pytest.MonkeyPatch) -> N
             self,
             image_root: object = None,
             *,
-            server_url: object = None,
+            catalog_source: object = None,
             mac: object = None,
         ) -> None:
             captured["image_root"] = image_root
-            captured["server_url"] = server_url
+            captured["catalog_source"] = catalog_source
             captured["mac"] = mac
 
         def run(self) -> None:
@@ -248,9 +275,9 @@ def test_main_accepts_server_and_mac_flags(monkeypatch: pytest.MonkeyPatch) -> N
     # Re-import the entry-point to make sure it picks up the patched class.
     import bty.tui as tui_mod
 
-    tui_mod.main(["--server", "http://srv:8080", "--mac", "aa:bb:cc:dd:ee:ff"])
+    tui_mod.main(["--catalog", "http://srv:8080/catalog.toml", "--mac", "aa:bb:cc:dd:ee:ff"])
 
-    assert captured["server_url"] == "http://srv:8080"
+    assert captured["catalog_source"] == "http://srv:8080/catalog.toml"
     assert captured["mac"] == "aa:bb:cc:dd:ee:ff"
     assert captured["ran"] is True
 
@@ -269,11 +296,11 @@ def test_main_accepts_image_root_flag(monkeypatch: pytest.MonkeyPatch) -> None:
             self,
             image_root: object = None,
             *,
-            server_url: object = None,
+            catalog_source: object = None,
             mac: object = None,
         ) -> None:
             captured["image_root"] = image_root
-            captured["server_url"] = server_url
+            captured["catalog_source"] = catalog_source
             captured["mac"] = mac
 
         def run(self) -> None:
@@ -285,7 +312,7 @@ def test_main_accepts_image_root_flag(monkeypatch: pytest.MonkeyPatch) -> None:
     tui_mod.main(["--image-root", "/tmp/bty-images"])
 
     assert captured["image_root"] == Path("/tmp/bty-images")
-    assert captured["server_url"] is None
+    assert captured["catalog_source"] is None
     assert captured["mac"] is None
     assert captured["ran"] is True
 
@@ -334,8 +361,8 @@ def _patch_data_sources(
     if remote_catalog is not None:
         monkeypatch.setattr(
             tui_app,
-            "fetch_remote_catalog",
-            lambda _url: list(remote_catalog),
+            "load_catalog_from_source",
+            lambda _source, **_kw: list(remote_catalog),
         )
 
 
@@ -540,12 +567,12 @@ def test_app_non_root_status_says_read_only(
     _run(_drive())
 
 
-def test_app_remote_mode_renders_catalog_from_server(
+def test_app_catalog_source_overlays_local_scan(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``--server URL`` swaps the local image-root scan for
-    ``fetch_remote_catalog``. The Images pane title shows the server
-    URL; the table populates from the mocked remote catalog."""
+    """``--catalog URL`` runs alongside the local image-root scan and
+    surfaces its entries in the catalog table. With an empty local
+    image_root, only the catalog rows appear."""
     remote_rows = [
         tui_app._TuiImage(
             name="remote.img.zst",
@@ -560,7 +587,7 @@ def test_app_remote_mode_renders_catalog_from_server(
         remote_catalog=remote_rows,
     )
 
-    app = tui_app.BtyTui(server_url="http://server:8080")
+    app = tui_app.BtyTui(catalog_source="http://server:8080/catalog.toml")
 
     async def _drive() -> None:
         async with app.run_test() as pilot:
@@ -569,11 +596,11 @@ def test_app_remote_mode_renders_catalog_from_server(
 
             images_table = app.query_one("#images_table", DataTable)
             assert images_table.row_count == 1
-            # The remote URL is the row key (used to drive the URL flash
-            # path in action_flash); confirm the entry round-trips.
+            # The catalog entry's src is the row key (used to drive the
+            # URL flash path in action_flash); confirm round-trip.
             row = next(iter(app._images_by_key.values()))  # type: ignore[reportPrivateUsage]
             assert row.url == "http://server:8080/images/remote.img.zst"
-            assert row.path is None  # remote rows never carry a local path
+            assert row.path is None  # catalog rows never carry a local path
 
     _run(_drive())
 
@@ -628,11 +655,12 @@ def test_app_welcome_panel_has_local_onboarding_text_when_empty(
 def test_app_welcome_panel_has_remote_onboarding_text_when_empty(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Empty remote catalog -> welcome Static is populated with
-    remote-mode onboarding (PUT /images guidance)."""
+    """Empty catalog source -> welcome Static is populated with the
+    catalog-source onboarding (catalog URL plus the local-root
+    fallback line, and the bty-server install hint)."""
     _patch_data_sources(monkeypatch, disks_list=[_fake_disk()], remote_catalog=[])
 
-    app = tui_app.BtyTui(server_url="http://server:8080")
+    app = tui_app.BtyTui(catalog_source="http://server:8080/catalog.toml")
 
     async def _drive() -> None:
         async with app.run_test() as pilot:
@@ -641,9 +669,10 @@ def test_app_welcome_panel_has_remote_onboarding_text_when_empty(
 
             welcome = app.query_one("#welcome", Static)
             text_str = str(welcome.content)
-            # Remote-mode markers: server URL + the PUT example
-            assert "http://server:8080/images" in text_str
-            assert "curl -X PUT" in text_str
+            # The configured catalog source URL must be visible.
+            assert "http://server:8080/catalog.toml" in text_str
+            # Operator still gets the "install bty-server" hint.
+            assert "Install bty-server" in text_str
 
     _run(_drive())
 
@@ -1180,7 +1209,7 @@ def test_catalog_picker_opens_and_dismisses_cleanly(
         async with app.run_test() as pilot:
             await pilot.pause()
             initial_root = app._image_root  # type: ignore[reportPrivateUsage]
-            initial_server = app._server_url  # type: ignore[reportPrivateUsage]
+            initial_source = app._catalog_source  # type: ignore[reportPrivateUsage]
 
             await pilot.press("c")
             for _ in range(10):
@@ -1195,6 +1224,6 @@ def test_catalog_picker_opens_and_dismisses_cleanly(
                 await pilot.pause()
             # Catalog unchanged when dismissed without selection.
             assert app._image_root == initial_root  # type: ignore[reportPrivateUsage]
-            assert app._server_url == initial_server  # type: ignore[reportPrivateUsage]
+            assert app._catalog_source == initial_source  # type: ignore[reportPrivateUsage]
 
     _run(_drive())

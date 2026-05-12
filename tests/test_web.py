@@ -562,6 +562,49 @@ def test_list_images_returns_files_under_image_root(
     assert by_name["alpha.qcow2"]["cached"] is True
 
 
+def test_list_catalog_toml_renders_unified_catalog(tmp_path: Path) -> None:
+    """``GET /catalog.toml`` serves the same unified-catalog rows as
+    ``GET /images`` but as a TOML manifest matching the
+    ``bty.catalog.Catalog`` schema. The bty-tui's ``--catalog``
+    loader consumes this without server-specific code paths --
+    it's the same shape it'd consume from any static catalog file."""
+    import hashlib
+
+    from bty.catalog import load_bytes as catalog_load_bytes
+
+    image_root = tmp_path / "images"
+    image_root.mkdir()
+    payload = b"\0" * 256
+    (image_root / "alpha.qcow2").write_bytes(payload)
+    sha = hashlib.sha256(payload).hexdigest()
+    (image_root / "alpha.qcow2.sha256").write_text(f"{sha}  alpha.qcow2\n")
+
+    state = tmp_path / "state.db"
+    app = create_app(
+        state_path=state,
+        service_user=TEST_SERVICE_USER,
+        secret_key=TEST_SECRET_KEY,
+        image_root=image_root,
+    )
+    with TestClient(app) as client:
+        r = client.get("/catalog.toml")
+
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("application/toml")
+    # Body must parse via the standard catalog loader, not need bty-
+    # web-specific knowledge.
+    parsed = catalog_load_bytes(r.content, source="<test>")
+    by_name = {entry.name: entry for entry in parsed.entries}
+    assert "alpha.qcow2" in by_name
+    entry = by_name["alpha.qcow2"]
+    assert entry.sha256 == sha
+    assert entry.format == "qcow2"
+    assert entry.size_bytes == 256
+    # bty-web hosts the bytes; the URL points at this server's
+    # ``/images/<sha>/<name>`` route just like /images JSON does.
+    assert entry.src.endswith(f"/images/{sha}/alpha.qcow2")
+
+
 def test_list_images_does_not_surface_bri_descriptors(tmp_path: Path) -> None:
     """``.bri`` is the bty-usb / bty-tui ad-hoc local-catalog
     format; bty-web is the SHA-keyed managed-catalog model. A

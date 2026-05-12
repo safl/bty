@@ -40,8 +40,7 @@ bty is a flasher, not an image builder:
 bty tui
 
 # Remote: bind a MAC to an image, the next PXE boot reflashes itself.
-curl -X PUT http://bty-server:8080/machines/aa:bb:cc:dd:ee:ff \
-  -d '{"image_sha256":"<sha>","boot_policy":"flash"}'
+# (See the bty-web HTTP API reference in the docs for the full surface.)
 
 # Per-job CI: every job a clean OS, no drift, no snowflakes.
 ```
@@ -51,11 +50,43 @@ curl -X PUT http://bty-server:8080/machines/aa:bb:cc:dd:ee:ff \
 | Shape | What it is | When it fits |
 |---|---|---|
 | **USB live stick** | bty boots from a flash drive, runs `bty tui`, flashes the box it's plugged into. Fresh sticks ship with four starter `.bri` pointers (Debian / Ubuntu / Fedora sysdev images via `oras://ghcr.io/safl/nosi/...`, plus bty-server) so the catalog is non-empty out of the box. | Single-machine local imaging |
-| **USB + server catalog** | Same stick, but the operator presses `c` in the TUI and the image list comes from a running `bty-web` over HTTP | A handful of boxes, shared image library |
+| **USB + portable catalog** | Same stick, plus `bty tui --catalog <SOURCE>` pointed at a TOML catalog hosted anywhere (a local file, an HTTP URL, an `oras://` reference, or a bty-web instance's `/catalog.toml`). | A handful of boxes, shared image library |
 | **PXE-boot appliance** | bty-web on a Pi or x86 box runs DHCP/TFTP/HTTP; targets PXE-chain into a netboot live env that flashes them unattended | CI fleets, racks, anything you don't want to walk to |
 
 All three share the same Python codebase, the same image catalog, the
 same SHA-keyed machine bindings.
+
+## ORAS-published images and portable catalogs
+
+bty consumes images and catalogs as **OCI artefacts** published with
+[ORAS](https://oras.land/) (OCI Registry As Storage -- the spec for
+non-container artefacts in a container registry). The end-to-end
+story:
+
+- **Images live in a registry.** [`safl/nosi`](https://github.com/safl/nosi)
+  publishes Debian / Ubuntu / Fedora disk images to `ghcr.io/safl/nosi/<variant>:latest`.
+  `bty flash oras://ghcr.io/safl/nosi/debian-sysdev:latest /dev/sdX --yes`
+  resolves the manifest, picks the disk-image layer, and streams the
+  blob straight to the target via the same `curl | dd` pipeline as
+  any HTTP URL. Anonymous-pull only -- no PAT, no docker login.
+- **Catalogs are portable TOML files.** A catalog is a small TOML
+  manifest listing named images with `src` URLs (any combination of
+  `http(s)://`, `oras://`, or `file://`). `bty tui --catalog
+  <SOURCE>` accepts a local path, an HTTP URL, or an `oras://`
+  reference. Operators can publish a catalog on GitHub Releases, an
+  S3 bucket, a private registry, or alongside images in GHCR --
+  whatever they already have. `bty-web` instances serve the same
+  shape at `GET /catalog.toml`, so a running server is "just another
+  catalog source".
+- **`.bri` descriptors are the per-stick analogue.** A USB stick's
+  `BTY_IMAGES` partition can carry `.bri` files (one-image-per-file
+  TOML pointers, including `oras://` URLs). The TUI merges them
+  with whatever `--catalog` source the operator passed.
+
+Why this shape: images and catalog metadata are content-addressed
+artefacts, not container images. The OCI ecosystem already solves
+"distribute signed, versioned, content-addressed blobs"; bty just
+piggybacks on that without dragging in the docker / podman runtime.
 
 ## Why bty
 

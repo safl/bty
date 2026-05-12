@@ -24,12 +24,13 @@ that bridges the two:
   and bundled images on its own exFAT partition. Plug in, boot, flash,
   walk away. No server to set up. Best for the field-tech / one-off
   reflash.
-- **USB + network catalog.** Same USB live image, but `bty tui --server
-  URL` pulls the image catalog from a `bty-web` instance on the LAN
-  (commonly the `ghcr.io/safl/bty-web` Docker container running on
-  someone's workstation). Flash still happens locally on the operator's
-  hardware; only the catalog is centralised. Best for a small team
-  sharing pre-built images without setting up a full PXE server.
+- **USB + portable catalog.** Same USB live image, plus
+  `bty tui --catalog <SOURCE>` pointed at a TOML catalog hosted
+  anywhere -- a local file, an HTTP URL, an `oras://` reference, or
+  a bty-web instance's `/catalog.toml` endpoint. Flash still happens
+  locally on the operator's hardware; only the catalog is centralised.
+  Best for a small team sharing pre-built images without setting up
+  a full PXE server.
 - **PXE-driven (no operator).** Full `bty-server` appliance running
   `bty-web` and the iPXE/TFTP/HTTP services. Fleet members are
   registered by MAC address; reflashes happen on schedule, on demand,
@@ -60,8 +61,9 @@ entry points, plus a sibling appliance-image builder:
 
 - `bty` - main CLI for image inspection, target discovery, flashing.
 - `bty-tui` - terminal UI for interactive use from a live environment.
-  With ``--server URL`` it also drives a remote flash against a
-  running ``bty-web``.
+  With ``--catalog SOURCE`` (a local TOML path, HTTP URL, or
+  ``oras://`` reference) it overlays a portable catalog on top of
+  the local image-root scan.
 - `bty-web` - HTTP server + browser UI for fleet image flashing.
 - `bty-media/` - sibling directory (not a Python package); a
   cijoe-driven Debian appliance-image builder that produces the USB live

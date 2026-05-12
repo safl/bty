@@ -740,6 +740,60 @@ def create_app(
         # can't actually flash.
         return out
 
+    @app.get("/catalog.toml", response_class=PlainTextResponse)
+    def list_catalog_toml(request: Request) -> Response:
+        """Serve the unified image catalog as a TOML manifest matching
+        the ``bty.catalog.Catalog`` schema (``version=1``, ``[[images]]``
+        entries with ``name``/``src``/``sha256``/``format``/``size_bytes``).
+
+        Same set of rows as ``GET /images`` (manifest + dir-scan +
+        operator-curated DB entries; ``.bri`` deliberately excluded),
+        but serialised so ``bty-tui --catalog`` clients can consume it
+        with the same code path they use for static files hosted on
+        e.g. GitHub. Open route, same trust model as ``/images``.
+
+        Implemented as ``application/toml`` so a curl-then-eyeball
+        round-trip shows a human-readable manifest, not a binary blob.
+        Entries without a sha256 are skipped (the catalog schema
+        requires one); a future cache-hashing pass over dir-scan
+        files will surface them.
+        """
+        unified = _list_unified_images()
+        host = request.headers.get("host", f"{request.url.hostname}:{request.url.port or 8080}")
+        scheme = request.url.scheme or "http"
+        lines: list[str] = ["version = 1", ""]
+        for u in unified:
+            if u.sha256 is None:
+                # Catalog manifest schema requires a sha; skip dir-scan
+                # entries that haven't been hashed yet.
+                continue
+            if u.cached:
+                src = f"{scheme}://{host}/images/{u.sha256}/{u.names[0]}"
+            else:
+                upstream = next(
+                    (s.location for s in u.sources if s.kind in ("manifest", "url")),
+                    None,
+                )
+                if upstream is None:
+                    continue
+                src = upstream
+            # tomllib basic-string escaping: backslash + double-quote.
+            # All other fields are sourced from validated state and
+            # are either plain ASCII identifiers or already-quoted URLs.
+            name_quoted = u.names[0].replace("\\", "\\\\").replace('"', '\\"')
+            src_quoted = src.replace("\\", "\\\\").replace('"', '\\"')
+            lines.append("[[images]]")
+            lines.append(f'name = "{name_quoted}"')
+            lines.append(f'src = "{src_quoted}"')
+            lines.append(f'sha256 = "{u.sha256}"')
+            if u.format:
+                lines.append(f'format = "{u.format}"')
+            if u.size_bytes is not None:
+                lines.append(f"size_bytes = {u.size_bytes}")
+            lines.append("")
+        body = "\n".join(lines).rstrip() + "\n"
+        return PlainTextResponse(content=body, media_type="application/toml")
+
     @app.put(
         "/images/{name}",
         dependencies=[Depends(require_auth)],
