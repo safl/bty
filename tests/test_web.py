@@ -11,6 +11,7 @@ attach it.
 
 from __future__ import annotations
 
+import typing
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -1595,8 +1596,8 @@ def test_catalog_entries_add_without_sha_url_is_url_only(
 
 
 def test_catalog_entries_add_rejects_non_https(app_client: TestClient) -> None:
-    """``image_url`` / ``sha_url`` must be http(s); a typo with
-    a different scheme should 422 at the Pydantic layer rather
+    """``image_url`` / ``sha_url`` must be http(s) or oras://; a typo
+    with a different scheme should 422 at the Pydantic layer rather
     than land an unflashable entry."""
     r = app_client.post(
         "/catalog/entries",
@@ -1604,6 +1605,95 @@ def test_catalog_entries_add_rejects_non_https(app_client: TestClient) -> None:
         cookies=AUTH,
     )
     assert r.status_code == 422
+
+
+def test_catalog_entries_add_with_oras_ref_resolves_manifest(
+    app_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``POST /catalog/entries`` with an ``oras://`` image_url resolves
+    the manifest at add time. The picked layer's content-addressed
+    digest becomes the row's sha256 (= machine-bindable); the layer
+    title annotation becomes the name; the layer size becomes
+    size_bytes. ``sha_url`` is ignored (manifest is authoritative)."""
+    import io
+    import json as _json
+
+    manifest = {
+        "schemaVersion": 2,
+        "mediaType": "application/vnd.oci.image.manifest.v1+json",
+        "layers": [
+            {
+                "mediaType": "application/vnd.nosi.disk-image.layer.v1+gzip",
+                "digest": "sha256:" + "ab" * 32,
+                "size": 12345678,
+                "annotations": {
+                    "org.opencontainers.image.title": "nosi-debian-sysdev-x86_64.img.gz"
+                },
+            },
+        ],
+    }
+
+    def fake_urlopen(req, *_a, **_kw):
+        url = req if isinstance(req, str) else req.full_url
+
+        class _Resp(io.BytesIO):
+            # No-op headers attr; the fetch_to_cache path reads
+            # ``Content-Length`` off it, but the manifest / token
+            # responses here are short fixed JSON blobs that bypass
+            # the streaming branch.
+            headers: typing.ClassVar[dict[str, str]] = {}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return None
+
+        if "/token" in url:
+            return _Resp(_json.dumps({"token": "anon-tok"}).encode())
+        if "/manifests/" in url:
+            return _Resp(_json.dumps(manifest).encode())
+        raise AssertionError(f"unexpected URL: {url}")
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    r = app_client.post(
+        "/catalog/entries",
+        json={
+            "image_url": "oras://ghcr.io/safl/nosi/debian-sysdev:latest",
+            "sha_url": None,
+        },
+        cookies=AUTH,
+    )
+    assert r.status_code == 201, r.text
+    payload = r.json()
+    assert payload["src"] == "oras://ghcr.io/safl/nosi/debian-sysdev:latest"
+    assert payload["sha256"] == "ab" * 32  # stripped algorithm prefix
+    assert payload["name"] == "nosi-debian-sysdev-x86_64.img.gz"
+    assert payload["format"] == "img.gz"
+    assert payload["size_bytes"] == 12345678
+    assert payload["sha_url"] is None
+
+
+def test_catalog_entries_add_with_oras_ref_propagates_resolve_failure(
+    app_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Token / manifest fetch failure for an oras ref must 400 rather
+    than landing a half-populated row. The event log records the
+    failure with the operator's source IP."""
+
+    def fake_urlopen(*_a, **_kw):
+        raise OSError("connection refused")
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    r = app_client.post(
+        "/catalog/entries",
+        json={"image_url": "oras://ghcr.io/safl/nosi/no-such-pkg:latest"},
+        cookies=AUTH,
+    )
+    assert r.status_code == 400
+    assert "oras" in r.json()["detail"].lower()
 
 
 def test_catalog_entries_add_duplicate_src_409(

@@ -464,6 +464,7 @@ def register_ui_routes(
         entirely and would land arbitrary strings in the DB.
         """
         from bty import catalog as _catalog
+        from bty import oras as _oras
         from bty.web._app import _head_content_length  # local import: avoid cycle at module load
 
         cleaned_sha_url = sha_url.strip() or None
@@ -480,6 +481,41 @@ def register_ui_routes(
             )
         image_url = validated.image_url
         cleaned_sha_url = validated.sha_url
+
+        # ``oras://`` short-circuit: resolve via bty.oras and write
+        # the row with the manifest-derived digest / name / size /
+        # format. Mirrors the JSON endpoint's oras branch verbatim.
+        if image_url.startswith("oras://"):
+            try:
+                resolved = _oras.resolve_ref(image_url)
+            except _oras.OrasError as exc:
+                return RedirectResponse(
+                    "/ui/images?error="
+                    + urllib.parse.quote(f"oras resolve failed: {exc}", safe=""),
+                    status_code=status.HTTP_303_SEE_OTHER,
+                )
+            sha256 = resolved.digest.removeprefix("sha256:")
+            ref = _oras.parse_ref(image_url)
+            name = resolved.title or ref.repository.rsplit("/", 1)[-1]
+            fmt = bty_images.detect_format(Path(name)) or "img.gz"
+            size_bytes = resolved.size
+            now = datetime.now(UTC).isoformat()
+            with _db.open_db(state_path) as conn:
+                try:
+                    conn.execute(
+                        "INSERT INTO catalog_entries "
+                        "(src, sha256, name, sha_url, format, size_bytes, "
+                        "description, added_at) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                        (image_url, sha256, name, None, fmt, size_bytes, None, now),
+                    )
+                    conn.commit()
+                except sqlite3.IntegrityError:
+                    return RedirectResponse(
+                        "/ui/images?error=already+exists",
+                        status_code=status.HTTP_303_SEE_OTHER,
+                    )
+            return RedirectResponse("/ui/images", status_code=status.HTTP_303_SEE_OTHER)
 
         # Filename-required: same rule as the JSON ``add_catalog_entry``
         # endpoint. ``https://example.com`` and

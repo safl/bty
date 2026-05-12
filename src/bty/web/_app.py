@@ -32,6 +32,7 @@ from starlette.middleware.sessions import SessionMiddleware
 import bty
 from bty import catalog as _catalog
 from bty import images
+from bty import oras as _oras
 from bty.web import _catalog as _web_catalog
 from bty.web import _db, _hash, _models, _release_mgr, _sysconfig, _ui
 from bty.web._auth import SESSION_COOKIE, require_auth
@@ -953,8 +954,93 @@ def create_app(
         - HEADs ``image_url`` for ``Content-Length`` (best-effort).
         - Inserts a row keyed by image_url.
 
+        ``oras://`` short-circuit: when ``image_url`` starts with
+        ``oras://``, the server runs ``bty.oras.resolve_ref`` at add
+        time. The picked layer's digest becomes the entry's sha256
+        (= machine-bindable), the layer's title annotation becomes
+        ``name``, the layer's declared size becomes ``size_bytes``,
+        and ``format`` is detected from the title. ``sha_url`` is
+        ignored for oras refs (the manifest is authoritative).
+
         409 if a row with the same image_url already exists.
         """
+        # ``oras://`` short-circuit: resolve the manifest first and
+        # populate everything from it. This bypasses both the
+        # sha_url branch (no separate sidecar needed) and the
+        # HEAD-for-Content-Length call (the layer carries size).
+        if body.image_url.startswith("oras://"):
+            try:
+                resolved = _oras.resolve_ref(body.image_url)
+            except _oras.OrasError as exc:
+                with _db.open_db(state_path) as conn:
+                    _log_event(
+                        conn,
+                        kind="catalog.entry.add_failed",
+                        summary=f"catalog entry add failed for {body.image_url!r}: {exc}",
+                        subject_kind="catalog",
+                        subject_id=body.image_url,
+                        actor="operator",
+                        source_ip=_client_ip(request),
+                        details={"image_url": body.image_url, "error": str(exc)},
+                    )
+                    conn.commit()
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"could not resolve oras ref: {exc}",
+                ) from exc
+            # Layer digest is ``sha256:<hex>``; strip the algorithm
+            # prefix since the schema column stores bare 64-hex.
+            sha256 = resolved.digest.removeprefix("sha256:")
+            # Display name: prefer the layer's title annotation
+            # (typically the upstream filename, e.g.
+            # ``nosi-debian-sysdev-x86_64.img.gz``). Fall back to
+            # the repository basename when the manifest doesn't
+            # annotate the layer.
+            ref = _oras.parse_ref(body.image_url)
+            name = resolved.title or ref.repository.rsplit("/", 1)[-1]
+            fmt = images.detect_format(Path(name)) or "img.gz"
+            size_bytes = resolved.size
+            now = _now_iso()
+            with _db.open_db(state_path) as conn:
+                try:
+                    conn.execute(
+                        "INSERT INTO catalog_entries "
+                        "(src, sha256, name, sha_url, format, size_bytes, description, added_at) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                        (body.image_url, sha256, name, None, fmt, size_bytes, None, now),
+                    )
+                    _log_event(
+                        conn,
+                        kind="catalog.entry.added",
+                        summary=f"catalog entry added (oras): {name}",
+                        subject_kind="catalog",
+                        subject_id=body.image_url,
+                        actor="operator",
+                        source_ip=_client_ip(request),
+                        details={
+                            "name": name,
+                            "sha256": sha256,
+                            "format": fmt,
+                            "size_bytes": size_bytes,
+                            "oras": True,
+                        },
+                    )
+                    conn.commit()
+                except sqlite3.IntegrityError as exc:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail=f"catalog entry with src={body.image_url} already exists",
+                    ) from exc
+            return {
+                "src": body.image_url,
+                "sha256": sha256,
+                "name": name,
+                "sha_url": None,
+                "format": fmt,
+                "size_bytes": size_bytes,
+                "added_at": now,
+            }
+
         sha256: str | None = None
         if body.sha_url is not None:
             try:

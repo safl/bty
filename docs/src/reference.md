@@ -155,7 +155,11 @@ The `url` field accepts three schemes:
   Any OCI v2 registry that follows the GHCR anonymous-pull
   convention works; the URL's host (`ghcr.io`, `quay.io`,
   `registry.example.com:5000`, etc.) drives the per-host token
-  endpoint.
+  endpoint. ``bty-web``'s "Add image by URL" form / `POST
+  /catalog/entries` endpoint accepts the same `oras://` shape;
+  the server resolves the manifest at add time and stores the
+  layer digest as the entry's sha256 (no separate `sha_url`
+  needed for oras refs).
 
 ```toml
 # rolling tag, bty pins to current digest at flash time
@@ -486,7 +490,15 @@ templates, Bootstrap CSS, HTMX form posts).
 - `GET /ui/machines/{mac}` -> detail + edit form
 - `POST /ui/machines/{mac}` -> upsert from a form submit
 - `POST /ui/machines/{mac}/delete` -> delete record
-- `GET /ui/images` -> read-only image catalog
+- `GET /ui/images` -> image catalog page (dir-scan listing +
+ "Add image by URL" form + upload widget)
+- `POST /ui/catalog/entries` (form) and
+ `POST /catalog/entries` (JSON) -> add an operator-curated
+ catalog entry. ``image_url`` accepts http(s):// URLs and
+ ``oras://`` references; for ``oras://`` the server resolves the
+ OCI manifest at add time, uses the layer's content-addressed
+ digest as the entry's sha256 (= machine-bindable), and skips
+ the optional sha_url branch (manifest is authoritative).
 - `GET /ui/boot` -> live-env boot artifacts: present/missing per
  artifact, sizes, last-fetched timestamps, "fetch latest release"
  form

@@ -17,9 +17,13 @@
         <form method="post" action="/ui/catalog/entries">
             <div class="row g-2 align-items-end">
                 <div class="col-md-5">
-                    <label for="image_url" class="form-label small mb-1">Image URL</label>
-                    <input type="url" required class="form-control" id="image_url" name="image_url"
-                           placeholder="https://example.com/ubuntu-22.04.img.gz">
+                    <label for="image_url" class="form-label small mb-1">Image URL or <code>oras://</code> ref</label>
+                    {# type="text" rather than type="url": some browsers
+                       reject non-http schemes (oras://) under HTML5 URL
+                       validation. Server-side Pydantic validation still
+                       runs (regex covers http/https/oras schemes). #}
+                    <input type="text" required class="form-control" id="image_url" name="image_url"
+                           placeholder="https://example.com/ubuntu.img.gz  |  oras://ghcr.io/owner/repo:tag">
                 </div>
                 <div class="col-md-5">
                     <label for="sha_url" class="form-label small mb-1">SHA URL <span class="text-muted">(optional)</span></label>
@@ -33,9 +37,12 @@
                 </div>
             </div>
             <div class="form-text small mt-2">
-                Image URL is required. Provide a SHA URL (a sha256sum-style manifest)
-                to enable per-machine binding to this image; without it the entry is
-                URL-only (flashable, but not bindable to a machine).
+                Image URL is required.
+                For <code>http(s)://</code> URLs, providing a SHA URL (a sha256sum-style manifest)
+                enables per-machine binding; without it the entry is URL-only (flashable, but not
+                bindable to a machine).
+                For <code>oras://</code> refs the server resolves the OCI manifest at add time and
+                uses the layer's content-addressed digest -- no SHA URL needed (it's ignored).
             </div>
         </form>
     </div>

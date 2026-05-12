@@ -193,16 +193,22 @@ class CatalogEntryAdd(BaseModel):
     catalog entry by URL.
 
     ``image_url`` is required: the upstream URL the bytes live at.
-    ``sha_url`` is optional: if given, server fetches and parses
-    the sha256-manifest body, picks the digest matching
-    ``image_url``'s filename, and stores it. Without it the entry
-    is URL-only -- flashable via the URL pipeline, not bindable
-    to a machine.
+    Accepts ``http://``, ``https://``, and ``oras://`` schemes.
 
-    Both URLs must be ``http://`` or ``https://`` and must carry
-    a host segment; arbitrary schemes and host-less inputs like
-    ``https://?`` are rejected at validation time so a typo
-    doesn't land an entry that can never be flashed.
+    - For ``http(s)://`` URLs, ``sha_url`` is optional: if given,
+      server fetches and parses the sha256-manifest body, picks the
+      digest matching ``image_url``'s filename, and stores it.
+      Without it the entry is URL-only -- flashable via the URL
+      pipeline, not bindable to a machine.
+    - For ``oras://`` URLs the server resolves the OCI manifest at
+      add time, picks the disk-image layer, and uses the layer's
+      content-addressed digest as the entry's sha256. ``sha_url``
+      is ignored (the manifest is authoritative); the entry is
+      always bindable to a machine.
+
+    Both URLs must carry a host segment; arbitrary schemes and
+    host-less inputs like ``https://?`` are rejected at validation
+    time so a typo doesn't land an entry that can never be flashed.
 
     The host pattern (``[^\\s/?#]+``) requires at least one
     non-separator char before any path / query / fragment, which
@@ -212,5 +218,13 @@ class CatalogEntryAdd(BaseModel):
 
     model_config = {"extra": "forbid"}
 
-    image_url: str = Field(..., pattern=r"^https?://[^\s/?#]+(?:[/?#]\S*)?$")
+    # http(s) or oras:// scheme; both require a host component.
+    # The oras alternative also requires at least one ``/`` in the
+    # path (host/owner/repo) since GHCR-style refs need owner+repo
+    # under the host. The CLI / API entry point later runs
+    # ``bty.oras.parse_ref`` for stricter shape validation.
+    image_url: str = Field(
+        ...,
+        pattern=r"^(?:https?://[^\s/?#]+(?:[/?#]\S*)?|oras://[^\s/?#]+/\S+)$",
+    )
     sha_url: str | None = Field(default=None, pattern=r"^https?://[^\s/?#]+(?:[/?#]\S*)?$")

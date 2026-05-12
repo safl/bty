@@ -283,9 +283,22 @@ def fetch_to_cache(
     tmp_path = Path(tmp_name)
     try:
         digest = hashlib.sha256()
+        # ``oras://`` entries route through bty.oras to resolve the
+        # manifest layer and inject a bearer-token Authorization
+        # header on the blob GET. Plain http(s) URLs use urlopen
+        # with the URL directly. urllib.request.urlopen accepts
+        # both ``str`` and ``Request``.
+        fetch_request: str | urllib.request.Request
+        if entry.src.startswith("oras://"):
+            from bty import oras as _oras
+
+            resolved = _oras.resolve_ref(entry.src, timeout=timeout)
+            fetch_request = urllib.request.Request(resolved.blob_url, headers=resolved.headers)
+        else:
+            fetch_request = entry.src
         with (
             os.fdopen(fd, "wb") as out,
-            urllib.request.urlopen(entry.src, timeout=timeout) as resp,
+            urllib.request.urlopen(fetch_request, timeout=timeout) as resp,
         ):
             # Try to extract Content-Length; not all servers send it.
             total: int | None
