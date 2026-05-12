@@ -963,10 +963,16 @@ def test_flash_status_screen_cancel_button_sets_event_and_dismisses_cancelled(
                     break
             assert fake_execute_started.is_set(), "worker never ran"
 
-            # Press the Cancel button -- sets the event the worker
-            # is polling.
-            cancel_btn = screen.query_one("#cancel-flash", Button)
-            await pilot.click(cancel_btn)
+            # Press Esc -- exercises the same ``action_cancel_flash``
+            # path as the Cancel button. Picking Esc over a direct
+            # ``pilot.click(cancel_btn)`` because the textual pilot's
+            # bounds check (textual 8.x on cpython 3.14.5+ in CI)
+            # rejects clicks outside the default 80x24 harness
+            # screen, and the FlashStatusScreen's 30-row layout
+            # pushes the action-bar buttons just past row 24. The
+            # binding test covers the same flow without depending
+            # on harness-default geometry.
+            await pilot.press("escape")
             for _ in range(40):
                 await pilot.pause()
                 # ``_result`` flips to "cancelled" once the worker
@@ -977,6 +983,7 @@ def test_flash_status_screen_cancel_button_sets_event_and_dismisses_cancelled(
                 f"expected cancelled, got {screen._result!r}"  # type: ignore[reportPrivateUsage]
             )
             # Close button is now enabled; Cancel button is now disabled.
+            cancel_btn = screen.query_one("#cancel-flash", Button)
             close_btn = screen.query_one("#close", Button)
             assert close_btn.disabled is False
             assert cancel_btn.disabled is True
