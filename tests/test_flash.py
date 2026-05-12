@@ -584,10 +584,10 @@ def test_probe_image_url_unreachable_raises_filenotfound(
 
 
 def test_probe_image_url_rejects_non_http_scheme() -> None:
-    """``ghcr:`` is now accepted alongside http(s) (resolves through
-    the GHCR adapter); everything else still rejects with a clear
+    """``oras://`` is now accepted alongside http(s) (resolves through
+    the ORAS adapter); everything else still rejects with a clear
     message naming the supported schemes."""
-    with pytest.raises(ValueError, match="http, https, or ghcr"):
+    with pytest.raises(ValueError, match="http, https, or oras"):
         flash.probe_image_url("ftp://server/foo.img")
 
 

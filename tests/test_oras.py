@@ -1,4 +1,4 @@
-"""Tests for :mod:`bty.ghcr` -- the GHCR/OCI registry adapter.
+"""Tests for :mod:`bty.oras` -- the ORAS / OCI registry adapter.
 
 Parser tests are pure; resolver tests mock ``urllib.request.urlopen``
 since we want them to run on offline CI and not hit the real registry.
@@ -15,7 +15,7 @@ from unittest.mock import patch
 
 import pytest
 
-from bty import ghcr
+from bty import oras
 
 # A trimmed-down version of a real nosi manifest -- two layers (the
 # .img.gz and a .sha256 sidecar), one annotation each, OCI media types.
@@ -46,7 +46,8 @@ _NOSI_MANIFEST: dict[str, Any] = {
 
 
 def test_parse_ref_tag_form() -> None:
-    ref = ghcr.parse_ref("ghcr:safl/nosi/debian-base:latest")
+    ref = oras.parse_ref("oras://ghcr.io/safl/nosi/debian-base:latest")
+    assert ref.host == "ghcr.io"
     assert ref.repository == "safl/nosi/debian-base"
     assert ref.tag == "latest"
     assert ref.digest is None
@@ -55,7 +56,8 @@ def test_parse_ref_tag_form() -> None:
 
 def test_parse_ref_digest_form() -> None:
     digest = "sha256:" + "ab" * 32
-    ref = ghcr.parse_ref(f"ghcr:safl/nosi/debian-base@{digest}")
+    ref = oras.parse_ref(f"oras://ghcr.io/safl/nosi/debian-base@{digest}")
+    assert ref.host == "ghcr.io"
     assert ref.repository == "safl/nosi/debian-base"
     assert ref.tag is None
     assert ref.digest == digest
@@ -63,45 +65,55 @@ def test_parse_ref_digest_form() -> None:
 
 
 def test_parse_ref_owner_repo_minimum() -> None:
-    """Two-segment owner/repo is the minimum; anything shorter is rejected."""
-    ref = ghcr.parse_ref("ghcr:owner/repo:v1")
+    """Two-segment owner/repo under the host is the minimum; anything
+    shorter (e.g. ``oras://ghcr.io/nosi:latest``) is rejected."""
+    ref = oras.parse_ref("oras://ghcr.io/owner/repo:v1")
+    assert ref.host == "ghcr.io"
     assert ref.repository == "owner/repo"
 
 
-def test_parse_ref_rejects_bare_repo() -> None:
-    """A path with no ``/`` is not a valid OCI repository."""
-    with pytest.raises(ghcr.GhcrError, match="owner/repo"):
-        ghcr.parse_ref("ghcr:nosi:latest")
+def test_parse_ref_accepts_host_with_port() -> None:
+    """Private / on-prem registries often run on non-443 ports;
+    the host parser should preserve ``host:port`` verbatim."""
+    ref = oras.parse_ref("oras://registry.example.com:5000/foo/bar:v1")
+    assert ref.host == "registry.example.com:5000"
+    assert ref.repository == "foo/bar"
+
+
+def test_parse_ref_rejects_bare_repo_after_host() -> None:
+    """A path with no ``/`` after the host is not a valid OCI repository."""
+    with pytest.raises(oras.OrasError, match=r"host.*owner.*repo"):
+        oras.parse_ref("oras://ghcr.io/nosi:latest")
 
 
 def test_parse_ref_rejects_missing_scheme() -> None:
-    with pytest.raises(ghcr.GhcrError, match="not a ghcr:"):
-        ghcr.parse_ref("safl/nosi:latest")
+    with pytest.raises(oras.OrasError, match="not an oras://"):
+        oras.parse_ref("ghcr.io/safl/nosi:latest")
 
 
 def test_parse_ref_rejects_empty_body() -> None:
-    with pytest.raises(ghcr.GhcrError, match="empty"):
-        ghcr.parse_ref("ghcr:")
+    with pytest.raises(oras.OrasError, match="empty"):
+        oras.parse_ref("oras://")
 
 
 def test_parse_ref_rejects_missing_tag_and_digest() -> None:
     """Tagless / digestless refs aren't pullable; reject."""
-    with pytest.raises(ghcr.GhcrError, match="malformed"):
-        ghcr.parse_ref("ghcr:safl/nosi/debian-base")
+    with pytest.raises(oras.OrasError, match="malformed"):
+        oras.parse_ref("oras://ghcr.io/safl/nosi/debian-base")
 
 
 def test_parse_ref_rejects_short_digest() -> None:
     """sha256 digests must be 64 hex chars; partial digests would
     silently mis-address the blob."""
-    with pytest.raises(ghcr.GhcrError, match="malformed"):
-        ghcr.parse_ref("ghcr:safl/nosi/debian-base@sha256:abc123")
+    with pytest.raises(oras.OrasError, match="malformed"):
+        oras.parse_ref("oras://ghcr.io/safl/nosi/debian-base@sha256:abc123")
 
 
 # ---------- pick_image_layer --------------------------------------------------
 
 
 def test_pick_image_layer_skips_sha256_sidecar() -> None:
-    layer = ghcr.pick_image_layer(_NOSI_MANIFEST)
+    layer = oras.pick_image_layer(_NOSI_MANIFEST)
     title = layer["annotations"]["org.opencontainers.image.title"]
     assert title == "nosi-debian-base-x86_64.img.gz"
     assert not title.endswith(".sha256")
@@ -116,13 +128,13 @@ def test_pick_image_layer_picks_largest_when_no_sidecar() -> None:
             {"digest": "sha256:" + "22" * 32, "size": 1_000_000, "annotations": {}},
         ]
     }
-    layer = ghcr.pick_image_layer(manifest)
+    layer = oras.pick_image_layer(manifest)
     assert layer["size"] == 1_000_000
 
 
 def test_pick_image_layer_raises_on_empty_layers() -> None:
-    with pytest.raises(ghcr.GhcrError, match="no layers"):
-        ghcr.pick_image_layer({"layers": []})
+    with pytest.raises(oras.OrasError, match="no layers"):
+        oras.pick_image_layer({"layers": []})
 
 
 def test_pick_image_layer_falls_back_when_all_look_like_sidecars() -> None:
@@ -144,7 +156,7 @@ def test_pick_image_layer_falls_back_when_all_look_like_sidecars() -> None:
             },
         ]
     }
-    layer = ghcr.pick_image_layer(manifest)
+    layer = oras.pick_image_layer(manifest)
     assert layer["size"] == 500
 
 
@@ -177,7 +189,7 @@ def _make_urlopen_mock(token: str = "anon-token-xyz"):
 
 def test_resolve_ref_tag_resolves_to_layer_digest() -> None:
     with patch("urllib.request.urlopen", _make_urlopen_mock()):
-        resolved = ghcr.resolve_ref("ghcr:safl/nosi/debian-base:latest")
+        resolved = oras.resolve_ref("oras://ghcr.io/safl/nosi/debian-base:latest")
     assert resolved.digest == "sha256:" + "aa" * 32
     assert resolved.size == 1923658046
     assert resolved.title == "nosi-debian-base-x86_64.img.gz"
@@ -205,10 +217,41 @@ def test_resolve_ref_digest_skips_manifest() -> None:
 
     digest = "sha256:" + "cd" * 32
     with patch("urllib.request.urlopen", _strict_urlopen):
-        resolved = ghcr.resolve_ref(f"ghcr:safl/nosi/debian-base@{digest}")
+        resolved = oras.resolve_ref(f"oras://ghcr.io/safl/nosi/debian-base@{digest}")
     assert resolved.digest == digest
     assert resolved.size is None  # unknown without the manifest
     assert resolved.title is None
+    # Blob URL still builds correctly even without a manifest fetch.
+    assert resolved.blob_url == f"https://ghcr.io/v2/safl/nosi/debian-base/blobs/{digest}"
+
+
+def test_resolve_ref_uses_host_from_url_in_token_endpoint() -> None:
+    """Token endpoint URL must follow the URL's host, not be hardcoded
+    to ghcr.io. Verifies cross-registry support stays intact even
+    though only GHCR is exercised by the starter .bri set."""
+    seen_urls: list[str] = []
+
+    def _capturing_urlopen(req, timeout=None):
+        url = req if isinstance(req, str) else req.full_url
+        seen_urls.append(url)
+
+        class _Resp(io.BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_a):
+                return None
+
+        if "/token" in url:
+            return _Resp(json.dumps({"token": "tok"}).encode())
+        return _Resp(json.dumps(_NOSI_MANIFEST).encode())
+
+    with patch("urllib.request.urlopen", _capturing_urlopen):
+        oras.resolve_ref("oras://registry.example.com:5000/foo/bar:v1")
+
+    assert any(url.startswith("https://registry.example.com:5000/token") for url in seen_urls), (
+        f"expected token URL with custom host, saw: {seen_urls}"
+    )
 
 
 def test_resolve_ref_propagates_token_failure() -> None:
@@ -217,12 +260,14 @@ def test_resolve_ref_propagates_token_failure() -> None:
 
     with (
         patch("urllib.request.urlopen", _failing_urlopen),
-        pytest.raises(ghcr.GhcrError, match="token fetch failed"),
+        pytest.raises(oras.OrasError, match="token fetch failed"),
     ):
-        ghcr.resolve_ref("ghcr:safl/nosi/debian-base:latest")
+        oras.resolve_ref("oras://ghcr.io/safl/nosi/debian-base:latest")
 
 
-def test_is_ghcr_url() -> None:
-    assert ghcr.is_ghcr_url("ghcr:safl/nosi/debian-base:latest")
-    assert not ghcr.is_ghcr_url("https://ghcr.io/v2/safl/nosi/debian-base/blobs/x")
-    assert not ghcr.is_ghcr_url("https://example.invalid/x.img.gz")
+def test_is_oras_url() -> None:
+    assert oras.is_oras_url("oras://ghcr.io/safl/nosi/debian-base:latest")
+    assert not oras.is_oras_url("https://ghcr.io/v2/safl/nosi/debian-base/blobs/sha256:x")
+    assert not oras.is_oras_url("https://example.invalid/x.img.gz")
+    # ``ghcr:`` was the pre-rename scheme; should NOT be recognised.
+    assert not oras.is_oras_url("ghcr:safl/nosi/debian-base:latest")

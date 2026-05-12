@@ -729,12 +729,15 @@ def _extend_with_exfat(cijoe, iso_path: Path) -> int:
 
 
 # Starter .bri set baked into every USB stick's BTY_IMAGES partition.
-# Three nosi base images via the ``ghcr:`` URL scheme (resolved by
-# bty's GHCR adapter at flash time -- rolling :latest tag, layer
+# Three nosi base images via the ``oras://`` URL scheme (resolved by
+# bty's ORAS adapter at flash time -- rolling :latest tag, layer
 # digest verified-after-resolve), plus the bty-server appliance via
-# its GitHub release asset (built here, not in nosi). Operators
-# delete / edit / replace these freely from a host OS; the files
-# show up as ordinary text on the exFAT partition.
+# its GitHub release asset (built here, not in nosi). The ``oras://``
+# spelling -- distinct from ``ghcr:`` / ``docker pull ghcr.io/...``
+# -- signals that the artefacts are disk images stored as OCI
+# blobs, NOT runnable container images. Operators delete / edit /
+# replace these freely from a host OS; the files show up as ordinary
+# text on the exFAT partition.
 _STARTER_BRIS: tuple[tuple[str, str], ...] = (
     (
         "nosi-debian-base-x86_64.bri",
@@ -745,14 +748,16 @@ _STARTER_BRIS: tuple[tuple[str, str], ...] = (
         "# minimal TOML: ``url`` is the only required field.\n"
         "# See ``bty inspect <path>.bri`` for full syntax.\n"
         "#\n"
-        "# ``ghcr:`` URLs route through bty's GHCR adapter: the tag\n"
+        "# ``oras://`` URLs route through bty's ORAS adapter. The tag\n"
         '# (e.g. "latest") is resolved to a content-addressed layer\n'
         "# digest at flash time, so this stick stays current as nosi\n"
-        "# republishes. To pin a specific build instead, replace the\n"
-        '# ":latest" suffix with "@sha256:<digest>".\n'
+        "# republishes. NOTE: oras:// is distinct from ``docker pull\n"
+        "# ghcr.io/...`` -- the artefact is a disk image stored as an\n"
+        "# OCI blob, NOT a runnable container image. To pin a specific\n"
+        '# build, replace ":latest" with "@sha256:<digest>".\n'
         "\n"
         'name = "nosi debian-base (x86_64, rolling)"\n'
-        'url = "ghcr:safl/nosi/debian-base:latest"\n'
+        'url = "oras://ghcr.io/safl/nosi/debian-base:latest"\n'
         'format = "img.gz"\n'
         'description = "Debian 13 cloud image, nosi base, x86_64"\n',
     ),
@@ -763,7 +768,7 @@ _STARTER_BRIS: tuple[tuple[str, str], ...] = (
         "# See bty-server-x86_64.bri for syntax notes.\n"
         "\n"
         'name = "nosi ubuntu-base (x86_64, rolling)"\n'
-        'url = "ghcr:safl/nosi/ubuntu-base:latest"\n'
+        'url = "oras://ghcr.io/safl/nosi/ubuntu-base:latest"\n'
         'format = "img.gz"\n'
         'description = "Ubuntu 26.04 LTS cloud image, nosi base, x86_64"\n',
     ),
@@ -774,7 +779,7 @@ _STARTER_BRIS: tuple[tuple[str, str], ...] = (
         "# See bty-server-x86_64.bri for syntax notes.\n"
         "\n"
         'name = "nosi fedora-base (x86_64, rolling)"\n'
-        'url = "ghcr:safl/nosi/fedora-base:latest"\n'
+        'url = "oras://ghcr.io/safl/nosi/fedora-base:latest"\n'
         'format = "img.gz"\n'
         'description = "Fedora 44 cloud image, nosi base, x86_64"\n',
     ),

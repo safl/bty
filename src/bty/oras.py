@@ -1,26 +1,53 @@
-"""GHCR / OCI registry adapter for fetching disk images.
+"""ORAS / OCI registry adapter for fetching disk images.
 
-Lets ``.bri`` descriptors point at GitHub Container Registry artefacts
-via a tiny URL scheme prefix. Operators write::
+Lets ``.bri`` descriptors point at OCI artefacts -- disk images
+published via ORAS_ (OCI Registry As Storage), *not* container
+images -- via a tiny URL scheme prefix. Operators write::
 
-    url = "ghcr:safl/nosi/debian-base:latest"
+    url = "oras://ghcr.io/safl/nosi/debian-base:latest"
 
 and bty resolves the tag to a manifest, picks the disk-image layer,
 and streams the blob to disk through the same flash pipeline used
 for plain HTTPS URLs. Digest-pinned references look like::
 
-    url = "ghcr:safl/nosi/debian-base@sha256:94e6..."
+    url = "oras://ghcr.io/safl/nosi/debian-base@sha256:94e6..."
 
 and skip the manifest fetch entirely -- the digest IS the address.
+
+Why ``oras://`` and not ``ghcr:``
+---------------------------------
+
+The ORAS spelling disambiguates from container references. A reader
+who sees ``ghcr.io/safl/nosi/debian-base:latest`` in a docs example
+might reach for ``docker pull`` or ``podman run`` -- which would
+fail and leave them confused, because nosi publishes disk-image
+artefacts, not runnable container images. ``oras://`` is the
+ecosystem term for OCI-Registry-As-Storage; an operator googling it
+lands at oras.land which explicitly explains "store arbitrary
+artefacts, not just containers". The ``://`` form also composes
+with other registries -- ``oras://quay.io/...``,
+``oras://registry.example.com:5000/...`` -- without per-registry
+schemes.
+
+.. _ORAS: https://oras.land/
 
 Auth
 ----
 
-GHCR returns 401 on every request even for public packages, but its
-``/token`` endpoint mints anonymous tokens on a plain credential-less
-GET. So the flow is: hit ``/token``, take the returned bearer, set
+Spec-compliant OCI v2 registries (GHCR included) return 401 on every
+request even for public packages. Their ``/token`` endpoint
+mints anonymous tokens on a plain credential-less GET. So the flow
+is: hit ``https://<host>/token``, take the returned bearer, set
 ``Authorization: Bearer`` on the manifest + blob requests. No
 registry login, no PAT, no secrets shipped.
+
+The token endpoint is built from the URL's host (``ghcr.io`` ->
+``https://ghcr.io/token``), which works for GHCR and any registry
+that follows the same convention. Registries with non-standard auth
+flows (private registries with custom realms, e.g.) would need the
+proper ``WWW-Authenticate`` challenge dance instead -- noted as
+future work; not needed for the homelab / nosi use case this module
+ships for.
 
 Layer picker
 ------------
@@ -44,9 +71,7 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any
 
-GHCR_SCHEME = "ghcr:"
-GHCR_HOST = "ghcr.io"
-GHCR_TOKEN_URL = f"https://{GHCR_HOST}/token"
+ORAS_SCHEME = "oras://"
 
 # Accept type covers OCI v1 + Docker v2 manifest media types so the
 # registry doesn't bounce us with a 406 if the package was originally
@@ -73,8 +98,8 @@ _SIDECAR_SUFFIXES = (
 )
 
 
-class GhcrError(Exception):
-    """Raised on parse / resolution / fetch errors against GHCR.
+class OrasError(Exception):
+    """Raised on parse / resolution / fetch errors against an OCI registry.
 
     Distinct from generic exceptions so callers can surface a friendly
     per-reference error without conflating it with unrelated network
@@ -82,8 +107,8 @@ class GhcrError(Exception):
 
 
 @dataclass(frozen=True)
-class GhcrRef:
-    """Parsed ``ghcr:`` reference.
+class OrasRef:
+    """Parsed ``oras://`` reference.
 
     Exactly one of ``tag`` / ``digest`` is set. ``digest`` references
     skip the manifest fetch (the digest is content-addressed, so the
@@ -91,6 +116,7 @@ class GhcrRef:
     manifest to resolve a layer digest first.
     """
 
+    host: str  # e.g. "ghcr.io" or "registry.example.com:5000"
     repository: str  # e.g. "safl/nosi/debian-base"
     tag: str | None = None
     digest: str | None = None
@@ -100,60 +126,80 @@ class GhcrRef:
         """Value used in the ``/manifests/<X>`` URL path."""
         if self.digest is not None:
             return self.digest
-        assert self.tag is not None, "GhcrRef must have either tag or digest set"
+        assert self.tag is not None, "OrasRef must have either tag or digest set"
         return self.tag
 
 
-# Repository: lowercase alnum + ``/_.-``, must contain at least one ``/``
-# (owner + repo). Tag: GitHub uses the OCI tag charset (alnum + ``._-``).
-# Digest: only sha256 today; future algorithms would need extending.
+# Host: DNS hostname (or registry.example.com:5000 with optional port).
+# Repository: lowercase alnum + ``/_.-``, must contain at least one
+# ``/`` after the host (owner + repo). Tag: OCI tag charset (alnum +
+# ``._-``). Digest: only sha256 today; future algorithms would need
+# extending. Layout overall::
+#
+#     <host>[:port]/<repo>(:<tag>|@sha256:<hex>)
+#
+# applied to the body after stripping the ``oras://`` scheme.
 _REF_RE = re.compile(
-    r"^(?P<repo>[a-z0-9][a-z0-9/_.-]*)"
+    r"^"
+    r"(?P<host>[a-zA-Z0-9][a-zA-Z0-9.-]*(?::[0-9]+)?)"
+    r"/"
+    r"(?P<repo>[a-z0-9][a-z0-9/_.-]*)"
     r"(?:(?:@(?P<digest>sha256:[0-9a-f]{64}))"
-    r"|(?::(?P<tag>[A-Za-z0-9._-]+)))$"
+    r"|(?::(?P<tag>[A-Za-z0-9._-]+)))"
+    r"$"
 )
 
 
-def parse_ref(ref: str) -> GhcrRef:
-    """Parse a ``ghcr:`` reference string into a :class:`GhcrRef`.
+def parse_ref(ref: str) -> OrasRef:
+    """Parse an ``oras://`` reference into a :class:`OrasRef`.
 
     Accepts the two canonical forms::
 
-        ghcr:owner/repo[/extra]:tag
-        ghcr:owner/repo[/extra]@sha256:<64-hex>
+        oras://<host>/<owner>/<repo>[/<extra>]:<tag>
+        oras://<host>/<owner>/<repo>[/<extra>]@sha256:<64-hex>
 
-    Raises :class:`GhcrError` on any malformed input. The repository
-    component must contain at least one ``/`` -- a bare top-level path
-    like ``ghcr:nosi:latest`` is rejected because GHCR's URL scheme
-    requires owner+repo.
+    Raises :class:`OrasError` on any malformed input. The repository
+    component must contain at least one ``/`` -- a bare top-level
+    path like ``oras://ghcr.io/nosi:latest`` is rejected because OCI's
+    URL scheme requires owner+repo under the host.
     """
-    if not ref.startswith(GHCR_SCHEME):
-        raise GhcrError(f"not a ghcr: reference: {ref!r}")
-    body = ref[len(GHCR_SCHEME) :]
+    if not ref.startswith(ORAS_SCHEME):
+        raise OrasError(f"not an oras:// reference: {ref!r}")
+    body = ref[len(ORAS_SCHEME) :]
     if not body:
-        raise GhcrError(f"empty ghcr: reference: {ref!r}")
+        raise OrasError(f"empty oras:// reference: {ref!r}")
     match = _REF_RE.match(body)
     if match is None:
-        raise GhcrError(
-            f"malformed ghcr: reference {ref!r}: "
-            f"expected ghcr:owner/repo:tag or ghcr:owner/repo@sha256:<hex>"
+        raise OrasError(
+            f"malformed oras:// reference {ref!r}: "
+            f"expected oras://<host>/<owner>/<repo>:<tag> or "
+            f"oras://<host>/<owner>/<repo>@sha256:<hex>"
         )
     repo = match.group("repo")
     if "/" not in repo:
-        raise GhcrError(f"ghcr: reference must include owner/repo: {ref!r} (got bare {repo!r})")
-    return GhcrRef(repository=repo, tag=match.group("tag"), digest=match.group("digest"))
+        raise OrasError(
+            f"oras:// reference must include <host>/<owner>/<repo>: "
+            f"{ref!r} (got bare repo {repo!r} after host)"
+        )
+    return OrasRef(
+        host=match.group("host"),
+        repository=repo,
+        tag=match.group("tag"),
+        digest=match.group("digest"),
+    )
 
 
-def fetch_anonymous_token(repository: str, *, timeout: float = 30.0) -> str:
+def fetch_anonymous_token(host: str, repository: str, *, timeout: float = 30.0) -> str:
     """Grab an anonymous bearer token for ``repository:pull``.
 
-    GHCR's ``/token`` endpoint accepts unauthenticated GETs for public
-    packages and returns a short-lived bearer in the response body. No
-    credentials, no PAT, no signup. The token scope is read-only and
-    repository-specific.
+    Spec-compliant OCI v2 registries (GHCR included) expose a
+    ``/token`` endpoint that accepts unauthenticated GETs for public
+    packages and returns a short-lived bearer in the response body.
+    No credentials, no PAT, no signup. The token scope is read-only
+    and repository-specific.
     """
     url = (
-        f"{GHCR_TOKEN_URL}?service={GHCR_HOST}"
+        f"https://{host}/token?service={host}"
         f"&scope=repository:{urllib.parse.quote(repository, safe='/')}:pull"
     )
     try:
@@ -165,25 +211,25 @@ def fetch_anonymous_token(repository: str, *, timeout: float = 30.0) -> str:
         # platforms; tests also patch in a plain ``OSError`` to
         # simulate "registry unreachable" without constructing a
         # full URLError.
-        raise GhcrError(f"ghcr token fetch failed for {repository}: {exc}") from exc
-    # GHCR returns ``token``; some registries spell it ``access_token``.
+        raise OrasError(f"oras token fetch failed for {host}/{repository}: {exc}") from exc
+    # OCI registries return ``token``; some spell it ``access_token``.
     token = payload.get("token") or payload.get("access_token")
     if not isinstance(token, str) or not token:
-        raise GhcrError(
-            f"ghcr token response for {repository} did not contain a token "
-            f"(keys: {sorted(payload.keys())})"
+        raise OrasError(
+            f"oras token response for {host}/{repository} did not contain "
+            f"a token (keys: {sorted(payload.keys())})"
         )
     return token
 
 
-def fetch_manifest(ref: GhcrRef, token: str, *, timeout: float = 30.0) -> dict[str, Any]:
+def fetch_manifest(ref: OrasRef, token: str, *, timeout: float = 30.0) -> dict[str, Any]:
     """Fetch the OCI manifest for ``ref`` using a previously-acquired token.
 
-    Returns the parsed JSON. Raises :class:`GhcrError` on network or
+    Returns the parsed JSON. Raises :class:`OrasError` on network or
     parse failure. The caller is responsible for layer selection.
     """
     locator = urllib.parse.quote(ref.manifest_locator, safe=":")
-    url = f"https://{GHCR_HOST}/v2/{ref.repository}/manifests/{locator}"
+    url = f"https://{ref.host}/v2/{ref.repository}/manifests/{locator}"
     request = urllib.request.Request(
         url,
         headers={
@@ -195,12 +241,15 @@ def fetch_manifest(ref: GhcrRef, token: str, *, timeout: float = 30.0) -> dict[s
         with urllib.request.urlopen(request, timeout=timeout) as resp:
             payload = json.loads(resp.read())
     except (OSError, json.JSONDecodeError, ValueError) as exc:
-        raise GhcrError(
-            f"ghcr manifest fetch failed for {ref.repository}:{ref.manifest_locator}: {exc}"
+        raise OrasError(
+            f"oras manifest fetch failed for "
+            f"{ref.host}/{ref.repository}:{ref.manifest_locator}: {exc}"
         ) from exc
     if not isinstance(payload, dict):
-        raise GhcrError(
-            f"ghcr manifest for {ref.repository}:{ref.manifest_locator} is not a JSON object"
+        raise OrasError(
+            f"oras manifest for "
+            f"{ref.host}/{ref.repository}:{ref.manifest_locator} "
+            f"is not a JSON object"
         )
     return payload
 
@@ -221,11 +270,11 @@ def pick_image_layer(manifest: dict[str, Any]) -> dict[str, Any]:
     annotations falls through to the largest layer overall -- the image
     bytes will dwarf any metadata blob in practice.
 
-    Raises :class:`GhcrError` if the manifest has no layers at all.
+    Raises :class:`OrasError` if the manifest has no layers at all.
     """
     layers = manifest.get("layers")
     if not isinstance(layers, list) or not layers:
-        raise GhcrError("manifest has no layers")
+        raise OrasError("manifest has no layers")
 
     image_like: list[dict[str, Any]] = []
     for layer in layers:
@@ -240,7 +289,7 @@ def pick_image_layer(manifest: dict[str, Any]) -> dict[str, Any]:
     # so the size-pick still has something to choose from.
     candidates = image_like or [layer for layer in layers if isinstance(layer, dict)]
     if not candidates:
-        raise GhcrError("manifest has no usable layers")
+        raise OrasError("manifest has no usable layers")
     return max(candidates, key=lambda layer: layer.get("size") or 0)
 
 
@@ -263,9 +312,9 @@ class ResolvedBlob:
     title: str | None
 
 
-def resolve_ref(ref: str | GhcrRef, *, timeout: float = 30.0) -> ResolvedBlob:
-    """Resolve a ``ghcr:`` reference (or pre-parsed :class:`GhcrRef`) to a
-    :class:`ResolvedBlob`.
+def resolve_ref(ref: str | OrasRef, *, timeout: float = 30.0) -> ResolvedBlob:
+    """Resolve an ``oras://`` reference (or pre-parsed :class:`OrasRef`)
+    to a :class:`ResolvedBlob`.
 
     For tag references: anonymous token -> manifest -> layer pick ->
     ``ResolvedBlob`` with the layer's content-addressed digest. The
@@ -279,7 +328,7 @@ def resolve_ref(ref: str | GhcrRef, *, timeout: float = 30.0) -> ResolvedBlob:
     """
     if isinstance(ref, str):
         ref = parse_ref(ref)
-    token = fetch_anonymous_token(ref.repository, timeout=timeout)
+    token = fetch_anonymous_token(ref.host, ref.repository, timeout=timeout)
     headers = {"Authorization": f"Bearer {token}"}
 
     if ref.digest is not None:
@@ -291,8 +340,9 @@ def resolve_ref(ref: str | GhcrRef, *, timeout: float = 30.0) -> ResolvedBlob:
         layer = pick_image_layer(manifest)
         raw_digest = layer.get("digest")
         if not isinstance(raw_digest, str) or not raw_digest.startswith("sha256:"):
-            raise GhcrError(
-                f"picked layer for {ref.repository}:{ref.manifest_locator} "
+            raise OrasError(
+                f"picked layer for "
+                f"{ref.host}/{ref.repository}:{ref.manifest_locator} "
                 f"has unusable digest {raw_digest!r}"
             )
         digest = raw_digest
@@ -300,7 +350,7 @@ def resolve_ref(ref: str | GhcrRef, *, timeout: float = 30.0) -> ResolvedBlob:
         size = layer_size if isinstance(layer_size, int) else None
         title = _layer_title(layer) or None
 
-    blob_url = f"https://{GHCR_HOST}/v2/{ref.repository}/blobs/{digest}"
+    blob_url = f"https://{ref.host}/v2/{ref.repository}/blobs/{digest}"
     return ResolvedBlob(
         blob_url=blob_url,
         headers=headers,
@@ -310,6 +360,6 @@ def resolve_ref(ref: str | GhcrRef, *, timeout: float = 30.0) -> ResolvedBlob:
     )
 
 
-def is_ghcr_url(url: str) -> bool:
-    """True iff ``url`` is a ``ghcr:`` reference rather than http(s)://."""
-    return url.startswith(GHCR_SCHEME)
+def is_oras_url(url: str) -> bool:
+    """True iff ``url`` is an ``oras://`` reference rather than http(s)://."""
+    return url.startswith(ORAS_SCHEME)

@@ -335,23 +335,34 @@ def test_read_bri_missing_url_raises(tmp_path: Path) -> None:
 
 def test_read_bri_rejects_non_http_url(tmp_path: Path) -> None:
     """A bare hostname or ``ftp://`` URL would silently break flash;
-    require an explicit supported scheme (http, https, or ghcr:)."""
+    require an explicit supported scheme (http, https, or oras://)."""
     bri = tmp_path / "bad.bri"
     bri.write_text('url = "ftp://example.invalid/x.img.gz"\n')
-    with pytest.raises(images.BriError, match="ghcr"):
+    with pytest.raises(images.BriError, match="oras"):
         images.read_bri(bri)
 
 
-def test_read_bri_accepts_ghcr_url(tmp_path: Path) -> None:
-    """``ghcr:`` URLs resolve through bty's GHCR adapter at flash
+def test_read_bri_accepts_oras_url(tmp_path: Path) -> None:
+    """``oras://`` URLs resolve through bty's ORAS adapter at flash
     time. ``read_bri`` should accept them and default ``format`` to
     ``img.gz`` (nosi's publishing convention) when no extension can
     be derived from the URL."""
-    bri = tmp_path / "ghcr.bri"
-    bri.write_text('url = "ghcr:safl/nosi/debian-base:latest"\nname = "nosi debian"\n')
+    bri = tmp_path / "oras.bri"
+    bri.write_text('url = "oras://ghcr.io/safl/nosi/debian-base:latest"\nname = "nosi debian"\n')
     remote = images.read_bri(bri)
-    assert remote.url == "ghcr:safl/nosi/debian-base:latest"
+    assert remote.url == "oras://ghcr.io/safl/nosi/debian-base:latest"
     assert remote.format == "img.gz"
+
+
+def test_read_bri_rejects_pre_rename_ghcr_scheme(tmp_path: Path) -> None:
+    """The bare ``ghcr:`` scheme (pre-v0.8.6 rename) is intentionally
+    NOT accepted -- it was easy to confuse with a container reference
+    that operators might ``docker pull``. Operators must use the
+    explicit ``oras://`` form instead."""
+    bri = tmp_path / "old.bri"
+    bri.write_text('url = "ghcr:safl/nosi/debian-base:latest"\n')
+    with pytest.raises(images.BriError, match="oras"):
+        images.read_bri(bri)
 
 
 def test_read_bri_rejects_empty_name(tmp_path: Path) -> None:

@@ -34,7 +34,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import IO, Any, TypeAlias
 
-from bty import ghcr, images
+from bty import images, oras
 
 
 @dataclass
@@ -236,10 +236,10 @@ def probe_image(path: Path) -> ImageInfo:
 
 
 def probe_image_url(url: str) -> ImageInfo:
-    """Inspect an image at an HTTP/HTTPS or ``ghcr:`` URL.
+    """Inspect an image at an HTTP/HTTPS or ``oras://`` URL.
 
     For http(s): HEAD request, format from URL path, size from
-    ``Content-Length``. For ``ghcr:`` refs: resolve via :mod:`bty.ghcr`
+    ``Content-Length``. For ``oras://`` refs: resolve via :mod:`bty.oras`
     to a manifest layer, format inferred from the layer's title
     annotation (or ``img.gz`` default), size from the manifest's layer
     size. Virtual size (what gets written to disk) can only be
@@ -250,10 +250,10 @@ def probe_image_url(url: str) -> ImageInfo:
 
     Raises ``FileNotFoundError`` if the server doesn't respond or
     returns 4xx / 5xx for the HEAD (http) or any registry call
-    (ghcr). Raises ``ValueError`` on an unsupported scheme.
+    (oras). Raises ``ValueError`` on an unsupported scheme.
     """
-    if ghcr.is_ghcr_url(url):
-        return _probe_image_url_ghcr(url)
+    if oras.is_oras_url(url):
+        return _probe_image_url_oras(url)
 
     import urllib.error
     import urllib.parse
@@ -261,7 +261,7 @@ def probe_image_url(url: str) -> ImageInfo:
 
     parsed = urllib.parse.urlparse(url)
     if parsed.scheme not in ("http", "https"):
-        raise ValueError(f"image URL must be http, https, or ghcr: {url}")
+        raise ValueError(f"image URL must be http, https, or oras: {url}")
     filename = Path(parsed.path).name or "image"
     fmt = images.detect_format(Path(filename))
 
@@ -288,23 +288,23 @@ def probe_image_url(url: str) -> ImageInfo:
     )
 
 
-def _probe_image_url_ghcr(url: str) -> ImageInfo:
-    """Probe a ``ghcr:`` reference by resolving it to a manifest layer.
+def _probe_image_url_oras(url: str) -> ImageInfo:
+    """Probe an ``oras://`` reference by resolving it to a manifest layer.
 
     Caller already verified the scheme. Format comes from the layer's
     title annotation (e.g. ``nosi-debian-base-x86_64.img.gz`` ->
     ``img.gz``); falls back to ``img.gz`` if no usable title (nosi's
-    publishing convention and the practical default for GHCR-hosted
+    publishing convention and the practical default for OCI-hosted
     disk images). Virtual size stays ``None`` -- determining it from
     a compressed blob would require pulling the whole image.
     """
     try:
-        resolved = ghcr.resolve_ref(url)
-    except ghcr.GhcrError as exc:
+        resolved = oras.resolve_ref(url)
+    except oras.OrasError as exc:
         # Re-raise as FileNotFoundError so the CLI's existing
         # "image URL not reachable" path handles it uniformly with
         # plain HTTP failures.
-        raise FileNotFoundError(f"ghcr ref not resolvable: {url} ({exc})") from exc
+        raise FileNotFoundError(f"oras ref not resolvable: {url} ({exc})") from exc
     fmt = images.detect_format(Path(resolved.title)) if resolved.title else "img.gz"
     return ImageInfo(
         path=None,
@@ -833,17 +833,17 @@ _CURL_BASE = ("curl", "-fSL", "--retry", "3", "--retry-connrefused")
 def _curl_args_for_source(url: str) -> tuple[list[str], int | None]:
     """Build curl arguments for a fetch source.
 
-    Plain http(s) URLs pass through unchanged. ``ghcr:`` references go
-    through :mod:`bty.ghcr` to resolve the manifest layer, and the
+    Plain http(s) URLs pass through unchanged. ``oras://`` references
+    go through :mod:`bty.oras` to resolve the manifest layer, and the
     resulting bearer token is injected as a ``-H Authorization``
     header on the curl call. Returns ``(argv, expected_size_or_None)``
     -- the size is the manifest's declared layer size when known, so
     callers can use it as a fallback ``total_bytes`` when HEAD wasn't
     run beforehand.
     """
-    if not ghcr.is_ghcr_url(url):
+    if not oras.is_oras_url(url):
         return [*_CURL_BASE, url], None
-    resolved = ghcr.resolve_ref(url)
+    resolved = oras.resolve_ref(url)
     args = [*_CURL_BASE]
     for header_name, header_value in resolved.headers.items():
         args.extend(["-H", f"{header_name}: {header_value}"])

@@ -309,13 +309,13 @@ def test_usb_iso_build_starter_bris_parse_as_toml() -> None:
 
     # Each body must parse as TOML, declare a url, and round-trip
     # through read_bri without raising. nosi entries should use
-    # ``ghcr:``; the bty-server entry should use https.
+    # ``oras://ghcr.io/``; the bty-server entry should use https.
     for filename, body in starter:
         parsed = tomllib.loads(body)
         assert "url" in parsed, f"{filename}: missing url"
         if filename.startswith("nosi-"):
-            assert parsed["url"].startswith("ghcr:safl/nosi/"), (
-                f"{filename}: expected ghcr: URL, got {parsed['url']!r}"
+            assert parsed["url"].startswith("oras://ghcr.io/safl/nosi/"), (
+                f"{filename}: expected oras://ghcr.io/ URL, got {parsed['url']!r}"
             )
         else:
             assert parsed["url"].startswith("https://github.com/safl/bty/releases/"), (
