@@ -52,6 +52,7 @@ import json
 import logging as log
 import os
 import shutil
+import tempfile
 from argparse import ArgumentParser
 from pathlib import Path
 
@@ -701,11 +702,8 @@ def _extend_with_exfat(cijoe, iso_path: Path) -> int:
         return err
 
     # Drop a starter set of ``.bri`` descriptors into BTY_IMAGES so a
-    # fresh stick boots with something flashable in the catalog. v0.8.5
-    # re-introduced this after v0.8.4 shipped empty: the TUI's ``i``
-    # keybinding only flashes the bty-server appliance, but operators
-    # also want one-click access to the nosi sysdev images (Debian /
-    # Ubuntu / Fedora). The four entries are:
+    # fresh stick boots with something flashable in the catalog. The
+    # four entries are:
     #
     # - 3x nosi sysdev images via ``oras://ghcr.io/safl/nosi/<variant>:latest``,
     #   resolved by bty's ORAS adapter to the current published layer
@@ -713,11 +711,17 @@ def _extend_with_exfat(cijoe, iso_path: Path) -> int:
     # - 1x bty-server appliance via the GitHub release asset URL
     #   (the bty-server image is built here, not in nosi).
     #
-    # Best-effort: if exfat mount fails on this build runner (some
-    # minimal CI images lack the kernel module + fuse fallback), we
-    # log a warning and ship the partition empty. The TUI's ``i``
-    # shortcut still provides the bty-server bootstrap path.
-    _populate_bty_images_partition(cijoe, part_dev)
+    # Fail-loud: if the populate step fails (mount failure, write
+    # failure, exfat-fuse missing on the runner), the whole bake
+    # fails. Earlier v0.7.x / v0.8.6 / v0.8.7 sticks silently shipped
+    # empty when the mount fell through to the "best-effort warning"
+    # path; we'd rather lose the build artifact than ship another
+    # broken stick. The detection mechanism the v0.7.16 hardening
+    # added has to stay live in every subsequent version.
+    err = _populate_bty_images_partition(cijoe, part_dev)
+    if err:
+        cijoe.run_local(f"sudo losetup -d {loop}")
+        return err
 
     err, _ = cijoe.run_local(f"sudo losetup -d {loop}")
     if err:
@@ -801,37 +805,90 @@ _STARTER_BRIS: tuple[tuple[str, str], ...] = (
 )
 
 
-def _populate_bty_images_partition(cijoe, part_dev: str) -> None:
-    """Mount the freshly-mkfs'd BTY_IMAGES exFAT partition and drop the
-    starter ``.bri`` set into it.
+def _populate_bty_images_partition(cijoe, part_dev: str) -> int:
+    """Mount the freshly-mkfs'd BTY_IMAGES exFAT partition and drop
+    the starter ``.bri`` set into it. Returns 0 on success, errno-
+    style int on failure.
 
-    Best-effort: a mount failure logs a warning and returns. The
-    partition stays empty in that case -- same UX as v0.8.4 sticks,
-    with the TUI's ``i`` keybinding still providing the bty-server
-    bootstrap path. Common failure case is a CI runner without exFAT
-    kernel module + ``fuse-exfat`` fallback; modern GHA runners ship
-    both.
+    Hardened against the silent-empty-partition failure mode that
+    v0.7.9 .. v0.7.15 and again v0.8.5 .. v0.8.7 shipped:
+
+    - Each .bri body is staged locally to a tempfile *before* mount,
+      then ``sudo cp``'d in. Avoids heredoc-via-cijoe-shell quoting
+      semantics, which were the prime suspect for the silent empty-
+      partition bug (whatever shell ``cijoe.run_local`` uses,
+      ``cp src dst`` is unambiguous).
+    - Kernel ``mount -t exfat`` first; fall back to
+      ``mount.exfat-fuse`` when the kernel module isn't loadable on
+      the runner. release.yml's apt step installs both.
+    - Explicit ``sync <path>`` after each write so a subsequent
+      ``losetup -d`` (or kernel buffer dirty-on-detach quirk) can't
+      drop the bytes.
+    - ``ls`` + ``cat`` of each written file land in the bake log so
+      a silent zero-byte write can't pass the next CI bake either.
+    - Errno-style return propagates upward so the whole bake fails
+      rather than shipping a partition with broken .bri pointers.
     """
-    mount_dir = "/tmp/bty-images-bake"
-    cijoe.run_local(f"sudo mkdir -p {mount_dir}")
+    # Stage every .bri body as a tempfile *now*, before mount. If
+    # any of these fail we haven't touched the loop device yet.
+    staged: list[tuple[str, Path]] = []
+    for filename, body in _STARTER_BRIS:
+        fd, name = tempfile.mkstemp(prefix=f"{filename}.", suffix=".tmp")
+        os.close(fd)
+        src_path = Path(name)
+        src_path.write_text(body)
+        staged.append((filename, src_path))
+
+    # ``mktemp -d`` for the mountpoint over a hardcoded path so
+    # parallel bake runs (CI matrix, two operators on one box) don't
+    # collide on it.
+    err, state = cijoe.run_local("mktemp -d -t bty-images-bake.XXXXXX")
+    if err:
+        log.error("mktemp -d failed; cannot populate BTY_IMAGES partition")
+        for _, src in staged:
+            src.unlink(missing_ok=True)
+        return errno.EIO
+    mount_dir = state.output().strip().splitlines()[-1].strip()
+
+    # Try kernel exfat first; fall back to fuse-exfat. GHA's
+    # ubuntu-latest carries the kernel module on most images; some
+    # minimal images need the fuse helper instead. release.yml's
+    # apt step installs both ``exfatprogs`` (mkfs.exfat) and
+    # ``exfat-fuse`` (mount.exfat-fuse) so both paths are present.
     err, _ = cijoe.run_local(f"sudo mount -t exfat {part_dev} {mount_dir}")
     if err:
-        log.warning(
-            f"could not mount {part_dev} as exfat at {mount_dir}; "
-            "BTY_IMAGES will ship empty (TUI ``i`` shortcut still bootstraps bty-server)"
+        err, _ = cijoe.run_local(f"sudo mount.exfat-fuse {part_dev} {mount_dir}")
+    if err:
+        log.error(
+            f"could not mount {part_dev} as exfat ({mount_dir}); "
+            "BTY_IMAGES populate FAILED -- check exfat / exfat-fuse on the bake runner"
         )
-        cijoe.run_local(f"sudo rmdir {mount_dir} 2>/dev/null || true")
-        return
+        cijoe.run_local(f"rmdir {mount_dir} 2>/dev/null || true")
+        for _, src in staged:
+            src.unlink(missing_ok=True)
+        return errno.ENODEV
+
     try:
-        for filename, body in _STARTER_BRIS:
+        for filename, src_path in staged:
             bri_path = f"{mount_dir}/{filename}"
-            # ``tee`` is the simplest sudo-write idiom; here-string
-            # keeps quoting straight without a temp file.
-            err, _ = cijoe.run_local(f"sudo tee {bri_path} > /dev/null <<'EOF'\n{body}EOF\n")
+            err, _ = cijoe.run_local(f"sudo cp {src_path} {bri_path}")
             if err:
-                log.warning(f"writing {bri_path} failed; continuing with remaining .bri files")
-                continue
+                log.error(f"cp {src_path} -> {bri_path} failed")
+                return errno.EIO
+            err, _ = cijoe.run_local(f"sudo sync {bri_path}")
+            if err:
+                log.error(f"sync {bri_path} failed")
+                return errno.EIO
             log.info(f"Wrote starter .bri to BTY_IMAGES: {filename}")
+        # Visible verification in the bake log so a silent zero-byte
+        # write or wrong-file-count can't pass the next CI bake.
+        cijoe.run_local(f"ls -la {mount_dir}")
+        for filename, _ in staged:
+            cijoe.run_local(f"sudo cat {mount_dir}/{filename}")
+        return 0
     finally:
+        # Always umount + drop tempdir + drop the staged source files.
         cijoe.run_local(f"sudo umount {mount_dir}")
-        cijoe.run_local(f"sudo rmdir {mount_dir} 2>/dev/null || true")
+        cijoe.run_local(f"rmdir {mount_dir} 2>/dev/null || true")
+        for _, src in staged:
+            src.unlink(missing_ok=True)
