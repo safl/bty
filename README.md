@@ -25,8 +25,10 @@ bty is a flasher, not an image builder:
 - **Image creation is somebody else's project.** First-boot bring-up
   (users, network, packages, hostnames) gets baked into the image
   upstream with cloud-init / kickstart / preseed / your favourite
-  image builder. Use the [companion image-builder](https://github.com/safl/jellyfin-kiosk-appliance-builder)
-  pattern, or your own. bty just writes the bytes.
+  image builder. Use the [companion image-builder](https://github.com/safl/nosi)
+  (`safl/nosi` -- builds Debian / Ubuntu / Fedora base images and
+  publishes them to GHCR as ORAS artefacts that bty flashes via
+  `oras://`), or your own. bty just writes the bytes.
 - **No post-boot configuration management either.** Anything that
   needs to be true on the running target (users, hostnames, config
   files, packages) belongs in the image builder, not in bty. The server
