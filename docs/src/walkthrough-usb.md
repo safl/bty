@@ -114,9 +114,9 @@ A fresh stick already ships with four starter `.bri` (bty Remote
 Image) descriptors on the `BTY_IMAGES` partition, so you can flash
 without copying anything onto the stick first:
 
-- `nosi-debian-base-x86_64.bri` -- Debian 13 cloud image
-- `nosi-ubuntu-base-x86_64.bri` -- Ubuntu 26.04 LTS cloud image
-- `nosi-fedora-base-x86_64.bri` -- Fedora 44 cloud image
+- `nosi-debian-sysdev-x86_64.bri` -- Debian 13 trixie sysdev image
+- `nosi-ubuntu-sysdev-x86_64.bri` -- Ubuntu 26.04 LTS resolute sysdev image
+- `nosi-fedora-sysdev-x86_64.bri` -- Fedora 44 sysdev image
 - `bty-server-x86_64.bri` -- latest bty-server appliance
 
 All three nosi entries use `oras://ghcr.io/safl/nosi/<variant>:latest`,

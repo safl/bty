@@ -28,14 +28,14 @@ _NOSI_MANIFEST: dict[str, Any] = {
             "mediaType": "application/vnd.nosi.disk-image.layer.v1+gzip",
             "digest": "sha256:" + "aa" * 32,
             "size": 1923658046,
-            "annotations": {"org.opencontainers.image.title": "nosi-debian-base-x86_64.img.gz"},
+            "annotations": {"org.opencontainers.image.title": "nosi-debian-sysdev-x86_64.img.gz"},
         },
         {
             "mediaType": "text/plain",
             "digest": "sha256:" + "bb" * 32,
             "size": 130,
             "annotations": {
-                "org.opencontainers.image.title": "nosi-debian-base-x86_64.img.gz.sha256"
+                "org.opencontainers.image.title": "nosi-debian-sysdev-x86_64.img.gz.sha256"
             },
         },
     ],
@@ -46,9 +46,9 @@ _NOSI_MANIFEST: dict[str, Any] = {
 
 
 def test_parse_ref_tag_form() -> None:
-    ref = oras.parse_ref("oras://ghcr.io/safl/nosi/debian-base:latest")
+    ref = oras.parse_ref("oras://ghcr.io/safl/nosi/debian-sysdev:latest")
     assert ref.host == "ghcr.io"
-    assert ref.repository == "safl/nosi/debian-base"
+    assert ref.repository == "safl/nosi/debian-sysdev"
     assert ref.tag == "latest"
     assert ref.digest is None
     assert ref.manifest_locator == "latest"
@@ -56,9 +56,9 @@ def test_parse_ref_tag_form() -> None:
 
 def test_parse_ref_digest_form() -> None:
     digest = "sha256:" + "ab" * 32
-    ref = oras.parse_ref(f"oras://ghcr.io/safl/nosi/debian-base@{digest}")
+    ref = oras.parse_ref(f"oras://ghcr.io/safl/nosi/debian-sysdev@{digest}")
     assert ref.host == "ghcr.io"
-    assert ref.repository == "safl/nosi/debian-base"
+    assert ref.repository == "safl/nosi/debian-sysdev"
     assert ref.tag is None
     assert ref.digest == digest
     assert ref.manifest_locator == digest
@@ -99,14 +99,14 @@ def test_parse_ref_rejects_empty_body() -> None:
 def test_parse_ref_rejects_missing_tag_and_digest() -> None:
     """Tagless / digestless refs aren't pullable; reject."""
     with pytest.raises(oras.OrasError, match="malformed"):
-        oras.parse_ref("oras://ghcr.io/safl/nosi/debian-base")
+        oras.parse_ref("oras://ghcr.io/safl/nosi/debian-sysdev")
 
 
 def test_parse_ref_rejects_short_digest() -> None:
     """sha256 digests must be 64 hex chars; partial digests would
     silently mis-address the blob."""
     with pytest.raises(oras.OrasError, match="malformed"):
-        oras.parse_ref("oras://ghcr.io/safl/nosi/debian-base@sha256:abc123")
+        oras.parse_ref("oras://ghcr.io/safl/nosi/debian-sysdev@sha256:abc123")
 
 
 # ---------- pick_image_layer --------------------------------------------------
@@ -115,7 +115,7 @@ def test_parse_ref_rejects_short_digest() -> None:
 def test_pick_image_layer_skips_sha256_sidecar() -> None:
     layer = oras.pick_image_layer(_NOSI_MANIFEST)
     title = layer["annotations"]["org.opencontainers.image.title"]
-    assert title == "nosi-debian-base-x86_64.img.gz"
+    assert title == "nosi-debian-sysdev-x86_64.img.gz"
     assert not title.endswith(".sha256")
 
 
@@ -189,11 +189,13 @@ def _make_urlopen_mock(token: str = "anon-token-xyz"):
 
 def test_resolve_ref_tag_resolves_to_layer_digest() -> None:
     with patch("urllib.request.urlopen", _make_urlopen_mock()):
-        resolved = oras.resolve_ref("oras://ghcr.io/safl/nosi/debian-base:latest")
+        resolved = oras.resolve_ref("oras://ghcr.io/safl/nosi/debian-sysdev:latest")
     assert resolved.digest == "sha256:" + "aa" * 32
     assert resolved.size == 1923658046
-    assert resolved.title == "nosi-debian-base-x86_64.img.gz"
-    assert resolved.blob_url == f"https://ghcr.io/v2/safl/nosi/debian-base/blobs/sha256:{'aa' * 32}"
+    assert resolved.title == "nosi-debian-sysdev-x86_64.img.gz"
+    assert (
+        resolved.blob_url == f"https://ghcr.io/v2/safl/nosi/debian-sysdev/blobs/sha256:{'aa' * 32}"
+    )
     assert resolved.headers == {"Authorization": "Bearer anon-token-xyz"}
 
 
@@ -217,12 +219,12 @@ def test_resolve_ref_digest_skips_manifest() -> None:
 
     digest = "sha256:" + "cd" * 32
     with patch("urllib.request.urlopen", _strict_urlopen):
-        resolved = oras.resolve_ref(f"oras://ghcr.io/safl/nosi/debian-base@{digest}")
+        resolved = oras.resolve_ref(f"oras://ghcr.io/safl/nosi/debian-sysdev@{digest}")
     assert resolved.digest == digest
     assert resolved.size is None  # unknown without the manifest
     assert resolved.title is None
     # Blob URL still builds correctly even without a manifest fetch.
-    assert resolved.blob_url == f"https://ghcr.io/v2/safl/nosi/debian-base/blobs/{digest}"
+    assert resolved.blob_url == f"https://ghcr.io/v2/safl/nosi/debian-sysdev/blobs/{digest}"
 
 
 def test_resolve_ref_uses_host_from_url_in_token_endpoint() -> None:
@@ -262,12 +264,12 @@ def test_resolve_ref_propagates_token_failure() -> None:
         patch("urllib.request.urlopen", _failing_urlopen),
         pytest.raises(oras.OrasError, match="token fetch failed"),
     ):
-        oras.resolve_ref("oras://ghcr.io/safl/nosi/debian-base:latest")
+        oras.resolve_ref("oras://ghcr.io/safl/nosi/debian-sysdev:latest")
 
 
 def test_is_oras_url() -> None:
-    assert oras.is_oras_url("oras://ghcr.io/safl/nosi/debian-base:latest")
-    assert not oras.is_oras_url("https://ghcr.io/v2/safl/nosi/debian-base/blobs/sha256:x")
+    assert oras.is_oras_url("oras://ghcr.io/safl/nosi/debian-sysdev:latest")
+    assert not oras.is_oras_url("https://ghcr.io/v2/safl/nosi/debian-sysdev/blobs/sha256:x")
     assert not oras.is_oras_url("https://example.invalid/x.img.gz")
     # ``ghcr:`` was the pre-rename scheme; should NOT be recognised.
-    assert not oras.is_oras_url("ghcr:safl/nosi/debian-base:latest")
+    assert not oras.is_oras_url("ghcr:safl/nosi/debian-sysdev:latest")

@@ -301,9 +301,9 @@ def test_usb_iso_build_starter_bris_parse_as_toml() -> None:
 
     names = {filename for filename, _ in starter}
     assert names == {
-        "nosi-debian-base-x86_64.bri",
-        "nosi-ubuntu-base-x86_64.bri",
-        "nosi-fedora-base-x86_64.bri",
+        "nosi-debian-sysdev-x86_64.bri",
+        "nosi-ubuntu-sysdev-x86_64.bri",
+        "nosi-fedora-sysdev-x86_64.bri",
         "bty-server-x86_64.bri",
     }
 

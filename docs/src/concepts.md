@@ -63,7 +63,7 @@ partition is *not* under the live-boot SquashFS+tmpfs overlay, so
 files copied there persist on the stick.
 
 Fresh sticks ship with four starter `.bri` files already on the
-partition: three nosi base images via the `oras://ghcr.io/...`
+partition: three nosi sysdev images via the `oras://ghcr.io/...`
 scheme (rolling `:latest` tags resolved to content-addressed
 layer digests at flash time) and the latest bty-server appliance
 via a GitHub release URL. See [`reference.md`](reference.md) for

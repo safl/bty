@@ -26,7 +26,7 @@ bty is a flasher, not an image builder:
   (users, network, packages, hostnames) gets baked into the image
   upstream with cloud-init / kickstart / preseed / your favourite
   image builder. Use the [companion image-builder](https://github.com/safl/nosi)
-  (`safl/nosi` -- builds Debian / Ubuntu / Fedora base images and
+  (`safl/nosi` -- builds Debian / Ubuntu / Fedora sysdev images and
   publishes them to GHCR as ORAS artefacts that bty flashes via
   `oras://`), or your own. bty just writes the bytes.
 - **No post-boot configuration management either.** Anything that
@@ -50,7 +50,7 @@ curl -X PUT http://bty-server:8080/machines/aa:bb:cc:dd:ee:ff \
 
 | Shape | What it is | When it fits |
 |---|---|---|
-| **USB live stick** | bty boots from a flash drive, runs `bty tui`, flashes the box it's plugged into. Fresh sticks ship with four starter `.bri` pointers (Debian / Ubuntu / Fedora base images via `oras://ghcr.io/safl/nosi/...`, plus bty-server) so the catalog is non-empty out of the box. | Single-machine local imaging |
+| **USB live stick** | bty boots from a flash drive, runs `bty tui`, flashes the box it's plugged into. Fresh sticks ship with four starter `.bri` pointers (Debian / Ubuntu / Fedora sysdev images via `oras://ghcr.io/safl/nosi/...`, plus bty-server) so the catalog is non-empty out of the box. | Single-machine local imaging |
 | **USB + server catalog** | Same stick, but the operator presses `c` in the TUI and the image list comes from a running `bty-web` over HTTP | A handful of boxes, shared image library |
 | **PXE-boot appliance** | bty-web on a Pi or x86 box runs DHCP/TFTP/HTTP; targets PXE-chain into a netboot live env that flashes them unattended | CI fleets, racks, anything you don't want to walk to |
 

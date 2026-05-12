@@ -4,13 +4,13 @@ Lets ``.bri`` descriptors point at OCI artefacts -- disk images
 published via ORAS_ (OCI Registry As Storage), *not* container
 images -- via a tiny URL scheme prefix. Operators write::
 
-    url = "oras://ghcr.io/safl/nosi/debian-base:latest"
+    url = "oras://ghcr.io/safl/nosi/debian-sysdev:latest"
 
 and bty resolves the tag to a manifest, picks the disk-image layer,
 and streams the blob to disk through the same flash pipeline used
 for plain HTTPS URLs. Digest-pinned references look like::
 
-    url = "oras://ghcr.io/safl/nosi/debian-base@sha256:94e6..."
+    url = "oras://ghcr.io/safl/nosi/debian-sysdev@sha256:94e6..."
 
 and skip the manifest fetch entirely -- the digest IS the address.
 
@@ -18,7 +18,7 @@ Why ``oras://`` and not ``ghcr:``
 ---------------------------------
 
 The ORAS spelling disambiguates from container references. A reader
-who sees ``ghcr.io/safl/nosi/debian-base:latest`` in a docs example
+who sees ``ghcr.io/safl/nosi/debian-sysdev:latest`` in a docs example
 might reach for ``docker pull`` or ``podman run`` -- which would
 fail and leave them confused, because nosi publishes disk-image
 artefacts, not runnable container images. ``oras://`` is the
@@ -117,7 +117,7 @@ class OrasRef:
     """
 
     host: str  # e.g. "ghcr.io" or "registry.example.com:5000"
-    repository: str  # e.g. "safl/nosi/debian-base"
+    repository: str  # e.g. "safl/nosi/debian-sysdev"
     tag: str | None = None
     digest: str | None = None
 

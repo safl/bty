@@ -147,17 +147,17 @@ stored as OCI blobs:
 
 ```toml
 # rolling tag, bty resolves :latest to the current layer digest at flash time
-url = "oras://ghcr.io/safl/nosi/debian-base:latest"
+url = "oras://ghcr.io/safl/nosi/debian-sysdev:latest"
 
 # digest-pinned: same blob forever, no manifest fetch
-url = "oras://ghcr.io/safl/nosi/debian-base@sha256:94e6..."
+url = "oras://ghcr.io/safl/nosi/debian-sysdev@sha256:94e6..."
 ```
 
 Any OCI v2 registry following the GHCR anonymous-pull convention
 works (``oras://quay.io/...``, ``oras://registry.example.com:5000/...``);
 GHCR is the one exercised in the starter set. Fresh USB sticks
 ship with four such .bri files pre-staged on the BTY_IMAGES
-partition (three nosi base images plus the bty-server appliance).
+partition (three nosi sysdev images plus the bty-server appliance).
 
 To install ``bty-server`` specifically, no ``.bri`` is needed:
 ``bty tui`` has an ``i`` keybinding that flashes the latest

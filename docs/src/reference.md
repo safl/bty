@@ -159,15 +159,15 @@ The `url` field accepts three schemes:
 
 ```toml
 # rolling tag, bty pins to current digest at flash time
-url = "oras://ghcr.io/safl/nosi/debian-base:latest"
+url = "oras://ghcr.io/safl/nosi/debian-sysdev:latest"
 
 # digest-pinned, skips the manifest fetch
-url = "oras://ghcr.io/safl/nosi/debian-base@sha256:94e6..."
+url = "oras://ghcr.io/safl/nosi/debian-sysdev@sha256:94e6..."
 ```
 
 Fresh USB sticks ship with four starter .bri files pre-staged
-on the BTY_IMAGES partition: three nosi base images
-(`debian-base`, `ubuntu-base`, `fedora-base`, each via
+on the BTY_IMAGES partition: three nosi sysdev images
+(`debian-sysdev`, `ubuntu-sysdev`, `fedora-sysdev`, each via
 `oras://ghcr.io/safl/nosi/<v>:latest`) plus the latest bty-server
 appliance from the GitHub release URL. Operators see all four
 in the TUI catalog without setting up any infrastructure, and

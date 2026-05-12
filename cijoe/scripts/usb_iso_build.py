@@ -704,10 +704,10 @@ def _extend_with_exfat(cijoe, iso_path: Path) -> int:
     # fresh stick boots with something flashable in the catalog. v0.8.5
     # re-introduced this after v0.8.4 shipped empty: the TUI's ``i``
     # keybinding only flashes the bty-server appliance, but operators
-    # also want one-click access to the nosi base images (Debian /
+    # also want one-click access to the nosi sysdev images (Debian /
     # Ubuntu / Fedora). The four entries are:
     #
-    # - 3x nosi base images via ``oras://ghcr.io/safl/nosi/<variant>:latest``,
+    # - 3x nosi sysdev images via ``oras://ghcr.io/safl/nosi/<variant>:latest``,
     #   resolved by bty's ORAS adapter to the current published layer
     #   digest at flash time (rolling).
     # - 1x bty-server appliance via the GitHub release asset URL
@@ -729,7 +729,7 @@ def _extend_with_exfat(cijoe, iso_path: Path) -> int:
 
 
 # Starter .bri set baked into every USB stick's BTY_IMAGES partition.
-# Three nosi base images via the ``oras://`` URL scheme (resolved by
+# Three nosi sysdev images via the ``oras://`` URL scheme (resolved by
 # bty's ORAS adapter at flash time -- rolling :latest tag, layer
 # digest verified-after-resolve), plus the bty-server appliance via
 # its GitHub release asset (built here, not in nosi). The ``oras://``
@@ -740,7 +740,7 @@ def _extend_with_exfat(cijoe, iso_path: Path) -> int:
 # text on the exFAT partition.
 _STARTER_BRIS: tuple[tuple[str, str], ...] = (
     (
-        "nosi-debian-base-x86_64.bri",
+        "nosi-debian-sysdev-x86_64.bri",
         "# bty Remote Image (.bri) descriptor.\n"
         "#\n"
         "# Drop your own .bri files alongside this one to advertise\n"
@@ -756,32 +756,32 @@ _STARTER_BRIS: tuple[tuple[str, str], ...] = (
         "# OCI blob, NOT a runnable container image. To pin a specific\n"
         '# build, replace ":latest" with "@sha256:<digest>".\n'
         "\n"
-        'name = "nosi debian-base (x86_64, rolling)"\n'
-        'url = "oras://ghcr.io/safl/nosi/debian-base:latest"\n'
+        'name = "nosi debian-sysdev (x86_64, rolling)"\n'
+        'url = "oras://ghcr.io/safl/nosi/debian-sysdev:latest"\n'
         'format = "img.gz"\n'
-        'description = "Debian 13 cloud image, nosi base, x86_64"\n',
+        'description = "Debian 13 trixie sysdev image, x86_64"\n',
     ),
     (
-        "nosi-ubuntu-base-x86_64.bri",
+        "nosi-ubuntu-sysdev-x86_64.bri",
         "# bty Remote Image (.bri) descriptor.\n"
         "#\n"
-        "# See nosi-debian-base-x86_64.bri for ``oras://`` syntax notes.\n"
+        "# See nosi-debian-sysdev-x86_64.bri for ``oras://`` syntax notes.\n"
         "\n"
-        'name = "nosi ubuntu-base (x86_64, rolling)"\n'
-        'url = "oras://ghcr.io/safl/nosi/ubuntu-base:latest"\n'
+        'name = "nosi ubuntu-sysdev (x86_64, rolling)"\n'
+        'url = "oras://ghcr.io/safl/nosi/ubuntu-sysdev:latest"\n'
         'format = "img.gz"\n'
-        'description = "Ubuntu 26.04 LTS cloud image, nosi base, x86_64"\n',
+        'description = "Ubuntu 26.04 LTS resolute sysdev image, x86_64"\n',
     ),
     (
-        "nosi-fedora-base-x86_64.bri",
+        "nosi-fedora-sysdev-x86_64.bri",
         "# bty Remote Image (.bri) descriptor.\n"
         "#\n"
-        "# See nosi-debian-base-x86_64.bri for ``oras://`` syntax notes.\n"
+        "# See nosi-debian-sysdev-x86_64.bri for ``oras://`` syntax notes.\n"
         "\n"
-        'name = "nosi fedora-base (x86_64, rolling)"\n'
-        'url = "oras://ghcr.io/safl/nosi/fedora-base:latest"\n'
+        'name = "nosi fedora-sysdev (x86_64, rolling)"\n'
+        'url = "oras://ghcr.io/safl/nosi/fedora-sysdev:latest"\n'
         'format = "img.gz"\n'
-        'description = "Fedora 44 cloud image, nosi base, x86_64"\n',
+        'description = "Fedora 44 sysdev image, x86_64"\n',
     ),
     (
         "bty-server-x86_64.bri",

@@ -348,9 +348,9 @@ def test_read_bri_accepts_oras_url(tmp_path: Path) -> None:
     ``img.gz`` (nosi's publishing convention) when no extension can
     be derived from the URL."""
     bri = tmp_path / "oras.bri"
-    bri.write_text('url = "oras://ghcr.io/safl/nosi/debian-base:latest"\nname = "nosi debian"\n')
+    bri.write_text('url = "oras://ghcr.io/safl/nosi/debian-sysdev:latest"\nname = "nosi debian"\n')
     remote = images.read_bri(bri)
-    assert remote.url == "oras://ghcr.io/safl/nosi/debian-base:latest"
+    assert remote.url == "oras://ghcr.io/safl/nosi/debian-sysdev:latest"
     assert remote.format == "img.gz"
 
 

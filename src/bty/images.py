@@ -200,7 +200,7 @@ def list_images(root: Path) -> list[Image]:
 # get the same flashable entry. The ``url`` field accepts http(s)://
 # (plain HTTP fetch) and ``oras://`` (OCI registry artefact, resolved
 # via bty's ORAS adapter at flash time). Fresh USB sticks bake four
-# starter descriptors onto BTY_IMAGES: three nosi base images via
+# starter descriptors onto BTY_IMAGES: three nosi sysdev images via
 # ``oras://`` plus the bty-server appliance via a GitHub release URL.
 BRI_EXTENSION = ".bri"
 

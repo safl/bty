@@ -295,7 +295,7 @@ def _probe_image_url_oras(url: str) -> ImageInfo:
     """Probe an ``oras://`` reference by resolving it to a manifest layer.
 
     Caller already verified the scheme. Format comes from the layer's
-    title annotation (e.g. ``nosi-debian-base-x86_64.img.gz`` ->
+    title annotation (e.g. ``nosi-debian-sysdev-x86_64.img.gz`` ->
     ``img.gz``); falls back to ``img.gz`` if no usable title (nosi's
     publishing convention and the practical default for OCI-hosted
     disk images). Virtual size stays ``None`` -- determining it from
