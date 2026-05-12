@@ -907,10 +907,20 @@ def _flash_compressed_from_url(
 
     Same single-file caveat as ``_flash_compressed``: tarballs and
     other multi-file containers must NOT be flashed through here.
+
+    Progress denominator note: ``dd`` reports OUTPUT bytes (the
+    decompressed bytes written to the target disk), but the upstream
+    compressed blob's size is generally smaller -- often dramatically
+    so for a sparse raw image. We pass ``total_bytes`` through
+    unchanged: the caller (``probe_image_url`` -> ``ImageInfo
+    .virtual_size_bytes``) supplies the decompressed size when it
+    can derive it, and ``None`` otherwise. We deliberately do NOT
+    fall back to ``_curl_args_for_source``'s ``resolved_size``
+    (the compressed blob size) here -- that mismatch made the
+    pre-v0.9.0 progress bar overshoot to ~6x for highly compressible
+    .img.gz inputs.
     """
-    curl_args, resolved_size = _curl_args_for_source(url)
-    if total_bytes is None:
-        total_bytes = resolved_size
+    curl_args, _resolved_compressed_size = _curl_args_for_source(url)
     curl_proc = subprocess.Popen(curl_args, stdout=subprocess.PIPE)
     try:
         decomp_proc = subprocess.Popen(
