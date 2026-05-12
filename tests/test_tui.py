@@ -1305,3 +1305,55 @@ def test_catalog_picker_opens_and_dismisses_cleanly(
             assert app._catalog_source == initial_source  # type: ignore[reportPrivateUsage]
 
     _run(_drive())
+
+
+def test_d_binding_loads_default_catalog_url(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Pressing ``d`` sets the catalog source to bty's default
+    release-asset URL and derives the pxe-done base from its host.
+    The catalog itself is fetched on the next populate (mocked here
+    via ``_patch_data_sources(remote_catalog=...)``); the binding's
+    job is just to land the new source on the App."""
+    remote_rows = [
+        tui_app._TuiImage(
+            name="nosi-debian",
+            fmt="img.gz",
+            size_bytes=8192,
+            url="oras://ghcr.io/safl/nosi/debian-sysdev:latest",
+        )
+    ]
+    _patch_data_sources(
+        monkeypatch,
+        disks_list=[_fake_disk()],
+        remote_catalog=remote_rows,
+    )
+    app = tui_app.BtyTui(image_root=tmp_path / "empty")
+
+    async def _drive() -> None:
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            assert app._catalog_source is None  # type: ignore[reportPrivateUsage]
+
+            await pilot.press("d")
+            for _ in range(10):
+                await pilot.pause()
+
+            # Catalog source flipped to bty's published catalog URL.
+            assert (  # type: ignore[reportPrivateUsage]
+                app._catalog_source == tui_app._BTY_DEFAULT_CATALOG_URL
+            )
+            # pxe-done base derived from the URL's host (so a TUI
+            # launched without --mac/--catalog can still POST done
+            # to bty-web instances reached via the default catalog).
+            assert (  # type: ignore[reportPrivateUsage]
+                app._pxe_done_base == "https://github.com"
+            )
+            # The catalog row from the mocked source landed in the
+            # table; confirms repopulate triggered.
+            from textual.widgets import DataTable
+
+            images_table = app.query_one("#images_table", DataTable)
+            assert images_table.row_count == 1
+
+    _run(_drive())

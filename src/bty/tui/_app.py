@@ -33,6 +33,7 @@ the keys below cover everything else):
 - ``q``           quit
 - ``r``           refresh catalogs
 - ``c``           switch catalog source (path / URL / blank for local-only)
+- ``d``           load bty's default release-asset catalog
 - ``i``           install bty-server (latest from GitHub releases)
 - ``/``           filter the image catalog by substring
 - ``f``           flash shortcut (equivalent to Enter on Flash button)
@@ -195,6 +196,16 @@ _BTY_SERVER_LATEST_URL = (
     "https://github.com/safl/bty/releases/latest/download/bty-server-x86_64.img.gz"
 )
 _BTY_SERVER_LATEST_NAME = "bty-server (latest from GitHub)"
+
+# bty's default portable catalog, published as a release asset on
+# every tag. The ``d`` keybinding swaps the TUI's catalog source for
+# this URL with one keypress, so an operator on a fresh stick (or a
+# stick with no local images) doesn't need to type the catalog URL
+# via the ``c`` switch dialog. Contents match the four-entry
+# BTY_IMAGES starter ``.bri`` set: three nosi sysdev images via
+# ``oras://`` rolling tags plus the bty-server appliance via its
+# GitHub release URL.
+_BTY_DEFAULT_CATALOG_URL = "https://github.com/safl/bty/releases/latest/download/catalog.toml"
 
 
 def _classify_catalog_source(source: str) -> str:
@@ -1119,6 +1130,10 @@ class HelpScreen(ModalScreen[None]):
                 classes="help-row",
             )
             yield Static(
+                "  d             load bty's default catalog (the release-asset catalog.toml)",
+                classes="help-row",
+            )
+            yield Static(
                 "  i             install bty-server (latest from GitHub)",
                 classes="help-row",
             )
@@ -1157,6 +1172,13 @@ class BtyTui(App[None]):
         # (``R`` aka shift+r) was a real fat-finger trap.
         Binding("i", "install_bty_server", "Install bty-server", show=False),
         Binding("c", "catalog", "Catalog", show=False),
+        # ``d`` swaps the catalog source for bty's default release-
+        # asset catalog (the one published alongside every bty tag
+        # at https://github.com/safl/bty/releases/latest/download/
+        # catalog.toml). Lets an operator on a fresh / empty-local
+        # stick get a flashable catalog with one keypress -- no need
+        # to type the URL via ``c``.
+        Binding("d", "default_catalog", "Default catalog", show=False),
         Binding("slash", "focus_filter", "Filter", show=False),
         # ``?`` pops a help modal listing every keybinding. Common
         # TUI convention (helix, k9s, lazygit); the operator on the
@@ -1476,16 +1498,21 @@ class BtyTui(App[None]):
     def _welcome_text(self) -> str:
         """Compose onboarding text shown when the catalog is empty.
 
-        Three concrete next steps the operator can take from here:
-        1. Flash an image you've staged locally (BTY_IMAGES /
-           Ventoy ``bty-images/`` / workstation ``--image-root``).
-        2. Flash from a remote bty-web catalog (press ``c``).
-        3. Install a bty-server appliance on this box from the
+        Four concrete next steps the operator can take from here:
+        1. [b]d[/] load bty's default release-asset catalog (3 nosi
+           sysdev images + bty-server, ready to flash with one
+           keypress).
+        2. Flash an image staged locally (BTY_IMAGES / Ventoy
+           ``bty-images/`` / workstation ``--image-root``).
+        3. Switch / re-fetch a different catalog source (press
+           ``c``).
+        4. Install a bty-server appliance on this box from the
            latest GitHub release (press ``i``).
 
-        The remote-catalog variant gets a tighter version of the
-        text because it only has options 2 + 3 plus the upload
-        recipes; the local variant gets the full three-way menu.
+        The remote-catalog variant gets a tighter version because it
+        only has options 2 + 3 + 4 plus the upload recipes; the
+        local variant gets the full menu with the default-catalog
+        suggestion at the top.
         """
         if self._catalog_source is not None:
             return (
@@ -1501,7 +1528,8 @@ class BtyTui(App[None]):
                 "       the file and re-publish.\n"
                 "     Then press [b]c[/] to re-fetch.\n"
                 "  2. [b]Switch catalog[/]: press [b]c[/] to point this\n"
-                "     TUI at a different catalog source or back to\n"
+                "     TUI at a different catalog source ([b]d[/] for bty's\n"
+                "     default release-asset catalog), or back to\n"
                 "     local-only.\n"
                 "  3. [b]Install bty-server[/] on this box from the\n"
                 "     latest GitHub release: press [b]i[/], pick a\n"
@@ -1510,8 +1538,13 @@ class BtyTui(App[None]):
         return (
             "[b]No images in the catalog yet.[/]\n\n"
             f"Local catalog: [accent]{self._image_root}[/]\n\n"
-            "Three ways forward from here:\n"
-            "  1. [b]Flash an image you stage locally[/].\n"
+            "Four ways forward from here:\n"
+            "  1. [b]Load bty's default catalog[/]: press [b]d[/] to\n"
+            "     swap the catalog source for bty's release-asset\n"
+            "     catalog (3 nosi sysdev images + bty-server).\n"
+            "     Source URL:\n"
+            f"     [dim]{_BTY_DEFAULT_CATALOG_URL}[/]\n"
+            "  2. [b]Flash an image you stage locally[/].\n"
             "     - bty-usb stick (dd'd directly): mount the\n"
             "       [b]BTY_IMAGES[/] exFAT partition on any host OS\n"
             "       and copy [dim]*.img.gz[/] / [dim]*.qcow2[/] /\n"
@@ -1524,10 +1557,11 @@ class BtyTui(App[None]):
             "       [b]BTY_IMAGE_ROOT[/]); press [b]r[/] to re-scan.\n"
             "     Live-env paths are read-only; power-cycle to\n"
             "     pick up files added after boot.\n"
-            "  2. [b]Flash from a remote bty-web catalog[/]:\n"
-            "     press [b]c[/] and enter the server URL\n"
-            "     (e.g. [dim]http://server:8080[/]).\n"
-            "  3. [b]Install bty-server[/] on this box from the\n"
+            "  3. [b]Point at a different catalog[/]: press [b]c[/]\n"
+            "     and enter a path or URL (a TOML catalog file on\n"
+            "     a workstation, a static [dim]https://[/] URL, or\n"
+            "     an [dim]oras://[/] OCI artefact reference).\n"
+            "  4. [b]Install bty-server[/] on this box from the\n"
             "     latest GitHub release: press [b]i[/], pick a\n"
             "     disk, hit Flash.\n\n"
             "[dim]Alt+F2 .. Alt+F6 drop into a root shell on the\n"
@@ -1915,6 +1949,39 @@ class BtyTui(App[None]):
         with contextlib.suppress(Exception):
             self.query_one("#images_table", DataTable).focus()
         self._set_status_transient(f"Catalog: {source_label}")
+
+    def action_default_catalog(self) -> None:
+        """``d`` binding: swap the catalog source for bty's default
+        release-asset catalog (``releases/latest/download/catalog.toml``
+        on the bty repo). One keypress beats the ``c``-and-type-URL
+        flow for the common "no local images, give me something to
+        flash" case.
+
+        Network constraint: the live env needs HTTPS reachability to
+        github.com / objects.githubusercontent.com at fetch time --
+        same as the bty-server bootstrap (``i``). Air-gapped operators
+        ship their own ``.bri`` files on BTY_IMAGES instead.
+        """
+        self._catalog_source = _BTY_DEFAULT_CATALOG_URL
+        self._pxe_done_base = _pxe_done_base_from_source(_BTY_DEFAULT_CATALOG_URL)
+        # Invalidate cache so the next populate re-fetches from the
+        # new source rather than serving an earlier session's rows.
+        self._cached_remote_catalog = None
+        source_label = f"{self._image_root} + {self._catalog_source}"
+        with contextlib.suppress(Exception):
+            self.query_one(
+                "#pane-1", Vertical
+            ).border_title = f"  1: Pick an image from {source_label}  "
+        # Clear any in-flight selection since the catalog changed
+        # (same as the ``c`` switch flow).
+        self._selected_image = None
+        self._selected_disk = None
+        self._post_flash = False
+        self._populate_images()
+        self._render_status()
+        with contextlib.suppress(Exception):
+            self.query_one("#images_table", DataTable).focus()
+        self._set_status_transient(f"Catalog: {_BTY_DEFAULT_CATALOG_URL} (bty default)")
 
     @work(exclusive=True)
     async def action_flash(self) -> None:
