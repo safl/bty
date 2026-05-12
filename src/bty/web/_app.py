@@ -964,6 +964,13 @@ def create_app(
 
         409 if a row with the same image_url already exists.
         """
+        # Variables shared across the oras / http branches. Declared
+        # up front so mypy sees a single binding (the oras branch
+        # narrows ``sha256`` to ``str``, which would clash with the
+        # ``str | None`` re-declaration the http branch had previously).
+        sha256: str | None = None
+        fmt: str | None = None
+        size_bytes: int | None = None
         # ``oras://`` short-circuit: resolve the manifest first and
         # populate everything from it. This bypasses both the
         # sha_url branch (no separate sidecar needed) and the
@@ -1041,7 +1048,6 @@ def create_app(
                 "added_at": now,
             }
 
-        sha256: str | None = None
         if body.sha_url is not None:
             try:
                 sha256 = _catalog.fetch_sha256_for_url(body.image_url, body.sha_url)

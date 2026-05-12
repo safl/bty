@@ -482,6 +482,14 @@ def register_ui_routes(
         image_url = validated.image_url
         cleaned_sha_url = validated.sha_url
 
+        # Variables shared across the oras / http branches. Declared
+        # up front so mypy sees a single binding (the oras branch
+        # narrows ``sha256`` / ``fmt`` / ``size_bytes`` to concrete
+        # types, which would clash with the http branch's re-
+        # declarations).
+        sha256: str | None = None
+        fmt: str | None = None
+        size_bytes: int | None = None
         # ``oras://`` short-circuit: resolve via bty.oras and write
         # the row with the manifest-derived digest / name / size /
         # format. Mirrors the JSON endpoint's oras branch verbatim.
@@ -533,7 +541,6 @@ def register_ui_routes(
                 status_code=status.HTTP_303_SEE_OTHER,
             )
 
-        sha256: str | None = None
         if cleaned_sha_url is not None:
             try:
                 sha256 = _catalog.fetch_sha256_for_url(image_url, cleaned_sha_url)

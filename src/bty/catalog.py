@@ -138,32 +138,30 @@ class Catalog:
         return len(self.entries)
 
 
-def load(path: Path) -> Catalog:
-    """Parse a TOML manifest into a :class:`Catalog`.
+def load_bytes(raw_bytes: bytes, *, source: str = "<bytes>") -> Catalog:
+    """Parse a TOML manifest from an in-memory bytes buffer.
 
-    Raises :class:`CatalogError` on missing files, malformed TOML,
-    schema-version mismatch, missing required fields, or duplicate
-    image names within the manifest.
+    Used by ``bty.tui``'s ``--catalog`` fetcher when the catalog
+    comes from HTTP / ORAS rather than a local path. ``source`` is
+    a label for error messages (a URL, a label like ``<http>``);
+    the bytes themselves carry no provenance.
     """
-    if not path.exists():
-        raise CatalogError(f"catalog manifest not found: {path}")
     try:
-        with path.open("rb") as fh:
-            raw = tomllib.load(fh)
-    except tomllib.TOMLDecodeError as exc:
-        raise CatalogError(f"catalog manifest at {path} is not valid TOML: {exc}") from exc
+        raw = tomllib.loads(raw_bytes.decode("utf-8"))
+    except (tomllib.TOMLDecodeError, UnicodeDecodeError) as exc:
+        raise CatalogError(f"catalog manifest at {source} is not valid TOML: {exc}") from exc
 
     version = raw.get("version")
     if version != SCHEMA_VERSION:
         raise CatalogError(
-            f"catalog manifest at {path}: version={version!r}, "
+            f"catalog manifest at {source}: version={version!r}, "
             f"this bty understands version={SCHEMA_VERSION}"
         )
 
     images_raw = raw.get("images", [])
     if not isinstance(images_raw, list):
         raise CatalogError(
-            f"catalog manifest at {path}: ``images`` must be an array of tables, "
+            f"catalog manifest at {source}: ``images`` must be an array of tables, "
             f"got {type(images_raw).__name__}"
         )
 
@@ -172,16 +170,28 @@ def load(path: Path) -> Catalog:
     for raw_entry in images_raw:
         if not isinstance(raw_entry, dict):
             raise CatalogError(
-                f"catalog manifest at {path}: ``images`` entry must be a table, "
+                f"catalog manifest at {source}: ``images`` entry must be a table, "
                 f"got {type(raw_entry).__name__}"
             )
         entry = CatalogEntry.from_dict(raw_entry)
         if entry.name in seen_names:
-            raise CatalogError(f"catalog manifest at {path}: duplicate image name {entry.name!r}")
+            raise CatalogError(f"catalog manifest at {source}: duplicate image name {entry.name!r}")
         seen_names.add(entry.name)
         entries.append(entry)
 
     return Catalog(version=version, entries=tuple(entries))
+
+
+def load(path: Path) -> Catalog:
+    """Parse a TOML manifest from a local file path.
+
+    Thin wrapper around :func:`load_bytes` for the file-path case.
+    Raises :class:`CatalogError` on missing files plus everything
+    :func:`load_bytes` raises.
+    """
+    if not path.exists():
+        raise CatalogError(f"catalog manifest not found: {path}")
+    return load_bytes(path.read_bytes(), source=str(path))
 
 
 def default_manifest_path() -> Path | None:
