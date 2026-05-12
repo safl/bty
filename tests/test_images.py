@@ -335,11 +335,23 @@ def test_read_bri_missing_url_raises(tmp_path: Path) -> None:
 
 def test_read_bri_rejects_non_http_url(tmp_path: Path) -> None:
     """A bare hostname or ``ftp://`` URL would silently break flash;
-    require explicit http(s) scheme."""
+    require an explicit supported scheme (http, https, or ghcr:)."""
     bri = tmp_path / "bad.bri"
     bri.write_text('url = "ftp://example.invalid/x.img.gz"\n')
-    with pytest.raises(images.BriError, match="http"):
+    with pytest.raises(images.BriError, match="ghcr"):
         images.read_bri(bri)
+
+
+def test_read_bri_accepts_ghcr_url(tmp_path: Path) -> None:
+    """``ghcr:`` URLs resolve through bty's GHCR adapter at flash
+    time. ``read_bri`` should accept them and default ``format`` to
+    ``img.gz`` (nosi's publishing convention) when no extension can
+    be derived from the URL."""
+    bri = tmp_path / "ghcr.bri"
+    bri.write_text('url = "ghcr:safl/nosi/debian-base:latest"\nname = "nosi debian"\n')
+    remote = images.read_bri(bri)
+    assert remote.url == "ghcr:safl/nosi/debian-base:latest"
+    assert remote.format == "img.gz"
 
 
 def test_read_bri_rejects_empty_name(tmp_path: Path) -> None:

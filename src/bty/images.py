@@ -294,8 +294,8 @@ def read_bri(path: Path) -> RemoteImage:
     if not isinstance(url, str) or not url.strip():
         raise BriError(f"{path}: missing required field: url")
     url = url.strip()
-    if not (url.startswith(("http://", "https://"))):
-        raise BriError(f"{path}: url must start with http:// or https://, got {url!r}")
+    if not url.startswith(("http://", "https://", "ghcr:")):
+        raise BriError(f"{path}: url must start with http://, https://, or ghcr:, got {url!r}")
 
     name = raw.get("name")
     if name is None:
@@ -311,8 +311,13 @@ def read_bri(path: Path) -> RemoteImage:
     if fmt is None:
         # Try to infer from URL last path segment so "img.gz",
         # "iso.gz", etc. flow through the same detect_format logic
-        # used for local files.
-        fmt = detect_format(Path(_name_from_url(url)))
+        # used for local files. ``ghcr:`` refs don't have a filename
+        # in the URL (the artefact name lives in the manifest layer's
+        # title annotation), so default to ``img.gz`` -- the format
+        # nosi publishes and the practical default for any GHCR-hosted
+        # disk image. Operators publishing other formats set ``format``
+        # explicitly in the .bri.
+        fmt = "img.gz" if url.startswith("ghcr:") else detect_format(Path(_name_from_url(url)))
     elif not isinstance(fmt, str):
         raise BriError(f"{path}: format must be a string")
 

@@ -435,7 +435,7 @@ def cmd_flash(
         if image_str.lower().endswith(images.BRI_EXTENSION) and Path(image_str).is_file():
             descriptor = images.read_bri(Path(image_str))
             image_str = descriptor.url
-        if image_str.startswith(("http://", "https://")):
+        if image_str.startswith(("http://", "https://", "ghcr:")):
             image_info = probe_image_url(image_str)
         else:
             image_info = probe_image(Path(image_str))

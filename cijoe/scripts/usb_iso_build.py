@@ -700,13 +700,25 @@ def _extend_with_exfat(cijoe, iso_path: Path) -> int:
         log.error(f"mkfs.exfat {part_dev} failed")
         return err
 
-    # No bake-time content in BTY_IMAGES. v0.7.16..v0.8.3 dropped a
-    # default ``bty-server-x86_64.bri`` here as a bootstrap entry;
-    # v0.8.4 moved the bootstrap to the TUI's ``i`` keybinding
-    # (which flashes the same GitHub release URL on demand), so the
-    # baked-in pointer was redundant. Operators with their own
-    # pre-built images drop them onto BTY_IMAGES themselves from a host
-    # OS; the partition ships empty.
+    # Drop a starter set of ``.bri`` descriptors into BTY_IMAGES so a
+    # fresh stick boots with something flashable in the catalog. v0.8.5
+    # re-introduced this after v0.8.4 shipped empty: the TUI's ``i``
+    # keybinding only flashes the bty-server appliance, but operators
+    # also want one-click access to the nosi base images (Debian /
+    # Ubuntu / Fedora). The four entries are:
+    #
+    # - 3x nosi base images via ``ghcr:safl/nosi/<variant>:latest``,
+    #   resolved by bty's GHCR adapter to the current published layer
+    #   at flash time (rolling).
+    # - 1x bty-server appliance via the GitHub release asset URL
+    #   (the bty-server image is built here, not in nosi).
+    #
+    # Best-effort: if exfat mount fails on this build runner (some
+    # minimal CI images lack the kernel module + fuse fallback), we
+    # log a warning and ship the partition empty. The TUI's ``i``
+    # shortcut still provides the bty-server bootstrap path.
+    _populate_bty_images_partition(cijoe, part_dev)
+
     err, _ = cijoe.run_local(f"sudo losetup -d {loop}")
     if err:
         log.error(f"losetup -d {loop} failed")
@@ -714,3 +726,107 @@ def _extend_with_exfat(cijoe, iso_path: Path) -> int:
 
     log.info(f"Extended {iso_path} with BTY_IMAGES exFAT partition (p{part_num})")
     return 0
+
+
+# Starter .bri set baked into every USB stick's BTY_IMAGES partition.
+# Three nosi base images via the ``ghcr:`` URL scheme (resolved by
+# bty's GHCR adapter at flash time -- rolling :latest tag, layer
+# digest verified-after-resolve), plus the bty-server appliance via
+# its GitHub release asset (built here, not in nosi). Operators
+# delete / edit / replace these freely from a host OS; the files
+# show up as ordinary text on the exFAT partition.
+_STARTER_BRIS: tuple[tuple[str, str], ...] = (
+    (
+        "nosi-debian-base-x86_64.bri",
+        "# bty Remote Image (.bri) descriptor.\n"
+        "#\n"
+        "# Drop your own .bri files alongside this one to advertise\n"
+        "# remote flashable images via bty's catalog. Format is\n"
+        "# minimal TOML: ``url`` is the only required field.\n"
+        "# See ``bty inspect <path>.bri`` for full syntax.\n"
+        "#\n"
+        "# ``ghcr:`` URLs route through bty's GHCR adapter: the tag\n"
+        '# (e.g. "latest") is resolved to a content-addressed layer\n'
+        "# digest at flash time, so this stick stays current as nosi\n"
+        "# republishes. To pin a specific build instead, replace the\n"
+        '# ":latest" suffix with "@sha256:<digest>".\n'
+        "\n"
+        'name = "nosi debian-base (x86_64, rolling)"\n'
+        'url = "ghcr:safl/nosi/debian-base:latest"\n'
+        'format = "img.gz"\n'
+        'description = "Debian 13 cloud image, nosi base, x86_64"\n',
+    ),
+    (
+        "nosi-ubuntu-base-x86_64.bri",
+        "# bty Remote Image (.bri) descriptor.\n"
+        "#\n"
+        "# See bty-server-x86_64.bri for syntax notes.\n"
+        "\n"
+        'name = "nosi ubuntu-base (x86_64, rolling)"\n'
+        'url = "ghcr:safl/nosi/ubuntu-base:latest"\n'
+        'format = "img.gz"\n'
+        'description = "Ubuntu 26.04 LTS cloud image, nosi base, x86_64"\n',
+    ),
+    (
+        "nosi-fedora-base-x86_64.bri",
+        "# bty Remote Image (.bri) descriptor.\n"
+        "#\n"
+        "# See bty-server-x86_64.bri for syntax notes.\n"
+        "\n"
+        'name = "nosi fedora-base (x86_64, rolling)"\n'
+        'url = "ghcr:safl/nosi/fedora-base:latest"\n'
+        'format = "img.gz"\n'
+        'description = "Fedora 44 cloud image, nosi base, x86_64"\n',
+    ),
+    (
+        "bty-server-x86_64.bri",
+        "# bty Remote Image (.bri) descriptor.\n"
+        "#\n"
+        "# Drop your own .bri files alongside this one to advertise\n"
+        "# remote flashable images via bty's catalog. Format is\n"
+        "# minimal TOML: ``url`` is the only required field.\n"
+        "# See ``bty inspect <path>.bri`` for full syntax.\n"
+        "\n"
+        'name = "bty-server (x86_64, latest)"\n'
+        'url = "https://github.com/safl/bty/releases/latest/download/'
+        'bty-server-x86_64.img.gz"\n'
+        'format = "img.gz"\n'
+        'description = "Latest published bty-server appliance for x86_64"\n',
+    ),
+)
+
+
+def _populate_bty_images_partition(cijoe, part_dev: str) -> None:
+    """Mount the freshly-mkfs'd BTY_IMAGES exFAT partition and drop the
+    starter ``.bri`` set into it.
+
+    Best-effort: a mount failure logs a warning and returns. The
+    partition stays empty in that case -- same UX as v0.8.4 sticks,
+    with the TUI's ``i`` keybinding still providing the bty-server
+    bootstrap path. Common failure case is a CI runner without exFAT
+    kernel module + ``fuse-exfat`` fallback; modern GHA runners ship
+    both.
+    """
+    mount_dir = "/tmp/bty-images-bake"
+    cijoe.run_local(f"sudo mkdir -p {mount_dir}")
+    err, _ = cijoe.run_local(f"sudo mount -t exfat {part_dev} {mount_dir}")
+    if err:
+        log.warning(
+            f"could not mount {part_dev} as exfat at {mount_dir}; "
+            "BTY_IMAGES will ship empty (TUI ``i`` shortcut still bootstraps bty-server)"
+        )
+        cijoe.run_local(f"sudo rmdir {mount_dir} 2>/dev/null || true")
+        return
+    try:
+        for filename, body in _STARTER_BRIS:
+            bri_path = f"{mount_dir}/{filename}"
+            # ``tee`` is the simplest sudo-write idiom; here-string
+            # keeps quoting straight without a temp file.
+            err, _ = cijoe.run_local(f"sudo tee {bri_path} > /dev/null <<'EOF'\n{body}EOF\n")
+            if err:
+                log.warning(f"writing {bri_path} failed; continuing with remaining .bri files")
+                continue
+            log.info(f"Wrote starter .bri to BTY_IMAGES: {filename}")
+    finally:
+        cijoe.run_local(f"sudo umount {mount_dir}")
+        cijoe.run_local(f"sudo rmdir {mount_dir} 2>/dev/null || true")

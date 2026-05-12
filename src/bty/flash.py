@@ -34,7 +34,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import IO, Any, TypeAlias
 
-from bty import images
+from bty import ghcr, images
 
 
 @dataclass
@@ -236,26 +236,32 @@ def probe_image(path: Path) -> ImageInfo:
 
 
 def probe_image_url(url: str) -> ImageInfo:
-    """Inspect an image at an HTTP/HTTPS URL via a HEAD request.
+    """Inspect an image at an HTTP/HTTPS or ``ghcr:`` URL.
 
-    Format is derived from the URL path's filename extension. Source size
-    is read from ``Content-Length`` if present. Virtual size (what gets
-    written to disk) can only be determined for raw ``.img`` URLs from
-    HEAD; ``.img.zst`` and ``.qcow2`` URLs return ``virtual_size_bytes
-    = None`` because computing it would require pulling part of the
-    body. Validation handles ``None`` by skipping the size-fits-target
-    check with a note.
+    For http(s): HEAD request, format from URL path, size from
+    ``Content-Length``. For ``ghcr:`` refs: resolve via :mod:`bty.ghcr`
+    to a manifest layer, format inferred from the layer's title
+    annotation (or ``img.gz`` default), size from the manifest's layer
+    size. Virtual size (what gets written to disk) can only be
+    determined for raw ``.img`` URLs from HEAD; compressed and qcow2
+    URLs return ``virtual_size_bytes = None`` because computing it
+    would require pulling part of the body. Validation handles
+    ``None`` by skipping the size-fits-target check with a note.
 
     Raises ``FileNotFoundError`` if the server doesn't respond or
-    returns 4xx / 5xx for the HEAD.
+    returns 4xx / 5xx for the HEAD (http) or any registry call
+    (ghcr). Raises ``ValueError`` on an unsupported scheme.
     """
+    if ghcr.is_ghcr_url(url):
+        return _probe_image_url_ghcr(url)
+
     import urllib.error
     import urllib.parse
     import urllib.request
 
     parsed = urllib.parse.urlparse(url)
     if parsed.scheme not in ("http", "https"):
-        raise ValueError(f"image URL must be http or https: {url}")
+        raise ValueError(f"image URL must be http, https, or ghcr: {url}")
     filename = Path(parsed.path).name or "image"
     fmt = images.detect_format(Path(filename))
 
@@ -279,6 +285,35 @@ def probe_image_url(url: str) -> ImageInfo:
         format=fmt,
         size_bytes=size_bytes,
         virtual_size_bytes=virtual_size_bytes,
+    )
+
+
+def _probe_image_url_ghcr(url: str) -> ImageInfo:
+    """Probe a ``ghcr:`` reference by resolving it to a manifest layer.
+
+    Caller already verified the scheme. Format comes from the layer's
+    title annotation (e.g. ``nosi-debian-base-x86_64.img.gz`` ->
+    ``img.gz``); falls back to ``img.gz`` if no usable title (nosi's
+    publishing convention and the practical default for GHCR-hosted
+    disk images). Virtual size stays ``None`` -- determining it from
+    a compressed blob would require pulling the whole image.
+    """
+    try:
+        resolved = ghcr.resolve_ref(url)
+    except ghcr.GhcrError as exc:
+        # Re-raise as FileNotFoundError so the CLI's existing
+        # "image URL not reachable" path handles it uniformly with
+        # plain HTTP failures.
+        raise FileNotFoundError(f"ghcr ref not resolvable: {url} ({exc})") from exc
+    fmt = images.detect_format(Path(resolved.title)) if resolved.title else "img.gz"
+    return ImageInfo(
+        path=None,
+        url=url,
+        format=fmt,
+        size_bytes=resolved.size or 0,
+        # Compressed: would need to pull (part of) the body. Caller
+        # falls back to the "skip size-fits check" branch on None.
+        virtual_size_bytes=None,
     )
 
 
@@ -795,6 +830,27 @@ def _flash_qcow2(image: Path, target: Path) -> None:
 _CURL_BASE = ("curl", "-fSL", "--retry", "3", "--retry-connrefused")
 
 
+def _curl_args_for_source(url: str) -> tuple[list[str], int | None]:
+    """Build curl arguments for a fetch source.
+
+    Plain http(s) URLs pass through unchanged. ``ghcr:`` references go
+    through :mod:`bty.ghcr` to resolve the manifest layer, and the
+    resulting bearer token is injected as a ``-H Authorization``
+    header on the curl call. Returns ``(argv, expected_size_or_None)``
+    -- the size is the manifest's declared layer size when known, so
+    callers can use it as a fallback ``total_bytes`` when HEAD wasn't
+    run beforehand.
+    """
+    if not ghcr.is_ghcr_url(url):
+        return [*_CURL_BASE, url], None
+    resolved = ghcr.resolve_ref(url)
+    args = [*_CURL_BASE]
+    for header_name, header_value in resolved.headers.items():
+        args.extend(["-H", f"{header_name}: {header_value}"])
+    args.append(resolved.blob_url)
+    return args, resolved.size
+
+
 def _flash_img_from_url(
     url: str,
     target: Path,
@@ -803,7 +859,10 @@ def _flash_img_from_url(
     total_bytes: int | None = None,
 ) -> None:
     """Stream a raw .img from URL straight to a block device with dd."""
-    curl_proc = subprocess.Popen([*_CURL_BASE, url], stdout=subprocess.PIPE)
+    curl_args, resolved_size = _curl_args_for_source(url)
+    if total_bytes is None:
+        total_bytes = resolved_size
+    curl_proc = subprocess.Popen(curl_args, stdout=subprocess.PIPE)
     try:
         stderr = subprocess.PIPE if progress is not None else None
         dd_proc = subprocess.Popen(
@@ -846,7 +905,10 @@ def _flash_compressed_from_url(
     Same single-file caveat as ``_flash_compressed``: tarballs and
     other multi-file containers must NOT be flashed through here.
     """
-    curl_proc = subprocess.Popen([*_CURL_BASE, url], stdout=subprocess.PIPE)
+    curl_args, resolved_size = _curl_args_for_source(url)
+    if total_bytes is None:
+        total_bytes = resolved_size
+    curl_proc = subprocess.Popen(curl_args, stdout=subprocess.PIPE)
     try:
         decomp_proc = subprocess.Popen(
             decompress_cmd,
@@ -971,8 +1033,9 @@ def _flash_qcow2_from_url(url: str, target: Path) -> None:
     with tempfile.NamedTemporaryFile(suffix=".qcow2", delete=False) as tmp:
         tmp_path = Path(tmp.name)
     try:
+        curl_args, _ = _curl_args_for_source(url)
         rc = subprocess.run(
-            [*_CURL_BASE, "--output", str(tmp_path), url],
+            [*curl_args[:-1], "--output", str(tmp_path), curl_args[-1]],
             check=False,
         ).returncode
         if rc != 0:

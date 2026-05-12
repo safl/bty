@@ -1,6 +1,9 @@
 """Smoke tests verifying the scaffold imports cleanly."""
 
+import ast
 import sys
+import tomllib
+from pathlib import Path
 
 import pytest
 
@@ -251,3 +254,82 @@ def test_server_cloudinit_ships_haveged() -> None:
     # confusing, let's revert" doesn't restore the regression.
     assert "MODULES=most" in body
     assert "update-initramfs -u" in body
+
+
+def test_usb_iso_build_starter_bris_parse_as_toml() -> None:
+    """The bake-time ``_STARTER_BRIS`` literal in ``usb_iso_build.py``
+    writes one .bri file per entry into the freshly-mkfs'd BTY_IMAGES
+    partition. If any entry's body isn't valid TOML (or doesn't pass
+    ``bty.images.read_bri``'s validation), every USB stick built from
+    the next release would ship with broken descriptors -- the live
+    env would skip them silently from the catalog. Guard with an
+    AST-extract + parse round-trip.
+
+    The bake script can't be imported directly from tests (it's a
+    cijoe task module, not a Python package), so we ast.parse the
+    file, locate the ``_STARTER_BRIS = (...)`` assignment, and
+    ``ast.literal_eval`` the tuple. This avoids running any of the
+    surrounding cijoe-dependent code paths.
+    """
+    from bty import images
+
+    script = Path(__file__).resolve().parents[1] / "cijoe" / "scripts" / "usb_iso_build.py"
+    tree = ast.parse(script.read_text())
+    starter = None
+    for node in ast.walk(tree):
+        target_name: str | None = None
+        value_node = None
+        if (
+            isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+        ):
+            target_name = node.targets[0].id
+            value_node = node.value
+        elif (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.value is not None
+        ):
+            target_name = node.target.id
+            value_node = node.value
+        if target_name == "_STARTER_BRIS" and value_node is not None:
+            starter = ast.literal_eval(value_node)
+            break
+    assert starter is not None, "_STARTER_BRIS not found in usb_iso_build.py"
+    assert len(starter) == 4, f"expected 4 starter .bri files, got {len(starter)}"
+
+    names = {filename for filename, _ in starter}
+    assert names == {
+        "nosi-debian-base-x86_64.bri",
+        "nosi-ubuntu-base-x86_64.bri",
+        "nosi-fedora-base-x86_64.bri",
+        "bty-server-x86_64.bri",
+    }
+
+    # Each body must parse as TOML, declare a url, and round-trip
+    # through read_bri without raising. nosi entries should use
+    # ``ghcr:``; the bty-server entry should use https.
+    for filename, body in starter:
+        parsed = tomllib.loads(body)
+        assert "url" in parsed, f"{filename}: missing url"
+        if filename.startswith("nosi-"):
+            assert parsed["url"].startswith("ghcr:safl/nosi/"), (
+                f"{filename}: expected ghcr: URL, got {parsed['url']!r}"
+            )
+        else:
+            assert parsed["url"].startswith("https://github.com/safl/bty/releases/"), (
+                f"{filename}: expected GitHub release URL"
+            )
+        # Materialise to a tmp .bri to exercise read_bri's full
+        # validation, including the size cap and schema checks.
+        import tempfile
+
+        with tempfile.NamedTemporaryFile("w", suffix=".bri", delete=False) as fh:
+            fh.write(body)
+            tmp = Path(fh.name)
+        try:
+            remote = images.read_bri(tmp)
+            assert remote.url == parsed["url"]
+        finally:
+            tmp.unlink()
