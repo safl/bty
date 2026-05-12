@@ -197,8 +197,11 @@ def list_images(root: Path) -> list[Image]:
 # that lives on the network rather than on the local filesystem.
 # Mailable / Slackable: an operator can attach a ``.bri`` to a
 # message and the recipient drops it into their own BTY_IMAGES to
-# get the same flashable entry. Used at bty-usb bake time to ship
-# a default pointer at the latest bty-server release on GitHub.
+# get the same flashable entry. The ``url`` field accepts http(s)://
+# (plain HTTP fetch) and ``oras://`` (OCI registry artefact, resolved
+# via bty's ORAS adapter at flash time). Fresh USB sticks bake four
+# starter descriptors onto BTY_IMAGES: three nosi base images via
+# ``oras://`` plus the bty-server appliance via a GitHub release URL.
 BRI_EXTENSION = ".bri"
 
 
@@ -212,12 +215,14 @@ class RemoteImage:
     but for over-the-network sources, so the catalog UI can show
     "fetchable" images alongside local ones.
 
-    Required fields: ``url`` (the bytes' upstream HTTP(S) location).
-    Everything else is optional with sensible defaults: ``name``
-    falls back to the URL's last path segment, ``format`` to the
-    extension-derived format, ``size_bytes`` and ``sha256`` stay
-    ``None`` until the operator (or a bty-side fetcher) materialises
-    them.
+    Required fields: ``url`` (the bytes' upstream location -- an
+    HTTP(S) URL or an ``oras://`` OCI registry reference resolved
+    via :mod:`bty.oras`). Everything else is optional with sensible
+    defaults: ``name`` falls back to the URL's last path segment,
+    ``format`` to the extension-derived format (or ``img.gz`` for
+    ``oras://`` refs, which have no filename to extension-sniff),
+    ``size_bytes`` and ``sha256`` stay ``None`` until the operator
+    (or a bty-side fetcher) materialises them.
     """
 
     name: str

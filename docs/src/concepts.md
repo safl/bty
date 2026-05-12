@@ -59,8 +59,8 @@ from this mount point by default (overridable with `--image-root` or
 Operators populate the partition by mounting it on any Linux / macOS /
 Windows box - exFAT is read/write on all three - and dropping
 `.img.gz`, `.qcow2`, `.img.zst`, or `.bri` files into it. The
-partition is *not* under the overlayroot tmpfs, so files copied
-there persist on the stick.
+partition is *not* under the live-boot SquashFS+tmpfs overlay, so
+files copied there persist on the stick.
 
 Fresh sticks ship with four starter `.bri` files already on the
 partition: three nosi base images via the `oras://ghcr.io/...`

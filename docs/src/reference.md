@@ -113,8 +113,9 @@ The image root is resolved in this order:
 
 The listing also includes any `.bri` (bty Remote Image) descriptors
 present in the image root. Each remote row carries a
-`source = "remote"` field plus `url` (the upstream HTTP/HTTPS
-location); local rows carry `source = "local"` and `path`.
+`source = "remote"` field plus `url` (the upstream location -- an
+HTTP/HTTPS URL or an `oras://` OCI registry reference; see the
+schemes block below); local rows carry `source = "local"` and `path`.
 
 A `.bri` is a tiny TOML file:
 
@@ -183,13 +184,17 @@ bootstrap.
 
 ### `bty inspect PATH`
 
-Print detailed metadata for a single image file. Always reports
-`path`, `format`, and `size_bytes`. Adds a format-specific `detail`
-block when the relevant tool succeeds:
+Print detailed metadata for a single image file or `.bri` descriptor.
+Always reports `path`, `format`, and `size_bytes`. Adds a format-
+specific `detail` block when the relevant tool succeeds:
 
 - `.qcow2` -> `qemu-img info --output=json`
 - `.img.zst` -> `zstd -l`
+- `.img.xz` -> `xz -l`
+- `.img.gz` -> `gzip -l`
+- `.img.bz2` -> (no listing tool; detail omitted)
 - `.img` -> nothing extra (raw images have no header to query)
+- `.bri` -> parsed descriptor contents (`url`, `name`, `format`, etc.)
 
 Exit codes:
 
@@ -203,13 +208,18 @@ flasher only -- first-boot bring-up belongs in the image builder
 upstream (cloud-init / NoCloud user-data baked at image-build
 time). There are no provisioning flags here.
 
-`IMAGE` (positional) accepts three forms:
+`IMAGE` (positional) accepts four forms:
 
 - A local file path (`/path/to/foo.img.gz`).
 - An HTTP/HTTPS URL (`https://server/foo.img.gz`); raw `.img` and
   compressed `.img.*` URLs stream straight to disk.
+- An `oras://` reference to an OCI artefact (`oras://ghcr.io/owner/repo:tag`
+  or `...@sha256:<hex>`); bty resolves the manifest, picks the
+  disk-image layer, and streams the blob through the same pipeline
+  as a plain HTTPS fetch (see the `.bri` schemes block above).
 - A `.bri` descriptor path; bty resolves the descriptor's `url`
-  field and falls into the URL flash path automatically.
+  field (any of the above) and falls into the URL flash path
+  automatically.
 
 Either `--dry-run` or `--yes` is required:
 
@@ -330,6 +340,7 @@ bty's modules are usable as a library. Stable entry points:
 |------------------|-----------------------------------------------------------|
 | `bty.disks` | `list_disks() -> list[dict]` - block-device discovery. |
 | `bty.images` | `list_images(root)`, `inspect_image(path)`, `Image` dataclass, `detect_format(path)`, `default_image_root()`, `read_bri(path)`, `list_remote_images(root)`, `RemoteImage` / `BriError`. |
+| `bty.oras` | `parse_ref(ref) -> OrasRef`, `resolve_ref(ref) -> ResolvedBlob`, `is_oras_url(url) -> bool`, `OrasError`. ORAS / OCI registry adapter for `oras://` URLs. |
 | `bty.formatting` | `print_table(rows, columns)`, `print_inspect(info)`. |
 
 A full sphinx-autodoc surface is on the roadmap. Until then treat

@@ -55,7 +55,7 @@ PyPI package to ``docs/tooling`` if you want first-class support.
 
 | Script | Type | Walkthrough |
 |---|---|---|
-| `usb-flash-cli.sh` | canned | Step 5b: ``bty list / inspect / flash --dry-run / flash --yes`` |
+| `usb-flash-cli.sh` | canned | Step 5b: ``bty images / inspect / flash --dry-run / flash --yes`` |
 | `usb-flash-tui.md` | live notes | Step 5a: keystroke recipe for recording the TUI by hand |
 
 Add new scripts here as walkthroughs grow; keep names short

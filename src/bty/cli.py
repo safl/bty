@@ -87,13 +87,6 @@ def main(argv: list[str] | None = None) -> int:
         help="emit machine-readable JSON instead of a human-readable table",
     )
 
-    # Note: ``bty list disks`` and ``bty list images`` were flattened
-    # to ``bty images`` (and ``bty list disks`` dropped entirely) in
-    # v0.8.4. ``lsblk -d -e7`` is the equivalent for the disk side;
-    # bty's wrapper added little beyond a schema-versioned JSON
-    # envelope. ``bty.disks.list_disks()`` remains as a Python helper
-    # for ``bty-tui`` + the flash validator.
-
     p_images = sub.add_parser(
         "images",
         parents=[common],
@@ -147,14 +140,18 @@ def main(argv: list[str] | None = None) -> int:
         "image",
         type=str,
         help=(
-            "image to flash. Either a local file path "
-            "(``/path/to/image.img.gz``) or an HTTP/HTTPS URL "
-            "(``http://server/images/foo.img.gz``); URLs stream "
-            "directly to disk for ``.img`` / ``.img.{gz,zst,xz,bz2}`` "
-            "and download to a temp file first for ``.qcow2``. "
-            "``bty tui --server`` operators get the URL from the "
-            "server's catalog listing; the server picks server-vs-"
-            "upstream based on cache state."
+            "image to flash. One of: a local file path "
+            "(``/path/to/image.img.gz``), an HTTP/HTTPS URL "
+            "(``http://server/images/foo.img.gz``), an ``oras://`` "
+            "reference to an OCI artefact in a container registry "
+            "(``oras://ghcr.io/owner/repo:tag``; resolved through the "
+            "registry's anonymous-pull flow), or a ``.bri`` descriptor "
+            "path (a TOML file whose ``url`` field carries any of the "
+            "above). URLs stream directly to disk for ``.img`` / "
+            "``.img.{gz,zst,xz,bz2}`` and download to a temp file "
+            "first for ``.qcow2``. ``bty tui --server`` operators get "
+            "the URL from the server's catalog listing; the server "
+            "picks server-vs-upstream based on cache state."
         ),
     )
     p_flash.add_argument("target", type=Path, help="target block device")

@@ -36,6 +36,7 @@ binaries that almost every Linux distribution already has:
 | `zstd` | decompress `.img.zst` images | `zstd` |
 | `gzip` | decompress `.img.gz` images | `gzip` (always present) |
 | `xz` | decompress `.img.xz` images | `xz-utils` |
+| `curl` | stream URLs (`http://`, `https://`, `oras://`) into the flash pipeline | `curl` |
 
 Flashing a real disk requires root (`sudo bty flash` or running
 inside the bty live env where root is already there).

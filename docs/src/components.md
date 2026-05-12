@@ -139,9 +139,9 @@ agetty's escape parser and emits VT100 control bytes onto ttyS0).
 **Server image, Raspberry Pi 4 / 5 (`server-rpi`).** Same appliance
 role, delivered as an SD-card image for arm64. Built by mounting the
 upstream Raspberry Pi OS Lite image and customising it in a
-`qemu-aarch64-static` chroot. Operator `dd`'s the resulting `.img.zst`
-to an SD card and boots a Pi 4 or Pi 5; first-boot ends at the same
-`bty / bty` credential as the x86 server image.
+`qemu-aarch64-static` chroot. Operator `dd`'s the resulting `.img.gz`
+(after `gunzip`) to an SD card and boots a Pi 4 or Pi 5; first-boot
+ends at the same `bty / bty` credential as the x86 server image.
 
 **Network-flash live env (`netboot-x86`).** Kernel + initrd + squashfs
 trio that PXE clients chain into. Built via Debian's `live-build`. The

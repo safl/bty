@@ -177,7 +177,7 @@ def _parse_size_to_bytes(s: str) -> int:
 _REMOTE_CATALOG_MAX_BYTES = 4 * 1024 * 1024
 
 
-# The bty-server bootstrap shortcut (``b`` in the TUI) flashes this
+# The bty-server bootstrap shortcut (``i`` in the TUI) flashes this
 # URL. ``releases/latest/download/<name>`` is GitHub's stable
 # redirect-to-newest-tag pattern, so the shortcut tracks new
 # releases without rebaking the live env. Network constraint: the
@@ -1337,9 +1337,9 @@ class BtyTui(App[None]):
         Three concrete next steps the operator can take from here:
         1. Flash an image you've staged locally (BTY_IMAGES /
            Ventoy ``bty-images/`` / workstation ``--image-root``).
-        2. Flash from a remote bty-web catalog (press ``s``).
+        2. Flash from a remote bty-web catalog (press ``c``).
         3. Install a bty-server appliance on this box from the
-           latest GitHub release (press ``b``).
+           latest GitHub release (press ``i``).
 
         The remote-catalog variant gets a tighter version of the
         text because it only has options 2 + 3 plus the upload
@@ -1401,7 +1401,7 @@ class BtyTui(App[None]):
         flash from a URL pointer dropped into BTY_IMAGES.
 
         The bty-server bootstrap is NOT in this list -- it's reached
-        via the ``b`` keyboard shortcut (see ``action_install_bty_
+        via the ``i`` keyboard shortcut (see ``action_install_bty_
         server``) so it doesn't clutter the regular catalog and is
         always available regardless of what's been dropped on the
         BTY_IMAGES / Ventoy stick.
@@ -1482,7 +1482,7 @@ class BtyTui(App[None]):
         self._set_status_transient("Refreshed.")
 
     def action_install_bty_server(self) -> None:
-        """``b`` binding: pre-select the bty-server bootstrap image
+        """``i`` binding: pre-select the bty-server bootstrap image
         and advance the wizard to disk selection.
 
         The bty-server image (``releases/latest/download/bty-server-
@@ -1503,7 +1503,7 @@ class BtyTui(App[None]):
             url=_BTY_SERVER_LATEST_URL,
         )
         # _post_flash carries over a stale "Reboot" button state if
-        # the operator chose ``b`` right after a previous flash;
+        # the operator chose ``i`` right after a previous flash;
         # reset so the wizard derives Stage 2 / 3 cleanly.
         self._post_flash = False
         self._render_status()

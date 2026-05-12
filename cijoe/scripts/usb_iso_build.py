@@ -765,7 +765,7 @@ _STARTER_BRIS: tuple[tuple[str, str], ...] = (
         "nosi-ubuntu-base-x86_64.bri",
         "# bty Remote Image (.bri) descriptor.\n"
         "#\n"
-        "# See bty-server-x86_64.bri for syntax notes.\n"
+        "# See nosi-debian-base-x86_64.bri for ``oras://`` syntax notes.\n"
         "\n"
         'name = "nosi ubuntu-base (x86_64, rolling)"\n'
         'url = "oras://ghcr.io/safl/nosi/ubuntu-base:latest"\n'
@@ -776,7 +776,7 @@ _STARTER_BRIS: tuple[tuple[str, str], ...] = (
         "nosi-fedora-base-x86_64.bri",
         "# bty Remote Image (.bri) descriptor.\n"
         "#\n"
-        "# See bty-server-x86_64.bri for syntax notes.\n"
+        "# See nosi-debian-base-x86_64.bri for ``oras://`` syntax notes.\n"
         "\n"
         'name = "nosi fedora-base (x86_64, rolling)"\n'
         'url = "oras://ghcr.io/safl/nosi/fedora-base:latest"\n'

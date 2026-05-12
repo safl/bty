@@ -161,11 +161,14 @@ _ZSTD_SIZE_RE = re.compile(r"([\d.]+)\s+(B|KiB|MiB|GiB|TiB)")
 class ImageInfo:
     """Probed metadata for an image source.
 
-    Either ``path`` (a local file) or ``url`` (an HTTP/HTTPS URL) is
-    set; never both. URL-sourced images stream through curl directly
-    to the target disk for ``.img`` / ``.img.zst`` (no temp file); for
-    ``.qcow2`` they get downloaded to a temp file first because qcow2
-    is random-access.
+    Either ``path`` (a local file) or ``url`` (an HTTP/HTTPS or
+    ``oras://`` reference) is set; never both. URL-sourced images
+    stream through curl directly to the target disk for ``.img`` /
+    ``.img.{gz,zst,xz,bz2}`` (no temp file); for ``.qcow2`` they get
+    downloaded to a temp file first because qcow2 is random-access.
+    ``oras://`` URLs go through :mod:`bty.oras` first to resolve the
+    layer digest and inject a bearer-token Authorization header into
+    the curl call.
     """
 
     path: Path | None

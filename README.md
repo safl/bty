@@ -107,7 +107,8 @@ pipx install "bty-lab[all]"     # everything
 
 `lsblk -d -e7`, `bty inspect`, `bty flash --dry-run` need only
 Python 3.11+ and stdlib. `bty flash --yes` shells out to `dd`,
-`qemu-img`, `zstd`, `lsblk`, and friends - your distro provides those.
+`qemu-img`, `zstd`, `lsblk`, `curl` (used by URL / `oras://` fetch),
+and friends - your distro provides those.
 
 For an appliance you can boot directly (USB stick, server image,
 PXE-chain live env), grab the bake from
