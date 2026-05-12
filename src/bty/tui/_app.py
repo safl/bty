@@ -1177,8 +1177,10 @@ class BtyTui(App[None]):
         # at https://github.com/safl/bty/releases/latest/download/
         # catalog.toml). Lets an operator on a fresh / empty-local
         # stick get a flashable catalog with one keypress -- no need
-        # to type the URL via ``c``.
-        Binding("d", "default_catalog", "Default catalog", show=False),
+        # to type the URL via ``c``. ``show=True`` so the Footer
+        # advertises it; this is the empty-state onboarding CTA for
+        # operators who skip the welcome panel.
+        Binding("d", "default_catalog", "Default catalog"),
         Binding("slash", "focus_filter", "Filter", show=False),
         # ``?`` pops a help modal listing every keybinding. Common
         # TUI convention (helix, k9s, lazygit); the operator on the
