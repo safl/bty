@@ -14,3 +14,28 @@ live-tools
 # an operator wants to fall back to a stock theme.
 plymouth
 plymouth-themes
+
+# Vendor firmware blobs. Without these, i915 wedges the GPU on
+# probe (cosmetic on tty1 / framebuffer-served consoles but produces
+# a scary "Failed to initialize GPU, declaring it wedged" line in
+# dmesg) and several common NIC / WiFi chipsets fail to come up at
+# all. Curated rather than ``firmware-linux-nonfree`` so the squashfs
+# only grows by ~150 MiB instead of ~500. Requires
+# ``--archive-areas "main non-free-firmware"`` in ``auto/config``.
+firmware-misc-nonfree
+firmware-iwlwifi
+firmware-realtek
+firmware-bnx2
+firmware-bnx2x
+firmware-amd-graphics
+
+# NetworkManager pulls in ``nmtui`` (a curses-friendly network picker)
+# and the daemon that backs it. Use case: operator boots bty-usb on
+# a WiFi-only laptop / mini-PC and needs to associate to an SSID
+# before the TUI can hit ``oras://`` image URLs. Drops to tty2 with
+# Ctrl+Alt+F2, runs ``nmtui``, joins the network, returns to the bty
+# TUI on tty1. The live env has no networkd ``.network`` files in
+# its chroot (those live in ``rootfs/server/`` and only ship in the
+# server appliance), so NM is the sole network manager here and
+# nothing competes for interface ownership.
+network-manager

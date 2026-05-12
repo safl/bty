@@ -55,6 +55,7 @@ lb config noauto \
     --mode debian \
     --distribution trixie \
     --architectures amd64 \
+    --archive-areas "main non-free-firmware" \
     --binary-images "${BINARY_IMAGES}" \
     --debian-installer none \
     --memtest none \
@@ -63,6 +64,14 @@ lb config noauto \
     ${BOOTLOADERS_OPTS} \
     --bootappend-live "${BOOTAPPEND}" \
     "${@}"
+# ``--archive-areas "main non-free-firmware"`` unlocks the
+# ``firmware-*`` packages declared in
+# ``config/package-lists/bty-base.list.chroot``. Default areas are
+# just ``main``, which silently drops every firmware blob and
+# produces a live env where i915 wedges the GPU on probe and
+# certain NIC / WiFi chipsets fail to load. Debian split
+# ``non-free-firmware`` out of ``non-free`` in bookworm precisely
+# so this archive can be enabled on its own.
 # Note: an earlier iteration tried ``--syslinux-timeout 1`` here per
 # advice from elsewhere; live-build trixie (20250814) doesn't
 # recognise that flag and ``lb config`` errors out. Bootloader-menu
