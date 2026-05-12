@@ -62,6 +62,13 @@ Windows box - exFAT is read/write on all three - and dropping
 partition is *not* under the overlayroot tmpfs, so files copied
 there persist on the stick.
 
+Fresh sticks ship with four starter `.bri` files already on the
+partition: three nosi base images via the `oras://ghcr.io/...`
+scheme (rolling `:latest` tags resolved to content-addressed
+layer digests at flash time) and the latest bty-server appliance
+via a GitHub release URL. See [`reference.md`](reference.md) for
+the `.bri` schema and `oras://` URL form.
+
 ## Machine record
 
 A `bty-web`-only concept. A persistent entry in the server's state

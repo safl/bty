@@ -129,6 +129,50 @@ or left null. Operators can drop `.bri` files alongside `.img.gz`
 deliveries, at the surrounding stick's partition root or in a
 `bty-images/` subfolder there).
 
+#### `url` field: schemes
+
+The `url` field accepts three schemes:
+
+- `https://` (or `http://`) — plain HTTP fetch. Format is inferred
+  from the URL's filename extension.
+- `oras://<host>/<owner>/<repo>:<tag>` — an OCI artefact published
+  via [ORAS](https://oras.land/) (OCI Registry As Storage -- the
+  spec for **non-container** artefacts in a container registry).
+  bty resolves the tag to a content-addressed layer digest at
+  flash time (through the registry's anonymous-pull flow; no
+  credentials required for public packages) and verifies the
+  downloaded bytes against that digest. Use a rolling tag
+  (`:latest`) to follow upstream re-publishes; pin a specific
+  build by replacing the tag with `@sha256:<hex>`.
+
+  Distinct from a `docker pull ghcr.io/...` reference: nosi-style
+  disk images are stored as OCI blobs but are **not** runnable
+  container images. The `oras://` spelling makes that explicit so
+  an operator reading a .bri file doesn't reach for `docker`
+  / `podman` by mistake.
+
+  Any OCI v2 registry that follows the GHCR anonymous-pull
+  convention works; the URL's host (`ghcr.io`, `quay.io`,
+  `registry.example.com:5000`, etc.) drives the per-host token
+  endpoint.
+
+```toml
+# rolling tag, bty pins to current digest at flash time
+url = "oras://ghcr.io/safl/nosi/debian-base:latest"
+
+# digest-pinned, skips the manifest fetch
+url = "oras://ghcr.io/safl/nosi/debian-base@sha256:94e6..."
+```
+
+Fresh USB sticks ship with four starter .bri files pre-staged
+on the BTY_IMAGES partition: three nosi base images
+(`debian-base`, `ubuntu-base`, `fedora-base`, each via
+`oras://ghcr.io/safl/nosi/<v>:latest`) plus the latest bty-server
+appliance from the GitHub release URL. Operators see all four
+in the TUI catalog without setting up any infrastructure, and
+edit / delete / replace them freely from a host OS since the
+files are plain TOML on an exFAT partition.
+
 To install the bty-server appliance specifically, no `.bri`
 shipping is needed: `bty tui` has an `i` keybinding that flashes
 the latest `bty-server-x86_64.img.gz` from

@@ -110,8 +110,24 @@ table, and you should now see the second partition labeled
 
 ## Step 3: Drop your image(s) onto BTY_IMAGES
 
-The `BTY_IMAGES` partition is **exFAT** so you can mount it on Linux,
-macOS, or Windows.
+A fresh stick already ships with four starter `.bri` (bty Remote
+Image) descriptors on the `BTY_IMAGES` partition, so you can flash
+without copying anything onto the stick first:
+
+- `nosi-debian-base-x86_64.bri` -- Debian 13 cloud image
+- `nosi-ubuntu-base-x86_64.bri` -- Ubuntu 26.04 LTS cloud image
+- `nosi-fedora-base-x86_64.bri` -- Fedora 44 cloud image
+- `bty-server-x86_64.bri` -- latest bty-server appliance
+
+All three nosi entries use `oras://ghcr.io/safl/nosi/<variant>:latest`,
+which bty resolves at flash time to the current GHCR-published
+layer digest. The bty-server entry uses a GitHub release URL.
+See [`reference.md`](reference.md) for the `.bri` schema and the
+`oras://` scheme details.
+
+To add your own pre-built images, mount the partition and drop
+files in. It's **exFAT** so you can mount it on Linux, macOS, or
+Windows.
 
 **Linux:**
 
