@@ -86,14 +86,18 @@ def test_load_rejects_unknown_version(tmp_path: Path) -> None:
 
 
 def test_load_rejects_missing_required_field(tmp_path: Path) -> None:
+    """``name`` and ``src`` are required; ``sha256`` is now optional
+    (relaxed in v0.9.3 so rolling-tag oras:// and rolling-asset
+    http URLs don't need a pre-pinned digest). This test pins the
+    remaining required-field behaviour: an entry without ``src``
+    is rejected, but an entry without ``sha256`` parses cleanly."""
     body = """
         version = 1
         [[images]]
-        name = "incomplete"
-        src = "https://example.com/incomplete"
+        name = "no-src"
     """
     path = _write(tmp_path / "catalog.toml", body)
-    with pytest.raises(catalog.CatalogError, match="sha256"):
+    with pytest.raises(catalog.CatalogError, match="src"):
         catalog.load(path)
 
 
@@ -419,3 +423,74 @@ def test_fetch_sha256_for_url_rejects_oversized_body(
             "https://example.invalid/foo.img.gz",
             "https://example.invalid/foo.img.gz.sha256",
         )
+
+
+# --------------------------------------------------------------------------
+# sha256 is optional for oras:// entries (rolling-tag portable catalogs)
+# --------------------------------------------------------------------------
+
+
+def test_catalog_entry_accepts_oras_src_without_sha256() -> None:
+    """``oras://`` entries can omit ``sha256``: the OCI manifest
+    carries a layer digest that bty resolves and verifies at flash
+    time. Pre-pinning would freeze a rolling tag to whatever was
+    current at catalog-publish time -- the whole point of rolling
+    is that the operator gets nosi's latest rebuild without a bty
+    re-release."""
+    entry = catalog.CatalogEntry.from_dict(
+        {
+            "name": "nosi-debian-sysdev",
+            "src": "oras://ghcr.io/safl/nosi/debian-sysdev:latest",
+            "format": "img.gz",
+        }
+    )
+    assert entry.sha256 is None
+    assert entry.src == "oras://ghcr.io/safl/nosi/debian-sysdev:latest"
+    assert entry.format == "img.gz"
+
+
+def test_catalog_entry_accepts_http_src_without_sha256() -> None:
+    """http(s) entries can also be sha-less in the portable catalog
+    use case: a rolling release-asset URL like
+    ``github.com/.../releases/latest/download/...`` has no stable
+    sha at catalog-publish time either. The flash path relies on
+    TLS for integrity; bty-web's manifest cache enforces "sha
+    required" at use-time via ``cached_path``."""
+    entry = catalog.CatalogEntry.from_dict(
+        {
+            "name": "bty-server-latest",
+            "src": "https://github.com/safl/bty/releases/latest/download/bty-server-x86_64.img.gz",
+            "format": "img.gz",
+        }
+    )
+    assert entry.sha256 is None
+    assert entry.src.startswith("https://github.com/safl/bty/releases/")
+
+
+def test_catalog_entry_cached_path_raises_when_sha_is_none(tmp_path: Path) -> None:
+    """``oras://`` entries don't carry a pre-pinned digest, so the
+    sha-keyed cache path is meaningless for them. Raise loudly
+    rather than fall back to a synthetic key -- the cache layer is
+    only ever exercised by bty-web's sha-bound flow."""
+    entry = catalog.CatalogEntry.from_dict(
+        {
+            "name": "no-sha",
+            "src": "oras://ghcr.io/owner/repo:latest",
+        }
+    )
+    with pytest.raises(catalog.CatalogError, match="cached_path requires a sha256"):
+        entry.cached_path(tmp_path)
+
+
+def test_catalog_entry_accepts_explicit_null_sha256() -> None:
+    """``sha256 = null`` in the TOML maps to a Python ``None``;
+    treat it the same as an absent key. Operators who author the
+    catalog by hand might write the explicit null for clarity."""
+    entry = catalog.CatalogEntry.from_dict(
+        {
+            "name": "explicit-null",
+            "src": "oras://ghcr.io/owner/repo:latest",
+            "sha256": None,
+        }
+    )
+    assert entry.sha256 is None

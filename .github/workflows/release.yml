@@ -412,6 +412,22 @@ jobs:
       # softprops/action-gh-release creates / updates the release.
       contents: write
     steps:
+      - name: Check out source (for catalog.toml generation)
+        # The catalog generator reads ``cijoe/scripts/usb_iso_build.py``
+        # to AST-extract the same ``_STARTER_BRIS`` set baked onto
+        # BTY_IMAGES, so the repo needs to be on disk in this job.
+        uses: actions/checkout@v4
+      - name: Generate catalog.toml from _STARTER_BRIS
+        # bty's default portable catalog: 3 nosi sysdev images (via
+        # rolling oras:// tags) + bty-server (GitHub release URL).
+        # Rolling tags stay rolling -- bty.oras resolves the layer
+        # digest at flash time, so this file stays current as nosi
+        # republishes without needing a bty re-release.
+        run: |
+          set -eu
+          python scripts/generate_catalog_toml.py catalog.toml
+          echo "--- catalog.toml ---"
+          cat catalog.toml
       - name: Download release artifacts
         # Explicit allow-list: only the artifacts that belong on the
         # GitHub Release page. Skip ``docs-html`` (hundreds of files,
@@ -429,7 +445,9 @@ jobs:
           # Each upload-artifact job lands its files in
           # ``gathered/<artifact-name>/...``. Listed explicitly so a
           # new artifact added by a future job doesn't silently leak
-          # onto the public Release page.
+          # onto the public Release page. ``catalog.toml`` is
+          # generated in the preceding step and lives at the repo
+          # root.
           files: |
             gathered/dist/*
             gathered/bty-usb-x86_64-iso-gz/*
@@ -437,6 +455,7 @@ jobs:
             gathered/bty-server-rpi-arm64-img-gz/*
             gathered/bty-netboot-x86_64/*
             gathered/docs-pdf/*
+            catalog.toml
           fail_on_unmatched_files: true
           # Auto-populate the release body with a list of merged
           # commits / PRs since the previous tag. Without this the

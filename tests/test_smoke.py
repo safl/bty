@@ -333,3 +333,59 @@ def test_usb_iso_build_starter_bris_parse_as_toml() -> None:
             assert remote.url == parsed["url"]
         finally:
             tmp.unlink()
+
+
+def test_generate_catalog_toml_round_trips_through_catalog_load(tmp_path: Path) -> None:
+    """``scripts/generate_catalog_toml.py`` reads ``_STARTER_BRIS``
+    (the same source-of-truth as the BTY_IMAGES bake) and emits a
+    catalog manifest matching the schema ``bty.catalog.load_bytes``
+    parses. The release workflow runs this script; if the output
+    drifts from the schema, every operator pointing ``--catalog`` at
+    the release asset stops working.
+
+    Guard: invoke the generator into a tmp file, then round-trip the
+    bytes through ``bty.catalog.load_bytes`` and assert all four
+    entries land, all four use ``src`` (not the .bri-side ``url``
+    key), and the oras:// entries don't carry a pre-pinned sha
+    (rolling-tag invariant).
+    """
+    import subprocess as _sp
+
+    from bty import catalog as _catalog
+
+    repo_root = Path(__file__).resolve().parents[1]
+    output = tmp_path / "catalog.toml"
+    rc = _sp.run(
+        [
+            sys.executable,
+            str(repo_root / "scripts" / "generate_catalog_toml.py"),
+            str(output),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert rc.returncode == 0, f"generator failed: {rc.stderr}"
+    assert output.is_file(), "generator did not write the output file"
+
+    catalog_obj = _catalog.load_bytes(output.read_bytes(), source=str(output))
+    assert catalog_obj.version == 1
+    assert len(catalog_obj.entries) == 4
+    # Same four images as the BTY_IMAGES starter set: three nosi
+    # sysdev images plus the bty-server appliance.
+    nosi_entries = [e for e in catalog_obj.entries if "nosi" in e.name]
+    server_entries = [e for e in catalog_obj.entries if "bty-server" in e.name]
+    assert len(nosi_entries) == 3
+    assert len(server_entries) == 1
+    # Rolling-tag invariant: oras:// entries are sha-less. Pre-
+    # pinning at generate time would freeze the catalog and defeat
+    # the whole point of the rolling tags.
+    for entry in nosi_entries:
+        assert entry.src.startswith("oras://ghcr.io/safl/nosi/")
+        assert entry.sha256 is None, (
+            f"{entry.name} has a pre-pinned sha256; generator should leave "
+            f"oras:// rolling tags unresolved so they stay current"
+        )
+    # bty-server entry uses a plain https URL (GitHub release
+    # asset); generator preserves the same shape.
+    assert server_entries[0].src.startswith("https://github.com/safl/bty/releases/")

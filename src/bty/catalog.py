@@ -78,31 +78,52 @@ class CatalogEntry:
     Operators can still set it explicitly to disambiguate or to
     name a format detection wouldn't infer (e.g. extension-less
     files served from a CDN).
+
+    ``sha256`` is optional in the schema. Different consumers have
+    different needs:
+
+    - bty-tui's ``--catalog`` (portable catalog: display + flash
+      from src) ignores sha; the digest verification happens at
+      flash time for ``oras://`` (manifest layer digest) or relies
+      on TLS for http(s).
+    - bty-web's manifest cache (``$BTY_STATE_DIR/catalog.toml`` +
+      ``fetch_to_cache``) needs sha for the SHA-keyed cache and
+      machine binding; ``cached_path`` raises if it's None so the
+      cache layer can't accidentally use a sha-less entry.
+
+    The schema decoupling is intentional: rolling tags (``oras://
+    ...:latest``, ``github.com/.../releases/latest/download/...``)
+    have no stable sha at catalog-publish time. Pre-pinning would
+    freeze the catalog to whatever upstream looked like that
+    afternoon, defeating the rolling-publish design.
     """
 
     name: str
     src: str
-    sha256: str
+    sha256: str | None
     format: str | None = None
     size_bytes: int | None = None
     description: str | None = None
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> Self:
-        for required in ("name", "src", "sha256"):
+        for required in ("name", "src"):
             if required not in raw:
                 raise CatalogError(
                     f"manifest entry missing required field: {required!r} (entry: {raw!r})"
                 )
-        sha = str(raw["sha256"]).strip().lower()
-        if not _images.is_sha256_hex(sha):
-            raise CatalogError(
-                f"manifest entry {raw['name']!r}: sha256 must be a 64-char "
-                f"lower-case hex string, got {sha!r}"
-            )
+        src = str(raw["src"])
+        sha: str | None = None
+        if "sha256" in raw and raw["sha256"] is not None:
+            sha = str(raw["sha256"]).strip().lower()
+            if not _images.is_sha256_hex(sha):
+                raise CatalogError(
+                    f"manifest entry {raw['name']!r}: sha256 must be a 64-char "
+                    f"lower-case hex string, got {sha!r}"
+                )
         return cls(
             name=str(raw["name"]),
-            src=str(raw["src"]),
+            src=src,
             sha256=sha,
             format=raw.get("format") or _images.detect_format(Path(raw["name"])),
             size_bytes=int(raw["size_bytes"]) if raw.get("size_bytes") is not None else None,
@@ -112,7 +133,20 @@ class CatalogEntry:
     def cached_path(self, cache_dir: Path) -> Path:
         """Where this entry's bytes live once cached. Content-
         addressed by SHA so multiple entries pointing at the same
-        upstream blob share one file."""
+        upstream blob share one file.
+
+        Raises :class:`CatalogError` if the entry has no ``sha256``
+        (oras:// rolling-tag entries in a portable catalog don't
+        carry one; they're flash-only and never enter the manifest-
+        cache path).
+        """
+        if self.sha256 is None:
+            raise CatalogError(
+                f"catalog entry {self.name!r}: cached_path requires a sha256 "
+                f"but this entry has none (oras:// rolling-tag entries don't "
+                f"carry a pre-pinned digest; they flash directly without "
+                f"hitting the sha-keyed cache)"
+            )
         return cache_dir / self.sha256
 
 
@@ -274,7 +308,10 @@ def fetch_to_cache(
 
     Returns the cached path on success.
     """
+    # ``cached_path`` raises if sha is None, so the assertion is a
+    # type-narrowing aid for mypy: from here on entry.sha256 is str.
     cached = entry.cached_path(cache_dir)
+    assert entry.sha256 is not None
     if cached.is_file():
         # Even a cached entry should announce itself as "100% done"
         # so a UI that registered the request before the cache check

@@ -66,7 +66,7 @@ class DownloadState:
     """
 
     name: str
-    sha256: str
+    sha256: str | None
     src: str
     status: str = "queued"  # queued | running | completed | cancelled | failed
     bytes_downloaded: int = 0
