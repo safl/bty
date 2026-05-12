@@ -870,7 +870,7 @@ def test_flash_status_screen_ticks_stages_on_success(
         disks_list=[_fake_disk()],
     )
 
-    def _fake_execute_plan(plan: Any, progress: Any = None) -> None:
+    def _fake_execute_plan(plan: Any, progress: Any = None, cancel: Any = None) -> None:
         # Walk through the four lifecycle events the screen renders
         # as stages (the fifth, ``done``, is ticked by the screen
         # itself after execute_plan returns).
@@ -909,6 +909,81 @@ def test_flash_status_screen_ticks_stages_on_success(
     _run(_drive())
 
 
+def test_flash_status_screen_cancel_button_sets_event_and_dismisses_cancelled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Pressing the Cancel button (or Esc) sets the screen's
+    ``threading.Event``, which the flash worker passes to
+    ``execute_plan`` as the ``cancel`` callback. The worker's fake
+    ``execute_plan`` then raises ``FlashCancelled`` and the screen
+    settles into the "cancelled" state with Close enabled."""
+    _patch_data_sources(
+        monkeypatch,
+        images_list=[_fake_image()],
+        disks_list=[_fake_disk()],
+    )
+
+    fake_execute_started = asyncio.Event()
+
+    def _fake_execute_plan(plan: Any, progress: Any = None, cancel: Any = None) -> None:
+        # Signal the test that the worker is running, then loop
+        # polling cancel until it goes True (mirrors the watchdog
+        # behaviour in the real flash code).
+        import time as _time
+
+        if progress is not None:
+            progress(tui_app.flash.FlashProgress(event="started"))
+            progress(tui_app.flash.FlashProgress(event="writing"))
+        # call_from_thread isn't available here (we're in the test
+        # thread, not the worker thread the screen would spawn for
+        # call_from_thread to reach); just set a plain event.
+        fake_execute_started.set()
+        for _ in range(50):  # ~5s safety bound
+            if cancel is not None and cancel():
+                raise tui_app.flash.FlashCancelled("flash cancelled by operator")
+            _time.sleep(0.1)
+        raise AssertionError("cancel callback never returned True")
+
+    monkeypatch.setattr(tui_app.flash, "execute_plan", _fake_execute_plan)
+
+    plan = _fake_flash_plan()
+    app = tui_app.BtyTui(image_root=tmp_path / "images")
+
+    async def _drive() -> None:
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            from textual.widgets import Button
+
+            screen = tui_app.FlashStatusScreen(plan)
+            app.push_screen(screen)
+            # Let the worker thread start.
+            for _ in range(40):
+                await pilot.pause()
+                if fake_execute_started.is_set():
+                    break
+            assert fake_execute_started.is_set(), "worker never ran"
+
+            # Press the Cancel button -- sets the event the worker
+            # is polling.
+            cancel_btn = screen.query_one("#cancel-flash", Button)
+            await pilot.click(cancel_btn)
+            for _ in range(40):
+                await pilot.pause()
+                # ``_result`` flips to "cancelled" once the worker
+                # raises FlashCancelled and ``_finish`` runs.
+                if screen._result is not None:  # type: ignore[reportPrivateUsage]
+                    break
+            assert screen._result == "cancelled", (  # type: ignore[reportPrivateUsage]
+                f"expected cancelled, got {screen._result!r}"  # type: ignore[reportPrivateUsage]
+            )
+            # Close button is now enabled; Cancel button is now disabled.
+            close_btn = screen.query_one("#close", Button)
+            assert close_btn.disabled is False
+            assert cancel_btn.disabled is True
+
+    _run(_drive())
+
+
 def test_flash_status_screen_marks_failed_stage_on_FlashError(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -921,7 +996,7 @@ def test_flash_status_screen_marks_failed_stage_on_FlashError(
         disks_list=[_fake_disk()],
     )
 
-    def _fake_execute_plan(plan: Any, progress: Any = None) -> None:
+    def _fake_execute_plan(plan: Any, progress: Any = None, cancel: Any = None) -> None:
         if progress is not None:
             progress(tui_app.flash.FlashProgress(event="started"))
             progress(tui_app.flash.FlashProgress(event="writing"))
@@ -1152,10 +1227,13 @@ def test_action_flash_success_flips_button_to_reboot(
 
     app = tui_app.BtyTui(image_root=tmp_path / "images")
 
-    confirmed_then_success = iter([True, True])
+    # First modal is FlashConfirmScreen (returns bool); second is
+    # FlashStatusScreen (returns str "ok" / "failed" / "cancelled").
+    modal_results: list[Any] = [True, "ok"]
+    modal_results_iter = iter(modal_results)
 
-    async def _fake_push_screen_wait(_screen: object) -> bool:
-        return next(confirmed_then_success)
+    async def _fake_push_screen_wait(_screen: object) -> Any:
+        return next(modal_results_iter)
 
     monkeypatch.setattr(app, "push_screen_wait", _fake_push_screen_wait)
 

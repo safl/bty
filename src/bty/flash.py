@@ -29,12 +29,19 @@ import stat
 import subprocess
 import sys
 import threading
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import IO, Any, TypeAlias
 
 from bty import images, oras
+
+# ``cancel`` callbacks return True to abort an in-flight flash. The
+# flash code polls ~4Hz from a watchdog thread; on True it terminates
+# all child subprocesses (curl + decompressor + dd) and the main
+# pipeline raises :class:`FlashCancelled`.
+CancelCheck: TypeAlias = Callable[[], bool]
 
 
 @dataclass
@@ -479,10 +486,69 @@ class FlashRaceError(FlashError):
     """The target changed state between probe and write (mounted, removed, ...)."""
 
 
+class FlashCancelled(FlashError):
+    """Raised when the operator's ``cancel`` callback returns True.
+
+    Distinct from :class:`FlashError` proper so callers (TUI, tests)
+    can branch on "operator-requested abort" vs "the underlying
+    pipeline failed". Subclassing means callers that catch
+    :class:`FlashError` still handle cancellation as a failure path
+    if they don't care about the distinction.
+    """
+
+
+def _spawn_cancel_watchdog(
+    procs: list[subprocess.Popen[Any]],
+    cancel: CancelCheck | None,
+    *,
+    poll_interval: float = 0.25,
+    terminate_grace: float = 1.0,
+) -> threading.Thread | None:
+    """Spawn a daemon thread that polls ``cancel()`` and kills the
+    pipeline subprocesses on True.
+
+    The watchdog exits naturally when all ``procs`` have finished
+    (so it doesn't outlive a successful flash). On cancel: SIGTERM
+    each live proc, give them ``terminate_grace`` seconds to drain
+    cleanly, then SIGKILL anything still alive. The main pipeline
+    will then see non-zero exit codes / EOF on its pipes; the caller
+    re-checks ``cancel()`` after the pipeline returns and raises
+    :class:`FlashCancelled` rather than :class:`FlashError`.
+    """
+    if cancel is None:
+        return None
+
+    def _watch() -> None:
+        while True:
+            if all(p.poll() is not None for p in procs):
+                return  # natural completion: nothing left to kill
+            if cancel():
+                for p in procs:
+                    if p.poll() is None:
+                        with contextlib.suppress(ProcessLookupError):
+                            p.terminate()
+                deadline = time.monotonic() + terminate_grace
+                for p in procs:
+                    remaining = max(0.0, deadline - time.monotonic())
+                    with contextlib.suppress(subprocess.TimeoutExpired):
+                        p.wait(timeout=remaining)
+                for p in procs:
+                    if p.poll() is None:
+                        with contextlib.suppress(ProcessLookupError):
+                            p.kill()
+                return
+            time.sleep(poll_interval)
+
+    thread = threading.Thread(target=_watch, daemon=True)
+    thread.start()
+    return thread
+
+
 def execute_plan(
     plan: FlashPlan,
     *,
     progress: ProgressCallback | None = None,
+    cancel: CancelCheck | None = None,
 ) -> None:
     """Write ``plan.image`` to ``plan.target``.
 
@@ -497,8 +563,20 @@ def execute_plan(
     On any :class:`FlashError`, a ``failed`` event is emitted with the
     exception string in ``note`` and the exception re-raised.
 
+    If ``cancel`` is given (a zero-arg callable returning ``bool``), a
+    watchdog thread polls it ~4Hz while a URL flash is streaming. On
+    True, the pipeline's subprocesses (``curl`` / decompressor /
+    ``dd``) are SIGTERM'd with a 1s grace then SIGKILL'd; the call
+    then raises :class:`FlashCancelled` rather than
+    :class:`FlashError`. Cancel applies only to the URL flash paths
+    (where a slow remote can leave the operator waiting); the
+    local-file dispatch finishes in a few seconds and isn't worth
+    interrupting.
+
     Raises :class:`FlashError` for caller-visible failures (target no
     longer suitable, format unrecognised, write subprocess failed).
+    Raises :class:`FlashCancelled` when the operator's cancel
+    callback returned True.
     """
     _emit(progress, "started", total_bytes=plan.image.virtual_size_bytes)
 
@@ -525,6 +603,7 @@ def execute_plan(
                     plan.target.path,
                     progress=progress,
                     total_bytes=total_bytes,
+                    cancel=cancel,
                 )
             elif fmt == "img.zst":
                 _flash_zst_from_url(
@@ -532,6 +611,7 @@ def execute_plan(
                     plan.target.path,
                     progress=progress,
                     total_bytes=total_bytes,
+                    cancel=cancel,
                 )
             elif fmt == "img.xz":
                 _flash_xz_from_url(
@@ -539,6 +619,7 @@ def execute_plan(
                     plan.target.path,
                     progress=progress,
                     total_bytes=total_bytes,
+                    cancel=cancel,
                 )
             elif fmt == "img.gz":
                 _flash_gz_from_url(
@@ -546,6 +627,7 @@ def execute_plan(
                     plan.target.path,
                     progress=progress,
                     total_bytes=total_bytes,
+                    cancel=cancel,
                 )
             elif fmt == "img.bz2":
                 _flash_bz2_from_url(
@@ -553,9 +635,10 @@ def execute_plan(
                     plan.target.path,
                     progress=progress,
                     total_bytes=total_bytes,
+                    cancel=cancel,
                 )
             elif fmt == "qcow2":
-                _flash_qcow2_from_url(plan.image.url, plan.target.path)
+                _flash_qcow2_from_url(plan.image.url, plan.target.path, cancel=cancel)
             else:
                 raise FlashError(f"cannot flash image of format {fmt!r}")
         else:
@@ -860,6 +943,7 @@ def _flash_img_from_url(
     *,
     progress: ProgressCallback | None = None,
     total_bytes: int | None = None,
+    cancel: CancelCheck | None = None,
 ) -> None:
     """Stream a raw .img from URL straight to a block device with dd."""
     curl_args, resolved_size = _curl_args_for_source(url)
@@ -874,6 +958,7 @@ def _flash_img_from_url(
             stderr=stderr,
             text=True,
         )
+        watchdog = _spawn_cancel_watchdog([curl_proc, dd_proc], cancel)
         pump = _start_dd_progress_thread(dd_proc, progress, total_bytes)
         # Hand the read end fully to dd; closing our copy lets the kernel
         # propagate EOF / SIGPIPE correctly when one end finishes first.
@@ -882,8 +967,15 @@ def _flash_img_from_url(
         dd_rc = dd_proc.wait()
         if pump is not None:
             pump.join(timeout=2)
+        if watchdog is not None:
+            watchdog.join(timeout=2)
     finally:
         curl_rc = curl_proc.wait()
+    # Cancel takes precedence over non-zero exit codes: SIGTERM
+    # leaves curl/dd with nonzero status which would otherwise be
+    # mis-reported as a transport failure.
+    if cancel is not None and cancel():
+        raise FlashCancelled("flash cancelled by operator")
     if curl_rc != 0:
         raise FlashError(f"curl exited {curl_rc} fetching {url}")
     if dd_rc != 0:
@@ -898,6 +990,7 @@ def _flash_compressed_from_url(
     *,
     progress: ProgressCallback | None = None,
     total_bytes: int | None = None,
+    cancel: CancelCheck | None = None,
 ) -> None:
     """Pipeline ``curl URL | <decompress_cmd> | dd of=TARGET ...``.
 
@@ -938,16 +1031,25 @@ def _flash_compressed_from_url(
                 stderr=stderr,
                 text=True,
             )
+            watchdog = _spawn_cancel_watchdog([curl_proc, decomp_proc, dd_proc], cancel)
             pump = _start_dd_progress_thread(dd_proc, progress, total_bytes)
             if decomp_proc.stdout is not None:
                 decomp_proc.stdout.close()
             dd_rc = dd_proc.wait()
             if pump is not None:
                 pump.join(timeout=2)
+            if watchdog is not None:
+                watchdog.join(timeout=2)
         finally:
             decomp_rc = decomp_proc.wait()
     finally:
         curl_rc = curl_proc.wait()
+    # Cancel takes precedence over non-zero exit codes: the SIGTERM
+    # the watchdog sends leaves all three subprocesses with nonzero
+    # status, which would otherwise be misread as a transport /
+    # decode failure.
+    if cancel is not None and cancel():
+        raise FlashCancelled("flash cancelled by operator")
     if curl_rc != 0:
         raise FlashError(f"curl exited {curl_rc} fetching {url}")
     if decomp_rc != 0:
@@ -962,6 +1064,7 @@ def _flash_zst_from_url(
     *,
     progress: ProgressCallback | None = None,
     total_bytes: int | None = None,
+    cancel: CancelCheck | None = None,
 ) -> None:
     """Pipeline ``curl URL | zstd -d --stdout | dd of=TARGET ...``.
 
@@ -977,6 +1080,7 @@ def _flash_zst_from_url(
         "zstd",
         progress=progress,
         total_bytes=total_bytes,
+        cancel=cancel,
     )
 
 
@@ -986,6 +1090,7 @@ def _flash_xz_from_url(
     *,
     progress: ProgressCallback | None = None,
     total_bytes: int | None = None,
+    cancel: CancelCheck | None = None,
 ) -> None:
     """Pipeline ``curl URL | xz -d --stdout | dd of=TARGET ...``."""
     _flash_compressed_from_url(
@@ -995,6 +1100,7 @@ def _flash_xz_from_url(
         "xz",
         progress=progress,
         total_bytes=total_bytes,
+        cancel=cancel,
     )
 
 
@@ -1004,6 +1110,7 @@ def _flash_gz_from_url(
     *,
     progress: ProgressCallback | None = None,
     total_bytes: int | None = None,
+    cancel: CancelCheck | None = None,
 ) -> None:
     """Pipeline ``curl URL | gzip -d --stdout | dd of=TARGET ...``."""
     _flash_compressed_from_url(
@@ -1013,6 +1120,7 @@ def _flash_gz_from_url(
         "gzip",
         progress=progress,
         total_bytes=total_bytes,
+        cancel=cancel,
     )
 
 
@@ -1022,6 +1130,7 @@ def _flash_bz2_from_url(
     *,
     progress: ProgressCallback | None = None,
     total_bytes: int | None = None,
+    cancel: CancelCheck | None = None,
 ) -> None:
     """Pipeline ``curl URL | bzip2 -d --stdout | dd of=TARGET ...``."""
     _flash_compressed_from_url(
@@ -1031,10 +1140,11 @@ def _flash_bz2_from_url(
         "bzip2",
         progress=progress,
         total_bytes=total_bytes,
+        cancel=cancel,
     )
 
 
-def _flash_qcow2_from_url(url: str, target: Path) -> None:
+def _flash_qcow2_from_url(url: str, target: Path, *, cancel: CancelCheck | None = None) -> None:
     """Download a qcow2 to a temp file, then ``qemu-img convert`` it.
 
     qcow2 is random-access (the converter seeks all over the source),
@@ -1047,10 +1157,19 @@ def _flash_qcow2_from_url(url: str, target: Path) -> None:
         tmp_path = Path(tmp.name)
     try:
         curl_args, _ = _curl_args_for_source(url)
-        rc = subprocess.run(
-            [*curl_args[:-1], "--output", str(tmp_path), curl_args[-1]],
-            check=False,
-        ).returncode
+        curl_argv = [*curl_args[:-1], "--output", str(tmp_path), curl_args[-1]]
+        # Popen + watchdog (rather than subprocess.run) so the cancel
+        # callback can terminate the download mid-stream. qcow2 can't
+        # stream-flash, so the download phase is the bulk of the wall
+        # time; cancelling there is what matters most for the
+        # operator experience.
+        curl_proc = subprocess.Popen(curl_argv)
+        watchdog = _spawn_cancel_watchdog([curl_proc], cancel)
+        rc = curl_proc.wait()
+        if watchdog is not None:
+            watchdog.join(timeout=2)
+        if cancel is not None and cancel():
+            raise FlashCancelled("flash cancelled by operator")
         if rc != 0:
             raise FlashError(f"curl exited {rc} fetching {url}")
         _flash_qcow2(tmp_path, target)

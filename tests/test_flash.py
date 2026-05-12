@@ -629,7 +629,11 @@ def test_execute_plan_dispatches_to_url_writers_for_url_images(
         "_flash_bz2_from_url",
         lambda _u, _t, **_kw: calls.append("bz2-url"),
     )
-    monkeypatch.setattr(flash, "_flash_qcow2_from_url", lambda _u, _t: calls.append("qcow2-url"))
+    monkeypatch.setattr(
+        flash,
+        "_flash_qcow2_from_url",
+        lambda _u, _t, **_kw: calls.append("qcow2-url"),
+    )
     _stub_post_write(monkeypatch, calls)
 
     for fmt, expected in (
@@ -740,3 +744,68 @@ def test_pump_dd_progress_handles_empty_stream() -> None:
     events: list[flash.FlashProgress] = []
     flash._pump_dd_progress(io.StringIO(""), events.append, total_bytes=100)
     assert events == []
+
+
+# --------------------------------------------------------------------------
+# Cancel plumbing (FlashCancelled + watchdog)
+# --------------------------------------------------------------------------
+
+
+def test_cancel_watchdog_terminates_live_procs_on_True() -> None:
+    """When ``cancel()`` returns True, every still-live subprocess
+    gets terminated. Procs that exited naturally are left alone."""
+    import subprocess as _sp
+
+    # Long-lived: ``sleep 30`` -- the watchdog needs to kill it.
+    alive = _sp.Popen(["sleep", "30"])
+    # Already-finished: a no-op ``true`` that exits immediately. The
+    # watchdog should NOT try to signal it (its handle is closed but
+    # poll() returns 0, so the dead-procs branch wins).
+    finished = _sp.Popen(["true"])
+    finished.wait(timeout=2)
+    cancelled = [False]
+
+    def _cancel() -> bool:
+        return cancelled[0]
+
+    watchdog = flash._spawn_cancel_watchdog([alive, finished], _cancel)
+    assert watchdog is not None
+    # Trigger cancel; the watchdog (running at ~4Hz) should see it
+    # within a tick and SIGTERM the live proc.
+    cancelled[0] = True
+    watchdog.join(timeout=5.0)
+    assert not watchdog.is_alive(), "watchdog did not exit after cancel"
+    # The alive proc was terminated.
+    rc = alive.wait(timeout=2.0)
+    assert rc != 0, f"expected terminated rc != 0, got {rc}"
+
+
+def test_cancel_watchdog_exits_when_all_procs_finish_naturally() -> None:
+    """No cancel ever fires -- the watchdog exits cleanly once every
+    proc has finished. Otherwise it'd leak a daemon thread per flash."""
+    import subprocess as _sp
+
+    proc = _sp.Popen(["true"])
+    proc.wait(timeout=2)
+    watchdog = flash._spawn_cancel_watchdog([proc], lambda: False)
+    assert watchdog is not None
+    watchdog.join(timeout=5.0)
+    assert not watchdog.is_alive(), "watchdog did not exit on natural completion"
+
+
+def test_cancel_watchdog_returns_none_without_cancel_callback() -> None:
+    """``cancel=None`` -> no thread spawned. Important: lets the
+    overwhelming majority of flashes (no cancel handler provided)
+    avoid the watchdog overhead entirely."""
+    import subprocess as _sp
+
+    proc = _sp.Popen(["true"])
+    proc.wait(timeout=2)
+    assert flash._spawn_cancel_watchdog([proc], None) is None
+
+
+def test_flash_cancelled_subclasses_flash_error() -> None:
+    """``except FlashError`` callers must still handle cancellation as
+    a failure case. Subclassing preserves that contract; callers that
+    want to distinguish catch FlashCancelled first."""
+    assert issubclass(flash.FlashCancelled, flash.FlashError)

@@ -535,17 +535,24 @@ class ProbingScreen(ModalScreen[None]):
         self._redraw()
 
 
-class FlashStatusScreen(ModalScreen[bool]):
+class FlashStatusScreen(ModalScreen[str]):
     """Floating modal that runs the flash in a worker and reports progress.
 
     Designed to feel like helix/zellij modals: bold stop-the-world
     "DO NOT REMOVE STICK" framing, a visual stage track that ticks
     as ``flash.execute_plan`` emits each lifecycle event, and a
     streaming event log below. The Close button is disabled until
-    the flash either completes or fails -- the operator can't bail
-    out mid-flash.
+    the flash settles to one of:
 
-    Returns ``True`` on success, ``False`` on failure.
+    - ``"ok"`` - success (returned via ``dismiss``)
+    - ``"failed"`` - pipeline error
+    - ``"cancelled"`` - operator pressed Cancel / Esc; the watchdog
+      terminated curl + decompressor + dd before the flash completed.
+
+    The Cancel button (enabled while the flash is running) sets a
+    ``threading.Event`` the worker passes to ``flash.execute_plan``
+    as ``cancel``. The flash code's cancel watchdog then SIGTERM's
+    its subprocess pipeline and raises :class:`flash.FlashCancelled`.
     """
 
     # Stable order of FlashProgress.event values that this modal
@@ -655,15 +662,29 @@ class FlashStatusScreen(ModalScreen[bool]):
     }
     """
 
+    BINDINGS: ClassVar[list[Binding | tuple[str, str] | tuple[str, str, str]]] = [
+        Binding("escape", "cancel_flash", "Cancel"),
+    ]
+
     def __init__(self, plan: flash.FlashPlan) -> None:
         super().__init__()
         self._plan = plan
-        self._result: bool | None = None
+        # ``"ok"`` / ``"failed"`` / ``"cancelled"`` once the worker
+        # settles; ``None`` while in-flight. ``dismiss`` uses it.
+        self._result: str | None = None
         self._completed_stages: set[str] = set()
         # Used to compute MB/s as ``writing_progress`` events arrive.
         # Set on first event; reset on each successful run.
         self._progress_start_t: float | None = None
         self._progress_start_bytes: int | None = None
+        # ``threading.Event`` (not asyncio) because the flash worker
+        # runs in a thread via ``@work(thread=True)``; the Cancel
+        # button's handler runs in the textual event-loop and just
+        # ``set()``s it. The flash code's watchdog polls
+        # ``cancel()`` ~4Hz and terminates curl/dd on True.
+        import threading
+
+        self._cancel_event = threading.Event()
 
     def compose(self) -> ComposeResult:
         with Vertical() as panel:
@@ -696,6 +717,9 @@ class FlashStatusScreen(ModalScreen[bool]):
                 yield Static("", id="flash-progress-summary", classes="flash-progress-summary")
             yield RichLog(highlight=False, markup=True, id="flash_log")
             with Horizontal(id="flash-actions"):
+                # Cancel is enabled while the flash runs; disabled once
+                # _finish lands (the operator picks Close at that point).
+                yield Button("Cancel", id="cancel-flash", variant="warning")
                 yield Button("Close", id="close", variant="default", disabled=True)
 
     def on_mount(self) -> None:
@@ -728,12 +752,28 @@ class FlashStatusScreen(ModalScreen[bool]):
                 self.app.call_from_thread(self._set_progress_total, event.total_bytes)
 
         try:
-            flash.execute_plan(self._plan, progress=on_progress)
+            flash.execute_plan(
+                self._plan,
+                progress=on_progress,
+                cancel=self._cancel_event.is_set,
+            )
             self.app.call_from_thread(self._mark_stage_active, "done")
-            self.app.call_from_thread(self._finish, True, "[green][OK] Flash completed.[/]")
+            self.app.call_from_thread(self._finish, "ok", "[green][OK] Flash completed.[/]")
+        except flash.FlashCancelled as exc:
+            # ``FlashCancelled`` subclasses ``FlashError``; catch it
+            # FIRST so the "failed" path doesn't swallow a deliberate
+            # operator-requested abort. The cancel watchdog has
+            # already SIGTERM'd the subprocess pipeline by the time
+            # we get here.
+            self.app.call_from_thread(self._mark_stage_failed)
+            self.app.call_from_thread(
+                self._finish,
+                "cancelled",
+                f"[yellow][CANCELLED] {exc}[/]",
+            )
         except flash.FlashError as exc:
             self.app.call_from_thread(self._mark_stage_failed)
-            self.app.call_from_thread(self._finish, False, f"[red][FAIL] Flash failed: {exc}[/]")
+            self.app.call_from_thread(self._finish, "failed", f"[red][FAIL] Flash failed: {exc}[/]")
 
     def _append_log(self, line: str) -> None:
         self.query_one(RichLog).write(line)
@@ -840,17 +880,18 @@ class FlashStatusScreen(ModalScreen[bool]):
         widget.update(f"[{marker}] {label}")
         widget.set_classes(f"flash-stage {state}")
 
-    def _finish(self, success: bool, message: str) -> None:
+    def _finish(self, result: str, message: str) -> None:
         log = self.query_one(RichLog)
         log.write(message)
-        self._result = success
+        self._result = result
+        success = result == "ok"
         # Stop the progress bar's animation. When ``total`` was
         # never set (image lacked a known virtual_size_bytes, or
         # the flash failed before the ``started`` event), the bar
         # stays in indeterminate mode and continues to bounce
         # back-and-forth even though the flash is done. Force the
         # bar to a finished determinate state so it freezes at
-        # 100% (or 0% on failure).
+        # 100% (on success) or 0% (on failure / cancel).
         try:
             bar = self.query_one("#flash-progress-bar", ProgressBar)
             if bar.total is None:
@@ -859,13 +900,42 @@ class FlashStatusScreen(ModalScreen[bool]):
                 bar.update(progress=bar.total)
         except Exception:  # pragma: no cover - defensive
             pass
+        # Cancel is now meaningless; Close becomes the operator's
+        # next action.
+        with contextlib.suppress(Exception):
+            self.query_one("#cancel-flash", Button).disabled = True
         close_btn = self.query_one("#close", Button)
         close_btn.disabled = False
         close_btn.focus()
 
+    def action_cancel_flash(self) -> None:
+        """Esc binding: same effect as pressing the Cancel button."""
+        self._request_cancel()
+
+    def _request_cancel(self) -> None:
+        if self._result is not None:
+            return  # already settled; Cancel is a no-op
+        if self._cancel_event.is_set():
+            return  # already requested; wait for the watchdog
+        self._cancel_event.set()
+        with contextlib.suppress(Exception):
+            self.query_one(RichLog).write(
+                "[yellow]Cancelling: terminating curl / decompressor / dd ...[/]"
+            )
+        # Disable Cancel so a second press doesn't look ambiguous.
+        with contextlib.suppress(Exception):
+            self.query_one("#cancel-flash", Button).disabled = True
+
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "close":
-            self.dismiss(self._result is True)
+            # ``_result`` is one of "ok" / "failed" / "cancelled" by the
+            # time Close is enabled; ``or "failed"`` is just defensive
+            # for a closed-too-early-without-result race.
+            self.dismiss(self._result or "failed")
+            return
+        if event.button.id == "cancel-flash":
+            self._request_cancel()
+            return
 
 
 class CatalogSelectScreen(ModalScreen["str | Path | None"]):
@@ -1919,7 +1989,9 @@ class BtyTui(App[None]):
             self._set_status("Flash cancelled.")
             return
 
-        success = await self.push_screen_wait(FlashStatusScreen(plan))
+        flash_result = await self.push_screen_wait(FlashStatusScreen(plan))
+        success = flash_result == "ok"
+        cancelled = flash_result == "cancelled"
         if success and self._pxe_done_base is not None and self._mac is not None:
             # Catalog source was an http(s) URL; the derived base
             # might be a bty-web instance. POST the completion signal
@@ -1934,6 +2006,20 @@ class BtyTui(App[None]):
                 return
         if success:
             self._set_status_transient("Flash completed.")
+        elif cancelled:
+            # Cancel returns the operator to the wizard with both
+            # selections cleared so a follow-up flash starts from
+            # Stage 1 -- the operator likely cancelled because they
+            # want to pick a different image or target.
+            self._selected_image = None
+            self._selected_disk = None
+            self._post_flash = False
+            self._render_status()
+            self._set_status("Flash cancelled. Pick an image to try again.")
+            with contextlib.suppress(Exception):
+                self.query_one("#images_table", DataTable).focus()
+            self._populate_disks()
+            return
         else:
             self._set_status("Flash failed; see status modal log.")
         # Disks may have new partition tables now; refresh.
