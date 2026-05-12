@@ -137,6 +137,28 @@ url = "https://my.example.com/images/debian-13-server.img.gz"
 # Optional: name, format, size_bytes, sha256, description
 ```
 
+The ``url`` field also accepts an ``oras://`` reference pointing
+at an OCI artefact published via [ORAS](https://oras.land/) (OCI
+Registry As Storage -- the spec for **non-container** artefacts in
+a container registry). The scheme is distinct from a ``docker pull
+ghcr.io/...`` reference because nosi-style disk images are not
+runnable container images; they are gzip-compressed raw disks
+stored as OCI blobs:
+
+```toml
+# rolling tag, bty resolves :latest to the current layer digest at flash time
+url = "oras://ghcr.io/safl/nosi/debian-base:latest"
+
+# digest-pinned: same blob forever, no manifest fetch
+url = "oras://ghcr.io/safl/nosi/debian-base@sha256:94e6..."
+```
+
+Any OCI v2 registry following the GHCR anonymous-pull convention
+works (``oras://quay.io/...``, ``oras://registry.example.com:5000/...``);
+GHCR is the one exercised in the starter set. Fresh USB sticks
+ship with four such .bri files pre-staged on the BTY_IMAGES
+partition (three nosi base images plus the bty-server appliance).
+
 To install ``bty-server`` specifically, no ``.bri`` is needed:
 ``bty tui`` has an ``i`` keybinding that flashes the latest
 ``bty-server-x86_64.img.gz`` from GitHub releases directly. The

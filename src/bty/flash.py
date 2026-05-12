@@ -261,7 +261,7 @@ def probe_image_url(url: str) -> ImageInfo:
 
     parsed = urllib.parse.urlparse(url)
     if parsed.scheme not in ("http", "https"):
-        raise ValueError(f"image URL must be http, https, or oras: {url}")
+        raise ValueError(f"image URL must be http://, https://, or oras://: {url}")
     filename = Path(parsed.path).name or "image"
     fmt = images.detect_format(Path(filename))
 

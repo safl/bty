@@ -707,9 +707,9 @@ def _extend_with_exfat(cijoe, iso_path: Path) -> int:
     # also want one-click access to the nosi base images (Debian /
     # Ubuntu / Fedora). The four entries are:
     #
-    # - 3x nosi base images via ``ghcr:safl/nosi/<variant>:latest``,
-    #   resolved by bty's GHCR adapter to the current published layer
-    #   at flash time (rolling).
+    # - 3x nosi base images via ``oras://ghcr.io/safl/nosi/<variant>:latest``,
+    #   resolved by bty's ORAS adapter to the current published layer
+    #   digest at flash time (rolling).
     # - 1x bty-server appliance via the GitHub release asset URL
     #   (the bty-server image is built here, not in nosi).
     #
