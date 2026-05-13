@@ -211,7 +211,7 @@ COOKIE=$(curl -sS -i -X POST -d "password=bty" \
 curl -H "Cookie: bty-token=$COOKIE" http://server:8080/machines
 curl -H "Cookie: bty-token=$COOKIE" -X PUT \
      -H "Content-Type: application/json" \
-     -d '{"image_sha256":"<64-hex>","boot_policy":"flash"}' \
+     -d '{"bty_image_ref":"<64-hex>","boot_policy":"flash"}' \
      http://server:8080/machines/aa:bb:cc:dd:ee:ff
 ```
 

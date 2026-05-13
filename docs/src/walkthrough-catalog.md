@@ -112,7 +112,7 @@ without manual refresh.
 ## CLI (local mode -- intentionally simple)
 
 ```bash
-bty images [--image-root PATH | --server URL]
+bty images [--image-root PATH | --catalog URL]
 bty inspect <path>
 bty flash PATH_OR_URL /dev/sdX --yes
 ```

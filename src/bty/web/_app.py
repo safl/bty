@@ -424,7 +424,7 @@ def create_app(
                     machine=machine,
                     host=host,
                     image_name=image_name,
-                    flash_sha=str(ref),
+                    flash_key=str(ref),
                 )
         if ref:
             template = jinja.get_template("ipxe.j2")
@@ -1050,6 +1050,12 @@ def create_app(
             # guarded for safety.
             with contextlib.suppress(FileNotFoundError):
                 await hash_manager.enqueue(name)
+            # Insert/refresh the ``catalog_entries`` row for this
+            # file so the operator can bind a machine by its
+            # ``bty_image_ref`` immediately, without waiting for a
+            # bty-web restart's lifespan sweep. Idempotent
+            # (``INSERT OR IGNORE`` + ``COALESCE`` UPDATE).
+            _auto_import_dir_scan_rows()
             with _db.open_db(state_path) as conn:
                 _log_event(
                     conn,
@@ -1182,19 +1188,22 @@ def create_app(
 
         - If ``sha_url`` is given: fetches it, parses, picks the
           digest matching the image-URL filename (or the only
-          digest if the manifest carries one entry). The entry is
-          SHA-keyed and can bind to a machine.
-        - If ``sha_url`` is null: the entry is URL-only. Flashable
-          via the URL streaming pipeline; not bindable to a machine
-          (machine binding is content-addressed; needs a known SHA).
+          digest if the manifest carries one entry). The entry's
+          ``disk_image_sha`` is populated so the cache-through
+          step on first flash verifies against it.
+        - If ``sha_url`` is null: the entry is URL-only
+          (``disk_image_sha`` stays NULL). Still bindable to a
+          machine via the row's ``bty_image_ref``; the first
+          flash trusts the upstream bytes and back-fills
+          ``disk_image_sha`` with what it observed.
 
         - HEADs ``image_url`` for ``Content-Length`` (best-effort).
         - Inserts a row keyed by image_url.
 
         ``oras://`` short-circuit: when ``image_url`` starts with
         ``oras://``, the server runs ``bty.oras.resolve_ref`` at add
-        time. The picked layer's digest becomes the entry's sha256
-        (= machine-bindable), the layer's title annotation becomes
+        time. The picked layer's digest becomes the entry's
+        ``disk_image_sha``, the layer's title annotation becomes
         ``name``, the layer's declared size becomes ``size_bytes``,
         and ``format`` is detected from the title. ``sha_url`` is
         ignored for oras refs (the manifest is authoritative).

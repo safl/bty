@@ -211,7 +211,7 @@ is lower-case `aa:bb:cc:dd:ee:ff`):
 versioned URL prefix (`/v2/...`). Agents key off field names.
 
 **Auto-discovery.** A `GET /pxe/{mac}` for an unknown MAC creates an
-unassigned `Machine` record (`image == null`, `boot_policy == 'tui'`)
+unassigned `Machine` record (`bty_image_ref == null`, `boot_policy == 'tui'`)
 with `discovered_at` / `last_seen_at` / `last_seen_ip` set, and
 returns the interactive-live-env iPXE chain so the operator lands at
 `bty-tui` on the target's tty1. Operators (or agents) poll

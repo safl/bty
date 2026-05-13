@@ -411,18 +411,24 @@ def test_put_image_triggers_hash_so_entry_appears_in_listing(
     expected_sha = hashlib.sha256(payload).hexdigest()
     r = app_client.put("/images/uploaded.img", content=payload, cookies=AUTH)
     assert r.status_code == 200
-    # The hash runs in a worker; poll briefly.
+    # v0.11.0: the auto-import sweep on upload inserts a
+    # ``catalog_entries`` row with ``disk_image_sha=None``
+    # immediately, so the row appears before the HashManager
+    # finishes. Poll for the URL to flip from the ``file://`` src
+    # (unhashed) to ``/images/<sha>/<name>`` (hash worker done).
     deadline = time.monotonic() + 5.0
+    sha_url = f"/images/{expected_sha}/uploaded.img"
     while time.monotonic() < deadline:
         r2 = app_client.get("/images")
-        names = {row["name"] for row in r2.json()}
-        if "uploaded.img" in names:
+        by_name = {row["name"]: row for row in r2.json()}
+        url = by_name.get("uploaded.img", {}).get("url", "")
+        if url.endswith(sha_url):
             break
         time.sleep(0.05)
     rows = r2.json()
     by_name = {row["name"]: row for row in rows}
     assert "uploaded.img" in by_name, "upload didn't trigger an auto-hash"
-    assert by_name["uploaded.img"]["url"].endswith(f"/images/{expected_sha}/uploaded.img")
+    assert by_name["uploaded.img"]["url"].endswith(sha_url)
 
 
 def test_put_boot_uploads_to_boot_root(app_client: TestClient) -> None:
