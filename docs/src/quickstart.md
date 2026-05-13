@@ -49,7 +49,7 @@ sha256sum -c bty-usb-x86_64.iso.gz.sha256
 ```
 
 `releases/latest/download/<name>` always points at the newest tag;
-swap `latest` for a specific tag (e.g. `v0.8.3`) if you want to pin.
+swap `latest` for a specific tag (e.g. `v0.11.1`) if you want to pin.
 
 **Build from source** (when you need to modify the image):
 

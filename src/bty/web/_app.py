@@ -544,8 +544,8 @@ def create_app(
         # Live-env artifacts (kernel + initrd + squashfs) the iPXE chain
         # references. Open route: PXE clients have no token. Operator
         # populates ``boot_root`` via the UI's "fetch latest release"
-        # action (D-3b) - until the dir has files, this returns 404
-        # and the appliance is non-functional for boot_policy=flash.
+        # action - until the dir has files, this returns 404 and the
+        # appliance is non-functional for boot_policy=flash.
         return _serve_safe_file(resolved_boot_root, name)
 
     def _serve_image_by_key(key: str) -> FileResponse:
@@ -571,27 +571,6 @@ def create_app(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"no such image: {key}",
         )
-
-    def _image_name_for_sha(sha: str) -> str | None:
-        """Find a display name for the image whose bytes hash to
-        ``sha``. Used by the iPXE flash-template renderer to build
-        ``/images/<sha>/<name>`` URLs that preserve the filename's
-        format-by-extension semantics on the live-env client side.
-
-        Resolution: dir-scan first (operator-supplied images take
-        precedence), then catalog manifest (cached or upstream).
-        Returns ``None`` if no entry matches the SHA -- caller's
-        responsibility to fall back to a safe default.
-        """
-        sha = sha.lower()
-        for img in images.list_images(resolved_image_root):
-            if img.sha256 == sha:
-                return img.name
-        if parsed_catalog is not None:
-            for entry in parsed_catalog.entries:
-                if entry.sha256 == sha:
-                    return entry.name
-        return None
 
     def _flash_target_for_ref(ref: str) -> str | None:
         """Resolve a ``bty_image_ref`` to a display name so the iPXE
@@ -692,14 +671,27 @@ def create_app(
                 )
                 conn.commit()
             return cached
-        # (2) sha lookup -- cache + dir-scan fallback.
+        # (2) sha lookup -- legacy path for content-sha-keyed URLs.
+        # Most catalog rows now carry a ``disk_image_sha`` populated
+        # via the HashManager / cache-through update; resolve via
+        # the catalog_entries row's src rather than re-walking the
+        # image root.
         if images.is_sha256_hex(key_lower):
             cached = catalog_cache_dir / key_lower
             if cached.is_file():
                 return cached
-            for img in images.list_images(resolved_image_root):
-                if img.sha256 == key_lower:
-                    return img.path
+            with _db.open_db(state_path) as conn:
+                row = conn.execute(
+                    "SELECT src FROM catalog_entries WHERE disk_image_sha = ?",
+                    (key_lower,),
+                ).fetchone()
+            if row is not None:
+                src = str(row["src"])
+                if src.startswith("file://"):
+                    rel = src[len("file://") :]
+                    local = resolved_image_root / rel
+                    if local.is_file():
+                        return local
         return None
 
     @app.get("/images/{key}", include_in_schema=False)
@@ -1098,8 +1090,9 @@ def create_app(
           dir-scan files / manifest entries that share the hash).
         - URL-only rows (operator added without a sha_url) ->
           :class:`bty.images.UnifiedImage` with ``sha256=None``,
-          surfaced verbatim. Flashable via the URL streaming
-          pipeline; not bindable to a machine.
+          surfaced verbatim. v0.11.0 onward they are bindable to
+          a machine via the row's ``bty_image_ref``; the first
+          flash's cache-through back-fills ``disk_image_sha``.
         """
         with _db.open_db(state_path) as conn:
             # ``ORDER BY added_at`` matches the ``list_catalog_entries``
@@ -1488,8 +1481,9 @@ def create_app(
           (= sha256). Errors propagate into the per-entry ``errors``
           list, not a request-level 4xx.
         - Else (http(s):// URL with no sha): the entry is URL-only
-          (``sha256=NULL``). Flashable; not machine-bindable until
-          hashed.
+          (``disk_image_sha=NULL``). v0.11.0 onward: still bindable
+          to a machine via ``bty_image_ref``; the first flash's
+          cache-through populates ``disk_image_sha``.
 
         Idempotent: re-importing the same source skips entries whose
         ``src`` already exists (counted in ``skipped``).

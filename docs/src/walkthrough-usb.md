@@ -49,7 +49,7 @@ curl -fLO https://github.com/safl/bty/releases/latest/download/bty-usb-x86_64.is
 sha256sum -c bty-usb-x86_64.iso.gz.sha256
 ```
 
-For a specific version, swap `latest` for the tag (e.g. `v0.8.3`).
+For a specific version, swap `latest` for the tag (e.g. `v0.11.1`).
 Browse all releases at <https://github.com/safl/bty/releases>.
 
 ### Option B: Build from a checkout (when you want to modify it)

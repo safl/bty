@@ -198,14 +198,16 @@ class CatalogEntryAdd(BaseModel):
 
     - For ``http(s)://`` URLs, ``sha_url`` is optional: if given,
       server fetches and parses the sha256-manifest body, picks the
-      digest matching ``image_url``'s filename, and stores it.
-      Without it the entry is URL-only -- flashable via the URL
-      pipeline, not bindable to a machine.
+      digest matching ``image_url``'s filename, and stores it as
+      ``disk_image_sha``. Without it the entry is URL-only
+      (``disk_image_sha`` stays NULL until the first flash's
+      cache-through observes it). v0.11.0 onward: still bindable to
+      a machine -- binding targets ``bty_image_ref``, not the
+      content sha.
     - For ``oras://`` URLs the server resolves the OCI manifest at
       add time, picks the disk-image layer, and uses the layer's
-      content-addressed digest as the entry's sha256. ``sha_url``
-      is ignored (the manifest is authoritative); the entry is
-      always bindable to a machine.
+      content-addressed digest as the entry's ``disk_image_sha``.
+      ``sha_url`` is ignored (the manifest is authoritative).
 
     Both URLs must carry a host segment; arbitrary schemes and
     host-less inputs like ``https://?`` are rejected at validation

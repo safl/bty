@@ -393,6 +393,27 @@ def test_put_image_rejects_oversized_upload(
     assert leftovers == [], f"upload cap left behind: {leftovers}"
 
 
+def test_put_image_inserts_catalog_entries_row_immediately(
+    app_client: TestClient,
+) -> None:
+    """v0.11.0: ``PUT /images/{name}`` runs the auto-import sweep
+    after a successful upload so the new file lands in
+    ``catalog_entries`` (keyed by ``bty_image_ref``) without
+    waiting for the HashManager or a bty-web restart. Verifies the
+    operator can immediately bind a machine by the new ref."""
+    from bty.catalog import image_ref_for_src
+
+    body = b"auto-import-on-upload-bytes"
+    r = app_client.put("/images/just-uploaded.img", content=body, cookies=AUTH)
+    assert r.status_code == 200, r.text
+    rows = app_client.get("/catalog/entries", cookies=AUTH).json()
+    by_src = {row["src"]: row for row in rows}
+    src = "file://just-uploaded.img"
+    assert src in by_src, f"expected catalog row for {src!r}; got {sorted(by_src)}"
+    expected_ref = image_ref_for_src(src)
+    assert by_src[src]["bty_image_ref"] == expected_ref
+
+
 def test_put_image_triggers_hash_so_entry_appears_in_listing(
     app_client: TestClient,
     tmp_path: Path,
@@ -916,7 +937,7 @@ def test_machine_upsert_accepts_real_hostname_shapes(app_client: TestClient) -> 
 
 def test_machine_upsert_rejects_unknown_fields(app_client: TestClient) -> None:
     """``MachineUpsert(extra="forbid")`` -- a stale client (or
-    operator typo) sending the pre-M22 ``image`` field instead of
+    operator typo) sending an unknown ``image`` field instead of
     ``bty_image_ref`` must 422 loudly. The previous default
     silently accepted unknown keys + landed an assignment with
     ``bty_image_ref=NULL``, which then surfaced as "no bty
@@ -925,7 +946,7 @@ def test_machine_upsert_rejects_unknown_fields(app_client: TestClient) -> None:
     r = app_client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
         json={
-            "image": "stale-pre-m22-filename.qcow2",
+            "image": "stale-filename.qcow2",
             "boot_policy": "flash",
         },
         cookies=AUTH,
