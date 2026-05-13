@@ -130,12 +130,14 @@ def main(args, cijoe):
             dummy_image,
             cfg["machine_image"],
         )
-        # M22 switched machine bindings from filename to content
-        # (image_sha256). Compute the dummy's SHA locally and
-        # upload a sidecar so the dir-scan finds the SHA
-        # immediately; without this, bty-web's async hash worker
-        # might still be running when the client PXE-boots and
-        # ``/pxe/<mac>`` would race-fail to resolve the SHA.
+        # v0.11.0 binds via ``bty_image_ref`` (sha256 of the
+        # canonical src); for file-backed images uploaded here
+        # there's no catalog_entries row yet, so the PXE resolver
+        # falls back to the legacy sha lookup over the dir-scan.
+        # Compute the dummy's content SHA locally and upload a
+        # sidecar so dir-scan finds the SHA immediately; without
+        # this, the async hash worker might still be running when
+        # the client PXE-boots and ``/pxe/<mac>`` would race-fail.
         dummy_sha = _sha256_file(dummy_image)
         sidecar_name = f"{cfg['machine_image']}.sha256"
         sidecar_body = f"{dummy_sha}  {cfg['machine_image']}\n".encode()
@@ -349,10 +351,10 @@ def _put_file(host, port, token, base_path, src_path, name):
                 raise RuntimeError(f"PUT {url} returned {resp.status}")
 
 
-def _put_assignment(host, port, token, cfg, image_sha256):
+def _put_assignment(host, port, token, cfg, bty_image_ref):
     body = json.dumps(
         {
-            "image_sha256": image_sha256,
+            "bty_image_ref": bty_image_ref,
             "boot_policy": "flash",
         }
     ).encode("utf-8")
