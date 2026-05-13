@@ -420,6 +420,13 @@ tooling which can't carry a session cookie:
  needs to enumerate from inside the live env without first
  bootstrapping a session, and discovery adds no capability beyond
  what the already-open byte-serving route provides.
+- `GET /catalog.toml` - same row set as `GET /images`, serialised as
+ a `bty.catalog.Catalog` TOML manifest (``version = 1``, ``[[images]]``
+ tables). Open for the same reason as `GET /images`; consumed by
+ `bty tui --catalog` and `bty images --catalog` so the same client
+ code path that handles static files (e.g. published on GitHub
+ releases) works against a live bty-web. Entries without a sha256
+ are skipped.
 
 Protected routes (session cookie required):
 

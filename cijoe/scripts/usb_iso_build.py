@@ -212,7 +212,7 @@ def main(args, cijoe):
     # Drive auto/config into iso-hybrid mode via the ``BTY_USB_ISO``
     # env var (``BTY_USB_ISO=1`` selects iso-hybrid + syslinux,grub-efi
     # + ``bty.mode=interactive`` on the kernel cmdline; unset selects
-    # netboot for live-x86). The env var has to be set in the
+    # netboot for the netboot-x86 variant). The env var has to be set in the
     # invocation environment of every ``lb`` call, because ``lb build``
     # re-runs ``lb config`` (which re-runs ``auto/config``) during its
     # own setup; flag-based overrides at the initial config call get

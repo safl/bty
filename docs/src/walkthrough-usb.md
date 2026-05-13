@@ -572,10 +572,10 @@ In the JetKVM web UI:
 
 #### Step 5: Point `bty-tui` at the remote `bty-web` catalog
 
-Same as piKVM Step 5. Press `c`, pick Remote, paste the server
-URL (e.g. `http://10.0.0.5:8080`), click Apply. The catalog
-populates from the server, images stream through the JetKVM-
-booted live env to the target's disk.
+Same as piKVM Step 5. Press `c`, enter the catalog URL
+(e.g. `http://10.0.0.5:8080/catalog.toml`), click Apply. The
+catalog populates from the server, images stream through the
+JetKVM-booted live env to the target's disk.
 
 To bootstrap the very first `bty-server` (no existing one to point
 at), press `i` instead of `c`: the built-in shortcut installs

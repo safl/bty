@@ -2,8 +2,9 @@
 
 Two layers:
 
-1. Free helpers (``fetch_remote_catalog``, ``post_pxe_done``) covered
-   without instantiating textual at all - they're just HTTP wrappers.
+1. Free helpers (``load_catalog_from_source``, ``post_pxe_done``)
+   covered without instantiating textual at all - they're just HTTP
+   wrappers.
 2. End-to-end interaction with the textual ``BtyTui`` app via
    ``App.run_test()`` (textual's headless test harness). The Pilot
    drives key presses and click events; assertions look at widget
@@ -12,7 +13,7 @@ Two layers:
    dependency.
 
 Data sources (``images.list_images``, ``disks.list_disks``,
-``fetch_remote_catalog``) are monkeypatched in the per-test fixtures
+``load_catalog_from_source``) are monkeypatched in the per-test fixtures
 to return synthetic rows; the goal is to verify the wiring in
 ``_populate_images`` / ``_populate_disks`` / ``_load_images`` /
 ``action_refresh`` / ``_initial_status``, not to re-test the

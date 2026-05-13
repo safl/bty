@@ -248,7 +248,7 @@ first because qcow2 needs random-access reads during conversion.
 The default for unknown MACs that PXE-boot through the server. The
 client lands in the live env in interactive mode; `bty-tui-on-tty1`
 launches `bty tui --catalog URL --mac MAC` which fetches the catalog
-from `GET /images` and streams the operator-picked image straight to
+from `GET /catalog.toml` and streams the operator-picked image straight to
 the target disk via `bty flash URL /dev/sdX`. On success, the TUI
 `POST`s `/pxe/{mac}/done` so `last_flashed_at` updates server-side.
 "bty-on-a-USB but over the network" - first PXE contact lands a

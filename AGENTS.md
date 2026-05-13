@@ -193,7 +193,8 @@ is lower-case `aa:bb:cc:dd:ee:ff`):
 | `GET /pxe-bootstrap.ipxe` | `PUT /images/{name}` (stream upload) |
 | `GET /boot/{name}` | `PUT /boot/{name}` (stream upload) |
 | `GET /images/{name}` | `GET /events/machines` (Server-Sent Events) |
-| `GET /images` (catalog list) | |
+| `GET /images` (catalog list, JSON) | |
+| `GET /catalog.toml` (catalog list, TOML) | |
 | `GET /static/*` | |
 
 **HTTP status semantics:**

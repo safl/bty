@@ -402,7 +402,7 @@ def test_put_image_triggers_hash_so_entry_appears_in_listing(
     image surfaces in /images on the next request without waiting
     for the next server restart's auto-import sweep. Without this,
     operators uploading via the API would see the file land but
-    bty tui --server clients would not see it as flashable until
+    bty tui --catalog clients would not see it as flashable until
     bty-web bounced.
     """
     import hashlib
@@ -1408,7 +1408,7 @@ def test_serve_image_resolves_by_sha_dir_scan(tmp_path: Path) -> None:
     """``GET /images/<sha>`` resolves to the dir-scan file whose
     ``.sha256`` sidecar holds that digest. Without this, the
     server-side URLs the /images listing emits would 404 for
-    every bty tui --server flash."""
+    every bty tui --catalog flash."""
     import hashlib
 
     image_root = tmp_path / "images"
