@@ -387,13 +387,13 @@ def cmd_flash(
 
     try:
         image_str = str(args.image)
+        image_path = Path(image_str)
         # ``.bri`` (bty Remote Image) descriptor: tiny TOML file
         # whose ``url`` field is the real source. Resolve here so
         # the rest of the flash path treats it as a regular URL
         # flash with no extra branching downstream.
-        if image_str.lower().endswith(images.BRI_EXTENSION) and Path(image_str).is_file():
-            descriptor = images.read_bri(Path(image_str))
-            image_str = descriptor.url
+        if image_str.lower().endswith(images.BRI_EXTENSION) and image_path.is_file():
+            image_str = images.read_bri(image_path).url
         if image_str.startswith(("http://", "https://", "oras://")):
             image_info = probe_image_url(image_str)
         else:

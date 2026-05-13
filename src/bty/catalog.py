@@ -797,4 +797,4 @@ def fetch_sha256_for_url(image_url: str, sha_url: str, *, timeout: float = 30.0)
             f"(did you paste an image URL into the sha_url field?)"
         )
     body = raw.decode("utf-8")
-    return parse_sha256_manifest(body, target_name=target if target else None)
+    return parse_sha256_manifest(body, target_name=target or None)

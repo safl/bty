@@ -61,13 +61,13 @@ def register_ui_routes(
     service_user: str,
     image_root: Path,
     boot_root: Path,
-    publish_machines_changed: Callable[[], None] = lambda: None,
+    publish_state_changed: Callable[[], None] = lambda: None,
     list_unified_images: Callable[[], list[bty_images.UnifiedImage]] | None = None,
 ) -> None:
     """Attach the ``/ui`` HTML routes (and exception handler) to ``app``.
 
     ``service_user`` is the Linux account whose OS password gates
-    ``/ui/login``. ``publish_machines_changed`` is invoked after any
+    ``/ui/login``. ``publish_state_changed`` is invoked after any
     UI form mutates a machine record, so SSE subscribers see the
     change immediately. The default no-op makes this module testable
     in isolation; the real app passes the bus-publishing callable.
@@ -378,7 +378,7 @@ def register_ui_routes(
                 ),
             )
             conn.commit()
-        publish_machines_changed()
+        publish_state_changed()
         return RedirectResponse("/ui/machines", status_code=status.HTTP_303_SEE_OTHER)
 
     @app.post(
@@ -391,7 +391,7 @@ def register_ui_routes(
         with _db.open_db(state_path) as conn:
             conn.execute("DELETE FROM machines WHERE mac = ?", (normalised,))
             conn.commit()
-        publish_machines_changed()
+        publish_state_changed()
         return RedirectResponse("/ui/machines", status_code=status.HTTP_303_SEE_OTHER)
 
     @app.get(

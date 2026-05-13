@@ -300,9 +300,6 @@ def create_app(
         event_bus.publish(MachineEvent(name="machines-update", html=render_machines_tbody()))
         event_bus.publish(MachineEvent(name="dashboard-counts", html=render_dashboard_counts()))
 
-    # Back-compat alias - older internal call sites use this name.
-    publish_machines_changed = publish_state_changed
-
     # ----- Open routes (no auth) ------------------------------------------
 
     @app.get("/", include_in_schema=False)
@@ -331,7 +328,7 @@ def create_app(
         # client always loops back to whichever name/IP/port the operator
         # used to reach this server. Open route: PXE clients have no
         # tokens.
-        host = request.headers.get("host", f"{request.url.hostname}:{request.url.port or 8080}")
+        host = _request_host(request)
         template = jinja.get_template("pxe_bootstrap.j2")
         return template.render(host=host)
 
@@ -395,7 +392,7 @@ def create_app(
 
         assert row is not None
         machine = dict(row)
-        publish_machines_changed()
+        publish_state_changed()
         # Boot-policy decision tree (highest priority first):
         #   - boot_policy == 'tui'                          -> live env in interactive mode
         #   - boot_policy == 'flash' + bty_image_ref        -> live env auto-flash
@@ -403,7 +400,7 @@ def create_app(
         #   - else (no ref, boot_policy == 'local')         -> sanboot fallback
         # Completion signal (POST /pxe/{mac}/done) updates last_flashed_at
         # but never flips boot_policy - operator does that explicitly.
-        host = request.headers.get("host", f"{request.url.hostname}:{request.url.port or 8080}")
+        host = _request_host(request)
         if machine.get("boot_policy") == "tui":
             template = jinja.get_template("ipxe_tui.j2")
             return template.render(mac=normalised, machine=machine, host=host)
@@ -488,7 +485,7 @@ def create_app(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"no machine record for {normalised}",
             )
-        publish_machines_changed()
+        publish_state_changed()
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     # ---------- release-fetch manager ---------------------------
@@ -831,7 +828,7 @@ def create_app(
             conn.commit()
             row = conn.execute("SELECT * FROM machines WHERE mac = ?", (normalised,)).fetchone()
         assert row is not None
-        publish_machines_changed()
+        publish_state_changed()
         return _row_to_machine(row)
 
     @app.delete(
@@ -859,7 +856,7 @@ def create_app(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"no machine record for {normalised}",
             )
-        publish_machines_changed()
+        publish_state_changed()
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @app.get("/images", response_model=list[_models.ImageEntry])
@@ -878,8 +875,7 @@ def create_app(
         open. Same homelab-network trust model as /pxe / /boot.
         """
         unified = _list_unified_images()
-        host = request.headers.get("host", f"{request.url.hostname}:{request.url.port or 8080}")
-        scheme = request.url.scheme or "http"
+        origin = _request_origin(request)
         out: list[_models.ImageEntry] = []
         for u in unified:
             if u.cached:
@@ -894,7 +890,7 @@ def create_app(
                 # route ignores ``<name>`` for the lookup.
                 if u.sha256 is None:
                     continue  # cached + no sha is impossible; defensive
-                url = f"{scheme}://{host}/images/{u.sha256}/{u.names[0]}"
+                url = f"{origin}/images/{u.sha256}/{u.names[0]}"
             else:
                 # Not cached: the client streams directly from
                 # upstream. Try manifest source first, then ``url``
@@ -951,8 +947,7 @@ def create_app(
         files will surface them.
         """
         unified = _list_unified_images()
-        host = request.headers.get("host", f"{request.url.hostname}:{request.url.port or 8080}")
-        scheme = request.url.scheme or "http"
+        origin = _request_origin(request)
         lines: list[str] = ["version = 1", ""]
         for u in unified:
             if u.sha256 is None:
@@ -960,7 +955,7 @@ def create_app(
                 # entries that haven't been hashed yet.
                 continue
             if u.cached:
-                src = f"{scheme}://{host}/images/{u.sha256}/{u.names[0]}"
+                src = f"{origin}/images/{u.sha256}/{u.names[0]}"
             else:
                 upstream = next(
                     (s.location for s in u.sources if s.kind in ("manifest", "url")),
@@ -1174,7 +1169,7 @@ def create_app(
         service_user=service_user,
         image_root=resolved_image_root,
         boot_root=resolved_boot_root,
-        publish_machines_changed=publish_machines_changed,
+        publish_state_changed=publish_state_changed,
         list_unified_images=_list_unified_images,
     )
 
@@ -1778,19 +1773,19 @@ def _normalise_mac(raw: str) -> str:
     return cleaned
 
 
-def _row_to_machine(row: object) -> _models.Machine:
+def _row_to_machine(row: sqlite3.Row) -> _models.Machine:
     """Decode a sqlite3.Row into a ``_models.Machine``."""
     return _models.Machine(
-        mac=row["mac"],  # type: ignore[index]
-        bty_image_ref=row["bty_image_ref"],  # type: ignore[index]
-        hostname=row["hostname"],  # type: ignore[index]
-        discovered_at=_iso_or_none(row["discovered_at"]),  # type: ignore[index]
-        last_seen_at=_iso_or_none(row["last_seen_at"]),  # type: ignore[index]
-        last_seen_ip=row["last_seen_ip"],  # type: ignore[index]
-        boot_policy=row["boot_policy"],  # type: ignore[index]
-        last_flashed_at=_iso_or_none(row["last_flashed_at"]),  # type: ignore[index]
-        created_at=datetime.fromisoformat(row["created_at"]),  # type: ignore[index]
-        updated_at=datetime.fromisoformat(row["updated_at"]),  # type: ignore[index]
+        mac=row["mac"],
+        bty_image_ref=row["bty_image_ref"],
+        hostname=row["hostname"],
+        discovered_at=_iso_or_none(row["discovered_at"]),
+        last_seen_at=_iso_or_none(row["last_seen_at"]),
+        last_seen_ip=row["last_seen_ip"],
+        boot_policy=row["boot_policy"],
+        last_flashed_at=_iso_or_none(row["last_flashed_at"]),
+        created_at=datetime.fromisoformat(row["created_at"]),
+        updated_at=datetime.fromisoformat(row["updated_at"]),
     )
 
 
@@ -1815,6 +1810,26 @@ def _head_content_length(url: str, *, timeout: float = 10.0) -> int | None:
 
 def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _request_host(request: Request) -> str:
+    """Return the ``host:port`` the client used to reach this server.
+
+    Prefers the ``Host`` header (what the client actually typed in the
+    URL bar); falls back to the parsed request URL when the header is
+    missing -- bare TestClient and tightly-curated reverse proxies can
+    omit it. Default port mirrors the appliance's listen port.
+    """
+    return request.headers.get(
+        "host",
+        f"{request.url.hostname}:{request.url.port or 8080}",
+    )
+
+
+def _request_origin(request: Request) -> str:
+    """Return the ``scheme://host:port`` origin the client used."""
+    scheme = request.url.scheme or "http"
+    return f"{scheme}://{_request_host(request)}"
 
 
 def _client_ip(request: Request) -> str | None:

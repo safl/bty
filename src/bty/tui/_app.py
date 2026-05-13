@@ -947,7 +947,7 @@ class CatalogSelectScreen(ModalScreen["str | Path | None"]):
         with Vertical() as panel:
             panel.border_title = "  Switch catalog source  "
             yield Static("Catalog source (path or URL; blank = local-only):")
-            initial = self._current_source if self._current_source else ""
+            initial = self._current_source or ""
             yield Input(
                 value=initial,
                 placeholder=(

@@ -76,7 +76,8 @@ def test_load_format_auto_detected_from_name(tmp_path: Path) -> None:
     """
     path = _write(tmp_path / "catalog.toml", body)
     entry = catalog.load(path).by_name("auto.qcow2")
-    assert entry is not None and entry.format == "qcow2"
+    assert entry is not None
+    assert entry.format == "qcow2"
 
 
 def test_load_rejects_unknown_version(tmp_path: Path) -> None:
