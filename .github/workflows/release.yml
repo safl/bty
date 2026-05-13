@@ -506,6 +506,15 @@ jobs:
       # Required for ghcr.io push via $GITHUB_TOKEN.
       packages: write
       contents: read
+    env:
+      # ``docker/build-push-action@v6`` uploads a build-record
+      # artifact named ``<owner>-<repo>-*.dockerbuild`` after every
+      # build (BuildKit history; replayable via ``docker buildx
+      # history import``). The default-on behaviour bakes the repo
+      # owner into the artifact list on every release run. Disable
+      # the upload; the in-Actions build summary (rendered on the
+      # job's Summary tab) is unaffected.
+      DOCKER_BUILD_RECORD_UPLOAD: "false"
     steps:
       - uses: actions/checkout@v6
       - uses: actions/download-artifact@v8
