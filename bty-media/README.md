@@ -33,8 +33,7 @@ Operators drive everything via the top-level Makefile:
 ## Layout
 
 - `auxiliary/cloudinit-base-server.user` - cloud-init base template
-  for the server bake. (The legacy `cloudinit-base-usb.user` was
-  retired in M19 phase 6; usb-x86 now uses live-build.)
+  for the server bake. (usb-x86 uses live-build, no cloud-init.)
 - `auxiliary/cloudinit-metadata.meta` - shared cloud-init metadata.
 - `rootfs/common/` - files baked into every disk-image variant.
 - `rootfs/server/` - files baked into the server image. Each file
@@ -171,10 +170,9 @@ hardware. Most operators never run this build pipeline themselves -
 - **usb-x86.** The `.iso.gz` decompresses to a hybrid ISO
   that boots into a Debian live environment with the `bty` CLI +
   TUI installed into `/opt/bty/venv`, and an exFAT `BTY_IMAGES`
-  partition for pre-built images. live-boot's SquashFS + tmpfs overlay
-  provides the ephemeral rootfs (no `overlayroot` package; M19
-  phase 6 retired the cloud-init bake that depended on it).
-  End-to-end use case in
+  partition for pre-built images. live-boot's SquashFS + tmpfs
+  overlay provides the ephemeral rootfs (no `overlayroot`
+  package needed). End-to-end use case in
   [Walkthrough: USB](../docs/src/walkthrough-usb.md).
 - **netboot-x86.** Kernel + initrd + squashfs trio used by PXE clients.
   The chroot ships `bty-flash-on-boot.service` (oneshot, after

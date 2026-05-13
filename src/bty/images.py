@@ -21,14 +21,11 @@ not forced on operators with their own pipelines.
   no equivalent quirk). Stick prep is a one-shot, host-side cost.
 - The **server appliance images** ship as ``.img.gz``
   (``bty-server-x86_64.img.gz``,
-  ``bty-server-rpi-arm64.img.gz``). The earlier rationale that
-  drove .img.zst here -- "flash-time decompression is on the hot
-  path of per-job CI reflash" -- conflated two different cases:
-  the per-job reflash hot path applies to operator-supplied
-  target images (any of the 4 compressed forms work), NOT to
-  the bty-server appliance itself, which is flashed once during
-  initial setup. Universal flasher compat wins for one-shot
-  setup; the speed advantage of zstd was buying nothing for the
+  ``bty-server-rpi-arm64.img.gz``). Universal flasher compat
+  wins for one-shot setup; zstd's flash-time-decompression edge
+  is irrelevant for the bty-server appliance itself, which is
+  flashed once during initial setup -- the per-job reflash hot
+  path applies to operator-supplied target images, not to
   bty-shipped artifacts.
 - Operators running per-job CI reflash on a fast disk can pick
   ``.img.zst`` for their own images and the flash code will

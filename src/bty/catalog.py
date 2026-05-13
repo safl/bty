@@ -43,17 +43,15 @@ from typing import IO, Any, Self, TypeAlias
 
 from bty import images as _images
 
-# Manifest schema version this implementation understands. We bump
-# this when an incompatible change is made to the on-disk shape;
-# older manifests then need a migration step or fail validation.
+# Manifest schema version this implementation understands.
 SCHEMA_VERSION = 1
 
 
 class CatalogError(Exception):
     """Raised when a manifest fails to parse, validate, or fetch.
 
-    Subclassed only when call sites need to discriminate (rare so
-    far -- the CLI just prints the message).
+    Subclass only when a call site needs to discriminate; the CLI
+    prints the message verbatim.
     """
 
 

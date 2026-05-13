@@ -1278,10 +1278,9 @@ def test_catalog_picker_opens_and_dismisses_cleanly(
     """Pressing ``c`` pushes a CatalogSelectScreen modal; pressing
     Esc dismisses it without changing the active catalog.
 
-    Same regression-class as ``test_theme_picker_*`` and
-    ``test_action_flash_*`` -- guards against the ``@work``
-    decorator being dropped from ``action_catalog`` (Textual 8.x
-    requires worker context for ``push_screen_wait``).
+    Guards against the ``@work`` decorator being dropped from
+    ``action_catalog`` -- Textual 8.x requires worker context for
+    ``push_screen_wait``.
     """
     _patch_data_sources(
         monkeypatch,

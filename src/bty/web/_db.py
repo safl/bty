@@ -1,18 +1,16 @@
 """SQLite-backed persistence for bty-web.
 
 Uses stdlib :mod:`sqlite3` - no SQLAlchemy or SQLModel dep. The schema
-is small enough to evolve by hand for now; a migration framework can
-be added when the need arises.
+is small enough to evolve by hand.
 
 State lives at ``$BTY_STATE_DIR/state.db`` (default
 ``/var/lib/bty/state.db`` to match the appliance image's expectations).
 
 Pre-1.0: the schema is whatever ``CREATE TABLE`` says here. There is
-no migration apparatus -- breaking changes during the pre-1.0 stretch
-are landed by the operator wiping ``state.db`` (the appliance is
-trivial to redeploy and machine records are operator-typed). The
-post-1.0 cadence will pick up a proper migration framework before the
-first stable tag.
+no migration apparatus -- breaking changes are landed by the operator
+wiping ``state.db`` (the appliance is trivial to redeploy and machine
+records are operator-typed). A proper migration framework will land
+before the 1.0 tag.
 """
 
 from __future__ import annotations
@@ -105,11 +103,10 @@ CREATE INDEX IF NOT EXISTS events_subject_idx  ON events(subject_kind, subject_i
 
 
 class StaleSchemaError(RuntimeError):
-    """Raised when state.db exists but is missing columns added in
-    newer bty-web versions. Pre-1.0 has no migrations apparatus;
-    the fix is to wipe state.db. The error message names the
-    missing columns + path so an operator can act without
-    grepping the source."""
+    """Raised when state.db exists but is missing required columns.
+    Pre-1.0 has no migration apparatus; the fix is to wipe state.db.
+    The error message names the missing columns + path so an
+    operator can act without grepping the source."""
 
 
 # Columns that were added to existing tables after the initial

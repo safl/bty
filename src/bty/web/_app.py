@@ -241,8 +241,6 @@ def create_app(
     app = FastAPI(title="bty-web", version=bty.__version__, lifespan=_lifespan)
 
     # Server-signed session cookie via Starlette's SessionMiddleware.
-    # Cookie name kept as ``bty-token`` so existing operator scripts
-    # (and the PXE chain test) that captured Set-Cookie don't break.
     # ``same_site="strict"`` blocks cross-site cookie attachment;
     # browsers won't auto-send the cookie on third-party requests.
     app.add_middleware(
@@ -399,10 +397,10 @@ def create_app(
         machine = dict(row)
         publish_machines_changed()
         # Boot-policy decision tree (highest priority first):
-        #   - boot_policy == 'tui'                   -> live env in interactive mode
-        #   - boot_policy == 'flash' AND image       -> live env auto-flash
-        #   - boot_policy == 'local' AND image       -> sanboot (already provisioned)
-        #   - else (no image, boot_policy == 'local')-> sanboot fallback
+        #   - boot_policy == 'tui'                          -> live env in interactive mode
+        #   - boot_policy == 'flash' + bty_image_ref        -> live env auto-flash
+        #   - boot_policy == 'local' + bty_image_ref        -> sanboot (already provisioned)
+        #   - else (no ref, boot_policy == 'local')         -> sanboot fallback
         # Completion signal (POST /pxe/{mac}/done) updates last_flashed_at
         # but never flips boot_policy - operator does that explicitly.
         host = request.headers.get("host", f"{request.url.hostname}:{request.url.port or 8080}")
@@ -1056,9 +1054,9 @@ def create_app(
         # auto-import lifespan would have skipped this entry, so
         # we mirror that guard here.
         if not name.endswith(".sha256"):
-            # ``_stream_upload`` raised earlier if the write
-            # failed, so FileNotFoundError shouldn't happen here --
-            # guarded for safety.
+            # ``_stream_upload`` already raises on write failure, so
+            # FileNotFoundError shouldn't reach here -- suppressed
+            # defensively for robustness against a transient unlink.
             with contextlib.suppress(FileNotFoundError):
                 await hash_manager.enqueue(name)
             # Insert/refresh the ``catalog_entries`` row for this
@@ -1911,8 +1909,8 @@ async def _stream_upload(request: Request, root: Path, name: str) -> dict[str, o
     default; ``BTY_MAX_UPLOAD_BYTES`` overrides). A runaway script
     or hostile request that streams forever otherwise fills the
     image-root partition; the cap kills the upload + unlinks the
-    partial well before that. The pre-cleanup partial unlink
-    covers the cancellation case.
+    partial well before that. The partial is also unlinked
+    upfront so a prior aborted upload doesn't leak.
     """
     candidate = _safe_path(root, name)
     root.mkdir(parents=True, exist_ok=True)

@@ -2376,7 +2376,7 @@ class _MockResp:
         return self._body.decode()
 
 
-# ---------- release-fetch manager (M24) ------------------------------------
+# ---------- release-fetch manager ------------------------------------------
 
 
 def test_release_fetch_enqueue_returns_state(
@@ -2546,9 +2546,8 @@ def test_catalog_entries_add_rejects_url_without_host(
     app_client: TestClient,
 ) -> None:
     """``image_url`` regex requires a host segment. ``https://?``
-    (empty host) and ``http:///path`` (host-less) must 422 at
-    the Pydantic layer; the previous lax ``https?://.+`` would
-    have accepted both."""
+    (empty host) and ``http:///path`` (host-less) must 422 at the
+    Pydantic layer rather than landing as unflashable rows."""
     for bad in ("https://?", "http:///path", "https://"):
         r = app_client.post(
             "/catalog/entries",

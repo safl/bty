@@ -7,12 +7,11 @@ and runs at every boot in the live env. It's a standalone executable
 (``#!/usr/bin/env python3``), not a member of the ``bty`` package, so
 we import it via ``importlib`` for testing.
 
-The regression these tests guard against: bty-flash-on-boot used to
-download the image to a fixed ``/var/tmp/bty-flash-on-boot.image``
-path; ``bty.images.detect_format()`` keys off the file extension
-(``.qcow2``, ``.img``, ``.img.zst``) and ``.image`` matched none, so
-``bty flash --yes`` aborted at the validation stage with "image
-format not recognised" - on every network-flash, in production.
+These tests guard against a class of regressions: bty-flash-on-boot
+downloads the image to a path that ``bty.images.detect_format()``
+recognises (keying off file extension: ``.qcow2``, ``.img``,
+``.img.zst``...) so ``bty flash --yes`` doesn't abort at the
+validation stage with "image format not recognised".
 """
 
 from __future__ import annotations

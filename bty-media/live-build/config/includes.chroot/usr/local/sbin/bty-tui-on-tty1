@@ -18,7 +18,7 @@
 #    scheme+host, so the bty.server cmdline param only needs to be
 #    the bty-web instance's base URL.
 #
-# 2. USB-local (M19 phase 2): the live-build iso-hybrid bake sets
+# 2. USB-local: the live-build iso-hybrid bake sets
 #    ``bty.mode=interactive`` directly via ``--bootappend-live`` so
 #    the same service fires when the operator boots the USB stick
 #    on bare metal with no PXE involvement. No ``bty.server`` or

@@ -271,5 +271,6 @@ def test_is_oras_url() -> None:
     assert oras.is_oras_url("oras://ghcr.io/safl/nosi/debian-sysdev:latest")
     assert not oras.is_oras_url("https://ghcr.io/v2/safl/nosi/debian-sysdev/blobs/sha256:x")
     assert not oras.is_oras_url("https://example.invalid/x.img.gz")
-    # ``ghcr:`` was the pre-rename scheme; should NOT be recognised.
+    # The bare ``ghcr:`` scheme must NOT be recognised; oras refs
+    # require the explicit ``oras://`` form.
     assert not oras.is_oras_url("ghcr:safl/nosi/debian-sysdev:latest")

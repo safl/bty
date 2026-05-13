@@ -15,9 +15,8 @@ from __future__ import annotations
 
 from fastapi import HTTPException, Request, status
 
-# Session-cookie name. Set explicitly so the existing PXE chain test
-# (which captures Set-Cookie from /ui/login) and any operator scripts
-# don't break across the SessionMiddleware swap.
+# Session-cookie name. Set explicitly so the PXE chain test and
+# operator scripts can grep for a stable token in Set-Cookie.
 SESSION_COOKIE = "bty-token"
 
 # Session key the auth dep checks. Set on successful /ui/login.

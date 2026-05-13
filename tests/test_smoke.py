@@ -202,12 +202,11 @@ def test_server_cloudinit_does_not_install_plymouth() -> None:
 
 def test_activate_pxe_helper_uses_same_fs_tempfile() -> None:
     """``bty-web-activate-pxe`` writes a config to /etc/dnsmasq.d/.
-    Earlier versions used the default ``mktemp`` (which lands in
-    ``$TMPDIR`` = /tmp on tmpfs), then ``mv``'d cross-filesystem to
-    /etc/dnsmasq.d/. mv falls back to copy-then-unlink across
-    filesystems, and that path failed in the wild with
-    ``unable to remove target: Read-only file system``. Pin the
-    same-fs tempfile so the regression doesn't sneak back in."""
+    The default ``mktemp`` would land in ``$TMPDIR`` = /tmp (tmpfs);
+    a cross-filesystem ``mv`` to /etc/dnsmasq.d/ falls back to
+    copy-then-unlink which fails with "unable to remove target:
+    Read-only file system" under read-only-rootfs conditions. Pin
+    the same-fs tempfile so the bug stays out."""
     from pathlib import Path
 
     repo_root = Path(__file__).resolve().parents[1]
