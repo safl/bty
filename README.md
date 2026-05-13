@@ -56,6 +56,12 @@ bty tui
 All three share the same Python codebase, the same image catalog, the
 same SHA-keyed machine bindings.
 
+The PXE-boot appliance also separates rootfs from image cache: drop a
+2nd disk in, run `sudo bty-image-store-init /dev/sdX` once, and the
+image library survives appliance reflashes. The new appliance auto-
+mounts the labelled disk at `/var/lib/bty/images`; no operator action
+required.
+
 ## ORAS-published images and portable catalogs
 
 bty consumes images and catalogs as **OCI artefacts** published with

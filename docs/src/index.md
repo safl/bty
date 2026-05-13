@@ -122,6 +122,7 @@ walkthrough-usb
 walkthrough-server
 walkthrough-server-docker
 walkthrough-catalog
+walkthrough-image-store
 ```
 
 ```{toctree}

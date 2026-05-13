@@ -339,7 +339,20 @@ The `bty --image-root` flag (when given) takes precedence over
 ### Default paths
 
 - `/var/lib/bty/images` - image root. The USB live appliance
- auto-mounts the `BTY_IMAGES` partition here.
+ auto-mounts the `BTY_IMAGES` partition here. The server appliance
+ auto-mounts a `LABEL=BTY_IMAGE_STORE` disk here (if one is present)
+ so the image cache survives reflashes; see
+ [walkthrough-image-store](walkthrough-image-store.md).
+
+### Appliance helpers
+
+These ship with the bty-server appliance only (not the bty-lab
+Python package).
+
+| Helper | Purpose |
+|---|---|
+| `bty-image-store-init [--yes] DEVICE` | Partition + format a 2nd disk as the persistent image store (ext4, label `BTY_IMAGE_STORE`, mounted at `/var/lib/bty/images`). Stages existing files first; updates `/etc/fstab` for auto-mount on subsequent boots. Run once after first install; the labelled disk auto-mounts after reflashes without re-running. |
+| `bty-web-activate-pxe` / `bty-web-deactivate-pxe` | Toggle the dnsmasq proxy-DHCP block. Driven by the browser UI's "Activate PXE" / "Deactivate PXE" buttons. |
 
 ## Python API
 

@@ -265,6 +265,9 @@ provisions to.
   USB-stick flow ([walkthrough-usb](walkthrough-usb.md)) -- both
   end up at the same `bty-tui` / `bty flash` interface.
 - Swap images per-target without rebooting the server.
+- Add a second disk as a **persistent image store** so the cache
+  survives appliance reflashes
+  ([walkthrough-image-store](walkthrough-image-store.md)).
 
 ## Post-deploy hardening
 
