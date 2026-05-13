@@ -56,6 +56,7 @@ lb config noauto \
     --distribution trixie \
     --architectures amd64 \
     --archive-areas "main non-free-firmware" \
+    --firmware-chroot false \
     --binary-images "${BINARY_IMAGES}" \
     --debian-installer none \
     --memtest none \
@@ -72,6 +73,18 @@ lb config noauto \
 # certain NIC / WiFi chipsets fail to load. Debian split
 # ``non-free-firmware`` out of ``non-free`` in bookworm precisely
 # so this archive can be enabled on its own.
+#
+# ``--firmware-chroot false`` is the critical knob. Default is
+# ``true``, which adds ``firmware-linux-nonfree`` (a metapackage
+# that Depends on EVERY individual ``firmware-*`` package -- netronome
+# 140 MiB, nvidia-graphics 63 MiB, ath11k 63 MiB, mediatek 45 MiB,
+# plus a long tail of server-NIC and old-WiFi firmware) to the
+# chroot. With ``false``, the chroot only gets the firmware-*
+# packages our ``bty-base.list.chroot`` explicitly names -- which
+# is what we wanted all along. v0.9.5..v0.9.8's ISO size of ~828
+# MiB was driven entirely by the default-``true`` metapackage pull;
+# our explicit list was additive on top of an already-everything
+# install.
 # Note: an earlier iteration tried ``--syslinux-timeout 1`` here per
 # advice from elsewhere; live-build trixie (20250814) doesn't
 # recognise that flag and ``lb config`` errors out. Bootloader-menu
