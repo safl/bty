@@ -204,7 +204,7 @@ is lower-case `aa:bb:cc:dd:ee:ff`):
 - `401` - missing or invalid session cookie on a protected route
 - `404` - protected resource not found (e.g. machine record)
 - `422` - request body failed Pydantic validation (e.g. malformed
-  `image_sha256`)
+  `bty_image_ref`)
 
 **Schema versioning.** Wire types are documented inline in
 `reference.md`; breaking changes to those shapes will land under a

@@ -484,7 +484,9 @@ normalised to lower-case `aa:bb:cc:dd:ee:ff`.
 ```
 Machine = {
   "mac": "aa:bb:cc:dd:ee:ff",
-  "image_sha256": "<64-hex>" | null,         # null = discovered but unassigned
+  "bty_image_ref": "<64-hex>" | null,        # null = discovered but unassigned
+                                             # references catalog_entries.bty_image_ref
+                                             # (sha256 of canonicalised src URL)
   "hostname": "..." | null,
   "discovered_at": "<ISO 8601>" | null,      # first /pxe contact; null if PUT-only
   "last_seen_at":  "<ISO 8601>" | null,      # most recent /pxe contact
@@ -496,10 +498,24 @@ Machine = {
 }
 
 MachineUpsert = {
-  "image_sha256": "<64-hex>" | null,
+  "bty_image_ref": "<64-hex>" | null,
   "hostname": str | null,
   "boot_policy": "local" | "flash" | "tui"  # default "local" on PUT;
                                             # auto-discovery sets "tui"
+}
+
+CatalogEntry (as returned by `GET /catalog/entries`) = {
+  "bty_image_ref":  "<64-hex>",                # PK; sha256(canonicalise_src(src))
+  "src":            "file://..." | "https://..." | "oras://...",
+  "disk_image_sha": "<64-hex>" | null,         # observed content sha;
+                                               # populated by HashManager (file://)
+                                               # or fetch-to-cache (remote)
+  "name":           "<filename>",
+  "format":         "img.gz" | "img.zst" | ...,
+  "size_bytes":     int | null,
+  "sha_url":        "https://.../<name>.sha256" | null,
+  "description":    str | null,
+  "added_at":       "<ISO 8601>"
 }
 
 ImageEntry = {

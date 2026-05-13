@@ -160,7 +160,11 @@
             <thead class="table-light">
                 <tr>
                     <th>Name(s)</th>
-                    <th>Ref</th>
+                    {# v0.11.0: this is the OBSERVED content sha
+                       (``disk_image_sha`` on the catalog row).
+                       Machines bind via ``bty_image_ref`` -- shown
+                       in the machine-detail picker, not here. #}
+                    <th>Content SHA</th>
                     <th>Format</th>
                     <th>Sources</th>
                     <th>Cached</th>
@@ -180,7 +184,8 @@
                         {% if u.sha256 %}
                         <code title="{{ u.sha256 }}">{{ u.sha256[:12] }}...</code>
                         {% else %}
-                        <span class="badge bg-warning text-dark" title="no .sha256 sidecar yet; cannot bind to a machine until hashed">unhashed</span>
+                        <span class="badge bg-warning text-dark"
+                              title="content sha not computed yet; v0.11.0 machine bindings target bty_image_ref so the entry is still bindable -- the sha lands when the HashManager finishes or after first cache-through fetch">unhashed</span>
                         {% endif %}
                     </td>
                     <td><span class="badge bg-secondary">{{ u.format or "?" }}</span></td>
