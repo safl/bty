@@ -511,6 +511,109 @@ def test_auto_import_hashes_unhashed_dir_scan_files(tmp_path: Path) -> None:
         assert entry["url"].endswith(f"/images/{expected_sha}/fresh.img")
 
 
+def test_serve_image_does_cache_through_on_uncached_ref(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``GET /images/<ref>`` for a catalog row with NULL disk_image_sha
+    fetches upstream synchronously (Option A cache-through), writes
+    the bytes to ``$cache_dir/<sha>``, updates the row's
+    disk_image_sha, and serves the cached file."""
+    import hashlib
+    import io
+    import os
+
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    state = state_dir / "state.db"
+    image_root = tmp_path / "images"
+    image_root.mkdir()
+    payload = b"cache-through delivers these bytes"
+    expected_sha = hashlib.sha256(payload).hexdigest()
+
+    fetched = {"count": 0}
+
+    class _MockResp(io.BytesIO):
+        def __init__(self, data: bytes) -> None:
+            super().__init__(data)
+            self.headers = {"Content-Length": str(len(data))}
+
+        def __enter__(self):  # type: ignore[no-untyped-def]
+            return self
+
+        def __exit__(self, *_args):  # type: ignore[no-untyped-def]
+            return None
+
+    def fake_urlopen(req_or_url, *_a, **_kw):  # type: ignore[no-untyped-def]
+        if isinstance(req_or_url, str):
+            url = req_or_url
+            method = "GET"
+        else:
+            url = req_or_url.full_url
+            method = getattr(req_or_url, "method", None) or "GET"
+        if "example.invalid/streamed.img" in url and method == "GET":
+            fetched["count"] += 1
+            return _MockResp(payload)
+        return _MockResp(b"")  # HEAD calls (catalog entry add path)
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    os.environ["BTY_STATE_DIR"] = str(state_dir)
+    try:
+        app = create_app(
+            state_path=state,
+            service_user=TEST_SERVICE_USER,
+            secret_key=TEST_SECRET_KEY,
+            image_root=image_root,
+        )
+        import pamela
+
+        monkeypatch.setattr(pamela, "authenticate", lambda *a, **kw: True)
+
+        with TestClient(app) as client:
+            login = client.post(
+                "/ui/login",
+                data={"password": "pytest-password"},
+                follow_redirects=False,
+            )
+            assert login.status_code == 303
+            cookie = login.cookies.get("bty-token")
+            assert cookie is not None
+            auth = {"bty-token": cookie}
+
+            # Add a URL-only entry (disk_image_sha = NULL after add).
+            url = "https://example.invalid/streamed.img"
+            add = client.post(
+                "/catalog/entries",
+                json={"image_url": url},
+                cookies=auth,
+            )
+            assert add.status_code == 201, add.text
+            ref = add.json()["bty_image_ref"]
+            assert add.json()["disk_image_sha"] is None
+
+            # First GET triggers cache-through: fetch + cache + serve.
+            r = client.get(f"/images/{ref}")
+            assert r.status_code == 200, r.text
+            assert r.content == payload
+            assert fetched["count"] == 1
+
+            # disk_image_sha is now populated on the row.
+            rows = client.get("/catalog/entries", cookies=auth).json()
+            row = next(r for r in rows if r["bty_image_ref"] == ref)
+            assert row["disk_image_sha"] == expected_sha
+
+            # Cache file landed at $cache_dir/<sha>.
+            assert (state_dir / "cache" / expected_sha).is_file()
+
+            # Second GET serves from cache -- no upstream fetch.
+            r = client.get(f"/images/{ref}")
+            assert r.status_code == 200
+            assert r.content == payload
+            assert fetched["count"] == 1
+    finally:
+        os.environ.pop("BTY_STATE_DIR", None)
+
+
 def test_auto_import_inserts_catalog_entries_row_per_dir_scan_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -926,9 +1029,11 @@ def test_pxe_flash_policy_returns_chain_with_args(
     assert "console=ttyS0,115200" in body
     assert "bty.server=${bty-base}" in body
     assert "bty.mac=aa:bb:cc:dd:ee:ff" in body
-    # URL ends in ``/images/<disk_image_sha>/<name>``: the content
-    # hash binds bytes; ``/name`` preserves format-by-extension.
-    assert f"bty.image_url=${{bty-base}}/images/{flash_sha}/" in body
+    # v0.11.0: URL ends in ``/images/<bty_image_ref>/<name>``. The
+    # serve_image route does cache-through (Option A) to resolve the
+    # ref to the actual disk_image_sha and serve the bytes; clients
+    # never see the content sha in the URL.
+    assert f"bty.image_url=${{bty-base}}/images/{ref}/" in body
     assert "bty.provisioning" not in body
 
 

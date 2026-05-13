@@ -606,6 +606,84 @@ def fetch_to_cache(
         raise
 
 
+def fetch_src_to_cache(
+    src: str,
+    cache_dir: Path,
+    *,
+    expected_sha: str | None = None,
+    timeout: float = 300.0,
+    chunk_size: int = 1 << 20,  # 1 MiB
+    progress: ProgressCallback | None = None,
+    cancel: CancelCheck | None = None,
+) -> tuple[Path, str]:
+    """Eagerly fetch a remote ``src`` into the content-addressed cache.
+
+    Unlike :func:`fetch_to_cache`, this variant does NOT require the
+    SHA to be known in advance. It streams the bytes from ``src``,
+    computes the sha as bytes flow, and atomic-renames into
+    ``cache_dir/<sha>``. When ``expected_sha`` is given, the streamed
+    digest must match it; on mismatch the temp file is discarded and
+    :class:`CatalogError` is raised (the cache is never left in a
+    half-written state).
+
+    Used by the bty-web PXE flash path's eager cache-through: when a
+    machine is bound to a ``bty_image_ref`` whose ``disk_image_sha``
+    is unknown (rolling oras tag never fetched, URL-only entry that
+    hasn't been resolved), the live env's ``GET /images/<ref>/<name>``
+    triggers this fetch + caches + serves the bytes.
+
+    ``src`` must be an http(s):// or oras:// URL; file:// srcs don't
+    need fetching (bytes are already on disk under ``BTY_IMAGE_ROOT``)
+    and a :class:`ValueError` surfaces instead.
+
+    Returns ``(cache_path, computed_sha)``.
+    """
+    if src.startswith("file://"):
+        raise ValueError(
+            f"fetch_src_to_cache does not handle file:// srcs (bytes are already local): {src!r}"
+        )
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    tmp_path = cache_dir / f".tmp.{os.urandom(8).hex()}"
+    digest = hashlib.sha256()
+    try:
+        if src.startswith("oras://"):
+            from bty import oras as _oras
+
+            resolved = _oras.resolve_ref(src, timeout=timeout)
+            req = urllib.request.Request(resolved.blob_url, headers=resolved.headers)
+            opener = urllib.request.urlopen(req, timeout=timeout)
+        else:
+            opener = urllib.request.urlopen(src, timeout=timeout)
+        with opener as resp, tmp_path.open("wb") as out:
+            total = (
+                int(resp.headers.get("Content-Length"))
+                if resp.headers.get("Content-Length")
+                else None
+            )
+            _stream_with_digest(
+                resp,
+                out,
+                digest,
+                chunk_size,
+                progress=progress,
+                cancel=cancel,
+                total=total,
+            )
+        actual = digest.hexdigest()
+        if expected_sha is not None and actual != expected_sha.lower():
+            raise CatalogError(
+                f"fetch_src_to_cache {src!r}: sha256 mismatch "
+                f"(expected {expected_sha}, got {actual}); discarded"
+            )
+        cached = cache_dir / actual
+        os.replace(tmp_path, cached)
+        return cached, actual
+    except BaseException:
+        with contextlib.suppress(FileNotFoundError):
+            tmp_path.unlink()
+        raise
+
+
 def _stream_with_digest(
     src: IO[bytes],
     dst: IO[bytes],

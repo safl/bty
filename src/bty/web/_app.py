@@ -409,27 +409,22 @@ def create_app(
             return template.render(mac=normalised, machine=machine, host=host)
         ref = machine.get("bty_image_ref")
         if ref and machine.get("boot_policy") == "flash":
-            # Resolve ref -> (disk_image_sha, name) so the iPXE URL
-            # ends in ``/images/<sha>/<name>``. Without a resolvable
-            # disk sha, fall through to ``ipxe_unknown.j2`` (the
-            # bound entry hasn't been hashed / cached yet; a future
-            # release adds cache-through that materialises bytes on
-            # this same code path).
-            resolved = _flash_target_for_ref(str(ref))
-            if resolved is not None:
-                disk_sha, image_name = resolved
-                # Carry the resolved disk_image_sha into the template
-                # as ``flash_sha`` -- the template builds the
-                # ``/images/<sha>/<name>`` URL from this, decoupled
-                # from the machine row's ``bty_image_ref`` (which is
-                # provenance, not content).
+            # Emit the iPXE flash chain whose URL ends in
+            # ``/images/<ref>/<name>``. The serve_image route does
+            # eager cache-through (Option A): if the bound entry's
+            # disk_image_sha is unknown the route fetches upstream
+            # synchronously before sendfile-ing to the live env's
+            # curl. Operators who care about first-flash latency
+            # pre-warm the cache via the /ui/images Fetch button.
+            image_name = _flash_target_for_ref(str(ref))
+            if image_name is not None:
                 template = jinja.get_template("ipxe_flash.j2")
                 return template.render(
                     mac=normalised,
                     machine=machine,
                     host=host,
                     image_name=image_name,
-                    flash_sha=disk_sha,
+                    flash_sha=str(ref),
                 )
         if ref:
             template = jinja.get_template("ipxe.j2")
@@ -554,28 +549,24 @@ def create_app(
         return _serve_safe_file(resolved_boot_root, name)
 
     def _serve_image_by_key(key: str) -> FileResponse:
-        """Resolve ``key`` (filename OR SHA-256) to bytes.
+        """Resolve ``key`` (filename OR 64-hex ID) to bytes.
 
         Resolution order:
 
           1. Literal filename under ``image_root`` -- legacy path.
-          2. SHA-256 (64 lower-hex):
-             a. Catalog cache: ``cache_dir/<sha>``.
-             b. Dir-scan: file whose ``.sha256`` sidecar holds
-                this digest.
+          2. 64-hex ID through :func:`_resolve_image_for_key`, which
+             handles ``bty_image_ref`` lookups (with eager cache-through
+             on miss) and falls back to bare ``disk_image_sha`` lookups
+             against the cache + dir-scan.
         """
         try:
             return _serve_safe_file(resolved_image_root, key)
         except HTTPException:
             pass
-        sha = key.lower()
-        if images.is_sha256_hex(sha):
-            cached = catalog_cache_dir / sha
-            if cached.is_file():
-                return FileResponse(cached, media_type="application/octet-stream")
-            for img in images.list_images(resolved_image_root):
-                if img.sha256 == sha:
-                    return FileResponse(img.path, media_type="application/octet-stream")
+        if images.is_sha256_hex(key.lower()):
+            resolved_path = _resolve_image_for_key(key)
+            if resolved_path is not None:
+                return FileResponse(resolved_path, media_type="application/octet-stream")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"no such image: {key}",
@@ -602,27 +593,114 @@ def create_app(
                     return entry.name
         return None
 
-    def _flash_target_for_ref(ref: str) -> tuple[str, str] | None:
-        """Resolve a ``bty_image_ref`` to ``(disk_image_sha, name)`` so
-        the iPXE flash template can build a ``/images/<sha>/<name>``
-        URL pointing at cached bytes.
+    def _flash_target_for_ref(ref: str) -> str | None:
+        """Resolve a ``bty_image_ref`` to a display name so the iPXE
+        flash template can build the ``/images/<ref>/<name>`` URL.
 
-        Returns ``None`` if the ref isn't bindable yet:
-
-        - no catalog row for this ref (orphaned binding), OR
-        - row exists but ``disk_image_sha`` is NULL (entry hasn't been
-          hashed / fetched yet -- cache-through machinery in a future
-          release will materialise the bytes on demand; for now,
-          falling through to ``ipxe_unknown.j2`` is the safe path).
+        Returns the entry's ``name`` (preserves format-by-extension
+        on the live-env side) or ``None`` for an orphaned binding (no
+        catalog row matches this ref). The URL uses the ref itself,
+        not the content sha -- :func:`_resolve_image_for_key` does
+        the cache-through on the fly when the bound entry's
+        ``disk_image_sha`` is still NULL (eager fetch-then-serve,
+        Option A in the v0.11.0 design notes).
         """
         with _db.open_db(state_path) as conn:
             row = conn.execute(
-                "SELECT disk_image_sha, name FROM catalog_entries WHERE bty_image_ref = ?",
+                "SELECT name FROM catalog_entries WHERE bty_image_ref = ?",
                 (ref,),
             ).fetchone()
-        if row is None or not row["disk_image_sha"]:
+        if row is None:
             return None
-        return str(row["disk_image_sha"]), str(row["name"])
+        return str(row["name"])
+
+    def _resolve_image_for_key(key: str) -> Path | None:
+        """Resolve a 64-hex key (bty_image_ref or disk_image_sha) to a
+        local file path. Triggers eager cache-through if the bound
+        catalog row's bytes aren't on disk yet.
+
+        Resolution order:
+
+        1. ``key`` as ``bty_image_ref``: look up catalog_entries.
+           - disk_image_sha known + cache file present -> cache path
+           - disk_image_sha known + dir-scan file present -> local
+           - src is file:// + file exists -> local (HashManager will
+             populate disk_image_sha asynchronously)
+           - else (remote src, no cache): fetch src -> cache,
+             UPDATE row.disk_image_sha, return new cache path.
+             Pre-pinned-sha mismatch on fetch returns ``None`` (the
+             caller surfaces a 502 and logs a sha_mismatch event).
+        2. ``key`` as raw disk_image_sha: legacy path -- cache lookup
+           then dir-scan fallback for entries whose ref-keyed row was
+           deleted but the cache file lingers.
+        """
+        key_lower = key.lower()
+        # (1) ref lookup.
+        with _db.open_db(state_path) as conn:
+            row = conn.execute(
+                "SELECT bty_image_ref, src, disk_image_sha "
+                "FROM catalog_entries WHERE bty_image_ref = ?",
+                (key_lower,),
+            ).fetchone()
+        if row is not None:
+            sha = row["disk_image_sha"]
+            src = str(row["src"])
+            ref = str(row["bty_image_ref"])
+            if sha:
+                cached = catalog_cache_dir / sha
+                if cached.is_file():
+                    return cached
+            if src.startswith("file://"):
+                rel = src[len("file://") :]
+                local = resolved_image_root / rel
+                if local.is_file():
+                    return local
+                return None
+            # Remote src, no cache yet -- cache-through (Option A).
+            try:
+                cached, computed_sha = _catalog.fetch_src_to_cache(
+                    src,
+                    catalog_cache_dir,
+                    expected_sha=sha,
+                )
+            except _catalog.CatalogError as exc:
+                with _db.open_db(state_path) as conn:
+                    _log_event(
+                        conn,
+                        kind="catalog.fetch.sha_mismatch",
+                        summary=f"cache-through {src!r}: {exc}",
+                        subject_kind="catalog",
+                        subject_id=ref,
+                        actor="pxe-client",
+                        details={"src": src, "error": str(exc)},
+                    )
+                    conn.commit()
+                return None
+            with _db.open_db(state_path) as conn:
+                conn.execute(
+                    "UPDATE catalog_entries SET disk_image_sha = ? WHERE bty_image_ref = ?",
+                    (computed_sha, ref),
+                )
+                _log_event(
+                    conn,
+                    kind="catalog.cache.populated",
+                    summary=f"cache-through populated for {src!r}",
+                    subject_kind="catalog",
+                    subject_id=ref,
+                    actor="pxe-client",
+                    details={"src": src, "disk_image_sha": computed_sha},
+                )
+                conn.commit()
+            return cached
+        # (2) sha lookup -- cache + dir-scan fallback.
+        if images.is_sha256_hex(key_lower):
+            cached = catalog_cache_dir / key_lower
+            if cached.is_file():
+                return cached
+            for img in images.list_images(resolved_image_root):
+                if img.sha256 == key_lower:
+                    return img.path
+        return None
 
     @app.get("/images/{key}", include_in_schema=False)
     def serve_image(key: str) -> FileResponse:
