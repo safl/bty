@@ -15,31 +15,34 @@ live-tools
 plymouth
 plymouth-themes
 
-# Vendor firmware blobs. Tight curation: every package included
-# here has to earn its squashfs bytes against the "operator flashes
-# a random homelab box" use case. Requires
-# ``--archive-areas "main non-free-firmware"`` in ``auto/config``.
+# Vendor firmware blobs. Curated set covering "operator flashes a
+# random homelab box" hardware. Requires ``--archive-areas "main
+# non-free-firmware"`` in ``auto/config``.
 #
-#   firmware-misc-nonfree -- i915 GuC / HuC + sensor + IC firmware
-#     covers the bulk of Intel-platform "needs firmware at probe"
-#     hardware. Silences the "Failed to initialize GPU, declaring
-#     it wedged" log line on Alder-Lake-class targets.
+#   firmware-misc-nonfree -- i915 GuC / HuC + sensor + IC firmware.
+#     Silences "Failed to initialize GPU, declaring it wedged" on
+#     Alder-Lake-class targets.
 #   firmware-iwlwifi      -- Intel WiFi (AX2xx / BE2xx / etc.).
-#     Required for bty-usb on most modern laptops / NUC-class.
+#     Required on most modern laptops / NUC-class hardware.
 #   firmware-realtek      -- Realtek Ethernet + WiFi + BT. RTL8125
-#     2.5GbE shows up on essentially every mini-PC including the
-#     GMKtec G5; without it that NIC won't link.
+#     2.5GbE on essentially every mini-PC (incl. GMKtec G5).
+#   firmware-amd-graphics -- AMD GPU firmware. Parity with the i915
+#     fix on AMD targets (without it, amdgpu wedges at probe the
+#     same way i915 used to; cosmetic but noisy in dmesg).
+#   firmware-bnx2 + bnx2x -- Broadcom NetXtreme. Lower hit-rate
+#     than the rest but tiny (~3 MiB combined) and covers enterprise
+#     server NICs an operator might encounter.
 #
-# Intentionally NOT included:
-#   firmware-amd-graphics -- ~150 MiB compressed. AMD GPUs wedge at
-#     probe without it, but bty's TUI runs on the framebuffer /
-#     simpledrm; the wedge is cosmetic. Not worth doubling the ISO
-#     size to silence one log line.
-#   firmware-bnx2 + bnx2x -- Broadcom NetXtreme. Enterprise NICs;
-#     low hit-rate among bty operators (homelab + mini-PCs).
+# v0.9.7 tried trimming amd-graphics + bnx2* for size; saving was
+# under 100 MiB compressed -- not worth the coverage regression.
+# Curated vs ``firmware-linux-nonfree`` (the metapackage), which
+# would pull every architecture's firmware (~500 MiB compressed).
 firmware-misc-nonfree
 firmware-iwlwifi
 firmware-realtek
+firmware-bnx2
+firmware-bnx2x
+firmware-amd-graphics
 
 # NetworkManager pulls in ``nmtui`` (a curses-friendly network picker)
 # and the daemon that backs it. Use case: operator boots bty-usb on
