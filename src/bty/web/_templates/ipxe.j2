@@ -3,13 +3,17 @@
 # Assignment:
 #   image (ref):       {{ machine.bty_image_ref or "(none)" }}
 #   hostname:          {{ machine.hostname or "(none)" }}
+#   boot_policy:       {{ machine.boot_policy }}
 #
 # This template is rendered when the machine has an image assigned
-# but ``boot_policy=local`` - the machine has been provisioned at
-# some point and now boots normally from its disk. ``exit`` returns
-# control to the PXE ROM, which falls through to the next boot
-# device (typically the local disk).
+# but the flash chain isn't being emitted -- either ``boot_policy=
+# local`` (already provisioned, boot from disk) or
+# ``boot_policy=flash`` with an orphaned ``bty_image_ref`` (no
+# catalog row resolves the ref; surfaced as a ``pxe.flash.orphan_ref``
+# event in /ui/events). ``exit`` returns control to the PXE ROM,
+# which falls through to the next boot device (typically the local
+# disk).
 
-echo bty: {{ mac }} boot_policy=local ref={{ (machine.bty_image_ref or "none")[:12] }}..., returning to local boot
+echo bty: {{ mac }} boot_policy={{ machine.boot_policy }} ref={{ (machine.bty_image_ref or "none")[:12] }}..., returning to local boot
 sleep 1
 exit

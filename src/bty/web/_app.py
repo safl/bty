@@ -426,6 +426,23 @@ def create_app(
                     image_name=image_name,
                     flash_key=str(ref),
                 )
+            # Orphaned binding: machine targets a ref that no
+            # catalog_entries row resolves. Log loudly so the
+            # operator sees "you set boot_policy=flash but the
+            # ref is dangling" instead of a silent fall-through.
+            with _db.open_db(state_path) as conn:
+                short = str(ref)[:12]
+                _log_event(
+                    conn,
+                    kind="pxe.flash.orphan_ref",
+                    summary=f"machine {normalised} bound to ref={short}...: no catalog row",
+                    subject_kind="machine",
+                    subject_id=normalised,
+                    actor="pxe-client",
+                    source_ip=_client_ip(request),
+                    details={"bty_image_ref": ref},
+                )
+                conn.commit()
         if ref:
             template = jinja.get_template("ipxe.j2")
             return template.render(mac=normalised, machine=machine)

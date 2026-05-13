@@ -130,14 +130,14 @@ def main(args, cijoe):
             dummy_image,
             cfg["machine_image"],
         )
-        # v0.11.0 binds via ``bty_image_ref`` (sha256 of the
-        # canonical src); for file-backed images uploaded here
-        # there's no catalog_entries row yet, so the PXE resolver
-        # falls back to the legacy sha lookup over the dir-scan.
-        # Compute the dummy's content SHA locally and upload a
-        # sidecar so dir-scan finds the SHA immediately; without
-        # this, the async hash worker might still be running when
-        # the client PXE-boots and ``/pxe/<mac>`` would race-fail.
+        # PUT /images runs the auto-import sweep, which inserts a
+        # catalog_entries row keyed by
+        # ``bty_image_ref = sha256("file://<machine_image>")``. The
+        # machine binding (below) targets that ref. The content sha
+        # is uploaded as a sidecar so the HashManager populates
+        # ``disk_image_sha`` synchronously; otherwise the client
+        # could PXE-boot before the hash worker writes the column
+        # and the cache-through fetch would have nothing to verify.
         dummy_sha = _sha256_file(dummy_image)
         sidecar_name = f"{cfg['machine_image']}.sha256"
         sidecar_body = f"{dummy_sha}  {cfg['machine_image']}\n".encode()
@@ -150,6 +150,10 @@ def main(args, cijoe):
             sidecar_body,
             sidecar_name,
         )
+        # Canonical ref for the just-uploaded file. Mirrors
+        # ``bty.catalog.image_ref_for_src`` for the file:// scheme
+        # without importing the package (cijoe runs in its own venv).
+        bty_image_ref = hashlib.sha256(f"file://{cfg['machine_image']}".encode()).hexdigest()
 
         # Wait for sshd to come up + drop the test-only dnsmasq
         # config that does full DHCP on the synthesised PXE
@@ -167,7 +171,7 @@ def main(args, cijoe):
         _ssh_setup_test_dhcp("127.0.0.1", ssh_port, cfg)
 
         log.info(f"PUT /machines/{cfg['client_mac']} (boot_policy=flash)")
-        _put_assignment("127.0.0.1", mgmt_port, token, cfg, dummy_sha)
+        _put_assignment("127.0.0.1", mgmt_port, token, cfg, bty_image_ref)
 
         log.info(f"Starting client VM (PXE boot, joined to socket :{pxe_socket_port})")
         client = _start_client_vm(workspace, pxe_socket_port, client_log, cfg)
