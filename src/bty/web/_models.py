@@ -127,17 +127,18 @@ class ImageEntry(BaseModel):
       these up at startup with a single worker so a Pi 4 does
       not get hammered.
 
-    ``ref`` is a 12-char short SHA prefix for display only --
-    used by the browser UI to disambiguate same-named entries.
-    Operators do not paste it anywhere; bty-web speaks URLs,
-    machines bind by SHA, the CLI takes paths or URLs.
+    ``sha_short`` is a 12-char prefix of the entry's content sha
+    (``disk_image_sha``) for display only -- used by the browser
+    UI to disambiguate same-named entries. Distinct from
+    ``bty_image_ref`` (the binding key); operators do not paste
+    it anywhere.
     """
 
     name: str
     format: str
     size_bytes: int
     url: str
-    ref: str | None = None
+    sha_short: str | None = None
     cached: bool = False
 
 

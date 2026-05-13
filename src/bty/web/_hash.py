@@ -48,8 +48,8 @@ def _reject_traversal_name(name: str) -> None:
 
     The FastAPI layer's ``_safe_path`` rejects these on public
     routes; mirroring the check at the manager boundary means a
-    direct call from a non-API caller (auto-import, tests, future
-    internal use) can never resolve outside ``image_root``.
+    direct call from a non-API caller (auto-import, tests) can
+    never resolve outside ``image_root``.
     """
     if not name or name in (".", "..") or "/" in name or "\\" in name or "\0" in name:
         raise ValueError(
@@ -131,9 +131,8 @@ class HashManager(_BaseAsyncManager[HashState]):
         traversal characters (``/``, ``\\``, ``..``, NUL). The
         FastAPI layer's ``_safe_path`` already rejects these on
         the public PUT route; the check here defends non-API
-        callers (auto-import lifespan, tests, future internal
-        use) so a malformed name can never reach the
-        filesystem.
+        callers (auto-import lifespan, tests) so a malformed name
+        can never reach the filesystem.
         """
         _reject_traversal_name(name)
         if self._image_root is None:

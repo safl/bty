@@ -644,7 +644,7 @@ def test_serve_image_does_cache_through_on_uncached_ref(
 def test_auto_import_inserts_catalog_entries_row_per_dir_scan_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """v0.11.0 auto-import step: every dir-scan file lands in
+    """Auto-import sweep: every dir-scan file lands in
     ``catalog_entries`` with src ``file://<name>``, computed
     ``bty_image_ref``, and (once hashed) ``disk_image_sha``.
 
@@ -890,12 +890,12 @@ def test_machine_upsert_rejects_empty_hostname(app_client: TestClient) -> None:
 
 
 def test_machine_upsert_rejects_invalid_hostname_shapes(app_client: TestClient) -> None:
-    """The pre-v0.7.36 hostname pattern (``[a-zA-Z0-9.-]+``) accepted
-    invalid shapes like ``-foo`` (leading hyphen), ``foo-`` (trailing),
-    ``..``, ``.foo``, and bare ``-``. Tightened to RFC-1123-ish:
-    each label is alnum, hyphen-internal-only, dot-separated. These
-    used to land in state.db where they confused the agetty
-    \\S{name} renderer at console banner time; now rejected at PUT."""
+    """Hostname must be RFC-1123-ish: each dot-separated label is
+    alnum, hyphen-internal-only (no leading / trailing / bare
+    hyphen, no consecutive dots). Invalid shapes like ``-foo``,
+    ``foo-``, ``..``, ``.foo``, bare ``-`` must 422 at PUT
+    rather than landing in state.db where they confuse the agetty
+    \\S{name} renderer at console banner time."""
     valid_sha = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
     for bad in (
         "-foo",  # leading hyphen
@@ -936,13 +936,13 @@ def test_machine_upsert_accepts_real_hostname_shapes(app_client: TestClient) -> 
 
 
 def test_machine_upsert_rejects_unknown_fields(app_client: TestClient) -> None:
-    """``MachineUpsert(extra="forbid")`` -- a stale client (or
-    operator typo) sending an unknown ``image`` field instead of
-    ``bty_image_ref`` must 422 loudly. The previous default
-    silently accepted unknown keys + landed an assignment with
-    ``bty_image_ref=NULL``, which then surfaced as "no bty
-    assignment" at PXE-chain time. This regression test pins the
-    strict-extra contract so the failure surfaces at PUT time."""
+    """``MachineUpsert(extra="forbid")`` -- a typo sending an
+    unknown field instead of ``bty_image_ref`` must 422 loudly.
+    Without ``extra="forbid"``, unknown keys would be silently
+    dropped, landing an assignment with ``bty_image_ref=NULL``
+    that surfaces as "no bty assignment" at PXE-chain time. This
+    pins the strict-extra contract so the failure surfaces at
+    PUT time."""
     r = app_client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
         json={
@@ -1128,7 +1128,7 @@ def test_pxe_done_404_for_unknown_mac(app_client: TestClient) -> None:
     assert r.status_code == 404
 
 
-# ---------- /events API (v0.7.38 audit log) -----------------------------
+# ---------- /events API (audit log) -------------------------------------
 
 
 def test_events_list_requires_auth(app_client: TestClient) -> None:
@@ -1718,8 +1718,8 @@ def test_serve_image_with_name_resolves_by_sha(tmp_path: Path) -> None:
         r = client.get(f"/images/{sha}/whatever-filename.img.zst")
         assert r.status_code == 200
         assert r.content == payload
-        # Same SHA, no trailing name -- still works (back-compat
-        # for older clients that hit the bare-SHA URL).
+        # Same SHA, no trailing name -- the bare-SHA URL form is
+        # the lookup; the trailing name is purely decorative.
         r2 = client.get(f"/images/{sha}")
         assert r2.status_code == 200
         assert r2.content == payload
@@ -1792,7 +1792,7 @@ def test_catalog_hashes_cancel_unknown_404(app_client: TestClient) -> None:
     assert r.status_code == 404
 
 
-# ---------- operator-curated catalog entries (M23) -------------------------
+# ---------- operator-curated catalog entries -------------------------------
 
 
 def test_catalog_entries_add_with_sha_url_resolves_sha(
@@ -1855,7 +1855,7 @@ def test_catalog_entries_add_without_sha_url_is_url_only(
     by_name = {row["name"]: row for row in rows}
     assert "foo.img.gz" in by_name
     assert by_name["foo.img.gz"]["url"] == "https://example.invalid/foo.img.gz"
-    assert by_name["foo.img.gz"]["ref"] is None  # sha256 unknown
+    assert by_name["foo.img.gz"]["sha_short"] is None  # sha256 unknown
 
 
 def test_catalog_entries_add_rejects_non_https(app_client: TestClient) -> None:
@@ -1987,7 +1987,7 @@ def test_catalog_entries_list_and_delete(
     url = "https://example.invalid/del.img.gz"
     app_client.post("/catalog/entries", json={"image_url": url}, cookies=AUTH)
 
-    # v0.11.0 auto-imports dir-scan files into catalog_entries on
+    # Auto-import sweeps dir-scan files into catalog_entries on
     # bty-web startup; the app_client fixture seeds ``demo.qcow2``
     # so we filter by src to isolate the URL-added entry under test.
     r = app_client.get("/catalog/entries", cookies=AUTH)
@@ -2182,9 +2182,9 @@ def test_catalog_import_from_local_path(app_client: TestClient, tmp_path: Path) 
     assert body["imported"] == 2
     assert body["skipped"] == 0
     assert body["errors"] == []
-    # The fixture seeds ``demo.qcow2`` which the v0.11.0 auto-import
-    # sweep imports as ``file://demo.qcow2``; filter to the entries
-    # this test added.
+    # The fixture seeds ``demo.qcow2`` which the auto-import sweep
+    # imports as ``file://demo.qcow2``; filter to the entries this
+    # test added.
     r2 = app_client.get("/catalog/entries", cookies=AUTH)
     names = {row["name"] for row in r2.json()}
     assert "alpha.img.gz" in names
@@ -2592,9 +2592,8 @@ def test_catalog_enqueue_request_rejects_traversal_name(app_client: TestClient) 
     """``CatalogEnqueueRequest.name`` (used by both
     ``POST /catalog/downloads`` and ``POST /catalog/hashes``)
     rejects path-traversal characters at the Pydantic layer.
-    With the manager-side check shipped in v0.7.26, a bad name
-    used to surface as a 500 from ``ValueError``; now both
-    layers return a clean 422."""
+    Layered with the manager-side check so both surfaces return
+    a clean 422 instead of a 500 from ``ValueError``."""
     for bad in ("../etc/passwd", "foo/bar", "name\\with\\backslash", "with\0nul"):
         r = app_client.post(
             "/catalog/hashes",

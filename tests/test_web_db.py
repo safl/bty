@@ -67,8 +67,8 @@ def test_init_db_raises_on_stale_schema(tmp_path: Path) -> None:
     import pytest
 
     state = tmp_path / "state.db"
-    # Create an older-style events table missing ``source_ip``
-    # (added in v0.7.43 audit-log IP tracking).
+    # Create an older-style events table missing ``source_ip`` --
+    # simulates a stale state.db from before audit-log IP tracking.
     with sqlite3.connect(state) as conn:
         conn.execute(
             """

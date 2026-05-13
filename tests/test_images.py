@@ -354,10 +354,10 @@ def test_read_bri_accepts_oras_url(tmp_path: Path) -> None:
     assert remote.format == "img.gz"
 
 
-def test_read_bri_rejects_pre_rename_ghcr_scheme(tmp_path: Path) -> None:
-    """The bare ``ghcr:`` scheme (pre-v0.8.6 rename) is intentionally
-    NOT accepted -- it was easy to confuse with a container reference
-    that operators might ``docker pull``. Operators must use the
+def test_read_bri_rejects_bare_ghcr_scheme(tmp_path: Path) -> None:
+    """The bare ``ghcr:`` scheme is intentionally NOT accepted --
+    it would be easy to confuse with a container reference that
+    operators might ``docker pull``. Operators must use the
     explicit ``oras://`` form instead."""
     bri = tmp_path / "old.bri"
     bri.write_text('url = "ghcr:safl/nosi/debian-base:latest"\n')

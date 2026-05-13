@@ -86,11 +86,11 @@ def test_load_rejects_unknown_version(tmp_path: Path) -> None:
 
 
 def test_load_rejects_missing_required_field(tmp_path: Path) -> None:
-    """``name`` and ``src`` are required; ``sha256`` is now optional
-    (relaxed in v0.9.3 so rolling-tag oras:// and rolling-asset
-    http URLs don't need a pre-pinned digest). This test pins the
-    remaining required-field behaviour: an entry without ``src``
-    is rejected, but an entry without ``sha256`` parses cleanly."""
+    """``name`` and ``src`` are required; ``sha256`` is optional
+    so rolling-tag oras:// and rolling-asset http URLs don't need
+    a pre-pinned digest. This test pins the required-field rule:
+    an entry without ``src`` is rejected, but an entry without
+    ``sha256`` parses cleanly."""
     body = """
         version = 1
         [[images]]
@@ -342,7 +342,7 @@ def test_default_cache_dir_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     assert catalog.default_cache_dir() == Path("/var/cache/bty")
 
 
-# ---------- sha256 manifest parsing (M23) ----------------------------------
+# ---------- sha256 manifest parsing ----------------------------------------
 
 
 def test_parse_sha256_manifest_single_bare_digest() -> None:
@@ -497,9 +497,10 @@ def test_catalog_entry_accepts_explicit_null_sha256() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Canonicalisation + image-ref derivation (v0.11.0).
-# Every row of every B2 table is covered here so a future contributor
-# can see at a glance whether their input falls in or out of scope.
+# Canonicalisation + image-ref derivation.
+# Every per-scheme canonicalisation rule is covered here so a future
+# contributor can see at a glance whether their input falls in or out
+# of scope.
 
 
 @pytest.mark.parametrize(

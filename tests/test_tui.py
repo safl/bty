@@ -809,11 +809,11 @@ def test_app_filter_escape_clears_and_repopulates(
 
 
 def test_app_no_details_pane(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The Details pane was removed in v0.5.x to give the two
-    interactive panes (Images / Disks) more horizontal room.
-    Verify the layout no longer mounts a ``#details-pane`` /
-    ``#details-body`` so future regressions that re-introduce
-    duplicated table-vs-body rendering surface immediately.
+    """The layout has no Details pane -- the two interactive panes
+    (Images / Disks) take the horizontal room. Verify the layout
+    does not mount a ``#details-pane`` / ``#details-body`` so a
+    regression re-introducing duplicated table-vs-body rendering
+    surfaces immediately.
     """
     _patch_data_sources(
         monkeypatch,
@@ -1047,14 +1047,13 @@ def test_action_flash_pushes_confirm_modal_without_crashing(
     """Pressing ``f`` with an image + disk in the catalogs pushes the
     FlashConfirmScreen modal without raising.
 
-    Regression test for the v0.5.4 ``@work`` decorator gap: before
-    that fix, ``action_flash`` was a plain ``async def`` and called
-    ``push_screen_wait`` which Textual 8.x rejects outside a worker
-    context with "screen must be from a worker when wait_for_dismiss
-    is True". The bug shipped through several releases because no
-    test exercised the binding end-to-end -- the existing
-    ``FlashStatusScreen`` tests instantiate that screen directly via
-    ``app.push_screen(...)`` and never go through ``action_flash``.
+    Regression guard for the ``@work`` decorator contract:
+    ``action_flash`` calls ``push_screen_wait`` which Textual 8.x
+    rejects outside a worker context with "screen must be from a
+    worker when wait_for_dismiss is True". The existing
+    ``FlashStatusScreen`` tests instantiate that screen directly
+    via ``app.push_screen(...)`` and never go through
+    ``action_flash``, so the binding path needs its own coverage.
 
     This test drives the binding via Pilot.press("f") and asserts
     that within a few event-loop turns the FlashConfirmScreen is on

@@ -423,13 +423,17 @@ tooling which can't carry a session cookie:
  Operators populate the dir via the browser UI's "fetch latest
  release" button on the Boot page, or with the auth-gated
  `PUT /boot/{name}` upload route.
-- `GET /images/{name}` - serve image bytes from `BTY_IMAGE_ROOT`.
- Used by the live env to download the assigned image; reachable
- by anyone on the network. Companion auth-gated upload route at
+- `GET /images/{key}` and `GET /images/{key}/{name}` - serve
+ image bytes from `BTY_IMAGE_ROOT` (or the catalog cache).
+ ``key`` may be a filename, a ``bty_image_ref``, or a
+ ``disk_image_sha``; the trailing ``{name}`` form is decorative
+ (preserves format-by-extension on the client side). Used by
+ the live env to download the assigned image; reachable by
+ anyone on the network. Companion auth-gated upload route at
  `PUT /images/{name}` for operators / scripts.
-- `GET /images` - list the catalog (array of `ImageEntry`). Open for
- the same reason as `GET /images/{name}`: the bty-tui-on-PXE flow
- needs to enumerate from inside the live env without first
+- `GET /images` - list the catalog (array of `ImageEntry`). Open
+ for the same reason as `GET /images/{key}`: the bty-tui-on-PXE
+ flow needs to enumerate from inside the live env without first
  bootstrapping a session, and discovery adds no capability beyond
  what the already-open byte-serving route provides.
 - `GET /catalog.toml` - same row set as `GET /images`, serialised as
@@ -518,10 +522,15 @@ CatalogEntry (as returned by `GET /catalog/entries`) = {
 }
 
 ImageEntry = {
-  "name": "debian.qcow2",
-  "path": "/var/lib/bty/images/debian.qcow2",
-  "format": "qcow2",
-  "size_bytes": 268435456
+  "name":       "debian.qcow2",
+  "format":     "qcow2",
+  "size_bytes": 268435456,
+  "url":        "http://server:8080/images/<disk_image_sha>/<name>"
+                                              | "https://..." | "oras://...",
+  "sha_short":  "<12-hex>" | null,             # display-only prefix
+                                              # of disk_image_sha
+  "cached":     true | false                   # true iff bty-web has
+                                              # the bytes on disk
 }
 ```
 

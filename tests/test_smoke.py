@@ -107,15 +107,15 @@ def test_server_cloudinit_base_is_valid_yaml() -> None:
 def test_etc_issue_uses_only_documented_agetty_escapes() -> None:
     """``/etc/issue`` is rendered by agetty at login-prompt time;
     every ``\\<char>`` sequence in the file is interpreted by
-    agetty's escape parser. v0.7.4 caught a regression where
-    figlet ASCII art (``\\__|``, ``\\__,``) confused the parser
-    and emitted VT100 control bytes onto the serial console
-    right before the login banner.
+    agetty's escape parser. Figlet-style backslash ASCII art
+    (``\\__|``, ``\\__,``) confuses the parser and emits VT100
+    control bytes onto the serial console right before the
+    login banner.
 
     Pin both the rootfs-shipped /etc/issue AND the heredoc
-    bty-web-init writes on first boot so a future "let's spice
-    up the banner" attempt with backslash-laden ASCII gets
-    caught here instead of by an operator watching CI logs.
+    bty-web-init writes on first boot so any "spice up the
+    banner" attempt with backslash-laden ASCII gets caught here
+    instead of by an operator watching CI logs.
 
     Allowed escapes: the agetty(8)-documented set
     (``\\b \\d \\e \\l \\m \\n \\o \\r \\s \\t \\u \\U \\v
@@ -167,12 +167,10 @@ def test_server_cloudinit_does_not_install_plymouth() -> None:
     ``console=ttyS0`` serial consoles, which is the operator's
     primary boot-watch surface for headless servers.
 
-    Plymouth has been added-then-dropped twice already (v0.4.x
-    added, v0.5.12 dropped, post-v0.5.14 restored, v0.7.2 dropped
-    again after the serial-console regression resurfaced). Pin it
-    so a third "let's add the splash back" cycle gets caught by
-    tests instead of by an operator watching a fresh appliance
-    boot.
+    Plymouth has been added and dropped multiple times when
+    operators have asked for a boot splash; pin it out so the next
+    "let's add the splash back" attempt gets caught by tests
+    instead of by an operator watching a fresh appliance boot.
 
     Two layers of defense are pinned here:
 
@@ -180,8 +178,8 @@ def test_server_cloudinit_does_not_install_plymouth() -> None:
        doesn't ADD it).
     2. ``apt-get -y purge plymouth`` is in ``runcmd:`` (so
        plymouth is REMOVED if the Debian-13 daily cloud-image
-       baseline pre-installed it -- which is what happened in
-       v0.7.2's bake despite the packages-list removal).
+       baseline pre-installed it -- the packages-list removal
+       alone is not enough).
     """
     from pathlib import Path
 
@@ -220,14 +218,13 @@ def test_activate_pxe_helper_uses_same_fs_tempfile() -> None:
 
 
 def test_server_cloudinit_ships_haveged() -> None:
-    """v0.7.16's bake-VM showed a 20-minute systemd-journald start
-    on N97 hardware; entropy starvation is the prime suspect even
-    on RDRAND-capable CPUs (kernel CSPRNG can briefly block on
-    ``getrandom()`` before the trust-cpu logic settles). v0.7.17
-    adds ``haveged`` (CPU-jitter entropy daemon) + explicit
-    ``random.trust_cpu=on random.trust_bootloader=on`` cmdline
-    flags so the boot doesn't depend on the kernel's compile-time
-    defaults. Pin both layers."""
+    """Entropy starvation on N97-class hardware caused 20-minute
+    systemd-journald start times even on RDRAND-capable CPUs (the
+    kernel CSPRNG can briefly block on ``getrandom()`` before the
+    trust-cpu logic settles). Ship ``haveged`` (CPU-jitter entropy
+    daemon) + explicit ``random.trust_cpu=on
+    random.trust_bootloader=on`` cmdline flags so boot doesn't
+    depend on the kernel's compile-time defaults. Pin both layers."""
     from pathlib import Path
 
     repo_root = Path(__file__).resolve().parents[1]
@@ -238,20 +235,19 @@ def test_server_cloudinit_ships_haveged() -> None:
     # Layer 2: kernel cmdline trust hints.
     assert "random.trust_cpu=on" in body
     assert "random.trust_bootloader=on" in body
-    # v0.7.18 added bare-metal firmware blobs + ``noresume`` for
-    # N97-class hardware that was hitting firmware-probe timeouts +
-    # hibernation-resume waits during early boot. Pin both so a
-    # future "tidy the packages list" attempt doesn't drop them.
+    # Bare-metal firmware blobs + ``noresume`` for N97-class
+    # hardware that hits firmware-probe timeouts + hibernation-
+    # resume waits during early boot. Pin so any "tidy the packages
+    # list" attempt doesn't drop them.
     assert "\n  - firmware-linux-free\n" in body
     assert "\n  - firmware-misc-nonfree\n" in body
     assert "\n  - firmware-realtek\n" in body
     assert "noresume" in body
-    # v0.7.19: ``MODULES=most`` initramfs rebuild for broad bare-
-    # metal driver coverage. The cloud image's default
-    # ``MODULES=dep`` initrd was the actual cause of the N97 slow
-    # boot (driver probes timing out for hardware that wasn't in
-    # the bake VM). Pin the rebuild so a future "this is
-    # confusing, let's revert" doesn't restore the regression.
+    # ``MODULES=most`` initramfs rebuild for broad bare-metal
+    # driver coverage. The cloud image's default ``MODULES=dep``
+    # initrd misses drivers for hardware that wasn't in the bake
+    # VM (N97 slow boot symptom). Pin the rebuild so any "tidy
+    # this up" attempt doesn't restore the regression.
     assert "MODULES=most" in body
     assert "update-initramfs -u" in body
 

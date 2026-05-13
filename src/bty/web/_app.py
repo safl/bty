@@ -82,12 +82,14 @@ def create_app(
     resolved_boot_root: Path = boot_root or (state_path.parent / "boot")
     event_bus = MachineEventBus()
 
-    # Catalog manifest + cache + download manager. Optional: if no
+    # Optional catalog manifest + cache + DownloadManager. If no
     # manifest is configured (operator hasn't authored one), the
     # ``DownloadManager`` simply isn't started and the
-    # ``/catalog/...`` endpoints return 404. ``BTY_CATALOG_FILE``
-    # and ``BTY_CATALOG_CACHE_DIR`` override the defaults derived
-    # from ``BTY_STATE_DIR``.
+    # ``/catalog/downloads/*`` + ``/catalog/hashes/*`` endpoints
+    # return 404. Operator-curated entries (``POST /catalog/entries``)
+    # work independently of the manifest. ``BTY_CATALOG_FILE`` and
+    # ``BTY_CATALOG_CACHE_DIR`` override the defaults derived from
+    # ``BTY_STATE_DIR``.
     manifest_path = _catalog.default_manifest_path()
     catalog_cache_dir = _catalog.default_cache_dir()
     parsed_catalog: _catalog.Catalog | None = None
@@ -916,7 +918,7 @@ def create_app(
                     format=u.format or "",
                     size_bytes=u.size_bytes or 0,
                     url=url,
-                    ref=u.sha256[:12] if u.sha256 else None,
+                    sha_short=u.sha256[:12] if u.sha256 else None,
                     cached=u.cached,
                 )
             )
@@ -924,12 +926,12 @@ def create_app(
         # NOT surfaced here. ``.bri`` is the bty-usb / bty-tui ad-hoc
         # local-catalog format -- a tiny pointer file an operator
         # drops next to their .img.gz files for quick "flash this
-        # URL" workflows. bty-web is the SHA-keyed managed-catalog
-        # model: machine bindings store ``bty_image_ref``, not URL
-        # pointers, so a ``.bri`` can't bind to a machine without
-        # being fetched + hashed first. Mixing the two surfaces here
-        # would invite the operator to bind a ``.bri`` they then
-        # can't actually flash.
+        # URL" workflows. bty-web's catalog model is ref-keyed:
+        # machine bindings target a ``bty_image_ref`` derived from
+        # an entry's ``src``, so a ``.bri`` would need to be
+        # imported as a catalog_entries row first. Mixing the two
+        # surfaces here would invite the operator to bind a
+        # ``.bri`` they then can't actually flash.
         return out
 
     @app.get("/catalog.toml", response_class=PlainTextResponse)

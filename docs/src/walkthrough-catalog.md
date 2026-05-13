@@ -199,7 +199,7 @@ are administrative tools, not part of the operator's flash flow.
 | `/images` | GET | unified catalog listing |
 
 All endpoints are auth-gated (the same session cookie as the
-browser UI). The shape will be locked in for 1.0.
+browser UI).
 
 ## Environment variables
 

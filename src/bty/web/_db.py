@@ -51,7 +51,7 @@ CREATE TABLE IF NOT EXISTS machines (
     updated_at                TEXT NOT NULL
 );
 
--- Operator-curated catalog entries (v0.11.0 shape).
+-- Operator-curated catalog entries.
 --
 -- ``bty_image_ref`` is the stable provenance identifier:
 -- sha256(canonicalise_src(src)). Primary key. The value

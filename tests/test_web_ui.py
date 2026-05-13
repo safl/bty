@@ -535,11 +535,10 @@ def test_ui_machine_upsert_persists_boot_policy_flash(client: TestClient) -> Non
 
 
 def test_ui_machine_upsert_rejects_unknown_boot_policy(client: TestClient) -> None:
-    """v0.7.32 routed form upsert through Pydantic ``MachineUpsert``;
-    invalid ``boot_policy`` now produces a 303 with an error flash
-    instead of a 400 page. The previous 400-from-explicit-set-check
-    contract was a worse UX (lost form context, no flash); the new
-    bounce-back-with-flash matches the catalog-form pattern."""
+    """Form upsert routes through the same Pydantic ``MachineUpsert``
+    as the JSON API; an invalid ``boot_policy`` produces a 303 with
+    an error flash (matches the catalog-form pattern) instead of a
+    400 page that loses form context."""
     _login(client)
     r = client.post(
         "/ui/machines/aa:bb:cc:dd:ee:ff",
@@ -592,19 +591,16 @@ def test_ui_boot_page_renders_with_artifact_state(client: TestClient) -> None:
     # Empty boot dir => four "missing" badges (warning kind).
     assert body.count("missing</span>") == 4
     assert body.count('class="badge bg-warning text-dark"') >= 4
-    # v0.7.24 swapped the synchronous form-post for an
-    # HTMX-style background trigger; the page now wires a
-    # button that POSTs to /boot/releases (the trackable
-    # release-fetch endpoint) and polls /boot/releases for
-    # progress. Pin both shapes.
+    # HTMX-style background trigger: the page wires a button that
+    # POSTs to /boot/releases (the trackable release-fetch endpoint)
+    # and polls /boot/releases for progress.
     assert 'id="enqueue-fetch-btn"' in body
     assert "/boot/releases" in body
-    # v0.7.25: the boot-page polling JS used to (a) reference a
-    # never-set ``_just_completed_marker`` field and (b) wrap
-    # ``refresh`` to do a second ``fetch /boot/releases`` per
-    # poll cycle, doubling load. Both were folded out -- pin the
-    # cleaned-up shape so a future copy-paste doesn't reintroduce
-    # them.
+    # The boot-page polling JS must NOT reference a never-set
+    # ``_just_completed_marker`` field nor wrap ``refresh`` to
+    # do a second ``fetch /boot/releases`` per poll cycle (the
+    # latter doubles load). Pin the cleaned-up shape so a
+    # copy-paste doesn't reintroduce them.
     assert "_just_completed_marker" not in body
     # The bare-quoted ``"/boot/releases"`` (closing quote, no
     # trailing slash) appears in exactly two places: the refresh

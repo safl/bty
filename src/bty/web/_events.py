@@ -23,7 +23,7 @@ from dataclasses import dataclass
 class MachineEvent:
     """A single bus event. ``html`` is the body sent to SSE subscribers."""
 
-    name: str  # "machines-update" today; reserved for future event types
+    name: str  # SSE event name routed to subscribers
     html: str
 
 
