@@ -643,7 +643,7 @@ def create_app(
                 (key_lower,),
             ).fetchone()
         if row is not None:
-            sha = row["disk_image_sha"]
+            sha: str | None = row["disk_image_sha"]
             src = str(row["src"])
             ref = str(row["bty_image_ref"])
             if sha:
