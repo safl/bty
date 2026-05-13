@@ -255,8 +255,16 @@ def _start_client_vm(workspace, socket_port, log_path, cfg):
         "host",
         "-smp",
         "1",
+        # Client VM RAM. live-boot streams the squashfs into tmpfs
+        # via the ``fetch=`` cmdline param before pivot-root, so the
+        # client needs squashfs_size + working_set RAM before
+        # anything else happens. The bty live env squashfs is ~650
+        # MiB with non-free-firmware + network-manager, which OOMs a
+        # 1 GiB VM mid-wget. 2 GiB gives roughly 1.3 GiB of headroom
+        # over the squashfs size; bump again if we ever add another
+        # ~500 MiB to the live env.
         "-m",
-        "1G",
+        "2G",
         "-drive",
         f"file={blank_disk},if=virtio",
         "-nographic",

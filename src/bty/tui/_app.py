@@ -1500,74 +1500,33 @@ class BtyTui(App[None]):
     def _welcome_text(self) -> str:
         """Compose onboarding text shown when the catalog is empty.
 
-        Four concrete next steps the operator can take from here:
-        1. [b]d[/] load bty's default release-asset catalog (3 nosi
-           sysdev images + bty-server, ready to flash with one
-           keypress).
-        2. Flash an image staged locally (BTY_IMAGES / Ventoy
-           ``bty-images/`` / workstation ``--image-root``).
-        3. Switch / re-fetch a different catalog source (press
-           ``c``).
-        4. Install a bty-server appliance on this box from the
-           latest GitHub release (press ``i``).
-
-        The remote-catalog variant gets a tighter version because it
-        only has options 2 + 3 + 4 plus the upload recipes; the
-        local variant gets the full menu with the default-catalog
-        suggestion at the top.
+        Two variants: local (no catalog source set) leads with the
+        ``d`` default-catalog CTA; remote (a source URL is set but
+        returned no entries) leads with switch / add-entries. Both
+        stay tight enough to fit a tty1 framebuffer screen without
+        scrolling.
         """
         if self._catalog_source is not None:
             return (
-                "[b]No images in the catalog yet.[/]\n\n"
-                f"Catalog source: [accent]{self._catalog_source}[/]\n"
+                "[b]No images in this catalog.[/]\n\n"
+                f"Source: [accent]{self._catalog_source}[/]\n"
                 f"Local root: [accent]{self._image_root}[/]\n\n"
-                "Three ways forward from here:\n"
-                "  1. [b]Add entries to the catalog source[/]:\n"
-                "     - If the source is a bty-web instance, drop\n"
-                "       files into [dim]/var/lib/bty/images/[/] on the\n"
-                "       server's host (or use the bty-web Images page).\n"
-                "     - If the source is a static catalog.toml, edit\n"
-                "       the file and re-publish.\n"
-                "     Then press [b]c[/] to re-fetch.\n"
-                "  2. [b]Switch catalog[/]: press [b]c[/] to point this\n"
-                "     TUI at a different catalog source ([b]d[/] for bty's\n"
-                "     default release-asset catalog), or back to\n"
-                "     local-only.\n"
-                "  3. [b]Install bty-server[/] on this box from the\n"
-                "     latest GitHub release: press [b]i[/], pick a\n"
-                "     disk, hit Flash."
+                "  [b]c[/]  Switch catalog ([b]d[/] for bty's default).\n"
+                "  [b]i[/]  Install bty-server on this box.\n\n"
+                "[dim]Or add entries at the source, then [b]c[/] to re-fetch.[/]"
             )
         return (
-            "[b]No images in the catalog yet.[/]\n\n"
+            "[b]No images yet.[/]\n\n"
             f"Local catalog: [accent]{self._image_root}[/]\n\n"
-            "Four ways forward from here:\n"
-            "  1. [b]Load bty's default catalog[/]: press [b]d[/] to\n"
-            "     swap the catalog source for bty's release-asset\n"
-            "     catalog (3 nosi sysdev images + bty-server).\n"
-            "     Source URL:\n"
-            f"     [dim]{_BTY_DEFAULT_CATALOG_URL}[/]\n"
-            "  2. [b]Flash an image you stage locally[/].\n"
-            "     - bty-usb stick (dd'd directly): mount the\n"
-            "       [b]BTY_IMAGES[/] exFAT partition on any host OS\n"
-            "       and copy [dim]*.img.gz[/] / [dim]*.qcow2[/] /\n"
-            "       [dim]*.bri[/] files at its root.\n"
-            "     - Ventoy / piKVM / JetKVM: drop those files at the\n"
-            "       root of the surrounding stick's data partition\n"
-            "       (or in a [b]bty-images/[/] subfolder there).\n"
-            "     - Workstation: copy files at the path above\n"
-            "       (override with [b]--image-root /path[/] or\n"
-            "       [b]BTY_IMAGE_ROOT[/]); press [b]r[/] to re-scan.\n"
-            "     Live-env paths are read-only; power-cycle to\n"
-            "     pick up files added after boot.\n"
-            "  3. [b]Point at a different catalog[/]: press [b]c[/]\n"
-            "     and enter a path or URL (a TOML catalog file on\n"
-            "     a workstation, a static [dim]https://[/] URL, or\n"
-            "     an [dim]oras://[/] OCI artefact reference).\n"
-            "  4. [b]Install bty-server[/] on this box from the\n"
-            "     latest GitHub release: press [b]i[/], pick a\n"
-            "     disk, hit Flash.\n\n"
-            "[dim]Alt+F2 .. Alt+F6 drop into a root shell on the\n"
-            "alternate VTs for diagnostics; Alt+F1 returns here.[/]"
+            "  [b]d[/]  Load bty's default catalog\n"
+            "      (3 nosi sysdev images + bty-server).\n"
+            "  [b]c[/]  Point at a different catalog\n"
+            "      (path, [dim]https://[/], or [dim]oras://[/]).\n"
+            "  [b]i[/]  Install bty-server on this box.\n\n"
+            "Or stage [dim]*.img.gz[/] / [dim]*.qcow2[/] / [dim]*.bri[/] in\n"
+            "[b]BTY_IMAGES[/] (bty-usb), [dim]bty-images/[/] on a Ventoy stick,\n"
+            "or at the path above ([b]--image-root[/]); then press [b]r[/].\n\n"
+            "[dim]Alt+F2 for a shell.[/]"
         )
 
     def _load_images(self) -> list[_TuiImage]:
