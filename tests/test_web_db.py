@@ -20,7 +20,7 @@ def test_init_db_creates_machines_table(tmp_path: Path) -> None:
         cols = {row[1] for row in conn.execute("PRAGMA table_info(machines)")}
     expected = {
         "mac",
-        "image_sha256",
+        "bty_image_ref",
         "hostname",
         "discovered_at",
         "last_seen_at",
@@ -38,7 +38,7 @@ def test_init_db_creates_catalog_entries_table(tmp_path: Path) -> None:
     _db.init_db(state)
     with sqlite3.connect(state) as conn:
         cols = {row[1] for row in conn.execute("PRAGMA table_info(catalog_entries)")}
-    assert {"src", "sha256", "name", "format", "added_at"} <= cols
+    assert {"bty_image_ref", "src", "disk_image_sha", "name", "format", "added_at"} <= cols
 
 
 def test_init_db_creates_events_table(tmp_path: Path) -> None:

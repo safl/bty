@@ -176,7 +176,7 @@ def test_machines_with_right_token_is_200(app_client: TestClient) -> None:
 def test_machine_crud_round_trip(app_client: TestClient) -> None:
     mac = "aa:bb:cc:dd:ee:ff"
     body = {
-        "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
         "hostname": "bty-test-01",
     }
 
@@ -186,7 +186,7 @@ def test_machine_crud_round_trip(app_client: TestClient) -> None:
     created = r.json()
     assert created["mac"] == mac
     assert (
-        created["image_sha256"]
+        created["bty_image_ref"]
         == "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
     )
     assert created["hostname"] == "bty-test-01"
@@ -228,7 +228,7 @@ def test_pxe_for_known_mac_uses_assignment_template(app_client: TestClient) -> N
     app_client.put(
         f"/machines/{mac}",
         json={
-            "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
         },
         cookies=AUTH,
     )
@@ -268,7 +268,7 @@ def test_pxe_auto_discovers_unknown_mac(app_client: TestClient) -> None:
     assert found.status_code == 200
     body = found.json()
     assert body["mac"] == mac
-    assert body["image_sha256"] is None  # discovered, not yet assigned
+    assert body["bty_image_ref"] is None  # discovered, not yet assigned
     assert body["boot_policy"] == "tui"  # auto-discovery default
     assert body["discovered_at"] is not None
     assert body["last_seen_at"] is not None
@@ -300,20 +300,19 @@ def test_pxe_does_not_overwrite_assignment(app_client: TestClient) -> None:
     app_client.put(
         f"/machines/{mac}",
         json={
-            "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
         },
         cookies=AUTH,
     )
     before = app_client.get(f"/machines/{mac}", cookies=AUTH).json()
-    assert (
-        before["image_sha256"] == "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-    )
+    expected_ref = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    assert before["bty_image_ref"] == expected_ref
     assert before["discovered_at"] is None  # PUT-created
 
     app_client.get(f"/pxe/{mac}")
     after = app_client.get(f"/machines/{mac}", cookies=AUTH).json()
     assert (
-        after["image_sha256"] == "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+        after["bty_image_ref"] == "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
     )  # untouched
     assert after["last_seen_at"] is not None
     # discovered_at is set on first /pxe contact even for PUT-created rows
@@ -647,7 +646,7 @@ def test_machine_default_boot_policy_is_local(app_client: TestClient) -> None:
     r = app_client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
         json={
-            "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
         },
         cookies=AUTH,
     )
@@ -657,7 +656,7 @@ def test_machine_default_boot_policy_is_local(app_client: TestClient) -> None:
 
 
 def test_machine_upsert_rejects_malformed_sha256(app_client: TestClient) -> None:
-    """``image_sha256`` must be 64 lower-case hex chars. A typo
+    """``bty_image_ref`` must be 64 lower-case hex chars. A typo
     (uppercase, wrong length, non-hex) used to land in state.db
     verbatim and surface as a silent ``GET /pxe/<mac>`` lookup
     miss later. Validate at PUT time."""
@@ -669,7 +668,7 @@ def test_machine_upsert_rejects_malformed_sha256(app_client: TestClient) -> None
     ):
         r = app_client.put(
             "/machines/aa:bb:cc:dd:ee:ff",
-            json={"image_sha256": bad, "boot_policy": "flash"},
+            json={"bty_image_ref": bad, "boot_policy": "flash"},
             cookies=AUTH,
         )
         assert r.status_code == 422, f"expected 422 for {bad!r}, got {r.status_code}"
@@ -682,7 +681,7 @@ def test_machine_upsert_rejects_empty_hostname(app_client: TestClient) -> None:
     r = app_client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
         json={
-            "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
             "hostname": "",
         },
         cookies=AUTH,
@@ -710,7 +709,7 @@ def test_machine_upsert_rejects_invalid_hostname_shapes(app_client: TestClient) 
     ):
         r = app_client.put(
             "/machines/aa:bb:cc:dd:ee:ff",
-            json={"image_sha256": valid_sha, "hostname": bad},
+            json={"bty_image_ref": valid_sha, "hostname": bad},
             cookies=AUTH,
         )
         assert r.status_code == 422, f"expected 422 for {bad!r}, got {r.status_code}"
@@ -730,7 +729,7 @@ def test_machine_upsert_accepts_real_hostname_shapes(app_client: TestClient) -> 
     ):
         r = app_client.put(
             "/machines/aa:bb:cc:dd:ee:ff",
-            json={"image_sha256": valid_sha, "hostname": ok},
+            json={"bty_image_ref": valid_sha, "hostname": ok},
             cookies=AUTH,
         )
         assert r.status_code == 200, f"expected 200 for {ok!r}, got {r.status_code} {r.text}"
@@ -739,9 +738,9 @@ def test_machine_upsert_accepts_real_hostname_shapes(app_client: TestClient) -> 
 def test_machine_upsert_rejects_unknown_fields(app_client: TestClient) -> None:
     """``MachineUpsert(extra="forbid")`` -- a stale client (or
     operator typo) sending the pre-M22 ``image`` field instead of
-    ``image_sha256`` must 422 loudly. The previous default
+    ``bty_image_ref`` must 422 loudly. The previous default
     silently accepted unknown keys + landed an assignment with
-    ``image_sha256=NULL``, which then surfaced as "no bty
+    ``bty_image_ref=NULL``, which then surfaced as "no bty
     assignment" at PXE-chain time. This regression test pins the
     strict-extra contract so the failure surfaces at PUT time."""
     r = app_client.put(
@@ -766,7 +765,7 @@ def test_machine_upsert_accepts_boot_policy_flash(app_client: TestClient) -> Non
     r = app_client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
         json={
-            "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
             "boot_policy": "flash",
         },
         cookies=AUTH,
@@ -779,7 +778,7 @@ def test_machine_upsert_rejects_unknown_boot_policy(app_client: TestClient) -> N
     r = app_client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
         json={
-            "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
             "boot_policy": "yolo",
         },
         cookies=AUTH,
@@ -794,7 +793,7 @@ def test_pxe_local_policy_assigned_machine_returns_local_template(
     opt-in via boot_policy=flash, not implicit on assignment."""
     app_client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
-        json={"image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"},
+        json={"bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"},
         cookies=AUTH,
     )
     r = app_client.get("/pxe/aa:bb:cc:dd:ee:ff")
@@ -805,44 +804,61 @@ def test_pxe_local_policy_assigned_machine_returns_local_template(
     assert "bty.image_url" not in body
 
 
-def test_pxe_flash_policy_returns_chain_with_args(app_client: TestClient) -> None:
-    """boot_policy=flash + image: chain into kernel/initrd with the
-    four bty.* cmdline params the live env reads."""
+def test_pxe_flash_policy_returns_chain_with_args(
+    app_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """boot_policy=flash + bound image: chain into kernel/initrd with
+    the four bty.* cmdline params the live env reads.
+
+    v0.11.0: machines bind by ``bty_image_ref`` which is the SHA-256
+    of the canonicalised src URL. The PXE handler resolves the ref
+    through ``catalog_entries`` to the cached file's content hash
+    (``disk_image_sha``), which the iPXE URL ends in. The test
+    seeds a catalog row that already carries both ref + content
+    sha by going through the sha_url path (which pre-pins
+    disk_image_sha at insert time)."""
+    flash_sha = "0123456789abcdef" * 4
+
+    def fake_urlopen(*_a, **_kw):  # type: ignore[no-untyped-def]
+        return _MockResp(b"", headers={"Content-Length": "0"})
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr(
+        "bty.catalog.fetch_sha256_for_url",
+        lambda *_a, **_kw: flash_sha,
+    )
+    image_url = "https://example.invalid/demo.img.gz"
+    r = app_client.post(
+        "/catalog/entries",
+        json={
+            "image_url": image_url,
+            "sha_url": "https://example.invalid/demo.img.gz.sha256",
+        },
+        cookies=AUTH,
+    )
+    assert r.status_code == 201, r.text
+    ref = r.json()["bty_image_ref"]
+    assert r.json()["disk_image_sha"] == flash_sha
+
     app_client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
-        json={
-            "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            "boot_policy": "flash",
-        },
+        json={"bty_image_ref": ref, "boot_policy": "flash"},
         cookies=AUTH,
     )
     r = app_client.get("/pxe/aa:bb:cc:dd:ee:ff", headers={"Host": "bty.local:8080"})
     assert r.status_code == 200
     body = r.text
     assert body.startswith("#!ipxe"), body
-    # Template uses an iPXE variable for the base URL so the script
-    # reads cleanly; the variable is set from the request's Host.
     assert "set bty-base http://bty.local:8080" in body
     assert "kernel ${bty-base}/boot/bty-netboot-x86_64.vmlinuz" in body
     assert "initrd ${bty-base}/boot/bty-netboot-x86_64.initrd" in body
-    # live-boot needs ``fetch=`` to know where to grab the squashfs.
     assert "fetch=${bty-base}/boot/bty-netboot-x86_64.squashfs" in body
-    # Console mirror to ttyS0 so headless / IPMI / test serial works.
     assert "console=ttyS0,115200" in body
-    # Cmdline params: live env's bty-flash-on-boot reads these.
     assert "bty.server=${bty-base}" in body
     assert "bty.mac=aa:bb:cc:dd:ee:ff" in body
-    # URL shape is ``/images/<sha>/<name>``: the SHA binds the
-    # bytes; the trailing /<name> preserves format-by-extension on
-    # the live-env side. Without /<name> the live env's local
-    # cache file gets named after the bare SHA and
-    # ``bty.images.detect_format`` returns None for it.
-    assert (
-        "bty.image_url=${bty-base}/images/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef/"
-        in body
-    )
-    # ``bty.provisioning`` is not emitted on the cmdline -- bty
-    # has no post-flash provisioning step.
+    # URL ends in ``/images/<disk_image_sha>/<name>``: the content
+    # hash binds bytes; ``/name`` preserves format-by-extension.
+    assert f"bty.image_url=${{bty-base}}/images/{flash_sha}/" in body
     assert "bty.provisioning" not in body
 
 
@@ -888,7 +904,7 @@ def test_pxe_done_updates_last_flashed_at(app_client: TestClient) -> None:
     app_client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
         json={
-            "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
             "boot_policy": "flash",
         },
         cookies=AUTH,
@@ -943,7 +959,7 @@ def test_events_list_includes_machine_lifecycle(app_client: TestClient) -> None:
     app_client.put(
         f"/machines/{mac}",
         json={
-            "image_sha256": "0" * 64,
+            "bty_image_ref": "0" * 64,
             "boot_policy": "flash",
         },
         cookies=AUTH,
@@ -1605,11 +1621,13 @@ def test_catalog_entries_add_with_sha_url_resolves_sha(
     )
     assert r.status_code == 201, r.text
     body = r.json()
-    assert body["sha256"] == sha
+    assert body["disk_image_sha"] == sha
     assert body["src"] == "https://example.invalid/ubuntu-22.04.img.gz"
     assert body["name"] == "ubuntu-22.04.img.gz"
     assert body["format"] == "img.gz"
     assert body["size_bytes"] == 12345
+    # Every add returns a bty_image_ref (sha256 of canonicalised src).
+    assert len(body["bty_image_ref"]) == 64
 
 
 def test_catalog_entries_add_without_sha_url_is_url_only(
@@ -1628,7 +1646,8 @@ def test_catalog_entries_add_without_sha_url_is_url_only(
         cookies=AUTH,
     )
     assert r.status_code == 201, r.text
-    assert r.json()["sha256"] is None
+    assert r.json()["disk_image_sha"] is None
+    assert len(r.json()["bty_image_ref"]) == 64
 
     r2 = app_client.get("/images")
     rows = r2.json()
@@ -1711,11 +1730,12 @@ def test_catalog_entries_add_with_oras_ref_resolves_manifest(
     assert r.status_code == 201, r.text
     payload = r.json()
     assert payload["src"] == "oras://ghcr.io/safl/nosi/debian-sysdev:latest"
-    assert payload["sha256"] == "ab" * 32  # stripped algorithm prefix
+    assert payload["disk_image_sha"] == "ab" * 32  # stripped algorithm prefix
     assert payload["name"] == "nosi-debian-sysdev-x86_64.img.gz"
     assert payload["format"] == "img.gz"
     assert payload["size_bytes"] == 12345678
     assert payload["sha_url"] is None
+    assert len(payload["bty_image_ref"]) == 64
 
 
 def test_catalog_entries_add_with_oras_ref_propagates_resolve_failure(
@@ -1885,7 +1905,7 @@ def test_catalog_cache_delete_unlinks_file_keeps_entry(
             assert r.status_code == 200, r.text
             body = r.json()
             assert body["deleted"] is True
-            assert body["sha256"] == sha
+            assert body["disk_image_sha"] == sha
 
             # File is gone; entry remains.
             assert not cached_file.exists()
@@ -2072,7 +2092,8 @@ def test_catalog_import_with_oras_entry_resolves_sha(
     assert r.json()["imported"] == 1
     rows = app_client.get("/catalog/entries", cookies=AUTH).json()
     assert len(rows) == 1
-    assert rows[0]["sha256"] == "cd" * 32
+    assert rows[0]["disk_image_sha"] == "cd" * 32
+    assert len(rows[0]["bty_image_ref"]) == 64
     assert rows[0]["size_bytes"] == 7654321
 
 

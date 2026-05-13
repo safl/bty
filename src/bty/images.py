@@ -529,9 +529,7 @@ def merge_with_catalog(
 
     ``.bri`` (bty Remote Image) descriptors are deliberately NOT
     folded in here. A ``.bri`` is a name/URL pointer with no SHA,
-    so it cannot dedupe against SHA-keyed entries; it also cannot
-    be a machine-binding target until its bytes have been fetched
-    + hashed (machine.image_sha256 binds bytes by content). The
+    so it cannot dedupe against SHA-keyed entries. The
     catalog endpoint and the TUI surface ``.bri`` rows separately
     via :func:`list_remote_images`; the operator hashes a
     ``.bri`` (by fetching it) before binding it to a machine.

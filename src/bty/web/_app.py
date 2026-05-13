@@ -195,7 +195,7 @@ def create_app(
         with _db.open_db(state_path) as conn:
             machine_count = conn.execute("SELECT COUNT(*) FROM machines").fetchone()[0]
             discovered_count = conn.execute(
-                "SELECT COUNT(*) FROM machines WHERE image_sha256 IS NULL"
+                "SELECT COUNT(*) FROM machines WHERE bty_image_ref IS NULL"
             ).fetchone()[0]
         image_count = len(images.list_images(resolved_image_root))
         # PXE proxy-DHCP state for the 4th tile. Three flavours: inactive
@@ -333,22 +333,31 @@ def create_app(
         if machine.get("boot_policy") == "tui":
             template = jinja.get_template("ipxe_tui.j2")
             return template.render(mac=normalised, machine=machine, host=host)
-        if machine.get("image_sha256") and machine.get("boot_policy") == "flash":
-            template = jinja.get_template("ipxe_flash.j2")
-            # Resolve the image's display name so the iPXE URL ends
-            # in ``/images/<sha>/<name>`` instead of ``/images/<sha>``.
-            # The trailing /<name> is decorative for the client side
-            # (``bty.flash.probe_image_url`` reads format from the URL
-            # filename extension); without it the live env's local
-            # cache file gets named after the bare SHA and format
-            # detection falls over. Falls back to ``image.img`` only
-            # if the lookup yields nothing -- an unflashable name but
-            # at least one the server-side handler accepts.
-            image_name = _image_name_for_sha(machine["image_sha256"]) or "image.img"
-            return template.render(
-                mac=normalised, machine=machine, host=host, image_name=image_name
-            )
-        if machine.get("image_sha256"):
+        ref = machine.get("bty_image_ref")
+        if ref and machine.get("boot_policy") == "flash":
+            # Resolve ref -> (disk_image_sha, name) so the iPXE URL
+            # ends in ``/images/<sha>/<name>``. Without a resolvable
+            # disk sha, fall through to ``ipxe_unknown.j2`` (the
+            # bound entry hasn't been hashed / cached yet; a future
+            # release adds cache-through that materialises bytes on
+            # this same code path).
+            resolved = _flash_target_for_ref(str(ref))
+            if resolved is not None:
+                disk_sha, image_name = resolved
+                # Carry the resolved disk_image_sha into the template
+                # as ``flash_sha`` -- the template builds the
+                # ``/images/<sha>/<name>`` URL from this, decoupled
+                # from the machine row's ``bty_image_ref`` (which is
+                # provenance, not content).
+                template = jinja.get_template("ipxe_flash.j2")
+                return template.render(
+                    mac=normalised,
+                    machine=machine,
+                    host=host,
+                    image_name=image_name,
+                    flash_sha=disk_sha,
+                )
+        if ref:
             template = jinja.get_template("ipxe.j2")
             return template.render(mac=normalised, machine=machine)
         template = jinja.get_template("ipxe_unknown.j2")
@@ -519,6 +528,28 @@ def create_app(
                     return entry.name
         return None
 
+    def _flash_target_for_ref(ref: str) -> tuple[str, str] | None:
+        """Resolve a ``bty_image_ref`` to ``(disk_image_sha, name)`` so
+        the iPXE flash template can build a ``/images/<sha>/<name>``
+        URL pointing at cached bytes.
+
+        Returns ``None`` if the ref isn't bindable yet:
+
+        - no catalog row for this ref (orphaned binding), OR
+        - row exists but ``disk_image_sha`` is NULL (entry hasn't been
+          hashed / fetched yet -- cache-through machinery in a future
+          release will materialise the bytes on demand; for now,
+          falling through to ``ipxe_unknown.j2`` is the safe path).
+        """
+        with _db.open_db(state_path) as conn:
+            row = conn.execute(
+                "SELECT disk_image_sha, name FROM catalog_entries WHERE bty_image_ref = ?",
+                (ref,),
+            ).fetchone()
+        if row is None or not row["disk_image_sha"]:
+            return None
+        return str(row["disk_image_sha"]), str(row["name"])
+
     @app.get("/images/{key}", include_in_schema=False)
     def serve_image(key: str) -> FileResponse:
         """Serve image bytes by filename OR by SHA-256.
@@ -604,18 +635,18 @@ def create_app(
             conn.execute(
                 """
                 INSERT INTO machines
-                    (mac, image_sha256, hostname, boot_policy,
+                    (mac, bty_image_ref, hostname, boot_policy,
                      created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT(mac) DO UPDATE SET
-                    image_sha256 = excluded.image_sha256,
+                    bty_image_ref = excluded.bty_image_ref,
                     hostname     = excluded.hostname,
                     boot_policy  = excluded.boot_policy,
                     updated_at   = excluded.updated_at
                 """,
                 (
                     normalised,
-                    body.image_sha256,
+                    body.bty_image_ref,
                     body.hostname,
                     body.boot_policy,
                     created_at,
@@ -631,7 +662,7 @@ def create_app(
                 actor="operator",
                 source_ip=_client_ip(request),
                 details={
-                    "image_sha256": body.image_sha256,
+                    "bty_image_ref": body.bty_image_ref,
                     "boot_policy": body.boot_policy,
                     "hostname": body.hostname,
                 },
@@ -733,7 +764,7 @@ def create_app(
         # local-catalog format -- a tiny pointer file an operator
         # drops next to their .img.gz files for quick "flash this
         # URL" workflows. bty-web is the SHA-keyed managed-catalog
-        # model: machine bindings store ``image_sha256``, not URL
+        # model: machine bindings store ``bty_image_ref``, not URL
         # pointers, so a ``.bri`` can't bind to a machine without
         # being fetched + hashed first. Mixing the two surfaces here
         # would invite the operator to bind a ``.bri`` they then
@@ -920,18 +951,18 @@ def create_app(
             # Without it, SQLite returns rows in unspecified order
             # and a page-refresh can shuffle the table.
             rows = conn.execute(
-                "SELECT sha256, name, src, format, size_bytes, description "
+                "SELECT disk_image_sha, name, src, format, size_bytes, description "
                 "FROM catalog_entries ORDER BY added_at"
             ).fetchall()
         sha_keyed: list[_catalog.CatalogEntry] = []
         url_only: list[images.UnifiedImage] = []
         for row in rows:
-            if row["sha256"]:
+            if row["disk_image_sha"]:
                 sha_keyed.append(
                     _catalog.CatalogEntry(
                         name=row["name"],
                         src=row["src"],
-                        sha256=row["sha256"],
+                        sha256=row["disk_image_sha"],
                         format=row["format"],
                         size_bytes=row["size_bytes"],
                         description=row["description"],
@@ -1062,13 +1093,31 @@ def create_app(
             fmt = images.detect_format(Path(name)) or "img.gz"
             size_bytes = resolved.size
             now = _now_iso()
+            try:
+                bty_image_ref = _catalog.image_ref_for_src(body.image_url)
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"invalid image_url: {exc}",
+                ) from exc
             with _db.open_db(state_path) as conn:
                 try:
                     conn.execute(
                         "INSERT INTO catalog_entries "
-                        "(src, sha256, name, sha_url, format, size_bytes, description, added_at) "
-                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                        (body.image_url, sha256, name, None, fmt, size_bytes, None, now),
+                        "(bty_image_ref, src, disk_image_sha, name, sha_url, "
+                        "format, size_bytes, description, added_at) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        (
+                            bty_image_ref,
+                            body.image_url,
+                            sha256,
+                            name,
+                            None,
+                            fmt,
+                            size_bytes,
+                            None,
+                            now,
+                        ),
                     )
                     _log_event(
                         conn,
@@ -1080,7 +1129,8 @@ def create_app(
                         source_ip=_client_ip(request),
                         details={
                             "name": name,
-                            "sha256": sha256,
+                            "bty_image_ref": bty_image_ref,
+                            "disk_image_sha": sha256,
                             "format": fmt,
                             "size_bytes": size_bytes,
                             "oras": True,
@@ -1094,7 +1144,8 @@ def create_app(
                     ) from exc
             return {
                 "src": body.image_url,
-                "sha256": sha256,
+                "bty_image_ref": bty_image_ref,
+                "disk_image_sha": sha256,
                 "name": name,
                 "sha_url": None,
                 "format": fmt,
@@ -1148,13 +1199,31 @@ def create_app(
         fmt = images.detect_format(Path(name))
         size_bytes = _head_content_length(body.image_url)
         now = _now_iso()
+        try:
+            bty_image_ref = _catalog.image_ref_for_src(body.image_url)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"invalid image_url: {exc}",
+            ) from exc
         with _db.open_db(state_path) as conn:
             try:
                 conn.execute(
                     "INSERT INTO catalog_entries "
-                    "(src, sha256, name, sha_url, format, size_bytes, description, added_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                    (body.image_url, sha256, name, body.sha_url, fmt, size_bytes, None, now),
+                    "(bty_image_ref, src, disk_image_sha, name, sha_url, "
+                    "format, size_bytes, description, added_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        bty_image_ref,
+                        body.image_url,
+                        sha256,
+                        name,
+                        body.sha_url,
+                        fmt,
+                        size_bytes,
+                        None,
+                        now,
+                    ),
                 )
                 _log_event(
                     conn,
@@ -1166,7 +1235,8 @@ def create_app(
                     source_ip=_client_ip(request),
                     details={
                         "name": name,
-                        "sha256": sha256,
+                        "bty_image_ref": bty_image_ref,
+                        "disk_image_sha": sha256,
                         "format": fmt,
                         "size_bytes": size_bytes,
                     },
@@ -1179,7 +1249,8 @@ def create_app(
                 ) from exc
         return {
             "src": body.image_url,
-            "sha256": sha256,
+            "bty_image_ref": bty_image_ref,
+            "disk_image_sha": sha256,
             "name": name,
             "sha_url": body.sha_url,
             "format": fmt,
@@ -1194,7 +1265,7 @@ def create_app(
     def list_catalog_entries() -> list[dict[str, Any]]:
         with _db.open_db(state_path) as conn:
             rows = conn.execute(
-                "SELECT src, sha256, name, sha_url, format, size_bytes, "
+                "SELECT bty_image_ref, src, disk_image_sha, name, sha_url, format, size_bytes, "
                 "description, added_at "
                 "FROM catalog_entries ORDER BY added_at"
             ).fetchall()
@@ -1305,11 +1376,18 @@ def create_app(
                     if size_bytes is None:
                         size_bytes = resolved.size
                 try:
+                    bty_image_ref = _catalog.image_ref_for_src(entry.src)
+                except ValueError as exc:
+                    errors.append({"name": entry.name, "error": str(exc)})
+                    continue
+                try:
                     conn.execute(
                         "INSERT INTO catalog_entries "
-                        "(src, sha256, name, sha_url, format, size_bytes, description, added_at) "
-                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                        "(bty_image_ref, src, disk_image_sha, name, sha_url, "
+                        "format, size_bytes, description, added_at) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                         (
+                            bty_image_ref,
                             entry.src,
                             sha,
                             entry.name,
@@ -1433,11 +1511,11 @@ def create_app(
         sha: str | None = None
         with _db.open_db(state_path) as conn:
             row = conn.execute(
-                "SELECT sha256 FROM catalog_entries WHERE name = ?",
+                "SELECT disk_image_sha FROM catalog_entries WHERE name = ?",
                 (name,),
             ).fetchone()
-            if row and row["sha256"]:
-                sha = str(row["sha256"])
+            if row and row["disk_image_sha"]:
+                sha = str(row["disk_image_sha"])
         if sha is None and parsed_catalog is not None:
             entry = parsed_catalog.by_name(name)
             if entry is not None and entry.sha256 is not None:
@@ -1446,7 +1524,12 @@ def create_app(
             return {"name": name, "deleted": False, "reason": "no sha256 for name"}
         cached_file = catalog_cache_dir / sha
         if not cached_file.exists():
-            return {"name": name, "deleted": False, "reason": "not cached", "sha256": sha}
+            return {
+                "name": name,
+                "deleted": False,
+                "reason": "not cached",
+                "disk_image_sha": sha,
+            }
         cached_file.unlink()
         with _db.open_db(state_path) as conn:
             _log_event(
@@ -1457,10 +1540,10 @@ def create_app(
                 subject_id=name,
                 actor="operator",
                 source_ip=_client_ip(request),
-                details={"name": name, "sha256": sha},
+                details={"name": name, "disk_image_sha": sha},
             )
             conn.commit()
-        return {"name": name, "deleted": True, "sha256": sha}
+        return {"name": name, "deleted": True, "disk_image_sha": sha}
 
     # ---------- catalog hash manager --------------------------------------
     # Hashing is independent of the manifest -- always available so
@@ -1527,7 +1610,7 @@ def _row_to_machine(row: object) -> _models.Machine:
     """Decode a sqlite3.Row into a ``_models.Machine``."""
     return _models.Machine(
         mac=row["mac"],  # type: ignore[index]
-        image_sha256=row["image_sha256"],  # type: ignore[index]
+        bty_image_ref=row["bty_image_ref"],  # type: ignore[index]
         hostname=row["hostname"],  # type: ignore[index]
         discovered_at=_iso_or_none(row["discovered_at"]),  # type: ignore[index]
         last_seen_at=_iso_or_none(row["last_seen_at"]),  # type: ignore[index]

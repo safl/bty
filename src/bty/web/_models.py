@@ -45,23 +45,24 @@ class MachineUpsert(BaseModel):
     """Request body for ``PUT /machines/{mac}``.
 
     All fields are optional except for the implicit ``mac`` from the
-    path; ``boot_policy`` defaults to ``"local"``. Image identity is
-    the SHA-256 of the image bytes: the operator picks an image from
-    the unified catalog (which dedupes dir-scan files and manifest
-    entries by content hash) and bty stores the SHA, not a filename.
-    Renaming or replacing the underlying file does not affect the
-    binding.
+    path; ``boot_policy`` defaults to ``"local"``. v0.11.0 onward
+    binds by ``bty_image_ref`` (stable provenance ID derived as
+    ``sha256(canonicalise_src(src))``) rather than the content sha.
+    URL-only and rolling-tag oras entries are bindable; rename or
+    content drift leaves the binding intact.
 
     ``extra="forbid"`` so unknown fields fail loud at the edge with
     a 422 -- silent drops let a stale client put a row with
-    ``image_sha256=NULL`` and the next PXE chain fall through to
+    ``bty_image_ref=NULL`` and the next PXE chain fall through to
     "no assignment", which is a debugging trap.
     """
 
     model_config = {"extra": "forbid"}
 
     # 64 lower-case hex chars; ``None`` = discovered-but-unassigned.
-    image_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    # Same hex shape as a sha256 because the ref IS a sha256 (of the
+    # canonicalised src URL, not of content).
+    bty_image_ref: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     # RFC-1123-ish: each dot-separated label is alnum, hyphen-
     # internal-only (no leading / trailing / bare hyphen, no
     # consecutive dots). ``max_length=253`` matches DNS.
@@ -77,14 +78,14 @@ class MachineUpsert(BaseModel):
 class Machine(BaseModel):
     """A persisted machine record as returned by the API.
 
-    A machine without ``image_sha256`` set is *discovered* but
+    A machine without ``bty_image_ref`` set is *discovered* but
     unassigned - bty-web saw it via ``GET /pxe/{mac}`` and recorded
     it so the operator can claim it. Once the operator ``PUT``s an
     assignment, the machine is *assigned*.
     """
 
     mac: str = Field(..., pattern=MAC_PATTERN)
-    image_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    bty_image_ref: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     hostname: str | None = None
     # Set the first time bty-web sees a ``GET /pxe/{mac}`` for this MAC.
     # ``None`` for machines that were created via ``PUT`` and have not

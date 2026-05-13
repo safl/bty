@@ -202,7 +202,7 @@ def register_ui_routes(
         with _db.open_db(state_path) as conn:
             machine_count = conn.execute("SELECT COUNT(*) FROM machines").fetchone()[0]
             discovered_count = conn.execute(
-                "SELECT COUNT(*) FROM machines WHERE image_sha256 IS NULL"
+                "SELECT COUNT(*) FROM machines WHERE bty_image_ref IS NULL"
             ).fetchone()[0]
             # Recent activity slice for the dashboard's "what just
             # happened?" widget. Reuses ``_events_card.html`` so the
@@ -240,17 +240,17 @@ def register_ui_routes(
         filter: str | None = None,
     ) -> HTMLResponse:
         # ``?filter=discovered`` -- only unassigned machines (no
-        # image_sha256 yet). Powered by the dashboard's
+        # bty_image_ref yet). Powered by the dashboard's
         # "Unassigned (discovered)" counter card so clicking it
         # lands on a pre-filtered list. ``?filter=assigned`` --
         # symmetric "operator-bound" view. Anything else (no
         # filter, empty value, an unrecognised value) shows the
         # full list and surfaces no active-filter banner.
         if filter == "discovered":
-            sql = "SELECT * FROM machines WHERE image_sha256 IS NULL ORDER BY mac"
+            sql = "SELECT * FROM machines WHERE bty_image_ref IS NULL ORDER BY mac"
             active_filter: str | None = filter
         elif filter == "assigned":
-            sql = "SELECT * FROM machines WHERE image_sha256 IS NOT NULL ORDER BY mac"
+            sql = "SELECT * FROM machines WHERE bty_image_ref IS NOT NULL ORDER BY mac"
             active_filter = filter
         else:
             sql = "SELECT * FROM machines ORDER BY mac"
@@ -275,14 +275,17 @@ def register_ui_routes(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"no machine record for {normalised}",
             )
-        # Picker shows the unified catalog: dir-scan files with a
-        # SHA sidecar AND manifest entries, deduped by content
-        # hash. Unhashed dir-scan files are filtered out -- they
-        # cannot be selected (no SHA to bind to).
-        if list_unified_images is not None:
-            unified = [u for u in list_unified_images() if u.sha256 is not None]
-        else:
-            unified = []
+        # v0.11.0: the picker lists catalog_entries rows by
+        # ``bty_image_ref`` (provenance ID) rather than UnifiedImage
+        # by content sha. Operator binding stays valid across rolling
+        # tags / re-fetches; the content sha (``disk_image_sha``)
+        # surfaces alongside the ref when known.
+        with _db.open_db(state_path) as conn:
+            catalog_rows = conn.execute(
+                "SELECT bty_image_ref, name, format, src, disk_image_sha "
+                "FROM catalog_entries ORDER BY name"
+            ).fetchall()
+        catalog_options = [dict(r) for r in catalog_rows]
         # Reads ``?error=<msg>`` so the upsert form's bounce-on-
         # validation-failure renders a flash banner. Same shape as
         # /ui/images: Jinja autoescape covers ``flash`` so a
@@ -303,7 +306,7 @@ def register_ui_routes(
             "ui/machine_detail.html",
             request,
             m=_row_to_dict(row),
-            images=unified,
+            images=catalog_options,
             boot_policies=list(BOOT_POLICIES),
             machine_events=machine_events,
             flash=flash,
@@ -317,21 +320,21 @@ def register_ui_routes(
     )
     def ui_machine_upsert(
         mac: str,
-        image_sha256: Annotated[str, Form()] = "",
+        bty_image_ref: Annotated[str, Form()] = "",
         hostname: Annotated[str, Form()] = "",
         boot_policy: Annotated[str, Form()] = DEFAULT_BOOT_POLICY,
     ) -> RedirectResponse:
         normalised = _normalise_mac(mac)
         # Run the form inputs through the same Pydantic model the
         # JSON ``PUT /machines/{mac}`` uses so we don't drift: the
-        # API rejects non-hex ``image_sha256`` (``pattern=
+        # API rejects non-hex ``bty_image_ref`` (``pattern=
         # r"^[0-9a-f]{64}$"``) and out-of-shape ``hostname`` shapes,
         # while the form path used to accept any string. Empty-form
         # fields normalise to ``None`` (Pydantic accepts ``None``
         # for optional fields, and sqlite stores NULL).
         try:
             validated = MachineUpsert(
-                image_sha256=image_sha256 or None,
+                bty_image_ref=bty_image_ref or None,
                 hostname=hostname or None,
                 boot_policy=boot_policy,
             )
@@ -358,18 +361,18 @@ def register_ui_routes(
             conn.execute(
                 """
                 INSERT INTO machines
-                    (mac, image_sha256, hostname, boot_policy,
+                    (mac, bty_image_ref, hostname, boot_policy,
                      created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT(mac) DO UPDATE SET
-                    image_sha256 = excluded.image_sha256,
+                    bty_image_ref = excluded.bty_image_ref,
                     hostname     = excluded.hostname,
                     boot_policy  = excluded.boot_policy,
                     updated_at   = excluded.updated_at
                 """,
                 (
                     normalised,
-                    validated.image_sha256,
+                    validated.bty_image_ref,
                     validated.hostname,
                     validated.boot_policy,
                     created_at,
@@ -508,14 +511,31 @@ def register_ui_routes(
             fmt = bty_images.detect_format(Path(name)) or "img.gz"
             size_bytes = resolved.size
             now = datetime.now(UTC).isoformat()
+            try:
+                bty_image_ref = _catalog.image_ref_for_src(image_url)
+            except ValueError as exc:
+                return RedirectResponse(
+                    "/ui/images?error=" + urllib.parse.quote(f"invalid image_url: {exc}", safe=""),
+                    status_code=status.HTTP_303_SEE_OTHER,
+                )
             with _db.open_db(state_path) as conn:
                 try:
                     conn.execute(
                         "INSERT INTO catalog_entries "
-                        "(src, sha256, name, sha_url, format, size_bytes, "
-                        "description, added_at) "
-                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                        (image_url, sha256, name, None, fmt, size_bytes, None, now),
+                        "(bty_image_ref, src, disk_image_sha, name, sha_url, "
+                        "format, size_bytes, description, added_at) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        (
+                            bty_image_ref,
+                            image_url,
+                            sha256,
+                            name,
+                            None,
+                            fmt,
+                            size_bytes,
+                            None,
+                            now,
+                        ),
                     )
                     conn.commit()
                 except sqlite3.IntegrityError:
@@ -557,14 +577,31 @@ def register_ui_routes(
         fmt = bty_images.detect_format(Path(name))
         size_bytes = _head_content_length(image_url)
         now = datetime.now(UTC).isoformat()
+        try:
+            bty_image_ref = _catalog.image_ref_for_src(image_url)
+        except ValueError as exc:
+            return RedirectResponse(
+                "/ui/images?error=" + urllib.parse.quote(f"invalid image_url: {exc}", safe=""),
+                status_code=status.HTTP_303_SEE_OTHER,
+            )
         with _db.open_db(state_path) as conn:
             try:
                 conn.execute(
                     "INSERT INTO catalog_entries "
-                    "(src, sha256, name, sha_url, format, size_bytes, "
-                    "description, added_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                    (image_url, sha256, name, cleaned_sha_url, fmt, size_bytes, None, now),
+                    "(bty_image_ref, src, disk_image_sha, name, sha_url, "
+                    "format, size_bytes, description, added_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        bty_image_ref,
+                        image_url,
+                        sha256,
+                        name,
+                        cleaned_sha_url,
+                        fmt,
+                        size_bytes,
+                        None,
+                        now,
+                    ),
                 )
                 conn.commit()
             except sqlite3.IntegrityError:
@@ -909,7 +946,7 @@ def register_ui_routes(
 def _row_to_dict(row: Any) -> dict[str, Any]:
     return {
         "mac": row["mac"],
-        "image_sha256": row["image_sha256"],
+        "bty_image_ref": row["bty_image_ref"],
         "hostname": row["hostname"],
         "discovered_at": row["discovered_at"],
         "last_seen_at": row["last_seen_at"],

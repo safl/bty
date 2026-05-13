@@ -31,17 +31,17 @@
         <h2 class="h5 mb-3">Assignment</h2>
         <form action="/ui/machines/{{ m.mac }}" method="post">
             <div class="mb-3">
-                <label class="form-label" for="image_sha256">Image</label>
-                <select name="image_sha256" id="image_sha256" class="form-select">
+                <label class="form-label" for="bty_image_ref">Image</label>
+                <select name="bty_image_ref" id="bty_image_ref" class="form-select">
                     <option value="">- none (discovered, will boot from local disk) -</option>
                     {% for img in images %}
-                    {# img is bty.images.UnifiedImage: SHA-keyed,
-                       with names[] (filenames + manifest names) and
-                       a list of sources. Show the first name as the
-                       primary label and the short SHA so operators
-                       can disambiguate same-named entries. #}
-                    <option value="{{ img.sha256 }}" {% if img.sha256 == m.image_sha256 %}selected{% endif %}>
-                        {{ img.names[0] }} ({{ img.format or "?" }}, ref:{{ img.sha256[:12] }})
+                    {# img is a catalog_entries row dict: ``bty_image_ref``
+                       (provenance ID) is the option value; ``disk_image_sha``
+                       is shown alongside when known. Operator binds to
+                       the ref, which is stable across rolling tags and
+                       cache state. #}
+                    <option value="{{ img.bty_image_ref }}" {% if img.bty_image_ref == m.bty_image_ref %}selected{% endif %}>
+                        {{ img.name }} ({{ img.format or "?" }}, ref:{{ img.bty_image_ref[:12] }}{% if img.disk_image_sha %}, sha:{{ img.disk_image_sha[:12] }}{% endif %})
                     </option>
                     {% endfor %}
                 </select>

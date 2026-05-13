@@ -36,7 +36,11 @@ def default_state_path() -> Path:
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS machines (
     mac                       TEXT PRIMARY KEY,
-    image_sha256              TEXT,    -- content-addressed image identity
+    -- v0.11.0: bindings target ``catalog_entries.bty_image_ref``
+    -- (sha256 of canonicalised src), not the content sha. Lets
+    -- operators bind rolling-tag oras refs and URL-only entries
+    -- that have no pre-known content sha.
+    bty_image_ref             TEXT,
     hostname                  TEXT,
     discovered_at             TEXT,    -- first /pxe/{mac} contact (NULL if PUT-created)
     last_seen_at              TEXT,    -- most recent /pxe/{mac} contact
@@ -47,21 +51,32 @@ CREATE TABLE IF NOT EXISTS machines (
     updated_at                TEXT NOT NULL
 );
 
--- Operator-curated catalog entries.
--- Operator pastes ``image_url`` (+ optional ``sha_url``) via the
--- bty-web UI; the row drives the catalog table on /ui/images.
--- Without a sha, the entry is flashable via the URL streaming
--- pipeline but not bindable to a machine (machines.image_sha256
--- binds by content).
+-- Operator-curated catalog entries (v0.11.0 shape).
+--
+-- ``bty_image_ref`` is the stable provenance identifier:
+-- sha256(canonicalise_src(src)). Primary key. The value
+-- ``machines.bty_image_ref`` references.
+--
+-- ``src`` is the operator-typed source (file://, http(s)://, or
+-- oras://). UNIQUE -- two rows can't share a src. Different srcs
+-- whose content happens to match end up as distinct entries with
+-- potentially-equal ``disk_image_sha``.
+--
+-- ``disk_image_sha`` is the OBSERVED content hash. Populated:
+--   - on first cache via fetch-to-cache (remote);
+--   - on hash-by-HashManager for local file://;
+--   - if pre-pinned in the source TOML manifest (import flow).
+-- May stay NULL for an entry that has never been hashed/fetched.
 CREATE TABLE IF NOT EXISTS catalog_entries (
-    src          TEXT PRIMARY KEY,
-    sha256       TEXT,
-    name         TEXT NOT NULL,
-    sha_url      TEXT,
-    format       TEXT,
-    size_bytes   INTEGER,
-    description  TEXT,
-    added_at     TEXT NOT NULL
+    bty_image_ref  TEXT PRIMARY KEY,
+    src            TEXT NOT NULL UNIQUE,
+    disk_image_sha TEXT,
+    name           TEXT NOT NULL,
+    sha_url        TEXT,
+    format         TEXT,
+    size_bytes     INTEGER,
+    description    TEXT,
+    added_at       TEXT NOT NULL
 );
 
 -- Slim audit log of operator + machine activity.
@@ -104,6 +119,8 @@ class StaleSchemaError(RuntimeError):
 # subsequent ``SELECT`` blow up with ``no such column``.
 _REQUIRED_COLUMNS: dict[str, tuple[str, ...]] = {
     "events": ("source_ip",),
+    "machines": ("bty_image_ref",),
+    "catalog_entries": ("bty_image_ref", "disk_image_sha"),
 }
 
 

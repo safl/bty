@@ -257,7 +257,7 @@ def test_ui_machines_filter_assigned_excludes_discovered(client: TestClient) -> 
     client.put(
         "/machines/aa:bb:cc:dd:ee:04",
         json={
-            "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
         },
     )
     r = client.get("/ui/machines?filter=assigned")
@@ -294,11 +294,11 @@ def test_ui_machines_filter_discovered_excludes_assigned(client: TestClient) -> 
     _login(client)
     # Discovered (auto-discovery, no image bound).
     client.get("/pxe/aa:bb:cc:dd:ee:01")
-    # Assigned (operator PUT with image_sha256).
+    # Assigned (operator PUT with bty_image_ref).
     client.put(
         "/machines/aa:bb:cc:dd:ee:02",
         json={
-            "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
         },
     )
 
@@ -319,7 +319,7 @@ def test_ui_machines_lists_known_records(client: TestClient) -> None:
     client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
         json={
-            "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
         },
         cookies=AUTH,
     )
@@ -346,7 +346,7 @@ def test_ui_machine_detail_renders(client: TestClient) -> None:
     client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
         json={
-            "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
         },
         cookies=AUTH,
     )
@@ -402,7 +402,7 @@ def test_ui_machine_upsert_form_rejects_non_hex_sha256(client: TestClient) -> No
     """The form-style ``POST /ui/machines/{mac}`` must apply the
     same Pydantic ``MachineUpsert`` validation as the JSON
     ``PUT /machines/{mac}``. Previously the form accepted any
-    string for ``image_sha256`` and silently landed garbage in
+    string for ``bty_image_ref`` and silently landed garbage in
     state.db; the JSON API rejected the same value with 422.
 
     On validation failure the form 303s to /ui/machines/{mac}
@@ -413,7 +413,7 @@ def test_ui_machine_upsert_form_rejects_non_hex_sha256(client: TestClient) -> No
     client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
         json={
-            "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
         },
         cookies=AUTH,
     )
@@ -421,7 +421,7 @@ def test_ui_machine_upsert_form_rejects_non_hex_sha256(client: TestClient) -> No
     r = client.post(
         "/ui/machines/aa:bb:cc:dd:ee:ff",
         data={
-            "image_sha256": "not-a-real-sha-just-garbage",
+            "bty_image_ref": "not-a-real-sha-just-garbage",
             "boot_policy": "local",
         },
         follow_redirects=False,
@@ -438,7 +438,7 @@ def test_ui_machine_upsert_form_rejects_non_hex_sha256(client: TestClient) -> No
     r = client.get("/machines/aa:bb:cc:dd:ee:ff", cookies=AUTH)
     assert r.status_code == 200
     assert (
-        r.json()["image_sha256"]
+        r.json()["bty_image_ref"]
         == "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
     )
 
@@ -453,7 +453,7 @@ def test_ui_machine_detail_renders_error_query_param_as_flash_banner(
     client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
         json={
-            "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
         },
         cookies=AUTH,
     )
@@ -495,7 +495,7 @@ def test_ui_machine_upsert_via_form(client: TestClient) -> None:
     r = client.post(
         "/ui/machines/aa:bb:cc:dd:ee:ff",
         data={
-            "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
             "hostname": "bty-ui-test",
         },
     )
@@ -508,7 +508,7 @@ def test_ui_machine_upsert_via_form(client: TestClient) -> None:
     )
     assert api.status_code == 200
     assert (
-        api.json()["image_sha256"]
+        api.json()["bty_image_ref"]
         == "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
     )
     assert api.json()["hostname"] == "bty-ui-test"
@@ -521,7 +521,7 @@ def test_ui_machine_upsert_persists_boot_policy_flash(client: TestClient) -> Non
     r = client.post(
         "/ui/machines/aa:bb:cc:dd:ee:ff",
         data={
-            "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
             "hostname": "",
             "boot_policy": "flash",
         },
@@ -544,7 +544,7 @@ def test_ui_machine_upsert_rejects_unknown_boot_policy(client: TestClient) -> No
     r = client.post(
         "/ui/machines/aa:bb:cc:dd:ee:ff",
         data={
-            "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
             "boot_policy": "yolo",
         },
         follow_redirects=False,
@@ -560,7 +560,7 @@ def test_ui_machine_detail_renders_boot_policy_dropdown(client: TestClient) -> N
     client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
         json={
-            "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
             "boot_policy": "flash",
         },
         cookies=AUTH,
@@ -769,7 +769,7 @@ def test_ui_machines_list_shows_boot_policy_badge(client: TestClient) -> None:
     client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
         json={
-            "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
             "boot_policy": "flash",
         },
         cookies=AUTH,
@@ -777,7 +777,7 @@ def test_ui_machines_list_shows_boot_policy_badge(client: TestClient) -> None:
     client.put(
         "/machines/11:22:33:44:55:66",
         json={
-            "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
             "boot_policy": "local",
         },
         cookies=AUTH,
@@ -802,7 +802,7 @@ def test_ui_machine_delete_via_form(client: TestClient) -> None:
     client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
         json={
-            "image_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
         },
         cookies=AUTH,
     )

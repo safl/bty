@@ -5,9 +5,9 @@
         </a>
     </td>
     <td>
-        {% if m.image_sha256 %}
+        {% if m.bty_image_ref %}
         <i class="bi bi-disc text-secondary me-1"></i>
-        <code title="{{ m.image_sha256 }}">{{ m.image_sha256[:12] }}...</code>
+        <code title="{{ m.bty_image_ref }}">{{ m.bty_image_ref[:12] }}...</code>
         {% else %}
         <span class="badge bg-warning text-dark"><i class="bi bi-question-circle me-1"></i>discovered</span>
         {% endif %}
