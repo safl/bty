@@ -192,9 +192,9 @@ is lower-case `aa:bb:cc:dd:ee:ff`):
 | `POST /pxe/{mac}/done` | `DELETE /machines/{mac}` |
 | `GET /pxe-bootstrap.ipxe` | `PUT /images/{name}` (stream upload) |
 | `GET /boot/{name}` | `PUT /boot/{name}` (stream upload) |
-| `GET /images/{name}` | `GET /events/machines` (Server-Sent Events) |
-| `GET /images` (catalog list, JSON) | |
-| `GET /catalog.toml` (catalog list, TOML) | |
+| `GET /images/{name}` | `POST /catalog/import?source=...` (bulk add) |
+| `GET /images` (catalog list, JSON) | `DELETE /catalog/cache/{name}` (uncache) |
+| `GET /catalog.toml` (catalog list, TOML) | `GET /events/machines` (Server-Sent Events) |
 | `GET /static/*` | |
 
 **HTTP status semantics:**

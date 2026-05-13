@@ -449,6 +449,32 @@ Protected routes (session cookie required):
 | GET | `/machines/{mac}` | - | `Machine` (404 if missing) |
 | PUT | `/machines/{mac}` | `MachineUpsert` | `Machine` (the new state) |
 | DELETE | `/machines/{mac}` | - | 204 (404 if missing) |
+| POST | `/catalog/entries` | `CatalogEntryAdd` | new entry (201) |
+| GET | `/catalog/entries` | - | array of catalog rows |
+| DELETE | `/catalog/entries?src=URL` | - | 204 (404 if missing) |
+| POST | `/catalog/import?source=...` | - | `{imported, skipped, errors}` |
+| POST | `/catalog/downloads` | `CatalogEnqueueRequest` | download state (202) |
+| GET | `/catalog/downloads` | - | list of download states |
+| DELETE | `/catalog/downloads/{name}` | - | 200 with state; 404 if not active |
+| DELETE | `/catalog/cache/{name}` | - | `{deleted, sha256?}`; idempotent |
+| POST | `/catalog/hashes` | `CatalogEnqueueRequest` | hash state (202) |
+| GET | `/catalog/hashes` | - | list of hash states |
+| DELETE | `/catalog/hashes/{name}` | - | 200 with state; 404 if not active |
+
+``POST /catalog/import`` parses the TOML at ``source`` (path,
+``http(s)://``, or ``oras://``) via ``bty.catalog.load_source`` and
+adds each entry to the catalog as metadata. **No bytes are
+fetched at import time**; each row surfaces in ``/images`` as
+``cached: false`` until the operator triggers a fetch (the
+``/ui/images`` "Fetch" button or ``POST /catalog/downloads``).
+Idempotent: re-importing the same source skips duplicates by ``src``.
+
+``DELETE /catalog/cache/{name}`` unlinks ``$cache_dir/<sha256>``
+for the named entry; the catalog row is preserved. The next
+``GET /images`` listing shows the row as ``cached: false`` so the
+operator can re-enqueue a fetch. Idempotent: missing cache file
+or unknown name both return 200 with ``deleted: false`` and a
+``reason`` string.
 
 MAC addresses are accepted in any case + `:`-or-`-` separated, and
 normalised to lower-case `aa:bb:cc:dd:ee:ff`.

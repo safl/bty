@@ -19,10 +19,12 @@
         .navbar-brand .brand-icon {
             /* The bty bat mascot, used in place of a Bootstrap icon
                so the brand pill reads as "this product" rather than
-               "some generic networking thing". Sized to align with
-               the badge / nav-btn baseline. */
-            width: 1.6rem;
+               "some generic networking thing". Sized by height to
+               align with the badge / nav-btn baseline; width auto
+               preserves the source PNG's 3:2 aspect ratio (forcing
+               1:1 squashes the mascot horizontally). */
             height: 1.6rem;
+            width: auto;
             vertical-align: -0.4rem;
         }
         .navbar .nav-btn {
@@ -129,7 +131,7 @@
 <nav class="navbar navbar-expand-md bg-dark navbar-dark py-2">
     <div class="container">
         <a class="navbar-brand fw-semibold" href="/ui/dashboard">
-            <img src="/static/bty-favicon.png" alt="bty mascot" class="brand-icon me-1">bty-web
+            <img src="/static/bty-favicon.png" alt="bty mascot" class="brand-icon me-1">BTY
             <span class="badge bg-secondary fw-normal ms-1">{{ version }}</span>
         </a>
         {% if logged_in %}

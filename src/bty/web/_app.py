@@ -1229,6 +1229,125 @@ def create_app(
             )
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
+    @app.post(
+        "/catalog/import",
+        dependencies=[Depends(require_auth)],
+    )
+    def import_catalog(source: str, request: Request) -> dict[str, Any]:
+        """Bulk-import catalog entries from a TOML manifest source.
+
+        ``source`` is a query parameter: a local path on the
+        bty-server host (``/etc/bty/my-catalog.toml``), an
+        ``http(s)://`` URL pointing at a TOML manifest, or an
+        ``oras://`` reference whose layer is the manifest. Parsed
+        through :func:`bty.catalog.load_source` so the same client-
+        side fetcher the TUI uses applies here.
+
+        **Metadata-only**. Bytes are NOT fetched at import time; each
+        imported entry surfaces in ``/images`` as ``cached=False``.
+        The operator's "Fetch" button (or ``POST /catalog/downloads``)
+        materialises bytes on demand.
+
+        Per-entry behaviour:
+
+        - If the TOML entry carries a ``sha256``, it's inserted as-is.
+        - Else if the entry's ``src`` is ``oras://``, the registry
+          manifest is resolved at import time to get the layer digest
+          (= sha256). Errors propagate into the per-entry ``errors``
+          list, not a request-level 4xx.
+        - Else (http(s):// URL with no sha): the entry is URL-only
+          (``sha256=NULL``). Flashable; not machine-bindable until
+          hashed.
+
+        Idempotent: re-importing the same source skips entries whose
+        ``src`` already exists (counted in ``skipped``).
+
+        Returns:
+
+        .. code-block:: json
+
+           {
+             "source": "...",
+             "imported": 3,
+             "skipped": 1,
+             "errors": [{"name": "...", "error": "..."}]
+           }
+        """
+        try:
+            parsed = _catalog.load_source(source)
+        except (ValueError, _catalog.CatalogError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"failed to load catalog from {source!r}: {exc}",
+            ) from exc
+        except OSError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"failed to fetch catalog from {source!r}: {exc}",
+            ) from exc
+
+        imported = 0
+        skipped = 0
+        errors: list[dict[str, str]] = []
+        now = _now_iso()
+        with _db.open_db(state_path) as conn:
+            for entry in parsed.entries:
+                sha = entry.sha256
+                fmt = entry.format
+                size_bytes = entry.size_bytes
+                if sha is None and entry.src.startswith("oras://"):
+                    try:
+                        resolved = _oras.resolve_ref(entry.src)
+                    except _oras.OrasError as exc:
+                        errors.append({"name": entry.name, "error": f"oras: {exc}"})
+                        continue
+                    sha = resolved.digest.removeprefix("sha256:")
+                    if size_bytes is None:
+                        size_bytes = resolved.size
+                try:
+                    conn.execute(
+                        "INSERT INTO catalog_entries "
+                        "(src, sha256, name, sha_url, format, size_bytes, description, added_at) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                        (
+                            entry.src,
+                            sha,
+                            entry.name,
+                            None,
+                            fmt,
+                            size_bytes,
+                            entry.description,
+                            now,
+                        ),
+                    )
+                    imported += 1
+                except sqlite3.IntegrityError:
+                    skipped += 1
+            _log_event(
+                conn,
+                kind="catalog.entries.imported",
+                summary=(
+                    f"imported {imported} entr{'y' if imported == 1 else 'ies'} from {source!r}"
+                ),
+                subject_kind="catalog",
+                subject_id=source,
+                actor="operator",
+                source_ip=_client_ip(request),
+                details={
+                    "source": source,
+                    "imported": imported,
+                    "skipped": skipped,
+                    "errors": errors,
+                },
+            )
+            conn.commit()
+        return {
+            "source": source,
+            "imported": imported,
+            "skipped": skipped,
+            "errors": errors,
+        }
+
     # ---------- catalog download manager ----------------------------------
     # Authenticated endpoints; only operators logged into the bty-web
     # UI can enqueue / cancel fetches. Skipped silently when no
@@ -1282,6 +1401,66 @@ def create_app(
                 detail=f"no active download named {name!r}",
             )
         return state.to_dict()
+
+    @app.delete(
+        "/catalog/cache/{name}",
+        dependencies=[Depends(require_auth)],
+    )
+    def delete_catalog_cache(name: str, request: Request) -> dict[str, Any]:
+        """Delete the cached bytes for a named catalog entry; keep
+        the entry's metadata.
+
+        Looks up the entry's sha256 (DB ``catalog_entries`` first;
+        then the static manifest if loaded), unlinks
+        ``$cache_dir/<sha256>`` if it exists. Idempotent: a missing
+        file or unknown name both return ``{"deleted": false}``
+        with a ``reason`` string. The catalog entry's metadata is
+        preserved, so the row keeps surfacing in ``/images`` as
+        "available" (not cached) and ``POST /catalog/downloads``
+        re-fetches on demand.
+
+        Used by the ``/ui/images`` bulk "Delete local copy" toolbar
+        action; per-name dispatch keeps the response surface symmetric
+        with the per-name ``POST /catalog/downloads`` enqueue path.
+        Path-separator characters or NUL in ``name`` are rejected at
+        the boundary, same rule as :class:`CatalogEnqueueRequest`.
+        """
+        if not name or any(c in name for c in ("/", "\\", "\x00")) or name in (".", ".."):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"invalid name: {name!r}",
+            )
+        sha: str | None = None
+        with _db.open_db(state_path) as conn:
+            row = conn.execute(
+                "SELECT sha256 FROM catalog_entries WHERE name = ?",
+                (name,),
+            ).fetchone()
+            if row and row["sha256"]:
+                sha = str(row["sha256"])
+        if sha is None and parsed_catalog is not None:
+            entry = parsed_catalog.by_name(name)
+            if entry is not None and entry.sha256 is not None:
+                sha = entry.sha256
+        if sha is None:
+            return {"name": name, "deleted": False, "reason": "no sha256 for name"}
+        cached_file = catalog_cache_dir / sha
+        if not cached_file.exists():
+            return {"name": name, "deleted": False, "reason": "not cached", "sha256": sha}
+        cached_file.unlink()
+        with _db.open_db(state_path) as conn:
+            _log_event(
+                conn,
+                kind="catalog.cache.deleted",
+                summary=f"deleted cached file for {name!r}",
+                subject_kind="catalog",
+                subject_id=name,
+                actor="operator",
+                source_ip=_client_ip(request),
+                details={"name": name, "sha256": sha},
+            )
+            conn.commit()
+        return {"name": name, "deleted": True, "sha256": sha}
 
     # ---------- catalog hash manager --------------------------------------
     # Hashing is independent of the manifest -- always available so

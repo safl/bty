@@ -1779,6 +1779,303 @@ def test_catalog_entries_list_and_delete(
     assert r.json() == []
 
 
+def test_catalog_cache_delete_unlinks_file_keeps_entry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``DELETE /catalog/cache/{name}`` removes the cached bytes at
+    ``$cache_dir/<sha256>`` and leaves the catalog entry in place.
+    The follow-up ``GET /catalog/entries`` still shows the row;
+    ``GET /images`` shows it as ``cached=False`` so the operator can
+    re-enqueue a fetch."""
+    import hashlib
+    import io
+    import json as _json
+    import os
+
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    cache_dir = state_dir / "cache"
+    cache_dir.mkdir()
+    image_root = tmp_path / "images"
+    image_root.mkdir()
+    boot_root = tmp_path / "boot"
+    boot_root.mkdir()
+
+    # Stage a fake cached file at the SHA the oras manifest below will
+    # carry. The endpoint should unlink it on success.
+    payload = b"cached-bytes-to-evict"
+    sha = hashlib.sha256(payload).hexdigest()
+    cached_file = cache_dir / sha
+    cached_file.write_bytes(payload)
+
+    # Mock the oras manifest fetch so adding an entry via the API
+    # carries the SHA we just staged. Reuses the helper-style _Resp
+    # pattern from ``test_catalog_entries_add_with_oras_ref_resolves_manifest``.
+    manifest = {
+        "schemaVersion": 2,
+        "mediaType": "application/vnd.oci.image.manifest.v1+json",
+        "layers": [
+            {
+                "mediaType": "application/vnd.nosi.disk-image.layer.v1+gzip",
+                "digest": f"sha256:{sha}",
+                "size": len(payload),
+                "annotations": {"org.opencontainers.image.title": "deletable.img.gz"},
+            },
+        ],
+    }
+
+    def fake_urlopen(req, *_a, **_kw):  # type: ignore[no-untyped-def]
+        url = req if isinstance(req, str) else req.full_url
+
+        class _Resp(io.BytesIO):
+            headers: typing.ClassVar[dict[str, str]] = {}
+
+            def __enter__(self):  # type: ignore[no-untyped-def]
+                return self
+
+            def __exit__(self, *_args):  # type: ignore[no-untyped-def]
+                return None
+
+        if "/token" in url:
+            return _Resp(_json.dumps({"token": "anon-tok"}).encode())
+        if "/manifests/" in url:
+            return _Resp(_json.dumps(manifest).encode())
+        raise AssertionError(f"unexpected URL: {url}")
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    os.environ["BTY_STATE_DIR"] = str(state_dir)
+    try:
+        app = create_app(
+            state_path=state_dir / "state.db",
+            service_user=TEST_SERVICE_USER,
+            secret_key=TEST_SECRET_KEY,
+            image_root=image_root,
+            boot_root=boot_root,
+        )
+        import pamela
+
+        monkeypatch.setattr(pamela, "authenticate", lambda *a, **kw: True)
+
+        with TestClient(app) as client:
+            r = client.post(
+                "/ui/login",
+                data={"password": "pytest-password"},
+                follow_redirects=False,
+            )
+            assert r.status_code == 303
+            cookie = r.cookies.get("bty-token")
+            assert cookie is not None
+            auth_cookies = {"bty-token": cookie}
+
+            # Add an oras entry; the cached SHA matches the file we
+            # pre-staged.
+            r = client.post(
+                "/catalog/entries",
+                json={"image_url": "oras://ghcr.io/safl/test/deletable:latest"},
+                cookies=auth_cookies,
+            )
+            assert r.status_code == 201, r.text
+
+            # Cache file exists pre-delete.
+            assert cached_file.exists()
+
+            # Delete the cached bytes only.
+            r = client.delete("/catalog/cache/deletable.img.gz", cookies=auth_cookies)
+            assert r.status_code == 200, r.text
+            body = r.json()
+            assert body["deleted"] is True
+            assert body["sha256"] == sha
+
+            # File is gone; entry remains.
+            assert not cached_file.exists()
+            r = client.get("/catalog/entries", cookies=auth_cookies)
+            assert r.status_code == 200
+            assert len(r.json()) == 1
+            assert r.json()[0]["name"] == "deletable.img.gz"
+    finally:
+        os.environ.pop("BTY_STATE_DIR", None)
+
+
+def test_catalog_cache_delete_idempotent_no_cached_file(
+    app_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When the entry exists but no cached file is present, the
+    delete endpoint returns 200 with ``deleted=False, reason="not
+    cached"``. Idempotent: repeated calls don't error."""
+
+    def fake_urlopen(*_a, **_kw):  # type: ignore[no-untyped-def]
+        return _MockResp(b"", headers={"Content-Length": "0"})
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    # URL-only entry: sha256 is NULL.
+    app_client.post(
+        "/catalog/entries",
+        json={"image_url": "https://example.invalid/uncached.img.gz"},
+        cookies=AUTH,
+    )
+    r = app_client.delete("/catalog/cache/uncached.img.gz", cookies=AUTH)
+    assert r.status_code == 200
+    assert r.json()["deleted"] is False
+    assert r.json()["reason"] == "no sha256 for name"
+
+
+def test_catalog_cache_delete_requires_auth(app_client: TestClient) -> None:
+    r = app_client.delete("/catalog/cache/some.img.gz")
+    assert r.status_code == 401
+
+
+def test_catalog_import_from_local_path(app_client: TestClient, tmp_path: Path) -> None:
+    """``POST /catalog/import?source=<path>`` parses the TOML and
+    inserts entries into ``catalog_entries``. No bytes fetched."""
+    manifest = tmp_path / "catalog.toml"
+    manifest.write_text(
+        """
+        version = 1
+
+        [[images]]
+        name = "alpha.img.gz"
+        format = "img.gz"
+        size_bytes = 1024
+        src = "https://example.invalid/alpha.img.gz"
+
+        [[images]]
+        name = "beta.img.gz"
+        format = "img.gz"
+        size_bytes = 2048
+        src = "https://example.invalid/beta.img.gz"
+        """,
+        encoding="utf-8",
+    )
+    r = app_client.post(
+        "/catalog/import",
+        params={"source": str(manifest)},
+        cookies=AUTH,
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["imported"] == 2
+    assert body["skipped"] == 0
+    assert body["errors"] == []
+    r2 = app_client.get("/catalog/entries", cookies=AUTH)
+    rows = r2.json()
+    assert {row["name"] for row in rows} == {"alpha.img.gz", "beta.img.gz"}
+    # No bytes fetched: /images shows cached=False
+    r3 = app_client.get("/images")
+    images_rows = {row["name"]: row for row in r3.json()}
+    assert "alpha.img.gz" in images_rows
+    assert images_rows["alpha.img.gz"]["cached"] is False
+
+
+def test_catalog_import_idempotent_skips_duplicates(app_client: TestClient, tmp_path: Path) -> None:
+    """Re-importing the same manifest counts duplicates as ``skipped``,
+    leaves the table unchanged."""
+    manifest = tmp_path / "catalog.toml"
+    manifest.write_text(
+        """
+        version = 1
+        [[images]]
+        name = "gamma.img.gz"
+        format = "img.gz"
+        src = "https://example.invalid/gamma.img.gz"
+        """,
+        encoding="utf-8",
+    )
+    r1 = app_client.post("/catalog/import", params={"source": str(manifest)}, cookies=AUTH)
+    assert r1.json()["imported"] == 1
+    r2 = app_client.post("/catalog/import", params={"source": str(manifest)}, cookies=AUTH)
+    assert r2.json()["imported"] == 0
+    assert r2.json()["skipped"] == 1
+    assert len(app_client.get("/catalog/entries", cookies=AUTH).json()) == 1
+
+
+def test_catalog_import_rejects_invalid_source_scheme(
+    app_client: TestClient,
+) -> None:
+    """Unsupported schemes (ftp://, etc.) return 400."""
+    r = app_client.post(
+        "/catalog/import",
+        params={"source": "ftp://example.invalid/catalog.toml"},
+        cookies=AUTH,
+    )
+    assert r.status_code == 400
+    assert "ftp" in r.text or "scheme" in r.text
+
+
+def test_catalog_import_requires_auth(app_client: TestClient) -> None:
+    r = app_client.post(
+        "/catalog/import",
+        params={"source": "https://example.invalid/catalog.toml"},
+    )
+    assert r.status_code == 401
+
+
+def test_catalog_import_with_oras_entry_resolves_sha(
+    app_client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Manifest entries with ``oras://`` src and no pre-pinned
+    sha256 get resolved at import time so the imported row carries
+    a machine-bindable digest. The resolve uses the same code path
+    as ``POST /catalog/entries`` for oras URLs."""
+    import io
+    import json as _json
+
+    manifest_text = """
+    version = 1
+    [[images]]
+    name = "nosi-debian-sysdev.img.gz"
+    format = "img.gz"
+    src = "oras://ghcr.io/safl/nosi/debian-sysdev:latest"
+    """
+    manifest_file = tmp_path / "catalog.toml"
+    manifest_file.write_text(manifest_text, encoding="utf-8")
+
+    oras_manifest = {
+        "schemaVersion": 2,
+        "mediaType": "application/vnd.oci.image.manifest.v1+json",
+        "layers": [
+            {
+                "mediaType": "application/vnd.nosi.disk-image.layer.v1+gzip",
+                "digest": "sha256:" + "cd" * 32,
+                "size": 7654321,
+                "annotations": {"org.opencontainers.image.title": "nosi-debian-sysdev.img.gz"},
+            },
+        ],
+    }
+
+    def fake_urlopen(req, *_a, **_kw):  # type: ignore[no-untyped-def]
+        url = req if isinstance(req, str) else req.full_url
+
+        class _Resp(io.BytesIO):
+            headers: typing.ClassVar[dict[str, str]] = {}
+
+            def __enter__(self):  # type: ignore[no-untyped-def]
+                return self
+
+            def __exit__(self, *_args):  # type: ignore[no-untyped-def]
+                return None
+
+        if "/token" in url:
+            return _Resp(_json.dumps({"token": "anon-tok"}).encode())
+        if "/manifests/" in url:
+            return _Resp(_json.dumps(oras_manifest).encode())
+        raise AssertionError(f"unexpected URL: {url}")
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    r = app_client.post(
+        "/catalog/import",
+        params={"source": str(manifest_file)},
+        cookies=AUTH,
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["imported"] == 1
+    rows = app_client.get("/catalog/entries", cookies=AUTH).json()
+    assert len(rows) == 1
+    assert rows[0]["sha256"] == "cd" * 32
+    assert rows[0]["size_bytes"] == 7654321
+
+
 def test_ui_images_renders_catalog_entries_in_added_at_order(
     app_client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
