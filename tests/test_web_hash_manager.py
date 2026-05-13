@@ -1,4 +1,4 @@
-"""Tests for ``bty.web._hash`` (M22 layer 5+: background hash queue).
+"""Tests for ``bty.web._hash`` background hash queue.
 
 Mirrors ``tests/test_web_catalog_manager.py`` -- same lifecycle
 shape, hermetic (real files in tmp_path), async test bodies via

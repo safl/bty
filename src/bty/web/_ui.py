@@ -275,9 +275,8 @@ def register_ui_routes(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"no machine record for {normalised}",
             )
-        # v0.11.0: the picker lists catalog_entries rows by
-        # ``bty_image_ref`` (provenance ID) rather than UnifiedImage
-        # by content sha. Operator binding stays valid across rolling
+        # The picker lists catalog_entries rows by ``bty_image_ref``
+        # (provenance ID). Operator binding stays valid across rolling
         # tags / re-fetches; the content sha (``disk_image_sha``)
         # surfaces alongside the ref when known.
         with _db.open_db(state_path) as conn:
@@ -326,12 +325,11 @@ def register_ui_routes(
     ) -> RedirectResponse:
         normalised = _normalise_mac(mac)
         # Run the form inputs through the same Pydantic model the
-        # JSON ``PUT /machines/{mac}`` uses so we don't drift: the
-        # API rejects non-hex ``bty_image_ref`` (``pattern=
-        # r"^[0-9a-f]{64}$"``) and out-of-shape ``hostname`` shapes,
-        # while the form path used to accept any string. Empty-form
-        # fields normalise to ``None`` (Pydantic accepts ``None``
-        # for optional fields, and sqlite stores NULL).
+        # JSON ``PUT /machines/{mac}`` uses so the two paths stay in
+        # sync: non-hex ``bty_image_ref`` and out-of-shape
+        # ``hostname`` are rejected here too. Empty-form fields
+        # normalise to ``None`` (Pydantic accepts ``None`` for
+        # optional fields, sqlite stores NULL).
         try:
             validated = MachineUpsert(
                 bty_image_ref=bty_image_ref or None,
@@ -346,7 +344,7 @@ def register_ui_routes(
             )
         # ``boot_policy`` is pattern-checked by Pydantic above; the
         # explicit set membership check is therefore redundant but
-        # kept for the legacy enum-style error wording.
+        # kept so the operator gets an enum-style error message.
         if validated.boot_policy not in BOOT_POLICIES:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -462,9 +460,7 @@ def register_ui_routes(
 
         Validation runs through the same :class:`CatalogEntryAdd`
         Pydantic model the JSON endpoint uses, so the form rejects
-        ``ftp://`` / host-less URLs / non-http schemes identically
-        -- previously the form path skipped pattern validation
-        entirely and would land arbitrary strings in the DB.
+        ``ftp://`` / host-less URLs / non-http schemes identically.
         """
         from bty import catalog as _catalog
         from bty import oras as _oras

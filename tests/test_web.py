@@ -396,11 +396,11 @@ def test_put_image_rejects_oversized_upload(
 def test_put_image_inserts_catalog_entries_row_immediately(
     app_client: TestClient,
 ) -> None:
-    """v0.11.0: ``PUT /images/{name}`` runs the auto-import sweep
-    after a successful upload so the new file lands in
-    ``catalog_entries`` (keyed by ``bty_image_ref``) without
-    waiting for the HashManager or a bty-web restart. Verifies the
-    operator can immediately bind a machine by the new ref."""
+    """``PUT /images/{name}`` runs the auto-import sweep after a
+    successful upload so the new file lands in ``catalog_entries``
+    (keyed by ``bty_image_ref``) without waiting for the HashManager
+    or a bty-web restart. Verifies the operator can immediately bind
+    a machine by the new ref."""
     from bty.catalog import image_ref_for_src
 
     body = b"auto-import-on-upload-bytes"
@@ -432,11 +432,11 @@ def test_put_image_triggers_hash_so_entry_appears_in_listing(
     expected_sha = hashlib.sha256(payload).hexdigest()
     r = app_client.put("/images/uploaded.img", content=payload, cookies=AUTH)
     assert r.status_code == 200
-    # v0.11.0: the auto-import sweep on upload inserts a
-    # ``catalog_entries`` row with ``disk_image_sha=None``
-    # immediately, so the row appears before the HashManager
-    # finishes. Poll for the URL to flip from the ``file://`` src
-    # (unhashed) to ``/images/<sha>/<name>`` (hash worker done).
+    # The auto-import sweep on upload inserts a ``catalog_entries``
+    # row with ``disk_image_sha=None`` immediately, so the row
+    # appears before the HashManager finishes. Poll for the URL to
+    # flip from the ``file://`` src (unhashed) to
+    # ``/images/<sha>/<name>`` (hash worker done).
     deadline = time.monotonic() + 5.0
     sha_url = f"/images/{expected_sha}/uploaded.img"
     while time.monotonic() < deadline:
@@ -1010,13 +1010,13 @@ def test_pxe_flash_policy_returns_chain_with_args(
     """boot_policy=flash + bound image: chain into kernel/initrd with
     the four bty.* cmdline params the live env reads.
 
-    v0.11.0: machines bind by ``bty_image_ref`` which is the SHA-256
-    of the canonicalised src URL. The PXE handler resolves the ref
-    through ``catalog_entries`` to the cached file's content hash
-    (``disk_image_sha``), which the iPXE URL ends in. The test
-    seeds a catalog row that already carries both ref + content
-    sha by going through the sha_url path (which pre-pins
-    disk_image_sha at insert time)."""
+    Machines bind by ``bty_image_ref`` (the SHA-256 of the
+    canonicalised src URL). The PXE handler resolves the ref through
+    ``catalog_entries`` and emits ``/images/<ref>/<name>``; the
+    serve_image route handles cache-through. The test seeds a
+    catalog row that already carries both ref + content sha by going
+    through the sha_url path (which pre-pins disk_image_sha at
+    insert time)."""
     flash_sha = "0123456789abcdef" * 4
 
     def fake_urlopen(*_a, **_kw):  # type: ignore[no-untyped-def]
@@ -1056,9 +1056,8 @@ def test_pxe_flash_policy_returns_chain_with_args(
     assert "console=ttyS0,115200" in body
     assert "bty.server=${bty-base}" in body
     assert "bty.mac=aa:bb:cc:dd:ee:ff" in body
-    # v0.11.0: URL ends in ``/images/<bty_image_ref>/<name>``. The
-    # serve_image route does cache-through (Option A) to resolve the
-    # ref to the actual disk_image_sha and serve the bytes; clients
+    # URL ends in ``/images/<bty_image_ref>/<name>``. The serve_image
+    # route does cache-through to resolve the ref to bytes; clients
     # never see the content sha in the URL.
     assert f"bty.image_url=${{bty-base}}/images/{ref}/" in body
     assert "bty.provisioning" not in body
@@ -1726,7 +1725,7 @@ def test_serve_image_with_name_resolves_by_sha(tmp_path: Path) -> None:
         assert r2.content == payload
 
 
-# ---------- /catalog endpoints (M22) ---------------------------------------
+# ---------- /catalog endpoints ---------------------------------------------
 
 
 def test_catalog_downloads_requires_auth(app_client: TestClient) -> None:

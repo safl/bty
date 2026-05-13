@@ -45,14 +45,14 @@ class MachineUpsert(BaseModel):
     """Request body for ``PUT /machines/{mac}``.
 
     All fields are optional except for the implicit ``mac`` from the
-    path; ``boot_policy`` defaults to ``"local"``. v0.11.0 onward
-    binds by ``bty_image_ref`` (stable provenance ID derived as
-    ``sha256(canonicalise_src(src))``) rather than the content sha.
-    URL-only and rolling-tag oras entries are bindable; rename or
+    path; ``boot_policy`` defaults to ``"local"``. Binding targets
+    ``bty_image_ref`` (a stable provenance ID derived as
+    ``sha256(canonicalise_src(src))``) rather than the content sha,
+    so URL-only and rolling-tag oras entries are bindable; rename or
     content drift leaves the binding intact.
 
     ``extra="forbid"`` so unknown fields fail loud at the edge with
-    a 422 -- silent drops let a stale client put a row with
+    a 422 -- silent drops let a typo put a row with
     ``bty_image_ref=NULL`` and the next PXE chain fall through to
     "no assignment", which is a debugging trap.
     """
@@ -201,9 +201,8 @@ class CatalogEntryAdd(BaseModel):
       digest matching ``image_url``'s filename, and stores it as
       ``disk_image_sha``. Without it the entry is URL-only
       (``disk_image_sha`` stays NULL until the first flash's
-      cache-through observes it). v0.11.0 onward: still bindable to
-      a machine -- binding targets ``bty_image_ref``, not the
-      content sha.
+      cache-through observes it); still bindable to a machine
+      because binding targets ``bty_image_ref``, not the content sha.
     - For ``oras://`` URLs the server resolves the OCI manifest at
       add time, picks the disk-image layer, and uses the layer's
       content-addressed digest as the entry's ``disk_image_sha``.

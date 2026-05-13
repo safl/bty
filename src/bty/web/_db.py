@@ -36,10 +36,10 @@ def default_state_path() -> Path:
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS machines (
     mac                       TEXT PRIMARY KEY,
-    -- v0.11.0: bindings target ``catalog_entries.bty_image_ref``
-    -- (sha256 of canonicalised src), not the content sha. Lets
-    -- operators bind rolling-tag oras refs and URL-only entries
-    -- that have no pre-known content sha.
+    -- Binding target: ``catalog_entries.bty_image_ref`` (sha256
+    -- of canonicalised src), not the content sha. Lets operators
+    -- bind rolling-tag oras refs and URL-only entries that have
+    -- no pre-known content sha.
     bty_image_ref             TEXT,
     hostname                  TEXT,
     discovered_at             TEXT,    -- first /pxe/{mac} contact (NULL if PUT-created)

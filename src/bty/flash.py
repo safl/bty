@@ -874,11 +874,9 @@ def _flash_bz2(
 ) -> None:
     """Pipeline ``bzip2 -d --stdout IMG | dd of=TARGET ...``.
 
-    bzip2 is mostly legacy at this point but appears occasionally
-    in older appliance image bundles. Decompression is the
-    slowest of the supported formats (~10-30 MB/s) and bz2 lacks
-    a metadata header for uncompressed size, so
-    ``virtual_size_bytes`` is always ``None`` for .img.bz2 and
+    Decompression is the slowest of the supported formats
+    (~10-30 MB/s) and bz2 lacks a metadata header for uncompressed
+    size, so ``virtual_size_bytes`` is always ``None`` for .img.bz2 and
     validate_plan skips the size-fits-target check with a note.
     """
     _flash_compressed(
@@ -1009,9 +1007,9 @@ def _flash_compressed_from_url(
     .virtual_size_bytes``) supplies the decompressed size when it
     can derive it, and ``None`` otherwise. We deliberately do NOT
     fall back to ``_curl_args_for_source``'s ``resolved_size``
-    (the compressed blob size) here -- that mismatch made the
-    pre-v0.9.0 progress bar overshoot to ~6x for highly compressible
-    .img.gz inputs.
+    (the compressed blob size) here -- that mismatch makes the
+    progress bar overshoot to ~6x for highly compressible .img.gz
+    inputs.
     """
     curl_args, _resolved_compressed_size = _curl_args_for_source(url)
     curl_proc = subprocess.Popen(curl_args, stdout=subprocess.PIPE)

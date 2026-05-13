@@ -59,10 +59,9 @@ for the full per-command schema reference and the exit-code table.
 
 ### Block-device discovery: use `lsblk`
 
-bty doesn't ship its own block-device-listing command (a `bty list
-disks` wrapper existed pre-v0.8.4 but added little over what
-`lsblk` already does). Use `lsblk -d -e7` to see the candidate
-disks at a glance:
+bty doesn't ship its own block-device-listing command -- `lsblk`
+already covers that. Use `lsblk -d -e7` to see the candidate disks
+at a glance:
 
 ```text
 $ lsblk -d -e7

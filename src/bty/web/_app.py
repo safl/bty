@@ -553,11 +553,13 @@ def create_app(
 
         Resolution order:
 
-          1. Literal filename under ``image_root`` -- legacy path.
+          1. Literal filename under ``image_root`` -- the bare
+             ``GET /images/<name>`` form for scripts / curl-based
+             operators.
           2. 64-hex ID through :func:`_resolve_image_for_key`, which
              handles ``bty_image_ref`` lookups (with eager cache-through
-             on miss) and falls back to bare ``disk_image_sha`` lookups
-             against the cache + dir-scan.
+             on miss) and the sha-keyed URLs the ``/images`` listing
+             emits for known-content entries.
         """
         try:
             return _serve_safe_file(resolved_image_root, key)
@@ -581,8 +583,7 @@ def create_app(
         catalog row matches this ref). The URL uses the ref itself,
         not the content sha -- :func:`_resolve_image_for_key` does
         the cache-through on the fly when the bound entry's
-        ``disk_image_sha`` is still NULL (eager fetch-then-serve,
-        Option A in the v0.11.0 design notes).
+        ``disk_image_sha`` is still NULL.
         """
         with _db.open_db(state_path) as conn:
             row = conn.execute(
@@ -602,16 +603,17 @@ def create_app(
 
         1. ``key`` as ``bty_image_ref``: look up catalog_entries.
            - disk_image_sha known + cache file present -> cache path
-           - disk_image_sha known + dir-scan file present -> local
            - src is file:// + file exists -> local (HashManager will
              populate disk_image_sha asynchronously)
            - else (remote src, no cache): fetch src -> cache,
              UPDATE row.disk_image_sha, return new cache path.
              Pre-pinned-sha mismatch on fetch returns ``None`` (the
              caller surfaces a 502 and logs a sha_mismatch event).
-        2. ``key`` as raw disk_image_sha: legacy path -- cache lookup
-           then dir-scan fallback for entries whose ref-keyed row was
-           deleted but the cache file lingers.
+        2. ``key`` as raw ``disk_image_sha``: serves the sha-keyed
+           URLs that the ``GET /images`` listing emits for entries
+           whose content hash is known. Looks for the cache file
+           first, then falls back to the catalog_entries row's
+           ``file://`` src.
         """
         key_lower = key.lower()
         # (1) ref lookup.
@@ -671,11 +673,9 @@ def create_app(
                 )
                 conn.commit()
             return cached
-        # (2) sha lookup -- legacy path for content-sha-keyed URLs.
-        # Most catalog rows now carry a ``disk_image_sha`` populated
-        # via the HashManager / cache-through update; resolve via
-        # the catalog_entries row's src rather than re-walking the
-        # image root.
+        # (2) sha lookup -- serves the sha-keyed URLs emitted by the
+        # ``GET /images`` listing for entries whose content hash is
+        # known. Resolve via the catalog_entries row's src.
         if images.is_sha256_hex(key_lower):
             cached = catalog_cache_dir / key_lower
             if cached.is_file():
@@ -1090,9 +1090,9 @@ def create_app(
           dir-scan files / manifest entries that share the hash).
         - URL-only rows (operator added without a sha_url) ->
           :class:`bty.images.UnifiedImage` with ``sha256=None``,
-          surfaced verbatim. v0.11.0 onward they are bindable to
-          a machine via the row's ``bty_image_ref``; the first
-          flash's cache-through back-fills ``disk_image_sha``.
+          surfaced verbatim. Bindable to a machine via the row's
+          ``bty_image_ref``; the first flash's cache-through
+          back-fills ``disk_image_sha``.
         """
         with _db.open_db(state_path) as conn:
             # ``ORDER BY added_at`` matches the ``list_catalog_entries``
@@ -1205,8 +1205,8 @@ def create_app(
         """
         # Variables shared across the oras / http branches. Declared
         # up front so mypy sees a single binding (the oras branch
-        # narrows ``sha256`` to ``str``, which would clash with the
-        # ``str | None`` re-declaration the http branch had previously).
+        # narrows ``sha256`` to ``str``, which would clash with a
+        # branch-local ``str | None`` re-declaration).
         sha256: str | None = None
         fmt: str | None = None
         size_bytes: int | None = None
@@ -1481,9 +1481,9 @@ def create_app(
           (= sha256). Errors propagate into the per-entry ``errors``
           list, not a request-level 4xx.
         - Else (http(s):// URL with no sha): the entry is URL-only
-          (``disk_image_sha=NULL``). v0.11.0 onward: still bindable
-          to a machine via ``bty_image_ref``; the first flash's
-          cache-through populates ``disk_image_sha``.
+          (``disk_image_sha=NULL``). Still bindable to a machine
+          via ``bty_image_ref``; the first flash's cache-through
+          populates ``disk_image_sha``.
 
         Idempotent: re-importing the same source skips entries whose
         ``src`` already exists (counted in ``skipped``).
@@ -1831,8 +1831,7 @@ def _safe_path(root: Path, name: str) -> Path:
     """Resolve ``root / name`` with path-traversal checks, return the path.
 
     Rejects names with slashes, ``..``, NULs, etc. Caller decides
-    what to do with the resolved path (404 vs. open-for-write); the
-    existing FileResponse helper used to inline this check.
+    what to do with the resolved path (404 vs. open-for-write).
     """
     if not name or "/" in name or "\\" in name or "\x00" in name or name in {".", ".."}:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="bad name")

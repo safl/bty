@@ -407,9 +407,7 @@ _SHA_HEX = frozenset("0123456789abcdef")
 def is_sha256_hex(s: str) -> bool:
     """Return ``True`` iff ``s`` is a lower-case 64-char SHA-256
     hex digest. Single predicate shared by sidecar parsing,
-    manifest validation, and the URL-key dispatch in bty-web --
-    every callsite was previously a separate inline copy of
-    ``len(s) == 64 and all(c in '0123456789abcdef' for c in s)``.
+    manifest validation, and the URL-key dispatch in bty-web.
     """
     return len(s) == SHA256_HEX_LEN and all(c in _SHA_HEX for c in s)
 

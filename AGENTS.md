@@ -34,8 +34,7 @@ incompatible structural change increments the version.
 
 ### Per-command schemas
 
-**Block-device discovery is NOT a bty command.** A pre-v0.8.4
-``bty list disks`` wrapper was dropped because ``lsblk -d -e7 -J``
+**Block-device discovery is NOT a bty command.** ``lsblk -d -e7 -J``
 already produces structured output an agent can parse. Use that
 directly for disk discovery; bty's CLI is the right tool only for
 image-side operations.

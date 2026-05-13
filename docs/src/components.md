@@ -196,11 +196,9 @@ SD-card image natively.
 
 bty has no online provisioning surface. The bty-web server is a
 flasher: it writes bytes, records when bytes were written, and
-never opens an SSH session to a flashed target. Earlier versions
-(through v0.7.56) shipped an optional cijoe-task runner that
-SSH'd into post-flash targets; that surface was removed because
-"the flasher holds root creds on every machine it ever
-provisioned" is a bad security shape.
+never opens an SSH session to a flashed target. "The flasher
+holds root creds on every machine it ever provisioned" is a bad
+security shape, so the surface intentionally does not exist.
 
 First-boot bring-up belongs in the image builder -- cloud-init /
 NoCloud user-data baked into the image at build time. Post-boot

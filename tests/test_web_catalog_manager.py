@@ -1,4 +1,4 @@
-"""Tests for ``bty.web._catalog`` (M22 download manager).
+"""Tests for ``bty.web._catalog`` download manager.
 
 Covers the manager state machine without spinning up the full
 FastAPI app:

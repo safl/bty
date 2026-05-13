@@ -163,7 +163,7 @@ def test_inspect_image_missing_path_raises(tmp_path: Path) -> None:
 
 
 # -----------------------------------------------------------------------
-# SHA-256 sidecar caching (M22)
+# SHA-256 sidecar caching
 # -----------------------------------------------------------------------
 
 

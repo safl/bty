@@ -116,8 +116,8 @@ stay with the appliance. Images travel; meta-state stays.
 ## What if no labelled disk is present?
 
 The `nofail` mount option means the appliance still boots; bty-web
-falls back to storing images on the rootfs at the same path. You
-get the pre-0.10.0 behaviour without any error spam.
+falls back to storing images on the rootfs at the same path. No
+error spam, no behavioural change for the operator.
 
 If you decide later to move to a separate disk, run
 `sudo bty-image-store-init /dev/sdX` and the script copies the

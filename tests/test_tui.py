@@ -607,7 +607,7 @@ def test_app_catalog_source_overlays_local_scan(
 
 
 # --------------------------------------------------------------------------
-# M20: TUI polish (theme, filter, welcome panel, details pane, flash modal)
+# TUI polish (theme, filter, welcome panel, details pane, flash modal)
 # --------------------------------------------------------------------------
 
 
@@ -832,7 +832,7 @@ def test_app_no_details_pane(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
 
 
 # --------------------------------------------------------------------------
-# FlashStatusScreen stage tracker (M20)
+# FlashStatusScreen stage tracker
 # --------------------------------------------------------------------------
 
 

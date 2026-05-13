@@ -1,4 +1,4 @@
-"""Tests for ``bty.catalog`` (M22, v1).
+"""Tests for ``bty.catalog``.
 
 Coverage:
   * TOML parsing happy + sad paths.

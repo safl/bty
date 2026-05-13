@@ -1395,7 +1395,7 @@ class BtyTui(App[None]):
         if not entries:
             # Empty catalog: keep the (empty) data table visible but
             # populate the welcome panel below it with actionable
-            # next steps. Status line keeps the legacy short form so
+            # next steps. Status line is intentionally short so
             # tests / scripts have a stable hook.
             welcome.update(self._welcome_text())
             source = self._catalog_source or str(self._image_root)
@@ -1611,8 +1611,8 @@ class BtyTui(App[None]):
         """``Esc`` binding: route based on app state.
 
         Priority order:
-        1. If a filter is active, Esc clears it (legacy behavior --
-           operators expect the Input's escape semantics).
+        1. If a filter is active, Esc clears it (operators expect
+           the Input's escape semantics).
         2. Otherwise undo the most recent wizard commit and return
            one stage.
         """

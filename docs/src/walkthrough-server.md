@@ -282,10 +282,7 @@ trusted LAN:
   every console login.
 - **Per-instance SSH host keys.** `bty-ssh-host-keys.service`
   runs `ssh-keygen -A` on first boot of each freshly-flashed instance, so
-  every appliance has unique host keys (added in v0.5.14;
-  pre-v0.5.14 deployments share the bake-time keys -- rotate
-  manually with `sudo rm /etc/ssh/ssh_host_* && sudo ssh-keygen
-  -A && sudo systemctl restart ssh`).
+  every appliance has unique host keys.
 - **No built-in firewall.** The image does not ship with `ufw` or
   `nftables` rules. Listening ports out of the box: `:8080`
   (bty-web HTTP), `:22` (sshd), `:69` UDP (TFTP, dormant until a
