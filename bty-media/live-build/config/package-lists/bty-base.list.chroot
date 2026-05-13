@@ -15,19 +15,31 @@ live-tools
 plymouth
 plymouth-themes
 
-# Vendor firmware blobs. Without these, i915 wedges the GPU on
-# probe (cosmetic on tty1 / framebuffer-served consoles but produces
-# a scary "Failed to initialize GPU, declaring it wedged" line in
-# dmesg) and several common NIC / WiFi chipsets fail to come up at
-# all. Curated rather than ``firmware-linux-nonfree`` so the squashfs
-# only grows by ~150 MiB instead of ~500. Requires
+# Vendor firmware blobs. Tight curation: every package included
+# here has to earn its squashfs bytes against the "operator flashes
+# a random homelab box" use case. Requires
 # ``--archive-areas "main non-free-firmware"`` in ``auto/config``.
+#
+#   firmware-misc-nonfree -- i915 GuC / HuC + sensor + IC firmware
+#     covers the bulk of Intel-platform "needs firmware at probe"
+#     hardware. Silences the "Failed to initialize GPU, declaring
+#     it wedged" log line on Alder-Lake-class targets.
+#   firmware-iwlwifi      -- Intel WiFi (AX2xx / BE2xx / etc.).
+#     Required for bty-usb on most modern laptops / NUC-class.
+#   firmware-realtek      -- Realtek Ethernet + WiFi + BT. RTL8125
+#     2.5GbE shows up on essentially every mini-PC including the
+#     GMKtec G5; without it that NIC won't link.
+#
+# Intentionally NOT included:
+#   firmware-amd-graphics -- ~150 MiB compressed. AMD GPUs wedge at
+#     probe without it, but bty's TUI runs on the framebuffer /
+#     simpledrm; the wedge is cosmetic. Not worth doubling the ISO
+#     size to silence one log line.
+#   firmware-bnx2 + bnx2x -- Broadcom NetXtreme. Enterprise NICs;
+#     low hit-rate among bty operators (homelab + mini-PCs).
 firmware-misc-nonfree
 firmware-iwlwifi
 firmware-realtek
-firmware-bnx2
-firmware-bnx2x
-firmware-amd-graphics
 
 # NetworkManager pulls in ``nmtui`` (a curses-friendly network picker)
 # and the daemon that backs it. Use case: operator boots bty-usb on
