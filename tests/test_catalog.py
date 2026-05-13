@@ -494,3 +494,157 @@ def test_catalog_entry_accepts_explicit_null_sha256() -> None:
         }
     )
     assert entry.sha256 is None
+
+
+# ---------------------------------------------------------------------------
+# Canonicalisation + image-ref derivation (v0.11.0).
+# Every row of every B2 table is covered here so a future contributor
+# can see at a glance whether their input falls in or out of scope.
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("file://debian.img.gz", "file://debian.img.gz"),
+        ("file://./debian.img.gz", "file://debian.img.gz"),  # ./ stripped
+        ("file://a//b.img.gz", "file://a/b.img.gz"),  # // collapsed
+        ("file:///debian.img.gz", "file://debian.img.gz"),  # leading / stripped
+        ("file://topic/bar.img.gz", "file://topic/bar.img.gz"),  # subdir preserved
+        ("file://A/B/CamelCase.img.gz", "file://A/B/CamelCase.img.gz"),  # case preserved
+        ("file://a/./b/c.img.gz", "file://a/b/c.img.gz"),  # mid-path . stripped
+    ],
+)
+def test_canonicalise_src_file_scheme(raw: str, expected: str) -> None:
+    assert catalog.canonicalise_src(raw) == expected
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "file://../etc/passwd",  # ".." segment
+        "file://a/../../etc/passwd",  # ".." mid-path
+        "file://",  # empty path
+        "file://./.",  # normalises empty
+        "file:///",  # leading slash only
+        "file://debian\x00.img.gz",  # NUL byte
+    ],
+)
+def test_canonicalise_src_file_scheme_rejects(raw: str) -> None:
+    with pytest.raises(ValueError):
+        catalog.canonicalise_src(raw)
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("https://example.com/foo", "https://example.com/foo"),
+        ("https://EXAMPLE.com/foo", "https://example.com/foo"),  # host lowered
+        ("HTTPS://example.com/foo", "https://example.com/foo"),  # scheme lowered
+        ("https://example.com:443/foo", "https://example.com/foo"),  # default port stripped
+        ("http://example.com:80/foo", "http://example.com/foo"),  # default port stripped
+        ("https://example.com:8080/foo", "https://example.com:8080/foo"),  # non-default kept
+        ("https://example.com/Path/Foo.GZ", "https://example.com/Path/Foo.GZ"),  # case preserved
+        ("https://example.com/p?a=1&b=2", "https://example.com/p?a=1&b=2"),  # query kept
+        ("https://example.com/p/", "https://example.com/p/"),  # trailing / preserved
+        ("https://example.com/p%20q", "https://example.com/p%20q"),  # %-encoding kept
+    ],
+)
+def test_canonicalise_src_http_scheme(raw: str, expected: str) -> None:
+    assert catalog.canonicalise_src(raw) == expected
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        (
+            "oras://ghcr.io/safl/foo:latest",
+            "oras://ghcr.io/safl/foo:latest",
+        ),
+        (
+            "oras://GHCR.IO/safl/foo:latest",
+            "oras://ghcr.io/safl/foo:latest",  # host lowered
+        ),
+        (
+            "oras://ghcr.io/SAFL/Foo:latest",
+            "oras://ghcr.io/safl/foo:latest",  # repository lowered
+        ),
+        (
+            "oras://ghcr.io/safl/foo:LATEST",
+            "oras://ghcr.io/safl/foo:LATEST",  # tag preserved
+        ),
+        (
+            "oras://ghcr.io/safl/foo@sha256:" + "a" * 64,
+            "oras://ghcr.io/safl/foo@sha256:" + "a" * 64,
+        ),
+    ],
+)
+def test_canonicalise_src_oras_scheme(raw: str, expected: str) -> None:
+    assert catalog.canonicalise_src(raw) == expected
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "ftp://example.com/foo.img.gz",  # unsupported scheme
+        "",  # empty
+        "/var/lib/bty/images/foo.img.gz",  # bare path -- no scheme
+        "https://",  # missing host
+        "oras://ghcr.io/foo:latest",  # missing owner (single segment)
+    ],
+)
+def test_canonicalise_src_rejects(raw: str) -> None:
+    with pytest.raises(ValueError):
+        catalog.canonicalise_src(raw)
+
+
+def test_image_ref_for_src_is_sha256_hex() -> None:
+    """The ref is always a 64-char lowercase hex string."""
+    ref = catalog.image_ref_for_src("file://debian.img.gz")
+    assert len(ref) == 64
+    assert all(c in "0123456789abcdef" for c in ref)
+
+
+def test_image_ref_for_src_dedupes_trivial_variations() -> None:
+    """Variations the canonicaliser normalises away produce the same ref."""
+    base = catalog.image_ref_for_src("https://example.com/foo.img.gz")
+    assert catalog.image_ref_for_src("https://EXAMPLE.com/foo.img.gz") == base
+    assert catalog.image_ref_for_src("HTTPS://example.com/foo.img.gz") == base
+    assert catalog.image_ref_for_src("https://example.com:443/foo.img.gz") == base
+
+
+def test_image_ref_for_src_distinguishes_path_case_on_file_scheme() -> None:
+    """file:// paths are case-sensitive (Linux filesystems are)."""
+    a = catalog.image_ref_for_src("file://Debian.img.gz")
+    b = catalog.image_ref_for_src("file://debian.img.gz")
+    assert a != b
+
+
+def test_image_ref_for_src_distinguishes_oras_tag_case() -> None:
+    """OCI tags are case-sensitive per spec, even though most registries
+    treat them as case-insensitive. We preserve operator input."""
+    a = catalog.image_ref_for_src("oras://ghcr.io/safl/foo:latest")
+    b = catalog.image_ref_for_src("oras://ghcr.io/safl/foo:LATEST")
+    assert a != b
+
+
+def test_image_ref_for_src_dedupes_oras_host_case() -> None:
+    """OCI hosts are DNS-style; case-insensitive."""
+    a = catalog.image_ref_for_src("oras://GHCR.IO/safl/foo:latest")
+    b = catalog.image_ref_for_src("oras://ghcr.io/safl/foo:latest")
+    assert a == b
+
+
+def test_image_ref_for_src_distinguishes_trailing_slash_on_http() -> None:
+    """RFC says these are different resources; we preserve."""
+    a = catalog.image_ref_for_src("https://example.com/foo")
+    b = catalog.image_ref_for_src("https://example.com/foo/")
+    assert a != b
+
+
+def test_image_ref_for_src_distinguishes_local_vs_remote_with_same_name() -> None:
+    """``file://debian.img.gz`` and ``https://.../debian.img.gz`` are
+    different catalog identities even if they end up holding the same
+    bytes -- different provenance, different refs."""
+    a = catalog.image_ref_for_src("file://debian.img.gz")
+    b = catalog.image_ref_for_src("https://example.com/debian.img.gz")
+    assert a != b

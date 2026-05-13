@@ -339,6 +339,154 @@ def default_cache_dir() -> Path:
     return state_dir / "cache"
 
 
+# ---------------------------------------------------------------------------
+# Image-ref derivation
+#
+# Every catalog entry has a stable identifier ``bty_image_ref`` derived from
+# its ``src`` URL. The same canonicalisation rules apply to all source
+# schemes so trivial variations don't produce phantom-duplicate entries.
+# See ``docs/src/reference.md`` for the locked rule tables; tests in
+# ``tests/test_catalog.py`` cover every row of each table.
+
+_HTTP_DEFAULT_PORTS = {"http": 80, "https": 443}
+
+
+def _canonicalise_file(src: str) -> str:
+    """Canonicalise a ``file://<root-relative-path>`` src.
+
+    - strip the ``file://`` prefix
+    - reject any ``..`` segment (no escaping image-root)
+    - reject NUL bytes
+    - drop ``.`` and empty path segments (collapse ``./``, ``//``,
+      leading ``/``)
+    - preserve case (Linux filesystems are case-sensitive)
+    - reject empty result
+    """
+    assert src.startswith("file://")
+    path = src[len("file://") :]
+    if "\x00" in path:
+        raise ValueError(f"file:// src contains NUL byte: {src!r}")
+    segments = path.split("/")
+    if any(seg == ".." for seg in segments):
+        raise ValueError(f"file:// src contains '..' segment: {src!r}")
+    kept = [seg for seg in segments if seg and seg != "."]
+    if not kept:
+        raise ValueError(f"file:// src normalises to empty path: {src!r}")
+    return "file://" + "/".join(kept)
+
+
+def _canonicalise_http(src: str) -> str:
+    """Canonicalise an ``http://`` / ``https://`` src.
+
+    - lower-case scheme + host
+    - strip default port (``:80`` for http, ``:443`` for https)
+    - preserve path / query / fragment / trailing slash / percent-
+      encoding literally (servers can disambiguate by these)
+    """
+    parsed = urllib.parse.urlsplit(src)
+    scheme = parsed.scheme.lower()
+    if scheme not in ("http", "https"):
+        raise ValueError(f"unexpected scheme {scheme!r} for http canonicaliser: {src!r}")
+    host = parsed.hostname
+    if not host:
+        raise ValueError(f"http(s) src missing host: {src!r}")
+    host = host.lower()
+    netloc = host
+    if parsed.port is not None and parsed.port != _HTTP_DEFAULT_PORTS[scheme]:
+        netloc = f"{host}:{parsed.port}"
+    return urllib.parse.urlunsplit((scheme, netloc, parsed.path, parsed.query, parsed.fragment))
+
+
+def _canonicalise_oras(src: str) -> str:
+    """Canonicalise an ``oras://`` src.
+
+    - lower-case host + repository (DNS / OCI distribution spec)
+    - preserve tag literally (OCI tags are case-sensitive)
+    - preserve digest literally
+    - validates structure via ``bty.oras.parse_ref`` so a malformed
+      ref errors here rather than mid-flash
+
+    Lower-cases the ``<host>/<repo>`` prefix BEFORE handing to
+    parse_ref so operators who type ``oras://Ghcr.IO/Owner/...``
+    don't get rejected by parse_ref's lowercase-only repo regex
+    (which enforces the OCI spec but is stricter than what real
+    registries accept).
+    """
+    from bty import oras as _oras
+
+    body = src[len("oras://") :]
+    if not body:
+        raise ValueError("empty oras src")
+    # Locate the tag/digest separator and lower-case only the
+    # <host>/<repo> prefix; tag / digest after it keep their case.
+    if "@" in body:
+        idx = body.rindex("@")
+    elif ":" in body:
+        idx = body.rindex(":")
+    else:
+        # No separator -- parse_ref will reject below.
+        idx = len(body)
+    prefix = body[:idx].lower()
+    suffix = body[idx:]
+    try:
+        ref = _oras.parse_ref(f"oras://{prefix}{suffix}")
+    except _oras.OrasError as exc:
+        raise ValueError(f"malformed oras src: {exc}") from exc
+    if ref.digest is not None:
+        return f"oras://{ref.host}/{ref.repository}@{ref.digest}"
+    return f"oras://{ref.host}/{ref.repository}:{ref.tag}"
+
+
+def canonicalise_src(src: str) -> str:
+    """Return the canonical form of a catalog ``src`` URL.
+
+    Dispatches on scheme:
+
+    - ``file://<rel-path>``  -- root-relative; segments normalised.
+    - ``http(s)://...``      -- scheme + host lower-cased; default
+      port stripped.
+    - ``oras://...``         -- host + repo lower-cased.
+
+    Raises :class:`ValueError` for any other scheme or malformed
+    input. The full per-scheme rule table lives in
+    ``docs/src/reference.md``; tests cover every row.
+
+    Scheme prefix matching is case-insensitive (so ``HTTPS://...``
+    dispatches to the http canonicaliser, which then lower-cases
+    the scheme). Other parts of each scheme have scheme-specific
+    case rules in their respective helpers.
+    """
+    if not src:
+        raise ValueError("empty src")
+    lowered = src.lower()
+    if lowered.startswith("file://"):
+        return _canonicalise_file(src)
+    if lowered.startswith(("http://", "https://")):
+        return _canonicalise_http(src)
+    if lowered.startswith("oras://"):
+        return _canonicalise_oras(src)
+    raise ValueError(f"unsupported src scheme: {src!r} (expected file://, http(s)://, or oras://)")
+
+
+def image_ref_for_src(src: str) -> str:
+    """Compute the ``bty_image_ref`` for a catalog ``src``.
+
+    Returns a 64-character lowercase hex string -- the SHA-256 of
+    the canonical form of ``src`` (see :func:`canonicalise_src`).
+    Same algorithm for every source kind so the catalog has a
+    uniform identifier space.
+
+    The image-ref is **stable provenance**: identical src strings
+    produce identical refs across operators, machines, and time.
+    It is **not** a content hash; an oras rolling tag's ref stays
+    the same when the underlying content changes. The observed
+    content hash lives separately in ``CatalogEntry.disk_image_sha``
+    (populated on first cache).
+    """
+    canonical = canonicalise_src(src)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
 def is_cached(entry: CatalogEntry, cache_dir: Path) -> bool:
     """``True`` iff the cache holds a file matching this entry's
     SHA-256. We trust the filename (which IS the SHA) and the
