@@ -511,6 +511,76 @@ def test_auto_import_hashes_unhashed_dir_scan_files(tmp_path: Path) -> None:
         assert entry["url"].endswith(f"/images/{expected_sha}/fresh.img")
 
 
+def test_auto_import_inserts_catalog_entries_row_per_dir_scan_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """v0.11.0 auto-import step: every dir-scan file lands in
+    ``catalog_entries`` with src ``file://<name>``, computed
+    ``bty_image_ref``, and (once hashed) ``disk_image_sha``.
+
+    Makes the file bindable via the UI picker without waiting for
+    the operator to manually add a URL. Idempotent on bty-web
+    restart (``INSERT OR IGNORE``)."""
+    import hashlib
+    import os
+    import time
+
+    image_root = tmp_path / "images"
+    image_root.mkdir()
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    payload = b"auto-import as catalog row"
+    expected_sha = hashlib.sha256(payload).hexdigest()
+    (image_root / "demo.img").write_bytes(payload)
+
+    state = state_dir / "state.db"
+    os.environ["BTY_STATE_DIR"] = str(state_dir)
+    try:
+        app = create_app(
+            state_path=state,
+            service_user=TEST_SERVICE_USER,
+            secret_key=TEST_SECRET_KEY,
+            image_root=image_root,
+        )
+        import pamela
+
+        monkeypatch.setattr(pamela, "authenticate", lambda *a, **kw: True)
+        with TestClient(app) as client:
+            r = client.post(
+                "/ui/login",
+                data={"password": "pytest-password"},
+                follow_redirects=False,
+            )
+            assert r.status_code == 303
+            cookie = r.cookies.get("bty-token")
+            assert cookie is not None
+            auth = {"bty-token": cookie}
+
+            # Wait for the auto-import sweep + hash to settle.
+            sidecar = image_root / "demo.img.sha256"
+            deadline = time.monotonic() + 5.0
+            while time.monotonic() < deadline and not sidecar.exists():
+                time.sleep(0.05)
+            assert sidecar.exists()
+
+            rows = client.get("/catalog/entries", cookies=auth).json()
+            row = next(r for r in rows if r["src"] == "file://demo.img")
+            assert row["name"] == "demo.img"
+            assert len(row["bty_image_ref"]) == 64
+            # disk_image_sha propagates from HashManager terminal step
+            # via UPDATE of the catalog_entries row.
+            deadline = time.monotonic() + 5.0
+            while time.monotonic() < deadline:
+                rows = client.get("/catalog/entries", cookies=auth).json()
+                row = next(r for r in rows if r["src"] == "file://demo.img")
+                if row["disk_image_sha"] == expected_sha:
+                    break
+                time.sleep(0.05)
+            assert row["disk_image_sha"] == expected_sha
+    finally:
+        os.environ.pop("BTY_STATE_DIR", None)
+
+
 def test_list_images_returns_files_under_image_root(
     tmp_path: Path,
 ) -> None:
@@ -1786,17 +1856,21 @@ def test_catalog_entries_list_and_delete(
     url = "https://example.invalid/del.img.gz"
     app_client.post("/catalog/entries", json={"image_url": url}, cookies=AUTH)
 
+    # v0.11.0 auto-imports dir-scan files into catalog_entries on
+    # bty-web startup; the app_client fixture seeds ``demo.qcow2``
+    # so we filter by src to isolate the URL-added entry under test.
     r = app_client.get("/catalog/entries", cookies=AUTH)
     assert r.status_code == 200
-    rows = r.json()
-    assert len(rows) == 1
-    assert rows[0]["src"] == url
+    by_src = {row["src"]: row for row in r.json()}
+    assert url in by_src
+    assert by_src[url]["src"] == url
 
     r = app_client.delete("/catalog/entries", params={"src": url}, cookies=AUTH)
     assert r.status_code == 204
 
     r = app_client.get("/catalog/entries", cookies=AUTH)
-    assert r.json() == []
+    remaining = {row["src"] for row in r.json()}
+    assert url not in remaining
 
 
 def test_catalog_cache_delete_unlinks_file_keeps_entry(
@@ -1977,9 +2051,13 @@ def test_catalog_import_from_local_path(app_client: TestClient, tmp_path: Path) 
     assert body["imported"] == 2
     assert body["skipped"] == 0
     assert body["errors"] == []
+    # The fixture seeds ``demo.qcow2`` which the v0.11.0 auto-import
+    # sweep imports as ``file://demo.qcow2``; filter to the entries
+    # this test added.
     r2 = app_client.get("/catalog/entries", cookies=AUTH)
-    rows = r2.json()
-    assert {row["name"] for row in rows} == {"alpha.img.gz", "beta.img.gz"}
+    names = {row["name"] for row in r2.json()}
+    assert "alpha.img.gz" in names
+    assert "beta.img.gz" in names
     # No bytes fetched: /images shows cached=False
     r3 = app_client.get("/images")
     images_rows = {row["name"]: row for row in r3.json()}
@@ -2006,7 +2084,10 @@ def test_catalog_import_idempotent_skips_duplicates(app_client: TestClient, tmp_
     r2 = app_client.post("/catalog/import", params={"source": str(manifest)}, cookies=AUTH)
     assert r2.json()["imported"] == 0
     assert r2.json()["skipped"] == 1
-    assert len(app_client.get("/catalog/entries", cookies=AUTH).json()) == 1
+    # Filter to the gamma row; the auto-import sweep adds file://
+    # entries for fixture-seeded files (e.g. demo.qcow2).
+    names = {row["name"] for row in app_client.get("/catalog/entries", cookies=AUTH).json()}
+    assert "gamma.img.gz" in names
 
 
 def test_catalog_import_rejects_invalid_source_scheme(
@@ -2090,7 +2171,13 @@ def test_catalog_import_with_oras_entry_resolves_sha(
     )
     assert r.status_code == 200, r.text
     assert r.json()["imported"] == 1
-    rows = app_client.get("/catalog/entries", cookies=AUTH).json()
+    # Filter to the oras-imported row; ignore the auto-imported
+    # file:// row(s) the fixture's image_root seeds.
+    rows = [
+        row
+        for row in app_client.get("/catalog/entries", cookies=AUTH).json()
+        if row["src"].startswith("oras://")
+    ]
     assert len(rows) == 1
     assert rows[0]["disk_image_sha"] == "cd" * 32
     assert len(rows[0]["bty_image_ref"]) == 64

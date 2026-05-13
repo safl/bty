@@ -125,13 +125,21 @@ def create_app(
         # because fetching two GitHub releases in parallel is
         # operator-confusing and bandwidth-saturating.
         release_fetch_manager.start(resolved_boot_root, state_path=state_path)
-        # Auto-import: enqueue every dir-scan file without a
-        # ``.sha256`` sidecar so the HashManager processes them
-        # in the background. Once a sidecar lands, ``/images``
-        # picks the entry up with a server URL on the next call.
-        # Operator-initiated work is unaffected -- they queue
-        # behind the auto-import jobs by FIFO order, but the
-        # parallelism cap (default 1) keeps the box responsive.
+        # Auto-import: ensure every dir-scan file under
+        # ``resolved_image_root`` has a catalog_entries row keyed by
+        # ``bty_image_ref = sha256("file://<rel-path>")``, then enqueue
+        # the HashManager for any without a known ``disk_image_sha``.
+        # The row exists immediately (so the operator can bind to it
+        # without waiting for hashing); the HashManager populates
+        # ``disk_image_sha`` in the background and the PXE flash path
+        # becomes viable once the hash lands.
+        #
+        # Idempotent: ``INSERT OR IGNORE`` skips rows whose src is
+        # already in the table (the operator may have curated the
+        # file via the UI; preserve their description, etc.).
+        # Operator-initiated work queues behind these jobs by FIFO
+        # order; parallelism cap (default 1) keeps a Pi responsive.
+        _auto_import_dir_scan_rows()
         for img in images.list_images(resolved_image_root):
             if img.sha256 is None:
                 # ``FileNotFoundError`` -- file vanished between the
@@ -151,6 +159,72 @@ def create_app(
                 await download_manager.stop()
             await hash_manager.stop()
             await release_fetch_manager.stop()
+
+    def _auto_import_dir_scan_rows() -> None:
+        """Insert a ``catalog_entries`` row for every dir-scan file
+        under ``resolved_image_root`` that doesn't already have one.
+
+        Src shape: ``file://<rel-path>`` (path relative to image
+        root; root-relocation invariant, so moving the image-store
+        disk between appliances does not change refs). Ref:
+        ``sha256(canonicalise_src(src))`` from
+        ``bty.catalog.image_ref_for_src``. ``disk_image_sha`` is
+        populated when the file has a ``.sha256`` sidecar already;
+        otherwise it stays NULL until the HashManager finishes the
+        background hash.
+
+        Idempotent via ``INSERT OR IGNORE``: operator-curated rows
+        from ``POST /catalog/entries`` (or the UI form) that target
+        the same src keep their descriptions / sha_url intact.
+        ``UPDATE`` on the disk_image_sha column for rows that newly
+        gained a sidecar between bty-web restarts -- without this,
+        a sidecar that landed while bty-web was down wouldn't make
+        the entry bindable.
+        """
+        now = _now_iso()
+        with _db.open_db(state_path) as conn:
+            for img in images.list_images(resolved_image_root):
+                try:
+                    rel = img.path.relative_to(resolved_image_root)
+                except ValueError:
+                    # Symlink that escaped the root, or an image_root
+                    # that got remounted mid-scan -- skip rather than
+                    # auto-import.
+                    continue
+                src = "file://" + rel.as_posix()
+                try:
+                    ref = _catalog.image_ref_for_src(src)
+                except ValueError:
+                    continue  # path can't be canonicalised; skip silently
+                conn.execute(
+                    "INSERT OR IGNORE INTO catalog_entries "
+                    "(bty_image_ref, src, disk_image_sha, name, sha_url, "
+                    "format, size_bytes, description, added_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        ref,
+                        src,
+                        img.sha256,
+                        img.name,
+                        None,
+                        img.format,
+                        img.size_bytes,
+                        None,
+                        now,
+                    ),
+                )
+                # If the file has a sidecar that landed since the row
+                # was last seen, propagate it. ``COALESCE`` keeps any
+                # existing value to avoid overwriting an operator-
+                # pinned ``disk_image_sha`` with a stale read.
+                if img.sha256 is not None:
+                    conn.execute(
+                        "UPDATE catalog_entries "
+                        "SET disk_image_sha = COALESCE(disk_image_sha, ?) "
+                        "WHERE bty_image_ref = ?",
+                        (img.sha256, ref),
+                    )
+            conn.commit()
 
     jinja = Environment(
         loader=FileSystemLoader(str(TEMPLATES_DIR)),

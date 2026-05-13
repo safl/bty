@@ -226,6 +226,19 @@ class HashManager(_BaseAsyncManager[HashState]):
             return
         if final_status == "completed" and sha is not None:
             with _db.open_db(self._state_path) as conn:
+                # Propagate the computed sha into the catalog row
+                # that's already keyed by ``file://<name>``. The auto-
+                # import sweep on bty-web startup inserts the row
+                # with ``disk_image_sha = NULL`` so the catalog has
+                # entries the operator can bind to; this UPDATE makes
+                # those rows bindable in the flash flow (PXE handler
+                # resolves ref -> disk_image_sha -> /images/<sha>).
+                # Match by src rather than ref so that this code path
+                # stays decoupled from the canonicalisation helper.
+                conn.execute(
+                    "UPDATE catalog_entries SET disk_image_sha = ? WHERE src = ?",
+                    (sha, f"file://{state.name}"),
+                )
                 _log_event(
                     conn,
                     kind="image.hashed",
