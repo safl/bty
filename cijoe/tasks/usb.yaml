@@ -11,13 +11,13 @@ doc: |
   The chroot carries the bty runtime, ``bty-flash-on-boot.service``
   (auto-flash mode), and ``bty-tui-on-tty1.service`` (interactive
   mode). The pre-built artifact ships a writable ``BTY_IMAGES`` exFAT
-  partition (M19 phase 3) that ``var-lib-bty-images.mount``
-  attaches at ``/var/lib/bty/images`` (M19 phase 4). When booted
-  from USB with no ``bty.server`` / ``bty.mac`` on the kernel
-  cmdline (M19 phase 2), ``bty-tui`` runs flagless and finds the
-  operator's catalog there; when chained from a bty server's iPXE
-  script with ``bty.server=`` and ``bty.mac=``, the same units
-  take the network-flash path. Same image, two modes.
+  partition that ``var-lib-bty-images.mount`` attaches at
+  ``/var/lib/bty/images``. When booted from USB with no
+  ``bty.server`` / ``bty.mac`` on the kernel cmdline, ``bty-tui``
+  runs flagless and finds the operator's catalog there; when chained
+  from a bty server's iPXE script with ``bty.server=`` and
+  ``bty.mac=``, the same units take the network-flash path. Same
+  image, two modes.
 
   Steps:
 

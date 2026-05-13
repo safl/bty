@@ -10,7 +10,7 @@ VARIANT ?= usb-x86
 # Per-variant cijoe workflow file under cijoe/tasks/.
 #  - usb-x86 uses the live-build iso-hybrid pipeline (usb.yaml).
 #  - netboot-x86 uses the live-build netboot pipeline (netboot.yaml).
-#    Renamed from live-x86 in M19 phase 5.
+#    Renamed from live-x86 to disambiguate from usb-x86 (also "live").
 #  - server-x86 uses the cloud-init-in-QEMU bake (build.yaml)
 #  - server-rpi mounts a Raspberry Pi OS image and chroots via
 #    qemu-aarch64-static (build-rpi.yaml)

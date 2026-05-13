@@ -2,10 +2,10 @@
 
 Subcommand structure:
 
-    bty images [--image-root PATH | --server URL]
+    bty images [--image-root PATH | --catalog SOURCE]
     bty inspect PATH
     bty flash IMAGE TARGET [--dry-run | --yes]
-    bty tui [--server URL --mac MAC]
+    bty tui [--catalog SOURCE --mac MAC]
     bty catalog ACTION ...
 
 Each subcommand except ``tui`` accepts ``--json`` to emit machine-
@@ -90,7 +90,7 @@ def main(argv: list[str] | None = None) -> int:
     p_images = sub.add_parser(
         "images",
         parents=[common],
-        help="list supported images under the image root OR on a remote bty-web",
+        help="list supported images under the image root OR from a catalog source",
     )
     p_images.add_argument(
         "--image-root",
@@ -98,18 +98,20 @@ def main(argv: list[str] | None = None) -> int:
         default=images.default_image_root(),
         help=(
             "directory containing image files (default: $BTY_IMAGE_ROOT or "
-            "%(default)s). Ignored when --server is set."
+            "%(default)s). Ignored when --catalog is set."
         ),
     )
     p_images.add_argument(
-        "--server",
+        "--catalog",
         type=str,
         default=None,
+        metavar="SOURCE",
         help=(
-            "fetch the catalog from a running bty-web server instead of "
-            "scanning a local directory. Hits ``GET <URL>/images`` (the "
-            "same endpoint ``bty tui --server`` uses). Example: "
-            "``http://server:8080``."
+            "load the catalog from a TOML manifest instead of scanning a "
+            "local directory. SOURCE is a file path, an ``http(s)://`` URL "
+            "(e.g. a bty-web's ``/catalog.toml``), or an ``oras://`` "
+            "reference (e.g. ``oras://ghcr.io/owner/bty-catalog:latest``). "
+            "Same source argument shape as ``bty tui --catalog``."
         ),
     )
     p_images.set_defaults(func=cmd_images)
@@ -149,9 +151,8 @@ def main(argv: list[str] | None = None) -> int:
             "path (a TOML file whose ``url`` field carries any of the "
             "above). URLs stream directly to disk for ``.img`` / "
             "``.img.{gz,zst,xz,bz2}`` and download to a temp file "
-            "first for ``.qcow2``. ``bty tui --server`` operators get "
-            "the URL from the server's catalog listing; the server "
-            "picks server-vs-upstream based on cache state."
+            "first for ``.qcow2``. ``bty tui --catalog`` operators get "
+            "the URL from the catalog entry's ``src`` field."
         ),
     )
     p_flash.add_argument("target", type=Path, help="target block device")
@@ -236,7 +237,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def cmd_images(args: argparse.Namespace) -> int:
-    """List images either from a local image-root or a remote bty-web.
+    """List images either from a local image-root or a catalog source.
 
     Local mode (default): dir-scan, no catalog manifest, no content-
     hash merge. Includes ``.bri`` (bty Remote Image) descriptors as
@@ -245,15 +246,13 @@ def cmd_images(args: argparse.Namespace) -> int:
     answers "what flashable files are sitting in this directory?"
     and nothing more.
 
-    Server mode (``--server URL``): hits ``GET <URL>/images`` and
-    renders the catalog the server exposes (the same endpoint
-    ``bty tui --server`` uses). Each row's ``url`` is whatever the
-    server provides directly -- server URL when the bytes are cached
-    / imported, upstream URL when a manifest entry hasn't been
-    cached yet.
+    Catalog mode (``--catalog SOURCE``): fetches and parses a TOML
+    manifest from the source (path, ``http(s)://``, or ``oras://``)
+    and renders its entries. Shares the same fetcher as
+    ``bty tui --catalog`` (see :func:`bty.catalog.load_source`).
     """
-    if args.server is not None:
-        return _cmd_images_remote(args)
+    if args.catalog is not None:
+        return _cmd_images_catalog(args)
     return _cmd_images_local(args)
 
 
@@ -299,74 +298,37 @@ def _cmd_images_local(args: argparse.Namespace) -> int:
     return 0
 
 
-def _cmd_images_remote(args: argparse.Namespace) -> int:
-    """``--server URL`` path: fetch the catalog from bty-web's
-    ``GET /images`` and render it. Same row shape as local mode so a
-    script can ``bty images --server $URL --json | jq ...``
-    without branching."""
+def _cmd_images_catalog(args: argparse.Namespace) -> int:
+    """``--catalog SOURCE`` path: fetch + parse a TOML manifest and
+    render it. Same row shape as local mode so a script can
+    ``bty images --catalog $SOURCE --json | jq ...`` without
+    branching on mode."""
     import urllib.error
-    import urllib.parse
-    import urllib.request
 
-    parsed = urllib.parse.urlparse(args.server)
-    if parsed.scheme not in ("http", "https") or not parsed.netloc:
-        print(
-            f"bty: --server URL must be http:// or https://; got {args.server!r}",
-            file=sys.stderr,
-        )
-        return 2
-    base = args.server.rstrip("/")
-    catalog_url = f"{base}/images"
-    # 4 MiB cap mirrors bty-tui's fetch_remote_catalog; a misconfigured
-    # / hostile server cannot OOM the CLI with a multi-GiB blob.
-    max_bytes = 4 * 1024 * 1024
     try:
-        with urllib.request.urlopen(catalog_url, timeout=30.0) as resp:
-            raw = resp.read(max_bytes + 1)
-    except urllib.error.URLError as exc:
-        print(f"bty: GET {catalog_url} failed: {exc}", file=sys.stderr)
+        parsed_catalog = catalog.load_source(args.catalog)
+    except (ValueError, catalog.CatalogError) as exc:
+        print(f"bty: --catalog {args.catalog!r}: {exc}", file=sys.stderr)
         return 2
-    if len(raw) > max_bytes:
-        print(
-            f"bty: /images response from {args.server} exceeded {max_bytes} bytes; "
-            f"refusing to parse",
-            file=sys.stderr,
-        )
+    except (urllib.error.URLError, OSError) as exc:
+        print(f"bty: failed to fetch catalog from {args.catalog!r}: {exc}", file=sys.stderr)
         return 2
-    try:
-        payload = json.loads(raw.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        print(f"bty: /images response not valid JSON: {exc}", file=sys.stderr)
-        return 2
-    if not isinstance(payload, list):
-        print(
-            f"bty: unexpected /images payload from {args.server}: not a list",
-            file=sys.stderr,
-        )
-        return 2
-    rows: list[dict[str, object]] = []
-    for entry in payload:
-        if not isinstance(entry, dict):
-            continue
-        name = entry.get("name")
-        url = entry.get("url")
-        if not isinstance(name, str) or not name or not isinstance(url, str) or not url:
-            continue
-        rows.append(
-            {
-                "name": name,
-                "format": entry.get("format"),
-                "size_bytes": entry.get("size_bytes"),
-                "source": "remote",
-                "url": url,
-                "ref": entry.get("ref"),
-                "cached": entry.get("cached"),
-            }
-        )
+    rows: list[dict[str, object]] = [
+        {
+            "name": entry.name,
+            "format": entry.format,
+            "size_bytes": entry.size_bytes,
+            "source": "remote",
+            "url": entry.src,
+            "sha256": entry.sha256,
+            "description": entry.description,
+        }
+        for entry in parsed_catalog.entries
+    ]
     if args.json:
         payload_out = _envelope(
             "images",
-            server=args.server,
+            catalog=args.catalog,
             images=rows,
         )
         print(json.dumps(payload_out, indent=2))
@@ -549,7 +511,8 @@ def cmd_catalog_validate(args: argparse.Namespace) -> int:
     path = args.path or catalog.default_manifest_path()
     if path is None:
         print(
-            "no manifest configured (set BTY_CATALOG_FILE or place ${BTY_STATE_DIR}/catalog.toml)",
+            "bty: no manifest configured "
+            "(set BTY_CATALOG_FILE or place ${BTY_STATE_DIR}/catalog.toml)",
             file=sys.stderr,
         )
         return 1
@@ -564,7 +527,7 @@ def cmd_catalog_validate(args: argparse.Namespace) -> int:
                 )
             )
         else:
-            print(f"catalog: {exc}", file=sys.stderr)
+            print(f"bty: catalog: {exc}", file=sys.stderr)
         return 1
     if args.json:
         print(
@@ -587,14 +550,15 @@ def cmd_catalog_list(args: argparse.Namespace) -> int:
     path = args.manifest or catalog.default_manifest_path()
     if path is None:
         print(
-            "no manifest configured (set BTY_CATALOG_FILE or place ${BTY_STATE_DIR}/catalog.toml)",
+            "bty: no manifest configured "
+            "(set BTY_CATALOG_FILE or place ${BTY_STATE_DIR}/catalog.toml)",
             file=sys.stderr,
         )
         return 1
     try:
         cat = catalog.load(path)
     except catalog.CatalogError as exc:
-        print(f"catalog: {exc}", file=sys.stderr)
+        print(f"bty: catalog: {exc}", file=sys.stderr)
         return 1
     cache_dir = catalog.default_cache_dir()
     if args.json:
@@ -647,27 +611,28 @@ def cmd_catalog_fetch(args: argparse.Namespace) -> int:
     path = args.manifest or catalog.default_manifest_path()
     if path is None:
         print(
-            "no manifest configured (set BTY_CATALOG_FILE or place ${BTY_STATE_DIR}/catalog.toml)",
+            "bty: no manifest configured "
+            "(set BTY_CATALOG_FILE or place ${BTY_STATE_DIR}/catalog.toml)",
             file=sys.stderr,
         )
         return 1
     try:
         cat = catalog.load(path)
     except catalog.CatalogError as exc:
-        print(f"catalog: {exc}", file=sys.stderr)
+        print(f"bty: catalog: {exc}", file=sys.stderr)
         return 1
     entry = cat.by_name(args.name)
     if entry is None:
-        print(f"catalog: no entry named {args.name!r} in {path}", file=sys.stderr)
+        print(f"bty: catalog: no entry named {args.name!r} in {path}", file=sys.stderr)
         return 1
     cache_dir = catalog.default_cache_dir()
     try:
         cached = catalog.fetch_to_cache(entry, cache_dir)
     except catalog.CatalogError as exc:
-        print(f"catalog fetch: {exc}", file=sys.stderr)
+        print(f"bty: catalog fetch: {exc}", file=sys.stderr)
         return 1
     except OSError as exc:
-        print(f"catalog fetch: I/O error: {exc}", file=sys.stderr)
+        print(f"bty: catalog fetch: I/O error: {exc}", file=sys.stderr)
         return 1
     if args.json:
         print(

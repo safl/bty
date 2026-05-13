@@ -223,7 +223,7 @@ def main(args, cijoe):
     # same unit the PXE-tui flow uses. With no ``bty.server`` /
     # ``bty.mac`` on the cmdline the wrapper script forwards no flags
     # and ``bty-tui`` falls back to scanning the local image-root -
-    # the offline USB-boot mode (M19 phase 2).
+    # the offline USB-boot mode.
     # ``bty-flash-on-boot.service`` short-circuits cleanly when it
     # sees ``bty.mode=interactive``, so the two services don't race
     # over tty1.
@@ -432,11 +432,11 @@ def _verify_iso(cijoe, iso_path: Path) -> int:
 
     Catches the layout regressions we've broken before:
 
-    - 3 partitions in the MBR (was 2 before M19 phase 7's relocation;
-      regressed silently from v0.4.1 onward when xz-related churn
-      moved attention away from layout testing).
-    - Non-overlapping byte ranges (M19 phase 7 invariant; Windows
-      enumeration breaks if violated).
+    - 3 partitions in the MBR (was 2 before the BTY_IMAGES partition
+      was added; layout regressed silently from v0.4.1 onward when
+      xz-related churn moved attention away from layout testing).
+    - Non-overlapping byte ranges (Windows enumeration breaks if
+      violated).
     - p1 type 0 + bootable flag (live-build's iso-hybrid + isohdpfx.bin).
     - p2 type ef (EFI ESP).
     - p3 type 07 (exFAT) labeled BTY_IMAGES, mountable as exFAT on
@@ -539,7 +539,7 @@ def _read_bty_version(cijoe_dir: Path) -> str:
 
 def _extend_with_exfat(cijoe, iso_path: Path) -> int:
     """Relocate the EFI partition out of the iso-hybrid overlap, then
-    append a trailing exFAT partition labelled BTY_IMAGES (M19 phase 7).
+    append a trailing exFAT partition labelled BTY_IMAGES.
 
     live-build's iso-hybrid output puts the EFI partition entry
     *inside* the ISO9660 partition's byte range (the EFI FAT image is

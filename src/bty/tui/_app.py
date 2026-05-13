@@ -173,15 +173,10 @@ def _parse_size_to_bytes(s: str) -> int:
         return 0
 
 
-# Catalog JSON is small in practice: one entry per image, ~200 bytes
-# each. 4 MiB caps it at "definitely a misconfiguration or hostile
-# server" without rejecting any plausible real catalog (operator
-# would need 20,000+ entries to exceed this). Matters because
-# ``fetch_remote_catalog`` is called from the bty-tui live env on
-# tty1, where the OS image is read-only and there's no swap; an
-# OOM would wedge the operator's flashing flow at the worst
-# possible moment.
-_REMOTE_CATALOG_MAX_BYTES = 4 * 1024 * 1024
+# Catalog response size cap. Lives in ``bty.catalog`` so the CLI's
+# ``bty images --catalog`` and this TUI share the same hostile-input
+# protection. Re-exported here as the historical name only for
+# readability of the comment block above it.
 
 
 # The bty-server bootstrap shortcut (``i`` in the TUI) flashes this
@@ -208,69 +203,6 @@ _BTY_SERVER_LATEST_NAME = "bty-server (latest from GitHub)"
 _BTY_DEFAULT_CATALOG_URL = "https://github.com/safl/bty/releases/latest/download/catalog.toml"
 
 
-def _classify_catalog_source(source: str) -> str:
-    """Return the dispatch kind for a ``--catalog`` source: ``"path"``,
-    ``"http"``, or ``"oras"``. Raises ``ValueError`` for anything else.
-
-    Heuristic: an explicit ``http://`` / ``https://`` / ``oras://`` /
-    ``file://`` scheme dispatches by scheme. Everything else (bare
-    paths like ``./catalog.toml`` or ``/etc/bty/catalog.toml``) is
-    treated as a filesystem path. The ``file://`` scheme also maps to
-    ``"path"``; ``urllib.parse.urlparse`` exposes the path component.
-    """
-    parsed = urllib.parse.urlparse(source)
-    if parsed.scheme in ("http", "https"):
-        if not parsed.netloc:
-            raise ValueError(
-                f"--catalog URL missing a host: {source!r} (expected http(s)://<host>/<path>)"
-            )
-        return "http"
-    if parsed.scheme == "oras":
-        return "oras"
-    if parsed.scheme in ("", "file"):
-        return "path"
-    raise ValueError(
-        f"--catalog source must be a local path or http(s):// / oras:// URL; "
-        f"got scheme {parsed.scheme!r} in {source!r}"
-    )
-
-
-def _read_catalog_bytes(source: str, *, timeout: float = 30.0) -> bytes:
-    """Fetch a catalog TOML's raw bytes from a path or URL.
-
-    Caps the response body at :data:`_REMOTE_CATALOG_MAX_BYTES` so a
-    misconfigured / hostile remote cannot OOM the live env via a
-    multi-GiB response. Local-file reads are uncapped (operator's
-    own filesystem, not a hostile boundary).
-    """
-    kind = _classify_catalog_source(source)
-    if kind == "path":
-        parsed = urllib.parse.urlparse(source)
-        path = Path(parsed.path) if parsed.scheme == "file" else Path(source)
-        return path.read_bytes()
-    if kind == "oras":
-        # Defer the import so a TUI without ORAS in flight doesn't
-        # pay the import cost just for the type-stripped helper to
-        # exist. (bty.oras IS pure-stdlib, so this is mostly cosmetic.)
-        from bty import oras as _oras
-
-        resolved = _oras.resolve_ref(source, timeout=timeout)
-        req = urllib.request.Request(resolved.blob_url, headers=resolved.headers)
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            raw = resp.read(_REMOTE_CATALOG_MAX_BYTES + 1)
-    else:  # kind == "http"
-        with urllib.request.urlopen(source, timeout=timeout) as resp:
-            raw = resp.read(_REMOTE_CATALOG_MAX_BYTES + 1)
-    if len(raw) > _REMOTE_CATALOG_MAX_BYTES:
-        raise ValueError(
-            f"catalog response from {source} exceeded "
-            f"{_REMOTE_CATALOG_MAX_BYTES} bytes; refusing to parse"
-        )
-    # urllib's ``resp.read(n)`` is typed as ``Any`` in the stdlib stubs;
-    # ``bytes()`` round-trip nails it down for mypy.
-    return bytes(raw)
-
-
 def load_catalog_from_source(source: str, *, timeout: float = 30.0) -> list[_TuiImage]:
     """Load catalog rows from a local path or remote URL into the TUI shape.
 
@@ -284,14 +216,12 @@ def load_catalog_from_source(source: str, *, timeout: float = 30.0) -> list[_Tui
     - an ``oras://`` reference whose layer is a TOML catalog
       (``oras://ghcr.io/owner/bty-catalog:latest``)
 
-    Parses through ``bty.catalog.load_bytes`` (or ``load`` for the
-    path case) and projects into ``_TuiImage`` rows using each entry's
-    ``src`` as the flashable URL. Free function so unit tests can
+    Thin projection over :func:`bty.catalog.load_source` into the
+    TUI's ``_TuiImage`` row shape. Free function so unit tests can
     mock ``urllib.request.urlopen`` without instantiating a textual
     ``App``.
     """
-    raw = _read_catalog_bytes(source, timeout=timeout)
-    parsed_catalog = _catalog.load_bytes(raw, source=source)
+    parsed_catalog = _catalog.load_source(source, timeout=timeout)
     return [
         _TuiImage(
             name=entry.name,
@@ -427,7 +357,7 @@ class FlashConfirmScreen(ModalScreen[bool]):
         # were accidentally cancelling.
         try:
             confirm = self.query_one("#confirm", Button)
-        except Exception:
+        except Exception:  # pragma: no cover - defensive
             return
         if confirm.disabled:
             with contextlib.suppress(Exception):
@@ -1747,7 +1677,7 @@ class BtyTui(App[None]):
             return
         try:
             filter_input = self.query_one("#filter-input", Input)
-        except Exception:
+        except Exception:  # pragma: no cover - defensive
             return
         filter_input.value = ""
         filter_input.remove_class("active")
@@ -1827,7 +1757,7 @@ class BtyTui(App[None]):
         try:
             flash_btn = self.query_one("#flash-btn", Button)
             pane3 = self.query_one("#pane-3", Vertical)
-        except Exception:
+        except Exception:  # pragma: no cover - defensive
             return
         if self._post_flash:
             flash_btn.label = "Reboot"

@@ -73,7 +73,7 @@ sda        8:0    0  500G   0   disk
 
 `-d` strips partitions, `-e7` excludes loop devices.
 
-### `bty images [--image-root PATH | --server URL]`
+### `bty images [--image-root PATH | --catalog SOURCE]`
 
 List supported images directly under the image root (non-recursive).
 Recognised formats: `.qcow2`, `.img`, `.img.zst`, `.img.xz`,

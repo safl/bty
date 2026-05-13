@@ -143,10 +143,9 @@ jobs:
       fail-fast: false
       matrix:
         # ``variant`` is the user-facing name (``make build VARIANT=...``);
-        # ``kind`` selects the right deps and upload step.
-        # M19 phase 6 retired the ``usb-x86`` cloud-init bake; the
-        # ``usb-x86`` variant is now the live-build iso-hybrid path
-        # (kind: live).
+        # ``kind`` selects the right deps and upload step. The
+        # ``usb-x86`` variant uses the live-build iso-hybrid path
+        # (kind: live), not the cloud-init bake.
         include:
           - variant: server-x86
             kind: disk

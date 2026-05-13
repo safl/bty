@@ -13,8 +13,8 @@ bytes on the target.
 Reads the ``[bty]`` config from cijoe to:
 
 - Pick the variant (``bty.variant``: ``"server-x86"`` is the only
-  cloud-init bake variant after M19 phase 6 retired the
-  ``usb-x86`` cloud-init path; ``server-rpi`` uses
+  cloud-init bake variant; the ``usb-x86`` cloud-init path was
+  retired in favour of live-build, and ``server-rpi`` uses
   ``build-rpi.yaml`` and doesn't go through this script). The arch
   suffix is stripped to derive the *role* (``"server"``); the role
   then selects the base file

@@ -171,8 +171,8 @@ clients chain into via the server's HTTP boot stack. The chroot
 ships `bty-flash-on-boot.service` (auto-flash mode) and
 `bty-tui-on-tty1.service` (interactive `bty-tui` on tty1), with
 the mode picked by kernel cmdline params from the server's iPXE
-chain. Renamed from `live-x86` in M19 phase 5 to disambiguate
-from `usb-x86` (which is also a live image).
+chain. Renamed from `live-x86` to disambiguate from `usb-x86`
+(which is also a live image).
 
 The intended operator experience for the server variants is
 appliance-grade:
@@ -247,7 +247,7 @@ first because qcow2 needs random-access reads during conversion.
 
 The default for unknown MACs that PXE-boot through the server. The
 client lands in the live env in interactive mode; `bty-tui-on-tty1`
-launches `bty tui --server URL --mac MAC` which fetches the catalog
+launches `bty tui --catalog URL --mac MAC` which fetches the catalog
 from `GET /images` and streams the operator-picked image straight to
 the target disk via `bty flash URL /dev/sdX`. On success, the TUI
 `POST`s `/pxe/{mac}/done` so `last_flashed_at` updates server-side.
@@ -414,7 +414,7 @@ Landed after the original 1.0 list:
 
 16. **[done]** TUI-on-PXE flow - new `boot_policy=tui` (default for
     auto-discovered MACs), `ipxe_tui.j2` template, streaming
-    `bty flash URL /dev/sdX`, `bty tui --server URL --mac MAC` remote
+    `bty flash URL /dev/sdX`, `bty tui --catalog URL --mac MAC` remote
     mode, `bty-tui-on-tty1.service` in the live env. First PXE
     contact lands the operator at the TUI without prior server-side
     configuration ("bty-on-a-USB but over the network").
@@ -548,7 +548,7 @@ Landed after the original 1.0 list:
     (``docker run -p 8080:8080 ...`` and the UI is up) and adds
     a third deployment lane: USB live stick + network-shared
     catalog. Operators run the container on a workstation,
-    point ``bty tui --server URL`` at it, and pick images from
+    point ``bty tui --catalog URL`` at it, and pick images from
     the catalog without flashing the catalog onto every stick.
     The PXE flow stays in the bare-metal `bty-server` appliance.
 
@@ -684,7 +684,7 @@ Landed after the original 1.0 list:
       images doesn't get hammered.
     - **Client/server shape (v0.6.1)**: ``GET /images``
       returns one entry per SHA with a single ``url`` field
-      that the client (``bty tui --server URL``, any HTTP
+      that the client (``bty tui --catalog URL``, any HTTP
       consumer) flashes from. Server URL when cached / imported,
       upstream URL when manifest+uncached. The client never
       reasons about cache state.

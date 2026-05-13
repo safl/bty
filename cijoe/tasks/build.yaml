@@ -3,9 +3,8 @@ doc: |
   ===================================================
 
   Drives the cloud-init-in-QEMU pipeline used by the ``server-x86``
-  variant. (``usb-x86`` previously used this path too; M19 phase 6
-  retired the cloud-init bake for the USB image in favour of
-  live-build.) The variant comes from the cijoe config
+  variant. (``usb-x86`` previously used this path too; it has since
+  moved to live-build.) The variant comes from the cijoe config
   (``-c configs/<variant>.toml``); the cijoe scripts strip the arch
   suffix to derive the role (``server``) used as the rootfs
   subdirectory and the cloud-init base file. The output image name

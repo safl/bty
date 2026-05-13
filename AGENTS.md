@@ -59,13 +59,13 @@ image-side operations.
 }
 ```
 
-`bty images --server URL --json` (remote mode, ``GET /images``)
+`bty images --catalog SOURCE --json` (catalog mode; SOURCE is a path, http(s):// URL, or oras:// reference)
 
 ```json
 {
   "schema_version": "1",
   "command": "images",
-  "server": "http://server:8080",
+  "catalog": "http://server:8080/catalog.toml",
   "images": [
     {
       "name": "debian-13-server.img.gz",
@@ -73,8 +73,8 @@ image-side operations.
       "size_bytes": 1234567890,
       "source": "remote",
       "url": "http://server:8080/images/abc123def456",
-      "ref": "abc123def456",
-      "cached": true
+      "sha256": "abc123def456...",
+      "description": null
     }
   ]
 }

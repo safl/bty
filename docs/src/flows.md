@@ -59,7 +59,7 @@ without setting up the appliance + PXE stack.
    tty1 prompt or by relaunching the auto-started TUI with that
    flag).
 
-3. The TUI populates its image pane from `GET /images` on the
+3. The TUI populates its image pane from `GET /catalog.toml` on the
    server, the operator picks a target disk on the local machine
    and an image from the remote catalog, and confirms the flash.
    Image bytes stream from `GET /images/{name}` directly through
@@ -164,7 +164,7 @@ zero per-MAC configuration.
    and short-circuits; `bty-tui-on-tty1.service` takes over tty1 in
    place of the agetty and launches
    `bty tui --catalog SOURCE --mac MAC`.
-4. The TUI fetches the catalog from `GET /images`, the operator
+4. The TUI fetches the catalog from `GET /catalog.toml`, the operator
    picks an image and a target disk, and confirms the flash. Image
    bytes stream from `GET /images/{name}` straight through
    `zstd -d | dd` to the target disk - no temp file, no intermediate

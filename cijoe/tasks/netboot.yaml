@@ -11,9 +11,9 @@ doc: |
   (auto-flash, ``boot_policy=flash``) or ``bty.mode=interactive``
   (TUI, ``boot_policy=tui``).
 
-  Renamed from ``tasks/live.yaml`` to ``tasks/netboot.yaml`` in M19
-  phase 5: the variant moved from ``live-x86`` to ``netboot-x86``
-  to disambiguate from ``usb-x86`` (which is also a live image).
+  Renamed from ``tasks/live.yaml`` to ``tasks/netboot.yaml``: the
+  variant moved from ``live-x86`` to ``netboot-x86`` to disambiguate
+  from ``usb-x86`` (which is also a live image).
 
   Steps:
 

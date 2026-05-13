@@ -6,10 +6,10 @@
 # config tree as the ``usb-x86`` variant; only the binary-images
 # output mode differs (selected by the absence of ``BTY_USB_ISO=1``).
 #
-# Renamed from ``live-x86`` to ``netboot-x86`` in M19 phase 5: the
-# previous name was ambiguous because ``usb-x86`` is also a "live"
-# image (live-build, ephemeral squashfs+tmpfs); the actual
-# distinction is the delivery mechanism (network boot vs USB stick).
+# Renamed from ``live-x86`` to ``netboot-x86``: the previous name
+# was ambiguous because ``usb-x86`` is also a "live" image (live-
+# build, ephemeral squashfs+tmpfs); the actual distinction is the
+# delivery mechanism (network boot vs USB stick).
 #
 # Usage:
 #   cijoe tasks/netboot.yaml --config configs/netboot-x86.toml --monitor

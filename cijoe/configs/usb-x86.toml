@@ -14,9 +14,9 @@
 # Decompress to .iso first (``gunzip bty-usb-x86_64.iso.gz``) before
 # dropping onto a Ventoy stick; Ventoy doesn't auto-decompress.
 #
-# This is the M19 live-build replacement for the previous cloud-init
-# bake; phase 6 retired the cloud-init path and the ``usb-x86``
-# variant name moved here.
+# This is the live-build replacement for an earlier cloud-init bake
+# of the ``usb-x86`` variant; the cloud-init path was retired in
+# favour of live-build's iso-hybrid output.
 #
 # Usage:
 #   cijoe tasks/usb.yaml --config configs/usb-x86.toml --monitor

@@ -512,15 +512,19 @@ The local catalog is empty (no images on the piKVM). Switch to the
 remote `bty-web` from inside the TUI:
 
 1. Press `c` (Catalog).
-2. In the modal, pick "Remote".
-3. Enter the server URL: `http://10.0.0.5:8080` (substitute your
-   host).
-4. Click "Apply".
+2. In the modal, enter the catalog source URL:
+   `http://10.0.0.5:8080/catalog.toml` (substitute your host).
+3. Click "Apply".
 
-`bty-tui` fetches the catalog from `GET /images` on the server.
-Pick an image (Enter), pick the target disk (Enter), flash (Enter
-on Flash). The image streams directly from `bty-web` through the
-live env to the target's disk; piKVM only carried the boot env.
+`bty-tui` fetches the TOML catalog from `GET /catalog.toml` on the
+server. Pick an image (Enter), pick the target disk (Enter), flash
+(Enter on Flash). The image streams directly from `bty-web` through
+the live env to the target's disk; piKVM only carried the boot env.
+
+If you already have bty's published default catalog in mind, press
+`d` instead at the empty-state screen: that points the TUI at
+`https://github.com/safl/bty/releases/latest/download/catalog.toml`
+without typing.
 
 If you don't yet have a `bty-web` instance running (chicken-and-
 egg case for setting up the very first one), press `i` instead:

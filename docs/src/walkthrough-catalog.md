@@ -170,7 +170,7 @@ That's deliberate: the catalog story is a **server** concern.
 Operators who want the unified catalog (manifest + dir-scan +
 auto-imported sidecars) interact with it through bty-web -- in
 the browser, or via ``bty tui --catalog SOURCE`` which consumes
-``GET /images`` and gets a single ``url`` per entry that the
+``GET /catalog.toml`` and gets a single ``src`` per entry that the
 client just flashes from. No client-side resolution logic.
 
 For server-side manifest management:

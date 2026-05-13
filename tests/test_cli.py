@@ -85,59 +85,57 @@ def test_images_includes_bri_descriptors(
     assert remote["format"] == "img.gz"
 
 
-def test_images_server_mode_fetches_catalog(capsys: pytest.CaptureFixture[str]) -> None:
-    """``bty images --server URL`` fetches ``GET <URL>/images`` and
-    renders the catalog. Same row shape as local mode so a script
-    can pipe ``--json`` through ``jq`` without branching on mode."""
-    from io import BytesIO
-    from unittest.mock import MagicMock
+def test_images_catalog_mode_fetches_toml(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``bty images --catalog SOURCE`` fetches + parses a TOML catalog
+    manifest and renders its entries. Same row shape as local mode so
+    a script can pipe ``--json`` through ``jq`` without branching."""
+    manifest = tmp_path / "catalog.toml"
+    manifest.write_text(
+        """
+        version = 1
 
-    payload = [
-        {
-            "name": "debian-13-server.img.gz",
-            "format": "img.gz",
-            "size_bytes": 1024,
-            "url": "http://server:8080/images/abc123",
-            "ref": "abc123def456",
-            "cached": True,
-        },
-    ]
-    fake_resp = MagicMock()
-    fake_resp.read = BytesIO(json.dumps(payload).encode("utf-8")).read
-    fake_resp.__enter__ = MagicMock(return_value=fake_resp)
-    fake_resp.__exit__ = MagicMock(return_value=False)
+        [[images]]
+        name = "debian-13-server.img.gz"
+        format = "img.gz"
+        size_bytes = 1024
+        src = "http://server:8080/images/abc123"
+        """,
+        encoding="utf-8",
+    )
 
-    with patch("urllib.request.urlopen", return_value=fake_resp):
-        rc = cli.main(["images", "--server", "http://server:8080", "--json"])
+    rc = cli.main(["images", "--catalog", str(manifest), "--json"])
 
     assert rc == 0
     out_payload = json.loads(capsys.readouterr().out)
     assert out_payload["schema_version"] == "1"
     assert out_payload["command"] == "images"
-    assert out_payload["server"] == "http://server:8080"
+    assert out_payload["catalog"] == str(manifest)
     assert len(out_payload["images"]) == 1
     row = out_payload["images"][0]
     assert row["name"] == "debian-13-server.img.gz"
     assert row["url"] == "http://server:8080/images/abc123"
     assert row["source"] == "remote"
-    assert row["cached"] is True
 
 
-def test_images_server_mode_rejects_non_http_scheme(capsys: pytest.CaptureFixture[str]) -> None:
-    rc = cli.main(["images", "--server", "file:///etc/passwd"])
+def test_images_catalog_mode_rejects_unsupported_scheme(capsys: pytest.CaptureFixture[str]) -> None:
+    rc = cli.main(["images", "--catalog", "ftp://example.com/catalog.toml"])
     assert rc == 2
-    assert "must be http://" in capsys.readouterr().err
+    assert "must be a local path or http(s):// / oras:// URL" in capsys.readouterr().err
 
 
 def test_tui_subcommand_calls_tui_main() -> None:
     """``bty tui`` is a thin forwarder to ``bty.tui.main``; the test
     confirms argv pass-through works (the TUI's own argparse handles
-    --server / --mac / --image-root)."""
+    --catalog / --mac / --image-root)."""
     with patch("bty.tui.main") as mock_main:
-        rc = cli.main(["tui", "--server", "http://localhost:8080", "--mac", "aa:bb:cc:dd:ee:ff"])
+        rc = cli.main(
+            ["tui", "--catalog", "http://localhost:8080/catalog.toml", "--mac", "aa:bb:cc:dd:ee:ff"]
+        )
     assert rc == 0
     mock_main.assert_called_once_with(
-        ["--server", "http://localhost:8080", "--mac", "aa:bb:cc:dd:ee:ff"],
+        ["--catalog", "http://localhost:8080/catalog.toml", "--mac", "aa:bb:cc:dd:ee:ff"],
         prog="bty tui",
     )
 

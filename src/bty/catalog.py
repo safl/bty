@@ -228,6 +228,85 @@ def load(path: Path) -> Catalog:
     return load_bytes(path.read_bytes(), source=str(path))
 
 
+# Cap for ``fetch_bytes`` over http(s) and oras. 4 MiB is roomy for
+# a hand-edited TOML index (hundreds of entries) while keeping a
+# hostile / misconfigured remote from OOMing the caller. Local-file
+# reads are uncapped: the operator's own filesystem is not a hostile
+# boundary.
+REMOTE_CATALOG_MAX_BYTES = 4 * 1024 * 1024
+
+
+def classify_source(source: str) -> str:
+    """Return the dispatch kind for a catalog source: ``"path"``,
+    ``"http"``, or ``"oras"``. Raises :class:`ValueError` otherwise.
+
+    Heuristic: an explicit ``http://`` / ``https://`` / ``oras://`` /
+    ``file://`` scheme dispatches by scheme. Everything else (bare
+    paths like ``./catalog.toml`` or ``/etc/bty/catalog.toml``) is
+    treated as a filesystem path. ``file://`` maps to ``"path"``.
+    """
+    parsed = urllib.parse.urlparse(source)
+    if parsed.scheme in ("http", "https"):
+        if not parsed.netloc:
+            raise ValueError(
+                f"catalog URL missing a host: {source!r} (expected http(s)://<host>/<path>)"
+            )
+        return "http"
+    if parsed.scheme == "oras":
+        return "oras"
+    if parsed.scheme in ("", "file"):
+        return "path"
+    raise ValueError(
+        f"catalog source must be a local path or http(s):// / oras:// URL; "
+        f"got scheme {parsed.scheme!r} in {source!r}"
+    )
+
+
+def fetch_bytes(source: str, *, timeout: float = 30.0) -> bytes:
+    """Fetch a catalog TOML's raw bytes from a path / http(s) / oras source.
+
+    Caps remote responses at :data:`REMOTE_CATALOG_MAX_BYTES`. Resolves
+    ``oras://`` references through :mod:`bty.oras` (anonymous-pull flow
+    against the OCI registry). Returns the raw TOML bytes; the caller
+    feeds these to :func:`load_bytes`.
+    """
+    kind = classify_source(source)
+    if kind == "path":
+        parsed = urllib.parse.urlparse(source)
+        path = Path(parsed.path) if parsed.scheme == "file" else Path(source)
+        return path.read_bytes()
+    if kind == "oras":
+        # Defer the import so callers that never use oras don't pay
+        # the import cost. (``bty.oras`` is pure-stdlib, so this is
+        # mostly cosmetic, but keeps the load graph tidy.)
+        from bty import oras as _oras
+
+        resolved = _oras.resolve_ref(source, timeout=timeout)
+        req = urllib.request.Request(resolved.blob_url, headers=resolved.headers)
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read(REMOTE_CATALOG_MAX_BYTES + 1)
+    else:  # kind == "http"
+        with urllib.request.urlopen(source, timeout=timeout) as resp:
+            raw = resp.read(REMOTE_CATALOG_MAX_BYTES + 1)
+    if len(raw) > REMOTE_CATALOG_MAX_BYTES:
+        raise CatalogError(
+            f"catalog response from {source} exceeded "
+            f"{REMOTE_CATALOG_MAX_BYTES} bytes; refusing to parse"
+        )
+    return bytes(raw)
+
+
+def load_source(source: str, *, timeout: float = 30.0) -> Catalog:
+    """Fetch + parse a catalog from any supported source.
+
+    Convenience wrapper combining :func:`fetch_bytes` and
+    :func:`load_bytes`. Used by both ``bty images --catalog`` and
+    ``bty tui --catalog``.
+    """
+    raw = fetch_bytes(source, timeout=timeout)
+    return load_bytes(raw, source=source)
+
+
 def default_manifest_path() -> Path | None:
     """Resolve the manifest path from the environment.
 
