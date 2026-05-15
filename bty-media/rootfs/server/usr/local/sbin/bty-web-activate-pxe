@@ -80,6 +80,11 @@ if [ -f /etc/dnsmasq.d/bty-pxe-active.conf ]; then
     systemctl restart dnsmasq.service
 fi
 
+# daemon-reload ensures systemd picks up any updated unit file on
+# an in-place upgrade where the appliance's bty-lab was pip-
+# updated since the last activate -- without this, systemctl
+# restart would use the stale cached unit.
+systemctl daemon-reload
 # Enable + restart picks up new EnvironmentFile contents. enable is
 # idempotent -- safe to run on every activate.
 systemctl enable bty-pxe-proxy.service >/dev/null 2>&1 || true

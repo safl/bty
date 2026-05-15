@@ -158,6 +158,20 @@ class Packet:
             return None
         return int.from_bytes(raw, "big")
 
+    @property
+    def bootfile_name(self) -> bytes | None:
+        """Option 67. The bootfile in our PXE offers, or ``None``
+        on a packet that's missing it (every DISCOVER, since clients
+        ask for the bootfile -- they don't send one)."""
+        return self.options.get(Opt.BOOTFILE_NAME)
+
+    @property
+    def server_id(self) -> bytes | None:
+        """Option 54 (server-identifier) -- the 4-byte packed IP of
+        the DHCP server emitting this packet. ``None`` on a packet
+        without it (i.e. a discover, which has no server yet)."""
+        return self.options.get(Opt.SERVER_ID)
+
 
 def parse(data: bytes) -> Packet:
     """Decode a UDP payload into a :class:`Packet`.

@@ -39,6 +39,7 @@ import logging
 import signal
 import socket
 import sys
+from dataclasses import dataclass
 
 from bty.pxe import wire
 from bty.pxe.wire import MsgType, Op, Opt, Packet
@@ -63,30 +64,43 @@ _HTTP_BOOTFILE_PATH = "/boot/ipxe.efi"
 _HTTP_BOOTFILE_PORT = 8080
 
 
+@dataclass(frozen=True)
 class ProxyConfig:
     """Resolved daemon config: which interface to listen on + the
-    IP to advertise. Kept as a plain class (not a dataclass) so
-    the runtime can mutate it on interface flap if we add that
-    later. For now it's set at startup and read-only."""
+    IP to advertise.
 
-    __slots__ = ("http_port", "interface", "server_ip", "tftp_only")
+    ``tftp_only`` makes the daemon refuse HTTPClient discovers --
+    useful when the appliance hasn't staged the HTTP-Boot binary at
+    /boot/ipxe.efi yet (better to fail loud than offer a URL that
+    404s). Default off: when bty-web is up, /boot/ipxe.efi is
+    served and HTTPClient targets boot cleanly.
+    """
 
-    def __init__(
-        self,
-        *,
-        interface: str,
-        server_ip: str,
-        http_port: int = _HTTP_BOOTFILE_PORT,
-        tftp_only: bool = False,
-    ) -> None:
-        self.interface = interface
-        self.server_ip = server_ip
-        self.http_port = http_port
-        # ``tftp_only`` makes the daemon refuse HTTPClient discovers.
-        # Useful when the appliance hasn't staged the HTTP-Boot binary
-        # at /boot/ipxe.efi yet -- better to fail loud than offer a URL
-        # that 404s.
-        self.tftp_only = tftp_only
+    interface: str
+    server_ip: str
+    http_port: int = _HTTP_BOOTFILE_PORT
+    tftp_only: bool = False
+
+    @property
+    def server_ip_bytes(self) -> bytes:
+        """Packed 4-byte server IP, ready to drop into BOOTP siaddr
+        / DHCP option 54. Frozen-dataclass-friendly: computed every
+        call but the call is one ``inet_aton``."""
+        return socket.inet_aton(self.server_ip)
+
+
+@dataclass(frozen=True)
+class BootDecision:
+    """Outcome of ``_resolve_bootfile``: what to stamp into the
+    offer + how to tag the response.
+
+    ``vendor_class_response`` MUST echo the client's class --
+    HTTPClient firmware rejects offers tagged ``PXEClient`` and
+    vice versa. Cheap to mess up, hence the explicit field.
+    """
+
+    bootfile: bytes
+    vendor_class_response: bytes
 
 
 def _resolve_bootfile(
@@ -94,21 +108,19 @@ def _resolve_bootfile(
     vendor_class: bytes,
     arch: int | None,
     is_ipxe: bool,
-) -> tuple[bytes, bytes] | None:
+) -> BootDecision | None:
     """Pick the right bootfile bytes for the client's arch + class.
 
-    Returns ``(bootfile_bytes, vendor_class_response_bytes)`` or
-    ``None`` when we don't have a sensible answer (unknown arch,
-    HTTPClient when tftp_only is set, etc). ``vendor_class_response``
-    must echo the client's class -- a HTTPClient that gets a
-    "PXEClient" offer back will reject it.
+    Returns ``None`` when we don't have a sensible answer (unknown
+    arch, HTTPClient when tftp_only is set, etc) so the caller stays
+    silent rather than emitting a malformed offer.
     """
     if is_ipxe:
         # iPXE second-stage: chain to bty-web's bootstrap script.
         # Tag the offer as PXEClient (iPXE itself sends that vendor
         # class on its second-stage DHCP).
         url = f"http://{cfg.server_ip}:{cfg.http_port}/pxe-bootstrap.ipxe"
-        return url.encode("ascii"), b"PXEClient"
+        return BootDecision(bootfile=url.encode("ascii"), vendor_class_response=b"PXEClient")
     if vendor_class.startswith(b"HTTPClient"):
         if cfg.tftp_only:
             return None
@@ -116,7 +128,7 @@ def _resolve_bootfile(
         # the response's option 60 MUST be "HTTPClient" -- firmware
         # rejects PXEClient-tagged offers when it asked HTTP.
         url = f"http://{cfg.server_ip}:{cfg.http_port}{_HTTP_BOOTFILE_PATH}"
-        return url.encode("ascii"), b"HTTPClient"
+        return BootDecision(bootfile=url.encode("ascii"), vendor_class_response=b"HTTPClient")
     # PXEClient: pick a TFTP bootfile by arch. Some BIOS-era
     # clients don't send option 93; treat missing arch as 0 (legacy
     # BIOS x86) so they still get a sensible bootfile.
@@ -125,7 +137,7 @@ def _resolve_bootfile(
     if bootfile is None:
         log.warning("pxe: no bootfile mapping for arch=%d", arch_key)
         return None
-    return bootfile.encode("ascii"), b"PXEClient"
+    return BootDecision(bootfile=bootfile.encode("ascii"), vendor_class_response=b"PXEClient")
 
 
 def build_offer(cfg: ProxyConfig, discover: Packet) -> bytes | None:
@@ -138,15 +150,22 @@ def build_offer(cfg: ProxyConfig, discover: Packet) -> bytes | None:
     """
     if not wire.is_pxe_client_discover(discover):
         return None
-    vc = discover.vendor_class or b""
-    is_ipxe = (discover.user_class or b"") == b"iPXE"
-    result = _resolve_bootfile(cfg, vc, discover.client_arch, is_ipxe)
-    if result is None:
+    decision = _resolve_bootfile(
+        cfg,
+        vendor_class=discover.vendor_class or b"",
+        arch=discover.client_arch,
+        is_ipxe=(discover.user_class or b"") == b"iPXE",
+    )
+    if decision is None:
         return None
-    bootfile, vc_response = result
+    return _build_offer_packet(cfg, discover, decision)
 
-    server_ip_bytes = socket.inet_aton(cfg.server_ip)
 
+def _build_offer_packet(cfg: ProxyConfig, discover: Packet, decision: BootDecision) -> bytes:
+    """Assemble the wire-format DHCPOFFER. Split out from
+    :func:`build_offer` so the decision-vs-wire-assembly halves
+    can be unit-tested separately and the daemon can log the
+    decision without re-parsing the bytes."""
     # Options in send-order. Modern UEFI is picky about a few of
     # these being present:
     #   53 (msg-type) first -- always the discoverable bit.
@@ -162,27 +181,26 @@ def build_offer(cfg: ProxyConfig, discover: Packet) -> bytes | None:
     #     even though we also fill file[] below for legacy clients).
     #   97 (client-machine-id) -- echo client's GUID back when
     #     present. Some firmware uses it as a sanity check.
+    server_ip_bytes = cfg.server_ip_bytes
     options: dict[int, bytes] = {
         Opt.MSG_TYPE: bytes((MsgType.OFFER,)),
         Opt.SERVER_ID: server_ip_bytes,
-        Opt.VENDOR_CLASS: vc_response,
+        Opt.VENDOR_CLASS: decision.vendor_class_response,
         Opt.TFTP_SERVER_NAME: cfg.server_ip.encode("ascii"),
-        Opt.BOOTFILE_NAME: bootfile,
+        Opt.BOOTFILE_NAME: decision.bootfile,
     }
     if Opt.CLIENT_MACHINE_ID in discover.options:
         options[Opt.CLIENT_MACHINE_ID] = discover.options[Opt.CLIENT_MACHINE_ID]
 
     # file[] is a 128-byte fixed-position field; URLs longer than
-    # that have to live in option 67 only. We truncate-with-warning
-    # rather than silently losing bytes.
-    file_field = bootfile[:128]
-    if len(bootfile) > 128 and bootfile != file_field:
-        # The URL got truncated for the legacy BOOTP file[] field,
-        # but the full URL is still in option 67 -- which is what
-        # modern firmware reads.
+    # that have to live in option 67 only. We truncate rather than
+    # silently losing bytes -- modern firmware reads option 67
+    # anyway.
+    file_field = decision.bootfile[:128]
+    if len(decision.bootfile) > 128:
         log.debug(
-            "pxe: bootfile too long for file[] (%d > 128 bytes); only option 67 carries it",
-            len(bootfile),
+            "pxe: bootfile too long for file[] (%d > 128 bytes); option 67 carries it",
+            len(decision.bootfile),
         )
 
     packet = wire.build(
@@ -224,13 +242,26 @@ class _DhcpServerProtocol(asyncio.DatagramProtocol):
         except ValueError as exc:
             log.debug("pxe: malformed DHCP packet from %s: %s", addr, exc)
             return
-        try:
-            offer = build_offer(self._cfg, discover)
-        except Exception as exc:
-            log.exception("pxe: build_offer crashed (xid=%#x): %s", discover.xid, exc)
+        # Decide first, build second -- so we have the decision
+        # available for the log line without re-parsing wire bytes.
+        if not wire.is_pxe_client_discover(discover):
             return
-        if offer is None:
-            # Not for us, or no answer we can give.
+        try:
+            decision = _resolve_bootfile(
+                self._cfg,
+                vendor_class=discover.vendor_class or b"",
+                arch=discover.client_arch,
+                is_ipxe=(discover.user_class or b"") == b"iPXE",
+            )
+        except Exception as exc:
+            log.exception("pxe: _resolve_bootfile crashed (xid=%#x): %s", discover.xid, exc)
+            return
+        if decision is None:
+            return
+        try:
+            offer = _build_offer_packet(self._cfg, discover, decision)
+        except Exception as exc:
+            log.exception("pxe: _build_offer_packet crashed (xid=%#x): %s", discover.xid, exc)
             return
         assert self._transport is not None
         # Broadcast the reply -- the client has no IP yet so we
@@ -239,8 +270,7 @@ class _DhcpServerProtocol(asyncio.DatagramProtocol):
         mac_pretty = ":".join(f"{b:02x}" for b in discover.mac)
         log.info(
             "pxe: offered %s to %s (arch=%s, vendor-class=%s, xid=%#x)",
-            offer[44 + 64 : 44 + 64 + 128].rstrip(b"\x00").decode("ascii", errors="replace")
-            or "<file[]-empty>",
+            decision.bootfile.decode("ascii", errors="replace"),
             mac_pretty,
             discover.client_arch,
             (discover.vendor_class or b"").decode("ascii", errors="replace"),

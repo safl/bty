@@ -192,11 +192,11 @@ def test_build_offer_pxeclient_arch7_stamps_ipxe_efi() -> None:
     # name fits unchanged).
     assert parsed.file.rstrip(b"\x00") == b"ipxe.efi"
     # option 67 stamped.
-    assert parsed.options[Opt.BOOTFILE_NAME] == b"ipxe.efi"
+    assert parsed.bootfile_name == b"ipxe.efi"
     # siaddr / option 54 / option 66 = our IP.
     expected_ip = socket.inet_aton("192.168.1.31")
     assert parsed.siaddr == expected_ip
-    assert parsed.options[Opt.SERVER_ID] == expected_ip
+    assert parsed.server_id == expected_ip
     assert parsed.options[Opt.TFTP_SERVER_NAME] == b"192.168.1.31"
     # Vendor class echoed back as PXEClient (firmware rejects offers
     # with the wrong tag).
@@ -209,7 +209,7 @@ def test_build_offer_pxeclient_arch0_stamps_undionly_kpxe() -> None:
     offer = build_offer(_cfg(), discover)
     assert offer is not None
     parsed = _decode_offer(offer)
-    assert parsed.options[Opt.BOOTFILE_NAME] == b"undionly.kpxe"
+    assert parsed.bootfile_name == b"undionly.kpxe"
 
 
 def test_build_offer_httpclient_arch16_stamps_http_url() -> None:
@@ -223,7 +223,7 @@ def test_build_offer_httpclient_arch16_stamps_http_url() -> None:
     offer = build_offer(_cfg(), discover)
     assert offer is not None
     parsed = _decode_offer(offer)
-    assert parsed.options[Opt.BOOTFILE_NAME] == b"http://192.168.1.31:8080/boot/ipxe.efi"
+    assert parsed.bootfile_name == b"http://192.168.1.31:8080/boot/ipxe.efi"
     assert parsed.options[Opt.VENDOR_CLASS] == b"HTTPClient"
 
 
@@ -244,7 +244,7 @@ def test_build_offer_ipxe_userclass_chains_to_bty_web_bootstrap() -> None:
     offer = build_offer(_cfg(), discover)
     assert offer is not None
     parsed = _decode_offer(offer)
-    bootfile = parsed.options[Opt.BOOTFILE_NAME]
+    bootfile = parsed.bootfile_name
     assert bootfile == b"http://192.168.1.31:8080/pxe-bootstrap.ipxe"
     # iPXE itself sends PXEClient on its second-stage DHCP, so the
     # response also tags as PXEClient.
@@ -310,4 +310,4 @@ def test_build_offer_long_http_bootfile_lands_in_option_67_not_file_field() -> N
     assert offer is not None
     parsed = _decode_offer(offer)
     # Option 67 always carries the full URL.
-    assert parsed.options[Opt.BOOTFILE_NAME].startswith(b"http://10.10.10.10")
+    assert parsed.bootfile_name.startswith(b"http://10.10.10.10")
