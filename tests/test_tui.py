@@ -659,6 +659,64 @@ def test_app_catalog_source_oras_failure_does_not_freeze_tui(
     _run(_drive())
 
 
+def test_app_shows_fetching_status_when_catalog_worker_spawns(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Spawning the background catalog worker must surface a
+    ``Fetching catalog from ...`` status so the operator knows
+    something is happening. Without it, the local-only view
+    renders immediately with no signal that more rows may be on
+    the way -- confusing on slow networks where the worker can
+    take many seconds.
+
+    Drive a slow loader (blocks on a thread Event), assert the
+    fetching status appears between mount and worker completion.
+    """
+    import threading
+
+    _patch_data_sources(
+        monkeypatch,
+        images_list=[_fake_image(name="local.qcow2", size=4096)],
+        disks_list=[_fake_disk()],
+    )
+
+    release = threading.Event()
+    catalog_rows = [
+        tui_app._TuiImage(
+            name="catalog-row.img.gz",
+            fmt="img.gz",
+            size_bytes=12345,
+            url="http://example/catalog-row.img.gz",
+        )
+    ]
+
+    def _slow_loader(_source: str, **_kw: object) -> list[tui_app._TuiImage]:
+        # Block until the test explicitly releases us; lets the
+        # test observe the in-flight state.
+        release.wait(timeout=5.0)
+        return list(catalog_rows)
+
+    monkeypatch.setattr(tui_app, "load_catalog_from_source", _slow_loader)
+    statuses = _spy_status(monkeypatch)
+
+    app = tui_app.BtyTui(catalog_source="https://example/catalog.toml")
+
+    async def _drive() -> None:
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            # While the worker is in-flight, the fetching status
+            # must have been set at least once.
+            assert any("Fetching catalog" in s for s in statuses), (
+                f"expected 'Fetching catalog ...' in statuses; got {statuses}"
+            )
+            # Release the worker so the test doesn't hang on
+            # threading.Event.wait().
+            release.set()
+            await pilot.pause()
+
+    _run(_drive())
+
+
 def test_action_refresh_retries_catalog_after_earlier_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

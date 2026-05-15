@@ -70,3 +70,29 @@ fi
 echo "0980-bty-apt-validate: apt-get update OK."
 echo "0980-bty-apt-validate: apt-cache policy (top of source rankings):"
 apt-cache policy | head -40 || true
+
+# Validate the CA bundle: parse the concatenated PEM file with
+# openssl and assert at least a few dozen certs are present.
+# Catches the case where ``update-ca-certificates`` failed silently
+# during ca-certificates' postinst, leaving the bundle empty (which
+# would let HTTP work but break every HTTPS handshake in the live
+# env -- the exact symptom the operator describes when the TUI's
+# oras catalog fetch errors with "[SSL: CERTIFICATE_VERIFY_FAILED]"
+# even though lynx accesses github.com fine).
+BUNDLE=/etc/ssl/certs/ca-certificates.crt
+if [ ! -s "$BUNDLE" ]; then
+    echo "0980-bty-apt-validate: CA bundle missing or empty: $BUNDLE"
+    exit 1
+fi
+echo "0980-bty-apt-validate: CA bundle parse check ($BUNDLE):"
+N=$(grep -c '^-----BEGIN CERTIFICATE-----' "$BUNDLE" || echo 0)
+echo "  $N PEM certificates"
+# A healthy Debian trixie ca-certificates ships ~140 root CAs.
+# Anything below 50 means something went wrong (partial install,
+# user-removed certs, etc.) -- fail loud rather than ship a stick
+# whose HTTPS will mysteriously break.
+if [ "$N" -lt 50 ]; then
+    echo "0980-bty-apt-validate: CA bundle suspiciously small ($N certs); refusing to ship"
+    exit 1
+fi
+echo "0980-bty-apt-validate: CA bundle OK ($N certs)."

@@ -1508,6 +1508,15 @@ class BtyTui(App[None]):
         catalog_rows: list[_TuiImage] = []
         if self._catalog_source is not None:
             if self._cached_remote_catalog is None:
+                # Tell the operator the catalog is fetching in the
+                # background. Without this, the local-only view shows
+                # immediately and there's no signal that more rows
+                # may be on the way -- which is confusing on slow
+                # networks where the worker can take many seconds.
+                # Transient: the worker's success / failure status
+                # ("Catalog: N images" / "--catalog ... failed: ...")
+                # will replace this within the fetch window.
+                self._set_status_transient(f"Fetching catalog from {self._catalog_source}...")
                 self._fetch_catalog_in_background(self._catalog_source)
             else:
                 catalog_rows = list(self._cached_remote_catalog)
