@@ -56,7 +56,7 @@ lb config noauto \
     --distribution trixie \
     --architectures amd64 \
     --archive-areas "main non-free-firmware" \
-    --firmware-chroot false \
+    --firmware-chroot true \
     --binary-images "${BINARY_IMAGES}" \
     --debian-installer none \
     --memtest none \
@@ -66,25 +66,26 @@ lb config noauto \
     --bootappend-live "${BOOTAPPEND}" \
     "${@}"
 # ``--archive-areas "main non-free-firmware"`` unlocks the
-# ``firmware-*`` packages declared in
-# ``config/package-lists/bty-base.list.chroot``. Default areas are
-# just ``main``, which silently drops every firmware blob and
-# produces a live env where i915 wedges the GPU on probe and
-# certain NIC / WiFi chipsets fail to load. Debian split
-# ``non-free-firmware`` out of ``non-free`` in bookworm precisely
-# so this archive can be enabled on its own.
+# ``firmware-*`` packages. Default areas are just ``main``, which
+# silently drops every firmware blob and produces a live env where
+# i915 wedges the GPU on probe and certain NIC / WiFi chipsets fail
+# to load. Debian split ``non-free-firmware`` out of ``non-free``
+# in bookworm precisely so this archive can be enabled on its own.
 #
-# ``--firmware-chroot false`` is the critical knob. Default is
-# ``true``, which adds ``firmware-linux-nonfree`` (a metapackage
-# that Depends on EVERY individual ``firmware-*`` package -- netronome
-# 140 MiB, nvidia-graphics 63 MiB, ath11k 63 MiB, mediatek 45 MiB,
-# plus a long tail of server-NIC and old-WiFi firmware) to the
-# chroot. With ``false``, the chroot only gets the firmware-*
-# packages our ``bty-base.list.chroot`` explicitly names -- which
-# is what we wanted all along. v0.9.5..v0.9.8's ISO size of ~828
-# MiB was driven entirely by the default-``true`` metapackage pull;
-# our explicit list was additive on top of an already-everything
-# install.
+# ``--firmware-chroot true`` pulls ``firmware-linux-nonfree`` (a
+# metapackage that Depends on EVERY individual nonfree ``firmware-*``
+# package: realtek, iwlwifi, atheros, brcm80211, mediatek, ath11k,
+# bnx2/bnx2x, netronome, nvidia-graphics, amd-graphics, and a long
+# tail of server-NIC + old-WiFi blobs). The size cost (~300 MiB
+# compressed) buys "boots on whatever bare-metal box the operator
+# points it at" -- the alternative is the operator hits a missing
+# firmware -> driver init failure -> dead NIC and can't proceed.
+# Trimming back to a curated list was tried earlier; recurring
+# Realtek / WiFi failures on consumer mini-PCs drove the reversal.
+# The trixie-backports archive layered via
+# ``config/archives/backports.list.chroot`` plus the pin in
+# ``config/preferences/backports.pref.chroot`` makes apt pull the
+# newest kernel + firmware Debian ships, not just trixie's.
 # Note: an earlier iteration tried ``--syslinux-timeout 1`` here per
 # advice from elsewhere; live-build trixie (20250814) doesn't
 # recognise that flag and ``lb config`` errors out. Bootloader-menu

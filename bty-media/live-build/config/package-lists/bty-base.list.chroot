@@ -15,34 +15,18 @@ live-tools
 plymouth
 plymouth-themes
 
-# Vendor firmware blobs. Curated set covering "operator flashes a
-# random homelab box" hardware. Requires ``--archive-areas "main
-# non-free-firmware"`` in ``auto/config``.
-#
-#   firmware-misc-nonfree -- i915 GuC / HuC + sensor + IC firmware.
-#     Silences "Failed to initialize GPU, declaring it wedged" on
-#     Alder-Lake-class targets.
-#   firmware-iwlwifi      -- Intel WiFi (AX2xx / BE2xx / etc.).
-#     Required on most modern laptops / NUC-class hardware.
-#   firmware-realtek      -- Realtek Ethernet + WiFi + BT. RTL8125
-#     2.5GbE on essentially every mini-PC (incl. GMKtec G5).
-#   firmware-amd-graphics -- AMD GPU firmware. Parity with the i915
-#     fix on AMD targets (without it, amdgpu wedges at probe the
-#     same way i915 used to; cosmetic but noisy in dmesg).
-#   firmware-bnx2 + bnx2x -- Broadcom NetXtreme. Lower hit-rate
-#     than the rest but tiny (~3 MiB combined) and covers enterprise
-#     server NICs an operator might encounter.
-#
-# v0.9.7 tried trimming amd-graphics + bnx2* for size; saving was
-# under 100 MiB compressed -- not worth the coverage regression.
-# Curated vs ``firmware-linux-nonfree`` (the metapackage), which
-# would pull every architecture's firmware (~500 MiB compressed).
-firmware-misc-nonfree
-firmware-iwlwifi
-firmware-realtek
-firmware-bnx2
-firmware-bnx2x
-firmware-amd-graphics
+# Vendor firmware blobs. ``--firmware-chroot true`` in
+# ``auto/config`` pulls the ``firmware-linux-nonfree`` metapackage,
+# which Depends on every individual ``firmware-*`` package
+# (realtek, iwlwifi, atheros, brcm80211, mediatek, ath11k, bnx2/
+# bnx2x, netronome, nvidia-graphics, amd-graphics, misc-nonfree,
+# ...). Layered on top, ``config/archives/backports.list.chroot``
+# + ``config/preferences/backports.pref.chroot`` make apt resolve
+# each ``firmware-*`` to its trixie-backports version, which has
+# noticeably newer blobs (iwlwifi MAC firmware, realtek RTL8851/
+# 8852 WiFi, amdgpu / i915 microcode revisions). Curated trimming
+# was tried in earlier releases; Realtek + Wi-Fi failures on
+# consumer mini-PCs drove the reversal.
 
 # NetworkManager pulls in ``nmtui`` (a curses-friendly network picker)
 # and the daemon that backs it. Use case: operator boots bty-usb on

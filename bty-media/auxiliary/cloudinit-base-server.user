@@ -15,6 +15,23 @@ manage_etc_hosts: true
 
 timezone: __BTY_TIMEZONE__
 
+# trixie-backports for newer kernel + firmware. Stock trixie ships
+# kernel 6.12.x; some recent consumer NICs (Realtek RTL8125/8126
+# 2.5GbE on mini-PCs, Intel I225/I226) and WiFi chipsets (rtw89,
+# mt7925) only see solid in-tree driver support in 6.13+. Backports
+# rebuilds the latest stable kernel from sid/testing for trixie;
+# signed by the same archive key, so no extra keyring handling.
+#
+# The apt preference file
+# rootfs/server/etc/apt/preferences.d/99-bty-backports.pref is
+# deployed via write_files (init stage) and pins linux-image-amd64
+# + firmware-* to this archive so the candidate version apt picks
+# during cc_package_update_upgrade_install is the backports one.
+apt:
+  sources:
+    debian-backports.list:
+      source: "deb http://deb.debian.org/debian trixie-backports main non-free-firmware"
+
 # Build VM only - the cooked image's runcmd locks the bake-VM root
 # password (``passwd -l root``) so this seed credential cannot be
 # used after the bake. ``ssh_pwauth: true`` here just lets cloud-
@@ -58,19 +75,27 @@ packages:
   # so ``getrandom()`` never blocks. Defense-in-depth; no harm
   # on hardware that already has plenty of entropy.
   - haveged
-  # Firmware blobs for the bare-metal hardware bty-server is most
-  # likely to land on (NUC-class boxes, Intel mini-PCs, ASUS
-  # PN-series, etc.). The cloud-image baseline doesn't include
-  # these because cloud VMs don't need wireless / GPU / Realtek
-  # NIC firmware. On bare metal, the kernel probes the device,
-  # waits for the firmware file, times out after 60-120s per
-  # device, retries -- which compounds to many minutes of
-  # unexplained early-boot wait. Including the meta-packages
-  # is cheap (~150 MB) and removes a whole class of "boot is
-  # really slow on this specific hardware" reports.
-  - firmware-linux-free
-  - firmware-misc-nonfree
-  - firmware-realtek
+  # Firmware + bare-metal kernel for whatever hardware bty-server
+  # lands on. The cloud-image baseline ships a slim
+  # ``linux-image-cloud-amd64`` plus ~no firmware -- cloud VMs
+  # don't need wireless / GPU / Realtek NIC blobs, but bare metal
+  # does. Without firmware the kernel probes the device, times
+  # out after 60-120s per probe, retries -- compounding to
+  # multi-minute unexplained early-boot waits.
+  #
+  # ``firmware-linux-nonfree`` is the metapackage that Depends on
+  # every individual ``firmware-*`` nonfree package (realtek,
+  # iwlwifi, atheros, brcm80211, mediatek, ath11k, bnx2/bnx2x,
+  # netronome, nvidia-graphics, amd-graphics, misc-nonfree, ...).
+  # ``linux-image-amd64`` plus the trixie-backports pin (see the
+  # ``apt:`` block + the preferences file under rootfs/server)
+  # land the newest kernel Debian ships, which carries newer
+  # in-tree drivers (r8169 with RTL8125/8126 fixes, rtw89, etc.).
+  # Curated trimming was tried in earlier releases; recurring
+  # Realtek + WiFi failures on consumer mini-PCs drove the
+  # reversal.
+  - linux-image-amd64
+  - firmware-linux-nonfree
   # ``parted`` is used by ``bty-image-store-init`` to partition a
   # 2nd disk for the persistent image cache. It's almost certainly
   # already pulled in transitively (cloud-utils' growpart shells out

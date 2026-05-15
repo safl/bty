@@ -234,13 +234,18 @@ def test_server_cloudinit_ships_haveged() -> None:
     # Layer 2: kernel cmdline trust hints.
     assert "random.trust_cpu=on" in body
     assert "random.trust_bootloader=on" in body
-    # Bare-metal firmware blobs + ``noresume`` for N97-class
-    # hardware that hits firmware-probe timeouts + hibernation-
-    # resume waits during early boot. Pin so any "tidy the packages
-    # list" attempt doesn't drop them.
-    assert "\n  - firmware-linux-free\n" in body
-    assert "\n  - firmware-misc-nonfree\n" in body
-    assert "\n  - firmware-realtek\n" in body
+    # Bare-metal firmware + kernel + ``noresume`` for arbitrary
+    # hardware. The kernel comes from trixie-backports (newer
+    # in-tree drivers, e.g. r8169 RTL8125/8126 fixes, rtw89),
+    # firmware via the ``firmware-linux-nonfree`` metapackage
+    # which Depends on every individual firmware-* package. Pin
+    # both layers so any "tidy the packages list" attempt
+    # doesn't silently regress HW coverage. Pin the backports
+    # source line too: without it the apt pin can't resolve to
+    # the newer candidate version.
+    assert "\n  - linux-image-amd64\n" in body
+    assert "\n  - firmware-linux-nonfree\n" in body
+    assert "trixie-backports" in body
     assert "noresume" in body
     # ``MODULES=most`` initramfs rebuild for broad bare-metal
     # driver coverage. The cloud image's default ``MODULES=dep``
