@@ -659,6 +659,74 @@ def test_app_catalog_source_oras_failure_does_not_freeze_tui(
     _run(_drive())
 
 
+def test_action_refresh_retries_catalog_after_earlier_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression for: TUI catalog fetch fails (network down), TUI
+    caches the failure as an empty list, operator plugs in a USB
+    ethernet dongle, connectivity returns, operator presses ``r``
+    -- and nothing happens because ``_cached_remote_catalog`` is
+    still ``[]`` (not ``None``), so ``_load_images`` short-circuits.
+
+    Drive the catalog loader through one failed and one successful
+    call; press ``r`` between them; assert the second populate
+    surfaces the now-reachable catalog rows."""
+    from bty import oras as _oras_module
+
+    _patch_data_sources(
+        monkeypatch,
+        images_list=[_fake_image(name="local.qcow2", size=4096)],
+        disks_list=[_fake_disk()],
+    )
+
+    call_count = {"n": 0}
+    success_rows = [
+        tui_app._TuiImage(
+            name="catalog-row.img.gz",
+            fmt="img.gz",
+            size_bytes=12345,
+            url="oras://ghcr.io/safl/nosi/ubuntu-sysdev@sha256:deadbeef",
+        )
+    ]
+
+    def _flaky_loader(_source: str, **_kw: object) -> list[tui_app._TuiImage]:
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            raise _oras_module.OrasError(
+                "oras token fetch failed for ghcr.io/safl/nosi/ubuntu-sysdev: "
+                "<urlopen error [Errno 101] Network is unreachable>"
+            )
+        return list(success_rows)
+
+    monkeypatch.setattr(tui_app, "load_catalog_from_source", _flaky_loader)
+
+    app = tui_app.BtyTui(catalog_source="oras://ghcr.io/safl/nosi/ubuntu-sysdev:latest")
+
+    async def _drive() -> None:
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            from textual.widgets import DataTable
+
+            images_table = app.query_one("#images_table", DataTable)
+            # First populate: local row only (catalog fetch failed,
+            # cached as empty list).
+            assert images_table.row_count == 1
+            assert call_count["n"] == 1
+            # Press ``r``. Should bust the cache and re-fetch -- the
+            # second call returns the catalog row this time.
+            await pilot.press("r")
+            await pilot.pause()
+            assert call_count["n"] == 2, (
+                f"refresh should bust the cache and re-fetch; call_count={call_count['n']!r}"
+            )
+            assert images_table.row_count == 2, (
+                f"local + freshly-fetched catalog row expected after refresh; "
+                f"got row_count={images_table.row_count}"
+            )
+
+    _run(_drive())
+
+
 def test_oras_error_is_an_os_error() -> None:
     """:class:`OrasError` must subclass :class:`OSError` so callers
     that handle remote-I/O generically (``except OSError``) catch

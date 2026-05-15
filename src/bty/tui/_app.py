@@ -1497,22 +1497,68 @@ class BtyTui(App[None]):
             )
             for r in images.list_remote_images(self._image_root)
         ]
-        # Overlay the --catalog source's entries. Fetched once and
-        # cached in memory; ``r``-refresh re-scans local only,
-        # ``c``-switch invalidates ``_cached_remote_catalog`` to force
-        # a re-fetch on the next populate.
+        # Overlay the --catalog source's entries. ``_cached_remote_catalog``
+        # is ``None`` on first populate / after a cache-bust (``r``
+        # refresh / ``c``-switch / ``d``-default). In that state, spawn
+        # a background worker to fetch and re-render later; the current
+        # call renders local-only so the TUI stays responsive even when
+        # the catalog source is slow / unreachable. Once the cache is
+        # filled (even ``[]`` on failure), subsequent populates serve
+        # cached rows without re-spawning.
         catalog_rows: list[_TuiImage] = []
         if self._catalog_source is not None:
             if self._cached_remote_catalog is None:
-                try:
-                    self._cached_remote_catalog = load_catalog_from_source(self._catalog_source)
-                except (OSError, ValueError, _catalog.CatalogError) as exc:
-                    # Surface in the status line but don't let a flaky
-                    # catalog source block local-only operation.
-                    self._set_status_transient(f"--catalog {self._catalog_source} failed: {exc}")
-                    self._cached_remote_catalog = []
-            catalog_rows = list(self._cached_remote_catalog)
+                self._fetch_catalog_in_background(self._catalog_source)
+            else:
+                catalog_rows = list(self._cached_remote_catalog)
         return local + remote + catalog_rows
+
+    @work(thread=True, exclusive=True, group="catalog-fetch")
+    def _fetch_catalog_in_background(self, source: str) -> None:
+        """Background worker for the remote catalog fetch.
+
+        Runs on a thread so the urllib + oras timeouts (up to 30 s
+        each) don't freeze the event loop while the operator waits
+        on a slow / unreachable catalog source. The sync version
+        locked the TUI for the full timeout before surfacing the
+        error -- terrible UX on the flaky-network path where the
+        operator may be plugging a USB ethernet dongle in right
+        now to fix things.
+
+        On success: stash the rows + trigger a re-populate so the
+        fresh entries appear without a manual refresh.
+        On failure: stash an empty list (so subsequent populates
+        don't keep retrying until ``r`` busts the cache) and
+        surface a sticky error.
+
+        ``exclusive=True`` + ``group="catalog-fetch"``: a new
+        refresh / c-switch cancels any running fetch from the
+        previous cycle. Avoids two workers stomping on
+        ``_cached_remote_catalog`` in either direction.
+        """
+        try:
+            rows = load_catalog_from_source(source)
+        except (OSError, ValueError, _catalog.CatalogError) as exc:
+            self.app.call_from_thread(
+                self._set_status,
+                f"--catalog {source} failed: {exc}",
+            )
+            self.app.call_from_thread(self._on_catalog_fetched, [])
+            return
+        self.app.call_from_thread(self._on_catalog_fetched, rows)
+
+    def _on_catalog_fetched(self, rows: list[_TuiImage]) -> None:
+        """Worker callback (via ``call_from_thread``): stash the
+        fetched rows and re-render the images table so the catalog
+        overlay appears. Called for both the success path (non-
+        empty rows) and the cached-failure path (empty rows). On
+        success the transient "Catalog: N images" message tells the
+        operator the fetch completed; on failure the sticky error
+        set by the worker stays up so the reason is visible."""
+        self._cached_remote_catalog = rows
+        self._populate_images()
+        if rows:
+            self._set_status_transient(f"Catalog: {len(rows)} images")
 
     def _populate_disks(self) -> None:
         table = self.query_one("#disks_table", DataTable)
@@ -1559,6 +1605,14 @@ class BtyTui(App[None]):
     # ---------- actions ------------------------------------------------------
 
     def action_refresh(self) -> None:
+        # Bust the remote-catalog cache so a failed earlier fetch
+        # (network was down, oras unreachable, ...) gets retried.
+        # Without this, ``_cached_remote_catalog == []`` from the
+        # failure looks identical to "fetched OK, empty result" and
+        # subsequent refreshes are silent no-ops -- the operator
+        # plugs in a USB ethernet dongle, the live env gets a
+        # working IP, presses ``r``, and nothing changes.
+        self._cached_remote_catalog = None
         self._populate_images()
         self._populate_disks()
         self._set_status_transient("Refreshed.")
