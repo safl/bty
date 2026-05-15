@@ -156,10 +156,14 @@ runcmd:
   - ln -sf /usr/lib/ipxe/undionly.kpxe /var/lib/tftpboot/undionly.kpxe
   - ln -sf /usr/lib/ipxe/ipxe.efi /var/lib/tftpboot/ipxe.efi
 
-  # Privileged helper + sudoers entry that lets the bty service user
-  # activate the PXE proxy-DHCP block without a password. sudo refuses
-  # to load /etc/sudoers.d/* unless the file is exactly mode 0440.
+  # Privileged helpers + sudoers entry that let the bty service user
+  # activate / deactivate the PXE proxy-DHCP daemon without a password.
+  # sudo refuses to load /etc/sudoers.d/* unless the file is exactly
+  # mode 0440. The activate helper writes /etc/default/bty-pxe-proxy
+  # and restarts bty-pxe-proxy.service; the deactivate helper stops
+  # the service.
   - chmod 0755 /usr/local/sbin/bty-web-activate-pxe
+  - chmod 0755 /usr/local/sbin/bty-web-deactivate-pxe
   - chmod 0440 /etc/sudoers.d/bty-web
   - chown root:root /etc/sudoers.d/bty-web
 
@@ -192,9 +196,9 @@ runcmd:
   # Pick up the staged systemd units. bty-web-init runs once on the
   # cooked image's first boot to set up the state directory tree and
   # write /etc/default/bty-web; bty-web is the long-running service.
-  # dnsmasq is enabled so TFTP is up at boot; the proxy-DHCP block
-  # in /etc/dnsmasq.d/bty-pxe.conf stays dormant until the operator
-  # activates it via the UI.
+  # dnsmasq is enabled so TFTP is up at boot; bty-pxe-proxy.service
+  # is shipped DORMANT (ConditionPathExists=/etc/default/bty-pxe-proxy)
+  # and only starts once the operator activates PXE through the UI.
   - systemctl daemon-reload
   # ``bty-grow-rootfs.service`` runs once on first boot of the
   # cooked image (sentinel-gated on /var/lib/bty/.rootfs-grown)

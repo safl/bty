@@ -24,7 +24,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-PXE_ACTIVE_PATH = Path("/etc/dnsmasq.d/bty-pxe-active.conf")
+PXE_ACTIVE_PATH = Path("/etc/default/bty-pxe-proxy")
 SYSNET_PATH = Path("/sys/class/net")
 ACTIVATE_PXE_HELPER = "/usr/local/sbin/bty-web-activate-pxe"
 DEACTIVATE_PXE_HELPER = "/usr/local/sbin/bty-web-deactivate-pxe"
@@ -165,15 +165,24 @@ def _first_ipv4(iface: str) -> tuple[str | None, int | None]:
 
 
 def pxe_active(active_path: Path = PXE_ACTIVE_PATH) -> PxeConfig | None:
-    """Parse the active PXE config; ``None`` if the file is absent."""
+    """Parse the active PXE config; ``None`` if the file is absent.
+
+    The active file is an ``EnvironmentFile``-shaped key=value blob
+    written by ``bty-web-activate-pxe`` and read by
+    ``bty-pxe-proxy.service``::
+
+        BTY_PXE_INTERFACE=enp90s0
+        BTY_PXE_SUBNET=192.168.1.0
+    """
     if not active_path.is_file():
         return None
     text = active_path.read_text()
-    iface_match = re.search(r"^interface=(.+)$", text, re.MULTILINE)
-    subnet_match = re.search(r"^dhcp-range=([^,]+),proxy", text, re.MULTILINE)
+    iface_match = re.search(r"^BTY_PXE_INTERFACE=(.+)$", text, re.MULTILINE)
+    subnet_match = re.search(r"^BTY_PXE_SUBNET=(.+)$", text, re.MULTILINE)
     if iface_match and subnet_match:
         return PxeConfig(
-            interface=iface_match.group(1).strip(), subnet=subnet_match.group(1).strip()
+            interface=iface_match.group(1).strip(),
+            subnet=subnet_match.group(1).strip(),
         )
     return None
 

@@ -201,35 +201,65 @@ def test_server_cloudinit_does_not_install_plymouth() -> None:
 
 
 def test_activate_pxe_helper_uses_same_fs_tempfile() -> None:
-    """``bty-web-activate-pxe`` writes a config to /etc/dnsmasq.d/.
-    The default ``mktemp`` would land in ``$TMPDIR`` = /tmp (tmpfs);
-    a cross-filesystem ``mv`` to /etc/dnsmasq.d/ falls back to
-    copy-then-unlink which fails with "unable to remove target:
-    Read-only file system" under read-only-rootfs conditions. Pin
-    the same-fs tempfile so the bug stays out."""
+    """``bty-web-activate-pxe`` writes an EnvironmentFile to
+    /etc/default/. The default ``mktemp`` would land in
+    ``$TMPDIR`` = /tmp (tmpfs); a cross-filesystem ``mv`` to
+    /etc/default/ falls back to copy-then-unlink which fails with
+    "unable to remove target: Read-only file system" under
+    read-only-rootfs conditions. Pin the same-fs tempfile so the
+    bug stays out."""
     from pathlib import Path
 
     repo_root = Path(__file__).resolve().parents[1]
     body = (repo_root / "bty-media/rootfs/server/usr/local/sbin/bty-web-activate-pxe").read_text()
-    # ``mktemp -p /etc/dnsmasq.d ...`` keeps source + target on the
+    # ``mktemp -p /etc/default ...`` keeps source + target on the
     # same filesystem, so the final ``mv`` is an atomic rename.
-    assert "mktemp -p /etc/dnsmasq.d" in body
+    assert "mktemp -p /etc/default" in body
 
 
-def test_activate_pxe_helper_enables_dhcp_logging() -> None:
-    """``bty-web-activate-pxe`` must include ``log-dhcp`` in the
-    generated dnsmasq config so PXE transactions land in
-    journalctl. Without it, ``journalctl -u dnsmasq`` shows only
-    startup banner + "bound to interface" lines -- the operator
-    can't tell from logs whether clients are reaching dnsmasq,
-    forcing them to break out tcpdump for what should be a
-    one-line diagnostic. Pin so a future "trim the config"
-    attempt doesn't silently re-introduce the visibility gap."""
+def test_activate_pxe_helper_drives_bty_pxe_proxy_service() -> None:
+    """``bty-web-activate-pxe`` runs the bty-built proxy-DHCP
+    daemon instead of writing dnsmasq config. We replaced dnsmasq's
+    proxy-DHCP in v0.14.0 because dnsmasq 2.91 doesn't put the
+    bootfile in the offer for modern UEFI clients (see
+    project_dnsmasq_proxy_dhcp_dead_end memory note). Pin the
+    helper to keep wiring ``bty-pxe-proxy.service`` so a future
+    "go back to dnsmasq" attempt fails the test loud."""
     from pathlib import Path
 
     repo_root = Path(__file__).resolve().parents[1]
     body = (repo_root / "bty-media/rootfs/server/usr/local/sbin/bty-web-activate-pxe").read_text()
-    assert "log-dhcp" in body
+    # Writes the EnvironmentFile bty-pxe-proxy.service reads.
+    assert "/etc/default/bty-pxe-proxy" in body
+    assert "BTY_PXE_INTERFACE=" in body
+    # Starts / restarts the daemon.
+    assert "systemctl restart bty-pxe-proxy.service" in body
+    # Cleans up the legacy dnsmasq active config on in-place upgrade.
+    assert "/etc/dnsmasq.d/bty-pxe-active.conf" in body
+
+
+def test_bty_pxe_proxy_service_runs_unprivileged_with_net_caps() -> None:
+    """The systemd unit must run the daemon as the unprivileged
+    ``bty`` user (NOT root), with the two capabilities binding UDP
+    67 + SO_BINDTODEVICE require. Running the proxy as root would
+    give a UDP-listening daemon root file-system access for no
+    reason -- the daemon never writes the filesystem."""
+    from pathlib import Path
+
+    repo_root = Path(__file__).resolve().parents[1]
+    unit = (
+        repo_root / "bty-media/rootfs/server/etc/systemd/system/bty-pxe-proxy.service"
+    ).read_text()
+    assert "User=bty" in unit
+    assert "AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_NET_RAW" in unit
+    # Hardening floor we don't want regressed.
+    assert "NoNewPrivileges=yes" in unit
+    assert "ProtectSystem=strict" in unit
+    # EnvironmentFile is the contract with bty-web-activate-pxe.
+    assert "EnvironmentFile=/etc/default/bty-pxe-proxy" in unit
+    # ConditionPathExists keeps systemd from flapping when PXE is
+    # deactivated (env file gone -> unit stays inactive cleanly).
+    assert "ConditionPathExists=/etc/default/bty-pxe-proxy" in unit
 
 
 def test_server_cloudinit_ships_haveged() -> None:
