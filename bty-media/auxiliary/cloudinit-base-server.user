@@ -46,7 +46,9 @@ chpasswd:
 
 # Server is persistent: let cloud-init grow root to fill the disk on
 # first boot. Image library / TFTP / iPXE assets live on the same
-# rootfs (later milestones may carve a separate /var partition).
+# rootfs -- one filesystem to grow keeps first-boot logic simple,
+# and the bty image store carves out its own labelled partition
+# when the operator opts in via ``bty-image-store-init``.
 package_update: true
 package_upgrade: false
 packages:
@@ -56,7 +58,7 @@ packages:
   - git
   - curl
   - ca-certificates
-  # PXE boot stack (Phase C). dnsmasq runs TFTP and (when the operator
+  # PXE boot stack. dnsmasq runs TFTP and (when the operator
   # activates it) proxy-DHCP. ``ipxe`` ships the BIOS + UEFI binaries.
   - dnsmasq
   - ipxe
@@ -139,9 +141,9 @@ runcmd:
     for whl in /opt/bty/bty_lab-*-py3-none-any.whl; do
       /opt/bty/venv/bin/pip install --no-cache-dir "${whl}[web]"
     done
-    # Online cijoe (milestone 15) - bty-web shells out to ``cijoe`` to
-    # run a task against freshly-flashed targets. Same venv, same
-    # PATH (``Path(sys.executable).parent / 'cijoe'`` resolves to
+    # Online cijoe: bty-web shells out to ``cijoe`` to run a task
+    # against freshly-flashed targets. Same venv, same PATH
+    # (``Path(sys.executable).parent / 'cijoe'`` resolves to
     # ``/opt/bty/venv/bin/cijoe`` for the runner).
     /opt/bty/venv/bin/pip install --no-cache-dir cijoe
 
