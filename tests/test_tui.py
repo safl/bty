@@ -606,6 +606,75 @@ def test_app_catalog_source_overlays_local_scan(
     _run(_drive())
 
 
+def test_app_catalog_source_oras_failure_does_not_freeze_tui(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ORAS catalog fetch failure must surface in the status line and
+    let the TUI keep running -- not propagate an unhandled
+    :class:`OrasError` past Textual's event handler (which leaves
+    the bottom-line error displayed but the event loop in a
+    half-broken state, preventing Esc/q exit). Regression for the
+    "TUI freezes after oras token fetch failed" hardware-test
+    report.
+
+    Drives :func:`load_catalog_from_source` to raise the same
+    :class:`OrasError` that ``oras token fetch failed`` produces;
+    asserts the TUI mounts cleanly, renders local rows, and an
+    error status was set."""
+    from bty import oras as _oras_module
+
+    _patch_data_sources(
+        monkeypatch,
+        images_list=[_fake_image(name="local.qcow2", size=4096)],
+        disks_list=[_fake_disk()],
+    )
+
+    def _raise_oras_error(_source: str, **_kw: object) -> list[tui_app._TuiImage]:
+        raise _oras_module.OrasError(
+            "oras token fetch failed for ghcr.io/safl/nosi/ubuntu-sysdev: "
+            "<urlopen error [Errno 101] Network is unreachable>"
+        )
+
+    monkeypatch.setattr(tui_app, "load_catalog_from_source", _raise_oras_error)
+    statuses = _spy_status(monkeypatch)
+
+    app = tui_app.BtyTui(catalog_source="oras://ghcr.io/safl/nosi/ubuntu-sysdev:latest")
+
+    async def _drive() -> None:
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            from textual.widgets import DataTable
+
+            # Local row still rendered -- catalog failure didn't take
+            # down the whole populate.
+            images_table = app.query_one("#images_table", DataTable)
+            assert images_table.row_count == 1
+            # Some flavour of catalog-error message landed in the
+            # status line. Match loosely (the exact wording is
+            # operator-facing copy; pinning it forces test churn).
+            assert any("oras" in s.lower() or "catalog" in s.lower() for s in statuses), (
+                f"expected an oras/catalog error in status; got {statuses}"
+            )
+
+    _run(_drive())
+
+
+def test_oras_error_is_an_os_error() -> None:
+    """:class:`OrasError` must subclass :class:`OSError` so callers
+    that handle remote-I/O generically (``except OSError``) catch
+    it. ``urllib.error.URLError`` already follows this pattern;
+    keeping OrasError on the same family closes the "TUI freezes
+    after oras failure" class of bugs at the type level."""
+    from bty import oras as _oras_module
+
+    assert issubclass(_oras_module.OrasError, OSError)
+    # And it remains catchable as itself for the call sites that
+    # do want ORAS-specific handling.
+    err = _oras_module.OrasError("boom")
+    assert isinstance(err, _oras_module.OrasError)
+    assert isinstance(err, OSError)
+
+
 # --------------------------------------------------------------------------
 # TUI polish (theme, filter, welcome panel, details pane, flash modal)
 # --------------------------------------------------------------------------

@@ -98,12 +98,16 @@ _SIDECAR_SUFFIXES = (
 )
 
 
-class OrasError(Exception):
+class OrasError(OSError):
     """Raised on parse / resolution / fetch errors against an OCI registry.
 
-    Distinct from generic exceptions so callers can surface a friendly
-    per-reference error without conflating it with unrelated network
-    failures."""
+    Inherits from :class:`OSError` so it's caught by callers that
+    handle remote-I/O failures generically (the TUI, the CLI, the
+    catalog boundary) -- semantically the same family as
+    :class:`urllib.error.URLError`, which also subclasses
+    :class:`OSError`. Code paths that need to distinguish ORAS-
+    specific failures from arbitrary network errors still can:
+    :class:`OrasError` is a strict subclass."""
 
 
 @dataclass(frozen=True)
