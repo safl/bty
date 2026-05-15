@@ -216,6 +216,22 @@ def test_activate_pxe_helper_uses_same_fs_tempfile() -> None:
     assert "mktemp -p /etc/dnsmasq.d" in body
 
 
+def test_activate_pxe_helper_enables_dhcp_logging() -> None:
+    """``bty-web-activate-pxe`` must include ``log-dhcp`` in the
+    generated dnsmasq config so PXE transactions land in
+    journalctl. Without it, ``journalctl -u dnsmasq`` shows only
+    startup banner + "bound to interface" lines -- the operator
+    can't tell from logs whether clients are reaching dnsmasq,
+    forcing them to break out tcpdump for what should be a
+    one-line diagnostic. Pin so a future "trim the config"
+    attempt doesn't silently re-introduce the visibility gap."""
+    from pathlib import Path
+
+    repo_root = Path(__file__).resolve().parents[1]
+    body = (repo_root / "bty-media/rootfs/server/usr/local/sbin/bty-web-activate-pxe").read_text()
+    assert "log-dhcp" in body
+
+
 def test_server_cloudinit_ships_haveged() -> None:
     """Entropy starvation on N97-class hardware caused 20-minute
     systemd-journald start times even on RDRAND-capable CPUs (the
