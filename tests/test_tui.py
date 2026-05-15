@@ -408,7 +408,7 @@ def test_app_renders_local_panes_with_seeded_data(
             # Root user: initial status is empty (no nudge text;
             # the verbose pane border-titles carry the wizard
             # prompts instead).
-            assert app._initial_status() == ""  # type: ignore[reportPrivateUsage]
+            assert app._initial_status() == ""
 
     _run(_drive())
 
@@ -443,7 +443,7 @@ def test_app_local_mode_renders_bri_descriptors_alongside_local(
             images_table = app.query_one("#images_table", DataTable)
             assert images_table.row_count == 2
             # _images_by_key should have one local + one remote entry.
-            keys = list(app._images_by_key.values())  # type: ignore[reportPrivateUsage]
+            keys = list(app._images_by_key.values())
             urls = [k.url for k in keys]
             paths = [k.path for k in keys]
             assert "https://example.invalid/bty-server.img.gz" in urls
@@ -473,7 +473,7 @@ def test_action_install_bty_server_preselects_image_and_focuses_disks(
             await pilot.pause()
             from textual.widgets import DataTable
 
-            selected = app._selected_image  # type: ignore[reportPrivateUsage]
+            selected = app._selected_image
             assert selected is not None
             assert selected.url == tui_app._BTY_SERVER_LATEST_URL
             assert selected.name == tui_app._BTY_SERVER_LATEST_NAME
@@ -563,7 +563,7 @@ def test_app_non_root_status_says_read_only(
     async def _drive() -> None:
         async with app.run_test() as pilot:
             await pilot.pause()
-            assert "Read-only mode" in app._initial_status()  # type: ignore[reportPrivateUsage]
+            assert "Read-only mode" in app._initial_status()
 
     _run(_drive())
 
@@ -599,7 +599,7 @@ def test_app_catalog_source_overlays_local_scan(
             assert images_table.row_count == 1
             # The catalog entry's src is the row key (used to drive the
             # URL flash path in action_flash); confirm round-trip.
-            row = next(iter(app._images_by_key.values()))  # type: ignore[reportPrivateUsage]
+            row = next(iter(app._images_by_key.values()))
             assert row.url == "http://server:8080/images/remote.img.zst"
             assert row.path is None  # catalog rows never carry a local path
 
@@ -761,8 +761,8 @@ def test_app_filter_narrows_catalog_to_matching_substring(
             filter_input = app.query_one("#filter-input", Input)
             filter_input.value = "qcow2"
             # Trigger the submitted handler the way Enter does.
-            app._filter = "qcow2"  # type: ignore[reportPrivateUsage]
-            app._populate_images()  # type: ignore[reportPrivateUsage]
+            app._filter = "qcow2"
+            app._populate_images()
             await pilot.pause()
             assert images_table.row_count == 2  # alpha + gamma match qcow2
 
@@ -792,8 +792,8 @@ def test_app_filter_escape_clears_and_repopulates(
             from textual.widgets import DataTable
 
             # Apply a filter that excludes ``beta``
-            app._filter = "alpha"  # type: ignore[reportPrivateUsage]
-            app._populate_images()  # type: ignore[reportPrivateUsage]
+            app._filter = "alpha"
+            app._populate_images()
             await pilot.pause()
             images_table = app.query_one("#images_table", DataTable)
             assert images_table.row_count == 1
@@ -801,7 +801,7 @@ def test_app_filter_escape_clears_and_repopulates(
             # escape should clear the filter
             await pilot.press("escape")
             await pilot.pause()
-            assert app._filter == ""  # type: ignore[reportPrivateUsage]
+            assert app._filter == ""
             assert images_table.row_count == 2  # both rows back
             assert any("Filter cleared" in s for s in statuses)
 
@@ -897,7 +897,7 @@ def test_flash_status_screen_ticks_stages_on_success(
                 await pilot.pause()
 
             # All five stages should be done.
-            for ev_name, _ in tui_app.FlashStatusScreen._STAGES:  # type: ignore[reportPrivateUsage]
+            for ev_name, _ in tui_app.FlashStatusScreen._STAGES:
                 widget = screen.query_one(f"#stage-{ev_name}", Static)
                 assert "done" in widget.classes, (
                     f"stage {ev_name} not marked done: classes={widget.classes}"
@@ -978,11 +978,9 @@ def test_flash_status_screen_cancel_button_sets_event_and_dismisses_cancelled(
                 await pilot.pause()
                 # ``_result`` flips to "cancelled" once the worker
                 # raises FlashCancelled and ``_finish`` runs.
-                if screen._result is not None:  # type: ignore[reportPrivateUsage]
+                if screen._result is not None:
                     break
-            assert screen._result == "cancelled", (  # type: ignore[reportPrivateUsage]
-                f"expected cancelled, got {screen._result!r}"  # type: ignore[reportPrivateUsage]
-            )
+            assert screen._result == "cancelled", f"expected cancelled, got {screen._result!r}"
             # Close button is now enabled; Cancel button is now disabled.
             cancel_btn = screen.query_one("#cancel-flash", Button)
             close_btn = screen.query_one("#close", Button)
@@ -1123,16 +1121,16 @@ def test_wizard_advances_on_image_row_enter(
             await pilot.pause()
 
             # Initial state: Stage 1, focus on images_table.
-            assert app._stage == tui_app._WizardStage.SELECT_IMAGE  # type: ignore[reportPrivateUsage]
+            assert app._stage == tui_app._WizardStage.SELECT_IMAGE
             assert app.focused is not None
             assert app.focused.id == "images_table"
 
             await pilot.press("enter")
             await pilot.pause()
 
-            assert app._selected_image is not None  # type: ignore[reportPrivateUsage]
-            assert app._selected_image.name == "advance.qcow2"  # type: ignore[reportPrivateUsage]
-            assert app._stage == tui_app._WizardStage.SELECT_DISK  # type: ignore[reportPrivateUsage]
+            assert app._selected_image is not None
+            assert app._selected_image.name == "advance.qcow2"
+            assert app._stage == tui_app._WizardStage.SELECT_DISK
             assert app.focused is not None
             assert app.focused.id == "disks_table"
 
@@ -1158,14 +1156,14 @@ def test_wizard_back_clears_disk_selection(tmp_path: Path, monkeypatch: pytest.M
             await pilot.pause()
             await pilot.press("enter")  # Stage 2 -> Stage 3
             await pilot.pause()
-            assert app._stage == tui_app._WizardStage.CONFIRM_FLASH  # type: ignore[reportPrivateUsage]
+            assert app._stage == tui_app._WizardStage.CONFIRM_FLASH
 
             # Esc -> back to Stage 2.
             await pilot.press("escape")
             await pilot.pause()
-            assert app._selected_disk is None  # type: ignore[reportPrivateUsage]
-            assert app._selected_image is not None  # type: ignore[reportPrivateUsage]  # image preserved
-            assert app._stage == tui_app._WizardStage.SELECT_DISK  # type: ignore[reportPrivateUsage]
+            assert app._selected_disk is None
+            assert app._selected_image is not None  # image preserved
+            assert app._stage == tui_app._WizardStage.SELECT_DISK
             assert app.focused is not None
             assert app.focused.id == "disks_table"
 
@@ -1193,19 +1191,19 @@ def test_wizard_back_via_backspace_all_the_way(
             await pilot.pause()
             await pilot.press("enter")
             await pilot.pause()
-            assert app._stage == tui_app._WizardStage.CONFIRM_FLASH  # type: ignore[reportPrivateUsage]
+            assert app._stage == tui_app._WizardStage.CONFIRM_FLASH
 
             # Backspace #1: Stage 3 -> Stage 2.
             await pilot.press("backspace")
             await pilot.pause()
-            assert app._stage == tui_app._WizardStage.SELECT_DISK  # type: ignore[reportPrivateUsage]
+            assert app._stage == tui_app._WizardStage.SELECT_DISK
 
             # Backspace #2: Stage 2 -> Stage 1.
             await pilot.press("backspace")
             await pilot.pause()
-            assert app._stage == tui_app._WizardStage.SELECT_IMAGE  # type: ignore[reportPrivateUsage]
-            assert app._selected_image is None  # type: ignore[reportPrivateUsage]
-            assert app._selected_disk is None  # type: ignore[reportPrivateUsage]
+            assert app._stage == tui_app._WizardStage.SELECT_IMAGE
+            assert app._selected_image is None
+            assert app._selected_disk is None
             assert app.focused is not None
             assert app.focused.id == "images_table"
 
@@ -1249,20 +1247,16 @@ def test_action_flash_success_flips_button_to_reboot(
 
         async with app.run_test() as pilot:
             await pilot.pause()
-            app._selected_image = next(  # type: ignore[reportPrivateUsage]
-                iter(app._images_by_key.values())  # type: ignore[reportPrivateUsage]
-            )
-            app._selected_disk = next(  # type: ignore[reportPrivateUsage]
-                iter(app._disks_by_key.values())  # type: ignore[reportPrivateUsage]
-            )
-            app._render_status()  # type: ignore[reportPrivateUsage]
-            assert app._stage == tui_app._WizardStage.CONFIRM_FLASH  # type: ignore[reportPrivateUsage]
+            app._selected_image = next(iter(app._images_by_key.values()))
+            app._selected_disk = next(iter(app._disks_by_key.values()))
+            app._render_status()
+            assert app._stage == tui_app._WizardStage.CONFIRM_FLASH
 
             app.action_flash()  # type: ignore[unused-coroutine]
             for _ in range(20):
                 await pilot.pause()
 
-            assert app._post_flash is True  # type: ignore[reportPrivateUsage]
+            assert app._post_flash is True
             flash_btn = app.query_one("#flash-btn", Button)
             # Button label flipped to "Reboot" so the operator's
             # next press fires the reboot action instead of flash.
@@ -1292,8 +1286,8 @@ def test_catalog_picker_opens_and_dismisses_cleanly(
     async def _drive() -> None:
         async with app.run_test() as pilot:
             await pilot.pause()
-            initial_root = app._image_root  # type: ignore[reportPrivateUsage]
-            initial_source = app._catalog_source  # type: ignore[reportPrivateUsage]
+            initial_root = app._image_root
+            initial_source = app._catalog_source
 
             await pilot.press("c")
             for _ in range(10):
@@ -1307,8 +1301,8 @@ def test_catalog_picker_opens_and_dismisses_cleanly(
             for _ in range(10):
                 await pilot.pause()
             # Catalog unchanged when dismissed without selection.
-            assert app._image_root == initial_root  # type: ignore[reportPrivateUsage]
-            assert app._catalog_source == initial_source  # type: ignore[reportPrivateUsage]
+            assert app._image_root == initial_root
+            assert app._catalog_source == initial_source
 
     _run(_drive())
 
@@ -1339,22 +1333,18 @@ def test_d_binding_loads_default_catalog_url(
     async def _drive() -> None:
         async with app.run_test() as pilot:
             await pilot.pause()
-            assert app._catalog_source is None  # type: ignore[reportPrivateUsage]
+            assert app._catalog_source is None
 
             await pilot.press("d")
             for _ in range(10):
                 await pilot.pause()
 
             # Catalog source flipped to bty's published catalog URL.
-            assert (  # type: ignore[reportPrivateUsage]
-                app._catalog_source == tui_app._BTY_DEFAULT_CATALOG_URL
-            )
+            assert app._catalog_source == tui_app._BTY_DEFAULT_CATALOG_URL
             # pxe-done base derived from the URL's host (so a TUI
             # launched without --mac/--catalog can still POST done
             # to bty-web instances reached via the default catalog).
-            assert (  # type: ignore[reportPrivateUsage]
-                app._pxe_done_base == "https://github.com"
-            )
+            assert app._pxe_done_base == "https://github.com"
             # The catalog row from the mocked source landed in the
             # table; confirms repopulate triggered.
             from textual.widgets import DataTable

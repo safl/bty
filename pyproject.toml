@@ -1,6 +1,6 @@
 [project]
 name = "bty-lab"
-version = "0.12.3"
+version = "0.12.4"
 description = "Flash images onto target disks, locally or over PXE"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -101,6 +101,15 @@ ignore_missing_imports = true
 [tool.pyright]
 include = ["src", "tests", "docs/tooling/src"]
 extraPaths = ["src", "docs/tooling/src"]
+
+# Tests intentionally poke at private state (``_filter``,
+# ``_images_by_key``, ``_selected_image``, etc.) to exercise
+# internal invariants. Silencing reportPrivateUsage here keeps
+# pyright honest about src/ private access while letting tests
+# do their job without 40+ inline ``# type: ignore`` markers.
+[[tool.pyright.executionEnvironments]]
+root = "tests"
+reportPrivateUsage = "none"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
