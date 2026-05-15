@@ -71,11 +71,10 @@ def pick_target() -> str:
     disk; a future ``bty.target=`` cmdline param could let the
     server override for multi-disk hosts.
 
-    Shells out to ``lsblk -d -e7 -J`` (the same form recommended in
-    the docs for disk discovery -- ``-d`` strips partitions, ``-e7``
-    excludes loop devices). Used to call ``bty list disks --json``
-    but that wrapper was dropped in v0.8.4; lsblk's structured
-    output is the documented replacement.
+    Shells out to ``lsblk -d -e7 -J`` (the same form documented for
+    disk discovery -- ``-d`` strips partitions, ``-e7`` excludes
+    loop devices). lsblk's structured JSON is what bty's own
+    ``list disks`` codepath consumes too, so no wrapper here.
     """
     out = subprocess.run(
         ["lsblk", "-d", "-e7", "-J", "-o", "PATH,RM,RO,TYPE"],
@@ -87,8 +86,9 @@ def pick_target() -> str:
     for disk in payload.get("blockdevices", []):
         if disk.get("type") != "disk":
             continue
-        # lsblk emits ``rm`` / ``ro`` as booleans in JSON (older
-        # versions emitted "0" / "1" strings; tolerate both).
+        # lsblk emits ``rm`` / ``ro`` as JSON booleans; the wider
+        # match (True / "1" / 1) is a one-line safety belt against
+        # lsblk format drift across distros.
         if disk.get("rm") in (True, "1", 1):
             continue
         if disk.get("ro") in (True, "1", 1):

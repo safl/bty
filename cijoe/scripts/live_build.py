@@ -102,17 +102,17 @@ def main(args, cijoe):
         log.error("lb build failed; see live-build.log under the build dir")
         return err
 
-    # Locate the artefacts. live-build's netboot mode has shifted output
-    # paths between versions ('binary/live/' historically; sometimes
-    # tarballed; sometimes split across binary/live/ + a top-level
-    # 'live-image-amd64.tar.xz'). Recursive globs find them wherever
-    # they ended up. Filter ``vmlinuz*`` matches to skip the chroot/boot/
-    # copy that lb leaves behind for caching.
+    # Locate the artefacts. live-build's netboot output paths vary
+    # between releases (``binary/live/`` direct, tarballed under
+    # ``binary/`` as ``live-image-amd64.tar.xz``, or split across
+    # both); recursive globs find them wherever they ended up.
+    # Filter ``vmlinuz*`` matches to skip the chroot/boot/ copy that
+    # lb leaves behind for caching.
     def _outside_chroot(p: Path) -> bool:
         return "chroot" not in p.parts
 
-    # Dump the build dir for diagnostics; turns out invaluable when
-    # live-build's output layout changes again.
+    # Dump the build dir for diagnostics so the next time live-build's
+    # output layout changes we can see the new shape in the logs.
     cijoe.run_local(f"sudo find {build_dir} -maxdepth 4 -type d 2>/dev/null | head -60")
 
     kernels = sorted(p for p in build_dir.rglob("vmlinuz*") if _outside_chroot(p))

@@ -8,8 +8,8 @@
 #
 # Output: ``bty-server-rpi-arm64.img.gz`` (dd onto an SD card; works on
 # Raspberry Pi 4 and 5). Gzip rather than zstd for universal flasher
-# compat (Etcher / Imager / dd) -- same rationale that drove the .iso.gz
-# switch in v0.5.4.
+# compat (Etcher / Imager / dd) -- the appliance is flashed once per
+# operator setup, so flash-time decompression speed doesn't matter.
 #
 # Build host requirements:
 #   - amd64 Linux with ``binfmt_misc`` and ``qemu-user-static`` (so the

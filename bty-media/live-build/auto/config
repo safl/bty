@@ -80,14 +80,14 @@ lb config noauto \
 # compressed) buys "boots on whatever bare-metal box the operator
 # points it at" -- the alternative is the operator hits a missing
 # firmware -> driver init failure -> dead NIC and can't proceed.
-# Trimming back to a curated list was tried earlier; recurring
-# Realtek / WiFi failures on consumer mini-PCs drove the reversal.
+# A curated list is too narrow: Realtek WiFi/BT chipsets alone
+# span half a dozen firmware packages and consumer mini-PCs cycle
+# them quickly.
 # The trixie-backports archive layered via
 # ``config/archives/backports.list.chroot`` plus the pin in
 # ``config/preferences/backports.pref.chroot`` makes apt pull the
 # newest kernel + firmware Debian ships, not just trixie's.
-# Note: an earlier iteration tried ``--syslinux-timeout 1`` here per
-# advice from elsewhere; live-build trixie (20250814) doesn't
-# recognise that flag and ``lb config`` errors out. Bootloader-menu
-# suppression is handled in
-# ``hooks/binary/0500-bty-skip-bootloader-menu.hook.binary`` instead.
+# Bootloader-menu suppression: see
+# ``hooks/binary/0500-bty-skip-bootloader-menu.hook.binary``. Don't
+# add ``--syslinux-timeout`` here -- live-build trixie doesn't
+# recognise that flag and ``lb config`` errors out.

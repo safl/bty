@@ -26,13 +26,10 @@ Workflow:
    single dd-able file carries both the boot path and the
    operator's image catalog.
 5. Compress the pre-built ISO with ``gzip -9`` to get under GitHub's
-   2 GiB per-release-asset upload limit. gzip is chosen over xz
-   because Etcher's bundled xz decompressor fails on our output
-   regardless of how the .iso.xz is shaped (single-stream,
-   single-block, lower preset, none of it helps); gzip is
-   universally supported by Etcher / Rufus / Raspberry Pi Imager
-   / dd. Cost: ~50-100 MB larger output, no operator-side
-   downside.
+   2 GiB per-release-asset upload limit. gzip rather than xz: every
+   flasher (Etcher / Rufus / Raspberry Pi Imager) handles gzip
+   natively, and xz support drifts. Cost: ~50-100 MB larger output,
+   no operator-side downside.
 6. Write a sha256 manifest covering the .iso.gz.
 
 The cwd at run time is ``cijoe/`` (the Makefile cd's there before
@@ -63,65 +60,23 @@ PUBLISH_GZ_BASENAME = "bty-usb-x86_64.iso.gz"
 # an exFAT partition labelled BTY_IMAGES. Operators ``dd`` the
 # pre-built artifact to a stick (Etcher / RPi Imager / Rufus DD-mode
 # read .iso.gz natively, no decompress step needed), drop
-# ``*.img.zst`` files into the writable exFAT partition from any
+# ``*.img.gz`` files into the writable exFAT partition from any
 # host OS, then boot.
 #
-# Sized at 4 GiB to keep the dd-to-stick step fast: the .iso file
-# is mostly the BTY_IMAGES region, so each pre-allocated GiB is a
-# GiB of bytes the operator's host has to actually write to the
-# stick (BalenaEtcher / dd / Rufus do not sparsify -- the xz
-# decompressor produces real zero bytes that get streamed to USB
-# at the stick's full write speed). 4 GiB writes in ~50-100 sec
-# on a typical USB-3 stick; the previous 14 GiB target took ~5
-# minutes per stick and operators flash sticks frequently.
-#
-# Why 4 GiB specifically: the dominant bty use case is flashing
-# the bty-server appliance from a freshly written stick. A
-# zstd-compressed bty-server image is ~1.0-1.5 GiB; 4 GiB leaves
-# room for the server image plus 1-2 additional images (e.g. a
-# workstation variant) with comfortable headroom. Operators who
-# need more can grow the partition on their host with gparted
-# after dd-ing the stick -- no need to rebuild the .iso. For the
-# bty-server flash use case this is rarely needed.
-#
-# bty-server first-boot grows its rootfs to fill the operator's
-# real disk via ``bty-grow-rootfs.service``. The bty-usb stick
-# is intentionally "what you dd is what you get": the operator
-# may drop image files onto BTY_IMAGES before ever booting the
-# stick, so we can't depend on a first-boot grow step.
-# 2.1 GiB target: enough room for a fleet of small ``.bri``
-# descriptors plus either one large ``.img.gz`` (e.g. a Debian
-# server image) or several smaller ones. Smaller than the original
-# 4 GiB so the bty.iso plays nicely with Ventoy (which hosts the
-# images on its own data partition) and KVM-over-IP shims like
-# piKVM / JetKVM (which rely on the .bri-pointer flow rather than
-# embedded blobs). Operators who want more can grow the partition
-# on their host via ``gparted`` post-flash; the live env reads
-# whatever exFAT size it finds.
+# Sized for the single-stick offline workflow: operator carries one
+# stick to an air-gapped target with bty-server.img.gz already on
+# BTY_IMAGES. 2.1 GiB fits one server image (~1-1.5 GiB) plus a few
+# ``.bri`` descriptors, and keeps the artefact small enough to play
+# nicely with Ventoy + KVM-over-IP shims (piKVM / JetKVM) that
+# bypass this partition via the .bri-pointer flow or
+# bty-images-discover. Operators who want more space can grow the
+# partition on their host with gparted after dd-ing the stick; the
+# live env reads whatever exFAT size it finds.
 #
 # Encoded as ``2150M`` (mebibytes) rather than ``2.1G`` because GNU
 # ``truncate`` rejects fractional sizes -- ``+2.1G`` would error out
 # with ``Invalid number``. 2150 MiB is 2.0996 GiB, close enough to
 # the stated 2.1 GiB target.
-#
-# We've revisited the "drop / shrink BTY_IMAGES" question (most
-# recently in v0.8.4 design): the raw ``.iso`` is ~4.5 GiB
-# (~2.4 GiB live env + ~2.1 GiB sparse BTY_IMAGES) which is paid in
-# full on every transfer to Ventoy / piKVM / JetKVM, even though
-# those paths can't reach the partition. Compressed ``.iso.gz`` is
-# ~410 MiB (sparse zeros gzip near-flat). We considered (a) dropping
-# the partition entirely, (b) shrinking to ~1 GiB, (c) tiny-with-
-# grow-on-demand. The single-stick offline workflow (operator
-# carries one stick to an air-gapped target, e.g. updating a family
-# member's box) is the use case that uniquely depends on this
-# partition; the shim paths (Ventoy + IP-KVMs) have alternative
-# routes (the ``bty-images-discover`` service finds external sticks,
-# the TUI's ``i`` shortcut bootstraps bty-server from GitHub, the
-# TUI's ``c`` shortcut switches to a remote bty-web catalog).
-# Decision: keep at 2.1 GiB. The transfer-cost-for-no-benefit on
-# the shim paths is paid once at piKVM image-library setup (then
-# amortized across many flashes); the single-stick offline workflow
-# is preserved with zero added complexity for the operator.
 TRAILING_EXFAT_SIZE = "2150M"
 
 # Compress the pre-built ISO with gzip. We tried xz first (zstd lacks
@@ -244,23 +199,24 @@ def main(args, cijoe):
 
     # Verify the binary-stage hook actually ran + the bootloader
     # menus are suppressed. Catches the "hook silently doesn't
-    # execute" class of bugs (the dir-mismatch saga that bit
-    # v0.5.2..v0.5.9 before the hook was moved from
-    # ``config/hooks/binary/`` to ``config/hooks/normal/``).
+    # execute" class of bugs -- live-build discovers binary-stage
+    # hooks under ``config/hooks/normal/`` with a ``.binary``
+    # suffix, NOT under ``config/hooks/binary/``; a wrong location
+    # produces a green build with no menu suppression applied.
     err = _verify_bootloader_suppression(cijoe, build_dir)
     if err:
         return err
 
-    # Locate the artifact. live-build's iso-hybrid output naming has
-    # drifted between releases: historically ``binary.hybrid.iso``,
-    # later ``live-image-amd64.hybrid.iso``. Recursive glob picks up
+    # Locate the artifact. live-build's iso-hybrid output naming
+    # varies between releases (``binary.hybrid.iso`` /
+    # ``live-image-amd64.hybrid.iso``); a recursive glob picks up
     # whichever it ended up as. Filter chroot/ matches to skip cache
     # copies lb leaves behind.
     def _outside_chroot(p: Path) -> bool:
         return "chroot" not in p.parts
 
-    # Dump the build dir for diagnostics; turns out invaluable when
-    # live-build's output layout changes again.
+    # Dump the build dir for diagnostics so the next time live-build's
+    # output layout changes we can see the new shape in the logs.
     cijoe.run_local(f"sudo find {build_dir} -maxdepth 4 -type d 2>/dev/null | head -60")
 
     isos = sorted(p for p in build_dir.rglob("*.hybrid.iso") if _outside_chroot(p))
@@ -300,10 +256,10 @@ def main(args, cijoe):
     # regressions in the pre-built ISO (partition count / types /
     # overlap / BTY_IMAGES label / exFAT mountability) before
     # we waste CI cycles on the gzip step. Necessary but not
-    # sufficient -- doesn't catch host-OS handler bugs (e.g.
-    # Etcher's xz decompressor through v0.4.1-v0.5.3); those
-    # need hardware verification per
-    # ``feedback_verify_flasher_compat`` discipline.
+    # sufficient -- doesn't catch host-OS handler bugs (the
+    # ``feedback_verify_flasher_compat`` rule: any compression /
+    # partition / boot-layout change ships with a hardware test
+    # on Etcher / Rufus, not just Linux assertions).
     err = _verify_iso(cijoe, dst)
     if err:
         return err
@@ -344,11 +300,12 @@ def _verify_bootloader_suppression(cijoe, build_dir: Path) -> int:
     suppressed in the pre-built binary tree.
 
     Catches the "hook silently doesn't execute" class of failures
-    (v0.5.2..v0.5.9 saga: hook lived at the wrong path, never ran,
-    every "fix the bootloader menu" iteration was a no-op).
-    Runs against ``_build/usb-x86/binary/`` after ``lb build``
-    completes so we fail the bake locally instead of waiting for
-    a hardware test to surface the issue.
+    -- live-build discovers binary-stage hooks under
+    ``config/hooks/normal/`` with a ``.binary`` suffix; a hook at
+    the wrong path produces a green build with no menu suppression
+    applied. Runs against ``_build/usb-x86/binary/`` after
+    ``lb build`` completes so we fail the bake locally instead of
+    waiting for a hardware test to surface the issue.
 
     Checks (each fails the bake with a specific error message):
 
@@ -430,11 +387,9 @@ def _verify_bootloader_suppression(cijoe, build_dir: Path) -> int:
 def _verify_iso(cijoe, iso_path: Path) -> int:
     """Linux-side post-bake structural checks on the pre-built ISO.
 
-    Catches the layout regressions we've broken before:
+    Asserts the expected layout:
 
-    - 3 partitions in the MBR (was 2 before the BTY_IMAGES partition
-      was added; layout regressed silently from v0.4.1 onward when
-      xz-related churn moved attention away from layout testing).
+    - 3 partitions in the MBR.
     - Non-overlapping byte ranges (Windows enumeration breaks if
       violated).
     - p1 type 0 + bootable flag (live-build's iso-hybrid + isohdpfx.bin).
@@ -443,11 +398,11 @@ def _verify_iso(cijoe, iso_path: Path) -> int:
       Linux (proves mkfs.exfat completed and the FAT/bitmap/root are
       coherent).
 
-    Necessary but not sufficient. Doesn't catch host-OS handler
-    bugs -- Etcher's xz decompressor failed for ~4 releases despite
-    every Linux-side check passing. Hardware verification on a real
-    flasher is still required before tagging any publish-format
-    change (see ``feedback_verify_flasher_compat`` in memory).
+    Necessary but not sufficient: Linux-side checks can't surface
+    host-OS handler bugs (Windows Etcher / Rufus decompressors).
+    Hardware verification on a real flasher is still required
+    before tagging any publish-format change (see
+    ``feedback_verify_flasher_compat`` in memory).
     """
     log.info(f"Verifying pre-built ISO structure: {iso_path}")
 
@@ -713,11 +668,12 @@ def _extend_with_exfat(cijoe, iso_path: Path) -> int:
     #
     # Fail-loud: if the populate step fails (mount failure, write
     # failure, exfat-fuse missing on the runner), the whole bake
-    # fails. Earlier v0.7.x / v0.8.6 / v0.8.7 sticks silently shipped
-    # empty when the mount fell through to the "best-effort warning"
-    # path; we'd rather lose the build artifact than ship another
-    # broken stick. The detection mechanism the v0.7.16 hardening
-    # added has to stay live in every subsequent version.
+    # fails. The alternative -- silently shipping a stick with an
+    # empty BTY_IMAGES partition because the mount fell through to
+    # a "best-effort warning" path -- is strictly worse: a USB
+    # stick that boots and finds no images is a broken artefact
+    # that requires hands-on diagnosis to distinguish from a real
+    # delivery problem.
     err = _populate_bty_images_partition(cijoe, part_dev)
     if err:
         cijoe.run_local(f"sudo losetup -d {loop}")
@@ -810,8 +766,7 @@ def _populate_bty_images_partition(cijoe, part_dev: str) -> int:
     the starter ``.bri`` set into it. Returns 0 on success, errno-
     style int on failure.
 
-    Hardened against the silent-empty-partition failure mode that
-    v0.7.9 .. v0.7.15 and again v0.8.5 .. v0.8.7 shipped:
+    Hardened against the silent-empty-partition failure mode:
 
     - Each .bri body is staged locally to a tempfile *before* mount,
       then ``sudo cp``'d in. Avoids heredoc-via-cijoe-shell quoting

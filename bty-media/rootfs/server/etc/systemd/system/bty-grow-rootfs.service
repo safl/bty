@@ -3,7 +3,7 @@ Description=Grow bty server rootfs to fill the disk on first boot
 Documentation=https://github.com/safl/bty
 # The cooked server appliance is baked at a fixed 6 GiB disk size
 # (see ``cijoe/scripts/diskimage_build.py::DISK_SIZE``) so the
-# .img.zst stays small. On first boot after dd to a real server
+# .img.gz stays small. On first boot after dd to a real server
 # disk we expand the rootfs partition + filesystem to fill the
 # actual disk size. Sentinel-gated so the work happens exactly
 # once over the appliance's lifetime.

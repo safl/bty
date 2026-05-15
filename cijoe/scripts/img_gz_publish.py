@@ -10,13 +10,12 @@ gzip - all of them) onto a target disk.
 
 Why gzip rather than zstd: bty-shipped appliance images are
 flashed once during operator setup, not on a per-job CI hot
-path. The flash-time decompression-speed argument that
-originally drove .zst applies to operator-supplied target
-images (which the bty flash code still accepts in any of
-.img.{zst,xz,gz,bz2}); for the appliance itself, gzip's
-universal flasher / OS / tooling support wins over zstd's
-marginal speed advantage on a one-shot setup. Same rationale
-that drove the .iso.xz -> .iso.gz switch in v0.5.4.
+path. zstd's flash-time decompression-speed advantage matters
+for operator-supplied target images (which the bty flash code
+still accepts in any of .img.{zst,xz,gz,bz2}); for the
+appliance itself, gzip's universal flasher / OS / tooling
+support wins over zstd's marginal speed advantage on a one-
+shot setup.
 
 Reads the ``publish`` section of ``system-imaging.images.<image_name>``:
 
@@ -77,10 +76,8 @@ def main(args, cijoe):
         log.error("Failed converting qcow2 to raw")
         return err
 
-    # ``gzip -<level> -c`` writes to stdout; ``-f`` overwrites the
-    # destination. Single-stream output is what every flasher / OS
-    # tooling handles uniformly (the lesson from v0.5.4's .iso.gz
-    # switch carried over).
+    # ``gzip -<level> -c`` writes to stdout. Single-stream output is
+    # what every flasher / OS tooling handles uniformly.
     log.info(f"Compressing {raw_path} -> {gz_path} (gzip -{level})")
     err, _ = cijoe.run_local(f"sh -c 'gzip -{level} -c {raw_path} > {gz_path}'")
     if err:

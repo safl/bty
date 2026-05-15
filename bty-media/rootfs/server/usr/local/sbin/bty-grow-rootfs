@@ -3,7 +3,7 @@
 # to fill the disk on first boot.
 #
 # The cooked server image is baked at a fixed 6 GiB disk size to
-# keep the .img.zst small and dd-time fast. After the operator
+# keep the .img.gz small and dd-time fast. After the operator
 # dd's it to a real server disk (typically 100s of GB), the
 # rootfs is still only 6 GiB and bty-web's image catalog +
 # state DB run out of headroom fast. This script grows the

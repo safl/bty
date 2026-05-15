@@ -24,9 +24,10 @@ plymouth-themes
 # + ``config/preferences/backports.pref.chroot`` make apt resolve
 # each ``firmware-*`` to its trixie-backports version, which has
 # noticeably newer blobs (iwlwifi MAC firmware, realtek RTL8851/
-# 8852 WiFi, amdgpu / i915 microcode revisions). Curated trimming
-# was tried in earlier releases; Realtek + Wi-Fi failures on
-# consumer mini-PCs drove the reversal.
+# 8852 WiFi, amdgpu / i915 microcode revisions). A curated
+# subset is too narrow: Realtek WiFi/BT chipsets alone span half
+# a dozen firmware packages and consumer mini-PCs cycle them
+# quickly.
 
 # NetworkManager pulls in ``nmtui`` (a curses-friendly network picker)
 # and the daemon that backs it. Use case: operator boots bty-usb on

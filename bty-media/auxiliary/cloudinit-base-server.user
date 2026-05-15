@@ -102,20 +102,18 @@ packages:
   # to parted), but list it explicitly so the dependency doesn't
   # depend on what cloud-utils Recommends in some future Debian.
   - parted
-  # Plymouth is intentionally NOT installed on the server appliance.
-  # It was tried twice (added in v0.4.x, dropped in v0.5.12, restored
-  # post-v0.5.14, dropped again in v0.7.2). Each time the same issue
-  # surfaces: plymouth's quit/teardown emits VT100 escape sequences
-  # to ``/dev/console``, and on a server with the standard
+  # Plymouth is intentionally NOT installed on the server appliance:
+  # its quit/teardown emits VT100 escape sequences to
+  # ``/dev/console``, and on a server with the standard
   # ``console=ttyS0,115200 console=tty0`` kernel cmdline that means
-  # garbage like ``[?7h[6;32766H`` lands on the serial console
-  # right before agetty draws the login banner. The figlet banner
-  # in /etc/issue + /etc/motd is the appliance's identity layer for
+  # garbage like ``[?7h[6;32766H`` lands on the serial console right
+  # before agetty draws the login banner. The figlet banner in
+  # /etc/issue + /etc/motd is the appliance's identity layer for
   # the headless case; a graphical splash adds no operational value
   # on a box the operator interacts with via SSH or the browser UI.
   # ``tests/test_smoke.py::test_server_cloudinit_does_not_install_plymouth``
-  # pins this so a third "let's add the splash back" cycle gets
-  # caught by tests rather than a fresh appliance boot.
+  # pins this so a "let's add the splash back" attempt gets caught
+  # by tests rather than by a fresh appliance boot.
 
 runcmd:
   # Install bty-lab[web] from the staged wheel into a system venv,
@@ -282,9 +280,11 @@ runcmd:
     #                                  if an operator rebuilds a
     #                                  custom kernel without
     #                                  CONFIG_RANDOM_TRUST_CPU=y.
-    #                                  Mitigates the v0.7.16 ~20-
-    #                                  minute boot waiting on
-    #                                  getrandom() symptom.
+    #                                  Without this, getrandom()
+    #                                  can block early-boot
+    #                                  services for many minutes
+    #                                  on hardware without virtio-
+    #                                  rng / RDRAND-trust.
     #   noresume                    -- skip hibernation-image probe
     #                                  on a fresh-flashed disk
     #                                  with no swap. Without it
@@ -318,10 +318,10 @@ runcmd:
   # hardware the kernel's early-init then waits 60-120s per
   # missing driver before falling through to the on-disk
   # ``/lib/modules`` set -- compounded across several devices,
-  # this is the ~20-minute slow-boot regression observed on N97
-  # mini-PCs in v0.7.x. ``MODULES=most`` packs everything
-  # initramfs-tools knows might be needed for boot; ~30 MB of
-  # extra initrd, fast-probes on every box.
+  # boot stalls for many minutes on consumer mini-PCs.
+  # ``MODULES=most`` packs everything initramfs-tools knows might
+  # be needed for boot; ~30 MB of extra initrd, fast-probes on
+  # every box.
   - |
     set -eu
     if [ -f /etc/initramfs-tools/initramfs.conf ]; then

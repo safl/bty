@@ -129,10 +129,10 @@ def main(args, cijoe):
     if rc != 0:
         return rc
 
-    # 4. Compress the customised image with gzip. v0.5.x switched
-    # bty's shipped images from .zst to .gz for universal flasher
-    # compat (see ``feedback_verify_flasher_compat`` memory note);
-    # operator-supplied images are still accepted in any of
+    # 4. Compress the customised image with gzip. bty's shipped
+    # images use .gz for universal flasher compat (see
+    # ``feedback_verify_flasher_compat`` memory note); operator-
+    # supplied images are still accepted in any of
     # .img.{zst,xz,gz,bz2} via the bty flash code.
     log.info(f"Compressing {raw_path} -> {gz_path} (gzip -{gzip_level})")
     if gz_path.exists():

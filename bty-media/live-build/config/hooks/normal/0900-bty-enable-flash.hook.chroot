@@ -33,15 +33,12 @@
 #   piKVM, JetKVM, and any other loop-mount shim that hides the
 #   bty.iso's internal partitions from the booted kernel.
 #
-# An auto-grow service used to live here too -- bty-grow-images
-# -partition. Removed because the live env's tmpfs sentinel
-# didn't survive reboots, so the service ran every boot and
-# destroyed operator data dropped between boots. Per repeated
-# user direction: bty-usb sticks ship at the baked 2.1 GiB
-# BTY_IMAGES size (shrunk from 4 GiB in v0.8.0); if an operator
-# wants more, gparted on the host is the right escape hatch (a
-# one-shot manual operation, not something the live env should
-# be doing on its own).
+# No auto-grow service: bty-usb sticks ship at the baked
+# BTY_IMAGES partition size. If an operator wants more space,
+# gparted on the host is the right escape hatch -- a one-shot
+# manual operation, not something the live env should do on its
+# own (a sentinel-gated grow service running on every boot risks
+# destroying operator data dropped between reboots).
 
 set -eu
 systemctl enable bty-flash-on-boot.service

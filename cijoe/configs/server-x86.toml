@@ -52,10 +52,10 @@ cloud.userdata_path = "bty-media/auxiliary/cloudinit-userdata.user"
 
 disk.path = "{{ local.env.HOME }}/system_imaging/disk/bty-server-x86_64.qcow2"
 
-# Final dd-able artifact: raw + gzip. bty-shipped images switched
-# from .zst to .gz in v0.5.x for universal flasher compat; the
-# operator-side flash code in src/bty/flash.py still accepts any
-# of .img.{zst,xz,gz,bz2} for operator-supplied target images.
+# Final dd-able artifact: raw + gzip. bty-shipped images use .gz
+# for universal flasher compat; operator-supplied target images
+# are still accepted in any of .img.{zst,xz,gz,bz2} via the flash
+# code in src/bty/flash.py.
 publish.raw_path = "{{ local.env.HOME }}/system_imaging/disk/bty-server-x86_64.img"
 publish.gz_path = "{{ local.env.HOME }}/system_imaging/disk/bty-server-x86_64.img.gz"
 publish.gzip_level = 9
