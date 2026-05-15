@@ -109,11 +109,11 @@ class StaleSchemaError(RuntimeError):
     operator can act without grepping the source."""
 
 
-# Columns that were added to existing tables after the initial
-# schema landed. Each entry is checked on every ``init_db`` call;
-# a missing column raises :class:`StaleSchemaError` with an
-# operator-actionable message instead of letting the first
-# subsequent ``SELECT`` blow up with ``no such column``.
+# Columns the current schema requires. Each entry is checked on
+# every ``init_db`` call against an existing DB; a missing column
+# raises :class:`StaleSchemaError` with an operator-actionable
+# message ("rm state.db") instead of letting the first subsequent
+# ``SELECT`` blow up with ``no such column``.
 _REQUIRED_COLUMNS: dict[str, tuple[str, ...]] = {
     "events": ("source_ip",),
     "machines": ("bty_image_ref",),

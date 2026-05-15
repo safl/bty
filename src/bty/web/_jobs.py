@@ -44,6 +44,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import threading
 import time
 from typing import Generic, Protocol, TypeVar
 
@@ -67,9 +68,7 @@ class _CancelableState(Protocol):
     status: str
     started_at: float | None
     finished_at: float | None
-
-    @property
-    def _cancel(self) -> object: ...
+    _cancel: threading.Event
 
 
 StateT = TypeVar("StateT", bound=_CancelableState)
@@ -106,7 +105,7 @@ class _BaseAsyncManager(Generic[StateT]):
         async with self._lock:
             for st in self._states.values():
                 if st.status in PENDING_STATES:
-                    st._cancel.set()  # type: ignore[attr-defined]
+                    st._cancel.set()
                     if st.status == "queued":
                         st.status = "cancelled"
                         st.finished_at = time.time()
@@ -129,7 +128,7 @@ class _BaseAsyncManager(Generic[StateT]):
                 return None
             if state.status not in PENDING_STATES:
                 return state
-            state._cancel.set()  # type: ignore[attr-defined]
+            state._cancel.set()
             if state.status == "queued":
                 state.status = "cancelled"
                 state.finished_at = time.time()
