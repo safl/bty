@@ -692,6 +692,101 @@ def test_ui_settings_pxe_activate_failure_preserves_form_input(client: TestClien
     assert 'value="10.20.30.0/garbage"' in r.text
 
 
+def test_ui_settings_warns_when_netboot_env_incomplete(client: TestClient) -> None:
+    """Settings page surfaces a banner pinning the missing netboot
+    artifacts even before the operator activates PXE. Without the
+    banner an operator activates, clients chain into iPXE fine,
+    then 404 on the kernel fetch -- a footgun that lands as 'PXE
+    isn't working' instead of 'put the kernel in /var/lib/bty/boot'."""
+    _login(client)
+    r = client.get("/ui/settings")
+    assert r.status_code == 200
+    # The default fixture's boot_root is tmp_path/boot which doesn't
+    # exist, so every netboot artifact is missing.
+    assert "Netboot environment incomplete" in r.text
+    assert "bty-netboot-x86_64.vmlinuz" in r.text
+    assert "bty-netboot-x86_64.initrd" in r.text
+    assert "bty-netboot-x86_64.squashfs" in r.text
+    # And the operator gets a direct link to the boot-artifacts page.
+    assert 'href="/ui/boot"' in r.text
+
+
+def test_ui_settings_pxe_activate_warns_when_netboot_env_incomplete(
+    client: TestClient,
+) -> None:
+    """Activating PXE with no netboot env in boot_root must surface a
+    warning flash (not a plain success). Otherwise the operator
+    leaves /ui/settings thinking it's done and only finds out at the
+    target machine's PXE timeout that the kernel fetch is 404'ing."""
+    from unittest.mock import patch
+
+    _login(client)
+    with patch("bty.web._sysconfig.activate_pxe"):
+        r = client.post(
+            "/ui/settings/pxe-activate",
+            data={"interface": "eth0", "subnet": "192.168.1.0/24"},
+        )
+    assert r.status_code == 200
+    # Plain success message would say "PXE activated on ..." alone;
+    # the warning path embeds the specifics + the recovery hint.
+    assert "netboot environment is incomplete" in r.text
+    assert "alert-warning" in r.text
+    # The banner names what's missing.
+    assert "bty-netboot-x86_64.vmlinuz" in r.text
+
+
+def test_ui_settings_pxe_activate_clean_success_when_artifacts_present(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Activating PXE with the full kernel/initrd/squashfs trio under
+    boot_root must surface a plain success flash, not the missing-
+    artifact warning. Pairs with the warning test above to pin both
+    branches of the conditional."""
+    from unittest.mock import patch
+
+    image_root = tmp_path / "images"
+    image_root.mkdir()
+    (image_root / "demo.qcow2").write_bytes(b"\0" * 16)
+    boot_root = tmp_path / "boot"
+    boot_root.mkdir()
+    # Populate ALL three bootable artifacts (the .sha256 manifest is
+    # optional). The contents don't matter for this test, only that
+    # the files exist.
+    for name in (
+        "bty-netboot-x86_64.vmlinuz",
+        "bty-netboot-x86_64.initrd",
+        "bty-netboot-x86_64.squashfs",
+    ):
+        (boot_root / name).write_bytes(b"\0" * 16)
+    state = tmp_path / "state.db"
+    app = create_app(
+        state_path=state,
+        service_user=TEST_SERVICE_USER,
+        secret_key=TEST_SECRET_KEY,
+        image_root=image_root,
+        boot_root=boot_root,
+    )
+    import pamela
+
+    monkeypatch.setattr(pamela, "authenticate", lambda *a, **kw: True)
+
+    with TestClient(app, follow_redirects=False) as c:
+        r = c.post("/ui/login", data={"password": "x"}, follow_redirects=False)
+        assert r.status_code == 303, r.text
+        c.cookies.set("bty-token", r.cookies["bty-token"])
+        with patch("bty.web._sysconfig.activate_pxe"):
+            r = c.post(
+                "/ui/settings/pxe-activate",
+                data={"interface": "eth0", "subnet": "192.168.1.0/24"},
+            )
+        assert r.status_code == 200
+        # Plain success: no warning, no missing-artifact text.
+        assert "netboot environment is incomplete" not in r.text
+        assert "alert-success" in r.text
+        # And no missing-artifact banner on the rendered page either.
+        assert "Netboot environment incomplete" not in r.text
+
+
 def test_ui_settings_pxe_panel_warns_when_configured_iface_is_gone(client: TestClient) -> None:
     """When dnsmasq is bound to a NIC that no longer exists (renamed
     across reboot, USB ethernet unplugged), the Settings panel shows

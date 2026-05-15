@@ -91,6 +91,23 @@ FetchCancelCheck: TypeAlias = Callable[[], bool]
 a worker thread) can abort from outside."""
 
 
+def missing_netboot_artifacts(boot_dir: Path) -> list[str]:
+    """Names of the bootable artifacts NOT present in ``boot_dir``.
+
+    "Bootable" = the kernel + initrd + squashfs trio
+    (:data:`ARTIFACT_NAMES`). The ``.sha256`` manifest is
+    verification metadata that doesn't affect whether PXE clients
+    can boot, so it's intentionally NOT included here -- a missing
+    manifest doesn't break the chain.
+
+    Returns ``[]`` when the netboot env is complete. Callers
+    (``/ui/settings``, the PXE activate handler) treat a non-empty
+    return as "warn the operator: activating PXE now would let
+    clients chain into iPXE but they'd 404 fetching the kernel".
+    """
+    return [name for name in ARTIFACT_NAMES if not (boot_dir / name).is_file()]
+
+
 def inspect_boot_dir(boot_dir: Path) -> list[ArtifactState]:
     """Return the present/missing state of each expected artifact."""
     out: list[ArtifactState] = []

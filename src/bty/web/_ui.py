@@ -747,12 +747,23 @@ def register_ui_routes(
         # UI so the operator can deactivate + re-bind instead
         # of chasing why dnsmasq is silently failing.
         pxe_iface_present = pxe is not None and any(i.name == pxe.interface for i in interfaces)
+        # Netboot-env presence: PXE proxy-DHCP gets clients to
+        # chain into bty's iPXE script, but the script then
+        # ``kernel`` / ``initrd`` fetches against ``GET /boot/``
+        # land 404 if the kernel + initrd + squashfs trio hasn't
+        # been populated under ``boot_root``. Surface this in the
+        # UI so the operator sees the precondition before they
+        # activate (or right after, if they didn't notice the
+        # banner first time).
+        missing_netboot = _releases.missing_netboot_artifacts(boot_root)
         return render(
             "ui/settings.html",
             request,
             interfaces=interfaces,
             pxe=pxe,
             pxe_iface_present=pxe_iface_present,
+            missing_netboot_artifacts=missing_netboot,
+            boot_root=str(boot_root),
             new_token=new_token,
             settings_events=settings_events,
             flash=flash,
@@ -811,22 +822,53 @@ def register_ui_routes(
                 form_interface=interface,
                 form_subnet=subnet,
             )
+        # Netboot-env check: even with a successful proxy-DHCP +
+        # iPXE chain, clients can't actually boot if
+        # vmlinuz/initrd/squashfs aren't sitting under boot_root.
+        # Record either way (the missing list, possibly empty, lands
+        # in the audit detail so operators can see the activation's
+        # netboot precondition state in the timeline), but the
+        # operator-visible flash differs: warning if anything's
+        # missing, plain success if not.
+        missing_netboot = _releases.missing_netboot_artifacts(boot_root)
+        if missing_netboot:
+            summary = (
+                f"PXE activated on {interface!r} for {subnet!r}; "
+                f"netboot env incomplete (missing {', '.join(missing_netboot)})"
+            )
+            flash_message = (
+                f"PXE activated on {interface!r} for {subnet!r}, but the "
+                f"netboot environment is incomplete: missing "
+                f"{', '.join(missing_netboot)} under {boot_root}. "
+                f"PXE clients can chain into iPXE but will get 404 "
+                f"fetching the kernel. Populate the boot directory "
+                f"via the Boot artifacts page."
+            )
+            flash_kind: str = "warning"
+        else:
+            summary = f"PXE activated on {interface!r} for {subnet!r}"
+            flash_message = f"PXE activated on {interface!r} for {subnet!r}."
+            flash_kind = "success"
         with _db.open_db(state_path) as conn:
             _events_log.record(
                 conn,
                 kind="settings.pxe.activated",
-                summary=f"PXE activated on {interface!r} for {subnet!r}",
+                summary=summary,
                 subject_kind="settings",
                 subject_id="pxe",
                 actor="operator",
                 source_ip=client_ip,
-                details={"interface": interface, "subnet": subnet},
+                details={
+                    "interface": interface,
+                    "subnet": subnet,
+                    "missing_netboot_artifacts": missing_netboot,
+                },
             )
             conn.commit()
         return _render_settings_page(
             request,
-            flash=f"PXE activated on {interface!r} for {subnet!r}.",
-            flash_kind="success",
+            flash=flash_message,
+            flash_kind=flash_kind,
         )
 
     @app.post(

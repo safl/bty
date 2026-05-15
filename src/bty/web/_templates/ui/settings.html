@@ -34,6 +34,30 @@
             and restarts <code>dnsmasq</code> back to TFTP-only.
         </p>
 
+        {% if missing_netboot_artifacts %}
+        {# Netboot env incomplete: activating PXE now would let
+           clients chain into iPXE but they'd 404 fetching the
+           kernel. Surface the precondition prominently so the
+           operator sees it before they activate (or right after,
+           when the activate handler's warning flash arrives). #}
+        <div class="alert alert-warning d-flex justify-content-between align-items-start">
+            <div>
+                <i class="bi bi-exclamation-triangle-fill me-1"></i>
+                <strong>Netboot environment incomplete.</strong>
+                Missing under <code>{{ boot_root }}</code>:
+                {% for name in missing_netboot_artifacts %}
+                <code>{{ name }}</code>{% if not loop.last %}, {% endif %}
+                {% endfor %}.
+                PXE proxy-DHCP can still be activated, but clients chaining
+                into bty's iPXE script will 404 on the kernel fetch until
+                these files are present.
+            </div>
+            <a href="/ui/boot" class="btn btn-sm btn-outline-warning ms-3 flex-shrink-0">
+                <i class="bi bi-arrow-right-circle me-1"></i>Boot artifacts
+            </a>
+        </div>
+        {% endif %}
+
         {% if pxe %}
             {% if pxe_iface_present %}
             {# Healthy active state: configured interface still exists. #}
