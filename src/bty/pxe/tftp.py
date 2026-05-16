@@ -470,31 +470,50 @@ class _Transfer:
         expected_block: int,
     ) -> bool:
         """Send ``packet`` to the client, wait for an ACK with
-        ``block == expected_block``, retry up to ``max_retries`` times.
-        Returns True on success, False on giving up."""
+        ``block == expected_block``, retry up to ``max_retries``
+        times. Returns ``True`` on success, ``False`` on giving up.
+
+        Two nested loops:
+          * outer  -- one retransmit per iteration on real timeout.
+          * inner  -- drain stale / duplicate ACKs without
+            retransmitting. PXE ROMs commonly emit a dup-ACK when
+            they receive our retransmit (so they got our DATA twice);
+            resending the DATA *yet again* in response would waste
+            bandwidth without helping. We just discard the stale
+            ACK and keep waiting on the inner loop until either the
+            right ACK arrives or the per-retransmit timeout elapses.
+        """
+        loop = asyncio.get_running_loop()
         for attempt in range(self.max_retries + 1):
             transport.sendto(packet, self.client_addr)
-            try:
-                ack = await asyncio.wait_for(protocol.next_ack(), timeout=self.timeout)
-            except TimeoutError:
+            deadline = loop.time() + self.timeout
+            while True:
+                remaining = deadline - loop.time()
+                if remaining <= 0:
+                    # Genuine timeout: jump to the outer loop's
+                    # retransmit step (if we still have attempts).
+                    log.debug(
+                        "tftp: timeout waiting for ACK block %d from %s (attempt %d/%d)",
+                        expected_block,
+                        self.client_addr,
+                        attempt + 1,
+                        self.max_retries + 1,
+                    )
+                    break
+                try:
+                    ack = await asyncio.wait_for(protocol.next_ack(), timeout=remaining)
+                except TimeoutError:
+                    continue  # let the deadline check fire on the next inner pass
+                if ack.block == expected_block:
+                    return True
+                # Stale / duplicate ACK -- discard and keep waiting
+                # WITHOUT retransmitting.
                 log.debug(
-                    "tftp: timeout waiting for ACK block %d from %s (attempt %d/%d)",
+                    "tftp: stale ACK block %d (expected %d) from %s; ignoring",
+                    ack.block,
                     expected_block,
                     self.client_addr,
-                    attempt + 1,
-                    self.max_retries + 1,
                 )
-                continue
-            if ack.block == expected_block:
-                return True
-            # Out-of-order ACK -- some PXE ROMs send duplicate ACKs
-            # on retry; treat as a stale ack and keep waiting.
-            log.debug(
-                "tftp: stale ACK block %d (expected %d) from %s; ignoring",
-                ack.block,
-                expected_block,
-                self.client_addr,
-            )
         log.warning(
             "tftp: gave up waiting for ACK block %d from %s after %d retries",
             expected_block,

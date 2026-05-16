@@ -398,3 +398,62 @@ def test_listener_negotiates_blksize_via_oack(tmp_path: Path) -> None:
             listener_transport.close()
 
     _run(_drive())
+
+
+def test_listener_discards_duplicate_acks_without_retransmitting(tmp_path: Path) -> None:
+    """A duplicate ACK for an earlier block must NOT cause the
+    server to retransmit the current block -- PXE ROMs commonly
+    emit dup-ACKs when they receive our retransmit, and replying
+    with another retransmit wastes bandwidth without helping.
+
+    Two DATA blocks total. The client ACKs block 1, then sends a
+    SECOND ACK for block 1 (the dup), then ACKs block 2. The
+    server should only emit DATA block 2 once -- exactly one DATA
+    packet per block, no extras driven by the stale ACK."""
+    payload = b"\xcc" * (DEFAULT_BLKSIZE + 100)  # 2 blocks: full + tail
+    (tmp_path / "ipxe.efi").write_bytes(payload)
+    cfg = TftpConfig(
+        root=tmp_path,
+        allowlist=frozenset({"ipxe.efi"}),
+        block_timeout=2.0,
+        max_retries=2,
+    )
+
+    async def _drive() -> None:
+        listener_transport, listener_port = await _spawn_listener(cfg)
+        client_transport, client = await _spawn_test_client()
+        try:
+            client_transport.sendto(_build_rrq("ipxe.efi"), ("127.0.0.1", listener_port))
+            # Block 1 arrives.
+            data1, server_addr = await asyncio.wait_for(client.inbox.get(), timeout=5.0)
+            assert struct.unpack("!H", data1[:2])[0] == Opcode.DATA
+            assert struct.unpack("!H", data1[2:4])[0] == 1
+            # Send the legitimate ACK for block 1.
+            client_transport.sendto(struct.pack("!HH", Opcode.ACK, 1), server_addr)
+            # Now send a stale dup-ACK for block 1 -- this is what
+            # PXE ROMs do when they receive our retransmit. The
+            # server MUST NOT respond by retransmitting block 2;
+            # block 2 should arrive exactly once, driven by the
+            # legitimate ACK above.
+            client_transport.sendto(struct.pack("!HH", Opcode.ACK, 1), server_addr)
+            # Block 2 arrives -- once.
+            data2, _ = await asyncio.wait_for(client.inbox.get(), timeout=5.0)
+            assert struct.unpack("!H", data2[:2])[0] == Opcode.DATA
+            assert struct.unpack("!H", data2[2:4])[0] == 2
+            # Nothing else should be pending. If the dup-ACK had
+            # caused a retransmit, a second block-2 DATA would be
+            # in the queue right now.
+            try:
+                bonus = await asyncio.wait_for(client.inbox.get(), timeout=0.5)
+            except TimeoutError:
+                bonus = None
+            assert bonus is None, (
+                f"unexpected extra packet: opcode {struct.unpack('!H', bonus[0][:2])[0]}"
+            )
+            # Finish the transfer.
+            client_transport.sendto(struct.pack("!HH", Opcode.ACK, 2), server_addr)
+        finally:
+            client_transport.close()
+            listener_transport.close()
+
+    _run(_drive())

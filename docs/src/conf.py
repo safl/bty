@@ -27,7 +27,7 @@ exclude_patterns: list[str] = ["_build", "Thumbs.db", ".DS_Store"]
 
 # HTML output
 html_theme = "furo"
-html_title = "bty - flash images onto target disks, locally or over PXE"
+html_title = "bty - flash images onto target disks, locally or remote with and without PXE"
 html_static_path = ["_static"]
 
 # LaTeX / PDF output - pdflatex with sane UTF-8 (inputenc utf8). Avoid

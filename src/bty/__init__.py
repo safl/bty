@@ -1,4 +1,4 @@
-"""bty - flash images onto target disks, locally or over PXE.
+"""bty - flash images onto target disks, locally or remote with and without PXE.
 
 Top-level package. Subpackages:
 
