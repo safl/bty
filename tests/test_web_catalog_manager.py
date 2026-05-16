@@ -110,6 +110,141 @@ def test_enqueue_already_cached_shortcut(tmp_path: Path) -> None:
     _run(_drive())
 
 
+def test_enqueue_runs_to_completion_for_unhashed_entry(tmp_path: Path) -> None:
+    """Operator-visible bug fix: a catalog entry with sha256=None
+    (rolling oras tag, URL-only entry not yet hashed) used to
+    crash the worker because fetch_to_cache requires a pinned sha.
+    The manager now dispatches to fetch_src_to_cache for un-sha'd
+    entries: download + compute sha + write to cache_dir/<sha>,
+    set state.sha256 to the computed value, and back-fill
+    catalog_entries.disk_image_sha when state_path is given.
+    """
+    from bty.web import _db, _events_log
+
+    async def _drive() -> None:
+        payload = b"un-sha'd-bytes" * 100
+        computed_sha = hashlib.sha256(payload).hexdigest()
+        entry = _catalog.CatalogEntry(
+            name="rolling.img.gz",
+            src="https://example.com/rolling.img.gz",
+            sha256=None,
+        )
+        cat = _catalog.Catalog(version=1, entries=(entry,))
+        cache_dir = tmp_path / "cache"
+        state_path = tmp_path / "state.db"
+        # Seed an existing catalog_entries row so the back-fill
+        # update has something to land on.
+        _db.init_db(state_path)
+        import sqlite3
+
+        with sqlite3.connect(state_path) as conn:
+            conn.execute(
+                "INSERT INTO catalog_entries "
+                "(bty_image_ref, src, name, disk_image_sha, added_at) "
+                "VALUES (?, ?, ?, NULL, ?)",
+                (
+                    "1" * 64,
+                    entry.src,
+                    entry.name,
+                    "2026-05-16T00:00:00+00:00",
+                ),
+            )
+            conn.commit()
+        mgr = DownloadManager(max_parallel=1)
+        with patch("urllib.request.urlopen", _mock_urlopen(payload)):
+            mgr.start(cat, cache_dir, state_path=state_path)
+            try:
+                await mgr.enqueue(entry.name)
+                for _ in range(100):
+                    states = await mgr.list()
+                    if states and states[0].status == "completed":
+                        break
+                    await asyncio.sleep(0.01)
+                states = await mgr.list()
+                assert len(states) == 1
+                assert states[0].status == "completed"
+                # Computed sha lands on the state.
+                assert states[0].sha256 == computed_sha
+            finally:
+                await mgr.stop()
+        # File landed at cache_dir/<computed_sha>.
+        cached = cache_dir / computed_sha
+        assert cached.is_file()
+        assert cached.read_bytes() == payload
+        # Back-fill: catalog_entries row now carries the sha.
+        with sqlite3.connect(state_path) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT disk_image_sha FROM catalog_entries WHERE name = ?",
+                (entry.name,),
+            ).fetchone()
+            assert row["disk_image_sha"] == computed_sha
+        # And a catalog.cache.populated event was recorded.
+        with sqlite3.connect(state_path) as conn:
+            conn.row_factory = sqlite3.Row
+            events = _events_log.list_events(conn, kind="catalog.cache.populated", limit=10)
+        assert any(e.subject_id == entry.name for e in events)
+
+    _run(_drive())
+
+
+def test_download_manager_backfills_from_events(tmp_path: Path) -> None:
+    """``DownloadManager.start(state_path=...)`` repopulates
+    ``_states`` from recent catalog.cache.populated events so the
+    /ui/images Downloads table shows operator-driven fetch history
+    across bty-web restarts."""
+    from bty.web import _db, _events_log
+
+    async def _drive() -> None:
+        state_path = tmp_path / "state.db"
+        cache_dir = tmp_path / "cache"
+        cache_dir.mkdir()
+        _db.init_db(state_path)
+        import sqlite3
+
+        with sqlite3.connect(state_path) as conn:
+            _events_log.record(
+                conn,
+                kind="catalog.cache.populated",
+                summary="fetched rolling.img.gz",
+                subject_kind="catalog",
+                subject_id="rolling.img.gz",
+                actor="operator",
+                details={
+                    "name": "rolling.img.gz",
+                    "src": "https://example.com/rolling.img.gz",
+                    "disk_image_sha": "a" * 64,
+                    "size_bytes": 12345,
+                },
+            )
+            # Cache-through event (no ``name`` key) -- should be
+            # filtered out by the backfill.
+            _events_log.record(
+                conn,
+                kind="catalog.cache.populated",
+                summary="cache-through for ref=...",
+                subject_kind="catalog",
+                subject_id="b" * 64,
+                actor="pxe-client",
+                details={"src": "oras://...", "disk_image_sha": "b" * 64},
+            )
+            conn.commit()
+        cat = _catalog.Catalog(version=1, entries=())
+        mgr = DownloadManager(max_parallel=1)
+        mgr.start(cat, cache_dir, state_path=state_path)
+        try:
+            states = await mgr.list()
+            assert len(states) == 1
+            assert states[0].name == "rolling.img.gz"
+            assert states[0].status == "completed"
+            assert states[0].sha256 == "a" * 64
+            assert states[0].bytes_downloaded == 12345
+        finally:
+            await mgr.stop()
+
+    _run(_drive())
+
+
 def test_enqueue_runs_to_completion(tmp_path: Path) -> None:
     """The default happy path: enqueue, worker runs, status flips
     queued -> running -> completed, bytes match."""

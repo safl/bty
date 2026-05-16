@@ -285,6 +285,32 @@ def test_details_round_trip(tmp_path: Path) -> None:
     assert by_kind["junk"].details is None  # malformed -> None, not crash
 
 
+def test_known_subject_kinds_covers_every_kind_emitted_by_the_codebase() -> None:
+    """Same shape as the KNOWN_EVENT_KINDS check: every
+    ``subject_kind="..."`` literal in `_log_event` calls across
+    `src/bty/` must be present in `KNOWN_SUBJECT_KINDS`.
+
+    Powers the /ui/events filter dropdown's "Subject kind" select.
+    A subject kind that's emitted but missing here is invisible
+    to the operator filtering by subject.
+    """
+    import re
+    from pathlib import Path
+
+    src_root = Path(__file__).resolve().parent.parent / "src" / "bty"
+    pattern = re.compile(r'subject_kind="([a-z][a-z0-9_]+)"')
+    found: set[str] = set()
+    for path in src_root.rglob("*.py"):
+        text = path.read_text()
+        for match in pattern.findall(text):
+            found.add(match)
+    missing = sorted(found - set(_events_log.KNOWN_SUBJECT_KINDS))
+    assert not missing, (
+        "KNOWN_SUBJECT_KINDS is missing subject kinds emitted by the codebase. "
+        f"Add to _events_log.KNOWN_SUBJECT_KINDS: {missing}"
+    )
+
+
 def test_known_event_kinds_covers_every_kind_emitted_by_the_codebase() -> None:
     """Every ``kind="..."`` literal used in `_log_event` calls
     across `src/bty/` must be present in `KNOWN_EVENT_KINDS`.

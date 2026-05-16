@@ -140,7 +140,11 @@ def create_app(
         # via call_soon_threadsafe.
         event_bus.attach(asyncio.get_running_loop())
         if catalog_state.catalog is not None:
-            download_manager.start(catalog_state.catalog, catalog_cache_dir)
+            download_manager.start(
+                catalog_state.catalog,
+                catalog_cache_dir,
+                state_path=state_path,
+            )
         # The hash manager always starts -- it operates on
         # ``image_root``, which exists for every bty-web shape
         # (appliance, container, dev). Default parallelism is 1
@@ -1834,7 +1838,7 @@ def create_app(
         if catalog_state.catalog is not None:
             await download_manager.stop()
         catalog_state.catalog = new_catalog
-        download_manager.start(new_catalog, catalog_cache_dir)
+        download_manager.start(new_catalog, catalog_cache_dir, state_path=state_path)
 
     # URL for "Fetch from bty project release" -- mirrors the
     # ``bty tui`` flow's ``d`` keystroke (loads

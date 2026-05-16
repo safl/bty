@@ -795,6 +795,67 @@ def test_ui_images_renders(client: TestClient) -> None:
     assert "demo.qcow2" in r.text
 
 
+def test_ui_images_renders_fetch_button_for_unhashed_url_entry(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Operator-visible bug fix: a catalog row added by URL without
+    a sha_url used to render a 'Hash' button that 404'd when
+    clicked (HashManager needs a local file). Now those entries
+    render a 'Fetch' button instead, which downloads + computes
+    + back-fills the sha via the DownloadManager.
+
+    Guards the template dispatch rule: ``not u.sha256 + no local
+    source -> Fetch button``."""
+    # Stub the HEAD probe + sha_url resolve so the catalog-entry
+    # add doesn't try to reach example.invalid.
+    from bty.web import _app as _web_app
+
+    monkeypatch.setattr(_web_app, "_head_content_length", lambda url: None)
+    _login(client)
+    add = client.post(
+        "/ui/catalog/entries",
+        data={
+            "image_url": "https://example.invalid/rolling.img.gz",
+            "sha_url": "",
+        },
+        follow_redirects=False,
+    )
+    assert add.status_code == 303, add.text
+    r = client.get("/ui/images")
+    assert r.status_code == 200
+    body = r.text
+    # The row exists.
+    assert "rolling.img.gz" in body
+    # Fetch button is rendered for this entry.
+    assert "bty-fetch-btn" in body
+    # The bug: this entry must NOT carry a hash button.
+    # The dir-scan demo.qcow2 also lacks a sha (no sidecar in the
+    # fixture), so the Hash button still appears for THAT row.
+    # We assert specifically that the URL-row's neighbourhood
+    # does not have a hash button by checking the per-row marker.
+    # ``data-name="rolling.img.gz"`` should only appear on
+    # ``bty-fetch-btn`` (not ``bty-hash-btn``) for this row.
+    fetch_idx = body.find('data-name="rolling.img.gz"')
+    hash_idx_before_fetch = body.rfind("bty-hash-btn", 0, fetch_idx)
+    hash_idx_after_fetch = body.find("bty-hash-btn", fetch_idx)
+    fetch_btn_idx = body.rfind("bty-fetch-btn", 0, fetch_idx)
+    # The fetch-btn class must be on the SAME button as the data-
+    # name for rolling.img.gz, so its closest preceding bty-*-btn
+    # marker must be bty-fetch-btn.
+    assert fetch_btn_idx != -1
+    assert fetch_btn_idx > (hash_idx_before_fetch or -1) if hash_idx_before_fetch != -1 else True
+    # And the nearest following bty-hash-btn (if any) is for a
+    # later row, not this row.
+    if hash_idx_after_fetch != -1:
+        # The following hash-btn shouldn't carry rolling.img.gz's
+        # data-name.
+        next_data_name_idx = body.find('data-name="', hash_idx_after_fetch)
+        if next_data_name_idx != -1:
+            chunk = body[next_data_name_idx : next_data_name_idx + 80]
+            assert "rolling.img.gz" not in chunk
+
+
 # ---------- /ui/settings/tftp-control --------------------------------------
 
 

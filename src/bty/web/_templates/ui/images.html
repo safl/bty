@@ -259,18 +259,25 @@
                         {% endif %}
                     </td>
                     <td class="text-end">
-                        {% if not u.sha256 %}
-                        {# Unhashed dir-scan file: a hash button
-                           enqueues via the HashManager (background,
-                           single-worker by default). #}
+                        {# Dispatch by source shape, not just sha presence:
+                           - Has a ``local`` source and no sha -> the file is
+                             on disk and just needs hashing. Hash button.
+                           - No local source -> bytes need fetching. Fetch
+                             button. Works for un-sha'd URL / oras entries
+                             (the DownloadManager downloads + computes sha +
+                             back-fills catalog_entries.disk_image_sha) AND
+                             for sha-pinned entries not yet in cache.
+                           Previously every un-sha'd entry rendered the
+                           Hash button, which 404'd on URL-only rows
+                           because HashManager requires a local file. #}
+                        {% set has_local = u.sources|selectattr('kind','equalto','local')|list|length > 0 %}
+                        {% if not u.sha256 and has_local %}
                         <button type="button"
                                 class="btn btn-sm btn-warning bty-hash-btn"
                                 data-name="{{ u.names[0] }}">
                             <i class="bi bi-hash me-1"></i>Hash
                         </button>
                         {% elif not u.cached %}
-                        {# Manifest-only entry not yet in cache: a fetch
-                           button enqueues via the DownloadManager. #}
                         <button type="button"
                                 class="btn btn-sm btn-primary bty-fetch-btn"
                                 data-name="{{ u.names[0] }}">

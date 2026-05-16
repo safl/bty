@@ -1364,6 +1364,107 @@ def test_machines_upsert_accepts_target_disk_serial(app_client: TestClient) -> N
     assert r.json()["target_disk_serial"] == "Z9YHHRWZ"
 
 
+def test_machines_upsert_rejects_oversize_target_disk_serial(
+    app_client: TestClient,
+) -> None:
+    """MachineUpsert.target_disk_serial has max_length=128 to keep
+    the column small + bound the kernel cmdline length. >128 chars
+    -> 422 (Pydantic rejection)."""
+    r = app_client.put(
+        "/machines/aa:bb:cc:dd:ee:ef",
+        json={"target_disk_serial": "X" * 200},
+        cookies=AUTH,
+    )
+    assert r.status_code == 422
+
+
+def test_pxe_inventory_ignores_unknown_per_disk_fields(app_client: TestClient) -> None:
+    """``InventoryDisk`` is ``extra="ignore"`` so a future ``bty.disks``
+    release adding a new field (NVMe namespace, partition table type,
+    etc.) doesn't break older bty-web instances. The known fields
+    survive; the unknown ones drop on the floor."""
+    app_client.get("/pxe/aa:bb:cc:dd:ee:f4")
+    r = app_client.post(
+        "/pxe/aa:bb:cc:dd:ee:f4/inventory",
+        json={
+            "disks": [
+                {
+                    "path": "/dev/sda",
+                    "serial": "ABCD1234",
+                    "size": "500G",
+                    "future_field": "ignored",
+                    "another_new_thing": 42,
+                },
+            ],
+        },
+    )
+    assert r.status_code == 204, r.text
+    machine = app_client.get("/machines/aa:bb:cc:dd:ee:f4", cookies=AUTH).json()
+    disk = machine["known_disks"][0]
+    assert disk["serial"] == "ABCD1234"
+    assert disk["size"] == "500G"
+    assert "future_field" not in disk
+    assert "another_new_thing" not in disk
+
+
+def test_pxe_inventory_rejects_unknown_top_level_fields(app_client: TestClient) -> None:
+    """``InventoryPost`` is ``extra="forbid"`` at the top level so a
+    typo in the bty-tui payload (``disk`` instead of ``disks``)
+    fails 422 loudly rather than silently persisting an empty
+    inventory."""
+    app_client.get("/pxe/aa:bb:cc:dd:ee:f5")
+    r = app_client.post(
+        "/pxe/aa:bb:cc:dd:ee:f5/inventory",
+        json={"disk": [{"path": "/dev/sda", "serial": "X"}]},  # typo
+    )
+    assert r.status_code == 422
+
+
+def test_pxe_flash_chain_includes_target_disk_serial_cmdline(
+    app_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Concrete check that ``bty.target_disk_serial=...`` appears in
+    the kernel cmdline of the flash chain when the operator has
+    picked a target. Guards against a future template edit that
+    silently drops the param."""
+    flash_sha = "deadbeef" * 8
+    monkeypatch.setattr(
+        "urllib.request.urlopen",
+        lambda *_a, **_kw: _MockResp(b"", {"Content-Length": "0"}),
+    )
+    monkeypatch.setattr("bty.catalog.fetch_sha256_for_url", lambda *_a, **_kw: flash_sha)
+    add = app_client.post(
+        "/catalog/entries",
+        json={
+            "image_url": "https://example.invalid/img.img.gz",
+            "sha_url": "https://example.invalid/img.img.gz.sha256",
+        },
+        cookies=AUTH,
+    )
+    assert add.status_code == 201
+    ref = add.json()["bty_image_ref"]
+    app_client.put(
+        "/machines/aa:bb:cc:dd:ee:f6",
+        json={
+            "bty_image_ref": ref,
+            "boot_policy": "flash",
+            "target_disk_serial": "WD-SERIAL-XYZ",
+        },
+        cookies=AUTH,
+    )
+    r = app_client.get("/pxe/aa:bb:cc:dd:ee:f6")
+    assert r.status_code == 200
+    body = r.text
+    # The full cmdline param appears verbatim (no truncation, no
+    # quoting weirdness that the live env's bty-flash-on-boot
+    # parser wouldn't handle).
+    assert "bty.target_disk_serial=WD-SERIAL-XYZ" in body
+    # And the rendered chain advertises the pin in the header
+    # comment so an operator inspecting curl output can see it.
+    assert "target_disk_serial: WD-SERIAL-XYZ" in body
+
+
 def test_pxe_hit_records_pxe_offered_event(app_client: TestClient) -> None:
     """Every /pxe/{mac} hit emits a ``pxe.offered`` event recording
     which template was returned. Gives the operator a full timeline
