@@ -149,20 +149,29 @@ runcmd:
 
   # PXE TFTP root: dnsmasq serves the iPXE binaries from here when
   # the operator's router/DHCP tells PXE clients to fetch
-  # ``ipxe.efi`` (or an arch sibling) from this appliance. Symlinks
-  # into /usr/lib/ipxe/ so ``apt install ipxe`` upgrades carry
-  # through.
+  # ``ipxe.efi`` (or an arch sibling) from this appliance.
+  #
+  # ``ipxe.efi`` is a custom slim build with an embedded chain
+  # script that jumps to bty-web's pxe-bootstrap.ipxe -- shipped
+  # via cijoe's ``bty_ipxe_build`` step in rootfs/server/var/lib/
+  # tftpboot/. Without the embed, stock iPXE's autoboot re-fetches
+  # itself in a loop (the operator's DHCP always returns
+  # ``filename=ipxe.efi``).
+  #
+  # ``undionly.kpxe`` for legacy-BIOS PXE clients stays as the
+  # Debian-stock symlink (no embed needed there for the homelab
+  # path -- BIOS PXE is rare enough that the chain-loop concern
+  # is hypothetical, and we keep the bake simple).
   - install -d -o root -g root -m 0755 /var/lib/tftpboot
   - ln -sf /usr/lib/ipxe/undionly.kpxe /var/lib/tftpboot/undionly.kpxe
-  - ln -sf /usr/lib/ipxe/ipxe.efi /var/lib/tftpboot/ipxe.efi
 
   # HTTP-Boot path: UEFI HTTPClient targets fetch ipxe.efi over
   # plain HTTP (no TFTP). bty-web serves files from /var/lib/bty/boot,
-  # so we expose ipxe.efi there too via a symlink. Operator
-  # configures their router with the HTTPClient bootfile URL
-  # pointing at ``http://<bty-server>:8080/boot/ipxe.efi``.
+  # which is also where the custom-built ipxe.efi lands via cijoe's
+  # bty_ipxe_build step. Operator configures their router with the
+  # HTTPClient bootfile URL pointing at
+  # ``http://<bty-server>:8080/boot/ipxe.efi``.
   - install -d -o bty -g bty -m 0755 /var/lib/bty/boot
-  - ln -sf /usr/lib/ipxe/ipxe.efi /var/lib/bty/boot/ipxe.efi
 
   # bty-web's TFTP daemon-control helper + sudoers entry. The web
   # UI exposes Start/Stop/Restart buttons for dnsmasq.service (which

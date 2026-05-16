@@ -15,15 +15,22 @@ doc: |
   1. ``bty_wheel_stage`` builds the bty-lab wheel via ``uv build``
      from the parent repo and stages it under
      ``rootfs/server/opt/bty/`` so ``gen_userdata`` can inline it.
-  2. ``gen_userdata`` assembles a cloud-init user-data file by
+  2. ``bty_ipxe_build`` clones iPXE upstream, applies bty's slim-
+     build trims + embedded chain script, and produces a custom
+     ``ipxe.efi`` staged at ``rootfs/server/var/lib/tftpboot/``
+     (TFTP-served) and ``rootfs/server/var/lib/bty/boot/`` (HTTP-
+     Boot served). The embedded script breaks iPXE's autoboot
+     loop -- stock Debian iPXE would re-fetch itself indefinitely
+     since the operator's LAN DHCP returns ``filename=ipxe.efi``.
+  3. ``gen_userdata`` assembles a cloud-init user-data file by
      inlining files under ``rootfs/common/`` and ``rootfs/<role>/``
      as ``write_files`` entries on top of
      ``auxiliary/cloudinit-base-<role>.user``.
-  3. ``diskimage_build`` downloads the Debian cloud image, resizes
+  4. ``diskimage_build`` downloads the Debian cloud image, resizes
      the boot disk, builds the cloud-init seed.iso, and boots QEMU.
      cloud-init provisions the system and powers off; ``qemu-img
      convert -c`` produces a baked qcow2.
-  4. ``img_gz_publish`` converts the qcow2 to raw and gzip-compresses
+  5. ``img_gz_publish`` converts the qcow2 to raw and gzip-compresses
      it into a dd-able ``.img.gz`` artifact, alongside a sha256sum.
      Gzip rather than zstd: bty-shipped images are flashed once
      during operator setup; gzip's universal flasher / OS / tooling
@@ -38,6 +45,9 @@ doc: |
 steps:
 - name: bty_wheel_stage
   uses: bty_wheel_stage
+
+- name: bty_ipxe_build
+  uses: bty_ipxe_build
 
 - name: gen_userdata
   uses: gen_userdata
