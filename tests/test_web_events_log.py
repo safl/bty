@@ -285,6 +285,33 @@ def test_details_round_trip(tmp_path: Path) -> None:
     assert by_kind["junk"].details is None  # malformed -> None, not crash
 
 
+def test_known_actors_covers_every_actor_emitted_by_the_codebase() -> None:
+    """Every ``actor="..."`` literal in `_log_event` calls across
+    `src/bty/` must be present in `KNOWN_ACTORS`.
+
+    Powers the /ui/events ``actor`` filter dropdown -- an actor
+    that's emitted but missing here is invisible to operator
+    filtering. Completes the trio with KNOWN_EVENT_KINDS +
+    KNOWN_SUBJECT_KINDS meta-tests so the three taxonomies all
+    drift-check against the source tree.
+    """
+    import re
+    from pathlib import Path
+
+    src_root = Path(__file__).resolve().parent.parent / "src" / "bty"
+    pattern = re.compile(r'actor="([a-z][a-z0-9_-]+)"')
+    found: set[str] = set()
+    for path in src_root.rglob("*.py"):
+        text = path.read_text()
+        for match in pattern.findall(text):
+            found.add(match)
+    missing = sorted(found - set(_events_log.KNOWN_ACTORS))
+    assert not missing, (
+        "KNOWN_ACTORS is missing actors emitted by the codebase. "
+        f"Add to _events_log.KNOWN_ACTORS: {missing}"
+    )
+
+
 def test_known_subject_kinds_covers_every_kind_emitted_by_the_codebase() -> None:
     """Same shape as the KNOWN_EVENT_KINDS check: every
     ``subject_kind="..."`` literal in `_log_event` calls across
