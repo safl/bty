@@ -398,10 +398,25 @@ def register_ui_routes(
         include_in_schema=False,
         dependencies=[Depends(require_ui_auth)],
     )
-    def ui_machine_delete(mac: str) -> RedirectResponse:
+    def ui_machine_delete(mac: str, request: Request) -> RedirectResponse:
+        """Form-style delete. Records a ``machine.deleted`` event
+        with the operator's IP so /ui/events is symmetric across
+        the JSON API delete + this form delete. Pre-fix the form
+        path silently removed the row with no audit trail."""
         normalised = _normalise_mac(mac)
+        client_ip = _client_ip(request)
         with _db.open_db(state_path) as conn:
-            conn.execute("DELETE FROM machines WHERE mac = ?", (normalised,))
+            cur = conn.execute("DELETE FROM machines WHERE mac = ?", (normalised,))
+            if cur.rowcount > 0:
+                _events_log.record(
+                    conn,
+                    kind="machine.deleted",
+                    summary=f"{normalised} deleted",
+                    subject_kind="machine",
+                    subject_id=normalised,
+                    actor="operator",
+                    source_ip=client_ip,
+                )
             conn.commit()
         publish_state_changed()
         return RedirectResponse("/ui/machines", status_code=status.HTTP_303_SEE_OTHER)

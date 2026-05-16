@@ -819,6 +819,36 @@ def test_ui_machines_list_shows_boot_policy_badge(client: TestClient) -> None:
     assert "<th>Last flashed</th>" in body
 
 
+def test_ui_machine_delete_via_form_records_event(client: TestClient) -> None:
+    """The form-style /ui/machines/{mac}/delete must record a
+    ``machine.deleted`` event so /ui/events shows operator
+    actions consistently. Pre-fix the form delete silently
+    removed the row, leaving the audit trail with discovery +
+    upsert events but no delete event for the same MAC."""
+    _login(client)
+    client.put(
+        "/machines/aa:bb:cc:dd:ee:11",
+        json={
+            "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        },
+        cookies=AUTH,
+    )
+    r = client.post("/ui/machines/aa:bb:cc:dd:ee:11/delete")
+    assert r.status_code == 303
+    # Event recorded.
+    events = client.get(
+        "/events",
+        params={
+            "subject_kind": "machine",
+            "subject_id": "aa:bb:cc:dd:ee:11",
+            "kind": "machine.deleted",
+        },
+        cookies=AUTH,
+    ).json()["events"]
+    assert len(events) == 1
+    assert events[0]["actor"] == "operator"
+
+
 def test_ui_machine_delete_via_form(client: TestClient) -> None:
     _login(client)
     client.put(
