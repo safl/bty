@@ -11,6 +11,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 
+import pytest
+
 from bty.web._events import MachineEvent, MachineEventBus, sse_format
 
 
@@ -110,3 +112,58 @@ def test_event_bus_unregisters_on_unsubscribe() -> None:
         return len(bus._subscribers)
 
     assert asyncio.run(scenario()) == 0
+
+
+def test_event_bus_close_wakes_idle_subscriber() -> None:
+    """``close()`` unblocks every subscribe() generator immediately so
+    bty-web shutdown isn't held up by SSE clients waiting on
+    ``queue.get`` (previously caused uvicorn's full 90s graceful-
+    shutdown timeout on every restart with an open browser tab)."""
+
+    async def scenario() -> bool:
+        bus = MachineEventBus()
+        bus.attach(asyncio.get_running_loop())
+        gen = bus.subscribe()
+        # First yield drives the queue registration.
+        first_task = asyncio.create_task(anext(gen))
+        # Give the generator a tick to enter its wait state.
+        await asyncio.sleep(0)
+        # Close before any event is published; the subscriber must
+        # exit (StopAsyncIteration) within the loop tick rather than
+        # hang forever.
+        await bus.close()
+        try:
+            await asyncio.wait_for(first_task, timeout=1.0)
+            # If we got a value, that's a regression -- close should
+            # cause StopAsyncIteration via the generator's return.
+            return False
+        except StopAsyncIteration:
+            return True
+        except TimeoutError:
+            first_task.cancel()
+            return False
+
+    assert asyncio.run(scenario()) is True
+
+
+def test_event_bus_close_after_event_still_delivers_event() -> None:
+    """If a publish happened and the subscriber was waiting on it,
+    ``close`` mid-flight shouldn't drop the event already-queued.
+    Guards against an over-eager shutdown that loses the last
+    'machine flashed' broadcast."""
+
+    async def scenario() -> str:
+        bus = MachineEventBus()
+        bus.attach(asyncio.get_running_loop())
+        gen = bus.subscribe()
+        # Publish first so the event is queued.
+        bus.publish(MachineEvent(name="machines-update", html="<row/>"))
+        # First yield reads the queued event.
+        evt = await anext(gen)
+        # Now close; the next yield resolves to StopAsyncIteration.
+        await bus.close()
+        with pytest.raises(StopAsyncIteration):
+            await anext(gen)
+        return evt.html
+
+    assert asyncio.run(scenario()) == "<row/>"

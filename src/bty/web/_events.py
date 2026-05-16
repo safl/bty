@@ -48,6 +48,12 @@ class MachineEventBus:
         self._subscribers: list[asyncio.Queue[MachineEvent]] = []
         self._queue_size = queue_size
         self._loop: asyncio.AbstractEventLoop | None = None
+        # Set by ``close()`` so every blocked ``subscribe`` generator
+        # wakes up and exits cleanly on bty-web shutdown. Without
+        # this the StreamingResponse held SSE clients open until
+        # uvicorn's 90s graceful-shutdown timeout SIGKILL'd the
+        # process every restart.
+        self._closed = asyncio.Event()
 
     def attach(self, loop: asyncio.AbstractEventLoop) -> None:
         """Capture the event loop SSE subscribers run on.
@@ -79,15 +85,58 @@ class MachineEventBus:
                 queue.put_nowait(event)
 
     async def subscribe(self) -> AsyncGenerator[MachineEvent, None]:
-        """Yield events for one subscriber. Cleans up on cancellation."""
+        """Yield events for one subscriber.
+
+        Cleans up on client cancellation OR on bus close (lifespan
+        shutdown). Without the close-aware wait the SSE generators
+        block on ``queue.get`` indefinitely, so uvicorn's graceful
+        shutdown waits its full 90s timeout before SIGKILL'ing the
+        process every restart.
+        """
         queue: asyncio.Queue[MachineEvent] = asyncio.Queue(maxsize=self._queue_size)
         self._subscribers.append(queue)
         try:
-            while True:
-                yield await queue.get()
+            while not self._closed.is_set():
+                # Race the next event against shutdown. ``wait()`` on
+                # the closed event resolves the instant ``close()`` is
+                # called; ``queue.get`` resolves on a published event.
+                # Whichever wins, we cancel the other.
+                get_task = asyncio.create_task(queue.get())
+                close_task = asyncio.create_task(self._closed.wait())
+                try:
+                    done, _pending = await asyncio.wait(
+                        (get_task, close_task),
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+                finally:
+                    for task in (get_task, close_task):
+                        if not task.done():
+                            task.cancel()
+                            with contextlib.suppress(asyncio.CancelledError):
+                                await task
+                if get_task in done and not get_task.cancelled():
+                    yield get_task.result()
+                else:
+                    return
         finally:
             with contextlib.suppress(ValueError):
                 self._subscribers.remove(queue)
+
+    async def close(self) -> None:
+        """Signal every subscribed generator to exit.
+
+        Called from ``create_app``'s lifespan finally-block on
+        shutdown so SSE-holding browser tabs don't pin the worker
+        for the full uvicorn-graceful-shutdown timeout.
+        """
+        loop = self._loop
+        if loop is not None and loop.is_running():
+            try:
+                loop.call_soon_threadsafe(self._closed.set)
+                return
+            except RuntimeError:
+                pass
+        self._closed.set()
 
 
 def sse_format(event_name: str, data: str) -> bytes:

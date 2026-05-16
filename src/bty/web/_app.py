@@ -187,6 +187,12 @@ def create_app(
         try:
             yield
         finally:
+            # Wake every SSE subscribe() generator so the
+            # StreamingResponse exits its yield loop. Without this,
+            # browser tabs left open on /ui/machines or /ui/dashboard
+            # hold the HTTP connection alive until uvicorn's 90s
+            # graceful-shutdown timeout SIGKILLs the worker.
+            await event_bus.close()
             if catalog_state.catalog is not None:
                 await download_manager.stop()
             await hash_manager.stop()

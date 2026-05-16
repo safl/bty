@@ -35,10 +35,10 @@ def _resolve_secret_key(state_dir: Path) -> str:
         return env_key
     secret_path = state_dir / "session-secret"
     if secret_path.exists():
-        return secret_path.read_text().strip()
+        return secret_path.read_text(encoding="utf-8").strip()
     state_dir.mkdir(parents=True, exist_ok=True)
     key = secrets.token_urlsafe(32)
-    secret_path.write_text(key + "\n")
+    secret_path.write_text(key + "\n", encoding="utf-8")
     secret_path.chmod(0o640)
     return key
 
@@ -95,6 +95,23 @@ def main(argv: list[str] | None = None) -> None:
     )
 
     host = os.environ.get("BTY_WEB_HOST", "0.0.0.0")
-    port = int(os.environ.get("BTY_WEB_PORT", "8080"))
+    raw_port = os.environ.get("BTY_WEB_PORT", "8080")
+    try:
+        port = int(raw_port)
+    except ValueError:
+        # A typo'd BTY_WEB_PORT used to crash bty-web at start with
+        # an unhelpful ValueError traceback. Emit a clear systemd-
+        # journal-readable error and fall back to the default port.
+        print(
+            f"bty-web: BTY_WEB_PORT={raw_port!r} is not an integer; falling back to 8080",
+            file=sys.stderr,
+        )
+        port = 8080
+    if not (1 <= port <= 65535):
+        print(
+            f"bty-web: BTY_WEB_PORT={port} is out of range (1-65535); falling back to 8080",
+            file=sys.stderr,
+        )
+        port = 8080
 
     uvicorn.run(app, host=host, port=port, log_level="info")

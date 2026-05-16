@@ -251,7 +251,7 @@ def _verify_sha256_manifest(manifest_path: Path, files_dir: Path) -> None:
     Raises :class:`ValueError` if a file is missing, the manifest is
     malformed, or any digest mismatches.
     """
-    text = manifest_path.read_text()
+    text = manifest_path.read_text(encoding="utf-8")
     seen = 0
     for raw in text.splitlines():
         line = raw.strip()

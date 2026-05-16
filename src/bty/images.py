@@ -425,7 +425,7 @@ def _read_sidecar_sha(image_path: Path) -> str | None:
     """
     sidecar = _sidecar_path(image_path)
     try:
-        head = sidecar.read_text().strip().split(maxsplit=1)
+        head = sidecar.read_text(encoding="utf-8").strip().split(maxsplit=1)
     except (FileNotFoundError, IsADirectoryError, PermissionError):
         return None
     if not head:

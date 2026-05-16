@@ -202,7 +202,11 @@ def list_interfaces(sysnet: Path = SYSNET_PATH) -> list[Interface]:
         if entry.name == "lo":
             continue
         operstate_path = entry / "operstate"
-        operstate = operstate_path.read_text().strip() if operstate_path.is_file() else "unknown"
+        operstate = (
+            operstate_path.read_text(encoding="utf-8").strip()
+            if operstate_path.is_file()
+            else "unknown"
+        )
         ipv4, prefix = _first_ipv4(entry.name)
         out.append(Interface(name=entry.name, operstate=operstate, ipv4=ipv4, prefix=prefix))
     return out
