@@ -30,6 +30,7 @@ import os
 import threading
 import time
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -115,10 +116,83 @@ class HashManager(_BaseAsyncManager[HashState]):
         """Spawn the worker pool. ``state_path`` is optional: when
         given, successful hash completions log an ``image.hashed``
         event to the audit table so the operator can see SHA
-        availability roll forward in /ui/events. Tests omit it."""
+        availability roll forward in /ui/events. Tests omit it.
+
+        Also backfills ``_states`` from recent ``image.hashed`` /
+        ``image.hash_failed`` events when ``state_path`` is given.
+        The /ui/images Hashes table is otherwise empty after every
+        bty-web restart even when sidecar .sha256 files are
+        already on disk; the backfill keeps history visible.
+        Mirrors the DownloadManager + ReleaseFetchManager backfill
+        pattern.
+        """
         self._image_root = image_root
         self._state_path = state_path
+        if state_path is not None:
+            self._backfill_from_events(state_path)
         self._spawn_workers()
+
+    def _backfill_from_events(self, state_path: Path) -> None:
+        """Repopulate ``_states`` with recent terminal hash outcomes.
+
+        Reads ``image.hashed`` (success) + ``image.hash_failed``
+        (failure) events; newest-per-name wins. Soft-fails on any
+        DB exception so a corrupt state.db can't keep bty-web
+        from starting -- backfill is a UX nicety, not a
+        correctness guarantee.
+        """
+        from bty.web import _db, _events_log
+
+        try:
+            with _db.open_db(state_path) as conn:
+                rows = _events_log.list_events(
+                    conn,
+                    subject_kind="image",
+                    limit=400,
+                )
+        except Exception:
+            return
+        seen: set[str] = set()
+        for ev in rows:
+            if ev.kind not in ("image.hashed", "image.hash_failed"):
+                continue
+            name = ev.subject_id
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            details = ev.details or {}
+            try:
+                started = (
+                    datetime.fromisoformat(ev.ts.replace("Z", "+00:00")).timestamp()
+                    if ev.ts
+                    else None
+                )
+            except (TypeError, ValueError):
+                started = None
+            sha_raw = details.get("sha256")
+            sha = sha_raw if isinstance(sha_raw, str) else None
+            # ``image.hashed`` event details use ``bytes``; older
+            # variants may use ``size_bytes``. Accept either.
+            size = int(details.get("bytes") or details.get("size_bytes") or 0)
+            path_raw = details.get("path")
+            root = self._image_root
+            if isinstance(path_raw, str):
+                path = path_raw
+            elif root is not None:
+                path = str(root / name)
+            else:
+                path = name
+            self._states[name] = HashState(
+                name=name,
+                path=path,
+                status="completed" if ev.kind == "image.hashed" else "failed",
+                bytes_hashed=size,
+                bytes_total=size,
+                sha256=sha,
+                started_at=started,
+                finished_at=started,
+                error=(str(details.get("error")) if ev.kind == "image.hash_failed" else None),
+            )
 
     async def enqueue(self, name: str) -> HashState:
         """Queue a hash job for ``image_root / name``.

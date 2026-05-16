@@ -162,6 +162,104 @@ def test_run_hash_cancel_with_concurrent_oserror_marks_cancelled(tmp_path: Path)
     _run(_drive())
 
 
+def test_hash_manager_backfills_from_events(tmp_path: Path) -> None:
+    """``HashManager.start(state_path=...)`` repopulates ``_states``
+    from recent image.hashed / image.hash_failed events so the
+    /ui/images Hashes table survives a bty-web restart. Mirrors
+    the DownloadManager + ReleaseFetchManager backfill."""
+    from bty.web import _db, _events_log
+    from bty.web._hash import HashManager
+
+    state_path = tmp_path / "state.db"
+    image_root = tmp_path / "images"
+    image_root.mkdir()
+    _db.init_db(state_path)
+    with _db.open_db(state_path) as conn:
+        _events_log.record(
+            conn,
+            kind="image.hashed",
+            summary="hashed demo.img.zst",
+            subject_kind="image",
+            subject_id="demo.img.zst",
+            actor="system",
+            details={"name": "demo.img.zst", "sha256": "c" * 64, "bytes": 1234},
+        )
+        _events_log.record(
+            conn,
+            kind="image.hash_failed",
+            summary="broken.img.gz failed",
+            subject_kind="image",
+            subject_id="broken.img.gz",
+            actor="system",
+            details={"name": "broken.img.gz", "error": "OSError: disk on fire"},
+        )
+        conn.commit()
+
+    async def _drive() -> None:
+        mgr = HashManager()
+        mgr.start(image_root, state_path=state_path)
+        try:
+            states = await mgr.list()
+            by_name = {s.name: s for s in states}
+            assert by_name["demo.img.zst"].status == "completed"
+            assert by_name["demo.img.zst"].sha256 == "c" * 64
+            assert by_name["demo.img.zst"].bytes_hashed == 1234
+            assert by_name["broken.img.gz"].status == "failed"
+            assert "disk on fire" in (by_name["broken.img.gz"].error or "")
+        finally:
+            await mgr.stop()
+
+    _run(_drive())
+
+
+def test_hash_manager_backfill_newest_per_name_wins(tmp_path: Path) -> None:
+    """Two image.hashed events for the same name -- the newer one
+    wins after backfill. Guards the newest-first / seen-set
+    invariant shared with the other manager backfills."""
+    from bty.web import _db, _events_log
+    from bty.web._hash import HashManager
+
+    state_path = tmp_path / "state.db"
+    image_root = tmp_path / "images"
+    image_root.mkdir()
+    _db.init_db(state_path)
+    with _db.open_db(state_path) as conn:
+        # Older event (e.g. failed import attempt).
+        _events_log.record(
+            conn,
+            kind="image.hash_failed",
+            summary="early failure",
+            subject_kind="image",
+            subject_id="demo.img.gz",
+            actor="system",
+            details={"name": "demo.img.gz", "error": "old transient"},
+        )
+        # Newer event (operator re-triggered after fix).
+        _events_log.record(
+            conn,
+            kind="image.hashed",
+            summary="hashed successfully",
+            subject_kind="image",
+            subject_id="demo.img.gz",
+            actor="system",
+            details={"name": "demo.img.gz", "sha256": "d" * 64, "bytes": 8},
+        )
+        conn.commit()
+
+    async def _drive() -> None:
+        mgr = HashManager()
+        mgr.start(image_root, state_path=state_path)
+        try:
+            states = await mgr.list()
+            assert len(states) == 1
+            assert states[0].status == "completed"
+            assert states[0].sha256 == "d" * 64
+        finally:
+            await mgr.stop()
+
+    _run(_drive())
+
+
 def test_hash_failed_event_is_recorded(tmp_path: Path) -> None:
     """A genuinely-failed hash (IO error, not operator cancel)
     must land an ``image.hash_failed`` event in the audit log
