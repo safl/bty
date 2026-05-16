@@ -63,11 +63,21 @@ jobs:
             parted \
             exfatprogs \
             exfat-fuse
-          # Ubuntu runners often don't auto-load the in-kernel exfat
-          # module; try to load it now and fall back to FUSE (exfat-
-          # fuse provides /sbin/mount.exfat which mount -t exfat
-          # delegates to when the kernel module is absent).
+          # GHA Ubuntu runners don't have the in-kernel exfat module
+          # auto-loaded; try modprobe first.
           sudo modprobe exfat 2>/dev/null || true
+          # If the kernel module's still unavailable, point ``mount
+          # -t exfat`` at the FUSE helper. exfat-fuse installs
+          # ``mount.exfat-fuse`` but mount(8) looks for
+          # ``/sbin/mount.exfat`` specifically when delegating
+          # unknown types; symlink bridges the gap.
+          if ! grep -qw exfat /proc/filesystems 2>/dev/null; then
+            FUSE_HELPER=$(command -v mount.exfat-fuse || true)
+            if [ -n "${FUSE_HELPER}" ] && [ ! -e /sbin/mount.exfat ]; then
+              sudo ln -sf "${FUSE_HELPER}" /sbin/mount.exfat
+              echo "linked /sbin/mount.exfat -> ${FUSE_HELPER}"
+            fi
+          fi
       - run: uv sync --all-extras --group dev
       # Integration tests use losetup + dd against a real loop device,
       # so they need root. The default pytest run excludes them via the
