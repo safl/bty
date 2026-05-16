@@ -283,3 +283,36 @@ def test_details_round_trip(tmp_path: Path) -> None:
     by_kind = {r.kind: r for r in rows}
     assert by_kind["image.uploaded"].details == {"size_bytes": 12345, "name": "demo.qcow2"}
     assert by_kind["junk"].details is None  # malformed -> None, not crash
+
+
+def test_known_event_kinds_covers_every_kind_emitted_by_the_codebase() -> None:
+    """Every ``kind="..."`` literal used in `_log_event` calls
+    across `src/bty/` must be present in `KNOWN_EVENT_KINDS`.
+
+    ``KNOWN_EVENT_KINDS`` powers the /ui/events filter dropdown;
+    a kind that's emitted but not in the catalogue still records
+    fine (the check at write time is a no-op) but is invisible
+    in the dropdown -- the operator can't filter to it without
+    knowing the exact string. This test guards the
+    catalogue against drift by grepping the source tree.
+    """
+    import re
+    from pathlib import Path
+
+    src_root = Path(__file__).resolve().parent.parent / "src" / "bty"
+    pattern = re.compile(r'kind="([a-z][a-z0-9._]+)"')
+    found: set[str] = set()
+    for path in src_root.rglob("*.py"):
+        text = path.read_text()
+        for match in pattern.findall(text):
+            # ``kind=`` strings used in template / status badges
+            # (success / danger / url) shouldn't be mistaken for
+            # event kinds. Filter to dotted namespaces, which is
+            # the convention.
+            if "." in match:
+                found.add(match)
+    missing = sorted(found - set(_events_log.KNOWN_EVENT_KINDS))
+    assert not missing, (
+        "KNOWN_EVENT_KINDS is missing kinds emitted by the codebase. "
+        f"Add to _events_log.KNOWN_EVENT_KINDS: {missing}"
+    )

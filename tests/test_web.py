@@ -2806,6 +2806,119 @@ def test_release_fetch_unknown_extra_field_422(app_client: TestClient) -> None:
     assert r.status_code == 422
 
 
+def test_release_fetch_manager_backfills_from_events(tmp_path: Path) -> None:
+    """The manager's in-memory ``_states`` dies on restart, which
+    made the /ui/boot "Active + recent fetches" table show "No
+    fetches yet." even when artefacts were clearly present on
+    disk. The fix backfills from boot.release.fetched /
+    boot.release.fetch_failed events on ``start()``.
+
+    Seeds two events on a fresh state.db, then starts a manager
+    against it and asserts that the manager's state mirror the
+    events (newest-per-tag wins for terminal outcome)."""
+    import asyncio
+
+    from bty.web import _db, _events_log, _release_mgr
+
+    state_path = tmp_path / "state.db"
+    boot_root = tmp_path / "boot"
+    boot_root.mkdir()
+
+    with _db.open_db(state_path) as conn:
+        _events_log.record(
+            conn,
+            kind="boot.release.fetched",
+            summary="release latest fetched",
+            subject_kind="boot",
+            subject_id="latest",
+            actor="operator",
+            source_ip="127.0.0.1",
+            details={
+                "tag": "latest",
+                "base_url": "https://example.invalid/latest",
+                "total_bytes": 12345,
+                "artifacts": ["a.efi"],
+            },
+        )
+        _events_log.record(
+            conn,
+            kind="boot.release.fetch_failed",
+            summary="release v0.1.2 failed",
+            subject_kind="boot",
+            subject_id="v0.1.2",
+            actor="operator",
+            source_ip="127.0.0.1",
+            details={"tag": "v0.1.2", "error": "404 Not Found"},
+        )
+        conn.commit()
+
+    async def go() -> None:
+        mgr = _release_mgr.ReleaseFetchManager()
+        mgr.start(boot_root, state_path=state_path)
+        try:
+            states = await mgr.list()
+            by_tag = {s.tag: s for s in states}
+            assert "latest" in by_tag
+            assert by_tag["latest"].status == "completed"
+            assert by_tag["latest"].bytes_done == 12345
+            assert by_tag["latest"].base_url == "https://example.invalid/latest"
+            assert "v0.1.2" in by_tag
+            assert by_tag["v0.1.2"].status == "failed"
+            assert by_tag["v0.1.2"].error == "404 Not Found"
+        finally:
+            await mgr.stop()
+
+    asyncio.run(go())
+
+
+def test_release_fetch_manager_backfill_picks_most_recent_per_tag(
+    tmp_path: Path,
+) -> None:
+    """Two events for the same tag (older failure + newer success):
+    the newer one wins after backfill. Guards the "newest-first
+    iteration with seen-set" invariant."""
+    import asyncio
+
+    from bty.web import _db, _events_log, _release_mgr
+
+    state_path = tmp_path / "state.db"
+    boot_root = tmp_path / "boot"
+    boot_root.mkdir()
+    with _db.open_db(state_path) as conn:
+        # Older failure
+        _events_log.record(
+            conn,
+            kind="boot.release.fetch_failed",
+            summary="latest failed first attempt",
+            subject_kind="boot",
+            subject_id="latest",
+            details={"tag": "latest", "error": "old network blip"},
+        )
+        # Newer success
+        _events_log.record(
+            conn,
+            kind="boot.release.fetched",
+            summary="latest succeeded on retry",
+            subject_kind="boot",
+            subject_id="latest",
+            details={"tag": "latest", "base_url": "https://example/latest", "total_bytes": 99},
+        )
+        conn.commit()
+
+    async def go() -> None:
+        mgr = _release_mgr.ReleaseFetchManager()
+        mgr.start(boot_root, state_path=state_path)
+        try:
+            states = await mgr.list()
+            assert len(states) == 1
+            assert states[0].status == "completed"
+            assert states[0].bytes_done == 99
+        finally:
+            await mgr.stop()
+
+    asyncio.run(go())
+
+
 def test_release_fetch_manager_run_fetch_cancel_overrides_fetch_error(
     tmp_path: Path,
 ) -> None:

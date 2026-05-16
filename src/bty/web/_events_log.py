@@ -22,7 +22,7 @@ Conventions:
   the event is about. ``machine`` / mac, ``image`` / sha or name,
   ``catalog`` / src URL, ``boot`` / release-tag, ``settings`` /
   panel-name. Either may be ``None`` for global events
-  (``settings.pxe.activated``).
+  (``settings.tftp.controlled``).
 - ``actor`` distinguishes operator-initiated changes from
   system-initiated ones (auto-discovery, hash completion).
   See :data:`KNOWN_ACTORS` for the catalogue of conventional
@@ -103,12 +103,14 @@ KNOWN_EVENT_KINDS: tuple[str, ...] = (
     "catalog.entry.added",
     "catalog.entry.add_failed",
     "catalog.entry.deleted",
+    "catalog.entries.imported",
+    "catalog.cache.deleted",
+    "catalog.cache.populated",
+    "catalog.fetch.sha_mismatch",
     "boot.release.fetched",
     "boot.release.fetch_failed",
-    "settings.pxe.activated",
-    "settings.pxe.activate_failed",
-    "settings.pxe.deactivated",
-    "settings.pxe.deactivate_failed",
+    "settings.tftp.controlled",
+    "settings.tftp.control_failed",
     "auth.login.succeeded",
     "auth.login.failed",
     "auth.logout",

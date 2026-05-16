@@ -30,6 +30,7 @@ import re
 import threading
 import time
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -108,10 +109,88 @@ class ReleaseFetchManager(_BaseAsyncManager[ReleaseFetchState]):
         given, terminal status transitions (completed / failed)
         log a ``boot.release.fetched`` event to the audit table
         so async fetches surface in /ui/events alongside the
-        synchronous /ui/boot/fetch-release path. Tests omit it."""
+        synchronous /ui/boot/fetch-release path. Tests omit it.
+
+        Also backfills ``_states`` from recent
+        ``boot.release.fetched`` / ``boot.release.fetch_failed``
+        events when ``state_path`` is given. The manager's
+        ``_states`` dict is otherwise lost on restart, which made
+        the /ui/boot "Active + recent fetches" table show
+        "No fetches yet." even when artefacts were clearly
+        present on disk. Backfill gives the operator a durable
+        history per-tag without persisting the manager's queue.
+        """
         self._boot_root = boot_root
         self._state_path = state_path
+        if state_path is not None:
+            self._backfill_from_events(state_path)
         self._spawn_workers()
+
+    def _backfill_from_events(self, state_path: Path) -> None:
+        """Repopulate ``_states`` with recent fetch outcomes.
+
+        Reads the latest ``boot.release.fetched`` /
+        ``boot.release.fetch_failed`` rows from the events table
+        (per-tag dedupe: the most recent terminal event for each
+        tag wins). The reconstructed states show ``status=completed``
+        or ``status=failed`` with the original ts as
+        ``finished_at`` -- enough for the UI to render the
+        "Last fetched" / "Error" cells. Bytes counters stay at 0;
+        the live progress is gone, but the terminal outcome is
+        what the operator wants to see across restarts.
+
+        Soft-fail on any exception: a corrupt events row or a DB
+        that hasn't been created yet must not crash bty-web
+        startup. The backfill is a UX nicety, not a correctness
+        guarantee.
+        """
+        # ``_events_log.list_events`` is the canonical reader.
+        from bty.web import _events_log
+
+        try:
+            with _db.open_db(state_path) as conn:
+                rows = _events_log.list_events(
+                    conn,
+                    subject_kind="boot",
+                    limit=200,
+                )
+        except Exception:
+            return
+
+        # Walk newest-first; first terminal event per tag wins.
+        # ``rows`` is already ordered by id DESC from
+        # ``list_events``.
+        seen: set[str] = set()
+        for ev in rows:
+            if ev.kind not in ("boot.release.fetched", "boot.release.fetch_failed"):
+                continue
+            tag = ev.subject_id
+            if not tag or tag in seen:
+                continue
+            seen.add(tag)
+            details = ev.details or {}
+            try:
+                started = (
+                    datetime.fromisoformat(ev.ts.replace("Z", "+00:00")).timestamp()
+                    if ev.ts
+                    else None
+                )
+            except (TypeError, ValueError):
+                started = None
+            self._states[tag] = ReleaseFetchState(
+                tag=tag,
+                status="completed" if ev.kind == "boot.release.fetched" else "failed",
+                bytes_done=int(details.get("total_bytes") or 0),
+                bytes_total=int(details.get("total_bytes") or 0) or None,
+                started_at=started,
+                finished_at=started,
+                error=(
+                    str(details.get("error")) if ev.kind == "boot.release.fetch_failed" else None
+                ),
+                base_url=(
+                    details.get("base_url") if isinstance(details.get("base_url"), str) else None
+                ),
+            )
 
     async def enqueue(self, tag: str) -> ReleaseFetchState:
         """Queue a release fetch for ``tag``.
