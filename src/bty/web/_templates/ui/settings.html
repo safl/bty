@@ -25,22 +25,16 @@
 <!-- ----------------------------------------------------------------- -->
 <div class="card mb-4">
     <div class="card-body">
-        <h2 class="h5 mb-3"><i class="bi bi-hdd-network me-2"></i>PXE proxy-DHCP</h2>
+        <h2 class="h5 mb-3"><i class="bi bi-hdd-network me-2"></i>PXE / network boot</h2>
         <p class="text-muted">
-            When active, bty-pxe-proxy answers PXE / HTTP-Boot DHCP queries
-            on the chosen interface and bty-tftp serves the iPXE binaries.
-            Pick the interface facing the target machines, supply the subnet
-            they're on, and click Activate. Deactivate stops and disables
-            both daemons. The diagnostic panel below shows each daemon's
-            current state.
+            bty-server runs a TFTP daemon (dnsmasq) and serves boot
+            artefacts over HTTP. The DHCP side stays with your LAN's
+            router/DHCP server -- bty deliberately doesn't try to
+            replace it. Point your router at this appliance with the
+            settings below.
         </p>
 
         {% if missing_netboot_artifacts %}
-        {# Netboot env incomplete: activating PXE now would let
-           clients chain into iPXE but they'd 404 fetching the
-           kernel. Surface the precondition prominently so the
-           operator sees it before they activate (or right after,
-           when the activate handler's warning flash arrives). #}
         <div class="alert alert-warning d-flex justify-content-between align-items-start">
             <div>
                 <i class="bi bi-exclamation-triangle-fill me-1"></i>
@@ -49,9 +43,8 @@
                 {% for name in missing_netboot_artifacts %}
                 <code>{{ name }}</code>{% if not loop.last %}, {% endif %}
                 {% endfor %}.
-                PXE proxy-DHCP can still be activated, but clients chaining
-                into bty's iPXE script will 404 on the kernel fetch until
-                these files are present.
+                PXE clients will chain into iPXE but get 404 on the
+                kernel fetch until these files are present.
             </div>
             <a href="/ui/boot" class="btn btn-sm btn-outline-warning ms-3 flex-shrink-0">
                 <i class="bi bi-arrow-right-circle me-1"></i>Boot artifacts
@@ -59,259 +52,138 @@
         </div>
         {% endif %}
 
-        {% if pxe %}
-            {% if pxe_iface_present %}
-            {# Healthy active state: configured interface still exists. #}
-            <div class="alert alert-success d-flex justify-content-between align-items-center">
-                <div>
-                    <i class="bi bi-check-circle-fill me-1"></i>
-                    <strong>Active</strong> on interface
-                    <code>{{ pxe.interface }}</code>, subnet
-                    <code>{{ pxe.subnet }}</code>.
-                </div>
-                <form action="/ui/settings/pxe-deactivate" method="post" class="m-0">
-                    <button type="submit" class="btn btn-sm btn-outline-danger"
-                            onclick="return confirm('Deactivate PXE proxy-DHCP on {{ pxe.interface }}?');">
-                        <i class="bi bi-stop-circle me-1"></i>Deactivate
-                    </button>
-                </form>
-            </div>
-            {% else %}
-            {# NIC-gone state: configured interface is no longer present.
-               Likely renamed across a reboot (USB ethernet adapters,
-               systemd predictable-name churn). dnsmasq is failing to
-               bind silently in the background. #}
-            <div class="alert alert-warning d-flex justify-content-between align-items-center">
-                <div>
-                    <i class="bi bi-exclamation-triangle-fill me-1"></i>
-                    PXE is configured for interface
-                    <code>{{ pxe.interface }}</code> but that interface is
-                    <strong>not currently present</strong>. <code>dnsmasq</code>
-                    is failing to bind. Deactivate and re-activate on a present
-                    interface below.
-                </div>
-                <form action="/ui/settings/pxe-deactivate" method="post" class="m-0">
-                    <button type="submit" class="btn btn-sm btn-outline-danger">
-                        <i class="bi bi-stop-circle me-1"></i>Deactivate
-                    </button>
-                </form>
-            </div>
-            {% endif %}
-        {% else %}
-        <div class="alert alert-light border">
-            <i class="bi bi-info-circle me-1"></i>
-            PXE is currently <strong>not</strong> active. Machines with
-            <code>boot_policy=flash</code> won't actually be served until you
-            activate it here.
-        </div>
-        {% endif %}
+        <h3 class="h6 mt-3">This appliance</h3>
+        <table class="table table-sm mb-3">
+            <thead>
+                <tr>
+                    <th scope="col">Interface</th>
+                    <th scope="col">State</th>
+                    <th scope="col">IPv4</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for iface in interfaces %}
+                <tr>
+                    <td><code>{{ iface.name }}</code></td>
+                    <td>{{ iface.operstate }}</td>
+                    <td>
+                        {% if iface.ipv4 %}
+                        <code>{{ iface.ipv4 }}/{{ iface.prefix }}</code>
+                        {% else %}
+                        <span class="text-muted">(no address)</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="3" class="text-muted">(no interfaces detected)</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
 
-        <h3 class="h6 mt-4">{% if pxe %}Change binding{% else %}Activate{% endif %}</h3>
-        {# ``form_interface`` / ``form_subnet`` are set by the activate-
-           failed path so the operator's typed values survive the
-           re-render. Falls through to the active config, otherwise
-           to the first detected interface's auto-detected subnet. #}
-        {% set pxe_iface = form_interface or (pxe.interface if (pxe and pxe_iface_present) else (interfaces[0].name if interfaces else '')) %}
-        {% set pxe_subnet = form_subnet or (pxe.subnet if pxe else (interfaces[0].subnet if interfaces and interfaces[0].subnet else '')) %}
-        <form action="/ui/settings/pxe-activate" method="post" class="row g-3">
-            <div class="col-sm-6">
-                <label class="form-label" for="interface">Interface</label>
-                <select name="interface" id="interface" class="form-select" required
-                        onchange="document.getElementById('subnet').value =
-                                  this.options[this.selectedIndex].dataset.subnet || '';">
-                    {% for iface in interfaces %}
-                    <option value="{{ iface.name }}"
-                            data-subnet="{{ iface.subnet or '' }}"
-                            data-netmask="{{ iface.netmask or '' }}"
-                            {% if iface.name == pxe_iface %}selected{% endif %}>
-                        {{ iface.name }} ({{ iface.operstate }}{% if iface.ipv4 %},
-                        {{ iface.ipv4 }}/{{ iface.prefix }}{% endif %})
-                    </option>
-                    {% endfor %}
-                    {% if not interfaces %}
-                    <option value="" disabled selected>(no interfaces detected)</option>
-                    {% endif %}
-                </select>
-            </div>
-            <div class="col-sm-6">
-                <label class="form-label" for="subnet">Subnet</label>
-                <input type="text" name="subnet" id="subnet" class="form-control"
-                       placeholder="192.168.1.0 or 192.168.1.0/24"
-                       value="{{ pxe_subnet }}" required>
-                <div class="form-text">
-                    Network address of the segment PXE clients live on. Pre-filled
-                    from the selected interface's IPv4 address; edit if needed.
-                </div>
-            </div>
-            <div class="col-12">
-                <button type="submit" class="btn btn-primary">
-                    {% if pxe %}
-                    <i class="bi bi-arrow-clockwise me-1"></i>Re-bind
-                    {% else %}
-                    <i class="bi bi-play-circle me-1"></i>Activate
-                    {% endif %}
-                </button>
-            </div>
-        </form>
-        <p class="form-text mt-2">
-            Proxy-DHCP only: bty assumes there is already a DHCP server on
-            this segment. Full DHCP is intentionally not offered here -
-            misconfigured rogue-DHCP would conflict with the LAN's real
-            DHCP server. Run a dedicated DHCP daemon next to bty if you
-            need one.
+        <h3 class="h6 mt-4">Router-side configuration</h3>
+        <p class="text-muted">
+            Configure your LAN's DHCP server to tag PXE clients with
+            the options below. For UniFi: <em>Settings &rarr; Networks
+            &rarr; [your LAN] &rarr; Advanced &rarr; DHCP &rarr; Network
+            Boot</em>. For pfSense / OpenWRT / dnsmasq: equivalent
+            options on the DHCP service.
+        </p>
+
+        <table class="table table-sm">
+            <thead>
+                <tr>
+                    <th scope="col">Option</th>
+                    <th scope="col">Value</th>
+                    <th scope="col">Notes</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><code>option 60</code></td>
+                    <td><code>PXEClient</code></td>
+                    <td>Vendor-class echo. Strict UEFI firmware filters offers without it.</td>
+                </tr>
+                <tr>
+                    <td><code>option 66</code> / Next-Server</td>
+                    <td>
+                        {% set primary = interfaces[0] if interfaces else None %}
+                        {% if primary and primary.ipv4 %}
+                        <code>{{ primary.ipv4 }}</code>
+                        {% else %}
+                        <code>(this appliance's LAN IP)</code>
+                        {% endif %}
+                    </td>
+                    <td>The TFTP server. Same box as bty-web.</td>
+                </tr>
+                <tr>
+                    <td><code>option 67</code> / Boot-Filename</td>
+                    <td><code>ipxe.efi</code></td>
+                    <td>For UEFI PXEClient (arch 6/7/9). Use <code>undionly.kpxe</code> for legacy BIOS (arch 0).</td>
+                </tr>
+                <tr>
+                    <td><code>option 67</code> for <code>user-class=iPXE</code></td>
+                    <td>
+                        <code>http://{% if primary and primary.ipv4 %}{{ primary.ipv4 }}{% else %}&lt;bty-server&gt;{% endif %}:8080/pxe-bootstrap.ipxe</code>
+                    </td>
+                    <td>Stops iPXE chain-loop. Different bootfile when iPXE re-DHCPs.</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <p class="form-text mt-2 mb-0">
+            For UEFI HTTP-Boot (vendor-class <code>HTTPClient</code>), point
+            <code>option 67</code> at
+            <code>http://{% if primary and primary.ipv4 %}{{ primary.ipv4 }}{% else %}&lt;bty-server&gt;{% endif %}:8080/boot/ipxe.efi</code>
+            instead -- no TFTP roundtrip.
         </p>
     </div>
 </div>
 
 <!-- ----------------------------------------------------------------- -->
-{# Per-daemon state panel for the PXE stack. Surfaces the
-   ``systemctl is-active`` state of bty-pxe-proxy.service +
-   bty-tftp.service as badges + lets the operator Start / Stop /
-   Restart each daemon independently for triage. Distinct from
-   the master Activate / Deactivate above: those are the
-   opinionated workflow; these are the diagnostic knobs. #}
+{# TFTP daemon (dnsmasq) state + control panel. Distinct from the
+   info card above: this lets the operator triage the local TFTP
+   service. Start / Stop are the "take PXE offline briefly" knobs;
+   Restart picks up any TFTP-root changes the operator made by hand. #}
 <div class="card">
     <div class="card-body">
-        <h2 class="h5 mb-3"><i class="bi bi-cpu me-2"></i>Daemons</h2>
+        <h2 class="h5 mb-3"><i class="bi bi-cpu me-2"></i>TFTP daemon</h2>
         <p class="text-muted">
-            Live state and triage knobs for the two PXE-stack daemons.
-            Both are required for end-to-end PXE; running one without the
-            other leaves clients with a working DHCP offer pointing at a
-            file no one serves (or vice versa). Use these for triage; use
-            the Activate / Deactivate flow above for normal operation.
+            The local <code>dnsmasq.service</code> serves the TFTP root
+            (<code>/var/lib/tftpboot</code>). Stop it to take PXE offline
+            without disabling DHCP; restart it to pick up new bootfiles
+            staged into the TFTP root.
         </p>
-        <div class="table-responsive">
-            <table class="table table-sm align-middle mb-0">
-                <thead>
-                    <tr>
-                        <th scope="col">Daemon</th>
-                        <th scope="col">State</th>
-                        <th scope="col" class="text-end">Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for d in pxe_daemons %}
-                    <tr>
-                        <td><code>{{ d.unit }}.service</code></td>
-                        <td>
-                            {# Map the raw systemctl state to a Bootstrap
-                               badge class. ``active`` is green; ``failed``
-                               is red; ``activating`` / ``deactivating``
-                               are amber; everything else (``inactive``,
-                               ``unknown``, ...) is neutral grey. #}
-                            {% if d.state == 'active' %}
-                                <span class="badge bg-success">{{ d.state }}</span>
-                            {% elif d.state == 'failed' %}
-                                <span class="badge bg-danger">{{ d.state }}</span>
-                            {% elif d.state in ('activating', 'deactivating', 'reloading') %}
-                                <span class="badge bg-warning text-dark">{{ d.state }}</span>
-                            {% else %}
-                                <span class="badge bg-secondary">{{ d.state }}</span>
-                            {% endif %}
-                        </td>
-                        <td class="text-end">
-                            <form action="/ui/settings/pxe-daemon" method="post"
-                                  class="d-inline-flex gap-1 m-0">
-                                <input type="hidden" name="unit" value="{{ d.unit }}">
-                                <button type="submit" name="action" value="start"
-                                        class="btn btn-sm btn-outline-success"
-                                        {% if d.state == 'active' %}disabled{% endif %}>
-                                    <i class="bi bi-play-fill"></i> Start
-                                </button>
-                                <button type="submit" name="action" value="stop"
-                                        class="btn btn-sm btn-outline-secondary"
-                                        {% if d.state != 'active' %}disabled{% endif %}>
-                                    <i class="bi bi-stop-fill"></i> Stop
-                                </button>
-                                <button type="submit" name="action" value="restart"
-                                        class="btn btn-sm btn-outline-warning">
-                                    <i class="bi bi-arrow-clockwise"></i> Restart
-                                </button>
-                            </form>
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+        <div class="d-flex align-items-center gap-3">
+            <div>
+                {% if tftp.state == 'active' %}
+                <span class="badge bg-success fs-6">{{ tftp.state }}</span>
+                {% elif tftp.state == 'failed' %}
+                <span class="badge bg-danger fs-6">{{ tftp.state }}</span>
+                {% elif tftp.state in ('activating', 'deactivating', 'reloading') %}
+                <span class="badge bg-warning text-dark fs-6">{{ tftp.state }}</span>
+                {% else %}
+                <span class="badge bg-secondary fs-6">{{ tftp.state }}</span>
+                {% endif %}
+                <code class="ms-2">dnsmasq.service</code>
+            </div>
+            <form action="/ui/settings/tftp-control" method="post" class="d-inline-flex gap-1 m-0 ms-auto">
+                <button type="submit" name="action" value="start"
+                        class="btn btn-sm btn-outline-success"
+                        {% if tftp.state == 'active' %}disabled{% endif %}>
+                    <i class="bi bi-play-fill"></i> Start
+                </button>
+                <button type="submit" name="action" value="stop"
+                        class="btn btn-sm btn-outline-secondary"
+                        {% if tftp.state != 'active' %}disabled{% endif %}>
+                    <i class="bi bi-stop-fill"></i> Stop
+                </button>
+                <button type="submit" name="action" value="restart"
+                        class="btn btn-sm btn-outline-warning">
+                    <i class="bi bi-arrow-clockwise"></i> Restart
+                </button>
+            </form>
         </div>
-        <p class="form-text mt-3 mb-3">
-            ``Start`` of a daemon that doesn't see
-            <code>/etc/default/bty-pxe-proxy</code> is a no-op: the unit's
-            <code>ConditionPathExists=</code> guard keeps it cleanly inactive
-            until you activate the PXE workflow above.
-        </p>
-
-        {# Recent structured events from the daemons (DHCP
-           discover/offer, TFTP rrq/complete/error). Read on each
-           page render from journald; refresh by reloading. Shows
-           operators what targets the proxy + tftp are actually
-           talking to, without needing SSH + journalctl. #}
-        <h3 class="h6 mb-2"><i class="bi bi-broadcast me-1"></i>Recent activity</h3>
-        {% if pxe_events %}
-        <div class="table-responsive" style="max-height: 24rem;">
-            <table class="table table-sm table-striped mb-0 small">
-                <thead class="sticky-top bg-body">
-                    <tr>
-                        <th scope="col" style="width: 11rem;">Time</th>
-                        <th scope="col" style="width: 10rem;">Daemon</th>
-                        <th scope="col" style="width: 9rem;">Event</th>
-                        <th scope="col">Detail</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {# Reverse: newest first for at-a-glance scanning.
-                       jinja's reverse filter is fine on a small list (80
-                       items max per the handler cap). #}
-                    {% for e in pxe_events|reverse %}
-                    <tr>
-                        <td class="font-monospace text-muted">
-                            <span title="{{ e.iso_utc }}">{{ e.hms_utc }}</span>
-                        </td>
-                        <td><code>{{ e.unit }}</code></td>
-                        <td>
-                            {# Map event prefix to a Bootstrap badge:
-                               offer / complete = green (good), error /
-                               giveup = red, ignore = amber, everything
-                               else (discover, rrq, ...) neutral. #}
-                            {% if e.event in ('dhcp.offer', 'tftp.complete') %}
-                                <span class="badge bg-success">{{ e.event }}</span>
-                            {% elif e.event in ('dhcp.error', 'tftp.error', 'tftp.giveup') %}
-                                <span class="badge bg-danger">{{ e.event }}</span>
-                            {% elif e.event == 'dhcp.ignore' %}
-                                <span class="badge bg-warning text-dark">{{ e.event }}</span>
-                            {% else %}
-                                <span class="badge bg-secondary">{{ e.event }}</span>
-                            {% endif %}
-                        </td>
-                        <td class="font-monospace small text-break">
-                            {# Flat key=value list keeps the wire shape
-                               obvious. Operators reading this are
-                               diagnosing PXE so they want the raw fields,
-                               not a stylised view. #}
-                            {% for k, v in e.fields.items() %}
-                            <span class="me-2"><span class="text-muted">{{ k }}=</span>{{ v }}</span>
-                            {% endfor %}
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-        {% else %}
-        <p class="text-muted small mb-0">
-            No daemon events recorded yet. Activate PXE and trigger a
-            target to PXE-boot; this feed populates from journald
-            (which captures the daemons' structured JSON output).
-        </p>
-        {% endif %}
     </div>
 </div>
 
-{# Recent activity for settings: PXE activate / activate-failed
-   via the per-subject events card. #}
-{% with events=settings_events,
-        title="Recent settings activity",
-        link_to_full="/ui/events?subject_kind=settings" %}
-{% include "ui/_events_card.html" %}
-{% endwith %}
 {% endblock %}

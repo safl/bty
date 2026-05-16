@@ -1,6 +1,6 @@
 [project]
 name = "bty-lab"
-version = "0.17.1"
+version = "0.18.0"
 description = "Flash images onto target disks, locally or remote with and without PXE"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -50,8 +50,6 @@ all = [
 bty = "bty.cli:main"
 bty-tui = "bty.tui:main"
 bty-web = "bty.web:main"
-bty-pxe-proxy = "bty.pxe.proxy:main"
-bty-tftp = "bty.pxe.tftp:main"
 
 [project.urls]
 Homepage = "https://safl.dk/bty/"

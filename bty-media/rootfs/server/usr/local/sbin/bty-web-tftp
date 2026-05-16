@@ -1,0 +1,29 @@
+#!/bin/sh
+# bty-web TFTP daemon-control helper.
+#
+# Invoked by the ``bty`` service user via the entry in
+# ``/etc/sudoers.d/bty-web``. Performs ``systemctl <action>
+# dnsmasq.service`` where ``action`` is from a strict allowlist.
+#
+# dnsmasq is the only daemon this helper touches: it owns the
+# TFTP root the appliance hands iPXE binaries from. Operators
+# may want to start / stop / restart it from /ui/settings without
+# SSHing in -- "restart TFTP" is the common triage knob after a
+# new bootfile is dropped into ``/var/lib/tftpboot``.
+#
+# Args:
+#   $1  action: ``start`` | ``stop`` | ``restart``
+
+set -eu
+
+if [ $# -ne 1 ]; then
+    printf 'usage: %s <start|stop|restart>\n' "$0" >&2
+    exit 64
+fi
+
+case "$1" in
+    start|stop|restart) ;;
+    *) printf 'bad action: %s (allowed: start, stop, restart)\n' "$1" >&2; exit 64 ;;
+esac
+
+systemctl "$1" dnsmasq.service

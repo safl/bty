@@ -38,41 +38,18 @@
             </div>
         </a>
     </div>
-    {# PXE proxy-DHCP state tile. Three flavours via icon + colour:
-       - active + NIC present : green check, interface + subnet shown
-       - active + NIC gone    : yellow warning, NIC name + nudge to fix
-       - inactive             : grey hyphen, "inactive" label
-       Page-reload refresh (not SSE-pushed) since the bus only fires on
-       machine + image mutations. #}
+    {# Fourth tile: link to /ui/settings for router-side PXE config
+       guidance. bty no longer owns DHCP / proxy-DHCP -- the tile is
+       a navigation hint rather than a live status reflection. #}
     <div class="col-md-3">
         <a href="/ui/settings" class="text-decoration-none text-body">
             <div class="card h-100 shadow-sm">
                 <div class="card-body d-flex align-items-center">
-                    {% if pxe and pxe_iface_present %}
-                    <i class="bi bi-broadcast-pin display-4 text-success me-3"></i>
+                    <i class="bi bi-hdd-network display-4 text-primary me-3"></i>
                     <div>
-                        <h2 class="h5 mb-0">PXE active</h2>
-                        <p class="text-muted small mb-0">
-                            <code>{{ pxe.interface }}</code>
-                            ({{ pxe.subnet }})
-                        </p>
+                        <h2 class="h5 mb-0">PXE / network boot</h2>
+                        <p class="text-muted small mb-0">router config &amp; TFTP root</p>
                     </div>
-                    {% elif pxe %}
-                    <i class="bi bi-exclamation-triangle display-4 text-warning me-3"></i>
-                    <div>
-                        <h2 class="h5 mb-0">PXE: NIC gone</h2>
-                        <p class="text-muted small mb-0">
-                            bound to <code>{{ pxe.interface }}</code>,
-                            not present
-                        </p>
-                    </div>
-                    {% else %}
-                    <i class="bi bi-broadcast display-4 text-muted me-3"></i>
-                    <div>
-                        <h2 class="h5 mb-0">PXE inactive</h2>
-                        <p class="text-muted small mb-0">no proxy-DHCP</p>
-                    </div>
-                    {% endif %}
                 </div>
             </div>
         </a>

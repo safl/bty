@@ -34,7 +34,7 @@ from bty import catalog as _catalog
 from bty import images
 from bty import oras as _oras
 from bty.web import _catalog as _web_catalog
-from bty.web import _db, _hash, _models, _release_mgr, _sysconfig, _ui
+from bty.web import _db, _hash, _models, _release_mgr, _ui
 from bty.web._auth import SESSION_COOKIE, require_auth
 from bty.web._events import MachineEvent, MachineEventBus, sse_format
 from bty.web._events_log import list_events as _list_events
@@ -272,20 +272,10 @@ def create_app(
                 "SELECT COUNT(*) FROM machines WHERE bty_image_ref IS NULL"
             ).fetchone()[0]
         image_count = len(images.list_images(resolved_image_root))
-        # PXE proxy-DHCP state for the 4th tile. Three flavours: inactive
-        # (no config), active+healthy (config present, NIC present),
-        # active+nic-gone (config bound to a NIC that's no longer in
-        # /sys/class/net -- USB ethernet adapters or systemd predictable-
-        # name churn). The tile links to /ui/settings; state changes from
-        # there are not pushed via SSE (the bus fires on machine + image
-        # mutations only), so the tile refreshes on page reload.
-        pxe_state = _sysconfig.pxe_state()
         return jinja.get_template("ui/_dashboard_counts.html").render(
             machine_count=machine_count,
             discovered_count=discovered_count,
             image_count=image_count,
-            pxe=pxe_state.config,
-            pxe_iface_present=pxe_state.iface_present,
         )
 
     def publish_state_changed() -> None:

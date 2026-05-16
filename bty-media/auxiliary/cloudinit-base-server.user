@@ -135,13 +135,6 @@ runcmd:
     set -eu
     useradd --system --no-create-home --shell /usr/sbin/nologin bty
     echo 'bty:bty' | chpasswd
-    # systemd-journal membership lets bty-web read the
-    # bty-pxe-proxy + bty-tftp journals to surface the structured
-    # event feed in /ui/settings. Modern systemd permits the
-    # unit's User= to read its own journal without this, but the
-    # group membership is a portable belt-and-braces guarantee
-    # across systemd versions and Storage= configurations.
-    usermod -a -G systemd-journal bty
     install -d -o root -g root -m 0755 /opt/bty
     python3 -m venv /opt/bty/venv
     /opt/bty/venv/bin/pip install --no-cache-dir --upgrade pip
@@ -154,47 +147,30 @@ runcmd:
     # ``/opt/bty/venv/bin/cijoe`` for the runner).
     /opt/bty/venv/bin/pip install --no-cache-dir cijoe
 
-  # PXE boot stack: stage the iPXE binaries under the TFTP root so
-  # dnsmasq can serve them when the operator activates proxy-DHCP.
-  # The package layout from `apt install ipxe` puts them under
-  # /usr/lib/ipxe/ - symlink rather than copy so package upgrades
-  # carry through.
+  # PXE TFTP root: dnsmasq serves the iPXE binaries from here when
+  # the operator's router/DHCP tells PXE clients to fetch
+  # ``ipxe.efi`` (or an arch sibling) from this appliance. Symlinks
+  # into /usr/lib/ipxe/ so ``apt install ipxe`` upgrades carry
+  # through.
   - install -d -o root -g root -m 0755 /var/lib/tftpboot
   - ln -sf /usr/lib/ipxe/undionly.kpxe /var/lib/tftpboot/undionly.kpxe
   - ln -sf /usr/lib/ipxe/ipxe.efi /var/lib/tftpboot/ipxe.efi
 
-  # HTTP-Boot path: UEFI HTTPClient targets (arch 16) get told by
-  # the proxy-DHCP daemon to fetch ``http://<server>:8080/boot/ipxe.efi``
-  # via plain HTTP (no TFTP roundtrip). bty-web serves files from
-  # /var/lib/bty/boot, so we expose ipxe.efi there too via a
-  # symlink. Same package source, same upgrade-tracking story as
-  # the /var/lib/tftpboot links above.
+  # HTTP-Boot path: UEFI HTTPClient targets fetch ipxe.efi over
+  # plain HTTP (no TFTP). bty-web serves files from /var/lib/bty/boot,
+  # so we expose ipxe.efi there too via a symlink. Operator
+  # configures their router with the HTTPClient bootfile URL
+  # pointing at ``http://<bty-server>:8080/boot/ipxe.efi``.
   - install -d -o bty -g bty -m 0755 /var/lib/bty/boot
   - ln -sf /usr/lib/ipxe/ipxe.efi /var/lib/bty/boot/ipxe.efi
 
-  # Privileged helpers + sudoers entry that let the bty service user
-  # activate / deactivate the PXE proxy-DHCP daemon without a password.
-  # sudo refuses to load /etc/sudoers.d/* unless the file is exactly
-  # mode 0440. The activate helper writes /etc/default/bty-pxe-proxy
-  # and restarts bty-pxe-proxy.service; the deactivate helper stops
-  # the service.
-  - chmod 0755 /usr/local/sbin/bty-web-activate-pxe
-  - chmod 0755 /usr/local/sbin/bty-web-deactivate-pxe
-  - chmod 0755 /usr/local/sbin/bty-web-pxe-daemon
+  # bty-web's TFTP daemon-control helper + sudoers entry. The web
+  # UI exposes Start/Stop/Restart buttons for dnsmasq.service (which
+  # owns the TFTP root). sudo refuses /etc/sudoers.d/* unless mode is
+  # exactly 0440.
+  - chmod 0755 /usr/local/sbin/bty-web-tftp
   - chmod 0440 /etc/sudoers.d/bty-web
   - chown root:root /etc/sudoers.d/bty-web
-
-  # Enable the PXE-stack units at bake time so the runtime helpers
-  # don't need to. ``systemctl enable`` writes WantedBy symlinks
-  # into /etc/systemd/system/multi-user.target.wants/, which the
-  # bty-web service (running under ProtectSystem=full) can't reach
-  # via its sudo'd helpers. Both units have
-  # ``ConditionPathExists=/etc/default/bty-pxe-proxy``, so an
-  # enabled-but-unconfigured unit is harmless -- it gets skipped
-  # cleanly at boot. ``activate`` only needs to write the env file
-  # + ``systemctl restart``.
-  - systemctl enable bty-pxe-proxy.service
-  - systemctl enable bty-tftp.service
 
   # Privileged helper that prepares a 2nd disk as the bty image store
   # so the operator can reflash the bty-server appliance without

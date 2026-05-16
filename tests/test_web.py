@@ -1264,16 +1264,23 @@ def test_events_carry_source_ip(app_client: TestClient) -> None:
 
 def test_events_filter_failed_only_returns_only_failure_kinds(
     app_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """``?failed=1`` returns only events whose kind ends in
     ``.failed`` or ``_failed``. Cross-kind shortcut for the
     operator's "show me everything that broke" triage view --
     one toggle instead of cycling through 6+ failure kinds in
     the per-kind dropdown."""
-    # Force a settings.pxe.activate_failed event (deterministic).
+    # Force a boot.release.fetch_failed event (deterministic).
+    from bty.web import _releases
+
+    def _explode(*_a: object, **_kw: object) -> None:
+        raise _releases.FetchError("simulated fetch failure")
+
+    monkeypatch.setattr(_releases, "fetch_release", _explode)
     app_client.post(
-        "/ui/settings/pxe-activate",
-        data={"interface": "!!!", "subnet": "10.0.0.0/24"},
+        "/ui/boot/fetch-release",
+        data={"tag": "v0.0.0"},
         cookies=AUTH,
         follow_redirects=False,
     )
@@ -1414,37 +1421,6 @@ def test_image_upload_oserror_logs_failure_event(
     assert "No space left on device" in row["details"]["error"]
 
 
-def test_settings_pxe_activate_failure_logs_event(app_client: TestClient) -> None:
-    """A failed PXE activation must land a
-    ``settings.pxe.activate_failed`` event so the audit trail is
-    symmetric with the success path. Posting an invalid interface
-    name (regex-rejected before the helper is even shelled out)
-    is the deterministic failure trigger that doesn't depend on
-    sudo / helper presence."""
-    r = app_client.post(
-        "/ui/settings/pxe-activate",
-        data={"interface": "!!!", "subnet": "192.168.1.0/24"},
-        cookies=AUTH,
-        follow_redirects=False,
-    )
-    # Settings page re-renders with the red flash.
-    assert r.status_code == 200
-    r = app_client.get(
-        "/events",
-        params={"kind": "settings.pxe.activate_failed"},
-        cookies=AUTH,
-    )
-    assert r.status_code == 200
-    events = r.json()["events"]
-    assert len(events) == 1
-    row = events[0]
-    assert row["actor"] == "operator"
-    assert row["subject_kind"] == "settings"
-    assert row["subject_id"] == "pxe"
-    assert row["details"] is not None
-    assert "invalid interface name" in row["details"]["error"]
-
-
 def test_events_filter_by_subject_id(app_client: TestClient) -> None:
     """The per-MAC embedded card on /ui/machines/{mac} drives this
     filter -- only events for the given MAC come back."""
@@ -1535,7 +1511,9 @@ def test_ui_events_page_footer_shows_filtered_when_filter_active(
     assert "(filtered)" in body
 
 
-def test_ui_events_page_renders_failure_with_danger_badge(app_client: TestClient) -> None:
+def test_ui_events_page_renders_failure_with_danger_badge(
+    app_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Failure-kind events (anything ending ``.failed`` or
     ``_failed``) render with the ``bg-danger`` Bootstrap badge so
     they pop in a long log instead of blending in with their
@@ -1543,22 +1521,28 @@ def test_ui_events_page_renders_failure_with_danger_badge(app_client: TestClient
     same family / different colour). Guards the
     failed-kind branch in the events / per-machine templates
     against a future refactor of the badge map."""
-    # Trigger a settings.pxe.activate_failed event with a regex-
-    # rejected interface name (deterministic, no helper needed).
+    # Trigger a boot.release.fetch_failed event (deterministic --
+    # monkeypatch the fetch to raise FetchError).
+    from bty.web import _releases
+
+    def _explode(*_a: object, **_kw: object) -> None:
+        raise _releases.FetchError("simulated fetch failure")
+
+    monkeypatch.setattr(_releases, "fetch_release", _explode)
     app_client.post(
-        "/ui/settings/pxe-activate",
-        data={"interface": "!!!", "subnet": "10.0.0.0/24"},
+        "/ui/boot/fetch-release",
+        data={"tag": "v0.0.0"},
         cookies=AUTH,
         follow_redirects=False,
     )
     r = app_client.get(
         "/ui/events",
-        params={"kind": "settings.pxe.activate_failed"},
+        params={"kind": "boot.release.fetch_failed"},
         cookies=AUTH,
     )
     assert r.status_code == 200
     body = r.text
-    assert "settings.pxe.activate_failed" in body
+    assert "boot.release.fetch_failed" in body
     # Danger badge appears in the rendered row.
     assert "bg-danger" in body
 

@@ -211,21 +211,12 @@ def register_ui_routes(
             # update) so a reload is the refresh gesture.
             recent_events = _events_log.list_events(conn, limit=10)
         image_count = len(bty_images.list_images(image_root))
-        # PXE proxy-DHCP state for the 4th counter tile. ``pxe_state``
-        # is shared with the SSE refresh fragment in ``_app.py`` so the
-        # initial render and SSE updates agree. The bus fires on
-        # machine + image mutations only -- PXE state changes from
-        # /ui/settings won't push here, so the tile refreshes on next
-        # page reload.
-        pxe_state = _sysconfig.pxe_state()
         return render(
             "ui/dashboard.html",
             request,
             machine_count=machine_count,
             discovered_count=discovered_count,
             image_count=image_count,
-            pxe=pxe_state.config,
-            pxe_iface_present=pxe_state.iface_present,
             recent_events=recent_events,
         )
 
@@ -729,61 +720,29 @@ def register_ui_routes(
     def _render_settings_page(
         request: Request,
         *,
-        new_token: str | None = None,
         flash: str | None = None,
         flash_kind: str | None = None,
-        form_interface: str | None = None,
-        form_subnet: str | None = None,
     ) -> HTMLResponse:
-        # Recent activity for settings: PXE activate / activate-
-        # failed / deactivate / deactivate-failed.
-        with _db.open_db(state_path) as conn:
-            settings_events = _events_log.list_events(conn, subject_kind="settings", limit=10)
+        # /ui/settings is now an informational page: operator config
+        # for the PXE flow happens on the LAN router (DHCP option 60
+        # / 66 / 67 tagging), not in bty-web. We surface this
+        # appliance's IP + interfaces so the operator has the values
+        # they need to paste into UniFi / pfSense / dnsmasq. The
+        # appliance side that IS controllable from here is the local
+        # dnsmasq (TFTP) -- Start / Stop / Restart in the panel
+        # below.
         interfaces = _sysconfig.list_interfaces()
-        pxe = _sysconfig.pxe_active()
-        # NIC-gone detection: the configured interface may have
-        # been renamed across a reboot (USB ethernet adapters,
-        # systemd predictable-name updates, etc.). Flag in the
-        # UI so the operator can deactivate + re-bind instead
-        # of chasing why dnsmasq is silently failing.
-        pxe_iface_present = pxe is not None and any(i.name == pxe.interface for i in interfaces)
-        # Netboot-env presence: PXE proxy-DHCP gets clients to
-        # chain into bty's iPXE script, but the script then
-        # ``kernel`` / ``initrd`` fetches against ``GET /boot/``
-        # land 404 if the kernel + initrd + squashfs trio hasn't
-        # been populated under ``boot_root``. Surface this in the
-        # UI so the operator sees the precondition before they
-        # activate (or right after, if they didn't notice the
-        # banner first time).
         missing_netboot = _releases.missing_netboot_artifacts(boot_root)
-        # Per-daemon systemctl state for the PXE-stack diagnostics
-        # panel. Cheap (two ``systemctl is-active`` calls, no sudo,
-        # ~ms total). Surfaced as badges + Start/Stop/Restart knobs
-        # so the operator can triage a half-up state from the UI
-        # without SSHing in for ``systemctl status``.
-        pxe_daemons = _sysconfig.daemon_statuses()
-        # Recent structured events emitted by the daemons (DHCP
-        # discover/offer, TFTP rrq/complete/error). Read from
-        # journald; shells out to journalctl. Bounded to the 80
-        # most recent entries so the page stays cheap to render
-        # even after a busy boot session.
-        pxe_events = _sysconfig.recent_daemon_events(limit=80)
+        tftp = _sysconfig.tftp_status()
         return render(
             "ui/settings.html",
             request,
             interfaces=interfaces,
-            pxe=pxe,
-            pxe_iface_present=pxe_iface_present,
-            pxe_daemons=pxe_daemons,
-            pxe_events=pxe_events,
+            tftp=tftp,
             missing_netboot_artifacts=missing_netboot,
             boot_root=str(boot_root),
-            new_token=new_token,
-            settings_events=settings_events,
             flash=flash,
             flash_kind=flash_kind,
-            form_interface=form_interface,
-            form_subnet=form_subnet,
         )
 
     @app.get(
@@ -796,193 +755,53 @@ def register_ui_routes(
         return _render_settings_page(request)
 
     @app.post(
-        "/ui/settings/pxe-activate",
+        "/ui/settings/tftp-control",
         include_in_schema=False,
         dependencies=[Depends(require_ui_auth)],
     )
-    def ui_settings_pxe_activate(
+    def ui_settings_tftp_control(
         request: Request,
-        interface: Annotated[str, Form()] = "",
-        subnet: Annotated[str, Form()] = "",
-    ) -> HTMLResponse:
-        client_ip = _client_ip(request)
-        try:
-            _sysconfig.activate_pxe(interface, subnet)
-        except _sysconfig.SysConfigError as exc:
-            # Log the failure so the audit trail is symmetric with
-            # the success path -- a failed activation is operator
-            # activity worth recording (failed sudo, malformed
-            # subnet, missing interface, etc.).
-            with _db.open_db(state_path) as conn:
-                _events_log.record(
-                    conn,
-                    kind="settings.pxe.activate_failed",
-                    summary=f"PXE activation failed on {interface!r} for {subnet!r}: {exc}",
-                    subject_kind="settings",
-                    subject_id="pxe",
-                    actor="operator",
-                    source_ip=client_ip,
-                    details={
-                        "interface": interface,
-                        "subnet": subnet,
-                        "error": str(exc),
-                    },
-                )
-                conn.commit()
-            return _render_settings_page(
-                request,
-                flash=f"PXE activation failed: {exc}",
-                flash_kind="danger",
-                form_interface=interface,
-                form_subnet=subnet,
-            )
-        # Netboot-env check: even with a successful proxy-DHCP +
-        # iPXE chain, clients can't actually boot if
-        # vmlinuz/initrd/squashfs aren't sitting under boot_root.
-        # Record either way (the missing list, possibly empty, lands
-        # in the audit detail so operators can see the activation's
-        # netboot precondition state in the timeline), but the
-        # operator-visible flash differs: warning if anything's
-        # missing, plain success if not.
-        missing_netboot = _releases.missing_netboot_artifacts(boot_root)
-        if missing_netboot:
-            summary = (
-                f"PXE activated on {interface!r} for {subnet!r}; "
-                f"netboot env incomplete (missing {', '.join(missing_netboot)})"
-            )
-            flash_message = (
-                f"PXE activated on {interface!r} for {subnet!r}, but the "
-                f"netboot environment is incomplete: missing "
-                f"{', '.join(missing_netboot)} under {boot_root}. "
-                f"PXE clients can chain into iPXE but will get 404 "
-                f"fetching the kernel. Populate the boot directory "
-                f"via the Boot artifacts page."
-            )
-            flash_kind: str = "warning"
-        else:
-            summary = f"PXE activated on {interface!r} for {subnet!r}"
-            flash_message = f"PXE activated on {interface!r} for {subnet!r}."
-            flash_kind = "success"
-        with _db.open_db(state_path) as conn:
-            _events_log.record(
-                conn,
-                kind="settings.pxe.activated",
-                summary=summary,
-                subject_kind="settings",
-                subject_id="pxe",
-                actor="operator",
-                source_ip=client_ip,
-                details={
-                    "interface": interface,
-                    "subnet": subnet,
-                    "missing_netboot_artifacts": missing_netboot,
-                },
-            )
-            conn.commit()
-        return _render_settings_page(
-            request,
-            flash=flash_message,
-            flash_kind=flash_kind,
-        )
-
-    @app.post(
-        "/ui/settings/pxe-deactivate",
-        include_in_schema=False,
-        dependencies=[Depends(require_ui_auth)],
-    )
-    def ui_settings_pxe_deactivate(request: Request) -> HTMLResponse:
-        # Symmetric pair with ``pxe-activate``. Idempotent on the
-        # helper side: a missing config file is reported as
-        # already-deactivated and we still log the operator's
-        # intent.
-        client_ip = _client_ip(request)
-        try:
-            _sysconfig.deactivate_pxe()
-        except _sysconfig.SysConfigError as exc:
-            with _db.open_db(state_path) as conn:
-                _events_log.record(
-                    conn,
-                    kind="settings.pxe.deactivate_failed",
-                    summary=f"PXE deactivation failed: {exc}",
-                    subject_kind="settings",
-                    subject_id="pxe",
-                    actor="operator",
-                    source_ip=client_ip,
-                    details={"error": str(exc)},
-                )
-                conn.commit()
-            return _render_settings_page(
-                request, flash=f"PXE deactivation failed: {exc}", flash_kind="danger"
-            )
-        with _db.open_db(state_path) as conn:
-            _events_log.record(
-                conn,
-                kind="settings.pxe.deactivated",
-                summary="PXE proxy-DHCP deactivated",
-                subject_kind="settings",
-                subject_id="pxe",
-                actor="operator",
-                source_ip=client_ip,
-            )
-            conn.commit()
-        return _render_settings_page(
-            request,
-            flash="PXE proxy-DHCP deactivated.",
-            flash_kind="success",
-        )
-
-    @app.post(
-        "/ui/settings/pxe-daemon",
-        include_in_schema=False,
-        dependencies=[Depends(require_ui_auth)],
-    )
-    def ui_settings_pxe_daemon(
-        request: Request,
-        unit: Annotated[str, Form()] = "",
         action: Annotated[str, Form()] = "",
     ) -> HTMLResponse:
-        # Per-daemon Start / Stop / Restart for operator triage.
-        # Distinct from activate / deactivate: those are the
-        # opinionated workflow (write env file, restart dnsmasq,
-        # bring both daemons up together). This is the diagnostic
-        # knob ("the proxy is in failed state, restart just it"
-        # or "stop TFTP and observe whether proxy still serves").
+        # Start / Stop / Restart dnsmasq.service (the local TFTP
+        # daemon). Operator triage: "TFTP isn't responding -> restart
+        # it"; "I want to take PXE offline briefly -> stop it".
         client_ip = _client_ip(request)
         try:
-            _sysconfig.control_daemon(unit, action)
+            _sysconfig.control_tftp(action)
         except _sysconfig.SysConfigError as exc:
             with _db.open_db(state_path) as conn:
                 _events_log.record(
                     conn,
-                    kind="settings.pxe.daemon_failed",
-                    summary=(f"PXE daemon {action!r} on {unit!r} failed: {exc}"),
+                    kind="settings.tftp.control_failed",
+                    summary=f"TFTP {action!r} failed: {exc}",
                     subject_kind="settings",
-                    subject_id="pxe",
+                    subject_id="tftp",
                     actor="operator",
                     source_ip=client_ip,
-                    details={"unit": unit, "action": action, "error": str(exc)},
+                    details={"action": action, "error": str(exc)},
                 )
                 conn.commit()
             return _render_settings_page(
                 request,
-                flash=f"{action} of {unit} failed: {exc}",
+                flash=f"{action} of TFTP daemon failed: {exc}",
                 flash_kind="danger",
             )
         with _db.open_db(state_path) as conn:
             _events_log.record(
                 conn,
-                kind="settings.pxe.daemon",
-                summary=f"PXE daemon {action} on {unit}",
+                kind="settings.tftp.controlled",
+                summary=f"TFTP daemon {action}",
                 subject_kind="settings",
-                subject_id="pxe",
+                subject_id="tftp",
                 actor="operator",
                 source_ip=client_ip,
-                details={"unit": unit, "action": action},
+                details={"action": action},
             )
             conn.commit()
         return _render_settings_page(
             request,
-            flash=f"{action.capitalize()}ed {unit}.",
+            flash=f"{action.capitalize()}ed TFTP daemon.",
             flash_kind="success",
         )
 
