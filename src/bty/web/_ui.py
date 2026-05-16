@@ -456,7 +456,11 @@ def register_ui_routes(
         if not catalog_manifest_path:
             state_dir = os.environ.get("BTY_STATE_DIR", "/var/lib/bty")
             catalog_manifest_path = str(Path(state_dir) / "catalog.toml")
-        release_repo = os.environ.get("BTY_BOOT_RELEASE_REPO", "safl/bty")
+        # ``or DEFAULT_REPO`` rather than the dict default so an
+        # empty-string env value (``BTY_BOOT_RELEASE_REPO=``) falls
+        # back instead of breaking the page's release link. Matches
+        # the pattern in _releases.fetch_release + ui_boot.
+        release_repo = os.environ.get("BTY_BOOT_RELEASE_REPO") or _releases.DEFAULT_REPO
         # Image-relevant slice of the event log: uploads, hash
         # completions, catalog entry add/delete. Top 15 keeps the
         # page short; full timeline at /ui/events.

@@ -148,6 +148,24 @@ def test_ui_dashboard_renders_after_login(client: TestClient) -> None:
     assert "Machines" in r.text
 
 
+def test_ui_images_handles_empty_release_repo_env(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``BTY_BOOT_RELEASE_REPO=`` (empty string) used to produce a
+    broken release link on /ui/images because the dict-default
+    fallback only fires on absent keys, not empty values. The
+    ``or DEFAULT_REPO`` pattern handles both."""
+    monkeypatch.setenv("BTY_BOOT_RELEASE_REPO", "")
+    _login(client)
+    r = client.get("/ui/images")
+    assert r.status_code == 200
+    body = r.text
+    # The fallback ``safl/bty`` URL appears in the "Fetch from
+    # project release" card's external link.
+    assert "github.com/safl/bty" in body
+
+
 def test_ui_dashboard_renders_with_zero_state(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
