@@ -1745,6 +1745,24 @@ def create_app(
         download manager in-process. 303s back to /ui/images with
         either a success or ``?error=`` query param so the page's
         flash slot surfaces the outcome.
+
+        Validation layers, in order:
+
+        * ``file`` field present + an UploadFile.
+        * Size cap: ``_CATALOG_UPLOAD_MAX_BYTES`` (1 MiB). A real
+          ``catalog.toml`` is a handful of KB; anything multi-MB
+          is almost certainly an operator dropping the wrong file
+          (an .iso, an image) into the catalog form by mistake,
+          and rejecting at the boundary beats OOM-ing the
+          process trying to parse it as TOML.
+        * Non-empty body.
+        * Filename extension hint (``.toml`` / ``.tml``): served
+          purely as a clearer-error path. The actual gate is the
+          TOML parse below; a .yaml file accidentally renamed
+          to .toml will still bounce on parse failure, and a
+          stripped-extension upload that is valid TOML still
+          works.
+        * Parses as a valid catalog manifest.
         """
         form = await request.form()
         upload = form.get("file")
@@ -1753,7 +1771,30 @@ def create_app(
                 "/ui/images?error=" + urllib.parse.quote("no file in upload", safe=""),
                 status_code=status.HTTP_303_SEE_OTHER,
             )
-        content = await upload.read()
+        filename = upload.filename or ""
+        if filename and not filename.lower().endswith((".toml", ".tml")):
+            return RedirectResponse(
+                "/ui/images?error="
+                + urllib.parse.quote(
+                    f"unexpected file extension for catalog manifest: {filename!r} "
+                    "(expected .toml)",
+                    safe="",
+                ),
+                status_code=status.HTTP_303_SEE_OTHER,
+            )
+        # Read up to the cap+1 so we can distinguish "exactly the
+        # cap" from "more than the cap".
+        content = await upload.read(_CATALOG_UPLOAD_MAX_BYTES + 1)
+        if len(content) > _CATALOG_UPLOAD_MAX_BYTES:
+            return RedirectResponse(
+                "/ui/images?error="
+                + urllib.parse.quote(
+                    f"catalog manifest upload exceeded {_CATALOG_UPLOAD_MAX_BYTES} bytes; "
+                    "is this actually a catalog.toml?",
+                    safe="",
+                ),
+                status_code=status.HTTP_303_SEE_OTHER,
+            )
         if not content:
             return RedirectResponse(
                 "/ui/images?error=" + urllib.parse.quote("upload was empty", safe=""),
@@ -1794,13 +1835,47 @@ def create_app(
         release page (``releases/latest/download/catalog.toml``),
         save it at the manifest path, and reload. Symmetric with the
         boot-artifacts page's "Fetch latest release" button.
+
+        Error paths surface via ``?error=`` so the operator sees
+        what went wrong on the /ui/images flash slot:
+
+        * Network failure / timeout -> URLError / TimeoutError.
+        * HTTP non-2xx (e.g. release tag has no catalog.toml asset
+          and GitHub returns a 404 HTML page) -> HTTPError, caught
+          by the same URLError branch since HTTPError is a
+          URLError subclass.
+        * Oversized body (release page returned something
+          unexpected and huge) -> rejected against
+          ``_CATALOG_UPLOAD_MAX_BYTES`` before parse.
+        * Non-TOML body (e.g. HTML 404) -> caught by load_bytes'
+          TOMLDecodeError -> CatalogError.
         """
         try:
             with urllib.request.urlopen(_BTY_RELEASE_CATALOG_URL, timeout=30) as resp:
-                content = resp.read()
+                # Bound the read at the catalog upload cap + 1 byte
+                # so a release page that responds with a huge
+                # unexpected body (HTML, a binary asset that
+                # somehow got the catalog.toml URL pointed at it)
+                # can't OOM the worker.
+                content = resp.read(_CATALOG_UPLOAD_MAX_BYTES + 1)
         except (urllib.error.URLError, TimeoutError) as exc:
             return RedirectResponse(
                 "/ui/images?error=" + urllib.parse.quote(f"release fetch failed: {exc}", safe=""),
+                status_code=status.HTTP_303_SEE_OTHER,
+            )
+        if len(content) > _CATALOG_UPLOAD_MAX_BYTES:
+            return RedirectResponse(
+                "/ui/images?error="
+                + urllib.parse.quote(
+                    f"fetched catalog exceeded {_CATALOG_UPLOAD_MAX_BYTES} bytes; "
+                    "release URL did not serve a catalog.toml",
+                    safe="",
+                ),
+                status_code=status.HTTP_303_SEE_OTHER,
+            )
+        if not content:
+            return RedirectResponse(
+                "/ui/images?error=" + urllib.parse.quote("fetched catalog was empty", safe=""),
                 status_code=status.HTTP_303_SEE_OTHER,
             )
         try:
@@ -2116,6 +2191,14 @@ def _serve_safe_file(root: Path, name: str) -> FileResponse:
 # anything useful". Operators can raise via ``BTY_MAX_UPLOAD_BYTES``
 # if they have a legitimate use case for bigger images.
 _DEFAULT_MAX_UPLOAD_BYTES = 200 * 1024 * 1024 * 1024
+
+# Hard cap for ``/ui/catalog/upload``. A catalog.toml is plain TOML
+# (typically a few KB; a fleet manifest with hundreds of entries
+# stays well under 100 KB). 1 MiB is generous enough to never block
+# a legitimate manifest and small enough to reject the "wrong form
+# target" case (operator dropped an ISO / image into the catalog
+# form by mistake) before parsing it as text.
+_CATALOG_UPLOAD_MAX_BYTES = 1 * 1024 * 1024
 
 
 def _max_upload_bytes() -> int:

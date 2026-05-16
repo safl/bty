@@ -475,6 +475,48 @@ def test_put_boot_requires_auth(app_client: TestClient) -> None:
     assert r.status_code == 401
 
 
+def test_put_boot_rejects_path_traversal(app_client: TestClient) -> None:
+    """``..`` mustn't escape the boot_root. Same defence-in-depth
+    as PUT /images/{name} -- the URL-decoded ``..%2F`` is the
+    classic traversal probe."""
+    r = app_client.put("/boot/..%2Fescape.efi", content=b"x", cookies=AUTH)
+    # Three valid rejects: 400 (explicit reject), 404 (no such
+    # path), 405 (URL-decoded becomes ``..%2F...`` routing onto a
+    # non-PUT handler). All deny the upload.
+    assert r.status_code in {400, 404, 405}
+
+
+def test_put_boot_rejects_oversized_upload(
+    app_client: TestClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``_stream_upload`` is shared between /images and /boot so
+    the cap behaviour applies to both. Verify directly so a future
+    refactor that splits the two paths can't silently drop the
+    cap on /boot."""
+    monkeypatch.setenv("BTY_MAX_UPLOAD_BYTES", "16")
+    payload = b"a" * 64
+    r = app_client.put("/boot/oversized.efi", content=payload, cookies=AUTH)
+    assert r.status_code == 413
+    boot_root = tmp_path / "boot"
+    leftovers = sorted(p.name for p in boot_root.iterdir() if p.name.startswith("oversized"))
+    assert leftovers == [], f"upload cap left behind: {leftovers}"
+
+
+def test_put_image_empty_body_writes_zero_byte_file(app_client: TestClient) -> None:
+    """An empty body is a 0-byte file. Not an error -- the upload
+    completes, the file exists, just empty. Documents the
+    behaviour so a future "reject empty uploads" change has a
+    test to flip."""
+    r = app_client.put("/images/zero.qcow2", content=b"", cookies=AUTH)
+    assert r.status_code == 200
+    assert r.json()["size_bytes"] == 0
+    served = app_client.get("/images/zero.qcow2")
+    assert served.status_code == 200
+    assert served.content == b""
+
+
 # ---------- images ----------------------------------------------------------
 
 
@@ -2836,6 +2878,31 @@ def test_ui_catalog_fetch_release_requires_auth(app_client: TestClient) -> None:
     assert r.status_code == 401
 
 
+class _FakeUrlopenResp:
+    """Stub for ``urllib.request.urlopen`` context-manager value.
+
+    Used by every ``/ui/catalog/fetch-release`` test to swap out
+    the real HTTP fetch. Returns the canned bytes via ``read()``
+    -- which the production handler now calls with a size cap
+    argument, so the stub honours it instead of dumping the
+    whole body and forcing the caller to remember the cap.
+    """
+
+    def __init__(self, data: bytes) -> None:
+        self._data = data
+
+    def read(self, size: int = -1) -> bytes:
+        if size < 0:
+            return self._data
+        return self._data[:size]
+
+    def __enter__(self) -> _FakeUrlopenResp:
+        return self
+
+    def __exit__(self, *_a: object) -> None:
+        return None
+
+
 def test_ui_catalog_fetch_release_persists_and_303s(
     app_client: TestClient,
     tmp_path: Path,
@@ -2847,22 +2914,9 @@ def test_ui_catalog_fetch_release_persists_and_303s(
     state_dir = tmp_path / "bty-state"
     body = b'version = 1\n\n[[images]]\nname = "rel"\nsrc = "https://example.com/rel.img.zst"\n'
 
-    class _FakeResp:
-        def __init__(self, data: bytes) -> None:
-            self._data = data
-
-        def read(self) -> bytes:
-            return self._data
-
-        def __enter__(self) -> _FakeResp:
-            return self
-
-        def __exit__(self, *_a: object) -> None:
-            return None
-
     import urllib.request as _urlreq
 
-    monkeypatch.setattr(_urlreq, "urlopen", lambda *_a, **_kw: _FakeResp(body))
+    monkeypatch.setattr(_urlreq, "urlopen", lambda *_a, **_kw: _FakeUrlopenResp(body))
     r = app_client.post(
         "/ui/catalog/fetch-release",
         cookies=AUTH,
@@ -2873,6 +2927,266 @@ def test_ui_catalog_fetch_release_persists_and_303s(
     manifest = state_dir / "catalog.toml"
     assert manifest.is_file()
     assert manifest.read_bytes() == body
+
+
+# ---------- /ui/catalog/upload and /ui/catalog/fetch-release error matrix --
+
+
+def test_ui_catalog_upload_no_file_field_303s_with_error(app_client: TestClient) -> None:
+    """A multipart POST with no ``file`` field bounces back with a
+    flash error instead of 500-ing or silently writing nothing."""
+    # ``files`` empty + ``data`` populated forces httpx to send a
+    # multipart body that has no file part.
+    r = app_client.post(
+        "/ui/catalog/upload",
+        data={"unrelated": "x"},
+        files={"otherfield": ("x.toml", b"version = 1\n", "application/toml")},
+        cookies=AUTH,
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert r.headers["location"].startswith("/ui/images?error=")
+    assert "no%20file%20in%20upload" in r.headers["location"]
+
+
+def test_ui_catalog_upload_empty_file_303s_with_error(app_client: TestClient) -> None:
+    """A zero-byte upload is rejected with a flash error."""
+    r = app_client.post(
+        "/ui/catalog/upload",
+        files={"file": ("catalog.toml", b"", "application/toml")},
+        cookies=AUTH,
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert r.headers["location"].startswith("/ui/images?error=")
+    assert "empty" in r.headers["location"]
+
+
+def test_ui_catalog_upload_oversized_303s_with_error(
+    app_client: TestClient,
+    tmp_path: Path,
+) -> None:
+    """A multi-MB upload (operator dropped a wrong file like an
+    .iso into the catalog form) is rejected before we try parsing
+    it. The on-disk manifest is unaffected even if one existed."""
+    state_dir = tmp_path / "bty-state"
+    existing = state_dir / "catalog.toml"
+    good = b'version = 1\n\n[[images]]\nname = "demo"\nsrc = "https://example.com/demo.img.zst"\n'
+    existing.write_bytes(good)
+    # 2 MiB > 1 MiB cap. Use a memoryview so the test stays cheap.
+    huge = b"# fake huge body\n" + b"x" * (2 * 1024 * 1024)
+    r = app_client.post(
+        "/ui/catalog/upload",
+        files={"file": ("catalog.toml", huge, "application/toml")},
+        cookies=AUTH,
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert r.headers["location"].startswith("/ui/images?error=")
+    assert "exceeded" in r.headers["location"]
+    # Existing manifest is untouched (size check fires before
+    # the on-disk rename step).
+    assert existing.read_bytes() == good
+
+
+def test_ui_catalog_upload_wrong_extension_303s_with_error(
+    app_client: TestClient,
+) -> None:
+    """An operator-friendly hint: a .yaml / .json upload to the
+    catalog manifest form gets a clear "expected .toml" message
+    instead of a generic "TOML parse failed" buried inside the
+    parse error path."""
+    r = app_client.post(
+        "/ui/catalog/upload",
+        files={"file": ("manifest.yaml", b"version: 1\nimages: []\n", "text/yaml")},
+        cookies=AUTH,
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert r.headers["location"].startswith("/ui/images?error=")
+    assert "unexpected%20file%20extension" in r.headers["location"]
+
+
+def test_ui_catalog_upload_binary_content_303s_with_parse_error(
+    app_client: TestClient,
+    tmp_path: Path,
+) -> None:
+    """A .toml-named upload that is actually binary content
+    bounces on the TOML parser. The on-disk manifest is
+    preserved (write happens AFTER parse)."""
+    state_dir = tmp_path / "bty-state"
+    existing = state_dir / "catalog.toml"
+    good = b'version = 1\n\n[[images]]\nname = "demo"\nsrc = "https://example.com/demo.img.zst"\n'
+    existing.write_bytes(good)
+    # 100 bytes of binary content -- below the size cap so it
+    # makes it to the parse step.
+    r = app_client.post(
+        "/ui/catalog/upload",
+        files={"file": ("manifest.toml", b"\x89PNG\r\n\x1a\n" + b"\x00" * 96, "application/toml")},
+        cookies=AUTH,
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert r.headers["location"].startswith("/ui/images?error=")
+    assert "parse%20failed" in r.headers["location"]
+    assert existing.read_bytes() == good
+
+
+def test_ui_catalog_upload_wrong_schema_version_303s_with_error(
+    app_client: TestClient,
+) -> None:
+    """A syntactically-valid TOML with the wrong schema version
+    (or missing version) gets rejected at parse, surfacing the
+    schema mismatch in the flash message."""
+    r = app_client.post(
+        "/ui/catalog/upload",
+        files={
+            "file": (
+                "catalog.toml",
+                b'version = 99\n\n[[images]]\nname = "demo"\nsrc = "https://example.com/x.img"\n',
+                "application/toml",
+            ),
+        },
+        cookies=AUTH,
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert r.headers["location"].startswith("/ui/images?error=")
+    assert "parse%20failed" in r.headers["location"]
+
+
+def test_ui_catalog_fetch_release_url_error_303s_with_error(
+    app_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A urlopen URLError (no network, DNS failure, etc.) lands on
+    the flash slot, not a 500."""
+    import urllib.error as _urlerr
+    import urllib.request as _urlreq
+
+    def _boom(*_a: object, **_kw: object) -> None:
+        raise _urlerr.URLError("no route to host")
+
+    monkeypatch.setattr(_urlreq, "urlopen", _boom)
+    r = app_client.post(
+        "/ui/catalog/fetch-release",
+        cookies=AUTH,
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert r.headers["location"].startswith("/ui/images?error=")
+    assert "fetch%20failed" in r.headers["location"]
+
+
+def test_ui_catalog_fetch_release_http_404_303s_with_error(
+    app_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A 404 from GitHub releases (e.g. the release tag has no
+    catalog.toml asset uploaded) raises HTTPError (a URLError
+    subclass) and lands on the flash slot."""
+    import urllib.error as _urlerr
+    import urllib.request as _urlreq
+
+    def _http404(*_a: object, **_kw: object) -> None:
+        raise _urlerr.HTTPError(
+            url="https://example.invalid",
+            code=404,
+            msg="Not Found",
+            hdrs=None,  # type: ignore[arg-type]
+            fp=None,
+        )
+
+    monkeypatch.setattr(_urlreq, "urlopen", _http404)
+    r = app_client.post(
+        "/ui/catalog/fetch-release",
+        cookies=AUTH,
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert r.headers["location"].startswith("/ui/images?error=")
+
+
+def test_ui_catalog_fetch_release_timeout_303s_with_error(
+    app_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A network timeout lands on the flash slot."""
+    import urllib.request as _urlreq
+
+    def _timeout(*_a: object, **_kw: object) -> None:
+        raise TimeoutError("read timed out")
+
+    monkeypatch.setattr(_urlreq, "urlopen", _timeout)
+    r = app_client.post(
+        "/ui/catalog/fetch-release",
+        cookies=AUTH,
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert r.headers["location"].startswith("/ui/images?error=")
+
+
+def test_ui_catalog_fetch_release_non_toml_body_303s_with_error(
+    app_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If GitHub serves an HTML page (e.g. a 200 to a redirect
+    landing on a marketing page) instead of TOML, parse fails
+    and we surface that on the flash slot rather than persisting
+    HTML to disk as the manifest."""
+    import urllib.request as _urlreq
+
+    html_404 = b"<!DOCTYPE html><html><body><h1>Not Found</h1></body></html>\n"
+    monkeypatch.setattr(_urlreq, "urlopen", lambda *_a, **_kw: _FakeUrlopenResp(html_404))
+    r = app_client.post(
+        "/ui/catalog/fetch-release",
+        cookies=AUTH,
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert r.headers["location"].startswith("/ui/images?error=")
+    assert "parse%20failed" in r.headers["location"]
+
+
+def test_ui_catalog_fetch_release_empty_body_303s_with_error(
+    app_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An empty (zero-byte) response from the release URL is
+    rejected with a flash message rather than persisting an
+    empty manifest."""
+    import urllib.request as _urlreq
+
+    monkeypatch.setattr(_urlreq, "urlopen", lambda *_a, **_kw: _FakeUrlopenResp(b""))
+    r = app_client.post(
+        "/ui/catalog/fetch-release",
+        cookies=AUTH,
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert r.headers["location"].startswith("/ui/images?error=")
+    assert "empty" in r.headers["location"]
+
+
+def test_ui_catalog_fetch_release_oversized_body_303s_with_error(
+    app_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A multi-MB body from the release URL gets capped at the
+    same 1 MiB the upload form uses."""
+    import urllib.request as _urlreq
+
+    huge = b"# fake huge body\n" + b"x" * (2 * 1024 * 1024)
+    monkeypatch.setattr(_urlreq, "urlopen", lambda *_a, **_kw: _FakeUrlopenResp(huge))
+    r = app_client.post(
+        "/ui/catalog/fetch-release",
+        cookies=AUTH,
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert r.headers["location"].startswith("/ui/images?error=")
+    assert "exceeded" in r.headers["location"]
 
 
 def test_catalog_enqueue_request_rejects_traversal_name(app_client: TestClient) -> None:
