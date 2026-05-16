@@ -98,8 +98,15 @@ def control_tftp(action: str) -> None:
     on either side fails fast with a clear error instead of an
     unexpected systemctl invocation as root.
     """
+    if not action:
+        # Surfaces nicely instead of the generic "unknown action:
+        # ''" path. The form field arriving empty would otherwise
+        # show as an empty-quoted error in the flash.
+        raise SysConfigError("no action specified")
     if action not in TFTP_ACTIONS:
-        raise SysConfigError(f"unknown action: {action!r}")
+        raise SysConfigError(
+            f"unknown action: {action!r} (allowed: {', '.join(TFTP_ACTIONS)})"
+        )
     try:
         subprocess.run(
             ["sudo", "-n", TFTP_HELPER, action],

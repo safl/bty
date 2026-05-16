@@ -187,3 +187,21 @@ def test_control_tftp_helper_timeout_wraps_as_sysconfig_error() -> None:
         pytest.raises(SysConfigError, match="tftp helper failed"),
     ):
         control_tftp("restart")
+
+
+def test_control_tftp_empty_action_gets_friendly_error() -> None:
+    """Form field arriving as an empty string surfaces a clean
+    error rather than the generic 'unknown action: \\'\\'' path."""
+    with pytest.raises(SysConfigError, match="no action specified"):
+        control_tftp("")
+
+
+def test_tftp_status_masked_state_passes_through() -> None:
+    """``systemctl is-active`` returns 'inactive' for masked units
+    (and 'masked' on some systemd versions). Either way the
+    template should render it via the bg-secondary fallback."""
+    completed = subprocess.CompletedProcess(args=[], returncode=3, stdout="masked\n", stderr="")
+    with patch("bty.web._sysconfig.subprocess.run", return_value=completed):
+        status = tftp_status()
+    assert status.state == "masked"
+    assert status.is_active is False

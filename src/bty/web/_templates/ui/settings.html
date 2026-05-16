@@ -1,6 +1,11 @@
 {% extends "ui/_layout.html" %}
 {% block title %}Settings - bty-web{% endblock %}
 {% block content %}
+{# Hoisted once: ``primary`` is the first listed non-loopback
+   interface, used by the router-config cheatsheet to suggest
+   the appliance's LAN IP. Computed up front so the same
+   reference is available everywhere on the page. #}
+{% set primary = interfaces[0] if interfaces else None %}
 <h1 class="h3 mb-4"><i class="bi bi-gear me-2"></i>Settings</h1>
 
 <!-- ----------------------------------------------------------------- -->
@@ -106,7 +111,6 @@
                 <tr>
                     <td><code>option 66</code> / Next-Server</td>
                     <td>
-                        {% set primary = interfaces[0] if interfaces else None %}
                         {% if primary and primary.ipv4 %}
                         <code>{{ primary.ipv4 }}</code>
                         {% else %}
