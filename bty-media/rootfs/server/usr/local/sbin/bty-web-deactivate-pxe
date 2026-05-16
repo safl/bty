@@ -17,10 +17,9 @@ set -eu
 
 ACTIVE=/etc/default/bty-pxe-proxy
 
-# Stop + disable the proxy daemon (and Wants=, the service unit's
-# Install section). disable is idempotent.
-systemctl stop bty-pxe-proxy.service 2>/dev/null || true
-systemctl disable bty-pxe-proxy.service >/dev/null 2>&1 || true
+# Stop + disable both PXE-stack daemons. disable is idempotent.
+systemctl stop bty-pxe-proxy.service bty-tftp.service 2>/dev/null || true
+systemctl disable bty-pxe-proxy.service bty-tftp.service >/dev/null 2>&1 || true
 
 removed_something=0
 if [ -f "$ACTIVE" ]; then

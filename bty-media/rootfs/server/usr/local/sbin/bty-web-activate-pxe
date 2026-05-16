@@ -86,8 +86,11 @@ fi
 # restart would use the stale cached unit.
 systemctl daemon-reload
 # Enable + restart picks up new EnvironmentFile contents. enable is
-# idempotent -- safe to run on every activate.
-systemctl enable bty-pxe-proxy.service >/dev/null 2>&1 || true
-systemctl restart bty-pxe-proxy.service
+# idempotent -- safe to run on every activate. We bring up both
+# halves of the PXE stack together: bty-pxe-proxy answers DHCP
+# discovers + tells clients which file to fetch, bty-tftp serves
+# the actual file. Either alone is useless.
+systemctl enable bty-pxe-proxy.service bty-tftp.service >/dev/null 2>&1 || true
+systemctl restart bty-pxe-proxy.service bty-tftp.service
 
-printf 'PXE activated on %s (proxy-DHCP daemon serving %s)\n' "$IFACE" "$SUBNET"
+printf 'PXE activated on %s (proxy-DHCP + TFTP daemons serving %s)\n' "$IFACE" "$SUBNET"

@@ -262,6 +262,53 @@ def test_bty_pxe_proxy_service_runs_unprivileged_with_net_caps() -> None:
     assert "ConditionPathExists=/etc/default/bty-pxe-proxy" in unit
 
 
+def test_bty_tftp_service_mirrors_proxy_hardening() -> None:
+    """bty-tftp.service is the sibling unit that owns UDP 69 after
+    we dropped dnsmasq's TFTP role. Same hardening floor as
+    bty-pxe-proxy.service: unprivileged user + just the network
+    caps it needs + ProtectSystem=strict + NoNewPrivileges. The
+    daemon needs ReadOnlyPaths=/var/lib/tftpboot so it can actually
+    open the bootfiles."""
+    from pathlib import Path
+
+    repo_root = Path(__file__).resolve().parents[1]
+    unit = (repo_root / "bty-media/rootfs/server/etc/systemd/system/bty-tftp.service").read_text()
+    assert "User=bty" in unit
+    assert "AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_NET_RAW" in unit
+    assert "NoNewPrivileges=yes" in unit
+    assert "ProtectSystem=strict" in unit
+    assert "ReadOnlyPaths=/var/lib/tftpboot" in unit
+    # Shares the env file with bty-pxe-proxy so the operator's
+    # activate request brings both up coherently on the same NIC.
+    assert "EnvironmentFile=/etc/default/bty-pxe-proxy" in unit
+    assert "ConditionPathExists=/etc/default/bty-pxe-proxy" in unit
+
+
+def test_activate_pxe_helper_starts_both_proxy_and_tftp() -> None:
+    """Activate must bring up the PXE-proxy AND the TFTP daemon
+    together -- either alone is useless (proxy points at a bootfile
+    nobody serves; tftp serves a bootfile no DHCP offer points at).
+    Pin to keep a future "drop tftp.service" attempt from going
+    unnoticed."""
+    from pathlib import Path
+
+    repo_root = Path(__file__).resolve().parents[1]
+    body = (repo_root / "bty-media/rootfs/server/usr/local/sbin/bty-web-activate-pxe").read_text()
+    assert "bty-pxe-proxy.service bty-tftp.service" in body
+
+
+def test_dnsmasq_no_longer_does_tftp() -> None:
+    """v0.15.0 swap: bty-tftp owns UDP 69 now. dnsmasq's bty-pxe.conf
+    must NOT contain ``enable-tftp`` -- two daemons on port 69 would
+    race and one would fail to bind. Pin the no-tftp invariant."""
+    from pathlib import Path
+
+    repo_root = Path(__file__).resolve().parents[1]
+    body = (repo_root / "bty-media/rootfs/server/etc/dnsmasq.d/bty-pxe.conf").read_text()
+    assert "enable-tftp" not in body
+    assert "tftp-root" not in body
+
+
 def test_server_cloudinit_ships_haveged() -> None:
     """Entropy starvation on N97-class hardware caused 20-minute
     systemd-journald start times even on RDRAND-capable CPUs (the
