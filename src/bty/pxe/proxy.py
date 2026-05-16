@@ -24,10 +24,10 @@ we set both to avoid the dnsmasq-proxy-DHCP class of failure where
 the bootfile only appears in option 43 PXE sub-options that the
 client doesn't parse.
 
-Privileges: binding UDP 67 needs root or
-``CAP_NET_BIND_SERVICE``. The systemd unit will run the process
-under one of those, drop to the ``bty`` user after bind. Until
-that's wired, run via ``sudo bty-pxe-proxy --interface enp90s0``.
+Privileges: binding UDP 67 needs ``CAP_NET_BIND_SERVICE`` (port
+< 1024) + ``CAP_NET_RAW`` (for SO_BINDTODEVICE). The systemd unit
+grants both as ambient capabilities and runs the daemon as the
+``bty`` user.
 """
 
 from __future__ import annotations
@@ -35,16 +35,24 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import re
 import socket
 import sys
 from dataclasses import dataclass
 
 from bty.pxe import wire
-from bty.pxe._daemon import run_udp_daemon
+from bty.pxe._daemon import bind_udp_socket, run_udp_daemon
 from bty.pxe._events import emit as emit_event
 from bty.pxe.wire import MsgType, Op, Opt, Packet
 
 log = logging.getLogger("bty.pxe.proxy")
+
+# Linux IFNAMSIZ-1 is 15. The kernel rejects anything longer at
+# SO_BINDTODEVICE time; we reject early so the operator sees a
+# clear argparse error instead of a confusing OSError later.
+# Character set mirrors the activate-helper's validation -- one
+# place that calls this binary, one source of truth.
+_INTERFACE_RE = re.compile(r"^[A-Za-z0-9_-]{1,15}$")
 
 # Arch -> bootfile (RFC 4578 client-arch numbers).
 #
@@ -129,17 +137,23 @@ class BootDecision:
     vendor_class_response: bytes
 
 
+# Tagged reasons for declining to offer; surfaced verbatim as the
+# ``reason`` field of the dhcp.ignore event so operators can tell
+# "unknown arch" from "operator disabled HTTP-Boot" at a glance.
+IGNORE_UNKNOWN_ARCH = "unknown_arch"
+IGNORE_HTTP_DISABLED = "http_disabled"
+
+
 def _resolve_bootfile(
     cfg: ProxyConfig,
     vendor_class: bytes,
     arch: int | None,
     is_ipxe: bool,
-) -> BootDecision | None:
+) -> BootDecision | str:
     """Pick the right bootfile bytes for the client's arch + class.
 
-    Returns ``None`` when we don't have a sensible answer (unknown
-    arch, HTTPClient when tftp_only is set, etc) so the caller stays
-    silent rather than emitting a malformed offer.
+    Returns a :class:`BootDecision` on success, or one of the
+    ``IGNORE_*`` reason strings when we decline to offer.
     """
     if is_ipxe:
         # iPXE second-stage: chain to bty-web's bootstrap script.
@@ -149,7 +163,7 @@ def _resolve_bootfile(
         return BootDecision(bootfile=url.encode("ascii"), vendor_class_response=b"PXEClient")
     if vendor_class.startswith(b"HTTPClient"):
         if cfg.tftp_only:
-            return None
+            return IGNORE_HTTP_DISABLED
         # UEFI HTTP-Boot. The bootfile MUST be an absolute URL and
         # the response's option 60 MUST be "HTTPClient" -- firmware
         # rejects PXEClient-tagged offers when it asked HTTP.
@@ -162,7 +176,7 @@ def _resolve_bootfile(
     bootfile = _PXE_BOOTFILE_BY_ARCH.get(arch_key)
     if bootfile is None:
         log.warning("pxe: no bootfile mapping for arch=%d", arch_key)
-        return None
+        return IGNORE_UNKNOWN_ARCH
     return BootDecision(bootfile=bootfile.encode("ascii"), vendor_class_response=b"PXEClient")
 
 
@@ -182,7 +196,7 @@ def build_offer(cfg: ProxyConfig, discover: Packet) -> bytes | None:
         arch=discover.client_arch,
         is_ipxe=(discover.user_class or b"") == b"iPXE",
     )
-    if decision is None:
+    if not isinstance(decision, BootDecision):
         return None
     return _build_offer_packet(cfg, discover, decision)
 
@@ -281,7 +295,7 @@ class _DhcpServerProtocol(asyncio.DatagramProtocol):
             return
         if not wire.is_pxe_client_discover(discover):
             return
-        mac_pretty = ":".join(f"{b:02x}" for b in discover.mac)
+        mac_pretty = discover.mac_pretty
         vendor_class = (discover.vendor_class or b"").decode("ascii", errors="replace")
         user_class = (discover.user_class or b"").decode("ascii", errors="replace")
         emit_event(
@@ -291,10 +305,8 @@ class _DhcpServerProtocol(asyncio.DatagramProtocol):
             vendor_class=vendor_class,
             user_class=user_class or None,
         )
-        # decide-then-build kept inside one defensive try so a bug
-        # in either branch logs once + drops the packet, rather
-        # than two near-identical try/except blocks both saying
-        # "the daemon must not die on a single bad packet".
+        # One defensive try: a single bad packet must never take
+        # the daemon down.
         try:
             decision = _resolve_bootfile(
                 self._cfg,
@@ -302,12 +314,12 @@ class _DhcpServerProtocol(asyncio.DatagramProtocol):
                 arch=discover.client_arch,
                 is_ipxe=(discover.user_class or b"") == b"iPXE",
             )
-            if decision is None:
+            if not isinstance(decision, BootDecision):
                 emit_event(
                     "dhcp.ignore",
                     mac=mac_pretty,
                     arch=discover.client_arch,
-                    reason="no bootfile for arch / class",
+                    reason=decision,
                 )
                 return
             offer = _build_offer_packet(self._cfg, discover, decision)
@@ -357,31 +369,8 @@ def _detect_interface_ip(interface: str) -> str:
     return ip
 
 
-def _bind_udp67_broadcast_socket(interface: str) -> socket.socket:
-    """Open the listener socket explicitly so we can set the various
-    flags asyncio's ``create_datagram_endpoint`` doesn't expose.
-
-    SO_REUSEADDR  -- coexist with anything else on UDP 67 transiently
-                     (e.g., dnsmasq during cutover).
-    SO_BROADCAST  -- required to send 255.255.255.255 broadcasts.
-    SO_BINDTODEVICE -- pin to the operator-selected interface so we
-                      don't accidentally answer discovers arriving on
-                      a different NIC (the appliance often has more
-                      than one).
-    """
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-    # SO_BINDTODEVICE needs CAP_NET_RAW or root; if we already need
-    # root for port 67 anyway, this is "free" from a privilege POV.
-    s.setsockopt(socket.SOL_SOCKET, socket.SO_BINDTODEVICE, interface.encode("ascii"))
-    s.bind(("0.0.0.0", 67))
-    s.setblocking(False)
-    return s
-
-
 async def _serve(cfg: ProxyConfig) -> None:
-    sock = _bind_udp67_broadcast_socket(cfg.interface)
+    sock = bind_udp_socket(67, interface=cfg.interface, broadcast=True)
     await run_udp_daemon(sock, lambda: _DhcpServerProtocol(cfg), log_prefix="pxe")
 
 
@@ -426,6 +415,8 @@ def _parse_args(argv: list[str]) -> tuple[ProxyConfig, bool]:
         help="Verbose (debug-level) logging.",
     )
     ns = parser.parse_args(argv)
+    if not _INTERFACE_RE.fullmatch(ns.interface):
+        parser.error(f"invalid --interface name: {ns.interface!r}")
     server_ip = ns.server_ip
     if server_ip is None:
         try:

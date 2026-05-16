@@ -3,12 +3,8 @@
 Sibling to :mod:`bty.pxe.proxy`. The PXE proxy answers DHCP
 discovers with a bootfile name; the client (PXE option-ROM in
 BIOS / non-HTTP UEFI firmware) then TFTPs that bootfile -- this
-daemon is what serves it.
-
-dnsmasq's TFTP would work fine; rolling our own removes the
-dnsmasq dependency on the appliance entirely (matching the
-proxy-DHCP daemon's structure). The wire surface is tiny
-(RFC 1350 + the option-extension RFCs 2347/2348/2349):
+daemon is what serves it. The wire surface is tiny (RFC 1350 +
+the option-extension RFCs 2347/2348/2349):
 
 * RRQ  (opcode 1) -- read request: filename + mode + options
 * WRQ  (opcode 2) -- write request; we reject all
@@ -40,10 +36,17 @@ from dataclasses import dataclass, field
 from enum import IntEnum
 from pathlib import Path
 
-from bty.pxe._daemon import run_udp_daemon
+from bty.pxe._daemon import bind_udp_socket, run_udp_daemon
 from bty.pxe._events import emit as emit_event
 
 log = logging.getLogger("bty.pxe.tftp")
+
+
+def _format_peer(addr: tuple[str, int]) -> str:
+    """``ip:port`` format for log lines + event payloads. Python's
+    default tuple repr (``('192.168.1.50', 1234)``) is noisy in
+    operator-facing output."""
+    return f"{addr[0]}:{addr[1]}"
 
 
 # --------------------------------------------------------------------------
@@ -309,15 +312,24 @@ def _resolve_safe_path(root: Path, filename: str) -> Path | None:
     any of: path traversal (``..``), absolute path, symlink to
     outside root, missing file. The allowlist already gates this
     by name; the realpath check is belt + braces against a hostile
-    operator-staged symlink in ``root``."""
+    operator-staged symlink in ``root``.
+
+    Path-traversal attempts (a relative_to() mismatch after
+    resolve()) are surfaced via :func:`log.warning` + a
+    ``tftp.traversal`` structured event so the operator sees them
+    in the journal feed rather than the request just vanishing as
+    FILE_NOT_FOUND.
+    """
     if not filename or "\x00" in filename:
         return None
     candidate = (root / filename).resolve()
-    if not candidate.is_file():
-        return None
     try:
         candidate.relative_to(root.resolve())
     except ValueError:
+        log.warning("tftp: rejected traversal-shaped filename %r -> %s", filename, candidate)
+        emit_event("tftp.traversal", file=filename, resolved=str(candidate))
+        return None
+    if not candidate.is_file():
         return None
     return candidate
 
@@ -389,14 +401,14 @@ class _ListenerProtocol(asyncio.DatagramProtocol):
         # the request before lookup. Costs nothing on standard
         # clients; saves a real-world boot-fails-silently quirk.
         filename = rrq.filename.lower()
+        peer = _format_peer(client_addr)
         log.info(
             "tftp: %s requested %r (mode=%s, options=%s)",
-            client_addr,
+            peer,
             rrq.filename,
             rrq.mode,
             rrq.options,
         )
-        peer = f"{client_addr[0]}:{client_addr[1]}"
         emit_event("tftp.rrq", peer=peer, file=rrq.filename, mode=rrq.mode)
         if rrq.mode != "octet":
             await self._send_error_oneshot(
@@ -448,13 +460,9 @@ class _ListenerProtocol(asyncio.DatagramProtocol):
         means we don't wait for an ACK -- ERROR aborts the transfer
         from both sides per the spec, so we don't need asyncio
         plumbing here, just a plain sendto + close."""
-        log.info("tftp: ERROR %s -> %s: %s", code.name, client_addr, message)
-        emit_event(
-            "tftp.error",
-            peer=f"{client_addr[0]}:{client_addr[1]}",
-            code=code.name,
-            message=message,
-        )
+        peer = _format_peer(client_addr)
+        log.info("tftp: ERROR %s -> %s: %s", code.name, peer, message)
+        emit_event("tftp.error", peer=peer, code=code.name, message=message)
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         try:
             sock.bind(("", 0))  # ephemeral TID
@@ -477,10 +485,8 @@ class _Transfer:
     timeout: float
     max_retries: int
     oack: dict[str, str] | None  # OACK options to send first if any
-    # Carried purely for structured-event payloads -- the wire path
-    # neither cares nor depends on it. Keeping it on the dataclass
-    # so the in-flight ``_drive`` / ``_send_and_wait_ack`` can emit
-    # tftp.complete / tftp.giveup with the filename inline.
+    # Carried for structured-event payloads only; the wire path
+    # neither reads nor writes it.
     filename: str = ""
 
     async def run(self) -> None:
@@ -529,15 +535,16 @@ class _Transfer:
             offset += self.blksize
             if len(chunk) < self.blksize:
                 # Last data block (possibly empty) signals EOF.
+                peer = _format_peer(self.client_addr)
                 log.info(
                     "tftp: transfer to %s complete (%d bytes in %d block(s))",
-                    self.client_addr,
+                    peer,
                     total,
                     block,
                 )
                 emit_event(
                     "tftp.complete",
-                    peer=f"{self.client_addr[0]}:{self.client_addr[1]}",
+                    peer=peer,
                     file=self.filename,
                     bytes=total,
                     blocks=block,
@@ -578,7 +585,7 @@ class _Transfer:
                     log.debug(
                         "tftp: timeout waiting for ACK block %d from %s (attempt %d/%d)",
                         expected_block,
-                        self.client_addr,
+                        _format_peer(self.client_addr),
                         attempt + 1,
                         self.max_retries + 1,
                     )
@@ -595,17 +602,18 @@ class _Transfer:
                     "tftp: stale ACK block %d (expected %d) from %s; ignoring",
                     ack.block,
                     expected_block,
-                    self.client_addr,
+                    _format_peer(self.client_addr),
                 )
+        peer = _format_peer(self.client_addr)
         log.warning(
             "tftp: gave up waiting for ACK block %d from %s after %d retries",
             expected_block,
-            self.client_addr,
+            peer,
             self.max_retries,
         )
         emit_event(
             "tftp.giveup",
-            peer=f"{self.client_addr[0]}:{self.client_addr[1]}",
+            peer=peer,
             file=self.filename,
             block=expected_block,
             retries=self.max_retries,
@@ -667,23 +675,8 @@ class _AckCollector(asyncio.DatagramProtocol):
         return await self._inbox.get()
 
 
-def _bind_udp69(interface: str | None) -> socket.socket:
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    if interface:
-        # SO_BINDTODEVICE keeps the daemon from accidentally serving
-        # TFTP on every interface (the appliance often has more than
-        # one). Mirrors bty-pxe-proxy's interface pinning. Needs
-        # CAP_NET_RAW (granted via the systemd unit) for the bty
-        # service user.
-        s.setsockopt(socket.SOL_SOCKET, socket.SO_BINDTODEVICE, interface.encode("ascii"))
-    s.bind(("0.0.0.0", 69))
-    s.setblocking(False)
-    return s
-
-
 async def _serve(cfg: TftpConfig, interface: str | None) -> None:
-    sock = _bind_udp69(interface)
+    sock = bind_udp_socket(69, interface=interface)
     await run_udp_daemon(sock, lambda: _ListenerProtocol(cfg), log_prefix="tftp")
 
 

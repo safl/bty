@@ -30,6 +30,7 @@ from bty.pxe.tftp import (
     Rrq,
     TftpConfig,
     TftpError,
+    _format_peer,
     _ListenerProtocol,
     _negotiate_options,
     _resolve_safe_path,
@@ -541,3 +542,34 @@ def test_listener_discards_duplicate_acks_without_retransmitting(tmp_path: Path)
             listener_transport.close()
 
     _run(_drive())
+
+
+# --------------------------------------------------------------------------
+# _format_peer helper + path-traversal logging.
+# --------------------------------------------------------------------------
+
+
+def test_format_peer_renders_ip_colon_port() -> None:
+    """``_format_peer`` replaces python's default tuple repr in
+    operator-facing output. ``('192.168.1.50', 1234)`` becomes
+    ``192.168.1.50:1234``."""
+    assert _format_peer(("192.168.1.50", 1234)) == "192.168.1.50:1234"
+
+
+def test_resolve_safe_path_logs_and_emits_event_on_traversal(tmp_path, capsys, caplog) -> None:
+    """Traversal-shaped requests must surface in BOTH the journal
+    (via log.warning) and the structured event feed (tftp.traversal)
+    rather than vanish silently as FILE_NOT_FOUND."""
+    import logging as _logging
+
+    root = tmp_path / "tftpboot"
+    root.mkdir()
+    with caplog.at_level(_logging.WARNING, logger="bty.pxe.tftp"):
+        result = _resolve_safe_path(root, "../etc/passwd")
+    assert result is None
+    # Log line surfaces the traversal attempt.
+    assert any("traversal" in r.message for r in caplog.records), caplog.records
+    # Structured event line on stdout (from emit_event).
+    stdout = capsys.readouterr().out
+    assert '"evt":"tftp.traversal"' in stdout
+    assert '"file":"../etc/passwd"' in stdout

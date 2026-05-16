@@ -127,6 +127,13 @@ class Packet:
         return self.chaddr[: self.hlen]
 
     @property
+    def mac_pretty(self) -> str:
+        """Lowercase colon-separated MAC (``aa:bb:cc:dd:ee:ff``).
+        Used by event payloads + log lines so callers don't repeat
+        the join expression."""
+        return ":".join(f"{b:02x}" for b in self.mac)
+
+    @property
     def msg_type(self) -> int | None:
         """DHCP message type (option 53) as int, or ``None`` if
         the packet is plain BOOTP with no DHCP options."""

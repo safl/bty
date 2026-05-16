@@ -23,6 +23,40 @@ from collections.abc import Callable
 log = logging.getLogger("bty.pxe.daemon")
 
 
+def bind_udp_socket(
+    port: int,
+    *,
+    interface: str | None = None,
+    broadcast: bool = False,
+) -> socket.socket:
+    """Open a UDP socket bound to ``port`` on all addresses, with
+    options shared between bty-pxe-proxy + bty-tftp set.
+
+    * ``SO_REUSEADDR`` -- coexist with anything else on the port
+      transiently (e.g. dnsmasq during a cutover).
+    * ``SO_BINDTODEVICE`` when ``interface`` is given -- pin the
+      listener to the operator-selected NIC so the daemon doesn't
+      accidentally answer on every interface (the appliance often
+      has more than one). Needs CAP_NET_RAW, granted via the systemd
+      unit's AmbientCapabilities.
+    * ``SO_BROADCAST`` when ``broadcast=True`` -- required by the
+      PXE proxy to ``sendto(("255.255.255.255", 68))``. The TFTP
+      side never broadcasts and so leaves it off.
+
+    The returned socket is non-blocking so asyncio's transport
+    machinery can attach to it directly.
+    """
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    if broadcast:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+    if interface:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_BINDTODEVICE, interface.encode("ascii"))
+    s.bind(("0.0.0.0", port))
+    s.setblocking(False)
+    return s
+
+
 async def run_udp_daemon(
     sock: socket.socket,
     protocol_factory: Callable[[], asyncio.DatagramProtocol],

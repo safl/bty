@@ -21,7 +21,15 @@ import struct
 import pytest
 
 from bty.pxe import wire
-from bty.pxe.proxy import ProxyConfig, build_offer
+from bty.pxe.proxy import (
+    IGNORE_HTTP_DISABLED,
+    IGNORE_UNKNOWN_ARCH,
+    BootDecision,
+    ProxyConfig,
+    _parse_args,
+    _resolve_bootfile,
+    build_offer,
+)
 from bty.pxe.wire import FLAG_BROADCAST, MsgType, Op, Opt, Packet
 
 # --------------------------------------------------------------------------
@@ -378,3 +386,68 @@ def test_build_offer_long_http_bootfile_lands_in_option_67_not_file_field() -> N
     parsed = _decode_offer(offer)
     # Option 67 always carries the full URL.
     assert parsed.bootfile_name.startswith(b"http://10.10.10.10")
+
+
+# --------------------------------------------------------------------------
+# Packet.mac_pretty helper.
+# --------------------------------------------------------------------------
+
+
+def test_packet_mac_pretty_formats_as_colon_separated_hex() -> None:
+    discover = wire.parse(_make_pxe_discover())
+    assert discover.mac_pretty == "84:47:09:77:8a:18"
+
+
+# --------------------------------------------------------------------------
+# Tagged ignore reasons returned by _resolve_bootfile.
+# --------------------------------------------------------------------------
+
+
+def test_resolve_bootfile_returns_unknown_arch_reason() -> None:
+    """PXEClient with an arch we have no mapping for should return
+    the IGNORE_UNKNOWN_ARCH sentinel so the daemon can emit a
+    specific ignore reason in the event feed."""
+    cfg = ProxyConfig(interface="enp90s0", server_ip="192.168.1.31")
+    result = _resolve_bootfile(cfg, vendor_class=b"PXEClient", arch=42, is_ipxe=False)
+    assert result == IGNORE_UNKNOWN_ARCH
+
+
+def test_resolve_bootfile_returns_http_disabled_reason_when_tftp_only() -> None:
+    """HTTPClient + tftp_only=True should yield IGNORE_HTTP_DISABLED
+    so operators can distinguish "blocked by config" from "unknown
+    arch" in the diagnostic feed."""
+    cfg = ProxyConfig(interface="enp90s0", server_ip="192.168.1.31", tftp_only=True)
+    result = _resolve_bootfile(cfg, vendor_class=b"HTTPClient:Arch:00016", arch=16, is_ipxe=False)
+    assert result == IGNORE_HTTP_DISABLED
+
+
+def test_resolve_bootfile_known_arch_returns_decision() -> None:
+    cfg = ProxyConfig(interface="enp90s0", server_ip="192.168.1.31")
+    result = _resolve_bootfile(cfg, vendor_class=b"PXEClient", arch=7, is_ipxe=False)
+    assert isinstance(result, BootDecision)
+    assert result.bootfile == b"ipxe.efi"
+
+
+# --------------------------------------------------------------------------
+# --interface name validation.
+# --------------------------------------------------------------------------
+
+
+def test_parse_args_rejects_invalid_interface_name() -> None:
+    """The activate helper validates the interface name; the daemon
+    re-validates so a manual / cron / systemd invocation with a
+    bogus name also fails fast with a clear error."""
+    with pytest.raises(SystemExit):
+        _parse_args(["--interface", "eth0; rm -rf /", "--server-ip", "192.168.1.31"])
+
+
+def test_parse_args_rejects_too_long_interface_name() -> None:
+    """Linux IFNAMSIZ-1 is 15. SO_BINDTODEVICE would reject anything
+    longer; we reject at argparse time for a clearer error."""
+    with pytest.raises(SystemExit):
+        _parse_args(["--interface", "a" * 16, "--server-ip", "192.168.1.31"])
+
+
+def test_parse_args_accepts_standard_interface_names() -> None:
+    cfg, _verbose = _parse_args(["--interface", "enp90s0", "--server-ip", "192.168.1.31"])
+    assert cfg.interface == "enp90s0"
