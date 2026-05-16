@@ -258,6 +258,16 @@ def _negotiate_options(requested: dict[str, str], file_size: int) -> dict[str, s
 # --------------------------------------------------------------------------
 
 
+# Concurrent-transfer cap. Each in-flight transfer owns its own
+# ephemeral UDP socket + a couple of asyncio tasks; an unbounded
+# fleet of them would let a hostile client (or a flood of
+# legitimate clients during a wave reboot) exhaust file
+# descriptors. 32 covers a generous homelab-scale wave reboot
+# (a rack-worth of PXE clients hitting the same instant) without
+# being so high that DoS is meaningful.
+DEFAULT_MAX_CONCURRENT_TRANSFERS = 32
+
+
 @dataclass(frozen=True)
 class TftpConfig:
     """Resolved daemon config: where files live, which ones are
@@ -270,12 +280,26 @@ class TftpConfig:
     # the client negotiates it.
     block_timeout: float = DEFAULT_BLOCK_TIMEOUT
     max_retries: int = DEFAULT_MAX_RETRIES
+    max_concurrent_transfers: int = DEFAULT_MAX_CONCURRENT_TRANSFERS
 
 
-# Default allowlist: the iPXE binaries the bty PXE-proxy points
-# clients at. Operators with extra needs can pass --allow filename
-# to extend the set (e.g. an off-band custom bootfile).
-DEFAULT_ALLOWLIST: frozenset[str] = frozenset({"ipxe.efi", "undionly.kpxe", "ipxe-arm64.efi"})
+# Default allowlist: every iPXE bootfile the bty PXE-proxy maps
+# arches to. The appliance ships ``ipxe.efi`` + ``undionly.kpxe``
+# by default; the other names are listed so an operator who drops
+# the right binary at /var/lib/tftpboot/ipxe-arm64.efi (etc.) gets
+# it served without touching dnsmasq config or the allowlist. A
+# request for a filename in the list but not on disk fails clean
+# with FILE_NOT_FOUND -- the target falls through to whatever
+# other DHCP is on the segment, instead of getting a bogus binary.
+DEFAULT_ALLOWLIST: frozenset[str] = frozenset(
+    {
+        "undionly.kpxe",  # legacy BIOS x86
+        "ipxe.efi",  # UEFI x86-64 (default ship)
+        "ipxe-i386.efi",  # UEFI IA32 (operator-supplied)
+        "ipxe-arm32.efi",  # UEFI ARM 32-bit (operator-supplied)
+        "ipxe-arm64.efi",  # UEFI ARM 64-bit (RPi 4 in UEFI mode, etc.)
+    }
+)
 
 
 def _resolve_safe_path(root: Path, filename: str) -> Path | None:
@@ -330,12 +354,40 @@ class _ListenerProtocol(asyncio.DatagramProtocol):
             # transfer we never started; ignore (the listener
             # socket only accepts RRQs).
             return
+        # Refuse new transfers once we hit the concurrent-transfer
+        # cap. Reply with an explicit ERROR (DISK_FULL is the
+        # closest match in RFC 1350 -- "we ran out of capacity")
+        # so the client falls through cleanly instead of timing
+        # out waiting for DATA that'll never arrive.
+        if len(self._transfers) >= self._cfg.max_concurrent_transfers:
+            log.warning(
+                "tftp: at concurrent-transfer cap %d; refusing RRQ from %s",
+                self._cfg.max_concurrent_transfers,
+                addr,
+            )
+            error_task = asyncio.ensure_future(
+                self._send_error_oneshot(addr, ErrorCode.DISK_FULL, "server busy; retry later")
+            )
+            # Track the error-send task too so ``stop()``-style
+            # waits don't leave it dangling; it removes itself from
+            # the set on completion via ``add_done_callback``.
+            self._transfers.add(error_task)
+            error_task.add_done_callback(self._transfers.discard)
+            return
         task = asyncio.ensure_future(self._serve_one(msg, addr))
         self._transfers.add(task)
         task.add_done_callback(self._transfers.discard)
 
     async def _serve_one(self, rrq: Rrq, client_addr: tuple[str, int]) -> None:
         """One read transfer, end to end."""
+        # Normalize filename to lowercase for both the allowlist
+        # check and the on-disk lookup. Some BIOS PXE ROMs send the
+        # bootfile name uppercased (``IPXE.EFI``); we serve them by
+        # treating filenames as case-insensitive end-to-end. The
+        # allowlist itself is defined in lowercase; we lowercase
+        # the request before lookup. Costs nothing on standard
+        # clients; saves a real-world boot-fails-silently quirk.
+        filename = rrq.filename.lower()
         log.info(
             "tftp: %s requested %r (mode=%s, options=%s)",
             client_addr,
@@ -350,14 +402,14 @@ class _ListenerProtocol(asyncio.DatagramProtocol):
                 f"only octet mode supported, got {rrq.mode!r}",
             )
             return
-        if rrq.filename not in self._cfg.allowlist:
+        if filename not in self._cfg.allowlist:
             await self._send_error_oneshot(
                 client_addr,
                 ErrorCode.ACCESS_VIOLATION,
                 f"file not in allowlist: {rrq.filename!r}",
             )
             return
-        path = _resolve_safe_path(self._cfg.root, rrq.filename)
+        path = _resolve_safe_path(self._cfg.root, filename)
         if path is None:
             await self._send_error_oneshot(
                 client_addr, ErrorCode.FILE_NOT_FOUND, f"no such file: {rrq.filename!r}"
@@ -421,11 +473,17 @@ class _Transfer:
         # ephemeral port (the TID per RFC 1350) and own the socket
         # lifecycle for us; we just supply the protocol factory.
         # Empty-host shorthand "" doesn't work with asyncio's
-        # resolver -- it needs an explicit address.
+        # resolver -- it needs an explicit address. The factory
+        # closure captures the legitimate client's IP so the
+        # collector can drop ACKs from a different source -- a
+        # hostile actor on the same broadcast segment could
+        # otherwise spoof ACKs to disrupt the transfer.
         loop = asyncio.get_running_loop()
+        client_ip = self.client_addr[0]
         try:
             transport, protocol = await loop.create_datagram_endpoint(
-                _AckCollector, local_addr=("0.0.0.0", 0)
+                lambda: _AckCollector(expected_client_ip=client_ip),
+                local_addr=("0.0.0.0", 0),
             )
         except OSError as exc:
             log.warning("tftp: could not open transfer socket: %s", exc)
@@ -528,20 +586,51 @@ class _Transfer:
 
 class _AckCollector(asyncio.DatagramProtocol):
     """Receives ACKs (and ignores anything else) on the per-transfer
-    socket. The transfer driver pulls them via :meth:`next_ack`."""
+    socket. The transfer driver pulls them via :meth:`next_ack`.
 
-    def __init__(self) -> None:
-        self._inbox: asyncio.Queue[Ack] = asyncio.Queue()
+    Only accepts datagrams from the original client's source IP --
+    per RFC 1350 the client's TID stays fixed for the connection.
+    We're lenient on source port (some non-spec clients change it,
+    or routers NAT it), strict on source IP because a different IP
+    is unambiguously a different host: either a hostile actor
+    spoofing ACKs to disrupt the transfer, or noise. The inbox
+    queue is bounded so a flood of bogus ACKs from the right IP
+    can't grow memory without limit either.
+    """
+
+    # Bound the inbox queue: under normal flow at most one ACK
+    # lives there between sends, but a chatty client (or one
+    # blasting dup-ACKs) shouldn't be able to make us hold the
+    # whole stream in memory. 256 is generous for any sane
+    # transfer pattern.
+    _INBOX_MAXSIZE = 256
+
+    def __init__(self, expected_client_ip: str) -> None:
+        self._inbox: asyncio.Queue[Ack] = asyncio.Queue(maxsize=self._INBOX_MAXSIZE)
+        self._expected_client_ip = expected_client_ip
 
     def datagram_received(self, data: bytes, addr: tuple[str, int]) -> None:
+        if addr[0] != self._expected_client_ip:
+            # Different source IP -- not our client. Drop silently.
+            return
         try:
             msg = parse(data)
         except TftpError:
             return
-        if isinstance(msg, Ack):
+        if not isinstance(msg, Ack):
+            # DATA / OACK echoed back, ERROR from client, etc.
+            # The driver's timeout handles missing ACKs.
+            return
+        try:
             self._inbox.put_nowait(msg)
-        # Anything else (DATA / OACK echoed back, ERROR from client)
-        # is dropped; the driver's timeout will retry as needed.
+        except asyncio.QueueFull:
+            # Overflow: drop the new ACK rather than block. The
+            # driver picks up from whatever's queued.
+            log.debug(
+                "tftp: ack inbox full (%d items); dropping new ACK block %d",
+                self._INBOX_MAXSIZE,
+                msg.block,
+            )
 
     async def next_ack(self) -> Ack:
         """Pull the next ACK off the inbox queue. The driver checks

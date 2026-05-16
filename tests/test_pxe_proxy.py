@@ -281,6 +281,73 @@ def test_build_offer_pads_to_300_bytes_min() -> None:
     assert len(offer) >= 300
 
 
+def test_build_offer_populates_bootp_sname_field() -> None:
+    """BOOTP ``sname`` (the 64-byte server-name field) gets our IP
+    as ASCII. Old PXE 2.x firmware reads sname as "boot server
+    hostname" and falls back when it's empty -- populating it is
+    pure leniency toward legacy clients; modern UEFI ignores it.
+    """
+    discover = wire.parse(_make_pxe_discover())
+    offer = build_offer(_cfg(), discover)
+    assert offer is not None
+    parsed = wire.parse(offer)
+    assert parsed.sname.rstrip(b"\x00") == b"192.168.1.31"
+
+
+def test_build_offer_emits_option_43_pxe_discovery_control() -> None:
+    """Option 43 (vendor-specific) carries the PXE_DISCOVERY_CONTROL
+    sub-option (sub-code 6, value 0x0C) which tells old PXE 2.x
+    ROMs "skip multicast / broadcast discovery; use the bootfile-
+    name directly". Modern UEFI ignores option 43; no downside.
+    Pin so a future "trim the options" attempt doesn't silently
+    re-introduce the legacy-firmware compat gap."""
+    discover = wire.parse(_make_pxe_discover())
+    offer = build_offer(_cfg(), discover)
+    assert offer is not None
+    parsed = wire.parse(offer)
+    body = parsed.options.get(43)  # raw 43 not in our IntEnum
+    assert body is not None, "option 43 absent from offer"
+    # Sub-option-6-len-1-value-0x0C-end-0xff.
+    assert body == bytes((6, 1, 0x0C, 0xFF))
+
+
+def test_build_offer_accepts_gpxe_vendor_class() -> None:
+    """``gPXE`` (iPXE's predecessor) and ``iPXE`` (when tagged in
+    option 60 instead of option 77) are also legitimate PXE-family
+    discovers. We accept them with the standard PXE arch mapping."""
+    discover = wire.parse(_make_pxe_discover(vendor_class=b"gPXE:1.0.1"))
+    offer = build_offer(_cfg(), discover)
+    assert offer is not None
+    # Same shape as a regular PXEClient offer.
+    parsed = wire.parse(offer)
+    assert parsed.bootfile_name == b"ipxe.efi"
+
+
+def test_build_offer_arch_6_uefi_ia32_uses_arch_specific_binary() -> None:
+    """A UEFI IA32 client (arch 6) must get ``ipxe-i386.efi``,
+    NOT x86_64 ``ipxe.efi`` -- sending the wrong arch's binary
+    would let the offer flow succeed only to crash on execution.
+    The file may not be on disk; TFTP responds FILE_NOT_FOUND
+    in that case, which is preferable to serving a wrong-arch
+    binary."""
+    discover = wire.parse(_make_pxe_discover(arch=6))
+    offer = build_offer(_cfg(), discover)
+    assert offer is not None
+    parsed = wire.parse(offer)
+    assert parsed.bootfile_name == b"ipxe-i386.efi"
+
+
+def test_build_offer_arch_11_uefi_arm64_uses_arm64_binary() -> None:
+    """ARM64 UEFI clients (RPi 4+ in UEFI mode, RockPi etc.) get
+    ``ipxe-arm64.efi``. Pin the mapping so a future arch-table
+    edit doesn't accidentally regress ARM64 boot support."""
+    discover = wire.parse(_make_pxe_discover(arch=11))
+    offer = build_offer(_cfg(), discover)
+    assert offer is not None
+    parsed = wire.parse(offer)
+    assert parsed.bootfile_name == b"ipxe-arm64.efi"
+
+
 def test_build_offer_echoes_client_machine_id_when_present() -> None:
     """Option 97 (client-machine-id / GUID) is echoed back when the
     client sent one -- some firmware uses it as a sanity check

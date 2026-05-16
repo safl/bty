@@ -400,6 +400,90 @@ def test_listener_negotiates_blksize_via_oack(tmp_path: Path) -> None:
     _run(_drive())
 
 
+def test_listener_refuses_rrq_when_at_concurrent_cap(tmp_path: Path) -> None:
+    """When ``max_concurrent_transfers`` is hit, new RRQs get a
+    DISK_FULL error instead of a transfer slot. Prevents fd
+    exhaustion from a flood of legitimate or hostile RRQs.
+
+    Forces the cap to 0 (refuse everything) so we don't have to
+    keep transfers alive concurrently in the test."""
+    (tmp_path / "ipxe.efi").write_bytes(b"\x00")
+    cfg = TftpConfig(
+        root=tmp_path,
+        allowlist=frozenset({"ipxe.efi"}),
+        max_concurrent_transfers=0,  # refuse every RRQ
+    )
+
+    async def _drive() -> None:
+        listener_transport, listener_port = await _spawn_listener(cfg)
+        client_transport, client = await _spawn_test_client()
+        try:
+            client_transport.sendto(_build_rrq("ipxe.efi"), ("127.0.0.1", listener_port))
+            data, _addr = await asyncio.wait_for(client.inbox.get(), timeout=5.0)
+            assert struct.unpack("!H", data[:2])[0] == Opcode.ERROR
+            assert struct.unpack("!H", data[2:4])[0] == ErrorCode.DISK_FULL
+        finally:
+            client_transport.close()
+            listener_transport.close()
+
+    _run(_drive())
+
+
+def test_ack_collector_drops_acks_from_wrong_source_ip() -> None:
+    """The per-transfer _AckCollector accepts ACKs only from the
+    legitimate client's IP. ACK packets arriving from a different
+    IP are dropped silently -- otherwise a hostile actor on the
+    same LAN could fire spoofed ACKs to force premature transfer
+    completion (and let the client end up with a truncated
+    bootfile). Test by hand-feeding the collector packets from
+    two different addresses."""
+    from bty.pxe.tftp import _AckCollector
+
+    collector = _AckCollector(expected_client_ip="10.0.0.42")
+    # Legitimate ACK from the right IP, any port.
+    legit = struct.pack("!HH", Opcode.ACK, 7)
+    collector.datagram_received(legit, ("10.0.0.42", 54321))
+    # Spoofed ACK from a different IP -- must be silently dropped.
+    spoof = struct.pack("!HH", Opcode.ACK, 99)
+    collector.datagram_received(spoof, ("10.0.0.99", 54321))
+    # Pulling one ACK out should give back the legitimate one;
+    # the spoofed one was filtered.
+    assert collector._inbox.qsize() == 1
+    queued = collector._inbox.get_nowait()
+    assert queued.block == 7
+
+
+def test_listener_accepts_uppercase_filename_via_case_insensitive_match(
+    tmp_path: Path,
+) -> None:
+    """Some BIOS PXE ROMs uppercase the bootfile name (``IPXE.EFI``).
+    The allowlist is defined in lowercase; the request name should
+    be normalised before lookup so legacy clients aren't rejected
+    with ACCESS_VIOLATION when the only sin is a different case."""
+    payload = b"\x11" * 64
+    (tmp_path / "ipxe.efi").write_bytes(payload)
+    cfg = TftpConfig(root=tmp_path, allowlist=frozenset({"ipxe.efi"}))
+
+    async def _drive() -> None:
+        listener_transport, listener_port = await _spawn_listener(cfg)
+        client_transport, client = await _spawn_test_client()
+        try:
+            # Note: uppercase filename in the RRQ.
+            client_transport.sendto(_build_rrq("IPXE.EFI"), ("127.0.0.1", listener_port))
+            data, _addr = await asyncio.wait_for(client.inbox.get(), timeout=5.0)
+            # We expect DATA, not ERROR.
+            assert struct.unpack("!H", data[:2])[0] == Opcode.DATA, (
+                f"expected DATA, got opcode {struct.unpack('!H', data[:2])[0]} "
+                f"(case-insensitive filename match regression)"
+            )
+            assert data[4:] == payload
+        finally:
+            client_transport.close()
+            listener_transport.close()
+
+    _run(_drive())
+
+
 def test_listener_discards_duplicate_acks_without_retransmitting(tmp_path: Path) -> None:
     """A duplicate ACK for an earlier block must NOT cause the
     server to retransmit the current block -- PXE ROMs commonly

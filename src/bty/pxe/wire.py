@@ -65,6 +65,7 @@ class Opt(IntEnum):
     MAX_MSG_SIZE = 57
     VENDOR_CLASS = 60
     CLIENT_ID = 61
+    VENDOR_SPECIFIC = 43  # PXE sub-options live inside this option
     TFTP_SERVER_NAME = 66
     BOOTFILE_NAME = 67
     USER_CLASS = 77
@@ -333,15 +334,30 @@ def pad_to_min(packet: bytes, minimum: int = 300) -> bytes:
     return packet + b"\x00" * (minimum - len(packet))
 
 
+# Vendor-class prefixes we recognise as PXE-like discovers.
+# ``PXEClient`` is the RFC 4578 mainline; ``HTTPClient`` is UEFI
+# HTTP Boot. ``gPXE`` and ``iPXE`` are alternative loaders that
+# sometimes tag option 60 instead of (or in addition to) option 77
+# -- accepting them lets us serve those clients without conflating
+# detection paths. Anything outside this set is regular DHCP we
+# stay out of.
+_PXE_VENDOR_CLASS_PREFIXES: tuple[bytes, ...] = (
+    b"PXEClient",
+    b"HTTPClient",
+    b"gPXE",
+    b"iPXE",
+)
+
+
 def is_pxe_client_discover(p: Packet) -> bool:
     """True when ``p`` is a DHCPDISCOVER from a PXE/HTTP-Boot client.
 
     Filter rule for the proxy: only respond to discovers whose
-    vendor-class option starts with ``PXEClient`` or ``HTTPClient``.
+    vendor-class option starts with a known PXE-family prefix.
     Anything else is regular DHCP traffic the operator's main
     server owns -- we stay out of it.
     """
     if p.op != Op.BOOTREQUEST or p.msg_type != MsgType.DISCOVER:
         return False
     vc = p.vendor_class or b""
-    return vc.startswith((b"PXEClient", b"HTTPClient"))
+    return vc.startswith(_PXE_VENDOR_CLASS_PREFIXES)

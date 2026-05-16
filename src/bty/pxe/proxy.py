@@ -45,15 +45,28 @@ from bty.pxe.wire import MsgType, Op, Opt, Packet
 
 log = logging.getLogger("bty.pxe.proxy")
 
-# Arch -> (bootfile, transport-hint). For PXEClient (TFTP) we serve
-# the bootfile by name relative to dnsmasq's tftp-root. For HTTPClient
-# we serve an absolute URL the firmware fetches directly over HTTP.
+# Arch -> bootfile (RFC 4578 client-arch numbers).
+#
+# Each entry MUST point at a binary that actually matches the
+# arch -- sending an x86_64 iPXE binary to an ARM64 UEFI client
+# would let the offer flow succeed (option 67 set + TFTP serves
+# the bytes) only to fail at execution on the target, which is
+# strictly worse than no offer at all. If the operator hasn't
+# staged a particular arch's iPXE binary at /var/lib/tftpboot/,
+# TFTP returns FILE_NOT_FOUND and the target falls through to
+# the operator's main DHCP -- a clean "no, not me" signal.
+#
+# Bty's default appliance ships ipxe.efi (x86-64 UEFI) +
+# undionly.kpxe (legacy BIOS) only. Other arches need their
+# iPXE binaries added by the operator -- see the RPi-over-PXE
+# notes in src/bty/pxe/__init__.py.
 _PXE_BOOTFILE_BY_ARCH: dict[int, str] = {
     0: "undionly.kpxe",  # legacy BIOS x86
-    6: "ipxe.efi",  # UEFI IA32 (uncommon but seen)
-    7: "ipxe.efi",  # UEFI BC (x86_64 byte code) -- the common case
-    9: "ipxe.efi",  # UEFI x86_64 native
-    11: "ipxe.efi",  # UEFI ARM64; placeholder until we ship arm64.efi
+    6: "ipxe-i386.efi",  # UEFI IA32 (uncommon but seen)
+    7: "ipxe.efi",  # UEFI BC (x86-64 byte code; common)
+    9: "ipxe.efi",  # UEFI x86-64 native
+    10: "ipxe-arm32.efi",  # UEFI ARM 32-bit (rare)
+    11: "ipxe-arm64.efi",  # UEFI ARM 64-bit (Raspberry Pi, etc.)
 }
 
 # bty-web's HTTP route for the iPXE binary. The path matches the
@@ -61,6 +74,19 @@ _PXE_BOOTFILE_BY_ARCH: dict[int, str] = {
 # release pipeline put ipxe.efi at this URL.
 _HTTP_BOOTFILE_PATH = "/boot/ipxe.efi"
 _HTTP_BOOTFILE_PORT = 8080
+
+# PXE vendor-specific sub-option payload for option 43.
+#
+# Old PXE 2.x firmware reads option 43 for PXE_DISCOVERY_CONTROL
+# (sub-option 6) before honouring the bootfile-name option. We
+# set bits 2+3 -- "skip multicast / broadcast PXE discovery; use
+# the bootfile in option 67 / BOOTP file[] directly". Modern UEFI
+# ignores option 43 entirely, so emitting this is pure leniency
+# toward legacy hardware; no downside on current clients.
+#
+# Layout: ``sub_code(1) + sub_len(1) + value + ... + END(0xff)``.
+# Sub-option 6 (PXE_DISCOVERY_CONTROL) takes a 1-byte value.
+_PXE_VENDOR_OPT_BODY: bytes = bytes((6, 1, 0x0C, 0xFF))
 
 
 @dataclass(frozen=True)
@@ -171,6 +197,9 @@ def _build_offer_packet(cfg: ProxyConfig, discover: Packet, decision: BootDecisi
     #   54 (server-id) -- "who is the DHCP server"; required by RFC.
     #   60 (vendor-class) -- MUST echo "PXEClient" or "HTTPClient"
     #     depending on what the client sent.
+    #   43 (vendor-specific) -- PXE_DISCOVERY_CONTROL hint for old
+    #     PXE 2.x firmware (see _PXE_VENDOR_OPT_BODY); modern UEFI
+    #     ignores it.
     #   66 (tftp-server) -- redundant with siaddr for most firmware
     #     but some implementations only check this. Cheap insurance.
     #   67 (bootfile-name) -- the actual answer. modern UEFI firmware
@@ -185,6 +214,7 @@ def _build_offer_packet(cfg: ProxyConfig, discover: Packet, decision: BootDecisi
         Opt.MSG_TYPE: bytes((MsgType.OFFER,)),
         Opt.SERVER_ID: server_ip_bytes,
         Opt.VENDOR_CLASS: decision.vendor_class_response,
+        Opt.VENDOR_SPECIFIC: _PXE_VENDOR_OPT_BODY,
         Opt.TFTP_SERVER_NAME: cfg.server_ip.encode("ascii"),
         Opt.BOOTFILE_NAME: decision.bootfile,
     }
@@ -202,6 +232,12 @@ def _build_offer_packet(cfg: ProxyConfig, discover: Packet, decision: BootDecisi
             len(decision.bootfile),
         )
 
+    # Populate the BOOTP sname (server-name) field with our IP as
+    # an ASCII string. Modern UEFI ignores sname entirely, but some
+    # PXE 2.x firmware reads it as "boot server hostname"; an empty
+    # sname pushed those clients to a fallback path that sometimes
+    # didn't work. ``server_ip`` is always ASCII-clean and short.
+    sname_field = cfg.server_ip.encode("ascii")
     packet = wire.build(
         op=Op.BOOTREPLY,
         xid=discover.xid,
@@ -211,6 +247,7 @@ def _build_offer_packet(cfg: ProxyConfig, discover: Packet, decision: BootDecisi
         # server / next-server).
         siaddr=server_ip_bytes,
         chaddr=discover.chaddr,
+        sname=sname_field,
         file=file_field,
         options=options,
     )
