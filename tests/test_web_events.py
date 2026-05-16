@@ -114,6 +114,34 @@ def test_event_bus_unregisters_on_unsubscribe() -> None:
     assert asyncio.run(scenario()) == 0
 
 
+def test_event_bus_close_is_idempotent() -> None:
+    """Multiple ``close()`` calls must not raise. The lifespan
+    finally-block fires once on normal shutdown, but a test or
+    operator-driven reload path may call it again later."""
+
+    async def scenario() -> None:
+        bus = MachineEventBus()
+        bus.attach(asyncio.get_running_loop())
+        await bus.close()
+        await bus.close()
+        await bus.close()
+
+    asyncio.run(scenario())
+
+
+def test_event_bus_close_without_attach_falls_through_safely() -> None:
+    """``close()`` called before ``attach()`` (no event loop bound
+    yet) must still set the closed flag without raising."""
+
+    async def scenario() -> bool:
+        bus = MachineEventBus()
+        # No attach!
+        await bus.close()
+        return bus._closed.is_set()
+
+    assert asyncio.run(scenario()) is True
+
+
 def test_event_bus_close_wakes_idle_subscriber() -> None:
     """``close()`` unblocks every subscribe() generator immediately so
     bty-web shutdown isn't held up by SSE clients waiting on
