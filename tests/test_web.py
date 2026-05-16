@@ -1652,9 +1652,7 @@ def test_http_boot_404_for_missing_ipxe_efi(app_client: TestClient) -> None:
     assert r.status_code == 404
 
 
-def test_http_boot_arch_specific_filenames_routable(
-    app_client: TestClient, tmp_path: Path
-) -> None:
+def test_http_boot_arch_specific_filenames_routable(app_client: TestClient, tmp_path: Path) -> None:
     """The router-config cheatsheet on /ui/settings lists arch-
     specific bootfiles (ipxe-i386.efi, ipxe-arm64.efi, etc.) for
     targets where the default ipxe.efi (x86_64) isn't appropriate.

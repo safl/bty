@@ -1,0 +1,42 @@
+doc: |
+  PXE chain end-to-end test
+  =========================
+
+  Spins up two QEMU VMs sharing an L2 segment via ``-netdev socket``:
+  the server VM runs the bty server image unmodified (default
+  ``bty / bty`` PAM credential, ``odus / odus`` SSH admin); the client
+  VM PXE-boots on that segment. The test asserts the chain completes
+  by grepping the client's serial-console log for marker strings
+  emitted at each stage of the boot pipeline (iPXE binary loaded,
+  /pxe-bootstrap.ipxe fetched, per-MAC plan fetched, kernel + initrd
+  loaded, live env booted, bty-flash-on-boot service started).
+
+  Steps:
+
+  1. ``pxe_customize_server`` - copies the pre-built server qcow2 to
+     the cijoe run dir and stages the live trio + a small dummy image
+     for upload. No virt-customisation - the production qcow2 is
+     booted as-is and the test drives the HTTP API to seed
+     assignments.
+
+  2. ``pxe_run_chain_test`` - starts the server VM (mgmt NIC with
+     ``hostfwd`` for HTTP-API access + PXE NIC on the socket), waits
+     for ``/healthz``, drives ``POST /ui/login`` to mint a session
+     cookie, ``PUT``s the live trio + dummy image and an assignment
+     for the client's MAC with ``boot_policy=flash``, then SSHes in
+     as ``odus`` to drop a test-only full-DHCP dnsmasq overlay (bty
+     itself never runs DHCP in production; this is genuinely
+     test-side machinery for the isolated socket-net segment).
+     Starts the client VM (PXE-boot, joined to the same socket),
+     tails the client serial log, asserts every chain marker
+     appears within the deadline.
+
+  Wall clock: 5-10 minutes per run. Server + client serial logs land
+  in the cijoe run dir as artefacts of the report.
+
+steps:
+- name: pxe_customize_server
+  uses: pxe_customize_server
+
+- name: pxe_run_chain_test
+  uses: pxe_run_chain_test

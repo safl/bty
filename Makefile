@@ -28,7 +28,7 @@ endif
 
 .PHONY: help \
         deps test lint format format-check typecheck ci wheel \
-        media-deps build \
+        media-deps build test-pxe \
         docker-build docker-run docker-clean \
         docs-html docs-pdf docs-serve \
         clean
@@ -50,6 +50,8 @@ help:
 	@echo "  media-deps    pipx install cijoe"
 	@echo "  build         build a media image (override VARIANT below)"
 	@echo "                  -> ~/system_imaging/disk/bty-<variant>.*"
+	@echo "  test-pxe      end-to-end PXE chain test (server + client QEMU VMs)"
+	@echo "                  (needs QEMU + KVM; ~5-10 min wall clock)"
 	@echo ""
 	@echo "Variant: $(VARIANT)  (override with VARIANT=server-x86, server-rpi, netboot-x86, ...)"
 	@echo "  usb-x86      - bootable USB live ISO via live-build (.iso.gz, x86_64)"
@@ -117,6 +119,14 @@ media-deps:
 # + passwordless sudo.
 build:
 	cd cijoe && cijoe $(MEDIA_TASK) --monitor -c configs/$(VARIANT).toml
+
+# End-to-end PXE chain test: server + client QEMU VMs sharing an L2
+# segment via -netdev socket. Test-side dnsmasq does full DHCP for
+# the isolated segment (bty itself never runs DHCP). Requires
+# pre-built server + live artefacts under ~/system_imaging/disk/.
+# Wall clock 5-10 min per run.
+test-pxe:
+	cd cijoe && cijoe tasks/test-pxe.yaml --monitor -c configs/test-pxe.toml
 
 # ---------- Docker ------------------------------------------------------
 
