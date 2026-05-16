@@ -62,15 +62,51 @@
                     <code>local</code>: PXE boots return sanboot (production / stable).
                     <code>flash</code>: PXE boots chain into the live env so the box
                     re-flashes the assigned image every time (per-job CI cadence).
+                    <code>flash-once</code>: same as <code>flash</code> for the next
+                    PXE boot, then auto-flips to <code>local</code> after the
+                    live env signals completion.
                     <code>tui</code>: PXE boots chain into the live env in interactive
-                    mode (<code>bty-tui</code> on tty1) so the operator picks an image
-                    from the server's catalog by hand. The auto-discovery default for
-                    unknown MACs is <code>tui</code>; you can flip a known machine
-                    here. Completion (<code>POST /pxe/{mac}/done</code>) updates
-                    <em>last flashed</em> but never flips the policy - the operator
-                    flips back to <code>local</code> when they want the box to stop
-                    reflashing.
+                    mode (<code>bty-tui</code> on tty1). The auto-discovery default
+                    for unknown MACs is <code>tui</code> -- it's also how the box
+                    reports its disk inventory to bty-web (see Target disk below).
                 </div>
+            </div>
+            <div class="mb-3">
+                <label class="form-label" for="target_disk_serial">Target disk</label>
+                {% if m.known_disks %}
+                <select name="target_disk_serial" id="target_disk_serial" class="form-select">
+                    <option value="">- none picked (flash will refuse) -</option>
+                    {% for d in m.known_disks %}
+                    {# Each disk's serial is the durable identifier the live env
+                       matches at flash time. Display path/size/model alongside
+                       so the operator picks a recognisable line. Disks without
+                       a serial get disabled options -- the live env wouldn't
+                       be able to match them anyway. #}
+                    {% if d.serial %}
+                    <option value="{{ d.serial }}" {% if d.serial == m.target_disk_serial %}selected{% endif %}>
+                        {{ d.path }} -- {{ d.size or "?" }}{% if d.model %} -- {{ d.model }}{% endif %} -- serial:{{ d.serial }}{% if d.tran %} ({{ d.tran }}){% endif %}{% if d.removable %} [removable]{% endif %}
+                    </option>
+                    {% else %}
+                    <option disabled>
+                        {{ d.path }} -- {{ d.size or "?" }}{% if d.model %} -- {{ d.model }}{% endif %} -- (no serial; cannot select)
+                    </option>
+                    {% endif %}
+                    {% endfor %}
+                </select>
+                <div class="form-text">
+                    Last inventory reported {{ m.known_disks_at }}. The live env's
+                    flash service matches the picked SERIAL against current
+                    disks; a swapped or renumbered drive refuses to flash
+                    rather than risking the wrong target.
+                </div>
+                {% else %}
+                <input type="hidden" name="target_disk_serial" value="{{ m.target_disk_serial or '' }}">
+                <div class="alert alert-warning small mb-0">
+                    No disk inventory yet for this machine. Set <code>boot_policy=tui</code>
+                    above and power-cycle the machine; bty-tui will report its
+                    disks to bty-web on startup and this dropdown will populate.
+                </div>
+                {% endif %}
             </div>
             <div class="d-flex justify-content-between">
                 <button type="submit" class="btn btn-primary">Save</button>

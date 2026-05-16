@@ -506,6 +506,11 @@ def test_ui_machine_upsert_via_form(client: TestClient) -> None:
 
 
 def test_ui_machine_upsert_persists_boot_policy_flash(client: TestClient) -> None:
+    """Form upsert with boot_policy=flash also requires the operator
+    to have picked a target_disk_serial (post-v0.18 safety gate).
+    The dropdown is populated from machines.known_disks after
+    bty-tui posts its inventory; this test sends the serial
+    directly via form data."""
     _login(client)
     r = client.post(
         "/ui/machines/aa:bb:cc:dd:ee:ff",
@@ -513,6 +518,7 @@ def test_ui_machine_upsert_persists_boot_policy_flash(client: TestClient) -> Non
             "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
             "hostname": "",
             "boot_policy": "flash",
+            "target_disk_serial": "ATA-WDC-123456",
         },
     )
     assert r.status_code == 303
@@ -521,6 +527,40 @@ def test_ui_machine_upsert_persists_boot_policy_flash(client: TestClient) -> Non
         cookies=AUTH,
     )
     assert api.json()["boot_policy"] == "flash"
+    assert api.json()["target_disk_serial"] == "ATA-WDC-123456"
+
+
+def test_ui_machine_upsert_refuses_flash_without_target_disk(client: TestClient) -> None:
+    """Safety gate (operator request: refuse if target_disk is
+    unset). Setting boot_policy=flash without target_disk_serial
+    bounces back to /ui/machines/{mac} with a flash banner
+    explaining how to fix it -- and the machine row does NOT
+    flip to boot_policy=flash."""
+    _login(client)
+    # Seed the machine first so the redirect target exists.
+    client.put(
+        "/machines/aa:bb:cc:dd:ee:ff",
+        json={
+            "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "boot_policy": "local",
+        },
+        cookies=AUTH,
+    )
+    r = client.post(
+        "/ui/machines/aa:bb:cc:dd:ee:ff",
+        data={
+            "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "boot_policy": "flash",
+            "target_disk_serial": "",
+        },
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert "/ui/machines/aa:bb:cc:dd:ee:ff?error=" in r.headers["location"]
+    api = client.get("/machines/aa:bb:cc:dd:ee:ff", cookies=AUTH).json()
+    # Safety gate: didn't flip to flash.
+    assert api["boot_policy"] == "local"
+    assert api["target_disk_serial"] is None
 
 
 def test_ui_machine_upsert_rejects_unknown_boot_policy(client: TestClient) -> None:

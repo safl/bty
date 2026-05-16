@@ -250,6 +250,54 @@ def test_post_pxe_done_propagates_url_errors(monkeypatch: pytest.MonkeyPatch) ->
         tui_app.post_pxe_done("http://server", "aa:bb:cc:dd:ee:ff")
 
 
+def test_post_inventory_sends_json_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``post_inventory`` serialises the disk list to JSON, sets
+    Content-Type and POSTs to ``<server>/pxe/<mac>/inventory``."""
+    seen: dict[str, object] = {}
+
+    class _FakeOpen:
+        def __enter__(self) -> _FakeOpen:
+            return self
+
+        def __exit__(self, *_a: object) -> None:
+            pass
+
+    def _capture(req: Any, **_kw: object) -> _FakeOpen:
+        seen["url"] = req.full_url
+        seen["method"] = req.get_method()
+        seen["body"] = req.data
+        seen["content_type"] = req.get_header("Content-type")
+        return _FakeOpen()
+
+    monkeypatch.setattr(tui_app.urllib.request, "urlopen", _capture)
+    tui_app.post_inventory(
+        "http://server:8080",
+        "aa:bb:cc:dd:ee:ff",
+        [{"path": "/dev/sda", "serial": "S1234"}],
+    )
+    assert seen["url"] == "http://server:8080/pxe/aa:bb:cc:dd:ee:ff/inventory"
+    assert seen["method"] == "POST"
+    assert seen["content_type"] == "application/json"
+    import json as _json
+
+    decoded = _json.loads(seen["body"])  # type: ignore[arg-type]
+    assert decoded == {"disks": [{"path": "/dev/sda", "serial": "S1234"}]}
+
+
+def test_post_inventory_propagates_url_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Transport errors bubble up to the caller so the wrapper in
+    BtyTui can surface them on the status bar."""
+
+    def _boom(*_a: object, **_kw: object) -> None:
+        raise urllib.error.URLError("no route")
+
+    monkeypatch.setattr(tui_app.urllib.request, "urlopen", _boom)
+    with pytest.raises(urllib.error.URLError):
+        tui_app.post_inventory("http://server", "aa:bb:cc:dd:ee:ff", [])
+
+
 def test_main_accepts_catalog_and_mac_flags(monkeypatch: pytest.MonkeyPatch) -> None:
     """``bty-tui --catalog URL --mac MAC`` reaches ``BtyTui(...)`` with
     the right kwargs. The actual ``run()`` is monkeypatched so we

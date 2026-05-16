@@ -45,6 +45,22 @@ CREATE TABLE IF NOT EXISTS machines (
     last_seen_ip              TEXT,    -- source IP of most recent /pxe contact
     boot_policy               TEXT NOT NULL DEFAULT 'local',
     last_flashed_at           TEXT,    -- updated by POST /pxe/{mac}/done
+    -- Per-machine disk inventory, posted by bty-tui on startup via
+    -- POST /pxe/{mac}/inventory. JSON array of dicts:
+    -- ``[{"path": "/dev/sda", "size": "...", "model": "...",
+    --     "serial": "...", "tran": "sata", ...}, ...]``.
+    -- The operator picks one of these by serial number; the chosen
+    -- serial is what the live env consumes at flash time.
+    known_disks               TEXT,    -- JSON array; NULL until first inventory
+    known_disks_at            TEXT,    -- ISO timestamp of last inventory post
+    -- Operator-selected target disk SERIAL. Serial (vs path) is the
+    -- durable identifier: ``/dev/sda`` can flip to ``/dev/nvme0n1``
+    -- across kernel versions / udev rules, but the disk's serial
+    -- number is fixed. The live env's bty-flash-on-boot matches
+    -- on this serial; refuses to flash if the serial isn't found
+    -- among the current disks (so a swapped-out drive doesn't get
+    -- mis-flashed against a stale operator decision).
+    target_disk_serial        TEXT,
     created_at                TEXT NOT NULL,
     updated_at                TEXT NOT NULL
 );
@@ -116,7 +132,7 @@ class StaleSchemaError(RuntimeError):
 # ``SELECT`` blow up with ``no such column``.
 _REQUIRED_COLUMNS: dict[str, tuple[str, ...]] = {
     "events": ("source_ip",),
-    "machines": ("bty_image_ref",),
+    "machines": ("bty_image_ref", "known_disks", "target_disk_serial"),
     "catalog_entries": ("bty_image_ref", "disk_image_sha"),
 }
 

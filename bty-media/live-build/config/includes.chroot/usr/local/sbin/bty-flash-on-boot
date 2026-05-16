@@ -11,14 +11,25 @@ operator is booting the live env interactively for debugging), the
 service exits 0 and the live env drops to its console.
 
 Recognised cmdline parameters:
-- ``bty.server=URL``       - base URL of the bty-web server
-- ``bty.mac=MAC``          - this machine's MAC (xx-xx-...)
-- ``bty.image_url=URL``    - direct URL to the image to flash
-- ``bty.mode=interactive`` - short-circuit; ``bty-tui-on-tty1.service``
-                             handles the interactive flash flow on
-                             tty1 instead. Set by the server's
-                             ``ipxe_tui.j2`` for ``boot_policy=tui``
-                             (default for unknown MACs).
+- ``bty.server=URL``              - base URL of the bty-web server
+- ``bty.mac=MAC``                 - this machine's MAC (xx-xx-...)
+- ``bty.image_url=URL``           - direct URL to the image to flash
+- ``bty.target_disk_serial=...``  - serial number of the disk to
+                                    flash. REQUIRED. Matched against
+                                    ``lsblk -d -o SERIAL`` at boot
+                                    time. If the serial is missing
+                                    or doesn't match any present
+                                    disk, the script bails rather
+                                    than picking the wrong drive.
+                                    Operator picks via /ui/machines/
+                                    {mac}; the server bakes it into
+                                    the iPXE flash chain via
+                                    ``ipxe_flash.j2``.
+- ``bty.mode=interactive``        - short-circuit; ``bty-tui-on-tty1.service``
+                                    handles the interactive flash flow on
+                                    tty1 instead. Set by the server's
+                                    ``ipxe_tui.j2`` for ``boot_policy=tui``
+                                    (default for unknown MACs).
 """
 
 from __future__ import annotations
@@ -34,7 +45,7 @@ from pathlib import Path
 CMDLINE = Path("/proc/cmdline")
 LOCAL_IMAGE_DIR = Path("/var/tmp")
 
-REQUIRED = ("bty.server", "bty.mac", "bty.image_url")
+REQUIRED = ("bty.server", "bty.mac", "bty.image_url", "bty.target_disk_serial")
 
 
 def local_image_path(image_url: str) -> Path:
@@ -62,41 +73,52 @@ def cmdline_args() -> dict[str, str]:
     return out
 
 
-def pick_target() -> str:
-    """First non-removable, non-readonly disk on the system.
+def pick_target(target_serial: str) -> str:
+    """Resolve the disk whose SERIAL matches ``target_serial``.
 
-    bty-web doesn't yet send an explicit target hint in the per-MAC
-    plan, so the live env picks whatever the kernel enumerates
-    first. Right answer for a bare-metal target with one fixed
-    disk; a future ``bty.target=`` cmdline param could let the
-    server override for multi-disk hosts.
+    Serial (vs /dev/sda) is the durable identifier baked into the
+    iPXE flash chain by bty-web. ``/dev/sda`` can flip across
+    kernel versions and udev rules but the disk's serial number
+    is fixed. Matching on serial means a swapped-out or
+    renumbered drive triggers a clean refusal here instead of
+    wiping the wrong target.
 
-    Shells out to ``lsblk -d -e7 -J`` (the same form documented for
-    disk discovery -- ``-d`` strips partitions, ``-e7`` excludes
-    loop devices). lsblk's structured JSON is what bty's own
-    ``list disks`` codepath consumes too, so no wrapper here.
+    Shells out to ``lsblk -d -e7 -J`` (``-d`` strips partitions,
+    ``-e7`` excludes loop devices). ``-o`` adds SERIAL so we can
+    compare directly; lsblk's structured JSON is what bty's own
+    ``list disks`` codepath consumes too.
+
+    Raises :class:`SystemExit` with an operator-readable message
+    when no disk matches. The serial-list-on-failure helps an
+    operator who can see tty1 (KVM / IPMI / serial console)
+    figure out which disk to pick in /ui/machines/{mac}.
     """
     out = subprocess.run(
-        ["lsblk", "-d", "-e7", "-J", "-o", "PATH,RM,RO,TYPE"],
+        ["lsblk", "-d", "-e7", "-J", "-o", "PATH,SERIAL,RM,RO,TYPE,MODEL,SIZE"],
         check=True,
         capture_output=True,
         text=True,
     )
     payload = json.loads(out.stdout)
+    candidates = []
     for disk in payload.get("blockdevices", []):
         if disk.get("type") != "disk":
             continue
-        # lsblk emits ``rm`` / ``ro`` as JSON booleans; the wider
-        # match (True / "1" / 1) is a one-line safety belt against
-        # lsblk format drift across distros.
-        if disk.get("rm") in (True, "1", 1):
-            continue
-        if disk.get("ro") in (True, "1", 1):
-            continue
         path = disk.get("path")
+        serial = disk.get("serial")
         if path:
-            return str(path)
-    raise SystemExit("bty-flash-on-boot: no flashable disk found")
+            candidates.append((path, serial, disk.get("model"), disk.get("size")))
+            if serial == target_serial:
+                return str(path)
+    rendered = ", ".join(
+        f"{p} (serial={s!r}, model={m!r}, size={sz!r})" for p, s, m, sz in candidates
+    )
+    raise SystemExit(
+        f"bty-flash-on-boot: no disk on this host has "
+        f"serial={target_serial!r}. Current disks: "
+        f"{rendered or '(none)'}. The operator's pick in /ui/machines "
+        "is stale; re-pick after the next inventory."
+    )
 
 
 def download(url: str, dest: Path) -> None:
@@ -173,13 +195,18 @@ def main() -> int:
     server = args["bty.server"].rstrip("/")
     mac = args["bty.mac"]
     image_url = args["bty.image_url"]
+    target_serial = args["bty.target_disk_serial"]
 
-    print(f"bty-flash-on-boot: server={server} mac={mac}", flush=True)
+    print(
+        f"bty-flash-on-boot: server={server} mac={mac} "
+        f"target_disk_serial={target_serial}",
+        flush=True,
+    )
 
     local_image = local_image_path(image_url)
     download(image_url, local_image)
-    target = pick_target()
-    print(f"bty-flash-on-boot: target disk {target}", flush=True)
+    target = pick_target(target_serial)
+    print(f"bty-flash-on-boot: target disk {target} (serial {target_serial})", flush=True)
 
     subprocess.run(
         ["bty", "flash", str(local_image), target, "--yes"],

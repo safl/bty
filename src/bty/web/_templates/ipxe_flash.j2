@@ -1,10 +1,13 @@
 #!ipxe
 # bty network-flash for {{ mac }}
-#   bty_image_ref: {{ flash_key }}
+#   bty_image_ref:      {{ flash_key }}
+#   target_disk_serial: {{ target_disk_serial }}
 #
 # Chains into the bty live env. The live env's bty-flash-on-boot
 # service reads bty.* from /proc/cmdline, downloads the image,
-# runs ``bty flash --yes``, signals completion, and reboots.
+# matches ``bty.target_disk_serial`` against the box's current
+# disks, runs ``bty flash --yes`` on the matched device, signals
+# completion, and reboots.
 
 set bty-base http://{{ host }}
 # fetch= tells live-boot's initramfs to download the squashfs over
@@ -20,6 +23,13 @@ set bty-base http://{{ host }}
 # fetch). The trailing ``/<name>`` is decorative -- the ref binds the
 # resolution; the name preserves format-by-extension on the live-env
 # side (``bty.flash.probe_image_url`` keys off the URL filename).
-kernel ${bty-base}/boot/bty-netboot-x86_64.vmlinuz boot=live fetch=${bty-base}/boot/bty-netboot-x86_64.squashfs components quiet console=tty0 console=ttyS0,115200 bty.server=${bty-base} bty.mac={{ mac }} bty.image_url=${bty-base}/images/{{ flash_key }}/{{ image_name }}
+#
+# bty.target_disk_serial pins the destination by SERIAL number
+# (vs /dev/sda which can flip across reboots). The live env
+# refuses to flash if the cmdline serial does not match any
+# disk's current serial -- preventing the operator's pick from
+# becoming "wrong disk wiped" when a drive is swapped between
+# inventory and flash time.
+kernel ${bty-base}/boot/bty-netboot-x86_64.vmlinuz boot=live fetch=${bty-base}/boot/bty-netboot-x86_64.squashfs components quiet console=tty0 console=ttyS0,115200 bty.server=${bty-base} bty.mac={{ mac }} bty.image_url=${bty-base}/images/{{ flash_key }}/{{ image_name }} bty.target_disk_serial={{ target_disk_serial }}
 initrd ${bty-base}/boot/bty-netboot-x86_64.initrd
 boot

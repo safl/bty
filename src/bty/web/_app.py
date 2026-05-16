@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import os
 import sqlite3
 import sys
@@ -436,8 +437,17 @@ def create_app(
             offer_summary = f"{normalised} offered tui (interactive bty-tui on tty1)"
             offer_details = {"offer": "tui"}
         elif ref and policy in ("flash", "flash-once"):
+            # Safety gate: refuse the flash chain unless the operator
+            # has picked a target disk by serial. Without this,
+            # bty-flash-on-boot would fall back to "first non-removable
+            # disk" and risk wiping the wrong drive on a multi-disk
+            # host. The matching pxe.flash.no_target_disk event makes
+            # the refusal visible on /ui/events so an operator
+            # debugging "why didn't my box reflash?" sees the reason
+            # without digging through dnsmasq logs.
+            target_disk_serial = machine.get("target_disk_serial")
             image_name = _flash_target_for_ref(str(ref))
-            if image_name is not None:
+            if image_name is not None and target_disk_serial:
                 template = jinja.get_template("ipxe_flash.j2")
                 rendered = template.render(
                     mac=normalised,
@@ -445,14 +455,56 @@ def create_app(
                     host=host,
                     image_name=image_name,
                     flash_key=str(ref),
+                    target_disk_serial=target_disk_serial,
                 )
                 offer_kind = policy  # "flash" or "flash-once"
                 short = str(ref)[:12]
-                offer_summary = f"{normalised} offered {policy} for ref={short}... ({image_name})"
+                offer_summary = (
+                    f"{normalised} offered {policy} for ref={short}... "
+                    f"({image_name}, target serial {target_disk_serial})"
+                )
                 offer_details = {
                     "offer": policy,
                     "bty_image_ref": ref,
                     "image_name": image_name,
+                    "target_disk_serial": target_disk_serial,
+                }
+            elif image_name is not None and not target_disk_serial:
+                # Image binding is resolvable but no target disk
+                # picked. Fall through to ipxe.j2 (sanboot/local) and
+                # log a distinct event so the operator can tell this
+                # case apart from "orphan ref / no bindable image".
+                with _db.open_db(state_path) as conn:
+                    _log_event(
+                        conn,
+                        kind="pxe.flash.no_target_disk",
+                        summary=(
+                            f"machine {normalised}: boot_policy={policy} but no "
+                            "target_disk_serial picked; refusing flash chain"
+                        ),
+                        subject_kind="machine",
+                        subject_id=normalised,
+                        actor="pxe-client",
+                        source_ip=client_ip,
+                        details={
+                            "bty_image_ref": ref,
+                            "image_name": image_name,
+                            "boot_policy": policy,
+                        },
+                    )
+                    conn.commit()
+                template = jinja.get_template("ipxe.j2")
+                rendered = template.render(mac=normalised, machine=machine)
+                offer_kind = "local-fallback"
+                offer_summary = (
+                    f"{normalised} offered local fallback "
+                    f"(boot_policy={policy} but no target_disk_serial picked)"
+                )
+                offer_details = {
+                    "offer": "local-fallback",
+                    "bty_image_ref": ref,
+                    "reason": "no_target_disk",
+                    "boot_policy": policy,
                 }
             else:
                 # Orphaned binding: machine targets a ref that no
@@ -578,6 +630,66 @@ def create_app(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"no machine record for {normalised}",
             )
+        publish_state_changed()
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    @app.post(
+        "/pxe/{mac}/inventory",
+        status_code=status.HTTP_204_NO_CONTENT,
+    )
+    def pxe_inventory(mac: str, body: _models.InventoryPost, request: Request) -> Response:
+        """Receive the per-MAC disk inventory from the live env's
+        bty-tui on startup.
+
+        Open endpoint -- the live env has no operator session.
+        Trust model matches the rest of ``/pxe/*``: bty-web is for
+        trusted networks (homelab / CI).
+
+        Persists the inventory as a JSON blob on the machine row
+        so the /ui/machines/{mac} dropdown can show real
+        path/model/serial values picked from the box's actual
+        hardware (instead of asking the operator to type the
+        serial by hand). Updates ``known_disks_at`` to the receive
+        time so the UI can show "last inventory: X seconds ago".
+
+        404s if the MAC has no machine record. The live env only
+        posts after a successful PXE chain, so the machine row
+        should always exist; a 404 here means the operator
+        deleted the machine in /ui/machines while the live env
+        was still booting.
+        """
+        normalised = _normalise_mac(mac)
+        now = _now_iso()
+        client_ip = _client_ip(request)
+        # Serialise as JSON with stable key order so two inventories
+        # with the same disks produce byte-identical column values.
+        disks_payload = [d.model_dump() for d in body.disks]
+        disks_json = json.dumps(disks_payload, sort_keys=True)
+        with _db.open_db(state_path) as conn:
+            cur = conn.execute(
+                "UPDATE machines SET known_disks = ?, known_disks_at = ?, "
+                "updated_at = ? WHERE mac = ?",
+                (disks_json, now, now, normalised),
+            )
+            if cur.rowcount == 0:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"no machine record for {normalised}",
+                )
+            _log_event(
+                conn,
+                kind="machine.inventory",
+                summary=f"{normalised} reported {len(body.disks)} disk(s)",
+                subject_kind="machine",
+                subject_id=normalised,
+                actor="pxe-client",
+                source_ip=client_ip,
+                details={
+                    "count": len(body.disks),
+                    "serials": [d.serial for d in body.disks if d.serial],
+                },
+            )
+            conn.commit()
         publish_state_changed()
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -894,19 +1006,21 @@ def create_app(
                 """
                 INSERT INTO machines
                     (mac, bty_image_ref, hostname, boot_policy,
-                     created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                     target_disk_serial, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(mac) DO UPDATE SET
-                    bty_image_ref = excluded.bty_image_ref,
-                    hostname     = excluded.hostname,
-                    boot_policy  = excluded.boot_policy,
-                    updated_at   = excluded.updated_at
+                    bty_image_ref      = excluded.bty_image_ref,
+                    hostname           = excluded.hostname,
+                    boot_policy        = excluded.boot_policy,
+                    target_disk_serial = excluded.target_disk_serial,
+                    updated_at         = excluded.updated_at
                 """,
                 (
                     normalised,
                     body.bty_image_ref,
                     body.hostname,
                     body.boot_policy,
+                    body.target_disk_serial,
                     created_at,
                     now,
                 ),
@@ -923,6 +1037,7 @@ def create_app(
                     "bty_image_ref": body.bty_image_ref,
                     "boot_policy": body.boot_policy,
                     "hostname": body.hostname,
+                    "target_disk_serial": body.target_disk_serial,
                 },
             )
             conn.commit()
@@ -2075,7 +2190,25 @@ def _normalise_mac(raw: str) -> str:
 
 
 def _row_to_machine(row: sqlite3.Row) -> _models.Machine:
-    """Decode a sqlite3.Row into a ``_models.Machine``."""
+    """Decode a sqlite3.Row into a ``_models.Machine``.
+
+    ``known_disks`` is stored as a JSON string in the column;
+    deserialise it lazily here so callers don't have to juggle the
+    text/list distinction. A None or unparseable column means "no
+    inventory yet"; missing fields don't crash the model.
+    """
+    raw_disks = row["known_disks"]
+    parsed_disks: list[dict[str, object]] | None = None
+    if raw_disks:
+        try:
+            decoded = json.loads(raw_disks)
+            if isinstance(decoded, list):
+                parsed_disks = decoded
+        except (TypeError, ValueError):
+            # Stale / malformed JSON in the column shouldn't crash
+            # the listing endpoint; surface as "no inventory" and
+            # the next /pxe/{mac}/inventory post replaces it cleanly.
+            parsed_disks = None
     return _models.Machine(
         mac=row["mac"],
         bty_image_ref=row["bty_image_ref"],
@@ -2085,6 +2218,9 @@ def _row_to_machine(row: sqlite3.Row) -> _models.Machine:
         last_seen_ip=row["last_seen_ip"],
         boot_policy=row["boot_policy"],
         last_flashed_at=_iso_or_none(row["last_flashed_at"]),
+        known_disks=parsed_disks,
+        known_disks_at=_iso_or_none(row["known_disks_at"]),
+        target_disk_serial=row["target_disk_serial"],
         created_at=datetime.fromisoformat(row["created_at"]),
         updated_at=datetime.fromisoformat(row["updated_at"]),
     )

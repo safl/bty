@@ -80,6 +80,59 @@ class MachineUpsert(BaseModel):
         pattern=r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$",
     )
     boot_policy: str = Field(default=DEFAULT_BOOT_POLICY, pattern=BOOT_POLICY_PATTERN)
+    # Operator-selected target disk serial. The live env's
+    # bty-flash-on-boot matches THIS value against the
+    # SCSI / NVMe / SATA serial of the disk it sees at boot
+    # time, refusing to flash if the serial isn't found among
+    # current disks. Serial (vs path) is the durable identifier:
+    # ``/dev/sda`` can flip across kernel versions, but the
+    # disk's serial number is stable. Free-form string because
+    # vendor formats vary wildly (NVMe nguid, SATA wwn,
+    # spinning-rust ATA serial); the only constraint is
+    # "what lsblk -o SERIAL emits". The /ui/machines/{mac}
+    # dropdown is populated from the most recent inventory
+    # post, so typos are not an exposed failure mode.
+    target_disk_serial: str | None = Field(default=None, max_length=128)
+
+
+class InventoryDisk(BaseModel):
+    """One block device as reported by ``bty.disks.list_disks``.
+
+    Shape mirrors the dict that helper returns; Pydantic at the
+    boundary catches a future drift between bty-tui and bty-web.
+    """
+
+    model_config = {"extra": "ignore"}
+
+    # /dev path at inventory time. Operator UI displays this
+    # alongside model/serial for readability; not the durable
+    # identifier (use ``serial`` instead).
+    path: str = Field(..., max_length=255)
+    # lsblk's human-readable size string ("500G" / "1.5T") --
+    # kept as text because operators recognise it.
+    size: str | None = Field(default=None, max_length=32)
+    vendor: str | None = Field(default=None, max_length=64)
+    model: str | None = Field(default=None, max_length=128)
+    # The durable identifier. Used as the match key at flash time.
+    serial: str | None = Field(default=None, max_length=128)
+    # Transport ("sata"/"nvme"/"usb"/...). Hints "is this the
+    # external drive plugged in by the operator or the internal
+    # boot disk" in the UI.
+    tran: str | None = Field(default=None, max_length=32)
+    removable: bool = False
+    readonly: bool = False
+
+
+class InventoryPost(BaseModel):
+    """Body of ``POST /pxe/{mac}/inventory``.
+
+    Open endpoint (live env's bty-tui has no token). Trust model
+    matches the rest of ``/pxe/*``: bty-web is for trusted networks.
+    """
+
+    model_config = {"extra": "forbid"}
+
+    disks: list[InventoryDisk] = Field(default_factory=list, max_length=64)
 
 
 class Machine(BaseModel):
@@ -103,6 +156,12 @@ class Machine(BaseModel):
     last_seen_ip: str | None = None
     boot_policy: str = Field(default=DEFAULT_BOOT_POLICY, pattern=BOOT_POLICY_PATTERN)
     last_flashed_at: datetime | None = None
+    # JSON-decoded inventory from the most recent
+    # ``POST /pxe/{mac}/inventory``. ``None`` means bty-tui has
+    # never reported in for this machine yet.
+    known_disks: list[dict[str, object]] | None = None
+    known_disks_at: datetime | None = None
+    target_disk_serial: str | None = None
     created_at: datetime
     updated_at: datetime
 

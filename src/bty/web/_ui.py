@@ -313,6 +313,7 @@ def register_ui_routes(
         bty_image_ref: Annotated[str, Form()] = "",
         hostname: Annotated[str, Form()] = "",
         boot_policy: Annotated[str, Form()] = DEFAULT_BOOT_POLICY,
+        target_disk_serial: Annotated[str, Form()] = "",
     ) -> RedirectResponse:
         normalised = _normalise_mac(mac)
         # Run the form inputs through the same Pydantic model the
@@ -326,6 +327,7 @@ def register_ui_routes(
                 bty_image_ref=bty_image_ref or None,
                 hostname=hostname or None,
                 boot_policy=boot_policy,
+                target_disk_serial=target_disk_serial or None,
             )
         except ValueError as exc:
             return RedirectResponse(
@@ -341,6 +343,23 @@ def register_ui_routes(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"invalid boot_policy: {validated.boot_policy!r}",
             )
+        # Safety gate: boot_policy=flash / flash-once require a
+        # picked target_disk_serial. Without it the live env's
+        # bty-flash-on-boot would refuse anyway (the cmdline param
+        # would be empty); catching it here gives the operator a
+        # clear flash-banner error before the next PXE boot
+        # instead of "tty1 says target serial missing".
+        if validated.boot_policy in ("flash", "flash-once") and not validated.target_disk_serial:
+            return RedirectResponse(
+                f"/ui/machines/{normalised}?error="
+                + urllib.parse.quote(
+                    "boot_policy=flash requires a target disk to be picked; "
+                    "power-cycle the machine in 'tui' mode first so it can "
+                    "report its disk inventory, then pick one here",
+                    safe="",
+                ),
+                status_code=status.HTTP_303_SEE_OTHER,
+            )
         now = _now_iso()
         with _db.open_db(state_path) as conn:
             existing = conn.execute(
@@ -351,19 +370,21 @@ def register_ui_routes(
                 """
                 INSERT INTO machines
                     (mac, bty_image_ref, hostname, boot_policy,
-                     created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                     target_disk_serial, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(mac) DO UPDATE SET
-                    bty_image_ref = excluded.bty_image_ref,
-                    hostname     = excluded.hostname,
-                    boot_policy  = excluded.boot_policy,
-                    updated_at   = excluded.updated_at
+                    bty_image_ref      = excluded.bty_image_ref,
+                    hostname           = excluded.hostname,
+                    boot_policy        = excluded.boot_policy,
+                    target_disk_serial = excluded.target_disk_serial,
+                    updated_at         = excluded.updated_at
                 """,
                 (
                     normalised,
                     validated.bty_image_ref,
                     validated.hostname,
                     validated.boot_policy,
+                    validated.target_disk_serial,
                     created_at,
                     now,
                 ),
@@ -882,6 +903,29 @@ def register_ui_routes(
 
 
 def _row_to_dict(row: Any) -> dict[str, Any]:
+    """Decode a sqlite3.Row of ``machines`` into a plain dict.
+
+    ``known_disks`` is stored as JSON text in the column;
+    decode it here so the Jinja template can iterate it
+    directly. Bad JSON degrades to ``None`` so a stale row
+    can't 500 the detail page.
+
+    The new columns are part of the current schema (see
+    ``_db._REQUIRED_COLUMNS``), so a missing-column
+    StaleSchemaError fires at startup rather than letting a
+    KeyError surface here. We can index directly.
+    """
+    raw_disks = row["known_disks"]
+    parsed_disks: list[dict[str, Any]] | None = None
+    if raw_disks:
+        import json as _json
+
+        try:
+            decoded = _json.loads(raw_disks)
+            if isinstance(decoded, list):
+                parsed_disks = decoded
+        except (TypeError, ValueError):
+            parsed_disks = None
     return {
         "mac": row["mac"],
         "bty_image_ref": row["bty_image_ref"],
@@ -891,6 +935,9 @@ def _row_to_dict(row: Any) -> dict[str, Any]:
         "last_seen_ip": row["last_seen_ip"],
         "boot_policy": row["boot_policy"],
         "last_flashed_at": row["last_flashed_at"],
+        "known_disks": parsed_disks,
+        "known_disks_at": row["known_disks_at"],
+        "target_disk_serial": row["target_disk_serial"],
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
     }

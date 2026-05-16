@@ -65,6 +65,7 @@ import asyncio
 import contextlib
 import os
 import subprocess
+import threading
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -259,6 +260,37 @@ def post_pxe_done(pxe_done_base: str, mac: str, *, timeout: float = 10.0) -> Non
     further validation here."""
     base = pxe_done_base.rstrip("/")
     req = urllib.request.Request(f"{base}/pxe/{mac}/done", method="POST")
+    with urllib.request.urlopen(req, timeout=timeout):
+        pass
+
+
+def post_inventory(
+    pxe_done_base: str,
+    mac: str,
+    disks_payload: list[dict[str, object]],
+    *,
+    timeout: float = 10.0,
+) -> None:
+    """Report the local disk inventory to bty-web.
+
+    Posts the dict list returned by :func:`bty.disks.list_disks`
+    to ``POST <pxe_done_base>/pxe/{mac}/inventory``. Best-effort:
+    raises ``urllib.error.URLError`` / ``HTTPError`` on transport
+    failure so the caller can decide whether to surface in the
+    status bar. The PXE-side bty-tui treats inventory posting as
+    fire-and-forget -- a flaky network shouldn't block the
+    operator from using the TUI.
+    """
+    import json as _json
+
+    base = pxe_done_base.rstrip("/")
+    body = _json.dumps({"disks": disks_payload}).encode("utf-8")
+    req = urllib.request.Request(
+        f"{base}/pxe/{mac}/inventory",
+        data=body,
+        method="POST",
+        headers={"Content-Type": "application/json"},
+    )
     with urllib.request.urlopen(req, timeout=timeout):
         pass
 
@@ -1368,6 +1400,53 @@ class BtyTui(App[None]):
         # with the operator able to immediately Enter on a row.
         with contextlib.suppress(Exception):  # pragma: no cover - defensive
             self.query_one("#images_table", DataTable).focus()
+        # Auto-report disk inventory to bty-web. When we're booted
+        # via PXE we have ``--mac`` + an http(s) ``--catalog`` URL
+        # (the per-MAC bootstrap script sets both); the inventory
+        # POST tells bty-web "this MAC sees these disks", which is
+        # what the /ui/machines/{mac} target-disk dropdown reads
+        # from. Fire-and-forget: any failure surfaces in the status
+        # bar but does NOT block the operator from using the TUI.
+        if self._pxe_done_base is not None and self._mac is not None:
+            self._auto_post_inventory()
+
+    def _auto_post_inventory(self) -> None:
+        """Best-effort: report local disk inventory to bty-web.
+
+        Reads :func:`bty.disks.list_disks` then POSTs to
+        ``${pxe_done_base}/pxe/{mac}/inventory``. Runs in a
+        background worker so a slow lsblk / slow server doesn't
+        delay the first paint. Exceptions are logged to the
+        status bar and swallowed.
+        """
+        assert self._pxe_done_base is not None
+        assert self._mac is not None
+        base = self._pxe_done_base
+        mac = self._mac
+
+        def _do_post() -> None:
+            try:
+                inventory = disks.list_disks()
+            except Exception as exc:
+                self.call_from_thread(
+                    self._set_status_transient,
+                    f"inventory probe failed: {exc}",
+                )
+                return
+            try:
+                post_inventory(base, mac, inventory)
+            except Exception as exc:
+                self.call_from_thread(
+                    self._set_status_transient,
+                    f"inventory upload failed: {exc}",
+                )
+                return
+            self.call_from_thread(
+                self._set_status_transient,
+                f"posted {len(inventory)} disk(s) to {base}",
+            )
+
+        threading.Thread(target=_do_post, daemon=True).start()
 
     # ---------- data refresh ------------------------------------------------
 

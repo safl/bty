@@ -149,13 +149,14 @@ def test_main_runs_flash_path_when_interactive_mode_absent(
     fake_cmdline = tmp_path / "cmdline"
     fake_cmdline.write_text(
         "boot=live bty.server=http://srv bty.mac=aa:bb:cc:dd:ee:ff "
-        "bty.image_url=http://srv/images/foo.img\n"
+        "bty.image_url=http://srv/images/foo.img "
+        "bty.target_disk_serial=ABCD1234\n"
     )
     monkeypatch.setattr(mod, "CMDLINE", fake_cmdline)
 
     visited: list[str] = []
     monkeypatch.setattr(mod, "download", lambda _u, _d: visited.append("download"))
-    monkeypatch.setattr(mod, "pick_target", lambda: (visited.append("pick"), "/dev/sda")[1])
+    monkeypatch.setattr(mod, "pick_target", lambda _s: (visited.append("pick"), "/dev/sda")[1])
     monkeypatch.setattr(mod, "signal_done", lambda _s, _m: visited.append("signal"))
 
     # subprocess.run is called by main() for ``bty flash`` + sleep + reboot;
@@ -179,3 +180,104 @@ class _DummyCompleted:
     returncode = 0
     stdout = ""
     stderr = ""
+
+
+# ---------- pick_target: resolve disk by serial -----------------------------
+
+
+def _fake_lsblk_proc(stdout_payload: str):
+    """Build a stand-in for ``subprocess.run`` that returns
+    a CompletedProcess whose ``.stdout`` is ``stdout_payload``."""
+
+    class _Result:
+        stdout = stdout_payload
+        stderr = ""
+        returncode = 0
+
+    def _run(*_args: object, **_kwargs: object) -> _Result:
+        return _Result()
+
+    return _run
+
+
+def test_pick_target_returns_path_for_matching_serial(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """pick_target shells out to ``lsblk`` and returns the path of
+    the disk whose serial matches the requested value. Matching by
+    serial (vs path) is the safety guarantee: a swapped or
+    renumbered drive cannot get mis-flashed."""
+    mod = _load_module()
+    lsblk_json = (
+        '{"blockdevices": ['
+        '{"path": "/dev/sda", "serial": "AAAA1111", "type": "disk", '
+        '"rm": false, "ro": false, "model": "X", "size": "500G"},'
+        '{"path": "/dev/nvme0n1", "serial": "BBBB2222", "type": "disk", '
+        '"rm": false, "ro": false, "model": "Y", "size": "1T"}'
+        "]}"
+    )
+    monkeypatch.setattr(mod.subprocess, "run", _fake_lsblk_proc(lsblk_json))
+    assert mod.pick_target("BBBB2222") == "/dev/nvme0n1"
+    assert mod.pick_target("AAAA1111") == "/dev/sda"
+
+
+def test_pick_target_raises_when_serial_not_found(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Stale operator pick (drive swapped between inventory and
+    flash) results in a SystemExit with a clear message listing
+    the disks actually present. Refusing to flash is the right
+    default; the alternative (auto-pick something else) is the
+    "huge risk of losing data" the safety gate is designed to
+    prevent."""
+    mod = _load_module()
+    lsblk_json = (
+        '{"blockdevices": ['
+        '{"path": "/dev/sda", "serial": "ZZZZZ", "type": "disk", '
+        '"rm": false, "ro": false, "model": "Z", "size": "500G"}'
+        "]}"
+    )
+    monkeypatch.setattr(mod.subprocess, "run", _fake_lsblk_proc(lsblk_json))
+    with pytest.raises(SystemExit) as excinfo:
+        mod.pick_target("WANTED-SERIAL-NOT-PRESENT")
+    message = str(excinfo.value)
+    assert "WANTED-SERIAL-NOT-PRESENT" in message
+    assert "ZZZZZ" in message  # current disks listed
+
+
+def test_pick_target_skips_non_disk_types(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """lsblk emits cdrom / loop / etc. with type != "disk".
+    pick_target's loop must skip those so a CD with serial matching
+    by coincidence can't be picked."""
+    mod = _load_module()
+    lsblk_json = (
+        '{"blockdevices": ['
+        '{"path": "/dev/sr0", "serial": "AAA", "type": "rom"},'
+        '{"path": "/dev/sda", "serial": "AAA", "type": "disk", '
+        '"rm": false, "ro": false}'
+        "]}"
+    )
+    monkeypatch.setattr(mod.subprocess, "run", _fake_lsblk_proc(lsblk_json))
+    assert mod.pick_target("AAA") == "/dev/sda"
+
+
+def test_main_requires_target_disk_serial(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The cmdline-key check now includes ``bty.target_disk_serial``;
+    missing it shows up in the "missing required keys" stderr
+    message and main exits 0 (not-an-error: drop to console)."""
+    mod = _load_module()
+    fake_cmdline = tmp_path / "cmdline"
+    fake_cmdline.write_text(
+        "bty.server=http://srv bty.mac=aa:bb:cc:dd:ee:ff bty.image_url=http://srv/x.img\n"
+    )
+    monkeypatch.setattr(mod, "CMDLINE", fake_cmdline)
+    rc = mod.main()
+    assert rc == 0
+    captured = capsys.readouterr()
+    assert "bty.target_disk_serial" in captured.err

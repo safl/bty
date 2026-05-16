@@ -1088,9 +1088,16 @@ def test_pxe_flash_policy_returns_chain_with_args(
     ref = r.json()["bty_image_ref"]
     assert r.json()["disk_image_sha"] == flash_sha
 
+    # boot_policy=flash now requires an explicit target_disk_serial
+    # (set by the operator after bty-tui reports inventory). Pass it
+    # here so the safety gate lets the flash chain through.
     app_client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
-        json={"bty_image_ref": ref, "boot_policy": "flash"},
+        json={
+            "bty_image_ref": ref,
+            "boot_policy": "flash",
+            "target_disk_serial": "WD-WX12345",
+        },
         cookies=AUTH,
     )
     r = app_client.get("/pxe/aa:bb:cc:dd:ee:ff", headers={"Host": "bty.local:8080"})
@@ -1104,6 +1111,7 @@ def test_pxe_flash_policy_returns_chain_with_args(
     assert "console=ttyS0,115200" in body
     assert "bty.server=${bty-base}" in body
     assert "bty.mac=aa:bb:cc:dd:ee:ff" in body
+    assert "bty.target_disk_serial=WD-WX12345" in body
     # URL ends in ``/images/<bty_image_ref>/<name>``. The serve_image
     # route does cache-through to resolve the ref to bytes; clients
     # never see the content sha in the URL.
@@ -1220,6 +1228,140 @@ def test_pxe_done_flips_flash_once_to_local(app_client: TestClient) -> None:
     assert after["last_flashed_at"] is not None
     # The completion signal flipped the policy.
     assert after["boot_policy"] == "local"
+
+
+def test_pxe_inventory_persists_disks_and_logs_event(app_client: TestClient) -> None:
+    """``POST /pxe/{mac}/inventory`` lands the disk list on the
+    machine row (visible via GET /machines/{mac}) and records a
+    machine.inventory event. Open endpoint -- no auth needed,
+    same trust model as /pxe/{mac}."""
+    # Seed the machine via /pxe so a row exists.
+    app_client.get("/pxe/aa:bb:cc:dd:ee:aa")
+    r = app_client.post(
+        "/pxe/aa:bb:cc:dd:ee:aa/inventory",
+        json={
+            "disks": [
+                {
+                    "path": "/dev/sda",
+                    "size": "500G",
+                    "model": "WDC WD5000",
+                    "serial": "WD-WX12345",
+                    "tran": "sata",
+                    "removable": False,
+                    "readonly": False,
+                },
+                {
+                    "path": "/dev/nvme0n1",
+                    "size": "1T",
+                    "model": "Samsung 970",
+                    "serial": "S5GXNF0NB12345",
+                    "tran": "nvme",
+                    "removable": False,
+                    "readonly": False,
+                },
+            ],
+        },
+    )
+    assert r.status_code == 204, r.text
+    machine = app_client.get("/machines/aa:bb:cc:dd:ee:aa", cookies=AUTH).json()
+    assert machine["known_disks_at"] is not None
+    serials = {d["serial"] for d in machine["known_disks"]}
+    assert serials == {"WD-WX12345", "S5GXNF0NB12345"}
+    events = app_client.get(
+        "/events",
+        params={"subject_kind": "machine", "subject_id": "aa:bb:cc:dd:ee:aa"},
+        cookies=AUTH,
+    ).json()["events"]
+    inv_events = [e for e in events if e["kind"] == "machine.inventory"]
+    assert len(inv_events) == 1
+    assert inv_events[0]["details"]["count"] == 2
+
+
+def test_pxe_inventory_404_for_unknown_mac(app_client: TestClient) -> None:
+    """Inventory POST for a MAC that was never discovered returns
+    404 -- prevents bty-tui from silently creating ghost machines
+    that the operator never saw on /ui/machines."""
+    r = app_client.post(
+        "/pxe/00:11:22:33:44:99/inventory",
+        json={"disks": []},
+    )
+    assert r.status_code == 404
+
+
+def test_pxe_inventory_rejects_oversize_list(app_client: TestClient) -> None:
+    """64-disk cap on the inventory list (matches the InventoryPost
+    Pydantic max_length). 65 disks gets a 422."""
+    app_client.get("/pxe/aa:bb:cc:dd:ee:bb")
+    disks_payload = [
+        {
+            "path": f"/dev/sd{chr(ord('a') + i % 26)}{i}",
+            "size": "1G",
+            "serial": f"S{i:04d}",
+        }
+        for i in range(65)
+    ]
+    r = app_client.post(
+        "/pxe/aa:bb:cc:dd:ee:bb/inventory",
+        json={"disks": disks_payload},
+    )
+    assert r.status_code == 422
+
+
+def test_pxe_flash_refuses_chain_logs_no_target_disk_event(
+    app_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Safety gate end-to-end: seed a real catalog row so the ref
+    resolves, bind the machine to it with boot_policy=flash but
+    leave target_disk_serial NULL. The /pxe hit returns ipxe.j2
+    (local fallback) AND records pxe.flash.no_target_disk so the
+    operator can see why the box isn't reflashing on /ui/events."""
+    flash_sha = "abcdef0123456789" * 4
+    monkeypatch.setattr(
+        "urllib.request.urlopen",
+        lambda *_a, **_kw: _MockResp(b"", {"Content-Length": "0"}),
+    )
+    monkeypatch.setattr("bty.catalog.fetch_sha256_for_url", lambda *_a, **_kw: flash_sha)
+    add = app_client.post(
+        "/catalog/entries",
+        json={
+            "image_url": "https://example.invalid/safe.img.gz",
+            "sha_url": "https://example.invalid/safe.img.gz.sha256",
+        },
+        cookies=AUTH,
+    )
+    assert add.status_code == 201
+    ref = add.json()["bty_image_ref"]
+    app_client.put(
+        "/machines/aa:bb:cc:dd:ee:dd",
+        json={"bty_image_ref": ref, "boot_policy": "flash"},
+        cookies=AUTH,
+    )
+    r = app_client.get("/pxe/aa:bb:cc:dd:ee:dd")
+    assert r.status_code == 200
+    # ipxe.j2 (local fallback) -- NOT ipxe_flash.j2.
+    assert "kernel ${bty-base}/boot/" not in r.text
+    events = app_client.get(
+        "/events",
+        params={"subject_kind": "machine", "subject_id": "aa:bb:cc:dd:ee:dd"},
+        cookies=AUTH,
+    ).json()["events"]
+    kinds = [e["kind"] for e in events]
+    assert "pxe.flash.no_target_disk" in kinds
+
+
+def test_machines_upsert_accepts_target_disk_serial(app_client: TestClient) -> None:
+    """The JSON API takes target_disk_serial and persists it."""
+    r = app_client.put(
+        "/machines/aa:bb:cc:dd:ee:ee",
+        json={
+            "boot_policy": "local",
+            "target_disk_serial": "Z9YHHRWZ",
+        },
+        cookies=AUTH,
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["target_disk_serial"] == "Z9YHHRWZ"
 
 
 def test_pxe_hit_records_pxe_offered_event(app_client: TestClient) -> None:
