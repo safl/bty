@@ -348,6 +348,45 @@ def test_ui_catalog_entry_form_rejects_bad_url(client: TestClient) -> None:
     assert "filename%20component" in location or "filename+component" in location
 
 
+def test_ui_catalog_entry_form_requires_auth(client: TestClient) -> None:
+    """Unauthed POST to /ui/catalog/entries bounces to /ui/login,
+    not 303 to /ui/images. Defence-in-depth: the JSON sibling at
+    POST /catalog/entries is also gated, but a logged-out form
+    must hit the same auth wall."""
+    r = client.post(
+        "/ui/catalog/entries",
+        data={"image_url": "https://example.invalid/x.img.gz", "sha_url": ""},
+    )
+    assert r.status_code == 303
+    assert r.headers["location"] == "/ui/login"
+
+
+def test_ui_catalog_entry_form_happy_path_lands_row_and_303s(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Valid image_url (no sha_url) -> 303 back to /ui/images and a
+    new ``catalog_entries`` row is visible via the JSON
+    ``GET /catalog/entries`` endpoint. Stubs the size-probe HEAD
+    so no real network call leaves the test."""
+    from bty.web import _app as _web_app
+
+    monkeypatch.setattr(_web_app, "_head_content_length", lambda url: None)
+    _login(client)
+    r = client.post(
+        "/ui/catalog/entries",
+        data={
+            "image_url": "https://example.invalid/charlie.img.gz",
+            "sha_url": "",
+        },
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert r.headers["location"] == "/ui/images"
+    entries = client.get("/catalog/entries", cookies=AUTH).json()
+    assert any(e["src"] == "https://example.invalid/charlie.img.gz" for e in entries)
+
+
 def test_ui_machine_upsert_form_rejects_non_hex_sha256(client: TestClient) -> None:
     """The form-style ``POST /ui/machines/{mac}`` must apply the
     same Pydantic ``MachineUpsert`` validation as the JSON
@@ -643,6 +682,196 @@ def test_ui_images_renders(client: TestClient) -> None:
     r = client.get("/ui/images")
     assert r.status_code == 200
     assert "demo.qcow2" in r.text
+
+
+# ---------- /ui/settings/tftp-control --------------------------------------
+
+
+def test_ui_settings_tftp_control_requires_auth(client: TestClient) -> None:
+    """Unauthed POST bounces to /ui/login like the rest of the UI;
+    no TFTP daemon action is taken."""
+    r = client.post("/ui/settings/tftp-control", data={"action": "restart"})
+    assert r.status_code == 303
+    assert r.headers["location"] == "/ui/login"
+
+
+def test_ui_settings_tftp_control_success_renders_green_flash(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``control_tftp`` returning cleanly produces a 200 with a
+    success flash on the settings page. The handler also records a
+    ``settings.tftp.controlled`` event."""
+    from bty.web import _sysconfig
+
+    seen: list[str] = []
+    monkeypatch.setattr(_sysconfig, "control_tftp", lambda action: seen.append(action))
+    _login(client)
+    r = client.post("/ui/settings/tftp-control", data={"action": "restart"})
+    assert r.status_code == 200
+    assert seen == ["restart"]
+    # Green flash on the rendered settings page.
+    body = r.text
+    assert "alert-success" in body
+    assert "Restarted TFTP" in body
+    # Event recorded.
+    events = client.get(
+        "/events",
+        params={"subject_kind": "settings", "subject_id": "tftp"},
+        cookies=AUTH,
+    ).json()["events"]
+    assert any(e["kind"] == "settings.tftp.controlled" for e in events)
+
+
+def test_ui_settings_tftp_control_failure_renders_red_flash_and_logs_event(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A ``SysConfigError`` from the helper bounces back to the
+    settings page with a red flash AND a ``settings.tftp.control_failed``
+    event so the operator sees the systemctl exit code in the
+    audit log without having to ssh in."""
+    from bty.web import _sysconfig
+
+    def _raise(action: str) -> None:
+        raise _sysconfig.SysConfigError("dnsmasq.service is masked")
+
+    monkeypatch.setattr(_sysconfig, "control_tftp", _raise)
+    _login(client)
+    r = client.post("/ui/settings/tftp-control", data={"action": "start"})
+    assert r.status_code == 200
+    body = r.text
+    assert "alert-danger" in body
+    assert "dnsmasq.service is masked" in body
+    events = client.get(
+        "/events",
+        params={"subject_kind": "settings", "subject_id": "tftp"},
+        cookies=AUTH,
+    ).json()["events"]
+    failed = [e for e in events if e["kind"] == "settings.tftp.control_failed"]
+    assert len(failed) == 1
+    assert failed[0]["details"]["action"] == "start"
+
+
+def test_ui_settings_tftp_control_unknown_action_surfaces_clear_error(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Bad ``action`` value (typo from a hand-crafted form post or
+    a stale page) hits the allowlist check in ``control_tftp`` and
+    renders the failure on the settings page."""
+    # No monkeypatch needed for this path -- ``control_tftp`` raises
+    # before reaching subprocess.
+    _login(client)
+    r = client.post("/ui/settings/tftp-control", data={"action": "explode"})
+    assert r.status_code == 200
+    assert "alert-danger" in r.text
+    assert "unknown action" in r.text
+
+
+def test_ui_settings_tftp_control_empty_action_surfaces_clear_error(
+    client: TestClient,
+) -> None:
+    """Form posted without an action field: the handler still
+    renders cleanly and the operator sees a "no action specified"
+    flash instead of a 500."""
+    _login(client)
+    r = client.post("/ui/settings/tftp-control", data={})
+    assert r.status_code == 200
+    assert "alert-danger" in r.text
+    assert "no action specified" in r.text
+
+
+# ---------- /ui/boot/fetch-release ------------------------------------------
+
+
+def test_ui_boot_fetch_success_renders_green_flash(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Happy path: ``_releases.fetch_release`` returns a
+    ``FetchResult`` -> 200 with a green flash listing the
+    artifact count + total bytes. Also records the
+    ``boot.release.fetched`` event."""
+    from bty.web import _releases
+
+    def _stub(boot_root_arg: Path, *, tag: str) -> _releases.FetchResult:
+        return _releases.FetchResult(
+            base_url=f"https://example.invalid/releases/{tag}",
+            artifacts=("a.efi", "b.vmlinuz", "c.initrd"),
+            total_bytes=12345,
+        )
+
+    monkeypatch.setattr(_releases, "fetch_release", _stub)
+    _login(client)
+    r = client.post("/ui/boot/fetch-release", data={"tag": "v0.1.2"})
+    assert r.status_code == 200
+    body = r.text
+    assert "alert-success" in body
+    assert "Fetched 3 artifacts" in body
+    assert "12,345 bytes" in body
+    events = client.get(
+        "/events",
+        params={"subject_kind": "boot", "subject_id": "v0.1.2"},
+        cookies=AUTH,
+    ).json()["events"]
+    assert any(e["kind"] == "boot.release.fetched" for e in events)
+
+
+def test_ui_boot_fetch_failure_renders_red_flash_and_logs_event(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``FetchError`` (no network / 404 release tag / sha mismatch)
+    surfaces on the page with a red flash + a
+    ``boot.release.fetch_failed`` event."""
+    from bty.web import _releases
+
+    def _raise(boot_root_arg: Path, *, tag: str) -> _releases.FetchResult:
+        raise _releases.FetchError(f"tag {tag!r} not found")
+
+    monkeypatch.setattr(_releases, "fetch_release", _raise)
+    _login(client)
+    r = client.post("/ui/boot/fetch-release", data={"tag": "v0.999.999"})
+    assert r.status_code == 200
+    assert "alert-danger" in r.text
+    assert "Fetch failed" in r.text
+    events = client.get(
+        "/events",
+        params={"subject_kind": "boot", "subject_id": "v0.999.999"},
+        cookies=AUTH,
+    ).json()["events"]
+    failed = [e for e in events if e["kind"] == "boot.release.fetch_failed"]
+    assert len(failed) == 1
+    assert failed[0]["details"]["tag"] == "v0.999.999"
+
+
+def test_ui_boot_fetch_empty_tag_falls_back_to_latest(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Submitting the form with an empty ``tag`` field is the same
+    as omitting it -- the handler resolves to ``"latest"``. Guards
+    against a UI change that wires an empty default to the form
+    accidentally pointing the operator at a release tagged
+    literally ``""``."""
+    from bty.web import _releases
+
+    seen: list[str] = []
+
+    def _stub(boot_root_arg: Path, *, tag: str) -> _releases.FetchResult:
+        seen.append(tag)
+        return _releases.FetchResult(
+            base_url=f"https://example.invalid/releases/{tag}",
+            artifacts=(),
+            total_bytes=0,
+        )
+
+    monkeypatch.setattr(_releases, "fetch_release", _stub)
+    _login(client)
+    r = client.post("/ui/boot/fetch-release", data={"tag": ""})
+    assert r.status_code == 200
+    assert seen == ["latest"]
 
 
 # ---------- cross-cutting: cookie also authenticates the API ----------------
