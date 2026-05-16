@@ -39,9 +39,10 @@ import re
 import socket
 import sys
 from dataclasses import dataclass
+from typing import Literal
 
 from bty.pxe import wire
-from bty.pxe._daemon import bind_udp_socket, run_udp_daemon
+from bty.pxe._daemon import bind_udp_socket, run_udp_daemon, setup_daemon_logging
 from bty.pxe._events import emit as emit_event
 from bty.pxe.wire import MsgType, Op, Opt, Packet
 
@@ -140,8 +141,11 @@ class BootDecision:
 # Tagged reasons for declining to offer; surfaced verbatim as the
 # ``reason`` field of the dhcp.ignore event so operators can tell
 # "unknown arch" from "operator disabled HTTP-Boot" at a glance.
-IGNORE_UNKNOWN_ARCH = "unknown_arch"
-IGNORE_HTTP_DISABLED = "http_disabled"
+# Literal alias lets type checkers exhaustiveness-check ``match``
+# statements + flag typos at the call site.
+IgnoreReason = Literal["unknown_arch", "http_disabled"]
+IGNORE_UNKNOWN_ARCH: IgnoreReason = "unknown_arch"
+IGNORE_HTTP_DISABLED: IgnoreReason = "http_disabled"
 
 
 def _resolve_bootfile(
@@ -149,7 +153,7 @@ def _resolve_bootfile(
     vendor_class: bytes,
     arch: int | None,
     is_ipxe: bool,
-) -> BootDecision | str:
+) -> BootDecision | IgnoreReason:
     """Pick the right bootfile bytes for the client's arch + class.
 
     Returns a :class:`BootDecision` on success, or one of the
@@ -442,10 +446,7 @@ def _parse_args(argv: list[str]) -> tuple[ProxyConfig, bool]:
 def main(argv: list[str] | None = None) -> int:
     """``bty-pxe-proxy`` console-script entry."""
     cfg, verbose = _parse_args(sys.argv[1:] if argv is None else argv)
-    logging.basicConfig(
-        level=logging.DEBUG if verbose else logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
+    setup_daemon_logging(verbose)
     try:
         asyncio.run(_serve(cfg))
     except KeyboardInterrupt:

@@ -23,6 +23,19 @@ from collections.abc import Callable
 log = logging.getLogger("bty.pxe.daemon")
 
 
+def setup_daemon_logging(verbose: bool) -> None:
+    """Configure root logging consistently across bty PXE-stack daemons.
+
+    ``-v`` flips to DEBUG so operators can SSH in + run the daemon
+    by hand with verbose output; the systemd units bake ``-v`` in
+    so journald captures the same detail under normal operation.
+    """
+    logging.basicConfig(
+        level=logging.DEBUG if verbose else logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+
+
 def bind_udp_socket(
     port: int,
     *,

@@ -12,12 +12,13 @@ BROADCAST, BINDTODEVICE) along the way.
 
 from __future__ import annotations
 
+import logging
 import os
 import socket
 
 import pytest
 
-from bty.pxe._daemon import bind_udp_socket
+from bty.pxe._daemon import bind_udp_socket, setup_daemon_logging
 
 
 def test_bind_udp_socket_sets_reuseaddr_and_nonblocking() -> None:
@@ -64,3 +65,31 @@ def test_bind_udp_socket_with_interface_sets_bindtodevice() -> None:  # pragma: 
         assert bound.rstrip(b"\x00") == b"lo"
     finally:
         s.close()
+
+
+# --------------------------------------------------------------------------
+# setup_daemon_logging
+# --------------------------------------------------------------------------
+
+
+def test_setup_daemon_logging_verbose_flag_flips_root_level() -> None:
+    """``-v`` sets root logger to DEBUG; without it the level lands
+    at INFO. Both PXE daemons call this from main()."""
+    # Save current state to restore after; logging.basicConfig is
+    # global and would otherwise leak between tests.
+    root = logging.getLogger()
+    saved_level = root.level
+    saved_handlers = root.handlers[:]
+    try:
+        # Clear handlers so basicConfig actually takes effect (it
+        # short-circuits when the root logger already has handlers).
+        root.handlers = []
+        setup_daemon_logging(verbose=True)
+        assert root.level == logging.DEBUG
+
+        root.handlers = []
+        setup_daemon_logging(verbose=False)
+        assert root.level == logging.INFO
+    finally:
+        root.level = saved_level
+        root.handlers = saved_handlers

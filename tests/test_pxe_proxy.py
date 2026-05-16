@@ -451,3 +451,34 @@ def test_parse_args_rejects_too_long_interface_name() -> None:
 def test_parse_args_accepts_standard_interface_names() -> None:
     cfg, _verbose = _parse_args(["--interface", "enp90s0", "--server-ip", "192.168.1.31"])
     assert cfg.interface == "enp90s0"
+
+
+# --------------------------------------------------------------------------
+# _DhcpServerProtocol.datagram_received exception path.
+# --------------------------------------------------------------------------
+
+
+def test_datagram_received_emits_dhcp_error_when_build_fails(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A bug in offer-building must not take the daemon down; the
+    handler emits ``dhcp.error`` + drops the packet. Patch
+    ``_build_offer_packet`` to force the failure path."""
+    from unittest.mock import patch
+
+    from bty.pxe.proxy import _DhcpServerProtocol
+
+    cfg = ProxyConfig(interface="enp90s0", server_ip="192.168.1.31")
+    proto = _DhcpServerProtocol(cfg)
+    # transport never gets used on the error path, but the assert in
+    # datagram_received needs it set; supply a stub.
+    proto._transport = object()  # type: ignore[assignment]
+    discover_bytes = _make_pxe_discover()
+    with patch(
+        "bty.pxe.proxy._build_offer_packet",
+        side_effect=RuntimeError("boom in offer assembly"),
+    ):
+        proto.datagram_received(discover_bytes, ("0.0.0.0", 68))
+    stdout = capsys.readouterr().out
+    assert '"evt":"dhcp.error"' in stdout
+    assert '"error":"boom in offer assembly"' in stdout

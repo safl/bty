@@ -36,7 +36,7 @@ from dataclasses import dataclass, field
 from enum import IntEnum
 from pathlib import Path
 
-from bty.pxe._daemon import bind_udp_socket, run_udp_daemon
+from bty.pxe._daemon import bind_udp_socket, run_udp_daemon, setup_daemon_logging
 from bty.pxe._events import emit as emit_event
 
 log = logging.getLogger("bty.pxe.tftp")
@@ -393,14 +393,6 @@ class _ListenerProtocol(asyncio.DatagramProtocol):
 
     async def _serve_one(self, rrq: Rrq, client_addr: tuple[str, int]) -> None:
         """One read transfer, end to end."""
-        # Normalize filename to lowercase for both the allowlist
-        # check and the on-disk lookup. Some BIOS PXE ROMs send the
-        # bootfile name uppercased (``IPXE.EFI``); we serve them by
-        # treating filenames as case-insensitive end-to-end. The
-        # allowlist itself is defined in lowercase; we lowercase
-        # the request before lookup. Costs nothing on standard
-        # clients; saves a real-world boot-fails-silently quirk.
-        filename = rrq.filename.lower()
         peer = _format_peer(client_addr)
         log.info(
             "tftp: %s requested %r (mode=%s, options=%s)",
@@ -410,34 +402,9 @@ class _ListenerProtocol(asyncio.DatagramProtocol):
             rrq.options,
         )
         emit_event("tftp.rrq", peer=peer, file=rrq.filename, mode=rrq.mode)
-        if rrq.mode != "octet":
-            await self._send_error_oneshot(
-                client_addr,
-                ErrorCode.ILLEGAL_OPERATION,
-                f"only octet mode supported, got {rrq.mode!r}",
-            )
-            return
-        if filename not in self._cfg.allowlist:
-            await self._send_error_oneshot(
-                client_addr,
-                ErrorCode.ACCESS_VIOLATION,
-                f"file not in allowlist: {rrq.filename!r}",
-            )
-            return
-        path = _resolve_safe_path(self._cfg.root, filename)
-        if path is None:
-            await self._send_error_oneshot(
-                client_addr, ErrorCode.FILE_NOT_FOUND, f"no such file: {rrq.filename!r}"
-            )
-            return
-        try:
-            payload = path.read_bytes()
-        except OSError as exc:
-            log.warning("tftp: cannot read %s: %s", path, exc)
-            await self._send_error_oneshot(
-                client_addr, ErrorCode.ACCESS_VIOLATION, "file unreadable"
-            )
-            return
+        payload = await self._read_servable_payload(rrq, client_addr)
+        if payload is None:
+            return  # _read_servable_payload already sent the error
         oack_options = _negotiate_options(rrq.options, file_size=len(payload))
         # Per-transfer timeout overrides default if negotiated.
         timeout = float(oack_options.get("timeout", self._cfg.block_timeout))
@@ -451,6 +418,56 @@ class _ListenerProtocol(asyncio.DatagramProtocol):
             oack=oack_options if oack_options else None,
             filename=rrq.filename,
         ).run()
+
+    async def _read_servable_payload(
+        self, rrq: Rrq, client_addr: tuple[str, int]
+    ) -> bytes | None:
+        """Validate the RRQ + return the file's bytes, or ``None``
+        when we sent the client an ERROR instead.
+
+        Three failure modes, each with its own TFTP ErrorCode:
+
+        * Non-octet mode -> ``ILLEGAL_OPERATION``. We don't serve
+          netascii (would require LF/CRLF rewriting + nobody PXE-boots
+          netascii) or mail (obsolete).
+        * Filename not in allowlist or read failed -> ``ACCESS_VIOLATION``.
+        * File missing on disk -> ``FILE_NOT_FOUND``.
+
+        Filenames are normalised to lowercase before allowlist + path
+        lookup -- some BIOS PXE ROMs send ``IPXE.EFI``, we serve them
+        by treating filenames as case-insensitive end-to-end. Costs
+        nothing on standard clients; fixes a real-world silent boot
+        failure.
+        """
+        if rrq.mode != "octet":
+            await self._send_error_oneshot(
+                client_addr,
+                ErrorCode.ILLEGAL_OPERATION,
+                f"only octet mode supported, got {rrq.mode!r}",
+            )
+            return None
+        filename = rrq.filename.lower()
+        if filename not in self._cfg.allowlist:
+            await self._send_error_oneshot(
+                client_addr,
+                ErrorCode.ACCESS_VIOLATION,
+                f"file not in allowlist: {rrq.filename!r}",
+            )
+            return None
+        path = _resolve_safe_path(self._cfg.root, filename)
+        if path is None:
+            await self._send_error_oneshot(
+                client_addr, ErrorCode.FILE_NOT_FOUND, f"no such file: {rrq.filename!r}"
+            )
+            return None
+        try:
+            return path.read_bytes()
+        except OSError as exc:
+            log.warning("tftp: cannot read %s: %s", path, exc)
+            await self._send_error_oneshot(
+                client_addr, ErrorCode.ACCESS_VIOLATION, "file unreadable"
+            )
+            return None
 
     async def _send_error_oneshot(
         self, client_addr: tuple[str, int], code: ErrorCode, message: str
@@ -751,10 +768,7 @@ def _parse_args(argv: list[str]) -> tuple[TftpConfig, str | None, bool]:
 def main(argv: list[str] | None = None) -> int:
     """``bty-tftp`` console-script entry."""
     cfg, interface, verbose = _parse_args(sys.argv[1:] if argv is None else argv)
-    logging.basicConfig(
-        level=logging.DEBUG if verbose else logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
+    setup_daemon_logging(verbose)
     try:
         asyncio.run(_serve(cfg, interface))
     except KeyboardInterrupt:
