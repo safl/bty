@@ -34,14 +34,13 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import ipaddress
 import logging
-import signal
 import socket
 import sys
 from dataclasses import dataclass
 
 from bty.pxe import wire
+from bty.pxe._daemon import run_udp_daemon
 from bty.pxe.wire import MsgType, Op, Opt, Packet
 
 log = logging.getLogger("bty.pxe.proxy")
@@ -323,29 +322,8 @@ def _bind_udp67_broadcast_socket(interface: str) -> socket.socket:
 
 
 async def _serve(cfg: ProxyConfig) -> None:
-    loop = asyncio.get_running_loop()
     sock = _bind_udp67_broadcast_socket(cfg.interface)
-    try:
-        transport, _ = await loop.create_datagram_endpoint(
-            lambda: _DhcpServerProtocol(cfg),
-            sock=sock,
-        )
-    except Exception:
-        sock.close()
-        raise
-    stop = asyncio.Event()
-
-    def _sig_handler(signum: int) -> None:
-        log.info("pxe: signal %d received; stopping", signum)
-        stop.set()
-
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, _sig_handler, sig)
-
-    try:
-        await stop.wait()
-    finally:
-        transport.close()
+    await run_udp_daemon(sock, lambda: _DhcpServerProtocol(cfg), log_prefix="pxe")
 
 
 def _parse_args(argv: list[str]) -> ProxyConfig:
@@ -398,10 +376,13 @@ def _parse_args(argv: list[str]) -> ProxyConfig:
             parser.error(f"could not auto-detect IP on {ns.interface}: {exc}")
         log.info("pxe: auto-detected --server-ip=%s on %s", server_ip, ns.interface)
     # Validate the IP shape -- a typo here would let us serve
-    # garbage as next-server.
+    # garbage as next-server. ``inet_aton`` rejects anything that
+    # isn't a dotted-quad IPv4, with the same error semantics as
+    # ``ipaddress.IPv4Address`` for our purposes (and no extra
+    # import).
     try:
-        ipaddress.IPv4Address(server_ip)
-    except ValueError as exc:
+        socket.inet_aton(server_ip)
+    except OSError as exc:
         parser.error(f"invalid --server-ip {server_ip!r}: {exc}")
     return ProxyConfig(
         interface=ns.interface,

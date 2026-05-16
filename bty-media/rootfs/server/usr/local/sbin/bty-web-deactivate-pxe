@@ -9,9 +9,10 @@
 # success ("already deactivated") so the operator can click
 # Deactivate from a clean state without seeing an error.
 #
-# Pairs with ``bty-web-activate-pxe``. The legacy v0.13.x flow
-# wrote dnsmasq config at /etc/dnsmasq.d/bty-pxe-active.conf; we
-# also clean that up here so an in-place upgrade settles cleanly.
+# Pairs with ``bty-web-activate-pxe``. We also clean up any
+# historical dnsmasq-proxy-DHCP file at
+# /etc/dnsmasq.d/bty-pxe-active.conf so an appliance upgraded in
+# place settles to one source of truth.
 
 set -eu
 
@@ -27,7 +28,7 @@ if [ -f "$ACTIVE" ]; then
     removed_something=1
 fi
 
-# Cleanup of the legacy dnsmasq-proxy-DHCP file from v0.13.x.
+# Cleanup of any historical dnsmasq-proxy-DHCP file.
 if [ -f /etc/dnsmasq.d/bty-pxe-active.conf ]; then
     rm -f /etc/dnsmasq.d/bty-pxe-active.conf
     systemctl restart dnsmasq.service

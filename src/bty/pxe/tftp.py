@@ -5,10 +5,10 @@ discovers with a bootfile name; the client (PXE option-ROM in
 BIOS / non-HTTP UEFI firmware) then TFTPs that bootfile -- this
 daemon is what serves it.
 
-dnsmasq's TFTP works fine and we used to lean on it; rolling our
-own removes the dnsmasq dependency on the appliance entirely
-(matching the proxy-DHCP swap in v0.14.0). The wire surface is
-tiny (RFC 1350 + the option-extension RFCs 2347/2348/2349):
+dnsmasq's TFTP would work fine; rolling our own removes the
+dnsmasq dependency on the appliance entirely (matching the
+proxy-DHCP daemon's structure). The wire surface is tiny
+(RFC 1350 + the option-extension RFCs 2347/2348/2349):
 
 * RRQ  (opcode 1) -- read request: filename + mode + options
 * WRQ  (opcode 2) -- write request; we reject all
@@ -33,7 +33,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
-import signal
 import socket
 import struct
 import sys
@@ -41,6 +40,8 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from enum import IntEnum
 from pathlib import Path
+
+from bty.pxe._daemon import run_udp_daemon
 
 log = logging.getLogger("bty.pxe.tftp")
 
@@ -136,31 +137,36 @@ def parse(data: bytes) -> Rrq | Ack | None:
     raise TftpError(f"unknown opcode {opcode}")
 
 
+def _decode_ascii(raw: bytes, what: str) -> str:
+    """ASCII-decode a TFTP wire field or raise :class:`TftpError`.
+    Centralised so the parser doesn't repeat the try/except shape
+    for every nul-terminated string."""
+    try:
+        return raw.decode("ascii")
+    except UnicodeDecodeError as exc:
+        raise TftpError(f"non-ASCII {what}: {exc}") from exc
+
+
 def _parse_rrq(body: bytes) -> Rrq:
     """RRQ body: nul-terminated filename + nul-terminated mode +
-    (optional) ``key\0value\0`` pairs per RFC 2347."""
+    (optional) ``key\0value\0`` pairs per RFC 2347. body ends with
+    ``\0`` so the final ``split`` chunk is an empty string."""
     parts = body.split(b"\x00")
-    # body ends with \0 so trailing empty string is expected.
     if len(parts) < 3:
         raise TftpError(f"RRQ truncated: only {len(parts) - 1} nul-terminated fields")
-    try:
-        filename = parts[0].decode("ascii")
-        mode = parts[1].decode("ascii").lower()
-    except UnicodeDecodeError as exc:
-        raise TftpError(f"non-ASCII RRQ field: {exc}") from exc
-    # Remaining parts are options: pairs of key, value. Last part
-    # is the empty trailing string from the final ``\0``.
+    filename = _decode_ascii(parts[0], "RRQ filename")
+    mode = _decode_ascii(parts[1], "RRQ mode").lower()
+    # Remaining parts are options: pairs of key, value. The last
+    # part is the empty trailing string from the final ``\0``.
     extras = parts[2:-1] if parts[-1] == b"" else parts[2:]
     if len(extras) % 2 != 0:
         raise TftpError(f"RRQ options not paired: {len(extras)} entries")
-    options: dict[str, str] = {}
-    for i in range(0, len(extras), 2):
-        try:
-            key = extras[i].decode("ascii").lower()
-            value = extras[i + 1].decode("ascii")
-        except UnicodeDecodeError as exc:
-            raise TftpError(f"non-ASCII RRQ option: {exc}") from exc
-        options[key] = value
+    options = {
+        _decode_ascii(extras[i], "RRQ option name").lower(): _decode_ascii(
+            extras[i + 1], "RRQ option value"
+        )
+        for i in range(0, len(extras), 2)
+    }
     return Rrq(filename=filename, mode=mode, options=options)
 
 
@@ -381,22 +387,15 @@ class _ListenerProtocol(asyncio.DatagramProtocol):
         """ERROR over a fresh ephemeral socket (per RFC: ERRORs use
         the transfer's own TID, not the listener port). One-shot
         means we don't wait for an ACK -- ERROR aborts the transfer
-        from both sides per the spec."""
+        from both sides per the spec, so we don't need asyncio
+        plumbing here, just a plain sendto + close."""
         log.info("tftp: ERROR %s -> %s: %s", code.name, client_addr, message)
-        loop = asyncio.get_running_loop()
-        # Open a transient unprivileged-port socket for the reply.
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.bind(("", 0))
-        sock.setblocking(False)
         try:
-            transport, _ = await loop.create_datagram_endpoint(asyncio.DatagramProtocol, sock=sock)
-        except Exception:
-            sock.close()
-            return
-        try:
-            transport.sendto(build_error(code, message), client_addr)
+            sock.bind(("", 0))  # ephemeral TID
+            sock.sendto(build_error(code, message), client_addr)
         finally:
-            transport.close()
+            sock.close()
 
     def error_received(self, exc: Exception) -> None:
         log.warning("tftp: listener socket error: %s", exc)
@@ -415,14 +414,18 @@ class _Transfer:
     oack: dict[str, str] | None  # OACK options to send first if any
 
     async def run(self) -> None:
+        # ``local_addr=("0.0.0.0", 0)`` lets asyncio bind an
+        # ephemeral port (the TID per RFC 1350) and own the socket
+        # lifecycle for us; we just supply the protocol factory.
+        # Empty-host shorthand "" doesn't work with asyncio's
+        # resolver -- it needs an explicit address.
         loop = asyncio.get_running_loop()
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.bind(("", 0))  # ephemeral TID
-        sock.setblocking(False)
         try:
-            transport, protocol = await loop.create_datagram_endpoint(_AckCollector, sock=sock)
-        except Exception:
-            sock.close()
+            transport, protocol = await loop.create_datagram_endpoint(
+                _AckCollector, local_addr=("0.0.0.0", 0)
+            )
+        except OSError as exc:
+            log.warning("tftp: could not open transfer socket: %s", exc)
             return
         try:
             await self._drive(transport, protocol)
@@ -472,9 +475,7 @@ class _Transfer:
         for attempt in range(self.max_retries + 1):
             transport.sendto(packet, self.client_addr)
             try:
-                ack = await asyncio.wait_for(
-                    protocol.next_ack(expected_block), timeout=self.timeout
-                )
+                ack = await asyncio.wait_for(protocol.next_ack(), timeout=self.timeout)
             except TimeoutError:
                 log.debug(
                     "tftp: timeout waiting for ACK block %d from %s (attempt %d/%d)",
@@ -510,9 +511,6 @@ class _AckCollector(asyncio.DatagramProtocol):
     def __init__(self) -> None:
         self._inbox: asyncio.Queue[Ack] = asyncio.Queue()
 
-    def connection_made(self, transport: asyncio.BaseTransport) -> None:
-        return None
-
     def datagram_received(self, data: bytes, addr: tuple[str, int]) -> None:
         try:
             msg = parse(data)
@@ -523,9 +521,9 @@ class _AckCollector(asyncio.DatagramProtocol):
         # Anything else (DATA / OACK echoed back, ERROR from client)
         # is dropped; the driver's timeout will retry as needed.
 
-    async def next_ack(self, _expected: int) -> Ack:
-        # ``_expected`` is informational; the driver also checks
-        # the block number itself so we can log stale ACKs.
+    async def next_ack(self) -> Ack:
+        """Pull the next ACK off the inbox queue. The driver checks
+        the block number itself + logs stale ACKs."""
         return await self._inbox.get()
 
 
@@ -545,29 +543,8 @@ def _bind_udp69(interface: str | None) -> socket.socket:
 
 
 async def _serve(cfg: TftpConfig, interface: str | None) -> None:
-    loop = asyncio.get_running_loop()
     sock = _bind_udp69(interface)
-    try:
-        transport, _ = await loop.create_datagram_endpoint(
-            lambda: _ListenerProtocol(cfg),
-            sock=sock,
-        )
-    except Exception:
-        sock.close()
-        raise
-    stop = asyncio.Event()
-
-    def _sig_handler(signum: int) -> None:
-        log.info("tftp: signal %d received; stopping", signum)
-        stop.set()
-
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, _sig_handler, sig)
-
-    try:
-        await stop.wait()
-    finally:
-        transport.close()
+    await run_udp_daemon(sock, lambda: _ListenerProtocol(cfg), log_prefix="tftp")
 
 
 def _parse_args(argv: Iterable[str]) -> tuple[TftpConfig, str | None]:

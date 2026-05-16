@@ -2,10 +2,9 @@
 Description=bty TFTP daemon (read-only, allowlist-gated)
 Documentation=https://github.com/safl/bty
 # Serves the iPXE binaries (ipxe.efi / undionly.kpxe) that
-# bty-pxe-proxy.service's DHCPOFFER points clients at. Replaces
-# dnsmasq's TFTP role -- we stopped relying on dnsmasq in v0.14
-# (proxy-DHCP) and v0.15 (TFTP), and dnsmasq is no longer a hard
-# dependency on the appliance.
+# bty-pxe-proxy.service's DHCPOFFER points clients at. Owns UDP 69
+# in tandem with bty-pxe-proxy.service owning UDP 67; dnsmasq is
+# no longer a hard dependency on the appliance.
 After=network-online.target
 Wants=network-online.target
 # Pair with bty-pxe-proxy: when the operator activates PXE, both
