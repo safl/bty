@@ -184,6 +184,18 @@ runcmd:
   - chmod 0440 /etc/sudoers.d/bty-web
   - chown root:root /etc/sudoers.d/bty-web
 
+  # Enable the PXE-stack units at bake time so the runtime helpers
+  # don't need to. ``systemctl enable`` writes WantedBy symlinks
+  # into /etc/systemd/system/multi-user.target.wants/, which the
+  # bty-web service (running under ProtectSystem=full) can't reach
+  # via its sudo'd helpers. Both units have
+  # ``ConditionPathExists=/etc/default/bty-pxe-proxy``, so an
+  # enabled-but-unconfigured unit is harmless -- it gets skipped
+  # cleanly at boot. ``activate`` only needs to write the env file
+  # + ``systemctl restart``.
+  - systemctl enable bty-pxe-proxy.service
+  - systemctl enable bty-tftp.service
+
   # Privileged helper that prepares a 2nd disk as the bty image store
   # so the operator can reflash the bty-server appliance without
   # losing the image cache. The helper script lives in rootfs/server

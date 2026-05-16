@@ -16,17 +16,28 @@ Group=bty
 ProtectSystem=full
 ProtectHome=true
 # bty-web's "Activate PXE" / "Deactivate PXE" buttons shell out
-# to sudo'd helpers ``/usr/local/sbin/bty-web-activate-pxe`` and
-# ``/usr/local/sbin/bty-web-deactivate-pxe`` which write or remove
-# ``/etc/dnsmasq.d/bty-pxe-active.conf``. ``ProtectSystem=full``
-# bind-mounts ``/etc`` as read-only into this unit's namespace,
-# and ``sudo`` elevates UID but NOT the mount namespace -- so
-# either helper, even as root, would see ``/etc`` as read-only and
-# fail with ``mktemp: ... Read-only file system`` (activate) or
-# ``rm: ... Read-only file system`` (deactivate). Punch a single
-# read-write hole for the dnsmasq config dir; everything else
-# in /etc stays protected.
-ReadWritePaths=/etc/dnsmasq.d
+# to sudo'd helpers under /usr/local/sbin/. ``ProtectSystem=full``
+# bind-mounts /etc as read-only into this unit's namespace, and
+# sudo elevates UID but NOT the mount namespace -- so a helper,
+# even as root, would see /etc as read-only and fail with
+# ``mktemp: ... Read-only file system``. Punch read-write holes
+# only for the paths the helpers actually touch:
+#
+#   /etc/default   -- activate writes /etc/default/bty-pxe-proxy
+#                     (read by bty-pxe-proxy.service +
+#                     bty-tftp.service via EnvironmentFile=);
+#                     deactivate removes it.
+#   /etc/dnsmasq.d -- legacy cleanup branch in both helpers, for
+#                     servers in-place-upgraded from <v0.14 where
+#                     /etc/dnsmasq.d/bty-pxe-active.conf still
+#                     exists from the old dnsmasq-proxy-DHCP flow.
+#
+# The helpers DO call ``systemctl restart`` / ``daemon-reload``
+# but those go via the systemd dbus socket, not the filesystem,
+# so no /etc/systemd RW hole is needed. ``systemctl enable`` is
+# done at bake time in cloud-init runcmd (it would otherwise need
+# /etc/systemd/system to be writable too).
+ReadWritePaths=/etc/default /etc/dnsmasq.d
 # Intentionally NOT setting NoNewPrivileges=true: bty-web's
 # /ui/login authenticates via PAM (pamela -> libpam -> pam_unix ->
 # setgid unix_chkpwd to read /etc/shadow). NoNewPrivileges blocks
