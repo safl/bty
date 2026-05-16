@@ -419,9 +419,7 @@ class _ListenerProtocol(asyncio.DatagramProtocol):
             filename=rrq.filename,
         ).run()
 
-    async def _read_servable_payload(
-        self, rrq: Rrq, client_addr: tuple[str, int]
-    ) -> bytes | None:
+    async def _read_servable_payload(self, rrq: Rrq, client_addr: tuple[str, int]) -> bytes | None:
         """Validate the RRQ + return the file's bytes, or ``None``
         when we sent the client an ERROR instead.
 

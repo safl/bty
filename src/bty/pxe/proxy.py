@@ -11,12 +11,18 @@ The daemon stays narrowly scoped:
 
 The decision rule (RFC 4578 + experience):
 
-  PXEClient + arch 0  -> ``undionly.kpxe`` via TFTP (legacy BIOS)
-  PXEClient + arch 6  -> ``ipxe.efi`` via TFTP (UEFI IA32)
-  PXEClient + arch 7  -> ``ipxe.efi`` via TFTP (UEFI BC; common)
-  PXEClient + arch 9  -> ``ipxe.efi`` via TFTP (UEFI x86_64)
-  PXEClient + arch 11 -> ``ipxe.efi`` via TFTP (UEFI ARM64; placeholder)
+  PXEClient + arch 0  -> ``undionly.kpxe``       via TFTP (legacy BIOS)
+  PXEClient + arch 6  -> ``ipxe-i386.efi``       via TFTP (UEFI IA32)
+  PXEClient + arch 7  -> ``ipxe.efi``            via TFTP (UEFI BC; common)
+  PXEClient + arch 9  -> ``ipxe.efi``            via TFTP (UEFI x86_64)
+  PXEClient + arch 10 -> ``ipxe-arm32.efi``      via TFTP (UEFI ARM 32)
+  PXEClient + arch 11 -> ``ipxe-arm64.efi``      via TFTP (UEFI ARM 64)
+  iPXE second-stage   -> ``http://<server>:8080/pxe-bootstrap.ipxe``
   HTTPClient *        -> ``http://<server>:8080/boot/ipxe.efi`` (UEFI HTTP)
+
+For arches whose binary isn't on disk at /var/lib/tftpboot, the
+offer still goes out and TFTP cleanly answers FILE_NOT_FOUND --
+the target falls through to the operator's main DHCP.
 
 The bootfile lands in BOTH the BOOTP ``file[]`` field AND option 67
 (bootfile-name) -- modern UEFI firmware reads one or the other, so
@@ -79,10 +85,18 @@ _PXE_BOOTFILE_BY_ARCH: dict[int, str] = {
     11: "ipxe-arm64.efi",  # UEFI ARM 64-bit (Raspberry Pi, etc.)
 }
 
-# bty-web's HTTP route for the iPXE binary. The path matches the
-# /boot/{name} endpoint already in bty-web; the activate helper +
-# release pipeline put ipxe.efi at this URL.
+# bty-web HTTP paths the proxy points clients at.
+#
+# * ``_HTTP_BOOTFILE_PATH`` -- the iPXE binary itself, served by
+#   bty-web's /boot/{name} route. Used for UEFI HTTP-Boot
+#   (HTTPClient discovers, arch 16): firmware downloads ipxe.efi
+#   directly over HTTP, no TFTP roundtrip.
+# * ``_PXE_BOOTSTRAP_PATH`` -- the iPXE chain script bty-web
+#   renders for second-stage discovers. After ipxe.efi loads
+#   (via either TFTP or HTTP-Boot) it re-DHCPs with user-class
+#   "iPXE"; we point it here for the per-MAC boot plan.
 _HTTP_BOOTFILE_PATH = "/boot/ipxe.efi"
+_PXE_BOOTSTRAP_PATH = "/pxe-bootstrap.ipxe"
 _HTTP_BOOTFILE_PORT = 8080
 
 # PXE vendor-specific sub-option payload for option 43.
@@ -148,6 +162,13 @@ IGNORE_UNKNOWN_ARCH: IgnoreReason = "unknown_arch"
 IGNORE_HTTP_DISABLED: IgnoreReason = "http_disabled"
 
 
+def _http_url(cfg: ProxyConfig, path: str) -> bytes:
+    """Build an ASCII URL pointing at a bty-web HTTP route. Returns
+    bytes so the caller can drop it straight into ``BootDecision``
+    without an extra ``.encode``."""
+    return f"http://{cfg.server_ip}:{cfg.http_port}{path}".encode("ascii")
+
+
 def _resolve_bootfile(
     cfg: ProxyConfig,
     vendor_class: bytes,
@@ -163,16 +184,20 @@ def _resolve_bootfile(
         # iPXE second-stage: chain to bty-web's bootstrap script.
         # Tag the offer as PXEClient (iPXE itself sends that vendor
         # class on its second-stage DHCP).
-        url = f"http://{cfg.server_ip}:{cfg.http_port}/pxe-bootstrap.ipxe"
-        return BootDecision(bootfile=url.encode("ascii"), vendor_class_response=b"PXEClient")
+        return BootDecision(
+            bootfile=_http_url(cfg, _PXE_BOOTSTRAP_PATH),
+            vendor_class_response=b"PXEClient",
+        )
     if vendor_class.startswith(b"HTTPClient"):
         if cfg.tftp_only:
             return IGNORE_HTTP_DISABLED
         # UEFI HTTP-Boot. The bootfile MUST be an absolute URL and
         # the response's option 60 MUST be "HTTPClient" -- firmware
         # rejects PXEClient-tagged offers when it asked HTTP.
-        url = f"http://{cfg.server_ip}:{cfg.http_port}{_HTTP_BOOTFILE_PATH}"
-        return BootDecision(bootfile=url.encode("ascii"), vendor_class_response=b"HTTPClient")
+        return BootDecision(
+            bootfile=_http_url(cfg, _HTTP_BOOTFILE_PATH),
+            vendor_class_response=b"HTTPClient",
+        )
     # PXEClient: pick a TFTP bootfile by arch. Some BIOS-era
     # clients don't send option 93; treat missing arch as 0 (legacy
     # BIOS x86) so they still get a sensible bootfile.
@@ -335,9 +360,10 @@ class _DhcpServerProtocol(asyncio.DatagramProtocol):
         # Broadcast the reply -- the client has no IP yet so we
         # can't unicast.
         self._transport.sendto(offer, ("255.255.255.255", 68))
+        bootfile_str = decision.bootfile.decode("ascii", errors="replace")
         log.info(
             "pxe: offered %s to %s (arch=%s, vendor-class=%s, xid=%#x)",
-            decision.bootfile.decode("ascii", errors="replace"),
+            bootfile_str,
             mac_pretty,
             discover.client_arch,
             vendor_class,
@@ -347,7 +373,7 @@ class _DhcpServerProtocol(asyncio.DatagramProtocol):
             "dhcp.offer",
             mac=mac_pretty,
             arch=discover.client_arch,
-            bootfile=decision.bootfile.decode("ascii", errors="replace"),
+            bootfile=bootfile_str,
             server_ip=self._cfg.server_ip,
         )
 
