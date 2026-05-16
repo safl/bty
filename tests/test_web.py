@@ -1407,6 +1407,53 @@ def test_pxe_inventory_ignores_unknown_per_disk_fields(app_client: TestClient) -
     assert "another_new_thing" not in disk
 
 
+def test_pxe_inventory_rejects_non_json_body(app_client: TestClient) -> None:
+    """A bty-tui posting garbage (e.g. binary noise from a corrupted
+    payload buffer) must produce a clean 4xx, not a 500. FastAPI's
+    Pydantic dispatch rejects with 422 when the body is not valid
+    JSON or doesn't fit the schema."""
+    app_client.get("/pxe/aa:bb:cc:dd:ee:f7")
+    r = app_client.post(
+        "/pxe/aa:bb:cc:dd:ee:f7/inventory",
+        content=b"\x00\x01\x02 not json at all",
+        headers={"Content-Type": "application/json"},
+    )
+    assert r.status_code in (400, 422)
+    assert r.status_code != 500
+
+
+def test_pxe_inventory_rejects_disks_wrong_shape(app_client: TestClient) -> None:
+    """``disks`` must be an array of objects; a string in the array
+    or a top-level scalar gets 422 (not 500)."""
+    app_client.get("/pxe/aa:bb:cc:dd:ee:f8")
+    for body in [
+        {"disks": "not an array"},
+        {"disks": [123]},
+        {"disks": [{"path": 42}]},  # path must be str
+    ]:
+        r = app_client.post(
+            "/pxe/aa:bb:cc:dd:ee:f8/inventory",
+            json=body,
+        )
+        assert r.status_code == 422, body
+
+
+def test_pxe_inventory_accepts_empty_disks_list(app_client: TestClient) -> None:
+    """A target with zero disks (a fresh chassis, NVMe-only in a
+    USB-boot test rig, etc.) reports ``disks: []``. That's valid
+    -- the operator just can't pick a target until the disks are
+    physically installed."""
+    app_client.get("/pxe/aa:bb:cc:dd:ee:f9")
+    r = app_client.post(
+        "/pxe/aa:bb:cc:dd:ee:f9/inventory",
+        json={"disks": []},
+    )
+    assert r.status_code == 204
+    machine = app_client.get("/machines/aa:bb:cc:dd:ee:f9", cookies=AUTH).json()
+    assert machine["known_disks"] == []
+    assert machine["known_disks_at"] is not None
+
+
 def test_pxe_inventory_rejects_unknown_top_level_fields(app_client: TestClient) -> None:
     """``InventoryPost`` is ``extra="forbid"`` at the top level so a
     typo in the bty-tui payload (``disk`` instead of ``disks``)

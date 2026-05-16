@@ -260,6 +260,52 @@ def test_hash_manager_backfill_newest_per_name_wins(tmp_path: Path) -> None:
     _run(_drive())
 
 
+def test_hash_manager_backfill_tolerates_corrupted_ts(tmp_path: Path) -> None:
+    """A row with a malformed ``ts`` (manually corrupted state.db,
+    or a future ts format we don't recognise) shouldn't crash the
+    backfill. The event still seeds the manager state; only
+    ``started_at`` / ``finished_at`` end up None."""
+    from bty.web import _db
+    from bty.web._hash import HashManager
+
+    state_path = tmp_path / "state.db"
+    image_root = tmp_path / "images"
+    image_root.mkdir()
+    _db.init_db(state_path)
+    # Hand-write a row with a clearly-broken ts so we can be sure
+    # the backfill doesn't bail on the whole loop.
+    with _db.open_db(state_path) as conn:
+        conn.execute(
+            "INSERT INTO events (ts, kind, subject_kind, subject_id, actor, summary, details) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                "not an iso timestamp",
+                "image.hashed",
+                "image",
+                "broken_ts.img",
+                "system",
+                "ok despite bad ts",
+                '{"name": "broken_ts.img", "sha256": "ff", "bytes": 1}',
+            ),
+        )
+        conn.commit()
+
+    async def _drive() -> None:
+        mgr = HashManager()
+        mgr.start(image_root, state_path=state_path)
+        try:
+            states = await mgr.list()
+            assert len(states) == 1
+            assert states[0].name == "broken_ts.img"
+            assert states[0].status == "completed"
+            assert states[0].started_at is None
+            assert states[0].finished_at is None
+        finally:
+            await mgr.stop()
+
+    _run(_drive())
+
+
 def test_hash_failed_event_is_recorded(tmp_path: Path) -> None:
     """A genuinely-failed hash (IO error, not operator cancel)
     must land an ``image.hash_failed`` event in the audit log

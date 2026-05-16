@@ -183,11 +183,7 @@ class DownloadManager(_BaseAsyncManager[DownloadState]):
                 continue
             seen.add(name)
             try:
-                started = (
-                    datetime.fromisoformat(ev.ts.replace("Z", "+00:00")).timestamp()
-                    if ev.ts
-                    else None
-                )
+                started = datetime.fromisoformat(ev.ts).timestamp() if ev.ts else None
             except (TypeError, ValueError):
                 started = None
             sha_raw = details.get("disk_image_sha")

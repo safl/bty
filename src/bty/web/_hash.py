@@ -162,11 +162,7 @@ class HashManager(_BaseAsyncManager[HashState]):
             seen.add(name)
             details = ev.details or {}
             try:
-                started = (
-                    datetime.fromisoformat(ev.ts.replace("Z", "+00:00")).timestamp()
-                    if ev.ts
-                    else None
-                )
+                started = datetime.fromisoformat(ev.ts).timestamp() if ev.ts else None
             except (TypeError, ValueError):
                 started = None
             sha_raw = details.get("sha256")
