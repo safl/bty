@@ -575,6 +575,25 @@ def merge_with_catalog(
     # Pass 2: catalog manifest entries.
     for entry in manifest_entries:
         manifest_src = ImageSource(kind="manifest", location=str(entry.src))
+        # Entries without a pinned sha256 (rolling oras tags,
+        # operator-added URLs with no sha_url, .toml authored
+        # without the field) can't be sha-keyed -- they appear
+        # in the unhashed tail with cached=False until a fetch
+        # populates the cache + back-fills the sha. Skipping
+        # the cache_hit / by_sha branches keeps the indexing
+        # safe (cache_dir / None would TypeError).
+        if entry.sha256 is None:
+            unhashed.append(
+                UnifiedImage(
+                    sha256=None,
+                    names=(entry.name,),
+                    format=entry.format,
+                    size_bytes=entry.size_bytes,
+                    sources=(manifest_src,),
+                    cached=False,
+                )
+            )
+            continue
         cache_hit = (cache_dir / entry.sha256).is_file()
         existing = by_sha.get(entry.sha256)
         if existing is None:

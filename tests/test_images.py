@@ -264,6 +264,46 @@ def test_merge_with_catalog_unhashed_dirscan_kept_separate(tmp_path: Path) -> No
     assert merged[1].names == ("fresh.img",)
 
 
+def test_merge_with_catalog_handles_manifest_entry_without_sha256(tmp_path: Path) -> None:
+    """Manifest entries without a pinned sha256 (rolling oras tags,
+    operator-added URLs without sha_url) appear in the unhashed
+    tail with sha256=None and cached=False -- they don't break
+    the merge with a ``cache_dir / None`` TypeError, which used to
+    500 /ui/images whenever the catalog.toml had any unhashed
+    entry."""
+    from types import SimpleNamespace
+
+    image_root = tmp_path / "imgs"
+    cache_dir = tmp_path / "cache"
+    image_root.mkdir()
+    cache_dir.mkdir()
+
+    # Manifest entry with sha=None (rolling oras ref).
+    rolling = SimpleNamespace(
+        sha256=None,
+        name="nosi rolling",
+        src="oras://ghcr.io/safl/nosi/x:latest",
+        format="img.gz",
+        size_bytes=None,
+    )
+    # And a pinned entry to confirm the other branch still works.
+    pinned_sha = "c" * 64
+    pinned = SimpleNamespace(
+        sha256=pinned_sha,
+        name="pinned.img",
+        src="https://example.com/pinned.img",
+        format="img",
+        size_bytes=128,
+    )
+    merged = images.merge_with_catalog(image_root, [rolling, pinned], cache_dir)
+    # SHA-keyed first, unhashed last.
+    assert len(merged) == 2
+    assert merged[0].sha256 == pinned_sha
+    assert merged[1].sha256 is None
+    assert merged[1].names == ("nosi rolling",)
+    assert merged[1].cached is False
+
+
 def test_merge_with_catalog_manifest_only_uses_cache_dir(tmp_path: Path) -> None:
     """A manifest entry with no matching local file shows
     ``cached=True`` iff the SHA exists under the content-
