@@ -28,15 +28,22 @@ MAC_PATTERN = r"^[0-9a-f]{2}(:[0-9a-f]{2}){5}$"
 #   This is the explicit-PUT default for assigned machines.
 # - ``flash`` returns the live-env chain so the box re-flashes itself
 #   on every PXE boot (per-job CI cadence).
+# - ``flash-once`` returns the live-env flash chain just like ``flash``,
+#   but the completion signal (``POST /pxe/{mac}/done``) flips the
+#   policy to ``local`` so the box doesn't re-flash on the next boot.
+#   For "I want this machine reimaged now, then leave it alone" --
+#   distinct from ``flash`` which is "reimage on every PXE boot".
 # - ``tui`` returns the live-env chain in interactive mode; the live
 #   env launches ``bty-tui`` on tty1 instead of auto-flashing, so the
 #   operator picks an image from the server's catalog by hand. This is
 #   the auto-discovery default for unknown MACs that PXE-boot through
 #   the server.
 #
-# Decoupled from the completion signal: ``POST /pxe/{mac}/done`` updates
-# ``last_flashed_at`` regardless of policy and never flips the policy.
-BOOT_POLICIES = ("local", "flash", "tui")
+# Completion signal (``POST /pxe/{mac}/done``) updates
+# ``last_flashed_at`` regardless of policy; it only mutates
+# ``boot_policy`` for ``flash-once`` (-> ``local``). ``flash`` stays
+# ``flash`` so the per-job CI cadence reflashes every boot.
+BOOT_POLICIES = ("local", "flash", "flash-once", "tui")
 BOOT_POLICY_PATTERN = _enum_pattern(BOOT_POLICIES)
 DEFAULT_BOOT_POLICY = BOOT_POLICIES[0]
 

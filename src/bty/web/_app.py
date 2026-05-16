@@ -409,18 +409,20 @@ def create_app(
         machine = dict(row)
         publish_state_changed()
         # Boot-policy decision tree (highest priority first):
-        #   - boot_policy == 'tui'                          -> live env in interactive mode
-        #   - boot_policy == 'flash' + bty_image_ref        -> live env auto-flash
-        #   - boot_policy == 'local' + bty_image_ref        -> sanboot (already provisioned)
-        #   - else (no ref, boot_policy == 'local')         -> sanboot fallback
-        # Completion signal (POST /pxe/{mac}/done) updates last_flashed_at
-        # but never flips boot_policy - operator does that explicitly.
+        #   - boot_policy == 'tui'                                -> live env in interactive mode
+        #   - boot_policy in ('flash', 'flash-once') + ref        -> live env auto-flash
+        #   - boot_policy == 'local' + bty_image_ref              -> sanboot (already provisioned)
+        #   - else (no ref, boot_policy == 'local')               -> sanboot fallback
+        # Completion signal (POST /pxe/{mac}/done) updates
+        # last_flashed_at always, and flips flash-once -> local so
+        # the next PXE boot returns sanboot. ``flash`` stays
+        # ``flash`` (per-job CI cadence keeps reflashing).
         host = _request_host(request)
         if machine.get("boot_policy") == "tui":
             template = jinja.get_template("ipxe_tui.j2")
             return template.render(mac=normalised, machine=machine, host=host)
         ref = machine.get("bty_image_ref")
-        if ref and machine.get("boot_policy") == "flash":
+        if ref and machine.get("boot_policy") in ("flash", "flash-once"):
             # Emit the iPXE flash chain whose URL ends in
             # ``/images/<ref>/<name>``. The serve_image route does
             # eager cache-through (Option A): if the bound entry's
@@ -471,24 +473,40 @@ def create_app(
         # networks (homelab / CI), not the open internet - same as the
         # other ``/pxe/*`` endpoints.
         #
-        # Only updates ``last_flashed_at`` and ``updated_at``. Does NOT
-        # touch ``boot_policy``: if the operator wants the box to stop
-        # reflashing on every boot they flip the policy themselves.
-        # This decoupling is deliberate - per-job CI cadence wants
-        # boot_policy=flash to stay flash across reflashes.
+        # Always updates ``last_flashed_at`` + ``updated_at``. For
+        # ``boot_policy=flash-once`` we also flip the policy to
+        # ``local`` here so the next PXE boot returns sanboot (the
+        # box flashed, the operator's "one reimage please" is
+        # satisfied, leave it alone). ``flash`` stays ``flash`` --
+        # the per-job CI cadence wants every PXE boot to reflash.
         normalised = _normalise_mac(mac)
         now = _now_iso()
         client_ip = _client_ip(request)
         with _db.open_db(state_path) as conn:
-            cur = conn.execute(
-                "UPDATE machines SET last_flashed_at = ?, updated_at = ? WHERE mac = ?",
-                (now, now, normalised),
-            )
+            current = conn.execute(
+                "SELECT boot_policy FROM machines WHERE mac = ?",
+                (normalised,),
+            ).fetchone()
+            flipped_from_flash_once = current is not None and current["boot_policy"] == "flash-once"
+            if flipped_from_flash_once:
+                cur = conn.execute(
+                    "UPDATE machines SET last_flashed_at = ?, updated_at = ?, "
+                    "boot_policy = 'local' WHERE mac = ?",
+                    (now, now, normalised),
+                )
+            else:
+                cur = conn.execute(
+                    "UPDATE machines SET last_flashed_at = ?, updated_at = ? WHERE mac = ?",
+                    (now, now, normalised),
+                )
             if cur.rowcount > 0:
                 _log_event(
                     conn,
                     kind="machine.flashed",
-                    summary=f"{normalised} signalled flash completion",
+                    summary=(
+                        f"{normalised} signalled flash completion"
+                        + (" (flash-once -> local)" if flipped_from_flash_once else "")
+                    ),
                     subject_kind="machine",
                     subject_id=normalised,
                     actor="pxe-client",

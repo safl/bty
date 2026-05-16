@@ -1134,6 +1134,63 @@ def test_pxe_done_404_for_unknown_mac(app_client: TestClient) -> None:
     assert r.status_code == 404
 
 
+def test_pxe_flash_once_emits_flash_chain_like_flash(
+    app_client: TestClient,
+) -> None:
+    """``boot_policy=flash-once`` returns the same iPXE flash chain
+    as ``flash`` on the first PXE boot; it's only the completion
+    signal that differs."""
+    app_client.put(
+        "/machines/11:22:33:44:55:66",
+        json={
+            "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "boot_policy": "flash-once",
+        },
+        cookies=AUTH,
+    )
+    r = app_client.get("/pxe/11:22:33:44:55:66")
+    assert r.status_code == 200
+    # The flash chain includes the per-MAC live-env kernel cmdline
+    # markers; the sanboot fallback never does.
+    assert "bty_image_ref" in r.text or "bty_flash_key" in r.text
+
+
+def test_pxe_done_flips_flash_once_to_local(app_client: TestClient) -> None:
+    """``flash-once`` is the one policy where the completion signal
+    mutates ``boot_policy``: it flips to ``local`` so the next PXE
+    boot returns sanboot and the box stops reflashing itself."""
+    app_client.put(
+        "/machines/22:33:44:55:66:77",
+        json={
+            "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "boot_policy": "flash-once",
+        },
+        cookies=AUTH,
+    )
+    before = app_client.get("/machines/22:33:44:55:66:77", cookies=AUTH).json()
+    assert before["boot_policy"] == "flash-once"
+    assert before["last_flashed_at"] is None
+
+    r = app_client.post("/pxe/22:33:44:55:66:77/done")
+    assert r.status_code == 204
+
+    after = app_client.get("/machines/22:33:44:55:66:77", cookies=AUTH).json()
+    assert after["last_flashed_at"] is not None
+    # The completion signal flipped the policy.
+    assert after["boot_policy"] == "local"
+
+
+def test_machines_upsert_accepts_flash_once(app_client: TestClient) -> None:
+    """flash-once is in BOOT_POLICIES so Pydantic accepts it."""
+    r = app_client.put(
+        "/machines/33:44:55:66:77:88",
+        json={"boot_policy": "flash-once"},
+        cookies=AUTH,
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["boot_policy"] == "flash-once"
+
+
 # ---------- /events API (audit log) -------------------------------------
 
 
