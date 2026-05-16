@@ -42,8 +42,11 @@ from enum import IntEnum
 #   sname (64)  -- "server name"; usually empty in PXE proxy
 #   file (128)  -- bootfile name; we put the PXE bootfile here too
 #   magic (4)  -- DHCP cookie 0x63 82 53 63
-_BOOTP_FMT = "!BBBB I HH 4s4s4s4s 16s 64s 128s 4s"
-_BOOTP_LEN = struct.calcsize(_BOOTP_FMT)
+# Cached Struct instance so the format string is compiled once at
+# import time, not re-parsed per call. The format is otherwise
+# identical to what would be passed to struct.pack/unpack.
+_BOOTP = struct.Struct("!BBBB I HH 4s4s4s4s 16s 64s 128s 4s")
+_BOOTP_LEN = _BOOTP.size
 assert _BOOTP_LEN == 240, "BOOTP fixed header size drift"
 
 DHCP_MAGIC = b"\x63\x82\x53\x63"
@@ -183,7 +186,7 @@ def parse(data: bytes) -> Packet:
     """
     if len(data) < _BOOTP_LEN:
         raise ValueError(f"packet too short for BOOTP: {len(data)} < {_BOOTP_LEN}")
-    fields = struct.unpack(_BOOTP_FMT, data[:_BOOTP_LEN])
+    fields = _BOOTP.unpack_from(data)
     (
         op,
         htype,
@@ -285,8 +288,7 @@ def build(
     chaddr_pad = chaddr.ljust(16, b"\x00")[:16]
     sname_pad = sname.ljust(64, b"\x00")[:64]
     file_pad = file.ljust(128, b"\x00")[:128]
-    header = struct.pack(
-        _BOOTP_FMT,
+    header = _BOOTP.pack(
         op,
         htype,
         hlen,

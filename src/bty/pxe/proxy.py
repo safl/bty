@@ -241,10 +241,12 @@ class _DhcpServerProtocol(asyncio.DatagramProtocol):
         except ValueError as exc:
             log.debug("pxe: malformed DHCP packet from %s: %s", addr, exc)
             return
-        # Decide first, build second -- so we have the decision
-        # available for the log line without re-parsing wire bytes.
         if not wire.is_pxe_client_discover(discover):
             return
+        # decide-then-build kept inside one defensive try so a bug
+        # in either branch logs once + drops the packet, rather
+        # than two near-identical try/except blocks both saying
+        # "the daemon must not die on a single bad packet".
         try:
             decision = _resolve_bootfile(
                 self._cfg,
@@ -252,15 +254,11 @@ class _DhcpServerProtocol(asyncio.DatagramProtocol):
                 arch=discover.client_arch,
                 is_ipxe=(discover.user_class or b"") == b"iPXE",
             )
-        except Exception as exc:
-            log.exception("pxe: _resolve_bootfile crashed (xid=%#x): %s", discover.xid, exc)
-            return
-        if decision is None:
-            return
-        try:
+            if decision is None:
+                return
             offer = _build_offer_packet(self._cfg, discover, decision)
         except Exception as exc:
-            log.exception("pxe: _build_offer_packet crashed (xid=%#x): %s", discover.xid, exc)
+            log.exception("pxe: failed to build offer (xid=%#x): %s", discover.xid, exc)
             return
         assert self._transport is not None
         # Broadcast the reply -- the client has no IP yet so we
@@ -326,7 +324,10 @@ async def _serve(cfg: ProxyConfig) -> None:
     await run_udp_daemon(sock, lambda: _DhcpServerProtocol(cfg), log_prefix="pxe")
 
 
-def _parse_args(argv: list[str]) -> ProxyConfig:
+def _parse_args(argv: list[str]) -> tuple[ProxyConfig, bool]:
+    """Parse + validate command-line args. Returns the resolved
+    config plus a verbose-flag the caller uses to set up logging.
+    Pure: no side effects on global state (logging, env)."""
     parser = argparse.ArgumentParser(
         prog="bty-pxe-proxy",
         description=(
@@ -364,37 +365,35 @@ def _parse_args(argv: list[str]) -> ProxyConfig:
         help="Verbose (debug-level) logging.",
     )
     ns = parser.parse_args(argv)
-    logging.basicConfig(
-        level=logging.DEBUG if ns.verbose else logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
     server_ip = ns.server_ip
     if server_ip is None:
         try:
             server_ip = _detect_interface_ip(ns.interface)
         except OSError as exc:
             parser.error(f"could not auto-detect IP on {ns.interface}: {exc}")
-        log.info("pxe: auto-detected --server-ip=%s on %s", server_ip, ns.interface)
     # Validate the IP shape -- a typo here would let us serve
     # garbage as next-server. ``inet_aton`` rejects anything that
-    # isn't a dotted-quad IPv4, with the same error semantics as
-    # ``ipaddress.IPv4Address`` for our purposes (and no extra
-    # import).
+    # isn't a dotted-quad IPv4.
     try:
         socket.inet_aton(server_ip)
     except OSError as exc:
         parser.error(f"invalid --server-ip {server_ip!r}: {exc}")
-    return ProxyConfig(
+    cfg = ProxyConfig(
         interface=ns.interface,
         server_ip=server_ip,
         http_port=ns.http_port,
         tftp_only=ns.tftp_only,
     )
+    return cfg, ns.verbose
 
 
 def main(argv: list[str] | None = None) -> int:
     """``bty-pxe-proxy`` console-script entry."""
-    cfg = _parse_args(sys.argv[1:] if argv is None else argv)
+    cfg, verbose = _parse_args(sys.argv[1:] if argv is None else argv)
+    logging.basicConfig(
+        level=logging.DEBUG if verbose else logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
     try:
         asyncio.run(_serve(cfg))
     except KeyboardInterrupt:

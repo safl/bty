@@ -36,7 +36,6 @@ import logging
 import socket
 import struct
 import sys
-from collections.abc import Iterable
 from dataclasses import dataclass, field
 from enum import IntEnum
 from pathlib import Path
@@ -208,6 +207,16 @@ _MIN_BLKSIZE = 8
 _MAX_BLKSIZE = 1432
 
 
+def _parse_int(s: str, default: int) -> int:
+    """Parse ``s`` as int, or fall back to ``default`` on a
+    non-numeric value. Single place to put the swallow-ValueError
+    pattern for RRQ option parsing."""
+    try:
+        return int(s)
+    except ValueError:
+        return default
+
+
 def _negotiate_options(requested: dict[str, str], file_size: int) -> dict[str, str]:
     """Decide which RRQ options we accept + what values we report
     back in OACK. Per RFC 2347, options the server doesn't recognise
@@ -231,20 +240,14 @@ def _negotiate_options(requested: dict[str, str], file_size: int) -> dict[str, s
     """
     accepted: dict[str, str] = {}
     if "blksize" in requested:
-        try:
-            requested_blksize = int(requested["blksize"])
-        except ValueError:
-            requested_blksize = DEFAULT_BLKSIZE
+        requested_blksize = _parse_int(requested["blksize"], DEFAULT_BLKSIZE)
         clamped = max(_MIN_BLKSIZE, min(requested_blksize, _MAX_BLKSIZE))
         accepted["blksize"] = str(clamped)
     if "tsize" in requested:
         accepted["tsize"] = str(file_size)
     if "timeout" in requested:
-        try:
-            requested_timeout = int(requested["timeout"])
-        except ValueError:
-            requested_timeout = int(DEFAULT_BLOCK_TIMEOUT)
         # RFC 2349 mandates 1..255 seconds for the timeout option.
+        requested_timeout = _parse_int(requested["timeout"], int(DEFAULT_BLOCK_TIMEOUT))
         if 1 <= requested_timeout <= 255:
             accepted["timeout"] = str(requested_timeout)
     return accepted
@@ -566,7 +569,11 @@ async def _serve(cfg: TftpConfig, interface: str | None) -> None:
     await run_udp_daemon(sock, lambda: _ListenerProtocol(cfg), log_prefix="tftp")
 
 
-def _parse_args(argv: Iterable[str]) -> tuple[TftpConfig, str | None]:
+def _parse_args(argv: list[str]) -> tuple[TftpConfig, str | None, bool]:
+    """Parse + validate command-line args. Returns the resolved
+    config, the operator's interface choice (or None for "all
+    interfaces"), and a verbose-flag the caller uses to set up
+    logging. Pure: no side effects on global state."""
     parser = argparse.ArgumentParser(
         prog="bty-tftp",
         description=(
@@ -617,11 +624,7 @@ def _parse_args(argv: Iterable[str]) -> tuple[TftpConfig, str | None]:
     parser.add_argument(
         "-v", "--verbose", action="store_true", help="Verbose (debug-level) logging."
     )
-    ns = parser.parse_args(list(argv))
-    logging.basicConfig(
-        level=logging.DEBUG if ns.verbose else logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
+    ns = parser.parse_args(argv)
     if not ns.root.is_dir():
         parser.error(f"--root {ns.root!s} is not a directory")
     allowlist = frozenset(ns.allow) if ns.allow else DEFAULT_ALLOWLIST
@@ -631,12 +634,16 @@ def _parse_args(argv: Iterable[str]) -> tuple[TftpConfig, str | None]:
         block_timeout=ns.block_timeout,
         max_retries=ns.max_retries,
     )
-    return cfg, ns.interface
+    return cfg, ns.interface, ns.verbose
 
 
 def main(argv: list[str] | None = None) -> int:
     """``bty-tftp`` console-script entry."""
-    cfg, interface = _parse_args(sys.argv[1:] if argv is None else argv)
+    cfg, interface, verbose = _parse_args(sys.argv[1:] if argv is None else argv)
+    logging.basicConfig(
+        level=logging.DEBUG if verbose else logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
     try:
         asyncio.run(_serve(cfg, interface))
     except KeyboardInterrupt:
