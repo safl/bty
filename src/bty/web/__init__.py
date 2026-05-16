@@ -114,4 +114,16 @@ def main(argv: list[str] | None = None) -> None:
         )
         port = 8080
 
-    uvicorn.run(app, host=host, port=port, log_level="info")
+    # ``timeout_graceful_shutdown`` bounds how long uvicorn waits
+    # for in-flight requests to drain on SIGTERM. SSE streams used
+    # to hold the worker until systemd's 90s SIGKILL fired on every
+    # restart -- the lifespan-driven bus.close() in v0.19.1 fixes
+    # that, but we set a hard 10s upper bound here so a bug in any
+    # future stream handler can't bring the timeout back.
+    uvicorn.run(
+        app,
+        host=host,
+        port=port,
+        log_level="info",
+        timeout_graceful_shutdown=10,
+    )
