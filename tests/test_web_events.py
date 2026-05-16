@@ -146,6 +146,36 @@ def test_event_bus_close_wakes_idle_subscriber() -> None:
     assert asyncio.run(scenario()) is True
 
 
+def test_event_bus_close_unblocks_full_queue_subscriber() -> None:
+    """A subscriber that's holding a full queue (slow consumer) must
+    still unblock on ``close()`` so shutdown isn't held up by
+    queue-saturated SSE generators. Edge case the lifespan
+    finally-block needs to handle to avoid the 90s SIGKILL path."""
+
+    async def scenario() -> bool:
+        bus = MachineEventBus(queue_size=1)
+        bus.attach(asyncio.get_running_loop())
+        gen = bus.subscribe()
+        # Saturate the queue.
+        bus.publish(MachineEvent(name="machines-update", html="a"))
+        # First yield consumes the queued event.
+        await anext(gen)
+        # Publish a second one; the subscriber hasn't pulled yet so
+        # the queue has the latest event waiting.
+        bus.publish(MachineEvent(name="machines-update", html="b"))
+        # Now close; the next anext must resolve (with either the
+        # remaining event or StopAsyncIteration -- either is fine).
+        await bus.close()
+        try:
+            with contextlib.suppress(StopAsyncIteration):
+                await asyncio.wait_for(anext(gen), timeout=1.0)
+            return True
+        except TimeoutError:
+            return False
+
+    assert asyncio.run(scenario()) is True
+
+
 def test_event_bus_close_after_event_still_delivers_event() -> None:
     """If a publish happened and the subscriber was waiting on it,
     ``close`` mid-flight shouldn't drop the event already-queued.

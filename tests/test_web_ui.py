@@ -148,6 +148,46 @@ def test_ui_dashboard_renders_after_login(client: TestClient) -> None:
     assert "Machines" in r.text
 
 
+def test_ui_dashboard_renders_with_zero_state(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A fresh appliance with no machines + no images must not 500
+    the dashboard. Guards the count-cards rendering against
+    division-by-zero / off-by-one regressions if someone tries to
+    compute a percentage from machine_count or image_count."""
+    # Spin up a brand-new app with NOTHING in either root so the
+    # zero-state path renders.
+    state = tmp_path / "state.db"
+    image_root = tmp_path / "images"
+    image_root.mkdir()
+    bty_state_dir = tmp_path / "bty-state"
+    bty_state_dir.mkdir()
+    monkeypatch.setenv("BTY_STATE_DIR", str(bty_state_dir))
+    fresh_app = create_app(
+        state_path=state,
+        service_user=TEST_SERVICE_USER,
+        secret_key=TEST_SECRET_KEY,
+        image_root=image_root,
+    )
+
+    import pamela
+
+    monkeypatch.setattr(pamela, "authenticate", lambda *a, **kw: True)
+    with TestClient(fresh_app, follow_redirects=False) as c:
+        login = c.post("/ui/login", data={"password": "x"})
+        assert login.status_code == 303
+        r = c.get("/ui/dashboard")
+        assert r.status_code == 200
+        body = r.text
+        # Counts should show 0 (or the literal "0" character).
+        assert "Dashboard" in body
+        # Empty-state rendering -- the page must still surface the
+        # primary nav so the operator can act.
+        assert 'href="/ui/machines"' in body
+        assert 'href="/ui/images"' in body
+
+
 def test_ui_dashboard_shows_recent_activity_after_a_pxe_event(client: TestClient) -> None:
     """The dashboard re-uses ``_events_card.html`` to surface the
     last 10 events. Trigger a PXE check-in so there's a row, then
@@ -755,14 +795,23 @@ def test_ui_machines_list_shows_boot_policy_badge(client: TestClient) -> None:
         },
         cookies=AUTH,
     )
-    # Auto-discovery via /pxe lands a third row with boot_policy=tui
-    # so we can exercise all three badge variants in one table.
+    client.put(
+        "/machines/22:33:44:55:66:77",
+        json={
+            "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "boot_policy": "flash-once",
+        },
+        cookies=AUTH,
+    )
+    # Auto-discovery via /pxe lands a fourth row with boot_policy=tui
+    # so we can exercise all four badge variants in one table.
     client.get("/pxe/aa:bb:cc:dd:ee:01")
     r = client.get("/ui/machines")
     assert r.status_code == 200
     body = r.text
-    # All three boot-policy badges should appear in the table.
+    # All four boot-policy badges should appear in the table.
     assert "bg-danger" in body and ">flash<" in body
+    assert ">flash-once<" in body  # the bg-warning variant
     assert "bg-secondary" in body and ">local<" in body
     assert "bg-info text-dark" in body and ">tui<" in body
     # Table header has Boot column + Last flashed column.
