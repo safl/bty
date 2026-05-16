@@ -76,8 +76,16 @@ trap - EXIT
 # appliance upgraded in place. Safe no-op on fresh bakes.
 if [ -f /etc/dnsmasq.d/bty-pxe-active.conf ]; then
     rm -f /etc/dnsmasq.d/bty-pxe-active.conf
-    systemctl restart dnsmasq.service
 fi
+
+# Always restart dnsmasq, not just when a legacy file was cleaned
+# up. The bty-pxe.conf shipped in /etc/dnsmasq.d/ may have changed
+# across an in-place upgrade (e.g. dropping ``enable-tftp`` so
+# bty-tftp.service can bind UDP 69); the running dnsmasq is still
+# on the OLD config until restart. Unconditional restart costs a
+# tiny dnsmasq blip but guarantees we end in a known good state
+# regardless of upgrade path.
+systemctl restart dnsmasq.service
 
 # daemon-reload ensures systemd picks up any updated unit file on
 # an in-place upgrade where the appliance's bty-lab was pip-

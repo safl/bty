@@ -156,6 +156,15 @@ runcmd:
   - ln -sf /usr/lib/ipxe/undionly.kpxe /var/lib/tftpboot/undionly.kpxe
   - ln -sf /usr/lib/ipxe/ipxe.efi /var/lib/tftpboot/ipxe.efi
 
+  # HTTP-Boot path: UEFI HTTPClient targets (arch 16) get told by
+  # the proxy-DHCP daemon to fetch ``http://<server>:8080/boot/ipxe.efi``
+  # via plain HTTP (no TFTP roundtrip). bty-web serves files from
+  # /var/lib/bty/boot, so we expose ipxe.efi there too via a
+  # symlink. Same package source, same upgrade-tracking story as
+  # the /var/lib/tftpboot links above.
+  - install -d -o bty -g bty -m 0755 /var/lib/bty/boot
+  - ln -sf /usr/lib/ipxe/ipxe.efi /var/lib/bty/boot/ipxe.efi
+
   # Privileged helpers + sudoers entry that let the bty service user
   # activate / deactivate the PXE proxy-DHCP daemon without a password.
   # sudo refuses to load /etc/sudoers.d/* unless the file is exactly
