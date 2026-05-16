@@ -28,9 +28,18 @@ PXE_ACTIVE_PATH = Path("/etc/default/bty-pxe-proxy")
 SYSNET_PATH = Path("/sys/class/net")
 ACTIVATE_PXE_HELPER = "/usr/local/sbin/bty-web-activate-pxe"
 DEACTIVATE_PXE_HELPER = "/usr/local/sbin/bty-web-deactivate-pxe"
+PXE_DAEMON_HELPER = "/usr/local/sbin/bty-web-pxe-daemon"
 
 # Per the helper's own validation; mirrored here for early rejection.
 _INTERFACE_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+
+# Allowlist for daemon-control: must match the helper's own check
+# exactly. Both sides validate so a typo in either fails fast with a
+# clear "bad unit/action" error instead of a confusing systemctl
+# error. The helper is the security boundary; this is UX defence
+# in depth.
+PXE_DAEMON_UNITS: tuple[str, ...] = ("bty-pxe-proxy", "bty-tftp")
+PXE_DAEMON_ACTIONS: tuple[str, ...] = ("start", "stop", "restart")
 
 
 @dataclass(frozen=True)
@@ -86,6 +95,22 @@ class PxeState:
 
     config: PxeConfig | None
     iface_present: bool
+
+
+@dataclass(frozen=True)
+class DaemonStatus:
+    """systemctl-derived state for one PXE-stack daemon.
+
+    ``state`` is the literal output of ``systemctl is-active`` --
+    typically one of ``active`` / ``inactive`` / ``failed`` /
+    ``activating`` / ``deactivating``. ``unknown`` is used when the
+    command itself fails (systemctl missing on a test host, the
+    unit doesn't exist at all). The string is surfaced raw in the
+    UI as a badge label and CSS class.
+    """
+
+    unit: str  # e.g. "bty-pxe-proxy" (without ``.service``)
+    state: str  # "active" | "inactive" | "failed" | "unknown" | ...
 
 
 class SysConfigError(Exception):
@@ -229,6 +254,69 @@ def activate_pxe(interface: str, subnet: str) -> None:
         ) from exc
     except (subprocess.TimeoutExpired, FileNotFoundError) as exc:
         raise SysConfigError(f"activate-pxe helper failed: {exc}") from exc
+
+
+def daemon_status(unit: str) -> DaemonStatus:
+    """Return the systemctl state for a PXE-stack daemon.
+
+    Uses ``systemctl is-active`` which does NOT require root --
+    it just reads the unit state from dbus. Falls back to
+    ``unknown`` when systemctl is missing entirely (test hosts,
+    containers) or the command times out.
+
+    ``is-active`` exits non-zero when the unit is anything other
+    than ``active``; we don't treat that as an error since the
+    stdout still carries the useful state name.
+    """
+    if unit not in PXE_DAEMON_UNITS:
+        raise SysConfigError(f"unknown unit: {unit!r}")
+    try:
+        result = subprocess.run(
+            ["systemctl", "is-active", f"{unit}.service"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return DaemonStatus(unit=unit, state="unknown")
+    state = (result.stdout or "").strip() or "unknown"
+    return DaemonStatus(unit=unit, state=state)
+
+
+def daemon_statuses(units: tuple[str, ...] = PXE_DAEMON_UNITS) -> list[DaemonStatus]:
+    """Convenience: status for each PXE-stack daemon in display order."""
+    return [daemon_status(u) for u in units]
+
+
+def control_daemon(unit: str, action: str) -> None:
+    """Invoke the PXE daemon-control helper to start/stop/restart a unit.
+
+    Both ``unit`` and ``action`` are validated here before the helper
+    runs as root; the helper revalidates against the same allowlists
+    so a slip on either side fails closed. Use case is operator
+    triage from the /ui/settings page -- "the proxy daemon is in
+    failed state, restart it" -- rather than first-line operations
+    (that's :func:`activate_pxe` / :func:`deactivate_pxe`).
+    """
+    if unit not in PXE_DAEMON_UNITS:
+        raise SysConfigError(f"unknown unit: {unit!r}")
+    if action not in PXE_DAEMON_ACTIONS:
+        raise SysConfigError(f"unknown action: {action!r}")
+    try:
+        subprocess.run(
+            ["sudo", "-n", PXE_DAEMON_HELPER, action, unit],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=30,
+        )
+    except subprocess.CalledProcessError as exc:
+        raise SysConfigError(
+            f"pxe-daemon helper exited {exc.returncode}: {(exc.stderr or '').strip()}"
+        ) from exc
+    except (subprocess.TimeoutExpired, FileNotFoundError) as exc:
+        raise SysConfigError(f"pxe-daemon helper failed: {exc}") from exc
 
 
 def deactivate_pxe() -> None:

@@ -1,10 +1,14 @@
 # Allow the bty-web service user to invoke its privileged helpers
-# without a password. Two PXE helpers today:
+# without a password. Three PXE helpers today:
 #   * ``bty-web-activate-pxe``   -- writes /etc/default/bty-pxe-proxy
 #                                   and restarts bty-pxe-proxy.service.
 #   * ``bty-web-deactivate-pxe`` -- stops bty-pxe-proxy.service and
 #                                   removes the same env file.
-# Both also clean up the legacy /etc/dnsmasq.d/bty-pxe-active.conf
+#   * ``bty-web-pxe-daemon``     -- per-daemon start/stop/restart for
+#                                   bty-pxe-proxy + bty-tftp (the
+#                                   helper validates the action + unit
+#                                   against a hard-coded allowlist).
+# All three also clean up the legacy /etc/dnsmasq.d/bty-pxe-active.conf
 # file from pre-v0.14 in-place upgrades.
 #
 # Cloud-init writes this file via write_files; the cooked image's
@@ -12,3 +16,4 @@
 # looser perms).
 bty ALL=(root) NOPASSWD: /usr/local/sbin/bty-web-activate-pxe
 bty ALL=(root) NOPASSWD: /usr/local/sbin/bty-web-deactivate-pxe
+bty ALL=(root) NOPASSWD: /usr/local/sbin/bty-web-pxe-daemon

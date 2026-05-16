@@ -756,12 +756,19 @@ def register_ui_routes(
         # activate (or right after, if they didn't notice the
         # banner first time).
         missing_netboot = _releases.missing_netboot_artifacts(boot_root)
+        # Per-daemon systemctl state for the PXE-stack diagnostics
+        # panel. Cheap (two ``systemctl is-active`` calls, no sudo,
+        # ~ms total). Surfaced as badges + Start/Stop/Restart knobs
+        # so the operator can triage a half-up state from the UI
+        # without SSHing in for ``systemctl status``.
+        pxe_daemons = _sysconfig.daemon_statuses()
         return render(
             "ui/settings.html",
             request,
             interfaces=interfaces,
             pxe=pxe,
             pxe_iface_present=pxe_iface_present,
+            pxe_daemons=pxe_daemons,
             missing_netboot_artifacts=missing_netboot,
             boot_root=str(boot_root),
             new_token=new_token,
@@ -914,6 +921,61 @@ def register_ui_routes(
         return _render_settings_page(
             request,
             flash="PXE proxy-DHCP deactivated.",
+            flash_kind="success",
+        )
+
+    @app.post(
+        "/ui/settings/pxe-daemon",
+        include_in_schema=False,
+        dependencies=[Depends(require_ui_auth)],
+    )
+    def ui_settings_pxe_daemon(
+        request: Request,
+        unit: Annotated[str, Form()] = "",
+        action: Annotated[str, Form()] = "",
+    ) -> HTMLResponse:
+        # Per-daemon Start / Stop / Restart for operator triage.
+        # Distinct from activate / deactivate: those are the
+        # opinionated workflow (write env file, restart dnsmasq,
+        # bring both daemons up together). This is the diagnostic
+        # knob ("the proxy is in failed state, restart just it"
+        # or "stop TFTP and observe whether proxy still serves").
+        client_ip = _client_ip(request)
+        try:
+            _sysconfig.control_daemon(unit, action)
+        except _sysconfig.SysConfigError as exc:
+            with _db.open_db(state_path) as conn:
+                _events_log.record(
+                    conn,
+                    kind="settings.pxe.daemon_failed",
+                    summary=(f"PXE daemon {action!r} on {unit!r} failed: {exc}"),
+                    subject_kind="settings",
+                    subject_id="pxe",
+                    actor="operator",
+                    source_ip=client_ip,
+                    details={"unit": unit, "action": action, "error": str(exc)},
+                )
+                conn.commit()
+            return _render_settings_page(
+                request,
+                flash=f"{action} of {unit} failed: {exc}",
+                flash_kind="danger",
+            )
+        with _db.open_db(state_path) as conn:
+            _events_log.record(
+                conn,
+                kind="settings.pxe.daemon",
+                summary=f"PXE daemon {action} on {unit}",
+                subject_kind="settings",
+                subject_id="pxe",
+                actor="operator",
+                source_ip=client_ip,
+                details={"unit": unit, "action": action},
+            )
+            conn.commit()
+        return _render_settings_page(
+            request,
+            flash=f"{action.capitalize()}ed {unit}.",
             flash_kind="success",
         )
 

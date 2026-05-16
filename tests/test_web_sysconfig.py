@@ -16,10 +16,14 @@ from unittest.mock import patch
 import pytest
 
 from bty.web._sysconfig import (
+    DaemonStatus,
     Interface,
     PxeConfig,
     SysConfigError,
     activate_pxe,
+    control_daemon,
+    daemon_status,
+    daemon_statuses,
     list_interfaces,
     pxe_active,
 )
@@ -182,3 +186,80 @@ def test_activate_pxe_helper_failure_wraps_as_sysconfig_error() -> None:
         pytest.raises(SysConfigError, match="exited 2"),
     ):
         activate_pxe("eth0", "192.168.1.0")
+
+
+# ---------- daemon_status / daemon_statuses --------------------------------
+
+
+def test_daemon_status_returns_systemctl_state_verbatim() -> None:
+    completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="active\n", stderr="")
+    with patch("bty.web._sysconfig.subprocess.run", return_value=completed) as mock_run:
+        status = daemon_status("bty-pxe-proxy")
+    assert status == DaemonStatus(unit="bty-pxe-proxy", state="active")
+    cmd = mock_run.call_args[0][0]
+    assert cmd == ["systemctl", "is-active", "bty-pxe-proxy.service"]
+
+
+def test_daemon_status_handles_inactive_nonzero_exit() -> None:
+    # ``systemctl is-active`` exits non-zero on inactive / failed,
+    # but stdout still carries the state name and we keep it.
+    completed = subprocess.CompletedProcess(args=[], returncode=3, stdout="inactive\n", stderr="")
+    with patch("bty.web._sysconfig.subprocess.run", return_value=completed):
+        status = daemon_status("bty-tftp")
+    assert status.state == "inactive"
+
+
+def test_daemon_status_returns_unknown_when_systemctl_missing() -> None:
+    with patch(
+        "bty.web._sysconfig.subprocess.run",
+        side_effect=FileNotFoundError("systemctl"),
+    ):
+        status = daemon_status("bty-tftp")
+    assert status.state == "unknown"
+
+
+def test_daemon_status_rejects_unknown_unit() -> None:
+    with pytest.raises(SysConfigError, match="unknown unit"):
+        daemon_status("sshd")  # not in PXE_DAEMON_UNITS
+
+
+def test_daemon_statuses_covers_both_pxe_daemons() -> None:
+    completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="active\n", stderr="")
+    with patch("bty.web._sysconfig.subprocess.run", return_value=completed):
+        results = daemon_statuses()
+    units = [s.unit for s in results]
+    assert units == ["bty-pxe-proxy", "bty-tftp"]
+
+
+# ---------- control_daemon -------------------------------------------------
+
+
+def test_control_daemon_shells_helper_via_sudo() -> None:
+    completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+    with patch("bty.web._sysconfig.subprocess.run", return_value=completed) as mock_run:
+        control_daemon("bty-pxe-proxy", "restart")
+    cmd = mock_run.call_args[0][0]
+    assert cmd[:2] == ["sudo", "-n"]
+    assert cmd[2].endswith("/bty-web-pxe-daemon")
+    assert cmd[3:] == ["restart", "bty-pxe-proxy"]
+
+
+def test_control_daemon_rejects_unknown_unit() -> None:
+    with pytest.raises(SysConfigError, match="unknown unit"):
+        control_daemon("sshd", "restart")
+
+
+def test_control_daemon_rejects_unknown_action() -> None:
+    with pytest.raises(SysConfigError, match="unknown action"):
+        control_daemon("bty-pxe-proxy", "enable")  # enable not in allowlist
+
+
+def test_control_daemon_helper_failure_wraps_as_sysconfig_error() -> None:
+    err = subprocess.CalledProcessError(
+        returncode=1, cmd=["sudo"], stderr="Failed to restart bty-pxe-proxy.service\n"
+    )
+    with (
+        patch("bty.web._sysconfig.subprocess.run", side_effect=err),
+        pytest.raises(SysConfigError, match="exited 1"),
+    ):
+        control_daemon("bty-pxe-proxy", "restart")

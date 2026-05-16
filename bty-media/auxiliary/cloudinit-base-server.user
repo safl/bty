@@ -173,6 +173,7 @@ runcmd:
   # the service.
   - chmod 0755 /usr/local/sbin/bty-web-activate-pxe
   - chmod 0755 /usr/local/sbin/bty-web-deactivate-pxe
+  - chmod 0755 /usr/local/sbin/bty-web-pxe-daemon
   - chmod 0440 /etc/sudoers.d/bty-web
   - chown root:root /etc/sudoers.d/bty-web
 

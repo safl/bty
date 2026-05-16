@@ -23,15 +23,16 @@
 </div>
 
 <!-- ----------------------------------------------------------------- -->
-<div class="card">
+<div class="card mb-4">
     <div class="card-body">
         <h2 class="h5 mb-3"><i class="bi bi-hdd-network me-2"></i>PXE proxy-DHCP</h2>
         <p class="text-muted">
-            Controls the dnsmasq proxy-DHCP block: when active, bty-web
-            responds to PXE queries on the chosen interface. Pick the
-            interface facing the target machines, supply the subnet they're
-            on, and click Activate. Deactivate removes the active config
-            and restarts <code>dnsmasq</code> back to TFTP-only.
+            When active, bty-pxe-proxy answers PXE / HTTP-Boot DHCP queries
+            on the chosen interface and bty-tftp serves the iPXE binaries.
+            Pick the interface facing the target machines, supply the subnet
+            they're on, and click Activate. Deactivate stops and disables
+            both daemons. The diagnostic panel below shows each daemon's
+            current state.
         </p>
 
         {% if missing_netboot_artifacts %}
@@ -158,6 +159,86 @@
             misconfigured rogue-DHCP would conflict with the LAN's real
             DHCP server. Run a dedicated DHCP daemon next to bty if you
             need one.
+        </p>
+    </div>
+</div>
+
+<!-- ----------------------------------------------------------------- -->
+{# Per-daemon state panel for the PXE stack. Surfaces the
+   ``systemctl is-active`` state of bty-pxe-proxy.service +
+   bty-tftp.service as badges + lets the operator Start / Stop /
+   Restart each daemon independently for triage. Distinct from
+   the master Activate / Deactivate above: those are the
+   opinionated workflow; these are the diagnostic knobs. #}
+<div class="card">
+    <div class="card-body">
+        <h2 class="h5 mb-3"><i class="bi bi-cpu me-2"></i>Daemons</h2>
+        <p class="text-muted">
+            Live state and triage knobs for the two PXE-stack daemons.
+            Both are required for end-to-end PXE; running one without the
+            other leaves clients with a working DHCP offer pointing at a
+            file no one serves (or vice versa). Use these for triage; use
+            the Activate / Deactivate flow above for normal operation.
+        </p>
+        <div class="table-responsive">
+            <table class="table table-sm align-middle mb-0">
+                <thead>
+                    <tr>
+                        <th scope="col">Daemon</th>
+                        <th scope="col">State</th>
+                        <th scope="col" class="text-end">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for d in pxe_daemons %}
+                    <tr>
+                        <td><code>{{ d.unit }}.service</code></td>
+                        <td>
+                            {# Map the raw systemctl state to a Bootstrap
+                               badge class. ``active`` is green; ``failed``
+                               is red; ``activating`` / ``deactivating``
+                               are amber; everything else (``inactive``,
+                               ``unknown``, ...) is neutral grey. #}
+                            {% if d.state == 'active' %}
+                                <span class="badge bg-success">{{ d.state }}</span>
+                            {% elif d.state == 'failed' %}
+                                <span class="badge bg-danger">{{ d.state }}</span>
+                            {% elif d.state in ('activating', 'deactivating', 'reloading') %}
+                                <span class="badge bg-warning text-dark">{{ d.state }}</span>
+                            {% else %}
+                                <span class="badge bg-secondary">{{ d.state }}</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-end">
+                            <form action="/ui/settings/pxe-daemon" method="post"
+                                  class="d-inline-flex gap-1 m-0">
+                                <input type="hidden" name="unit" value="{{ d.unit }}">
+                                <button type="submit" name="action" value="start"
+                                        class="btn btn-sm btn-outline-success"
+                                        {% if d.state == 'active' %}disabled{% endif %}>
+                                    <i class="bi bi-play-fill"></i> Start
+                                </button>
+                                <button type="submit" name="action" value="stop"
+                                        class="btn btn-sm btn-outline-secondary"
+                                        {% if d.state != 'active' %}disabled{% endif %}>
+                                    <i class="bi bi-stop-fill"></i> Stop
+                                </button>
+                                <button type="submit" name="action" value="restart"
+                                        class="btn btn-sm btn-outline-warning">
+                                    <i class="bi bi-arrow-clockwise"></i> Restart
+                                </button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <p class="form-text mt-3 mb-0">
+            ``Start`` of a daemon that doesn't see
+            <code>/etc/default/bty-pxe-proxy</code> is a no-op: the unit's
+            <code>ConditionPathExists=</code> guard keeps it cleanly inactive
+            until you activate the PXE workflow above.
         </p>
     </div>
 </div>

@@ -841,6 +841,66 @@ def test_ui_settings_pxe_deactivate_failure_shows_danger_flash(client: TestClien
     assert "PXE deactivation failed" in r.text
 
 
+def test_ui_settings_renders_daemon_panel(client: TestClient) -> None:
+    """Settings page surfaces the per-daemon diagnostic panel: badges
+    show the state, action buttons are present for each daemon."""
+    from unittest.mock import patch
+
+    from bty.web._sysconfig import DaemonStatus
+
+    _login(client)
+    with patch(
+        "bty.web._sysconfig.daemon_statuses",
+        return_value=[
+            DaemonStatus(unit="bty-pxe-proxy", state="active"),
+            DaemonStatus(unit="bty-tftp", state="inactive"),
+        ],
+    ):
+        r = client.get("/ui/settings")
+    assert r.status_code == 200
+    body = r.text
+    # Daemons section header.
+    assert "Daemons" in body
+    # Both unit names rendered as code blocks.
+    assert "<code>bty-pxe-proxy.service</code>" in body
+    assert "<code>bty-tftp.service</code>" in body
+    # State badges with the right semantic class.
+    assert 'class="badge bg-success">active' in body
+    assert 'class="badge bg-secondary">inactive' in body
+
+
+def test_ui_settings_pxe_daemon_invokes_helper(client: TestClient) -> None:
+    from unittest.mock import patch
+
+    _login(client)
+    with patch("bty.web._sysconfig.control_daemon") as mock_control:
+        r = client.post(
+            "/ui/settings/pxe-daemon",
+            data={"unit": "bty-pxe-proxy", "action": "restart"},
+        )
+    assert r.status_code == 200
+    assert "Restarted bty-pxe-proxy" in r.text
+    mock_control.assert_called_once_with("bty-pxe-proxy", "restart")
+
+
+def test_ui_settings_pxe_daemon_failure_shows_danger_flash(client: TestClient) -> None:
+    from unittest.mock import patch
+
+    from bty.web._sysconfig import SysConfigError
+
+    _login(client)
+    with patch(
+        "bty.web._sysconfig.control_daemon",
+        side_effect=SysConfigError("Failed to restart bty-pxe-proxy.service"),
+    ):
+        r = client.post(
+            "/ui/settings/pxe-daemon",
+            data={"unit": "bty-pxe-proxy", "action": "restart"},
+        )
+    assert r.status_code == 200
+    assert "restart of bty-pxe-proxy failed" in r.text
+
+
 def test_ui_boot_requires_auth(client: TestClient) -> None:
     """Without the cookie, /ui/boot redirects to login like the rest
     of the UI."""
