@@ -1575,6 +1575,96 @@ def test_boot_artifact_404_for_missing(app_client: TestClient) -> None:
     assert r.status_code == 404
 
 
+# ---------- HTTP-Boot (UEFI arch 16) -----------------------------------
+#
+# UEFI HTTP-Boot fetches the bootfile via plain HTTP -- no TFTP --
+# from the URL the LAN DHCP server hands it (option 60 = "HTTPClient",
+# option 67 = "http://<bty>:8080/boot/ipxe.efi"). The firmware
+# expects standard HTTP semantics: 200 OK with Content-Length set so
+# it can size the boot buffer before the GET completes, HEAD support
+# for cheap probing, and no auth gate (PXE clients have no session
+# cookie). These pin those expectations against the ``/boot/{name}``
+# route so a future template-render or auth-tightening commit
+# doesn't silently break HTTP-Boot.
+
+
+def test_http_boot_serves_ipxe_efi_with_content_length(
+    app_client: TestClient, tmp_path: Path
+) -> None:
+    """HTTP-Boot firmware allocates a buffer for the bootfile based
+    on Content-Length BEFORE the body arrives. Without that header
+    some implementations refuse to start the download."""
+    fake_efi = b"FAKE-EFI-BINARY!" * 256  # 4 KiB sentinel
+    (tmp_path / "boot" / "ipxe.efi").write_bytes(fake_efi)
+    r = app_client.get("/boot/ipxe.efi")
+    assert r.status_code == 200
+    assert "content-length" in r.headers
+    assert int(r.headers["content-length"]) == len(fake_efi)
+    assert r.content == fake_efi
+
+
+def test_http_boot_head_request_works(app_client: TestClient, tmp_path: Path) -> None:
+    """Some UEFI HTTP-Boot implementations probe with HEAD before
+    issuing the GET (to size the fetch / verify the URL). HEAD must
+    return the same status + Content-Length as GET, no body."""
+    fake_efi = b"FAKE-EFI" * 128  # 1 KiB
+    (tmp_path / "boot" / "ipxe.efi").write_bytes(fake_efi)
+    r = app_client.head("/boot/ipxe.efi")
+    assert r.status_code == 200
+    assert int(r.headers["content-length"]) == len(fake_efi)
+    assert r.content == b""  # HEAD has no body
+
+
+def test_http_boot_is_unauthenticated(app_client: TestClient, tmp_path: Path) -> None:
+    """PXE clients have no session cookie -- the /boot/* route must
+    serve without auth. Pin so a future ``Depends(require_auth)`` on
+    the API surface doesn't accidentally creep onto this route."""
+    fake_efi = b"FAKE-EFI" * 16
+    (tmp_path / "boot" / "ipxe.efi").write_bytes(fake_efi)
+    # No cookies= argument -- explicitly unauthenticated client.
+    r = app_client.get("/boot/ipxe.efi", cookies={})
+    assert r.status_code == 200
+    assert r.content == fake_efi
+
+
+def test_http_boot_returns_octet_stream_content_type(
+    app_client: TestClient, tmp_path: Path
+) -> None:
+    """The .efi extension shouldn't accidentally pick up a text/html
+    MIME type from FastAPI's mimetypes guess. application/octet-stream
+    is the safest default for a UEFI binary."""
+    (tmp_path / "boot" / "ipxe.efi").write_bytes(b"FAKE-EFI")
+    r = app_client.get("/boot/ipxe.efi")
+    assert r.status_code == 200
+    ct = r.headers.get("content-type", "").lower()
+    # Either application/octet-stream or a *.efi-specific MIME that's
+    # not text/html. The wire shape doesn't strictly care; what we
+    # guard against is the "served as text" case.
+    assert "text/html" not in ct
+    assert "text/plain" not in ct
+
+
+def test_http_boot_404_for_missing_ipxe_efi(app_client: TestClient) -> None:
+    """Operator deployment forgets to stage ipxe.efi under boot_root
+    -- the firmware should get a clean 404 rather than a hang or a
+    redirect to the login page."""
+    r = app_client.get("/boot/ipxe.efi")
+    assert r.status_code == 404
+
+
+def test_http_boot_arch_specific_filenames_routable(
+    app_client: TestClient, tmp_path: Path
+) -> None:
+    """The router-config cheatsheet on /ui/settings lists arch-
+    specific bootfiles (ipxe-i386.efi, ipxe-arm64.efi, etc.) for
+    targets where the default ipxe.efi (x86_64) isn't appropriate.
+    The route must serve any operator-staged file by name."""
+    (tmp_path / "boot" / "ipxe-arm64.efi").write_bytes(b"ARM64-EFI")
+    r = app_client.get("/boot/ipxe-arm64.efi")
+    assert r.status_code == 200
+    assert r.content == b"ARM64-EFI"
+
+
 def test_boot_artifact_rejects_traversal(app_client: TestClient) -> None:
     """Slash in a single-segment ``{name}`` is impossible (FastAPI's
     path converter splits on /), but the explicit guards reject the

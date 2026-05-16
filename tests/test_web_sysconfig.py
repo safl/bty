@@ -205,3 +205,48 @@ def test_tftp_status_masked_state_passes_through() -> None:
         status = tftp_status()
     assert status.state == "masked"
     assert status.is_active is False
+
+
+def test_tftp_controllable_requires_helper_and_sudo() -> None:
+    """The UI hides Start/Stop/Restart buttons when sudo or the
+    helper isn't installed (Docker container case). On a clean
+    test host neither path exists; on the appliance both do."""
+    from bty.web._sysconfig import tftp_controllable
+
+    # No expectation on truthiness -- depends on the test host.
+    # Just verify it returns a bool and doesn't crash.
+    assert isinstance(tftp_controllable(), bool)
+
+
+def test_tftp_status_falls_back_to_pgrep_when_systemctl_missing() -> None:
+    """Inside the bty-web Docker container there's no systemd /
+    no systemctl on PATH. ``tftp_status`` should fall back to
+    ``pgrep -x dnsmasq`` so the UI badge still reflects whether
+    the daemon is alive."""
+
+    def fake_run(cmd, **_kw):  # type: ignore[no-untyped-def]
+        if cmd[0] == "systemctl":
+            raise FileNotFoundError("systemctl")
+        if cmd[0] == "pgrep":
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout=b"42\n")
+        raise AssertionError(f"unexpected: {cmd}")
+
+    with patch("bty.web._sysconfig.subprocess.run", side_effect=fake_run):
+        status = tftp_status()
+    assert status.state == "active"
+
+
+def test_tftp_status_pgrep_missing_returns_inactive() -> None:
+    """pgrep returns 1 when no matching process. UI shows
+    inactive badge (grey)."""
+
+    def fake_run(cmd, **_kw):  # type: ignore[no-untyped-def]
+        if cmd[0] == "systemctl":
+            raise FileNotFoundError("systemctl")
+        if cmd[0] == "pgrep":
+            return subprocess.CompletedProcess(args=cmd, returncode=1, stdout=b"")
+        raise AssertionError(f"unexpected: {cmd}")
+
+    with patch("bty.web._sysconfig.subprocess.run", side_effect=fake_run):
+        status = tftp_status()
+    assert status.state == "inactive"

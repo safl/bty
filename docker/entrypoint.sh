@@ -9,9 +9,16 @@
 #   2. Print a loud banner with the default credentials so an
 #      operator never accidentally exposes ``bty/bty`` past a
 #      trusted LAN. ``BTY_QUIET=1`` suppresses (CI / automation).
-#   3. ``exec bty-web`` so PID 1 (tini) wraps the actual server
-#      process directly -- no extra shell layer to fight with on
-#      ``docker stop``.
+#   3. Start dnsmasq (TFTP) in the background, then ``exec
+#      bty-web`` in the foreground so PID 1 (tini) wraps the
+#      actual server process directly.
+#
+# Why both daemons in one container: parity with the bty-server
+# appliance. The appliance ships dnsmasq for TFTP serving + bty-web
+# for HTTP serving; the container should be functionally equivalent
+# so operators can pick deployment shape based on infra
+# preferences (Docker host vs. flashed image) without losing
+# capability.
 
 set -eu
 
@@ -46,10 +53,25 @@ EOF
     exit 1
 fi
 
+# Start dnsmasq for TFTP serving. The dnsmasq binary has
+# ``cap_net_bind_service`` set on the file (see Dockerfile), so it
+# can bind UDP 69 even while running as the unprivileged bty user
+# (config's ``user=bty`` drops privileges after the bind).
+# ``--keep-in-foreground`` keeps dnsmasq in the foreground so it
+# logs to our stderr; we backgrond it from the shell so bty-web
+# can hold the foreground for tini.
+dnsmasq --keep-in-foreground --conf-file=/etc/dnsmasq.conf &
+DNSMASQ_PID=$!
+
+# If dnsmasq dies, take the container down with it -- the operator
+# won't see "TFTP broken" silently; they get a container restart
+# via their orchestrator's policy.
+trap 'kill -TERM "$DNSMASQ_PID" 2>/dev/null; exit 0' INT TERM
+
 if [ -z "${BTY_QUIET:-}" ]; then
     cat >&2 <<EOF
 ========================================================================
-  bty-web container -- listening on :${BTY_WEB_PORT:-8080}
+  bty-web container -- HTTP on :${BTY_WEB_PORT:-8080}, TFTP on udp/69
 
   Default credentials: bty / bty
   -> ROTATE before exposing past a trusted LAN:
@@ -62,11 +84,10 @@ if [ -z "${BTY_QUIET:-}" ]; then
   Connect bty tui clients with:
        bty tui --server http://<host>:${BTY_WEB_PORT:-8080}
 
-  HTTP-only -- this container serves the bty-web HTTP API and
-  HTTP-Boot bootfile via ``/boot/ipxe.efi``. For TFTP-only PXE
-  clients, run a TFTP server alongside or use the bty-server
-  appliance image (docs/walkthrough-server.md). bty does not run
-  any DHCP role in either deployment shape.
+  PXE clients: configure your LAN DHCP server (UniFi / pfSense /
+  dnsmasq / etc.) to point clients at this container -- option 60
+  "PXEClient" + option 66 next-server <host-ip> + option 67
+  bootfile "ipxe.efi". bty does NOT run a DHCP role.
 ========================================================================
 EOF
 fi

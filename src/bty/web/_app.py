@@ -543,13 +543,20 @@ def create_app(
             )
         return {"events": [e.to_dict() for e in events]}
 
-    @app.get("/boot/{name}", include_in_schema=False)
+    @app.api_route(
+        "/boot/{name}",
+        methods=["GET", "HEAD"],
+        include_in_schema=False,
+    )
     def boot_artifact(name: str) -> FileResponse:
         # Live-env artifacts (kernel + initrd + squashfs) the iPXE chain
-        # references. Open route: PXE clients have no token. Operator
-        # populates ``boot_root`` via the UI's "fetch latest release"
-        # action - until the dir has files, this returns 404 and the
-        # appliance is non-functional for boot_policy=flash.
+        # references PLUS the HTTP-Boot bootfile (ipxe.efi) UEFI
+        # HTTPClient targets fetch directly via DHCP option 67 URL.
+        # Open route: PXE clients have no token. HEAD is included
+        # because some UEFI HTTP-Boot firmware HEADs the URL first
+        # to size the fetch buffer before issuing the GET; Starlette's
+        # FileResponse handles the HEAD shape (200 + Content-Length,
+        # empty body) automatically.
         return _serve_safe_file(resolved_boot_root, name)
 
     def _serve_image_by_key(key: str) -> FileResponse:

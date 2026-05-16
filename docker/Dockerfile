@@ -1,19 +1,17 @@
 # bty-web container.
 #
-# What this is: a minimal HTTP-server image hosting the bty image
-# catalog + machine registry + browser UI. Operators run it as a
-# trial / network-reachable image library; ``bty tui --server URL``
-# clients (running from the USB live env or a workstation) connect
-# here and pick images from the catalog.
+# What this is: a full bty-server deployment as a single OCI
+# image -- bty-web (HTTP + browser UI) AND dnsmasq (TFTP serving
+# the iPXE binaries) running side by side. Functionally
+# equivalent to the bty-server appliance: operators can configure
+# their LAN DHCP server to point PXE clients at this container
+# for both TFTP (option 66) and HTTP-Boot (HTTPClient option 67)
+# fetches.
 #
-# What this is NOT: a TFTP server. bty no longer runs any DHCP
-# role (the operator's LAN DHCP server points clients at bty);
-# but the appliance still bundles dnsmasq to serve the iPXE
-# binaries via TFTP. This container is HTTP-only, so for
-# TFTP-only PXE clients you either need a separate TFTP server
-# next to the container or use the appliance image (see
-# docs/walkthrough-server.md). UEFI HTTP-Boot targets work
-# directly against this container.
+# bty does NOT run any DHCP role -- the operator's existing LAN
+# DHCP server is the authoritative DHCP source, configured with
+# option 60 "PXEClient" / 66 next-server / 67 bootfile pointing
+# at this container. Same architecture as the appliance.
 #
 # Built off the local wheel produced by ``uv build``; the GHA
 # workflow stages ``dist/bty_lab-*.whl`` into the build context
@@ -47,6 +45,14 @@ LABEL org.opencontainers.image.title="bty-web" \
 #   curl: HEALTHCHECK probes ``/`` so docker/orchestrators detect a
 #     wedged uvicorn (Python deadlock, OOM, etc.) without needing
 #     to add curl per-deployment.
+#   dnsmasq + ipxe: TFTP serving + the iPXE bootfiles. ``setcap``
+#     grants dnsmasq the CAP_NET_BIND_SERVICE capability so it can
+#     bind UDP 69 as the unprivileged ``bty`` user (no need to run
+#     the daemon as root).
+#   libcap2-bin: provides setcap.
+#   procps: pgrep, used by ``_sysconfig.tftp_status`` when
+#     systemctl isn't around (i.e. inside this container) so the
+#     UI's TFTP badge still reflects whether dnsmasq is alive.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
         libpam0g \
@@ -55,7 +61,23 @@ RUN apt-get update \
         tini \
         ca-certificates \
         curl \
+        dnsmasq \
+        ipxe \
+        libcap2-bin \
+        procps \
+ && setcap 'cap_net_bind_service=+ep' /usr/sbin/dnsmasq \
  && rm -rf /var/lib/apt/lists/*
+
+# Stage the iPXE binaries dnsmasq will hand out via TFTP. Symlinks
+# rather than copies so apt upgrades of the iPXE package carry
+# through. The same shape the appliance uses (see
+# bty-media/auxiliary/cloudinit-base-server.user).
+RUN install -d -o root -g root -m 0755 /var/lib/tftpboot \
+ && ln -sf /usr/lib/ipxe/undionly.kpxe /var/lib/tftpboot/undionly.kpxe \
+ && ln -sf /usr/lib/ipxe/ipxe.efi /var/lib/tftpboot/ipxe.efi
+
+# dnsmasq config: TFTP-only (no DNS, no DHCP), drops to bty user.
+COPY docker/dnsmasq.conf /etc/dnsmasq.conf
 
 # Install bty-lab[web] from the wheel staged by the workflow into
 # ./dist/. The wheel is platform-independent (pure Python), so
@@ -106,6 +128,7 @@ ENV BTY_STATE_DIR=/var/lib/bty \
     BTY_WEB_PORT=8080
 
 EXPOSE 8080
+EXPOSE 69/udp
 
 # Purpose-built health endpoint. Lighter than probing ``/`` (no
 # template rendering, no redirect) and explicit about its intent.

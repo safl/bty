@@ -13,10 +13,11 @@
 #        mkdir -p ./bty-data && sudo chown -R 999:999 ./bty-data
 #   2. Replace the volume line with: ``- ./bty-data:/var/lib/bty``
 #
-# This container is HTTP-only. UEFI HTTP-Boot targets work
-# directly against it; TFTP-only PXE clients need either a
-# separate TFTP server (operator-run dnsmasq alongside) or the
-# bty-server appliance image (which bundles dnsmasq).
+# Full bty-server parity with the appliance: bty-web (HTTP on
+# 8080) AND dnsmasq (TFTP on udp/69) running in the same
+# container. PXE clients can fetch the iPXE binaries via TFTP
+# and HTTP-Boot targets fetch ipxe.efi over HTTP; either way the
+# operator's LAN DHCP server points clients at this host.
 
 services:
   bty-web:
@@ -24,6 +25,7 @@ services:
     restart: unless-stopped
     ports:
       - "8080:8080"
+      - "69:69/udp"
     volumes:
       - bty-data:/var/lib/bty
     # Override defaults if you want to point clients at a public

@@ -72,9 +72,10 @@ def tftp_status() -> DaemonStatus:
     """Return the ``dnsmasq.service`` state.
 
     Uses ``systemctl is-active`` which does NOT require root --
-    it just reads the unit state from dbus. Falls back to
-    ``unknown`` when systemctl is missing (test hosts, containers)
-    or the command times out.
+    it just reads the unit state from dbus. When systemctl is
+    missing (container deployments without systemd, test hosts),
+    falls back to a ``pgrep -x dnsmasq`` check so the badge still
+    reflects whether the TFTP daemon is actually running.
     """
     try:
         result = subprocess.run(
@@ -84,9 +85,40 @@ def tftp_status() -> DaemonStatus:
             check=False,
             timeout=5,
         )
+        return DaemonStatus(state=(result.stdout or "").strip() or "unknown")
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        pass
+    # No systemd around -- try pgrep. Useful inside the bty-web
+    # Docker container where dnsmasq is launched by the entrypoint
+    # and systemd isn't running. ``pgrep -x dnsmasq`` exits 0 when
+    # there's a process named exactly ``dnsmasq``, 1 otherwise.
+    try:
+        rc = subprocess.run(
+            ["pgrep", "-x", "dnsmasq"],
+            capture_output=True,
+            check=False,
+            timeout=5,
+        ).returncode
     except (subprocess.TimeoutExpired, FileNotFoundError):
         return DaemonStatus(state="unknown")
-    return DaemonStatus(state=(result.stdout or "").strip() or "unknown")
+    return DaemonStatus(state="active" if rc == 0 else "inactive")
+
+
+def tftp_controllable() -> bool:
+    """``True`` when the UI can offer Start / Stop / Restart for
+    the TFTP daemon. Requires the sudo'd helper to be installed
+    AND ``sudo`` itself on PATH.
+
+    Inside the bty-web Docker container neither is present (the
+    container's dnsmasq is supervised by the entrypoint, not by
+    systemd, and the bty user has no sudo grant); on the bty-server
+    appliance both are present from the bake. The UI hides the
+    Start/Stop/Restart buttons when this returns False so the
+    operator isn't offered controls that would fail.
+    """
+    return Path(TFTP_HELPER).is_file() and (
+        Path("/usr/bin/sudo").is_file() or Path("/bin/sudo").is_file()
+    )
 
 
 def control_tftp(action: str) -> None:

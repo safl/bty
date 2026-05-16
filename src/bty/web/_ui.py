@@ -734,11 +734,13 @@ def register_ui_routes(
         interfaces = _sysconfig.list_interfaces()
         missing_netboot = _releases.missing_netboot_artifacts(boot_root)
         tftp = _sysconfig.tftp_status()
+        tftp_controllable = _sysconfig.tftp_controllable()
         return render(
             "ui/settings.html",
             request,
             interfaces=interfaces,
             tftp=tftp,
+            tftp_controllable=tftp_controllable,
             missing_netboot_artifacts=missing_netboot,
             boot_root=str(boot_root),
             flash=flash,

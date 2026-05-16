@@ -170,6 +170,7 @@
                 {% endif %}
                 <code class="ms-2">dnsmasq.service</code>
             </div>
+            {% if tftp_controllable %}
             <form action="/ui/settings/tftp-control" method="post" class="d-inline-flex gap-1 m-0 ms-auto">
                 <button type="submit" name="action" value="start"
                         class="btn btn-sm btn-outline-success"
@@ -186,6 +187,14 @@
                     <i class="bi bi-arrow-clockwise"></i> Restart
                 </button>
             </form>
+            {% else %}
+            {# No sudo'd helper available in this deployment (Docker
+               container, dev shell, etc). dnsmasq lifecycle is owned
+               by the entrypoint / supervisor instead of bty-web. #}
+            <span class="text-muted ms-auto small">
+                <i class="bi bi-info-circle me-1"></i>Controls disabled (no daemon helper here)
+            </span>
+            {% endif %}
         </div>
     </div>
 </div>
