@@ -102,15 +102,26 @@ _HTTP_BOOTFILE_PORT = 8080
 # PXE vendor-specific sub-option payload for option 43.
 #
 # Old PXE 2.x firmware reads option 43 for PXE_DISCOVERY_CONTROL
-# (sub-option 6) before honouring the bootfile-name option. We
-# set bits 2+3 -- "skip multicast / broadcast PXE discovery; use
-# the bootfile in option 67 / BOOTP file[] directly". Modern UEFI
-# ignores option 43 entirely, so emitting this is pure leniency
-# toward legacy hardware; no downside on current clients.
+# (sub-option 6) before honouring the bootfile-name option.
+#
+# Per the PXE 2.1 spec, sub-option 6 is a single byte bitmap:
+#   bit 0 (0x01) -- DISABLE_BCAST_DISCOVERY
+#   bit 1 (0x02) -- DISABLE_MCAST_DISCOVERY
+#   bit 2 (0x04) -- USE_PXE_BOOT_SERVERS_LIST (requires sub-option 8!)
+#   bit 3 (0x08) -- USE_BOOT_FILE (use BOOTP file[] / option 67 directly)
+#
+# We set bit 3 only -- "use the bootfile name in this offer
+# directly; no further PXE discovery". This is the canonical
+# proxy-DHCP value (matches dnsmasq). An earlier version set 0x0C
+# (bits 2+3) which advertised a PXE boot servers list without
+# providing sub-option 8 to carry it -- strict PXE firmware
+# rejected the whole offer over the contradiction, leaving real-
+# world targets stuck in DHCPDISCOVER retry. Modern UEFI ignores
+# option 43 entirely, so the change is harmless on current
+# clients and unbreaks legacy firmware.
 #
 # Layout: ``sub_code(1) + sub_len(1) + value + ... + END(0xff)``.
-# Sub-option 6 (PXE_DISCOVERY_CONTROL) takes a 1-byte value.
-_PXE_VENDOR_OPT_BODY: bytes = bytes((6, 1, 0x0C, 0xFF))
+_PXE_VENDOR_OPT_BODY: bytes = bytes((6, 1, 0x08, 0xFF))
 
 
 @dataclass(frozen=True)

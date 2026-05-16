@@ -304,19 +304,23 @@ def test_build_offer_populates_bootp_sname_field() -> None:
 
 def test_build_offer_emits_option_43_pxe_discovery_control() -> None:
     """Option 43 (vendor-specific) carries the PXE_DISCOVERY_CONTROL
-    sub-option (sub-code 6, value 0x0C) which tells old PXE 2.x
-    ROMs "skip multicast / broadcast discovery; use the bootfile-
-    name directly". Modern UEFI ignores option 43; no downside.
-    Pin so a future "trim the options" attempt doesn't silently
-    re-introduce the legacy-firmware compat gap."""
+    sub-option (sub-code 6, value 0x08 = USE_BOOT_FILE) which tells
+    old PXE 2.x ROMs "use the bootfile in this offer directly; no
+    further discovery". Modern UEFI ignores option 43; no downside.
+
+    Pinned at 0x08 specifically: an earlier 0x0C advertised
+    USE_BOOT_SERVERS_LIST without providing sub-option 8 (the list
+    itself), which caused strict UEFI BC firmware to reject the
+    offer and the target stayed in DHCPDISCOVER retry. Don't
+    re-flip bit 2 without also adding sub-option 8."""
     discover = wire.parse(_make_pxe_discover())
     offer = build_offer(_cfg(), discover)
     assert offer is not None
     parsed = wire.parse(offer)
     body = parsed.options.get(43)  # raw 43 not in our IntEnum
     assert body is not None, "option 43 absent from offer"
-    # Sub-option-6-len-1-value-0x0C-end-0xff.
-    assert body == bytes((6, 1, 0x0C, 0xFF))
+    # Sub-option-6-len-1-value-0x08-end-0xff.
+    assert body == bytes((6, 1, 0x08, 0xFF))
 
 
 def test_build_offer_accepts_gpxe_vendor_class() -> None:
