@@ -418,50 +418,110 @@ def create_app(
         # the next PXE boot returns sanboot. ``flash`` stays
         # ``flash`` (per-job CI cadence keeps reflashing).
         host = _request_host(request)
-        if machine.get("boot_policy") == "tui":
-            template = jinja.get_template("ipxe_tui.j2")
-            return template.render(mac=normalised, machine=machine, host=host)
+        policy = machine.get("boot_policy")
         ref = machine.get("bty_image_ref")
-        if ref and machine.get("boot_policy") in ("flash", "flash-once"):
-            # Emit the iPXE flash chain whose URL ends in
-            # ``/images/<ref>/<name>``. The serve_image route does
-            # eager cache-through (Option A): if the bound entry's
-            # disk_image_sha is unknown the route fetches upstream
-            # synchronously before sendfile-ing to the live env's
-            # curl. Operators who care about first-flash latency
-            # pre-warm the cache via the /ui/images Fetch button.
+
+        # First decide the offer (template + summary + details).
+        # This keeps the "what did we hand out" decision in one
+        # place so the per-hit event log mirrors the actual render.
+        rendered: str
+        offer_kind: str
+        offer_summary: str
+        offer_details: dict[str, Any]
+
+        if policy == "tui":
+            template = jinja.get_template("ipxe_tui.j2")
+            rendered = template.render(mac=normalised, machine=machine, host=host)
+            offer_kind = "tui"
+            offer_summary = f"{normalised} offered tui (interactive bty-tui on tty1)"
+            offer_details = {"offer": "tui"}
+        elif ref and policy in ("flash", "flash-once"):
             image_name = _flash_target_for_ref(str(ref))
             if image_name is not None:
                 template = jinja.get_template("ipxe_flash.j2")
-                return template.render(
+                rendered = template.render(
                     mac=normalised,
                     machine=machine,
                     host=host,
                     image_name=image_name,
                     flash_key=str(ref),
                 )
-            # Orphaned binding: machine targets a ref that no
-            # catalog_entries row resolves. Log loudly so the
-            # operator sees "you set boot_policy=flash but the
-            # ref is dangling" instead of a silent fall-through.
-            with _db.open_db(state_path) as conn:
+                offer_kind = policy  # "flash" or "flash-once"
                 short = str(ref)[:12]
-                _log_event(
-                    conn,
-                    kind="pxe.flash.orphan_ref",
-                    summary=f"machine {normalised} bound to ref={short}...: no catalog row",
-                    subject_kind="machine",
-                    subject_id=normalised,
-                    actor="pxe-client",
-                    source_ip=_client_ip(request),
-                    details={"bty_image_ref": ref},
+                offer_summary = f"{normalised} offered {policy} for ref={short}... ({image_name})"
+                offer_details = {
+                    "offer": policy,
+                    "bty_image_ref": ref,
+                    "image_name": image_name,
+                }
+            else:
+                # Orphaned binding: machine targets a ref that no
+                # catalog_entries row resolves. Falls through to the
+                # ipxe.j2 (sanboot-or-local-msg) branch, but the
+                # operator sees a louder event so the
+                # "boot_policy=flash but ref is dangling" case
+                # doesn't look like a normal hit.
+                short = str(ref)[:12]
+                with _db.open_db(state_path) as conn:
+                    _log_event(
+                        conn,
+                        kind="pxe.flash.orphan_ref",
+                        summary=f"machine {normalised} bound to ref={short}...: no catalog row",
+                        subject_kind="machine",
+                        subject_id=normalised,
+                        actor="pxe-client",
+                        source_ip=client_ip,
+                        details={"bty_image_ref": ref},
+                    )
+                    conn.commit()
+                template = jinja.get_template("ipxe.j2")
+                rendered = template.render(mac=normalised, machine=machine)
+                offer_kind = "local-fallback"
+                offer_summary = (
+                    f"{normalised} offered local fallback "
+                    f"(boot_policy={policy} but ref={short}... is orphaned)"
                 )
-                conn.commit()
-        if ref:
+                offer_details = {
+                    "offer": "local-fallback",
+                    "bty_image_ref": ref,
+                    "reason": "orphan_ref",
+                }
+        elif ref:
             template = jinja.get_template("ipxe.j2")
-            return template.render(mac=normalised, machine=machine)
-        template = jinja.get_template("ipxe_unknown.j2")
-        return template.render(mac=normalised, machine=machine)
+            rendered = template.render(mac=normalised, machine=machine)
+            offer_kind = "local"
+            short = str(ref)[:12]
+            offer_summary = f"{normalised} offered local (sanboot) for ref={short}..."
+            offer_details = {"offer": "local", "bty_image_ref": ref}
+        else:
+            template = jinja.get_template("ipxe_unknown.j2")
+            rendered = template.render(mac=normalised, machine=machine)
+            offer_kind = "unknown"
+            offer_summary = f"{normalised} offered local (sanboot) -- no bty_image_ref bound"
+            offer_details = {"offer": "unknown"}
+
+        # Audit every PXE hit. Cheap (one INSERT) and gives the
+        # operator a full timeline of "client X showed up, server
+        # offered Y". The events table is append-only with no
+        # retention cap today; long-running per-job CI loops will
+        # grow it indefinitely. If that becomes a problem, the
+        # ``pxe.offered`` kind is a natural candidate for a
+        # subject-id-keyed rolling-window prune ("keep the last 100
+        # per MAC").
+        with _db.open_db(state_path) as conn:
+            _log_event(
+                conn,
+                kind="pxe.offered",
+                summary=offer_summary,
+                subject_kind="machine",
+                subject_id=normalised,
+                actor="pxe-client",
+                source_ip=client_ip,
+                details={"boot_policy": policy, **offer_details, "offer_kind": offer_kind},
+            )
+            conn.commit()
+
+        return rendered
 
     @app.post(
         "/pxe/{mac}/done",

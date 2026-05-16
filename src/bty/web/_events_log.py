@@ -92,6 +92,8 @@ KNOWN_EVENT_KINDS: tuple[str, ...] = (
     "machine.upserted",
     "machine.deleted",
     "machine.flashed",
+    "pxe.offered",
+    "pxe.flash.orphan_ref",
     "image.uploaded",
     "image.upload_failed",
     "image.hashed",

@@ -1180,6 +1180,53 @@ def test_pxe_done_flips_flash_once_to_local(app_client: TestClient) -> None:
     assert after["boot_policy"] == "local"
 
 
+def test_pxe_hit_records_pxe_offered_event(app_client: TestClient) -> None:
+    """Every /pxe/{mac} hit emits a ``pxe.offered`` event recording
+    which template was returned. Gives the operator a full timeline
+    of "client X showed up, server handed back Y" without enabling
+    debug logging."""
+    # Bind a machine in flash mode so we get a non-tui offer.
+    ref = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    app_client.put(
+        "/machines/aa:bb:cc:dd:ee:f0",
+        json={"bty_image_ref": ref, "boot_policy": "local"},
+        cookies=AUTH,
+    )
+    app_client.get("/pxe/aa:bb:cc:dd:ee:f0")
+    r = app_client.get(
+        "/events",
+        params={
+            "subject_kind": "machine",
+            "subject_id": "aa:bb:cc:dd:ee:f0",
+            "kind": "pxe.offered",
+        },
+        cookies=AUTH,
+    )
+    assert r.status_code == 200
+    events = r.json()["events"]
+    assert len(events) == 1
+    ev = events[0]
+    assert ev["kind"] == "pxe.offered"
+    assert ev["subject_id"] == "aa:bb:cc:dd:ee:f0"
+    assert ev["actor"] == "pxe-client"
+    assert ev["details"]["offer"] == "local"
+    assert ev["details"]["boot_policy"] == "local"
+
+
+def test_pxe_hit_records_tui_offer_for_unknown_mac(app_client: TestClient) -> None:
+    """Auto-discovery (unknown MAC) records both ``machine.discovered``
+    AND a ``pxe.offered`` event with offer=tui."""
+    app_client.get("/pxe/aa:bb:cc:dd:ee:f1")
+    r = app_client.get(
+        "/events",
+        params={"subject_kind": "machine", "subject_id": "aa:bb:cc:dd:ee:f1"},
+        cookies=AUTH,
+    )
+    events = {e["kind"]: e for e in r.json()["events"]}
+    assert set(events) == {"machine.discovered", "pxe.offered"}
+    assert events["pxe.offered"]["details"]["offer"] == "tui"
+
+
 def test_machines_upsert_accepts_flash_once(app_client: TestClient) -> None:
     """flash-once is in BOOT_POLICIES so Pydantic accepts it."""
     r = app_client.put(
@@ -1486,7 +1533,9 @@ def test_image_upload_oserror_logs_failure_event(
 
 def test_events_filter_by_subject_id(app_client: TestClient) -> None:
     """The per-MAC embedded card on /ui/machines/{mac} drives this
-    filter -- only events for the given MAC come back."""
+    filter -- only events for the given MAC come back. The /pxe
+    hit emits two events (discovery + offer) so we assert the
+    count is 2 and the subject_id matches."""
     app_client.get("/pxe/aa:bb:cc:dd:ee:01")
     app_client.get("/pxe/aa:bb:cc:dd:ee:02")
     r = app_client.get(
@@ -1496,8 +1545,9 @@ def test_events_filter_by_subject_id(app_client: TestClient) -> None:
     )
     assert r.status_code == 200
     events = r.json()["events"]
-    assert len(events) == 1
-    assert events[0]["subject_id"] == "aa:bb:cc:dd:ee:01"
+    assert len(events) == 2
+    assert {e["subject_id"] for e in events} == {"aa:bb:cc:dd:ee:01"}
+    assert {e["kind"] for e in events} == {"machine.discovered", "pxe.offered"}
 
 
 def test_ui_events_page_renders(app_client: TestClient) -> None:
