@@ -530,6 +530,77 @@ def test_ui_machine_upsert_persists_boot_policy_flash(client: TestClient) -> Non
     assert api.json()["target_disk_serial"] == "ATA-WDC-123456"
 
 
+def test_ui_machine_detail_renders_disk_inventory_dropdown(client: TestClient) -> None:
+    """When the machine has ``known_disks`` populated (bty-tui has
+    reported in), /ui/machines/{mac} shows a populated <select>
+    with one <option> per disk. Each option displays the path /
+    size / model / serial so the operator picks a recognisable
+    line."""
+    _login(client)
+    # Discover the machine, then post inventory (mirrors what
+    # bty-tui does on startup).
+    client.get("/pxe/aa:bb:cc:dd:ee:88")
+    inv = client.post(
+        "/pxe/aa:bb:cc:dd:ee:88/inventory",
+        json={
+            "disks": [
+                {
+                    "path": "/dev/sda",
+                    "size": "500G",
+                    "model": "Samsung 870 EVO",
+                    "serial": "S5RRNF0N123456",
+                    "tran": "sata",
+                },
+                {
+                    "path": "/dev/nvme0n1",
+                    "size": "2T",
+                    "model": "WDC PC SN810",
+                    "serial": "21345A800002",
+                    "tran": "nvme",
+                },
+            ],
+        },
+    )
+    assert inv.status_code == 204, inv.text
+    r = client.get("/ui/machines/aa:bb:cc:dd:ee:88", cookies=AUTH)
+    assert r.status_code == 200
+    body = r.text
+    # The <select> for target_disk_serial exists.
+    assert 'name="target_disk_serial"' in body
+    # Both serials are options.
+    assert "S5RRNF0N123456" in body
+    assert "21345A800002" in body
+    # Each option shows the path so the operator can map the serial.
+    assert "/dev/sda" in body
+    assert "/dev/nvme0n1" in body
+    # The "no inventory yet" alert should NOT render.
+    assert "No disk inventory yet for this machine" not in body
+
+
+def test_ui_machine_detail_renders_no_inventory_warning(client: TestClient) -> None:
+    """A machine that hasn't yet reported its inventory shows a
+    yellow warning alert pointing at the recovery path ("set
+    boot_policy=tui and power-cycle") instead of a broken empty
+    dropdown."""
+    _login(client)
+    # Seed a machine record without ever posting inventory.
+    client.put(
+        "/machines/aa:bb:cc:dd:ee:89",
+        json={"boot_policy": "local"},
+        cookies=AUTH,
+    )
+    r = client.get("/ui/machines/aa:bb:cc:dd:ee:89", cookies=AUTH)
+    assert r.status_code == 200
+    body = r.text
+    assert "No disk inventory yet for this machine" in body
+    assert "alert-warning" in body
+    # The dropdown <select> should NOT be rendered; the hidden
+    # input form-field preserves the existing serial (empty here)
+    # so a form submit doesn't clobber the value with garbage.
+    assert 'id="target_disk_serial"' not in body
+    assert 'type="hidden" name="target_disk_serial"' in body
+
+
 def test_ui_machine_upsert_refuses_flash_without_target_disk(client: TestClient) -> None:
     """Safety gate (operator request: refuse if target_disk is
     unset). Setting boot_policy=flash without target_disk_serial

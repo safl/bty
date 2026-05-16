@@ -20,9 +20,12 @@
             /* The bty bat mascot, used in place of a Bootstrap icon
                so the brand pill reads as "this product" rather than
                "some generic networking thing". Sized by height to
-               align with the badge / nav-btn baseline; width auto
-               preserves the source PNG's 3:2 aspect ratio (forcing
-               1:1 squashes the mascot horizontally). */
+               align with the badge / nav-btn baseline; ``width: auto``
+               so the aspect ratio of whatever PNG is currently
+               vendored under /static/bty-favicon.png is preserved.
+               The art has been swapped at different aspect ratios
+               over time (1:1, 3:2, ~1.46:1); the layout
+               accommodates all of them without hardcoded width. */
             height: 1.6rem;
             width: auto;
             vertical-align: -0.4rem;

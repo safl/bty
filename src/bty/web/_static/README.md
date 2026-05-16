@@ -15,8 +15,8 @@ would defeat the offline-friendly design.
 | `fonts/bootstrap-icons.woff`  | <https://cdn.jsdelivr.net/npm/bootstrap-icons@1.13.1/font/fonts/bootstrap-icons.woff>        | 1.13.1  |
 | `htmx.min.js`                 | <https://cdn.jsdelivr.net/npm/htmx.org@2.0.4/dist/htmx.min.js>                               | 2.0.4   |
 | `sse.js`                      | <https://cdn.jsdelivr.net/npm/htmx-ext-sse@2.2.3/sse.js>                                     | 2.2.3   |
-| `bty-mascot.png`              | downscale of ``docs/src/_static/bty-mascot.png`` (``magick ... -resize 384x384``)            | 384px   |
-| `bty-favicon.png`             | downscale of ``docs/src/_static/bty-mascot.png`` (``magick ... -resize 64x64``)              | 64px    |
+| `bty-mascot.png`              | square mascot art (2000x2000 in repo; rendered scaled in CSS).                               | 2000px  |
+| `bty-favicon.png`             | wider variant used in the navbar brand pill; aspect ratio is not 1:1 -- the navbar CSS sets ``width: auto`` so the aspect is preserved when the mascot or favicon art is refreshed. | 1017x698 |
 
 All served by FastAPI under ``/static/`` at runtime. Hatchling includes
 this directory in the wheel automatically (no special config needed -
