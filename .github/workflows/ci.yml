@@ -61,7 +61,13 @@ jobs:
             gdisk \
             e2fsprogs \
             parted \
-            exfatprogs
+            exfatprogs \
+            exfat-fuse
+          # Ubuntu runners often don't auto-load the in-kernel exfat
+          # module; try to load it now and fall back to FUSE (exfat-
+          # fuse provides /sbin/mount.exfat which mount -t exfat
+          # delegates to when the kernel module is absent).
+          sudo modprobe exfat 2>/dev/null || true
       - run: uv sync --all-extras --group dev
       # Integration tests use losetup + dd against a real loop device,
       # so they need root. The default pytest run excludes them via the
