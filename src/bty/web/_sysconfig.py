@@ -30,6 +30,12 @@ from pathlib import Path
 SYSNET_PATH = Path("/sys/class/net")
 TFTP_HELPER = "/usr/local/sbin/bty-web-tftp"
 
+# The systemd unit that owns the TFTP root on the appliance. One
+# constant + the helper script that hardcodes the same name --
+# kept in lockstep on purpose; ``tftp_status`` shouldn't be
+# pointing at a different unit than the helper restarts.
+TFTP_UNIT = "dnsmasq.service"
+
 # Allowlist of actions the helper accepts. Mirrored on the Python
 # side so a typo here fails fast with a clean SysConfigError
 # instead of getting a confusing systemctl error from the helper.
@@ -54,6 +60,13 @@ class DaemonStatus:
 
     state: str  # "active" | "inactive" | "failed" | "unknown" | ...
 
+    @property
+    def is_active(self) -> bool:
+        """``True`` when systemd reports the unit as ``active``.
+        Used by the template to disable the Start button while the
+        daemon is up + the Stop button while it's down."""
+        return self.state == "active"
+
 
 def tftp_status() -> DaemonStatus:
     """Return the ``dnsmasq.service`` state.
@@ -65,7 +78,7 @@ def tftp_status() -> DaemonStatus:
     """
     try:
         result = subprocess.run(
-            ["systemctl", "is-active", "dnsmasq.service"],
+            ["systemctl", "is-active", TFTP_UNIT],
             capture_output=True,
             text=True,
             check=False,

@@ -169,12 +169,12 @@
             <form action="/ui/settings/tftp-control" method="post" class="d-inline-flex gap-1 m-0 ms-auto">
                 <button type="submit" name="action" value="start"
                         class="btn btn-sm btn-outline-success"
-                        {% if tftp.state == 'active' %}disabled{% endif %}>
+                        {% if tftp.is_active %}disabled{% endif %}>
                     <i class="bi bi-play-fill"></i> Start
                 </button>
                 <button type="submit" name="action" value="stop"
                         class="btn btn-sm btn-outline-secondary"
-                        {% if tftp.state != 'active' %}disabled{% endif %}>
+                        {% if not tftp.is_active %}disabled{% endif %}>
                     <i class="bi bi-stop-fill"></i> Stop
                 </button>
                 <button type="submit" name="action" value="restart"
