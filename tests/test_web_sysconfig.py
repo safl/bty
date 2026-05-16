@@ -16,6 +16,7 @@ from unittest.mock import patch
 import pytest
 
 from bty.web._sysconfig import (
+    DaemonEvent,
     DaemonStatus,
     Interface,
     PxeConfig,
@@ -26,6 +27,7 @@ from bty.web._sysconfig import (
     daemon_statuses,
     list_interfaces,
     pxe_active,
+    recent_daemon_events,
 )
 
 # ---------- list_interfaces -------------------------------------------------
@@ -263,3 +265,121 @@ def test_control_daemon_helper_failure_wraps_as_sysconfig_error() -> None:
         pytest.raises(SysConfigError, match="exited 1"),
     ):
         control_daemon("bty-pxe-proxy", "restart")
+
+
+# ---------- recent_daemon_events -------------------------------------------
+
+
+def _journal_line(*, unit: str, ts_us: int, message: str) -> str:
+    """Compose one journalctl --output=json line."""
+    import json as _json
+
+    return _json.dumps(
+        {
+            "_SYSTEMD_UNIT": f"{unit}.service",
+            "__REALTIME_TIMESTAMP": str(ts_us),
+            "MESSAGE": message,
+        }
+    )
+
+
+def test_recent_daemon_events_parses_structured_lines() -> None:
+    lines = "\n".join(
+        [
+            _journal_line(
+                unit="bty-pxe-proxy",
+                ts_us=1_700_000_000_000_000,
+                message='{"evt":"dhcp.offer","mac":"aa:bb","arch":7,"bootfile":"ipxe.efi"}',
+            ),
+            _journal_line(
+                unit="bty-tftp",
+                ts_us=1_700_000_001_000_000,
+                message='{"evt":"tftp.complete","peer":"192.168.1.50:1234","bytes":1024}',
+            ),
+        ]
+    )
+    completed = subprocess.CompletedProcess(args=[], returncode=0, stdout=lines, stderr="")
+    with patch("bty.web._sysconfig.subprocess.run", return_value=completed) as mock_run:
+        out = recent_daemon_events()
+    # journalctl invocation: both units passed via -u, JSON output.
+    cmd = mock_run.call_args[0][0]
+    assert cmd[:3] == ["journalctl", "--output=json", "--no-pager"]
+    assert "-u" in cmd and "bty-pxe-proxy.service" in cmd
+    assert "bty-tftp.service" in cmd
+    # Parsed events kept in journal order (oldest first), ``evt``
+    # stripped from fields.
+    assert len(out) == 2
+    assert out[0] == DaemonEvent(
+        unit="bty-pxe-proxy",
+        ts_us=1_700_000_000_000_000,
+        event="dhcp.offer",
+        fields={"mac": "aa:bb", "arch": 7, "bootfile": "ipxe.efi"},
+    )
+    assert out[1].event == "tftp.complete"
+
+
+def test_recent_daemon_events_skips_plain_log_lines() -> None:
+    """Daemons emit a plain-text startup banner alongside structured
+    events. Those land in journald but aren't JSON; the parser must
+    skip them silently rather than blowing up."""
+    lines = "\n".join(
+        [
+            _journal_line(
+                unit="bty-pxe-proxy",
+                ts_us=1_700_000_000_000_000,
+                message="bty-pxe-proxy: listening on enp90s0 (UDP 67)",
+            ),
+            _journal_line(
+                unit="bty-pxe-proxy",
+                ts_us=1_700_000_000_500_000,
+                message='{"evt":"dhcp.discover","mac":"aa:bb","arch":7}',
+            ),
+        ]
+    )
+    completed = subprocess.CompletedProcess(args=[], returncode=0, stdout=lines, stderr="")
+    with patch("bty.web._sysconfig.subprocess.run", return_value=completed):
+        out = recent_daemon_events()
+    # Only the structured line came through.
+    assert len(out) == 1
+    assert out[0].event == "dhcp.discover"
+
+
+def test_recent_daemon_events_skips_dict_without_evt_key() -> None:
+    """JSON-but-not-an-event messages (e.g. ``log.info(json.dumps({...}))``
+    elsewhere) must not be treated as events."""
+    lines = _journal_line(
+        unit="bty-pxe-proxy",
+        ts_us=1_700_000_000_000_000,
+        message='{"hello": "world"}',
+    )
+    completed = subprocess.CompletedProcess(args=[], returncode=0, stdout=lines, stderr="")
+    with patch("bty.web._sysconfig.subprocess.run", return_value=completed):
+        assert recent_daemon_events() == []
+
+
+def test_recent_daemon_events_returns_empty_when_journalctl_missing() -> None:
+    with patch(
+        "bty.web._sysconfig.subprocess.run",
+        side_effect=FileNotFoundError("journalctl"),
+    ):
+        assert recent_daemon_events() == []
+
+
+def test_recent_daemon_events_returns_empty_on_timeout() -> None:
+    with patch(
+        "bty.web._sysconfig.subprocess.run",
+        side_effect=subprocess.TimeoutExpired(cmd=["journalctl"], timeout=5),
+    ):
+        assert recent_daemon_events() == []
+
+
+def test_daemon_event_hms_and_iso_utc_properties() -> None:
+    # 1700000000 == 2023-11-14 22:13:20 UTC.
+    e = DaemonEvent(
+        unit="bty-pxe-proxy",
+        ts_us=1_700_000_000_000_000,
+        event="dhcp.offer",
+        fields={},
+    )
+    assert e.hms_utc == "22:13:20"
+    assert e.iso_utc.startswith("2023-11-14T22:13:20")

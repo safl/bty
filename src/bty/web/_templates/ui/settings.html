@@ -234,12 +234,76 @@
                 </tbody>
             </table>
         </div>
-        <p class="form-text mt-3 mb-0">
+        <p class="form-text mt-3 mb-3">
             ``Start`` of a daemon that doesn't see
             <code>/etc/default/bty-pxe-proxy</code> is a no-op: the unit's
             <code>ConditionPathExists=</code> guard keeps it cleanly inactive
             until you activate the PXE workflow above.
         </p>
+
+        {# Recent structured events from the daemons (DHCP
+           discover/offer, TFTP rrq/complete/error). Read on each
+           page render from journald; refresh by reloading. Shows
+           operators what targets the proxy + tftp are actually
+           talking to, without needing SSH + journalctl. #}
+        <h3 class="h6 mb-2"><i class="bi bi-broadcast me-1"></i>Recent activity</h3>
+        {% if pxe_events %}
+        <div class="table-responsive" style="max-height: 24rem;">
+            <table class="table table-sm table-striped mb-0 small">
+                <thead class="sticky-top bg-body">
+                    <tr>
+                        <th scope="col" style="width: 11rem;">Time</th>
+                        <th scope="col" style="width: 10rem;">Daemon</th>
+                        <th scope="col" style="width: 9rem;">Event</th>
+                        <th scope="col">Detail</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {# Reverse: newest first for at-a-glance scanning.
+                       jinja's reverse filter is fine on a small list (80
+                       items max per the handler cap). #}
+                    {% for e in pxe_events|reverse %}
+                    <tr>
+                        <td class="font-monospace text-muted">
+                            <span title="{{ e.iso_utc }}">{{ e.hms_utc }}</span>
+                        </td>
+                        <td><code>{{ e.unit }}</code></td>
+                        <td>
+                            {# Map event prefix to a Bootstrap badge:
+                               offer / complete = green (good), error /
+                               giveup = red, ignore = amber, everything
+                               else (discover, rrq, ...) neutral. #}
+                            {% if e.event in ('dhcp.offer', 'tftp.complete') %}
+                                <span class="badge bg-success">{{ e.event }}</span>
+                            {% elif e.event in ('dhcp.error', 'tftp.error', 'tftp.giveup') %}
+                                <span class="badge bg-danger">{{ e.event }}</span>
+                            {% elif e.event == 'dhcp.ignore' %}
+                                <span class="badge bg-warning text-dark">{{ e.event }}</span>
+                            {% else %}
+                                <span class="badge bg-secondary">{{ e.event }}</span>
+                            {% endif %}
+                        </td>
+                        <td class="font-monospace small text-break">
+                            {# Flat key=value list keeps the wire shape
+                               obvious. Operators reading this are
+                               diagnosing PXE so they want the raw fields,
+                               not a stylised view. #}
+                            {% for k, v in e.fields.items() %}
+                            <span class="me-2"><span class="text-muted">{{ k }}=</span>{{ v }}</span>
+                            {% endfor %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="text-muted small mb-0">
+            No daemon events recorded yet. Activate PXE and trigger a
+            target to PXE-boot; this feed populates from journald
+            (which captures the daemons' structured JSON output).
+        </p>
+        {% endif %}
     </div>
 </div>
 

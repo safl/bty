@@ -135,6 +135,13 @@ runcmd:
     set -eu
     useradd --system --no-create-home --shell /usr/sbin/nologin bty
     echo 'bty:bty' | chpasswd
+    # systemd-journal membership lets bty-web read the
+    # bty-pxe-proxy + bty-tftp journals to surface the structured
+    # event feed in /ui/settings. Modern systemd permits the
+    # unit's User= to read its own journal without this, but the
+    # group membership is a portable belt-and-braces guarantee
+    # across systemd versions and Storage= configurations.
+    usermod -a -G systemd-journal bty
     install -d -o root -g root -m 0755 /opt/bty
     python3 -m venv /opt/bty/venv
     /opt/bty/venv/bin/pip install --no-cache-dir --upgrade pip

@@ -23,6 +23,7 @@ import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 PXE_ACTIVE_PATH = Path("/etc/default/bty-pxe-proxy")
 SYSNET_PATH = Path("/sys/class/net")
@@ -95,6 +96,43 @@ class PxeState:
 
     config: PxeConfig | None
     iface_present: bool
+
+
+@dataclass(frozen=True)
+class DaemonEvent:
+    """One parsed structured event from a PXE-stack daemon's journal.
+
+    The daemons emit one-line JSON to stdout (see
+    ``bty.pxe._events.emit``); journald captures those as MESSAGE
+    fields; :func:`recent_daemon_events` parses them back. Each
+    instance carries the unit name, timestamp, event name (``evt``),
+    and the rest of the payload as a free-form mapping for the
+    template to render.
+
+    Non-JSON log lines (startup banner, errors, plain ``log.info``
+    output) get filtered out at parse time -- only entries whose
+    MESSAGE deserialises into a dict with an ``evt`` key make it
+    here.
+    """
+
+    unit: str
+    ts_us: int  # journald __REALTIME_TIMESTAMP, microseconds since epoch
+    event: str  # the ``evt`` field, e.g. "dhcp.offer"
+    fields: dict[str, Any]  # remaining JSON fields, ``evt`` stripped
+
+    @property
+    def hms_utc(self) -> str:
+        """``HH:MM:SS`` (UTC) for the row's left-most cell."""
+        import datetime as _dt
+
+        return _dt.datetime.fromtimestamp(self.ts_us / 1_000_000, tz=_dt.UTC).strftime("%H:%M:%S")
+
+    @property
+    def iso_utc(self) -> str:
+        """ISO-8601 UTC timestamp; used as the cell title= tooltip."""
+        import datetime as _dt
+
+        return _dt.datetime.fromtimestamp(self.ts_us / 1_000_000, tz=_dt.UTC).isoformat()
 
 
 @dataclass(frozen=True)
@@ -287,6 +325,91 @@ def daemon_status(unit: str) -> DaemonStatus:
 def daemon_statuses(units: tuple[str, ...] = PXE_DAEMON_UNITS) -> list[DaemonStatus]:
     """Convenience: status for each PXE-stack daemon in display order."""
     return [daemon_status(u) for u in units]
+
+
+def recent_daemon_events(
+    units: tuple[str, ...] = PXE_DAEMON_UNITS,
+    *,
+    limit: int = 200,
+) -> list[DaemonEvent]:
+    """Read recent structured events from the PXE daemons' journals.
+
+    Shells ``journalctl --output=json -u <unit>.service [...]`` with
+    the configured units; parses each line's MESSAGE as JSON and
+    keeps only entries whose payload has an ``evt`` key (i.e.
+    actual emit() output, not plain log lines). Returns events in
+    journald's natural order (oldest first), capped at ``limit``.
+
+    Failure modes -- all return an empty list, no exception:
+
+    * journalctl missing (test hosts, containers without systemd)
+    * permission denied (bty user not in systemd-journal group AND
+      systemd predates the unit-owner-can-read-own-journal change)
+    * timeout (journal IO stuck for ~5s)
+
+    bty-web tolerates an empty feed cleanly -- the template just
+    renders "no recent events". This is diagnostic data, not a
+    correctness boundary.
+    """
+    if not units:
+        return []
+    cmd: list[str] = [
+        "journalctl",
+        "--output=json",
+        "--no-pager",
+        "-n",
+        str(limit),
+    ]
+    for unit in units:
+        cmd.extend(["-u", f"{unit}.service"])
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return []
+    events: list[DaemonEvent] = []
+    for line in result.stdout.splitlines():
+        if not line:
+            continue
+        try:
+            jrec = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        message = jrec.get("MESSAGE")
+        if not isinstance(message, str):
+            continue
+        try:
+            payload = json.loads(message)
+        except json.JSONDecodeError:
+            continue  # non-JSON log line (startup banner, errors, ...)
+        if not isinstance(payload, dict):
+            continue
+        evt = payload.get("evt")
+        if not isinstance(evt, str):
+            continue
+        # journald reports the unit as "bty-pxe-proxy.service";
+        # strip the suffix for display alignment with the daemon
+        # status panel.
+        unit_raw = jrec.get("_SYSTEMD_UNIT") or jrec.get("UNIT") or ""
+        unit = unit_raw.removesuffix(".service") if isinstance(unit_raw, str) else ""
+        # __REALTIME_TIMESTAMP is a string of microseconds. Parse
+        # to int once here so templates can format consistently.
+        ts_raw = jrec.get("__REALTIME_TIMESTAMP")
+        try:
+            ts_us = int(ts_raw) if ts_raw is not None else 0
+        except (TypeError, ValueError):
+            ts_us = 0
+        # Strip ``evt`` from the per-event detail mapping; it's
+        # carried as a typed field on DaemonEvent so duplicating
+        # it inside ``fields`` would be wasted bytes in the template.
+        fields = {k: v for k, v in payload.items() if k != "evt"}
+        events.append(DaemonEvent(unit=unit, ts_us=ts_us, event=evt, fields=fields))
+    return events
 
 
 def control_daemon(unit: str, action: str) -> None:

@@ -41,6 +41,7 @@ from enum import IntEnum
 from pathlib import Path
 
 from bty.pxe._daemon import run_udp_daemon
+from bty.pxe._events import emit as emit_event
 
 log = logging.getLogger("bty.pxe.tftp")
 
@@ -395,6 +396,8 @@ class _ListenerProtocol(asyncio.DatagramProtocol):
             rrq.mode,
             rrq.options,
         )
+        peer = f"{client_addr[0]}:{client_addr[1]}"
+        emit_event("tftp.rrq", peer=peer, file=rrq.filename, mode=rrq.mode)
         if rrq.mode != "octet":
             await self._send_error_oneshot(
                 client_addr,
@@ -434,6 +437,7 @@ class _ListenerProtocol(asyncio.DatagramProtocol):
             timeout=timeout,
             max_retries=self._cfg.max_retries,
             oack=oack_options if oack_options else None,
+            filename=rrq.filename,
         ).run()
 
     async def _send_error_oneshot(
@@ -445,6 +449,12 @@ class _ListenerProtocol(asyncio.DatagramProtocol):
         from both sides per the spec, so we don't need asyncio
         plumbing here, just a plain sendto + close."""
         log.info("tftp: ERROR %s -> %s: %s", code.name, client_addr, message)
+        emit_event(
+            "tftp.error",
+            peer=f"{client_addr[0]}:{client_addr[1]}",
+            code=code.name,
+            message=message,
+        )
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         try:
             sock.bind(("", 0))  # ephemeral TID
@@ -467,6 +477,11 @@ class _Transfer:
     timeout: float
     max_retries: int
     oack: dict[str, str] | None  # OACK options to send first if any
+    # Carried purely for structured-event payloads -- the wire path
+    # neither cares nor depends on it. Keeping it on the dataclass
+    # so the in-flight ``_drive`` / ``_send_and_wait_ack`` can emit
+    # tftp.complete / tftp.giveup with the filename inline.
+    filename: str = ""
 
     async def run(self) -> None:
         # ``local_addr=("0.0.0.0", 0)`` lets asyncio bind an
@@ -519,6 +534,13 @@ class _Transfer:
                     self.client_addr,
                     total,
                     block,
+                )
+                emit_event(
+                    "tftp.complete",
+                    peer=f"{self.client_addr[0]}:{self.client_addr[1]}",
+                    file=self.filename,
+                    bytes=total,
+                    blocks=block,
                 )
                 return
             block = (block + 1) & 0xFFFF  # 16-bit wrap is fine for our file sizes
@@ -580,6 +602,13 @@ class _Transfer:
             expected_block,
             self.client_addr,
             self.max_retries,
+        )
+        emit_event(
+            "tftp.giveup",
+            peer=f"{self.client_addr[0]}:{self.client_addr[1]}",
+            file=self.filename,
+            block=expected_block,
+            retries=self.max_retries,
         )
         return False
 

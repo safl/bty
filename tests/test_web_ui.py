@@ -841,6 +841,54 @@ def test_ui_settings_pxe_deactivate_failure_shows_danger_flash(client: TestClien
     assert "PXE deactivation failed" in r.text
 
 
+def test_ui_settings_renders_daemon_event_feed(client: TestClient) -> None:
+    """The Daemons card surfaces recent structured events from
+    journald: time, daemon, event badge, and key=value detail."""
+    from unittest.mock import patch
+
+    from bty.web._sysconfig import DaemonEvent
+
+    _login(client)
+    events = [
+        DaemonEvent(
+            unit="bty-pxe-proxy",
+            ts_us=1_700_000_000_000_000,
+            event="dhcp.offer",
+            fields={"mac": "aa:bb:cc:dd:ee:ff", "bootfile": "ipxe.efi"},
+        ),
+        DaemonEvent(
+            unit="bty-tftp",
+            ts_us=1_700_000_001_000_000,
+            event="tftp.complete",
+            fields={"peer": "192.168.1.50:1234", "bytes": 1024},
+        ),
+    ]
+    with patch("bty.web._sysconfig.recent_daemon_events", return_value=events):
+        r = client.get("/ui/settings")
+    assert r.status_code == 200
+    body = r.text
+    # Section header.
+    assert "Recent activity" in body
+    # Both event names rendered as badges.
+    assert 'class="badge bg-success">dhcp.offer' in body
+    assert 'class="badge bg-success">tftp.complete' in body
+    # Detail key=value pairs visible.
+    assert "mac=" in body and "aa:bb:cc:dd:ee:ff" in body
+    assert "bootfile=" in body and "ipxe.efi" in body
+    # Time-of-day cell from the @property.
+    assert "22:13:20" in body
+
+
+def test_ui_settings_empty_feed_shows_helpful_text(client: TestClient) -> None:
+    from unittest.mock import patch
+
+    _login(client)
+    with patch("bty.web._sysconfig.recent_daemon_events", return_value=[]):
+        r = client.get("/ui/settings")
+    assert r.status_code == 200
+    assert "No daemon events recorded yet" in r.text
+
+
 def test_ui_settings_renders_daemon_panel(client: TestClient) -> None:
     """Settings page surfaces the per-daemon diagnostic panel: badges
     show the state, action buttons are present for each daemon."""

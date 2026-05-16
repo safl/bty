@@ -762,6 +762,12 @@ def register_ui_routes(
         # so the operator can triage a half-up state from the UI
         # without SSHing in for ``systemctl status``.
         pxe_daemons = _sysconfig.daemon_statuses()
+        # Recent structured events emitted by the daemons (DHCP
+        # discover/offer, TFTP rrq/complete/error). Read from
+        # journald; shells out to journalctl. Bounded to the 80
+        # most recent entries so the page stays cheap to render
+        # even after a busy boot session.
+        pxe_events = _sysconfig.recent_daemon_events(limit=80)
         return render(
             "ui/settings.html",
             request,
@@ -769,6 +775,7 @@ def register_ui_routes(
             pxe=pxe,
             pxe_iface_present=pxe_iface_present,
             pxe_daemons=pxe_daemons,
+            pxe_events=pxe_events,
             missing_netboot_artifacts=missing_netboot,
             boot_root=str(boot_root),
             new_token=new_token,

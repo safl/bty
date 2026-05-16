@@ -41,6 +41,7 @@ from dataclasses import dataclass
 
 from bty.pxe import wire
 from bty.pxe._daemon import run_udp_daemon
+from bty.pxe._events import emit as emit_event
 from bty.pxe.wire import MsgType, Op, Opt, Packet
 
 log = logging.getLogger("bty.pxe.proxy")
@@ -280,6 +281,16 @@ class _DhcpServerProtocol(asyncio.DatagramProtocol):
             return
         if not wire.is_pxe_client_discover(discover):
             return
+        mac_pretty = ":".join(f"{b:02x}" for b in discover.mac)
+        vendor_class = (discover.vendor_class or b"").decode("ascii", errors="replace")
+        user_class = (discover.user_class or b"").decode("ascii", errors="replace")
+        emit_event(
+            "dhcp.discover",
+            mac=mac_pretty,
+            arch=discover.client_arch,
+            vendor_class=vendor_class,
+            user_class=user_class or None,
+        )
         # decide-then-build kept inside one defensive try so a bug
         # in either branch logs once + drops the packet, rather
         # than two near-identical try/except blocks both saying
@@ -292,23 +303,36 @@ class _DhcpServerProtocol(asyncio.DatagramProtocol):
                 is_ipxe=(discover.user_class or b"") == b"iPXE",
             )
             if decision is None:
+                emit_event(
+                    "dhcp.ignore",
+                    mac=mac_pretty,
+                    arch=discover.client_arch,
+                    reason="no bootfile for arch / class",
+                )
                 return
             offer = _build_offer_packet(self._cfg, discover, decision)
         except Exception as exc:
             log.exception("pxe: failed to build offer (xid=%#x): %s", discover.xid, exc)
+            emit_event("dhcp.error", mac=mac_pretty, error=str(exc))
             return
         assert self._transport is not None
         # Broadcast the reply -- the client has no IP yet so we
         # can't unicast.
         self._transport.sendto(offer, ("255.255.255.255", 68))
-        mac_pretty = ":".join(f"{b:02x}" for b in discover.mac)
         log.info(
             "pxe: offered %s to %s (arch=%s, vendor-class=%s, xid=%#x)",
             decision.bootfile.decode("ascii", errors="replace"),
             mac_pretty,
             discover.client_arch,
-            (discover.vendor_class or b"").decode("ascii", errors="replace"),
+            vendor_class,
             discover.xid,
+        )
+        emit_event(
+            "dhcp.offer",
+            mac=mac_pretty,
+            arch=discover.client_arch,
+            bootfile=decision.bootfile.decode("ascii", errors="replace"),
+            server_ip=self._cfg.server_ip,
         )
 
     def error_received(self, exc: Exception) -> None:
