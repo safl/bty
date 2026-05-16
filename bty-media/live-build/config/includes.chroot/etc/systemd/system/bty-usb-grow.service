@@ -1,0 +1,26 @@
+[Unit]
+Description=Grow BTY_IMAGES partition to fill the USB on first boot
+Documentation=https://github.com/safl/bty
+# Skip cleanly when the USB doesn't have a BTY_IMAGES partition
+# (Ventoy / loopback boot path -- bty-images-discover.service
+# handles those).
+ConditionPathExists=/dev/disk/by-label/BTY_IMAGES
+# Must run BEFORE the mount unit so it sees the grown partition.
+Before=var-lib-bty-images.mount bty-images-discover.service bty-tui-on-tty1.service bty-flash-on-boot.service
+After=local-fs.target systemd-udev-settle.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/bty-usb-grow
+RemainAfterExit=yes
+StandardOutput=journal
+StandardError=journal
+# Hard cap on total runtime. parted resizepart + mkfs.exfat are
+# seconds-scale on any USB; tar archive + restore of a ~1 GiB
+# pre-baked bty-server image dominates the wall clock at ~30-60s
+# on USB 3.0. 120s leaves ample headroom while preventing a
+# wedged mkfs from delaying boot indefinitely.
+TimeoutStartSec=120s
+
+[Install]
+WantedBy=multi-user.target

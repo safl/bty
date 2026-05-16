@@ -1,0 +1,211 @@
+#!/bin/sh
+# bty-usb-grow: extend the BTY_IMAGES partition + filesystem to
+# fill the operator's USB stick on first boot, preserving any
+# baked-in or operator-staged content.
+#
+# The bty-usb live image is sized to a small minimum so the .iso
+# stays compact (and Ventoy / IP-KVM virtual-media friendly). When
+# an operator flashes it onto a 64 GB / 256 GB / whatever USB
+# stick, the BTY_IMAGES partition starts off as the same small
+# minimum and the rest of the stick sits unused. This script
+# extends the partition to fill the disk so the operator gets the
+# full capacity for their image catalog.
+#
+# exFAT doesn't support online resize, so the flow is:
+#
+#   1. Mount BTY_IMAGES read-only, archive its content to a tmpfs
+#      staging area (the live env's /tmp is tmpfs in RAM).
+#   2. parted resizepart N 100% on the parent disk.
+#   3. mkfs.exfat -L BTY_IMAGES on the resized partition.
+#   4. Mount the new partition read-write, restore the archive,
+#      drop the ``.bty-grown`` sentinel, unmount.
+#
+# The mount unit (``var-lib-bty-images.mount``) re-mounts at
+# ``/var/lib/bty/images`` read-only afterwards.
+#
+# Safeties (the user's stated concerns are long-running / failure
+# / mess-up):
+#
+#   * Hard size cap: if archived content would exceed
+#     ``MAX_CONTENT_MIB`` we bail rather than risk OOM in tmpfs.
+#     The bake-time content is just ``.bri`` descriptors (KB-scale)
+#     plus optionally one ``bty-server.img.gz`` (~1 GiB); 4 GiB cap
+#     is comfortably above that.
+#   * Sentinel ``.bty-grown`` on the partition prevents re-runs
+#     once the partition has been extended successfully.
+#   * Sentinel ``.bty-grown-failed`` prevents repeated thrashing
+#     if a run errors mid-flight. Operator removes that file (and
+#     checks ``journalctl -u bty-usb-grow``) to retry.
+#   * systemd's ``TimeoutStartSec=120s`` on the unit hard-caps
+#     total runtime even if mkfs or tar wedges.
+#
+# Skipped cases (BTY_IMAGES untouched):
+#
+#   * Ventoy / BMC virtual-media boot: the .iso is loop-mounted
+#     by the shim, so the kernel sees a single CD-ROM device --
+#     no BTY_IMAGES partition exists. ConditionPathExists on the
+#     unit handles this; the script never runs.
+#   * Already grown: ``.bty-grown`` sentinel present.
+#   * Already tried + failed: ``.bty-grown-failed`` sentinel
+#     present.
+#   * No free space behind the partition.
+
+set -eu
+
+LABEL=BTY_IMAGES
+SENTINEL_OK=.bty-grown
+SENTINEL_FAILED=.bty-grown-failed
+SLACK_BYTES=$((16 * 1024 * 1024))  # 16 MiB tolerance for end-of-disk metadata
+MAX_CONTENT_MIB=4096                # 4 GiB ceiling on what we'll archive
+STASH=/run/bty-usb-grow.tar
+
+log() { logger -t bty-usb-grow -s -- "$@"; }
+
+drop_failure_sentinel() {
+    # Best-effort: try to mount the partition and drop the failure
+    # sentinel so the next boot doesn't repeat the failed work.
+    # If the partition is in a bad enough state that we can't even
+    # mount it, the next boot's journal will surface the same
+    # failure.
+    _tmp=$(mktemp -d 2>/dev/null) || return 0
+    if mount -t exfat "${PART}" "${_tmp}" 2>/dev/null; then
+        touch "${_tmp}/${SENTINEL_FAILED}" 2>/dev/null || true
+        sync
+        umount "${_tmp}"
+    fi
+    rmdir "${_tmp}" 2>/dev/null || true
+}
+
+PART=$(readlink -f "/dev/disk/by-label/${LABEL}" 2>/dev/null || true)
+if [ -z "${PART}" ] || [ ! -b "${PART}" ]; then
+    log "no ${LABEL} partition; skipping (Ventoy / BMC loop boot?)"
+    exit 0
+fi
+
+# Resolve the parent disk + partition number.
+# /dev/sda1      -> /dev/sda      part=1
+# /dev/nvme0n1p2 -> /dev/nvme0n1  part=2
+# /dev/mmcblk0p1 -> /dev/mmcblk0  part=1
+PART_BASE=$(basename "${PART}")
+case "${PART_BASE}" in
+    *p[0-9]*)
+        DISK_BASE=$(echo "${PART_BASE}" | sed -E 's/p[0-9]+$//')
+        PARTNUM=$(echo "${PART_BASE}" | sed -E 's/.*p([0-9]+)$/\1/')
+        ;;
+    *)
+        DISK_BASE=$(echo "${PART_BASE}" | sed -E 's/[0-9]+$//')
+        PARTNUM=$(echo "${PART_BASE}" | sed -E 's/.*[^0-9]([0-9]+)$/\1/')
+        ;;
+esac
+DISK="/dev/${DISK_BASE}"
+if [ ! -b "${DISK}" ]; then
+    log "could not resolve parent disk for ${PART}; skipping"
+    exit 0
+fi
+log "BTY_IMAGES at ${PART}; parent disk ${DISK} (partition ${PARTNUM})"
+
+# Mount RO to inspect sentinels + measure content size.
+TMP=$(mktemp -d)
+trap 'umount "${TMP}" 2>/dev/null || true; rmdir "${TMP}" 2>/dev/null || true' EXIT
+if ! mount -t exfat -o ro "${PART}" "${TMP}"; then
+    log "could not mount ${PART} read-only; skipping"
+    exit 0
+fi
+
+if [ -e "${TMP}/${SENTINEL_OK}" ]; then
+    log "already grown (sentinel ${SENTINEL_OK} present); skipping"
+    exit 0
+fi
+if [ -e "${TMP}/${SENTINEL_FAILED}" ]; then
+    log "previous grow failed (sentinel ${SENTINEL_FAILED} present); skipping"
+    exit 0
+fi
+
+# Free space behind the partition?
+DISK_BYTES=$(blockdev --getsize64 "${DISK}")
+PART_END=$(parted -ms "${DISK}" unit B print 2>/dev/null \
+    | awk -F: -v n="${PARTNUM}" '$1==n {gsub(/B/,"",$3); print $3}')
+if [ -z "${PART_END}" ]; then
+    log "could not read partition end from parted; skipping"
+    exit 0
+fi
+FREE=$((DISK_BYTES - PART_END))
+if [ "${FREE}" -lt "${SLACK_BYTES}" ]; then
+    log "no significant free space behind partition (${FREE} B); skipping"
+    exit 0
+fi
+
+# Measure content size before we commit to anything destructive.
+# ``du -sm`` reports total used MiB; we cap to keep tmpfs happy.
+CONTENT_MIB=$(du -sm "${TMP}" 2>/dev/null | awk '{print $1}')
+if [ -z "${CONTENT_MIB}" ]; then
+    CONTENT_MIB=0
+fi
+log "growing partition: ${FREE} B free behind it, ${CONTENT_MIB} MiB content to preserve"
+if [ "${CONTENT_MIB}" -gt "${MAX_CONTENT_MIB}" ]; then
+    log "content ${CONTENT_MIB} MiB exceeds ${MAX_CONTENT_MIB} MiB cap; refusing to grow"
+    exit 0
+fi
+
+# Archive content to tmpfs. ``tar c`` from the mount root preserves
+# the whole tree; we restore with ``tar x`` after reformat. We use
+# the BSD tar features ``-C dir -cf - .`` so paths are relative,
+# avoiding any leading-/ replays that would write outside the new
+# mount point.
+log "archiving content to ${STASH}"
+if ! tar -C "${TMP}" -cf "${STASH}" . 2>/dev/null; then
+    log "tar create failed; aborting"
+    exit 1
+fi
+umount "${TMP}"
+trap 'rm -f "${STASH}"; rmdir "${TMP}" 2>/dev/null || true' EXIT
+
+# Resize the partition. ``parted resizepart`` rewrites the
+# partition table + asks the kernel to re-read; well under a
+# second on any modern USB.
+if ! parted -s "${DISK}" resizepart "${PARTNUM}" 100%; then
+    log "parted resizepart failed; aborting"
+    drop_failure_sentinel
+    exit 1
+fi
+partprobe "${DISK}" 2>/dev/null || true
+udevadm settle --timeout=10 || true
+
+# Re-resolve the partition device after the kernel re-read. The
+# /dev/disk/by-label/ symlink may briefly disappear during the
+# repartition + reformat; the path-by-name (PART_BASE) is stable.
+PART="/dev/${PART_BASE}"
+
+# Reformat as exfat with the same label. Wipes any leftover
+# filesystem state (which we've already archived).
+if ! mkfs.exfat -L "${LABEL}" "${PART}" >/dev/null; then
+    log "mkfs.exfat failed; partition is in an inconsistent state"
+    drop_failure_sentinel
+    exit 1
+fi
+udevadm settle --timeout=10 || true
+
+# Restore content + drop sentinel.
+TMP=$(mktemp -d)
+trap 'rm -f "${STASH}"; umount "${TMP}" 2>/dev/null || true; rmdir "${TMP}" 2>/dev/null || true' EXIT
+if ! mount -t exfat "${PART}" "${TMP}"; then
+    log "could not mount grown partition; aborting"
+    drop_failure_sentinel
+    exit 1
+fi
+if [ "${CONTENT_MIB}" -gt 0 ]; then
+    log "restoring ${CONTENT_MIB} MiB of content"
+    if ! tar -C "${TMP}" -xf "${STASH}"; then
+        log "tar extract failed; partition is grown but empty"
+        touch "${TMP}/${SENTINEL_FAILED}"
+        sync
+        umount "${TMP}"
+        exit 1
+    fi
+fi
+touch "${TMP}/${SENTINEL_OK}"
+sync
+umount "${TMP}"
+
+rm -f "${STASH}"
+log "BTY_IMAGES grown to fill ${DISK}; content preserved; sentinel ${SENTINEL_OK} dropped"
