@@ -385,12 +385,17 @@ def _detect_interface_ip(interface: str) -> str:
     """Return the IPv4 address on ``interface``. Linux-only (uses
     ``ioctl(SIOCGIFADDR)``). Raises ``OSError`` when the interface
     is missing or has no IPv4."""
+    # Linux struct ifreq on 64-bit: IFNAMSIZ (16) + the largest
+    # union member (24, struct ifmap). 40 bytes is the minimum
+    # fcntl.ioctl needs to round-trip SIOCGIFADDR; the kernel
+    # writes the sockaddr response back into the same buffer.
     SIOCGIFADDR = 0x8915
+    IFREQ_LEN = 40
     import fcntl
 
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
-        ifname_padded = interface.encode("ascii")[:15].ljust(256, b"\x00")
+        ifname_padded = interface.encode("ascii")[:15].ljust(IFREQ_LEN, b"\x00")
         result = fcntl.ioctl(s.fileno(), SIOCGIFADDR, ifname_padded)
     finally:
         s.close()

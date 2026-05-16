@@ -345,6 +345,23 @@ def test_build_offer_arch_6_uefi_ia32_uses_arch_specific_binary() -> None:
     assert parsed.bootfile_name == b"ipxe-i386.efi"
 
 
+def test_build_offer_arch_10_uefi_arm32_uses_arm32_binary() -> None:
+    """Arch 10 is the RFC 4578 code for UEFI ARM 32-bit firmware.
+    The proxy doesn't ship the binary -- operators stage it under
+    /var/lib/tftpboot if they target ARM 32 -- but the offer must
+    point at ipxe-arm32.efi so TFTP can serve it (or cleanly answer
+    FILE_NOT_FOUND when absent, letting the operator's main DHCP
+    win). Sibling to arch_6 + arch_11 coverage; uncovered until now."""
+    discover = wire.parse(
+        _make_pxe_discover(arch=10, vendor_class=b"PXEClient:Arch:00010:UNDI:003016")
+    )
+    offer = build_offer(_cfg(), discover)
+    assert offer is not None
+    parsed = _decode_offer(offer)
+    assert parsed.bootfile_name == b"ipxe-arm32.efi"
+    assert parsed.options[Opt.VENDOR_CLASS] == b"PXEClient"
+
+
 def test_build_offer_arch_11_uefi_arm64_uses_arm64_binary() -> None:
     """ARM64 UEFI clients (RPi 4+ in UEFI mode, RockPi etc.) get
     ``ipxe-arm64.efi``. Pin the mapping so a future arch-table
