@@ -24,9 +24,15 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
-from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse
+from fastapi.responses import (
+    FileResponse,
+    PlainTextResponse,
+    RedirectResponse,
+    StreamingResponse,
+)
 from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader, select_autoescape
+from starlette.datastructures import UploadFile
 from starlette.middleware.sessions import SessionMiddleware
 
 import bty
@@ -90,19 +96,38 @@ def create_app(
     # work independently of the manifest. ``BTY_CATALOG_FILE`` and
     # ``BTY_CATALOG_CACHE_DIR`` override the defaults derived from
     # ``BTY_STATE_DIR``.
+    #
+    # The manifest path is treated as the "always this file" location
+    # so the UI can write a fresh ``catalog.toml`` to it and reload
+    # in-process. When ``$BTY_CATALOG_FILE`` is unset and the default
+    # file doesn't exist yet, we still pin the default path so an
+    # ``/ui/catalog/manifest`` upload knows where to land.
     manifest_path = _catalog.default_manifest_path()
+    if manifest_path is None:
+        state_dir = Path(os.environ.get("BTY_STATE_DIR", "/var/lib/bty"))
+        manifest_path = state_dir / "catalog.toml"
     catalog_cache_dir = _catalog.default_cache_dir()
-    parsed_catalog: _catalog.Catalog | None = None
-    if manifest_path is not None:
+
+    # Mutable holder so a runtime reload (operator uploads a new
+    # catalog.toml from /ui/images) propagates to every closure-
+    # captured handler below. Without this indirection,
+    # ``catalog_state.catalog`` would be a local variable that no other
+    # function can reassign.
+    class _CatalogState:
+        def __init__(self) -> None:
+            self.catalog: _catalog.Catalog | None = None
+
+    catalog_state = _CatalogState()
+    if manifest_path.is_file():
         try:
-            parsed_catalog = _catalog.load(manifest_path)
+            catalog_state.catalog = _catalog.load(manifest_path)
         except _catalog.CatalogError as exc:
             # Don't crash bty-web startup over a malformed manifest;
             # log it and proceed without the catalog feature. The
-            # operator sees the empty catalog page + can fix the
-            # manifest then restart.
+            # operator sees the empty catalog page + can upload a
+            # fresh manifest from the UI to recover.
             print(f"bty-web: catalog manifest at {manifest_path}: {exc}", file=sys.stderr)
-            parsed_catalog = None
+            catalog_state.catalog = None
     download_manager = _web_catalog.DownloadManager()
     hash_manager = _hash.HashManager()
     release_fetch_manager = _release_mgr.ReleaseFetchManager()
@@ -113,8 +138,8 @@ def create_app(
         # capture the loop now so cross-thread publishes can hop in
         # via call_soon_threadsafe.
         event_bus.attach(asyncio.get_running_loop())
-        if parsed_catalog is not None:
-            download_manager.start(parsed_catalog, catalog_cache_dir)
+        if catalog_state.catalog is not None:
+            download_manager.start(catalog_state.catalog, catalog_cache_dir)
         # The hash manager always starts -- it operates on
         # ``image_root``, which exists for every bty-web shape
         # (appliance, container, dev). Default parallelism is 1
@@ -157,7 +182,7 @@ def create_app(
         try:
             yield
         finally:
-            if parsed_catalog is not None:
+            if catalog_state.catalog is not None:
                 await download_manager.stop()
             await hash_manager.stop()
             await release_fetch_manager.stop()
@@ -1150,7 +1175,7 @@ def create_app(
         added a URL via the UI) sees the change on the next page load
         without restarting bty-web.
         """
-        manifest_entries = parsed_catalog.entries if parsed_catalog else ()
+        manifest_entries = catalog_state.catalog.entries if catalog_state.catalog else ()
         sha_keyed, url_only = _load_db_catalog_split()
         merged = images.merge_with_catalog(
             resolved_image_root,
@@ -1595,9 +1620,135 @@ def create_app(
     # UI can enqueue / cancel fetches. Skipped silently when no
     # manifest is configured.
 
+    # Runtime catalog reload helper. The upload + fetch-release
+    # endpoints both end here: write the manifest file, restart the
+    # download manager with the freshly-parsed catalog, then
+    # propagate via ``catalog_state.catalog`` so every closure-
+    # captured handler sees the new value on its next call.
+    async def _reload_catalog_from_disk() -> None:
+        """Re-read ``manifest_path`` and restart the DownloadManager.
+
+        Called after a manifest write (UI upload or release fetch).
+        Raises :class:`_catalog.CatalogError` on parse failure -- the
+        caller wraps it into an HTTP 400 + flash error so the
+        operator sees what's wrong rather than getting a silent
+        no-op.
+        """
+        new_catalog = _catalog.load(manifest_path)
+        # Tear the old manager down first so its in-flight downloads
+        # don't bleed into the new manager's queue with stale entry
+        # references.
+        if catalog_state.catalog is not None:
+            await download_manager.stop()
+        catalog_state.catalog = new_catalog
+        download_manager.start(new_catalog, catalog_cache_dir)
+
+    # URL for "Fetch from bty project release" -- mirrors the
+    # ``bty tui`` flow's ``d`` keystroke (loads
+    # ``releases/latest/download/catalog.toml`` from the bty repo).
+    # ``BTY_BOOT_RELEASE_REPO`` is reused as the repo override
+    # because the same release page hosts boot artefacts +
+    # catalog.toml; one knob configures both.
+    _BTY_RELEASE_CATALOG_URL = (
+        f"https://github.com/"
+        f"{os.environ.get('BTY_BOOT_RELEASE_REPO', 'safl/bty')}"
+        f"/releases/latest/download/catalog.toml"
+    )
+
+    @app.post(
+        "/ui/catalog/upload",
+        include_in_schema=False,
+        dependencies=[Depends(require_auth)],
+    )
+    async def upload_catalog_manifest(request: Request) -> RedirectResponse:
+        """Receive a multipart ``catalog.toml`` upload, save it as
+        ``${BTY_STATE_DIR}/catalog.toml`` (or whatever
+        ``$BTY_CATALOG_FILE`` overrides to), parse, and reload the
+        download manager in-process. 303s back to /ui/images with
+        either a success or ``?error=`` query param so the page's
+        flash slot surfaces the outcome.
+        """
+        form = await request.form()
+        upload = form.get("file")
+        if not isinstance(upload, UploadFile):
+            return RedirectResponse(
+                "/ui/images?error=" + urllib.parse.quote("no file in upload", safe=""),
+                status_code=status.HTTP_303_SEE_OTHER,
+            )
+        content = await upload.read()
+        if not content:
+            return RedirectResponse(
+                "/ui/images?error=" + urllib.parse.quote("upload was empty", safe=""),
+                status_code=status.HTTP_303_SEE_OTHER,
+            )
+        # Parse first (without writing anything) so a bad upload
+        # doesn't clobber a working manifest already on disk.
+        try:
+            _catalog.load_bytes(content, source="<upload>")
+        except _catalog.CatalogError as exc:
+            return RedirectResponse(
+                "/ui/images?error=" + urllib.parse.quote(f"manifest parse failed: {exc}", safe=""),
+                status_code=status.HTTP_303_SEE_OTHER,
+            )
+        # Atomic write via tempfile-in-parent + rename so a torn
+        # write can't leave a half-written manifest where a working
+        # one used to be.
+        manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = manifest_path.with_suffix(manifest_path.suffix + ".partial")
+        tmp.write_bytes(content)
+        tmp.replace(manifest_path)
+        try:
+            await _reload_catalog_from_disk()
+        except _catalog.CatalogError as exc:
+            return RedirectResponse(
+                "/ui/images?error=" + urllib.parse.quote(f"reload failed: {exc}", safe=""),
+                status_code=status.HTTP_303_SEE_OTHER,
+            )
+        return RedirectResponse("/ui/images", status_code=status.HTTP_303_SEE_OTHER)
+
+    @app.post(
+        "/ui/catalog/fetch-release",
+        include_in_schema=False,
+        dependencies=[Depends(require_auth)],
+    )
+    async def fetch_release_catalog() -> RedirectResponse:
+        """Fetch ``catalog.toml`` from the bty project's GitHub
+        release page (``releases/latest/download/catalog.toml``),
+        save it at the manifest path, and reload. Symmetric with the
+        boot-artifacts page's "Fetch latest release" button.
+        """
+        try:
+            with urllib.request.urlopen(_BTY_RELEASE_CATALOG_URL, timeout=30) as resp:
+                content = resp.read()
+        except (urllib.error.URLError, TimeoutError) as exc:
+            return RedirectResponse(
+                "/ui/images?error=" + urllib.parse.quote(f"release fetch failed: {exc}", safe=""),
+                status_code=status.HTTP_303_SEE_OTHER,
+            )
+        try:
+            _catalog.load_bytes(content, source=_BTY_RELEASE_CATALOG_URL)
+        except _catalog.CatalogError as exc:
+            return RedirectResponse(
+                "/ui/images?error="
+                + urllib.parse.quote(f"fetched manifest parse failed: {exc}", safe=""),
+                status_code=status.HTTP_303_SEE_OTHER,
+            )
+        manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = manifest_path.with_suffix(manifest_path.suffix + ".partial")
+        tmp.write_bytes(content)
+        tmp.replace(manifest_path)
+        try:
+            await _reload_catalog_from_disk()
+        except _catalog.CatalogError as exc:
+            return RedirectResponse(
+                "/ui/images?error=" + urllib.parse.quote(f"reload failed: {exc}", safe=""),
+                status_code=status.HTTP_303_SEE_OTHER,
+            )
+        return RedirectResponse("/ui/images", status_code=status.HTTP_303_SEE_OTHER)
+
     @app.get("/catalog/downloads")
     async def list_downloads(_: str = Depends(require_auth)) -> dict[str, Any]:
-        if parsed_catalog is None:
+        if catalog_state.catalog is None:
             return {"manifest": None, "downloads": []}
         states = await download_manager.list()
         return {
@@ -1612,7 +1763,7 @@ def create_app(
         body: _models.CatalogEnqueueRequest,
         _: str = Depends(require_auth),
     ) -> dict[str, Any]:
-        if parsed_catalog is None:
+        if catalog_state.catalog is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="no catalog manifest configured",
@@ -1631,7 +1782,7 @@ def create_app(
         name: str,
         _: str = Depends(require_auth),
     ) -> dict[str, Any]:
-        if parsed_catalog is None:
+        if catalog_state.catalog is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="no catalog manifest configured",
@@ -1680,8 +1831,8 @@ def create_app(
             ).fetchone()
             if row and row["disk_image_sha"]:
                 sha = str(row["disk_image_sha"])
-        if sha is None and parsed_catalog is not None:
-            entry = parsed_catalog.by_name(name)
+        if sha is None and catalog_state.catalog is not None:
+            entry = catalog_state.catalog.by_name(name)
             if entry is not None and entry.sha256 is not None:
                 sha = entry.sha256
         if sha is None:

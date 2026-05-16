@@ -87,6 +87,54 @@
     </div>
 </div>
 
+<div class="card mb-3">
+    <div class="card-header bg-light fw-semibold">
+        <i class="bi bi-file-earmark-text me-1"></i>Catalog manifest
+        <small class="text-muted ms-2">
+            replaces <code>{{ manifest_path or "${BTY_STATE_DIR}/catalog.toml" }}</code>;
+            reloads the download manager in-process
+        </small>
+    </div>
+    <div class="card-body">
+        <div class="row g-3">
+            <div class="col-md-6">
+                <form method="post" action="/ui/catalog/upload" enctype="multipart/form-data">
+                    <label for="catalog-file" class="form-label small mb-1">
+                        Upload <code>catalog.toml</code>
+                    </label>
+                    <div class="input-group">
+                        <input type="file" required class="form-control" id="catalog-file"
+                               name="file" accept=".toml">
+                        <button type="submit" class="btn btn-primary">
+                            <i class="bi bi-upload me-1"></i>Upload
+                        </button>
+                    </div>
+                    <div class="form-text small">
+                        Parses before clobbering an existing manifest -- a bad upload bounces
+                        back with the parse error.
+                    </div>
+                </form>
+            </div>
+            <div class="col-md-6">
+                <form method="post" action="/ui/catalog/fetch-release">
+                    <label class="form-label small mb-1">Fetch from project release</label>
+                    <div>
+                        <button type="submit" class="btn btn-outline-primary">
+                            <i class="bi bi-cloud-download me-1"></i>Fetch latest
+                            <code class="ms-1">catalog.toml</code>
+                        </button>
+                    </div>
+                    <div class="form-text small">
+                        Pulls <code>releases/latest/download/catalog.toml</code> from
+                        <a href="https://github.com/{{ release_repo }}/releases/latest"
+                           target="_blank" rel="noopener">{{ release_repo }}</a>.
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
     (function () {
         var input = document.getElementById("upload-file");

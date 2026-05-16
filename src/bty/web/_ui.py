@@ -413,6 +413,14 @@ def register_ui_routes(
         """
         unified = list_unified_images() if list_unified_images is not None else []
         flash = request.query_params.get("error")
+        # Catalog manifest path + release repo for the "Catalog
+        # manifest" card. The path mirrors the resolution in
+        # _app.create_app (env override -> default under state dir).
+        catalog_manifest_path = os.environ.get("BTY_CATALOG_FILE")
+        if not catalog_manifest_path:
+            state_dir = os.environ.get("BTY_STATE_DIR", "/var/lib/bty")
+            catalog_manifest_path = str(Path(state_dir) / "catalog.toml")
+        release_repo = os.environ.get("BTY_BOOT_RELEASE_REPO", "safl/bty")
         # Image-relevant slice of the event log: uploads, hash
         # completions, catalog entry add/delete. Top 15 keeps the
         # page short; full timeline at /ui/events.
@@ -429,6 +437,8 @@ def register_ui_routes(
             unified=unified,
             image_root=str(image_root),
             image_events=image_events,
+            manifest_path=catalog_manifest_path,
+            release_repo=release_repo,
             flash=flash,
             flash_kind="danger" if flash else None,
         )

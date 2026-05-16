@@ -44,12 +44,18 @@ def app_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Test
     image_root.mkdir()
     boot_root = tmp_path / "boot"
     boot_root.mkdir()
+    bty_state_dir = tmp_path / "bty-state"
+    bty_state_dir.mkdir()
     # Seed a fake live-env triplet so /boot/{name} tests can hit real files.
     (boot_root / "bty-netboot-x86_64.vmlinuz").write_bytes(b"fake-kernel")
     (boot_root / "bty-netboot-x86_64.initrd").write_bytes(b"fake-initrd")
     (boot_root / "bty-netboot-x86_64.squashfs").write_bytes(b"fake-squashfs")
     # Seed an image too so /images/{name} tests work.
     (image_root / "demo.qcow2").write_bytes(b"fake-image")
+    # Pin BTY_STATE_DIR so ``catalog.toml`` upload / fetch-release
+    # tests can find the on-disk manifest under tmp_path. The default
+    # is /var/lib/bty which would be unwritable in CI.
+    monkeypatch.setenv("BTY_STATE_DIR", str(bty_state_dir))
     app = create_app(
         state_path=state,
         service_user=TEST_SERVICE_USER,
@@ -2657,6 +2663,109 @@ def test_catalog_entries_add_rejects_url_without_filename(
         )
         assert r.status_code == 422, f"expected 422 for {bad!r}, got {r.status_code}"
         assert "filename component" in r.text
+
+
+def test_ui_catalog_upload_requires_auth(app_client: TestClient) -> None:
+    r = app_client.post(
+        "/ui/catalog/upload",
+        files={"file": ("catalog.toml", b"version = 1\n", "application/toml")},
+        follow_redirects=False,
+    )
+    assert r.status_code == 401
+
+
+def test_ui_catalog_upload_persists_and_303s_on_success(
+    app_client: TestClient,
+    tmp_path: Path,
+) -> None:
+    """Upload a valid manifest -> persisted at the configured path,
+    /catalog/downloads now returns the manifest path (was None
+    before), 303 back to /ui/images without an error param."""
+    state_dir = tmp_path / "bty-state"
+    # Sanity check: fixture pre-set BTY_STATE_DIR to this path.
+    pre = app_client.get("/catalog/downloads", cookies=AUTH)
+    assert pre.status_code == 200
+    assert pre.json() == {"manifest": None, "downloads": []}
+    body = b'version = 1\n\n[[images]]\nname = "demo"\nsrc = "https://example.com/demo.img.zst"\n'
+    r = app_client.post(
+        "/ui/catalog/upload",
+        files={"file": ("catalog.toml", body, "application/toml")},
+        cookies=AUTH,
+        follow_redirects=False,
+    )
+    assert r.status_code == 303, r.text
+    assert r.headers["location"] == "/ui/images"
+    manifest = state_dir / "catalog.toml"
+    assert manifest.is_file()
+    assert manifest.read_bytes() == body
+    post = app_client.get("/catalog/downloads", cookies=AUTH).json()
+    assert post["manifest"] == str(manifest)
+
+
+def test_ui_catalog_upload_rejects_bad_manifest_keeps_existing(
+    app_client: TestClient,
+    tmp_path: Path,
+) -> None:
+    """A parse failure 303s back with ?error=... and does NOT
+    clobber the on-disk manifest -- so a stray bad upload can't
+    nuke a working catalog."""
+    state_dir = tmp_path / "bty-state"
+    good = b'version = 1\n\n[[images]]\nname = "demo"\nsrc = "https://example.com/demo.img.zst"\n'
+    manifest = state_dir / "catalog.toml"
+    manifest.write_bytes(good)
+    r = app_client.post(
+        "/ui/catalog/upload",
+        files={"file": ("catalog.toml", b"this is not valid toml [[", "application/toml")},
+        cookies=AUTH,
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert r.headers["location"].startswith("/ui/images?error=")
+    assert manifest.read_bytes() == good  # unchanged
+
+
+def test_ui_catalog_fetch_release_requires_auth(app_client: TestClient) -> None:
+    r = app_client.post("/ui/catalog/fetch-release", follow_redirects=False)
+    assert r.status_code == 401
+
+
+def test_ui_catalog_fetch_release_persists_and_303s(
+    app_client: TestClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fetch-release stubs urlopen, writes the bytes to the manifest
+    path, and reloads. Mirrors the upload happy path but via the
+    GitHub-release-style entrypoint."""
+    state_dir = tmp_path / "bty-state"
+    body = b'version = 1\n\n[[images]]\nname = "rel"\nsrc = "https://example.com/rel.img.zst"\n'
+
+    class _FakeResp:
+        def __init__(self, data: bytes) -> None:
+            self._data = data
+
+        def read(self) -> bytes:
+            return self._data
+
+        def __enter__(self) -> _FakeResp:
+            return self
+
+        def __exit__(self, *_a: object) -> None:
+            return None
+
+    import urllib.request as _urlreq
+
+    monkeypatch.setattr(_urlreq, "urlopen", lambda *_a, **_kw: _FakeResp(body))
+    r = app_client.post(
+        "/ui/catalog/fetch-release",
+        cookies=AUTH,
+        follow_redirects=False,
+    )
+    assert r.status_code == 303, r.text
+    assert r.headers["location"] == "/ui/images"
+    manifest = state_dir / "catalog.toml"
+    assert manifest.is_file()
+    assert manifest.read_bytes() == body
 
 
 def test_catalog_enqueue_request_rejects_traversal_name(app_client: TestClient) -> None:
