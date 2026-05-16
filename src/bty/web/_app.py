@@ -172,6 +172,12 @@ def create_app(
         # Operator-initiated work queues behind these jobs by FIFO
         # order; parallelism cap (default 1) keeps a Pi responsive.
         _auto_import_dir_scan_rows()
+        # And the symmetric path for manifest entries: a catalog.toml
+        # that survived a restart (operator uploaded it, then bty-web
+        # restarted) needs its entries reflected in catalog_entries
+        # so the /ui/machines/{mac} dropdown shows them.
+        if catalog_state.catalog is not None:
+            _auto_import_manifest_rows(catalog_state.catalog)
         for img in images.list_images(resolved_image_root):
             if img.sha256 is None:
                 # ``FileNotFoundError`` -- file vanished between the
@@ -1828,6 +1834,49 @@ def create_app(
     # download manager with the freshly-parsed catalog, then
     # propagate via ``catalog_state.catalog`` so every closure-
     # captured handler sees the new value on its next call.
+    def _auto_import_manifest_rows(catalog: _catalog.Catalog) -> None:
+        """Insert a ``catalog_entries`` row for every manifest entry
+        that doesn't already have one.
+
+        Without this, an operator who uploads a ``catalog.toml`` via
+        /ui/catalog/upload sees the entries on /ui/images (the merge
+        renders them) but the /ui/machines/{mac} "Image" dropdown
+        stays empty for those entries -- the dropdown queries
+        ``catalog_entries`` only. Auto-importing on reload keeps the
+        two views consistent: an upload makes the entries bindable
+        without an extra ``POST /catalog/import`` round-trip.
+
+        ``INSERT OR IGNORE`` -- operator-curated rows (added via
+        the URL form or a prior ``/catalog/import``) for the same
+        src are preserved with their original description / sha_url
+        intact.
+        """
+        now = _now_iso()
+        with _db.open_db(state_path) as conn:
+            for entry in catalog.entries:
+                try:
+                    ref = _catalog.image_ref_for_src(entry.src)
+                except ValueError:
+                    continue
+                conn.execute(
+                    "INSERT OR IGNORE INTO catalog_entries "
+                    "(bty_image_ref, src, disk_image_sha, name, sha_url, "
+                    "format, size_bytes, description, added_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        ref,
+                        entry.src,
+                        entry.sha256,
+                        entry.name,
+                        None,
+                        entry.format,
+                        entry.size_bytes,
+                        entry.description,
+                        now,
+                    ),
+                )
+            conn.commit()
+
     async def _reload_catalog_from_disk() -> None:
         """Re-read ``manifest_path`` and restart the DownloadManager.
 
@@ -1836,6 +1885,11 @@ def create_app(
         caller wraps it into an HTTP 400 + flash error so the
         operator sees what's wrong rather than getting a silent
         no-op.
+
+        Auto-imports the parsed entries into ``catalog_entries``
+        as a side-effect so the /ui/machines/{mac} dropdown
+        becomes populated without a separate ``POST /catalog/import``
+        step. Idempotent (``INSERT OR IGNORE``).
         """
         new_catalog = _catalog.load(manifest_path)
         # Tear the old manager down first so its in-flight downloads
@@ -1844,7 +1898,9 @@ def create_app(
         if catalog_state.catalog is not None:
             await download_manager.stop()
         catalog_state.catalog = new_catalog
+        _auto_import_manifest_rows(new_catalog)
         download_manager.start(new_catalog, catalog_cache_dir, state_path=state_path)
+        publish_state_changed()
 
     # URL for "Fetch from bty project release" -- mirrors the
     # ``bty tui`` flow's ``d`` keystroke (loads

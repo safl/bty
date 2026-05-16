@@ -3226,6 +3226,40 @@ def test_ui_catalog_upload_requires_auth(app_client: TestClient) -> None:
     assert r.status_code == 401
 
 
+def test_ui_catalog_upload_auto_imports_manifest_into_catalog_entries(
+    app_client: TestClient,
+) -> None:
+    """A manifest uploaded via /ui/catalog/upload must auto-import
+    its entries into ``catalog_entries`` so the /ui/machines/{mac}
+    dropdown becomes populated without a separate /catalog/import
+    round-trip. Pre-fix the entries showed up on /ui/images (the
+    merge surfaced them) but were invisible in the machine binding
+    picker."""
+    body = (
+        b"version = 1\n\n"
+        b"[[images]]\n"
+        b'name = "ubuntu-from-manifest"\n'
+        b'src = "https://example.invalid/ubuntu-from-manifest.img.gz"\n'
+        b'format = "img.gz"\n'
+    )
+    r = app_client.post(
+        "/ui/catalog/upload",
+        files={"file": ("catalog.toml", body, "application/toml")},
+        cookies=AUTH,
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    # /catalog/entries returns the catalog_entries DB rows. The
+    # manifest entry should now be in there with the right name +
+    # src + bty_image_ref.
+    entries = app_client.get("/catalog/entries", cookies=AUTH).json()
+    found = [e for e in entries if e["name"] == "ubuntu-from-manifest"]
+    assert len(found) == 1
+    assert found[0]["src"] == "https://example.invalid/ubuntu-from-manifest.img.gz"
+    # bty_image_ref is a 64-hex sha derived from canonicalised src.
+    assert len(found[0]["bty_image_ref"]) == 64
+
+
 def test_ui_catalog_upload_persists_and_303s_on_success(
     app_client: TestClient,
     tmp_path: Path,
