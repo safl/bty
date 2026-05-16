@@ -13,8 +13,10 @@
 #        mkdir -p ./bty-data && sudo chown -R 999:999 ./bty-data
 #   2. Replace the volume line with: ``- ./bty-data:/var/lib/bty``
 #
-# Production deploys should use the bty-server appliance instead
-# (this is a trial / image-library shape; no PXE proxy-DHCP).
+# This container is HTTP-only. UEFI HTTP-Boot targets work
+# directly against it; TFTP-only PXE clients need either a
+# separate TFTP server (operator-run dnsmasq alongside) or the
+# bty-server appliance image (which bundles dnsmasq).
 
 services:
   bty-web:

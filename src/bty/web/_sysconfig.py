@@ -104,9 +104,7 @@ def control_tftp(action: str) -> None:
         # show as an empty-quoted error in the flash.
         raise SysConfigError("no action specified")
     if action not in TFTP_ACTIONS:
-        raise SysConfigError(
-            f"unknown action: {action!r} (allowed: {', '.join(TFTP_ACTIONS)})"
-        )
+        raise SysConfigError(f"unknown action: {action!r} (allowed: {', '.join(TFTP_ACTIONS)})")
     try:
         subprocess.run(
             ["sudo", "-n", TFTP_HELPER, action],

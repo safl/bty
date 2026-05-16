@@ -7,11 +7,12 @@ registry**, and **browser UI** of bty-web. `bty tui --catalog SOURCE`
 clients (running from the USB live env or a workstation) connect
 to it and pick images for flashing.
 
-This is not the bty-server appliance. There is no DHCP / TFTP /
-PXE proxy-DHCP in this container. Those services need bare-metal
-LAN access for L2 broadcasts, which Docker bridge networking
-cannot provide. For the full PXE flow, deploy the bty-server
-appliance image (see [walkthrough-server.md](walkthrough-server.md)).
+This is not the bty-server appliance. The appliance bundles
+`dnsmasq` for TFTP serving on top of bty-web; the container is
+HTTP-only. For UEFI HTTP-Boot-capable targets, this container is
+sufficient. For TFTP-only PXE flow, either run a separate TFTP
+server alongside the container or deploy the appliance image (see
+[walkthrough-server.md](walkthrough-server.md)).
 
 ## When to use this
 
@@ -171,13 +172,14 @@ so the only per-arch differences are the apt-installed system deps.
 
 This container deliberately does not run:
 
-- `dnsmasq` (proxy-DHCP / TFTP) - needs L2 broadcast access
-- iPXE binaries staged under `/var/lib/tftpboot/`
-- The `bty-web-activate-pxe` privileged helper
-- Cloud-init / first-boot rootfs grow
+- `dnsmasq` for TFTP. The container is HTTP-only; UEFI HTTP-Boot
+  targets work directly against `/boot/ipxe.efi`. TFTP-only PXE
+  clients would need a separate TFTP server (or use the appliance
+  image instead, which bundles dnsmasq).
+- Cloud-init / first-boot rootfs grow.
 
-The PXE chain (a target machine boots into the bty network-flash
-live env, gets its image assignment, writes to local disk) requires
-all of the above, which is why the appliance exists. Use the
-container for everything that does not require booting another
-machine through this server.
+bty no longer runs any DHCP role in either deployment shape -- the
+operator's LAN DHCP server is configured to point PXE clients at
+bty (via option 60/66/67 tagging) regardless of whether bty runs
+as the appliance or as this container. For HTTP-Boot-capable
+firmware, that means this container is a complete deployment.

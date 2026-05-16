@@ -261,30 +261,32 @@ runtime; agents and PXE clients can run on air-gapped networks.
 real broker (Redis pub/sub, NATS), which is out of scope.
 
 **PXE boot stack (server image).** `bty-media`'s server variant
-ships dnsmasq + the iPXE BIOS/UEFI binaries. TFTP serves
-`undionly.kpxe` and `ipxe.efi` from `/var/lib/tftpboot/`. The
-proxy-DHCP and chain-config block in
-`/etc/dnsmasq.d/bty-pxe.conf` is **commented out by default** so a
-freshly-imaged appliance never disrupts an existing DHCP server;
-operators activate via the `/ui/settings` page (which writes
-`/etc/dnsmasq.d/bty-pxe-active.conf` and restarts dnsmasq via the
-sudoers-permitted `bty-web-activate-pxe` helper). Two-stage chain:
-PXE ROM -> `undionly.kpxe`/`ipxe.efi` -> bty-web's
-`/pxe-bootstrap.ipxe` -> per-MAC `/pxe/{mac}` plan.
+ships dnsmasq + the iPXE BIOS/UEFI binaries. dnsmasq is configured
+for TFTP only -- it serves `undionly.kpxe` / `ipxe.efi` from
+`/var/lib/tftpboot/`. **bty does NOT run any DHCP role** (full or
+proxy); the operator's existing LAN DHCP server is configured to
+point PXE clients at this appliance via the canonical option-66
+(next-server) + option-67 (bootfile) tagging plus the option-60
+"PXEClient" vendor-class echo. Two rounds of proxy-DHCP were
+tried in v0.13.x and v0.14-v0.17.1 and both failed against strict
+UEFI firmware; the v0.18 architecture pivot drops it permanently.
+Two-stage chain remains the same shape: PXE ROM ->
+`undionly.kpxe`/`ipxe.efi` -> bty-web's `/pxe-bootstrap.ipxe` ->
+per-MAC `/pxe/{mac}` plan.
 
-**Settings (`/ui/settings`).** Operator-facing controls for PXE
-activation (writes `/etc/dnsmasq.d/bty-pxe-active.conf` + restarts
-dnsmasq via `bty-web-activate-pxe`) and deactivation (removes the
-same file via `bty-web-deactivate-pxe`). The panel also warns when
-the configured interface is no longer present (NIC renamed across
-reboot, USB ethernet adapter unplugged). The credential is rotated
-out-of-band with `sudo passwd bty` on the appliance; sessions
-invalidate on cookie expiry (7-day sliding TTL) or by rotating the
-session-cookie secret at `/var/lib/bty/session-secret` (delete +
-``systemctl restart bty-web``). The PXE helpers live in
-`/usr/local/sbin/` and are invocable by user `bty` via the
-`/etc/sudoers.d/bty-web` NOPASSWD entries - the only privileged
-operations bty-web is granted.
+**Settings (`/ui/settings`).** Operator-facing config:
+appliance-IP/interfaces table + a router-config cheatsheet
+(option 60/66/67 values to paste into the LAN's DHCP server) + a
+Start/Stop/Restart panel for the local dnsmasq.service via the
+sudoers-permitted `bty-web-tftp` helper. The credential is
+rotated out-of-band with `sudo passwd bty` on the appliance;
+sessions invalidate on cookie expiry (7-day sliding TTL) or by
+rotating the session-cookie secret at
+`/var/lib/bty/session-secret` (delete + ``systemctl restart
+bty-web``). `bty-web-tftp` is the only helper in
+`/usr/local/sbin/` invocable by user `bty` via
+`/etc/sudoers.d/bty-web` NOPASSWD - the sole privileged operation
+bty-web is granted.
 
 ## Conventions agents can rely on
 

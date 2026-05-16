@@ -47,8 +47,8 @@ VARIANT = "server-rpi"
 IMAGE_NAME = f"bty-{VARIANT}-arm64"
 
 # Apt packages installed inside the arm64 chroot. Kept minimal:
-# python3-venv for the bty-web venv, dnsmasq for PXE proxy-DHCP, ipxe
-# for the kpxe / efi binaries the appliance hands to clients,
+# python3-venv for the bty-web venv, dnsmasq for TFTP (bty doesn't
+# do DHCP), ipxe for the kpxe / efi binaries served via TFTP,
 # qemu-utils for ``qemu-img`` (used by ``bty inspect`` /
 # ``bty flash``), zstd for image-decompression on-target.
 APT_PACKAGES = (
@@ -357,8 +357,9 @@ def _render_install_script(wheel_filename: str) -> str:
         # 5. State dirs.
         {state_dir_lines}
 
-        # 6. Sudoers + helper perms.
-        chmod 0755 /usr/local/sbin/bty-web-activate-pxe
+        # 6. Sudoers + helper perms. bty-web-tftp is the only sudo'd
+        #    helper as of v0.18 (start/stop/restart dnsmasq.service).
+        chmod 0755 /usr/local/sbin/bty-web-tftp
         chmod 0755 /usr/local/sbin/bty-web-init
         chown root:root /etc/sudoers.d/bty-web
         chmod 0440 /etc/sudoers.d/bty-web

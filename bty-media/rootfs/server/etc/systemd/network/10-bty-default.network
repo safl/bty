@@ -22,9 +22,9 @@ Name=en*
 DHCP=yes
 
 [DHCP]
-# Don't accept DNS / NTP / routes from a flaky PXE-segment DHCP
-# server (when the operator runs bty-web on a network where bty
-# itself may be the only DHCP responder via the proxy-DHCP block).
+# Standard DHCP client behaviour against the operator's LAN
+# DHCP server. bty does not run any DHCP role itself; the
+# appliance lease is just a normal client lease.
 UseDNS=yes
 UseNTP=yes
 RouteMetric=100

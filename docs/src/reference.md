@@ -351,7 +351,7 @@ Python package).
 | Helper | Purpose |
 |---|---|
 | `bty-image-store-init [--yes] DEVICE` | Partition + format a 2nd disk as the persistent image store (ext4, label `BTY_IMAGE_STORE`, mounted at `/var/lib/bty/images`). Stages existing files first; updates `/etc/fstab` for auto-mount on subsequent boots. Run once after first install; the labelled disk auto-mounts after reflashes without re-running. |
-| `bty-web-activate-pxe` / `bty-web-deactivate-pxe` | Toggle the dnsmasq proxy-DHCP block. Driven by the browser UI's "Activate PXE" / "Deactivate PXE" buttons. |
+| `bty-web-tftp <start\|stop\|restart>` | Control the local `dnsmasq.service` (which owns the TFTP root). Driven by the browser UI's TFTP daemon Start/Stop/Restart buttons on `/ui/settings`. |
 
 ## Python API
 
@@ -582,31 +582,23 @@ templates, Bootstrap CSS, HTMX form posts).
  `https://github.com/<BTY_BOOT_RELEASE_REPO>/releases/<tag>/download/`
  (default `safl/bty`, default tag `latest`); verifies the manifest
  and atomically installs into `BTY_BOOT_DIR`
-- `GET /ui/settings` -> two-card page:
+- `GET /ui/settings` -> three-card page:
  - **Authentication** - explanatory text only. The credential is
  the OS password of the bty service user; the operator rotates
  it with `sudo passwd bty`. To force every session to invalidate
  in one shot, rotate the cookie-signing secret with `rm
  /var/lib/bty/session-secret && systemctl restart bty-web`.
- - **PXE proxy-DHCP** - interface dropdown (read from
- `/sys/class/net/`) + subnet input (`192.168.1.0` or
- `192.168.1.0/24`). Activate calls `bty-web-activate-pxe`
- which writes `/etc/dnsmasq.d/bty-pxe-active.conf` and
- restarts dnsmasq. A separate Deactivate button calls
- `bty-web-deactivate-pxe` to remove that file and restart
- dnsmasq back to TFTP-only. When the configured interface
- is no longer present (NIC renamed across reboot, USB
- ethernet unplugged), the panel flags the broken binding so
- the operator can deactivate and re-bind.
-- `POST /ui/settings/pxe-activate` -> drives `bty-web-activate-pxe`,
- a sudoers-permitted helper in `/usr/local/sbin/` that writes
- `/etc/dnsmasq.d/bty-pxe-active.conf` and restarts dnsmasq.
-- `POST /ui/settings/pxe-deactivate` -> drives `bty-web-deactivate-pxe`,
- the sibling helper that removes the active config and restarts
- dnsmasq. Idempotent: a missing active config is reported as
- already-deactivated. The two NOPASSWD entries in
- `/etc/sudoers.d/bty-web` are the only sudo grants the appliance
- gives bty-web.
+ - **PXE / network boot** - appliance-IP/interfaces table + a
+ router-config cheatsheet (the option-60 / 66 / 67 values to
+ paste into the LAN's DHCP server). bty does NOT run any DHCP
+ role; the operator's existing DHCP server points clients at
+ this appliance for TFTP + HTTP-Boot fetches.
+ - **TFTP daemon** - live `systemctl is-active dnsmasq.service`
+ badge + Start / Stop / Restart buttons driven by the
+ sudoers-permitted `bty-web-tftp` helper.
+- `POST /ui/settings/tftp-control` -> drives `bty-web-tftp <action>`
+ (allowlist `start` / `stop` / `restart`), the sole sudoers
+ grant in `/etc/sudoers.d/bty-web`.
 
 The auth dependency checks ``request.session.get("bty_authed")``;
 the session is a Starlette ``SessionMiddleware``-signed payload

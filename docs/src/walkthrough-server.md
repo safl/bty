@@ -2,9 +2,10 @@
 
 The bty server appliance is the network-flash flow's delivery
 vehicle: a turnkey image you `dd` onto a small box (or VM, or
-Raspberry Pi 4/5) that brings up `bty-web` (browser UI), iPXE,
-TFTP, and proxy-DHCP. Targets PXE-boot into the server's catalog,
-flash themselves, reboot.
+Raspberry Pi 4/5) that brings up `bty-web` (browser UI), iPXE
+binaries, and TFTP via dnsmasq. The operator's existing LAN DHCP
+server points PXE clients at this appliance; targets PXE-boot
+into the server's catalog, flash themselves, reboot.
 
 Two paths:
 
@@ -26,7 +27,7 @@ tty1, ready to register machines and serve images.
 |---|---|
 | **Target hardware** | x86: any small-form-factor PC, NUC, or VM with at least 4 GiB RAM and ~10 GiB disk. arm64: Raspberry Pi 4 (4 GiB+ RAM model) or 5 with an SD card 8 GiB or larger. |
 | A **flashing tool** | `dd` (Linux/macOS), Balena Etcher, Raspberry Pi Imager, or Rufus DD-mode. All decompress `.gz` natively. |
-| A **network cable** to the target's LAN | The PXE-flash flow needs the server to be on the same broadcast domain as the targets. WiFi works for the browser UI but not for proxy-DHCP. |
+| A **network cable** to the target's LAN | The PXE-flash flow needs the server reachable from the targets for TFTP + HTTP fetches. WiFi works fine for the browser UI; for PXE the operator's DHCP server still has to point clients at this appliance regardless of the medium. |
 
 ## Step 1: Get the server image
 
@@ -168,8 +169,10 @@ Power on the target. The bty-server image:
    directory tree and rewrite `/etc/issue` with the actual
    server URL + default credentials.
 4. Starts `bty-web.service` (long-running) on port 8080.
-5. Starts `dnsmasq.service` for TFTP (proxy-DHCP stays dormant
-   until you activate it via the UI).
+5. Starts `dnsmasq.service` for TFTP (the appliance does NOT
+   run any DHCP role -- bty deliberately stays out of DHCP and
+   relies on the operator's existing LAN DHCP server to point
+   PXE clients at this box).
 
 Tty1 ends up showing something like:
 
@@ -181,8 +184,9 @@ Tty1 ends up showing something like:
   Default login: bty / bty (rotate before exposing this server)
   SSH admin:     odus / odus
 
-  Activate PXE proxy-DHCP via the browser UI's Settings page when
-  you're ready to PXE-boot targets on this LAN.
+  Configure your LAN DHCP server to point PXE clients at this
+  appliance (option 60 = "PXEClient", option 66 = this IP,
+  option 67 = "ipxe.efi"). See /ui/settings for the cheatsheet.
 ======================================================================
 
 bty 0.8.2 on bty-server (tty1)
@@ -216,19 +220,18 @@ Initial UI tour:
   `initrd`, `squashfs`). The server can fetch the latest from
   the bty release page directly via the "Fetch latest release"
   button, or you can upload your own.
-- **`/ui/settings`** - activates / deactivates PXE proxy-DHCP
-  on the operator's chosen interface + subnet. Also flags when
-  the configured interface goes missing across a reboot (USB
-  ethernet adapter unplugged, systemd NIC-name churn) so the
-  operator can re-bind without chasing a silent dnsmasq failure.
+- **`/ui/settings`** - router-config cheatsheet (option 60 / 66
+  / 67 values to paste into the LAN's DHCP server) plus a
+  Start/Stop/Restart panel for the local `dnsmasq.service`
+  (which serves the TFTP root).
 
 ## Step 5: Flash a target over PXE
 
 Once a target's MAC is registered with an assigned image, configure
 the target's BIOS / UEFI to PXE-boot first. On power-on it'll:
 
-1. DHCP-discover the bty server (proxy-DHCP, doesn't conflict with
-   your existing DHCP server).
+1. DHCP-discover from your LAN's DHCP server, which is configured
+   to return option 66/67 pointing at the bty appliance.
 2. Chain into the bty iPXE script, which renders into a kernel
    cmdline that auto-flashes the assigned image.
 3. Boot the netboot kernel + initrd + squashfs trio, run
@@ -300,13 +303,18 @@ trusted LAN:
 
 ## Known limitations
 
-- **PXE proxy-DHCP** assumes the existing LAN already has a real
-  DHCP server (it just adds the boot-server hint). If you don't
-  have one, configure the bty-server's dnsmasq to do full DHCP
-  via `/etc/dnsmasq.d/`.
+- **DHCP stays with the operator's LAN**. bty does NOT run a DHCP
+  server (proxy or full); a working LAN DHCP server is a hard
+  prerequisite, and its config must be extended with option 60 /
+  66 / 67 to direct PXE clients at the bty appliance. The
+  `/ui/settings` page has a cheatsheet with the exact values.
 - **UEFI Secure Boot** isn't supported - the bty netboot kernel
   isn't shim-signed. Disable Secure Boot on targets you're
   PXE-flashing, or use the USB stick flow.
-- **Wireless deployment** of the server to its LAN works for the
-  browser UI but not for proxy-DHCP (which needs broadcast
-  visibility). Plug the server in via Ethernet for production.
+- **iPXE chain-loop**. After the firmware TFTPs `ipxe.efi`, iPXE
+  re-DHCPs with `user-class=iPXE`; stock Debian iPXE will
+  re-fetch itself unless your LAN DHCP returns a different
+  bootfile (e.g. `http://<bty>/pxe-bootstrap.ipxe`) when it sees
+  `user-class=iPXE`. Most modern DHCP servers (UniFi via
+  config.gateway.json or Kea client-classes, dnsmasq via
+  `dhcp-userclass`, ISC-DHCPd via conditional `if`) support this.

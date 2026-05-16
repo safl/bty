@@ -70,17 +70,18 @@ your own.
 
 | Binary / package | Used for |
 |---|---|
-| `dnsmasq` | proxy-DHCP + TFTP for the PXE chain |
+| `dnsmasq` | TFTP for the PXE chain (bty does not run any DHCP role) |
 | `ipxe` | the iPXE BIOS / UEFI ROMs (`undionly.kpxe`, `ipxe.efi`) chain-loaded by booting clients |
 | `systemd-networkd` | NIC management on the appliance |
 | `cloud-init` | first-boot user / password / network setup |
 | `cloud-utils` | `growpart` for `bty-grow-rootfs.service` |
 | `plymouth` + `plymouth-themes` | bty-themed boot splash on tty1 (USB live env only -- not on the headless server appliance) |
 
-The appliance is the **only** delivery shape that exercises the PXE
-stack. The Docker container (`ghcr.io/safl/bty-web`) deliberately
-omits dnsmasq + iPXE because Docker bridge networking can't relay
-the L2 broadcasts proxy-DHCP needs.
+The appliance ships dnsmasq for TFTP; the Docker container
+(`ghcr.io/safl/bty-web`) is HTTP-only. UEFI HTTP-Boot targets
+work against either deployment; TFTP-only PXE clients need the
+appliance (or a separately-run TFTP server next to the
+container). DHCP stays with the operator's LAN in both cases.
 
 ## To build the appliance images yourself
 

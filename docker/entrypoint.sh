@@ -62,9 +62,11 @@ if [ -z "${BTY_QUIET:-}" ]; then
   Connect bty tui clients with:
        bty tui --server http://<host>:${BTY_WEB_PORT:-8080}
 
-  No dnsmasq / TFTP / PXE proxy-DHCP in this container -- those
-  need bare-metal LAN access. Use the bty-server appliance for
-  the full PXE flow (docs/walkthrough-server.md).
+  HTTP-only -- this container serves the bty-web HTTP API and
+  HTTP-Boot bootfile via ``/boot/ipxe.efi``. For TFTP-only PXE
+  clients, run a TFTP server alongside or use the bty-server
+  appliance image (docs/walkthrough-server.md). bty does not run
+  any DHCP role in either deployment shape.
 ========================================================================
 EOF
 fi

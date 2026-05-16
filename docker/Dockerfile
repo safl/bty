@@ -6,13 +6,14 @@
 # clients (running from the USB live env or a workstation) connect
 # here and pick images from the catalog.
 #
-# What this is NOT: the full bty-server appliance. There is no
-# dnsmasq / TFTP / iPXE proxy-DHCP stack in this image -- those
-# need bare-metal access to L2 broadcasts on the LAN, which docker
-# bridge networking can't do, and host networking is Linux-only.
-# The PXE flow lives in ``bty-media/`` (see
-# docs/walkthrough-server.md). This container is the easy way in;
-# the appliance is the production deployment.
+# What this is NOT: a TFTP server. bty no longer runs any DHCP
+# role (the operator's LAN DHCP server points clients at bty);
+# but the appliance still bundles dnsmasq to serve the iPXE
+# binaries via TFTP. This container is HTTP-only, so for
+# TFTP-only PXE clients you either need a separate TFTP server
+# next to the container or use the appliance image (see
+# docs/walkthrough-server.md). UEFI HTTP-Boot targets work
+# directly against this container.
 #
 # Built off the local wheel produced by ``uv build``; the GHA
 # workflow stages ``dist/bty_lab-*.whl`` into the build context
