@@ -60,7 +60,8 @@ jobs:
             zstd \
             gdisk \
             e2fsprogs \
-            parted
+            parted \
+            exfatprogs
       - run: uv sync --all-extras --group dev
       # Integration tests use losetup + dd against a real loop device,
       # so they need root. The default pytest run excludes them via the
