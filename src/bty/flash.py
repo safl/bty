@@ -245,7 +245,7 @@ def probe_image(path: Path) -> ImageInfo:
     )
 
 
-def probe_image_url(url: str) -> ImageInfo:
+def probe_image_url(url: str, format_hint: str | None = None) -> ImageInfo:
     """Inspect an image at an HTTP/HTTPS or ``oras://`` URL.
 
     For http(s): HEAD request, format from URL path, size from
@@ -257,6 +257,17 @@ def probe_image_url(url: str) -> ImageInfo:
     URLs return ``virtual_size_bytes = None`` because computing it
     would require pulling part of the body. Validation handles
     ``None`` by skipping the size-fits-target check with a note.
+
+    ``format_hint`` is the catalog entry's declared format
+    (``CatalogEntry.format`` or ``ImageEntry.format``). When the URL
+    path's filename has no recognised extension -- e.g. bty-web's
+    ``/images/<sha>/<display-name>`` route where the trailing
+    segment is human text without a file extension -- URL-based
+    detection returns ``None`` and ``validate_plan`` rejects the
+    plan with "image format not recognised". The hint lets the
+    caller (which read the catalog and knows the format) supply
+    it as a fallback so the probe doesn't fail just because the
+    URL's decorative filename lacks an extension.
 
     Raises ``FileNotFoundError`` if the server doesn't respond or
     returns 4xx / 5xx for the HEAD (http) or any registry call
@@ -274,6 +285,13 @@ def probe_image_url(url: str) -> ImageInfo:
         raise ValueError(f"image URL must be http://, https://, or oras://: {url}")
     filename = Path(parsed.path).name or "image"
     fmt = images.detect_format(Path(filename))
+    if fmt is None:
+        # URL filename didn't carry a recognised extension. Fall
+        # back to the caller-supplied hint (catalog entry's
+        # ``format`` field) if any. ``validate_plan`` will still
+        # reject ``None`` -> caller saw an "image format not
+        # recognised" error when both fail.
+        fmt = format_hint
 
     size_bytes = 0
     virtual_size_bytes: int | None = None

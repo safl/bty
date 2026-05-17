@@ -549,6 +549,51 @@ def test_probe_image_url_parses_format_from_url(monkeypatch: pytest.MonkeyPatch)
     assert info.virtual_size_bytes is None
 
 
+def test_probe_image_url_falls_back_to_format_hint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: when the URL path filename has no recognised
+    extension (bty-web's ``/images/<sha>/<display-name>`` route
+    emits URLs whose trailing segment is human text like
+    ``nosi%20fedora-sysdev%20%28x86_64%2C%20rolling%29`` with no
+    extension), URL-based format detection returns None and
+    ``validate_plan`` rejects with "image format not recognised".
+
+    The caller (bty-tui, which has the catalog entry's
+    ``format`` field) passes that as ``format_hint``; the probe
+    uses it as a fallback when extension detection fails.
+    """
+
+    class _FakeResp:
+        headers: ClassVar[dict[str, str]] = {"Content-Length": "9000"}
+
+        def __enter__(self) -> _FakeResp:
+            return self
+
+        def __exit__(self, *a: object) -> None:
+            pass
+
+    monkeypatch.setattr(
+        "urllib.request.urlopen",
+        lambda *_args, **_kw: _FakeResp(),
+    )
+    url = "http://server/images/abc123/nosi%20fedora-sysdev%20%28x86_64%2C%20rolling%29"
+    info = flash.probe_image_url(url, format_hint="img.gz")
+    assert info.format == "img.gz"
+    assert info.size_bytes == 9000
+
+    # No hint -> format stays None (caller-side responsibility
+    # to pass the hint when they have it).
+    info_no_hint = flash.probe_image_url(url)
+    assert info_no_hint.format is None
+
+    # URL-derived format still takes precedence over the hint
+    # (no need to second-guess a URL that does carry an
+    # extension).
+    info_url_wins = flash.probe_image_url("http://server/foo.qcow2", format_hint="img.gz")
+    assert info_url_wins.format == "qcow2"
+
+
 def test_probe_image_url_raw_img_uses_content_length_as_virtual(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

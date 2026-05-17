@@ -2063,7 +2063,17 @@ class BtyTui(App[None]):
         self.push_screen(probing)
         try:
             if image.url is not None:
-                image_info = await asyncio.to_thread(flash.probe_image_url, image.url)
+                # Pass the catalog's declared format as a hint so
+                # ``probe_image_url`` doesn't have to derive it
+                # from the URL filename. The bty-web ``/images/
+                # <sha>/<display-name>`` route emits URLs whose
+                # trailing segment is human text without a file
+                # extension (catalog ``name`` like ``nosi
+                # fedora-sysdev (x86_64, rolling)``), so the
+                # URL-based detection would otherwise return None
+                # and validate_plan would reject with "image
+                # format not recognised".
+                image_info = await asyncio.to_thread(flash.probe_image_url, image.url, image.fmt)
             else:
                 assert image.path is not None  # local row guarantees a path
                 image_info = await asyncio.to_thread(flash.probe_image, image.path)
