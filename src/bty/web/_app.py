@@ -976,16 +976,34 @@ def create_app(
                         return local
         return None
 
-    @app.get("/images/{key}", include_in_schema=False)
+    @app.api_route(
+        "/images/{key}",
+        methods=["GET", "HEAD"],
+        include_in_schema=False,
+    )
     def serve_image(key: str) -> FileResponse:
         """Serve image bytes by filename OR by SHA-256.
 
         Same trust model as /boot. The live env curls this to
         get the bytes that ``bty.image_url`` points at.
+
+        HEAD is accepted alongside GET because
+        ``bty.flash.probe_image_url`` HEADs the URL before
+        streaming to learn Content-Length without downloading
+        the bytes. Without HEAD support, the server returns
+        405 Method Not Allowed; bty-tui catches that as
+        ``URLError`` and surfaces "image URL not reachable" --
+        which obscures the actual cause (HEAD blocked).
+        Starlette's FileResponse handles HEAD shape (200 +
+        Content-Length, empty body) automatically.
         """
         return _serve_image_by_key(key)
 
-    @app.get("/images/{key}/{name:path}", include_in_schema=False)
+    @app.api_route(
+        "/images/{key}/{name:path}",
+        methods=["GET", "HEAD"],
+        include_in_schema=False,
+    )
     def serve_image_with_name(key: str, name: str) -> FileResponse:
         """``/images/<sha>/<filename>`` form. The ``key`` (SHA-256)
         binds the bytes; ``name`` is purely decorative -- it lets
@@ -995,6 +1013,9 @@ def create_app(
         emits SHA-keyed URLs. The server ignores ``name`` for the
         actual lookup; it's there so ``Path(url.path).name``
         returns ``foo.img.zst`` instead of a bare 64-hex SHA.
+
+        HEAD support: see the sibling ``/images/{key}`` route
+        for the rationale.
         """
         del name  # informational only; lookup is by ``key``
         return _serve_image_by_key(key)

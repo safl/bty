@@ -2417,6 +2417,36 @@ def test_serve_image_404_for_missing(app_client: TestClient) -> None:
     assert r.status_code == 404
 
 
+def test_serve_image_accepts_head(app_client: TestClient) -> None:
+    """Regression: ``bty.flash.probe_image_url`` HEADs the image URL
+    before flashing to learn ``Content-Length`` without downloading
+    the bytes. The route at ``/images/{key}`` and the SHA-keyed
+    sibling ``/images/{key}/{name:path}`` previously only declared
+    GET, so the HEAD returned ``405 Method Not Allowed`` -- which
+    bty-tui caught as ``URLError`` and surfaced as the misleading
+    "image URL not reachable" error.
+
+    Both routes now declare ``methods=["GET", "HEAD"]``. Starlette's
+    FileResponse handles the HEAD shape (200 + Content-Length,
+    empty body) automatically.
+    """
+    # Bare ``/images/{key}`` form.
+    r = app_client.head("/images/demo.qcow2")
+    assert r.status_code == 200, r.text
+    assert r.content == b""  # HEAD never carries a body
+    # Content-Length header must reflect the would-be GET payload
+    # so a probe can size its buffer / progress bar.
+    assert r.headers["content-length"] == str(len(b"fake-image"))
+
+    # Sibling SHA-keyed form ``/images/{key}/{name:path}``. The
+    # ``key`` does not have to be a real sha here -- the
+    # ``key`` resolver also accepts a literal filename for
+    # backward compat with the dir-scan path.
+    r2 = app_client.head("/images/demo.qcow2/decorative-name")
+    assert r2.status_code == 200, r2.text
+    assert r2.content == b""
+
+
 def test_serve_image_resolves_by_sha_dir_scan(tmp_path: Path) -> None:
     """``GET /images/<sha>`` resolves to the dir-scan file whose
     ``.sha256`` sidecar holds that digest. Without this, the
