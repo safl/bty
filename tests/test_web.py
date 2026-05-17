@@ -2278,6 +2278,37 @@ def test_serve_image_returns_file_bytes(app_client: TestClient) -> None:
     assert r.content == b"fake-image"
 
 
+def test_serve_image_rejects_traversal_attempts(app_client: TestClient) -> None:
+    """``GET /images/{key}`` must reject path-traversal attempts at
+    the boundary even though FastAPI's path converter already
+    strips raw ``/`` from ``{key}``. The URL-encoded ``..%2F``
+    routes onto the GET handler with an opaque ``{key}`` that
+    looks like a normal name but escapes the image_root if not
+    rejected. The sibling PUT route has its own dedicated test
+    (test_put_image_rejects_path_traversal); this one guards the
+    open serve route operators don't have to authenticate to.
+
+    Note: bare ``.`` and ``..`` are intentionally NOT in the
+    attempts list -- Starlette normalizes ``/images/.`` and
+    ``/images/..`` to ``/images/`` which redirects to the
+    unrelated ``GET /images`` listing endpoint (a 200 response
+    with the image catalog, not a traversal leak). The dangerous
+    cases are the URL-encoded ``..%2F`` forms that smuggle past
+    the path normaliser into ``{key}``."""
+    for attempt in (
+        "..%2Fescape.qcow2",
+        "%2E%2E%2Fescape.qcow2",  # double-encoded -- still rejected
+        "..%5Cescape.qcow2",  # backslash variant
+    ):
+        r = app_client.get(f"/images/{attempt}")
+        # Valid rejects: 400 (explicit), 404 (no such file),
+        # 405 (URL-decoded routes onto a non-GET handler), 307
+        # (Starlette path normalisation redirects to a different
+        # route). All deny serving bytes from outside image_root;
+        # the vulnerability would be a 200 + arbitrary bytes.
+        assert r.status_code in {307, 400, 404, 405}, (attempt, r.status_code)
+
+
 def test_serve_image_404_for_missing(app_client: TestClient) -> None:
     r = app_client.get("/images/does-not-exist.qcow2")
     assert r.status_code == 404
