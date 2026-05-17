@@ -59,7 +59,17 @@ SLACK_BYTES=$((16 * 1024 * 1024))  # 16 MiB tolerance for end-of-disk metadata
 MAX_CONTENT_MIB=4096                # 4 GiB ceiling on what we'll archive
 STASH=/run/bty-usb-grow.tar
 
-log() { logger -t bty-usb-grow -s -- "$@"; }
+STATUS=/run/bty-usb-grow.status
+
+log() {
+    logger -t bty-usb-grow -s -- "$@"
+    # Mirror to a status file so the operator can ``cat
+    # /run/bty-usb-grow.status`` from tty1 to see what happened
+    # without having to grep journalctl. /run is tmpfs (small
+    # cost) and forgotten on reboot, so the file shows the most
+    # recent run's outcome.
+    echo "$(date -u +%FT%TZ) $*" >> "${STATUS}" 2>/dev/null || true
+}
 
 drop_failure_sentinel() {
     # Best-effort: try to mount the partition and drop the failure

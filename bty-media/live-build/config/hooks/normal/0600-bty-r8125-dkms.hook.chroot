@@ -114,7 +114,14 @@ alias pci:v000010ECd00008126sv*sd*bc*sc*i* r8125
 # auto-negotiate flapping with some switches; safer to leave it
 # off on a PXE-boot path where one dropped link delays the
 # entire flash.
-options r8125 enable_eee=0
+#
+# Disable PCIe ASPM (Active State Power Management). The G10's
+# Realtek RTL8125 brings the link up but drops TCP packets mid-
+# transfer when the PCIe link transitions to a lower power state
+# under load; ``apt-get update`` and image fetches stall. ASPM
+# saves single-digit milliwatts; the appliance is line-powered
+# and the per-packet cost dwarfs the saving.
+options r8125 enable_eee=0 aspm=0
 EOF
 
 # Rebuild the initramfs so the r8125 module is available during

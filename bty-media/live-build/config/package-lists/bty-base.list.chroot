@@ -59,6 +59,19 @@ firmware-realtek
 intel-microcode
 amd64-microcode
 
+# ``ethtool`` is needed by the offload-disable udev rule
+# (``70-bty-realtek-2g5-offloads.rules``) that fires on RTL8125 /
+# RTL8126 link-up. The GMKTec NUCBOX G10 reports an IP via DHCP
+# fine but TCP transfers (apt-get update, oras image fetch) stall
+# or fail entirely until TSO / GSO / GRO and TX checksum offload
+# are turned off -- the long-standing Realtek 2.5GbE offload
+# regression where the hardware claims checksum + segmentation
+# offload support but emits malformed packets that peers drop.
+# Negligible cost (~1 MiB) and useful at runtime for diagnostics
+# (``ethtool -k eth0`` to read the offload state, ``-S`` for
+# stats, ``-i`` for the driver / firmware version).
+ethtool
+
 # Out-of-tree Realtek r8125 DKMS driver (built into the chroot
 # kernel by hooks/normal/0600-bty-r8125-dkms.hook.chroot). The
 # in-tree ``r8169`` driver in kernel 6.13+ covers the RTL8125

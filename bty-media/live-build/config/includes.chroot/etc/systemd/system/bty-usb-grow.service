@@ -5,6 +5,16 @@ Documentation=https://github.com/safl/bty
 # (Ventoy / loopback boot path -- bty-images-discover.service
 # handles those).
 ConditionPathExists=/dev/disk/by-label/BTY_IMAGES
+# Wait for the by-label device unit so the ConditionPathExists
+# above evaluates after udev has created the symlink. Without
+# this, on fast-USB boards (GMKTec NUCBOX G10, etc.) the unit
+# can be evaluated before udev finishes its blkid probe; the
+# condition fails silently and the partition stays at the
+# bake-time size. systemd auto-generates a ``.device`` unit
+# for every udev-tracked device; the escaped-name form here is
+# what ``systemd-escape -p`` produces from the by-label path.
+Wants=dev-disk-by\x2dlabel-BTY_IMAGES.device
+After=dev-disk-by\x2dlabel-BTY_IMAGES.device
 # Must run BEFORE the mount unit so it sees the grown partition.
 Before=var-lib-bty-images.mount bty-images-discover.service bty-tui-on-tty1.service bty-flash-on-boot.service
 After=local-fs.target systemd-udev-settle.service

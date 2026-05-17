@@ -47,3 +47,21 @@ systemctl enable bty-tui-on-tty1.service
 systemctl enable bty-images-discover.service
 systemctl enable var-lib-bty-images.mount
 systemctl enable bty-usb-grow.service
+
+# Belt-and-braces explicit symlinks. ``systemctl enable`` in a
+# live-build chroot occasionally produces a no-op (silent on
+# stdout, no .wants/ symlink) when the dbus / systemd-tmpfiles
+# state of the chroot is in an awkward shape -- we've seen unit
+# files baked into the squashfs without their multi-user.target
+# wants link, and a unit not enabled = unit not run. Adding
+# explicit ``ln -sf`` here is idempotent (``systemctl enable``
+# already created the link in the happy path; we overwrite
+# with the same target) and survives any future regression in
+# systemctl's chroot-mode behaviour.
+mkdir -p /etc/systemd/system/multi-user.target.wants
+for svc in bty-flash-on-boot.service bty-tui-on-tty1.service \
+           bty-images-discover.service var-lib-bty-images.mount \
+           bty-usb-grow.service; do
+    ln -sf "/etc/systemd/system/${svc}" \
+           "/etc/systemd/system/multi-user.target.wants/${svc}"
+done

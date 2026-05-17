@@ -103,6 +103,13 @@ packages:
   # Realtek 2.5GbE NIC support: RTL8125 / RTL8125B / RTL8126 on
   # GMKTec NUCBOX G10 (Ryzen 5) and the wider mini-PC ecosystem.
   - firmware-realtek
+  # ``ethtool`` is needed by the offload-disable udev rule
+  # (``70-bty-realtek-2g5-offloads.rules`` under rootfs/server)
+  # that fires on RTL8125 / RTL8126 link-up. Without it the
+  # appliance reports an IP via DHCP fine on a G10-class host
+  # but TCP transfers (apt-get update, oras image fetch) stall
+  # or fail entirely.
+  - ethtool
   # CPU microcode. Both vendor packages installed so the same
   # appliance image runs unmodified on Intel and AMD bare-metal
   # hosts (the kernel picks whichever vendor matches the running
@@ -254,8 +261,13 @@ runcmd:
     alias pci:v000010ECd00008125sv*sd*bc*sc*i* r8125
     alias pci:v000010ECd00008126sv*sd*bc*sc*i* r8125
     # Disable Energy-Efficient Ethernet on r8125; some switches
-    # auto-negotiate-flap with EEE on.
-    options r8125 enable_eee=0
+    # auto-negotiate-flap with EEE on. Disable PCIe ASPM: the
+    # G10's RTL8125 drops TCP packets mid-transfer when the PCIe
+    # link drops to a lower power state under load; ``apt-get
+    # update`` and image fetches stall otherwise. ASPM saves
+    # single-digit milliwatts on a line-powered appliance; the
+    # per-packet cost dwarfs the saving.
+    options r8125 enable_eee=0 aspm=0
     EOF
     update-initramfs -u -k all
 
