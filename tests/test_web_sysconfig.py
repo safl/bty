@@ -210,12 +210,36 @@ def test_tftp_status_masked_state_passes_through() -> None:
 def test_tftp_controllable_requires_helper_and_sudo() -> None:
     """The UI hides Start/Stop/Restart buttons when sudo or the
     helper isn't installed (Docker container case). On a clean
-    test host neither path exists; on the appliance both do."""
+    test host neither path exists; on the appliance both do.
+
+    Stronger than just "returns a bool": exercises each of the
+    three branches by monkey-patching ``Path.is_file`` so we
+    don't depend on the test host's actual filesystem.
+    """
     from bty.web._sysconfig import tftp_controllable
 
-    # No expectation on truthiness -- depends on the test host.
-    # Just verify it returns a bool and doesn't crash.
-    assert isinstance(tftp_controllable(), bool)
+    # Always-True: both helper + sudo present.
+    with patch.object(Path, "is_file", lambda self: True):
+        assert tftp_controllable() is True
+
+    # Helper missing: sudo present but bty-web-tftp absent.
+    def _no_helper(self: Path) -> bool:
+        return not str(self).endswith("bty-web-tftp")
+
+    with patch.object(Path, "is_file", _no_helper):
+        assert tftp_controllable() is False
+
+    # sudo missing: helper present, neither /usr/bin/sudo nor
+    # /bin/sudo on the host.
+    def _no_sudo(self: Path) -> bool:
+        return "sudo" not in str(self)
+
+    with patch.object(Path, "is_file", _no_sudo):
+        assert tftp_controllable() is False
+
+    # Both missing.
+    with patch.object(Path, "is_file", lambda self: False):
+        assert tftp_controllable() is False
 
 
 def test_tftp_status_falls_back_to_pgrep_when_systemctl_missing() -> None:
