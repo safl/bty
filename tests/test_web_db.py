@@ -56,6 +56,41 @@ def test_init_db_idempotent(tmp_path: Path) -> None:
     _db.init_db(state)  # second call must not raise
 
 
+def test_init_db_raises_on_machines_known_disks_missing(tmp_path: Path) -> None:
+    """A state.db from v0.18 (machines table without
+    ``known_disks`` / ``target_disk_serial``) must trigger
+    StaleSchemaError so the operator gets the ``rm state.db``
+    recovery hint, not a silent insert that fails on the next
+    query."""
+    import sqlite3
+
+    import pytest
+
+    state = tmp_path / "state.db"
+    # Create the v0.18-shaped machines table -- missing the v0.19
+    # disk columns.
+    with sqlite3.connect(state) as conn:
+        conn.execute(
+            """
+            CREATE TABLE machines (
+                mac                TEXT PRIMARY KEY,
+                bty_image_ref      TEXT,
+                hostname           TEXT,
+                discovered_at      TEXT,
+                last_seen_at       TEXT,
+                last_seen_ip       TEXT,
+                boot_policy        TEXT NOT NULL DEFAULT 'local',
+                last_flashed_at    TEXT,
+                created_at         TEXT NOT NULL,
+                updated_at         TEXT NOT NULL
+            )
+            """
+        )
+        conn.commit()
+    with pytest.raises(_db.StaleSchemaError, match="known_disks"):
+        _db.init_db(state)
+
+
 def test_init_db_raises_on_stale_schema(tmp_path: Path) -> None:
     """If state.db exists from an older bty-web (missing
     columns added in a later release), :func:`init_db` raises
