@@ -837,6 +837,47 @@ def test_ui_machines_list_shows_boot_policy_badge(client: TestClient) -> None:
     assert "<th>Last flashed</th>" in body
 
 
+def test_ui_events_renders_older_link_when_full_page(
+    client: TestClient,
+) -> None:
+    """The /ui/events page renders an "Older" link with
+    ``?before_id=<smallest-id-on-page>`` when a full page of 50
+    rows comes back. Without the cursor an operator on a busy
+    appliance can't page back beyond the first 50 events."""
+    _login(client)
+    # 60 PXE check-ins -> 120 events (machine.discovered +
+    # pxe.offered per MAC) -- well past page_size=50.
+    for i in range(60):
+        client.get(f"/pxe/aa:bb:cc:dd:ee:{i:02x}")
+    r = client.get("/ui/events", cookies=AUTH)
+    assert r.status_code == 200
+    body = r.text
+    # Cursor link present.
+    assert "before_id=" in body
+
+
+def test_ui_events_pagination_cursor_returns_older_rows(
+    client: TestClient,
+) -> None:
+    """Following the cursor from the first page yields rows whose
+    ids are strictly less than the smallest id on page 1."""
+    _login(client)
+    for i in range(60):
+        client.get(f"/pxe/aa:bb:cc:dd:ee:{i:02x}")
+    # Use the JSON /events endpoint for precise id comparison
+    # (the HTML page doesn't expose ids in machine-readable form).
+    first = client.get("/events", params={"limit": 50}, cookies=AUTH).json()["events"]
+    assert len(first) == 50
+    smallest_on_page1 = first[-1]["id"]
+    second = client.get(
+        "/events",
+        params={"limit": 50, "before_id": smallest_on_page1},
+        cookies=AUTH,
+    ).json()["events"]
+    assert len(second) > 0
+    assert all(e["id"] < smallest_on_page1 for e in second)
+
+
 def test_ui_machine_detail_dropdown_lists_manifest_entry_after_upload(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
