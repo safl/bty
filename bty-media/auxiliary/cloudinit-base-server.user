@@ -103,6 +103,21 @@ packages:
   # Realtek 2.5GbE NIC support: RTL8125 / RTL8125B / RTL8126 on
   # GMKTec NUCBOX G10 (Ryzen 5) and the wider mini-PC ecosystem.
   - firmware-realtek
+  # CPU microcode. Both vendor packages installed so the same
+  # appliance image runs unmodified on Intel and AMD bare-metal
+  # hosts (the kernel picks whichever vendor matches the running
+  # CPU at early boot). Pinned to trixie-backports via the
+  # 99-bty-backports.pref preference deployed below so we ship
+  # the vendor's most recent published errata + mitigation fixes.
+  # The microcode-package post-install hook writes an early-
+  # microcode segment to the initrd; the kernel loads it BEFORE
+  # driver init so the running CPU has the fixed microcode in
+  # place when modules probe hardware. Negligible cost (~10 MiB
+  # across both vendors) bought back many times over by avoiding
+  # the sporadic stability + Spectre-class issues old factory
+  # microcode carries.
+  - intel-microcode
+  - amd64-microcode
   # DKMS build environment for the out-of-tree ``r8125`` driver.
   # See the ``r8125-dkms`` runcmd block below: the in-tree
   # ``r8169`` in kernel 6.13+ nominally covers the RTL8125 family

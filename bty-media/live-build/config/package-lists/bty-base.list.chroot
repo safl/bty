@@ -40,6 +40,25 @@ plymouth-themes
 # r8125 out-of-tree DKMS variant probe and fail.
 firmware-realtek
 
+# CPU microcode. Both vendor packages installed so the same
+# live env runs unmodified on Intel and AMD targets (the
+# bake produces one squashfs; the kernel picks whichever vendor
+# matches the running CPU at early boot). Pinned to trixie-
+# backports via ``backports.pref.chroot`` so we ship the
+# vendor's most recent published errata fixes.
+#
+# Why the live env needs microcode: PXE-booted targets sit on
+# raw bare metal -- no hypervisor, no host already-loaded ucode.
+# Without these packages the kernel uses the factory-shipped
+# microcode revision, which on modern Ryzen and recent Intel
+# cores misses Spectre / SRBDS / Reptar / Inception / etc.
+# mitigations + various sporadic stability fixes. The initrd
+# hook from each package writes an early-microcode segment to
+# the initrd image so the load happens BEFORE driver init.
+# Negligible squashfs cost (~10 MiB across both vendors).
+intel-microcode
+amd64-microcode
+
 # Out-of-tree Realtek r8125 DKMS driver (built into the chroot
 # kernel by hooks/normal/0600-bty-r8125-dkms.hook.chroot). The
 # in-tree ``r8169`` driver in kernel 6.13+ covers the RTL8125
