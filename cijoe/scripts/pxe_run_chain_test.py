@@ -273,11 +273,23 @@ def _start_client_vm(workspace, socket_port, log_path, cfg):
         "2G",
         # Pin a stable serial on the flash target so the bty-web
         # safety gate's ``target_disk_serial`` match succeeds.
-        # ``BTYTEST`` is the value the per-MAC binding (below) ships
-        # in ``bty.target_disk_serial=`` on the kernel cmdline; the
-        # live env's bty-flash-on-boot looks it up via lsblk.
+        # ``BTYTEST`` is the value the per-MAC binding (below)
+        # ships in ``bty.target_disk_serial=`` on the kernel
+        # cmdline; the live env's bty-flash-on-boot looks it up
+        # via lsblk.
+        #
+        # Two-stage drive+device split: ``serial=`` on ``-drive
+        # if=virtio`` is a legacy QEMU shortcut that some QEMU
+        # builds reject silently (process exits before opening
+        # the serial-console file, so the test sees an empty
+        # client.serial.log + every chain-marker missing). The
+        # explicit ``-drive ...,if=none`` + ``-device virtio-
+        # blk-pci,drive=,serial=`` form is the canonical split
+        # and works on every QEMU version we test against.
         "-drive",
-        f"file={blank_disk},if=virtio,serial=BTYTEST",
+        f"file={blank_disk},if=none,id=flashdrive,format=qcow2",
+        "-device",
+        "virtio-blk-pci,drive=flashdrive,serial=BTYTEST",
         "-nographic",
         "-serial",
         f"file:{log_path}",

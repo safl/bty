@@ -1409,6 +1409,49 @@ def test_pxe_inventory_rejects_oversize_list(app_client: TestClient) -> None:
     assert r.status_code == 422
 
 
+def test_pxe_flash_with_orphan_ref_logs_event(
+    app_client: TestClient,
+) -> None:
+    """Operator-visible failure mode: machine bound to a
+    ``bty_image_ref`` whose catalog_entries row has been deleted.
+    /pxe returns the local fallback (ipxe.j2) AND records a
+    ``pxe.flash.orphan_ref`` event so the operator can see why
+    the box stopped reflashing on /ui/events instead of
+    debugging dnsmasq.
+
+    Distinct kind from ``pxe.flash.no_target_disk`` because the
+    failure cause is different: orphan_ref = the operator's
+    image binding points at a deleted entry; no_target_disk =
+    the operator forgot to pick a target disk.
+    """
+    # Bind to a ref that doesn't exist in catalog_entries.
+    orphan_ref = "deadbeef" * 8
+    app_client.put(
+        "/machines/aa:bb:cc:dd:ee:bd",
+        json={
+            "bty_image_ref": orphan_ref,
+            "boot_policy": "flash",
+            "target_disk_serial": "SN12345",
+        },
+        cookies=AUTH,
+    )
+    r = app_client.get("/pxe/aa:bb:cc:dd:ee:bd")
+    assert r.status_code == 200
+    # ipxe.j2 (local fallback) -- not the flash chain.
+    assert "kernel ${bty-base}/boot/" not in r.text
+    events = app_client.get(
+        "/events",
+        params={"subject_kind": "machine", "subject_id": "aa:bb:cc:dd:ee:bd"},
+        cookies=AUTH,
+    ).json()["events"]
+    kinds = [e["kind"] for e in events]
+    assert "pxe.flash.orphan_ref" in kinds
+    # Details carry the dangling ref so the operator can grep
+    # for it across catalog history.
+    orphan_evt = next(e for e in events if e["kind"] == "pxe.flash.orphan_ref")
+    assert orphan_evt["details"]["bty_image_ref"] == orphan_ref
+
+
 def test_pxe_flash_refuses_chain_logs_no_target_disk_event(
     app_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
