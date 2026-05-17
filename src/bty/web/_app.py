@@ -2322,11 +2322,20 @@ def _request_host(request: Request) -> str:
     URL bar); falls back to the parsed request URL when the header is
     missing -- bare TestClient and tightly-curated reverse proxies can
     omit it. Default port mirrors the appliance's listen port.
+
+    If both the Host header AND ``request.url.hostname`` are unset
+    (synthetic Request constructed without scope, rare), returns a
+    plausible loopback host instead of a string with ``"None"`` in
+    it. The iPXE flash chain interpolates this value into a
+    ``set bty-base http://{host}`` line, so a broken host would
+    break the live env's HTTP fetches.
     """
-    return request.headers.get(
-        "host",
-        f"{request.url.hostname}:{request.url.port or 8080}",
-    )
+    header_host = request.headers.get("host")
+    if header_host:
+        return header_host
+    hostname = request.url.hostname or "127.0.0.1"
+    port = request.url.port or 8080
+    return f"{hostname}:{port}"
 
 
 def _request_origin(request: Request) -> str:
