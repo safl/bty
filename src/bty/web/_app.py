@@ -880,13 +880,20 @@ def create_app(
                     return local
                 return None
             # Remote src, no cache yet -- cache-through (Option A).
+            # Broad except: a urllib URLError / OSError / OrasError
+            # during cache-through used to propagate up and 500 the
+            # live env's image GET, leaving the flash chain dead.
+            # Now we log the failure as a sha_mismatch-shaped audit
+            # row (close enough -- the operator sees "cache-through
+            # failed for src") and return None so the caller raises
+            # a clean 404, which the live env can surface on tty1.
             try:
                 cached, computed_sha = _catalog.fetch_src_to_cache(
                     src,
                     catalog_cache_dir,
                     expected_sha=sha,
                 )
-            except _catalog.CatalogError as exc:
+            except Exception as exc:
                 with _db.open_db(state_path) as conn:
                     _log_event(
                         conn,
@@ -895,7 +902,10 @@ def create_app(
                         subject_kind="catalog",
                         subject_id=ref,
                         actor="pxe-client",
-                        details={"src": src, "error": str(exc)},
+                        details={
+                            "src": src,
+                            "error": f"{type(exc).__name__}: {exc}",
+                        },
                     )
                     conn.commit()
                 return None

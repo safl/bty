@@ -586,6 +586,64 @@ def test_auto_import_hashes_unhashed_dir_scan_files(tmp_path: Path) -> None:
         assert entry["url"].endswith(f"/images/{expected_sha}/fresh.img")
 
 
+def test_serve_image_cache_through_url_error_returns_404_not_500(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A network failure during cache-through (URLError -- no
+    route, DNS, etc.) used to propagate up as a 500 from the
+    live env's image GET, leaving the flash chain dead. Now it
+    logs a sha_mismatch-shaped event and returns 404 cleanly so
+    the live env surfaces a recognisable error on tty1 instead
+    of a server-side traceback."""
+    import hashlib
+    import os
+    import urllib.error
+
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    state = state_dir / "state.db"
+    image_root = tmp_path / "images"
+    image_root.mkdir()
+
+    def fake_urlopen(*_a: object, **_kw: object) -> None:
+        raise urllib.error.URLError("no route to host")
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    os.environ["BTY_STATE_DIR"] = str(state_dir)
+    try:
+        app = create_app(
+            state_path=state,
+            service_user=TEST_SERVICE_USER,
+            secret_key=TEST_SECRET_KEY,
+            image_root=image_root,
+        )
+        with TestClient(app) as client:
+            # Seed a catalog_entries row with no disk_image_sha so
+            # the cache-through path activates. We have to do this
+            # directly via sqlite because /catalog/entries POST
+            # also probes the URL with HEAD (which would also raise).
+            import sqlite3
+
+            ref = hashlib.sha256(b"https://example.invalid/img.img.gz").hexdigest()
+            with sqlite3.connect(state) as conn:
+                conn.execute(
+                    "INSERT INTO catalog_entries "
+                    "(bty_image_ref, src, name, added_at) VALUES (?, ?, ?, ?)",
+                    (
+                        ref,
+                        "https://example.invalid/img.img.gz",
+                        "img.img.gz",
+                        "2026-05-17T00:00:00+00:00",
+                    ),
+                )
+                conn.commit()
+            r = client.get(f"/images/{ref}/img.img.gz")
+            # 404, not 500.
+            assert r.status_code == 404, r.text
+    finally:
+        os.environ.pop("BTY_STATE_DIR", None)
+
+
 def test_serve_image_does_cache_through_on_uncached_ref(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
