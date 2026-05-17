@@ -163,6 +163,40 @@ def test_verify_sha256_manifest_streams_large_files(tmp_path: Path) -> None:
         _verify_sha256_manifest(files_dir / SHA256_NAME, files_dir)
 
 
+def test_missing_netboot_artifacts_empty_when_all_present(tmp_path: Path) -> None:
+    """An empty list means "PXE clients can boot": kernel + initrd
+    + squashfs are all on disk. The .sha256 manifest is verification
+    metadata and intentionally not included in the trio."""
+    from bty.web._releases import ARTIFACT_NAMES, missing_netboot_artifacts
+
+    for name in ARTIFACT_NAMES:
+        (tmp_path / name).write_bytes(b"fake")
+    assert missing_netboot_artifacts(tmp_path) == []
+
+
+def test_missing_netboot_artifacts_reports_each_gap(tmp_path: Path) -> None:
+    """``missing_netboot_artifacts`` returns the names NOT on disk
+    so the /ui/settings warning can list which fetches the
+    operator still owes."""
+    from bty.web._releases import ARTIFACT_NAMES, missing_netboot_artifacts
+
+    # Plant only the first; the rest should show up as missing.
+    (tmp_path / ARTIFACT_NAMES[0]).write_bytes(b"fake")
+    missing = missing_netboot_artifacts(tmp_path)
+    assert ARTIFACT_NAMES[0] not in missing
+    for name in ARTIFACT_NAMES[1:]:
+        assert name in missing
+
+
+def test_missing_netboot_artifacts_empty_dir_returns_all(tmp_path: Path) -> None:
+    """A boot_dir with none of the artefacts -- every name shows
+    up in the list. The helper must not raise."""
+    from bty.web._releases import ARTIFACT_NAMES, missing_netboot_artifacts
+
+    missing = missing_netboot_artifacts(tmp_path)
+    assert set(missing) == set(ARTIFACT_NAMES)
+
+
 def test_inspect_boot_dir_reports_present_and_missing(tmp_path: Path) -> None:
     boot_dir = tmp_path / "boot"
     boot_dir.mkdir()
