@@ -13,6 +13,11 @@
 # etc. Kernel + firmware are self-contained and the whole reason we
 # enabled the archive in the first place (broader bare-metal HW
 # coverage, e.g. Realtek RTL8125/8126 + newer rtw89 WiFi chipsets).
-Package: linux-image-amd64 linux-image-*-amd64 firmware-* intel-microcode amd64-microcode
+#
+# linux-headers-* must match linux-image-* exactly -- the r8125
+# DKMS build (see hooks/normal/0600-bty-r8125-dkms.hook.chroot)
+# fails to compile if the chroot resolves headers to trixie main
+# while the kernel itself came from backports.
+Package: linux-image-amd64 linux-image-*-amd64 linux-headers-amd64 linux-headers-*-amd64 firmware-* intel-microcode amd64-microcode
 Pin: release a=trixie-backports
 Pin-Priority: 990

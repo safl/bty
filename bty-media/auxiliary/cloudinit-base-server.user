@@ -98,6 +98,25 @@ packages:
   # reversal.
   - linux-image-amd64
   - firmware-linux-nonfree
+  # ``firmware-realtek`` is explicit (also pulled transitively by
+  # firmware-linux-nonfree) so the package list visibly advertises
+  # Realtek 2.5GbE NIC support: RTL8125 / RTL8125B / RTL8126 on
+  # GMKTec NUCBOX G10 (Ryzen 5) and the wider mini-PC ecosystem.
+  - firmware-realtek
+  # DKMS build environment for the out-of-tree ``r8125`` driver.
+  # See the ``r8125-dkms`` runcmd block below: the in-tree
+  # ``r8169`` in kernel 6.13+ nominally covers the RTL8125 family
+  # but some consumer mini-PCs (GMKTec G10) need the upstream
+  # Realtek r8125 source. linux-headers-amd64 is pinned to
+  # trixie-backports via 99-bty-backports.pref so the headers
+  # match the linux-image-amd64 the bake installs. ``git`` is
+  # already in the list above. dkms + build-essential stay on
+  # the appliance because the operator may upgrade kernels later
+  # and DKMS rebuilds the module against the new kernel
+  # automatically.
+  - dkms
+  - build-essential
+  - linux-headers-amd64
   # ``parted`` is used by ``bty-image-store-init`` to partition a
   # 2nd disk for the persistent image cache. It's almost certainly
   # already pulled in transitively (cloud-utils' growpart shells out
@@ -172,6 +191,58 @@ runcmd:
   # HTTPClient bootfile URL pointing at
   # ``http://<bty-server>:8080/boot/ipxe.efi``.
   - install -d -o bty -g bty -m 0755 /var/lib/bty/boot
+
+  # Bake the out-of-tree Realtek r8125 driver into the appliance
+  # kernel. The in-tree r8169 in 6.13+ covers RTL8125 / RTL8125B /
+  # RTL8126 in theory, but on some consumer mini-PCs (GMKTec
+  # NUCBOX G10 in particular) the upstream Realtek r8125 has
+  # device-init quirks the in-tree variant hasn't picked up. The
+  # narrow modprobe alias (``zz-bty-r8125-prefer.conf`` below)
+  # scopes r8125-preference to PCI device IDs 0x8125 and 0x8126
+  # ONLY -- machines with RTL8168 / RTL8169 (older 1GbE Realtek)
+  # continue to use r8169 unchanged, and machines with no Realtek
+  # NIC never auto-load either driver.
+  #
+  # Pinned to ``master`` of the awesometic packaging; this repo
+  # ships the latest Realtek-published source. A specific
+  # commit hash can be pinned here if upstream Realtek drift ever
+  # introduces a regression.
+  - |
+    set -eu
+    KVER=$(ls /lib/modules | head -1)
+    rm -rf /usr/src/r8125-build
+    git clone --depth 1 --branch master \
+        https://github.com/awesometic/realtek-r8125-dkms.git \
+        /usr/src/r8125-build
+    R8125_VERSION=$(awk -F'"' '/^PACKAGE_VERSION=/ {print $2}' \
+        /usr/src/r8125-build/dkms.conf)
+    rm -rf "/usr/src/r8125-${R8125_VERSION}"
+    mv /usr/src/r8125-build "/usr/src/r8125-${R8125_VERSION}"
+    dkms add -m r8125 -v "${R8125_VERSION}"
+    dkms build -m r8125 -v "${R8125_VERSION}" -k "${KVER}"
+    dkms install -m r8125 -v "${R8125_VERSION}" -k "${KVER}"
+    depmod -a "${KVER}"
+    # The awesometic DKMS install may write a flat
+    # ``blacklist r8169`` config that would impact non-2.5GbE
+    # Realtek hardware (RTL8168 / RTL8169). Remove it and replace
+    # with a narrower device-id-scoped alias.
+    rm -f /etc/modprobe.d/r8125-dkms.conf \
+          /etc/modprobe.d/blacklist-r8169.conf
+    cat > /etc/modprobe.d/zz-bty-r8125-prefer.conf <<'EOF'
+    # bty: prefer out-of-tree r8125 for the RTL8125 / B and
+    # RTL8126 2.5GbE family ONLY. Other Realtek device IDs fall
+    # through to in-tree r8169.
+    #
+    # Operator override (return to in-tree r8169 only):
+    #   ln -s /dev/null /etc/modprobe.d/zz-bty-r8125-prefer.conf
+    #   update-initramfs -u && reboot
+    alias pci:v000010ECd00008125sv*sd*bc*sc*i* r8125
+    alias pci:v000010ECd00008126sv*sd*bc*sc*i* r8125
+    # Disable Energy-Efficient Ethernet on r8125; some switches
+    # auto-negotiate-flap with EEE on.
+    options r8125 enable_eee=0
+    EOF
+    update-initramfs -u -k all
 
   # bty-web's TFTP daemon-control helper + sudoers entry. The web
   # UI exposes Start/Stop/Restart buttons for dnsmasq.service (which
