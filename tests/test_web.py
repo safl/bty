@@ -1175,6 +1175,9 @@ def test_pxe_flash_policy_returns_chain_with_args(
     # never see the content sha in the URL.
     assert f"bty.image_url=${{bty-base}}/images/{ref}/" in body
     assert "bty.provisioning" not in body
+    # Same plymouth-disable as the tui template; see that test for
+    # the MS-01 wedge that drove this.
+    assert "plymouth.enable=0" in body
 
 
 def test_pxe_tui_policy_returns_interactive_chain(app_client: TestClient) -> None:
@@ -1201,6 +1204,15 @@ def test_pxe_tui_policy_returns_interactive_chain(app_client: TestClient) -> Non
     # come from the operator's TUI selection.
     assert "bty.image_url" not in body
     assert "bty.provisioning" not in body
+    # Plymouth is disabled on the kernel cmdline so plymouth-quit-wait
+    # cannot hang on hardware whose iGPU framebuffer plymouth refuses
+    # to release. Observed on a Minisforum MS-01 PXE-booting bty-
+    # netboot v0.19.6: plymouth-quit-wait stayed in "Starting"
+    # indefinitely, blocking bty-flash-on-boot.service which has
+    # ``After=plymouth-quit.service`` in its unit. plymouth.enable=0
+    # tells plymouthd to no-op, so the quit-wait barrier completes
+    # immediately even when the framebuffer would have wedged it.
+    assert "plymouth.enable=0" in body
 
 
 def test_machine_upsert_accepts_boot_policy_tui(app_client: TestClient) -> None:
