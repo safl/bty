@@ -1230,6 +1230,50 @@ def test_pxe_done_flips_flash_once_to_local(app_client: TestClient) -> None:
     assert after["boot_policy"] == "local"
 
 
+def test_pxe_done_flash_once_second_call_is_idempotent(
+    app_client: TestClient,
+) -> None:
+    """A second /pxe/{mac}/done call against a machine that already
+    flipped flash-once -> local on the first call returns 204
+    cleanly without raising or re-flipping anything. Important
+    for cosmic-ray retries from the live env (network blip
+    between the flash signal and the rebooting kernel)."""
+    app_client.put(
+        "/machines/33:44:55:66:77:88",
+        json={
+            "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "boot_policy": "flash-once",
+        },
+        cookies=AUTH,
+    )
+    # First /done flips to local + records the event.
+    r1 = app_client.post("/pxe/33:44:55:66:77:88/done")
+    assert r1.status_code == 204
+    # Second /done: machine is now boot_policy=local; the handler
+    # still hits the UPDATE path and returns 204 cleanly.
+    r2 = app_client.post("/pxe/33:44:55:66:77:88/done")
+    assert r2.status_code == 204
+    after = app_client.get("/machines/33:44:55:66:77:88", cookies=AUTH).json()
+    assert after["boot_policy"] == "local"
+    # Two flash events recorded -- one per /done call. The audit
+    # trail captures the retry; the operator can see "this box
+    # signalled twice in quick succession".
+    events = app_client.get(
+        "/events",
+        params={
+            "subject_kind": "machine",
+            "subject_id": "33:44:55:66:77:88",
+            "kind": "machine.flashed",
+        },
+        cookies=AUTH,
+    ).json()["events"]
+    assert len(events) == 2
+    # First event's summary mentions the flip; second doesn't.
+    summaries = [e["summary"] for e in events]
+    assert any("flash-once -> local" in s for s in summaries)
+    assert sum(1 for s in summaries if "flash-once -> local" in s) == 1
+
+
 def test_pxe_inventory_persists_disks_and_logs_event(app_client: TestClient) -> None:
     """``POST /pxe/{mac}/inventory`` lands the disk list on the
     machine row (visible via GET /machines/{mac}) and records a
