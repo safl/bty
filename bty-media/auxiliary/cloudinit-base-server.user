@@ -145,6 +145,21 @@ packages:
   # to parted), but list it explicitly so the dependency doesn't
   # depend on what cloud-utils Recommends in some future Debian.
   - parted
+  # ``systemd-timesyncd`` keeps the appliance clock honest. The
+  # bty-server bake completes in a VM with hypervisor-clock time
+  # so the initial RTC is correct, but the appliance may then
+  # run on bare metal whose CMOS battery is dead, may sit
+  # powered-off for weeks between reboots, etc. timesyncd queries
+  # the Debian NTP pool (``[0-3].debian.pool.ntp.org``) on every
+  # network-up event and steps the system clock. Cost: ~200 KiB
+  # on disk; one-shot ~2 KiB UDP exchange per sync. Without an
+  # honest clock, ``apt-get update`` fails on sqv signature
+  # ``Not live until`` errors and oras pulls fail on freshly-
+  # rotated TLS certs whose NotBefore is in the system clock's
+  # future. The same problem hits the bty-usb live env (covered
+  # by ``bty-base.list.chroot``); covering it here too keeps the
+  # appliance side robust to its own clock drift.
+  - systemd-timesyncd
   # Plymouth is intentionally NOT installed on the server appliance:
   # its quit/teardown emits VT100 escape sequences to
   # ``/dev/console``, and on a server with the standard
@@ -454,6 +469,12 @@ runcmd:
   # postinst, but explicitly enabling here is paranoia-friendly
   # (matches the pattern used for systemd-networkd / dnsmasq).
   - systemctl enable haveged.service
+
+  # Enable systemd-timesyncd. The package's postinst typically
+  # enables it via vendor preset, but on Debian's slim cloud
+  # baseline that preset can be off; explicit enable matches
+  # the haveged / networkd pattern and is idempotent.
+  - systemctl enable systemd-timesyncd.service
 
   # Disable cloud-init for subsequent boots and clear its artefacts.
   # The cooked image already has its identity (bty user + default

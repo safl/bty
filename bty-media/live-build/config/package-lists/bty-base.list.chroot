@@ -59,18 +59,56 @@ firmware-realtek
 intel-microcode
 amd64-microcode
 
-# ``ethtool`` is needed by the offload-disable udev rule
+# ``ethtool`` is used by the offload-disable udev rule
 # (``70-bty-realtek-2g5-offloads.rules``) that fires on RTL8125 /
-# RTL8126 link-up. The GMKTec NUCBOX G10 reports an IP via DHCP
-# fine but TCP transfers (apt-get update, oras image fetch) stall
-# or fail entirely until TSO / GSO / GRO and TX checksum offload
-# are turned off -- the long-standing Realtek 2.5GbE offload
-# regression where the hardware claims checksum + segmentation
-# offload support but emits malformed packets that peers drop.
-# Negligible cost (~1 MiB) and useful at runtime for diagnostics
-# (``ethtool -k eth0`` to read the offload state, ``-S`` for
-# stats, ``-i`` for the driver / firmware version).
+# RTL8126 link-up to turn off TSO / GSO / GRO / TX checksum
+# offload, working around the long-standing Realtek 2.5GbE
+# offload regression where the hardware claims checksum +
+# segmentation offload but emits malformed packets that peers
+# drop. Whether the specific G10 / G5 / etc. board this happens
+# to needs the offloads off is hardware-by-hardware; the rule
+# is narrow (only fires on r8125 / r8169 drivers) so leaving it
+# in place is cheap and harmless on non-Realtek hardware. Also
+# useful at runtime for diagnostics: ``ethtool -k eth0`` to read
+# offload state, ``-S`` for stats, ``-i`` for driver / firmware.
 ethtool
+
+# Time synchronisation. The live env boots with whatever the
+# target's RTC reports, which can be wildly wrong on consumer
+# mini-PCs with dead BIOS batteries (GMKTec NUCBOX G10 boots with
+# RTC ~6 months in the past). systemd's bake-time clock-epoch
+# floor advances the system clock to roughly when the squashfs
+# was created, but that's still days-to-weeks behind real time
+# by the time an operator boots the .iso. Symptoms when the
+# clock is behind:
+#
+#   * ``apt-get update`` fails: sqv rejects InRelease signatures
+#     as "Not live until <future timestamp>" because the
+#     signature's creation time is after the system clock.
+#   * ``oras pull`` fails on freshly-rotated registry certs
+#     whose NotBefore is after the system clock.
+#   * Any signature-timestamp-aware verification (cosign /
+#     notation / similar) fails for the same reason.
+#
+# ``systemd-timesyncd`` is the lightweight SNTP client shipped
+# with systemd. Once enabled it queries the default Debian NTP
+# pool (``[0-3].debian.pool.ntp.org``) on every network-up event
+# and steps the clock to the truth. Cost: ~200 KiB on disk,
+# one-shot ~2 KiB UDP exchange per sync.
+#
+# Belt-and-braces fallback for air-gapped labs (no internet,
+# only LAN with the bty-web server reachable):
+# ``bty-clock-from-http.service`` reads the HTTP ``Date:`` header
+# from the kernel-cmdline ``bty.server=`` URL and ``date -s``'s
+# it. Installed by hooks/normal/0700-bty-clock-from-http.hook.chroot
+# alongside its companion script. timesyncd wins if NTP works;
+# otherwise the HTTP fallback rescues the air-gapped case.
+systemd-timesyncd
+# ``curl`` is the HTTP client used by the clock-from-http
+# fallback. Already part of bty-flash's runtime list but
+# repeated here so the base list is self-contained for the
+# bty-netboot variant which doesn't pull bty-flash.
+curl
 
 # Out-of-tree Realtek r8125 DKMS driver (built into the chroot
 # kernel by hooks/normal/0600-bty-r8125-dkms.hook.chroot). The
