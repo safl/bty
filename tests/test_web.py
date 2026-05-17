@@ -3873,6 +3873,42 @@ def test_ui_catalog_fetch_release_does_not_duplicate_unsha_entries(
         )
 
 
+def test_ui_machines_renders_timestamps_compactly(app_client: TestClient, tmp_path: Path) -> None:
+    """The ``fmt_ts`` Jinja filter trims ISO 8601 timestamps to
+    ``YYYY-MM-DD HH:MM:SS UTC`` for display on /ui/machines and
+    related pages. The raw value (with microseconds + ``+00:00``)
+    is unreadable for an operator scanning a row -- the title=
+    attribute keeps the full precision available on hover.
+
+    Insert a machine row directly into the fixture's state.db
+    (the only way to set a known timestamp), GET /ui/machines,
+    and assert both the compact form (visible text) and the raw
+    form (title= attribute for hover) render.
+    """
+    from bty.web import _db as _bty_db
+
+    state_path = tmp_path / "state.db"
+    with _bty_db.open_db(state_path) as conn:
+        conn.execute(
+            "INSERT INTO machines (mac, boot_policy, last_seen_at, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (
+                "aa:bb:cc:dd:ee:ff",
+                "tui",
+                "2026-05-17T20:21:09.155109+00:00",
+                "2026-05-17T20:00:00+00:00",
+                "2026-05-17T20:21:09.155109+00:00",
+            ),
+        )
+        conn.commit()
+    page = app_client.get("/ui/machines", cookies=AUTH)
+    assert page.status_code == 200, page.text
+    # Compact form rendered in the row body.
+    assert "2026-05-17 20:21:09 UTC" in page.text
+    # Raw form kept in the title= attribute for hover precision.
+    assert 'title="2026-05-17T20:21:09.155109+00:00"' in page.text
+
+
 def test_catalog_enqueue_request_rejects_traversal_name(app_client: TestClient) -> None:
     """``CatalogEnqueueRequest.name`` (used by both
     ``POST /catalog/downloads`` and ``POST /catalog/hashes``)

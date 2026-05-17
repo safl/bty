@@ -106,7 +106,7 @@
             <tbody>
                 {% for e in events %}
                 <tr>
-                    <td><small class="text-muted">{{ e.ts }}</small></td>
+                    <td><small class="text-muted" title="{{ e.ts }}">{{ e.ts | fmt_ts }}</small></td>
                     <td>
                         {# Badge colour: failure kinds (anything ending
                            ``.failed`` or ``_failed``) override to

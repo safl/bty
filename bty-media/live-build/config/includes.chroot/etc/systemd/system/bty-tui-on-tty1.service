@@ -42,7 +42,17 @@ After=plymouth-quit.service plymouth-quit-wait.service
 Wants=network-online.target
 
 [Service]
-Type=idle
+# Type=simple (not idle): with Type=idle systemd delays ExecStart
+# until the job queue drains, which on slower targets and on
+# unattended PXE boots can wedge bty-tui's appearance for 30-60s
+# while the operator watches systemd init messages scroll past.
+# We do not need idle's output-interleaving guarantee here -- the
+# Conflicts=getty@tty1 + TTYVHangup combo already takes the tty
+# cleanly, and plymouth-quit-wait gates init-time noise on tty1.
+# Type=simple lets ExecStart fire as soon as After=plymouth-quit-
+# wait fires, which is what the operator expects (the live env
+# is "the bty-tui appliance" -- it should appear immediately).
+Type=simple
 ExecStart=/usr/local/sbin/bty-tui-on-tty1
 Restart=on-failure
 RestartSec=5

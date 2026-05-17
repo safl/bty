@@ -13,15 +13,15 @@
         <h1 class="h4 mb-3"><code>{{ m.mac }}</code></h1>
         <dl class="row mb-0">
             <dt class="col-sm-3">Discovered</dt>
-            <dd class="col-sm-9">{{ m.discovered_at or "-" }}</dd>
+            <dd class="col-sm-9" title="{{ m.discovered_at }}">{{ m.discovered_at | fmt_ts if m.discovered_at else "-" }}</dd>
             <dt class="col-sm-3">Last seen</dt>
-            <dd class="col-sm-9">{{ m.last_seen_at or "-" }}{% if m.last_seen_ip %} from <a class="text-decoration-none" href="/ui/events?source_ip={{ m.last_seen_ip|urlencode }}" title="Show every event from this IP"><code>{{ m.last_seen_ip }}</code></a>{% endif %}</dd>
+            <dd class="col-sm-9"><span title="{{ m.last_seen_at }}">{{ m.last_seen_at | fmt_ts if m.last_seen_at else "-" }}</span>{% if m.last_seen_ip %} from <a class="text-decoration-none" href="/ui/events?source_ip={{ m.last_seen_ip|urlencode }}" title="Show every event from this IP"><code>{{ m.last_seen_ip }}</code></a>{% endif %}</dd>
             <dt class="col-sm-3">Last flashed</dt>
-            <dd class="col-sm-9">{{ m.last_flashed_at or "-" }}</dd>
+            <dd class="col-sm-9" title="{{ m.last_flashed_at }}">{{ m.last_flashed_at | fmt_ts if m.last_flashed_at else "-" }}</dd>
             <dt class="col-sm-3">Created</dt>
-            <dd class="col-sm-9">{{ m.created_at }}</dd>
+            <dd class="col-sm-9" title="{{ m.created_at }}">{{ m.created_at | fmt_ts }}</dd>
             <dt class="col-sm-3">Updated</dt>
-            <dd class="col-sm-9">{{ m.updated_at }}</dd>
+            <dd class="col-sm-9" title="{{ m.updated_at }}">{{ m.updated_at | fmt_ts }}</dd>
         </dl>
     </div>
 </div>
