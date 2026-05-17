@@ -271,8 +271,13 @@ def _start_client_vm(workspace, socket_port, log_path, cfg):
         # ~500 MiB to the live env.
         "-m",
         "2G",
+        # Pin a stable serial on the flash target so the bty-web
+        # safety gate's ``target_disk_serial`` match succeeds.
+        # ``BTYTEST`` is the value the per-MAC binding (below) ships
+        # in ``bty.target_disk_serial=`` on the kernel cmdline; the
+        # live env's bty-flash-on-boot looks it up via lsblk.
         "-drive",
-        f"file={blank_disk},if=virtio",
+        f"file={blank_disk},if=virtio,serial=BTYTEST",
         "-nographic",
         "-serial",
         f"file:{log_path}",
@@ -360,6 +365,13 @@ def _put_assignment(host, port, token, cfg, bty_image_ref):
         {
             "bty_image_ref": bty_image_ref,
             "boot_policy": "flash",
+            # v0.19.0+ safety gate: /pxe/{mac} refuses the flash
+            # chain unless a target_disk_serial is picked. The
+            # client VM's flash target is pinned to ``serial=
+            # BTYTEST`` in _start_client_vm; the live env's
+            # bty-flash-on-boot matches this value against
+            # lsblk's SERIAL field.
+            "target_disk_serial": "BTYTEST",
         }
     ).encode("utf-8")
     req = urllib.request.Request(
