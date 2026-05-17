@@ -33,6 +33,17 @@
 
 set -eu
 
+# Self-guard: plymouth lives in ``bty-plymouth.list.chroot`` which
+# ``auto/config`` activates only for the USB ISO bake. In the
+# netboot variant the package is absent -- the hook still runs
+# (live-build doesn't filter hooks by variant), so it must
+# detect plymouth absence and exit cleanly rather than crash
+# the bake.
+if ! command -v plymouth-set-default-theme >/dev/null 2>&1; then
+    echo "0950-bty-plymouth: plymouth not installed; netboot variant skipping splash setup"
+    exit 0
+fi
+
 # Sanity check: theme files staged?
 if ! [ -f /usr/share/plymouth/themes/bty/bty.plymouth ]; then
     echo "0950-bty-plymouth: bty theme not staged at /usr/share/plymouth/themes/bty/" >&2

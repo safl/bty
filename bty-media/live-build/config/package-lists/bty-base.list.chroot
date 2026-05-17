@@ -6,14 +6,14 @@ linux-image-amd64
 live-boot
 live-config
 live-tools
-# Plymouth provides the kernel-stage graphical splash (see
-# ``hooks/normal/0950-bty-plymouth.hook.chroot`` for theme setup).
-# ``plymouth-themes`` ships extra base themes; we only need the
-# script module from ``plymouth`` itself for the bty theme but
-# pulling -themes in too keeps the alternative chooser happy if
-# an operator wants to fall back to a stock theme.
-plymouth
-plymouth-themes
+# Plymouth lives in ``bty-plymouth.list.chroot`` -- activated only
+# by the USB ISO bake via auto/config. The mascot splash on a USB
+# stick (operator-facing first impression) is worth its disk +
+# init cost; the netboot variant runs in headless / KVM / PXE
+# contexts where plymouth adds latency (plymouth-quit-wait wedges
+# on certain iGPUs -- see the MS-01 / EPYC plymouth hangs) and
+# zero operator value. Same chroot tree, two output variants:
+# one ships plymouth, the other doesn't.
 
 # Vendor firmware blobs. ``--firmware-chroot true`` in
 # ``auto/config`` pulls the ``firmware-linux-nonfree`` metapackage,

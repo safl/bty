@@ -35,6 +35,24 @@
 # pulls the trixie .deb explicitly to work around that.
 set -e
 
+# Plymouth lives in ``config/package-lists/bty-plymouth.list.chroot.usb``
+# as an inert template (the ``.usb`` suffix is not a live-build-
+# recognised extension; live-build ignores the file unless it
+# matches ``.list.chroot[_<scope>]``). We activate it by copying
+# to ``bty-plymouth.list.chroot`` only on USB bakes, and remove
+# the active copy on netboot bakes. The hook
+# ``hooks/normal/0950-bty-plymouth.hook.chroot`` self-guards on
+# the presence of plymouthd, so an absent plymouth simply skips
+# the theme setup with no error.
+#
+# Why split: USB boot is the operator's first impression (mascot
+# splash is worth the disk + init cost). Netboot runs in headless
+# / KVM / PXE contexts where plymouth adds latency (the MS-01 /
+# EPYC plymouth-quit-wait wedges came from this) and provides
+# zero operator value.
+PLYMOUTH_SRC="config/package-lists/bty-plymouth.list.chroot.usb"
+PLYMOUTH_DST="config/package-lists/bty-plymouth.list.chroot"
+
 if [ "${BTY_USB_ISO:-}" = "1" ]; then
     BINARY_IMAGES=iso-hybrid
     BOOTLOADERS_OPTS="--bootloaders syslinux,grub-efi"
@@ -44,10 +62,20 @@ if [ "${BTY_USB_ISO:-}" = "1" ]; then
     # bootloader menu, which works but doesn't show bty branding
     # during the kernel boot window.
     BOOTAPPEND="boot=live components quiet splash noeject bty.mode=interactive bty.version=__BTY_VERSION__"
+    # Activate the plymouth package list for the USB bake.
+    if [ -f "${PLYMOUTH_SRC}" ]; then
+        cp "${PLYMOUTH_SRC}" "${PLYMOUTH_DST}"
+    fi
 else
     BINARY_IMAGES=netboot
     BOOTLOADERS_OPTS=""
-    BOOTAPPEND="boot=live components quiet splash noeject bty.version=__BTY_VERSION__"
+    # No ``splash`` -- plymouth isn't installed in this variant.
+    # ``plymouth.enable=0`` is belt-and-braces in case a future
+    # change pulls plymouth in transitively; with the package
+    # absent it's a no-op.
+    BOOTAPPEND="boot=live components quiet plymouth.enable=0 bty.version=__BTY_VERSION__"
+    # Deactivate the plymouth package list for the netboot bake.
+    rm -f "${PLYMOUTH_DST}"
 fi
 
 # shellcheck disable=SC2086 # BOOTLOADERS_OPTS is intentionally word-split

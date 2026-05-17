@@ -416,3 +416,55 @@ def test_mascot_logo_is_in_sync_across_assets() -> None:
         f"bty mascot drifted between asset locations: {digests!r}. "
         f"Sync by copying {canonical} over the others."
     )
+
+
+def test_plymouth_only_in_usb_variant() -> None:
+    """Plymouth is the kernel-stage splash. It's awesome on the
+    bty-usb stick (operator-facing first impression) but a
+    headless-target liability on the netboot variant: plymouth-
+    quit-wait has wedged on multiple Intel iGPU targets (Minisforum
+    MS-01, AMD EPYC bring-up box, etc.) blocking bty-flash-on-boot
+    indefinitely.
+
+    Invariant: plymouth + plymouth-themes must NOT live in
+    ``bty-base.list.chroot`` (which feeds both variants) -- they
+    belong in ``bty-plymouth.list.chroot.usb`` which
+    ``auto/config`` activates only when ``BTY_USB_ISO=1``.
+    """
+    repo_root = Path(__file__).resolve().parents[1]
+    base_list = (
+        repo_root / "bty-media" / "live-build" / "config" / "package-lists" / "bty-base.list.chroot"
+    )
+    base_lines = [
+        line.strip()
+        for line in base_list.read_text().splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    ]
+    forbidden = {"plymouth", "plymouth-themes"}
+    leaked = forbidden & set(base_lines)
+    assert not leaked, (
+        f"plymouth packages leaked into bty-base.list.chroot: {leaked}. "
+        f"They belong in bty-plymouth.list.chroot.usb (activated only "
+        f"by the USB ISO bake via auto/config)."
+    )
+
+    usb_list = (
+        repo_root
+        / "bty-media"
+        / "live-build"
+        / "config"
+        / "package-lists"
+        / "bty-plymouth.list.chroot.usb"
+    )
+    assert usb_list.exists(), (
+        f"missing USB-only plymouth package list at {usb_list}; "
+        "auto/config copies this file to bty-plymouth.list.chroot "
+        "when BTY_USB_ISO=1."
+    )
+    usb_packages = {
+        line.strip()
+        for line in usb_list.read_text().splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    }
+    assert "plymouth" in usb_packages, usb_packages
+    assert "plymouth-themes" in usb_packages, usb_packages
