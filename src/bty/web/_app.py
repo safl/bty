@@ -1393,6 +1393,17 @@ def create_app(
         BTY_IMAGE_ROOT (or whose catalog fetch just completed, or who
         added a URL via the UI) sees the change on the next page load
         without restarting bty-web.
+
+        Dedup invariant: a manifest entry or dir-scan file that has
+        no pinned ``sha256`` lands in ``url_only`` (via the auto-
+        import into ``catalog_entries``) AND in the merge's
+        ``unhashed`` tail (because there's no sha to key on). Without
+        the explicit ``represented_srcs`` filter below, every such
+        entry renders twice on /ui/images. The filter is keyed by
+        ``src`` because that's the value :func:`_auto_import_manifest_rows`
+        and :func:`_auto_import_dir_scan_rows` write into the DB
+        row -- the same string the merge passes through as the
+        ImageSource.location, so the comparison is exact.
         """
         manifest_entries = catalog_state.catalog.entries if catalog_state.catalog else ()
         sha_keyed, url_only = _load_db_catalog_split()
@@ -1401,7 +1412,17 @@ def create_app(
             (*manifest_entries, *sha_keyed),
             catalog_cache_dir,
         )
-        return [*merged, *url_only]
+        represented_srcs: set[str] = {entry.src for entry in manifest_entries}
+        for img in images.list_images(resolved_image_root):
+            try:
+                rel = img.path.relative_to(resolved_image_root)
+            except ValueError:
+                continue
+            represented_srcs.add("file://" + rel.as_posix())
+        url_only_filtered = tuple(
+            u for u in url_only if u.sources[0].location not in represented_srcs
+        )
+        return [*merged, *url_only_filtered]
 
     _ui.register_ui_routes(
         app,

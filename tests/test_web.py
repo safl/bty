@@ -3817,6 +3817,62 @@ def test_ui_catalog_fetch_release_oversized_body_303s_with_error(
     assert "exceeded" in r.headers["location"]
 
 
+def test_ui_catalog_fetch_release_does_not_duplicate_unsha_entries(
+    app_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: every manifest entry without a pinned ``sha256``
+    used to render twice on /ui/images -- once via the in-memory
+    catalog merge (it lands in the merge's unhashed tail because
+    there's no sha to key on) and once via the ``catalog_entries``
+    DB row that ``_auto_import_manifest_rows`` writes during reload
+    (which falls into ``url_only`` because ``disk_image_sha`` is
+    NULL). Hit cold on the catalog page after clicking "Fetch
+    latest" -- the operator saw a 4-entry catalog rendered as 8
+    rows. Pin the dedup invariant: each manifest src appears in the
+    rendered HTML exactly once even when none of the entries carry
+    a sha pin (the common case for rolling oras tags + GitHub
+    ``releases/latest/download/`` URLs).
+    """
+    import urllib.request as _urlreq
+
+    body = (
+        b"version = 1\n"
+        b"\n"
+        b'[[images]]\nname = "alpha"\nsrc = "oras://ghcr.io/example/alpha:latest"\n'
+        b"\n"
+        b'[[images]]\nname = "beta"\nsrc = "oras://ghcr.io/example/beta:latest"\n'
+        b"\n"
+        b'[[images]]\nname = "gamma"\nsrc = "https://example.com/releases/latest/download/gamma.img.gz"\n'
+    )
+    monkeypatch.setattr(_urlreq, "urlopen", lambda *_a, **_kw: _FakeUrlopenResp(body))
+    r = app_client.post(
+        "/ui/catalog/fetch-release",
+        cookies=AUTH,
+        follow_redirects=False,
+    )
+    assert r.status_code == 303, r.text
+    assert r.headers["location"] == "/ui/images"
+
+    page = app_client.get("/ui/images", cookies=AUTH)
+    assert page.status_code == 200, page.text
+    html = page.text
+    for src in (
+        "oras://ghcr.io/example/alpha:latest",
+        "oras://ghcr.io/example/beta:latest",
+        "https://example.com/releases/latest/download/gamma.img.gz",
+    ):
+        # Each src may be linkified + appear in a data attribute,
+        # but it should not duplicate. Use the same string as the
+        # exact-match probe.
+        assert html.count(src) >= 1, f"missing src {src!r} on /ui/images"
+        assert html.count(src) <= 2, (
+            f"src {src!r} rendered {html.count(src)} times on /ui/images; "
+            "expected at most 2 (entry row + binding hint). The duplicate-"
+            "rendering regression presented as 4 - 6 occurrences."
+        )
+
+
 def test_catalog_enqueue_request_rejects_traversal_name(app_client: TestClient) -> None:
     """``CatalogEnqueueRequest.name`` (used by both
     ``POST /catalog/downloads`` and ``POST /catalog/hashes``)
