@@ -50,7 +50,14 @@ def list_disks() -> list[dict[str, Any]]:
                 "type": d.get("type"),
                 "vendor": _strip_or_none(d.get("vendor")),
                 "model": _strip_or_none(d.get("model")),
-                "serial": d.get("serial"),
+                # Some USB enclosures / vendor-firmware report
+                # serials with trailing whitespace; strip for
+                # consistency with vendor / model. The live env's
+                # bty-flash-on-boot matches against this value
+                # exactly, so the same strip on both ends keeps
+                # the gate working when the inventory side and
+                # the flash-time side agree on the canonical form.
+                "serial": _strip_or_none(d.get("serial")),
                 "tran": d.get("tran"),
                 "removable": bool(d.get("rm")),
                 "readonly": bool(d.get("ro")),

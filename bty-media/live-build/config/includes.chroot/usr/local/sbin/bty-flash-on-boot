@@ -105,7 +105,13 @@ def pick_target(target_serial: str) -> str:
         if disk.get("type") != "disk":
             continue
         path = disk.get("path")
-        serial = disk.get("serial")
+        # Mirror bty.disks.list_disks's whitespace-strip on serial
+        # so the inventory side (which records the stripped value)
+        # and the flash side (this lookup) agree on the canonical
+        # form. Some USB enclosures / vendor firmware ship
+        # serials with trailing whitespace.
+        raw_serial = disk.get("serial")
+        serial = raw_serial.strip() if isinstance(raw_serial, str) else raw_serial
         if path:
             candidates.append((path, serial, disk.get("model"), disk.get("size")))
             if serial == target_serial:

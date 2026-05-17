@@ -101,6 +101,33 @@ def test_list_disks_handles_mounted_root() -> None:
     assert nvme["vendor"] is None  # absent in input -> None in output
 
 
+def test_list_disks_strips_whitespace_on_serial() -> None:
+    """Some USB enclosures and vendor firmware report serials with
+    trailing whitespace via lsblk. ``list_disks`` strips the
+    serial like it strips vendor/model so the inventory side and
+    the live env's ``pick_target`` agree on the canonical form."""
+    payload = {
+        "blockdevices": [
+            {
+                "name": "sda",
+                "path": "/dev/sda",
+                "type": "disk",
+                "serial": "  CRUCIAL12345  ",
+                "vendor": "ATA",
+                "model": "X",
+                "size": "500G",
+                "tran": "sata",
+                "rm": False,
+                "ro": False,
+                "mountpoints": [],
+            }
+        ]
+    }
+    with patch("bty.disks.subprocess.run", return_value=_mock_lsblk(payload)):
+        rows = disks.list_disks()
+    assert rows[0]["serial"] == "CRUCIAL12345"
+
+
 def test_list_disks_empty_when_no_devices() -> None:
     with patch("bty.disks.subprocess.run", return_value=_mock_lsblk({"blockdevices": []})):
         rows = disks.list_disks()

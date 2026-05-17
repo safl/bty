@@ -245,6 +245,24 @@ def test_pick_target_raises_when_serial_not_found(
     assert "ZZZZZ" in message  # current disks listed
 
 
+def test_pick_target_strips_whitespace_on_serial(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """USB enclosures + some vendor firmware report serials with
+    trailing whitespace via lsblk. ``pick_target`` strips before
+    comparing so a match still succeeds when the operator picked
+    the (already-stripped) value from /ui/machines/{mac}."""
+    mod = _load_module()
+    lsblk_json = (
+        '{"blockdevices": ['
+        '{"path": "/dev/sda", "serial": "  CRUCIAL12345  ", "type": "disk", '
+        '"rm": false, "ro": false}'
+        "]}"
+    )
+    monkeypatch.setattr(mod.subprocess, "run", _fake_lsblk_proc(lsblk_json))
+    assert mod.pick_target("CRUCIAL12345") == "/dev/sda"
+
+
 def test_pick_target_skips_non_disk_types(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
