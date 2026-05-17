@@ -775,6 +775,40 @@ def test_ui_boot_page_renders_with_artifact_state(client: TestClient) -> None:
 # ---------- Phase E: settings page ----------------------------------------
 
 
+def test_ui_settings_renders_when_authed(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A logged-in operator sees the /ui/settings page with the
+    TFTP status panel + interface list. Most of the page is
+    populated by ``_sysconfig`` (lsblk-style shell-outs); we stub
+    those so the test is hermetic + works in CI containers
+    without dnsmasq installed."""
+    from bty.web import _sysconfig
+
+    monkeypatch.setattr(
+        _sysconfig,
+        "list_interfaces",
+        lambda: [_sysconfig.Interface(name="eth0", operstate="up", ipv4="10.0.0.7", prefix=24)],
+    )
+    monkeypatch.setattr(
+        _sysconfig,
+        "tftp_status",
+        lambda: _sysconfig.DaemonStatus(state="active"),
+    )
+    monkeypatch.setattr(_sysconfig, "tftp_controllable", lambda: True)
+    _login(client)
+    r = client.get("/ui/settings")
+    assert r.status_code == 200
+    body = r.text
+    # Page surface: interface + TFTP status + boot root.
+    assert "eth0" in body
+    assert "10.0.0.7" in body
+    # TFTP status text -- either the state literal or surrounding
+    # copy from the template.
+    assert "active" in body or "TFTP" in body
+
+
 def test_ui_settings_requires_auth(client: TestClient) -> None:
     r = client.get("/ui/settings")
     assert r.status_code == 303
