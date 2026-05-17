@@ -468,3 +468,66 @@ def test_plymouth_only_in_usb_variant() -> None:
     }
     assert "plymouth" in usb_packages, usb_packages
     assert "plymouth-themes" in usb_packages, usb_packages
+
+
+def test_nouveau_blacklisted_across_all_three_images() -> None:
+    """Nouveau (in-tree Nvidia driver) stalls early boot 10-60s on
+    Maxwell/Pascal/Turing cards probing for firmware bty does not
+    need. Blacklist invariant: every bty image variant must ship
+    the modprobe.d config so any Nvidia-equipped target PXE-boots
+    or USB-boots without the nouveau stall.
+
+    Three locations:
+
+    * live env (bty-usb + bty-netboot): drops to /etc/modprobe.d/
+      via the live-build includes.chroot tree.
+    * bty-server appliance: same path via rootfs/server/ which
+      cloud-init's write_files block lands at /etc/modprobe.d/.
+
+    Plus belt-and-braces kernel cmdline. modprobe.d only catches
+    later module loads; initramfs-resolved modules can sneak in
+    before /etc/ is mounted. ``modprobe.blacklist=nouveau`` on
+    the kernel cmdline closes that window.
+    """
+    repo_root = Path(__file__).resolve().parents[1]
+    live_conf = (
+        repo_root
+        / "bty-media"
+        / "live-build"
+        / "config"
+        / "includes.chroot"
+        / "etc"
+        / "modprobe.d"
+        / "zz-bty-blacklist-nouveau.conf"
+    )
+    server_conf = (
+        repo_root
+        / "bty-media"
+        / "rootfs"
+        / "server"
+        / "etc"
+        / "modprobe.d"
+        / "zz-bty-blacklist-nouveau.conf"
+    )
+    for conf in (live_conf, server_conf):
+        assert conf.is_file(), f"missing nouveau blacklist at {conf}"
+        body = conf.read_text()
+        assert "blacklist nouveau" in body, f"{conf} missing 'blacklist nouveau' directive"
+        assert "install nouveau /bin/true" in body, (
+            f"{conf} missing 'install nouveau /bin/true' belt-and-braces"
+        )
+
+    # Kernel cmdline coverage: both iPXE templates and the server
+    # cloud-init's GRUB_CMDLINE_LINUX_DEFAULT EXTRA. Don't pin the
+    # exact ordering -- just that ``modprobe.blacklist=nouveau``
+    # appears in each so a future template edit can't silently
+    # drop it.
+    ipxe_tui = repo_root / "src" / "bty" / "web" / "_templates" / "ipxe_tui.j2"
+    ipxe_flash = repo_root / "src" / "bty" / "web" / "_templates" / "ipxe_flash.j2"
+    cloudinit = repo_root / "bty-media" / "auxiliary" / "cloudinit-base-server.user"
+    auto_config = repo_root / "bty-media" / "live-build" / "auto" / "config"
+    for path in (ipxe_tui, ipxe_flash, cloudinit, auto_config):
+        body = path.read_text()
+        assert "modprobe.blacklist=nouveau" in body, (
+            f"{path} missing 'modprobe.blacklist=nouveau' on the kernel cmdline"
+        )

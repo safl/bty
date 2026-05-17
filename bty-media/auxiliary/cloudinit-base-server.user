@@ -425,7 +425,7 @@ runcmd:
     #                                  the resume device to
     #                                  appear; bty-server doesn't
     #                                  hibernate so always skip.
-    EXTRA="plymouth.enable=0 random.trust_cpu=on random.trust_bootloader=on noresume"
+    EXTRA="plymouth.enable=0 random.trust_cpu=on random.trust_bootloader=on noresume modprobe.blacklist=nouveau nouveau.modeset=0"
     if grep -q '^GRUB_CMDLINE_LINUX_DEFAULT=' /etc/default/grub; then
       for arg in $EXTRA; do
         # ``arg`` is either ``key=value`` or a bare flag (e.g.

@@ -61,7 +61,7 @@ if [ "${BTY_USB_ISO:-}" = "1" ]; then
     # it the kernel scrolls boot messages over our suppressed
     # bootloader menu, which works but doesn't show bty branding
     # during the kernel boot window.
-    BOOTAPPEND="boot=live components quiet splash noeject bty.mode=interactive bty.version=__BTY_VERSION__"
+    BOOTAPPEND="boot=live components quiet splash noeject modprobe.blacklist=nouveau nouveau.modeset=0 bty.mode=interactive bty.version=__BTY_VERSION__"
     # Activate the plymouth package list for the USB bake.
     if [ -f "${PLYMOUTH_SRC}" ]; then
         cp "${PLYMOUTH_SRC}" "${PLYMOUTH_DST}"
@@ -73,7 +73,11 @@ else
     # ``plymouth.enable=0`` is belt-and-braces in case a future
     # change pulls plymouth in transitively; with the package
     # absent it's a no-op.
-    BOOTAPPEND="boot=live components quiet plymouth.enable=0 bty.version=__BTY_VERSION__"
+    # ``modprobe.blacklist=nouveau nouveau.modeset=0`` keep the
+    # in-tree Nvidia driver from binding -- nouveau stalls early
+    # boot 10-60s on Maxwell/Pascal/Turing cards probing for
+    # firmware bty doesn't need.
+    BOOTAPPEND="boot=live components quiet plymouth.enable=0 modprobe.blacklist=nouveau nouveau.modeset=0 bty.version=__BTY_VERSION__"
     # Deactivate the plymouth package list for the netboot bake.
     rm -f "${PLYMOUTH_DST}"
 fi
