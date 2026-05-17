@@ -458,23 +458,36 @@ class ImageSource:
 
 @dataclass(frozen=True)
 class UnifiedImage:
-    """SHA-keyed image record. Merges directory-scan + catalog
-    manifest entries that share a content hash so the API / UI /
-    machine bindings see one row per actual image, not one per
-    name-where-it-was-found.
+    """Image record on the merged listing.
 
-    ``sha256`` is the durable identity (None for an
-    unhashed-dir-scan-only entry the operator hasn't yet
-    materialised; the row exists so the operator can find it +
-    trigger hashing, but it cannot be bound to a machine until
-    the SHA is computed). ``names`` collects every label the
-    image goes by -- typically one (filename or manifest entry
-    name), occasionally two when a dir-scan file's SHA matches a
-    manifest entry. ``sources`` lists every fetch path; ``cached``
-    is True if either a local file exists or the content-addressed
-    cache holds the SHA.
+    Two identity fields, distinct on purpose:
+
+    ``ref`` is the **provenance ID** -- ``sha256(canonicalise_src(src))``,
+    a deterministic 64-hex digest of the canonical form of the source URL.
+    Populated for every entry the merge produces (dir-scan files get
+    ``src="file://<rel-path>"``; catalog entries get their declared
+    ``src``). This is THE value machine bindings target -- a rolling
+    oras tag's ref stays stable across re-pushes, so binding to a tag
+    survives the next rebuild upstream. Always non-empty.
+
+    ``sha256`` is the **observed content hash**. May be None for a
+    rolling manifest entry that has never been cached, a dir-scan
+    file lacking a ``.sha256`` sidecar, or an operator-added URL
+    without a ``sha_url``. Back-fills on first cache / hash. Distinct
+    from ``ref`` -- the same content can land under
+    multiple refs (e.g. operator catalogs the same image under
+    ``oras://a`` and ``http://b``), and the same ref can map to
+    different content over time (rolling tag re-push).
+
+    Merge collapse rule: same content-sha or same ref collapse into
+    one entry; otherwise distinct. See :func:`merge_with_catalog`.
+
+    ``names`` collects every label the image goes by; ``sources``
+    every fetch path; ``cached`` is True iff a local file exists or
+    the content-addressed cache holds the SHA.
     """
 
+    ref: str
     sha256: str | None
     names: tuple[str, ...]
     format: str | None
@@ -484,6 +497,7 @@ class UnifiedImage:
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "ref": self.ref,
             "sha256": self.sha256,
             "names": list(self.names),
             "format": self.format,
@@ -498,135 +512,175 @@ def merge_with_catalog(
     manifest_entries: Iterable[Any],
     cache_dir: Path,
 ) -> list[UnifiedImage]:
-    """Build the SHA-keyed unified image listing.
+    """Build the unified image listing.
 
     Inputs:
 
       * ``image_root``: directory scanned via :func:`list_images`.
         Files with a sidecar ``<file>.sha256`` get their SHA
         populated; files without remain unhashed (sha256=None
-        in the result).
-      * ``manifest_entries``: iterable of
-        ``bty.catalog.CatalogEntry`` objects (passed by structural
-        type so this module does not import ``bty.catalog`` --
-        keeps the dependency graph one-directional: ``bty.catalog``
-        knows about ``bty.images``, never the reverse).
+        on the resulting :class:`UnifiedImage`).
+      * ``manifest_entries``: iterable of catalog entries
+        (``bty.catalog.CatalogEntry`` or anything structurally
+        equivalent: ``name`` / ``src`` / ``sha256`` / ``format`` /
+        ``size_bytes`` / ``description``). Passed by structural
+        type so this module avoids importing ``bty.catalog`` at
+        module load; the local import for :func:`image_ref_for_src`
+        below resolves only at call time, after the catalog
+        module is fully initialised.
       * ``cache_dir``: where the content-addressed cache lives
         (``${BTY_STATE_DIR}/cache``). Used to determine ``cached``
         for SHAs that are NOT present as a local file.
 
-    Merge rule: directory-scan images and manifest entries with
-    the same SHA-256 collapse into one ``UnifiedImage`` whose
-    ``names`` and ``sources`` arrays contain both sides. SHAs
-    seen only in one source produce single-name single-source
-    entries. Unhashed dir-scan files get one entry each, keyed
-    by name (no SHA available to dedupe).
+    Merge rule -- two collapse axes, both applied:
+
+      1. **Content identity** (``sha256``): entries whose observed
+         content hash matches collapse into one ``UnifiedImage``.
+         This is the "same image, multiple sources" case (e.g. a
+         local file + a manifest entry that pins the same SHA).
+      2. **Provenance identity** (``ref =
+         sha256(canonicalise_src(src))``): entries that share a
+         canonical src URL collapse into one ``UnifiedImage`` even
+         when there is no content sha to key on. This is what
+         covers rolling oras tags + ``releases/latest/download/``
+         URLs in the default catalog (every entry has ``sha256 =
+         None`` at first sight), plus the duplicate-auto-import
+         shape where the manifest entry and its
+         ``catalog_entries`` DB row appear under the same src.
+
+    Without axis (2) every entry with no pinned ``sha256`` ended
+    up in an "unhashed" tail with no dedup -- so a single fetch-
+    latest click rendered each rolling-tag entry twice on
+    /ui/images (once from the in-memory manifest, once from the
+    auto-imported DB row). The previous behaviour matched the
+    spec when every entry came with a content sha, which the
+    well-pinned tests covered, but not the rolling-tag case the
+    default catalog actually ships.
 
     ``.bri`` (bty Remote Image) descriptors are deliberately NOT
-    folded in here. A ``.bri`` is a name/URL pointer with no SHA,
-    so it cannot dedupe against SHA-keyed entries. The
-    catalog endpoint and the TUI surface ``.bri`` rows separately
-    via :func:`list_remote_images`; the operator hashes a
-    ``.bri`` (by fetching it) before binding it to a machine.
+    folded in here. A ``.bri`` is a name/URL pointer; if surfaced
+    it would round-trip through this function as a CatalogEntry
+    too, but the surface lives in :func:`list_remote_images` and
+    catalog endpoints, not this merge.
     """
+    # Local import: ``bty.catalog`` imports ``bty.images`` at
+    # module load, so a top-of-file import here would cycle. By
+    # call time the catalog module is fully loaded, so this is
+    # cheap and safe.
+    from bty.catalog import image_ref_for_src
+
     by_sha: dict[str, UnifiedImage] = {}
-    unhashed: list[UnifiedImage] = []
+    by_ref: dict[str, UnifiedImage] = {}
 
-    # Pass 1: directory scan.
+    def add_entry(
+        ref: str,
+        sha256: str | None,
+        name: str,
+        format_: str | None,
+        size_bytes: int | None,
+        source: ImageSource,
+        cached: bool,
+    ) -> None:
+        """Insert or merge an entry into by_sha (if sha known) and
+        by_ref (always). Same UnifiedImage instance lives in both
+        dicts when a sha is present, so a later ref-keyed hit will
+        update the by_sha entry in place via re-assignment.
+        """
+        # Prefer the existing record under EITHER key, in priority
+        # order (sha first because content-identity is stronger).
+        existing = (by_sha.get(sha256) if sha256 is not None else None) or by_ref.get(ref)
+        if existing is None:
+            new = UnifiedImage(
+                ref=ref,
+                sha256=sha256,
+                names=(name,),
+                format=format_,
+                size_bytes=size_bytes,
+                sources=(source,),
+                cached=cached,
+            )
+            if sha256 is not None:
+                by_sha[sha256] = new
+            by_ref[ref] = new
+            return
+        # Merge into the existing entry. Promote sha256 if we now
+        # know it and existing did not.
+        merged_sha = existing.sha256 if existing.sha256 is not None else sha256
+        merged_format = existing.format or format_
+        merged_size = existing.size_bytes if existing.size_bytes is not None else size_bytes
+        merged_names = existing.names if name in existing.names else (*existing.names, name)
+        merged_sources = (
+            existing.sources if source in existing.sources else (*existing.sources, source)
+        )
+        merged = UnifiedImage(
+            ref=existing.ref,
+            sha256=merged_sha,
+            names=merged_names,
+            format=merged_format,
+            size_bytes=merged_size,
+            sources=merged_sources,
+            cached=existing.cached or cached,
+        )
+        by_ref[merged.ref] = merged
+        if merged_sha is not None:
+            by_sha[merged_sha] = merged
+
+    # Pass 1: directory scan. Each file becomes one entry; its
+    # provenance ref is computed from the ``file://<rel-path>``
+    # form so it matches whatever the auto-import wrote into
+    # ``catalog_entries``.
     for img in list_images(image_root):
+        try:
+            rel = img.path.relative_to(image_root)
+        except ValueError:
+            # Symlink escaped the root, or scan ran against a
+            # remounted-mid-stream root. Skip rather than mint a
+            # ref against an unrooted absolute path.
+            continue
+        src = "file://" + rel.as_posix()
+        try:
+            ref = image_ref_for_src(src)
+        except ValueError:
+            continue  # untranslatable src, e.g. invalid characters
         local = ImageSource(kind="local", location=str(img.path))
-        if img.sha256 is None:
-            unhashed.append(
-                UnifiedImage(
-                    sha256=None,
-                    names=(img.name,),
-                    format=img.format,
-                    size_bytes=img.size_bytes,
-                    sources=(local,),
-                    cached=True,  # the local file IS its own cache
-                )
-            )
-            continue
-        existing = by_sha.get(img.sha256)
-        if existing is None:
-            by_sha[img.sha256] = UnifiedImage(
-                sha256=img.sha256,
-                names=(img.name,),
-                format=img.format,
-                size_bytes=img.size_bytes,
-                sources=(local,),
-                cached=True,
-            )
-        else:
-            # Multiple local files with the same SHA (rare but
-            # possible if the operator copied an image). Merge.
-            new_names = (
-                existing.names if img.name in existing.names else (*existing.names, img.name)
-            )
-            by_sha[img.sha256] = UnifiedImage(
-                sha256=existing.sha256,
-                names=new_names,
-                format=existing.format or img.format,
-                size_bytes=existing.size_bytes or img.size_bytes,
-                sources=(*existing.sources, local),
-                cached=True,
-            )
+        add_entry(
+            ref=ref,
+            sha256=img.sha256,
+            name=img.name,
+            format_=img.format,
+            size_bytes=img.size_bytes,
+            source=local,
+            cached=True,  # the local file IS its own cache
+        )
 
-    # Pass 2: catalog manifest entries.
+    # Pass 2: catalog manifest entries (and any structurally-
+    # equivalent records the caller fed in -- the web layer
+    # passes operator-added catalog_entries rows here too).
     for entry in manifest_entries:
+        try:
+            ref = image_ref_for_src(entry.src)
+        except ValueError:
+            continue  # malformed src; skip
         manifest_src = ImageSource(kind="manifest", location=str(entry.src))
-        # Entries without a pinned sha256 (rolling oras tags,
-        # operator-added URLs with no sha_url, .toml authored
-        # without the field) can't be sha-keyed -- they appear
-        # in the unhashed tail with cached=False until a fetch
-        # populates the cache + back-fills the sha. Skipping
-        # the cache_hit / by_sha branches keeps the indexing
-        # safe (cache_dir / None would TypeError).
-        if entry.sha256 is None:
-            unhashed.append(
-                UnifiedImage(
-                    sha256=None,
-                    names=(entry.name,),
-                    format=entry.format,
-                    size_bytes=entry.size_bytes,
-                    sources=(manifest_src,),
-                    cached=False,
-                )
-            )
-            continue
-        cache_hit = (cache_dir / entry.sha256).is_file()
-        existing = by_sha.get(entry.sha256)
-        if existing is None:
-            by_sha[entry.sha256] = UnifiedImage(
-                sha256=entry.sha256,
-                names=(entry.name,),
-                format=entry.format,
-                size_bytes=entry.size_bytes,
-                sources=(manifest_src,),
-                cached=cache_hit,
-            )
-        else:
-            new_names = (
-                existing.names if entry.name in existing.names else (*existing.names, entry.name)
-            )
-            by_sha[entry.sha256] = UnifiedImage(
-                sha256=existing.sha256,
-                names=new_names,
-                format=existing.format or entry.format,
-                size_bytes=existing.size_bytes or entry.size_bytes,
-                sources=(*existing.sources, manifest_src),
-                # Cached if EITHER a local file exists (already
-                # marked True in pass 1) OR the content-addressed
-                # cache holds the SHA.
-                cached=existing.cached or cache_hit,
-            )
+        cache_hit = entry.sha256 is not None and (cache_dir / entry.sha256).is_file()
+        add_entry(
+            ref=ref,
+            sha256=entry.sha256,
+            name=entry.name,
+            format_=entry.format,
+            size_bytes=entry.size_bytes,
+            source=manifest_src,
+            cached=cache_hit,
+        )
 
-    # Stable order: SHA-keyed entries by first name, then unhashed
-    # dir-scan tail also by name, so the UI / CLI / API output is
-    # deterministic across runs.
-    sha_keyed = sorted(by_sha.values(), key=lambda u: u.names[0])
-    unhashed.sort(key=lambda u: u.names[0])
-    return sha_keyed + unhashed
+    # Stable order: first by content-sha-presence (so sha-pinned
+    # entries land before unhashed ones, matching the prior
+    # behaviour the UI / CLI expect), then by first name within
+    # each bucket.
+    unique = list(by_ref.values())
+    with_sha = sorted((u for u in unique if u.sha256 is not None), key=lambda u: u.names[0])
+    without_sha = sorted((u for u in unique if u.sha256 is None), key=lambda u: u.names[0])
+    return with_sha + without_sha
 
 
 class HashCancelled(Exception):

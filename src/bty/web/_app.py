@@ -1331,98 +1331,75 @@ def create_app(
 
     # Browser UI under /ui/ (Jinja + Bootstrap, cookie-auth).
 
-    def _load_db_catalog_split() -> tuple[
-        tuple[_catalog.CatalogEntry, ...],
-        tuple[images.UnifiedImage, ...],
-    ]:
-        """Load operator-curated catalog rows from state.db, split
-        by whether they carry a sha256:
+    def _load_db_catalog_entries() -> tuple[_catalog.CatalogEntry, ...]:
+        """Load all rows from ``catalog_entries`` as :class:`CatalogEntry`
+        records.
 
-        - Sha-keyed rows -> :class:`bty.catalog.CatalogEntry` for
-          the SHA-keyed merge pipeline (so they dedupe with
-          dir-scan files / manifest entries that share the hash).
-        - URL-only rows (operator added without a sha_url) ->
-          :class:`bty.images.UnifiedImage` with ``sha256=None``,
-          surfaced verbatim. Bindable to a machine via the row's
-          ``bty_image_ref``; the first flash's cache-through
-          back-fills ``disk_image_sha``.
+        Single shape regardless of whether ``disk_image_sha`` is set:
+        ``CatalogEntry.sha256`` is either the observed content hash
+        or ``None``. The downstream merge keys on both
+        ``bty_image_ref`` (always derivable from ``src``) and on
+        ``sha256`` (when known), so a row without content sha still
+        collapses with the matching manifest entry that produced it.
+
+        Previously this method split into sha-keyed CatalogEntry +
+        url-only UnifiedImage records. The split caused the
+        duplicate-rendering regression on /ui/images: every entry
+        without a pinned sha appeared once in the merge's unhashed
+        tail and once in the url-only verbatim tail. Folding both
+        into one shape lets the merge dedupe by ref.
+
+        ``ORDER BY added_at`` matches the ``list_catalog_entries``
+        API endpoint so the UI's catalog table renders in the same
+        insertion order regardless of which code path populated the
+        page.
         """
         with _db.open_db(state_path) as conn:
-            # ``ORDER BY added_at`` matches the ``list_catalog_entries``
-            # API endpoint so the UI's catalog table renders in the
-            # same insertion order regardless of which code path
-            # populated the page (display merge vs. raw API listing).
-            # Without it, SQLite returns rows in unspecified order
-            # and a page-refresh can shuffle the table.
             rows = conn.execute(
                 "SELECT disk_image_sha, name, src, format, size_bytes, description "
                 "FROM catalog_entries ORDER BY added_at"
             ).fetchall()
-        sha_keyed: list[_catalog.CatalogEntry] = []
-        url_only: list[images.UnifiedImage] = []
-        for row in rows:
-            if row["disk_image_sha"]:
-                sha_keyed.append(
-                    _catalog.CatalogEntry(
-                        name=row["name"],
-                        src=row["src"],
-                        sha256=row["disk_image_sha"],
-                        format=row["format"],
-                        size_bytes=row["size_bytes"],
-                        description=row["description"],
-                    )
-                )
-            else:
-                url_only.append(
-                    images.UnifiedImage(
-                        sha256=None,
-                        names=(row["name"],),
-                        format=row["format"],
-                        size_bytes=row["size_bytes"],
-                        sources=(images.ImageSource(kind="url", location=row["src"]),),
-                        cached=False,
-                    )
-                )
-        return tuple(sha_keyed), tuple(url_only)
+        return tuple(
+            _catalog.CatalogEntry(
+                name=row["name"],
+                src=row["src"],
+                sha256=row["disk_image_sha"],  # may be None
+                format=row["format"],
+                size_bytes=row["size_bytes"],
+                description=row["description"],
+            )
+            for row in rows
+        )
 
     def _list_unified_images() -> list[images.UnifiedImage]:
-        """SHA-keyed merge of dir-scan + catalog manifest entries +
-        operator-curated catalog_entries rows.
+        """Unified image listing: dir-scan files, manifest entries,
+        and operator-curated ``catalog_entries`` rows folded through
+        the same ref-keyed + sha-keyed merge.
+
+        The merge collapses on two axes (see
+        :func:`images.merge_with_catalog`):
+
+        * ``bty_image_ref`` (provenance ID, always present): a
+          manifest entry and its auto-imported DB row carry the
+          same ref so they collapse into one entry even when no
+          content sha is pinned.
+        * ``sha256`` (content hash, may be None): a dir-scan file
+          and a manifest entry that pin the same SHA collapse via
+          the content-identity axis -- preserves the "one image,
+          multiple sources" rendering across local + remote.
 
         Recomputed per call so an operator who drops new files into
-        BTY_IMAGE_ROOT (or whose catalog fetch just completed, or who
-        added a URL via the UI) sees the change on the next page load
-        without restarting bty-web.
-
-        Dedup invariant: a manifest entry or dir-scan file that has
-        no pinned ``sha256`` lands in ``url_only`` (via the auto-
-        import into ``catalog_entries``) AND in the merge's
-        ``unhashed`` tail (because there's no sha to key on). Without
-        the explicit ``represented_srcs`` filter below, every such
-        entry renders twice on /ui/images. The filter is keyed by
-        ``src`` because that's the value :func:`_auto_import_manifest_rows`
-        and :func:`_auto_import_dir_scan_rows` write into the DB
-        row -- the same string the merge passes through as the
-        ImageSource.location, so the comparison is exact.
+        BTY_IMAGE_ROOT (or whose catalog fetch just completed, or
+        who added a URL via the UI) sees the change on the next
+        page load without restarting bty-web.
         """
         manifest_entries = catalog_state.catalog.entries if catalog_state.catalog else ()
-        sha_keyed, url_only = _load_db_catalog_split()
-        merged = images.merge_with_catalog(
+        db_entries = _load_db_catalog_entries()
+        return images.merge_with_catalog(
             resolved_image_root,
-            (*manifest_entries, *sha_keyed),
+            (*manifest_entries, *db_entries),
             catalog_cache_dir,
         )
-        represented_srcs: set[str] = {entry.src for entry in manifest_entries}
-        for img in images.list_images(resolved_image_root):
-            try:
-                rel = img.path.relative_to(resolved_image_root)
-            except ValueError:
-                continue
-            represented_srcs.add("file://" + rel.as_posix())
-        url_only_filtered = tuple(
-            u for u in url_only if u.sources[0].location not in represented_srcs
-        )
-        return [*merged, *url_only_filtered]
 
     _ui.register_ui_routes(
         app,
