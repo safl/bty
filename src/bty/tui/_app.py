@@ -2097,13 +2097,17 @@ class BtyTui(App[None]):
             # might be a bty-web instance. POST the completion signal
             # so the server's ``last_flashed_at`` updates. Best-
             # effort - a failed signal (404 / non-bty-web host) is
-            # logged but doesn't undo a successful flash.
+            # logged but doesn't undo a successful flash. In
+            # particular it MUST NOT skip the post-flash UI
+            # transition below: a stand-alone catalog URL (raw
+            # GitHub release, static HTTP host) returns 404 here
+            # every time, and we don't want the operator stuck on a
+            # "Flash!" button after a flash that actually wrote the
+            # disk -- the natural next step is Reboot.
             try:
                 post_pxe_done(self._pxe_done_base, self._mac)
             except urllib.error.URLError as exc:
                 self._set_status(f"Flash done but POST /pxe/{self._mac}/done failed: {exc}")
-                self._populate_disks()
-                return
         if success:
             self._set_status_transient("Flash completed.")
         elif cancelled:

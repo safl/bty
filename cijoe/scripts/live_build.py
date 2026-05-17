@@ -41,6 +41,13 @@ import shutil
 from argparse import ArgumentParser
 from pathlib import Path
 
+# Reuse the version reader from the USB iso build script. Same
+# pyproject.toml lookup, same placeholder convention. Kept as a
+# script-level import (rather than a duplicated helper) so a
+# single source of truth governs how the bake derives the
+# stamped version string.
+from usb_iso_build import _read_bty_version
+
 PUBLISH_BASENAMES = (
     "bty-netboot-x86_64.vmlinuz",
     "bty-netboot-x86_64.initrd",
@@ -95,6 +102,26 @@ def main(args, cijoe):
             shutil.copytree(entry, dest, symlinks=True)
         else:
             shutil.copy2(entry, dest)
+
+    # Stamp the bty version into every ``__BTY_VERSION__`` placeholder
+    # in the copied tree before ``lb build`` runs. Mirrors the
+    # equivalent block in ``cijoe/scripts/usb_iso_build.py``: same
+    # placeholder convention, same set of files (auto/config,
+    # /etc/issue, /etc/motd, /etc/profile.d/bty-version.sh, plymouth
+    # theme). Without this step the bty-netboot live env boots with
+    # the literal ``__BTY_VERSION__`` in /etc/issue / motd / shell
+    # prompt -- operator sees the placeholder instead of the real
+    # version on tty2 and can't match a booted target back to a
+    # release.
+    bty_version = _read_bty_version(cijoe_dir)
+    log.info(f"Stamping bty version {bty_version} into live-build tree")
+    err, _ = cijoe.run_local(
+        f"sh -c 'grep -rlF __BTY_VERSION__ {build_dir} | "
+        f"xargs --no-run-if-empty sed -i s/__BTY_VERSION__/{bty_version}/g'"
+    )
+    if err:
+        log.error("__BTY_VERSION__ substitution failed")
+        return err
 
     log.info(f"Running lb build in {build_dir}")
     err, _ = cijoe.run_local(f"sh -c 'cd {build_dir} && sudo lb clean --all && sudo lb build'")

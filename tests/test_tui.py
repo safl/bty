@@ -1509,6 +1509,72 @@ def test_action_flash_success_flips_button_to_reboot(
     _run(_drive())
 
 
+def test_action_flash_pxe_done_failure_still_flips_to_reboot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression: when the flash succeeds but the post-pxe-done
+    POST raises URLError (e.g. catalog URL was a static GitHub
+    release / non-bty-web HTTP host that does not implement
+    ``POST /pxe/<mac>/done`` -> 404), the post-flash UI transition
+    must still fire. Previous behaviour: a URLError caused
+    ``action_flash`` to return early, leaving ``_post_flash``
+    False and the button stuck on ``Flash!`` despite the disk
+    having been written. Operator reading the screen saw
+    a "Flash!" button after a successful flash and concluded
+    the flash had failed.
+    """
+    _patch_data_sources(
+        monkeypatch,
+        images_list=[_fake_image()],
+        disks_list=[_fake_disk()],
+    )
+    plan = _fake_flash_plan()
+    monkeypatch.setattr(tui_app.flash, "probe_image", lambda _path: plan.image)
+    monkeypatch.setattr(tui_app.flash, "probe_target", lambda _path: plan.target)
+
+    def _boom(*_a: object, **_kw: object) -> None:
+        raise urllib.error.URLError("pxe-done host unreachable / 404")
+
+    monkeypatch.setattr(tui_app, "post_pxe_done", _boom)
+
+    app = tui_app.BtyTui(image_root=tmp_path / "images")
+    # Simulate the catalog-source flow that derives a pxe-done base
+    # so the failing POST actually fires.
+    app._pxe_done_base = "http://server.invalid:8080"
+    app._mac = "aa:bb:cc:dd:ee:ff"
+
+    modal_results: list[Any] = [True, "ok"]
+    modal_results_iter = iter(modal_results)
+
+    async def _fake_push_screen_wait(_screen: object) -> Any:
+        return next(modal_results_iter)
+
+    monkeypatch.setattr(app, "push_screen_wait", _fake_push_screen_wait)
+
+    async def _drive() -> None:
+        from textual.widgets import Button
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app._selected_image = next(iter(app._images_by_key.values()))
+            app._selected_disk = next(iter(app._disks_by_key.values()))
+            app._render_status()
+            assert app._stage == tui_app._WizardStage.CONFIRM_FLASH
+
+            app.action_flash()  # type: ignore[unused-coroutine]
+            for _ in range(20):
+                await pilot.pause()
+
+            assert app._post_flash is True, (
+                "Flash succeeded but _post_flash never flipped -- the URLError "
+                "branch was skipping the post-flash UI transition."
+            )
+            flash_btn = app.query_one("#flash-btn", Button)
+            assert str(flash_btn.label) == "Reboot"
+
+    _run(_drive())
+
+
 def test_catalog_picker_opens_and_dismisses_cleanly(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
