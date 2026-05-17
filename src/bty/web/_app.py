@@ -1161,7 +1161,22 @@ def create_app(
                 # route ignores ``<name>`` for the lookup.
                 if u.sha256 is None:
                     continue  # cached + no sha is impossible; defensive
-                url = f"{origin}/images/{u.sha256}/{u.names[0]}"
+                # URL-encode the trailing name. Catalog ``name`` is
+                # human text -- ``nosi fedora-sysdev (x86_64, rolling)``
+                # is real -- and Python's ``http.client._validate_path``
+                # rejects any URL path that contains a space or
+                # control character (CVE-2019-9740 mitigation), so
+                # an unencoded space here makes a downstream
+                # ``urllib.request.urlopen`` from bty-tui or bty-
+                # flash raise ``InvalidURL`` before the request
+                # ever leaves the box. ``safe=""`` percent-encodes
+                # every special character (parens, spaces, etc.)
+                # so the URL is reliably valid; the server route
+                # is ``GET /images/{key}/{name:path}`` and only
+                # reads ``key`` for resolution, so the encoded
+                # form is purely decorative on the wire.
+                encoded_name = urllib.parse.quote(u.names[0], safe="")
+                url = f"{origin}/images/{u.sha256}/{encoded_name}"
             else:
                 # Not cached: the client streams directly from
                 # upstream. Try manifest source first, then ``url``
@@ -1226,7 +1241,13 @@ def create_app(
                 # entries that haven't been hashed yet.
                 continue
             if u.cached:
-                src = f"{origin}/images/{u.sha256}/{u.names[0]}"
+                # See the matching site in ``list_images_endpoint`` for
+                # the rationale on percent-encoding the name segment.
+                # Catalog ``name`` is human text and may contain
+                # spaces / parens that would otherwise produce a URL
+                # ``http.client`` rejects with InvalidURL.
+                encoded_name = urllib.parse.quote(u.names[0], safe="")
+                src = f"{origin}/images/{u.sha256}/{encoded_name}"
             else:
                 upstream = next(
                     (s.location for s in u.sources if s.kind in ("manifest", "url")),

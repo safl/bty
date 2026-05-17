@@ -910,6 +910,97 @@ def test_list_catalog_toml_renders_unified_catalog(tmp_path: Path) -> None:
     assert entry.src.endswith(f"/images/{sha}/alpha.qcow2")
 
 
+def test_list_catalog_toml_url_encodes_special_chars_in_names(tmp_path: Path) -> None:
+    """Regression: when a catalog entry's ``name`` contains spaces
+    or parens (real example: ``nosi fedora-sysdev (x86_64,
+    rolling)``), the ``/catalog.toml`` endpoint must percent-
+    encode the trailing name segment of the served URL. Without
+    encoding, the URL ``/images/<sha>/nosi fedora-sysdev (...)``
+    travels through bty-tui to ``http.client.HTTPConnection.
+    putrequest``, which calls ``_validate_path`` -- a
+    CVE-2019-9740 mitigation that rejects any URL path with a
+    space or control character. The operator sees a Textual
+    traceback ``InvalidURL: URL can't contain control characters
+    ...`` instead of the flash completing.
+
+    Pinning the encoding contract: the ``/catalog.toml`` body
+    must contain the percent-encoded form (``%20`` for space,
+    ``%28`` for ``(`` etc.) and must NOT contain the raw form
+    with a literal space character in the URL.
+    """
+    import hashlib
+
+    image_root = tmp_path / "images"
+    image_root.mkdir()
+    # File on disk uses an ASCII basename (fs reality); the
+    # spaces-in-name regression is driven by a catalog manifest
+    # entry whose declared ``name`` has spaces. Seed the
+    # ``catalog_entries`` DB row directly so the merge surfaces
+    # the human-readable name as the entry name (the dir-scan
+    # name uses the filename).
+    payload = b"\0" * 256
+    (image_root / "fedora.qcow2").write_bytes(payload)
+    sha = hashlib.sha256(payload).hexdigest()
+    (image_root / "fedora.qcow2.sha256").write_text(f"{sha}  fedora.qcow2\n")
+
+    state = tmp_path / "state.db"
+    app = create_app(
+        state_path=state,
+        service_user=TEST_SERVICE_USER,
+        secret_key=TEST_SECRET_KEY,
+        image_root=image_root,
+    )
+    # Inject a catalog_entries row whose ``name`` carries spaces
+    # + parens, matching the real catalog entry the user hit.
+    # ``bty_image_ref`` is sha256(canonicalise_src(src)); for
+    # this regression test the exact value does not matter as
+    # long as it's hex-shaped.
+    from bty.web import _db as _bty_db
+
+    with _bty_db.open_db(state) as conn:
+        conn.execute(
+            "INSERT INTO catalog_entries "
+            "(bty_image_ref, src, disk_image_sha, name, "
+            "sha_url, format, size_bytes, description, added_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "a" * 64,
+                f"http://example.invalid/{sha}.qcow2",
+                sha,
+                "nosi fedora-sysdev (x86_64, rolling)",
+                None,
+                "qcow2",
+                256,
+                None,
+                "2026-05-17T22:00:00+00:00",
+            ),
+        )
+        conn.commit()
+
+    with TestClient(app) as client:
+        r = client.get("/catalog.toml")
+
+    assert r.status_code == 200
+    body = r.text
+    # No raw space inside the path segment after /images/<sha>/...
+    # An encoded form (``%20``) is acceptable; a literal space is
+    # the regression.
+    assert "/images/" in body
+    # Walk every src= line and assert no literal-space character
+    # appears between ``/images/`` and the trailing ``"`` quote.
+    for line in body.splitlines():
+        if not line.startswith("src = ") or "/images/" not in line:
+            continue
+        path_start = line.index("/images/")
+        path_end = line.rindex('"')
+        path_segment = line[path_start:path_end]
+        assert " " not in path_segment, (
+            f"unencoded space in /catalog.toml src URL: {line!r} -- "
+            "regression of the http.client InvalidURL bug"
+        )
+        assert "(" not in path_segment, f"unencoded paren in /catalog.toml src URL: {line!r}"
+
+
 def test_list_images_does_not_surface_bri_descriptors(tmp_path: Path) -> None:
     """``.bri`` is the bty-usb / bty-tui ad-hoc local-catalog
     format; bty-web is the SHA-keyed managed-catalog model. A
