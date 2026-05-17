@@ -283,21 +283,52 @@
                                 data-name="{{ u.names[0] }}">
                             <i class="bi bi-cloud-arrow-down me-1"></i>Fetch
                         </button>
-                        {% else %}
-                        <span class="text-muted small">-</span>
                         {% endif %}
-                        {# Operator-added catalog_entries rows are
-                           identified by a ``url``-kind source. Show
-                           a Delete button to remove via the
-                           ``DELETE /catalog/entries?src=...`` API. #}
-                        {% set url_src = u.sources|selectattr('kind','equalto','url')|map(attribute='location')|first %}
-                        {% if url_src %}
+                        {# Evict cached bytes. Available for any entry
+                           whose bytes are in the cache dir
+                           (``$BTY_STATE_DIR/cache/<sha>``). Backed by
+                           ``DELETE /catalog/cache/{name}`` which
+                           unlinks the cached file but preserves the
+                           catalog entry's metadata -- the next Fetch
+                           re-downloads. Useful for forcing a
+                           re-pull when a rolling tag has rotated
+                           upstream. Suppressed for purely-local rows
+                           (``local`` source only) since deleting
+                           those would unlink the operator's source
+                           file rather than just a cache copy. #}
+                        {% set has_remote = u.sources|selectattr('kind','in',['manifest','url'])|list|length > 0 %}
+                        {% if u.cached and has_remote %}
+                        <button type="button"
+                                class="btn btn-sm btn-outline-warning ms-1 bty-cache-delete-btn"
+                                data-name="{{ u.names[0] }}"
+                                title="Delete cached bytes (entry stays; Fetch re-downloads)">
+                            <i class="bi bi-eraser"></i>
+                        </button>
+                        {% endif %}
+                        {# Delete the catalog entry. Backed by
+                           ``DELETE /catalog/entries?src=<src>`` which
+                           wipes the catalog_entries row. The button
+                           shows for every entry that has at least one
+                           ``manifest`` or ``url``-kind source (i.e.
+                           everything except local-only dir-scan rows,
+                           where the right delete action is to remove
+                           the underlying file). For manifest entries
+                           that came from a catalog.toml, deleting the
+                           DB row will only stick until the next
+                           manifest reload; the operator's right path
+                           in that case is to upload a smaller
+                           catalog.toml via the "Upload" form above. #}
+                        {% if has_remote %}
+                        {% set entry_src = u.sources|selectattr('kind','in',['manifest','url'])|map(attribute='location')|first %}
                         <button type="button"
                                 class="btn btn-sm btn-outline-danger ms-1 bty-catalog-entry-delete-btn"
-                                data-src="{{ url_src }}"
-                                title="Remove this URL from the catalog">
+                                data-src="{{ entry_src }}"
+                                title="Remove this entry from the catalog">
                             <i class="bi bi-trash"></i>
                         </button>
+                        {% endif %}
+                        {% if not has_remote and not u.cached and not (not u.sha256 and has_local) %}
+                        <span class="text-muted small">-</span>
                         {% endif %}
                     </td>
                 </tr>
@@ -589,7 +620,7 @@
         if (entryDeleteBtn) {
             ev.preventDefault();
             var src = entryDeleteBtn.getAttribute("data-src");
-            if (!confirm("Remove this URL from the catalog?\n\n" + src)) return;
+            if (!confirm("Remove this entry from the catalog?\n\n" + src)) return;
             entryDeleteBtn.disabled = true;
             fetch("/catalog/entries?src=" + encodeURIComponent(src), {
                 method: "DELETE",
@@ -601,6 +632,26 @@
                 window.location.reload();
             }).catch(function () {
                 entryDeleteBtn.disabled = false;
+            });
+            return;
+        }
+        var cacheDeleteBtn = ev.target.closest(".bty-cache-delete-btn");
+        if (cacheDeleteBtn) {
+            ev.preventDefault();
+            var name = cacheDeleteBtn.getAttribute("data-name");
+            if (!confirm("Delete the cached bytes for this image?\n\n" +
+                         name + "\n\nThe catalog entry stays; the next " +
+                         "Fetch re-downloads.")) return;
+            cacheDeleteBtn.disabled = true;
+            fetch("/catalog/cache/" + encodeURIComponent(name), {
+                method: "DELETE",
+                credentials: "same-origin",
+            }).then(function () {
+                // Reload so the row's badge flips ``cached`` -> ``available``
+                // and the action column re-renders with the Fetch button.
+                window.location.reload();
+            }).catch(function () {
+                cacheDeleteBtn.disabled = false;
             });
         }
     });

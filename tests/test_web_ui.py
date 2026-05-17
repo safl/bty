@@ -1085,6 +1085,71 @@ def test_ui_images_renders_fetch_button_for_unhashed_url_entry(
             assert "rolling.img.gz" not in chunk
 
 
+def test_ui_images_renders_cache_delete_button_when_cached(
+    client: TestClient,
+    tmp_path: Path,
+) -> None:
+    """Operator-requested UI gap: bty-web had ``DELETE /catalog/
+    cache/{name}`` (unlinks the cached bytes, keeps the entry) and
+    ``DELETE /catalog/entries`` (wipes the catalog row) at the API
+    layer, but /ui/images only surfaced the entry-delete button --
+    and only for ``url``-kind operator-added rows. Manifest entries
+    + cached entries had no UI to delete cache or entry.
+
+    This test pins:
+
+    1. A cached entry with a remote source (manifest / url) renders
+       the cache-delete button (``bty-cache-delete-btn``).
+    2. That same entry renders the entry-delete button -- not
+       gated on ``url``-kind anymore (manifest sources qualify too).
+    """
+    from bty.web import _db as _bty_db
+
+    # Set up a state.db with one entry pointing at a cached file.
+    state_path = tmp_path / "state.db"
+    _bty_db.init_db(state_path)
+    # Seed the cache directory + sha sidecar so the merge marks
+    # the row as ``cached``.
+    cache_dir = tmp_path / "bty-state" / "cache"
+    cache_dir.mkdir(parents=True)
+    sha = "a" * 64
+    (cache_dir / sha).write_bytes(b"\0" * 256)
+
+    with _bty_db.open_db(state_path) as conn:
+        conn.execute(
+            "INSERT INTO catalog_entries "
+            "(bty_image_ref, src, disk_image_sha, name, "
+            "sha_url, format, size_bytes, description, added_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "b" * 64,
+                "oras://ghcr.io/example/foo:latest",
+                sha,
+                "Example image (rolling)",
+                None,
+                "img.gz",
+                256,
+                None,
+                "2026-05-17T22:00:00+00:00",
+            ),
+        )
+        conn.commit()
+
+    _login(client)
+    r = client.get("/ui/images")
+    assert r.status_code == 200, r.text
+    body = r.text
+    assert "Example image (rolling)" in body
+    assert "bty-cache-delete-btn" in body, (
+        "missing cache-delete button on a cached entry; "
+        "operator can't evict stale cached bytes from the UI"
+    )
+    assert "bty-catalog-entry-delete-btn" in body, (
+        "missing entry-delete button on a manifest-source entry; "
+        "operator can't remove the entry from the UI"
+    )
+
+
 # ---------- /ui/settings/tftp-control --------------------------------------
 
 
