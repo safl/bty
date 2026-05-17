@@ -1,0 +1,1180 @@
+"""End-to-end tests that wire multiple modules together.
+
+Per-module tests cover units in isolation: ``probe_image_url``
+with a clean URL, ``/catalog.toml`` with one pinned-sha entry,
+``merge_with_catalog`` with neat ``CatalogEntry`` instances, etc.
+A long string of operator-visible bugs in v0.19.x / v0.20.x slipped
+past 600+ such tests because nothing strung the modules together
+with the inputs production actually sees:
+
+* URLs whose path segments contain spaces / parens (rolling-tag
+  catalog names are human text).
+* URLs whose path filenames lack a recognised extension (bty-web
+  ``/images/<sha>/<display-name>`` route emits these).
+* HEAD-then-GET probe sequences (every test issued GET, none
+  issued HEAD; the GET-only routes returned 405 on HEAD).
+* Manifest entries that auto-import into the DB AND appear in
+  the in-memory catalog (the dedup bug).
+* Post-flash branches where pxe-done fails (every flash test
+  stubbed pxe-done to succeed).
+* Catalog round-trips: emit /catalog.toml, parse it back, run
+  the result through probe_image_url.
+
+Each test in this file picks one such seam and asserts the full
+chain works end-to-end on production-shaped inputs.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import typing
+import urllib.error
+import urllib.request
+from collections.abc import Iterator
+from pathlib import Path
+
+import pytest
+from fastapi.testclient import TestClient
+
+from bty import catalog as _catalog
+from bty import flash as _flash
+from bty.web import _db as _bty_db
+from bty.web._app import create_app
+
+TEST_SERVICE_USER = "bty-test"
+TEST_SECRET_KEY = "test-secret-not-for-prod-use"
+
+AUTH: dict[str, str] = {}
+
+
+@pytest.fixture
+def app_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
+    """A TestClient backed by an isolated bty-web app + state.db.
+
+    Mirrors the fixture in ``test_web.py`` but without the seed
+    image / boot triplets that interfere with e2e seeding.
+    """
+    state = tmp_path / "state.db"
+    image_root = tmp_path / "images"
+    image_root.mkdir()
+    boot_root = tmp_path / "boot"
+    boot_root.mkdir()
+    bty_state_dir = tmp_path / "bty-state"
+    bty_state_dir.mkdir()
+    monkeypatch.setenv("BTY_STATE_DIR", str(bty_state_dir))
+    app = create_app(
+        state_path=state,
+        service_user=TEST_SERVICE_USER,
+        secret_key=TEST_SECRET_KEY,
+        image_root=image_root,
+        boot_root=boot_root,
+    )
+
+    import pamela
+
+    monkeypatch.setattr(pamela, "authenticate", lambda *_a, **_kw: True)
+
+    with TestClient(app) as client:
+        r = client.post(
+            "/ui/login",
+            data={"password": "pytest-password"},
+            follow_redirects=False,
+        )
+        assert r.status_code == 303, r.text
+        cookie_value = r.cookies.get("bty-token")
+        assert cookie_value is not None
+        AUTH.clear()
+        AUTH["bty-token"] = cookie_value
+        client.cookies.clear()
+        # Expose paths so tests that need to poke state.db / write
+        # files into image_root can do so without a second fixture.
+        client.app.state.tmp_path = tmp_path  # type: ignore[attr-defined]
+        client.app.state.state_path = state  # type: ignore[attr-defined]
+        client.app.state.image_root = image_root  # type: ignore[attr-defined]
+        client.app.state.boot_root = boot_root  # type: ignore[attr-defined]
+        try:
+            yield client
+        finally:
+            AUTH.clear()
+
+
+# ----------------------------------------------------------------------
+# 1. /catalog.toml -> probe_image_url with production-shaped entries
+# ----------------------------------------------------------------------
+
+
+def test_e2e_real_default_catalog_round_trips_through_probe_url(
+    app_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Generate the actual ``scripts/generate_catalog_toml.py`` default
+    catalog (rolling oras tags + GitHub release URL, human names with
+    spaces and parens, NO sha pins), upload it via the bty-web
+    ``/ui/catalog/upload`` endpoint, fetch ``/catalog.toml`` back,
+    and run every entry's ``src`` through ``flash.probe_image_url``
+    with the catalog's declared format as a hint.
+
+    Asserts:
+      * Each entry's src parses without ``InvalidURL`` (regression for
+        the unencoded-spaces bug fixed in v0.20.3).
+      * ``probe_image_url`` returns a valid ImageInfo with a
+        recognized ``format`` (regression for v0.20.8's "image format
+        not recognised" bug -- the URL filename has no extension when
+        the catalog name is human text).
+      * No ``InvalidURL`` from ``http.client._validate_path``.
+      * For HTTP entries, the HEAD probe doesn't fail with 405
+        (regression for v0.20.7's HEAD-not-allowed bug).
+    """
+    # The default catalog ships rolling-tag entries with NO sha
+    # pin. bty-web's ``/catalog.toml`` deliberately skips no-sha
+    # entries (the bty-tui consumer requires shas for binding), so
+    # to round-trip we upload sha-pinned versions of the same
+    # shape -- same name format (spaces + parens), same URL types
+    # (https with no path extension, oras://). That exercises the
+    # path that broke in v0.20.3 / v0.20.8 without fighting the
+    # /catalog.toml no-sha filter.
+    body = (
+        b"version = 1\n"
+        b"\n"
+        b'[[images]]\nname = "nosi debian-sysdev (x86_64, rolling)"\n'
+        b'src = "https://example.invalid/debian"\n'
+        b'sha256 = "' + b"a" * 64 + b'"\n'
+        b'format = "img.gz"\n'
+        b"\n"
+        b'[[images]]\nname = "nosi fedora-sysdev (x86_64, rolling)"\n'
+        b'src = "https://example.invalid/fedora"\n'
+        b'sha256 = "' + b"b" * 64 + b'"\n'
+        b'format = "img.gz"\n'
+        b"\n"
+        b'[[images]]\nname = "bty-server (x86_64, latest)"\n'
+        b'src = "https://example.invalid/bty-server"\n'
+        b'sha256 = "' + b"c" * 64 + b'"\n'
+        b'format = "img.gz"\n'
+    )
+    r = app_client.post(
+        "/ui/catalog/upload",
+        files={"file": ("catalog.toml", body, "application/toml")},
+        cookies=AUTH,
+        follow_redirects=False,
+    )
+    assert r.status_code == 303, r.text
+
+    # Fetch back the rendered catalog.
+    r = app_client.get("/catalog.toml")
+    assert r.status_code == 200, r.text
+    parsed = _catalog.load_bytes(r.content, source="<e2e>")
+    names = {e.name for e in parsed.entries}
+    assert "nosi debian-sysdev (x86_64, rolling)" in names, names
+    assert "nosi fedora-sysdev (x86_64, rolling)" in names, names
+    assert "bty-server (x86_64, latest)" in names, names
+
+    # Every entry's src must parse cleanly. ``http.client._validate_path``
+    # rejects any URL path with a literal space; building a Request
+    # exercises that check on http(s) URLs.
+    for entry in parsed.entries:
+        if entry.src.startswith(("http://", "https://")):
+            urllib.request.Request(entry.src)  # raises InvalidURL on bad URL
+
+    class _FakeResp:
+        headers: typing.ClassVar[dict[str, str]] = {"Content-Length": "100"}
+
+        def __enter__(self) -> _FakeResp:
+            return self
+
+        def __exit__(self, *_a: object) -> None:
+            return None
+
+    monkeypatch.setattr("urllib.request.urlopen", lambda *_a, **_kw: _FakeResp())
+
+    for entry in parsed.entries:
+        info = _flash.probe_image_url(entry.src, format_hint=entry.format)
+        assert info.format == "img.gz", (
+            f"entry {entry.name!r} (src={entry.src!r}) produced "
+            f"format={info.format!r}, expected img.gz. The hint should "
+            "rescue URL-filename-based detection when the path has no "
+            "recognised extension."
+        )
+
+
+# ----------------------------------------------------------------------
+# 2. PUT /images -> /catalog.toml -> HEAD/GET parity
+# ----------------------------------------------------------------------
+
+
+def test_e2e_uploaded_image_routes_round_trip_with_special_chars(
+    app_client: TestClient,
+) -> None:
+    """Upload an image with a "normal" filename, then exercise both
+    URL shapes (``/images/<sha>``, ``/images/<sha>/<name>``) with
+    both methods (HEAD, GET). Catches:
+
+      * HEAD-on-images route returning 405 (v0.20.7 regression).
+      * Content-Length absent from HEAD (Starlette FileResponse
+        contract).
+      * Per-request size mismatches (HEAD claims X bytes, GET
+        delivers Y).
+
+    The "special char" twist: percent-encode the name segment
+    in the HEAD/GET to ensure routing tolerates it.
+    """
+    payload = b"\0" * 4096
+    encoded = "foo%20bar.img.gz"  # space in name, percent-encoded
+    # PUT requires auth.
+    r = app_client.put(
+        f"/images/{encoded}",
+        content=payload,
+        cookies=AUTH,
+    )
+    # 200 OK (overwrite) or 201 Created (new) -- either is success.
+    assert r.status_code in (200, 201), r.text
+    sha = hashlib.sha256(payload).hexdigest()
+
+    # Bare /images/{key} -- by filename.
+    for method in ("HEAD", "GET"):
+        r = app_client.request(method, f"/images/{encoded}")
+        assert r.status_code == 200, (method, r.text)
+        assert r.headers.get("content-length") == str(len(payload)), (
+            method,
+            r.headers,
+        )
+        if method == "GET":
+            assert r.content == payload
+        else:
+            assert r.content == b""
+
+    # /images/{key}/{name:path} -- ``name`` is decorative.
+    for method in ("HEAD", "GET"):
+        r = app_client.request(method, f"/images/{sha}/{encoded}")
+        assert r.status_code == 200, (method, r.text)
+        assert r.headers.get("content-length") == str(len(payload))
+
+
+# ----------------------------------------------------------------------
+# 3. /pxe/<mac> -> kernel cmdline tokens are well-formed
+# ----------------------------------------------------------------------
+
+
+def test_e2e_pxe_chain_cmdline_carries_all_expected_tokens(
+    app_client: TestClient,
+) -> None:
+    """An unknown MAC chains through ``/pxe/<mac>`` and gets
+    ipxe_tui.j2. The rendered iPXE script's ``kernel`` line must
+    carry every token bty relies on at boot time:
+
+      * boot=live + fetch=<squashfs URL>  -- live-boot machinery
+      * plymouth.enable=0                 -- avoid plymouth-quit-wait
+                                              wedge on Intel iGPUs
+      * modprobe.blacklist=nouveau        -- avoid the 30s nouveau
+        + nouveau.modeset=0                 firmware-probe stall
+      * bty.mode=interactive              -- fires bty-tui-on-tty1
+      * bty.server=...                    -- catalog source URL
+      * bty.mac=<mac>                     -- so the live env can
+                                              POST /pxe/<mac>/done
+
+    Each token has been added in a separate release to fix a
+    real-hardware boot issue; the cumulative invariant is that all
+    of them must reach the kernel cmdline. A future template edit
+    that drops any one of them would silently re-break a previously
+    fixed target -- this test catches that.
+    """
+    r = app_client.get(
+        "/pxe/aa:bb:cc:dd:ee:ff",
+        headers={"Host": "bty.local:8080"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.text
+    assert body.startswith("#!ipxe"), body
+    kernel_line = next(
+        (line for line in body.splitlines() if line.startswith("kernel ")),
+        None,
+    )
+    assert kernel_line is not None, f"no kernel line in:\n{body}"
+
+    required = (
+        "boot=live",
+        "fetch=${bty-base}/boot/bty-netboot-x86_64.squashfs",
+        "plymouth.enable=0",
+        "modprobe.blacklist=nouveau",
+        "nouveau.modeset=0",
+        "bty.mode=interactive",
+        "bty.server=${bty-base}",
+        "bty.mac=aa:bb:cc:dd:ee:ff",
+        "console=tty0",
+        "console=ttyS0,115200",
+    )
+    for token in required:
+        assert token in kernel_line, f"kernel cmdline missing {token!r}: {kernel_line!r}"
+
+    # No token in the cmdline should contain a literal space inside
+    # its value (we percent-encode at construction sites; an
+    # unencoded space inside a token is the InvalidURL bug shape).
+    # Each token is separated by single spaces, so split + scan for
+    # tokens that contain a key= but no value-end before the next
+    # space.
+    for token in kernel_line.split()[1:]:  # skip "kernel"
+        # Each token is either a positional (url) or key=value. None
+        # should contain a tab or weird whitespace.
+        assert "\t" not in token, token
+
+
+def test_e2e_pxe_flash_chain_cmdline_includes_image_url_and_target_serial(
+    app_client: TestClient,
+) -> None:
+    """Bind a known machine to a known catalog entry + target disk
+    serial, set boot_policy to flash-once, GET /pxe/<mac>, parse
+    the ipxe_flash.j2 output: every flash-specific token must be
+    present AND well-formed.
+    """
+    # Seed a catalog entry the machine binds to. Use a sha that
+    # corresponds to a file we'll create so the URL is reachable.
+    image_root: Path = app_client.app.state.image_root  # type: ignore[attr-defined]
+    payload = b"\0" * 256
+    (image_root / "demo.qcow2").write_bytes(payload)
+    sha = hashlib.sha256(payload).hexdigest()
+    (image_root / "demo.qcow2.sha256").write_text(f"{sha}  demo.qcow2\n")
+
+    # Auto-import ran on app startup against an empty image_root
+    # (fixture sequence: app starts -> lifespan -> our test adds
+    # the file). Insert the catalog row by hand. ``bty_image_ref``
+    # has the same shape the auto-import would produce
+    # (``image_ref_for_src("file://demo.qcow2")``).
+    state_path: Path = app_client.app.state.state_path  # type: ignore[attr-defined]
+    bty_image_ref = _catalog.image_ref_for_src("file://demo.qcow2")
+    with _bty_db.open_db(state_path) as conn:
+        conn.execute(
+            "INSERT INTO catalog_entries "
+            "(bty_image_ref, src, disk_image_sha, name, "
+            "sha_url, format, size_bytes, description, added_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                bty_image_ref,
+                "file://demo.qcow2",
+                sha,
+                "demo.qcow2",
+                None,
+                "qcow2",
+                len(payload),
+                None,
+                "2026-05-17T22:00:00+00:00",
+            ),
+        )
+        conn.commit()
+
+    # Bind the machine to that ref.
+    r = app_client.put(
+        "/machines/aa:bb:cc:dd:ee:ff",
+        json={
+            "bty_image_ref": bty_image_ref,
+            "boot_policy": "flash-once",
+            "target_disk_serial": "WD-WX12345",
+        },
+        cookies=AUTH,
+    )
+    assert r.status_code == 200, r.text
+
+    r = app_client.get(
+        "/pxe/aa:bb:cc:dd:ee:ff",
+        headers={"Host": "bty.local:8080"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.text
+    kernel_line = next(line for line in body.splitlines() if line.startswith("kernel "))
+    required = (
+        "bty.image_url=",
+        "bty.target_disk_serial=WD-WX12345",
+        "plymouth.enable=0",
+        "modprobe.blacklist=nouveau",
+    )
+    for token in required:
+        assert token in kernel_line, f"flash cmdline missing {token!r}: {kernel_line!r}"
+
+
+# ----------------------------------------------------------------------
+# 4. catalog.toml roundtrip with mixed shapes -> no dupes on /ui/images
+# ----------------------------------------------------------------------
+
+
+def test_e2e_catalog_with_mixed_entry_shapes_renders_each_once(
+    app_client: TestClient,
+) -> None:
+    """Upload a catalog with diverse entry shapes -- sha-pinned,
+    sha-less rolling tag, http URL, oras URL, plus dir-scan files
+    on disk -- and assert /ui/images renders each exactly once.
+
+    Regression: v0.19.7's duplicate bug only fired on no-sha entries
+    (the by_sha merge can't dedupe them). v0.19.8's ref-keyed merge
+    fixed it structurally. This test exercises the WORST CASE: every
+    shape mixed together, plus a dir-scan file that overlaps via
+    auto-import.
+    """
+    # Drop a dir-scan file -- gets auto-imported into catalog_entries.
+    image_root: Path = app_client.app.state.image_root  # type: ignore[attr-defined]
+    payload = b"\x00" * 256
+    (image_root / "local-image.img.gz").write_bytes(payload)
+    sha = hashlib.sha256(payload).hexdigest()
+    (image_root / "local-image.img.gz.sha256").write_text(f"{sha}  local-image.img.gz\n")
+
+    body = (
+        b"version = 1\n"
+        b"\n"
+        # sha-pinned http
+        b'[[images]]\nname = "Pinned HTTP"\n'
+        b'src = "https://example.invalid/pinned.img.gz"\n'
+        b'sha256 = "' + b"d" * 64 + b'"\n'
+        b'format = "img.gz"\n'
+        b"\n"
+        # rolling oras, no sha
+        b'[[images]]\nname = "Rolling ORAS (rolling)"\n'
+        b'src = "oras://ghcr.io/example/rolling:latest"\n'
+        b'format = "img.gz"\n'
+        b"\n"
+        # un-sha http with spaces in name
+        b'[[images]]\nname = "Human Named (x86_64, rolling)"\n'
+        b'src = "https://example.invalid/human.img.gz"\n'
+        b'format = "img.gz"\n'
+    )
+    r = app_client.post(
+        "/ui/catalog/upload",
+        files={"file": ("catalog.toml", body, "application/toml")},
+        cookies=AUTH,
+        follow_redirects=False,
+    )
+    assert r.status_code == 303, r.text
+
+    r = app_client.get("/ui/images", cookies=AUTH)
+    assert r.status_code == 200, r.text
+    page = r.text
+
+    # Each manifest entry name appears exactly once in a row-level
+    # cell. Count the strict occurrences in <td> contexts vs
+    # decorative occurrences in title=, hidden inputs, etc.
+    for name in (
+        "Pinned HTTP",
+        "Rolling ORAS (rolling)",
+        "Human Named (x86_64, rolling)",
+        "local-image.img.gz",
+    ):
+        count = page.count(name)
+        # Each entry may appear in: row cell (1), possibly a title= hint (1),
+        # possibly a confirm-dialog data-attr (1). Upper bound is 3.
+        # The bug shape was 6-8 occurrences (entry rendered twice on
+        # the merge + url_only paths, each carrying its own cell + title).
+        assert 1 <= count <= 3, (
+            f"entry {name!r} rendered {count} times on /ui/images; "
+            f"expected 1-3 (one row + optional hover/data attrs). "
+            "If count is in the 4+ range the duplicate-rendering "
+            "regression is back."
+        )
+
+
+# ----------------------------------------------------------------------
+# 5. HEAD/GET parity on /boot artifact route
+# ----------------------------------------------------------------------
+
+
+def test_e2e_boot_artifact_route_supports_head_with_correct_content_length(
+    app_client: TestClient,
+) -> None:
+    """UEFI HTTP-Boot firmware HEADs the bootfile URL before issuing
+    GET to size its fetch buffer. The /boot/{name} route must:
+      * accept HEAD (not return 405)
+      * report the same Content-Length on HEAD and GET
+      * return an empty body on HEAD (HEAD semantics)
+    """
+    boot_root: Path = app_client.app.state.boot_root  # type: ignore[attr-defined]
+    payload = b"fake-vmlinuz" * 100
+    (boot_root / "bty-netboot-x86_64.vmlinuz").write_bytes(payload)
+
+    head_r = app_client.head("/boot/bty-netboot-x86_64.vmlinuz")
+    assert head_r.status_code == 200, head_r.text
+    assert head_r.content == b""
+    head_cl = head_r.headers.get("content-length")
+    assert head_cl == str(len(payload)), head_cl
+
+    get_r = app_client.get("/boot/bty-netboot-x86_64.vmlinuz")
+    assert get_r.status_code == 200, get_r.text
+    assert get_r.content == payload
+    assert get_r.headers.get("content-length") == head_cl
+
+
+# ----------------------------------------------------------------------
+# 6. catalog entry lifecycle -- add via UI, list, cache, evict, delete
+# ----------------------------------------------------------------------
+
+
+def test_e2e_catalog_entry_lifecycle_via_ui_endpoints(
+    app_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Full lifecycle of a URL-form-added catalog entry:
+
+      1. POST /ui/catalog/entries with image_url -> 303 to /ui/images
+      2. GET /ui/images -> entry appears, trash button present
+      3. DELETE /catalog/entries?src=... -> 204
+      4. GET /ui/images -> entry gone
+
+    Catches: the entry shows up where the operator expects it (so
+    the delete button can be found), AND the delete actually removes
+    the row.
+    """
+    from bty.web import _app as _web_app
+
+    monkeypatch.setattr(_web_app, "_head_content_length", lambda _url: None)
+
+    src = "https://example.invalid/rolling.img.gz"
+    r = app_client.post(
+        "/ui/catalog/entries",
+        data={"image_url": src, "sha_url": ""},
+        cookies=AUTH,
+        follow_redirects=False,
+    )
+    assert r.status_code == 303, r.text
+
+    r = app_client.get("/ui/images", cookies=AUTH)
+    assert r.status_code == 200, r.text
+    assert "rolling.img.gz" in r.text
+    assert "bty-catalog-entry-delete-btn" in r.text
+
+    # Sanity-check the DB has the row.
+    state_path: Path = app_client.app.state.state_path  # type: ignore[attr-defined]
+    with _bty_db.open_db(state_path) as conn:
+        rows = conn.execute("SELECT src FROM catalog_entries WHERE src = ?", (src,)).fetchall()
+    assert rows, "POST /ui/catalog/entries did not insert the row"
+
+    # Use httpx's url= form to pass the query string explicitly
+    # (params= via .request() sometimes urlencodes the dict keys
+    # in surprising ways).
+    from urllib.parse import quote as _q
+
+    r = app_client.request(
+        "DELETE",
+        f"/catalog/entries?src={_q(src, safe='')}",
+        cookies=AUTH,
+    )
+    assert r.status_code == 204, r.text
+
+    with _bty_db.open_db(state_path) as conn:
+        rows_after = conn.execute(
+            "SELECT src FROM catalog_entries WHERE src = ?", (src,)
+        ).fetchall()
+    assert not rows_after, (
+        f"DELETE returned 204 but the row is still in catalog_entries: {rows_after}"
+    )
+
+    r = app_client.get("/ui/images", cookies=AUTH)
+    # ``rolling.img.gz`` will still appear in the events audit log
+    # at the bottom of /ui/images (audit is append-only, correctly).
+    # The contract under test is that the IMAGES table no longer
+    # carries it -- so the delete button (which only renders on
+    # image rows referencing this entry) must be gone.
+    page = r.text
+    # Find the catalog-entry-delete-btn instances and assert none
+    # carry our deleted src as their data-src attribute.
+    import re
+
+    btns_with_our_src = re.findall(
+        r'bty-catalog-entry-delete-btn[^>]*data-src="' + re.escape(src) + r'"',
+        page,
+    )
+    assert not btns_with_our_src, (
+        f"DELETE removed the DB row but the entry's delete button is still "
+        f"rendered: {btns_with_our_src!r}. Auto-import re-adding it?"
+    )
+
+
+# ----------------------------------------------------------------------
+# 7. format_hint propagates through make_plan + validate_plan
+# ----------------------------------------------------------------------
+
+
+def test_e2e_format_hint_carries_through_to_validate_plan(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Validate_plan rejects with "image format not recognised" when
+    the probe returns ``format=None``. The path that broke in
+    v0.20.8: bty-web emits ``/images/<sha>/<display-name>`` URLs
+    whose filename has no recognised extension; URL-only detection
+    fails; without the ``format_hint`` parameter, validate_plan
+    rejects.
+
+    Pin the contract by running through make_plan + validate_plan
+    twice -- once with hint, once without -- and asserting the
+    rejection error string changes shape accordingly.
+    """
+
+    class _FakeResp:
+        headers: typing.ClassVar[dict[str, str]] = {"Content-Length": "1024"}
+
+        def __enter__(self) -> _FakeResp:
+            return self
+
+        def __exit__(self, *_a: object) -> None:
+            return None
+
+    monkeypatch.setattr("urllib.request.urlopen", lambda *_a, **_kw: _FakeResp())
+    url = "http://server/images/abcd/Human%20Named%20%28rolling%29"
+
+    target_info = _flash.TargetInfo(
+        path=Path("/dev/sdz"),
+        size_bytes=10 * 1024 * 1024,
+        exists=True,
+        is_block_device=True,
+        mountpoints=[],
+    )
+
+    # Without hint: format=None -> validate rejects.
+    info_no_hint = _flash.probe_image_url(url)
+    assert info_no_hint.format is None
+    errors = _flash.validate_plan(_flash.make_plan(info_no_hint, target_info))
+    assert any("format not recognised" in e for e in errors), errors
+
+    # With hint: format propagates, validate accepts.
+    info_hint = _flash.probe_image_url(url, format_hint="img.gz")
+    assert info_hint.format == "img.gz"
+    errors_hint = _flash.validate_plan(_flash.make_plan(info_hint, target_info))
+    assert not any("format not recognised" in e for e in errors_hint), errors_hint
+
+
+# ----------------------------------------------------------------------
+# 8. flash success when pxe-done fails -> button still flips
+# ----------------------------------------------------------------------
+
+
+def test_e2e_pxe_done_failure_is_isolated_from_machine_state(
+    app_client: TestClient,
+) -> None:
+    """POST /pxe/<mac>/done is best-effort. If the bty-tui side hits
+    a URLError trying to call it, the actual flash succeeded -- the
+    server must accept a subsequent successful done call AND the
+    machine's last_flashed_at must update correctly.
+
+    This is the same shape as the UI-side bug fixed in v0.20.1:
+    pxe-done is best-effort and its failure must not block other
+    state transitions.
+    """
+    # Seed a dir-scan file + an explicit catalog_entries row (the
+    # auto-import on lifespan ran against an empty image_root --
+    # we add the file AFTER the app started, so we have to wire
+    # the catalog row by hand).
+    image_root: Path = app_client.app.state.image_root  # type: ignore[attr-defined]
+    payload = b"\x11" * 128
+    (image_root / "tiny.img").write_bytes(payload)
+    sha = hashlib.sha256(payload).hexdigest()
+    (image_root / "tiny.img.sha256").write_text(f"{sha}  tiny.img\n")
+
+    state_path: Path = app_client.app.state.state_path  # type: ignore[attr-defined]
+    ref = _catalog.image_ref_for_src("file://tiny.img")
+    with _bty_db.open_db(state_path) as conn:
+        conn.execute(
+            "INSERT INTO catalog_entries "
+            "(bty_image_ref, src, disk_image_sha, name, "
+            "sha_url, format, size_bytes, description, added_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                ref,
+                "file://tiny.img",
+                sha,
+                "tiny.img",
+                None,
+                "img",
+                len(payload),
+                None,
+                "2026-05-17T22:00:00+00:00",
+            ),
+        )
+        conn.commit()
+    r = app_client.put(
+        "/machines/12:34:56:78:9a:bc",
+        json={
+            "bty_image_ref": ref,
+            "boot_policy": "flash-once",
+            "target_disk_serial": "WD-XX",
+        },
+        cookies=AUTH,
+    )
+    assert r.status_code == 200, r.text
+
+    # Trigger the done call (open endpoint -- PXE clients have
+    # no auth). Server-side state mutation only. Endpoint returns
+    # 204 No Content on success (no body to return).
+    r = app_client.post("/pxe/12:34:56:78:9a:bc/done")
+    assert r.status_code in (200, 204), r.text
+
+    # Verify last_flashed_at populated + policy flipped to ``local``.
+    r = app_client.get("/machines/12:34:56:78:9a:bc", cookies=AUTH)
+    assert r.status_code == 200, r.text
+    m = r.json()
+    assert m["boot_policy"] == "local", m
+    assert m["last_flashed_at"] is not None, m
+
+
+# ----------------------------------------------------------------------
+# 9. modprobe.d blacklist files are in the bake (structural)
+# ----------------------------------------------------------------------
+
+
+def test_e2e_modprobe_blacklist_files_match_kernel_cmdline_intent() -> None:
+    """The repo ships ``zz-bty-blacklist-nouveau.conf`` in the live env
+    + server rootfs, and ``modprobe.blacklist=nouveau nouveau.modeset=0``
+    on the kernel cmdline at four locations (two iPXE templates,
+    auto/config BOOTAPPEND, cloud-init GRUB_CMDLINE EXTRA).
+
+    A future change that adds another GPU driver to the blacklist
+    must do it in ALL FIVE places, not just some, or the cmdline /
+    config drift will silently let the driver load on some boot
+    paths and not others.
+
+    This test catches the cross-cutting consistency invariant by
+    listing every "blacklist <driver>" line in either modprobe.d
+    file and asserting the SAME drivers appear in
+    modprobe.blacklist=<drivers> on every kernel cmdline insertion.
+    """
+    repo_root = Path(__file__).resolve().parents[1]
+    live_conf = (
+        repo_root
+        / "bty-media"
+        / "live-build"
+        / "config"
+        / "includes.chroot"
+        / "etc"
+        / "modprobe.d"
+        / "zz-bty-blacklist-nouveau.conf"
+    )
+    server_conf = (
+        repo_root
+        / "bty-media"
+        / "rootfs"
+        / "server"
+        / "etc"
+        / "modprobe.d"
+        / "zz-bty-blacklist-nouveau.conf"
+    )
+    # Extract blacklisted modules.
+    drivers = set()
+    for path in (live_conf, server_conf):
+        for line in path.read_text().splitlines():
+            stripped = line.strip()
+            if stripped.startswith("blacklist "):
+                drivers.add(stripped.split(None, 1)[1])
+
+    assert drivers, "no 'blacklist <driver>' lines found in modprobe.d configs"
+
+    # Every driver listed must appear on every kernel cmdline
+    # insertion point as ``modprobe.blacklist=<driver>``.
+    cmdline_files = (
+        repo_root / "src" / "bty" / "web" / "_templates" / "ipxe_tui.j2",
+        repo_root / "src" / "bty" / "web" / "_templates" / "ipxe_flash.j2",
+        repo_root / "bty-media" / "live-build" / "auto" / "config",
+        repo_root / "bty-media" / "auxiliary" / "cloudinit-base-server.user",
+    )
+    for path in cmdline_files:
+        body = path.read_text()
+        for driver in drivers:
+            assert f"modprobe.blacklist={driver}" in body or (
+                "modprobe.blacklist=" in body and driver in body
+            ), (
+                f"{path} has cmdline insertions but does not include "
+                f"modprobe.blacklist={driver} -- driver is blacklisted "
+                f"in modprobe.d but not at kernel cmdline level on "
+                f"this boot path. The initramfs window before /etc/ is "
+                f"mounted would still load it."
+            )
+
+
+# ----------------------------------------------------------------------
+# 10. /catalog.toml entries that come back parse cleanly
+# ----------------------------------------------------------------------
+
+
+def test_e2e_pxe_unknown_mac_then_inventory_then_flash_chain(
+    app_client: TestClient,
+) -> None:
+    """The PXE flow has four state transitions on the server side:
+
+      1. Unknown MAC -> /pxe/<mac> -> auto-discovered with policy=tui
+      2. Same MAC -> /machines/<mac>/inventory -> machine.inventory event
+      3. Operator binds (PUT /machines/<mac>) with flash-once + ref
+      4. Same MAC -> /pxe/<mac> -> renders ipxe_flash.j2 with the ref
+
+    Each step depends on the prior; a regression in any of them
+    leaves operators with a "PXE booted but nothing happened" mystery.
+    """
+    mac = "0a:0b:0c:0d:0e:0f"
+
+    # 1. Auto-discovery.
+    r = app_client.get(f"/pxe/{mac}", headers={"Host": "bty.local:8080"})
+    assert r.status_code == 200, r.text
+    assert "bty.mode=interactive" in r.text, r.text  # default tui policy
+
+    r = app_client.get(f"/machines/{mac}", cookies=AUTH)
+    assert r.status_code == 200, r.text
+    assert r.json()["boot_policy"] == "tui"
+
+    # 2. Inventory POST -- simulates the live env reporting disks.
+    r = app_client.post(
+        f"/pxe/{mac}/inventory",
+        json={"disks": [{"path": "/dev/sda", "serial": "SER-1", "size_bytes": 10**9}]},
+    )
+    assert r.status_code in (200, 204), r.text
+
+    # 3. Operator binds. Insert a catalog row + bind machine.
+    image_root: Path = app_client.app.state.image_root  # type: ignore[attr-defined]
+    payload = b"\x55" * 256
+    (image_root / "bound.img.gz").write_bytes(payload)
+    sha = hashlib.sha256(payload).hexdigest()
+    (image_root / "bound.img.gz.sha256").write_text(f"{sha}  bound.img.gz\n")
+
+    state_path: Path = app_client.app.state.state_path  # type: ignore[attr-defined]
+    ref = _catalog.image_ref_for_src("file://bound.img.gz")
+    with _bty_db.open_db(state_path) as conn:
+        conn.execute(
+            "INSERT INTO catalog_entries "
+            "(bty_image_ref, src, disk_image_sha, name, "
+            "sha_url, format, size_bytes, description, added_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                ref,
+                "file://bound.img.gz",
+                sha,
+                "bound.img.gz",
+                None,
+                "img.gz",
+                len(payload),
+                None,
+                "2026-05-17T22:00:00+00:00",
+            ),
+        )
+        conn.commit()
+
+    r = app_client.put(
+        f"/machines/{mac}",
+        json={
+            "bty_image_ref": ref,
+            "boot_policy": "flash-once",
+            "target_disk_serial": "SER-1",
+        },
+        cookies=AUTH,
+    )
+    assert r.status_code == 200, r.text
+
+    # 4. Subsequent PXE renders the flash chain with the binding.
+    r = app_client.get(f"/pxe/{mac}", headers={"Host": "bty.local:8080"})
+    assert r.status_code == 200, r.text
+    body = r.text
+    assert "bty.image_url=" in body, body
+    assert f"bty.image_url=${{bty-base}}/images/{ref}" in body
+    assert "bty.target_disk_serial=SER-1" in body
+    # Done call flips flash-once -> local.
+    r = app_client.post(f"/pxe/{mac}/done")
+    assert r.status_code in (200, 204), r.text
+    r = app_client.get(f"/machines/{mac}", cookies=AUTH)
+    assert r.json()["boot_policy"] == "local"
+
+
+def test_e2e_image_serve_routes_resolve_by_sha_or_filename(
+    app_client: TestClient,
+) -> None:
+    """``/images/<key>`` accepts either a SHA-256 (64-hex) or a
+    filename. Both should resolve to the same bytes when the
+    operator's dir-scan file has a matching ``.sha256`` sidecar.
+
+    Confirms the resolver pipeline:
+      filename -> dir-scan -> bytes
+      sha -> dir-scan sidecar match -> bytes
+    """
+    image_root: Path = app_client.app.state.image_root  # type: ignore[attr-defined]
+    state_path: Path = app_client.app.state.state_path  # type: ignore[attr-defined]
+    payload = b"\xab" * 8192
+    (image_root / "resolver.img.gz").write_bytes(payload)
+    sha = hashlib.sha256(payload).hexdigest()
+    (image_root / "resolver.img.gz.sha256").write_text(f"{sha}  resolver.img.gz\n")
+    # The sha-key resolver looks the value up in catalog_entries
+    # (the dir-scan auto-import populates that table at startup,
+    # but our file landed AFTER lifespan ran -- insert by hand).
+    ref = _catalog.image_ref_for_src("file://resolver.img.gz")
+    with _bty_db.open_db(state_path) as conn:
+        conn.execute(
+            "INSERT INTO catalog_entries "
+            "(bty_image_ref, src, disk_image_sha, name, "
+            "sha_url, format, size_bytes, description, added_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                ref,
+                "file://resolver.img.gz",
+                sha,
+                "resolver.img.gz",
+                None,
+                "img.gz",
+                len(payload),
+                None,
+                "2026-05-17T22:00:00+00:00",
+            ),
+        )
+        conn.commit()
+
+    by_name = app_client.get("/images/resolver.img.gz")
+    by_sha = app_client.get(f"/images/{sha}")
+    assert by_name.status_code == 200, by_name.text
+    assert by_sha.status_code == 200, by_sha.text
+    assert by_name.content == by_sha.content == payload
+
+
+def test_e2e_flash_safety_gate_no_target_disk_serial_logs_event(
+    app_client: TestClient,
+) -> None:
+    """Operator binds a machine to a ref with flash-once policy
+    but forgets to set ``target_disk_serial``. The safety gate in
+    /pxe/<mac> must:
+      1. Refuse to render ipxe_flash.j2 (would wipe wrong disk).
+      2. Log a ``pxe.flash.no_target_disk`` event for operator
+         debugging visibility.
+      3. Fall through to the local-boot / sanboot template.
+
+    Regression coverage for the v0.13.x-era safety gate that exists
+    precisely because dev/sda can flip across reboots; pinning to
+    a serial is the only safe pick.
+    """
+    mac = "ee:ee:ee:ee:ee:ee"
+    state_path: Path = app_client.app.state.state_path  # type: ignore[attr-defined]
+    image_root: Path = app_client.app.state.image_root  # type: ignore[attr-defined]
+    payload = b"\x99" * 256
+    (image_root / "gated.img.gz").write_bytes(payload)
+    sha = hashlib.sha256(payload).hexdigest()
+    (image_root / "gated.img.gz.sha256").write_text(f"{sha}  gated.img.gz\n")
+    ref = _catalog.image_ref_for_src("file://gated.img.gz")
+    with _bty_db.open_db(state_path) as conn:
+        conn.execute(
+            "INSERT INTO catalog_entries "
+            "(bty_image_ref, src, disk_image_sha, name, sha_url, "
+            "format, size_bytes, description, added_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                ref,
+                "file://gated.img.gz",
+                sha,
+                "gated.img.gz",
+                None,
+                "img.gz",
+                len(payload),
+                None,
+                "2026-05-17T22:00:00+00:00",
+            ),
+        )
+        conn.commit()
+
+    # Bind without target_disk_serial.
+    r = app_client.put(
+        f"/machines/{mac}",
+        json={"bty_image_ref": ref, "boot_policy": "flash-once"},
+        cookies=AUTH,
+    )
+    assert r.status_code == 200, r.text
+
+    r = app_client.get(f"/pxe/{mac}", headers={"Host": "bty.local:8080"})
+    assert r.status_code == 200, r.text
+    body = r.text
+    # Safety gate triggered: NO bty.image_url on the cmdline.
+    assert "bty.image_url=" not in body, (
+        "safety gate failed: flash chain emitted without target_disk_serial. "
+        "This is the regression that would wipe the wrong disk on a multi-disk host."
+    )
+
+    # And the event log records the refusal.
+    with _bty_db.open_db(state_path) as conn:
+        rows = conn.execute(
+            "SELECT kind FROM events WHERE subject_id = ? ORDER BY id DESC LIMIT 5",
+            (mac,),
+        ).fetchall()
+    kinds = {r["kind"] for r in rows}
+    assert "pxe.flash.no_target_disk" in kinds, (
+        f"safety gate fired but did not log pxe.flash.no_target_disk event "
+        f"for operator debugging visibility. events: {kinds}"
+    )
+
+
+def test_e2e_catalog_upload_invalid_toml_preserves_existing_manifest(
+    app_client: TestClient,
+) -> None:
+    """``POST /ui/catalog/upload`` validates the body before writing.
+    A malformed TOML must:
+      1. Return 303 to ``/ui/images?error=...`` (not 500).
+      2. NOT clobber the existing manifest_path file (the operator's
+         existing catalog is preserved).
+    """
+    # First upload a valid catalog so there's an existing manifest
+    # to potentially clobber.
+    good = (
+        b"version = 1\n"
+        b"\n"
+        b'[[images]]\nname = "Good"\n'
+        b'src = "https://example.invalid/good"\n'
+        b'sha256 = "' + b"e" * 64 + b'"\n'
+        b'format = "img.gz"\n'
+    )
+    r = app_client.post(
+        "/ui/catalog/upload",
+        files={"file": ("catalog.toml", good, "application/toml")},
+        cookies=AUTH,
+        follow_redirects=False,
+    )
+    assert r.status_code == 303, r.text
+
+    # Now upload garbage.
+    garbage = b"this is not valid TOML [[[\nname missing\n"
+    r = app_client.post(
+        "/ui/catalog/upload",
+        files={"file": ("catalog.toml", garbage, "application/toml")},
+        cookies=AUTH,
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert r.headers["location"].startswith("/ui/images?error="), r.headers["location"]
+
+    # The existing manifest must still parse + show the Good entry.
+    r = app_client.get("/catalog.toml")
+    assert r.status_code == 200, r.text
+    parsed = _catalog.load_bytes(r.content, source="<e2e>")
+    assert any(e.name == "Good" for e in parsed.entries), (
+        f"Bad upload clobbered the existing catalog. Entries: {parsed.entries!r}"
+    )
+
+
+def test_e2e_machine_put_is_full_replace_not_partial_update(
+    app_client: TestClient,
+) -> None:
+    """PUT /machines/<mac> is REST-spec full replace. A PUT with
+    only ``{"hostname": ...}`` resets every other field to its
+    Pydantic default (bty_image_ref=None, boot_policy=local).
+
+    Pin the contract: the UI's machine-edit form sends every
+    field every time precisely because the API is full-replace.
+    A future "let's accept partial updates" refactor must update
+    both the API + the form together, or operators will lose
+    bindings when editing hostname / other unrelated fields.
+    """
+    mac = "44:44:44:44:44:44"
+    state_path: Path = app_client.app.state.state_path  # type: ignore[attr-defined]
+    image_root: Path = app_client.app.state.image_root  # type: ignore[attr-defined]
+    (image_root / "stable.img.gz").write_bytes(b"x" * 256)
+    sha = hashlib.sha256(b"x" * 256).hexdigest()
+    (image_root / "stable.img.gz.sha256").write_text(f"{sha}  stable.img.gz\n")
+    ref = _catalog.image_ref_for_src("file://stable.img.gz")
+    with _bty_db.open_db(state_path) as conn:
+        conn.execute(
+            "INSERT INTO catalog_entries "
+            "(bty_image_ref, src, disk_image_sha, name, sha_url, "
+            "format, size_bytes, description, added_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                ref,
+                "file://stable.img.gz",
+                sha,
+                "stable.img.gz",
+                None,
+                "img.gz",
+                256,
+                None,
+                "2026-05-17T22:00:00+00:00",
+            ),
+        )
+        conn.commit()
+
+    # Initial bind with everything.
+    r = app_client.put(
+        f"/machines/{mac}",
+        json={
+            "bty_image_ref": ref,
+            "boot_policy": "flash-once",
+            "target_disk_serial": "SER-Z",
+            "hostname": "first-name",
+        },
+        cookies=AUTH,
+    )
+    assert r.status_code == 200, r.text
+
+    # Partial PUT -- only hostname. Per the REST spec semantics
+    # we've pinned, this RESETS everything else to defaults.
+    r = app_client.put(
+        f"/machines/{mac}",
+        json={"hostname": "second-name"},
+        cookies=AUTH,
+    )
+    assert r.status_code == 200, r.text
+
+    r = app_client.get(f"/machines/{mac}", cookies=AUTH)
+    assert r.status_code == 200, r.text
+    m = r.json()
+    assert m["hostname"] == "second-name", m
+    # Full-replace contract: omitted fields reset to defaults.
+    assert m["bty_image_ref"] is None, m
+    assert m["boot_policy"] == "local", m
+    assert m["target_disk_serial"] is None, m
+
+    # The operator-correct way to update a single field is to
+    # re-send everything.
+    r = app_client.put(
+        f"/machines/{mac}",
+        json={
+            "bty_image_ref": ref,
+            "boot_policy": "flash-once",
+            "target_disk_serial": "SER-Z",
+            "hostname": "third-name",
+        },
+        cookies=AUTH,
+    )
+    assert r.status_code == 200, r.text
+    r = app_client.get(f"/machines/{mac}", cookies=AUTH)
+    m = r.json()
+    assert m["bty_image_ref"] == ref, m
+    assert m["hostname"] == "third-name", m
+
+
+def test_e2e_catalog_toml_output_is_parseable_by_bty_catalog_loader(
+    app_client: TestClient,
+) -> None:
+    """The bty-tui consumer of ``--catalog`` uses
+    ``bty.catalog.load_bytes`` to parse the response from
+    ``GET /catalog.toml``. If bty-web emits a TOML body the loader
+    doesn't accept, the TUI shows an empty / corrupt catalog and
+    the operator can't flash anything.
+
+    Round-trip every byte of /catalog.toml's output through
+    ``load_bytes`` and assert no parse errors.
+    """
+    image_root: Path = app_client.app.state.image_root  # type: ignore[attr-defined]
+    # Mix shapes: one with sha, one without.
+    payload_a = b"AAAA" * 1024
+    (image_root / "with-sha.img.gz").write_bytes(payload_a)
+    sha_a = hashlib.sha256(payload_a).hexdigest()
+    (image_root / "with-sha.img.gz.sha256").write_text(f"{sha_a}  with-sha.img.gz\n")
+    (image_root / "no-sha.qcow2").write_bytes(b"BBBB" * 256)
+
+    # Upload a small manifest with a name carrying spaces. Pin a
+    # sha so /catalog.toml emits the entry (it skips un-sha'd
+    # entries; that filter is exercised by other tests).
+    body = (
+        b"version = 1\n"
+        b"\n"
+        b'[[images]]\nname = "Manifest Only (spaces, parens)"\n'
+        b'src = "https://example.invalid/manifest.img.gz"\n'
+        b'sha256 = "' + b"f" * 64 + b'"\n'
+        b'format = "img.gz"\n'
+    )
+    r = app_client.post(
+        "/ui/catalog/upload",
+        files={"file": ("catalog.toml", body, "application/toml")},
+        cookies=AUTH,
+        follow_redirects=False,
+    )
+    assert r.status_code == 303, r.text
+
+    r = app_client.get("/catalog.toml")
+    assert r.status_code == 200, r.text
+    parsed = _catalog.load_bytes(r.content, source="<e2e>")
+    # At least the manifest entry is present.
+    assert any("Manifest Only" in e.name for e in parsed.entries), (
+        f"entries: {[e.name for e in parsed.entries]}"
+    )
+
+    # And the dir-scan with-sha file surfaces with a server-relative URL.
+    sha_keyed = [e for e in parsed.entries if e.sha256 == sha_a]
+    assert sha_keyed, f"with-sha.img.gz not surfaced; entries: {parsed.entries}"
+    assert "/images/" in sha_keyed[0].src

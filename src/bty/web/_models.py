@@ -209,10 +209,20 @@ class ImageEntry(BaseModel):
 
 
 class HealthResponse(BaseModel):
+    """``GET /healthz`` response body. Liveness check for monitoring
+    / smoke tests / Kubernetes-style probes. Always ``{"status":
+    "ok"}`` when the worker is up; the absence of a 200 response
+    is the signal, not the body content."""
+
     status: str = "ok"
 
 
 class VersionResponse(BaseModel):
+    """``GET /version`` response body. Carries the running bty-lab
+    package version so operators (and CI smoke tests) can verify
+    which release the appliance has installed without ssh'ing in
+    to read ``pip show``."""
+
     version: str
 
 
