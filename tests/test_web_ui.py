@@ -837,6 +837,63 @@ def test_ui_machines_list_shows_boot_policy_badge(client: TestClient) -> None:
     assert "<th>Last flashed</th>" in body
 
 
+def test_ui_machine_detail_dropdown_lists_manifest_entry_after_upload(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """End-to-end of the auto-import fix from v0.19.1: upload a
+    catalog.toml, then open /ui/machines/{mac} and assert the
+    Image <select> contains an <option> for the manifest entry.
+    Pre-v0.19.1 the entry was visible on /ui/images (via merge)
+    but the machine-binding dropdown stayed empty for it.
+
+    Builds a separate app per-test because the manifest_path is
+    resolved at create_app() time from ``BTY_STATE_DIR``; the
+    shared client fixture's app was already built before this
+    test runs.
+    """
+    image_root = tmp_path / "images"
+    image_root.mkdir()
+    bty_state_dir = tmp_path / "bty-state"
+    bty_state_dir.mkdir()
+    monkeypatch.setenv("BTY_STATE_DIR", str(bty_state_dir))
+    fresh_app = create_app(
+        state_path=tmp_path / "state.db",
+        service_user=TEST_SERVICE_USER,
+        secret_key=TEST_SECRET_KEY,
+        image_root=image_root,
+    )
+
+    import pamela
+
+    monkeypatch.setattr(pamela, "authenticate", lambda *a, **kw: True)
+
+    with TestClient(fresh_app, follow_redirects=False) as c:
+        login = c.post("/ui/login", data={"password": "x"})
+        assert login.status_code == 303
+        body = (
+            b"version = 1\n\n"
+            b"[[images]]\n"
+            b'name = "rolling-from-upload"\n'
+            b'src = "oras://ghcr.io/example/foo:latest"\n'
+            b'format = "img.gz"\n'
+        )
+        r = c.post(
+            "/ui/catalog/upload",
+            files={"file": ("catalog.toml", body, "application/toml")},
+        )
+        assert r.status_code == 303, r.text
+        # Discover a machine via /pxe so the detail page exists.
+        c.get("/pxe/aa:bb:cc:dd:ee:21")
+        detail = c.get("/ui/machines/aa:bb:cc:dd:ee:21")
+        assert detail.status_code == 200
+        body_html = detail.text
+        # The bty_image_ref <select> contains the manifest entry's
+        # name as an option label.
+        assert 'name="bty_image_ref"' in body_html
+        assert "rolling-from-upload" in body_html
+
+
 def test_ui_machine_delete_via_form_records_event(client: TestClient) -> None:
     """The form-style /ui/machines/{mac}/delete must record a
     ``machine.deleted`` event so /ui/events shows operator
