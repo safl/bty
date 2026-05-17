@@ -19,6 +19,10 @@
 
   Alt+F2 (through Alt+F6) drops into a root shell on the alternate
   VTs for diagnostics; Alt+F1 returns to bty-tui.
+
+  Remote diagnostics: sshd is up on port 22.
+      ssh root@\4      password: bty
+  (lab credential -- assumes the live env runs on a trusted segment)
 ======================================================================
 
 bty __BTY_VERSION__ on \n (\l)

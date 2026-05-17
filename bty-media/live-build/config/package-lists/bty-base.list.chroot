@@ -110,6 +110,25 @@ systemd-timesyncd
 # bty-netboot variant which doesn't pull bty-flash.
 curl
 
+# ``openssh-server`` so an operator (or a debugging session) can
+# ssh into the live env when the local console is unusable --
+# the GMKTec NUCBOX G5 boots Trixie far enough to reach
+# multi-user but bty-tui-on-tty1 didn't visibly take tty1 there,
+# and the G5's USB keyboard doesn't switch ttys via
+# Ctrl+Alt+F2 so console-side diagnosis was blocked. With sshd
+# baked in, the next PXE / USB boot answers on port 22.
+#
+# Credential: root password is set to ``bty`` by
+# hooks/normal/0800-bty-ssh-live.hook.chroot; PasswordAuthentication
+# stays on, PermitRootLogin yes. Same lab-trust model as the
+# bty-server appliance's ``bty:bty`` / ``odus:odus`` -- this is
+# the live env an operator boots themselves on bare metal in a
+# trusted segment, not a service exposed to a hostile network.
+# Every boot regenerates host keys via the standard openssh-
+# server postinst, so there is no shared-host-key problem across
+# operators downloading the same .iso.
+openssh-server
+
 # Out-of-tree Realtek r8125 DKMS driver (built into the chroot
 # kernel by hooks/normal/0600-bty-r8125-dkms.hook.chroot). The
 # in-tree ``r8169`` driver in kernel 6.13+ covers the RTL8125
