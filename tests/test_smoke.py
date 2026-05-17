@@ -373,3 +373,46 @@ def test_generate_catalog_toml_round_trips_through_catalog_load(tmp_path: Path) 
     # bty-server entry uses a plain https URL (GitHub release
     # asset); generator preserves the same shape.
     assert server_entries[0].src.startswith("https://github.com/safl/bty/releases/")
+
+
+def test_mascot_logo_is_in_sync_across_assets() -> None:
+    """The bty mascot artwork is shipped in three places:
+
+    * ``docs/src/_static/bty-mascot.png`` -- Sphinx docs site / PDF.
+    * ``src/bty/web/_static/bty-mascot.png`` -- /ui/* pages.
+    * ``bty-media/live-build/config/includes.chroot/usr/share/plymouth/themes/bty/logo.png``
+      -- plymouth splash on the live env (bty-usb + bty-netboot).
+
+    They must be byte-identical so an operator never sees a stale
+    version in one place and the current artwork in another.
+    Earlier the plymouth logo drifted (older, smaller export);
+    pin the invariant so a future asset refresh updates all three.
+    """
+    import hashlib
+
+    repo_root = Path(__file__).resolve().parents[1]
+    canonical = repo_root / "docs" / "src" / "_static" / "bty-mascot.png"
+    web_static = repo_root / "src" / "bty" / "web" / "_static" / "bty-mascot.png"
+    plymouth = (
+        repo_root
+        / "bty-media"
+        / "live-build"
+        / "config"
+        / "includes.chroot"
+        / "usr"
+        / "share"
+        / "plymouth"
+        / "themes"
+        / "bty"
+        / "logo.png"
+    )
+
+    digests = {
+        path: hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in (canonical, web_static, plymouth)
+    }
+    distinct = set(digests.values())
+    assert len(distinct) == 1, (
+        f"bty mascot drifted between asset locations: {digests!r}. "
+        f"Sync by copying {canonical} over the others."
+    )
