@@ -27,7 +27,7 @@ endif
 .DEFAULT_GOAL := help
 
 .PHONY: help \
-        deps test lint format format-check typecheck ci wheel \
+        deps test lint format format-check typecheck ci wheel tui \
         media-deps build test-pxe \
         docker-build docker-run docker-clean \
         docs-html docs-pdf docs-serve \
@@ -45,6 +45,7 @@ help:
 	@echo "  typecheck     mypy src"
 	@echo "  ci            lint + format-check + typecheck + test"
 	@echo "  wheel         uv build  -> dist/bty_lab-X.Y.Z-py3-none-any.whl + sdist"
+	@echo "  tui           launch bty-tui locally (IMAGE_ROOT=path, CATALOG=URL|default)"
 	@echo ""
 	@echo "Media (cijoe pipelines under cijoe/; require passwordless sudo):"
 	@echo "  media-deps    pipx install cijoe"
@@ -96,6 +97,31 @@ ci: lint format-check typecheck test
 
 wheel:
 	$(UV) build
+
+# Smoke-launch the TUI from a local checkout. Useful for developer
+# iteration without flashing a USB / PXE-booting a target.
+#
+#   make tui                      -- local image-root only (BTY_IMAGE_ROOT env or /tmp/bty-images)
+#   make tui CATALOG=URL          -- overlay a catalog source
+#   make tui CATALOG=default      -- shortcut for bty's release-asset catalog
+#   make tui IMAGE_ROOT=/path     -- override the image-root directory
+#
+# Sample invocations:
+#   make tui IMAGE_ROOT=/tmp/bty-images
+#   make tui CATALOG=https://github.com/safl/bty/releases/latest/download/catalog.toml
+#   make tui CATALOG=default
+.PHONY: tui
+IMAGE_ROOT ?= /tmp/bty-images
+TUI_DEFAULT_CATALOG := https://github.com/safl/bty/releases/latest/download/catalog.toml
+tui:
+	@mkdir -p $(IMAGE_ROOT)
+ifeq ($(CATALOG),default)
+	$(UV) run bty-tui --image-root $(IMAGE_ROOT) --catalog $(TUI_DEFAULT_CATALOG)
+else ifdef CATALOG
+	$(UV) run bty-tui --image-root $(IMAGE_ROOT) --catalog $(CATALOG)
+else
+	$(UV) run bty-tui --image-root $(IMAGE_ROOT)
+endif
 
 # ---------- Media (bty-media/ via cijoe) ---------------------------------
 

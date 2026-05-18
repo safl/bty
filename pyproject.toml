@@ -1,6 +1,6 @@
 [project]
 name = "bty-lab"
-version = "0.21.4"
+version = "0.22.0"
 description = "Flash images onto target disks, locally or remote with and without PXE"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -19,7 +19,15 @@ classifiers = [
 dependencies = []
 
 [project.optional-dependencies]
-tui = ["textual>=0.80"]
+# bty-tui is built on Rich (no Textual). Rich is widely deployed
+# (it powers pip's progress bars, ipython, the Python repl, ...)
+# and is fast enough on a kernel framebuffer console: per-screen
+# render is one synchronous print, not an event-loop diff cycle.
+# We migrated away from Textual in v0.22.0 after operator reports
+# of multi-minute first-paint times on slow consoles (Supermicro
+# / EPYC bring-up boxes). See the docstring of ``bty.tui._app``
+# for the design rationale.
+tui = ["rich>=13"]
 web = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
@@ -37,7 +45,7 @@ web = [
     "itsdangerous>=2.1",
 ]
 all = [
-    "textual>=0.80",
+    "rich>=13",
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
     "jinja2>=3.1",

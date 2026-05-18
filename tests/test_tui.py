@@ -366,471 +366,7 @@ def test_main_accepts_image_root_flag(monkeypatch: pytest.MonkeyPatch) -> None:
     assert captured["ran"] is True
 
 
-# ---------- end-to-end: BtyTui driven via textual's Pilot ------------------
-#
-# These run the actual textual ``App`` headless in pytest. The Pilot
-# simulates key presses; assertions look at widget state via
-# ``app.query_one(...)``. Data sources are monkeypatched on the
-# ``bty.tui._app`` module references so the app sees synthetic rows
-# without touching the real filesystem / lsblk / network.
-
-
-def _patch_data_sources(
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    images_list: list[images.Image] | None = None,
-    remote_images_list: list[images.RemoteImage] | None = None,
-    disks_list: list[dict[str, Any]] | None = None,
-    remote_catalog: list[Any] | None = None,
-    geteuid: int = 0,
-) -> None:
-    """Wire fake data into the module-level references the TUI uses.
-
-    ``images_list`` / ``disks_list`` feed the local-mode populate paths.
-    ``remote_images_list`` feeds the local-mode ``.bri`` scan.
-    ``remote_catalog`` feeds the remote-mode catalog fetch.
-    ``geteuid`` controls the read-only-vs-flashable status string.
-    """
-    monkeypatch.setattr(tui_app.os, "geteuid", lambda: geteuid)
-    monkeypatch.setattr(
-        tui_app.images,
-        "list_images",
-        lambda _root: list(images_list or []),
-    )
-    monkeypatch.setattr(
-        tui_app.images,
-        "list_remote_images",
-        lambda _root: list(remote_images_list or []),
-    )
-    monkeypatch.setattr(
-        tui_app.disks,
-        "list_disks",
-        lambda: list(disks_list or []),
-    )
-    if remote_catalog is not None:
-        monkeypatch.setattr(
-            tui_app,
-            "load_catalog_from_source",
-            lambda _source, **_kw: list(remote_catalog),
-        )
-
-
-def _spy_status(monkeypatch: pytest.MonkeyPatch) -> list[str]:
-    """Capture every ``_set_status`` call. Cleaner than poking textual
-    Static internals (the rendered-text accessor is private)."""
-    captured: list[str] = []
-    original = tui_app.BtyTui._set_status
-
-    def _capturing(self: tui_app.BtyTui, message: str) -> None:
-        captured.append(message)
-        original(self, message)
-
-    monkeypatch.setattr(tui_app.BtyTui, "_set_status", _capturing)
-    return captured
-
-
-def test_app_renders_local_panes_with_seeded_data(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Launch the app with one seeded image + one seeded disk; both
-    DataTables populate. Initial status is empty when running as
-    root (the wizard's pane labels carry the prompt instead);
-    non-root surfaces the read-only mode message instead."""
-    _patch_data_sources(
-        monkeypatch,
-        images_list=[_fake_image(name="alpha.qcow2", size=4096)],
-        disks_list=[_fake_disk(path="/dev/sda")],
-    )
-
-    app = tui_app.BtyTui(image_root=tmp_path / "images")
-
-    async def _drive() -> None:
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            from textual.widgets import DataTable
-
-            images_table = app.query_one("#images_table", DataTable)
-            disks_table = app.query_one("#disks_table", DataTable)
-            assert images_table.row_count == 1
-            assert disks_table.row_count == 1
-            # Root user: initial status is empty (no nudge text;
-            # the verbose pane border-titles carry the wizard
-            # prompts instead).
-            assert app._initial_status() == ""
-
-    _run(_drive())
-
-
-def test_app_local_mode_renders_bri_descriptors_alongside_local(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """``.bri`` descriptors in BTY_IMAGES surface as catalog rows
-    next to local images, with ``url`` populated rather than
-    ``path`` so flash dispatch can branch on origin."""
-    bri_path = tmp_path / "images" / "bty-server.bri"
-    remote = images.RemoteImage(
-        name="bty-server.img.gz",
-        url="https://example.invalid/bty-server.img.gz",
-        path=bri_path,
-        format="img.gz",
-    )
-    _patch_data_sources(
-        monkeypatch,
-        images_list=[_fake_image(name="alpha.qcow2", size=4096)],
-        remote_images_list=[remote],
-        disks_list=[_fake_disk(path="/dev/sda")],
-    )
-
-    app = tui_app.BtyTui(image_root=tmp_path / "images")
-
-    async def _drive() -> None:
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            from textual.widgets import DataTable
-
-            images_table = app.query_one("#images_table", DataTable)
-            assert images_table.row_count == 2
-            # _images_by_key should have one local + one remote entry.
-            keys = list(app._images_by_key.values())
-            urls = [k.url for k in keys]
-            paths = [k.path for k in keys]
-            assert "https://example.invalid/bty-server.img.gz" in urls
-            assert any(p is not None for p in paths)
-
-    _run(_drive())
-
-
-def test_action_install_bty_server_preselects_image_and_focuses_disks(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Pressing ``i`` pre-selects the GitHub-latest bty-server image
-    and focuses the disks pane so the next Enter commits a disk.
-    The flash flow from there is the same as any URL-backed image."""
-    _patch_data_sources(
-        monkeypatch,
-        images_list=[],
-        disks_list=[_fake_disk(path="/dev/sda")],
-    )
-
-    app = tui_app.BtyTui(image_root=tmp_path / "images")
-
-    async def _drive() -> None:
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            await pilot.press("i")
-            await pilot.pause()
-            from textual.widgets import DataTable
-
-            selected = app._selected_image
-            assert selected is not None
-            assert selected.url == tui_app._BTY_SERVER_LATEST_URL
-            assert selected.name == tui_app._BTY_SERVER_LATEST_NAME
-            assert app.focused is not None
-            assert app.focused.id == "disks_table"
-            # Disks table still populated -- next Enter commits.
-            disks_table = app.query_one("#disks_table", DataTable)
-            assert disks_table.row_count == 1
-
-    _run(_drive())
-
-
-def test_app_shows_no_images_message_when_local_root_is_empty(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Empty image root -> ``_set_status`` is called with the
-    "No images at <path>. See screen for how to add some." message
-    during the initial populate; the welcome panel carries the
-    actionable detail."""
-    statuses = _spy_status(monkeypatch)
-    _patch_data_sources(monkeypatch, images_list=[], disks_list=[_fake_disk()])
-
-    app = tui_app.BtyTui(image_root=tmp_path / "empty")
-
-    async def _drive() -> None:
-        async with app.run_test() as pilot:
-            await pilot.pause()
-
-    _run(_drive())
-    assert any("No images at" in s and "how to add some" in s for s in statuses)
-
-
-def test_app_refresh_action_repopulates(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Pressing ``r`` re-runs the populate path. First call returns an
-    empty list, second call returns one image; after the keypress the
-    images table has the new row and ``Refreshed.`` shows in status."""
-    statuses = _spy_status(monkeypatch)
-    images_returns = [
-        [],  # first populate (on mount)
-        [_fake_image()],  # second populate (after R)
-    ]
-    call_count = 0
-
-    def _list_images(_root: Path) -> list[images.Image]:
-        nonlocal call_count
-        call_count += 1
-        return images_returns.pop(0) if images_returns else []
-
-    monkeypatch.setattr(tui_app.os, "geteuid", lambda: 0)
-    monkeypatch.setattr(tui_app.images, "list_images", _list_images)
-    monkeypatch.setattr(tui_app.disks, "list_disks", lambda: [_fake_disk()])
-
-    app = tui_app.BtyTui(image_root=tmp_path / "images")
-
-    async def _drive() -> None:
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            from textual.widgets import DataTable
-
-            images_table = app.query_one("#images_table", DataTable)
-            assert images_table.row_count == 0  # initial: empty
-
-            await pilot.press("r")
-            await pilot.pause()
-
-            assert images_table.row_count == 1  # second populate landed
-
-    _run(_drive())
-    assert call_count == 2  # populate ran on mount + on refresh
-    assert any("Refreshed" in s for s in statuses)
-
-
-def test_app_non_root_status_says_read_only(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Without root (geteuid != 0), ``_initial_status`` returns the
-    read-only message so the operator knows ``F`` won't work."""
-    _patch_data_sources(
-        monkeypatch,
-        images_list=[_fake_image()],
-        disks_list=[_fake_disk()],
-        geteuid=1000,
-    )
-
-    app = tui_app.BtyTui(image_root=tmp_path / "images")
-
-    async def _drive() -> None:
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            assert "Read-only mode" in app._initial_status()
-
-    _run(_drive())
-
-
-def test_app_catalog_source_overlays_local_scan(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """``--catalog URL`` runs alongside the local image-root scan and
-    surfaces its entries in the catalog table. With an empty local
-    image_root, only the catalog rows appear."""
-    remote_rows = [
-        tui_app._TuiImage(
-            name="remote.img.zst",
-            fmt="img.zst",
-            size_bytes=8192,
-            url="http://server:8080/images/remote.img.zst",
-        )
-    ]
-    _patch_data_sources(
-        monkeypatch,
-        disks_list=[_fake_disk()],
-        remote_catalog=remote_rows,
-    )
-
-    app = tui_app.BtyTui(catalog_source="http://server:8080/catalog.toml")
-
-    async def _drive() -> None:
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            from textual.widgets import DataTable
-
-            images_table = app.query_one("#images_table", DataTable)
-            assert images_table.row_count == 1
-            # The catalog entry's src is the row key (used to drive the
-            # URL flash path in action_flash); confirm round-trip.
-            row = next(iter(app._images_by_key.values()))
-            assert row.url == "http://server:8080/images/remote.img.zst"
-            assert row.path is None  # catalog rows never carry a local path
-
-    _run(_drive())
-
-
-def test_app_catalog_source_oras_failure_does_not_freeze_tui(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """ORAS catalog fetch failure must surface in the status line and
-    let the TUI keep running -- not propagate an unhandled
-    :class:`OrasError` past Textual's event handler (which leaves
-    the bottom-line error displayed but the event loop in a
-    half-broken state, preventing Esc/q exit). Regression for the
-    "TUI freezes after oras token fetch failed" hardware-test
-    report.
-
-    Drives :func:`load_catalog_from_source` to raise the same
-    :class:`OrasError` that ``oras token fetch failed`` produces;
-    asserts the TUI mounts cleanly, renders local rows, and an
-    error status was set."""
-    from bty import oras as _oras_module
-
-    _patch_data_sources(
-        monkeypatch,
-        images_list=[_fake_image(name="local.qcow2", size=4096)],
-        disks_list=[_fake_disk()],
-    )
-
-    def _raise_oras_error(_source: str, **_kw: object) -> list[tui_app._TuiImage]:
-        raise _oras_module.OrasError(
-            "oras token fetch failed for ghcr.io/safl/nosi/ubuntu-sysdev: "
-            "<urlopen error [Errno 101] Network is unreachable>"
-        )
-
-    monkeypatch.setattr(tui_app, "load_catalog_from_source", _raise_oras_error)
-    statuses = _spy_status(monkeypatch)
-
-    app = tui_app.BtyTui(catalog_source="oras://ghcr.io/safl/nosi/ubuntu-sysdev:latest")
-
-    async def _drive() -> None:
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            from textual.widgets import DataTable
-
-            # Local row still rendered -- catalog failure didn't take
-            # down the whole populate.
-            images_table = app.query_one("#images_table", DataTable)
-            assert images_table.row_count == 1
-            # Some flavour of catalog-error message landed in the
-            # status line. Match loosely (the exact wording is
-            # operator-facing copy; pinning it forces test churn).
-            assert any("oras" in s.lower() or "catalog" in s.lower() for s in statuses), (
-                f"expected an oras/catalog error in status; got {statuses}"
-            )
-
-    _run(_drive())
-
-
-def test_app_shows_fetching_status_when_catalog_worker_spawns(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Spawning the background catalog worker must surface a
-    ``Fetching catalog from ...`` status so the operator knows
-    something is happening. Without it, the local-only view
-    renders immediately with no signal that more rows may be on
-    the way -- confusing on slow networks where the worker can
-    take many seconds.
-
-    Drive a slow loader (blocks on a thread Event), assert the
-    fetching status appears between mount and worker completion.
-    """
-    import threading
-
-    _patch_data_sources(
-        monkeypatch,
-        images_list=[_fake_image(name="local.qcow2", size=4096)],
-        disks_list=[_fake_disk()],
-    )
-
-    release = threading.Event()
-    catalog_rows = [
-        tui_app._TuiImage(
-            name="catalog-row.img.gz",
-            fmt="img.gz",
-            size_bytes=12345,
-            url="http://example/catalog-row.img.gz",
-        )
-    ]
-
-    def _slow_loader(_source: str, **_kw: object) -> list[tui_app._TuiImage]:
-        # Block until the test explicitly releases us; lets the
-        # test observe the in-flight state.
-        release.wait(timeout=5.0)
-        return list(catalog_rows)
-
-    monkeypatch.setattr(tui_app, "load_catalog_from_source", _slow_loader)
-    statuses = _spy_status(monkeypatch)
-
-    app = tui_app.BtyTui(catalog_source="https://example/catalog.toml")
-
-    async def _drive() -> None:
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            # While the worker is in-flight, the fetching status
-            # must have been set at least once.
-            assert any("Fetching catalog" in s for s in statuses), (
-                f"expected 'Fetching catalog ...' in statuses; got {statuses}"
-            )
-            # Release the worker so the test doesn't hang on
-            # threading.Event.wait().
-            release.set()
-            await pilot.pause()
-
-    _run(_drive())
-
-
-def test_action_refresh_retries_catalog_after_earlier_failure(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Regression for: TUI catalog fetch fails (network down), TUI
-    caches the failure as an empty list, operator plugs in a USB
-    ethernet dongle, connectivity returns, operator presses ``r``
-    -- and nothing happens because ``_cached_remote_catalog`` is
-    still ``[]`` (not ``None``), so ``_load_images`` short-circuits.
-
-    Drive the catalog loader through one failed and one successful
-    call; press ``r`` between them; assert the second populate
-    surfaces the now-reachable catalog rows."""
-    from bty import oras as _oras_module
-
-    _patch_data_sources(
-        monkeypatch,
-        images_list=[_fake_image(name="local.qcow2", size=4096)],
-        disks_list=[_fake_disk()],
-    )
-
-    call_count = {"n": 0}
-    success_rows = [
-        tui_app._TuiImage(
-            name="catalog-row.img.gz",
-            fmt="img.gz",
-            size_bytes=12345,
-            url="oras://ghcr.io/safl/nosi/ubuntu-sysdev@sha256:deadbeef",
-        )
-    ]
-
-    def _flaky_loader(_source: str, **_kw: object) -> list[tui_app._TuiImage]:
-        call_count["n"] += 1
-        if call_count["n"] == 1:
-            raise _oras_module.OrasError(
-                "oras token fetch failed for ghcr.io/safl/nosi/ubuntu-sysdev: "
-                "<urlopen error [Errno 101] Network is unreachable>"
-            )
-        return list(success_rows)
-
-    monkeypatch.setattr(tui_app, "load_catalog_from_source", _flaky_loader)
-
-    app = tui_app.BtyTui(catalog_source="oras://ghcr.io/safl/nosi/ubuntu-sysdev:latest")
-
-    async def _drive() -> None:
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            from textual.widgets import DataTable
-
-            images_table = app.query_one("#images_table", DataTable)
-            # First populate: local row only (catalog fetch failed,
-            # cached as empty list).
-            assert images_table.row_count == 1
-            assert call_count["n"] == 1
-            # Press ``r``. Should bust the cache and re-fetch -- the
-            # second call returns the catalog row this time.
-            await pilot.press("r")
-            await pilot.pause()
-            assert call_count["n"] == 2, (
-                f"refresh should bust the cache and re-fetch; call_count={call_count['n']!r}"
-            )
-            assert images_table.row_count == 2, (
-                f"local + freshly-fetched catalog row expected after refresh; "
-                f"got row_count={images_table.row_count}"
-            )
-
-    _run(_drive())
+# ---------- type-level cross-cutting ---------------------------------------
 
 
 def test_oras_error_is_an_os_error() -> None:
@@ -850,815 +386,298 @@ def test_oras_error_is_an_os_error() -> None:
 
 
 # --------------------------------------------------------------------------
-# TUI polish (theme, filter, welcome panel, details pane, flash modal)
+# Wizard state machine: _State.stage() + _State.back()
 # --------------------------------------------------------------------------
 
 
-def test_app_uses_tokyo_night_theme(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The app picks Tokyo Night on mount (matches the bty mascot's
-    navy + warm-yellow palette)."""
-    _patch_data_sources(
-        monkeypatch,
-        images_list=[_fake_image()],
-        disks_list=[_fake_disk()],
-    )
-
-    app = tui_app.BtyTui(image_root=tmp_path / "images")
-
-    async def _drive() -> None:
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            assert app.theme == "tokyo-night"
-
-    _run(_drive())
-
-
-def test_app_welcome_panel_has_local_onboarding_text_when_empty(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Empty local catalog -> welcome Static is populated with
-    local-mode onboarding (BTY_IMAGES partition guidance)."""
-    _patch_data_sources(monkeypatch, images_list=[], disks_list=[_fake_disk()])
-
-    app = tui_app.BtyTui(image_root=tmp_path / "empty")
-
-    async def _drive() -> None:
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            from textual.widgets import Static
-
-            welcome = app.query_one("#welcome", Static)
-            text_str = str(welcome.content)
-            # Local-mode markers: BTY_IMAGES partition + image-root path
-            assert "BTY_IMAGES" in text_str
-            assert str(tmp_path / "empty") in text_str
-
-    _run(_drive())
-
-
-def test_app_welcome_panel_has_remote_onboarding_text_when_empty(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Empty catalog source -> welcome Static is populated with the
-    catalog-source onboarding (catalog URL plus the local-root
-    fallback line, and the bty-server install hint)."""
-    _patch_data_sources(monkeypatch, disks_list=[_fake_disk()], remote_catalog=[])
-
-    app = tui_app.BtyTui(catalog_source="http://server:8080/catalog.toml")
-
-    async def _drive() -> None:
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            from textual.widgets import Static
-
-            welcome = app.query_one("#welcome", Static)
-            text_str = str(welcome.content)
-            # The configured catalog source URL must be visible.
-            assert "http://server:8080/catalog.toml" in text_str
-            # Operator still gets the "install bty-server" hint.
-            assert "Install bty-server" in text_str
-
-    _run(_drive())
-
-
-def test_app_welcome_panel_clears_when_catalog_populated(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Non-empty catalog -> welcome Static is cleared so the panel
-    collapses and the table fills the space."""
-    _patch_data_sources(
-        monkeypatch,
-        images_list=[_fake_image()],
-        disks_list=[_fake_disk()],
-    )
-
-    app = tui_app.BtyTui(image_root=tmp_path / "images")
-
-    async def _drive() -> None:
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            from textual.widgets import Static
-
-            welcome = app.query_one("#welcome", Static)
-            text_str = str(welcome.content)
-            assert text_str == ""
-
-    _run(_drive())
-
-
-def test_app_filter_action_focuses_input(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """``/`` makes the filter Input visible + focused so the operator
-    can type a substring. Pressing it from the table (initial focus)
-    should not type ``/`` into the table."""
-    _patch_data_sources(
-        monkeypatch,
-        images_list=[_fake_image()],
-        disks_list=[_fake_disk()],
-    )
-
-    app = tui_app.BtyTui(image_root=tmp_path / "images")
-
-    async def _drive() -> None:
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            from textual.widgets import Input
-
-            await pilot.press("slash")
-            await pilot.pause()
-            filter_input = app.query_one("#filter-input", Input)
-            assert filter_input.has_class("active")
-            assert filter_input.has_focus
-
-    _run(_drive())
-
-
-def test_app_filter_narrows_catalog_to_matching_substring(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Submitting the filter Input narrows the images table to rows
-    whose name contains the substring (case-insensitive). Other
-    rows go away; non-matching filter -> empty table."""
-    _patch_data_sources(
-        monkeypatch,
-        images_list=[
-            _fake_image(name="alpha.qcow2"),
-            _fake_image(name="beta.img.zst"),
-            _fake_image(name="gamma.qcow2"),
-        ],
-        disks_list=[_fake_disk()],
-    )
-
-    app = tui_app.BtyTui(image_root=tmp_path / "images")
-
-    async def _drive() -> None:
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            from textual.widgets import DataTable, Input
-
-            images_table = app.query_one("#images_table", DataTable)
-            assert images_table.row_count == 3  # all three pre-filter
-
-            # Apply the filter via the Input's value (instead of
-            # typing each character through pilot, which is slow and
-            # easy to fight focus on).
-            filter_input = app.query_one("#filter-input", Input)
-            filter_input.value = "qcow2"
-            # Trigger the submitted handler the way Enter does.
-            app._filter = "qcow2"
-            app._populate_images()
-            await pilot.pause()
-            assert images_table.row_count == 2  # alpha + gamma match qcow2
-
-    _run(_drive())
-
-
-def test_app_filter_escape_clears_and_repopulates(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """``escape`` clears the active filter, re-populates the catalog,
-    and emits a ``Filter cleared.`` status."""
-    _patch_data_sources(
-        monkeypatch,
-        images_list=[
-            _fake_image(name="alpha.qcow2"),
-            _fake_image(name="beta.img.zst"),
-        ],
-        disks_list=[_fake_disk()],
-    )
-    statuses = _spy_status(monkeypatch)
-
-    app = tui_app.BtyTui(image_root=tmp_path / "images")
-
-    async def _drive() -> None:
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            from textual.widgets import DataTable
-
-            # Apply a filter that excludes ``beta``
-            app._filter = "alpha"
-            app._populate_images()
-            await pilot.pause()
-            images_table = app.query_one("#images_table", DataTable)
-            assert images_table.row_count == 1
-
-            # escape should clear the filter
-            await pilot.press("escape")
-            await pilot.pause()
-            assert app._filter == ""
-            assert images_table.row_count == 2  # both rows back
-            assert any("Filter cleared" in s for s in statuses)
-
-    _run(_drive())
-
-
-def test_app_no_details_pane(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The layout has no Details pane -- the two interactive panes
-    (Images / Disks) take the horizontal room. Verify the layout
-    does not mount a ``#details-pane`` / ``#details-body`` so a
-    regression re-introducing duplicated table-vs-body rendering
-    surfaces immediately.
+def test_state_stage_advances_with_each_commit() -> None:
+    """``_State.stage()`` is derived from selection state. Empty state
+    is Stage 1; setting selected_image -> Stage 2; setting both ->
+    Stage 3; post_flash flag -> Stage 4.
     """
-    _patch_data_sources(
-        monkeypatch,
-        images_list=[_fake_image()],
-        disks_list=[_fake_disk()],
-    )
-    app = tui_app.BtyTui(image_root=tmp_path / "images")
+    s = tui_app._State(image_root=Path("/tmp"))
+    assert s.stage() is tui_app._WizardStage.SELECT_IMAGE
 
-    async def _drive() -> None:
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            assert not app.query("#details-pane")
-            assert not app.query("#details-body")
+    s.selected_image = tui_app._TuiImage(name="x", fmt="img.gz", size_bytes=0, url="http://x")
+    assert s.stage() is tui_app._WizardStage.SELECT_DISK
 
-    _run(_drive())
+    s.selected_disk = {"path": "/dev/sda"}
+    assert s.stage() is tui_app._WizardStage.CONFIRM_FLASH
+
+    s.post_flash = True
+    assert s.stage() is tui_app._WizardStage.REBOOT_OR_DONE
 
 
-# --------------------------------------------------------------------------
-# FlashStatusScreen stage tracker
-# --------------------------------------------------------------------------
-
-
-def _fake_flash_plan() -> tui_app.flash.FlashPlan:
-    """Synthesize a minimal FlashPlan for FlashStatusScreen tests.
-
-    The plan's content doesn't matter; we mock ``flash.execute_plan``
-    so it never actually touches the disk.
+def test_state_back_clears_one_commit_at_a_time() -> None:
+    """``_State.back()`` drops the most-recent commit. Post-flash
+    back goes to Stage 2 (same image, pick another disk); further
+    back clears image; further back is a no-op (already at top).
     """
-    image = tui_app.flash.ImageInfo(
-        path=Path("/fake/images/demo.qcow2"),
-        format="qcow2",
-        size_bytes=1024,
-        virtual_size_bytes=2048,
-    )
-    target = tui_app.flash.TargetInfo(
-        path=Path("/dev/sdz"),
-        exists=True,
-        is_block_device=True,
-        size_bytes=8192,
-        mountpoints=[],
-    )
-    return tui_app.flash.FlashPlan(image=image, target=target)
+    s = tui_app._State(image_root=Path("/tmp"))
+    s.selected_image = tui_app._TuiImage(name="x", fmt="img.gz", size_bytes=0, url="http://x")
+    s.selected_disk = {"path": "/dev/sda"}
+    s.post_flash = True
+
+    s.back()  # Stage 4 -> Stage 2 (keep image, clear disk + post_flash)
+    assert s.stage() is tui_app._WizardStage.SELECT_DISK
+    assert s.selected_image is not None
+    assert s.selected_disk is None
+    assert s.post_flash is False
+
+    s.selected_disk = {"path": "/dev/sda"}
+    s.back()  # Stage 3 -> Stage 2 (clear disk)
+    assert s.stage() is tui_app._WizardStage.SELECT_DISK
+    assert s.selected_disk is None
+
+    s.back()  # Stage 2 -> Stage 1 (clear image)
+    assert s.stage() is tui_app._WizardStage.SELECT_IMAGE
+    assert s.selected_image is None
+
+    s.back()  # Stage 1 -> no-op
+    assert s.stage() is tui_app._WizardStage.SELECT_IMAGE
 
 
-def test_flash_status_screen_ticks_stages_on_success(
+# --------------------------------------------------------------------------
+# Index parsing: numeric prompt -> list index
+# --------------------------------------------------------------------------
+
+
+def test_parse_index_handles_valid_and_invalid_input(tmp_path: Path) -> None:
+    """``_parse_index`` returns 0-based index for a valid 1-based
+    numeric choice within ``[1, n]``; returns ``None`` otherwise
+    (empty, non-numeric, out of range).
+    """
+    app = tui_app.BtyTui(image_root=tmp_path)
+    assert app._parse_index("1", 3) == 0
+    assert app._parse_index("3", 3) == 2
+    assert app._parse_index("4", 3) is None
+    assert app._parse_index("0", 3) is None
+    assert app._parse_index("", 3) is None
+    assert app._parse_index("q", 3) is None
+    assert app._parse_index("1.5", 3) is None
+    assert app._parse_index("-1", 3) is None
+
+
+# --------------------------------------------------------------------------
+# Refresh paths: local + remote catalog blending
+# --------------------------------------------------------------------------
+
+
+def test_refresh_images_blends_local_and_remote(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """As ``flash.execute_plan`` emits each lifecycle event the stage
-    tracker advances: prior stages get ``done``, the active one gets
-    ``active``. After completion all five stages (started, writing,
-    synced, partprobed, done) are marked ``done``."""
-    _patch_data_sources(
-        monkeypatch,
-        images_list=[_fake_image()],
-        disks_list=[_fake_disk()],
+    """``_refresh_images`` combines the local image-root scan and
+    the optional ``--catalog`` overlay. Both feeds end up on
+    ``_state._images``.
+    """
+    monkeypatch.setattr(
+        tui_app,
+        "_list_local_images",
+        lambda _root: [
+            tui_app._TuiImage(
+                name="local.img.gz",
+                fmt="img.gz",
+                size_bytes=1024,
+                path=tmp_path / "local.img.gz",
+            )
+        ],
     )
+    monkeypatch.setattr(
+        tui_app,
+        "load_catalog_from_source",
+        lambda _src, **_kw: [
+            tui_app._TuiImage(
+                name="remote (rolling)",
+                fmt="img.gz",
+                size_bytes=2048,
+                url="https://example.invalid/remote.img.gz",
+            )
+        ],
+    )
+    app = tui_app.BtyTui(image_root=tmp_path, catalog_source="https://example.invalid/catalog.toml")
+    app._refresh_images()
+    names = [i.name for i in app._state._images]
+    assert "local.img.gz" in names
+    assert "remote (rolling)" in names
+    assert app._catalog_load_error is None
 
-    def _fake_execute_plan(plan: Any, progress: Any = None, cancel: Any = None) -> None:
-        # Walk through the four lifecycle events the screen renders
-        # as stages (the fifth, ``done``, is ticked by the screen
-        # itself after execute_plan returns).
-        if progress is None:
-            return
-        for ev in ("started", "writing", "synced", "partprobed"):
-            progress(tui_app.flash.FlashProgress(event=ev))
 
-    monkeypatch.setattr(tui_app.flash, "execute_plan", _fake_execute_plan)
+def test_refresh_images_surfaces_catalog_load_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failed catalog fetch (URL unreachable, bad TOML, oras
+    miss) must NOT abort the TUI -- it sets
+    ``_catalog_load_error`` and the next screen render shows a
+    soft banner.
+    """
+    monkeypatch.setattr(tui_app, "_list_local_images", lambda _root: [])
 
-    plan = _fake_flash_plan()
-    app = tui_app.BtyTui(image_root=tmp_path / "images")
+    def _boom(_src, **_kw):
+        raise urllib.error.URLError("simulated network failure")
 
-    async def _drive() -> None:
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            from textual.widgets import Button, Static
+    monkeypatch.setattr(tui_app, "load_catalog_from_source", _boom)
+    app = tui_app.BtyTui(image_root=tmp_path, catalog_source="https://example.invalid/catalog.toml")
+    app._refresh_images()
+    assert app._state._images == []
+    assert app._catalog_load_error is not None
+    assert "URLError" in app._catalog_load_error
 
-            screen = tui_app.FlashStatusScreen(plan)
-            app.push_screen(screen)
-            # Drain the worker thread + queued call_from_thread updates.
-            for _ in range(20):
-                await pilot.pause()
 
-            # All five stages should be done.
-            for ev_name, _ in tui_app.FlashStatusScreen._STAGES:
-                widget = screen.query_one(f"#stage-{ev_name}", Static)
-                assert "done" in widget.classes, (
-                    f"stage {ev_name} not marked done: classes={widget.classes}"
+# --------------------------------------------------------------------------
+# Rendering smoke tests: tables don't crash on various input shapes
+# --------------------------------------------------------------------------
+
+
+def test_print_image_table_handles_empty_and_partial_rows(
+    tmp_path: Path,
+) -> None:
+    """``_print_image_table`` must render cleanly on rows with
+    missing fmt / size_bytes. The framebuffer console renders
+    ``?`` placeholders; the test just confirms no exceptions.
+    """
+    app = tui_app.BtyTui(image_root=tmp_path)
+    app._print_image_table(
+        [
+            tui_app._TuiImage(name="complete.img.gz", fmt="img.gz", size_bytes=1024, path=tmp_path),
+            tui_app._TuiImage(name="missing-fmt", fmt=None, size_bytes=0, url="http://x"),
+        ]
+    )  # no raise
+
+
+def test_print_disk_table_handles_partial_rows(tmp_path: Path) -> None:
+    """``_print_disk_table`` must render even when lsblk omits
+    optional fields (vendor / model / serial). Crashing here used
+    to be the v0.19.x "TUI freezes after lsblk reports a sparse
+    row" class of bug.
+    """
+    app = tui_app.BtyTui(image_root=tmp_path)
+    app._print_disk_table(
+        [
+            {"path": "/dev/sda", "size": "500G"},  # minimal: just path + size
+            {"name": "nvme0n1", "size": "1T", "model": "Samsung 980", "serial": "S1"},
+        ]
+    )  # no raise
+
+
+# --------------------------------------------------------------------------
+# Format-progress helper
+# --------------------------------------------------------------------------
+
+
+def test_format_progress_bytes_handles_unknowns() -> None:
+    """``_format_progress_bytes`` renders ``?`` for None inputs so
+    a flash whose total isn't yet known doesn't crash the live
+    progress callback.
+    """
+    assert tui_app._format_progress_bytes(0, 1 << 20) == "0.0 MiB / 1.0 MiB"
+    assert tui_app._format_progress_bytes(None, 1 << 20) == "? / 1.0 MiB"
+    assert tui_app._format_progress_bytes(1 << 20, None) == "1.0 MiB / ?"
+    assert tui_app._format_progress_bytes(None, None) == "? / ?"
+
+
+# --------------------------------------------------------------------------
+# Flash plumbing: progress callback receives flash.FlashProgress events
+# --------------------------------------------------------------------------
+
+
+def test_screen_flash_running_drives_callback_and_sets_post_flash(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``_screen_flash_running`` runs ``flash.execute_plan`` in a
+    thread, joins, and flips ``_state.post_flash = True`` on
+    success. The progress callback is invoked synchronously from
+    the flash thread; we stub execute_plan to emit a small
+    sequence of events + return cleanly.
+    """
+    captured_events: list[str] = []
+
+    def _fake_execute(plan, *, progress=None, cancel=None):
+        if progress is not None:
+            progress(tui_app.flash.FlashProgress(event="started", total_bytes=1024))
+            captured_events.append("started")
+            progress(tui_app.flash.FlashProgress(event="writing", note="img.gz"))
+            captured_events.append("writing")
+            progress(
+                tui_app.flash.FlashProgress(
+                    event="writing_progress", total_bytes=1024, bytes_written=1024
                 )
+            )
+            captured_events.append("writing_progress")
+            progress(tui_app.flash.FlashProgress(event="synced"))
+            progress(tui_app.flash.FlashProgress(event="partprobed"))
+            progress(tui_app.flash.FlashProgress(event="done"))
 
-            # Close button is now enabled (worker reported success).
-            close_btn = screen.query_one("#close", Button)
-            assert close_btn.disabled is False
-
-    _run(_drive())
-
-
-def test_flash_status_screen_cancel_button_sets_event_and_dismisses_cancelled(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Pressing the Cancel button (or Esc) sets the screen's
-    ``threading.Event``, which the flash worker passes to
-    ``execute_plan`` as the ``cancel`` callback. The worker's fake
-    ``execute_plan`` then raises ``FlashCancelled`` and the screen
-    settles into the "cancelled" state with Close enabled."""
-    _patch_data_sources(
-        monkeypatch,
-        images_list=[_fake_image()],
-        disks_list=[_fake_disk()],
+    monkeypatch.setattr(tui_app.flash, "execute_plan", _fake_execute)
+    # Stub post_pxe_done so the test doesn't try to reach the network.
+    monkeypatch.setattr(
+        tui_app,
+        "post_pxe_done",
+        lambda *_a, **_kw: None,
     )
 
-    fake_execute_started = asyncio.Event()
+    app = tui_app.BtyTui(image_root=tmp_path)
+    app._state.selected_image = tui_app._TuiImage(
+        name="x", fmt="img.gz", size_bytes=0, url="http://x"
+    )
+    app._state.selected_disk = {"path": "/dev/null"}
 
-    def _fake_execute_plan(plan: Any, progress: Any = None, cancel: Any = None) -> None:
-        # Signal the test that the worker is running, then loop
-        # polling cancel until it goes True (mirrors the watchdog
-        # behaviour in the real flash code).
-        import time as _time
+    plan = tui_app.flash.FlashPlan(
+        image=tui_app.flash.ImageInfo(
+            path=None,
+            url="http://x",
+            format="img.gz",
+            size_bytes=1024,
+            virtual_size_bytes=1024,
+        ),
+        target=tui_app.flash.TargetInfo(
+            path=Path("/dev/null"),
+            size_bytes=10 * 1024 * 1024,
+            exists=True,
+            is_block_device=True,
+            mountpoints=[],
+        ),
+    )
+    app._screen_flash_running(plan)
 
+    assert "started" in captured_events
+    assert "writing_progress" in captured_events
+    assert app._state.post_flash is True
+
+
+def test_screen_flash_running_does_not_advance_on_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression: a flash that raises ``FlashError`` must NOT
+    flip ``post_flash`` -- the operator stays on Stage 3 and
+    sees the failure panel.
+    """
+
+    def _fake_execute(plan, *, progress=None, cancel=None):
         if progress is not None:
             progress(tui_app.flash.FlashProgress(event="started"))
-            progress(tui_app.flash.FlashProgress(event="writing"))
-        # call_from_thread isn't available here (we're in the test
-        # thread, not the worker thread the screen would spawn for
-        # call_from_thread to reach); just set a plain event.
-        fake_execute_started.set()
-        for _ in range(50):  # ~5s safety bound
-            if cancel is not None and cancel():
-                raise tui_app.flash.FlashCancelled("flash cancelled by operator")
-            _time.sleep(0.1)
-        raise AssertionError("cancel callback never returned True")
+        raise tui_app.flash.FlashError("simulated dd failure")
 
-    monkeypatch.setattr(tui_app.flash, "execute_plan", _fake_execute_plan)
+    monkeypatch.setattr(tui_app.flash, "execute_plan", _fake_execute)
+    monkeypatch.setattr(tui_app, "post_pxe_done", lambda *_a, **_kw: None)
 
-    plan = _fake_flash_plan()
-    app = tui_app.BtyTui(image_root=tmp_path / "images")
-
-    async def _drive() -> None:
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            from textual.widgets import Button
-
-            screen = tui_app.FlashStatusScreen(plan)
-            app.push_screen(screen)
-            # Let the worker thread start.
-            for _ in range(40):
-                await pilot.pause()
-                if fake_execute_started.is_set():
-                    break
-            assert fake_execute_started.is_set(), "worker never ran"
-
-            # Press Esc -- exercises the same ``action_cancel_flash``
-            # path as the Cancel button. Picking Esc over a direct
-            # ``pilot.click(cancel_btn)`` because the textual pilot's
-            # bounds check (textual 8.x on cpython 3.14.5+ in CI)
-            # rejects clicks outside the default 80x24 harness
-            # screen, and the FlashStatusScreen's 30-row layout
-            # pushes the action-bar buttons just past row 24. The
-            # binding test covers the same flow without depending
-            # on harness-default geometry.
-            await pilot.press("escape")
-            for _ in range(40):
-                await pilot.pause()
-                # ``_result`` flips to "cancelled" once the worker
-                # raises FlashCancelled and ``_finish`` runs.
-                if screen._result is not None:
-                    break
-            assert screen._result == "cancelled", f"expected cancelled, got {screen._result!r}"
-            # Close button is now enabled; Cancel button is now disabled.
-            cancel_btn = screen.query_one("#cancel-flash", Button)
-            close_btn = screen.query_one("#close", Button)
-            assert close_btn.disabled is False
-            assert cancel_btn.disabled is True
-
-    _run(_drive())
-
-
-def test_flash_status_screen_marks_failed_stage_on_FlashError(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """When ``flash.execute_plan`` raises a ``FlashError`` partway
-    through, the currently-active stage is marked ``failed`` (not
-    done) and the close button enables so the operator can dismiss."""
-    _patch_data_sources(
-        monkeypatch,
-        images_list=[_fake_image()],
-        disks_list=[_fake_disk()],
+    app = tui_app.BtyTui(image_root=tmp_path)
+    plan = tui_app.flash.FlashPlan(
+        image=tui_app.flash.ImageInfo(
+            path=None,
+            url="http://x",
+            format="img.gz",
+            size_bytes=1024,
+            virtual_size_bytes=1024,
+        ),
+        target=tui_app.flash.TargetInfo(
+            path=Path("/dev/null"),
+            size_bytes=10 * 1024 * 1024,
+            exists=True,
+            is_block_device=True,
+            mountpoints=[],
+        ),
     )
-
-    def _fake_execute_plan(plan: Any, progress: Any = None, cancel: Any = None) -> None:
-        if progress is not None:
-            progress(tui_app.flash.FlashProgress(event="started"))
-            progress(tui_app.flash.FlashProgress(event="writing"))
-        raise tui_app.flash.FlashError("boom: simulated write failure")
-
-    monkeypatch.setattr(tui_app.flash, "execute_plan", _fake_execute_plan)
-
-    plan = _fake_flash_plan()
-    app = tui_app.BtyTui(image_root=tmp_path / "images")
-
-    async def _drive() -> None:
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            from textual.widgets import Button, Static
-
-            screen = tui_app.FlashStatusScreen(plan)
-            app.push_screen(screen)
-            for _ in range(20):
-                await pilot.pause()
-
-            # ``writing`` was active when the failure landed; expect
-            # it marked ``failed``. Earlier ``started`` is ``done``;
-            # later stages are still ``pending``.
-            started = screen.query_one("#stage-started", Static)
-            writing = screen.query_one("#stage-writing", Static)
-            synced = screen.query_one("#stage-synced", Static)
-            assert "done" in started.classes
-            assert "failed" in writing.classes
-            assert "pending" in synced.classes
-
-            close_btn = screen.query_one("#close", Button)
-            assert close_btn.disabled is False  # enabled to let operator dismiss
-
-    _run(_drive())
-
-
-def test_action_flash_pushes_confirm_modal_without_crashing(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Pressing ``f`` with an image + disk in the catalogs pushes the
-    FlashConfirmScreen modal without raising.
-
-    Regression guard for the ``@work`` decorator contract:
-    ``action_flash`` calls ``push_screen_wait`` which Textual 8.x
-    rejects outside a worker context with "screen must be from a
-    worker when wait_for_dismiss is True". The existing
-    ``FlashStatusScreen`` tests instantiate that screen directly
-    via ``app.push_screen(...)`` and never go through
-    ``action_flash``, so the binding path needs its own coverage.
-
-    This test drives the binding via Pilot.press("f") and asserts
-    that within a few event-loop turns the FlashConfirmScreen is on
-    the screen stack. If a future change drops or misconfigures the
-    ``@work`` decorator on ``action_flash``, this test surfaces it.
-    """
-    _patch_data_sources(
-        monkeypatch,
-        images_list=[_fake_image(name="probe-test.qcow2")],
-        disks_list=[_fake_disk()],
-    )
-
-    # ``action_flash`` calls ``flash.probe_image`` (real qcow2 read)
-    # and ``flash.probe_target`` (real block-device introspection);
-    # stub both so the test runs without the synthetic paths
-    # needing to exist.
-    plan = _fake_flash_plan()
-    monkeypatch.setattr(tui_app.flash, "probe_image", lambda _path: plan.image)
-    monkeypatch.setattr(tui_app.flash, "probe_target", lambda _path: plan.target)
-
-    app = tui_app.BtyTui(image_root=tmp_path / "images")
-
-    async def _drive() -> None:
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            await pilot.press("f")
-            # The worker spins up, builds the plan, calls
-            # ``push_screen_wait``. A few pause turns let the worker
-            # run far enough for the modal to mount.
-            for _ in range(20):
-                await pilot.pause()
-            # Two scenarios both prove the worker context is right:
-            # the modal is on top, OR the worker already finished and
-            # the screen stack is back to the main screen. The bug
-            # we're guarding against would have raised ScreenStackError
-            # before either of those states could be reached -- the
-            # ``run_test`` context manager would propagate the exception.
-            top = app.screen
-            assert isinstance(top, (tui_app.FlashConfirmScreen, type(top))), (
-                f"unexpected screen on stack: {type(top).__name__}"
-            )
-            # If the modal is up, dismiss it cleanly so the worker
-            # finishes and the test exits without hanging.
-            if isinstance(top, tui_app.FlashConfirmScreen):
-                top.dismiss(False)
-                for _ in range(10):
-                    await pilot.pause()
-
-    _run(_drive())
-
-
-def test_wizard_advances_on_image_row_enter(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Pressing Enter on an image row commits the selection,
-    advances the wizard to Stage 2 (SELECT_DISK), and moves focus
-    to the Disks table."""
-    _patch_data_sources(
-        monkeypatch,
-        images_list=[_fake_image(name="advance.qcow2")],
-        disks_list=[_fake_disk()],
-    )
-    app = tui_app.BtyTui(image_root=tmp_path / "images")
-
-    async def _drive() -> None:
-        async with app.run_test() as pilot:
-            await pilot.pause()
-
-            # Initial state: Stage 1, focus on images_table.
-            assert app._stage == tui_app._WizardStage.SELECT_IMAGE
-            assert app.focused is not None
-            assert app.focused.id == "images_table"
-
-            await pilot.press("enter")
-            await pilot.pause()
-
-            assert app._selected_image is not None
-            assert app._selected_image.name == "advance.qcow2"
-            assert app._stage == tui_app._WizardStage.SELECT_DISK
-            assert app.focused is not None
-            assert app.focused.id == "disks_table"
-
-    _run(_drive())
-
-
-def test_wizard_back_clears_disk_selection(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """From Stage 3, Esc clears _selected_disk and returns the
-    wizard to Stage 2 with focus on the Disks table."""
-    _patch_data_sources(
-        monkeypatch,
-        images_list=[_fake_image(name="back.qcow2")],
-        disks_list=[_fake_disk()],
-    )
-    app = tui_app.BtyTui(image_root=tmp_path / "images")
-
-    async def _drive() -> None:
-        async with app.run_test() as pilot:
-            await pilot.pause()
-
-            # Drive to Stage 3 by committing image then disk.
-            await pilot.press("enter")  # Stage 1 -> Stage 2
-            await pilot.pause()
-            await pilot.press("enter")  # Stage 2 -> Stage 3
-            await pilot.pause()
-            assert app._stage == tui_app._WizardStage.CONFIRM_FLASH
-
-            # Esc -> back to Stage 2.
-            await pilot.press("escape")
-            await pilot.pause()
-            assert app._selected_disk is None
-            assert app._selected_image is not None  # image preserved
-            assert app._stage == tui_app._WizardStage.SELECT_DISK
-            assert app.focused is not None
-            assert app.focused.id == "disks_table"
-
-    _run(_drive())
-
-
-def test_wizard_back_via_backspace_all_the_way(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Backspace is wired as an alias for Esc on the back binding;
-    pressing it twice from Stage 3 should clear both selections
-    and land on Stage 1 with focus on the Images table.
-    """
-    _patch_data_sources(
-        monkeypatch,
-        images_list=[_fake_image(name="back.qcow2")],
-        disks_list=[_fake_disk()],
-    )
-    app = tui_app.BtyTui(image_root=tmp_path / "images")
-
-    async def _drive() -> None:
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            await pilot.press("enter")
-            await pilot.pause()
-            await pilot.press("enter")
-            await pilot.pause()
-            assert app._stage == tui_app._WizardStage.CONFIRM_FLASH
-
-            # Backspace #1: Stage 3 -> Stage 2.
-            await pilot.press("backspace")
-            await pilot.pause()
-            assert app._stage == tui_app._WizardStage.SELECT_DISK
-
-            # Backspace #2: Stage 2 -> Stage 1.
-            await pilot.press("backspace")
-            await pilot.pause()
-            assert app._stage == tui_app._WizardStage.SELECT_IMAGE
-            assert app._selected_image is None
-            assert app._selected_disk is None
-            assert app.focused is not None
-            assert app.focused.id == "images_table"
-
-    _run(_drive())
-
-
-def test_action_flash_success_flips_button_to_reboot(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """End-to-end happy path: when both modals dismiss with True,
-    ``action_flash`` flips ``_post_flash`` and the action-pane
-    button transforms from ``Flash!`` into ``Reboot``.
-
-    Stubs ``push_screen_wait`` to skip the modals; flash pipeline
-    (probe / make_plan / validate_plan) stubbed so the test
-    isolates the post-success state transition.
-    """
-    _patch_data_sources(
-        monkeypatch,
-        images_list=[_fake_image()],
-        disks_list=[_fake_disk()],
-    )
-    plan = _fake_flash_plan()
-    monkeypatch.setattr(tui_app.flash, "probe_image", lambda _path: plan.image)
-    monkeypatch.setattr(tui_app.flash, "probe_target", lambda _path: plan.target)
-
-    app = tui_app.BtyTui(image_root=tmp_path / "images")
-
-    # First modal is FlashConfirmScreen (returns bool); second is
-    # FlashStatusScreen (returns str "ok" / "failed" / "cancelled").
-    modal_results: list[Any] = [True, "ok"]
-    modal_results_iter = iter(modal_results)
-
-    async def _fake_push_screen_wait(_screen: object) -> Any:
-        return next(modal_results_iter)
-
-    monkeypatch.setattr(app, "push_screen_wait", _fake_push_screen_wait)
-
-    async def _drive() -> None:
-        from textual.widgets import Button
-
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            app._selected_image = next(iter(app._images_by_key.values()))
-            app._selected_disk = next(iter(app._disks_by_key.values()))
-            app._render_status()
-            assert app._stage == tui_app._WizardStage.CONFIRM_FLASH
-
-            app.action_flash()  # type: ignore[unused-coroutine]
-            for _ in range(20):
-                await pilot.pause()
-
-            assert app._post_flash is True
-            flash_btn = app.query_one("#flash-btn", Button)
-            # Button label flipped to "Reboot" so the operator's
-            # next press fires the reboot action instead of flash.
-            assert str(flash_btn.label) == "Reboot"
-            assert flash_btn.disabled is False
-
-    _run(_drive())
-
-
-def test_action_flash_pxe_done_failure_still_flips_to_reboot(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Regression: when the flash succeeds but the post-pxe-done
-    POST raises URLError (e.g. catalog URL was a static GitHub
-    release / non-bty-web HTTP host that does not implement
-    ``POST /pxe/<mac>/done`` -> 404), the post-flash UI transition
-    must still fire. Previous behaviour: a URLError caused
-    ``action_flash`` to return early, leaving ``_post_flash``
-    False and the button stuck on ``Flash!`` despite the disk
-    having been written. Operator reading the screen saw
-    a "Flash!" button after a successful flash and concluded
-    the flash had failed.
-    """
-    _patch_data_sources(
-        monkeypatch,
-        images_list=[_fake_image()],
-        disks_list=[_fake_disk()],
-    )
-    plan = _fake_flash_plan()
-    monkeypatch.setattr(tui_app.flash, "probe_image", lambda _path: plan.image)
-    monkeypatch.setattr(tui_app.flash, "probe_target", lambda _path: plan.target)
-
-    def _boom(*_a: object, **_kw: object) -> None:
-        raise urllib.error.URLError("pxe-done host unreachable / 404")
-
-    monkeypatch.setattr(tui_app, "post_pxe_done", _boom)
-
-    app = tui_app.BtyTui(image_root=tmp_path / "images")
-    # Simulate the catalog-source flow that derives a pxe-done base
-    # so the failing POST actually fires.
-    app._pxe_done_base = "http://server.invalid:8080"
-    app._mac = "aa:bb:cc:dd:ee:ff"
-
-    modal_results: list[Any] = [True, "ok"]
-    modal_results_iter = iter(modal_results)
-
-    async def _fake_push_screen_wait(_screen: object) -> Any:
-        return next(modal_results_iter)
-
-    monkeypatch.setattr(app, "push_screen_wait", _fake_push_screen_wait)
-
-    async def _drive() -> None:
-        from textual.widgets import Button
-
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            app._selected_image = next(iter(app._images_by_key.values()))
-            app._selected_disk = next(iter(app._disks_by_key.values()))
-            app._render_status()
-            assert app._stage == tui_app._WizardStage.CONFIRM_FLASH
-
-            app.action_flash()  # type: ignore[unused-coroutine]
-            for _ in range(20):
-                await pilot.pause()
-
-            assert app._post_flash is True, (
-                "Flash succeeded but _post_flash never flipped -- the URLError "
-                "branch was skipping the post-flash UI transition."
-            )
-            flash_btn = app.query_one("#flash-btn", Button)
-            assert str(flash_btn.label) == "Reboot"
-
-    _run(_drive())
-
-
-def test_catalog_picker_opens_and_dismisses_cleanly(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Pressing ``c`` pushes a CatalogSelectScreen modal; pressing
-    Esc dismisses it without changing the active catalog.
-
-    Guards against the ``@work`` decorator being dropped from
-    ``action_catalog`` -- Textual 8.x requires worker context for
-    ``push_screen_wait``.
-    """
-    _patch_data_sources(
-        monkeypatch,
-        images_list=[_fake_image()],
-        disks_list=[_fake_disk()],
-    )
-    app = tui_app.BtyTui(image_root=tmp_path / "images")
-
-    async def _drive() -> None:
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            initial_root = app._image_root
-            initial_source = app._catalog_source
-
-            await pilot.press("c")
-            for _ in range(10):
-                await pilot.pause()
-
-            top = app.screen
-            assert isinstance(top, tui_app.CatalogSelectScreen), (
-                f"expected CatalogSelectScreen, got {type(top).__name__}"
-            )
-            top.dismiss(None)
-            for _ in range(10):
-                await pilot.pause()
-            # Catalog unchanged when dismissed without selection.
-            assert app._image_root == initial_root
-            assert app._catalog_source == initial_source
-
-    _run(_drive())
-
-
-def test_d_binding_loads_default_catalog_url(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Pressing ``d`` sets the catalog source to bty's default
-    release-asset URL and derives the pxe-done base from its host.
-    The catalog itself is fetched on the next populate (mocked here
-    via ``_patch_data_sources(remote_catalog=...)``); the binding's
-    job is just to land the new source on the App."""
-    remote_rows = [
-        tui_app._TuiImage(
-            name="nosi-debian",
-            fmt="img.gz",
-            size_bytes=8192,
-            url="oras://ghcr.io/safl/nosi/debian-sysdev:latest",
-        )
-    ]
-    _patch_data_sources(
-        monkeypatch,
-        disks_list=[_fake_disk()],
-        remote_catalog=remote_rows,
-    )
-    app = tui_app.BtyTui(image_root=tmp_path / "empty")
-
-    async def _drive() -> None:
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            assert app._catalog_source is None
-
-            await pilot.press("d")
-            for _ in range(10):
-                await pilot.pause()
-
-            # Catalog source flipped to bty's published catalog URL.
-            assert app._catalog_source == tui_app._BTY_DEFAULT_CATALOG_URL
-            # pxe-done base derived from the URL's host (so a TUI
-            # launched without --mac/--catalog can still POST done
-            # to bty-web instances reached via the default catalog).
-            assert app._pxe_done_base == "https://github.com"
-            # The catalog row from the mocked source landed in the
-            # table; confirms repopulate triggered.
-            from textual.widgets import DataTable
-
-            images_table = app.query_one("#images_table", DataTable)
-            assert images_table.row_count == 1
-
-    _run(_drive())
+    # Stub the ack-pause so the test doesn't block on input.
+    monkeypatch.setattr(app, "_pause_for_ack", lambda: None)
+    app._screen_flash_running(plan)
+    assert app._state.post_flash is False
