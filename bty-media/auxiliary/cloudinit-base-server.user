@@ -476,6 +476,18 @@ runcmd:
   # the haveged / networkd pattern and is idempotent.
   - systemctl enable systemd-timesyncd.service
 
+  # Three-step boot banner -- prints "BTY vX.Y.Z | Server /
+  # bty-web | step N of 3 -- ..." at early / mid / late boot
+  # checkpoints so an operator watching the appliance boot has
+  # visible progress (plymouth was retired in v0.22.1; this is
+  # the textual replacement). Variant + mode come from
+  # ``/etc/bty/variant`` + ``/etc/bty/mode`` marker files
+  # written into rootfs/server/etc/bty/ at bake time.
+  - chmod 0755 /usr/local/sbin/bty-boot-banner
+  - systemctl enable bty-banner-early.service
+  - systemctl enable bty-banner-mid.service
+  - systemctl enable bty-banner-late.service
+
   # Disable cloud-init for subsequent boots and clear its artefacts.
   # The cooked image already has its identity (bty user + default
   # password baked above), so cloud-init has nothing to do at first

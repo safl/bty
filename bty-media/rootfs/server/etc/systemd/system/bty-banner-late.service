@@ -1,0 +1,19 @@
+[Unit]
+Description=bty boot banner -- step 3 of 3 (multi-user reached)
+Documentation=https://github.com/safl/bty
+# Just before bty-web becomes reachable. If the operator sees
+# step 3 but bty-web's port 8080 never answers, the wedge is in
+# bty-web itself (cloud-init wheel install, PAM misconfig,
+# port already-bound, ...) -- not in the boot chain.
+After=multi-user.target
+Before=bty-web.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/bty-boot-banner late
+StandardOutput=journal+console
+StandardError=journal+console
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

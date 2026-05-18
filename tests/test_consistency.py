@@ -478,7 +478,97 @@ def test_boot_banner_script_and_units_exist_and_are_wired() -> None:
 
 
 # ----------------------------------------------------------------------
-# 12. Every Pydantic model in _models.py has a docstring
+# 12. bty-boot-banner script + units stay byte-identical across trees
+# ----------------------------------------------------------------------
+
+
+def test_boot_banner_files_synced_across_live_env_and_server_trees() -> None:
+    """The banner script + most units are duplicated between
+    ``bty-media/live-build/config/includes.chroot/`` (live env)
+    and ``bty-media/rootfs/server/`` (appliance) -- live-build's
+    chroot includes are NOT shared with the cloud-init rootfs.
+    A manual ``cp`` is the current sync mechanism; this test
+    keeps the two copies honest.
+
+    Exception: ``bty-banner-late.service`` has a deliberately
+    different ``Before=`` directive per tree (live env ->
+    ``bty-tui-on-tty1.service bty-flash-on-boot.service``,
+    server -> ``bty-web.service``). Diff the unit minus that
+    line and assert the rest matches.
+    """
+    import hashlib
+
+    live = (
+        REPO_ROOT
+        / "bty-media"
+        / "live-build"
+        / "config"
+        / "includes.chroot"
+    )
+    server = REPO_ROOT / "bty-media" / "rootfs" / "server"
+
+    # Script: byte-for-byte identical.
+    live_script = live / "usr" / "local" / "sbin" / "bty-boot-banner"
+    server_script = server / "usr" / "local" / "sbin" / "bty-boot-banner"
+    assert live_script.is_file(), f"missing {live_script}"
+    assert server_script.is_file(), f"missing {server_script}"
+    assert (
+        hashlib.sha256(live_script.read_bytes()).hexdigest()
+        == hashlib.sha256(server_script.read_bytes()).hexdigest()
+    ), (
+        "bty-boot-banner drifted between the live-env and "
+        "server-rootfs trees. Sync via:\n"
+        f"  cp {live_script.relative_to(REPO_ROOT)} {server_script.relative_to(REPO_ROOT)}"
+    )
+
+    # Early + mid units: identical.
+    for phase in ("early", "mid"):
+        live_unit = live / "etc" / "systemd" / "system" / f"bty-banner-{phase}.service"
+        server_unit = server / "etc" / "systemd" / "system" / f"bty-banner-{phase}.service"
+        assert live_unit.read_bytes() == server_unit.read_bytes(), (
+            f"bty-banner-{phase}.service drifted; sync the file"
+        )
+
+    # Late unit: [Unit] section is intentionally divergent
+    # (different Before= + different commentary explaining the
+    # hand-off target). [Service] + [Install] sections must
+    # match -- those are the load-bearing pieces.
+    live_late = (live / "etc" / "systemd" / "system" / "bty-banner-late.service").read_text()
+    server_late = (server / "etc" / "systemd" / "system" / "bty-banner-late.service").read_text()
+
+    def _section(body: str, name: str) -> str:
+        """Extract the named ini-style section from a systemd unit."""
+        lines: list[str] = []
+        in_section = False
+        for raw in body.splitlines():
+            stripped = raw.strip()
+            if stripped.startswith("[") and stripped.endswith("]"):
+                in_section = stripped == f"[{name}]"
+                continue
+            if in_section and stripped:
+                lines.append(raw)
+        return "\n".join(lines)
+
+    assert _section(live_late, "Service") == _section(server_late, "Service"), (
+        "bty-banner-late.service [Service] block drifted; reconcile."
+    )
+    assert _section(live_late, "Install") == _section(server_late, "Install"), (
+        "bty-banner-late.service [Install] block drifted; reconcile."
+    )
+
+    # Server has the marker files; live env does not.
+    server_variant = server / "etc" / "bty" / "variant"
+    server_mode = server / "etc" / "bty" / "mode"
+    assert server_variant.is_file() and server_variant.read_text().strip(), (
+        f"server rootfs missing /etc/bty/variant marker: {server_variant}"
+    )
+    assert server_mode.is_file() and server_mode.read_text().strip(), (
+        f"server rootfs missing /etc/bty/mode marker: {server_mode}"
+    )
+
+
+# ----------------------------------------------------------------------
+# 13. Every Pydantic model in _models.py has a docstring
 # ----------------------------------------------------------------------
 
 
