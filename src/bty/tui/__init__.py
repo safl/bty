@@ -72,6 +72,41 @@ def main(argv: list[str] | None = None, *, prog: str = "bty-tui") -> None:
     )
     args = parser.parse_args(argv)
 
+    # Lifecycle progress -- the launch path has two slow phases an
+    # operator stares at without feedback otherwise:
+    #
+    #   1. ``from bty.tui._app import BtyTui`` (1-3s): pulls Textual
+    #      + bty.catalog + bty.flash + bty.oras into the
+    #      interpreter. On slower hardware (low-end mini-PCs, EPYC
+    #      bringup boxes) this is several seconds of "blinking
+    #      cursor".
+    #   2. ``BtyTui(...).run()`` -> Textual init paints the first
+    #      frame (5-20s on the live env's framebuffer console).
+    #      Once Textual enters alt-screen mode our prior output is
+    #      hidden until the app exits.
+    #
+    # Print progress to stderr BEFORE the import + the run. The
+    # operator sees: wrapper banner (from bty-tui-on-tty1 shell
+    # wrapper, on the live env) -> these progress lines -> Textual
+    # paints. The blank-screen window narrows from "the whole
+    # launch" to "after the last progress line + before Textual's
+    # first frame".
+    #
+    # Also mirror to ``/run/bty-tui.status`` so an operator who
+    # Alt-F2'd to tty2 can ``cat`` it without having to read tty1's
+    # transient output. ``/run`` is tmpfs on the live env so this
+    # is forgotten on reboot; cheap to write.
+    def _progress(msg: str) -> None:
+        line = f"bty-tui: {msg}"
+        print(line, file=sys.stderr, flush=True)
+        try:
+            with open("/run/bty-tui.status", "a") as f:
+                f.write(line + "\n")
+        except OSError:
+            pass
+
+    _progress(f"v{bty.__version__} starting...")
+    _progress("loading UI dependencies (Textual)...")
     try:
         from bty.tui._app import BtyTui
     except ImportError as exc:
@@ -82,5 +117,9 @@ def main(argv: list[str] | None = None, *, prog: str = "bty-tui") -> None:
             file=sys.stderr,
         )
         sys.exit(1)
+    _progress("dependencies loaded")
+    if args.catalog:
+        _progress(f"catalog source: {args.catalog}")
+    _progress("starting interface (first paint may take a few seconds)...")
 
     BtyTui(image_root=args.image_root, catalog_source=args.catalog, mac=args.mac).run()

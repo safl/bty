@@ -422,7 +422,46 @@ def test_memory_md_index_entries_resolve() -> None:
 
 
 # ----------------------------------------------------------------------
-# 11. Every Pydantic model in _models.py has a docstring
+# 11. Plymouth script scales the logo to a framebuffer-sane size
+# ----------------------------------------------------------------------
+
+
+def test_plymouth_script_scales_logo() -> None:
+    """The plymouth script must scale the source PNG before
+    rendering. The mascot asset is the same 600x600 PNG synced
+    across docs / web / plymouth via the test_smoke invariant; on
+    a framebuffer console that's larger than the boot screen would
+    show without scaling. Regression: v0.20.4 synced the asset
+    without adding the scale call, so the next bty-usb boot showed
+    a "huge zoomed critter" instead of a centred splash.
+
+    Heuristic: the script must contain an ``Image(...).Scale(...)``
+    or a ``.Scale(`` invocation against the logo image variable.
+    """
+    script_path = (
+        REPO_ROOT
+        / "bty-media"
+        / "live-build"
+        / "config"
+        / "includes.chroot"
+        / "usr"
+        / "share"
+        / "plymouth"
+        / "themes"
+        / "bty"
+        / "bty.script"
+    )
+    body = script_path.read_text()
+    assert ".Scale(" in body, (
+        "plymouth script does not call .Scale() on the logo image. "
+        "A 600x600 source PNG renders at native size on the framebuffer "
+        "console, which looks like a huge zoomed mascot. Scale to a "
+        "fraction of Window.GetWidth() / Window.GetHeight()."
+    )
+
+
+# ----------------------------------------------------------------------
+# 12. Every Pydantic model in _models.py has a docstring
 # ----------------------------------------------------------------------
 
 

@@ -19,7 +19,20 @@
 Window.SetBackgroundTopColor(0.10, 0.13, 0.21);    // tokyo-night-ish navy
 Window.SetBackgroundBottomColor(0.06, 0.08, 0.13);
 
-logo.image = Image("logo.png");
+// Scale the mascot to a fixed 256x256. The source PNG is the
+// canonical 600x600 mascot (synced with the docs + web /ui/
+// assets via tests/test_smoke.py); rendered at native size that
+// fills most of a framebuffer console. ``Image.Scale(w, h)`` is
+// the same call every distro plymouth theme uses (Debian's,
+// Ubuntu's, Fedora's all do the same pattern), so the call site
+// is on the well-trodden plymouth-script surface.
+//
+// 256x256 is a reasonable size on every framebuffer we ship to:
+// 800x600 -> mascot is 32% of width, 1024x768 -> 25%, 1920x1080
+// -> 13%. If plymouth's Scale fails (unlikely; it's a standard
+// method) the rendering reverts to no-splash plain text boot --
+// not a boot failure, just a degraded UX.
+logo.image = Image("logo.png").Scale(256, 256);
 logo.sprite = Sprite(logo.image);
 logo.x = Window.GetX() + Window.GetWidth() / 2 - logo.image.GetWidth() / 2;
 logo.y = Window.GetY() + Window.GetHeight() / 2 - logo.image.GetHeight() / 2 - 40;
