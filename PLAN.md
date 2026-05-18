@@ -1,4 +1,4 @@
-# bty - flash images onto target disks, locally or remote with and without PXE
+# bty - flash images onto target disks, offline or networked with and without PXE
 
 Image-flash toolkit for bare-metal and virtual targets. Writes
 pre-built system images onto target disks - locally from a

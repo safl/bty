@@ -71,7 +71,7 @@ def main(argv: list[str] | None = None) -> int:
 
     parser = argparse.ArgumentParser(
         prog="bty",
-        description="bty - flash images onto target disks, locally or remote with and without PXE",
+        description="bty - flash images onto target disks, offline or networked with and without PXE",
     )
     parser.add_argument(
         "--version",
