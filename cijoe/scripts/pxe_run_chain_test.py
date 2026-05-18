@@ -61,7 +61,10 @@ ARTIFACT_NAMES = (
     "bty-netboot-x86_64.squashfs",
 )
 
-HEALTHZ_TIMEOUT = 300  # cloud-init + bty-web-init + bty-web takes a while
+HEALTHZ_TIMEOUT = 600  # cloud-init + bty-web-init + bty-web takes a while.
+# 300s tripped on v0.22.4 with no underlying code change (runner-variance flake;
+# bty-web/web-init untouched since v0.22.0). 600s gives the slow tail of GHA's
+# nested-KVM runners a real chance without unbounding the wait.
 CHAIN_TIMEOUT = 600  # total for all client-side markers to appear
 
 
