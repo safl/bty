@@ -19,18 +19,11 @@ ConditionKernelCommandLine=bty.mode=interactive
 # getty never gets a chance to start in the first place.
 Conflicts=getty@tty1.service
 Before=getty@tty1.service
-# Wait for plymouth to fully release tty1 before bty-tui claims
-# it. ``plymouth-quit.service`` only SIGNALS plymouth to start
-# exiting; ``plymouth-quit-wait.service`` BLOCKS until the
-# plymouth process actually terminates. Need both to avoid the
-# race that bit second-boot hangs (first boot: grow-images
-# takes ~30s so plymouth has time to exit; second boot: grow is
-# no-op, plymouth-quit fires immediately, bty-tui starts before
-# plymouth releases the tty -> Textual can't initialize ->
-# unit hangs forever). The ordering is compatible with
-# ``Before=getty@tty1.service`` (plymouth-quit-wait -> bty-tui
-# -> getty in the dependency graph).
-After=plymouth-quit.service plymouth-quit-wait.service
+# Plymouth was retired in v0.22.1; the previous ordering against
+# plymouth-quit-wait.service is no longer needed (the unit
+# doesn't exist when plymouth isn't installed; ``After=`` of an
+# unknown unit is a systemd no-op, so leaving it would be inert,
+# but dropping it keeps the unit honest about its actual deps).
 # ``Wants=network-online.target`` (without a matching ``After=``)
 # pulls network up in parallel rather than blocking the TUI on it.
 # USB-local mode (``bty-tui-on-tty1`` with no ``bty.server=``) doesn't

@@ -1,0 +1,75 @@
+#!/bin/sh
+# bty-boot-banner: print bty identity markers at three points
+# during the boot, so an operator watching the screen sees:
+#
+#   1. **early**  -- just after the kernel hands off to systemd
+#                    (Before=sysinit.target). "yes, this is bty
+#                    and it's booting."
+#   2. **mid**    -- once network-online.target has fired.
+#                    "bty's reached network; next is the bty
+#                    service that drives this boot."
+#   3. **late**   -- after multi-user.target. "bty's about to
+#                    hand off to bty-tui-on-tty1 / bty-flash-
+#                    on-boot. If you see this banner but no
+#                    further action, the service crashed."
+#
+# Three visible checkpoints means a wedge between them is
+# immediately diagnostic. With plymouth retired in v0.22.1
+# there's no graphical splash; these three textual banners
+# are the replacement -- mixed in with systemd's own
+# ``[ OK ] / [ INFO ]`` progress lines so they blend.
+#
+# Called from three systemd units (bty-banner-{early,mid,late}.
+# service) with the phase as $1. ``__BTY_VERSION__`` is
+# substituted at bake time by the variant-specific bake script
+# (cijoe/scripts/usb_iso_build.py or cijoe/scripts/live_build.py).
+#
+# Routes:
+#
+#   * stdout (which the systemd unit pipes via
+#     ``StandardOutput=journal+console`` to /dev/console).
+#   * /dev/tty1 directly. Belt-and-braces for the framebuffer-
+#     only target case (``/dev/console`` would be an unattached
+#     serial port).
+
+PHASE="${1:-mid}"
+VERSION='__BTY_VERSION__'
+
+CMDLINE=$(cat /proc/cmdline 2>/dev/null || echo "")
+
+# Variant: netboot vs usb-iso. live-boot's ``fetch=`` only
+# appears on PXE-netboot (squashfs fetched over HTTP); USB-iso
+# boots mount it from the boot media -> no fetch= token.
+case "${CMDLINE}" in
+    *fetch=*) VARIANT="Netboot" ;;
+    *)        VARIANT="USB" ;;
+esac
+
+# Mode: flash vs tui. ``bty.image_url=`` only appears on the
+# server-side ipxe_flash.j2 chain (auto-flash); ``bty.mode=
+# interactive`` appears on ipxe_tui.j2 + USB-iso BOOTAPPEND
+# (operator-facing TUI).
+case "${CMDLINE}" in
+    *"bty.image_url="*)        MODE="Flash" ;;
+    *"bty.mode=interactive"*)  MODE="TUI" ;;
+    *)                         MODE="(no bty.* params)" ;;
+esac
+
+case "${PHASE}" in
+    early) PHASE_NUM=1 ; PHASE_NOTE="kernel handed off -- starting init" ;;
+    mid)   PHASE_NUM=2 ; PHASE_NOTE="network online" ;;
+    late)  PHASE_NUM=3 ; PHASE_NOTE="multi-user reached -- handing off to bty-${MODE}" ;;
+    *)     PHASE_NUM=? ; PHASE_NOTE="${PHASE}" ;;
+esac
+
+BANNER="[ INFO ] BTY ${VERSION} | ${VARIANT} / ${MODE} | step ${PHASE_NUM} of 3 -- ${PHASE_NOTE}"
+
+# 1) stdout -> systemd routes to journal+console.
+printf '\n%s\n\n' "${BANNER}"
+
+# 2) /dev/tty1 -> always-visible local-console mirror.
+if [ -w /dev/tty1 ]; then
+    {
+        printf '\n%s\n\n' "${BANNER}"
+    } > /dev/tty1 2>/dev/null || true
+fi

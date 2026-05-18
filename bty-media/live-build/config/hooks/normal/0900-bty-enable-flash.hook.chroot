@@ -47,6 +47,19 @@ systemctl enable bty-tui-on-tty1.service
 systemctl enable bty-images-discover.service
 systemctl enable var-lib-bty-images.mount
 systemctl enable bty-usb-grow.service
+# Three-banner boot progress (post-plymouth-retirement
+# replacement; v0.22.1). Each fires at a stable boot
+# checkpoint so an operator watching the screen sees "BTY
+# step 1 of 3", "BTY step 2 of 3", "BTY step 3 of 3" mixed
+# in with the systemd init log -- "this is bty + how far".
+systemctl enable bty-banner-early.service
+systemctl enable bty-banner-mid.service
+systemctl enable bty-banner-late.service
+
+# Make sure the banner script is executable -- live-build
+# does not preserve +x on files coming from includes.chroot/
+# by default.
+chmod 0755 /usr/local/sbin/bty-boot-banner
 
 # Belt-and-braces explicit symlinks. ``systemctl enable`` in a
 # live-build chroot occasionally produces a no-op (silent on
@@ -59,9 +72,15 @@ systemctl enable bty-usb-grow.service
 # with the same target) and survives any future regression in
 # systemctl's chroot-mode behaviour.
 mkdir -p /etc/systemd/system/multi-user.target.wants
+mkdir -p /etc/systemd/system/sysinit.target.wants
 for svc in bty-flash-on-boot.service bty-tui-on-tty1.service \
            bty-images-discover.service var-lib-bty-images.mount \
-           bty-usb-grow.service; do
+           bty-usb-grow.service \
+           bty-banner-mid.service bty-banner-late.service; do
     ln -sf "/etc/systemd/system/${svc}" \
            "/etc/systemd/system/multi-user.target.wants/${svc}"
 done
+# bty-banner-early lands in sysinit.target.wants (it's WantedBy
+# sysinit.target so it fires before the multi-user wave).
+ln -sf "/etc/systemd/system/bty-banner-early.service" \
+       "/etc/systemd/system/sysinit.target.wants/bty-banner-early.service"

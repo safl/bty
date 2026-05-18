@@ -35,41 +35,24 @@
 # pulls the trixie .deb explicitly to work around that.
 set -e
 
-# Plymouth lives in ``config/package-lists/bty-plymouth.list.chroot.usb``
-# as an inert template (the ``.usb`` suffix is not a live-build-
-# recognised extension; live-build ignores the file unless it
-# matches ``.list.chroot[_<scope>]``). We activate it by copying
-# to ``bty-plymouth.list.chroot`` only on USB bakes, and remove
-# the active copy on netboot bakes. The hook
-# ``hooks/normal/0950-bty-plymouth.hook.chroot`` self-guards on
-# the presence of plymouthd, so an absent plymouth simply skips
-# the theme setup with no error.
-#
-# Why split: USB boot is the operator's first impression (mascot
-# splash is worth the disk + init cost). Netboot runs in headless
-# / KVM / PXE contexts where plymouth adds latency (the MS-01 /
-# EPYC plymouth-quit-wait wedges came from this) and provides
-# zero operator value.
-PLYMOUTH_SRC="config/package-lists/bty-plymouth.list.chroot.usb"
-PLYMOUTH_DST="config/package-lists/bty-plymouth.list.chroot"
+# Plymouth was retired in v0.22.1: the kernel-stage graphical splash
+# wedged plymouth-quit-wait on several Intel iGPUs (MS-01, EPYC
+# bring-up box) and the mascot-splash value didn't justify the
+# multi-layer workaround stack (cmdline disable + package purge +
+# variant split). The live env now boots to plain kernel + systemd
+# init messages; ``/etc/issue`` (rendered by agetty on tty1) carries
+# the bty identity. ``plymouth.enable=0`` stays on the cmdline as
+# belt-and-braces in case plymouth ever gets pulled in transitively
+# by a future package change -- with no package installed it's a
+# no-op.
 
 if [ "${BTY_USB_ISO:-}" = "1" ]; then
     BINARY_IMAGES=iso-hybrid
     BOOTLOADERS_OPTS="--bootloaders syslinux,grub-efi"
-    # ``splash`` triggers plymouth to render the bty boot splash
-    # (see ``hooks/normal/0950-bty-plymouth.hook.chroot``). Without
-    # it the kernel scrolls boot messages over our suppressed
-    # bootloader menu, which works but doesn't show bty branding
-    # during the kernel boot window.
-    BOOTAPPEND="boot=live components quiet splash noeject modprobe.blacklist=nouveau nouveau.modeset=0 bty.mode=interactive bty.version=__BTY_VERSION__"
-    # Activate the plymouth package list for the USB bake.
-    if [ -f "${PLYMOUTH_SRC}" ]; then
-        cp "${PLYMOUTH_SRC}" "${PLYMOUTH_DST}"
-    fi
+    BOOTAPPEND="boot=live components quiet noeject plymouth.enable=0 modprobe.blacklist=nouveau nouveau.modeset=0 bty.mode=interactive bty.version=__BTY_VERSION__"
 else
     BINARY_IMAGES=netboot
     BOOTLOADERS_OPTS=""
-    # No ``splash`` -- plymouth isn't installed in this variant.
     # ``plymouth.enable=0`` is belt-and-braces in case a future
     # change pulls plymouth in transitively; with the package
     # absent it's a no-op.

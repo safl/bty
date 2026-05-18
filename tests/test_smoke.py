@@ -376,40 +376,25 @@ def test_generate_catalog_toml_round_trips_through_catalog_load(tmp_path: Path) 
 
 
 def test_mascot_logo_is_in_sync_across_assets() -> None:
-    """The bty mascot artwork is shipped in three places:
+    """The bty mascot artwork is shipped in two places (since
+    v0.22.1's plymouth retirement):
 
     * ``docs/src/_static/bty-mascot.png`` -- Sphinx docs site / PDF.
     * ``src/bty/web/_static/bty-mascot.png`` -- /ui/* pages.
-    * ``bty-media/live-build/config/includes.chroot/usr/share/plymouth/themes/bty/logo.png``
-      -- plymouth splash on the live env (bty-usb + bty-netboot).
 
     They must be byte-identical so an operator never sees a stale
-    version in one place and the current artwork in another.
-    Earlier the plymouth logo drifted (older, smaller export);
-    pin the invariant so a future asset refresh updates all three.
+    version in one place and the current artwork in another. The
+    plymouth path is gone with plymouth itself.
     """
     import hashlib
 
     repo_root = Path(__file__).resolve().parents[1]
     canonical = repo_root / "docs" / "src" / "_static" / "bty-mascot.png"
     web_static = repo_root / "src" / "bty" / "web" / "_static" / "bty-mascot.png"
-    plymouth = (
-        repo_root
-        / "bty-media"
-        / "live-build"
-        / "config"
-        / "includes.chroot"
-        / "usr"
-        / "share"
-        / "plymouth"
-        / "themes"
-        / "bty"
-        / "logo.png"
-    )
 
     digests = {
         path: hashlib.sha256(path.read_bytes()).hexdigest()
-        for path in (canonical, web_static, plymouth)
+        for path in (canonical, web_static)
     }
     distinct = set(digests.values())
     assert len(distinct) == 1, (
@@ -418,56 +403,49 @@ def test_mascot_logo_is_in_sync_across_assets() -> None:
     )
 
 
-def test_plymouth_only_in_usb_variant() -> None:
-    """Plymouth is the kernel-stage splash. It's awesome on the
-    bty-usb stick (operator-facing first impression) but a
-    headless-target liability on the netboot variant: plymouth-
-    quit-wait has wedged on multiple Intel iGPU targets (Minisforum
-    MS-01, AMD EPYC bring-up box, etc.) blocking bty-flash-on-boot
-    indefinitely.
+def test_plymouth_is_not_baked_into_the_live_env() -> None:
+    """Plymouth was retired in v0.22.1: the kernel-stage graphical
+    splash wedged plymouth-quit-wait.service on several Intel iGPUs
+    (Minisforum MS-01, AMD EPYC bring-up box) and the mascot-splash
+    value didn't justify the multi-layer workaround stack.
 
-    Invariant: plymouth + plymouth-themes must NOT live in
-    ``bty-base.list.chroot`` (which feeds both variants) -- they
-    belong in ``bty-plymouth.list.chroot.usb`` which
-    ``auto/config`` activates only when ``BTY_USB_ISO=1``.
+    Invariant: no plymouth packages live in any
+    ``bty-base.list.chroot*`` package list; the plymouth theme dir
+    and hook are gone.
     """
     repo_root = Path(__file__).resolve().parents[1]
-    base_list = (
-        repo_root / "bty-media" / "live-build" / "config" / "package-lists" / "bty-base.list.chroot"
-    )
-    base_lines = [
-        line.strip()
-        for line in base_list.read_text().splitlines()
-        if line.strip() and not line.strip().startswith("#")
-    ]
+    pkg_lists_dir = repo_root / "bty-media" / "live-build" / "config" / "package-lists"
     forbidden = {"plymouth", "plymouth-themes"}
-    leaked = forbidden & set(base_lines)
+    leaked: dict[str, set[str]] = {}
+    for path in pkg_lists_dir.glob("*.list.chroot*"):
+        lines = {
+            line.strip()
+            for line in path.read_text().splitlines()
+            if line.strip() and not line.strip().startswith("#")
+        }
+        overlap = forbidden & lines
+        if overlap:
+            leaked[path.name] = overlap
     assert not leaked, (
-        f"plymouth packages leaked into bty-base.list.chroot: {leaked}. "
-        f"They belong in bty-plymouth.list.chroot.usb (activated only "
-        f"by the USB ISO bake via auto/config)."
+        f"plymouth packages leaked into live-env package lists: {leaked}. "
+        f"Plymouth was retired in v0.22.1; remove the entries."
     )
 
-    usb_list = (
+    # Theme dir + hook must not exist.
+    theme_dir = (
         repo_root
         / "bty-media"
         / "live-build"
         / "config"
-        / "package-lists"
-        / "bty-plymouth.list.chroot.usb"
+        / "includes.chroot"
+        / "usr"
+        / "share"
+        / "plymouth"
     )
-    assert usb_list.exists(), (
-        f"missing USB-only plymouth package list at {usb_list}; "
-        "auto/config copies this file to bty-plymouth.list.chroot "
-        "when BTY_USB_ISO=1."
-    )
-    usb_packages = {
-        line.strip()
-        for line in usb_list.read_text().splitlines()
-        if line.strip() and not line.strip().startswith("#")
-    }
-    assert "plymouth" in usb_packages, usb_packages
-    assert "plymouth-themes" in usb_packages, usb_packages
+    hook = repo_root / "bty-media" / "live-build" / "config" / "hooks" / "normal"
+    plymouth_hook = list(hook.glob("*-bty-plymouth.hook.chroot")) if hook.exists() else []
+    assert not theme_dir.exists(), f"stale plymouth theme dir: {theme_dir}"
+    assert not plymouth_hook, f"stale plymouth hook(s): {plymouth_hook}"
 
 
 def test_nouveau_blacklisted_across_all_three_images() -> None:

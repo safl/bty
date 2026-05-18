@@ -426,38 +426,55 @@ def test_memory_md_index_entries_resolve() -> None:
 # ----------------------------------------------------------------------
 
 
-def test_plymouth_script_scales_logo() -> None:
-    """The plymouth script must scale the source PNG before
-    rendering. The mascot asset is the same 600x600 PNG synced
-    across docs / web / plymouth via the test_smoke invariant; on
-    a framebuffer console that's larger than the boot screen would
-    show without scaling. Regression: v0.20.4 synced the asset
-    without adding the scale call, so the next bty-usb boot showed
-    a "huge zoomed critter" instead of a centred splash.
+# ----------------------------------------------------------------------
+# 11. Boot-banner script + units are wired together
+# ----------------------------------------------------------------------
 
-    Heuristic: the script must contain an ``Image(...).Scale(...)``
-    or a ``.Scale(`` invocation against the logo image variable.
+
+def test_boot_banner_script_and_units_exist_and_are_wired() -> None:
+    """The three-step boot banner (v0.22.1 plymouth replacement)
+    fires at early / mid / late checkpoints so the operator sees
+    "BTY step N of 3" mixed into the systemd init log. If any
+    of the four pieces -- script + three units + the enable-hook
+    entry -- drops out, the operator loses one of those visible
+    checkpoints.
+
+    Pin:
+      * /usr/local/sbin/bty-boot-banner exists + is executable.
+      * Three systemd units exist (early, mid, late).
+      * The enable hook (0900-bty-enable-flash.hook.chroot)
+        contains ``systemctl enable bty-banner-<phase>.service``
+        for each phase.
     """
-    script_path = (
+    live_root = (
         REPO_ROOT
         / "bty-media"
         / "live-build"
         / "config"
         / "includes.chroot"
-        / "usr"
-        / "share"
-        / "plymouth"
-        / "themes"
-        / "bty"
-        / "bty.script"
     )
-    body = script_path.read_text()
-    assert ".Scale(" in body, (
-        "plymouth script does not call .Scale() on the logo image. "
-        "A 600x600 source PNG renders at native size on the framebuffer "
-        "console, which looks like a huge zoomed mascot. Scale to a "
-        "fraction of Window.GetWidth() / Window.GetHeight()."
+    script = live_root / "usr" / "local" / "sbin" / "bty-boot-banner"
+    assert script.is_file(), f"missing banner script: {script}"
+    assert script.stat().st_mode & 0o111, f"banner script not +x: {script}"
+
+    for phase in ("early", "mid", "late"):
+        unit = live_root / "etc" / "systemd" / "system" / f"bty-banner-{phase}.service"
+        assert unit.is_file(), f"missing banner unit: {unit}"
+
+    hook = (
+        REPO_ROOT
+        / "bty-media"
+        / "live-build"
+        / "config"
+        / "hooks"
+        / "normal"
+        / "0900-bty-enable-flash.hook.chroot"
     )
+    hook_body = hook.read_text()
+    for phase in ("early", "mid", "late"):
+        assert f"systemctl enable bty-banner-{phase}.service" in hook_body, (
+            f"enable hook does not enable bty-banner-{phase}.service"
+        )
 
 
 # ----------------------------------------------------------------------
