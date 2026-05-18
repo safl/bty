@@ -4,7 +4,7 @@
 :align: center
 ```
 
-# bty - flash a fleet without leaving your chair
+# bty - flash images onto target disks, offline or networked with and without PXE
 
 > Pronounced "battie" (rhymes with "batty") - the blue bat up top is the
 > mascot, so when in doubt say it like the critter.
@@ -17,11 +17,14 @@
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://github.com/safl/bty/blob/main/LICENSE)
 ```
 
-Reflash a homelab box, a CI runner, or a rack of bare-metal targets in
-the time it takes to make coffee. bty writes pre-built system images
-onto disks -- locally over USB or remotely over PXE. The image is the
-source of truth: rebuild the image, reflash the target. No imperative
-configuration management, no idempotency mind games.
+Flash a single bare-metal box ad-hoc with a USB stick, or reflash a
+whole fleet remotely from a single controller -- bty works with or
+without PXE and scales from one machine to a rack without changing how
+you operate. The image is the source of truth: rebuild the image,
+reflash the target. No imperative configuration management, no
+idempotency mind games. Works equally well in homelabs, CI fleets, lab
+benches, data-centre racks, and anywhere else bytes need to land on a
+disk.
 
 bty is a flasher, not an image builder:
 
