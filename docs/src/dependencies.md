@@ -3,7 +3,7 @@
 What bty needs at runtime, organised by what you're trying to do.
 The `bty-lab` PyPI package itself has no third-party Python
 dependencies for the core CLI, and lazy-loads the bigger pieces
-(textual for the TUI, fastapi for the web server) only when those
+(rich for the TUI, fastapi for the web server) only when those
 entry points are actually used.
 
 ## To install bty itself
@@ -12,7 +12,7 @@ The Python package and one of its CLI / TUI / web entry points:
 
 ```bash
 pipx install bty-lab            # bty CLI only, stdlib-only Python
-pipx install "bty-lab[tui]"     # adds bty-tui (Textual)
+pipx install "bty-lab[tui]"     # adds bty-tui (Rich)
 pipx install "bty-lab[web]"     # adds bty-web (FastAPI, Uvicorn, pamela)
 pipx install "bty-lab[all]"     # everything
 ```

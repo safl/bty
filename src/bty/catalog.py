@@ -23,7 +23,7 @@ fails before the temp file is renamed into place.
 
 Module is stdlib-only -- ``tomllib`` is in Python 3.11+ stdlib,
 ``hashlib`` / ``urllib`` / ``shutil`` are too. Importing this
-module from the CLI does NOT pull in fastapi or textual.
+module from the CLI does NOT pull in fastapi or rich.
 """
 
 from __future__ import annotations

@@ -9,7 +9,7 @@ Subcommand structure:
     bty catalog ACTION ...
 
 Each subcommand except ``tui`` accepts ``--json`` to emit machine-
-readable output (``tui`` is a forwarder to the textual app; its
+readable output (``tui`` is a forwarder to the bty-tui app; its
 output is the interactive terminal session itself).
 
 JSON outputs are envelope-wrapped with a stable schema:

@@ -481,7 +481,11 @@ class BtyTui:
         if idx is not None:
             self._state.selected_image = self._state._images[idx]
         else:
-            self._console.print(f"[{_DANGER}]Unrecognised choice {choice!r}.[/]")
+            self._console.print(
+                f"[{_DANGER}]"
+                + self._describe_index_miss(choice, len(self._state._images), "image")
+                + "[/]"
+            )
             self._pause_for_ack()
         return "continue"
 
@@ -527,7 +531,11 @@ class BtyTui:
         if idx is not None:
             self._state.selected_disk = self._state._disks[idx]
         else:
-            self._console.print(f"[{_DANGER}]Unrecognised choice {choice!r}.[/]")
+            self._console.print(
+                f"[{_DANGER}]"
+                + self._describe_index_miss(choice, len(self._state._disks), "disk")
+                + "[/]"
+            )
             self._pause_for_ack()
         return "continue"
 
@@ -813,10 +821,23 @@ class BtyTui:
     # ---------- rendering helpers -------------------------------------
 
     def _print_header(self, *, stage: int, title: str) -> None:
-        """Single-line header: bty version + stage breadcrumb +
-        title. The breadcrumb is the wizard map: 1 -> 2 -> 3 -> 4
-        with the current stage in accent colour.
+        """Two-line header:
+
+        Line 1: ASCII banner -- ``- -- ---={[| bty vX.Y.Z |]}=--- -- -``.
+            Wide, centred, hacker-style. Pure ASCII so the framebuffer
+            console renders it identically to SSH / serial; no
+            Unicode box-drawing, no styling beyond the version.
+
+        Line 2: blank.
+
+        Line 3: ``Steps: 1.Image -> 2.Disk -> 3.Flash -> 4.Reboot``
+            with the active step highlighted in the accent colour
+            and the rest muted. The title goes alongside in muted
+            parens so it still rides with the screen identity.
         """
+        banner = f"- -- ---={{[| bty v{bty.__version__} |]}}=--- -- -"
+        self._console.print(f"[bold]{banner}[/]")
+        self._console.print()
         crumb_parts = []
         for n, label in enumerate(("Image", "Disk", "Flash", "Reboot"), start=1):
             if n == stage:
@@ -824,9 +845,7 @@ class BtyTui:
             else:
                 crumb_parts.append(f"[{_MUTED}]{n}.{label}[/]")
         crumb = " -> ".join(crumb_parts)
-        self._console.print(
-            f"[bold]bty[/] [{_MUTED}]v{bty.__version__}[/]   {crumb}   [{_MUTED}]({title})[/]"
-        )
+        self._console.print(f"Steps: {crumb}   [{_MUTED}]({title})[/]")
         self._console.print()
 
     def _print_source_summary(self) -> None:
@@ -946,25 +965,61 @@ class BtyTui:
         choice_hint: str,
         extras: tuple[tuple[str, str], ...],
     ) -> str:
-        """Build the prompt suffix shown by ``Prompt.ask``.
+        """Build the prompt label shown by ``Prompt.ask``.
+
+        Layout principle: the prompt itself stays compact -- just
+        the leader, the context hint, and the input cursor -- so the
+        operator's eye lands on "what do I type" immediately next to
+        the cursor. Secondary keybindings (refresh / quit / catalog
+        switch / ...) are printed on a separate dim line just ABOVE
+        the prompt via :meth:`_print_keybindings`, where they read as
+        a guide rather than competing with the input.
 
         Returns a Rich-markup-formatted prompt label. ``choice_hint``
-        is the primary action description; ``extras`` is a list of
-        (key, label) pairs for secondary actions.
+        is the primary action description; ``extras`` is the list
+        of (key, label) pairs printed by the caller via
+        ``_print_keybindings`` BEFORE this method's return value
+        reaches ``Prompt.ask``.
         """
-        parts: list[str] = []
+        self._print_keybindings(extras)
         if choice_hint:
-            parts.append(f"[bold]{choice_hint}[/]")
-        for key, label in extras:
-            parts.append(f"[{_ACCENT}]{key}[/]={label}")
-        return "[bold]>[/] " + "  ".join(parts)
+            return f"[bold]>[/] [bold]{choice_hint}[/]"
+        return "[bold]>[/]"
+
+    def _print_keybindings(self, extras: tuple[tuple[str, str], ...]) -> None:
+        """Print the secondary-key guide above the prompt.
+
+        Renders as one dim line: ``[k] label    [k] label   ...``.
+        Skips printing when ``extras`` is empty (the confirm screens
+        encode their keys in the choice_hint itself).
+        """
+        if not extras:
+            return
+        # ``\[[accent]K[/]] label`` -> renders as ``[K] label`` with K
+        # in the accent colour. ``\[`` is Rich's escape for a literal
+        # bracket; ``[/]`` closes the most-recent open tag.
+        cells = [f"\\[[{_ACCENT}]{key}[/{_ACCENT}]] {label}" for key, label in extras]
+        self._console.print(f"[{_MUTED}]" + "   ".join(cells) + "[/]")
 
     def _ask(self, prompt_text: str) -> str:
         """Single-line prompt with a leading newline so it's clearly
-        separated from the rendered panel above.
+        separated from the rendered panel above. ``show_default=False``
+        suppresses Rich's ``()`` annotation after the prompt label --
+        the empty-string default is still honoured (Enter returns
+        ``""`` which the screens map to ``refresh``); we just don't
+        render the parens.
         """
         try:
-            answer = Prompt.ask(prompt_text, console=self._console, default="").strip().lower()
+            answer = (
+                Prompt.ask(
+                    prompt_text,
+                    console=self._console,
+                    default="",
+                    show_default=False,
+                )
+                .strip()
+                .lower()
+            )
         except (EOFError, KeyboardInterrupt):
             return "q"
         return answer
@@ -978,6 +1033,7 @@ class BtyTui:
                 f"[{_MUTED}](press Enter to continue)[/]",
                 console=self._console,
                 default="",
+                show_default=False,
             )
 
     # ---------- model helpers (probe, plan, post) ---------------------
@@ -1028,6 +1084,30 @@ class BtyTui:
         if 0 <= idx < n:
             return idx
         return None
+
+    def _describe_index_miss(self, choice: str, n: int, kind: str) -> str:
+        """Compose a context-specific error message for a failed index parse.
+
+        Distinguishes "empty list" (catalog or disk inventory has no rows --
+        no number is valid), "out of range" (a number was typed but the
+        list is shorter), and "not a number" (everything else).
+        ``kind`` is the singular noun the screen is selecting (``"image"``
+        or ``"disk"``); ``n`` is the current list length.
+        """
+        # Backslash-escape ``[k]`` brackets so Rich renders them as
+        # literal text rather than swallowing them as unknown style
+        # tags (the strings below all flow through the
+        # ``[{_DANGER}]...[/]`` wrapper at the call site).
+        if n == 0:
+            tail = (
+                ", \\[c] to switch catalog source, or \\[d] for the bty default catalog."
+                if kind == "image"
+                else ", or check that a target disk is attached."
+            )
+            return f"No {kind}s available; {choice!r} can't pick one. Press \\[r] to refresh{tail}"
+        if choice.lstrip("-").isdigit():
+            return f"{choice!r} is out of range; valid {kind} numbers are 1..{n}."
+        return f"Unrecognised choice {choice!r}; type a number 1..{n} or one of the listed keys."
 
     def _probe_and_plan(
         self,

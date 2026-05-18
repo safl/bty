@@ -49,8 +49,8 @@ Type=simple
 ExecStart=/usr/local/sbin/bty-tui-on-tty1
 Restart=on-failure
 RestartSec=5
-# Plumb tty1 in as the controlling terminal so textual's input loop
-# works (cursor keys, function keys, etc.).
+# Plumb tty1 in as the controlling terminal so bty-tui's Rich
+# Prompt.ask reads from the right tty.
 StandardInput=tty
 StandardOutput=tty
 StandardError=tty

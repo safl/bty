@@ -140,7 +140,7 @@ PyPI - with three console scripts:
 
 ```bash
 pipx install bty-lab            # `bty` CLI, zero third-party deps
-pipx install "bty-lab[tui]"     # adds `bty-tui` (Textual)
+pipx install "bty-lab[tui]"     # adds `bty-tui` (Rich)
 pipx install "bty-lab[web]"     # adds `bty-web` (FastAPI + Pydantic)
 pipx install "bty-lab[all]"     # everything
 ```

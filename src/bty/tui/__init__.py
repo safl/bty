@@ -1,11 +1,11 @@
 """bty.tui - terminal UI on top of bty.
 
 This module is intentionally lightweight: it imports nothing from
-:mod:`textual` at module level so a CLI-only install
+:mod:`rich` at module level so a CLI-only install
 (``pipx install bty-lab`` without the ``[tui]`` extra) can still
 ``import bty.tui`` for introspection without crashing. The actual
-textual app lives in :mod:`bty.tui._app`, which is loaded only when
-``bty-tui`` is invoked.
+Rich-based app lives in :mod:`bty.tui._app`, which is loaded only
+when ``bty-tui`` is invoked.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ import bty
 def main(argv: list[str] | None = None, *, prog: str = "bty-tui") -> None:
     """Console-script entry point for ``bty-tui`` (or ``bty tui``).
 
-    Defers loading the textual app until invocation time so a missing
+    Defers loading the Rich-based app until invocation time so a missing
     ``[tui]`` extra produces a clear "reinstall with extras" message
     rather than a raw ``ModuleNotFoundError``. ``prog`` controls how
     the program identifies itself in ``--help`` and ``--version`` so
@@ -75,22 +75,22 @@ def main(argv: list[str] | None = None, *, prog: str = "bty-tui") -> None:
     # Lifecycle progress -- the launch path has two slow phases an
     # operator stares at without feedback otherwise:
     #
-    #   1. ``from bty.tui._app import BtyTui`` (1-3s): pulls Textual
+    #   1. ``from bty.tui._app import BtyTui`` (1-3s): pulls Rich
     #      + bty.catalog + bty.flash + bty.oras into the
     #      interpreter. On slower hardware (low-end mini-PCs, EPYC
     #      bringup boxes) this is several seconds of "blinking
     #      cursor".
-    #   2. ``BtyTui(...).run()`` -> Textual init paints the first
-    #      frame (5-20s on the live env's framebuffer console).
-    #      Once Textual enters alt-screen mode our prior output is
-    #      hidden until the app exits.
+    #   2. ``BtyTui(...).run()`` -> the wizard prints its first
+    #      header (Rich is no-alt-screen, so prior stderr output
+    #      stays visible above the header). On the live env's
+    #      framebuffer console first print is typically under a
+    #      second after import.
     #
     # Print progress to stderr BEFORE the import + the run. The
     # operator sees: wrapper banner (from bty-tui-on-tty1 shell
-    # wrapper, on the live env) -> these progress lines -> Textual
-    # paints. The blank-screen window narrows from "the whole
-    # launch" to "after the last progress line + before Textual's
-    # first frame".
+    # wrapper, on the live env) -> these progress lines -> the
+    # bty-tui header. The blank-screen window narrows to a few
+    # hundred ms while Rich's Console initialises.
     #
     # Also mirror to ``/run/bty-tui.status`` so an operator who
     # Alt-F2'd to tty2 can ``cat`` it without having to read tty1's
@@ -106,7 +106,7 @@ def main(argv: list[str] | None = None, *, prog: str = "bty-tui") -> None:
             pass
 
     _progress(f"v{bty.__version__} starting...")
-    _progress("loading UI dependencies (Textual)...")
+    _progress("loading UI dependencies (Rich)...")
     try:
         from bty.tui._app import BtyTui
     except ImportError as exc:
