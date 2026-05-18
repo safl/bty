@@ -68,6 +68,18 @@ class FlashProgress:
     - ``failed``            - emitted on any :class:`FlashError`;
       ``note`` carries the exception string. The exception is then
       re-raised.
+    - ``subprocess_log``    - one line of stderr from an auxiliary
+      pipeline subprocess (``zstd`` / ``gzip`` / ``xz`` / ``bzip2`` /
+      ``curl``). ``note`` is the line, already prefixed with the
+      source label (e.g. ``"zstd: ..."``). Consumers in a TUI render
+      these above their progress widget; CLI consumers can ignore
+      them (the subprocess's stderr is already inherited in CLI
+      mode). Live updates that use carriage-return-only refresh
+      (curl/zstd's own progress bars) don't show up live -- the
+      pump reads newline-terminated lines, so only the final
+      newline-terminated message lands here. That keeps the
+      Rich progress bar uncluttered while still surfacing real
+      errors + end-of-run stats.
 
     ``total_bytes`` is the image's virtual size when known (set on
     ``started`` and carried on ``writing_progress``). ``bytes_written``
@@ -711,6 +723,49 @@ def execute_plan(
         raise
 
 
+def _start_subprocess_log_pump(
+    proc: subprocess.Popen[Any],
+    progress: ProgressCallback | None,
+    label: str,
+) -> threading.Thread | None:
+    """Drain ``proc.stderr`` line-by-line and emit ``subprocess_log``
+    events to the progress callback.
+
+    Used for auxiliary pipeline processes (zstd / gzip / xz / bzip2 /
+    curl) when a progress callback is set (TUI mode). The TUI prints
+    each line via ``console.print`` inside its ``with Progress():``
+    context; Rich routes the line above the progress widget without
+    corrupting it.
+
+    Lines are decoded as UTF-8 with replacement. The reader is
+    newline-bound, so subprocesses that update via carriage-return-
+    only refresh (curl's progress bar, zstd's --no-progress=auto)
+    don't emit until they finally write a ``\\n`` -- exactly what we
+    want, since those refresh streams would otherwise spam the
+    progress widget.
+
+    Returns the thread (caller ``.join()``s after the proc exits) or
+    ``None`` if no callback is set.
+    """
+    if progress is None or proc.stderr is None:
+        return None
+
+    def _pump() -> None:
+        stream = proc.stderr
+        if stream is None:
+            return
+        for raw in stream:
+            line = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else raw
+            line = line.rstrip("\r\n")
+            if not line:
+                continue
+            _emit(progress, "subprocess_log", note=f"{label}: {line}")
+
+    thread = threading.Thread(target=_pump, daemon=True, name=f"bty-{label}-stderr")
+    thread.start()
+    return thread
+
+
 def _start_dd_progress_thread(
     proc: subprocess.Popen[str],
     progress: ProgressCallback | None,
@@ -785,7 +840,15 @@ def _flash_compressed(
     detection in ``images.py`` deliberately rejects tarball
     extensions.
     """
-    decomp_proc = subprocess.Popen(decompress_cmd, stdout=subprocess.PIPE)
+    # When a progress callback is set (TUI mode), pipe the
+    # decompressor's stderr into a pump thread that emits
+    # ``subprocess_log`` events; the TUI routes those through Rich's
+    # console so they print above the progress widget without
+    # corrupting it. CLI mode leaves stderr inherited (operator's
+    # tty sees zstd/gzip output natively).
+    decomp_stderr = subprocess.PIPE if progress is not None else None
+    decomp_proc = subprocess.Popen(decompress_cmd, stdout=subprocess.PIPE, stderr=decomp_stderr)
+    decomp_log_pump = _start_subprocess_log_pump(decomp_proc, progress, decompress_name)
     try:
         stderr = subprocess.PIPE if progress is not None else None
         dd_proc = subprocess.Popen(
@@ -809,6 +872,8 @@ def _flash_compressed(
             pump.join(timeout=2)
     finally:
         decomp_rc = decomp_proc.wait()
+        if decomp_log_pump is not None:
+            decomp_log_pump.join(timeout=2)
 
     if dd_rc != 0:
         raise FlashError(f"dd exited {dd_rc} writing {image} -> {target}")
@@ -965,7 +1030,15 @@ def _flash_img_from_url(
     curl_args, resolved_size = _curl_args_for_source(url)
     if total_bytes is None:
         total_bytes = resolved_size
-    curl_proc = subprocess.Popen(curl_args, stdout=subprocess.PIPE)
+    # Pipe curl's stderr through the subprocess-log pump so the TUI
+    # can surface curl's lines (errors + final status) above its
+    # progress widget. curl's live progress bar uses ``\r``-only
+    # refresh which the newline-bound pump intentionally skips; the
+    # operator sees errors + the end-of-run line, not the noisy
+    # real-time bar.
+    curl_stderr = subprocess.PIPE if progress is not None else None
+    curl_proc = subprocess.Popen(curl_args, stdout=subprocess.PIPE, stderr=curl_stderr)
+    curl_log_pump = _start_subprocess_log_pump(curl_proc, progress, "curl")
     try:
         stderr = subprocess.PIPE if progress is not None else None
         dd_proc = subprocess.Popen(
@@ -987,6 +1060,8 @@ def _flash_img_from_url(
             watchdog.join(timeout=2)
     finally:
         curl_rc = curl_proc.wait()
+        if curl_log_pump is not None:
+            curl_log_pump.join(timeout=2)
     # Cancel takes precedence over non-zero exit codes: SIGTERM
     # leaves curl/dd with nonzero status which would otherwise be
     # mis-reported as a transport failure.
@@ -1030,13 +1105,22 @@ def _flash_compressed_from_url(
     inputs.
     """
     curl_args, _resolved_compressed_size = _curl_args_for_source(url)
-    curl_proc = subprocess.Popen(curl_args, stdout=subprocess.PIPE)
+    # Pipe both curl + decompressor stderr through subprocess-log
+    # pumps. The TUI prints each line above its progress widget via
+    # Rich's ``console.print`` (which Rich routes around the live
+    # display). Newline-bound reads mean curl's/zstd's CR-only
+    # real-time refresh doesn't fire; only meaningful lines do.
+    pipeline_stderr = subprocess.PIPE if progress is not None else None
+    curl_proc = subprocess.Popen(curl_args, stdout=subprocess.PIPE, stderr=pipeline_stderr)
+    curl_log_pump = _start_subprocess_log_pump(curl_proc, progress, "curl")
     try:
         decomp_proc = subprocess.Popen(
             decompress_cmd,
             stdin=curl_proc.stdout,
             stdout=subprocess.PIPE,
+            stderr=pipeline_stderr,
         )
+        decomp_log_pump = _start_subprocess_log_pump(decomp_proc, progress, decompress_name)
         if curl_proc.stdout is not None:
             curl_proc.stdout.close()
         try:
@@ -1058,8 +1142,12 @@ def _flash_compressed_from_url(
                 watchdog.join(timeout=2)
         finally:
             decomp_rc = decomp_proc.wait()
+            if decomp_log_pump is not None:
+                decomp_log_pump.join(timeout=2)
     finally:
         curl_rc = curl_proc.wait()
+        if curl_log_pump is not None:
+            curl_log_pump.join(timeout=2)
     # Cancel takes precedence over non-zero exit codes: the SIGTERM
     # the watchdog sends leaves all three subprocesses with nonzero
     # status, which would otherwise be misread as a transport /

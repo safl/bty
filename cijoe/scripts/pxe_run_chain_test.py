@@ -449,10 +449,13 @@ def _build_markers(cfg):
     """Return ``[(key, needle), ...]`` from config, with the per-MAC
     chain marker derived from the configured client MAC.
 
-    iPXE prints fetched URLs with the MAC in ``${net0/mac:hexhyp}``
-    form (hyphenated, e.g. ``52-54-00-11-22-33``), not the canonical
+    iPXE prints fetched URLs with the MAC in ``${mac:hexhyp}`` form
+    (hyphenated, e.g. ``52-54-00-11-22-33``), not the canonical
     colon form. Build the marker accordingly so the assertion
-    matches what shows up on the serial console.
+    matches what shows up on the serial console. In QEMU the client
+    VM has a single NIC so ``${mac}`` is net0; on bare-metal
+    multi-NIC hosts the template uses the active-NIC MAC, which
+    is the right one regardless of which physical port booted.
     """
     out = [(entry["key"], entry["needle"]) for entry in cfg.get("chain_markers", [])]
     mac_hyphen = cfg["client_mac"].replace(":", "-")

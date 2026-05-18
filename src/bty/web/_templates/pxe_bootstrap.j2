@@ -4,4 +4,13 @@
 # this script (Host header), so the URL stays correct regardless of
 # whether the operator addresses the server by IP, hostname, or
 # .local mDNS name.
-chain http://{{ host }}/pxe/${net0/mac:hexhyp}
+#
+# ``${mac:hexhyp}`` (no NIC prefix) is iPXE's MAC of the *current*
+# network device -- the one that just succeeded DHCP and fetched
+# this script. NEVER hardcode ``${net0/mac:hexhyp}`` here: on a
+# multi-NIC box where net0 is link-down (a common shape -- onboard
+# NIC unplugged, USB or expansion-card NIC actually connected),
+# iPXE still reads net0's MAC from the NIC's EEPROM and would
+# query bty with the wrong MAC. bty would then correctly answer
+# "no assignment for <inactive NIC's MAC>" and the chain fails.
+chain http://{{ host }}/pxe/${mac:hexhyp}

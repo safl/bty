@@ -612,6 +612,21 @@ def create_app(
             short = str(ref)[:12]
             offer_summary = f"{normalised} offered local (sanboot) for ref={short}..."
             offer_details = {"offer": "local", "bty_image_ref": ref}
+        elif policy == "local":
+            # Registered with boot_policy=local and no image ref bound.
+            # The machine IS known; render ``ipxe.j2`` (the local-boot
+            # template) NOT ``ipxe_unknown.j2`` -- the operator would
+            # otherwise see "no bty assignment for <MAC>" even though
+            # the assignment exists and explicitly says "boot local".
+            # Surfaced on a multi-NIC client whose registered MAC was
+            # set to boot_policy=local with no ref bound (intentional);
+            # bty was printing the wrong-template message and looking
+            # like a lookup miss.
+            template = jinja.get_template("ipxe.j2")
+            rendered = template.render(mac=normalised, machine=machine)
+            offer_kind = "local"
+            offer_summary = f"{normalised} offered local (sanboot) -- policy=local, no image bound"
+            offer_details = {"offer": "local", "bty_image_ref": None}
         else:
             template = jinja.get_template("ipxe_unknown.j2")
             rendered = template.render(mac=normalised, machine=machine)

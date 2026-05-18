@@ -236,17 +236,29 @@ _BTY_DEFAULT_CATALOG_URL = "https://github.com/safl/bty/releases/latest/download
 
 
 # ---------------------------------------------------------------------------
-# Rendering style: a few colour constants matching the bty mascot.
-# Pure-text fallback works on the framebuffer console too; the
-# colour bytes are ANSI escapes the kernel terminal driver
-# understands.
+# Rendering style: blue/gray dominant, with a sparing dash of
+# muted yellow. Pure-text fallback works on the framebuffer
+# console too; the colour bytes are ANSI escapes the kernel
+# terminal driver understands. Names are kept in the 16-colour
+# set so the look is identical across SSH, serial, and the live
+# env's framebuffer tty1 (where any 256-colour mapping collapses
+# to its nearest neighbour and the design intent gets lost).
 # ---------------------------------------------------------------------------
 
-_ACCENT = "bright_yellow"  # mascot yellow, used for prompts + stage breadcrumb
-_PRIMARY = "cyan"  # secondary highlights
+_PRIMARY = "blue"  # dominant -- headers, table titles, primary columns
+_MUTED = "bright_black"  # secondary -- byline columns, parenthesised hints. Canonical
+# 16-colour ANSI gray with no 256-colour tint (grey62 read as
+# teal-ish on dark dev terminals); renders identically across SSH,
+# serial, and the live env's framebuffer.
+_ACCENT = "yellow"  # the dash: row indices + prompts + stage breadcrumb only
 _DANGER = "red"
 _OK = "green"
-_MUTED = "grey62"
+# Very dark grey for subtle zebra striping. On 256-colour terminals
+# (SSH, dev consoles) renders as a faint band; on the live env's
+# 16-colour framebuffer it down-converts to black and disappears,
+# which is the desired behaviour -- the stripe is a nicety on
+# capable terminals, not a feature anyone should depend on.
+_STRIPE = "grey11"
 
 
 # ---------------------------------------------------------------------------
@@ -580,7 +592,10 @@ class BtyTui:
             return "continue"
 
         prompt_text = self._render_prompt_line(
-            choice_hint="[y]es to flash, [b]ack, [q]uit",
+            # Backslash-escapes prevent Rich from parsing ``[y]``/``[b]``/
+            # ``[q]`` as (non-existent) markup style tags and swallowing
+            # them. Closing ``]`` does not need escaping.
+            choice_hint="\\[y]es to flash, \\[b]ack, \\[q]uit",
             extras=(),
         )
         choice = self._ask(prompt_text)
@@ -657,6 +672,13 @@ class BtyTui:
                     progress.update(task_id, description="done")
                 elif ev.event == "failed":
                     progress.update(task_id, description=f"FAILED: {ev.note}")
+                elif ev.event == "subprocess_log":
+                    # Rich's Progress is a Live; ``console.print``
+                    # inside the live context erases the live
+                    # region, prints the line, and redraws -- so
+                    # the log line lands above the progress widget
+                    # without corrupting it.
+                    self._console.print(f"[{_MUTED}]{ev.note}[/]")
 
             def _runner() -> None:
                 try:
@@ -714,7 +736,7 @@ class BtyTui:
         )
 
         prompt_text = self._render_prompt_line(
-            choice_hint="[y]es reboot now, [b]ack, [q]uit",
+            choice_hint="\\[y]es reboot now, \\[b]ack, \\[q]uit",
             extras=(),
         )
         choice = self._ask(prompt_text)
@@ -839,8 +861,8 @@ class BtyTui:
     def _print_image_table(self, rows: list[_TuiImage]) -> None:
         table = Table(
             show_header=True,
-            header_style=f"bold {_ACCENT}",
-            row_styles=("", f"on {_MUTED}"),
+            header_style=f"bold {_PRIMARY}",
+            row_styles=("", f"on {_STRIPE}"),
             expand=True,
         )
         table.add_column("#", justify="right", style=_ACCENT, no_wrap=True)
@@ -863,8 +885,8 @@ class BtyTui:
     def _print_disk_table(self, rows: list[dict[str, Any]]) -> None:
         table = Table(
             show_header=True,
-            header_style=f"bold {_ACCENT}",
-            row_styles=("", f"on {_MUTED}"),
+            header_style=f"bold {_PRIMARY}",
+            row_styles=("", f"on {_STRIPE}"),
             expand=True,
         )
         table.add_column("#", justify="right", style=_ACCENT, no_wrap=True)
@@ -964,11 +986,21 @@ class BtyTui:
         """Combine local + (optional) catalog overlay into one
         sorted list. Catalog load errors surface via
         ``self._catalog_load_error``.
+
+        Prints a one-line ``loading catalog ...`` indicator BEFORE
+        the blocking fetch so an operator on a slow / broken network
+        sees where the wait is going. On a healthy LAN the fetch
+        finishes inside a second and the indicator scrolls past
+        instantly; on a stuck DNS / slow server it tells the
+        operator the box is waiting on the network, not wedged.
         """
         local = _list_local_images(self._state.image_root)
         remote: list[_TuiImage] = []
         self._catalog_load_error = None
         if self._state.catalog_source:
+            self._console.print(
+                f"[{_MUTED}]loading catalog from {self._state.catalog_source} (timeout 30s) ...[/]"
+            )
             try:
                 remote = load_catalog_from_source(self._state.catalog_source)
             except (

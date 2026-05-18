@@ -146,14 +146,24 @@ def test_pxe_bootstrap_returns_self_referential_chain(app_client: TestClient) ->
     """The static iPXE script that dnsmasq points iPXE clients at on
     second-stage DHCP. Must reference back to whichever Host the
     client used to reach the server, and use iPXE's runtime MAC
-    substitution."""
+    substitution for the *current* (active / DHCP-leasing) NIC, NOT
+    net0 specifically -- multi-NIC hosts with net0 link-down would
+    otherwise query bty with net0's EEPROM MAC and get no match."""
     r = app_client.get("/pxe-bootstrap.ipxe", headers={"Host": "192.0.2.1:8080"})
     assert r.status_code == 200
     assert r.headers["content-type"].startswith("text/plain")
     body = r.text
     assert body.startswith("#!ipxe"), body
-    # Self-referential chain: the URL uses the Host header.
-    assert "chain http://192.0.2.1:8080/pxe/${net0/mac:hexhyp}" in body
+    # Self-referential chain: the URL uses the Host header AND iPXE's
+    # active-NIC MAC variable (no ``netN/`` prefix).
+    assert "chain http://192.0.2.1:8080/pxe/${mac:hexhyp}" in body
+    # Guard against re-introducing the net0-hardcoded form on the
+    # actual chain line (the comment block does reference it as
+    # the anti-pattern to avoid, which is fine).
+    chain_lines = [ln for ln in body.splitlines() if ln.startswith("chain ")]
+    assert chain_lines, body
+    for ln in chain_lines:
+        assert "${net0/" not in ln, ln
     # No auth required (PXE clients have no token).
 
 

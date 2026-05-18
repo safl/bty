@@ -30,27 +30,11 @@
     <div class="card-body">
         <h2 class="h5 mb-3">Assignment</h2>
         <form action="/ui/machines/{{ m.mac }}" method="post">
-            <div class="mb-3">
-                <label class="form-label" for="bty_image_ref">Image</label>
-                <select name="bty_image_ref" id="bty_image_ref" class="form-select">
-                    <option value="">- none (discovered, will boot from local disk) -</option>
-                    {% for img in images %}
-                    {# img is a catalog_entries row dict: ``bty_image_ref``
-                       (provenance ID) is the option value; ``disk_image_sha``
-                       is shown alongside when known. Operator binds to
-                       the ref, which is stable across rolling tags and
-                       cache state. #}
-                    <option value="{{ img.bty_image_ref }}" {% if img.bty_image_ref == m.bty_image_ref %}selected{% endif %}>
-                        {{ img.name }} ({{ img.format or "?" }}, ref:{{ img.bty_image_ref[:12] }}{% if img.disk_image_sha %}, sha:{{ img.disk_image_sha[:12] }}{% endif %})
-                    </option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div class="mb-3">
-                <label class="form-label" for="hostname">Hostname</label>
-                <input type="text" name="hostname" id="hostname" class="form-control"
-                       value="{{ m.hostname or '' }}" placeholder="(optional)">
-            </div>
+            {# Boot policy first: it drives which other fields matter.
+               Image + Target disk are only relevant for the flash chain;
+               local + tui ignore both. The inline script below hides the
+               irrelevant fields so the operator sees only what's
+               actionable for the chosen policy. #}
             <div class="mb-3">
                 <label class="form-label" for="boot_policy">Boot policy</label>
                 <select name="boot_policy" id="boot_policy" class="form-select">
@@ -71,7 +55,28 @@
                     reports its disk inventory to bty-web (see Target disk below).
                 </div>
             </div>
-            <div class="mb-3">
+            <div class="mb-3" data-policy-relevant="flash flash-once">
+                <label class="form-label" for="bty_image_ref">Image</label>
+                <select name="bty_image_ref" id="bty_image_ref" class="form-select">
+                    <option value="">- none (discovered, will boot from local disk) -</option>
+                    {% for img in images %}
+                    {# img is a catalog_entries row dict: ``bty_image_ref``
+                       (provenance ID) is the option value; ``disk_image_sha``
+                       is shown alongside when known. Operator binds to
+                       the ref, which is stable across rolling tags and
+                       cache state. #}
+                    <option value="{{ img.bty_image_ref }}" {% if img.bty_image_ref == m.bty_image_ref %}selected{% endif %}>
+                        {{ img.name }} ({{ img.format or "?" }}, ref:{{ img.bty_image_ref[:12] }}{% if img.disk_image_sha %}, sha:{{ img.disk_image_sha[:12] }}{% endif %})
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="mb-3" data-policy-relevant="local flash flash-once tui">
+                <label class="form-label" for="hostname">Hostname</label>
+                <input type="text" name="hostname" id="hostname" class="form-control"
+                       value="{{ m.hostname or '' }}" placeholder="(optional)">
+            </div>
+            <div class="mb-3" data-policy-relevant="flash flash-once">
                 <label class="form-label" for="target_disk_serial">Target disk</label>
                 {% if m.known_disks %}
                 <select name="target_disk_serial" id="target_disk_serial" class="form-select">
@@ -119,6 +124,33 @@
         </form>
     </div>
 </div>
+
+<script>
+(function () {
+    // Show/hide form fields based on the selected boot_policy. Each
+    // optional field carries a ``data-policy-relevant`` attribute
+    // listing the policies it applies to (space-separated); we
+    // hide rows whose policy is not the current selection. Values
+    // in hidden rows still POST -- they don't get cleared -- so an
+    // operator who picks ``local`` doesn't lose the image binding
+    // they previously chose; flipping back to ``flash`` restores
+    // the form to where it was.
+    const policySelect = document.getElementById("boot_policy");
+    if (!policySelect) return;
+    const targets = document.querySelectorAll("[data-policy-relevant]");
+
+    function applyVisibility() {
+        const current = policySelect.value;
+        targets.forEach((el) => {
+            const allowed = (el.getAttribute("data-policy-relevant") || "").split(/\s+/);
+            el.style.display = allowed.includes(current) ? "" : "none";
+        });
+    }
+
+    policySelect.addEventListener("change", applyVisibility);
+    applyVisibility();
+})();
+</script>
 
 {# Per-MAC event slice. Filtered to ``subject_kind=machine`` +
    ``subject_id=this MAC`` server-side; the link forwards the

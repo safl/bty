@@ -52,18 +52,25 @@ if [ -n "$MAC" ]; then
     ARGS="$ARGS --mac $MAC"
 fi
 
-# Print a "starting" banner before exec'ing bty-tui. On lower-
-# spec targets and on first cold boot, Python + Textual + the
-# HTTP catalog fetch can take 10-30s after this service fires
-# before Textual paints its first frame. Without something on
-# the screen during that window, an operator looking at a
-# blank-ish tty1 thinks the box is hung and rules it out.
+# Print a "starting" banner before exec'ing bty-tui. The Rich-based
+# TUI (Textual was retired in v0.22.0) typically renders its first
+# frame within 1-5s; cold-cache Python imports on slow USB media
+# can stretch that. The synchronous catalog fetch -- if a
+# ``--catalog`` URL was set via cmdline -- adds DNS + TCP-connect +
+# transfer time on top, capped at the 30s urllib timeout in
+# ``bty.catalog.fetch_bytes``. On a stuck network this whole
+# sequence can stretch to ~60-90s before the TUI gives up and
+# paints. Without something on the screen during that window, an
+# operator looking at a blank-ish tty1 thinks the box is hung and
+# rules it out. The TUI itself prints a ``loading catalog ...``
+# indicator before its blocking fetch, so this banner only needs to
+# bridge the Python-import gap.
 #
 # We print to /dev/tty1 directly (rather than stdout) because
-# Textual is about to claim stdio and our exec replaces this
-# process; a stdout write here would race Textual's init. Direct
-# tty write lands before Textual takes over and survives until
-# Textual issues its own clear.
+# bty-tui is about to claim stdio and our exec replaces this
+# process; a stdout write here would race Rich's init. Direct
+# tty write lands before Rich takes over and survives until
+# Rich issues its own clear.
 {
     printf '\033c'  # ESC c -> full terminal reset, clears any
                     # plymouth / agetty leftover that didn't clean up.
@@ -79,10 +86,12 @@ fi
         printf '    MAC     : %s\n' "${MAC}"
     fi
     printf '\n'
-    printf '  Python + Textual init + catalog fetch typically take\n'
-    printf '  5-30s on first boot depending on hardware and network.\n'
-    printf '  If this banner stays for more than ~60s, check\n'
-    printf '  journalctl -u bty-tui-on-tty1.service\n'
+    printf '  Python imports + catalog fetch (when ``--catalog`` is set)\n'
+    printf '  typically take 1-5s + up to 30s respectively. The TUI\n'
+    printf '  will print its own ``loading catalog ...`` line when it\n'
+    printf '  starts the fetch. If THIS banner stays > ~60s with no\n'
+    printf '  further output, check:\n'
+    printf '    journalctl -u bty-tui-on-tty1.service -b --no-pager\n'
     printf '\n'
 } > /dev/tty1 2>/dev/null || true
 
