@@ -4,9 +4,16 @@ Documentation=https://github.com/safl/bty
 # Run after the live env has DHCPed and network is up.
 After=network-online.target
 Wants=network-online.target
-# Don't keep retrying on a fresh boot if the script bailed because no
-# bty.* params were on cmdline (operator booted interactively for
-# debug); in that case it exits 0 and we leave the env alone.
+# Take tty1 away from agetty so its login banner does not
+# re-paint over our progress messages. Mirrors the pattern
+# bty-tui-on-tty1.service uses for the interactive path.
+# Without this, operators on a framebuffer-only console see
+# agetty's blinking-cursor login prompt while the flash runs
+# silently in the background; the journal entries we emit go
+# to /dev/console which on most cmdlines resolves to ttyS0,
+# i.e. nowhere visible without a serial console attached.
+Conflicts=getty@tty1.service
+Before=getty@tty1.service
 
 [Service]
 Type=oneshot
@@ -14,6 +21,9 @@ ExecStart=/usr/local/sbin/bty-flash-on-boot
 RemainAfterExit=yes
 # Mirror stdout/stderr to the active console so the operator watching
 # the bare-metal/VM screen sees flash progress without journalctl.
+# The script ALSO writes every progress line to /dev/tty1 via the
+# ``say()`` helper, so framebuffer-only operators see output even
+# when /dev/console points at an unattached serial port.
 StandardOutput=journal+console
 StandardError=journal+console
 

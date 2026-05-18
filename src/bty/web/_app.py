@@ -493,13 +493,34 @@ def create_app(
             # without digging through dnsmasq logs.
             target_disk_serial = machine.get("target_disk_serial")
             image_name = _flash_target_for_ref(str(ref))
+            image_format = _flash_format_for_ref(str(ref))
             if image_name is not None and target_disk_serial:
                 template = jinja.get_template("ipxe_flash.j2")
+                # Percent-encode the name segment of the URL: catalog
+                # names are human text (``nosi fedora-sysdev
+                # (x86_64, rolling)``) and unencoded spaces inside
+                # the URL break ``shlex.split`` of /proc/cmdline in
+                # the live env, truncating bty.image_url at the
+                # first space. Server route /images/{key}/{name:path}
+                # decodes back to the original name; routing is
+                # by ``key`` only so the encoded form is decorative.
+                image_name_encoded = urllib.parse.quote(image_name, safe="")
+                # ``image_format`` (img.gz / img.zst / qcow2 / ...)
+                # rides on the cmdline as ``bty.image_format=...`` so
+                # the live env can rename the downloaded file with
+                # the right extension. Without this hint,
+                # ``bty flash`` validates the local path's filename
+                # for a recognised extension and rejects on names
+                # without one. Empty string when the catalog row
+                # has no format field; bty-flash-on-boot tolerates
+                # the absence and falls back to extension detection.
                 rendered = template.render(
                     mac=normalised,
                     machine=machine,
                     host=host,
                     image_name=image_name,
+                    image_name_encoded=image_name_encoded,
+                    image_format=image_format or "",
                     flash_key=str(ref),
                     target_disk_serial=target_disk_serial,
                 )
@@ -865,6 +886,28 @@ def create_app(
         if row is None:
             return None
         return str(row["name"])
+
+    def _flash_format_for_ref(ref: str) -> str | None:
+        """Resolve a ``bty_image_ref`` to the entry's declared
+        ``format`` (img.gz / img.zst / qcow2 / ...). Goes onto the
+        ipxe_flash.j2 kernel cmdline as ``bty.image_format=...``
+        so the live env can rename the downloaded file with the
+        right extension before ``bty flash`` runs.
+
+        Returns ``None`` for an orphaned binding (no catalog row)
+        or when the catalog row has no ``format`` field. The iPXE
+        template renders ``None`` as the empty string; bty-flash-
+        on-boot tolerates the absence and falls back to
+        extension-based detection.
+        """
+        with _db.open_db(state_path) as conn:
+            row = conn.execute(
+                "SELECT format FROM catalog_entries WHERE bty_image_ref = ?",
+                (ref,),
+            ).fetchone()
+        if row is None or row["format"] is None:
+            return None
+        return str(row["format"])
 
     def _resolve_image_for_key(key: str) -> Path | None:
         """Resolve a 64-hex key (bty_image_ref or disk_image_sha) to a

@@ -30,6 +30,6 @@ set bty-base http://{{ host }}
 # disk's current serial -- preventing the operator's pick from
 # becoming "wrong disk wiped" when a drive is swapped between
 # inventory and flash time.
-kernel ${bty-base}/boot/bty-netboot-x86_64.vmlinuz boot=live fetch=${bty-base}/boot/bty-netboot-x86_64.squashfs components quiet console=tty0 console=ttyS0,115200 plymouth.enable=0 modprobe.blacklist=nouveau nouveau.modeset=0 bty.server=${bty-base} bty.mac={{ mac }} bty.image_url=${bty-base}/images/{{ flash_key }}/{{ image_name }} bty.target_disk_serial={{ target_disk_serial }}
+kernel ${bty-base}/boot/bty-netboot-x86_64.vmlinuz boot=live fetch=${bty-base}/boot/bty-netboot-x86_64.squashfs components quiet console=tty0 console=ttyS0,115200 plymouth.enable=0 modprobe.blacklist=nouveau nouveau.modeset=0 bty.server=${bty-base} bty.mac={{ mac }} bty.image_url=${bty-base}/images/{{ flash_key }}/{{ image_name_encoded }} bty.image_format={{ image_format }} bty.target_disk_serial={{ target_disk_serial }}
 initrd ${bty-base}/boot/bty-netboot-x86_64.initrd
 boot

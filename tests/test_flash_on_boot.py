@@ -136,6 +136,43 @@ def test_main_short_circuits_on_interactive_mode(
     assert "bty-tui-on-tty1.service" in captured.out
 
 
+def test_say_writes_to_stdout_and_mirrors_to_tty1(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Regression: ``bty-flash-on-boot.service`` runs on systems
+    whose ``/dev/console`` is a serial port that isn't physically
+    attached -- ``StandardOutput=journal+console`` then dumps
+    progress nowhere visible. The operator on the local
+    framebuffer sees agetty's blinking-cursor prompt while the
+    flash happens silently.
+
+    Fix: the script's ``say()`` helper writes to stdout/stderr
+    (which the unit pipes to journal+console) AND opens
+    /dev/tty1 directly to mirror the same line. This test
+    points the tty1 path at a tmp file and asserts both
+    destinations receive the message.
+    """
+    mod = _load_module()
+
+    fake_tty = tmp_path / "tty1"
+    # Redirect the say() helper's /dev/tty1 open to our tmp file.
+    real_open = mod.open if hasattr(mod, "open") else __builtins__["open"]  # type: ignore[index]
+
+    def _open(path: object, *args: object, **kwargs: object):  # type: ignore[no-untyped-def]
+        if isinstance(path, str) and path == "/dev/tty1":
+            return real_open(fake_tty, *args, **kwargs)  # type: ignore[operator]
+        return real_open(path, *args, **kwargs)  # type: ignore[operator]
+
+    monkeypatch.setattr("builtins.open", _open)
+    mod.say("hello from flash-on-boot")
+    captured = capsys.readouterr()
+    assert "hello from flash-on-boot" in captured.out, captured
+    assert fake_tty.exists(), "tty1 mirror file not created"
+    assert "hello from flash-on-boot" in fake_tty.read_text()
+
+
 def test_main_runs_flash_path_when_interactive_mode_absent(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

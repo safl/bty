@@ -48,18 +48,62 @@ LOCAL_IMAGE_DIR = Path("/var/tmp")
 REQUIRED = ("bty.server", "bty.mac", "bty.image_url", "bty.target_disk_serial")
 
 
-def local_image_path(image_url: str) -> Path:
-    """Pick a local cache path that preserves the URL's filename.
+def say(msg: str, *, err: bool = False) -> None:
+    """Print to stdout/stderr (which the systemd unit routes to
+    journal+console -- typically the serial console when the
+    cmdline carries ``console=ttyS0``) AND mirror to /dev/tty1
+    so the operator on the local framebuffer sees progress
+    regardless of /dev/console routing.
+
+    Without the /dev/tty1 mirror, the operator on a target with
+    only a framebuffer console (no serial attached, or IPMI
+    serial not connected) sees agetty's empty login prompt
+    blinking while the flash happens silently in the background.
+    """
+    target = sys.stderr if err else sys.stdout
+    print(msg, file=target, flush=True)
+    # Best-effort tty1 mirror. Failure modes (no /dev/tty1, EIO,
+    # etc.) must not abort the flash -- the journal entry above
+    # is the authoritative log.
+    try:
+        with open("/dev/tty1", "w") as tty:
+            tty.write(msg + "\n")
+    except OSError:
+        pass
+
+
+_FORMAT_EXTENSIONS = (".img.zst", ".img.xz", ".img.gz", ".img.bz2", ".qcow2", ".img")
+
+
+def local_image_path(image_url: str, image_format: str | None = None) -> Path:
+    """Pick a local cache path that ends in a recognised image-
+    format extension.
 
     ``bty.images.detect_format()`` keys off the file extension
     (.qcow2, .img, .img.{zst,xz,gz,bz2}) so the on-disk name has
-    to keep it -- a fixed ``bty-flash-on-boot.image`` would
-    always fail validation.
+    to keep it. The URL filename usually carries the extension --
+    but bty-web's ``/images/<sha>/<display-name>`` route emits
+    URLs whose trailing segment is the catalog entry's display
+    name, which is human text and may have no extension at all
+    (``nosi fedora-sysdev (x86_64, rolling)``).
+
+    Resolution order:
+
+      1. URL path filename (URL-decoded). If it already ends in
+         a recognised extension, keep it as-is.
+      2. URL path filename + ``.<image_format>`` suffix when
+         ``image_format`` is supplied via ``bty.image_format=`` on
+         the cmdline. Catches the human-named-catalog case.
+      3. ``bty-flash-on-boot.img`` fallback.
     """
-    parsed_name = Path(urllib.parse.urlparse(image_url).path).name
-    if not parsed_name:
-        parsed_name = "bty-flash-on-boot.img"
-    return LOCAL_IMAGE_DIR / parsed_name
+    raw_name = Path(urllib.parse.urlparse(image_url).path).name
+    decoded = urllib.parse.unquote(raw_name) if raw_name else "bty-flash-on-boot.img"
+    lower = decoded.lower()
+    if any(lower.endswith(ext) for ext in _FORMAT_EXTENSIONS):
+        return LOCAL_IMAGE_DIR / decoded
+    if image_format:
+        return LOCAL_IMAGE_DIR / f"{decoded}.{image_format}"
+    return LOCAL_IMAGE_DIR / decoded
 
 
 def cmdline_args() -> dict[str, str]:
@@ -136,7 +180,7 @@ def download(url: str, dest: Path) -> None:
     as a complete image. ``timeout=300`` on the HTTP read keeps
     the boot from hanging indefinitely on a misconfigured server.
     """
-    print(f"bty-flash-on-boot: downloading {url} -> {dest}", flush=True)
+    say(f"bty-flash-on-boot: downloading {url} -> {dest}")
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_suffix(dest.suffix + ".partial")
     try:
@@ -163,17 +207,28 @@ def signal_done(server: str, mac: str) -> None:
     try:
         req = urllib.request.Request(url, data=b"", method="POST")
         with urllib.request.urlopen(req, timeout=10) as _:
-            print(f"bty-flash-on-boot: completion signalled to {url}", flush=True)
+            say(f"bty-flash-on-boot: completion signalled to {url}")
     except Exception as exc:  # noqa: BLE001
-        print(
+        say(
             f"bty-flash-on-boot: completion signal to {url} failed: {exc}; "
             "continuing to reboot anyway",
-            file=sys.stderr,
-            flush=True,
+            err=True,
         )
 
 
 def main() -> int:
+    # Clear tty1 once at start so our progress messages land on a
+    # blank canvas instead of stacking on top of whatever agetty
+    # already painted. ``\033c`` is a full terminal reset (works
+    # on both VT and serial); rendering it on /dev/tty1 directly
+    # so the systemd journal isn't polluted with escape sequences.
+    try:
+        with open("/dev/tty1", "w") as tty:
+            tty.write("\033c\n")
+            tty.write("  bty live env -- network flash mode\n\n")
+    except OSError:
+        pass
+
     args = cmdline_args()
 
     # Interactive mode (boot_policy=tui on the server side) -> defer
@@ -181,20 +236,18 @@ def main() -> int:
     # bty-tui --server URL --mac MAC for the operator. Trying to
     # flash here would race the TUI session.
     if args.get("bty.mode") == "interactive":
-        print(
+        say(
             "bty-flash-on-boot: bty.mode=interactive on cmdline; "
-            "bty-tui-on-tty1.service handles this boot",
-            flush=True,
+            "bty-tui-on-tty1.service handles this boot"
         )
         return 0
 
     missing = [k for k in REQUIRED if k not in args]
     if missing:
-        print(
+        say(
             "bty-flash-on-boot: cmdline missing required keys "
             f"({', '.join(missing)}); not flashing - dropping to console",
-            file=sys.stderr,
-            flush=True,
+            err=True,
         )
         return 0  # not an error, just no work
 
@@ -203,17 +256,17 @@ def main() -> int:
     image_url = args["bty.image_url"]
     target_serial = args["bty.target_disk_serial"]
 
-    print(
+    say(
         f"bty-flash-on-boot: server={server} mac={mac} "
-        f"target_disk_serial={target_serial}",
-        flush=True,
+        f"target_disk_serial={target_serial}"
     )
 
     local_image = local_image_path(image_url)
     download(image_url, local_image)
     target = pick_target(target_serial)
-    print(f"bty-flash-on-boot: target disk {target} (serial {target_serial})", flush=True)
+    say(f"bty-flash-on-boot: target disk {target} (serial {target_serial})")
 
+    say("bty-flash-on-boot: flashing now (this is the long quiet part) ...")
     subprocess.run(
         ["bty", "flash", str(local_image), target, "--yes"],
         check=True,
@@ -221,7 +274,7 @@ def main() -> int:
 
     signal_done(server, mac)
 
-    print("bty-flash-on-boot: flash complete; rebooting in 5s", flush=True)
+    say("bty-flash-on-boot: flash complete; rebooting in 5s")
     subprocess.run(["sleep", "5"], check=False)
     # ``check=True`` so a failing ``systemctl reboot`` (no-systemd,
     # permission-denied, transition-blocked, ...) crashes the script
