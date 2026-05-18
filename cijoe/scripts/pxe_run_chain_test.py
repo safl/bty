@@ -111,6 +111,12 @@ def main(args, cijoe):
             HEALTHZ_TIMEOUT,
             "bty-web /healthz",
         ):
+            # On timeout the server log is the only window into what's
+            # happening inside the VM -- without it, a /healthz miss
+            # looks identical for "cloud-init slow", "wheel install
+            # broken", "bty-web crashed", "network never came up".
+            log.error("server VM serial-console tail (last 300 lines):")
+            _dump_tail(server_log, 300)
             return errno.ETIMEDOUT
 
         log.info("POST /ui/login (PAM, default appliance credential)")
@@ -169,6 +175,8 @@ def main(args, cijoe):
             HEALTHZ_TIMEOUT,
             "sshd",
         ):
+            log.error("server VM serial-console tail (last 300 lines):")
+            _dump_tail(server_log, 300)
             return errno.ETIMEDOUT
         log.info("Configuring full-DHCP for the isolated PXE segment via SSH")
         _ssh_setup_test_dhcp("127.0.0.1", ssh_port, cfg)

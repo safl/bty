@@ -1,12 +1,17 @@
 [Unit]
 Description=bty boot banner -- step 3 of 3 (multi-user reached)
 Documentation=https://github.com/safl/bty
-# Just before bty-tui-on-tty1 / bty-flash-on-boot take tty1.
-# If the operator sees step 3 but bty-tui doesn't appear,
-# the wedge is in bty-tui itself (slow Textual / Rich init,
-# catalog fetch hang, etc.) -- not in the boot chain.
+# Just after multi-user.target. The banner is informational --
+# DO NOT add ``Before=bty-tui-on-tty1.service`` or
+# ``Before=bty-flash-on-boot.service`` here even though it would
+# read nicely: those units are themselves ``WantedBy=multi-user.
+# target``, so ordering this unit ``Before=`` them while also
+# being ``After=multi-user.target`` creates an ordering cycle.
+# systemd silently breaks the cycle by dropping one of the units
+# from the boot transaction. Same trap as the server's
+# ``bty-banner-late.service`` -- surfaced on v0.22.4 when bty-web
+# got dropped on the server appliance.
 After=multi-user.target
-Before=bty-tui-on-tty1.service bty-flash-on-boot.service
 
 [Service]
 Type=oneshot

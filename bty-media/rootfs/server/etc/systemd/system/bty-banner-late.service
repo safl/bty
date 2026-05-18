@@ -1,12 +1,17 @@
 [Unit]
 Description=bty boot banner -- step 3 of 3 (multi-user reached)
 Documentation=https://github.com/safl/bty
-# Just before bty-web becomes reachable. If the operator sees
-# step 3 but bty-web's port 8080 never answers, the wedge is in
-# bty-web itself (cloud-init wheel install, PAM misconfig,
-# port already-bound, ...) -- not in the boot chain.
+# Just after multi-user.target. The banner is informational --
+# DO NOT add ``Before=bty-web.service`` here even though it would
+# read nicely: bty-web.service is itself ``WantedBy=multi-user.
+# target``, so ordering this unit ``Before=`` it while also being
+# ``After=multi-user.target`` creates an ordering cycle. systemd
+# silently breaks the cycle by dropping bty-web.service from the
+# boot transaction (caught only by ``journalctl | grep 'ordering
+# cycle'``); the appliance then comes up with no /healthz and the
+# release fails at test-pxe. Surfaced on v0.22.4 -- never reuse
+# the Before= relation here.
 After=multi-user.target
-Before=bty-web.service
 
 [Service]
 Type=oneshot

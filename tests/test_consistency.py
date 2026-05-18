@@ -484,11 +484,19 @@ def test_boot_banner_files_synced_across_live_env_and_server_trees() -> None:
     A manual ``cp`` is the current sync mechanism; this test
     keeps the two copies honest.
 
-    Exception: ``bty-banner-late.service`` has a deliberately
-    different ``Before=`` directive per tree (live env ->
-    ``bty-tui-on-tty1.service bty-flash-on-boot.service``,
-    server -> ``bty-web.service``). Diff the unit minus that
-    line and assert the rest matches.
+    Exception: ``bty-banner-late.service`` has a slightly
+    divergent ``[Unit]`` block (different commentary, different
+    references in the doc comment) but the ``[Service]`` and
+    ``[Install]`` sections must match byte-for-byte. Critically:
+    NEITHER copy may carry a ``Before=`` directive. The unit is
+    ``After=multi-user.target`` AND ``WantedBy=multi-user.target``;
+    adding ``Before=<anything-also-WantedBy-multi-user.target>``
+    creates an ordering cycle that systemd silently breaks by
+    dropping a unit from the boot transaction. This bit us on
+    v0.22.4 when the appliance's ``Before=bty-web.service`` got
+    bty-web silently removed from the boot, so /healthz never
+    answered. Test guards both trees against re-introducing the
+    trap.
     """
     import hashlib
 
@@ -543,6 +551,20 @@ def test_boot_banner_files_synced_across_live_env_and_server_trees() -> None:
     assert _section(live_late, "Install") == _section(server_late, "Install"), (
         "bty-banner-late.service [Install] block drifted; reconcile."
     )
+
+    # Cycle-trap guard: NEITHER copy may have a ``Before=`` directive
+    # while being ``After=multi-user.target`` + ``WantedBy=multi-user.
+    # target``. See the docstring above for the v0.22.4 incident.
+    for label, body in (("live", live_late), ("server", server_late)):
+        unit_section = _section(body, "Unit")
+        for line in unit_section.splitlines():
+            assert not line.strip().startswith("Before="), (
+                f"bty-banner-late.service ({label} tree) has a "
+                f"``Before=`` directive: {line.strip()!r}. This "
+                f"creates an ordering cycle with the multi-user."
+                f"target wantedby; systemd will silently drop a "
+                f"service from boot. Drop the Before= line."
+            )
 
     # Server has the marker files; live env does not.
     server_variant = server / "etc" / "bty" / "variant"
