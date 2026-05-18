@@ -446,13 +446,7 @@ def test_boot_banner_script_and_units_exist_and_are_wired() -> None:
         contains ``systemctl enable bty-banner-<phase>.service``
         for each phase.
     """
-    live_root = (
-        REPO_ROOT
-        / "bty-media"
-        / "live-build"
-        / "config"
-        / "includes.chroot"
-    )
+    live_root = REPO_ROOT / "bty-media" / "live-build" / "config" / "includes.chroot"
     script = live_root / "usr" / "local" / "sbin" / "bty-boot-banner"
     assert script.is_file(), f"missing banner script: {script}"
     assert script.stat().st_mode & 0o111, f"banner script not +x: {script}"
@@ -498,13 +492,7 @@ def test_boot_banner_files_synced_across_live_env_and_server_trees() -> None:
     """
     import hashlib
 
-    live = (
-        REPO_ROOT
-        / "bty-media"
-        / "live-build"
-        / "config"
-        / "includes.chroot"
-    )
+    live = REPO_ROOT / "bty-media" / "live-build" / "config" / "includes.chroot"
     server = REPO_ROOT / "bty-media" / "rootfs" / "server"
 
     # Script: byte-for-byte identical.

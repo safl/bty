@@ -393,8 +393,7 @@ def test_mascot_logo_is_in_sync_across_assets() -> None:
     web_static = repo_root / "src" / "bty" / "web" / "_static" / "bty-mascot.png"
 
     digests = {
-        path: hashlib.sha256(path.read_bytes()).hexdigest()
-        for path in (canonical, web_static)
+        path: hashlib.sha256(path.read_bytes()).hexdigest() for path in (canonical, web_static)
     }
     distinct = set(digests.values())
     assert len(distinct) == 1, (
