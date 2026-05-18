@@ -103,6 +103,22 @@ class CatalogEntry:
     size_bytes: int | None = None
     description: str | None = None
 
+    @property
+    def ref(self) -> str:
+        """Stable provenance id, derived from ``src``.
+
+        ``image_ref_for_src(canonicalise_src(self.src))`` -- a
+        64-hex sha256 over the canonical URL. Always present
+        (it's pure math on ``src``); same value across processes,
+        operators, and time. Distinct from ``sha256`` (which is
+        the *observed content* hash and can be ``None``).
+
+        Exposed as a property rather than a stored field so the
+        invariant ``ref == image_ref_for_src(src)`` cannot drift
+        -- there's no second copy to get out of sync.
+        """
+        return image_ref_for_src(self.src)
+
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> Self:
         for required in ("name", "src"):
@@ -118,6 +134,30 @@ class CatalogEntry:
                 raise CatalogError(
                     f"manifest entry {raw['name']!r}: sha256 must be a 64-char "
                     f"lower-case hex string, got {sha!r}"
+                )
+        # Trust-but-verify: if the inbound dict carries a ``ref``
+        # field, recompute it from ``src`` and reject on mismatch.
+        # Catches drift between a producer's canonicalisation and
+        # ours, and prevents a malformed import from binding
+        # machines to bytes the operator didn't intend. Bare-text
+        # ``ref`` is normalised to lower-case hex like ``sha256``.
+        if "ref" in raw and raw["ref"] is not None:
+            supplied_ref = str(raw["ref"]).strip().lower()
+            try:
+                expected_ref = image_ref_for_src(src)
+            except ValueError as exc:
+                raise CatalogError(
+                    f"manifest entry {raw['name']!r}: cannot verify ``ref`` "
+                    f"because ``src`` is malformed: {exc}"
+                ) from exc
+            if supplied_ref != expected_ref:
+                raise CatalogError(
+                    f"manifest entry {raw['name']!r}: ``ref`` mismatch -- "
+                    f"supplied {supplied_ref!r} but image_ref_for_src(src) "
+                    f"= {expected_ref!r}. The ref must equal "
+                    f"sha256(canonicalise_src(src)); either the producer's "
+                    f"canonicalisation differs from ours or the entry was "
+                    f"tampered with."
                 )
         return cls(
             name=str(raw["name"]),

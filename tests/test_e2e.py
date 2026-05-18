@@ -1416,28 +1416,23 @@ def test_e2e_ui_images_error_query_param_renders_then_clears(
 # ----------------------------------------------------------------------
 
 
-def test_e2e_get_images_does_not_yet_surface_bty_image_ref(
+def test_e2e_get_images_surfaces_ref_derivable_from_src(
     app_client: TestClient,
 ) -> None:
-    """Audit / known-gap test: the JSON ``/images`` listing
-    currently does NOT carry ``bty_image_ref``. The ImageEntry
-    Pydantic model exposes ``name``, ``format``, ``size_bytes``,
-    ``url``, ``sha_short``, ``cached`` -- no provenance ref.
+    """The JSON ``/images`` listing carries ``ref`` for every
+    entry. The value is ``image_ref_for_src(canonicalise_src(
+    src))`` -- the same stable provenance id used as the
+    catalog_entries primary key + machine binding target.
 
-    The ref is the canonical binding key (per the schema in
-    ``catalog_entries``: ``bty_image_ref TEXT PRIMARY KEY``). The
-    /ui/machines/<mac> dropdown queries the DB directly so it
-    has access; an external operator script using the JSON API
-    has to derive the ref via ``image_ref_for_src(src)`` on the
-    client side instead.
-
-    This test PINS the current state so a future change that
-    starts surfacing the ref needs to update this test. It
-    also documents the gap for whoever decides whether to close
-    it.
+    Pin: the ``ref`` field is present, is a 64-hex string, and
+    recomputes to the same value the response carried. That last
+    check is the trust-but-verify contract -- a client that
+    re-uses the ref on a subsequent write expects the server's
+    canonicalisation to be deterministic.
     """
     state_path: Path = app_client.app.state.state_path  # type: ignore[attr-defined]
-    ref = "1" * 64
+    src = "https://example.invalid/json-listing"
+    expected_ref = _catalog.image_ref_for_src(src)
     with _bty_db.open_db(state_path) as conn:
         conn.execute(
             "INSERT INTO catalog_entries "
@@ -1445,8 +1440,8 @@ def test_e2e_get_images_does_not_yet_surface_bty_image_ref(
             "sha_url, format, size_bytes, description, added_at) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
-                ref,
-                "https://example.invalid/json-listing",
+                expected_ref,
+                src,
                 "2" * 64,
                 "Json Listing Entry",
                 None,
@@ -1464,16 +1459,121 @@ def test_e2e_get_images_does_not_yet_surface_bty_image_ref(
     matching = [row for row in rows if row.get("name") == "Json Listing Entry"]
     assert matching, f"entry not in /images JSON: {rows}"
     row = matching[0]
-    # Currently absent -- audit the gap so a future change is
-    # noticed. The minimum a script needs to bind today: sha and
-    # src/url (to compute the ref client-side).
-    assert "bty_image_ref" not in row, (
-        f"bty_image_ref now surfaces on /images JSON: {row}. "
-        "Update this test (and probably document the new field "
-        "in the API ref + the Pydantic model docstring)."
+    assert "ref" in row, f"row missing 'ref': {row}"
+    assert row["ref"] == expected_ref, (
+        f"server ref {row['ref']!r} does not equal image_ref_for_src({src!r}) = {expected_ref!r}"
     )
-    # Sanity check what IS there (the binding inputs an external
-    # script needs).
-    assert "url" in row
-    assert "sha_short" in row
-    assert "name" in row
+    # ref must be 64-hex.
+    import re as _re
+
+    assert _re.fullmatch(r"[0-9a-f]{64}", row["ref"]), row["ref"]
+
+
+def test_e2e_catalog_entry_add_rejects_mismatched_ref(
+    app_client: TestClient,
+) -> None:
+    """Trust-but-verify: ``POST /catalog/entries`` accepts an
+    optional ``ref`` field. When supplied, the server recomputes
+    ``image_ref_for_src(image_url)`` and rejects mismatches with
+    422 + an operator-actionable error string naming both the
+    supplied and expected refs.
+
+    Catches: a client that read a ref from /images and forgot to
+    update it after the operator changed the URL, OR a producer
+    whose canonicalisation differs from the server's. Either way,
+    the binding would be wrong -- 422 surfaces the disagreement
+    before a row lands.
+    """
+    image_url = "https://example.invalid/ref-verify"
+    wrong_ref = "0" * 64
+
+    r = app_client.post(
+        "/catalog/entries",
+        json={"image_url": image_url, "sha_url": None, "ref": wrong_ref},
+        cookies=AUTH,
+    )
+    assert r.status_code == 422, r.text
+    body = r.json()["detail"]
+    assert "ref mismatch" in body, body
+    assert wrong_ref in body, body
+    # Computed ref must also appear so the operator can verify
+    # client-side what the server expected.
+    expected = _catalog.image_ref_for_src(image_url)
+    assert expected in body, body
+
+
+def test_e2e_catalog_entry_add_accepts_matching_ref(
+    app_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The happy path of trust-but-verify: supplying the correct
+    ref alongside the URL accepts. The ref is optional; this
+    test asserts the verification path doesn't reject a legit
+    client.
+    """
+    from bty.web import _app as _web_app
+
+    monkeypatch.setattr(_web_app, "_head_content_length", lambda _url: None)
+    image_url = "https://example.invalid/ref-ok"
+    right_ref = _catalog.image_ref_for_src(image_url)
+
+    r = app_client.post(
+        "/catalog/entries",
+        json={"image_url": image_url, "sha_url": None, "ref": right_ref},
+        cookies=AUTH,
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["bty_image_ref"] == right_ref
+
+
+def test_e2e_catalog_load_bytes_verifies_inbound_ref_field(
+    tmp_path: Path,
+) -> None:
+    """The TOML schema accepts an optional ``ref`` per entry. On
+    parse, ``CatalogEntry.from_dict`` recomputes the ref from
+    ``src`` and raises ``CatalogError`` on mismatch -- the same
+    trust-but-verify pattern applied at the catalog-loader
+    boundary so an imported catalog can carry refs.
+    """
+    src = "https://example.invalid/loader-verify"
+    expected = _catalog.image_ref_for_src(src)
+    # Matching ref: OK.
+    body = (
+        b"version = 1\n"
+        b'[[images]]\nname = "ok"\nsrc = "' + src.encode() + b'"\n'
+        b'ref = "' + expected.encode() + b'"\n'
+        b'sha256 = "' + b"a" * 64 + b'"\n'
+        b'format = "img.gz"\n'
+    )
+    parsed = _catalog.load_bytes(body, source="<test>")
+    assert parsed.entries[0].ref == expected
+
+    # Mismatched ref: rejected.
+    bad = body.replace(expected.encode(), (b"0" * 64))
+    with pytest.raises(_catalog.CatalogError) as exc_info:
+        _catalog.load_bytes(bad, source="<test>")
+    assert "mismatch" in str(exc_info.value)
+
+
+def test_e2e_catalog_entry_ref_property_always_equals_image_ref_for_src() -> None:
+    """``CatalogEntry.ref`` is a property derived from
+    ``image_ref_for_src(src)`` -- not a stored field. Pin the
+    invariant across a spread of src shapes (http, oras, file).
+
+    A future refactor that stores ref as a separate field must
+    keep this property contract -- the test asserts the value
+    matches the function regardless of how it's implemented.
+    """
+    for src in (
+        "https://example.com/foo.img.gz",
+        "http://server/path/to/img",
+        "oras://ghcr.io/owner/repo:tag",
+        "file://relative/path.qcow2",
+    ):
+        entry = _catalog.CatalogEntry(
+            name="x",
+            src=src,
+            sha256=None,
+            format="img.gz",
+        )
+        assert entry.ref == _catalog.image_ref_for_src(src)

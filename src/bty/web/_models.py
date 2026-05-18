@@ -204,6 +204,14 @@ class ImageEntry(BaseModel):
     format: str
     size_bytes: int
     url: str
+    # Stable provenance id (``sha256(canonicalise_src(src))``).
+    # Always derivable from ``src``, surfaced here so external
+    # scripts can bind a machine to this entry without recomputing
+    # the canonicalisation themselves. The PUT /machines/<mac>
+    # binding key (``bty_image_ref``) takes exactly this value;
+    # the bare ``ref`` name is used in the image-context (where
+    # it's obviously the image's ref) to keep the field tight.
+    ref: str = Field(..., pattern=r"^[0-9a-f]{64}$")
     sha_short: str | None = None
     cached: bool = False
 
@@ -307,3 +315,34 @@ class CatalogEntryAdd(BaseModel):
         pattern=r"^(?:https?://[^\s/?#]+(?:[/?#]\S*)?|oras://[^\s/?#]+/\S+)$",
     )
     sha_url: str | None = Field(default=None, pattern=r"^https?://[^\s/?#]+(?:[/?#]\S*)?$")
+    # Optional client-supplied ref. When set, the server recomputes
+    # ``image_ref_for_src(image_url)`` and rejects with 422 if it
+    # doesn't match. Trust-but-verify: any client that read an
+    # entry's ref from /images and is round-tripping it back here
+    # is confirming "yes, this is the entry I think it is" -- a
+    # mismatch means our canonicalisation differs from theirs or
+    # the data was tampered with mid-flight. Always-derivable so
+    # not required; omit to let the server compute fresh.
+    ref: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+
+    def verify_ref(self) -> None:
+        """Recompute the canonical ref from ``image_url`` and raise
+        ``ValueError`` if the inbound ``ref`` (if any) doesn't
+        match.
+
+        Called by the endpoint after Pydantic validation; raising
+        ``ValueError`` lets the endpoint translate to a clean 422
+        with operator-actionable detail (the computed ref + the
+        supplied one).
+        """
+        if self.ref is None:
+            return
+        from bty.catalog import image_ref_for_src
+
+        expected = image_ref_for_src(self.image_url)
+        if self.ref != expected:
+            raise ValueError(
+                f"ref mismatch: supplied {self.ref!r} but "
+                f"image_ref_for_src({self.image_url!r}) = {expected!r}. "
+                "The ref must equal sha256(canonicalise_src(image_url))."
+            )

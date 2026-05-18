@@ -1219,6 +1219,7 @@ def create_app(
                     format=u.format or "",
                     size_bytes=u.size_bytes or 0,
                     url=url,
+                    ref=u.ref,
                     sha_short=u.sha256[:12] if u.sha256 else None,
                     cached=u.cached,
                 )
@@ -1524,8 +1525,20 @@ def create_app(
         and ``format`` is detected from the title. ``sha_url`` is
         ignored for oras refs (the manifest is authoritative).
 
-        409 if a row with the same image_url already exists.
+        409 if a row with the same image_url already exists. 422
+        if the body carries a ``ref`` that doesn't match
+        ``image_ref_for_src(image_url)``.
         """
+        # Trust-but-verify: if the client supplied a ``ref``,
+        # recompute it from the URL and reject mismatches at 422.
+        try:
+            body.verify_ref()
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=str(exc),
+            ) from exc
+
         # Variables shared across the oras / http branches. Declared
         # up front so mypy sees a single binding (the oras branch
         # narrows ``sha256`` to ``str``, which would clash with a
