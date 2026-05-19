@@ -113,14 +113,17 @@ wheel:
 .PHONY: tui
 IMAGE_ROOT ?= /tmp/bty-images
 TUI_DEFAULT_CATALOG := https://github.com/safl/bty/releases/latest/download/catalog.toml
+# v0.22.11+: ``bty`` is the merged console script. Image-root comes
+# from ``BTY_IMAGE_ROOT`` (no ``--image-root`` flag any more) and the
+# only catalog input is ``--catalog URL`` (no separate default-knob).
 tui:
 	@mkdir -p $(IMAGE_ROOT)
 ifeq ($(CATALOG),default)
-	$(UV) run bty-tui --image-root $(IMAGE_ROOT) --catalog $(TUI_DEFAULT_CATALOG)
+	BTY_IMAGE_ROOT=$(IMAGE_ROOT) $(UV) run bty --catalog $(TUI_DEFAULT_CATALOG)
 else ifdef CATALOG
-	$(UV) run bty-tui --image-root $(IMAGE_ROOT) --catalog $(CATALOG)
+	BTY_IMAGE_ROOT=$(IMAGE_ROOT) $(UV) run bty --catalog $(CATALOG)
 else
-	$(UV) run bty-tui --image-root $(IMAGE_ROOT)
+	BTY_IMAGE_ROOT=$(IMAGE_ROOT) $(UV) run bty
 endif
 
 # ---------- Media (bty-media/ via cijoe) ---------------------------------

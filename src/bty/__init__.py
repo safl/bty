@@ -2,10 +2,13 @@
 
 Top-level package. Subpackages:
 
-- ``bty.cli`` - main command-line interface (image inspection,
-  catalog management, flashing).
-- ``bty.tui`` - terminal UI; requires the ``[tui]`` extra.
-- ``bty.web`` - HTTP server with browser UI; requires the ``[web]`` extra.
+- ``bty.tui`` - the operator-facing wizard / scripted flasher
+  (``bty`` console script); requires the ``[tui]`` extra.
+- ``bty.web`` - HTTP server with browser UI (``bty-web`` console
+  script); requires the ``[web]`` extra.
+- ``bty.flash`` / ``bty.images`` / ``bty.catalog`` / ``bty.disks``
+  / ``bty.oras`` - the library modules ``bty.tui`` + ``bty.web``
+  share.
 """
 
 from __future__ import annotations

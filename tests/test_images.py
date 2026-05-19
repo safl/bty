@@ -114,9 +114,10 @@ def test_inspect_image_raw_img_no_external_tool(tmp_path: Path) -> None:
 
 
 def test_inspect_image_hints_about_tarballs(tmp_path: Path) -> None:
-    """``bty inspect foo.tar.gz`` doesn't return a confusing
+    """``inspect_image(foo.tar.gz)`` doesn't return a confusing
     blank record; instead it surfaces a friendly ``detail_error``
-    that tells the operator to extract first."""
+    that tells the operator to extract first. Surfaced in the
+    wizard's flash-plan-rejected panel."""
     tarball = tmp_path / "ubuntu-22.04.tar.gz"
     tarball.write_bytes(b"\x1f\x8b" + b"\0" * 30)  # gzip magic + padding
     info = images.inspect_image(tarball)
@@ -126,10 +127,11 @@ def test_inspect_image_hints_about_tarballs(tmp_path: Path) -> None:
 
 
 def test_inspect_image_hints_about_unrecognised_extensions(tmp_path: Path) -> None:
-    """``bty inspect README.md`` (a real but non-image file) returns
-    a clear ``detail_error`` naming the supported extensions, rather
-    than a confusing blank ``format: ''`` record. The CLI prints
-    ``detail_error`` so the operator sees the actionable hint."""
+    """``inspect_image(README.md)`` (a real but non-image file)
+    returns a clear ``detail_error`` naming the supported
+    extensions, rather than a confusing blank ``format: ''``
+    record. The wizard surfaces ``detail_error`` so the operator
+    sees the actionable hint."""
     other = tmp_path / "README.md"
     other.write_text("# notes\n")
     info = images.inspect_image(other)
@@ -143,9 +145,9 @@ def test_inspect_image_hints_about_unrecognised_extensions(tmp_path: Path) -> No
 
 
 def test_inspect_image_handles_bri_descriptor(tmp_path: Path) -> None:
-    """``bty inspect foo.bri`` returns the descriptor's
-    parsed contents under ``detail`` rather than blowing up the way
-    a regular image probe would on a non-image extension."""
+    """``inspect_image(foo.bri)`` returns the descriptor's parsed
+    contents under ``detail`` rather than blowing up the way a
+    regular image probe would on a non-image extension."""
     bri = tmp_path / "demo.bri"
     bri.write_text(
         'url = "https://example.invalid/demo.img.gz"\nname = "Demo"\ndescription = "demo"\n'

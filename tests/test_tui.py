@@ -656,6 +656,33 @@ def test_format_progress_bytes_handles_unknowns() -> None:
     assert tui_app._format_progress_bytes(None, None) == "? / ?"
 
 
+def test_emit_console_marker_writes_to_stderr_and_swallows_console_failure(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """``_emit_console_marker`` is the chain-test marker emitter. It
+    MUST write to ``sys.stderr`` so a workstation-side ``bty`` run
+    (no writable /dev/console) still surfaces the line, AND it MUST
+    swallow OSError from the /dev/console write so the auto-flash
+    path doesn't crash if the kernel console is missing / non-
+    writable. The chain test (cijoe/configs/test-pxe.toml) pins the
+    exact strings the live env emits; this guards the contract from
+    the Python side.
+    """
+    # Sanity: chain-test markers used by the live env's _run_auto
+    # path. Plain text, no Rich markup -- the chain test grep's the
+    # QEMU serial log for these substrings.
+    tui_app._emit_console_marker("bty: auto-flash starting")
+    tui_app._emit_console_marker("bty: flash complete; rebooting")
+    captured = capsys.readouterr()
+    # Both markers on stderr, one per line, in order.
+    assert "bty: auto-flash starting" in captured.err
+    assert "bty: flash complete; rebooting" in captured.err
+    # /dev/console write was best-effort; on this host it either
+    # succeeded (real /dev/console) or was swallowed (read-only,
+    # missing, EPERM under non-root) -- either way no exception
+    # propagated to here.
+
+
 # --------------------------------------------------------------------------
 # Flash plumbing: progress callback receives flash.FlashProgress events
 # --------------------------------------------------------------------------

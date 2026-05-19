@@ -126,12 +126,12 @@ Two ways to use Ventoy with bty:
    partition next to the bty ISO. After bty boots, the
    partition is still attached to the host (it's the physical
    USB stick the live env booted from). Mount it and point
-   `bty tui` at the path:
+   `bty` at the path via the ``BTY_IMAGE_ROOT`` env var:
 
    ```bash
    # On the booted bty live env's tty1 (drop to a shell first):
    mount /dev/sdaN /mnt          # Ventoy data partition
-   bty tui --image-root /mnt
+   BTY_IMAGE_ROOT=/mnt bty
    ```
 
    No `bty-web` server needed for this variant - same

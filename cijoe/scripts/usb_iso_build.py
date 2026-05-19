@@ -705,8 +705,8 @@ _STARTER_BRIS: tuple[tuple[str, str], ...] = (
         "#\n"
         "# Drop your own .bri files alongside this one to advertise\n"
         "# remote flashable images via bty's catalog. Format is\n"
-        "# minimal TOML: ``url`` is the only required field.\n"
-        "# See ``bty inspect <path>.bri`` for full syntax.\n"
+        "# minimal TOML: ``url`` is the only required field. See\n"
+        "# bty.images.read_bri for the parser + the schema.\n"
         "#\n"
         "# ``oras://`` URLs route through bty's ORAS adapter. The tag\n"
         '# (e.g. "latest") is resolved to a content-addressed layer\n'
@@ -749,8 +749,8 @@ _STARTER_BRIS: tuple[tuple[str, str], ...] = (
         "#\n"
         "# Drop your own .bri files alongside this one to advertise\n"
         "# remote flashable images via bty's catalog. Format is\n"
-        "# minimal TOML: ``url`` is the only required field.\n"
-        "# See ``bty inspect <path>.bri`` for full syntax.\n"
+        "# minimal TOML: ``url`` is the only required field. See\n"
+        "# bty.images.read_bri for the parser + the schema.\n"
         "\n"
         'name = "bty-server (x86_64, latest)"\n'
         'url = "https://github.com/safl/bty/releases/latest/download/'

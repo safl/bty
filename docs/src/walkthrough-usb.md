@@ -7,7 +7,8 @@ The fastest path to "I just bty-flashed a box":
 3. **Drop** the system image you want to flash onto the stick's
  `BTY_IMAGES` partition.
 4. **Boot** the target machine from the stick.
-5. **Flash** with `bty tui` (interactive) or `bty flash` (scripted).
+5. **Flash** with `bty` (interactive wizard on tty1; scripted via
+   `bty --server X --mac Y` and a bty-web binding).
 6. **Reboot** the target into the freshly-flashed image.
 
 End state: the target's local disk has whatever image you copied onto
@@ -171,107 +172,80 @@ The bty live env auto-logins as `root` on `tty1`. From there you have
 two ways to flash: the TUI (interactive, recommended for one-offs) or
 the CLI (scriptable).
 
-## Step 5a: Flash with `bty tui` (interactive)
+## Step 5a: Flash with `bty` (interactive)
+
+On the booted bty live env, `bty` is already running on tty1
+(via `bty-tui-on-tty1.service`). On a workstation install:
 
 ```bash
-bty tui
+sudo bty
 ```
 
-The TUI is a three-pane wizard: pick an image, pick a disk,
-flash. Each `Enter` commits the current step and advances to
-the next; `Esc` (or `Backspace`) walks back.
+The wizard is a five-stage flow: pick an image source (or skip
+when local images exist), pick an image, pick a target disk,
+confirm the plan, reboot. Each step accepts a number (`1`, `2`,
+...) to pick a row or a single letter for navigation.
 
-| Pane | Contents |
+| Stage | What it asks |
 |---|---|
-| **1: Images** | Pre-built images found on `BTY_IMAGES` plus any entries from the catalog source passed to `--catalog SOURCE` (a local TOML path, HTTP URL, or `oras://` reference) |
-| **2: Disks** | Block devices detected on this machine |
-| **3: Flash** | A big `Flash!` button (becomes `Reboot` after a successful flash) |
+| **1: Source**       | Default catalog (bty release), custom catalog URL (http / oras), or local-only |
+| **2: Image**        | Pick from local image-root + the chosen catalog overlay |
+| **3: Disk**         | Block devices detected on this machine (filtered to flash-eligible) |
+| **4: Confirm**      | Shows the flash plan + validation; `y` to write, `b` to back |
+| **5: Reboot**       | After a successful flash, boot the freshly-written image |
 
-Common keys:
+Common keys at every prompt:
 
 | Key | What happens |
 |---|---|
-| `1` / `2` | Jump focus back to the Images / Disks pane |
-| Arrow keys / `h` `l` | Cycle focus between panes |
-| `Enter` | Commit the focused row, advance to the next pane (on the Flash button: trigger the flash) |
-| `Esc` / `Backspace` | Undo the most recent commit, return one step |
-| `f` | Trigger the flash from anywhere once both image and disk are picked |
-| `r` | Refresh the catalog and disk list |
-| `c` | Switch the catalog (local path or remote `bty-web`) |
-| `i` | Install `bty-server` (latest from GitHub releases) |
-| `/` | Filter the image catalog by substring |
-| `q` | Quit the TUI |
+| `<number>` | Pick row N from the list (1-based) |
+| `b`        | Back one stage (undo the most recent commit) |
+| `r`        | Refresh the current list |
+| `q`        | Quit |
 
-After a successful flash the action-pane button flips from "Flash"
-to "Reboot"; hit Enter on the focused button to reboot. There is no
-single-key reboot shortcut (the old `Shift+R` binding was dropped
-because it shoulder-rubbed `r` for refresh).
+For an unattended catalog pre-load, pass `--catalog URL`:
 
-A confirmation modal shows the flash plan (image format, target
-size, validation). `Enter` runs it; `Esc` cancels. A status modal
-then streams the write progress; when it closes, the Flash pane's
-button transforms into `Reboot` so you can boot into the
-freshly-written image with a single keystroke.
-
-<!--
-A screenshot of bty-tui mid-flash will land at
-``_static/screenshot-tui-flashing.png`` once the asciinema /
-screenshot capture pass is done.
--->
+```bash
+sudo bty --catalog http://bty-server:8080/catalog.toml
+```
 
 
 ```{note}
-Without root the TUI launches in **read-only mode** - you can
+Without root the wizard launches in **read-only mode** - you can
 browse images and disks, but the Flash button is disabled and
-`f` refuses with a status message. Use ``sudo bty tui`` if you
+`f` refuses with a status message. Use ``sudo bty`` if you
 need to flash.
 ```
 
-## Step 5b: Flash with `bty` (scriptable)
+## Step 5b: Scripted flashing via the bty-server plan endpoint
 
-If you'd rather drive the flash from a shell - e.g. you want to
-script a fleet of identical boxes - the same operations are
-available as CLI commands.
+v0.22.11+ retired the `bty flash` / `bty inspect` / `bty images`
+subcommands. To drive flashes from a fleet controller, run a
+`bty-web` appliance and target the per-MAC plan endpoint:
 
-```bash
-# 1. List what's on the system
-lsblk -d -e7                              # block devices on the target
-bty images --image-root /mnt/BTY_IMAGES   # images on the stick
+1. On the appliance, bind the machine: PUT `/machines/<mac>`
+   with `boot_policy=flash`, a `bty_image_ref`, and a
+   `target_disk_serial`.
+2. On the target, run `bty --server <appliance> --mac <self-mac>`.
+   bty GETs `<server>/pxe/<mac>/plan`, sees `mode=auto`, streams
+   the image straight from the appliance, runs `dd`, signals
+   `/pxe/<mac>/done`, and reboots. Same chrome as the interactive
+   wizard, no operator input.
 
-# 2. Inspect a specific image
-bty inspect /mnt/BTY_IMAGES/my-image.img.gz
+The PXE-boot flow does this automatically: the live env's
+`bty-tui-on-tty1.service` exec's `bty --server X --mac Y` with
+`X` + `Y` read from the kernel cmdline (`bty.server` + `bty.mac`).
+No operator action on the target.
 
-# 3. Dry-run the flash to validate the plan without writing
-bty flash /mnt/BTY_IMAGES/my-image.img.gz /dev/sda --dry-run
+For ad-hoc single-machine flashes without a bty-web, the wizard
+is the path - it accepts any HTTP/HTTPS or `oras://` source via
+the catalog overlay.
 
-# 4. Run for real (requires root)
-sudo bty flash /mnt/BTY_IMAGES/my-image.img.gz /dev/sda --yes
-```
-
-`--dry-run` prints the flash plan and validates without writing.
-`--yes` is the explicit consent token for the destructive write - 
-`bty flash` refuses to do anything without one or the other, so you
-never accidentally wipe a disk.
-
-The `IMAGE` positional accepts an HTTP/HTTPS URL too, not just a
-local path. Useful for scripted flashes from a remote `bty-web`
-(the appliance or the `ghcr.io/safl/bty-web` Docker container)
-without pre-staging the image:
-
-```bash
-sudo bty flash http://server:8080/images/my-image.img.zst /dev/sda --yes
-```
-
-`.img` and `.img.zst` URLs stream straight from the network through
-`zstd -d | dd` to disk; `.qcow2` URLs download to a temp file first
-(qemu-img needs random access to convert to raw bytes). Either way,
-no operator copy step.
-
-`bty flash` writes the bytes and stops. There's no
-post-flash provisioning step -- first-boot bring-up (users,
-network, packages, hostnames) is the image builder's job, baked
-in via cloud-init / NoCloud user-data at image-build time. bty
-itself only writes bytes.
+`bty` writes the bytes and stops. There's no post-flash
+provisioning step -- first-boot bring-up (users, network,
+packages, hostnames) is the image builder's job, baked in via
+cloud-init / NoCloud user-data at image-build time. bty itself
+only writes bytes.
 
 ## Step 6: Reboot
 
@@ -304,8 +278,8 @@ If it doesn't, see **Troubleshooting** below.
 * Confirm the image's format is right for what you wanted. A qcow2
  flashed onto a disk creates a qcow2-formatted disk, not a
  bootable filesystem. For a bootable target, use a raw `.img` or
- let `bty flash` convert the qcow2 (which it does automatically:
- `bty inspect` shows the resulting on-disk format).
+ let bty convert the qcow2 at flash time (which it does
+ automatically via `qemu-img convert`).
 * If the image was built for UEFI but the target is configured for
  legacy BIOS (or vice versa), the firmware won't find a bootloader.
  Check the target's BIOS settings.
@@ -336,11 +310,12 @@ for the catalog because IP-KVMs expose the `.iso` as a single
 CD-ROM and there is no local storage to put image files on.
 
 **Always-available bty-server install shortcut.** Regardless of
-which delivery shape you use, `bty tui` has a built-in `i`
-shortcut that pre-selects the latest `bty-server-x86_64.img.gz`
-from GitHub releases. From the TUI: press `i`, pick a target disk,
-hit Flash. The image streams directly from GitHub through the live
-env to the target's disk; no local staging is needed.
+which delivery shape you use, fresh USB sticks ship with a
+`bty-server-x86_64.bri` descriptor on `BTY_IMAGES` pointing at the
+latest GitHub release. The wizard surfaces it on the image list
+out of the box -- pick it, pick a target disk, confirm. The
+image streams directly from GitHub through the live env to the
+target's disk; no local staging is needed.
 
 Network constraint: the live env needs HTTPS reachability to
 `github.com` / `objects.githubusercontent.com` at flash time.
@@ -425,12 +400,11 @@ root. First match with at least one supported file (`.bri` /
 4. bty live env boots. `bty-images-discover.service` scans the
    attached partitions, finds `bty-images/` on the Ventoy stick,
    and bind-mounts it at `/var/lib/bty/images`.
-5. `bty-tui` opens on tty1 with your image catalog already
-   populated.
+5. `bty` opens on tty1 with your image catalog already populated.
 
 #### Troubleshooting
 
-If `bty-tui` shows "No images in the catalog yet":
+If `bty` shows "No images in the catalog yet":
 
 1. Press `Alt+F2` for a root shell on the alternate VT.
 2. Run `journalctl -u bty-images-discover` to see exactly which
@@ -439,7 +413,7 @@ If `bty-tui` shows "No images in the catalog yet":
    probed): `lsblk -f`.
 4. Confirm the folder is exactly `bty-images/` at the partition
    root (not `Bty-Images/`, not nested).
-5. `Alt+F1` returns to `bty-tui`; press `r` once you've fixed the
+5. `Alt+F1` returns to `bty`; press `r` once you've fixed the
    layout to re-scan.
 
 ### piKVM (remote catalog only)
@@ -504,33 +478,26 @@ In the piKVM web UI:
 2. In the piKVM HDMI viewer, watch the target's BIOS/UEFI come up.
 3. Enter the target's boot menu, pick the piKVM virtual storage
    device.
-4. The bty live env boots; `bty-tui` opens on tty1.
+4. The bty live env boots; `bty` opens on tty1.
 
-#### Step 5: Point `bty-tui` at the remote `bty-web` catalog
+#### Step 5: Point `bty` at the remote `bty-web` catalog
 
-The local catalog is empty (no images on the piKVM). Switch to the
-remote `bty-web` from inside the TUI:
+The local catalog is empty (no images on the piKVM). Pick the
+custom catalog option on the SELECT_CATALOG stage:
 
-1. Press `c` (Catalog).
-2. In the modal, enter the catalog source URL:
+1. At the source-pick prompt, type `c` (custom).
+2. Type the catalog URL when asked:
    `http://10.0.0.5:8080/catalog.toml` (substitute your host).
-3. Click "Apply".
+3. Confirm with Enter.
 
-`bty-tui` fetches the TOML catalog from `GET /catalog.toml` on the
-server. Pick an image (Enter), pick the target disk (Enter), flash
-(Enter on Flash). The image streams directly from `bty-web` through
-the live env to the target's disk; piKVM only carried the boot env.
+`bty` fetches the TOML catalog from `GET /catalog.toml` on the
+server, advances to SELECT_IMAGE, and you pick + flash from there.
+The image streams directly from `bty-web` through the live env to
+the target's disk; piKVM only carried the boot env.
 
-If you already have bty's published default catalog in mind, press
-`d` instead at the empty-state screen: that points the TUI at
-`https://github.com/safl/bty/releases/latest/download/catalog.toml`
-without typing.
-
-If you don't yet have a `bty-web` instance running (chicken-and-
-egg case for setting up the very first one), press `i` instead:
-that's the built-in shortcut to install `bty-server` straight
-from GitHub. Once it boots, point subsequent piKVM-driven
-flashes at the new server.
+If you want bty's published default catalog without typing the URL,
+type `d` instead at the source-pick prompt: that's the bty release
+catalog (Debian / Ubuntu / Fedora sysdev images plus bty-server).
 
 ### JetKVM (remote catalog only)
 
@@ -568,14 +535,14 @@ In the JetKVM web UI:
 1. Power-cycle the target via JetKVM's power-control page.
 2. In the HDMI viewer, enter the target's boot menu and pick the
    JetKVM virtual storage device.
-3. The bty live env boots; `bty-tui` opens on tty1.
+3. The bty live env boots; `bty` opens on tty1.
 
-#### Step 5: Point `bty-tui` at the remote `bty-web` catalog
+#### Step 5: Point `bty` at the remote `bty-web` catalog
 
-Same as piKVM Step 5. Press `c`, enter the catalog URL
-(e.g. `http://10.0.0.5:8080/catalog.toml`), click Apply. The
-catalog populates from the server, images stream through the
-JetKVM-booted live env to the target's disk.
+Same as piKVM Step 5: type `c` at the source-pick prompt, enter the
+catalog URL (e.g. `http://10.0.0.5:8080/catalog.toml`). The catalog
+populates from the server, images stream through the JetKVM-booted
+live env to the target's disk.
 
 To bootstrap the very first `bty-server` (no existing one to point
 at), press `i` instead of `c`: the built-in shortcut installs
