@@ -126,14 +126,17 @@
             }
         }
 
-        /* Sub-nav strip. Sits immediately below the main bg-dark
-           navbar; coloured one notch lighter so it reads as
-           "second-tier nav, still chrome" rather than "page
-           content area". ``--bs-gray-800`` (#343a40) vs the main
-           nav's ``--bs-gray-900`` (#212529). */
+        /* Sub-nav strip. Sits immediately below the main ``bg-dark``
+           navbar; coloured CLEARLY lighter so it reads as
+           "second-tier nav, still chrome" rather than fading
+           back into the bar above. The default Sandstone theme
+           resolves ``bg-dark`` to a warm ``#3e3f3a``; pick
+           ``--bs-gray-700`` (#495057, ~+12 luminance steps over
+           the top nav) so the boundary is unambiguous regardless
+           of theme. */
         .subnav-strip {
-            background-color: #343a40;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            background-color: #495057;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.10);
         }
         .subnav-strip .nav-pills {
             /* Match the inter-button spacing the top nav uses
