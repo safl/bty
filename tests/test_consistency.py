@@ -657,6 +657,48 @@ def test_pydantic_models_have_docstrings() -> None:
 # ----------------------------------------------------------------------
 
 
+def test_subnav_pill_keys_match_route_validator_whitelist() -> None:
+    """Each /ui page with a sub-nav strip defines its pill set in
+    the template (``{% with sections=[{"key": ..., ...}, ...] %}``)
+    AND validates ``?section=`` in the route handler. A drift
+    between the two surfaces is a real bug shape: an operator
+    clicks a freshly-added pill -> the route's validator falls
+    back to ``list`` -> the operator sees the wrong page.
+
+    Walks the boot / images / machines templates' first
+    ``sections=[...]`` block, extracts the pill ``key`` values,
+    and asserts each is present in the matching
+    ``if section not in (...)`` whitelist in ``_ui.py``.
+    """
+    import re
+
+    ui_dir = REPO_ROOT / "src" / "bty" / "web" / "_templates" / "ui"
+    ui_py = (REPO_ROOT / "src" / "bty" / "web" / "_ui.py").read_text()
+
+    def _pill_keys(tmpl: str) -> list[str]:
+        body = (ui_dir / tmpl).read_text()
+        m = re.search(r"{% with sections=\[(.*?)\] ,", body, re.DOTALL)
+        if not m:
+            return []
+        return re.findall(r'"key":\s*"([^"]+)"', m.group(1))
+
+    # The route validator that gates the ?section= path on each
+    # page lives inside ``_ui.py`` as ``section not in (...)``
+    # tuples. Walk them out of the source via a regex scan.
+    validators = re.findall(r"section\s+not\s+in\s+\(([^)]+)\)", ui_py)
+    validator_keys = {
+        k.strip().strip('"') for tup in validators for k in tup.split(",") if k.strip()
+    }
+
+    drifts = [
+        f"{tmpl} renders pill ``{key}`` but no _ui.py validator whitelists it"
+        for tmpl in ("boot.html", "images.html", "machines.html")
+        for key in _pill_keys(tmpl)
+        if key not in validator_keys
+    ]
+    assert not drifts, "\n".join(drifts)
+
+
 def test_every_ui_page_uses_the_intro_box_partial() -> None:
     """Every operator-facing /ui page (dashboard / machines /
     images / boot / events / settings) renders its intro

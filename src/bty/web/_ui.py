@@ -880,26 +880,15 @@ def register_ui_routes(
         flash: str | None = None,
         flash_kind: str | None = None,
     ) -> HTMLResponse:
-        # /ui/settings is now an informational page: operator config
-        # for the PXE flow happens on the LAN router (DHCP option 60
-        # / 66 / 67 tagging), not in bty-web. We surface this
-        # appliance's IP + interfaces so the operator has the values
-        # they need to paste into UniFi / pfSense / dnsmasq. The
-        # appliance side that IS controllable from here is the local
-        # dnsmasq (TFTP) -- Start / Stop / Restart in the panel
-        # below.
-        interfaces = _sysconfig.list_interfaces()
-        missing_netboot = _releases.missing_netboot_artifacts(boot_root)
-        tftp = _sysconfig.tftp_status()
-        tftp_controllable = _sysconfig.tftp_controllable()
+        # /ui/settings is now a thin operator-account page (just an
+        # About + Authentication card). The PXE / TFTP surfaces that
+        # used to live here moved to ``/ui/boot`` (DHCP / PXE +
+        # TFTP daemon sub-sections); nothing on the template still
+        # reads ``interfaces`` / ``tftp`` / ``missing_netboot``, so
+        # the route handler doesn't need to gather them.
         return render(
             "ui/settings.html",
             request,
-            interfaces=interfaces,
-            tftp=tftp,
-            tftp_controllable=tftp_controllable,
-            missing_netboot_artifacts=missing_netboot,
-            boot_root=str(boot_root),
             flash=flash,
             flash_kind=flash_kind,
         )
