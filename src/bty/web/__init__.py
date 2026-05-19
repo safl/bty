@@ -55,7 +55,7 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         prog="bty-web",
         description=(
-            "bty-web -- HTTP server with browser UI for fleet image flashing.\n\n"
+            "bty-web: HTTP server with browser UI for fleet image flashing.\n\n"
             "All runtime configuration is read from the environment so the\n"
             "appliance's systemd unit (and the bty-web container) can supply\n"
             "values without command-line plumbing:\n\n"

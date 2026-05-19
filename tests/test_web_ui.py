@@ -1524,7 +1524,10 @@ def test_ui_settings_tftp_control_success_renders_green_flash(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """``control_tftp`` returning cleanly produces a 200 with a
-    success flash on the settings page. The handler also records a
+    success flash on the Netboot page (the TFTP daemon panel
+    lives under /ui/boot now; the POST URL is unchanged for
+    backwards compat but the response is the boot template,
+    not settings). The handler also records a
     ``settings.tftp.controlled`` event."""
     from bty.web import _sysconfig
 
@@ -1534,10 +1537,14 @@ def test_ui_settings_tftp_control_success_renders_green_flash(
     r = client.post("/ui/settings/tftp-control", data={"action": "restart"})
     assert r.status_code == 200
     assert seen == ["restart"]
-    # Green flash on the rendered settings page.
+    # Green flash on the rendered Netboot page.
     body = r.text
     assert "alert-success" in body
     assert "Restarted TFTP" in body
+    # Page-level marker: the netboot artefact filename only renders
+    # on /ui/boot, not on /ui/settings -- proves the response came
+    # from _render_boot_page.
+    assert "bty-netboot-x86_64.vmlinuz" in body
     # Event recorded.
     events = client.get(
         "/events",
@@ -1552,9 +1559,10 @@ def test_ui_settings_tftp_control_failure_renders_red_flash_and_logs_event(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A ``SysConfigError`` from the helper bounces back to the
-    settings page with a red flash AND a ``settings.tftp.control_failed``
-    event so the operator sees the systemctl exit code in the
-    audit log without having to ssh in."""
+    Netboot page (the TFTP panel's home now) with a red flash
+    AND a ``settings.tftp.control_failed`` event so the operator
+    sees the systemctl exit code in the audit log without
+    having to ssh in."""
     from bty.web import _sysconfig
 
     def _raise(action: str) -> None:

@@ -35,7 +35,7 @@ def main(argv: list[str] | None = None, *, prog: str = "bty") -> None:
     parser = argparse.ArgumentParser(
         prog=prog,
         description=(
-            f"{prog} -- bty's terminal interface. Three modes:\n\n"
+            f"{prog}: bty's terminal interface. Three modes:\n\n"
             f"  {prog}                          - interactive wizard\n"
             f"                                    (local image-root only)\n"
             f"  {prog} --catalog <URL>          - interactive wizard with\n"
@@ -48,7 +48,7 @@ def main(argv: list[str] | None = None, *, prog: str = "bty") -> None:
             f"                                    --server's /pxe/<MAC>/plan\n"
             f"                                    and acts on it (auto-flash,\n"
             f"                                    interactive, or local-boot\n"
-            f"                                    -- whatever the server says).\n\n"
+            f"                                    (whatever the server says).\n\n"
             "The operator-facing surface is intentionally narrow: in\n"
             "server-driven mode every knob (image, target disk, catalog\n"
             "overlay) comes from the bty-server's machine record, not the\n"
@@ -79,7 +79,7 @@ def main(argv: list[str] | None = None, *, prog: str = "bty") -> None:
         help="Self-MAC of this client (e.g. ``aa:bb:cc:dd:ee:ff``). "
         "When supplied, bty switches to server-driven mode: it "
         "GETs ``<server>/pxe/<mac>/plan`` and dispatches on the "
-        "returned plan -- auto-flash, interactive, or no-op. The "
+        "returned plan (auto-flash, interactive, or no-op). The "
         "live env passes this via ``bty.mac=`` on the kernel cmdline.",
     )
     parser.add_argument(
@@ -89,8 +89,8 @@ def main(argv: list[str] | None = None, *, prog: str = "bty") -> None:
         help="Catalog URL or path to pre-load (http(s):// for HTTP, "
         "oras:// for OCI, or a local path). When given, the SELECT_CATALOG "
         "screen is skipped and the wizard jumps straight to SELECT_IMAGE "
-        "with this catalog overlaying the local image-root -- equivalent "
-        "to picking ``[c]`` on the source screen and typing the URL. "
+        "with this catalog overlaying the local image-root (equivalent "
+        "to picking ``[c]`` on the source screen and typing the URL). "
         "Ignored in server-driven mode (``--mac`` set) because the server "
         "supplies the catalog as part of /pxe/<mac>/plan.",
     )

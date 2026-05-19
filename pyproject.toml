@@ -111,12 +111,16 @@ extraPaths = ["src", "docs/tooling/src"]
 
 # Tests intentionally poke at private state (``_filter``,
 # ``_images_by_key``, ``_selected_image``, etc.) to exercise
-# internal invariants. Silencing reportPrivateUsage here keeps
-# pyright honest about src/ private access while letting tests
-# do their job without 40+ inline ``# type: ignore`` markers.
+# internal invariants, AND lean on the leading-underscore lambda
+# arg convention (``lambda *_a, **_kw: ...``) to mark stub
+# parameters the test doesn't care about. Silence the two
+# pyright diagnostic classes that flag these patterns so the
+# tests/ diagnostic stream isn't drowned in 100+ intentional
+# matches; src/ keeps the strict default.
 [[tool.pyright.executionEnvironments]]
 root = "tests"
 reportPrivateUsage = "none"
+reportUnusedVariable = "none"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
