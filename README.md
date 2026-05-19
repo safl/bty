@@ -128,8 +128,15 @@ docker run -d --name bty-web -p 8080:8080 -v bty-data:/var/lib/bty \
 # -> http://localhost:8080/ui   (login: bty / bty)
 ```
 
-Image catalog only - no DHCP / TFTP / PXE proxy in the container
-(those need bare-metal LAN access; use the appliance for that).
+HTTP-only - no TFTP daemon bundled in the container. The
+container's lane is **UEFI HTTP Boot** (operator's DHCP serves
+option 67 = `http://<bty>:8080/ipxe.efi`) or pairing with a
+[`boots-from`](https://github.com/safl/boots-from) USB stick
+(operator boots the stick, embedded iPXE chains to bty's HTTP
+endpoint). For fleets that need TFTP (legacy BIOS + UEFI
+firmware that only does TFTP option 67), use the
+**`bty-server` appliance** -- it bundles dnsmasq for TFTP
+serving alongside bty-web.
 See [`docs/src/walkthrough-server-docker.md`](docs/src/walkthrough-server-docker.md)
 for bind-mount permissions, env vars, and password rotation.
 

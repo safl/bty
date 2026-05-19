@@ -9,10 +9,27 @@ to it and pick images for flashing.
 
 This is not the bty-server appliance. The appliance bundles
 `dnsmasq` for TFTP serving on top of bty-web; the container is
-HTTP-only. For UEFI HTTP-Boot-capable targets, this container is
-sufficient. For TFTP-only PXE flow, either run a separate TFTP
-server alongside the container or deploy the appliance image (see
-[walkthrough-server.md](walkthrough-server.md)).
+**HTTP-only by design**. This makes the container the
+**HTTP-Boot / `boots-from` deployment lane** -- production-fit
+for either of:
+
+- **UEFI HTTP Boot targets**: the operator's LAN DHCP server is
+  configured to serve DHCP option 67 = `http://<bty-web>/ipxe.efi`
+  (bty-web serves the iPXE binaries from `/boot/` over HTTP).
+  Modern UEFI firmware fetches the binary natively -- no TFTP in
+  the path at all.
+- **`boots-from` USB sticks**: the operator boots a target from a
+  [`boots-from`](https://github.com/safl/boots-from) USB whose
+  embedded iPXE script chains to bty-web's `/pxe-bootstrap.ipxe`.
+  The stick replaces the firmware-driven PXE step entirely, so
+  neither DHCP-PXE options nor a TFTP daemon are needed on the
+  LAN. Works on legacy BIOS too.
+
+For mixed-firmware fleets that include legacy BIOS or older UEFI
+implementations that only support TFTP option 67, deploy the
+bty-server appliance instead (see
+[walkthrough-server.md](walkthrough-server.md)) -- it bundles
+the TFTP daemon.
 
 ## When to use this
 
@@ -22,9 +39,12 @@ server alongside the container or deploy the appliance image (see
   bty USB sticks and want a network-shared catalog of pre-built
   images instead of copying files to every stick.
 - **Local-dev backend** for `bty tui --catalog` work.
+- **Production HTTP-Boot or `boots-from` deployment** for fleets
+  that don't need a TFTP daemon (UEFI-HTTP-Boot-capable firmware
+  or USB-driven targets).
 
-If your goal is to PXE-boot targets onto network-flash, you need
-the bty-server appliance instead.
+For mixed-firmware fleets that include TFTP-only PXE clients,
+deploy the bty-server appliance instead.
 
 ## Quick start
 

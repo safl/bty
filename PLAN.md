@@ -541,16 +541,37 @@ Landed after the original 1.0 list:
 21. **[done, v0.5.13]** Docker container for `bty-web`. Multi-arch
     (amd64 + arm64) image at `ghcr.io/safl/bty-web`, published
     by the same release workflow that ships PyPI + the appliance
-    images. Image catalog + machine registry + browser UI only;
-    no dnsmasq / TFTP / iPXE proxy-DHCP, because docker bridge
-    networking can't relay L2 broadcasts and host networking is
-    Linux-only. The container is the lowest-barrier-to-try shape
-    (``docker run -p 8080:8080 ...`` and the UI is up) and adds
-    a third deployment lane: USB live stick + network-shared
+    images. HTTP-only by design: bty-web + image catalog +
+    machine registry + browser UI; no TFTP daemon bundled. The
+    container's deployment lane is HTTP-Boot / `boots-from`:
+
+    - **UEFI HTTP Boot** -- operator's LAN DHCP serves
+      ``option 67 = http://<bty>/ipxe.efi`` (bty-web serves
+      iPXE binaries from ``/boot/`` over HTTP). Modern UEFI
+      firmware supports this directly; no TFTP in the path.
+    - **`boots-from` USB stick** (sibling project
+      ``safl/boots-from``) -- the operator boots a USB whose
+      embedded iPXE script chains to bty-web's
+      ``/pxe-bootstrap.ipxe``. Works on legacy BIOS too,
+      since the USB replaces firmware-driven PXE. Neither
+      DHCP-PXE options nor a TFTP daemon are needed on the
+      LAN.
+
+    For mixed-firmware fleets that include legacy BIOS or
+    older UEFI implementations that only support TFTP-via-
+    option-67, deploy the bare-metal `bty-server` appliance
+    instead -- it bundles ``dnsmasq`` configured for TFTP
+    serving alongside bty-web. The test matrix exercises
+    both lanes (appliance: SeaBIOS+TFTP and OVMF+HTTP-Boot;
+    docker: OVMF+HTTP-Boot).
+
+    The container is also the lowest-barrier-to-try shape
+    (``docker run -p 8080:8080 ...`` and the UI is up) and
+    adds a third lane: USB live stick + network-shared
     catalog. Operators run the container on a workstation,
-    point ``bty tui --catalog URL`` at it, and pick images from
-    the catalog without flashing the catalog onto every stick.
-    The PXE flow stays in the bare-metal `bty-server` appliance.
+    point ``bty tui --catalog URL`` at it, and pick images
+    from the catalog without flashing the catalog onto every
+    stick.
 
 22. **[done, v0.6.0]** `bty-web` catalog manifest with `src`
     URLs + local SHA-verified cache. Today `/images` enumerates

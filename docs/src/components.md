@@ -155,9 +155,26 @@ assignment from `/proc/cmdline`, downloads the assigned image, runs
 A multi-arch container (`linux/amd64` + `linux/arm64`) built from
 the same `bty-lab[web]` wheel and published to
 [GitHub Container Registry](https://github.com/safl/bty/pkgs/container/bty-web)
-on every tagged release. Hosts `bty-web` only - **no** dnsmasq,
-TFTP, or iPXE proxy-DHCP, because Docker bridge networking cannot
-relay L2 broadcasts.
+on every tagged release. Hosts `bty-web` only - **HTTP-only by
+design**: no TFTP daemon, no DHCP role. The container is the
+**HTTP-Boot / `boots-from` deployment lane** for fleets where
+either:
+
+- Target firmware supports **UEFI HTTP Boot** -- the operator's
+  router serves DHCP option 67 = ``http://bty-web/ipxe.efi``
+  (bty-web serves the iPXE binaries from ``/boot/`` over HTTP);
+  no TFTP needed end-to-end.
+- Targets boot from a
+  [`boots-from`](https://github.com/safl/boots-from) USB stick
+  whose embedded iPXE script chains to bty-web's
+  ``/pxe-bootstrap.ipxe``; the stick replaces the
+  PXE-firmware-fetches-bootfile step entirely, so neither
+  DHCP-PXE options nor a TFTP daemon are needed on the LAN.
+
+For mixed-firmware fleets that include **legacy BIOS** or
+older UEFI implementations that only support TFTP option 67,
+use the `bty-server` appliance instead -- it bundles ``dnsmasq``
+configured for TFTP serving alongside bty-web.
 
 Use cases:
 
@@ -166,9 +183,10 @@ Use cases:
 - Network-shared image catalog: a fleet of operators with bty USB
   sticks all point `bty tui --catalog SOURCE` at the same container.
 - Local development backend for `bty tui --catalog` work.
+- Production PXE-flash for **UEFI-HTTP-Boot-capable** or
+  **`boots-from`**-driven fleets where TFTP is not in the path.
 
-For PXE-boot provisioning, deploy the bare-metal `bty-server`
-appliance instead. See
+See
 [`walkthrough-server-docker.md`](walkthrough-server-docker.md)
 for the full operator guide.
 
