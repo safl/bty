@@ -313,7 +313,9 @@ def test_top_level_nav_highlights_active_page(client: TestClient) -> None:
         "/ui/images": "/ui/images",
         "/ui/boot": "/ui/boot",
         "/ui/events": "/ui/events",
-        "/ui/settings": "/ui/settings",
+        # /ui/settings is no longer in the top nav; it sits behind
+        # the user-bar's gear icon. Its highlight is tested via the
+        # ``user-bar-action active`` class instead (see below).
     }
     for path, expected_href in page_to_nav_key.items():
         body = client.get(path).text
@@ -325,6 +327,11 @@ def test_top_level_nav_highlights_active_page(client: TestClient) -> None:
         assert actives == [expected_href], (
             f"{path}: expected top-bar nav to highlight {expected_href!r} only, got {actives!r}"
         )
+    # /ui/settings retains its highlight via the user-bar gear button.
+    body = client.get("/ui/settings").text
+    assert 'class="user-bar-action active"' in body or 'class="user-bar-action  active"' in body, (
+        "/ui/settings page should mark the user-bar gear icon as active"
+    )
 
 
 def test_subnav_renders_aria_current_on_active_section(client: TestClient) -> None:
@@ -419,8 +426,11 @@ def test_ui_boot_section_fetch_shows_form_only(client: TestClient) -> None:
     assert r.status_code == 200
     body = r.text
     assert 'id="enqueue-fetch-btn"' in body
-    # No artefact table on the fetch view.
-    assert "bty-netboot-x86_64.vmlinuz" not in body
+    # The artefact-list table is suppressed on the fetch view. The
+    # PXE / TFTP cards stay on every section because they're
+    # informational config-reference cards, not part of the
+    # list-vs-fetch switching surface.
+    assert "<th>File</th>\n                    <th>Status</th>" not in body
 
 
 def test_ui_machines_default_section_is_list_not_add_form(
@@ -491,7 +501,8 @@ def test_ui_boot_page_shows_recent_activity_card(
     r = client.get("/ui/boot")
     assert r.status_code == 200
     body = r.text
-    assert "Recent boot-artefact activity" in body
+    # Card title was renamed alongside the Boot -> Netboot label change.
+    assert "Recent netboot activity" in body
     assert "boot.release.fetched" in body
 
 
@@ -1011,38 +1022,22 @@ def test_ui_boot_page_renders_with_artifact_state(client: TestClient) -> None:
 # ---------- Phase E: settings page ----------------------------------------
 
 
-def test_ui_settings_renders_when_authed(
-    client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A logged-in operator sees the /ui/settings page with the
-    TFTP status panel + interface list. Most of the page is
-    populated by ``_sysconfig`` (lsblk-style shell-outs); we stub
-    those so the test is hermetic + works in CI containers
-    without dnsmasq installed."""
-    from bty.web import _sysconfig
-
-    monkeypatch.setattr(
-        _sysconfig,
-        "list_interfaces",
-        lambda: [_sysconfig.Interface(name="eth0", operstate="up", ipv4="10.0.0.7", prefix=24)],
-    )
-    monkeypatch.setattr(
-        _sysconfig,
-        "tftp_status",
-        lambda: _sysconfig.DaemonStatus(state="active"),
-    )
-    monkeypatch.setattr(_sysconfig, "tftp_controllable", lambda: True)
+def test_ui_settings_renders_when_authed(client: TestClient) -> None:
+    """A logged-in operator sees the /ui/settings page rendering
+    the Authentication card. PXE / TFTP info moved to /ui/boot
+    in v0.22.13; settings is now an operator-account page reached
+    via the user-bar gear icon, not the top nav.
+    """
     _login(client)
     r = client.get("/ui/settings")
     assert r.status_code == 200
     body = r.text
-    # Page surface: interface + TFTP status + boot root.
-    assert "eth0" in body
-    assert "10.0.0.7" in body
-    # TFTP status text -- either the state literal or surrounding
-    # copy from the template.
-    assert "active" in body or "TFTP" in body
+    # Authentication card heading.
+    assert "Authentication" in body
+    # The PAM-rotation hint with the service-user.
+    assert "passwd" in body
+    # Cross-link out to the netboot page (where PXE / TFTP now live).
+    assert 'href="/ui/boot"' in body
 
 
 def test_ui_settings_requires_auth(client: TestClient) -> None:

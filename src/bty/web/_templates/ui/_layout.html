@@ -81,20 +81,32 @@
             width: 1px;
             background-color: rgba(255, 255, 255, 0.18);
         }
-        .user-bar-logout {
+        .user-bar-action {
             display: inline-flex;
             align-items: center;
             padding: 0.35rem 0.7rem;
             background: transparent;
             border: none;
             color: rgba(255, 255, 255, 0.85);
+            text-decoration: none;
             transition: background-color 0.15s, color 0.15s;
         }
-        .user-bar-logout:hover,
-        .user-bar-logout:focus {
-            background-color: rgba(220, 53, 69, 0.65); /* danger red on hover */
+        .user-bar-action:hover,
+        .user-bar-action:focus {
+            background-color: rgba(255, 255, 255, 0.10);
             color: #fff;
             outline: none;
+        }
+        .user-bar-action.active {
+            background-color: rgba(255, 255, 255, 0.16);
+            color: #fff;
+        }
+        /* Logout hover keeps the danger-red signal so it doesn't
+           look indistinguishable from the gear/account action. */
+        .user-bar-logout:hover,
+        .user-bar-logout:focus {
+            background-color: rgba(220, 53, 69, 0.65);
+            color: #fff;
         }
 
         /* SSE visual cues. The page-level "live" indicator pulses
@@ -137,6 +149,13 @@
         .subnav-strip {
             background-color: #495057;
             border-bottom: 1px solid rgba(255, 255, 255, 0.10);
+            /* Pin the strip's minimum inner height so it stays the
+               same height whether or not it has pills. Without
+               this the no-pill cases (dashboard / account) would
+               collapse to just padding + border. The value matches
+               a pill's rendered height: line-height (1rem) +
+               vertical padding (0.4rem * 2). */
+            min-height: calc(1rem + 0.8rem + 0.5rem); /* +py-1 wrapper */
         }
         .subnav-strip .nav-pills {
             /* Match the inter-button spacing the top nav uses
@@ -204,9 +223,6 @@
                 <a class="nav-btn {% if nav_active == 'events' %}active{% endif %}" href="/ui/events">
                     <i class="bi bi-clock-history"></i>Events
                 </a>
-                <a class="nav-btn {% if nav_active == 'settings' %}active{% endif %}" href="/ui/settings">
-                    <i class="bi bi-gear"></i>Settings
-                </a>
             </div>
             <div class="user-bar ms-md-3 mt-2 mt-md-0"
                  title="OS user that bty-web is running as (PAM auth)">
@@ -215,8 +231,14 @@
                     <code>{{ service_user }}</code>
                 </span>
                 <span class="user-bar-divider"></span>
+                <a href="/ui/settings"
+                   class="user-bar-action {% if nav_active == 'settings' %}active{% endif %}"
+                   title="Account / session info">
+                    <i class="bi bi-gear"></i>
+                </a>
+                <span class="user-bar-divider"></span>
                 <form action="/ui/logout" method="post" class="m-0 d-inline-flex">
-                    <button type="submit" class="user-bar-logout"
+                    <button type="submit" class="user-bar-action user-bar-logout"
                             title="Sign out">
                         <i class="bi bi-box-arrow-right"></i>
                     </button>

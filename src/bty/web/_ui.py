@@ -695,6 +695,12 @@ def register_ui_routes(
         # fetch failures.
         with _db.open_db(state_path) as conn:
             boot_events = _events_log.list_events(conn, subject_kind="boot", limit=10)
+        # Network + TFTP context the operator needs to wire up the
+        # netboot side -- moved out of /ui/settings in v0.22.13 so
+        # the "what do I configure on my router" cheatsheet lives
+        # next to the netboot artefacts it depends on.
+        interfaces = _sysconfig.list_interfaces()
+        primary = next((i for i in interfaces if i.ipv4), interfaces[0] if interfaces else None)
         return render(
             "ui/boot.html",
             request,
@@ -705,6 +711,11 @@ def register_ui_routes(
             section=section,
             flash=flash,
             flash_kind=flash_kind,
+            interfaces=interfaces,
+            primary=primary,
+            tftp=_sysconfig.tftp_status(),
+            tftp_controllable=_sysconfig.tftp_controllable(),
+            missing_netboot_artifacts=_releases.missing_netboot_artifacts(boot_root),
         )
 
     @app.get(
@@ -870,7 +881,7 @@ def register_ui_routes(
                     details={"action": action, "error": str(exc)},
                 )
                 conn.commit()
-            return _render_settings_page(
+            return _render_boot_page(
                 request,
                 flash=f"{action} of TFTP daemon failed: {exc}",
                 flash_kind="danger",
@@ -887,7 +898,7 @@ def register_ui_routes(
                 details={"action": action},
             )
             conn.commit()
-        return _render_settings_page(
+        return _render_boot_page(
             request,
             flash=f"{action.capitalize()}ed TFTP daemon.",
             flash_kind="success",

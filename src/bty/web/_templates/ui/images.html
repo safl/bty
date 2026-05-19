@@ -5,9 +5,9 @@
 {% set right_html %}<span class="text-muted small">{{ unified|length }} entr{{ "y" if unified|length == 1 else "ies" }} | image-root <code>{{ image_root }}</code></span>{% endset %}
 {% with sections=[
     {"key": "list",            "label": "List",                "icon": "list-ul",       "href": "/ui/images"},
-    {"key": "fetch",           "label": "Fetch default",       "icon": "cloud-download","href": "/ui/images?section=fetch"},
-    {"key": "add-url",         "label": "Add by URL",          "icon": "cloud-plus",    "href": "/ui/images?section=add-url"},
+    {"key": "fetch",           "label": "Fetch catalog",       "icon": "cloud-download","href": "/ui/images?section=fetch"},
     {"key": "upload-catalog",  "label": "Upload catalog",      "icon": "file-earmark-text", "href": "/ui/images?section=upload-catalog"},
+    {"key": "add-url",         "label": "Add by URL",          "icon": "cloud-plus",    "href": "/ui/images?section=add-url"},
     {"key": "upload-image",    "label": "Upload image",        "icon": "upload",        "href": "/ui/images?section=upload-image"},
 ] , active=section, right_html=right_html %}
 {% include "ui/_subnav.html" %}
