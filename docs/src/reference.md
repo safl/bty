@@ -230,12 +230,15 @@ tooling which can't carry a session cookie:
  response depends on the machine's `boot_policy`:
  - `local` (default) or no image assigned: sanboot fallback ("boot
  from local disk"). Auto-discovery still applies to unknown MACs.
- - `flash` + image assigned: chain into the live env over HTTP
- with kernel cmdline params `bty.server`, `bty.mac`, and
- `bty.image_url` so the live env can flash the assigned image.
+ - `flash` + image assigned + target serial picked: chain into
+ the live env over HTTP with kernel cmdline `bty.server=` +
+ `bty.mac=`. The live env's ``bty`` then GETs `/pxe/<mac>/plan`
+ to retrieve the image URL + target_disk_serial and runs the
+ flash. (v0.22.10+ retired the older shape that put those on
+ the cmdline.)
 
  Auto-discovery: the first contact for an unknown MAC inserts a
- placeholder row (image=null, boot_policy=local) so the operator
+ placeholder row (image=null, boot_policy=tui) so the operator
  sees it in `GET /machines` and can claim it with `PUT
  /machines/{mac}`. Repeat contacts update `last_seen_at` /
  `last_seen_ip`. Trust model: bty-web is meant for a homelab /

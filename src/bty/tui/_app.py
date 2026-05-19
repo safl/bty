@@ -633,11 +633,15 @@ class BtyTui:
             # Server may suggest a specific catalog. If it does, use
             # it; if not, keep whatever was set in __init__ (which
             # defaults to ``<server>/catalog.toml`` for server-driven
-            # mode).
+            # mode). Crucially, ``pxe_done_base`` stays at
+            # ``self._server_url`` regardless of what the plan's
+            # catalog field points at -- the completion POST goes
+            # back to the bty-server that handed us the plan, NOT
+            # to whichever (possibly third-party) host hosts the
+            # catalog TOML.
             suggested = payload.get("catalog")
             if isinstance(suggested, str) and suggested:
                 self._state.catalog_source = suggested
-                self._state.pxe_done_base = _pxe_done_base_from_source(suggested)
             return "interactive"
         if mode == "local":
             return "local"

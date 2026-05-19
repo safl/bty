@@ -1,23 +1,23 @@
-"""Tests for the bty-tui module.
+"""Tests for the ``bty.tui`` module (the Rich-based wizard
+distributed as the ``bty`` console script).
 
 Two layers:
 
-1. Free helpers (``load_catalog_from_source``, ``post_pxe_done``)
-   covered without instantiating textual at all - they're just HTTP
-   wrappers.
-2. End-to-end interaction with the textual ``BtyTui`` app via
-   ``App.run_test()`` (textual's headless test harness). The Pilot
-   drives key presses and click events; assertions look at widget
-   state via ``app.query_one(...)``. ``asyncio.run`` is used to drive
-   the async test body so we don't have to take a pytest-asyncio
-   dependency.
+1. Free helpers (``load_catalog_from_source``, ``post_pxe_done``,
+   ``post_inventory``, ``_emit_console_marker``,
+   ``_format_progress_bytes``) -- HTTP wrappers + pure utilities
+   covered without instantiating ``BtyTui`` at all.
+2. ``BtyTui`` smoke / contract tests: argparse routing in
+   ``bty.tui.main``, ``_State`` stage machine, ``_refresh_images``
+   blending of local + catalog sources, ``_fetch_and_dispatch_plan``
+   contract, and the auto-flash code path's progress-callback
+   plumbing.
 
 Data sources (``images.list_images``, ``disks.list_disks``,
-``load_catalog_from_source``) are monkeypatched in the per-test fixtures
-to return synthetic rows; the goal is to verify the wiring in
-``_populate_images`` / ``_populate_disks`` / ``_load_images`` /
-``action_refresh`` / ``_initial_status``, not to re-test the
-underlying functions (those have their own coverage).
+``load_catalog_from_source``) are monkeypatched per-test to
+return synthetic rows; the goal is to verify the wiring around
+those calls, not to re-test the underlying functions (those have
+their own coverage).
 """
 
 from __future__ import annotations
@@ -299,9 +299,9 @@ def test_post_inventory_propagates_url_errors(
 
 
 def test_main_accepts_server_and_mac_flags(monkeypatch: pytest.MonkeyPatch) -> None:
-    """``bty-tui --server URL --mac MAC`` reaches ``BtyTui(...)`` with
+    """``bty --server URL --mac MAC`` reaches ``BtyTui(...)`` with
     the right kwargs. The actual ``run()`` is monkeypatched so we
-    don't try to launch a real TUI from a unit test.
+    don't try to launch a real wizard from a unit test.
 
     The cmdline surface is intentionally narrow -- just --server +
     --mac -- because every other knob (image, target disk, catalog)
@@ -339,7 +339,7 @@ def test_main_accepts_server_and_mac_flags(monkeypatch: pytest.MonkeyPatch) -> N
 def test_main_accepts_catalog_flag_for_interactive_prefill(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``bty-tui --catalog URL`` (no --mac) reaches
+    """``bty --catalog URL`` (no --mac) reaches
     ``BtyTui(catalog=URL)``. The operator-level intent is "skip
     SELECT_CATALOG; jump to SELECT_IMAGE with this catalog already
     chosen" -- equivalent to picking ``[c] custom`` on the source
@@ -389,11 +389,11 @@ def test_bty_tui_init_catalog_skips_select_catalog_stage(
 
 
 def test_main_defaults_to_bty_server_hostname(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Bare ``bty-tui`` invocation (no flags) reaches
+    """Bare ``bty`` invocation (no flags) reaches
     ``BtyTui(server="bty-server", mac=None)``. The default exists
     because the netboot live env's tty1 wrapper supplies --server
     explicitly; but on a developer workstation, a LAN DNS entry for
-    ``bty-server`` (or an /etc/hosts line) lets ``bty-tui --mac X``
+    ``bty-server`` (or an /etc/hosts line) lets ``bty --mac X``
     just work.
     """
     captured: dict[str, object] = {}
@@ -681,6 +681,52 @@ def test_emit_console_marker_writes_to_stderr_and_swallows_console_failure(
     # succeeded (real /dev/console) or was swallowed (read-only,
     # missing, EPERM under non-root) -- either way no exception
     # propagated to here.
+
+
+# --------------------------------------------------------------------------
+# Plan dispatch: /pxe/<mac>/plan response is correctly consumed
+# --------------------------------------------------------------------------
+
+
+def test_fetch_and_dispatch_plan_interactive_preserves_pxe_done_base(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When the plan returns ``mode=interactive`` with a third-party
+    catalog URL (e.g. a github releases catalog.toml that the bty-
+    server hands out as the suggested source), the completion POST
+    must still go back to the bty-server. The plan's ``catalog``
+    field updates ``_state.catalog_source`` but MUST NOT repoint
+    ``_state.pxe_done_base`` -- otherwise a successful flash would
+    POST `/pxe/<mac>/done` at github.com (404, silently swallowed
+    by the URL-error suppressor), leaving the server-side
+    ``last_flashed_at`` stale.
+    """
+    monkeypatch.setenv("BTY_IMAGE_ROOT", str(tmp_path))
+    app = tui_app.BtyTui(server="http://bty-server:8080", mac="aa:bb:cc:dd:ee:ff")
+    # Sanity: __init__ sets pxe_done_base to the bty-server URL.
+    assert app._state.pxe_done_base == "http://bty-server:8080"
+
+    def fake_urlopen(req, **_kw):
+        # Simulate a plan response carrying a third-party catalog
+        # URL (not pointing at the bty-server). The bug being
+        # guarded against is over-eager pxe_done_base derivation
+        # that would repoint /done to github.com.
+        payload = (
+            b'{"mode": "interactive", '
+            b'"catalog": "https://github.com/safl/bty/releases/'
+            b'latest/download/catalog.toml"}'
+        )
+        return _fake_bytes_resp(payload)
+
+    monkeypatch.setattr(tui_app.urllib.request, "urlopen", fake_urlopen)
+    action = app._fetch_and_dispatch_plan()
+    assert action == "interactive"
+    # catalog_source updates to the plan's suggestion ...
+    assert app._state.catalog_source == (
+        "https://github.com/safl/bty/releases/latest/download/catalog.toml"
+    )
+    # ... but pxe_done_base stays anchored to the bty-server.
+    assert app._state.pxe_done_base == "http://bty-server:8080"
 
 
 # --------------------------------------------------------------------------

@@ -15,9 +15,10 @@ Boots two QEMU VMs sharing an L2 segment via ``-netdev socket``:
 
 - Client: single NIC joined to the server's PXE socket. PXE-boot
   enabled. Blank virtio disk attached as the flash target. After
-  the chain runs, ``bty-flash-on-boot`` pulls the dummy image we
-  uploaded earlier, runs ``bty flash --yes`` against /dev/vda, and
-  reaches the "flash complete; rebooting" marker.
+  the chain runs, ``bty`` in auto-flash mode (driven by the plan
+  endpoint) pulls the dummy image we uploaded earlier, writes it
+  to /dev/vda, and reaches the ``bty: flash complete; rebooting``
+  marker on /dev/console.
 
 The test uses production paths for everything except DHCP setup
 on the synthesised PXE segment. ``POST /ui/login`` uses the
@@ -285,9 +286,9 @@ def _start_client_vm(workspace, socket_port, log_path, cfg):
         # Pin a stable serial on the flash target so the bty-web
         # safety gate's ``target_disk_serial`` match succeeds.
         # ``BTYTEST`` is the value the per-MAC binding (below)
-        # ships in ``bty.target_disk_serial=`` on the kernel
-        # cmdline; the live env's bty-flash-on-boot looks it up
-        # via lsblk.
+        # ships in the plan endpoint's ``target_disk_serial``
+        # field; the live env's ``bty`` in auto-flash mode looks
+        # it up via lsblk.
         #
         # Two-stage drive+device split: ``serial=`` on ``-drive
         # if=virtio`` is a legacy QEMU shortcut that some QEMU

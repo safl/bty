@@ -165,23 +165,18 @@ def main(args, cijoe):
         return err
 
     # Drive auto/config into iso-hybrid mode via the ``BTY_USB_ISO``
-    # env var (``BTY_USB_ISO=1`` selects iso-hybrid + syslinux,grub-efi
-    # + ``bty.mode=interactive`` on the kernel cmdline; unset selects
-    # netboot for the netboot-x86 variant). The env var has to be set in the
-    # invocation environment of every ``lb`` call, because ``lb build``
-    # re-runs ``lb config`` (which re-runs ``auto/config``) during its
-    # own setup; flag-based overrides at the initial config call get
-    # clobbered by that re-run.
+    # env var (``BTY_USB_ISO=1`` selects iso-hybrid + syslinux + grub-
+    # efi; unset selects netboot for the netboot-x86 variant). The env
+    # var has to be set in the invocation environment of every ``lb``
+    # call, because ``lb build`` re-runs ``lb config`` (which re-runs
+    # ``auto/config``) during its own setup; flag-based overrides at
+    # the initial config call get clobbered by that re-run.
     #
-    # ``bty.mode=interactive`` fires ``bty-tui-on-tty1.service`` (its
-    # ``ConditionKernelCommandLine`` is keyed on this), which is the
-    # same unit the PXE-tui flow uses. With no ``bty.server`` /
-    # ``bty.mac`` on the cmdline the wrapper script forwards no flags
-    # and ``bty-tui`` falls back to scanning the local image-root -
-    # the offline USB-boot mode.
-    # ``bty-flash-on-boot.service`` short-circuits cleanly when it
-    # sees ``bty.mode=interactive``, so the two services don't race
-    # over tty1.
+    # ``bty-tui-on-tty1.service`` fires unconditionally on every live
+    # env boot (v0.22.10+ retired the cmdline-mode gating). With no
+    # ``bty.server`` / ``bty.mac`` on the cmdline the wrapper script
+    # forwards no flags and ``bty`` falls back to scanning the local
+    # image-root -- the offline USB-boot mode.
     #
     # ``sudo env`` is used (instead of ``sudo`` with shell variable
     # assignment) because sudo strips environment by default; ``env``

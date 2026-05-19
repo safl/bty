@@ -14,31 +14,32 @@ you have:
 - **Server-driven PXE flash** - fleet image flashing, machines reflash
   themselves on schedule / on demand / on failure.
 
-## Direct flash (CLI / TUI)
+## Direct flash (USB live, offline)
 
 Used for ad-hoc provisioning of a single box, with no infrastructure on
 the network.
 
 1. Operator boots the target machine from the bty USB live image
    (built by `bty-media`).
-2. The live environment auto-logins as root on `tty1`. The operator
-   runs `bty tui` for an interactive flow, or invokes `bty` directly
-   from the shell.
-3. Operator selects an image (sourced from the USB stick itself) and a
-   target disk (block device on the booted machine).
-4. `bty flash` writes the image and reports success.
-5. Operator removes the USB stick and reboots; the target boots into the
-   freshly-flashed image.
+2. The live env auto-launches ``bty`` on tty1 via
+   ``bty-tui-on-tty1.service``. Without ``bty.mac=`` on the kernel
+   cmdline, the wizard runs in local-only mode: scans the
+   ``BTY_IMAGES`` partition + any ``.bri`` descriptors there.
+3. Operator picks an image (Enter), picks a target disk (Enter),
+   confirms the flash plan (y / Enter).
+4. bty writes the image and reports success.
+5. Operator removes the USB stick and reboots; the target boots into
+   the freshly-flashed image.
 
 The whole flow runs offline. No network, no server, no MAC registration.
 
-## USB + network catalog (`bty tui --catalog SOURCE`)
+## USB + network catalog (`bty --catalog SOURCE`)
 
 A middle shape between the strictly-offline direct flash and the
 PXE-driven flows. The operator boots from the same USB live stick
-but points the TUI at a network-shared `bty-web` for the catalog.
-Useful for a small team that wants one place to keep pre-built images
-without setting up the appliance + PXE stack.
+but points the wizard at a network-shared `bty-web` for the catalog.
+Useful for a small team that wants one place to keep pre-built
+images without setting up the appliance + PXE stack.
 
 1. Someone (operator's workstation, a homelab server, a dev box)
    runs `bty-web`. The lowest-friction shape is the published
@@ -49,43 +50,47 @@ without setting up the appliance + PXE stack.
      ghcr.io/safl/bty-web:latest
    ```
 
-   Pre-built images get dropped into the volume; they show up in the
-   `/images` endpoint. The bare-metal `bty-server` appliance also
-   serves `/images` and works identically as a catalog source -
-   any `bty-web` instance does.
+   Pre-built images get dropped into the volume; they show up in
+   the `/images` endpoint. The bare-metal `bty-server` appliance
+   also serves `/images` and works identically as a catalog source
+   - any `bty-web` instance does.
 
-2. Operator boots a target from the bty USB live stick and runs
-   `bty tui --catalog http://<host>:8080/catalog.toml` (either inline at the
-   tty1 prompt or by relaunching the auto-started TUI with that
-   flag).
+2. Operator boots a target from the bty USB live stick. ``bty``
+   auto-launches in local-only mode (no ``--mac`` on cmdline). On
+   the first stage (SELECT_CATALOG) the operator picks ``[c]
+   custom`` and types ``http://<host>:8080/catalog.toml``. Or:
+   relaunch the wizard with ``bty --catalog
+   http://<host>:8080/catalog.toml`` from a shell on Alt+F2.
 
-3. The TUI populates its image pane from `GET /catalog.toml` on the
-   server, the operator picks a target disk on the local machine
-   and an image from the remote catalog, and confirms the flash.
-   Image bytes stream from `GET /images/{name}` directly through
-   `zstd -d | dd` to the target disk - no temp file.
+3. The wizard fetches `GET /catalog.toml` from the server, merges
+   it with the local image-root, and advances to the image picker.
+   Operator picks an image + a target disk, confirms. Image bytes
+   stream from `GET /images/{name}` directly through `curl | dd`
+   to the target disk -- no temp file.
 
 4. On completion the operator removes the stick and reboots; the
    target boots into the freshly-flashed image. The server has no
    per-MAC record (this isn't PXE), so no follow-up state to
-   manage.
+   manage. The operator's pick is also never reported back: the
+   catalog source is a one-way data feed in this mode.
 
 No PXE, no DHCP-proxy, no L2 broadcasts. The container can
 therefore live anywhere reachable - operator's laptop, an EC2
-instance, anywhere with HTTP. The cost: the operator still has to
-plug in the USB stick and stand at the target.
+instance, anywhere with HTTP. The cost: the operator still has
+to plug in the USB stick and stand at the target.
 
 ### Sub-case: virtual USB via IP-KVM (PiKVM, JetKVM)
 
 The "USB live stick" in step 2 above does not have to be a
-physical stick. IP-KVM appliances (PiKVM, JetKVM, BMC IPMI virtual
-media, vendor-specific OoB consoles) can mount the bty `.iso.gz`
-artifact and expose it to the target as if it were a USB or
-CD-ROM device. The target boots into the bty live env exactly as
-it would from a physical stick; bty-tui auto-launches on tty1;
-the operator types `s`, fills in `http://<host>:8080`, picks an
-image, picks a target disk, flashes. The whole sequence runs
-through the IP-KVM session - no one has to be at the rack.
+physical stick. IP-KVM appliances (PiKVM, JetKVM, BMC IPMI
+virtual media, vendor-specific OoB consoles) can mount the bty
+`.iso.gz` artifact and expose it to the target as if it were a
+USB or CD-ROM device. The target boots into the bty live env
+exactly as it would from a physical stick; ``bty`` auto-launches
+on tty1; the operator types ``c``, fills in
+``http://<host>:8080/catalog.toml``, picks an image, picks a
+target disk, flashes. The whole sequence runs through the IP-KVM
+session -- no one has to be at the rack.
 
 Practical notes:
 
@@ -98,7 +103,7 @@ Practical notes:
 - The bty live env's tty1 framebuffer renders cleanly through
   every IP-KVM I have tested (PSF console fonts, no nerd-font /
   emoji dependencies). The plain-ASCII /etc/issue banner and the
-  bty-tui rounded panels both render identically over IP-KVM and
+  wizard's Rich panels both render identically over IP-KVM and
   locally.
 
 This is what "bare-metal provisioning over the internet" looks
@@ -117,8 +122,8 @@ into the bty live env exactly as if it had been `dd`'d directly.
 Two ways to use Ventoy with bty:
 
 1. **bty-usb plus a remote catalog.** Same shape as the IP-KVM
-   sub-case above: bty-tui auto-launches, the operator presses
-   `s` and types the `bty-web` URL. Ventoy is just a different
+   sub-case above: ``bty`` auto-launches, the operator presses
+   ``c`` and types the `bty-web` URL. Ventoy is just a different
    boot mechanism; the catalog source is unchanged.
 
 2. **bty-usb plus images on the same Ventoy partition.** Drop
@@ -158,27 +163,29 @@ zero per-MAC configuration.
    `bty-web` auto-discovers the MAC, creates a `Machine` record with
    `boot_policy=tui`, and serves the iPXE-tui template
    (`ipxe_tui.j2`).
-3. The target chains into the bty live env with
-   `bty.mode=interactive bty.server=URL bty.mac=MAC` on the kernel
-   cmdline. `bty-flash-on-boot.service` sees the interactive flag
-   and short-circuits; `bty-tui-on-tty1.service` takes over tty1 in
-   place of the agetty and launches
-   `bty tui --catalog SOURCE --mac MAC`.
-4. **bty-tui auto-posts the local disk inventory** to
+3. The target chains into the bty live env with `bty.server=URL`
+   + `bty.mac=MAC` on the kernel cmdline (the iPXE template
+   carries nothing else; every other knob comes from the plan
+   endpoint). `bty-tui-on-tty1.service` takes over tty1 in
+   place of the agetty and exec's `bty --server URL --mac MAC`.
+4. **bty auto-posts the local disk inventory** to
    `POST /pxe/{mac}/inventory` on startup. The operator does not
    have to press anything for this. bty-web stores it on the
    machine row; the operator's `/ui/machines/{mac}` page now shows
-   a real path / model / serial dropdown for picking a target disk.
-5. The TUI fetches the catalog from `GET /catalog.toml`, the operator
-   picks an image and a target disk, and confirms the flash. Image
-   bytes stream from `GET /images/{name}` straight through
-   `zstd -d | dd` to the target disk - no temp file, no intermediate
-   download.
-6. On success the TUI `POST`s `/pxe/{mac}/done` so `last_flashed_at`
-   updates server-side. The next reboot chains the TUI again unless
-   the operator flips `boot_policy` (typically to `local` once the
-   target is happy with what it's running, or to `flash` / `flash-once`
-   for an automated reflash).
+   a real path / model / serial dropdown for picking a target
+   disk. Then bty GETs `<server>/pxe/<mac>/plan` and sees
+   ``mode=interactive`` for boot_policy=tui.
+5. bty drops into the wizard with the server's catalog pre-loaded
+   (`GET /catalog.toml`). The operator picks an image and a target
+   disk, confirms the flash. Image bytes stream from
+   `GET /images/{name}` straight through `curl | dd` to the
+   target disk - no temp file, no intermediate download.
+6. On success bty `POST`s `/pxe/{mac}/done` so `last_flashed_at`
+   updates server-side. **The image pick itself is NOT reported
+   back** -- the machine's `bty_image_ref` stays whatever it was
+   (or null). For server-tracked flashes, set boot_policy=flash
+   with a bound ref + serial. The next reboot chains the wizard
+   again unless the operator flips `boot_policy`.
 
 This flow is also useful for the operator who just wants a
 one-off remote flash without preparing a USB stick: any unknown
@@ -193,25 +200,27 @@ schedule, on demand, or on failure.
 1. Server appliance is already up (same setup as the interactive
    flow above).
 2. The target's first PXE contact creates a `Machine` record with
-   `boot_policy=tui`. The live env launches bty-tui on tty1; bty-tui
+   `boot_policy=tui`. The live env runs ``bty`` on tty1, which
    AUTOMATICALLY posts the box's disk inventory to
    `POST /pxe/{mac}/inventory` on startup. The operator does not
    have to push a button for this.
-3. Operator assigns `MAC -> image + target_disk + boot_policy` in the
-   web UI:
+3. Operator assigns `MAC -> image + target_disk + boot_policy` in
+   the web UI:
    - `bty_image_ref` (image binding) - picked from the catalog.
    - `target_disk_serial` (which disk to flash) - picked from the
      inventory dropdown populated in step 2.
    - `boot_policy=flash` arms the auto-flash.
-4. Target machine PXE-boots; bty-web's `/pxe/{mac}` returns the iPXE
-   flash chain with `bty.target_disk_serial=...` baked into the
-   kernel cmdline. iPXE chains into the bty live environment served
-   over HTTP by `bty-web`.
-5. The live env's `bty-flash-on-boot.service` resolves the cmdline
-   serial to a `/dev/...` path via `lsblk -o SERIAL`, fetches the
-   assigned image from `GET /images/{ref}/{name}`, runs `bty flash`,
-   and `POST`s `/pxe/{mac}/done` to update `last_flashed_at`. Then
-   it reboots automatically.
+4. Target machine PXE-boots; bty-web's `/pxe/{mac}` returns the
+   iPXE flash chain. Cmdline carries just `bty.server` +
+   `bty.mac`; iPXE chains into the bty live env served over HTTP
+   by `bty-web`.
+5. `bty-tui-on-tty1.service` exec's `bty --server URL --mac MAC`.
+   ``bty`` GETs `/pxe/<mac>/plan`, sees ``mode=auto`` with the
+   image URL + target_disk_serial filled in, resolves the serial
+   to a `/dev/...` path via lsblk, fetches the assigned image
+   from `GET /images/{ref}/{name}`, runs the flash, and `POST`s
+   `/pxe/{mac}/done` to update `last_flashed_at`. Then it reboots
+   automatically.
 6. The next reboot still chains the live env unless the operator
    flips the machine to `boot_policy=local` (or used `flash-once`,
    which flips itself - see below). Per-job CI cadences that want
@@ -233,7 +242,7 @@ fields plus three timestamps the server maintains:
 | `hostname`           | RFC-1123 hostname (optional). Cosmetic; not consumed by the flash chain. |
 | `boot_policy`        | One of `local` / `flash` / `flash-once` / `tui` (default `local`).      |
 | `target_disk_serial` | Operator-picked serial number from the most recent inventory post.       |
-| `known_disks`        | JSON array of disks the live env's bty-tui reported on startup.          |
+| `known_disks`        | JSON array of disks the live env's ``bty`` reported on startup.          |
 | `last_seen_at`       | Updated on every `GET /pxe/{mac}` hit.                                   |
 | `last_flashed_at`    | Updated on every `POST /pxe/{mac}/done`.                                 |
 | `known_disks_at`     | Updated on every `POST /pxe/{mac}/inventory`.                            |
@@ -248,7 +257,7 @@ parameters the policy needs.
 | `local`       | `ipxe.j2` (sanboot - boot from local disk).                                                                      | No.                      |
 | `flash`       | `ipxe_flash.j2` (auto-reflash via live env). Refuses (falls back to `ipxe.j2`) if no `target_disk_serial`.        | No. Stays `flash`.       |
 | `flash-once`  | Same chain as `flash`. Same `target_disk_serial` gate.                                                            | Yes. Flips to `local`.   |
-| `tui`         | `ipxe_tui.j2` (interactive bty-tui on tty1). bty-tui auto-posts inventory on startup.                            | No.                      |
+| `tui`         | `ipxe_tui.j2` (live env chain; ``bty`` on tty1 GETs /pxe/<mac>/plan -> ``mode=interactive``, drops into wizard). ``bty`` auto-posts inventory on startup. | No.                      |
 
 The flash-once policy is the "I want this box reimaged now, then
 leave it alone" pattern. It's distinct from `flash` (which reimages
@@ -267,7 +276,7 @@ incidents on multi-disk hosts. The full picture, in event order:
    (`machine.discovered` event), sets `boot_policy=tui`, returns
    the interactive chain (`ipxe_tui.j2`). Audit log gets a
    `pxe.offered` row with `offer_kind=tui`.
-2. **Live env boots, bty-tui starts.** bty-tui runs on tty1; on
+2. **Live env boots, ``bty`` starts.** ``bty`` runs on tty1; on
    startup it shells out to `lsblk` and POSTs the result to
    `/pxe/{mac}/inventory`. bty-web stores the inventory as JSON
    on the machine row, updates `known_disks_at`, records
@@ -280,10 +289,12 @@ incidents on multi-disk hosts. The full picture, in event order:
 4. **Operator power-cycles the target.** Next PXE contact:
    `/pxe/{mac}` sees `boot_policy=flash`, `bty_image_ref` bound,
    and `target_disk_serial` picked. Returns `ipxe_flash.j2` with
-   `bty.target_disk_serial=...` in the kernel cmdline.
-5. **Live env flashes.** `bty-flash-on-boot` reads the cmdline,
+   `bty.server=` + `bty.mac=` on the cmdline (the image URL +
+   target serial come from the plan endpoint, not the cmdline).
+5. **Live env flashes.** ``bty`` on tty1 GETs `/pxe/<mac>/plan`,
+   sees ``mode=auto`` with image + target_disk_serial filled in,
    shells out `lsblk -o SERIAL`, matches the serial to a path,
-   runs `bty flash` on that path, `POST`s `/pxe/{mac}/done`
+   runs the flash on that path, `POST`s `/pxe/{mac}/done`
    (audit: `machine.flashed`), reboots.
 
 The gate fires at multiple points:
@@ -296,11 +307,11 @@ The gate fires at multiple points:
   is empty.** Returns `ipxe.j2` (local fallback) and records a
   `pxe.flash.no_target_disk` event so the operator can see on
   `/ui/events` why their box isn't reflashing.
-- **`bty-flash-on-boot` refuses when the serial doesn't match any
-  current disk.** Prints an operator-readable message listing the
-  current disks and their serials, exits non-zero. The systemd
-  service stays failed; the operator can re-pick on the server
-  and try again.
+- **``bty`` in auto-flash mode refuses when the plan's serial
+  doesn't match any current disk.** Prints an operator-readable
+  red Panel listing the current disks and their serials, exits
+  non-zero. The bty-tui-on-tty1 service stays at the failed
+  banner; the operator can re-pick on the server and try again.
 
 The serial-match (vs path-match) at flash time is the durable
 guarantee: `/dev/sda` can flip to `/dev/nvme0n1` across kernel
@@ -326,7 +337,7 @@ If the machine's `boot_policy == "flash-once"`:
 - The `machine.flashed` event summary calls this out:
   `"... (flash-once -> local)"`.
 
-### `POST /pxe/{mac}/inventory` (bty-tui reports disks)
+### `POST /pxe/{mac}/inventory` (``bty`` reports disks)
 
 - Replaces the entire `known_disks` JSON column with the new
   payload (no merge - the live env is authoritative for "what
@@ -335,7 +346,7 @@ If the machine's `boot_policy == "flash-once"`:
 - Records `machine.inventory` event with the disk count + list of
   serials.
 - 404s if the MAC has no machine record (prevents a renegade
-  bty-tui from creating ghost machines).
+  ``bty`` from creating ghost machines).
 
 ### `GET /pxe/{mac}` (firmware fetches the per-MAC chain)
 

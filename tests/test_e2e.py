@@ -126,7 +126,7 @@ def test_e2e_real_default_catalog_round_trips_through_probe_url(
     """
     # The default catalog ships rolling-tag entries with NO sha
     # pin. bty-web's ``/catalog.toml`` deliberately skips no-sha
-    # entries (the bty-tui consumer requires shas for binding), so
+    # entries (the ``bty`` consumer requires shas for binding), so
     # to round-trip we upload sha-pinned versions of the same
     # shape -- same name format (spaces + parens), same URL types
     # (https with no path extension, oras://). That exercises the
@@ -265,9 +265,9 @@ def test_e2e_pxe_chain_cmdline_carries_all_expected_tokens(
                                               wedge on Intel iGPUs
       * modprobe.blacklist=nouveau        -- avoid the 30s nouveau
         + nouveau.modeset=0                 firmware-probe stall
-      * bty.server=...                    -- bty-tui dispatches via
+      * bty.server=...                    -- ``bty`` dispatches via
                                               <server>/pxe/<mac>/plan
-      * bty.mac=<mac>                     -- so bty-tui can fetch
+      * bty.mac=<mac>                     -- so ``bty`` can fetch
                                               the per-MAC plan
 
     Each token has been added in a separate release to fix a
@@ -329,7 +329,7 @@ def test_e2e_pxe_flash_chain_plan_carries_image_url_and_target_serial(
 
     v0.22.10 moved these out of the iPXE kernel cmdline and into
     the plan endpoint. The iPXE chain is now template-agnostic
-    (same shape for tui + flash); bty-tui consumes the plan JSON
+    (same shape for tui + flash); ``bty`` consumes the plan JSON
     to decide what to do.
     """
     # Seed a catalog entry the machine binds to. Use a sha that
@@ -668,7 +668,7 @@ def test_e2e_format_hint_carries_through_to_validate_plan(
 def test_e2e_pxe_done_failure_is_isolated_from_machine_state(
     app_client: TestClient,
 ) -> None:
-    """POST /pxe/<mac>/done is best-effort. If the bty-tui side hits
+    """POST /pxe/<mac>/done is best-effort. If the ``bty`` side hits
     a URLError trying to call it, the actual flash succeeded -- the
     server must accept a subsequent successful done call AND the
     machine's last_flashed_at must update correctly.
@@ -831,7 +831,7 @@ def test_e2e_pxe_unknown_mac_then_inventory_then_flash_chain(
     assert r.status_code == 200, r.text
     # Default policy is tui; cmdline carries minimal bty.server +
     # bty.mac (v0.22.10 retired bty.mode=). The plan endpoint
-    # decides what bty-tui does.
+    # decides what ``bty`` does.
     assert "bty.server=" in r.text
     assert f"bty.mac={mac}" in r.text
 
@@ -893,7 +893,7 @@ def test_e2e_pxe_unknown_mac_then_inventory_then_flash_chain(
     # The iPXE chain itself carries only bty.server + bty.mac on the
     # cmdline (v0.22.10); the image URL + target serial appear in
     # the chain header comment block for operator inspection AND on
-    # /pxe/<mac>/plan as JSON (the contract bty-tui consumes).
+    # /pxe/<mac>/plan as JSON (the contract ``bty`` consumes).
     r = app_client.get(f"/pxe/{mac}", headers={"Host": "bty.local:8080"})
     assert r.status_code == 200, r.text
     body = r.text
@@ -1171,7 +1171,7 @@ def test_e2e_machine_put_is_full_replace_not_partial_update(
 def test_e2e_catalog_toml_output_is_parseable_by_bty_catalog_loader(
     app_client: TestClient,
 ) -> None:
-    """The bty-tui consumer of ``--catalog`` uses
+    """The ``bty --catalog`` consumer uses
     ``bty.catalog.load_bytes`` to parse the response from
     ``GET /catalog.toml``. If bty-web emits a TOML body the loader
     doesn't accept, the TUI shows an empty / corrupt catalog and

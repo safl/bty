@@ -2,18 +2,17 @@
 
 What bty needs at runtime, organised by what you're trying to do.
 The `bty-lab` PyPI package itself has no third-party Python
-dependencies for the core CLI, and lazy-loads the bigger pieces
-(rich for the TUI, fastapi for the web server) only when those
-entry points are actually used.
+dependencies in its bare install; the bigger pieces (Rich for the
+wizard, FastAPI for the web server) are pulled in by extras and
+lazy-loaded only when those entry points are actually used.
 
 ## To install bty itself
 
-The Python package and one of its CLI / TUI / web entry points:
-
 ```bash
-pipx install bty-lab            # bty CLI only, stdlib-only Python
-pipx install "bty-lab[tui]"     # adds bty-tui (Rich)
-pipx install "bty-lab[web]"     # adds bty-web (FastAPI, Uvicorn, pamela)
+pipx install "bty-lab[tui]"     # `bty` wizard (Rich-based; the
+                                #  operator-facing tool)
+pipx install "bty-lab[web]"     # adds `bty-web` (FastAPI, Uvicorn,
+                                #  pamela)
 pipx install "bty-lab[all]"     # everything
 ```
 
@@ -21,10 +20,10 @@ Python 3.11+ is the only hard requirement. PyPI hosts pure-Python
 wheels; the `[tui]` / `[web]` extras pull in their own pure-Python
 deps with no native build step on install.
 
-## To inspect or flash on a Linux host
+## To run `bty` (the wizard)
 
-`bty inspect` and `bty flash` shell out to a handful of system
-binaries that almost every Linux distribution already has:
+The wizard shells out to a handful of system binaries that almost
+every Linux distribution already has:
 
 | Binary | Used for | Debian/Ubuntu pkg |
 |---|---|---|
@@ -38,21 +37,17 @@ binaries that almost every Linux distribution already has:
 | `xz` | decompress `.img.xz` images | `xz-utils` |
 | `curl` | stream URLs (`http://`, `https://`, `oras://`) into the flash pipeline | `curl` |
 
-Flashing a real disk requires root (`sudo bty flash` or running
-inside the bty live env where root is already there).
+Flashing a real disk requires root (`sudo bty` or running inside
+the bty live env where root is already there).
 
-## To run bty-tui
-
-Same set of binaries as above (the TUI delegates flashing to the
-same `bty.flash` library), plus the `[tui]` extra. The `--catalog
-SOURCE` mode (a local TOML path, HTTP URL, or `oras://` reference)
-adds nothing host-side -- it's a plain HTTP client; `oras://` uses
-stdlib urllib through `bty.oras`.
+The `--catalog SOURCE` mode (a local TOML path, HTTP URL, or
+`oras://` reference) adds nothing host-side -- it's a plain HTTP
+client; `oras://` uses stdlib urllib through `bty.oras`.
 
 ## To run bty-web
 
-The `[web]` extra (fastapi, uvicorn, pamela, jinja2 are pulled in by
-pip) plus:
+The `[web]` extra (fastapi, uvicorn, pamela, jinja2 are pulled in
+by pip) plus:
 
 - `libpam0g` + `libpam-modules` if you want PAM-based `/ui/login`
   (this is the default; the appliance and the Docker container both
@@ -75,7 +70,6 @@ your own.
 | `systemd-networkd` | NIC management on the appliance |
 | `cloud-init` | first-boot user / password / network setup |
 | `cloud-utils` | `growpart` for `bty-grow-rootfs.service` |
-| `plymouth` + `plymouth-themes` | bty-themed boot splash on tty1 (USB live env only -- not on the headless server appliance) |
 
 The appliance ships dnsmasq for TFTP; the Docker container
 (`ghcr.io/safl/bty-web`) is HTTP-only. UEFI HTTP-Boot targets
@@ -103,34 +97,30 @@ for at runtime.
 ## Environment variables
 
 Quick reference of every env var bty's runtime reads, with which
-process consumes it and the default. The CLI / TUI / web all read
+process consumes it and the default. The wizard + web all read
 from the same set so a single ``/etc/default/bty-web`` (appliance)
 or ``ENV`` block (Dockerfile) covers every component.
 
 | Var | Read by | Default | Purpose |
 |---|---|---|---|
-| `BTY_IMAGE_ROOT` | `bty`, `bty-tui`, `bty-web` | `/var/lib/bty/images` | Image catalog directory |
+| `BTY_IMAGE_ROOT` | `bty`, `bty-web` | `/var/lib/bty/images` | Image catalog directory |
 | `BTY_STATE_DIR` | `bty-web` | `/var/lib/bty` | Where `state.db`, `session-secret`, etc. live |
 | `BTY_BOOT_DIR` | `bty-web` | `${BTY_STATE_DIR}/boot` | Kernel / initrd / squashfs (PXE boot artifacts) |
 | `BTY_WEB_HOST` | `bty-web` | `0.0.0.0` | Listen address |
 | `BTY_WEB_PORT` | `bty-web` | `8080` | Listen port |
 | `BTY_SESSION_SECRET` | `bty-web` | (generated, persisted under `BTY_STATE_DIR`) | Cookie key override; useful for multi-instance |
 | `BTY_BOOT_RELEASE_REPO` | `bty-web` | `safl/bty` | GitHub releases repo to fetch boot artifacts from |
-| `BTY_CATALOG_FILE` | `bty-web`, `bty catalog` | `${BTY_STATE_DIR}/catalog.toml` | Manifest path (TOML; see walkthrough-catalog.md) |
-| `BTY_CATALOG_CACHE_DIR` | `bty-web`, `bty catalog` | `${BTY_STATE_DIR}/cache` | Content-addressed blob cache |
+| `BTY_CATALOG_FILE` | `bty-web` | `${BTY_STATE_DIR}/catalog.toml` | Manifest path (TOML; see walkthrough-catalog.md) |
+| `BTY_CATALOG_CACHE_DIR` | `bty-web` | `${BTY_STATE_DIR}/cache` | Content-addressed blob cache |
 | `BTY_CATALOG_MAX_PARALLEL` | `bty-web` | `2` | Concurrent catalog downloads |
 | `BTY_HASH_MAX_PARALLEL` | `bty-web` | `1` | Concurrent SHA-256 hashes (low: Pi/NUC-friendly) |
 | `BTY_MAX_UPLOAD_BYTES` | `bty-web` | `200 GiB` | Hard cap on `PUT /images/{name}` body size; rejected uploads land an `image.upload_failed` audit row |
 | `BTY_TRUSTED_PROXY` | `bty-web` | unset | When set (any truthy), read client IP from `X-Forwarded-For`; only enable behind a reverse proxy that strips inbound X-F-F |
 | `BTY_QUIET` | container entrypoint | unset | Suppress the start-up banner with default credentials |
 
-`bty tui` also accepts `--image-root /path` and `--catalog SOURCE`
-flags directly. On the CLI, `bty images --image-root /path`
-overrides for that command; `bty inspect PATH` and
-`bty flash IMAGE TARGET` take the image as a direct positional
-argument (path for inspect; path, `http(s)://...`, `oras://...`,
-or `.bri` descriptor path for flash's IMAGE) and don't read the
-image root.
+``bty`` also accepts `--catalog SOURCE` to pre-load a catalog and
+`--server X --mac Y` to switch to server-driven dispatch. See
+`reference.md > CLI` for the full surface.
 
 ## To run the test-pxe end-to-end check
 

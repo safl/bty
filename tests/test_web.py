@@ -128,10 +128,10 @@ def test_pxe_for_unknown_mac_returns_tui_template(app_client: TestClient) -> Non
     """An unknown MAC auto-discovers with ``boot_policy=tui`` and is
     served the interactive-live-env iPXE chain. This is "bty-on-a-USB
     but over the network": first PXE contact lands the operator at
-    bty-tui without any prior server-side configuration.
+    ``bty`` without any prior server-side configuration.
 
     Since v0.22.10 the kernel cmdline only carries ``bty.server`` +
-    ``bty.mac``; bty-tui GETs ``/pxe/<mac>/plan`` to decide what to
+    ``bty.mac``; ``bty`` GETs ``/pxe/<mac>/plan`` to decide what to
     do (auto-flash, interactive, or no-op). The legacy
     ``bty.mode=interactive`` cmdline flag was retired with the
     server-side plan dispatcher.
@@ -272,9 +272,9 @@ def test_pxe_for_known_mac_uses_assignment_template(app_client: TestClient) -> N
 def test_pxe_auto_discovers_unknown_mac(app_client: TestClient) -> None:
     """A /pxe contact for an unknown MAC creates a placeholder record so the
     operator sees the machine in /machines and can claim it. The default
-    ``boot_policy`` is ``tui``: the unknown MAC chains into the live env in
-    interactive mode (bty-tui), letting the operator pick + flash an image
-    by hand without prior server-side configuration."""
+    ``boot_policy`` is ``tui``: the unknown MAC chains into the live env where
+    ``bty`` drops the operator into the wizard, letting them pick + flash
+    an image by hand without prior server-side configuration."""
     mac = "11:22:33:44:55:66"
 
     # Pre-condition: not in the DB.
@@ -551,7 +551,7 @@ def test_list_images_returns_seeded_fixture(app_client: TestClient) -> None:
 
 
 def test_list_images_is_open_for_pxe_clients(app_client: TestClient) -> None:
-    """``GET /images`` is an open route: the bty-tui-on-PXE flow needs
+    """``GET /images`` is an open route: the PXE-booted ``bty`` flow needs
     to enumerate the catalog from inside the live env without first
     bootstrapping a session. Same trust model as ``GET /images/{name}``
     (already open) and the other ``/pxe/`` routes."""
@@ -890,8 +890,8 @@ def test_list_images_returns_files_under_image_root(
 def test_list_catalog_toml_renders_unified_catalog(tmp_path: Path) -> None:
     """``GET /catalog.toml`` serves the same unified-catalog rows as
     ``GET /images`` but as a TOML manifest matching the
-    ``bty.catalog.Catalog`` schema. The bty-tui's ``--catalog``
-    loader consumes this without server-specific code paths --
+    ``bty.catalog.Catalog`` schema. ``bty --catalog`` consumes
+    this without server-specific code paths --
     it's the same shape it'd consume from any static catalog file."""
     import hashlib
 
@@ -936,7 +936,7 @@ def test_list_catalog_toml_url_encodes_special_chars_in_names(tmp_path: Path) ->
     rolling)``), the ``/catalog.toml`` endpoint must percent-
     encode the trailing name segment of the served URL. Without
     encoding, the URL ``/images/<sha>/nosi fedora-sysdev (...)``
-    travels through bty-tui to ``http.client.HTTPConnection.
+    travels through ``bty`` to ``http.client.HTTPConnection.
     putrequest``, which calls ``_validate_path`` -- a
     CVE-2019-9740 mitigation that rejects any URL path with a
     space or control character. The operator sees a Textual
@@ -1022,7 +1022,7 @@ def test_list_catalog_toml_url_encodes_special_chars_in_names(tmp_path: Path) ->
 
 
 def test_list_images_does_not_surface_bri_descriptors(tmp_path: Path) -> None:
-    """``.bri`` is the bty-usb / bty-tui ad-hoc local-catalog
+    """``.bri`` is the ``bty``-on-USB ad-hoc local-catalog
     format; bty-web is the SHA-keyed managed-catalog model. A
     ``.bri`` dropped into the server's image root must NOT
     appear in ``GET /images`` -- it can't bind to a machine
@@ -1229,7 +1229,7 @@ def test_pxe_flash_policy_returns_chain_with_args(
 
     Since v0.22.10 the kernel cmdline no longer carries
     ``bty.image_url`` / ``bty.target_disk_serial`` / ``bty.image_format``
-    -- those come from ``GET <server>/pxe/<mac>/plan`` once bty-tui
+    -- those come from ``GET <server>/pxe/<mac>/plan`` once ``bty``
     runs on tty1. The iPXE chain still distinguishes flash vs tui
     so the audit log records the intended outcome; the cmdline
     shape is just the same minimal pair.
@@ -1307,7 +1307,7 @@ def test_pxe_plan_unknown_mac_auto_discovers_and_returns_interactive(
     server's ``/catalog.toml`` URL.
 
     This is the workstation-side equivalent of "bty-on-a-USB but
-    over the network": ``bty-tui --server X --mac Y`` against an
+    over the network": ``bty --server X --mac Y`` against an
     unknown MAC drops the operator into the wizard with the server
     catalog pre-loaded, no prior server-side configuration needed.
     """
@@ -1327,7 +1327,7 @@ def test_pxe_plan_unknown_mac_auto_discovers_and_returns_interactive(
 
 
 def test_pxe_plan_local_policy_returns_local(app_client: TestClient) -> None:
-    """``boot_policy=local`` -> ``mode=local`` so bty-tui exits
+    """``boot_policy=local`` -> ``mode=local`` so ``bty`` exits
     cleanly and the firmware / local-disk path handles boot. The
     operator's known-good appliance row stays untouched."""
     mac = "aa:bb:cc:dd:ee:ff"
@@ -1346,7 +1346,7 @@ def test_pxe_plan_flash_policy_with_target_returns_auto(
 ) -> None:
     """``boot_policy=flash`` + bindable ref + target_disk_serial ->
     ``mode=auto`` with the image URL and target serial filled in.
-    bty-tui runs the flash without prompts.
+    ``bty`` runs the flash without prompts.
 
     The image URL takes the same ``/images/<ref>/<name>`` shape as
     the ipxe_flash.j2 chain -- serve_image cache-through resolves
@@ -1432,14 +1432,14 @@ def test_pxe_plan_tui_policy_returns_interactive_with_catalog(
 
 
 def test_pxe_tui_policy_returns_interactive_chain(app_client: TestClient) -> None:
-    """boot_policy=tui: chain into the live env. bty-tui-on-tty1.
-    service launches bty-tui, which GETs ``/pxe/<mac>/plan`` and
+    """boot_policy=tui: chain into the live env. ``bty-tui-on-tty1.
+    service`` launches ``bty``, which GETs ``/pxe/<mac>/plan`` and
     drops the operator into the wizard for boot_policy=tui.
 
     Since v0.22.10 the cmdline carries only ``bty.server`` +
     ``bty.mac``; ``bty.mode=interactive`` was retired alongside
-    the bty-flash-on-boot.service unit (now collapsed into bty-tui
-    -on-tty1.service running unconditionally with plan-endpoint
+    the bty-flash-on-boot.service unit (now collapsed into
+    ``bty-tui-on-tty1.service`` running unconditionally with plan-endpoint
     dispatch).
     """
     app_client.put(
@@ -1651,7 +1651,7 @@ def test_pxe_inventory_persists_disks_and_logs_event(app_client: TestClient) -> 
 
 def test_pxe_inventory_404_for_unknown_mac(app_client: TestClient) -> None:
     """Inventory POST for a MAC that was never discovered returns
-    404 -- prevents bty-tui from silently creating ghost machines
+    404 -- prevents ``bty`` from silently creating ghost machines
     that the operator never saw on /ui/machines."""
     r = app_client.post(
         "/pxe/00:11:22:33:44:99/inventory",
@@ -1823,7 +1823,7 @@ def test_pxe_inventory_ignores_unknown_per_disk_fields(app_client: TestClient) -
 
 
 def test_pxe_inventory_rejects_non_json_body(app_client: TestClient) -> None:
-    """A bty-tui posting garbage (e.g. binary noise from a corrupted
+    """A ``bty`` posting garbage (e.g. binary noise from a corrupted
     payload buffer) must produce a clean 4xx, not a 500. FastAPI's
     Pydantic dispatch rejects with 422 when the body is not valid
     JSON or doesn't fit the schema."""
@@ -1871,7 +1871,7 @@ def test_pxe_inventory_accepts_empty_disks_list(app_client: TestClient) -> None:
 
 def test_pxe_inventory_rejects_unknown_top_level_fields(app_client: TestClient) -> None:
     """``InventoryPost`` is ``extra="forbid"`` at the top level so a
-    typo in the bty-tui payload (``disk`` instead of ``disks``)
+    typo in the ``bty`` payload (``disk`` instead of ``disks``)
     fails 422 loudly rather than silently persisting an empty
     inventory."""
     app_client.get("/pxe/aa:bb:cc:dd:ee:f5")
@@ -1890,7 +1890,7 @@ def test_pxe_plan_flash_chain_carries_target_disk_serial(
     the plan-endpoint JSON in v0.22.10. The iPXE template still
     renders the serial in its header comment block (for operator
     curl-inspection / audit) but it is no longer a kernel param.
-    The plan endpoint is the contract bty-tui consumes.
+    The plan endpoint is the contract ``bty`` consumes.
     """
     flash_sha = "deadbeef" * 8
     monkeypatch.setattr(
@@ -2594,7 +2594,7 @@ def test_serve_image_accepts_head(app_client: TestClient) -> None:
     the bytes. The route at ``/images/{key}`` and the SHA-keyed
     sibling ``/images/{key}/{name:path}`` previously only declared
     GET, so the HEAD returned ``405 Method Not Allowed`` -- which
-    bty-tui caught as ``URLError`` and surfaced as the misleading
+    ``bty`` caught as ``URLError`` and surfaced as the misleading
     "image URL not reachable" error.
 
     Both routes now declare ``methods=["GET", "HEAD"]``. Starlette's
