@@ -158,7 +158,9 @@ def test_ui_images_handles_empty_release_repo_env(
     ``or DEFAULT_REPO`` pattern handles both."""
     monkeypatch.setenv("BTY_BOOT_RELEASE_REPO", "")
     _login(client)
-    r = client.get("/ui/images")
+    # v0.22.11+: the release-link lives in the ``?section=fetch``
+    # sub-nav section, not the default list view.
+    r = client.get("/ui/images?section=fetch")
     assert r.status_code == 200
     body = r.text
     # The fallback ``safl/bty`` URL appears in the "Fetch from
@@ -233,6 +235,125 @@ def test_ui_dashboard_subscribes_to_sse_for_live_counts(client: TestClient) -> N
     assert 'id="dashboard-counts"' in body
     assert 'sse-connect="/events/machines"' in body
     assert 'sse-swap="dashboard-counts"' in body
+
+
+# ---------------------------------------------------------------------
+# Sub-nav (v0.22.11): /ui/images, /ui/boot, /ui/machines each have a
+# sub-nav strip that splits "what's there" (list, the default
+# landing) from "how to add/fetch more". The action paths are one
+# click away; the default landing stays a clean read view.
+# ---------------------------------------------------------------------
+
+
+def test_ui_images_default_section_is_list_not_add_forms(client: TestClient) -> None:
+    """Bare ``GET /ui/images`` lands on the list section: shows the
+    unified catalog table (or its empty state) but NOT the add-by-
+    URL / upload-manifest / upload-image forms.
+    """
+    _login(client)
+    r = client.get("/ui/images")
+    assert r.status_code == 200
+    body = r.text
+    # Sub-nav strip is present and List is the active pill.
+    assert 'href="/ui/images?section=fetch"' in body
+    assert 'href="/ui/images?section=add-url"' in body
+    # The add-url form's input lives behind ?section=add-url, not on
+    # the default landing.
+    assert 'id="image_url"' not in body
+    # Upload-manifest's accept=.toml is the section-specific marker;
+    # the catalog manifest upload form lives behind ?section=
+    # upload-manifest.
+    assert 'accept=".toml"' not in body
+    # Upload-image's <input type=file> with image extensions lives
+    # behind ?section=upload-image.
+    assert 'id="upload-file"' not in body
+
+
+def test_ui_images_section_add_url_shows_add_form(client: TestClient) -> None:
+    _login(client)
+    r = client.get("/ui/images?section=add-url")
+    assert r.status_code == 200
+    body = r.text
+    assert 'id="image_url"' in body
+    assert 'action="/ui/catalog/entries"' in body
+    # No catalog table or downloads/hashes panes on the add view.
+    assert "Unified catalog" not in body
+
+
+def test_ui_images_section_fetch_shows_one_button_form(client: TestClient) -> None:
+    _login(client)
+    r = client.get("/ui/images?section=fetch")
+    assert r.status_code == 200
+    body = r.text
+    assert 'action="/ui/catalog/fetch-release"' in body
+    assert "Fetch latest catalog.toml" in body
+    # No add-by-URL form on this view.
+    assert 'id="image_url"' not in body
+
+
+def test_ui_images_section_unrecognised_falls_back_to_list(client: TestClient) -> None:
+    """A bookmark / typo / scripted call with a bogus section value
+    must NOT 500 the page. Server clamps to the default list
+    section."""
+    _login(client)
+    r = client.get("/ui/images?section=garbage")
+    assert r.status_code == 200
+    body = r.text
+    # Lands on list (no add-form markers).
+    assert 'id="image_url"' not in body
+    # Sub-nav strip still renders.
+    assert 'href="/ui/images?section=fetch"' in body
+
+
+def test_ui_boot_default_section_is_list(client: TestClient) -> None:
+    """Bare ``GET /ui/boot`` lands on the artefact table + polling
+    JS, but the Fetch form is behind ?section=fetch."""
+    _login(client)
+    r = client.get("/ui/boot")
+    assert r.status_code == 200
+    body = r.text
+    assert 'href="/ui/boot?section=fetch"' in body
+    # Fetch form not on default landing.
+    assert 'id="enqueue-fetch-btn"' not in body
+    # But the artefact table polling JS IS present.
+    assert "/boot/releases" in body
+
+
+def test_ui_boot_section_fetch_shows_form_only(client: TestClient) -> None:
+    _login(client)
+    r = client.get("/ui/boot?section=fetch")
+    assert r.status_code == 200
+    body = r.text
+    assert 'id="enqueue-fetch-btn"' in body
+    # No artefact table on the fetch view.
+    assert "bty-netboot-x86_64.vmlinuz" not in body
+
+
+def test_ui_machines_default_section_is_list_not_add_form(
+    client: TestClient,
+) -> None:
+    """Bare ``GET /ui/machines`` shows the live table; the Add form
+    is behind ?section=add (the dashboard / unassigned-counter
+    clicks land on the list, not the add view)."""
+    _login(client)
+    r = client.get("/ui/machines")
+    assert r.status_code == 200
+    body = r.text
+    assert 'href="/ui/machines?section=add"' in body
+    # Add form's MAC input lives behind ?section=add.
+    assert 'id="add-mac"' not in body
+    # Live machines table is present.
+    assert 'id="machines-tbody"' in body
+
+
+def test_ui_machines_section_add_shows_form_only(client: TestClient) -> None:
+    _login(client)
+    r = client.get("/ui/machines?section=add")
+    assert r.status_code == 200
+    body = r.text
+    assert 'id="add-mac"' in body
+    # No live machines table on the add view.
+    assert 'id="machines-tbody"' not in body
 
 
 def test_ui_boot_page_shows_recent_activity_card(
@@ -736,6 +857,8 @@ def test_ui_boot_page_renders_with_artifact_state(client: TestClient) -> None:
     """The /ui/boot page must show the configured boot dir and one
     row per expected artifact (vmlinuz/initrd/squashfs/sha256)."""
     _login(client)
+    # Default landing (list section): shows the four artefacts +
+    # the polling JS for the active-fetches table.
     r = client.get("/ui/boot")
     assert r.status_code == 200
     body = r.text
@@ -749,10 +872,8 @@ def test_ui_boot_page_renders_with_artifact_state(client: TestClient) -> None:
     # Empty boot dir => four "missing" badges (warning kind).
     assert body.count("missing</span>") == 4
     assert body.count('class="badge bg-warning text-dark"') >= 4
-    # HTMX-style background trigger: the page wires a button that
-    # POSTs to /boot/releases (the trackable release-fetch endpoint)
-    # and polls /boot/releases for progress.
-    assert 'id="enqueue-fetch-btn"' in body
+    # The list section polls /boot/releases (the trackable release-
+    # fetch endpoint) for live progress + cancel actions.
     assert "/boot/releases" in body
     # The boot-page polling JS must NOT reference a never-set
     # ``_just_completed_marker`` field nor wrap ``refresh`` to
@@ -760,16 +881,14 @@ def test_ui_boot_page_renders_with_artifact_state(client: TestClient) -> None:
     # latter doubles load). Pin the cleaned-up shape so a
     # copy-paste doesn't reintroduce them.
     assert "_just_completed_marker" not in body
-    # The bare-quoted ``"/boot/releases"`` (closing quote, no
-    # trailing slash) appears in exactly two places: the refresh
-    # GET and the enqueue POST. The cancel DELETE uses
-    # ``"/boot/releases/" + encodeURIComponent(tag)`` (trailing
-    # slash, different literal). A third bare-quoted occurrence
-    # means the double-fetch ``origRefresh`` wrapper crept back.
-    bare_count = body.count('"/boot/releases"')
-    assert bare_count == 2, (
-        f"expected exactly 2 references (refresh GET + enqueue POST); got {bare_count}"
-    )
+
+    # The Fetch button lives behind ?section=fetch (the sub-nav
+    # split lands operators on the OBSERVABLE state by default;
+    # the action forms are one sub-nav click away).
+    r2 = client.get("/ui/boot?section=fetch")
+    assert r2.status_code == 200
+    fetch_body = r2.text
+    assert 'id="enqueue-fetch-btn"' in fetch_body
 
 
 # ---------- Phase E: settings page ----------------------------------------

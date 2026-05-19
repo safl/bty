@@ -246,10 +246,22 @@ def register_ui_routes(
         else:
             sql = "SELECT * FROM machines ORDER BY mac"
             active_filter = None
+        # Sub-nav: ``?section=list`` (default) is the live table,
+        # ``?section=add`` is the form for staging a machine before
+        # it PXE-boots. Unrecognised sections fall back to list.
+        section = request.query_params.get("section") or "list"
+        if section not in ("list", "add"):
+            section = "list"
         with _db.open_db(state_path) as conn:
             rows = conn.execute(sql).fetchall()
         machines = [_row_to_dict(r) for r in rows]
-        return render("ui/machines.html", request, machines=machines, active_filter=active_filter)
+        return render(
+            "ui/machines.html",
+            request,
+            machines=machines,
+            active_filter=active_filter,
+            section=section,
+        )
 
     @app.get(
         "/ui/machines/{mac}",
@@ -344,11 +356,12 @@ def register_ui_routes(
                 detail=f"invalid boot_policy: {validated.boot_policy!r}",
             )
         # Safety gate: boot_policy=flash / flash-once require a
-        # picked target_disk_serial. Without it the live env's
-        # bty-flash-on-boot would refuse anyway (the cmdline param
-        # would be empty); catching it here gives the operator a
-        # clear flash-banner error before the next PXE boot
-        # instead of "tty1 says target serial missing".
+        # picked target_disk_serial. Without it /pxe/<mac>/plan
+        # would fall back to mode=interactive anyway (the auto-
+        # flash branch needs a serial); catching it here gives
+        # the operator a clear flash-banner error in /ui/machines
+        # instead of the operator being surprised by a wizard
+        # prompt at flash time.
         if validated.boot_policy in ("flash", "flash-once") and not validated.target_disk_serial:
             return RedirectResponse(
                 f"/ui/machines/{normalised}?error="
@@ -428,27 +441,34 @@ def register_ui_routes(
         dependencies=[Depends(require_ui_auth)],
     )
     def ui_images(request: Request) -> HTMLResponse:
-        """Unified images page: SHA-keyed merge of dir-scan +
-        catalog manifest entries, plus the live downloads pane
-        (table of in-flight + recent fetches with progress + cancel).
+        """Unified images page with sub-nav. Default landing
+        (``?section=list``, or no query) shows the SHA-keyed catalog
+        merge + the live downloads / hashes panes. Operators land
+        on the OBSERVABLE state of the catalog; "add" paths are one
+        click away via the sub-nav:
 
-        The page renders the catalog + downloads via embedded JS
-        polling ``/catalog/downloads`` every ~2s so an operator
-        watches a fetch finish without manually refreshing.
+        * ``?section=fetch``: one-button fetch of the bty release
+          catalog.toml (the common-case default for populating).
+        * ``?section=add-url``: form to add by http(s):// or
+          oras:// URL.
+        * ``?section=upload-manifest``: file picker for a
+          ``catalog.toml`` upload.
+        * ``?section=upload-image``: file picker for streaming an
+          image into the image root.
 
-        Reads ``?error=<msg>`` from the query string into the
-        layout's flash slot. The form-style ``POST /ui/catalog/
-        entries`` 303s back here with that param on validation
-        failure, sha-resolve failure, or duplicate-src 409 --
-        without this read, the flash banner renders but the
-        operator never sees a reason for the bounce.
-        ``request.query_params.get`` returns ``None`` for an
-        absent param, which the layout treats as "no banner".
-        Jinja autoescapes ``flash`` so a hostile ``?error=`` value
-        cannot inject HTML.
+        Unrecognised ``section`` values fall back to ``list`` so
+        bookmark drift can't 500 the page.
+
+        ``?error=<msg>`` lands in the layout's flash slot. The form-
+        style ``POST /ui/catalog/entries`` 303s back here with that
+        param on validation failure, sha-resolve failure, or
+        duplicate-src 409.
         """
         unified = list_unified_images() if list_unified_images is not None else []
         flash = request.query_params.get("error")
+        section = request.query_params.get("section") or "list"
+        if section not in ("list", "fetch", "add-url", "upload-manifest", "upload-image"):
+            section = "list"
         # Catalog manifest path + release repo for the "Catalog
         # manifest" card. The path mirrors the resolution in
         # _app.create_app (env override -> default under state dir).
@@ -479,6 +499,7 @@ def register_ui_routes(
             image_events=image_events,
             manifest_path=catalog_manifest_path,
             release_repo=release_repo,
+            section=section,
             flash=flash,
             flash_kind="danger" if flash else None,
         )
@@ -656,6 +677,20 @@ def register_ui_routes(
         flash: str | None = None,
         flash_kind: str | None = None,
     ) -> HTMLResponse:
+        """Sub-nav-aware boot-artifacts page. ``?section=list``
+        (the default landing) shows the four artefacts +
+        present/missing + recent fetch table. ``?section=fetch``
+        is the one-button "fetch from latest release" form. The
+        upload route is intentionally NOT in the sub-nav -- the
+        appliance is designed around release fetches, and
+        operator-side artefact uploads are scripted via the
+        auth-gated ``PUT /boot/{name}`` route, not the browser.
+
+        Unrecognised ``section`` values fall back to ``list``.
+        """
+        section = request.query_params.get("section") or "list"
+        if section not in ("list", "fetch"):
+            section = "list"
         # Recent activity for boot artefacts: release fetches /
         # fetch failures.
         with _db.open_db(state_path) as conn:
@@ -667,6 +702,7 @@ def register_ui_routes(
             artifacts=_releases.inspect_boot_dir(boot_root),
             release_repo=os.environ.get("BTY_BOOT_RELEASE_REPO") or _releases.DEFAULT_REPO,
             boot_events=boot_events,
+            section=section,
             flash=flash,
             flash_kind=flash_kind,
         )

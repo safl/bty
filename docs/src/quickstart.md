@@ -24,9 +24,9 @@ prefer bind-mounts so files show up in the host filesystem,
 pre-chown the dir to uid 999 (the bty user) - the entrypoint
 checks and exits with a clear hint if it cannot write.
 
-Connect a `bty tui --catalog http://<host>:8080/catalog.toml` from a USB live
-stick or a workstation to flash from this catalog without burning
-images onto every stick.
+Connect a `bty --catalog http://<host>:8080/catalog.toml` from a
+USB live stick or a workstation to flash from this catalog without
+burning images onto every stick.
 
 The container has no dnsmasq / TFTP / iPXE - it's the catalog +
 UI shape, not the PXE shape. For PXE-driven unattended flashing,
@@ -109,10 +109,12 @@ Concepts for the convention bty expects.
 
 ## Boot a target machine
 
-Insert the USB stick into the target machine and boot from it. The bty
-live env auto-logins as root on `tty1`. From there you can run the CLI
-(`lsblk -d -e7`, `bty flash ...`) or `bty tui` for an interactive
-terminal UI.
+Insert the USB stick into the target machine and boot from it. The
+bty live env runs `bty` on `tty1` automatically (the
+`bty-tui-on-tty1.service` unit takes over the console), so the
+operator lands on the interactive wizard without typing anything.
+Alt+F2 through Alt+F6 drop into a root shell for diagnostics if
+needed; Alt+F1 returns to `bty`.
 
 The rootfs is a read-only SquashFS with a tmpfs overlay (live-boot's
 default), so anything you change in the live env vanishes on
@@ -122,38 +124,27 @@ OS when the stick is removed) - files you copied there persist.
 
 ## What you can do today
 
-### Inspect
+### Inspect + flash a target disk
 
-Inside the live env (or on any Linux box where `bty` is installed):
-
-```bash
-# List interesting block devices on the system
-lsblk -d -e7
-
-# List images available under /var/lib/bty/images (or BTY_IMAGE_ROOT)
-bty images
-
-# Inspect a specific image in detail
-bty inspect /var/lib/bty/images/my-image.img.gz
-
-# Each leaf command also accepts --json
-lsblk -d -e7 -J
-bty inspect --json /var/lib/bty/images/my-image.img.gz
-```
-
-### Flash a target disk
+Inside the live env `bty` runs automatically on tty1; on any
+other Linux box install the wizard (`pipx install "bty-lab[tui]"`)
+and launch it as root:
 
 ```bash
-# 1. Validate that an image can be flashed to a target without writing.
-bty flash /var/lib/bty/images/my-image.img.gz /dev/sdX --dry-run
-
-# 2. Once the plan looks right, run for real (requires root):
-sudo bty flash /var/lib/bty/images/my-image.img.gz /dev/sdX --yes
+sudo bty
 ```
 
-`--dry-run` prints a plan and validates without writing. `--yes` is
-the explicit consent token for the destructive write - `bty flash`
-refuses to do anything without one or the other.
+The wizard is a five-stage flow: pick a catalog source (or skip
+when local images exist), pick an image, pick a target disk, confirm
+the flash plan, reboot. Each step accepts a number (`1`, `2`, ...)
+or a single letter for navigation (`b` back, `q` quit, `r` refresh).
+A confirmation panel shows the plan + any validation errors before
+the destructive write.
+
+`lsblk -d -e7` (the stdlib disk-listing command) is still the
+right tool for "what block devices does the kernel see"; `bty`
+shows the same data inside the wizard but only for flash-eligible
+disks (excludes loop devices, partitions, read-only media).
 
 ### No post-flash provisioning
 
@@ -162,23 +153,22 @@ bty is a flasher, not an image builder. First-boot bring-up
 the image builder upstream via cloud-init / NoCloud user-data --
 bty just writes the bytes.
 
-Interactive flashing via the TUI:
+### bty --catalog: pre-load a remote catalog
+
+If you want the wizard to start with a known catalog overlay
+(e.g. a bty-web instance hosting your team's image library), pass
+its URL on the cmdline:
 
 ```bash
-sudo bty tui
+sudo bty --catalog http://bty-server:8080/catalog.toml
 ```
 
-The TUI is a wizard: pick an image (Enter), pick a disk (Enter),
-hit the Flash button (Enter, or `f` from anywhere). A modal shows
-the plan and any validation errors; confirm to run. A status modal
-streams the result.
+This skips the SELECT_CATALOG screen and jumps straight to
+SELECT_IMAGE with the catalog merged into the local image-root
+listing -- equivalent to picking `[c] custom` on the source screen
+and typing the URL.
 
-Without root the TUI still launches in a read-only mode (you can
-browse images + disks) but flashing refuses with a status-bar
-message. Requires the `[tui]` install extra
-(`pipx install "bty-lab[tui]"`).
-
-See [Reference > CLI](reference.md#cli) for the full surface.
+See [Reference](reference.md) for the full cmdline surface.
 
 ### Network flashing via the bty-web server
 

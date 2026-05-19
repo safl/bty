@@ -18,6 +18,14 @@
     {% endif %}
 </div>
 
+{% with sections=[
+    {"key": "list", "label": "List",        "icon": "list-ul",     "href": "/ui/machines"},
+    {"key": "add",  "label": "Add by MAC",  "icon": "plus-circle", "href": "/ui/machines?section=add"},
+] %}
+{% include "ui/_subnav.html" %}
+{% endwith %}
+
+{% if section == "add" %}
 <div class="card mb-3">
     <div class="card-header bg-light fw-semibold">
         <i class="bi bi-plus-circle me-1"></i>Add machine
@@ -31,17 +39,16 @@
            that first ``GET /pxe/<mac>``. Lets operators stage a
            machine + its image binding before the box is even
            racked. #}
-        <form id="add-machine-form" class="row g-2 align-items-end"
-              onsubmit="return submitAddMachine(event);">
-            <div class="col-md-3">
-                <label for="add-mac" class="form-label small mb-1">MAC address</label>
+        <form id="add-machine-form" onsubmit="return submitAddMachine(event);">
+            <div class="mb-3">
+                <label for="add-mac" class="form-label">MAC address</label>
                 <input type="text" required class="form-control font-monospace"
                        id="add-mac" name="mac"
                        pattern="^([0-9a-fA-F]{2}[:-]){5}[0-9a-fA-F]{2}$"
                        placeholder="aa:bb:cc:dd:ee:ff">
             </div>
-            <div class="col-md-3">
-                <label for="add-hostname" class="form-label small mb-1">Hostname <span class="text-muted">(optional)</span></label>
+            <div class="mb-3">
+                <label for="add-hostname" class="form-label">Hostname <span class="text-muted">(optional)</span></label>
                 {# Pattern mirrors the server-side Pydantic regex on
                    ``MachineUpsert.hostname``: each dot-separated label
                    is alnum, hyphen-internal-only, no leading/trailing
@@ -53,26 +60,25 @@
                        pattern="^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$"
                        placeholder="lab-01">
             </div>
-            <div class="col-md-2">
-                <label for="add-boot-policy" class="form-label small mb-1">Boot policy</label>
+            <div class="mb-3">
+                <label for="add-boot-policy" class="form-label">Boot policy</label>
                 <select class="form-select" id="add-boot-policy" name="boot_policy">
                     <option value="local" selected>local (don't reflash)</option>
                     <option value="tui">tui (operator picks)</option>
                     <option value="flash">flash (every boot)</option>
                 </select>
+                <div class="form-text small">
+                    MAC is the only required field. Image binding is
+                    set per-machine on the detail page (click the row);
+                    the boot policy defaults to "local" so a freshly
+                    added machine doesn't re-flash itself unexpectedly
+                    on first boot.
+                </div>
             </div>
-            <div class="col-md-4">
-                <button type="submit" class="btn btn-primary w-100">
-                    <i class="bi bi-plus-lg me-1"></i>Add
-                </button>
-            </div>
+            <button type="submit" class="btn btn-primary">
+                <i class="bi bi-plus-lg me-1"></i>Add
+            </button>
         </form>
-        <div class="form-text small mt-2">
-            MAC is the only required field. Image binding is set per-machine on
-            the detail page (click the row); the boot policy defaults to
-            "local" so a freshly added machine doesn't re-flash itself
-            unexpectedly on first boot.
-        </div>
     </div>
 </div>
 
@@ -91,9 +97,10 @@
             body: data,
         }).then(function (r) {
             if (!r.ok) throw new Error("HTTP " + r.status);
-            // The SSE stream will re-render the table; clear the form so
-            // the operator can immediately add another.
-            f.reset();
+            // Send the operator back to the list to see the new row
+            // (the SSE stream picks up the addition on its own, but
+            // the redirect makes the success path obvious).
+            window.location = "/ui/machines";
         }).catch(function (e) {
             alert("Add machine failed: " + e.message);
         });
@@ -101,6 +108,11 @@
     }
 </script>
 
+{% else %}
+{# section == "list" (default): the live table of all machines.
+   This is what an operator wants to see when they click
+   "Machines" in the top nav -- "show me what's there", not "give
+   me the add form". The Add flow is one sub-nav click away. #}
 <div class="card">
     <div class="table-responsive">
         <table class="table table-hover mb-0 align-middle">
@@ -138,4 +150,5 @@
         </table>
     </div>
 </div>
+{% endif %}
 {% endblock %}

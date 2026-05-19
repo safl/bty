@@ -52,8 +52,9 @@ def list_disks() -> list[dict[str, Any]]:
                 "model": _strip_or_none(d.get("model")),
                 # Some USB enclosures / vendor-firmware report
                 # serials with trailing whitespace; strip for
-                # consistency with vendor / model. The live env's
-                # bty-flash-on-boot matches against this value
+                # consistency with vendor / model. ``bty`` in
+                # auto-flash mode matches the plan's
+                # ``target_disk_serial`` against this value
                 # exactly, so the same strip on both ends keeps
                 # the gate working when the inventory side and
                 # the flash-time side agree on the canonical form.

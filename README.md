@@ -40,7 +40,7 @@ bty is a flasher, not an image builder:
 
 ```bash
 # Local: USB stick into target, two arrows + Enter, done.
-bty tui
+bty
 
 # Remote: bind a MAC to an image, the next PXE boot reflashes itself.
 # (See the bty-web HTTP API reference in the docs for the full surface.)
@@ -52,9 +52,9 @@ bty tui
 
 | Shape | What it is | When it fits |
 |---|---|---|
-| **USB live stick** | bty boots from a flash drive, runs `bty tui`, flashes the box it's plugged into. Fresh sticks ship with four starter `.bri` pointers (Debian / Ubuntu / Fedora sysdev images via `oras://ghcr.io/safl/nosi/...`, plus bty-server) so the catalog is non-empty out of the box. | Single-machine local imaging |
-| **USB + portable catalog** | Same stick, plus `bty tui --catalog <SOURCE>` pointed at a TOML catalog hosted anywhere (a local file, an HTTP URL, an `oras://` reference, or a bty-web instance's `/catalog.toml`). | A handful of boxes, shared image library |
-| **PXE-boot appliance** | bty-web on a Pi or x86 box runs DHCP/TFTP/HTTP; targets PXE-chain into a netboot live env that flashes them unattended | CI fleets, racks, anything you don't want to walk to |
+| **USB live stick** | bty boots from a flash drive, runs `bty`, flashes the box it's plugged into. Fresh sticks ship with four starter `.bri` pointers (Debian / Ubuntu / Fedora sysdev images via `oras://ghcr.io/safl/nosi/...`, plus bty-server) so the catalog is non-empty out of the box. | Single-machine local imaging |
+| **USB + portable catalog** | Same stick, plus `bty --catalog <SOURCE>` pointed at a TOML catalog hosted anywhere (a local file, an HTTP URL, an `oras://` reference, or a bty-web instance's `/catalog.toml`). | A handful of boxes, shared image library |
+| **PXE-boot appliance** | bty-web on a Pi or x86 box runs DHCP/TFTP/HTTP; targets PXE-chain into a netboot live env that runs `bty --server X --mac Y` on tty1, which fetches a per-MAC plan and either auto-flashes or drops the operator into the wizard | CI fleets, racks, anything you don't want to walk to |
 
 All three share the same Python codebase, the same image catalog, the
 same SHA-keyed machine bindings.
@@ -73,20 +73,21 @@ non-container artefacts in a container registry). The end-to-end
 story:
 
 - **Images live in a registry.** [`safl/nosi`](https://github.com/safl/nosi)
-  publishes Debian / Ubuntu / Fedora disk images to `ghcr.io/safl/nosi/<variant>:latest`.
-  `bty flash oras://ghcr.io/safl/nosi/debian-sysdev:latest /dev/sdX --yes`
-  resolves the manifest, picks the disk-image layer, and streams the
-  blob straight to the target via the same `curl | dd` pipeline as
-  any HTTP URL. Anonymous-pull only -- no PAT, no docker login.
+  publishes Debian / Ubuntu / Fedora disk images to
+  `ghcr.io/safl/nosi/<variant>:latest`. `bty` resolves an
+  `oras://ghcr.io/safl/nosi/...` source from a catalog entry, picks
+  the disk-image layer, and streams the blob straight to the target
+  via the same `curl | dd` pipeline as any HTTP URL. Anonymous-pull
+  only -- no PAT, no docker login.
 - **Catalogs are portable TOML files.** A catalog is a small TOML
   manifest listing named images with `src` URLs (any combination of
-  `http(s)://`, `oras://`, or `file://`). `bty tui --catalog
-  <SOURCE>` accepts a local path, an HTTP URL, or an `oras://`
-  reference. Operators can publish a catalog on GitHub Releases, an
-  S3 bucket, a private registry, or alongside images in GHCR --
-  whatever they already have. `bty-web` instances serve the same
-  shape at `GET /catalog.toml`, so a running server is "just another
-  catalog source".
+  `http(s)://`, `oras://`, or `file://`). `bty --catalog <SOURCE>`
+  accepts a local path, an HTTP URL, or an `oras://` reference.
+  Operators can publish a catalog on GitHub Releases, an S3 bucket,
+  a private registry, or alongside images in GHCR -- whatever they
+  already have. `bty-web` instances serve the same shape at
+  `GET /catalog.toml`, so a running server is "just another catalog
+  source".
 - **`.bri` descriptors are the per-stick analogue.** A USB stick's
   `BTY_IMAGES` partition can carry `.bri` files (one-image-per-file
   TOML pointers, including `oras://` URLs). The TUI merges them
@@ -109,6 +110,12 @@ piggybacks on that without dragging in the docker / podman runtime.
   the image builder upstream via cloud-init / NoCloud user-data.
   bty itself doesn't run a provisioning step -- no agent, no daemon,
   no convergence loops.
+
+  Note that interactive picks (operator chooses an image at tty1)
+  are not reported back to the server: bty-server tracks "what
+  image is this MAC supposed to have" only when `boot_policy=flash`
+  binds it. Interactive runs are operator-driven and stay local.
+  See `docs/src/concepts.md` for the asymmetry.
 - **OS-agnostic by design.** Linux, FreeBSD, Windows - if it boots
   from a disk image, bty can flash it. macOS targets are out (Apple
   Silicon's boot story isn't friendly to imaging).
@@ -143,19 +150,22 @@ for bind-mount permissions, env vars, and password rotation.
 ## Install
 
 bty is one Python package - [`bty-lab`](https://pypi.org/project/bty-lab/) on
-PyPI - with three console scripts:
+PyPI - with two console scripts:
 
 ```bash
-pipx install bty-lab            # `bty` CLI, zero third-party deps
-pipx install "bty-lab[tui]"     # adds `bty-tui` (Rich)
-pipx install "bty-lab[web]"     # adds `bty-web` (FastAPI + Pydantic)
+pipx install "bty-lab[tui]"     # `bty` (Rich-based wizard, the
+                                #  operator-facing tool)
+pipx install "bty-lab[web]"     # adds `bty-web` (FastAPI + Pydantic,
+                                #  the controller appliance)
 pipx install "bty-lab[all]"     # everything
 ```
 
-`lsblk -d -e7`, `bty inspect`, `bty flash --dry-run` need only
-Python 3.11+ and stdlib. `bty flash --yes` shells out to `dd`,
-`qemu-img`, `zstd`, `lsblk`, `curl` (used by URL / `oras://` fetch),
-and friends - your distro provides those.
+`bty` shells out to `dd`, `qemu-img`, `zstd`, `lsblk`, `curl` (used
+by URL / `oras://` fetch), and friends - your distro provides
+those. The dispatch surface is intentionally narrow: bare `bty`
+launches the local-image wizard, `bty --catalog URL` pre-loads a
+catalog, `bty --server X --mac Y` fetches a per-MAC plan from the
+server and dispatches (auto-flash / interactive / no-op).
 
 For an appliance you can boot directly (USB stick, server image,
 PXE-chain live env), grab the bake from

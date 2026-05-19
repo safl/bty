@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS machines (
     last_seen_ip              TEXT,    -- source IP of most recent /pxe contact
     boot_policy               TEXT NOT NULL DEFAULT 'local',
     last_flashed_at           TEXT,    -- updated by POST /pxe/{mac}/done
-    -- Per-machine disk inventory, posted by bty-tui on startup via
+    -- Per-machine disk inventory, posted by ``bty`` on startup via
     -- POST /pxe/{mac}/inventory. JSON array of dicts:
     -- ``[{"path": "/dev/sda", "size": "...", "model": "...",
     --     "serial": "...", "tran": "sata", ...}, ...]``.
@@ -56,10 +56,11 @@ CREATE TABLE IF NOT EXISTS machines (
     -- Operator-selected target disk SERIAL. Serial (vs path) is the
     -- durable identifier: ``/dev/sda`` can flip to ``/dev/nvme0n1``
     -- across kernel versions / udev rules, but the disk's serial
-    -- number is fixed. The live env's bty-flash-on-boot matches
-    -- on this serial; refuses to flash if the serial isn't found
-    -- among the current disks (so a swapped-out drive doesn't get
-    -- mis-flashed against a stale operator decision).
+    -- number is fixed. ``bty`` in auto-flash mode matches the plan's
+    -- target_disk_serial on this value; refuses to flash if the
+    -- serial isn't found among the current disks (so a swapped-out
+    -- drive doesn't get mis-flashed against a stale operator
+    -- decision).
     target_disk_serial        TEXT,
     created_at                TEXT NOT NULL,
     updated_at                TEXT NOT NULL

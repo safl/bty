@@ -33,11 +33,11 @@ MAC_PATTERN = r"^[0-9a-f]{2}(:[0-9a-f]{2}){5}$"
 #   policy to ``local`` so the box doesn't re-flash on the next boot.
 #   For "I want this machine reimaged now, then leave it alone" --
 #   distinct from ``flash`` which is "reimage on every PXE boot".
-# - ``tui`` returns the live-env chain in interactive mode; the live
-#   env launches ``bty-tui`` on tty1 instead of auto-flashing, so the
-#   operator picks an image from the server's catalog by hand. This is
-#   the auto-discovery default for unknown MACs that PXE-boot through
-#   the server.
+# - ``tui`` returns the live-env chain. ``bty`` on tty1 GETs
+#   /pxe/<mac>/plan and (for boot_policy=tui) drops the operator
+#   into the wizard so they can pick an image from the server's
+#   catalog by hand. This is the auto-discovery default for
+#   unknown MACs that PXE-boot through the server.
 #
 # Completion signal (``POST /pxe/{mac}/done``) updates
 # ``last_flashed_at`` regardless of policy; it only mutates
@@ -80,8 +80,8 @@ class MachineUpsert(BaseModel):
         pattern=r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$",
     )
     boot_policy: str = Field(default=DEFAULT_BOOT_POLICY, pattern=BOOT_POLICY_PATTERN)
-    # Operator-selected target disk serial. The live env's
-    # bty-flash-on-boot matches THIS value against the
+    # Operator-selected target disk serial. ``bty`` in auto-flash
+    # mode matches the plan's ``target_disk_serial`` against the
     # SCSI / NVMe / SATA serial of the disk it sees at boot
     # time, refusing to flash if the serial isn't found among
     # current disks. Serial (vs path) is the durable identifier:
@@ -99,7 +99,7 @@ class InventoryDisk(BaseModel):
     """One block device as reported by ``bty.disks.list_disks``.
 
     Shape mirrors the dict that helper returns; Pydantic at the
-    boundary catches a future drift between bty-tui and bty-web.
+    boundary catches a future drift between ``bty`` and bty-web.
     """
 
     model_config = {"extra": "ignore"}
@@ -126,7 +126,7 @@ class InventoryDisk(BaseModel):
 class InventoryPost(BaseModel):
     """Body of ``POST /pxe/{mac}/inventory``.
 
-    Open endpoint (live env's bty-tui has no token). Trust model
+    Open endpoint (live env's ``bty`` has no token). Trust model
     matches the rest of ``/pxe/*``: bty-web is for trusted networks.
     """
 
@@ -157,7 +157,7 @@ class Machine(BaseModel):
     boot_policy: str = Field(default=DEFAULT_BOOT_POLICY, pattern=BOOT_POLICY_PATTERN)
     last_flashed_at: datetime | None = None
     # JSON-decoded inventory from the most recent
-    # ``POST /pxe/{mac}/inventory``. ``None`` means bty-tui has
+    # ``POST /pxe/{mac}/inventory``. ``None`` means ``bty`` has
     # never reported in for this machine yet.
     known_disks: list[dict[str, object]] | None = None
     known_disks_at: datetime | None = None
@@ -171,7 +171,7 @@ class ImageEntry(BaseModel):
 
     Each entry carries a single ``url`` -- the place a client
     should fetch the bytes from. The server resolves it based on
-    cache state so the client (e.g. ``bty tui --catalog URL``)
+    cache state so the client (e.g. ``bty --catalog URL``)
     does not need to know about catalog manifests, sidecars, or
     cache layout: it just flashes from ``url``.
 

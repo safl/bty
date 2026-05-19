@@ -3,11 +3,12 @@
 #   bty_image_ref:      {{ flash_key }}
 #   target_disk_serial: {{ target_disk_serial }}
 #
-# Chains into the bty live env. The live env's bty-flash-on-boot
-# service exec's ``bty-tui --server X --mac Y``; bty-tui then
-# GETs ``<server>/pxe/<mac>/plan`` and dispatches on the JSON
-# response (mode=auto -> flash without prompts, mode=interactive
-# -> wizard on tty1, mode=local -> exit, let firmware boot).
+# Chains into the bty live env. The live env's
+# bty-tui-on-tty1.service exec's ``bty --server X --mac Y``;
+# ``bty`` then GETs ``<server>/pxe/<mac>/plan`` and dispatches
+# on the JSON response (mode=auto -> flash without prompts,
+# mode=interactive -> wizard on tty1, mode=local -> exit, let
+# firmware boot).
 #
 # The kernel cmdline only carries ``bty.server`` + ``bty.mac``;
 # every other knob (image URL, target disk serial, etc.) comes

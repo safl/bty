@@ -9,13 +9,12 @@
 # was staged by ``scripts/bty_wheel_stage.py`` and copied into the
 # chroot's ``/opt/bty/`` by live-build's includes pipeline.
 #
-# Output: bty CLI + TUI on the live env's ``$PATH`` via
-# ``/usr/local/bin/{bty,bty-tui}`` symlinks pointing into a venv at
-# ``/opt/bty/venv``. The ``[tui]`` extra is needed because the
-# TUI-on-PXE flow (``boot_policy=tui``, default for unknown MACs)
-# lands at ``bty-tui --server URL --mac MAC`` on tty1; the ``[web]``
-# extra is intentionally NOT installed - the live env is never an
-# HTTP server.
+# Output: bty on the live env's ``$PATH`` via ``/usr/local/bin/bty``
+# pointing into a venv at ``/opt/bty/venv``. The ``[tui]`` extra is
+# required because every PXE flow (auto-flash, interactive, local)
+# lands at ``bty --server URL --mac MAC`` on tty1 via bty-tui-on-
+# tty1.service. The ``[web]`` extra is intentionally NOT installed -
+# the live env is never an HTTP server.
 
 set -eu
 
@@ -32,7 +31,6 @@ for whl in /opt/bty/bty_lab-*-py3-none-any.whl; do
 done
 
 ln -sf /opt/bty/venv/bin/bty /usr/local/bin/bty
-ln -sf /opt/bty/venv/bin/bty-tui /usr/local/bin/bty-tui
 
 # Trim pip caches and the build wheel - the appliance only needs the
 # installed package.

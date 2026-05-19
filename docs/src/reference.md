@@ -23,303 +23,140 @@ API for build automation is `GET /repos/safl/bty/releases/latest`.
 
 ## CLI
 
-The `bty` command groups operations as subcommands. Each leaf command
-accepts `--json` to emit machine-readable output instead of the default
-human-readable table.
-
-`bty --version` prints the installed version (sourced from package
-metadata) and exits.
-
-### JSON output envelope
-
-Every `--json` output is wrapped:
-
-```json
-{
-  "schema_version": "1",
-  "command": "<subcommand-name>",
-  ...command-specific fields...
-}
-```
-
-Agents key off `schema_version`; incompatible structural changes bump
-the version. See [`AGENTS.md`](https://github.com/safl/bty/blob/main/AGENTS.md)
-for the full per-command schema reference and the exit-code table.
-
-### Exit codes
-
-| Code | Meaning |
-|------|--------------------------------------------------------------------|
-| 0 | Success. |
-| 1 | Operation failed (validation rejected the plan; write subprocess returned non-zero). |
-| 2 | Misuse - argparse error, missing required flag, missing input file. |
-| 3 | Privilege required - operation needs root, rerun via `sudo`. |
-| 4 | Required external tool is not installed (e.g. `qemu-img` for `.qcow2`). |
-| 5 | Target raced - block device became mounted or otherwise unsuitable between validation and write. |
-
-### Block-device discovery: use `lsblk`
-
-bty doesn't ship its own block-device-listing command -- `lsblk`
-already covers that. Use `lsblk -d -e7` to see the candidate disks
-at a glance:
+`bty` is the operator-facing tool: a Rich-based wizard that picks
+an image + a target disk and flashes. Three invocation shapes:
 
 ```text
-$ lsblk -d -e7
-NAME    MAJ:MIN  RM   SIZE  RO  TYPE  MOUNTPOINTS
-nvme0n1  259:0    0    1T   0   disk
-sda        8:0    0  500G   0   disk
+bty                              # interactive wizard, local image-root only
+bty --catalog <URL>              # interactive wizard, catalog pre-loaded
+bty --server <X> --mac <Y>       # server-driven mode (auto / interactive
+                                 # / local) chosen by GET <X>/pxe/<Y>/plan
 ```
 
-`-d` strips partitions, `-e7` excludes loop devices.
+`bty --version` prints the installed version (sourced from package
+metadata) and exits. `bty --help` documents every flag inline.
 
-### `bty images [--image-root PATH | --catalog SOURCE]`
+### `--server URL` (default `bty-server`)
 
-List supported images directly under the image root (non-recursive).
-Recognised formats: `.qcow2`, `.img`, `.img.zst`, `.img.xz`,
-`.img.gz`, `.img.bz2`.
+bty-server base URL or hostname. Bare hostnames are accepted;
+missing scheme defaults to `http://`. Pair with a LAN DNS entry
+(or `/etc/hosts` line) pointing at the appliance and `bty --mac X`
+just works. The PXE-booted live env sets this explicitly from the
+kernel cmdline (`bty.server=...`).
 
-bty itself ships all of its dd-able images
-(`bty-server-x86_64.img.gz`, `bty-server-rpi-arm64.img.gz`,
-`bty-usb-x86_64.iso.gz`) as gzip for universal flasher support
-- Etcher / Rufus / Imager / dd / Windows / macOS all decompress
-gzip natively without the version-cliff or implementation-bug
-issues that bit us with xz (Etcher's bundled xz handler) and
-zstd (older Etcher pre-1.18). Stick prep / appliance setup is
-a one-shot host operation, not a hot-path concern; gzip's
-universal compatibility wins over the marginal speed advantage
-of zstd on a one-shot decompress.
+### `--mac MAC`
 
-The flash code still accepts `.img.zst` / `.img.xz` / `.img.gz`
-/ `.img.bz2` for operator-supplied target images, so an operator
-running per-job CI reflash on a fast disk can pick `.img.zst`
-for the speed advantage without bty-shipped artifacts forcing
-that choice. Decompression speed ranking (rough): zstd > gzip >
-xz > bzip2.
+Self-MAC of this client (e.g. `aa:bb:cc:dd:ee:ff`). When supplied,
+`bty` switches to **server-driven mode**: it POSTs the local disk
+inventory to `<server>/pxe/<mac>/inventory`, then GETs
+`<server>/pxe/<mac>/plan` and dispatches on the JSON response:
 
-**Tarballs are NOT supported.** `.tar.gz` / `.tar.xz` / `.tgz` /
-`.tar.bz2` etc. wrap one or more files in TAR headers; running
-the gzip/xz/bzip2 layer on them yields a TAR stream, not an
-image. dd'ing that into a target disk would write tar headers
-into the MBR. Extract first (`tar -xzf foo.tar.gz`) and drop the
-resulting `.img` onto BTY_IMAGES.
+| `plan.mode` | What happens |
+|---|---|
+| `auto` | Flash without prompts (the plan carries the image URL + target serial picked on the server side), then POST `/pxe/<mac>/done` and reboot. |
+| `interactive` | Drop into the wizard with the plan's catalog pre-loaded. Operator picks image + disk. |
+| `local` | Print a notice and exit. Firmware / local-disk boot handles it. |
 
-The image root is resolved in this order:
+Network / parse failures fall through to `interactive` with the
+server's `/catalog.toml` as the catalog source so the operator
+still has something to act on.
 
-1. The `--image-root` argument, if given.
-2. The `BTY_IMAGE_ROOT` environment variable.
-3. `/var/lib/bty/images` (the path the bty USB live appliance auto-mounts
- the `BTY_IMAGES` partition at).
+### `--catalog URL`
 
-The listing also includes any `.bri` (bty Remote Image) descriptors
-present in the image root. Each remote row carries a
-`source = "remote"` field plus `url` (the upstream location -- an
-HTTP/HTTPS URL or an `oras://` OCI registry reference; see the
-schemes block below); local rows carry `source = "local"` and `path`.
+Catalog URL or path to pre-load (http(s):// for HTTP, oras:// for
+OCI, or a local file path). When given, the SELECT_CATALOG screen
+is skipped and the wizard jumps straight to SELECT_IMAGE with the
+catalog overlaying the local image-root. Equivalent to picking
+`[c] custom` on the source screen and typing the URL.
 
-A `.bri` is a tiny TOML file:
+Ignored in server-driven mode (`--mac` set): the server supplies
+the catalog as part of `/pxe/<mac>/plan`.
+
+### Catalog sources
+
+`--catalog` accepts the same shapes the wizard's `[c] custom`
+prompt does:
+
+- **Local TOML file** (`/path/to/catalog.toml`).
+- **HTTP URL** (`https://example.com/catalog.toml`).
+- **`oras://` reference** (`oras://ghcr.io/owner/bty-catalog:latest`).
+- **bty-web instance** (`http://server:8080/catalog.toml`).
+
+The catalog TOML schema is `bty.catalog.Catalog` (version 1):
+
+```toml
+version = 1
+
+[[images]]
+name = "demo.qcow2"
+src = "https://example.com/images/demo.qcow2"
+sha256 = "abc123..."  # optional; required for sha-pinned bty-web entries
+format = "qcow2"
+size_bytes = 1024
+```
+
+`src` accepts `http(s)://`, `oras://`, or `file://`. `sha256` is
+optional in the schema; rolling tags (`oras://...:latest`) leave
+it null because the digest is resolved at flash time.
+
+### `.bri` descriptors (per-stick catalog)
+
+A USB stick's `BTY_IMAGES` partition can carry `.bri` (bty Remote
+Image) descriptors -- tiny TOML pointers to remote images:
 
 ```toml
 url = "https://github.com/safl/bty/releases/latest/download/bty-server-x86_64.img.gz"
 # Optional: name, format, size_bytes, sha256, description
 ```
 
-Only `url` is required; everything else is inferred from the URL
-or left null. Operators can drop `.bri` files alongside `.img.gz`
-/ `.qcow2` files in BTY_IMAGES (or, on Ventoy / IP-KVM
-deliveries, at the surrounding stick's partition root or in a
-`bty-images/` subfolder there).
+The `url` field accepts:
 
-#### `url` field: schemes
-
-The `url` field accepts three schemes:
-
-- `https://` (or `http://`) — plain HTTP fetch. Format is inferred
-  from the URL's filename extension.
-- `oras://<host>/<owner>/<repo>:<tag>` — an OCI artefact published
-  via [ORAS](https://oras.land/) (OCI Registry As Storage -- the
-  spec for **non-container** artefacts in a container registry).
-  bty resolves the tag to a content-addressed layer digest at
-  flash time (through the registry's anonymous-pull flow; no
-  credentials required for public packages) and verifies the
+- `https://` (or `http://`) -- plain HTTP fetch.
+- `oras://<host>/<owner>/<repo>:<tag>` -- an OCI artefact published
+  via [ORAS](https://oras.land/) (the spec for non-container
+  artefacts in a container registry). bty resolves the tag to a
+  content-addressed layer digest at flash time and verifies the
   downloaded bytes against that digest. Use a rolling tag
-  (`:latest`) to follow upstream re-publishes; pin a specific
-  build by replacing the tag with `@sha256:<hex>`.
+  (`:latest`) or pin to `@sha256:<hex>`. Anonymous-pull only -- no
+  PAT, no docker login.
 
-  Distinct from a `docker pull ghcr.io/...` reference: nosi-style
-  disk images are stored as OCI blobs but are **not** runnable
-  container images. The `oras://` spelling makes that explicit so
-  an operator reading a .bri file doesn't reach for `docker`
-  / `podman` by mistake.
+Fresh USB sticks ship with four starter `.bri` files pre-staged on
+`BTY_IMAGES`: three nosi sysdev images (Debian / Ubuntu / Fedora,
+each via `oras://ghcr.io/safl/nosi/<v>:latest`) plus the bty-server
+appliance from the GitHub release URL. Operators see all four in
+the wizard catalog without setting up any infrastructure.
 
-  Any OCI v2 registry that follows the GHCR anonymous-pull
-  convention works; the URL's host (`ghcr.io`, `quay.io`,
-  `registry.example.com:5000`, etc.) drives the per-host token
-  endpoint. ``bty-web``'s "Add image by URL" form / `POST
-  /catalog/entries` endpoint accepts the same `oras://` shape;
-  the server resolves the manifest at add time and stores the
-  layer digest as the entry's sha256 (no separate `sha_url`
-  needed for oras refs).
+### Recognised image formats
 
-```toml
-# rolling tag, bty pins to current digest at flash time
-url = "oras://ghcr.io/safl/nosi/debian-sysdev:latest"
+- `.qcow2` -- decompressed via `qemu-img convert`.
+- `.img` -- raw image; `dd` directly.
+- `.img.zst` -- `zstd -d --stdout | dd`.
+- `.img.xz` -- `xz -d --stdout | dd`.
+- `.img.gz` -- `gzip -d --stdout | dd`.
+- `.img.bz2` -- `bzip2 -d --stdout | dd`.
 
-# digest-pinned, skips the manifest fetch
-url = "oras://ghcr.io/safl/nosi/debian-sysdev@sha256:94e6..."
-```
+Tarballs (`.tar.gz`, `.tgz`, etc.) are **not** supported: the
+gzip/xz/bzip2 layer applied to a tarball yields a TAR stream, not
+an image, and writing TAR headers into the MBR is a wrong-answer.
+Extract first if you have one.
 
-Fresh USB sticks ship with four starter .bri files pre-staged
-on the BTY_IMAGES partition: three nosi sysdev images
-(`debian-sysdev`, `ubuntu-sysdev`, `fedora-sysdev`, each via
-`oras://ghcr.io/safl/nosi/<v>:latest`) plus the latest bty-server
-appliance from the GitHub release URL. Operators see all four
-in the TUI catalog without setting up any infrastructure, and
-edit / delete / replace them freely from a host OS since the
-files are plain TOML on an exFAT partition.
+bty itself ships its appliance images (`bty-server-x86_64.img.gz`,
+`bty-server-rpi-arm64.img.gz`, `bty-usb-x86_64.iso.gz`) as gzip
+for universal flasher support -- Etcher / Rufus / Imager / dd all
+decompress gzip natively without the version-cliff issues that
+bit us with xz (Etcher's bundled xz handler) and zstd (older
+Etcher pre-1.18). The flash path inside the wizard accepts every
+format above for operator-supplied target images.
 
-To install the bty-server appliance specifically, no `.bri`
-shipping is needed: `bty tui` has an `i` keybinding that flashes
-the latest `bty-server-x86_64.img.gz` from
-`https://github.com/safl/bty/releases/latest/...` directly. The
-`.bri` mechanism is for operator-supplied URL pointers (private
-mirrors, custom-built images, etc.), not for the bty-server
-bootstrap.
+### Image root
 
-### `bty inspect PATH`
+The local image-root is resolved in this order:
 
-Print detailed metadata for a single image file or `.bri` descriptor.
-Always reports `path`, `format`, and `size_bytes`. Adds a format-
-specific `detail` block when the relevant tool succeeds:
-
-- `.qcow2` -> `qemu-img info --output=json`
-- `.img.zst` -> `zstd -l`
-- `.img.xz` -> `xz -l`
-- `.img.gz` -> `gzip -l`
-- `.img.bz2` -> (no listing tool; detail omitted)
-- `.img` -> nothing extra (raw images have no header to query)
-- `.bri` -> parsed descriptor contents (`url`, `name`, `format`, etc.)
-
-Exit codes:
-
-- `0` -> success
-- `2` -> the path does not exist (or argparse rejected the invocation)
-
-### `bty flash IMAGE TARGET [--progress {text,ndjson,none}] [--dry-run] [--yes]`
-
-Flash an image onto a target block device. ``bty flash`` is a
-flasher only -- first-boot bring-up belongs in the image builder
-upstream (cloud-init / NoCloud user-data baked at image-build
-time). There are no provisioning flags here.
-
-`IMAGE` (positional) accepts four forms:
-
-- A local file path (`/path/to/foo.img.gz`).
-- An HTTP/HTTPS URL (`https://server/foo.img.gz`); raw `.img` and
-  compressed `.img.*` URLs stream straight to disk.
-- An `oras://` reference to an OCI artefact (`oras://ghcr.io/owner/repo:tag`
-  or `...@sha256:<hex>`); bty resolves the manifest, picks the
-  disk-image layer, and streams the blob through the same pipeline
-  as a plain HTTPS fetch (see the `.bri` schemes block above).
-- A `.bri` descriptor path; bty resolves the descriptor's `url`
-  field (any of the above) and falls into the URL flash path
-  automatically.
-
-Either `--dry-run` or `--yes` is required:
-
-| Flags | Behaviour |
-|---|---|
-| `--dry-run` | Validate the plan; no writes. Exit `0` if valid, `1` if not. |
-| `--yes` | Validate, then write. Requires root. |
-| (neither) | Refuse with exit `2` and a hint pointing at both flags. |
-| `--dry-run --yes` | `--dry-run` wins. |
-
-#### Validation
-
-Both modes start by validating the plan:
-
-- Image exists and is a recognised format (`.qcow2` / `.img` / `.img.zst` / `.img.xz`).
-- Image virtual size (decompressed / qcow2-virtual size, not on-disk
- size) fits the target. Skipped with a note if the virtual size
- cannot be determined (e.g. `qemu-img info` failure).
-- Target exists and is a block device.
-- Target has no mounted partitions (refuses to overwrite live storage).
-
-#### Write (`--yes` only)
-
-If validation passes and `bty` is running as root, the write proceeds
-in a format-specific way:
-
-- `.img` -> `dd if=IMG of=TARGET bs=4M conv=fsync status=progress`
-- `.img.zst` -> `zstd -d --stdout IMG | dd of=TARGET bs=4M conv=fsync status=progress`
-- `.qcow2` -> `qemu-img convert -p -O raw IMG TARGET`
-
-Immediately before the write, the target is re-probed and re-validated
-to catch races (e.g. the target getting mounted between dry-run and
-flash). On success, `bty` runs `sync` and `partprobe TARGET` so the
-kernel re-reads the new partition table.
-
-#### Progress
-
-`--progress {text,ndjson,none}` controls lifecycle reporting (default
-`text`).
-
-Lifecycle events: `started`, `writing`, `synced`, `partprobed`,
-`done`, `failed`.
-
-- `text` (default) - one line per event on stderr (`[event] note`).
-- `ndjson` - one JSON object per line on stdout
- (`{"event":"started","total_bytes":12345}` etc.). Use this from
- agents and CI scripts.
-- `none` - no lifecycle output. Subprocess noise (`dd status=progress`)
- still goes to stderr in all modes; redirect if you want a clean
- channel.
-
-The same callback shape (`bty.flash.ProgressCallback` /
-`bty.flash.FlashProgress`) is used by `bty-tui`'s flash modal - UI
-updates and CLI output share the same event stream.
-
-#### Exit codes (specific to `bty flash`)
-
-- `0` -> success (validation passed for `--dry-run`; write completed for `--yes`).
-- `1` -> validation failed, or the write subprocess returned non-zero.
-- `2` -> argparse error, missing image, neither `--dry-run` nor `--yes` given.
-- `3` -> `--yes` was passed without root.
-- `4` -> required external tool missing (e.g. `qemu-img` for `.qcow2`).
-- `5` -> target raced (became mounted or stopped being a block device between validation and write).
-
-The general exit-code table at the top of this section applies to all
-subcommands.
-
-### `bty tui [--catalog SOURCE] [--image-root PATH] [--mac MAC]`
-
-Terminal UI for picking an image + a target disk and flashing. Same
-flash machinery as the CLI; the TUI is a thin wrapper around
-`bty.flash.execute_plan`.
-
-Catalog sources (combine freely):
-
-- **Local image-root** (always scanned). Files + `.bri` descriptors
-  under the configured root (USB live env's `BTY_IMAGES` partition,
-  `BTY_IMAGE_ROOT` env, or `--image-root /path`).
-- **Catalog overlay** (`--catalog SOURCE`). One additional source:
-  a local TOML file (`/path/to/catalog.toml`), an HTTP URL
-  (`https://example.com/catalog.toml`), an `oras://` reference
-  (`oras://ghcr.io/owner/bty-catalog:latest`), or a `bty-web`
-  instance's TOML endpoint (`http://server:8080/catalog.toml`).
-  Fetched once at startup and held in memory; pressing `r` re-scans
-  only the local image-root, not the remote catalog. The TUI's pane
-  title shows the merged source label.
-
-`--mac MAC` is the self-MAC. Combined with an http(s) `--catalog`,
-the TUI auto-derives the URL's `scheme://host` as the pxe-done base
-and `POST`s `<base>/pxe/<mac>/done` after a successful flash so a
-bty-web's `last_flashed_at` updates. Best-effort: a non-bty-web
-catalog source (static file, `oras://`) skips the POST.
-
-The TUI-on-PXE flow uses both flags: the live env reads `bty.server`
-and `bty.mac` from `/proc/cmdline` and the
-`/usr/local/sbin/bty-tui-on-tty1` wrapper rewrites the bty.server
-base URL into `--catalog <base>/catalog.toml`.
+1. `BTY_IMAGE_ROOT` environment variable.
+2. `/var/lib/bty/images` (the USB live env auto-mounts the
+   `BTY_IMAGES` exFAT partition here; the server appliance
+   auto-mounts a `LABEL=BTY_IMAGE_STORE` second disk here so the
+   cache survives reflashes).
 
 ## Configuration
 
@@ -330,10 +167,7 @@ environment and sensible defaults.
 
 | Variable | Purpose | Default |
 |-------------------|----------------------------------------------------------------|---------------------|
-| `BTY_IMAGE_ROOT` | Image root for `bty images` and `bty inspect`. | `/var/lib/bty/images` |
-
-The `bty --image-root` flag (when given) takes precedence over
-`BTY_IMAGE_ROOT`.
+| `BTY_IMAGE_ROOT` | Image root the `bty` wizard scans. | `/var/lib/bty/images` |
 
 ### Default paths
 
@@ -362,7 +196,8 @@ bty's modules are usable as a library. Stable entry points:
 | `bty.disks` | `list_disks() -> list[dict]` - block-device discovery. |
 | `bty.images` | `list_images(root)`, `inspect_image(path)`, `Image` dataclass, `detect_format(path)`, `default_image_root()`, `read_bri(path)`, `list_remote_images(root)`, `RemoteImage` / `BriError`. |
 | `bty.oras` | `parse_ref(ref) -> OrasRef`, `resolve_ref(ref) -> ResolvedBlob`, `is_oras_url(url) -> bool`, `OrasError`. ORAS / OCI registry adapter for `oras://` URLs. |
-| `bty.formatting` | `print_table(rows, columns)`, `print_inspect(info)`. |
+| `bty.catalog` | `Catalog`, `load_source(src)`, `load_bytes(...)`, `fetch_bytes(...)`. Portable catalog TOML loader. |
+| `bty.flash` | `execute_plan(plan, progress=, cancel=)`, `FlashPlan`, `FlashProgress`, `FlashError`. The flash machinery the wizard sits on top of. |
 
 A full sphinx-autodoc surface is on the roadmap. Until then treat
 any module not listed above as internal.
@@ -432,17 +267,16 @@ tooling which can't carry a session cookie:
  anyone on the network. Companion auth-gated upload route at
  `PUT /images/{name}` for operators / scripts.
 - `GET /images` - list the catalog (array of `ImageEntry`). Open
- for the same reason as `GET /images/{key}`: the bty-tui-on-PXE
+ for the same reason as `GET /images/{key}`: the PXE-booted ``bty``
  flow needs to enumerate from inside the live env without first
  bootstrapping a session, and discovery adds no capability beyond
  what the already-open byte-serving route provides.
 - `GET /catalog.toml` - same row set as `GET /images`, serialised as
  a `bty.catalog.Catalog` TOML manifest (``version = 1``, ``[[images]]``
  tables). Open for the same reason as `GET /images`; consumed by
- `bty tui --catalog` and `bty images --catalog` so the same client
- code path that handles static files (e.g. published on GitHub
- releases) works against a live bty-web. Entries without a sha256
- are skipped.
+ `bty --catalog` so the same client code path that handles static
+ files (e.g. published on GitHub releases) works against a live
+ bty-web. Entries without a sha256 are skipped.
 
 Protected routes (session cookie required):
 

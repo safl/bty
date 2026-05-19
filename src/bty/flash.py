@@ -987,11 +987,11 @@ def _flash_qcow2(image: Path, target: Path) -> None:
 
 # ---------- URL-streaming variants -------------------------------------------
 #
-# curl is used as the HTTP downloader: it's the same tool the live env's
-# bty-flash-on-boot service uses to fetch images, it's available on every
-# Debian/Ubuntu/macOS host the project supports, and its ``--retry`` flag
-# handles flaky network gracefully. The pipelines mirror the local-file
-# flash functions but with curl on the front instead of an open(file).
+# curl is the HTTP downloader: available on every Debian/Ubuntu/macOS
+# host the project supports, and well-instrumented for progress
+# reporting via ``--progress-bar`` to stderr. The pipelines mirror
+# the local-file flash functions but with curl on the front instead
+# of an open(file).
 
 
 # ``-fsSL``:

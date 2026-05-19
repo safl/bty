@@ -80,10 +80,10 @@ class CatalogEntry:
     ``sha256`` is optional in the schema. Different consumers have
     different needs:
 
-    - bty-tui's ``--catalog`` (portable catalog: display + flash
-      from src) ignores sha; the digest verification happens at
-      flash time for ``oras://`` (manifest layer digest) or relies
-      on TLS for http(s).
+    - ``bty --catalog`` (portable catalog: display + flash from src)
+      ignores sha; the digest verification happens at flash time
+      for ``oras://`` (manifest layer digest) or relies on TLS for
+      http(s).
     - bty-web's manifest cache (``$BTY_STATE_DIR/catalog.toml`` +
       ``fetch_to_cache``) needs sha for the SHA-keyed cache and
       machine binding; ``cached_path`` raises if it's None so the
@@ -338,8 +338,8 @@ def load_source(source: str, *, timeout: float = 30.0) -> Catalog:
     """Fetch + parse a catalog from any supported source.
 
     Convenience wrapper combining :func:`fetch_bytes` and
-    :func:`load_bytes`. Used by both ``bty images --catalog`` and
-    ``bty tui --catalog``.
+    :func:`load_bytes`. Used by ``bty --catalog`` and bty-web's
+    catalog ingestion path.
     """
     raw = fetch_bytes(source, timeout=timeout)
     return load_bytes(raw, source=source)
@@ -568,8 +568,7 @@ def fetch_to_cache(
     ``progress(downloaded, total_or_none)`` is called once per chunk
     written, with ``total`` from the upstream ``Content-Length`` if
     available. ``cancel()`` is polled between chunks; returning
-    ``True`` raises :class:`CatalogCancelled`. Both are optional; the
-    CLI's offline ``bty catalog fetch`` doesn't pass them.
+    ``True`` raises :class:`CatalogCancelled`. Both are optional.
 
     Returns the cached path on success.
     """

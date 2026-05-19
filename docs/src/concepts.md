@@ -89,7 +89,7 @@ values:
   re-flashes the assigned image on every PXE boot - the per-job CI
   cadence.
 - `tui` - chain the live env in interactive mode. The target lands
-  at `bty-tui` on tty1 and the operator picks an image from the
+  at `bty` on tty1 and the operator picks an image from the
   server's catalog by hand.
 
 The auto-discovery default for unknown MACs is `tui`, so a new box
@@ -99,3 +99,35 @@ session immediately - no per-MAC server-side configuration needed.
 The completion signal `POST /pxe/{mac}/done` updates `last_flashed_at`
 but never modifies `boot_policy`. Flipping back to `local` after a
 flash is an explicit operator action.
+
+## Server-controlled vs interactive: who decides which image gets flashed
+
+`bty` has two operating modes when the kernel cmdline carries
+`bty.server` + `bty.mac`. The mode is chosen by `GET /pxe/<mac>/plan`,
+which reads the [machine record](#machine-record) on the server side:
+
+- **Server-controlled** (`plan.mode = "auto"`). Triggered when
+  `boot_policy in {flash, flash-once}` AND `bty_image_ref` is bound
+  AND `target_disk_serial` is picked. The plan response carries the
+  image URL + target serial; `bty` flashes them without prompts.
+  The server is the source of truth for *what gets flashed*.
+- **Interactive** (`plan.mode = "interactive"`). Triggered when
+  `boot_policy = tui`, OR when a flash policy can't be auto-resolved
+  (no serial picked / orphan ref). `bty` drops the operator into the
+  wizard with the server's catalog pre-loaded. The operator picks
+  any image from the catalog and flashes any local disk.
+
+The asymmetry worth knowing: **interactive picks are not reported
+back to the server.** `bty` does POST `/pxe/<mac>/done` after a
+successful flash (so the operator timeline shows a flash happened),
+but it does *not* tell the server which image was chosen or which
+disk was written. The machine record's `bty_image_ref` /
+`target_disk_serial` fields are unchanged by interactive runs.
+
+Practical consequence: if you want the server to drive flashing -
+to know which image is on each box, to surface "this MAC will
+re-flash on next boot" in `/ui/machines`, to make a flash repeatable
+- you must set `boot_policy=flash`, bind a `bty_image_ref`, and pick
+a `target_disk_serial` on the server side. Interactive mode is for
+"give me a box that boots `bty`, I'll decide locally what to do with
+it" - the local pick stays local.

@@ -520,7 +520,7 @@ class BtyTui:
         #
         # For every plan we print a banner BEFORE the dispatch so the
         # operator (or anyone watching the live env's tty1) sees what
-        # the server said and what bty-tui is about to do. A silent
+        # the server said and what ``bty`` is about to do. A silent
         # exit / silent wizard launch is indistinguishable from a
         # crash on a framebuffer console.
         if self._state.mac:
@@ -542,7 +542,7 @@ class BtyTui:
             if plan_action == "local":
                 # The server says nothing to do here (boot_policy=local
                 # or similar). Print a Panel so an operator hand-running
-                # ``bty-tui --mac X`` from a workstation sees WHY the
+                # ``bty --mac X`` from a workstation sees WHY the
                 # tool is exiting -- a silent ``sys.exit(0)`` looks
                 # like a crash. The live env never reaches this path:
                 # boot_policy=local short-circuits at the iPXE chain
@@ -551,7 +551,7 @@ class BtyTui:
                     Panel(
                         f"Server reports [{_ACCENT}]mode=local[/] for "
                         f"[{_PRIMARY}]{self._state.mac}[/] -- nothing for "
-                        "bty-tui to do here.\n\n"
+                        "bty to do here.\n\n"
                         f"[{_MUTED}]boot_policy=local means the firmware / "
                         "local disk boots directly; no flash, no wizard.[/]",
                         title="Plan: local boot",
@@ -647,13 +647,14 @@ class BtyTui:
         return "interactive"
 
     def _run_auto(self) -> int:
-        """Scripted flash path: cmdline-driven, no prompts.
+        """Scripted flash path: plan-driven, no prompts.
 
-        The bty-server provides every argument needed for the flash.
-        bty-tui's job is to:
+        The bty-server's /pxe/<mac>/plan response provides every
+        argument needed for the flash. ``bty``'s job is to:
 
-        1. Look up the disk whose serial matches ``--target-disk-serial``
-           (the bty-server picked this serial in /ui/machines).
+        1. Look up the disk whose serial matches the plan's
+           ``target_disk_serial`` (the operator picked it in
+           /ui/machines).
         2. Build the flash plan.
         3. Run the flash with the standard Rich progress bar.
         4. POST ``/pxe/<mac>/done`` to the bty-server.
@@ -1712,19 +1713,6 @@ def _format_progress_bytes(written: int | None, total: int | None) -> str:
     return f"{w} / {t}"
 
 
-# ---------------------------------------------------------------------------
-# Convenience standalone runner. Imported by ``bty tui`` via the
-# ``bty-tui`` console script in pyproject.toml's [project.scripts].
-# ---------------------------------------------------------------------------
-
-
-def main() -> None:
-    """Console-script entry. Kept as a no-arg wrapper so callers
-    that imported it from the old location keep working.
-    """
-    BtyTui().run()
-
-
 __all__ = [
     "BtyTui",
     "_TuiImage",
@@ -1733,7 +1721,6 @@ __all__ = [
     "_parse_size_to_bytes",
     "_pxe_done_base_from_source",
     "load_catalog_from_source",
-    "main",
     "post_inventory",
     "post_pxe_done",
 ]

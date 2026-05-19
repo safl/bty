@@ -49,10 +49,11 @@
                     <code>flash-once</code>: same as <code>flash</code> for the next
                     PXE boot, then auto-flips to <code>local</code> after the
                     live env signals completion.
-                    <code>tui</code>: PXE boots chain into the live env in interactive
-                    mode (<code>bty-tui</code> on tty1). The auto-discovery default
-                    for unknown MACs is <code>tui</code> -- it's also how the box
-                    reports its disk inventory to bty-web (see Target disk below).
+                    <code>tui</code>: PXE boots chain into the live env. <code>bty</code>
+                    on tty1 GETs <code>/pxe/&lt;mac&gt;/plan</code> and drops the operator
+                    into the wizard. The auto-discovery default for unknown MACs
+                    is <code>tui</code> -- it's also how the box reports its disk
+                    inventory to bty-web (see Target disk below).
                 </div>
             </div>
             <div class="mb-3" data-policy-relevant="flash flash-once">
@@ -108,8 +109,9 @@
                 <input type="hidden" name="target_disk_serial" value="{{ m.target_disk_serial or '' }}">
                 <div class="alert alert-warning small mb-0">
                     No disk inventory yet for this machine. Set <code>boot_policy=tui</code>
-                    above and power-cycle the machine; bty-tui will report its
-                    disks to bty-web on startup and this dropdown will populate.
+                    above and power-cycle the machine; <code>bty</code> will
+                    report its disks to bty-web on startup and this dropdown
+                    will populate.
                 </div>
                 {% endif %}
             </div>

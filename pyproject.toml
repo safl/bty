@@ -1,6 +1,6 @@
 [project]
 name = "bty-lab"
-version = "0.22.10"
+version = "0.22.11"
 description = "Flash images onto target disks, offline or networked with and without PXE"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -55,8 +55,7 @@ all = [
 ]
 
 [project.scripts]
-bty = "bty.cli:main"
-bty-tui = "bty.tui:main"
+bty = "bty.tui:main"
 bty-web = "bty.web:main"
 
 [project.urls]

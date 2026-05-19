@@ -2,11 +2,11 @@
 # bty network-flash for {{ mac }} - interactive TUI mode
 #
 # ``boot_policy=tui``: chain into the bty live env. The live env's
-# bty-tui-on-tty1 service exec's ``bty-tui --server X --mac Y``;
-# bty-tui GETs ``<server>/pxe/<mac>/plan`` and dispatches on the
+# bty-tui-on-tty1 service exec's ``bty --server X --mac Y``;
+# ``bty`` GETs ``<server>/pxe/<mac>/plan`` and dispatches on the
 # JSON response. For ``boot_policy=tui`` the plan endpoint returns
-# ``{"mode": "interactive", "catalog": ...}`` and bty-tui drops
-# the operator into the wizard with the server's catalog pre-loaded.
+# ``{"mode": "interactive", "catalog": ...}`` and ``bty`` drops the
+# operator into the wizard with the server's catalog pre-loaded.
 #
 # This is the default for unknown MACs that PXE-boot through the
 # server: anyone on the segment lands at "bty-on-a-USB-but-over-the-

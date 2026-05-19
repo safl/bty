@@ -6,12 +6,81 @@
     <span class="text-muted small"><code>{{ boot_root }}</code></span>
 </div>
 
+{% with sections=[
+    {"key": "list",  "label": "List",                "icon": "list-ul",        "href": "/ui/boot"},
+    {"key": "fetch", "label": "Fetch latest release", "icon": "cloud-download", "href": "/ui/boot?section=fetch"},
+] %}
+{% include "ui/_subnav.html" %}
+{% endwith %}
+
+{% if section == "fetch" %}
+<div class="card mb-3">
+    <div class="card-header bg-light fw-semibold">
+        <i class="bi bi-cloud-download me-1"></i>Fetch from GitHub releases
+    </div>
+    <div class="card-body">
+        <p>
+            Pulls <code>vmlinuz</code> + <code>initrd</code> +
+            <code>squashfs</code> + <code>sha256</code> from
+            <a href="https://github.com/{{ release_repo }}/releases"
+               target="_blank" rel="noopener">{{ release_repo }}</a>,
+            verifies the manifest, and atomically installs into
+            <code>{{ boot_root }}</code>.
+        </p>
+        <div class="row g-3 align-items-end">
+            <div class="col-sm-8">
+                <label class="form-label" for="tag">Tag</label>
+                <input type="text" id="tag" class="form-control"
+                       value="latest" placeholder="latest, or e.g. v0.11.3">
+                <div class="form-text">
+                    <code>latest</code> resolves through GitHub's redirect
+                    to the most recent release.
+                </div>
+            </div>
+            <div class="col-sm-4">
+                <button type="button" class="btn btn-primary w-100" id="enqueue-fetch-btn"
+                        onclick="enqueueFetch();">
+                    <i class="bi bi-cloud-download me-1"></i>Fetch
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    window.enqueueFetch = function () {
+        var tag = document.getElementById("tag").value.trim() || "latest";
+        var btn = document.getElementById("enqueue-fetch-btn");
+        btn.disabled = true;
+        fetch("/boot/releases", {
+            method: "POST",
+            credentials: "same-origin",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ tag: tag }),
+        }).then(function (r) {
+            if (!r.ok) throw new Error("HTTP " + r.status);
+            // Send the operator back to the list so they can watch
+            // the fetch progress (the list section polls).
+            window.location = "/ui/boot";
+        }).catch(function (e) {
+            alert("Enqueue failed: " + e.message);
+            btn.disabled = false;
+        });
+    };
+})();
+</script>
+
+{% else %}
+{# section == "list" (default): present/missing per-artefact + live
+   fetch table. Operators land on the OBSERVABLE boot state when
+   they click "Boot" in the top nav. The single Fetch flow is one
+   sub-nav click away. #}
 <p class="text-muted">
     The bty live env that PXE clients chain into when their assignment has
     <code>boot_policy=flash</code>. Until these files are present, machines with
-    <code>boot_policy=flash</code> cannot actually flash. Fetch them from the
-    <a href="https://github.com/{{ release_repo }}/releases" target="_blank" rel="noopener">latest GitHub release</a>
-    of <code>{{ release_repo }}</code>, or drop the files into <code>{{ boot_root }}</code> by hand.
+    <code>boot_policy=flash</code> cannot actually flash. Click
+    <a href="/ui/boot?section=fetch">Fetch latest release</a> to populate.
 </p>
 
 <div class="card mb-4">
@@ -57,34 +126,6 @@
     </div>
 </div>
 
-<div class="card mb-4">
-    <div class="card-header bg-light fw-semibold">
-        <i class="bi bi-cloud-download me-1"></i>Fetch from GitHub releases
-    </div>
-    <div class="card-body">
-        <div class="row g-3 align-items-end">
-            <div class="col-sm-8">
-                <label class="form-label" for="tag">Tag</label>
-                <input type="text" id="tag" class="form-control"
-                       value="latest" placeholder="latest, or e.g. v0.11.3">
-                <div class="form-text">
-                    <code>latest</code> resolves through GitHub's redirect to the most
-                    recent release. The fetch downloads
-                    <code>vmlinuz</code> + <code>initrd</code> + <code>squashfs</code> +
-                    <code>sha256</code>, verifies the manifest, and atomically installs
-                    into <code>{{ boot_root }}</code>.
-                </div>
-            </div>
-            <div class="col-sm-4">
-                <button type="button" class="btn btn-primary w-100" id="enqueue-fetch-btn"
-                        onclick="enqueueFetch();">
-                    <i class="bi bi-cloud-download me-1"></i>Fetch
-                </button>
-            </div>
-        </div>
-    </div>
-</div>
-
 <div class="card">
     <div class="card-header bg-light fw-semibold d-flex justify-content-between align-items-center">
         <span><i class="bi bi-arrow-down-circle me-1"></i>Active + recent fetches</span>
@@ -124,10 +165,6 @@
     var lastFetchesSnapshot = null;
 
     // HTML-escape arbitrary strings before innerHTML interpolation.
-    // Server-side errors (``s.error``) and operator-controlled tags
-    // (``s.tag``) are pattern-validated, but defense-in-depth: a
-    // future code path that surfaces less-validated content here
-    // shouldn't introduce an XSS regression.
     function esc(v) {
         if (v === null || v === undefined) return "";
         return String(v)
@@ -236,25 +273,6 @@
         if (document.hidden) stopPolling(); else startPolling();
     });
 
-    window.enqueueFetch = function () {
-        var tag = document.getElementById("tag").value.trim() || "latest";
-        var btn = document.getElementById("enqueue-fetch-btn");
-        btn.disabled = true;
-        fetch("/boot/releases", {
-            method: "POST",
-            credentials: "same-origin",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ tag: tag }),
-        }).then(function (r) {
-            if (!r.ok) throw new Error("HTTP " + r.status);
-            refresh();
-        }).catch(function (e) {
-            alert("Enqueue failed: " + e.message);
-        }).finally(function () {
-            btn.disabled = false;
-        });
-    };
-
     document.addEventListener("click", function (ev) {
         var cancelBtn = ev.target.closest(".bty-cancel-fetch-btn");
         if (cancelBtn) {
@@ -271,9 +289,12 @@
     startPolling();
 })();
 </script>
+{% endif %}
 
 {# Recent activity for boot artefacts: release fetches +
-   fetch failures via the per-subject events card. #}
+   fetch failures via the per-subject events card. Stays on
+   every section so an operator who clicked Fetch sees the
+   audit log context. #}
 {% with events=boot_events,
         title="Recent boot-artefact activity",
         link_to_full="/ui/events?subject_kind=boot" %}

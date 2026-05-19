@@ -1,11 +1,12 @@
-"""bty.tui - terminal UI on top of bty.
+"""bty.tui - the bty terminal interface.
 
-This module is intentionally lightweight: it imports nothing from
-:mod:`rich` at module level so a CLI-only install
-(``pipx install bty-lab`` without the ``[tui]`` extra) can still
-``import bty.tui`` for introspection without crashing. The actual
-Rich-based app lives in :mod:`bty.tui._app`, which is loaded only
-when ``bty-tui`` is invoked.
+Module name is historical (Rich-based wizard module); the
+console script is ``bty``. This module is intentionally
+lightweight: it imports nothing from :mod:`rich` at module level
+so an install without the ``[tui]`` extra can still ``import
+bty.tui`` for introspection without crashing. The actual Rich-
+based app lives in :mod:`bty.tui._app`, which is loaded only
+when ``bty`` is invoked.
 """
 
 from __future__ import annotations
@@ -16,21 +17,17 @@ import sys
 import bty
 
 
-def main(argv: list[str] | None = None, *, prog: str = "bty-tui") -> None:
-    """Console-script entry point for ``bty-tui`` (or ``bty tui``).
+def main(argv: list[str] | None = None, *, prog: str = "bty") -> None:
+    """Console-script entry point for ``bty``.
 
-    Defers loading the Rich-based app until invocation time so a missing
-    ``[tui]`` extra produces a clear "reinstall with extras" message
-    rather than a raw ``ModuleNotFoundError``. ``prog`` controls how
-    the program identifies itself in ``--help`` and ``--version`` so
-    the same code path serves both the standalone ``bty-tui`` console
-    script and ``bty tui``'s argparse bypass (cli.py passes
-    ``prog="bty tui"``).
+    Defers loading the Rich-based app until invocation time so a
+    missing ``[tui]`` extra produces a clear "reinstall with extras"
+    message rather than a raw ``ModuleNotFoundError``.
     """
     parser = argparse.ArgumentParser(
         prog=prog,
         description=(
-            f"{prog} -- bty's terminal UI. Two modes:\n\n"
+            f"{prog} -- bty's terminal interface. Three modes:\n\n"
             f"  {prog}                          - interactive wizard\n"
             f"                                    (local image-root only)\n"
             f"  {prog} --catalog <URL>          - interactive wizard with\n"
@@ -62,8 +59,8 @@ def main(argv: list[str] | None = None, *, prog: str = "bty-tui") -> None:
         default="bty-server",
         help="bty-server base URL or hostname. Default ``bty-server`` "
         "(operator convenience: pair with a LAN DNS entry pointing at "
-        "the appliance and ``bty-tui --mac X`` just works). The netboot "
-        "and USB-PXE-TUI paths pass this explicitly via ``bty.server=`` "
+        "the appliance and ``bty --mac X`` just works). The netboot "
+        "and USB-PXE paths pass this explicitly via ``bty.server=`` "
         "on the kernel cmdline. Bare hostnames are accepted; missing "
         "scheme defaults to ``http://``.",
     )
@@ -72,7 +69,7 @@ def main(argv: list[str] | None = None, *, prog: str = "bty-tui") -> None:
         type=str,
         default=None,
         help="Self-MAC of this client (e.g. ``aa:bb:cc:dd:ee:ff``). "
-        "When supplied, bty-tui switches to server-driven mode: it "
+        "When supplied, bty switches to server-driven mode: it "
         "GETs ``<server>/pxe/<mac>/plan`` and dispatches on the "
         "returned plan -- auto-flash, interactive, or no-op. The "
         "live env passes this via ``bty.mac=`` on the kernel cmdline.",
@@ -106,20 +103,20 @@ def main(argv: list[str] | None = None, *, prog: str = "bty-tui") -> None:
     #      second after import.
     #
     # Print progress to stderr BEFORE the import + the run. The
-    # operator sees: wrapper banner (from bty-tui-on-tty1 shell
-    # wrapper, on the live env) -> these progress lines -> the
-    # bty-tui header. The blank-screen window narrows to a few
-    # hundred ms while Rich's Console initialises.
+    # operator sees: wrapper banner (from /usr/local/sbin/bty-tui-
+    # on-tty1 on the live env) -> these progress lines -> the bty
+    # header. The blank-screen window narrows to a few hundred ms
+    # while Rich's Console initialises.
     #
-    # Also mirror to ``/run/bty-tui.status`` so an operator who
-    # Alt-F2'd to tty2 can ``cat`` it without having to read tty1's
-    # transient output. ``/run`` is tmpfs on the live env so this
-    # is forgotten on reboot; cheap to write.
+    # Also mirror to ``/run/bty.status`` so an operator who Alt-F2'd
+    # to tty2 can ``cat`` it without having to read tty1's transient
+    # output. ``/run`` is tmpfs on the live env so this is forgotten
+    # on reboot; cheap to write.
     def _progress(msg: str) -> None:
-        line = f"bty-tui: {msg}"
+        line = f"{prog}: {msg}"
         print(line, file=sys.stderr, flush=True)
         try:
-            with open("/run/bty-tui.status", "a") as f:
+            with open("/run/bty.status", "a") as f:
                 f.write(line + "\n")
         except OSError:
             pass
@@ -130,7 +127,7 @@ def main(argv: list[str] | None = None, *, prog: str = "bty-tui") -> None:
         from bty.tui._app import BtyTui
     except ImportError as exc:
         print(
-            f"bty-tui {bty.__version__}: required dependency is not installed "
+            f"{prog} {bty.__version__}: required dependency is not installed "
             f"({exc.name or exc}); reinstall with "
             '`pipx install "bty-lab[tui]"`',
             file=sys.stderr,

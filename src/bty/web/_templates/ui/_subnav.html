@@ -1,0 +1,26 @@
+{# Sub-nav strip for a /ui page with multiple actions.
+   Usage: include with ``sections`` (list of dicts) + ``active`` (string key).
+
+   Each section dict has:
+     key:   short identifier matching ``?section=<key>``
+     label: display text
+     icon:  Bootstrap Icon class fragment (e.g. "list-ul")
+     href:  the URL the pill links to
+
+   Renders as a Bootstrap nav-pills strip; the active pill is highlighted.
+   The default-key section (the one with section == "" or section == "list")
+   is reached by visiting the page without ?section= -- so refreshing the
+   default view stays on the default view.
+#}
+<nav class="mb-3">
+    <ul class="nav nav-pills">
+        {% for s in sections %}
+        <li class="nav-item">
+            <a class="nav-link{% if s.key == active %} active{% endif %}"
+               href="{{ s.href }}">
+                {% if s.icon %}<i class="bi bi-{{ s.icon }} me-1"></i>{% endif %}{{ s.label }}
+            </a>
+        </li>
+        {% endfor %}
+    </ul>
+</nav>

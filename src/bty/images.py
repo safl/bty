@@ -357,10 +357,9 @@ def list_remote_images(root: Path) -> list[RemoteImage]:
     Mirrors :func:`list_images`'s shape but for the remote half of
     the catalog. Malformed ``.bri`` files are silently skipped so
     one bad descriptor doesn't break the whole listing.
-    ``bty inspect foo.bri`` is the place to surface parse
-    errors loudly: it goes through :func:`inspect_image`, which
-    re-raises :class:`BriError` so the CLI can render it as a
-    friendly stderr line instead of swallowing the symptom.
+    :func:`inspect_image` re-raises :class:`BriError` on a bad
+    descriptor so an interactive tool can surface the symptom
+    loudly instead of swallowing it.
     """
     if not root.exists() or not root.is_dir():
         return []
@@ -821,8 +820,9 @@ def inspect_image(path: Path) -> dict[str, Any]:
 
     # Any other unrecognised extension: same shape as the tarball
     # branch, just a generic "this isn't a format bty knows about"
-    # message listing what IS supported. Without this, ``bty inspect
-    # README.md`` returned a confusing blank record with format=''.
+    # message listing what IS supported. Without this, an inspect
+    # against e.g. README.md returned a confusing blank record
+    # with format=''.
     if fmt is None:
         supported = ", ".join(ext for ext, _ in _EXTENSIONS) + ", .bri"
         info["detail_error"] = (

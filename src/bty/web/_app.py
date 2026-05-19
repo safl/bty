@@ -405,10 +405,11 @@ def create_app(
                 # Auto-discovery: record an unassigned machine so the
                 # operator can see this MAC in /machines and decide
                 # what to do with it. ``boot_policy='tui'`` makes
-                # the unknown MAC chain into the live env in
-                # interactive mode (bty-tui) - "bty-on-a-USB but
-                # over the network" - so first contact is useful
-                # without prior server-side configuration.
+                # the unknown MAC chain into the live env where ``bty``
+                # GETs /pxe/<mac>/plan and drops into the wizard -
+                # "bty-on-a-USB but over the network" - so first
+                # contact is useful without prior server-side
+                # configuration.
                 conn.execute(
                     """
                     INSERT INTO machines
@@ -480,47 +481,31 @@ def create_app(
             template = jinja.get_template("ipxe_tui.j2")
             rendered = template.render(mac=normalised, machine=machine, host=host)
             offer_kind = "tui"
-            offer_summary = f"{normalised} offered tui (interactive bty-tui on tty1)"
+            offer_summary = f"{normalised} offered tui (operator picks via bty on tty1)"
             offer_details = {"offer": "tui"}
         elif ref and policy in ("flash", "flash-once"):
             # Safety gate: refuse the flash chain unless the operator
-            # has picked a target disk by serial. Without this,
-            # bty-flash-on-boot would fall back to "first non-removable
-            # disk" and risk wiping the wrong drive on a multi-disk
-            # host. The matching pxe.flash.no_target_disk event makes
-            # the refusal visible on /ui/events so an operator
-            # debugging "why didn't my box reflash?" sees the reason
-            # without digging through dnsmasq logs.
+            # has picked a target disk by serial. Without this, ``bty``
+            # in auto-flash mode would have no disk pinned and refuse
+            # at the plan endpoint anyway -- but landing on ipxe.j2
+            # (sanboot fallback) here makes the misconfiguration
+            # immediately visible: the box doesn't even chain into
+            # the live env. The matching pxe.flash.no_target_disk
+            # event surfaces the refusal on /ui/events.
             target_disk_serial = machine.get("target_disk_serial")
             image_name = _flash_target_for_ref(str(ref))
-            image_format = _flash_format_for_ref(str(ref))
             if image_name is not None and target_disk_serial:
                 template = jinja.get_template("ipxe_flash.j2")
-                # Percent-encode the name segment of the URL: catalog
-                # names are human text (``nosi fedora-sysdev
-                # (x86_64, rolling)``) and unencoded spaces inside
-                # the URL break ``shlex.split`` of /proc/cmdline in
-                # the live env, truncating bty.image_url at the
-                # first space. Server route /images/{key}/{name:path}
-                # decodes back to the original name; routing is
-                # by ``key`` only so the encoded form is decorative.
-                image_name_encoded = urllib.parse.quote(image_name, safe="")
-                # ``image_format`` (img.gz / img.zst / qcow2 / ...)
-                # rides on the cmdline as ``bty.image_format=...`` so
-                # the live env can rename the downloaded file with
-                # the right extension. Without this hint,
-                # ``bty flash`` validates the local path's filename
-                # for a recognised extension and rejects on names
-                # without one. Empty string when the catalog row
-                # has no format field; bty-flash-on-boot tolerates
-                # the absence and falls back to extension detection.
+                # The kernel cmdline only carries bty.server + bty.mac
+                # (v0.22.10+); the image URL + target serial come from
+                # /pxe/<mac>/plan. The flash_key + target_disk_serial
+                # context vars feed the template's HEADER COMMENT block
+                # so an operator inspecting curl output can see what
+                # this chain is bound to.
                 rendered = template.render(
                     mac=normalised,
                     machine=machine,
                     host=host,
-                    image_name=image_name,
-                    image_name_encoded=image_name_encoded,
-                    image_format=image_format or "",
                     flash_key=str(ref),
                     target_disk_serial=target_disk_serial,
                 )
@@ -717,27 +702,39 @@ def create_app(
 
     @app.get("/pxe/{mac}/plan")
     def pxe_plan(mac: str, request: Request) -> dict[str, Any]:
-        """Return the per-MAC plan as JSON so ``bty-tui --server X
-        --mac Y`` can dispatch without operator input.
+        """Return the per-MAC plan as JSON so ``bty --server X --mac
+        Y`` can dispatch without operator input.
 
         Plan shapes (mode is the dispatch token):
 
         * ``{"mode": "auto", "image": URL, "target_disk_serial": S}``
           -- boot_policy in (flash, flash-once) with a bindable ref
-          AND a target_disk_serial picked. bty-tui runs the flash
+          AND a target_disk_serial picked. ``bty`` runs the flash
           without prompts.
         * ``{"mode": "interactive", "catalog": URL}`` -- boot_policy
           ``tui``, OR a flash policy that can't be auto-resolved
-          (no target serial, orphan ref). bty-tui drops the operator
+          (no target serial, orphan ref). ``bty`` drops the operator
           into the wizard with the server's catalog pre-loaded.
         * ``{"mode": "local"}`` -- boot_policy=local (or anything
-          unrecognised). bty-tui exits cleanly; the firmware /
+          unrecognised). ``bty`` exits cleanly; the firmware /
           local-disk path handles boot.
 
         Unknown MACs auto-register (matches the ``/pxe/{mac}`` iPXE
-        endpoint) with boot_policy=tui so a hand-launched ``bty-tui
-        --mac X`` from a fresh box gets a wizard plan rather than a
-        404.
+        endpoint) with boot_policy=tui so a hand-launched ``bty
+        --mac X`` from a fresh box gets a wizard plan rather than
+        a 404.
+
+        Server-vs-client truth asymmetry: ``mode=auto`` is the only
+        path that makes the server the source of truth for what
+        gets flashed. ``mode=interactive`` returns a catalog URL
+        but ``bty`` does NOT report back which entry the operator
+        picks -- the only feedback channels are
+        ``/pxe/<mac>/inventory`` (disk list, posted at startup) and
+        ``/pxe/<mac>/done`` (boolean "a flash completed", posted
+        after success). The machine record's ``bty_image_ref`` /
+        ``target_disk_serial`` fields stay untouched by interactive
+        flashes. Operators who want server-tracked flashes must
+        configure boot_policy=flash + bind a ref + pick a serial.
 
         Open endpoint: same trust model as the rest of /pxe/*
         (homelab / CI network, not the internet).
@@ -749,7 +746,7 @@ def create_app(
             row = conn.execute("SELECT * FROM machines WHERE mac = ?", (normalised,)).fetchone()
             if row is None:
                 # Auto-discovery: mirror /pxe/{mac}'s behaviour so a
-                # bty-tui invocation against an unknown MAC creates
+                # ``bty`` invocation against an unknown MAC creates
                 # a record (boot_policy=tui) instead of 404-ing.
                 conn.execute(
                     """
@@ -822,7 +819,7 @@ def create_app(
             plan = {"mode": "interactive", "catalog": f"{base}/catalog.toml"}
             offer_kind = "plan:interactive:tui"
         else:
-            # boot_policy=local (or any other / missing) -- bty-tui
+            # boot_policy=local (or any other / missing) -- ``bty``
             # has nothing to do; let firmware / sanboot handle it.
             plan = {"mode": "local"}
             offer_kind = f"plan:local:{policy}"
@@ -847,7 +844,7 @@ def create_app(
     )
     def pxe_inventory(mac: str, body: _models.InventoryPost, request: Request) -> Response:
         """Receive the per-MAC disk inventory from the live env's
-        bty-tui on startup.
+        ``bty`` on startup.
 
         Open endpoint -- the live env has no operator session.
         Trust model matches the rest of ``/pxe/*``: bty-web is for
@@ -1028,28 +1025,6 @@ def create_app(
             return None
         return str(row["name"])
 
-    def _flash_format_for_ref(ref: str) -> str | None:
-        """Resolve a ``bty_image_ref`` to the entry's declared
-        ``format`` (img.gz / img.zst / qcow2 / ...). Goes onto the
-        ipxe_flash.j2 kernel cmdline as ``bty.image_format=...``
-        so the live env can rename the downloaded file with the
-        right extension before ``bty flash`` runs.
-
-        Returns ``None`` for an orphaned binding (no catalog row)
-        or when the catalog row has no ``format`` field. The iPXE
-        template renders ``None`` as the empty string; bty-flash-
-        on-boot tolerates the absence and falls back to
-        extension-based detection.
-        """
-        with _db.open_db(state_path) as conn:
-            row = conn.execute(
-                "SELECT format FROM catalog_entries WHERE bty_image_ref = ?",
-                (ref,),
-            ).fetchone()
-        if row is None or row["format"] is None:
-            return None
-        return str(row["format"])
-
     def _resolve_image_for_key(key: str) -> Path | None:
         """Resolve a 64-hex key (bty_image_ref or disk_image_sha) to a
         local file path. Triggers eager cache-through if the bound
@@ -1175,7 +1150,7 @@ def create_app(
         ``bty.flash.probe_image_url`` HEADs the URL before
         streaming to learn Content-Length without downloading
         the bytes. Without HEAD support, the server returns
-        405 Method Not Allowed; bty-tui catches that as
+        405 Method Not Allowed; ``bty`` catches that as
         ``URLError`` and surfaces "image URL not reachable" --
         which obscures the actual cause (HEAD blocked).
         Starlette's FileResponse handles HEAD shape (200 +
@@ -1192,11 +1167,11 @@ def create_app(
         """``/images/<sha>/<filename>`` form. The ``key`` (SHA-256)
         binds the bytes; ``name`` is purely decorative -- it lets
         clients that derive image format from URL filename
-        extension (the live env's ``bty-flash-on-boot``,
-        ``bty.flash.probe_image_url``) keep working when bty-web
-        emits SHA-keyed URLs. The server ignores ``name`` for the
-        actual lookup; it's there so ``Path(url.path).name``
-        returns ``foo.img.zst`` instead of a bare 64-hex SHA.
+        extension (``bty.flash.probe_image_url``) keep working
+        when bty-web emits SHA-keyed URLs. The server ignores
+        ``name`` for the actual lookup; it's there so
+        ``Path(url.path).name`` returns ``foo.img.zst`` instead
+        of a bare 64-hex SHA.
 
         HEAD support: see the sibling ``/images/{key}`` route
         for the rationale.
@@ -1345,7 +1320,7 @@ def create_app(
         cached yet. The client just flashes from ``url`` --
         no need to know about manifests, sidecars, or cache.
 
-        Open route: the bty-tui-on-PXE flow needs to enumerate
+        Open route: the PXE-booted ``bty`` flow needs to enumerate
         the catalog without first bootstrapping auth. The
         byte-serving route ``GET /images/{name}`` is already
         open. Same homelab-network trust model as /pxe / /boot.
@@ -1360,10 +1335,10 @@ def create_app(
                 # ``/images/<sha>/<name>``: the SHA binds the
                 # content; the trailing name is decorative so a
                 # client that derives format from URL filename
-                # extension (the live env's bty-flash-on-boot,
-                # ``bty.flash.probe_image_url``) gets ``foo.img.zst``
-                # instead of a bare 64-hex digest. The server
-                # route ignores ``<name>`` for the lookup.
+                # extension (``bty.flash.probe_image_url``) gets
+                # ``foo.img.zst`` instead of a bare 64-hex digest.
+                # The server route ignores ``<name>`` for the
+                # lookup.
                 if u.sha256 is None:
                     continue  # cached + no sha is impossible; defensive
                 # URL-encode the trailing name. Catalog ``name`` is
@@ -1372,9 +1347,9 @@ def create_app(
                 # rejects any URL path that contains a space or
                 # control character (CVE-2019-9740 mitigation), so
                 # an unencoded space here makes a downstream
-                # ``urllib.request.urlopen`` from bty-tui or bty-
-                # flash raise ``InvalidURL`` before the request
-                # ever leaves the box. ``safe=""`` percent-encodes
+                # ``urllib.request.urlopen`` from ``bty`` raise
+                # ``InvalidURL`` before the request ever leaves
+                # the box. ``safe=""`` percent-encodes
                 # every special character (parens, spaces, etc.)
                 # so the URL is reliably valid; the server route
                 # is ``GET /images/{key}/{name:path}`` and only
@@ -1409,7 +1384,7 @@ def create_app(
                 )
             )
         # ``.bri`` (bty Remote Image) descriptors are deliberately
-        # NOT surfaced here. ``.bri`` is the bty-usb / bty-tui ad-hoc
+        # NOT surfaced here. ``.bri`` is the ``bty``-on-USB ad-hoc
         # local-catalog format -- a tiny pointer file an operator
         # drops next to their .img.gz files for quick "flash this
         # URL" workflows. bty-web's catalog model is ref-keyed:
@@ -1428,7 +1403,7 @@ def create_app(
 
         Same set of rows as ``GET /images`` (manifest + dir-scan +
         operator-curated DB entries; ``.bri`` deliberately excluded),
-        but serialised so ``bty-tui --catalog`` clients can consume it
+        but serialised so ``bty --catalog`` clients can consume it
         with the same code path they use for static files hosted on
         e.g. GitHub. Open route, same trust model as ``/images``.
 
@@ -2212,7 +2187,7 @@ def create_app(
         publish_state_changed()
 
     # URL for "Fetch from bty project release" -- mirrors the
-    # ``bty tui`` flow's ``d`` keystroke (loads
+    # ``bty`` wizard's ``d`` keystroke (loads
     # ``releases/latest/download/catalog.toml`` from the bty repo).
     # ``BTY_BOOT_RELEASE_REPO`` is reused as the repo override
     # because the same release page hosts boot artefacts +

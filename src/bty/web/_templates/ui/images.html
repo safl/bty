@@ -9,47 +9,107 @@
     </span>
 </div>
 
+{% with sections=[
+    {"key": "list",            "label": "List",                "icon": "list-ul",       "href": "/ui/images"},
+    {"key": "fetch",           "label": "Fetch default",       "icon": "cloud-download","href": "/ui/images?section=fetch"},
+    {"key": "add-url",         "label": "Add by URL",          "icon": "cloud-plus",    "href": "/ui/images?section=add-url"},
+    {"key": "upload-manifest", "label": "Upload manifest",     "icon": "file-earmark-text", "href": "/ui/images?section=upload-manifest"},
+    {"key": "upload-image",    "label": "Upload image",        "icon": "upload",        "href": "/ui/images?section=upload-image"},
+] %}
+{% include "ui/_subnav.html" %}
+{% endwith %}
+
+{% if section == "fetch" %}
+{# The common-case default: pull the bty project's released
+   catalog.toml in one click. Operators who just want "give me
+   something to flash" land here, click once, get a populated
+   catalog. Custom URLs / uploads are one sub-nav click away. #}
+<div class="card mb-3">
+    <div class="card-header bg-light fw-semibold">
+        <i class="bi bi-cloud-download me-1"></i>Fetch from project release
+    </div>
+    <div class="card-body">
+        <form method="post" action="/ui/catalog/fetch-release">
+            <p class="mb-3">
+                Pulls <code>releases/latest/download/catalog.toml</code> from
+                <a href="https://github.com/{{ release_repo }}/releases/latest"
+                   target="_blank" rel="noopener">{{ release_repo }}</a>
+                and imports its entries into the catalog.
+            </p>
+            <button type="submit" class="btn btn-primary">
+                <i class="bi bi-cloud-download me-1"></i>Fetch latest catalog.toml
+            </button>
+        </form>
+    </div>
+</div>
+
+{% elif section == "add-url" %}
 <div class="card mb-3">
     <div class="card-header bg-light fw-semibold">
         <i class="bi bi-cloud-plus me-1"></i>Add image by URL
     </div>
     <div class="card-body">
         <form method="post" action="/ui/catalog/entries">
-            <div class="row g-2 align-items-end">
-                <div class="col-md-5">
-                    <label for="image_url" class="form-label small mb-1">Image URL or <code>oras://</code> ref</label>
-                    {# type="text" rather than type="url": some browsers
-                       reject non-http schemes (oras://) under HTML5 URL
-                       validation. Server-side Pydantic validation still
-                       runs (regex covers http/https/oras schemes). #}
-                    <input type="text" required class="form-control" id="image_url" name="image_url"
-                           placeholder="https://example.com/ubuntu.img.gz  |  oras://ghcr.io/owner/repo:tag">
-                </div>
-                <div class="col-md-5">
-                    <label for="sha_url" class="form-label small mb-1">SHA URL <span class="text-muted">(optional)</span></label>
-                    <input type="url" class="form-control" id="sha_url" name="sha_url"
-                           placeholder="https://example.com/ubuntu-22.04.img.gz.sha256">
-                </div>
-                <div class="col-md-2">
-                    <button type="submit" class="btn btn-primary w-100">
-                        <i class="bi bi-plus-lg me-1"></i>Add
-                    </button>
+            <div class="mb-3">
+                <label for="image_url" class="form-label">Image URL or <code>oras://</code> ref</label>
+                {# type="text" rather than type="url": some browsers
+                   reject non-http schemes (oras://) under HTML5 URL
+                   validation. Server-side Pydantic validation still
+                   runs (regex covers http/https/oras schemes). #}
+                <input type="text" required class="form-control" id="image_url" name="image_url"
+                       placeholder="https://example.com/ubuntu.img.gz  |  oras://ghcr.io/owner/repo:tag">
+            </div>
+            <div class="mb-3">
+                <label for="sha_url" class="form-label">SHA URL <span class="text-muted">(optional)</span></label>
+                <input type="url" class="form-control" id="sha_url" name="sha_url"
+                       placeholder="https://example.com/ubuntu-22.04.img.gz.sha256">
+                <div class="form-text small">
+                    For <code>http(s)://</code> URLs, providing a SHA URL
+                    (a sha256sum-style manifest) pins the content sha at
+                    add time so cache-through can verify it; without it
+                    the first flash trusts the upstream bytes and
+                    back-fills <code>disk_image_sha</code> with what it
+                    observed. For <code>oras://</code> refs the server
+                    resolves the OCI manifest at add time and uses the
+                    layer's content-addressed digest (SHA URL is
+                    ignored).
                 </div>
             </div>
-            <div class="form-text small mt-2">
-                Image URL is required.
-                For <code>http(s)://</code> URLs, providing a SHA URL (a sha256sum-style manifest)
-                pins the content sha at add time so cache-through can verify it; without it the
-                first flash trusts the upstream bytes and back-fills <code>disk_image_sha</code>
-                with what it observed. Either way the entry is bindable to a machine via its
-                <code>bty_image_ref</code>.
-                For <code>oras://</code> refs the server resolves the OCI manifest at add time and
-                uses the layer's content-addressed digest -- no SHA URL needed (it's ignored).
-            </div>
+            <button type="submit" class="btn btn-primary">
+                <i class="bi bi-plus-lg me-1"></i>Add
+            </button>
         </form>
     </div>
 </div>
 
+{% elif section == "upload-manifest" %}
+<div class="card mb-3">
+    <div class="card-header bg-light fw-semibold">
+        <i class="bi bi-file-earmark-text me-1"></i>Upload catalog manifest
+    </div>
+    <div class="card-body">
+        <form method="post" action="/ui/catalog/upload" enctype="multipart/form-data">
+            <div class="mb-3">
+                <label for="catalog-file" class="form-label">
+                    <code>catalog.toml</code> file
+                </label>
+                <input type="file" required class="form-control" id="catalog-file"
+                       name="file" accept=".toml">
+                <div class="form-text small">
+                    Parses before clobbering an existing manifest -- a
+                    bad upload bounces back with the parse error.
+                    Replaces <code>{{ manifest_path or "${BTY_STATE_DIR}/catalog.toml" }}</code>
+                    and reloads the download manager in-process.
+                </div>
+            </div>
+            <button type="submit" class="btn btn-primary">
+                <i class="bi bi-upload me-1"></i>Upload
+            </button>
+        </form>
+    </div>
+</div>
+
+{% elif section == "upload-image" %}
 <div class="card mb-3">
     <div class="card-header bg-light fw-semibold">
         <i class="bi bi-upload me-1"></i>Upload image file
@@ -58,79 +118,27 @@
         {# Streams the file via XHR PUT to /images/<name> -- the
            existing API endpoint that takes ``application/octet-
            stream``. JS handles progress + auth (cookie, same-
-           origin); on success we reload so the new file shows
-           up in the catalog table below. The HashManager picks
-           up the upload via PUT /images/<name>'s post-write
-           hook (auto-enqueue), so a SHA appears in seconds. #}
-        <div class="row g-2 align-items-end">
-            <div class="col-md-9">
-                <label for="upload-file" class="form-label small mb-1">Local image file</label>
-                <input type="file" class="form-control" id="upload-file"
-                       accept=".qcow2,.img,.img.zst,.img.xz,.img.gz,.img.bz2,.iso,.iso.gz">
-            </div>
-            <div class="col-md-3">
-                <button type="button" class="btn btn-primary w-100" id="upload-btn"
-                        onclick="uploadSelectedFile();" disabled>
-                    <i class="bi bi-upload me-1"></i>Upload
-                </button>
-            </div>
+           origin); on success we redirect back to the list so the
+           new file shows up. The HashManager picks up the upload
+           via PUT /images/<name>'s post-write hook (auto-enqueue),
+           so a SHA appears in seconds. #}
+        <div class="mb-3">
+            <label for="upload-file" class="form-label">Local image file</label>
+            <input type="file" class="form-control" id="upload-file"
+                   accept=".qcow2,.img,.img.zst,.img.xz,.img.gz,.img.bz2,.iso,.iso.gz">
         </div>
-        <div class="progress mt-2 d-none" id="upload-progress" style="height: 1.25rem;">
+        <button type="button" class="btn btn-primary" id="upload-btn"
+                onclick="uploadSelectedFile();" disabled>
+            <i class="bi bi-upload me-1"></i>Upload
+        </button>
+        <div class="progress mt-3 d-none" id="upload-progress" style="height: 1.25rem;">
             <div class="progress-bar progress-bar-striped progress-bar-animated"
                  role="progressbar" style="width: 0%;" id="upload-progress-bar">0%</div>
         </div>
         <div class="form-text small mt-2" id="upload-status">
-            Pick a file -- it streams directly into the image root via
+            Streams directly into the image root via
             <code>PUT /images/&lt;name&gt;</code>. SHA-256 is auto-computed
             in the background after upload completes.
-        </div>
-    </div>
-</div>
-
-<div class="card mb-3">
-    <div class="card-header bg-light fw-semibold">
-        <i class="bi bi-file-earmark-text me-1"></i>Catalog manifest
-        <small class="text-muted ms-2">
-            replaces <code>{{ manifest_path or "${BTY_STATE_DIR}/catalog.toml" }}</code>;
-            reloads the download manager in-process
-        </small>
-    </div>
-    <div class="card-body">
-        <div class="row g-3">
-            <div class="col-md-6">
-                <form method="post" action="/ui/catalog/upload" enctype="multipart/form-data">
-                    <label for="catalog-file" class="form-label small mb-1">
-                        Upload <code>catalog.toml</code>
-                    </label>
-                    <div class="input-group">
-                        <input type="file" required class="form-control" id="catalog-file"
-                               name="file" accept=".toml">
-                        <button type="submit" class="btn btn-primary">
-                            <i class="bi bi-upload me-1"></i>Upload
-                        </button>
-                    </div>
-                    <div class="form-text small">
-                        Parses before clobbering an existing manifest -- a bad upload bounces
-                        back with the parse error.
-                    </div>
-                </form>
-            </div>
-            <div class="col-md-6">
-                <form method="post" action="/ui/catalog/fetch-release">
-                    <label class="form-label small mb-1">Fetch from project release</label>
-                    <div>
-                        <button type="submit" class="btn btn-outline-primary">
-                            <i class="bi bi-cloud-download me-1"></i>Fetch latest
-                            <code class="ms-1">catalog.toml</code>
-                        </button>
-                    </div>
-                    <div class="form-text small">
-                        Pulls <code>releases/latest/download/catalog.toml</code> from
-                        <a href="https://github.com/{{ release_repo }}/releases/latest"
-                           target="_blank" rel="noopener">{{ release_repo }}</a>.
-                    </div>
-                </form>
-            </div>
         </div>
     </div>
 </div>
@@ -139,6 +147,7 @@
     (function () {
         var input = document.getElementById("upload-file");
         var btn = document.getElementById("upload-btn");
+        if (!input || !btn) return;
         input.addEventListener("change", function () {
             btn.disabled = !input.files || input.files.length === 0;
         });
@@ -168,8 +177,8 @@
         };
         xhr.onload = function () {
             if (xhr.status >= 200 && xhr.status < 300) {
-                status.textContent = "Upload complete; reloading catalog...";
-                setTimeout(function () { window.location.reload(); }, 600);
+                status.textContent = "Upload complete; redirecting to catalog...";
+                setTimeout(function () { window.location = "/ui/images"; }, 600);
             } else {
                 status.textContent = "Upload failed: HTTP " + xhr.status + " " + xhr.responseText;
                 btn.disabled = false;
@@ -190,14 +199,20 @@
     }
 </script>
 
+{% else %}
+{# section == "list" (default): the OBSERVABLE state of the catalog
+   plus the live downloads + hashes panes. This is what an operator
+   wants to see when they click "Images" in the top nav. Adding
+   things is one sub-nav click away (above). #}
 {% if not unified %}
 <div class="alert alert-light border">
     <i class="bi bi-info-circle me-2"></i>
-    No images yet. Add one with the form above, drop a
-    <code>.qcow2</code> / <code>.img</code> / <code>.img.zst</code> /
-    <code>.img.xz</code> / <code>.img.gz</code> / <code>.img.bz2</code> file
-    under <code>{{ image_root }}</code>, or author a <code>catalog.toml</code>
-    manifest. Refresh the page after either to see them here.
+    No images yet. The fastest way to populate: click
+    <a href="/ui/images?section=fetch">Fetch default</a> to pull the
+    project's release catalog. Or drop a <code>.qcow2</code> /
+    <code>.img</code> / <code>.img.zst</code> / <code>.img.xz</code>
+    / <code>.img.gz</code> / <code>.img.bz2</code> file under
+    <code>{{ image_root }}</code> and refresh.
 </div>
 {% else %}
 
@@ -312,12 +327,7 @@
                            ``manifest`` or ``url``-kind source (i.e.
                            everything except local-only dir-scan rows,
                            where the right delete action is to remove
-                           the underlying file). For manifest entries
-                           that came from a catalog.toml, deleting the
-                           DB row will only stick until the next
-                           manifest reload; the operator's right path
-                           in that case is to upload a smaller
-                           catalog.toml via the "Upload" form above. #}
+                           the underlying file). #}
                         {% if has_remote %}
                         {% set entry_src = u.sources|selectattr('kind','in',['manifest','url'])|map(attribute='location')|first %}
                         <button type="button"
@@ -633,11 +643,6 @@
                     window.location.reload();
                     return;
                 }
-                // Server refused (e.g. 409 when the entry is sourced
-                // from the static catalog manifest -- deleting the
-                // DB row would just re-appear on the next render).
-                // Surface the server's error message so the operator
-                // sees WHY the click looked like a no-op.
                 resp.text().then(function (body) {
                     var msg;
                     try {
@@ -677,13 +682,14 @@
     startPolling();
 })();
 </script>
-
+{% endif %}
 {% endif %}
 
 {# Image-relevant event slice (uploads, hashes, catalog adds /
    deletes). The /ui/events drill-down filters to subject_kind=
    image; catalog rows are picked up via the broader filter at
-   /ui/events itself. #}
+   /ui/events itself. Shown on every section so an operator
+   doing an upload sees the recent activity context. #}
 {% with events=image_events,
         title="Recent image-catalog activity",
         link_to_full="/ui/events?subject_kind=image" %}

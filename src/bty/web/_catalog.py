@@ -20,8 +20,7 @@ leaves no file).
 
 Module is layered on top of ``bty.catalog``: this file holds the
 async + state machinery, ``bty.catalog`` holds the byte-pumping +
-SHA verification. Keeps the CLI path (``bty catalog fetch``) free
-of any asyncio dependency.
+SHA verification.
 
 Lifecycle plumbing lives in :class:`bty.web._jobs._BaseAsyncManager`.
 """
