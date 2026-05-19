@@ -57,16 +57,15 @@
         .navbar-brand .brand-icon {
             /* The bty bat mascot, used in place of a Bootstrap icon
                so the brand pill reads as "this product" rather than
-               "some generic networking thing". Sized by height to
-               align with the badge / nav-btn baseline; ``width: auto``
-               so the aspect ratio of whatever PNG is currently
-               vendored under /static/bty-favicon.png is preserved.
-               The art has been swapped at different aspect ratios
-               over time (1:1, 3:2, ~1.46:1); the layout
-               accommodates all of them without hardcoded width. */
-            height: 1.1rem;
+               "some generic networking thing". Height matches the
+               nav-btn ``<i>`` font-size below (1.05rem) so the
+               mascot reads as the same visual weight as the nav-btn
+               icons (Machines, Images, ...). ``width: auto``
+               preserves the aspect ratio of whichever PNG is
+               vendored under /static/bty-favicon.png. */
+            height: 1.05rem;
             width: auto;
-            vertical-align: -0.2rem;
+            vertical-align: -0.15rem;
         }
         .navbar .nav-btn {
             display: inline-flex;
