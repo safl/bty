@@ -125,3 +125,7 @@ bty-media/live-build/config/includes.chroot/opt/bty/bty_lab-*.whl
 # read uv.lock. The file gets created if someone runs 'uv run --project
 # ./docs/tooling' for ad-hoc dev; we don't track it.
 docs/tooling/uv.lock
+
+# Claude Code's per-project state directory (scheduled-task lock,
+# permission settings). Local to each developer's environment.
+.claude/
