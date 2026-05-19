@@ -657,6 +657,50 @@ def test_pydantic_models_have_docstrings() -> None:
 # ----------------------------------------------------------------------
 
 
+def test_every_ui_page_uses_the_intro_box_partial() -> None:
+    """Every operator-facing /ui page (dashboard / machines /
+    images / boot / events / settings) renders its intro
+    paragraph through the shared ``ui/_intro_box.html`` partial
+    rather than open-coding the ``alert alert-info ...`` DOM.
+
+    Pinning the contract here means a future page that lands a
+    bespoke info-box can't drift from the canonical styling --
+    the test fails CI when the partial isn't used, prompting
+    the author to either import the macro or extend the
+    partial (e.g. with a colour variant) intentionally.
+    """
+    ui_dir = REPO_ROOT / "src" / "bty" / "web" / "_templates" / "ui"
+    pages = (
+        "dashboard.html",
+        "machines.html",
+        "images.html",
+        "boot.html",
+        "events.html",
+        "settings.html",
+    )
+    intro_box_import = '_intro_box.html" import render as intro_box'
+    bare_alert_info = 'class="alert alert-info'
+    missing = []
+    open_coded = []
+    for name in pages:
+        body = (ui_dir / name).read_text()
+        if "{% block intro %}" not in body:
+            continue  # page deliberately has no intro
+        if intro_box_import not in body:
+            missing.append(name)
+        if bare_alert_info in body:
+            open_coded.append(name)
+    assert not missing, (
+        f"pages with an intro block but not using ``_intro_box.html``: {missing}. "
+        f"Either import the partial or remove the intro block."
+    )
+    assert not open_coded, (
+        f"pages still open-code an ``alert alert-info`` div instead of "
+        f"calling the partial: {open_coded}. Migrate to "
+        f"``{{% call intro_box() %}}...{{% endcall %}}``."
+    )
+
+
 def test_bty_web_help_documents_every_env_var() -> None:
     """Every ``BTY_*`` env var that ``bty.web.main()`` reads from
     ``os.environ`` must be documented in the argparse description

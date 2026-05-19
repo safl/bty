@@ -16,16 +16,14 @@
 {% endblock %}
 
 {% block intro %}
-<div class="alert alert-info d-flex align-items-start mb-3" role="status">
-    <i class="bi bi-info-circle me-2 mt-1 flex-shrink-0" aria-hidden="true"></i>
-    <div>
-        The known fleet, keyed by MAC. Each row carries an optional
-        image binding, target-disk pin, and boot policy. Machines
-        auto-appear on first PXE contact; explicitly add via
-        <a href="/ui/machines?section=add">Add by MAC</a> to stage
-        an image + policy before the box has even booted.
-    </div>
-</div>
+{% from "ui/_intro_box.html" import render as intro_box %}
+{% call intro_box() %}
+    The known fleet, keyed by MAC. Each row carries an optional
+    image binding, target-disk pin, and boot policy. Machines
+    auto-appear on first PXE contact; explicitly add via
+    <a href="/ui/machines?section=add">Add by MAC</a> to stage
+    an image + policy before the box has even booted.
+{% endcall %}
 {% endblock %}
 
 {% block content %}

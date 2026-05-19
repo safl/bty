@@ -8,14 +8,12 @@
 {% endblock %}
 
 {% block intro %}
-<div class="alert alert-info d-flex align-items-start mb-3" role="status">
-    <i class="bi bi-info-circle me-2 mt-1 flex-shrink-0" aria-hidden="true"></i>
-    <div>
-        Operator-account info for the logged-in user. PXE / Netboot
-        configuration (router cheatsheet + TFTP daemon control)
-        lives on the <a href="/ui/boot">Netboot</a> page.
-    </div>
-</div>
+{% from "ui/_intro_box.html" import render as intro_box %}
+{% call intro_box() %}
+    Operator-account info for the logged-in user. PXE / Netboot
+    configuration (router cheatsheet + TFTP daemon control)
+    lives on the <a href="/ui/boot">Netboot</a> page.
+{% endcall %}
 {% endblock %}
 
 {% block content %}

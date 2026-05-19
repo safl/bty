@@ -14,17 +14,15 @@
 {% endblock %}
 
 {% block intro %}
-<div class="alert alert-info d-flex align-items-start mb-3" role="status">
-    <i class="bi bi-info-circle me-2 mt-1 flex-shrink-0" aria-hidden="true"></i>
-    <div>
-        The bty live env that PXE clients chain into when their
-        assignment has <code>boot_policy=flash</code>. Until these
-        files are present, machines with <code>boot_policy=flash</code>
-        cannot actually flash. Click
-        <a href="/ui/boot?section=fetch">Fetch latest release</a>
-        to populate.
-    </div>
-</div>
+{% from "ui/_intro_box.html" import render as intro_box %}
+{% call intro_box() %}
+    The bty live env that PXE clients chain into when their
+    assignment has <code>boot_policy=flash</code>. Until these
+    files are present, machines with <code>boot_policy=flash</code>
+    cannot actually flash. Click
+    <a href="/ui/boot?section=fetch">Fetch netboot artifacts</a>
+    to populate.
+{% endcall %}
 {% endblock %}
 
 {% block content %}

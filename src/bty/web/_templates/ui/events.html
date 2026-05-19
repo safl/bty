@@ -9,15 +9,13 @@
 {% endblock %}
 
 {% block intro %}
-<div class="alert alert-info d-flex align-items-start mb-3" role="status">
-    <i class="bi bi-info-circle me-2 mt-1 flex-shrink-0" aria-hidden="true"></i>
-    <div>
-        Append-only audit trail of operator + machine activity:
-        PXE check-ins, image uploads, catalog edits, settings
-        changes, auth attempts. Filter by kind / subject / actor /
-        source IP via the form below. Newest first.
-    </div>
-</div>
+{% from "ui/_intro_box.html" import render as intro_box %}
+{% call intro_box() %}
+    Append-only audit trail of operator + machine activity:
+    PXE check-ins, image uploads, catalog edits, settings
+    changes, auth attempts. Filter by kind / subject / actor /
+    source IP via the form below. Newest first.
+{% endcall %}
 {% endblock %}
 
 {% block content %}

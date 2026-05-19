@@ -1,0 +1,15 @@
+{# Intro info-box partial. Pages set ``caller()`` body via
+   ``{% call render() %}<copy here>{% endcall %}`` -- the partial
+   wraps it in the standard ``alert alert-info`` styling so all
+   per-page intros render identically.
+
+   Used by every operator-facing /ui page that needs a one-
+   paragraph section description below the navbars and above the
+   content. Consolidates 5+ copies of the same DOM shape.
+#}
+{% macro render() %}
+<div class="alert alert-info d-flex align-items-start mb-3" role="status">
+    <i class="bi bi-info-circle me-2 mt-1 flex-shrink-0" aria-hidden="true"></i>
+    <div>{{ caller() }}</div>
+</div>
+{% endmacro %}

@@ -15,19 +15,17 @@
 {% endblock %}
 
 {% block intro %}
-<div class="alert alert-info d-flex align-items-start mb-3" role="status">
-    <i class="bi bi-info-circle me-2 mt-1 flex-shrink-0" aria-hidden="true"></i>
-    <div>
-        Pre-built system images bty flashes onto target disks.
-        Populate via <a href="/ui/images?section=fetch">Fetch
-        catalog</a> to pull the bty release catalog, paste an image
-        / oras URL, upload a catalog file, or drop files directly
-        into <code>{{ image_root }}</code>. Entries are content-
-        addressed: bty refuses to flash an entry whose sha hasn't
-        been computed yet (the background hash worker picks new
-        files up automatically).
-    </div>
-</div>
+{% from "ui/_intro_box.html" import render as intro_box %}
+{% call intro_box() %}
+    Pre-built system images bty flashes onto target disks.
+    Populate via <a href="/ui/images?section=fetch">Fetch
+    catalog</a> to pull the bty release catalog, paste an image
+    / oras URL, upload a catalog file, or drop files directly
+    into <code>{{ image_root }}</code>. Entries are content-
+    addressed: bty refuses to flash an entry whose sha hasn't
+    been computed yet (the background hash worker picks new
+    files up automatically).
+{% endcall %}
 {% endblock %}
 
 {% block content %}
