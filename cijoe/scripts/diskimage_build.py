@@ -49,14 +49,35 @@ _DOWNLOAD_BACKOFF_S = (5, 15, 45)
 def _download_with_retry(url: str, dst: Path) -> int:
     """Wrap :func:`cijoe.core.misc.download` with bounded retry.
 
-    Returns the same error code shape (0 / non-zero) as ``download``.
-    Cleans a partial destination between attempts so ``download``'s
-    own existence check doesn't short-circuit a retry with corrupt
-    bytes from the previous failure.
+    cijoe's ``download`` has two failure modes we have to handle
+    separately:
+
+    * Soft failures (e.g. non-2xx HTTP status) come back as a
+      non-zero ``err`` in the ``(err, _)`` tuple.
+    * Hard failures (the TCP connection reset mid-stream that
+      Debian's cloud-image mirror periodically inflicts during
+      release windows) raise ``requests.exceptions.ConnectionError``
+      out of ``download``. The CI traceback in v0.22.12 was
+      precisely this: ``RemoteDisconnected`` -> ``ConnectionError``
+      escaping past the original retry loop.
+
+    Both shapes are retried up to ``_DOWNLOAD_RETRIES`` times with
+    escalating backoff. Returns 0 on success or an ``errno.EIO``-ish
+    code if all attempts failed. Partial destination bytes are
+    unlinked between attempts so ``download``'s own existence-check
+    short-circuit doesn't fire on a corrupt partial.
     """
+    # Pulled in lazily so this module still imports in environments
+    # that lack ``requests`` (the cijoe distribution provides it).
+    import requests.exceptions as _req_exc
+
     last_err = errno.EIO
     for attempt in range(_DOWNLOAD_RETRIES):
-        err, _ = download(url, dst)
+        try:
+            err, _ = download(url, dst)
+        except (_req_exc.ConnectionError, _req_exc.ChunkedEncodingError, OSError) as exc:
+            err = errno.EIO
+            log.warning(f"download {url} raised {type(exc).__name__}: {exc}")
         if not err:
             return 0
         last_err = err
