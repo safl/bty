@@ -674,8 +674,8 @@ def merge_with_catalog(
 
     # Stable order: first by content-sha-presence (so sha-pinned
     # entries land before unhashed ones, matching the prior
-    # behaviour the UI / CLI expect), then by first name within
-    # each bucket.
+    # behaviour the UI and ``bty`` wizard expect), then by first
+    # name within each bucket.
     unique = list(by_ref.values())
     with_sha = sorted((u for u in unique if u.sha256 is not None), key=lambda u: u.names[0])
     without_sha = sorted((u for u in unique if u.sha256 is None), key=lambda u: u.names[0])

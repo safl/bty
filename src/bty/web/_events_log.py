@@ -80,12 +80,13 @@ def normalize_ip(host: str | None) -> str | None:
 
 # Catalogue of every ``kind`` value the rest of bty-web is allowed
 # to pass to :func:`record`. Owned here so the callsites (in
-# ``_app.py`` / ``_task.py`` / ``_ui.py``) and the ``/ui/events``
-# filter dropdown share one source. Adding a new event class is a
-# two-step change: append a constant here, then use it at the
-# callsite. :func:`record` no-ops the runtime check when a kind is
-# not in this set -- the goal is centralisation, not enforcement;
-# we don't want a typo in a logging call to crash a request flow.
+# ``_app.py`` / ``_ui.py`` / the job managers under :mod:`._jobs`)
+# and the ``/ui/events`` filter dropdown share one source. Adding
+# a new event class is a two-step change: append a constant here,
+# then use it at the callsite. :func:`record` no-ops the runtime
+# check when a kind is not in this set -- the goal is
+# centralisation, not enforcement; we don't want a typo in a logging
+# call to crash a request flow.
 KNOWN_EVENT_KINDS: tuple[str, ...] = (
     "machine.discovered",
     "machine.created",

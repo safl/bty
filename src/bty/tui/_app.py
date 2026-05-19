@@ -411,9 +411,12 @@ def _list_disks() -> list[dict[str, Any]]:
 class BtyTui:
     """The bty terminal UI -- Rich-based, no event loop.
 
-    ``run()`` is the entry point. The wizard advances through four
-    stages (SELECT_IMAGE, SELECT_DISK, CONFIRM_FLASH,
-    REBOOT_OR_DONE) until the operator quits.
+    ``run()`` is the entry point. The wizard advances through five
+    stages (SELECT_CATALOG, SELECT_IMAGE, SELECT_DISK, CONFIRM_FLASH,
+    REBOOT_OR_DONE) until the operator quits. ``SELECT_CATALOG`` is
+    auto-skipped at launch when ``--catalog`` was passed or the local
+    image-root already has images; see :class:`_WizardStage` for the
+    derivation rules.
 
     Each screen is a method that renders + prompts + returns a
     string token. The dispatcher uses the token to advance, back,

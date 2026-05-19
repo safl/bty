@@ -40,8 +40,9 @@ class MachineEventBus:
     ``publish`` may be called from any thread. ``attach`` captures the
     asyncio loop the SSE consumers are running on; thereafter,
     cross-thread publishes hop through ``call_soon_threadsafe`` to
-    deliver into ``asyncio.Queue`` safely. Task-runner threads in
-    :mod:`bty.web._task` rely on this.
+    deliver into ``asyncio.Queue`` safely. The worker threads in
+    :mod:`bty.web._jobs` (catalog / hash / release managers) rely
+    on this.
     """
 
     def __init__(self, *, queue_size: int = 64) -> None:
