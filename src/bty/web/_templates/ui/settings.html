@@ -1,6 +1,26 @@
 {% extends "ui/_layout.html" %}
 {% block title %}Settings - bty-web{% endblock %}
 
+{% block subnav %}
+{% with sections=None %}
+{% include "ui/_subnav.html" %}
+{% endwith %}
+{% endblock %}
+
+{% block intro %}
+<div class="alert alert-info d-flex align-items-start mb-3" role="status">
+    <i class="bi bi-info-circle me-2 mt-1 flex-shrink-0" aria-hidden="true"></i>
+    <div>
+        Auth credentials, PXE / network-boot configuration pointers
+        the operator needs to point their LAN DHCP server at this
+        appliance, and the TFTP daemon's runtime state. Most knobs
+        are surfaced as references rather than editable fields --
+        bty's persistent config lives in env vars and the image
+        builder, not in a settings DB.
+    </div>
+</div>
+{% endblock %}
+
 {% block content %}
 {# Hoisted once: ``primary`` is the first listed non-loopback
    interface, used by the router-config cheatsheet to suggest
@@ -52,7 +72,7 @@
                 kernel fetch until these files are present.
             </div>
             <a href="/ui/boot" class="btn btn-sm btn-outline-warning ms-3 flex-shrink-0">
-                <i class="bi bi-arrow-right-circle me-1"></i>Boot artifacts
+                <i class="bi bi-arrow-right-circle me-1"></i>Netboot artifacts
             </a>
         </div>
         {% endif %}

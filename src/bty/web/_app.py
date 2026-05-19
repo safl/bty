@@ -2265,19 +2265,24 @@ def create_app(
                 "/ui/images?error=" + urllib.parse.quote("upload was empty", safe=""),
                 status_code=status.HTTP_303_SEE_OTHER,
             )
-        # Parse + import each entry into the ``catalog_entries`` DB.
-        # The uploaded TOML is treated purely as an IMPORT SOURCE --
-        # we don't write it to disk or keep it as a live overlay.
-        # The DB is the authoritative catalog; idempotent INSERT
-        # (UNIQUE on src) means re-uploading is safe.
+        # Parse the uploaded TOML and import each entry into the
+        # ``catalog_entries`` DB so the table on /ui/images picks
+        # the rows up. Also persist the bytes to ``manifest_path``
+        # and reload the in-process catalog so the DownloadManager
+        # binds to it -- without that step the "Fetch" buttons on
+        # the resulting rows fall through to ``/catalog/downloads``
+        # and get a 404 "no catalog manifest configured".
         try:
             parsed = _catalog.load_bytes(content, source="<upload>")
         except _catalog.CatalogError as exc:
             return RedirectResponse(
-                "/ui/images?error=" + urllib.parse.quote(f"manifest parse failed: {exc}", safe=""),
+                "/ui/images?error=" + urllib.parse.quote(f"catalog parse failed: {exc}", safe=""),
                 status_code=status.HTTP_303_SEE_OTHER,
             )
         _import_parsed_catalog(parsed, source="<upload>", source_ip=_client_ip(request))
+        manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        manifest_path.write_bytes(content)
+        await _reload_catalog_from_disk()
         return RedirectResponse("/ui/images", status_code=status.HTTP_303_SEE_OTHER)
 
     @app.post(
@@ -2338,15 +2343,19 @@ def create_app(
         except _catalog.CatalogError as exc:
             return RedirectResponse(
                 "/ui/images?error="
-                + urllib.parse.quote(f"fetched manifest parse failed: {exc}", safe=""),
+                + urllib.parse.quote(f"fetched catalog parse failed: {exc}", safe=""),
                 status_code=status.HTTP_303_SEE_OTHER,
             )
-        # Fetched catalog.toml is treated as an IMPORT SOURCE -- we
-        # don't write it to disk or keep it as a live overlay. The
-        # ``catalog_entries`` DB is the authoritative catalog;
-        # idempotent INSERT means re-fetching the same release adds
-        # any new entries without disturbing what's already there.
+        # Import rows into the ``catalog_entries`` DB AND persist
+        # the bytes to ``manifest_path`` + reload, so the
+        # DownloadManager binds and the "Fetch" buttons on the
+        # imported rows actually work. Without the write+reload,
+        # ``POST /catalog/downloads`` 404s with "no catalog
+        # configured" right after a successful import.
         _import_parsed_catalog(parsed, source=_BTY_RELEASE_CATALOG_URL, source_ip=None)
+        manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        manifest_path.write_bytes(content)
+        await _reload_catalog_from_disk()
         return RedirectResponse("/ui/images", status_code=status.HTTP_303_SEE_OTHER)
 
     @app.get("/catalog/downloads")

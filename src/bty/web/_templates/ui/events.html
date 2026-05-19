@@ -1,8 +1,23 @@
 {% extends "ui/_layout.html" %}
 {% block title %}Event log - bty-web{% endblock %}
 
+{% block subnav %}
+{% set right_html %}<span class="text-muted small">{{ events|length }} on this page</span>{% endset %}
+{% with sections=[{"key": "list", "label": "List", "icon": "list-ul", "href": "/ui/events"}], active="list", right_html=right_html %}
+{% include "ui/_subnav.html" %}
+{% endwith %}
+{% endblock %}
+
 {% block intro %}
-<p class="text-muted small mb-3">Slim audit trail of operator + machine activity.</p>
+<div class="alert alert-info d-flex align-items-start mb-3" role="status">
+    <i class="bi bi-info-circle me-2 mt-1 flex-shrink-0" aria-hidden="true"></i>
+    <div>
+        Append-only audit trail of operator + machine activity:
+        PXE check-ins, image uploads, catalog edits, settings
+        changes, auth attempts. Filter by kind / subject / actor /
+        source IP via the form below. Newest first.
+    </div>
+</div>
 {% endblock %}
 
 {% block content %}

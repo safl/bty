@@ -451,7 +451,7 @@ def register_ui_routes(
           catalog.toml (the common-case default for populating).
         * ``?section=add-url``: form to add by http(s):// or
           oras:// URL.
-        * ``?section=upload-manifest``: file picker for a
+        * ``?section=upload-catalog``: file picker for a
           ``catalog.toml`` upload.
         * ``?section=upload-image``: file picker for streaming an
           image into the image root.
@@ -467,7 +467,7 @@ def register_ui_routes(
         unified = list_unified_images() if list_unified_images is not None else []
         flash = request.query_params.get("error")
         section = request.query_params.get("section") or "list"
-        if section not in ("list", "fetch", "add-url", "upload-manifest", "upload-image"):
+        if section not in ("list", "fetch", "add-url", "upload-catalog", "upload-image"):
             section = "list"
         # Catalog manifest path + release repo for the "Catalog
         # manifest" card. The path mirrors the resolution in

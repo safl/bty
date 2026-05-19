@@ -24,9 +24,10 @@
    for screen readers; ``aria-current="page"`` on the active <a>
    tells assistive tech which sub-section is currently visible.
 #}
-<nav class="navbar subnav-strip py-2"
+<nav class="navbar subnav-strip py-1"
      aria-label="Section sub-navigation">
     <div class="container">
+        {% if sections %}
         <ul class="nav nav-pills me-auto">
             {% for s in sections %}
             <li class="nav-item">
@@ -38,6 +39,12 @@
             </li>
             {% endfor %}
         </ul>
+        {% else %}
+        {# No sub-sections on this page; the strip still renders
+           (the user wants the chrome to stay consistent across
+           pages so transitions don't reflow the header). #}
+        <span class="me-auto"></span>
+        {% endif %}
         {% if right_html %}<div class="ms-auto">{{ right_html|safe }}</div>{% endif %}
     </div>
 </nav>

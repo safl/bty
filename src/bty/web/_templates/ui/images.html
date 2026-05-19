@@ -7,11 +7,27 @@
     {"key": "list",            "label": "List",                "icon": "list-ul",       "href": "/ui/images"},
     {"key": "fetch",           "label": "Fetch default",       "icon": "cloud-download","href": "/ui/images?section=fetch"},
     {"key": "add-url",         "label": "Add by URL",          "icon": "cloud-plus",    "href": "/ui/images?section=add-url"},
-    {"key": "upload-manifest", "label": "Upload manifest",     "icon": "file-earmark-text", "href": "/ui/images?section=upload-manifest"},
+    {"key": "upload-catalog",  "label": "Upload catalog",      "icon": "file-earmark-text", "href": "/ui/images?section=upload-catalog"},
     {"key": "upload-image",    "label": "Upload image",        "icon": "upload",        "href": "/ui/images?section=upload-image"},
 ] , active=section, right_html=right_html %}
 {% include "ui/_subnav.html" %}
 {% endwith %}
+{% endblock %}
+
+{% block intro %}
+<div class="alert alert-info d-flex align-items-start mb-3" role="status">
+    <i class="bi bi-info-circle me-2 mt-1 flex-shrink-0" aria-hidden="true"></i>
+    <div>
+        Pre-built system images bty flashes onto target disks.
+        Populate via <a href="/ui/images?section=fetch">Fetch default</a>
+        to pull the bty release catalog, paste an image / oras URL,
+        upload a catalog file, or drop files directly into
+        <code>{{ image_root }}</code>. Entries are content-addressed:
+        bty refuses to flash an entry whose sha hasn't been computed
+        yet -- the background hash worker picks new files up
+        automatically.
+    </div>
+</div>
 {% endblock %}
 
 {% block content %}
@@ -78,10 +94,10 @@
     </div>
 </div>
 
-{% elif section == "upload-manifest" %}
+{% elif section == "upload-catalog" %}
 <div class="card mb-3">
     <div class="card-header bg-light fw-semibold">
-        <i class="bi bi-file-earmark-text me-1"></i>Upload catalog manifest
+        <i class="bi bi-file-earmark-text me-1"></i>Upload catalog
     </div>
     <div class="card-body">
         <form method="post" action="/ui/catalog/upload" enctype="multipart/form-data">
@@ -92,7 +108,7 @@
                 <input type="file" required class="form-control" id="catalog-file"
                        name="file" accept=".toml">
                 <div class="form-text small">
-                    Parses before clobbering an existing manifest -- a
+                    Parses before clobbering the existing catalog -- a
                     bad upload bounces back with the parse error.
                     Replaces <code>{{ manifest_path or "${BTY_STATE_DIR}/catalog.toml" }}</code>
                     and reloads the download manager in-process.

@@ -1,13 +1,23 @@
 {% extends "ui/_layout.html" %}
 {% block title %}Dashboard - bty-web{% endblock %}
 
+{% block subnav %}
+{% set right_html %}<span class="live-indicator text-muted small" title="Live-updating via Server-Sent Events"><i class="bi bi-broadcast text-success me-1"></i>live</span>{% endset %}
+{% with sections=None, right_html=right_html %}
+{% include "ui/_subnav.html" %}
+{% endwith %}
+{% endblock %}
+
 {% block intro %}
-<p class="live-indicator text-muted small mb-3"
-   title="Live-updating via Server-Sent Events">
-    <i class="bi bi-broadcast text-success me-1"></i>
-    Fleet overview, live -- counters and recent activity update
-    on every machine mutation, image upload, or PXE contact.
-</p>
+<div class="alert alert-info d-flex align-items-start mb-3" role="status">
+    <i class="bi bi-info-circle me-2 mt-1 flex-shrink-0" aria-hidden="true"></i>
+    <div>
+        Fleet overview. Counters and recent activity update live as
+        machines check in via PXE, operators bind catalog entries to
+        MACs, image uploads complete, and target boxes signal
+        flash-done. Drill into any count to see the underlying rows.
+    </div>
+</div>
 {% endblock %}
 
 {% block content %}

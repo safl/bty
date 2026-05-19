@@ -1,5 +1,5 @@
 {% extends "ui/_layout.html" %}
-{% block title %}Boot artifacts - bty-web{% endblock %}
+{% block title %}Netboot artifacts - bty-web{% endblock %}
 
 {% block subnav %}
 {% set right_html %}<span class="text-muted small"><code>{{ boot_root }}</code></span>{% endset %}
@@ -9,6 +9,20 @@
 ] , active=section, right_html=right_html %}
 {% include "ui/_subnav.html" %}
 {% endwith %}
+{% endblock %}
+
+{% block intro %}
+<div class="alert alert-info d-flex align-items-start mb-3" role="status">
+    <i class="bi bi-info-circle me-2 mt-1 flex-shrink-0" aria-hidden="true"></i>
+    <div>
+        The bty live env that PXE clients chain into when their
+        assignment has <code>boot_policy=flash</code>. Until these
+        files are present, machines with <code>boot_policy=flash</code>
+        cannot actually flash. Click
+        <a href="/ui/boot?section=fetch">Fetch latest release</a>
+        to populate.
+    </div>
+</div>
 {% endblock %}
 
 {% block content %}
@@ -75,13 +89,6 @@
    fetch table. Operators land on the OBSERVABLE boot state when
    they click "Boot" in the top nav. The single Fetch flow is one
    sub-nav click away. #}
-<p class="text-muted">
-    The bty live env that PXE clients chain into when their assignment has
-    <code>boot_policy=flash</code>. Until these files are present, machines with
-    <code>boot_policy=flash</code> cannot actually flash. Click
-    <a href="/ui/boot?section=fetch">Fetch latest release</a> to populate.
-</p>
-
 <div class="card mb-4">
     <div class="table-responsive">
         <table class="table mb-0 align-middle">
