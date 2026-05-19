@@ -54,7 +54,26 @@ def main(argv: list[str] | None = None) -> None:
     """
     parser = argparse.ArgumentParser(
         prog="bty-web",
-        description="bty-web - HTTP server with browser UI for fleet image flashing",
+        description=(
+            "bty-web -- HTTP server with browser UI for fleet image flashing.\n\n"
+            "All runtime configuration is read from the environment so the\n"
+            "appliance's systemd unit (and the bty-web container) can supply\n"
+            "values without command-line plumbing:\n\n"
+            "  BTY_WEB_HOST          bind address (default 0.0.0.0)\n"
+            "  BTY_WEB_PORT          bind port (default 8080; clamped to 1-65535)\n"
+            "  BTY_STATE_DIR         state directory holding state.db / cache /\n"
+            "                        session-secret (default /var/lib/bty)\n"
+            "  BTY_IMAGE_ROOT        directory of operator-uploaded images\n"
+            "                        (default <BTY_STATE_DIR>/images)\n"
+            "  BTY_BOOT_DIR          directory of netboot artifacts (kernel /\n"
+            "                        initrd / squashfs); unset disables /boot\n"
+            "  BTY_SESSION_SECRET    override the persisted session-cookie key\n"
+            "                        (default: read/create <BTY_STATE_DIR>/\n"
+            "                        session-secret)\n"
+            "  BTY_MAX_UPLOAD_BYTES  cap on image-upload body size (default\n"
+            "                        documented in the upload-endpoint docs)\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "--version",

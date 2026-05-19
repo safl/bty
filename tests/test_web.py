@@ -4227,3 +4227,71 @@ def test_catalog_enqueue_request_rejects_traversal_name(app_client: TestClient) 
             cookies=AUTH,
         )
         assert r.status_code == 422, f"expected 422 for {bad!r}, got {r.status_code}"
+
+
+# --------------------------------------------------------------------------
+# _safe_path: direct unit tests for the path-traversal guard
+# --------------------------------------------------------------------------
+#
+# The HTTP layer's helper that resolves ``root / name`` and refuses
+# any name that could escape the root. Indirectly covered by the
+# upload / image / boot-artifact endpoint tests, but pinning the
+# contract directly guards against subtle regressions when those
+# callers change.
+
+
+def test_safe_path_accepts_plain_name(tmp_path: Path) -> None:
+    """A bare filename returns ``root / name`` resolved."""
+    from bty.web._app import _safe_path
+
+    result = _safe_path(tmp_path, "image.img.gz")
+    assert result == (tmp_path / "image.img.gz").resolve()
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "",  # empty
+        ".",  # current dir
+        "..",  # parent dir
+        "with/slash",  # forward slash
+        "with\\backslash",  # backslash (windows-style)
+        "with\x00nul",  # NUL byte
+        "../etc/passwd",  # classic traversal
+        "/absolute",  # absolute -- starts with slash
+    ],
+)
+def test_safe_path_rejects_traversal_inputs(tmp_path: Path, bad: str) -> None:
+    """Each forbidden name shape raises 400 with detail 'bad name'.
+    Pinned individually so a future "drop the NUL check" edit fails
+    on the specific case rather than masquerading as a generic
+    upload-endpoint test failure."""
+    from fastapi import HTTPException
+
+    from bty.web._app import _safe_path
+
+    with pytest.raises(HTTPException) as excinfo:
+        _safe_path(tmp_path, bad)
+    assert excinfo.value.status_code == 400
+    assert excinfo.value.detail == "bad name"
+
+
+def test_safe_path_rejects_symlink_escape(tmp_path: Path) -> None:
+    """A symlink whose name is innocuous but whose resolved target
+    escapes the root must still 400. Final ``relative_to(root)`` is
+    the backstop that catches resolved-out-of-root paths the
+    syntactic check misses."""
+    from fastapi import HTTPException
+
+    from bty.web._app import _safe_path
+
+    outside = tmp_path.parent / "elsewhere"
+    outside.mkdir(exist_ok=True)
+    (outside / "target.txt").write_text("escaped")
+    root = tmp_path / "root"
+    root.mkdir()
+    (root / "innocent").symlink_to(outside / "target.txt")
+
+    with pytest.raises(HTTPException) as excinfo:
+        _safe_path(root, "innocent")
+    assert excinfo.value.status_code == 400

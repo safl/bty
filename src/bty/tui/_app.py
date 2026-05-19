@@ -82,6 +82,7 @@ from rich.table import Table
 import bty
 from bty import catalog as _catalog
 from bty import disks, flash, images
+from bty.tui import DEFAULT_SERVER as _DEFAULT_SERVER
 
 # ---------------------------------------------------------------------------
 # Public-API helpers (preserved across the textual -> rich rewrite so
@@ -425,7 +426,7 @@ class BtyTui:
 
     def __init__(
         self,
-        server: str = "bty-server",
+        server: str = _DEFAULT_SERVER,
         mac: str | None = None,
         catalog: str | None = None,
     ) -> None:
