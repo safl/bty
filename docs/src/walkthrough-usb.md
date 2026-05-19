@@ -169,8 +169,10 @@ few common ones:
 | Generic AMI | F11 / Esc |
 
 The bty live env auto-logins as `root` on `tty1`. From there you have
-two ways to flash: the TUI (interactive, recommended for one-offs) or
-the CLI (scriptable).
+two ways to flash: `bty` interactively (the operator picks an image
+and disk by hand, recommended for one-offs) or plan-driven against a
+`bty-server` (the appliance answers `bty --mac` with a pre-bound
+image and target, recommended for fleets).
 
 ## Step 5a: Flash with `bty` (interactive)
 
@@ -389,7 +391,7 @@ The discovery service accepts either layout:
 The service tries the subfolder first, then falls back to the
 root. First match with at least one supported file (`.bri` /
 `.img*` / `.qcow2`) wins, gets bind-mounted at
-`/var/lib/bty/images`, and the TUI picks it up from there.
+`/var/lib/bty/images`, and `bty` picks it up from there.
 
 #### Step 4: Boot the target
 

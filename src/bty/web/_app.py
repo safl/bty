@@ -1963,7 +1963,7 @@ def create_app(
         ``http(s)://`` URL pointing at a TOML manifest, or an
         ``oras://`` reference whose layer is the manifest. Parsed
         through :func:`bty.catalog.load_source` so the same client-
-        side fetcher the TUI uses applies here.
+        side fetcher ``bty`` uses applies here.
 
         **Metadata-only**. Bytes are NOT fetched at import time; each
         imported entry surfaces in ``/images`` as ``cached=False``.

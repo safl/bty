@@ -9,6 +9,7 @@ can't (and shouldn't) actually run ``qemu-img`` / ``zstd`` / ``lsblk``.
 
 from __future__ import annotations
 
+import io
 from pathlib import Path
 from typing import Any, ClassVar
 from unittest.mock import MagicMock, patch
@@ -719,8 +720,6 @@ def test_pump_dd_progress_emits_most_recent_progress_per_chunk() -> None:
     MOST RECENT to keep the consumer's render loop quiet. ``total_bytes``
     is carried through so the consumer can compute percent / ETA without
     holding state."""
-    import io
-
     stream = io.StringIO(
         "1048576 bytes (1.0 MB, 1.0 MiB) copied, 0.5 s, 2.0 MB/s\r"
         "2097152 bytes (2.1 MB, 2.0 MiB) copied, 1.0 s, 2.1 MB/s\r"
@@ -738,8 +737,6 @@ def test_pump_dd_progress_skips_non_progress_dd_lines() -> None:
     """dd also emits ``records in/out`` summary lines and warnings;
     only lines matching the ``<int> bytes`` prefix should fire
     progress events."""
-    import io
-
     stream = io.StringIO(
         "1+0 records in\n1+0 records out\n524288 bytes (524 kB, 512 KiB) copied, 0.1 s, 5.2 MB/s\r"
     )
@@ -755,8 +752,6 @@ def test_pump_dd_progress_skips_non_progress_dd_lines() -> None:
 def test_pump_dd_progress_handles_empty_stream() -> None:
     """An empty stream (dd never emitted progress, e.g. immediate
     failure) should return without raising and without emitting."""
-    import io
-
     events: list[flash.FlashProgress] = []
     flash._pump_dd_progress(io.StringIO(""), events.append, total_bytes=100)
     assert events == []

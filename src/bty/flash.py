@@ -801,12 +801,12 @@ def _flash_compressed(
     detection in ``images.py`` deliberately rejects tarball
     extensions.
     """
-    # When a progress callback is set (TUI mode), pipe the
-    # decompressor's stderr into a pump thread that emits
-    # ``subprocess_log`` events; the TUI routes those through Rich's
-    # console so they print above the progress widget without
-    # corrupting it. CLI mode leaves stderr inherited (operator's
-    # tty sees zstd/gzip output natively).
+    # When a progress callback is set (``bty`` wizard caller), pipe
+    # the decompressor's stderr into a pump thread that emits
+    # ``subprocess_log`` events; the wizard routes those through
+    # Rich's console so they print above the progress widget without
+    # corrupting it. Callers without a progress callback leave stderr
+    # inherited (operator's tty sees zstd/gzip output natively).
     decomp_stderr = subprocess.PIPE if progress is not None else None
     decomp_proc = subprocess.Popen(decompress_cmd, stdout=subprocess.PIPE, stderr=decomp_stderr)
     decomp_log_pump = _start_subprocess_log_pump(decomp_proc, progress, decompress_name)
@@ -961,7 +961,7 @@ def _flash_qcow2(image: Path, target: Path) -> None:
 #   -S: but still show errors (without this, -s would also silence them)
 #   -L: follow redirects
 # The ``-s`` is deliberate: curl's progress meter is carriage-return-
-# updated, which the TUI's newline-bound subprocess-log pump can
+# updated, which ``bty``'s newline-bound subprocess-log pump can
 # only capture as the *initial* zero-state line (followed by silence
 # as the same line gets overwritten in place). Operators saw "all 0"
 # rows above the Rich progress bar; ``-s`` silences that, ``-S``
@@ -1015,7 +1015,7 @@ def _flash_img_from_url(
     curl_args, resolved_size = _curl_args_for_source(url)
     if total_bytes is None:
         total_bytes = resolved_size
-    # Pipe curl's stderr through the subprocess-log pump so the TUI
+    # Pipe curl's stderr through the subprocess-log pump so ``bty``
     # can surface curl's lines (errors + final status) above its
     # progress widget. curl's live progress bar uses ``\r``-only
     # refresh which the newline-bound pump intentionally skips; the
@@ -1159,8 +1159,8 @@ def _flash_zst_from_url(
 
     Decompresses on the fly. The compressed bytes never land on
     the local filesystem; only the raw image touches the target
-    disk. This is the path the TUI-on-PXE flow uses by default
-    since bty's own target images ship as ``.img.zst``.
+    disk. This is the path the PXE-driven ``bty`` flow uses by
+    default since bty's own target images ship as ``.img.zst``.
     """
     _flash_compressed_from_url(
         url,
