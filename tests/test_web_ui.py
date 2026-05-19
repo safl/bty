@@ -506,6 +506,59 @@ def test_ui_boot_section_tftp_shows_daemon_status(client: TestClient) -> None:
     assert "bi-hdd-network me-2" not in body  # DHCP / PXE <h2>'s icon
 
 
+def test_ui_layout_renders_version_in_navbar_outside_brand(client: TestClient) -> None:
+    """The navbar carries an always-visible ``v{__version__}`` slug
+    sitting OUTSIDE the brand ``<a>`` so the BTY pill stays a clean
+    click target. Pin both invariants:
+    * The slug renders with the ``v`` prefix on every authed page.
+    * It's a sibling of the brand link (``class="navbar-version"``),
+      not nested inside it.
+    """
+    import re
+
+    import bty
+
+    _login(client)
+    body = client.get("/ui/dashboard").text
+    # Always-visible version with the ``v`` prefix.
+    assert f"v{bty.__version__}" in body
+    # The version <span> carries the navbar-version class (may sit
+    # alongside utility classes like ``me-2``).
+    assert re.search(r'<span class="navbar-version[^"]*">', body), (
+        'version slug should render as a <span class="navbar-version ...">'
+    )
+    # The navbar-version <span> must NOT be inside the navbar-brand
+    # <a>: the brand needs to stay a single clean click target.
+    brand_match = re.search(
+        r'<a class="navbar-brand[^"]*"[^>]*>(.*?)</a>',
+        body,
+        re.DOTALL,
+    )
+    assert brand_match, "navbar-brand <a> should render"
+    assert "navbar-version" not in brand_match.group(1), (
+        "navbar-version must be a sibling of the brand <a>, not nested inside it"
+    )
+
+
+def test_ui_boot_section_unrecognised_falls_back_to_list(client: TestClient) -> None:
+    """A bookmark / typo / scripted call with a bogus ``?section=``
+    value must NOT 500 the page. The server clamps to the default
+    ``list`` section. Symmetric with the /ui/images fallback test.
+    """
+    _login(client)
+    r = client.get("/ui/boot?section=garbage")
+    assert r.status_code == 200
+    body = r.text
+    # Lands on list (the artefact-status table renders; the Fetch
+    # form does not).
+    assert 'id="enqueue-fetch-btn"' not in body
+    assert "bty-netboot-x86_64.vmlinuz" in body
+    # Sub-nav strip still renders with the canonical pills.
+    assert 'href="/ui/boot?section=fetch"' in body
+    assert 'href="/ui/boot?section=dhcp-pxe"' in body
+    assert 'href="/ui/boot?section=tftp"' in body
+
+
 def test_ui_machines_default_section_is_list_not_add_form(
     client: TestClient,
 ) -> None:
