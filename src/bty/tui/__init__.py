@@ -35,7 +35,8 @@ def main(argv: list[str] | None = None, *, prog: str = "bty") -> None:
     parser = argparse.ArgumentParser(
         prog=prog,
         description=(
-            f"{prog}: bty's terminal interface. Three modes:\n\n"
+            f"{prog}: flash images onto target disks, locally or via PXE. "
+            f"Three modes:\n\n"
             f"  {prog}                          - interactive wizard\n"
             f"                                    (local image-root only)\n"
             f"  {prog} --catalog <URL>          - interactive wizard with\n"

@@ -253,15 +253,17 @@ def register_ui_routes(
                     if tftp_controllable or tftp.state == "active"
                     else (
                         f"dnsmasq.service is {tftp.state} "
-                        "(no daemon helper here -- the container "
+                        "(no daemon helper here, the container "
                         "or operator owns the lifecycle)."
                     )
                 ),
                 "href": "/ui/boot?section=tftp",
                 # The control buttons live on the TFTP section
-                # itself; "fix" is the same as "view".
+                # itself; "fix" is the same as "view". Label
+                # matches the sub-nav pill so operators see one
+                # name across the two surfaces.
                 "fix_href": "/ui/boot?section=tftp",
-                "fix_label": "TFTP controls",
+                "fix_label": "TFTP daemon",
             },
         ]
         return render(

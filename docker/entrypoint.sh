@@ -72,7 +72,7 @@ trap 'kill -TERM "$DNSMASQ_PID" 2>/dev/null; exit 0' INT TERM
 if [ -z "${BTY_QUIET:-}" ]; then
     cat >&2 <<EOF
 ========================================================================
-  bty-web container -- HTTP on :${BTY_WEB_PORT:-8080}, TFTP on udp/69
+  bty-web container: HTTP on :${BTY_WEB_PORT:-8080}, TFTP on udp/69
 
   Default credentials: bty / bty
   -> ROTATE before exposing past a trusted LAN:
@@ -86,8 +86,8 @@ if [ -z "${BTY_QUIET:-}" ]; then
        bty --server http://<host>:${BTY_WEB_PORT:-8080} --mac <self-mac>
 
   PXE clients: configure your LAN DHCP server (UniFi / pfSense /
-  dnsmasq / etc.) to point clients at this container -- option 60
-  "PXEClient" + option 66 next-server <host-ip> + option 67
+  dnsmasq / etc.) to point clients at this container with option
+  60 "PXEClient", option 66 next-server <host-ip>, option 67
   bootfile "ipxe.efi". bty does NOT run a DHCP role.
 ========================================================================
 EOF
