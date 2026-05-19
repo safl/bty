@@ -1,5 +1,14 @@
 {# Sub-nav strip for a /ui page with multiple actions.
-   Usage: include with ``sections`` (list of dicts) + ``active`` (string key).
+
+   Rendered as a navbar-styled bar that visually attaches to the
+   main navbar above (the layout renders it via ``{% block subnav %}``
+   immediately after the dark navbar). Pills inside the bar carry
+   the per-section actions; the bar itself stays compact so it
+   reads as "row of buttons" rather than "second-class header".
+
+   Usage: include with ``sections`` (list of dicts) + ``active``
+   (string key). Optionally pass ``right_html`` for a right-aligned
+   meta blob (live indicator, filter status, etc.).
 
    Each section dict has:
      key:   short identifier matching ``?section=<key>``
@@ -7,25 +16,28 @@
      icon:  Bootstrap Icon class fragment (e.g. "list-ul")
      href:  the URL the pill links to
 
-   Renders as a Bootstrap nav-pills strip; the active pill is highlighted.
-   The default-key section (the one with section == "" or section == "list")
-   is reached by visiting the page without ?section= -- so refreshing the
-   default view stays on the default view.
+   The default-key section (``"list"``) is reached by visiting
+   the page without ``?section=`` -- so refreshing the default
+   view stays on the default view.
 
-   Accessibility: ``aria-label`` on the <nav> labels the strip for
-   screen readers; ``aria-current="page"`` on the active <a> tells
-   assistive tech which sub-section is currently visible.
+   Accessibility: ``aria-label`` on the <nav> labels the strip
+   for screen readers; ``aria-current="page"`` on the active <a>
+   tells assistive tech which sub-section is currently visible.
 #}
-<nav class="mb-3" aria-label="Section sub-navigation">
-    <ul class="nav nav-pills">
-        {% for s in sections %}
-        <li class="nav-item">
-            <a class="nav-link{% if s.key == active %} active{% endif %}"
-               href="{{ s.href }}"
-               {% if s.key == active %}aria-current="page"{% endif %}>
-                {% if s.icon %}<i class="bi bi-{{ s.icon }} me-1"></i>{% endif %}{{ s.label }}
-            </a>
-        </li>
-        {% endfor %}
-    </ul>
+<nav class="navbar navbar-light bg-white border-bottom py-2"
+     aria-label="Section sub-navigation">
+    <div class="container">
+        <ul class="nav nav-pills me-auto">
+            {% for s in sections %}
+            <li class="nav-item">
+                <a class="nav-link{% if s.key == active %} active{% endif %}"
+                   href="{{ s.href }}"
+                   {% if s.key == active %}aria-current="page"{% endif %}>
+                    {% if s.icon %}<i class="bi bi-{{ s.icon }} me-1"></i>{% endif %}{{ s.label }}
+                </a>
+            </li>
+            {% endfor %}
+        </ul>
+        {% if right_html %}<div class="ms-auto">{{ right_html|safe }}</div>{% endif %}
+    </div>
 </nav>

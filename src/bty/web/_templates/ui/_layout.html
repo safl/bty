@@ -178,10 +178,23 @@
     </div>
 </nav>
 
+{# Sub-nav strip. Pages with per-section actions (machines, images,
+   boot) render their pill nav here so it visually attaches to the
+   main navbar above. Pages without sub-sections leave this empty
+   and the main content flows straight up to the main navbar.
+   The intent is "you already know what page you're on, no need
+   to repeat ``Machines`` as an H1 below". #}
+{% block subnav %}{% endblock %}
+
 <main class="container py-4">
     {% if flash %}
     <div class="alert alert-{{ flash_kind or 'info' }}">{{ flash }}</div>
     {% endif %}
+    {# Optional one-paragraph description of the current section.
+       Sits between the navbars and the listing / action body so
+       an operator landing here for the first time has a single
+       sentence of context without a full H1 / subtitle stack. #}
+    {% block intro %}{% endblock %}
     {% block content %}{% endblock %}
 </main>
 

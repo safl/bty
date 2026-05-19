@@ -1,24 +1,20 @@
 {% extends "ui/_layout.html" %}
 {% block title %}Images - bty-web{% endblock %}
-{% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
-    <h1 class="h3 mb-0"><i class="bi bi-disc me-2"></i>Images</h1>
-    <span class="text-muted small">
-        {{ unified|length }} entr{{ "y" if unified|length == 1 else "ies" }}
-        | image-root <code>{{ image_root }}</code>
-    </span>
-</div>
 
+{% block subnav %}
+{% set right_html %}<span class="text-muted small">{{ unified|length }} entr{{ "y" if unified|length == 1 else "ies" }} | image-root <code>{{ image_root }}</code></span>{% endset %}
 {% with sections=[
     {"key": "list",            "label": "List",                "icon": "list-ul",       "href": "/ui/images"},
     {"key": "fetch",           "label": "Fetch default",       "icon": "cloud-download","href": "/ui/images?section=fetch"},
     {"key": "add-url",         "label": "Add by URL",          "icon": "cloud-plus",    "href": "/ui/images?section=add-url"},
     {"key": "upload-manifest", "label": "Upload manifest",     "icon": "file-earmark-text", "href": "/ui/images?section=upload-manifest"},
     {"key": "upload-image",    "label": "Upload image",        "icon": "upload",        "href": "/ui/images?section=upload-image"},
-] , active=section %}
+] , active=section, right_html=right_html %}
 {% include "ui/_subnav.html" %}
 {% endwith %}
+{% endblock %}
 
+{% block content %}
 {% if section == "fetch" %}
 {# The common-case default: pull the bty project's released
    catalog.toml in one click. Operators who just want "give me
@@ -371,7 +367,7 @@
     </div>
 </div>
 
-<div class="card">
+<div class="card mb-3">
     <div class="card-header bg-light fw-semibold">
         <i class="bi bi-hash me-1"></i>Hashes
         <small class="text-muted ms-2">background SHA-256 of dir-scan files; default 1 at a time so small hardware (Pi / NUC) stays responsive</small>
