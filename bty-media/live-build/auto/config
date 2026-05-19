@@ -46,10 +46,16 @@ set -e
 # by a future package change -- with no package installed it's a
 # no-op.
 
+# Transparency: NO ``quiet``, NO ``splash``. bty wants the full
+# kernel + systemd boot stream visible on tty1/serial -- a wedge
+# between `[ OK ] Started X` and `[ OK ] Started Y` is immediately
+# diagnostic. Same reason plymouth was retired (v0.22.1): hiding
+# init output makes operator debugging harder, polish is not worth
+# the opacity.
 if [ "${BTY_USB_ISO:-}" = "1" ]; then
     BINARY_IMAGES=iso-hybrid
     BOOTLOADERS_OPTS="--bootloaders syslinux,grub-efi"
-    BOOTAPPEND="boot=live components quiet noeject plymouth.enable=0 modprobe.blacklist=nouveau nouveau.modeset=0 bty.mode=interactive bty.version=__BTY_VERSION__"
+    BOOTAPPEND="boot=live components noeject plymouth.enable=0 modprobe.blacklist=nouveau nouveau.modeset=0 bty.mode=interactive bty.version=__BTY_VERSION__"
 else
     BINARY_IMAGES=netboot
     BOOTLOADERS_OPTS=""
@@ -60,7 +66,7 @@ else
     # in-tree Nvidia driver from binding -- nouveau stalls early
     # boot 10-60s on Maxwell/Pascal/Turing cards probing for
     # firmware bty doesn't need.
-    BOOTAPPEND="boot=live components quiet plymouth.enable=0 modprobe.blacklist=nouveau nouveau.modeset=0 bty.version=__BTY_VERSION__"
+    BOOTAPPEND="boot=live components plymouth.enable=0 modprobe.blacklist=nouveau nouveau.modeset=0 bty.version=__BTY_VERSION__"
     # Deactivate the plymouth package list for the netboot bake.
     rm -f "${PLYMOUTH_DST}"
 fi

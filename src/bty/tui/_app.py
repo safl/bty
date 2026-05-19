@@ -227,11 +227,6 @@ def post_inventory(
         pass
 
 
-_BTY_SERVER_LATEST_URL = (
-    "https://github.com/safl/bty/releases/latest/download/bty-server-x86_64.img.gz"
-)
-_BTY_SERVER_LATEST_NAME = "bty-server (latest from GitHub)"
-
 _BTY_DEFAULT_CATALOG_URL = "https://github.com/safl/bty/releases/latest/download/catalog.toml"
 
 
@@ -445,7 +440,7 @@ class BtyTui:
         """
         self._refresh_images()
         self._console.clear()
-        self._print_header(stage=1, title="Pick an image to flash")
+        self._print_header(stage=1, title="Pick an image to flash (or download an image catalog)")
         self._print_source_summary()
         if self._state._images:
             self._print_image_table(self._state._images)
@@ -453,19 +448,28 @@ class BtyTui:
             self._print_empty_catalog_panel()
 
         prompt_text = self._render_prompt_line(
-            choice_hint="image #",
+            title="Pick an image to flash (or download an image catalog)",
             extras=(
-                ("c", "switch catalog source"),
-                ("d", "default catalog (bty release)"),
-                ("i", "install bty-server"),
-                ("r", "refresh"),
+                ("#", "pick by number"),
+                ("d", "default catalog"),
+                ("c", "custom catalog"),
+                ("r", "refresh catalog"),
                 ("q", "quit"),
             ),
         )
+        # NOTE: ``[i] install bty-server`` was dropped -- it bypassed
+        # the catalog with a synthesised flash plan pointing at the
+        # same GitHub release URL the default catalog already
+        # advertises. The right path now is ``[d]`` then pick
+        # bty-server from the table. ``[r]`` is kept as an explicit
+        # affordance (Enter does the same; ``r`` is muscle-memory
+        # friendly for operators who reach for "refresh" by name).
         choice = self._ask(prompt_text)
         if choice in ("q", "quit"):
             return "quit"
-        if choice in ("r", "refresh", ""):
+        if choice in ("", "r", "refresh"):
+            # ``r`` is no longer advertised but still honoured for
+            # operators who learned it; Enter does the same.
             return "continue"
         if choice in ("c", "catalog"):
             self._screen_change_catalog()
@@ -473,9 +477,6 @@ class BtyTui:
         if choice in ("d", "default"):
             self._state.catalog_source = _BTY_DEFAULT_CATALOG_URL
             self._state.pxe_done_base = _pxe_done_base_from_source(_BTY_DEFAULT_CATALOG_URL)
-            return "continue"
-        if choice in ("i", "install"):
-            self._screen_install_bty_server()
             return "continue"
         idx = self._parse_index(choice, len(self._state._images))
         if idx is not None:
@@ -511,11 +512,15 @@ class BtyTui:
                 )
             )
 
+        # ``[r]`` is not advertised here: Enter re-runs
+        # ``_refresh_disks`` (called on every screen entry), so an
+        # explicit refresh key is redundant. Hot-plugged disks show
+        # up on the next Enter.
         prompt_text = self._render_prompt_line(
-            choice_hint="disk #",
+            title="Pick a target disk",
             extras=(
+                ("#", "pick by number"),
                 ("b", "back"),
-                ("r", "refresh"),
                 ("q", "quit"),
             ),
         )
@@ -568,7 +573,7 @@ class BtyTui:
             )
             choice = self._ask(
                 self._render_prompt_line(
-                    choice_hint="",
+                    title="Probe failed",
                     extras=(("b", "back"), ("q", "quit")),
                 )
             )
@@ -590,7 +595,7 @@ class BtyTui:
             )
             choice = self._ask(
                 self._render_prompt_line(
-                    choice_hint="",
+                    title="Plan rejected",
                     extras=(("b", "back"), ("q", "quit")),
                 )
             )
@@ -600,11 +605,12 @@ class BtyTui:
             return "continue"
 
         prompt_text = self._render_prompt_line(
-            # Backslash-escapes prevent Rich from parsing ``[y]``/``[b]``/
-            # ``[q]`` as (non-existent) markup style tags and swallowing
-            # them. Closing ``]`` does not need escaping.
-            choice_hint="\\[y]es to flash, \\[b]ack, \\[q]uit",
-            extras=(),
+            title="Confirm flash plan",
+            extras=(
+                ("y", "yes, flash"),
+                ("b", "back"),
+                ("q", "quit"),
+            ),
         )
         choice = self._ask(prompt_text)
         if choice in ("q", "quit"):
@@ -744,8 +750,12 @@ class BtyTui:
         )
 
         prompt_text = self._render_prompt_line(
-            choice_hint="\\[y]es reboot now, \\[b]ack, \\[q]uit",
-            extras=(),
+            title="Reboot to boot from the freshly flashed disk",
+            extras=(
+                ("y", "yes, reboot now"),
+                ("b", "back"),
+                ("q", "quit"),
+            ),
         )
         choice = self._ask(prompt_text)
         if choice in ("q", "quit", "n", "no", ""):
@@ -789,35 +799,6 @@ class BtyTui:
         self._state.catalog_source = new_source or None
         self._state.pxe_done_base = _pxe_done_base_from_source(self._state.catalog_source)
 
-    def _screen_install_bty_server(self) -> None:
-        """Synthesize a one-shot flash plan for the latest bty-server
-        release URL. Doesn't go through the wizard; runs immediately
-        on confirm.
-        """
-        self._console.clear()
-        self._print_header(stage=1, title="Install bty-server (latest GitHub release)")
-        self._console.print(
-            Panel(
-                f"This will flash [{_PRIMARY}]{_BTY_SERVER_LATEST_URL}[/]\n"
-                f"as a fresh appliance on a target disk you pick next.",
-                title="bty-server install",
-            )
-        )
-
-        confirm = self._ask("[bold]>[/] proceed with bty-server flash? [y/N]").strip().lower()
-        if confirm not in ("y", "yes"):
-            return
-
-        # Stage the install as a synthetic image + force-pick disk.
-        self._state.selected_image = _TuiImage(
-            name=_BTY_SERVER_LATEST_NAME,
-            fmt="img.gz",
-            size_bytes=0,
-            url=_BTY_SERVER_LATEST_URL,
-        )
-        # Now the wizard's next iteration will land at SELECT_DISK
-        # then CONFIRM_FLASH automatically.
-
     # ---------- rendering helpers -------------------------------------
 
     def _print_header(self, *, stage: int, title: str) -> None:
@@ -832,20 +813,47 @@ class BtyTui:
 
         Line 3: ``Steps: 1.Image -> 2.Disk -> 3.Flash -> 4.Reboot``
             with the active step highlighted in the accent colour
-            and the rest muted. The title goes alongside in muted
-            parens so it still rides with the screen identity.
+            and the rest muted.
+
+        The per-screen title is NOT printed here -- it surfaces
+        attached to the leader on the prompt line itself
+        (``> <title>: _``, via :meth:`_render_prompt_line`) so the
+        action label sits right next to the input cursor where the
+        operator's eye lands. The ``title`` arg is kept on this
+        method for symmetry with the call sites (every screen
+        passes the same title to both the header and the prompt
+        builder).
         """
-        banner = f"- -- ---={{[| bty v{bty.__version__} |]}}=--- -- -"
+        del title  # surfaced near the prompt instead
+        # Build the Steps line first (so we can size the banner to
+        # match its plain-text width). Stage labels are fixed -- they
+        # don't depend on terminal state -- so we know the visible
+        # width up front.
+        labels = ("Image", "Disk", "Flash", "Reboot")
+        steps_plain = "Steps: " + " -> ".join(f"{n}.{lbl}" for n, lbl in enumerate(labels, 1))
+        steps_width = len(steps_plain)
+        # Banner: ``+- -- ---={[| bty vX.Y.Z |]}=--- -- -+`` with
+        # extra ``-`` filler symmetric inside the wings so the
+        # outermost ``+`` characters land at the same column as the
+        # last character of the Steps line. Pure ASCII; renders
+        # identically on framebuffer / SSH / serial.
+        left_wing = "+- -- ---"
+        right_wing = "--- -- -+"
+        core = f"={{[| bty v{bty.__version__} |]}}="
+        filler_total = max(0, steps_width - (len(left_wing) + len(core) + len(right_wing)))
+        left_filler = "-" * (filler_total // 2)
+        right_filler = "-" * (filler_total - filler_total // 2)
+        banner = f"{left_wing}{left_filler}{core}{right_filler}{right_wing}"
         self._console.print(f"[bold]{banner}[/]")
         self._console.print()
         crumb_parts = []
-        for n, label in enumerate(("Image", "Disk", "Flash", "Reboot"), start=1):
+        for n, label in enumerate(labels, start=1):
             if n == stage:
                 crumb_parts.append(f"[bold {_ACCENT}]{n}.{label}[/]")
             else:
                 crumb_parts.append(f"[{_MUTED}]{n}.{label}[/]")
         crumb = " -> ".join(crumb_parts)
-        self._console.print(f"Steps: {crumb}   [{_MUTED}]({title})[/]")
+        self._console.print(f"Steps: {crumb}")
         self._console.print()
 
     def _print_source_summary(self) -> None:
@@ -930,9 +938,11 @@ class BtyTui:
         body = (
             f"No images visible.\n\n"
             f"[{_MUTED}]Add some via:[/]\n"
-            f"  - dropping files into [{_PRIMARY}]{self._state.image_root}[/]\n"
-            f"  - [{_ACCENT}]d[/] to load bty's default release catalog\n"
-            f"  - [{_ACCENT}]c[/] to switch to a custom catalog source"
+            f"  - drop files into [{_PRIMARY}]{self._state.image_root}[/]\n"
+            f"  - [{_ACCENT}]d[/] load bty's default catalog "
+            f"(published with bty as a release artefact)\n"
+            f"  - [{_ACCENT}]c[/] provide an http(s):// or oras:// URL "
+            f"to a catalog that you host"
         )
         self._console.print(Panel(body, title="Catalog is empty"))
         self._console.print()
@@ -962,29 +972,26 @@ class BtyTui:
     def _render_prompt_line(
         self,
         *,
-        choice_hint: str,
         extras: tuple[tuple[str, str], ...],
+        title: str,
     ) -> str:
         """Build the prompt label shown by ``Prompt.ask``.
 
-        Layout principle: the prompt itself stays compact -- just
-        the leader, the context hint, and the input cursor -- so the
-        operator's eye lands on "what do I type" immediately next to
-        the cursor. Secondary keybindings (refresh / quit / catalog
-        switch / ...) are printed on a separate dim line just ABOVE
-        the prompt via :meth:`_print_keybindings`, where they read as
-        a guide rather than competing with the input.
+        Layout: keybinding guide on the line above, action statement
+        attached to the leader on the prompt line itself:
 
-        Returns a Rich-markup-formatted prompt label. ``choice_hint``
-        is the primary action description; ``extras`` is the list
-        of (key, label) pairs printed by the caller via
-        ``_print_keybindings`` BEFORE this method's return value
-        reaches ``Prompt.ask``.
+          \\[k] label   \\[k] label  ...     <- keybinding guide
+          > <title>: _                    <- leader + action + cursor
+
+        ``>`` marks the action point; the ``title`` immediately after
+        describes the action (``Pick an image to flash``, ``Confirm
+        flash plan``, ...). For screens whose input is a choice from
+        a set (``y/b/q`` etc.), the options should live in ``extras``
+        as keybindings -- the prompt line itself stays focused on the
+        action, not on enumerating valid keys.
         """
         self._print_keybindings(extras)
-        if choice_hint:
-            return f"[bold]>[/] [bold]{choice_hint}[/]"
-        return "[bold]>[/]"
+        return f"[bold]>[/] [bold]{title}[/]"
 
     def _print_keybindings(self, extras: tuple[tuple[str, str], ...]) -> None:
         """Print the secondary-key guide above the prompt.
@@ -1099,12 +1106,16 @@ class BtyTui:
         # tags (the strings below all flow through the
         # ``[{_DANGER}]...[/]`` wrapper at the call site).
         if n == 0:
-            tail = (
-                ", \\[c] to switch catalog source, or \\[d] for the bty default catalog."
-                if kind == "image"
-                else ", or check that a target disk is attached."
+            if kind == "image":
+                return (
+                    f"No images available; {choice!r} can't pick one. "
+                    f"Press Enter to re-scan, \\[c] for a custom catalog source, "
+                    f"or \\[d] for the bty default catalog."
+                )
+            return (
+                f"No disks available; {choice!r} can't pick one. "
+                f"Press Enter to re-scan, or check that a target disk is attached."
             )
-            return f"No {kind}s available; {choice!r} can't pick one. Press \\[r] to refresh{tail}"
         if choice.lstrip("-").isdigit():
             return f"{choice!r} is out of range; valid {kind} numbers are 1..{n}."
         return f"Unrecognised choice {choice!r}; type a number 1..{n} or one of the listed keys."

@@ -426,6 +426,21 @@ runcmd:
     #                                  appear; bty-server doesn't
     #                                  hibernate so always skip.
     EXTRA="plymouth.enable=0 random.trust_cpu=on random.trust_bootloader=on noresume modprobe.blacklist=nouveau nouveau.modeset=0"
+    # First STRIP ``quiet`` / ``splash`` (stock Debian server image
+    # ships them in GRUB_CMDLINE_LINUX_DEFAULT). bty wants the full
+    # kernel + systemd boot stream visible on console -- a wedge
+    # between two ``[ OK ] Started X`` lines is immediately
+    # diagnostic. Same reason plymouth was retired (v0.22.1):
+    # hiding init output makes operator debugging harder, polish
+    # not worth the opacity.
+    if grep -q '^GRUB_CMDLINE_LINUX_DEFAULT=' /etc/default/grub; then
+      # Loop the substitution so ``quiet splash`` and the like
+      # all get removed in one pass; cleanup pass collapses any
+      # leftover double-spaces / leading-trailing space inside
+      # the quoted value.
+      sed -i -E ':a;s/^(GRUB_CMDLINE_LINUX_DEFAULT="[^"]*)\b(quiet|splash)\b/\1/;ta' /etc/default/grub
+      sed -i -E 's/(GRUB_CMDLINE_LINUX_DEFAULT=")[[:space:]]+/\1/; s/[[:space:]]+(")$/\1/; s/[[:space:]]{2,}/ /g' /etc/default/grub
+    fi
     if grep -q '^GRUB_CMDLINE_LINUX_DEFAULT=' /etc/default/grub; then
       for arg in $EXTRA; do
         # ``arg`` is either ``key=value`` or a bare flag (e.g.
