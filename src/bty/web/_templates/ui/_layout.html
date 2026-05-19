@@ -135,9 +135,15 @@
             background-color: #343a40;
             border-bottom: 1px solid rgba(255, 255, 255, 0.08);
         }
+        .subnav-strip .nav-pills {
+            /* Space the pills out so they read as discrete buttons
+               rather than a single segmented control. Bootstrap's
+               nav-pills default to gap:0; this widens it. */
+            gap: 0.35rem;
+        }
         .subnav-strip .nav-pills .nav-link {
             color: rgba(255, 255, 255, 0.78);
-            padding: 0.25rem 0.7rem;
+            padding: 0.3rem 0.85rem;
         }
         .subnav-strip .nav-pills .nav-link:hover {
             color: #fff;
