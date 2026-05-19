@@ -291,6 +291,44 @@ def test_ui_images_section_fetch_shows_one_button_form(client: TestClient) -> No
     assert 'id="image_url"' not in body
 
 
+def test_top_level_nav_highlights_active_page(client: TestClient) -> None:
+    """The top-bar nav (Dashboard / Machines / Images / Boot /
+    Events / Settings) marks the current page with the ``active``
+    class so the operator can see where they are. The Python side
+    derives ``nav_active`` from ``request.url.path.split("/")[2]``;
+    the template applies the class via a Jinja ``{% if
+    nav_active == 'images' %}active{% endif %}`` pattern. Each
+    page must light up its own entry and ONLY its own.
+
+    Mirror of the v0.22.11 sub-nav bug (where ``active`` was never
+    wired through) for the top-level nav. Without this test the
+    same drift could happen on the global nav and go unnoticed.
+    """
+    import re
+
+    _login(client)
+    page_to_nav_key = {
+        "/ui/dashboard": "/ui/dashboard",
+        "/ui/machines": "/ui/machines",
+        "/ui/images": "/ui/images",
+        "/ui/boot": "/ui/boot",
+        "/ui/events": "/ui/events",
+        "/ui/settings": "/ui/settings",
+    }
+    for path, expected_href in page_to_nav_key.items():
+        body = client.get(path).text
+        actives = [
+            href
+            for cls, href in re.findall(
+                r'<a class="nav-btn ([^"]*)" href="([^"]+)"', body
+            )
+            if "active" in cls
+        ]
+        assert actives == [expected_href], (
+            f"{path}: expected top-bar nav to highlight {expected_href!r} only, got {actives!r}"
+        )
+
+
 def test_subnav_renders_aria_current_on_active_section(client: TestClient) -> None:
     """The sub-nav partial annotates the active pill with
     ``aria-current="page"`` so assistive tech announces which
@@ -412,6 +450,29 @@ def test_ui_machines_section_add_shows_form_only(client: TestClient) -> None:
     assert 'id="add-mac"' in body
     # No live machines table on the add view.
     assert 'id="machines-tbody"' not in body
+
+
+def test_ui_machines_add_form_offers_every_boot_policy(client: TestClient) -> None:
+    """The Add-by-MAC form lets the operator pick the initial boot
+    policy. The pre-v0.22.11 form hardcoded only 3 of the 4
+    values (local / tui / flash) and forgot ``flash-once``, which
+    meant operators staging a "reflash on next boot, then leave
+    alone" machine had to claim it then immediately re-edit on the
+    detail page. The detail page already iterates over the
+    server-side ``BOOT_POLICIES`` tuple; this test pins that the
+    Add form is in sync.
+    """
+    from bty.web._models import BOOT_POLICIES
+
+    _login(client)
+    body = client.get("/ui/machines?section=add").text
+    for policy in BOOT_POLICIES:
+        assert f'value="{policy}"' in body, (
+            f"Add-by-MAC form is missing the {policy!r} option "
+            f"(BOOT_POLICIES = {BOOT_POLICIES!r}). Operators "
+            "staging a machine with that policy would have to edit "
+            "on the detail page."
+        )
 
 
 def test_ui_boot_page_shows_recent_activity_card(
