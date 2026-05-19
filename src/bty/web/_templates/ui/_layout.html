@@ -209,6 +209,11 @@
 <div class="bty-accent"></div>
 <nav class="navbar navbar-expand-md bg-dark navbar-dark py-2">
     <div class="container">
+        {# Logo + ``BTY`` + version sit top-left -- the conventional
+           anchor for brand + click-to-home in admin UIs (Slack /
+           GitHub / Linear / Datadog all do this). Keeps the
+           identity-cluster (who's logged in, gear, logout) on the
+           right where action surfaces typically live. #}
         <a class="navbar-brand fw-semibold" href="/ui/dashboard">
             <img src="/static/bty-favicon.png" alt="bty mascot" class="brand-icon me-1">BTY
             <span class="badge bg-secondary fw-normal ms-1">{{ version }}</span>

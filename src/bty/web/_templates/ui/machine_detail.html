@@ -90,11 +90,11 @@
                        be able to match them anyway. #}
                     {% if d.serial %}
                     <option value="{{ d.serial }}" {% if d.serial == m.target_disk_serial %}selected{% endif %}>
-                        {{ d.path }} -- {{ d.size or "?" }}{% if d.model %} -- {{ d.model }}{% endif %} -- serial:{{ d.serial }}{% if d.tran %} ({{ d.tran }}){% endif %}{% if d.removable %} [removable]{% endif %}
+                        {{ d.path }} | {{ d.size or "?" }}{% if d.model %} | {{ d.model }}{% endif %} | serial: {{ d.serial }}{% if d.tran %} ({{ d.tran }}){% endif %}{% if d.removable %} [removable]{% endif %}
                     </option>
                     {% else %}
                     <option disabled>
-                        {{ d.path }} -- {{ d.size or "?" }}{% if d.model %} -- {{ d.model }}{% endif %} -- (no serial; cannot select)
+                        {{ d.path }} | {{ d.size or "?" }}{% if d.model %} | {{ d.model }}{% endif %} | (no serial; cannot select)
                     </option>
                     {% endif %}
                     {% endfor %}

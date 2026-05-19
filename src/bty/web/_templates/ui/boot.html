@@ -4,8 +4,10 @@
 {% block subnav %}
 {% set right_html %}<span class="text-muted small"><code>{{ boot_root }}</code></span>{% endset %}
 {% with sections=[
-    {"key": "list",  "label": "List",         "icon": "list-ul",        "href": "/ui/boot"},
-    {"key": "fetch", "label": "Fetch latest", "icon": "cloud-download", "href": "/ui/boot?section=fetch"},
+    {"key": "list",     "label": "List",         "icon": "list-ul",        "href": "/ui/boot"},
+    {"key": "fetch",    "label": "Fetch netboot artifacts", "icon": "cloud-download", "href": "/ui/boot?section=fetch"},
+    {"key": "dhcp-pxe", "label": "DHCP / PXE",   "icon": "hdd-network",    "href": "/ui/boot?section=dhcp-pxe"},
+    {"key": "tftp",     "label": "TFTP daemon",  "icon": "cpu",            "href": "/ui/boot?section=tftp"},
 ] , active=section, right_html=right_html %}
 {% include "ui/_subnav.html" %}
 {% endwith %}
@@ -75,7 +77,9 @@
             if (!r.ok) throw new Error("HTTP " + r.status);
             // Send the operator back to the list so they can watch
             // the fetch progress (the list section polls).
-            window.location = "/ui/boot";
+            // Reload the same view so the fetches table below picks
+            // up the new tag and the operator sees progress in place.
+            window.location.reload();
         }).catch(function (e) {
             alert("Enqueue failed: " + e.message);
             btn.disabled = false;
@@ -84,55 +88,10 @@
 })();
 </script>
 
-{% else %}
-{# section == "list" (default): present/missing per-artefact + live
-   fetch table. Operators land on the OBSERVABLE boot state when
-   they click "Boot" in the top nav. The single Fetch flow is one
-   sub-nav click away. #}
-<div class="card mb-4">
-    <div class="table-responsive">
-        <table class="table mb-0 align-middle">
-            <thead class="table-light">
-                <tr>
-                    <th>File</th>
-                    <th>Status</th>
-                    <th>Size</th>
-                    <th>Last fetched</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for a in artifacts %}
-                <tr>
-                    <td><code>{{ a.name }}</code></td>
-                    <td>
-                        {% if a.present %}
-                        <span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>present</span>
-                        {% else %}
-                        <span class="badge bg-warning text-dark"><i class="bi bi-exclamation-circle me-1"></i>missing</span>
-                        {% endif %}
-                    </td>
-                    <td>
-                        {% if a.size is not none %}
-                        <small class="text-muted">{{ "{:,}".format(a.size) }} bytes</small>
-                        {% else %}
-                        <small class="text-muted">-</small>
-                        {% endif %}
-                    </td>
-                    <td>
-                        {% if a.mtime %}
-                        <small class="text-muted">{{ a.mtime }}</small>
-                        {% else %}
-                        <small class="text-muted">-</small>
-                        {% endif %}
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
-</div>
-
-<div class="card">
+{# Active + recent fetches live alongside the fetch form so the
+   operator who just clicked "Fetch" sees progress without
+   leaving the page. #}
+<div class="card mb-3">
     <div class="card-header bg-light fw-semibold d-flex justify-content-between align-items-center">
         <span><i class="bi bi-arrow-down-circle me-1"></i>Active + recent fetches</span>
         <span class="text-muted small bty-poll-status">refreshing...</span>
@@ -162,15 +121,9 @@
     var pollHandle = null;
     var POLL_INTERVAL_MS = 2000;
 
-    // Reload the page when a previously-running fetch hits
-    // "completed" so the top "Boot artifacts" table reflects the
-    // newly-present files. Tracks the previous snapshot of fetches
-    // and reloads once on the running -> completed transition for
-    // a given tag.
     var seenCompleted = new Set();
     var lastFetchesSnapshot = null;
 
-    // HTML-escape arbitrary strings before innerHTML interpolation.
     function esc(v) {
         if (v === null || v === undefined) return "";
         return String(v)
@@ -227,6 +180,9 @@
         return '<span class="text-muted small">-</span>';
     }
 
+    // When a tag transitions running -> completed we reload so the
+    // List section (and the inline "missing artefacts" banner) pick
+    // up the newly-present files.
     function detectCompletion(fetches) {
         if (lastFetchesSnapshot) {
             fetches.forEach(function (s) {
@@ -295,33 +251,21 @@
     startPolling();
 })();
 </script>
-{% endif %}
 
-{# Recent activity for boot artefacts: release fetches +
-   fetch failures via the per-subject events card. Stays on
-   every section so an operator who clicked Fetch sees the
-   audit log context. #}
-{% with events=boot_events,
-        title="Recent netboot activity",
-        link_to_full="/ui/events?subject_kind=boot" %}
-{% include "ui/_events_card.html" %}
-{% endwith %}
-
-{# PXE / network-boot configuration cheatsheet + TFTP daemon
-   triage. Both belong here -- the "what do I configure on my
-   router" reference and the TFTP start/stop knob depend on the
-   netboot artefacts above being present, so they read
-   alongside the artefact list rather than in a generic
-   Settings page. #}
-<div class="card mb-4">
+{% elif section == "dhcp-pxe" %}
+{# Router-side cheatsheet. The bits the operator pastes into
+   UniFi / pfSense / dnsmasq DHCP config to point PXE clients
+   at this appliance. Reference-only; no editable fields here
+   -- bty doesn't run DHCP, the LAN router does. #}
+<div class="card mb-3">
     <div class="card-body">
-        <h2 class="h5 mb-3"><i class="bi bi-hdd-network me-2"></i>PXE / network boot</h2>
+        <h2 class="h5 mb-3"><i class="bi bi-hdd-network me-2"></i>DHCP / PXE</h2>
         <p class="text-muted">
             bty-server runs a TFTP daemon (dnsmasq) and serves boot
             artefacts over HTTP. The DHCP side stays with your LAN's
-            router/DHCP server -- bty deliberately doesn't try to
-            replace it. Point your router at this appliance with the
-            settings below.
+            router (or DHCP server); bty deliberately doesn't try
+            to replace it. Point your router at this appliance with
+            the settings below.
         </p>
 
         {% if missing_netboot_artifacts %}
@@ -337,7 +281,7 @@
                 kernel fetch until these files are present.
             </div>
             <a href="/ui/boot?section=fetch" class="btn btn-sm btn-outline-warning ms-3 flex-shrink-0">
-                <i class="bi bi-cloud-download me-1"></i>Fetch latest release
+                <i class="bi bi-cloud-download me-1"></i>Fetch latest
             </a>
         </div>
         {% endif %}
@@ -423,12 +367,16 @@
             For UEFI HTTP-Boot (vendor-class <code>HTTPClient</code>), point
             <code>option 67</code> at
             <code>http://{% if primary and primary.ipv4 %}{{ primary.ipv4 }}{% else %}&lt;bty-server&gt;{% endif %}:8080/boot/ipxe.efi</code>
-            instead -- no TFTP roundtrip.
+            instead (no TFTP roundtrip).
         </p>
     </div>
 </div>
 
-<div class="card">
+{% elif section == "tftp" %}
+{# Local dnsmasq.service state + start/stop/restart. The "take
+   PXE offline briefly" knob, separate from the cheatsheet
+   because most operators never touch it. #}
+<div class="card mb-3">
     <div class="card-body">
         <h2 class="h5 mb-3"><i class="bi bi-cpu me-2"></i>TFTP daemon</h2>
         <p class="text-muted">
@@ -475,4 +423,67 @@
         </div>
     </div>
 </div>
+
+{% else %}
+{# section == "list" (default): present/missing per-artefact + live
+   fetch table. Operators land on the OBSERVABLE boot state when
+   they click "Netboot" in the top nav. The single Fetch flow is
+   one sub-nav click away. #}
+<div class="card mb-4">
+    <div class="table-responsive">
+        <table class="table mb-0 align-middle">
+            <thead class="table-light">
+                <tr>
+                    <th>File</th>
+                    <th>Status</th>
+                    <th>Size</th>
+                    <th>Last fetched</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for a in artifacts %}
+                <tr>
+                    <td><code>{{ a.name }}</code></td>
+                    <td>
+                        {% if a.present %}
+                        <span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>present</span>
+                        {% else %}
+                        <span class="badge bg-warning text-dark"><i class="bi bi-exclamation-circle me-1"></i>missing</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if a.size is not none %}
+                        <small class="text-muted">{{ "{:,}".format(a.size) }} bytes</small>
+                        {% else %}
+                        <small class="text-muted">-</small>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if a.mtime %}
+                        <small class="text-muted">{{ a.mtime }}</small>
+                        {% else %}
+                        <small class="text-muted">-</small>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{% endif %}
+
+{# Recent activity for boot artefacts: release fetches +
+   fetch failures via the per-subject events card. On the
+   default list view only -- the DHCP / TFTP sections have their
+   own focused content and the events log link in the top nav
+   covers the cross-section view. #}
+{% if section in ("list", "fetch") %}
+{% with events=boot_events,
+        title="Recent netboot activity",
+        link_to_full="/ui/events?subject_kind=boot" %}
+{% include "ui/_events_card.html" %}
+{% endwith %}
+{% endif %}
 {% endblock %}

@@ -247,8 +247,8 @@ def test_ui_dashboard_subscribes_to_sse_for_live_counts(client: TestClient) -> N
 
 def test_ui_images_default_section_is_list_not_add_forms(client: TestClient) -> None:
     """Bare ``GET /ui/images`` lands on the list section: shows the
-    unified catalog table (or its empty state) but NOT the add-by-
-    URL / upload-manifest / upload-image forms.
+    unified catalog table (or its empty state) but NOT the
+    upload-from-URL / upload-catalog / upload-image forms.
     """
     _login(client)
     r = client.get("/ui/images")
@@ -256,22 +256,18 @@ def test_ui_images_default_section_is_list_not_add_forms(client: TestClient) -> 
     body = r.text
     # Sub-nav strip is present and List is the active pill.
     assert 'href="/ui/images?section=fetch"' in body
-    assert 'href="/ui/images?section=add-url"' in body
-    # The add-url form's input lives behind ?section=add-url, not on
-    # the default landing.
+    assert 'href="/ui/images?section=upload-image-from-url"' in body
+    # The upload-from-URL form's input lives behind its own section.
     assert 'id="image_url"' not in body
-    # Upload-manifest's accept=.toml is the section-specific marker;
-    # the catalog manifest upload form lives behind ?section=
-    # upload-manifest.
+    # Upload-catalog's accept=.toml is the section-specific marker.
     assert 'accept=".toml"' not in body
-    # Upload-image's <input type=file> with image extensions lives
-    # behind ?section=upload-image.
+    # Upload-image's <input type=file> with image extensions.
     assert 'id="upload-file"' not in body
 
 
-def test_ui_images_section_add_url_shows_add_form(client: TestClient) -> None:
+def test_ui_images_section_upload_image_from_url_shows_form(client: TestClient) -> None:
     _login(client)
-    r = client.get("/ui/images?section=add-url")
+    r = client.get("/ui/images?section=upload-image-from-url")
     assert r.status_code == 200
     body = r.text
     assert 'id="image_url"' in body
@@ -407,8 +403,9 @@ def test_ui_images_section_unrecognised_falls_back_to_list(client: TestClient) -
 
 
 def test_ui_boot_default_section_is_list(client: TestClient) -> None:
-    """Bare ``GET /ui/boot`` lands on the artefact table + polling
-    JS, but the Fetch form is behind ?section=fetch."""
+    """Bare ``GET /ui/boot`` lands on the artefact table; the Fetch
+    form (and its sibling Active+recent-fetches polling table) is
+    behind ?section=fetch."""
     _login(client)
     r = client.get("/ui/boot")
     assert r.status_code == 200
@@ -416,8 +413,8 @@ def test_ui_boot_default_section_is_list(client: TestClient) -> None:
     assert 'href="/ui/boot?section=fetch"' in body
     # Fetch form not on default landing.
     assert 'id="enqueue-fetch-btn"' not in body
-    # But the artefact table polling JS IS present.
-    assert "/boot/releases" in body
+    # The active-fetches polling is on the fetch section only.
+    assert 'id="fetches-tbody"' not in body
 
 
 def test_ui_boot_section_fetch_shows_form_only(client: TestClient) -> None:
@@ -460,27 +457,21 @@ def test_ui_machines_section_add_shows_form_only(client: TestClient) -> None:
     assert 'id="machines-tbody"' not in body
 
 
-def test_ui_machines_add_form_offers_every_boot_policy(client: TestClient) -> None:
-    """The Add-by-MAC form lets the operator pick the initial boot
-    policy. The pre-v0.22.11 form hardcoded only 3 of the 4
-    values (local / tui / flash) and forgot ``flash-once``, which
-    meant operators staging a "reflash on next boot, then leave
-    alone" machine had to claim it then immediately re-edit on the
-    detail page. The detail page already iterates over the
-    server-side ``BOOT_POLICIES`` tuple; this test pins that the
-    Add form is in sync.
+def test_ui_machines_add_form_offers_safe_boot_policies(client: TestClient) -> None:
+    """The Add-by-MAC form pre-fleet-contact only offers policies
+    that don't need a target_disk_serial: ``local`` (the safe
+    default) and ``tui`` (operator picks on tty1). The flash
+    policies need the box's disk inventory which only lands after
+    its first PXE check-in, so they're set on the detail page
+    after the row has discovered_at / known_disks populated.
     """
-    from bty.web._models import BOOT_POLICIES
-
     _login(client)
     body = client.get("/ui/machines?section=add").text
-    for policy in BOOT_POLICIES:
-        assert f'value="{policy}"' in body, (
-            f"Add-by-MAC form is missing the {policy!r} option "
-            f"(BOOT_POLICIES = {BOOT_POLICIES!r}). Operators "
-            "staging a machine with that policy would have to edit "
-            "on the detail page."
-        )
+    assert 'value="local"' in body
+    assert 'value="tui"' in body
+    # flash / flash-once are intentionally absent from this form.
+    assert 'value="flash"' not in body
+    assert 'value="flash-once"' not in body
 
 
 def test_ui_boot_page_shows_recent_activity_card(
@@ -1000,15 +991,15 @@ def test_ui_boot_page_renders_with_artifact_state(client: TestClient) -> None:
     # Empty boot dir => four "missing" badges (warning kind).
     assert body.count("missing</span>") == 4
     assert body.count('class="badge bg-warning text-dark"') >= 4
-    # The list section polls /boot/releases (the trackable release-
-    # fetch endpoint) for live progress + cancel actions.
-    assert "/boot/releases" in body
-    # The boot-page polling JS must NOT reference a never-set
-    # ``_just_completed_marker`` field nor wrap ``refresh`` to
-    # do a second ``fetch /boot/releases`` per poll cycle (the
-    # latter doubles load). Pin the cleaned-up shape so a
-    # copy-paste doesn't reintroduce them.
-    assert "_just_completed_marker" not in body
+    # The polling JS for active fetches lives on the fetch section
+    # (next to the Fetch form), not the default list view.
+    assert 'id="fetches-tbody"' not in body
+    fetch_body = client.get("/ui/boot?section=fetch").text
+    assert "/boot/releases" in fetch_body
+    # The polling JS must NOT reference a never-set
+    # ``_just_completed_marker`` field. Pin the cleaned-up shape so
+    # a copy-paste doesn't reintroduce it.
+    assert "_just_completed_marker" not in fetch_body
 
     # The Fetch button lives behind ?section=fetch (the sub-nav
     # split lands operators on the OBSERVABLE state by default;

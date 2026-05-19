@@ -69,12 +69,16 @@
                 <select class="form-select" id="add-boot-policy" name="boot_policy">
                     <option value="local" selected>local (don't reflash)</option>
                     <option value="tui">tui (operator picks)</option>
-                    <option value="flash">flash (every boot)</option>
-                    <option value="flash-once">flash-once (next boot, then flip to local)</option>
                 </select>
                 <div class="form-text small">
-                    MAC is the only required field. Image binding is
-                    set per-machine on the detail page (click the row);
+                    <code>flash</code> / <code>flash-once</code>
+                    need the target's disk inventory (posted by the
+                    box itself on first PXE contact) to pick a
+                    target_disk_serial; pick one of those on the
+                    machine's detail page after the inventory has
+                    landed. MAC is the only required field here.
+                    Image binding is set per-machine on the detail
+                    page (click the row);
                     the boot policy defaults to "local" so a freshly
                     added machine doesn't re-flash itself unexpectedly
                     on first boot.

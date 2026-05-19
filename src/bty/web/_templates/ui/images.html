@@ -4,11 +4,11 @@
 {% block subnav %}
 {% set right_html %}<span class="text-muted small">{{ unified|length }} entr{{ "y" if unified|length == 1 else "ies" }} | image-root <code>{{ image_root }}</code></span>{% endset %}
 {% with sections=[
-    {"key": "list",            "label": "List",                "icon": "list-ul",       "href": "/ui/images"},
-    {"key": "fetch",           "label": "Fetch catalog",       "icon": "cloud-download","href": "/ui/images?section=fetch"},
-    {"key": "upload-catalog",  "label": "Upload catalog",      "icon": "file-earmark-text", "href": "/ui/images?section=upload-catalog"},
-    {"key": "add-url",         "label": "Add by URL",          "icon": "cloud-plus",    "href": "/ui/images?section=add-url"},
-    {"key": "upload-image",    "label": "Upload image",        "icon": "upload",        "href": "/ui/images?section=upload-image"},
+    {"key": "list",                  "label": "List",                     "icon": "list-ul",       "href": "/ui/images"},
+    {"key": "fetch",                 "label": "Fetch catalog",            "icon": "cloud-download","href": "/ui/images?section=fetch"},
+    {"key": "upload-catalog",        "label": "Upload catalog",           "icon": "file-earmark-text", "href": "/ui/images?section=upload-catalog"},
+    {"key": "upload-image",          "label": "Upload image",             "icon": "upload",        "href": "/ui/images?section=upload-image"},
+    {"key": "upload-image-from-url", "label": "Upload image (from URL)",  "icon": "cloud-plus",    "href": "/ui/images?section=upload-image-from-url"},
 ] , active=section, right_html=right_html %}
 {% include "ui/_subnav.html" %}
 {% endwith %}
@@ -19,13 +19,13 @@
     <i class="bi bi-info-circle me-2 mt-1 flex-shrink-0" aria-hidden="true"></i>
     <div>
         Pre-built system images bty flashes onto target disks.
-        Populate via <a href="/ui/images?section=fetch">Fetch default</a>
-        to pull the bty release catalog, paste an image / oras URL,
-        upload a catalog file, or drop files directly into
-        <code>{{ image_root }}</code>. Entries are content-addressed:
-        bty refuses to flash an entry whose sha hasn't been computed
-        yet -- the background hash worker picks new files up
-        automatically.
+        Populate via <a href="/ui/images?section=fetch">Fetch
+        catalog</a> to pull the bty release catalog, paste an image
+        / oras URL, upload a catalog file, or drop files directly
+        into <code>{{ image_root }}</code>. Entries are content-
+        addressed: bty refuses to flash an entry whose sha hasn't
+        been computed yet (the background hash worker picks new
+        files up automatically).
     </div>
 </div>
 {% endblock %}
@@ -55,10 +55,10 @@
     </div>
 </div>
 
-{% elif section == "add-url" %}
+{% elif section == "upload-image-from-url" %}
 <div class="card mb-3">
     <div class="card-header bg-light fw-semibold">
-        <i class="bi bi-cloud-plus me-1"></i>Add image by URL
+        <i class="bi bi-cloud-plus me-1"></i>Upload image (from URL)
     </div>
     <div class="card-body">
         <form method="post" action="/ui/catalog/entries">
@@ -70,21 +70,13 @@
                    runs (regex covers http/https/oras schemes). #}
                 <input type="text" required class="form-control" id="image_url" name="image_url"
                        placeholder="https://example.com/ubuntu.img.gz  |  oras://ghcr.io/owner/repo:tag">
-            </div>
-            <div class="mb-3">
-                <label for="sha_url" class="form-label">SHA URL <span class="text-muted">(optional)</span></label>
-                <input type="url" class="form-control" id="sha_url" name="sha_url"
-                       placeholder="https://example.com/ubuntu-22.04.img.gz.sha256">
                 <div class="form-text small">
-                    For <code>http(s)://</code> URLs, providing a SHA URL
-                    (a sha256sum-style manifest) pins the content sha at
-                    add time so cache-through can verify it; without it
-                    the first flash trusts the upstream bytes and
-                    back-fills <code>disk_image_sha</code> with what it
-                    observed. For <code>oras://</code> refs the server
-                    resolves the OCI manifest at add time and uses the
-                    layer's content-addressed digest (SHA URL is
-                    ignored).
+                    For <code>http(s)://</code> URLs, the first flash
+                    trusts the upstream bytes and back-fills
+                    <code>disk_image_sha</code> with what it observed.
+                    For <code>oras://</code> refs the server resolves
+                    the OCI manifest at add time and uses the layer's
+                    content-addressed digest.
                 </div>
             </div>
             <button type="submit" class="btn btn-primary">
@@ -108,8 +100,8 @@
                 <input type="file" required class="form-control" id="catalog-file"
                        name="file" accept=".toml">
                 <div class="form-text small">
-                    Parses before clobbering the existing catalog -- a
-                    bad upload bounces back with the parse error.
+                    Parses before clobbering the existing catalog
+                    (a bad upload bounces back with the parse error).
                     Replaces <code>{{ manifest_path or "${BTY_STATE_DIR}/catalog.toml" }}</code>
                     and reloads the download manager in-process.
                 </div>

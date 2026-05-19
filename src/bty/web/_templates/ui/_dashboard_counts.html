@@ -38,16 +38,17 @@
             </div>
         </a>
     </div>
-    {# Fourth tile: link to /ui/settings for router-side PXE config
-       guidance. bty no longer owns DHCP / proxy-DHCP -- the tile is
-       a navigation hint rather than a live status reflection. #}
+    {# Fourth tile: link to the Netboot page's DHCP/PXE section
+       (router-side config cheatsheet + TFTP daemon controls).
+       bty doesn't own DHCP, so the tile is a navigation hint
+       rather than a live status reflection. #}
     <div class="col-md-3">
-        <a href="/ui/settings" class="text-decoration-none text-body">
+        <a href="/ui/boot?section=dhcp-pxe" class="text-decoration-none text-body">
             <div class="card h-100 shadow-sm">
                 <div class="card-body d-flex align-items-center">
                     <i class="bi bi-hdd-network display-4 text-primary me-3"></i>
                     <div>
-                        <h2 class="h5 mb-0">PXE / network boot</h2>
+                        <h2 class="h5 mb-0">DHCP / PXE</h2>
                         <p class="text-muted small mb-0">router config &amp; TFTP root</p>
                     </div>
                 </div>

@@ -467,7 +467,13 @@ def register_ui_routes(
         unified = list_unified_images() if list_unified_images is not None else []
         flash = request.query_params.get("error")
         section = request.query_params.get("section") or "list"
-        if section not in ("list", "fetch", "add-url", "upload-catalog", "upload-image"):
+        if section not in (
+            "list",
+            "fetch",
+            "upload-catalog",
+            "upload-image",
+            "upload-image-from-url",
+        ):
             section = "list"
         # Catalog manifest path + release repo for the "Catalog
         # manifest" card. The path mirrors the resolution in
@@ -689,7 +695,7 @@ def register_ui_routes(
         Unrecognised ``section`` values fall back to ``list``.
         """
         section = request.query_params.get("section") or "list"
-        if section not in ("list", "fetch"):
+        if section not in ("list", "fetch", "dhcp-pxe", "tftp"):
             section = "list"
         # Recent activity for boot artefacts: release fetches /
         # fetch failures.
