@@ -319,9 +319,7 @@ def test_top_level_nav_highlights_active_page(client: TestClient) -> None:
         body = client.get(path).text
         actives = [
             href
-            for cls, href in re.findall(
-                r'<a class="nav-btn ([^"]*)" href="([^"]+)"', body
-            )
+            for cls, href in re.findall(r'<a class="nav-btn ([^"]*)" href="([^"]+)"', body)
             if "active" in cls
         ]
         assert actives == [expected_href], (
