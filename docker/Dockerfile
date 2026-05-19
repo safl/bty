@@ -106,7 +106,16 @@ RUN set -eu; \
 # web itself having shadow-group access. Same pattern the appliance
 # uses (``User=bty`` in bty-web.service); aligning the container
 # avoids divergent privilege levels between deployment shapes.
-RUN useradd --system --no-create-home --shell /usr/sbin/nologin bty \
+#
+# ``--uid 1000`` pins the UID so the operator's host-side ``chown
+# -R 1000:1000 ./bty-data`` doesn't break when apt's package order
+# changes the auto-assigned UID. Empirically dnsmasq's postinst
+# grabs UID 999 first on Debian 13, so ``useradd --system`` would
+# otherwise hand bty UID 998 -- and the Makefile / docker-compose
+# / docs would all silently fall out of sync.
+RUN groupadd --gid 1000 bty \
+ && useradd --uid 1000 --gid 1000 --no-create-home \
+        --shell /usr/sbin/nologin bty \
  && echo 'bty:bty' | chpasswd
 
 # State + image directories. Operator volume-mounts ``/var/lib/bty``;

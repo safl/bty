@@ -172,16 +172,18 @@ docker-build:
 	    -f docker/Dockerfile -t bty-web:dev .
 
 # Trial run with a host-side data dir so dropped images show up in
-# the container catalog. The bty-web container runs as uid 999
-# (the bty user, mirroring the appliance's ``User=bty`` for PAM
-# auth via setgid unix_chkpwd); a bare bind-mount the operator
+# the container catalog. The bty-web container runs as uid 1000
+# (the bty user, pinned in the Dockerfile so it doesn't drift
+# when Debian's package order changes which UIDs ``useradd
+# --system`` auto-assigns -- dnsmasq's postinst empirically grabs
+# UID 999 first on Debian 13); a bare bind-mount the operator
 # owns would fail the entrypoint's writability preflight, so we
-# chown the dir to 999:999 first. Requires sudo; alternative is
+# chown the dir to 1000:1000 first. Requires sudo; alternative is
 # ``docker run -v bty-data:/var/lib/bty ...`` with a managed
 # volume (no chown needed, harder to inspect from the host).
 docker-run:
 	mkdir -p bty-data/images
-	sudo chown -R 999:999 bty-data
+	sudo chown -R 1000:1000 bty-data
 	docker run -d --name bty-web --rm -p 8080:8080 \
 	    -v "$(CURDIR)/bty-data":/var/lib/bty bty-web:dev
 	@echo "bty-web running on http://localhost:8080/ui (login: bty / bty)"

@@ -26,8 +26,9 @@ STATE_DIR="${BTY_STATE_DIR:-/var/lib/bty}"
 IMAGE_ROOT="${BTY_IMAGE_ROOT:-/var/lib/bty/images}"
 
 # Volume-permission preflight. The container runs bty-web as the
-# unprivileged ``bty`` user (uid 999) so it matches the appliance
-# layout. Bind mounts inherit host ownership, so a bare
+# unprivileged ``bty`` user (uid 1000, pinned in the Dockerfile so
+# it doesn't drift across Debian package-order changes). Bind
+# mounts inherit host ownership, so a bare
 # ``-v ./bty-data:/var/lib/bty`` from a host where the dir is
 # root-owned blocks bty-web's first write to ``state.db`` /
 # ``session-secret`` and the container would crash 30 frames
@@ -81,8 +82,8 @@ if [ -z "${BTY_QUIET:-}" ]; then
   State dir:     ${BTY_STATE_DIR:-/var/lib/bty}
   Browser UI:    http://<host>:${BTY_WEB_PORT:-8080}/ui
 
-  Connect bty tui clients with:
-       bty tui --server http://<host>:${BTY_WEB_PORT:-8080}
+  Connect bty wizard clients with:
+       bty --server http://<host>:${BTY_WEB_PORT:-8080} --mac <self-mac>
 
   PXE clients: configure your LAN DHCP server (UniFi / pfSense /
   dnsmasq / etc.) to point clients at this container -- option 60

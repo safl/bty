@@ -5,12 +5,12 @@
 #   -> http://localhost:8080/ui   (login: bty / bty)
 #
 # Uses a docker-managed named volume (``bty-data``) so the in-
-# container bty user (uid 999) owns it without any host-side
-# chown step. To inspect or feed images from the host filesystem
-# instead:
+# container bty user (uid 1000, pinned in the Dockerfile) owns it
+# without any host-side chown step. To inspect or feed images from
+# the host filesystem instead:
 #
-#   1. Pre-create the dir owned by uid 999 ("the bty user"):
-#        mkdir -p ./bty-data && sudo chown -R 999:999 ./bty-data
+#   1. Pre-create the dir owned by uid 1000 ("the bty user"):
+#        mkdir -p ./bty-data && sudo chown -R 1000:1000 ./bty-data
 #   2. Replace the volume line with: ``- ./bty-data:/var/lib/bty``
 #
 # Full bty-server parity with the appliance: bty-web (HTTP on
