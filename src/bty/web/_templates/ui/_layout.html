@@ -125,6 +125,45 @@
                 animation: none;
             }
         }
+
+        /* Sub-nav strip. Sits immediately below the main bg-dark
+           navbar; coloured one notch lighter so it reads as
+           "second-tier nav, still chrome" rather than "page
+           content area". ``--bs-gray-800`` (#343a40) vs the main
+           nav's ``--bs-gray-900`` (#212529). */
+        .subnav-strip {
+            background-color: #343a40;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        .subnav-strip .nav-pills .nav-link {
+            color: rgba(255, 255, 255, 0.78);
+            padding: 0.25rem 0.7rem;
+        }
+        .subnav-strip .nav-pills .nav-link:hover {
+            color: #fff;
+            background-color: rgba(255, 255, 255, 0.10);
+        }
+        .subnav-strip .nav-pills .nav-link.active {
+            color: #fff;
+            background-color: #0d6efd;
+        }
+        /* Right-aligned meta blob: pages pass ``text-muted small``
+           etc. via the ``right_html`` slot; rebase those colours
+           for the dark backdrop so live indicators / filter chips
+           stay readable. */
+        .subnav-strip .text-muted {
+            color: rgba(255, 255, 255, 0.55) !important;
+        }
+        .subnav-strip code {
+            color: rgba(255, 255, 255, 0.85);
+            background-color: transparent;
+        }
+        .subnav-strip a {
+            color: rgba(255, 255, 255, 0.78);
+        }
+        .subnav-strip a:hover {
+            color: #fff;
+        }
     </style>
     <script src="/static/htmx.min.js"></script>
     <script src="/static/sse.js"></script>
