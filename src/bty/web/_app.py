@@ -2241,8 +2241,7 @@ def create_app(
             return RedirectResponse(
                 "/ui/images?error="
                 + urllib.parse.quote(
-                    f"unexpected file extension for catalog manifest: {filename!r} "
-                    "(expected .toml)",
+                    f"unexpected file extension for catalog upload: {filename!r} (expected .toml)",
                     safe="",
                 ),
                 status_code=status.HTTP_303_SEE_OTHER,
@@ -2254,7 +2253,7 @@ def create_app(
             return RedirectResponse(
                 "/ui/images?error="
                 + urllib.parse.quote(
-                    f"catalog manifest upload exceeded {_CATALOG_UPLOAD_MAX_BYTES} bytes; "
+                    f"catalog upload exceeded {_CATALOG_UPLOAD_MAX_BYTES} bytes; "
                     "is this actually a catalog.toml?",
                     safe="",
                 ),
@@ -2378,7 +2377,7 @@ def create_app(
         if catalog_state.catalog is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="no catalog manifest configured",
+                detail="no catalog configured",
             )
         try:
             state = await download_manager.enqueue(body.name)
@@ -2397,7 +2396,7 @@ def create_app(
         if catalog_state.catalog is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="no catalog manifest configured",
+                detail="no catalog configured",
             )
         state = await download_manager.cancel(name)
         if state is None:

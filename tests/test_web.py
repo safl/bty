@@ -2752,7 +2752,7 @@ def test_catalog_downloads_post_without_manifest_404(app_client: TestClient) -> 
         cookies=AUTH,
     )
     assert r.status_code == 404
-    assert "no catalog manifest" in r.json()["detail"]
+    assert "no catalog" in r.json()["detail"]
 
 
 def test_catalog_downloads_delete_requires_auth(app_client: TestClient) -> None:
@@ -2767,7 +2767,7 @@ def test_catalog_downloads_delete_no_manifest_404(app_client: TestClient) -> Non
     not 500. Same shape as POST /catalog/downloads."""
     r = app_client.delete("/catalog/downloads/anything", cookies=AUTH)
     assert r.status_code == 404
-    assert "no catalog manifest" in r.json()["detail"]
+    assert "no catalog" in r.json()["detail"]
 
 
 def test_catalog_hashes_requires_auth(app_client: TestClient) -> None:
@@ -3758,14 +3758,15 @@ def test_ui_catalog_upload_auto_imports_manifest_into_catalog_entries(
 
 def test_ui_catalog_upload_imports_into_db_and_303s_on_success(
     app_client: TestClient,
-    tmp_path: Path,
 ) -> None:
-    """Upload a valid manifest -> entries are imported into the
-    ``catalog_entries`` DB, no file is written to disk, 303 back to
-    /ui/images without an error param. The manifest is treated as
-    an IMPORT SOURCE: the DB is the authoritative catalog.
+    """Upload a valid catalog -> entries are imported into the
+    ``catalog_entries`` DB, the bytes are written to
+    ``manifest_path`` and the DownloadManager binds, 303 back to
+    /ui/images without an error param. Symmetric with
+    ``test_ui_catalog_fetch_release_imports_into_db_and_303s``:
+    without the write+reload step, per-row Fetch buttons on
+    /ui/images would 404 right after a successful upload.
     """
-    del tmp_path  # not used; just confirms no on-disk artefact
     body = b'version = 1\n\n[[images]]\nname = "demo"\nsrc = "https://example.com/demo.img.zst"\n'
     r = app_client.post(
         "/ui/catalog/upload",
@@ -3779,6 +3780,15 @@ def test_ui_catalog_upload_imports_into_db_and_303s_on_success(
     # from catalog_entries) -- evidence the import landed in the DB.
     listing = app_client.get("/catalog/entries", cookies=AUTH).json()
     assert any(e["src"] == "https://example.com/demo.img.zst" for e in listing)
+    # /catalog/downloads reports a non-null ``manifest`` -- proves
+    # the write+reload happened so the DownloadManager is bound
+    # and per-row Fetch buttons will work.
+    downloads = app_client.get("/catalog/downloads", cookies=AUTH).json()
+    assert downloads["manifest"] is not None, (
+        "upload-catalog must write the bytes to manifest_path + "
+        "reload so the DownloadManager binds; without it the "
+        "per-row Fetch buttons would 404."
+    )
 
 
 def test_ui_catalog_upload_rejects_bad_manifest_keeps_existing(
@@ -3835,15 +3845,14 @@ class _FakeUrlopenResp:
 
 def test_ui_catalog_fetch_release_imports_into_db_and_303s(
     app_client: TestClient,
-    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Fetch-release stubs urlopen, imports the bytes' entries into
-    ``catalog_entries``, 303s back to /ui/images. No file is written
-    to disk -- the fetched manifest is treated as an import source
-    only.
+    ``catalog_entries``, writes the bytes to ``manifest_path`` and
+    reloads so the DownloadManager binds, then 303s back to
+    /ui/images. Without the write+reload step, per-row Fetch
+    buttons on /ui/images would 404 with "no catalog configured".
     """
-    del tmp_path  # not used; just confirms no on-disk artefact
     body = b'version = 1\n\n[[images]]\nname = "rel"\nsrc = "https://example.com/rel.img.zst"\n'
 
     import urllib.request as _urlreq
@@ -3858,6 +3867,16 @@ def test_ui_catalog_fetch_release_imports_into_db_and_303s(
     assert r.headers["location"] == "/ui/images"
     listing = app_client.get("/catalog/entries", cookies=AUTH).json()
     assert any(e["src"] == "https://example.com/rel.img.zst" for e in listing)
+    # /catalog/downloads must now report a non-null ``manifest``
+    # (proves the write+reload happened). Without that step
+    # POST /catalog/downloads would 404; the symmetric GET
+    # would return ``{"manifest": null, ...}``.
+    downloads = app_client.get("/catalog/downloads", cookies=AUTH).json()
+    assert downloads["manifest"] is not None, (
+        "fetch-release must write the catalog to manifest_path + "
+        "reload so the DownloadManager binds; without it the "
+        "per-row Fetch buttons would 404."
+    )
 
 
 # ---------- /ui/catalog/upload and /ui/catalog/fetch-release error matrix --
