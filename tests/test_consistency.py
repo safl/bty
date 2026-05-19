@@ -650,3 +650,85 @@ def test_pydantic_models_have_docstrings() -> None:
         f"Pydantic models missing docstrings: {missing}. "
         "OpenAPI schemas will surface empty descriptions."
     )
+
+
+# ----------------------------------------------------------------------
+# 14. Docker bty UID stays in sync across Dockerfile + Makefile + compose
+# ----------------------------------------------------------------------
+
+
+def test_bty_web_help_documents_every_env_var() -> None:
+    """Every ``BTY_*`` env var that ``bty.web.main()`` reads from
+    ``os.environ`` must be documented in the argparse description
+    that ``bty-web --help`` prints. Without this pin a future
+    "read BTY_FOO_BAR" addition can land without the operator-
+    facing surface picking it up, and the only way to discover
+    the knob is grep-the-source.
+
+    ``BTY_SESSION_SECRET`` lives in ``_resolve_secret_key`` (a
+    helper called from main); include both files in the scan.
+    """
+    init = REPO_ROOT / "src" / "bty" / "web" / "__init__.py"
+    body = init.read_text()
+    env_keys = sorted(set(re.findall(r'os\.environ\.get\(\s*"(BTY_[A-Z0-9_]+)"', body)))
+    assert env_keys, "scan should find at least one BTY_* lookup"
+
+    # Description text lives inside the argparse call. Easiest
+    # signal: the env-var name appears somewhere in the file
+    # outside the ``os.environ.get`` line itself (i.e. in the
+    # description block or a help string).
+    missing = []
+    for key in env_keys:
+        # Strip the line that does the lookup to make sure the
+        # name appears in user-facing text too.
+        outside = re.sub(rf"os\.environ\.get\([^)]*{key}[^)]*\)", "", body)
+        if key not in outside:
+            missing.append(key)
+    assert not missing, (
+        f"bty-web --help is missing env-var documentation for: {missing}. "
+        f"Add a line under the argparse description in "
+        f"src/bty/web/__init__.py."
+    )
+
+
+def test_docker_bty_uid_aligned_across_surfaces() -> None:
+    """The Dockerfile pins the in-container bty user to a fixed
+    UID; the Makefile ``docker-run`` target chowns the host-side
+    bind-mount to the same UID; the docker-compose comments
+    document it. If any of those three drift the
+    ``make docker-clean docker-build docker-run`` flow comes up
+    and immediately exits 1 (the entrypoint's writability
+    preflight kicks in) and the operator sees nothing on
+    http://localhost:8080/ui -- the exact bug v0.22.11 shipped.
+
+    Pin the alignment so a future Dockerfile bump that changes
+    the UID has to also bump the Makefile + compose surfaces.
+    """
+    dockerfile = (REPO_ROOT / "docker" / "Dockerfile").read_text()
+    makefile = (REPO_ROOT / "Makefile").read_text()
+    compose = (REPO_ROOT / "docker" / "docker-compose.yml").read_text()
+
+    uid_match = re.search(r"useradd\s+--uid\s+(\d+)\s+--gid\s+\d+", dockerfile)
+    assert uid_match, (
+        "Dockerfile must pin the bty user to a fixed UID via "
+        "``useradd --uid N --gid N``. Without an explicit UID the "
+        "value drifts when apt's package order changes."
+    )
+    uid = uid_match.group(1)
+
+    chown_match = re.search(r"chown\s+-R\s+(\d+):(\d+)\s+bty-data", makefile)
+    assert chown_match, "Makefile docker-run target must chown bty-data"
+    assert chown_match.group(1) == uid and chown_match.group(2) == uid, (
+        f"Makefile chowns bty-data to {chown_match.group(1)}:{chown_match.group(2)} "
+        f"but Dockerfile pins bty to uid {uid}. Align them or the "
+        f"entrypoint's writability preflight will reject the bind-mount."
+    )
+
+    # docker-compose.yml documents the UID in operator comments.
+    # Look for the literal "(uid N" so a future operator copying
+    # the chown command finds the right number.
+    assert f"(uid {uid}" in compose, (
+        f"docker-compose.yml comments should reference uid {uid} "
+        f"(matching the Dockerfile pin); operator copy-paste relies "
+        f"on that number being current."
+    )
