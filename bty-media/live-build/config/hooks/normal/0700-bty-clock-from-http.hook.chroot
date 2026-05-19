@@ -13,7 +13,7 @@
 #
 # Belt-and-braces ``ln -sf`` for both units to survive
 # ``systemctl enable`` no-op edge cases in live-build chroots
-# (see 0900-bty-enable-flash.hook.chroot for the long form of
+# (see 0900-bty-enable-services.hook.chroot for the long form of
 # why).
 
 set -eu

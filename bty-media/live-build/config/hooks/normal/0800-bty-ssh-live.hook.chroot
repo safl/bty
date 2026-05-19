@@ -50,7 +50,7 @@
 #     keys here forces that path.
 #
 # Belt-and-braces explicit `ln -sf` for the wants symlinks,
-# matching the pattern in 0900-bty-enable-flash.hook.chroot --
+# matching the pattern in 0900-bty-enable-services.hook.chroot --
 # ``systemctl enable`` in a live-build chroot occasionally
 # produces a no-op.
 

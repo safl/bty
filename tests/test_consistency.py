@@ -293,7 +293,7 @@ def test_systemd_units_in_live_env_declare_install_section() -> None:
     enabled via systemctl but won't be picked up if anything
     queries its state (``is-enabled`` returns ``static``). The
     bty live env enables several units in
-    ``hooks/normal/0900-bty-enable-flash.hook.chroot``; each must
+    ``hooks/normal/0900-bty-enable-services.hook.chroot``; each must
     actually have an [Install] section or the enable is a no-op.
     """
     units_dir = (
@@ -485,7 +485,7 @@ def test_boot_banner_script_and_units_exist_and_are_wired() -> None:
     Pin:
       * /usr/local/sbin/bty-boot-banner exists + is executable.
       * Three systemd units exist (early, mid, late).
-      * The enable hook (0900-bty-enable-flash.hook.chroot)
+      * The enable hook (0900-bty-enable-services.hook.chroot)
         contains ``systemctl enable bty-banner-<phase>.service``
         for each phase.
     """
@@ -505,7 +505,7 @@ def test_boot_banner_script_and_units_exist_and_are_wired() -> None:
         / "config"
         / "hooks"
         / "normal"
-        / "0900-bty-enable-flash.hook.chroot"
+        / "0900-bty-enable-services.hook.chroot"
     )
     hook_body = hook.read_text()
     for phase in ("early", "mid", "late"):

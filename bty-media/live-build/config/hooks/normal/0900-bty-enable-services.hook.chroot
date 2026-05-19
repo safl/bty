@@ -1,5 +1,5 @@
 #!/bin/sh
-# 0900-bty-enable-flash.hook.chroot - enable bty live-env services.
+# 0900-bty-enable-services.hook.chroot - enable bty live-env services.
 #
 # Runs after 0500-bty-install (CLI present) and after live-build's
 # default hooks. Creates the multi-user.target.wants symlinks so the
