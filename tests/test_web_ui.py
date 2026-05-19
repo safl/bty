@@ -141,11 +141,26 @@ def test_ui_logout_clears_cookie(client: TestClient) -> None:
 
 
 def test_ui_dashboard_renders_after_login(client: TestClient) -> None:
+    """Bare ``GET /ui/dashboard`` after auth renders the three
+    surfaces a logged-in operator expects to see: the counter
+    tiles, the sanity-check card, and the recent-activity card.
+    The "Dashboard" string previously asserted here only matched
+    the ``<title>`` tag (since the dashboard nav-btn was dropped
+    in favour of the brand pill); pin the actual content instead.
+    """
     _login(client)
     r = client.get("/ui/dashboard")
     assert r.status_code == 200
-    assert "Dashboard" in r.text
-    assert "Machines" in r.text
+    body = r.text
+    # Counter tiles render.
+    assert 'id="dashboard-counts"' in body
+    # Sanity checklist renders.
+    assert "Sanity checklist" in body
+    # Recent-activity card title.
+    assert "Recent activity" in body
+    # Navbar still carries the Machines nav-btn.
+    assert 'href="/ui/machines">' in body
+    assert "Machines" in body
 
 
 def test_ui_images_handles_empty_release_repo_env(

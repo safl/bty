@@ -433,7 +433,10 @@ templates, Bootstrap CSS, HTMX form posts).
 - `POST /ui/logout` -> ``request.session.clear()``; SessionMiddleware
  emits a deletion cookie.
 - `GET /ui/dashboard` -> overview (machine count, discovered count,
- image count)
+ image count) + sanity-checklist card (one row per readiness
+ condition: netboot artefacts present / catalog non-empty / TFTP
+ daemon running, with deep-links into the relevant page when a
+ condition fails) + recent-activity slice
 - `GET /ui/machines` -> table of all machines with a "discovered"
  badge for unassigned rows; auto-refreshes via SSE
 - `GET /ui/machines/{mac}` -> detail + edit form
@@ -448,25 +451,12 @@ templates, Bootstrap CSS, HTMX form posts).
  OCI manifest at add time, uses the layer's content-addressed
  digest as the entry's sha256 (= machine-bindable), and skips
  the optional sha_url branch (manifest is authoritative).
-- `GET /ui/boot` -> live-env boot artifacts: present/missing per
- artifact, sizes, last-fetched timestamps, "fetch latest release"
- form
-- `POST /ui/boot/fetch-release` -> downloads
- `vmlinuz`/`initrd`/`squashfs`/`sha256` from
- `https://github.com/<BTY_BOOT_RELEASE_REPO>/releases/<tag>/download/`
- (default `safl/bty`, default tag `latest`); verifies the manifest
- and atomically installs into `BTY_BOOT_DIR`
-- `GET /ui/settings` -> thin operator-account page (About card +
- Authentication card). Reached via the gear icon in the user-bar,
- not the top nav. Authentication explanatory text only: the
- credential is the OS password of the bty service user, the
- operator rotates it with `sudo passwd bty`; to force every
- session to invalidate in one shot, rotate the cookie-signing
- secret with `rm /var/lib/bty/session-secret && systemctl
- restart bty-web`.
-- `GET /ui/boot` -> netboot artifacts list + (via sub-nav pills):
+- `GET /ui/boot` -> netboot artifacts list + sub-nav pills:
+ - **List** (default) - present/missing per artifact, sizes,
+ last-fetched timestamps.
  - **Fetch netboot artifacts** - one-button form to pull
- `vmlinuz`/`initrd`/`squashfs`/`sha256` from the bty release page.
+ `vmlinuz`/`initrd`/`squashfs`/`sha256` from the bty release page,
+ plus the live "active + recent fetches" polling table.
  - **DHCP / PXE** - appliance-IP/interfaces table + router-config
  cheatsheet (option 60 / 66 / 67 values to paste into the LAN's
  DHCP server). bty does NOT run any DHCP role; the operator's
@@ -475,6 +465,19 @@ templates, Bootstrap CSS, HTMX form posts).
  - **TFTP daemon** - live `systemctl is-active dnsmasq.service`
  badge + Start / Stop / Restart buttons driven by the
  sudoers-permitted `bty-web-tftp` helper.
+- `POST /ui/boot/fetch-release` -> downloads
+ `vmlinuz`/`initrd`/`squashfs`/`sha256` from
+ `https://github.com/<BTY_BOOT_RELEASE_REPO>/releases/<tag>/download/`
+ (default `safl/bty`, default tag `latest`); verifies the manifest
+ and atomically installs into `BTY_BOOT_DIR`.
+- `GET /ui/settings` -> thin operator-account page (About card +
+ Authentication card). Reached via the gear icon in the user-bar,
+ not the top nav. Authentication explanatory text only: the
+ credential is the OS password of the bty service user, the
+ operator rotates it with `sudo passwd bty`; to force every
+ session to invalidate in one shot, rotate the cookie-signing
+ secret with `rm /var/lib/bty/session-secret && systemctl
+ restart bty-web`.
 - `POST /ui/settings/tftp-control` -> drives `bty-web-tftp <action>`
  (allowlist `start` / `stop` / `restart`), the sole sudoers
  grant in `/etc/sudoers.d/bty-web`. URL is unchanged for
