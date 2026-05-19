@@ -16,15 +16,26 @@
             height: 3px;
             background: linear-gradient(90deg, #0d6efd 0%, #6610f2 50%, #d63384 100%);
         }
-        /* When ``nav_active='dashboard'``, give the brand a subtle
-           highlight so the operator sees "you are on the
-           dashboard" -- the brand pill doubles as the Dashboard
-           nav link, so it carries the active state. */
-        .navbar-brand.brand-active {
-            background-color: rgba(13, 110, 253, 0.85);
+        /* Brand pill keeps the same padding + radius on every
+           page; the active-on-dashboard state only swaps the
+           background colour so the layout doesn't shift when the
+           operator navigates between pages. (The previous version
+           added padding when active and the dashboard pill jumped
+           a few pixels right of where it sits on other pages.) */
+        .navbar-brand {
             border-radius: 0.5rem;
             padding-left: 0.6rem;
             padding-right: 0.6rem;
+            transition: background-color 0.15s;
+        }
+        .navbar-brand.brand-active {
+            background-color: rgba(13, 110, 253, 0.85);
+        }
+        .navbar-brand:hover {
+            background-color: rgba(255, 255, 255, 0.06);
+        }
+        .navbar-brand.brand-active:hover {
+            background-color: rgba(13, 110, 253, 0.95);
         }
         .navbar-brand .brand-icon {
             /* The bty bat mascot, used in place of a Bootstrap icon
