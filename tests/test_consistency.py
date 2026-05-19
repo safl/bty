@@ -732,3 +732,35 @@ def test_docker_bty_uid_aligned_across_surfaces() -> None:
         f"(matching the Dockerfile pin); operator copy-paste relies "
         f"on that number being current."
     )
+
+
+def test_docker_run_and_compose_publish_same_ports() -> None:
+    """``make docker-run`` (the manual single-command path) and
+    ``docker-compose.yml`` (the orchestrated path) should publish
+    the same port set. Otherwise the operator's mental model
+    silently differs between deployment shapes -- e.g. compose
+    serves TFTP but the make target doesn't, and a PXE client
+    appears to be unreachable from one but not the other.
+    """
+    makefile = (REPO_ROOT / "Makefile").read_text()
+    compose = (REPO_ROOT / "docker" / "docker-compose.yml").read_text()
+
+    # Match ``-p HOST:CONTAINER[/proto]`` flags in the docker-run
+    # rule. ``-p 69:69/udp`` -> ("69", "69", "udp"). TCP is the
+    # default when /proto is missing; normalise.
+    make_ports = {
+        f"{host}:{cont}/{proto or 'tcp'}"
+        for host, cont, proto in re.findall(r"-p\s+(\d+):(\d+)(?:/(tcp|udp))?", makefile)
+    }
+    # docker-compose YAML: ``"HOST:CONTAINER[/proto]"`` strings
+    # inside the ports list. Same regex shape.
+    compose_ports = {
+        f"{host}:{cont}/{proto or 'tcp'}"
+        for host, cont, proto in re.findall(r'"(\d+):(\d+)(?:/(tcp|udp))?"', compose)
+    }
+    assert make_ports == compose_ports, (
+        f"Makefile docker-run ports {sorted(make_ports)} != "
+        f"docker-compose.yml ports {sorted(compose_ports)}. "
+        f"One deployment shape can't reach a service the other "
+        f"can; align them or the operator gets surprises."
+    )

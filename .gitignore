@@ -129,3 +129,11 @@ docs/tooling/uv.lock
 # Claude Code's per-project state directory (scheduled-task lock,
 # permission settings). Local to each developer's environment.
 .claude/
+
+# Host-side bind-mount root for ``make docker-run`` (the
+# bty-web:dev container writes state.db / session-secret / image
+# catalog here under uid 1000). Owned by the in-container bty
+# user, so a bare ``git add -A`` would either need sudo to read
+# the dir or stage container-managed state we don't want in the
+# repo. Operator wipes with ``make docker-clean``.
+bty-data/
