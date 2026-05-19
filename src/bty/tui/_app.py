@@ -450,10 +450,10 @@ class BtyTui:
         prompt_text = self._render_prompt_line(
             title="Pick an image to flash (or download an image catalog)",
             extras=(
-                ("#", "pick by number"),
+                ("#", "pick"),
                 ("d", "default catalog"),
                 ("c", "custom catalog"),
-                ("r", "refresh catalog"),
+                ("r", "refresh"),
                 ("q", "quit"),
             ),
         )
@@ -519,7 +519,7 @@ class BtyTui:
         prompt_text = self._render_prompt_line(
             title="Pick a target disk",
             extras=(
-                ("#", "pick by number"),
+                ("#", "pick"),
                 ("b", "back"),
                 ("q", "quit"),
             ),
@@ -825,22 +825,20 @@ class BtyTui:
         builder).
         """
         del title  # surfaced near the prompt instead
-        # Build the Steps line first (so we can size the banner to
-        # match its plain-text width). Stage labels are fixed -- they
-        # don't depend on terminal state -- so we know the visible
-        # width up front.
-        labels = ("Image", "Disk", "Flash", "Reboot")
-        steps_plain = "Steps: " + " -> ".join(f"{n}.{lbl}" for n, lbl in enumerate(labels, 1))
-        steps_width = len(steps_plain)
         # Banner: ``+- -- ---={[| bty vX.Y.Z |]}=--- -- -+`` with
-        # extra ``-`` filler symmetric inside the wings so the
-        # outermost ``+`` characters land at the same column as the
-        # last character of the Steps line. Pure ASCII; renders
+        # extra ``-`` filler symmetric inside the wings to reach the
+        # banner-width target. 79 chars = one short of an 80-col
+        # terminal's right edge -- comfortable on serial / VGA-text
+        # / framebuffer consoles + tightly framed on the typical SSH
+        # / BMC virtual-console widths, without ever wrapping when
+        # the terminal is at the 80-col floor. Pure ASCII; renders
         # identically on framebuffer / SSH / serial.
+        labels = ("Image", "Disk", "Flash", "Reboot")
+        banner_width = 79
         left_wing = "+- -- ---"
         right_wing = "--- -- -+"
         core = f"={{[| bty v{bty.__version__} |]}}="
-        filler_total = max(0, steps_width - (len(left_wing) + len(core) + len(right_wing)))
+        filler_total = max(0, banner_width - (len(left_wing) + len(core) + len(right_wing)))
         left_filler = "-" * (filler_total // 2)
         right_filler = "-" * (filler_total - filler_total // 2)
         banner = f"{left_wing}{left_filler}{core}{right_filler}{right_wing}"
@@ -854,16 +852,32 @@ class BtyTui:
                 crumb_parts.append(f"[{_MUTED}]{n}.{label}[/]")
         crumb = " -> ".join(crumb_parts)
         self._console.print(f"Steps: {crumb}")
-        self._console.print()
+        # NOTE: no trailing blank line -- screens that follow with
+        # ``_print_source_summary`` want the ``image_root`` /
+        # ``catalog`` lines to read as a continuation of the header.
+        # Screens that follow with a Panel (confirm-flash, flashing,
+        # reboot) print their own leading blank line if they want
+        # breathing room.
 
     def _print_source_summary(self) -> None:
-        """One-line summary of where the catalog rows came from."""
-        parts = [f"image_root: [{_PRIMARY}]{self._state.image_root}[/]"]
-        if self._state.catalog_source:
-            parts.append(f"catalog: [{_PRIMARY}]{self._state.catalog_source}[/]")
+        """Per-line summary of where the wizard's data comes from.
+
+        Always prints ``image_root`` and ``catalog``. The catalog
+        line reads ``local only`` when no ``--catalog`` source was
+        passed -- explicit absence rather than a missing row, so an
+        operator scanning the screen never wonders "did I forget to
+        configure something?". ``mac`` is shown only when present
+        (PXE-driven runs have it; ad-hoc USB runs don't).
+        """
+        catalog_value = (
+            f"[{_PRIMARY}]{self._state.catalog_source}[/]"
+            if self._state.catalog_source
+            else "[italic]local only[/italic]"
+        )
+        self._console.print(f"[{_MUTED}]image_root:[/] [{_PRIMARY}]{self._state.image_root}[/]")
+        self._console.print(f"[{_MUTED}]catalog:[/] {catalog_value}")
         if self._state.mac:
-            parts.append(f"mac: [{_PRIMARY}]{self._state.mac}[/]")
-        self._console.print(f"[{_MUTED}]" + "   ".join(parts) + "[/]")
+            self._console.print(f"[{_MUTED}]mac:[/] [{_PRIMARY}]{self._state.mac}[/]")
         if self._catalog_load_error:
             self._console.print(f"[{_DANGER}]catalog load failed: {self._catalog_load_error}[/]")
         self._console.print()
