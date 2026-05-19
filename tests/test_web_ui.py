@@ -323,17 +323,23 @@ def test_ui_images_section_fetch_shows_one_button_form(client: TestClient) -> No
 
 
 def test_top_level_nav_highlights_active_page(client: TestClient) -> None:
-    """The top-bar nav (Dashboard / Machines / Images / Boot /
-    Events / Settings) marks the current page with the ``active``
-    class so the operator can see where they are. The Python side
-    derives ``nav_active`` from ``request.url.path.split("/")[2]``;
-    the template applies the class via a Jinja ``{% if
-    nav_active == 'images' %}active{% endif %}`` pattern. Each
-    page must light up its own entry and ONLY its own.
+    """The top-bar nav (Machines / Images / Netboot / Events) marks
+    the current page with the ``active`` class so the operator can
+    see where they are. The Python side derives ``nav_active`` from
+    ``request.url.path.split("/")[2]``; the template applies the
+    class via a Jinja ``{% if nav_active == 'images' %}active{%
+    endif %}`` pattern. Each page must light up its own entry and
+    ONLY its own.
+
+    Dashboard is NOT a separate nav-btn -- the BTY brand pill
+    doubles as the dashboard link and carries the ``brand-active``
+    class instead (checked below). Settings sits behind the
+    user-bar gear icon and is checked via the ``user-bar-action
+    active`` class.
 
     Mirror of the v0.22.11 sub-nav bug (where ``active`` was never
-    wired through) for the top-level nav. Without this test the
-    same drift could happen on the global nav and go unnoticed.
+    wired through) for the top-level nav -- without this test the
+    same drift could happen and go unnoticed.
     """
     import re
 
@@ -1151,17 +1157,22 @@ def test_ui_boot_page_renders_with_artifact_state(client: TestClient) -> None:
 
 def test_ui_settings_renders_when_authed(client: TestClient) -> None:
     """A logged-in operator sees the /ui/settings page rendering
-    the Authentication card. PXE / TFTP info moved to /ui/boot
-    in v0.22.13; settings is now an operator-account page reached
-    via the user-bar gear icon, not the top nav.
+    the About + Authentication cards. PXE / TFTP info now lives on
+    /ui/boot; settings is the operator-account page reached via
+    the user-bar gear icon, not the top nav.
     """
+    import bty
+
     _login(client)
     r = client.get("/ui/settings")
     assert r.status_code == 200
     body = r.text
-    # Authentication card heading.
-    assert "Authentication" in body
-    # The PAM-rotation hint with the service-user.
+    # About card: heading + version slug + service-user + repo link.
+    assert ">About</h2>" in body
+    assert f"bty v{bty.__version__}" in body
+    assert "github.com/safl/bty" in body
+    # Authentication card: heading + PAM-rotation hint w/ service-user.
+    assert ">Authentication</h2>" in body
     assert "passwd" in body
     # Cross-link out to the netboot page (where PXE / TFTP now live).
     assert 'href="/ui/boot"' in body

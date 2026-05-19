@@ -62,7 +62,7 @@ help:
 	@echo ""
 	@echo "Docker (trial / image-library bty-web container):"
 	@echo "  docker-build  uv build + docker build -> bty-web:dev (single-arch, local)"
-	@echo "  docker-run    run bty-web:dev with ./bty-data/ bind-mount on :8080"
+	@echo "  docker-run    run bty-web:dev with ./bty-data/ bind-mount on :8080 + udp/69 (TFTP)"
 	@echo "  docker-clean  stop container, remove bty-web:dev image, wipe ./bty-data/"
 	@echo ""
 	@echo "Docs (bty-docs sibling; ``pipx install ./docs/tooling`` first):"
