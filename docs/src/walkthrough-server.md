@@ -186,7 +186,7 @@ Tty1 ends up showing something like:
 
   Configure your LAN DHCP server to point PXE clients at this
   appliance (option 60 = "PXEClient", option 66 = this IP,
-  option 67 = "ipxe.efi"). See /ui/settings for the cheatsheet.
+  option 67 = "ipxe.efi"). See /ui/boot for the cheatsheet.
 ======================================================================
 
 bty 0.8.2 on bty-server (tty1)
@@ -217,13 +217,16 @@ Initial UI tour:
   These end up under `/var/lib/bty/images/` on the server and
   get streamed to targets at flash time.
 - **`/ui/boot`** - manages the netboot trio (`vmlinuz`,
-  `initrd`, `squashfs`). The server can fetch the latest from
-  the bty release page directly via the "Fetch latest release"
-  button, or you can upload your own.
-- **`/ui/settings`** - router-config cheatsheet (option 60 / 66
-  / 67 values to paste into the LAN's DHCP server) plus a
-  Start/Stop/Restart panel for the local `dnsmasq.service`
-  (which serves the TFTP root).
+  `initrd`, `squashfs`) AND carries the router-config
+  cheatsheet (option 60 / 66 / 67 values to paste into the
+  LAN's DHCP server) + a Start/Stop/Restart panel for the
+  local `dnsmasq.service` (which serves the TFTP root). The
+  three live behind sub-nav pills: List / Fetch netboot
+  artifacts / DHCP / PXE / TFTP daemon.
+- **`/ui/settings`** - operator-account info for the logged-in
+  user (PAM password rotation + session-cookie rotation
+  hints). Reached via the gear icon in the user-bar, not from
+  the top nav.
 
 ## Step 5: Flash a target over PXE
 
@@ -312,7 +315,8 @@ trusted LAN:
   server (proxy or full); a working LAN DHCP server is a hard
   prerequisite, and its config must be extended with option 60 /
   66 / 67 to direct PXE clients at the bty appliance. The
-  `/ui/settings` page has a cheatsheet with the exact values.
+  `/ui/boot?section=dhcp-pxe` page has a cheatsheet with the
+  exact values.
 - **UEFI Secure Boot** isn't supported - the bty netboot kernel
   isn't shim-signed. Disable Secure Boot on targets you're
   PXE-flashing, or use the USB stick flow.

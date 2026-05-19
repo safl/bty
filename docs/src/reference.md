@@ -185,7 +185,7 @@ Python package).
 | Helper | Purpose |
 |---|---|
 | `bty-image-store-init [--yes] DEVICE` | Partition + format a 2nd disk as the persistent image store (ext4, label `BTY_IMAGE_STORE`, mounted at `/var/lib/bty/images`). Stages existing files first; updates `/etc/fstab` for auto-mount on subsequent boots. Run once after first install; the labelled disk auto-mounts after reflashes without re-running. |
-| `bty-web-tftp <start\|stop\|restart>` | Control the local `dnsmasq.service` (which owns the TFTP root). Driven by the browser UI's TFTP daemon Start/Stop/Restart buttons on `/ui/settings`. |
+| `bty-web-tftp <start\|stop\|restart>` | Control the local `dnsmasq.service` (which owns the TFTP root). Driven by the browser UI's TFTP daemon Start/Stop/Restart buttons on `/ui/boot?section=tftp`. |
 
 ## Python API
 
@@ -456,23 +456,29 @@ templates, Bootstrap CSS, HTMX form posts).
  `https://github.com/<BTY_BOOT_RELEASE_REPO>/releases/<tag>/download/`
  (default `safl/bty`, default tag `latest`); verifies the manifest
  and atomically installs into `BTY_BOOT_DIR`
-- `GET /ui/settings` -> three-card page:
- - **Authentication** - explanatory text only. The credential is
- the OS password of the bty service user; the operator rotates
- it with `sudo passwd bty`. To force every session to invalidate
- in one shot, rotate the cookie-signing secret with `rm
- /var/lib/bty/session-secret && systemctl restart bty-web`.
- - **PXE / network boot** - appliance-IP/interfaces table + a
- router-config cheatsheet (the option-60 / 66 / 67 values to
- paste into the LAN's DHCP server). bty does NOT run any DHCP
- role; the operator's existing DHCP server points clients at
- this appliance for TFTP + HTTP-Boot fetches.
+- `GET /ui/settings` -> thin operator-account page (About card +
+ Authentication card). Reached via the gear icon in the user-bar,
+ not the top nav. Authentication explanatory text only: the
+ credential is the OS password of the bty service user, the
+ operator rotates it with `sudo passwd bty`; to force every
+ session to invalidate in one shot, rotate the cookie-signing
+ secret with `rm /var/lib/bty/session-secret && systemctl
+ restart bty-web`.
+- `GET /ui/boot` -> netboot artifacts list + (via sub-nav pills):
+ - **Fetch netboot artifacts** - one-button form to pull
+ `vmlinuz`/`initrd`/`squashfs`/`sha256` from the bty release page.
+ - **DHCP / PXE** - appliance-IP/interfaces table + router-config
+ cheatsheet (option 60 / 66 / 67 values to paste into the LAN's
+ DHCP server). bty does NOT run any DHCP role; the operator's
+ existing DHCP server points clients at this appliance for TFTP
+ + HTTP-Boot fetches.
  - **TFTP daemon** - live `systemctl is-active dnsmasq.service`
  badge + Start / Stop / Restart buttons driven by the
  sudoers-permitted `bty-web-tftp` helper.
 - `POST /ui/settings/tftp-control` -> drives `bty-web-tftp <action>`
  (allowlist `start` / `stop` / `restart`), the sole sudoers
- grant in `/etc/sudoers.d/bty-web`.
+ grant in `/etc/sudoers.d/bty-web`. URL is unchanged for
+ backwards compat though the panel lives on /ui/boot now.
 
 The auth dependency checks ``request.session.get("bty_authed")``;
 the session is a Starlette ``SessionMiddleware``-signed payload
