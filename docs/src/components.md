@@ -271,7 +271,9 @@ operator can ask "everything from 192.168.1.5" or "everything
 that touched image X" with one click.
 
 **Recent-activity cards** on `/ui/dashboard`, `/ui/machines/
-{mac}`, `/ui/images`, `/ui/boot`, and `/ui/settings` all
-embed the same `_events_card.html` partial filtered to the
+{mac}`, `/ui/images`, and `/ui/boot` (list + fetch sections)
+all embed the same `_events_card.html` partial filtered to the
 relevant subject so each page has a short timeline of
-context-relevant rows.
+context-relevant rows. ``/ui/settings`` is now a thin
+operator-account page and omits the card; the global timeline
+lives under ``/ui/events``.

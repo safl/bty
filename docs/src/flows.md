@@ -189,8 +189,8 @@ zero per-MAC configuration.
 
 This flow is also useful for the operator who just wants a
 one-off remote flash without preparing a USB stick: any unknown
-MAC on the segment becomes a TUI session reachable via IPMI / serial
-console.
+MAC on the segment becomes a `bty` wizard session reachable via
+IPMI / serial console.
 
 ## Server-driven PXE flash (`boot_policy=flash`)
 
