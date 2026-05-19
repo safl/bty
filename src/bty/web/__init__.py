@@ -1,7 +1,7 @@
 """bty.web - HTTP server with browser UI for fleet image flashing.
 
 This module is intentionally lightweight: it imports nothing from
-:mod:`fastapi` or :mod:`uvicorn` at module level so a CLI-only install
+:mod:`fastapi` or :mod:`uvicorn` at module level so a minimal install
 (``pipx install bty-lab`` without the ``[web]`` extra) can still
 ``import bty.web`` for introspection without crashing. The actual
 FastAPI app lives in :mod:`bty.web._app`, which is loaded only when

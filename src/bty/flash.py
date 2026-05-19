@@ -27,7 +27,6 @@ import json
 import re
 import stat
 import subprocess
-import sys
 import threading
 import time
 from collections.abc import Callable
@@ -341,7 +340,7 @@ def _probe_image_url_oras(url: str) -> ImageInfo:
     try:
         resolved = oras.resolve_ref(url)
     except oras.OrasError as exc:
-        # Re-raise as FileNotFoundError so the CLI's existing
+        # Re-raise as FileNotFoundError so ``bty``'s existing
         # "image URL not reachable" path handles it uniformly with
         # plain HTTP failures.
         raise FileNotFoundError(f"oras ref not resolvable: {url} ({exc})") from exc
@@ -461,44 +460,6 @@ def validate_plan(plan: FlashPlan) -> list[str]:
     return errors
 
 
-def print_plan(
-    plan: FlashPlan,
-    errors: list[str],
-    *,
-    file: IO[str] | None = None,
-) -> None:
-    """Render ``plan`` and any ``errors`` for human consumption."""
-    out = file if file is not None else sys.stdout
-
-    virtual = _fmt_bytes(plan.image.virtual_size_bytes)
-    target_size = _fmt_bytes(plan.target.size_bytes)
-    mounts = ", ".join(plan.target.mountpoints) if plan.target.mountpoints else "(none)"
-
-    print("Flash plan:", file=out)
-    print(f"  image:               {plan.image.display}", file=out)
-    print(f"  image format:        {plan.image.format}", file=out)
-    print(f"  image size on disk:  {plan.image.size_bytes} bytes", file=out)
-    print(f"  image virtual size:  {virtual}", file=out)
-    print(f"  target:              {plan.target.path}", file=out)
-    print(f"  target is block:     {plan.target.is_block_device}", file=out)
-    print(f"  target size:         {target_size}", file=out)
-    print(f"  target mountpoints:  {mounts}", file=out)
-
-    if plan.notes:
-        print(file=out)
-        print("Notes:", file=out)
-        for note in plan.notes:
-            print(f"  - {note}", file=out)
-
-    print(file=out)
-    if errors:
-        print("Validation: FAILED", file=out)
-        for err in errors:
-            print(f"  - {err}", file=out)
-    else:
-        print("Validation: OK (dry-run; no writes performed)", file=out)
-
-
 # ---------- Real write -------------------------------------------------------
 
 
@@ -508,7 +469,7 @@ class FlashError(RuntimeError):
     :class:`FlashRaceError` is a subclass for the specific case where
     the target's state changed between the last successful probe and
     the attempted write (it became mounted, stopped being a block
-    device, etc.) -- the CLI surfaces that as exit code 5.
+    device, etc.) -- ``bty`` surfaces that as exit code 5.
     """
 
 
@@ -1325,10 +1286,6 @@ def _partprobe_target(target: Path) -> None:
 
 
 # ---------- Internal helpers --------------------------------------------------
-
-
-def _fmt_bytes(value: int | None) -> str:
-    return f"{value} bytes" if value is not None else "(unknown) bytes"
 
 
 def _image_virtual_size(path: Path, image_format: str | None) -> int | None:

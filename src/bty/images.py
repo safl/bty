@@ -244,7 +244,7 @@ class RemoteImage:
 
 class BriError(Exception):
     """Raised when a ``.bri`` descriptor fails to parse or validate.
-    Distinct from generic exceptions so callers (CLI / TUI / tests)
+    Distinct from generic exceptions so callers (``bty``, tests)
     can surface a friendly per-file error without crashing the whole
     listing."""
 

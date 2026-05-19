@@ -102,8 +102,8 @@ class OrasError(OSError):
     """Raised on parse / resolution / fetch errors against an OCI registry.
 
     Inherits from :class:`OSError` so it's caught by callers that
-    handle remote-I/O failures generically (the TUI, the CLI, the
-    catalog boundary) -- semantically the same family as
+    handle remote-I/O failures generically (``bty``, the catalog
+    boundary) -- semantically the same family as
     :class:`urllib.error.URLError`, which also subclasses
     :class:`OSError`. Code paths that need to distinguish ORAS-
     specific failures from arbitrary network errors still can:

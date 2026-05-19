@@ -1,7 +1,7 @@
 """Block-device discovery via ``lsblk``.
 
 Pure-data module: returns plain dicts so the result can be JSON-serialised
-or tabulated by the CLI without further translation.
+or tabulated by ``bty`` without further translation.
 """
 
 from __future__ import annotations
@@ -31,8 +31,8 @@ def list_disks() -> list[dict[str, Any]]:
         text=True,
         check=True,
         # Bound the call so a stuck IO subsystem (failing disk
-        # responding slowly to udev queries) can't hang the CLI /
-        # TUI indefinitely. 10s is generous; healthy lsblk returns
+        # responding slowly to udev queries) can't hang ``bty``
+        # indefinitely. 10s is generous; healthy lsblk returns
         # in <100ms on every box I've tested.
         timeout=10,
     )

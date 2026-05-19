@@ -22,8 +22,10 @@ dedupe naturally; corrupted bytes never serve, since SHA mismatch
 fails before the temp file is renamed into place.
 
 Module is stdlib-only -- ``tomllib`` is in Python 3.11+ stdlib,
-``hashlib`` / ``urllib`` / ``shutil`` are too. Importing this
-module from the CLI does NOT pull in fastapi or rich.
+``hashlib`` / ``urllib`` / ``shutil`` are too. ``bty`` and
+``bty-web`` both consume this module without dragging in any
+extra dependency beyond their own (rich for ``bty``, fastapi /
+uvicorn for ``bty-web``).
 """
 
 from __future__ import annotations
@@ -50,7 +52,7 @@ SCHEMA_VERSION = 1
 class CatalogError(Exception):
     """Raised when a manifest fails to parse, validate, or fetch.
 
-    Subclass only when a call site needs to discriminate; the CLI
+    Subclass only when a call site needs to discriminate; ``bty``
     prints the message verbatim.
     """
 

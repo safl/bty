@@ -1,6 +1,6 @@
 """Tests for bty.flash.
 
-Validation logic (``make_plan`` / ``validate_plan`` / ``print_plan``) is
+Validation logic (``make_plan`` / ``validate_plan``) is
 exercised with hand-built ``ImageInfo`` / ``TargetInfo`` dataclasses -
 no mocking. The probe functions, which actually shell out, get their
 own targeted tests; subprocess calls are patched there because tests
@@ -9,7 +9,6 @@ can't (and shouldn't) actually run ``qemu-img`` / ``zstd`` / ``lsblk``.
 
 from __future__ import annotations
 
-import io
 from pathlib import Path
 from typing import Any, ClassVar
 from unittest.mock import MagicMock, patch
@@ -127,34 +126,6 @@ def test_validate_skips_size_check_when_virtual_unknown() -> None:
     plan = flash.make_plan(_img(virtual=None), _tgt(size=1))
     errors = flash.validate_plan(plan)
     assert all("larger than target" not in e for e in errors)
-
-
-def test_print_plan_renders_validation_status() -> None:
-    plan = flash.make_plan(_img(), _tgt())
-    out = io.StringIO()
-    flash.print_plan(plan, errors=[], file=out)
-    text = out.getvalue()
-    assert "Flash plan:" in text
-    assert "Validation: OK" in text
-
-
-def test_print_plan_lists_errors() -> None:
-    plan = flash.make_plan(_img(virtual=10_000), _tgt(size=1))
-    errors = flash.validate_plan(plan)
-    out = io.StringIO()
-    flash.print_plan(plan, errors=errors, file=out)
-    text = out.getvalue()
-    assert "Validation: FAILED" in text
-    assert "larger than target" in text
-
-
-def test_print_plan_renders_notes() -> None:
-    plan = flash.make_plan(_img(virtual=None), _tgt())
-    out = io.StringIO()
-    flash.print_plan(plan, errors=[], file=out)
-    text = out.getvalue()
-    assert "Notes:" in text
-    assert "size-fits-target check skipped" in text
 
 
 def test_to_dict_round_trips_plain_types() -> None:
