@@ -392,10 +392,15 @@ def test_oras_error_is_an_os_error() -> None:
 
 def test_state_stage_advances_with_each_commit() -> None:
     """``_State.stage()`` is derived from selection state. Empty state
-    is Stage 1; setting selected_image -> Stage 2; setting both ->
-    Stage 3; post_flash flag -> Stage 4.
+    with ``catalog_chosen=False`` -> Stage 1 (SELECT_CATALOG); flipping
+    ``catalog_chosen=True`` -> Stage 2 (SELECT_IMAGE); setting
+    ``selected_image`` -> Stage 3; both selections -> Stage 4;
+    ``post_flash`` -> Stage 5.
     """
     s = tui_app._State(image_root=Path("/tmp"))
+    assert s.stage() is tui_app._WizardStage.SELECT_CATALOG
+
+    s.catalog_chosen = True
     assert s.stage() is tui_app._WizardStage.SELECT_IMAGE
 
     s.selected_image = tui_app._TuiImage(name="x", fmt="img.gz", size_bytes=0, url="http://x")
@@ -409,32 +414,42 @@ def test_state_stage_advances_with_each_commit() -> None:
 
 
 def test_state_back_clears_one_commit_at_a_time() -> None:
-    """``_State.back()`` drops the most-recent commit. Post-flash
-    back goes to Stage 2 (same image, pick another disk); further
-    back clears image; further back is a no-op (already at top).
+    """``_State.back()`` drops the most-recent commit, one stage at a
+    time. Chain across all five stages:
+
+      REBOOT_OR_DONE -> SELECT_DISK   (clear post_flash + disk)
+      CONFIRM_FLASH  -> SELECT_DISK   (clear disk)
+      SELECT_DISK    -> SELECT_IMAGE  (clear image)
+      SELECT_IMAGE   -> SELECT_CATALOG (clear catalog_chosen)
+      SELECT_CATALOG -> no-op (top of wizard)
     """
     s = tui_app._State(image_root=Path("/tmp"))
+    s.catalog_chosen = True
     s.selected_image = tui_app._TuiImage(name="x", fmt="img.gz", size_bytes=0, url="http://x")
     s.selected_disk = {"path": "/dev/sda"}
     s.post_flash = True
 
-    s.back()  # Stage 4 -> Stage 2 (keep image, clear disk + post_flash)
+    s.back()  # REBOOT_OR_DONE -> SELECT_DISK (keep image, clear disk + post_flash)
     assert s.stage() is tui_app._WizardStage.SELECT_DISK
     assert s.selected_image is not None
     assert s.selected_disk is None
     assert s.post_flash is False
 
     s.selected_disk = {"path": "/dev/sda"}
-    s.back()  # Stage 3 -> Stage 2 (clear disk)
+    s.back()  # CONFIRM_FLASH -> SELECT_DISK (clear disk)
     assert s.stage() is tui_app._WizardStage.SELECT_DISK
     assert s.selected_disk is None
 
-    s.back()  # Stage 2 -> Stage 1 (clear image)
+    s.back()  # SELECT_DISK -> SELECT_IMAGE (clear image)
     assert s.stage() is tui_app._WizardStage.SELECT_IMAGE
     assert s.selected_image is None
 
-    s.back()  # Stage 1 -> no-op
-    assert s.stage() is tui_app._WizardStage.SELECT_IMAGE
+    s.back()  # SELECT_IMAGE -> SELECT_CATALOG (clear catalog_chosen)
+    assert s.stage() is tui_app._WizardStage.SELECT_CATALOG
+    assert s.catalog_chosen is False
+
+    s.back()  # SELECT_CATALOG -> no-op
+    assert s.stage() is tui_app._WizardStage.SELECT_CATALOG
 
 
 # --------------------------------------------------------------------------

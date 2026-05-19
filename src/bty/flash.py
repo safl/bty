@@ -994,7 +994,31 @@ def _flash_qcow2(image: Path, target: Path) -> None:
 # flash functions but with curl on the front instead of an open(file).
 
 
-_CURL_BASE = ("curl", "-fSL", "--retry", "3", "--retry-connrefused")
+# ``-fsSL``:
+#   -f: fail on HTTP errors (4xx/5xx exit non-zero)
+#   -s: silent (no progress meter, no diagnostic notes)
+#   -S: but still show errors (without this, -s would also silence them)
+#   -L: follow redirects
+# The ``-s`` is deliberate: curl's progress meter is carriage-return-
+# updated, which the TUI's newline-bound subprocess-log pump can
+# only capture as the *initial* zero-state line (followed by silence
+# as the same line gets overwritten in place). Operators saw "all 0"
+# rows above the Rich progress bar; ``-s`` silences that, ``-S``
+# keeps real error lines flowing through.
+#
+# NO ``--retry``: every curl invocation here streams into a running
+# ``dd`` pipeline. If curl retries on a transient network failure,
+# it re-fetches from byte 0; those bytes get written to disk a
+# SECOND time, corrupting whatever was already there. Symptom
+# observed on a Supermicro BMC flash: the Rich progress bar
+# repeatedly hit 100% then "reset" as dd kept writing past the
+# image's compressed-size total. For streaming-to-dd the right
+# behaviour is fail-fast -- the operator gets a clean error and
+# can re-flash from scratch instead of seeing a silently-corrupted
+# target. ``--retry`` would only make sense if we also passed
+# ``--continue-at`` and made dd resumable, which is a much bigger
+# refactor for a much rarer win.
+_CURL_BASE = ("curl", "-fsSL")
 
 
 def _curl_args_for_source(url: str) -> tuple[list[str], int | None]:

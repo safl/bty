@@ -90,18 +90,27 @@ from bty import disks, flash, images
 
 
 class _WizardStage(IntEnum):
-    """The four wizard stages, derived from selection state.
+    """The five wizard stages, derived from selection state.
 
     Forward advance: an operator commit (Enter on an image / disk
     / confirm) sets the corresponding state field, which flips the
     derived stage. Esc / ``b`` back-nav clears the most-recent
     commit, dropping the stage by one.
+
+    ``SELECT_CATALOG`` is auto-skipped on startup when either a
+    ``--catalog`` URL was passed OR the local image-root already
+    contains images -- the operator has data to work with, no
+    catalog selection needed up front. Back-nav from ``SELECT_IMAGE``
+    re-enters ``SELECT_CATALOG`` so the operator can switch source
+    mid-session (e.g. plug-in to a USB stick but then realize they
+    want the remote release catalog).
     """
 
-    SELECT_IMAGE = 1
-    SELECT_DISK = 2
-    CONFIRM_FLASH = 3
-    REBOOT_OR_DONE = 4
+    SELECT_CATALOG = 1
+    SELECT_IMAGE = 2
+    SELECT_DISK = 3
+    CONFIRM_FLASH = 4
+    REBOOT_OR_DONE = 5
 
 
 @dataclass
@@ -240,7 +249,13 @@ _BTY_DEFAULT_CATALOG_URL = "https://github.com/safl/bty/releases/latest/download
 # to its nearest neighbour and the design intent gets lost).
 # ---------------------------------------------------------------------------
 
-_PRIMARY = "blue"  # dominant -- headers, table titles, primary columns
+_PRIMARY = "bright_blue"  # dominant -- headers, table titles, primary columns.
+# ``bright_blue`` (16-colour canonical, ANSI code 94 fg / xterm
+# default #5555ff) was chosen over plain ``blue`` (#0000aa) so the
+# non-bold instances (column data: path / format / size / etc.)
+# stay readable against the framebuffer console's black background
+# -- plain blue rendered too dark for non-bold body text. Bold
+# headers still pop because of the weight.
 _MUTED = "bright_black"  # secondary -- byline columns, parenthesised hints. Canonical
 # 16-colour ANSI gray with no 256-colour tint (grey62 read as
 # teal-ish on dark dev terminals); renders identically across SSH,
@@ -272,6 +287,15 @@ class _State:
     selected_disk: dict[str, Any] | None = None
     post_flash: bool = False
 
+    # ``True`` iff the operator has either explicitly chosen a
+    # catalog source via the SELECT_CATALOG screen (``[d]`` /
+    # ``[c]`` / ``[l] local-only``) OR the wizard auto-skipped that
+    # step at startup because ``--catalog`` was set OR the local
+    # ``image_root`` had images at startup. Back-nav from
+    # SELECT_IMAGE clears this flag so the operator can re-enter
+    # SELECT_CATALOG mid-session.
+    catalog_chosen: bool = False
+
     # Cached lists; refreshed on demand.
     _images: list[_TuiImage] = field(default_factory=list)
     _disks: list[dict[str, Any]] = field(default_factory=list)
@@ -279,6 +303,8 @@ class _State:
     def stage(self) -> _WizardStage:
         if self.post_flash:
             return _WizardStage.REBOOT_OR_DONE
+        if not self.catalog_chosen:
+            return _WizardStage.SELECT_CATALOG
         if self.selected_image is None:
             return _WizardStage.SELECT_IMAGE
         if self.selected_disk is None:
@@ -287,7 +313,7 @@ class _State:
 
     def back(self) -> None:
         """Clear the most-recent commit. Esc / ``b`` from a prompt
-        calls this. Stage 1 -> no-op (already at the top).
+        calls this. SELECT_CATALOG (top stage) -> no-op.
         """
         if self.post_flash:
             self.post_flash = False
@@ -299,7 +325,14 @@ class _State:
         if self.selected_image is not None:
             self.selected_image = None
             return
-        # Stage 1: no-op.
+        if self.catalog_chosen:
+            # Back from SELECT_IMAGE -> SELECT_CATALOG. Clear the
+            # chosen flag so stage() returns SELECT_CATALOG;
+            # ``catalog_source`` itself stays so the catalog screen
+            # shows the previous choice as the implicit default.
+            self.catalog_chosen = False
+            return
+        # SELECT_CATALOG: no-op (top of wizard).
 
 
 # ---------------------------------------------------------------------------
@@ -377,11 +410,21 @@ class BtyTui:
         resolved_root = image_root or (
             Path(env_image_root) if env_image_root else Path("/var/lib/bty/images")
         )
+        # Auto-skip SELECT_CATALOG when the operator already has
+        # something to work with at startup: either ``--catalog`` was
+        # explicitly passed, or the local image-root already has
+        # images (``.bri`` pointers, raw ``.img.gz``, ...). Otherwise
+        # the wizard opens on SELECT_CATALOG so the operator gets
+        # asked where images should come from before being dropped
+        # into an empty list. Operator can always back-nav from
+        # SELECT_IMAGE to SELECT_CATALOG to change source.
+        catalog_chosen = bool(catalog_source) or bool(_list_local_images(resolved_root))
         self._state = _State(
             image_root=resolved_root,
             catalog_source=catalog_source,
             mac=mac,
             pxe_done_base=_pxe_done_base_from_source(catalog_source),
+            catalog_chosen=catalog_chosen,
         )
         # Catalog load errors (transient network / bad TOML) -- surface
         # via a soft banner on the image-pick screen rather than
@@ -416,7 +459,9 @@ class BtyTui:
     def _main_loop(self) -> None:
         while True:
             stage = self._state.stage()
-            if stage is _WizardStage.SELECT_IMAGE:
+            if stage is _WizardStage.SELECT_CATALOG:
+                action = self._screen_select_catalog()
+            elif stage is _WizardStage.SELECT_IMAGE:
                 action = self._screen_select_image()
             elif stage is _WizardStage.SELECT_DISK:
                 action = self._screen_select_disk()
@@ -431,16 +476,77 @@ class BtyTui:
 
     # ---------- screens ------------------------------------------------
 
+    def _screen_select_catalog(self) -> str:
+        """Stage 1: pick the image source.
+
+        Three options: bty's default release catalog, a custom
+        catalog URL (http(s):// or oras://), or local-only (no
+        remote overlay, just scan ``image_root``). The screen is
+        auto-skipped at startup when ``--catalog`` was set or the
+        local image-root already has images; back-nav from
+        SELECT_IMAGE re-enters this screen so the operator can
+        switch source mid-session.
+        """
+        self._console.clear()
+        self._print_header(stage=1, title="Pick an image source")
+        self._console.print(
+            Panel(
+                f"[{_ACCENT}]d[/]  load bty's [bold]default[/] catalog "
+                "(published with bty as a release artefact)\n"
+                f"[{_ACCENT}]c[/]  provide a [bold]custom[/] http(s):// or oras:// URL "
+                "to a catalog that you host\n"
+                f"[{_ACCENT}]l[/]  [bold]local only[/] -- skip remote catalog, "
+                "use images already in the image-root",
+                title="How should bty find images?",
+                border_style=_PRIMARY,
+            )
+        )
+        prompt_text = self._render_prompt_line(
+            title="Pick an image source",
+            extras=(
+                ("d", "default"),
+                ("c", "custom"),
+                ("l", "local only"),
+                ("q", "quit"),
+            ),
+        )
+        choice = self._ask(prompt_text)
+        if choice in ("q", "quit"):
+            return "quit"
+        if choice in ("d", "default"):
+            self._state.catalog_source = _BTY_DEFAULT_CATALOG_URL
+            self._state.pxe_done_base = _pxe_done_base_from_source(_BTY_DEFAULT_CATALOG_URL)
+            self._state.catalog_chosen = True
+            return "continue"
+        if choice in ("c", "custom"):
+            self._screen_change_catalog()
+            # Mark chosen even if the operator cancelled the URL
+            # input -- ``catalog_source`` either got set (success)
+            # or stayed at whatever it was (cancel). Either way the
+            # operator decided to proceed; back-nav from image
+            # screen re-enters this stage if they change their mind.
+            self._state.catalog_chosen = True
+            return "continue"
+        if choice in ("l", "local"):
+            self._state.catalog_source = None
+            self._state.pxe_done_base = None
+            self._state.catalog_chosen = True
+            return "continue"
+        self._console.print(f"[{_DANGER}]Unrecognised choice {choice!r}; type d, c, l, or q.[/]")
+        self._pause_for_ack()
+        return "continue"
+
     def _screen_select_image(self) -> str:
-        """Stage 1: pick an image.
+        """Stage 2: pick an image.
 
         Combines local image-root scan + the optional ``--catalog``
         overlay into one numbered list. Operator types a number or
-        a single-letter command.
+        a single-letter command. The catalog source itself was
+        chosen in stage 1; ``b`` here re-enters that screen.
         """
         self._refresh_images()
         self._console.clear()
-        self._print_header(stage=1, title="Pick an image to flash (or download an image catalog)")
+        self._print_header(stage=2, title="Pick an image to flash")
         self._print_source_summary()
         if self._state._images:
             self._print_image_table(self._state._images)
@@ -448,35 +554,21 @@ class BtyTui:
             self._print_empty_catalog_panel()
 
         prompt_text = self._render_prompt_line(
-            title="Pick an image to flash (or download an image catalog)",
+            title="Pick an image to flash",
             extras=(
                 ("#", "pick"),
-                ("d", "default catalog"),
-                ("c", "custom catalog"),
+                ("b", "back (change catalog)"),
                 ("r", "refresh"),
                 ("q", "quit"),
             ),
         )
-        # NOTE: ``[i] install bty-server`` was dropped -- it bypassed
-        # the catalog with a synthesised flash plan pointing at the
-        # same GitHub release URL the default catalog already
-        # advertises. The right path now is ``[d]`` then pick
-        # bty-server from the table. ``[r]`` is kept as an explicit
-        # affordance (Enter does the same; ``r`` is muscle-memory
-        # friendly for operators who reach for "refresh" by name).
         choice = self._ask(prompt_text)
         if choice in ("q", "quit"):
             return "quit"
         if choice in ("", "r", "refresh"):
-            # ``r`` is no longer advertised but still honoured for
-            # operators who learned it; Enter does the same.
             return "continue"
-        if choice in ("c", "catalog"):
-            self._screen_change_catalog()
-            return "continue"
-        if choice in ("d", "default"):
-            self._state.catalog_source = _BTY_DEFAULT_CATALOG_URL
-            self._state.pxe_done_base = _pxe_done_base_from_source(_BTY_DEFAULT_CATALOG_URL)
+        if choice in ("b", "back"):
+            self._state.back()
             return "continue"
         idx = self._parse_index(choice, len(self._state._images))
         if idx is not None:
@@ -498,7 +590,7 @@ class BtyTui:
         """
         self._refresh_disks()
         self._console.clear()
-        self._print_header(stage=2, title="Pick a target disk")
+        self._print_header(stage=3, title="Pick a target disk")
         self._print_selection_so_far()
         if self._state._disks:
             self._print_disk_table(self._state._disks)
@@ -557,7 +649,7 @@ class BtyTui:
 
         disk_path = Path(str(disk.get("path") or disk.get("name") or ""))
         self._console.clear()
-        self._print_header(stage=3, title="Confirm flash plan")
+        self._print_header(stage=4, title="Confirm flash plan")
         self._print_selection_so_far()
 
         # Probe both ends with a spinner so the screen isn't blank
@@ -634,7 +726,7 @@ class BtyTui:
         next ``stage()`` returns REBOOT_OR_DONE.
         """
         self._console.clear()
-        self._print_header(stage=3, title="Flashing...")
+        self._print_header(stage=4, title="Flashing...")
 
         progress = Progress(
             TextColumn("[bold]{task.description}"),
@@ -709,6 +801,14 @@ class BtyTui:
             t.start()
             t.join()
 
+        # Defensive: Rich's ``Live`` (which ``Progress`` uses) hides
+        # the cursor while running via ANSI ``\033[?25l`` and is
+        # supposed to restore it on ``with`` exit. On the live env's
+        # framebuffer console and BMC virtual KVMs the restore is
+        # sometimes lost (terminal state desync). Explicitly re-show
+        # the cursor here so the next screen's prompt is visible.
+        self._console.show_cursor(True)
+
         if shared["result"] == "ok":
             self._console.print(
                 Panel(
@@ -739,10 +839,12 @@ class BtyTui:
         a further ``b``.
         """
         self._console.clear()
-        self._print_header(stage=4, title="Flash complete -- ready to reboot")
+        self._print_header(stage=5, title="Flash complete -- ready to reboot")
+        d = self._state.selected_disk or {}
+        disk_brief = f"{d.get('path', '?')} ({d.get('size', '?')} {d.get('model') or ''})".strip()
         self._console.print(
             Panel(
-                f"[{_OK}]Image written to {self._state.selected_disk}.[/]\n\n"
+                f"[{_OK}]Image written to {disk_brief}.[/]\n\n"
                 f"Reboot now to boot the freshly flashed disk.",
                 border_style=_OK,
                 title="Done",
@@ -802,62 +904,37 @@ class BtyTui:
     # ---------- rendering helpers -------------------------------------
 
     def _print_header(self, *, stage: int, title: str) -> None:
-        """Two-line header:
+        """Single Rich-Panel header carrying everything that's "world
+        state" for the screen.
 
-        Line 1: ASCII banner -- ``- -- ---={[| bty vX.Y.Z |]}=--- -- -``.
-            Wide, centred, hacker-style. Pure ASCII so the framebuffer
-            console renders it identically to SSH / serial; no
-            Unicode box-drawing, no styling beyond the version.
+        Title (on the top border): ``-={[ bty vX.Y.Z ]}=-`` -- the
+        decoration that used to live in the standalone ASCII banner.
+        Same two-tone treatment (blue brackets, yellow version) via
+        Rich markup; the Panel itself uses ``border_style=_PRIMARY``
+        so the box-drawing renders blue. Rich's ``safe_box`` falls
+        back to ASCII frames on dumb / monochrome terminals.
 
-        Line 2: blank.
+        Body lines:
 
-        Line 3: ``Steps: 1.Image -> 2.Disk -> 3.Flash -> 4.Reboot``
-            with the active step highlighted in the accent colour
-            and the rest muted.
+        * ``Steps:`` -- the wizard breadcrumb. Active stage in
+          accent yellow + bold, others muted. The active-step
+          highlight tracks the ``stage`` arg.
+        * ``image_root:`` -- always shown.
+        * ``catalog:`` -- always shown; reads ``local only``
+          (italic) when no ``--catalog`` source is set.
+        * ``mac:`` -- shown only when set (PXE-driven runs).
 
-        The per-screen title is NOT printed here -- it surfaces
-        attached to the leader on the prompt line itself
-        (``> <title>: _``, via :meth:`_render_prompt_line`) so the
-        action label sits right next to the input cursor where the
-        operator's eye lands. The ``title`` arg is kept on this
-        method for symmetry with the call sites (every screen
-        passes the same title to both the header and the prompt
-        builder).
+        The per-screen ``title`` is NOT rendered here -- it surfaces
+        attached to the leader on the prompt line
+        (``> <title>: _``, via :meth:`_render_prompt_line`). The
+        arg is kept on this method for symmetry with the call
+        sites; every screen passes the same title to both this
+        method and the prompt builder.
         """
         del title  # surfaced near the prompt instead
-        # Banner: ``+- -- ---={[| bty vX.Y.Z |]}=--- -- -+`` with
-        # extra ``-`` filler symmetric inside the wings to reach the
-        # banner-width target. 79 chars = one short of an 80-col
-        # terminal's right edge -- comfortable on serial / VGA-text
-        # / framebuffer consoles + tightly framed on the typical SSH
-        # / BMC virtual-console widths, without ever wrapping when
-        # the terminal is at the 80-col floor. Pure ASCII; renders
-        # identically on framebuffer / SSH / serial.
-        #
-        # Two-tone styling: wings + decoration in PRIMARY (blue),
-        # the ``bty vX.Y.Z`` heart in ACCENT (yellow) so the version
-        # pops without dominating. Rich degrades each style
-        # independently -- on a 16-colour framebuffer the named
-        # ANSI colours map cleanly; on a monochrome / NO_COLOR
-        # terminal both flatten to plain text and the ASCII
-        # geometry still reads.
-        labels = ("Image", "Disk", "Flash", "Reboot")
-        banner_width = 79
-        left_wing = "+- -- ---"
-        right_wing = "--- -- -+"
-        version_text = f"bty v{bty.__version__}"
-        # core plain-text width drives filler arithmetic; the styled
-        # version below splits the same chars into three Rich blocks.
-        core = f"={{[| {version_text} |]}}="
-        filler_total = max(0, banner_width - (len(left_wing) + len(core) + len(right_wing)))
-        left_filler = "-" * (filler_total // 2)
-        right_filler = "-" * (filler_total - filler_total // 2)
-        self._console.print(
-            f"[bold {_PRIMARY}]{left_wing}{left_filler}={{[| [/]"
-            f"[bold {_ACCENT}]{version_text}[/]"
-            f"[bold {_PRIMARY}] |]}}={right_filler}{right_wing}[/]"
-        )
-        self._console.print()
+        labels = ("Catalog", "Image", "Disk", "Flash", "Reboot")
+
+        # Steps breadcrumb with active-step highlight.
         crumb_parts = []
         for n, label in enumerate(labels, start=1):
             if n == stage:
@@ -865,53 +942,87 @@ class BtyTui:
             else:
                 crumb_parts.append(f"[{_MUTED}]{n}.{label}[/]")
         crumb = " -> ".join(crumb_parts)
-        self._console.print(f"Steps: {crumb}")
-        # NOTE: no trailing blank line -- screens that follow with
-        # ``_print_source_summary`` want the ``image_root`` /
-        # ``catalog`` lines to read as a continuation of the header.
-        # Screens that follow with a Panel (confirm-flash, flashing,
-        # reboot) print their own leading blank line if they want
-        # breathing room.
 
-    def _print_source_summary(self) -> None:
-        """Per-line summary of where the wizard's data comes from.
-
-        Always prints ``image_root`` and ``catalog``. The catalog
-        line reads ``local only`` when no ``--catalog`` source was
-        passed -- explicit absence rather than a missing row, so an
-        operator scanning the screen never wonders "did I forget to
-        configure something?". ``mac`` is shown only when present
-        (PXE-driven runs have it; ad-hoc USB runs don't).
-        """
+        # Source-summary lines. Catalog is always shown so an
+        # operator scanning the header never wonders whether the
+        # state is missing.
         catalog_value = (
             f"[{_PRIMARY}]{self._state.catalog_source}[/]"
             if self._state.catalog_source
             else "[italic]local only[/italic]"
         )
-        self._console.print(f"[{_MUTED}]image_root:[/] [{_PRIMARY}]{self._state.image_root}[/]")
-        self._console.print(f"[{_MUTED}]catalog:[/] {catalog_value}")
+        # ``image_root:`` is the longest label; pad shorter ones so
+        # the colons align in the rendered body. Body groups two
+        # sections, separated by a divider line:
+        #   1. Wizard process: steps + data sources
+        #   2. Wizard state:   what the operator has committed so far
+        body_lines = [
+            f"[{_MUTED}]Steps:     [/] {crumb}",
+            f"[{_MUTED}]image_root:[/] [{_PRIMARY}]{self._state.image_root}[/]",
+            f"[{_MUTED}]catalog:   [/] {catalog_value}",
+        ]
         if self._state.mac:
-            self._console.print(f"[{_MUTED}]mac:[/] [{_PRIMARY}]{self._state.mac}[/]")
+            body_lines.append(f"[{_MUTED}]mac:       [/] [{_PRIMARY}]{self._state.mac}[/]")
+
+        # State-collected lines (selected image / disk). Only emit
+        # the divider + section when there's at least one commit;
+        # stage-1 boots with nothing selected, no need for an
+        # empty section.
+        state_lines: list[str] = []
+        if self._state.selected_image:
+            state_lines.append(
+                f"[{_MUTED}]image:     [/] [{_PRIMARY}]{self._state.selected_image.name}[/]"
+            )
+        if self._state.selected_disk:
+            d = self._state.selected_disk
+            disk_brief = (
+                f"{d.get('path', '?')} ({d.get('size', '?')} {d.get('model') or ''})".strip()
+            )
+            state_lines.append(f"[{_MUTED}]disk:      [/] [{_PRIMARY}]{disk_brief}[/]")
+        if state_lines:
+            body_lines.append("")  # blank divider line inside the panel
+            body_lines.extend(state_lines)
+
+        # Panel title: ``-={[ bty vX.Y.Z ]}=-`` with blue brackets +
+        # yellow version. Rich preserves markup in the title slot.
+        panel_title = (
+            f"[bold {_PRIMARY}]-={{[ [/]"
+            f"[bold {_ACCENT}]bty v{bty.__version__}[/]"
+            f"[bold {_PRIMARY}] ]}}=-[/]"
+        )
+        self._console.print(
+            Panel(
+                "\n".join(body_lines),
+                title=panel_title,
+                border_style=_PRIMARY,
+            )
+        )
         if self._catalog_load_error:
             self._console.print(f"[{_DANGER}]catalog load failed: {self._catalog_load_error}[/]")
         self._console.print()
 
-    def _print_selection_so_far(self) -> None:
-        """Echo what's been committed to the wizard. Lets the
-        operator see at each stage what they've picked + what's
-        still pending.
+    def _print_source_summary(self) -> None:
+        """No-op shim kept for screen call sites.
+
+        Source summary used to be a separate line block printed
+        below ``_print_header``. As of the Panel-header rework it
+        lives inside the header Panel itself, so screens that still
+        call this method get no extra output. Kept (instead of
+        deleted) to avoid churning every screen call site for a
+        no-op.
         """
-        rows = []
-        if self._state.selected_image:
-            rows.append(("Image", self._state.selected_image.name))
-        if self._state.selected_disk:
-            d = self._state.selected_disk
-            rows.append(("Disk", f"{d.get('path')} ({d.get('size', '?')} {d.get('model') or ''})"))
-        if not rows:
-            return
-        for label, value in rows:
-            self._console.print(f"  [{_MUTED}]{label}:[/] [{_PRIMARY}]{value}[/]")
-        self._console.print()
+
+    def _print_selection_so_far(self) -> None:
+        """No-op shim kept for screen call sites.
+
+        Selection-so-far (selected image / disk) used to print as
+        a separate line block below the header. As of the Panel-
+        header rework it lives inside the header Panel itself (the
+        ``state_lines`` block in :meth:`_print_header`), so screens
+        that still call this method get no extra output. Kept
+        (instead of deleted) to avoid churning every call site for
+        a no-op.
+        """
 
     def _print_image_table(self, rows: list[_TuiImage]) -> None:
         table = Table(
@@ -1043,7 +1154,17 @@ class BtyTui:
         the empty-string default is still honoured (Enter returns
         ``""`` which the screens map to ``refresh``); we just don't
         render the parens.
+
+        Belt-and-braces ``show_cursor(True)`` before every prompt:
+        a prior screen's Rich ``Live`` region (the flash progress
+        bar) hides the cursor and is supposed to restore it on exit,
+        but the live env's framebuffer console and Supermicro BMC
+        KVMs have been seen to drop the restore sequence. The
+        operator then types at an invisible cursor and thinks the
+        TUI is wedged. Re-asserting visibility on every prompt
+        costs one ANSI escape and removes the failure mode.
         """
+        self._console.show_cursor(True)
         try:
             answer = (
                 Prompt.ask(
@@ -1101,7 +1222,35 @@ class BtyTui:
                 ValueError,
             ) as exc:
                 self._catalog_load_error = f"{type(exc).__name__}: {exc}"
-        self._state._images = local + remote
+        # Dedup local + remote by the canonical ``bty_image_ref``
+        # (``sha256(canonicalise_src(url))``). Local rows take
+        # precedence: a ``.bri`` pointer on the operator's USB stick
+        # and a catalog entry that target the SAME upstream
+        # (typically ``oras://...``) collapse to one row instead of
+        # showing both. Plain local image files without a ``url``
+        # (raw ``.img.gz`` etc. dropped into BTY_IMAGES) skip the
+        # dedup -- they're unique by filesystem identity.
+        seen_refs: set[str] = set()
+        merged: list[_TuiImage] = []
+        for img in local:
+            if img.url:
+                # Malformed URL (not http/https/oras/file): let the
+                # row through but don't gate dedup on it.
+                with contextlib.suppress(ValueError):
+                    seen_refs.add(_catalog.image_ref_for_src(img.url))
+            merged.append(img)
+        for img in remote:
+            if img.url:
+                try:
+                    ref = _catalog.image_ref_for_src(img.url)
+                except ValueError:
+                    merged.append(img)
+                    continue
+                if ref in seen_refs:
+                    continue
+                seen_refs.add(ref)
+            merged.append(img)
+        self._state._images = merged
 
     def _refresh_disks(self) -> None:
         self._state._disks = _list_disks()
