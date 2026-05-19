@@ -2,7 +2,7 @@
   bty __BTY_VERSION__ live env
 
   CLI:        bty --help
-  TUI:        bty-tui
+  Tool:       bty
   Mounted:    /var/lib/bty/images   (BTY_IMAGES exFAT, RO in live env)
   Logs:       journalctl -u bty-on-tty1
 

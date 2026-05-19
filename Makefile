@@ -45,7 +45,7 @@ help:
 	@echo "  typecheck     mypy src"
 	@echo "  ci            lint + format-check + typecheck + test"
 	@echo "  wheel         uv build  -> dist/bty_lab-X.Y.Z-py3-none-any.whl + sdist"
-	@echo "  tui           launch bty-tui locally (IMAGE_ROOT=path, CATALOG=URL|default)"
+	@echo "  tui           launch the bty wizard locally (IMAGE_ROOT=path, CATALOG=URL|default)"
 	@echo ""
 	@echo "Media (cijoe pipelines under cijoe/; require passwordless sudo):"
 	@echo "  media-deps    pipx install cijoe"

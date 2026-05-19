@@ -30,11 +30,11 @@
 #   mounted at ``/var/lib/bty/images``.
 #
 # Best-effort: no candidate partition is fine, the live env just
-# starts with an empty catalog and the operator can use the bty-tui
-# ``i`` shortcut to install a fresh bty-server from GitHub or press
-# ``c`` to connect to an existing bty-web catalog. NTFS isn't
-# probed; Ventoy's default data partition is exFAT and that covers
-# the common case.
+# starts with an empty catalog and the operator can use ``bty``'s
+# SELECT_CATALOG prompt to pick ``[d] default`` (bty's GitHub-
+# release catalog) or ``[c] custom`` (an existing bty-web URL).
+# NTFS isn't probed; Ventoy's default data partition is exFAT
+# and that covers the common case.
 #
 # Diagnostics: every candidate partition + the reason it was kept
 # or skipped is logged to journalctl. ``Alt+F2`` then
@@ -123,7 +123,7 @@ $list
 EOF
 
 if [ "$found" -eq 0 ]; then
-    echo "bty-images-discover: no image catalog found; bty-tui will show the built-in bootstrap entries only."
+    echo "bty-images-discover: no image catalog found; bty will offer the default catalog at the SELECT_CATALOG prompt."
 fi
 
 exit 0

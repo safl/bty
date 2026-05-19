@@ -9,15 +9,15 @@
 # - ``bty-on-tty1.service`` runs unconditionally on tty1 (the
 #   live env's only operator-facing surface). The wrapper script
 #   ``/usr/local/sbin/bty-on-tty1`` reads ``bty.server`` +
-#   ``bty.mac`` from /proc/cmdline and exec's ``bty-tui --server X
-#   --mac Y``; bty-tui then GETs ``<server>/pxe/<mac>/plan`` and
+#   ``bty.mac`` from /proc/cmdline and exec's ``bty --server X
+#   --mac Y``; ``bty`` then GETs ``<server>/pxe/<mac>/plan`` and
 #   dispatches (auto-flash / interactive / no-op). The legacy
 #   ``bty-flash-on-boot.service`` + ``bty.mode=interactive``
 #   ConditionKernelCommandLine gating was retired in v0.22.10 --
 #   the server-side plan endpoint is now the single dispatch
 #   point.
 # - ``var-lib-bty-images.mount`` mounts the BTY_IMAGES partition
-#   at /var/lib/bty/images (RO) so bty-tui sees it as the local
+#   at /var/lib/bty/images (RO) so ``bty`` sees it as the local
 #   image catalog. Gated on
 #   ``ConditionPathExists=/dev/disk/by-label/BTY_IMAGES`` so it
 #   no-ops cleanly when the operator booted from a stick that

@@ -559,9 +559,9 @@ def test_probe_image_url_falls_back_to_format_hint(
     extension), URL-based format detection returns None and
     ``validate_plan`` rejects with "image format not recognised".
 
-    The caller (bty-tui, which has the catalog entry's
-    ``format`` field) passes that as ``format_hint``; the probe
-    uses it as a fallback when extension detection fails.
+    The caller (``bty``, which has the catalog entry's ``format``
+    field) passes that as ``format_hint``; the probe uses it as a
+    fallback when extension detection fails.
     """
 
     class _FakeResp:

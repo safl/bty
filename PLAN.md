@@ -378,9 +378,9 @@ Documentation lives in `docs/` and follows the aisio convention:
   the direct-flash and network-flash flows.
 - **Concepts** - image, target, machine record, boot policy.
 - **Flows** - direct flash, network flash (BIOS + UEFI via iPXE).
-- **Components** - sections per component (`bty` CLI, `bty-tui`,
-  `bty-web`, `bty-media/`). Scope, public surface, configuration,
-  operational notes.
+- **Components** - sections per component (`bty` (wizard +
+  library), `bty-web`, `bty-media/`). Scope, public surface,
+  configuration, operational notes.
 - **Related work** - how bty positions against MAAS, FOG, iVentoy,
   NixOS, and others.
 - **Reference** - CLI, HTTP API, configuration schemas, state

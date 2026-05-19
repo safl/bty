@@ -42,7 +42,7 @@ def test_fetch_routes_accept_head() -> None:
     to size buffers and check liveness without paying the byte
     transfer cost:
 
-      * bty-tui's ``flash.probe_image_url`` HEADs the URL before
+      * ``bty.flash.probe_image_url`` HEADs the URL before
         streaming. v0.20.7's "image URL not reachable" bug was
         ``/images/{key}/{name}`` returning 405 on HEAD.
       * UEFI HTTP-Boot firmware HEADs the bootfile URL to size

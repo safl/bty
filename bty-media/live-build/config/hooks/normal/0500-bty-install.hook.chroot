@@ -12,9 +12,9 @@
 # Output: bty on the live env's ``$PATH`` via ``/usr/local/bin/bty``
 # pointing into a venv at ``/opt/bty/venv``. The ``[tui]`` extra is
 # required because every PXE flow (auto-flash, interactive, local)
-# lands at ``bty --server URL --mac MAC`` on tty1 via bty-tui-on-
-# tty1.service. The ``[web]`` extra is intentionally NOT installed -
-# the live env is never an HTTP server.
+# lands at ``bty --server URL --mac MAC`` on tty1 via
+# bty-on-tty1.service. The ``[web]`` extra is intentionally NOT
+# installed -- the live env is never an HTTP server.
 
 set -eu
 

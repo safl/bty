@@ -5,7 +5,7 @@
   ``bty-on-tty1.service`` runs on tty1 unconditionally. When
   ``bty.server=URL`` + ``bty.mac=MAC`` are on the kernel command
   line (set by ``ipxe_tui.j2`` / ``ipxe_flash.j2`` for PXE boots),
-  bty-tui GETs ``<server>/pxe/<mac>/plan`` and dispatches:
+  ``bty`` GETs ``<server>/pxe/<mac>/plan`` and dispatches:
 
       mode=auto        -> flash without prompts, then reboot.
       mode=interactive -> drop into the wizard.
@@ -16,7 +16,7 @@
   details.
 
   Alt+F2 (through Alt+F6) drops into a root shell on the alternate
-  VTs for diagnostics; Alt+F1 returns to bty-tui.
+  VTs for diagnostics; Alt+F1 returns to ``bty``.
 
   Remote diagnostics: sshd is up on port 22.
       ssh root@\4      password: bty

@@ -64,7 +64,7 @@
 #     scenario so the service doesn't loop / red-X. The clock
 #     stays whatever timesyncd or the bake-time floor set it
 #     to, and apt / oras may fail downstream -- but at least
-#     bty-tui starts.
+#     ``bty`` (on tty1) starts.
 
 set -eu
 

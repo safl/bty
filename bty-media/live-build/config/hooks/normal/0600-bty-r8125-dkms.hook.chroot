@@ -10,7 +10,7 @@
 # TX timeouts / failed firmware load. The boxes we see this on
 # include the GMKTec NUCBOX G10 (Ryzen 5) -- the live env can't
 # fetch its squashfs over HTTP if the NIC isn't usable, so PXE-
-# netboot fails before bty-tui ever appears.
+# netboot fails before ``bty`` ever appears.
 #
 # Source: https://github.com/awesometic/realtek-r8125-dkms
 # Packaging of the Realtek upstream source as a Debian DKMS

@@ -19,7 +19,7 @@ classifiers = [
 dependencies = []
 
 [project.optional-dependencies]
-# bty-tui is built on Rich (no Textual). Rich is widely deployed
+# ``bty`` (the wizard) is built on Rich (no Textual). Rich is widely deployed
 # (it powers pip's progress bars, ipython, the Python repl, ...)
 # and is fast enough on a kernel framebuffer console: per-screen
 # render is one synchronous print, not an event-loop diff cycle.

@@ -103,10 +103,10 @@ def main(argv: list[str] | None = None, *, prog: str = "bty") -> None:
     #      second after import.
     #
     # Print progress to stderr BEFORE the import + the run. The
-    # operator sees: wrapper banner (from /usr/local/sbin/bty-tui-
-    # on-tty1 on the live env) -> these progress lines -> the bty
-    # header. The blank-screen window narrows to a few hundred ms
-    # while Rich's Console initialises.
+    # operator sees: wrapper banner (from /usr/local/sbin/bty-on-tty1
+    # on the live env) -> these progress lines -> the bty header.
+    # The blank-screen window narrows to a few hundred ms while
+    # Rich's Console initialises.
     #
     # Also mirror to ``/run/bty.status`` so an operator who Alt-F2'd
     # to tty2 can ``cat`` it without having to read tty1's transient

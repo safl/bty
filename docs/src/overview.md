@@ -56,14 +56,16 @@ NixOS, MAAS, FOG, iVentoy, and others.
 ## Components
 
 bty is one Python package - the `bty` module, distributed on PyPI as
-[`bty-lab`](https://pypi.org/project/bty-lab/) - with three console-script
+[`bty-lab`](https://pypi.org/project/bty-lab/) - with two console-script
 entry points, plus a sibling appliance-image builder:
 
-- `bty` - main CLI for image inspection, target discovery, flashing.
-- `bty-tui` - terminal UI for interactive use from a live environment.
-  With ``--catalog SOURCE`` (a local TOML path, HTTP URL, or
-  ``oras://`` reference) it overlays a portable catalog on top of
-  the local image-root scan.
+- `bty` - the operator-facing wizard (Rich-based) + library;
+  subsumes the retired ``bty-tui`` / ``bty inspect|flash|images
+  |catalog`` subcommands as of v0.22.10. With ``--catalog SOURCE``
+  (a local TOML path, HTTP URL, or ``oras://`` reference) it
+  overlays a portable catalog on top of the local image-root scan.
+  With ``--server X --mac Y`` it switches to server-driven mode
+  (GETs ``<X>/pxe/<Y>/plan`` and dispatches on the JSON response).
 - `bty-web` - HTTP server + browser UI for fleet image flashing.
 - `bty-media/` - sibling directory (not a Python package); a
   cijoe-driven Debian appliance-image builder that produces the USB live

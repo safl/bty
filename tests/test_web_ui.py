@@ -688,7 +688,7 @@ def test_ui_machine_upsert_persists_boot_policy_flash(client: TestClient) -> Non
     """Form upsert with boot_policy=flash also requires the operator
     to have picked a target_disk_serial (post-v0.18 safety gate).
     The dropdown is populated from machines.known_disks after
-    bty-tui posts its inventory; this test sends the serial
+    ``bty`` posts its inventory; this test sends the serial
     directly via form data."""
     _login(client)
     r = client.post(
@@ -710,14 +710,14 @@ def test_ui_machine_upsert_persists_boot_policy_flash(client: TestClient) -> Non
 
 
 def test_ui_machine_detail_renders_disk_inventory_dropdown(client: TestClient) -> None:
-    """When the machine has ``known_disks`` populated (bty-tui has
+    """When the machine has ``known_disks`` populated (``bty`` has
     reported in), /ui/machines/{mac} shows a populated <select>
     with one <option> per disk. Each option displays the path /
     size / model / serial so the operator picks a recognisable
     line."""
     _login(client)
     # Discover the machine, then post inventory (mirrors what
-    # bty-tui does on startup).
+    # ``bty`` does on startup).
     client.get("/pxe/aa:bb:cc:dd:ee:88")
     inv = client.post(
         "/pxe/aa:bb:cc:dd:ee:88/inventory",
