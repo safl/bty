@@ -52,9 +52,8 @@ three partitions in an MBR isohybrid layout:
   host if you need more.
 
 bty auto-mounts `/dev/disk/by-label/BTY_IMAGES` at `/var/lib/bty/images`
-on boot. The `bty images` and `bty inspect` commands read
-from this mount point by default (overridable with `--image-root` or
-`BTY_IMAGE_ROOT`).
+on boot. The ``bty`` wizard scans this mount point by default,
+overridable via the `BTY_IMAGE_ROOT` environment variable.
 
 Operators populate the partition by mounting it on any Linux / macOS /
 Windows box - exFAT is read/write on all three - and dropping

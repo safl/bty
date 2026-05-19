@@ -51,9 +51,9 @@ from pathlib import Path
 from typing import Any, TypeAlias
 from urllib.parse import urlparse
 
-# Default image root. Operators override via ``--image-root`` or the
-# ``BTY_IMAGE_ROOT`` environment variable. The USB live appliance mounts
-# the BTY_IMAGES partition here.
+# Default image root. Operators override via the ``BTY_IMAGE_ROOT``
+# environment variable. The USB live appliance mounts the BTY_IMAGES
+# partition here.
 DEFAULT_IMAGE_ROOT = Path("/var/lib/bty/images")
 
 # Supported extensions, ordered most-specific first so multi-suffix
