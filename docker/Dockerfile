@@ -89,9 +89,15 @@ COPY docker/dnsmasq.conf /etc/dnsmasq.conf
 # pattern (any one of w/e/b), which doesn't match anything and
 # leaves pip with the literal ``*`` in the filename. Resolve the
 # wheel name first, then concatenate the ``[web]`` extra.
+#
+# ``sort -V | tail -1`` picks the highest version when dist/ has
+# multiple wheels (which it commonly does -- ``uv build`` appends
+# rather than wipes). A previous bug: ``head -1`` chose the
+# alphabetically-first wheel, so dist/ holding 0.22.11 + 0.22.12
+# baked 0.22.11 into the container and operators saw stale UI.
 COPY dist/bty_lab-*-py3-none-any.whl /tmp/wheels/
 RUN set -eu; \
-    WHL=$(ls /tmp/wheels/bty_lab-*-py3-none-any.whl | head -1); \
+    WHL=$(ls /tmp/wheels/bty_lab-*-py3-none-any.whl | sort -V | tail -1); \
     pip install --no-cache-dir "${WHL}[web]"; \
     rm -rf /tmp/wheels
 
