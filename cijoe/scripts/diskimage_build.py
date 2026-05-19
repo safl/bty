@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import errno
 import logging as log
+import time
 from argparse import ArgumentParser
 from pathlib import Path
 
@@ -35,6 +36,41 @@ from cijoe.qemu.wrapper import Guest
 # the operator's actual disk size on first boot via
 # ``bty-grow-rootfs.service``.
 DISK_SIZE = "6G"
+
+# Debian's cloud-image mirror (cloud.debian.org / cdimage.debian.org)
+# periodically resets HTTP connections mid-stream during release
+# windows or mirror sync; ``cijoe.core.misc.download`` doesn't
+# retry on ``requests.ConnectionError``. Retry a few times with
+# escalating backoff before failing the release.
+_DOWNLOAD_RETRIES = 3
+_DOWNLOAD_BACKOFF_S = (5, 15, 45)
+
+
+def _download_with_retry(url: str, dst: Path) -> int:
+    """Wrap :func:`cijoe.core.misc.download` with bounded retry.
+
+    Returns the same error code shape (0 / non-zero) as ``download``.
+    Cleans a partial destination between attempts so ``download``'s
+    own existence check doesn't short-circuit a retry with corrupt
+    bytes from the previous failure.
+    """
+    last_err = errno.EIO
+    for attempt in range(_DOWNLOAD_RETRIES):
+        err, _ = download(url, dst)
+        if not err:
+            return 0
+        last_err = err
+        if dst.exists():
+            dst.unlink()
+        if attempt + 1 < _DOWNLOAD_RETRIES:
+            delay = _DOWNLOAD_BACKOFF_S[attempt]
+            log.warning(
+                f"download {url} attempt {attempt + 1}/{_DOWNLOAD_RETRIES} failed "
+                f"(err={err}); retrying in {delay}s"
+            )
+            time.sleep(delay)
+    log.error(f"download {url} failed after {_DOWNLOAD_RETRIES} attempts")
+    return last_err
 
 
 def add_args(parser: ArgumentParser):
@@ -73,7 +109,7 @@ def main(args, cijoe):
 
     if not cloud_image_path.exists():
         cloud_image_path.parent.mkdir(parents=True, exist_ok=True)
-        err, _ = download(cloud_image_url, cloud_image_path)
+        err = _download_with_retry(cloud_image_url, cloud_image_path)
         if err:
             log.error(f"Failed to download {cloud_image_url}")
             return err
