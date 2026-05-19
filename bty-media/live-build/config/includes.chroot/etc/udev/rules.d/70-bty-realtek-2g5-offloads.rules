@@ -14,7 +14,7 @@
 #   * Any TCP transfer larger than a few packets stalls or
 #     fails entirely. ``apt-get update`` errors with
 #     ``Could not connect`` or ``Failed to fetch``. The live
-#     env's bty-tui can't reach catalog.toml. Image fetches
+#     env's ``bty`` can't reach catalog.toml. Image fetches
 #     hang mid-transfer.
 #
 # Disabling the offloads at the kernel-driver level forces the

@@ -9,9 +9,9 @@
 #                    "bty's reached network; next is the bty
 #                    service that drives this boot."
 #   3. **late**   -- after multi-user.target. "bty's about to
-#                    hand off to bty-tui-on-tty1 / bty-flash-
-#                    on-boot. If you see this banner but no
-#                    further action, the service crashed."
+#                    hand off to bty-tui-on-tty1. If you see this
+#                    banner but no further action, the service
+#                    crashed."
 #
 # Three visible checkpoints means a wedge between them is
 # immediately diagnostic. With plymouth retired in v0.22.1
@@ -49,10 +49,11 @@ CMDLINE=$(cat /proc/cmdline 2>/dev/null || echo "")
 #      these marker files don't exist:
 #        - netboot vs usb-iso: ``fetch=`` only appears on
 #          PXE-netboot (live-boot's HTTP fetch).
-#        - flash vs tui: ``bty.image_url=`` only appears on
-#          the server-side ipxe_flash.j2 chain;
-#          ``bty.mode=interactive`` on ipxe_tui.j2 +
-#          USB-iso BOOTAPPEND.
+#        - server-driven vs USB-local: ``bty.mac=`` only appears
+#          on the PXE chain (rendered by the server's iPXE
+#          template). v0.22.10+ retired the cmdline-level
+#          auto-vs-interactive split; the run-time plan endpoint
+#          decides that, so the banner can't predict here.
 if [ -r /etc/bty/variant ]; then
     VARIANT=$(cat /etc/bty/variant 2>/dev/null | head -1 | tr -d '\r\n[:space:]')
 else
@@ -66,9 +67,8 @@ if [ -r /etc/bty/mode ]; then
     MODE=$(cat /etc/bty/mode 2>/dev/null | head -1 | tr -d '\r\n[:space:]')
 else
     case "${CMDLINE}" in
-        *"bty.image_url="*)        MODE="Flash" ;;
-        *"bty.mode=interactive"*)  MODE="TUI" ;;
-        *)                         MODE="(no bty.* params)" ;;
+        *"bty.mac="*) MODE="Plan-driven" ;;
+        *)            MODE="Local" ;;
     esac
 fi
 

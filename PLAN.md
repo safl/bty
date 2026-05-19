@@ -37,7 +37,7 @@ bty is shaped to serve both ends of the spectrum:
 - **Ad-hoc.** An operator with a single box and no infrastructure should
   be able to grab the USB live image, plug it in, flash, walk away. No
   server to set up, no MAC registration, no network to wire. That path
-  is owned by `bty-media`'s USB live image, plus `bty` and `bty-tui`.
+  is owned by `bty-media`'s USB live image, plus the `bty` wizard.
 - **DevOps infrastructure.** A lab or CI environment with a fleet should
   be able to set up a single bty server appliance, register machines
   by MAC, and let reflashes happen on schedule, on demand, or on failure
@@ -72,42 +72,48 @@ upstream produces, with no influence from bty.
 
 ## Components
 
-bty is **one Python package** (distribution name `bty-lab` on PyPI; the
-importable module stays `bty`) with three console-script entry points
-(`bty`, `bty-tui`, `bty-web`) and optional install extras,
-plus a sibling appliance-image builder under `bty-media/`. Splitting
-the Python side into multiple distributions earned nothing for a
+bty is **one Python package** (distribution name `bty-lab` on PyPI;
+the importable module stays `bty`) with two console-script entry
+points (`bty`, `bty-web`) and optional install extras, plus a
+sibling appliance-image builder under `bty-media/`. Splitting the
+Python side into multiple distributions earned nothing for a
 single-maintainer project; the "different install footprint for
 different users" need is handled cleanly through optional extras.
 
-The components below are conceptual code areas, not separate distributions.
+The components below are conceptual code areas, not separate
+distributions.
 
-### `bty` (library + main CLI)
+### `bty` (the wizard + library)
 
-The Python library and the `bty` command. Single source of truth for image
-inspection, target-disk discovery, flashing, and provisioning. Everything
-else is a UI or a delivery vehicle for this. Usable standalone from any
-Linux environment with a sufficient runtime:
+The operator-facing tool. A Rich-based wizard that picks an image
++ a target disk and flashes; the same code path also handles
+scripted / server-driven flashes via the bty-web plan endpoint.
+Single source of truth for image inspection, target-disk discovery,
+flashing, and remote-catalog ingestion. Lives at `src/bty/tui/`
+with the entry point in `src/bty/tui/__init__.py`; shared library
+modules at `src/bty/{flash,images,catalog,disks,oras}.py`.
 
-```bash
-pipx install bty-lab
-```
-
-Lives at `src/bty/` with the CLI entry point in `src/bty/cli.py`.
-
-### `bty-tui` (terminal UI)
-
-Terminal UI on top of the library. Targeted at interactive use from a live
-environment where a graphical browser is not appropriate - a serial
-console, an SSH session, or a minimal recovery image. Exposes the same
-operations as the CLI in a navigable form.
-
-Shipped as the `bty-lab[tui]` install extra and exposed as the `bty-tui`
-console script. Lives under `src/bty/tui/`.
+Shipped as the `bty-lab[tui]` install extra (the Rich dependency
+sits behind that extra so a `[web]`-only install footprint is
+small). The console script is `bty`:
 
 ```bash
 pipx install "bty-lab[tui]"
 ```
+
+Three invocation shapes:
+
+- `bty` -- interactive wizard, local image-root only.
+- `bty --catalog URL` -- interactive wizard with the catalog
+  pre-loaded.
+- `bty --server X --mac Y` -- server-driven: GETs
+  `<X>/pxe/<Y>/plan` and dispatches (auto-flash / interactive
+  / no-op) on the JSON response.
+
+(v0.22.10 collapsed the historical separate `bty` CLI and
+`bty-tui` wizard into this single tool. `bty inspect` / `bty
+flash` / `bty images` / `bty catalog` subcommands retired; the
+wizard subsumes them.)
 
 ### `bty-web` (HTTP server + browser UI)
 
@@ -148,11 +154,13 @@ cloud-init bases, live-build config).
 
 Four shipping variants:
 
-**`usb-x86`** - bootable USB stick carrying the `bty` CLI, `bty-tui`,
-and an exFAT `BTY_IMAGES` partition for pre-built images. The operator
-plugs it into a target machine, boots it, and runs `bty flash` against
-the target's local disk using images sourced from the stick itself.
-Self-contained and offline. The direct-flash flow's delivery vehicle.
+**`usb-x86`** - bootable USB stick carrying the `bty` runtime
+and an exFAT `BTY_IMAGES` partition for pre-built images. The
+operator plugs it into a target machine, boots it; `bty`
+auto-launches on tty1 (via `bty-tui-on-tty1.service`) and walks
+the operator through pick + flash using images sourced from the
+stick itself. Self-contained and offline. The direct-flash flow's
+delivery vehicle.
 
 **`server-x86`** - installable disk image (amd64) that, when written
 to a host's disk and booted, runs the bty server appliance:
@@ -168,17 +176,18 @@ Booting a Pi off SD is the homelab-friendliest server-deployment path.
 
 **`netboot-x86`** - kernel + initrd + squashfs trio that PXE
 clients chain into via the server's HTTP boot stack. The chroot
-ships `bty-flash-on-boot.service` (auto-flash mode) and
-`bty-tui-on-tty1.service` (interactive `bty-tui` on tty1), with
-the mode picked by kernel cmdline params from the server's iPXE
-chain. Renamed from `live-x86` to disambiguate from `usb-x86`
-(which is also a live image).
+ships `bty-tui-on-tty1.service` (unconditional; runs on every
+boot). The cmdline carries `bty.server` + `bty.mac` only; `bty`
+GETs `<server>/pxe/<mac>/plan` to decide whether to auto-flash,
+interact, or exit. Renamed from `live-x86` to disambiguate from
+`usb-x86` (which is also a live image).
 
 The intended operator experience for the server variants is
 appliance-grade:
 
-1. `dd` (or `bty flash`) the image onto the server host's disk
-   (or SD card, for the Pi).
+1. `dd` (or boot the bty USB live, run `bty`, flash the appliance
+   from the starter `.bri` catalog) the image onto the server
+   host's disk (or SD card, for the Pi).
 2. Boot. Network comes up via DHCP; the appliance auto-starts
    `bty-web` on `:8080` with the default `bty / bty` PAM credential
    and an `odus` SSH admin user (passwordless sudo).
@@ -215,57 +224,61 @@ runner; if you need fleet-specific tweaks, bake them into the image.
 ## Concepts
 
 - **Image** - a system image file in one of the supported formats,
-  residing in a configured image root (or fetched from an HTTP URL via
-  `bty flash http://... /dev/sdX`).
+  residing in a configured image root or fetched from an HTTP /
+  oras:// URL via a catalog entry.
 - **Target** - a block device on the machine being flashed.
-- **Machine record** (web only) - MAC-address-keyed assignment of image
-  + optional hostname + boot policy.
-- **Boot policy** (web only) - what `GET /pxe/{mac}` returns: `local`
-  (sanboot), `flash` (auto-flash chain), or `tui` (interactive
-  `bty-tui` on tty1; the auto-discovery default for unknown MACs).
+- **Machine record** (web only) - MAC-address-keyed assignment of
+  image + optional hostname + boot policy + target disk serial.
+- **Boot policy** (web only) - what `GET /pxe/{mac}` returns:
+  `local` (sanboot), `flash` (live-env chain; plan endpoint
+  returns `mode=auto` for the unattended flash), `flash-once`
+  (same chain; flips to `local` after `POST /pxe/{mac}/done`),
+  or `tui` (live-env chain; plan returns `mode=interactive` so
+  ``bty`` drops the operator into the wizard; the auto-discovery
+  default for unknown MACs).
 
 ## Flows
 
-### Direct flash (CLI / TUI)
+### Direct flash (USB live, offline)
 
-Operator boots the target machine from bty live media (USB), then
-runs `bty` locally:
+Operator boots the target machine from bty live media (USB).
+`bty` auto-launches on tty1 via ``bty-tui-on-tty1.service``;
+without `bty.mac=` on the kernel cmdline it runs in local-only
+mode (scans `BTY_IMAGES` + any `.bri` descriptors). Operator
+picks image + target disk + confirms; the same Rich progress
+panel runs in both interactive and scripted flashes.
 
-```
-sudo bty flash IMG /dev/sda --yes
-```
-
-`bty flash` also accepts an HTTP/HTTPS URL, in which case
-the bytes stream from the URL through the appropriate
-decompressor (`zstd -d` / `xz -d` / `gzip -d` / `bzip2 -d`)
-piped to `dd` straight to the target disk - no temp file for
-streamable formats (`.img`, `.img.zst`, `.img.xz`, `.img.gz`,
-`.img.bz2`). Only `.qcow2` URLs are downloaded to a temp file
-first because qcow2 needs random-access reads during conversion.
+`.img` / `.img.zst` / `.img.xz` / `.img.gz` / `.img.bz2` images
+stream through the appropriate decompressor piped to `dd`
+straight to the target disk -- no temp file. `.qcow2` images are
+converted in place via ``qemu-img convert``.
 
 ### Interactive PXE flash (`boot_policy=tui`)
 
-The default for unknown MACs that PXE-boot through the server. The
-client lands in the live env in interactive mode; `bty-tui-on-tty1`
-launches `bty tui --catalog URL --mac MAC` which fetches the catalog
-from `GET /catalog.toml` and streams the operator-picked image straight to
-the target disk via `bty flash URL /dev/sdX`. On success, the TUI
-`POST`s `/pxe/{mac}/done` so `last_flashed_at` updates server-side.
-"bty-on-a-USB but over the network" - first PXE contact lands a
-useful UI without prior server-side configuration.
+The default for unknown MACs that PXE-boot through the server.
+The client lands in the live env; `bty-tui-on-tty1.service`
+exec's `bty --server X --mac Y` (server URL + MAC from the
+kernel cmdline). `bty` GETs `<server>/pxe/<mac>/plan`, sees
+`mode=interactive`, drops the operator into the wizard with the
+server's catalog pre-loaded. On success the wizard POSTs
+`/pxe/{mac}/done` so `last_flashed_at` updates server-side, but
+the operator's image pick is NOT reported back. "bty-on-a-USB
+but over the network" -- first PXE contact lands a useful UI
+without prior server-side configuration.
 
 ### Server-driven PXE flash (`boot_policy=flash`)
 
-1. Operator assigns `MAC -> image + provisioning + boot_policy=flash`
-   in the web UI.
-2. Target machine PXE-boots; iPXE chains into the bty live env over
-   HTTP.
-3. bty live env's `bty-flash-on-boot.service` reads kernel cmdline
-   params, fetches the assigned image, flashes the target disk,
-   applies provisioning, signals `/pxe/{mac}/done`, reboots.
+1. Operator assigns `MAC -> bty_image_ref + target_disk_serial +
+   boot_policy=flash` in the web UI.
+2. Target machine PXE-boots; iPXE chains into the bty live env
+   over HTTP. Cmdline carries just `bty.server` + `bty.mac`.
+3. `bty-tui-on-tty1.service` exec's `bty --server X --mac Y`.
+   `bty` GETs `<server>/pxe/<mac>/plan`, sees `mode=auto` with
+   the image URL + target serial filled in, flashes without
+   prompts, POSTs `/pxe/{mac}/done`, reboots.
 4. Per-job CI cadences leave `boot_policy=flash` so every boot
-   reflashes; one-shot deployments flip to `local` after the first
-   successful flash.
+   reflashes; one-shot deployments use `flash-once` which
+   auto-flips to `local` on `POST /pxe/{mac}/done`.
 
 Both BIOS and UEFI clients are supported via iPXE.
 
@@ -287,8 +300,8 @@ bty/
 +-- src/
 |   \-- bty/                # the Python package
 |       +-- __init__.py
-|       +-- cli.py          # bty console script
-|       +-- tui/            # bty-tui console script (extra: tui)
+|       +-- {flash,images,catalog,disks,oras}.py  # shared library
+|       +-- tui/            # bty console script (extra: tui)
 |       \-- web/            # bty-web console script (extra: web)
 +-- tests/
 +-- docs/
@@ -308,9 +321,10 @@ bty/
     \-- workflows/          # ci / docs / release
 ```
 
-There is one wheel (`bty`), one set of console scripts (`bty`, `bty-tui`,
-`bty-web`), and one version. Optional extras (`tui`, `web`, `all`) gate
-the heavier dependencies so a CLI-only install stays light.
+There is one wheel (`bty-lab`), two console scripts (`bty`,
+`bty-web`), and one version. Optional extras (`tui`, `web`,
+`all`) gate the heavier dependencies so a `[web]`-only install
+stays light.
 
 ## Continuous integration
 
@@ -759,15 +773,16 @@ implementation is in flight.
   use-case; otherwise it's solving a problem that does not exist
   yet.
 
-- **Repeatable ``--image-root`` (multi-root catalogs).** Today
-  ``bty-tui`` and the ``bty`` CLI accept exactly one image root.
-  Operators with images split across locations -- a stock USB
-  stick's ``BTY_IMAGES`` plus a Ventoy partition mounted at
-  ``/mnt``, a workstation install plus a downloads dir, etc. --
-  have to merge directories by hand. The natural fix is making
-  the flag repeatable (``--image-root /a --image-root /b``,
-  argparse ``action="append"``) and having ``bty.images``
-  accept an iterable; the catalog pane shows the merged rows.
+- **Multi-root image-root (parked, low-priority).** Today
+  ``bty`` reads a single image root from ``BTY_IMAGE_ROOT`` (or
+  ``/var/lib/bty/images``). Operators with images split across
+  locations -- a stock USB stick's ``BTY_IMAGES`` plus a Ventoy
+  partition mounted at ``/mnt``, a workstation install plus a
+  downloads dir, etc. -- have to merge directories by hand or
+  symlink into the single root. Future shape: an env var
+  ``BTY_IMAGE_ROOTS`` (plural) accepting colon-separated paths
+  and ``bty.images`` accepting an iterable; the wizard's image
+  list shows the merged rows.
   Open question on name collisions: easiest rule is first-root-
   wins with a one-line ``foo.qcow2: shadowed in /mnt/ventoy``
   status note so accidents surface; alternatively show the
