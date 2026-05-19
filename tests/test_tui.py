@@ -660,6 +660,118 @@ def test_fetch_and_dispatch_plan_interactive_preserves_pxe_done_base(
     assert app._state.pxe_done_base == "http://bty-server:8080"
 
 
+def test_fetch_and_dispatch_plan_auto_populates_auto_image_and_serial(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``mode=auto`` plans populate ``_auto_image`` +
+    ``_auto_target_disk_serial`` (consumed by ``_run_auto``) and
+    return ``"auto"`` as the dispatch token. Without this wiring,
+    the auto-flash path would assert-fail trying to dereference
+    None values.
+    """
+    monkeypatch.setenv("BTY_IMAGE_ROOT", str(tmp_path))
+    app = tui_app.BtyTui(server="http://bty-server:8080", mac="aa:bb:cc:dd:ee:ff")
+    assert app._auto_image is None
+    assert app._auto_target_disk_serial is None
+    assert app._auto is False
+
+    def fake_urlopen(req, **_kw):
+        return _fake_bytes_resp(
+            b'{"mode": "auto", '
+            b'"image": "http://bty-server:8080/images/abc/demo.img.gz", '
+            b'"target_disk_serial": "WD-WX12345"}'
+        )
+
+    monkeypatch.setattr(tui_app.urllib.request, "urlopen", fake_urlopen)
+    action = app._fetch_and_dispatch_plan()
+    assert action == "auto"
+    assert app._auto is True
+    assert app._auto_image == "http://bty-server:8080/images/abc/demo.img.gz"
+    assert app._auto_target_disk_serial == "WD-WX12345"
+
+
+def test_fetch_and_dispatch_plan_auto_missing_fields_falls_back_to_interactive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """If the server claims ``mode=auto`` but omits ``image`` or
+    ``target_disk_serial``, fall back to interactive with a soft
+    error banner. The auto-flash path can't proceed without both
+    values; the safest landing is the operator at the wizard.
+    """
+    monkeypatch.setenv("BTY_IMAGE_ROOT", str(tmp_path))
+    app = tui_app.BtyTui(server="http://bty-server:8080", mac="aa:bb:cc:dd:ee:ff")
+
+    def fake_urlopen(req, **_kw):
+        # mode=auto but missing target_disk_serial.
+        return _fake_bytes_resp(
+            b'{"mode": "auto", "image": "http://bty-server:8080/images/abc/demo.img.gz"}'
+        )
+
+    monkeypatch.setattr(tui_app.urllib.request, "urlopen", fake_urlopen)
+    action = app._fetch_and_dispatch_plan()
+    assert action == "interactive"
+    assert app._auto is False
+    # Operator sees a soft banner explaining the fall-back.
+    assert app._catalog_load_error is not None
+    assert "missing image/target_disk_serial" in app._catalog_load_error
+
+
+def test_fetch_and_dispatch_plan_local_returns_local_token(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``mode=local`` -> ``"local"`` dispatch token (the bty caller
+    exits cleanly with a "nothing to do here" banner)."""
+    monkeypatch.setenv("BTY_IMAGE_ROOT", str(tmp_path))
+    app = tui_app.BtyTui(server="http://bty-server:8080", mac="aa:bb:cc:dd:ee:ff")
+    monkeypatch.setattr(
+        tui_app.urllib.request,
+        "urlopen",
+        lambda *_a, **_kw: _fake_bytes_resp(b'{"mode": "local"}'),
+    )
+    assert app._fetch_and_dispatch_plan() == "local"
+
+
+def test_fetch_and_dispatch_plan_unknown_mode_clamps_to_interactive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A server returning an unrecognised mode (rolling release
+    drift, mistyped enum) falls back to interactive so the
+    operator gets SOMETHING they can act on, plus an error
+    banner explaining why."""
+    monkeypatch.setenv("BTY_IMAGE_ROOT", str(tmp_path))
+    app = tui_app.BtyTui(server="http://bty-server:8080", mac="aa:bb:cc:dd:ee:ff")
+    monkeypatch.setattr(
+        tui_app.urllib.request,
+        "urlopen",
+        lambda *_a, **_kw: _fake_bytes_resp(b'{"mode": "telephone"}'),
+    )
+    action = app._fetch_and_dispatch_plan()
+    assert action == "interactive"
+    assert app._catalog_load_error is not None
+    assert "unknown plan mode" in app._catalog_load_error
+
+
+def test_fetch_and_dispatch_plan_network_error_falls_back_to_interactive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A transport failure on the plan fetch (DNS miss, refused
+    connection, timeout) MUST NOT crash bty -- the operator at
+    tty1 should still get a wizard they can drive. Soft-fail to
+    interactive with the catalog source set in __init__
+    (``<server>/catalog.toml``)."""
+    monkeypatch.setenv("BTY_IMAGE_ROOT", str(tmp_path))
+    app = tui_app.BtyTui(server="http://unreachable:8080", mac="aa:bb:cc:dd:ee:ff")
+
+    def _boom(*_a, **_kw):
+        raise urllib.error.URLError("connection refused")
+
+    monkeypatch.setattr(tui_app.urllib.request, "urlopen", _boom)
+    action = app._fetch_and_dispatch_plan()
+    assert action == "interactive"
+    assert app._catalog_load_error is not None
+    assert "plan fetch failed" in app._catalog_load_error
+
+
 # --------------------------------------------------------------------------
 # Flash plumbing: progress callback receives flash.FlashProgress events
 # --------------------------------------------------------------------------
