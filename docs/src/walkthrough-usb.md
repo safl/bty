@@ -175,7 +175,7 @@ the CLI (scriptable).
 ## Step 5a: Flash with `bty` (interactive)
 
 On the booted bty live env, `bty` is already running on tty1
-(via `bty-tui-on-tty1.service`). On a workstation install:
+(via `bty-on-tty1.service`). On a workstation install:
 
 ```bash
 sudo bty
@@ -233,7 +233,7 @@ subcommands. To drive flashes from a fleet controller, run a
    wizard, no operator input.
 
 The PXE-boot flow does this automatically: the live env's
-`bty-tui-on-tty1.service` exec's `bty --server X --mac Y` with
+`bty-on-tty1.service` exec's `bty --server X --mac Y` with
 `X` + `Y` read from the kernel cmdline (`bty.server` + `bty.mac`).
 No operator action on the target.
 

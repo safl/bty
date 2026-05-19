@@ -2,7 +2,7 @@
 ======================================================================
   bty __BTY_VERSION__ live env
 
-  ``bty-tui-on-tty1.service`` runs on tty1 unconditionally. When
+  ``bty-on-tty1.service`` runs on tty1 unconditionally. When
   ``bty.server=URL`` + ``bty.mac=MAC`` are on the kernel command
   line (set by ``ipxe_tui.j2`` / ``ipxe_flash.j2`` for PXE boots),
   bty-tui GETs ``<server>/pxe/<mac>/plan`` and dispatches:
@@ -12,7 +12,7 @@
       mode=local       -> print a notice and exit cleanly.
 
   USB-local (no cmdline args) falls back to scanning the local
-  image-root directory. See ``journalctl -u bty-tui-on-tty1`` for
+  image-root directory. See ``journalctl -u bty-on-tty1`` for
   details.
 
   Alt+F2 (through Alt+F6) drops into a root shell on the alternate

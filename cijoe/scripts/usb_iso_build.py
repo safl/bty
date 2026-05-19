@@ -172,7 +172,7 @@ def main(args, cijoe):
     # ``auto/config``) during its own setup; flag-based overrides at
     # the initial config call get clobbered by that re-run.
     #
-    # ``bty-tui-on-tty1.service`` fires unconditionally on every live
+    # ``bty-on-tty1.service`` fires unconditionally on every live
     # env boot (v0.22.10+ retired the cmdline-mode gating). With no
     # ``bty.server`` / ``bty.mac`` on the cmdline the wrapper script
     # forwards no flags and ``bty`` falls back to scanning the local

@@ -17,7 +17,7 @@ Source content for the bty appliance images. Four variants:
 - **Network-flash live env** (`VARIANT=netboot-x86`) - kernel + initrd +
   squashfs that PXE clients chain into. Built via live-build
   (`netboot` output). Carries the bty runtime plus a
-  `bty-tui-on-tty1.service` unit that reads `bty.server` + `bty.mac`
+  `bty-on-tty1.service` unit that reads `bty.server` + `bty.mac`
   from `/proc/cmdline` and exec's `bty --server X --mac Y`; ``bty``
   then GETs `<server>/pxe/<mac>/plan` and dispatches (auto-flash,
   interactive wizard, or no-op).
@@ -176,7 +176,7 @@ hardware. Most operators never run this build pipeline themselves -
   package needed). End-to-end use case in
   [Walkthrough: USB](../docs/src/walkthrough-usb.md).
 - **netboot-x86.** Kernel + initrd + squashfs trio used by PXE clients.
-  The chroot ships `bty-tui-on-tty1.service` (after
+  The chroot ships `bty-on-tty1.service` (after
   `network-online.target`); it reads `bty.server=` + `bty.mac=`
   from `/proc/cmdline` and exec's `bty --server X --mac Y`. ``bty``
   then GETs `<server>/pxe/<mac>/plan` and dispatches: `mode=auto`

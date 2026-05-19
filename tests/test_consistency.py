@@ -288,7 +288,7 @@ def test_chroot_hooks_are_executable() -> None:
     A hook without the executable bit silently fails to run --
     no warning in the log, no error, just the configuration that
     the hook would have applied is missing in the final squashfs.
-    v0.19.x ran into this shape with the bty-tui-on-tty1 enable
+    v0.19.x ran into this shape with the bty-on-tty1 enable
     hook briefly.
     """
     hooks_dir = REPO_ROOT / "bty-media" / "live-build" / "config" / "hooks" / "normal"
@@ -313,7 +313,7 @@ def test_chroot_hooks_are_executable() -> None:
 def test_plymouth_kill_token_on_every_cmdline_insertion_point() -> None:
     """``plymouth.enable=0`` must appear on every kernel cmdline
     bty emits, because plymouth-quit-wait wedges on certain
-    Intel iGPUs and bty-flash-on-boot / bty-tui-on-tty1 have
+    Intel iGPUs and bty-flash-on-boot / bty-on-tty1 have
     ``After=plymouth-quit.service`` deps. Insertion points:
 
       * iPXE templates (already tested elsewhere)

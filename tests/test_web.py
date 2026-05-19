@@ -465,13 +465,14 @@ def test_put_image_triggers_hash_so_entry_appears_in_listing(
     # ``/images/<sha>/<name>`` (hash worker done).
     deadline = time.monotonic() + 5.0
     sha_url = f"/images/{expected_sha}/uploaded.img"
+    r2 = app_client.get("/images")  # initial fetch so r2 is always bound
     while time.monotonic() < deadline:
-        r2 = app_client.get("/images")
         by_name = {row["name"]: row for row in r2.json()}
         url = by_name.get("uploaded.img", {}).get("url", "")
         if url.endswith(sha_url):
             break
         time.sleep(0.05)
+        r2 = app_client.get("/images")
     rows = r2.json()
     by_name = {row["name"]: row for row in rows}
     assert "uploaded.img" in by_name, "upload didn't trigger an auto-hash"
@@ -1432,14 +1433,14 @@ def test_pxe_plan_tui_policy_returns_interactive_with_catalog(
 
 
 def test_pxe_tui_policy_returns_interactive_chain(app_client: TestClient) -> None:
-    """boot_policy=tui: chain into the live env. ``bty-tui-on-tty1.
+    """boot_policy=tui: chain into the live env. ``bty-on-tty1.
     service`` launches ``bty``, which GETs ``/pxe/<mac>/plan`` and
     drops the operator into the wizard for boot_policy=tui.
 
     Since v0.22.10 the cmdline carries only ``bty.server`` +
     ``bty.mac``; ``bty.mode=interactive`` was retired alongside
     the bty-flash-on-boot.service unit (now collapsed into
-    ``bty-tui-on-tty1.service`` running unconditionally with plan-endpoint
+    ``bty-on-tty1.service`` running unconditionally with plan-endpoint
     dispatch).
     """
     app_client.put(

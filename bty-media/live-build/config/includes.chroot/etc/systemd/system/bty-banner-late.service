@@ -2,7 +2,7 @@
 Description=bty boot banner -- step 3 of 3 (multi-user reached)
 Documentation=https://github.com/safl/bty
 # Just after multi-user.target. The banner is informational --
-# DO NOT add ``Before=bty-tui-on-tty1.service`` here even though
+# DO NOT add ``Before=bty-on-tty1.service`` here even though
 # it would read nicely: that unit is itself ``WantedBy=multi-
 # user.target``, so ordering this unit ``Before=`` it while also
 # being ``After=multi-user.target`` creates an ordering cycle.

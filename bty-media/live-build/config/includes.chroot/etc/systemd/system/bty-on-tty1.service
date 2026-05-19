@@ -1,32 +1,35 @@
 [Unit]
-Description=bty-tui on tty1 -- server-driven dispatcher (auto-flash / wizard / no-op)
+Description=bty on tty1 -- server-driven dispatcher (auto-flash / wizard / no-op)
 Documentation=https://github.com/safl/bty
-# Fires unconditionally on every live env boot. bty-tui reads
+# Fires unconditionally on every live env boot. ``bty`` reads
 # ``bty.server`` + ``bty.mac`` from /proc/cmdline (via the
-# /usr/local/sbin/bty-tui-on-tty1 wrapper), GETs
+# /usr/local/sbin/bty-on-tty1 wrapper), GETs
 # ``<server>/pxe/<mac>/plan``, and dispatches on the JSON response:
 #
 #   mode=auto        -> flash without prompts, then reboot.
 #   mode=interactive -> drop the operator into the wizard.
 #   mode=local       -> print a notice and exit cleanly.
 #
-# No more ConditionKernelCommandLine gating: the v0.22.10 design
-# replaced the cmdline-mode dispatch (``bty.mode=interactive`` vs
-# ``bty.mode=auto`` set by ipxe_tui.j2 / ipxe_flash.j2) with the
-# server-side /pxe/<mac>/plan endpoint. The cmdline now carries
-# just ``bty.server`` + ``bty.mac``; bty-tui itself decides what
-# to do. This means USB-local (no bty.server set) also runs the
-# same service path -- bty-tui falls back to local image-root
-# scanning when there's no server to ask.
+# No ConditionKernelCommandLine gating: the v0.22.10 design replaced
+# the cmdline-mode dispatch (``bty.mode=interactive`` vs an implicit
+# ``flash`` form via ``bty.image_url=``) with the server-side
+# /pxe/<mac>/plan endpoint. The cmdline now carries just
+# ``bty.server`` + ``bty.mac``; ``bty`` itself decides what to do.
+# This means USB-local (no ``bty.server`` set) also runs the same
+# service path -- ``bty`` falls back to local image-root scanning
+# when there's no server to ask.
+#
+# Renamed from ``bty-tui-on-tty1.service`` in v0.22.10 alongside the
+# bty-cli + bty-tui merge: the binary is just ``bty`` now.
 After=network-online.target
 Wants=network-online.target
 # Take over tty1: the live env's auto-login agetty is the default
 # session there; we want to BE the session, not run inside it.
 # ``Before=getty@tty1.service`` (combined with ``Conflicts=``) means
-# bty-tui starts BEFORE getty has a chance to render its login
+# ``bty`` starts BEFORE getty has a chance to render its login
 # prompt -- otherwise the operator sees the agetty login flash on
 # screen for the seconds it takes us to take over, which they read
-# as "boot didn't go directly to the TUI". With Before+Conflicts,
+# as "boot didn't go directly to bty". With Before+Conflicts,
 # getty never gets a chance to start in the first place.
 Conflicts=getty@tty1.service
 Before=getty@tty1.service
@@ -34,16 +37,16 @@ Before=getty@tty1.service
 [Service]
 # Type=simple (not idle): with Type=idle systemd delays ExecStart
 # until the job queue drains, which on slower targets and on
-# unattended PXE boots can wedge bty-tui's appearance for 30-60s
+# unattended PXE boots can wedge bty's appearance for 30-60s
 # while the operator watches systemd init messages scroll past.
 # We do not need idle's output-interleaving guarantee here -- the
 # Conflicts=getty@tty1 + TTYVHangup combo already takes the tty
 # cleanly.
 Type=simple
-ExecStart=/usr/local/sbin/bty-tui-on-tty1
+ExecStart=/usr/local/sbin/bty-on-tty1
 Restart=on-failure
 RestartSec=5
-# Plumb tty1 in as the controlling terminal so bty-tui's Rich
+# Plumb tty1 in as the controlling terminal so bty's Rich
 # Prompt.ask reads from the right tty.
 StandardInput=tty
 StandardOutput=tty

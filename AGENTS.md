@@ -54,7 +54,7 @@ The end-to-end contract for "make MAC X receive image Y":
 2. **Target-side trigger.** Either:
    - **Power-cycle**: the target's firmware PXE-DHCPs, fetches the
      iPXE chain at `/pxe/<mac>`, chains into the live env. The
-     live env's `bty-tui-on-tty1.service` exec's `bty --server X
+     live env's `bty-on-tty1.service` exec's `bty --server X
      --mac Y` with the values rendered into the cmdline by the
      server's iPXE template.
    - **Hand-launched** (target already running): run `bty --server

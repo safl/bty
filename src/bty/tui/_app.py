@@ -1730,7 +1730,7 @@ def _emit_console_marker(line: str) -> None:
     cmdline names with ``console=ttyS0,115200``. The bty live env
     aliases that as ``/dev/console``. Writing to /dev/console
     reaches the chain-test observer; writing only to stderr would
-    stay on /dev/tty1 because bty-tui-on-tty1.service routes
+    stay on /dev/tty1 because bty-on-tty1.service routes
     ``StandardError=tty`` -> ``TTYPath=/dev/tty1``.
 
     Also mirrors to stderr so an operator running ``bty`` on a

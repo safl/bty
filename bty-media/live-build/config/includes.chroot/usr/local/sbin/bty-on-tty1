@@ -1,7 +1,7 @@
 #!/bin/sh
-# bty-tui-on-tty1: launch ``bty`` on tty1.
+# bty-on-tty1: launch ``bty`` on tty1.
 #
-# Driven by ``bty-tui-on-tty1.service``. We own tty1 in this mode
+# Driven by ``bty-on-tty1.service``. We own tty1 in this mode
 # (the unit conflicts with ``getty@tty1.service``); systemd hands
 # us /dev/tty1 as stdio.
 #
@@ -76,7 +76,7 @@ fi
     printf '  typically take 1-5s + a few seconds respectively. bty\n'
     printf '  will print its own lifecycle messages once it starts.\n'
     printf '  If THIS banner stays > ~60s with no further output, check:\n'
-    printf '    journalctl -u bty-tui-on-tty1.service -b --no-pager\n'
+    printf '    journalctl -u bty-on-tty1.service -b --no-pager\n'
     printf '\n'
 } > /dev/tty1 2>/dev/null || true
 

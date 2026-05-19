@@ -15,7 +15,7 @@ partition) and emits a single ``catalog.toml`` matching the
     format      = "img.gz"
     description = "..."
 
-bty-tui consumers point ``--catalog`` at::
+``bty --catalog`` consumers point at::
 
     https://github.com/safl/bty/releases/latest/download/catalog.toml
 
@@ -121,7 +121,7 @@ def render_catalog_toml(starter: tuple[tuple[str, str], ...]) -> str:
         "# starter .bri set that lands on every USB stick's BTY_IMAGES",
         "# partition. Operators consume this via:",
         "#",
-        "#   bty-tui --catalog https://github.com/safl/bty/releases/latest/download/catalog.toml",
+        "#   bty --catalog https://github.com/safl/bty/releases/latest/download/catalog.toml",
         "#",
         "# oras:// refs use rolling :latest tags; bty resolves the layer",
         "# digest at flash time, so the catalog stays current as nosi",

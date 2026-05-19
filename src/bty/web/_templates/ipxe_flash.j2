@@ -4,7 +4,7 @@
 #   target_disk_serial: {{ target_disk_serial }}
 #
 # Chains into the bty live env. The live env's
-# bty-tui-on-tty1.service exec's ``bty --server X --mac Y``;
+# bty-on-tty1.service exec's ``bty --server X --mac Y``;
 # ``bty`` then GETs ``<server>/pxe/<mac>/plan`` and dispatches
 # on the JSON response (mode=auto -> flash without prompts,
 # mode=interactive -> wizard on tty1, mode=local -> exit, let

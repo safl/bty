@@ -17,7 +17,7 @@
 #     CD or USB stick (BIOS + UEFI). Used by the ``usb-iso`` variant.
 #     Adds ``--bootloaders syslinux,grub-efi`` for dual-firmware boot
 #     and ``bty.mode=interactive`` to the kernel cmdline so
-#     ``bty-tui-on-tty1.service`` fires on USB boot the same way it
+#     ``bty-on-tty1.service`` fires on USB boot the same way it
 #     fires for the PXE-tui flow.
 #
 # Both modes use the same chroot package set + hooks; only the binary

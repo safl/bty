@@ -157,7 +157,7 @@ Four shipping variants:
 **`usb-x86`** - bootable USB stick carrying the `bty` runtime
 and an exFAT `BTY_IMAGES` partition for pre-built images. The
 operator plugs it into a target machine, boots it; `bty`
-auto-launches on tty1 (via `bty-tui-on-tty1.service`) and walks
+auto-launches on tty1 (via `bty-on-tty1.service`) and walks
 the operator through pick + flash using images sourced from the
 stick itself. Self-contained and offline. The direct-flash flow's
 delivery vehicle.
@@ -176,7 +176,7 @@ Booting a Pi off SD is the homelab-friendliest server-deployment path.
 
 **`netboot-x86`** - kernel + initrd + squashfs trio that PXE
 clients chain into via the server's HTTP boot stack. The chroot
-ships `bty-tui-on-tty1.service` (unconditional; runs on every
+ships `bty-on-tty1.service` (unconditional; runs on every
 boot). The cmdline carries `bty.server` + `bty.mac` only; `bty`
 GETs `<server>/pxe/<mac>/plan` to decide whether to auto-flash,
 interact, or exit. Renamed from `live-x86` to disambiguate from
@@ -242,7 +242,7 @@ runner; if you need fleet-specific tweaks, bake them into the image.
 ### Direct flash (USB live, offline)
 
 Operator boots the target machine from bty live media (USB).
-`bty` auto-launches on tty1 via ``bty-tui-on-tty1.service``;
+`bty` auto-launches on tty1 via ``bty-on-tty1.service``;
 without `bty.mac=` on the kernel cmdline it runs in local-only
 mode (scans `BTY_IMAGES` + any `.bri` descriptors). Operator
 picks image + target disk + confirms; the same Rich progress
@@ -256,7 +256,7 @@ converted in place via ``qemu-img convert``.
 ### Interactive PXE flash (`boot_policy=tui`)
 
 The default for unknown MACs that PXE-boot through the server.
-The client lands in the live env; `bty-tui-on-tty1.service`
+The client lands in the live env; `bty-on-tty1.service`
 exec's `bty --server X --mac Y` (server URL + MAC from the
 kernel cmdline). `bty` GETs `<server>/pxe/<mac>/plan`, sees
 `mode=interactive`, drops the operator into the wizard with the
@@ -272,7 +272,7 @@ without prior server-side configuration.
    boot_policy=flash` in the web UI.
 2. Target machine PXE-boots; iPXE chains into the bty live env
    over HTTP. Cmdline carries just `bty.server` + `bty.mac`.
-3. `bty-tui-on-tty1.service` exec's `bty --server X --mac Y`.
+3. `bty-on-tty1.service` exec's `bty --server X --mac Y`.
    `bty` GETs `<server>/pxe/<mac>/plan`, sees `mode=auto` with
    the image URL + target serial filled in, flashes without
    prompts, POSTs `/pxe/{mac}/done`, reboots.
@@ -429,7 +429,7 @@ Landed after the original 1.0 list:
 16. **[done]** TUI-on-PXE flow - new `boot_policy=tui` (default for
     auto-discovered MACs), `ipxe_tui.j2` template, streaming
     `bty flash URL /dev/sdX`, `bty tui --catalog URL --mac MAC` remote
-    mode, `bty-tui-on-tty1.service` in the live env. First PXE
+    mode, `bty-on-tty1.service` in the live env. First PXE
     contact lands the operator at the TUI without prior server-side
     configuration ("bty-on-a-USB but over the network").
 17. **[done]** `server-rpi` variant - SD-card image for Raspberry Pi
@@ -459,7 +459,7 @@ Landed after the original 1.0 list:
        (`cijoe/configs/usb-iso.toml`, `cijoe/tasks/usb.yaml`,
        `cijoe/scripts/usb_iso_build.py`); marked experimental in
        the release.yml media matrix until proven on real hardware.
-    2. **[done]** Make `bty-tui-on-tty1.service` graceful when no
+    2. **[done]** Make `bty-on-tty1.service` graceful when no
        `bty.server` / `bty.mac` is on the kernel cmdline: the
        wrapper script forwards no flags and `bty-tui` falls back
        to scanning the local image-root. Same service, two modes

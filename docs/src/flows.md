@@ -22,7 +22,7 @@ the network.
 1. Operator boots the target machine from the bty USB live image
    (built by `bty-media`).
 2. The live env auto-launches ``bty`` on tty1 via
-   ``bty-tui-on-tty1.service``. Without ``bty.mac=`` on the kernel
+   ``bty-on-tty1.service``. Without ``bty.mac=`` on the kernel
    cmdline, the wizard runs in local-only mode: scans the
    ``BTY_IMAGES`` partition + any ``.bri`` descriptors there.
 3. Operator picks an image (Enter), picks a target disk (Enter),
@@ -166,7 +166,7 @@ zero per-MAC configuration.
 3. The target chains into the bty live env with `bty.server=URL`
    + `bty.mac=MAC` on the kernel cmdline (the iPXE template
    carries nothing else; every other knob comes from the plan
-   endpoint). `bty-tui-on-tty1.service` takes over tty1 in
+   endpoint). `bty-on-tty1.service` takes over tty1 in
    place of the agetty and exec's `bty --server URL --mac MAC`.
 4. **bty auto-posts the local disk inventory** to
    `POST /pxe/{mac}/inventory` on startup. The operator does not
@@ -214,7 +214,7 @@ schedule, on demand, or on failure.
    iPXE flash chain. Cmdline carries just `bty.server` +
    `bty.mac`; iPXE chains into the bty live env served over HTTP
    by `bty-web`.
-5. `bty-tui-on-tty1.service` exec's `bty --server URL --mac MAC`.
+5. `bty-on-tty1.service` exec's `bty --server URL --mac MAC`.
    ``bty`` GETs `/pxe/<mac>/plan`, sees ``mode=auto`` with the
    image URL + target_disk_serial filled in, resolves the serial
    to a `/dev/...` path via lsblk, fetches the assigned image
@@ -310,7 +310,7 @@ The gate fires at multiple points:
 - **``bty`` in auto-flash mode refuses when the plan's serial
   doesn't match any current disk.** Prints an operator-readable
   red Panel listing the current disks and their serials, exits
-  non-zero. The bty-tui-on-tty1 service stays at the failed
+  non-zero. The bty-on-tty1 service stays at the failed
   banner; the operator can re-pick on the server and try again.
 
 The serial-match (vs path-match) at flash time is the durable

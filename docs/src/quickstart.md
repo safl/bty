@@ -111,7 +111,7 @@ Concepts for the convention bty expects.
 
 Insert the USB stick into the target machine and boot from it. The
 bty live env runs `bty` on `tty1` automatically (the
-`bty-tui-on-tty1.service` unit takes over the console), so the
+`bty-on-tty1.service` unit takes over the console), so the
 operator lands on the interactive wizard without typing anything.
 Alt+F2 through Alt+F6 drop into a root shell for diagnostics if
 needed; Alt+F1 returns to `bty`.

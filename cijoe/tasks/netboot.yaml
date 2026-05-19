@@ -4,7 +4,7 @@ doc: |
 
   Builds the kernel + initrd + squashfs trio that PXE clients chain
   into via the bty server's HTTP boot stack. The chroot carries the
-  bty runtime + ``bty-tui-on-tty1.service`` (unconditional; runs on
+  bty runtime + ``bty-on-tty1.service`` (unconditional; runs on
   every boot). The kernel command line carries just ``bty.server=``
   + ``bty.mac=``; ``bty`` then GETs ``<server>/pxe/<mac>/plan`` and
   dispatches on the JSON response (auto-flash, interactive wizard,

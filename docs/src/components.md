@@ -53,7 +53,7 @@ The `bty` package implements the flashing logic (`bty.flash`,
 `bty.images`, `bty.disks`, `bty.catalog`, `bty.oras`) consumed by
 both shipping flows. ``bty`` (the operator wizard) and ``bty-web``
 (the HTTP server) are the two UI shells; in the netboot live env,
-``bty`` is launched on tty1 by `bty-tui-on-tty1.service` and
+``bty`` is launched on tty1 by `bty-on-tty1.service` and
 dispatches via the bty-web plan endpoint -- no separate auto-flash
 service. Same operations, different delivery vehicles. The middle
 shape (`--catalog SOURCE`, typically pointed at a bty-web instance's
@@ -148,7 +148,7 @@ ends at the same `bty / bty` credential as the x86 server image.
 
 **Network-flash live env (`netboot-x86`).** Kernel + initrd +
 squashfs trio that PXE clients chain into. Built via Debian's
-`live-build`. The chroot ships `bty-tui-on-tty1.service`
+`live-build`. The chroot ships `bty-on-tty1.service`
 (unconditional; runs on every boot). The service exec's `bty
 --server X --mac Y` (values from `/proc/cmdline`); ``bty`` GETs
 `<server>/pxe/<mac>/plan` and dispatches (auto-flash without

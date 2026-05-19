@@ -9,7 +9,7 @@ doc: |
   Rufus) or drop onto a Ventoy stick alongside other rescue ISOs.
 
   The chroot carries the bty runtime, ``bty-flash-on-boot.service``
-  (auto-flash mode), and ``bty-tui-on-tty1.service`` (interactive
+  (auto-flash mode), and ``bty-on-tty1.service`` (interactive
   mode). The pre-built artifact ships a writable ``BTY_IMAGES`` exFAT
   partition that ``var-lib-bty-images.mount`` attaches at
   ``/var/lib/bty/images``. When booted from USB with no

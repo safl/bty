@@ -235,7 +235,7 @@ the target's BIOS / UEFI to PXE-boot first. On power-on it'll:
 2. Chain into the bty iPXE script. Cmdline carries
    ``bty.server=URL`` + ``bty.mac=MAC`` only.
 3. Boot the netboot kernel + initrd + squashfs trio.
-   `bty-tui-on-tty1.service` exec's `bty --server X --mac Y` on
+   `bty-on-tty1.service` exec's `bty --server X --mac Y` on
    tty1; ``bty`` GETs `<server>/pxe/<mac>/plan`, sees
    ``mode=auto`` (because boot_policy=flash + ref + serial),
    writes the image to the local disk, POSTs `/pxe/<mac>/done`,

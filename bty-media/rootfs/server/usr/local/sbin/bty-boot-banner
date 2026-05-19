@@ -9,7 +9,7 @@
 #                    "bty's reached network; next is the bty
 #                    service that drives this boot."
 #   3. **late**   -- after multi-user.target. "bty's about to
-#                    hand off to bty-tui-on-tty1. If you see this
+#                    hand off to bty-on-tty1. If you see this
 #                    banner but no further action, the service
 #                    crashed."
 #

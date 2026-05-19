@@ -15,8 +15,8 @@ Documentation=https://github.com/safl/bty
 After=local-fs.target var-lib-bty-images.mount
 # Block bty-tui until discovery is done so it sees the populated
 # catalog on its first scan. (bty-flash-on-boot.service was retired
-# in v0.22.10; bty-tui-on-tty1.service handles both auto + interactive.)
-Before=bty-tui-on-tty1.service
+# in v0.22.10; bty-on-tty1.service handles both auto + interactive.)
+Before=bty-on-tty1.service
 
 [Service]
 Type=oneshot
