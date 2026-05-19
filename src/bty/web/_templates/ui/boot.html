@@ -4,8 +4,8 @@
 {% block subnav %}
 {% set right_html %}<span class="text-muted small"><code>{{ boot_root }}</code></span>{% endset %}
 {% with sections=[
-    {"key": "list",  "label": "List",                "icon": "list-ul",        "href": "/ui/boot"},
-    {"key": "fetch", "label": "Fetch latest release", "icon": "cloud-download", "href": "/ui/boot?section=fetch"},
+    {"key": "list",  "label": "List",         "icon": "list-ul",        "href": "/ui/boot"},
+    {"key": "fetch", "label": "Fetch latest", "icon": "cloud-download", "href": "/ui/boot?section=fetch"},
 ] , active=section, right_html=right_html %}
 {% include "ui/_subnav.html" %}
 {% endwith %}
