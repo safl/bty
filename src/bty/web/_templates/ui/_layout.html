@@ -51,8 +51,8 @@
             color: rgba(255, 255, 255, 0.55);
             font-weight: 400;
             font-size: 0.85rem;
-            margin-right: 0.5rem;
             align-self: center;
+            white-space: nowrap;
         }
         .navbar-brand .brand-icon {
             /* The bty bat mascot, used in place of a Bootstrap icon
@@ -257,7 +257,6 @@
            href="/ui/dashboard">
             <img src="/static/bty-favicon.png" alt="bty mascot" class="brand-icon me-1">BTY
         </a>
-        <span class="navbar-version">v{{ version }}</span>
         {% if logged_in %}
         <div class="d-flex flex-grow-1 align-items-center flex-wrap">
             <div class="me-auto d-flex flex-wrap">
@@ -274,7 +273,8 @@
                     <i class="bi bi-clock-history"></i>Events
                 </a>
             </div>
-            <div class="user-bar ms-md-3 mt-2 mt-md-0"
+            <span class="navbar-version me-2">v{{ version }}</span>
+            <div class="user-bar mt-2 mt-md-0"
                  title="OS user that bty-web is running as (PAM auth)">
                 <span class="user-bar-name">
                     <i class="bi bi-person-circle"></i>
