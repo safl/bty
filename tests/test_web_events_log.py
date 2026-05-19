@@ -369,3 +369,77 @@ def test_known_event_kinds_covers_every_kind_emitted_by_the_codebase() -> None:
         "KNOWN_EVENT_KINDS is missing kinds emitted by the codebase. "
         f"Add to _events_log.KNOWN_EVENT_KINDS: {missing}"
     )
+
+
+# --------------------------------------------------------------------------
+# Reverse-direction drift checks: every entry in the KNOWN_* catalogues
+# must actually be emitted somewhere. Catches stale entries left behind
+# by feature removal (round 16 caught ``bty-web`` lingering in
+# KNOWN_ACTORS after the actor was retired).
+# --------------------------------------------------------------------------
+
+
+def _broad_attr_scan(attr: str) -> set[str]:
+    """Collect every double-quoted string on lines containing
+    ``<attr>=``. Wider than ``re.findall(r'<attr>="..."')`` because
+    that misses the conditional-expression form
+    ``kind="A" if cond else "B"`` (the regex only catches the first
+    literal). Reverse drift checks need to count BOTH branches as
+    emitted, so we lean wide and filter by the catalogue.
+    """
+    import re
+    from pathlib import Path
+
+    src_root = Path(__file__).resolve().parent.parent / "src" / "bty"
+    found: set[str] = set()
+    needle = attr + "="
+    for path in src_root.rglob("*.py"):
+        for line in path.read_text().splitlines():
+            if needle not in line:
+                continue
+            for match in re.findall(r'"([a-z][a-z0-9._-]*)"', line):
+                found.add(match)
+    return found
+
+
+def test_known_event_kinds_has_no_unused_entries() -> None:
+    """Every entry in ``KNOWN_EVENT_KINDS`` must correspond to a
+    real emit call somewhere in ``src/bty/``. A stale entry would
+    surface in the /ui/events kind dropdown but nothing in the
+    audit log would ever match it -- operator confusion + a hint
+    that a feature was retired without a doc / code pass.
+    """
+    emitted = _broad_attr_scan("kind")
+    unused = sorted(set(_events_log.KNOWN_EVENT_KINDS) - emitted)
+    assert not unused, (
+        "KNOWN_EVENT_KINDS contains entries that no _log_event call emits. "
+        f"Drop from _events_log.KNOWN_EVENT_KINDS: {unused}"
+    )
+
+
+def test_known_subject_kinds_has_no_unused_entries() -> None:
+    """Reverse direction of the existing forward check. Same drift
+    class -- a subject kind retired in code but not the catalogue
+    would appear in the filter dropdown with no matches.
+    """
+    emitted = _broad_attr_scan("subject_kind")
+    unused = sorted(set(_events_log.KNOWN_SUBJECT_KINDS) - emitted)
+    assert not unused, (
+        "KNOWN_SUBJECT_KINDS contains entries that no _log_event call emits. "
+        f"Drop from _events_log.KNOWN_SUBJECT_KINDS: {unused}"
+    )
+
+
+def test_known_actors_has_no_unused_entries() -> None:
+    """Reverse direction. The auth events emit ``actor=service_user``
+    (a dynamic value -- the OS account name, not a string literal),
+    so this test allows those to escape the scan; only literal
+    ``actor="..."`` strings count for emission. KNOWN_ACTORS must
+    enumerate only literals that bty-web actually emits.
+    """
+    emitted = _broad_attr_scan("actor")
+    unused = sorted(set(_events_log.KNOWN_ACTORS) - emitted)
+    assert not unused, (
+        "KNOWN_ACTORS contains entries that no _log_event call emits. "
+        f"Drop from _events_log.KNOWN_ACTORS: {unused}"
+    )

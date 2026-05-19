@@ -140,7 +140,6 @@ KNOWN_ACTORS: tuple[str, ...] = (
     "operator",
     "system",
     "pxe-client",
-    "bty-web",
 )
 
 
