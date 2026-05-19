@@ -263,6 +263,13 @@ def test_ui_dashboard_sanity_checklist_renders_with_fix_links(client: TestClient
     # (no netboot artefacts, no live TFTP daemon) carry fix links.
     assert 'href="/ui/boot?section=fetch"' in body
     assert 'href="/ui/boot?section=tftp"' in body
+    # Both visual indicators render on the bare fixture: green
+    # tick on the catalog row (the fixture seeds demo.qcow2 so
+    # ``Catalog is non-empty`` passes), red x on the other two.
+    # Pinned together so a future "text-only checklist" refactor
+    # would fail CI.
+    assert "bi-check-circle-fill" in body
+    assert "bi-x-circle-fill" in body
 
 
 # ---------------------------------------------------------------------
