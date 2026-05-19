@@ -696,8 +696,8 @@ def register_ui_routes(
         with _db.open_db(state_path) as conn:
             boot_events = _events_log.list_events(conn, subject_kind="boot", limit=10)
         # Network + TFTP context the operator needs to wire up the
-        # netboot side -- moved out of /ui/settings in v0.22.13 so
-        # the "what do I configure on my router" cheatsheet lives
+        # netboot side. Lives here (rather than under /ui/settings)
+        # so the "what do I configure on my router" cheatsheet sits
         # next to the netboot artefacts it depends on.
         interfaces = _sysconfig.list_interfaces()
         primary = next((i for i in interfaces if i.ipv4), interfaces[0] if interfaces else None)

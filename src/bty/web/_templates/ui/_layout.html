@@ -149,13 +149,21 @@
         .subnav-strip {
             background-color: #495057;
             border-bottom: 1px solid rgba(255, 255, 255, 0.10);
-            /* Pin the strip's minimum inner height so it stays the
-               same height whether or not it has pills. Without
-               this the no-pill cases (dashboard / account) would
-               collapse to just padding + border. The value matches
-               a pill's rendered height: line-height (1rem) +
-               vertical padding (0.4rem * 2). */
-            min-height: calc(1rem + 0.8rem + 0.5rem); /* +py-1 wrapper */
+        }
+        /* Pin the strip's inner container's minimum height so the
+           strip stays the same height regardless of whether it
+           carries pills, right-side meta, or just an empty
+           placeholder. The value matches a pill's rendered height:
+           line-height (1.5 * 1rem) + vertical padding
+           (0.4rem * 2) = 2.3rem. ``min-height`` on the inner
+           container (rather than on ``.subnav-strip`` itself) lets
+           the navbar's own ``py-1`` padding sit outside the
+           reservation, so adding/removing pills doesn't shift
+           ``main`` content up or down. */
+        .subnav-strip > .container {
+            min-height: 2.3rem;
+            display: flex;
+            align-items: center;
         }
         .subnav-strip .nav-pills {
             /* Match the inter-button spacing the top nav uses
