@@ -355,9 +355,12 @@ def test_chroot_hooks_are_executable() -> None:
 
 def test_plymouth_kill_token_on_every_cmdline_insertion_point() -> None:
     """``plymouth.enable=0`` must appear on every kernel cmdline
-    bty emits, because plymouth-quit-wait wedges on certain
-    Intel iGPUs and bty-flash-on-boot / bty-on-tty1 have
-    ``After=plymouth-quit.service`` deps. Insertion points:
+    bty emits, because plymouth-quit-wait used to wedge on certain
+    Intel iGPUs (MS-01, EPYC bring-up box) and any service ordered
+    ``After=plymouth-quit.service`` would block forever. The
+    package is retired in the bty chroot, but cmdline belt-and-
+    braces stays in case a future transitively-pulled package
+    reintroduces it. Insertion points:
 
       * iPXE templates (already tested elsewhere)
       * live-build auto/config BOOTAPPEND (both branches)

@@ -392,8 +392,8 @@ def _put_assignment(host, port, token, cfg, bty_image_ref):
             # v0.19.0+ safety gate: /pxe/{mac} refuses the flash
             # chain unless a target_disk_serial is picked. The
             # client VM's flash target is pinned to ``serial=
-            # BTYTEST`` in _start_client_vm; the live env's
-            # bty-flash-on-boot matches this value against
+            # BTYTEST`` in _start_client_vm; ``bty`` in auto-flash
+            # mode matches the plan's target_disk_serial against
             # lsblk's SERIAL field.
             "target_disk_serial": "BTYTEST",
         }

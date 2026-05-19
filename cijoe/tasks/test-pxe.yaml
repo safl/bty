@@ -8,8 +8,9 @@ doc: |
   VM PXE-boots on that segment. The test asserts the chain completes
   by grepping the client's serial-console log for marker strings
   emitted at each stage of the boot pipeline (iPXE binary loaded,
-  /pxe-bootstrap.ipxe fetched, per-MAC plan fetched, kernel + initrd
-  loaded, live env booted, bty-flash-on-boot service started).
+  /pxe-bootstrap.ipxe fetched, per-MAC chain fetched, kernel +
+  initrd + squashfs loaded, ``bty: auto-flash starting`` /
+  ``bty: flash complete; rebooting`` markers on /dev/console).
 
   Steps:
 

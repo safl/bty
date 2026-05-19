@@ -1,8 +1,9 @@
-# Packages bty needs to flash a target disk and run the flash-on-boot
-# / tui-on-tty1 services. qemu-utils for qemu-img, parted for
-# partitioning, zstd for .img.zst, nvme-cli for block-device
-# discovery. ``util-linux`` is intentionally absent: it's
-# ``Essential: yes`` in Debian and always installed by debootstrap.
+# Packages bty needs to flash a target disk and run
+# ``bty-on-tty1.service`` (the merged dispatcher). qemu-utils for
+# qemu-img, parted for partitioning, zstd for .img.zst, nvme-cli
+# for block-device discovery. ``util-linux`` is intentionally
+# absent: it's ``Essential: yes`` in Debian and always installed
+# by debootstrap.
 
 # bty runtime. ``python3-venv`` ships ensurepip, so the venv created
 # by ``hooks/normal/0500-bty-install.hook.chroot`` has its own pip;

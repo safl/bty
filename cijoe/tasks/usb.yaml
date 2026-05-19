@@ -8,16 +8,18 @@ doc: |
   stick with whatever tool they prefer (``dd``, Balena Etcher,
   Rufus) or drop onto a Ventoy stick alongside other rescue ISOs.
 
-  The chroot carries the bty runtime, ``bty-flash-on-boot.service``
-  (auto-flash mode), and ``bty-on-tty1.service`` (interactive
-  mode). The pre-built artifact ships a writable ``BTY_IMAGES`` exFAT
-  partition that ``var-lib-bty-images.mount`` attaches at
+  The chroot carries the bty runtime and ``bty-on-tty1.service``
+  (the merged dispatcher: GETs ``<server>/pxe/<mac>/plan`` and
+  runs auto-flash / interactive wizard / no-op). The pre-built
+  artifact ships a writable ``BTY_IMAGES`` exFAT partition that
+  ``var-lib-bty-images.mount`` attaches at
   ``/var/lib/bty/images``. When booted from USB with no
-  ``bty.server`` / ``bty.mac`` on the kernel cmdline, ``bty-tui``
-  runs flagless and finds the operator's catalog there; when chained
-  from a bty server's iPXE script with ``bty.server=`` and
-  ``bty.mac=``, the same units take the network-flash path. Same
-  image, two modes.
+  ``bty.server`` / ``bty.mac`` on the kernel cmdline, ``bty``
+  runs flagless and finds the operator's catalog there; when
+  chained from a bty server's iPXE script with ``bty.server=`` +
+  ``bty.mac=``, the same unit drives the network-flash path
+  through the plan endpoint. Same image, same code; the bty-server
+  decides the mode.
 
   Steps:
 
