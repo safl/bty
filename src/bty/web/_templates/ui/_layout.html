@@ -37,6 +37,18 @@
         .navbar-brand.brand-active:hover {
             background-color: rgba(13, 110, 253, 0.95);
         }
+        /* Version sits as plain text after the BTY wordmark --
+           the previous badge pill (``bg-secondary``) added a
+           second pill inside the brand button, which read as a
+           click target itself. Strip the badge styling and use
+           a muted color so the version is legible but doesn't
+           compete with the brand wordmark. */
+        .navbar-brand .brand-version {
+            color: rgba(255, 255, 255, 0.55);
+            font-weight: 400;
+            font-size: 0.85rem;
+            margin-left: 0.4rem;
+        }
         .navbar-brand .brand-icon {
             /* The bty bat mascot, used in place of a Bootstrap icon
                so the brand pill reads as "this product" rather than
@@ -240,7 +252,7 @@
         <a class="navbar-brand fw-semibold {% if nav_active == 'dashboard' %}brand-active{% endif %}"
            href="/ui/dashboard">
             <img src="/static/bty-favicon.png" alt="bty mascot" class="brand-icon me-1">BTY
-            <span class="badge bg-secondary fw-normal ms-1">{{ version }}</span>
+            <span class="brand-version">v{{ version }}</span>
         </a>
         {% if logged_in %}
         <div class="d-flex flex-grow-1 align-items-center flex-wrap">
