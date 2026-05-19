@@ -237,6 +237,34 @@ def test_ui_dashboard_subscribes_to_sse_for_live_counts(client: TestClient) -> N
     assert 'sse-swap="dashboard-counts"' in body
 
 
+def test_ui_dashboard_sanity_checklist_renders_with_fix_links(client: TestClient) -> None:
+    """The dashboard sanity checklist is the operator's
+    fresh-install onboarding surface: one row per readiness
+    condition, each labelled + linked into the remediation
+    section when the condition fails. Pin the three core rows
+    (Netboot artefacts / Catalog non-empty / TFTP daemon
+    running) so a future refactor doesn't accidentally drop one.
+    """
+    import re
+
+    _login(client)
+    body = client.get("/ui/dashboard").text
+    assert "Sanity checklist" in body
+    # Each row's label.
+    assert "Netboot artefacts present" in body
+    assert "Catalog is non-empty" in body
+    assert "TFTP daemon running" in body
+    # The "N / 3 ready" header is present (the actual N depends
+    # on the test fixture's pre-seeded state; we don't pin it).
+    assert re.search(r"\d+ / 3 ready", body), (
+        "sanity-check header should render an 'N / 3 ready' summary"
+    )
+    # The two always-failing rows in the bare-fixture state
+    # (no netboot artefacts, no live TFTP daemon) carry fix links.
+    assert 'href="/ui/boot?section=fetch"' in body
+    assert 'href="/ui/boot?section=tftp"' in body
+
+
 # ---------------------------------------------------------------------
 # Sub-nav (v0.22.11): /ui/images, /ui/boot, /ui/machines each have a
 # sub-nav strip that splits "what's there" (list, the default
@@ -430,11 +458,52 @@ def test_ui_boot_section_fetch_shows_form_only(client: TestClient) -> None:
     assert r.status_code == 200
     body = r.text
     assert 'id="enqueue-fetch-btn"' in body
-    # The artefact-list table is suppressed on the fetch view. The
-    # PXE / TFTP cards stay on every section because they're
-    # informational config-reference cards, not part of the
-    # list-vs-fetch switching surface.
+    # The artefact-list table is suppressed on the fetch view --
+    # only the Fetch form + Active-fetches polling table render.
     assert "<th>File</th>\n                    <th>Status</th>" not in body
+    # The DHCP/PXE + TFTP <h2>s (each section's distinctive
+    # heading marker) are NOT on the fetch view either -- both
+    # live behind their own sub-section pills now.
+    assert "bi-hdd-network me-2" not in body
+    assert "bi-cpu me-2" not in body
+
+
+def test_ui_boot_section_dhcp_pxe_shows_router_cheatsheet(client: TestClient) -> None:
+    """The DHCP / PXE sub-section is the operator's router-config
+    cheatsheet. It must render the four DHCP options bty needs
+    the LAN router to set (60 PXEClient / 66 next-server / 67
+    bootfile / 67 for user-class=iPXE), each labelled."""
+    _login(client)
+    r = client.get("/ui/boot?section=dhcp-pxe")
+    assert r.status_code == 200
+    body = r.text
+    # Section heading + the four DHCP options.
+    assert "bi-hdd-network me-2" in body  # the <h2>'s icon class
+    assert ">DHCP / PXE</h2>" in body
+    assert "option 60" in body
+    assert "PXEClient" in body
+    assert "option 66" in body
+    assert "option 67" in body
+    # The other sub-sections' headings should NOT render.
+    assert 'id="enqueue-fetch-btn"' not in body
+    assert "bi-cpu me-2" not in body  # TFTP daemon <h2>'s icon
+
+
+def test_ui_boot_section_tftp_shows_daemon_status(client: TestClient) -> None:
+    """The TFTP sub-section is the operator's "take PXE offline
+    briefly" surface. Renders the dnsmasq.service status badge +
+    Start/Stop/Restart controls (or the no-helper hint when the
+    container can't supervise the daemon)."""
+    _login(client)
+    r = client.get("/ui/boot?section=tftp")
+    assert r.status_code == 200
+    body = r.text
+    assert "bi-cpu me-2" in body  # the <h2>'s icon class
+    assert ">TFTP daemon</h2>" in body
+    assert "dnsmasq.service" in body
+    # The other sub-sections' headings should NOT render.
+    assert 'id="enqueue-fetch-btn"' not in body
+    assert "bi-hdd-network me-2" not in body  # DHCP / PXE <h2>'s icon
 
 
 def test_ui_machines_default_section_is_list_not_add_form(
