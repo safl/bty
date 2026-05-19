@@ -129,6 +129,40 @@ class _TuiImage:
     url: str | None = None
 
 
+def _normalise_server_url(server: str) -> str:
+    """Turn a bare hostname or full URL into a normalised base URL.
+
+    Operator convenience: ``--server bty-server`` should work as
+    well as ``--server http://bty-server:8080``. When no scheme is
+    present we default to ``http://``. Trailing slashes are stripped
+    so concatenations like ``f"{server}/pxe/{mac}/plan"`` produce
+    a clean path.
+    """
+    server = server.strip().rstrip("/")
+    if "://" not in server:
+        server = f"http://{server}"
+    return server
+
+
+def _basename_from_url(url: str) -> str | None:
+    """Last path segment of ``url``, url-decoded, or ``None`` if the
+    URL has no useful filename component.
+
+    Used by the auto-flash path to derive a display name for the
+    image being flashed. The URL may have a query string and
+    arbitrary percent-encoded characters; we want the human-
+    readable last segment.
+    """
+    try:
+        parsed = urllib.parse.urlparse(url)
+    except ValueError:
+        return None
+    name = Path(parsed.path).name
+    if not name:
+        return None
+    return urllib.parse.unquote(name)
+
+
 def _format_mib(size_bytes: int | None) -> str:
     """Format a byte count as comma-grouped MiB.
 
@@ -401,45 +435,144 @@ class BtyTui:
 
     def __init__(
         self,
-        image_root: Path | None = None,
-        catalog_source: str | None = None,
+        server: str = "bty-server",
         mac: str | None = None,
+        catalog: str | None = None,
     ) -> None:
+        """Two-mode TUI:
+
+        * ``mac`` unset -> interactive wizard, local image-root only.
+          BTY_IMAGE_ROOT env var still picks the root. ``catalog``,
+          if given, pre-fills the catalog source and skips the
+          SELECT_CATALOG screen (equivalent to picking ``[c]`` and
+          typing the URL).
+        * ``mac`` set -> server-driven mode. ``run()`` GETs
+          ``<server>/pxe/<mac>/plan`` and dispatches:
+            - ``plan.mode == "auto"``     -> ``_run_auto`` (no prompts)
+            - ``plan.mode == "interactive"`` -> interactive wizard with
+              the catalog the server suggests
+            - ``plan.mode == "local"``    -> exit cleanly (nothing to do
+              from bty's side; firmware sanboot handles the rest)
+            - 404 / network failure       -> interactive wizard with
+              server's ``/catalog.toml`` as the catalog source
+          ``catalog`` is ignored in server-driven mode -- the server's
+          plan response carries the catalog the operator should see.
+        """
         self._console = Console(highlight=False)
         env_image_root = os.environ.get("BTY_IMAGE_ROOT")
-        resolved_root = image_root or (
-            Path(env_image_root) if env_image_root else Path("/var/lib/bty/images")
-        )
-        # Auto-skip SELECT_CATALOG when the operator already has
-        # something to work with at startup: either ``--catalog`` was
-        # explicitly passed, or the local image-root already has
-        # images (``.bri`` pointers, raw ``.img.gz``, ...). Otherwise
-        # the wizard opens on SELECT_CATALOG so the operator gets
-        # asked where images should come from before being dropped
-        # into an empty list. Operator can always back-nav from
-        # SELECT_IMAGE to SELECT_CATALOG to change source.
-        catalog_chosen = bool(catalog_source) or bool(_list_local_images(resolved_root))
+        resolved_root = Path(env_image_root) if env_image_root else Path("/var/lib/bty/images")
+        # ``server`` is the bty-server URL or hostname (bare hostnames
+        # get an ``http://`` scheme defaulted in below). Stored on the
+        # state so the header Panel can show it; also the base for
+        # ``/pxe/<mac>/done`` POST after a successful flash.
+        self._server_url = _normalise_server_url(server)
+        pxe_done = self._server_url if mac else None
+        # Three startup paths:
+        # 1. ``mac`` set -> server-driven mode. catalog_chosen=True so
+        #    the interactive fallback lands on SELECT_IMAGE directly
+        #    with the server's catalog pre-loaded. The --catalog flag
+        #    is ignored here; the server's plan dictates source.
+        # 2. ``catalog`` set (no mac) -> hand-driven interactive run
+        #    with a known catalog. Skip SELECT_CATALOG; behave as if
+        #    the operator typed ``[c]`` + the URL.
+        # 3. Neither set -> auto-skip SELECT_CATALOG only when the
+        #    local image-root already has images; otherwise prompt.
+        if mac:
+            catalog_chosen = True
+            catalog_source: str | None = self._server_url.rstrip("/") + "/catalog.toml"
+        elif catalog:
+            catalog_chosen = True
+            catalog_source = catalog
+        else:
+            catalog_source = None
+            catalog_chosen = bool(_list_local_images(resolved_root))
         self._state = _State(
             image_root=resolved_root,
             catalog_source=catalog_source,
             mac=mac,
-            pxe_done_base=_pxe_done_base_from_source(catalog_source),
+            pxe_done_base=pxe_done,
             catalog_chosen=catalog_chosen,
         )
         # Catalog load errors (transient network / bad TOML) -- surface
         # via a soft banner on the image-pick screen rather than
         # aborting the TUI.
         self._catalog_load_error: str | None = None
+        # ``_auto`` is flipped True later by ``run()`` if the
+        # server's plan says ``mode=auto``. Without a mac, stays False.
+        self._auto = False
+        self._auto_image: str | None = None
+        self._auto_target_disk_serial: str | None = None
 
     # ---------- entry --------------------------------------------------
 
     def run(self) -> None:
-        """Drive the wizard until the operator quits."""
+        """Drive the wizard until the operator quits, OR run the
+        server-driven path when a ``mac`` was supplied.
+        """
         # Best-effort inventory post at startup. Network failures are
         # non-fatal; the TUI is still useful even if bty-web can't be
         # reached.
         if self._state.pxe_done_base and self._state.mac:
             self._auto_post_inventory()
+
+        # Server-driven mode: fetch the plan from
+        # <server>/pxe/<mac>/plan and dispatch.
+        #
+        # For every plan we print a banner BEFORE the dispatch so the
+        # operator (or anyone watching the live env's tty1) sees what
+        # the server said and what bty-tui is about to do. A silent
+        # exit / silent wizard launch is indistinguishable from a
+        # crash on a framebuffer console.
+        if self._state.mac:
+            plan_action = self._fetch_and_dispatch_plan()
+            if plan_action == "auto":
+                self._console.print(
+                    Panel(
+                        f"Server reports [{_ACCENT}]mode=auto[/] for "
+                        f"[{_PRIMARY}]{self._state.mac}[/]:\n\n"
+                        f"  image  : {self._auto_image}\n"
+                        f"  serial : {self._auto_target_disk_serial}\n\n"
+                        f"[{_MUTED}]Running the flash without prompts; "
+                        "the same chrome the interactive wizard uses.[/]",
+                        title="Plan: auto-flash",
+                        border_style=_PRIMARY,
+                    )
+                )
+                sys.exit(self._run_auto())
+            if plan_action == "local":
+                # The server says nothing to do here (boot_policy=local
+                # or similar). Print a Panel so an operator hand-running
+                # ``bty-tui --mac X`` from a workstation sees WHY the
+                # tool is exiting -- a silent ``sys.exit(0)`` looks
+                # like a crash. The live env never reaches this path:
+                # boot_policy=local short-circuits at the iPXE chain
+                # (sanboot directly, no live-env chain).
+                self._console.print(
+                    Panel(
+                        f"Server reports [{_ACCENT}]mode=local[/] for "
+                        f"[{_PRIMARY}]{self._state.mac}[/] -- nothing for "
+                        "bty-tui to do here.\n\n"
+                        f"[{_MUTED}]boot_policy=local means the firmware / "
+                        "local disk boots directly; no flash, no wizard.[/]",
+                        title="Plan: local boot",
+                        border_style=_PRIMARY,
+                    )
+                )
+                sys.exit(0)
+            # ``interactive`` falls through to the wizard below. Print a
+            # banner first so the operator knows the server delegated
+            # the pick to them (vs. having auto-flashed).
+            self._console.print(
+                Panel(
+                    f"Server reports [{_ACCENT}]mode=interactive[/] for "
+                    f"[{_PRIMARY}]{self._state.mac}[/]:\n\n"
+                    f"  catalog : {self._state.catalog_source or '(none)'}\n\n"
+                    f"[{_MUTED}]Dropping into the wizard so you can pick "
+                    "the image + target disk by hand.[/]",
+                    title="Plan: interactive",
+                    border_style=_PRIMARY,
+                )
+            )
 
         try:
             self._main_loop()
@@ -453,6 +586,195 @@ class BtyTui:
         except Exception:  # pragma: no cover - last-resort safety net
             self._console.print_exception(show_locals=False)
             sys.exit(1)
+
+    def _fetch_and_dispatch_plan(self) -> str:
+        """GET ``<server>/pxe/<mac>/plan`` and prep the wizard for
+        dispatch. Returns one of:
+
+        * ``"auto"`` -- plan is an auto-flash; ``_run_auto`` should
+          run next. ``_auto_image`` + ``_auto_target_disk_serial``
+          are populated.
+        * ``"interactive"`` -- plan asks the operator to pick; fall
+          through to the interactive wizard. The catalog source on
+          state may be updated to the server's suggestion.
+        * ``"local"`` -- plan is "nothing to do here"; exit cleanly.
+
+        Network / parse failures fall through to ``"interactive"``
+        with the previously-set catalog (the server's
+        ``/catalog.toml`` -- set in ``__init__``). The operator can
+        retry from the interactive screen or re-run with the same
+        cmdline.
+        """
+        assert self._state.mac is not None
+        url = f"{self._server_url.rstrip('/')}/pxe/{self._state.mac}/plan"
+        try:
+            req = urllib.request.Request(url, headers={"Accept": "application/json"})
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                payload = _json.loads(resp.read().decode("utf-8"))
+        except (urllib.error.URLError, OSError, TimeoutError, ValueError) as exc:
+            # Soft failure: surface as a transient catalog-load
+            # error and fall through to interactive. Operator sees
+            # the banner on the image-select screen.
+            self._catalog_load_error = f"plan fetch failed: {exc}"
+            return "interactive"
+
+        mode = payload.get("mode")
+        if mode == "auto":
+            self._auto_image = payload.get("image")
+            self._auto_target_disk_serial = payload.get("target_disk_serial")
+            if not self._auto_image or not self._auto_target_disk_serial:
+                self._catalog_load_error = (
+                    f"server returned mode=auto but missing image/target_disk_serial: {payload!r}"
+                )
+                return "interactive"
+            self._auto = True
+            return "auto"
+        if mode == "interactive":
+            # Server may suggest a specific catalog. If it does, use
+            # it; if not, keep whatever was set in __init__ (which
+            # defaults to ``<server>/catalog.toml`` for server-driven
+            # mode).
+            suggested = payload.get("catalog")
+            if isinstance(suggested, str) and suggested:
+                self._state.catalog_source = suggested
+                self._state.pxe_done_base = _pxe_done_base_from_source(suggested)
+            return "interactive"
+        if mode == "local":
+            return "local"
+        # Unknown mode -- treat as interactive so the operator gets
+        # SOMETHING they can act on, plus a banner explaining why.
+        self._catalog_load_error = f"unknown plan mode {mode!r}; falling back to interactive"
+        return "interactive"
+
+    def _run_auto(self) -> int:
+        """Scripted flash path: cmdline-driven, no prompts.
+
+        The bty-server provides every argument needed for the flash.
+        bty-tui's job is to:
+
+        1. Look up the disk whose serial matches ``--target-disk-serial``
+           (the bty-server picked this serial in /ui/machines).
+        2. Build the flash plan.
+        3. Run the flash with the standard Rich progress bar.
+        4. POST ``/pxe/<mac>/done`` to the bty-server.
+        5. Reboot.
+
+        On any failure: prints a red Panel + exits non-zero, no reboot.
+        Uses the same screens/panels the interactive wizard uses, so
+        operator-visible chrome is identical between scripted +
+        interactive runs.
+        """
+        assert self._auto_image is not None
+        assert self._auto_target_disk_serial is not None
+
+        # Pre-fill wizard state from cmdline args. ``--image``
+        # accepts a path or URL; ``_TuiImage`` keys differ.
+        image_arg = self._auto_image
+        if "://" in image_arg:
+            self._state.selected_image = _TuiImage(
+                name=_basename_from_url(image_arg) or "auto-flash-image",
+                fmt=None,
+                size_bytes=0,
+                url=image_arg,
+            )
+        else:
+            image_path = Path(image_arg)
+            self._state.selected_image = _TuiImage(
+                name=image_path.name or "auto-flash-image",
+                fmt=None,
+                size_bytes=0,
+                path=image_path,
+            )
+
+        # Look up the disk by serial. lsblk-via-disks.list_disks
+        # returns dicts with a ``serial`` field; the bty-server
+        # picked this serial when the operator chose a target in
+        # /ui/machines. A no-match means the drive was swapped or
+        # the inventory is stale -- refuse rather than guess.
+        target_serial = self._auto_target_disk_serial
+        try:
+            all_disks = disks.list_disks()
+        except (FileNotFoundError, subprocess.SubprocessError, OSError) as exc:
+            self._console.clear()
+            self._print_header(stage=3, title="Auto-flash: disk lookup failed")
+            self._console.print(
+                Panel(
+                    f"[{_DANGER}]lsblk failed: {exc}[/]",
+                    border_style=_DANGER,
+                    title="Disk inventory failed",
+                )
+            )
+            return 1
+        matched: dict[str, Any] | None = None
+        for disk in all_disks:
+            raw = disk.get("serial")
+            present = raw.strip() if isinstance(raw, str) else raw
+            if present == target_serial:
+                matched = disk
+                break
+        if matched is None:
+            self._console.clear()
+            self._print_header(stage=3, title="Auto-flash: target disk not found")
+            visible = (
+                ", ".join(
+                    f"{d.get('path')} (serial={d.get('serial')!r})"
+                    for d in all_disks
+                    if d.get("type") == "disk"
+                )
+                or "(none)"
+            )
+            self._console.print(
+                Panel(
+                    f"[{_DANGER}]No disk on this host has serial="
+                    f"{target_serial!r}.[/]\n\n"
+                    f"Current disks: {visible}\n\n"
+                    "The operator's pick in /ui/machines is stale; "
+                    "re-pick after the next inventory and retry.",
+                    border_style=_DANGER,
+                    title="No matching disk",
+                )
+            )
+            return 2
+        self._state.selected_disk = matched
+
+        # Probe + plan (same code path the interactive screen 4
+        # uses). Errors surface as a red Panel and a non-zero exit.
+        self._console.clear()
+        self._print_header(stage=4, title="Auto-flash: probing")
+        plan_or_error = self._probe_and_plan(
+            self._state.selected_image,
+            Path(str(matched.get("path"))),
+        )
+        if isinstance(plan_or_error, str):
+            self._console.print(
+                Panel(
+                    f"[{_DANGER}]Probe failed:[/]\n\n{plan_or_error}",
+                    border_style=_DANGER,
+                    title="Plan rejected",
+                )
+            )
+            return 3
+        plan, errors = plan_or_error
+        if errors:
+            self._print_flash_plan(plan, errors)
+            return 4
+
+        # Run the flash with the same Rich progress bar interactive
+        # operators see. ``_screen_flash_running`` sets
+        # ``self._state.post_flash`` on success.
+        self._screen_flash_running(plan)
+        if not self._state.post_flash:
+            return 5
+
+        # Best-effort completion signal (bty-web's per-MAC timeline).
+        if self._state.pxe_done_base and self._state.mac:
+            with contextlib.suppress(urllib.error.URLError, OSError, TimeoutError):
+                post_pxe_done(self._state.pxe_done_base, self._state.mac)
+
+        # Always reboot on success -- auto-mode exists for the
+        # unattended netboot flow where reboot is the whole point.
+        self._do_reboot()  # exits via systemctl reboot; unreachable on success
+        return 0
 
     # ---------- main loop ----------------------------------------------
 

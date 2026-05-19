@@ -11,7 +11,7 @@ Wants=network-online.target
 # Run BEFORE anything that does package install / image pull /
 # signature verification so the corrected clock is in place by
 # the time apt, oras, or bty-flash inspect it.
-Before=apt-daily.service bty-flash-on-boot.service bty-tui-on-tty1.service
+Before=apt-daily.service bty-tui-on-tty1.service
 
 [Service]
 Type=oneshot

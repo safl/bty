@@ -2,10 +2,9 @@
 Description=bty boot banner -- step 3 of 3 (multi-user reached)
 Documentation=https://github.com/safl/bty
 # Just after multi-user.target. The banner is informational --
-# DO NOT add ``Before=bty-tui-on-tty1.service`` or
-# ``Before=bty-flash-on-boot.service`` here even though it would
-# read nicely: those units are themselves ``WantedBy=multi-user.
-# target``, so ordering this unit ``Before=`` them while also
+# DO NOT add ``Before=bty-tui-on-tty1.service`` here even though
+# it would read nicely: that unit is itself ``WantedBy=multi-
+# user.target``, so ordering this unit ``Before=`` it while also
 # being ``After=multi-user.target`` creates an ordering cycle.
 # systemd silently breaks the cycle by dropping one of the units
 # from the boot transaction. Same trap as the server's

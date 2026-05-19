@@ -4,8 +4,7 @@
   CLI:        bty --help
   TUI:        bty-tui
   Mounted:    /var/lib/bty/images   (BTY_IMAGES exFAT, RO in live env)
-  Logs:       journalctl -u bty-flash-on-boot
-              journalctl -u bty-tui-on-tty1
+  Logs:       journalctl -u bty-tui-on-tty1
 
   This rootfs is a read-only squashfs with a tmpfs overlay -- any
   changes vanish on reboot. Files dropped onto BTY_IMAGES from

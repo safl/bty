@@ -94,6 +94,7 @@ KNOWN_EVENT_KINDS: tuple[str, ...] = (
     "machine.flashed",
     "machine.inventory",
     "pxe.offered",
+    "pxe.plan",
     "pxe.flash.orphan_ref",
     "pxe.flash.no_target_disk",
     "image.uploaded",
@@ -139,6 +140,7 @@ KNOWN_ACTORS: tuple[str, ...] = (
     "operator",
     "system",
     "pxe-client",
+    "bty-web",
 )
 
 

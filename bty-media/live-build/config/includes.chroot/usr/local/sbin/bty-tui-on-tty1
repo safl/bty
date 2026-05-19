@@ -1,29 +1,24 @@
 #!/bin/sh
-# bty-tui-on-tty1: launch bty-tui on tty1 in interactive mode.
+# bty-tui-on-tty1: launch bty-tui on tty1.
 #
-# Driven by ``bty-tui-on-tty1.service``, gated on
-# ``bty.mode=interactive`` via ``ConditionKernelCommandLine``. We're
-# the tty1 session in this mode (the unit conflicts with
-# ``getty@tty1.service``); systemd hands us /dev/tty1 as stdio.
+# Driven by ``bty-tui-on-tty1.service``. We own tty1 in this mode
+# (the unit conflicts with ``getty@tty1.service``); systemd hands
+# us /dev/tty1 as stdio.
 #
-# Two boot scenarios put ``bty.mode=interactive`` on the cmdline:
+# Two boot scenarios put us on tty1:
 #
-# 1. PXE-tui (server's ``ipxe_tui.j2`` template, ``boot_policy=tui``):
-#    cmdline also carries ``bty.server=`` and ``bty.mac=``. We rewrite
-#    the bty.server URL into a ``--catalog <URL>/catalog.toml`` flag
-#    (the bty-web instance serves a TOML catalog there matching the
-#    operator's ``--catalog`` URL elsewhere) plus ``--mac MAC`` so
-#    the TUI POSTs ``<server>/pxe/<mac>/done`` after a successful
-#    flash. The pxe-done base is auto-derived from the catalog URL's
-#    scheme+host, so the bty.server cmdline param only needs to be
-#    the bty-web instance's base URL.
+# 1. PXE (server's ``ipxe_tui.j2`` / ``ipxe_flash.j2``): cmdline
+#    carries ``bty.server=`` and ``bty.mac=``. We pass both through
+#    to ``bty-tui --server <X> --mac <Y>``; bty-tui then GETs
+#    ``<server>/pxe/<mac>/plan`` and dispatches on the JSON
+#    response (auto-flash without prompts, interactive wizard, or
+#    no-op-and-exit).
 #
-# 2. USB-local: the live-build iso-hybrid bake sets
-#    ``bty.mode=interactive`` directly via ``--bootappend-live`` so
-#    the same service fires when the operator boots the USB stick
-#    on bare metal with no PXE involvement. No ``bty.server`` or
-#    ``bty.mac`` is set; we forward no flags and ``bty-tui`` falls
-#    back to scanning the local image-root directory.
+# 2. USB-local: the live-build iso-hybrid bake fires the same
+#    service when the operator boots the USB stick on bare metal
+#    with no PXE involvement. No ``bty.server`` / ``bty.mac`` is
+#    set; we launch ``bty-tui`` bare and it falls back to scanning
+#    the local image-root directory.
 #
 # Cmdline parsing is intentionally simple (tr+sed): bty.* tokens
 # never contain spaces, so word-splitting is safe. Mirrors the
@@ -41,30 +36,23 @@ MAC=$(printf '%s\n' $CMDLINE | tr ' ' '\n' | sed -n 's/^bty\.mac=//p' | head -1)
 
 ARGS=""
 if [ -n "$SERVER" ]; then
-    # Rewrite the bty-web base URL into a --catalog <base>/catalog.toml
-    # so the TUI consumes the static TOML view (same code path used
-    # for static / oras catalogs). The pxe-done base is auto-derived
-    # from the URL's scheme+host inside the TUI.
-    CATALOG_URL="${SERVER%/}/catalog.toml"
-    ARGS="$ARGS --catalog $CATALOG_URL"
+    ARGS="$ARGS --server ${SERVER%/}"
 fi
 if [ -n "$MAC" ]; then
     ARGS="$ARGS --mac $MAC"
 fi
 
 # Print a "starting" banner before exec'ing bty-tui. The Rich-based
-# TUI (Textual was retired in v0.22.0) typically renders its first
-# frame within 1-5s; cold-cache Python imports on slow USB media
-# can stretch that. The synchronous catalog fetch -- if a
-# ``--catalog`` URL was set via cmdline -- adds DNS + TCP-connect +
-# transfer time on top, capped at the 30s urllib timeout in
-# ``bty.catalog.fetch_bytes``. On a stuck network this whole
-# sequence can stretch to ~60-90s before the TUI gives up and
-# paints. Without something on the screen during that window, an
-# operator looking at a blank-ish tty1 thinks the box is hung and
-# rules it out. The TUI itself prints a ``loading catalog ...``
-# indicator before its blocking fetch, so this banner only needs to
-# bridge the Python-import gap.
+# TUI typically renders its first frame within 1-5s; cold-cache
+# Python imports on slow USB media can stretch that. When a
+# ``--mac`` is set, the synchronous plan fetch adds DNS + TCP-
+# connect + HTTP round-trip on top (15s timeout). On a stuck
+# network this whole sequence can stretch to ~30-60s before the TUI
+# gives up and paints. Without something on the screen during that
+# window, an operator looking at a blank-ish tty1 thinks the box is
+# hung and rules it out. The TUI itself prints lifecycle messages
+# from its main entry point, so this banner only needs to bridge
+# the Python-import gap.
 #
 # We print to /dev/tty1 directly (rather than stdout) because
 # bty-tui is about to claim stdio and our exec replaces this
@@ -78,19 +66,18 @@ fi
     printf '  bty-tui is starting...\n'
     printf '\n'
     if [ -n "${SERVER}" ]; then
-        printf '    catalog : %s\n' "${SERVER%/}/catalog.toml"
+        printf '    server  : %s\n' "${SERVER%/}"
     else
-        printf '    catalog : (local image-root)\n'
+        printf '    server  : (none -- local image-root only)\n'
     fi
     if [ -n "${MAC}" ]; then
         printf '    MAC     : %s\n' "${MAC}"
     fi
     printf '\n'
-    printf '  Python imports + catalog fetch (when ``--catalog`` is set)\n'
-    printf '  typically take 1-5s + up to 30s respectively. The TUI\n'
-    printf '  will print its own ``loading catalog ...`` line when it\n'
-    printf '  starts the fetch. If THIS banner stays > ~60s with no\n'
-    printf '  further output, check:\n'
+    printf '  Python imports + plan fetch (when ``--mac`` is set)\n'
+    printf '  typically take 1-5s + a few seconds respectively. The\n'
+    printf '  TUI will print its own lifecycle messages once it starts.\n'
+    printf '  If THIS banner stays > ~60s with no further output, check:\n'
     printf '    journalctl -u bty-tui-on-tty1.service -b --no-pager\n'
     printf '\n'
 } > /dev/tty1 2>/dev/null || true

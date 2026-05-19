@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import argparse
 import sys
-from pathlib import Path
 
 import bty
 
@@ -30,7 +29,27 @@ def main(argv: list[str] | None = None, *, prog: str = "bty-tui") -> None:
     """
     parser = argparse.ArgumentParser(
         prog=prog,
-        description=f"{prog} - terminal UI for image inspection and flashing",
+        description=(
+            f"{prog} -- bty's terminal UI. Two modes:\n\n"
+            f"  {prog}                          - interactive wizard\n"
+            f"                                    (local image-root only)\n"
+            f"  {prog} --catalog <URL>          - interactive wizard with\n"
+            f"                                    the given catalog pre-loaded\n"
+            f"                                    (equivalent to picking [c]\n"
+            f"                                    on the source screen and\n"
+            f"                                    typing the URL).\n"
+            f"  {prog} --mac <MAC>              - server-driven mode:\n"
+            f"                                    fetches a plan from\n"
+            f"                                    --server's /pxe/<MAC>/plan\n"
+            f"                                    and acts on it (auto-flash,\n"
+            f"                                    interactive, or local-boot\n"
+            f"                                    -- whatever the server says).\n\n"
+            "The operator-facing surface is intentionally narrow: in\n"
+            "server-driven mode every knob (image, target disk, catalog\n"
+            "overlay) comes from the bty-server's machine record, not the\n"
+            "cmdline. --catalog is only useful for hand-driven runs."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "--version",
@@ -38,37 +57,37 @@ def main(argv: list[str] | None = None, *, prog: str = "bty-tui") -> None:
         version=f"{prog} {bty.__version__}",
     )
     parser.add_argument(
-        "--catalog",
+        "--server",
         type=str,
-        default=None,
-        help="Catalog source. Accepts a local TOML file path "
-        "(``./catalog.toml`` or ``/var/lib/bty/catalog.toml``) or "
-        "a URL (``http://server:8080/catalog.toml``, "
-        "``https://example.com/catalog.toml``, "
-        "``oras://ghcr.io/owner/repo:tag``). Fetched once at startup "
-        "and held in memory; pressing ``r`` only re-scans the local "
-        "image-root, not the remote catalog. Without --catalog, "
-        "the TUI scans a local image-root directory only.",
+        default="bty-server",
+        help="bty-server base URL or hostname. Default ``bty-server`` "
+        "(operator convenience: pair with a LAN DNS entry pointing at "
+        "the appliance and ``bty-tui --mac X`` just works). The netboot "
+        "and USB-PXE-TUI paths pass this explicitly via ``bty.server=`` "
+        "on the kernel cmdline. Bare hostnames are accepted; missing "
+        "scheme defaults to ``http://``.",
     )
     parser.add_argument(
         "--mac",
         type=str,
         default=None,
-        help="Self-MAC of this client (e.g. from the live env's "
-        "``bty.mac=`` cmdline param). When set together with a "
-        "``--catalog`` URL whose base looks like a bty-web instance, "
-        "the TUI ``POST``s ``<base>/pxe/<mac>/done`` after a "
-        "successful flash. Best-effort: a non-bty-web catalog "
-        "source (static file, oras://) skips the POST.",
+        help="Self-MAC of this client (e.g. ``aa:bb:cc:dd:ee:ff``). "
+        "When supplied, bty-tui switches to server-driven mode: it "
+        "GETs ``<server>/pxe/<mac>/plan`` and dispatches on the "
+        "returned plan -- auto-flash, interactive, or no-op. The "
+        "live env passes this via ``bty.mac=`` on the kernel cmdline.",
     )
     parser.add_argument(
-        "--image-root",
-        type=Path,
+        "--catalog",
+        type=str,
         default=None,
-        help="Local directory to scan for images (overrides the "
-        "``BTY_IMAGE_ROOT`` env var and the live env default of "
-        "``/var/lib/bty/images``). Local images and the --catalog "
-        "entries surface together in the TUI's catalog table.",
+        help="Catalog URL or path to pre-load (http(s):// for HTTP, "
+        "oras:// for OCI, or a local path). When given, the SELECT_CATALOG "
+        "screen is skipped and the wizard jumps straight to SELECT_IMAGE "
+        "with this catalog overlaying the local image-root -- equivalent "
+        "to picking ``[c]`` on the source screen and typing the URL. "
+        "Ignored in server-driven mode (``--mac`` set) because the server "
+        "supplies the catalog as part of /pxe/<mac>/plan.",
     )
     args = parser.parse_args(argv)
 
@@ -118,8 +137,8 @@ def main(argv: list[str] | None = None, *, prog: str = "bty-tui") -> None:
         )
         sys.exit(1)
     _progress("dependencies loaded")
-    if args.catalog:
-        _progress(f"catalog source: {args.catalog}")
+    if args.mac:
+        _progress(f"server-driven mode: server={args.server} mac={args.mac}")
     _progress("starting interface (first paint may take a few seconds)...")
 
-    BtyTui(image_root=args.image_root, catalog_source=args.catalog, mac=args.mac).run()
+    BtyTui(server=args.server, mac=args.mac, catalog=args.catalog).run()

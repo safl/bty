@@ -6,17 +6,16 @@
 # services start automatically on every boot of the live env. Each
 # unit decides at runtime whether it actually has work to do:
 #
-# - ``bty-flash-on-boot.service`` exits 0 when /proc/cmdline lacks
-#   the required bty.* keys, OR when ``bty.mode=interactive`` is
-#   set (in which case the TUI service handles the boot instead).
-# - ``bty-tui-on-tty1.service`` is gated by
-#   ``ConditionKernelCommandLine=bty.mode=interactive`` and runs
-#   ``bty-tui --catalog <bty.server>/catalog.toml --mac MAC`` in
-#   place of the agetty on tty1 when the server's ipxe_tui.j2 set
-#   that mode (or when the usb-iso bake set it via
-#   ``--bootappend-live``). The wrapper script
-#   ``/usr/local/sbin/bty-tui-on-tty1`` does the URL rewriting; the
-#   bty.server cmdline param is still the bty-web base URL.
+# - ``bty-tui-on-tty1.service`` runs unconditionally on tty1 (the
+#   live env's only operator-facing surface). The wrapper script
+#   ``/usr/local/sbin/bty-tui-on-tty1`` reads ``bty.server`` +
+#   ``bty.mac`` from /proc/cmdline and exec's ``bty-tui --server X
+#   --mac Y``; bty-tui then GETs ``<server>/pxe/<mac>/plan`` and
+#   dispatches (auto-flash / interactive / no-op). The legacy
+#   ``bty-flash-on-boot.service`` + ``bty.mode=interactive``
+#   ConditionKernelCommandLine gating was retired in v0.22.10 --
+#   the server-side plan endpoint is now the single dispatch
+#   point.
 # - ``var-lib-bty-images.mount`` mounts the BTY_IMAGES partition
 #   at /var/lib/bty/images (RO) so bty-tui sees it as the local
 #   image catalog. Gated on
@@ -42,7 +41,6 @@
 # Sentinel files on the partition prevent re-runs.
 
 set -eu
-systemctl enable bty-flash-on-boot.service
 systemctl enable bty-tui-on-tty1.service
 systemctl enable bty-images-discover.service
 systemctl enable var-lib-bty-images.mount
@@ -73,7 +71,7 @@ chmod 0755 /usr/local/sbin/bty-boot-banner
 # systemctl's chroot-mode behaviour.
 mkdir -p /etc/systemd/system/multi-user.target.wants
 mkdir -p /etc/systemd/system/sysinit.target.wants
-for svc in bty-flash-on-boot.service bty-tui-on-tty1.service \
+for svc in bty-tui-on-tty1.service \
            bty-images-discover.service var-lib-bty-images.mount \
            bty-usb-grow.service \
            bty-banner-mid.service bty-banner-late.service; do

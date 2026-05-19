@@ -265,16 +265,21 @@ def test_e2e_pxe_chain_cmdline_carries_all_expected_tokens(
                                               wedge on Intel iGPUs
       * modprobe.blacklist=nouveau        -- avoid the 30s nouveau
         + nouveau.modeset=0                 firmware-probe stall
-      * bty.mode=interactive              -- fires bty-tui-on-tty1
-      * bty.server=...                    -- catalog source URL
-      * bty.mac=<mac>                     -- so the live env can
-                                              POST /pxe/<mac>/done
+      * bty.server=...                    -- bty-tui dispatches via
+                                              <server>/pxe/<mac>/plan
+      * bty.mac=<mac>                     -- so bty-tui can fetch
+                                              the per-MAC plan
 
     Each token has been added in a separate release to fix a
     real-hardware boot issue; the cumulative invariant is that all
     of them must reach the kernel cmdline. A future template edit
     that drops any one of them would silently re-break a previously
     fixed target -- this test catches that.
+
+    v0.22.10 retired ``bty.mode=interactive`` (and the matching
+    cmdline-conditioned bty-flash-on-boot.service). Dispatch now
+    happens at the /pxe/<mac>/plan endpoint, so the cmdline is the
+    same minimal shape for tui + flash chains.
     """
     r = app_client.get(
         "/pxe/aa:bb:cc:dd:ee:ff",
@@ -295,7 +300,6 @@ def test_e2e_pxe_chain_cmdline_carries_all_expected_tokens(
         "plymouth.enable=0",
         "modprobe.blacklist=nouveau",
         "nouveau.modeset=0",
-        "bty.mode=interactive",
         "bty.server=${bty-base}",
         "bty.mac=aa:bb:cc:dd:ee:ff",
         "console=tty0",
@@ -316,13 +320,17 @@ def test_e2e_pxe_chain_cmdline_carries_all_expected_tokens(
         assert "\t" not in token, token
 
 
-def test_e2e_pxe_flash_chain_cmdline_includes_image_url_and_target_serial(
+def test_e2e_pxe_flash_chain_plan_carries_image_url_and_target_serial(
     app_client: TestClient,
 ) -> None:
     """Bind a known machine to a known catalog entry + target disk
-    serial, set boot_policy to flash-once, GET /pxe/<mac>, parse
-    the ipxe_flash.j2 output: every flash-specific token must be
-    present AND well-formed.
+    serial, set boot_policy to flash-once, GET /pxe/<mac>/plan: the
+    plan response must carry the image URL + target serial.
+
+    v0.22.10 moved these out of the iPXE kernel cmdline and into
+    the plan endpoint. The iPXE chain is now template-agnostic
+    (same shape for tui + flash); bty-tui consumes the plan JSON
+    to decide what to do.
     """
     # Seed a catalog entry the machine binds to. Use a sha that
     # corresponds to a file we'll create so the URL is reachable.
@@ -371,6 +379,22 @@ def test_e2e_pxe_flash_chain_cmdline_includes_image_url_and_target_serial(
     )
     assert r.status_code == 200, r.text
 
+    # Plan endpoint carries image URL + target disk serial in JSON.
+    plan_resp = app_client.get(
+        "/pxe/aa:bb:cc:dd:ee:ff/plan",
+        headers={"Host": "bty.local:8080"},
+    )
+    assert plan_resp.status_code == 200, plan_resp.text
+    plan = plan_resp.json()
+    assert plan["mode"] == "auto"
+    assert plan["target_disk_serial"] == "WD-WX12345"
+    assert "/images/" in plan["image"]
+    assert bty_image_ref in plan["image"]
+
+    # iPXE chain still renders the flash header comment block (so
+    # an operator inspecting curl output sees the bound ref + serial)
+    # AND the minimal kernel cmdline (bty.server + bty.mac only,
+    # plus the boot-time hardening tokens).
     r = app_client.get(
         "/pxe/aa:bb:cc:dd:ee:ff",
         headers={"Host": "bty.local:8080"},
@@ -379,13 +403,16 @@ def test_e2e_pxe_flash_chain_cmdline_includes_image_url_and_target_serial(
     body = r.text
     kernel_line = next(line for line in body.splitlines() if line.startswith("kernel "))
     required = (
-        "bty.image_url=",
-        "bty.target_disk_serial=WD-WX12345",
+        "bty.server=${bty-base}",
+        "bty.mac=aa:bb:cc:dd:ee:ff",
         "plymouth.enable=0",
         "modprobe.blacklist=nouveau",
     )
     for token in required:
         assert token in kernel_line, f"flash cmdline missing {token!r}: {kernel_line!r}"
+    # Retired: these moved to the plan endpoint.
+    assert "bty.image_url" not in kernel_line
+    assert "bty.target_disk_serial" not in kernel_line
 
 
 # ----------------------------------------------------------------------
@@ -802,11 +829,18 @@ def test_e2e_pxe_unknown_mac_then_inventory_then_flash_chain(
     # 1. Auto-discovery.
     r = app_client.get(f"/pxe/{mac}", headers={"Host": "bty.local:8080"})
     assert r.status_code == 200, r.text
-    assert "bty.mode=interactive" in r.text, r.text  # default tui policy
+    # Default policy is tui; cmdline carries minimal bty.server +
+    # bty.mac (v0.22.10 retired bty.mode=). The plan endpoint
+    # decides what bty-tui does.
+    assert "bty.server=" in r.text
+    assert f"bty.mac={mac}" in r.text
 
     r = app_client.get(f"/machines/{mac}", cookies=AUTH)
     assert r.status_code == 200, r.text
     assert r.json()["boot_policy"] == "tui"
+
+    plan = app_client.get(f"/pxe/{mac}/plan", headers={"Host": "bty.local:8080"}).json()
+    assert plan["mode"] == "interactive"
 
     # 2. Inventory POST -- simulates the live env reporting disks.
     r = app_client.post(
@@ -856,12 +890,19 @@ def test_e2e_pxe_unknown_mac_then_inventory_then_flash_chain(
     assert r.status_code == 200, r.text
 
     # 4. Subsequent PXE renders the flash chain with the binding.
+    # The iPXE chain itself carries only bty.server + bty.mac on the
+    # cmdline (v0.22.10); the image URL + target serial appear in
+    # the chain header comment block for operator inspection AND on
+    # /pxe/<mac>/plan as JSON (the contract bty-tui consumes).
     r = app_client.get(f"/pxe/{mac}", headers={"Host": "bty.local:8080"})
     assert r.status_code == 200, r.text
     body = r.text
-    assert "bty.image_url=" in body, body
-    assert f"bty.image_url=${{bty-base}}/images/{ref}" in body
-    assert "bty.target_disk_serial=SER-1" in body
+    assert f"bty_image_ref:      {ref}" in body
+    assert "target_disk_serial: SER-1" in body
+    plan = app_client.get(f"/pxe/{mac}/plan", headers={"Host": "bty.local:8080"}).json()
+    assert plan["mode"] == "auto"
+    assert plan["target_disk_serial"] == "SER-1"
+    assert f"/images/{ref}/" in plan["image"]
     # Done call flips flash-once -> local.
     r = app_client.post(f"/pxe/{mac}/done")
     assert r.status_code in (200, 204), r.text

@@ -625,11 +625,29 @@
             fetch("/catalog/entries?src=" + encodeURIComponent(src), {
                 method: "DELETE",
                 credentials: "same-origin",
-            }).then(function () {
-                // Full reload so the row disappears + flash banner
-                // (if any) renders. Refresh just hits the polling
-                // endpoints; we want the page tree re-rendered.
-                window.location.reload();
+            }).then(function (resp) {
+                if (resp.ok) {
+                    // Full reload so the row disappears + flash banner
+                    // (if any) renders. Refresh just hits the polling
+                    // endpoints; we want the page tree re-rendered.
+                    window.location.reload();
+                    return;
+                }
+                // Server refused (e.g. 409 when the entry is sourced
+                // from the static catalog manifest -- deleting the
+                // DB row would just re-appear on the next render).
+                // Surface the server's error message so the operator
+                // sees WHY the click looked like a no-op.
+                resp.text().then(function (body) {
+                    var msg;
+                    try {
+                        msg = JSON.parse(body).detail || body;
+                    } catch (_e) {
+                        msg = body || ("HTTP " + resp.status);
+                    }
+                    alert("Could not remove entry:\n\n" + msg);
+                    entryDeleteBtn.disabled = false;
+                });
             }).catch(function () {
                 entryDeleteBtn.disabled = false;
             });

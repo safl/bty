@@ -715,6 +715,132 @@ def create_app(
         publish_state_changed()
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
+    @app.get("/pxe/{mac}/plan")
+    def pxe_plan(mac: str, request: Request) -> dict[str, Any]:
+        """Return the per-MAC plan as JSON so ``bty-tui --server X
+        --mac Y`` can dispatch without operator input.
+
+        Plan shapes (mode is the dispatch token):
+
+        * ``{"mode": "auto", "image": URL, "target_disk_serial": S}``
+          -- boot_policy in (flash, flash-once) with a bindable ref
+          AND a target_disk_serial picked. bty-tui runs the flash
+          without prompts.
+        * ``{"mode": "interactive", "catalog": URL}`` -- boot_policy
+          ``tui``, OR a flash policy that can't be auto-resolved
+          (no target serial, orphan ref). bty-tui drops the operator
+          into the wizard with the server's catalog pre-loaded.
+        * ``{"mode": "local"}`` -- boot_policy=local (or anything
+          unrecognised). bty-tui exits cleanly; the firmware /
+          local-disk path handles boot.
+
+        Unknown MACs auto-register (matches the ``/pxe/{mac}`` iPXE
+        endpoint) with boot_policy=tui so a hand-launched ``bty-tui
+        --mac X`` from a fresh box gets a wizard plan rather than a
+        404.
+
+        Open endpoint: same trust model as the rest of /pxe/*
+        (homelab / CI network, not the internet).
+        """
+        normalised = _normalise_mac(mac)
+        client_ip = _client_ip(request)
+        now = _now_iso()
+        with _db.open_db(state_path) as conn:
+            row = conn.execute("SELECT * FROM machines WHERE mac = ?", (normalised,)).fetchone()
+            if row is None:
+                # Auto-discovery: mirror /pxe/{mac}'s behaviour so a
+                # bty-tui invocation against an unknown MAC creates
+                # a record (boot_policy=tui) instead of 404-ing.
+                conn.execute(
+                    """
+                    INSERT INTO machines
+                        (mac, boot_policy,
+                         discovered_at, last_seen_at, last_seen_ip,
+                         created_at, updated_at)
+                    VALUES (?, 'tui', ?, ?, ?, ?, ?)
+                    """,
+                    (normalised, now, now, client_ip, now, now),
+                )
+                _log_event(
+                    conn,
+                    kind="machine.discovered",
+                    summary=(
+                        f"{normalised} first contacted /pxe/{normalised}/plan "
+                        f"from {client_ip or 'unknown IP'}"
+                    ),
+                    subject_kind="machine",
+                    subject_id=normalised,
+                    actor="pxe-client",
+                    source_ip=client_ip,
+                )
+                conn.commit()
+                row = conn.execute("SELECT * FROM machines WHERE mac = ?", (normalised,)).fetchone()
+            else:
+                conn.execute(
+                    """
+                    UPDATE machines
+                    SET last_seen_at = ?,
+                        last_seen_ip = ?,
+                        discovered_at = COALESCE(discovered_at, ?),
+                        updated_at = ?
+                    WHERE mac = ?
+                    """,
+                    (now, client_ip, now, now, normalised),
+                )
+                conn.commit()
+                row = conn.execute("SELECT * FROM machines WHERE mac = ?", (normalised,)).fetchone()
+
+        assert row is not None
+        machine = dict(row)
+        publish_state_changed()
+
+        host = _request_host(request)
+        base = f"http://{host}"
+        policy = machine.get("boot_policy")
+        ref = machine.get("bty_image_ref")
+
+        plan: dict[str, Any]
+        offer_kind: str
+        if policy in ("flash", "flash-once") and ref:
+            target_disk_serial = machine.get("target_disk_serial")
+            image_name = _flash_target_for_ref(str(ref))
+            if image_name is not None and target_disk_serial:
+                image_name_encoded = urllib.parse.quote(image_name, safe="")
+                plan = {
+                    "mode": "auto",
+                    "image": f"{base}/images/{ref}/{image_name_encoded}",
+                    "target_disk_serial": str(target_disk_serial),
+                }
+                offer_kind = f"plan:auto:{policy}"
+            else:
+                # Flash policy but the auto-resolve failed (no target
+                # serial picked or orphan ref). Drop the operator into
+                # the wizard so they can pick + finish manually.
+                plan = {"mode": "interactive", "catalog": f"{base}/catalog.toml"}
+                offer_kind = "plan:interactive:flash-unresolved"
+        elif policy == "tui":
+            plan = {"mode": "interactive", "catalog": f"{base}/catalog.toml"}
+            offer_kind = "plan:interactive:tui"
+        else:
+            # boot_policy=local (or any other / missing) -- bty-tui
+            # has nothing to do; let firmware / sanboot handle it.
+            plan = {"mode": "local"}
+            offer_kind = f"plan:local:{policy}"
+
+        with _db.open_db(state_path) as conn:
+            _log_event(
+                conn,
+                kind="pxe.plan",
+                summary=f"{normalised} plan offered: mode={plan['mode']} (policy={policy})",
+                subject_kind="machine",
+                subject_id=normalised,
+                actor="pxe-client",
+                source_ip=client_ip,
+                details={"plan": plan, "boot_policy": policy, "offer_kind": offer_kind},
+            )
+            conn.commit()
+        return plan
+
     @app.post(
         "/pxe/{mac}/inventory",
         status_code=status.HTTP_204_NO_CONTENT,
@@ -1503,32 +1629,27 @@ def create_app(
         )
 
     def _list_unified_images() -> list[images.UnifiedImage]:
-        """Unified image listing: dir-scan files, manifest entries,
-        and operator-curated ``catalog_entries`` rows folded through
-        the same ref-keyed + sha-keyed merge.
+        """Unified image listing: dir-scan files + operator-curated
+        ``catalog_entries`` rows + content-cache, folded through the
+        same ref-keyed + sha-keyed merge.
 
-        The merge collapses on two axes (see
-        :func:`images.merge_with_catalog`):
-
-        * ``bty_image_ref`` (provenance ID, always present): a
-          manifest entry and its auto-imported DB row carry the
-          same ref so they collapse into one entry even when no
-          content sha is pinned.
-        * ``sha256`` (content hash, may be None): a dir-scan file
-          and a manifest entry that pin the same SHA collapse via
-          the content-identity axis -- preserves the "one image,
-          multiple sources" rendering across local + remote.
+        The ``catalog_entries`` DB table is the authoritative
+        catalog. ``catalog.toml`` is treated as a one-time import
+        seed at startup (``_seed_db_from_manifest_if_empty``), not
+        a live overlay -- so operator removals via
+        ``DELETE /catalog/entries`` stick across renders + restarts.
+        Re-importing the manifest is an explicit operator action
+        (``POST /catalog/import`` or the UI's catalog upload form).
 
         Recomputed per call so an operator who drops new files into
         BTY_IMAGE_ROOT (or whose catalog fetch just completed, or
         who added a URL via the UI) sees the change on the next
         page load without restarting bty-web.
         """
-        manifest_entries = catalog_state.catalog.entries if catalog_state.catalog else ()
         db_entries = _load_db_catalog_entries()
         return images.merge_with_catalog(
             resolved_image_root,
-            (*manifest_entries, *db_entries),
+            db_entries,
             catalog_cache_dir,
         )
 
@@ -1827,7 +1948,14 @@ def create_app(
     def delete_catalog_entry(src: str, request: Request) -> Response:
         """Delete via ``?src=<url>`` query param. URL-as-path-param
         would require percent-encoding the schema and slashes,
-        which is operator-hostile; query param is cleaner."""
+        which is operator-hostile; query param is cleaner.
+
+        The DB is the authoritative catalog: ``catalog.toml`` is just
+        a one-time import seed at startup (see ``_seed_db_from_manifest_if_empty``),
+        not a live overlay. So a delete that succeeds at the DB level
+        is genuinely the end of the entry's lifetime -- no manifest
+        re-injection on next render.
+        """
         with _db.open_db(state_path) as conn:
             cur = conn.execute("DELETE FROM catalog_entries WHERE src = ?", (src,))
             if cur.rowcount > 0:
@@ -1905,7 +2033,31 @@ def create_app(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"failed to fetch catalog from {source!r}: {exc}",
             ) from exc
+        imported, skipped, errors = _import_parsed_catalog(
+            parsed, source=source, source_ip=_client_ip(request)
+        )
+        return {
+            "source": source,
+            "imported": imported,
+            "skipped": skipped,
+            "errors": errors,
+        }
 
+    def _import_parsed_catalog(
+        parsed: _catalog.Catalog,
+        *,
+        source: str,
+        source_ip: str | None,
+    ) -> tuple[int, int, list[dict[str, str]]]:
+        """Insert every entry from ``parsed`` into ``catalog_entries``.
+
+        Idempotent: rows whose ``src`` already exists are counted in
+        ``skipped`` (sqlite IntegrityError on the UNIQUE constraint)
+        rather than overwriting. Returns ``(imported, skipped, errors)``.
+        ``source`` is the human-readable origin (a URL, a file path,
+        or ``"<upload>"``) and rides into the events-log row so the
+        operator can trace where a batch came from.
+        """
         imported = 0
         skipped = 0
         errors: list[dict[str, str]] = []
@@ -1916,14 +2068,25 @@ def create_app(
                 fmt = entry.format
                 size_bytes = entry.size_bytes
                 if sha is None and entry.src.startswith("oras://"):
+                    # Best-effort oras resolution: try to pin sha + size
+                    # from the registry manifest. On failure (offline /
+                    # registry unreachable / private registry needing
+                    # auth) we still insert the entry, just without
+                    # the sha+size pre-filled. The row is bindable via
+                    # ``bty_image_ref`` even without sha, and the first
+                    # cache-fetch will populate ``disk_image_sha`` then.
+                    # Strict-fail mode would refuse offline imports
+                    # which is operator-hostile for sealed environments.
                     try:
                         resolved = _oras.resolve_ref(entry.src)
                     except _oras.OrasError as exc:
-                        errors.append({"name": entry.name, "error": f"oras: {exc}"})
-                        continue
-                    sha = resolved.digest.removeprefix("sha256:")
-                    if size_bytes is None:
-                        size_bytes = resolved.size
+                        errors.append(
+                            {"name": entry.name, "error": f"oras (kept without sha): {exc}"}
+                        )
+                    else:
+                        sha = resolved.digest.removeprefix("sha256:")
+                        if size_bytes is None:
+                            size_bytes = resolved.size
                 try:
                     bty_image_ref = _catalog.image_ref_for_src(entry.src)
                 except ValueError as exc:
@@ -1959,7 +2122,7 @@ def create_app(
                 subject_kind="catalog",
                 subject_id=source,
                 actor="operator",
-                source_ip=_client_ip(request),
+                source_ip=source_ip,
                 details={
                     "source": source,
                     "imported": imported,
@@ -1968,12 +2131,7 @@ def create_app(
                 },
             )
             conn.commit()
-        return {
-            "source": source,
-            "imported": imported,
-            "skipped": skipped,
-            "errors": errors,
-        }
+        return imported, skipped, errors
 
     # ---------- catalog download manager ----------------------------------
     # Authenticated endpoints; only operators logged into the bty-web
@@ -2132,29 +2290,19 @@ def create_app(
                 "/ui/images?error=" + urllib.parse.quote("upload was empty", safe=""),
                 status_code=status.HTTP_303_SEE_OTHER,
             )
-        # Parse first (without writing anything) so a bad upload
-        # doesn't clobber a working manifest already on disk.
+        # Parse + import each entry into the ``catalog_entries`` DB.
+        # The uploaded TOML is treated purely as an IMPORT SOURCE --
+        # we don't write it to disk or keep it as a live overlay.
+        # The DB is the authoritative catalog; idempotent INSERT
+        # (UNIQUE on src) means re-uploading is safe.
         try:
-            _catalog.load_bytes(content, source="<upload>")
+            parsed = _catalog.load_bytes(content, source="<upload>")
         except _catalog.CatalogError as exc:
             return RedirectResponse(
                 "/ui/images?error=" + urllib.parse.quote(f"manifest parse failed: {exc}", safe=""),
                 status_code=status.HTTP_303_SEE_OTHER,
             )
-        # Atomic write via tempfile-in-parent + rename so a torn
-        # write can't leave a half-written manifest where a working
-        # one used to be.
-        manifest_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = manifest_path.with_suffix(manifest_path.suffix + ".partial")
-        tmp.write_bytes(content)
-        tmp.replace(manifest_path)
-        try:
-            await _reload_catalog_from_disk()
-        except _catalog.CatalogError as exc:
-            return RedirectResponse(
-                "/ui/images?error=" + urllib.parse.quote(f"reload failed: {exc}", safe=""),
-                status_code=status.HTTP_303_SEE_OTHER,
-            )
+        _import_parsed_catalog(parsed, source="<upload>", source_ip=_client_ip(request))
         return RedirectResponse("/ui/images", status_code=status.HTTP_303_SEE_OTHER)
 
     @app.post(
@@ -2211,24 +2359,19 @@ def create_app(
                 status_code=status.HTTP_303_SEE_OTHER,
             )
         try:
-            _catalog.load_bytes(content, source=_BTY_RELEASE_CATALOG_URL)
+            parsed = _catalog.load_bytes(content, source=_BTY_RELEASE_CATALOG_URL)
         except _catalog.CatalogError as exc:
             return RedirectResponse(
                 "/ui/images?error="
                 + urllib.parse.quote(f"fetched manifest parse failed: {exc}", safe=""),
                 status_code=status.HTTP_303_SEE_OTHER,
             )
-        manifest_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = manifest_path.with_suffix(manifest_path.suffix + ".partial")
-        tmp.write_bytes(content)
-        tmp.replace(manifest_path)
-        try:
-            await _reload_catalog_from_disk()
-        except _catalog.CatalogError as exc:
-            return RedirectResponse(
-                "/ui/images?error=" + urllib.parse.quote(f"reload failed: {exc}", safe=""),
-                status_code=status.HTTP_303_SEE_OTHER,
-            )
+        # Fetched catalog.toml is treated as an IMPORT SOURCE -- we
+        # don't write it to disk or keep it as a live overlay. The
+        # ``catalog_entries`` DB is the authoritative catalog;
+        # idempotent INSERT means re-fetching the same release adds
+        # any new entries without disturbing what's already there.
+        _import_parsed_catalog(parsed, source=_BTY_RELEASE_CATALOG_URL, source_ip=None)
         return RedirectResponse("/ui/images", status_code=status.HTTP_303_SEE_OTHER)
 
     @app.get("/catalog/downloads")

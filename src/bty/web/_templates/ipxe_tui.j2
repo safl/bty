@@ -1,17 +1,30 @@
 #!ipxe
 # bty network-flash for {{ mac }} - interactive TUI mode
 #
-# ``boot_policy=tui``: chain into the bty live env with
-# ``bty.mode=interactive`` so the flash-on-boot oneshot short-circuits
-# and ``bty-tui`` is launched on tty1 instead. The TUI fetches the
-# image catalog from ``GET <bty.server>/images`` and lets the operator
-# pick + flash without needing a server-side per-MAC assignment.
+# ``boot_policy=tui``: chain into the bty live env. The live env's
+# bty-tui-on-tty1 service exec's ``bty-tui --server X --mac Y``;
+# bty-tui GETs ``<server>/pxe/<mac>/plan`` and dispatches on the
+# JSON response. For ``boot_policy=tui`` the plan endpoint returns
+# ``{"mode": "interactive", "catalog": ...}`` and bty-tui drops
+# the operator into the wizard with the server's catalog pre-loaded.
 #
 # This is the default for unknown MACs that PXE-boot through the
 # server: anyone on the segment lands at "bty-on-a-USB-but-over-the-
 # network" without prior configuration.
+#
+# The kernel cmdline only carries ``bty.server`` + ``bty.mac`` --
+# every other knob (image URL, target disk, catalog) comes from
+# the plan endpoint. Keeps the iPXE chain template-agnostic and
+# the operator-facing cmdline minimal.
 
 set bty-base http://{{ host }}
-kernel ${bty-base}/boot/bty-netboot-x86_64.vmlinuz boot=live fetch=${bty-base}/boot/bty-netboot-x86_64.squashfs components quiet console=tty0 console=ttyS0,115200 plymouth.enable=0 modprobe.blacklist=nouveau nouveau.modeset=0 bty.mode=interactive bty.server=${bty-base} bty.mac={{ mac }}
+# Transparency: NO ``quiet`` -- bty wants the full kernel + systemd
+# boot stream visible. A wedge between two ``[ OK ] Started X`` lines
+# is immediately diagnostic. Same reason plymouth was retired
+# (v0.22.1); see live-build/auto/config for the matching USB-ISO
+# cmdline. The screen otherwise jumps from ``[ INFO ] BTY step 1`` to
+# ``step 2`` to ``step 3`` with NOTHING between the banners, leaving
+# the operator with no insight into what systemd is doing.
+kernel ${bty-base}/boot/bty-netboot-x86_64.vmlinuz boot=live fetch=${bty-base}/boot/bty-netboot-x86_64.squashfs components console=tty0 console=ttyS0,115200 plymouth.enable=0 modprobe.blacklist=nouveau nouveau.modeset=0 bty.server=${bty-base} bty.mac={{ mac }}
 initrd ${bty-base}/boot/bty-netboot-x86_64.initrd
 boot

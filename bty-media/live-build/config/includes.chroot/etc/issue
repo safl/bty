@@ -2,20 +2,18 @@
 ======================================================================
   bty __BTY_VERSION__ live env
 
-  Two boot modes, selected by the kernel command line:
+  ``bty-tui-on-tty1.service`` runs on tty1 unconditionally. When
+  ``bty.server=URL`` + ``bty.mac=MAC`` are on the kernel command
+  line (set by ``ipxe_tui.j2`` / ``ipxe_flash.j2`` for PXE boots),
+  bty-tui GETs ``<server>/pxe/<mac>/plan`` and dispatches:
 
-    bty.mode=interactive
-        Land in ``bty-tui`` on tty1 (USB-stick interactive flow).
+      mode=auto        -> flash without prompts, then reboot.
+      mode=interactive -> drop into the wizard.
+      mode=local       -> print a notice and exit cleanly.
 
-    bty.server=URL bty.mac=MAC bty.image_url=URL
-        Run ``bty-flash-on-boot.service`` -- download image, flash,
-        signal the server, reboot (PXE network-flash flow).
-
-  With neither set, both services exit and you land here. See
-  ``journalctl -u bty-flash-on-boot`` or ``journalctl -u
-  bty-tui-on-tty1`` for details. The iPXE chain that supplies the
-  cmdline params is rendered by the bty-web server's
-  ``ipxe_flash.j2`` / ``ipxe_tui.j2`` templates at ``GET /pxe/<mac>``.
+  USB-local (no cmdline args) falls back to scanning the local
+  image-root directory. See ``journalctl -u bty-tui-on-tty1`` for
+  details.
 
   Alt+F2 (through Alt+F6) drops into a root shell on the alternate
   VTs for diagnostics; Alt+F1 returns to bty-tui.

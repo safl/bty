@@ -16,7 +16,7 @@ ConditionPathExists=/dev/disk/by-label/BTY_IMAGES
 Wants=dev-disk-by\x2dlabel-BTY_IMAGES.device
 After=dev-disk-by\x2dlabel-BTY_IMAGES.device
 # Must run BEFORE the mount unit so it sees the grown partition.
-Before=var-lib-bty-images.mount bty-images-discover.service bty-tui-on-tty1.service bty-flash-on-boot.service
+Before=var-lib-bty-images.mount bty-images-discover.service bty-tui-on-tty1.service
 After=local-fs.target systemd-udev-settle.service
 
 [Service]

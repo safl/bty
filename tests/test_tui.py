@@ -298,23 +298,28 @@ def test_post_inventory_propagates_url_errors(
         tui_app.post_inventory("http://server", "aa:bb:cc:dd:ee:ff", [])
 
 
-def test_main_accepts_catalog_and_mac_flags(monkeypatch: pytest.MonkeyPatch) -> None:
-    """``bty-tui --catalog URL --mac MAC`` reaches ``BtyTui(...)`` with
+def test_main_accepts_server_and_mac_flags(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``bty-tui --server URL --mac MAC`` reaches ``BtyTui(...)`` with
     the right kwargs. The actual ``run()`` is monkeypatched so we
-    don't try to launch a real TUI from a unit test."""
+    don't try to launch a real TUI from a unit test.
+
+    The cmdline surface is intentionally narrow -- just --server +
+    --mac -- because every other knob (image, target disk, catalog)
+    comes from the bty-server's /pxe/<mac>/plan response, not the
+    cmdline.
+    """
     captured: dict[str, object] = {}
 
     class _FakeBtyTui:
         def __init__(
             self,
-            image_root: object = None,
-            *,
-            catalog_source: object = None,
+            server: object = None,
             mac: object = None,
+            **kw: object,
         ) -> None:
-            captured["image_root"] = image_root
-            captured["catalog_source"] = catalog_source
+            captured["server"] = server
             captured["mac"] = mac
+            captured["kw"] = kw
 
         def run(self) -> None:
             captured["ran"] = True
@@ -324,32 +329,83 @@ def test_main_accepts_catalog_and_mac_flags(monkeypatch: pytest.MonkeyPatch) -> 
     # Re-import the entry-point to make sure it picks up the patched class.
     import bty.tui as tui_mod
 
-    tui_mod.main(["--catalog", "http://srv:8080/catalog.toml", "--mac", "aa:bb:cc:dd:ee:ff"])
+    tui_mod.main(["--server", "http://srv:8080", "--mac", "aa:bb:cc:dd:ee:ff"])
 
-    assert captured["catalog_source"] == "http://srv:8080/catalog.toml"
+    assert captured["server"] == "http://srv:8080"
     assert captured["mac"] == "aa:bb:cc:dd:ee:ff"
     assert captured["ran"] is True
 
 
-def test_main_accepts_image_root_flag(monkeypatch: pytest.MonkeyPatch) -> None:
-    """``bty-tui --image-root /path`` reaches ``BtyTui(image_root=Path(...))``.
-
-    The flag overrides ``BTY_IMAGE_ROOT`` env var and the live env
-    default; useful for local development where the operator is
-    running from a checkout, not the bty live env.
+def test_main_accepts_catalog_flag_for_interactive_prefill(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``bty-tui --catalog URL`` (no --mac) reaches
+    ``BtyTui(catalog=URL)``. The operator-level intent is "skip
+    SELECT_CATALOG; jump to SELECT_IMAGE with this catalog already
+    chosen" -- equivalent to picking ``[c] custom`` on the source
+    screen and typing the URL.
     """
     captured: dict[str, object] = {}
 
     class _FakeBtyTui:
         def __init__(
             self,
-            image_root: object = None,
-            *,
-            catalog_source: object = None,
+            server: object = None,
             mac: object = None,
+            catalog: object = None,
+            **kw: object,
         ) -> None:
-            captured["image_root"] = image_root
-            captured["catalog_source"] = catalog_source
+            captured["server"] = server
+            captured["mac"] = mac
+            captured["catalog"] = catalog
+
+        def run(self) -> None:
+            captured["ran"] = True
+
+    monkeypatch.setattr(tui_app, "BtyTui", _FakeBtyTui)
+    import bty.tui as tui_mod
+
+    tui_mod.main(["--catalog", "http://srv:8080/catalog.toml"])
+
+    assert captured["server"] == "bty-server"
+    assert captured["mac"] is None
+    assert captured["catalog"] == "http://srv:8080/catalog.toml"
+    assert captured["ran"] is True
+
+
+def test_bty_tui_init_catalog_skips_select_catalog_stage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``BtyTui(catalog=URL)`` pre-loads the catalog source and
+    flags ``catalog_chosen=True``, so the wizard's derived stage is
+    SELECT_IMAGE (not SELECT_CATALOG) on the first iteration.
+    """
+    monkeypatch.setenv("BTY_IMAGE_ROOT", str(tmp_path))
+    app = tui_app.BtyTui(catalog="http://srv:8080/catalog.toml")
+    assert app._state.catalog_source == "http://srv:8080/catalog.toml"
+    assert app._state.catalog_chosen is True
+    # No image / disk selected yet; the next stage is SELECT_IMAGE.
+    assert app._state.stage() is tui_app._WizardStage.SELECT_IMAGE
+
+
+def test_main_defaults_to_bty_server_hostname(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Bare ``bty-tui`` invocation (no flags) reaches
+    ``BtyTui(server="bty-server", mac=None)``. The default exists
+    because the netboot live env's tty1 wrapper supplies --server
+    explicitly; but on a developer workstation, a LAN DNS entry for
+    ``bty-server`` (or an /etc/hosts line) lets ``bty-tui --mac X``
+    just work.
+    """
+    captured: dict[str, object] = {}
+
+    class _FakeBtyTui:
+        def __init__(
+            self,
+            server: object = None,
+            mac: object = None,
+            **kw: object,
+        ) -> None:
+            captured["server"] = server
             captured["mac"] = mac
 
         def run(self) -> None:
@@ -358,10 +414,9 @@ def test_main_accepts_image_root_flag(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(tui_app, "BtyTui", _FakeBtyTui)
     import bty.tui as tui_mod
 
-    tui_mod.main(["--image-root", "/tmp/bty-images"])
+    tui_mod.main([])
 
-    assert captured["image_root"] == Path("/tmp/bty-images")
-    assert captured["catalog_source"] is None
+    assert captured["server"] == "bty-server"
     assert captured["mac"] is None
     assert captured["ran"] is True
 
@@ -457,12 +512,15 @@ def test_state_back_clears_one_commit_at_a_time() -> None:
 # --------------------------------------------------------------------------
 
 
-def test_parse_index_handles_valid_and_invalid_input(tmp_path: Path) -> None:
+def test_parse_index_handles_valid_and_invalid_input(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """``_parse_index`` returns 0-based index for a valid 1-based
     numeric choice within ``[1, n]``; returns ``None`` otherwise
     (empty, non-numeric, out of range).
     """
-    app = tui_app.BtyTui(image_root=tmp_path)
+    monkeypatch.setenv("BTY_IMAGE_ROOT", str(tmp_path))
+    app = tui_app.BtyTui()
     assert app._parse_index("1", 3) == 0
     assert app._parse_index("3", 3) == 2
     assert app._parse_index("4", 3) is None
@@ -509,7 +567,9 @@ def test_refresh_images_blends_local_and_remote(
             )
         ],
     )
-    app = tui_app.BtyTui(image_root=tmp_path, catalog_source="https://example.invalid/catalog.toml")
+    monkeypatch.setenv("BTY_IMAGE_ROOT", str(tmp_path))
+    app = tui_app.BtyTui()
+    app._state.catalog_source = "https://example.invalid/catalog.toml"
     app._refresh_images()
     names = [i.name for i in app._state._images]
     assert "local.img.gz" in names
@@ -531,7 +591,9 @@ def test_refresh_images_surfaces_catalog_load_failure(
         raise urllib.error.URLError("simulated network failure")
 
     monkeypatch.setattr(tui_app, "load_catalog_from_source", _boom)
-    app = tui_app.BtyTui(image_root=tmp_path, catalog_source="https://example.invalid/catalog.toml")
+    monkeypatch.setenv("BTY_IMAGE_ROOT", str(tmp_path))
+    app = tui_app.BtyTui()
+    app._state.catalog_source = "https://example.invalid/catalog.toml"
     app._refresh_images()
     assert app._state._images == []
     assert app._catalog_load_error is not None
@@ -544,13 +606,14 @@ def test_refresh_images_surfaces_catalog_load_failure(
 
 
 def test_print_image_table_handles_empty_and_partial_rows(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """``_print_image_table`` must render cleanly on rows with
     missing fmt / size_bytes. The framebuffer console renders
     ``?`` placeholders; the test just confirms no exceptions.
     """
-    app = tui_app.BtyTui(image_root=tmp_path)
+    monkeypatch.setenv("BTY_IMAGE_ROOT", str(tmp_path))
+    app = tui_app.BtyTui()
     app._print_image_table(
         [
             tui_app._TuiImage(name="complete.img.gz", fmt="img.gz", size_bytes=1024, path=tmp_path),
@@ -559,13 +622,16 @@ def test_print_image_table_handles_empty_and_partial_rows(
     )  # no raise
 
 
-def test_print_disk_table_handles_partial_rows(tmp_path: Path) -> None:
+def test_print_disk_table_handles_partial_rows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """``_print_disk_table`` must render even when lsblk omits
     optional fields (vendor / model / serial). Crashing here used
     to be the v0.19.x "TUI freezes after lsblk reports a sparse
     row" class of bug.
     """
-    app = tui_app.BtyTui(image_root=tmp_path)
+    monkeypatch.setenv("BTY_IMAGE_ROOT", str(tmp_path))
+    app = tui_app.BtyTui()
     app._print_disk_table(
         [
             {"path": "/dev/sda", "size": "500G"},  # minimal: just path + size
@@ -630,7 +696,8 @@ def test_screen_flash_running_drives_callback_and_sets_post_flash(
         lambda *_a, **_kw: None,
     )
 
-    app = tui_app.BtyTui(image_root=tmp_path)
+    monkeypatch.setenv("BTY_IMAGE_ROOT", str(tmp_path))
+    app = tui_app.BtyTui()
     app._state.selected_image = tui_app._TuiImage(
         name="x", fmt="img.gz", size_bytes=0, url="http://x"
     )
@@ -675,7 +742,8 @@ def test_screen_flash_running_does_not_advance_on_failure(
     monkeypatch.setattr(tui_app.flash, "execute_plan", _fake_execute)
     monkeypatch.setattr(tui_app, "post_pxe_done", lambda *_a, **_kw: None)
 
-    app = tui_app.BtyTui(image_root=tmp_path)
+    monkeypatch.setenv("BTY_IMAGE_ROOT", str(tmp_path))
+    app = tui_app.BtyTui()
     plan = tui_app.flash.FlashPlan(
         image=tui_app.flash.ImageInfo(
             path=None,

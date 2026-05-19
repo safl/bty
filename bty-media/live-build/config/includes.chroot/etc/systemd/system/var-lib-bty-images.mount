@@ -13,9 +13,11 @@ Documentation=https://github.com/safl/bty
 # auto-discovery will handle those).
 ConditionPathExists=/dev/disk/by-label/BTY_IMAGES
 
-# Mount before the TUI / flash services so the catalog is in
-# place when they scan /var/lib/bty/images.
-Before=bty-tui-on-tty1.service bty-flash-on-boot.service
+# Mount before the TUI so the catalog is in place when it scans
+# /var/lib/bty/images. (bty-flash-on-boot.service was retired in
+# v0.22.10; bty-tui-on-tty1.service now handles both auto-flash
+# and interactive paths via /pxe/<mac>/plan.)
+Before=bty-tui-on-tty1.service
 
 [Mount]
 What=/dev/disk/by-label/BTY_IMAGES

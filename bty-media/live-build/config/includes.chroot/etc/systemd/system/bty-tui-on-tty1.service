@@ -1,14 +1,25 @@
 [Unit]
-Description=bty-tui interactive flash on tty1
+Description=bty-tui on tty1 -- server-driven dispatcher (auto-flash / wizard / no-op)
 Documentation=https://github.com/safl/bty
-# Fire whenever ``bty.mode=interactive`` is on the kernel cmdline.
-# Two paths set it:
-#   - PXE-tui: server's ``ipxe_tui.j2`` (``boot_policy=tui``)
-#   - USB-local: the usb-iso live-build bake sets it directly via
-#     ``--bootappend-live``.
-# ``ipxe_flash.j2`` (``boot_policy=flash``) does NOT set it, so the
-# auto-flash boots fall through to ``bty-flash-on-boot.service``.
-ConditionKernelCommandLine=bty.mode=interactive
+# Fires unconditionally on every live env boot. bty-tui reads
+# ``bty.server`` + ``bty.mac`` from /proc/cmdline (via the
+# /usr/local/sbin/bty-tui-on-tty1 wrapper), GETs
+# ``<server>/pxe/<mac>/plan``, and dispatches on the JSON response:
+#
+#   mode=auto        -> flash without prompts, then reboot.
+#   mode=interactive -> drop the operator into the wizard.
+#   mode=local       -> print a notice and exit cleanly.
+#
+# No more ConditionKernelCommandLine gating: the v0.22.10 design
+# replaced the cmdline-mode dispatch (``bty.mode=interactive`` vs
+# ``bty.mode=auto`` set by ipxe_tui.j2 / ipxe_flash.j2) with the
+# server-side /pxe/<mac>/plan endpoint. The cmdline now carries
+# just ``bty.server`` + ``bty.mac``; bty-tui itself decides what
+# to do. This means USB-local (no bty.server set) also runs the
+# same service path -- bty-tui falls back to local image-root
+# scanning when there's no server to ask.
+After=network-online.target
+Wants=network-online.target
 # Take over tty1: the live env's auto-login agetty is the default
 # session there; we want to BE the session, not run inside it.
 # ``Before=getty@tty1.service`` (combined with ``Conflicts=``) means
@@ -19,20 +30,6 @@ ConditionKernelCommandLine=bty.mode=interactive
 # getty never gets a chance to start in the first place.
 Conflicts=getty@tty1.service
 Before=getty@tty1.service
-# Plymouth was retired in v0.22.1; the previous ordering against
-# plymouth-quit-wait.service is no longer needed (the unit
-# doesn't exist when plymouth isn't installed; ``After=`` of an
-# unknown unit is a systemd no-op, so leaving it would be inert,
-# but dropping it keeps the unit honest about its actual deps).
-# ``Wants=network-online.target`` (without a matching ``After=``)
-# pulls network up in parallel rather than blocking the TUI on it.
-# USB-local mode (``bty-tui-on-tty1`` with no ``bty.server=``) doesn't
-# need network at all; PXE-tui mode catalogs over the network but
-# the operator typically takes longer to navigate the menu than
-# DHCP+linkup take to settle, so racing them is fine. If the
-# initial catalog fetch fires before network is up, ``bty-tui``'s
-# refresh binding (``r``) retries.
-Wants=network-online.target
 
 [Service]
 # Type=simple (not idle): with Type=idle systemd delays ExecStart
@@ -41,10 +38,7 @@ Wants=network-online.target
 # while the operator watches systemd init messages scroll past.
 # We do not need idle's output-interleaving guarantee here -- the
 # Conflicts=getty@tty1 + TTYVHangup combo already takes the tty
-# cleanly, and plymouth-quit-wait gates init-time noise on tty1.
-# Type=simple lets ExecStart fire as soon as After=plymouth-quit-
-# wait fires, which is what the operator expects (the live env
-# is "the bty-tui appliance" -- it should appear immediately).
+# cleanly.
 Type=simple
 ExecStart=/usr/local/sbin/bty-tui-on-tty1
 Restart=on-failure

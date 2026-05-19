@@ -128,12 +128,19 @@ def test_pxe_for_unknown_mac_returns_tui_template(app_client: TestClient) -> Non
     """An unknown MAC auto-discovers with ``boot_policy=tui`` and is
     served the interactive-live-env iPXE chain. This is "bty-on-a-USB
     but over the network": first PXE contact lands the operator at
-    bty-tui without any prior server-side configuration."""
+    bty-tui without any prior server-side configuration.
+
+    Since v0.22.10 the kernel cmdline only carries ``bty.server`` +
+    ``bty.mac``; bty-tui GETs ``/pxe/<mac>/plan`` to decide what to
+    do (auto-flash, interactive, or no-op). The legacy
+    ``bty.mode=interactive`` cmdline flag was retired with the
+    server-side plan dispatcher.
+    """
     r = app_client.get("/pxe/aa:bb:cc:dd:ee:ff")
     assert r.status_code == 200
     body = r.text
-    assert "bty.mode=interactive" in body
-    assert "aa:bb:cc:dd:ee:ff" in body
+    assert "bty.server=" in body
+    assert "bty.mac=aa:bb:cc:dd:ee:ff" in body
     assert "kernel" in body  # chains into the live env
 
 
@@ -277,7 +284,10 @@ def test_pxe_auto_discovers_unknown_mac(app_client: TestClient) -> None:
     # PXE client (no auth) hits the endpoint.
     r = app_client.get(f"/pxe/{mac}")
     assert r.status_code == 200
-    assert "bty.mode=interactive" in r.text  # tui template
+    # v0.22.10+: cmdline carries bty.server + bty.mac; dispatch
+    # happens at GET /pxe/<mac>/plan, not at iPXE chain time.
+    assert "bty.server=" in r.text
+    assert f"bty.mac={mac}" in r.text
 
     # Now visible to the operator.
     found = app_client.get(f"/machines/{mac}", cookies=AUTH)
@@ -1214,16 +1224,22 @@ def test_pxe_local_policy_assigned_machine_returns_local_template(
 def test_pxe_flash_policy_returns_chain_with_args(
     app_client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """boot_policy=flash + bound image: chain into kernel/initrd with
-    the four bty.* cmdline params the live env reads.
+    """boot_policy=flash + bound image: chain into kernel/initrd
+    with the minimal ``bty.server`` + ``bty.mac`` cmdline params.
+
+    Since v0.22.10 the kernel cmdline no longer carries
+    ``bty.image_url`` / ``bty.target_disk_serial`` / ``bty.image_format``
+    -- those come from ``GET <server>/pxe/<mac>/plan`` once bty-tui
+    runs on tty1. The iPXE chain still distinguishes flash vs tui
+    so the audit log records the intended outcome; the cmdline
+    shape is just the same minimal pair.
 
     Machines bind by ``bty_image_ref`` (the SHA-256 of the
     canonicalised src URL). The PXE handler resolves the ref through
-    ``catalog_entries`` and emits ``/images/<ref>/<name>``; the
-    serve_image route handles cache-through. The test seeds a
-    catalog row that already carries both ref + content sha by going
-    through the sha_url path (which pre-pins disk_image_sha at
-    insert time)."""
+    ``catalog_entries`` and emits ``/images/<ref>/<name>`` (still
+    used in the audit-log details + plan endpoint output); the
+    serve_image route handles cache-through.
+    """
     flash_sha = "0123456789abcdef" * 4
 
     def fake_urlopen(*_a, **_kw):  # type: ignore[no-untyped-def]
@@ -1247,9 +1263,10 @@ def test_pxe_flash_policy_returns_chain_with_args(
     ref = r.json()["bty_image_ref"]
     assert r.json()["disk_image_sha"] == flash_sha
 
-    # boot_policy=flash now requires an explicit target_disk_serial
-    # (set by the operator after bty-tui reports inventory). Pass it
-    # here so the safety gate lets the flash chain through.
+    # boot_policy=flash still requires an explicit target_disk_serial
+    # to route to the ipxe_flash.j2 template (vs the local-fallback);
+    # the serial itself is now delivered via the plan endpoint, not
+    # the cmdline.
     app_client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
         json={
@@ -1270,22 +1287,161 @@ def test_pxe_flash_policy_returns_chain_with_args(
     assert "console=ttyS0,115200" in body
     assert "bty.server=${bty-base}" in body
     assert "bty.mac=aa:bb:cc:dd:ee:ff" in body
-    assert "bty.target_disk_serial=WD-WX12345" in body
-    # URL ends in ``/images/<bty_image_ref>/<name>``. The serve_image
-    # route does cache-through to resolve the ref to bytes; clients
-    # never see the content sha in the URL.
-    assert f"bty.image_url=${{bty-base}}/images/{ref}/" in body
+    # Retired in v0.22.10: these come from /pxe/<mac>/plan now, not
+    # the cmdline.
+    assert "bty.image_url" not in body
+    assert "bty.target_disk_serial" not in body
+    assert "bty.image_format" not in body
     assert "bty.provisioning" not in body
     # Same plymouth-disable as the tui template; see that test for
     # the MS-01 wedge that drove this.
     assert "plymouth.enable=0" in body
 
 
+def test_pxe_plan_unknown_mac_auto_discovers_and_returns_interactive(
+    app_client: TestClient,
+) -> None:
+    """``GET /pxe/<mac>/plan`` on an unknown MAC mirrors the iPXE
+    auto-discovery path: creates a machine record with
+    ``boot_policy=tui`` and returns ``mode=interactive`` with the
+    server's ``/catalog.toml`` URL.
+
+    This is the workstation-side equivalent of "bty-on-a-USB but
+    over the network": ``bty-tui --server X --mac Y`` against an
+    unknown MAC drops the operator into the wizard with the server
+    catalog pre-loaded, no prior server-side configuration needed.
+    """
+    mac = "11:22:33:44:55:66"
+    pre = app_client.get(f"/machines/{mac}", cookies=AUTH)
+    assert pre.status_code == 404
+
+    r = app_client.get(f"/pxe/{mac}/plan", headers={"Host": "bty.local:8080"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["mode"] == "interactive"
+    assert body["catalog"] == "http://bty.local:8080/catalog.toml"
+
+    # Auto-discovered as boot_policy=tui (matches /pxe/{mac}).
+    row = app_client.get(f"/machines/{mac}", cookies=AUTH).json()
+    assert row["boot_policy"] == "tui"
+
+
+def test_pxe_plan_local_policy_returns_local(app_client: TestClient) -> None:
+    """``boot_policy=local`` -> ``mode=local`` so bty-tui exits
+    cleanly and the firmware / local-disk path handles boot. The
+    operator's known-good appliance row stays untouched."""
+    mac = "aa:bb:cc:dd:ee:ff"
+    app_client.put(
+        f"/machines/{mac}",
+        json={"boot_policy": "local"},
+        cookies=AUTH,
+    )
+    r = app_client.get(f"/pxe/{mac}/plan")
+    assert r.status_code == 200
+    assert r.json() == {"mode": "local"}
+
+
+def test_pxe_plan_flash_policy_with_target_returns_auto(
+    app_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``boot_policy=flash`` + bindable ref + target_disk_serial ->
+    ``mode=auto`` with the image URL and target serial filled in.
+    bty-tui runs the flash without prompts.
+
+    The image URL takes the same ``/images/<ref>/<name>`` shape as
+    the ipxe_flash.j2 chain -- serve_image cache-through resolves
+    the ref to bytes server-side."""
+    flash_sha = "0123456789abcdef" * 4
+
+    def fake_urlopen(*_a, **_kw):  # type: ignore[no-untyped-def]
+        return _MockResp(b"", headers={"Content-Length": "0"})
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr(
+        "bty.catalog.fetch_sha256_for_url",
+        lambda *_a, **_kw: flash_sha,
+    )
+    r = app_client.post(
+        "/catalog/entries",
+        json={
+            "image_url": "https://example.invalid/demo.img.gz",
+            "sha_url": "https://example.invalid/demo.img.gz.sha256",
+        },
+        cookies=AUTH,
+    )
+    assert r.status_code == 201, r.text
+    ref = r.json()["bty_image_ref"]
+
+    mac = "aa:bb:cc:dd:ee:ff"
+    app_client.put(
+        f"/machines/{mac}",
+        json={
+            "bty_image_ref": ref,
+            "boot_policy": "flash",
+            "target_disk_serial": "WD-WX12345",
+        },
+        cookies=AUTH,
+    )
+    r = app_client.get(f"/pxe/{mac}/plan", headers={"Host": "bty.local:8080"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["mode"] == "auto"
+    assert body["target_disk_serial"] == "WD-WX12345"
+    assert body["image"].startswith(f"http://bty.local:8080/images/{ref}/")
+
+
+def test_pxe_plan_flash_policy_without_target_falls_back_to_interactive(
+    app_client: TestClient,
+) -> None:
+    """``boot_policy=flash`` but no target_disk_serial picked yet ->
+    falls back to ``mode=interactive``. The auto-flash safety gate
+    (mirrored from the iPXE chain) refuses to guess at a disk."""
+    mac = "aa:bb:cc:dd:ee:ff"
+    app_client.put(
+        f"/machines/{mac}",
+        json={
+            "bty_image_ref": "0123456789abcdef" * 4,
+            "boot_policy": "flash",
+        },
+        cookies=AUTH,
+    )
+    r = app_client.get(f"/pxe/{mac}/plan", headers={"Host": "bty.local:8080"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["mode"] == "interactive"
+    assert body["catalog"] == "http://bty.local:8080/catalog.toml"
+
+
+def test_pxe_plan_tui_policy_returns_interactive_with_catalog(
+    app_client: TestClient,
+) -> None:
+    """``boot_policy=tui`` -> ``mode=interactive`` with the
+    server's catalog. Matches the iPXE ipxe_tui.j2 semantic: the
+    operator picks at run time."""
+    mac = "aa:bb:cc:dd:ee:ff"
+    app_client.put(
+        f"/machines/{mac}",
+        json={"boot_policy": "tui"},
+        cookies=AUTH,
+    )
+    r = app_client.get(f"/pxe/{mac}/plan", headers={"Host": "bty.local:8080"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["mode"] == "interactive"
+    assert body["catalog"] == "http://bty.local:8080/catalog.toml"
+
+
 def test_pxe_tui_policy_returns_interactive_chain(app_client: TestClient) -> None:
-    """boot_policy=tui: chain into the live env with bty.mode=interactive
-    so the live env launches bty-tui on tty1 instead of auto-flashing.
-    No image / no provisioning cmdline params - the operator picks at
-    run time."""
+    """boot_policy=tui: chain into the live env. bty-tui-on-tty1.
+    service launches bty-tui, which GETs ``/pxe/<mac>/plan`` and
+    drops the operator into the wizard for boot_policy=tui.
+
+    Since v0.22.10 the cmdline carries only ``bty.server`` +
+    ``bty.mac``; ``bty.mode=interactive`` was retired alongside
+    the bty-flash-on-boot.service unit (now collapsed into bty-tui
+    -on-tty1.service running unconditionally with plan-endpoint
+    dispatch).
+    """
     app_client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
         json={"boot_policy": "tui"},
@@ -1298,21 +1454,22 @@ def test_pxe_tui_policy_returns_interactive_chain(app_client: TestClient) -> Non
     assert "set bty-base http://bty.local:8080" in body
     assert "kernel ${bty-base}/boot/bty-netboot-x86_64.vmlinuz" in body
     assert "initrd ${bty-base}/boot/bty-netboot-x86_64.initrd" in body
-    assert "bty.mode=interactive" in body
     assert "bty.server=${bty-base}" in body
     assert "bty.mac=aa:bb:cc:dd:ee:ff" in body
-    # Interactive mode must NOT pre-decide image / provisioning - those
-    # come from the operator's TUI selection.
+    # Retired in v0.22.10: dispatch happens at /pxe/<mac>/plan, not
+    # via cmdline flags. Image + target details come from the plan
+    # response, not the kernel cmdline.
+    assert "bty.mode=" not in body
     assert "bty.image_url" not in body
+    assert "bty.target_disk_serial" not in body
     assert "bty.provisioning" not in body
     # Plymouth is disabled on the kernel cmdline so plymouth-quit-wait
     # cannot hang on hardware whose iGPU framebuffer plymouth refuses
     # to release. Observed on a Minisforum MS-01 PXE-booting bty-
     # netboot v0.19.6: plymouth-quit-wait stayed in "Starting"
-    # indefinitely, blocking bty-flash-on-boot.service which has
-    # ``After=plymouth-quit.service`` in its unit. plymouth.enable=0
-    # tells plymouthd to no-op, so the quit-wait barrier completes
-    # immediately even when the framebuffer would have wedged it.
+    # indefinitely. plymouth.enable=0 tells plymouthd to no-op, so
+    # the quit-wait barrier completes immediately even when the
+    # framebuffer would have wedged it.
     assert "plymouth.enable=0" in body
 
 
@@ -1725,14 +1882,16 @@ def test_pxe_inventory_rejects_unknown_top_level_fields(app_client: TestClient) 
     assert r.status_code == 422
 
 
-def test_pxe_flash_chain_includes_target_disk_serial_cmdline(
+def test_pxe_plan_flash_chain_carries_target_disk_serial(
     app_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Concrete check that ``bty.target_disk_serial=...`` appears in
-    the kernel cmdline of the flash chain when the operator has
-    picked a target. Guards against a future template edit that
-    silently drops the param."""
+    """The target disk serial moved from the iPXE kernel cmdline to
+    the plan-endpoint JSON in v0.22.10. The iPXE template still
+    renders the serial in its header comment block (for operator
+    curl-inspection / audit) but it is no longer a kernel param.
+    The plan endpoint is the contract bty-tui consumes.
+    """
     flash_sha = "deadbeef" * 8
     monkeypatch.setattr(
         "urllib.request.urlopen",
@@ -1758,16 +1917,18 @@ def test_pxe_flash_chain_includes_target_disk_serial_cmdline(
         },
         cookies=AUTH,
     )
+    # Plan endpoint carries the serial.
+    plan = app_client.get("/pxe/aa:bb:cc:dd:ee:f6/plan", headers={"Host": "bty.local:8080"}).json()
+    assert plan["mode"] == "auto"
+    assert plan["target_disk_serial"] == "WD-SERIAL-XYZ"
+    # iPXE chain advertises the pin in the header comment so an
+    # operator inspecting curl output can see it; the kernel cmdline
+    # no longer carries it.
     r = app_client.get("/pxe/aa:bb:cc:dd:ee:f6")
     assert r.status_code == 200
     body = r.text
-    # The full cmdline param appears verbatim (no truncation, no
-    # quoting weirdness that the live env's bty-flash-on-boot
-    # parser wouldn't handle).
-    assert "bty.target_disk_serial=WD-SERIAL-XYZ" in body
-    # And the rendered chain advertises the pin in the header
-    # comment so an operator inspecting curl output can see it.
     assert "target_disk_serial: WD-SERIAL-XYZ" in body
+    assert "bty.target_disk_serial" not in body
 
 
 def test_pxe_hit_records_pxe_offered_event(app_client: TestClient) -> None:
@@ -3594,18 +3755,16 @@ def test_ui_catalog_upload_auto_imports_manifest_into_catalog_entries(
     assert len(found[0]["bty_image_ref"]) == 64
 
 
-def test_ui_catalog_upload_persists_and_303s_on_success(
+def test_ui_catalog_upload_imports_into_db_and_303s_on_success(
     app_client: TestClient,
     tmp_path: Path,
 ) -> None:
-    """Upload a valid manifest -> persisted at the configured path,
-    /catalog/downloads now returns the manifest path (was None
-    before), 303 back to /ui/images without an error param."""
-    state_dir = tmp_path / "bty-state"
-    # Sanity check: fixture pre-set BTY_STATE_DIR to this path.
-    pre = app_client.get("/catalog/downloads", cookies=AUTH)
-    assert pre.status_code == 200
-    assert pre.json() == {"manifest": None, "downloads": []}
+    """Upload a valid manifest -> entries are imported into the
+    ``catalog_entries`` DB, no file is written to disk, 303 back to
+    /ui/images without an error param. The manifest is treated as
+    an IMPORT SOURCE: the DB is the authoritative catalog.
+    """
+    del tmp_path  # not used; just confirms no on-disk artefact
     body = b'version = 1\n\n[[images]]\nname = "demo"\nsrc = "https://example.com/demo.img.zst"\n'
     r = app_client.post(
         "/ui/catalog/upload",
@@ -3615,11 +3774,10 @@ def test_ui_catalog_upload_persists_and_303s_on_success(
     )
     assert r.status_code == 303, r.text
     assert r.headers["location"] == "/ui/images"
-    manifest = state_dir / "catalog.toml"
-    assert manifest.is_file()
-    assert manifest.read_bytes() == body
-    post = app_client.get("/catalog/downloads", cookies=AUTH).json()
-    assert post["manifest"] == str(manifest)
+    # Entry now visible via the catalog list endpoint (which reads
+    # from catalog_entries) -- evidence the import landed in the DB.
+    listing = app_client.get("/catalog/entries", cookies=AUTH).json()
+    assert any(e["src"] == "https://example.com/demo.img.zst" for e in listing)
 
 
 def test_ui_catalog_upload_rejects_bad_manifest_keeps_existing(
@@ -3674,15 +3832,17 @@ class _FakeUrlopenResp:
         return None
 
 
-def test_ui_catalog_fetch_release_persists_and_303s(
+def test_ui_catalog_fetch_release_imports_into_db_and_303s(
     app_client: TestClient,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Fetch-release stubs urlopen, writes the bytes to the manifest
-    path, and reloads. Mirrors the upload happy path but via the
-    GitHub-release-style entrypoint."""
-    state_dir = tmp_path / "bty-state"
+    """Fetch-release stubs urlopen, imports the bytes' entries into
+    ``catalog_entries``, 303s back to /ui/images. No file is written
+    to disk -- the fetched manifest is treated as an import source
+    only.
+    """
+    del tmp_path  # not used; just confirms no on-disk artefact
     body = b'version = 1\n\n[[images]]\nname = "rel"\nsrc = "https://example.com/rel.img.zst"\n'
 
     import urllib.request as _urlreq
@@ -3695,9 +3855,8 @@ def test_ui_catalog_fetch_release_persists_and_303s(
     )
     assert r.status_code == 303, r.text
     assert r.headers["location"] == "/ui/images"
-    manifest = state_dir / "catalog.toml"
-    assert manifest.is_file()
-    assert manifest.read_bytes() == body
+    listing = app_client.get("/catalog/entries", cookies=AUTH).json()
+    assert any(e["src"] == "https://example.com/rel.img.zst" for e in listing)
 
 
 # ---------- /ui/catalog/upload and /ui/catalog/fetch-release error matrix --
@@ -3960,59 +4119,55 @@ def test_ui_catalog_fetch_release_oversized_body_303s_with_error(
     assert "exceeded" in r.headers["location"]
 
 
-def test_ui_catalog_fetch_release_does_not_duplicate_unsha_entries(
+def test_ui_catalog_fetch_release_is_idempotent_on_repeated_imports(
     app_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Regression: every manifest entry without a pinned ``sha256``
-    used to render twice on /ui/images -- once via the in-memory
-    catalog merge (it lands in the merge's unhashed tail because
-    there's no sha to key on) and once via the ``catalog_entries``
-    DB row that ``_auto_import_manifest_rows`` writes during reload
-    (which falls into ``url_only`` because ``disk_image_sha`` is
-    NULL). Hit cold on the catalog page after clicking "Fetch
-    latest" -- the operator saw a 4-entry catalog rendered as 8
-    rows. Pin the dedup invariant: each manifest src appears in the
-    rendered HTML exactly once even when none of the entries carry
-    a sha pin (the common case for rolling oras tags + GitHub
-    ``releases/latest/download/`` URLs).
+    """Each entry's ``src`` is UNIQUE in ``catalog_entries``; a
+    repeated fetch-release of the same manifest skips already-imported
+    rows on the second pass. /ui/images should render each src once,
+    regardless of how many times the manifest got re-imported.
+
+    Historical context: an earlier model rendered manifest entries
+    AND their auto-imported DB rows separately, double-counting each
+    unsha src. The current model imports into DB once + reads only
+    from DB, so the dedup invariant is enforced at the SQL layer
+    (UNIQUE on src). This test pins the operator-visible result.
     """
     import urllib.request as _urlreq
 
     body = (
         b"version = 1\n"
         b"\n"
-        b'[[images]]\nname = "alpha"\nsrc = "oras://ghcr.io/example/alpha:latest"\n'
+        b'[[images]]\nname = "alpha"\nsrc = "https://example.com/alpha.img.gz"\n'
         b"\n"
-        b'[[images]]\nname = "beta"\nsrc = "oras://ghcr.io/example/beta:latest"\n'
+        b'[[images]]\nname = "beta"\nsrc = "https://example.com/beta.img.gz"\n'
         b"\n"
         b'[[images]]\nname = "gamma"\nsrc = "https://example.com/releases/latest/download/gamma.img.gz"\n'
     )
     monkeypatch.setattr(_urlreq, "urlopen", lambda *_a, **_kw: _FakeUrlopenResp(body))
-    r = app_client.post(
-        "/ui/catalog/fetch-release",
-        cookies=AUTH,
-        follow_redirects=False,
-    )
-    assert r.status_code == 303, r.text
-    assert r.headers["location"] == "/ui/images"
+    for _ in range(2):  # idempotency: second fetch must not duplicate
+        r = app_client.post(
+            "/ui/catalog/fetch-release",
+            cookies=AUTH,
+            follow_redirects=False,
+        )
+        assert r.status_code == 303, r.text
+        assert r.headers["location"] == "/ui/images"
 
     page = app_client.get("/ui/images", cookies=AUTH)
     assert page.status_code == 200, page.text
     html = page.text
     for src in (
-        "oras://ghcr.io/example/alpha:latest",
-        "oras://ghcr.io/example/beta:latest",
+        "https://example.com/alpha.img.gz",
+        "https://example.com/beta.img.gz",
         "https://example.com/releases/latest/download/gamma.img.gz",
     ):
-        # Each src may be linkified + appear in a data attribute,
-        # but it should not duplicate. Use the same string as the
-        # exact-match probe.
         assert html.count(src) >= 1, f"missing src {src!r} on /ui/images"
         assert html.count(src) <= 2, (
             f"src {src!r} rendered {html.count(src)} times on /ui/images; "
-            "expected at most 2 (entry row + binding hint). The duplicate-"
-            "rendering regression presented as 4 - 6 occurrences."
+            "expected at most 2 (entry row + binding hint). Dedup invariant "
+            "(UNIQUE on catalog_entries.src) was violated."
         )
 
 
