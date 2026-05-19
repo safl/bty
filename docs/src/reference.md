@@ -331,8 +331,19 @@ Machine = {
   "discovered_at": "<ISO 8601>" | null,      # first /pxe contact; null if PUT-only
   "last_seen_at":  "<ISO 8601>" | null,      # most recent /pxe contact
   "last_seen_ip":  "203.0.113.42" | null,
-  "boot_policy":   "local" | "flash" | "tui", # what /pxe/{mac} returns
+  "boot_policy":   "local"                   # one of local / flash /
+                 | "flash"                   # flash-once / tui; what
+                 | "flash-once"              # /pxe/{mac} returns
+                 | "tui",
   "last_flashed_at": "<ISO 8601>" | null,    # set by POST /pxe/{mac}/done
+  "known_disks":   [{ ... InventoryDisk ... }] | null,
+                                             # most recent POST /pxe/{mac}/inventory;
+                                             # populates the /ui/machines/{mac}
+                                             # target-disk dropdown
+  "known_disks_at": "<ISO 8601>" | null,     # when the inventory above was posted
+  "target_disk_serial": "<vendor serial>" | null,
+                                             # operator pick from known_disks;
+                                             # required for plan.mode=auto
   "created_at":    "<ISO 8601>",
   "updated_at":    "<ISO 8601>"
 }
@@ -340,8 +351,14 @@ Machine = {
 MachineUpsert = {
   "bty_image_ref": "<64-hex>" | null,
   "hostname": str | null,
-  "boot_policy": "local" | "flash" | "tui"  # default "local" on PUT;
-                                            # auto-discovery sets "tui"
+  "boot_policy": "local"                     # default "local" on PUT;
+              | "flash"                      # auto-discovery sets "tui";
+              | "flash-once"                 # flash + flash-once also
+              | "tui",                       # require target_disk_serial
+  "target_disk_serial": str | null           # required when boot_policy is
+                                             # flash / flash-once -- /ui/
+                                             # machines/{mac} POST refuses
+                                             # without it
 }
 
 CatalogEntry (as returned by `GET /catalog/entries`) = {
@@ -364,10 +381,30 @@ ImageEntry = {
   "size_bytes": 268435456,
   "url":        "http://server:8080/images/<disk_image_sha>/<name>"
                                               | "https://..." | "oras://...",
+  "ref":        "<64-hex>",                    # bty_image_ref (=
+                                              # sha256(canonicalise_src(src)));
+                                              # the value to PUT as
+                                              # MachineUpsert.bty_image_ref
+                                              # without recomputing the
+                                              # canonicalisation client-
+                                              # side
   "sha_short":  "<12-hex>" | null,             # display-only prefix
                                               # of disk_image_sha
   "cached":     true | false                   # true iff bty-web has
                                               # the bytes on disk
+}
+
+InventoryDisk = {
+  "path":      "/dev/sda",                    # /dev path at inventory time
+                                              # (not the durable id)
+  "size":      "500G" | null,                 # lsblk human-readable string
+  "vendor":    "ATA" | null,
+  "model":     "Samsung 980" | null,
+  "serial":    "<vendor serial>" | null,      # the durable id; used at
+                                              # flash time
+  "tran":      "sata" | "nvme" | "usb" | null,
+  "removable": false,
+  "readonly":  false
 }
 ```
 
