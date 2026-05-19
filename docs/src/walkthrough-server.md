@@ -232,11 +232,14 @@ the target's BIOS / UEFI to PXE-boot first. On power-on it'll:
 
 1. DHCP-discover from your LAN's DHCP server, which is configured
    to return option 66/67 pointing at the bty appliance.
-2. Chain into the bty iPXE script, which renders into a kernel
-   cmdline that auto-flashes the assigned image.
-3. Boot the netboot kernel + initrd + squashfs trio, run
-   `bty-flash-on-boot.service`, write the image to the local
-   disk, signal back to the server, reboot.
+2. Chain into the bty iPXE script. Cmdline carries
+   ``bty.server=URL`` + ``bty.mac=MAC`` only.
+3. Boot the netboot kernel + initrd + squashfs trio.
+   `bty-tui-on-tty1.service` exec's `bty --server X --mac Y` on
+   tty1; ``bty`` GETs `<server>/pxe/<mac>/plan`, sees
+   ``mode=auto`` (because boot_policy=flash + ref + serial),
+   writes the image to the local disk, POSTs `/pxe/<mac>/done`,
+   reboots.
 
 The server's machine-detail page shows live progress + last
 flashed timestamp. Subsequent boots skip PXE (BIOS falls back to
@@ -255,7 +258,8 @@ provisions to.
                                           v
                                 +-------------------+
                                 | Target machine    |
-                                |  bty-flash on boot|
+                                |  bty on tty1      |
+                                |  (plan: mode=auto)|
                                 |  -> local disk    |
                                 +-------------------+
 ```
@@ -266,7 +270,8 @@ provisions to.
   free, in parallel.
 - Mix the network-flash flow (this walkthrough) with the
   USB-stick flow ([walkthrough-usb](walkthrough-usb.md)) -- both
-  end up at the same `bty-tui` / `bty flash` interface.
+  end up running the same ``bty`` flash code, just driven by the
+  plan endpoint vs the local wizard.
 - Swap images per-target without rebooting the server.
 - Add a second disk as a **persistent image store** so the cache
   survives appliance reflashes

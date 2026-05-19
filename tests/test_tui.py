@@ -22,66 +22,13 @@ their own coverage).
 
 from __future__ import annotations
 
-import asyncio
-import json
 import urllib.error
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock
 
 import pytest
 
-from bty import images
 from bty.tui import _app as tui_app
-
-
-def _run(coro: Any) -> Any:
-    """Drive an async test body without pulling in pytest-asyncio."""
-    return asyncio.run(coro)
-
-
-def _fake_image(
-    name: str = "demo.qcow2",
-    fmt: str = "qcow2",
-    size: int = 1024,
-) -> images.Image:
-    """Synthetic ``images.Image`` for monkeypatched list_images."""
-    return images.Image(
-        path=Path("/fake/images") / name,
-        name=name,
-        format=fmt,
-        size_bytes=size,
-    )
-
-
-def _fake_disk(
-    path: str = "/dev/sda",
-    size: str = "500G",
-    model: str = "Test Disk",
-) -> dict[str, Any]:
-    """Synthetic disk row matching ``disks.list_disks`` output shape."""
-    return {
-        "path": path,
-        "size": size,
-        "type": "disk",
-        "vendor": "ATA",
-        "model": model,
-        "serial": "TEST123",
-        "tran": "sata",
-        "removable": False,
-        "readonly": False,
-        "mountpoints": [],
-    }
-
-
-def _fake_resp(payload: Any) -> MagicMock:
-    """A context-manageable fake matching urlopen's protocol."""
-    resp = MagicMock()
-    resp.read.return_value = json.dumps(payload).encode("utf-8")
-    resp.__enter__ = MagicMock(return_value=resp)
-    resp.__exit__ = MagicMock(return_value=False)
-    return resp
-
 
 _VALID_CATALOG_TOML = b"""\
 version = 1
@@ -177,22 +124,6 @@ def test_load_catalog_from_source_propagates_url_errors(
 
     with pytest.raises(urllib.error.URLError):
         tui_app.load_catalog_from_source("http://server/catalog.toml")
-
-
-def test_pxe_done_base_from_source_for_http() -> None:
-    """A http(s):// catalog URL derives scheme://host[:port] as the
-    pxe-done base. Static-file and oras:// sources -> None (no POST)."""
-    assert (
-        tui_app._pxe_done_base_from_source("http://server:8080/catalog.toml")
-        == "http://server:8080"
-    )
-    assert (
-        tui_app._pxe_done_base_from_source("https://example.com/path/catalog.toml")
-        == "https://example.com"
-    )
-    assert tui_app._pxe_done_base_from_source(None) is None
-    assert tui_app._pxe_done_base_from_source("oras://ghcr.io/owner/repo:tag") is None
-    assert tui_app._pxe_done_base_from_source("/local/catalog.toml") is None
 
 
 def test_post_pxe_done_sends_post(monkeypatch: pytest.MonkeyPatch) -> None:

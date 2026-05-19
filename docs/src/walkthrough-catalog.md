@@ -51,11 +51,17 @@ Required fields per entry: `name`, `src`, `sha256`. Optional:
 within the manifest. SHA-256 must be a 64-char lower-case hex
 string.
 
-Validate before deploying:
+Validate before deploying via the Python API (``bty.catalog.
+load_source`` raises ``CatalogError`` on parse / schema failure):
 
 ```bash
-bty catalog validate /path/to/catalog.toml
+python3 -c 'import sys; from bty import catalog; catalog.load_source(sys.argv[1])' /path/to/catalog.toml
 ```
+
+bty-web also parses the manifest server-side -- uploading via
+`/ui/images?section=upload-manifest` (or `POST /catalog/import?
+source=...`) bounces back with the parse error on a bad manifest
+without clobbering the running one.
 
 ## SHA-256 sidecars for dir-scan images
 

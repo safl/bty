@@ -55,8 +55,12 @@ PyPI package to ``docs/tooling`` if you want first-class support.
 
 | Script | Type | Walkthrough |
 |---|---|---|
-| `usb-flash-cli.sh` | canned | Step 5b: ``bty images / inspect / flash --dry-run / flash --yes`` |
-| `usb-flash-tui.md` | live notes | Step 5a: keystroke recipe for recording the TUI by hand |
+| `usb-flash-tui.md` | live notes | Step 5a: keystroke recipe for recording the wizard by hand |
+
+(The historical canned ``usb-flash-cli.sh`` script demoed the
+``bty images / inspect / flash`` subcommands, all retired in
+v0.22.10 -- the merged ``bty`` wizard does the same work
+interactively. Removed with the subcommands.)
 
 Add new scripts here as walkthroughs grow; keep names short
 (`<flow>-<step>.sh`) and reference them from the walkthrough page.

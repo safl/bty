@@ -16,11 +16,11 @@ Source content for the bty appliance images. Four variants:
   losetup-mount + chroot in `qemu-aarch64-static`.
 - **Network-flash live env** (`VARIANT=netboot-x86`) - kernel + initrd +
   squashfs that PXE clients chain into. Built via live-build
-  (`netboot` output). Carries the bty CLI plus a
+  (`netboot` output). Carries the bty runtime plus a
   `bty-tui-on-tty1.service` unit that reads `bty.server` + `bty.mac`
-  from `/proc/cmdline` and exec's `bty-tui --server X --mac Y`;
-  bty-tui then GETs `<server>/pxe/<mac>/plan` and dispatches
-  (auto-flash, interactive wizard, or no-op).
+  from `/proc/cmdline` and exec's `bty --server X --mac Y`; ``bty``
+  then GETs `<server>/pxe/<mac>/plan` and dispatches (auto-flash,
+  interactive wizard, or no-op).
 
 This directory holds the **content** baked into the images: cloud-init
 base templates (server only), rootfs trees that live-build /
@@ -178,13 +178,12 @@ hardware. Most operators never run this build pipeline themselves -
 - **netboot-x86.** Kernel + initrd + squashfs trio used by PXE clients.
   The chroot ships `bty-tui-on-tty1.service` (after
   `network-online.target`); it reads `bty.server=` + `bty.mac=`
-  from `/proc/cmdline` and exec's `bty-tui --server X --mac Y`.
-  bty-tui then GETs `<server>/pxe/<mac>/plan` and dispatches:
-  `mode=auto` downloads + flashes + reboots, `mode=interactive`
-  drops the operator into the wizard, `mode=local` prints a
-  notice and exits. Without `bty.mac` on the cmdline (e.g. USB-
-  local boot), bty-tui falls back to scanning the local
-  image-root directory.
+  from `/proc/cmdline` and exec's `bty --server X --mac Y`. ``bty``
+  then GETs `<server>/pxe/<mac>/plan` and dispatches: `mode=auto`
+  downloads + flashes + reboots, `mode=interactive` drops the
+  operator into the wizard, `mode=local` prints a notice and
+  exits. Without `bty.mac` on the cmdline (e.g. USB-local boot),
+  ``bty`` falls back to scanning the local image-root directory.
 
   The end-to-end PXE chain (server hands a per-MAC iPXE plan, client
   loads the live trio, flashes a target disk, signals done) is

@@ -42,7 +42,7 @@ Public surface preserved from the prior Textual implementation:
 
   * ``BtyTui`` class with ``run()``.
   * ``_TuiImage`` dataclass (catalog row shape).
-  * ``load_catalog_from_source(...)``, ``_pxe_done_base_from_source(...)``,
+  * ``load_catalog_from_source(...)``,
     ``post_pxe_done(...)``, ``post_inventory(...)`` helpers.
   * ``_format_mib``, ``_parse_size_to_bytes`` formatters.
   * ``_WizardStage`` enum.
@@ -222,19 +222,6 @@ def load_catalog_from_source(source: str, *, timeout: float = 30.0) -> list[_Tui
         )
         for entry in parsed_catalog.entries
     ]
-
-
-def _pxe_done_base_from_source(source: str | None) -> str | None:
-    """Derive a bty-web base URL for the pxe-done POST from a
-    ``--catalog`` source. Returns ``None`` when the source isn't
-    an http(s) URL.
-    """
-    if source is None:
-        return None
-    parsed = urllib.parse.urlparse(source)
-    if parsed.scheme not in ("http", "https") or not parsed.netloc:
-        return None
-    return f"{parsed.scheme}://{parsed.netloc}"
 
 
 def post_pxe_done(pxe_done_base: str, mac: str, *, timeout: float = 10.0) -> None:
@@ -856,7 +843,6 @@ class BtyTui:
             return "quit"
         if choice in ("d", "default"):
             self._state.catalog_source = _BTY_DEFAULT_CATALOG_URL
-            self._state.pxe_done_base = _pxe_done_base_from_source(_BTY_DEFAULT_CATALOG_URL)
             self._state.catalog_chosen = True
             return "continue"
         if choice in ("c", "custom"):
@@ -870,7 +856,6 @@ class BtyTui:
             return "continue"
         if choice in ("l", "local"):
             self._state.catalog_source = None
-            self._state.pxe_done_base = None
             self._state.catalog_chosen = True
             return "continue"
         self._console.print(f"[{_DANGER}]Unrecognised choice {choice!r}; type d, c, l, or q.[/]")
@@ -1240,7 +1225,13 @@ class BtyTui:
         if new_source in ("q", "quit"):
             return
         self._state.catalog_source = new_source or None
-        self._state.pxe_done_base = _pxe_done_base_from_source(self._state.catalog_source)
+        # ``pxe_done_base`` stays anchored to ``self._server_url``
+        # (set in __init__ when ``--mac`` was supplied) regardless
+        # of what catalog source the operator picks here. The
+        # completion POST goes to the bty-server we got the plan
+        # from, NOT to whichever host the catalog TOML happens to
+        # live on. See the matching guard in
+        # ``_fetch_and_dispatch_plan`` for the same bug pattern.
 
     # ---------- rendering helpers -------------------------------------
 
@@ -1761,7 +1752,6 @@ __all__ = [
     "_WizardStage",
     "_format_mib",
     "_parse_size_to_bytes",
-    "_pxe_done_base_from_source",
     "load_catalog_from_source",
     "post_inventory",
     "post_pxe_done",

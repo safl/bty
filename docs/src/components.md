@@ -21,17 +21,17 @@ three:
  |  live env      |      |  live env      |            |  appliance      |
  |                |      |                |            |                 |
  | +------------+ |      | +------------+ |            | +-------------+ |
- | | bty-tui    | |      | | bty-tui    | |    HTTP    | | bty-web     | |
+ | | bty        | |      | | bty        | |    HTTP    | | bty-web     | |
  | | (local     | |      | | --catalog  +-+----------->+ | iPXE/TFTP/  | |
  | |  catalog)  | |      | |   SOURCE)  | | (catalog)  | | dnsmasq     | |
  | +-----+------+ |      | +-----+------+ |            | +------+------+ |
  +-------+--------+      +-------+--------+            +--------+--------+
          |                       |                              |
-         | bty flash             | bty flash                    | iPXE
-         | (BTY_IMAGES)          | (image fetched               | chain to
-         |                       |   from catalog               | target +
-         v                       |   server)                    | flash-on-
-   +-----------+                 v                              | boot
+         |  dd to disk           | dd to disk                   | iPXE
+         | (BTY_IMAGES)          | (image fetched               | chain ->
+         |                       |   from catalog               | live env ->
+         v                       |   server)                    | bty in
+   +-----------+                 v                              | auto mode
    | target    |           +-----------+                        v
    | machine   |           | target    |                  +---------------+
    | local     |           | machine   |                  | target machine|
@@ -49,36 +49,37 @@ three:
                               |   (also serves catalog over HTTP)|
 ```
 
-The `bty` library implements the flashing logic (`bty.flash`,
-`bty.images`, `bty.disks`) consumed by all three flows. `bty-tui` and
-`bty-web` are UI shells; `bty-flash-on-boot` is the systemd service
-that runs the flash unattended after a PXE boot. Same operations,
-different delivery vehicles. The middle shape (`--catalog SOURCE`,
-typically pointed at a bty-web instance's `/catalog.toml`) is where
-the Docker container fits naturally - a single command on a
-workstation gives a small team a shared image catalog without
-setting up the appliance.
+The `bty` package implements the flashing logic (`bty.flash`,
+`bty.images`, `bty.disks`, `bty.catalog`, `bty.oras`) consumed by
+both shipping flows. ``bty`` (the operator wizard) and ``bty-web``
+(the HTTP server) are the two UI shells; in the netboot live env,
+``bty`` is launched on tty1 by `bty-tui-on-tty1.service` and
+dispatches via the bty-web plan endpoint -- no separate auto-flash
+service. Same operations, different delivery vehicles. The middle
+shape (`--catalog SOURCE`, typically pointed at a bty-web instance's
+`/catalog.toml`) is where the Docker container fits naturally -- a
+single command on a workstation gives a small team a shared image
+catalog without setting up the appliance.
 
-## `bty` (CLI)
+## `bty` (wizard + library)
 
-Main command-line interface. The single source of truth for image
-inspection, target-disk discovery, flashing, and provisioning. Every
-other component is a UI or delivery vehicle for what `bty` does.
+The operator-facing tool: a Rich-based wizard that picks an image
++ a target disk and flashes; the same code also runs in scripted /
+server-driven mode via the bty-web plan endpoint. Single source of
+truth for image inspection, target-disk discovery, flashing, and
+remote-catalog ingestion. Library modules (`bty.flash`,
+`bty.images`, `bty.catalog`, `bty.disks`, `bty.oras`) are stable
+Python API for in-process scripting.
 
-Installable on any Linux environment with a sufficient Python runtime:
+Three invocation shapes:
 
-```bash
-pipx install bty-lab
-```
+- `bty` -- interactive wizard, local image-root only.
+- `bty --catalog URL` -- interactive wizard with the catalog
+  pre-loaded.
+- `bty --server X --mac Y` -- server-driven via
+  `<X>/pxe/<Y>/plan`.
 
-## `bty-tui` (Terminal UI)
-
-Terminal UI on top of the same library. Targeted at interactive use from
-a live environment where a graphical browser is not appropriate - a
-serial console, an SSH session, or a minimal recovery image. Exposes the
-same operations as the CLI in a navigable form.
-
-Requires the `tui` extra:
+Requires the `tui` extra (Rich):
 
 ```bash
 pipx install "bty-lab[tui]"
@@ -121,10 +122,11 @@ framework, no heavy front-end build pipeline, no JVM dependencies.
 Sibling directory at the repo root. Not a Python package. Builds four
 appliance variants from a shared rootfs overlay:
 
-**USB live image (`usb-x86`).** Bootable USB stick carrying the `bty`
-runtime and an exFAT `BTY_IMAGES` partition for pre-built images. Operator
-plugs it in, boots a target, runs `bty flash` against the local disk.
-Self-contained and offline. Direct-flash delivery vehicle.
+**USB live image (`usb-x86`).** Bootable USB stick carrying the
+`bty` runtime and an exFAT `BTY_IMAGES` partition for pre-built
+images. Operator plugs it in, boots a target; ``bty`` auto-launches
+on tty1 and walks the operator through pick + flash. Self-contained
+and offline. Direct-flash delivery vehicle.
 
 **Server image, x86_64 (`server-x86`).** Installable disk image that,
 when written to a host's disk and booted, runs the bty provisioning
@@ -144,11 +146,13 @@ upstream Raspberry Pi OS Lite image and customising it in a
 (after `gunzip`) to an SD card and boots a Pi 4 or Pi 5; first-boot
 ends at the same `bty / bty` credential as the x86 server image.
 
-**Network-flash live env (`netboot-x86`).** Kernel + initrd + squashfs
-trio that PXE clients chain into. Built via Debian's `live-build`. The
-chroot ships a `bty-flash-on-boot.service` oneshot that reads its
-assignment from `/proc/cmdline`, downloads the assigned image, runs
-`bty flash`, signals completion, and reboots.
+**Network-flash live env (`netboot-x86`).** Kernel + initrd +
+squashfs trio that PXE clients chain into. Built via Debian's
+`live-build`. The chroot ships `bty-tui-on-tty1.service`
+(unconditional; runs on every boot). The service exec's `bty
+--server X --mac Y` (values from `/proc/cmdline`); ``bty`` GETs
+`<server>/pxe/<mac>/plan` and dispatches (auto-flash without
+prompts, interactive wizard, or no-op-and-exit).
 
 ## `ghcr.io/safl/bty-web` (Docker container)
 
@@ -192,8 +196,9 @@ for the full operator guide.
 
 The intended operator experience is appliance-grade:
 
-1. `dd` (or `bty flash`) the image onto the server host's disk (or SD
-   card, for the Pi variant).
+1. `dd` (or boot the bty USB live, pick the bty-server entry from
+   the wizard's starter catalog, flash) the image onto the server
+   host's disk (or SD card, for the Pi variant).
 2. Boot. Network comes up via DHCP; the appliance auto-starts
    `bty-web` on `:8080` with a default `bty / bty` credential and an
    `odus` admin user with passwordless sudo.

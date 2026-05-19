@@ -88,9 +88,9 @@ To upgrade or repair the appliance:
 
 1. Power off the machine.
 2. Reflash `bty-server-x86_64.img.gz` onto the **rootfs disk only**
-   (do NOT touch the image-store disk). Use `bty tui`, `bty flash`,
-   Etcher, Rufus -- any tool that writes a raw image to a single
-   disk.
+   (do NOT touch the image-store disk). Use ``bty`` from a USB
+   live env, Etcher, Rufus -- any tool that writes a raw image
+   to a single disk.
 3. Boot the appliance.
 
 The new appliance's `/etc/fstab` (baked in at build time) carries:
