@@ -43,7 +43,7 @@ bty is a flasher, not an image builder:
 
 ```bash
 # Local: USB stick into target, two arrows + Enter, done.
-bty tui
+bty
 
 # Remote: bind a MAC to an image, the next PXE boot reflashes itself.
 # (See the bty-web HTTP API reference for the full surface.)
@@ -55,9 +55,9 @@ bty tui
 
 | Shape | What it is | When it fits |
 |---|---|---|
-| **USB live stick** | bty boots from a flash drive, runs `bty tui`, flashes the box it's plugged into. Fresh sticks ship with four starter `.bri` pointers (Debian / Ubuntu / Fedora sysdev images via `oras://ghcr.io/safl/nosi/...`, plus bty-server) so the catalog is non-empty out of the box. | Single-machine local imaging |
-| **USB + portable catalog** | Same stick, plus `bty tui --catalog <SOURCE>` pointed at a TOML catalog hosted anywhere (a local file, an HTTP URL, an `oras://` reference, or a bty-web instance's `/catalog.toml`). | A handful of boxes, shared image library |
-| **PXE-boot appliance** | bty-web on a Pi or x86 box runs DHCP/TFTP/HTTP; targets PXE-chain into a netboot live env that flashes them unattended | CI fleets, racks, anything you don't want to walk to |
+| **USB live stick** | bty boots from a flash drive, runs `bty`, flashes the box it's plugged into. Fresh sticks ship with four starter `.bri` pointers (Debian / Ubuntu / Fedora sysdev images via `oras://ghcr.io/safl/nosi/...`, plus bty-server) so the catalog is non-empty out of the box. | Single-machine local imaging |
+| **USB + portable catalog** | Same stick, plus `bty --catalog <SOURCE>` pointed at a TOML catalog hosted anywhere (a local file, an HTTP URL, an `oras://` reference, or a bty-web instance's `/catalog.toml`). | A handful of boxes, shared image library |
+| **PXE-boot appliance** | bty-web on a Pi or x86 box runs DHCP/TFTP/HTTP; targets PXE-chain into a netboot live env that runs `bty --server X --mac Y` on tty1, which fetches a per-MAC plan and either auto-flashes or drops the operator into the wizard | CI fleets, racks, anything you don't want to walk to |
 
 All three share the same Python codebase, the same image catalog, the
 same SHA-keyed machine bindings.
@@ -70,23 +70,24 @@ non-container artefacts in a container registry). The end-to-end
 story:
 
 - **Images live in a registry.** [`safl/nosi`](https://github.com/safl/nosi)
-  publishes Debian / Ubuntu / Fedora disk images to `ghcr.io/safl/nosi/<variant>:latest`.
-  `bty flash oras://ghcr.io/safl/nosi/debian-sysdev:latest /dev/sdX --yes`
-  resolves the manifest, picks the disk-image layer, and streams the
-  blob straight to the target via the same `curl | dd` pipeline as
-  any HTTP URL. Anonymous-pull only -- no PAT, no docker login.
+  publishes Debian / Ubuntu / Fedora disk images to
+  `ghcr.io/safl/nosi/<variant>:latest`. `bty` resolves an
+  `oras://ghcr.io/safl/nosi/...` source from a catalog entry,
+  picks the disk-image layer, and streams the blob straight to
+  the target via the same `curl | dd` pipeline as any HTTP URL.
+  Anonymous-pull only -- no PAT, no docker login.
 - **Catalogs are portable TOML files.** A catalog is a small TOML
-  manifest listing named images with `src` URLs (any combination of
-  `http(s)://`, `oras://`, or `file://`). `bty tui --catalog
-  <SOURCE>` accepts a local path, an HTTP URL, or an `oras://`
-  reference. Operators can publish a catalog on GitHub Releases, an
-  S3 bucket, a private registry, or alongside images in GHCR --
-  whatever they already have. `bty-web` instances serve the same
-  shape at `GET /catalog.toml`, so a running server is "just another
+  manifest listing named images with `src` URLs (any combination
+  of `http(s)://`, `oras://`, or `file://`). `bty --catalog <SOURCE>`
+  accepts a local path, an HTTP URL, or an `oras://` reference.
+  Operators can publish a catalog on GitHub Releases, an S3 bucket,
+  a private registry, or alongside images in GHCR -- whatever they
+  already have. `bty-web` instances serve the same shape at
+  `GET /catalog.toml`, so a running server is "just another
   catalog source".
 - **`.bri` descriptors are the per-stick analogue.** A USB stick's
   `BTY_IMAGES` partition can carry `.bri` files (one-image-per-file
-  TOML pointers, including `oras://` URLs). The TUI merges them
+  TOML pointers, including `oras://` URLs). `bty` merges them
   with whatever `--catalog` source the operator passed.
 
 Why this shape: images and catalog metadata are content-addressed

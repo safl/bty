@@ -25,7 +25,7 @@ that bridges the two:
   walk away. No server to set up. Best for the field-tech / one-off
   reflash.
 - **USB + portable catalog.** Same USB live image, plus
-  `bty tui --catalog <SOURCE>` pointed at a TOML catalog hosted
+  `bty --catalog <SOURCE>` pointed at a TOML catalog hosted
   anywhere -- a local file, an HTTP URL, an `oras://` reference, or
   a bty-web instance's `/catalog.toml` endpoint. Flash still happens
   locally on the operator's hardware; only the catalog is centralised.

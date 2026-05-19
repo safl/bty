@@ -3,7 +3,7 @@
 A pre-built bty-web container is published to
 [`ghcr.io/safl/bty-web`](https://github.com/safl/bty/pkgs/container/bty-web)
 on every tagged release. It hosts the **image catalog**, **machine
-registry**, and **browser UI** of bty-web. `bty tui --catalog SOURCE`
+registry**, and **browser UI** of bty-web. `bty --catalog SOURCE`
 clients (running from the USB live env or a workstation) connect
 to it and pick images for flashing.
 
@@ -38,7 +38,7 @@ the TFTP daemon.
 - **Image library**: you have a fleet of operators who all carry
   bty USB sticks and want a network-shared catalog of pre-built
   images instead of copying files to every stick.
-- **Local-dev backend** for `bty tui --catalog` work.
+- **Local-dev backend** for `bty --catalog` work.
 - **Production HTTP-Boot or `boots-from` deployment** for fleets
   that don't need a TFTP daemon (UEFI-HTTP-Boot-capable firmware
   or USB-driven targets).
@@ -92,35 +92,31 @@ docker compose up -d
 Same defaults: `:8080` published, `./bty-data/` bind-mounted as the
 volume, `restart: unless-stopped`.
 
-## Connecting `bty tui`
+## Connecting `bty`
 
 From a workstation or the USB live env:
 
 ```bash
-bty tui --catalog http://<host>:8080/catalog.toml
+bty --catalog http://<host>:8080/catalog.toml
 ```
 
 The catalog pane fills with whatever the server has under
-`/var/lib/bty/images`. Pick a row with `Enter`, pick a target disk,
-flash. The server is the catalog source; the actual write happens
-on the local machine running `bty tui`.
+`/var/lib/bty/images`. Pick an image (Enter), pick a target disk,
+confirm the flash plan. The server is the catalog source; the
+actual write happens on the local machine running `bty`.
 
-## Scripted flash via URL (no TUI)
+## Scripted flash via the plan endpoint (no wizard)
 
-For batch / CI workflows the `bty flash` IMAGE positional accepts
-an HTTP URL directly, so a script doesn't need to download
-images first:
+For batch / CI workflows: bind the machine on the appliance with
+`boot_policy=flash` + a `bty_image_ref` + a `target_disk_serial`,
+then on the target run `bty --server <host> --mac <self-mac>`. The
+wizard skips and the flash runs scripted (`mode=auto` from
+`GET <host>/pxe/<mac>/plan`). The image streams directly from the
+container's catalog through the live env to the target's disk; no
+operator copy step.
 
-```bash
-sudo bty flash http://<host>:8080/images/my-image.img.gz /dev/sda --yes
-```
-
-`.img` and `.img.zst` URLs stream straight from the container
-through `zstd -d | dd` to disk; `.qcow2` URLs download to a temp
-file first. Combined with the container running on a teammate's
-workstation, this turns "flash this box from the shared catalog"
-into a single command - no operator copy step, no preconfigured
-client.
+For one-shot ad-hoc flashes (no MAC binding), the wizard's URL
+accept covers HTTP and `oras://` sources via `bty --catalog ...`.
 
 ## Rotating the default credentials
 

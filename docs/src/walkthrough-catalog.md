@@ -109,27 +109,33 @@ auto-reloads (after a brief delay so the 100% bar renders) so
 the catalog table picks up the new `cached` / `sha256` state
 without manual refresh.
 
-## CLI (local mode -- intentionally simple)
+## CLI: the wizard is the operator surface
+
+v0.22.11+ collapsed the historical `bty inspect` / `bty flash` /
+`bty images` / `bty catalog` subcommands into the single
+``bty`` console script (the wizard). Three invocation shapes:
 
 ```bash
-bty images [--image-root PATH | --catalog URL]
-bty inspect <path>
-bty flash PATH_OR_URL /dev/sdX --yes
+bty                              # interactive wizard, local image-root only
+bty --catalog <URL>              # interactive wizard with the catalog pre-loaded
+bty --server <X> --mac <Y>       # server-driven via GET <X>/pxe/<Y>/plan
 ```
 
-The local CLI is dir-scan only -- no manifest, no SHA, no
-catalog. ``bty images`` answers "what flashable files are
-in this directory?" and stops there. ``bty flash``'s IMAGE
-positional accepts a path, an HTTP URL, or a ``.bri`` (bty
-Remote Image) descriptor file.
+The wizard's catalog overlay accepts the same shapes the old
+``--catalog`` accepted: a local TOML path, an HTTP URL, an
+``oras://`` reference, or a bty-web instance's `/catalog.toml`.
+Local-only mode (no overlay) scans `BTY_IMAGE_ROOT` (or
+`/var/lib/bty/images`) and shows whatever flashable files are
+there.
+
+### .bri descriptors (per-stick remote-image pointers)
 
 A ``.bri`` is a tiny TOML pointer at a remote image. Drop one
 into BTY_IMAGES (or, on a Ventoy / IP-KVM delivery, at the
 surrounding stick's partition root or in a ``bty-images/``
 subfolder there) alongside your local files and it shows up in
-``bty images`` next to them, with ``source = remote`` and
-the upstream URL. ``bty flash foo.bri /dev/sdX --yes`` resolves
-the descriptor and falls into the URL flash path.
+the wizard's image list next to them, with ``source = remote``
+and the upstream URL. Picking it kicks off the URL flash path.
 
 ```toml
 # example .bri shape
@@ -159,32 +165,16 @@ GHCR is the one exercised in the starter set. Fresh USB sticks
 ship with four such .bri files pre-staged on the BTY_IMAGES
 partition (three nosi sysdev images plus the bty-server appliance).
 
-To install ``bty-server`` specifically, no ``.bri`` is needed:
-``bty tui`` has an ``i`` keybinding that flashes the latest
-``bty-server-x86_64.img.gz`` from GitHub releases directly. The
-``.bri`` mechanism exists for operator-supplied URL pointers
-(private mirrors, custom-built images, etc.), not for the
-bty-server bootstrap.
-
 That's deliberate: the catalog story is a **server** concern.
 Operators who want the unified catalog (manifest + dir-scan +
 auto-imported sidecars) interact with it through bty-web -- in
-the browser, or via ``bty tui --catalog SOURCE`` which consumes
-``GET /catalog.toml`` and gets a single ``src`` per entry that the
-client just flashes from. No client-side resolution logic.
+the browser, or via ``bty --catalog SOURCE`` which consumes
+``GET /catalog.toml`` and gets a single ``src`` per entry that
+the client just flashes from. No client-side resolution logic.
 
-For server-side manifest management:
-
-```bash
-bty catalog validate [PATH]   # parse + schema-check a TOML manifest
-bty catalog list              # show entries with cached state
-bty catalog fetch <name>      # blocks while downloading; useful for
-                              #   batch / scripted cache-warming
-```
-
-These run against the configured manifest path
-(``BTY_CATALOG_FILE`` or ``${BTY_STATE_DIR}/catalog.toml``); they
-are administrative tools, not part of the operator's flash flow.
+Server-side manifest management lives in `/ui/images` (sub-nav:
+List / Fetch default / Add by URL / Upload manifest / Upload image)
+and the HTTP API below.
 
 ## HTTP API
 
