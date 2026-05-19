@@ -238,30 +238,48 @@ def test_bty_version_substitution_runs_in_every_bake_script() -> None:
     chroot tree must also include it.
     """
     scripts_dir = REPO_ROOT / "cijoe" / "scripts"
-    # Live-env bake scripts: every script whose name ends in _build.py
-    # AND that touches bty-media live-build (heuristic: contains
-    # "live-build" in its source). Both should substitute the
-    # version placeholder.
-    bake_scripts = [
-        scripts_dir / "usb_iso_build.py",
-        scripts_dir / "live_build.py",
+    # Bake scripts that emit live-env / appliance artifacts derived
+    # from the bty-media trees. Each must substitute
+    # ``__BTY_VERSION__`` via SOME mechanism. The substitution
+    # mechanism varies by bake style:
+    #
+    #   * usb_iso_build.py + live_build.py shell out to ``sed -i``
+    #     across the copied live-build tree (the trees mostly carry
+    #     templated text files like /etc/issue, /etc/motd, the
+    #     boot-banner script).
+    #   * gen_userdata.py renders cloud-init user-data for the
+    #     server appliance from rootfs/server/. It does the
+    #     substitution in-Python via ``text.replace(...)`` because
+    #     cloud-init's write_files YAML is generated string-by-
+    #     string and a single sed pass over the rendered YAML
+    #     would also rewrite the placeholder inside any binary
+    #     base64 block.
+    bake_scripts: list[tuple[Path, tuple[str, ...]]] = [
+        (scripts_dir / "usb_iso_build.py", ("sed -i s/__BTY_VERSION__/",)),
+        (scripts_dir / "live_build.py", ("sed -i s/__BTY_VERSION__/",)),
+        # gen_userdata's in-Python replace; either spelling is fine.
+        (
+            scripts_dir / "gen_userdata.py",
+            (
+                'replace("__BTY_VERSION__"',
+                "replace('__BTY_VERSION__'",
+            ),
+        ),
     ]
-    for script in bake_scripts:
+    for script, substitution_hints in bake_scripts:
         body = script.read_text()
         assert "__BTY_VERSION__" in body, (
-            f"{script.name} touches the live-build tree but contains no "
-            "__BTY_VERSION__ substitution. The booted live env's /etc/issue "
-            "/ motd / shell prompt will carry the literal placeholder."
+            f"{script.name} produces a live-env / appliance artifact but contains no "
+            "__BTY_VERSION__ substitution. The booted target's /etc/issue / motd "
+            "/ shell prompt will carry the literal placeholder."
         )
-        # Must call _read_bty_version (or import it) AND run the sed
-        # substitution against the build dir.
         assert "_read_bty_version" in body, (
             f"{script.name} uses __BTY_VERSION__ but does not call "
             "``_read_bty_version`` -- the placeholder won't get replaced."
         )
-        assert "sed -i s/__BTY_VERSION__/" in body, (
-            f"{script.name} should run the canonical sed substitution "
-            "``sed -i s/__BTY_VERSION__/<version>/g`` against the build dir."
+        assert any(hint in body for hint in substitution_hints), (
+            f"{script.name} should perform a __BTY_VERSION__ substitution "
+            f"matching one of: {substitution_hints!r}."
         )
 
 
