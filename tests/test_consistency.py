@@ -163,23 +163,34 @@ def test_ipxe_templates_share_baseline_cmdline_tokens() -> None:
     """Both ``ipxe_tui.j2`` and ``ipxe_flash.j2`` render kernel
     cmdlines for the SAME live env. Tokens that are essential for
     the live env to boot correctly (plymouth disable, nouveau
-    blacklist, console plumbing) must appear in BOTH templates.
+    blacklist, console plumbing) must appear in BOTH templates'
+    ``kernel`` line (not just doc comments).
 
     A previous bug shape: a token gets added to one template (to
     fix a tui-mode issue), but the flash-mode template ships
     without it and the next flash-mode boot wedges on the same
     hardware. v0.20.2 ran into exactly this with plymouth.enable=0.
 
-    Pinned baseline shared between the two templates:
+    The token list is asserted against the actual ``kernel`` line
+    only (not the whole template body) so a comment mentioning
+    a token can't spoof its presence.
     """
-    tui = (REPO_ROOT / "src" / "bty" / "web" / "_templates" / "ipxe_tui.j2").read_text()
-    flash = (REPO_ROOT / "src" / "bty" / "web" / "_templates" / "ipxe_flash.j2").read_text()
+    tui_body = (REPO_ROOT / "src" / "bty" / "web" / "_templates" / "ipxe_tui.j2").read_text()
+    flash_body = (REPO_ROOT / "src" / "bty" / "web" / "_templates" / "ipxe_flash.j2").read_text()
+
+    def _kernel_line(body: str) -> str:
+        for ln in body.splitlines():
+            if ln.startswith("kernel "):
+                return ln
+        raise AssertionError("template has no ``kernel`` line")
+
+    tui = _kernel_line(tui_body)
+    flash = _kernel_line(flash_body)
 
     baseline_tokens = (
         "boot=live",
         "fetch=${bty-base}/boot/bty-netboot-x86_64.squashfs",
         "components",
-        "quiet",
         "console=tty0",
         "console=ttyS0,115200",
         "plymouth.enable=0",
@@ -189,8 +200,22 @@ def test_ipxe_templates_share_baseline_cmdline_tokens() -> None:
         "bty.mac={{ mac }}",
     )
     for token in baseline_tokens:
-        assert token in tui, f"ipxe_tui.j2 missing baseline token {token!r}"
-        assert token in flash, f"ipxe_flash.j2 missing baseline token {token!r}"
+        assert token in tui, f"ipxe_tui.j2 kernel line missing token {token!r}: {tui!r}"
+        assert token in flash, f"ipxe_flash.j2 kernel line missing token {token!r}: {flash!r}"
+
+    # Transparency invariant: NEITHER template ships ``quiet`` on
+    # the kernel cmdline. v0.22.1 retired plymouth + dropped quiet
+    # from every cmdline insertion point so a wedge between two
+    # ``[ OK ] Started X`` lines is immediately diagnostic.
+    # Both templates' header comments contain the phrase ``NO
+    # quiet`` -- this assertion checks the kernel line itself, so
+    # a future edit that adds quiet (without removing the comment)
+    # fails here.
+    for label, line in (("ipxe_tui.j2", tui), ("ipxe_flash.j2", flash)):
+        assert " quiet" not in line, (
+            f"{label} kernel line carries ``quiet`` -- transparency was "
+            f"the v0.22.1 deliberate choice: {line!r}"
+        )
 
 
 # ----------------------------------------------------------------------

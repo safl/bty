@@ -6,14 +6,11 @@ linux-image-amd64
 live-boot
 live-config
 live-tools
-# Plymouth lives in ``bty-plymouth.list.chroot`` -- activated only
-# by the USB ISO bake via auto/config. The mascot splash on a USB
-# stick (operator-facing first impression) is worth its disk +
-# init cost; the netboot variant runs in headless / KVM / PXE
-# contexts where plymouth adds latency (plymouth-quit-wait wedges
-# on certain iGPUs -- see the MS-01 / EPYC plymouth hangs) and
-# zero operator value. Same chroot tree, two output variants:
-# one ships plymouth, the other doesn't.
+# Plymouth was retired in v0.22.1: plymouth-quit-wait wedged on
+# certain Intel iGPUs (MS-01 / EPYC bring-up box) and the mascot
+# splash didn't justify the workaround stack. ``plymouth.enable=0``
+# stays on the kernel cmdline as belt-and-braces, but the package
+# is not installed in either variant (no ``bty-plymouth.list.chroot``).
 
 # Vendor firmware blobs. ``--firmware-chroot true`` in
 # ``auto/config`` pulls the ``firmware-linux-nonfree`` metapackage,

@@ -15,10 +15,11 @@
 #     over HTTP and clients chain into them via iPXE.
 #   - **BTY_USB_ISO=1 (iso-hybrid)**: hybrid ISO image bootable from
 #     CD or USB stick (BIOS + UEFI). Used by the ``usb-iso`` variant.
-#     Adds ``--bootloaders syslinux,grub-efi`` for dual-firmware boot
-#     and ``bty.mode=interactive`` to the kernel cmdline so
-#     ``bty-on-tty1.service`` fires on USB boot the same way it
-#     fires for the PXE-tui flow.
+#     Adds ``--bootloaders syslinux,grub-efi`` for dual-firmware
+#     boot. No ``bty.*`` cmdline params: USB-local boot has no
+#     bty-server URL or self-MAC to pin, and ``bty-on-tty1.service``
+#     fires unconditionally (v0.22.10+ retired the
+#     ConditionKernelCommandLine gating).
 #
 # Both modes use the same chroot package set + hooks; only the binary
 # packaging differs. ``lb build`` re-runs this script during its
@@ -55,20 +56,15 @@ set -e
 if [ "${BTY_USB_ISO:-}" = "1" ]; then
     BINARY_IMAGES=iso-hybrid
     BOOTLOADERS_OPTS="--bootloaders syslinux,grub-efi"
-    BOOTAPPEND="boot=live components noeject plymouth.enable=0 modprobe.blacklist=nouveau nouveau.modeset=0 bty.mode=interactive bty.version=__BTY_VERSION__"
+    BOOTAPPEND="boot=live components noeject plymouth.enable=0 modprobe.blacklist=nouveau nouveau.modeset=0 bty.version=__BTY_VERSION__"
 else
     BINARY_IMAGES=netboot
     BOOTLOADERS_OPTS=""
-    # ``plymouth.enable=0`` is belt-and-braces in case a future
-    # change pulls plymouth in transitively; with the package
-    # absent it's a no-op.
-    # ``modprobe.blacklist=nouveau nouveau.modeset=0`` keep the
-    # in-tree Nvidia driver from binding -- nouveau stalls early
-    # boot 10-60s on Maxwell/Pascal/Turing cards probing for
-    # firmware bty doesn't need.
+    # The PXE-flash chain (server's ipxe_flash.j2 / ipxe_tui.j2)
+    # appends ``bty.server=...`` + ``bty.mac=...`` per-client at
+    # render time, so the chroot's static bootappend doesn't carry
+    # them.
     BOOTAPPEND="boot=live components plymouth.enable=0 modprobe.blacklist=nouveau nouveau.modeset=0 bty.version=__BTY_VERSION__"
-    # Deactivate the plymouth package list for the netboot bake.
-    rm -f "${PLYMOUTH_DST}"
 fi
 
 # shellcheck disable=SC2086 # BOOTLOADERS_OPTS is intentionally word-split
