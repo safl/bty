@@ -11,7 +11,7 @@ gzip - all of them) onto a target disk.
 Why gzip rather than zstd: bty-shipped appliance images are
 flashed once during operator setup, not on a per-job CI hot
 path. zstd's flash-time decompression-speed advantage matters
-for operator-supplied target images (which the bty flash code
+for operator-supplied target images (which :mod:`bty.flash`
 still accepts in any of .img.{zst,xz,gz,bz2}); for the
 appliance itself, gzip's universal flasher / OS / tooling
 support wins over zstd's marginal speed advantage on a one-

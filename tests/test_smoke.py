@@ -47,6 +47,29 @@ def test_bty_main_handles_missing_extras(
     assert "bty-lab[tui]" in err
 
 
+def test_bty_web_main_handles_missing_extras(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A bare ``pipx install bty-lab`` (no ``[web]`` extra) must
+    produce a clear hint when ``bty-web`` is invoked, not a raw
+    ``ModuleNotFoundError``. Symmetric with the ``bty`` test above.
+
+    Simulated by poisoning the deferred-import targets so the
+    ``import uvicorn`` / ``from bty.web._app import create_app``
+    inside ``main()`` fails.
+    """
+    monkeypatch.setitem(sys.modules, "uvicorn", None)
+
+    import bty.web as web_mod
+
+    with pytest.raises(SystemExit) as excinfo:
+        web_mod.main([])
+
+    assert excinfo.value.code == 1
+    err = capsys.readouterr().err
+    assert "bty-lab[web]" in err
+
+
 def test_bty_main_version_flag(capsys: pytest.CaptureFixture[str]) -> None:
     """``bty --version`` exits 0 with ``bty <version>`` on stdout."""
     import bty.tui as tui_mod
@@ -71,6 +94,56 @@ def test_bty_web_main_version_flag(capsys: pytest.CaptureFixture[str]) -> None:
     out = capsys.readouterr().out
     assert out.startswith("bty-web ")
     assert bty.__version__ in out
+
+
+def test_resolve_secret_key_env_wins(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """``BTY_SESSION_SECRET`` takes precedence over any on-disk file."""
+    from bty.web import _resolve_secret_key
+
+    secret_file = tmp_path / "session-secret"
+    secret_file.write_text("from-disk\n", encoding="utf-8")
+    monkeypatch.setenv("BTY_SESSION_SECRET", "from-env")
+
+    assert _resolve_secret_key(tmp_path) == "from-env"
+
+
+def test_resolve_secret_key_reads_existing_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Without env override, the persisted secret is reused so the
+    appliance survives a bty-web restart without invalidating
+    every operator's session cookie."""
+    from bty.web import _resolve_secret_key
+
+    monkeypatch.delenv("BTY_SESSION_SECRET", raising=False)
+    secret_file = tmp_path / "session-secret"
+    # Trailing whitespace must be stripped -- bty-web-init writes
+    # ``key + "\n"`` so file-round-trip cycles add one.
+    secret_file.write_text("persisted-key\n", encoding="utf-8")
+
+    assert _resolve_secret_key(tmp_path) == "persisted-key"
+
+
+def test_resolve_secret_key_generates_and_persists(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Fresh ``state_dir`` (no env, no file): generate a key,
+    write it with mode 0640, return it. Second call must read
+    the same value back (idempotent across restarts)."""
+    from bty.web import _resolve_secret_key
+
+    monkeypatch.delenv("BTY_SESSION_SECRET", raising=False)
+    fresh = tmp_path / "new-state"
+    assert not fresh.exists()
+
+    first = _resolve_secret_key(fresh)
+    assert first  # non-empty
+    secret_file = fresh / "session-secret"
+    assert secret_file.exists()
+    assert secret_file.stat().st_mode & 0o777 == 0o640
+
+    second = _resolve_secret_key(fresh)
+    assert second == first
 
 
 def test_server_cloudinit_base_is_valid_yaml() -> None:

@@ -49,8 +49,8 @@ IMAGE_NAME = f"bty-{VARIANT}-arm64"
 # Apt packages installed inside the arm64 chroot. Kept minimal:
 # python3-venv for the bty-web venv, dnsmasq for TFTP (bty doesn't
 # do DHCP), ipxe for the kpxe / efi binaries served via TFTP,
-# qemu-utils for ``qemu-img`` (used by ``bty inspect`` /
-# ``bty flash``), zstd for image-decompression on-target.
+# qemu-utils for ``qemu-img`` (used by the ``bty`` wizard's image
+# probe + flash pipeline), zstd for image-decompression on-target.
 APT_PACKAGES = (
     "python3-venv",
     "python3-pip",
@@ -133,7 +133,7 @@ def main(args, cijoe):
     # images use .gz for universal flasher compat (see
     # ``feedback_verify_flasher_compat`` memory note); operator-
     # supplied images are still accepted in any of
-    # .img.{zst,xz,gz,bz2} via the bty flash code.
+    # .img.{zst,xz,gz,bz2} via :mod:`bty.flash`.
     log.info(f"Compressing {raw_path} -> {gz_path} (gzip -{gzip_level})")
     if gz_path.exists():
         gz_path.unlink()
