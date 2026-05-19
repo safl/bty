@@ -6,8 +6,8 @@ attached for display. Two sources feed the catalog:
 
 1. **Directory scan**: files under `BTY_IMAGE_ROOT` (default
    `/var/lib/bty/images`). A `<file>.sha256` sidecar carries the
-   hash; `bty-web` (or the CLI) computes and writes one on first
-   access.
+   hash; `bty-web` (or `bty` when it touches an unhashed image)
+   computes and writes one on first access.
 2. **Manifest**: a TOML file at `BTY_CATALOG_FILE` (default
    `${BTY_STATE_DIR}/catalog.toml`) listing named entries with
    upstream `src` URLs and pinned `sha256` digests. Entries are

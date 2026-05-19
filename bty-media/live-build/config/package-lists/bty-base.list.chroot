@@ -150,9 +150,9 @@ linux-headers-amd64
 # NetworkManager pulls in ``nmtui`` (a curses-friendly network picker)
 # and the daemon that backs it. Use case: operator boots bty-usb on
 # a WiFi-only laptop / mini-PC and needs to associate to an SSID
-# before the TUI can hit ``oras://`` image URLs. Drops to tty2 with
-# Ctrl+Alt+F2, runs ``nmtui``, joins the network, returns to the bty
-# TUI on tty1. The live env has no networkd ``.network`` files in
+# before ``bty`` can hit ``oras://`` image URLs. Drops to tty2 with
+# Ctrl+Alt+F2, runs ``nmtui``, joins the network, returns to ``bty``
+# on tty1. The live env has no networkd ``.network`` files in
 # its chroot (those live in ``rootfs/server/`` and only ship in the
 # server appliance), so NM is the sole network manager here and
 # nothing competes for interface ownership.

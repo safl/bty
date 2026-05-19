@@ -3,13 +3,13 @@
 Replayable scripts for recording the terminal walkthroughs that ship
 with the bty docs. Each script either runs end-to-end (canned) or
 documents the live keystrokes the operator should make (interactive
-flows that can't be canned, like the TUI).
+flows that can't be canned, like the `bty` wizard itself).
 
 Why scripts instead of one-off captures? **Reproducibility.** When
-the CLI surface changes (new flag, renamed subcommand, different
-output shape), the recordings go stale. Re-record by replaying the
-script under `asciinema rec`; you don't have to remember what to
-type.
+the CLI surface changes (new flag, different output shape, new
+prompt copy in the wizard), the recordings go stale. Re-record by
+replaying the script under `asciinema rec`; you don't have to
+remember what to type.
 
 ## Recording
 

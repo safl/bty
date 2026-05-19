@@ -13,11 +13,11 @@ cover the validation logic:
   post-flash provisioning step -- first-boot bring-up belongs in
   the image builder (cloud-init / NoCloud); bty only writes bytes.
 
-The CLI calls all four. Tests construct ``ImageInfo`` / ``TargetInfo``
-directly and exercise ``make_plan`` / ``validate_plan`` without mocks.
-The probe and write functions have their own targeted tests for the
-subprocess-shelling-out parts; integration tests against a real
-loop device live in ``tests/test_flash_integration.py``.
+The ``bty`` wizard calls all four. Tests construct ``ImageInfo`` /
+``TargetInfo`` directly and exercise ``make_plan`` / ``validate_plan``
+without mocks. The probe and write functions have their own targeted
+tests for the subprocess-shelling-out parts; integration tests against
+a real loop device live in ``tests/test_flash_integration.py``.
 """
 
 from __future__ import annotations
@@ -70,13 +70,13 @@ class FlashProgress:
     - ``subprocess_log``    - one line of stderr from an auxiliary
       pipeline subprocess (``zstd`` / ``gzip`` / ``xz`` / ``bzip2`` /
       ``curl``). ``note`` is the line, already prefixed with the
-      source label (e.g. ``"zstd: ..."``). Consumers in a TUI render
-      these above their progress widget; CLI consumers can ignore
-      them (the subprocess's stderr is already inherited in CLI
-      mode). Live updates that use carriage-return-only refresh
-      (curl/zstd's own progress bars) don't show up live -- the
-      pump reads newline-terminated lines, so only the final
-      newline-terminated message lands here. That keeps the
+      source label (e.g. ``"zstd: ..."``). The ``bty`` wizard renders
+      these above its progress widget; callers without a progress
+      callback can ignore them (the subprocess's stderr is already
+      inherited in that mode). Live updates that use carriage-return-
+      only refresh (curl/zstd's own progress bars) don't show up
+      live -- the pump reads newline-terminated lines, so only the
+      final newline-terminated message lands here. That keeps the
       Rich progress bar uncluttered while still surfacing real
       errors + end-of-run stats.
 

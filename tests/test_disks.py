@@ -132,3 +132,23 @@ def test_list_disks_empty_when_no_devices() -> None:
     with patch("bty.disks.subprocess.run", return_value=_mock_lsblk({"blockdevices": []})):
         rows = disks.list_disks()
     assert rows == []
+
+
+def test_list_disks_bounds_lsblk_with_timeout() -> None:
+    """``list_disks`` runs ``lsblk`` under a finite timeout so a
+    stuck IO subsystem (failing disk, slow udev) can't hang the
+    wizard indefinitely. Pin the bound so a future "drop the
+    timeout for simplicity" edit fails CI rather than reaching
+    operator hardware where it'd manifest as a frozen TUI."""
+    with patch("bty.disks.subprocess.run") as run:
+        run.return_value = _mock_lsblk({"blockdevices": []})
+        disks.list_disks()
+    assert run.call_count == 1
+    kwargs = run.call_args.kwargs
+    assert "timeout" in kwargs, "subprocess.run must pass a timeout=N"
+    assert isinstance(kwargs["timeout"], int | float), (
+        f"timeout must be numeric, got {type(kwargs['timeout']).__name__}"
+    )
+    assert 0 < kwargs["timeout"] <= 30, (
+        f"lsblk timeout out of plausible range: {kwargs['timeout']}s"
+    )

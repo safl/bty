@@ -31,8 +31,8 @@
 #
 # - Network failures on the operator's side at runtime. We can
 #   only assert "bake had connectivity"; the runtime is on the
-#   operator's network. Surface as a sticky error in the TUI's
-#   ``--catalog`` flow instead.
+#   operator's network. Surface as a sticky error in the ``bty``
+#   wizard's ``--catalog`` flow instead.
 # - Per-Architecture mirror skew (we only build amd64, so any
 #   mirror that's missing amd64 indices is a hard fail anyway).
 #
@@ -76,7 +76,7 @@ apt-cache policy | head -40 || true
 # Catches the case where ``update-ca-certificates`` failed silently
 # during ca-certificates' postinst, leaving the bundle empty (which
 # would let HTTP work but break every HTTPS handshake in the live
-# env -- the exact symptom the operator describes when the TUI's
+# env -- the exact symptom the operator describes when ``bty``'s
 # oras catalog fetch errors with "[SSL: CERTIFICATE_VERIFY_FAILED]"
 # even though lynx accesses github.com fine).
 BUNDLE=/etc/ssl/certs/ca-certificates.crt
