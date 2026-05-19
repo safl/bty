@@ -673,7 +673,7 @@ class BtyTui:
         # text so downstream observers (test scripts, BMC serial-log
         # tailers, operators inspecting journalctl) can detect that
         # bty entered auto-flash mode rather than the wizard.
-        print("bty: auto-flash starting", file=sys.stderr, flush=True)
+        _emit_console_marker("bty: auto-flash starting")
 
         # Pre-fill wizard state from plan-fetched values. ``--image``
         # accepts a path or URL; ``_TuiImage`` keys differ.
@@ -784,7 +784,7 @@ class BtyTui:
         # vary across terminal widths; this plain-text line is the
         # contract downstream observers (test scripts, CI dashboards,
         # operators tailing the BMC serial log) can pin against.
-        print("bty: flash complete; rebooting", file=sys.stderr, flush=True)
+        _emit_console_marker("bty: flash complete; rebooting")
 
         # Always reboot on success -- auto-mode exists for the
         # unattended netboot flow where reboot is the whole point.
@@ -1725,6 +1725,30 @@ def _format_progress_bytes(written: int | None, total: int | None) -> str:
     w = _format_mib(written) if written is not None else "?"
     t = _format_mib(total) if total is not None else "?"
     return f"{w} / {t}"
+
+
+def _emit_console_marker(line: str) -> None:
+    """Write a chain-test marker line to the kernel console.
+
+    The PXE chain test (cijoe/configs/test-pxe.toml) reads the
+    client VM's QEMU serial log -- which is whatever the kernel
+    cmdline names with ``console=ttyS0,115200``. The bty live env
+    aliases that as ``/dev/console``. Writing to /dev/console
+    reaches the chain-test observer; writing only to stderr would
+    stay on /dev/tty1 because bty-tui-on-tty1.service routes
+    ``StandardError=tty`` -> ``TTYPath=/dev/tty1``.
+
+    Also mirrors to stderr so an operator running ``bty`` on a
+    workstation (no /dev/console as a writable kernel console)
+    still sees the marker. Both writes are best-effort: if
+    /dev/console is missing or unwritable (workstation runs
+    under a non-root user, sandboxed test) we just skip the
+    console write and rely on stderr.
+    """
+    print(line, file=sys.stderr, flush=True)
+    with contextlib.suppress(OSError), open("/dev/console", "w") as console:
+        console.write(line + "\n")
+        console.flush()
 
 
 __all__ = [
