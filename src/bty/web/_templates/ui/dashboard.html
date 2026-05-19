@@ -34,6 +34,39 @@
     {% include "ui/_dashboard_counts.html" %}
 </div>
 
+{# Sanity checklist. One row per essential condition for PXE +
+   flash to actually work; each row carries a clear green-check /
+   red-cross indicator + a deep link into the page where the
+   condition lives (and, on failure, a "fix it" action). Static
+   at render time; reload to refresh. #}
+<div class="card mb-3">
+    <div class="card-header bg-light fw-semibold d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-clipboard-check me-1"></i>Sanity checklist</span>
+        {% set _ok = sanity | selectattr("ok") | list | length %}
+        <span class="text-muted small">{{ _ok }} / {{ sanity | length }} ready</span>
+    </div>
+    <ul class="list-group list-group-flush">
+        {% for s in sanity %}
+        <li class="list-group-item d-flex align-items-center">
+            {% if s.ok %}
+            <i class="bi bi-check-circle-fill text-success fs-5 me-3" aria-label="ok"></i>
+            {% else %}
+            <i class="bi bi-x-circle-fill text-danger fs-5 me-3" aria-label="missing"></i>
+            {% endif %}
+            <div class="flex-grow-1">
+                <a href="{{ s.href }}" class="fw-semibold text-decoration-none">{{ s.label }}</a>
+                <div class="text-muted small">{{ s.detail }}</div>
+            </div>
+            {% if not s.ok %}
+            <a href="{{ s.fix_href }}" class="btn btn-sm btn-outline-primary ms-3 flex-shrink-0">
+                <i class="bi bi-arrow-right-circle me-1"></i>{{ s.fix_label }}
+            </a>
+            {% endif %}
+        </li>
+        {% endfor %}
+    </ul>
+</div>
+
 {# Recent activity slice -- reuses the per-subject events card.
    Static at request time (reload to refresh); the live SSE
    stream is wired to the counters above, not here. #}

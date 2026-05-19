@@ -204,6 +204,7 @@ def register_ui_routes(
             discovered_count = conn.execute(
                 "SELECT COUNT(*) FROM machines WHERE bty_image_ref IS NULL"
             ).fetchone()[0]
+            catalog_entry_count = conn.execute("SELECT COUNT(*) FROM catalog_entries").fetchone()[0]
             # Recent activity slice for the dashboard's "what just
             # happened?" widget. Reuses ``_events_card.html`` so the
             # styling matches the per-machine and per-image cards;
@@ -211,6 +212,58 @@ def register_ui_routes(
             # update) so a reload is the refresh gesture.
             recent_events = _events_log.list_events(conn, limit=10)
         image_count = len(bty_images.list_images(image_root))
+        # Sanity checklist: the handful of conditions that need to
+        # be true for PXE + flash to actually work. Operators landing
+        # on the dashboard get a one-glance status of "is this
+        # appliance ready to do its job", each row linking at the
+        # remediation page if the answer is no.
+        missing_netboot = _releases.missing_netboot_artifacts(boot_root)
+        tftp = _sysconfig.tftp_status()
+        tftp_controllable = _sysconfig.tftp_controllable()
+        sanity = [
+            {
+                "label": "Netboot artefacts present",
+                "ok": not missing_netboot,
+                "detail": (
+                    f"All four files under {boot_root}."
+                    if not missing_netboot
+                    else f"Missing: {', '.join(missing_netboot)}"
+                ),
+                "href": "/ui/boot",
+                "fix_href": "/ui/boot?section=fetch",
+                "fix_label": "Fetch netboot artifacts",
+            },
+            {
+                "label": "Catalog is non-empty",
+                "ok": catalog_entry_count > 0 or image_count > 0,
+                "detail": (
+                    f"{catalog_entry_count} catalog entries, {image_count} local images."
+                    if catalog_entry_count > 0 or image_count > 0
+                    else "No catalog entries and no local images."
+                ),
+                "href": "/ui/images",
+                "fix_href": "/ui/images?section=fetch",
+                "fix_label": "Fetch catalog",
+            },
+            {
+                "label": "TFTP daemon running",
+                "ok": tftp.is_active,
+                "detail": (
+                    f"dnsmasq.service is {tftp.state}."
+                    if tftp_controllable or tftp.state == "active"
+                    else (
+                        f"dnsmasq.service is {tftp.state} "
+                        "(no daemon helper here -- the container "
+                        "or operator owns the lifecycle)."
+                    )
+                ),
+                "href": "/ui/boot?section=tftp",
+                # The control buttons live on the TFTP section
+                # itself; "fix" is the same as "view".
+                "fix_href": "/ui/boot?section=tftp",
+                "fix_label": "TFTP controls",
+            },
+        ]
         return render(
             "ui/dashboard.html",
             request,
@@ -218,6 +271,7 @@ def register_ui_routes(
             discovered_count=discovered_count,
             image_count=image_count,
             recent_events=recent_events,
+            sanity=sanity,
         )
 
     @app.get(
