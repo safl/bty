@@ -668,7 +668,14 @@ class BtyTui:
         assert self._auto_image is not None
         assert self._auto_target_disk_serial is not None
 
-        # Pre-fill wizard state from cmdline args. ``--image``
+        # Stable serial-console marker for the PXE chain test
+        # (cijoe/configs/test-pxe.toml chain_markers). Pinned plain-
+        # text so downstream observers (test scripts, BMC serial-log
+        # tailers, operators inspecting journalctl) can detect that
+        # bty entered auto-flash mode rather than the wizard.
+        print("bty: auto-flash starting", file=sys.stderr, flush=True)
+
+        # Pre-fill wizard state from plan-fetched values. ``--image``
         # accepts a path or URL; ``_TuiImage`` keys differ.
         image_arg = self._auto_image
         if "://" in image_arg:
@@ -771,6 +778,13 @@ class BtyTui:
         if self._state.pxe_done_base and self._state.mac:
             with contextlib.suppress(urllib.error.URLError, OSError, TimeoutError):
                 post_pxe_done(self._state.pxe_done_base, self._state.mac)
+
+        # Stable serial-console marker for the PXE chain test
+        # (cijoe/configs/test-pxe.toml chain_markers). Rich Panels
+        # vary across terminal widths; this plain-text line is the
+        # contract downstream observers (test scripts, CI dashboards,
+        # operators tailing the BMC serial log) can pin against.
+        print("bty: flash complete; rebooting", file=sys.stderr, flush=True)
 
         # Always reboot on success -- auto-mode exists for the
         # unattended netboot flow where reboot is the whole point.

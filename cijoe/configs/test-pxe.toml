@@ -84,13 +84,22 @@ needle = "bty-netboot-x86_64.initrd"
 key = "squashfs-fetched"
 needle = "bty-netboot-x86_64.squashfs"
 
+# v0.22.11+: bty (the merged TUI / wizard / scripted-flash tool)
+# emits these stable plain-text markers on its stderr from inside
+# the live env. Earlier releases used the now-retired
+# ``bty-flash-on-boot.service`` and matched ``bty-flash-on-boot``
+# in the journalctl banner; both moved into ``bty`` directly when
+# v0.22.10 collapsed the two units. The markers are pinned in
+# ``bty.tui._app._run_auto``: a chain-test failure means the
+# auto-flash path didn't fire, not that the print format drifted.
 [[test.pxe.chain_markers]]
-key = "flash-on-boot-running"
-needle = "bty-flash-on-boot"
+key = "auto-flash-started"
+needle = "bty: auto-flash starting"
 
-# Printed by bty-flash-on-boot only after ``bty flash --yes`` has
-# returned 0; proves the dummy image landed on /dev/vda and the
-# completion-signal/reboot path is reachable.
+# Printed by ``bty`` only after the flash subprocess returned 0
+# AND the /pxe/<mac>/done POST has been attempted; proves the
+# dummy image landed on /dev/vda and the completion-signal /
+# reboot path is reachable.
 [[test.pxe.chain_markers]]
 key = "flash-complete"
-needle = "flash complete; rebooting"
+needle = "bty: flash complete; rebooting"
