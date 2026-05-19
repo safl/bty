@@ -304,14 +304,15 @@ def test_top_level_nav_highlights_active_page(client: TestClient) -> None:
 
     _login(client)
     page_to_nav_key = {
-        "/ui/dashboard": "/ui/dashboard",
+        # /ui/dashboard's highlight lives on the brand pill, not in
+        # the nav-btn cluster -- tested separately below.
         "/ui/machines": "/ui/machines",
         "/ui/images": "/ui/images",
         "/ui/boot": "/ui/boot",
         "/ui/events": "/ui/events",
-        # /ui/settings is no longer in the top nav; it sits behind
-        # the user-bar's gear icon. Its highlight is tested via the
-        # ``user-bar-action active`` class instead (see below).
+        # /ui/settings sits behind the user-bar gear icon; its
+        # highlight uses the ``user-bar-action active`` class
+        # (also tested below).
     }
     for path, expected_href in page_to_nav_key.items():
         body = client.get(path).text
@@ -323,6 +324,12 @@ def test_top_level_nav_highlights_active_page(client: TestClient) -> None:
         assert actives == [expected_href], (
             f"{path}: expected top-bar nav to highlight {expected_href!r} only, got {actives!r}"
         )
+    # /ui/dashboard's brand pill carries the active state.
+    body = client.get("/ui/dashboard").text
+    assert "brand-active" in body, (
+        "/ui/dashboard should mark the BTY brand pill as active "
+        "(the brand doubles as the dashboard nav link)"
+    )
     # /ui/settings retains its highlight via the user-bar gear button.
     body = client.get("/ui/settings").text
     assert 'class="user-bar-action active"' in body or 'class="user-bar-action  active"' in body, (

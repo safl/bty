@@ -16,6 +16,16 @@
             height: 3px;
             background: linear-gradient(90deg, #0d6efd 0%, #6610f2 50%, #d63384 100%);
         }
+        /* When ``nav_active='dashboard'``, give the brand a subtle
+           highlight so the operator sees "you are on the
+           dashboard" -- the brand pill doubles as the Dashboard
+           nav link, so it carries the active state. */
+        .navbar-brand.brand-active {
+            background-color: rgba(13, 110, 253, 0.85);
+            border-radius: 0.5rem;
+            padding-left: 0.6rem;
+            padding-right: 0.6rem;
+        }
         .navbar-brand .brand-icon {
             /* The bty bat mascot, used in place of a Bootstrap icon
                so the brand pill reads as "this product" rather than
@@ -209,21 +219,21 @@
 <div class="bty-accent"></div>
 <nav class="navbar navbar-expand-md bg-dark navbar-dark py-2">
     <div class="container">
-        {# Logo + ``BTY`` + version sit top-left -- the conventional
-           anchor for brand + click-to-home in admin UIs (Slack /
-           GitHub / Linear / Datadog all do this). Keeps the
-           identity-cluster (who's logged in, gear, logout) on the
-           right where action surfaces typically live. #}
-        <a class="navbar-brand fw-semibold" href="/ui/dashboard">
+        {# Logo + ``BTY`` + version sit top-left and double as the
+           click-to-dashboard link -- the conventional anchor for
+           brand + home in admin UIs (Slack / GitHub / Linear /
+           Datadog all do this). The active highlight on the brand
+           when nav_active=='dashboard' is what tells the operator
+           "you ARE on the dashboard" -- a separate "Dashboard"
+           pill would just duplicate the brand's click target. #}
+        <a class="navbar-brand fw-semibold {% if nav_active == 'dashboard' %}brand-active{% endif %}"
+           href="/ui/dashboard">
             <img src="/static/bty-favicon.png" alt="bty mascot" class="brand-icon me-1">BTY
             <span class="badge bg-secondary fw-normal ms-1">{{ version }}</span>
         </a>
         {% if logged_in %}
         <div class="d-flex flex-grow-1 align-items-center flex-wrap">
             <div class="me-auto d-flex flex-wrap">
-                <a class="nav-btn {% if nav_active == 'dashboard' %}active{% endif %}" href="/ui/dashboard">
-                    <i class="bi bi-speedometer2"></i>Dashboard
-                </a>
                 <a class="nav-btn {% if nav_active == 'machines' %}active{% endif %}" href="/ui/machines">
                     <i class="bi bi-pc-display"></i>Machines
                 </a>
