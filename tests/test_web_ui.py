@@ -291,6 +291,64 @@ def test_ui_images_section_fetch_shows_one_button_form(client: TestClient) -> No
     assert 'id="image_url"' not in body
 
 
+def test_subnav_renders_aria_current_on_active_section(client: TestClient) -> None:
+    """The sub-nav partial annotates the active pill with
+    ``aria-current="page"`` so assistive tech announces which
+    sub-section is currently visible. Same contract across every
+    /ui page that uses the strip (images / boot / machines).
+    """
+    import re
+
+    _login(client)
+
+    def _aria_current_hrefs(body: str) -> list[str]:
+        """Return the ``href`` of every <a> element bearing
+        ``aria-current="page"``. Tolerant of attribute order +
+        whitespace -- Jinja can emit either ``href=... aria-current=
+        ...`` or ``aria-current=... href=...`` depending on
+        formatting changes."""
+        out: list[str] = []
+        for m in re.finditer(
+            r'<a\b[^>]*\baria-current="page"[^>]*>',
+            body,
+            flags=re.DOTALL,
+        ):
+            href = re.search(r'\bhref="([^"]+)"', m.group(0))
+            if href:
+                out.append(href.group(1))
+        # Also catch the swapped ordering (href first, aria-current
+        # later) -- the regex above already handles both because
+        # ``[^>]*`` spans everything between < and the matched marker.
+        return out
+
+    # Default list view: exactly one active pill, pointing at /ui/images.
+    body = client.get("/ui/images").text
+    actives = _aria_current_hrefs(body)
+    assert actives == ["/ui/images"], (
+        f"images default view: expected aria-current on /ui/images only, got {actives!r}"
+    )
+
+    # ?section=fetch: exactly one active pill, pointing at the fetch URL.
+    body = client.get("/ui/images?section=fetch").text
+    actives = _aria_current_hrefs(body)
+    assert actives == ["/ui/images?section=fetch"], (
+        f"images fetch view: expected aria-current on the fetch href only, got {actives!r}"
+    )
+    # Top-level <nav> carries an aria-label so screen readers
+    # distinguish the section sub-nav from the top-bar nav.
+    assert 'aria-label="Section sub-navigation"' in body
+
+    # /ui/boot list view: List pill is active.
+    body = client.get("/ui/boot").text
+    actives = _aria_current_hrefs(body)
+    assert actives == ["/ui/boot"]
+
+    # /ui/machines list view: List pill is active.
+    body = client.get("/ui/machines").text
+    actives = _aria_current_hrefs(body)
+    assert actives == ["/ui/machines"]
+
+
 def test_ui_images_section_unrecognised_falls_back_to_list(client: TestClient) -> None:
     """A bookmark / typo / scripted call with a bogus section value
     must NOT 500 the page. Server clamps to the default list

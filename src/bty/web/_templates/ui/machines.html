@@ -21,7 +21,7 @@
 {% with sections=[
     {"key": "list", "label": "List",        "icon": "list-ul",     "href": "/ui/machines"},
     {"key": "add",  "label": "Add by MAC",  "icon": "plus-circle", "href": "/ui/machines?section=add"},
-] %}
+] , active=section %}
 {% include "ui/_subnav.html" %}
 {% endwith %}
 

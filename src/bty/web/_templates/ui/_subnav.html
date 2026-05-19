@@ -11,13 +11,18 @@
    The default-key section (the one with section == "" or section == "list")
    is reached by visiting the page without ?section= -- so refreshing the
    default view stays on the default view.
+
+   Accessibility: ``aria-label`` on the <nav> labels the strip for
+   screen readers; ``aria-current="page"`` on the active <a> tells
+   assistive tech which sub-section is currently visible.
 #}
-<nav class="mb-3">
+<nav class="mb-3" aria-label="Section sub-navigation">
     <ul class="nav nav-pills">
         {% for s in sections %}
         <li class="nav-item">
             <a class="nav-link{% if s.key == active %} active{% endif %}"
-               href="{{ s.href }}">
+               href="{{ s.href }}"
+               {% if s.key == active %}aria-current="page"{% endif %}>
                 {% if s.icon %}<i class="bi bi-{{ s.icon }} me-1"></i>{% endif %}{{ s.label }}
             </a>
         </li>

@@ -9,7 +9,7 @@
 {% with sections=[
     {"key": "list",  "label": "List",                "icon": "list-ul",        "href": "/ui/boot"},
     {"key": "fetch", "label": "Fetch latest release", "icon": "cloud-download", "href": "/ui/boot?section=fetch"},
-] %}
+] , active=section %}
 {% include "ui/_subnav.html" %}
 {% endwith %}
 
