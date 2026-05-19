@@ -833,16 +833,30 @@ class BtyTui:
         # / BMC virtual-console widths, without ever wrapping when
         # the terminal is at the 80-col floor. Pure ASCII; renders
         # identically on framebuffer / SSH / serial.
+        #
+        # Two-tone styling: wings + decoration in PRIMARY (blue),
+        # the ``bty vX.Y.Z`` heart in ACCENT (yellow) so the version
+        # pops without dominating. Rich degrades each style
+        # independently -- on a 16-colour framebuffer the named
+        # ANSI colours map cleanly; on a monochrome / NO_COLOR
+        # terminal both flatten to plain text and the ASCII
+        # geometry still reads.
         labels = ("Image", "Disk", "Flash", "Reboot")
         banner_width = 79
         left_wing = "+- -- ---"
         right_wing = "--- -- -+"
-        core = f"={{[| bty v{bty.__version__} |]}}="
+        version_text = f"bty v{bty.__version__}"
+        # core plain-text width drives filler arithmetic; the styled
+        # version below splits the same chars into three Rich blocks.
+        core = f"={{[| {version_text} |]}}="
         filler_total = max(0, banner_width - (len(left_wing) + len(core) + len(right_wing)))
         left_filler = "-" * (filler_total // 2)
         right_filler = "-" * (filler_total - filler_total // 2)
-        banner = f"{left_wing}{left_filler}{core}{right_filler}{right_wing}"
-        self._console.print(f"[bold]{banner}[/]")
+        self._console.print(
+            f"[bold {_PRIMARY}]{left_wing}{left_filler}={{[| [/]"
+            f"[bold {_ACCENT}]{version_text}[/]"
+            f"[bold {_PRIMARY}] |]}}={right_filler}{right_wing}[/]"
+        )
         self._console.print()
         crumb_parts = []
         for n, label in enumerate(labels, start=1):
