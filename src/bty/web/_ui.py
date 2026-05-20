@@ -942,27 +942,32 @@ def register_ui_routes(
         )
 
     @app.post(
-        "/ui/events/{event_id}/ack",
+        "/ui/events/acknowledge",
         include_in_schema=False,
         dependencies=[Depends(require_ui_auth)],
     )
-    def ui_event_ack(
-        event_id: int,
-        failed: Annotated[str, Form()] = "",
-    ) -> RedirectResponse:
-        """Mark one event acknowledged, then bounce back to the list.
+    def ui_events_acknowledge(
+        ids: Annotated[list[int], Form()] = [],  # noqa: B006 (FastAPI form-list default)
+        acknowledged: Annotated[str, Form()] = "1",
+    ) -> dict[str, Any]:
+        """Set the acknowledged flag on one or more events. Drives both
+        the per-row toggle (one id) and the bulk Acknowledge / Clear
+        buttons (the checked ids). ``acknowledged`` is "1" to
+        acknowledge, "0" to clear (un-acknowledge).
 
         Acknowledging a failure clears it from the dashboard Health
-        Monitoring tripwire (which counts only unacknowledged
-        failures) without deleting the audit row. ``failed`` carries
-        the failures-only filter through the round-trip so an operator
-        working the error view stays on it after each ack.
+        Monitoring tripwire (which counts only unacknowledged failures)
+        without deleting the audit row; clearing puts it back. Returns
+        the number of rows updated; the page reloads itself via JS.
         """
+        value = acknowledged not in ("0", "false", "")
+        updated = 0
         with _db.open_db(state_path) as conn:
-            _events_log.acknowledge_event(conn, event_id)
+            for event_id in ids:
+                if _events_log.set_acknowledged(conn, event_id, value):
+                    updated += 1
             conn.commit()
-        target = "/ui/events?failed=1" if failed else "/ui/events"
-        return RedirectResponse(target, status_code=status.HTTP_303_SEE_OTHER)
+        return {"updated": updated, "acknowledged": value}
 
     # ----- settings -------------------------------------------------------
 

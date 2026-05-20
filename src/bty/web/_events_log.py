@@ -314,15 +314,22 @@ def _row_to_event(row: sqlite3.Row) -> Event:
     )
 
 
-def acknowledge_event(conn: sqlite3.Connection, event_id: int) -> bool:
-    """Mark one event acknowledged. Returns ``True`` iff a row changed.
-
-    Caller owns the transaction (mirrors :func:`record`): this does
-    not ``commit`` so the ack can batch with surrounding work; the
-    ``open_db`` with-block flushes it otherwise.
-    """
-    cur = conn.execute("UPDATE events SET acknowledged = 1 WHERE id = ?", (event_id,))
+def set_acknowledged(conn: sqlite3.Connection, event_id: int, value: bool) -> bool:
+    """Set one event's acknowledged flag. ``value=True`` acknowledges,
+    ``value=False`` clears it (un-acknowledges). Returns ``True`` iff a
+    row matched. Caller owns the transaction (mirrors :func:`record`)."""
+    cur = conn.execute(
+        "UPDATE events SET acknowledged = ? WHERE id = ?",
+        (1 if value else 0, event_id),
+    )
     return cur.rowcount > 0
+
+
+def acknowledge_event(conn: sqlite3.Connection, event_id: int) -> bool:
+    """Mark one event acknowledged. Thin wrapper over
+    :func:`set_acknowledged` kept for the JSON ``/events/{id}/ack``
+    endpoint and existing callers."""
+    return set_acknowledged(conn, event_id, True)
 
 
 def count_unacknowledged_failures(conn: sqlite3.Connection) -> int:

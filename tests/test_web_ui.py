@@ -1887,37 +1887,58 @@ def test_unacknowledged_failure_trips_health_then_ack_clears_it(
 ) -> None:
     """An unacknowledged failure shows on the dashboard Health
     Monitoring as a not-OK 'No unacknowledged errors' row;
-    acknowledging it via the UI form route returns the row to green.
+    acknowledging it via the bulk endpoint returns the row to green,
+    and clearing it (acknowledged=0) trips the row again.
     """
     _login(client)
     eid = _seed_failed_event(client, monkeypatch, "v0.0.2")
     body = client.get("/ui/dashboard").text
     assert "unacknowledged failure" in body  # the not-OK detail text
     r = client.post(
-        f"/ui/events/{eid}/ack",
-        data={"failed": "1"},
+        "/ui/events/acknowledge",
+        data={"ids": str(eid), "acknowledged": "1"},
         cookies=AUTH,
-        follow_redirects=False,
     )
-    assert r.status_code == 303
-    assert r.headers["location"] == "/ui/events?failed=1"
+    assert r.status_code == 200
+    assert r.json() == {"updated": 1, "acknowledged": True}
     body2 = client.get("/ui/dashboard").text
     assert "No unacknowledged failed events." in body2
+    # Clearing the acknowledgement puts the tripwire back.
+    r2 = client.post(
+        "/ui/events/acknowledge",
+        data={"ids": str(eid), "acknowledged": "0"},
+        cookies=AUTH,
+    )
+    assert r2.json() == {"updated": 1, "acknowledged": False}
+    assert "unacknowledged failure" in client.get("/ui/dashboard").text
 
 
-def test_ui_events_renders_ack_control_for_unacknowledged_failure(
+def test_ui_events_list_has_checkboxes_and_bulk_actions(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The /ui/events table shows an Acknowledge form on an
-    unacknowledged failure row, replaced by a tick once acked."""
+    """The /ui/events table shows a per-row select checkbox, a
+    select-all, bulk Acknowledge / Clear buttons, and a per-row toggle
+    that flips Acknowledge -> Clear once acked."""
     _login(client)
     eid = _seed_failed_event(client, monkeypatch, "v0.0.3")
     body = client.get("/ui/events", params={"failed": "1"}, cookies=AUTH).text
-    assert f'action="/ui/events/{eid}/ack"' in body
-    client.post(f"/events/{eid}/ack", cookies=AUTH)
+    # Selection + bulk controls.
+    assert 'id="select-all"' in body
+    assert 'class="form-check-input ev-check"' in body
+    assert 'id="bulk-ack"' in body
+    assert 'id="bulk-clear"' in body
+    # Per-row toggle: unacked -> Acknowledge.
+    assert f'data-id="{eid}" data-ack="1"' in body
+    assert "Acknowledge" in body
+    # Once acked, the per-row toggle becomes Clear.
+    client.post(
+        "/ui/events/acknowledge",
+        data={"ids": str(eid), "acknowledged": "1"},
+        cookies=AUTH,
+    )
     body2 = client.get("/ui/events", params={"failed": "1"}, cookies=AUTH).text
-    assert f'action="/ui/events/{eid}/ack"' not in body2
-    assert "Acknowledged" in body2
+    assert f'data-id="{eid}" data-ack="0"' in body2
+    assert ">Clear" in body2
 
 
 # ---------- cross-cutting: cookie also authenticates the API ----------------
