@@ -7,9 +7,10 @@
 #
 # dnsmasq is the only daemon this helper touches: it owns the
 # TFTP root the appliance hands iPXE binaries from. Operators
-# may want to start / stop / restart it from /ui/settings without
-# SSHing in -- "restart TFTP" is the common triage knob after a
-# new bootfile is dropped into ``/var/lib/tftpboot``.
+# may want to start / stop / restart it from the browser UI's
+# Netboot page (/ui/boot?section=tftp) without SSHing in;
+# "restart TFTP" is the common triage knob after a new bootfile
+# is dropped into ``/var/lib/tftpboot``.
 #
 # Args:
 #   $1  action: ``start`` | ``stop`` | ``restart``

@@ -101,11 +101,10 @@ def missing_netboot_artifacts(boot_dir: Path) -> list[str]:
     manifest doesn't break the chain.
 
     Returns ``[]`` when the netboot env is complete. Callers
-    (the /ui/boot DHCP/PXE cheatsheet warning banner, the
-    dashboard sanity checklist, the PXE activate handler) treat
-    a non-empty return as "warn the operator: activating PXE
-    now would let clients chain into iPXE but they'd 404
-    fetching the kernel".
+    (the /ui/boot DHCP/PXE cheatsheet warning banner and the
+    dashboard sanity checklist) treat a non-empty return as
+    "warn the operator: a PXE client would chain into iPXE but
+    then 404 fetching the kernel until these files are present".
     """
     return [name for name in ARTIFACT_NAMES if not (boot_dir / name).is_file()]
 

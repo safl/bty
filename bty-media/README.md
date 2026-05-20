@@ -214,6 +214,10 @@ hardware. Most operators never run this build pipeline themselves -
   2. Boot. The login prompt's banner shows the browser UI URL.
   3. Log in to `/ui/login` with `bty / bty` (or rotate first via
      `sudo passwd bty` on the appliance).
-  4. From `/ui/settings`, pick the interface + subnet for PXE and
-     click Activate. dnsmasq restarts; PXE clients on that segment
-     will now chain through bty-web.
+  4. Populate the netboot env: on `/ui/boot`, click "Fetch
+     netboot artifacts" to pull the kernel / initrd / squashfs.
+     Then configure your LAN's DHCP server (option 60 "PXEClient"
+     / 66 next-server / 67 bootfile) to point PXE clients at the
+     appliance -- the `/ui/boot?section=dhcp-pxe` cheatsheet has
+     the exact values for your interfaces. bty does not run DHCP
+     itself.
