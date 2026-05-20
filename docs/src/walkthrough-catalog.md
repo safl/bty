@@ -58,9 +58,9 @@ load_source`` raises ``CatalogError`` on parse / schema failure):
 python3 -c 'import sys; from bty import catalog; catalog.load_source(sys.argv[1])' /path/to/catalog.toml
 ```
 
-bty-web also parses the manifest server-side -- uploading via
-`/ui/images?section=upload-manifest` (or `POST /catalog/import?
-source=...`) bounces back with the parse error on a bad manifest
+bty-web also parses the catalog server-side -- uploading via
+`/ui/images?section=upload-catalog` (or `POST /catalog/import?
+source=...`) bounces back with the parse error on a bad catalog
 without clobbering the running one.
 
 ## SHA-256 sidecars for dir-scan images
@@ -178,21 +178,27 @@ the browser, or via ``bty --catalog SOURCE`` which consumes
 ``GET /catalog.toml`` and gets a single ``src`` per entry that
 the client just flashes from. No client-side resolution logic.
 
-Server-side manifest management lives in `/ui/images` (sub-nav:
-List / Fetch default / Add by URL / Upload manifest / Upload image)
-and the HTTP API below.
+Server-side catalog management lives in `/ui/images` (sub-nav:
+List / Fetch catalog / Upload catalog / Upload image / Upload
+image (from URL)) and the HTTP API below.
 
 ## HTTP API
 
 | Endpoint | Method | Purpose |
 |---|---|---|
+| `/images` | GET | unified catalog listing (dir-scan + catalog entries, SHA-keyed) |
+| `/catalog.toml` | GET | the unified catalog rendered back as a TOML catalog (what `bty --catalog` consumes) |
+| `/catalog/entries` | GET | list operator-curated catalog entries |
+| `/catalog/entries` | POST | add an entry: `{"image_url": "...", "sha_url": "..." \| null}` |
+| `/catalog/entries` | DELETE | delete an entry by `bty_image_ref` |
+| `/catalog/import` | POST | import entries from a `source=` catalog (path / URL / oras) |
 | `/catalog/downloads` | GET | list active + recent fetches |
 | `/catalog/downloads` | POST | enqueue: `{"name": "..."}` |
 | `/catalog/downloads/{name}` | DELETE | cancel |
+| `/catalog/cache/{name}` | DELETE | evict the cached bytes for an entry (keeps the entry's metadata) |
 | `/catalog/hashes` | GET | list active + recent hashes |
 | `/catalog/hashes` | POST | enqueue: `{"name": "..."}` |
 | `/catalog/hashes/{name}` | DELETE | cancel |
-| `/images` | GET | unified catalog listing |
 
 All endpoints are auth-gated (the same session cookie as the
 browser UI).
@@ -203,7 +209,7 @@ browser UI).
 |---|---|---|
 | `BTY_IMAGE_ROOT` | `/var/lib/bty/images` | dir-scan source |
 | `BTY_STATE_DIR` | `/var/lib/bty` | base for catalog + cache + state.db |
-| `BTY_CATALOG_FILE` | `${BTY_STATE_DIR}/catalog.toml` | manifest path |
+| `BTY_CATALOG_FILE` | `${BTY_STATE_DIR}/catalog.toml` | catalog file path |
 | `BTY_CATALOG_CACHE_DIR` | `${BTY_STATE_DIR}/cache` | content-addressed cache |
 | `BTY_CATALOG_MAX_PARALLEL` | `2` | concurrent downloads |
 | `BTY_HASH_MAX_PARALLEL` | `1` | concurrent hashes (low: small hardware) |
