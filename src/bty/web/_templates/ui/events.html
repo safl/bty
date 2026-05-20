@@ -20,6 +20,9 @@
 
 {% block content %}
 <div class="card mb-3">
+    <div class="card-header bg-light fw-semibold">
+        <i class="bi bi-funnel me-1"></i>Filter
+    </div>
     <div class="card-body">
         {# Filter form. GET so links stay shareable + back-button friendly. #}
         <form method="get" action="/ui/events" class="row g-2 align-items-end">

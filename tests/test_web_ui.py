@@ -555,9 +555,10 @@ def test_ui_boot_list_header_has_fetch_control(client: TestClient) -> None:
     assert 'value="latest"' in body
     # The artefacts table renders alongside the control.
     assert "<th>File</th>" in body
-    # DHCP/PXE + TFTP headings are NOT on the list view.
-    assert "bi-hdd-network me-2" not in body
-    assert "bi-cpu me-2" not in body
+    # The DHCP/PXE + TFTP section bodies are NOT on the list view
+    # (their subnav pills are, but not the cheatsheet / daemon panel).
+    assert "Router-side configuration" not in body
+    assert "serves the TFTP root" not in body
 
 
 def test_ui_boot_section_dhcp_pxe_shows_router_cheatsheet(client: TestClient) -> None:
@@ -569,16 +570,17 @@ def test_ui_boot_section_dhcp_pxe_shows_router_cheatsheet(client: TestClient) ->
     r = client.get("/ui/boot?section=dhcp-pxe")
     assert r.status_code == 200
     body = r.text
-    # Section heading + the four DHCP options.
-    assert "bi-hdd-network me-2" in body  # the <h2>'s icon class
-    assert ">DHCP / PXE</h2>" in body
+    # Section renders in a card (header label + cheatsheet content +
+    # the four DHCP options).
+    assert "DHCP / PXE" in body
+    assert "Router-side configuration" in body
     assert "option 60" in body
     assert "PXEClient" in body
     assert "option 66" in body
     assert "option 67" in body
-    # The other sub-sections' headings should NOT render.
+    # The other sub-sections should NOT render.
     assert 'id="enqueue-fetch-btn"' not in body
-    assert "bi-cpu me-2" not in body  # TFTP daemon <h2>'s icon
+    assert "serves the TFTP root" not in body
 
 
 def test_ui_boot_section_tftp_shows_daemon_status(client: TestClient) -> None:
@@ -590,12 +592,13 @@ def test_ui_boot_section_tftp_shows_daemon_status(client: TestClient) -> None:
     r = client.get("/ui/boot?section=tftp")
     assert r.status_code == 200
     body = r.text
-    assert "bi-cpu me-2" in body  # the <h2>'s icon class
-    assert ">TFTP daemon</h2>" in body
+    # Section renders in a card (header label + daemon panel content).
+    assert "TFTP daemon" in body
+    assert "serves the TFTP root" in body
     assert "dnsmasq.service" in body
-    # The other sub-sections' headings should NOT render.
+    # The other sub-sections should NOT render.
     assert 'id="enqueue-fetch-btn"' not in body
-    assert "bi-hdd-network me-2" not in body  # DHCP / PXE <h2>'s icon
+    assert "Router-side configuration" not in body
 
 
 def test_ui_layout_renders_version_in_navbar_outside_brand(client: TestClient) -> None:
