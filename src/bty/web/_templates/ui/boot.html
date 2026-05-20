@@ -5,7 +5,6 @@
 {% set right_html %}<span class="text-muted small"><code>{{ boot_root }}</code></span>{% endset %}
 {% with sections=[
     {"key": "list",     "label": "List",         "icon": "list-ul",        "href": "/ui/boot"},
-    {"key": "fetch",    "label": "Fetch netboot artifacts", "icon": "cloud-download", "href": "/ui/boot?section=fetch"},
     {"key": "dhcp-pxe", "label": "DHCP / PXE",   "icon": "hdd-network",    "href": "/ui/boot?section=dhcp-pxe"},
     {"key": "tftp",     "label": "TFTP daemon",  "icon": "cpu",            "href": "/ui/boot?section=tftp"},
 ] , active=section, right_html=right_html %}
@@ -19,238 +18,14 @@
     The bty live env that PXE clients chain into when their
     assignment has <code>boot_policy=flash</code>. Until these
     files are present, machines with <code>boot_policy=flash</code>
-    cannot actually flash. Click
-    <a href="/ui/boot?section=fetch">Fetch netboot artifacts</a>
-    to populate.
+    cannot actually flash. Use the <strong>Fetch</strong> control in
+    the table header below (tag defaults to <code>latest</code>) to
+    populate them from GitHub releases.
 {% endcall %}
 {% endblock %}
 
 {% block content %}
-{% if section == "fetch" %}
-<div class="card mb-3">
-    <div class="card-header bg-light fw-semibold">
-        <i class="bi bi-cloud-download me-1"></i>Fetch from GitHub releases
-    </div>
-    <div class="card-body">
-        <p>
-            Pulls <code>vmlinuz</code> + <code>initrd</code> +
-            <code>squashfs</code> + <code>sha256</code> from
-            <a href="https://github.com/{{ release_repo }}/releases"
-               target="_blank" rel="noopener">{{ release_repo }}</a>,
-            verifies the manifest, and atomically installs into
-            <code>{{ boot_root }}</code>.
-        </p>
-        <div class="row g-3 align-items-end">
-            <div class="col-sm-8">
-                <label class="form-label" for="tag">Tag</label>
-                <input type="text" id="tag" class="form-control"
-                       value="latest" placeholder="latest, or e.g. v0.11.3">
-                <div class="form-text">
-                    <code>latest</code> resolves through GitHub's redirect
-                    to the most recent release.
-                </div>
-            </div>
-            <div class="col-sm-4">
-                <button type="button" class="btn btn-primary w-100" id="enqueue-fetch-btn"
-                        onclick="enqueueFetch();">
-                    <i class="bi bi-cloud-download me-1"></i>Fetch
-                </button>
-            </div>
-        </div>
-    </div>
-</div>
-
-<script>
-(function () {
-    window.enqueueFetch = function () {
-        var tag = document.getElementById("tag").value.trim() || "latest";
-        var btn = document.getElementById("enqueue-fetch-btn");
-        btn.disabled = true;
-        fetch("/boot/releases", {
-            method: "POST",
-            credentials: "same-origin",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ tag: tag }),
-        }).then(function (r) {
-            if (!r.ok) throw new Error("HTTP " + r.status);
-            // Send the operator back to the list so they can watch
-            // the fetch progress (the list section polls).
-            // Reload the same view so the fetches table below picks
-            // up the new tag and the operator sees progress in place.
-            window.location.reload();
-        }).catch(function (e) {
-            alert("Enqueue failed: " + e.message);
-            btn.disabled = false;
-        });
-    };
-})();
-</script>
-
-{# Active + recent fetches live alongside the fetch form so the
-   operator who just clicked "Fetch" sees progress without
-   leaving the page. #}
-<div class="card mb-3">
-    <div class="card-header bg-light fw-semibold d-flex justify-content-between align-items-center">
-        <span><i class="bi bi-arrow-down-circle me-1"></i>Active + recent fetches</span>
-        <span class="text-muted small bty-poll-status">refreshing...</span>
-    </div>
-    <div class="table-responsive">
-        <table class="table mb-0 align-middle">
-            <thead class="table-light">
-                <tr>
-                    <th>Tag</th>
-                    <th>Status</th>
-                    <th>Progress</th>
-                    <th>Started</th>
-                    <th class="text-end" style="width: 1%; white-space: nowrap;">Action</th>
-                </tr>
-            </thead>
-            <tbody id="fetches-tbody">
-                <tr><td colspan="5" class="text-center text-muted py-3">
-                    <em>Loading...</em>
-                </td></tr>
-            </tbody>
-        </table>
-    </div>
-</div>
-
-<script>
-(function () {
-    var pollHandle = null;
-    var POLL_INTERVAL_MS = 2000;
-
-    var seenCompleted = new Set();
-    var lastFetchesSnapshot = null;
-
-    function esc(v) {
-        if (v === null || v === undefined) return "";
-        return String(v)
-            .replace(/&/g, "&amp;")
-            .replace(/</g, "&lt;")
-            .replace(/>/g, "&gt;")
-            .replace(/"/g, "&quot;")
-            .replace(/'/g, "&#39;");
-    }
-
-    function fmtBytes(n) {
-        if (n === null || n === undefined) return "?";
-        var mib = n / (1024 * 1024);
-        if (mib < 1024) return mib.toFixed(1) + " MiB";
-        return (mib / 1024).toFixed(2) + " GiB";
-    }
-
-    function fmtTime(ts) {
-        if (!ts) return "-";
-        return new Date(ts * 1000).toLocaleTimeString();
-    }
-
-    function statusBadge(s) {
-        var cls = {
-            queued: "bg-secondary",
-            running: "bg-primary",
-            completed: "bg-success",
-            cancelled: "bg-warning text-dark",
-            failed: "bg-danger",
-        }[s] || "bg-light text-dark border";
-        return '<span class="badge ' + cls + '">' + esc(s) + '</span>';
-    }
-
-    function progressCell(s) {
-        if (s.status !== "running") {
-            if (s.status === "completed") return '<span class="text-muted small">' + esc(fmtBytes(s.bytes_done)) + '</span>';
-            if (s.status === "failed" && s.error) return '<span class="text-danger small">' + esc(s.error) + '</span>';
-            return '<span class="text-muted small">-</span>';
-        }
-        var pct = s.bytes_total ? Math.round(s.bytes_done * 100 / s.bytes_total) : null;
-        var label = (s.artefact || "...") + " - " + fmtBytes(s.bytes_done);
-        if (pct !== null) label += " / " + fmtBytes(s.bytes_total) + " (" + pct + "%)";
-        var bar = '<div class="progress" style="height: 0.85rem;">' +
-                  '<div class="progress-bar progress-bar-striped progress-bar-animated" ' +
-                  'style="width: ' + (pct === null ? 100 : pct) + '%;"></div></div>';
-        return '<div class="small">' + esc(label) + '</div>' + bar;
-    }
-
-    function actionCell(s) {
-        if (s.status === "queued" || s.status === "running") {
-            return '<button class="btn btn-sm btn-outline-danger bty-cancel-fetch-btn" data-tag="' +
-                   esc(s.tag) + '"><i class="bi bi-x-circle me-1"></i>Cancel</button>';
-        }
-        return '<span class="text-muted small">-</span>';
-    }
-
-    // When a tag transitions running -> completed we reload so the
-    // List section (and the inline "missing artefacts" banner) pick
-    // up the newly-present files.
-    function detectCompletion(fetches) {
-        if (lastFetchesSnapshot) {
-            fetches.forEach(function (s) {
-                if (s.status === "completed" && !seenCompleted.has(s.tag)) {
-                    var prior = lastFetchesSnapshot.find(function (p) { return p.tag === s.tag; });
-                    if (prior && prior.status === "running") {
-                        seenCompleted.add(s.tag);
-                        window.location.reload();
-                    }
-                }
-            });
-        }
-        lastFetchesSnapshot = fetches;
-    }
-
-    function refresh() {
-        return fetch("/boot/releases", { credentials: "same-origin" })
-            .then(function (r) { return r.json(); })
-            .then(function (data) {
-                var tbody = document.getElementById("fetches-tbody");
-                var fetches = data.fetches || [];
-                if (!fetches.length) {
-                    tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-3"><em>No fetches yet.</em></td></tr>';
-                } else {
-                    var rows = fetches.map(function (s) {
-                        return "<tr>" +
-                               "<td><code>" + esc(s.tag) + "</code></td>" +
-                               "<td>" + statusBadge(s.status) + "</td>" +
-                               "<td>" + progressCell(s) + "</td>" +
-                               "<td><small>" + esc(fmtTime(s.started_at)) + "</small></td>" +
-                               '<td class="text-end">' + actionCell(s) + "</td>" +
-                               "</tr>";
-                    }).join("");
-                    tbody.innerHTML = rows;
-                }
-                document.querySelector(".bty-poll-status").textContent = "updated " + new Date().toLocaleTimeString();
-                detectCompletion(fetches);
-            });
-    }
-
-    function startPolling() {
-        if (pollHandle) return;
-        refresh();
-        pollHandle = setInterval(refresh, POLL_INTERVAL_MS);
-    }
-    function stopPolling() {
-        if (pollHandle) { clearInterval(pollHandle); pollHandle = null; }
-    }
-    document.addEventListener("visibilitychange", function () {
-        if (document.hidden) stopPolling(); else startPolling();
-    });
-
-    document.addEventListener("click", function (ev) {
-        var cancelBtn = ev.target.closest(".bty-cancel-fetch-btn");
-        if (cancelBtn) {
-            ev.preventDefault();
-            var tag = cancelBtn.getAttribute("data-tag");
-            cancelBtn.disabled = true;
-            fetch("/boot/releases/" + encodeURIComponent(tag), {
-                method: "DELETE",
-                credentials: "same-origin",
-            }).then(refresh);
-        }
-    });
-
-    startPolling();
-})();
-</script>
-
-{% elif section == "dhcp-pxe" %}
+{% if section == "dhcp-pxe" %}
 {# Router-side cheatsheet. The bits the operator pastes into
    UniFi / pfSense / dnsmasq DHCP config to point PXE clients
    at this appliance. Reference-only; no editable fields here
@@ -423,11 +198,22 @@
 </div>
 
 {% else %}
-{# section == "list" (default): present/missing per-artefact + live
-   fetch table. Operators land on the OBSERVABLE boot state when
-   they click "Netboot" in the top nav. The single Fetch flow is
-   one sub-nav click away. #}
+{# section == "list" (default): the netboot artefacts table, with
+   the Fetch control (tag input, default "latest") inline in its
+   header -- List and Fetch are merged into one view, like the
+   Catalog. Live fetch activity shows in the top-nav indicator. #}
 <div class="card mb-4">
+    <div class="card-header bg-light fw-semibold d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <span><i class="bi bi-box-seam me-1"></i>Netboot artifacts</span>
+        <span class="d-flex gap-1 align-items-center">
+            <input type="text" id="tag" class="form-control form-control-sm" style="max-width: 11rem;"
+                   value="latest" placeholder="latest, or v0.11.3"
+                   title="GitHub release tag from {{ release_repo }}; 'latest' resolves to the most recent release">
+            <button type="button" class="btn btn-sm btn-primary" id="enqueue-fetch-btn" onclick="enqueueFetch();">
+                <i class="bi bi-cloud-download me-1"></i>Fetch
+            </button>
+        </span>
+    </div>
     <div class="table-responsive">
         <table class="table mb-0 align-middle">
             <thead class="table-light">
@@ -489,6 +275,30 @@
         </table>
     </div>
 </div>
+
+<script>
+(function () {
+    window.enqueueFetch = function () {
+        var tag = (document.getElementById("tag").value || "latest").trim() || "latest";
+        var btn = document.getElementById("enqueue-fetch-btn");
+        btn.disabled = true;
+        fetch("/boot/releases", {
+            method: "POST",
+            credentials: "same-origin",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ tag: tag }),
+        }).then(function (r) {
+            if (!r.ok) throw new Error("HTTP " + r.status);
+            // Reload so the artefacts table reflects the fetch once it
+            // lands; live progress shows in the top-nav indicator.
+            window.location.reload();
+        }).catch(function (e) {
+            alert("Fetch failed: " + e.message);
+            btn.disabled = false;
+        });
+    };
+})();
+</script>
 
 {% endif %}
 

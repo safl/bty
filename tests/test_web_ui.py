@@ -484,32 +484,32 @@ def test_ui_images_section_unrecognised_falls_back_to_list(client: TestClient) -
 
 
 def test_ui_boot_default_section_is_list(client: TestClient) -> None:
-    """Bare ``GET /ui/boot`` lands on the artefact table; the Fetch
-    form (and its sibling Active+recent-fetches polling table) is
-    behind ?section=fetch."""
+    """Bare ``GET /ui/boot`` lands on the artefact table, which now
+    carries the Fetch control (tag input + button) inline in its
+    header -- List and Fetch are merged into one view."""
     _login(client)
     r = client.get("/ui/boot")
     assert r.status_code == 200
     body = r.text
-    assert 'href="/ui/boot?section=fetch"' in body
-    # Fetch form not on default landing.
-    assert 'id="enqueue-fetch-btn"' not in body
-    # The active-fetches polling is on the fetch section only.
-    assert 'id="fetches-tbody"' not in body
-
-
-def test_ui_boot_section_fetch_shows_form_only(client: TestClient) -> None:
-    _login(client)
-    r = client.get("/ui/boot?section=fetch")
-    assert r.status_code == 200
-    body = r.text
+    # Sub-nav strip renders (DHCP/PXE pill present).
+    assert 'href="/ui/boot?section=dhcp-pxe"' in body
+    # Fetch control is inline in the artefacts table header.
     assert 'id="enqueue-fetch-btn"' in body
-    # The artefact-list table is suppressed on the fetch view --
-    # only the Fetch form + Active-fetches polling table render.
-    assert "<th>File</th>\n                    <th>Status</th>" not in body
-    # The DHCP/PXE + TFTP <h2>s (each section's distinctive
-    # heading marker) are NOT on the fetch view either -- both
-    # live behind their own sub-section pills now.
+    assert 'id="tag"' in body
+
+
+def test_ui_boot_list_header_has_fetch_control(client: TestClient) -> None:
+    """The netboot List view carries the Fetch control (tag input,
+    default 'latest', + Fetch button) inline in the artefacts table
+    header -- the merged List+Fetch view (the standalone
+    ?section=fetch page was dropped)."""
+    _login(client)
+    body = client.get("/ui/boot").text
+    assert 'id="enqueue-fetch-btn"' in body
+    assert 'value="latest"' in body
+    # The artefacts table renders alongside the control.
+    assert "<th>File</th>" in body
+    # DHCP/PXE + TFTP headings are NOT on the list view.
     assert "bi-hdd-network me-2" not in body
     assert "bi-cpu me-2" not in body
 
@@ -595,12 +595,10 @@ def test_ui_boot_section_unrecognised_falls_back_to_list(client: TestClient) -> 
     r = client.get("/ui/boot?section=garbage")
     assert r.status_code == 200
     body = r.text
-    # Lands on list (the artefact-status table renders; the Fetch
-    # form does not).
-    assert 'id="enqueue-fetch-btn"' not in body
+    # Lands on list: artefacts table + the inline Fetch control.
+    assert 'id="enqueue-fetch-btn"' in body
     assert "bty-netboot-x86_64.vmlinuz" in body
     # Sub-nav strip still renders with the canonical pills.
-    assert 'href="/ui/boot?section=fetch"' in body
     assert 'href="/ui/boot?section=dhcp-pxe"' in body
     assert 'href="/ui/boot?section=tftp"' in body
 

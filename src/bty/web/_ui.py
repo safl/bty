@@ -752,19 +752,20 @@ def register_ui_routes(
         flash: str | None = None,
         flash_kind: str | None = None,
     ) -> HTMLResponse:
-        """Sub-nav-aware boot-artifacts page. ``?section=list``
-        (the default landing) shows the four artefacts +
-        present/missing + recent fetch table. ``?section=fetch``
-        is the one-button "fetch from latest release" form. The
-        upload route is intentionally NOT in the sub-nav -- the
-        appliance is designed around release fetches, and
-        operator-side artefact uploads are scripted via the
-        auth-gated ``PUT /boot/{name}`` route, not the browser.
+        """Sub-nav-aware boot-artifacts page. ``?section=list`` (the
+        default landing) shows the artefacts (present/missing, size,
+        sha256, download) with the Fetch control -- a tag input
+        (default ``latest``) + button -- inline in the table header;
+        List and Fetch are merged into one view (like the Catalog).
+        ``?section=dhcp-pxe`` / ``?section=tftp`` are the router
+        cheatsheet + TFTP-daemon controls. Operator-side artefact
+        uploads stay scripted via the auth-gated ``PUT /boot/{name}``
+        route, not the browser.
 
         Unrecognised ``section`` values fall back to ``list``.
         """
         section = request.query_params.get("section") or "list"
-        if section not in ("list", "fetch", "dhcp-pxe", "tftp"):
+        if section not in ("list", "dhcp-pxe", "tftp"):
             section = "list"
         # Recent activity for boot artefacts: release fetches /
         # fetch failures.
