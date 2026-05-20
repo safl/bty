@@ -17,11 +17,11 @@
 {% block intro %}
 {% from "ui/_intro_box.html" import render as intro_box %}
 {% call intro_box() %}
-    The known fleet, keyed by MAC. Each row carries an optional
-    image binding, target-disk pin, and boot policy. Machines
-    auto-appear on first PXE contact; to stage one before it boots,
-    use the <strong>Add</strong> field in the table header (image
-    binding + boot policy are set per-machine on the detail page).
+    Machines auto-appear on first remote contact (PXE or manual
+    <code>tui --server .. --mac ..</code>); to stage one before it
+    boots, use the <strong>Add</strong> field in the table header
+    (image binding + boot policy are set per-machine on the detail
+    page).
 {% endcall %}
 {% endblock %}
 
