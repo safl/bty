@@ -170,6 +170,7 @@
         }
         @media (prefers-reduced-motion: reduce) {
             .live-indicator.pulsing i,
+            .nav-live.pulsing i,
             .sse-target.flashing {
                 animation: none;
             }
@@ -294,6 +295,38 @@
             font-size: 0.6rem;
             padding: 0.15em 0.4em;
         }
+        /* Top-level live indicator: sits after the worker cluster
+           (divided by ``.nav-live-sep``). Green ``live`` while the poll
+           reaches bty-web, red ``offline`` when it can't; pulses when a
+           background job starts or finishes. */
+        .nav-live-sep {
+            width: 1px;
+            align-self: stretch;
+            background-color: rgba(255, 255, 255, 0.15);
+            margin: 0.25rem 0.4rem;
+        }
+        .nav-live {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.3rem;
+            padding: 0.3rem 0.4rem;
+            font-size: 0.72rem;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            color: rgba(255, 255, 255, 0.45);  /* neutral until first poll */
+        }
+        .nav-live i {
+            font-size: 1rem;
+        }
+        .nav-live.live {
+            color: #4ade80;
+        }
+        .nav-live.offline {
+            color: #f87171;
+        }
+        .nav-live.pulsing i {
+            animation: bty-pulse 0.45s ease-out;
+        }
     </style>
     <script src="/static/htmx.min.js"></script>
     <script src="/static/sse.js"></script>
@@ -349,6 +382,16 @@
                         <i class="bi bi-cloud-arrow-down"></i>
                         <span class="badge rounded-pill bg-info text-dark nav-worker-badge d-none" data-worker="releases">0</span>
                     </a>
+                    {# Live indicator: connection health to bty-web, after
+                       a divider. Driven by the same poll that feeds the
+                       worker badges -- green while reachable, red when the
+                       poll fails, pulsing when a job starts/finishes. #}
+                    <span class="nav-live-sep"></span>
+                    <span class="nav-live" id="nav-live"
+                          title="Live connection to bty-web (background activity ticks in here)">
+                        <i class="bi bi-broadcast"></i>
+                        <span class="nav-live-label">live</span>
+                    </span>
                 </div>
             </div>
             <span class="navbar-version me-2">v{{ version }}</span>
@@ -452,17 +495,65 @@
             if (link) link.classList.remove("busy");
         }
     }
+    var liveEl = document.getElementById("nav-live");
+    var lastTotal = -1;
+    function setLive(connected, total) {
+        if (!liveEl) return;
+        var icon = liveEl.querySelector("i");
+        var label = liveEl.querySelector(".nav-live-label");
+        if (connected) {
+            liveEl.classList.add("live");
+            liveEl.classList.remove("offline");
+            if (icon) icon.className = "bi bi-broadcast";
+            if (label) label.textContent = "live";
+            // Emphasize when a background job started or finished since
+            // the last successful poll (skip the very first resolve).
+            if (lastTotal !== -1 && total !== lastTotal) {
+                liveEl.classList.remove("pulsing");
+                void liveEl.offsetWidth;  // reflow so the animation restarts
+                liveEl.classList.add("pulsing");
+            }
+            lastTotal = total;
+        } else {
+            liveEl.classList.add("offline");
+            liveEl.classList.remove("live", "pulsing");
+            if (icon) icon.className = "bi bi-wifi-off";
+            if (label) label.textContent = "offline";
+            lastTotal = -1;  // a reconnect + activity should pulse afresh
+        }
+    }
     function poll() {
         if (document.hidden) return;
-        SOURCES.forEach(function (s) {
-            fetch(s.url, { credentials: "same-origin" })
+        // ``allSettled`` so one endpoint failing doesn't hide the others;
+        // the live indicator is "connected" iff at least one reached the
+        // server, "offline" when every fetch rejects (network/server down).
+        Promise.allSettled(SOURCES.map(function (s) {
+            return fetch(s.url, { credentials: "same-origin" })
                 .then(function (r) { return r.ok ? r.json() : null; })
-                .then(function (data) { if (data) setBadge(s.worker, activeCount(data[s.key])); })
-                .catch(function () { /* transient; keep the last shown state */ });
+                .then(function (data) {
+                    var n = data ? activeCount(data[s.key]) : null;
+                    if (n !== null) setBadge(s.worker, n);
+                    return n;
+                });
+        })).then(function (results) {
+            var connected = false;
+            var total = 0;
+            results.forEach(function (res) {
+                if (res.status === "fulfilled" && res.value !== null) {
+                    connected = true;
+                    total += res.value;
+                }
+            });
+            setLive(connected, total);
         });
     }
     poll();
     setInterval(poll, 5000);
+    // Poll immediately when the tab regains focus so the indicator
+    // recovers from "offline" without waiting out the interval.
+    document.addEventListener("visibilitychange", function () {
+        if (!document.hidden) poll();
+    });
 })();
 </script>
 </body>

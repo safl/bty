@@ -606,6 +606,21 @@ def test_ui_boot_section_tftp_shows_daemon_status(client: TestClient) -> None:
     assert "Router-side configuration" not in body
 
 
+def test_ui_layout_renders_top_level_live_indicator(client: TestClient) -> None:
+    """The navbar carries a top-level live indicator (after the worker
+    cluster, behind a divider) plus the poll-driven setLive logic that
+    flips it green/red and pulses it on activity."""
+    _login(client)
+    body = client.get("/ui/dashboard").text
+    assert 'id="nav-live"' in body
+    assert "nav-live-sep" in body  # divider after downloads/hashes/artifacts
+    assert "function setLive" in body
+    # The poller it rides on targets all three worker endpoints.
+    assert "/catalog/downloads" in body
+    assert "/catalog/hashes" in body
+    assert "/boot/releases" in body
+
+
 def test_ui_layout_renders_version_in_navbar_outside_brand(client: TestClient) -> None:
     """The navbar carries an always-visible ``v{__version__}`` slug
     sitting OUTSIDE the brand ``<a>`` so the BTY pill stays a clean
