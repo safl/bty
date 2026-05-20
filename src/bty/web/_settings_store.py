@@ -26,9 +26,12 @@ from bty.web._releases import DEFAULT_REPO
 
 KEY_RELEASE_REPO = "upstream.release_repo"
 KEY_CATALOG_URL = "upstream.catalog_url"
+KEY_RELEASE_TAG = "upstream.release_tag"
 
 # The env vars each key falls back to before the built-in default.
 ENV_RELEASE_REPO = "BTY_BOOT_RELEASE_REPO"
+
+DEFAULT_RELEASE_TAG = "latest"
 
 
 def get(conn: sqlite3.Connection, key: str) -> str | None:
@@ -78,3 +81,9 @@ def resolve_catalog_url(conn: sqlite3.Connection) -> str:
     """The effective catalog URL: override -> URL built from the
     effective release repo."""
     return get(conn, KEY_CATALOG_URL) or default_catalog_url(resolve_release_repo(conn))
+
+
+def resolve_release_tag(conn: sqlite3.Connection) -> str:
+    """The effective netboot release tag to fetch: override ->
+    :data:`DEFAULT_RELEASE_TAG` (``latest``)."""
+    return get(conn, KEY_RELEASE_TAG) or DEFAULT_RELEASE_TAG

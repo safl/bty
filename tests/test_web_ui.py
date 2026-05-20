@@ -399,9 +399,9 @@ def test_top_level_nav_highlights_active_page(client: TestClient) -> None:
 
     Dashboard is NOT a separate nav-btn -- the BTY brand pill
     doubles as the dashboard link and carries the ``brand-active``
-    class instead (checked below). Settings sits behind the
-    user-bar gear icon and is checked via the ``user-bar-action
-    active`` class.
+    class instead (checked below). The operator Account page sits
+    behind the user-bar gear icon and is checked via the
+    ``user-bar-action active`` class.
 
     Mirror of the v0.22.11 sub-nav bug (where ``active`` was never
     wired through) for the top-level nav -- without this test the
@@ -417,9 +417,10 @@ def test_top_level_nav_highlights_active_page(client: TestClient) -> None:
         "/ui/images": "/ui/images",
         "/ui/boot": "/ui/boot",
         "/ui/events": "/ui/events",
-        # /ui/settings sits behind the user-bar gear icon; its
+        "/ui/settings": "/ui/settings",
+        # /ui/account sits behind the user-bar gear icon; its
         # highlight uses the ``user-bar-action active`` class
-        # (also tested below).
+        # (tested below).
     }
     for path, expected_href in page_to_nav_key.items():
         body = client.get(path).text
@@ -437,11 +438,13 @@ def test_top_level_nav_highlights_active_page(client: TestClient) -> None:
         "/ui/dashboard should mark the BTY brand pill as active "
         "(the brand doubles as the dashboard nav link)"
     )
-    # /ui/settings retains its highlight via the user-bar gear button.
-    body = client.get("/ui/settings").text
-    assert 'class="user-bar-action active"' in body or 'class="user-bar-action  active"' in body, (
-        "/ui/settings page should mark the user-bar gear icon as active"
+    # /ui/account highlights the operator pill (the name doubles as the
+    # account link, carrying ``user-bar-action active``).
+    body = client.get("/ui/account").text
+    assert "user-bar-action active" in body, (
+        "/ui/account page should mark the operator pill as active"
     )
+    assert 'href="/ui/account"' in body
 
 
 def test_subnav_renders_aria_current_on_active_section(client: TestClient) -> None:
@@ -526,9 +529,10 @@ def test_ui_boot_default_section_is_list(client: TestClient) -> None:
     body = r.text
     # Sub-nav strip renders (DHCP/PXE pill present).
     assert 'href="/ui/boot?section=dhcp-pxe"' in body
-    # Fetch control is inline in the artefacts table header.
+    # Fetch control is inline in the artefacts table header (the tag is
+    # an editable Settings value, so the button just fetches it).
     assert 'id="enqueue-fetch-btn"' in body
-    assert 'id="tag"' in body
+    assert "artifacts" in body
 
 
 def test_ui_boot_list_has_live_release_fetches_table(client: TestClient) -> None:
@@ -545,14 +549,15 @@ def test_ui_boot_list_has_live_release_fetches_table(client: TestClient) -> None
 
 
 def test_ui_boot_list_header_has_fetch_control(client: TestClient) -> None:
-    """The netboot List view carries the Fetch control (tag input,
-    default 'latest', + Fetch button) inline in the artefacts table
-    header -- the merged List+Fetch view (the standalone
-    ?section=fetch page was dropped)."""
+    """The netboot List view carries the Fetch control inline in the
+    artefacts table header. The release tag is an editable Settings
+    value, so the button reads "Fetch latest artifacts" and carries the
+    resolved tag in data-tag (no on-page tag input)."""
     _login(client)
     body = client.get("/ui/boot").text
     assert 'id="enqueue-fetch-btn"' in body
-    assert 'value="latest"' in body
+    assert 'data-tag="latest"' in body
+    assert "artifacts" in body
     # The artefacts table renders alongside the control.
     assert "<th>File</th>" in body
     # The DHCP/PXE + TFTP section bodies are NOT on the list view
@@ -1223,10 +1228,11 @@ def test_ui_boot_page_renders_with_artifact_state(client: TestClient) -> None:
 
 
 def test_ui_settings_renders_when_authed(client: TestClient) -> None:
-    """A logged-in operator sees the /ui/settings page: the editable
-    Upstream sources card, the read-only config-value groups (each
-    magic value tagged with its source + env var), and the About +
-    Authentication cards. PXE / TFTP info lives on /ui/boot.
+    """The /ui/settings page (its own top-nav entry) shows the editable
+    Upstream sources card (repo + catalog URL + release tag), and the
+    read-only config-value groups, including the Identity group with the
+    bty version, service user, and project URL as magic values. The
+    Authentication card lives on /ui/account, not here.
     """
     import bty
 
@@ -1234,22 +1240,38 @@ def test_ui_settings_renders_when_authed(client: TestClient) -> None:
     r = client.get("/ui/settings")
     assert r.status_code == 200
     body = r.text
-    # Editable upstream card: both fields + the save form.
+    # Editable upstream card: all three fields + the save form.
     assert "Upstream sources" in body
     assert 'action="/ui/settings/upstream"' in body
     assert 'id="release_repo"' in body
     assert 'id="catalog_url"' in body
-    # Read-only config groups: at least one magic value + its env var.
+    assert 'id="release_tag"' in body
+    # Read-only config groups: storage + the Identity magic values.
     assert "Storage paths" in body
     assert "BTY_STATE_DIR" in body
-    # About + Authentication cards still present.
-    assert "About" in body
-    assert f"bty v{bty.__version__}" in body
-    assert "github.com/safl/bty" in body
+    assert "Service user" in body
+    assert "github.com/safl/bty" in body  # project URL listed as a magic value
+    assert f"{bty.__version__}" in body
+    # Authentication is an operator concern -> not on Settings.
+    assert "Authentication" not in body
+    assert "passwd" not in body
+    # Cross-links to the Account + Netboot pages.
+    assert 'href="/ui/account"' in body
+    assert 'href="/ui/boot"' in body
+
+
+def test_ui_account_holds_authentication(client: TestClient) -> None:
+    """The operator Account page (user-bar gear icon) carries the
+    Authentication card moved off the bty Settings page."""
+    _login(client)
+    r = client.get("/ui/account")
+    assert r.status_code == 200
+    body = r.text
     assert "Authentication" in body
     assert "passwd" in body
-    # Cross-link out to the netboot page (where PXE / TFTP now live).
-    assert 'href="/ui/boot"' in body
+    # bty config is elsewhere.
+    assert "Upstream sources" not in body
+    assert 'href="/ui/settings"' in body
 
 
 def test_ui_settings_upstream_override_round_trips(client: TestClient) -> None:

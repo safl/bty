@@ -10,11 +10,12 @@
 {% block intro %}
 {% from "ui/_intro_box.html" import render as intro_box %}
 {% call intro_box() %}
-    Where every magic value comes from. Most are read-only (set via
+    Where every bty magic value comes from. Most are read-only (set via
     environment variable or derived from the state directory); the
     <strong>Upstream sources</strong> card is editable and persists in
-    the database. PXE / Netboot wiring (router cheatsheet + TFTP daemon)
-    lives on the <a href="/ui/boot">Netboot</a> page.
+    the database. Operator authentication lives on the
+    <a href="/ui/account">Account</a> page; PXE / Netboot wiring on the
+    <a href="/ui/boot">Netboot</a> page.
 {% endcall %}
 {% endblock %}
 
@@ -49,6 +50,19 @@
                     <code>catalog.toml</code> from. Effective:
                     <code>{{ upstream.catalog_url }}</code>{% if not upstream.catalog_url_override %}
                     (derived from the release repo; leave blank to keep){% endif %}.
+                </div>
+            </div>
+            <div class="mb-3">
+                <label for="release_tag" class="form-label">Netboot release tag</label>
+                <input type="text" class="form-control font-monospace" id="release_tag"
+                       name="release_tag" placeholder="{{ upstream.release_tag_default }}"
+                       value="{{ upstream.release_tag_override or '' }}">
+                <div class="form-text small">
+                    Which release the <em>Fetch artifacts</em> button on the
+                    <a href="/ui/boot">Netboot</a> page pulls: <code>latest</code>
+                    or a tag like <code>v0.23.0</code>. Effective:
+                    <code>{{ upstream.release_tag }}</code>{% if not upstream.release_tag_override %}
+                    (default; leave blank to keep){% endif %}.
                 </div>
             </div>
             <button type="submit" class="btn btn-primary">
@@ -102,39 +116,5 @@
     </div>
 </div>
 {% endfor %}
-
-<div class="card mb-4">
-    <div class="card-header bg-light fw-semibold">
-        <i class="bi bi-info-circle me-1"></i>About
-    </div>
-    <div class="card-body">
-        <p class="text-muted mb-0">
-            Running <code>bty v{{ version }}</code> as service user
-            <code>{{ service_user }}</code>. Source +
-            release notes at <a href="https://github.com/safl/bty"
-            target="_blank" rel="noopener">github.com/safl/bty</a>.
-        </p>
-    </div>
-</div>
-
-<div class="card mb-4">
-    <div class="card-header bg-light fw-semibold">
-        <i class="bi bi-shield-lock me-1"></i>Authentication
-    </div>
-    <div class="card-body">
-        <p class="text-muted mb-0">
-            bty-web is gated by the OS password of the
-            <code>{{ service_user }}</code> account. To rotate the credential,
-            run <code>sudo passwd {{ service_user }}</code> on the server.
-            Sessions are server-signed cookies (Starlette's
-            <code>SessionMiddleware</code>) with a sliding 7-day TTL. To
-            invalidate every existing session in one shot, rotate the
-            session secret:
-            <code>sudo rm /var/lib/bty/session-secret &amp;&amp; sudo systemctl
-            restart bty-web</code>. The restart regenerates the secret on
-            startup; no reboot needed.
-        </p>
-    </div>
-</div>
 
 {% endblock %}

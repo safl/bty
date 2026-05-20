@@ -210,11 +210,15 @@
     <div class="card-header bg-light fw-semibold d-flex justify-content-between align-items-center flex-wrap gap-2">
         <span><i class="bi bi-box-seam me-1"></i>Netboot artifacts</span>
         <span class="d-flex gap-1 align-items-center">
-            <input type="text" id="tag" class="form-control form-control-sm" style="max-width: 11rem;"
-                   value="latest" placeholder="latest, or v0.11.3"
-                   title="GitHub release tag from {{ release_repo }}; 'latest' resolves to the most recent release">
-            <button type="button" class="btn btn-sm btn-primary" id="enqueue-fetch-btn" onclick="enqueueFetch();">
+            {# The release tag is an editable magic value (Settings ->
+               Upstream sources); the button just fetches whatever it
+               resolves to. #}
+            <button type="button" class="btn btn-sm btn-primary" id="enqueue-fetch-btn"
+                    data-tag="{{ release_tag }}" onclick="enqueueFetch();"
+                    title="Fetch netboot artefacts for tag '{{ release_tag }}' from {{ release_repo }} (change the tag on the Settings page)">
                 <i class="bi bi-cloud-download me-1"></i>Fetch
+                {% if release_tag == "latest" %}latest{% else %}<code>{{ release_tag }}</code>{% endif %}
+                artifacts
             </button>
         </span>
     </div>
@@ -402,8 +406,8 @@
     });
 
     window.enqueueFetch = function () {
-        var tag = (document.getElementById("tag").value || "latest").trim() || "latest";
         var btn = document.getElementById("enqueue-fetch-btn");
+        var tag = (btn.dataset.tag || "latest").trim() || "latest";
         btn.disabled = true;
         fetch("/boot/releases", {
             method: "POST",

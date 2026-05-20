@@ -1,0 +1,51 @@
+{% extends "ui/_layout.html" %}
+{% block title %}Account - bty-web{% endblock %}
+
+{% block subnav %}
+{% with sections=None %}
+{% include "ui/_subnav.html" %}
+{% endwith %}
+{% endblock %}
+
+{% block intro %}
+{% from "ui/_intro_box.html" import render as intro_box %}
+{% call intro_box() %}
+    Operator account for the logged-in user. bty configuration (upstream
+    sources, paths, limits) lives on the <a href="/ui/settings">Settings</a>
+    page.
+{% endcall %}
+{% endblock %}
+
+{% block content %}
+<div class="card mb-4">
+    <div class="card-header bg-light fw-semibold">
+        <i class="bi bi-person-circle me-1"></i>Signed in
+    </div>
+    <div class="card-body">
+        <p class="text-muted mb-0">
+            Authenticated as service user <code>{{ service_user }}</code> on
+            <code>bty v{{ version }}</code>.
+        </p>
+    </div>
+</div>
+
+<div class="card mb-4">
+    <div class="card-header bg-light fw-semibold">
+        <i class="bi bi-shield-lock me-1"></i>Authentication
+    </div>
+    <div class="card-body">
+        <p class="text-muted mb-0">
+            bty-web is gated by the OS password of the
+            <code>{{ service_user }}</code> account. To rotate the credential,
+            run <code>sudo passwd {{ service_user }}</code> on the server.
+            Sessions are server-signed cookies (Starlette's
+            <code>SessionMiddleware</code>) with a sliding 7-day TTL. To
+            invalidate every existing session in one shot, rotate the
+            session secret:
+            <code>sudo rm /var/lib/bty/session-secret &amp;&amp; sudo systemctl
+            restart bty-web</code>. The restart regenerates the secret on
+            startup; no reboot needed.
+        </p>
+    </div>
+</div>
+{% endblock %}

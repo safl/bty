@@ -328,6 +328,9 @@
                 <a class="nav-btn {% if nav_active == 'events' %}active{% endif %}" href="/ui/events">
                     <i class="bi bi-clock-history"></i>Events
                 </a>
+                <a class="nav-btn {% if nav_active == 'settings' %}active{% endif %}" href="/ui/settings">
+                    <i class="bi bi-sliders"></i>Settings
+                </a>
                 {# Background-worker status, right of Events in a quieter
                    (status, not navigation) style. A small poller lights
                    each badge when its manager has queued/running jobs,
@@ -351,15 +354,13 @@
             <span class="navbar-version me-2">v{{ version }}</span>
             <div class="user-bar mt-2 mt-md-0"
                  title="OS user that bty-web is running as (PAM auth)">
-                <span class="user-bar-name">
+                {# The operator name doubles as the Account link (auth /
+                   session management). #}
+                <a href="/ui/account"
+                   class="user-bar-name user-bar-action {% if nav_active == 'account' %}active{% endif %}"
+                   title="Operator account (authentication)">
                     <i class="bi bi-person-circle"></i>
                     <code>{{ service_user }}</code>
-                </span>
-                <span class="user-bar-divider"></span>
-                <a href="/ui/settings"
-                   class="user-bar-action {% if nav_active == 'settings' %}active{% endif %}"
-                   title="Account / session info">
-                    <i class="bi bi-gear"></i>
                 </a>
                 <span class="user-bar-divider"></span>
                 <form action="/ui/logout" method="post" class="m-0 d-inline-flex">

@@ -823,6 +823,7 @@ def register_ui_routes(
         with _db.open_db(state_path) as conn:
             boot_events = _events_log.list_events(conn, subject_kind="boot", limit=10)
             release_repo = _settings_store.resolve_release_repo(conn)
+            release_tag = _settings_store.resolve_release_tag(conn)
         # Network + TFTP context the operator needs to wire up the
         # netboot side. Lives here (rather than under /ui/settings)
         # so the "what do I configure on my router" cheatsheet sits
@@ -836,6 +837,7 @@ def register_ui_routes(
             artifacts=_releases.inspect_boot_dir(boot_root),
             artifact_shas=_releases.boot_artifact_shas(boot_root),
             release_repo=release_repo,
+            release_tag=release_tag,
             boot_events=boot_events,
             section=section,
             flash=flash,
@@ -972,17 +974,10 @@ def register_ui_routes(
     # ----- settings -------------------------------------------------------
 
     def _config_row(label: str, value: object, env: str | None, default: str) -> dict[str, Any]:
-        """One read-only config row. ``source`` records where the live
-        value came from: an env var, a derived path, or the built-in
-        default, so the operator can see why a magic value is what it
-        is."""
-        raw = os.environ.get(env) if env else None
-        if env is None:
-            source = "derived"
-        elif raw:
-            source = "env"
-        else:
-            source = "default"
+        """One read-only config row. ``source`` is "env" when an env var
+        is set, else "default" (the built-in / derived value), so the
+        operator can see why a magic value is what it is."""
+        source = "env" if (env and os.environ.get(env)) else "default"
         return {
             "label": label,
             "value": str(value),
@@ -1009,8 +1004,10 @@ def register_ui_routes(
         with _db.open_db(state_path) as conn:
             release_repo = _settings_store.resolve_release_repo(conn)
             catalog_url = _settings_store.resolve_catalog_url(conn)
+            release_tag = _settings_store.resolve_release_tag(conn)
             repo_override = _settings_store.get(conn, _settings_store.KEY_RELEASE_REPO)
             catalog_override = _settings_store.get(conn, _settings_store.KEY_CATALOG_URL)
+            tag_override = _settings_store.get(conn, _settings_store.KEY_RELEASE_TAG)
         upstream = {
             "release_repo": release_repo,
             "release_repo_override": repo_override,
@@ -1018,8 +1015,25 @@ def register_ui_routes(
             "catalog_url": catalog_url,
             "catalog_url_override": catalog_override,
             "catalog_url_default": _settings_store.default_catalog_url(release_repo),
+            "release_tag": release_tag,
+            "release_tag_override": tag_override,
+            "release_tag_default": _settings_store.DEFAULT_RELEASE_TAG,
         }
         config_groups = [
+            {
+                "title": "Identity",
+                "icon": "info-circle",
+                "rows": [
+                    _config_row("bty version", bty.__version__, None, "(package version)"),
+                    _config_row("Service user", service_user, None, "(launch argument)"),
+                    _config_row(
+                        "Project / release notes",
+                        "https://github.com/safl/bty",
+                        None,
+                        "https://github.com/safl/bty",
+                    ),
+                ],
+            },
             {
                 "title": "Storage paths",
                 "icon": "hdd",
@@ -1111,6 +1125,19 @@ def register_ui_routes(
         flash = "Upstream sources saved." if saved else None
         return _render_settings_page(request, flash=flash, flash_kind="success" if saved else None)
 
+    @app.get(
+        "/ui/account",
+        response_class=HTMLResponse,
+        include_in_schema=False,
+        dependencies=[Depends(require_ui_auth)],
+    )
+    def ui_account(request: Request) -> HTMLResponse:
+        # Operator account page (reached via the user-bar gear icon):
+        # authentication is an operator concern, kept separate from the
+        # bty-config Settings page. version + service_user come from the
+        # global render context.
+        return render("ui/account.html", request)
+
     @app.post(
         "/ui/settings/upstream",
         include_in_schema=False,
@@ -1120,6 +1147,7 @@ def register_ui_routes(
         request: Request,
         release_repo: Annotated[str, Form()] = "",
         catalog_url: Annotated[str, Form()] = "",
+        release_tag: Annotated[str, Form()] = "",
     ) -> RedirectResponse:
         """Save (or clear) the two editable upstream overrides. An empty
         field clears the override, reverting to env / default. Both take
@@ -1127,6 +1155,7 @@ def register_ui_routes(
         sites resolve from this store at request time."""
         rr = release_repo.strip()
         cu = catalog_url.strip()
+        rt = release_tag.strip()
         with _db.open_db(state_path) as conn:
             if rr:
                 _settings_store.set_value(conn, _settings_store.KEY_RELEASE_REPO, rr)
@@ -1136,12 +1165,16 @@ def register_ui_routes(
                 _settings_store.set_value(conn, _settings_store.KEY_CATALOG_URL, cu)
             else:
                 _settings_store.clear(conn, _settings_store.KEY_CATALOG_URL)
+            if rt:
+                _settings_store.set_value(conn, _settings_store.KEY_RELEASE_TAG, rt)
+            else:
+                _settings_store.clear(conn, _settings_store.KEY_RELEASE_TAG)
             _events_log.record(
                 conn,
                 kind="settings.upstream.updated",
                 summary=(
                     f"upstream sources set: repo={rr or '(default)'}, "
-                    f"catalog_url={cu or '(default)'}"
+                    f"catalog_url={cu or '(default)'}, tag={rt or '(default)'}"
                 ),
                 subject_kind="settings",
                 subject_id="upstream",
