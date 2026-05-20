@@ -185,8 +185,8 @@ Use cases:
 - Trial / kicking-the-tires deploys: `docker run -p 8080:8080
   ghcr.io/safl/bty-web:latest` and the browser UI is up in seconds.
 - Network-shared image catalog: a fleet of operators with bty USB
-  sticks all point `bty tui --catalog SOURCE` at the same container.
-- Local development backend for `bty tui --catalog` work.
+  sticks all point `bty --catalog SOURCE` at the same container.
+- Local development backend for `bty --catalog` work.
 - Production PXE-flash for **UEFI-HTTP-Boot-capable** or
   **`boots-from`**-driven fleets where TFTP is not in the path.
 
