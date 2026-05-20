@@ -6,13 +6,13 @@ What's here:
 * :func:`list_interfaces` -- enumerate non-loopback network
   interfaces with their IPv4 / operstate. Used to suggest the
   bty-server's own IP to the operator in the router-config
-  cheatsheet on /ui/boot?section=dhcp-pxe.
+  cheatsheet (the DHCP / PXE card on the Settings page).
 * :func:`tftp_status` / :func:`control_tftp` -- read ``systemctl
   is-active dnsmasq.service`` and shell out to a sudo'd helper
   for start / stop / restart. dnsmasq serves the appliance's
   TFTP root; the operator may want to stop or restart it from
-  the UI without SSHing in (the buttons live on
-  /ui/boot?section=tftp).
+  the UI without SSHing in (the buttons live on the Netboot
+  list view, below the artifacts table).
 
 What used to be here (v0.14 - v0.17.1, removed in v0.18):
 proxy-DHCP activate / deactivate helpers, per-daemon journald

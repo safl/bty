@@ -1,29 +1,51 @@
 {% extends "ui/_layout.html" %}
-{% block title %}Images - bty-web{% endblock %}
+{% block title %}{% if section == "downloads" %}Downloads{% elif section == "hashes" %}Hashes{% else %}Images{% endif %} - bty-web{% endblock %}
 
 {% block subnav %}
-{% with sections=[
-    {"key": "list",                  "label": "List",                     "icon": "list-ul",       "href": "/ui/images"},
-    {"key": "downloads",             "label": "Downloads",                "icon": "arrow-down-circle", "href": "/ui/images?section=downloads"},
-    {"key": "hashes",                "label": "Hashes",                   "icon": "hash",          "href": "/ui/images?section=hashes"},
-] , active=section %}
-{% include "ui/_subnav.html" %}
-{% endwith %}
+{# In-page jump links to the page's two tables (the main list + the
+   activity table), separated by a vertical rule. The List anchor points
+   at whichever table this section shows (catalog / downloads / hashes);
+   Activity points at the shared image-catalog activity table. #}
+<nav class="navbar subnav-strip" aria-label="Section sub-navigation">
+    <div class="container">
+        <span class="subnav-jumps d-flex align-items-center flex-wrap">
+            {% if section == "downloads" %}
+            <a href="#downloads-list">List</a>
+            {% elif section == "hashes" %}
+            <a href="#hashes-list">List</a>
+            {% else %}
+            <a href="#images-list">List</a>
+            {% endif %}
+            <span class="vr"></span>
+            <a href="#images-activity">Activity</a>
+        </span>
+    </div>
+</nav>
 {% endblock %}
 
 {% block intro %}
 {% from "ui/_intro_box.html" import render as intro_box %}
 {% call intro_box() %}
+    {% if section == "downloads" %}
+    Add a single image (upload a local file, or add one by
+    http(s):// / oras:// URL) and watch the live fetch jobs below.
+    Reach this page any time from the <strong>downloads</strong>
+    indicator in the navbar, right of Settings.
+    {% elif section == "hashes" %}
+    Background SHA-256 hashing of files under
+    <code>{{ image_root }}</code>: dropped-in images are hashed
+    automatically (one at a time by default, so small hardware stays
+    responsive). Reach this page from the <strong>hashes</strong>
+    indicator in the navbar.
+    {% else %}
     Pre-built system images bty flashes onto target disks, content-
-    addressed by sha256. Sub-nav:
-    <strong>List</strong> is the merged catalog (dir scan + catalog
-    entries): its header carries <em>Fetch latest catalog</em> (pull
-    the bty release catalog) and <em>Upload catalog</em> (a catalog.toml);
-    <strong>Downloads</strong> is where you add a single image
-    (upload a file or add by URL) and watch the live fetch jobs;
-    <strong>Hashes</strong> shows the background sha worker. Files
-    dropped into <code>{{ image_root }}</code> are picked up and
-    hashed automatically.
+    addressed by sha256. This is the merged catalog (dir scan +
+    catalog entries): its header carries <em>Fetch latest catalog</em>
+    (pull the bty release catalog) and <em>Upload catalog</em>
+    (a catalog.toml). Files dropped into <code>{{ image_root }}</code>
+    are picked up and hashed automatically; add individual images from
+    the <strong>Downloads</strong> page.
+    {% endif %}
 {% endcall %}
 {% endblock %}
 
@@ -32,7 +54,7 @@
 {# Downloads: the two add-image controls (add by URL, upload a local
    file) live inline in the table header, split by a vertical rule; the
    live download-jobs table is below. #}
-<div class="card mb-3">
+<div class="card mb-3" id="downloads-list">
     {# ``py-1`` + ``flex-nowrap`` keep this a single tight row: the two
        add-image forms used to wrap to a second line (doubling the
        header height) on a narrow window. The inputs shrink (min-width:0)
@@ -48,8 +70,8 @@
                        style="max-width: 18rem; min-width: 0;"
                        placeholder="https://...img.gz  |  oras://owner/repo:tag"
                        title="http(s):// trusts the upstream bytes on first flash and back-fills disk_image_sha; oras:// resolves the OCI manifest digest at add time.">
-                <button type="submit" class="btn btn-sm btn-outline-secondary flex-shrink-0 text-nowrap">
-                    <i class="bi bi-cloud-plus me-1"></i>Fetch from URL
+                <button type="submit" class="btn btn-sm btn-primary flex-shrink-0 text-nowrap">
+                    <i class="bi bi-cloud-download me-1"></i>Fetch from URL
                 </button>
             </form>
             <div class="vr"></div>
@@ -60,7 +82,7 @@
                        style="max-width: 15rem; min-width: 0;"
                        accept=".qcow2,.img,.img.zst,.img.xz,.img.gz,.img.bz2,.iso,.iso.gz"
                        title="Streams into the image root via PUT /images/<name>; SHA-256 auto-computed after.">
-                <button type="button" class="btn btn-sm btn-outline-secondary flex-shrink-0 text-nowrap" id="upload-btn"
+                <button type="button" class="btn btn-sm btn-primary flex-shrink-0 text-nowrap" id="upload-btn"
                         onclick="uploadSelectedFile();" disabled>
                     <i class="bi bi-upload me-1"></i>Upload
                 </button>
@@ -149,7 +171,7 @@
     }
 </script>
 {% elif section == "hashes" %}
-<div class="card mb-3">
+<div class="card mb-3" id="hashes-list">
     <div class="card-header bg-light fw-semibold">
         <i class="bi bi-hash me-1"></i>Hashes
         <small class="text-muted ms-2">background SHA-256 of dir-scan files; default 1 at a time so small hardware (Pi / NUC) stays responsive</small>
@@ -173,7 +195,7 @@
 </div>
 {% else %}
 
-<div class="card mb-3">
+<div class="card mb-3" id="images-list">
     {# ``py-1`` + ``flex-nowrap``: keep the catalog actions a single
        tight row instead of wrapping to a second line on a narrow
        window. The upload input shrinks; button labels stay intact. #}
@@ -190,7 +212,7 @@
                 <input type="file" required name="file" accept=".toml"
                        class="form-control form-control-sm" style="max-width: 12rem; min-width: 0;"
                        title="catalog.toml: parsed before replacing {{ manifest_path }}">
-                <button type="submit" class="btn btn-sm btn-outline-secondary flex-shrink-0 text-nowrap">
+                <button type="submit" class="btn btn-sm btn-primary flex-shrink-0 text-nowrap">
                     <i class="bi bi-upload me-1"></i>Upload catalog
                 </button>
             </form>
@@ -256,7 +278,7 @@
                         <span class="badge bg-light text-dark border">available</span>
                         {% endif %}
                     </td>
-                    <td class="text-end">
+                    <td class="text-end text-nowrap">
                         {# Dispatch by source shape, not just sha presence:
                            - Has a ``local`` source and no sha -> the file is
                              on disk and just needs hashing. Hash button.
@@ -271,15 +293,15 @@
                         {% set has_local = u.sources|selectattr('kind','equalto','local')|list|length > 0 %}
                         {% if not u.sha256 and has_local %}
                         <button type="button"
-                                class="btn btn-sm btn-warning bty-hash-btn"
+                                class="btn btn-sm btn-warning text-nowrap bty-hash-btn"
                                 data-name="{{ u.names[0] }}">
                             <i class="bi bi-hash me-1"></i>Hash
                         </button>
                         {% elif not u.cached %}
                         <button type="button"
-                                class="btn btn-sm btn-primary bty-fetch-btn"
+                                class="btn btn-sm btn-primary text-nowrap bty-fetch-btn"
                                 data-name="{{ u.names[0] }}">
-                            <i class="bi bi-cloud-arrow-down me-1"></i>Fetch
+                            <i class="bi bi-cloud-download me-1"></i>Fetch
                         </button>
                         {% endif %}
                         {# Evict cached bytes. Available for any entry
@@ -440,7 +462,7 @@
 
     function actionCellFor(d, cancelEndpoint) {
         if (d.status === "queued" || d.status === "running") {
-            return '<button type="button" class="btn btn-sm btn-outline-danger bty-cancel-btn" ' +
+            return '<button type="button" class="btn btn-sm btn-outline-danger text-nowrap bty-cancel-btn" ' +
                    'data-name="' + esc(d.name) + '" data-endpoint="' + esc(cancelEndpoint) + '">' +
                    '<i class="bi bi-x-circle me-1"></i>Cancel</button>';
         }
@@ -638,7 +660,8 @@
    doing an upload sees the recent activity context. #}
 {% with events=image_events,
         title="Recent image-catalog activity",
-        link_to_full="/ui/events?subject_kind=image" %}
+        link_to_full="/ui/events?subject_kind=image",
+        card_id="images-activity" %}
 {% include "ui/_events_card.html" %}
 {% endwith %}
 {% endblock %}

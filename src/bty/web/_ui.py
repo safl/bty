@@ -263,7 +263,7 @@ def register_ui_routes(
                     else f"Missing: {', '.join(missing_netboot)}"
                 ),
                 "href": "/ui/boot",
-                "fix_href": "/ui/boot?section=fetch",
+                "fix_href": "/ui/fetches",
                 "fix_label": "Fetch netboot artifacts",
             },
             {
@@ -275,7 +275,7 @@ def register_ui_routes(
                     else "No catalog entries and no local images."
                 ),
                 "href": "/ui/images",
-                "fix_href": "/ui/images?section=fetch",
+                "fix_href": "/ui/images",
                 "fix_label": "Fetch catalog",
             },
             {
@@ -290,12 +290,11 @@ def register_ui_routes(
                         "or operator owns the lifecycle)."
                     )
                 ),
-                "href": "/ui/boot?section=tftp",
-                # The control buttons live on the TFTP section
-                # itself; "fix" is the same as "view". Label
-                # matches the sub-nav pill so operators see one
-                # name across the two surfaces.
-                "fix_href": "/ui/boot?section=tftp",
+                "href": "/ui/boot",
+                # The TFTP daemon control now lives on the Netboot
+                # list view (below the artifacts table); "fix" is the
+                # same as "view".
+                "fix_href": "/ui/boot",
                 "fix_label": "TFTP daemon",
             },
             {
@@ -323,12 +322,12 @@ def register_ui_routes(
                 "ok": state_valid,
                 "info": not state_valid,
                 "detail": (
-                    "/var/lib/bty is a mount point; the database, images "
+                    f"{state_dir} is a mount point; the database, images "
                     "and netboot artifacts all live on it, so they "
                     "survive an OS reflash."
                     if state_valid
                     else (
-                        "/var/lib/bty is mounted but images or netboot "
+                        f"{state_dir} is mounted but images or netboot "
                         "resolve outside it, so they would not survive a "
                         "reflash. Re-run bty-state-migrate <disk>."
                         if state_migrated
@@ -382,6 +381,9 @@ def register_ui_routes(
             section = "list"
         with _db.open_db(state_path) as conn:
             rows = conn.execute(sql).fetchall()
+            # Recent machine activity (discoveries, flashes, inventory
+            # posts) for the page's "Activity" table.
+            machine_events = _events_log.list_events(conn, subject_kind="machine", limit=10)
         machines = [_row_to_dict(r) for r in rows]
         return render(
             "ui/machines.html",
@@ -389,6 +391,7 @@ def register_ui_routes(
             machines=machines,
             active_filter=active_filter,
             section=section,
+            machine_events=machine_events,
         )
 
     @app.get(
@@ -562,48 +565,35 @@ def register_ui_routes(
         publish_state_changed()
         return RedirectResponse("/ui/machines", status_code=status.HTTP_303_SEE_OTHER)
 
-    @app.get(
-        "/ui/images",
-        response_class=HTMLResponse,
-        include_in_schema=False,
-        dependencies=[Depends(require_ui_auth)],
-    )
-    def ui_images(request: Request) -> HTMLResponse:
-        """Unified images page with sub-nav. Default landing
-        (``?section=list``, or no query) shows the SHA-keyed catalog
-        merge; its table header carries the inline Fetch-latest
-        (release catalog.toml) + Upload-catalog controls. The other
-        sections:
+    def _render_images_page(request: Request, section: str) -> HTMLResponse:
+        """Build the shared context for the image-catalog family of
+        pages and render ``ui/images.html`` for ``section``.
 
-        * ``?section=downloads``: the image-add forms (upload a local
-          file, or add by http(s):// / oras:// URL) above the live
-          download-jobs table.
-        * ``?section=hashes``: the background sha worker pane.
+        ``section`` selects which body the template renders:
 
-        Unrecognised ``section`` values fall back to ``list`` so
-        bookmark drift can't 500 the page.
+        * ``list``      -- the SHA-keyed catalog merge (the ``/ui/images``
+          landing); its header carries the inline Fetch-latest
+          (release catalog.toml) + Upload-catalog controls.
+        * ``downloads`` -- the image-add forms (upload a local file, or
+          add by http(s):// / oras:// URL) above the live download-jobs
+          table. Top-level page at ``/ui/downloads``.
+        * ``hashes``    -- the background sha worker pane. Top-level
+          page at ``/ui/hashes``.
 
-        ``?error=<msg>`` lands in the layout's flash slot. The form-
-        style ``POST /ui/catalog/entries`` 303s back here with that
-        param on validation failure, sha-resolve failure, or
-        duplicate-src 409.
+        ``?error=<msg>`` lands in the layout's flash slot (the form-
+        style ``POST /ui/catalog/entries`` 303s back with that param on
+        validation failure, sha-resolve failure, or duplicate-src 409).
         """
         unified = list_unified_images() if list_unified_images is not None else []
         flash = request.query_params.get("error")
-        section = request.query_params.get("section") or "list"
-        if section not in (
-            "list",
-            "downloads",
-            "hashes",
-        ):
-            section = "list"
-        # Catalog manifest path + release repo for the "Catalog
-        # manifest" card. The path mirrors the resolution in
-        # _app.create_app (env override -> default under state dir).
-        catalog_manifest_path = os.environ.get("BTY_CATALOG_FILE")
-        if not catalog_manifest_path:
-            state_dir = os.environ.get("BTY_STATE_DIR", "/var/lib/bty")
-            catalog_manifest_path = str(Path(state_dir) / "catalog.toml")
+        # Catalog manifest path + release repo for the list view's
+        # "Catalog manifest" card. ``state_path.parent`` is the resolved
+        # state dir create_app was given, so this stays consistent with
+        # the Settings page even when ``state_path`` was passed
+        # explicitly rather than derived from ``BTY_STATE_DIR``.
+        catalog_manifest_path = os.environ.get("BTY_CATALOG_FILE") or str(
+            state_path.parent / "catalog.toml"
+        )
         # Image-relevant slice of the event log: uploads, hash
         # completions, catalog entry add/delete. Top 15 keeps the
         # page short; full timeline at /ui/events.
@@ -629,6 +619,46 @@ def register_ui_routes(
             flash=flash,
             flash_kind="danger" if flash else None,
         )
+
+    @app.get(
+        "/ui/images",
+        response_class=HTMLResponse,
+        include_in_schema=False,
+        dependencies=[Depends(require_ui_auth)],
+    )
+    def ui_images(request: Request) -> HTMLResponse:
+        """The image catalog: the SHA-keyed merge of dir-scan files +
+        catalog entries, with the inline Fetch-latest / Upload-catalog
+        controls in its header. Downloads and Hashes used to be
+        ``?section=`` sub-tabs here; they are now top-level pages
+        (``/ui/downloads``, ``/ui/hashes``) reached from the navbar's
+        worker indicators right of Settings."""
+        return _render_images_page(request, "list")
+
+    @app.get(
+        "/ui/downloads",
+        response_class=HTMLResponse,
+        include_in_schema=False,
+        dependencies=[Depends(require_ui_auth)],
+    )
+    def ui_downloads(request: Request) -> HTMLResponse:
+        """Top-level Downloads page: the image-add forms (upload a local
+        file, or add by URL) above the live download-jobs table. Reached
+        from the navbar's "Active downloads" indicator (right of
+        Settings)."""
+        return _render_images_page(request, "downloads")
+
+    @app.get(
+        "/ui/hashes",
+        response_class=HTMLResponse,
+        include_in_schema=False,
+        dependencies=[Depends(require_ui_auth)],
+    )
+    def ui_hashes(request: Request) -> HTMLResponse:
+        """Top-level Hashes page: the background SHA-256 worker pane.
+        Reached from the navbar's "Active hashes" indicator (right of
+        Settings)."""
+        return _render_images_page(request, "hashes")
 
     @app.post(
         "/ui/catalog/entries",
@@ -694,7 +724,7 @@ def register_ui_routes(
             name = resolved.title or ref.repository.rsplit("/", 1)[-1]
             fmt = bty_images.detect_format(Path(name)) or "img.gz"
             size_bytes = resolved.size
-            now = datetime.now(UTC).isoformat()
+            now = _now_iso()
             try:
                 bty_image_ref = _catalog.image_ref_for_src(image_url)
             except ValueError as exc:
@@ -760,7 +790,7 @@ def register_ui_routes(
 
         fmt = bty_images.detect_format(Path(name))
         size_bytes = _head_content_length(image_url)
-        now = datetime.now(UTC).isoformat()
+        now = _now_iso()
         try:
             bty_image_ref = _catalog.image_ref_for_src(image_url)
         except ValueError as exc:
@@ -803,33 +833,21 @@ def register_ui_routes(
         flash: str | None = None,
         flash_kind: str | None = None,
     ) -> HTMLResponse:
-        """Sub-nav-aware boot-artifacts page. ``?section=list`` (the
-        default landing) shows the artifacts (present/missing, size,
-        sha256, download) with the Fetch control -- a tag input
-        (default ``latest``) + button -- inline in the table header;
-        List and Fetch are merged into one view (like the Catalog).
-        ``?section=dhcp-pxe`` / ``?section=tftp`` are the router
-        cheatsheet + TFTP-daemon controls. Operator-side artifact
-        uploads stay scripted via the auth-gated ``PUT /boot/{name}``
-        route, not the browser.
+        """The netboot artifacts inventory (present/missing, size,
+        sha256, download) plus the TFTP daemon control.
 
-        Unrecognised ``section`` values fall back to ``list``.
+        The artifacts header still carries a "Fetch latest artifacts"
+        button, but it enqueues the fetch and hands off to the Release
+        fetches page (``/ui/fetches``, under the navbar worker icon) to
+        watch progress. The router-side DHCP / PXE cheatsheet moved to
+        Settings. Operator-side artifact uploads stay scripted via the
+        auth-gated ``PUT /boot/{name}`` route, not the browser.
         """
-        section = request.query_params.get("section") or "list"
-        if section not in ("list", "dhcp-pxe", "tftp"):
-            section = "list"
-        # Recent activity for boot artifacts: release fetches /
-        # fetch failures.
         with _db.open_db(state_path) as conn:
-            boot_events = _events_log.list_events(conn, subject_kind="boot", limit=10)
             release_repo = _settings_store.resolve_release_repo(conn)
             release_tag = _settings_store.resolve_release_tag(conn)
-        # Network + TFTP context the operator needs to wire up the
-        # netboot side. Lives here (rather than under /ui/settings)
-        # so the "what do I configure on my router" cheatsheet sits
-        # next to the netboot artifacts it depends on.
-        interfaces = _sysconfig.list_interfaces()
-        primary = next((i for i in interfaces if i.ipv4), interfaces[0] if interfaces else None)
+            # Recent netboot activity for the page's "Activity" table.
+            boot_events = _events_log.list_events(conn, subject_kind="boot", limit=10)
         return render(
             "ui/boot.html",
             request,
@@ -839,14 +857,10 @@ def register_ui_routes(
             release_repo=release_repo,
             release_tag=release_tag,
             boot_events=boot_events,
-            section=section,
             flash=flash,
             flash_kind=flash_kind,
-            interfaces=interfaces,
-            primary=primary,
             tftp=_sysconfig.tftp_status(),
             tftp_controllable=_sysconfig.tftp_controllable(),
-            missing_netboot_artifacts=_releases.missing_netboot_artifacts(boot_root),
         )
 
     @app.get(
@@ -857,6 +871,41 @@ def register_ui_routes(
     )
     def ui_boot(request: Request) -> HTMLResponse:
         return _render_boot_page(request)
+
+    def _render_fetches_page(
+        request: Request,
+        *,
+        flash: str | None = None,
+        flash_kind: str | None = None,
+    ) -> HTMLResponse:
+        """The Release fetches page (under the navbar's release-fetch
+        worker indicator, right of Settings): the "Fetch latest
+        artifacts" trigger and the live release-fetch jobs table (active
+        + recent, event-backfilled on restart), plus recent netboot
+        activity. The artifact inventory + TFTP daemon are on the Netboot
+        page."""
+        with _db.open_db(state_path) as conn:
+            boot_events = _events_log.list_events(conn, subject_kind="boot", limit=10)
+            release_repo = _settings_store.resolve_release_repo(conn)
+            release_tag = _settings_store.resolve_release_tag(conn)
+        return render(
+            "ui/fetches.html",
+            request,
+            release_repo=release_repo,
+            release_tag=release_tag,
+            boot_events=boot_events,
+            flash=flash,
+            flash_kind=flash_kind,
+        )
+
+    @app.get(
+        "/ui/fetches",
+        response_class=HTMLResponse,
+        include_in_schema=False,
+        dependencies=[Depends(require_ui_auth)],
+    )
+    def ui_fetches(request: Request) -> HTMLResponse:
+        return _render_fetches_page(request)
 
     # ----- event log -----------------------------------------------------
 
@@ -1106,6 +1155,11 @@ def register_ui_routes(
                 ],
             },
         ]
+        # Network context for the DHCP / PXE cheatsheet (moved here from
+        # the Netboot page): the appliance's interfaces + the primary
+        # v4 address the operator points their router's Next-Server at.
+        interfaces = _sysconfig.list_interfaces()
+        primary = next((i for i in interfaces if i.ipv4), interfaces[0] if interfaces else None)
         return render(
             "ui/settings.html",
             request,
@@ -1113,6 +1167,10 @@ def register_ui_routes(
             flash_kind=flash_kind,
             upstream=upstream,
             config_groups=config_groups,
+            interfaces=interfaces,
+            primary=primary,
+            boot_root=str(boot_root),
+            missing_netboot_artifacts=_releases.missing_netboot_artifacts(boot_root),
         )
 
     @app.get(
@@ -1149,10 +1207,11 @@ def register_ui_routes(
         catalog_url: Annotated[str, Form()] = "",
         release_tag: Annotated[str, Form()] = "",
     ) -> RedirectResponse:
-        """Save (or clear) the two editable upstream overrides. An empty
-        field clears the override, reverting to env / default. Both take
-        effect on the next fetch without a restart, since the fetch
-        sites resolve from this store at request time."""
+        """Save (or clear) the three editable upstream overrides
+        (release repo, catalog URL, release tag). An empty field clears
+        that override, reverting to env / default. All three take effect
+        on the next fetch without a restart, since the fetch sites
+        resolve from this store at request time."""
         rr = release_repo.strip()
         cu = catalog_url.strip()
         rt = release_tag.strip()

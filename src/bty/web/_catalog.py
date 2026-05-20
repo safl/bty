@@ -320,7 +320,10 @@ class DownloadManager(_BaseAsyncManager[DownloadState]):
         except _catalog.CatalogCancelled:
             final_status = "cancelled"
             error = None
-        except (_catalog.CatalogError, Exception) as exc:
+        except Exception as exc:
+            # Catch-all (``CatalogError`` is a subclass): the
+            # ``isinstance`` check below keeps a tidy ``CatalogError``
+            # message distinct from an unexpected error's typed prefix.
             # Cancel-vs-IO-error race: if the cancel flag fired
             # between chunks but urllib raised before the chunk
             # boundary's cancel check, treat as cancellation

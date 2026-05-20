@@ -697,11 +697,15 @@ def fetch_src_to_cache(
         else:
             opener = urllib.request.urlopen(src, timeout=timeout)
         with opener as resp, tmp_path.open("wb") as out:
-            total = (
-                int(resp.headers.get("Content-Length"))
-                if resp.headers.get("Content-Length")
-                else None
-            )
+            # Read the header once and guard the parse: a malformed
+            # ``Content-Length`` should fold into "unknown total"
+            # rather than crash the fetch (mirrors ``fetch_to_cache``
+            # and ``_releases._stream``).
+            try:
+                cl = resp.headers.get("Content-Length")
+                total = int(cl) if cl is not None else None
+            except (ValueError, AttributeError):
+                total = None
             _stream_with_digest(
                 resp,
                 out,

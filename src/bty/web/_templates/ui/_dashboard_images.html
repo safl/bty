@@ -1,8 +1,11 @@
 {# Images card body. Rendered at page load (ui_dashboard) and swapped
    live on the ``dashboard-images`` SSE event. Lives in its own col in
    dashboard.html so it's an independent, equally-spaced grid column
-   (not bundled with Machine Summary). #}
-<div class="card h-100 shadow-sm">
+   (not bundled with Machine Summary). The id lives on the card (not the
+   col) so the sub-nav "Images Summary" jump + its flash ring hug the
+   card, and it survives the SSE swap (the card is what gets swapped
+   in). #}
+<div class="card h-100 shadow-sm" id="dash-images">
     <div class="card-header bg-light fw-semibold">
         <i class="bi bi-disc me-1"></i>Images
     </div>

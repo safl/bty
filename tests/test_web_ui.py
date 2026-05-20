@@ -289,9 +289,10 @@ def test_ui_dashboard_health_monitoring_renders_with_links(client: TestClient) -
         "over the four pass/fail rows (info row excluded)"
     )
     # The two always-failing rows in the bare-fixture state
-    # (no netboot artifacts, no live TFTP daemon) carry fix links.
-    assert 'href="/ui/boot?section=fetch"' in body
-    assert 'href="/ui/boot?section=tftp"' in body
+    # (no netboot artifacts, no live TFTP daemon) carry fix links;
+    # both point at the Netboot list view (the Fetch control + the
+    # TFTP daemon panel both live there now).
+    assert 'href="/ui/boot"' in body
     # Both visual indicators render on the bare fixture: green
     # tick on the catalog row (the fixture seeds demo.qcow2 so
     # ``Catalog is non-empty`` passes), red x on the other two.
@@ -343,8 +344,11 @@ def test_ui_images_default_section_is_list_not_add_forms(client: TestClient) -> 
     r = client.get("/ui/images")
     assert r.status_code == 200
     body = r.text
-    # Sub-nav strip present; Downloads is its own pill.
-    assert 'href="/ui/images?section=downloads"' in body
+    # Sub-nav strip present (just the List pill now). Downloads is a
+    # top-level navbar entry, no longer a sub-nav pill.
+    assert 'aria-label="Section sub-navigation"' in body
+    assert 'href="/ui/downloads"' in body
+    assert 'href="/ui/images?section=downloads"' not in body
     # Catalog header carries the inline Fetch + Upload-catalog controls.
     assert 'action="/ui/catalog/fetch-release"' in body
     assert 'action="/ui/catalog/upload"' in body
@@ -354,12 +358,12 @@ def test_ui_images_default_section_is_list_not_add_forms(client: TestClient) -> 
     assert 'id="upload-file"' not in body
 
 
-def test_ui_images_downloads_section_has_add_forms(client: TestClient) -> None:
-    """The Downloads section carries the image-add forms (upload a
-    local file + add by URL) above the live download-jobs table --
-    moved here from the dropped upload-image* sub-nav pages."""
+def test_ui_downloads_page_has_add_forms(client: TestClient) -> None:
+    """The top-level Downloads page (``/ui/downloads``) carries the
+    image-add forms (upload a local file + add by URL) above the live
+    download-jobs table -- moved here out of the Images sub-nav."""
     _login(client)
-    r = client.get("/ui/images?section=downloads")
+    r = client.get("/ui/downloads")
     assert r.status_code == 200
     body = r.text
     # Add-by-URL form.
@@ -369,6 +373,25 @@ def test_ui_images_downloads_section_has_add_forms(client: TestClient) -> None:
     assert 'id="upload-file"' in body
     # The live downloads table is here too.
     assert "bty-downloads-tbody" in body
+    # The navbar downloads indicator is active; the page carries the
+    # List / Activity jump sub-nav.
+    assert "nav-worker active" in body
+    assert 'href="#downloads-list"' in body
+    assert 'href="#images-activity"' in body
+
+
+def test_ui_hashes_page_has_hashes_table(client: TestClient) -> None:
+    """The top-level Hashes page (``/ui/hashes``) shows the background
+    sha worker pane, lights its navbar indicator active, and carries the
+    List / Activity jump sub-nav."""
+    _login(client)
+    r = client.get("/ui/hashes")
+    assert r.status_code == 200
+    body = r.text
+    assert "bty-hashes-tbody" in body
+    assert "nav-worker active" in body
+    assert 'href="#hashes-list"' in body
+    assert 'href="#images-activity"' in body
 
 
 def test_ui_images_list_header_has_fetch_and_upload_catalog(client: TestClient) -> None:
@@ -447,62 +470,51 @@ def test_top_level_nav_highlights_active_page(client: TestClient) -> None:
     assert 'href="/ui/account"' in body
 
 
-def test_subnav_renders_aria_current_on_active_section(client: TestClient) -> None:
-    """The sub-nav partial annotates the active pill with
-    ``aria-current="page"`` so assistive tech announces which
-    sub-section is currently visible. Same contract across every
-    /ui page that uses the strip (images / boot / machines).
+def test_subnavs_drop_the_redundant_list_pill(client: TestClient) -> None:
+    """The per-page "List" pill was dropped as redundant. The single-view
+    pages keep the thin sub-nav strip as chrome but carry no section
+    pills (so no ``aria-current`` markers). Settings is the one page with
+    a real sub-nav: in-page section-jump links separated by rules.
     """
     import re
 
     _login(client)
 
     def _aria_current_hrefs(body: str) -> list[str]:
-        """Return the ``href`` of every <a> element bearing
-        ``aria-current="page"``. Tolerant of attribute order +
-        whitespace -- Jinja can emit either ``href=... aria-current=
-        ...`` or ``aria-current=... href=...`` depending on
-        formatting changes."""
+        """Return the ``href`` of every <a> bearing ``aria-current``."""
         out: list[str] = []
-        for m in re.finditer(
-            r'<a\b[^>]*\baria-current="page"[^>]*>',
-            body,
-            flags=re.DOTALL,
-        ):
+        for m in re.finditer(r'<a\b[^>]*\baria-current="page"[^>]*>', body, flags=re.DOTALL):
             href = re.search(r'\bhref="([^"]+)"', m.group(0))
             if href:
                 out.append(href.group(1))
-        # Also catch the swapped ordering (href first, aria-current
-        # later) -- the regex above already handles both because
-        # ``[^>]*`` spans everything between < and the matched marker.
         return out
 
-    # Default list view: exactly one active pill, pointing at /ui/images.
-    body = client.get("/ui/images").text
-    actives = _aria_current_hrefs(body)
-    assert actives == ["/ui/images"], (
-        f"images default view: expected aria-current on /ui/images only, got {actives!r}"
-    )
+    # Every content page carries the section-jump sub-nav strip with
+    # in-page anchor links (no aria-current pills -- those were the old
+    # ?section= page links).
+    for path in (
+        "/ui/images",
+        "/ui/boot",
+        "/ui/machines",
+        "/ui/events",
+        "/ui/downloads",
+        "/ui/hashes",
+        "/ui/fetches",
+        "/ui/dashboard",
+    ):
+        body = client.get(path).text
+        assert 'aria-label="Section sub-navigation"' in body, path
+        assert _aria_current_hrefs(body) == [], path
 
-    # ?section=downloads: exactly one active pill, pointing at it.
-    body = client.get("/ui/images?section=downloads").text
-    actives = _aria_current_hrefs(body)
-    assert actives == ["/ui/images?section=downloads"], (
-        f"images downloads view: expected aria-current on that href only, got {actives!r}"
-    )
-    # Top-level <nav> carries an aria-label so screen readers
-    # distinguish the section sub-nav from the top-bar nav.
-    assert 'aria-label="Section sub-navigation"' in body
+    # The worker pages also light their navbar indicator active.
+    for path in ("/ui/downloads", "/ui/hashes", "/ui/fetches"):
+        assert "nav-worker active" in client.get(path).text, path
 
-    # /ui/boot list view: List pill is active.
-    body = client.get("/ui/boot").text
-    actives = _aria_current_hrefs(body)
-    assert actives == ["/ui/boot"]
-
-    # /ui/machines list view: List pill is active.
-    body = client.get("/ui/machines").text
-    actives = _aria_current_hrefs(body)
-    assert actives == ["/ui/machines"]
+    # Settings carries its own section-jump sub-nav (anchor links + rules).
+    settings = client.get("/ui/settings").text
+    assert 'aria-label="Settings sections"' in settings
+    assert 'href="#upstream-sources"' in settings
+    assert 'href="#dhcp-pxe"' in settings
 
 
 def test_ui_images_section_unrecognised_falls_back_to_list(client: TestClient) -> None:
@@ -515,94 +527,100 @@ def test_ui_images_section_unrecognised_falls_back_to_list(client: TestClient) -
     body = r.text
     # Lands on list (no add-form markers).
     assert 'id="image_url"' not in body
-    # Sub-nav strip still renders.
-    assert 'href="/ui/images?section=downloads"' in body
+    # Sub-nav strip still renders (the List pill).
+    assert 'aria-label="Section sub-navigation"' in body
 
 
 def test_ui_boot_default_section_is_list(client: TestClient) -> None:
-    """Bare ``GET /ui/boot`` lands on the artifact table, which now
-    carries the Fetch control (tag input + button) inline in its
-    header -- List and Fetch are merged into one view."""
+    """Bare ``GET /ui/boot`` lands on the artifacts inventory + the TFTP
+    daemon control. Fetching moved to the Release fetches page, so the
+    Fetch trigger is NOT on this view."""
     _login(client)
     r = client.get("/ui/boot")
     assert r.status_code == 200
     body = r.text
-    # Sub-nav strip renders (DHCP/PXE pill present).
-    assert 'href="/ui/boot?section=dhcp-pxe"' in body
-    # Fetch control is inline in the artifacts table header (the tag is
-    # an editable Settings value, so the button just fetches it).
+    # Sub-nav strip renders with just the List pill now: DHCP / PXE
+    # moved to Settings and TFTP folded into this list view.
+    assert 'aria-label="Section sub-navigation"' in body
+    assert 'href="/ui/boot?section=dhcp-pxe"' not in body
+    # The artifacts inventory + the Fetch button render here (the button
+    # hands off to the Release fetches page); the live jobs table itself
+    # lives on /ui/fetches.
+    assert "<th>File</th>" in body
     assert 'id="enqueue-fetch-btn"' in body
-    assert "artifacts" in body
+    assert "bty-fetches-tbody" not in body
 
 
-def test_ui_boot_list_has_live_release_fetches_table(client: TestClient) -> None:
-    """The netboot List view renders a live Release fetches table that
-    polls GET /boot/releases, so active + previous (event-backfilled)
-    fetches are visible -- mirrors the Images -> Downloads jobs table.
-    """
+def test_ui_fetches_page_has_fetch_control_and_jobs_table(client: TestClient) -> None:
+    """The Release fetches page (``/ui/fetches``, under the navbar's
+    release-fetch worker icon) carries the "Fetch latest artifacts"
+    trigger and a live jobs table that polls GET /boot/releases. It's a
+    top-level page: the worker indicator is active and there's no section
+    sub-nav."""
     _login(client)
-    body = client.get("/ui/boot").text
+    body = client.get("/ui/fetches").text
     assert "Release fetches" in body
-    assert "bty-fetches-tbody" in body
-    # The poller targets the release-fetch listing endpoint.
-    assert '"/boot/releases"' in body
-
-
-def test_ui_boot_list_header_has_fetch_control(client: TestClient) -> None:
-    """The netboot List view carries the Fetch control inline in the
-    artifacts table header. The release tag is an editable Settings
-    value, so the button reads "Fetch latest artifacts" and carries the
-    resolved tag in data-tag (no on-page tag input)."""
-    _login(client)
-    body = client.get("/ui/boot").text
     assert 'id="enqueue-fetch-btn"' in body
     assert 'data-tag="latest"' in body
-    assert "artifacts" in body
-    # The artifacts table renders alongside the control.
-    assert "<th>File</th>" in body
-    # The DHCP/PXE + TFTP section bodies are NOT on the list view
-    # (their subnav pills are, but not the cheatsheet / daemon panel).
-    assert "Router-side configuration" not in body
-    assert "serves the TFTP root" not in body
+    assert "bty-fetches-tbody" in body
+    assert '"/boot/releases"' in body
+    # Worker icon active; the page carries the List / Activity jump nav.
+    assert "nav-worker active" in body
+    assert 'href="#fetches-list"' in body
+    assert 'href="#netboot-activity"' in body
 
 
-def test_ui_boot_section_dhcp_pxe_shows_router_cheatsheet(client: TestClient) -> None:
-    """The DHCP / PXE sub-section is the operator's router-config
-    cheatsheet. It must render the four DHCP options bty needs
-    the LAN router to set (60 PXEClient / 66 next-server / 67
-    bootfile / 67 for user-class=iPXE), each labelled."""
+def test_ui_boot_list_header_has_artifacts_and_tftp(client: TestClient) -> None:
+    """The netboot List view shows the artifacts inventory and the TFTP
+    daemon panel. The router-side DHCP / PXE cheatsheet moved to
+    Settings; the Fetch trigger moved to the Release fetches page."""
     _login(client)
-    r = client.get("/ui/boot?section=dhcp-pxe")
+    body = client.get("/ui/boot").text
+    # The artifacts table renders.
+    assert "<th>File</th>" in body
+    # The TFTP daemon panel lives here, with a link over to the Settings
+    # DHCP / PXE config details.
+    assert "serves the TFTP root" in body
+    assert 'href="/ui/settings#dhcp-pxe"' in body
+    # The router cheatsheet is NOT here (it's on Settings); the Fetch
+    # button IS here (it hands off to the Release fetches page), but the
+    # live jobs table is not.
+    assert "Router-side configuration" not in body
+    assert 'id="enqueue-fetch-btn"' in body
+    assert "bty-fetches-tbody" not in body
+
+
+def test_ui_settings_shows_dhcp_pxe_cheatsheet(client: TestClient) -> None:
+    """The DHCP / PXE router-config cheatsheet moved to the Settings
+    page. It must render the four DHCP options bty needs the LAN
+    router to set (60 PXEClient / 66 next-server / 67 bootfile / 67
+    for user-class=iPXE), each labelled."""
+    _login(client)
+    r = client.get("/ui/settings")
     assert r.status_code == 200
     body = r.text
-    # Section renders in a card (header label + cheatsheet content +
-    # the four DHCP options).
     assert "DHCP / PXE" in body
     assert "Router-side configuration" in body
     assert "option 60" in body
     assert "PXEClient" in body
     assert "option 66" in body
     assert "option 67" in body
-    # The other sub-sections should NOT render.
-    assert 'id="enqueue-fetch-btn"' not in body
-    assert "serves the TFTP root" not in body
 
 
-def test_ui_boot_section_tftp_shows_daemon_status(client: TestClient) -> None:
-    """The TFTP sub-section is the operator's "take PXE offline
-    briefly" surface. Renders the dnsmasq.service status badge +
-    Start/Stop/Restart controls (or the no-helper hint when the
-    container can't supervise the daemon)."""
+def test_ui_boot_shows_tftp_daemon_status(client: TestClient) -> None:
+    """The TFTP daemon control moved onto the Netboot list view (below
+    the artifacts table) -- the operator's "take PXE offline briefly"
+    surface. Renders the dnsmasq.service status badge + Start/Stop/
+    Restart controls (or the no-helper hint when the container can't
+    supervise the daemon)."""
     _login(client)
-    r = client.get("/ui/boot?section=tftp")
+    r = client.get("/ui/boot")
     assert r.status_code == 200
     body = r.text
-    # Section renders in a card (header label + daemon panel content).
     assert "TFTP daemon" in body
     assert "serves the TFTP root" in body
     assert "dnsmasq.service" in body
-    # The other sub-sections should NOT render.
-    assert 'id="enqueue-fetch-btn"' not in body
+    # The router cheatsheet is on Settings now, not here.
     assert "Router-side configuration" not in body
 
 
@@ -664,12 +682,14 @@ def test_ui_boot_section_unrecognised_falls_back_to_list(client: TestClient) -> 
     r = client.get("/ui/boot?section=garbage")
     assert r.status_code == 200
     body = r.text
-    # Lands on list: artifacts table + the inline Fetch control.
-    assert 'id="enqueue-fetch-btn"' in body
+    # Lands on list: the artifacts inventory (the Fetch trigger moved
+    # to the Release fetches page).
+    assert "<th>File</th>" in body
     assert "bty-netboot-x86_64.vmlinuz" in body
-    # Sub-nav strip still renders with the canonical pills.
-    assert 'href="/ui/boot?section=dhcp-pxe"' in body
-    assert 'href="/ui/boot?section=tftp"' in body
+    # Sub-nav strip still renders (just the List pill now; DHCP / PXE
+    # moved to Settings and TFTP folded into this view).
+    assert 'aria-label="Section sub-navigation"' in body
+    assert 'href="/ui/boot?section=dhcp-pxe"' not in body
 
 
 def test_ui_machines_list_has_inline_add_form(client: TestClient) -> None:
@@ -703,12 +723,12 @@ def test_ui_machines_inline_add_defaults_to_safe_local_policy(client: TestClient
     assert '"boot_policy", "flash"' not in body
 
 
-def test_ui_boot_page_shows_recent_activity_card(
+def test_ui_fetches_page_shows_recent_activity_card(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The /ui/boot page reuses ``_events_card.html`` to show the
-    last 10 boot.* events (release fetches + fetch failures).
-    Trigger a successful sync fetch first so a row exists."""
+    """The Release fetches page reuses ``_events_card.html`` to show the
+    last 10 boot.* events (release fetches + fetch failures). Trigger a
+    successful sync fetch first so a row exists."""
     _login(client)
 
     def fake_fetch(boot_dir, *_a, **_kw):  # type: ignore[no-untyped-def]
@@ -718,10 +738,9 @@ def test_ui_boot_page_shows_recent_activity_card(
 
     monkeypatch.setattr("bty.web._releases.fetch_release", fake_fetch)
     client.post("/ui/boot/fetch-release", data={"tag": "v0.0.1"})
-    r = client.get("/ui/boot")
+    r = client.get("/ui/fetches")
     assert r.status_code == 200
     body = r.text
-    # Card title was renamed alongside the Boot -> Netboot label change.
     assert "Recent netboot activity" in body
     assert "boot.release.fetched" in body
 
@@ -739,9 +758,11 @@ def test_ui_machines_filter_assigned_excludes_discovered(client: TestClient) -> 
     )
     r = client.get("/ui/machines?filter=assigned")
     assert r.status_code == 200
-    body = r.text
-    assert "aa:bb:cc:dd:ee:04" in body
-    assert "aa:bb:cc:dd:ee:03" not in body
+    # Scope to the list table (the unfiltered "Activity" card below can
+    # mention any MAC's discovery event).
+    list_part = r.text.split('id="machines-activity"')[0]
+    assert "aa:bb:cc:dd:ee:04" in list_part
+    assert "aa:bb:cc:dd:ee:03" not in list_part
 
 
 def test_ui_machines_filter_unrecognised_value_falls_back_to_full_list(
@@ -781,8 +802,11 @@ def test_ui_machines_filter_discovered_excludes_assigned(client: TestClient) -> 
     r = client.get("/ui/machines?filter=discovered")
     assert r.status_code == 200
     body = r.text
-    assert "aa:bb:cc:dd:ee:01" in body
-    assert "aa:bb:cc:dd:ee:02" not in body
+    # Scope to the list table (the unfiltered "Activity" card below can
+    # mention any MAC's create/discovery event).
+    list_part = body.split('id="machines-activity"')[0]
+    assert "aa:bb:cc:dd:ee:01" in list_part
+    assert "aa:bb:cc:dd:ee:02" not in list_part
     # Under a server-side filter the SSE wiring is suppressed (a live
     # update would replace the filtered tbody with the full list).
     assert 'sse-connect="/events/machines"' not in body
@@ -1218,23 +1242,16 @@ def test_ui_boot_page_renders_with_artifact_state(client: TestClient) -> None:
     # Empty boot dir => four "missing" badges (warning kind).
     assert body.count("missing</span>") == 4
     assert body.count('class="badge bg-warning text-dark"') >= 4
-    # The polling JS for active fetches lives on the fetch section
-    # (next to the Fetch form), not the default list view.
-    assert 'id="fetches-tbody"' not in body
-    fetch_body = client.get("/ui/boot?section=fetch").text
-    assert "/boot/releases" in fetch_body
-    # The polling JS must NOT reference a never-set
-    # ``_just_completed_marker`` field. Pin the cleaned-up shape so
-    # a copy-paste doesn't reintroduce it.
-    assert "_just_completed_marker" not in fetch_body
-
-    # The Fetch button lives behind ?section=fetch (the sub-nav
-    # split lands operators on the OBSERVABLE state by default;
-    # the action forms are one sub-nav click away).
-    r2 = client.get("/ui/boot?section=fetch")
-    assert r2.status_code == 200
-    fetch_body = r2.text
-    assert 'id="enqueue-fetch-btn"' in fetch_body
+    # The Fetch button is on this inventory view (it hands off to the
+    # Release fetches page); the live jobs table lives on /ui/fetches.
+    assert 'id="enqueue-fetch-btn"' in body
+    assert "bty-fetches-tbody" not in body
+    # The Release fetches page carries the poller + the live jobs table +
+    # the cleaned-up JS shape (no never-set ``_just_completed_marker``).
+    fetches_body = client.get("/ui/fetches").text
+    assert "/boot/releases" in fetches_body
+    assert "_just_completed_marker" not in fetches_body
+    assert "bty-fetches-tbody" in fetches_body
 
 
 # ---------- Phase E: settings page ----------------------------------------

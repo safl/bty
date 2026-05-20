@@ -5,12 +5,14 @@
      - ``title`` -- card title (e.g. "Recent activity")
      - ``link_to_full`` -- /ui/events URL (with subject filter applied)
        so the operator can drill into the full timeline.
+     - ``card_id`` -- optional id on the card so an in-page sub-nav
+       "Activity" anchor can jump to it.
 
-   Renders nothing if ``events`` is empty so the parent page
-   doesn't grow an empty card.
+   Always renders (an empty-state row when there are no events) so the
+   "Activity" sub-nav anchor always has a target and the table is a
+   stable fixture on the page.
 #}
-{% if events %}
-<div class="card mb-3">
+<div class="card mb-3"{% if card_id %} id="{{ card_id }}"{% endif %}>
     <div class="card-header bg-light fw-semibold d-flex justify-content-between align-items-center">
         <span><i class="bi bi-clock-history me-1"></i>{{ title }}</span>
         {% if link_to_full %}
@@ -64,8 +66,15 @@
                     </td>
                 </tr>
                 {% endfor %}
+                {% if not events %}
+                <tr>
+                    <td colspan="4" class="text-muted small">
+                        No activity yet. Events appear here as machines check
+                        in, operators make changes, and background jobs run.
+                    </td>
+                </tr>
+                {% endif %}
             </tbody>
         </table>
     </div>
 </div>
-{% endif %}

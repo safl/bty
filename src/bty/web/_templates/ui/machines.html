@@ -2,11 +2,17 @@
 {% block title %}Machines - bty-web{% endblock %}
 
 {% block subnav %}
-{% with sections=[
-    {"key": "list", "label": "List",        "icon": "list-ul",     "href": "/ui/machines"},
-] , active=section %}
-{% include "ui/_subnav.html" %}
-{% endwith %}
+{# In-page jump links to the two tables on this page, separated by a
+   vertical rule (same style as the Settings section nav). #}
+<nav class="navbar subnav-strip" aria-label="Section sub-navigation">
+    <div class="container">
+        <span class="subnav-jumps d-flex align-items-center flex-wrap">
+            <a href="#machines-list">List</a>
+            <span class="vr"></span>
+            <a href="#machines-activity">Activity</a>
+        </span>
+    </div>
+</nav>
 {% endblock %}
 
 {% block intro %}
@@ -24,7 +30,7 @@
 {# The live table of all machines, with a minimal inline add-by-MAC
    field in the header. Machines also auto-appear on first PXE
    contact; the inline Add just stages a row early. #}
-<div class="card">
+<div class="card mb-3" id="machines-list">
     {# ``py-1`` + ``flex-nowrap`` keep the header a single tight row
        around the inline add-MAC form: default padding plus a wrap to a
        second line made the bar much taller than a table row. The input
@@ -112,4 +118,14 @@
         return false;
     }
 </script>
+
+{# Recent machine activity (discoveries, flashes, inventory posts). The
+   "Activity" sub-nav anchor jumps here; always rendered (empty-state
+   row when there's nothing yet). #}
+{% with events=machine_events,
+        title="Recent machine activity",
+        link_to_full="/ui/events?subject_kind=machine",
+        card_id="machines-activity" %}
+{% include "ui/_events_card.html" %}
+{% endwith %}
 {% endblock %}

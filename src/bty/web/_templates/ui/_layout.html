@@ -16,6 +16,21 @@
             height: 3px;
             background: linear-gradient(90deg, #0d6efd 0%, #6610f2 50%, #d63384 100%);
         }
+        /* The accent + navbar + sub-nav pin to the top as one unit so
+           the worker indicators and sub-nav jump links stay visible
+           while scrolling. */
+        .bty-sticky-header {
+            position: sticky;
+            top: 0;
+            z-index: 1030;
+        }
+        /* In-page ``#anchor`` jumps (the sub-nav section links) land
+           below the sticky header instead of under it. Matches the
+           combined accent + navbar + sub-nav height with a little slack. */
+        html {
+            scroll-padding-top: 5.5rem;
+            scroll-behavior: smooth;
+        }
         /* Brand pill keeps the same padding + radius on every
            page; the active-on-dashboard state only swaps the
            background colour so the layout doesn't shift when the
@@ -162,9 +177,28 @@
         .sse-target.flashing {
             animation: bty-flash 0.7s ease-out;
         }
+        /* Sub-nav jump feedback: a brief accent ring on the targeted
+           card. Gives clear feedback even when the page is too short to
+           scroll (so the hash jump moves nothing). Re-triggerable via
+           the click handler below.
+
+           Uses ``outline`` rather than ``box-shadow``: Bootstrap's
+           ``.shadow-sm`` (on the dashboard cards) sets ``box-shadow``
+           with ``!important``, which an animation cannot override -- so
+           a box-shadow flash silently no-ops there. ``outline`` is
+           untouched by the shadow utilities and follows the card's
+           border-radius in modern browsers. */
+        @keyframes bty-jump-flash {
+            0%   { outline: 3px solid rgba(13, 110, 253, 0.7); outline-offset: 2px; }
+            100% { outline: 3px solid rgba(13, 110, 253, 0); outline-offset: 2px; }
+        }
+        .bty-jump-flash {
+            animation: bty-jump-flash 1s ease-out;
+        }
         @media (prefers-reduced-motion: reduce) {
             .nav-live.pulsing i,
-            .sse-target.flashing {
+            .sse-target.flashing,
+            .bty-jump-flash {
                 animation: none;
             }
         }
@@ -180,6 +214,12 @@
         .subnav-strip {
             background-color: #495057;
             border-bottom: 1px solid rgba(255, 255, 255, 0.10);
+            /* The sub-nav reads as a thinner, quieter tier than the
+               main navbar: ~2/3 its height, with text scaled down to
+               match (the top nav is the default ~1rem). */
+            padding-top: 0.1rem;
+            padding-bottom: 0.1rem;
+            font-size: 0.72rem;
         }
         /* Pin the strip's inner container's minimum height so the
            strip stays the same height regardless of whether it
@@ -192,7 +232,7 @@
            reservation, so adding/removing pills doesn't shift
            ``main`` content up or down. */
         .subnav-strip > .container {
-            min-height: 2.3rem;
+            min-height: 1.7rem;
             display: flex;
             align-items: center;
         }
@@ -204,8 +244,32 @@
         }
         .subnav-strip .nav-pills .nav-link {
             color: rgba(255, 255, 255, 0.78);
-            /* Match the top nav's ``.nav-btn`` padding. */
-            padding: 0.4rem 0.8rem;
+            /* Tighter than the top nav's ``.nav-btn`` to suit the
+               thinner strip. */
+            padding: 0.15rem 0.55rem;
+        }
+        /* Settings section-jump links: in-page anchors to each card,
+           separated by ``.vr`` vertical rules. Quiet until hovered. */
+        .subnav-strip .subnav-jumps {
+            gap: 0.1rem;
+        }
+        .subnav-strip .subnav-jumps a {
+            color: rgba(255, 255, 255, 0.82);
+            text-decoration: none;
+            padding: 0.15rem 0.55rem;
+            border-radius: 0.35rem;
+        }
+        .subnav-strip .subnav-jumps a:hover {
+            color: #fff;
+            background-color: rgba(255, 255, 255, 0.10);
+        }
+        .subnav-strip .subnav-jumps .vr {
+            background-color: rgba(255, 255, 255, 0.5);
+            opacity: 1;
+            width: 1px;
+            min-height: 1.4em;
+            align-self: center;
+            margin: 0 0.3rem;
         }
         .subnav-strip .nav-pills .nav-link:hover {
             color: #fff;
@@ -281,6 +345,16 @@
         .nav-worker.busy {
             color: #fff;
         }
+        /* The worker icon whose page the operator is currently on:
+           emphasized like a selected nav-btn (full white on the brand
+           blue) so "you are here" reads at a glance, matching the
+           ``.nav-btn.active`` treatment above. */
+        .nav-worker.active {
+            color: #fff;
+            background-color: #0d6efd;
+            border-radius: 0.5rem;
+            box-shadow: 0 0 0 1px rgba(13, 110, 253, 0.6);
+        }
         .nav-worker-badge {
             position: absolute;
             top: -1px;
@@ -325,6 +399,10 @@
     <script src="/static/sse.js"></script>
 </head>
 <body class="bg-light">
+{# Sticky header: the accent strip, the main navbar, and the sub-nav
+   travel together and pin to the top so the worker indicators + the
+   sub-nav jump links stay reachable while scrolling a long page. #}
+<div class="bty-sticky-header">
 <div class="bty-accent"></div>
 <nav class="navbar navbar-expand-md bg-dark navbar-dark py-2">
     <div class="container">
@@ -357,21 +435,23 @@
                 <a class="nav-btn {% if nav_active == 'settings' %}active{% endif %}" href="/ui/settings">
                     <i class="bi bi-sliders"></i>Settings
                 </a>
-                {# Background-worker status, right of Events in a quieter
-                   (status, not navigation) style. A small poller lights
-                   each badge when its manager has queued/running jobs,
-                   so activity is visible from any page. #}
+                {# Downloads + Hashes are top-level pages right of
+                   Settings: the icon links to the page, the badge lights
+                   when its manager has queued/running jobs, and the
+                   ``active`` class emphasizes the one whose page you're
+                   on. The release-fetch indicator stays pure status
+                   (its page lives under Netboot). #}
                 <div class="nav-workers d-flex align-items-center"
-                     title="Background workers: downloads / hashes / release fetches">
-                    <a class="nav-worker" href="/ui/images?section=downloads" title="Active downloads">
+                     title="Downloads / Hashes (live job counts); release fetches">
+                    <a class="nav-worker {% if nav_active == 'downloads' %}active{% endif %}" href="/ui/downloads" title="Downloads (active job count)">
                         <i class="bi bi-arrow-down-circle"></i>
                         <span class="badge rounded-pill bg-primary nav-worker-badge d-none" data-worker="downloads">0</span>
                     </a>
-                    <a class="nav-worker" href="/ui/images?section=hashes" title="Active hashes">
+                    <a class="nav-worker {% if nav_active == 'hashes' %}active{% endif %}" href="/ui/hashes" title="Hashes (active job count)">
                         <i class="bi bi-hash"></i>
                         <span class="badge rounded-pill bg-warning text-dark nav-worker-badge d-none" data-worker="hashes">0</span>
                     </a>
-                    <a class="nav-worker" href="/ui/boot?section=fetch" title="Active release fetches">
+                    <a class="nav-worker {% if nav_active == 'fetches' %}active{% endif %}" href="/ui/fetches" title="Release fetches (active job count)">
                         <i class="bi bi-cloud-arrow-down"></i>
                         <span class="badge rounded-pill bg-info text-dark nav-worker-badge d-none" data-worker="releases">0</span>
                     </a>
@@ -418,6 +498,7 @@
    The intent is "you already know what page you're on, no need
    to repeat ``Machines`` as an H1 below". #}
 {% block subnav %}{% endblock %}
+</div>{# /.bty-sticky-header #}
 
 <main class="container py-4">
     {% if flash %}
@@ -456,6 +537,16 @@
         if (evt.target && evt.target.classList.contains("sse-target")) {
             blink(evt.target, "flashing");
         }
+    });
+
+    // Sub-nav jump links (and the Settings section nav): briefly flash
+    // the targeted card so a click gives feedback even when the page is
+    // too short to scroll. The browser still handles the hash + scroll.
+    document.addEventListener("click", function (ev) {
+        var a = ev.target.closest('.subnav-jumps a[href^="#"]');
+        if (!a) return;
+        var target = document.getElementById(a.getAttribute("href").slice(1));
+        if (target) blink(target, "bty-jump-flash");
     });
 })();
 

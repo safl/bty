@@ -1710,7 +1710,9 @@ def create_app(
             body.verify_ref()
         except ValueError as exc:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                # Match the sibling 422 below (the non-deprecated
+                # spelling Starlette renamed ``..._ENTITY`` to).
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=str(exc),
             ) from exc
 

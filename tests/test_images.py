@@ -93,6 +93,22 @@ def test_inspect_image_qcow2_invokes_qemu_img(tmp_path: Path) -> None:
     assert info["size_bytes"] == 10
 
 
+def test_inspect_image_qcow2_unparseable_json_is_detail_error(tmp_path: Path) -> None:
+    """``qemu-img info`` can exit 0 yet emit non-JSON (truncated /
+    half-understood image). The inspect must not 500: it folds the
+    decode failure into ``detail_error`` and leaves ``detail`` unset."""
+    img = _touch(tmp_path / "x.qcow2", size=10)
+    fake_proc = MagicMock()
+    fake_proc.stdout = "not json at all {"
+    fake_proc.returncode = 0
+    with patch("bty.images.subprocess.run", return_value=fake_proc):
+        info = images.inspect_image(img)
+    assert "detail" not in info
+    assert "detail_error" in info
+    assert "unparseable" in info["detail_error"].lower()
+    assert info["format"] == "qcow2"
+
+
 def test_inspect_image_zst_invokes_zstd(tmp_path: Path) -> None:
     img = _touch(tmp_path / "x.img.zst", size=10)
     fake_proc = MagicMock()

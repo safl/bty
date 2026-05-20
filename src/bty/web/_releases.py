@@ -44,6 +44,11 @@ ALL_NAMES = (*ARTIFACT_NAMES, SHA256_NAME)
 DEFAULT_REPO = "safl/bty"
 DEFAULT_USER_AGENT = "bty-web release-fetcher"
 
+# Env var that overrides the release repo when no explicit ``repo`` is
+# passed to :func:`fetch_release`. Single source of truth, re-exported
+# by :mod:`bty.web._settings_store` (which layers a DB override on top).
+ENV_RELEASE_REPO = "BTY_BOOT_RELEASE_REPO"
+
 
 @dataclass(frozen=True)
 class ArtifactState:
@@ -181,7 +186,7 @@ def fetch_release(
     the artifact field stayed None across the whole multi-file
     fetch.
     """
-    repo = repo or os.environ.get("BTY_BOOT_RELEASE_REPO") or DEFAULT_REPO
+    repo = repo or os.environ.get(ENV_RELEASE_REPO) or DEFAULT_REPO
     if base_url is None:
         if tag == "latest":
             base_url = f"https://github.com/{repo}/releases/latest/download"

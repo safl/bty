@@ -2,9 +2,25 @@
 {% block title %}Settings - bty-web{% endblock %}
 
 {% block subnav %}
-{% with sections=None %}
-{% include "ui/_subnav.html" %}
-{% endwith %}
+{# Settings is the one page with real sub-nav: in-page jump links to
+   each card, separated by vertical rules. #}
+<nav class="navbar subnav-strip" aria-label="Settings sections">
+    <div class="container">
+        <span class="subnav-jumps d-flex align-items-center flex-wrap">
+            <a href="#upstream-sources">Upstream sources</a>
+            <span class="vr"></span>
+            <a href="#settings-identity">Identity</a>
+            <span class="vr"></span>
+            <a href="#settings-storage-paths">Storage paths</a>
+            <span class="vr"></span>
+            <a href="#settings-network">Network</a>
+            <span class="vr"></span>
+            <a href="#settings-background-workers">Background workers</a>
+            <span class="vr"></span>
+            <a href="#dhcp-pxe">DHCP / PXE</a>
+        </span>
+    </div>
+</nav>
 {% endblock %}
 
 {% block intro %}
@@ -13,16 +29,16 @@
     Where every bty magic value comes from. Most are read-only (set via
     environment variable or derived from the state directory); the
     <strong>Upstream sources</strong> card is editable and persists in
-    the database. Operator authentication lives on the
-    <a href="/ui/account">Account</a> page; PXE / Netboot wiring on the
-    <a href="/ui/boot">Netboot</a> page.
+    the database. The <strong>DHCP / PXE</strong> cheatsheet below is the
+    router-side config to point PXE clients at this appliance. Operator
+    authentication lives on the <a href="/ui/account">Account</a> page.
 {% endcall %}
 {% endblock %}
 
 {% block content %}
 {# Editable: the two upstream URLs. Empty field clears the override and
    reverts to env / default. Both take effect on the next fetch. #}
-<div class="card mb-4">
+<div class="card mb-4" id="upstream-sources">
     <div class="card-header bg-light fw-semibold">
         <i class="bi bi-cloud-arrow-down me-1"></i>Upstream sources
     </div>
@@ -76,7 +92,7 @@
 {# Read-only: the magic values, grouped, each row tagged with where the
    live value came from (env var / derived path / default). #}
 {% for group in config_groups %}
-<div class="card mb-4">
+<div class="card mb-4" id="settings-{{ group.title|lower|replace(' ', '-') }}">
     <div class="card-header bg-light fw-semibold">
         <i class="bi bi-{{ group.icon }} me-1"></i>{{ group.title }}
     </div>
@@ -116,5 +132,126 @@
     </div>
 </div>
 {% endfor %}
+
+{# Router-side cheatsheet (moved here from the Netboot page). The bits
+   the operator pastes into UniFi / pfSense / dnsmasq DHCP config to
+   point PXE clients at this appliance. Reference-only; no editable
+   fields -- bty doesn't run DHCP, the LAN router does. #}
+<div class="card mb-4" id="dhcp-pxe">
+    <div class="card-header bg-light fw-semibold">
+        <i class="bi bi-hdd-network me-1"></i>DHCP / PXE
+    </div>
+    <div class="card-body">
+        <p class="text-muted">
+            bty-server runs a TFTP daemon (dnsmasq) and serves boot
+            artifacts over HTTP. The DHCP side stays with your LAN's
+            router (or DHCP server); bty deliberately doesn't try
+            to replace it. Point your router at this appliance with
+            the settings below.
+        </p>
+
+        {% if missing_netboot_artifacts %}
+        <div class="alert alert-warning d-flex justify-content-between align-items-start">
+            <div>
+                <i class="bi bi-exclamation-triangle-fill me-1"></i>
+                <strong>Netboot environment incomplete.</strong>
+                Missing under <code>{{ boot_root }}</code>:
+                {% for name in missing_netboot_artifacts %}
+                <code>{{ name }}</code>{% if not loop.last %}, {% endif %}
+                {% endfor %}.
+                PXE clients will chain into iPXE but get 404 on the
+                kernel fetch until these files are present.
+            </div>
+            <a href="/ui/fetches" class="btn btn-sm btn-primary ms-3 flex-shrink-0 text-nowrap">
+                <i class="bi bi-cloud-download me-1"></i>Fetch latest
+            </a>
+        </div>
+        {% endif %}
+
+        <h3 class="h6 mt-3">This appliance</h3>
+        <table class="table table-sm mb-3">
+            <thead>
+                <tr>
+                    <th scope="col">Interface</th>
+                    <th scope="col">State</th>
+                    <th scope="col">IPv4</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for iface in interfaces %}
+                <tr>
+                    <td><code>{{ iface.name }}</code></td>
+                    <td>{{ iface.operstate }}</td>
+                    <td>
+                        {% if iface.ipv4 %}
+                        <code>{{ iface.ipv4 }}/{{ iface.prefix }}</code>
+                        {% else %}
+                        <span class="text-muted">(no address)</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="3" class="text-muted">(no interfaces detected)</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        <h3 class="h6 mt-4">Router-side configuration</h3>
+        <p class="text-muted">
+            Configure your LAN's DHCP server to tag PXE clients with
+            the options below. For UniFi: <em>Settings &rarr; Networks
+            &rarr; [your LAN] &rarr; Advanced &rarr; DHCP &rarr; Network
+            Boot</em>. For pfSense / OpenWRT / dnsmasq: equivalent
+            options on the DHCP service.
+        </p>
+
+        <table class="table table-sm">
+            <thead>
+                <tr>
+                    <th scope="col">Option</th>
+                    <th scope="col">Value</th>
+                    <th scope="col">Notes</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><code>option 60</code></td>
+                    <td><code>PXEClient</code></td>
+                    <td>Vendor-class echo. Strict UEFI firmware filters offers without it.</td>
+                </tr>
+                <tr>
+                    <td><code>option 66</code> / Next-Server</td>
+                    <td>
+                        {% if primary and primary.ipv4 %}
+                        <code>{{ primary.ipv4 }}</code>
+                        {% else %}
+                        <code>(this appliance's LAN IP)</code>
+                        {% endif %}
+                    </td>
+                    <td>The TFTP server. Same box as bty-web.</td>
+                </tr>
+                <tr>
+                    <td><code>option 67</code> / Boot-Filename</td>
+                    <td><code>ipxe.efi</code></td>
+                    <td>For UEFI PXEClient (arch 6/7/9). Use <code>undionly.kpxe</code> for legacy BIOS (arch 0).</td>
+                </tr>
+                <tr>
+                    <td><code>option 67</code> for <code>user-class=iPXE</code></td>
+                    <td>
+                        <code>http://{% if primary and primary.ipv4 %}{{ primary.ipv4 }}{% else %}&lt;bty-server&gt;{% endif %}:8080/pxe-bootstrap.ipxe</code>
+                    </td>
+                    <td>Stops iPXE chain-loop. Different bootfile when iPXE re-DHCPs.</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <p class="form-text mt-2 mb-0">
+            For UEFI HTTP-Boot (vendor-class <code>HTTPClient</code>), point
+            <code>option 67</code> at
+            <code>http://{% if primary and primary.ipv4 %}{{ primary.ipv4 }}{% else %}&lt;bty-server&gt;{% endif %}:8080/boot/ipxe.efi</code>
+            instead (no TFTP roundtrip).
+        </p>
+    </div>
+</div>
 
 {% endblock %}

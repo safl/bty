@@ -1,8 +1,11 @@
 {# Machine Summary card body. Rendered at page load (ui_dashboard)
    and swapped live on the ``dashboard-machine`` SSE event. Lives in
    its own col in dashboard.html so it's an independent, equally-
-   spaced grid column (not bundled with Images). #}
-<div class="card h-100 shadow-sm">
+   spaced grid column (not bundled with Images). The id lives on the
+   card (not the col) so the sub-nav "Machine Summary" jump + its flash
+   ring hug the card, and it survives the SSE swap (the card is what
+   gets swapped in). #}
+<div class="card h-100 shadow-sm" id="dash-machines">
     <div class="card-header bg-light fw-semibold">
         <i class="bi bi-pc-display me-1"></i>Machine Summary
     </div>

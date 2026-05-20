@@ -450,8 +450,10 @@ class BtyTui:
           plan response carries the catalog the operator should see.
         """
         self._console = Console(highlight=False)
-        env_image_root = os.environ.get("BTY_IMAGE_ROOT")
-        resolved_root = Path(env_image_root) if env_image_root else Path("/var/lib/bty/images")
+        # Single source of truth for the BTY_IMAGE_ROOT -> default
+        # resolution; mirrors what bty-web uses rather than re-hardcoding
+        # the default path here.
+        resolved_root = images.default_image_root()
         # ``server`` is the bty-server URL or hostname (bare hostnames
         # get an ``http://`` scheme defaulted in below). Stored on the
         # state so the header Panel can show it; also the base for
@@ -1754,11 +1756,9 @@ class BtyTui:
 
 def _format_progress_bytes(written: int | None, total: int | None) -> str:
     """Format ``{written} / {total}`` in MiB. Either side may be
-    None; renders as ``?`` in that case.
+    None; ``_format_mib`` renders that (and negatives) as ``?``.
     """
-    w = _format_mib(written) if written is not None else "?"
-    t = _format_mib(total) if total is not None else "?"
-    return f"{w} / {t}"
+    return f"{_format_mib(written)} / {_format_mib(total)}"
 
 
 def _emit_console_marker(line: str) -> None:

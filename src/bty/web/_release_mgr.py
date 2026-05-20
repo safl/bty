@@ -264,7 +264,10 @@ class ReleaseFetchManager(_BaseAsyncManager[ReleaseFetchState]):
             final_status = "cancelled"
             error = None
             base_url = None
-        except (_releases.FetchError, Exception) as exc:
+        except Exception as exc:
+            # Catch-all (``FetchError`` is a subclass): the
+            # ``isinstance`` check below keeps a tidy ``FetchError``
+            # message distinct from an unexpected error's typed prefix.
             # Cancel-vs-IO-error race: if the cancel flag fired
             # while urllib happened to be mid-syscall, the worker
             # raises ``URLError`` (wrapped as ``FetchError``)

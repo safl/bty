@@ -862,7 +862,15 @@ def inspect_image(path: Path) -> dict[str, Any]:
     if fmt == "qcow2":
         detail, error = _run_detail_tool(["qemu-img", "info", "--output=json", str(path)])
         if detail is not None:
-            info["detail"] = json.loads(detail)
+            # ``qemu-img info`` can exit 0 yet emit non-JSON (truncated
+            # output, an image it half-understood). Treat a decode
+            # failure as a detail error rather than crashing the
+            # inspect request -- mirrors the guarded parse in
+            # ``flash._image_virtual_size``.
+            try:
+                info["detail"] = json.loads(detail)
+            except json.JSONDecodeError as exc:
+                info["detail_error"] = f"qemu-img info returned unparseable JSON: {exc}"
         else:
             info["detail_error"] = error
     elif fmt == "img.zst":

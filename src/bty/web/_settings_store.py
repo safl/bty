@@ -10,10 +10,15 @@ persisted across restarts without touching the systemd unit:
   release fetch pulls artifacts from.
 - :data:`KEY_CATALOG_URL` -- the full URL the "Fetch latest catalog"
   action downloads ``catalog.toml`` from.
+- :data:`KEY_RELEASE_TAG` -- the release tag the "Fetch latest
+  artifacts" action targets (``latest`` by default).
 
-Resolution order for both is override (this table) -> environment
-variable -> built-in default, so an unset key transparently falls back
-to the existing behaviour.
+Resolution order is override (this table) -> environment variable ->
+built-in default, so an unset key transparently falls back to the
+existing behaviour. Not every key has an env layer:
+:data:`KEY_RELEASE_REPO` reads :data:`ENV_RELEASE_REPO`, while
+:data:`KEY_CATALOG_URL` and :data:`KEY_RELEASE_TAG` resolve straight
+from override to default.
 """
 
 from __future__ import annotations
@@ -22,14 +27,14 @@ import os
 import sqlite3
 from datetime import UTC, datetime
 
-from bty.web._releases import DEFAULT_REPO
+from bty.web._releases import DEFAULT_REPO, ENV_RELEASE_REPO
 
+# ``ENV_RELEASE_REPO`` is imported from :mod:`bty.web._releases` so the
+# env-var name has a single definition; ``KEY_RELEASE_REPO`` falls back
+# to it (via :func:`default_release_repo`) before the built-in default.
 KEY_RELEASE_REPO = "upstream.release_repo"
 KEY_CATALOG_URL = "upstream.catalog_url"
 KEY_RELEASE_TAG = "upstream.release_tag"
-
-# The env vars each key falls back to before the built-in default.
-ENV_RELEASE_REPO = "BTY_BOOT_RELEASE_REPO"
 
 DEFAULT_RELEASE_TAG = "latest"
 

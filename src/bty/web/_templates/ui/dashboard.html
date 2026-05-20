@@ -2,9 +2,20 @@
 {% block title %}Dashboard - bty-web{% endblock %}
 
 {% block subnav %}
-{% with sections=None %}
-{% include "ui/_subnav.html" %}
-{% endwith %}
+{# In-page jump links to the dashboard's panels, separated by rules. #}
+<nav class="navbar subnav-strip" aria-label="Section sub-navigation">
+    <div class="container">
+        <span class="subnav-jumps d-flex align-items-center flex-wrap">
+            <a href="#dash-machines">Machine Summary</a>
+            <span class="vr"></span>
+            <a href="#dash-images">Images Summary</a>
+            <span class="vr"></span>
+            <a href="#dash-health">Health Monitoring</a>
+            <span class="vr"></span>
+            <a href="#dash-activity">Activity</a>
+        </span>
+    </div>
+</nav>
 {% endblock %}
 
 {% block intro %}
@@ -35,7 +46,7 @@
         {% include "ui/_dashboard_images.html" %}
     </div>
     <div class="col-lg-4 col-md-6">
-        <div class="card h-100 shadow-sm">
+        <div class="card h-100 shadow-sm" id="dash-health">
             <div class="card-header bg-light fw-semibold d-flex justify-content-between align-items-center">
                 <span><i class="bi bi-heart-pulse me-1"></i>Health Monitoring</span>
                 {# Info rows (advisory, e.g. dedicated-disk state) are
@@ -86,7 +97,8 @@
    stream is wired to the counters above, not here. #}
 {% with events=recent_events,
         title="Recent activity",
-        link_to_full="/ui/events" %}
+        link_to_full="/ui/events",
+        card_id="dash-activity" %}
 {% include "ui/_events_card.html" %}
 {% endwith %}
 {% endblock %}
