@@ -505,6 +505,19 @@ def test_ui_boot_default_section_is_list(client: TestClient) -> None:
     assert 'id="tag"' in body
 
 
+def test_ui_boot_list_has_live_release_fetches_table(client: TestClient) -> None:
+    """The netboot List view renders a live Release fetches table that
+    polls GET /boot/releases, so active + previous (event-backfilled)
+    fetches are visible -- mirrors the Images -> Downloads jobs table.
+    """
+    _login(client)
+    body = client.get("/ui/boot").text
+    assert "Release fetches" in body
+    assert "bty-fetches-tbody" in body
+    # The poller targets the release-fetch listing endpoint.
+    assert '"/boot/releases"' in body
+
+
 def test_ui_boot_list_header_has_fetch_control(client: TestClient) -> None:
     """The netboot List view carries the Fetch control (tag input,
     default 'latest', + Fetch button) inline in the artefacts table

@@ -276,8 +276,127 @@
     </div>
 </div>
 
+{# Live release-fetch jobs: active (queued / running) + previous
+   (completed / failed, backfilled from events on restart). Polls
+   GET /boot/releases, the same endpoint the top-nav worker
+   indicator counts. Mirrors the Images -> Downloads jobs table. #}
+<div class="card mb-4">
+    <div class="card-header bg-light fw-semibold d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-arrow-down-circle me-1"></i>Release fetches</span>
+        <span class="text-muted small bty-fetch-poll-status">refreshing...</span>
+    </div>
+    <div class="table-responsive">
+        <table class="table mb-0 align-middle">
+            <thead class="table-light">
+                <tr>
+                    <th>Tag</th>
+                    <th>Status</th>
+                    <th style="width: 30%;">Progress</th>
+                    <th>Bytes</th>
+                    <th class="text-end" style="width: 1%; white-space: nowrap;">Action</th>
+                </tr>
+            </thead>
+            <tbody class="bty-fetches-tbody">
+                <tr><td colspan="5" class="text-muted">No fetches yet.</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
 <script>
 (function () {
+    function esc(s) {
+        return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+            return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+        });
+    }
+    function fmtBytes(n) {
+        if (n == null) return "-";
+        if (n < 1024) return n + " B";
+        var u = ["KiB", "MiB", "GiB", "TiB"], i = -1;
+        do { n /= 1024; i++; } while (n >= 1024 && i < u.length - 1);
+        return n.toFixed(1) + " " + u[i];
+    }
+    function statusBadge(s) {
+        var cls = {
+            "queued": "bg-secondary", "running": "bg-primary",
+            "completed": "bg-success", "cancelled": "bg-warning text-dark",
+            "failed": "bg-danger",
+        }[s] || "bg-secondary";
+        return '<span class="badge ' + cls + '">' + esc(s) + '</span>';
+    }
+    function progressBar(d) {
+        if (d.bytes_total == null) {
+            return '<div class="progress" style="height: 16px;">' +
+                   '<div class="progress-bar progress-bar-striped progress-bar-animated" ' +
+                   'style="width: 100%;">' + (d.status === "running" ? "..." : "") + '</div></div>';
+        }
+        var pct = d.bytes_total > 0 ? (100 * (d.bytes_done || 0) / d.bytes_total) : 0;
+        var color = d.status === "completed" ? "bg-success" :
+                    d.status === "failed" ? "bg-danger" :
+                    d.status === "cancelled" ? "bg-warning" : "";
+        return '<div class="progress" style="height: 16px;">' +
+               '<div class="progress-bar ' + color + '" style="width: ' +
+               pct.toFixed(1) + '%;">' + pct.toFixed(1) + '%</div></div>';
+    }
+    function actionCell(d) {
+        if (d.status === "queued" || d.status === "running") {
+            return '<button type="button" class="btn btn-sm btn-outline-danger bty-fetch-cancel" ' +
+                   'data-tag="' + esc(d.tag) + '"><i class="bi bi-x-circle me-1"></i>Cancel</button>';
+        }
+        if (d.status === "failed") {
+            return '<span class="text-danger small" title="' + esc(d.error || "") + '">' +
+                   '<i class="bi bi-exclamation-triangle me-1"></i>' +
+                   esc((d.error || "failed").substring(0, 60)) + '</span>';
+        }
+        return "";
+    }
+    function render(jobs) {
+        var tbody = document.querySelector(".bty-fetches-tbody");
+        if (!tbody) return;
+        if (!jobs.length) {
+            tbody.innerHTML = '<tr><td colspan="5" class="text-muted">No fetches yet.</td></tr>';
+            return;
+        }
+        var order = { "running": 0, "queued": 1, "failed": 2, "cancelled": 3, "completed": 4 };
+        jobs.sort(function (a, b) { return (order[a.status] || 9) - (order[b.status] || 9); });
+        tbody.innerHTML = jobs.map(function (d) {
+            var bytes = fmtBytes(d.bytes_done || 0);
+            if (d.bytes_total != null) bytes += " / " + fmtBytes(d.bytes_total);
+            return "<tr>" +
+                   "<td><code>" + esc(d.tag) + "</code>" +
+                   (d.artefact ? ' <small class="text-muted">' + esc(d.artefact) + "</small>" : "") +
+                   "</td>" +
+                   "<td>" + statusBadge(d.status) + "</td>" +
+                   "<td>" + progressBar(d) + "</td>" +
+                   "<td class=\"small\">" + esc(bytes) + "</td>" +
+                   "<td class=\"text-end\">" + actionCell(d) + "</td>" +
+                   "</tr>";
+        }).join("");
+    }
+    function refresh() {
+        var statusEl = document.querySelector(".bty-fetch-poll-status");
+        return fetch("/boot/releases", { credentials: "same-origin" })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                render(data.fetches || []);
+                if (statusEl) statusEl.textContent = "updated " + new Date().toLocaleTimeString();
+            }).catch(function () {
+                if (statusEl) statusEl.textContent = "(poll failed)";
+            });
+    }
+
+    // Cancel an in-flight fetch (event-delegated; rows are re-rendered
+    // on every poll so per-row handlers would go stale).
+    document.addEventListener("click", function (ev) {
+        var btn = ev.target.closest(".bty-fetch-cancel");
+        if (!btn) return;
+        btn.disabled = true;
+        fetch("/boot/releases/" + encodeURIComponent(btn.dataset.tag), {
+            method: "DELETE", credentials: "same-origin",
+        }).then(refresh).catch(function () { btn.disabled = false; });
+    });
+
     window.enqueueFetch = function () {
         var tag = (document.getElementById("tag").value || "latest").trim() || "latest";
         var btn = document.getElementById("enqueue-fetch-btn");
@@ -289,14 +408,24 @@
             body: JSON.stringify({ tag: tag }),
         }).then(function (r) {
             if (!r.ok) throw new Error("HTTP " + r.status);
-            // Reload so the artefacts table reflects the fetch once it
-            // lands; live progress shows in the top-nav indicator.
-            window.location.reload();
+            // No reload: the poller picks up the queued job and shows
+            // it progress -> done in the Release fetches table below.
+            btn.disabled = false;
+            return refresh();
         }).catch(function (e) {
             alert("Fetch failed: " + e.message);
             btn.disabled = false;
         });
     };
+
+    // Poll while the page is visible; pause in a backgrounded tab.
+    var handle = null;
+    function start() { if (!handle) { refresh(); handle = setInterval(refresh, 2000); } }
+    function stop() { if (handle) { clearInterval(handle); handle = null; } }
+    document.addEventListener("visibilitychange", function () {
+        if (document.hidden) stop(); else start();
+    });
+    start();
 })();
 </script>
 
