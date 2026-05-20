@@ -603,48 +603,35 @@ def test_ui_boot_section_unrecognised_falls_back_to_list(client: TestClient) -> 
     assert 'href="/ui/boot?section=tftp"' in body
 
 
-def test_ui_machines_default_section_is_list_not_add_form(
-    client: TestClient,
-) -> None:
-    """Bare ``GET /ui/machines`` shows the live table; the Add form
-    is behind ?section=add (the dashboard / unassigned-counter
-    clicks land on the list, not the add view)."""
+def test_ui_machines_list_has_inline_add_form(client: TestClient) -> None:
+    """Bare ``GET /ui/machines`` shows the live table with the
+    minimal add-by-MAC field inline in the table header (the
+    standalone ?section=add page was dropped)."""
     _login(client)
     r = client.get("/ui/machines")
     assert r.status_code == 200
     body = r.text
-    assert 'href="/ui/machines?section=add"' in body
-    # Add form's MAC input lives behind ?section=add.
-    assert 'id="add-mac"' not in body
+    # Inline add-by-MAC field is present in the list header.
+    assert 'id="add-mac"' in body
     # Live machines table is present.
     assert 'id="machines-tbody"' in body
+    # The standalone add sub-nav pill is gone.
+    assert 'href="/ui/machines?section=add"' not in body
 
 
-def test_ui_machines_section_add_shows_form_only(client: TestClient) -> None:
-    _login(client)
-    r = client.get("/ui/machines?section=add")
-    assert r.status_code == 200
-    body = r.text
-    assert 'id="add-mac"' in body
-    # No live machines table on the add view.
-    assert 'id="machines-tbody"' not in body
-
-
-def test_ui_machines_add_form_offers_safe_boot_policies(client: TestClient) -> None:
-    """The Add-by-MAC form pre-fleet-contact only offers policies
-    that don't need a target_disk_serial: ``local`` (the safe
-    default) and ``tui`` (operator picks on tty1). The flash
-    policies need the box's disk inventory which only lands after
-    its first PXE check-in, so they're set on the detail page
-    after the row has discovered_at / known_disks populated.
+def test_ui_machines_inline_add_defaults_to_safe_local_policy(client: TestClient) -> None:
+    """The minimal inline add field stages a row by MAC only and
+    submits ``boot_policy=local`` -- never a flash policy (which
+    would need a target_disk_serial the box only reports after its
+    first PXE check-in). Image binding + policy are set on the
+    detail page.
     """
     _login(client)
-    body = client.get("/ui/machines?section=add").text
-    assert 'value="local"' in body
-    assert 'value="tui"' in body
-    # flash / flash-once are intentionally absent from this form.
-    assert 'value="flash"' not in body
-    assert 'value="flash-once"' not in body
+    body = client.get("/ui/machines").text
+    # The submit JS hardcodes the safe default.
+    assert '"boot_policy", "local"' in body
+    # No flash policy is offered/sent from the inline add.
+    assert '"boot_policy", "flash"' not in body
 
 
 def test_ui_boot_page_shows_recent_activity_card(

@@ -9,7 +9,6 @@
 {% endif %}
 {% with sections=[
     {"key": "list", "label": "List",        "icon": "list-ul",     "href": "/ui/machines"},
-    {"key": "add",  "label": "Add by MAC",  "icon": "plus-circle", "href": "/ui/machines?section=add"},
 ] , active=section, right_html=right_html %}
 {% include "ui/_subnav.html" %}
 {% endwith %}
@@ -20,107 +19,36 @@
 {% call intro_box() %}
     The known fleet, keyed by MAC. Each row carries an optional
     image binding, target-disk pin, and boot policy. Machines
-    auto-appear on first PXE contact; explicitly add via
-    <a href="/ui/machines?section=add">Add by MAC</a> to stage
-    an image + policy before the box has even booted.
+    auto-appear on first PXE contact; to stage one before it boots,
+    use the <strong>Add</strong> field in the table header (image
+    binding + boot policy are set per-machine on the detail page).
 {% endcall %}
 {% endblock %}
 
 {% block content %}
-{% if section == "add" %}
-<div class="card mb-3">
-    <div class="card-header bg-light fw-semibold">
-        <i class="bi bi-plus-circle me-1"></i>Add machine
-    </div>
-    <div class="card-body">
-        {# The form posts to /ui/machines/<mac>; the existing
-           upsert handler creates the row with ``discovered_at=NULL``
-           if the MAC isn't known yet. Once the box PXE-boots,
-           ``discovered_at`` flips to the first-seen timestamp and
-           the boot_policy already configured here takes effect on
-           that first ``GET /pxe/<mac>``. Lets operators stage a
-           machine + its image binding before the box is even
-           racked. #}
-        <form id="add-machine-form" onsubmit="return submitAddMachine(event);">
-            <div class="mb-3">
-                <label for="add-mac" class="form-label">MAC address</label>
-                <input type="text" required class="form-control font-monospace"
-                       id="add-mac" name="mac"
-                       pattern="^([0-9a-fA-F]{2}[:-]){5}[0-9a-fA-F]{2}$"
-                       placeholder="aa:bb:cc:dd:ee:ff">
-            </div>
-            <div class="mb-3">
-                <label for="add-hostname" class="form-label">Hostname <span class="text-muted">(optional)</span></label>
-                {# Pattern mirrors the server-side Pydantic regex on
-                   ``MachineUpsert.hostname``: each dot-separated label
-                   is alnum, hyphen-internal-only, no leading/trailing
-                   hyphen, no consecutive dots. Browser-side validation
-                   gives the operator an inline error before the form
-                   posts; without this match, the server returns 422
-                   and the operator hits the form-flash redirect. #}
-                <input type="text" class="form-control" id="add-hostname" name="hostname"
-                       pattern="^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$"
-                       placeholder="lab-01">
-            </div>
-            <div class="mb-3">
-                <label for="add-boot-policy" class="form-label">Boot policy</label>
-                <select class="form-select" id="add-boot-policy" name="boot_policy">
-                    <option value="local" selected>local (don't reflash)</option>
-                    <option value="tui">tui (operator picks)</option>
-                </select>
-                <div class="form-text small">
-                    <code>flash</code> / <code>flash-once</code>
-                    need the target's disk inventory (posted by the
-                    box itself on first PXE contact) to pick a
-                    target_disk_serial; pick one of those on the
-                    machine's detail page after the inventory has
-                    landed. MAC is the only required field here.
-                    Image binding is set per-machine on the detail
-                    page (click the row);
-                    the boot policy defaults to "local" so a freshly
-                    added machine doesn't re-flash itself unexpectedly
-                    on first boot.
-                </div>
-            </div>
-            <button type="submit" class="btn btn-primary">
+{# The live table of all machines, with a minimal inline add-by-MAC
+   field in the header. Machines also auto-appear on first PXE
+   contact; the inline Add just stages a row early. #}
+<div class="card">
+    <div class="card-header bg-light fw-semibold d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <span><i class="bi bi-pc-display me-1"></i>Machines</span>
+        {# Minimal add-by-MAC: MAC only. boot_policy defaults to the
+           safe "local" (never a flash policy from here); hostname,
+           image binding + policy are set on the detail page. The
+           upsert handler creates the row with discovered_at=NULL; it
+           flips to first-seen on the box's first PXE contact. #}
+        <form id="add-machine-form" class="d-flex gap-1 m-0"
+              onsubmit="return submitAddMachine(event);">
+            <input type="text" required class="form-control form-control-sm font-monospace"
+                   id="add-mac" name="mac" style="max-width: 14rem;"
+                   pattern="^([0-9a-fA-F]{2}[:-]){5}[0-9a-fA-F]{2}$"
+                   placeholder="aa:bb:cc:dd:ee:ff"
+                   title="Stage a machine by MAC before it boots; boot policy defaults to 'local' (set image + policy on the detail page)">
+            <button type="submit" class="btn btn-sm btn-primary">
                 <i class="bi bi-plus-lg me-1"></i>Add
             </button>
         </form>
     </div>
-</div>
-
-<script>
-    function submitAddMachine(ev) {
-        ev.preventDefault();
-        var f = ev.target;
-        var mac = f.querySelector("#add-mac").value.trim().toLowerCase();
-        var data = new FormData();
-        data.append("hostname", f.querySelector("#add-hostname").value);
-        data.append("boot_policy", f.querySelector("#add-boot-policy").value);
-        // Submit via the existing form-handler endpoint -- /ui/machines/<mac>.
-        fetch("/ui/machines/" + encodeURIComponent(mac), {
-            method: "POST",
-            credentials: "same-origin",
-            body: data,
-        }).then(function (r) {
-            if (!r.ok) throw new Error("HTTP " + r.status);
-            // Send the operator back to the list to see the new row
-            // (the SSE stream picks up the addition on its own, but
-            // the redirect makes the success path obvious).
-            window.location = "/ui/machines";
-        }).catch(function (e) {
-            alert("Add machine failed: " + e.message);
-        });
-        return false;
-    }
-</script>
-
-{% else %}
-{# section == "list" (default): the live table of all machines.
-   This is what an operator wants to see when they click
-   "Machines" in the top nav -- "show me what's there", not "give
-   me the add form". The Add flow is one sub-nav click away. #}
-<div class="card">
     <div class="table-responsive">
         <table class="table table-hover mb-0 align-middle">
             <thead class="table-light">
@@ -157,5 +85,28 @@
         </table>
     </div>
 </div>
-{% endif %}
+
+<script>
+    function submitAddMachine(ev) {
+        ev.preventDefault();
+        var mac = document.getElementById("add-mac").value.trim().toLowerCase();
+        var data = new FormData();
+        // Minimal: MAC only. boot_policy defaults to the safe "local"
+        // (never a flash policy from this inline form); hostname +
+        // image binding + policy are set on the machine's detail page.
+        data.append("hostname", "");
+        data.append("boot_policy", "local");
+        fetch("/ui/machines/" + encodeURIComponent(mac), {
+            method: "POST",
+            credentials: "same-origin",
+            body: data,
+        }).then(function (r) {
+            if (!r.ok) throw new Error("HTTP " + r.status);
+            window.location = "/ui/machines";
+        }).catch(function (e) {
+            alert("Add machine failed: " + e.message);
+        });
+        return false;
+    }
+</script>
 {% endblock %}

@@ -325,7 +325,7 @@ def register_ui_routes(
         # ``?section=add`` is the form for staging a machine before
         # it PXE-boots. Unrecognised sections fall back to list.
         section = request.query_params.get("section") or "list"
-        if section not in ("list", "add"):
+        if section not in ("list",):
             section = "list"
         with _db.open_db(state_path) as conn:
             rows = conn.execute(sql).fetchall()
