@@ -199,27 +199,36 @@ def register_ui_routes(
         dependencies=[Depends(require_ui_auth)],
     )
     def ui_dashboard(request: Request) -> HTMLResponse:
+        unified = list_unified_images() if list_unified_images is not None else []
         with _db.open_db(state_path) as conn:
-            machine_count = conn.execute("SELECT COUNT(*) FROM machines").fetchone()[0]
-            discovered_count = conn.execute(
-                "SELECT COUNT(*) FROM machines WHERE bty_image_ref IS NULL"
-            ).fetchone()[0]
+            # Live panel context (machine summary + image breakdown),
+            # shared with the SSE publisher so the two never drift.
+            counts = dashboard_counts_context(conn, unified)
             catalog_entry_count = conn.execute("SELECT COUNT(*) FROM catalog_entries").fetchone()[0]
+            # Error-event count for the Health Monitoring panel. Same
+            # ``kind LIKE '%failed'`` predicate the /ui/events
+            # ``?failed=1`` filter uses (list_events(failed_only=True)),
+            # so the "Review errors" deep link lands on exactly this
+            # set: image.upload_failed / image.hash_failed /
+            # catalog.entry.add_failed / boot.release.fetch_failed /
+            # settings.tftp.control_failed / auth.login.failed.
+            error_event_count = conn.execute(
+                "SELECT COUNT(*) FROM events WHERE kind LIKE '%failed'"
+            ).fetchone()[0]
             # Recent activity slice for the dashboard's "what just
             # happened?" widget. Reuses ``_events_card.html`` so the
             # styling matches the per-machine and per-image cards;
             # the dashboard renders at request time only (no SSE
             # update) so a reload is the refresh gesture.
             recent_events = _events_log.list_events(conn, limit=10)
-        image_count = len(bty_images.list_images(image_root))
-        # Sanity checklist: the handful of conditions that need to
-        # be true for PXE + flash to actually work. Operators landing
-        # on the dashboard get a one-glance status of "is this
-        # appliance ready to do its job", each row linking at the
-        # remediation page if the answer is no.
+        # Health Monitoring: the conditions that must hold for PXE +
+        # flash to work, plus an error-events tripwire. One glance at
+        # "is this appliance ready to do its job", each row deep-
+        # linking to the page that owns it (with a fix action on fail).
         missing_netboot = _releases.missing_netboot_artifacts(boot_root)
         tftp = _sysconfig.tftp_status()
         tftp_controllable = _sysconfig.tftp_controllable()
+        catalog_ok = catalog_entry_count > 0 or counts["img_total"] > 0
         sanity = [
             {
                 "label": "Netboot artefacts present",
@@ -235,10 +244,10 @@ def register_ui_routes(
             },
             {
                 "label": "Catalog is non-empty",
-                "ok": catalog_entry_count > 0 or image_count > 0,
+                "ok": catalog_ok,
                 "detail": (
-                    f"{catalog_entry_count} catalog entries, {image_count} local images."
-                    if catalog_entry_count > 0 or image_count > 0
+                    f"{catalog_entry_count} catalog entries, {counts['img_total']} images total."
+                    if catalog_ok
                     else "No catalog entries and no local images."
                 ),
                 "href": "/ui/images",
@@ -265,15 +274,25 @@ def register_ui_routes(
                 "fix_href": "/ui/boot?section=tftp",
                 "fix_label": "TFTP daemon",
             },
+            {
+                "label": "No error events",
+                "ok": error_event_count == 0,
+                "detail": (
+                    "No failed events recorded."
+                    if error_event_count == 0
+                    else f"{error_event_count} failed event(s) recorded -- review the cause."
+                ),
+                "href": "/ui/events?failed=1",
+                "fix_href": "/ui/events?failed=1",
+                "fix_label": "Review errors",
+            },
         ]
         return render(
             "ui/dashboard.html",
             request,
-            machine_count=machine_count,
-            discovered_count=discovered_count,
-            image_count=image_count,
             recent_events=recent_events,
             sanity=sanity,
+            **counts,
         )
 
     @app.get(
@@ -1019,6 +1038,44 @@ def register_ui_routes(
 
 
 # ---------- helpers ---------------------------------------------------------
+
+
+def dashboard_counts_context(conn: Any, unified: list[bty_images.UnifiedImage]) -> dict[str, Any]:
+    """Build the LIVE dashboard-panel context: machine summary +
+    image breakdown. Shared by ``ui_dashboard`` (initial render) and
+    the SSE ``render_dashboard_counts`` publisher (in _app) so the two
+    panels can never drift.
+
+    ``unified`` is the merged catalog listing. The image breakdown
+    counts entries that carry each kind of source: ``local`` is a
+    file on disk, ``http`` an http(s):// source, ``oras`` an OCI
+    registry ref; ``cached`` is the content-addressed-cache hit flag.
+    An entry can count toward several (e.g. a local file that's also
+    a catalog http entry).
+    """
+    machine_count = conn.execute("SELECT COUNT(*) FROM machines").fetchone()[0]
+    unassigned_count = conn.execute(
+        "SELECT COUNT(*) FROM machines WHERE bty_image_ref IS NULL"
+    ).fetchone()[0]
+    last_seen = conn.execute("SELECT MAX(last_seen_at) FROM machines").fetchone()[0]
+    last_flashed = conn.execute("SELECT MAX(last_flashed_at) FROM machines").fetchone()[0]
+    return {
+        "machine_count": machine_count,
+        "unassigned_count": unassigned_count,
+        "last_seen": last_seen,
+        "last_flashed": last_flashed,
+        "img_total": len(unified),
+        "img_cached": sum(1 for u in unified if u.cached),
+        "img_local": sum(1 for u in unified if any(s.kind == "local" for s in u.sources)),
+        "img_http": sum(
+            1
+            for u in unified
+            if any(s.location.startswith(("http://", "https://")) for s in u.sources)
+        ),
+        "img_oras": sum(
+            1 for u in unified if any(s.location.startswith("oras://") for s in u.sources)
+        ),
+    }
 
 
 def _row_to_dict(row: Any) -> dict[str, Any]:

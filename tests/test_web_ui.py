@@ -152,10 +152,12 @@ def test_ui_dashboard_renders_after_login(client: TestClient) -> None:
     r = client.get("/ui/dashboard")
     assert r.status_code == 200
     body = r.text
-    # Counter tiles render.
+    # Live panels render (SSE-swapped Machine Summary + Images).
     assert 'id="dashboard-counts"' in body
-    # Sanity checklist renders.
-    assert "Sanity checklist" in body
+    assert "Machine Summary" in body
+    assert "Images" in body
+    # Health Monitoring panel (renamed from "Sanity checklist").
+    assert "Health Monitoring" in body
     # Recent-activity card title.
     assert "Recent activity" in body
     # Navbar still carries the Machines nav-btn.
@@ -252,27 +254,28 @@ def test_ui_dashboard_subscribes_to_sse_for_live_counts(client: TestClient) -> N
     assert 'sse-swap="dashboard-counts"' in body
 
 
-def test_ui_dashboard_sanity_checklist_renders_with_fix_links(client: TestClient) -> None:
-    """The dashboard sanity checklist is the operator's
-    fresh-install onboarding surface: one row per readiness
-    condition, each labelled + linked into the remediation
-    section when the condition fails. Pin the three core rows
-    (Netboot artefacts / Catalog non-empty / TFTP daemon
-    running) so a future refactor doesn't accidentally drop one.
+def test_ui_dashboard_health_monitoring_renders_with_links(client: TestClient) -> None:
+    """The dashboard Health Monitoring panel (was "Sanity
+    checklist") is the operator's fresh-install onboarding +
+    at-a-glance status surface: one row per readiness condition,
+    each linked into the remediation section when it fails. Pin the
+    four rows (Netboot artefacts / Catalog non-empty / TFTP daemon /
+    No error events) so a future refactor doesn't drop one.
     """
     import re
 
     _login(client)
     body = client.get("/ui/dashboard").text
-    assert "Sanity checklist" in body
+    assert "Health Monitoring" in body
     # Each row's label.
     assert "Netboot artefacts present" in body
     assert "Catalog is non-empty" in body
     assert "TFTP daemon running" in body
-    # The "N / 3 ready" header is present (the actual N depends
+    assert "No error events" in body
+    # The "N / 4 OK" header is present (the actual N depends
     # on the test fixture's pre-seeded state; we don't pin it).
-    assert re.search(r"\d+ / 3 ready", body), (
-        "sanity-check header should render an 'N / 3 ready' summary"
+    assert re.search(r"\d+ / 4 OK", body), (
+        "health-monitoring header should render an 'N / 4 OK' summary"
     )
     # The two always-failing rows in the bare-fixture state
     # (no netboot artefacts, no live TFTP daemon) carry fix links.

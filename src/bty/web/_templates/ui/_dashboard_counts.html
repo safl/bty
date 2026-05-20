@@ -1,41 +1,63 @@
-<div class="row g-3 mb-4">
-    <div class="col-md-4">
-        <a href="/ui/machines" class="text-decoration-none text-body">
-            <div class="card h-100 shadow-sm">
-                <div class="card-body d-flex align-items-center">
-                    <i class="bi bi-pc-display display-4 text-primary me-3"></i>
-                    <div>
-                        <h2 class="display-6 mb-0">{{ machine_count }}</h2>
-                        <p class="text-muted mb-0">Machines</p>
-                    </div>
-                </div>
-            </div>
-        </a>
+{# Live dashboard panels (machine summary + image breakdown),
+   SSE-swapped together on every machine mutation / image change.
+   Rendered both at page load (ui_dashboard) and on the
+   ``dashboard-counts`` SSE event (render_dashboard_counts), from the
+   shared _ui.dashboard_counts_context builder. Two equal cards; the
+   static Health Monitoring panel sits beside them (dashboard.html).
+   These are direct grid children -- the SSE wrapper is
+   display:contents -- so all three line up as equal columns. #}
+<div class="col-lg-4 col-md-6">
+    <div class="card h-100 shadow-sm">
+        <div class="card-header bg-light fw-semibold">
+            <i class="bi bi-pc-display me-1"></i>Machine Summary
+        </div>
+        <ul class="list-group list-group-flush">
+            <li class="list-group-item d-flex justify-content-between align-items-center">
+                <span class="text-muted">Total</span>
+                <a href="/ui/machines" class="fw-semibold text-decoration-none">{{ machine_count }}</a>
+            </li>
+            <li class="list-group-item d-flex justify-content-between align-items-center">
+                <span class="text-muted">Unassigned</span>
+                <a href="/ui/machines?filter=discovered"
+                   class="fw-semibold text-decoration-none {{ 'text-warning' if unassigned_count else '' }}">{{ unassigned_count }}</a>
+            </li>
+            <li class="list-group-item d-flex justify-content-between align-items-center">
+                <span class="text-muted">Last seen</span>
+                <span class="small">{{ last_seen[:16].replace("T", " ") if last_seen else "never" }}</span>
+            </li>
+            <li class="list-group-item d-flex justify-content-between align-items-center">
+                <span class="text-muted">Last flashed</span>
+                <span class="small">{{ last_flashed[:16].replace("T", " ") if last_flashed else "never" }}</span>
+            </li>
+        </ul>
     </div>
-    <div class="col-md-4">
-        <a href="/ui/machines?filter=discovered" class="text-decoration-none text-body">
-            <div class="card h-100 shadow-sm">
-                <div class="card-body d-flex align-items-center">
-                    <i class="bi bi-question-diamond display-4 text-warning me-3"></i>
-                    <div>
-                        <h2 class="display-6 mb-0">{{ discovered_count }}</h2>
-                        <p class="text-muted mb-0">Unassigned (discovered)</p>
-                    </div>
-                </div>
-            </div>
-        </a>
-    </div>
-    <div class="col-md-4">
-        <a href="/ui/images" class="text-decoration-none text-body">
-            <div class="card h-100 shadow-sm">
-                <div class="card-body d-flex align-items-center">
-                    <i class="bi bi-disc display-4 text-success me-3"></i>
-                    <div>
-                        <h2 class="display-6 mb-0">{{ image_count }}</h2>
-                        <p class="text-muted mb-0">Images</p>
-                    </div>
-                </div>
-            </div>
-        </a>
+</div>
+<div class="col-lg-4 col-md-6">
+    <div class="card h-100 shadow-sm">
+        <div class="card-header bg-light fw-semibold">
+            <i class="bi bi-disc me-1"></i>Images
+        </div>
+        <ul class="list-group list-group-flush">
+            <li class="list-group-item d-flex justify-content-between align-items-center">
+                <span class="text-muted">Total</span>
+                <a href="/ui/images" class="fw-semibold text-decoration-none">{{ img_total }}</a>
+            </li>
+            <li class="list-group-item d-flex justify-content-between align-items-center">
+                <span class="text-muted">Cached</span>
+                <span>{{ img_cached }}</span>
+            </li>
+            <li class="list-group-item d-flex justify-content-between align-items-center">
+                <span class="text-muted">Local</span>
+                <span>{{ img_local }}</span>
+            </li>
+            <li class="list-group-item d-flex justify-content-between align-items-center">
+                <span class="text-muted">HTTP</span>
+                <span>{{ img_http }}</span>
+            </li>
+            <li class="list-group-item d-flex justify-content-between align-items-center">
+                <span class="text-muted">ORAS</span>
+                <span>{{ img_oras }}</span>
+            </li>
+        </ul>
     </div>
 </div>

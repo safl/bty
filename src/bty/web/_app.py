@@ -337,18 +337,14 @@ def create_app(
         return jinja.get_template("ui/_machines_tbody.html").render(machines=machines)
 
     def render_dashboard_counts() -> str:
-        """Render the dashboard counter cards as a swappable fragment."""
+        """Render the live dashboard panels (machine summary + image
+        breakdown) as a swappable SSE fragment. Uses the same
+        ``_ui.dashboard_counts_context`` builder as the initial
+        dashboard render so the live panels can't drift from the
+        request-time render."""
         with _db.open_db(state_path) as conn:
-            machine_count = conn.execute("SELECT COUNT(*) FROM machines").fetchone()[0]
-            discovered_count = conn.execute(
-                "SELECT COUNT(*) FROM machines WHERE bty_image_ref IS NULL"
-            ).fetchone()[0]
-        image_count = len(images.list_images(resolved_image_root))
-        return jinja.get_template("ui/_dashboard_counts.html").render(
-            machine_count=machine_count,
-            discovered_count=discovered_count,
-            image_count=image_count,
-        )
+            ctx = _ui.dashboard_counts_context(conn, _list_unified_images())
+        return jinja.get_template("ui/_dashboard_counts.html").render(**ctx)
 
     def publish_state_changed() -> None:
         """Publish fresh snapshots of every SSE-driven UI fragment.
