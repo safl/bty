@@ -58,10 +58,10 @@ load_source`` raises ``CatalogError`` on parse / schema failure):
 python3 -c 'import sys; from bty import catalog; catalog.load_source(sys.argv[1])' /path/to/catalog.toml
 ```
 
-bty-web also parses the catalog server-side -- uploading via
-`/ui/images?section=upload-catalog` (or `POST /catalog/import?
-source=...`) bounces back with the parse error on a bad catalog
-without clobbering the running one.
+bty-web also parses the catalog server-side -- uploading via the
+**Upload catalog** control in the Images list header (or
+`POST /catalog/import?source=...`) bounces back with the parse error
+on a bad catalog without clobbering the running one.
 
 ## SHA-256 sidecars for dir-scan images
 
@@ -99,16 +99,19 @@ Operators who drop a file *after* server startup can either:
 
 ## Browser UI
 
-`/ui/images` is a single page with two cards:
+`/ui/images` shows the **unified catalog** table: SHA prefix, names,
+format, sources (icons distinguish local file vs manifest URL),
+cached state, per-row Action button. Action shows "Hash" for unhashed
+dir-scan rows, "Fetch" for manifest entries not yet in the cache, or
+"-" for cached entries. Its header carries the **Fetch latest
+catalog** and **Upload catalog** controls; an in-page sub-nav jumps
+between the catalog **List** and the recent **Activity** table.
 
-- **Unified catalog** table: SHA prefix, names, format, sources
-  (icons distinguish local file vs manifest URL), cached state,
-  per-row Action button. Action shows "Hash" for unhashed
-  dir-scan rows, "Fetch" for manifest entries not yet in the
-  cache, or "-" for cached entries.
-- **Downloads** pane + **Hashes** pane below: live progress for
-  each in-flight job, with Cancel per row. Auto-refreshes every
-  ~2s via polling.
+**Image Downloads** (add a single image by file or URL + the live
+fetch jobs) and **Hashes** (the background SHA worker) are their own
+top-level pages, reached from the worker-indicator icons in the
+navbar (right of Settings), not sub-tabs of Images. Each shows live
+progress with Cancel per row and auto-refreshes every ~2s.
 
 When a Fetch or Hash transitions to `completed`, the page
 auto-reloads (after a brief delay so the 100% bar renders) so

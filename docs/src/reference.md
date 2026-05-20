@@ -185,7 +185,7 @@ Python package).
 | Helper | Purpose |
 |---|---|
 | `bty-state-migrate [--yes] DEVICE` | Move the whole bty state dir `/var/lib/bty` (images, netboot artifacts, content cache, `state.db`) onto a 2nd disk (ext4, label `BTY_IMAGE_STORE`, mounted at `/var/lib/bty`) so it survives an OS reflash. Stops bty-web, copies + verifies before removing the rootfs copy, updates `/etc/fstab` for auto-mount. Run once; the labelled disk auto-mounts after reflashes (the venv stays on the rootfs and upgrades with the reflash). |
-| `bty-web-tftp <start\|stop\|restart>` | Control the local `dnsmasq.service` (which owns the TFTP root). Driven by the browser UI's TFTP daemon Start/Stop/Restart buttons on `/ui/boot?section=tftp`. |
+| `bty-web-tftp <start\|stop\|restart>` | Control the local `dnsmasq.service` (which owns the TFTP root). Driven by the browser UI's TFTP daemon Start/Stop/Restart buttons on the Netboot page (`/ui/boot`). |
 
 ## Python API
 
@@ -228,13 +228,17 @@ tooling which can't carry a session cookie:
 - `GET /version` - `{"version": "..."}`
 - `GET /pxe/{mac}` - per-MAC iPXE script (`text/plain`). The
  response depends on the machine's `boot_policy`:
- - `local` (default) or no image assigned: sanboot fallback ("boot
- from local disk"). Auto-discovery still applies to unknown MACs.
- - `flash` + image assigned + target serial picked: chain into
- the live env over HTTP with kernel cmdline `bty.server=` +
- `bty.mac=`. The live env's ``bty`` then GETs `/pxe/<mac>/plan`
- to retrieve the image URL + target_disk_serial and runs the
- flash. (v0.22.10+ retired the older shape that put those on
+ - `local` (default) or no image assigned: iPXE `exit`; the firmware
+ boot order picks the next device (typically the local disk). NOT
+ sanboot. Auto-discovery still applies to unknown MACs.
+ - `sanboot`: iPXE `sanboot --drive <sanboot_drive> || exit` boots
+ the local disk itself (default drive `0x80`), independent of the
+ firmware boot order, falling back to `exit` if it can't.
+ - `bty-flash-always` / `bty-flash-once` + image assigned + target
+ serial picked: chain into the live env over HTTP with kernel cmdline
+ `bty.server=` + `bty.mac=`. The live env's ``bty`` then GETs
+ `/pxe/<mac>/plan` to retrieve the image URL + target_disk_serial and
+ runs the flash. (v0.22.10+ retired the older shape that put those on
  the cmdline.)
 
  Auto-discovery: the first contact for an unknown MAC inserts a
@@ -245,12 +249,14 @@ tooling which can't carry a session cookie:
  CI network, not the open internet - anyone reachable can write
  discovery rows.
 - `POST /pxe/{mac}/done` - completion signal from the live env
- after a successful flash. Updates `last_flashed_at`. **Does not
- modify `boot_policy`** - flipping a machine back to `local` is an
- explicit operator action so the per-job CI cadence (constant
- reflashing) survives across boots. bty-web does *not* run any
- post-flash provisioning -- the target reboots into whatever the
- pre-built image brings up via cloud-init.
+ after a successful flash. Updates `last_flashed_at`. Mutates
+ `boot_policy` only for `bty-flash-once`, flipping it to the
+ configured **settle policy** (`flash.settle_policy` /
+ `BTY_FLASH_SETTLE_POLICY`; default `local`, or `sanboot`) so the box
+ stops re-flashing. `bty-flash-always` is left untouched so the
+ per-job CI cadence (constant reflashing) survives across boots.
+ bty-web does *not* run any post-flash provisioning -- the target
+ reboots into whatever the pre-built image brings up via cloud-init.
 - `GET /pxe-bootstrap.ipxe` - static iPXE script that dnsmasq points
  iPXE clients at on their second-stage DHCP. Returns
  `chain http://<host>/pxe/${net0/mac:hexhyp}` where `<host>` is the
@@ -331,10 +337,13 @@ Machine = {
   "discovered_at": "<ISO 8601>" | null,      # first /pxe contact; null if PUT-only
   "last_seen_at":  "<ISO 8601>" | null,      # most recent /pxe contact
   "last_seen_ip":  "203.0.113.42" | null,
-  "boot_policy":   "local"                   # one of local / flash /
-                 | "flash"                   # flash-once / tui; what
-                 | "flash-once"              # /pxe/{mac} returns
-                 | "tui",
+  "boot_policy":   "local"                   # one of local / sanboot /
+                 | "sanboot"                 # bty-flash-always /
+                 | "bty-flash-always"        # bty-flash-once / bty-tui;
+                 | "bty-flash-once"          # what /pxe/{mac} returns
+                 | "bty-tui",
+  "sanboot_drive": "0x80" | null,            # iPXE BIOS drive for sanboot
+                                             # (null = default 0x80)
   "last_flashed_at": "<ISO 8601>" | null,    # set by POST /pxe/{mac}/done
   "known_disks":   [{ ... InventoryDisk ... }] | null,
                                              # most recent POST /pxe/{mac}/inventory;
@@ -352,13 +361,16 @@ MachineUpsert = {
   "bty_image_ref": "<64-hex>" | null,
   "hostname": str | null,
   "boot_policy": "local"                     # default "local" on PUT;
-              | "flash"                      # auto-discovery sets "tui";
-              | "flash-once"                 # flash + flash-once also
-              | "tui",                       # require target_disk_serial
+              | "sanboot"                    # auto-discovery sets
+              | "bty-flash-always"           # "bty-tui"; the flash
+              | "bty-flash-once"             # policies require a
+              | "bty-tui",                   # target_disk_serial
+  "sanboot_drive": str | null,               # iPXE BIOS drive for sanboot
+                                             # (e.g. "0x80"; null = default)
   "target_disk_serial": str | null           # required when boot_policy is
-                                             # flash / flash-once -- /ui/
-                                             # machines/{mac} POST refuses
-                                             # without it
+                                             # bty-flash-always / -once --
+                                             # /ui/machines/{mac} POST
+                                             # refuses without it
 }
 
 CatalogEntry (as returned by `GET /catalog/entries`) = {
@@ -442,8 +454,10 @@ templates, Bootstrap CSS, HTMX form posts).
 - `GET /ui/machines/{mac}` -> detail + edit form
 - `POST /ui/machines/{mac}` -> upsert from a form submit
 - `POST /ui/machines/{mac}/delete` -> delete record
-- `GET /ui/images` -> image catalog page (dir-scan listing +
- "Add image by URL" form + upload widget)
+- `GET /ui/images` -> image catalog page (the unified dir-scan +
+ catalog-entry listing, with Fetch-latest-catalog / Upload-catalog
+ controls in its header). The per-image "Add by URL" + upload widgets
+ live on the Image Downloads page (`/ui/downloads`).
 - `POST /ui/catalog/entries` (form) and
  `POST /catalog/entries` (JSON) -> add an operator-curated
  catalog entry. ``image_url`` accepts http(s):// URLs and
@@ -451,33 +465,41 @@ templates, Bootstrap CSS, HTMX form posts).
  OCI manifest at add time, uses the layer's content-addressed
  digest as the entry's sha256 (= machine-bindable), and skips
  the optional sha_url branch (manifest is authoritative).
-- `GET /ui/boot` -> netboot artifacts list + sub-nav pills:
- - **List** (default) - present/missing per artifact, sizes,
- last-fetched timestamps.
- - **Fetch netboot artifacts** - one-button form to pull
- `vmlinuz`/`initrd`/`squashfs`/`sha256` from the bty release page,
- plus the live "active + recent fetches" polling table.
- - **DHCP / PXE** - appliance-IP/interfaces table + router-config
- cheatsheet (option 60 / 66 / 67 values to paste into the LAN's
- DHCP server). bty does NOT run any DHCP role; the operator's
- existing DHCP server points clients at this appliance for TFTP
- + HTTP-Boot fetches.
- - **TFTP daemon** - live `systemctl is-active dnsmasq.service`
+- `GET /ui/boot` (Netboot) -> the netboot artifacts inventory
+ (present/missing per artifact, sizes, last-fetched timestamps, with a
+ Fetch button that hands off to the Artifact Fetches page) plus the
+ **TFTP daemon** panel: live `systemctl is-active dnsmasq.service`
  badge + Start / Stop / Restart buttons driven by the
- sudoers-permitted `bty-web-tftp` helper.
+ sudoers-permitted `bty-web-tftp` helper. An in-page sub-nav jumps
+ between List / TFTP Daemon / Activity.
+- `GET /ui/fetches` (Artifact Fetches) -> the **Fetch latest
+ artifacts** trigger + the live "active + recent fetches" polling
+ table. Reached from the cloud worker-icon in the navbar.
+- `GET /ui/downloads` (Image Downloads) / `GET /ui/hashes` (Hashes) ->
+ the per-image add forms + live download jobs, and the background SHA
+ worker. Top-level pages reached from the navbar worker-icons.
+- The router-config **DHCP / PXE** cheatsheet (appliance-IP /
+ interfaces table + option 60 / 66 / 67 values to paste into the LAN's
+ DHCP server) lives on the Settings page (`/ui/settings#dhcp-pxe`).
+ bty does NOT run any DHCP role; the operator's existing DHCP server
+ points clients at this appliance for TFTP + HTTP-Boot fetches.
 - `POST /ui/boot/fetch-release` -> downloads
  `vmlinuz`/`initrd`/`squashfs`/`sha256` from
  `https://github.com/<BTY_BOOT_RELEASE_REPO>/releases/<tag>/download/`
  (default `safl/bty`, default tag `latest`); verifies the manifest
  and atomically installs into `BTY_BOOT_DIR`.
-- `GET /ui/settings` -> thin operator-account page (About card +
- Authentication card). Reached via the gear icon in the user-bar,
- not the top nav. Authentication explanatory text only: the
- credential is the OS password of the bty service user, the
- operator rotates it with `sudo passwd bty`; to force every
- session to invalidate in one shot, rotate the cookie-signing
- secret with `rm /var/lib/bty/session-secret && systemctl
- restart bty-web`.
+- `GET /ui/settings` -> the config map: read-only groups for every bty
+ magic value (where each comes from -- env var / derived path /
+ default), the editable **Upstream sources** (release repo / catalog
+ URL / release tag) and **Flash behaviour** (`flash.settle_policy`)
+ cards, and the **DHCP / PXE** router cheatsheet. Operator
+ authentication is on the separate Account page (`/ui/account`,
+ reached via the user pill): the credential is the OS password of the
+ bty service user, rotated with `sudo passwd bty`; to invalidate every
+ session at once, rotate the cookie-signing secret with
+ `rm /var/lib/bty/session-secret && systemctl restart bty-web`.
+- `POST /ui/settings/upstream` / `POST /ui/settings/flash` -> persist
+ the editable Upstream-sources / settle-policy overrides.
 - `POST /ui/settings/tftp-control` -> drives `bty-web-tftp <action>`
  (allowlist `start` / `stop` / `restart`), the sole sudoers
  grant in `/etc/sudoers.d/bty-web`. URL is unchanged for

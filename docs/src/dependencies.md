@@ -110,6 +110,7 @@ or ``ENV`` block (Dockerfile) covers every component.
 | `BTY_WEB_PORT` | `bty-web` | `8080` | Listen port |
 | `BTY_SESSION_SECRET` | `bty-web` | (generated, persisted under `BTY_STATE_DIR`) | Cookie key override; useful for multi-instance |
 | `BTY_BOOT_RELEASE_REPO` | `bty-web` | `safl/bty` | GitHub releases repo to fetch boot artifacts from |
+| `BTY_FLASH_SETTLE_POLICY` | `bty-web` | `local` | `boot_policy` a `bty-flash-once` machine settles into after flashing: `local` or `sanboot` |
 | `BTY_CATALOG_FILE` | `bty-web` | `${BTY_STATE_DIR}/catalog.toml` | Catalog file path (TOML; see walkthrough-catalog.md) |
 | `BTY_CATALOG_CACHE_DIR` | `bty-web` | `${BTY_STATE_DIR}/cache` | Content-addressed blob cache |
 | `BTY_CATALOG_MAX_PARALLEL` | `bty-web` | `2` | Concurrent catalog downloads |

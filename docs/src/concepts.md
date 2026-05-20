@@ -79,25 +79,79 @@ per-MAC iPXE configurations.
 ## Boot policy
 
 A field on the [machine record](#machine-record) that decides what
-``GET /pxe/{mac}`` serves the target on every PXE contact. Three
-values:
+``GET /pxe/{mac}`` serves the target on every PXE contact. The
+`bty-` prefix marks the policies that PXE-boot into bty's own live
+env; `local` and `sanboot` boot something other than bty:
 
-- `local` - sanboot fallback; the target boots whatever is on its
-  local disk. Stable / production stance, the explicit-PUT default.
-- `flash` - chain the live env in auto-flash mode. The target
-  re-flashes the assigned image on every PXE boot - the per-job CI
-  cadence.
-- `tui` - chain the live env in interactive mode. The target lands
-  at `bty` on tty1 and the operator picks an image from the
+- `local` - iPXE emits `exit`, handing control back to the firmware,
+  which then boots the next device in its BIOS/UEFI boot order
+  (typically the local disk). It does **not** sanboot. The stable /
+  production stance and the explicit-PUT default. Requires the
+  firmware boot order to list the disk after PXE (see
+  [Firmware boot order](#firmware-boot-order)).
+- `sanboot` - iPXE boots the local disk itself
+  (`sanboot --drive <drive> || exit`), rather than relying on the
+  firmware boot order. The drive defaults to `0x80` (first BIOS
+  disk) and is a per-machine override (`sanboot_drive`); the
+  `|| exit` falls back to the firmware order if the drive isn't
+  bootable.
+- `bty-flash-always` - chain the live env in auto-flash mode. The
+  target re-flashes the assigned image on every PXE boot - the
+  per-job CI cadence.
+- `bty-flash-once` - flash exactly once: behaves like
+  `bty-flash-always` for the next boot, then the completion signal
+  flips the policy to the configured *settle policy* so the box
+  stops re-flashing.
+- `bty-tui` - chain the live env in interactive mode. The target
+  lands at `bty` on tty1 and the operator picks an image from the
   server's catalog by hand.
 
-The auto-discovery default for unknown MACs is `tui`, so a new box
-PXE-booting against a fresh server appliance becomes a useful TUI
+The auto-discovery default for unknown MACs is `bty-tui`, so a new
+box PXE-booting against a fresh server appliance becomes a useful TUI
 session immediately - no per-MAC server-side configuration needed.
 
-The completion signal `POST /pxe/{mac}/done` updates `last_flashed_at`
-but never modifies `boot_policy`. Flipping back to `local` after a
-flash is an explicit operator action.
+The completion signal `POST /pxe/{mac}/done` always updates
+`last_flashed_at`. It mutates `boot_policy` only for `bty-flash-once`,
+flipping it to the **settle policy** - `local` (the default) or
+`sanboot` - so the box stops re-flashing once it has been imaged.
+The settle policy is configurable (setting `flash.settle_policy`, env
+`BTY_FLASH_SETTLE_POLICY`) on the Settings page. `bty-flash-always`
+is never modified, so the per-job CI cadence keeps reflashing.
+
+(`sanboot` here means iPXE's local-disk boot. Before this was an
+explicit policy, `local` was loosely described as "sanboot"; it is
+actually a firmware-handoff `exit`.)
+
+## Firmware boot order
+
+For a PXE-driven target, set its BIOS/UEFI firmware to **boot from
+the network (PXE) first**. bty-server then decides, per boot, whether
+the box re-flashes, drops into the wizard, or boots its disk - all
+driven by the machine's `boot_policy`, not by re-toggling the
+firmware each time.
+
+What happens *after* a flash depends on the policy:
+
+- With `local`, iPXE runs `exit` and the firmware continues to the
+  **next entry in its boot order** - so the local disk must be
+  enabled and listed *after* PXE. If the firmware has no bootable
+  entry after PXE (disk disabled, or PXE-only), the freshly-flashed
+  box won't boot. This is the most common "I flashed it but it won't
+  boot" gotcha: it's a firmware boot-order problem, not a bty one.
+- With `sanboot`, iPXE boots the local disk itself, so the box boots
+  the flashed disk regardless of where the disk sits in the firmware
+  order (with `|| exit` falling back to the firmware order). Use this
+  when the firmware order is awkward to set, or when you'd rather bty
+  drive the local boot. `sanboot` selects the disk by BIOS drive
+  number (`0x80` = first disk), not by the Linux serial used at flash
+  time, so on a multi-disk box set `sanboot_drive` to the right
+  drive.
+
+Practical setup: enter firmware setup (often F2 / F10 / Del at
+power-on), open the boot-order menu, put Network/PXE first and the
+target disk second, save and exit. UEFI HTTP-Boot and legacy
+PXE+TFTP both work; see [DHCP / PXE](walkthrough-server.md) for the
+router-side options.
 
 ## Server-controlled vs interactive: who decides which image gets flashed
 
@@ -106,12 +160,12 @@ flash is an explicit operator action.
 which reads the [machine record](#machine-record) on the server side:
 
 - **Server-controlled** (`plan.mode = "auto"`). Triggered when
-  `boot_policy in {flash, flash-once}` AND `bty_image_ref` is bound
+  `boot_policy in {bty-flash-always, bty-flash-once}` AND `bty_image_ref` is bound
   AND `target_disk_serial` is picked. The plan response carries the
   image URL + target serial; `bty` flashes them without prompts.
   The server is the source of truth for *what gets flashed*.
 - **Interactive** (`plan.mode = "interactive"`). Triggered when
-  `boot_policy = tui`, OR when a flash policy can't be auto-resolved
+  `boot_policy = bty-tui`, OR when a flash policy can't be auto-resolved
   (no serial picked / orphan ref). `bty` drops the operator into the
   wizard with the server's catalog pre-loaded. The operator picks
   any image from the catalog and flashes any local disk.

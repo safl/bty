@@ -201,9 +201,14 @@ COOKIE=$(curl -sS -i -X POST -d "password=bty" \
 curl -H "Cookie: bty-token=$COOKIE" http://server:8080/machines
 curl -H "Cookie: bty-token=$COOKIE" -X PUT \
      -H "Content-Type: application/json" \
-     -d '{"bty_image_ref":"<64-hex>","boot_policy":"flash"}' \
+     -d '{"bty_image_ref":"<64-hex>","boot_policy":"bty-flash-always","target_disk_serial":"<serial>"}' \
      http://server:8080/machines/aa:bb:cc:dd:ee:ff
 ```
+
+(The flash policies also need a `target_disk_serial` picked from the
+machine's reported inventory; without one the chain falls back to a
+local boot. Boot the box once as `bty-tui` so it reports its disks,
+then pick the target.)
 
 PXE clients hit `GET /pxe/{mac}` (open, no auth) for the per-MAC
 iPXE config and chain into the live env, which downloads the

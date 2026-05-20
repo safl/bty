@@ -216,22 +216,36 @@ Initial UI tour:
   / `*.img.bz2` / `*.qcow2` images via PUT or drag-and-drop.
   These end up under `/var/lib/bty/images/` on the server and
   get streamed to targets at flash time.
-- **`/ui/boot`** - manages the netboot trio (`vmlinuz`,
-  `initrd`, `squashfs`) AND carries the router-config
-  cheatsheet (option 60 / 66 / 67 values to paste into the
-  LAN's DHCP server) + a Start/Stop/Restart panel for the
-  local `dnsmasq.service` (which serves the TFTP root). The
-  three live behind sub-nav pills: List / Fetch netboot
-  artifacts / DHCP / PXE / TFTP daemon.
-- **`/ui/settings`** - operator-account info for the logged-in
-  user (PAM password rotation + session-cookie rotation
-  hints). Reached via the gear icon in the user-bar, not from
-  the top nav.
+- **`/ui/boot`** (Netboot) - the netboot artifacts inventory
+  (`vmlinuz` / `initrd` / `squashfs`) plus a Start/Stop/Restart
+  panel for the local `dnsmasq.service` (which serves the TFTP
+  root). Fetching the artifacts happens on the **Artifact
+  Fetches** page (the cloud worker-icon in the navbar); the
+  router-config cheatsheet (option 60 / 66 / 67 to paste into
+  the LAN's DHCP server) lives on the Settings page under
+  **DHCP / PXE**. An in-page sub-nav jumps between List / TFTP
+  Daemon / Activity.
+- **`/ui/settings`** - the read-only map of every bty config
+  value plus the editable **Upstream sources** (release repo /
+  catalog URL / release tag) and **Flash behaviour** (the
+  bty-flash-once settle policy) cards, and the **DHCP / PXE**
+  router cheatsheet. Operator-account info (PAM password +
+  session-cookie rotation) is on the separate Account page,
+  reached via the user pill.
 
 ## Step 5: Flash a target over PXE
 
 Once a target's MAC is registered with an assigned image, configure
-the target's BIOS / UEFI to PXE-boot first. On power-on it'll:
+the target's BIOS / UEFI to **boot from the network (PXE) first**.
+bty then drives every subsequent boot via `boot_policy` -- you set the
+firmware order once. Mind the post-flash boot: with `boot_policy=local`
+the box boots its disk only because iPXE `exit` falls through to the
+**next firmware boot entry**, so the disk must be enabled and listed
+*after* PXE; with `boot_policy=sanboot` bty boots the disk itself and
+the firmware order matters less. (A flashed box that won't boot is
+almost always a firmware boot-order problem -- see
+[Firmware boot order](concepts.md#firmware-boot-order).) On power-on
+it'll:
 
 1. DHCP-discover from your LAN's DHCP server, which is configured
    to return option 66/67 pointing at the bty appliance.
@@ -315,8 +329,8 @@ trusted LAN:
   server (proxy or full); a working LAN DHCP server is a hard
   prerequisite, and its config must be extended with option 60 /
   66 / 67 to direct PXE clients at the bty appliance. The
-  `/ui/boot?section=dhcp-pxe` page has a cheatsheet with the
-  exact values.
+  **DHCP / PXE** cheatsheet on the Settings page
+  (`/ui/settings#dhcp-pxe`) has the exact values.
 - **UEFI Secure Boot** isn't supported - the bty netboot kernel
   isn't shim-signed. Disable Secure Boot on targets you're
   PXE-flashing, or use the USB stick flow.
