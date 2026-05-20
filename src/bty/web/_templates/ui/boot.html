@@ -435,7 +435,9 @@
                     <th>File</th>
                     <th>Status</th>
                     <th>Size</th>
+                    <th>SHA256</th>
                     <th>Last fetched</th>
+                    <th class="text-end" style="width: 1%; white-space: nowrap;">Action</th>
                 </tr>
             </thead>
             <tbody>
@@ -457,10 +459,28 @@
                         {% endif %}
                     </td>
                     <td>
+                        {% set sha = artifact_shas.get(a.name) %}
+                        {% if sha %}
+                        <code class="small" title="{{ sha }}">{{ sha[:12] }}...</code>
+                        {% else %}
+                        <small class="text-muted">-</small>
+                        {% endif %}
+                    </td>
+                    <td>
                         {% if a.mtime %}
                         <small class="text-muted">{{ a.mtime }}</small>
                         {% else %}
                         <small class="text-muted">-</small>
+                        {% endif %}
+                    </td>
+                    <td class="text-end">
+                        {% if a.present %}
+                        <a href="/boot/{{ a.name }}" download
+                           class="btn btn-sm btn-outline-secondary" title="Download {{ a.name }}">
+                            <i class="bi bi-download"></i>
+                        </a>
+                        {% else %}
+                        <span class="text-muted small">-</span>
                         {% endif %}
                     </td>
                 </tr>

@@ -129,6 +129,28 @@ def inspect_boot_dir(boot_dir: Path) -> list[ArtifactState]:
     return out
 
 
+def boot_artifact_shas(boot_dir: Path) -> dict[str, str]:
+    """Parse the ``bty-netboot-x86_64.sha256`` manifest in ``boot_dir``
+    into ``{filename: sha256}``.
+
+    The manifest is sha256sum-format (``<64-hex>  <name>`` per line);
+    it's the same file PXE clients verify against. Returns ``{}`` when
+    the manifest is absent or unreadable so the UI just shows a dash
+    for unknown digests rather than erroring.
+    """
+    out: dict[str, str] = {}
+    try:
+        text = (boot_dir / SHA256_NAME).read_text(encoding="utf-8")
+    except OSError:
+        return out
+    for raw in text.splitlines():
+        parts = raw.strip().split(maxsplit=1)
+        if len(parts) == 2:
+            digest, name = parts
+            out[name.lstrip("*./")] = digest.lower()
+    return out
+
+
 def fetch_release(
     boot_dir: Path,
     *,

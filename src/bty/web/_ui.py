@@ -785,6 +785,7 @@ def register_ui_routes(
             request,
             boot_root=str(boot_root),
             artifacts=_releases.inspect_boot_dir(boot_root),
+            artifact_shas=_releases.boot_artifact_shas(boot_root),
             release_repo=os.environ.get("BTY_BOOT_RELEASE_REPO") or _releases.DEFAULT_REPO,
             boot_events=boot_events,
             section=section,
