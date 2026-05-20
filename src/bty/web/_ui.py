@@ -230,13 +230,29 @@ def register_ui_routes(
         tftp = _sysconfig.tftp_status()
         tftp_controllable = _sysconfig.tftp_controllable()
         catalog_ok = catalog_entry_count > 0 or counts["img_total"] > 0
-        # Recommended-not-required: when /var/lib/bty is its own mount
-        # (bty-state-migrate), images + netboot artefacts + inventory
-        # survive an OS reflash. A rootfs-only install is still fully
-        # functional, so this renders as an INFO row (an "i", never a
-        # red cross) -- it advises rather than fails. ``os.path.ismount``
+        # Dedicated-disk state check. Green when the state dir is a
+        # mount that actually holds the live data (the DB plus the
+        # image and netboot roots), so an OS reflash leaves it intact.
+        # Otherwise an advisory INFO row (a blue "i", never a red
+        # cross): a rootfs-only install is fully functional, the
+        # dedicated disk is recommended, not required. ``os.path.ismount``
         # returns False on stat error, so this never raises.
-        state_migrated = os.path.ismount(state_path.parent)
+        state_dir = state_path.parent
+        state_migrated = os.path.ismount(state_dir)
+
+        def _under(path: Path, parent: Path) -> bool:
+            try:
+                path.resolve().relative_to(parent.resolve())
+            except (OSError, ValueError):
+                return False
+            return True
+
+        state_valid = (
+            state_migrated
+            and state_path.exists()
+            and _under(image_root, state_dir)
+            and _under(boot_root, state_dir)
+        )
         sanity = [
             {
                 "label": "Netboot artefacts present",
@@ -296,21 +312,31 @@ def register_ui_routes(
                 "fix_label": "Review errors",
             },
             {
-                # INFO row (not pass/fail): advises the recommended
-                # dedicated-disk state setup. Never a red cross -- a
-                # rootfs-only install is fully functional, just less
-                # resilient to a reflash. No fix link: bty-state-migrate
-                # is an appliance CLI, not a web action.
+                # Green check when the state dir is a mount holding the
+                # live DB plus the image and netboot roots (survives a
+                # reflash); otherwise an advisory INFO row (a blue "i",
+                # never a red cross): a rootfs-only install is fully
+                # functional, the dedicated disk is recommended, not
+                # required. No fix link: bty-state-migrate is an
+                # appliance CLI, not a web action.
                 "label": "State on a dedicated disk",
-                "info": True,
-                "ok": state_migrated,
+                "ok": state_valid,
+                "info": not state_valid,
                 "detail": (
-                    "/var/lib/bty is a mount point -- images, netboot "
-                    "artefacts and inventory survive an OS reflash."
-                    if state_migrated
-                    else "Running on the root filesystem. Recommended "
-                    "(not required): run bty-state-migrate <disk> so "
-                    "images + inventory survive a reflash."
+                    "/var/lib/bty is a mount point; the database, images "
+                    "and netboot artefacts all live on it, so they "
+                    "survive an OS reflash."
+                    if state_valid
+                    else (
+                        "/var/lib/bty is mounted but images or netboot "
+                        "resolve outside it, so they would not survive a "
+                        "reflash. Re-run bty-state-migrate <disk>."
+                        if state_migrated
+                        else "Running on the root filesystem. Recommended "
+                        "(not required): run bty-state-migrate <disk> so "
+                        "the database, images and netboot artefacts "
+                        "survive a reflash."
+                    )
                 ),
             },
         ]

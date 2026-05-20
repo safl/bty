@@ -301,6 +301,30 @@ def test_ui_dashboard_health_monitoring_renders_with_links(client: TestClient) -
     assert "bi-x-circle-fill" in body
 
 
+def test_ui_dashboard_state_row_green_when_migrated_and_valid(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The dedicated-disk row turns into a counted green check (not a
+    blue info) once the state dir is a mount that holds the live DB +
+    image/netboot roots. The fixture puts all three under ``tmp_path``,
+    so faking ``os.path.ismount`` for that dir flips the row to valid.
+    """
+    import os
+    import re
+
+    real = os.path.ismount
+    monkeypatch.setattr(
+        "os.path.ismount",
+        lambda p: True if os.fspath(p) == os.fspath(tmp_path) else real(p),
+    )
+    _login(client)
+    body = client.get("/ui/dashboard").text
+    # Green-state detail text, and the count now includes this row
+    # (5 pass/fail rows) rather than excluding it as advisory.
+    assert "all live on it, so they" in body
+    assert re.search(r"\d+ / 5 OK", body)
+
+
 # ---------------------------------------------------------------------
 # Sub-nav (v0.22.11): /ui/images, /ui/boot, /ui/machines each have a
 # sub-nav strip that splits "what's there" (list, the default
