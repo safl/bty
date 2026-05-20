@@ -948,3 +948,62 @@ def test_publish_scripts_write_basename_into_sha256_sidecar() -> None:
                 f"an operator's ``sha256sum -c``. Use ``cd {{dir}} && sha256sum "
                 f"{{name}} > {{name}}.sha256``. Offending line: {line.strip()!r}"
             )
+
+
+def test_state_disk_mounts_at_state_dir_not_images_subdir() -> None:
+    """The persistent-state disk (LABEL=BTY_IMAGE_STORE) must mount at
+    the whole state dir ``/var/lib/bty``, NOT the ``images/`` subdir.
+
+    Pre-0.22.17 mounted only ``/var/lib/bty/images`` -- but the bulk of
+    bty's data (the multi-GB content ``cache/`` and ``state.db``) are
+    SIBLINGS of ``images/`` under the state dir, so they stayed on the
+    rootfs and were lost on reflash. ``bty-state-migrate`` + the baked
+    fstab line now target the state dir itself. Pin all three surfaces
+    (cloud-init fstab line, the migrate script, the bty-web mount
+    ordering) so the granularity bug can't regress.
+    """
+    cloudinit = (REPO_ROOT / "bty-media" / "auxiliary" / "cloudinit-base-server.user").read_text(
+        encoding="utf-8"
+    )
+    fstab_lines = [
+        ln for ln in cloudinit.splitlines() if "LABEL=BTY_IMAGE_STORE" in ln and "ext4" in ln
+    ]
+    assert fstab_lines, "no LABEL=BTY_IMAGE_STORE fstab line in the server cloud-init"
+    for ln in fstab_lines:
+        assert "BTY_IMAGE_STORE /var/lib/bty " in ln, (
+            f"state disk must mount at /var/lib/bty (the whole state dir), not a subdir; "
+            f"got: {ln.strip()!r}"
+        )
+        assert "/var/lib/bty/images " not in ln, (
+            "fstab mounts the images/ subdir again -- that strands cache/ + state.db on the "
+            "rootfs (the pre-0.22.17 bug). Mount /var/lib/bty itself."
+        )
+
+    migrate = (
+        REPO_ROOT
+        / "bty-media"
+        / "rootfs"
+        / "server"
+        / "usr"
+        / "local"
+        / "sbin"
+        / "bty-state-migrate"
+    ).read_text(encoding="utf-8")
+    assert "STATE_DIR=/var/lib/bty\n" in migrate, (
+        "bty-state-migrate must target STATE_DIR=/var/lib/bty"
+    )
+
+    bty_web = (
+        REPO_ROOT
+        / "bty-media"
+        / "rootfs"
+        / "server"
+        / "etc"
+        / "systemd"
+        / "system"
+        / "bty-web.service"
+    ).read_text(encoding="utf-8")
+    assert "After=var-lib-bty.mount" in bty_web, (
+        "bty-web.service must order After=var-lib-bty.mount so it reads state from the "
+        "migrated disk, not the rootfs underneath a slow-to-mount disk"
+    )

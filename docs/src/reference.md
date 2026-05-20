@@ -184,7 +184,7 @@ Python package).
 
 | Helper | Purpose |
 |---|---|
-| `bty-image-store-init [--yes] DEVICE` | Partition + format a 2nd disk as the persistent image store (ext4, label `BTY_IMAGE_STORE`, mounted at `/var/lib/bty/images`). Stages existing files first; updates `/etc/fstab` for auto-mount on subsequent boots. Run once after first install; the labelled disk auto-mounts after reflashes without re-running. |
+| `bty-state-migrate [--yes] DEVICE` | Move the whole bty state dir `/var/lib/bty` (images, netboot artefacts, content cache, `state.db`) onto a 2nd disk (ext4, label `BTY_IMAGE_STORE`, mounted at `/var/lib/bty`) so it survives an OS reflash. Stops bty-web, copies + verifies before removing the rootfs copy, updates `/etc/fstab` for auto-mount. Run once; the labelled disk auto-mounts after reflashes (the venv stays on the rootfs and upgrades with the reflash). |
 | `bty-web-tftp <start\|stop\|restart>` | Control the local `dnsmasq.service` (which owns the TFTP root). Driven by the browser UI's TFTP daemon Start/Stop/Restart buttons on `/ui/boot?section=tftp`. |
 
 ## Python API

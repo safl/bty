@@ -295,29 +295,30 @@ runcmd:
   - chmod 0440 /etc/sudoers.d/bty-web
   - chown root:root /etc/sudoers.d/bty-web
 
-  # Privileged helper that prepares a 2nd disk as the bty image store
-  # so the operator can reflash the bty-server appliance without
-  # losing the image cache. The helper script lives in rootfs/server
-  # and gets +x at bake time the same way the PXE helpers do.
-  - chmod 0755 /usr/local/sbin/bty-image-store-init
+  # Privileged helper that moves bty's durable state (/var/lib/bty:
+  # images, netboot artifacts, content cache, machine DB) onto a
+  # dedicated disk so the operator can reflash the appliance without
+  # re-inventorying machines or re-downloading images. The helper
+  # lives in rootfs/server and gets +x at bake time like the PXE
+  # helpers.
+  - chmod 0755 /usr/local/sbin/bty-state-migrate
 
   # ``LABEL=BTY_IMAGE_STORE`` fstab line: if the operator runs
-  # ``bty-image-store-init /dev/sdX`` on this appliance, the resulting
+  # ``bty-state-migrate /dev/sdX`` on this appliance, the resulting
   # ext4 filesystem gets that label. The line below auto-mounts the
-  # labelled disk at /var/lib/bty/images on every subsequent boot,
-  # including after the bty-server appliance is reflashed (because
-  # this same line gets baked into the new appliance's /etc/fstab).
-  # ``nofail`` means the appliance still boots if no labelled disk
-  # is present; bty-web then falls back to storing images on the
-  # rootfs. ``x-systemd.device-timeout=10s`` avoids systemd's default
-  # 90-second wait when the disk is absent. Idempotent: the bake is
-  # one-shot so this only ever runs once; the helper script applies
-  # the same guard with ``grep -q`` if the operator wires it up
-  # later by hand.
+  # labelled disk at /var/lib/bty (the whole state dir) on every
+  # subsequent boot, including after the appliance is reflashed (the
+  # same line gets baked into the new appliance's /etc/fstab), so the
+  # state survives while the OS + venv upgrade with the reflash.
+  # ``nofail`` means a diskless appliance still boots, using the
+  # rootfs /var/lib/bty. ``x-systemd.device-timeout=10s`` avoids
+  # systemd's default 90-second wait when the disk is absent.
+  # Idempotent: the bake is one-shot; the helper applies the same
+  # ``grep -q`` guard if wired up by hand later.
   - |
     set -eu
     if ! grep -qE '^LABEL=BTY_IMAGE_STORE[[:space:]]' /etc/fstab; then
-      printf 'LABEL=BTY_IMAGE_STORE /var/lib/bty/images ext4 nofail,x-systemd.device-timeout=10s 0 2\n' \
+      printf 'LABEL=BTY_IMAGE_STORE /var/lib/bty ext4 nofail,x-systemd.device-timeout=10s 0 2\n' \
         >> /etc/fstab
     fi
 

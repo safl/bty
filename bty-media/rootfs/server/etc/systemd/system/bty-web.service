@@ -4,6 +4,13 @@ Documentation=https://github.com/safl/bty
 Requires=bty-web-init.service
 After=network-online.target bty-web-init.service
 Wants=network-online.target
+# Order after the (nofail) /var/lib/bty mount so bty-web reads its
+# state from the migrated disk, not the rootfs underneath it. After=
+# only -- a diskless appliance (no labelled disk) still starts on the
+# rootfs /var/lib/bty; on a slow disk this avoids racing the mount,
+# since local-fs.target does NOT wait for nofail mounts. The disk is
+# prepared by ``bty-state-migrate``.
+After=var-lib-bty.mount
 
 [Service]
 Type=exec
