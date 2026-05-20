@@ -304,8 +304,8 @@ def register_ui_routes(
                 "detail": (
                     "No unacknowledged failed events."
                     if error_event_count == 0
-                    else f"{error_event_count} unacknowledged failure(s) "
-                    "-- review and acknowledge to clear."
+                    else f"{error_event_count} unacknowledged failure(s); "
+                    "review and acknowledge to clear."
                 ),
                 "href": "/ui/events?failed=1",
                 "fix_href": "/ui/events?failed=1",

@@ -372,15 +372,17 @@ def test_ui_images_downloads_section_has_add_forms(client: TestClient) -> None:
 
 
 def test_ui_images_list_header_has_fetch_and_upload_catalog(client: TestClient) -> None:
-    """The Catalog table header on the list view carries the Fetch
-    (release catalog.toml) button + the Upload-catalog file form --
-    the controls moved here from the dropped ``?section=fetch`` /
-    ``?section=upload-catalog`` pages."""
+    """The Images table header on the list view carries the Fetch
+    (release catalog.toml) button + the Upload-catalog file form, the
+    controls moved here from the dropped ``?section=fetch`` /
+    ``?section=upload-catalog`` pages. Buttons spell out the noun
+    ("catalog") and a rule separates the two actions."""
     _login(client)
     body = client.get("/ui/images").text
     assert 'action="/ui/catalog/fetch-release"' in body
-    assert "Fetch latest" in body
+    assert "Fetch latest catalog" in body
     assert 'action="/ui/catalog/upload"' in body
+    assert "Upload catalog" in body
     assert 'accept=".toml"' in body
     # The add-by-URL form is still its own section, not on the list.
     assert 'id="image_url"' not in body

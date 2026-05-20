@@ -18,8 +18,8 @@
     Pre-built system images bty flashes onto target disks, content-
     addressed by sha256. Sub-nav:
     <strong>List</strong> is the merged catalog (dir scan + catalog
-    entries) -- its header carries <em>Fetch latest</em> (pull the
-    bty release catalog) and <em>Upload</em> (a catalog.toml);
+    entries): its header carries <em>Fetch latest catalog</em> (pull
+    the bty release catalog) and <em>Upload catalog</em> (a catalog.toml);
     <strong>Downloads</strong> is where you add a single image
     (upload a file or add by URL) and watch the live fetch jobs;
     <strong>Hashes</strong> shows the background sha worker. Files
@@ -191,25 +191,26 @@
 <div class="card mb-3">
     <div class="card-header bg-light fw-semibold d-flex justify-content-between align-items-center flex-wrap gap-2">
         <span><i class="bi bi-list-ul me-1"></i>Images</span>
-        <span class="d-flex flex-wrap gap-2 align-items-center">
-            {# Fetch the bty release catalog.toml in one click (was the
-               dropped "Fetch catalog" sub-nav page). #}
+        {# Two catalog actions stacked, separated by a rule: fetch the
+           bty release catalog.toml in one click, or upload a local
+           catalog.toml (both were dropped sub-nav pages). #}
+        <span class="d-flex flex-column align-items-end gap-1" style="min-width: 14rem;">
             <form method="post" action="/ui/catalog/fetch-release" class="m-0">
                 <button type="submit" class="btn btn-sm btn-primary"
                         title="Pull releases/latest/download/catalog.toml from {{ release_repo }} and import its entries">
-                    <i class="bi bi-cloud-download me-1"></i>Fetch latest
+                    <i class="bi bi-cloud-download me-1"></i>Fetch latest catalog
                 </button>
             </form>
-            {# Upload a catalog.toml (was the dropped "Upload catalog"
-               sub-nav page). Parsed before it replaces the current
-               catalog ({{ manifest_path }}); a bad file bounces back. #}
+            <hr class="w-100 my-1">
+            {# Parsed before it replaces the current catalog
+               ({{ manifest_path }}); a bad file bounces back. #}
             <form method="post" action="/ui/catalog/upload" enctype="multipart/form-data"
                   class="d-flex gap-1 m-0">
                 <input type="file" required name="file" accept=".toml"
                        class="form-control form-control-sm" style="max-width: 12rem;"
-                       title="catalog.toml -- parsed before replacing {{ manifest_path }}">
+                       title="catalog.toml: parsed before replacing {{ manifest_path }}">
                 <button type="submit" class="btn btn-sm btn-outline-secondary">
-                    <i class="bi bi-upload me-1"></i>Upload
+                    <i class="bi bi-upload me-1"></i>Upload catalog
                 </button>
             </form>
         </span>
