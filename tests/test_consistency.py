@@ -744,32 +744,37 @@ def test_every_ui_page_uses_the_intro_box_partial() -> None:
 
 
 def test_bty_web_help_documents_every_env_var() -> None:
-    """Every ``BTY_*`` env var that ``bty.web.main()`` reads from
+    """Every ``BTY_*`` env var the bty-web runtime reads from
     ``os.environ`` must be documented in the argparse description
     that ``bty-web --help`` prints. Without this pin a future
     "read BTY_FOO_BAR" addition can land without the operator-
     facing surface picking it up, and the only way to discover
     the knob is grep-the-source.
 
-    ``BTY_SESSION_SECRET`` lives in ``_resolve_secret_key`` (a
-    helper called from main); include both files in the scan.
+    Scans ``__init__.py`` (the entry point), ``_app.py`` and
+    ``_ui.py`` (which read e.g. ``BTY_TRUSTED_PROXY`` /
+    ``BTY_BOOT_RELEASE_REPO`` directly) for the read sites, and
+    asserts each name appears in the ``--help`` description block
+    that lives in ``__init__.py``.
     """
-    init = REPO_ROOT / "src" / "bty" / "web" / "__init__.py"
-    body = init.read_text()
-    env_keys = sorted(set(re.findall(r'os\.environ\.get\(\s*"(BTY_[A-Z0-9_]+)"', body)))
+    web = REPO_ROOT / "src" / "bty" / "web"
+    help_body = (web / "__init__.py").read_text()
+    # Read sites across the runtime modules.
+    env_keys: set[str] = set()
+    for name in ("__init__.py", "_app.py", "_ui.py"):
+        src = (web / name).read_text()
+        env_keys.update(re.findall(r'os\.environ\.get\(\s*"(BTY_[A-Z0-9_]+)"', src))
+        env_keys.update(re.findall(r'os\.environ\[\s*"(BTY_[A-Z0-9_]+)"', src))
+    # BTY_QUIET is a docker-entrypoint shell knob, not read by the
+    # Python runtime; not expected in the Python --help.
+    env_keys.discard("BTY_QUIET")
     assert env_keys, "scan should find at least one BTY_* lookup"
 
-    # Description text lives inside the argparse call. Easiest
-    # signal: the env-var name appears somewhere in the file
-    # outside the ``os.environ.get`` line itself (i.e. in the
-    # description block or a help string).
-    missing = []
-    for key in env_keys:
-        # Strip the line that does the lookup to make sure the
-        # name appears in user-facing text too.
-        outside = re.sub(rf"os\.environ\.get\([^)]*{key}[^)]*\)", "", body)
-        if key not in outside:
-            missing.append(key)
+    # The name must appear in the --help description block (we
+    # approximate "in user-facing help" as "present in __init__.py
+    # outside its own os.environ read line").
+    help_outside = re.sub(r"os\.environ(?:\.get)?[\[(][^\])]*[\])]", "", help_body)
+    missing = sorted(k for k in env_keys if k not in help_outside)
     assert not missing, (
         f"bty-web --help is missing env-var documentation for: {missing}. "
         f"Add a line under the argparse description in "

@@ -1609,11 +1609,12 @@ def create_app(
         same ref-keyed + sha-keyed merge.
 
         The ``catalog_entries`` DB table is the authoritative
-        catalog. ``catalog.toml`` is treated as a one-time import
-        seed at startup (``_seed_db_from_manifest_if_empty``), not
-        a live overlay -- so operator removals via
+        catalog. ``catalog.toml`` is treated as an import seed
+        (``_auto_import_manifest_rows`` at startup, and again after
+        a UI upload / fetch-release reload), not a live overlay
+        whose deletions get re-injected -- so operator removals via
         ``DELETE /catalog/entries`` stick across renders + restarts.
-        Re-importing the manifest is an explicit operator action
+        Re-importing the catalog is an explicit operator action
         (``POST /catalog/import`` or the UI's catalog upload form).
 
         Recomputed per call so an operator who drops new files into
@@ -1925,11 +1926,11 @@ def create_app(
         would require percent-encoding the schema and slashes,
         which is operator-hostile; query param is cleaner.
 
-        The DB is the authoritative catalog: ``catalog.toml`` is just
-        a one-time import seed at startup (see ``_seed_db_from_manifest_if_empty``),
-        not a live overlay. So a delete that succeeds at the DB level
-        is genuinely the end of the entry's lifetime -- no manifest
-        re-injection on next render.
+        The DB is the authoritative catalog: ``catalog.toml`` is an
+        import seed (``_auto_import_manifest_rows``), not a live
+        overlay that re-injects deletions. So a delete that succeeds
+        at the DB level is genuinely the end of the entry's lifetime
+        -- no re-injection on next render.
         """
         with _db.open_db(state_path) as conn:
             cur = conn.execute("DELETE FROM catalog_entries WHERE src = ?", (src,))

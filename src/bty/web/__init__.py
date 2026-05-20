@@ -68,11 +68,19 @@ def main(argv: list[str] | None = None) -> None:
             "  BTY_BOOT_DIR          directory of netboot artifacts (kernel /\n"
             "                        initrd / squashfs); default <BTY_STATE_DIR>/\n"
             "                        boot\n"
+            "  BTY_BOOT_RELEASE_REPO GitHub repo to fetch netboot artifacts +\n"
+            "                        catalog.toml from (default safl/bty)\n"
+            "  BTY_CATALOG_FILE      catalog.toml path (default <BTY_STATE_DIR>/\n"
+            "                        catalog.toml)\n"
             "  BTY_SESSION_SECRET    override the persisted session-cookie key\n"
             "                        (default: read/create <BTY_STATE_DIR>/\n"
             "                        session-secret)\n"
             "  BTY_MAX_UPLOAD_BYTES  cap on image-upload body size (default\n"
             "                        documented in the upload-endpoint docs)\n"
+            "  BTY_TRUSTED_PROXY     when set (any truthy value), read the\n"
+            "                        client IP from X-Forwarded-For; only\n"
+            "                        enable behind a reverse proxy that\n"
+            "                        strips inbound X-Forwarded-For\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )

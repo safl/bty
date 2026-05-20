@@ -190,7 +190,7 @@ image (from URL)) and the HTTP API below.
 | `/catalog.toml` | GET | the unified catalog rendered back as a TOML catalog (what `bty --catalog` consumes) |
 | `/catalog/entries` | GET | list operator-curated catalog entries |
 | `/catalog/entries` | POST | add an entry: `{"image_url": "...", "sha_url": "..." \| null}` |
-| `/catalog/entries` | DELETE | delete an entry by `bty_image_ref` |
+| `/catalog/entries?src=URL` | DELETE | delete an entry by its `src` URL |
 | `/catalog/import` | POST | import entries from a `source=` catalog (path / URL / oras) |
 | `/catalog/downloads` | GET | list active + recent fetches |
 | `/catalog/downloads` | POST | enqueue: `{"name": "..."}` |
