@@ -279,7 +279,7 @@ class DownloadManager(_BaseAsyncManager[DownloadState]):
         if entry is None:
             async with self._lock:
                 state.status = "failed"
-                state.error = "manifest entry vanished"
+                state.error = "catalog entry vanished"
                 state.finished_at = time.time()
             return
 

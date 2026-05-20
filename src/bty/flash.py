@@ -480,9 +480,10 @@ class FlashRaceError(FlashError):
 class FlashCancelled(FlashError):
     """Raised when the operator's ``cancel`` callback returns True.
 
-    Distinct from :class:`FlashError` proper so callers (TUI, tests)
-    can branch on "operator-requested abort" vs "the underlying
-    pipeline failed". Subclassing means callers that catch
+    Distinct from :class:`FlashError` proper so callers (the
+    ``bty`` wizard, tests) can branch on "operator-requested abort"
+    vs "the underlying pipeline failed". Subclassing means callers
+    that catch
     :class:`FlashError` still handle cancellation as a failure path
     if they don't care about the distinction.
     """
@@ -693,10 +694,10 @@ def _start_subprocess_log_pump(
     events to the progress callback.
 
     Used for auxiliary pipeline processes (zstd / gzip / xz / bzip2 /
-    curl) when a progress callback is set (TUI mode). The TUI prints
-    each line via ``console.print`` inside its ``with Progress():``
-    context; Rich routes the line above the progress widget without
-    corrupting it.
+    curl) when a progress callback is set (the ``bty`` wizard). The
+    wizard prints each line via ``console.print`` inside its ``with
+    Progress():`` context; Rich routes the line above the progress
+    widget without corrupting it.
 
     Lines are decoded as UTF-8 with replacement. The reader is
     newline-bound, so subprocesses that update via carriage-return-
@@ -1091,9 +1092,9 @@ def _flash_compressed_from_url(
     """
     curl_args, _resolved_compressed_size = _curl_args_for_source(url)
     # Pipe both curl + decompressor stderr through subprocess-log
-    # pumps. The TUI prints each line above its progress widget via
-    # Rich's ``console.print`` (which Rich routes around the live
-    # display). Newline-bound reads mean curl's/zstd's CR-only
+    # pumps. The ``bty`` wizard prints each line above its progress
+    # widget via Rich's ``console.print`` (which Rich routes around
+    # the live display). Newline-bound reads mean curl's/zstd's CR-only
     # real-time refresh doesn't fire; only meaningful lines do.
     pipeline_stderr = subprocess.PIPE if progress is not None else None
     curl_proc = subprocess.Popen(curl_args, stdout=subprocess.PIPE, stderr=pipeline_stderr)
