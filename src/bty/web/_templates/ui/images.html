@@ -30,61 +30,66 @@
 
 {% block content %}
 {% if section == "downloads" %}
-{# Downloads section: add images (upload a local file or add by URL)
-   above the live download-jobs table. Both add-forms share one
-   compact two-column card so they don't dominate the page; the
-   verbose per-form help moved to title tooltips. #}
+{# Downloads: the two add-image controls (add by URL, upload a local
+   file) live inline in the table header, split by a vertical rule; the
+   live download-jobs table is below. #}
 <div class="card mb-3">
-    <div class="card-header bg-light fw-semibold">
-        <i class="bi bi-plus-circle me-1"></i>Add images
+    <div class="card-header bg-light fw-semibold d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <span><i class="bi bi-arrow-down-circle me-1"></i>Downloads
+              <span class="text-muted small bty-poll-status ms-1">refreshing...</span></span>
+        <span class="d-flex flex-wrap align-items-center gap-2">
+            {# type="text" not type="url": browsers reject oras:// under
+               HTML5 URL validation; server-side Pydantic still validates. #}
+            <form method="post" action="/ui/catalog/entries" class="d-flex gap-1 m-0">
+                <input type="text" required class="form-control form-control-sm" id="image_url" name="image_url"
+                       style="max-width: 18rem;"
+                       placeholder="https://...img.gz  |  oras://owner/repo:tag"
+                       title="http(s):// trusts the upstream bytes on first flash and back-fills disk_image_sha; oras:// resolves the OCI manifest digest at add time.">
+                <button type="submit" class="btn btn-sm btn-outline-secondary">
+                    <i class="bi bi-cloud-plus me-1"></i>Fetch from URL
+                </button>
+            </form>
+            <div class="vr"></div>
+            {# Streams via XHR PUT /images/<name>; the HashManager
+               auto-enqueues a SHA on the post-write hook. #}
+            <span class="d-flex gap-1 align-items-center">
+                <input type="file" class="form-control form-control-sm" id="upload-file" style="max-width: 15rem;"
+                       accept=".qcow2,.img,.img.zst,.img.xz,.img.gz,.img.bz2,.iso,.iso.gz"
+                       title="Streams into the image root via PUT /images/<name>; SHA-256 auto-computed after.">
+                <button type="button" class="btn btn-sm btn-outline-secondary" id="upload-btn"
+                        onclick="uploadSelectedFile();" disabled>
+                    <i class="bi bi-upload me-1"></i>Upload
+                </button>
+            </span>
+        </span>
     </div>
-    <div class="card-body">
-        <div class="row g-3 align-items-start">
-            <div class="col-md-6">
-                {# type="text" rather than type="url": some browsers
-                   reject non-http schemes (oras://) under HTML5 URL
-                   validation. Server-side Pydantic validation still
-                   runs (regex covers http/https/oras schemes). #}
-                <form method="post" action="/ui/catalog/entries">
-                    <label for="image_url" class="form-label small mb-1">From URL or <code>oras://</code> ref</label>
-                    <div class="input-group input-group-sm">
-                        <input type="text" required class="form-control" id="image_url" name="image_url"
-                               placeholder="https://...img.gz  |  oras://ghcr.io/owner/repo:tag"
-                               title="http(s):// trusts the upstream bytes on first flash and back-fills disk_image_sha with what it observed; oras:// resolves the OCI manifest at add time and uses the layer's content-addressed digest.">
-                        <button type="submit" class="btn btn-primary" title="Add by URL">
-                            <i class="bi bi-plus-lg"></i>
-                        </button>
-                    </div>
-                </form>
-            </div>
-            <div class="col-md-6">
-                {# Streams the file via XHR PUT to /images/<name> -- the
-                   existing API endpoint that takes ``application/octet-
-                   stream``. JS handles progress + auth (cookie, same-
-                   origin); on success we redirect back to the list. The
-                   HashManager picks up the upload via the PUT post-write
-                   hook (auto-enqueue), so a SHA appears in seconds. #}
-                <label for="upload-file" class="form-label small mb-1">Upload local file</label>
-                <div class="input-group input-group-sm">
-                    <input type="file" class="form-control" id="upload-file"
-                           accept=".qcow2,.img,.img.zst,.img.xz,.img.gz,.img.bz2,.iso,.iso.gz"
-                           title="Streams into the image root via PUT /images/<name>; SHA-256 is auto-computed in the background after upload.">
-                    <button type="button" class="btn btn-primary" id="upload-btn"
-                            onclick="uploadSelectedFile();" disabled title="Upload">
-                        <i class="bi bi-upload"></i>
-                    </button>
-                </div>
-                <div class="progress mt-2 d-none" id="upload-progress" style="height: 1rem;">
-                    <div class="progress-bar progress-bar-striped progress-bar-animated"
-                         role="progressbar" style="width: 0%;" id="upload-progress-bar">0%</div>
-                </div>
-                <div class="form-text small mt-1" id="upload-status"></div>
-            </div>
-        </div>
+    {# Upload progress (hidden until an upload runs). #}
+    <div class="progress d-none mx-3 mt-2" id="upload-progress" style="height: 1rem;">
+        <div class="progress-bar progress-bar-striped progress-bar-animated"
+             role="progressbar" style="width: 0%;" id="upload-progress-bar">0%</div>
+    </div>
+    <div class="form-text small mx-3 mb-0" id="upload-status"></div>
+    <div class="table-responsive">
+        <table class="table mb-0 align-middle">
+            <thead class="table-light">
+                <tr>
+                    <th>Name</th>
+                    <th>Status</th>
+                    <th style="width: 30%;">Progress</th>
+                    <th>Bytes</th>
+                    <th class="text-end" style="width: 1%; white-space: nowrap;">Action</th>
+                </tr>
+            </thead>
+            <tbody class="bty-downloads-tbody">
+                <tr><td colspan="5" class="text-muted">No downloads yet.</td></tr>
+            </tbody>
+        </table>
     </div>
 </div>
 
 <script>
+    // Enable Upload once a file is picked. The IIFE runs after the
+    // header markup above, so #upload-file already exists.
     (function () {
         var input = document.getElementById("upload-file");
         var btn = document.getElementById("upload-btn");
@@ -139,30 +144,6 @@
         xhr.send(file);
     }
 </script>
-
-{# Active download jobs (live). #}
-<div class="card mb-3">
-    <div class="card-header bg-light fw-semibold d-flex justify-content-between align-items-center">
-        <span><i class="bi bi-arrow-down-circle me-1"></i>Downloads</span>
-        <span class="text-muted small bty-poll-status">refreshing...</span>
-    </div>
-    <div class="table-responsive">
-        <table class="table mb-0 align-middle">
-            <thead class="table-light">
-                <tr>
-                    <th>Name</th>
-                    <th>Status</th>
-                    <th style="width: 30%;">Progress</th>
-                    <th>Bytes</th>
-                    <th class="text-end" style="width: 1%; white-space: nowrap;">Action</th>
-                </tr>
-            </thead>
-            <tbody class="bty-downloads-tbody">
-                <tr><td colspan="5" class="text-muted">No downloads yet.</td></tr>
-            </tbody>
-        </table>
-    </div>
-</div>
 {% elif section == "hashes" %}
 <div class="card mb-3">
     <div class="card-header bg-light fw-semibold">
