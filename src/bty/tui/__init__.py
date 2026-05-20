@@ -125,7 +125,7 @@ def main(argv: list[str] | None = None, *, prog: str = "bty") -> None:
         line = f"{prog}: {msg}"
         print(line, file=sys.stderr, flush=True)
         try:
-            with open("/run/bty.status", "a") as f:
+            with open("/run/bty.status", "a", encoding="utf-8") as f:
                 f.write(line + "\n")
         except OSError:
             pass

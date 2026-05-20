@@ -82,7 +82,7 @@ def main(args, cijoe):
 
     bty_version = _read_bty_version(cijoe_dir)
 
-    base = base_path.read_text()
+    base = base_path.read_text(encoding="utf-8")
     base = base.replace("__BTY_TIMEZONE__", bty.get("timezone", "UTC"))
     base = base.replace("__BTY_HOSTNAME__", bty.get("hostname", "bty"))
     base = base.replace("__BTY_VERSION__", bty_version)
@@ -100,7 +100,7 @@ def main(args, cijoe):
                 continue
             lines.extend(_render_write_file(filepath, source_dir, bty_version))
 
-    output_path.write_text("\n".join(lines) + "\n")
+    output_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     log.info(f"Generated {output_path} (variant={variant})")
 
     return 0
@@ -154,7 +154,7 @@ def _read_bty_version(cijoe_dir: Path) -> str:
     ``__BTY_VERSION__`` placeholder convention.
     """
     pyproject = cijoe_dir.parent / "pyproject.toml"
-    for line in pyproject.read_text().splitlines():
+    for line in pyproject.read_text(encoding="utf-8").splitlines():
         stripped = line.strip()
         if stripped.startswith("version") and "=" in stripped:
             return stripped.split("=", 1)[1].strip().strip('"').strip("'")

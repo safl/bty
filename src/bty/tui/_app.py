@@ -1745,7 +1745,7 @@ def _emit_console_marker(line: str) -> None:
     console write and rely on stderr.
     """
     print(line, file=sys.stderr, flush=True)
-    with contextlib.suppress(OSError), open("/dev/console", "w") as console:
+    with contextlib.suppress(OSError), open("/dev/console", "w", encoding="utf-8") as console:
         console.write(line + "\n")
         console.flush()
 
