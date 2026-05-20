@@ -3,12 +3,13 @@
 
   Browser UI:    http://<server-ip>:8080
   Default login: bty / bty   (rotate before exposing this server)
-  SSH admin:     odus / odus
+  SSH admin:     odus / odus.321
 
   CLI:           bty --help
   Logs:          journalctl -u bty-web
                  journalctl -u dnsmasq
 
-  Activate PXE proxy-DHCP via the browser UI's Settings page when
-  you're ready to PXE-boot targets on this LAN.
+  PXE: point your LAN DHCP server (option 60/66/67) at this
+  appliance; the browser UI's Netboot page has the cheatsheet.
+  bty serves TFTP but does not run DHCP.
 

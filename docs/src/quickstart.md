@@ -215,8 +215,9 @@ assigned image and flashes the target's local disk.
 gets you a cookie-backed session. The dashboard shows machine /
 image counts; the **Machines** page is a live table that updates
 via Server-Sent Events as PXE clients self-discover. The
-**Settings** page activates the dnsmasq proxy-DHCP block when
-you're ready to start serving PXE.
+**Netboot** page has a per-interface cheatsheet for pointing your
+LAN DHCP server (option 60/66/67) at the appliance; bty serves
+TFTP but does not run DHCP.
 
 All client-side assets (Bootstrap CSS, Bootstrap Icons, HTMX,
 htmx-ext-sse) are vendored in the wheel - the appliance does not

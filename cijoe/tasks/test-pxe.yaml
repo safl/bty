@@ -4,7 +4,7 @@ doc: |
 
   Spins up two QEMU VMs sharing an L2 segment via ``-netdev socket``:
   the server VM runs the bty server image unmodified (default
-  ``bty / bty`` PAM credential, ``odus / odus`` SSH admin); the client
+  ``bty / bty`` PAM credential, ``odus / odus.321`` SSH admin); the client
   VM PXE-boots on that segment. The test asserts the chain completes
   by grepping the client's serial-console log for marker strings
   emitted at each stage of the boot pipeline (iPXE binary loaded,

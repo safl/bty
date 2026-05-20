@@ -12,7 +12,7 @@
 #
 # Credential: root password = ``bty``. Matches the lab-trust
 # model already established on the bty-server appliance
-# (``bty:bty`` for the web UI, ``odus:odus`` for shell). The live
+# (``bty:bty`` for the web UI, ``odus:odus.321`` for shell). The live
 # env is ephemeral -- every PXE / USB boot starts fresh, so a
 # credential rotation policy beyond "rotate the next release" has
 # no surface to bite on.

@@ -195,16 +195,17 @@ hardware. Most operators never run this build pipeline themselves -
   passwordless sudo) for SSH-side maintenance. The server image's
   `bty-web-init.service` oneshot creates `BTY_STATE_DIR`, initialises
   the SQLite schema, and rewrites `/etc/issue` to point operators at
-  `http://<ip>:8080/ui`. The dnsmasq PXE block is shipped commented
-  out and activated from the browser UI's Settings page (no shell
-  edits required).
+  `http://<ip>:8080/ui`. dnsmasq serves TFTP for the iPXE binaries;
+  the operator points their LAN DHCP server (option 60/66/67) at the
+  appliance (bty does not run DHCP), using the per-interface
+  cheatsheet on the browser UI's Netboot page.
 - **server-rpi.** Same appliance role on arm64, delivered as an SD-card
   image for Raspberry Pi 4 / 5. Built by mounting the upstream
   Raspberry Pi OS Lite arm64 image via losetup and customising it in a
   qemu-aarch64-static chroot (no QEMU full-system bake): apt install,
   bty + odus user creation, bty-lab venv install, service enables.
-  Same `bty / bty` PAM credential and `odus / odus` SSH admin as the
-  x86 server image; same `bty-web-init.service` first-boot.
+  Same `bty / bty` PAM credential and `odus / odus.321` SSH admin as
+  the x86 server image; same `bty-web-init.service` first-boot.
 
   ### Operator first-boot
 

@@ -204,10 +204,10 @@ The intended operator experience is appliance-grade:
    `odus` admin user with passwordless sudo.
 3. SSH in once to rotate the password (`sudo passwd bty`) and then
    open `/ui/login` in a browser.
-4. The Settings page activates the dnsmasq proxy-DHCP block when
-   you're ready to start serving PXE; everything else (machine
-   assignments, image catalog, boot artifacts) is browser-driven from
-   that point on.
+4. The Netboot page shows how to point your LAN DHCP server (option
+   60/66/67) at the appliance (bty serves TFTP, not DHCP); everything
+   else (machine assignments, image catalog, boot artifacts) is
+   browser-driven from that point on.
 
 *Hardware targets.* `server-x86` runs on any amd64 box that boots a
 Debian cloud image: older Intel NUCs, discarded 1U servers, recent

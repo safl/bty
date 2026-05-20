@@ -337,7 +337,7 @@ def _render_install_script(wheel_filename: str) -> str:
         if ! id odus >/dev/null 2>&1; then
             useradd --create-home --shell /bin/bash --groups sudo odus
         fi
-        echo 'odus:odus' | chpasswd
+        echo 'odus:odus.321' | chpasswd
         printf 'odus ALL=(ALL) NOPASSWD:ALL\\n' > /etc/sudoers.d/odus
         chown root:root /etc/sudoers.d/odus
         chmod 0440 /etc/sudoers.d/odus

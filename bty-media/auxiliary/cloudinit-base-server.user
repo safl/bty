@@ -58,8 +58,9 @@ packages:
   - git
   - curl
   - ca-certificates
-  # PXE boot stack. dnsmasq runs TFTP and (when the operator
-  # activates it) proxy-DHCP. ``ipxe`` ships the BIOS + UEFI binaries.
+  # PXE boot stack. dnsmasq serves TFTP only; the operator's LAN
+  # DHCP server points PXE clients here (bty does not run DHCP).
+  # ``ipxe`` ships the BIOS + UEFI binaries.
   - dnsmasq
   - ipxe
   # ``cloud-utils`` ships ``growpart`` which ``bty-grow-rootfs.service``
@@ -347,11 +348,11 @@ runcmd:
   # Lock root and create an admin user ``odus`` with passwordless
   # sudo so the operator has shell access for hands-on tasks. SSH
   # password auth stays enabled - the cooked image ships with
-  # ``odus:odus`` (and ``bty:bty`` for the web UI). Same model as
-  # PiKVM and friends; rotate before exposing.
+  # ``odus:odus.321`` (and ``bty:bty`` for the web UI). Same model
+  # as PiKVM and friends; rotate before exposing.
   - passwd -l root
   - useradd --create-home --shell /bin/bash --groups sudo odus
-  - echo 'odus:odus' | chpasswd
+  - echo 'odus:odus.321' | chpasswd
   - |
     set -eu
     printf 'odus ALL=(ALL) NOPASSWD:ALL\n' > /etc/sudoers.d/odus

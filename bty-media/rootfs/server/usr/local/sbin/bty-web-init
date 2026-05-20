@@ -54,7 +54,7 @@ cat > /etc/issue <<'EOF'
   bty server appliance
 
   Browser UI:    http://\4:8080        login: bty / bty
-  SSH admin:     ssh odus@\4           login: odus / odus
+  SSH admin:     ssh odus@\4           login: odus / odus.321
                  (odus has passwordless sudo)
 
   CHANGE THESE BEFORE EXPOSING TO ANY UNTRUSTED NETWORK:

@@ -118,7 +118,7 @@ curl
 # Credential: root password is set to ``bty`` by
 # hooks/normal/0800-bty-ssh-live.hook.chroot; PasswordAuthentication
 # stays on, PermitRootLogin yes. Same lab-trust model as the
-# bty-server appliance's ``bty:bty`` / ``odus:odus`` -- this is
+# bty-server appliance's ``bty:bty`` / ``odus:odus.321`` -- this is
 # the live env an operator boots themselves on bare metal in a
 # trusted segment, not a service exposed to a hostile network.
 # Every boot regenerates host keys via the standard openssh-

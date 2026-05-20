@@ -593,7 +593,7 @@ def _ssh_setup_test_dhcp(host, port, cfg):
         host,
         port=port,
         username="odus",
-        password="odus",
+        password="odus.321",
         allow_agent=False,
         look_for_keys=False,
         timeout=15,

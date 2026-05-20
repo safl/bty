@@ -182,7 +182,7 @@ Tty1 ends up showing something like:
 
   Browser UI:    http://192.168.1.42:8080
   Default login: bty / bty (rotate before exposing this server)
-  SSH admin:     odus / odus
+  SSH admin:     odus / odus.321
 
   Configure your LAN DHCP server to point PXE clients at this
   appliance (option 60 = "PXEClient", option 66 = this IP,
@@ -203,7 +203,7 @@ Default browser-UI credentials are `bty / bty`. **Rotate before
 exposing this server** to anything beyond a trusted network:
 
 ```bash
-# SSH in as the admin user (default: odus / odus, passwordless sudo)
+# SSH in as the admin user (default: odus / odus.321, passwordless sudo)
 ssh odus@<server-ip>
 sudo passwd bty
 ```
@@ -288,7 +288,7 @@ A few things to address before exposing the server beyond a
 trusted LAN:
 
 - **Default credentials.** Rotate `bty / bty` (browser UI) and
-  `odus / odus` (SSH admin) on first login: `sudo passwd bty`,
+  `odus / odus.321` (SSH admin) on first login: `sudo passwd bty`,
   `sudo passwd odus`. The `/etc/issue` banner reminds you on
   every console login.
 - **Per-instance SSH host keys.** `bty-ssh-host-keys.service`

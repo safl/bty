@@ -156,9 +156,10 @@ any MAC the server has never seen, so onboarding a new box needs
 zero per-MAC configuration.
 
 1. Operator stands up the bty server image (`dd` to disk, boot).
-   Default credentials are `bty / bty` (web UI) and `odus / odus`
-   (SSH); rotate with `passwd` and activate the dnsmasq proxy-DHCP
-   block from the Settings page.
+   Default credentials are `bty / bty` (web UI) and `odus / odus.321`
+   (SSH); rotate with `passwd`, and point your LAN DHCP server
+   (option 60/66/67) at the appliance using the Netboot page
+   cheatsheet (bty serves TFTP but does not run DHCP).
 2. A target machine PXE-boots on the same segment for the first time.
    `bty-web` auto-discovers the MAC, creates a `Machine` record with
    `boot_policy=tui`, and serves the iPXE-tui template
