@@ -919,3 +919,32 @@ def test_docker_healthcheck_honors_configured_port() -> None:
     assert "127.0.0.1:8080/healthz" not in healthcheck, (
         "HEALTHCHECK appears to hardcode :8080 again -- use ${BTY_WEB_PORT:-8080}."
     )
+
+
+def test_publish_scripts_write_basename_into_sha256_sidecar() -> None:
+    """Every bake/publish script that emits a ``.sha256`` sidecar via
+    a shell ``sha256sum ... > ...`` redirect must ``cd`` into the
+    artifact's directory first, so the recorded filename is a
+    BASENAME rather than the absolute build-host path.
+
+    Otherwise an operator's ``sha256sum -c <artifact>.sha256``
+    (documented in docs/src/walkthrough-*.md) looks for a
+    nonexistent ``/home/runner/.../<artifact>`` and fails. The
+    netboot / usb scripts already used ``cd <dir> && sha256sum
+    <basename>``; img_gz_publish + diskimage_build embedded the
+    absolute path until this was pinned (broke ``-c`` for the
+    server-x86 image). Scripts that build the sidecar in-Python via
+    ``write_text(f"{digest}  {path.name}")`` carry no shell
+    ``sha256sum`` redirect and are naturally exempt.
+    """
+    scripts_dir = REPO_ROOT / "cijoe" / "scripts"
+    for script in sorted(scripts_dir.glob("*.py")):
+        for line in script.read_text(encoding="utf-8").splitlines():
+            if "sha256sum" not in line or ">" not in line:
+                continue  # not a sidecar-writing redirect
+            assert "cd " in line, (
+                f"{script.name}: a ``sha256sum ... >`` sidecar redirect lacks a "
+                f"``cd <dir>`` -- the recorded path will be absolute and break "
+                f"an operator's ``sha256sum -c``. Use ``cd {{dir}} && sha256sum "
+                f"{{name}} > {{name}}.sha256``. Offending line: {line.strip()!r}"
+            )

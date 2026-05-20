@@ -84,7 +84,15 @@ def main(args, cijoe):
         log.error("Failed gzip-compressing raw image")
         return err
 
-    err, _ = cijoe.run_local(f"sha256sum {gz_path} > {gz_path}.sha256")
+    # ``cd`` first so the sidecar records the BASENAME, not the
+    # absolute build-host path -- otherwise an operator's
+    # ``sha256sum -c bty-server-x86_64.img.gz.sha256`` looks for a
+    # nonexistent ``/home/runner/.../bty-...img.gz`` and fails.
+    # Matches the netboot (live_build) / usb (usb_iso_build) / rpi
+    # convention.
+    err, _ = cijoe.run_local(
+        f"sh -c 'cd {gz_path.parent} && sha256sum {gz_path.name} > {gz_path.name}.sha256'"
+    )
     if err:
         log.error("Failed computing sha256sum")
         return err

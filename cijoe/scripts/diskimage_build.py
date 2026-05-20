@@ -202,7 +202,12 @@ def main(args, cijoe):
         return err
 
     cijoe.run_local(f"qemu-img info {disk_path}")
-    err, _ = cijoe.run_local(f"sha256sum {disk_path} > {disk_path}.sha256")
+    # Record the basename (not the absolute build-host path) so
+    # ``sha256sum -c`` works wherever the artifact lands; matches
+    # img_gz_publish / live_build / usb_iso_build.
+    err, _ = cijoe.run_local(
+        f"sh -c 'cd {disk_path.parent} && sha256sum {disk_path.name} > {disk_path.name}.sha256'"
+    )
     if err:
         log.error("Failed computing sha256sum")
         return err
