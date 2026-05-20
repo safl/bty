@@ -113,6 +113,7 @@ KNOWN_EVENT_KINDS: tuple[str, ...] = (
     "boot.release.fetch_failed",
     "settings.tftp.controlled",
     "settings.tftp.control_failed",
+    "settings.upstream.updated",
     "auth.login.succeeded",
     "auth.login.failed",
     "auth.logout",

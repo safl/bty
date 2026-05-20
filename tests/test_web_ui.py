@@ -1223,10 +1223,10 @@ def test_ui_boot_page_renders_with_artifact_state(client: TestClient) -> None:
 
 
 def test_ui_settings_renders_when_authed(client: TestClient) -> None:
-    """A logged-in operator sees the /ui/settings page rendering
-    the About + Authentication cards. PXE / TFTP info now lives on
-    /ui/boot; settings is the operator-account page reached via
-    the user-bar gear icon, not the top nav.
+    """A logged-in operator sees the /ui/settings page: the editable
+    Upstream sources card, the read-only config-value groups (each
+    magic value tagged with its source + env var), and the About +
+    Authentication cards. PXE / TFTP info lives on /ui/boot.
     """
     import bty
 
@@ -1234,15 +1234,73 @@ def test_ui_settings_renders_when_authed(client: TestClient) -> None:
     r = client.get("/ui/settings")
     assert r.status_code == 200
     body = r.text
-    # About card: heading + version slug + service-user + repo link.
-    assert ">About</h2>" in body
+    # Editable upstream card: both fields + the save form.
+    assert "Upstream sources" in body
+    assert 'action="/ui/settings/upstream"' in body
+    assert 'id="release_repo"' in body
+    assert 'id="catalog_url"' in body
+    # Read-only config groups: at least one magic value + its env var.
+    assert "Storage paths" in body
+    assert "BTY_STATE_DIR" in body
+    # About + Authentication cards still present.
+    assert "About" in body
     assert f"bty v{bty.__version__}" in body
     assert "github.com/safl/bty" in body
-    # Authentication card: heading + PAM-rotation hint w/ service-user.
-    assert ">Authentication</h2>" in body
+    assert "Authentication" in body
     assert "passwd" in body
     # Cross-link out to the netboot page (where PXE / TFTP now live).
     assert 'href="/ui/boot"' in body
+
+
+def test_ui_settings_upstream_override_round_trips(client: TestClient) -> None:
+    """Saving an upstream override persists it; the Settings page then
+    shows it as the override value, and clearing the field reverts to
+    the default."""
+    _login(client)
+    # Save both overrides.
+    r = client.post(
+        "/ui/settings/upstream",
+        data={
+            "release_repo": "acme/bty-fork",
+            "catalog_url": "https://example.invalid/catalog.toml",
+        },
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert r.headers["location"] == "/ui/settings?saved=1"
+    body = client.get("/ui/settings").text
+    assert "acme/bty-fork" in body
+    assert "https://example.invalid/catalog.toml" in body
+    # Clearing the repo field reverts it to the default repo.
+    client.post("/ui/settings/upstream", data={"release_repo": "", "catalog_url": ""})
+    body2 = client.get("/ui/settings").text
+    # The override value is gone; the default repo drives the page.
+    assert "acme/bty-fork" not in body2
+    assert "safl/bty" in body2
+
+
+def test_settings_upstream_override_drives_catalog_fetch_url(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The catalog-fetch handler resolves its URL from the override at
+    request time, so a saved Catalog URL is what gets fetched."""
+    import urllib.error
+    import urllib.request
+
+    _login(client)
+    client.post(
+        "/ui/settings/upstream",
+        data={"release_repo": "", "catalog_url": "https://example.invalid/custom.toml"},
+    )
+    seen: list[str] = []
+
+    def _fake_urlopen(url, *a, **kw):  # type: ignore[no-untyped-def]
+        seen.append(url)
+        raise urllib.error.URLError("blocked in test")
+
+    monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen)
+    client.post("/ui/catalog/fetch-release", follow_redirects=False)
+    assert seen == ["https://example.invalid/custom.toml"]
 
 
 def test_ui_settings_requires_auth(client: TestClient) -> None:

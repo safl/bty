@@ -34,7 +34,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from bty.web import _db, _releases
+from bty.web import _db, _releases, _settings_store
 from bty.web._events_log import record as _log_event
 from bty.web._jobs import ENQUEUE_DEDUP_STATES, _BaseAsyncManager
 
@@ -238,10 +238,20 @@ class ReleaseFetchManager(_BaseAsyncManager[ReleaseFetchState]):
             state.bytes_done = 0
             state.bytes_total = None
 
+        # Resolve the release repo from the operator override (if any)
+        # at fetch time, so a Settings change takes effect without a
+        # restart. ``None`` lets ``fetch_release`` fall back to env /
+        # default itself.
+        repo: str | None = None
+        if self._state_path is not None:
+            with _db.open_db(self._state_path) as conn:
+                repo = _settings_store.get(conn, _settings_store.KEY_RELEASE_REPO)
+
         try:
             result = await asyncio.to_thread(
                 _releases.fetch_release,
                 boot_root,
+                repo=repo,
                 tag=state.tag,
                 progress=_progress,
                 cancel=_cancel,

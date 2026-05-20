@@ -33,7 +33,7 @@ from jinja2 import Environment
 
 import bty
 from bty import images as bty_images
-from bty.web import _db, _events_log, _releases, _sysconfig
+from bty.web import _db, _events_log, _releases, _settings_store, _sysconfig
 from bty.web._auth import SESSION_AUTHED_KEY
 from bty.web._events_log import KNOWN_ACTORS, KNOWN_EVENT_KINDS, KNOWN_SUBJECT_KINDS
 from bty.web._events_log import normalize_ip as _normalize_ip
@@ -604,15 +604,13 @@ def register_ui_routes(
         if not catalog_manifest_path:
             state_dir = os.environ.get("BTY_STATE_DIR", "/var/lib/bty")
             catalog_manifest_path = str(Path(state_dir) / "catalog.toml")
-        # ``or DEFAULT_REPO`` rather than the dict default so an
-        # empty-string env value (``BTY_BOOT_RELEASE_REPO=``) falls
-        # back instead of breaking the page's release link. Matches
-        # the pattern in _releases.fetch_release + ui_boot.
-        release_repo = os.environ.get("BTY_BOOT_RELEASE_REPO") or _releases.DEFAULT_REPO
         # Image-relevant slice of the event log: uploads, hash
         # completions, catalog entry add/delete. Top 15 keeps the
         # page short; full timeline at /ui/events.
         with _db.open_db(state_path) as conn:
+            # Effective release repo: operator override -> env ->
+            # default. Drives the fetch-catalog button's title.
+            release_repo = _settings_store.resolve_release_repo(conn)
             image_events = []
             for kind in ("image", "catalog"):
                 image_events.extend(_events_log.list_events(conn, subject_kind=kind, limit=10))
@@ -824,6 +822,7 @@ def register_ui_routes(
         # fetch failures.
         with _db.open_db(state_path) as conn:
             boot_events = _events_log.list_events(conn, subject_kind="boot", limit=10)
+            release_repo = _settings_store.resolve_release_repo(conn)
         # Network + TFTP context the operator needs to wire up the
         # netboot side. Lives here (rather than under /ui/settings)
         # so the "what do I configure on my router" cheatsheet sits
@@ -836,7 +835,7 @@ def register_ui_routes(
             boot_root=str(boot_root),
             artifacts=_releases.inspect_boot_dir(boot_root),
             artifact_shas=_releases.boot_artifact_shas(boot_root),
-            release_repo=os.environ.get("BTY_BOOT_RELEASE_REPO") or _releases.DEFAULT_REPO,
+            release_repo=release_repo,
             boot_events=boot_events,
             section=section,
             flash=flash,
@@ -967,23 +966,131 @@ def register_ui_routes(
 
     # ----- settings -------------------------------------------------------
 
+    def _config_row(label: str, value: object, env: str | None, default: str) -> dict[str, Any]:
+        """One read-only config row. ``source`` records where the live
+        value came from: an env var, a derived path, or the built-in
+        default, so the operator can see why a magic value is what it
+        is."""
+        raw = os.environ.get(env) if env else None
+        if env is None:
+            source = "derived"
+        elif raw:
+            source = "env"
+        else:
+            source = "default"
+        return {
+            "label": label,
+            "value": str(value),
+            "env": env,
+            "default": default,
+            "source": source,
+        }
+
     def _render_settings_page(
         request: Request,
         *,
         flash: str | None = None,
         flash_kind: str | None = None,
     ) -> HTMLResponse:
-        # /ui/settings is now a thin operator-account page (just an
-        # About + Authentication card). The PXE / TFTP surfaces that
-        # used to live here moved to ``/ui/boot`` (DHCP / PXE +
-        # TFTP daemon sub-sections); nothing on the template still
-        # reads ``interfaces`` / ``tftp`` / ``missing_netboot``, so
-        # the route handler doesn't need to gather them.
+        # The Settings page is a read-only map of every magic value
+        # that configures bty-web (where each comes from: env var /
+        # derived path / default), plus the one editable card: the
+        # upstream sources (release repo + catalog URL), persisted in
+        # state.db so they survive a restart.
+        state_dir = state_path.parent
+        catalog_file = os.environ.get("BTY_CATALOG_FILE") or str(state_dir / "catalog.toml")
+        cache_dir = os.environ.get("BTY_CATALOG_CACHE_DIR") or str(state_dir / "cache")
+        session_secret = os.environ.get("BTY_SESSION_SECRET")
+        with _db.open_db(state_path) as conn:
+            release_repo = _settings_store.resolve_release_repo(conn)
+            catalog_url = _settings_store.resolve_catalog_url(conn)
+            repo_override = _settings_store.get(conn, _settings_store.KEY_RELEASE_REPO)
+            catalog_override = _settings_store.get(conn, _settings_store.KEY_CATALOG_URL)
+        upstream = {
+            "release_repo": release_repo,
+            "release_repo_override": repo_override,
+            "release_repo_default": _settings_store.default_release_repo(),
+            "catalog_url": catalog_url,
+            "catalog_url_override": catalog_override,
+            "catalog_url_default": _settings_store.default_catalog_url(release_repo),
+        }
+        config_groups = [
+            {
+                "title": "Storage paths",
+                "icon": "hdd",
+                "rows": [
+                    _config_row("State directory", state_dir, "BTY_STATE_DIR", "/var/lib/bty"),
+                    _config_row("Database", state_path, None, "<state dir>/state.db"),
+                    _config_row(
+                        "Image root", image_root, "BTY_IMAGE_ROOT", "/var/lib/bty/images"
+                    ),
+                    _config_row("Netboot directory", boot_root, "BTY_BOOT_DIR", "<state dir>/boot"),
+                    _config_row(
+                        "Catalog manifest",
+                        catalog_file,
+                        "BTY_CATALOG_FILE",
+                        "<state dir>/catalog.toml",
+                    ),
+                    _config_row(
+                        "Image cache", cache_dir, "BTY_CATALOG_CACHE_DIR", "<state dir>/cache"
+                    ),
+                    _config_row(
+                        "Session secret",
+                        session_secret or str(state_dir / "session-secret"),
+                        "BTY_SESSION_SECRET",
+                        "<state dir>/session-secret",
+                    ),
+                ],
+            },
+            {
+                "title": "Network",
+                "icon": "hdd-network",
+                "rows": [
+                    _config_row("Bind host", os.environ.get("BTY_WEB_HOST", "0.0.0.0"),
+                                "BTY_WEB_HOST", "0.0.0.0"),
+                    _config_row("Bind port", os.environ.get("BTY_WEB_PORT", "8080"),
+                                "BTY_WEB_PORT", "8080"),
+                    _config_row(
+                        "Trust X-Forwarded-For",
+                        "yes" if os.environ.get("BTY_TRUSTED_PROXY") else "no",
+                        "BTY_TRUSTED_PROXY",
+                        "no",
+                    ),
+                    _config_row("TFTP systemd unit", _sysconfig.TFTP_UNIT, None, "dnsmasq.service"),
+                ],
+            },
+            {
+                "title": "Background workers",
+                "icon": "cpu",
+                "rows": [
+                    _config_row(
+                        "Catalog downloads (parallel)",
+                        os.environ.get("BTY_CATALOG_MAX_PARALLEL", "2"),
+                        "BTY_CATALOG_MAX_PARALLEL",
+                        "2",
+                    ),
+                    _config_row(
+                        "Image hashing (parallel)",
+                        os.environ.get("BTY_HASH_MAX_PARALLEL", "1"),
+                        "BTY_HASH_MAX_PARALLEL",
+                        "1",
+                    ),
+                    _config_row(
+                        "Release-fetch user agent",
+                        _releases.DEFAULT_USER_AGENT,
+                        None,
+                        "bty-web release-fetcher",
+                    ),
+                ],
+            },
+        ]
         return render(
             "ui/settings.html",
             request,
             flash=flash,
             flash_kind=flash_kind,
+            upstream=upstream,
+            config_groups=config_groups,
         )
 
     @app.get(
@@ -992,8 +1099,51 @@ def register_ui_routes(
         include_in_schema=False,
         dependencies=[Depends(require_ui_auth)],
     )
-    def ui_settings(request: Request) -> HTMLResponse:
-        return _render_settings_page(request)
+    def ui_settings(request: Request, saved: str | None = None) -> HTMLResponse:
+        flash = "Upstream sources saved." if saved else None
+        return _render_settings_page(
+            request, flash=flash, flash_kind="success" if saved else None
+        )
+
+    @app.post(
+        "/ui/settings/upstream",
+        include_in_schema=False,
+        dependencies=[Depends(require_ui_auth)],
+    )
+    def ui_settings_upstream(
+        request: Request,
+        release_repo: Annotated[str, Form()] = "",
+        catalog_url: Annotated[str, Form()] = "",
+    ) -> RedirectResponse:
+        """Save (or clear) the two editable upstream overrides. An empty
+        field clears the override, reverting to env / default. Both take
+        effect on the next fetch without a restart, since the fetch
+        sites resolve from this store at request time."""
+        rr = release_repo.strip()
+        cu = catalog_url.strip()
+        with _db.open_db(state_path) as conn:
+            if rr:
+                _settings_store.set_value(conn, _settings_store.KEY_RELEASE_REPO, rr)
+            else:
+                _settings_store.clear(conn, _settings_store.KEY_RELEASE_REPO)
+            if cu:
+                _settings_store.set_value(conn, _settings_store.KEY_CATALOG_URL, cu)
+            else:
+                _settings_store.clear(conn, _settings_store.KEY_CATALOG_URL)
+            _events_log.record(
+                conn,
+                kind="settings.upstream.updated",
+                summary=(
+                    f"upstream sources set: repo={rr or '(default)'}, "
+                    f"catalog_url={cu or '(default)'}"
+                ),
+                subject_kind="settings",
+                subject_id="upstream",
+                actor="operator",
+                source_ip=_client_ip(request),
+            )
+            conn.commit()
+        return RedirectResponse("/ui/settings?saved=1", status_code=status.HTTP_303_SEE_OTHER)
 
     @app.post(
         "/ui/settings/tftp-control",

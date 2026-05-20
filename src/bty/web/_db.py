@@ -123,6 +123,18 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE INDEX IF NOT EXISTS events_ts_idx       ON events(ts);
 CREATE INDEX IF NOT EXISTS events_kind_idx     ON events(kind);
 CREATE INDEX IF NOT EXISTS events_subject_idx  ON events(subject_kind, subject_id);
+
+-- Operator-overridable settings, a small key-value store. Most config
+-- stays env-var / default driven (read-only on the Settings page); a
+-- handful of values (upstream catalog URL, netboot release repo) can be
+-- overridden here so they survive across restarts without editing the
+-- unit file. A missing key means "no override": the resolver falls back
+-- to the env var, then the built-in default.
+CREATE TABLE IF NOT EXISTS settings (
+    key        TEXT PRIMARY KEY,
+    value      TEXT NOT NULL,
+    updated_at TEXT NOT NULL        -- ISO 8601 UTC of the last write
+);
 """
 
 

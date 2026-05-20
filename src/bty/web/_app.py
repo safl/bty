@@ -41,7 +41,7 @@ from bty import catalog as _catalog
 from bty import images
 from bty import oras as _oras
 from bty.web import _catalog as _web_catalog
-from bty.web import _db, _hash, _models, _release_mgr, _ui
+from bty.web import _db, _hash, _models, _release_mgr, _settings_store, _ui
 from bty.web._auth import SESSION_COOKIE, require_auth
 from bty.web._events import MachineEvent, MachineEventBus, sse_format
 from bty.web._events_log import acknowledge_event as _acknowledge_event
@@ -2209,14 +2209,11 @@ def create_app(
     # URL for "Fetch from bty project release" -- mirrors the
     # ``bty`` wizard's ``d`` keystroke (loads
     # ``releases/latest/download/catalog.toml`` from the bty repo).
-    # ``BTY_BOOT_RELEASE_REPO`` is reused as the repo override
-    # because the same release page hosts boot artefacts +
-    # catalog.toml; one knob configures both.
-    _BTY_RELEASE_CATALOG_URL = (
-        f"https://github.com/"
-        f"{os.environ.get('BTY_BOOT_RELEASE_REPO', 'safl/bty')}"
-        f"/releases/latest/download/catalog.toml"
-    )
+    # The same release page hosts boot artefacts + catalog.toml, so the
+    # netboot release repo and the catalog URL share one default; both
+    # are operator-overridable via the Settings page (resolved per
+    # request below from ``_settings_store`` so a change takes effect
+    # without a restart).
 
     @app.post(
         "/ui/catalog/upload",
@@ -2329,8 +2326,10 @@ def create_app(
         * Non-TOML body (e.g. HTML 404) -> caught by load_bytes'
           TOMLDecodeError -> CatalogError.
         """
+        with _db.open_db(state_path) as conn:
+            catalog_url = _settings_store.resolve_catalog_url(conn)
         try:
-            with urllib.request.urlopen(_BTY_RELEASE_CATALOG_URL, timeout=30) as resp:
+            with urllib.request.urlopen(catalog_url, timeout=30) as resp:
                 # Bound the read at the catalog upload cap + 1 byte
                 # so a release page that responds with a huge
                 # unexpected body (HTML, a binary asset that
@@ -2358,7 +2357,7 @@ def create_app(
                 status_code=status.HTTP_303_SEE_OTHER,
             )
         try:
-            parsed = _catalog.load_bytes(content, source=_BTY_RELEASE_CATALOG_URL)
+            parsed = _catalog.load_bytes(content, source=catalog_url)
         except _catalog.CatalogError as exc:
             return RedirectResponse(
                 "/ui/images?error="
@@ -2371,7 +2370,7 @@ def create_app(
         # imported rows actually work. Without the write+reload,
         # ``POST /catalog/downloads`` 404s with "no catalog
         # configured" right after a successful import.
-        _import_parsed_catalog(parsed, source=_BTY_RELEASE_CATALOG_URL, source_ip=None)
+        _import_parsed_catalog(parsed, source=catalog_url, source_ip=None)
         manifest_path.parent.mkdir(parents=True, exist_ok=True)
         manifest_path.write_bytes(content)
         await _reload_catalog_from_disk()

@@ -1,5 +1,5 @@
 {% extends "ui/_layout.html" %}
-{% block title %}Account - bty-web{% endblock %}
+{% block title %}Settings - bty-web{% endblock %}
 
 {% block subnav %}
 {% with sections=None %}
@@ -10,16 +10,104 @@
 {% block intro %}
 {% from "ui/_intro_box.html" import render as intro_box %}
 {% call intro_box() %}
-    Operator-account info for the logged-in user. PXE / Netboot
-    configuration (router cheatsheet + TFTP daemon control)
+    Where every magic value comes from. Most are read-only (set via
+    environment variable or derived from the state directory); the
+    <strong>Upstream sources</strong> card is editable and persists in
+    the database. PXE / Netboot wiring (router cheatsheet + TFTP daemon)
     lives on the <a href="/ui/boot">Netboot</a> page.
 {% endcall %}
 {% endblock %}
 
 {% block content %}
+{# Editable: the two upstream URLs. Empty field clears the override and
+   reverts to env / default. Both take effect on the next fetch. #}
 <div class="card mb-4">
+    <div class="card-header bg-light fw-semibold">
+        <i class="bi bi-cloud-arrow-down me-1"></i>Upstream sources
+    </div>
     <div class="card-body">
-        <h2 class="h5 mb-3"><i class="bi bi-info-circle me-2"></i>About</h2>
+        <form method="post" action="/ui/settings/upstream">
+            <div class="mb-3">
+                <label for="release_repo" class="form-label">Netboot release repo</label>
+                <input type="text" class="form-control font-monospace" id="release_repo"
+                       name="release_repo" placeholder="{{ upstream.release_repo_default }}"
+                       value="{{ upstream.release_repo_override or '' }}">
+                <div class="form-text small">
+                    GitHub <code>owner/repo</code> the netboot artefacts (and the
+                    default catalog URL) are pulled from. Effective:
+                    <code>{{ upstream.release_repo }}</code>{% if not upstream.release_repo_override %}
+                    (default; leave blank to keep){% endif %}.
+                </div>
+            </div>
+            <div class="mb-3">
+                <label for="catalog_url" class="form-label">Catalog URL</label>
+                <input type="text" class="form-control font-monospace" id="catalog_url"
+                       name="catalog_url" placeholder="{{ upstream.catalog_url_default }}"
+                       value="{{ upstream.catalog_url_override or '' }}">
+                <div class="form-text small">
+                    Full URL the <em>Fetch latest catalog</em> action downloads
+                    <code>catalog.toml</code> from. Effective:
+                    <code>{{ upstream.catalog_url }}</code>{% if not upstream.catalog_url_override %}
+                    (derived from the release repo; leave blank to keep){% endif %}.
+                </div>
+            </div>
+            <button type="submit" class="btn btn-primary">
+                <i class="bi bi-save me-1"></i>Save upstream sources
+            </button>
+            <span class="form-text small ms-2">Clear a field to revert it to the default.</span>
+        </form>
+    </div>
+</div>
+
+{# Read-only: the magic values, grouped, each row tagged with where the
+   live value came from (env var / derived path / default). #}
+{% for group in config_groups %}
+<div class="card mb-4">
+    <div class="card-header bg-light fw-semibold">
+        <i class="bi bi-{{ group.icon }} me-1"></i>{{ group.title }}
+    </div>
+    <div class="table-responsive">
+        <table class="table table-sm mb-0 align-middle">
+            <thead class="table-light">
+                <tr>
+                    <th style="width: 18rem;">Setting</th>
+                    <th>Value</th>
+                    <th style="width: 1%; white-space: nowrap;">Source</th>
+                    <th style="width: 1%; white-space: nowrap;">Env var</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in group.rows %}
+                <tr>
+                    <td>{{ r.label }}</td>
+                    <td><code class="small">{{ r.value }}</code></td>
+                    <td>
+                        {% if r.source == "env" %}
+                        <span class="badge bg-primary" title="set via environment variable">env</span>
+                        {% elif r.source == "derived" %}
+                        <span class="badge bg-secondary" title="derived from another path">derived</span>
+                        {% else %}
+                        <span class="badge bg-light text-dark border"
+                              title="built-in default: {{ r.default }}">default</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if r.env %}<code class="small text-muted">{{ r.env }}</code>
+                        {% else %}<span class="text-muted small">-</span>{% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endfor %}
+
+<div class="card mb-4">
+    <div class="card-header bg-light fw-semibold">
+        <i class="bi bi-info-circle me-1"></i>About
+    </div>
+    <div class="card-body">
         <p class="text-muted mb-0">
             Running <code>bty v{{ version }}</code> as service user
             <code>{{ service_user }}</code>. Source +
@@ -30,8 +118,10 @@
 </div>
 
 <div class="card mb-4">
+    <div class="card-header bg-light fw-semibold">
+        <i class="bi bi-shield-lock me-1"></i>Authentication
+    </div>
     <div class="card-body">
-        <h2 class="h5 mb-3"><i class="bi bi-shield-lock me-2"></i>Authentication</h2>
         <p class="text-muted mb-0">
             bty-web is gated by the OS password of the
             <code>{{ service_user }}</code> account. To rotate the credential,

@@ -81,6 +81,12 @@ def main(argv: list[str] | None = None) -> None:
             "                        client IP from X-Forwarded-For; only\n"
             "                        enable behind a reverse proxy that\n"
             "                        strips inbound X-Forwarded-For\n"
+            "  BTY_CATALOG_CACHE_DIR image cache directory (default\n"
+            "                        <BTY_STATE_DIR>/cache)\n"
+            "  BTY_CATALOG_MAX_PARALLEL  max concurrent catalog downloads\n"
+            "                        (default 2)\n"
+            "  BTY_HASH_MAX_PARALLEL max concurrent image hash jobs\n"
+            "                        (default 1)\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
