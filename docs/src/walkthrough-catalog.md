@@ -150,8 +150,8 @@ url = "https://my.example.com/images/debian-13-server.img.gz"
 ```
 
 The ``url`` field also accepts an ``oras://`` reference pointing
-at an OCI artefact published via [ORAS](https://oras.land/) (OCI
-Registry As Storage -- the spec for **non-container** artefacts in
+at an OCI artifact published via [ORAS](https://oras.land/) (OCI
+Registry As Storage -- the spec for **non-container** artifacts in
 a container registry). The scheme is distinct from a ``docker pull
 ghcr.io/...`` reference because nosi-style disk images are not
 runnable container images; they are gzip-compressed raw disks

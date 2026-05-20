@@ -3,7 +3,7 @@
 The bty-server appliance ships as a single rootfs image
 (`bty-server-x86_64.img.gz`). Out of the box, all bty state lives on
 the disk you flashed, under `/var/lib/bty`: the image cache
-(`cache/`), the netboot artefacts (`boot/`), the uploaded images
+(`cache/`), the netboot artifacts (`boot/`), the uploaded images
 (`images/`), and bty-web's SQLite database (`state.db`, which holds
 the machine inventory, catalog, and boot-policy assignments). That's
 fine for a first-look install, but it means **reflashing the
@@ -15,7 +15,7 @@ This walkthrough moves `/var/lib/bty` onto a **separate disk** with
 repairs the OS (and the `bty` venv, which stays on the rootfs at
 `/opt/bty/venv`) while the disk preserves the data: the new appliance
 auto-detects the labelled disk on boot, mounts it at `/var/lib/bty`,
-and bty-web comes back with its images, netboot artefacts, and
+and bty-web comes back with its images, netboot artifacts, and
 machine inventory intact -- no re-downloading, no re-inventorying.
 
 ## Prerequisites
@@ -96,7 +96,7 @@ LABEL=BTY_IMAGE_STORE /var/lib/bty ext4 nofail,x-systemd.device-timeout=10s 0 2
 
 systemd finds the labelled disk and mounts it at `/var/lib/bty`;
 `bty-web.service` is ordered after that mount (`After=var-lib-bty.mount`),
-so by the time it starts, the cache, netboot artefacts, AND the
+so by the time it starts, the cache, netboot artifacts, AND the
 machine inventory are exactly where they were before the reflash. No
 operator action required -- and crucially, no re-inventorying.
 

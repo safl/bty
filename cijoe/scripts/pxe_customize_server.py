@@ -12,7 +12,7 @@ This step just lays out the test workspace under
 
 - ``server.qcow2``       - working copy of the production qcow2
                           (rehydrated from .img.gz when only that's
-                          present, the CI artefact shape).
+                          present, the CI artifact shape).
 - ``test-image.qcow2``   - 1 MiB dummy qcow2 the chain step uploads
                           to ``PUT /images/<name>``.
 - ``boot/{vmlinuz,...}`` - copies of the live trio for the chain
@@ -79,7 +79,7 @@ def main(args, cijoe):
 
     for name in ARTIFACT_NAMES:
         if not (artifact_dir / name).is_file():
-            log.error(f"live artefact missing: {artifact_dir / name}")
+            log.error(f"live artifact missing: {artifact_dir / name}")
             log.error("Run `make build VARIANT=netboot-x86` from the repo root first")
             return errno.ENOENT
 
@@ -110,7 +110,7 @@ def main(args, cijoe):
         return err
 
     # Stage the live trio so the chain step can PUT each via
-    # ``PUT /boot/<name>``. The artefact dir itself is left
+    # ``PUT /boot/<name>``. The artifact dir itself is left
     # untouched.
     boot_stage = workspace / "boot"
     boot_stage.mkdir()

@@ -112,9 +112,9 @@ url = "https://github.com/safl/bty/releases/latest/download/bty-server-x86_64.im
 The `url` field accepts:
 
 - `https://` (or `http://`) -- plain HTTP fetch.
-- `oras://<host>/<owner>/<repo>:<tag>` -- an OCI artefact published
+- `oras://<host>/<owner>/<repo>:<tag>` -- an OCI artifact published
   via [ORAS](https://oras.land/) (the spec for non-container
-  artefacts in a container registry). bty resolves the tag to a
+  artifacts in a container registry). bty resolves the tag to a
   content-addressed layer digest at flash time and verifies the
   downloaded bytes against that digest. Use a rolling tag
   (`:latest`) or pin to `@sha256:<hex>`. Anonymous-pull only -- no
@@ -184,7 +184,7 @@ Python package).
 
 | Helper | Purpose |
 |---|---|
-| `bty-state-migrate [--yes] DEVICE` | Move the whole bty state dir `/var/lib/bty` (images, netboot artefacts, content cache, `state.db`) onto a 2nd disk (ext4, label `BTY_IMAGE_STORE`, mounted at `/var/lib/bty`) so it survives an OS reflash. Stops bty-web, copies + verifies before removing the rootfs copy, updates `/etc/fstab` for auto-mount. Run once; the labelled disk auto-mounts after reflashes (the venv stays on the rootfs and upgrades with the reflash). |
+| `bty-state-migrate [--yes] DEVICE` | Move the whole bty state dir `/var/lib/bty` (images, netboot artifacts, content cache, `state.db`) onto a 2nd disk (ext4, label `BTY_IMAGE_STORE`, mounted at `/var/lib/bty`) so it survives an OS reflash. Stops bty-web, copies + verifies before removing the rootfs copy, updates `/etc/fstab` for auto-mount. Run once; the labelled disk auto-mounts after reflashes (the venv stays on the rootfs and upgrades with the reflash). |
 | `bty-web-tftp <start\|stop\|restart>` | Control the local `dnsmasq.service` (which owns the TFTP root). Driven by the browser UI's TFTP daemon Start/Stop/Restart buttons on `/ui/boot?section=tftp`. |
 
 ## Python API
@@ -434,7 +434,7 @@ templates, Bootstrap CSS, HTMX form posts).
  emits a deletion cookie.
 - `GET /ui/dashboard` -> overview (machine count, discovered count,
  image count) + sanity-checklist card (one row per readiness
- condition: netboot artefacts present / catalog non-empty / TFTP
+ condition: netboot artifacts present / catalog non-empty / TFTP
  daemon running, with deep-links into the relevant page when a
  condition fails) + recent-activity slice
 - `GET /ui/machines` -> table of all machines with a "discovered"

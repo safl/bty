@@ -3453,7 +3453,7 @@ def test_release_fetch_unknown_extra_field_422(app_client: TestClient) -> None:
 def test_release_fetch_manager_backfills_from_events(tmp_path: Path) -> None:
     """The manager's in-memory ``_states`` dies on restart, which
     made the /ui/boot "Active + recent fetches" table show "No
-    fetches yet." even when artefacts were clearly present on
+    fetches yet." even when artifacts were clearly present on
     disk. The fix backfills from boot.release.fetched /
     boot.release.fetch_failed events on ``start()``.
 

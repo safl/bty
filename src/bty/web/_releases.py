@@ -80,7 +80,7 @@ class FetchCancelled(Exception):
 # HashManager / ReleaseFetchManager.
 FetchProgressCallback: TypeAlias = Callable[[int, "int | None"], None]
 """Signature: ``progress(bytes_done, total_bytes_or_None)``. Called
-once per chunk written for the *currently-streaming* artefact.
+once per chunk written for the *currently-streaming* artifact.
 ``total_bytes`` is the upstream ``Content-Length`` if the server
 sent one (most do), else ``None``."""
 
@@ -159,7 +159,7 @@ def fetch_release(
     base_url: str | None = None,
     progress: FetchProgressCallback | None = None,
     cancel: FetchCancelCheck | None = None,
-    on_artefact_start: Callable[[str], None] | None = None,
+    on_artifact_start: Callable[[str], None] | None = None,
 ) -> FetchResult:
     """Download all expected artifacts for ``tag`` into ``boot_dir``.
 
@@ -170,15 +170,15 @@ def fetch_release(
 
     ``progress(bytes_done, total)`` and ``cancel()`` enable the
     :class:`bty.web._release_mgr.ReleaseFetchManager` UI: progress
-    is called per-chunk during each artefact's stream, and cancel
+    is called per-chunk during each artifact's stream, and cancel
     is polled so the operator's "Cancel" button lands within
     seconds.
 
-    ``on_artefact_start(name)`` is called once at the start of each
-    individual artefact's stream so the manager can update the
-    ``state.artefact`` field for the live UI. Without this hook
+    ``on_artifact_start(name)`` is called once at the start of each
+    individual artifact's stream so the manager can update the
+    ``state.artifact`` field for the live UI. Without this hook
     the /ui/boot page rendered ``"... - N MiB / M MiB"`` because
-    the artefact field stayed None across the whole multi-file
+    the artifact field stayed None across the whole multi-file
     fetch.
     """
     repo = repo or os.environ.get("BTY_BOOT_RELEASE_REPO") or DEFAULT_REPO
@@ -201,8 +201,8 @@ def fetch_release(
         tmp_path = Path(tmp)
         for name in ALL_NAMES:
             url = f"{base_url}/{name}"
-            if on_artefact_start is not None:
-                on_artefact_start(name)
+            if on_artifact_start is not None:
+                on_artifact_start(name)
             try:
                 total += _stream(url, tmp_path / name, progress=progress, cancel=cancel)
             except FetchCancelled:
@@ -238,11 +238,11 @@ def _stream(
     """Stream ``url`` to ``dest`` in 1 MiB chunks; return bytes written.
 
     ``timeout=300`` so a flaky GitHub mirror (or a network blip mid-
-    artefact) doesn't wedge the bty-web "Fetch netboot artifacts"
+    artifact) doesn't wedge the bty-web "Fetch netboot artifacts"
     action indefinitely.
 
     ``progress`` is called per-chunk with cumulative bytes written
-    for *this artefact* (not the whole release); ``cancel`` is
+    for *this artifact* (not the whole release); ``cancel`` is
     polled per-chunk and raises :class:`FetchCancelled` on True.
     """
     req = urllib.request.Request(url, headers={"User-Agent": DEFAULT_USER_AGENT})
@@ -295,9 +295,9 @@ def _verify_sha256_manifest(manifest_path: Path, files_dir: Path) -> None:
         if not target.is_file():
             raise ValueError(f"manifest references missing file: {name}")
         # Stream-hash instead of ``target.read_bytes()``: the squashfs
-        # artefact alone is ~300 MiB; a Pi 4 / small NUC running
-        # bty-web can OOM if N artefacts get fully buffered. 1 MiB
-        # chunks keep peak memory bounded regardless of artefact
+        # artifact alone is ~300 MiB; a Pi 4 / small NUC running
+        # bty-web can OOM if N artifacts get fully buffered. 1 MiB
+        # chunks keep peak memory bounded regardless of artifact
         # size; performance is identical to read_bytes() for small
         # files (a single chunk).
         h = hashlib.sha256()

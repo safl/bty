@@ -349,7 +349,7 @@ and `release`.
   wheel and sdist (PyPI publish via trusted publishing); the same
   workflow builds the four `bty-media` variants in parallel
   (`usb-x86`, `server-x86`, `server-rpi`, `netboot-x86`), runs the
-  end-to-end PXE chain test against the freshly-built artefacts,
+  end-to-end PXE chain test against the freshly-built artifacts,
   builds HTML + PDF docs, and attaches every release-bound artifact
   to the GitHub release at the same tag. Operators get one release
   page covering the whole stack at one version; `/ui/boot`'s "fetch
@@ -827,7 +827,7 @@ implementation is in flight.
   Use cases: diskless CI runners that fetch a fresh OS every
   job (no state to drift); rescue / recovery boots to a
   known-good environment; lab benchmarking on machines that
-  have no disk or shouldn't be written to. The artefacts
+  have no disk or shouldn't be written to. The artifacts
   already exist (`netboot-x86` variant) and `bty-web`'s
   per-MAC `boot_policy` field already routes to different
   iPXE scripts; this mode would add a new policy value (e.g.

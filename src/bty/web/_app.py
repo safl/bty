@@ -906,7 +906,7 @@ def create_app(
 
     # ---------- release-fetch manager ---------------------------
     # Registered BEFORE the ``GET /boot/{name}`` catch-all so
-    # ``/boot/releases`` doesn't get eaten as a missing artefact name.
+    # ``/boot/releases`` doesn't get eaten as a missing artifact name.
     # Powers the trackable "Fetch from GitHub releases" action on
     # /ui/boot: ``POST /boot/releases`` enqueues, ``GET /boot/releases``
     # polls, ``DELETE /boot/releases/{tag}`` cancels.
@@ -1573,7 +1573,7 @@ def create_app(
         include_in_schema=False,
     )
     async def upload_boot_artifact(name: str, request: Request) -> dict[str, object]:
-        """Stream-upload a live-env artefact into the boot dir.
+        """Stream-upload a live-env artifact into the boot dir.
 
         Same shape as ``PUT /images/{name}`` - the live trio
         (vmlinuz / initrd / squashfs) goes here so the iPXE chain
@@ -2210,7 +2210,7 @@ def create_app(
     # URL for "Fetch from bty project release" -- mirrors the
     # ``bty`` wizard's ``d`` keystroke (loads
     # ``releases/latest/download/catalog.toml`` from the bty repo).
-    # The same release page hosts boot artefacts + catalog.toml, so the
+    # The same release page hosts boot artifacts + catalog.toml, so the
     # netboot release repo and the catalog URL share one default; both
     # are operator-overridable via the Settings page (resolved per
     # request below from ``_settings_store`` so a change takes effect

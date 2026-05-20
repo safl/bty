@@ -129,7 +129,7 @@ make test-pxe
 ```
 
 Spins up a server VM + a client VM sharing an L2 segment and runs
-the full PXE chain against pre-built artefacts. Adds:
+the full PXE chain against pre-built artifacts. Adds:
 
 | Dependency | Used for |
 |---|---|

@@ -1,6 +1,6 @@
 """ORAS / OCI registry adapter for fetching disk images.
 
-Lets ``.bri`` descriptors point at OCI artefacts -- disk images
+Lets ``.bri`` descriptors point at OCI artifacts -- disk images
 published via ORAS_ (OCI Registry As Storage), *not* container
 images -- via a tiny URL scheme prefix. Operators write::
 
@@ -21,10 +21,10 @@ The ORAS spelling disambiguates from container references. A reader
 who sees ``ghcr.io/safl/nosi/debian-sysdev:latest`` in a docs example
 might reach for ``docker pull`` or ``podman run`` -- which would
 fail and leave them confused, because nosi publishes disk-image
-artefacts, not runnable container images. ``oras://`` is the
+artifacts, not runnable container images. ``oras://`` is the
 ecosystem term for OCI-Registry-As-Storage; an operator googling it
 lands at oras.land which explicitly explains "store arbitrary
-artefacts, not just containers". The ``://`` form also composes
+artifacts, not just containers". The ``://`` form also composes
 with other registries -- ``oras://quay.io/...``,
 ``oras://registry.example.com:5000/...`` -- without per-registry
 schemes.
@@ -83,7 +83,7 @@ _MANIFEST_ACCEPT = (
 
 # Layer titles ending in any of these are non-image sidecars (sha
 # sums, signatures, attestations); skip them when picking the image
-# layer so a future ``oras attach`` on the same artefact doesn't
+# layer so a future ``oras attach`` on the same artifact doesn't
 # silently start being flashed.
 _SIDECAR_SUFFIXES = (
     ".sha256",
@@ -289,7 +289,7 @@ def pick_image_layer(manifest: dict[str, Any]) -> dict[str, Any]:
             continue
         image_like.append(layer)
     # If every layer looked like a sidecar (shouldn't happen for a real
-    # disk-image artefact but tolerate it), fall back to all dict layers
+    # disk-image artifact but tolerate it), fall back to all dict layers
     # so the size-pick still has something to choose from.
     candidates = image_like or [layer for layer in layers if isinstance(layer, dict)]
     if not candidates:

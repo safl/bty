@@ -23,7 +23,7 @@ Boots two QEMU VMs sharing an L2 segment via ``-netdev socket``:
 The test uses production paths for everything except DHCP setup
 on the synthesised PXE segment. ``POST /ui/login`` uses the
 default credential, ``PUT /boot/<name>`` and ``PUT /images/<name>``
-upload the artefacts, and ``PUT /machines/<mac>`` pins the per-MAC
+upload the artifacts, and ``PUT /machines/<mac>`` pins the per-MAC
 plan.
 
 DHCP is the one piece that has to be test-side: the server VM and
@@ -94,7 +94,7 @@ def main(args, cijoe):
             return errno.ENOENT
     for name in ARTIFACT_NAMES:
         if not (boot_stage / name).is_file():
-            log.error(f"live artefact missing in workspace: {boot_stage / name}")
+            log.error(f"live artifact missing in workspace: {boot_stage / name}")
             return errno.ENOENT
 
     pxe_socket_port = _free_port()
@@ -365,7 +365,7 @@ def _login(host, port, password):
 
 def _put_file(host, port, token, base_path, src_path, name):
     """``PUT /<base>/<name>`` with the file as the body. Streams to
-    avoid loading large squashfs / kernel artefacts into memory."""
+    avoid loading large squashfs / kernel artifacts into memory."""
     url = f"http://{host}:{port}{base_path}/{name}"
     size = src_path.stat().st_size
     with src_path.open("rb") as fh:

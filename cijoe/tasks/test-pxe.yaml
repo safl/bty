@@ -33,7 +33,7 @@ doc: |
      appears within the deadline.
 
   Wall clock: 5-10 minutes per run. Server + client serial logs land
-  in the cijoe run dir as artefacts of the report.
+  in the cijoe run dir as artifacts of the report.
 
 steps:
 - name: pxe_customize_server

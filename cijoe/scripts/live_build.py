@@ -129,7 +129,7 @@ def main(args, cijoe):
         log.error("lb build failed; see live-build.log under the build dir")
         return err
 
-    # Locate the artefacts. live-build's netboot output paths vary
+    # Locate the artifacts. live-build's netboot output paths vary
     # between releases (``binary/live/`` direct, tarballed under
     # ``binary/`` as ``live-image-amd64.tar.xz``, or split across
     # both); recursive globs find them wherever they ended up.

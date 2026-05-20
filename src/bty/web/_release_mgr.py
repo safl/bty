@@ -9,7 +9,7 @@ operator can:
   * cancel an in-flight fetch via ``DELETE /boot/releases/{tag}``
     -- the worker checks the cancel flag between 1 MiB chunks and
     aborts within seconds, leaving the boot dir's existing
-    artefacts untouched (atomic-rename pattern in
+    artifacts untouched (atomic-rename pattern in
     :func:`bty.web._releases.fetch_release` only commits after
     the manifest has verified),
   * see the resulting state without the browser having to hold
@@ -62,9 +62,9 @@ class ReleaseFetchState:
 
     tag: str  # the tag the operator requested ("latest" or e.g. "v1.2.3") -- the job key
     status: str = "queued"  # queued | running | completed | cancelled | failed
-    bytes_done: int = 0  # cumulative bytes for the artefact currently streaming
-    bytes_total: int | None = None  # Content-Length of the artefact currently streaming
-    artefact: str | None = None  # filename of the artefact currently streaming
+    bytes_done: int = 0  # cumulative bytes for the artifact currently streaming
+    bytes_total: int | None = None  # Content-Length of the artifact currently streaming
+    artifact: str | None = None  # filename of the artifact currently streaming
     started_at: float | None = None
     finished_at: float | None = None
     error: str | None = None
@@ -83,7 +83,7 @@ class ReleaseFetchState:
             "status": self.status,
             "bytes_done": self.bytes_done,
             "bytes_total": self.bytes_total,
-            "artefact": self.artefact,
+            "artifact": self.artifact,
             "started_at": self.started_at,
             "finished_at": self.finished_at,
             "error": self.error,
@@ -116,7 +116,7 @@ class ReleaseFetchManager(_BaseAsyncManager[ReleaseFetchState]):
         events when ``state_path`` is given. The manager's
         ``_states`` dict is otherwise lost on restart, which made
         the /ui/boot "Active + recent fetches" table show
-        "No fetches yet." even when artefacts were clearly
+        "No fetches yet." even when artifacts were clearly
         present on disk. Backfill gives the operator a durable
         history per-tag without persisting the manager's queue.
         """
@@ -229,12 +229,12 @@ class ReleaseFetchManager(_BaseAsyncManager[ReleaseFetchState]):
         def _cancel() -> bool:
             return cancel_event.is_set()
 
-        def _on_artefact_start(name: str) -> None:
-            # Reset bytes counters at each new artefact so the
+        def _on_artifact_start(name: str) -> None:
+            # Reset bytes counters at each new artifact so the
             # /ui/boot live UI ticks per-file rather than carrying
             # the previous file's terminal value into the next
             # file's "0 / total" initial render.
-            state.artefact = name
+            state.artifact = name
             state.bytes_done = 0
             state.bytes_total = None
 
@@ -255,7 +255,7 @@ class ReleaseFetchManager(_BaseAsyncManager[ReleaseFetchState]):
                 tag=state.tag,
                 progress=_progress,
                 cancel=_cancel,
-                on_artefact_start=_on_artefact_start,
+                on_artifact_start=_on_artifact_start,
             )
             final_status = "completed"
             error = None

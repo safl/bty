@@ -23,7 +23,7 @@ variant = "test-pxe"
 fail_fast = true
 
 [test.pxe]
-# Pre-built artefacts live here; ``make build VARIANT=...`` populates
+# Pre-built artifacts live here; ``make build VARIANT=...`` populates
 # this dir. Same convention as the disk-image / live build pipelines.
 artifact_dir = "{{ local.env.HOME }}/system_imaging/disk"
 

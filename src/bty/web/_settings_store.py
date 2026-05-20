@@ -7,7 +7,7 @@ value comes from). A small set of values can be overridden here and
 persisted across restarts without touching the systemd unit:
 
 - :data:`KEY_RELEASE_REPO` -- the GitHub ``owner/repo`` the netboot
-  release fetch pulls artefacts from.
+  release fetch pulls artifacts from.
 - :data:`KEY_CATALOG_URL` -- the full URL the "Fetch latest catalog"
   action downloads ``catalog.toml`` from.
 

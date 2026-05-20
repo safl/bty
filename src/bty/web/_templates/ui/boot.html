@@ -37,7 +37,7 @@
     <div class="card-body">
         <p class="text-muted">
             bty-server runs a TFTP daemon (dnsmasq) and serves boot
-            artefacts over HTTP. The DHCP side stays with your LAN's
+            artifacts over HTTP. The DHCP side stays with your LAN's
             router (or DHCP server); bty deliberately doesn't try
             to replace it. Point your router at this appliance with
             the settings below.
@@ -202,7 +202,7 @@
 </div>
 
 {% else %}
-{# section == "list" (default): the netboot artefacts table, with
+{# section == "list" (default): the netboot artifacts table, with
    the Fetch control (tag input, default "latest") inline in its
    header -- List and Fetch are merged into one view, like the
    Catalog. Live fetch activity shows in the top-nav indicator. #}
@@ -215,7 +215,7 @@
                resolves to. #}
             <button type="button" class="btn btn-sm btn-primary" id="enqueue-fetch-btn"
                     data-tag="{{ release_tag }}" onclick="enqueueFetch();"
-                    title="Fetch netboot artefacts for tag '{{ release_tag }}' from {{ release_repo }} (change the tag on the Settings page)">
+                    title="Fetch netboot artifacts for tag '{{ release_tag }}' from {{ release_repo }} (change the tag on the Settings page)">
                 <i class="bi bi-cloud-download me-1"></i>Fetch
                 {% if release_tag == "latest" %}latest{% else %}<code>{{ release_tag }}</code>{% endif %}
                 artifacts
@@ -373,7 +373,7 @@
             if (d.bytes_total != null) bytes += " / " + fmtBytes(d.bytes_total);
             return "<tr>" +
                    "<td><code>" + esc(d.tag) + "</code>" +
-                   (d.artefact ? ' <small class="text-muted">' + esc(d.artefact) + "</small>" : "") +
+                   (d.artifact ? ' <small class="text-muted">' + esc(d.artifact) + "</small>" : "") +
                    "</td>" +
                    "<td>" + statusBadge(d.status) + "</td>" +
                    "<td>" + progressBar(d) + "</td>" +
@@ -439,7 +439,7 @@
 
 {% endif %}
 
-{# Recent activity for boot artefacts: release fetches +
+{# Recent activity for boot artifacts: release fetches +
    fetch failures via the per-subject events card. On the
    default list view only -- the DHCP / TFTP sections have their
    own focused content and the events log link in the top nav

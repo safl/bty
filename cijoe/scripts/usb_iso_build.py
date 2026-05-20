@@ -66,7 +66,7 @@ PUBLISH_GZ_BASENAME = "bty-usb-x86_64.iso.gz"
 # Sized for the single-stick offline workflow: operator carries one
 # stick to an air-gapped target with bty-server.img.gz already on
 # BTY_IMAGES. 2.1 GiB fits one server image (~1-1.5 GiB) plus a few
-# ``.bri`` descriptors, and keeps the artefact small enough to play
+# ``.bri`` descriptors, and keeps the artifact small enough to play
 # nicely with Ventoy + KVM-over-IP shims (piKVM / JetKVM) that
 # bypass this partition via the .bri-pointer flow or
 # bty-images-discover. Operators who want more space can grow the
@@ -667,7 +667,7 @@ def _extend_with_exfat(cijoe, iso_path: Path) -> int:
     # fails. The alternative -- silently shipping a stick with an
     # empty BTY_IMAGES partition because the mount fell through to
     # a "best-effort warning" path -- is strictly worse: a USB
-    # stick that boots and finds no images is a broken artefact
+    # stick that boots and finds no images is a broken artifact
     # that requires hands-on diagnosis to distinguish from a real
     # delivery problem.
     err = _populate_bty_images_partition(cijoe, part_dev)
@@ -690,7 +690,7 @@ def _extend_with_exfat(cijoe, iso_path: Path) -> int:
 # digest verified-after-resolve), plus the bty-server appliance via
 # its GitHub release asset (built here, not in nosi). The ``oras://``
 # spelling -- distinct from ``ghcr:`` / ``docker pull ghcr.io/...``
-# -- signals that the artefacts are disk images stored as OCI
+# -- signals that the artifacts are disk images stored as OCI
 # blobs, NOT runnable container images. Operators delete / edit /
 # replace these freely from a host OS; the files show up as ordinary
 # text on the exFAT partition.
@@ -708,7 +708,7 @@ _STARTER_BRIS: tuple[tuple[str, str], ...] = (
         '# (e.g. "latest") is resolved to a content-addressed layer\n'
         "# digest at flash time, so this stick stays current as nosi\n"
         "# republishes. NOTE: oras:// is distinct from ``docker pull\n"
-        "# ghcr.io/...`` -- the artefact is a disk image stored as an\n"
+        "# ghcr.io/...`` -- the artifact is a disk image stored as an\n"
         "# OCI blob, NOT a runnable container image. To pin a specific\n"
         '# build, replace ":latest" with "@sha256:<digest>".\n'
         "\n"

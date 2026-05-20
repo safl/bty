@@ -195,7 +195,7 @@ def list_images(root: Path) -> list[Image]:
 # Mailable / Slackable: an operator can attach a ``.bri`` to a
 # message and the recipient drops it into their own BTY_IMAGES to
 # get the same flashable entry. The ``url`` field accepts http(s)://
-# (plain HTTP fetch) and ``oras://`` (OCI registry artefact, resolved
+# (plain HTTP fetch) and ``oras://`` (OCI registry artifact, resolved
 # via bty's ORAS adapter at flash time). Fresh USB sticks bake four
 # starter descriptors onto BTY_IMAGES: three nosi sysdev images via
 # ``oras://`` plus the bty-server appliance via a GitHub release URL.
@@ -314,7 +314,7 @@ def read_bri(path: Path) -> RemoteImage:
         # Try to infer from URL last path segment so "img.gz",
         # "iso.gz", etc. flow through the same detect_format logic
         # used for local files. ``oras://`` refs don't have a filename
-        # in the URL (the artefact name lives in the manifest layer's
+        # in the URL (the artifact name lives in the manifest layer's
         # title annotation), so default to ``img.gz`` -- the format
         # nosi publishes and the practical default for any OCI-hosted
         # disk image. Operators publishing other formats set ``format``

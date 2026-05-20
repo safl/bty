@@ -128,11 +128,11 @@ def test_fetch_release_atomic_install(serve_artifacts: tuple[str, Path], tmp_pat
 
 
 def test_verify_sha256_manifest_streams_large_files(tmp_path: Path) -> None:
-    """``_verify_sha256_manifest`` must hash artefacts in chunks
+    """``_verify_sha256_manifest`` must hash artifacts in chunks
     rather than via ``Path.read_bytes()``. A Pi 4 / small NUC
     running bty-web has limited RAM, and the squashfs alone is
     ~300 MiB; if the hash were buffered as a single bytes object,
-    a future larger artefact could OOM the verifier.
+    a future larger artifact could OOM the verifier.
 
     We can't directly assert "didn't read whole file" without
     instrumentation, but we CAN assert the function happily
@@ -146,8 +146,8 @@ def test_verify_sha256_manifest_streams_large_files(tmp_path: Path) -> None:
     # 3 MiB of varied bytes so the streaming loop runs 3 chunks.
     large = bytes(range(256)) * (3 * 1024 * 4)
     assert len(large) > 1 << 20
-    artefact = files_dir / "bty-netboot-x86_64.vmlinuz"
-    artefact.write_bytes(large)
+    artifact = files_dir / "bty-netboot-x86_64.vmlinuz"
+    artifact.write_bytes(large)
     digest = hashlib.sha256(large).hexdigest()
     (files_dir / SHA256_NAME).write_text(f"{digest}  bty-netboot-x86_64.vmlinuz\n")
 
@@ -158,7 +158,7 @@ def test_verify_sha256_manifest_streams_large_files(tmp_path: Path) -> None:
     # and expect a mismatch on re-verify.
     tampered = bytearray(large)
     tampered[-1] ^= 0xFF
-    artefact.write_bytes(bytes(tampered))
+    artifact.write_bytes(bytes(tampered))
     with pytest.raises(ValueError, match="mismatch"):
         _verify_sha256_manifest(files_dir / SHA256_NAME, files_dir)
 
@@ -189,7 +189,7 @@ def test_missing_netboot_artifacts_reports_each_gap(tmp_path: Path) -> None:
 
 
 def test_missing_netboot_artifacts_empty_dir_returns_all(tmp_path: Path) -> None:
-    """A boot_dir with none of the artefacts -- every name shows
+    """A boot_dir with none of the artifacts -- every name shows
     up in the list. The helper must not raise."""
     from bty.web._releases import ARTIFACT_NAMES, missing_netboot_artifacts
 

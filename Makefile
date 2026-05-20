@@ -71,7 +71,7 @@ help:
 	@echo "  docs-serve    bty-docs-serve (live-rebuild dev server on :8000)"
 	@echo ""
 	@echo "Cleanup:"
-	@echo "  clean         remove build artefacts (Python dist/, cijoe-output, _build, caches)"
+	@echo "  clean         remove build artifacts (Python dist/, cijoe-output, _build, caches)"
 
 # ---------- Python package ----------------------------------------------
 
@@ -152,7 +152,7 @@ build:
 # End-to-end PXE chain test: server + client QEMU VMs sharing an L2
 # segment via -netdev socket. Test-side dnsmasq does full DHCP for
 # the isolated segment (bty itself never runs DHCP). Requires
-# pre-built server + live artefacts under ~/system_imaging/disk/.
+# pre-built server + live artifacts under ~/system_imaging/disk/.
 # Wall clock 5-10 min per run.
 test-pxe:
 	cd cijoe && cijoe tasks/test-pxe.yaml --monitor -c configs/test-pxe.toml

@@ -357,13 +357,13 @@ jobs:
       - name: Install cijoe
         run: pipx install --force cijoe
 
-      - name: Download server image artefact
+      - name: Download server image artifact
         uses: actions/download-artifact@v8
         with:
           name: bty-server-x86_64-img-gz
           path: ~/system_imaging/disk/
 
-      - name: Download netboot artefacts
+      - name: Download netboot artifacts
         uses: actions/download-artifact@v8
         with:
           name: bty-netboot-x86_64

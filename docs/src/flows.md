@@ -391,7 +391,7 @@ Conditional:
 | `catalog.entry.added`           | Operator `POST /catalog/entries` (form or JSON) succeeds.                                                  |
 | `catalog.entry.add_failed`      | sha resolve / oras resolve failed on `/catalog/entries`.                                                   |
 | `catalog.entry.deleted`         | Operator `DELETE /catalog/entries`.                                                                         |
-| `boot.release.fetched`          | `/ui/boot/fetch-release` (or `POST /boot/releases`) successfully pulled artefacts.                          |
+| `boot.release.fetched`          | `/ui/boot/fetch-release` (or `POST /boot/releases`) successfully pulled artifacts.                          |
 | `boot.release.fetch_failed`     | Same path failed (404, sha mismatch, etc.).                                                                 |
 | `settings.tftp.controlled`      | Operator `POST /ui/settings/tftp-control` succeeded.                                                        |
 | `settings.tftp.control_failed`  | Same path failed (`sudo -n` denied, helper exit non-zero, etc.).                                            |
@@ -421,7 +421,7 @@ and a JSON `details` blob with kind-specific extras.
 | Upload an image                           | `PUT /images/{name}` (XHR from form) | Streams into `BTY_IMAGES`. Auto-enqueues sha256 hash. Records `image.{uploaded,upload_failed}`.     |
 | Hash an unhashed image                    | `POST /catalog/hashes`               | Enqueues a HashManager job. Records `image.{hashed,hash_failed}` on completion.                      |
 | Fetch a catalog image                     | `POST /catalog/downloads`            | Enqueues a DownloadManager job.                                                                      |
-| Fetch boot artefacts (kernel + initrd + squashfs) | `POST /ui/boot/fetch-release` | Pulls release artefacts into `BTY_BOOT_ROOT`. Records `boot.release.{fetched,fetch_failed}`.        |
+| Fetch boot artifacts (kernel + initrd + squashfs) | `POST /ui/boot/fetch-release` | Pulls release artifacts into `BTY_BOOT_ROOT`. Records `boot.release.{fetched,fetch_failed}`.        |
 | Start / Stop / Restart the TFTP daemon    | `POST /ui/settings/tftp-control`     | `sudo bty-web-tftp <action>` -> `systemctl <action> dnsmasq`. Records `settings.tftp.{controlled,control_failed}`. |
 
 ## Safety gates summary

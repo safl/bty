@@ -505,7 +505,7 @@ runcmd:
   - systemctl enable bty-banner-mid.service
   - systemctl enable bty-banner-late.service
 
-  # Disable cloud-init for subsequent boots and clear its artefacts.
+  # Disable cloud-init for subsequent boots and clear its artifacts.
   # The cooked image already has its identity (bty user + default
   # password baked above), so cloud-init has nothing to do at first
   # boot - and without an attached datasource it can stall systemd's

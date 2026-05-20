@@ -34,7 +34,7 @@
                        name="release_repo" placeholder="{{ upstream.release_repo_default }}"
                        value="{{ upstream.release_repo_override or '' }}">
                 <div class="form-text small">
-                    GitHub <code>owner/repo</code> the netboot artefacts (and the
+                    GitHub <code>owner/repo</code> the netboot artifacts (and the
                     default catalog URL) are pulled from. Effective:
                     <code>{{ upstream.release_repo }}</code>{% if not upstream.release_repo_override %}
                     (default; leave blank to keep){% endif %}.

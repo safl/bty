@@ -30,7 +30,7 @@ bty is a flasher, not an image builder:
   upstream with cloud-init / kickstart / preseed / your favourite
   image builder. Use the [companion image-builder](https://github.com/safl/nosi)
   (`safl/nosi` -- builds Debian / Ubuntu / Fedora sysdev images and
-  publishes them to GHCR as ORAS artefacts that bty flashes via
+  publishes them to GHCR as ORAS artifacts that bty flashes via
   `oras://`), or your own. bty just writes the bytes.
 - **No post-boot configuration management either.** Anything that
   needs to be true on the running target (users, hostnames, config
@@ -67,9 +67,9 @@ required.
 
 ## ORAS-published images and portable catalogs
 
-bty consumes images and catalogs as **OCI artefacts** published with
+bty consumes images and catalogs as **OCI artifacts** published with
 [ORAS](https://oras.land/) (OCI Registry As Storage -- the spec for
-non-container artefacts in a container registry). The end-to-end
+non-container artifacts in a container registry). The end-to-end
 story:
 
 - **Images live in a registry.** [`safl/nosi`](https://github.com/safl/nosi)
@@ -94,7 +94,7 @@ story:
   with whatever `--catalog` source the operator passed.
 
 Why this shape: images and catalog metadata are content-addressed
-artefacts, not container images. The OCI ecosystem already solves
+artifacts, not container images. The OCI ecosystem already solves
 "distribute signed, versioned, content-addressed blobs"; bty just
 piggybacks on that without dragging in the docker / podman runtime.
 

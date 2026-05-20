@@ -802,7 +802,7 @@ def parse_sha256_manifest(text: str, target_name: str | None = None) -> str:
 
 
 # sha256sum-style manifests are tiny in practice: one line per
-# artefact at ~80 bytes each. 1 MiB caps a maliciously-large or
+# artifact at ~80 bytes each. 1 MiB caps a maliciously-large or
 # wrong-URL response without rejecting any plausible real
 # manifest. Without this cap, a ``sha_url`` that points at a
 # multi-GB file (operator typo into the image url field) reads

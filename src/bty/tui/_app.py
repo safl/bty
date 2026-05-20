@@ -824,7 +824,7 @@ class BtyTui:
         self._console.print(
             Panel(
                 f"[{_ACCENT}]d[/]  load bty's [bold]default[/] catalog "
-                "(published with bty as a release artefact)\n"
+                "(published with bty as a release artifact)\n"
                 f"[{_ACCENT}]c[/]  provide a [bold]custom[/] http(s):// or oras:// URL "
                 "to a catalog that you host\n"
                 f"[{_ACCENT}]l[/]  [bold]local only[/] -- skip remote catalog, "
@@ -1415,7 +1415,7 @@ class BtyTui:
             f"[{_MUTED}]Add some via:[/]\n"
             f"  - drop files into [{_PRIMARY}]{self._state.image_root}[/]\n"
             f"  - [{_ACCENT}]d[/] load bty's default catalog "
-            f"(published with bty as a release artefact)\n"
+            f"(published with bty as a release artifact)\n"
             f"  - [{_ACCENT}]c[/] provide an http(s):// or oras:// URL "
             f"to a catalog that you host"
         )

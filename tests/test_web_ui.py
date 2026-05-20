@@ -263,7 +263,7 @@ def test_ui_dashboard_health_monitoring_renders_with_links(client: TestClient) -
     checklist") is the operator's fresh-install onboarding +
     at-a-glance status surface: one row per readiness condition,
     each linked into the remediation section when it fails. Pin the
-    four pass/fail rows (Netboot artefacts / Catalog non-empty / TFTP
+    four pass/fail rows (Netboot artifacts / Catalog non-empty / TFTP
     daemon / No unacknowledged errors) plus the advisory dedicated-disk
     info row so a future refactor doesn't drop one.
     """
@@ -273,7 +273,7 @@ def test_ui_dashboard_health_monitoring_renders_with_links(client: TestClient) -
     body = client.get("/ui/dashboard").text
     assert "Health Monitoring" in body
     # Each row's label.
-    assert "Netboot artefacts present" in body
+    assert "Netboot artifacts present" in body
     assert "Catalog is non-empty" in body
     assert "TFTP daemon running" in body
     assert "No unacknowledged errors" in body
@@ -289,7 +289,7 @@ def test_ui_dashboard_health_monitoring_renders_with_links(client: TestClient) -
         "over the four pass/fail rows (info row excluded)"
     )
     # The two always-failing rows in the bare-fixture state
-    # (no netboot artefacts, no live TFTP daemon) carry fix links.
+    # (no netboot artifacts, no live TFTP daemon) carry fix links.
     assert 'href="/ui/boot?section=fetch"' in body
     assert 'href="/ui/boot?section=tftp"' in body
     # Both visual indicators render on the bare fixture: green
@@ -520,7 +520,7 @@ def test_ui_images_section_unrecognised_falls_back_to_list(client: TestClient) -
 
 
 def test_ui_boot_default_section_is_list(client: TestClient) -> None:
-    """Bare ``GET /ui/boot`` lands on the artefact table, which now
+    """Bare ``GET /ui/boot`` lands on the artifact table, which now
     carries the Fetch control (tag input + button) inline in its
     header -- List and Fetch are merged into one view."""
     _login(client)
@@ -529,7 +529,7 @@ def test_ui_boot_default_section_is_list(client: TestClient) -> None:
     body = r.text
     # Sub-nav strip renders (DHCP/PXE pill present).
     assert 'href="/ui/boot?section=dhcp-pxe"' in body
-    # Fetch control is inline in the artefacts table header (the tag is
+    # Fetch control is inline in the artifacts table header (the tag is
     # an editable Settings value, so the button just fetches it).
     assert 'id="enqueue-fetch-btn"' in body
     assert "artifacts" in body
@@ -550,7 +550,7 @@ def test_ui_boot_list_has_live_release_fetches_table(client: TestClient) -> None
 
 def test_ui_boot_list_header_has_fetch_control(client: TestClient) -> None:
     """The netboot List view carries the Fetch control inline in the
-    artefacts table header. The release tag is an editable Settings
+    artifacts table header. The release tag is an editable Settings
     value, so the button reads "Fetch latest artifacts" and carries the
     resolved tag in data-tag (no on-page tag input)."""
     _login(client)
@@ -558,7 +558,7 @@ def test_ui_boot_list_header_has_fetch_control(client: TestClient) -> None:
     assert 'id="enqueue-fetch-btn"' in body
     assert 'data-tag="latest"' in body
     assert "artifacts" in body
-    # The artefacts table renders alongside the control.
+    # The artifacts table renders alongside the control.
     assert "<th>File</th>" in body
     # The DHCP/PXE + TFTP section bodies are NOT on the list view
     # (their subnav pills are, but not the cheatsheet / daemon panel).
@@ -649,7 +649,7 @@ def test_ui_boot_section_unrecognised_falls_back_to_list(client: TestClient) -> 
     r = client.get("/ui/boot?section=garbage")
     assert r.status_code == 200
     body = r.text
-    # Lands on list: artefacts table + the inline Fetch control.
+    # Lands on list: artifacts table + the inline Fetch control.
     assert 'id="enqueue-fetch-btn"' in body
     assert "bty-netboot-x86_64.vmlinuz" in body
     # Sub-nav strip still renders with the canonical pills.
@@ -1190,7 +1190,7 @@ def test_ui_boot_page_renders_with_artifact_state(client: TestClient) -> None:
     """The /ui/boot page must show the configured boot dir and one
     row per expected artifact (vmlinuz/initrd/squashfs/sha256)."""
     _login(client)
-    # Default landing (list section): shows the four artefacts +
+    # Default landing (list section): shows the four artifacts +
     # the polling JS for the active-fetches table.
     r = client.get("/ui/boot")
     assert r.status_code == 200
@@ -1699,7 +1699,7 @@ def test_ui_settings_tftp_control_success_renders_green_flash(
     body = r.text
     assert "alert-success" in body
     assert "Restarted TFTP" in body
-    # Page-level marker: the netboot artefact filename only renders
+    # Page-level marker: the netboot artifact filename only renders
     # on /ui/boot, not on /ui/settings -- proves the response came
     # from _render_boot_page.
     assert "bty-netboot-x86_64.vmlinuz" in body

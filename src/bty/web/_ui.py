@@ -255,7 +255,7 @@ def register_ui_routes(
         )
         sanity = [
             {
-                "label": "Netboot artefacts present",
+                "label": "Netboot artifacts present",
                 "ok": not missing_netboot,
                 "detail": (
                     f"All four files under {boot_root}."
@@ -324,7 +324,7 @@ def register_ui_routes(
                 "info": not state_valid,
                 "detail": (
                     "/var/lib/bty is a mount point; the database, images "
-                    "and netboot artefacts all live on it, so they "
+                    "and netboot artifacts all live on it, so they "
                     "survive an OS reflash."
                     if state_valid
                     else (
@@ -334,7 +334,7 @@ def register_ui_routes(
                         if state_migrated
                         else "Running on the root filesystem. Recommended "
                         "(not required): run bty-state-migrate <disk> so "
-                        "the database, images and netboot artefacts "
+                        "the database, images and netboot artifacts "
                         "survive a reflash."
                     )
                 ),
@@ -804,12 +804,12 @@ def register_ui_routes(
         flash_kind: str | None = None,
     ) -> HTMLResponse:
         """Sub-nav-aware boot-artifacts page. ``?section=list`` (the
-        default landing) shows the artefacts (present/missing, size,
+        default landing) shows the artifacts (present/missing, size,
         sha256, download) with the Fetch control -- a tag input
         (default ``latest``) + button -- inline in the table header;
         List and Fetch are merged into one view (like the Catalog).
         ``?section=dhcp-pxe`` / ``?section=tftp`` are the router
-        cheatsheet + TFTP-daemon controls. Operator-side artefact
+        cheatsheet + TFTP-daemon controls. Operator-side artifact
         uploads stay scripted via the auth-gated ``PUT /boot/{name}``
         route, not the browser.
 
@@ -818,7 +818,7 @@ def register_ui_routes(
         section = request.query_params.get("section") or "list"
         if section not in ("list", "dhcp-pxe", "tftp"):
             section = "list"
-        # Recent activity for boot artefacts: release fetches /
+        # Recent activity for boot artifacts: release fetches /
         # fetch failures.
         with _db.open_db(state_path) as conn:
             boot_events = _events_log.list_events(conn, subject_kind="boot", limit=10)
@@ -827,7 +827,7 @@ def register_ui_routes(
         # Network + TFTP context the operator needs to wire up the
         # netboot side. Lives here (rather than under /ui/settings)
         # so the "what do I configure on my router" cheatsheet sits
-        # next to the netboot artefacts it depends on.
+        # next to the netboot artifacts it depends on.
         interfaces = _sysconfig.list_interfaces()
         primary = next((i for i in interfaces if i.ipv4), interfaces[0] if interfaces else None)
         return render(
