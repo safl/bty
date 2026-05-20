@@ -54,7 +54,10 @@
                    "i" instead of a check/cross and carry no link. #}
                 <li class="list-group-item d-flex align-items-center">
                     {% if s.info %}
-                    <i class="bi bi-info-circle-fill {{ 'text-success' if s.ok else 'text-info' }} fs-5 me-2 flex-shrink-0" aria-label="info"></i>
+                    {# Advisory row: always the neutral info colour, never
+                       green/red. It's a "nice to have", not a pass/fail --
+                       a blue "i" you might act on but that never alarms. #}
+                    <i class="bi bi-info-circle-fill text-info fs-5 me-2 flex-shrink-0" aria-label="info"></i>
                     {% elif s.ok %}
                     <i class="bi bi-check-circle-fill text-success fs-5 me-2 flex-shrink-0" aria-label="ok"></i>
                     {% else %}
