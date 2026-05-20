@@ -25,17 +25,21 @@
    field in the header. Machines also auto-appear on first PXE
    contact; the inline Add just stages a row early. #}
 <div class="card">
-    <div class="card-header bg-light fw-semibold d-flex justify-content-between align-items-center flex-wrap gap-2">
-        <span><i class="bi bi-pc-display me-1"></i>Machines</span>
+    {# ``py-1`` + ``flex-nowrap`` keep the header a single tight row
+       around the inline add-MAC form: default padding plus a wrap to a
+       second line made the bar much taller than a table row. The input
+       shrinks rather than wrapping on a narrow window. #}
+    <div class="card-header bg-light fw-semibold d-flex justify-content-between align-items-center flex-nowrap gap-2 py-1">
+        <span class="text-nowrap"><i class="bi bi-pc-display me-1"></i>Machines</span>
         {# Minimal add-by-MAC: MAC only. boot_policy defaults to the
            safe "local" (never a flash policy from here); hostname,
            image binding + policy are set on the detail page. The
            upsert handler creates the row with discovered_at=NULL; it
            flips to first-seen on the box's first PXE contact. #}
-        <form id="add-machine-form" class="d-flex gap-1 m-0"
+        <form id="add-machine-form" class="d-flex gap-1 m-0" style="min-width: 0;"
               onsubmit="return submitAddMachine(event);">
             <input type="text" required class="form-control form-control-sm font-monospace"
-                   id="add-mac" name="mac" style="max-width: 14rem;"
+                   id="add-mac" name="mac" style="max-width: 14rem; min-width: 0;"
                    pattern="^([0-9a-fA-F]{2}[:-]){5}[0-9a-fA-F]{2}$"
                    placeholder="aa:bb:cc:dd:ee:ff"
                    title="Stage a machine by MAC before it boots; boot policy defaults to 'local' (set image + policy on the detail page)">

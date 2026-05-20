@@ -33,29 +33,34 @@
    file) live inline in the table header, split by a vertical rule; the
    live download-jobs table is below. #}
 <div class="card mb-3">
-    <div class="card-header bg-light fw-semibold d-flex justify-content-between align-items-center flex-wrap gap-2">
-        <span><i class="bi bi-arrow-down-circle me-1"></i>Downloads
+    {# ``py-1`` + ``flex-nowrap`` keep this a single tight row: the two
+       add-image forms used to wrap to a second line (doubling the
+       header height) on a narrow window. The inputs shrink (min-width:0)
+       instead, and the button labels stay on one line (text-nowrap). #}
+    <div class="card-header bg-light fw-semibold d-flex justify-content-between align-items-center flex-nowrap gap-2 py-1">
+        <span class="text-nowrap"><i class="bi bi-arrow-down-circle me-1"></i>Downloads
               <span class="text-muted small bty-poll-status ms-1">refreshing...</span></span>
-        <span class="d-flex flex-wrap align-items-center gap-2">
+        <span class="d-flex flex-nowrap align-items-center gap-2" style="min-width: 0;">
             {# type="text" not type="url": browsers reject oras:// under
                HTML5 URL validation; server-side Pydantic still validates. #}
-            <form method="post" action="/ui/catalog/entries" class="d-flex gap-1 m-0">
+            <form method="post" action="/ui/catalog/entries" class="d-flex gap-1 m-0" style="min-width: 0;">
                 <input type="text" required class="form-control form-control-sm" id="image_url" name="image_url"
-                       style="max-width: 18rem;"
+                       style="max-width: 18rem; min-width: 0;"
                        placeholder="https://...img.gz  |  oras://owner/repo:tag"
                        title="http(s):// trusts the upstream bytes on first flash and back-fills disk_image_sha; oras:// resolves the OCI manifest digest at add time.">
-                <button type="submit" class="btn btn-sm btn-outline-secondary">
+                <button type="submit" class="btn btn-sm btn-outline-secondary text-nowrap">
                     <i class="bi bi-cloud-plus me-1"></i>Fetch from URL
                 </button>
             </form>
             <div class="vr"></div>
             {# Streams via XHR PUT /images/<name>; the HashManager
                auto-enqueues a SHA on the post-write hook. #}
-            <span class="d-flex gap-1 align-items-center">
-                <input type="file" class="form-control form-control-sm" id="upload-file" style="max-width: 15rem;"
+            <span class="d-flex gap-1 align-items-center" style="min-width: 0;">
+                <input type="file" class="form-control form-control-sm" id="upload-file"
+                       style="max-width: 15rem; min-width: 0;"
                        accept=".qcow2,.img,.img.zst,.img.xz,.img.gz,.img.bz2,.iso,.iso.gz"
                        title="Streams into the image root via PUT /images/<name>; SHA-256 auto-computed after.">
-                <button type="button" class="btn btn-sm btn-outline-secondary" id="upload-btn"
+                <button type="button" class="btn btn-sm btn-outline-secondary text-nowrap" id="upload-btn"
                         onclick="uploadSelectedFile();" disabled>
                     <i class="bi bi-upload me-1"></i>Upload
                 </button>
@@ -169,26 +174,29 @@
 {% else %}
 
 <div class="card mb-3">
-    <div class="card-header bg-light fw-semibold d-flex justify-content-between align-items-center flex-wrap gap-2">
-        <span><i class="bi bi-list-ul me-1"></i>Images</span>
+    {# ``py-1`` + ``flex-nowrap``: keep the catalog actions a single
+       tight row instead of wrapping to a second line on a narrow
+       window. The upload input shrinks; button labels stay intact. #}
+    <div class="card-header bg-light fw-semibold d-flex justify-content-between align-items-center flex-nowrap gap-2 py-1">
+        <span class="text-nowrap"><i class="bi bi-list-ul me-1"></i>Images</span>
         {# Two catalog actions side by side, separated by a vertical
            rule: upload a local catalog.toml, or fetch the bty release
            catalog.toml in one click (both were dropped sub-nav pages). #}
-        <span class="d-flex flex-wrap align-items-center gap-2">
+        <span class="d-flex flex-nowrap align-items-center gap-2" style="min-width: 0;">
             {# Parsed before it replaces the current catalog
                ({{ manifest_path }}); a bad file bounces back. #}
             <form method="post" action="/ui/catalog/upload" enctype="multipart/form-data"
-                  class="d-flex gap-1 m-0">
+                  class="d-flex gap-1 m-0" style="min-width: 0;">
                 <input type="file" required name="file" accept=".toml"
-                       class="form-control form-control-sm" style="max-width: 12rem;"
+                       class="form-control form-control-sm" style="max-width: 12rem; min-width: 0;"
                        title="catalog.toml: parsed before replacing {{ manifest_path }}">
-                <button type="submit" class="btn btn-sm btn-outline-secondary">
+                <button type="submit" class="btn btn-sm btn-outline-secondary text-nowrap">
                     <i class="bi bi-upload me-1"></i>Upload catalog
                 </button>
             </form>
             <div class="vr"></div>
             <form method="post" action="/ui/catalog/fetch-release" class="m-0">
-                <button type="submit" class="btn btn-sm btn-primary"
+                <button type="submit" class="btn btn-sm btn-primary text-nowrap"
                         title="Pull releases/latest/download/catalog.toml from {{ release_repo }} and import its entries">
                     <i class="bi bi-cloud-download me-1"></i>Fetch latest catalog
                 </button>
