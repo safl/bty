@@ -149,7 +149,7 @@ relies on the partition label; Ventoy's data partition is labeled
 relabel that partition `BTY_IMAGES` (if you want auto-mount) or
 mount it manually as in option 2.
 
-## Interactive PXE flash (`boot_policy=tui`)
+## Interactive PXE flash (`boot_policy=bty-tui`)
 
 The "bty-on-a-USB but over the network" path. Default behaviour for
 any MAC the server has never seen, so onboarding a new box needs
@@ -162,7 +162,7 @@ zero per-MAC configuration.
    cheatsheet (bty serves TFTP but does not run DHCP).
 2. A target machine PXE-boots on the same segment for the first time.
    `bty-web` auto-discovers the MAC, creates a `Machine` record with
-   `boot_policy=tui`, and serves the iPXE-tui template
+   `boot_policy=bty-tui`, and serves the iPXE-tui template
    (`ipxe_tui.j2`).
 3. The target chains into the bty live env with `bty.server=URL`
    + `bty.mac=MAC` on the kernel cmdline (the iPXE template
@@ -175,7 +175,7 @@ zero per-MAC configuration.
    machine row; the operator's `/ui/machines/{mac}` page now shows
    a real path / model / serial dropdown for picking a target
    disk. Then bty GETs `<server>/pxe/<mac>/plan` and sees
-   ``mode=interactive`` for boot_policy=tui.
+   ``mode=interactive`` for boot_policy=bty-tui.
 5. bty drops into the wizard with the server's catalog pre-loaded
    (`GET /catalog.toml`). The operator picks an image and a target
    disk, confirms the flash. Image bytes stream from
@@ -184,7 +184,7 @@ zero per-MAC configuration.
 6. On success bty `POST`s `/pxe/{mac}/done` so `last_flashed_at`
    updates server-side. **The image pick itself is NOT reported
    back** -- the machine's `bty_image_ref` stays whatever it was
-   (or null). For server-tracked flashes, set boot_policy=flash
+   (or null). For server-tracked flashes, set boot_policy=bty-flash-always
    with a bound ref + serial. The next reboot chains the wizard
    again unless the operator flips `boot_policy`.
 
@@ -193,7 +193,7 @@ one-off remote flash without preparing a USB stick: any unknown
 MAC on the segment becomes a `bty` wizard session reachable via
 IPMI / serial console.
 
-## Server-driven PXE flash (`boot_policy=flash`)
+## Server-driven PXE flash (`boot_policy=bty-flash-always`)
 
 Used for fleet-managed provisioning, where targets are reflashed on
 schedule, on demand, or on failure.
@@ -201,7 +201,7 @@ schedule, on demand, or on failure.
 1. Server appliance is already up (same setup as the interactive
    flow above).
 2. The target's first PXE contact creates a `Machine` record with
-   `boot_policy=tui`. The live env runs ``bty`` on tty1, which
+   `boot_policy=bty-tui`. The live env runs ``bty`` on tty1, which
    AUTOMATICALLY posts the box's disk inventory to
    `POST /pxe/{mac}/inventory` on startup. The operator does not
    have to push a button for this.
@@ -210,7 +210,7 @@ schedule, on demand, or on failure.
    - `bty_image_ref` (image binding) - picked from the catalog.
    - `target_disk_serial` (which disk to flash) - picked from the
      inventory dropdown populated in step 2.
-   - `boot_policy=flash` arms the auto-flash.
+   - `boot_policy=bty-flash-always` arms the auto-flash.
 4. Target machine PXE-boots; bty-web's `/pxe/{mac}` returns the
    iPXE flash chain. Cmdline carries just `bty.server` +
    `bty.mac`; iPXE chains into the bty live env served over HTTP
@@ -274,7 +274,7 @@ incidents on multi-disk hosts. The full picture, in event order:
    box. The firmware PXE-DHCPs, gets `ipxe.efi` via TFTP, runs
    the embedded chain script, fetches `/pxe-bootstrap.ipxe` from
    bty-web, chains to `/pxe/{mac}`. bty-web records the MAC
-   (`machine.discovered` event), sets `boot_policy=tui`, returns
+   (`machine.discovered` event), sets `boot_policy=bty-tui`, returns
    the interactive chain (`ipxe_tui.j2`). Audit log gets a
    `pxe.offered` row with `offer_kind=tui`.
 2. **Live env boots, ``bty`` starts.** ``bty`` runs on tty1; on
@@ -286,9 +286,9 @@ incidents on multi-disk hosts. The full picture, in event order:
 3. **Operator opens `/ui/machines/{mac}`.** The Target disk
    dropdown is now populated from `known_disks`, showing
    path / size / model / serial for each disk. The operator
-   picks one + binds an image + sets `boot_policy=flash`.
+   picks one + binds an image + sets `boot_policy=bty-flash-always`.
 4. **Operator power-cycles the target.** Next PXE contact:
-   `/pxe/{mac}` sees `boot_policy=flash`, `bty_image_ref` bound,
+   `/pxe/{mac}` sees `boot_policy=bty-flash-always`, `bty_image_ref` bound,
    and `target_disk_serial` picked. Returns `ipxe_flash.j2` with
    `bty.server=` + `bty.mac=` on the cmdline (the image URL +
    target serial come from the plan endpoint, not the cmdline).
@@ -300,7 +300,7 @@ incidents on multi-disk hosts. The full picture, in event order:
 
 The gate fires at multiple points:
 
-- **`/ui/machines/{mac}` POST refuses `boot_policy=flash` when
+- **`/ui/machines/{mac}` POST refuses `boot_policy=bty-flash-always` when
   `target_disk_serial` is empty.** The form bounces to
   `/ui/machines/{mac}?error=...` so the operator sees a flash
   banner explaining how to fix it.
@@ -362,11 +362,11 @@ Always:
 
 Conditional:
 
-- `pxe.flash.no_target_disk` fires when `boot_policy=flash` /
+- `pxe.flash.no_target_disk` fires when `boot_policy=bty-flash-always` /
   `flash-once` is set, an image is bound, the ref resolves, but
   `target_disk_serial` is empty. Distinct kind so the operator can
   filter for "why isn't this reflashing?" cases.
-- `pxe.flash.orphan_ref` fires when `boot_policy=flash` is set and
+- `pxe.flash.orphan_ref` fires when `boot_policy=bty-flash-always` is set and
   an image is bound but the ref has no resolvable `catalog_entries`
   row. Different failure mode from `no_target_disk`; the binding
   itself is stale.
@@ -412,7 +412,7 @@ and a JSON `details` blob with kind-specific extras.
 |-------------------------------------------|--------------------------------------|----------------------------------------------------------------------------------------------------|
 | Log in                                    | `POST /ui/login`                     | PAM authenticate -> session cookie. Records `auth.login.{succeeded,failed}`.                       |
 | Log out                                   | `POST /ui/logout`                    | Clears session cookie. Records `auth.logout`.                                                       |
-| Bind image + disk + policy on a machine   | `POST /ui/machines/{mac}`            | UPSERT. Refuses `boot_policy=flash` without `target_disk_serial`. Records `machine.{created,upserted}`. |
+| Bind image + disk + policy on a machine   | `POST /ui/machines/{mac}`            | UPSERT. Refuses `boot_policy=bty-flash-always` without `target_disk_serial`. Records `machine.{created,upserted}`. |
 | Delete a machine record                   | `POST /ui/machines/{mac}/delete`     | DELETE row. Records `machine.deleted`.                                                              |
 | Add catalog entry by URL                  | `POST /ui/catalog/entries`           | sha-resolve (if `sha_url` given) -> INSERT `catalog_entries`. Records `catalog.entry.{added,add_failed}`. |
 | Delete a catalog entry                    | `DELETE /catalog/entries?src=...`    | Removes the row; image cache is left in place. Records `catalog.entry.deleted`.                     |
@@ -431,8 +431,8 @@ the operator sees:
 
 | Gate                                                  | Trigger condition                                                  | Where it fires                          | Operator surface                                   |
 |-------------------------------------------------------|--------------------------------------------------------------------|-----------------------------------------|----------------------------------------------------|
-| Refuse flash chain without `target_disk_serial`        | `boot_policy=flash`/`flash-once`, image bound, target empty.        | `GET /pxe/{mac}`                        | `pxe.flash.no_target_disk` event; ipxe.j2 sanboot. |
-| Refuse `boot_policy=flash` upsert without target       | Form posts `boot_policy=flash` and `target_disk_serial=""`.         | `POST /ui/machines/{mac}`               | 303 to `/ui/machines/{mac}?error=...` flash banner. |
+| Refuse flash chain without `target_disk_serial`        | `boot_policy=bty-flash-always`/`flash-once`, image bound, target empty.        | `GET /pxe/{mac}`                        | `pxe.flash.no_target_disk` event; ipxe.j2 sanboot. |
+| Refuse `boot_policy=bty-flash-always` upsert without target       | Form posts `boot_policy=bty-flash-always` and `target_disk_serial=""`.         | `POST /ui/machines/{mac}`               | 303 to `/ui/machines/{mac}?error=...` flash banner. |
 | Refuse flash on serial mismatch at boot time           | Live env can't find a current disk whose serial matches the plan's `target_disk_serial`. | `bty` auto-flash on tty1 (live env)     | `bty` prints a red "No matching disk" Panel + non-zero exit; bty-on-tty1.service stays at the failed banner. |
 | Refuse oversize catalog upload                         | `/ui/catalog/upload` body > 1 MiB.                                  | `POST /ui/catalog/upload`               | 303 with `?error=...exceeded...`.                  |
 | Refuse oversize image upload                           | `PUT /images/{name}` body > `BTY_MAX_UPLOAD_BYTES` (200 GiB).      | `PUT /images/{name}`                    | 413 Content Too Large; `image.upload_failed`.       |

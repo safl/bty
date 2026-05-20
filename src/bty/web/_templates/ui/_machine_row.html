@@ -13,14 +13,16 @@
         {% endif %}
     </td>
     <td>
-        {% if m.boot_policy == 'flash' %}
-        <span class="badge bg-danger" title="every PXE boot reflashes the image"><i class="bi bi-arrow-clockwise me-1"></i>flash</span>
-        {% elif m.boot_policy == 'flash-once' %}
-        <span class="badge bg-warning text-dark" title="next PXE boot reflashes, then auto-flips to local"><i class="bi bi-1-circle me-1"></i>flash-once</span>
-        {% elif m.boot_policy == 'tui' %}
-        <span class="badge bg-info text-dark" title="every PXE boot lands at bty on tty1 (operator picks an image)"><i class="bi bi-display me-1"></i>tui</span>
+        {% if m.boot_policy == 'bty-flash-always' %}
+        <span class="badge bg-danger" title="every PXE boot reflashes the image"><i class="bi bi-arrow-clockwise me-1"></i>{{ m.boot_policy }}</span>
+        {% elif m.boot_policy == 'bty-flash-once' %}
+        <span class="badge bg-warning text-dark" title="next PXE boot reflashes, then auto-flips to the settle policy"><i class="bi bi-1-circle me-1"></i>{{ m.boot_policy }}</span>
+        {% elif m.boot_policy == 'bty-tui' %}
+        <span class="badge bg-info text-dark" title="every PXE boot lands at bty on tty1 (operator picks an image)"><i class="bi bi-display me-1"></i>{{ m.boot_policy }}</span>
+        {% elif m.boot_policy == 'sanboot' %}
+        <span class="badge bg-dark" title="iPXE boots the local disk itself"><i class="bi bi-hdd-fill me-1"></i>{{ m.boot_policy }}</span>
         {% else %}
-        <span class="badge bg-secondary" title="every PXE boot returns sanboot"><i class="bi bi-hdd me-1"></i>local</span>
+        <span class="badge bg-secondary" title="emit iPXE exit; firmware boot order picks the disk"><i class="bi bi-hdd me-1"></i>{{ m.boot_policy }}</span>
         {% endif %}
     </td>
     <td>{{ m.hostname or "-" }}</td>

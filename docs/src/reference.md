@@ -238,7 +238,7 @@ tooling which can't carry a session cookie:
  the cmdline.)
 
  Auto-discovery: the first contact for an unknown MAC inserts a
- placeholder row (image=null, boot_policy=tui) so the operator
+ placeholder row (image=null, boot_policy=bty-tui) so the operator
  sees it in `GET /machines` and can claim it with `PUT
  /machines/{mac}`. Repeat contacts update `last_seen_at` /
  `last_seen_ip`. Trust model: bty-web is meant for a homelab /

@@ -34,25 +34,30 @@ MAC_PATTERN = r"^[0-9a-f]{2}(:[0-9a-f]{2}){5}$"
 #   you'd rather bty drive the local boot than depend on the firmware
 #   order. The drive is a per-machine override (``sanboot_drive``);
 #   iPXE selects by BIOS drive number, not by Linux serial.
-# - ``flash`` returns the live-env chain so the box re-flashes itself
-#   on every PXE boot (per-job CI cadence).
-# - ``flash-once`` returns the live-env flash chain just like ``flash``,
-#   but the completion signal (``POST /pxe/{mac}/done``) flips the
-#   policy to the configured settle policy (``flash.settle_policy``,
-#   default ``local``) so the box doesn't re-flash on the next boot.
-#   For "I want this machine reimaged now, then leave it alone" --
-#   distinct from ``flash`` which is "reimage on every PXE boot".
-# - ``tui`` returns the live-env chain. ``bty`` on tty1 GETs
-#   /pxe/<mac>/plan and (for boot_policy=tui) drops the operator
+# - ``bty-flash-always`` returns the live-env chain so the box
+#   re-flashes itself on every PXE boot (per-job CI cadence).
+# - ``bty-flash-once`` returns the live-env flash chain just like
+#   ``bty-flash-always``, but the completion signal
+#   (``POST /pxe/{mac}/done``) flips the policy to the configured settle
+#   policy (``flash.settle_policy``, default ``local``) so the box
+#   doesn't re-flash on the next boot. For "I want this machine reimaged
+#   now, then leave it alone" -- distinct from ``bty-flash-always``
+#   which is "reimage on every PXE boot".
+# - ``bty-tui`` returns the live-env chain. ``bty`` on tty1 GETs
+#   /pxe/<mac>/plan and (for boot_policy=bty-tui) drops the operator
 #   into the wizard so they can pick an image from the server's
 #   catalog by hand. This is the auto-discovery default for
 #   unknown MACs that PXE-boot through the server.
 #
+# The ``bty-*`` prefix marks the policies that PXE-boot into bty's own
+# live env; ``local`` / ``sanboot`` boot elsewhere.
+#
 # Completion signal (``POST /pxe/{mac}/done``) updates
 # ``last_flashed_at`` regardless of policy; it only mutates
-# ``boot_policy`` for ``flash-once`` (-> the settle policy). ``flash``
-# stays ``flash`` so the per-job CI cadence reflashes every boot.
-BOOT_POLICIES = ("local", "sanboot", "flash", "flash-once", "tui")
+# ``boot_policy`` for ``bty-flash-once`` (-> the settle policy).
+# ``bty-flash-always`` is unchanged so the per-job CI cadence reflashes
+# every boot.
+BOOT_POLICIES = ("local", "sanboot", "bty-flash-always", "bty-flash-once", "bty-tui")
 
 # iPXE BIOS drive selector the ``sanboot`` policy boots: ``0x80`` is the
 # first disk, ``0x81`` the second, and so on. The sensible default; a

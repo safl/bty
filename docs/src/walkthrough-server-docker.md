@@ -108,7 +108,7 @@ actual write happens on the local machine running `bty`.
 ## Scripted flash via the plan endpoint (no wizard)
 
 For batch / CI workflows: bind the machine on the appliance with
-`boot_policy=flash` + a `bty_image_ref` + a `target_disk_serial`,
+`boot_policy=bty-flash-always` + a `bty_image_ref` + a `target_disk_serial`,
 then on the target run `bty --server <host> --mac <self-mac>`. The
 wizard skips and the flash runs scripted (`mode=auto` from
 `GET <host>/pxe/<mac>/plan`). The image streams directly from the

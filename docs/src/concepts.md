@@ -126,7 +126,7 @@ disk was written. The machine record's `bty_image_ref` /
 Practical consequence: if you want the server to drive flashing -
 to know which image is on each box, to surface "this MAC will
 re-flash on next boot" in `/ui/machines`, to make a flash repeatable
-- you must set `boot_policy=flash`, bind a `bty_image_ref`, and pick
+- you must set `boot_policy=bty-flash-always`, bind a `bty_image_ref`, and pick
 a `target_disk_serial` on the server side. Interactive mode is for
 "give me a box that boots `bty`, I'll decide locally what to do with
 it" - the local pick stays local.

@@ -240,7 +240,7 @@ the target's BIOS / UEFI to PXE-boot first. On power-on it'll:
 3. Boot the netboot kernel + initrd + squashfs trio.
    `bty-on-tty1.service` exec's `bty --server X --mac Y` on
    tty1; ``bty`` GETs `<server>/pxe/<mac>/plan`, sees
-   ``mode=auto`` (because boot_policy=flash + ref + serial),
+   ``mode=auto`` (because boot_policy=bty-flash-always + ref + serial),
    writes the image to the local disk, POSTs `/pxe/<mac>/done`,
    reboots.
 

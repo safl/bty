@@ -8,7 +8,7 @@
 # This template is rendered when the machine has an image assigned
 # but the flash chain isn't being emitted -- either ``boot_policy=
 # local`` (already provisioned, boot from disk) or
-# ``boot_policy=flash`` with an orphaned ``bty_image_ref`` (no
+# ``boot_policy=bty-flash-always`` with an orphaned ``bty_image_ref`` (no
 # catalog row resolves the ref; surfaced as a ``pxe.flash.orphan_ref``
 # event in /ui/events). ``exit`` returns control to the PXE ROM,
 # which falls through to the next boot device (typically the local

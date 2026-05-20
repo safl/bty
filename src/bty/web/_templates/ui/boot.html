@@ -22,8 +22,8 @@
 {% from "ui/_intro_box.html" import render as intro_box %}
 {% call intro_box() %}
     The bty live env that PXE clients chain into when their
-    assignment has <code>boot_policy=flash</code>. Until these files
-    are present, machines with <code>boot_policy=flash</code> cannot
+    assignment has <code>boot_policy=bty-flash-always</code>. Until these files
+    are present, machines with <code>boot_policy=bty-flash-always</code> cannot
     actually flash: fetch them from the
     <strong>Artifact Fetches</strong> page (the download indicator in
     the navbar). The TFTP daemon controls are below; the router-side

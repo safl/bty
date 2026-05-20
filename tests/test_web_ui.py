@@ -720,7 +720,7 @@ def test_ui_machines_inline_add_defaults_to_safe_local_policy(client: TestClient
     # The submit JS hardcodes the safe default.
     assert '"boot_policy", "local"' in body
     # No flash policy is offered/sent from the inline add.
-    assert '"boot_policy", "flash"' not in body
+    assert '"boot_policy", "bty-flash-always"' not in body
 
 
 def test_ui_fetches_page_shows_recent_activity_card(
@@ -1066,7 +1066,7 @@ def test_ui_machine_upsert_persists_boot_policy_flash(client: TestClient) -> Non
         data={
             "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
             "hostname": "",
-            "boot_policy": "flash",
+            "boot_policy": "bty-flash-always",
             "target_disk_serial": "ATA-WDC-123456",
         },
     )
@@ -1075,7 +1075,7 @@ def test_ui_machine_upsert_persists_boot_policy_flash(client: TestClient) -> Non
         "/machines/aa:bb:cc:dd:ee:ff",
         cookies=AUTH,
     )
-    assert api.json()["boot_policy"] == "flash"
+    assert api.json()["boot_policy"] == "bty-flash-always"
     assert api.json()["target_disk_serial"] == "ATA-WDC-123456"
 
 
@@ -1170,7 +1170,7 @@ def test_ui_machine_upsert_refuses_flash_without_target_disk(client: TestClient)
         "/ui/machines/aa:bb:cc:dd:ee:ff",
         data={
             "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            "boot_policy": "flash",
+            "boot_policy": "bty-flash-always",
             "target_disk_serial": "",
         },
         follow_redirects=False,
@@ -1209,7 +1209,7 @@ def test_ui_machine_detail_renders_boot_policy_dropdown(client: TestClient) -> N
         "/machines/aa:bb:cc:dd:ee:ff",
         json={
             "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            "boot_policy": "flash",
+            "boot_policy": "bty-flash-always",
         },
         cookies=AUTH,
     )
@@ -1219,8 +1219,8 @@ def test_ui_machine_detail_renders_boot_policy_dropdown(client: TestClient) -> N
     assert 'name="boot_policy"' in body
     # Both options present, current value selected.
     assert ">local</option>" in body
-    assert ">flash</option>" in body
-    assert 'value="flash" selected' in body or 'flash" selected' in body
+    assert ">bty-flash-always</option>" in body
+    assert 'value="bty-flash-always" selected' in body
 
 
 def test_ui_boot_page_renders_with_artifact_state(client: TestClient) -> None:
@@ -1381,7 +1381,7 @@ def test_ui_machines_list_shows_boot_policy_badge(client: TestClient) -> None:
         "/machines/aa:bb:cc:dd:ee:ff",
         json={
             "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            "boot_policy": "flash",
+            "boot_policy": "bty-flash-always",
         },
         cookies=AUTH,
     )
@@ -1397,21 +1397,22 @@ def test_ui_machines_list_shows_boot_policy_badge(client: TestClient) -> None:
         "/machines/22:33:44:55:66:77",
         json={
             "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            "boot_policy": "flash-once",
+            "boot_policy": "bty-flash-once",
         },
         cookies=AUTH,
     )
-    # Auto-discovery via /pxe lands a fourth row with boot_policy=tui
+    # Auto-discovery via /pxe lands a fourth row with boot_policy=bty-tui
     # so we can exercise all four badge variants in one table.
     client.get("/pxe/aa:bb:cc:dd:ee:01")
     r = client.get("/ui/machines")
     assert r.status_code == 200
     body = r.text
-    # All four boot-policy badges should appear in the table.
-    assert "bg-danger" in body and ">flash<" in body
-    assert ">flash-once<" in body  # the bg-warning variant
+    # All four boot-policy badges should appear in the table (the badge
+    # text is the full policy name).
+    assert "bg-danger" in body and ">bty-flash-always<" in body
+    assert ">bty-flash-once<" in body  # the bg-warning variant
     assert "bg-secondary" in body and ">local<" in body
-    assert "bg-info text-dark" in body and ">tui<" in body
+    assert "bg-info text-dark" in body and ">bty-tui<" in body
     # Table header has Boot column + Last flashed column.
     assert ">Boot</th>" in body
     assert ">Last flashed</th>" in body

@@ -410,7 +410,7 @@ def create_app(
             if row is None:
                 # Auto-discovery: record an unassigned machine so the
                 # operator can see this MAC in /machines and decide
-                # what to do with it. ``boot_policy='tui'`` makes
+                # what to do with it. ``boot_policy='bty-tui'`` makes
                 # the unknown MAC chain into the live env where ``bty``
                 # GETs /pxe/<mac>/plan and drops into the wizard -
                 # "bty-on-a-USB but over the network" - so first
@@ -422,7 +422,7 @@ def create_app(
                         (mac, boot_policy,
                          discovered_at, last_seen_at, last_seen_ip,
                          created_at, updated_at)
-                    VALUES (?, 'tui', ?, ?, ?, ?, ?)
+                    VALUES (?, 'bty-tui', ?, ?, ?, ?, ?)
                     """,
                     (normalised, now, now, client_ip, now, now),
                 )
@@ -463,12 +463,12 @@ def create_app(
         machine = dict(row)
         publish_state_changed()
         # Boot-policy decision tree (highest priority first):
-        #   - boot_policy == 'tui'                                -> live env in interactive mode
-        #   - boot_policy in ('flash', 'flash-once') + ref        -> live env auto-flash
-        #   - boot_policy == 'local' + bty_image_ref              -> sanboot (already provisioned)
-        #   - else (no ref, boot_policy == 'local')               -> sanboot fallback
+        #   - bty-tui                       -> live env, interactive wizard
+        #   - sanboot                       -> iPXE sanboot the local disk
+        #   - bty-flash-always / -once + ref + target disk -> live env auto-flash
+        #   - else (local, or no usable binding)           -> ipxe.j2 (exit)
         # Completion signal (POST /pxe/{mac}/done) updates
-        # last_flashed_at always, and flips flash-once -> local so
+        # last_flashed_at always, and flips bty-flash-once -> the settle policy so
         # the next PXE boot returns sanboot. ``flash`` stays
         # ``flash`` (per-job CI cadence keeps reflashing).
         host = _request_host(request)
@@ -483,12 +483,12 @@ def create_app(
         offer_summary: str
         offer_details: dict[str, Any]
 
-        if policy == "tui":
+        if policy == "bty-tui":
             template = jinja.get_template("ipxe_tui.j2")
             rendered = template.render(mac=normalised, machine=machine, host=host)
-            offer_kind = "tui"
+            offer_kind = "bty-tui"
             offer_summary = f"{normalised} offered tui (operator picks via bty on tty1)"
-            offer_details = {"offer": "tui"}
+            offer_details = {"offer": "bty-tui"}
         elif policy == "sanboot":
             # iPXE boots the local disk itself (drive override, default
             # 0x80), with ``|| exit`` falling back to the firmware boot
@@ -501,7 +501,7 @@ def create_app(
             offer_kind = "sanboot"
             offer_summary = f"{normalised} offered sanboot (iPXE boots local drive {drive})"
             offer_details = {"offer": "sanboot", "sanboot_drive": drive}
-        elif ref and policy in ("flash", "flash-once"):
+        elif ref and policy in ("bty-flash-always", "bty-flash-once"):
             # Safety gate: refuse the flash chain unless the operator
             # has picked a target disk by serial. Without this, ``bty``
             # in auto-flash mode would have no disk pinned and refuse
@@ -527,7 +527,7 @@ def create_app(
                     flash_key=str(ref),
                     target_disk_serial=target_disk_serial,
                 )
-                offer_kind = policy  # "flash" or "flash-once"
+                offer_kind = policy  # "bty-flash-always" or "bty-flash-once"
                 short = str(ref)[:12]
                 offer_summary = (
                     f"{normalised} offered {policy} for ref={short}... "
@@ -581,7 +581,7 @@ def create_app(
                 # catalog_entries row resolves. Falls through to the
                 # ipxe.j2 (sanboot-or-local-msg) branch, but the
                 # operator sees a louder event so the
-                # "boot_policy=flash but ref is dangling" case
+                # "boot_policy=bty-flash-always but ref is dangling" case
                 # doesn't look like a normal hit.
                 short = str(ref)[:12]
                 with _db.open_db(state_path) as conn:
@@ -673,7 +673,7 @@ def create_app(
         # other ``/pxe/*`` endpoints.
         #
         # Always updates ``last_flashed_at`` + ``updated_at``. For
-        # ``boot_policy=flash-once`` we also flip the policy to the
+        # ``boot_policy=bty-flash-once`` we also flip the policy to the
         # configured settle policy here (``flash.settle_policy``,
         # default ``local``) so the next PXE boot stops re-flashing (the
         # box flashed, the operator's "one reimage please" is satisfied,
@@ -687,7 +687,9 @@ def create_app(
                 "SELECT boot_policy FROM machines WHERE mac = ?",
                 (normalised,),
             ).fetchone()
-            flipped_from_flash_once = current is not None and current["boot_policy"] == "flash-once"
+            flipped_from_flash_once = (
+                current is not None and current["boot_policy"] == "bty-flash-once"
+            )
             settle_policy = ""
             if flipped_from_flash_once:
                 settle_policy = _settings_store.resolve_flash_settle_policy(conn)
@@ -707,7 +709,11 @@ def create_app(
                     kind="machine.flashed",
                     summary=(
                         f"{normalised} signalled flash completion"
-                        + (f" (flash-once -> {settle_policy})" if flipped_from_flash_once else "")
+                        + (
+                            f" (bty-flash-once -> {settle_policy})"
+                            if flipped_from_flash_once
+                            else ""
+                        )
                     ),
                     subject_kind="machine",
                     subject_id=normalised,
@@ -743,7 +749,7 @@ def create_app(
           local-disk path handles boot.
 
         Unknown MACs auto-register (matches the ``/pxe/{mac}`` iPXE
-        endpoint) with boot_policy=tui so a hand-launched ``bty
+        endpoint) with boot_policy=bty-tui so a hand-launched ``bty
         --mac X`` from a fresh box gets a wizard plan rather than
         a 404.
 
@@ -757,7 +763,7 @@ def create_app(
         after success). The machine record's ``bty_image_ref`` /
         ``target_disk_serial`` fields stay untouched by interactive
         flashes. Operators who want server-tracked flashes must
-        configure boot_policy=flash + bind a ref + pick a serial.
+        configure boot_policy=bty-flash-always + bind a ref + pick a serial.
 
         Open endpoint: same trust model as the rest of /pxe/*
         (homelab / CI network, not the internet).
@@ -770,14 +776,14 @@ def create_app(
             if row is None:
                 # Auto-discovery: mirror /pxe/{mac}'s behaviour so a
                 # ``bty`` invocation against an unknown MAC creates
-                # a record (boot_policy=tui) instead of 404-ing.
+                # a record (boot_policy=bty-tui) instead of 404-ing.
                 conn.execute(
                     """
                     INSERT INTO machines
                         (mac, boot_policy,
                          discovered_at, last_seen_at, last_seen_ip,
                          created_at, updated_at)
-                    VALUES (?, 'tui', ?, ?, ?, ?, ?)
+                    VALUES (?, 'bty-tui', ?, ?, ?, ?, ?)
                     """,
                     (normalised, now, now, client_ip, now, now),
                 )
@@ -821,7 +827,7 @@ def create_app(
 
         plan: dict[str, Any]
         offer_kind: str
-        if policy in ("flash", "flash-once") and ref:
+        if policy in ("bty-flash-always", "bty-flash-once") and ref:
             target_disk_serial = machine.get("target_disk_serial")
             image_name = _flash_target_for_ref(str(ref))
             if image_name is not None and target_disk_serial:
@@ -838,7 +844,7 @@ def create_app(
                 # the wizard so they can pick + finish manually.
                 plan = {"mode": "interactive", "catalog": f"{base}/catalog.toml"}
                 offer_kind = "plan:interactive:flash-unresolved"
-        elif policy == "tui":
+        elif policy == "bty-tui":
             plan = {"mode": "interactive", "catalog": f"{base}/catalog.toml"}
             offer_kind = "plan:interactive:tui"
         else:

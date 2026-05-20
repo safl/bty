@@ -372,7 +372,7 @@ def test_e2e_pxe_flash_chain_plan_carries_image_url_and_target_serial(
         "/machines/aa:bb:cc:dd:ee:ff",
         json={
             "bty_image_ref": bty_image_ref,
-            "boot_policy": "flash-once",
+            "boot_policy": "bty-flash-once",
             "target_disk_serial": "WD-WX12345",
         },
         cookies=AUTH,
@@ -712,7 +712,7 @@ def test_e2e_pxe_done_failure_is_isolated_from_machine_state(
         "/machines/12:34:56:78:9a:bc",
         json={
             "bty_image_ref": ref,
-            "boot_policy": "flash-once",
+            "boot_policy": "bty-flash-once",
             "target_disk_serial": "WD-XX",
         },
         cookies=AUTH,
@@ -837,7 +837,7 @@ def test_e2e_pxe_unknown_mac_then_inventory_then_flash_chain(
 
     r = app_client.get(f"/machines/{mac}", cookies=AUTH)
     assert r.status_code == 200, r.text
-    assert r.json()["boot_policy"] == "tui"
+    assert r.json()["boot_policy"] == "bty-tui"
 
     plan = app_client.get(f"/pxe/{mac}/plan", headers={"Host": "bty.local:8080"}).json()
     assert plan["mode"] == "interactive"
@@ -882,7 +882,7 @@ def test_e2e_pxe_unknown_mac_then_inventory_then_flash_chain(
         f"/machines/{mac}",
         json={
             "bty_image_ref": ref,
-            "boot_policy": "flash-once",
+            "boot_policy": "bty-flash-once",
             "target_disk_serial": "SER-1",
         },
         cookies=AUTH,
@@ -1004,7 +1004,7 @@ def test_e2e_flash_safety_gate_no_target_disk_serial_logs_event(
     # Bind without target_disk_serial.
     r = app_client.put(
         f"/machines/{mac}",
-        json={"bty_image_ref": ref, "boot_policy": "flash-once"},
+        json={"bty_image_ref": ref, "boot_policy": "bty-flash-once"},
         cookies=AUTH,
     )
     assert r.status_code == 200, r.text
@@ -1123,7 +1123,7 @@ def test_e2e_machine_put_is_full_replace_not_partial_update(
         f"/machines/{mac}",
         json={
             "bty_image_ref": ref,
-            "boot_policy": "flash-once",
+            "boot_policy": "bty-flash-once",
             "target_disk_serial": "SER-Z",
             "hostname": "first-name",
         },
@@ -1155,7 +1155,7 @@ def test_e2e_machine_put_is_full_replace_not_partial_update(
         f"/machines/{mac}",
         json={
             "bty_image_ref": ref,
-            "boot_policy": "flash-once",
+            "boot_policy": "bty-flash-once",
             "target_disk_serial": "SER-Z",
             "hostname": "third-name",
         },

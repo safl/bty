@@ -49,16 +49,16 @@
                     <code>sanboot</code>: iPXE boots the local disk itself (drive
                     below; defaults to the first disk), falling back to the
                     firmware order if it can't.
-                    <code>flash</code>: PXE boots chain into the live env so the box
+                    <code>bty-flash-always</code>: PXE boots chain into the live env so the box
                     re-flashes the assigned image every time (per-job CI cadence).
-                    <code>flash-once</code>: same as <code>flash</code> for the next
+                    <code>bty-flash-once</code>: same as <code>bty-flash-always</code> for the next
                     PXE boot, then auto-flips to the configured settle policy
                     (Settings; default <code>local</code>) after the live env
                     signals completion.
-                    <code>tui</code>: PXE boots chain into the live env. <code>bty</code>
+                    <code>bty-tui</code>: PXE boots chain into the live env. <code>bty</code>
                     on tty1 GETs <code>/pxe/&lt;mac&gt;/plan</code> and drops the operator
                     into the wizard. The auto-discovery default for unknown MACs
-                    is <code>tui</code>; it's also how the box reports its disk
+                    is <code>bty-tui</code>; it's also how the box reports its disk
                     inventory to bty-web (see Target disk below).
                 </div>
             </div>
@@ -77,7 +77,7 @@
                     the Linux serial used for flashing.
                 </div>
             </div>
-            <div class="mb-3" data-policy-relevant="flash flash-once">
+            <div class="mb-3" data-policy-relevant="bty-flash-always bty-flash-once">
                 <label class="form-label" for="bty_image_ref">Image</label>
                 <select name="bty_image_ref" id="bty_image_ref" class="form-select">
                     <option value="">- none (discovered, will boot from local disk) -</option>
@@ -93,12 +93,12 @@
                     {% endfor %}
                 </select>
             </div>
-            <div class="mb-3" data-policy-relevant="local flash flash-once tui">
+            <div class="mb-3" data-policy-relevant="local bty-flash-always bty-flash-once bty-tui">
                 <label class="form-label" for="hostname">Hostname</label>
                 <input type="text" name="hostname" id="hostname" class="form-control"
                        value="{{ m.hostname or '' }}" placeholder="(optional)">
             </div>
-            <div class="mb-3" data-policy-relevant="flash flash-once">
+            <div class="mb-3" data-policy-relevant="bty-flash-always bty-flash-once">
                 <label class="form-label" for="target_disk_serial">Target disk</label>
                 {% if m.known_disks %}
                 <select name="target_disk_serial" id="target_disk_serial" class="form-select">
@@ -129,7 +129,7 @@
                 {% else %}
                 <input type="hidden" name="target_disk_serial" value="{{ m.target_disk_serial or '' }}">
                 <div class="alert alert-warning small mb-0">
-                    No disk inventory yet for this machine. Set <code>boot_policy=tui</code>
+                    No disk inventory yet for this machine. Set <code>boot_policy=bty-tui</code>
                     above and power-cycle the machine; <code>bty</code> will
                     report its disks to bty-web on startup and this dropdown
                     will populate.

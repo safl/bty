@@ -226,7 +226,7 @@ subcommands. To drive flashes from a fleet controller, run a
 `bty-web` appliance and target the per-MAC plan endpoint:
 
 1. On the appliance, bind the machine: PUT `/machines/<mac>`
-   with `boot_policy=flash`, a `bty_image_ref`, and a
+   with `boot_policy=bty-flash-always`, a `bty_image_ref`, and a
    `target_disk_serial`.
 2. On the target, run `bty --server <appliance> --mac <self-mac>`.
    bty GETs `<server>/pxe/<mac>/plan`, sees `mode=auto`, streams

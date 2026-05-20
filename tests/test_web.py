@@ -295,7 +295,7 @@ def test_pxe_auto_discovers_unknown_mac(app_client: TestClient) -> None:
     body = found.json()
     assert body["mac"] == mac
     assert body["bty_image_ref"] is None  # discovered, not yet assigned
-    assert body["boot_policy"] == "tui"  # auto-discovery default
+    assert body["boot_policy"] == "bty-tui"  # auto-discovery default
     assert body["discovered_at"] is not None
     assert body["last_seen_at"] is not None
 
@@ -1086,7 +1086,7 @@ def test_machine_upsert_rejects_malformed_sha256(app_client: TestClient) -> None
     ):
         r = app_client.put(
             "/machines/aa:bb:cc:dd:ee:ff",
-            json={"bty_image_ref": bad, "boot_policy": "flash"},
+            json={"bty_image_ref": bad, "boot_policy": "bty-flash-always"},
             cookies=AUTH,
         )
         assert r.status_code == 422, f"expected 422 for {bad!r}, got {r.status_code}"
@@ -1165,7 +1165,7 @@ def test_machine_upsert_rejects_unknown_fields(app_client: TestClient) -> None:
         "/machines/aa:bb:cc:dd:ee:ff",
         json={
             "image": "stale-filename.qcow2",
-            "boot_policy": "flash",
+            "boot_policy": "bty-flash-always",
         },
         cookies=AUTH,
     )
@@ -1184,12 +1184,12 @@ def test_machine_upsert_accepts_boot_policy_flash(app_client: TestClient) -> Non
         "/machines/aa:bb:cc:dd:ee:ff",
         json={
             "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            "boot_policy": "flash",
+            "boot_policy": "bty-flash-always",
         },
         cookies=AUTH,
     )
     assert r.status_code == 200
-    assert r.json()["boot_policy"] == "flash"
+    assert r.json()["boot_policy"] == "bty-flash-always"
 
 
 def test_machine_upsert_rejects_unknown_boot_policy(app_client: TestClient) -> None:
@@ -1273,7 +1273,7 @@ def test_pxe_flash_policy_returns_chain_with_args(
         "/machines/aa:bb:cc:dd:ee:ff",
         json={
             "bty_image_ref": ref,
-            "boot_policy": "flash",
+            "boot_policy": "bty-flash-always",
             "target_disk_serial": "WD-WX12345",
         },
         cookies=AUTH,
@@ -1325,7 +1325,7 @@ def test_pxe_plan_unknown_mac_auto_discovers_and_returns_interactive(
 
     # Auto-discovered as boot_policy=tui (matches /pxe/{mac}).
     row = app_client.get(f"/machines/{mac}", cookies=AUTH).json()
-    assert row["boot_policy"] == "tui"
+    assert row["boot_policy"] == "bty-tui"
 
 
 def test_pxe_plan_local_policy_returns_local(app_client: TestClient) -> None:
@@ -1379,7 +1379,7 @@ def test_pxe_plan_flash_policy_with_target_returns_auto(
         f"/machines/{mac}",
         json={
             "bty_image_ref": ref,
-            "boot_policy": "flash",
+            "boot_policy": "bty-flash-always",
             "target_disk_serial": "WD-WX12345",
         },
         cookies=AUTH,
@@ -1403,7 +1403,7 @@ def test_pxe_plan_flash_policy_without_target_falls_back_to_interactive(
         f"/machines/{mac}",
         json={
             "bty_image_ref": "0123456789abcdef" * 4,
-            "boot_policy": "flash",
+            "boot_policy": "bty-flash-always",
         },
         cookies=AUTH,
     )
@@ -1423,7 +1423,7 @@ def test_pxe_plan_tui_policy_returns_interactive_with_catalog(
     mac = "aa:bb:cc:dd:ee:ff"
     app_client.put(
         f"/machines/{mac}",
-        json={"boot_policy": "tui"},
+        json={"boot_policy": "bty-tui"},
         cookies=AUTH,
     )
     r = app_client.get(f"/pxe/{mac}/plan", headers={"Host": "bty.local:8080"})
@@ -1446,7 +1446,7 @@ def test_pxe_tui_policy_returns_interactive_chain(app_client: TestClient) -> Non
     """
     app_client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
-        json={"boot_policy": "tui"},
+        json={"boot_policy": "bty-tui"},
         cookies=AUTH,
     )
     r = app_client.get("/pxe/aa:bb:cc:dd:ee:ff", headers={"Host": "bty.local:8080"})
@@ -1476,15 +1476,15 @@ def test_pxe_tui_policy_returns_interactive_chain(app_client: TestClient) -> Non
 
 
 def test_machine_upsert_accepts_boot_policy_tui(app_client: TestClient) -> None:
-    """``boot_policy='tui'`` is accepted by Pydantic validation alongside
+    """``boot_policy='bty-tui'`` is accepted by Pydantic validation alongside
     ``local`` and ``flash``."""
     r = app_client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
-        json={"boot_policy": "tui"},
+        json={"boot_policy": "bty-tui"},
         cookies=AUTH,
     )
     assert r.status_code == 200
-    assert r.json()["boot_policy"] == "tui"
+    assert r.json()["boot_policy"] == "bty-tui"
 
 
 def test_pxe_done_updates_last_flashed_at(app_client: TestClient) -> None:
@@ -1492,7 +1492,7 @@ def test_pxe_done_updates_last_flashed_at(app_client: TestClient) -> None:
         "/machines/aa:bb:cc:dd:ee:ff",
         json={
             "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            "boot_policy": "flash",
+            "boot_policy": "bty-flash-always",
         },
         cookies=AUTH,
     )
@@ -1506,7 +1506,7 @@ def test_pxe_done_updates_last_flashed_at(app_client: TestClient) -> None:
     assert after["last_flashed_at"] is not None
     # Critical: the policy is preserved. Per-job CI cadence stays
     # boot_policy=flash across reflashes.
-    assert after["boot_policy"] == "flash"
+    assert after["boot_policy"] == "bty-flash-always"
 
 
 def test_pxe_done_404_for_unknown_mac(app_client: TestClient) -> None:
@@ -1524,7 +1524,7 @@ def test_pxe_flash_once_emits_flash_chain_like_flash(
         "/machines/11:22:33:44:55:66",
         json={
             "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            "boot_policy": "flash-once",
+            "boot_policy": "bty-flash-once",
         },
         cookies=AUTH,
     )
@@ -1544,12 +1544,12 @@ def test_pxe_done_flips_flash_once_to_local(app_client: TestClient) -> None:
         "/machines/22:33:44:55:66:77",
         json={
             "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            "boot_policy": "flash-once",
+            "boot_policy": "bty-flash-once",
         },
         cookies=AUTH,
     )
     before = app_client.get("/machines/22:33:44:55:66:77", cookies=AUTH).json()
-    assert before["boot_policy"] == "flash-once"
+    assert before["boot_policy"] == "bty-flash-once"
     assert before["last_flashed_at"] is None
 
     r = app_client.post("/pxe/22:33:44:55:66:77/done")
@@ -1615,7 +1615,7 @@ def test_pxe_done_flash_once_settles_to_sanboot_when_configured(
         "/machines/aa:bb:cc:dd:ee:04",
         json={
             "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            "boot_policy": "flash-once",
+            "boot_policy": "bty-flash-once",
         },
         cookies=AUTH,
     )
@@ -1637,7 +1637,7 @@ def test_pxe_done_flash_once_second_call_is_idempotent(
         "/machines/33:44:55:66:77:88",
         json={
             "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            "boot_policy": "flash-once",
+            "boot_policy": "bty-flash-once",
         },
         cookies=AUTH,
     )
@@ -1665,8 +1665,8 @@ def test_pxe_done_flash_once_second_call_is_idempotent(
     assert len(events) == 2
     # First event's summary mentions the flip; second doesn't.
     summaries = [e["summary"] for e in events]
-    assert any("flash-once -> local" in s for s in summaries)
-    assert sum(1 for s in summaries if "flash-once -> local" in s) == 1
+    assert any("bty-flash-once -> local" in s for s in summaries)
+    assert sum(1 for s in summaries if "bty-flash-once -> local" in s) == 1
 
 
 def test_pxe_inventory_persists_disks_and_logs_event(app_client: TestClient) -> None:
@@ -1767,7 +1767,7 @@ def test_pxe_flash_with_orphan_ref_logs_event(
         "/machines/aa:bb:cc:dd:ee:bd",
         json={
             "bty_image_ref": orphan_ref,
-            "boot_policy": "flash",
+            "boot_policy": "bty-flash-always",
             "target_disk_serial": "SN12345",
         },
         cookies=AUTH,
@@ -1816,7 +1816,7 @@ def test_pxe_flash_refuses_chain_logs_no_target_disk_event(
     ref = add.json()["bty_image_ref"]
     app_client.put(
         "/machines/aa:bb:cc:dd:ee:dd",
-        json={"bty_image_ref": ref, "boot_policy": "flash"},
+        json={"bty_image_ref": ref, "boot_policy": "bty-flash-always"},
         cookies=AUTH,
     )
     r = app_client.get("/pxe/aa:bb:cc:dd:ee:dd")
@@ -1979,7 +1979,7 @@ def test_pxe_plan_flash_chain_carries_target_disk_serial(
         "/machines/aa:bb:cc:dd:ee:f6",
         json={
             "bty_image_ref": ref,
-            "boot_policy": "flash",
+            "boot_policy": "bty-flash-always",
             "target_disk_serial": "WD-SERIAL-XYZ",
         },
         cookies=AUTH,
@@ -2042,18 +2042,18 @@ def test_pxe_hit_records_tui_offer_for_unknown_mac(app_client: TestClient) -> No
     )
     events = {e["kind"]: e for e in r.json()["events"]}
     assert set(events) == {"machine.discovered", "pxe.offered"}
-    assert events["pxe.offered"]["details"]["offer"] == "tui"
+    assert events["pxe.offered"]["details"]["offer"] == "bty-tui"
 
 
 def test_machines_upsert_accepts_flash_once(app_client: TestClient) -> None:
     """flash-once is in BOOT_POLICIES so Pydantic accepts it."""
     r = app_client.put(
         "/machines/33:44:55:66:77:88",
-        json={"boot_policy": "flash-once"},
+        json={"boot_policy": "bty-flash-once"},
         cookies=AUTH,
     )
     assert r.status_code == 200, r.text
-    assert r.json()["boot_policy"] == "flash-once"
+    assert r.json()["boot_policy"] == "bty-flash-once"
 
 
 # ---------- /events API (audit log) -------------------------------------
@@ -2089,7 +2089,7 @@ def test_events_list_includes_machine_lifecycle(app_client: TestClient) -> None:
         f"/machines/{mac}",
         json={
             "bty_image_ref": "0" * 64,
-            "boot_policy": "flash",
+            "boot_policy": "bty-flash-always",
         },
         cookies=AUTH,
     )
@@ -4278,7 +4278,7 @@ def test_ui_machines_renders_timestamps_compactly(app_client: TestClient, tmp_pa
             "VALUES (?, ?, ?, ?, ?)",
             (
                 "aa:bb:cc:dd:ee:ff",
-                "tui",
+                "bty-tui",
                 "2026-05-17T20:21:09.155109+00:00",
                 "2026-05-17T20:00:00+00:00",
                 "2026-05-17T20:21:09.155109+00:00",

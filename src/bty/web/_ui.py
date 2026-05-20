@@ -488,19 +488,22 @@ def register_ui_routes(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"invalid boot_policy: {validated.boot_policy!r}",
             )
-        # Safety gate: boot_policy=flash / flash-once require a
+        # Safety gate: boot_policy=bty-flash-always / bty-flash-once require a
         # picked target_disk_serial. Without it /pxe/<mac>/plan
         # would fall back to mode=interactive anyway (the auto-
         # flash branch needs a serial); catching it here gives
         # the operator a clear flash-banner error in /ui/machines
         # instead of the operator being surprised by a wizard
         # prompt at flash time.
-        if validated.boot_policy in ("flash", "flash-once") and not validated.target_disk_serial:
+        if (
+            validated.boot_policy in ("bty-flash-always", "bty-flash-once")
+            and not validated.target_disk_serial
+        ):
             return RedirectResponse(
                 f"/ui/machines/{normalised}?error="
                 + urllib.parse.quote(
-                    "boot_policy=flash requires a target disk to be picked; "
-                    "power-cycle the machine in 'tui' mode first so it can "
+                    "boot_policy=bty-flash-always requires a target disk to be picked; "
+                    "power-cycle the machine in 'bty-tui' mode first so it can "
                     "report its disk inventory, then pick one here",
                     safe="",
                 ),
