@@ -1,8 +1,8 @@
 """Fetch live-env boot artifacts from GitHub releases.
 
 Operators populate ``BTY_BOOT_DIR`` (default ``/var/lib/bty/boot/``)
-via the browser UI's "fetch latest release" action. This module hits
-the predictable release-asset URLs
+via the browser UI's "Fetch netboot artifacts" action. This module
+hits the predictable release-asset URLs
 
     https://github.com/<repo>/releases/latest/download/<asset>
 
@@ -216,7 +216,7 @@ def _stream(
     """Stream ``url`` to ``dest`` in 1 MiB chunks; return bytes written.
 
     ``timeout=300`` so a flaky GitHub mirror (or a network blip mid-
-    artefact) doesn't wedge the bty-web ``fetch latest release``
+    artefact) doesn't wedge the bty-web "Fetch netboot artifacts"
     action indefinitely.
 
     ``progress`` is called per-chunk with cumulative bytes written

@@ -890,3 +890,32 @@ def test_docker_run_and_compose_publish_same_ports() -> None:
         f"One deployment shape can't reach a service the other "
         f"can; align them or the operator gets surprises."
     )
+
+
+def test_docker_healthcheck_honors_configured_port() -> None:
+    """The container's HEALTHCHECK must probe the *configured*
+    ``BTY_WEB_PORT``, not a hardcoded port. An operator who
+    overrides the port (``docker run -e BTY_WEB_PORT=9000``) would
+    otherwise get a permanently-unhealthy container -- the probe
+    keeps hitting the stale default while bty-web listens
+    elsewhere. The fix is shell-form CMD with runtime env
+    expansion (``${BTY_WEB_PORT:-8080}``); guard against a
+    regression back to a literal ``:8080`` in the probe URL.
+    """
+    dockerfile = (REPO_ROOT / "docker" / "Dockerfile").read_text()
+    healthcheck = next(
+        (
+            line
+            for line in dockerfile.splitlines()
+            if "curl" in line and "healthz" in line and "http" in line
+        ),
+        None,
+    )
+    assert healthcheck is not None, "Dockerfile HEALTHCHECK curl line not found"
+    assert "${BTY_WEB_PORT" in healthcheck, (
+        f"HEALTHCHECK must expand BTY_WEB_PORT at runtime, got: {healthcheck.strip()!r}. "
+        f"A hardcoded port breaks the health probe for any operator who overrides it."
+    )
+    assert "127.0.0.1:8080/healthz" not in healthcheck, (
+        "HEALTHCHECK appears to hardcode :8080 again -- use ${BTY_WEB_PORT:-8080}."
+    )

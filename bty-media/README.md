@@ -169,8 +169,8 @@ hardware. Most operators never run this build pipeline themselves -
 ``bty-media/`` exists for contributors who want to modify the image.
 
 - **usb-x86.** The `.iso.gz` decompresses to a hybrid ISO
-  that boots into a Debian live environment with the `bty` CLI +
-  TUI installed into `/opt/bty/venv`, and an exFAT `BTY_IMAGES`
+  that boots into a Debian live environment with the `bty` wizard
+  installed into `/opt/bty/venv`, and an exFAT `BTY_IMAGES`
   partition for pre-built images. live-boot's SquashFS + tmpfs
   overlay provides the ephemeral rootfs (no `overlayroot`
   package needed). End-to-end use case in
