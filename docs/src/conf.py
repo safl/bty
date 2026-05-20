@@ -19,6 +19,11 @@ myst_enable_extensions = [
     "colon_fence",
 ]
 
+# Auto-generate slug anchors for headings (h1-h3) so intra-page links
+# like ``[machine record](#machine-record)`` resolve without a manual
+# ``(machine-record)=`` label on every heading.
+myst_heading_anchors = 3
+
 source_suffix = {".md": "markdown"}
 master_doc = "index"
 
