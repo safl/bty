@@ -525,6 +525,8 @@ def register_ui_routes(
         section = request.query_params.get("section") or "list"
         if section not in (
             "list",
+            "downloads",
+            "hashes",
             "fetch",
             "upload-catalog",
             "upload-image",

@@ -4,7 +4,9 @@
 {% block subnav %}
 {% set right_html %}<span class="text-muted small">{{ unified|length }} entr{{ "y" if unified|length == 1 else "ies" }} | image-root <code>{{ image_root }}</code></span>{% endset %}
 {% with sections=[
-    {"key": "list",                  "label": "List",                     "icon": "list-ul",       "href": "/ui/images"},
+    {"key": "list",                  "label": "Catalog",                  "icon": "list-ul",       "href": "/ui/images"},
+    {"key": "downloads",             "label": "Downloads",                "icon": "arrow-down-circle", "href": "/ui/images?section=downloads"},
+    {"key": "hashes",                "label": "Hashes",                   "icon": "hash",          "href": "/ui/images?section=hashes"},
     {"key": "fetch",                 "label": "Fetch catalog",            "icon": "cloud-download","href": "/ui/images?section=fetch"},
     {"key": "upload-catalog",        "label": "Upload catalog",           "icon": "file-earmark-text", "href": "/ui/images?section=upload-catalog"},
     {"key": "upload-image",          "label": "Upload image",             "icon": "upload",        "href": "/ui/images?section=upload-image"},
@@ -17,14 +19,17 @@
 {% block intro %}
 {% from "ui/_intro_box.html" import render as intro_box %}
 {% call intro_box() %}
-    Pre-built system images bty flashes onto target disks.
-    Populate via <a href="/ui/images?section=fetch">Fetch
-    catalog</a> to pull the bty release catalog, paste an image
-    / oras URL, upload a catalog file, or drop files directly
-    into <code>{{ image_root }}</code>. Entries are content-
-    addressed: bty refuses to flash an entry whose sha hasn't
-    been computed yet (the background hash worker picks new
-    files up automatically).
+    Pre-built system images bty flashes onto target disks, content-
+    addressed by sha256. Sub-nav:
+    <strong>Catalog</strong> is the merged listing (dir scan +
+    catalog entries);
+    <strong>Downloads</strong> / <strong>Hashes</strong> show the
+    live background fetch + sha workers;
+    <strong>Fetch catalog</strong> pulls the bty release catalog;
+    <strong>Upload catalog</strong> / <strong>Upload image</strong> /
+    <strong>Upload image (from URL)</strong> add entries by hand.
+    Files dropped into <code>{{ image_root }}</code> are picked up
+    and hashed automatically.
 {% endcall %}
 {% endblock %}
 
@@ -202,11 +207,58 @@
 </script>
 
 {% else %}
-{# section == "list" (default): the OBSERVABLE state of the catalog
-   plus the live downloads + hashes panes. This is what an operator
-   wants to see when they click "Images" in the top nav. Adding
-   things is one sub-nav click away (above). #}
-{% if not unified %}
+{# list / downloads / hashes: the OBSERVABLE state of the catalog
+   plus the live fetch + hash workers, each its own sub-nav item.
+   The poll script further below is shared by all three (it self-
+   guards on which panes are present). Adding things is one sub-nav
+   click away (above). #}
+{% if section == "downloads" %}
+<div class="card mb-3">
+    <div class="card-header bg-light fw-semibold d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-arrow-down-circle me-1"></i>Downloads</span>
+        <span class="text-muted small bty-poll-status">refreshing...</span>
+    </div>
+    <div class="table-responsive">
+        <table class="table mb-0 align-middle">
+            <thead class="table-light">
+                <tr>
+                    <th>Name</th>
+                    <th>Status</th>
+                    <th style="width: 30%;">Progress</th>
+                    <th>Bytes</th>
+                    <th class="text-end" style="width: 1%; white-space: nowrap;">Action</th>
+                </tr>
+            </thead>
+            <tbody class="bty-downloads-tbody">
+                <tr><td colspan="5" class="text-muted">No downloads yet.</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+{% elif section == "hashes" %}
+<div class="card mb-3">
+    <div class="card-header bg-light fw-semibold">
+        <i class="bi bi-hash me-1"></i>Hashes
+        <small class="text-muted ms-2">background SHA-256 of dir-scan files; default 1 at a time so small hardware (Pi / NUC) stays responsive</small>
+    </div>
+    <div class="table-responsive">
+        <table class="table mb-0 align-middle">
+            <thead class="table-light">
+                <tr>
+                    <th>Name</th>
+                    <th>Status</th>
+                    <th style="width: 30%;">Progress</th>
+                    <th>Bytes</th>
+                    <th class="text-end" style="width: 1%; white-space: nowrap;">Action</th>
+                </tr>
+            </thead>
+            <tbody class="bty-hashes-tbody">
+                <tr><td colspan="5" class="text-muted">No hashes yet.</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+{% elif not unified %}
 <div class="alert alert-light border">
     <i class="bi bi-info-circle me-2"></i>
     No images yet. The fastest way to populate: click
@@ -220,7 +272,7 @@
 
 <div class="card mb-3">
     <div class="card-header bg-light fw-semibold">
-        <i class="bi bi-list-ul me-1"></i>Unified catalog (dir scan + manifest, SHA-keyed)
+        <i class="bi bi-list-ul me-1"></i>Catalog
     </div>
     <div class="table-responsive">
         <table class="table table-hover mb-0 align-middle">
@@ -349,52 +401,7 @@
         </table>
     </div>
 </div>
-
-<div class="card mb-3">
-    <div class="card-header bg-light fw-semibold d-flex justify-content-between align-items-center">
-        <span><i class="bi bi-arrow-down-circle me-1"></i>Downloads</span>
-        <span class="text-muted small bty-poll-status">refreshing...</span>
-    </div>
-    <div class="table-responsive">
-        <table class="table mb-0 align-middle">
-            <thead class="table-light">
-                <tr>
-                    <th>Name</th>
-                    <th>Status</th>
-                    <th style="width: 30%;">Progress</th>
-                    <th>Bytes</th>
-                    <th class="text-end" style="width: 1%; white-space: nowrap;">Action</th>
-                </tr>
-            </thead>
-            <tbody class="bty-downloads-tbody">
-                <tr><td colspan="5" class="text-muted">No downloads yet.</td></tr>
-            </tbody>
-        </table>
-    </div>
-</div>
-
-<div class="card mb-3">
-    <div class="card-header bg-light fw-semibold">
-        <i class="bi bi-hash me-1"></i>Hashes
-        <small class="text-muted ms-2">background SHA-256 of dir-scan files; default 1 at a time so small hardware (Pi / NUC) stays responsive</small>
-    </div>
-    <div class="table-responsive">
-        <table class="table mb-0 align-middle">
-            <thead class="table-light">
-                <tr>
-                    <th>Name</th>
-                    <th>Status</th>
-                    <th style="width: 30%;">Progress</th>
-                    <th>Bytes</th>
-                    <th class="text-end" style="width: 1%; white-space: nowrap;">Action</th>
-                </tr>
-            </thead>
-            <tbody class="bty-hashes-tbody">
-                <tr><td colspan="5" class="text-muted">No hashes yet.</td></tr>
-            </tbody>
-        </table>
-    </div>
-</div>
+{% endif %}
 
 <script>
 (function () {
@@ -684,7 +691,6 @@
     startPolling();
 })();
 </script>
-{% endif %}
 {% endif %}
 
 {# Image-relevant event slice (uploads, hashes, catalog adds /
