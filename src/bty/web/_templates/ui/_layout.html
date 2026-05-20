@@ -238,6 +238,28 @@
         .subnav-strip a:hover {
             color: #fff;
         }
+        /* Table surface shading -- a luminance ladder that extends the
+           navbar > subnav chrome downward into content: every table's
+           body sits a touch darker than the white card it lives in, and
+           the header tier (column ``thead`` row + the card-header
+           "title" bar above it) is one clear step darker than the body.
+           Both tiers stay well lighter than the navbar / subnav. Driven
+           through Bootstrap's ``--bs-table-bg`` custom property + a
+           card-header override so every ``.table`` matches without
+           per-template classes. The ``.table > thead`` rule outranks the
+           ``.table-light`` class the templates still carry, so those are
+           harmless. */
+        .table {
+            --bs-table-bg: #eef2f6;          /* body rows: darker than the white card */
+        }
+        .table > thead {
+            --bs-table-bg: #dde4ec;          /* header row: one step darker than the body */
+        }
+        .card > .card-header.bg-light {
+            /* Match the column-header tone so the title bar and the
+               ``thead`` read as one header tier above the body. */
+            background-color: #dde4ec !important;
+        }
         /* Background-worker status cluster: quieter than the nav-btns
            (it's status, not navigation), set off by a faint divider.
            Each icon dims to ~50% until its manager is busy, then the
