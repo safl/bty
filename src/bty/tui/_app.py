@@ -1483,6 +1483,39 @@ class BtyTui:
         cells = [f"\\[[{_ACCENT}]{key}[/{_ACCENT}]] {label}" for key, label in extras]
         self._console.print(f"[{_MUTED}]" + "   ".join(cells) + "[/]")
 
+    def _sanitize_tty(self) -> None:
+        """Restore the controlling tty to canonical mode + echo before
+        reading a prompt.
+
+        Companion to ``show_cursor(True)``: that fixes an invisible
+        *cursor*, this fixes *dead input*. After a long flash (Rich
+        ``Live`` region + ``curl``/``dd`` subprocesses writing to the
+        same tty), the live env's framebuffer console / BMC KVM has
+        been seen to come back with ``ECHO``/``ICANON`` cleared -- the
+        operator types ``y``/Enter and nothing reaches ``input()``, so
+        the post-flash reboot prompt looks wedged (the symptom that
+        forced a Ctrl+Alt+Del). Re-asserting ICANON+ECHO+ISIG (and
+        ICRNL so Enter delivers ``\\n``) makes the prompt readable
+        again regardless of what disturbed the tty.
+
+        Best-effort: silently no-ops when stdin isn't a real tty
+        (tests, piped input) or ``termios`` is unavailable.
+        """
+        try:
+            import termios
+        except ImportError:
+            return
+        with contextlib.suppress(OSError, termios.error, ValueError):
+            fd = sys.stdin.fileno()
+            if not os.isatty(fd):
+                return
+            attrs = termios.tcgetattr(fd)
+            attrs[0] |= termios.ICRNL  # iflag: CR -> NL so Enter submits
+            attrs[3] |= (  # lflag: canonical line editing + echo + signals
+                termios.ICANON | termios.ECHO | termios.ECHOE | termios.ECHOK | termios.ISIG
+            )
+            termios.tcsetattr(fd, termios.TCSADRAIN, attrs)
+
     def _ask(self, prompt_text: str) -> str:
         """Single-line prompt with a leading newline so it's clearly
         separated from the rendered panel above. ``show_default=False``
@@ -1491,16 +1524,17 @@ class BtyTui:
         ``""`` which the screens map to ``refresh``); we just don't
         render the parens.
 
-        Belt-and-braces ``show_cursor(True)`` before every prompt:
-        a prior screen's Rich ``Live`` region (the flash progress
-        bar) hides the cursor and is supposed to restore it on exit,
-        but the live env's framebuffer console and Supermicro BMC
-        KVMs have been seen to drop the restore sequence. The
-        operator then types at an invisible cursor and thinks the
-        TUI is wedged. Re-asserting visibility on every prompt
-        costs one ANSI escape and removes the failure mode.
+        Belt-and-braces ``show_cursor(True)`` + ``_sanitize_tty()``
+        before every prompt: a prior screen's Rich ``Live`` region
+        (the flash progress bar) plus the flash subprocesses can
+        leave the live env's framebuffer console / BMC KVM with the
+        cursor hidden AND input echo/canonical-mode disabled. The
+        operator then types at an invisible cursor (or types and
+        nothing happens) and thinks the TUI is wedged. Re-asserting
+        both costs two cheap syscalls and removes the failure mode.
         """
         self._console.show_cursor(True)
+        self._sanitize_tty()
         try:
             answer = (
                 Prompt.ask(
@@ -1520,6 +1554,7 @@ class BtyTui:
         """Tiny ``press Enter to continue``. Used after an error
         message so the operator sees it before the screen redraws.
         """
+        self._sanitize_tty()
         with contextlib.suppress(EOFError, KeyboardInterrupt):
             Prompt.ask(
                 f"[{_MUTED}](press Enter to continue)[/]",
