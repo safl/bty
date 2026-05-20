@@ -14,7 +14,7 @@ tag's copy of that file; substitute `latest` for a specific tag (e.g.
 | `bty-usb-x86_64.iso.gz` (+ `.sha256`) | Bootable USB live ISO with built-in writable `BTY_IMAGES` exFAT partition for the operator's image catalog. Open in Balena Etcher / Raspberry Pi Imager / Rufus DD-mode (decompresses `.gz` natively). CLI: `gunzip -d --stdout bty-usb-x86_64.iso.gz \| sudo dd of=/dev/sdX bs=4M`. | <https://github.com/safl/bty/releases/latest/download/bty-usb-x86_64.iso.gz> |
 | `bty-server-x86_64.img.gz` (+ `.sha256`) | Server appliance image, x86_64 (browser UI + iPXE + dnsmasq). Boot in QEMU or `dd` to a disk. | <https://github.com/safl/bty/releases/latest/download/bty-server-x86_64.img.gz> |
 | `bty-server-rpi-arm64.img.gz` (+ `.sha256`) | Server appliance image for Raspberry Pi 4 / 5 (arm64). Write with `dd` to an SD card. | <https://github.com/safl/bty/releases/latest/download/bty-server-rpi-arm64.img.gz> |
-| `bty-netboot-x86_64.{vmlinuz,initrd,squashfs}` (+ `bty-netboot-x86_64.sha256`) | Netboot trio for PXE-flash clients. Drop into the server's `BTY_BOOT_DIR` (or click "fetch latest release" on `/ui/boot`). | <https://github.com/safl/bty/releases/latest/download/bty-netboot-x86_64.vmlinuz> |
+| `bty-netboot-x86_64.{vmlinuz,initrd,squashfs}` (+ `bty-netboot-x86_64.sha256`) | Netboot trio for PXE-flash clients. Drop into the server's `BTY_BOOT_DIR` (or click "Fetch netboot artifacts" on `/ui/boot`). | <https://github.com/safl/bty/releases/latest/download/bty-netboot-x86_64.vmlinuz> |
 | `bty.pdf` | Offline copy of the docs (this site, rendered by Sphinx + LaTeX). | <https://github.com/safl/bty/releases/latest/download/bty.pdf> |
 | `bty_lab-X.Y.Z-py3-none-any.whl` / `.tar.gz` | Python wheel + sdist. Mirrored on PyPI as [`bty-lab`](https://pypi.org/project/bty-lab/) - prefer `pipx install bty-lab` over downloading by hand. | <https://github.com/safl/bty/releases> |
 
@@ -258,8 +258,8 @@ tooling which can't carry a session cookie:
  whichever IP / hostname / .local name it used to reach the server.
 - `GET /boot/{name}` - serve a live-env artifact from `BTY_BOOT_DIR`
  (default `/var/lib/bty/boot/`). Same trust model as `/pxe/*`.
- Operators populate the dir via the browser UI's "fetch latest
- release" button on the Boot page, or with the auth-gated
+ Operators populate the dir via the browser UI's "Fetch netboot
+ artifacts" button on the Netboot page, or with the auth-gated
  `PUT /boot/{name}` upload route.
 - `GET /images/{key}` and `GET /images/{key}/{name}` - serve
  image bytes from `BTY_IMAGE_ROOT` (or the catalog cache).
@@ -415,7 +415,7 @@ InventoryDisk = {
 | `BTY_STATE_DIR` | Where `state.db` lives | `/var/lib/bty` |
 | `BTY_IMAGE_ROOT` | Image catalog directory | `/var/lib/bty/images` |
 | `BTY_BOOT_DIR` | Live-env artifacts (`/boot/{name}` source) | `${BTY_STATE_DIR}/boot` |
-| `BTY_BOOT_RELEASE_REPO` | GitHub repo (`<owner>/<name>`) the "fetch latest release" UI pulls live-env artifacts from | `safl/bty` |
+| `BTY_BOOT_RELEASE_REPO` | GitHub repo (`<owner>/<name>`) the "Fetch netboot artifacts" UI pulls live-env artifacts from | `safl/bty` |
 | `BTY_WEB_HOST` | uvicorn bind address | `0.0.0.0` |
 | `BTY_WEB_PORT` | uvicorn port | `8080` |
 
