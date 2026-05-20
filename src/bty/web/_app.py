@@ -89,20 +89,20 @@ def create_app(
     resolved_boot_root: Path = boot_root or (state_path.parent / "boot")
     event_bus = MachineEventBus()
 
-    # Optional catalog manifest + cache + DownloadManager. If no
-    # manifest is configured (operator hasn't authored one), the
+    # Optional catalog file + cache + DownloadManager. If no
+    # catalog is configured (operator hasn't authored one), the
     # ``DownloadManager`` simply isn't started and the
     # ``/catalog/downloads/*`` + ``/catalog/hashes/*`` endpoints
     # return 404. Operator-curated entries (``POST /catalog/entries``)
-    # work independently of the manifest. ``BTY_CATALOG_FILE`` and
+    # work independently of the catalog. ``BTY_CATALOG_FILE`` and
     # ``BTY_CATALOG_CACHE_DIR`` override the defaults derived from
     # ``BTY_STATE_DIR``.
     #
-    # The manifest path is treated as the "always this file" location
+    # The catalog path is treated as the "always this file" location
     # so the UI can write a fresh ``catalog.toml`` to it and reload
     # in-process. When ``$BTY_CATALOG_FILE`` is unset and the default
-    # file doesn't exist yet, we still pin the default path so an
-    # ``/ui/catalog/manifest`` upload knows where to land.
+    # file doesn't exist yet, we still pin the default path so a
+    # ``/ui/catalog/upload`` upload knows where to land.
     manifest_path = _catalog.default_manifest_path()
     if manifest_path is None:
         state_dir = Path(os.environ.get("BTY_STATE_DIR", "/var/lib/bty"))
@@ -123,11 +123,11 @@ def create_app(
         try:
             catalog_state.catalog = _catalog.load(manifest_path)
         except _catalog.CatalogError as exc:
-            # Don't crash bty-web startup over a malformed manifest;
+            # Don't crash bty-web startup over a malformed catalog;
             # log it and proceed without the catalog feature. The
             # operator sees the empty catalog page + can upload a
-            # fresh manifest from the UI to recover.
-            print(f"bty-web: catalog manifest at {manifest_path}: {exc}", file=sys.stderr)
+            # fresh catalog from the UI to recover.
+            print(f"bty-web: catalog at {manifest_path}: {exc}", file=sys.stderr)
             catalog_state.catalog = None
     download_manager = _web_catalog.DownloadManager()
     hash_manager = _hash.HashManager()
@@ -2361,10 +2361,10 @@ def create_app(
     @app.get("/catalog/downloads")
     async def list_downloads(_: str = Depends(require_auth)) -> dict[str, Any]:
         if catalog_state.catalog is None:
-            return {"manifest": None, "downloads": []}
+            return {"catalog": None, "downloads": []}
         states = await download_manager.list()
         return {
-            "manifest": str(manifest_path),
+            "catalog": str(manifest_path),
             "cache_dir": str(catalog_cache_dir),
             "max_parallel": download_manager.max_parallel,
             "downloads": [s.to_dict() for s in states],

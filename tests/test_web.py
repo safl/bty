@@ -2733,13 +2733,13 @@ def test_catalog_downloads_requires_auth(app_client: TestClient) -> None:
 
 def test_catalog_downloads_no_manifest_returns_empty(app_client: TestClient) -> None:
     """The fixture's app has no ``catalog.toml`` -- the endpoint
-    returns ``{"manifest": null, "downloads": []}`` rather than
+    returns ``{"catalog": null, "downloads": []}`` rather than
     404, so the UI's polling loop has something stable to render.
     """
     r = app_client.get("/catalog/downloads", cookies=AUTH)
     assert r.status_code == 200
     body = r.json()
-    assert body == {"manifest": None, "downloads": []}
+    assert body == {"catalog": None, "downloads": []}
 
 
 def test_catalog_downloads_post_without_manifest_404(app_client: TestClient) -> None:
@@ -3780,11 +3780,11 @@ def test_ui_catalog_upload_imports_into_db_and_303s_on_success(
     # from catalog_entries) -- evidence the import landed in the DB.
     listing = app_client.get("/catalog/entries", cookies=AUTH).json()
     assert any(e["src"] == "https://example.com/demo.img.zst" for e in listing)
-    # /catalog/downloads reports a non-null ``manifest`` -- proves
+    # /catalog/downloads reports a non-null ``catalog`` -- proves
     # the write+reload happened so the DownloadManager is bound
     # and per-row Fetch buttons will work.
     downloads = app_client.get("/catalog/downloads", cookies=AUTH).json()
-    assert downloads["manifest"] is not None, (
+    assert downloads["catalog"] is not None, (
         "upload-catalog must write the bytes to manifest_path + "
         "reload so the DownloadManager binds; without it the "
         "per-row Fetch buttons would 404."
@@ -3867,12 +3867,12 @@ def test_ui_catalog_fetch_release_imports_into_db_and_303s(
     assert r.headers["location"] == "/ui/images"
     listing = app_client.get("/catalog/entries", cookies=AUTH).json()
     assert any(e["src"] == "https://example.com/rel.img.zst" for e in listing)
-    # /catalog/downloads must now report a non-null ``manifest``
+    # /catalog/downloads must now report a non-null ``catalog``
     # (proves the write+reload happened). Without that step
     # POST /catalog/downloads would 404; the symmetric GET
-    # would return ``{"manifest": null, ...}``.
+    # would return ``{"catalog": null, ...}``.
     downloads = app_client.get("/catalog/downloads", cookies=AUTH).json()
-    assert downloads["manifest"] is not None, (
+    assert downloads["catalog"] is not None, (
         "fetch-release must write the catalog to manifest_path + "
         "reload so the DownloadManager binds; without it the "
         "per-row Fetch buttons would 404."
