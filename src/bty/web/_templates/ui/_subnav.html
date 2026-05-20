@@ -7,8 +7,7 @@
    reads as "row of buttons" rather than "second-class header".
 
    Usage: include with ``sections`` (list of dicts) + ``active``
-   (string key). Optionally pass ``right_html`` for a right-aligned
-   meta blob (live indicator, filter status, etc.).
+   (string key).
 
    Each section dict has:
      key:   short identifier matching ``?section=<key>``
@@ -45,6 +44,5 @@
            pages so transitions don't reflow the header). #}
         <span class="me-auto"></span>
         {% endif %}
-        {% if right_html %}<div class="ms-auto">{{ right_html|safe }}</div>{% endif %}
     </div>
 </nav>

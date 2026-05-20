@@ -2,8 +2,7 @@
 {% block title %}Event log - bty-web{% endblock %}
 
 {% block subnav %}
-{% set right_html %}<span class="text-muted small">{{ events|length }} on this page</span>{% endset %}
-{% with sections=[{"key": "list", "label": "List", "icon": "list-ul", "href": "/ui/events"}], active="list", right_html=right_html %}
+{% with sections=[{"key": "list", "label": "List", "icon": "list-ul", "href": "/ui/events"}], active="list" %}
 {% include "ui/_subnav.html" %}
 {% endwith %}
 {% endblock %}

@@ -742,7 +742,6 @@ def test_ui_machines_filter_assigned_excludes_discovered(client: TestClient) -> 
     body = r.text
     assert "aa:bb:cc:dd:ee:04" in body
     assert "aa:bb:cc:dd:ee:03" not in body
-    assert "filter:" in body
 
 
 def test_ui_machines_filter_unrecognised_value_falls_back_to_full_list(
@@ -784,9 +783,8 @@ def test_ui_machines_filter_discovered_excludes_assigned(client: TestClient) -> 
     body = r.text
     assert "aa:bb:cc:dd:ee:01" in body
     assert "aa:bb:cc:dd:ee:02" not in body
-    # Active-filter banner; SSE wiring suppressed.
-    assert "filter:" in body
-    assert "show all" in body
+    # Under a server-side filter the SSE wiring is suppressed (a live
+    # update would replace the filtered tbody with the full list).
     assert 'sse-connect="/events/machines"' not in body
 
 

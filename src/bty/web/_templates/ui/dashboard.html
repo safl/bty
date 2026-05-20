@@ -2,8 +2,7 @@
 {% block title %}Dashboard - bty-web{% endblock %}
 
 {% block subnav %}
-{% set right_html %}<span class="live-indicator text-muted small" title="Live-updating via Server-Sent Events"><i class="bi bi-broadcast text-success me-1"></i>live</span>{% endset %}
-{% with sections=None, right_html=right_html %}
+{% with sections=None %}
 {% include "ui/_subnav.html" %}
 {% endwith %}
 {% endblock %}

@@ -2,12 +2,11 @@
 {% block title %}Images - bty-web{% endblock %}
 
 {% block subnav %}
-{% set right_html %}<span class="text-muted small">{{ unified|length }} entr{{ "y" if unified|length == 1 else "ies" }} | image-root <code>{{ image_root }}</code></span>{% endset %}
 {% with sections=[
     {"key": "list",                  "label": "List",                     "icon": "list-ul",       "href": "/ui/images"},
     {"key": "downloads",             "label": "Downloads",                "icon": "arrow-down-circle", "href": "/ui/images?section=downloads"},
     {"key": "hashes",                "label": "Hashes",                   "icon": "hash",          "href": "/ui/images?section=hashes"},
-] , active=section, right_html=right_html %}
+] , active=section %}
 {% include "ui/_subnav.html" %}
 {% endwith %}
 {% endblock %}

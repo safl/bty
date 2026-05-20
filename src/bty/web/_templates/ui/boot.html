@@ -2,12 +2,11 @@
 {% block title %}Netboot artifacts - bty-web{% endblock %}
 
 {% block subnav %}
-{% set right_html %}<span class="text-muted small"><code>{{ boot_root }}</code></span>{% endset %}
 {% with sections=[
     {"key": "list",     "label": "List",         "icon": "list-ul",        "href": "/ui/boot"},
     {"key": "dhcp-pxe", "label": "DHCP / PXE",   "icon": "hdd-network",    "href": "/ui/boot?section=dhcp-pxe"},
     {"key": "tftp",     "label": "TFTP daemon",  "icon": "cpu",            "href": "/ui/boot?section=tftp"},
-] , active=section, right_html=right_html %}
+] , active=section %}
 {% include "ui/_subnav.html" %}
 {% endwith %}
 {% endblock %}

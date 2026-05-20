@@ -2,14 +2,9 @@
 {% block title %}Machines - bty-web{% endblock %}
 
 {% block subnav %}
-{% if active_filter %}
-{% set right_html %}<span class="text-muted small"><i class="bi bi-funnel me-1"></i>filter: <code>{{ active_filter }}</code> <a href="/ui/machines" class="ms-2">show all</a></span>{% endset %}
-{% else %}
-{% set right_html %}<span class="live-indicator text-muted small" title="Live-updating via Server-Sent Events"><i class="bi bi-broadcast text-success me-1"></i><span id="machines-count">{{ machines|length }}</span> total · live</span>{% endset %}
-{% endif %}
 {% with sections=[
     {"key": "list", "label": "List",        "icon": "list-ul",     "href": "/ui/machines"},
-] , active=section, right_html=right_html %}
+] , active=section %}
 {% include "ui/_subnav.html" %}
 {% endwith %}
 {% endblock %}

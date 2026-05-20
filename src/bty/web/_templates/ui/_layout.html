@@ -146,20 +146,14 @@
             color: #fff;
         }
 
-        /* SSE visual cues. The page-level "live" indicator pulses
-           when an event arrives; the swapped fragment gets a brief
-           green wash so the operator's eye snaps to where the change
-           landed. ``prefers-reduced-motion`` users see no animation. */
-        .live-indicator i {
-            display: inline-block;
-        }
+        /* SSE visual cues. The top-level nav-live indicator pulses when
+           an event arrives; the swapped fragment gets a brief green wash
+           so the operator's eye snaps to where the change landed.
+           ``prefers-reduced-motion`` users see no animation. */
         @keyframes bty-pulse {
             0%   { transform: scale(1); }
             40%  { transform: scale(1.45); }
             100% { transform: scale(1); }
-        }
-        .live-indicator.pulsing i {
-            animation: bty-pulse 0.45s ease-out;
         }
         @keyframes bty-flash {
             0%   { background-color: rgba(40, 167, 69, 0.20); }
@@ -169,7 +163,6 @@
             animation: bty-flash 0.7s ease-out;
         }
         @media (prefers-reduced-motion: reduce) {
-            .live-indicator.pulsing i,
             .nav-live.pulsing i,
             .sse-target.flashing {
                 animation: none;
@@ -454,9 +447,10 @@
         el.classList.add(cls);
     }
     document.body.addEventListener("htmx:sseMessage", function () {
-        document.querySelectorAll(".live-indicator").forEach(function (i) {
-            blink(i, "pulsing");
-        });
+        // Emphasize the top-level live indicator on any SSE event, so
+        // machine / dashboard updates pulse it in real time (the poll
+        // also pulses it on worker-activity changes).
+        blink(document.getElementById("nav-live"), "pulsing");
     });
     document.body.addEventListener("htmx:afterSwap", function (evt) {
         if (evt.target && evt.target.classList.contains("sse-target")) {
