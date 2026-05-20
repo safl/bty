@@ -46,7 +46,56 @@ def test_init_db_creates_events_table(tmp_path: Path) -> None:
     _db.init_db(state)
     with sqlite3.connect(state) as conn:
         cols = {row[1] for row in conn.execute("PRAGMA table_info(events)")}
-    assert {"id", "ts", "kind", "subject_kind", "subject_id", "summary"} <= cols
+    assert {
+        "id",
+        "ts",
+        "kind",
+        "subject_kind",
+        "subject_id",
+        "summary",
+        "acknowledged",
+    } <= cols
+
+
+def test_init_db_backfills_acknowledged_on_old_events_table(tmp_path: Path) -> None:
+    """A state.db whose ``events`` table predates the ``acknowledged``
+    column gets it added in place (additive migration), NOT a
+    StaleSchemaError wipe -- the column carries a DEFAULT so existing
+    rows survive. This is the persist-across-reflash contract: adding
+    an events flag must not cost the operator their machine inventory.
+    """
+    state = tmp_path / "state.db"
+    # Pre-``acknowledged`` events table with one row, plus the columns
+    # _REQUIRED_COLUMNS checks so we exercise the additive path (not
+    # the stale-wipe path).
+    with sqlite3.connect(state) as conn:
+        conn.execute(
+            """
+            CREATE TABLE events (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts            TEXT NOT NULL,
+                kind          TEXT NOT NULL,
+                subject_kind  TEXT,
+                subject_id    TEXT,
+                actor         TEXT,
+                source_ip     TEXT,
+                summary       TEXT NOT NULL,
+                details       TEXT
+            )
+            """
+        )
+        conn.execute(
+            "INSERT INTO events (ts, kind, summary) VALUES (?, ?, ?)",
+            ("2026-01-01T00:00:00+00:00", "image.hash_failed", "old failure"),
+        )
+        conn.commit()
+    _db.init_db(state)  # must not raise; must add the column
+    with sqlite3.connect(state) as conn:
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(events)")}
+        assert "acknowledged" in cols
+        # The pre-existing row is backfilled to the default (0).
+        row = conn.execute("SELECT acknowledged FROM events").fetchone()
+    assert row[0] == 0
 
 
 def test_init_db_idempotent(tmp_path: Path) -> None:

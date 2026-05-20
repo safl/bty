@@ -111,7 +111,14 @@ CREATE TABLE IF NOT EXISTS events (
     -- where the bty-web process self-initiates).
     source_ip     TEXT,
     summary       TEXT NOT NULL,
-    details       TEXT                  -- JSON blob with kind-specific extras
+    details       TEXT,                 -- JSON blob with kind-specific extras
+    -- Operator tripwire-clear flag. 0 = unacknowledged; 1 =
+    -- acknowledged. Unacknowledged failures count toward the
+    -- dashboard Health Monitoring error tripwire; acknowledging one
+    -- clears it from the count without deleting the row. Defaulted
+    -- so the additive migration below can backfill it on DBs created
+    -- before this column existed.
+    acknowledged  INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS events_ts_idx       ON events(ts);
 CREATE INDEX IF NOT EXISTS events_kind_idx     ON events(kind);
@@ -136,6 +143,41 @@ _REQUIRED_COLUMNS: dict[str, tuple[str, ...]] = {
     "machines": ("bty_image_ref", "known_disks", "target_disk_serial"),
     "catalog_entries": ("bty_image_ref", "disk_image_sha"),
 }
+
+
+# Columns added after their table's initial release that carry a
+# DEFAULT, so they can be backfilled in place with a plain
+# ``ALTER TABLE ... ADD COLUMN`` rather than forcing a state.db wipe.
+# This is the narrow exception to the "no migrations" rule: a
+# defaulted column is non-destructive to add, and wiping the whole
+# DB (losing machine inventory) just to gain an events flag would
+# defeat bty-state-migrate's persist-across-reflash promise.
+# Strictly-required columns with no sensible default still go through
+# ``_REQUIRED_COLUMNS`` + the wipe path.
+_ADDITIVE_COLUMNS: dict[str, dict[str, str]] = {
+    "events": {
+        "acknowledged": "INTEGER NOT NULL DEFAULT 0",
+    },
+}
+
+
+def _apply_additive_columns(conn: sqlite3.Connection) -> None:
+    """Add any missing defaulted columns from :data:`_ADDITIVE_COLUMNS`.
+
+    Idempotent: runs after the ``CREATE TABLE IF NOT EXISTS`` pass so
+    a fresh DB already has the column (the ALTER is skipped); an older
+    DB gets the column added in place with its default backfilled.
+    Table + column names are internal constants, never user input, so
+    the f-string SQL carries no injection surface.
+    """
+    for table, cols in _ADDITIVE_COLUMNS.items():
+        rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+        if not rows:
+            continue  # fresh DB: SCHEMA already created it with the column
+        existing = {r[1] for r in rows}
+        for name, decl in cols.items():
+            if name not in existing:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
 
 
 def _detect_stale_schema(conn: sqlite3.Connection, path: Path) -> None:
@@ -183,6 +225,7 @@ def init_db(path: Path) -> None:
     with closing(sqlite3.connect(path)) as conn, conn:
         _detect_stale_schema(conn, path)
         conn.executescript(SCHEMA)
+        _apply_additive_columns(conn)
 
 
 @contextmanager

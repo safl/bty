@@ -263,8 +263,9 @@ def test_ui_dashboard_health_monitoring_renders_with_links(client: TestClient) -
     checklist") is the operator's fresh-install onboarding +
     at-a-glance status surface: one row per readiness condition,
     each linked into the remediation section when it fails. Pin the
-    four rows (Netboot artefacts / Catalog non-empty / TFTP daemon /
-    No error events) so a future refactor doesn't drop one.
+    four pass/fail rows (Netboot artefacts / Catalog non-empty / TFTP
+    daemon / No unacknowledged errors) plus the advisory dedicated-disk
+    info row so a future refactor doesn't drop one.
     """
     import re
 
@@ -275,11 +276,17 @@ def test_ui_dashboard_health_monitoring_renders_with_links(client: TestClient) -
     assert "Netboot artefacts present" in body
     assert "Catalog is non-empty" in body
     assert "TFTP daemon running" in body
-    assert "No error events" in body
-    # The "N / 4 OK" header is present (the actual N depends
-    # on the test fixture's pre-seeded state; we don't pin it).
+    assert "No unacknowledged errors" in body
+    # The dedicated-disk advisory renders as an INFO row (an "i",
+    # never a red cross) -- recommended-not-required.
+    assert "State on a dedicated disk" in body
+    assert "bi-info-circle-fill" in body
+    # The "N / 4 OK" header counts only the four pass/fail rows --
+    # the info row is excluded from the OK tally. (The actual N
+    # depends on the fixture's pre-seeded state; we don't pin it.)
     assert re.search(r"\d+ / 4 OK", body), (
-        "health-monitoring header should render an 'N / 4 OK' summary"
+        "health-monitoring header should render an 'N / 4 OK' summary "
+        "over the four pass/fail rows (info row excluded)"
     )
     # The two always-failing rows in the bare-fixture state
     # (no netboot artefacts, no live TFTP daemon) carry fix links.
@@ -1733,6 +1740,84 @@ def test_ui_boot_fetch_empty_tag_falls_back_to_latest(
     r = client.post("/ui/boot/fetch-release", data={"tag": ""})
     assert r.status_code == 200
     assert seen == ["latest"]
+
+
+# ---------- event acknowledgement -------------------------------------------
+
+
+def _seed_failed_event(client: TestClient, monkeypatch: pytest.MonkeyPatch, tag: str) -> int:
+    """Drive the boot-fetch-failure path to record one
+    ``boot.release.fetch_failed`` event; return its id (newest)."""
+    from bty.web import _releases
+
+    def _raise(boot_root_arg: Path, *, tag: str) -> _releases.FetchResult:
+        raise _releases.FetchError(f"tag {tag!r} not found")
+
+    monkeypatch.setattr(_releases, "fetch_release", _raise)
+    client.post("/ui/boot/fetch-release", data={"tag": tag})
+    events = client.get("/events", params={"failed": "1"}, cookies=AUTH).json()["events"]
+    return int(events[0]["id"])
+
+
+def test_event_ack_endpoint_flips_acknowledged_flag(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """POST /events/{id}/ack marks the event acknowledged; the JSON
+    listing then reports ``acknowledged: true`` for that row."""
+    _login(client)
+    eid = _seed_failed_event(client, monkeypatch, "v0.0.1")
+    before = client.get("/events", params={"failed": "1"}, cookies=AUTH).json()["events"]
+    assert any(e["id"] == eid and e["acknowledged"] is False for e in before)
+    r = client.post(f"/events/{eid}/ack", cookies=AUTH)
+    assert r.status_code == 200
+    assert r.json() == {"id": eid, "acknowledged": True}
+    after = client.get("/events", params={"failed": "1"}, cookies=AUTH).json()["events"]
+    assert any(e["id"] == eid and e["acknowledged"] is True for e in after)
+
+
+def test_event_ack_unknown_id_404s(client: TestClient) -> None:
+    """Acking a non-existent event id is a 404, not a silent no-op."""
+    _login(client)
+    r = client.post("/events/999999/ack", cookies=AUTH)
+    assert r.status_code == 404
+
+
+def test_unacknowledged_failure_trips_health_then_ack_clears_it(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An unacknowledged failure shows on the dashboard Health
+    Monitoring as a not-OK 'No unacknowledged errors' row;
+    acknowledging it via the UI form route returns the row to green.
+    """
+    _login(client)
+    eid = _seed_failed_event(client, monkeypatch, "v0.0.2")
+    body = client.get("/ui/dashboard").text
+    assert "unacknowledged failure" in body  # the not-OK detail text
+    r = client.post(
+        f"/ui/events/{eid}/ack",
+        data={"failed": "1"},
+        cookies=AUTH,
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert r.headers["location"] == "/ui/events?failed=1"
+    body2 = client.get("/ui/dashboard").text
+    assert "No unacknowledged failed events." in body2
+
+
+def test_ui_events_renders_ack_control_for_unacknowledged_failure(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The /ui/events table shows an Acknowledge form on an
+    unacknowledged failure row, replaced by a tick once acked."""
+    _login(client)
+    eid = _seed_failed_event(client, monkeypatch, "v0.0.3")
+    body = client.get("/ui/events", params={"failed": "1"}, cookies=AUTH).text
+    assert f'action="/ui/events/{eid}/ack"' in body
+    client.post(f"/events/{eid}/ack", cookies=AUTH)
+    body2 = client.get("/ui/events", params={"failed": "1"}, cookies=AUTH).text
+    assert f'action="/ui/events/{eid}/ack"' not in body2
+    assert "Acknowledged" in body2
 
 
 # ---------- cross-cutting: cookie also authenticates the API ----------------

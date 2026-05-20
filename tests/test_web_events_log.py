@@ -285,6 +285,42 @@ def test_details_round_trip(tmp_path: Path) -> None:
     assert by_kind["junk"].details is None  # malformed -> None, not crash
 
 
+def test_acknowledge_event_and_unacked_failure_count(tmp_path: Path) -> None:
+    """``acknowledge_event`` flips the flag on one row;
+    ``count_unacknowledged_failures`` counts only ``%failed`` kinds
+    with ``acknowledged = 0`` -- the predicate behind the dashboard
+    Health Monitoring error tripwire. Acking a failure decrements the
+    count without deleting the row; acking a non-failure leaves the
+    count untouched.
+    """
+    state = tmp_path / "state.db"
+    _db.init_db(state)
+    conn, close = _open(state)
+    try:
+        fail1 = _events_log.record(conn, kind="image.hash_failed", summary="boom 1")
+        fail2 = _events_log.record(conn, kind="boot.release.fetch_failed", summary="boom 2")
+        ok = _events_log.record(conn, kind="machine.flashed", summary="fine")
+        conn.commit()
+        # New events default to unacknowledged.
+        assert all(not e.acknowledged for e in _events_log.list_events(conn))
+        assert _events_log.count_unacknowledged_failures(conn) == 2
+        # Acking one failure drops the tripwire count by one.
+        assert _events_log.acknowledge_event(conn, fail1) is True
+        conn.commit()
+        assert _events_log.count_unacknowledged_failures(conn) == 1
+        by_id = {e.id: e for e in _events_log.list_events(conn)}
+        assert by_id[fail1].acknowledged is True
+        assert by_id[fail2].acknowledged is False
+        # Acking a non-failure event is a no-op for the tripwire.
+        assert _events_log.acknowledge_event(conn, ok) is True
+        conn.commit()
+        assert _events_log.count_unacknowledged_failures(conn) == 1
+        # Acking an unknown id changes nothing.
+        assert _events_log.acknowledge_event(conn, 999999) is False
+    finally:
+        close()
+
+
 def test_known_actors_covers_every_actor_emitted_by_the_codebase() -> None:
     """Every ``actor="..."`` literal in `_log_event` calls across
     `src/bty/` must be present in `KNOWN_ACTORS`.

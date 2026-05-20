@@ -114,6 +114,7 @@
                     <th style="width: 1%; white-space: nowrap;">Subject</th>
                     <th style="width: 1%; white-space: nowrap;">Actor</th>
                     <th style="width: 1%; white-space: nowrap;">Source IP</th>
+                    <th style="width: 1%; white-space: nowrap;">Ack</th>
                 </tr>
             </thead>
             <tbody>
@@ -190,6 +191,31 @@
                            title="Filter by this IP">
                             <code class="small">{{ e.source_ip }}</code>
                         </a>
+                        {% else %}
+                        <span class="text-muted small">-</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {# Acknowledgement applies to failure events: an
+                           unacknowledged failure counts toward the
+                           dashboard Health Monitoring tripwire. Acking
+                           clears it from that count without deleting the
+                           audit row. Non-failure events have nothing to
+                           acknowledge. #}
+                        {% if e.kind.endswith('.failed') or e.kind.endswith('_failed') %}
+                            {% if e.acknowledged %}
+                            <span class="text-success small" title="Acknowledged">
+                                <i class="bi bi-check-circle-fill"></i>
+                            </span>
+                            {% else %}
+                            <form method="post" action="/ui/events/{{ e.id }}/ack" class="m-0">
+                                {% if failed_only %}<input type="hidden" name="failed" value="1">{% endif %}
+                                <button type="submit" class="btn btn-sm btn-outline-secondary py-0"
+                                        title="Acknowledge this failure (clears it from Health Monitoring)">
+                                    <i class="bi bi-check-lg"></i>
+                                </button>
+                            </form>
+                            {% endif %}
                         {% else %}
                         <span class="text-muted small">-</span>
                         {% endif %}

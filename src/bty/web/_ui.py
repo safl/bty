@@ -205,16 +205,17 @@ def register_ui_routes(
             # shared with the SSE publisher so the two never drift.
             counts = dashboard_counts_context(conn, unified)
             catalog_entry_count = conn.execute("SELECT COUNT(*) FROM catalog_entries").fetchone()[0]
-            # Error-event count for the Health Monitoring panel. Same
-            # ``kind LIKE '%failed'`` predicate the /ui/events
+            # Error-event count for the Health Monitoring panel: only
+            # *unacknowledged* failures count toward the tripwire, so
+            # an operator can mark a known / resolved failure as seen
+            # and get the panel back to green without deleting the row.
+            # Same ``kind LIKE '%failed'`` predicate the /ui/events
             # ``?failed=1`` filter uses (list_events(failed_only=True)),
             # so the "Review errors" deep link lands on exactly this
-            # set: image.upload_failed / image.hash_failed /
+            # family: image.upload_failed / image.hash_failed /
             # catalog.entry.add_failed / boot.release.fetch_failed /
             # settings.tftp.control_failed / auth.login.failed.
-            error_event_count = conn.execute(
-                "SELECT COUNT(*) FROM events WHERE kind LIKE '%failed'"
-            ).fetchone()[0]
+            error_event_count = _events_log.count_unacknowledged_failures(conn)
             # Recent activity slice for the dashboard's "what just
             # happened?" widget. Reuses ``_events_card.html`` so the
             # styling matches the per-machine and per-image cards;
@@ -229,6 +230,13 @@ def register_ui_routes(
         tftp = _sysconfig.tftp_status()
         tftp_controllable = _sysconfig.tftp_controllable()
         catalog_ok = catalog_entry_count > 0 or counts["img_total"] > 0
+        # Recommended-not-required: when /var/lib/bty is its own mount
+        # (bty-state-migrate), images + netboot artefacts + inventory
+        # survive an OS reflash. A rootfs-only install is still fully
+        # functional, so this renders as an INFO row (an "i", never a
+        # red cross) -- it advises rather than fails. ``os.path.ismount``
+        # returns False on stat error, so this never raises.
+        state_migrated = os.path.ismount(state_path.parent)
         sanity = [
             {
                 "label": "Netboot artefacts present",
@@ -275,16 +283,35 @@ def register_ui_routes(
                 "fix_label": "TFTP daemon",
             },
             {
-                "label": "No error events",
+                "label": "No unacknowledged errors",
                 "ok": error_event_count == 0,
                 "detail": (
-                    "No failed events recorded."
+                    "No unacknowledged failed events."
                     if error_event_count == 0
-                    else f"{error_event_count} failed event(s) recorded -- review the cause."
+                    else f"{error_event_count} unacknowledged failure(s) "
+                    "-- review and acknowledge to clear."
                 ),
                 "href": "/ui/events?failed=1",
                 "fix_href": "/ui/events?failed=1",
                 "fix_label": "Review errors",
+            },
+            {
+                # INFO row (not pass/fail): advises the recommended
+                # dedicated-disk state setup. Never a red cross -- a
+                # rootfs-only install is fully functional, just less
+                # resilient to a reflash. No fix link: bty-state-migrate
+                # is an appliance CLI, not a web action.
+                "label": "State on a dedicated disk",
+                "info": True,
+                "ok": state_migrated,
+                "detail": (
+                    "/var/lib/bty is a mount point -- images, netboot "
+                    "artefacts and inventory survive an OS reflash."
+                    if state_migrated
+                    else "Running on the root filesystem. Recommended "
+                    "(not required): run bty-state-migrate <disk> so "
+                    "images + inventory survive a reflash."
+                ),
             },
         ]
         return render(
@@ -888,6 +915,29 @@ def register_ui_routes(
             known_actors=KNOWN_ACTORS,
             older_url=older_url,
         )
+
+    @app.post(
+        "/ui/events/{event_id}/ack",
+        include_in_schema=False,
+        dependencies=[Depends(require_ui_auth)],
+    )
+    def ui_event_ack(
+        event_id: int,
+        failed: Annotated[str, Form()] = "",
+    ) -> RedirectResponse:
+        """Mark one event acknowledged, then bounce back to the list.
+
+        Acknowledging a failure clears it from the dashboard Health
+        Monitoring tripwire (which counts only unacknowledged
+        failures) without deleting the audit row. ``failed`` carries
+        the failures-only filter through the round-trip so an operator
+        working the error view stays on it after each ack.
+        """
+        with _db.open_db(state_path) as conn:
+            _events_log.acknowledge_event(conn, event_id)
+            conn.commit()
+        target = "/ui/events?failed=1" if failed else "/ui/events"
+        return RedirectResponse(target, status_code=status.HTTP_303_SEE_OTHER)
 
     # ----- settings -------------------------------------------------------
 

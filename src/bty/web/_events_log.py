@@ -157,6 +157,7 @@ class Event:
     source_ip: str | None
     summary: str
     details: dict[str, Any] | None
+    acknowledged: bool
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -169,6 +170,7 @@ class Event:
             "source_ip": self.source_ip,
             "summary": self.summary,
             "details": self.details,
+            "acknowledged": self.acknowledged,
         }
 
 
@@ -293,6 +295,10 @@ def _row_to_event(row: sqlite3.Row) -> Event:
             decoded = None
         if isinstance(decoded, dict):
             details = decoded
+    # ``acknowledged`` is always present after ``init_db`` (the
+    # additive migration backfills it), but guard the lookup so a row
+    # selected before the migration ran still maps cleanly.
+    ack = bool(row["acknowledged"]) if "acknowledged" in row.keys() else False  # noqa: SIM118
     return Event(
         id=row["id"],
         ts=row["ts"],
@@ -303,4 +309,32 @@ def _row_to_event(row: sqlite3.Row) -> Event:
         source_ip=row["source_ip"],
         summary=row["summary"],
         details=details,
+        acknowledged=ack,
     )
+
+
+def acknowledge_event(conn: sqlite3.Connection, event_id: int) -> bool:
+    """Mark one event acknowledged. Returns ``True`` iff a row changed.
+
+    Caller owns the transaction (mirrors :func:`record`): this does
+    not ``commit`` so the ack can batch with surrounding work; the
+    ``open_db`` with-block flushes it otherwise.
+    """
+    cur = conn.execute("UPDATE events SET acknowledged = 1 WHERE id = ?", (event_id,))
+    return cur.rowcount > 0
+
+
+def count_unacknowledged_failures(conn: sqlite3.Connection) -> int:
+    """Count failure events the operator has not acknowledged yet.
+
+    Same ``kind LIKE '%failed'`` predicate as ``failed_only`` in
+    :func:`list_events`, narrowed to ``acknowledged = 0``. Backs the
+    dashboard Health Monitoring error tripwire: acknowledging a
+    failure clears it from this count without deleting the row, so
+    the operator can mark a known / resolved failure as seen and get
+    the panel back to green.
+    """
+    row = conn.execute(
+        "SELECT COUNT(*) FROM events WHERE kind LIKE '%failed' AND acknowledged = 0"
+    ).fetchone()
+    return int(row[0])

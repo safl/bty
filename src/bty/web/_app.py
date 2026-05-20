@@ -44,6 +44,7 @@ from bty.web import _catalog as _web_catalog
 from bty.web import _db, _hash, _models, _release_mgr, _ui
 from bty.web._auth import SESSION_COOKIE, require_auth
 from bty.web._events import MachineEvent, MachineEventBus, sse_format
+from bty.web._events_log import acknowledge_event as _acknowledge_event
 from bty.web._events_log import list_events as _list_events
 from bty.web._events_log import normalize_ip as _normalize_ip
 from bty.web._events_log import record as _log_event
@@ -966,6 +967,18 @@ def create_app(
                 limit=limit,
             )
         return {"events": [e.to_dict() for e in events]}
+
+    @app.post("/events/{event_id}/ack", dependencies=[Depends(require_auth)])
+    def acknowledge_event_endpoint(event_id: int) -> dict[str, Any]:
+        """Mark one event acknowledged. Clears it from the dashboard
+        Health Monitoring tripwire (which counts only unacknowledged
+        failures) without deleting the audit row. 404 if no such id."""
+        with _db.open_db(state_path) as conn:
+            changed = _acknowledge_event(conn, event_id)
+            conn.commit()
+        if not changed:
+            raise HTTPException(status_code=404, detail=f"no event with id {event_id}")
+        return {"id": event_id, "acknowledged": True}
 
     @app.api_route(
         "/boot/{name}",

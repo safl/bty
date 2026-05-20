@@ -39,25 +39,39 @@
         <div class="card h-100 shadow-sm">
             <div class="card-header bg-light fw-semibold d-flex justify-content-between align-items-center">
                 <span><i class="bi bi-heart-pulse me-1"></i>Health Monitoring</span>
-                {% set _ok = sanity | selectattr("ok") | list | length %}
-                <span class="text-muted small">{{ _ok }} / {{ sanity | length }} OK</span>
+                {# Info rows (advisory, e.g. dedicated-disk state) are
+                   excluded from the pass/fail count: they're neither OK
+                   nor not-OK, just informational. #}
+                {% set _checks = sanity | rejectattr("info") | list %}
+                {% set _ok = _checks | selectattr("ok") | list | length %}
+                <span class="text-muted small">{{ _ok }} / {{ _checks | length }} OK</span>
             </div>
             <ul class="list-group list-group-flush">
                 {% for s in sanity %}
                 {# Whole row links to the fix page on failure, else the
                    view page -- keeps the panel compact (no separate
-                   button) at one-third width. #}
+                   button) at one-third width. Info rows render a blue
+                   "i" instead of a check/cross and carry no link. #}
                 <li class="list-group-item d-flex align-items-center">
-                    {% if s.ok %}
+                    {% if s.info %}
+                    <i class="bi bi-info-circle-fill {{ 'text-success' if s.ok else 'text-info' }} fs-5 me-2 flex-shrink-0" aria-label="info"></i>
+                    {% elif s.ok %}
                     <i class="bi bi-check-circle-fill text-success fs-5 me-2 flex-shrink-0" aria-label="ok"></i>
                     {% else %}
                     <i class="bi bi-x-circle-fill text-danger fs-5 me-2 flex-shrink-0" aria-label="not ok"></i>
                     {% endif %}
-                    <a href="{{ s.fix_href if not s.ok else s.href }}"
+                    {% if s.href or s.fix_href %}
+                    <a href="{{ s.fix_href if (not s.ok and not s.info) else s.href }}"
                        class="text-decoration-none text-body flex-grow-1">
                         <span class="fw-semibold small">{{ s.label }}</span>
                         <div class="text-muted small">{{ s.detail }}</div>
                     </a>
+                    {% else %}
+                    <div class="flex-grow-1">
+                        <span class="fw-semibold small">{{ s.label }}</span>
+                        <div class="text-muted small">{{ s.detail }}</div>
+                    </div>
+                    {% endif %}
                 </li>
                 {% endfor %}
             </ul>
