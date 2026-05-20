@@ -238,6 +238,37 @@
         .subnav-strip a:hover {
             color: #fff;
         }
+        /* Background-worker status cluster: quieter than the nav-btns
+           (it's status, not navigation), set off by a faint divider.
+           Each icon dims to ~50% until its manager is busy, then the
+           ``.busy`` class brightens it and its pill count appears. */
+        .nav-workers {
+            border-left: 1px solid rgba(255, 255, 255, 0.15);
+            padding-left: 0.4rem;
+            margin-left: 0.4rem;
+        }
+        .nav-worker {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            padding: 0.3rem 0.45rem;
+            color: rgba(255, 255, 255, 0.5);
+            font-size: 1.05rem;
+            text-decoration: none;
+        }
+        .nav-worker:hover {
+            color: rgba(255, 255, 255, 0.85);
+        }
+        .nav-worker.busy {
+            color: #fff;
+        }
+        .nav-worker-badge {
+            position: absolute;
+            top: -1px;
+            right: -3px;
+            font-size: 0.6rem;
+            padding: 0.15em 0.4em;
+        }
     </style>
     <script src="/static/htmx.min.js"></script>
     <script src="/static/sse.js"></script>
@@ -272,6 +303,25 @@
                 <a class="nav-btn {% if nav_active == 'events' %}active{% endif %}" href="/ui/events">
                     <i class="bi bi-clock-history"></i>Events
                 </a>
+                {# Background-worker status, right of Events in a quieter
+                   (status, not navigation) style. A small poller lights
+                   each badge when its manager has queued/running jobs,
+                   so activity is visible from any page. #}
+                <div class="nav-workers d-flex align-items-center"
+                     title="Background workers: downloads / hashes / release fetches">
+                    <a class="nav-worker" href="/ui/images?section=downloads" title="Active downloads">
+                        <i class="bi bi-arrow-down-circle"></i>
+                        <span class="badge rounded-pill bg-primary nav-worker-badge d-none" data-worker="downloads">0</span>
+                    </a>
+                    <a class="nav-worker" href="/ui/images?section=hashes" title="Active hashes">
+                        <i class="bi bi-hash"></i>
+                        <span class="badge rounded-pill bg-warning text-dark nav-worker-badge d-none" data-worker="hashes">0</span>
+                    </a>
+                    <a class="nav-worker" href="/ui/boot?section=fetch" title="Active release fetches">
+                        <i class="bi bi-cloud-arrow-down"></i>
+                        <span class="badge rounded-pill bg-info text-dark nav-worker-badge d-none" data-worker="releases">0</span>
+                    </a>
+                </div>
             </div>
             <span class="navbar-version me-2">v{{ version }}</span>
             <div class="user-bar mt-2 mt-md-0"
@@ -344,6 +394,49 @@
             blink(evt.target, "flashing");
         }
     });
+})();
+
+// Top-nav background-worker indicator. Polls the three manager
+// endpoints and lights a badge when any has queued/running jobs, so
+// activity is visible from every page. Element-guarded: no-ops on the
+// login page (the navbar -- and these badges -- only render when
+// authed). Skips polling while the tab is hidden.
+(function () {
+    if (!document.querySelector(".nav-worker-badge")) return;
+    var SOURCES = [
+        { worker: "downloads", url: "/catalog/downloads", key: "downloads" },
+        { worker: "hashes",    url: "/catalog/hashes",    key: "hashes" },
+        { worker: "releases",  url: "/boot/releases",     key: "fetches" },
+    ];
+    function activeCount(jobs) {
+        return (jobs || []).filter(function (j) {
+            return j.status === "queued" || j.status === "running";
+        }).length;
+    }
+    function setBadge(worker, n) {
+        var b = document.querySelector('.nav-worker-badge[data-worker="' + worker + '"]');
+        if (!b) return;
+        var link = b.closest(".nav-worker");
+        if (n > 0) {
+            b.textContent = n;
+            b.classList.remove("d-none");
+            if (link) link.classList.add("busy");
+        } else {
+            b.classList.add("d-none");
+            if (link) link.classList.remove("busy");
+        }
+    }
+    function poll() {
+        if (document.hidden) return;
+        SOURCES.forEach(function (s) {
+            fetch(s.url, { credentials: "same-origin" })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (data) { if (data) setBadge(s.worker, activeCount(data[s.key])); })
+                .catch(function () { /* transient; keep the last shown state */ });
+        });
+    }
+    poll();
+    setInterval(poll, 5000);
 })();
 </script>
 </body>
