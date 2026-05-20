@@ -759,9 +759,38 @@ def ensure_sha256(
     hex_digest = digest.hexdigest()
     sidecar = _sidecar_path(image_path)
     tmp = sidecar.with_suffix(sidecar.suffix + ".tmp")
-    tmp.write_text(f"{hex_digest}  {image_path.name}\n")
+    tmp.write_text(f"{hex_digest}  {image_path.name}\n", encoding="utf-8")
     os.replace(tmp, sidecar)
     return hex_digest
+
+
+def _run_detail_tool(cmd: list[str], *, timeout: float = 30.0) -> tuple[str | None, str | None]:
+    """Run a metadata-listing tool, returning ``(detail, error)``.
+
+    Exactly one element is non-None: ``detail`` is the tool's
+    stripped stdout on success, otherwise ``error`` carries the
+    stderr (or a timeout note). Bounds the call with ``timeout`` so
+    a hung tool (corrupt file, slow network mount) can't wedge an
+    inspect request -- the same defensive shell-out pattern
+    :mod:`bty.disks` and :mod:`bty.web._sysconfig` use.
+    """
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return None, f"{cmd[0]} timed out after {timeout:g}s"
+    if proc.returncode == 0:
+        return proc.stdout.strip(), None
+    return None, proc.stderr.strip()
+
+
+def _set_detail(info: dict[str, Any], detail: str | None, error: str | None) -> None:
+    """Stash a text ``detail`` block or a ``detail_error`` onto the
+    inspect result, depending on which :func:`_run_detail_tool`
+    returned."""
+    if detail is not None:
+        info["detail"] = detail
+    else:
+        info["detail_error"] = error
 
 
 def inspect_image(path: Path) -> dict[str, Any]:
@@ -831,49 +860,20 @@ def inspect_image(path: Path) -> dict[str, Any]:
         return info
 
     if fmt == "qcow2":
-        proc = subprocess.run(
-            ["qemu-img", "info", "--output=json", str(path)],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if proc.returncode == 0:
-            info["detail"] = json.loads(proc.stdout)
+        detail, error = _run_detail_tool(["qemu-img", "info", "--output=json", str(path)])
+        if detail is not None:
+            info["detail"] = json.loads(detail)
         else:
-            info["detail_error"] = proc.stderr.strip()
+            info["detail_error"] = error
     elif fmt == "img.zst":
-        proc = subprocess.run(
-            ["zstd", "-l", str(path)],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if proc.returncode == 0:
-            info["detail"] = proc.stdout.strip()
-        else:
-            info["detail_error"] = proc.stderr.strip()
+        detail, error = _run_detail_tool(["zstd", "-l", str(path)])
+        _set_detail(info, detail, error)
     elif fmt == "img.xz":
-        proc = subprocess.run(
-            ["xz", "-l", str(path)],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if proc.returncode == 0:
-            info["detail"] = proc.stdout.strip()
-        else:
-            info["detail_error"] = proc.stderr.strip()
+        detail, error = _run_detail_tool(["xz", "-l", str(path)])
+        _set_detail(info, detail, error)
     elif fmt == "img.gz":
-        proc = subprocess.run(
-            ["gzip", "-l", str(path)],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if proc.returncode == 0:
-            info["detail"] = proc.stdout.strip()
-        else:
-            info["detail_error"] = proc.stderr.strip()
+        detail, error = _run_detail_tool(["gzip", "-l", str(path)])
+        _set_detail(info, detail, error)
     # img.bz2: no listing tool ships with bzip2; ``detail`` block
     # is intentionally omitted.
 

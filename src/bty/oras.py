@@ -55,11 +55,11 @@ Layer picker
 A nosi manifest carries two layers: the ``.img.gz`` disk image and a
 ``.sha256`` sidecar. The picker drops layers whose
 ``org.opencontainers.image.title`` annotation ends in a known sidecar
-suffix (``.sha256``, ``.sig``, ``.asc``, ``.pem``, ``.cert``,
-``.sbom``, ``.att``), then takes the largest remaining layer by
-declared size. Manifests with no useful annotations fall through to
-the largest layer overall -- a reasonable bet that the image bytes
-dwarf any metadata sidecar.
+suffix (``.sha256``, ``.sha512``, ``.sig``, ``.asc``, ``.pem``,
+``.cert``, ``.sbom``, ``.att``, ``.json``), then takes the largest
+remaining layer by declared size. Manifests with no useful
+annotations fall through to the largest layer overall -- a reasonable
+bet that the image bytes dwarf any metadata sidecar.
 """
 
 from __future__ import annotations
