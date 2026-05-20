@@ -466,11 +466,19 @@ def create_app(
         #   - bty-tui                       -> live env, interactive wizard
         #   - sanboot                       -> iPXE sanboot the local disk
         #   - bty-flash-always / -once + ref + target disk -> live env auto-flash
+        #     EXCEPT bty-flash-always with saw_flasher_boot set -> sanboot
+        #     the just-flashed disk once (one-shot loop-break, see below)
         #   - else (local, or no usable binding)           -> ipxe.j2 (exit)
         # Completion signal (POST /pxe/{mac}/done) updates
         # last_flashed_at always, and flips bty-flash-once -> the settle policy so
-        # the next PXE boot returns sanboot. ``flash`` stays
-        # ``flash`` (per-job CI cadence keeps reflashing).
+        # the next PXE boot returns sanboot.
+        # bty-flash-always never changes policy; instead it alternates
+        # flash-chain -> sanboot -> flash-chain across boots so the
+        # just-flashed disk actually boots once before the next reflash.
+        # The flip is driven by ``saw_flasher_boot``: armed when the box
+        # fetches a /boot artifact (proof it booted the flasher),
+        # consumed here on the following /pxe contact. Without this,
+        # PXE-first firmware would reflash on every reboot forever.
         host = _request_host(request)
         policy = machine.get("boot_policy")
         ref = machine.get("bty_image_ref")
@@ -513,32 +521,64 @@ def create_app(
             target_disk_serial = machine.get("target_disk_serial")
             image_name = _flash_target_for_ref(str(ref))
             if image_name is not None and target_disk_serial:
-                template = jinja.get_template("ipxe_flash.j2")
-                # The kernel cmdline only carries bty.server + bty.mac
-                # (v0.22.10+); the image URL + target serial come from
-                # /pxe/<mac>/plan. The flash_key + target_disk_serial
-                # context vars feed the template's HEADER COMMENT block
-                # so an operator inspecting curl output can see what
-                # this chain is bound to.
-                rendered = template.render(
-                    mac=normalised,
-                    machine=machine,
-                    host=host,
-                    flash_key=str(ref),
-                    target_disk_serial=target_disk_serial,
-                )
-                offer_kind = policy  # "bty-flash-always" or "bty-flash-once"
-                short = str(ref)[:12]
-                offer_summary = (
-                    f"{normalised} offered {policy} for ref={short}... "
-                    f"({image_name}, target serial {target_disk_serial})"
-                )
-                offer_details = {
-                    "offer": policy,
-                    "bty_image_ref": ref,
-                    "image_name": image_name,
-                    "target_disk_serial": target_disk_serial,
-                }
+                if policy == "bty-flash-always" and machine.get("saw_flasher_boot"):
+                    # One-shot post-flash boot. Since we last served the
+                    # flash chain, this machine fetched a /boot artifact
+                    # with ``?mac=`` -- proof it booted the flasher and,
+                    # having now rebooted back to us, finished. Boot the
+                    # freshly-flashed disk once via sanboot instead of
+                    # reflashing, and CLEAR the bit so the next real
+                    # netboot (no artifact fetch in between) flips back
+                    # to the flash chain. This is what stops
+                    # bty-flash-always from looping forever under
+                    # PXE-first firmware (reboot -> PXE -> reflash -> ...).
+                    drive = machine.get("sanboot_drive") or _models.DEFAULT_SANBOOT_DRIVE
+                    template = jinja.get_template("ipxe_sanboot.j2")
+                    rendered = template.render(mac=normalised, machine=machine, drive=drive)
+                    with _db.open_db(state_path) as conn:
+                        conn.execute(
+                            "UPDATE machines SET saw_flasher_boot = 0, updated_at = ? "
+                            "WHERE mac = ?",
+                            (now, normalised),
+                        )
+                        conn.commit()
+                    offer_kind = "bty-flash-always-settle"
+                    offer_summary = (
+                        f"{normalised} booting just-flashed disk (drive {drive}); "
+                        f"bty-flash-always re-arms on next netboot"
+                    )
+                    offer_details = {
+                        "offer": "sanboot",
+                        "sanboot_drive": drive,
+                        "settle_after_flash": True,
+                    }
+                else:
+                    template = jinja.get_template("ipxe_flash.j2")
+                    # The kernel cmdline only carries bty.server + bty.mac
+                    # (v0.22.10+); the image URL + target serial come from
+                    # /pxe/<mac>/plan. The flash_key + target_disk_serial
+                    # context vars feed the template's HEADER COMMENT block
+                    # so an operator inspecting curl output can see what
+                    # this chain is bound to.
+                    rendered = template.render(
+                        mac=normalised,
+                        machine=machine,
+                        host=host,
+                        flash_key=str(ref),
+                        target_disk_serial=target_disk_serial,
+                    )
+                    offer_kind = policy  # "bty-flash-always" or "bty-flash-once"
+                    short = str(ref)[:12]
+                    offer_summary = (
+                        f"{normalised} offered {policy} for ref={short}... "
+                        f"({image_name}, target serial {target_disk_serial})"
+                    )
+                    offer_details = {
+                        "offer": policy,
+                        "bty_image_ref": ref,
+                        "image_name": image_name,
+                        "target_disk_serial": target_disk_serial,
+                    }
             elif image_name is not None and not target_disk_serial:
                 # Image binding is resolvable but no target disk
                 # picked. Fall through to ipxe.j2 (sanboot/local) and
@@ -1004,12 +1044,37 @@ def create_app(
             raise HTTPException(status_code=404, detail=f"no event with id {event_id}")
         return {"id": event_id, "acknowledged": True}
 
+    def _arm_flasher_boot(raw_mac: str) -> None:
+        """Mark that ``raw_mac`` fetched a flash-chain artifact -- proof
+        it actually booted the flasher, which is stronger evidence than
+        the ``/pxe`` config GET (that only means "we told it to flash").
+        One-shot state transition for the ``bty-flash-always``
+        loop-break: the next ``GET /pxe/{mac}`` consumes the bit and
+        serves a sanboot of the freshly-flashed disk instead of
+        reflashing. The WHERE clause confines arming to
+        bty-flash-always machines so the bit's lifecycle can't leak
+        into other policies (a typo'd or stale ``?mac=`` is a no-op)."""
+        try:
+            mac = _normalise_mac(raw_mac)
+        except HTTPException:
+            return  # malformed ?mac= -- ignore, just serve the file
+        with _db.open_db(state_path) as conn:
+            conn.execute(
+                """
+                UPDATE machines
+                SET saw_flasher_boot = 1, updated_at = ?
+                WHERE mac = ? AND boot_policy = 'bty-flash-always'
+                """,
+                (_now_iso(), mac),
+            )
+            conn.commit()
+
     @app.api_route(
         "/boot/{name}",
         methods=["GET", "HEAD"],
         include_in_schema=False,
     )
-    def boot_artifact(name: str) -> FileResponse:
+    def boot_artifact(name: str, request: Request) -> FileResponse:
         # Live-env artifacts (kernel + initrd + squashfs) the iPXE chain
         # references PLUS the HTTP-Boot bootfile (ipxe.efi) UEFI
         # HTTPClient targets fetch directly via DHCP option 67 URL.
@@ -1018,6 +1083,16 @@ def create_app(
         # to size the fetch buffer before issuing the GET; Starlette's
         # FileResponse handles the HEAD shape (200 + Content-Length,
         # empty body) automatically.
+        #
+        # The flash chain tags these URLs with ``?mac=<MAC>`` (the
+        # server already knows the MAC when it renders ipxe_flash.j2,
+        # so it's free to embed). A fetch here is therefore proof the
+        # machine booted the flasher -- arm the bty-flash-always
+        # one-shot sanboot off it. HEADs arm too: a HEAD still means
+        # the firmware committed to fetching this artifact.
+        raw_mac = request.query_params.get("mac")
+        if raw_mac:
+            _arm_flasher_boot(raw_mac)
         return _serve_safe_file(resolved_boot_root, name)
 
     def _serve_image_by_key(key: str) -> FileResponse:

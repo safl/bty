@@ -222,10 +222,15 @@ schedule, on demand, or on failure.
    from `GET /images/{ref}/{name}`, runs the flash, and `POST`s
    `/pxe/{mac}/done` to update `last_flashed_at`. Then it reboots
    automatically.
-6. The next reboot still chains the live env unless the operator
-   flips the machine to `boot_policy=local` (or used `bty-flash-once`,
-   which flips itself - see below). Per-job CI cadences that want
-   every boot to reflash leave the policy on `bty-flash-always`.
+6. The reboot lands back on PXE (PXE-first firmware). Because the box
+   fetched the live-env artifacts during steps 4-5,
+   `boot_policy=bty-flash-always` now serves a one-shot `sanboot` of
+   the just-flashed disk instead of the flash chain, so the freshly
+   imaged OS boots. The next power cycle (no artifact fetch in
+   between) serves the flash chain again - so a per-job CI cadence
+   reflashes every cycle while still booting the image each time, with
+   no policy change. `bty-flash-once` instead flips its policy to the
+   settle policy on completion (see below).
 7. First-boot bring-up (users, network, packages, hostnames) is the
    pre-built image's job, baked in via cloud-init / NoCloud user-data
    at image-build time. bty has no online provisioning step.
@@ -258,13 +263,14 @@ parameters the policy needs.
 |--------------------|-----------------------------------------------------------------------------------------------------------------|--------------------------|
 | `local`            | `ipxe.j2` (`exit` - hand back to firmware boot order; the disk must be next after PXE).                          | No.                      |
 | `sanboot`          | `ipxe_sanboot.j2` (`sanboot --drive <sanboot_drive> \|\| exit` - iPXE boots the local disk itself).               | No.                      |
-| `bty-flash-always` | `ipxe_flash.j2` (auto-reflash via live env). Refuses (falls back to `ipxe.j2`) if no `target_disk_serial`.       | No. Stays `bty-flash-always`. |
+| `bty-flash-always` | `ipxe_flash.j2` for a fresh flash, then a one-shot `ipxe_sanboot.j2` of the just-flashed disk on the contact after the live-env artifact fetch (alternates flash then sanboot). Refuses (falls back to `ipxe.j2`) if no `target_disk_serial`. | No. Stays `bty-flash-always` (uses a transient `saw_flasher_boot` bit, not a policy change). |
 | `bty-flash-once`   | Same chain as `bty-flash-always`. Same `target_disk_serial` gate.                                                | Yes. Flips to the settle policy (default `local`, configurable to `sanboot`). |
 | `bty-tui`          | `ipxe_tui.j2` (live env chain; ``bty`` on tty1 GETs /pxe/<mac>/plan -> ``mode=interactive``, drops into wizard). ``bty`` auto-posts inventory on startup. | No.                      |
 
 The `bty-flash-once` policy is the "I want this box reimaged now, then
 leave it alone" pattern. It's distinct from `bty-flash-always` (which
-reimages every PXE boot, the per-job CI cadence) and from manually
+reimages on every netboot cycle - booting the disk in between via the
+one-shot sanboot - the per-job CI cadence) and from manually
 flipping `bty-flash-always` -> `local` after one reimage (which is
 operator-error-prone). On completion it settles to `local` (the
 default) or `sanboot`, per `flash.settle_policy`.

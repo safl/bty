@@ -95,9 +95,13 @@ env; `local` and `sanboot` boot something other than bty:
   disk) and is a per-machine override (`sanboot_drive`); the
   `|| exit` falls back to the firmware order if the drive isn't
   bootable.
-- `bty-flash-always` - chain the live env in auto-flash mode. The
-  target re-flashes the assigned image on every PXE boot - the
-  per-job CI cadence.
+- `bty-flash-always` - chain the live env in auto-flash mode for a
+  fresh flash, then boot the just-flashed disk once before the next
+  reflash - the per-job CI cadence. It does **not** loop: the server
+  alternates flash-chain then sanboot across PXE contacts (see
+  [Firmware boot order](#firmware-boot-order)), so under PXE-first
+  firmware the freshly-flashed image actually boots instead of being
+  re-flashed on every reboot.
 - `bty-flash-once` - flash exactly once: behaves like
   `bty-flash-always` for the next boot, then the completion signal
   flips the policy to the configured *settle policy* so the box
@@ -146,6 +150,23 @@ What happens *after* a flash depends on the policy:
   number (`0x80` = first disk), not by the Linux serial used at flash
   time, so on a multi-disk box set `sanboot_drive` to the right
   drive.
+- With `bty-flash-always`, the freshly-flashed disk boots even though
+  PXE is first: the server hands out the flash chain, sees the box
+  fetch the live-env artifacts (proof it booted the flasher), and on
+  the *next* PXE contact serves a one-shot `sanboot` of the
+  just-flashed disk before re-arming the flash chain. So under
+  PXE-first firmware the box reflashes, boots the image, runs, and
+  reflashes again on the next power cycle - it never loops on the
+  flasher without booting. The one-shot `sanboot` honours the
+  machine's `sanboot_drive`. Cost: two firmware boots per cycle (one
+  to flash, one to boot the disk).
+
+Calibrate `sanboot_drive` before relying on it: on a multi-disk box,
+first set `boot_policy=sanboot`, set `sanboot_drive`, and reboot to
+confirm the machine actually boots its disk. Once that's verified,
+switch to `bty-flash-once` or `bty-flash-always` - the post-flash
+`sanboot` then inherits a known-good drive (the field persists across
+the policy change), so the boot after a flash isn't a guess.
 
 Practical setup: enter firmware setup (often F2 / F10 / Del at
 power-on), open the boot-order menu, put Network/PXE first and the

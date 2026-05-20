@@ -62,7 +62,7 @@
                     inventory to bty-web (see Target disk below).
                 </div>
             </div>
-            <div class="mb-3" data-policy-relevant="sanboot">
+            <div class="mb-3" data-policy-relevant="sanboot bty-flash-always bty-flash-once">
                 <label class="form-label" for="sanboot_drive">Sanboot drive</label>
                 <input type="text" name="sanboot_drive" id="sanboot_drive"
                        class="form-control font-monospace"
@@ -70,11 +70,15 @@
                        pattern="^0x[0-9a-fA-F]{1,2}$"
                        title="iPXE BIOS drive to sanboot: 0x80 = first disk, 0x81 = second, ...">
                 <div class="form-text">
-                    Which local disk iPXE boots for <code>sanboot</code>:
-                    <code>0x80</code> is the first disk, <code>0x81</code> the
-                    second, and so on. Leave blank for the default
+                    Which local disk iPXE boots whenever bty sanboots this
+                    machine: <code>0x80</code> is the first disk, <code>0x81</code>
+                    the second, and so on. Leave blank for the default
                     (<code>0x80</code>). iPXE selects by BIOS drive number, not by
-                    the Linux serial used for flashing.
+                    the Linux serial used for flashing. Applies to the
+                    <code>sanboot</code> policy, the one-shot disk boot after each
+                    <code>bty-flash-always</code> reflash, and a
+                    <code>bty-flash-once</code> machine that settles to
+                    <code>sanboot</code>.
                 </div>
             </div>
             <div class="mb-3" data-policy-relevant="bty-flash-always bty-flash-once">

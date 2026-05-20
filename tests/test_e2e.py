@@ -415,6 +415,126 @@ def test_e2e_pxe_flash_chain_plan_carries_image_url_and_target_serial(
     assert "bty.target_disk_serial" not in kernel_line
 
 
+def _seed_flashable_machine(app_client: TestClient, mac: str) -> None:
+    """Seed a catalog entry + bind ``mac`` as bty-flash-always with a
+    target disk serial -- the minimum for the flash chain to render."""
+    image_root: Path = app_client.app.state.image_root  # type: ignore[attr-defined]
+    state_path: Path = app_client.app.state.state_path  # type: ignore[attr-defined]
+    payload = b"\0" * 256
+    (image_root / "demo.qcow2").write_bytes(payload)
+    sha = hashlib.sha256(payload).hexdigest()
+    bty_image_ref = _catalog.image_ref_for_src("file://demo.qcow2")
+    with _bty_db.open_db(state_path) as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO catalog_entries "
+            "(bty_image_ref, src, disk_image_sha, name, sha_url, format, "
+            "size_bytes, description, added_at) VALUES (?,?,?,?,?,?,?,?,?)",
+            (
+                bty_image_ref,
+                "file://demo.qcow2",
+                sha,
+                "demo.qcow2",
+                None,
+                "qcow2",
+                len(payload),
+                None,
+                "2026-05-17T22:00:00+00:00",
+            ),
+        )
+        conn.commit()
+    r = app_client.put(
+        f"/machines/{mac}",
+        json={
+            "bty_image_ref": bty_image_ref,
+            "boot_policy": "bty-flash-always",
+            "target_disk_serial": "WD-WX12345",
+        },
+        cookies=AUTH,
+    )
+    assert r.status_code == 200, r.text
+
+
+def test_e2e_flash_always_alternates_flash_then_sanboot(app_client: TestClient) -> None:
+    """bty-flash-always must boot the just-flashed disk, not reflash in
+    a loop under PXE-first firmware. The server alternates flash-chain
+    -> sanboot -> flash-chain across PXE contacts, flipped by the /boot
+    artifact fetch (``?mac=``) that proves the box booted the flasher.
+    See project memory project_flash_always_loop_break.
+    """
+    boot_root: Path = app_client.app.state.boot_root  # type: ignore[attr-defined]
+    # Stage the kernel artifact so the /boot fetch returns 200 like a
+    # real iPXE chainload.
+    (boot_root / "bty-netboot-x86_64.vmlinuz").write_bytes(b"\0" * 64)
+
+    mac = "aa:bb:cc:dd:ee:ff"
+    _seed_flashable_machine(app_client, mac)
+    host = {"Host": "bty.local:8080"}
+
+    def _directives(body: str) -> set[str]:
+        # First token of each non-comment, non-blank iPXE line --
+        # distinguishes the flash chain (``kernel`` / ``boot``) from
+        # sanboot (``sanboot``) without matching the word inside a
+        # template comment.
+        return {
+            ln.split()[0]
+            for ln in body.splitlines()
+            if ln.strip() and not ln.lstrip().startswith("#")
+        }
+
+    # 1. First contact: flash chain, with ?mac= on the artifact URLs.
+    body = app_client.get(f"/pxe/{mac}", headers=host).text
+    assert "kernel" in _directives(body) and "sanboot" not in _directives(body)
+    assert "bty.server=" in body
+    assert f"?mac={mac}" in body, "flash-chain artifact URLs must carry ?mac="
+
+    # 2. The box boots the flasher: it fetches a /boot artifact w/ ?mac=.
+    a = app_client.get(f"/boot/bty-netboot-x86_64.vmlinuz?mac={mac}", headers=host)
+    assert a.status_code == 200, a.text
+
+    # 3. Post-flash contact: one-shot sanboot of the just-flashed disk.
+    body = app_client.get(f"/pxe/{mac}", headers=host).text
+    assert "sanboot" in _directives(body), f"expected sanboot after flasher boot: {body!r}"
+    assert "kernel" not in _directives(body)
+
+    # 4. No /boot fetch in between -> re-armed back to the flash chain.
+    body = app_client.get(f"/pxe/{mac}", headers=host).text
+    assert "kernel" in _directives(body) and "sanboot" not in _directives(body)
+
+
+def test_e2e_boot_artifact_mac_arms_only_flash_always(app_client: TestClient) -> None:
+    """The /boot ``?mac=`` arming is confined to bty-flash-always
+    machines, so the one-shot sanboot bit can't leak into other
+    policies (a flash-once / tui / local box never sanboots-after-flash).
+    """
+    boot_root: Path = app_client.app.state.boot_root  # type: ignore[attr-defined]
+    state_path: Path = app_client.app.state.state_path  # type: ignore[attr-defined]
+    (boot_root / "bty-netboot-x86_64.vmlinuz").write_bytes(b"\0" * 64)
+    host = {"Host": "bty.local:8080"}
+
+    def _saw(mac: str) -> int:
+        with _bty_db.open_db(state_path) as conn:
+            row = conn.execute(
+                "SELECT saw_flasher_boot FROM machines WHERE mac = ?", (mac,)
+            ).fetchone()
+        return int(row["saw_flasher_boot"])
+
+    always = "11:11:11:11:11:11"
+    tui = "22:22:22:22:22:22"
+    for mac, policy in ((always, "bty-flash-always"), (tui, "bty-tui")):
+        assert (
+            app_client.put(
+                f"/machines/{mac}", json={"boot_policy": policy}, cookies=AUTH
+            ).status_code
+            == 200
+        )
+
+    app_client.get(f"/boot/bty-netboot-x86_64.vmlinuz?mac={always}", headers=host)
+    app_client.get(f"/boot/bty-netboot-x86_64.vmlinuz?mac={tui}", headers=host)
+
+    assert _saw(always) == 1, "flash-always machine should be armed by /boot?mac="
+    assert _saw(tui) == 0, "non-flash-always machine must NOT be armed"
+
+
 # ----------------------------------------------------------------------
 # 4. catalog.toml roundtrip with mixed shapes -> no dupes on /ui/images
 # ----------------------------------------------------------------------

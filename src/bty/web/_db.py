@@ -50,6 +50,15 @@ CREATE TABLE IF NOT EXISTS machines (
     -- number, not by the Linux serial the flash step matches.
     sanboot_drive             TEXT,
     last_flashed_at           TEXT,    -- updated by POST /pxe/{mac}/done
+    -- One-shot state bit for the ``bty-flash-always`` loop-break.
+    -- Armed (1) when the machine fetches a flash-chain artifact with
+    -- ``?mac=`` (GET /boot/...?mac=X) -- positive proof it booted the
+    -- flasher. Consumed (back to 0) by the next ``GET /pxe/{mac}``,
+    -- which serves a one-shot sanboot of the just-flashed disk instead
+    -- of reflashing; the next real netboot (no artifact fetch in
+    -- between) flips back to the flash chain. Confined to
+    -- bty-flash-always machines (only that policy arms it).
+    saw_flasher_boot          INTEGER NOT NULL DEFAULT 0,
     -- Per-machine disk inventory, posted by ``bty`` on startup via
     -- POST /pxe/{mac}/inventory. JSON array of dicts:
     -- ``[{"path": "/dev/sda", "size": "...", "model": "...",
@@ -179,6 +188,9 @@ _ADDITIVE_COLUMNS: dict[str, dict[str, str]] = {
         # Nullable (NULL = use the default sanboot drive, 0x80), so a
         # plain ADD COLUMN backfills existing rows with NULL.
         "sanboot_drive": "TEXT",
+        # One-shot bty-flash-always loop-break bit; existing rows
+        # backfill to 0 (not yet seen a post-flash artifact fetch).
+        "saw_flasher_boot": "INTEGER NOT NULL DEFAULT 0",
     },
 }
 
