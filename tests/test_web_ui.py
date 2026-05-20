@@ -306,32 +306,38 @@ def test_ui_images_default_section_is_list_not_add_forms(client: TestClient) -> 
     """Bare ``GET /ui/images`` lands on the list section: the unified
     catalog table, with Fetch-latest + Upload-catalog controls inline
     in its header -- but NOT the per-image add forms (upload-image /
-    upload-from-URL), which stay behind their own sub-nav sections.
+    upload-from-URL), which now live in the Downloads section.
     """
     _login(client)
     r = client.get("/ui/images")
     assert r.status_code == 200
     body = r.text
-    # Sub-nav strip present; upload-image-from-url is still its own pill.
-    assert 'href="/ui/images?section=upload-image-from-url"' in body
+    # Sub-nav strip present; Downloads is its own pill.
+    assert 'href="/ui/images?section=downloads"' in body
     # Catalog header carries the inline Fetch + Upload-catalog controls.
     assert 'action="/ui/catalog/fetch-release"' in body
     assert 'action="/ui/catalog/upload"' in body
     assert 'accept=".toml"' in body
-    # But the per-image add forms live behind their own sections.
+    # But the per-image add forms live in the Downloads section.
     assert 'id="image_url"' not in body
     assert 'id="upload-file"' not in body
 
 
-def test_ui_images_section_upload_image_from_url_shows_form(client: TestClient) -> None:
+def test_ui_images_downloads_section_has_add_forms(client: TestClient) -> None:
+    """The Downloads section carries the image-add forms (upload a
+    local file + add by URL) above the live download-jobs table --
+    moved here from the dropped upload-image* sub-nav pages."""
     _login(client)
-    r = client.get("/ui/images?section=upload-image-from-url")
+    r = client.get("/ui/images?section=downloads")
     assert r.status_code == 200
     body = r.text
+    # Add-by-URL form.
     assert 'id="image_url"' in body
     assert 'action="/ui/catalog/entries"' in body
-    # No catalog table or downloads/hashes panes on the add view.
-    assert "Unified catalog" not in body
+    # Upload-file form.
+    assert 'id="upload-file"' in body
+    # The live downloads table is here too.
+    assert "bty-downloads-tbody" in body
 
 
 def test_ui_images_list_header_has_fetch_and_upload_catalog(client: TestClient) -> None:
@@ -442,11 +448,11 @@ def test_subnav_renders_aria_current_on_active_section(client: TestClient) -> No
         f"images default view: expected aria-current on /ui/images only, got {actives!r}"
     )
 
-    # ?section=upload-image: exactly one active pill, pointing at it.
-    body = client.get("/ui/images?section=upload-image").text
+    # ?section=downloads: exactly one active pill, pointing at it.
+    body = client.get("/ui/images?section=downloads").text
     actives = _aria_current_hrefs(body)
-    assert actives == ["/ui/images?section=upload-image"], (
-        f"images upload-image view: expected aria-current on that href only, got {actives!r}"
+    assert actives == ["/ui/images?section=downloads"], (
+        f"images downloads view: expected aria-current on that href only, got {actives!r}"
     )
     # Top-level <nav> carries an aria-label so screen readers
     # distinguish the section sub-nav from the top-bar nav.
@@ -474,7 +480,7 @@ def test_ui_images_section_unrecognised_falls_back_to_list(client: TestClient) -
     # Lands on list (no add-form markers).
     assert 'id="image_url"' not in body
     # Sub-nav strip still renders.
-    assert 'href="/ui/images?section=upload-image"' in body
+    assert 'href="/ui/images?section=downloads"' in body
 
 
 def test_ui_boot_default_section_is_list(client: TestClient) -> None:

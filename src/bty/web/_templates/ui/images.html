@@ -7,8 +7,6 @@
     {"key": "list",                  "label": "List",                     "icon": "list-ul",       "href": "/ui/images"},
     {"key": "downloads",             "label": "Downloads",                "icon": "arrow-down-circle", "href": "/ui/images?section=downloads"},
     {"key": "hashes",                "label": "Hashes",                   "icon": "hash",          "href": "/ui/images?section=hashes"},
-    {"key": "upload-image",          "label": "Upload image",             "icon": "upload",        "href": "/ui/images?section=upload-image"},
-    {"key": "upload-image-from-url", "label": "Upload image (from URL)",  "icon": "cloud-plus",    "href": "/ui/images?section=upload-image-from-url"},
 ] , active=section, right_html=right_html %}
 {% include "ui/_subnav.html" %}
 {% endwith %}
@@ -22,16 +20,18 @@
     <strong>List</strong> is the merged catalog (dir scan + catalog
     entries) -- its header carries <em>Fetch latest</em> (pull the
     bty release catalog) and <em>Upload</em> (a catalog.toml);
-    <strong>Downloads</strong> / <strong>Hashes</strong> show the
-    live background fetch + sha workers;
-    <strong>Upload image</strong> / <strong>Upload image (from URL)</strong>
-    add a single image. Files dropped into <code>{{ image_root }}</code>
-    are picked up and hashed automatically.
+    <strong>Downloads</strong> is where you add a single image
+    (upload a file or add by URL) and watch the live fetch jobs;
+    <strong>Hashes</strong> shows the background sha worker. Files
+    dropped into <code>{{ image_root }}</code> are picked up and
+    hashed automatically.
 {% endcall %}
 {% endblock %}
 
 {% block content %}
-{% if section == "upload-image-from-url" %}
+{% if section == "downloads" %}
+{# Downloads section: add images (upload a local file or add by URL)
+   above the live download-jobs table. #}
 <div class="card mb-3">
     <div class="card-header bg-light fw-semibold">
         <i class="bi bi-cloud-plus me-1"></i>Upload image (from URL)
@@ -62,7 +62,6 @@
     </div>
 </div>
 
-{% elif section == "upload-image" %}
 <div class="card mb-3">
     <div class="card-header bg-light fw-semibold">
         <i class="bi bi-upload me-1"></i>Upload image file
@@ -152,13 +151,7 @@
     }
 </script>
 
-{% else %}
-{# list / downloads / hashes: the OBSERVABLE state of the catalog
-   plus the live fetch + hash workers, each its own sub-nav item.
-   The poll script further below is shared by all three (it self-
-   guards on which panes are present). Adding things is one sub-nav
-   click away (above). #}
-{% if section == "downloads" %}
+{# Active download jobs (live). #}
 <div class="card mb-3">
     <div class="card-header bg-light fw-semibold d-flex justify-content-between align-items-center">
         <span><i class="bi bi-arrow-down-circle me-1"></i>Downloads</span>
@@ -659,7 +652,6 @@
     startPolling();
 })();
 </script>
-{% endif %}
 
 {# Image-relevant event slice (uploads, hashes, catalog adds /
    deletes). The /ui/events drill-down filters to subject_kind=

@@ -522,12 +522,10 @@ def register_ui_routes(
         (release catalog.toml) + Upload-catalog controls. The other
         sections:
 
-        * ``?section=downloads`` / ``?section=hashes``: the live
-          background fetch / sha worker panes.
-        * ``?section=upload-image-from-url``: form to add by
-          http(s):// or oras:// URL.
-        * ``?section=upload-image``: file picker for streaming an
-          image into the image root.
+        * ``?section=downloads``: the image-add forms (upload a local
+          file, or add by http(s):// / oras:// URL) above the live
+          download-jobs table.
+        * ``?section=hashes``: the background sha worker pane.
 
         Unrecognised ``section`` values fall back to ``list`` so
         bookmark drift can't 500 the page.
@@ -544,8 +542,6 @@ def register_ui_routes(
             "list",
             "downloads",
             "hashes",
-            "upload-image",
-            "upload-image-from-url",
         ):
             section = "list"
         # Catalog manifest path + release repo for the "Catalog
