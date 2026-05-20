@@ -469,7 +469,7 @@ def _wait_for_chain_markers(log_path, markers, timeout):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline and not all(seen.values()):
         if log_path.exists():
-            body = log_path.read_text(errors="replace")
+            body = log_path.read_text(encoding="utf-8", errors="replace")
             for key, needle in markers:
                 if not seen[key] and needle in body:
                     log.info(f"  + {key}: matched {needle!r}")
@@ -643,7 +643,7 @@ def _dump_tail(path, lines):
     if not path.is_file():
         log.error(f"{path}: file does not exist")
         return
-    body = path.read_text(errors="replace")
+    body = path.read_text(encoding="utf-8", errors="replace")
     log.error(f"--- last {lines} lines of {path} ---")
     for line in body.splitlines()[-lines:]:
         log.error(line)
