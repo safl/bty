@@ -489,6 +489,18 @@ def create_app(
             offer_kind = "tui"
             offer_summary = f"{normalised} offered tui (operator picks via bty on tty1)"
             offer_details = {"offer": "tui"}
+        elif policy == "sanboot":
+            # iPXE boots the local disk itself (drive override, default
+            # 0x80), with ``|| exit`` falling back to the firmware boot
+            # order. Checked before the generic ``ref`` branch so a
+            # sanboot machine with an image bound still sanboots rather
+            # than falling through to the ``exit`` (local) template.
+            drive = machine.get("sanboot_drive") or _models.DEFAULT_SANBOOT_DRIVE
+            template = jinja.get_template("ipxe_sanboot.j2")
+            rendered = template.render(mac=normalised, machine=machine, drive=drive)
+            offer_kind = "sanboot"
+            offer_summary = f"{normalised} offered sanboot (iPXE boots local drive {drive})"
+            offer_details = {"offer": "sanboot", "sanboot_drive": drive}
         elif ref and policy in ("flash", "flash-once"):
             # Safety gate: refuse the flash chain unless the operator
             # has picked a target disk by serial. Without this, ``bty``
@@ -601,7 +613,7 @@ def create_app(
             rendered = template.render(mac=normalised, machine=machine)
             offer_kind = "local"
             short = str(ref)[:12]
-            offer_summary = f"{normalised} offered local (sanboot) for ref={short}..."
+            offer_summary = f"{normalised} offered local (exit to firmware) for ref={short}..."
             offer_details = {"offer": "local", "bty_image_ref": ref}
         elif policy == "local":
             # Registered with boot_policy=local and no image ref bound.
@@ -616,7 +628,9 @@ def create_app(
             template = jinja.get_template("ipxe.j2")
             rendered = template.render(mac=normalised, machine=machine)
             offer_kind = "local"
-            offer_summary = f"{normalised} offered local (sanboot) -- policy=local, no image bound"
+            offer_summary = (
+                f"{normalised} offered local (exit to firmware) -- policy=local, no image bound"
+            )
             offer_details = {"offer": "local", "bty_image_ref": None}
         else:
             template = jinja.get_template("ipxe_unknown.j2")
@@ -659,11 +673,12 @@ def create_app(
         # other ``/pxe/*`` endpoints.
         #
         # Always updates ``last_flashed_at`` + ``updated_at``. For
-        # ``boot_policy=flash-once`` we also flip the policy to
-        # ``local`` here so the next PXE boot returns sanboot (the
-        # box flashed, the operator's "one reimage please" is
-        # satisfied, leave it alone). ``flash`` stays ``flash`` --
-        # the per-job CI cadence wants every PXE boot to reflash.
+        # ``boot_policy=flash-once`` we also flip the policy to the
+        # configured settle policy here (``flash.settle_policy``,
+        # default ``local``) so the next PXE boot stops re-flashing (the
+        # box flashed, the operator's "one reimage please" is satisfied,
+        # leave it alone). ``flash`` stays ``flash`` -- the per-job CI
+        # cadence wants every PXE boot to reflash.
         normalised = _normalise_mac(mac)
         now = _now_iso()
         client_ip = _client_ip(request)
@@ -673,11 +688,13 @@ def create_app(
                 (normalised,),
             ).fetchone()
             flipped_from_flash_once = current is not None and current["boot_policy"] == "flash-once"
+            settle_policy = ""
             if flipped_from_flash_once:
+                settle_policy = _settings_store.resolve_flash_settle_policy(conn)
                 cur = conn.execute(
                     "UPDATE machines SET last_flashed_at = ?, updated_at = ?, "
-                    "boot_policy = 'local' WHERE mac = ?",
-                    (now, now, normalised),
+                    "boot_policy = ? WHERE mac = ?",
+                    (now, now, settle_policy, normalised),
                 )
             else:
                 cur = conn.execute(
@@ -690,7 +707,7 @@ def create_app(
                     kind="machine.flashed",
                     summary=(
                         f"{normalised} signalled flash completion"
-                        + (" (flash-once -> local)" if flipped_from_flash_once else "")
+                        + (f" (flash-once -> {settle_policy})" if flipped_from_flash_once else "")
                     ),
                     subject_kind="machine",
                     subject_id=normalised,
@@ -1261,13 +1278,14 @@ def create_app(
             conn.execute(
                 """
                 INSERT INTO machines
-                    (mac, bty_image_ref, hostname, boot_policy,
+                    (mac, bty_image_ref, hostname, boot_policy, sanboot_drive,
                      target_disk_serial, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(mac) DO UPDATE SET
                     bty_image_ref      = excluded.bty_image_ref,
                     hostname           = excluded.hostname,
                     boot_policy        = excluded.boot_policy,
+                    sanboot_drive      = excluded.sanboot_drive,
                     target_disk_serial = excluded.target_disk_serial,
                     updated_at         = excluded.updated_at
                 """,
@@ -1276,6 +1294,7 @@ def create_app(
                     body.bty_image_ref,
                     body.hostname,
                     body.boot_policy,
+                    body.sanboot_drive,
                     body.target_disk_serial,
                     created_at,
                     now,
@@ -1292,6 +1311,7 @@ def create_app(
                 details={
                     "bty_image_ref": body.bty_image_ref,
                     "boot_policy": body.boot_policy,
+                    "sanboot_drive": body.sanboot_drive,
                     "hostname": body.hostname,
                     "target_disk_serial": body.target_disk_serial,
                 },
@@ -2582,6 +2602,7 @@ def _row_to_machine(row: sqlite3.Row) -> _models.Machine:
         last_seen_at=_iso_or_none(row["last_seen_at"]),
         last_seen_ip=row["last_seen_ip"],
         boot_policy=row["boot_policy"],
+        sanboot_drive=row["sanboot_drive"] if "sanboot_drive" in row.keys() else None,  # noqa: SIM118
         last_flashed_at=_iso_or_none(row["last_flashed_at"]),
         known_disks=parsed_disks,
         known_disks_at=_iso_or_none(row["known_disks_at"]),

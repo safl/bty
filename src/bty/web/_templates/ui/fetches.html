@@ -1,5 +1,5 @@
 {% extends "ui/_layout.html" %}
-{% block title %}Release fetches - bty-web{% endblock %}
+{% block title %}Artifact Fetches - bty-web{% endblock %}
 
 {% block subnav %}
 {# In-page jump links to the fetch jobs table + the activity table. #}
@@ -32,7 +32,7 @@
    indicator counts. The Fetch control lives inline in the header. #}
 <div class="card mb-4" id="fetches-list">
     <div class="card-header bg-light fw-semibold d-flex justify-content-between align-items-center flex-wrap gap-2">
-        <span><i class="bi bi-arrow-down-circle me-1"></i>Release fetches
+        <span><i class="bi bi-arrow-down-circle me-1"></i>Artifact Fetches
               <span class="text-muted small bty-fetch-poll-status ms-1">refreshing...</span></span>
         <span class="d-flex gap-1 align-items-center">
             {# The release tag is an editable magic value (Settings ->

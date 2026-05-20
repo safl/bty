@@ -456,6 +456,7 @@ def register_ui_routes(
         bty_image_ref: Annotated[str, Form()] = "",
         hostname: Annotated[str, Form()] = "",
         boot_policy: Annotated[str, Form()] = DEFAULT_BOOT_POLICY,
+        sanboot_drive: Annotated[str, Form()] = "",
         target_disk_serial: Annotated[str, Form()] = "",
     ) -> RedirectResponse:
         normalised = _normalise_mac(mac)
@@ -470,6 +471,7 @@ def register_ui_routes(
                 bty_image_ref=bty_image_ref or None,
                 hostname=hostname or None,
                 boot_policy=boot_policy,
+                sanboot_drive=sanboot_drive or None,
                 target_disk_serial=target_disk_serial or None,
             )
         except ValueError as exc:
@@ -513,13 +515,14 @@ def register_ui_routes(
             conn.execute(
                 """
                 INSERT INTO machines
-                    (mac, bty_image_ref, hostname, boot_policy,
+                    (mac, bty_image_ref, hostname, boot_policy, sanboot_drive,
                      target_disk_serial, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(mac) DO UPDATE SET
                     bty_image_ref      = excluded.bty_image_ref,
                     hostname           = excluded.hostname,
                     boot_policy        = excluded.boot_policy,
+                    sanboot_drive      = excluded.sanboot_drive,
                     target_disk_serial = excluded.target_disk_serial,
                     updated_at         = excluded.updated_at
                 """,
@@ -528,6 +531,7 @@ def register_ui_routes(
                     validated.bty_image_ref,
                     validated.hostname,
                     validated.boot_policy,
+                    validated.sanboot_drive,
                     validated.target_disk_serial,
                     created_at,
                     now,
@@ -1057,6 +1061,8 @@ def register_ui_routes(
             repo_override = _settings_store.get(conn, _settings_store.KEY_RELEASE_REPO)
             catalog_override = _settings_store.get(conn, _settings_store.KEY_CATALOG_URL)
             tag_override = _settings_store.get(conn, _settings_store.KEY_RELEASE_TAG)
+            settle_policy = _settings_store.resolve_flash_settle_policy(conn)
+            settle_override = _settings_store.get(conn, _settings_store.KEY_FLASH_SETTLE_POLICY)
         upstream = {
             "release_repo": release_repo,
             "release_repo_override": repo_override,
@@ -1067,6 +1073,12 @@ def register_ui_routes(
             "release_tag": release_tag,
             "release_tag_override": tag_override,
             "release_tag_default": _settings_store.DEFAULT_RELEASE_TAG,
+        }
+        flash_settle = {
+            "policy": settle_policy,
+            "override": settle_override,
+            "default": _settings_store.default_flash_settle_policy(),
+            "choices": _settings_store.FLASH_SETTLE_POLICIES,
         }
         config_groups = [
             {
@@ -1166,6 +1178,7 @@ def register_ui_routes(
             flash=flash,
             flash_kind=flash_kind,
             upstream=upstream,
+            flash_settle=flash_settle,
             config_groups=config_groups,
             interfaces=interfaces,
             primary=primary,
@@ -1237,6 +1250,37 @@ def register_ui_routes(
                 ),
                 subject_kind="settings",
                 subject_id="upstream",
+                actor="operator",
+                source_ip=_client_ip(request),
+            )
+            conn.commit()
+        return RedirectResponse("/ui/settings?saved=1", status_code=status.HTTP_303_SEE_OTHER)
+
+    @app.post(
+        "/ui/settings/flash",
+        include_in_schema=False,
+        dependencies=[Depends(require_ui_auth)],
+    )
+    def ui_settings_flash(
+        request: Request,
+        settle_policy: Annotated[str, Form()] = "",
+    ) -> RedirectResponse:
+        """Save the flash-once settle policy: which boot_policy a
+        machine drops into once its flash completes (``local`` -> exit
+        to firmware, or ``sanboot`` -> iPXE boots the disk). Empty /
+        unrecognised clears the override, reverting to env / default."""
+        choice = settle_policy.strip()
+        with _db.open_db(state_path) as conn:
+            if choice in _settings_store.FLASH_SETTLE_POLICIES:
+                _settings_store.set_value(conn, _settings_store.KEY_FLASH_SETTLE_POLICY, choice)
+            else:
+                _settings_store.clear(conn, _settings_store.KEY_FLASH_SETTLE_POLICY)
+            _events_log.record(
+                conn,
+                kind="settings.upstream.updated",
+                summary=f"flash settle policy set: {choice or '(default)'}",
+                subject_kind="settings",
+                subject_id="flash",
                 actor="operator",
                 source_ip=_client_ip(request),
             )
@@ -1428,6 +1472,7 @@ def _row_to_dict(row: Any) -> dict[str, Any]:
         "last_seen_at": row["last_seen_at"],
         "last_seen_ip": row["last_seen_ip"],
         "boot_policy": row["boot_policy"],
+        "sanboot_drive": row["sanboot_drive"] if "sanboot_drive" in row.keys() else None,  # noqa: SIM118
         "last_flashed_at": row["last_flashed_at"],
         "known_disks": parsed_disks,
         "known_disks_at": row["known_disks_at"],

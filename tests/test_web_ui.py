@@ -559,7 +559,7 @@ def test_ui_fetches_page_has_fetch_control_and_jobs_table(client: TestClient) ->
     sub-nav."""
     _login(client)
     body = client.get("/ui/fetches").text
-    assert "Release fetches" in body
+    assert "Artifact Fetches" in body
     assert 'id="enqueue-fetch-btn"' in body
     assert 'data-tag="latest"' in body
     assert "bty-fetches-tbody" in body

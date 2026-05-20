@@ -43,17 +43,38 @@
                     {% endfor %}
                 </select>
                 <div class="form-text">
-                    <code>local</code>: PXE boots return sanboot (production / stable).
+                    <code>local</code>: PXE boots emit iPXE <code>exit</code>; the
+                    firmware boot order picks the disk (put STORAGE after PXE in
+                    the BIOS/UEFI order).
+                    <code>sanboot</code>: iPXE boots the local disk itself (drive
+                    below; defaults to the first disk), falling back to the
+                    firmware order if it can't.
                     <code>flash</code>: PXE boots chain into the live env so the box
                     re-flashes the assigned image every time (per-job CI cadence).
                     <code>flash-once</code>: same as <code>flash</code> for the next
-                    PXE boot, then auto-flips to <code>local</code> after the
-                    live env signals completion.
+                    PXE boot, then auto-flips to the configured settle policy
+                    (Settings; default <code>local</code>) after the live env
+                    signals completion.
                     <code>tui</code>: PXE boots chain into the live env. <code>bty</code>
                     on tty1 GETs <code>/pxe/&lt;mac&gt;/plan</code> and drops the operator
                     into the wizard. The auto-discovery default for unknown MACs
                     is <code>tui</code>; it's also how the box reports its disk
                     inventory to bty-web (see Target disk below).
+                </div>
+            </div>
+            <div class="mb-3" data-policy-relevant="sanboot">
+                <label class="form-label" for="sanboot_drive">Sanboot drive</label>
+                <input type="text" name="sanboot_drive" id="sanboot_drive"
+                       class="form-control font-monospace"
+                       value="{{ m.sanboot_drive or '' }}" placeholder="0x80"
+                       pattern="^0x[0-9a-fA-F]{1,2}$"
+                       title="iPXE BIOS drive to sanboot: 0x80 = first disk, 0x81 = second, ...">
+                <div class="form-text">
+                    Which local disk iPXE boots for <code>sanboot</code>:
+                    <code>0x80</code> is the first disk, <code>0x81</code> the
+                    second, and so on. Leave blank for the default
+                    (<code>0x80</code>). iPXE selects by BIOS drive number, not by
+                    the Linux serial used for flashing.
                 </div>
             </div>
             <div class="mb-3" data-policy-relevant="flash flash-once">

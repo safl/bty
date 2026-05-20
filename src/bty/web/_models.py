@@ -24,13 +24,22 @@ MAC_PATTERN = r"^[0-9a-f]{2}(:[0-9a-f]{2}){5}$"
 
 # Boot-policy values: what ``GET /pxe/{mac}`` returns.
 #
-# - ``local`` returns sanboot; the box boots whatever is on its disk.
-#   This is the explicit-PUT default for assigned machines.
+# - ``local`` emits iPXE ``exit``: control returns to the firmware,
+#   which boots the next device in its BIOS/UEFI boot order. Use when
+#   STORAGE sits after PXE in the firmware boot order. This is the
+#   explicit-PUT default for assigned machines.
+# - ``sanboot`` emits ``sanboot --drive <sanboot_drive> || exit``: iPXE
+#   boots the local disk itself (default ``0x80`` = first BIOS disk),
+#   falling back to ``exit`` (firmware order) if it can't. Use when
+#   you'd rather bty drive the local boot than depend on the firmware
+#   order. The drive is a per-machine override (``sanboot_drive``);
+#   iPXE selects by BIOS drive number, not by Linux serial.
 # - ``flash`` returns the live-env chain so the box re-flashes itself
 #   on every PXE boot (per-job CI cadence).
 # - ``flash-once`` returns the live-env flash chain just like ``flash``,
 #   but the completion signal (``POST /pxe/{mac}/done``) flips the
-#   policy to ``local`` so the box doesn't re-flash on the next boot.
+#   policy to the configured settle policy (``flash.settle_policy``,
+#   default ``local``) so the box doesn't re-flash on the next boot.
 #   For "I want this machine reimaged now, then leave it alone" --
 #   distinct from ``flash`` which is "reimage on every PXE boot".
 # - ``tui`` returns the live-env chain. ``bty`` on tty1 GETs
@@ -41,9 +50,15 @@ MAC_PATTERN = r"^[0-9a-f]{2}(:[0-9a-f]{2}){5}$"
 #
 # Completion signal (``POST /pxe/{mac}/done``) updates
 # ``last_flashed_at`` regardless of policy; it only mutates
-# ``boot_policy`` for ``flash-once`` (-> ``local``). ``flash`` stays
-# ``flash`` so the per-job CI cadence reflashes every boot.
-BOOT_POLICIES = ("local", "flash", "flash-once", "tui")
+# ``boot_policy`` for ``flash-once`` (-> the settle policy). ``flash``
+# stays ``flash`` so the per-job CI cadence reflashes every boot.
+BOOT_POLICIES = ("local", "sanboot", "flash", "flash-once", "tui")
+
+# iPXE BIOS drive selector the ``sanboot`` policy boots: ``0x80`` is the
+# first disk, ``0x81`` the second, and so on. The sensible default; a
+# per-machine ``sanboot_drive`` overrides it.
+SANBOOT_DRIVE_PATTERN = r"^0x[0-9a-fA-F]{1,2}$"
+DEFAULT_SANBOOT_DRIVE = "0x80"
 BOOT_POLICY_PATTERN = _enum_pattern(BOOT_POLICIES)
 DEFAULT_BOOT_POLICY = BOOT_POLICIES[0]
 
@@ -80,6 +95,12 @@ class MachineUpsert(BaseModel):
         pattern=r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$",
     )
     boot_policy: str = Field(default=DEFAULT_BOOT_POLICY, pattern=BOOT_POLICY_PATTERN)
+    # iPXE BIOS drive the ``sanboot`` policy boots (``0x80`` first disk,
+    # ``0x81`` second, ...). ``None`` = use the default (``0x80``);
+    # ignored for non-sanboot policies. Distinct from
+    # ``target_disk_serial`` -- iPXE selects local disks by BIOS drive
+    # number, not by the Linux serial the flash step matches on.
+    sanboot_drive: str | None = Field(default=None, pattern=SANBOOT_DRIVE_PATTERN)
     # Operator-selected target disk serial. ``bty`` in auto-flash
     # mode matches the plan's ``target_disk_serial`` against the
     # SCSI / NVMe / SATA serial of the disk it sees at boot
@@ -155,6 +176,9 @@ class Machine(BaseModel):
     last_seen_at: datetime | None = None
     last_seen_ip: str | None = None
     boot_policy: str = Field(default=DEFAULT_BOOT_POLICY, pattern=BOOT_POLICY_PATTERN)
+    # iPXE BIOS drive the ``sanboot`` policy boots; ``None`` = default
+    # (``0x80``). See ``MachineUpsert.sanboot_drive``.
+    sanboot_drive: str | None = Field(default=None, pattern=SANBOOT_DRIVE_PATTERN)
     last_flashed_at: datetime | None = None
     # JSON-decoded inventory from the most recent
     # ``POST /pxe/{mac}/inventory``. ``None`` means ``bty`` has

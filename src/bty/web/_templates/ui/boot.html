@@ -25,7 +25,7 @@
     assignment has <code>boot_policy=flash</code>. Until these files
     are present, machines with <code>boot_policy=flash</code> cannot
     actually flash: fetch them from the
-    <strong>Release fetches</strong> page (the download indicator in
+    <strong>Artifact Fetches</strong> page (the download indicator in
     the navbar). The TFTP daemon controls are below; the router-side
     DHCP / PXE cheatsheet lives on the <strong>Settings</strong> page.
 {% endcall %}
@@ -43,7 +43,7 @@
            resolves to, then jumps to the Release fetches page. #}
         <button type="button" class="btn btn-sm btn-primary text-nowrap" id="enqueue-fetch-btn"
                 data-tag="{{ release_tag }}" onclick="fetchAndWatch();"
-                title="Fetch netboot artifacts for tag '{{ release_tag }}' from {{ release_repo }} and watch on the Release fetches page">
+                title="Fetch netboot artifacts for tag '{{ release_tag }}' from {{ release_repo }} and watch on the Artifact Fetches page">
             <i class="bi bi-cloud-download me-1"></i>Fetch
             {% if release_tag == "latest" %}latest{% else %}<code>{{ release_tag }}</code>{% endif %}
             artifacts

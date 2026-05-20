@@ -1207,8 +1207,9 @@ def test_machine_upsert_rejects_unknown_boot_policy(app_client: TestClient) -> N
 def test_pxe_local_policy_assigned_machine_returns_local_template(
     app_client: TestClient,
 ) -> None:
-    """boot_policy=local + image assigned: still sanboot. Reflashing is
-    opt-in via boot_policy=flash, not implicit on assignment."""
+    """boot_policy=local + image assigned: emit iPXE exit (firmware boot
+    order decides), NOT the flash chain. Reflashing is opt-in via
+    boot_policy=flash, not implicit on assignment."""
     app_client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
         json={"bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"},
@@ -1536,8 +1537,9 @@ def test_pxe_flash_once_emits_flash_chain_like_flash(
 
 def test_pxe_done_flips_flash_once_to_local(app_client: TestClient) -> None:
     """``flash-once`` is the one policy where the completion signal
-    mutates ``boot_policy``: it flips to ``local`` so the next PXE
-    boot returns sanboot and the box stops reflashing itself."""
+    mutates ``boot_policy``: it flips to the configured settle policy
+    (default ``local`` -> iPXE ``exit``, firmware boots the disk) so
+    the box stops reflashing itself."""
     app_client.put(
         "/machines/22:33:44:55:66:77",
         json={
@@ -1557,6 +1559,70 @@ def test_pxe_done_flips_flash_once_to_local(app_client: TestClient) -> None:
     assert after["last_flashed_at"] is not None
     # The completion signal flipped the policy.
     assert after["boot_policy"] == "local"
+
+
+def test_pxe_sanboot_policy_returns_sanboot_template(app_client: TestClient) -> None:
+    """``boot_policy=sanboot`` emits an iPXE ``sanboot --drive ... ||
+    exit`` (bty boots the local disk itself), defaulting to drive
+    0x80, NOT the flash chain."""
+    app_client.put(
+        "/machines/aa:bb:cc:dd:ee:01",
+        json={"boot_policy": "sanboot"},
+        cookies=AUTH,
+    )
+    r = app_client.get("/pxe/aa:bb:cc:dd:ee:01")
+    assert r.status_code == 200
+    body = r.text
+    assert "sanboot" in body
+    assert "--drive 0x80" in body
+    assert "|| exit" in body
+    # Not the flash chain.
+    assert "kernel" not in body
+
+
+def test_pxe_sanboot_policy_uses_per_machine_drive_override(app_client: TestClient) -> None:
+    """``sanboot_drive`` overrides the default 0x80 so multi-disk
+    boxes can point iPXE at the right BIOS drive."""
+    app_client.put(
+        "/machines/aa:bb:cc:dd:ee:02",
+        json={"boot_policy": "sanboot", "sanboot_drive": "0x81"},
+        cookies=AUTH,
+    )
+    r = app_client.get("/pxe/aa:bb:cc:dd:ee:02")
+    assert r.status_code == 200
+    assert "--drive 0x81" in r.text
+
+
+def test_machine_upsert_rejects_malformed_sanboot_drive(app_client: TestClient) -> None:
+    """``sanboot_drive`` must be an iPXE BIOS drive (``0x`` + 1-2 hex);
+    a bad value is a 422 at the API edge."""
+    r = app_client.put(
+        "/machines/aa:bb:cc:dd:ee:03",
+        json={"boot_policy": "sanboot", "sanboot_drive": "sda"},
+        cookies=AUTH,
+    )
+    assert r.status_code == 422
+
+
+def test_pxe_done_flash_once_settles_to_sanboot_when_configured(
+    app_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The flash-once settle policy is configurable: with
+    ``BTY_FLASH_SETTLE_POLICY=sanboot`` a completed flash-once flips to
+    ``sanboot`` (bty boots the disk) instead of the default ``local``."""
+    monkeypatch.setenv("BTY_FLASH_SETTLE_POLICY", "sanboot")
+    app_client.put(
+        "/machines/aa:bb:cc:dd:ee:04",
+        json={
+            "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "boot_policy": "flash-once",
+        },
+        cookies=AUTH,
+    )
+    r = app_client.post("/pxe/aa:bb:cc:dd:ee:04/done")
+    assert r.status_code == 204
+    after = app_client.get("/machines/aa:bb:cc:dd:ee:04", cookies=AUTH).json()
+    assert after["boot_policy"] == "sanboot"
 
 
 def test_pxe_done_flash_once_second_call_is_idempotent(

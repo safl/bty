@@ -44,6 +44,11 @@ CREATE TABLE IF NOT EXISTS machines (
     last_seen_at              TEXT,    -- most recent /pxe/{mac} contact
     last_seen_ip              TEXT,    -- source IP of most recent /pxe contact
     boot_policy               TEXT NOT NULL DEFAULT 'local',
+    -- iPXE BIOS drive the ``sanboot`` boot_policy boots (``0x80`` =
+    -- first disk). NULL = use the default (``0x80``). Distinct from
+    -- ``target_disk_serial``: iPXE picks local disks by BIOS drive
+    -- number, not by the Linux serial the flash step matches.
+    sanboot_drive             TEXT,
     last_flashed_at           TEXT,    -- updated by POST /pxe/{mac}/done
     -- Per-machine disk inventory, posted by ``bty`` on startup via
     -- POST /pxe/{mac}/inventory. JSON array of dicts:
@@ -169,6 +174,11 @@ _REQUIRED_COLUMNS: dict[str, tuple[str, ...]] = {
 _ADDITIVE_COLUMNS: dict[str, dict[str, str]] = {
     "events": {
         "acknowledged": "INTEGER NOT NULL DEFAULT 0",
+    },
+    "machines": {
+        # Nullable (NULL = use the default sanboot drive, 0x80), so a
+        # plain ADD COLUMN backfills existing rows with NULL.
+        "sanboot_drive": "TEXT",
     },
 }
 

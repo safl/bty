@@ -1,5 +1,5 @@
 {% extends "ui/_layout.html" %}
-{% block title %}{% if section == "downloads" %}Downloads{% elif section == "hashes" %}Hashes{% else %}Images{% endif %} - bty-web{% endblock %}
+{% block title %}{% if section == "downloads" %}Image Downloads{% elif section == "hashes" %}Hashes{% else %}Images{% endif %} - bty-web{% endblock %}
 
 {% block subnav %}
 {# In-page jump links to the page's two tables (the main list + the
@@ -29,7 +29,7 @@
     {% if section == "downloads" %}
     Add a single image (upload a local file, or add one by
     http(s):// / oras:// URL) and watch the live fetch jobs below.
-    Reach this page any time from the <strong>downloads</strong>
+    Reach this page any time from the <strong>Image Downloads</strong>
     indicator in the navbar, right of Settings.
     {% elif section == "hashes" %}
     Background SHA-256 hashing of files under
@@ -44,7 +44,7 @@
     (pull the bty release catalog) and <em>Upload catalog</em>
     (a catalog.toml). Files dropped into <code>{{ image_root }}</code>
     are picked up and hashed automatically; add individual images from
-    the <strong>Downloads</strong> page.
+    the <strong>Image Downloads</strong> page.
     {% endif %}
 {% endcall %}
 {% endblock %}
@@ -60,7 +60,7 @@
        header height) on a narrow window. The inputs shrink (min-width:0)
        instead, and the button labels stay on one line (text-nowrap). #}
     <div class="card-header bg-light fw-semibold d-flex justify-content-between align-items-center flex-nowrap gap-2 py-1">
-        <span class="text-nowrap"><i class="bi bi-arrow-down-circle me-1"></i>Downloads
+        <span class="text-nowrap"><i class="bi bi-arrow-down-circle me-1"></i>Image Downloads
               <span class="text-muted small bty-poll-status ms-1">refreshing...</span></span>
         <span class="d-flex flex-nowrap align-items-center gap-2" style="min-width: 0;">
             {# type="text" not type="url": browsers reject oras:// under

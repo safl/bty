@@ -442,8 +442,8 @@
                    on. The release-fetch indicator stays pure status
                    (its page lives under Netboot). #}
                 <div class="nav-workers d-flex align-items-center"
-                     title="Downloads / Hashes (live job counts); release fetches">
-                    <a class="nav-worker {% if nav_active == 'downloads' %}active{% endif %}" href="/ui/downloads" title="Downloads (active job count)">
+                     title="Image Downloads / Hashes (live job counts); Artifact Fetches">
+                    <a class="nav-worker {% if nav_active == 'downloads' %}active{% endif %}" href="/ui/downloads" title="Image Downloads (active job count)">
                         <i class="bi bi-arrow-down-circle"></i>
                         <span class="badge rounded-pill bg-primary nav-worker-badge d-none" data-worker="downloads">0</span>
                     </a>
@@ -451,7 +451,7 @@
                         <i class="bi bi-hash"></i>
                         <span class="badge rounded-pill bg-warning text-dark nav-worker-badge d-none" data-worker="hashes">0</span>
                     </a>
-                    <a class="nav-worker {% if nav_active == 'fetches' %}active{% endif %}" href="/ui/fetches" title="Release fetches (active job count)">
+                    <a class="nav-worker {% if nav_active == 'fetches' %}active{% endif %}" href="/ui/fetches" title="Artifact Fetches (active job count)">
                         <i class="bi bi-cloud-arrow-down"></i>
                         <span class="badge rounded-pill bg-info text-dark nav-worker-badge d-none" data-worker="releases">0</span>
                     </a>
