@@ -191,17 +191,18 @@
 <div class="card mb-3">
     <div class="card-header bg-light fw-semibold d-flex justify-content-between align-items-center flex-wrap gap-2">
         <span><i class="bi bi-list-ul me-1"></i>Images</span>
-        {# Two catalog actions stacked, separated by a rule: fetch the
-           bty release catalog.toml in one click, or upload a local
-           catalog.toml (both were dropped sub-nav pages). #}
-        <span class="d-flex flex-column align-items-end gap-1" style="min-width: 14rem;">
+        {# Two catalog actions side by side, separated by a vertical
+           rule: fetch the bty release catalog.toml in one click, or
+           upload a local catalog.toml (both were dropped sub-nav
+           pages). #}
+        <span class="d-flex flex-wrap align-items-center gap-2">
             <form method="post" action="/ui/catalog/fetch-release" class="m-0">
                 <button type="submit" class="btn btn-sm btn-primary"
                         title="Pull releases/latest/download/catalog.toml from {{ release_repo }} and import its entries">
                     <i class="bi bi-cloud-download me-1"></i>Fetch latest catalog
                 </button>
             </form>
-            <hr class="w-100 my-1">
+            <div class="vr"></div>
             {# Parsed before it replaces the current catalog
                ({{ manifest_path }}); a bad file bounces back. #}
             <form method="post" action="/ui/catalog/upload" enctype="multipart/form-data"
