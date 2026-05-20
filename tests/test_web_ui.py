@@ -1383,8 +1383,8 @@ def test_ui_machines_list_shows_boot_policy_badge(client: TestClient) -> None:
     assert "bg-secondary" in body and ">local<" in body
     assert "bg-info text-dark" in body and ">tui<" in body
     # Table header has Boot column + Last flashed column.
-    assert "<th>Boot</th>" in body
-    assert "<th>Last flashed</th>" in body
+    assert ">Boot</th>" in body
+    assert ">Last flashed</th>" in body
 
 
 def test_ui_events_renders_older_link_when_full_page(

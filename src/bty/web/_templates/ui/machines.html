@@ -52,14 +52,18 @@
     <div class="table-responsive">
         <table class="table table-hover mb-0 align-middle">
             <thead class="table-light">
+                {# Pin the narrow columns to width:1% + nowrap (as the
+                   other tables do) so they stay tight and only MAC /
+                   Image / Hostname absorb the slack -- otherwise the
+                   header columns stretch evenly and look oversized. #}
                 <tr>
-                    <th>MAC</th>
+                    <th style="white-space: nowrap;">MAC</th>
                     <th>Image</th>
-                    <th>Boot</th>
+                    <th style="width: 1%; white-space: nowrap;">Boot</th>
                     <th>Hostname</th>
-                    <th>Last seen</th>
-                    <th>Last flashed</th>
-                    <th></th>
+                    <th style="width: 1%; white-space: nowrap;">Last seen</th>
+                    <th style="width: 1%; white-space: nowrap;">Last flashed</th>
+                    <th style="width: 1%;"></th>
                 </tr>
             </thead>
             {# The tbody subscribes to the SSE stream so it auto-updates
