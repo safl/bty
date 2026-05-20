@@ -1949,9 +1949,9 @@ def test_ui_events_list_has_checkboxes_and_bulk_actions(
     assert 'class="form-check-input ev-check"' in body
     assert 'id="bulk-ack"' in body
     assert 'id="bulk-clear"' in body
-    # Per-row toggle: unacked -> Acknowledge.
+    # Per-row toggle: unacked -> Ack.
     assert f'data-id="{eid}" data-ack="1"' in body
-    assert "Acknowledge" in body
+    assert ">Ack" in body
     # Once acked, the per-row toggle becomes Clear.
     client.post(
         "/ui/events/acknowledge",
