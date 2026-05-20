@@ -1129,7 +1129,7 @@ def test_ui_machine_detail_renders_disk_inventory_dropdown(client: TestClient) -
 def test_ui_machine_detail_renders_no_inventory_warning(client: TestClient) -> None:
     """A machine that hasn't yet reported its inventory shows a
     yellow warning alert pointing at the recovery path ("set
-    boot_policy=tui and power-cycle") instead of a broken empty
+    boot_policy=bty-tui and power-cycle") instead of a broken empty
     dropdown."""
     _login(client)
     # Seed a machine record without ever posting inventory.

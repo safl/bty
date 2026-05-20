@@ -1268,7 +1268,7 @@ def register_ui_routes(
         request: Request,
         settle_policy: Annotated[str, Form()] = "",
     ) -> RedirectResponse:
-        """Save the flash-once settle policy: which boot_policy a
+        """Save the bty-flash-once settle policy: which boot_policy a
         machine drops into once its flash completes (``local`` -> exit
         to firmware, or ``sanboot`` -> iPXE boots the disk). Empty /
         unrecognised clears the override, reverting to env / default."""

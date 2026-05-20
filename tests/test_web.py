@@ -125,7 +125,7 @@ def test_version_is_open(app_client: TestClient) -> None:
 
 
 def test_pxe_for_unknown_mac_returns_tui_template(app_client: TestClient) -> None:
-    """An unknown MAC auto-discovers with ``boot_policy=tui`` and is
+    """An unknown MAC auto-discovers with ``boot_policy=bty-tui`` and is
     served the interactive-live-env iPXE chain. This is "bty-on-a-USB
     but over the network": first PXE contact lands the operator at
     ``bty`` without any prior server-side configuration.
@@ -1305,7 +1305,7 @@ def test_pxe_plan_unknown_mac_auto_discovers_and_returns_interactive(
 ) -> None:
     """``GET /pxe/<mac>/plan`` on an unknown MAC mirrors the iPXE
     auto-discovery path: creates a machine record with
-    ``boot_policy=tui`` and returns ``mode=interactive`` with the
+    ``boot_policy=bty-tui`` and returns ``mode=interactive`` with the
     server's ``/catalog.toml`` URL.
 
     This is the workstation-side equivalent of "bty-on-a-USB but
@@ -1323,7 +1323,7 @@ def test_pxe_plan_unknown_mac_auto_discovers_and_returns_interactive(
     assert body["mode"] == "interactive"
     assert body["catalog"] == "http://bty.local:8080/catalog.toml"
 
-    # Auto-discovered as boot_policy=tui (matches /pxe/{mac}).
+    # Auto-discovered as boot_policy=bty-tui (matches /pxe/{mac}).
     row = app_client.get(f"/machines/{mac}", cookies=AUTH).json()
     assert row["boot_policy"] == "bty-tui"
 
@@ -1417,7 +1417,7 @@ def test_pxe_plan_flash_policy_without_target_falls_back_to_interactive(
 def test_pxe_plan_tui_policy_returns_interactive_with_catalog(
     app_client: TestClient,
 ) -> None:
-    """``boot_policy=tui`` -> ``mode=interactive`` with the
+    """``boot_policy=bty-tui`` -> ``mode=interactive`` with the
     server's catalog. Matches the iPXE ipxe_tui.j2 semantic: the
     operator picks at run time."""
     mac = "aa:bb:cc:dd:ee:ff"
@@ -1434,9 +1434,9 @@ def test_pxe_plan_tui_policy_returns_interactive_with_catalog(
 
 
 def test_pxe_tui_policy_returns_interactive_chain(app_client: TestClient) -> None:
-    """boot_policy=tui: chain into the live env. ``bty-on-tty1.
+    """boot_policy=bty-tui: chain into the live env. ``bty-on-tty1.
     service`` launches ``bty``, which GETs ``/pxe/<mac>/plan`` and
-    drops the operator into the wizard for boot_policy=tui.
+    drops the operator into the wizard for boot_policy=bty-tui.
 
     Since v0.22.10 the cmdline carries only ``bty.server`` +
     ``bty.mac``; ``bty.mode=interactive`` was retired alongside
@@ -1517,7 +1517,7 @@ def test_pxe_done_404_for_unknown_mac(app_client: TestClient) -> None:
 def test_pxe_flash_once_emits_flash_chain_like_flash(
     app_client: TestClient,
 ) -> None:
-    """``boot_policy=flash-once`` returns the same iPXE flash chain
+    """``boot_policy=bty-flash-once`` returns the same iPXE flash chain
     as ``flash`` on the first PXE boot; it's only the completion
     signal that differs."""
     app_client.put(
@@ -1536,7 +1536,7 @@ def test_pxe_flash_once_emits_flash_chain_like_flash(
 
 
 def test_pxe_done_flips_flash_once_to_local(app_client: TestClient) -> None:
-    """``flash-once`` is the one policy where the completion signal
+    """``bty-flash-once`` is the one policy where the completion signal
     mutates ``boot_policy``: it flips to the configured settle policy
     (default ``local`` -> iPXE ``exit``, firmware boots the disk) so
     the box stops reflashing itself."""
@@ -1607,8 +1607,8 @@ def test_machine_upsert_rejects_malformed_sanboot_drive(app_client: TestClient) 
 def test_pxe_done_flash_once_settles_to_sanboot_when_configured(
     app_client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The flash-once settle policy is configurable: with
-    ``BTY_FLASH_SETTLE_POLICY=sanboot`` a completed flash-once flips to
+    """The bty-flash-once settle policy is configurable: with
+    ``BTY_FLASH_SETTLE_POLICY=sanboot`` a completed bty-flash-once flips to
     ``sanboot`` (bty boots the disk) instead of the default ``local``."""
     monkeypatch.setenv("BTY_FLASH_SETTLE_POLICY", "sanboot")
     app_client.put(
@@ -1629,7 +1629,7 @@ def test_pxe_done_flash_once_second_call_is_idempotent(
     app_client: TestClient,
 ) -> None:
     """A second /pxe/{mac}/done call against a machine that already
-    flipped flash-once -> local on the first call returns 204
+    flipped bty-flash-once -> local on the first call returns 204
     cleanly without raising or re-flipping anything. Important
     for cosmic-ray retries from the live env (network blip
     between the flash signal and the rebooting kernel)."""
@@ -2033,7 +2033,7 @@ def test_pxe_hit_records_pxe_offered_event(app_client: TestClient) -> None:
 
 def test_pxe_hit_records_tui_offer_for_unknown_mac(app_client: TestClient) -> None:
     """Auto-discovery (unknown MAC) records both ``machine.discovered``
-    AND a ``pxe.offered`` event with offer=tui."""
+    AND a ``pxe.offered`` event with offer=bty-tui."""
     app_client.get("/pxe/aa:bb:cc:dd:ee:f1")
     r = app_client.get(
         "/events",
@@ -2046,7 +2046,7 @@ def test_pxe_hit_records_tui_offer_for_unknown_mac(app_client: TestClient) -> No
 
 
 def test_machines_upsert_accepts_flash_once(app_client: TestClient) -> None:
-    """flash-once is in BOOT_POLICIES so Pydantic accepts it."""
+    """bty-flash-once is in BOOT_POLICIES so Pydantic accepts it."""
     r = app_client.put(
         "/machines/33:44:55:66:77:88",
         json={"boot_policy": "bty-flash-once"},

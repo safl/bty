@@ -1708,7 +1708,7 @@ class BtyTui:
 
     def _post_pxe_done_if_configured(self) -> None:
         """Best-effort: POST ``/pxe/<mac>/done`` after a successful
-        flash so the bty-web server's last_flashed_at + flash-once
+        flash so the bty-web server's last_flashed_at + bty-flash-once
         flip can fire. Failure is logged via the soft banner; does
         NOT block the post-flash transition (lesson from v0.20.1).
         """

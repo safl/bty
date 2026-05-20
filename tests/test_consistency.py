@@ -743,6 +743,33 @@ def test_every_ui_page_uses_the_intro_box_partial() -> None:
     )
 
 
+def test_every_boot_policy_is_handled_by_the_pxe_decision_tree() -> None:
+    """Every value in ``BOOT_POLICIES`` must appear as a literal string
+    in ``_app.py`` -- the PXE handler decides what to serve with an
+    explicit per-policy branch (``policy == "sanboot"``, ``policy in
+    ("bty-flash-always", "bty-flash-once")``, ...). A policy added to
+    the tuple (or renamed) without a matching branch silently falls
+    through to the default, serving the wrong thing on real hardware.
+
+    This is the exact bug shape the bty-* rename risked: the policy
+    set is one source of truth, the decision tree another, and they
+    can drift. Pin them together. The dropdown UI is already
+    drift-proof (it loops over ``BOOT_POLICIES`` directly), so the
+    decision tree is the surface that needs a guard.
+    """
+    from bty.web._models import BOOT_POLICIES
+
+    src = (REPO_ROOT / "src" / "bty" / "web" / "_app.py").read_text()
+    missing = [p for p in BOOT_POLICIES if f'"{p}"' not in src]
+    assert not missing, (
+        f"boot policies in BOOT_POLICIES with no literal branch in _app.py: "
+        f"{missing!r}. The PXE decision tree handles each policy explicitly; "
+        f"a policy with no branch falls through to the default and serves the "
+        f"wrong iPXE config. Add (or fix) the branch in the GET /pxe/{{mac}} "
+        f"handler."
+    )
+
+
 def test_bty_web_help_documents_every_env_var() -> None:
     """Every ``BTY_*`` env var the bty-web runtime reads from
     ``os.environ`` must be documented in the argparse description

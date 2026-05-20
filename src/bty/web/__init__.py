@@ -70,7 +70,7 @@ def main(argv: list[str] | None = None) -> None:
             "                        boot\n"
             "  BTY_BOOT_RELEASE_REPO GitHub repo to fetch netboot artifacts +\n"
             "                        catalog.toml from (default safl/bty)\n"
-            "  BTY_FLASH_SETTLE_POLICY  boot_policy a flash-once machine settles\n"
+            "  BTY_FLASH_SETTLE_POLICY  boot_policy a bty-flash-once machine settles\n"
             "                        into after flashing: local | sanboot\n"
             "                        (default local)\n"
             "  BTY_CATALOG_FILE      catalog.toml path (default <BTY_STATE_DIR>/\n"

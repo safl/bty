@@ -324,7 +324,7 @@ def test_e2e_pxe_flash_chain_plan_carries_image_url_and_target_serial(
     app_client: TestClient,
 ) -> None:
     """Bind a known machine to a known catalog entry + target disk
-    serial, set boot_policy to flash-once, GET /pxe/<mac>/plan: the
+    serial, set boot_policy to bty-flash-once, GET /pxe/<mac>/plan: the
     plan response must carry the image URL + target serial.
 
     v0.22.10 moved these out of the iPXE kernel cmdline and into
@@ -816,9 +816,9 @@ def test_e2e_pxe_unknown_mac_then_inventory_then_flash_chain(
 ) -> None:
     """The PXE flow has four state transitions on the server side:
 
-      1. Unknown MAC -> /pxe/<mac> -> auto-discovered with policy=tui
+      1. Unknown MAC -> /pxe/<mac> -> auto-discovered with policy=bty-tui
       2. Same MAC -> /machines/<mac>/inventory -> machine.inventory event
-      3. Operator binds (PUT /machines/<mac>) with flash-once + ref
+      3. Operator binds (PUT /machines/<mac>) with bty-flash-once + ref
       4. Same MAC -> /pxe/<mac> -> renders ipxe_flash.j2 with the ref
 
     Each step depends on the prior; a regression in any of them
@@ -903,7 +903,7 @@ def test_e2e_pxe_unknown_mac_then_inventory_then_flash_chain(
     assert plan["mode"] == "auto"
     assert plan["target_disk_serial"] == "SER-1"
     assert f"/images/{ref}/" in plan["image"]
-    # Done call flips flash-once -> local.
+    # Done call flips bty-flash-once -> local.
     r = app_client.post(f"/pxe/{mac}/done")
     assert r.status_code in (200, 204), r.text
     r = app_client.get(f"/machines/{mac}", cookies=AUTH)
@@ -961,7 +961,7 @@ def test_e2e_image_serve_routes_resolve_by_sha_or_filename(
 def test_e2e_flash_safety_gate_no_target_disk_serial_logs_event(
     app_client: TestClient,
 ) -> None:
-    """Operator binds a machine to a ref with flash-once policy
+    """Operator binds a machine to a ref with bty-flash-once policy
     but forgets to set ``target_disk_serial``. The safety gate in
     /pxe/<mac> must:
       1. Refuse to render ipxe_flash.j2 (would wipe wrong disk).

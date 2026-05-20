@@ -737,7 +737,7 @@ def create_app(
         Plan shapes (mode is the dispatch token):
 
         * ``{"mode": "auto", "image": URL, "target_disk_serial": S}``
-          -- boot_policy in (flash, flash-once) with a bindable ref
+          -- boot_policy in (bty-flash-always, bty-flash-once) with a bindable ref
           AND a target_disk_serial picked. ``bty`` runs the flash
           without prompts.
         * ``{"mode": "interactive", "catalog": URL}`` -- boot_policy
