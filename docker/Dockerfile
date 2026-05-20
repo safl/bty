@@ -42,9 +42,9 @@ LABEL org.opencontainers.image.title="bty-web" \
 #   tini: PID-1 init that forwards SIGTERM cleanly so
 #     ``docker stop`` doesn't fall back to SIGKILL after 10s.
 #   ca-certificates: HTTPS uploads / downloads.
-#   curl: HEALTHCHECK probes ``/`` so docker/orchestrators detect a
-#     wedged uvicorn (Python deadlock, OOM, etc.) without needing
-#     to add curl per-deployment.
+#   curl: HEALTHCHECK probes ``/healthz`` so docker/orchestrators
+#     detect a wedged uvicorn (Python deadlock, OOM, etc.) without
+#     needing to add curl per-deployment.
 #   dnsmasq + ipxe: TFTP serving + the iPXE bootfiles. ``setcap``
 #     grants dnsmasq the CAP_NET_BIND_SERVICE capability so it can
 #     bind UDP 69 as the unprivileged ``bty`` user (no need to run
@@ -151,8 +151,12 @@ EXPOSE 69/udp
 # migrations); after that, probe every 30s, 5s timeout, three
 # failures = unhealthy. Catches a wedged uvicorn or a process
 # that crashed with the port still held.
+# Probe the configured port (shell-form CMD expands the env var at
+# runtime): an operator who overrides ``BTY_WEB_PORT`` would
+# otherwise get a perpetually-unhealthy container because the
+# probe hit the stale default :8080.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
-    CMD curl -fsS http://127.0.0.1:8080/healthz -o /dev/null || exit 1
+    CMD curl -fsS "http://127.0.0.1:${BTY_WEB_PORT:-8080}/healthz" -o /dev/null || exit 1
 
 COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod 0755 /entrypoint.sh

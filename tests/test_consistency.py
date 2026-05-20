@@ -782,6 +782,41 @@ def test_bty_web_help_documents_every_env_var() -> None:
     )
 
 
+def test_dnsmasq_tftp_root_agrees_across_deployment_shapes() -> None:
+    """The bty-web container (docker/dnsmasq.conf) and the
+    bty-server appliance (rootfs .../dnsmasq.d/bty-pxe.conf) both
+    run dnsmasq as the TFTP daemon. They must agree on the
+    ``tftp-root`` -- it's where the iPXE binaries (``ipxe.efi`` /
+    ``undionly.kpxe``) are staged, and a PXE client that fetches
+    a bootfile from one path while the daemon serves another just
+    404s. The Dockerfile stages the binaries into that same root,
+    so pin all three to one another.
+    """
+    docker_conf = (REPO_ROOT / "docker" / "dnsmasq.conf").read_text()
+    appliance_conf = (
+        REPO_ROOT / "bty-media" / "rootfs" / "server" / "etc" / "dnsmasq.d" / "bty-pxe.conf"
+    ).read_text()
+    dockerfile = (REPO_ROOT / "docker" / "Dockerfile").read_text()
+
+    def _tftp_root(conf: str) -> str | None:
+        m = re.search(r"^tftp-root=(\S+)", conf, re.MULTILINE)
+        return m.group(1) if m else None
+
+    docker_root = _tftp_root(docker_conf)
+    appliance_root = _tftp_root(appliance_conf)
+    assert docker_root, "docker/dnsmasq.conf must set tftp-root"
+    assert appliance_root, "appliance bty-pxe.conf must set tftp-root"
+    assert docker_root == appliance_root, (
+        f"dnsmasq tftp-root mismatch: docker={docker_root!r} vs "
+        f"appliance={appliance_root!r}. PXE clients would 404 on "
+        f"the bootfile from one deployment shape."
+    )
+    # The Dockerfile must stage the iPXE binaries into that same root.
+    assert f"{docker_root}/ipxe.efi" in dockerfile, (
+        f"Dockerfile should stage ipxe.efi into {docker_root} (the configured tftp-root)"
+    )
+
+
 def test_docker_bty_uid_aligned_across_surfaces() -> None:
     """The Dockerfile pins the in-container bty user to a fixed
     UID; the Makefile ``docker-run`` target chowns the host-side
