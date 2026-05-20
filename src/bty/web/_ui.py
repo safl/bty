@@ -1026,9 +1026,7 @@ def register_ui_routes(
                 "rows": [
                     _config_row("State directory", state_dir, "BTY_STATE_DIR", "/var/lib/bty"),
                     _config_row("Database", state_path, None, "<state dir>/state.db"),
-                    _config_row(
-                        "Image root", image_root, "BTY_IMAGE_ROOT", "/var/lib/bty/images"
-                    ),
+                    _config_row("Image root", image_root, "BTY_IMAGE_ROOT", "/var/lib/bty/images"),
                     _config_row("Netboot directory", boot_root, "BTY_BOOT_DIR", "<state dir>/boot"),
                     _config_row(
                         "Catalog manifest",
@@ -1051,10 +1049,15 @@ def register_ui_routes(
                 "title": "Network",
                 "icon": "hdd-network",
                 "rows": [
-                    _config_row("Bind host", os.environ.get("BTY_WEB_HOST", "0.0.0.0"),
-                                "BTY_WEB_HOST", "0.0.0.0"),
-                    _config_row("Bind port", os.environ.get("BTY_WEB_PORT", "8080"),
-                                "BTY_WEB_PORT", "8080"),
+                    _config_row(
+                        "Bind host",
+                        os.environ.get("BTY_WEB_HOST", "0.0.0.0"),
+                        "BTY_WEB_HOST",
+                        "0.0.0.0",
+                    ),
+                    _config_row(
+                        "Bind port", os.environ.get("BTY_WEB_PORT", "8080"), "BTY_WEB_PORT", "8080"
+                    ),
                     _config_row(
                         "Trust X-Forwarded-For",
                         "yes" if os.environ.get("BTY_TRUSTED_PROXY") else "no",
@@ -1106,9 +1109,7 @@ def register_ui_routes(
     )
     def ui_settings(request: Request, saved: str | None = None) -> HTMLResponse:
         flash = "Upstream sources saved." if saved else None
-        return _render_settings_page(
-            request, flash=flash, flash_kind="success" if saved else None
-        )
+        return _render_settings_page(request, flash=flash, flash_kind="success" if saved else None)
 
     @app.post(
         "/ui/settings/upstream",

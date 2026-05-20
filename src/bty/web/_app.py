@@ -280,32 +280,33 @@ def create_app(
     )
 
     def _fmt_ts(value: object) -> str:
-        """Render an ISO-8601 timestamp as ``YYYY-MM-DD HH:MM:SS UTC``.
+        """Render a timestamp compactly as ``YYYY-MM-DD HH:MM:SS``.
 
         The on-disk shape (``_now_iso``) is
         ``2026-05-17T20:21:09.155109+00:00`` -- microseconds and the
-        ``+00:00`` offset are noise for an operator scanning a row.
-        This filter trims to second precision and labels the zone
-        explicitly so a glance is enough to read it.
+        ``+00:00`` offset are noise for an operator scanning a row, so
+        this trims to second precision and drops the offset. The single
+        display format used everywhere a timestamp is shown.
 
-        Defensive: returns the input unchanged on parse failure so a
-        malformed value renders as itself rather than crashing the
-        template render and 500-ing the whole page.
+        Accepts either an ISO-8601 string (DB columns) or a
+        ``datetime`` (e.g. a file mtime). Defensive: returns the input
+        unchanged on parse failure so a malformed value renders as
+        itself rather than 500-ing the template render.
         """
-        if not isinstance(value, str) or not value:
+        if isinstance(value, datetime):
+            dt = value
+        elif isinstance(value, str) and value:
+            try:
+                dt = datetime.fromisoformat(value)
+            except ValueError:
+                return value
+        else:
             return ""
-        try:
-            dt = datetime.fromisoformat(value)
-        except ValueError:
-            return value
-        # Normalise to UTC if a TZ was attached, then drop tzinfo for
-        # display (we always show UTC; appending the literal "UTC"
-        # keeps that explicit). All bty timestamps are written UTC,
-        # but a future shape that carries a non-UTC offset still
-        # renders correctly via this conversion.
+        # All bty timestamps are written UTC; normalise any attached
+        # offset to UTC, then drop tzinfo for the bare-second display.
         if dt.tzinfo is not None:
             dt = dt.astimezone(UTC).replace(tzinfo=None)
-        return dt.strftime("%Y-%m-%d %H:%M:%S UTC")
+        return dt.strftime("%Y-%m-%d %H:%M:%S")
 
     jinja.filters["fmt_ts"] = _fmt_ts
 

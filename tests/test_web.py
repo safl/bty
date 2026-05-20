@@ -4193,7 +4193,7 @@ def test_ui_catalog_fetch_release_is_idempotent_on_repeated_imports(
 
 def test_ui_machines_renders_timestamps_compactly(app_client: TestClient, tmp_path: Path) -> None:
     """The ``fmt_ts`` Jinja filter trims ISO 8601 timestamps to
-    ``YYYY-MM-DD HH:MM:SS UTC`` for display on /ui/machines and
+    ``YYYY-MM-DD HH:MM:SS`` for display on /ui/machines and
     related pages. The raw value (with microseconds + ``+00:00``)
     is unreadable for an operator scanning a row -- the title=
     attribute keeps the full precision available on hover.
@@ -4221,8 +4221,9 @@ def test_ui_machines_renders_timestamps_compactly(app_client: TestClient, tmp_pa
         conn.commit()
     page = app_client.get("/ui/machines", cookies=AUTH)
     assert page.status_code == 200, page.text
-    # Compact form rendered in the row body.
-    assert "2026-05-17 20:21:09 UTC" in page.text
+    # Compact form rendered in the row body (no offset, no " UTC").
+    assert "2026-05-17 20:21:09" in page.text
+    assert "2026-05-17 20:21:09 UTC" not in page.text
     # Raw form kept in the title= attribute for hover precision.
     assert 'title="2026-05-17T20:21:09.155109+00:00"' in page.text
 

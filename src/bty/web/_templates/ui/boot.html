@@ -258,7 +258,7 @@
                     </td>
                     <td>
                         {% if a.mtime %}
-                        <small class="text-muted">{{ a.mtime }}</small>
+                        <small class="text-muted">{{ a.mtime | fmt_ts }}</small>
                         {% else %}
                         <small class="text-muted">-</small>
                         {% endif %}

@@ -100,7 +100,7 @@
                     {% endfor %}
                 </select>
                 <div class="form-text">
-                    Last inventory reported {{ m.known_disks_at }}. The live env's
+                    Last inventory reported {{ m.known_disks_at | fmt_ts }}. The live env's
                     flash service matches the picked SERIAL against current
                     disks; a swapped or renumbered drive refuses to flash
                     rather than risking the wrong target.
