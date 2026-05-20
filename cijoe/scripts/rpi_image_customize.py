@@ -151,7 +151,7 @@ def main(args, cijoe):
     # 5. sha256 manifest
     sha256_path = gz_path.with_suffix(gz_path.suffix + ".sha256")
     digest = _sha256(gz_path)
-    sha256_path.write_text(f"{digest}  {gz_path.name}\n")
+    sha256_path.write_text(f"{digest}  {gz_path.name}\n", encoding="utf-8")
     log.info(f"sha256 -> {sha256_path}")
 
     return 0
@@ -256,13 +256,17 @@ def _stage_and_chroot(mnt: Path, bty_media: Path) -> int:
         return errno.EIO
 
     # Bind-mount /proc, /sys, /dev, /dev/pts so apt/systemctl work.
-    for src in ("/proc", "/sys", "/dev", "/dev/pts"):
-        dst = mnt / src.lstrip("/")
-        dst.mkdir(parents=True, exist_ok=True)
-        if _run_sudo(["mount", "--bind", src, str(dst)]) != 0:
-            return errno.EIO
-
+    # The mounts live INSIDE the try so a partial-failure (e.g. the
+    # 3rd bind fails) still hits the finally and unmounts whatever
+    # already succeeded -- otherwise the leftover mounts make the
+    # caller's ``umount <mnt>`` (and loop detach) fail with EBUSY.
     try:
+        for src in ("/proc", "/sys", "/dev", "/dev/pts"):
+            dst = mnt / src.lstrip("/")
+            dst.mkdir(parents=True, exist_ok=True)
+            if _run_sudo(["mount", "--bind", src, str(dst)]) != 0:
+                return errno.EIO
+
         # Render the install script and drop it into the chroot.
         install_script = _render_install_script(wheel.name)
         script_path = mnt / "tmp" / "bty-rpi-install.sh"

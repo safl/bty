@@ -480,7 +480,7 @@ def _read_bty_version(cijoe_dir: Path) -> str:
     installed in the cijoe runner's env.
     """
     pyproject = cijoe_dir.parent / "pyproject.toml"
-    for line in pyproject.read_text().splitlines():
+    for line in pyproject.read_text(encoding="utf-8").splitlines():
         stripped = line.strip()
         if stripped.startswith("version") and "=" in stripped:
             return stripped.split("=", 1)[1].strip().strip('"').strip("'")
@@ -620,7 +620,8 @@ def _extend_with_exfat(cijoe, iso_path: Path) -> int:
         f"\n"
         f"start={iso_part['start']}, size={iso_part['size']}, type=0, bootable\n"
         f"start={new_efi_start}, size={efi_size}, type=ef\n"
-        f"start={new_bty_start}, size={new_bty_size}, type=07\n"
+        f"start={new_bty_start}, size={new_bty_size}, type=07\n",
+        encoding="utf-8",
     )
     err, _ = cijoe.run_local(f"sh -c 'sudo sfdisk {iso_path} < {sfdisk_script}'")
     sfdisk_script.unlink(missing_ok=True)
@@ -786,7 +787,7 @@ def _populate_bty_images_partition(cijoe, part_dev: str) -> int:
         fd, name = tempfile.mkstemp(prefix=f"{filename}.", suffix=".tmp")
         os.close(fd)
         src_path = Path(name)
-        src_path.write_text(body)
+        src_path.write_text(body, encoding="utf-8")
         staged.append((filename, src_path))
 
     # ``mktemp -d`` for the mountpoint over a hardcoded path so

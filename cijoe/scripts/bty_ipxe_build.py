@@ -59,11 +59,13 @@ SUPPORTED_VARIANTS: tuple[str, ...] = ("server-x86",)
 
 # Upstream iPXE source.
 IPXE_REPO = "https://github.com/ipxe/ipxe.git"
-# Pin a specific commit so the bake is reproducible. iPXE moves
-# slowly enough that "latest" would mostly work, but pinning
-# avoids surprise breakage from an upstream change between bakes.
-# (Update by bumping this hash + verifying the resulting binary
-# still loads on the firmware under test.)
+# iPXE git ref to build. Currently tracks ``master`` -- iPXE moves
+# slowly enough that the tip mostly stays buildable + loadable on
+# the firmware under test. NOTE: this is NOT pinned, so a bad
+# upstream day can break the bake; pinning to a known-good commit
+# hash here would make the build reproducible, but only after
+# verifying that hash's binary still loads on the test firmware
+# (UNDI 3.0.22 was size-sensitive, see ipxe-local-general.h).
 IPXE_REV = "master"
 
 
