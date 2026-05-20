@@ -31,66 +31,55 @@
 {% block content %}
 {% if section == "downloads" %}
 {# Downloads section: add images (upload a local file or add by URL)
-   above the live download-jobs table. #}
+   above the live download-jobs table. Both add-forms share one
+   compact two-column card so they don't dominate the page; the
+   verbose per-form help moved to title tooltips. #}
 <div class="card mb-3">
     <div class="card-header bg-light fw-semibold">
-        <i class="bi bi-cloud-plus me-1"></i>Upload image (from URL)
+        <i class="bi bi-plus-circle me-1"></i>Add images
     </div>
     <div class="card-body">
-        <form method="post" action="/ui/catalog/entries">
-            <div class="mb-3">
-                <label for="image_url" class="form-label">Image URL or <code>oras://</code> ref</label>
+        <div class="row g-3 align-items-start">
+            <div class="col-md-6">
                 {# type="text" rather than type="url": some browsers
                    reject non-http schemes (oras://) under HTML5 URL
                    validation. Server-side Pydantic validation still
                    runs (regex covers http/https/oras schemes). #}
-                <input type="text" required class="form-control" id="image_url" name="image_url"
-                       placeholder="https://example.com/ubuntu.img.gz  |  oras://ghcr.io/owner/repo:tag">
-                <div class="form-text small">
-                    For <code>http(s)://</code> URLs, the first flash
-                    trusts the upstream bytes and back-fills
-                    <code>disk_image_sha</code> with what it observed.
-                    For <code>oras://</code> refs the server resolves
-                    the OCI manifest at add time and uses the layer's
-                    content-addressed digest.
-                </div>
+                <form method="post" action="/ui/catalog/entries">
+                    <label for="image_url" class="form-label small mb-1">From URL or <code>oras://</code> ref</label>
+                    <div class="input-group input-group-sm">
+                        <input type="text" required class="form-control" id="image_url" name="image_url"
+                               placeholder="https://...img.gz  |  oras://ghcr.io/owner/repo:tag"
+                               title="http(s):// trusts the upstream bytes on first flash and back-fills disk_image_sha with what it observed; oras:// resolves the OCI manifest at add time and uses the layer's content-addressed digest.">
+                        <button type="submit" class="btn btn-primary" title="Add by URL">
+                            <i class="bi bi-plus-lg"></i>
+                        </button>
+                    </div>
+                </form>
             </div>
-            <button type="submit" class="btn btn-primary">
-                <i class="bi bi-plus-lg me-1"></i>Add
-            </button>
-        </form>
-    </div>
-</div>
-
-<div class="card mb-3">
-    <div class="card-header bg-light fw-semibold">
-        <i class="bi bi-upload me-1"></i>Upload image file
-    </div>
-    <div class="card-body">
-        {# Streams the file via XHR PUT to /images/<name> -- the
-           existing API endpoint that takes ``application/octet-
-           stream``. JS handles progress + auth (cookie, same-
-           origin); on success we redirect back to the list so the
-           new file shows up. The HashManager picks up the upload
-           via PUT /images/<name>'s post-write hook (auto-enqueue),
-           so a SHA appears in seconds. #}
-        <div class="mb-3">
-            <label for="upload-file" class="form-label">Local image file</label>
-            <input type="file" class="form-control" id="upload-file"
-                   accept=".qcow2,.img,.img.zst,.img.xz,.img.gz,.img.bz2,.iso,.iso.gz">
-        </div>
-        <button type="button" class="btn btn-primary" id="upload-btn"
-                onclick="uploadSelectedFile();" disabled>
-            <i class="bi bi-upload me-1"></i>Upload
-        </button>
-        <div class="progress mt-3 d-none" id="upload-progress" style="height: 1.25rem;">
-            <div class="progress-bar progress-bar-striped progress-bar-animated"
-                 role="progressbar" style="width: 0%;" id="upload-progress-bar">0%</div>
-        </div>
-        <div class="form-text small mt-2" id="upload-status">
-            Streams directly into the image root via
-            <code>PUT /images/&lt;name&gt;</code>. SHA-256 is auto-computed
-            in the background after upload completes.
+            <div class="col-md-6">
+                {# Streams the file via XHR PUT to /images/<name> -- the
+                   existing API endpoint that takes ``application/octet-
+                   stream``. JS handles progress + auth (cookie, same-
+                   origin); on success we redirect back to the list. The
+                   HashManager picks up the upload via the PUT post-write
+                   hook (auto-enqueue), so a SHA appears in seconds. #}
+                <label for="upload-file" class="form-label small mb-1">Upload local file</label>
+                <div class="input-group input-group-sm">
+                    <input type="file" class="form-control" id="upload-file"
+                           accept=".qcow2,.img,.img.zst,.img.xz,.img.gz,.img.bz2,.iso,.iso.gz"
+                           title="Streams into the image root via PUT /images/<name>; SHA-256 is auto-computed in the background after upload.">
+                    <button type="button" class="btn btn-primary" id="upload-btn"
+                            onclick="uploadSelectedFile();" disabled title="Upload">
+                        <i class="bi bi-upload"></i>
+                    </button>
+                </div>
+                <div class="progress mt-2 d-none" id="upload-progress" style="height: 1rem;">
+                    <div class="progress-bar progress-bar-striped progress-bar-animated"
+                         role="progressbar" style="width: 0%;" id="upload-progress-bar">0%</div>
+                </div>
+                <div class="form-text small mt-1" id="upload-status"></div>
+            </div>
         </div>
     </div>
 </div>
