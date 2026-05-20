@@ -175,14 +175,15 @@ def test_ui_images_handles_empty_release_repo_env(
     ``or DEFAULT_REPO`` pattern handles both."""
     monkeypatch.setenv("BTY_BOOT_RELEASE_REPO", "")
     _login(client)
-    # v0.22.11+: the release-link lives in the ``?section=fetch``
-    # sub-nav section, not the default list view.
-    r = client.get("/ui/images?section=fetch")
+    # The Fetch control now lives in the Catalog table header on the
+    # default list view (the dropped ``?section=fetch`` page).
+    r = client.get("/ui/images")
     assert r.status_code == 200
     body = r.text
-    # The fallback ``safl/bty`` URL appears in the "Fetch from
-    # project release" card's external link.
-    assert "github.com/safl/bty" in body
+    # The fallback ``safl/bty`` repo appears in the Fetch button's
+    # title ("... from safl/bty ...") + the fetch-release form action.
+    assert "safl/bty" in body
+    assert 'action="/ui/catalog/fetch-release"' in body
 
 
 def test_ui_dashboard_renders_with_zero_state(
@@ -302,22 +303,23 @@ def test_ui_dashboard_health_monitoring_renders_with_links(client: TestClient) -
 
 
 def test_ui_images_default_section_is_list_not_add_forms(client: TestClient) -> None:
-    """Bare ``GET /ui/images`` lands on the list section: shows the
-    unified catalog table (or its empty state) but NOT the
-    upload-from-URL / upload-catalog / upload-image forms.
+    """Bare ``GET /ui/images`` lands on the list section: the unified
+    catalog table, with Fetch-latest + Upload-catalog controls inline
+    in its header -- but NOT the per-image add forms (upload-image /
+    upload-from-URL), which stay behind their own sub-nav sections.
     """
     _login(client)
     r = client.get("/ui/images")
     assert r.status_code == 200
     body = r.text
-    # Sub-nav strip is present and List is the active pill.
-    assert 'href="/ui/images?section=fetch"' in body
+    # Sub-nav strip present; upload-image-from-url is still its own pill.
     assert 'href="/ui/images?section=upload-image-from-url"' in body
-    # The upload-from-URL form's input lives behind its own section.
+    # Catalog header carries the inline Fetch + Upload-catalog controls.
+    assert 'action="/ui/catalog/fetch-release"' in body
+    assert 'action="/ui/catalog/upload"' in body
+    assert 'accept=".toml"' in body
+    # But the per-image add forms live behind their own sections.
     assert 'id="image_url"' not in body
-    # Upload-catalog's accept=.toml is the section-specific marker.
-    assert 'accept=".toml"' not in body
-    # Upload-image's <input type=file> with image extensions.
     assert 'id="upload-file"' not in body
 
 
@@ -332,14 +334,18 @@ def test_ui_images_section_upload_image_from_url_shows_form(client: TestClient) 
     assert "Unified catalog" not in body
 
 
-def test_ui_images_section_fetch_shows_one_button_form(client: TestClient) -> None:
+def test_ui_images_list_header_has_fetch_and_upload_catalog(client: TestClient) -> None:
+    """The Catalog table header on the list view carries the Fetch
+    (release catalog.toml) button + the Upload-catalog file form --
+    the controls moved here from the dropped ``?section=fetch`` /
+    ``?section=upload-catalog`` pages."""
     _login(client)
-    r = client.get("/ui/images?section=fetch")
-    assert r.status_code == 200
-    body = r.text
+    body = client.get("/ui/images").text
     assert 'action="/ui/catalog/fetch-release"' in body
-    assert "Fetch latest catalog.toml" in body
-    # No add-by-URL form on this view.
+    assert "Fetch latest" in body
+    assert 'action="/ui/catalog/upload"' in body
+    assert 'accept=".toml"' in body
+    # The add-by-URL form is still its own section, not on the list.
     assert 'id="image_url"' not in body
 
 
@@ -436,11 +442,11 @@ def test_subnav_renders_aria_current_on_active_section(client: TestClient) -> No
         f"images default view: expected aria-current on /ui/images only, got {actives!r}"
     )
 
-    # ?section=fetch: exactly one active pill, pointing at the fetch URL.
-    body = client.get("/ui/images?section=fetch").text
+    # ?section=upload-image: exactly one active pill, pointing at it.
+    body = client.get("/ui/images?section=upload-image").text
     actives = _aria_current_hrefs(body)
-    assert actives == ["/ui/images?section=fetch"], (
-        f"images fetch view: expected aria-current on the fetch href only, got {actives!r}"
+    assert actives == ["/ui/images?section=upload-image"], (
+        f"images upload-image view: expected aria-current on that href only, got {actives!r}"
     )
     # Top-level <nav> carries an aria-label so screen readers
     # distinguish the section sub-nav from the top-bar nav.
@@ -468,7 +474,7 @@ def test_ui_images_section_unrecognised_falls_back_to_list(client: TestClient) -
     # Lands on list (no add-form markers).
     assert 'id="image_url"' not in body
     # Sub-nav strip still renders.
-    assert 'href="/ui/images?section=fetch"' in body
+    assert 'href="/ui/images?section=upload-image"' in body
 
 
 def test_ui_boot_default_section_is_list(client: TestClient) -> None:

@@ -4,11 +4,9 @@
 {% block subnav %}
 {% set right_html %}<span class="text-muted small">{{ unified|length }} entr{{ "y" if unified|length == 1 else "ies" }} | image-root <code>{{ image_root }}</code></span>{% endset %}
 {% with sections=[
-    {"key": "list",                  "label": "Catalog",                  "icon": "list-ul",       "href": "/ui/images"},
+    {"key": "list",                  "label": "List",                     "icon": "list-ul",       "href": "/ui/images"},
     {"key": "downloads",             "label": "Downloads",                "icon": "arrow-down-circle", "href": "/ui/images?section=downloads"},
     {"key": "hashes",                "label": "Hashes",                   "icon": "hash",          "href": "/ui/images?section=hashes"},
-    {"key": "fetch",                 "label": "Fetch catalog",            "icon": "cloud-download","href": "/ui/images?section=fetch"},
-    {"key": "upload-catalog",        "label": "Upload catalog",           "icon": "file-earmark-text", "href": "/ui/images?section=upload-catalog"},
     {"key": "upload-image",          "label": "Upload image",             "icon": "upload",        "href": "/ui/images?section=upload-image"},
     {"key": "upload-image-from-url", "label": "Upload image (from URL)",  "icon": "cloud-plus",    "href": "/ui/images?section=upload-image-from-url"},
 ] , active=section, right_html=right_html %}
@@ -21,44 +19,19 @@
 {% call intro_box() %}
     Pre-built system images bty flashes onto target disks, content-
     addressed by sha256. Sub-nav:
-    <strong>Catalog</strong> is the merged listing (dir scan +
-    catalog entries);
+    <strong>List</strong> is the merged catalog (dir scan + catalog
+    entries) -- its header carries <em>Fetch latest</em> (pull the
+    bty release catalog) and <em>Upload</em> (a catalog.toml);
     <strong>Downloads</strong> / <strong>Hashes</strong> show the
     live background fetch + sha workers;
-    <strong>Fetch catalog</strong> pulls the bty release catalog;
-    <strong>Upload catalog</strong> / <strong>Upload image</strong> /
-    <strong>Upload image (from URL)</strong> add entries by hand.
-    Files dropped into <code>{{ image_root }}</code> are picked up
-    and hashed automatically.
+    <strong>Upload image</strong> / <strong>Upload image (from URL)</strong>
+    add a single image. Files dropped into <code>{{ image_root }}</code>
+    are picked up and hashed automatically.
 {% endcall %}
 {% endblock %}
 
 {% block content %}
-{% if section == "fetch" %}
-{# The common-case default: pull the bty project's released
-   catalog.toml in one click. Operators who just want "give me
-   something to flash" land here, click once, get a populated
-   catalog. Custom URLs / uploads are one sub-nav click away. #}
-<div class="card mb-3">
-    <div class="card-header bg-light fw-semibold">
-        <i class="bi bi-cloud-download me-1"></i>Fetch from project release
-    </div>
-    <div class="card-body">
-        <form method="post" action="/ui/catalog/fetch-release">
-            <p class="mb-3">
-                Pulls <code>releases/latest/download/catalog.toml</code> from
-                <a href="https://github.com/{{ release_repo }}/releases/latest"
-                   target="_blank" rel="noopener">{{ release_repo }}</a>
-                and imports its entries into the catalog.
-            </p>
-            <button type="submit" class="btn btn-primary">
-                <i class="bi bi-cloud-download me-1"></i>Fetch latest catalog.toml
-            </button>
-        </form>
-    </div>
-</div>
-
-{% elif section == "upload-image-from-url" %}
+{% if section == "upload-image-from-url" %}
 <div class="card mb-3">
     <div class="card-header bg-light fw-semibold">
         <i class="bi bi-cloud-plus me-1"></i>Upload image (from URL)
@@ -84,33 +57,6 @@
             </div>
             <button type="submit" class="btn btn-primary">
                 <i class="bi bi-plus-lg me-1"></i>Add
-            </button>
-        </form>
-    </div>
-</div>
-
-{% elif section == "upload-catalog" %}
-<div class="card mb-3">
-    <div class="card-header bg-light fw-semibold">
-        <i class="bi bi-file-earmark-text me-1"></i>Upload catalog
-    </div>
-    <div class="card-body">
-        <form method="post" action="/ui/catalog/upload" enctype="multipart/form-data">
-            <div class="mb-3">
-                <label for="catalog-file" class="form-label">
-                    <code>catalog.toml</code> file
-                </label>
-                <input type="file" required class="form-control" id="catalog-file"
-                       name="file" accept=".toml">
-                <div class="form-text small">
-                    Parses before clobbering the existing catalog
-                    (a bad upload bounces back with the parse error).
-                    Replaces <code>{{ manifest_path }}</code>
-                    and reloads the download manager in-process.
-                </div>
-            </div>
-            <button type="submit" class="btn btn-primary">
-                <i class="bi bi-upload me-1"></i>Upload
             </button>
         </form>
     </div>
@@ -258,21 +204,33 @@
         </table>
     </div>
 </div>
-{% elif not unified %}
-<div class="alert alert-light border">
-    <i class="bi bi-info-circle me-2"></i>
-    No images yet. The fastest way to populate: click
-    <a href="/ui/images?section=fetch">Fetch default</a> to pull the
-    project's release catalog. Or drop a <code>.qcow2</code> /
-    <code>.img</code> / <code>.img.zst</code> / <code>.img.xz</code>
-    / <code>.img.gz</code> / <code>.img.bz2</code> file under
-    <code>{{ image_root }}</code> and refresh.
-</div>
 {% else %}
 
 <div class="card mb-3">
-    <div class="card-header bg-light fw-semibold">
-        <i class="bi bi-list-ul me-1"></i>Catalog
+    <div class="card-header bg-light fw-semibold d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <span><i class="bi bi-list-ul me-1"></i>Catalog</span>
+        <span class="d-flex flex-wrap gap-2 align-items-center">
+            {# Fetch the bty release catalog.toml in one click (was the
+               dropped "Fetch catalog" sub-nav page). #}
+            <form method="post" action="/ui/catalog/fetch-release" class="m-0">
+                <button type="submit" class="btn btn-sm btn-primary"
+                        title="Pull releases/latest/download/catalog.toml from {{ release_repo }} and import its entries">
+                    <i class="bi bi-cloud-download me-1"></i>Fetch latest
+                </button>
+            </form>
+            {# Upload a catalog.toml (was the dropped "Upload catalog"
+               sub-nav page). Parsed before it replaces the current
+               catalog ({{ manifest_path }}); a bad file bounces back. #}
+            <form method="post" action="/ui/catalog/upload" enctype="multipart/form-data"
+                  class="d-flex gap-1 m-0">
+                <input type="file" required name="file" accept=".toml"
+                       class="form-control form-control-sm" style="max-width: 12rem;"
+                       title="catalog.toml -- parsed before replacing {{ manifest_path }}">
+                <button type="submit" class="btn btn-sm btn-outline-secondary">
+                    <i class="bi bi-upload me-1"></i>Upload
+                </button>
+            </form>
+        </span>
     </div>
     <div class="table-responsive">
         <table class="table table-hover mb-0 align-middle">
@@ -397,6 +355,16 @@
                     </td>
                 </tr>
                 {% endfor %}
+                {% if not unified %}
+                <tr><td colspan="6" class="text-muted text-center py-3">
+                    No images yet. Use <strong>Fetch latest</strong> or
+                    <strong>Upload</strong> above, or drop a
+                    <code>.qcow2</code> / <code>.img</code> /
+                    <code>.img.zst</code> / <code>.img.xz</code> /
+                    <code>.img.gz</code> / <code>.img.bz2</code> file into
+                    <code>{{ image_root }}</code>.
+                </td></tr>
+                {% endif %}
             </tbody>
         </table>
     </div>

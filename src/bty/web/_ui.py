@@ -518,16 +518,14 @@ def register_ui_routes(
     def ui_images(request: Request) -> HTMLResponse:
         """Unified images page with sub-nav. Default landing
         (``?section=list``, or no query) shows the SHA-keyed catalog
-        merge + the live downloads / hashes panes. Operators land
-        on the OBSERVABLE state of the catalog; "add" paths are one
-        click away via the sub-nav:
+        merge; its table header carries the inline Fetch-latest
+        (release catalog.toml) + Upload-catalog controls. The other
+        sections:
 
-        * ``?section=fetch``: one-button fetch of the bty release
-          catalog.toml (the common-case default for populating).
-        * ``?section=add-url``: form to add by http(s):// or
-          oras:// URL.
-        * ``?section=upload-catalog``: file picker for a
-          ``catalog.toml`` upload.
+        * ``?section=downloads`` / ``?section=hashes``: the live
+          background fetch / sha worker panes.
+        * ``?section=upload-image-from-url``: form to add by
+          http(s):// or oras:// URL.
         * ``?section=upload-image``: file picker for streaming an
           image into the image root.
 
@@ -546,8 +544,6 @@ def register_ui_routes(
             "list",
             "downloads",
             "hashes",
-            "fetch",
-            "upload-catalog",
             "upload-image",
             "upload-image-from-url",
         ):
