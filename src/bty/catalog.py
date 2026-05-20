@@ -50,10 +50,13 @@ SCHEMA_VERSION = 1
 
 
 class CatalogError(Exception):
-    """Raised when a manifest fails to parse, validate, or fetch.
+    """Raised when a catalog file fails to parse, validate, or fetch.
 
-    Subclass only when a call site needs to discriminate; ``bty``
-    prints the message verbatim.
+    The message is operator-facing: both the ``bty`` wizard and
+    bty-web print it verbatim, so it uses "catalog" vocabulary to
+    match the UI (the sha256-sidecar checksum file is a distinct
+    "manifest" and keeps that term). Subclass only when a call
+    site needs to discriminate.
     """
 
 
@@ -126,7 +129,7 @@ class CatalogEntry:
         for required in ("name", "src"):
             if required not in raw:
                 raise CatalogError(
-                    f"manifest entry missing required field: {required!r} (entry: {raw!r})"
+                    f"catalog entry missing required field: {required!r} (entry: {raw!r})"
                 )
         src = str(raw["src"])
         sha: str | None = None
@@ -134,7 +137,7 @@ class CatalogEntry:
             sha = str(raw["sha256"]).strip().lower()
             if not _images.is_sha256_hex(sha):
                 raise CatalogError(
-                    f"manifest entry {raw['name']!r}: sha256 must be a 64-char "
+                    f"catalog entry {raw['name']!r}: sha256 must be a 64-char "
                     f"lower-case hex string, got {sha!r}"
                 )
         # Trust-but-verify: if the inbound dict carries a ``ref``
@@ -149,12 +152,12 @@ class CatalogEntry:
                 expected_ref = image_ref_for_src(src)
             except ValueError as exc:
                 raise CatalogError(
-                    f"manifest entry {raw['name']!r}: cannot verify ``ref`` "
+                    f"catalog entry {raw['name']!r}: cannot verify ``ref`` "
                     f"because ``src`` is malformed: {exc}"
                 ) from exc
             if supplied_ref != expected_ref:
                 raise CatalogError(
-                    f"manifest entry {raw['name']!r}: ``ref`` mismatch -- "
+                    f"catalog entry {raw['name']!r}: ``ref`` mismatch: "
                     f"supplied {supplied_ref!r} but image_ref_for_src(src) "
                     f"= {expected_ref!r}. The ref must equal "
                     f"sha256(canonicalise_src(src)); either the producer's "
@@ -223,19 +226,19 @@ def load_bytes(raw_bytes: bytes, *, source: str = "<bytes>") -> Catalog:
     try:
         raw = tomllib.loads(raw_bytes.decode("utf-8"))
     except (tomllib.TOMLDecodeError, UnicodeDecodeError) as exc:
-        raise CatalogError(f"catalog manifest at {source} is not valid TOML: {exc}") from exc
+        raise CatalogError(f"catalog at {source} is not valid TOML: {exc}") from exc
 
     version = raw.get("version")
     if version != SCHEMA_VERSION:
         raise CatalogError(
-            f"catalog manifest at {source}: version={version!r}, "
+            f"catalog at {source}: version={version!r}, "
             f"this bty understands version={SCHEMA_VERSION}"
         )
 
     images_raw = raw.get("images", [])
     if not isinstance(images_raw, list):
         raise CatalogError(
-            f"catalog manifest at {source}: ``images`` must be an array of tables, "
+            f"catalog at {source}: ``images`` must be an array of tables, "
             f"got {type(images_raw).__name__}"
         )
 
@@ -244,12 +247,12 @@ def load_bytes(raw_bytes: bytes, *, source: str = "<bytes>") -> Catalog:
     for raw_entry in images_raw:
         if not isinstance(raw_entry, dict):
             raise CatalogError(
-                f"catalog manifest at {source}: ``images`` entry must be a table, "
+                f"catalog at {source}: ``images`` entry must be a table, "
                 f"got {type(raw_entry).__name__}"
             )
         entry = CatalogEntry.from_dict(raw_entry)
         if entry.name in seen_names:
-            raise CatalogError(f"catalog manifest at {source}: duplicate image name {entry.name!r}")
+            raise CatalogError(f"catalog at {source}: duplicate image name {entry.name!r}")
         seen_names.add(entry.name)
         entries.append(entry)
 
@@ -264,7 +267,7 @@ def load(path: Path) -> Catalog:
     :func:`load_bytes` raises.
     """
     if not path.exists():
-        raise CatalogError(f"catalog manifest not found: {path}")
+        raise CatalogError(f"catalog not found: {path}")
     return load_bytes(path.read_bytes(), source=str(path))
 
 

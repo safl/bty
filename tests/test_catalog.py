@@ -143,6 +143,36 @@ def test_load_rejects_malformed_toml(tmp_path: Path) -> None:
         catalog.load(path)
 
 
+def test_catalog_error_messages_say_catalog_not_manifest(tmp_path: Path) -> None:
+    """Operator-facing ``CatalogError`` messages use the word
+    "catalog", not "manifest" -- the UI renamed the concept to
+    "Catalog" everywhere, and these errors print verbatim in both
+    the ``bty`` wizard and bty-web. The internal sha256-sidecar
+    checksum file is a different "manifest" and keeps that term.
+
+    Pins the rename so a future edit to the error strings doesn't
+    drift back to "manifest entry ..." / "catalog manifest at ...".
+    """
+    # Missing-field error.
+    bad_field = _write(tmp_path / "a.toml", 'version = 1\n[[images]]\nname = "no-src"\n')
+    with pytest.raises(catalog.CatalogError) as ei1:
+        catalog.load(bad_field)
+    assert "catalog entry" in str(ei1.value)
+    assert "manifest entry" not in str(ei1.value)
+
+    # Parse error.
+    bad_toml = _write(tmp_path / "b.toml", "not = valid = toml\n")
+    with pytest.raises(catalog.CatalogError) as ei2:
+        catalog.load(bad_toml)
+    assert "catalog at" in str(ei2.value)
+    assert "catalog manifest at" not in str(ei2.value)
+
+    # Missing-file error.
+    with pytest.raises(catalog.CatalogError) as ei3:
+        catalog.load(tmp_path / "nope.toml")
+    assert "catalog not found" in str(ei3.value)
+
+
 # -----------------------------------------------------------------------
 # fetch_to_cache()
 # -----------------------------------------------------------------------
