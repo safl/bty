@@ -36,14 +36,14 @@
            image binding + policy are set on the detail page. The
            upsert handler creates the row with discovered_at=NULL; it
            flips to first-seen on the box's first PXE contact. #}
-        <form id="add-machine-form" class="d-flex gap-1 m-0" style="min-width: 0;"
+        <form id="add-machine-form" class="d-flex align-items-center gap-1 m-0" style="min-width: 0;"
               onsubmit="return submitAddMachine(event);">
             <input type="text" required class="form-control form-control-sm font-monospace"
                    id="add-mac" name="mac" style="max-width: 14rem; min-width: 0;"
                    pattern="^([0-9a-fA-F]{2}[:-]){5}[0-9a-fA-F]{2}$"
                    placeholder="aa:bb:cc:dd:ee:ff"
                    title="Stage a machine by MAC before it boots; boot policy defaults to 'local' (set image + policy on the detail page)">
-            <button type="submit" class="btn btn-sm btn-primary">
+            <button type="submit" class="btn btn-sm btn-primary flex-shrink-0 text-nowrap">
                 <i class="bi bi-plus-lg me-1"></i>Add
             </button>
         </form>

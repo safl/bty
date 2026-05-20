@@ -43,12 +43,12 @@
         <span class="d-flex flex-nowrap align-items-center gap-2" style="min-width: 0;">
             {# type="text" not type="url": browsers reject oras:// under
                HTML5 URL validation; server-side Pydantic still validates. #}
-            <form method="post" action="/ui/catalog/entries" class="d-flex gap-1 m-0" style="min-width: 0;">
+            <form method="post" action="/ui/catalog/entries" class="d-flex align-items-center gap-1 m-0" style="min-width: 0;">
                 <input type="text" required class="form-control form-control-sm" id="image_url" name="image_url"
                        style="max-width: 18rem; min-width: 0;"
                        placeholder="https://...img.gz  |  oras://owner/repo:tag"
                        title="http(s):// trusts the upstream bytes on first flash and back-fills disk_image_sha; oras:// resolves the OCI manifest digest at add time.">
-                <button type="submit" class="btn btn-sm btn-outline-secondary text-nowrap">
+                <button type="submit" class="btn btn-sm btn-outline-secondary flex-shrink-0 text-nowrap">
                     <i class="bi bi-cloud-plus me-1"></i>Fetch from URL
                 </button>
             </form>
@@ -60,7 +60,7 @@
                        style="max-width: 15rem; min-width: 0;"
                        accept=".qcow2,.img,.img.zst,.img.xz,.img.gz,.img.bz2,.iso,.iso.gz"
                        title="Streams into the image root via PUT /images/<name>; SHA-256 auto-computed after.">
-                <button type="button" class="btn btn-sm btn-outline-secondary text-nowrap" id="upload-btn"
+                <button type="button" class="btn btn-sm btn-outline-secondary flex-shrink-0 text-nowrap" id="upload-btn"
                         onclick="uploadSelectedFile();" disabled>
                     <i class="bi bi-upload me-1"></i>Upload
                 </button>
@@ -186,17 +186,17 @@
             {# Parsed before it replaces the current catalog
                ({{ manifest_path }}); a bad file bounces back. #}
             <form method="post" action="/ui/catalog/upload" enctype="multipart/form-data"
-                  class="d-flex gap-1 m-0" style="min-width: 0;">
+                  class="d-flex align-items-center gap-1 m-0" style="min-width: 0;">
                 <input type="file" required name="file" accept=".toml"
                        class="form-control form-control-sm" style="max-width: 12rem; min-width: 0;"
                        title="catalog.toml: parsed before replacing {{ manifest_path }}">
-                <button type="submit" class="btn btn-sm btn-outline-secondary text-nowrap">
+                <button type="submit" class="btn btn-sm btn-outline-secondary flex-shrink-0 text-nowrap">
                     <i class="bi bi-upload me-1"></i>Upload catalog
                 </button>
             </form>
             <div class="vr"></div>
             <form method="post" action="/ui/catalog/fetch-release" class="m-0">
-                <button type="submit" class="btn btn-sm btn-primary text-nowrap"
+                <button type="submit" class="btn btn-sm btn-primary flex-shrink-0 text-nowrap"
                         title="Pull releases/latest/download/catalog.toml from {{ release_repo }} and import its entries">
                     <i class="bi bi-cloud-download me-1"></i>Fetch latest catalog
                 </button>
