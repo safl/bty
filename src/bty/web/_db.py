@@ -18,7 +18,7 @@ from __future__ import annotations
 import os
 import sqlite3
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from pathlib import Path
 
 DEFAULT_STATE_DIR = Path("/var/lib/bty")
@@ -176,10 +176,13 @@ def init_db(path: Path) -> None:
     with operator-actionable recovery instructions.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(path) as conn:
+    # ``with sqlite3.connect(...)`` is a *transaction* context, not a
+    # *close* context -- it commits/rolls back but leaves the
+    # connection open (closed only by refcount GC, fragile off
+    # CPython). ``closing`` guarantees the fd is released here.
+    with closing(sqlite3.connect(path)) as conn, conn:
         _detect_stale_schema(conn, path)
         conn.executescript(SCHEMA)
-        conn.commit()
 
 
 @contextmanager

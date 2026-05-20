@@ -1289,19 +1289,32 @@ def _partprobe_target(target: Path) -> None:
 # ---------- Internal helpers --------------------------------------------------
 
 
+def _probe_run(cmd: list[str], *, timeout: float = 60.0) -> subprocess.CompletedProcess[str] | None:
+    """Run a bounded metadata-probe command; return the completed
+    process, or ``None`` if it timed out.
+
+    The size / mountpoint probes here run during ``validate_plan``;
+    bounding them keeps a stuck IO subsystem (failing disk, slow
+    network mount, corrupt image) from wedging the pre-flash check.
+    Callers already treat a failed probe as "unknown" (returning
+    ``None`` / ``[]``), so a timeout folds cleanly into that best-
+    effort contract. Mirrors the defensive timeouts in
+    :mod:`bty.disks` and :func:`bty.images.inspect_image`.
+    """
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return None
+
+
 def _image_virtual_size(path: Path, image_format: str | None) -> int | None:
     """Return the byte count an image would expand to on disk."""
     if image_format == "img":
         return path.stat().st_size
 
     if image_format == "qcow2":
-        proc = subprocess.run(
-            ["qemu-img", "info", "--output=json", str(path)],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if proc.returncode != 0:
+        proc = _probe_run(["qemu-img", "info", "--output=json", str(path)])
+        if proc is None or proc.returncode != 0:
             return None
         try:
             payload = json.loads(proc.stdout)
@@ -1311,24 +1324,14 @@ def _image_virtual_size(path: Path, image_format: str | None) -> int | None:
         return size if isinstance(size, int) else None
 
     if image_format == "img.zst":
-        proc = subprocess.run(
-            ["zstd", "-l", "--no-progress", str(path)],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if proc.returncode != 0:
+        proc = _probe_run(["zstd", "-l", "--no-progress", str(path)])
+        if proc is None or proc.returncode != 0:
             return None
         return _parse_compressed_listing(proc.stdout, header_prefix="Frames")
 
     if image_format == "img.xz":
-        proc = subprocess.run(
-            ["xz", "-l", str(path)],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if proc.returncode != 0:
+        proc = _probe_run(["xz", "-l", str(path)])
+        if proc is None or proc.returncode != 0:
             return None
         # ``xz -l`` shares the ``Compressed Uncompressed`` two-cell
         # column layout with ``zstd -l``, so the same parser works.
@@ -1345,13 +1348,8 @@ def _image_virtual_size(path: Path, image_format: str | None) -> int | None:
         # best-effort hint; if wrong the size-fits-target check
         # might miss but the actual flash still proceeds correctly
         # since dd reads the real stream.
-        proc = subprocess.run(
-            ["gzip", "-l", str(path)],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if proc.returncode != 0:
+        proc = _probe_run(["gzip", "-l", str(path)])
+        if proc is None or proc.returncode != 0:
             return None
         return _parse_gzip_listing(proc.stdout)
 
@@ -1420,15 +1418,11 @@ def _parse_gzip_listing(gzip_output: str) -> int | None:
 
 def _lsblk_target_size(target: Path) -> int | None:
     """Return target size in bytes via ``lsblk -bndo SIZE`` (top-level only)."""
-    proc = subprocess.run(
-        ["lsblk", "-bndo", "SIZE", str(target)],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if proc.returncode != 0:
+    proc = _probe_run(["lsblk", "-bndo", "SIZE", str(target)])
+    if proc is None or proc.returncode != 0:
         return None
-    line = proc.stdout.strip().splitlines()[0] if proc.stdout.strip() else ""
+    stdout = proc.stdout.strip()
+    line = stdout.splitlines()[0] if stdout else ""
     try:
         return int(line)
     except ValueError:
@@ -1437,12 +1431,7 @@ def _lsblk_target_size(target: Path) -> int | None:
 
 def _lsblk_target_mountpoints(target: Path) -> list[str]:
     """Return all mountpoints used by ``target`` and its partitions."""
-    proc = subprocess.run(
-        ["lsblk", "-no", "MOUNTPOINTS", str(target)],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if proc.returncode != 0:
+    proc = _probe_run(["lsblk", "-no", "MOUNTPOINTS", str(target)])
+    if proc is None or proc.returncode != 0:
         return []
     return [mp for raw in proc.stdout.splitlines() if (mp := raw.strip())]
