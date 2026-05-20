@@ -153,7 +153,7 @@ def test_ui_dashboard_renders_after_login(client: TestClient) -> None:
     assert r.status_code == 200
     body = r.text
     # Live panels render (SSE-swapped Machine Summary + Images).
-    assert 'id="dashboard-counts"' in body
+    assert 'sse-connect="/events/machines"' in body
     assert "Machine Summary" in body
     assert "Images" in body
     # Health Monitoring panel (renamed from "Sanity checklist").
@@ -241,17 +241,20 @@ def test_ui_dashboard_shows_recent_activity_after_a_pxe_event(client: TestClient
 
 
 def test_ui_dashboard_subscribes_to_sse_for_live_counts(client: TestClient) -> None:
-    """The counter cards need a ``sse-connect``/``sse-swap`` wrapper
-    so the htmx-ext-sse client routes ``dashboard-counts`` events to
-    them - that's what makes the dashboard a *dashboard* and not a
-    snapshot."""
+    """The live panels need ``sse-connect`` on the row + a per-panel
+    ``sse-swap`` so the htmx-ext-sse client routes the
+    ``dashboard-machine`` / ``dashboard-images`` events to the right
+    column - that's what makes the dashboard a *dashboard* and not a
+    snapshot. The Machine Summary + Images panels are independent
+    swap targets (not one bundled fragment) so they sit as separate,
+    equally-spaced columns."""
     _login(client)
     r = client.get("/ui/dashboard")
     assert r.status_code == 200
     body = r.text
-    assert 'id="dashboard-counts"' in body
     assert 'sse-connect="/events/machines"' in body
-    assert 'sse-swap="dashboard-counts"' in body
+    assert 'sse-swap="dashboard-machine"' in body
+    assert 'sse-swap="dashboard-images"' in body
 
 
 def test_ui_dashboard_health_monitoring_renders_with_links(client: TestClient) -> None:

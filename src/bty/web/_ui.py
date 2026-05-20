@@ -1043,7 +1043,7 @@ def register_ui_routes(
 def dashboard_counts_context(conn: Any, unified: list[bty_images.UnifiedImage]) -> dict[str, Any]:
     """Build the LIVE dashboard-panel context: machine summary +
     image breakdown. Shared by ``ui_dashboard`` (initial render) and
-    the SSE ``render_dashboard_counts`` publisher (in _app) so the two
+    the SSE ``render_dashboard_panels`` publisher (in _app) so the two
     panels can never drift.
 
     ``unified`` is the merged catalog listing. The image breakdown

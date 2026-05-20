@@ -19,20 +19,21 @@
 {% endblock %}
 
 {% block content %}
-{# Top row: three equal panels. The first two (Machine Summary +
-   Images) are LIVE -- they subscribe to /events/machines via SSE and
-   htmx-ext-sse swaps a fresh ``dashboard-counts`` fragment in on every
-   machine mutation / image change. The SSE wrapper is
-   display:contents so its two cards act as direct grid children,
-   lining up as equal thirds beside the static Health Monitoring card
-   (rendered at request time; reload to refresh). #}
-<div class="row g-3 mb-4">
-    <div id="dashboard-counts"
-         style="display: contents"
-         hx-ext="sse"
-         sse-connect="/events/machines"
-         sse-swap="dashboard-counts">
-        {% include "ui/_dashboard_counts.html" %}
+{# Top row: three independent, equally-spaced panels. Each is a
+   direct grid column so Bootstrap's gutters apply uniformly (an
+   earlier display:contents wrapper bundled Machine + Images and ate
+   their gutter). The row opens one SSE connection; the Machine
+   Summary + Images columns each swap their own event
+   (``dashboard-machine`` / ``dashboard-images``) live on machine
+   mutations / image changes. Health Monitoring is rendered at
+   request time (reload to refresh) -- its checks shell out, so we
+   don't want them on every check-in. #}
+<div class="row g-3 mb-4" hx-ext="sse" sse-connect="/events/machines">
+    <div class="col-lg-4 col-md-6 sse-target" sse-swap="dashboard-machine">
+        {% include "ui/_dashboard_machine.html" %}
+    </div>
+    <div class="col-lg-4 col-md-6 sse-target" sse-swap="dashboard-images">
+        {% include "ui/_dashboard_images.html" %}
     </div>
     <div class="col-lg-4 col-md-6">
         <div class="card h-100 shadow-sm">

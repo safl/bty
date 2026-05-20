@@ -1,0 +1,28 @@
+{# Machine Summary card body. Rendered at page load (ui_dashboard)
+   and swapped live on the ``dashboard-machine`` SSE event. Lives in
+   its own col in dashboard.html so it's an independent, equally-
+   spaced grid column (not bundled with Images). #}
+<div class="card h-100 shadow-sm">
+    <div class="card-header bg-light fw-semibold">
+        <i class="bi bi-pc-display me-1"></i>Machine Summary
+    </div>
+    <ul class="list-group list-group-flush">
+        <li class="list-group-item d-flex justify-content-between align-items-center">
+            <span class="text-muted">Total</span>
+            <a href="/ui/machines" class="fw-semibold text-decoration-none">{{ machine_count }}</a>
+        </li>
+        <li class="list-group-item d-flex justify-content-between align-items-center">
+            <span class="text-muted">Unassigned</span>
+            <a href="/ui/machines?filter=discovered"
+               class="fw-semibold text-decoration-none {{ 'text-warning' if unassigned_count else '' }}">{{ unassigned_count }}</a>
+        </li>
+        <li class="list-group-item d-flex justify-content-between align-items-center">
+            <span class="text-muted">Last seen</span>
+            <span class="small">{{ last_seen[:16].replace("T", " ") if last_seen else "never" }}</span>
+        </li>
+        <li class="list-group-item d-flex justify-content-between align-items-center">
+            <span class="text-muted">Last flashed</span>
+            <span class="small">{{ last_flashed[:16].replace("T", " ") if last_flashed else "never" }}</span>
+        </li>
+    </ul>
+</div>

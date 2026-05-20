@@ -336,15 +336,21 @@ def create_app(
         machines = [_ui._row_to_dict(r) for r in rows]
         return jinja.get_template("ui/_machines_tbody.html").render(machines=machines)
 
-    def render_dashboard_counts() -> str:
-        """Render the live dashboard panels (machine summary + image
-        breakdown) as a swappable SSE fragment. Uses the same
-        ``_ui.dashboard_counts_context`` builder as the initial
-        dashboard render so the live panels can't drift from the
-        request-time render."""
+    def render_dashboard_panels() -> tuple[str, str]:
+        """Render the two LIVE dashboard panels (machine summary,
+        images) as separate SSE fragments, returned as
+        ``(machine_html, images_html)``. Both come from the same
+        ``_ui.dashboard_counts_context`` builder as the request-time
+        dashboard render so they can't drift. They're published as
+        distinct ``dashboard-machine`` / ``dashboard-images`` events
+        because each lives in its own (independent, equally-spaced)
+        dashboard column."""
         with _db.open_db(state_path) as conn:
             ctx = _ui.dashboard_counts_context(conn, _list_unified_images())
-        return jinja.get_template("ui/_dashboard_counts.html").render(**ctx)
+        return (
+            jinja.get_template("ui/_dashboard_machine.html").render(**ctx),
+            jinja.get_template("ui/_dashboard_images.html").render(**ctx),
+        )
 
     def publish_state_changed() -> None:
         """Publish fresh snapshots of every SSE-driven UI fragment.
@@ -356,7 +362,9 @@ def create_app(
         ``dashboard-counts`` event.
         """
         event_bus.publish(MachineEvent(name="machines-update", html=render_machines_tbody()))
-        event_bus.publish(MachineEvent(name="dashboard-counts", html=render_dashboard_counts()))
+        machine_html, images_html = render_dashboard_panels()
+        event_bus.publish(MachineEvent(name="dashboard-machine", html=machine_html))
+        event_bus.publish(MachineEvent(name="dashboard-images", html=images_html))
 
     # ----- Open routes (no auth) ------------------------------------------
 
@@ -1187,7 +1195,9 @@ def create_app(
             # event is routed by the htmx-ext-sse client to whichever
             # element on the page declares ``sse-swap=<name>``.
             yield sse_format("machines-update", render_machines_tbody())
-            yield sse_format("dashboard-counts", render_dashboard_counts())
+            _machine_html, _images_html = render_dashboard_panels()
+            yield sse_format("dashboard-machine", _machine_html)
+            yield sse_format("dashboard-images", _images_html)
             async for event in event_bus.subscribe():
                 yield sse_format(event.name, event.html)
 
