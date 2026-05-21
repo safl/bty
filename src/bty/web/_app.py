@@ -1427,10 +1427,13 @@ def create_app(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"no lshw hardware inventory for {normalised}",
             )
+        # Colons are invalid in filenames on Windows (and awkward on
+        # every OS), so the download name uses the hyphen-separated MAC.
+        mac_fname = normalised.replace(":", "-")
         return Response(
             content=blob,
             media_type="application/json",
-            headers={"Content-Disposition": f'attachment; filename="{normalised}-lshw.json"'},
+            headers={"Content-Disposition": f'attachment; filename="{mac_fname}-lshw.json"'},
         )
 
     @app.put(

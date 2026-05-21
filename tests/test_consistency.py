@@ -743,6 +743,55 @@ def test_every_ui_page_uses_the_intro_box_partial() -> None:
     )
 
 
+def test_plan_modes_emitted_by_server_are_handled_by_the_client() -> None:
+    """Every ``plan.mode`` the server can return from
+    ``GET /pxe/{mac}/plan`` (``_app.py``) must be handled explicitly by
+    the live-env client's ``_fetch_and_dispatch_plan`` (``tui/_app.py``).
+
+    The client falls back to ``interactive`` for an unknown mode, so a
+    server-side mode added without a matching client branch wouldn't
+    crash -- it would just silently drop the operator into the wizard
+    instead of doing what the new mode intended (e.g. mode=inventory
+    posting disks + rebooting). Pin the server->client contract so that
+    drift fails CI instead.
+    """
+    server = (REPO_ROOT / "src" / "bty" / "web" / "_app.py").read_text()
+    client = (REPO_ROOT / "src" / "bty" / "tui" / "_app.py").read_text()
+    emitted = set(re.findall(r'"mode": "(\w+)"', server))
+    handled = set(re.findall(r'mode == "(\w+)"', client))
+    assert emitted, "no plan modes found in _app.py -- regex drifted?"
+    missing = emitted - handled
+    assert not missing, (
+        f"server emits plan mode(s) {sorted(missing)} that the live-env client "
+        f"(_fetch_and_dispatch_plan) doesn't handle -- they'd silently fall back to "
+        f"the interactive wizard. Add a matching ``mode == ...`` branch."
+    )
+
+
+def test_every_boot_policy_has_a_machine_row_badge() -> None:
+    """Every ``BOOT_POLICIES`` value must have an explicit
+    ``m.boot_policy == '<value>'`` badge case in ``_machine_row.html``.
+
+    The template ends in an ``{% else %}`` "unrecognised boot policy
+    (stale record)" fallback; without this pin a newly-added policy
+    would silently render with that grey fallback badge (wrong colour,
+    wrong tooltip) instead of its own. Mirrors the
+    decision-tree-coverage pin -- the policy set is one source of
+    truth, the badge ladder another.
+    """
+    from bty.web._models import BOOT_POLICIES
+
+    body = (
+        REPO_ROOT / "src" / "bty" / "web" / "_templates" / "ui" / "_machine_row.html"
+    ).read_text()
+    cased = set(re.findall(r"m\.boot_policy == '([^']+)'", body))
+    missing = [p for p in BOOT_POLICIES if p not in cased]
+    assert not missing, (
+        f"boot policies with no explicit badge case in _machine_row.html: {missing!r}. "
+        f"They'd fall to the grey 'unrecognised' badge. Add a {{% elif %}} branch."
+    )
+
+
 def test_pxe_chain_test_uses_a_valid_boot_policy() -> None:
     """The QEMU PXE chain test (the release's integration gate) PUTs a
     machine assignment with a literal ``boot_policy``; it must be a

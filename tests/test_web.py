@@ -1735,7 +1735,10 @@ def test_pxe_inventory_stores_lshw_and_serves_raw_download(app_client: TestClien
     dl = app_client.get(f"/machines/{mac}/lshw.json", cookies=AUTH)
     assert dl.status_code == 200, dl.text
     assert dl.headers["content-type"].startswith("application/json")
-    assert "attachment" in dl.headers.get("content-disposition", "")
+    cd = dl.headers.get("content-disposition", "")
+    assert "attachment" in cd
+    # The download filename must be Windows-safe (no colons from the MAC).
+    assert "filename=" in cd and ":" not in cd.split("filename=", 1)[1]
     assert dl.json()["product"] == "Test Box"
 
     inv = app_client.get(
