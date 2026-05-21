@@ -2,55 +2,50 @@
 
 A pre-built bty-web container is published to
 [`ghcr.io/safl/bty-web`](https://github.com/safl/bty/pkgs/container/bty-web)
-on every tagged release. It hosts the **image catalog**, **machine
-registry**, and **browser UI** of bty-web. `bty --catalog SOURCE`
-clients (running from the USB live env or a workstation) connect
-to it and pick images for flashing.
+on every tagged release. It hosts bty-web's **image catalog**, **machine
+registry**, and **browser UI**. `bty --catalog SOURCE` clients (from the
+USB live env or a workstation) connect to it and pick images for flashing.
 
-This is not the bty-server appliance. The appliance bundles
-`dnsmasq` for TFTP serving on top of bty-web; the container is
-**HTTP-only by design**. This makes the container the
-**HTTP-Boot / `boots-from` deployment lane** -- production-fit
+This is not the bty-server appliance. The appliance bundles `dnsmasq` for
+TFTP on top of bty-web; the container is **HTTP-only by design**. That
+makes it the **HTTP-Boot / `boots-from` deployment lane**, production-fit
 for either of:
 
-- **UEFI HTTP Boot targets**: the operator's LAN DHCP server is
-  configured to serve DHCP option 67 = `http://<bty-web>/ipxe.efi`
-  (bty-web serves the iPXE binaries from `/boot/` over HTTP).
-  Modern UEFI firmware fetches the binary natively -- no TFTP in
-  the path at all.
+- **UEFI HTTP Boot targets**: the operator's LAN DHCP server serves DHCP
+  option 67 = `http://<bty-web>/ipxe.efi` (bty-web serves the iPXE binaries
+  from `/boot/` over HTTP). Modern UEFI firmware fetches the binary
+  natively, no TFTP in the path.
 - **`boots-from` USB sticks**: the operator boots a target from a
-  [`boots-from`](https://github.com/safl/boots-from) USB whose
-  embedded iPXE script chains to bty-web's `/pxe-bootstrap.ipxe`.
-  The stick replaces the firmware-driven PXE step entirely, so
-  neither DHCP-PXE options nor a TFTP daemon are needed on the
-  LAN. Works on legacy BIOS too.
+  [`boots-from`](https://github.com/safl/boots-from) USB whose embedded
+  iPXE script chains to bty-web's `/pxe-bootstrap.ipxe`. The stick replaces
+  the firmware-driven PXE step entirely, so neither DHCP-PXE options nor a
+  TFTP daemon are needed on the LAN. Works on legacy BIOS too.
 
-For mixed-firmware fleets that include legacy BIOS or older UEFI
-implementations that only support TFTP option 67, deploy the
-bty-server appliance instead (see
-[walkthrough-server.md](walkthrough-server.md)) -- it bundles
-the TFTP daemon.
+For mixed-firmware fleets that include legacy BIOS or older UEFI that only
+support TFTP option 67, deploy the bty-server appliance instead (see
+[walkthrough-server.md](walkthrough-server.md)) - it bundles the TFTP
+daemon.
 
 ## When to use this
 
-- **Trial / kicking the tires**: you want to poke at the bty-web UI
-  without flashing an SD card or burning a NUC.
-- **Image library**: you have a fleet of operators who all carry
-  bty USB sticks and want a network-shared catalog of pre-built
-  images instead of copying files to every stick.
+- **Trial / kicking the tires**: poke at the bty-web UI without flashing an
+  SD card or burning a NUC.
+- **Image library**: a fleet of operators carry bty USB sticks and want a
+  network-shared catalog of pre-built images instead of copying files to
+  every stick.
 - **Local-dev backend** for `bty --catalog` work.
-- **Production HTTP-Boot or `boots-from` deployment** for fleets
-  that don't need a TFTP daemon (UEFI-HTTP-Boot-capable firmware
-  or USB-driven targets).
+- **Production HTTP-Boot or `boots-from` deployment** for fleets that don't
+  need a TFTP daemon (UEFI-HTTP-Boot-capable firmware or USB-driven
+  targets).
 
-For mixed-firmware fleets that include TFTP-only PXE clients,
-deploy the bty-server appliance instead.
+For mixed-firmware fleets with TFTP-only PXE clients, deploy the bty-server
+appliance instead.
 
 ## Quick start
 
-The container runs `bty-web` as the unprivileged `bty` user (uid
-999), matching the bare-metal appliance. Pre-create the host data
-dir with that ownership before starting (one-time, host-side):
+The container runs `bty-web` as the unprivileged `bty` user (uid 999),
+matching the bare-metal appliance. Pre-create the host data dir with that
+ownership before starting (one-time, host-side):
 
 ```bash
 mkdir -p ./bty-data
@@ -72,12 +67,11 @@ docker run -d --name bty-web \
 ```
 
 Open <http://localhost:8080/ui> and log in with `bty / bty`. Drop
-`.img.zst` / `.qcow2` / `.img.gz` files into the data directory's
-`images/` subfolder and they appear in the catalog after a refresh.
+`.img.zst` / `.qcow2` / `.img.gz` files into the data directory's `images/`
+subfolder and they appear in the catalog after a refresh.
 
-If the bind-mount permission isn't right, the entrypoint exits
-with a one-line fix command instead of letting bty-web crash deep
-in a Python traceback.
+If the bind-mount permission isn't right, the entrypoint exits with a
+one-line fix command instead of crashing deep in a Python traceback.
 
 ## Compose
 
@@ -101,38 +95,36 @@ bty --catalog http://<host>:8080/catalog.toml
 ```
 
 The catalog pane fills with whatever the server has under
-`/var/lib/bty/images`. Pick an image (Enter), pick a target disk,
-confirm the flash plan. The server is the catalog source; the
-actual write happens on the local machine running `bty`.
+`/var/lib/bty/images`. Pick an image (Enter), pick a target disk, confirm
+the flash plan. The server is the catalog source; the write happens on the
+local machine running `bty`.
 
 ## Scripted flash via the plan endpoint (no wizard)
 
 For batch / CI workflows: bind the machine on the appliance with
 `boot_policy=bty-flash-always` + a `bty_image_ref` + a `target_disk_serial`,
-then on the target run `bty --server <host> --mac <self-mac>`. The
-wizard skips and the flash runs scripted (`mode=flash` from
-`GET <host>/pxe/<mac>/plan`). The image streams directly from the
-container's catalog through the live env to the target's disk; no
-operator copy step.
+then on the target run `bty --server <host> --mac <self-mac>`. The wizard
+skips and the flash runs scripted (`mode=flash` from `GET
+<host>/pxe/<mac>/plan`). The image streams directly from the container's
+catalog through the live env to the target's disk; no operator copy step.
 
-For one-shot ad-hoc flashes (no MAC binding), the wizard's URL
-accept covers HTTP and `oras://` sources via `bty --catalog ...`.
+For one-shot ad-hoc flashes (no MAC binding), the wizard's URL accept
+covers HTTP and `oras://` sources via `bty --catalog ...`.
 
 ## Rotating the default credentials
 
 The pre-built image ships with `bty / bty` so the operator can start
-poking at the UI immediately. **Rotate before exposing past a
-trusted LAN.**
+poking immediately. **Rotate before exposing past a trusted LAN.**
 
 ```bash
 docker exec -it -u root bty-web passwd bty
 ```
 
-The `-u root` runs `passwd` as root inside the container so it
-prompts only for the new password (skipping "current password"
-the way `passwd bty` would when invoked as the bty user). The new
-hash lands in `/etc/shadow` inside the container; restart-resilient,
-since pamela reads `/etc/shadow` directly on every auth call.
+The `-u root` runs `passwd` as root inside the container so it prompts only
+for the new password (skipping "current password" the way `passwd bty`
+would when invoked as the bty user). The new hash lands in `/etc/shadow`
+inside the container; restart-resilient, since pamela reads `/etc/shadow`
+directly on every auth call.
 
 > If you rebuild or pull a fresh image, the password resets to
 > `bty / bty` because the new container's `/etc/shadow` comes
@@ -180,22 +172,20 @@ docker run --rm -p 8080:8080 -v "$PWD/bty-data":/var/lib/bty bty-web:dev
 
 ## Multi-arch
 
-The published image is `linux/amd64` + `linux/arm64`. Pull from a
-Pi 4 or Pi 5 just as easily as from an x86 host. Pure-Python wheel,
-so the only per-arch differences are the apt-installed system deps.
+The published image is `linux/amd64` + `linux/arm64`. Pull from a Pi 4 or
+Pi 5 as easily as from an x86 host. Pure-Python wheel, so the only per-arch
+differences are the apt-installed system deps.
 
 ## What is missing vs the appliance
 
 This container deliberately does not run:
 
-- `dnsmasq` for TFTP. The container is HTTP-only; UEFI HTTP-Boot
-  targets work directly against `/boot/ipxe.efi`. TFTP-only PXE
-  clients would need a separate TFTP server (or use the appliance
-  image instead, which bundles dnsmasq).
+- `dnsmasq` for TFTP. The container is HTTP-only; UEFI HTTP-Boot targets
+  work directly against `/boot/ipxe.efi`. TFTP-only PXE clients need a
+  separate TFTP server (or the appliance image, which bundles dnsmasq).
 - Cloud-init / first-boot rootfs grow.
 
-bty no longer runs any DHCP role in either deployment shape -- the
-operator's LAN DHCP server is configured to point PXE clients at
-bty (via option 60/66/67 tagging) regardless of whether bty runs
-as the appliance or as this container. For HTTP-Boot-capable
-firmware, that means this container is a complete deployment.
+bty runs no DHCP role in either deployment shape: the operator's LAN DHCP
+server points PXE clients at bty (via option 60/66/67 tagging) whether bty
+runs as the appliance or this container. For HTTP-Boot-capable firmware,
+this container is a complete deployment.

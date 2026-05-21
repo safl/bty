@@ -1,25 +1,24 @@
 # Set up a bty server appliance
 
-The bty server appliance is the network-flash flow's delivery
-vehicle: a turnkey image you `dd` onto a small box (or VM, or
-Raspberry Pi 4/5) that brings up `bty-web` (browser UI), iPXE
-binaries, and TFTP via dnsmasq. The operator's existing LAN DHCP
-server points PXE clients at this appliance; targets PXE-boot
-into the server's catalog, flash themselves, reboot.
+The bty server appliance is the network-flash flow's delivery vehicle: a
+turnkey image you `dd` onto a small box (or VM, or Raspberry Pi 4/5) that
+brings up `bty-web` (browser UI), iPXE binaries, and TFTP via dnsmasq. The
+operator's existing LAN DHCP server points PXE clients at this appliance;
+targets PXE-boot into the server's catalog, flash themselves, reboot.
 
 Two paths:
 
-1. **`server-x86`** - x86_64 disk image for any small-form-factor
-   PC, NUC, or virtual machine. Cloud-init bake of a Debian 13
-   cloud image inside QEMU, output as a dd-able `.img.gz`.
+1. **`server-x86`** - x86_64 disk image for any small-form-factor PC, NUC,
+   or VM. Cloud-init bake of a Debian 13 cloud image inside QEMU, output as
+   a dd-able `.img.gz`.
 2. **`server-rpi`** - arm64 SD-card image for Raspberry Pi 4 / 5.
-   Customisation of the upstream Pi OS Lite image via
-   qemu-aarch64-static chroot, output as a dd-able `.img.gz`.
+   Customisation of the upstream Pi OS Lite image via qemu-aarch64-static
+   chroot, output as a dd-able `.img.gz`.
 
-Both ship the same bty-web + PXE stack with the same default
-credentials (`bty` / `bty` for the browser UI, `odus` / `odus`
-for SSH admin). End state after first boot: a browser URL on
-tty1, ready to register machines and serve images.
+Both ship the same bty-web + PXE stack with the same default credentials
+(`bty` / `bty` for the browser UI, `odus` / `odus` for SSH admin). End
+state after first boot: a browser URL on tty1, ready to register machines
+and serve images.
 
 ## Prerequisites
 
@@ -31,8 +30,7 @@ tty1, ready to register machines and serve images.
 
 ## Step 1: Get the server image
 
-You have two options - download a pre-built artifact or build
-from source.
+Two options: download a pre-built artifact or build from source.
 
 ### Option A: Download the latest pre-built image (fastest)
 
@@ -61,9 +59,8 @@ sudo make build VARIANT=server-x86    # ~10-15 minutes (cloud-init bake in QEMU)
 sudo make build VARIANT=server-rpi    # ~5-10 minutes (chroot customisation)
 ```
 
-x86 build needs KVM access on the build host. arm64 build runs
-under `qemu-aarch64-static` so any amd64 Linux box with
-`binfmt_misc` works.
+x86 build needs KVM access on the build host. arm64 build runs under
+`qemu-aarch64-static`, so any amd64 Linux box with `binfmt_misc` works.
 
 When the build finishes:
 
@@ -92,17 +89,15 @@ sync
 
 **On Raspberry Pi 4/5:**
 
-Plug the SD card (8 GiB or larger) into a Linux/macOS/Windows
-host (NOT the Pi itself - the Pi can't write its own boot
-medium). The image goes onto the SD card; you then move the
-SD card to the Pi and power it on.
+Plug the SD card (8 GiB or larger) into a Linux/macOS/Windows host (NOT the
+Pi itself - the Pi can't write its own boot medium). The image goes onto
+the SD card; move the card to the Pi and power it on.
 
-*Identify the SD card first.* It's the device that appeared
-when you plugged it in. Easy way: run `lsblk` (Linux),
-`diskutil list` (macOS), or `wmic diskdrive list brief`
-(Windows PowerShell) before and after inserting the card; the
-new entry is the SD card. Sizes match the card's marketed
-capacity, give or take a GiB.
+*Identify the SD card first.* It's the device that appeared when you
+plugged it in. Run `lsblk` (Linux), `diskutil list` (macOS), or `wmic
+diskdrive list brief` (Windows PowerShell) before and after inserting the
+card; the new entry is the SD card. Sizes match the marketed capacity, give
+or take a GiB.
 
 *Linux*:
 
@@ -112,9 +107,9 @@ gunzip -d --stdout ~/system_imaging/disk/bty-server-rpi-arm64.img.gz | \
 sync
 ```
 
-Replace `/dev/sdX` with the SD card's device node (often
-`/dev/mmcblk0` on a built-in card reader). Double-check with
-`lsblk` - flashing the wrong disk wipes whatever is on it.
+Replace `/dev/sdX` with the SD card's device node (often `/dev/mmcblk0` on
+a built-in card reader). Double-check with `lsblk`: flashing the wrong disk
+wipes it.
 
 *macOS*:
 
@@ -130,20 +125,19 @@ diskutil eject /dev/diskN
 *Windows*: use Raspberry Pi Imager (recommended) or balenaEtcher.
 Both accept `.img.gz` directly without manual decompression.
 
-- **Raspberry Pi Imager**: choose `Operating System -> Use
-  custom`, pick the `.img.gz`, choose your SD card under
-  `Storage`, then Write. Imager handles the gunzip step
-  internally; do NOT pre-decompress.
-- **balenaEtcher**: Flash from file -> pick the `.img.gz` ->
-  Select target -> Flash.
+- **Raspberry Pi Imager**: choose `Operating System -> Use custom`, pick
+  the `.img.gz`, choose your SD card under `Storage`, then Write. Imager
+  gunzips internally; do NOT pre-decompress.
+- **balenaEtcher**: Flash from file -> pick the `.img.gz` -> Select target
+  -> Flash.
 
-(Imager is also available on Linux and macOS if you'd rather
-not type the `dd` line.)
+(Imager is also available on Linux and macOS if you'd rather not type the
+`dd` line.)
 
 **On a VM:**
 
-For a quick QEMU smoke test, point the VM at the `.qcow2`
-intermediate (faster than expanding the `.img.gz`):
+For a quick QEMU smoke test, point the VM at the `.qcow2` intermediate
+(faster than expanding the `.img.gz`):
 
 ```bash
 qemu-system-x86_64 \
@@ -154,25 +148,22 @@ qemu-system-x86_64 \
 
 Browse to <http://localhost:8080> once the VM finishes boot.
 
-For production deployment on a hypervisor, use the `.img.gz`
-directly: most hypervisors accept compressed disk images as
-input or you can pre-decompress to `.img`.
+For production deployment on a hypervisor, use the `.img.gz` directly: most
+hypervisors accept compressed disk images, or pre-decompress to `.img`.
 
 ## Step 3: First boot
 
 Power on the target. The bty-server image:
 
-1. Resizes the rootfs partition to fill the operator's disk
-   (one-shot via `bty-grow-rootfs.service`).
+1. Resizes the rootfs partition to fill the disk (one-shot via
+   `bty-grow-rootfs.service`).
 2. Brings up systemd-networkd against the operator's LAN.
-3. Runs `bty-web-init.service` once to set up the state
-   directory tree and rewrite `/etc/issue` with the actual
-   server URL + default credentials.
+3. Runs `bty-web-init.service` once to set up the state directory tree and
+   rewrite `/etc/issue` with the actual server URL + default credentials.
 4. Starts `bty-web.service` (long-running) on port 8080.
-5. Starts `dnsmasq.service` for TFTP (the appliance does NOT
-   run any DHCP role -- bty deliberately stays out of DHCP and
-   relies on the operator's existing LAN DHCP server to point
-   PXE clients at this box).
+5. Starts `dnsmasq.service` for TFTP (the appliance runs no DHCP role; bty
+   stays out of DHCP and relies on the operator's existing LAN DHCP server
+   to point PXE clients at this box).
 
 Tty1 ends up showing something like:
 
@@ -198,9 +189,9 @@ The version string updates per release.
 
 ## Step 4: Log in via the browser
 
-Open the URL shown on tty1 from any machine on the same LAN.
-Default browser-UI credentials are `bty / bty`. **Rotate before
-exposing this server** to anything beyond a trusted network:
+Open the URL shown on tty1 from any machine on the same LAN. Default
+browser-UI credentials are `bty / bty`. **Rotate before exposing this
+server** beyond a trusted network:
 
 ```bash
 # SSH in as the admin user (default: odus / odus.321, passwordless sudo)
@@ -210,64 +201,58 @@ sudo passwd bty
 
 Initial UI tour:
 
-- **`/ui/machines`** - register targets by MAC. Each machine
-  gets a row with assigned image + boot policy.
-- **`/ui/images`** - upload `*.img.zst` / `*.img.gz` / `*.img.xz`
-  / `*.img.bz2` / `*.qcow2` images via PUT or drag-and-drop.
-  These end up under `/var/lib/bty/images/` on the server and
-  get streamed to targets at flash time.
-- **`/ui/netboot`** (Netboot) - the netboot artifacts inventory
-  (`vmlinuz` / `initrd` / `squashfs`) plus a Start/Stop/Restart
-  panel for the local `dnsmasq.service` (which serves the TFTP
-  root). Fetching the artifacts happens on the **Artifact
-  Fetches** page (the cloud worker-icon in the navbar); the
-  router-config cheatsheet (option 60 / 66 / 67 to paste into
-  the LAN's DHCP server, for both PXE and UEFI HTTP Boot) lives
-  on the Settings page under **DHCP / Network boot**. An in-page
-  sub-nav jumps between List / TFTP Daemon / Activity.
-- **`/ui/settings`** - the read-only map of every bty config
-  value plus the editable **Upstream sources** (release repo /
-  catalog URL / release tag) card, and the **DHCP / Network boot**
-  router cheatsheet. Operator-account info (PAM password +
-  session-cookie rotation) is on the separate Account page,
-  reached via the user pill.
+- **`/ui/machines`** - register targets by MAC. Each machine gets a row
+  with assigned image + boot policy.
+- **`/ui/images`** - upload `*.img.zst` / `*.img.gz` / `*.img.xz` /
+  `*.img.bz2` / `*.qcow2` images via PUT or drag-and-drop. These end up
+  under `/var/lib/bty/images/` and stream to targets at flash time.
+- **`/ui/netboot`** (Netboot) - the netboot artifacts inventory (`vmlinuz`
+  / `initrd` / `squashfs`) plus a Start/Stop/Restart panel for the local
+  `dnsmasq.service` (which serves the TFTP root). Fetching the artifacts
+  happens on the **Artifact Fetches** page (the cloud worker-icon in the
+  navbar); the router-config cheatsheet (option 60 / 66 / 67 for the LAN's
+  DHCP server, for both PXE and UEFI HTTP Boot) lives on the Settings page
+  under **DHCP / Network boot**. An in-page sub-nav jumps between List /
+  TFTP Daemon / Activity.
+- **`/ui/settings`** - the read-only map of every bty config value plus the
+  editable **Upstream sources** (release repo / catalog URL / release tag)
+  card, and the **DHCP / Network boot** router cheatsheet. Operator-account
+  info (PAM password + session-cookie rotation) is on the separate Account
+  page, reached via the user pill.
 
 ## Step 5: Flash a target over PXE
 
-Once a target's MAC is registered with an assigned image, configure
-the target's BIOS / UEFI to **boot from the network (PXE) first**.
-bty then drives every subsequent boot via `boot_policy` -- you set the
-firmware order once. Mind the post-flash boot: with `boot_policy=sanboot`
-(the default) bty boots the disk itself via iPXE, so the firmware order
-matters less; the `bty-flash-*` policies sanboot the just-flashed disk
-the same way. The drive is `0x80` (first disk) unless you set
-`sanboot_drive`. (A flashed box that won't boot is almost always a
-firmware / drive-number problem -- see
-[Firmware boot order](concepts.md#firmware-boot-order).) On power-on
-it'll:
+Once a target's MAC is registered with an assigned image, set the target's
+BIOS / UEFI to **boot from the network (PXE) first**. bty then drives every
+subsequent boot via `boot_policy`; you set the firmware order once. Mind
+the post-flash boot: with `boot_policy=sanboot` (the default) bty boots the
+disk itself via iPXE, so the firmware order matters less; the `bty-flash-*`
+policies sanboot the just-flashed disk the same way. The drive is `0x80`
+(first disk) unless you set `sanboot_drive`. (A flashed box that won't boot
+is almost always a firmware / drive-number problem; see
+[Firmware boot order](concepts.md#firmware-boot-order).) On power-on it
+will:
 
-1. DHCP-discover from your LAN's DHCP server, which is configured
-   to return option 66/67 pointing at the bty appliance.
-2. Chain into the bty iPXE script. Cmdline carries
-   ``bty.server=URL`` + ``bty.mac=MAC`` only.
-3. Boot the netboot kernel + initrd + squashfs trio.
-   `bty-on-tty1.service` exec's `bty --server X --mac Y` on
-   tty1; ``bty`` GETs `<server>/pxe/<mac>/plan`, sees
-   ``mode=flash`` (because boot_policy=bty-flash-always + ref + serial),
-   writes the image to the local disk, POSTs `/pxe/<mac>/done`,
-   reboots.
+1. DHCP-discover from your LAN's DHCP server, configured to return option
+   66/67 pointing at the bty appliance.
+2. Chain into the bty iPXE script. Cmdline carries ``bty.server=URL`` +
+   ``bty.mac=MAC`` only.
+3. Boot the netboot kernel + initrd + squashfs trio. `bty-on-tty1.service`
+   exec's `bty --server X --mac Y` on tty1; ``bty`` GETs
+   `<server>/pxe/<mac>/plan`, sees ``mode=flash`` (because
+   boot_policy=bty-flash-always + ref + serial), writes the image to the
+   local disk, POSTs `/pxe/<mac>/done`, reboots.
 
-The server's machine-detail page shows live progress + last
-flashed timestamp. Subsequent boots skip PXE (BIOS falls back to
-disk) and the target runs whatever the freshly-flashed image
-provisions to.
+The server's machine-detail page shows live progress + last flashed
+timestamp. Subsequent boots skip PXE (BIOS falls back to disk) and the
+target runs whatever the freshly-flashed image provisions to.
 
 ### PXE or UEFI HTTP Boot
 
-The flow above assumes legacy/UEFI **PXE**: the firmware TFTPs the
-iPXE binary from the appliance. Firmware that supports **UEFI HTTP
-Boot** can skip TFTP entirely and fetch iPXE over HTTP. The only
-DHCP differences are the vendor class and the bootfile:
+The flow above assumes legacy/UEFI **PXE**: the firmware TFTPs the iPXE
+binary from the appliance. Firmware that supports **UEFI HTTP Boot** can
+skip TFTP entirely and fetch iPXE over HTTP. The only DHCP differences are
+the vendor class and the bootfile:
 
 | | PXE (TFTP) | UEFI HTTP Boot |
 |---|---|---|
@@ -275,12 +260,12 @@ DHCP differences are the vendor class and the bootfile:
 | Next-server (option 66) | appliance IP | appliance IP (still required) |
 | Bootfile (option 67) | `ipxe.efi` | `http://<appliance>:8080/boot/ipxe.efi` |
 
-Option 66 stays pointed at the appliance for HTTP Boot too: bty's
-iPXE binary chains on to `http://<next-server>:8080/pxe-bootstrap.ipxe`,
-so it needs the next-server even though the bootfile is a full URL.
-Once iPXE is running, both paths are identical (fetch
-`/pxe-bootstrap.ipxe`, then the per-MAC plan). The exact values for
-your appliance are on the Settings page under **DHCP / Network boot**.
+Option 66 stays pointed at the appliance for HTTP Boot too: bty's iPXE
+binary chains on to `http://<next-server>:8080/pxe-bootstrap.ipxe`, so it
+needs the next-server even though the bootfile is a full URL. Once iPXE is
+running, both paths are identical (fetch `/pxe-bootstrap.ipxe`, then the
+per-MAC plan). The exact values for your appliance are on the Settings page
+under **DHCP / Network boot**.
 
 ## Architecture at a glance
 
@@ -302,61 +287,57 @@ your appliance are on the Settings page under **DHCP / Network boot**.
 
 ## What you can do today
 
-- PXE-flash any number of targets to a registered image, hands-
-  free, in parallel.
-- Mix the network-flash flow (this walkthrough) with the
-  USB-stick flow ([walkthrough-usb](walkthrough-usb.md)) -- both
-  end up running the same ``bty`` flash code, just driven by the
-  plan endpoint vs the local wizard.
+- PXE-flash any number of targets to a registered image, hands-free, in
+  parallel.
+- Mix the network-flash flow (this walkthrough) with the USB-stick flow
+  ([walkthrough-usb](walkthrough-usb.md)): both run the same ``bty`` flash
+  code, driven by the plan endpoint vs the local wizard.
 - Swap images per-target without rebooting the server.
-- Add a second disk as a **persistent image store** so the cache
-  survives appliance reflashes
-  ([walkthrough-image-store](walkthrough-image-store.md)).
+- Add a second disk as a **persistent image store** so the cache survives
+  appliance reflashes ([walkthrough-image-store](walkthrough-image-store.md)).
 
 ## Post-deploy hardening
 
-The pre-built image ships with appliance defaults that prioritise
-"works on first boot" over "locked down for the open internet".
-A few things to address before exposing the server beyond a
+The pre-built image prioritises "works on first boot" over "locked down for
+the open internet". Address these before exposing the server beyond a
 trusted LAN:
 
-- **Default credentials.** Rotate `bty / bty` (browser UI) and
-  `odus / odus.321` (SSH admin) on first login: `sudo passwd bty`,
-  `sudo passwd odus`. The `/etc/issue` banner reminds you on
-  every console login.
-- **Per-instance SSH host keys.** `bty-ssh-host-keys.service`
-  runs `ssh-keygen -A` on first boot of each freshly-flashed instance, so
-  every appliance has unique host keys.
-- **No built-in firewall.** The image does not ship with `ufw` or
-  `nftables` rules. Listening ports out of the box: `:8080`
-  (bty-web HTTP), `:22` (sshd), `:69` UDP (TFTP, dormant until a
-  PXE client asks), and `:67` UDP (DHCP-proxy, dormant until you
-  click "Activate" in Settings). For an internet-exposed deploy,
-  put the appliance behind a reverse proxy / VPN, or `apt
-  install ufw` and constrain inbound to your management IP.
-- **Manual security upgrades.** The image masks `apt-daily.timer`
-  and `apt-daily-upgrade.timer` so a stock Debian boot does not
-  wake up doing 30s of disk IO that competes with the bty
-  services. Trade-off: you do `sudo apt update && sudo apt
-  upgrade` yourself on whatever cadence you choose. Schedule a
-  cron / systemd-timer if you want it automatic on long-running
-  installs.
+- **Default credentials.** Rotate `bty / bty` (browser UI) and `odus /
+  odus.321` (SSH admin) on first login: `sudo passwd bty`, `sudo passwd
+  odus`. The `/etc/issue` banner reminds you on every console login.
+- **Per-instance SSH host keys.** `bty-ssh-host-keys.service` runs
+  `ssh-keygen -A` on first boot of each freshly-flashed instance, so every
+  appliance has unique host keys.
+- **No built-in firewall.** The image ships no `ufw` or `nftables` rules.
+  Listening ports out of the box: `:8080` (bty-web HTTP), `:22` (sshd),
+  `:69` UDP (TFTP, dormant until a PXE client asks), and `:67` UDP
+  (DHCP-proxy, dormant until you click "Activate" in Settings). For an
+  internet-exposed deploy, put the appliance behind a reverse proxy / VPN,
+  or `apt install ufw` and constrain inbound to your management IP.
+- **Manual security upgrades.** The image masks `apt-daily.timer` and
+  `apt-daily-upgrade.timer` so a stock Debian boot does not wake up doing
+  30s of disk IO that competes with the bty services. Trade-off: you run
+  `sudo apt update && sudo apt upgrade` on your own cadence. Schedule a
+  cron / systemd-timer for automatic upgrades on long-running installs.
 
 ## Known limitations
 
-- **DHCP stays with the operator's LAN**. bty does NOT run a DHCP
-  server (proxy or full); a working LAN DHCP server is a hard
-  prerequisite, and its config must be extended with option 60 /
-  66 / 67 to direct PXE clients at the bty appliance. The
-  **DHCP / PXE** cheatsheet on the Settings page
+- **DHCP stays with the operator's LAN**. bty runs no DHCP server (proxy
+  or full); a working LAN DHCP server is a hard prerequisite, and its
+  config must be extended with option 60 / 66 / 67 to direct PXE clients at
+  the bty appliance. The **DHCP / PXE** cheatsheet on the Settings page
   (`/ui/settings#dhcp-pxe`) has the exact values.
-- **UEFI Secure Boot** isn't supported - the bty netboot kernel
-  isn't shim-signed. Disable Secure Boot on targets you're
-  PXE-flashing, or use the USB stick flow.
-- **iPXE chain-loop**. After the firmware TFTPs `ipxe.efi`, iPXE
-  re-DHCPs with `user-class=iPXE`; stock Debian iPXE will
-  re-fetch itself unless your LAN DHCP returns a different
-  bootfile (e.g. `http://<bty>/pxe-bootstrap.ipxe`) when it sees
-  `user-class=iPXE`. Most modern DHCP servers (UniFi via
-  config.gateway.json or Kea client-classes, dnsmasq via
-  `dhcp-userclass`, ISC-DHCPd via conditional `if`) support this.
+- **UEFI Secure Boot** isn't supported - the bty netboot kernel isn't
+  shim-signed. Disable Secure Boot on targets you're PXE-flashing, or use
+  the USB stick flow.
+- **iPXE chain-loop**. After the firmware TFTPs `ipxe.efi`, iPXE re-DHCPs
+  with `user-class=iPXE`; stock Debian iPXE re-fetches itself unless your
+  LAN DHCP returns a different bootfile (e.g.
+  `http://<bty>/pxe-bootstrap.ipxe`) when it sees `user-class=iPXE`. Most
+  modern DHCP servers (UniFi via config.gateway.json or Kea client-classes,
+  dnsmasq via `dhcp-userclass`, ISC-DHCPd via conditional `if`) support
+  this.
+- **UEFI tested, legacy BIOS not yet**. bty's netboot path has so far been
+  exercised only on UEFI targets. The legacy-BIOS branch (`sanboot
+  --drive` instead of the UEFI hand-back to firmware) is implemented but
+  not field-tested; treat BIOS as unverified for now.

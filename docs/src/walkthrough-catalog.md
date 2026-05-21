@@ -1,31 +1,28 @@
 # Walkthrough: image catalog (SHA-keyed, manifest + cache)
 
-bty's image catalog is **content-addressed** -- every image is
-identified by its SHA-256 hash, with one or more friendly names
-attached for display. Two sources feed the catalog:
+bty's image catalog is **content-addressed**: every image is identified by
+its SHA-256 hash, with one or more friendly names for display. Two sources
+feed the catalog:
 
 1. **Directory scan**: files under `BTY_IMAGE_ROOT` (default
-   `/var/lib/bty/images`). A `<file>.sha256` sidecar carries the
-   hash; `bty-web` (or `bty` when it touches an unhashed image)
-   computes and writes one on first access.
+   `/var/lib/bty/images`). A `<file>.sha256` sidecar carries the hash;
+   `bty-web` (or `bty` when it touches an unhashed image) computes and
+   writes one on first access.
 2. **Manifest**: a TOML file at `BTY_CATALOG_FILE` (default
-   `${BTY_STATE_DIR}/catalog.toml`) listing named entries with
-   upstream `src` URLs and pinned `sha256` digests. Entries are
-   fetched on demand and cached by hash under
-   `${BTY_STATE_DIR}/cache/<sha256>`.
+   `${BTY_STATE_DIR}/catalog.toml`) listing named entries with upstream
+   `src` URLs and pinned `sha256` digests. Entries are fetched on demand
+   and cached by hash under `${BTY_STATE_DIR}/cache/<sha256>`.
 
-Both sources merge by SHA-256: an image present locally AND
-declared in the manifest renders as a single row with both names
-and both sources.
+Both sources merge by SHA-256: an image present locally AND declared in the
+manifest renders as a single row with both names and both sources.
 
 ## Why a manifest
 
-The super-catalog pattern: a single `catalog.toml` published at a
-stable URL refers to artifacts spread across many GitHub releases /
-S3 buckets / wherever. A fleet of `bty-web` instances pulls the
-same manifest and lazily caches the blobs each one actually flashes.
-Adding a new image is a manifest PR, not "copy bytes to every
-server" by hand.
+The super-catalog pattern: a single `catalog.toml` published at a stable
+URL refers to artifacts spread across many GitHub releases / S3 buckets /
+wherever. A fleet of `bty-web` instances pulls the same manifest and lazily
+caches the blobs each one actually flashes. Adding a new image is a
+manifest PR, not "copy bytes to every server" by hand.
 
 ## Manifest schema
 
@@ -46,83 +43,78 @@ src    = "https://example.com/freebsd-14.img.zst"
 sha256 = "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
 ```
 
-Required fields per entry: `name`, `src`, `sha256`. Optional:
-`format`, `size_bytes`, `description`. `name` must be unique
-within the manifest. SHA-256 must be a 64-char lower-case hex
-string.
+Required fields per entry: `name`, `src`, `sha256`. Optional: `format`,
+`size_bytes`, `description`. `name` must be unique within the manifest.
+SHA-256 must be a 64-char lower-case hex string.
 
-Validate before deploying via the Python API (``bty.catalog.
-load_source`` raises ``CatalogError`` on parse / schema failure):
+Validate before deploying via the Python API (``bty.catalog.load_source``
+raises ``CatalogError`` on parse / schema failure):
 
 ```bash
 python3 -c 'import sys; from bty import catalog; catalog.load_source(sys.argv[1])' /path/to/catalog.toml
 ```
 
-bty-web also parses the catalog server-side -- uploading via the
-**Upload catalog** control in the Images list header (or
-`POST /catalog/import?source=...`) bounces back with the parse error
-on a bad catalog without clobbering the running one.
+bty-web also parses the catalog server-side: uploading via the **Upload
+catalog** control in the Images list header (or
+`POST /catalog/import?source=...`) bounces back with the parse error on a
+bad catalog without clobbering the running one.
 
 ## SHA-256 sidecars for dir-scan images
 
-Files dropped into `BTY_IMAGE_ROOT` get an associated sidecar at
-`<file>.sha256` -- standard `sha256sum`-compatible format so an
-operator can verify by hand:
+Files dropped into `BTY_IMAGE_ROOT` get a sidecar at `<file>.sha256`:
+standard `sha256sum`-compatible format so an operator can verify by hand:
 
 ```bash
 sha256sum -c demo.img.zst.sha256
 ```
 
-bty-web **auto-imports** at startup: it walks `BTY_IMAGE_ROOT`
-once and enqueues a hash job for every file without a sidecar.
-The HashManager runs them serially in the background (default
-parallelism is **1** -- on small hardware like a Pi 4 or an old
-NUC, two simultaneous SHA-256 computations saturate IO + CPU
-and both finish at half speed, so serial uses the same wall
-clock without tanking responsiveness; override via
-`BTY_HASH_MAX_PARALLEL` on fast hosts). Until a file's sidecar
-lands, the file does not appear in `/images` listings -- it
-becomes flashable once imported.
+bty-web **auto-imports** at startup: it walks `BTY_IMAGE_ROOT` once and
+enqueues a hash job for every file without a sidecar. The HashManager runs
+them serially in the background (default parallelism is **1**; on small
+hardware like a Pi 4 or old NUC, two simultaneous SHA-256 computations
+saturate IO + CPU and both finish at half speed, so serial uses the same
+wall clock without tanking responsiveness; override via
+`BTY_HASH_MAX_PARALLEL` on fast hosts). Until a file's sidecar lands, the
+file does not appear in `/images` listings; it becomes flashable once
+imported.
 
 Operators who drop a file *after* server startup can either:
 
 - Restart bty-web (the next startup picks the new file up).
-- Pre-compute the sidecar with `sha256sum` before dropping --
-  the auto-import skips it as already-hashed:
+- Pre-compute the sidecar with `sha256sum` before dropping; the auto-import
+  skips it as already-hashed:
 
   ```bash
   sha256sum demo.img.zst > demo.img.zst.sha256
   ```
-- Hit the Hash button in the bty-web UI for an explicit
-  re-trigger (useful when you want to confirm the bytes you
-  copied across haven't been corrupted by the transfer).
+- Hit the Hash button in the bty-web UI for an explicit re-trigger (useful
+  to confirm the copied bytes weren't corrupted by the transfer).
 
 ## Browser UI
 
 `/ui/images` shows the **unified catalog** table: SHA prefix, names,
-format, sources (icons distinguish local file vs manifest URL),
-cached state, per-row Action button. Action shows "Hash" for unhashed
-dir-scan rows, "Fetch" for manifest entries not yet in the cache, or
-"-" for cached entries. Its header carries the **Fetch latest
-catalog** and **Upload catalog** controls; an in-page sub-nav jumps
-between the catalog **List** and the recent **Activity** table.
+format, sources (icons distinguish local file vs manifest URL), cached
+state, per-row Action button. Action shows "Hash" for unhashed dir-scan
+rows, "Fetch" for manifest entries not yet cached, or "-" for cached
+entries. Its header carries the **Fetch latest catalog** and **Upload
+catalog** controls; an in-page sub-nav jumps between the catalog **List**
+and the recent **Activity** table.
 
-**Image Downloads** (add a single image by file or URL + the live
-fetch jobs) and **Hashes** (the background SHA worker) are their own
-top-level pages, reached from the worker-indicator icons in the
-navbar (right of Settings), not sub-tabs of Images. Each shows live
-progress with Cancel per row and auto-refreshes every ~2s.
+**Image Downloads** (add a single image by file or URL + the live fetch
+jobs) and **Hashes** (the background SHA worker) are their own top-level
+pages, reached from the worker-indicator icons in the navbar (right of
+Settings), not sub-tabs of Images. Each shows live progress with Cancel per
+row and auto-refreshes every ~2s.
 
-When a Fetch or Hash transitions to `completed`, the page
-auto-reloads (after a brief delay so the 100% bar renders) so
-the catalog table picks up the new `cached` / `sha256` state
-without manual refresh.
+When a Fetch or Hash transitions to `completed`, the page auto-reloads
+(after a brief delay so the 100% bar renders) so the catalog table picks up
+the new `cached` / `sha256` state without manual refresh.
 
 ## CLI: the wizard is the operator surface
 
-v0.22.11+ collapsed the historical `bty inspect` / `bty flash` /
-`bty images` / `bty catalog` subcommands into the single
-``bty`` console script (the wizard). Three invocation shapes:
+v0.22.11+ collapsed the historical `bty inspect` / `bty flash` / `bty
+images` / `bty catalog` subcommands into the single ``bty`` console script
+(the wizard). Three invocation shapes:
 
 ```bash
 bty                              # interactive wizard, local image-root only
@@ -130,21 +122,19 @@ bty --catalog <URL>              # interactive wizard with the catalog pre-loade
 bty --server <X> --mac <Y>       # server-driven via GET <X>/pxe/<Y>/plan
 ```
 
-The wizard's catalog overlay accepts the same shapes the old
-``--catalog`` accepted: a local TOML path, an HTTP URL, an
-``oras://`` reference, or a bty-web instance's `/catalog.toml`.
-Local-only mode (no overlay) scans `BTY_IMAGE_ROOT` (or
-`/var/lib/bty/images`) and shows whatever flashable files are
-there.
+The wizard's catalog overlay accepts the same shapes the old ``--catalog``
+accepted: a local TOML path, an HTTP URL, an ``oras://`` reference, or a
+bty-web instance's `/catalog.toml`. Local-only mode (no overlay) scans
+`BTY_IMAGE_ROOT` (or `/var/lib/bty/images`) and shows whatever flashable
+files are there.
 
 ### .bri descriptors (per-stick remote-image pointers)
 
-A ``.bri`` is a tiny TOML pointer at a remote image. Drop one
-into BTY_IMAGES (or, on a Ventoy / IP-KVM delivery, at the
-surrounding stick's partition root or in a ``bty-images/``
-subfolder there) alongside your local files and it shows up in
-the wizard's image list next to them, with ``source = remote``
-and the upstream URL. Picking it kicks off the URL flash path.
+A ``.bri`` is a tiny TOML pointer at a remote image. Drop one into
+BTY_IMAGES (or, on a Ventoy / IP-KVM delivery, at the surrounding stick's
+partition root or in a ``bty-images/`` subfolder there) alongside your
+local files and it shows up in the wizard's image list, with ``source =
+remote`` and the upstream URL. Picking it kicks off the URL flash path.
 
 ```toml
 # example .bri shape
@@ -152,13 +142,12 @@ url = "https://my.example.com/images/debian-13-server.img.gz"
 # Optional: name, format, size_bytes, sha256, description
 ```
 
-The ``url`` field also accepts an ``oras://`` reference pointing
-at an OCI artifact published via [ORAS](https://oras.land/) (OCI
-Registry As Storage -- the spec for **non-container** artifacts in
-a container registry). The scheme is distinct from a ``docker pull
-ghcr.io/...`` reference because nosi-style disk images are not
-runnable container images; they are gzip-compressed raw disks
-stored as OCI blobs:
+The ``url`` field also accepts an ``oras://`` reference pointing at an OCI
+artifact published via [ORAS](https://oras.land/) (OCI Registry As Storage,
+the spec for **non-container** artifacts in a container registry). The
+scheme is distinct from a ``docker pull ghcr.io/...`` reference because
+nosi-style disk images are not runnable container images; they are
+gzip-compressed raw disks stored as OCI blobs:
 
 ```toml
 # rolling tag, bty resolves :latest to the current layer digest at flash time
@@ -174,16 +163,15 @@ GHCR is the one exercised in the starter set. Fresh USB sticks
 ship with four such .bri files pre-staged on the BTY_IMAGES
 partition (three nosi sysdev images plus the bty-server appliance).
 
-That's deliberate: the catalog story is a **server** concern.
-Operators who want the unified catalog (manifest + dir-scan +
-auto-imported sidecars) interact with it through bty-web -- in
-the browser, or via ``bty --catalog SOURCE`` which consumes
-``GET /catalog.toml`` and gets a single ``src`` per entry that
-the client just flashes from. No client-side resolution logic.
+That's deliberate: the catalog story is a **server** concern. Operators who
+want the unified catalog (manifest + dir-scan + auto-imported sidecars)
+interact with it through bty-web: in the browser, or via ``bty --catalog
+SOURCE`` which consumes ``GET /catalog.toml`` and gets a single ``src`` per
+entry that the client just flashes from. No client-side resolution logic.
 
-Server-side catalog management lives in `/ui/images` (sub-nav:
-List / Fetch catalog / Upload catalog / Upload image / Upload
-image (from URL)) and the HTTP API below.
+Server-side catalog management lives in `/ui/images` (sub-nav: List / Fetch
+catalog / Upload catalog / Upload image / Upload image (from URL)) and the
+HTTP API below.
 
 ## HTTP API
 
@@ -225,7 +213,6 @@ The cache is unbounded in v1. Manual eviction:
 sudo rm -rf /var/lib/bty/cache/*
 ```
 
-A future release may add LRU + size-cap eviction; until then,
-plan for cache size = sum of every image you've fetched since
-last manual rm.
+A future release may add LRU + size-cap eviction; until then, plan for
+cache size = sum of every image fetched since the last manual rm.
 

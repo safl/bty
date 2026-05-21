@@ -11,11 +11,11 @@ The fastest path to "I just bty-flashed a box":
    `bty --server X --mac Y` and a bty-web binding).
 6. **Reboot** the target into the freshly-flashed image.
 
-End state: the target's local disk has whatever image you copied onto
-the stick. No server needed, no network needed once the stick is made.
+End state: the target's local disk has whatever image you copied onto the
+stick. No server, no network once the stick is made.
 
-This walkthrough takes roughly 25 minutes the first time (mostly the
-USB build, ~20 minutes), and under 5 minutes for any subsequent flash.
+This takes roughly 25 minutes the first time (mostly the USB build, ~20
+minutes), and under 5 minutes for any subsequent flash.
 
 ## Prerequisites
 
@@ -26,21 +26,21 @@ USB build, ~20 minutes), and under 5 minutes for any subsequent flash.
 | A **target machine** with a free disk | This is the box that will get flashed. UEFI or legacy BIOS, x86_64. |
 | A **system image** to flash | `.qcow2`, raw `.img`, or `.img.{zst,xz,gz,bz2}`. Any pre-built OS image of yours; bty doesn't ship one. |
 
-The build host runs Debian 12+ or Ubuntu 24.04+. Other Linux distros
-work if you can install `live-build`, `debootstrap`, `squashfs-tools`,
-`xorriso`, `exfatprogs`, and `pipx`. There's a one-shot install
-script for Debian-family at
+The build host runs Debian 12+ or Ubuntu 24.04+. Other Linux distros work
+if you can install `live-build`, `debootstrap`, `squashfs-tools`,
+`xorriso`, `exfatprogs`, and `pipx`. A one-shot Debian-family install
+script lives at
 [`scripts/install-dev-deps.sh`](https://github.com/safl/bty/blob/main/scripts/install-dev-deps.sh).
 
 ## Step 1: Get the USB image
 
-You have two options - download a pre-built one, or build from source.
+Two options: download a pre-built one, or build from source.
 
 ### Option A: Download the latest pre-built image (fastest)
 
-Each tagged release publishes the USB image as a GitHub release asset.
-The `releases/latest/download/<name>` URLs always redirect to the
-newest version, so you can pin to "latest" or to a specific tag.
+Each tagged release publishes the USB image as a GitHub release asset. The
+`releases/latest/download/<name>` URLs always redirect to the newest
+version, so you can pin to "latest" or a specific tag.
 
 ```bash
 mkdir -p ~/system_imaging/disk && cd ~/system_imaging/disk
@@ -60,11 +60,10 @@ make media-deps                    # one-time: pipx installs cijoe
 sudo make build VARIANT=usb-x86    # ~15 minutes
 ```
 
-What this does: runs Debian's `live-build` (debootstrap + mksquashfs
-+ mkinitramfs) directly on the build host (no QEMU, no cloud-init)
-to produce a hybrid ISO carrying the bty CLI + TUI, then post-
-processes the ISO to append a writable `BTY_IMAGES` exFAT partition,
-and gzip-compresses the result.
+What this does: runs Debian's `live-build` (debootstrap + mksquashfs +
+mkinitramfs) directly on the build host (no QEMU, no cloud-init) to produce
+a hybrid ISO carrying the bty CLI + TUI, appends a writable `BTY_IMAGES`
+exFAT partition, and gzip-compresses the result.
 
 When it finishes:
 
@@ -82,15 +81,14 @@ When it finishes:
 lsblk
 ```
 
-Find the USB stick. It'll typically show as `sda` or `sdb` and have
-the size of your stick. **Do not** confuse it with your laptop's
-internal disk.
+Find the USB stick. It typically shows as `sda` or `sdb` with the size of
+your stick. **Do not** confuse it with your laptop's internal disk.
 
 Two ways to write it:
 
-**GUI flashers** (Balena Etcher, Raspberry Pi Imager, Rufus in DD
-mode): open `bty-usb-x86_64.iso.gz` directly. They decompress
-`.gz` natively, no extra step.
+**GUI flashers** (Balena Etcher, Raspberry Pi Imager, Rufus in DD mode):
+open `bty-usb-x86_64.iso.gz` directly. They decompress `.gz` natively, no
+extra step.
 
 **Command line:**
 
@@ -100,20 +98,18 @@ gunzip -d --stdout ~/system_imaging/disk/bty-usb-x86_64.iso.gz | \
 sync
 ```
 
-Replace `/dev/sdX` with the actual device. The `conv=fsync` and
-trailing `sync` are belt-and-braces: `dd` exits before the kernel has
-flushed buffers, and unplugging early can land you with a half-written
-stick.
+Replace `/dev/sdX` with the actual device. The `conv=fsync` and trailing
+`sync` are belt-and-braces: `dd` exits before the kernel flushes buffers,
+and unplugging early can land you with a half-written stick.
 
-Eject and re-plug the stick once. The kernel re-reads the partition
-table, and you should now see the second partition labeled
-`BTY_IMAGES`.
+Eject and re-plug the stick once. The kernel re-reads the partition table
+and you should now see the second partition labeled `BTY_IMAGES`.
 
 ## Step 3: Drop your image(s) onto BTY_IMAGES
 
-A fresh stick already ships with four starter `.bri` (bty Remote
-Image) descriptors on the `BTY_IMAGES` partition, so you can flash
-without copying anything onto the stick first:
+A fresh stick ships with four starter `.bri` (bty Remote Image) descriptors
+on the `BTY_IMAGES` partition, so you can flash without copying anything
+first:
 
 - `nosi-debian-sysdev-x86_64.bri` -- Debian 13 trixie sysdev image
 - `nosi-ubuntu-sysdev-x86_64.bri` -- Ubuntu 26.04 LTS resolute sysdev image
@@ -121,14 +117,12 @@ without copying anything onto the stick first:
 - `bty-server-x86_64.bri` -- latest bty-server appliance
 
 All three nosi entries use `oras://ghcr.io/safl/nosi/<variant>:latest`,
-which bty resolves at flash time to the current GHCR-published
-layer digest. The bty-server entry uses a GitHub release URL.
-See [`reference.md`](reference.md) for the `.bri` schema and the
-`oras://` scheme details.
+which bty resolves at flash time to the current GHCR-published layer
+digest. The bty-server entry uses a GitHub release URL. See
+[`reference.md`](reference.md) for the `.bri` schema and `oras://` details.
 
-To add your own pre-built images, mount the partition and drop
-files in. It's **exFAT** so you can mount it on Linux, macOS, or
-Windows.
+To add your own pre-built images, mount the partition and drop files in.
+It's **exFAT**, so you can mount it on Linux, macOS, or Windows.
 
 **Linux:**
 
@@ -150,15 +144,14 @@ diskutil unmount /Volumes/BTY_IMAGES
 **Windows:** the stick gets a drive letter (typically `D:` or `E:`).
 Copy images in via Explorer.
 
-You can drop **multiple images** onto the stick if you'll be flashing
-several different OSes from the same boot media. The TUI lists every
-recognised image it finds on `BTY_IMAGES`.
+You can drop **multiple images** onto the stick to flash several different
+OSes from the same boot media. The TUI lists every recognised image it
+finds on `BTY_IMAGES`.
 
 ## Step 4: Boot the target from USB
 
-Plug the stick into the target machine, power it on, and select the
-USB stick from the boot menu. The boot-menu key varies by vendor; a
-few common ones:
+Plug the stick into the target machine, power it on, and select the USB
+stick from the boot menu. The boot-menu key varies by vendor:
 
 | Vendor | Boot-menu key |
 |---|---|
@@ -168,25 +161,24 @@ few common ones:
 | Intel NUC | F10 |
 | Generic AMI | F11 / Esc |
 
-The bty live env auto-logins as `root` on `tty1`. From there you have
-two ways to flash: `bty` interactively (the operator picks an image
-and disk by hand, recommended for one-offs) or plan-driven against a
-`bty-server` (the appliance answers `bty --mac` with a pre-bound
-image and target, recommended for fleets).
+The bty live env auto-logins as `root` on `tty1`. Two ways to flash: `bty`
+interactively (the operator picks an image and disk by hand, recommended
+for one-offs) or plan-driven against a `bty-server` (the appliance answers
+`bty --mac` with a pre-bound image and target, recommended for fleets).
 
 ## Step 5a: Flash with `bty` (interactive)
 
-On the booted bty live env, `bty` is already running on tty1
-(via `bty-on-tty1.service`). On a workstation install:
+On the booted bty live env, `bty` is already running on tty1 (via
+`bty-on-tty1.service`). On a workstation install:
 
 ```bash
 sudo bty
 ```
 
-The wizard is a five-stage flow: pick an image source (or skip
-when local images exist), pick an image, pick a target disk,
-confirm the plan, reboot. Each step accepts a number (`1`, `2`,
-...) to pick a row or a single letter for navigation.
+The wizard is a five-stage flow: pick an image source (or skip when local
+images exist), pick an image, pick a target disk, confirm the plan, reboot.
+Each step accepts a number (`1`, `2`, ...) to pick a row or a single letter
+for navigation.
 
 | Stage | What it asks |
 |---|---|
@@ -222,32 +214,30 @@ need to flash.
 ## Step 5b: Scripted flashing via the bty-server plan endpoint
 
 v0.22.11+ retired the `bty flash` / `bty inspect` / `bty images`
-subcommands. To drive flashes from a fleet controller, run a
-`bty-web` appliance and target the per-MAC plan endpoint:
+subcommands. To drive flashes from a fleet controller, run a `bty-web`
+appliance and target the per-MAC plan endpoint:
 
-1. On the appliance, bind the machine: PUT `/machines/<mac>`
-   with `boot_policy=bty-flash-always`, a `bty_image_ref`, and a
+1. On the appliance, bind the machine: PUT `/machines/<mac>` with
+   `boot_policy=bty-flash-always`, a `bty_image_ref`, and a
    `target_disk_serial`.
-2. On the target, run `bty --server <appliance> --mac <self-mac>`.
-   bty GETs `<server>/pxe/<mac>/plan`, sees `mode=flash`, streams
-   the image straight from the appliance, runs `dd`, signals
-   `/pxe/<mac>/done`, and reboots. Same chrome as the interactive
-   wizard, no operator input.
+2. On the target, run `bty --server <appliance> --mac <self-mac>`. bty GETs
+   `<server>/pxe/<mac>/plan`, sees `mode=flash`, streams the image straight
+   from the appliance, runs `dd`, signals `/pxe/<mac>/done`, and reboots.
+   Same chrome as the interactive wizard, no operator input.
 
 The PXE-boot flow does this automatically: the live env's
-`bty-on-tty1.service` exec's `bty --server X --mac Y` with
-`X` + `Y` read from the kernel cmdline (`bty.server` + `bty.mac`).
-No operator action on the target.
+`bty-on-tty1.service` exec's `bty --server X --mac Y` with `X` + `Y` read
+from the kernel cmdline (`bty.server` + `bty.mac`). No operator action on
+the target.
 
-For ad-hoc single-machine flashes without a bty-web, the wizard
-is the path - it accepts any HTTP/HTTPS or `oras://` source via
-the catalog overlay.
+For ad-hoc single-machine flashes without a bty-web, the wizard is the
+path - it accepts any HTTP/HTTPS or `oras://` source via the catalog
+overlay.
 
-`bty` writes the bytes and stops. There's no post-flash
-provisioning step -- first-boot bring-up (users, network,
-packages, hostnames) is the image builder's job, baked in via
-cloud-init / NoCloud user-data at image-build time. bty itself
-only writes bytes.
+`bty` writes the bytes and stops. No post-flash provisioning step:
+first-boot bring-up (users, network, packages, hostnames) is the image
+builder's job, baked in via cloud-init / NoCloud user-data at image-build
+time.
 
 ## Step 6: Reboot
 
@@ -277,14 +267,13 @@ If it doesn't, see **Troubleshooting** below.
 
 ### Flash succeeds but the target doesn't boot
 
-* Confirm the image's format is right for what you wanted. A qcow2
- flashed onto a disk creates a qcow2-formatted disk, not a
- bootable filesystem. For a bootable target, use a raw `.img` or
- let bty convert the qcow2 at flash time (which it does
+* Confirm the image's format is right. A qcow2 flashed onto a disk creates
+ a qcow2-formatted disk, not a bootable filesystem. For a bootable target,
+ use a raw `.img` or let bty convert the qcow2 at flash time (it does so
  automatically via `qemu-img convert`).
-* If the image was built for UEFI but the target is configured for
- legacy BIOS (or vice versa), the firmware won't find a bootloader.
- Check the target's BIOS settings.
+* If the image was built for UEFI but the target is set to legacy BIOS (or
+ vice versa), the firmware won't find a bootloader. Check the target's
+ BIOS settings.
 
 ### Validation fails with "image format not recognised"
 
@@ -304,32 +293,30 @@ sudo umount /dev/sdX*
 
 ## Alternative delivery shapes
 
-Three concrete ways to deliver the bty live image without
-dedicating a USB stick to it: a multi-boot stick via Ventoy, or
-remote boot via an IP-KVM (piKVM, JetKVM). The Ventoy path also
-carries the image catalog; the IP-KVM paths use a remote `bty-web`
-for the catalog because IP-KVMs expose the `.iso` as a single
-CD-ROM and there is no local storage to put image files on.
+Three ways to deliver the bty live image without a dedicated USB stick: a
+multi-boot stick via Ventoy, or remote boot via an IP-KVM (piKVM, JetKVM).
+The Ventoy path also carries the image catalog; the IP-KVM paths use a
+remote `bty-web` for the catalog because IP-KVMs expose the `.iso` as a
+single CD-ROM with no local storage for image files.
 
-**Always-available bty-server install shortcut.** Regardless of
-which delivery shape you use, fresh USB sticks ship with a
-`bty-server-x86_64.bri` descriptor on `BTY_IMAGES` pointing at the
-latest GitHub release. The wizard surfaces it on the image list
-out of the box -- pick it, pick a target disk, confirm. The
-image streams directly from GitHub through the live env to the
-target's disk; no local staging is needed.
+**Always-available bty-server install shortcut.** Whatever delivery shape
+you use, fresh USB sticks ship with a `bty-server-x86_64.bri` descriptor on
+`BTY_IMAGES` pointing at the latest GitHub release. The wizard surfaces it
+on the image list out of the box: pick it, pick a target disk, confirm. The
+image streams directly from GitHub through the live env to the target's
+disk; no local staging.
 
-Network constraint: the live env needs HTTPS reachability to
-`github.com` / `objects.githubusercontent.com` at flash time.
-Air-gapped operators should ship their own `bty-server.img.gz`
-via the Ventoy `bty-images/` folder path described below instead.
+Network constraint: the live env needs HTTPS reachability to `github.com` /
+`objects.githubusercontent.com` at flash time. Air-gapped operators should
+ship their own `bty-server.img.gz` via the Ventoy `bty-images/` folder path
+below instead.
 
 ### Ventoy
 
-[Ventoy](https://www.ventoy.net) lets one USB stick boot any of
-dozens of `.iso` files via a menu at power-on. The Ventoy data
-partition doubles as exFAT-formatted scratch space, which bty's
-live env auto-discovers and uses as the image catalog.
+[Ventoy](https://www.ventoy.net) lets one USB stick boot any of dozens of
+`.iso` files via a menu at power-on. The Ventoy data partition doubles as
+exFAT scratch space, which bty's live env auto-discovers and uses as the
+image catalog.
 
 #### Step 1: Install Ventoy on a USB stick
 
@@ -339,10 +326,10 @@ live env auto-discovers and uses as the image catalog.
 sudo Ventoy2Disk.sh -i /dev/sdX
 ```
 
-Ventoy's installer is upstream; their docs cover Windows + Linux +
-macOS. After install, the stick has two partitions: an EFI /
-bootloader partition (small) and an exFAT data partition labelled
-`Ventoy` (large; uses the rest of the stick).
+Ventoy's installer is upstream; their docs cover Windows + Linux + macOS.
+After install, the stick has two partitions: a small EFI / bootloader
+partition and a large exFAT data partition labelled `Ventoy` (the rest of
+the stick).
 
 #### Step 2: Stage `bty-usb-x86_64.iso` on the Ventoy partition
 
@@ -379,19 +366,15 @@ sudo umount /mnt
 
 The discovery service accepts either layout:
 
-1. **Recommended**: a `bty-images/` subfolder at the partition
-   root, with your `.img.gz` / `.qcow2` / `.bri` files inside.
-   Keeps your pre-built images visually separate from the `.iso`
-   files Ventoy is booting.
-2. **Quick-drop**: the same files at the partition root,
-   alongside `bty-usb-x86_64.iso`. Less tidy but supported -- the
-   discovery service falls through to the root if no
-   `bty-images/` subfolder exists.
+1. **Recommended**: a `bty-images/` subfolder at the partition root with
+   your `.img.gz` / `.qcow2` / `.bri` files inside. Keeps pre-built images
+   visually separate from the `.iso` files Ventoy boots.
+2. **Quick-drop**: the same files at the partition root, alongside
+   `bty-usb-x86_64.iso`. Less tidy but supported.
 
-The service tries the subfolder first, then falls back to the
-root. First match with at least one supported file (`.bri` /
-`.img*` / `.qcow2`) wins, gets bind-mounted at
-`/var/lib/bty/images`, and `bty` picks it up from there.
+The service tries the subfolder first, then falls back to the root. First
+match with at least one supported file (`.bri` / `.img*` / `.qcow2`) wins,
+gets bind-mounted at `/var/lib/bty/images`, and `bty` picks it up.
 
 #### Step 4: Boot the target
 
@@ -420,22 +403,20 @@ If `bty` shows "No images in the catalog yet":
 
 ### piKVM (remote catalog only)
 
-[piKVM](https://pikvm.org) is a Raspberry-Pi-based IP-KVM. It
-exposes a target machine's HDMI + USB over the network and can
-emulate a USB mass-storage device, so the target boots from an
-`.iso` an operator uploaded via the piKVM web UI.
+[piKVM](https://pikvm.org) is a Raspberry-Pi-based IP-KVM. It exposes a
+target's HDMI + USB over the network and can emulate a USB mass-storage
+device, so the target boots from an `.iso` uploaded via the piKVM web UI.
 
-**piKVM hosts the `.iso` as a single CD-ROM.** The kernel inside
-the bty live env cannot reach the `.iso`'s internal partitions, so
-there is no place on the piKVM to put image files. Use a remote
-`bty-web` instance for the catalog instead.
+**piKVM hosts the `.iso` as a single CD-ROM.** The kernel inside the bty
+live env cannot reach the `.iso`'s internal partitions, so there is no
+place on the piKVM for image files. Use a remote `bty-web` instance for the
+catalog instead.
 
 #### Step 1: Set up a `bty-web` server reachable from the target
 
 The simplest option is the trial container; see
-[walkthrough-server-docker.md](walkthrough-server-docker.md) for
-the full setup. On any host that the target can reach over the
-LAN:
+[walkthrough-server-docker.md](walkthrough-server-docker.md) for the full
+setup. On any host the target can reach over the LAN:
 
 ```bash
 docker run -d --name bty-web \
@@ -444,12 +425,11 @@ docker run -d --name bty-web \
   ghcr.io/safl/bty-web:latest
 ```
 
-The default credentials are `bty / bty`. Note the host's IP
-address (e.g. `10.0.0.5`); the target needs to reach it on TCP
-8080.
+Default credentials are `bty / bty`. Note the host's IP (e.g. `10.0.0.5`);
+the target needs to reach it on TCP 8080.
 
-Upload your pre-built images to the server via the bty-web Images
-page (`http://10.0.0.5:8080/ui/images`).
+Upload your pre-built images via the bty-web Images page
+(`http://10.0.0.5:8080/ui/images`).
 
 #### Step 2: Connect piKVM to the target
 
@@ -484,41 +464,39 @@ In the piKVM web UI:
 
 #### Step 5: Point `bty` at the remote `bty-web` catalog
 
-The local catalog is empty (no images on the piKVM). Pick the
-custom catalog option on the SELECT_CATALOG stage:
+The local catalog is empty (no images on the piKVM). Pick the custom
+catalog option on the SELECT_CATALOG stage:
 
 1. At the source-pick prompt, type `c` (custom).
-2. Type the catalog URL when asked:
-   `http://10.0.0.5:8080/catalog.toml` (substitute your host).
+2. Type the catalog URL when asked: `http://10.0.0.5:8080/catalog.toml`
+   (substitute your host).
 3. Confirm with Enter.
 
-`bty` fetches the TOML catalog from `GET /catalog.toml` on the
-server, advances to SELECT_IMAGE, and you pick + flash from there.
-The image streams directly from `bty-web` through the live env to
-the target's disk; piKVM only carried the boot env.
+`bty` fetches the catalog from `GET /catalog.toml`, advances to
+SELECT_IMAGE, and you pick + flash from there. The image streams directly
+from `bty-web` through the live env to the target's disk; piKVM only
+carried the boot env.
 
-If you want bty's published default catalog without typing the URL,
-type `d` instead at the source-pick prompt: that's the bty release
-catalog (Debian / Ubuntu / Fedora sysdev images plus bty-server).
+For bty's published default catalog without typing the URL, type `d`
+instead at the source-pick prompt: that's the bty release catalog (Debian /
+Ubuntu / Fedora sysdev images plus bty-server).
 
 ### JetKVM (remote catalog only)
 
 [JetKVM](https://jetkvm.com) is a compact commercial IP-KVM
-(USB-stick-shaped device) with mass-storage emulation. Same
-constraint as piKVM: the `.iso` is hosted as a single CD-ROM, so
-there is no local storage on the JetKVM to put image files.
-Use a remote `bty-web` for the catalog.
+(USB-stick-shaped) with mass-storage emulation. Same constraint as piKVM:
+the `.iso` is hosted as a single CD-ROM, so there is no local storage for
+image files. Use a remote `bty-web` for the catalog.
 
 #### Step 1: Set up a `bty-web` server reachable from the target
 
-Same as piKVM Step 1 above. Run a `bty-web` instance somewhere on
-the LAN; note its IP and port.
+Same as piKVM Step 1. Run a `bty-web` instance somewhere on the LAN; note
+its IP and port.
 
 #### Step 2: Connect JetKVM to the target
 
-Cable per the JetKVM quickstart (USB-C from JetKVM to target;
-JetKVM to LAN). Pair the device with your JetKVM account, reach
-its web UI.
+Cable per the JetKVM quickstart (USB-C from JetKVM to target; JetKVM to
+LAN). Pair the device with your JetKVM account, reach its web UI.
 
 #### Step 3: Upload `bty-usb-x86_64.iso` to JetKVM
 
@@ -541,20 +519,20 @@ In the JetKVM web UI:
 
 #### Step 5: Point `bty` at the remote `bty-web` catalog
 
-Same as piKVM Step 5: type `c` at the source-pick prompt, enter the
-catalog URL (e.g. `http://10.0.0.5:8080/catalog.toml`). The catalog
-populates from the server, images stream through the JetKVM-booted
-live env to the target's disk.
+Same as piKVM Step 5: type `c` at the source-pick prompt, enter the catalog
+URL (e.g. `http://10.0.0.5:8080/catalog.toml`). The catalog populates from
+the server; images stream through the JetKVM-booted live env to the
+target's disk.
 
-To bootstrap the very first `bty-server` (no existing one to point
-at), press `i` instead of `c`: the built-in shortcut installs
-`bty-server` directly from GitHub's latest release.
+To bootstrap the very first `bty-server` (no existing one to point at),
+press `i` instead of `c`: the built-in shortcut installs `bty-server`
+directly from GitHub's latest release.
 
 ## What's next
 
 * For provisioning many machines at once over the network, see the
  server-appliance section in [Quickstart](quickstart.md#network-flashing-via-the-bty-web-server).
- (A full server-appliance walkthrough is queued; until then the
- quickstart covers the same ground at lower depth.)
+ (A full server-appliance walkthrough is queued; until then the quickstart
+ covers the same ground at lower depth.)
 * For the full CLI surface, see [Reference](reference.md).
 * For how the live env works under the hood, see [Concepts](concepts.md).

@@ -1,10 +1,10 @@
 # Dependencies
 
-What bty needs at runtime, organised by what you're trying to do.
-The `bty-lab` PyPI package itself has no third-party Python
-dependencies in its bare install; the bigger pieces (Rich for the
-wizard, FastAPI for the web server) are pulled in by extras and
-lazy-loaded only when those entry points are actually used.
+What bty needs at runtime, organised by what you're trying to do. The
+`bty-lab` PyPI package has no third-party Python dependencies in its bare
+install; the bigger pieces (Rich for the wizard, FastAPI for the web
+server) come in via extras and lazy-load only when those entry points are
+used.
 
 ## To install bty itself
 
@@ -16,14 +16,14 @@ pipx install "bty-lab[web]"     # adds `bty-web` (FastAPI, Uvicorn,
 pipx install "bty-lab[all]"     # everything
 ```
 
-Python 3.11+ is the only hard requirement. PyPI hosts pure-Python
-wheels; the `[tui]` / `[web]` extras pull in their own pure-Python
-deps with no native build step on install.
+Python 3.11+ is the only hard requirement. PyPI hosts pure-Python wheels;
+the `[tui]` / `[web]` extras pull in their own pure-Python deps with no
+native build step on install.
 
 ## To run `bty` (the wizard)
 
-The wizard shells out to a handful of system binaries that almost
-every Linux distribution already has:
+The wizard shells out to a handful of system binaries that almost every
+Linux distribution already has:
 
 | Binary | Used for | Debian/Ubuntu pkg |
 |---|---|---|
@@ -37,12 +37,12 @@ every Linux distribution already has:
 | `xz` | decompress `.img.xz` images | `xz-utils` |
 | `curl` | stream URLs (`http://`, `https://`, `oras://`) into the flash pipeline | `curl` |
 
-Flashing a real disk requires root (`sudo bty` or running inside
-the bty live env where root is already there).
+Flashing a real disk requires root (`sudo bty`, or running inside the bty
+live env where root is already there).
 
-The `--catalog SOURCE` mode (a local TOML path, HTTP URL, or
-`oras://` reference) adds nothing host-side -- it's a plain HTTP
-client; `oras://` uses stdlib urllib through `bty.oras`.
+The `--catalog SOURCE` mode (a local TOML path, HTTP URL, or `oras://`
+reference) adds nothing host-side: it's a plain HTTP client, and `oras://`
+uses stdlib urllib through `bty.oras`.
 
 ## To run bty-web
 
@@ -60,8 +60,7 @@ by pip) plus:
 ## To use the bty-server appliance for PXE
 
 The shipped `server-x86` and `server-rpi` appliance images bundle
-everything needed; this list is for reference if you're rebuilding
-your own.
+everything needed; this list is for reference if rebuilding your own.
 
 | Binary / package | Used for |
 |---|---|
@@ -96,10 +95,10 @@ for at runtime.
 
 ## Environment variables
 
-Quick reference of every env var bty's runtime reads, with which
-process consumes it and the default. The wizard + web all read
-from the same set so a single ``/etc/default/bty-web`` (appliance)
-or ``ENV`` block (Dockerfile) covers every component.
+Every env var bty's runtime reads, with the consuming process and the
+default. The wizard + web read from the same set, so a single
+``/etc/default/bty-web`` (appliance) or ``ENV`` block (Dockerfile) covers
+every component.
 
 | Var | Read by | Default | Purpose |
 |---|---|---|---|
@@ -118,9 +117,9 @@ or ``ENV`` block (Dockerfile) covers every component.
 | `BTY_TRUSTED_PROXY` | `bty-web` | unset | When set (any truthy), read client IP from `X-Forwarded-For`; only enable behind a reverse proxy that strips inbound X-F-F |
 | `BTY_QUIET` | container entrypoint | unset | Suppress the start-up banner with default credentials |
 
-``bty`` also accepts `--catalog SOURCE` to pre-load a catalog and
-`--server X --mac Y` to switch to server-driven dispatch. See
-`reference.md > CLI` for the full surface.
+``bty`` also accepts `--catalog SOURCE` to pre-load a catalog and `--server
+X --mac Y` for server-driven dispatch. See `reference.md > CLI` for the
+full surface.
 
 ## To run the test-pxe end-to-end check
 

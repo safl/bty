@@ -5,9 +5,8 @@ Reference material for bty's surfaces. Filled in as features land.
 ## Pre-built release artifacts
 
 Each tagged release publishes a fixed set of assets to GitHub. The
-`releases/latest/download/<filename>` URLs always 302 to the newest
-tag's copy of that file; substitute `latest` for a specific tag (e.g.
-`v0.11.1`) to pin.
+`releases/latest/download/<filename>` URLs always 302 to the newest tag's
+copy; substitute `latest` for a specific tag (e.g. `v0.11.1`) to pin.
 
 | Asset | What it is | URL (latest) |
 |---|---|---|
@@ -23,8 +22,8 @@ API for build automation is `GET /repos/safl/bty/releases/latest`.
 
 ## CLI
 
-`bty` is the operator-facing tool: a Rich-based wizard that picks
-an image + a target disk and flashes. Three invocation shapes:
+`bty` is a Rich-based wizard that picks an image + a target disk and
+flashes. Three invocation shapes:
 
 ```text
 bty                              # interactive wizard, local image-root only
@@ -38,18 +37,17 @@ metadata) and exits. `bty --help` documents every flag inline.
 
 ### `--server URL` (default `bty-server`)
 
-bty-server base URL or hostname. Bare hostnames are accepted;
-missing scheme defaults to `http://`. Pair with a LAN DNS entry
-(or `/etc/hosts` line) pointing at the appliance and `bty --mac X`
-just works. The PXE-booted live env sets this explicitly from the
-kernel cmdline (`bty.server=...`).
+bty-server base URL or hostname. Bare hostnames are accepted; missing
+scheme defaults to `http://`. Pair with a LAN DNS entry (or `/etc/hosts`
+line) pointing at the appliance and `bty --mac X` just works. The
+PXE-booted live env sets this from the kernel cmdline (`bty.server=...`).
 
 ### `--mac MAC`
 
-Self-MAC of this client (e.g. `aa:bb:cc:dd:ee:ff`). When supplied,
-`bty` switches to **server-driven mode**: it POSTs the local disk
-inventory to `<server>/pxe/<mac>/inventory`, then GETs
-`<server>/pxe/<mac>/plan` and dispatches on the JSON response:
+Self-MAC of this client (e.g. `aa:bb:cc:dd:ee:ff`). When supplied, `bty`
+switches to **server-driven mode**: it POSTs the local disk inventory to
+`<server>/pxe/<mac>/inventory`, then GETs `<server>/pxe/<mac>/plan` and
+dispatches on the JSON response:
 
 | `plan.mode` | What happens |
 |---|---|
@@ -58,25 +56,24 @@ inventory to `<server>/pxe/<mac>/inventory`, then GETs
 | `inventory` | Post the disk inventory, then reboot (no flash, no wizard). The next PXE contact sanboots the disk. Used by `boot_policy=bty-inventory`. |
 | `exit` | Print a notice and exit. Firmware / local-disk boot handles it. |
 
-Network / parse failures fall through to `interactive` with the
-server's `/catalog.toml` as the catalog source so the operator
-still has something to act on.
+Network / parse failures fall through to `interactive` with the server's
+`/catalog.toml` as the catalog source, so the operator still has something
+to act on.
 
 ### `--catalog URL`
 
-Catalog URL or path to pre-load (http(s):// for HTTP, oras:// for
-OCI, or a local file path). When given, the SELECT_CATALOG screen
-is skipped and the wizard jumps straight to SELECT_IMAGE with the
-catalog overlaying the local image-root. Equivalent to picking
-`[c] custom` on the source screen and typing the URL.
+Catalog URL or path to pre-load (http(s):// for HTTP, oras:// for OCI, or a
+local file path). When given, the SELECT_CATALOG screen is skipped and the
+wizard jumps straight to SELECT_IMAGE with the catalog overlaying the local
+image-root. Equivalent to picking `[c] custom` on the source screen and
+typing the URL.
 
-Ignored in server-driven mode (`--mac` set): the server supplies
-the catalog as part of `/pxe/<mac>/plan`.
+Ignored in server-driven mode (`--mac` set): the server supplies the
+catalog as part of `/pxe/<mac>/plan`.
 
 ### Catalog sources
 
-`--catalog` accepts the same shapes the wizard's `[c] custom`
-prompt does:
+`--catalog` accepts the same shapes the wizard's `[c] custom` prompt does:
 
 - **Local TOML file** (`/path/to/catalog.toml`).
 - **HTTP URL** (`https://example.com/catalog.toml`).
@@ -102,8 +99,8 @@ it null because the digest is resolved at flash time.
 
 ### `.bri` descriptors (per-stick catalog)
 
-A USB stick's `BTY_IMAGES` partition can carry `.bri` (bty Remote
-Image) descriptors -- tiny TOML pointers to remote images:
+A USB stick's `BTY_IMAGES` partition can carry `.bri` (bty Remote Image)
+descriptors: tiny TOML pointers to remote images:
 
 ```toml
 url = "https://github.com/safl/bty/releases/latest/download/bty-server-x86_64.img.gz"
@@ -113,19 +110,18 @@ url = "https://github.com/safl/bty/releases/latest/download/bty-server-x86_64.im
 The `url` field accepts:
 
 - `https://` (or `http://`) -- plain HTTP fetch.
-- `oras://<host>/<owner>/<repo>:<tag>` -- an OCI artifact published
-  via [ORAS](https://oras.land/) (the spec for non-container
-  artifacts in a container registry). bty resolves the tag to a
-  content-addressed layer digest at flash time and verifies the
-  downloaded bytes against that digest. Use a rolling tag
-  (`:latest`) or pin to `@sha256:<hex>`. Anonymous-pull only -- no
-  PAT, no docker login.
+- `oras://<host>/<owner>/<repo>:<tag>` -- an OCI artifact published via
+  [ORAS](https://oras.land/) (the spec for non-container artifacts in a
+  container registry). bty resolves the tag to a content-addressed layer
+  digest at flash time and verifies the downloaded bytes against it. Use a
+  rolling tag (`:latest`) or pin to `@sha256:<hex>`. Anonymous-pull only:
+  no PAT, no docker login.
 
 Fresh USB sticks ship with four starter `.bri` files pre-staged on
-`BTY_IMAGES`: three nosi sysdev images (Debian / Ubuntu / Fedora,
-each via `oras://ghcr.io/safl/nosi/<v>:latest`) plus the bty-server
-appliance from the GitHub release URL. Operators see all four in
-the wizard catalog without setting up any infrastructure.
+`BTY_IMAGES`: three nosi sysdev images (Debian / Ubuntu / Fedora, each via
+`oras://ghcr.io/safl/nosi/<v>:latest`) plus the bty-server appliance from
+the GitHub release URL. All four appear in the wizard catalog with no
+infrastructure setup.
 
 ### Recognised image formats
 
@@ -136,18 +132,16 @@ the wizard catalog without setting up any infrastructure.
 - `.img.gz` -- `gzip -d --stdout | dd`.
 - `.img.bz2` -- `bzip2 -d --stdout | dd`.
 
-Tarballs (`.tar.gz`, `.tgz`, etc.) are **not** supported: the
-gzip/xz/bzip2 layer applied to a tarball yields a TAR stream, not
-an image, and writing TAR headers into the MBR is a wrong-answer.
-Extract first if you have one.
+Tarballs (`.tar.gz`, `.tgz`, etc.) are **not** supported: the gzip/xz/bzip2
+layer applied to a tarball yields a TAR stream, not an image, and writing
+TAR headers into the MBR is a wrong-answer. Extract first.
 
-bty itself ships its appliance images (`bty-server-x86_64.img.gz`,
-`bty-server-rpi-arm64.img.gz`, `bty-usb-x86_64.iso.gz`) as gzip
-for universal flasher support -- Etcher / Rufus / Imager / dd all
-decompress gzip natively without the version-cliff issues that
-bit us with xz (Etcher's bundled xz handler) and zstd (older
-Etcher pre-1.18). The flash path inside the wizard accepts every
-format above for operator-supplied target images.
+bty ships its appliance images (`bty-server-x86_64.img.gz`,
+`bty-server-rpi-arm64.img.gz`, `bty-usb-x86_64.iso.gz`) as gzip for
+universal flasher support: Etcher / Rufus / Imager / dd all decompress gzip
+natively, without the version-cliff issues that bit us with xz (Etcher's
+bundled xz handler) and zstd (older Etcher pre-1.18). The flash path inside
+the wizard accepts every format above for operator-supplied target images.
 
 ### Image root
 
@@ -161,8 +155,8 @@ The local image-root is resolved in this order:
 
 ## Configuration
 
-bty resolves a small set of paths and runtime knobs from the
-environment and sensible defaults.
+bty resolves a small set of paths and runtime knobs from the environment
+and sensible defaults.
 
 ### Environment variables
 
@@ -200,30 +194,29 @@ bty's modules are usable as a library. Stable entry points:
 | `bty.catalog` | `Catalog`, `load_source(src)`, `load_bytes(...)`, `fetch_bytes(...)`. Portable catalog TOML loader. |
 | `bty.flash` | `execute_plan(plan, progress=, cancel=)`, `FlashPlan`, `FlashProgress`, `FlashError`. The flash machinery the wizard sits on top of. |
 
-A full sphinx-autodoc surface is on the roadmap. Until then treat
-any module not listed above as internal.
+A full sphinx-autodoc surface is on the roadmap. Until then treat any module
+not listed above as internal.
 
 ## HTTP API
 
-`bty-web` exposes a FastAPI server. Backed by a single SQLite file at
+`bty-web` exposes a FastAPI server, backed by a single SQLite file at
 `$BTY_STATE_DIR/state.db` (default `/var/lib/bty/state.db`).
 
 ### Auth
 
-Single-tenant PAM authentication. bty-web runs as a Linux service
-user (typically ``bty``); the only credential is **that user's OS
-password**. ``passwd bty`` rotates it. ``POST /ui/login`` (form-
-encoded ``password=...``) PAM-checks the password and flips
-``request.session["bty_authed"] = True``; the session is a server-
-signed cookie managed by Starlette's
-:class:`SessionMiddleware` (cookie name ``bty-token``, sliding 7-day
-TTL). No DB-backed session table - the cookie value is the session,
-signed against the per-appliance key at
-``/var/lib/bty/session-secret`` (generated by ``bty-web-init`` on
-first boot). ``POST /ui/logout`` clears the session.
+Single-tenant PAM authentication. bty-web runs as a Linux service user
+(typically ``bty``); the only credential is **that user's OS password**.
+``passwd bty`` rotates it. ``POST /ui/login`` (form-encoded
+``password=...``) PAM-checks the password and flips
+``request.session["bty_authed"] = True``; the session is a server-signed
+cookie managed by Starlette's :class:`SessionMiddleware` (cookie name
+``bty-token``, sliding 7-day TTL). No DB-backed session table: the cookie
+value is the session, signed against the per-appliance key at
+``/var/lib/bty/session-secret`` (generated by ``bty-web-init`` on first
+boot). ``POST /ui/logout`` clears the session.
 
-Open routes - these are reachable by PXE clients and other live-env
-tooling which can't carry a session cookie:
+Open routes, reachable by PXE clients and other live-env tooling that can't
+carry a session cookie:
 
 - `GET /healthz` - `{"status": "ok"}`
 - `GET /version` - `{"version": "..."}`
@@ -248,48 +241,41 @@ tooling which can't carry a session cookie:
  Auto-discovery: the first contact for an unknown MAC inserts a
  placeholder row (image=null, boot_policy=bty-inventory) so the box
  self-reports its disks and just boots; the operator sees it in
- `GET /machines` with a populated disk dropdown and can claim it
- with `PUT /machines/{mac}`. Repeat contacts update `last_seen_at` /
- `last_seen_ip`. Trust model: bty-web is meant for a homelab /
- CI network, not the open internet - anyone reachable can write
- discovery rows.
-- `POST /pxe/{mac}/done` - completion signal from the live env
- after a successful flash. Updates `last_flashed_at`. Mutates
- `boot_policy` only for `bty-flash-once`, flipping it to `sanboot`
- so the box boots its freshly-flashed disk and stops re-flashing.
- `bty-flash-always` is left untouched so the
- per-job CI cadence (constant reflashing) survives across boots.
- bty-web does *not* run any post-flash provisioning -- the target
- reboots into whatever the pre-built image brings up via cloud-init.
-- `GET /pxe-bootstrap.ipxe` - static iPXE script that dnsmasq points
- iPXE clients at on their second-stage DHCP. Returns
+ `GET /machines` with a populated disk dropdown and can claim it with
+ `PUT /machines/{mac}`. Repeat contacts update `last_seen_at` /
+ `last_seen_ip`. Trust model: bty-web is for a homelab / CI network, not
+ the open internet - anyone reachable can write discovery rows.
+- `POST /pxe/{mac}/done` - completion signal from the live env after a
+ successful flash. Updates `last_flashed_at`. Mutates `boot_policy` only
+ for `bty-flash-once`, flipping it to `sanboot` so the box boots its
+ freshly-flashed disk and stops re-flashing. `bty-flash-always` is left
+ untouched so the per-job CI cadence (constant reflashing) survives across
+ boots. bty-web runs no post-flash provisioning; the target reboots into
+ whatever the pre-built image brings up via cloud-init.
+- `GET /pxe-bootstrap.ipxe` - static iPXE script that dnsmasq points iPXE
+ clients at on their second-stage DHCP. Returns
  `chain http://<host>/pxe/${net0/mac:hexhyp}` where `<host>` is the
- request's `Host` header, so the client always loops back to
- whichever IP / hostname / .local name it used to reach the server.
+ request's `Host` header, so the client always loops back to whichever IP
+ / hostname / .local name it used to reach the server.
 - `GET /boot/{name}` - serve a live-env artifact from `BTY_BOOT_DIR`
- (default `/var/lib/bty/boot/`). Same trust model as `/pxe/*`.
- Operators populate the dir via the browser UI's "Fetch netboot
- artifacts" button on the Netboot page, or with the auth-gated
- `PUT /boot/{name}` upload route.
-- `GET /images/{key}` and `GET /images/{key}/{name}` - serve
- image bytes from `BTY_IMAGE_ROOT` (or the catalog cache).
- ``key`` may be a filename, a ``bty_image_ref``, or a
- ``disk_image_sha``; the trailing ``{name}`` form is decorative
- (preserves format-by-extension on the client side). Used by
- the live env to download the assigned image; reachable by
- anyone on the network. Companion auth-gated upload route at
- `PUT /images/{name}` for operators / scripts.
-- `GET /images` - list the catalog (array of `ImageEntry`). Open
- for the same reason as `GET /images/{key}`: the PXE-booted ``bty``
- flow needs to enumerate from inside the live env without first
- bootstrapping a session, and discovery adds no capability beyond
- what the already-open byte-serving route provides.
-- `GET /catalog.toml` - same row set as `GET /images`, serialised as
- a `bty.catalog.Catalog` TOML manifest (``version = 1``, ``[[images]]``
- tables). Open for the same reason as `GET /images`; consumed by
- `bty --catalog` so the same client code path that handles static
- files (e.g. published on GitHub releases) works against a live
- bty-web. Entries without a sha256 are skipped.
+ (default `/var/lib/bty/boot/`). Same trust model as `/pxe/*`. Operators
+ populate the dir via the browser UI's "Fetch netboot artifacts" button on
+ the Netboot page, or with the auth-gated `PUT /boot/{name}` upload route.
+- `GET /images/{key}` and `GET /images/{key}/{name}` - serve image bytes
+ from `BTY_IMAGE_ROOT` (or the catalog cache). ``key`` may be a filename,
+ a ``bty_image_ref``, or a ``disk_image_sha``; the trailing ``{name}``
+ form is decorative (preserves format-by-extension client-side). Used by
+ the live env to download the assigned image; reachable by anyone on the
+ network. Companion auth-gated upload route at `PUT /images/{name}`.
+- `GET /images` - list the catalog (array of `ImageEntry`). Open for the
+ same reason as `GET /images/{key}`: the PXE-booted ``bty`` flow needs to
+ enumerate from inside the live env without bootstrapping a session, and
+ discovery adds no capability beyond the already-open byte-serving route.
+- `GET /catalog.toml` - same row set as `GET /images`, serialised as a
+ `bty.catalog.Catalog` TOML manifest (``version = 1``, ``[[images]]``
+ tables). Open for the same reason; consumed by `bty --catalog` so the
+ same client code path that handles static files (e.g. on GitHub releases)
+ works against a live bty-web. Entries without a sha256 are skipped.
 
 Protected routes (session cookie required):
 
@@ -314,19 +300,18 @@ Protected routes (session cookie required):
 | DELETE | `/catalog/hashes/{name}` | - | 200 with state; 404 if not active |
 
 ``POST /catalog/import`` parses the TOML at ``source`` (path,
-``http(s)://``, or ``oras://``) via ``bty.catalog.load_source`` and
-adds each entry to the catalog as metadata. **No bytes are
-fetched at import time**; each row surfaces in ``/images`` as
-``cached: false`` until the operator triggers a fetch (the
-``/ui/images`` "Fetch" button or ``POST /catalog/downloads``).
-Idempotent: re-importing the same source skips duplicates by ``src``.
+``http(s)://``, or ``oras://``) via ``bty.catalog.load_source`` and adds
+each entry to the catalog as metadata. **No bytes are fetched at import
+time**; each row surfaces in ``/images`` as ``cached: false`` until the
+operator triggers a fetch (the ``/ui/images`` "Fetch" button or ``POST
+/catalog/downloads``). Idempotent: re-importing the same source skips
+duplicates by ``src``.
 
-``DELETE /catalog/cache/{name}`` unlinks ``$cache_dir/<sha256>``
-for the named entry; the catalog row is preserved. The next
-``GET /images`` listing shows the row as ``cached: false`` so the
-operator can re-enqueue a fetch. Idempotent: missing cache file
-or unknown name both return 200 with ``deleted: false`` and a
-``reason`` string.
+``DELETE /catalog/cache/{name}`` unlinks ``$cache_dir/<sha256>`` for the
+named entry; the catalog row is preserved. The next ``GET /images`` listing
+shows the row as ``cached: false`` so the operator can re-enqueue a fetch.
+Idempotent: missing cache file or unknown name both return 200 with
+``deleted: false`` and a ``reason`` string.
 
 MAC addresses are accepted in any case + `:`-or-`-` separated, and
 normalised to lower-case `aa:bb:cc:dd:ee:ff`.
@@ -429,7 +414,7 @@ InventoryDisk = {
 The `POST /pxe/{mac}/inventory` body is `{"disks": [InventoryDisk, ...]}`
 plus an optional `"lshw"` field carrying the full `lshw -json` hardware
 tree (CPU / RAM / NICs + MACs / peripherals / firmware). `bty` collects
-it on every live-env boot. It is **supplementary** -- the flasher only
+it on every live-env boot. It is **supplementary**: the flasher only
 consumes `disks` (from lsblk); `lshw` is stored as a blob, surfaced on
 the Machine view, and downloadable raw at
 `GET /machines/{mac}/lshw.json` (size-capped server-side; an oversize
@@ -448,8 +433,8 @@ or absent blob leaves any prior one intact).
 
 ### Browser UI (`/ui`)
 
-`bty-web` ships a server-rendered browser UI under `/ui` (Jinja
-templates, Bootstrap CSS, HTMX form posts).
+`bty-web` ships a server-rendered browser UI under `/ui` (Jinja templates,
+Bootstrap CSS, HTMX form posts).
 
 - `GET /ui` -> 303 redirect to `/ui/dashboard`
 - `GET /ui/login` -> login form
@@ -505,15 +490,14 @@ templates, Bootstrap CSS, HTMX form posts).
  (default `safl/bty`, default tag `latest`); verifies the manifest
  and atomically installs into `BTY_BOOT_DIR`.
 - `GET /ui/settings` -> the config map: read-only groups for every bty
- magic value (where each comes from -- env var / derived path /
- default), the editable **Upstream sources** (release repo / catalog
- URL / release tag) card, and the **DHCP / Network boot** router cheatsheet.
- Operator
- authentication is on the separate Account page (`/ui/account`,
- reached via the user pill): the credential is the OS password of the
- bty service user, rotated with `sudo passwd bty`; to invalidate every
- session at once, rotate the cookie-signing secret with
- `rm /var/lib/bty/session-secret && systemctl restart bty-web`.
+ magic value (where each comes from: env var / derived path / default),
+ the editable **Upstream sources** (release repo / catalog URL / release
+ tag) card, and the **DHCP / Network boot** router cheatsheet. Operator
+ authentication is on the separate Account page (`/ui/account`, reached
+ via the user pill): the credential is the OS password of the bty service
+ user, rotated with `sudo passwd bty`; to invalidate every session at
+ once, rotate the cookie-signing secret with `rm
+ /var/lib/bty/session-secret && systemctl restart bty-web`.
 - `POST /ui/settings/upstream` / `POST /ui/settings/flash` -> persist
  the editable Upstream-sources / settle-policy overrides.
 - `POST /ui/settings/tftp-control` -> drives `bty-web-tftp <action>`
@@ -521,41 +505,39 @@ templates, Bootstrap CSS, HTMX form posts).
  grant in `/etc/sudoers.d/bty-web`. URL is unchanged for
  backwards compat though the panel lives on /ui/netboot now.
 
-The auth dependency checks ``request.session.get("bty_authed")``;
-the session is a Starlette ``SessionMiddleware``-signed payload
-carried in the ``bty-token`` cookie, so no per-request DB hop is
-needed. Logging out clears the session dict; ``SessionMiddleware``
-emits a deletion cookie on the response.
+The auth dependency checks ``request.session.get("bty_authed")``; the
+session is a Starlette ``SessionMiddleware``-signed payload carried in the
+``bty-token`` cookie, so no per-request DB hop is needed. Logging out clears
+the session dict; ``SessionMiddleware`` emits a deletion cookie.
 
 #### Static assets (offline-friendly)
 
-Bootstrap CSS, HTMX, and the HTMX SSE extension are **vendored** into
-the wheel under `bty.web._static/` and served at `/static/`. The bty
-appliance does not contact any CDN at runtime - all browser code is
-served from the same origin. See `src/bty/web/_static/README.md` in
-the source tree for asset versions and the refresh procedure.
+Bootstrap CSS, HTMX, and the HTMX SSE extension are **vendored** into the
+wheel under `bty.web._static/` and served at `/static/`. The appliance
+contacts no CDN at runtime; all browser code is served from the same
+origin. See `src/bty/web/_static/README.md` for asset versions and the
+refresh procedure.
 
 #### Live updates (`GET /events/machines`)
 
 The machines table subscribes to a Server-Sent Events stream so the
-operator does not have to refresh after PXE auto-discovery or another
-admin's edit. The endpoint:
+operator need not refresh after PXE auto-discovery or another admin's edit.
+The endpoint:
 
-- Authenticates with the same session-cookie dep as the rest of the
- API. Browsers carry the cookie automatically; the SSE `EventSource`
- API does not let you set custom headers.
-- Sends `Content-Type: text/event-stream` and an initial
- `machines-update` event containing the current `<tbody>` snapshot
- on connect.
-- Emits a fresh `machines-update` event after every mutation
- (`PUT /machines/{mac}`, `DELETE /machines/{mac}`, the corresponding
- `/ui` form posts, and PXE auto-discovery on `/pxe/{mac}`).
+- Authenticates with the same session-cookie dep as the rest of the API.
+ Browsers carry the cookie automatically; the SSE `EventSource` API does
+ not let you set custom headers.
+- Sends `Content-Type: text/event-stream` and an initial `machines-update`
+ event containing the current `<tbody>` snapshot on connect.
+- Emits a fresh `machines-update` event after every mutation (`PUT
+ /machines/{mac}`, `DELETE /machines/{mac}`, the corresponding `/ui` form
+ posts, and PXE auto-discovery on `/pxe/{mac}`).
 
-The fan-out bus is in-process - slow consumers are silently dropped
-(every event carries the full snapshot, so they catch up on the next
-mutation). **Single uvicorn worker** is required: a multi-worker
-deployment would need a real broker (Redis pub/sub, NATS, ...), which
-is overkill for an appliance serving a homelab fleet.
+The fan-out bus is in-process; slow consumers are silently dropped (every
+event carries the full snapshot, so they catch up on the next mutation).
+**Single uvicorn worker** is required: a multi-worker deployment would need
+a real broker (Redis pub/sub, NATS, ...), overkill for an appliance serving
+a homelab fleet.
 
 ## Configuration schemas
 

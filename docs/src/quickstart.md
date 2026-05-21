@@ -1,14 +1,13 @@
 # Quickstart
 
-A walk-through of what bty can do today, ordered roughly the way an
-operator would meet it: build a delivery medium, boot a target,
-flash a disk, and finally drive a fleet over the network via the
-bty-web server.
+What bty can do today, ordered the way an operator meets it: build a
+delivery medium, boot a target, flash a disk, then drive a fleet over the
+network via the bty-web server.
 
 ## Lowest-barrier trial: bty-web in Docker
 
-If you just want to poke at the browser UI before committing to a
-USB stick or an appliance, pull the published container:
+To poke at the browser UI before committing to a USB stick or an
+appliance, pull the published container:
 
 ```bash
 docker run -d --name bty-web \
@@ -18,20 +17,18 @@ docker run -d --name bty-web \
 # -> http://localhost:8080/ui   (login: bty / bty)
 ```
 
-Use the docker-managed volume (`-v bty-data:/var/lib/bty`) for
-the simplest start; the in-container bty user owns it. If you
-prefer bind-mounts so files show up in the host filesystem,
-pre-chown the dir to uid 999 (the bty user) - the entrypoint
-checks and exits with a clear hint if it cannot write.
+The docker-managed volume (`-v bty-data:/var/lib/bty`) is the simplest
+start; the in-container bty user owns it. For bind-mounts (files show up in
+the host filesystem) pre-chown the dir to uid 999 (the bty user) - the
+entrypoint checks and exits with a clear hint if it cannot write.
 
-Connect a `bty --catalog http://<host>:8080/catalog.toml` from a
-USB live stick or a workstation to flash from this catalog without
-burning images onto every stick.
+Connect a `bty --catalog http://<host>:8080/catalog.toml` from a USB live
+stick or a workstation to flash from this catalog without burning images
+onto every stick.
 
-The container has no dnsmasq / TFTP / iPXE - it's the catalog +
-UI shape, not the PXE shape. For PXE-driven unattended flashing,
-keep reading and build (or download) the bty-server appliance
-image. Full details and rotation guidance:
+The container has no dnsmasq / TFTP / iPXE - it's the catalog + UI shape,
+not the PXE shape. For PXE-driven unattended flashing, build (or download)
+the bty-server appliance image. Full details and rotation guidance:
 [walkthrough-server-docker.md](walkthrough-server-docker.md).
 
 ## Get the USB live image
@@ -61,9 +58,8 @@ sudo make build VARIANT=usb-x86    # 15-25 min
 ```
 
 The build runs Debian's `live-build` (debootstrap + mksquashfs +
-mkinitramfs) to produce a hybrid ISO, post-processes it to append
-a writable `BTY_IMAGES` exFAT partition, and gzip-compresses the
-result. Emits:
+mkinitramfs) to produce a hybrid ISO, appends a writable `BTY_IMAGES`
+exFAT partition, and gzip-compresses the result. Emits:
 
 - `~/system_imaging/disk/bty-usb-x86_64.iso.gz` - distributable
   artifact (the file you decompress + `dd` to a USB stick).
@@ -81,16 +77,15 @@ gunzip -d --stdout ~/system_imaging/disk/bty-usb-x86_64.iso.gz | \
 sync
 ```
 
-The stick now has the bty live-boot ISO9660 + EFI partitions plus
-a 2.1 GiB exFAT partition labelled `BTY_IMAGES` -- pre-staged with
-four starter `.bri` descriptors (nosi Debian / Ubuntu / Fedora
-sysdev images via `oras://ghcr.io/safl/nosi/...`, plus bty-server) so the
-catalog is non-empty out of the box, with room for a typical
-`bty-server` image (~1-1.5 GiB compressed) plus headroom. The
-smaller partition makes the .iso friendlier to Ventoy hosts and
-KVM-over-IP shims (piKVM / JetKVM). If you need more space (multi-
-distro carry-all etc.), grow `BTY_IMAGES` on your host with gparted
-after writing the stick.
+The stick now has the bty live-boot ISO9660 + EFI partitions plus a 2.1 GiB
+exFAT partition labelled `BTY_IMAGES`, pre-staged with four starter `.bri`
+descriptors (nosi Debian / Ubuntu / Fedora sysdev images via
+`oras://ghcr.io/safl/nosi/...`, plus bty-server) so the catalog is
+non-empty out of the box, with room for a typical `bty-server` image (~1-
+1.5 GiB compressed) plus headroom. The smaller partition makes the .iso
+friendlier to Ventoy hosts and KVM-over-IP shims (piKVM / JetKVM). For more
+space, grow `BTY_IMAGES` on your host with gparted after writing the
+stick.
 
 ## Drop images onto the stick
 
@@ -109,73 +104,67 @@ Concepts for the convention bty expects.
 
 ## Boot a target machine
 
-Insert the USB stick into the target machine and boot from it. The
-bty live env runs `bty` on `tty1` automatically (the
-`bty-on-tty1.service` unit takes over the console), so the
-operator lands on the interactive wizard without typing anything.
-Alt+F2 through Alt+F6 drop into a root shell for diagnostics if
-needed; Alt+F1 returns to `bty`.
+Insert the USB stick into the target machine and boot from it. The bty
+live env runs `bty` on `tty1` automatically (via `bty-on-tty1.service`), so
+the operator lands on the interactive wizard without typing anything.
+Alt+F2 through Alt+F6 drop into a root shell for diagnostics; Alt+F1
+returns to `bty`.
 
 The rootfs is a read-only SquashFS with a tmpfs overlay (live-boot's
-default), so anything you change in the live env vanishes on
-reboot. The `BTY_IMAGES` partition is mounted RO at
-`/var/lib/bty/images` inside the live env (read-write from any host
-OS when the stick is removed) - files you copied there persist.
+default), so changes in the live env vanish on reboot. The `BTY_IMAGES`
+partition is mounted RO at `/var/lib/bty/images` inside the live env
+(read-write from any host OS when the stick is removed) - files you copied
+there persist.
 
 ## What you can do today
 
 ### Inspect + flash a target disk
 
-Inside the live env `bty` runs automatically on tty1; on any
-other Linux box install the wizard (`pipx install "bty-lab[tui]"`)
-and launch it as root:
+Inside the live env `bty` runs automatically on tty1; on any other Linux
+box install the wizard (`pipx install "bty-lab[tui]"`) and launch it as
+root:
 
 ```bash
 sudo bty
 ```
 
-The wizard is a five-stage flow: pick a catalog source (or skip
-when local images exist), pick an image, pick a target disk, confirm
-the flash plan, reboot. Each step accepts a number (`1`, `2`, ...)
-or a single letter for navigation (`b` back, `q` quit, `r` refresh).
-A confirmation panel shows the plan + any validation errors before
-the destructive write.
+The wizard is a five-stage flow: pick a catalog source (or skip when local
+images exist), pick an image, pick a target disk, confirm the flash plan,
+reboot. Each step accepts a number (`1`, `2`, ...) or a single letter for
+navigation (`b` back, `q` quit, `r` refresh). A confirmation panel shows
+the plan + any validation errors before the destructive write.
 
-`lsblk -d -e7` (the stdlib disk-listing command) is still the
-right tool for "what block devices does the kernel see"; `bty`
-shows the same data inside the wizard but only for flash-eligible
-disks (excludes loop devices, partitions, read-only media).
+`lsblk -d -e7` remains the right tool for "what block devices does the
+kernel see"; `bty` shows the same data but only for flash-eligible disks
+(excludes loop devices, partitions, read-only media).
 
 ### No post-flash provisioning
 
-bty is a flasher, not an image builder. First-boot bring-up
-(users, network, packages, hostnames) gets baked into the image by
-the image builder upstream via cloud-init / NoCloud user-data --
-bty just writes the bytes.
+bty is a flasher, not an image builder. First-boot bring-up (users,
+network, packages, hostnames) gets baked into the image upstream via
+cloud-init / NoCloud user-data; bty just writes the bytes.
 
 ### bty --catalog: pre-load a remote catalog
 
-If you want the wizard to start with a known catalog overlay
-(e.g. a bty-web instance hosting your team's image library), pass
-its URL on the cmdline:
+To start the wizard with a known catalog overlay (e.g. a bty-web instance
+hosting your team's image library), pass its URL:
 
 ```bash
 sudo bty --catalog http://bty-server:8080/catalog.toml
 ```
 
-This skips the SELECT_CATALOG screen and jumps straight to
-SELECT_IMAGE with the catalog merged into the local image-root
-listing -- equivalent to picking `[c] custom` on the source screen
-and typing the URL.
+This skips the SELECT_CATALOG screen and jumps straight to SELECT_IMAGE
+with the catalog merged into the local image-root listing - equivalent to
+picking `[c] custom` on the source screen and typing the URL.
 
 See [Reference](reference.md) for the full cmdline surface.
 
 ### Network flashing via the bty-web server
 
-`bty-web` is the HTTP server side of bty - browser UI + REST API +
-the iPXE chain a target boots into for network-flash. The server
-appliance image (`make build VARIANT=server-x86`) ships preconfigured;
-for a quick local test you can run it directly:
+`bty-web` is the HTTP server side of bty - browser UI + REST API + the iPXE
+chain a target boots into for network-flash. The server appliance image
+(`make build VARIANT=server-x86`) ships preconfigured; for a quick local
+test run it directly:
 
 ```bash
 # On the server (or any box you're testing on):
@@ -183,15 +172,14 @@ export BTY_STATE_DIR=/var/lib/bty
 bty-web   # listens on 0.0.0.0:8080 by default
 ```
 
-Auth is OS-PAM against the bty service user (the account bty-web
-runs as). On the appliance image the default is `bty / bty`; rotate
-with `sudo passwd bty` before exposing. The browser UI at
-`http://server:8080/ui/login` is the primary operator entry point;
-``GET /pxe/{mac}`` (the route PXE clients hit) is open and needs no
-auth.
+Auth is OS-PAM against the bty service user (the account bty-web runs as).
+On the appliance image the default is `bty / bty`; rotate with `sudo passwd
+bty` before exposing. The browser UI at `http://server:8080/ui/login` is
+the primary operator entry point; ``GET /pxe/{mac}`` (the route PXE clients
+hit) is open and needs no auth.
 
-If you want to script mutations from a shell, drive `/ui/login` once
-to get the cookie, then attach it on subsequent requests:
+To script mutations from a shell, drive `/ui/login` once to get the cookie,
+then attach it on subsequent requests:
 
 ```bash
 COOKIE=$(curl -sS -i -X POST -d "password=bty" \
@@ -206,31 +194,29 @@ curl -H "Cookie: bty-token=$COOKIE" -X PUT \
 ```
 
 (The flash policies also need a `target_disk_serial` picked from the
-machine's reported inventory; without one the chain falls back to a
-local boot. Boot the box once as `bty-tui` so it reports its disks,
-then pick the target.)
+machine's reported inventory; without one the chain falls back to a local
+boot. Boot the box once as `bty-tui` so it reports its disks, then pick the
+target.)
 
-PXE clients hit `GET /pxe/{mac}` (open, no auth) for the per-MAC
-iPXE config and chain into the live env, which downloads the
-assigned image and flashes the target's local disk.
+PXE clients hit `GET /pxe/{mac}` (open, no auth) for the per-MAC iPXE
+config and chain into the live env, which downloads the assigned image and
+flashes the target's local disk.
 
 ### Browser UI
 
-`http://server:8080/ui/login` - the same `bty / bty` credential
-gets you a cookie-backed session. The dashboard shows machine /
-image counts; the **Machines** page is a live table that updates
-via Server-Sent Events as PXE clients self-discover. The
-**Netboot** page has a per-interface cheatsheet for pointing your
-LAN DHCP server (option 60/66/67) at the appliance; bty serves
-TFTP but does not run DHCP.
+`http://server:8080/ui/login` - the same `bty / bty` credential gets you a
+cookie-backed session. The dashboard shows machine / image counts; the
+**Machines** page is a live table that updates via Server-Sent Events as
+PXE clients self-discover. The **Netboot** page has a per-interface
+cheatsheet for pointing your LAN DHCP server (option 60/66/67) at the
+appliance; bty serves TFTP but does not run DHCP.
 
-All client-side assets (Bootstrap CSS, Bootstrap Icons, HTMX,
-htmx-ext-sse) are vendored in the wheel - the appliance does not
-contact any external CDN at runtime.
+All client-side assets (Bootstrap CSS, Bootstrap Icons, HTMX, htmx-ext-sse)
+are vendored in the wheel - the appliance contacts no external CDN at
+runtime.
 
 ## What is coming
 
-See [`PLAN.md`](https://github.com/safl/bty/blob/main/PLAN.md) for
-the live roadmap. First-boot bring-up of flashed targets is the
-image builder's job (cloud-init / NoCloud user-data); bty itself
-stays a flasher.
+See [`PLAN.md`](https://github.com/safl/bty/blob/main/PLAN.md) for the live
+roadmap. First-boot bring-up of flashed targets is the image builder's job
+(cloud-init / NoCloud user-data); bty stays a flasher.
