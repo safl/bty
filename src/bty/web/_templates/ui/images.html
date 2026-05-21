@@ -566,7 +566,15 @@
                 credentials: "same-origin",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ name: name }),
-            }).then(refresh).catch(function () {
+            }).then(function () {
+                // Re-enable on success too: this button is in the catalog
+                // table, which has no polling refresh, so without this it
+                // stays greyed until a full page reload. Re-enqueue is
+                // harmless (the download manager dedups queued/running);
+                // progress shows in the Downloads table below.
+                fetchBtn.disabled = false;
+                refresh();
+            }).catch(function () {
                 fetchBtn.disabled = false;
             });
             return;
@@ -581,7 +589,12 @@
                 credentials: "same-origin",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ name: name }),
-            }).then(refresh).catch(function () {
+            }).then(function () {
+                // Same as the Fetch button: re-enable on success since
+                // the catalog table isn't on a refresh timer.
+                hashBtn.disabled = false;
+                refresh();
+            }).catch(function () {
                 hashBtn.disabled = false;
             });
             return;
