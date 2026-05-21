@@ -229,7 +229,7 @@ subcommands. To drive flashes from a fleet controller, run a
    with `boot_policy=bty-flash-always`, a `bty_image_ref`, and a
    `target_disk_serial`.
 2. On the target, run `bty --server <appliance> --mac <self-mac>`.
-   bty GETs `<server>/pxe/<mac>/plan`, sees `mode=auto`, streams
+   bty GETs `<server>/pxe/<mac>/plan`, sees `mode=flash`, streams
    the image straight from the appliance, runs `dd`, signals
    `/pxe/<mac>/done`, and reboots. Same chrome as the interactive
    wizard, no operator input.

@@ -6,8 +6,8 @@
 # Chains into the bty live env. The live env's
 # bty-on-tty1.service exec's ``bty --server X --mac Y``;
 # ``bty`` then GETs ``<server>/pxe/<mac>/plan`` and dispatches
-# on the JSON response (mode=auto -> flash without prompts,
-# mode=interactive -> wizard on tty1, mode=local -> exit, let
+# on the JSON response (mode=flash -> flash without prompts,
+# mode=interactive -> wizard on tty1, mode=exit -> exit, let
 # firmware boot).
 #
 # The kernel cmdline only carries ``bty.server`` + ``bty.mac``;

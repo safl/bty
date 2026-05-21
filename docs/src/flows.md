@@ -218,7 +218,7 @@ schedule, on demand, or on failure.
    `bty.mac`; iPXE chains into the bty live env served over HTTP
    by `bty-web`.
 5. `bty-on-tty1.service` exec's `bty --server URL --mac MAC`.
-   ``bty`` GETs `/pxe/<mac>/plan`, sees ``mode=auto`` with the
+   ``bty`` GETs `/pxe/<mac>/plan`, sees ``mode=flash`` with the
    image URL + target_disk_serial filled in, resolves the serial
    to a `/dev/...` path via lsblk, fetches the assigned image
    from `GET /images/{ref}/{name}`, runs the flash, and `POST`s
@@ -303,7 +303,7 @@ incidents on multi-disk hosts. The full picture, in event order:
    `bty.server=` + `bty.mac=` on the cmdline (the image URL +
    target serial come from the plan endpoint, not the cmdline).
 5. **Live env flashes.** ``bty`` on tty1 GETs `/pxe/<mac>/plan`,
-   sees ``mode=auto`` with image + target_disk_serial filled in,
+   sees ``mode=flash`` with image + target_disk_serial filled in,
    shells out `lsblk -o SERIAL`, matches the serial to a path,
    runs the flash on that path, `POST`s `/pxe/{mac}/done`
    (audit: `machine.flashed`), reboots.

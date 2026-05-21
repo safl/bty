@@ -31,7 +31,7 @@ three:
          | (BTY_IMAGES)          | (image fetched               | chain ->
          |                       |   from catalog               | live env ->
          v                       |   server)                    | bty in
-   +-----------+                 v                              | auto mode
+   +-----------+                 v                              | flash mode
    | target    |           +-----------+                        v
    | machine   |           | target    |                  +---------------+
    | local     |           | machine   |                  | target machine|

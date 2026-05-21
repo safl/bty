@@ -798,7 +798,7 @@ def create_app(
 
         Plan shapes (mode is the dispatch token):
 
-        * ``{"mode": "auto", "image": URL, "target_disk_serial": S}``
+        * ``{"mode": "flash", "image": URL, "target_disk_serial": S}``
           -- boot_policy in (bty-flash-always, bty-flash-once) with a bindable ref
           AND a target_disk_serial picked. ``bty`` runs the flash
           without prompts.
@@ -806,7 +806,7 @@ def create_app(
           ``tui``, OR a flash policy that can't be auto-resolved
           (no target serial, orphan ref). ``bty`` drops the operator
           into the wizard with the server's catalog pre-loaded.
-        * ``{"mode": "local"}`` -- boot_policy=sanboot (handled at the
+        * ``{"mode": "exit"}`` -- boot_policy=sanboot (handled at the
           iPXE layer, so the box doesn't reach the live env) or any
           unrecognised policy. ``bty`` exits cleanly; the firmware /
           sanboot path handles boot.
@@ -816,7 +816,7 @@ def create_app(
         --mac X`` from a fresh box gets a wizard plan rather than
         a 404.
 
-        Server-vs-client truth asymmetry: ``mode=auto`` is the only
+        Server-vs-client truth asymmetry: ``mode=flash`` is the only
         path that makes the server the source of truth for what
         gets flashed. ``mode=interactive`` returns a catalog URL
         but ``bty`` does NOT report back which entry the operator
@@ -897,11 +897,11 @@ def create_app(
             if image_name is not None and target_disk_serial:
                 image_name_encoded = urllib.parse.quote(image_name, safe="")
                 plan = {
-                    "mode": "auto",
+                    "mode": "flash",
                     "image": f"{base}/images/{ref}/{image_name_encoded}",
                     "target_disk_serial": str(target_disk_serial),
                 }
-                offer_kind = f"plan:auto:{policy}"
+                offer_kind = f"plan:flash:{policy}"
             else:
                 # Flash policy but the auto-resolve failed (no target
                 # serial picked or orphan ref). Drop the operator into
@@ -924,10 +924,10 @@ def create_app(
         else:
             # boot_policy=sanboot (or any other / missing) -- ``bty``
             # has nothing to do (sanboot is handled at the iPXE layer,
-            # the box never chains into the live env); plan mode=local
+            # the box never chains into the live env); plan mode=exit
             # means "exit cleanly, let firmware / sanboot handle boot".
-            plan = {"mode": "local"}
-            offer_kind = f"plan:local:{policy}"
+            plan = {"mode": "exit"}
+            offer_kind = f"plan:exit:{policy}"
 
         with _db.open_db(state_path) as conn:
             _log_event(

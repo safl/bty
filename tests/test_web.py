@@ -1331,7 +1331,7 @@ def test_pxe_plan_unknown_mac_auto_discovers_and_returns_inventory(
 
 
 def test_pxe_plan_sanboot_policy_returns_local_mode(app_client: TestClient) -> None:
-    """``boot_policy=sanboot`` -> plan ``mode=local`` so ``bty`` exits
+    """``boot_policy=sanboot`` -> plan ``mode=exit`` so ``bty`` exits
     cleanly (sanboot is handled at the iPXE layer; the box never
     reaches the live env). The plan ``mode`` token is a live-env
     signal distinct from any boot_policy."""
@@ -1343,14 +1343,14 @@ def test_pxe_plan_sanboot_policy_returns_local_mode(app_client: TestClient) -> N
     )
     r = app_client.get(f"/pxe/{mac}/plan")
     assert r.status_code == 200
-    assert r.json() == {"mode": "local"}
+    assert r.json() == {"mode": "exit"}
 
 
 def test_pxe_plan_flash_policy_with_target_returns_auto(
     app_client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """``boot_policy=flash`` + bindable ref + target_disk_serial ->
-    ``mode=auto`` with the image URL and target serial filled in.
+    ``mode=flash`` with the image URL and target serial filled in.
     ``bty`` runs the flash without prompts.
 
     The image URL takes the same ``/images/<ref>/<name>`` shape as
@@ -1390,7 +1390,7 @@ def test_pxe_plan_flash_policy_with_target_returns_auto(
     r = app_client.get(f"/pxe/{mac}/plan", headers={"Host": "bty.local:8080"})
     assert r.status_code == 200
     body = r.json()
-    assert body["mode"] == "auto"
+    assert body["mode"] == "flash"
     assert body["target_disk_serial"] == "WD-WX12345"
     assert body["image"].startswith(f"http://bty.local:8080/images/{ref}/")
 
@@ -2147,7 +2147,7 @@ def test_pxe_plan_flash_chain_carries_target_disk_serial(
     )
     # Plan endpoint carries the serial.
     plan = app_client.get("/pxe/aa:bb:cc:dd:ee:f6/plan", headers={"Host": "bty.local:8080"}).json()
-    assert plan["mode"] == "auto"
+    assert plan["mode"] == "flash"
     assert plan["target_disk_serial"] == "WD-SERIAL-XYZ"
     # iPXE chain advertises the pin in the header comment so an
     # operator inspecting curl output can see it; the kernel cmdline

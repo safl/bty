@@ -386,7 +386,7 @@ def test_e2e_pxe_flash_chain_plan_carries_image_url_and_target_serial(
     )
     assert plan_resp.status_code == 200, plan_resp.text
     plan = plan_resp.json()
-    assert plan["mode"] == "auto"
+    assert plan["mode"] == "flash"
     assert plan["target_disk_serial"] == "WD-WX12345"
     assert "/images/" in plan["image"]
     assert bty_image_ref in plan["image"]
@@ -1071,7 +1071,7 @@ def test_e2e_pxe_unknown_mac_then_inventory_then_flash_chain(
     assert f"bty_image_ref:      {ref}" in body
     assert "target_disk_serial: SER-1" in body
     plan = app_client.get(f"/pxe/{mac}/plan", headers={"Host": "bty.local:8080"}).json()
-    assert plan["mode"] == "auto"
+    assert plan["mode"] == "flash"
     assert plan["target_disk_serial"] == "SER-1"
     assert f"/images/{ref}/" in plan["image"]
     # Done call flips bty-flash-once -> local.

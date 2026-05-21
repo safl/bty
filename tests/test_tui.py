@@ -663,9 +663,9 @@ def test_fetch_and_dispatch_plan_interactive_preserves_pxe_done_base(
 def test_fetch_and_dispatch_plan_auto_populates_auto_image_and_serial(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """``mode=auto`` plans populate ``_auto_image`` +
+    """``mode=flash`` plans populate ``_auto_image`` +
     ``_auto_target_disk_serial`` (consumed by ``_run_auto``) and
-    return ``"auto"`` as the dispatch token. Without this wiring,
+    return ``"flash"`` as the dispatch token. Without this wiring,
     the auto-flash path would assert-fail trying to dereference
     None values.
     """
@@ -677,14 +677,14 @@ def test_fetch_and_dispatch_plan_auto_populates_auto_image_and_serial(
 
     def fake_urlopen(req, **_kw):
         return _fake_bytes_resp(
-            b'{"mode": "auto", '
+            b'{"mode": "flash", '
             b'"image": "http://bty-server:8080/images/abc/demo.img.gz", '
             b'"target_disk_serial": "WD-WX12345"}'
         )
 
     monkeypatch.setattr(tui_app.urllib.request, "urlopen", fake_urlopen)
     action = app._fetch_and_dispatch_plan()
-    assert action == "auto"
+    assert action == "flash"
     assert app._auto is True
     assert app._auto_image == "http://bty-server:8080/images/abc/demo.img.gz"
     assert app._auto_target_disk_serial == "WD-WX12345"
@@ -742,7 +742,7 @@ def test_collect_lshw_parses_json_and_degrades(monkeypatch: pytest.MonkeyPatch) 
 def test_fetch_and_dispatch_plan_auto_missing_fields_falls_back_to_interactive(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """If the server claims ``mode=auto`` but omits ``image`` or
+    """If the server claims ``mode=flash`` but omits ``image`` or
     ``target_disk_serial``, fall back to interactive with a soft
     error banner. The auto-flash path can't proceed without both
     values; the safest landing is the operator at the wizard.
@@ -751,9 +751,9 @@ def test_fetch_and_dispatch_plan_auto_missing_fields_falls_back_to_interactive(
     app = tui_app.BtyTui(server="http://bty-server:8080", mac="aa:bb:cc:dd:ee:ff")
 
     def fake_urlopen(req, **_kw):
-        # mode=auto but missing target_disk_serial.
+        # mode=flash but missing target_disk_serial.
         return _fake_bytes_resp(
-            b'{"mode": "auto", "image": "http://bty-server:8080/images/abc/demo.img.gz"}'
+            b'{"mode": "flash", "image": "http://bty-server:8080/images/abc/demo.img.gz"}'
         )
 
     monkeypatch.setattr(tui_app.urllib.request, "urlopen", fake_urlopen)
@@ -768,16 +768,16 @@ def test_fetch_and_dispatch_plan_auto_missing_fields_falls_back_to_interactive(
 def test_fetch_and_dispatch_plan_local_returns_local_token(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """``mode=local`` -> ``"local"`` dispatch token (the bty caller
+    """``mode=exit`` -> ``"exit"`` dispatch token (the bty caller
     exits cleanly with a "nothing to do here" banner)."""
     monkeypatch.setenv("BTY_IMAGE_ROOT", str(tmp_path))
     app = tui_app.BtyTui(server="http://bty-server:8080", mac="aa:bb:cc:dd:ee:ff")
     monkeypatch.setattr(
         tui_app.urllib.request,
         "urlopen",
-        lambda *_a, **_kw: _fake_bytes_resp(b'{"mode": "local"}'),
+        lambda *_a, **_kw: _fake_bytes_resp(b'{"mode": "exit"}'),
     )
-    assert app._fetch_and_dispatch_plan() == "local"
+    assert app._fetch_and_dispatch_plan() == "exit"
 
 
 def test_fetch_and_dispatch_plan_unknown_mode_clamps_to_interactive(

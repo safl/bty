@@ -29,8 +29,8 @@ an image + a target disk and flashes. Three invocation shapes:
 ```text
 bty                              # interactive wizard, local image-root only
 bty --catalog <URL>              # interactive wizard, catalog pre-loaded
-bty --server <X> --mac <Y>       # server-driven mode (auto / interactive
-                                 # / local) chosen by GET <X>/pxe/<Y>/plan
+bty --server <X> --mac <Y>       # server-driven mode (flash / interactive
+                                 # / inventory / exit) chosen by GET <X>/pxe/<Y>/plan
 ```
 
 `bty --version` prints the installed version (sourced from package
@@ -53,10 +53,10 @@ inventory to `<server>/pxe/<mac>/inventory`, then GETs
 
 | `plan.mode` | What happens |
 |---|---|
-| `auto` | Flash without prompts (the plan carries the image URL + target serial picked on the server side), then POST `/pxe/<mac>/done` and reboot. |
+| `flash` | Flash without prompts (the plan carries the image URL + target serial picked on the server side), then POST `/pxe/<mac>/done` and reboot. |
 | `interactive` | Drop into the wizard with the plan's catalog pre-loaded. Operator picks image + disk. |
 | `inventory` | Post the disk inventory, then reboot (no flash, no wizard). The next PXE contact sanboots the disk. Used by `boot_policy=bty-inventory`. |
-| `local` | Print a notice and exit. Firmware / local-disk boot handles it. |
+| `exit` | Print a notice and exit. Firmware / local-disk boot handles it. |
 
 Network / parse failures fall through to `interactive` with the
 server's `/catalog.toml` as the catalog source so the operator
@@ -354,7 +354,7 @@ Machine = {
   "known_disks_at": "<ISO 8601>" | null,     # when the inventory above was posted
   "target_disk_serial": "<vendor serial>" | null,
                                              # operator pick from known_disks;
-                                             # required for plan.mode=auto
+                                             # required for plan.mode=flash
   "created_at":    "<ISO 8601>",
   "updated_at":    "<ISO 8601>"
 }

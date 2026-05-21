@@ -110,7 +110,7 @@ actual write happens on the local machine running `bty`.
 For batch / CI workflows: bind the machine on the appliance with
 `boot_policy=bty-flash-always` + a `bty_image_ref` + a `target_disk_serial`,
 then on the target run `bty --server <host> --mac <self-mac>`. The
-wizard skips and the flash runs scripted (`mode=auto` from
+wizard skips and the flash runs scripted (`mode=flash` from
 `GET <host>/pxe/<mac>/plan`). The image streams directly from the
 container's catalog through the live env to the target's disk; no
 operator copy step.

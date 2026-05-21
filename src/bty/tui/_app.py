@@ -474,12 +474,12 @@ class BtyTui:
           typing the URL).
         * ``mac`` set -> server-driven mode. ``run()`` GETs
           ``<server>/pxe/<mac>/plan`` and dispatches:
-            - ``plan.mode == "auto"``     -> ``_run_auto`` (no prompts)
+            - ``plan.mode == "flash"``     -> ``_run_auto`` (no prompts)
             - ``plan.mode == "interactive"`` -> interactive wizard with
               the catalog the server suggests
             - ``plan.mode == "inventory"`` -> post disk inventory, then
               reboot (boot_policy=bty-inventory; next contact sanboots)
-            - ``plan.mode == "local"``    -> exit cleanly (nothing to do
+            - ``plan.mode == "exit"``    -> exit cleanly (nothing to do
               from bty's side; firmware sanboot handles the rest)
             - 404 / network failure       -> interactive wizard with
               server's ``/catalog.toml`` as the catalog source
@@ -528,7 +528,7 @@ class BtyTui:
         # aborting the TUI.
         self._catalog_load_error: str | None = None
         # ``_auto`` is flipped True later by ``run()`` if the
-        # server's plan says ``mode=auto``. Without a mac, stays False.
+        # server's plan says ``mode=flash``. Without a mac, stays False.
         self._auto = False
         self._auto_image: str | None = None
         self._auto_target_disk_serial: str | None = None
@@ -555,16 +555,16 @@ class BtyTui:
         # crash on a framebuffer console.
         if self._state.mac:
             plan_action = self._fetch_and_dispatch_plan()
-            if plan_action == "auto":
+            if plan_action == "flash":
                 self._console.print(
                     Panel(
-                        f"Server reports [{_ACCENT}]mode=auto[/] for "
+                        f"Server reports [{_ACCENT}]mode=flash[/] for "
                         f"[{_PRIMARY}]{self._state.mac}[/]:\n\n"
                         f"  image  : {self._auto_image}\n"
                         f"  serial : {self._auto_target_disk_serial}\n\n"
                         f"[{_MUTED}]Running the flash without prompts; "
                         "the same chrome the interactive wizard uses.[/]",
-                        title="Plan: auto-flash",
+                        title="Plan: flash",
                         border_style=_PRIMARY,
                     )
                 )
@@ -586,7 +586,7 @@ class BtyTui:
                     "Pick an image and target disk by hand, or fix the "
                     "assignment in the bty-server UI (/ui/machines)."
                 )
-            if plan_action == "local":
+            if plan_action == "exit":
                 # The server says nothing to do here (boot_policy=sanboot
                 # or an unrecognised policy). Print a Panel so an operator
                 # hand-running ``bty --mac X`` from a workstation sees WHY
@@ -596,12 +596,12 @@ class BtyTui:
                 # local disk directly, no live-env chain).
                 self._console.print(
                     Panel(
-                        f"Server reports [{_ACCENT}]mode=local[/] for "
+                        f"Server reports [{_ACCENT}]mode=exit[/] for "
                         f"[{_PRIMARY}]{self._state.mac}[/] -- nothing for "
                         "bty to do here.\n\n"
                         f"[{_MUTED}]The firmware / local disk boots directly "
                         "(sanboot or already provisioned); no flash, no wizard.[/]",
-                        title="Plan: local boot",
+                        title="Plan: nothing to do",
                         border_style=_PRIMARY,
                     )
                 )
@@ -660,13 +660,13 @@ class BtyTui:
         """GET ``<server>/pxe/<mac>/plan`` and prep the wizard for
         dispatch. Returns one of:
 
-        * ``"auto"`` -- plan is an auto-flash; ``_run_auto`` should
+        * ``"flash"`` -- plan is an auto-flash; ``_run_auto`` should
           run next. ``_auto_image`` + ``_auto_target_disk_serial``
           are populated.
         * ``"interactive"`` -- plan asks the operator to pick; fall
           through to the interactive wizard. The catalog source on
           state may be updated to the server's suggestion.
-        * ``"local"`` -- plan is "nothing to do here"; exit cleanly.
+        * ``"exit"`` -- plan is "nothing to do here"; exit cleanly.
 
         Network / parse failures fall through to ``"interactive"``
         with the previously-set catalog (the server's
@@ -688,16 +688,16 @@ class BtyTui:
             return "interactive"
 
         mode = payload.get("mode")
-        if mode == "auto":
+        if mode == "flash":
             self._auto_image = payload.get("image")
             self._auto_target_disk_serial = payload.get("target_disk_serial")
             if not self._auto_image or not self._auto_target_disk_serial:
                 self._catalog_load_error = (
-                    f"server returned mode=auto but missing image/target_disk_serial: {payload!r}"
+                    f"server returned mode=flash but missing image/target_disk_serial: {payload!r}"
                 )
                 return "interactive"
             self._auto = True
-            return "auto"
+            return "flash"
         if mode == "interactive":
             # Server may suggest a specific catalog. If it does, use
             # it; if not, keep whatever was set in __init__ (which
@@ -712,8 +712,8 @@ class BtyTui:
             if isinstance(suggested, str) and suggested:
                 self._state.catalog_source = suggested
             return "interactive"
-        if mode == "local":
-            return "local"
+        if mode == "exit":
+            return "exit"
         if mode == "inventory":
             return "inventory"
         # Unknown mode -- treat as interactive so the operator gets
