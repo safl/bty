@@ -587,7 +587,7 @@ def create_app(
                             (now, normalised),
                         )
                         conn.commit()
-                    offer_kind = "bty-flash-always-settle"
+                    offer_kind = "bty-flash-always-sanboot"
                     offer_summary = (
                         f"{normalised} booting just-flashed disk (drive {drive}); "
                         f"bty-flash-always re-arms on next netboot"
@@ -595,7 +595,7 @@ def create_app(
                     offer_details = {
                         "offer": "sanboot",
                         "sanboot_drive": drive,
-                        "settle_after_flash": True,
+                        "sanboot_after_flash": True,
                     }
                 else:
                     template = jinja.get_template("ipxe_flash.j2")
