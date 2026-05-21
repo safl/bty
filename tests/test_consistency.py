@@ -743,6 +743,30 @@ def test_every_ui_page_uses_the_intro_box_partial() -> None:
     )
 
 
+def test_pxe_chain_test_uses_a_valid_boot_policy() -> None:
+    """The QEMU PXE chain test (the release's integration gate) PUTs a
+    machine assignment with a literal ``boot_policy``; it must be a
+    current ``BOOT_POLICIES`` member.
+
+    A stale name 422s the assignment and fails the whole release before
+    PyPI publish -- exactly what a v0.23.0 release run hit, because the
+    ``flash`` -> ``bty-flash-always`` rename updated src/tests/docs but
+    missed this cijoe harness. The QEMU test only runs in the release
+    pipeline (needs media + qemu), so this string check runs in plain
+    ``make ci`` to catch the drift early.
+    """
+    from bty.web._models import BOOT_POLICIES
+
+    src = (REPO_ROOT / "cijoe" / "scripts" / "pxe_run_chain_test.py").read_text()
+    m = re.search(r'"boot_policy":\s*"([^"]+)"', src)
+    assert m is not None, "no boot_policy literal found in pxe_run_chain_test.py"
+    assert m.group(1) in BOOT_POLICIES, (
+        f"pxe_run_chain_test.py sends boot_policy={m.group(1)!r}, which is not in "
+        f"BOOT_POLICIES {BOOT_POLICIES!r}. The assignment PUT will 422 and fail the "
+        f"release's PXE chain gate. Update the harness to a current policy."
+    )
+
+
 def test_live_env_chains_tag_boot_urls_with_mac() -> None:
     """The live-env iPXE chains (``ipxe_flash.j2`` + ``ipxe_tui.j2``)
     must tag every ``/boot`` artifact URL with ``?mac={{ mac }}``.

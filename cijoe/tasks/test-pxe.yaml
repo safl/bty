@@ -24,7 +24,7 @@ doc: |
      ``hostfwd`` for HTTP-API access + PXE NIC on the socket), waits
      for ``/healthz``, drives ``POST /ui/login`` to mint a session
      cookie, ``PUT``s the live trio + dummy image and an assignment
-     for the client's MAC with ``boot_policy=flash``, then SSHes in
+     for the client's MAC with ``boot_policy=bty-flash-always``, then SSHes in
      as ``odus`` to drop a test-only full-DHCP dnsmasq overlay (bty
      itself never runs DHCP in production; this is genuinely
      test-side machinery for the isolated socket-net segment).
