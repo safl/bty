@@ -295,6 +295,7 @@ Protected routes (session cookie required):
 | GET | `/machines` | - | array of `Machine` |
 | GET | `/machines/{mac}` | - | `Machine` (404 if missing) |
 | GET | `/machines/{mac}/lshw.json` | - | raw `lshw -json` blob (404 if none posted) |
+| GET | `/machines/{mac}/disks.json` | - | lsblk-derived disk inventory JSON (404 if none posted) |
 | PUT | `/machines/{mac}` | `MachineUpsert` | `Machine` (the new state) |
 | DELETE | `/machines/{mac}` | - | 204 (404 if missing) |
 | POST | `/catalog/entries` | `CatalogEntryAdd` | new entry (201) |
