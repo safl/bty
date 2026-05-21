@@ -456,6 +456,7 @@ def register_ui_routes(
     )
     def ui_machine_upsert(
         mac: str,
+        request: Request,
         bty_image_ref: Annotated[str, Form()] = "",
         hostname: Annotated[str, Form()] = "",
         boot_policy: Annotated[str, Form()] = DEFAULT_BOOT_POLICY,
@@ -547,6 +548,13 @@ def register_ui_routes(
                     boot_policy        = excluded.boot_policy,
                     sanboot_drive      = excluded.sanboot_drive,
                     target_disk_serial = excluded.target_disk_serial,
+                    -- Reset the one-shot alternation bit (mirrors the
+                    -- JSON PUT /machines path): an operator changing
+                    -- policy here starts a fresh cycle, so a stale
+                    -- arming left over from a prior bty-flash-always /
+                    -- bty-inventory boot can't make the next /pxe
+                    -- wrongly sanboot instead of flashing / inventorying.
+                    saw_flasher_boot   = 0,
                     updated_at         = excluded.updated_at
                 """,
                 (
@@ -559,6 +567,24 @@ def register_ui_routes(
                     created_at,
                     now,
                 ),
+            )
+            # Audit the change (mirrors PUT /machines) so a UI policy
+            # edit shows up on /ui/events like the JSON path does.
+            _events_log.record(
+                conn,
+                kind="machine.created" if existing is None else "machine.upserted",
+                summary=(f"{normalised} created" if existing is None else f"{normalised} updated"),
+                subject_kind="machine",
+                subject_id=normalised,
+                actor="operator",
+                source_ip=_client_ip(request),
+                details={
+                    "bty_image_ref": validated.bty_image_ref,
+                    "boot_policy": validated.boot_policy,
+                    "sanboot_drive": validated.sanboot_drive,
+                    "hostname": validated.hostname,
+                    "target_disk_serial": validated.target_disk_serial,
+                },
             )
             conn.commit()
         publish_state_changed()
