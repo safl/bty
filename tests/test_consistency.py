@@ -196,6 +196,9 @@ def test_ipxe_templates_share_baseline_cmdline_tokens() -> None:
         "plymouth.enable=0",
         "modprobe.blacklist=nouveau",
         "nouveau.modeset=0",
+        # Don't let systemd-gpt-auto-generator auto-mount the flash
+        # target's existing partitions in the live env.
+        "systemd.gpt_auto=0",
         "bty.server=${bty-base}",
         "bty.mac={{ mac }}",
     )

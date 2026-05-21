@@ -56,7 +56,7 @@ set -e
 if [ "${BTY_USB_ISO:-}" = "1" ]; then
     BINARY_IMAGES=iso-hybrid
     BOOTLOADERS_OPTS="--bootloaders syslinux,grub-efi"
-    BOOTAPPEND="boot=live components noeject plymouth.enable=0 modprobe.blacklist=nouveau nouveau.modeset=0 bty.version=__BTY_VERSION__"
+    BOOTAPPEND="boot=live components noeject plymouth.enable=0 modprobe.blacklist=nouveau nouveau.modeset=0 systemd.gpt_auto=0 bty.version=__BTY_VERSION__"
 else
     BINARY_IMAGES=netboot
     BOOTLOADERS_OPTS=""
@@ -64,7 +64,7 @@ else
     # appends ``bty.server=...`` + ``bty.mac=...`` per-client at
     # render time, so the chroot's static bootappend doesn't carry
     # them.
-    BOOTAPPEND="boot=live components plymouth.enable=0 modprobe.blacklist=nouveau nouveau.modeset=0 bty.version=__BTY_VERSION__"
+    BOOTAPPEND="boot=live components plymouth.enable=0 modprobe.blacklist=nouveau nouveau.modeset=0 systemd.gpt_auto=0 bty.version=__BTY_VERSION__"
 fi
 
 # shellcheck disable=SC2086 # BOOTLOADERS_OPTS is intentionally word-split

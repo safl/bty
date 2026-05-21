@@ -33,6 +33,10 @@ set bty-base http://{{ host }}
 # live-boot's initramfs can't fetch a URL with a ``?mac=`` query (it
 # aborts with "Unable to find a live file system on the network"); the
 # kernel/initrd fetch already armed the bit.
-kernel ${bty-base}/boot/bty-netboot-x86_64.vmlinuz?mac={{ mac }} boot=live fetch=${bty-base}/boot/bty-netboot-x86_64.squashfs components console=tty0 console=ttyS0,115200 plymouth.enable=0 modprobe.blacklist=nouveau nouveau.modeset=0 bty.server=${bty-base} bty.mac={{ mac }}
+# ``systemd.gpt_auto=0``: don't auto-mount the target disk's existing
+# partitions (see ipxe_flash.j2 for the rationale). The stick's own
+# BTY_IMAGES catalog is mounted by its explicit label-gated mount unit,
+# not by gpt-auto, so it's unaffected.
+kernel ${bty-base}/boot/bty-netboot-x86_64.vmlinuz?mac={{ mac }} boot=live fetch=${bty-base}/boot/bty-netboot-x86_64.squashfs components console=tty0 console=ttyS0,115200 plymouth.enable=0 modprobe.blacklist=nouveau nouveau.modeset=0 systemd.gpt_auto=0 bty.server=${bty-base} bty.mac={{ mac }}
 initrd ${bty-base}/boot/bty-netboot-x86_64.initrd?mac={{ mac }}
 boot

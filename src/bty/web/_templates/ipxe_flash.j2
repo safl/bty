@@ -39,6 +39,14 @@ set bty-base http://{{ host }}
 # ``?`` / ``:`` (it aborts with "Unable to find a live file system on
 # the network"). The kernel/initrd fetch already armed the bit, so the
 # squashfs tag would be redundant anyway.
-kernel ${bty-base}/boot/bty-netboot-x86_64.vmlinuz?mac={{ mac }} boot=live fetch=${bty-base}/boot/bty-netboot-x86_64.squashfs components console=tty0 console=ttyS0,115200 plymouth.enable=0 modprobe.blacklist=nouveau nouveau.modeset=0 bty.server=${bty-base} bty.mac={{ mac }}
+# ``systemd.gpt_auto=0`` disables systemd-gpt-auto-generator, which
+# would otherwise auto-mount the flash TARGET's existing partitions
+# (ESP / root / home, swapon) by their well-known GPT type GUIDs -- the
+# live env has no business touching the disk it's about to overwrite.
+# Without it every reflash (especially bty-flash-always) boots with the
+# target already mounted; bty unmounts as a backstop, but not mounting
+# it in the first place is the correct fix. Served by bty-web, so this
+# takes effect on the next PXE boot with no media rebake.
+kernel ${bty-base}/boot/bty-netboot-x86_64.vmlinuz?mac={{ mac }} boot=live fetch=${bty-base}/boot/bty-netboot-x86_64.squashfs components console=tty0 console=ttyS0,115200 plymouth.enable=0 modprobe.blacklist=nouveau nouveau.modeset=0 systemd.gpt_auto=0 bty.server=${bty-base} bty.mac={{ mac }}
 initrd ${bty-base}/boot/bty-netboot-x86_64.initrd?mac={{ mac }}
 boot
