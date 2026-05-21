@@ -1769,6 +1769,54 @@ def test_pxe_inventory_lshw_absent_does_not_clobber_prior(app_client: TestClient
     assert dl.json()["product"] == "Test Box"
 
 
+def test_pxe_inventory_oversize_lshw_skipped_keeps_prior(
+    app_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An lshw blob over LSHW_MAX_BYTES is skipped (not truncated to
+    invalid JSON), the prior blob is kept, and the event flags it."""
+    from bty.web import _app as _app_mod
+
+    monkeypatch.setattr(_app_mod, "LSHW_MAX_BYTES", 200)
+    mac = "aa:bb:cc:dd:ee:c3"
+    app_client.get(f"/pxe/{mac}")
+    # First: a small blob (well under the 200B test cap) lands.
+    small = {"id": "sys", "class": "system", "product": "Test Box"}
+    app_client.post(f"/pxe/{mac}/inventory", json={"disks": [], "lshw": small})
+    # Second: an oversize blob (well over the cap) is skipped.
+    big = {"id": "sys", "class": "system", "junk": "x" * 500}
+    app_client.post(f"/pxe/{mac}/inventory", json={"disks": [], "lshw": big})
+    dl = app_client.get(f"/machines/{mac}/lshw.json", cookies=AUTH)
+    assert dl.status_code == 200
+    assert dl.json()["product"] == "Test Box"  # prior blob intact, not the oversize one
+    inv = app_client.get(
+        "/events",
+        params={"subject_kind": "machine", "subject_id": mac, "kind": "machine.inventory"},
+        cookies=AUTH,
+    ).json()["events"]
+    # Most recent event notes the skipped lshw + did not flip the stored flag.
+    assert inv[0]["details"]["lshw"] is False
+
+
+def test_machine_lshw_404_for_unknown_mac(app_client: TestClient) -> None:
+    """The raw lshw download 404s for a MAC with no machine record at
+    all (distinct from a known machine that just hasn't posted lshw)."""
+    r = app_client.get("/machines/00:11:22:33:44:fe/lshw.json", cookies=AUTH)
+    assert r.status_code == 404
+
+
+def test_auto_discovery_default_agrees_across_pxe_and_plan(app_client: TestClient) -> None:
+    """Both auto-discovery sites (GET /pxe/{mac} and /pxe/{mac}/plan)
+    must create the placeholder row with the SAME boot_policy -- a drift
+    between the two INSERTs would make a box behave differently
+    depending on which endpoint it hit first."""
+    mac_a, mac_b = "0a:0a:0a:0a:0a:01", "0b:0b:0b:0b:0b:02"
+    app_client.get(f"/pxe/{mac_a}")
+    app_client.get(f"/pxe/{mac_b}/plan", headers={"Host": "bty.local:8080"})
+    pa = app_client.get(f"/machines/{mac_a}", cookies=AUTH).json()["boot_policy"]
+    pb = app_client.get(f"/machines/{mac_b}", cookies=AUTH).json()["boot_policy"]
+    assert pa == pb == "bty-inventory"
+
+
 def test_pxe_inventory_404_for_unknown_mac(app_client: TestClient) -> None:
     """Inventory POST for a MAC that was never discovered returns
     404 -- prevents ``bty`` from silently creating ghost machines

@@ -54,6 +54,13 @@ from bty.web._events_log import record as _log_event
 # active sessions stay alive while idle ones eventually expire.
 _SESSION_MAX_AGE = 7 * 24 * 60 * 60  # 7 days
 
+# Cap on the stored ``lshw -json`` blob (POST /pxe/{mac}/inventory). A
+# real lshw tree is tens of KB; 4 MiB tolerates a big server without
+# letting a pathological / wrong payload bloat the machine row. Over
+# the cap the blob is skipped (the prior one is kept) rather than
+# truncated to invalid JSON.
+LSHW_MAX_BYTES = 4 * 1024 * 1024
+
 TEMPLATES_DIR = Path(__file__).parent / "_templates"
 STATIC_DIR = Path(__file__).parent / "_static"
 
@@ -974,12 +981,11 @@ def create_app(
         # JSON. ``None`` (lshw not posted / failed) leaves the prior
         # blob untouched via COALESCE -- a boot where lshw hiccuped
         # shouldn't wipe good hardware data.
-        lshw_max_bytes = 4 * 1024 * 1024
         lshw_json: str | None = None
         lshw_oversize = False
         if body.lshw is not None:
             candidate = json.dumps(body.lshw, sort_keys=True)
-            if len(candidate.encode("utf-8")) <= lshw_max_bytes:
+            if len(candidate.encode("utf-8")) <= LSHW_MAX_BYTES:
                 lshw_json = candidate
             else:
                 lshw_oversize = True
