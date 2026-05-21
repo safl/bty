@@ -405,8 +405,6 @@ Conditional:
 | `netboot.artifacts.fetch_failed`     | Same path failed (404, sha mismatch, etc.).                                                                 |
 | `netboot.tftp.controlled`      | Operator `POST /ui/settings/tftp-control` succeeded.                                                        |
 | `netboot.tftp.control_failed`  | Same path failed (`sudo -n` denied, helper exit non-zero, etc.).                                            |
-| `settings.pxe.activated`        | Legacy: operator armed the now-removed proxy-DHCP block.                                                    |
-| `settings.pxe.activate_failed`  | Legacy: same path failed.                                                                                    |
 | `auth.login.succeeded`          | Operator `POST /ui/login` with a valid OS password.                                                         |
 | `auth.login.failed`             | Same path with PAM rejection.                                                                                |
 | `auth.logout`                   | Operator `POST /ui/logout` from an authed session.                                                          |
