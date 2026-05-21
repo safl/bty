@@ -238,12 +238,12 @@ Initial UI tour:
 Once a target's MAC is registered with an assigned image, configure
 the target's BIOS / UEFI to **boot from the network (PXE) first**.
 bty then drives every subsequent boot via `boot_policy` -- you set the
-firmware order once. Mind the post-flash boot: with `boot_policy=local`
-the box boots its disk only because iPXE `exit` falls through to the
-**next firmware boot entry**, so the disk must be enabled and listed
-*after* PXE; with `boot_policy=sanboot` bty boots the disk itself and
-the firmware order matters less. (A flashed box that won't boot is
-almost always a firmware boot-order problem -- see
+firmware order once. Mind the post-flash boot: with `boot_policy=sanboot`
+(the default) bty boots the disk itself via iPXE, so the firmware order
+matters less; the `bty-flash-*` policies sanboot the just-flashed disk
+the same way. The drive is `0x80` (first disk) unless you set
+`sanboot_drive`. (A flashed box that won't boot is almost always a
+firmware / drive-number problem -- see
 [Firmware boot order](concepts.md#firmware-boot-order).) On power-on
 it'll:
 

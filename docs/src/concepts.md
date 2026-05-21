@@ -81,20 +81,16 @@ per-MAC iPXE configurations.
 A field on the [machine record](#machine-record) that decides what
 ``GET /pxe/{mac}`` serves the target on every PXE contact. The
 `bty-` prefix marks the policies that PXE-boot into bty's own live
-env; `local` and `sanboot` boot something other than bty:
+env; `sanboot` boots the local disk:
 
-- `local` - iPXE emits `exit`, handing control back to the firmware,
-  which then boots the next device in its BIOS/UEFI boot order
-  (typically the local disk). It does **not** sanboot. The stable /
-  production stance and the explicit-PUT default. Requires the
-  firmware boot order to list the disk after PXE (see
-  [Firmware boot order](#firmware-boot-order)).
 - `sanboot` - iPXE boots the local disk itself
-  (`sanboot --drive <drive> || exit`), rather than relying on the
-  firmware boot order. The drive defaults to `0x80` (first BIOS
-  disk) and is a per-machine override (`sanboot_drive`); the
-  `|| exit` falls back to the firmware order if the drive isn't
-  bootable.
+  (`sanboot --drive <drive> || exit`). The drive defaults to `0x80`
+  (first BIOS disk) and is a per-machine override (`sanboot_drive`);
+  the `|| exit` hands back to the firmware boot order if the drive
+  isn't bootable. This is how bty boots an already-provisioned
+  machine, and the explicit-PUT default. (There is no separate
+  `local` policy: a bare `exit` is just `sanboot`'s fallback, and the
+  no-assignment / error paths emit it internally.)
 - `bty-flash-always` - chain the live env in auto-flash mode for a
   fresh flash, then boot the just-flashed disk once before the next
   reflash - the per-job CI cadence. It does **not** loop: the server
@@ -104,8 +100,8 @@ env; `local` and `sanboot` boot something other than bty:
   re-flashed on every reboot.
 - `bty-flash-once` - flash exactly once: behaves like
   `bty-flash-always` for the next boot, then the completion signal
-  flips the policy to the configured *settle policy* so the box
-  stops re-flashing.
+  flips the policy to `sanboot` so the box boots its freshly-flashed
+  disk and stops re-flashing.
 - `bty-tui` - chain the live env in interactive mode. The target
   lands at `bty` on tty1 and the operator picks an image from the
   server's catalog by hand.
@@ -116,15 +112,9 @@ session immediately - no per-MAC server-side configuration needed.
 
 The completion signal `POST /pxe/{mac}/done` always updates
 `last_flashed_at`. It mutates `boot_policy` only for `bty-flash-once`,
-flipping it to the **settle policy** - `local` (the default) or
-`sanboot` - so the box stops re-flashing once it has been imaged.
-The settle policy is configurable (setting `flash.settle_policy`, env
-`BTY_FLASH_SETTLE_POLICY`) on the Settings page. `bty-flash-always`
-is never modified, so the per-job CI cadence keeps reflashing.
-
-(`sanboot` here means iPXE's local-disk boot. Before this was an
-explicit policy, `local` was loosely described as "sanboot"; it is
-actually a firmware-handoff `exit`.)
+flipping it to `sanboot` so the box boots its freshly-flashed disk
+once it has been imaged. `bty-flash-always` is never modified, so the
+per-job CI cadence keeps reflashing.
 
 ## Firmware boot order
 
@@ -136,20 +126,13 @@ firmware each time.
 
 What happens *after* a flash depends on the policy:
 
-- With `local`, iPXE runs `exit` and the firmware continues to the
-  **next entry in its boot order** - so the local disk must be
-  enabled and listed *after* PXE. If the firmware has no bootable
-  entry after PXE (disk disabled, or PXE-only), the freshly-flashed
-  box won't boot. This is the most common "I flashed it but it won't
-  boot" gotcha: it's a firmware boot-order problem, not a bty one.
 - With `sanboot`, iPXE boots the local disk itself, so the box boots
   the flashed disk regardless of where the disk sits in the firmware
-  order (with `|| exit` falling back to the firmware order). Use this
-  when the firmware order is awkward to set, or when you'd rather bty
-  drive the local boot. `sanboot` selects the disk by BIOS drive
-  number (`0x80` = first disk), not by the Linux serial used at flash
-  time, so on a multi-disk box set `sanboot_drive` to the right
-  drive.
+  order. `sanboot` selects the disk by BIOS drive number (`0x80` =
+  first disk), not by the Linux serial used at flash time, so on a
+  multi-disk box set `sanboot_drive` to the right drive. The
+  `|| exit` is the safety net: if the chosen drive isn't bootable,
+  iPXE exits and the firmware boot order takes over.
 - With `bty-flash-always`, the freshly-flashed disk boots even though
   PXE is first: the server hands out the flash chain, sees the box
   fetch the live-env artifacts (proof it booted the flasher), and on
@@ -168,32 +151,17 @@ switch to `bty-flash-once` or `bty-flash-always` - the post-flash
 `sanboot` then inherits a known-good drive (the field persists across
 the policy change), so the boot after a flash isn't a guess.
 
-### `local` vs `sanboot`: which to pick
+### When `sanboot` can't reach the disk
 
-Both hand the box off to its local disk, but they delegate
-differently, and `sanboot` is **not** a strict superset of `local`.
-The `|| exit` fallback only fires when the selected drive isn't
-bootable; if drive `0x80` *is* bootable but isn't the disk you wanted,
-`sanboot` boots the wrong thing and never falls back - exactly where
-`local` would have let the firmware choose correctly.
-
-- Prefer `local` when the firmware is configured correctly and you
-  want it honoured: a multi-entry boot order, a specific UEFI
-  bootloader entry (multi-boot, a chosen default OS, Secure Boot
-  chains), RAID/LVM, or just "don't second-guess the firmware".
-  `local` keeps iPXE out of the local-boot path entirely and uses the
-  firmware's own well-tested boot logic. It is the assumption-free
-  default. Its one requirement: the firmware must *advance* past PXE
-  to the disk on `exit` (most do; a few restart the boot order).
-- Prefer `sanboot` when the firmware order is awkward, unreliable, or
-  restarts back to PXE on `exit` (a loop), or on a single-disk box
-  where "first disk" is unambiguous and you want a deterministic disk
-  boot. `sanboot` forces the disk regardless of firmware order - which
-  is also why the flash policies lean on it for the post-flash boot.
-
-Rule of thumb: `local` = "firmware decides"; `sanboot` = "iPXE forces
-the first disk". Keep `local` as the default; reach for `sanboot` when
-the firmware order can't be trusted to land on the disk.
+`sanboot` boots by BIOS drive number, so the two failure modes are: a
+drive that isn't bootable (handled - `|| exit` hands back to the
+firmware order) and a multi-disk box where `0x80` isn't the disk you
+meant (handled - set `sanboot_drive`). The remaining edge is firmware
+where iPXE's `sanboot` itself is flaky (some UEFI / NVMe quirks). bty
+does not keep a second "bare exit" policy for that case; if a target's
+firmware can't be driven by `sanboot`, build it a direct boot stick
+with [boots-from](https://github.com/safl/boots-from) rather than
+relying on the network path.
 
 Practical setup: enter firmware setup (often F2 / F10 / Del at
 power-on), open the boot-order menu, put Network/PXE first and the

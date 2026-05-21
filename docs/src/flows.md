@@ -246,7 +246,7 @@ fields plus three timestamps the server maintains:
 |----------------------|--------------------------------------------------------------------------|
 | `bty_image_ref`      | sha256 of canonicalised catalog `src`. Stable provenance ID; binds the image to flash. |
 | `hostname`           | RFC-1123 hostname (optional). Cosmetic; not consumed by the flash chain. |
-| `boot_policy`        | One of `local` / `sanboot` / `bty-flash-always` / `bty-flash-once` / `bty-tui` (default `local`). |
+| `boot_policy`        | One of `sanboot` / `bty-flash-always` / `bty-flash-once` / `bty-tui` (default `sanboot`). |
 | `sanboot_drive`      | iPXE BIOS drive the `sanboot` policy boots (e.g. `0x80`; null = default first disk). |
 | `target_disk_serial` | Operator-picked serial number from the most recent inventory post.       |
 | `known_disks`        | JSON array of disks the live env's ``bty`` reported on startup.          |
@@ -261,19 +261,16 @@ parameters the policy needs.
 
 | Policy             | What `GET /pxe/{mac}` returns                                                                                    | Auto-flip on `pxe_done`? |
 |--------------------|-----------------------------------------------------------------------------------------------------------------|--------------------------|
-| `local`            | `ipxe.j2` (`exit` - hand back to firmware boot order; the disk must be next after PXE).                          | No.                      |
-| `sanboot`          | `ipxe_sanboot.j2` (`sanboot --drive <sanboot_drive> \|\| exit` - iPXE boots the local disk itself).               | No.                      |
-| `bty-flash-always` | `ipxe_flash.j2` for a fresh flash, then a one-shot `ipxe_sanboot.j2` of the just-flashed disk on the contact after the live-env artifact fetch (alternates flash then sanboot). Refuses (falls back to `ipxe.j2`) if no `target_disk_serial`. | No. Stays `bty-flash-always` (uses a transient `saw_flasher_boot` bit, not a policy change). |
-| `bty-flash-once`   | Same chain as `bty-flash-always`. Same `target_disk_serial` gate.                                                | Yes. Flips to the settle policy (default `local`, configurable to `sanboot`). |
+| `sanboot`          | `ipxe_sanboot.j2` (`sanboot --drive <sanboot_drive> \|\| exit` - iPXE boots the local disk itself). The default.  | No.                      |
+| `bty-flash-always` | `ipxe_flash.j2` for a fresh flash, then a one-shot `ipxe_sanboot.j2` of the just-flashed disk on the contact after the live-env artifact fetch (alternates flash then sanboot). Refuses (falls back to `ipxe.j2` exit) if no `target_disk_serial`. | No. Stays `bty-flash-always` (uses a transient `saw_flasher_boot` bit, not a policy change). |
+| `bty-flash-once`   | Same chain as `bty-flash-always`. Same `target_disk_serial` gate.                                                | Yes. Flips to `sanboot`. |
 | `bty-tui`          | `ipxe_tui.j2` (live env chain; ``bty`` on tty1 GETs /pxe/<mac>/plan -> ``mode=interactive``, drops into wizard). ``bty`` auto-posts inventory on startup. | No.                      |
 
 The `bty-flash-once` policy is the "I want this box reimaged now, then
 leave it alone" pattern. It's distinct from `bty-flash-always` (which
 reimages on every netboot cycle - booting the disk in between via the
-one-shot sanboot - the per-job CI cadence) and from manually
-flipping `bty-flash-always` -> `local` after one reimage (which is
-operator-error-prone). On completion it settles to `local` (the
-default) or `sanboot`, per `flash.settle_policy`.
+one-shot sanboot - the per-job CI cadence). On completion it settles
+to `sanboot`, so the box boots its freshly-flashed disk.
 
 ## Inventory + safety-gate flow
 
@@ -343,10 +340,10 @@ Always:
 
 If the machine's `boot_policy == "bty-flash-once"`:
 
-- Flips `boot_policy` to `local` in the same transaction. The next
-  PXE contact emits iPXE `exit` (firmware boot order picks the disk).
+- Flips `boot_policy` to `sanboot` in the same transaction. The next
+  PXE contact emits `sanboot` (iPXE boots the freshly-flashed disk).
 - The `machine.flashed` event summary calls this out:
-  `"... (bty-flash-once -> local)"`.
+  `"... (bty-flash-once -> sanboot)"`.
 
 ### `POST /pxe/{mac}/inventory` (``bty`` reports disks)
 
@@ -441,7 +438,7 @@ the operator sees:
 
 | Gate                                                  | Trigger condition                                                  | Where it fires                          | Operator surface                                   |
 |-------------------------------------------------------|--------------------------------------------------------------------|-----------------------------------------|----------------------------------------------------|
-| Refuse flash chain without `target_disk_serial`        | `boot_policy=bty-flash-always`/`bty-flash-once`, image bound, target empty.        | `GET /pxe/{mac}`                        | `pxe.flash.no_target_disk` event; ipxe.j2 (local `exit`). |
+| Refuse flash chain without `target_disk_serial`        | `boot_policy=bty-flash-always`/`bty-flash-once`, image bound, target empty.        | `GET /pxe/{mac}`                        | `pxe.flash.no_target_disk` event; ipxe.j2 (exit to firmware). |
 | Refuse `boot_policy=bty-flash-always` upsert without target       | Form posts `boot_policy=bty-flash-always` and `target_disk_serial=""`.         | `POST /ui/machines/{mac}`               | 303 to `/ui/machines/{mac}?error=...` flash banner. |
 | Refuse flash on serial mismatch at boot time           | Live env can't find a current disk whose serial matches the plan's `target_disk_serial`. | `bty` auto-flash on tty1 (live env)     | `bty` prints a red "No matching disk" Panel + non-zero exit; bty-on-tty1.service stays at the failed banner. |
 | Refuse oversize catalog upload                         | `/ui/catalog/upload` body > 1 MiB.                                  | `POST /ui/catalog/upload`               | 303 with `?error=...exceeded...`.                  |

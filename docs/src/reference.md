@@ -228,12 +228,12 @@ tooling which can't carry a session cookie:
 - `GET /version` - `{"version": "..."}`
 - `GET /pxe/{mac}` - per-MAC iPXE script (`text/plain`). The
  response depends on the machine's `boot_policy`:
- - `local` (default) or no image assigned: iPXE `exit`; the firmware
- boot order picks the next device (typically the local disk). NOT
- sanboot. Auto-discovery still applies to unknown MACs.
- - `sanboot`: iPXE `sanboot --drive <sanboot_drive> || exit` boots
- the local disk itself (default drive `0x80`), independent of the
- firmware boot order, falling back to `exit` if it can't.
+ - `sanboot` (default): iPXE `sanboot --drive <sanboot_drive> || exit`
+ boots the local disk itself (default drive `0x80`), independent of
+ the firmware boot order, falling back to `exit` if it can't. A
+ machine with no usable assignment (or a stale policy) falls through
+ to the same `sanboot 0x80 || exit`. Auto-discovery still applies to
+ unknown MACs.
  - `bty-flash-always` / `bty-flash-once` + image assigned + target
  serial picked: chain into the live env over HTTP with kernel cmdline
  `bty.server=` + `bty.mac=`. The live env's ``bty`` then GETs
@@ -250,10 +250,9 @@ tooling which can't carry a session cookie:
  discovery rows.
 - `POST /pxe/{mac}/done` - completion signal from the live env
  after a successful flash. Updates `last_flashed_at`. Mutates
- `boot_policy` only for `bty-flash-once`, flipping it to the
- configured **settle policy** (`flash.settle_policy` /
- `BTY_FLASH_SETTLE_POLICY`; default `local`, or `sanboot`) so the box
- stops re-flashing. `bty-flash-always` is left untouched so the
+ `boot_policy` only for `bty-flash-once`, flipping it to `sanboot`
+ so the box boots its freshly-flashed disk and stops re-flashing.
+ `bty-flash-always` is left untouched so the
  per-job CI cadence (constant reflashing) survives across boots.
  bty-web does *not* run any post-flash provisioning -- the target
  reboots into whatever the pre-built image brings up via cloud-init.
@@ -337,11 +336,10 @@ Machine = {
   "discovered_at": "<ISO 8601>" | null,      # first /pxe contact; null if PUT-only
   "last_seen_at":  "<ISO 8601>" | null,      # most recent /pxe contact
   "last_seen_ip":  "203.0.113.42" | null,
-  "boot_policy":   "local"                   # one of local / sanboot /
-                 | "sanboot"                 # bty-flash-always /
-                 | "bty-flash-always"        # bty-flash-once / bty-tui;
-                 | "bty-flash-once"          # what /pxe/{mac} returns
-                 | "bty-tui",
+  "boot_policy":   "sanboot"                 # one of sanboot /
+                 | "bty-flash-always"        # bty-flash-always /
+                 | "bty-flash-once"          # bty-flash-once / bty-tui;
+                 | "bty-tui",                # what /pxe/{mac} returns
   "sanboot_drive": "0x80" | null,            # iPXE BIOS drive for sanboot
                                              # (null = default 0x80)
   "last_flashed_at": "<ISO 8601>" | null,    # set by POST /pxe/{mac}/done
@@ -360,11 +358,11 @@ Machine = {
 MachineUpsert = {
   "bty_image_ref": "<64-hex>" | null,
   "hostname": str | null,
-  "boot_policy": "local"                     # default "local" on PUT;
-              | "sanboot"                    # auto-discovery sets
-              | "bty-flash-always"           # "bty-tui"; the flash
-              | "bty-flash-once"             # policies require a
-              | "bty-tui",                   # target_disk_serial
+  "boot_policy": "sanboot"                   # default "sanboot" on PUT;
+              | "bty-flash-always"           # auto-discovery sets
+              | "bty-flash-once"             # "bty-tui"; the flash
+              | "bty-tui",                   # policies require a
+                                             # target_disk_serial
   "sanboot_drive": str | null,               # iPXE BIOS drive for sanboot
                                              # (e.g. "0x80"; null = default)
   "target_disk_serial": str | null           # required when boot_policy is
@@ -491,8 +489,8 @@ templates, Bootstrap CSS, HTMX form posts).
 - `GET /ui/settings` -> the config map: read-only groups for every bty
  magic value (where each comes from -- env var / derived path /
  default), the editable **Upstream sources** (release repo / catalog
- URL / release tag) and **Flash behaviour** (`flash.settle_policy`)
- cards, and the **DHCP / PXE** router cheatsheet. Operator
+ URL / release tag) card, and the **DHCP / PXE** router cheatsheet.
+ Operator
  authentication is on the separate Account page (`/ui/account`,
  reached via the user pill): the credential is the OS password of the
  bty service user, rotated with `sudo passwd bty`; to invalidate every
