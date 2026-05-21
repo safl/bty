@@ -168,6 +168,33 @@ switch to `bty-flash-once` or `bty-flash-always` - the post-flash
 `sanboot` then inherits a known-good drive (the field persists across
 the policy change), so the boot after a flash isn't a guess.
 
+### `local` vs `sanboot`: which to pick
+
+Both hand the box off to its local disk, but they delegate
+differently, and `sanboot` is **not** a strict superset of `local`.
+The `|| exit` fallback only fires when the selected drive isn't
+bootable; if drive `0x80` *is* bootable but isn't the disk you wanted,
+`sanboot` boots the wrong thing and never falls back - exactly where
+`local` would have let the firmware choose correctly.
+
+- Prefer `local` when the firmware is configured correctly and you
+  want it honoured: a multi-entry boot order, a specific UEFI
+  bootloader entry (multi-boot, a chosen default OS, Secure Boot
+  chains), RAID/LVM, or just "don't second-guess the firmware".
+  `local` keeps iPXE out of the local-boot path entirely and uses the
+  firmware's own well-tested boot logic. It is the assumption-free
+  default. Its one requirement: the firmware must *advance* past PXE
+  to the disk on `exit` (most do; a few restart the boot order).
+- Prefer `sanboot` when the firmware order is awkward, unreliable, or
+  restarts back to PXE on `exit` (a loop), or on a single-disk box
+  where "first disk" is unambiguous and you want a deterministic disk
+  boot. `sanboot` forces the disk regardless of firmware order - which
+  is also why the flash policies lean on it for the post-flash boot.
+
+Rule of thumb: `local` = "firmware decides"; `sanboot` = "iPXE forces
+the first disk". Keep `local` as the default; reach for `sanboot` when
+the firmware order can't be trusted to land on the disk.
+
 Practical setup: enter firmware setup (often F2 / F10 / Del at
 power-on), open the boot-order menu, put Network/PXE first and the
 target disk second, save and exit. UEFI HTTP-Boot and legacy
