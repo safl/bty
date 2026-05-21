@@ -136,6 +136,7 @@ walkthrough-image-store
 concepts
 flows
 components
+operations
 dependencies
 related
 reference
