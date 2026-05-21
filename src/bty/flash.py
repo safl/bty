@@ -452,12 +452,17 @@ def validate_plan(plan: FlashPlan) -> list[str]:
     elif not plan.target.is_block_device:
         errors.append(f"target is not a block device: {plan.target.path}")
 
-    # NOTE: mounted partitions on the target are NOT an error. bty
-    # overwrites whole disks, so a target that already holds an OS (and
-    # whose partitions the live env auto-mounted) is the normal case --
-    # especially under bty-flash-always, which reflashes a provisioned
-    # box every boot. ``execute_plan`` unmounts them right before
-    # writing; refusing here would make reflashing impossible.
+    # A mounted partition on the target means the disk is IN USE, so
+    # refuse: you can usually unmount, but the fact it was mounted means
+    # something was using it, and silently overwriting it is the wrong
+    # answer. The flasher live env must NOT auto-mount the target
+    # (systemd.gpt_auto=0 on the kernel cmdline); if it does, that's the
+    # bug to fix, not a reason to clobber the disk.
+    if plan.target.mountpoints:
+        errors.append(
+            f"target has mounted partitions ({', '.join(plan.target.mountpoints)}); "
+            "the disk is in use. Unmount it first if you really mean to overwrite it."
+        )
 
     if (
         plan.target.size_bytes is not None
@@ -548,23 +553,6 @@ def _spawn_cancel_watchdog(
     return thread
 
 
-def _unmount_target_partitions(mountpoints: list[str]) -> None:
-    """Unmount a flash target's mounted partitions before it's
-    overwritten.
-
-    Plain ``umount`` first; on failure, a lazy ``umount -l`` (the disk
-    is about to be destroyed, so a lazy detach is acceptable). Deepest
-    mountpoints first so nested mounts come off cleanly. Best-effort +
-    time-bounded; the caller re-probes and only fails if something stays
-    mounted.
-    """
-    for mp in sorted(mountpoints, key=len, reverse=True):
-        with contextlib.suppress(subprocess.SubprocessError, OSError):
-            done = subprocess.run(["umount", mp], check=False, timeout=30, capture_output=True)
-            if done.returncode != 0:
-                subprocess.run(["umount", "-l", mp], check=False, timeout=30)
-
-
 def execute_plan(
     plan: FlashPlan,
     *,
@@ -606,20 +594,17 @@ def execute_plan(
         if not fresh_target.exists or not fresh_target.is_block_device:
             raise FlashRaceError(f"target is no longer a block device: {plan.target.path}")
         if fresh_target.mountpoints:
-            # Expected on a reflash (the live env auto-mounts the box's
-            # existing OS). bty is about to overwrite the disk, so
-            # unmount first -- writing to a disk with mounted
-            # filesystems risks page-cache corruption and partprobe
-            # failures. Only refuse if something stays stubbornly mounted
-            # (genuinely busy), which a plain reflash never hits.
-            _emit(progress, "writing", note="unmounting target")
-            _unmount_target_partitions(fresh_target.mountpoints)
-            recheck = probe_target(plan.target.path)
-            if recheck.mountpoints:
-                raise FlashError(
-                    f"target still mounted after unmount attempt: "
-                    f"{', '.join(recheck.mountpoints)} (a partition is busy)"
-                )
+            # A mounted partition means the disk is IN USE -- refuse.
+            # Partitions + data are fine (bty overwrites whole disks);
+            # only a *mount* signals something is using it. We do NOT
+            # auto-unmount: you usually could, but the fact it was
+            # mounted means it was in use. The flasher live env must not
+            # auto-mount the target (systemd.gpt_auto=0); a mount here
+            # is therefore a real one, not the live env being silly.
+            raise FlashRaceError(
+                f"target has mounted partitions ({', '.join(fresh_target.mountpoints)}); "
+                "the disk is in use. Unmount it first if you really mean to overwrite it."
+            )
 
         fmt = plan.image.format
         total_bytes = plan.image.virtual_size_bytes
