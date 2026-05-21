@@ -2360,7 +2360,7 @@ def test_events_filter_failed_only_returns_only_failure_kinds(
     operator's "show me everything that broke" triage view --
     one toggle instead of cycling through 6+ failure kinds in
     the per-kind dropdown."""
-    # Force a boot.release.fetch_failed event (deterministic).
+    # Force a netboot.artifacts.fetch_failed event (deterministic).
     from bty.web import _releases
 
     def _explode(*_a: object, **_kw: object) -> None:
@@ -2613,7 +2613,7 @@ def test_ui_events_page_renders_failure_with_danger_badge(
     same family / different colour). Guards the
     failed-kind branch in the events / per-machine templates
     against a future refactor of the badge map."""
-    # Trigger a boot.release.fetch_failed event (deterministic --
+    # Trigger a netboot.artifacts.fetch_failed event (deterministic --
     # monkeypatch the fetch to raise FetchError).
     from bty.web import _releases
 
@@ -3681,8 +3681,8 @@ def test_release_fetch_manager_backfills_from_events(tmp_path: Path) -> None:
     """The manager's in-memory ``_states`` dies on restart, which
     made the /ui/netboot "Active + recent fetches" table show "No
     fetches yet." even when artifacts were clearly present on
-    disk. The fix backfills from boot.release.fetched /
-    boot.release.fetch_failed events on ``start()``.
+    disk. The fix backfills from netboot.artifacts.fetched /
+    netboot.artifacts.fetch_failed events on ``start()``.
 
     Seeds two events on a fresh state.db, then starts a manager
     against it and asserts that the manager's state mirror the
@@ -3827,8 +3827,8 @@ def test_release_fetch_manager_run_fetch_cancel_overrides_fetch_error(
 
 def test_release_fetch_manager_failure_logs_event(tmp_path: Path) -> None:
     """A genuinely-failed fetch (urllib error, not operator cancel)
-    must land a ``boot.release.fetch_failed`` event in the audit
-    log. Symmetric with the success path's ``boot.release.fetched``
+    must land a ``netboot.artifacts.fetch_failed`` event in the audit
+    log. Symmetric with the success path's ``netboot.artifacts.fetched``
     so the operator can see "this fetch tried + crashed" via
     /ui/events instead of polling /boot/releases."""
     import asyncio

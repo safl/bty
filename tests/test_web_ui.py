@@ -1975,7 +1975,7 @@ def test_ui_boot_fetch_success_renders_green_flash(
     """Happy path: ``_releases.fetch_release`` returns a
     ``FetchResult`` -> 200 with a green flash listing the
     artifact count + total bytes. Also records the
-    ``boot.release.fetched`` event."""
+    ``netboot.artifacts.fetched`` event."""
     from bty.web import _releases
 
     def _stub(boot_root_arg: Path, *, tag: str) -> _releases.FetchResult:
@@ -2007,7 +2007,7 @@ def test_ui_boot_fetch_failure_renders_red_flash_and_logs_event(
 ) -> None:
     """``FetchError`` (no network / 404 release tag / sha mismatch)
     surfaces on the page with a red flash + a
-    ``boot.release.fetch_failed`` event."""
+    ``netboot.artifacts.fetch_failed`` event."""
     from bty.web import _releases
 
     def _raise(boot_root_arg: Path, *, tag: str) -> _releases.FetchResult:
@@ -2062,7 +2062,7 @@ def test_ui_boot_fetch_empty_tag_falls_back_to_latest(
 
 def _seed_failed_event(client: TestClient, monkeypatch: pytest.MonkeyPatch, tag: str) -> int:
     """Drive the boot-fetch-failure path to record one
-    ``boot.release.fetch_failed`` event; return its id (newest)."""
+    ``netboot.artifacts.fetch_failed`` event; return its id (newest)."""
     from bty.web import _releases
 
     def _raise(boot_root_arg: Path, *, tag: str) -> _releases.FetchResult:

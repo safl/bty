@@ -429,7 +429,7 @@ and a JSON `details` blob with kind-specific extras.
 | Upload an image                           | `PUT /images/{name}` (XHR from form) | Streams into `BTY_IMAGES`. Auto-enqueues sha256 hash. Records `image.{uploaded,upload_failed}`.     |
 | Hash an unhashed image                    | `POST /catalog/hashes`               | Enqueues a HashManager job. Records `image.{hashed,hash_failed}` on completion.                      |
 | Fetch a catalog image                     | `POST /catalog/downloads`            | Enqueues a DownloadManager job.                                                                      |
-| Fetch boot artifacts (kernel + initrd + squashfs) | `POST /ui/netboot/fetch-release` | Pulls release artifacts into `BTY_BOOT_ROOT`. Records `boot.release.{fetched,fetch_failed}`.        |
+| Fetch boot artifacts (kernel + initrd + squashfs) | `POST /ui/netboot/fetch-release` | Pulls release artifacts into `BTY_BOOT_ROOT`. Records `netboot.artifacts.{fetched,fetch_failed}`.        |
 | Start / Stop / Restart the TFTP daemon    | `POST /ui/settings/tftp-control`     | `sudo bty-web-tftp <action>` -> `systemctl <action> dnsmasq`. Records `settings.tftp.{controlled,control_failed}`. |
 
 ## Safety gates summary
