@@ -1817,17 +1817,30 @@ class BtyTui:
     def _post_inventory_sync(self) -> None:
         """Post the disk inventory and block until it completes (or
         fails), so a ``mode=inventory`` boot doesn't reboot before
-        bty-web has the disks. Best-effort: lsblk / network failures are
-        swallowed -- the next inventory cycle retries."""
+        bty-web has the disks. Best-effort (the box reboots either way),
+        but the outcome is printed to the console so a failed post isn't
+        invisible -- a silent swallow here used to leave operators with
+        a box that re-armed sanboot yet reported no disks."""
         if self._state.pxe_done_base is None or self._state.mac is None:
             return
+        base = self._state.pxe_done_base
         try:
             payload = disks.list_disks()
-        except (FileNotFoundError, subprocess.SubprocessError, OSError):
+        except (FileNotFoundError, subprocess.SubprocessError, OSError) as exc:
+            self._console.print(f"[{_DANGER}]bty: lsblk failed; no inventory to post: {exc}[/]")
             return
         lshw = collect_lshw()
-        with contextlib.suppress(urllib.error.URLError, ConnectionError, TimeoutError, OSError):
-            post_inventory(self._state.pxe_done_base, self._state.mac, payload, lshw=lshw)
+        try:
+            post_inventory(base, self._state.mac, payload, lshw=lshw)
+            self._console.print(
+                f"[{_OK}]bty: posted inventory -- {len(payload)} disk(s)"
+                f"{', + lshw' if lshw is not None else ', no lshw'} -> {base}[/]"
+            )
+        except (urllib.error.URLError, ConnectionError, TimeoutError, OSError) as exc:
+            self._console.print(
+                f"[{_DANGER}]bty: inventory POST to {base}/pxe/{self._state.mac}/inventory "
+                f"FAILED: {exc}[/]"
+            )
 
     def _auto_post_inventory(self) -> None:
         """Background-thread post of the disk inventory so a slow
