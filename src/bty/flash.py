@@ -452,8 +452,12 @@ def validate_plan(plan: FlashPlan) -> list[str]:
     elif not plan.target.is_block_device:
         errors.append(f"target is not a block device: {plan.target.path}")
 
-    if plan.target.mountpoints:
-        errors.append(f"target has mounted partitions: {', '.join(plan.target.mountpoints)}")
+    # NOTE: mounted partitions on the target are NOT an error. bty
+    # overwrites whole disks, so a target that already holds an OS (and
+    # whose partitions the live env auto-mounted) is the normal case --
+    # especially under bty-flash-always, which reflashes a provisioned
+    # box every boot. ``execute_plan`` unmounts them right before
+    # writing; refusing here would make reflashing impossible.
 
     if (
         plan.target.size_bytes is not None
@@ -544,6 +548,23 @@ def _spawn_cancel_watchdog(
     return thread
 
 
+def _unmount_target_partitions(mountpoints: list[str]) -> None:
+    """Unmount a flash target's mounted partitions before it's
+    overwritten.
+
+    Plain ``umount`` first; on failure, a lazy ``umount -l`` (the disk
+    is about to be destroyed, so a lazy detach is acceptable). Deepest
+    mountpoints first so nested mounts come off cleanly. Best-effort +
+    time-bounded; the caller re-probes and only fails if something stays
+    mounted.
+    """
+    for mp in sorted(mountpoints, key=len, reverse=True):
+        with contextlib.suppress(subprocess.SubprocessError, OSError):
+            done = subprocess.run(["umount", mp], check=False, timeout=30, capture_output=True)
+            if done.returncode != 0:
+                subprocess.run(["umount", "-l", mp], check=False, timeout=30)
+
+
 def execute_plan(
     plan: FlashPlan,
     *,
@@ -585,9 +606,20 @@ def execute_plan(
         if not fresh_target.exists or not fresh_target.is_block_device:
             raise FlashRaceError(f"target is no longer a block device: {plan.target.path}")
         if fresh_target.mountpoints:
-            raise FlashRaceError(
-                f"target now has mounted partitions: {', '.join(fresh_target.mountpoints)}"
-            )
+            # Expected on a reflash (the live env auto-mounts the box's
+            # existing OS). bty is about to overwrite the disk, so
+            # unmount first -- writing to a disk with mounted
+            # filesystems risks page-cache corruption and partprobe
+            # failures. Only refuse if something stays stubbornly mounted
+            # (genuinely busy), which a plain reflash never hits.
+            _emit(progress, "writing", note="unmounting target")
+            _unmount_target_partitions(fresh_target.mountpoints)
+            recheck = probe_target(plan.target.path)
+            if recheck.mountpoints:
+                raise FlashError(
+                    f"target still mounted after unmount attempt: "
+                    f"{', '.join(recheck.mountpoints)} (a partition is busy)"
+                )
 
         fmt = plan.image.format
         total_bytes = plan.image.virtual_size_bytes

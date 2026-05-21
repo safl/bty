@@ -117,10 +117,14 @@ def test_validate_target_too_small() -> None:
     assert any("larger than target" in e for e in errors)
 
 
-def test_validate_target_mounted() -> None:
+def test_validate_target_mounted_is_not_an_error() -> None:
+    """A target with mounted partitions is NOT a validation error: bty
+    overwrites whole disks, so a reflash (especially bty-flash-always)
+    routinely targets a disk whose existing OS the live env auto-mounted.
+    execute_plan unmounts them right before writing instead."""
     plan = flash.make_plan(_img(), _tgt(mountpoints=["/", "/boot"]))
     errors = flash.validate_plan(plan)
-    assert any("mounted partitions" in e for e in errors)
+    assert all("mounted" not in e for e in errors)
 
 
 def test_validate_skips_size_check_when_virtual_unknown() -> None:
@@ -728,21 +732,68 @@ def test_execute_plan_refuses_when_target_no_longer_block(
         flash.execute_plan(plan)
 
 
-def test_execute_plan_refuses_when_target_now_mounted(
+def test_execute_plan_unmounts_then_flashes_a_mounted_target(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def now_mounted(path: Path) -> flash.TargetInfo:
+    """A target with mounted partitions is unmounted (not refused) and
+    the flash proceeds -- the reflash-a-provisioned-box case. The bug
+    this guards against made flash-always impossible: every reflash hit
+    a mounted target and was rejected."""
+    probes = iter(
+        [
+            # First probe: mounted (the box's old OS).
+            flash.TargetInfo(
+                path=Path("/dev/sda"),
+                exists=True,
+                is_block_device=True,
+                size_bytes=1024,
+                mountpoints=["/mnt/oops"],
+            ),
+            # Re-probe after unmount: clean.
+            flash.TargetInfo(
+                path=Path("/dev/sda"),
+                exists=True,
+                is_block_device=True,
+                size_bytes=1024,
+                mountpoints=[],
+            ),
+        ]
+    )
+    monkeypatch.setattr(flash, "probe_target", lambda _path: next(probes))
+    unmounted: list[list[str]] = []
+    monkeypatch.setattr(flash, "_unmount_target_partitions", lambda mps: unmounted.append(mps))
+    monkeypatch.setattr(flash, "_sync_target", lambda _t: None)
+    monkeypatch.setattr(flash, "_partprobe_target", lambda _t: None)
+    flashed: list[Path] = []
+    monkeypatch.setattr(flash, "_flash_img", lambda _img, tgt, **_kw: flashed.append(tgt))
+
+    plan = flash.make_plan(_img(), _tgt())
+    flash.execute_plan(plan)
+
+    assert unmounted == [["/mnt/oops"]]  # the mounted partition was unmounted
+    assert flashed == [plan.target.path]  # and the flash proceeded
+
+
+def test_execute_plan_refuses_when_target_stays_mounted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If a partition is genuinely busy and stays mounted after the
+    unmount attempt, execute_plan still refuses rather than dd over a
+    live filesystem."""
+
+    def always_mounted(path: Path) -> flash.TargetInfo:
         return flash.TargetInfo(
             path=path,
             exists=True,
             is_block_device=True,
             size_bytes=1024,
-            mountpoints=["/mnt/oops"],
+            mountpoints=["/mnt/busy"],
         )
 
-    monkeypatch.setattr(flash, "probe_target", now_mounted)
+    monkeypatch.setattr(flash, "probe_target", always_mounted)
+    monkeypatch.setattr(flash, "_unmount_target_partitions", lambda _mps: None)
     plan = flash.make_plan(_img(), _tgt())
-    with pytest.raises(flash.FlashError, match="now has mounted partitions"):
+    with pytest.raises(flash.FlashError, match="still mounted"):
         flash.execute_plan(plan)
 
 
