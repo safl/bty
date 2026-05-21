@@ -97,7 +97,8 @@
                     <td class="text-end">
                         {% if a.present %}
                         <a href="/boot/{{ a.name }}" download
-                           class="btn btn-sm btn-outline-secondary" title="Download {{ a.name }}">
+                           class="btn btn-sm btn-outline-secondary"
+                           title="Download {{ a.name }}" aria-label="Download {{ a.name }}">
                             <i class="bi bi-download"></i>
                         </a>
                         {% else %}
@@ -145,16 +146,16 @@
                 <button type="submit" name="action" value="start"
                         class="btn btn-sm btn-outline-success"
                         {% if tftp.is_active %}disabled{% endif %}>
-                    <i class="bi bi-play-fill"></i> Start
+                    <i class="bi bi-play-fill me-1"></i>Start
                 </button>
                 <button type="submit" name="action" value="stop"
                         class="btn btn-sm btn-outline-secondary"
                         {% if not tftp.is_active %}disabled{% endif %}>
-                    <i class="bi bi-stop-fill"></i> Stop
+                    <i class="bi bi-stop-fill me-1"></i>Stop
                 </button>
                 <button type="submit" name="action" value="restart"
                         class="btn btn-sm btn-outline-warning">
-                    <i class="bi bi-arrow-clockwise"></i> Restart
+                    <i class="bi bi-arrow-clockwise me-1"></i>Restart
                 </button>
             </form>
             {% else %}

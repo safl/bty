@@ -321,7 +321,8 @@
                         <button type="button"
                                 class="btn btn-sm btn-outline-warning ms-1 bty-cache-delete-btn"
                                 data-name="{{ u.names[0] }}"
-                                title="Delete cached bytes (entry stays; Fetch re-downloads)">
+                                title="Delete cached bytes (entry stays; Fetch re-downloads)"
+                                aria-label="Delete cached bytes">
                             <i class="bi bi-eraser"></i>
                         </button>
                         {% endif %}
@@ -338,7 +339,8 @@
                         <button type="button"
                                 class="btn btn-sm btn-outline-danger ms-1 bty-catalog-entry-delete-btn"
                                 data-src="{{ entry_src }}"
-                                title="Remove this entry from the catalog">
+                                title="Remove this entry from the catalog"
+                                aria-label="Remove this entry from the catalog">
                             <i class="bi bi-trash"></i>
                         </button>
                         {% endif %}
