@@ -1461,6 +1461,13 @@ def create_app(
                     boot_policy        = excluded.boot_policy,
                     sanboot_drive      = excluded.sanboot_drive,
                     target_disk_serial = excluded.target_disk_serial,
+                    -- Reset the one-shot alternation bit: an operator
+                    -- reconfiguring a machine starts a fresh cycle, so a
+                    -- stale arming (e.g. left over from a prior
+                    -- bty-flash-always/bty-inventory boot) can't make the
+                    -- next /pxe wrongly sanboot instead of flashing /
+                    -- inventorying.
+                    saw_flasher_boot   = 0,
                     updated_at         = excluded.updated_at
                 """,
                 (

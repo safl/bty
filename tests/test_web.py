@@ -81,6 +81,9 @@ def app_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Test
         AUTH["bty-token"] = cookie_value
         # Drop sticky cookies so unauthed-path tests aren't accidentally authed.
         client.cookies.clear()
+        # Expose the state.db path for the few tests that poke internal
+        # columns directly (mirrors the e2e fixture).
+        client.app.state.state_path = state  # type: ignore[attr-defined]
         try:
             yield client
         finally:
@@ -1798,6 +1801,35 @@ def test_pxe_inventory_oversize_lshw_skipped_keeps_prior(
     ).json()["events"]
     # Most recent event notes the skipped lshw + did not flip the stored flag.
     assert inv[0]["details"]["lshw"] is False
+
+
+def test_upsert_resets_saw_flasher_boot(app_client: TestClient) -> None:
+    """An operator upsert clears the one-shot saw_flasher_boot bit, so a
+    stale arming left from a prior bty-flash-always/bty-inventory boot
+    can't make the next PXE contact wrongly sanboot instead of
+    flashing/inventorying."""
+    mac = "aa:bb:cc:dd:ee:c4"
+    # Make it bty-flash-always so the /boot fetch arms the bit.
+    app_client.put(f"/machines/{mac}", json={"boot_policy": "bty-flash-always"}, cookies=AUTH)
+    app_client.get(
+        f"/boot/bty-netboot-x86_64.vmlinuz?mac={mac}", headers={"Host": "bty.local:8080"}
+    )
+
+    def _saw() -> int:
+        from bty.web import _db as _bty_db
+
+        state_path: Path = app_client.app.state.state_path  # type: ignore[attr-defined]
+        with _bty_db.open_db(state_path) as conn:
+            return int(
+                conn.execute(
+                    "SELECT saw_flasher_boot FROM machines WHERE mac = ?", (mac,)
+                ).fetchone()["saw_flasher_boot"]
+            )
+
+    assert _saw() == 1, "precondition: /boot?mac= armed the bit"
+    # Operator reconfigures -> bit resets.
+    app_client.put(f"/machines/{mac}", json={"boot_policy": "bty-flash-once"}, cookies=AUTH)
+    assert _saw() == 0
 
 
 def test_machine_lshw_404_for_unknown_mac(app_client: TestClient) -> None:
