@@ -49,6 +49,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
+from bty.web import _db
+
 
 def normalize_ip(host: str | None) -> str | None:
     """Canonicalise a client IP string for storage / filtering.
@@ -299,7 +301,7 @@ def _row_to_event(row: sqlite3.Row) -> Event:
     # ``acknowledged`` is always present after ``init_db`` (the
     # additive migration backfills it), but guard the lookup so a row
     # selected before the migration ran still maps cleanly.
-    ack = bool(row["acknowledged"]) if "acknowledged" in row.keys() else False  # noqa: SIM118
+    ack = bool(_db.row_value(row, "acknowledged", False))
     return Event(
         id=row["id"],
         ts=row["ts"],

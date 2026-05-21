@@ -2814,7 +2814,7 @@ def _row_to_machine(row: sqlite3.Row) -> _models.Machine:
         last_seen_at=_iso_or_none(row["last_seen_at"]),
         last_seen_ip=row["last_seen_ip"],
         boot_policy=row["boot_policy"],
-        sanboot_drive=row["sanboot_drive"] if "sanboot_drive" in row.keys() else None,  # noqa: SIM118
+        sanboot_drive=_db.row_value(row, "sanboot_drive"),
         last_flashed_at=_iso_or_none(row["last_flashed_at"]),
         known_disks=parsed_disks,
         known_disks_at=_iso_or_none(row["known_disks_at"]),

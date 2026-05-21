@@ -20,8 +20,21 @@ import sqlite3
 from collections.abc import Iterator
 from contextlib import closing, contextmanager
 from pathlib import Path
+from typing import Any
 
 DEFAULT_STATE_DIR = Path("/var/lib/bty")
+
+
+def row_value(row: sqlite3.Row, key: str, default: Any = None) -> Any:
+    """Read ``key`` from a sqlite3.Row, returning ``default`` when the
+    column is absent (an additive column on a row from a pre-migration
+    or partial SELECT).
+
+    Membership must go through ``.keys()``: ``key in row`` checks the
+    Row's *values*, not its column names -- which is also why call
+    sites otherwise need ``# noqa: SIM118``.
+    """
+    return row[key] if key in row.keys() else default  # noqa: SIM118
 
 
 def default_state_path() -> Path:

@@ -444,7 +444,7 @@ def register_ui_routes(
             images=catalog_options,
             boot_policies=list(BOOT_POLICIES),
             machine_events=machine_events,
-            hw=lshw_highlights(row["hw_lshw"] if "hw_lshw" in row.keys() else None),  # noqa: SIM118
+            hw=lshw_highlights(_db.row_value(row, "hw_lshw")),
             flash=flash,
             flash_kind="danger" if flash else None,
         )
@@ -1536,14 +1536,14 @@ def _row_to_dict(row: Any) -> dict[str, Any]:
         "last_seen_at": row["last_seen_at"],
         "last_seen_ip": row["last_seen_ip"],
         "boot_policy": row["boot_policy"],
-        "sanboot_drive": row["sanboot_drive"] if "sanboot_drive" in row.keys() else None,  # noqa: SIM118
+        "sanboot_drive": _db.row_value(row, "sanboot_drive"),
         "last_flashed_at": row["last_flashed_at"],
         "known_disks": parsed_disks,
         "known_disks_at": row["known_disks_at"],
         # Additive columns: guard with key check so an older row mid-
         # migration can't KeyError the detail page.
-        "hw_lshw": row["hw_lshw"] if "hw_lshw" in row.keys() else None,  # noqa: SIM118
-        "hw_lshw_at": row["hw_lshw_at"] if "hw_lshw_at" in row.keys() else None,  # noqa: SIM118
+        "hw_lshw": _db.row_value(row, "hw_lshw"),
+        "hw_lshw_at": _db.row_value(row, "hw_lshw_at"),
         "target_disk_serial": row["target_disk_serial"],
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
