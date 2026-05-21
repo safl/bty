@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import io
 import json
+import urllib.error
 from typing import Any
 from unittest.mock import patch
 
@@ -289,3 +290,80 @@ def test_is_oras_url() -> None:
     # The bare ``ghcr:`` scheme must NOT be recognised; oras refs
     # require the explicit ``oras://`` form.
     assert not oras.is_oras_url("ghcr:safl/nosi/debian-sysdev:latest")
+
+
+# ---------- retry / backoff (_urlopen_retry) ----------------------------------
+
+
+def _http_error(code: int) -> urllib.error.HTTPError:
+    return urllib.error.HTTPError("https://x/y", code, f"err {code}", {}, None)  # type: ignore[arg-type]
+
+
+class _BytesResp(io.BytesIO):
+    def __enter__(self) -> _BytesResp:
+        return self
+
+    def __exit__(self, *_a: object) -> None:
+        return None
+
+
+def test_urlopen_retry_retries_transient_then_succeeds(monkeypatch: Any) -> None:
+    """A 503 followed by a 200: one retry, returns the body."""
+    monkeypatch.setattr(oras.time, "sleep", lambda *_a: None)
+    calls = {"n": 0}
+
+    def _flaky(req: Any, timeout: Any = None) -> Any:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise _http_error(503)
+        return _BytesResp(b"ok")
+
+    monkeypatch.setattr("urllib.request.urlopen", _flaky)
+    assert oras._urlopen_retry("https://x/y", timeout=5) == b"ok"
+    assert calls["n"] == 2
+
+
+def test_urlopen_retry_does_not_retry_permanent(monkeypatch: Any) -> None:
+    """A 404 is permanent: raise immediately, no retry."""
+    monkeypatch.setattr(oras.time, "sleep", lambda *_a: None)
+    calls = {"n": 0}
+
+    def _notfound(req: Any, timeout: Any = None) -> Any:
+        calls["n"] += 1
+        raise _http_error(404)
+
+    monkeypatch.setattr("urllib.request.urlopen", _notfound)
+    with pytest.raises(urllib.error.HTTPError):
+        oras._urlopen_retry("https://x/y", timeout=5)
+    assert calls["n"] == 1
+
+
+def test_urlopen_retry_exhausts_then_reraises(monkeypatch: Any) -> None:
+    """Persistent transient failures exhaust the attempts and re-raise."""
+    monkeypatch.setattr(oras.time, "sleep", lambda *_a: None)
+    calls = {"n": 0}
+
+    def _down(req: Any, timeout: Any = None) -> Any:
+        calls["n"] += 1
+        raise _http_error(503)
+
+    monkeypatch.setattr("urllib.request.urlopen", _down)
+    with pytest.raises(urllib.error.HTTPError):
+        oras._urlopen_retry("https://x/y", timeout=5)
+    assert calls["n"] == oras._RETRY_ATTEMPTS
+
+
+def test_fetch_anonymous_token_rides_through_transient_503(monkeypatch: Any) -> None:
+    """A transient 503 on /token is retried, not surfaced as OrasError."""
+    monkeypatch.setattr(oras.time, "sleep", lambda *_a: None)
+    calls = {"n": 0}
+
+    def _flaky(req: Any, timeout: Any = None) -> Any:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise _http_error(503)
+        return _BytesResp(json.dumps({"token": "tok"}).encode())
+
+    monkeypatch.setattr("urllib.request.urlopen", _flaky)
+    assert oras.fetch_anonymous_token("ghcr.io", "owner/repo") == "tok"
+    assert calls["n"] == 2

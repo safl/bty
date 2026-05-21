@@ -66,12 +66,22 @@ from __future__ import annotations
 
 import json
 import re
+import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from typing import Any
 
 ORAS_SCHEME = "oras://"
+
+# Transient HTTP statuses worth retrying: 429 (rate limit -- common on
+# GHCR / Docker Hub under load) plus the gateway/server-blip 5xx range.
+# Everything else (401/403 auth, 404 not-found, other 4xx) is permanent
+# and raised immediately -- retrying would just stall the flash.
+_RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
+_RETRY_ATTEMPTS = 3
+_RETRY_BACKOFF = 0.5  # seconds; exponential: 0.5, 1.0 between attempts
 
 # Accept type covers OCI v1 + Docker v2 manifest media types so the
 # registry doesn't bounce us with a 406 if the package was originally
@@ -193,6 +203,34 @@ def parse_ref(ref: str) -> OrasRef:
     )
 
 
+def _urlopen_retry(req: urllib.request.Request | str, *, timeout: float) -> bytes:
+    """GET ``req`` and return the body bytes, retrying transient
+    failures with exponential backoff.
+
+    Retries on :data:`_RETRYABLE_STATUS` (429 / 5xx) and on raw
+    connection errors / timeouts. Permanent HTTP errors (401/403/404,
+    other 4xx) raise immediately -- a retry can't fix an auth or
+    not-found failure, only delay the inevitable. After
+    :data:`_RETRY_ATTEMPTS` the last error is re-raised so the caller's
+    ``except`` (which wraps into :class:`OrasError`) still fires.
+    """
+    last: BaseException | None = None
+    for attempt in range(_RETRY_ATTEMPTS):
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return bytes(resp.read())
+        except urllib.error.HTTPError as exc:
+            if exc.code not in _RETRYABLE_STATUS:
+                raise
+            last = exc
+        except (urllib.error.URLError, TimeoutError, ConnectionError, OSError) as exc:
+            last = exc
+        if attempt < _RETRY_ATTEMPTS - 1:
+            time.sleep(_RETRY_BACKOFF * (2**attempt))
+    assert last is not None  # loop ran at least once
+    raise last
+
+
 def fetch_anonymous_token(host: str, repository: str, *, timeout: float = 30.0) -> str:
     """Grab an anonymous bearer token for ``repository:pull``.
 
@@ -207,14 +245,13 @@ def fetch_anonymous_token(host: str, repository: str, *, timeout: float = 30.0) 
         f"&scope=repository:{urllib.parse.quote(repository, safe='/')}:pull"
     )
     try:
-        with urllib.request.urlopen(url, timeout=timeout) as resp:
-            payload = json.loads(resp.read())
+        payload = json.loads(_urlopen_retry(url, timeout=timeout))
     except (OSError, json.JSONDecodeError, ValueError) as exc:
         # ``OSError`` covers ``URLError`` (its subclass) plus the raw
         # connection failures urllib re-raises through it on some
         # platforms; tests also patch in a plain ``OSError`` to
         # simulate "registry unreachable" without constructing a
-        # full URLError.
+        # full URLError. Transient 429/5xx were already retried.
         raise OrasError(f"oras token fetch failed for {host}/{repository}: {exc}") from exc
     # OCI registries return ``token``; some spell it ``access_token``.
     token = payload.get("token") or payload.get("access_token")
@@ -242,8 +279,7 @@ def fetch_manifest(ref: OrasRef, token: str, *, timeout: float = 30.0) -> dict[s
         },
     )
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as resp:
-            payload = json.loads(resp.read())
+        payload = json.loads(_urlopen_retry(request, timeout=timeout))
     except (OSError, json.JSONDecodeError, ValueError) as exc:
         raise OrasError(
             f"oras manifest fetch failed for "
