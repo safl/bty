@@ -294,6 +294,7 @@ Protected routes (session cookie required):
 |---|---|---|---|
 | GET | `/machines` | - | array of `Machine` |
 | GET | `/machines/{mac}` | - | `Machine` (404 if missing) |
+| GET | `/machines/{mac}/lshw.json` | - | raw `lshw -json` blob (404 if none posted) |
 | PUT | `/machines/{mac}` | `MachineUpsert` | `Machine` (the new state) |
 | DELETE | `/machines/{mac}` | - | 204 (404 if missing) |
 | POST | `/catalog/entries` | `CatalogEntryAdd` | new entry (201) |
@@ -420,6 +421,15 @@ InventoryDisk = {
   "readonly":  false
 }
 ```
+
+The `POST /pxe/{mac}/inventory` body is `{"disks": [InventoryDisk, ...]}`
+plus an optional `"lshw"` field carrying the full `lshw -json` hardware
+tree (CPU / RAM / NICs + MACs / peripherals / firmware). `bty` collects
+it on every live-env boot. It is **supplementary** -- the flasher only
+consumes `disks` (from lsblk); `lshw` is stored as a blob, surfaced on
+the Machine view, and downloadable raw at
+`GET /machines/{mac}/lshw.json` (size-capped server-side; an oversize
+or absent blob leaves any prior one intact).
 
 ### Configuration
 

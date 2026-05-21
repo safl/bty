@@ -173,6 +173,13 @@ class InventoryPost(BaseModel):
     model_config = {"extra": "forbid"}
 
     disks: list[InventoryDisk] = Field(default_factory=list, max_length=64)
+    # Optional full ``lshw -json`` hardware tree (CPU / RAM / NICs +
+    # MACs / peripherals / firmware). Supplementary to ``disks`` -- the
+    # flasher only consumes ``disks`` (lsblk), never this. Stored as a
+    # blob and surfaced on the Machine view + raw download. ``lshw -json``
+    # is usually an object; some versions emit a top-level list, so
+    # accept either. Size is capped server-side when stored.
+    lshw: dict[str, object] | list[object] | None = None
 
 
 class Machine(BaseModel):

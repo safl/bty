@@ -23,3 +23,8 @@ dosfstools
 e2fsprogs
 exfatprogs
 zstd
+
+# Full hardware inventory (CPU / RAM / NICs+MACs / peripherals) that
+# ``bty`` collects via ``lshw -json`` and posts to /pxe/{mac}/inventory
+# on every live-env boot. Supplementary to the lsblk disk inventory.
+lshw

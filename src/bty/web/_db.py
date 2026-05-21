@@ -67,6 +67,13 @@ CREATE TABLE IF NOT EXISTS machines (
     -- serial is what the live env consumes at flash time.
     known_disks               TEXT,    -- JSON array; NULL until first inventory
     known_disks_at            TEXT,    -- ISO timestamp of last inventory post
+    -- Full ``lshw -json`` hardware tree (CPU / RAM / NICs+MACs /
+    -- peripherals), posted alongside the disk inventory. Supplementary
+    -- to known_disks; surfaced on the Machine view + a raw download
+    -- (GET /machines/{mac}/lshw.json). NULL until a live-env boot
+    -- posts it. The flasher never reads it.
+    hw_lshw                   TEXT,    -- JSON blob; NULL until first inventory with lshw
+    hw_lshw_at                TEXT,    -- ISO timestamp of last lshw post
     -- Operator-selected target disk SERIAL. Serial (vs path) is the
     -- durable identifier: ``/dev/sda`` can flip to ``/dev/nvme0n1``
     -- across kernel versions / udev rules, but the disk's serial
@@ -191,6 +198,10 @@ _ADDITIVE_COLUMNS: dict[str, dict[str, str]] = {
         # One-shot bty-flash-always loop-break bit; existing rows
         # backfill to 0 (not yet seen a post-flash artifact fetch).
         "saw_flasher_boot": "INTEGER NOT NULL DEFAULT 0",
+        # Full lshw -json hardware blob + its timestamp; nullable, so a
+        # plain ADD COLUMN backfills existing rows with NULL.
+        "hw_lshw": "TEXT",
+        "hw_lshw_at": "TEXT",
     },
 }
 

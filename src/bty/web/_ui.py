@@ -11,6 +11,7 @@ updates.
 
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 import urllib.parse
@@ -442,6 +443,7 @@ def register_ui_routes(
             images=catalog_options,
             boot_policies=list(BOOT_POLICIES),
             machine_events=machine_events,
+            hw=lshw_highlights(row["hw_lshw"] if "hw_lshw" in row.keys() else None),  # noqa: SIM118
             flash=flash,
             flash_kind="danger" if flash else None,
         )
@@ -1403,6 +1405,59 @@ def dashboard_counts_context(conn: Any, unified: list[bty_images.UnifiedImage]) 
     }
 
 
+def lshw_highlights(blob: str | None) -> dict[str, Any] | None:
+    """Pull a few display highlights out of a stored ``lshw -json``
+    blob: CPU model, total RAM, and the NIC list (name / MAC /
+    product). Returns ``None`` when there's no blob or it won't parse,
+    so the Machine view can hide the Hardware card. Shallow on purpose
+    -- the raw download (GET /machines/{mac}/lshw.json) is the real
+    artifact; this is just a glance."""
+    if not blob:
+        return None
+    try:
+        data = json.loads(blob)
+    except (ValueError, TypeError):
+        return None
+    roots = data if isinstance(data, list) else [data]
+    cpu: str | None = None
+    mem_bytes: int | None = None
+    nics: list[dict[str, Any]] = []
+
+    def _walk(node: Any) -> None:
+        nonlocal cpu, mem_bytes
+        if not isinstance(node, dict):
+            return
+        cls = node.get("class")
+        if cls == "processor" and cpu is None:
+            prod = node.get("product") or node.get("description")
+            if isinstance(prod, str):
+                cpu = prod
+        elif cls == "memory":
+            size = node.get("size")
+            ident = node.get("id", "")
+            if isinstance(size, int) and isinstance(ident, str) and "memory" in ident:
+                mem_bytes = (mem_bytes or 0) + size
+        elif cls == "network":
+            name = node.get("logicalname")
+            if isinstance(name, list):
+                name = ", ".join(str(n) for n in name)
+            nics.append(
+                {
+                    "name": name if isinstance(name, str) else None,
+                    "mac": node.get("serial") if isinstance(node.get("serial"), str) else None,
+                    "product": node.get("product") or node.get("description"),
+                }
+            )
+        for child in node.get("children") or []:
+            _walk(child)
+
+    for root in roots:
+        _walk(root)
+
+    mem_h = f"{mem_bytes / 1024**3:.1f} GiB" if mem_bytes else None
+    return {"cpu": cpu, "memory": mem_h, "nics": nics}
+
+
 def _row_to_dict(row: Any) -> dict[str, Any]:
     """Decode a sqlite3.Row of ``machines`` into a plain dict.
 
@@ -1439,6 +1494,10 @@ def _row_to_dict(row: Any) -> dict[str, Any]:
         "last_flashed_at": row["last_flashed_at"],
         "known_disks": parsed_disks,
         "known_disks_at": row["known_disks_at"],
+        # Additive columns: guard with key check so an older row mid-
+        # migration can't KeyError the detail page.
+        "hw_lshw": row["hw_lshw"] if "hw_lshw" in row.keys() else None,  # noqa: SIM118
+        "hw_lshw_at": row["hw_lshw_at"] if "hw_lshw_at" in row.keys() else None,  # noqa: SIM118
         "target_disk_serial": row["target_disk_serial"],
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],

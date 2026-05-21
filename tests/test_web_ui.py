@@ -1223,6 +1223,57 @@ def test_ui_machine_detail_renders_boot_policy_dropdown(client: TestClient) -> N
     assert 'value="bty-flash-always" selected' in body
 
 
+_LSHW_TREE = {
+    "id": "sys",
+    "class": "system",
+    "product": "Test Box",
+    "children": [
+        {"id": "cpu", "class": "processor", "product": "Test CPU @ 3.0GHz"},
+        {"id": "memory", "class": "memory", "size": 17179869184},
+        {
+            "id": "net",
+            "class": "network",
+            "logicalname": "eth0",
+            "serial": "aa:bb:cc:dd:ee:ff",
+            "product": "Test NIC",
+        },
+    ],
+}
+
+
+def test_lshw_highlights_parses_cpu_ram_nics() -> None:
+    """The Machine-view highlight parser pulls CPU / RAM / NIC MACs out
+    of an lshw tree and degrades to None on missing / bad input."""
+    import json
+
+    from bty.web._ui import lshw_highlights
+
+    hw = lshw_highlights(json.dumps(_LSHW_TREE))
+    assert hw is not None
+    assert hw["cpu"] == "Test CPU @ 3.0GHz"
+    assert hw["memory"] == "16.0 GiB"
+    assert hw["nics"][0]["mac"] == "aa:bb:cc:dd:ee:ff"
+    assert hw["nics"][0]["name"] == "eth0"
+    assert lshw_highlights(None) is None
+    assert lshw_highlights("not json{") is None
+
+
+def test_ui_machine_detail_renders_hardware_card(client: TestClient) -> None:
+    """Once a box posts lshw, the Machine view shows a Hardware card
+    with the highlights + a raw-download link."""
+    _login(client)
+    mac = "aa:bb:cc:dd:ee:d0"
+    client.get(f"/pxe/{mac}")  # auto-discover so a row exists
+    # Inventory POST is the open /pxe endpoint -- no auth.
+    r = client.post(f"/pxe/{mac}/inventory", json={"disks": [], "lshw": _LSHW_TREE})
+    assert r.status_code == 204, r.text
+    body = client.get(f"/ui/machines/{mac}").text
+    assert 'id="hardware"' in body
+    assert f"/machines/{mac}/lshw.json" in body
+    assert "Test CPU @ 3.0GHz" in body
+    assert "aa:bb:cc:dd:ee:ff" in body
+
+
 def test_ui_boot_page_renders_with_artifact_state(client: TestClient) -> None:
     """The /ui/boot page must show the configured boot dir and one
     row per expected artifact (vmlinuz/initrd/squashfs/sha256)."""

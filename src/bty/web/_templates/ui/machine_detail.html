@@ -204,6 +204,52 @@
 })();
 </script>
 
+{# Hardware card: highlights parsed from the box's last lshw -json,
+   plus a raw download for other tools. Only shown once the live env
+   has reported lshw (auto-discovered boxes do on their inventory
+   boot). #}
+{% if m.hw_lshw %}
+<div class="card mb-4" id="hardware">
+    <div class="card-header bg-light fw-semibold d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-cpu me-1"></i>Hardware</span>
+        <a class="btn btn-sm btn-outline-secondary" href="/machines/{{ m.mac }}/lshw.json">
+            <i class="bi bi-download me-1"></i>lshw.json
+        </a>
+    </div>
+    <div class="card-body">
+        <dl class="row mb-0">
+            {% if hw and hw.cpu %}
+            <dt class="col-sm-3">CPU</dt>
+            <dd class="col-sm-9">{{ hw.cpu }}</dd>
+            {% endif %}
+            {% if hw and hw.memory %}
+            <dt class="col-sm-3">Memory</dt>
+            <dd class="col-sm-9">{{ hw.memory }}</dd>
+            {% endif %}
+            {% if hw and hw.nics %}
+            <dt class="col-sm-3">Network</dt>
+            <dd class="col-sm-9">
+                <ul class="list-unstyled mb-0">
+                    {% for nic in hw.nics %}
+                    <li>
+                        {% if nic.mac %}<code>{{ nic.mac }}</code>{% endif %}
+                        {% if nic.name %} <span class="text-body-secondary">{{ nic.name }}</span>{% endif %}
+                        {% if nic.product %} - {{ nic.product }}{% endif %}
+                    </li>
+                    {% endfor %}
+                </ul>
+            </dd>
+            {% endif %}
+        </dl>
+        <div class="form-text mt-2">
+            Reported {{ m.hw_lshw_at | fmt_ts if m.hw_lshw_at else "-" }} via
+            <code>lshw -json</code> on the box's last live-env boot. The full
+            tree (peripherals, firmware, ...) is in the download.
+        </div>
+    </div>
+</div>
+{% endif %}
+
 {# Per-MAC event slice. Filtered to ``subject_kind=machine`` +
    ``subject_id=this MAC`` server-side; the link forwards the
    same filter to /ui/events for drill-down. #}

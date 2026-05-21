@@ -1694,6 +1694,81 @@ def test_pxe_inventory_persists_disks_and_logs_event(app_client: TestClient) -> 
     assert inv_events[0]["details"]["count"] == 2
 
 
+_LSHW_SAMPLE = {
+    "id": "sys",
+    "class": "system",
+    "product": "Test Box",
+    "children": [
+        {
+            "id": "core",
+            "class": "bus",
+            "children": [
+                {"id": "cpu:0", "class": "processor", "product": "Test CPU @ 3.0GHz"},
+                {"id": "memory", "class": "memory", "size": 17179869184},
+                {
+                    "id": "network",
+                    "class": "network",
+                    "logicalname": "eth0",
+                    "serial": "aa:bb:cc:dd:ee:ff",
+                    "product": "Test NIC",
+                },
+            ],
+        },
+    ],
+}
+
+
+def test_pxe_inventory_stores_lshw_and_serves_raw_download(app_client: TestClient) -> None:
+    """An inventory POST carrying ``lshw`` stores the blob; the raw
+    download (auth-gated) serves it back verbatim, and the
+    machine.inventory event notes the lshw presence."""
+    mac = "aa:bb:cc:dd:ee:c0"
+    app_client.get(f"/pxe/{mac}")
+    r = app_client.post(
+        f"/pxe/{mac}/inventory",
+        json={"disks": [{"path": "/dev/sda"}], "lshw": _LSHW_SAMPLE},
+    )
+    assert r.status_code == 204, r.text
+
+    # Raw download requires a session.
+    assert app_client.get(f"/machines/{mac}/lshw.json").status_code == 401
+    dl = app_client.get(f"/machines/{mac}/lshw.json", cookies=AUTH)
+    assert dl.status_code == 200, dl.text
+    assert dl.headers["content-type"].startswith("application/json")
+    assert "attachment" in dl.headers.get("content-disposition", "")
+    assert dl.json()["product"] == "Test Box"
+
+    inv = app_client.get(
+        "/events",
+        params={"subject_kind": "machine", "subject_id": mac, "kind": "machine.inventory"},
+        cookies=AUTH,
+    ).json()["events"]
+    assert inv[0]["details"]["lshw"] is True
+
+
+def test_machine_lshw_404_when_absent(app_client: TestClient) -> None:
+    """A machine that never posted lshw (e.g. only sanbooted) 404s the
+    raw download rather than serving an empty body."""
+    mac = "aa:bb:cc:dd:ee:c1"
+    app_client.get(f"/pxe/{mac}")  # discovered, no lshw yet
+    r = app_client.get(f"/machines/{mac}/lshw.json", cookies=AUTH)
+    assert r.status_code == 404
+
+
+def test_pxe_inventory_lshw_absent_does_not_clobber_prior(app_client: TestClient) -> None:
+    """A later inventory POST without ``lshw`` leaves a previously
+    stored blob intact (COALESCE), so a boot where lshw hiccuped
+    doesn't wipe good hardware data."""
+    mac = "aa:bb:cc:dd:ee:c2"
+    app_client.get(f"/pxe/{mac}")
+    app_client.post(f"/pxe/{mac}/inventory", json={"disks": [], "lshw": _LSHW_SAMPLE})
+    # Second post, no lshw.
+    app_client.post(f"/pxe/{mac}/inventory", json={"disks": [{"path": "/dev/sda"}]})
+    dl = app_client.get(f"/machines/{mac}/lshw.json", cookies=AUTH)
+    assert dl.status_code == 200
+    assert dl.json()["product"] == "Test Box"
+
+
 def test_pxe_inventory_404_for_unknown_mac(app_client: TestClient) -> None:
     """Inventory POST for a MAC that was never discovered returns
     404 -- prevents ``bty`` from silently creating ghost machines

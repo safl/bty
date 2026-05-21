@@ -76,6 +76,14 @@ hostname, boot policy, and (after first PXE contact) last-seen IP +
 discovery timestamp. The server uses machine records to render
 per-MAC iPXE configurations.
 
+On every live-env boot `bty` also reports the box's hardware to the
+record: the disk list (from `lsblk`, the flasher's target-disk
+source) and the full `lshw -json` tree (CPU, RAM, NICs + MACs,
+peripherals, firmware). The hardware tree is supplementary -- shown
+on the Machine view and downloadable raw -- so a bty fleet doubles as
+a passive hardware inventory. The `bty-inventory` policy exists to
+keep that data fresh on boxes that otherwise just sanboot.
+
 ## Boot policy
 
 A field on the [machine record](#machine-record) that decides what

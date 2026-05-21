@@ -241,13 +241,21 @@ def post_inventory(
     mac: str,
     disks_payload: list[dict[str, object]],
     *,
+    lshw: object | None = None,
     timeout: float = 10.0,
 ) -> None:
-    """POST ``<pxe_done_base>/pxe/{mac}/inventory`` with the live
-    env's local disk inventory.
+    """POST ``<pxe_done_base>/pxe/{mac}/inventory`` with the live env's
+    local disk inventory, plus the optional full ``lshw -json`` tree.
+
+    ``lshw`` (when supplied) is the parsed JSON from ``lshw -json``;
+    bty-web stores it as a supplementary hardware blob. The flasher
+    never consumes it -- ``disks_payload`` (from lsblk) is the contract.
     """
     base = pxe_done_base.rstrip("/")
-    body = _json.dumps({"disks": disks_payload}).encode("utf-8")
+    payload: dict[str, object] = {"disks": disks_payload}
+    if lshw is not None:
+        payload["lshw"] = lshw
+    body = _json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
         f"{base}/pxe/{mac}/inventory",
         data=body,
@@ -256,6 +264,33 @@ def post_inventory(
     )
     with urllib.request.urlopen(req, timeout=timeout):
         pass
+
+
+def collect_lshw(*, timeout: float = 30.0) -> object | None:
+    """Best-effort full hardware inventory via ``lshw -json``.
+
+    Returns the parsed JSON (lshw emits an object, or a list on some
+    versions), or ``None`` if lshw is missing, errors, times out, or
+    emits unparseable output. Bounded so a slow probe can't wedge the
+    inventory post; lshw needs root, which the live env has.
+    """
+    try:
+        proc = subprocess.run(
+            ["lshw", "-json"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=timeout,
+        )
+    except (FileNotFoundError, subprocess.SubprocessError, OSError):
+        return None
+    if proc.returncode != 0 or not proc.stdout.strip():
+        return None
+    try:
+        parsed: object = _json.loads(proc.stdout)
+    except (ValueError, TypeError):
+        return None
+    return parsed
 
 
 _BTY_DEFAULT_CATALOG_URL = "https://github.com/safl/bty/releases/latest/download/catalog.toml"
@@ -1756,8 +1791,9 @@ class BtyTui:
             payload = disks.list_disks()
         except (FileNotFoundError, subprocess.SubprocessError, OSError):
             return
+        lshw = collect_lshw()
         with contextlib.suppress(urllib.error.URLError, ConnectionError, TimeoutError, OSError):
-            post_inventory(self._state.pxe_done_base, self._state.mac, payload)
+            post_inventory(self._state.pxe_done_base, self._state.mac, payload, lshw=lshw)
 
     def _auto_post_inventory(self) -> None:
         """Background-thread post of the disk inventory so a slow
@@ -1773,8 +1809,9 @@ class BtyTui:
                 payload = disks.list_disks()
             except (FileNotFoundError, subprocess.SubprocessError, OSError):
                 return
+            lshw = collect_lshw()
             with contextlib.suppress(urllib.error.URLError, ConnectionError, TimeoutError):
-                post_inventory(base, mac, payload)
+                post_inventory(base, mac, payload, lshw=lshw)
 
         t = threading.Thread(target=_runner, name="bty-inventory", daemon=True)
         t.start()

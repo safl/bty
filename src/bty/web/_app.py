@@ -968,11 +968,28 @@ def create_app(
         # with the same disks produce byte-identical column values.
         disks_payload = [d.model_dump() for d in body.disks]
         disks_json = json.dumps(disks_payload, sort_keys=True)
+        # Supplementary lshw -json blob. Cap its size so a pathological
+        # tree can't bloat the row; over the cap we skip storing it
+        # (and keep any prior blob) rather than truncating to invalid
+        # JSON. ``None`` (lshw not posted / failed) leaves the prior
+        # blob untouched via COALESCE -- a boot where lshw hiccuped
+        # shouldn't wipe good hardware data.
+        lshw_max_bytes = 4 * 1024 * 1024
+        lshw_json: str | None = None
+        lshw_oversize = False
+        if body.lshw is not None:
+            candidate = json.dumps(body.lshw, sort_keys=True)
+            if len(candidate.encode("utf-8")) <= lshw_max_bytes:
+                lshw_json = candidate
+            else:
+                lshw_oversize = True
         with _db.open_db(state_path) as conn:
             cur = conn.execute(
                 "UPDATE machines SET known_disks = ?, known_disks_at = ?, "
+                "hw_lshw = COALESCE(?, hw_lshw), "
+                "hw_lshw_at = CASE WHEN ? IS NOT NULL THEN ? ELSE hw_lshw_at END, "
                 "updated_at = ? WHERE mac = ?",
-                (disks_json, now, now, normalised),
+                (disks_json, now, lshw_json, lshw_json, now, now, normalised),
             )
             if cur.rowcount == 0:
                 raise HTTPException(
@@ -982,7 +999,11 @@ def create_app(
             _log_event(
                 conn,
                 kind="machine.inventory",
-                summary=f"{normalised} reported {len(body.disks)} disk(s)",
+                summary=(
+                    f"{normalised} reported {len(body.disks)} disk(s)"
+                    + (" + lshw" if lshw_json is not None else "")
+                    + (" (lshw too large, skipped)" if lshw_oversize else "")
+                ),
                 subject_kind="machine",
                 subject_id=normalised,
                 actor="pxe-client",
@@ -990,6 +1011,7 @@ def create_app(
                 details={
                     "count": len(body.disks),
                     "serials": [d.serial for d in body.disks if d.serial],
+                    "lshw": lshw_json is not None,
                 },
             )
             conn.commit()
@@ -1373,6 +1395,37 @@ def create_app(
                 detail=f"no machine record for {normalised}",
             )
         return _row_to_machine(row)
+
+    @app.get(
+        "/machines/{mac}/lshw.json",
+        dependencies=[Depends(require_auth)],
+    )
+    def get_machine_lshw(mac: str) -> Response:
+        """Raw ``lshw -json`` blob the live env last reported for this
+        MAC, served verbatim for other tools to consume. 404 if the
+        machine has never posted lshw (e.g. only ever sanbooted, or the
+        live env's ``lshw`` failed)."""
+        normalised = _normalise_mac(mac)
+        with _db.open_db(state_path) as conn:
+            row = conn.execute(
+                "SELECT hw_lshw FROM machines WHERE mac = ?", (normalised,)
+            ).fetchone()
+        if row is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"no machine record for {normalised}",
+            )
+        blob = row["hw_lshw"]
+        if not blob:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"no lshw hardware inventory for {normalised}",
+            )
+        return Response(
+            content=blob,
+            media_type="application/json",
+            headers={"Content-Disposition": f'attachment; filename="{normalised}-lshw.json"'},
+        )
 
     @app.put(
         "/machines/{mac}",
