@@ -690,6 +690,55 @@ def test_fetch_and_dispatch_plan_auto_populates_auto_image_and_serial(
     assert app._auto_target_disk_serial == "WD-WX12345"
 
 
+def test_fetch_and_dispatch_plan_inventory_returns_inventory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A ``mode=inventory`` plan (boot_policy=bty-inventory) dispatches
+    to the ``"inventory"`` token, so ``run()`` posts the disk inventory
+    and reboots rather than dropping into the wizard."""
+    monkeypatch.setenv("BTY_IMAGE_ROOT", str(tmp_path))
+    app = tui_app.BtyTui(server="http://bty-server:8080", mac="aa:bb:cc:dd:ee:ff")
+    monkeypatch.setattr(
+        tui_app.urllib.request,
+        "urlopen",
+        lambda req, **_kw: _fake_bytes_resp(b'{"mode": "inventory"}'),
+    )
+    assert app._fetch_and_dispatch_plan() == "inventory"
+
+
+def test_collect_lshw_parses_json_and_degrades(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``collect_lshw`` returns the parsed ``lshw -json`` tree, and
+    folds missing-binary / non-zero-exit / unparseable output to
+    ``None`` so the inventory post stays best-effort."""
+
+    class _Proc:
+        returncode = 0
+        stdout = '{"id": "sys", "class": "system"}'
+
+    monkeypatch.setattr(tui_app.subprocess, "run", lambda *_a, **_kw: _Proc())
+    assert tui_app.collect_lshw() == {"id": "sys", "class": "system"}
+
+    class _Fail:
+        returncode = 1
+        stdout = ""
+
+    monkeypatch.setattr(tui_app.subprocess, "run", lambda *_a, **_kw: _Fail())
+    assert tui_app.collect_lshw() is None
+
+    class _Garbage:
+        returncode = 0
+        stdout = "not json{"
+
+    monkeypatch.setattr(tui_app.subprocess, "run", lambda *_a, **_kw: _Garbage())
+    assert tui_app.collect_lshw() is None
+
+    def _missing(*_a: object, **_kw: object) -> None:
+        raise FileNotFoundError("lshw not installed")
+
+    monkeypatch.setattr(tui_app.subprocess, "run", _missing)
+    assert tui_app.collect_lshw() is None
+
+
 def test_fetch_and_dispatch_plan_auto_missing_fields_falls_back_to_interactive(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

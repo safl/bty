@@ -743,6 +743,43 @@ def test_every_ui_page_uses_the_intro_box_partial() -> None:
     )
 
 
+def test_live_env_chains_tag_boot_urls_with_mac() -> None:
+    """The live-env iPXE chains (``ipxe_flash.j2`` + ``ipxe_tui.j2``)
+    must tag every ``/boot`` artifact URL with ``?mac={{ mac }}``.
+
+    That query string is what arms the ``saw_flasher_boot`` bit: the
+    server keys the one-shot sanboot off seeing ``GET /boot/...?mac=``
+    (proof the box booted the live env). It drives the
+    ``bty-flash-always`` AND ``bty-inventory`` alternation. Drop the
+    ``?mac=`` and a box never arms -> it reflashes / re-inventories on
+    every PXE boot WITHOUT ever sanbooting the disk: the exact
+    under-PXE-first loop those policies were built to break. Pin it so a
+    future template edit can't silently reintroduce the loop.
+    """
+    tmpl_dir = REPO_ROOT / "src" / "bty" / "web" / "_templates"
+    # Each kernel / initrd / squashfs URL must be immediately followed
+    # by the ``?mac={{ mac }}`` query. The optional group is None when
+    # the query is absent -> a violation.
+    artifact_re = re.compile(
+        r"/boot/bty-netboot-x86_64\.(?:vmlinuz|initrd|squashfs)(\?mac=\{\{ mac \}\})?"
+    )
+    violations: list[str] = []
+    for name in ("ipxe_flash.j2", "ipxe_tui.j2"):
+        body = (tmpl_dir / name).read_text()
+        violations.extend(
+            f"{name}: {m.group(0)!r} is missing ?mac={{ mac }}"
+            for m in artifact_re.finditer(body)
+            if m.group(1) is None
+        )
+        assert artifact_re.search(body), f"{name}: no /boot artifact URL found at all"
+    assert not violations, (
+        "live-env chain /boot URLs missing ``?mac={{ mac }}``:\n"
+        + "\n".join(violations)
+        + "\nWithout it the saw_flasher_boot arming never fires and "
+        "bty-flash-always / bty-inventory loop forever under PXE-first."
+    )
+
+
 def test_every_boot_policy_is_handled_by_the_pxe_decision_tree() -> None:
     """Every value in ``BOOT_POLICIES`` must appear as a literal string
     in ``_app.py`` -- the PXE handler decides what to serve with an
