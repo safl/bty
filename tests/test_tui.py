@@ -960,3 +960,31 @@ def test_print_flash_plan_shows_rejection_reasons(
     out = capsys.readouterr().out
     assert "rejected" in out.lower()
     assert "mounted" in out  # the actual reason is shown, not hidden
+
+
+# ---------- post-flash reboot prompt: Enter defaults to reboot ----------------
+
+
+def test_screen_reboot_or_done_enter_defaults_to_reboot(monkeypatch: Any) -> None:
+    """At the post-flash reboot prompt, a bare Enter ('') reboots -- the
+    operator just flashed and the obvious next step is to boot the new
+    disk. (Was 'quit', which surprised operators by leaving the box
+    flashed-but-not-rebooted.)"""
+    app = tui_app.BtyTui()
+    app._state.selected_disk = {"path": "/dev/sda", "size": "8G"}
+    monkeypatch.setattr(app, "_ask", lambda *_a, **_kw: "")  # Enter
+    rebooted: list[bool] = []
+    monkeypatch.setattr(app, "_do_reboot", lambda: rebooted.append(True))
+    assert app._screen_reboot_or_done() == "quit"
+    assert rebooted == [True]
+
+
+def test_screen_reboot_or_done_explicit_n_does_not_reboot(monkeypatch: Any) -> None:
+    """Explicit 'n' opts out -- no reboot."""
+    app = tui_app.BtyTui()
+    app._state.selected_disk = {"path": "/dev/sda"}
+    monkeypatch.setattr(app, "_ask", lambda *_a, **_kw: "n")
+    rebooted: list[bool] = []
+    monkeypatch.setattr(app, "_do_reboot", lambda: rebooted.append(True))
+    assert app._screen_reboot_or_done() == "quit"
+    assert rebooted == []

@@ -1264,18 +1264,26 @@ class BtyTui:
         prompt_text = self._render_prompt_line(
             title="Reboot to boot from the freshly flashed disk",
             extras=(
-                ("y", "yes, reboot now"),
+                ("Enter/y", "reboot now (default)"),
+                ("n", "don't reboot, stay"),
                 ("b", "back"),
                 ("q", "quit"),
             ),
         )
         choice = self._ask(prompt_text)
-        if choice in ("q", "quit", "n", "no", ""):
+        # Enter (empty) defaults to REBOOT: the operator just flashed and
+        # the obvious next step is to boot the new disk. Defaulting Enter
+        # to "quit" surprised operators (flashed box sat un-rebooted).
+        # The destructive step already happened, so reboot-on-Enter is
+        # safe -- explicit n/q/back still opt out.
+        if choice in ("n", "no"):
+            return "quit"  # stay; don't reboot
+        if choice in ("q", "quit"):
             return "quit"
         if choice in ("b", "back"):
             self._state.back()
             return "continue"
-        if choice in ("y", "yes", "r", "reboot"):
+        if choice in ("y", "yes", "r", "reboot", ""):
             self._do_reboot()
             return "quit"  # unreachable on success; defensive
         self._console.print(f"[{_DANGER}]Unrecognised choice {choice!r}.[/]")
