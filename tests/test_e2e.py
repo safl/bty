@@ -471,15 +471,22 @@ def test_e2e_flash_always_alternates_flash_then_sanboot(app_client: TestClient) 
     host = {"Host": "bty.local:8080"}
 
     def _directives(body: str) -> set[str]:
-        # First token of each non-comment, non-blank iPXE line --
-        # distinguishes the flash chain (``kernel`` / ``boot``) from
-        # sanboot (``sanboot``) without matching the word inside a
-        # template comment.
-        return {
-            ln.split()[0]
-            for ln in body.splitlines()
-            if ln.strip() and not ln.lstrip().startswith("#")
-        }
+        # Command keyword of each non-comment, non-blank iPXE line,
+        # INCLUDING sub-commands chained after && / || -- so the
+        # local-disk line ``iseq ${platform} efi && exit || sanboot
+        # ... || exit`` surfaces ``iseq``, ``exit`` AND ``sanboot``.
+        # Distinguishes the flash chain (``kernel`` / ``boot``) from
+        # the local-disk boot without matching the word in a comment.
+        out: set[str] = set()
+        for ln in body.splitlines():
+            s = ln.strip()
+            if not s or s.startswith("#"):
+                continue
+            for part in s.replace("&&", "||").split("||"):
+                toks = part.split()
+                if toks:
+                    out.add(toks[0])
+        return out
 
     # 1. First contact: flash chain, with ?mac= on the artifact URLs.
     body = app_client.get(f"/pxe/{mac}", headers=host).text
@@ -558,11 +565,19 @@ def test_e2e_inventory_alternates_liveenv_then_sanboot(app_client: TestClient) -
     host = {"Host": "bty.local:8080"}
 
     def _directives(body: str) -> set[str]:
-        return {
-            ln.split()[0]
-            for ln in body.splitlines()
-            if ln.strip() and not ln.lstrip().startswith("#")
-        }
+        # See the matching helper in the flash-always test: split on
+        # && / || so a chained ``... || sanboot ... || exit`` surfaces
+        # ``sanboot`` even though the line now leads with ``iseq``.
+        out: set[str] = set()
+        for ln in body.splitlines():
+            s = ln.strip()
+            if not s or s.startswith("#"):
+                continue
+            for part in s.replace("&&", "||").split("||"):
+                toks = part.split()
+                if toks:
+                    out.add(toks[0])
+        return out
 
     # 1. First contact: live-env chain (inventory boot), ?mac= tagged.
     body = app_client.get(f"/pxe/{mac}", headers=host).text

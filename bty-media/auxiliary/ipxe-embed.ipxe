@@ -22,14 +22,21 @@
 # (the operator's router sets it to bty-server's IP via the
 # Network Boot config -- option 66 / siaddr / both).
 #
-# On failure we drop to the iPXE shell so the operator can
-# diagnose live; ``boot`` from there picks up any pending DHCP
-# state and re-tries.
+# Hand-back: when the chained script EXITS rather than booting a
+# kernel -- the sanboot path on UEFI does exactly this, since iPXE
+# can't boot a local disk via BIOS ``--drive`` numbering there -- we
+# must exit to the firmware boot order so it boots the installed OS
+# (the next entry after network boot). Likewise if DHCP or the chain
+# fetch fails: ``exit`` lets the firmware fall through to the local
+# disk (or re-attempt netboot on the next cycle). We deliberately do
+# NOT drop to an iPXE ``shell`` here: these are headless appliances,
+# a shell strands the box, and on UEFI it was masking the sanboot
+# hand-back so the disk never booted.
 
 echo bty: requesting DHCP lease
-dhcp || goto failed
+dhcp || goto handoff
 echo bty: chaining to http://${next-server}:8080/pxe-bootstrap.ipxe
-chain http://${next-server}:8080/pxe-bootstrap.ipxe
-:failed
-echo bty: chain failed; dropping to iPXE shell
-shell
+chain http://${next-server}:8080/pxe-bootstrap.ipxe || echo bty: could not reach bty-web at ${next-server}:8080
+:handoff
+echo bty: handing control to firmware boot order (boots the local disk)
+exit

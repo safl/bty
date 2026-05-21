@@ -6,21 +6,29 @@
 #   boot_policy:       {{ policy }}
 #   sanboot drive:     {{ drive }}
 #
-# This serves a sanboot of the local disk. It's used directly by
+# This boots the local disk. It's used directly by
 # ``boot_policy=sanboot``, and also as the post-step boot for
 # ``bty-inventory`` (after disks are reported) and ``bty-flash-always``
 # (after the one-shot flash) -- so the policy is templated, not
-# hardcoded to "sanboot". iPXE boots the local disk itself rather than
-# returning control to the firmware boot order. ``--drive {{ drive }}``
-# selects the BIOS drive (0x80 = first disk, 0x81 = second, ...) -- a
-# per-machine override (``sanboot_drive``), defaulting to 0x80. iPXE
-# selects by BIOS drive number, NOT by the Linux serial the flash step
-# matches on, so this is distinct from ``target_disk_serial``.
+# hardcoded to "sanboot".
 #
-# ``|| exit`` is the safety net: if the drive isn't bootable (wrong
-# number, empty disk), iPXE exits and control falls back to the
-# firmware boot order.
+# Firmware split (this is the important part):
+#   * UEFI -- there is NO BIOS INT13 drive map, so ``sanboot --drive``
+#     cannot see the local disk and always fails. The correct UEFI way
+#     to boot the installed OS is to hand control back to the firmware
+#     boot order via ``exit``; the firmware then boots the disk's EFI
+#     loader (the next entry after network boot). Modern hardware is
+#     UEFI, so this is the common path.
+#   * Legacy BIOS -- ``sanboot --no-describe --drive {{ drive }}`` boots
+#     the BIOS drive directly (0x80 = first disk), independent of the
+#     BIOS boot order, with ``|| exit`` as the firmware-order fallback.
+#     ``--drive`` is a BIOS drive number, NOT the Linux serial the flash
+#     step matches on, so it's distinct from ``target_disk_serial``.
+#
+# A successful local boot means iPXE never returns; an ``exit`` hands
+# back to the embedded script (ipxe-embed.ipxe), which itself exits to
+# the firmware boot order rather than dropping to a shell.
 
-echo bty: {{ mac }} boot_policy={{ policy }}, sanbooting local drive {{ drive }}
+echo bty: {{ mac }} boot_policy={{ policy }}, booting local disk (platform=${platform})
 sleep 1
-sanboot --no-describe --drive {{ drive }} || exit
+iseq ${platform} efi && exit || sanboot --no-describe --drive {{ drive }} || exit
