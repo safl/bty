@@ -468,10 +468,11 @@ def create_app(
         #   - bty-flash-always / -once + ref + target disk -> live env auto-flash
         #     EXCEPT bty-flash-always with saw_flasher_boot set -> sanboot
         #     the just-flashed disk once (one-shot loop-break, see below)
-        #   - else (local, or no usable binding)           -> ipxe.j2 (exit)
+        #   - else (no usable binding / stale policy) -> ipxe_unknown.j2
+        #     (sanboot 0x80 || exit)
         # Completion signal (POST /pxe/{mac}/done) updates
-        # last_flashed_at always, and flips bty-flash-once -> the settle policy so
-        # the next PXE boot returns sanboot.
+        # last_flashed_at always, and flips bty-flash-once -> sanboot so
+        # the box boots its freshly-flashed disk and stops reflashing.
         # bty-flash-always never changes policy; instead it alternates
         # flash-chain -> sanboot -> flash-chain across boots so the
         # just-flashed disk actually boots once before the next reflash.
@@ -581,7 +582,7 @@ def create_app(
                     }
             elif image_name is not None and not target_disk_serial:
                 # Image binding is resolvable but no target disk
-                # picked. Fall through to ipxe.j2 (sanboot/local) and
+                # picked. Fall back to ipxe.j2 (exit to firmware) and
                 # log a distinct event so the operator can tell this
                 # case apart from "orphan ref / no bindable image".
                 with _db.open_db(state_path) as conn:
@@ -605,24 +606,23 @@ def create_app(
                     conn.commit()
                 template = jinja.get_template("ipxe.j2")
                 rendered = template.render(mac=normalised, machine=machine)
-                offer_kind = "local-fallback"
+                offer_kind = "exit-fallback"
                 offer_summary = (
-                    f"{normalised} offered local fallback "
+                    f"{normalised} offered exit (firmware boot) "
                     f"(boot_policy={policy} but no target_disk_serial picked)"
                 )
                 offer_details = {
-                    "offer": "local-fallback",
+                    "offer": "exit-fallback",
                     "bty_image_ref": ref,
                     "reason": "no_target_disk",
                     "boot_policy": policy,
                 }
             else:
                 # Orphaned binding: machine targets a ref that no
-                # catalog_entries row resolves. Falls through to the
-                # ipxe.j2 (sanboot-or-local-msg) branch, but the
-                # operator sees a louder event so the
-                # "boot_policy=bty-flash-always but ref is dangling" case
-                # doesn't look like a normal hit.
+                # catalog_entries row resolves. Falls back to ipxe.j2
+                # (exit to firmware), but the operator sees a louder
+                # event so the "boot_policy=bty-flash-always but ref is
+                # dangling" case doesn't look like a normal hit.
                 short = str(ref)[:12]
                 with _db.open_db(state_path) as conn:
                     _log_event(
@@ -638,45 +638,26 @@ def create_app(
                     conn.commit()
                 template = jinja.get_template("ipxe.j2")
                 rendered = template.render(mac=normalised, machine=machine)
-                offer_kind = "local-fallback"
+                offer_kind = "exit-fallback"
                 offer_summary = (
-                    f"{normalised} offered local fallback "
+                    f"{normalised} offered exit (firmware boot) "
                     f"(boot_policy={policy} but ref={short}... is orphaned)"
                 )
                 offer_details = {
-                    "offer": "local-fallback",
+                    "offer": "exit-fallback",
                     "bty_image_ref": ref,
                     "reason": "orphan_ref",
                 }
-        elif ref:
-            template = jinja.get_template("ipxe.j2")
-            rendered = template.render(mac=normalised, machine=machine)
-            offer_kind = "local"
-            short = str(ref)[:12]
-            offer_summary = f"{normalised} offered local (exit to firmware) for ref={short}..."
-            offer_details = {"offer": "local", "bty_image_ref": ref}
-        elif policy == "local":
-            # Registered with boot_policy=local and no image ref bound.
-            # The machine IS known; render ``ipxe.j2`` (the local-boot
-            # template) NOT ``ipxe_unknown.j2`` -- the operator would
-            # otherwise see "no bty assignment for <MAC>" even though
-            # the assignment exists and explicitly says "boot local".
-            # Surfaced on a multi-NIC client whose registered MAC was
-            # set to boot_policy=local with no ref bound (intentional);
-            # bty was printing the wrong-template message and looking
-            # like a lookup miss.
-            template = jinja.get_template("ipxe.j2")
-            rendered = template.render(mac=normalised, machine=machine)
-            offer_kind = "local"
-            offer_summary = (
-                f"{normalised} offered local (exit to firmware) -- policy=local, no image bound"
-            )
-            offer_details = {"offer": "local", "bty_image_ref": None}
         else:
+            # Known machine that doesn't resolve to a chain: a flash
+            # policy with no image ref bound, or a stale/invalid
+            # boot_policy. ipxe_unknown.j2 sanboots the first disk
+            # (``sanboot --drive 0x80 || exit``), so the box still boots
+            # whatever it has rather than wedging on the network.
             template = jinja.get_template("ipxe_unknown.j2")
             rendered = template.render(mac=normalised, machine=machine)
             offer_kind = "unknown"
-            offer_summary = f"{normalised} offered local (sanboot) -- no bty_image_ref bound"
+            offer_summary = f"{normalised} offered sanboot/exit -- no bty_image_ref bound"
             offer_details = {"offer": "unknown"}
 
         # Audit every PXE hit. Cheap (one INSERT) and gives the
@@ -713,12 +694,12 @@ def create_app(
         # other ``/pxe/*`` endpoints.
         #
         # Always updates ``last_flashed_at`` + ``updated_at``. For
-        # ``boot_policy=bty-flash-once`` we also flip the policy to the
-        # configured settle policy here (``flash.settle_policy``,
-        # default ``local``) so the next PXE boot stops re-flashing (the
-        # box flashed, the operator's "one reimage please" is satisfied,
-        # leave it alone). ``flash`` stays ``flash`` -- the per-job CI
-        # cadence wants every PXE boot to reflash.
+        # ``boot_policy=bty-flash-once`` we also flip the policy to
+        # ``sanboot`` here so the next PXE boot stops re-flashing and
+        # boots the freshly-flashed disk (the box flashed, the
+        # operator's "one reimage please" is satisfied, leave it
+        # alone). ``bty-flash-always`` is unchanged -- the per-job CI
+        # cadence wants every cycle to reflash.
         normalised = _normalise_mac(mac)
         now = _now_iso()
         client_ip = _client_ip(request)
@@ -730,13 +711,14 @@ def create_app(
             flipped_from_flash_once = (
                 current is not None and current["boot_policy"] == "bty-flash-once"
             )
-            settle_policy = ""
             if flipped_from_flash_once:
-                settle_policy = _settings_store.resolve_flash_settle_policy(conn)
+                # Settle to sanboot: the box boots its freshly-flashed
+                # disk and stops reflashing. (sanboot is the only
+                # "boot the disk" policy; there is no separate local.)
                 cur = conn.execute(
                     "UPDATE machines SET last_flashed_at = ?, updated_at = ?, "
-                    "boot_policy = ? WHERE mac = ?",
-                    (now, now, settle_policy, normalised),
+                    "boot_policy = 'sanboot' WHERE mac = ?",
+                    (now, now, normalised),
                 )
             else:
                 cur = conn.execute(
@@ -749,11 +731,7 @@ def create_app(
                     kind="machine.flashed",
                     summary=(
                         f"{normalised} signalled flash completion"
-                        + (
-                            f" (bty-flash-once -> {settle_policy})"
-                            if flipped_from_flash_once
-                            else ""
-                        )
+                        + (" (bty-flash-once -> sanboot)" if flipped_from_flash_once else "")
                     ),
                     subject_kind="machine",
                     subject_id=normalised,
@@ -784,9 +762,10 @@ def create_app(
           ``tui``, OR a flash policy that can't be auto-resolved
           (no target serial, orphan ref). ``bty`` drops the operator
           into the wizard with the server's catalog pre-loaded.
-        * ``{"mode": "local"}`` -- boot_policy=local (or anything
-          unrecognised). ``bty`` exits cleanly; the firmware /
-          local-disk path handles boot.
+        * ``{"mode": "local"}`` -- boot_policy=sanboot (handled at the
+          iPXE layer, so the box doesn't reach the live env) or any
+          unrecognised policy. ``bty`` exits cleanly; the firmware /
+          sanboot path handles boot.
 
         Unknown MACs auto-register (matches the ``/pxe/{mac}`` iPXE
         endpoint) with boot_policy=bty-tui so a hand-launched ``bty
@@ -888,8 +867,10 @@ def create_app(
             plan = {"mode": "interactive", "catalog": f"{base}/catalog.toml"}
             offer_kind = "plan:interactive:tui"
         else:
-            # boot_policy=local (or any other / missing) -- ``bty``
-            # has nothing to do; let firmware / sanboot handle it.
+            # boot_policy=sanboot (or any other / missing) -- ``bty``
+            # has nothing to do (sanboot is handled at the iPXE layer,
+            # the box never chains into the live env); plan mode=local
+            # means "exit cleanly, let firmware / sanboot handle boot".
             plan = {"mode": "local"}
             offer_kind = f"plan:local:{policy}"
 

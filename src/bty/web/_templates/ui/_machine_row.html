@@ -22,7 +22,7 @@
         {% elif m.boot_policy == 'sanboot' %}
         <span class="badge bg-dark" title="iPXE boots the local disk itself"><i class="bi bi-hdd-fill me-1"></i>{{ m.boot_policy }}</span>
         {% else %}
-        <span class="badge bg-secondary" title="emit iPXE exit; firmware boot order picks the disk"><i class="bi bi-hdd me-1"></i>{{ m.boot_policy }}</span>
+        <span class="badge bg-secondary" title="unrecognised boot policy (stale record)"><i class="bi bi-hdd me-1"></i>{{ m.boot_policy }}</span>
         {% endif %}
     </td>
     <td>{{ m.hostname or "-" }}</td>

@@ -845,11 +845,11 @@ def test_e2e_pxe_done_failure_is_isolated_from_machine_state(
     r = app_client.post("/pxe/12:34:56:78:9a:bc/done")
     assert r.status_code in (200, 204), r.text
 
-    # Verify last_flashed_at populated + policy flipped to ``local``.
+    # Verify last_flashed_at populated + policy flipped to ``sanboot``.
     r = app_client.get("/machines/12:34:56:78:9a:bc", cookies=AUTH)
     assert r.status_code == 200, r.text
     m = r.json()
-    assert m["boot_policy"] == "local", m
+    assert m["boot_policy"] == "sanboot", m
     assert m["last_flashed_at"] is not None, m
 
 
@@ -1027,7 +1027,7 @@ def test_e2e_pxe_unknown_mac_then_inventory_then_flash_chain(
     r = app_client.post(f"/pxe/{mac}/done")
     assert r.status_code in (200, 204), r.text
     r = app_client.get(f"/machines/{mac}", cookies=AUTH)
-    assert r.json()["boot_policy"] == "local"
+    assert r.json()["boot_policy"] == "sanboot"
 
 
 def test_e2e_image_serve_routes_resolve_by_sha_or_filename(
@@ -1203,7 +1203,7 @@ def test_e2e_machine_put_is_full_replace_not_partial_update(
 ) -> None:
     """PUT /machines/<mac> is REST-spec full replace. A PUT with
     only ``{"hostname": ...}`` resets every other field to its
-    Pydantic default (bty_image_ref=None, boot_policy=local).
+    Pydantic default (bty_image_ref=None, boot_policy=sanboot).
 
     Pin the contract: the UI's machine-edit form sends every
     field every time precisely because the API is full-replace.
@@ -1266,7 +1266,7 @@ def test_e2e_machine_put_is_full_replace_not_partial_update(
     assert m["hostname"] == "second-name", m
     # Full-replace contract: omitted fields reset to defaults.
     assert m["bty_image_ref"] is None, m
-    assert m["boot_policy"] == "local", m
+    assert m["boot_policy"] == "sanboot", m
     assert m["target_disk_serial"] is None, m
 
     # The operator-correct way to update a single field is to

@@ -38,7 +38,7 @@
     <div class="card-header bg-light fw-semibold d-flex justify-content-between align-items-center flex-nowrap gap-2 py-1">
         <span class="text-nowrap"><i class="bi bi-pc-display me-1"></i>Machines</span>
         {# Minimal add-by-MAC: MAC only. boot_policy defaults to the
-           safe "local" (never a flash policy from here); hostname,
+           safe "sanboot" (never a flash policy from here); hostname,
            image binding + policy are set on the detail page. The
            upsert handler creates the row with discovered_at=NULL; it
            flips to first-seen on the box's first PXE contact. #}
@@ -48,7 +48,7 @@
                    id="add-mac" name="mac" style="max-width: 14rem; min-width: 0;"
                    pattern="^([0-9a-fA-F]{2}[:-]){5}[0-9a-fA-F]{2}$"
                    placeholder="aa:bb:cc:dd:ee:ff"
-                   title="Stage a machine by MAC before it boots; boot policy defaults to 'local' (set image + policy on the detail page)">
+                   title="Stage a machine by MAC before it boots; boot policy defaults to 'sanboot' (set image + policy on the detail page)">
             <button type="submit" class="btn btn-sm btn-primary flex-shrink-0 text-nowrap">
                 <i class="bi bi-plus-lg me-1"></i>Add
             </button>
@@ -100,11 +100,11 @@
         ev.preventDefault();
         var mac = document.getElementById("add-mac").value.trim().toLowerCase();
         var data = new FormData();
-        // Minimal: MAC only. boot_policy defaults to the safe "local"
+        // Minimal: MAC only. boot_policy defaults to the safe "sanboot"
         // (never a flash policy from this inline form); hostname +
         // image binding + policy are set on the machine's detail page.
         data.append("hostname", "");
-        data.append("boot_policy", "local");
+        data.append("boot_policy", "sanboot");
         fetch("/ui/machines/" + encodeURIComponent(mac), {
             method: "POST",
             credentials: "same-origin",

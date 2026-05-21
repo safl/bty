@@ -533,20 +533,20 @@ class BtyTui:
                 )
                 sys.exit(self._run_auto())
             if plan_action == "local":
-                # The server says nothing to do here (boot_policy=local
-                # or similar). Print a Panel so an operator hand-running
-                # ``bty --mac X`` from a workstation sees WHY the
-                # tool is exiting -- a silent ``sys.exit(0)`` looks
+                # The server says nothing to do here (boot_policy=sanboot
+                # or an unrecognised policy). Print a Panel so an operator
+                # hand-running ``bty --mac X`` from a workstation sees WHY
+                # the tool is exiting -- a silent ``sys.exit(0)`` looks
                 # like a crash. The live env never reaches this path:
-                # boot_policy=local short-circuits at the iPXE chain
-                # (sanboot directly, no live-env chain).
+                # sanboot short-circuits at the iPXE chain (boots the
+                # local disk directly, no live-env chain).
                 self._console.print(
                     Panel(
                         f"Server reports [{_ACCENT}]mode=local[/] for "
                         f"[{_PRIMARY}]{self._state.mac}[/] -- nothing for "
                         "bty to do here.\n\n"
-                        f"[{_MUTED}]boot_policy=local means the firmware / "
-                        "local disk boots directly; no flash, no wizard.[/]",
+                        f"[{_MUTED}]The firmware / local disk boots directly "
+                        "(sanboot or already provisioned); no flash, no wizard.[/]",
                         title="Plan: local boot",
                         border_style=_PRIMARY,
                     )

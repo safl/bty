@@ -1058,9 +1058,9 @@ def test_list_images_does_not_surface_bri_descriptors(tmp_path: Path) -> None:
 # ---------- boot policy + flash chain --------------------------
 
 
-def test_machine_default_boot_policy_is_local(app_client: TestClient) -> None:
-    """A fresh PUT without an explicit boot_policy gets ``local`` -
-    operators opt INTO reflashing on every boot."""
+def test_machine_default_boot_policy_is_sanboot(app_client: TestClient) -> None:
+    """A fresh PUT without an explicit boot_policy gets ``sanboot`` -
+    boot the local disk; operators opt INTO reflashing explicitly."""
     r = app_client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
         json={
@@ -1069,7 +1069,7 @@ def test_machine_default_boot_policy_is_local(app_client: TestClient) -> None:
         cookies=AUTH,
     )
     assert r.status_code == 200
-    assert r.json()["boot_policy"] == "local"
+    assert r.json()["boot_policy"] == "sanboot"
     assert r.json()["last_flashed_at"] is None
 
 
@@ -1204,12 +1204,12 @@ def test_machine_upsert_rejects_unknown_boot_policy(app_client: TestClient) -> N
     assert r.status_code == 422
 
 
-def test_pxe_local_policy_assigned_machine_returns_local_template(
+def test_pxe_default_sanboot_assigned_machine_returns_sanboot_template(
     app_client: TestClient,
 ) -> None:
-    """boot_policy=local + image assigned: emit iPXE exit (firmware boot
-    order decides), NOT the flash chain. Reflashing is opt-in via
-    boot_policy=flash, not implicit on assignment."""
+    """An image-assigned machine on the default boot_policy (sanboot):
+    iPXE boots the local disk, NOT the flash chain. Reflashing is
+    opt-in via a bty-flash-* policy, not implicit on assignment."""
     app_client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
         json={"bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"},
@@ -1218,7 +1218,8 @@ def test_pxe_local_policy_assigned_machine_returns_local_template(
     r = app_client.get("/pxe/aa:bb:cc:dd:ee:ff")
     assert r.status_code == 200
     body = r.text
-    # ipxe.j2 (placeholder local template) - explicitly NOT the flash chain
+    # ipxe_sanboot.j2 - explicitly NOT the flash chain
+    assert "sanboot" in body
     assert "kernel" not in body
     assert "bty.image_url" not in body
 
@@ -1328,14 +1329,15 @@ def test_pxe_plan_unknown_mac_auto_discovers_and_returns_interactive(
     assert row["boot_policy"] == "bty-tui"
 
 
-def test_pxe_plan_local_policy_returns_local(app_client: TestClient) -> None:
-    """``boot_policy=local`` -> ``mode=local`` so ``bty`` exits
-    cleanly and the firmware / local-disk path handles boot. The
-    operator's known-good appliance row stays untouched."""
+def test_pxe_plan_sanboot_policy_returns_local_mode(app_client: TestClient) -> None:
+    """``boot_policy=sanboot`` -> plan ``mode=local`` so ``bty`` exits
+    cleanly (sanboot is handled at the iPXE layer; the box never
+    reaches the live env). The plan ``mode`` token is a live-env
+    signal distinct from any boot_policy."""
     mac = "aa:bb:cc:dd:ee:ff"
     app_client.put(
         f"/machines/{mac}",
-        json={"boot_policy": "local"},
+        json={"boot_policy": "sanboot"},
         cookies=AUTH,
     )
     r = app_client.get(f"/pxe/{mac}/plan")
@@ -1535,11 +1537,10 @@ def test_pxe_flash_once_emits_flash_chain_like_flash(
     assert "bty_image_ref" in r.text or "bty_flash_key" in r.text
 
 
-def test_pxe_done_flips_flash_once_to_local(app_client: TestClient) -> None:
+def test_pxe_done_flips_flash_once_to_sanboot(app_client: TestClient) -> None:
     """``bty-flash-once`` is the one policy where the completion signal
-    mutates ``boot_policy``: it flips to the configured settle policy
-    (default ``local`` -> iPXE ``exit``, firmware boots the disk) so
-    the box stops reflashing itself."""
+    mutates ``boot_policy``: it flips to ``sanboot`` so the box boots
+    its freshly-flashed disk and stops reflashing itself."""
     app_client.put(
         "/machines/22:33:44:55:66:77",
         json={
@@ -1558,7 +1559,7 @@ def test_pxe_done_flips_flash_once_to_local(app_client: TestClient) -> None:
     after = app_client.get("/machines/22:33:44:55:66:77", cookies=AUTH).json()
     assert after["last_flashed_at"] is not None
     # The completion signal flipped the policy.
-    assert after["boot_policy"] == "local"
+    assert after["boot_policy"] == "sanboot"
 
 
 def test_pxe_sanboot_policy_returns_sanboot_template(app_client: TestClient) -> None:
@@ -1604,32 +1605,11 @@ def test_machine_upsert_rejects_malformed_sanboot_drive(app_client: TestClient) 
     assert r.status_code == 422
 
 
-def test_pxe_done_flash_once_settles_to_sanboot_when_configured(
-    app_client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The bty-flash-once settle policy is configurable: with
-    ``BTY_FLASH_SETTLE_POLICY=sanboot`` a completed bty-flash-once flips to
-    ``sanboot`` (bty boots the disk) instead of the default ``local``."""
-    monkeypatch.setenv("BTY_FLASH_SETTLE_POLICY", "sanboot")
-    app_client.put(
-        "/machines/aa:bb:cc:dd:ee:04",
-        json={
-            "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            "boot_policy": "bty-flash-once",
-        },
-        cookies=AUTH,
-    )
-    r = app_client.post("/pxe/aa:bb:cc:dd:ee:04/done")
-    assert r.status_code == 204
-    after = app_client.get("/machines/aa:bb:cc:dd:ee:04", cookies=AUTH).json()
-    assert after["boot_policy"] == "sanboot"
-
-
 def test_pxe_done_flash_once_second_call_is_idempotent(
     app_client: TestClient,
 ) -> None:
     """A second /pxe/{mac}/done call against a machine that already
-    flipped bty-flash-once -> local on the first call returns 204
+    flipped bty-flash-once -> sanboot on the first call returns 204
     cleanly without raising or re-flipping anything. Important
     for cosmic-ray retries from the live env (network blip
     between the flash signal and the rebooting kernel)."""
@@ -1641,15 +1621,15 @@ def test_pxe_done_flash_once_second_call_is_idempotent(
         },
         cookies=AUTH,
     )
-    # First /done flips to local + records the event.
+    # First /done flips to sanboot + records the event.
     r1 = app_client.post("/pxe/33:44:55:66:77:88/done")
     assert r1.status_code == 204
-    # Second /done: machine is now boot_policy=local; the handler
+    # Second /done: machine is now boot_policy=sanboot; the handler
     # still hits the UPDATE path and returns 204 cleanly.
     r2 = app_client.post("/pxe/33:44:55:66:77:88/done")
     assert r2.status_code == 204
     after = app_client.get("/machines/33:44:55:66:77:88", cookies=AUTH).json()
-    assert after["boot_policy"] == "local"
+    assert after["boot_policy"] == "sanboot"
     # Two flash events recorded -- one per /done call. The audit
     # trail captures the retry; the operator can see "this box
     # signalled twice in quick succession".
@@ -1665,8 +1645,8 @@ def test_pxe_done_flash_once_second_call_is_idempotent(
     assert len(events) == 2
     # First event's summary mentions the flip; second doesn't.
     summaries = [e["summary"] for e in events]
-    assert any("bty-flash-once -> local" in s for s in summaries)
-    assert sum(1 for s in summaries if "bty-flash-once -> local" in s) == 1
+    assert any("bty-flash-once -> sanboot" in s for s in summaries)
+    assert sum(1 for s in summaries if "bty-flash-once -> sanboot" in s) == 1
 
 
 def test_pxe_inventory_persists_disks_and_logs_event(app_client: TestClient) -> None:
@@ -1837,7 +1817,7 @@ def test_machines_upsert_accepts_target_disk_serial(app_client: TestClient) -> N
     r = app_client.put(
         "/machines/aa:bb:cc:dd:ee:ee",
         json={
-            "boot_policy": "local",
+            "boot_policy": "sanboot",
             "target_disk_serial": "Z9YHHRWZ",
         },
         cookies=AUTH,
@@ -2003,11 +1983,11 @@ def test_pxe_hit_records_pxe_offered_event(app_client: TestClient) -> None:
     which template was returned. Gives the operator a full timeline
     of "client X showed up, server handed back Y" without enabling
     debug logging."""
-    # Bind a machine in flash mode so we get a non-tui offer.
+    # Bind a machine on sanboot so we get a non-tui offer.
     ref = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
     app_client.put(
         "/machines/aa:bb:cc:dd:ee:f0",
-        json={"bty_image_ref": ref, "boot_policy": "local"},
+        json={"bty_image_ref": ref, "boot_policy": "sanboot"},
         cookies=AUTH,
     )
     app_client.get("/pxe/aa:bb:cc:dd:ee:f0")
@@ -2027,8 +2007,8 @@ def test_pxe_hit_records_pxe_offered_event(app_client: TestClient) -> None:
     assert ev["kind"] == "pxe.offered"
     assert ev["subject_id"] == "aa:bb:cc:dd:ee:f0"
     assert ev["actor"] == "pxe-client"
-    assert ev["details"]["offer"] == "local"
-    assert ev["details"]["boot_policy"] == "local"
+    assert ev["details"]["offer"] == "sanboot"
+    assert ev["details"]["boot_policy"] == "sanboot"
 
 
 def test_pxe_hit_records_tui_offer_for_unknown_mac(app_client: TestClient) -> None:
@@ -2178,7 +2158,7 @@ def test_events_carry_source_ip(app_client: TestClient) -> None:
     """
     mac = "aa:bb:cc:dd:ee:fe"
     app_client.get(f"/pxe/{mac}")
-    app_client.put(f"/machines/{mac}", json={"boot_policy": "local"}, cookies=AUTH)
+    app_client.put(f"/machines/{mac}", json={"boot_policy": "sanboot"}, cookies=AUTH)
     r = app_client.get("/events", cookies=AUTH)
     assert r.status_code == 200
     by_kind = {e["kind"]: e for e in r.json()["events"]}
@@ -2235,7 +2215,7 @@ def test_events_filter_by_actor(app_client: TestClient) -> None:
     app_client.get(f"/pxe/{mac}")  # pxe-client: machine.discovered
     app_client.put(  # operator: machine.upserted
         f"/machines/{mac}",
-        json={"boot_policy": "local"},
+        json={"boot_policy": "sanboot"},
         cookies=AUTH,
     )
     r = app_client.get("/events", params={"actor": "operator"}, cookies=AUTH)
@@ -2428,7 +2408,7 @@ def test_ui_events_page_footer_shows_filtered_when_filter_active(
     app_client.get("/pxe/aa:bb:cc:dd:ee:f9")
     app_client.put(
         "/machines/aa:bb:cc:dd:ee:f9",
-        json={"boot_policy": "local"},
+        json={"boot_policy": "sanboot"},
         cookies=AUTH,
     )
     # Unfiltered view: no "(filtered)" suffix.

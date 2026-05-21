@@ -38,17 +38,6 @@ KEY_RELEASE_TAG = "upstream.release_tag"
 
 DEFAULT_RELEASE_TAG = "latest"
 
-# Which boot_policy a ``bty-flash-once`` machine settles into once its
-# flash completes (``POST /pxe/{mac}/done``): ``local`` (emit iPXE
-# ``exit`` and let the firmware boot order pick the disk) or ``sanboot``
-# (have iPXE boot the local disk itself). Override -> env -> default.
-KEY_FLASH_SETTLE_POLICY = "flash.settle_policy"
-ENV_FLASH_SETTLE_POLICY = "BTY_FLASH_SETTLE_POLICY"
-DEFAULT_FLASH_SETTLE_POLICY = "local"
-# The policies a bty-flash-once machine may settle into. Anything else
-# (typo in the env var / DB) resolves back to the default.
-FLASH_SETTLE_POLICIES = ("local", "sanboot")
-
 
 def get(conn: sqlite3.Connection, key: str) -> str | None:
     """Return the stored override for ``key``, or ``None`` if unset."""
@@ -103,24 +92,3 @@ def resolve_release_tag(conn: sqlite3.Connection) -> str:
     """The effective netboot release tag to fetch: override ->
     :data:`DEFAULT_RELEASE_TAG` (``latest``)."""
     return get(conn, KEY_RELEASE_TAG) or DEFAULT_RELEASE_TAG
-
-
-def default_flash_settle_policy() -> str:
-    """The bty-flash-once settle policy from the environment, else the
-    built-in default (ignores any DB override). Falls back to the
-    default if the env value isn't a recognised policy."""
-    value = os.environ.get(ENV_FLASH_SETTLE_POLICY)
-    if value in FLASH_SETTLE_POLICIES:
-        return value
-    return DEFAULT_FLASH_SETTLE_POLICY
-
-
-def resolve_flash_settle_policy(conn: sqlite3.Connection) -> str:
-    """The boot_policy a ``bty-flash-once`` machine settles into on flash
-    completion: override -> env -> default. An unrecognised override
-    (typo / stale value) resolves back to the env / built-in default so
-    a bad setting can never wedge a machine into an invalid policy."""
-    override = get(conn, KEY_FLASH_SETTLE_POLICY)
-    if override in FLASH_SETTLE_POLICIES:
-        return override
-    return default_flash_settle_policy()

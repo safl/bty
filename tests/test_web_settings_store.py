@@ -1,13 +1,9 @@
 """Tests for ``bty.web._settings_store``.
 
-The settle-policy resolver (``resolve_flash_settle_policy`` /
-``default_flash_settle_policy``) is the one knob that decides what a
-``bty-flash-once`` machine boots into after it has been imaged. It was
-covered only indirectly (one ``BTY_FLASH_SETTLE_POLICY=sanboot`` env
-case in test_web.py's PXE flow). These pin the resolution layer
-directly: the override -> env -> default precedence, and -- the part
-with no other coverage -- the safety fallback where a typo'd override
-or env value can never wedge a machine into an invalid policy.
+Direct unit coverage of the upstream-source resolvers (override -> env
+-> default precedence). These back the Settings page's "Upstream
+sources" controls; getting the precedence wrong silently points the
+catalog / release fetch at the wrong place.
 """
 
 from __future__ import annotations
@@ -18,6 +14,7 @@ from pathlib import Path
 import pytest
 
 from bty.web import _db, _settings_store
+from bty.web._releases import DEFAULT_REPO, ENV_RELEASE_REPO
 
 
 def _conn(tmp_path: Path) -> sqlite3.Connection:
@@ -26,64 +23,61 @@ def _conn(tmp_path: Path) -> sqlite3.Connection:
     return sqlite3.connect(state)
 
 
-def test_default_when_nothing_set(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """No override, no env -> the built-in default (``local``)."""
-    monkeypatch.delenv(_settings_store.ENV_FLASH_SETTLE_POLICY, raising=False)
+def test_release_repo_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """No override, no env -> the built-in default repo."""
+    monkeypatch.delenv(ENV_RELEASE_REPO, raising=False)
     with _conn(tmp_path) as conn:
-        assert _settings_store.resolve_flash_settle_policy(conn) == "local"
-    assert _settings_store.DEFAULT_FLASH_SETTLE_POLICY == "local"
+        assert _settings_store.resolve_release_repo(conn) == DEFAULT_REPO
 
 
-def test_env_overrides_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A recognised env value wins over the built-in default."""
-    monkeypatch.setenv(_settings_store.ENV_FLASH_SETTLE_POLICY, "sanboot")
+def test_release_repo_env_overrides_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(ENV_RELEASE_REPO, "acme/widgets")
     with _conn(tmp_path) as conn:
-        assert _settings_store.resolve_flash_settle_policy(conn) == "sanboot"
-    assert _settings_store.default_flash_settle_policy() == "sanboot"
+        assert _settings_store.resolve_release_repo(conn) == "acme/widgets"
 
 
-def test_db_override_wins_over_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A stored override takes precedence over the env layer."""
-    monkeypatch.setenv(_settings_store.ENV_FLASH_SETTLE_POLICY, "local")
+def test_release_repo_db_override_wins_over_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(ENV_RELEASE_REPO, "acme/widgets")
     with _conn(tmp_path) as conn:
-        _settings_store.set_value(conn, _settings_store.KEY_FLASH_SETTLE_POLICY, "sanboot")
-        assert _settings_store.resolve_flash_settle_policy(conn) == "sanboot"
+        _settings_store.set_value(conn, _settings_store.KEY_RELEASE_REPO, "other/repo")
+        assert _settings_store.resolve_release_repo(conn) == "other/repo"
 
 
-def test_bad_env_falls_back_to_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """An unrecognised env value (typo) resolves to the default rather
-    than propagating an invalid policy."""
-    monkeypatch.setenv(_settings_store.ENV_FLASH_SETTLE_POLICY, "bty-flash-always")
-    assert _settings_store.default_flash_settle_policy() == "local"
+def test_catalog_url_derives_from_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """With no explicit catalog override, the URL is built from the
+    effective release repo."""
+    monkeypatch.setenv(ENV_RELEASE_REPO, "acme/widgets")
     with _conn(tmp_path) as conn:
-        assert _settings_store.resolve_flash_settle_policy(conn) == "local"
+        url = _settings_store.resolve_catalog_url(conn)
+    assert url == "https://github.com/acme/widgets/releases/latest/download/catalog.toml"
 
 
-def test_bad_override_falls_back_to_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """An unrecognised stored override falls back through to the env
-    layer (not silently honoured) so a bad setting can never wedge a
-    machine into an invalid boot policy."""
-    monkeypatch.setenv(_settings_store.ENV_FLASH_SETTLE_POLICY, "sanboot")
+def test_catalog_url_explicit_override_wins(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(ENV_RELEASE_REPO, "acme/widgets")
     with _conn(tmp_path) as conn:
-        _settings_store.set_value(conn, _settings_store.KEY_FLASH_SETTLE_POLICY, "garbage")
-        # bad override -> skip -> env layer -> "sanboot"
-        assert _settings_store.resolve_flash_settle_policy(conn) == "sanboot"
+        _settings_store.set_value(
+            conn, _settings_store.KEY_CATALOG_URL, "https://example.test/catalog.toml"
+        )
+        assert _settings_store.resolve_catalog_url(conn) == "https://example.test/catalog.toml"
 
 
-def test_clear_reverts_to_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Clearing the override reverts resolution to the env / default."""
-    monkeypatch.delenv(_settings_store.ENV_FLASH_SETTLE_POLICY, raising=False)
+def test_release_tag_default_and_override(tmp_path: Path) -> None:
     with _conn(tmp_path) as conn:
-        _settings_store.set_value(conn, _settings_store.KEY_FLASH_SETTLE_POLICY, "sanboot")
-        assert _settings_store.resolve_flash_settle_policy(conn) == "sanboot"
-        _settings_store.clear(conn, _settings_store.KEY_FLASH_SETTLE_POLICY)
-        assert _settings_store.resolve_flash_settle_policy(conn) == "local"
+        assert _settings_store.resolve_release_tag(conn) == _settings_store.DEFAULT_RELEASE_TAG
+        _settings_store.set_value(conn, _settings_store.KEY_RELEASE_TAG, "v1.2.3")
+        assert _settings_store.resolve_release_tag(conn) == "v1.2.3"
 
 
-def test_settle_policies_are_a_subset_of_boot_policies() -> None:
-    """Every value a machine can settle into must be a real boot policy
-    -- otherwise the flip on ``POST /pxe/{mac}/done`` would write a
-    policy the PXE handler can't serve."""
-    from bty.web._models import BOOT_POLICIES
-
-    assert set(_settings_store.FLASH_SETTLE_POLICIES) <= set(BOOT_POLICIES)
+def test_clear_reverts_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv(ENV_RELEASE_REPO, raising=False)
+    with _conn(tmp_path) as conn:
+        _settings_store.set_value(conn, _settings_store.KEY_RELEASE_REPO, "other/repo")
+        assert _settings_store.resolve_release_repo(conn) == "other/repo"
+        _settings_store.clear(conn, _settings_store.KEY_RELEASE_REPO)
+        assert _settings_store.resolve_release_repo(conn) == DEFAULT_REPO

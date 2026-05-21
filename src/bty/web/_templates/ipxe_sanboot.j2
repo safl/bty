@@ -14,8 +14,8 @@
 # matches on, so this is distinct from ``target_disk_serial``.
 #
 # ``|| exit`` is the safety net: if the drive isn't bootable (wrong
-# number, empty disk), control falls back to the firmware boot order
-# exactly as ``boot_policy=local`` would.
+# number, empty disk), iPXE exits and control falls back to the
+# firmware boot order.
 
 echo bty: {{ mac }} boot_policy=sanboot, booting local drive {{ drive }}
 sleep 1

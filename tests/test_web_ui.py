@@ -708,9 +708,9 @@ def test_ui_machines_list_has_inline_add_form(client: TestClient) -> None:
     assert 'href="/ui/machines?section=add"' not in body
 
 
-def test_ui_machines_inline_add_defaults_to_safe_local_policy(client: TestClient) -> None:
+def test_ui_machines_inline_add_defaults_to_safe_sanboot_policy(client: TestClient) -> None:
     """The minimal inline add field stages a row by MAC only and
-    submits ``boot_policy=local`` -- never a flash policy (which
+    submits ``boot_policy=sanboot`` -- never a flash policy (which
     would need a target_disk_serial the box only reports after its
     first PXE check-in). Image binding + policy are set on the
     detail page.
@@ -718,7 +718,7 @@ def test_ui_machines_inline_add_defaults_to_safe_local_policy(client: TestClient
     _login(client)
     body = client.get("/ui/machines").text
     # The submit JS hardcodes the safe default.
-    assert '"boot_policy", "local"' in body
+    assert '"boot_policy", "sanboot"' in body
     # No flash policy is offered/sent from the inline add.
     assert '"boot_policy", "bty-flash-always"' not in body
 
@@ -960,7 +960,7 @@ def test_ui_machine_upsert_form_rejects_non_hex_sha256(client: TestClient) -> No
         "/ui/machines/aa:bb:cc:dd:ee:ff",
         data={
             "bty_image_ref": "not-a-real-sha-just-garbage",
-            "boot_policy": "local",
+            "boot_policy": "sanboot",
         },
         follow_redirects=False,
     )
@@ -1050,8 +1050,8 @@ def test_ui_machine_upsert_via_form(client: TestClient) -> None:
         == "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
     )
     assert api.json()["hostname"] == "bty-ui-test"
-    # Form omits boot_policy -> dependency default applies (local).
-    assert api.json()["boot_policy"] == "local"
+    # Form omits boot_policy -> dependency default applies (sanboot).
+    assert api.json()["boot_policy"] == "sanboot"
 
 
 def test_ui_machine_upsert_persists_boot_policy_flash(client: TestClient) -> None:
@@ -1135,7 +1135,7 @@ def test_ui_machine_detail_renders_no_inventory_warning(client: TestClient) -> N
     # Seed a machine record without ever posting inventory.
     client.put(
         "/machines/aa:bb:cc:dd:ee:89",
-        json={"boot_policy": "local"},
+        json={"boot_policy": "sanboot"},
         cookies=AUTH,
     )
     r = client.get("/ui/machines/aa:bb:cc:dd:ee:89", cookies=AUTH)
@@ -1162,7 +1162,7 @@ def test_ui_machine_upsert_refuses_flash_without_target_disk(client: TestClient)
         "/machines/aa:bb:cc:dd:ee:ff",
         json={
             "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            "boot_policy": "local",
+            "boot_policy": "sanboot",
         },
         cookies=AUTH,
     )
@@ -1179,7 +1179,7 @@ def test_ui_machine_upsert_refuses_flash_without_target_disk(client: TestClient)
     assert "/ui/machines/aa:bb:cc:dd:ee:ff?error=" in r.headers["location"]
     api = client.get("/machines/aa:bb:cc:dd:ee:ff", cookies=AUTH).json()
     # Safety gate: didn't flip to flash.
-    assert api["boot_policy"] == "local"
+    assert api["boot_policy"] == "sanboot"
     assert api["target_disk_serial"] is None
 
 
@@ -1218,7 +1218,7 @@ def test_ui_machine_detail_renders_boot_policy_dropdown(client: TestClient) -> N
     body = r.text
     assert 'name="boot_policy"' in body
     # Both options present, current value selected.
-    assert ">local</option>" in body
+    assert ">sanboot</option>" in body
     assert ">bty-flash-always</option>" in body
     assert 'value="bty-flash-always" selected' in body
 
@@ -1389,7 +1389,7 @@ def test_ui_machines_list_shows_boot_policy_badge(client: TestClient) -> None:
         "/machines/11:22:33:44:55:66",
         json={
             "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            "boot_policy": "local",
+            "boot_policy": "sanboot",
         },
         cookies=AUTH,
     )
@@ -1411,7 +1411,7 @@ def test_ui_machines_list_shows_boot_policy_badge(client: TestClient) -> None:
     # text is the full policy name).
     assert "bg-danger" in body and ">bty-flash-always<" in body
     assert ">bty-flash-once<" in body  # the bg-warning variant
-    assert "bg-secondary" in body and ">local<" in body
+    assert "bg-dark" in body and ">sanboot<" in body
     assert "bg-info text-dark" in body and ">bty-tui<" in body
     # Table header has Boot column + Last flashed column.
     assert ">Boot</th>" in body

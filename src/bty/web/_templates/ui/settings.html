@@ -9,8 +9,6 @@
         <span class="subnav-jumps d-flex align-items-center flex-wrap">
             <a href="#upstream-sources">Upstream sources</a>
             <span class="vr"></span>
-            <a href="#flash-behaviour">Flash behaviour</a>
-            <span class="vr"></span>
             <a href="#settings-identity">Identity</a>
             <span class="vr"></span>
             <a href="#settings-storage-paths">Storage paths</a>
@@ -88,37 +86,6 @@
             </button>
             <span class="form-text small ms-2">Clear a field to revert it to the default.</span>
         </form>
-    </div>
-</div>
-
-{# Editable: what a bty-flash-once machine settles into once it finishes
-   flashing. #}
-<div class="card mb-4" id="flash-behaviour">
-    <div class="card-header bg-light fw-semibold">
-        <i class="bi bi-lightning-charge me-1"></i>Flash behaviour
-    </div>
-    <div class="card-body">
-        <form method="post" action="/ui/settings/flash" class="d-flex align-items-end gap-2 flex-wrap">
-            <div>
-                <label for="settle_policy" class="form-label">Flash-once settle policy</label>
-                <select name="settle_policy" id="settle_policy" class="form-select">
-                    {% for choice in flash_settle.choices %}
-                    <option value="{{ choice }}" {% if choice == flash_settle.policy %}selected{% endif %}>{{ choice }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <button type="submit" class="btn btn-primary">
-                <i class="bi bi-save me-1"></i>Save
-            </button>
-        </form>
-        <div class="form-text small mt-2">
-            Which <code>boot_policy</code> a <code>bty-flash-once</code> machine drops
-            into once the live env signals flash completion:
-            <code>local</code> (emit iPXE <code>exit</code> and let the firmware
-            boot order pick the disk) or <code>sanboot</code> (have iPXE boot the
-            local disk itself). Effective: <code>{{ flash_settle.policy }}</code>{% if not flash_settle.override %}
-            (default; via <code>{{ flash_settle.default }}</code>){% endif %}.
-        </div>
     </div>
 </div>
 

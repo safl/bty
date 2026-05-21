@@ -24,25 +24,24 @@ MAC_PATTERN = r"^[0-9a-f]{2}(:[0-9a-f]{2}){5}$"
 
 # Boot-policy values: what ``GET /pxe/{mac}`` returns.
 #
-# - ``local`` emits iPXE ``exit``: control returns to the firmware,
-#   which boots the next device in its BIOS/UEFI boot order. Use when
-#   STORAGE sits after PXE in the firmware boot order. This is the
-#   explicit-PUT default for assigned machines.
 # - ``sanboot`` emits ``sanboot --drive <sanboot_drive> || exit``: iPXE
 #   boots the local disk itself (default ``0x80`` = first BIOS disk),
-#   falling back to ``exit`` (firmware order) if it can't. Use when
-#   you'd rather bty drive the local boot than depend on the firmware
-#   order. The drive is a per-machine override (``sanboot_drive``);
-#   iPXE selects by BIOS drive number, not by Linux serial.
+#   falling back to ``exit`` (firmware boot order) if it can't. This is
+#   the way bty boots an already-provisioned machine, and the
+#   explicit-PUT default. The drive is a per-machine override
+#   (``sanboot_drive``); iPXE selects by BIOS drive number, not by
+#   Linux serial. (There is no separate ``local`` policy: a bare
+#   ``exit`` is just ``sanboot``'s fallback, and the no-assignment /
+#   error paths emit it internally.)
 # - ``bty-flash-always`` returns the live-env chain so the box
-#   re-flashes itself on every PXE boot (per-job CI cadence).
+#   re-flashes itself, then sanboots the just-flashed disk before the
+#   next reflash (per-job CI cadence; see ``saw_flasher_boot``).
 # - ``bty-flash-once`` returns the live-env flash chain just like
 #   ``bty-flash-always``, but the completion signal
-#   (``POST /pxe/{mac}/done``) flips the policy to the configured settle
-#   policy (``flash.settle_policy``, default ``local``) so the box
-#   doesn't re-flash on the next boot. For "I want this machine reimaged
-#   now, then leave it alone" -- distinct from ``bty-flash-always``
-#   which is "reimage on every PXE boot".
+#   (``POST /pxe/{mac}/done``) flips the policy to ``sanboot`` so the
+#   box boots its freshly-flashed disk and stops re-flashing. For "I
+#   want this machine reimaged now, then leave it alone" -- distinct
+#   from ``bty-flash-always`` which reimages on every netboot cycle.
 # - ``bty-tui`` returns the live-env chain. ``bty`` on tty1 GETs
 #   /pxe/<mac>/plan and (for boot_policy=bty-tui) drops the operator
 #   into the wizard so they can pick an image from the server's
@@ -50,14 +49,14 @@ MAC_PATTERN = r"^[0-9a-f]{2}(:[0-9a-f]{2}){5}$"
 #   unknown MACs that PXE-boot through the server.
 #
 # The ``bty-*`` prefix marks the policies that PXE-boot into bty's own
-# live env; ``local`` / ``sanboot`` boot elsewhere.
+# live env; ``sanboot`` boots the local disk.
 #
 # Completion signal (``POST /pxe/{mac}/done``) updates
 # ``last_flashed_at`` regardless of policy; it only mutates
-# ``boot_policy`` for ``bty-flash-once`` (-> the settle policy).
+# ``boot_policy`` for ``bty-flash-once`` (-> ``sanboot``).
 # ``bty-flash-always`` is unchanged so the per-job CI cadence reflashes
-# every boot.
-BOOT_POLICIES = ("local", "sanboot", "bty-flash-always", "bty-flash-once", "bty-tui")
+# every cycle.
+BOOT_POLICIES = ("sanboot", "bty-flash-always", "bty-flash-once", "bty-tui")
 
 # iPXE BIOS drive selector the ``sanboot`` policy boots: ``0x80`` is the
 # first disk, ``0x81`` the second, and so on. The sensible default; a
@@ -72,7 +71,7 @@ class MachineUpsert(BaseModel):
     """Request body for ``PUT /machines/{mac}``.
 
     All fields are optional except for the implicit ``mac`` from the
-    path; ``boot_policy`` defaults to ``"local"``. Binding targets
+    path; ``boot_policy`` defaults to ``"sanboot"``. Binding targets
     ``bty_image_ref`` (a stable provenance ID derived as
     ``sha256(canonicalise_src(src))``) rather than the content sha,
     so URL-only and rolling-tag oras entries are bindable; rename or
