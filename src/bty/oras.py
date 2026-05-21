@@ -231,28 +231,22 @@ def _urlopen_retry(req: urllib.request.Request | str, *, timeout: float) -> byte
     raise last
 
 
-def fetch_anonymous_token(host: str, repository: str, *, timeout: float = 30.0) -> str:
-    """Grab an anonymous bearer token for ``repository:pull``.
+def parse_www_authenticate(header: str) -> dict[str, str]:
+    """Parse an OCI ``WWW-Authenticate: Bearer realm="...",service="...",
+    scope="..."`` challenge into a dict of its (lower-cased) params.
 
-    Spec-compliant OCI v2 registries (GHCR included) expose a
-    ``/token`` endpoint that accepts unauthenticated GETs for public
-    packages and returns a short-lived bearer in the response body.
-    No credentials, no PAT, no signup. The token scope is read-only
-    and repository-specific.
+    Returns ``{}`` for a non-Bearer or unparseable challenge so callers
+    can treat "no usable challenge" uniformly.
     """
-    url = (
-        f"https://{host}/token?service={host}"
-        f"&scope=repository:{urllib.parse.quote(repository, safe='/')}:pull"
-    )
-    try:
-        payload = json.loads(_urlopen_retry(url, timeout=timeout))
-    except (OSError, json.JSONDecodeError, ValueError) as exc:
-        # ``OSError`` covers ``URLError`` (its subclass) plus the raw
-        # connection failures urllib re-raises through it on some
-        # platforms; tests also patch in a plain ``OSError`` to
-        # simulate "registry unreachable" without constructing a
-        # full URLError. Transient 429/5xx were already retried.
-        raise OrasError(f"oras token fetch failed for {host}/{repository}: {exc}") from exc
+    header = header.strip()
+    if header[:7].lower() != "bearer ":
+        return {}
+    return {m.group(1).lower(): m.group(2) for m in re.finditer(r'(\w+)="([^"]*)"', header[7:])}
+
+
+def _token_from_endpoint(url: str, host: str, repository: str, *, timeout: float) -> str:
+    """GET a token endpoint and extract the bearer. Raises OrasError."""
+    payload = json.loads(_urlopen_retry(url, timeout=timeout))
     # OCI registries return ``token``; some spell it ``access_token``.
     token = payload.get("token") or payload.get("access_token")
     if not isinstance(token, str) or not token:
@@ -261,6 +255,65 @@ def fetch_anonymous_token(host: str, repository: str, *, timeout: float = 30.0) 
             f"a token (keys: {sorted(payload.keys())})"
         )
     return token
+
+
+def _discover_bearer_challenge(host: str, *, timeout: float) -> dict[str, str]:
+    """Probe ``GET https://{host}/v2/`` and return the parsed Bearer
+    challenge from the 401 response's ``WWW-Authenticate`` header.
+
+    The spec-compliant way to find a registry's token endpoint when it
+    isn't the GHCR-convention ``https://<host>/token`` (Docker Hub uses
+    ``auth.docker.io``, e.g.). Returns ``{}`` if the registry answers
+    200 (no auth) or sends no usable challenge."""
+    req = urllib.request.Request(f"https://{host}/v2/", method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout):
+            return {}  # 200: no auth challenge to discover
+    except urllib.error.HTTPError as exc:
+        if exc.code != 401 or exc.headers is None:
+            return {}
+        return parse_www_authenticate(exc.headers.get("WWW-Authenticate", ""))
+    except (urllib.error.URLError, TimeoutError, OSError):
+        return {}
+
+
+def fetch_anonymous_token(host: str, repository: str, *, timeout: float = 30.0) -> str:
+    """Grab an anonymous bearer token for ``repository:pull``.
+
+    Spec-compliant OCI v2 registries expose a token endpoint that mints
+    short-lived anonymous bearers for public packages (no creds, no
+    PAT). Two-step:
+
+    1. Try the GHCR / oras.land convention ``https://<host>/token`` --
+       one request for the common case.
+    2. If that fails, fall back to the spec discovery: ping
+       ``GET /v2/``, read the realm advertised in the ``WWW-Authenticate``
+       Bearer challenge, and fetch from there. This covers registries
+       whose token endpoint isn't ``<host>/token`` (Docker Hub ->
+       ``auth.docker.io``, Quay's custom realm, etc.).
+    """
+    scope = f"repository:{urllib.parse.quote(repository, safe='/')}:pull"
+    conv_url = f"https://{host}/token?service={host}&scope={scope}"
+    try:
+        return _token_from_endpoint(conv_url, host, repository, timeout=timeout)
+    except (OSError, json.JSONDecodeError, ValueError, OrasError) as conv_exc:
+        # Convention failed -- try spec discovery before giving up.
+        challenge = _discover_bearer_challenge(host, timeout=timeout)
+        realm = challenge.get("realm")
+        if realm:
+            service = challenge.get("service", host)
+            disc_url = f"{realm}?service={urllib.parse.quote(service, safe='')}&scope={scope}"
+            try:
+                return _token_from_endpoint(disc_url, host, repository, timeout=timeout)
+            except (OSError, json.JSONDecodeError, ValueError, OrasError) as exc:
+                raise OrasError(
+                    f"oras token fetch failed for {host}/{repository} via discovered "
+                    f"realm {realm}: {exc}"
+                ) from exc
+        # No usable discovery -- surface the original conventional error.
+        raise OrasError(
+            f"oras token fetch failed for {host}/{repository}: {conv_exc}"
+        ) from conv_exc
 
 
 def fetch_manifest(ref: OrasRef, token: str, *, timeout: float = 30.0) -> dict[str, Any]:

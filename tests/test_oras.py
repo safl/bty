@@ -367,3 +367,47 @@ def test_fetch_anonymous_token_rides_through_transient_503(monkeypatch: Any) -> 
     monkeypatch.setattr("urllib.request.urlopen", _flaky)
     assert oras.fetch_anonymous_token("ghcr.io", "owner/repo") == "tok"
     assert calls["n"] == 2
+
+
+# ---------- auth-realm discovery (WWW-Authenticate) ---------------------------
+
+
+def test_parse_www_authenticate_bearer() -> None:
+    params = oras.parse_www_authenticate(
+        'Bearer realm="https://a/token",service="svc",scope="repository:x:pull"'
+    )
+    assert params["realm"] == "https://a/token"
+    assert params["service"] == "svc"
+    assert params["scope"] == "repository:x:pull"
+
+
+def test_parse_www_authenticate_ignores_non_bearer() -> None:
+    assert oras.parse_www_authenticate('Basic realm="x"') == {}
+    assert oras.parse_www_authenticate("") == {}
+
+
+def test_fetch_anonymous_token_discovers_realm_when_convention_fails(monkeypatch: Any) -> None:
+    """When the conventional <host>/token 404s, discover the token
+    realm from the /v2/ Bearer challenge and fetch from there (the
+    Docker-Hub-style auth.<vendor> realm case)."""
+    monkeypatch.setattr(oras.time, "sleep", lambda *_a: None)
+    realm = "https://auth.example.io/token"
+
+    def _fake(req: Any, timeout: Any = None) -> Any:
+        url = req if isinstance(req, str) else req.full_url
+        if url.startswith("https://reg.example.io/token"):
+            raise _http_error(404)  # no conventional /token here
+        if url == "https://reg.example.io/v2/":
+            raise urllib.error.HTTPError(
+                url,
+                401,
+                "unauthorized",
+                {"WWW-Authenticate": f'Bearer realm="{realm}",service="reg.example.io"'},  # type: ignore[arg-type]
+                None,
+            )
+        if url.startswith(realm):
+            return _BytesResp(json.dumps({"token": "disc-tok"}).encode())
+        raise AssertionError(f"unexpected URL in test: {url}")
+
+    monkeypatch.setattr("urllib.request.urlopen", _fake)
+    assert oras.fetch_anonymous_token("reg.example.io", "owner/repo") == "disc-tok"
