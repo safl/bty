@@ -1,4 +1,4 @@
-"""System-config helpers for the ``/ui/boot`` page (DHCP / PXE +
+"""System-config helpers for the ``/ui/netboot`` page (DHCP / PXE +
 TFTP daemon sub-sections).
 
 What's here:

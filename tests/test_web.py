@@ -2308,7 +2308,7 @@ def test_events_filter_failed_only_returns_only_failure_kinds(
 
     monkeypatch.setattr(_releases, "fetch_release", _explode)
     app_client.post(
-        "/ui/boot/fetch-release",
+        "/ui/netboot/fetch-release",
         data={"tag": "v0.0.0"},
         cookies=AUTH,
         follow_redirects=False,
@@ -2562,7 +2562,7 @@ def test_ui_events_page_renders_failure_with_danger_badge(
 
     monkeypatch.setattr(_releases, "fetch_release", _explode)
     app_client.post(
-        "/ui/boot/fetch-release",
+        "/ui/netboot/fetch-release",
         data={"tag": "v0.0.0"},
         cookies=AUTH,
         follow_redirects=False,
@@ -3619,7 +3619,7 @@ def test_release_fetch_unknown_extra_field_422(app_client: TestClient) -> None:
 
 def test_release_fetch_manager_backfills_from_events(tmp_path: Path) -> None:
     """The manager's in-memory ``_states`` dies on restart, which
-    made the /ui/boot "Active + recent fetches" table show "No
+    made the /ui/netboot "Active + recent fetches" table show "No
     fetches yet." even when artifacts were clearly present on
     disk. The fix backfills from boot.release.fetched /
     boot.release.fetch_failed events on ``start()``.

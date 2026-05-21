@@ -186,7 +186,7 @@ Tty1 ends up showing something like:
 
   Configure your LAN DHCP server to point PXE clients at this
   appliance (option 60 = "PXEClient", option 66 = this IP,
-  option 67 = "ipxe.efi"). See /ui/boot for the cheatsheet.
+  option 67 = "ipxe.efi"). See /ui/netboot for the cheatsheet.
 ======================================================================
 
 bty 0.8.2 on bty-server (tty1)
@@ -216,7 +216,7 @@ Initial UI tour:
   / `*.img.bz2` / `*.qcow2` images via PUT or drag-and-drop.
   These end up under `/var/lib/bty/images/` on the server and
   get streamed to targets at flash time.
-- **`/ui/boot`** (Netboot) - the netboot artifacts inventory
+- **`/ui/netboot`** (Netboot) - the netboot artifacts inventory
   (`vmlinuz` / `initrd` / `squashfs`) plus a Start/Stop/Restart
   panel for the local `dnsmasq.service` (which serves the TFTP
   root). Fetching the artifacts happens on the **Artifact
@@ -227,8 +227,7 @@ Initial UI tour:
   Daemon / Activity.
 - **`/ui/settings`** - the read-only map of every bty config
   value plus the editable **Upstream sources** (release repo /
-  catalog URL / release tag) and **Flash behaviour** (the
-  bty-flash-once settle policy) cards, and the **DHCP / PXE**
+  catalog URL / release tag) card, and the **DHCP / PXE**
   router cheatsheet. Operator-account info (PAM password +
   session-cookie rotation) is on the separate Account page,
   reached via the user pill.

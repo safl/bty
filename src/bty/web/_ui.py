@@ -263,7 +263,7 @@ def register_ui_routes(
                     if not missing_netboot
                     else f"Missing: {', '.join(missing_netboot)}"
                 ),
-                "href": "/ui/boot",
+                "href": "/ui/netboot",
                 "fix_href": "/ui/fetches",
                 "fix_label": "Fetch netboot artifacts",
             },
@@ -291,11 +291,11 @@ def register_ui_routes(
                         "or operator owns the lifecycle)."
                     )
                 ),
-                "href": "/ui/boot",
+                "href": "/ui/netboot",
                 # The TFTP daemon control now lives on the Netboot
                 # list view (below the artifacts table); "fix" is the
                 # same as "view".
-                "fix_href": "/ui/boot",
+                "fix_href": "/ui/netboot",
                 "fix_label": "TFTP daemon",
             },
             {
@@ -836,7 +836,7 @@ def register_ui_routes(
 
     # ----- boot artifacts ------------------------------------------------
 
-    def _render_boot_page(
+    def _render_netboot_page(
         request: Request,
         *,
         flash: str | None = None,
@@ -858,7 +858,7 @@ def register_ui_routes(
             # Recent netboot activity for the page's "Activity" table.
             boot_events = _events_log.list_events(conn, subject_kind="boot", limit=10)
         return render(
-            "ui/boot.html",
+            "ui/netboot.html",
             request,
             boot_root=str(boot_root),
             artifacts=_releases.inspect_boot_dir(boot_root),
@@ -873,13 +873,13 @@ def register_ui_routes(
         )
 
     @app.get(
-        "/ui/boot",
+        "/ui/netboot",
         response_class=HTMLResponse,
         include_in_schema=False,
         dependencies=[Depends(require_ui_auth)],
     )
-    def ui_boot(request: Request) -> HTMLResponse:
-        return _render_boot_page(request)
+    def ui_netboot(request: Request) -> HTMLResponse:
+        return _render_netboot_page(request)
 
     def _render_fetches_page(
         request: Request,
@@ -1280,7 +1280,7 @@ def register_ui_routes(
                     details={"action": action, "error": str(exc)},
                 )
                 conn.commit()
-            return _render_boot_page(
+            return _render_netboot_page(
                 request,
                 flash=f"{action} of TFTP daemon failed: {exc}",
                 flash_kind="danger",
@@ -1297,18 +1297,18 @@ def register_ui_routes(
                 details={"action": action},
             )
             conn.commit()
-        return _render_boot_page(
+        return _render_netboot_page(
             request,
             flash=f"{action.capitalize()}ed TFTP daemon.",
             flash_kind="success",
         )
 
     @app.post(
-        "/ui/boot/fetch-release",
+        "/ui/netboot/fetch-release",
         include_in_schema=False,
         dependencies=[Depends(require_ui_auth)],
     )
-    def ui_boot_fetch(
+    def ui_netboot_fetch(
         request: Request,
         tag: Annotated[str, Form()] = "latest",
     ) -> HTMLResponse:
@@ -1332,7 +1332,7 @@ def register_ui_routes(
                     details={"tag": resolved_tag, "error": str(exc)},
                 )
                 conn.commit()
-            return _render_boot_page(
+            return _render_netboot_page(
                 request,
                 flash=f"Fetch failed: {exc}",
                 flash_kind="danger",
@@ -1354,7 +1354,7 @@ def register_ui_routes(
                 },
             )
             conn.commit()
-        return _render_boot_page(
+        return _render_netboot_page(
             request,
             flash=(
                 f"Fetched {len(result.artifacts)} artifacts ({result.total_bytes:,} bytes) "

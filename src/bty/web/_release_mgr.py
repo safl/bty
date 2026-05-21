@@ -109,13 +109,13 @@ class ReleaseFetchManager(_BaseAsyncManager[ReleaseFetchState]):
         given, terminal status transitions (completed / failed)
         log a ``boot.release.fetched`` event to the audit table
         so async fetches surface in /ui/events alongside the
-        synchronous /ui/boot/fetch-release path. Tests omit it.
+        synchronous /ui/netboot/fetch-release path. Tests omit it.
 
         Also backfills ``_states`` from recent
         ``boot.release.fetched`` / ``boot.release.fetch_failed``
         events when ``state_path`` is given. The manager's
         ``_states`` dict is otherwise lost on restart, which made
-        the /ui/boot "Active + recent fetches" table show
+        the /ui/netboot "Active + recent fetches" table show
         "No fetches yet." even when artifacts were clearly
         present on disk. Backfill gives the operator a durable
         history per-tag without persisting the manager's queue.
@@ -231,7 +231,7 @@ class ReleaseFetchManager(_BaseAsyncManager[ReleaseFetchState]):
 
         def _on_artifact_start(name: str) -> None:
             # Reset bytes counters at each new artifact so the
-            # /ui/boot live UI ticks per-file rather than carrying
+            # /ui/netboot live UI ticks per-file rather than carrying
             # the previous file's terminal value into the next
             # file's "0 / total" initial render.
             state.artifact = name

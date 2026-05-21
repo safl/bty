@@ -292,7 +292,7 @@ def test_ui_dashboard_health_monitoring_renders_with_links(client: TestClient) -
     # (no netboot artifacts, no live TFTP daemon) carry fix links;
     # both point at the Netboot list view (the Fetch control + the
     # TFTP daemon panel both live there now).
-    assert 'href="/ui/boot"' in body
+    assert 'href="/ui/netboot"' in body
     # Both visual indicators render on the bare fixture: green
     # tick on the catalog row (the fixture seeds demo.qcow2 so
     # ``Catalog is non-empty`` passes), red x on the other two.
@@ -327,7 +327,7 @@ def test_ui_dashboard_state_row_green_when_migrated_and_valid(
 
 
 # ---------------------------------------------------------------------
-# Sub-nav (v0.22.11): /ui/images, /ui/boot, /ui/machines each have a
+# Sub-nav (v0.22.11): /ui/images, /ui/netboot, /ui/machines each have a
 # sub-nav strip that splits "what's there" (list, the default
 # landing) from "how to add/fetch more". The action paths are one
 # click away; the default landing stays a clean read view.
@@ -438,7 +438,7 @@ def test_top_level_nav_highlights_active_page(client: TestClient) -> None:
         # the nav-btn cluster -- tested separately below.
         "/ui/machines": "/ui/machines",
         "/ui/images": "/ui/images",
-        "/ui/boot": "/ui/boot",
+        "/ui/netboot": "/ui/netboot",
         "/ui/events": "/ui/events",
         "/ui/settings": "/ui/settings",
         # /ui/account sits behind the user-bar gear icon; its
@@ -494,7 +494,7 @@ def test_subnavs_drop_the_redundant_list_pill(client: TestClient) -> None:
     # ?section= page links).
     for path in (
         "/ui/images",
-        "/ui/boot",
+        "/ui/netboot",
         "/ui/machines",
         "/ui/events",
         "/ui/downloads",
@@ -532,17 +532,17 @@ def test_ui_images_section_unrecognised_falls_back_to_list(client: TestClient) -
 
 
 def test_ui_boot_default_section_is_list(client: TestClient) -> None:
-    """Bare ``GET /ui/boot`` lands on the artifacts inventory + the TFTP
+    """Bare ``GET /ui/netboot`` lands on the artifacts inventory + the TFTP
     daemon control. Fetching moved to the Release fetches page, so the
     Fetch trigger is NOT on this view."""
     _login(client)
-    r = client.get("/ui/boot")
+    r = client.get("/ui/netboot")
     assert r.status_code == 200
     body = r.text
     # Sub-nav strip renders with just the List pill now: DHCP / PXE
     # moved to Settings and TFTP folded into this list view.
     assert 'aria-label="Section sub-navigation"' in body
-    assert 'href="/ui/boot?section=dhcp-pxe"' not in body
+    assert 'href="/ui/netboot?section=dhcp-pxe"' not in body
     # The artifacts inventory + the Fetch button render here (the button
     # hands off to the Release fetches page); the live jobs table itself
     # lives on /ui/fetches.
@@ -575,7 +575,7 @@ def test_ui_boot_list_header_has_artifacts_and_tftp(client: TestClient) -> None:
     daemon panel. The router-side DHCP / PXE cheatsheet moved to
     Settings; the Fetch trigger moved to the Release fetches page."""
     _login(client)
-    body = client.get("/ui/boot").text
+    body = client.get("/ui/netboot").text
     # The artifacts table renders.
     assert "<th>File</th>" in body
     # The TFTP daemon panel lives here, with a link over to the Settings
@@ -614,7 +614,7 @@ def test_ui_boot_shows_tftp_daemon_status(client: TestClient) -> None:
     Restart controls (or the no-helper hint when the container can't
     supervise the daemon)."""
     _login(client)
-    r = client.get("/ui/boot")
+    r = client.get("/ui/netboot")
     assert r.status_code == 200
     body = r.text
     assert "TFTP daemon" in body
@@ -679,7 +679,7 @@ def test_ui_boot_section_unrecognised_falls_back_to_list(client: TestClient) -> 
     ``list`` section. Symmetric with the /ui/images fallback test.
     """
     _login(client)
-    r = client.get("/ui/boot?section=garbage")
+    r = client.get("/ui/netboot?section=garbage")
     assert r.status_code == 200
     body = r.text
     # Lands on list: the artifacts inventory (the Fetch trigger moved
@@ -689,7 +689,7 @@ def test_ui_boot_section_unrecognised_falls_back_to_list(client: TestClient) -> 
     # Sub-nav strip still renders (just the List pill now; DHCP / PXE
     # moved to Settings and TFTP folded into this view).
     assert 'aria-label="Section sub-navigation"' in body
-    assert 'href="/ui/boot?section=dhcp-pxe"' not in body
+    assert 'href="/ui/netboot?section=dhcp-pxe"' not in body
 
 
 def test_ui_machines_list_has_inline_add_form(client: TestClient) -> None:
@@ -737,7 +737,7 @@ def test_ui_fetches_page_shows_recent_activity_card(
         return FetchResult(base_url="https://test.invalid/x", artifacts=("a",), total_bytes=42)
 
     monkeypatch.setattr("bty.web._releases.fetch_release", fake_fetch)
-    client.post("/ui/boot/fetch-release", data={"tag": "v0.0.1"})
+    client.post("/ui/netboot/fetch-release", data={"tag": "v0.0.1"})
     r = client.get("/ui/fetches")
     assert r.status_code == 200
     body = r.text
@@ -1275,12 +1275,12 @@ def test_ui_machine_detail_renders_hardware_card(client: TestClient) -> None:
 
 
 def test_ui_boot_page_renders_with_artifact_state(client: TestClient) -> None:
-    """The /ui/boot page must show the configured boot dir and one
+    """The /ui/netboot page must show the configured boot dir and one
     row per expected artifact (vmlinuz/initrd/squashfs/sha256)."""
     _login(client)
     # Default landing (list section): shows the four artifacts +
     # the polling JS for the active-fetches table.
-    r = client.get("/ui/boot")
+    r = client.get("/ui/netboot")
     assert r.status_code == 200
     body = r.text
     for name in (
@@ -1338,7 +1338,7 @@ def test_ui_settings_renders_when_authed(client: TestClient) -> None:
     assert "passwd" not in body
     # Cross-links to the Account + Netboot pages.
     assert 'href="/ui/account"' in body
-    assert 'href="/ui/boot"' in body
+    assert 'href="/ui/netboot"' in body
 
 
 def test_ui_account_holds_authentication(client: TestClient) -> None:
@@ -1413,15 +1413,15 @@ def test_ui_settings_requires_auth(client: TestClient) -> None:
 
 
 def test_ui_boot_requires_auth(client: TestClient) -> None:
-    """Without the cookie, /ui/boot redirects to login like the rest
+    """Without the cookie, /ui/netboot redirects to login like the rest
     of the UI."""
-    r = client.get("/ui/boot")
+    r = client.get("/ui/netboot")
     assert r.status_code == 303
     assert r.headers["location"] == "/ui/login"
 
 
 def test_ui_boot_fetch_requires_auth(client: TestClient) -> None:
-    r = client.post("/ui/boot/fetch-release", data={"tag": "latest"})
+    r = client.post("/ui/netboot/fetch-release", data={"tag": "latest"})
     assert r.status_code == 303
     assert r.headers["location"] == "/ui/login"
 
@@ -1771,7 +1771,7 @@ def test_ui_settings_tftp_control_success_renders_green_flash(
 ) -> None:
     """``control_tftp`` returning cleanly produces a 200 with a
     success flash on the Netboot page (the TFTP daemon panel
-    lives under /ui/boot now; the POST URL is unchanged for
+    lives under /ui/netboot now; the POST URL is unchanged for
     backwards compat but the response is the boot template,
     not settings). The handler also records a
     ``settings.tftp.controlled`` event."""
@@ -1788,8 +1788,8 @@ def test_ui_settings_tftp_control_success_renders_green_flash(
     assert "alert-success" in body
     assert "Restarted TFTP" in body
     # Page-level marker: the netboot artifact filename only renders
-    # on /ui/boot, not on /ui/settings -- proves the response came
-    # from _render_boot_page.
+    # on /ui/netboot, not on /ui/settings -- proves the response came
+    # from _render_netboot_page.
     assert "bty-netboot-x86_64.vmlinuz" in body
     # Event recorded.
     events = client.get(
@@ -1860,7 +1860,7 @@ def test_ui_settings_tftp_control_empty_action_surfaces_clear_error(
     assert "no action specified" in r.text
 
 
-# ---------- /ui/boot/fetch-release ------------------------------------------
+# ---------- /ui/netboot/fetch-release ------------------------------------------
 
 
 def test_ui_boot_fetch_success_renders_green_flash(
@@ -1882,7 +1882,7 @@ def test_ui_boot_fetch_success_renders_green_flash(
 
     monkeypatch.setattr(_releases, "fetch_release", _stub)
     _login(client)
-    r = client.post("/ui/boot/fetch-release", data={"tag": "v0.1.2"})
+    r = client.post("/ui/netboot/fetch-release", data={"tag": "v0.1.2"})
     assert r.status_code == 200
     body = r.text
     assert "alert-success" in body
@@ -1910,7 +1910,7 @@ def test_ui_boot_fetch_failure_renders_red_flash_and_logs_event(
 
     monkeypatch.setattr(_releases, "fetch_release", _raise)
     _login(client)
-    r = client.post("/ui/boot/fetch-release", data={"tag": "v0.999.999"})
+    r = client.post("/ui/netboot/fetch-release", data={"tag": "v0.999.999"})
     assert r.status_code == 200
     assert "alert-danger" in r.text
     assert "Fetch failed" in r.text
@@ -1947,7 +1947,7 @@ def test_ui_boot_fetch_empty_tag_falls_back_to_latest(
 
     monkeypatch.setattr(_releases, "fetch_release", _stub)
     _login(client)
-    r = client.post("/ui/boot/fetch-release", data={"tag": ""})
+    r = client.post("/ui/netboot/fetch-release", data={"tag": ""})
     assert r.status_code == 200
     assert seen == ["latest"]
 
@@ -1964,7 +1964,7 @@ def _seed_failed_event(client: TestClient, monkeypatch: pytest.MonkeyPatch, tag:
         raise _releases.FetchError(f"tag {tag!r} not found")
 
     monkeypatch.setattr(_releases, "fetch_release", _raise)
-    client.post("/ui/boot/fetch-release", data={"tag": tag})
+    client.post("/ui/netboot/fetch-release", data={"tag": tag})
     events = client.get("/events", params={"failed": "1"}, cookies=AUTH).json()["events"]
     return int(events[0]["id"])
 

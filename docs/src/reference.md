@@ -14,7 +14,7 @@ tag's copy of that file; substitute `latest` for a specific tag (e.g.
 | `bty-usb-x86_64.iso.gz` (+ `.sha256`) | Bootable USB live ISO with built-in writable `BTY_IMAGES` exFAT partition for the operator's image catalog. Open in Balena Etcher / Raspberry Pi Imager / Rufus DD-mode (decompresses `.gz` natively). CLI: `gunzip -d --stdout bty-usb-x86_64.iso.gz \| sudo dd of=/dev/sdX bs=4M`. | <https://github.com/safl/bty/releases/latest/download/bty-usb-x86_64.iso.gz> |
 | `bty-server-x86_64.img.gz` (+ `.sha256`) | Server appliance image, x86_64 (browser UI + iPXE + dnsmasq). Boot in QEMU or `dd` to a disk. | <https://github.com/safl/bty/releases/latest/download/bty-server-x86_64.img.gz> |
 | `bty-server-rpi-arm64.img.gz` (+ `.sha256`) | Server appliance image for Raspberry Pi 4 / 5 (arm64). Write with `dd` to an SD card. | <https://github.com/safl/bty/releases/latest/download/bty-server-rpi-arm64.img.gz> |
-| `bty-netboot-x86_64.{vmlinuz,initrd,squashfs}` (+ `bty-netboot-x86_64.sha256`) | Netboot trio for PXE-flash clients. Drop into the server's `BTY_BOOT_DIR` (or click "Fetch netboot artifacts" on `/ui/boot`). | <https://github.com/safl/bty/releases/latest/download/bty-netboot-x86_64.vmlinuz> |
+| `bty-netboot-x86_64.{vmlinuz,initrd,squashfs}` (+ `bty-netboot-x86_64.sha256`) | Netboot trio for PXE-flash clients. Drop into the server's `BTY_BOOT_DIR` (or click "Fetch netboot artifacts" on `/ui/netboot`). | <https://github.com/safl/bty/releases/latest/download/bty-netboot-x86_64.vmlinuz> |
 | `bty.pdf` | Offline copy of the docs (this site, rendered by Sphinx + LaTeX). | <https://github.com/safl/bty/releases/latest/download/bty.pdf> |
 | `bty_lab-X.Y.Z-py3-none-any.whl` / `.tar.gz` | Python wheel + sdist. Mirrored on PyPI as [`bty-lab`](https://pypi.org/project/bty-lab/) - prefer `pipx install bty-lab` over downloading by hand. | <https://github.com/safl/bty/releases> |
 
@@ -186,7 +186,7 @@ Python package).
 | Helper | Purpose |
 |---|---|
 | `bty-state-migrate [--yes] DEVICE` | Move the whole bty state dir `/var/lib/bty` (images, netboot artifacts, content cache, `state.db`) onto a 2nd disk (ext4, label `BTY_IMAGE_STORE`, mounted at `/var/lib/bty`) so it survives an OS reflash. Stops bty-web, copies + verifies before removing the rootfs copy, updates `/etc/fstab` for auto-mount. Run once; the labelled disk auto-mounts after reflashes (the venv stays on the rootfs and upgrades with the reflash). |
-| `bty-web-tftp <start\|stop\|restart>` | Control the local `dnsmasq.service` (which owns the TFTP root). Driven by the browser UI's TFTP daemon Start/Stop/Restart buttons on the Netboot page (`/ui/boot`). |
+| `bty-web-tftp <start\|stop\|restart>` | Control the local `dnsmasq.service` (which owns the TFTP root). Driven by the browser UI's TFTP daemon Start/Stop/Restart buttons on the Netboot page (`/ui/netboot`). |
 
 ## Python API
 
@@ -476,7 +476,7 @@ templates, Bootstrap CSS, HTMX form posts).
  OCI manifest at add time, uses the layer's content-addressed
  digest as the entry's sha256 (= machine-bindable), and skips
  the optional sha_url branch (manifest is authoritative).
-- `GET /ui/boot` (Netboot) -> the netboot artifacts inventory
+- `GET /ui/netboot` (Netboot) -> the netboot artifacts inventory
  (present/missing per artifact, sizes, last-fetched timestamps, with a
  Fetch button that hands off to the Artifact Fetches page) plus the
  **TFTP daemon** panel: live `systemctl is-active dnsmasq.service`
@@ -494,7 +494,7 @@ templates, Bootstrap CSS, HTMX form posts).
  DHCP server) lives on the Settings page (`/ui/settings#dhcp-pxe`).
  bty does NOT run any DHCP role; the operator's existing DHCP server
  points clients at this appliance for TFTP + HTTP-Boot fetches.
-- `POST /ui/boot/fetch-release` -> downloads
+- `POST /ui/netboot/fetch-release` -> downloads
  `vmlinuz`/`initrd`/`squashfs`/`sha256` from
  `https://github.com/<BTY_BOOT_RELEASE_REPO>/releases/<tag>/download/`
  (default `safl/bty`, default tag `latest`); verifies the manifest
@@ -514,7 +514,7 @@ templates, Bootstrap CSS, HTMX form posts).
 - `POST /ui/settings/tftp-control` -> drives `bty-web-tftp <action>`
  (allowlist `start` / `stop` / `restart`), the sole sudoers
  grant in `/etc/sudoers.d/bty-web`. URL is unchanged for
- backwards compat though the panel lives on /ui/boot now.
+ backwards compat though the panel lives on /ui/netboot now.
 
 The auth dependency checks ``request.session.get("bty_authed")``;
 the session is a Starlette ``SessionMiddleware``-signed payload

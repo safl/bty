@@ -75,7 +75,7 @@
                        value="{{ upstream.release_tag_override or '' }}">
                 <div class="form-text small">
                     Which release the <em>Fetch artifacts</em> button on the
-                    <a href="/ui/boot">Netboot</a> page pulls: <code>latest</code>
+                    <a href="/ui/netboot">Netboot</a> page pulls: <code>latest</code>
                     or a tag like <code>v0.23.0</code>. Effective:
                     <code>{{ upstream.release_tag }}</code>{% if not upstream.release_tag_override %}
                     (default; leave blank to keep){% endif %}.

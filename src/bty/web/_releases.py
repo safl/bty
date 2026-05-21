@@ -106,7 +106,7 @@ def missing_netboot_artifacts(boot_dir: Path) -> list[str]:
     manifest doesn't break the chain.
 
     Returns ``[]`` when the netboot env is complete. Callers
-    (the /ui/boot DHCP/PXE cheatsheet warning banner and the
+    (the /ui/netboot DHCP/PXE cheatsheet warning banner and the
     dashboard sanity checklist) treat a non-empty return as
     "warn the operator: a PXE client would chain into iPXE but
     then 404 fetching the kernel until these files are present".
@@ -182,7 +182,7 @@ def fetch_release(
     ``on_artifact_start(name)`` is called once at the start of each
     individual artifact's stream so the manager can update the
     ``state.artifact`` field for the live UI. Without this hook
-    the /ui/boot page rendered ``"... - N MiB / M MiB"`` because
+    the /ui/netboot page rendered ``"... - N MiB / M MiB"`` because
     the artifact field stayed None across the whole multi-file
     fetch.
     """

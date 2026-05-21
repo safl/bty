@@ -160,7 +160,7 @@ def create_app(
         # images need importing at once.
         hash_manager.start(resolved_image_root, state_path=state_path)
         # Release-fetch manager: powers the trackable
-        # /boot/releases endpoints (and the /ui/boot page's
+        # /boot/releases endpoints (and the /ui/netboot page's
         # progress + cancel buttons). Default parallelism is 1
         # because fetching two GitHub releases in parallel is
         # operator-confusing and bandwidth-saturating.
@@ -1028,7 +1028,7 @@ def create_app(
     # Registered BEFORE the ``GET /boot/{name}`` catch-all so
     # ``/boot/releases`` doesn't get eaten as a missing artifact name.
     # Powers the trackable "Fetch from GitHub releases" action on
-    # /ui/boot: ``POST /boot/releases`` enqueues, ``GET /boot/releases``
+    # /ui/netboot: ``POST /boot/releases`` enqueues, ``GET /boot/releases``
     # polls, ``DELETE /boot/releases/{tag}`` cancels.
 
     @app.get("/boot/releases", dependencies=[Depends(require_auth)])

@@ -231,8 +231,8 @@ schedule, on demand, or on failure.
    imaged OS boots. The next power cycle (no artifact fetch in
    between) serves the flash chain again - so a per-job CI cadence
    reflashes every cycle while still booting the image each time, with
-   no policy change. `bty-flash-once` instead flips its policy to the
-   settle policy on completion (see below).
+   no policy change. `bty-flash-once` instead flips its policy to
+   `sanboot` on completion (see below).
 7. First-boot bring-up (users, network, packages, hostnames) is the
    pre-built image's job, baked in via cloud-init / NoCloud user-data
    at image-build time. bty has no online provisioning step.
@@ -401,7 +401,7 @@ Conditional:
 | `catalog.entry.added`           | Operator `POST /catalog/entries` (form or JSON) succeeds.                                                  |
 | `catalog.entry.add_failed`      | sha resolve / oras resolve failed on `/catalog/entries`.                                                   |
 | `catalog.entry.deleted`         | Operator `DELETE /catalog/entries`.                                                                         |
-| `boot.release.fetched`          | `/ui/boot/fetch-release` (or `POST /boot/releases`) successfully pulled artifacts.                          |
+| `boot.release.fetched`          | `/ui/netboot/fetch-release` (or `POST /boot/releases`) successfully pulled artifacts.                          |
 | `boot.release.fetch_failed`     | Same path failed (404, sha mismatch, etc.).                                                                 |
 | `settings.tftp.controlled`      | Operator `POST /ui/settings/tftp-control` succeeded.                                                        |
 | `settings.tftp.control_failed`  | Same path failed (`sudo -n` denied, helper exit non-zero, etc.).                                            |
@@ -431,7 +431,7 @@ and a JSON `details` blob with kind-specific extras.
 | Upload an image                           | `PUT /images/{name}` (XHR from form) | Streams into `BTY_IMAGES`. Auto-enqueues sha256 hash. Records `image.{uploaded,upload_failed}`.     |
 | Hash an unhashed image                    | `POST /catalog/hashes`               | Enqueues a HashManager job. Records `image.{hashed,hash_failed}` on completion.                      |
 | Fetch a catalog image                     | `POST /catalog/downloads`            | Enqueues a DownloadManager job.                                                                      |
-| Fetch boot artifacts (kernel + initrd + squashfs) | `POST /ui/boot/fetch-release` | Pulls release artifacts into `BTY_BOOT_ROOT`. Records `boot.release.{fetched,fetch_failed}`.        |
+| Fetch boot artifacts (kernel + initrd + squashfs) | `POST /ui/netboot/fetch-release` | Pulls release artifacts into `BTY_BOOT_ROOT`. Records `boot.release.{fetched,fetch_failed}`.        |
 | Start / Stop / Restart the TFTP daemon    | `POST /ui/settings/tftp-control`     | `sudo bty-web-tftp <action>` -> `systemctl <action> dnsmasq`. Records `settings.tftp.{controlled,control_failed}`. |
 
 ## Safety gates summary

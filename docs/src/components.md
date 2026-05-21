@@ -271,7 +271,7 @@ operator can ask "everything from 192.168.1.5" or "everything
 that touched image X" with one click.
 
 **Recent-activity cards** on `/ui/dashboard`, `/ui/machines/
-{mac}`, `/ui/images`, and `/ui/boot` (list + fetch sections)
+{mac}`, `/ui/images`, and `/ui/netboot` (list + fetch sections)
 all embed the same `_events_card.html` partial filtered to the
 relevant subject so each page has a short timeline of
 context-relevant rows. ``/ui/settings`` is now a thin
