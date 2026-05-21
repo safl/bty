@@ -568,7 +568,24 @@ class BtyTui:
                         border_style=_PRIMARY,
                     )
                 )
-                sys.exit(self._run_auto())
+                rc = self._run_auto()
+                if rc == 0:
+                    sys.exit(0)
+                # Deterministic auto-flash failure (target disk not
+                # found / plan rejected / flash error). Do NOT sys.exit
+                # non-zero: bty-on-tty1.service has Restart=on-failure,
+                # so that relaunches bty every few seconds in a tight
+                # reject -> exit -> relaunch loop (the operator just sees
+                # the same rejection flash by). Fall back to the wizard
+                # instead -- the box stays up, the operator sees the
+                # rejection reasons printed above and can pick by hand or
+                # fix the assignment on the bty-server.
+                self._auto = False
+                self._catalog_load_error = (
+                    "Auto-flash could not proceed (see the panel above). "
+                    "Pick an image and target disk by hand, or fix the "
+                    "assignment in the bty-server UI (/ui/machines)."
+                )
             if plan_action == "local":
                 # The server says nothing to do here (boot_policy=sanboot
                 # or an unrecognised policy). Print a Panel so an operator
@@ -610,18 +627,21 @@ class BtyTui:
                 sys.exit(0)
             # ``interactive`` falls through to the wizard below. Print a
             # banner first so the operator knows the server delegated
-            # the pick to them (vs. having auto-flashed).
-            self._console.print(
-                Panel(
-                    f"Server reports [{_ACCENT}]mode=interactive[/] for "
-                    f"[{_PRIMARY}]{self._state.mac}[/]:\n\n"
-                    f"  catalog : {self._state.catalog_source or '(none)'}\n\n"
-                    f"[{_MUTED}]Dropping into the wizard so you can pick "
-                    "the image + target disk by hand.[/]",
-                    title="Plan: interactive",
-                    border_style=_PRIMARY,
+            # the pick to them (vs. having auto-flashed). The auto-flash
+            # FAILURE fall-through reaches the wizard too, but it already
+            # printed its own rejection panel, so skip this banner there.
+            if plan_action == "interactive":
+                self._console.print(
+                    Panel(
+                        f"Server reports [{_ACCENT}]mode=interactive[/] for "
+                        f"[{_PRIMARY}]{self._state.mac}[/]:\n\n"
+                        f"  catalog : {self._state.catalog_source or '(none)'}\n\n"
+                        f"[{_MUTED}]Dropping into the wizard so you can pick "
+                        "the image + target disk by hand.[/]",
+                        title="Plan: interactive",
+                        border_style=_PRIMARY,
+                    )
                 )
-            )
 
         try:
             self._main_loop()
@@ -1500,6 +1520,12 @@ class BtyTui:
         ]
         body = "[bold]Image[/]\n" + "\n".join(image_lines)
         body += "\n\n[bold]Target[/]\n" + "\n".join(target_lines)
+        if errors:
+            # Show WHY it was rejected -- the caller passes the reasons
+            # but the panel used to drop them, leaving the operator with
+            # a bare "rejected" and no clue (e.g. mounted partitions /
+            # image-too-big / unrecognised format).
+            body += f"\n\n[bold {_DANGER}]Rejected:[/]\n" + "\n".join(f"  - {e}" for e in errors)
         border_style = _DANGER if errors else _OK
         title = "[red]Flash plan (rejected)[/]" if errors else "[green]Flash plan[/]"
         self._console.print(Panel(body, border_style=border_style, title=title))

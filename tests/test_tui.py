@@ -929,3 +929,34 @@ def test_screen_flash_running_does_not_advance_on_failure(
     monkeypatch.setattr(app, "_pause_for_ack", lambda: None)
     app._screen_flash_running(plan)
     assert app._state.post_flash is False
+
+
+# ---------- auto-flash rejection (diagnosis + no restart-loop) ----------------
+
+
+def test_print_flash_plan_shows_rejection_reasons(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A rejected flash plan must show WHY -- the error list -- not just
+    a bare "Flash plan (rejected)" panel. The reasons used to be dropped,
+    which (with bty-on-tty1's Restart=on-failure) left the operator
+    watching an undiagnosable reject -> exit -> relaunch loop."""
+    from bty import flash
+
+    app = tui_app.BtyTui()
+    plan = flash.FlashPlan(
+        image=flash.ImageInfo(
+            path=Path("/img/x.img"), format="img", size_bytes=1024, virtual_size_bytes=1024
+        ),
+        target=flash.TargetInfo(
+            path=Path("/dev/sda"),
+            exists=True,
+            is_block_device=True,
+            size_bytes=512,
+            mountpoints=["/boot"],
+        ),
+    )
+    app._print_flash_plan(plan, ["target has mounted partitions: /boot"])
+    out = capsys.readouterr().out
+    assert "rejected" in out.lower()
+    assert "mounted" in out  # the actual reason is shown, not hidden
