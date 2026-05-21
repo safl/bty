@@ -517,7 +517,9 @@ def create_app(
             if machine.get("saw_flasher_boot"):
                 drive = machine.get("sanboot_drive") or _models.DEFAULT_SANBOOT_DRIVE
                 template = jinja.get_template("ipxe_sanboot.j2")
-                rendered = template.render(mac=normalised, machine=machine, drive=drive)
+                rendered = template.render(
+                    mac=normalised, machine=machine, drive=drive, policy=policy
+                )
                 with _db.open_db(state_path) as conn:
                     conn.execute(
                         "UPDATE machines SET saw_flasher_boot = 0, updated_at = ? WHERE mac = ?",
@@ -550,7 +552,7 @@ def create_app(
             # than falling through to the ``exit`` (local) template.
             drive = machine.get("sanboot_drive") or _models.DEFAULT_SANBOOT_DRIVE
             template = jinja.get_template("ipxe_sanboot.j2")
-            rendered = template.render(mac=normalised, machine=machine, drive=drive)
+            rendered = template.render(mac=normalised, machine=machine, drive=drive, policy=policy)
             offer_kind = "sanboot"
             offer_summary = f"{normalised} offered sanboot (iPXE boots local drive {drive})"
             offer_details = {"offer": "sanboot", "sanboot_drive": drive}
@@ -579,7 +581,9 @@ def create_app(
                     # PXE-first firmware (reboot -> PXE -> reflash -> ...).
                     drive = machine.get("sanboot_drive") or _models.DEFAULT_SANBOOT_DRIVE
                     template = jinja.get_template("ipxe_sanboot.j2")
-                    rendered = template.render(mac=normalised, machine=machine, drive=drive)
+                    rendered = template.render(
+                        mac=normalised, machine=machine, drive=drive, policy=policy
+                    )
                     with _db.open_db(state_path) as conn:
                         conn.execute(
                             "UPDATE machines SET saw_flasher_boot = 0, updated_at = ? "

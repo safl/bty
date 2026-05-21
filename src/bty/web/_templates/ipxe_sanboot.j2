@@ -1,12 +1,16 @@
 #!ipxe
-# bty-web - per-MAC iPXE config for {{ mac }} (boot_policy=sanboot)
+# bty-web - per-MAC iPXE config for {{ mac }} (boot_policy={{ policy }})
 # Assignment:
 #   image (ref):       {{ machine.bty_image_ref or "(none)" }}
 #   hostname:          {{ machine.hostname or "(none)" }}
-#   boot_policy:       sanboot
+#   boot_policy:       {{ policy }}
 #   sanboot drive:     {{ drive }}
 #
-# ``boot_policy=sanboot``: iPXE boots the local disk itself rather than
+# This serves a sanboot of the local disk. It's used directly by
+# ``boot_policy=sanboot``, and also as the post-step boot for
+# ``bty-inventory`` (after disks are reported) and ``bty-flash-always``
+# (after the one-shot flash) -- so the policy is templated, not
+# hardcoded to "sanboot". iPXE boots the local disk itself rather than
 # returning control to the firmware boot order. ``--drive {{ drive }}``
 # selects the BIOS drive (0x80 = first disk, 0x81 = second, ...) -- a
 # per-machine override (``sanboot_drive``), defaulting to 0x80. iPXE
@@ -17,6 +21,6 @@
 # number, empty disk), iPXE exits and control falls back to the
 # firmware boot order.
 
-echo bty: {{ mac }} boot_policy=sanboot, booting local drive {{ drive }}
+echo bty: {{ mac }} boot_policy={{ policy }}, sanbooting local drive {{ drive }}
 sleep 1
 sanboot --no-describe --drive {{ drive }} || exit
