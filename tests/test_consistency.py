@@ -830,27 +830,34 @@ def test_live_env_chains_tag_boot_urls_with_mac() -> None:
     future template edit can't silently reintroduce the loop.
     """
     tmpl_dir = REPO_ROOT / "src" / "bty" / "web" / "_templates"
-    # Each kernel / initrd / squashfs URL must be immediately followed
-    # by the ``?mac={{ mac }}`` query. The optional group is None when
-    # the query is absent -> a violation.
+    # The kernel + initrd URLs are fetched by iPXE (handles query
+    # strings fine) and MUST carry ?mac= -- that's what arms the bit.
+    # The squashfs URL is fetched by live-boot's initramfs, which
+    # derives a local filename from it and CHOKES on the ?/: in a
+    # ?mac= query ("Unable to find a live file system on the network");
+    # it MUST NOT be tagged. The kernel/initrd fetch already armed the
+    # bit, so the squashfs tag is redundant anyway. Pin BOTH directions
+    # so neither the loop bug (no tag) nor the live-boot bug (squashfs
+    # tagged) can recur.
     artifact_re = re.compile(
-        r"/boot/bty-netboot-x86_64\.(?:vmlinuz|initrd|squashfs)(\?mac=\{\{ mac \}\})?"
+        r"/boot/bty-netboot-x86_64\.(vmlinuz|initrd|squashfs)(\?mac=\{\{ mac \}\})?"
     )
     violations: list[str] = []
     for name in ("ipxe_flash.j2", "ipxe_tui.j2"):
         body = (tmpl_dir / name).read_text()
-        violations.extend(
-            f"{name}: {m.group(0)!r} is missing ?mac={{ mac }}"
-            for m in artifact_re.finditer(body)
-            if m.group(1) is None
-        )
-        assert artifact_re.search(body), f"{name}: no /boot artifact URL found at all"
-    assert not violations, (
-        "live-env chain /boot URLs missing ``?mac={{ mac }}``:\n"
-        + "\n".join(violations)
-        + "\nWithout it the saw_flasher_boot arming never fires and "
-        "bty-flash-always / bty-inventory loop forever under PXE-first."
-    )
+        seen: set[str] = set()
+        for m in artifact_re.finditer(body):
+            artifact, tag = m.group(1), m.group(2)
+            seen.add(artifact)
+            if artifact in ("vmlinuz", "initrd") and tag is None:
+                violations.append(f"{name}: {artifact} URL missing ?mac= (arming won't fire)")
+            if artifact == "squashfs" and tag is not None:
+                violations.append(
+                    f"{name}: squashfs fetch= URL carries ?mac= -- live-boot can't fetch it"
+                )
+        for required in ("vmlinuz", "initrd", "squashfs"):
+            assert required in seen, f"{name}: no {required} URL found at all"
+    assert not violations, "live-env chain ?mac= tagging is wrong:\n" + "\n".join(violations)
 
 
 def test_every_boot_policy_is_handled_by_the_pxe_decision_tree() -> None:

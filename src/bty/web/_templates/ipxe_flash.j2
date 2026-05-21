@@ -27,13 +27,18 @@ set bty-base http://{{ host }}
 # Transparency: NO ``quiet`` -- bty wants the full kernel + systemd
 # boot stream visible. See ipxe_tui.j2 + live-build/auto/config for
 # the matching rationale.
-# The /boot artifact URLs carry ``?mac={{ mac }}``. The server already
-# knows this MAC (it rendered this template for it), so embedding it is
-# free; the matching ``GET /boot/...?mac=`` is positive proof THIS box
-# booted the flasher. bty-web uses that to arm a one-shot sanboot of
-# the just-flashed disk on the next PXE contact, so bty-flash-always
-# boots the image once instead of reflashing in a loop under PXE-first
-# firmware. The query string is ignored when serving the file bytes.
-kernel ${bty-base}/boot/bty-netboot-x86_64.vmlinuz?mac={{ mac }} boot=live fetch=${bty-base}/boot/bty-netboot-x86_64.squashfs?mac={{ mac }} components console=tty0 console=ttyS0,115200 plymouth.enable=0 modprobe.blacklist=nouveau nouveau.modeset=0 bty.server=${bty-base} bty.mac={{ mac }}
+# The kernel + initrd URLs (fetched by iPXE) carry ``?mac={{ mac }}``.
+# The server already knows this MAC (it rendered this template for it),
+# so it's free; the matching ``GET /boot/...?mac=`` is positive proof
+# THIS box booted the flasher. bty-web arms a one-shot sanboot of the
+# just-flashed disk on the next PXE contact off that, so
+# bty-flash-always boots the image once instead of reflashing in a loop
+# under PXE-first firmware. The query is ignored when serving the bytes.
+# The squashfs ``fetch=`` URL is DELIBERATELY NOT tagged: live-boot's
+# initramfs derives a local filename from that URL and chokes on the
+# ``?`` / ``:`` (it aborts with "Unable to find a live file system on
+# the network"). The kernel/initrd fetch already armed the bit, so the
+# squashfs tag would be redundant anyway.
+kernel ${bty-base}/boot/bty-netboot-x86_64.vmlinuz?mac={{ mac }} boot=live fetch=${bty-base}/boot/bty-netboot-x86_64.squashfs components console=tty0 console=ttyS0,115200 plymouth.enable=0 modprobe.blacklist=nouveau nouveau.modeset=0 bty.server=${bty-base} bty.mac={{ mac }}
 initrd ${bty-base}/boot/bty-netboot-x86_64.initrd?mac={{ mac }}
 boot
