@@ -719,6 +719,7 @@ def register_ui_routes(
         dependencies=[Depends(require_ui_auth)],
     )
     def ui_catalog_entry_add(
+        request: Request,
         image_url: Annotated[str, Form()],
         sha_url: Annotated[str, Form()] = "",
     ) -> RedirectResponse:
@@ -804,6 +805,22 @@ def register_ui_routes(
                             now,
                         ),
                     )
+                    _events_log.record(
+                        conn,
+                        kind="catalog.entry.added",
+                        summary=f"catalog entry added (oras): {name}",
+                        subject_kind="catalog",
+                        subject_id=image_url,
+                        actor="operator",
+                        source_ip=_client_ip(request),
+                        details={
+                            "name": name,
+                            "bty_image_ref": bty_image_ref,
+                            "disk_image_sha": sha256,
+                            "format": fmt,
+                            "size_bytes": size_bytes,
+                        },
+                    )
                     conn.commit()
                 except sqlite3.IntegrityError:
                     return RedirectResponse(
@@ -869,6 +886,22 @@ def register_ui_routes(
                         None,
                         now,
                     ),
+                )
+                _events_log.record(
+                    conn,
+                    kind="catalog.entry.added",
+                    summary=f"catalog entry added: {name}",
+                    subject_kind="catalog",
+                    subject_id=image_url,
+                    actor="operator",
+                    source_ip=_client_ip(request),
+                    details={
+                        "name": name,
+                        "bty_image_ref": bty_image_ref,
+                        "disk_image_sha": sha256,
+                        "format": fmt,
+                        "size_bytes": size_bytes,
+                    },
                 )
                 conn.commit()
             except sqlite3.IntegrityError:

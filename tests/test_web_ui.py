@@ -941,6 +941,49 @@ def test_ui_catalog_entry_form_happy_path_lands_row_and_303s(
     assert r.headers["location"] == "/ui/images"
     entries = client.get("/catalog/entries", cookies=AUTH).json()
     assert any(e["src"] == "https://example.invalid/charlie.img.gz" for e in entries)
+    # The operator action is audited (debuggability) like the JSON path.
+    events = client.get(
+        "/events",
+        params={"subject_kind": "catalog", "kind": "catalog.entry.added"},
+        cookies=AUTH,
+    ).json()["events"]
+    assert any("charlie.img.gz" in e["summary"] for e in events)
+
+
+def test_ui_machine_save_is_audited(client: TestClient) -> None:
+    """Changing a machine via the browser UI records machine.created /
+    machine.upserted, same as the JSON PUT path -- so operator config
+    changes are debuggable from /ui/events (they previously weren't)."""
+    _login(client)
+    mac = "aa:bb:cc:dd:ee:99"
+    assert (
+        client.post(
+            f"/ui/machines/{mac}",
+            data={"boot_policy": "bty-inventory"},
+            cookies=AUTH,
+            follow_redirects=False,
+        ).status_code
+        == 303
+    )
+    created = client.get(
+        "/events",
+        params={"subject_kind": "machine", "subject_id": mac, "kind": "machine.created"},
+        cookies=AUTH,
+    ).json()["events"]
+    assert len(created) == 1
+    # A second save is an update -> machine.upserted.
+    client.post(
+        f"/ui/machines/{mac}",
+        data={"boot_policy": "sanboot"},
+        cookies=AUTH,
+        follow_redirects=False,
+    )
+    upserted = client.get(
+        "/events",
+        params={"subject_kind": "machine", "subject_id": mac, "kind": "machine.upserted"},
+        cookies=AUTH,
+    ).json()["events"]
+    assert len(upserted) == 1
 
 
 def test_ui_machine_upsert_form_rejects_non_hex_sha256(client: TestClient) -> None:
