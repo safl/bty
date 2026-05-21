@@ -257,8 +257,8 @@ inbound `X-Forwarded-For` from external requests.
 **Failure symmetry.** Every async-manager + operator-driven
 action that can fail emits a paired `<kind>_failed` event
 (`auth.login.failed`, `image.upload_failed`, `image.hash_failed`,
-`netboot.artifacts.fetch_failed`, `settings.pxe.activate_failed`,
-`settings.pxe.deactivate_failed`, `catalog.entry.add_failed`).
+`netboot.artifacts.fetch_failed`, `netboot.tftp.control_failed`,
+`catalog.entry.add_failed`).
 Failed kinds render in the events table with a danger-coloured
 badge so they pop in a
 long log.
