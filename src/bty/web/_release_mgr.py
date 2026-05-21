@@ -107,12 +107,12 @@ class ReleaseFetchManager(_BaseAsyncManager[ReleaseFetchState]):
     def start(self, boot_root: Path, state_path: Path | None = None) -> None:
         """Spawn the worker pool. ``state_path`` is optional: when
         given, terminal status transitions (completed / failed)
-        log a ``boot.release.fetched`` event to the audit table
+        log a ``netboot.artifacts.fetched`` event to the audit table
         so async fetches surface in /ui/events alongside the
         synchronous /ui/netboot/fetch-release path. Tests omit it.
 
         Also backfills ``_states`` from recent
-        ``boot.release.fetched`` / ``boot.release.fetch_failed``
+        ``netboot.artifacts.fetched`` / ``netboot.artifacts.fetch_failed``
         events when ``state_path`` is given. The manager's
         ``_states`` dict is otherwise lost on restart, which made
         the /ui/netboot "Active + recent fetches" table show
@@ -129,8 +129,8 @@ class ReleaseFetchManager(_BaseAsyncManager[ReleaseFetchState]):
     def _backfill_from_events(self, state_path: Path) -> None:
         """Repopulate ``_states`` with recent fetch outcomes.
 
-        Reads the latest ``boot.release.fetched`` /
-        ``boot.release.fetch_failed`` rows from the events table
+        Reads the latest ``netboot.artifacts.fetched`` /
+        ``netboot.artifacts.fetch_failed`` rows from the events table
         (per-tag dedupe: the most recent terminal event for each
         tag wins). The reconstructed states show ``status=completed``
         or ``status=failed`` with the original ts as
@@ -296,8 +296,8 @@ class ReleaseFetchManager(_BaseAsyncManager[ReleaseFetchState]):
                 state.base_url = base_url
 
         # Log terminal outcomes so the audit trail is symmetric:
-        # successful fetches land ``boot.release.fetched``, failures
-        # land ``boot.release.fetch_failed`` with the error so the
+        # successful fetches land ``netboot.artifacts.fetched``, failures
+        # land ``netboot.artifacts.fetch_failed`` with the error so the
         # operator can see "this fetch tried + crashed" in
         # /ui/events without polling /boot/releases. Cancelled
         # fetches are operator-initiated and not logged.

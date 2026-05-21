@@ -215,7 +215,7 @@ def register_ui_routes(
             # ``?failed=1`` filter uses (list_events(failed_only=True)),
             # so the "Review errors" deep link lands on exactly this
             # family: image.upload_failed / image.hash_failed /
-            # catalog.entry.add_failed / boot.release.fetch_failed /
+            # catalog.entry.add_failed / netboot.artifacts.fetch_failed /
             # settings.tftp.control_failed / auth.login.failed.
             error_event_count = _events_log.count_unacknowledged_failures(conn)
             # Recent activity slice for the dashboard's "what just

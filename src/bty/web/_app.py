@@ -709,7 +709,7 @@ def create_app(
         # offered Y". The events table is append-only with no
         # retention cap today; long-running per-job CI loops will
         # grow it indefinitely. If that becomes a problem, the
-        # ``pxe.offered`` kind is a natural candidate for a
+        # ``netboot.pxe.offered`` kind is a natural candidate for a
         # subject-id-keyed rolling-window prune ("keep the last 100
         # per MAC").
         with _db.open_db(state_path) as conn:
