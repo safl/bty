@@ -45,8 +45,17 @@ MAC_PATTERN = r"^[0-9a-f]{2}(:[0-9a-f]{2}){5}$"
 # - ``bty-tui`` returns the live-env chain. ``bty`` on tty1 GETs
 #   /pxe/<mac>/plan and (for boot_policy=bty-tui) drops the operator
 #   into the wizard so they can pick an image from the server's
-#   catalog by hand. This is the auto-discovery default for
-#   unknown MACs that PXE-boot through the server.
+#   catalog by hand.
+# - ``bty-inventory`` is to inventory what ``bty-flash-always`` is
+#   to flashing: it alternates an inventory boot then a sanboot across
+#   PXE contacts (same ``saw_flasher_boot`` mechanism). The active boot
+#   chains the live env in the ``inventory`` plan mode -- ``bty`` posts
+#   /pxe/<mac>/inventory and reboots (no flash, no wizard) -- and the
+#   next contact sanboots the disk. So every power cycle re-collects
+#   the disk inventory before booting, surfacing swapped hardware. This
+#   is the auto-discovery default for unknown MACs: a new box self-
+#   reports its disks and then just boots, ready for the operator to
+#   assign a flash policy from the now-populated inventory.
 #
 # The ``bty-*`` prefix marks the policies that PXE-boot into bty's own
 # live env; ``sanboot`` boots the local disk.
@@ -56,7 +65,13 @@ MAC_PATTERN = r"^[0-9a-f]{2}(:[0-9a-f]{2}){5}$"
 # ``boot_policy`` for ``bty-flash-once`` (-> ``sanboot``).
 # ``bty-flash-always`` is unchanged so the per-job CI cadence reflashes
 # every cycle.
-BOOT_POLICIES = ("sanboot", "bty-flash-always", "bty-flash-once", "bty-tui")
+BOOT_POLICIES = (
+    "sanboot",
+    "bty-flash-always",
+    "bty-flash-once",
+    "bty-tui",
+    "bty-inventory",
+)
 
 # iPXE BIOS drive selector the ``sanboot`` policy boots: ``0x80`` is the
 # first disk, ``0x81`` the second, and so on. The sensible default; a

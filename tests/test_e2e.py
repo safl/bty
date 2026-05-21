@@ -501,11 +501,11 @@ def test_e2e_flash_always_alternates_flash_then_sanboot(app_client: TestClient) 
     assert "kernel" in _directives(body) and "sanboot" not in _directives(body)
 
 
-def test_e2e_boot_artifact_mac_arms_only_flash_always(app_client: TestClient) -> None:
-    """The /boot ``?mac=`` arming is confined to bty-flash-always
-    machines, so the one-shot sanboot bit can't leak into other
-    policies (a flash-once / tui / local box never sanboots-after-flash).
-    """
+def test_e2e_boot_artifact_mac_arms_only_alternating_policies(app_client: TestClient) -> None:
+    """The /boot ``?mac=`` arming is confined to the alternating
+    policies (bty-flash-always, bty-inventory), so the one-shot sanboot
+    bit can't leak into others (a flash-once / tui box never gets a
+    spurious post-boot sanboot)."""
     boot_root: Path = app_client.app.state.boot_root  # type: ignore[attr-defined]
     state_path: Path = app_client.app.state.state_path  # type: ignore[attr-defined]
     (boot_root / "bty-netboot-x86_64.vmlinuz").write_bytes(b"\0" * 64)
@@ -519,8 +519,13 @@ def test_e2e_boot_artifact_mac_arms_only_flash_always(app_client: TestClient) ->
         return int(row["saw_flasher_boot"])
 
     always = "11:11:11:11:11:11"
-    tui = "22:22:22:22:22:22"
-    for mac, policy in ((always, "bty-flash-always"), (tui, "bty-tui")):
+    inventory = "22:22:22:22:22:22"
+    tui = "33:33:33:33:33:33"
+    for mac, policy in (
+        (always, "bty-flash-always"),
+        (inventory, "bty-inventory"),
+        (tui, "bty-tui"),
+    ):
         assert (
             app_client.put(
                 f"/machines/{mac}", json={"boot_policy": policy}, cookies=AUTH
@@ -528,11 +533,57 @@ def test_e2e_boot_artifact_mac_arms_only_flash_always(app_client: TestClient) ->
             == 200
         )
 
-    app_client.get(f"/boot/bty-netboot-x86_64.vmlinuz?mac={always}", headers=host)
-    app_client.get(f"/boot/bty-netboot-x86_64.vmlinuz?mac={tui}", headers=host)
+    for mac in (always, inventory, tui):
+        app_client.get(f"/boot/bty-netboot-x86_64.vmlinuz?mac={mac}", headers=host)
 
     assert _saw(always) == 1, "flash-always machine should be armed by /boot?mac="
-    assert _saw(tui) == 0, "non-flash-always machine must NOT be armed"
+    assert _saw(inventory) == 1, "bty-inventory machine should be armed by /boot?mac="
+    assert _saw(tui) == 0, "bty-tui machine must NOT be armed"
+
+
+def test_e2e_inventory_alternates_liveenv_then_sanboot(app_client: TestClient) -> None:
+    """bty-inventory alternates an inventory live-env boot then a
+    sanboot across PXE contacts, flipped by the /boot artifact fetch --
+    so every cycle re-collects the disk inventory before booting the
+    disk. Mirrors the bty-flash-always loop-break, minus the flash."""
+    boot_root: Path = app_client.app.state.boot_root  # type: ignore[attr-defined]
+    (boot_root / "bty-netboot-x86_64.vmlinuz").write_bytes(b"\0" * 64)
+    mac = "ab:cd:ef:00:11:22"
+    assert (
+        app_client.put(
+            f"/machines/{mac}", json={"boot_policy": "bty-inventory"}, cookies=AUTH
+        ).status_code
+        == 200
+    )
+    host = {"Host": "bty.local:8080"}
+
+    def _directives(body: str) -> set[str]:
+        return {
+            ln.split()[0]
+            for ln in body.splitlines()
+            if ln.strip() and not ln.lstrip().startswith("#")
+        }
+
+    # 1. First contact: live-env chain (inventory boot), ?mac= tagged.
+    body = app_client.get(f"/pxe/{mac}", headers=host).text
+    assert "kernel" in _directives(body) and "sanboot" not in _directives(body)
+    assert f"?mac={mac}" in body, "inventory chain artifact URLs must carry ?mac="
+    # The plan tells bty to post inventory and reboot.
+    assert app_client.get(f"/pxe/{mac}/plan", headers=host).json()["mode"] == "inventory"
+
+    # 2. Box boots the live env: fetches a /boot artifact w/ ?mac=.
+    assert (
+        app_client.get(f"/boot/bty-netboot-x86_64.vmlinuz?mac={mac}", headers=host).status_code
+        == 200
+    )
+
+    # 3. Post-inventory contact: one-shot sanboot of the disk.
+    body = app_client.get(f"/pxe/{mac}", headers=host).text
+    assert "sanboot" in _directives(body) and "kernel" not in _directives(body)
+
+    # 4. No /boot fetch in between -> re-armed back to the inventory boot.
+    body = app_client.get(f"/pxe/{mac}", headers=host).text
+    assert "kernel" in _directives(body) and "sanboot" not in _directives(body)
 
 
 # ----------------------------------------------------------------------
@@ -936,7 +987,7 @@ def test_e2e_pxe_unknown_mac_then_inventory_then_flash_chain(
 ) -> None:
     """The PXE flow has four state transitions on the server side:
 
-      1. Unknown MAC -> /pxe/<mac> -> auto-discovered with policy=bty-tui
+      1. Unknown MAC -> /pxe/<mac> -> auto-discovered with policy=bty-inventory
       2. Same MAC -> /machines/<mac>/inventory -> machine.inventory event
       3. Operator binds (PUT /machines/<mac>) with bty-flash-once + ref
       4. Same MAC -> /pxe/<mac> -> renders ipxe_flash.j2 with the ref
@@ -949,18 +1000,18 @@ def test_e2e_pxe_unknown_mac_then_inventory_then_flash_chain(
     # 1. Auto-discovery.
     r = app_client.get(f"/pxe/{mac}", headers={"Host": "bty.local:8080"})
     assert r.status_code == 200, r.text
-    # Default policy is tui; cmdline carries minimal bty.server +
-    # bty.mac (v0.22.10 retired bty.mode=). The plan endpoint
-    # decides what ``bty`` does.
+    # Default policy is bty-inventory; cmdline carries minimal
+    # bty.server + bty.mac (v0.22.10 retired bty.mode=). The plan
+    # endpoint decides what ``bty`` does.
     assert "bty.server=" in r.text
     assert f"bty.mac={mac}" in r.text
 
     r = app_client.get(f"/machines/{mac}", cookies=AUTH)
     assert r.status_code == 200, r.text
-    assert r.json()["boot_policy"] == "bty-tui"
+    assert r.json()["boot_policy"] == "bty-inventory"
 
     plan = app_client.get(f"/pxe/{mac}/plan", headers={"Host": "bty.local:8080"}).json()
-    assert plan["mode"] == "interactive"
+    assert plan["mode"] == "inventory"
 
     # 2. Inventory POST -- simulates the live env reporting disks.
     r = app_client.post(

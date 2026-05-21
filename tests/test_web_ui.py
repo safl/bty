@@ -1401,18 +1401,24 @@ def test_ui_machines_list_shows_boot_policy_badge(client: TestClient) -> None:
         },
         cookies=AUTH,
     )
-    # Auto-discovery via /pxe lands a fourth row with boot_policy=bty-tui
-    # so we can exercise all four badge variants in one table.
+    client.put(
+        "/machines/33:44:55:66:77:88",
+        json={"boot_policy": "bty-tui"},
+        cookies=AUTH,
+    )
+    # Auto-discovery via /pxe lands a fifth row with boot_policy=bty-inventory
+    # so we can exercise all five badge variants in one table.
     client.get("/pxe/aa:bb:cc:dd:ee:01")
     r = client.get("/ui/machines")
     assert r.status_code == 200
     body = r.text
-    # All four boot-policy badges should appear in the table (the badge
+    # All five boot-policy badges should appear in the table (the badge
     # text is the full policy name).
     assert "bg-danger" in body and ">bty-flash-always<" in body
     assert ">bty-flash-once<" in body  # the bg-warning variant
     assert "bg-dark" in body and ">sanboot<" in body
     assert "bg-info text-dark" in body and ">bty-tui<" in body
+    assert "bg-primary" in body and ">bty-inventory<" in body
     # Table header has Boot column + Last flashed column.
     assert ">Boot</th>" in body
     assert ">Last flashed</th>" in body

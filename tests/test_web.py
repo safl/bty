@@ -272,9 +272,9 @@ def test_pxe_for_known_mac_uses_assignment_template(app_client: TestClient) -> N
 def test_pxe_auto_discovers_unknown_mac(app_client: TestClient) -> None:
     """A /pxe contact for an unknown MAC creates a placeholder record so the
     operator sees the machine in /machines and can claim it. The default
-    ``boot_policy`` is ``tui``: the unknown MAC chains into the live env where
-    ``bty`` drops the operator into the wizard, letting them pick + flash
-    an image by hand without prior server-side configuration."""
+    ``boot_policy`` is ``bty-inventory``: the unknown MAC chains into the live
+    env to self-report its disks, then sanboots -- so a new box auto-collects
+    its inventory and just boots, with no prior server-side configuration."""
     mac = "11:22:33:44:55:66"
 
     # Pre-condition: not in the DB.
@@ -295,7 +295,7 @@ def test_pxe_auto_discovers_unknown_mac(app_client: TestClient) -> None:
     body = found.json()
     assert body["mac"] == mac
     assert body["bty_image_ref"] is None  # discovered, not yet assigned
-    assert body["boot_policy"] == "bty-tui"  # auto-discovery default
+    assert body["boot_policy"] == "bty-inventory"  # auto-discovery default
     assert body["discovered_at"] is not None
     assert body["last_seen_at"] is not None
 
@@ -1301,18 +1301,17 @@ def test_pxe_flash_policy_returns_chain_with_args(
     assert "plymouth.enable=0" in body
 
 
-def test_pxe_plan_unknown_mac_auto_discovers_and_returns_interactive(
+def test_pxe_plan_unknown_mac_auto_discovers_and_returns_inventory(
     app_client: TestClient,
 ) -> None:
     """``GET /pxe/<mac>/plan`` on an unknown MAC mirrors the iPXE
     auto-discovery path: creates a machine record with
-    ``boot_policy=bty-tui`` and returns ``mode=interactive`` with the
-    server's ``/catalog.toml`` URL.
+    ``boot_policy=bty-inventory`` and returns ``mode=inventory`` so
+    ``bty`` posts its disks and reboots into a sanboot.
 
-    This is the workstation-side equivalent of "bty-on-a-USB but
-    over the network": ``bty --server X --mac Y`` against an
-    unknown MAC drops the operator into the wizard with the server
-    catalog pre-loaded, no prior server-side configuration needed.
+    A new box self-collects its inventory with no prior server-side
+    configuration; the operator then assigns a flash policy from the
+    now-populated disk dropdown.
     """
     mac = "11:22:33:44:55:66"
     pre = app_client.get(f"/machines/{mac}", cookies=AUTH)
@@ -1321,12 +1320,11 @@ def test_pxe_plan_unknown_mac_auto_discovers_and_returns_interactive(
     r = app_client.get(f"/pxe/{mac}/plan", headers={"Host": "bty.local:8080"})
     assert r.status_code == 200
     body = r.json()
-    assert body["mode"] == "interactive"
-    assert body["catalog"] == "http://bty.local:8080/catalog.toml"
+    assert body["mode"] == "inventory"
 
-    # Auto-discovered as boot_policy=bty-tui (matches /pxe/{mac}).
+    # Auto-discovered as boot_policy=bty-inventory (matches /pxe/{mac}).
     row = app_client.get(f"/machines/{mac}", cookies=AUTH).json()
-    assert row["boot_policy"] == "bty-tui"
+    assert row["boot_policy"] == "bty-inventory"
 
 
 def test_pxe_plan_sanboot_policy_returns_local_mode(app_client: TestClient) -> None:
@@ -2011,9 +2009,9 @@ def test_pxe_hit_records_pxe_offered_event(app_client: TestClient) -> None:
     assert ev["details"]["boot_policy"] == "sanboot"
 
 
-def test_pxe_hit_records_tui_offer_for_unknown_mac(app_client: TestClient) -> None:
+def test_pxe_hit_records_inventory_offer_for_unknown_mac(app_client: TestClient) -> None:
     """Auto-discovery (unknown MAC) records both ``machine.discovered``
-    AND a ``pxe.offered`` event with offer=bty-tui."""
+    AND a ``pxe.offered`` event with offer=bty-inventory."""
     app_client.get("/pxe/aa:bb:cc:dd:ee:f1")
     r = app_client.get(
         "/events",
@@ -2022,7 +2020,7 @@ def test_pxe_hit_records_tui_offer_for_unknown_mac(app_client: TestClient) -> No
     )
     events = {e["kind"]: e for e in r.json()["events"]}
     assert set(events) == {"machine.discovered", "pxe.offered"}
-    assert events["pxe.offered"]["details"]["offer"] == "bty-tui"
+    assert events["pxe.offered"]["details"]["offer"] == "bty-inventory"
 
 
 def test_machines_upsert_accepts_flash_once(app_client: TestClient) -> None:

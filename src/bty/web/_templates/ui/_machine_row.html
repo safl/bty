@@ -19,6 +19,8 @@
         <span class="badge bg-warning text-dark" title="next PXE boot reflashes, then auto-flips to the settle policy"><i class="bi bi-1-circle me-1"></i>{{ m.boot_policy }}</span>
         {% elif m.boot_policy == 'bty-tui' %}
         <span class="badge bg-info text-dark" title="every PXE boot lands at bty on tty1 (operator picks an image)"><i class="bi bi-display me-1"></i>{{ m.boot_policy }}</span>
+        {% elif m.boot_policy == 'bty-inventory' %}
+        <span class="badge bg-primary" title="each boot re-collects the disk inventory, then sanboots the disk"><i class="bi bi-list-check me-1"></i>{{ m.boot_policy }}</span>
         {% elif m.boot_policy == 'sanboot' %}
         <span class="badge bg-dark" title="iPXE boots the local disk itself"><i class="bi bi-hdd-fill me-1"></i>{{ m.boot_policy }}</span>
         {% else %}

@@ -442,6 +442,8 @@ class BtyTui:
             - ``plan.mode == "auto"``     -> ``_run_auto`` (no prompts)
             - ``plan.mode == "interactive"`` -> interactive wizard with
               the catalog the server suggests
+            - ``plan.mode == "inventory"`` -> post disk inventory, then
+              reboot (boot_policy=bty-inventory; next contact sanboots)
             - ``plan.mode == "local"``    -> exit cleanly (nothing to do
               from bty's side; firmware sanboot handles the rest)
             - 404 / network failure       -> interactive wizard with
@@ -552,6 +554,25 @@ class BtyTui:
                     )
                 )
                 sys.exit(0)
+            if plan_action == "inventory":
+                # boot_policy=bty-inventory: the box booted the live env
+                # only to (re)report its disks. Post inventory
+                # synchronously so it lands, then reboot -- the next PXE
+                # contact (saw_flasher_boot armed by the /boot fetch)
+                # sanboots the local disk. No wizard, no flash.
+                self._console.print(
+                    Panel(
+                        f"Server reports [{_ACCENT}]mode=inventory[/] for "
+                        f"[{_PRIMARY}]{self._state.mac}[/].\n\n"
+                        f"[{_MUTED}]Reporting this box's disks to bty-web, then "
+                        "rebooting to boot the local disk.[/]",
+                        title="Plan: inventory + reboot",
+                        border_style=_PRIMARY,
+                    )
+                )
+                self._post_inventory_sync()
+                self._do_reboot()  # exits via systemctl reboot
+                sys.exit(0)
             # ``interactive`` falls through to the wizard below. Print a
             # banner first so the operator knows the server delegated
             # the pick to them (vs. having auto-flashed).
@@ -638,6 +659,8 @@ class BtyTui:
             return "interactive"
         if mode == "local":
             return "local"
+        if mode == "inventory":
+            return "inventory"
         # Unknown mode -- treat as interactive so the operator gets
         # SOMETHING they can act on, plus a banner explaining why.
         self._catalog_load_error = f"unknown plan mode {mode!r}; falling back to interactive"
@@ -1721,6 +1744,20 @@ class BtyTui:
                 f"[{_DANGER}]post-flash signal failed:[/] {exc} "
                 f"[{_MUTED}](flash succeeded; bty-web didn't update)[/]"
             )
+
+    def _post_inventory_sync(self) -> None:
+        """Post the disk inventory and block until it completes (or
+        fails), so a ``mode=inventory`` boot doesn't reboot before
+        bty-web has the disks. Best-effort: lsblk / network failures are
+        swallowed -- the next inventory cycle retries."""
+        if self._state.pxe_done_base is None or self._state.mac is None:
+            return
+        try:
+            payload = disks.list_disks()
+        except (FileNotFoundError, subprocess.SubprocessError, OSError):
+            return
+        with contextlib.suppress(urllib.error.URLError, ConnectionError, TimeoutError, OSError):
+            post_inventory(self._state.pxe_done_base, self._state.mac, payload)
 
     def _auto_post_inventory(self) -> None:
         """Background-thread post of the disk inventory so a slow

@@ -410,19 +410,19 @@ def create_app(
             if row is None:
                 # Auto-discovery: record an unassigned machine so the
                 # operator can see this MAC in /machines and decide
-                # what to do with it. ``boot_policy='bty-tui'`` makes
-                # the unknown MAC chain into the live env where ``bty``
-                # GETs /pxe/<mac>/plan and drops into the wizard -
-                # "bty-on-a-USB but over the network" - so first
-                # contact is useful without prior server-side
-                # configuration.
+                # what to do with it. ``boot_policy='bty-inventory'``
+                # makes the unknown MAC chain into the live env to self-
+                # report its disks, then sanboot -- so a new box auto-
+                # collects its inventory and just boots, with no prior
+                # server-side configuration. The operator then assigns a
+                # flash policy from the now-populated disk dropdown.
                 conn.execute(
                     """
                     INSERT INTO machines
                         (mac, boot_policy,
                          discovered_at, last_seen_at, last_seen_ip,
                          created_at, updated_at)
-                    VALUES (?, 'bty-tui', ?, ?, ?, ?, ?)
+                    VALUES (?, 'bty-inventory', ?, ?, ?, ?, ?)
                     """,
                     (normalised, now, now, client_ip, now, now),
                 )
@@ -498,6 +498,43 @@ def create_app(
             offer_kind = "bty-tui"
             offer_summary = f"{normalised} offered tui (operator picks via bty on tty1)"
             offer_details = {"offer": "bty-tui"}
+        elif policy == "bty-inventory":
+            # Inventory-then-sanboot, alternating like bty-flash-always
+            # (same saw_flasher_boot bit). When the box has just booted
+            # the live env (bit armed via GET /boot/...?mac=), serve a
+            # sanboot of its disk and clear the bit; otherwise serve the
+            # live-env chain so ``bty`` re-collects + posts inventory and
+            # reboots (plan mode=inventory). Net: every power cycle
+            # refreshes the inventory before booting the disk, so swapped
+            # hardware is discovered.
+            if machine.get("saw_flasher_boot"):
+                drive = machine.get("sanboot_drive") or _models.DEFAULT_SANBOOT_DRIVE
+                template = jinja.get_template("ipxe_sanboot.j2")
+                rendered = template.render(mac=normalised, machine=machine, drive=drive)
+                with _db.open_db(state_path) as conn:
+                    conn.execute(
+                        "UPDATE machines SET saw_flasher_boot = 0, updated_at = ? WHERE mac = ?",
+                        (now, normalised),
+                    )
+                    conn.commit()
+                offer_kind = "bty-inventory-sanboot"
+                offer_summary = (
+                    f"{normalised} booting disk (drive {drive}) after inventory; "
+                    f"bty-inventory re-arms on next netboot"
+                )
+                offer_details = {
+                    "offer": "sanboot",
+                    "sanboot_drive": drive,
+                    "after_inventory": True,
+                }
+            else:
+                template = jinja.get_template("ipxe_tui.j2")
+                rendered = template.render(mac=normalised, machine=machine, host=host)
+                offer_kind = "bty-inventory"
+                offer_summary = (
+                    f"{normalised} offered inventory boot (bty collects disks + reboots)"
+                )
+                offer_details = {"offer": "bty-inventory"}
         elif policy == "sanboot":
             # iPXE boots the local disk itself (drive override, default
             # 0x80), with ``|| exit`` falling back to the firmware boot
@@ -794,15 +831,16 @@ def create_app(
             row = conn.execute("SELECT * FROM machines WHERE mac = ?", (normalised,)).fetchone()
             if row is None:
                 # Auto-discovery: mirror /pxe/{mac}'s behaviour so a
-                # ``bty`` invocation against an unknown MAC creates
-                # a record (boot_policy=bty-tui) instead of 404-ing.
+                # ``bty`` invocation against an unknown MAC creates a
+                # record (boot_policy=bty-inventory) instead of
+                # 404-ing.
                 conn.execute(
                     """
                     INSERT INTO machines
                         (mac, boot_policy,
                          discovered_at, last_seen_at, last_seen_ip,
                          created_at, updated_at)
-                    VALUES (?, 'bty-tui', ?, ?, ?, ?, ?)
+                    VALUES (?, 'bty-inventory', ?, ?, ?, ?, ?)
                     """,
                     (normalised, now, now, client_ip, now, now),
                 )
@@ -866,6 +904,16 @@ def create_app(
         elif policy == "bty-tui":
             plan = {"mode": "interactive", "catalog": f"{base}/catalog.toml"}
             offer_kind = "plan:interactive:tui"
+        elif policy == "bty-inventory":
+            # The live env booted to (re)collect inventory. ``bty`` has
+            # already auto-posted /pxe/<mac>/inventory by the time it
+            # GETs the plan; ``mode=inventory`` tells it to reboot rather
+            # than wait at a wizard. The reboot lands on the
+            # saw_flasher_boot-armed /pxe contact, which sanboots the
+            # disk. (If the box never armed the bit, it just re-collects
+            # next cycle -- self-healing, like bty-flash-always.)
+            plan = {"mode": "inventory"}
+            offer_kind = "plan:inventory"
         else:
             # boot_policy=sanboot (or any other / missing) -- ``bty``
             # has nothing to do (sanboot is handled at the iPXE layer,
@@ -1026,15 +1074,17 @@ def create_app(
         return {"id": event_id, "acknowledged": True}
 
     def _arm_flasher_boot(raw_mac: str) -> None:
-        """Mark that ``raw_mac`` fetched a flash-chain artifact -- proof
-        it actually booted the flasher, which is stronger evidence than
-        the ``/pxe`` config GET (that only means "we told it to flash").
-        One-shot state transition for the ``bty-flash-always``
-        loop-break: the next ``GET /pxe/{mac}`` consumes the bit and
-        serves a sanboot of the freshly-flashed disk instead of
-        reflashing. The WHERE clause confines arming to
-        bty-flash-always machines so the bit's lifecycle can't leak
-        into other policies (a typo'd or stale ``?mac=`` is a no-op)."""
+        """Mark that ``raw_mac`` fetched a live-env artifact -- proof it
+        actually booted the live env, which is stronger evidence than
+        the ``/pxe`` config GET (that only means "we told it to boot").
+        One-shot state transition for the alternating policies: the next
+        ``GET /pxe/{mac}`` consumes the bit and serves a sanboot of the
+        local disk instead of re-running the live-env boot.
+        ``bty-flash-always`` uses it to boot the just-flashed disk;
+        ``bty-inventory`` to boot the disk after re-collecting
+        inventory. The WHERE clause confines arming to those two
+        policies so the bit's lifecycle can't leak into others (a
+        typo'd or stale ``?mac=`` is a no-op)."""
         try:
             mac = _normalise_mac(raw_mac)
         except HTTPException:
@@ -1044,7 +1094,7 @@ def create_app(
                 """
                 UPDATE machines
                 SET saw_flasher_boot = 1, updated_at = ?
-                WHERE mac = ? AND boot_policy = 'bty-flash-always'
+                WHERE mac = ? AND boot_policy IN ('bty-flash-always', 'bty-inventory')
                 """,
                 (_now_iso(), mac),
             )
