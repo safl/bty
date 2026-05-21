@@ -816,6 +816,61 @@ def test_pxe_chain_test_uses_a_valid_boot_policy() -> None:
     )
 
 
+def test_live_env_boot_ordering_invariants() -> None:
+    """Pin the load-bearing live-env systemd ordering. Each of these is
+    silent if broken (systemd just reorders / drops a unit) but every
+    one prevents a known boot-failure class:
+
+      * ``bty-on-tty1`` After ``network-online.target`` -- ``bty`` has
+        to reach the server over HTTP, so the network must be up first.
+      * ``bty-clock-from-http`` Before ``bty-on-tty1`` -- a wrong clock
+        breaks TLS / apt-signature / oras checks against the server
+        (the v0.19.6 clock-skew incident). The clock must be stepped
+        before ``bty`` does any HTTP/TLS, which is every boot policy
+        (flash / tui / inventory all fetch from the server).
+      * ``var-lib-bty-images.mount`` has ``ConditionPathExists`` +
+        ``nofail`` -- the SAME image boots over USB (has a BTY_IMAGES
+        partition) and over the network (does not); a hard mount would
+        stall every netboot ~90s waiting for a device that never
+        appears.
+
+    See also ``test_boot_banner_files_synced_across_live_env_and_server_trees``
+    for the matching "no Before= on the banner units" cycle guard.
+    """
+    units = (
+        REPO_ROOT
+        / "bty-media"
+        / "live-build"
+        / "config"
+        / "includes.chroot"
+        / "etc"
+        / "systemd"
+        / "system"
+    )
+    tty1 = (units / "bty-on-tty1.service").read_text()
+    assert re.search(r"^After=.*\bnetwork-online\.target\b", tty1, re.MULTILINE), (
+        "bty-on-tty1.service must be ordered After network-online.target -- bty "
+        "reaches the server over HTTP and needs the network up first."
+    )
+
+    clock = (units / "bty-clock-from-http.service").read_text()
+    clock_before = [ln for ln in clock.splitlines() if ln.startswith("Before=")]
+    assert any("bty-on-tty1.service" in ln for ln in clock_before), (
+        "bty-clock-from-http.service must be ordered Before bty-on-tty1.service -- "
+        "a skewed clock breaks TLS/oras to the server, so step it before bty runs."
+    )
+
+    mount = (units / "var-lib-bty-images.mount").read_text()
+    assert "ConditionPathExists=/dev/disk/by-label/BTY_IMAGES" in mount, (
+        "var-lib-bty-images.mount must be gated on the BTY_IMAGES device existing, "
+        "so it's skipped on a netboot env that has no such partition."
+    )
+    assert re.search(r"^Options=.*\bnofail\b", mount, re.MULTILINE), (
+        "var-lib-bty-images.mount must use nofail, or every netboot wastes ~90s "
+        "waiting for a BTY_IMAGES device that never appears."
+    )
+
+
 def test_live_env_chains_tag_boot_urls_with_mac() -> None:
     """The live-env iPXE chains (``ipxe_flash.j2`` + ``ipxe_tui.j2``)
     must tag every ``/boot`` artifact URL with ``?mac={{ mac }}``.
