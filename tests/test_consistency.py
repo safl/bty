@@ -795,6 +795,35 @@ def test_every_boot_policy_has_a_machine_row_badge() -> None:
     )
 
 
+def test_every_recorded_event_kind_is_registered() -> None:
+    """Every event ``kind=`` recorded anywhere in src must be in
+    ``KNOWN_EVENT_KINDS`` -- the catalogue that drives the /ui/events
+    filter dropdown (and the docs event-kind table). An event recorded
+    under an unregistered kind still lands in the DB, but the operator
+    can't filter for it and it's invisible to the catalogue, so it
+    silently drifts.
+
+    The regex matches a dotted lowercase kind value not preceded by a
+    word char or dot, which excludes ``subject_kind=`` / ``flash_kind=``
+    / ``s.kind`` and only catches the event-kind ``kind="..."`` form.
+    """
+    from bty.web._events_log import KNOWN_EVENT_KINDS
+
+    known = set(KNOWN_EVENT_KINDS)
+    pat = re.compile(r'(?<![\w.])kind="([a-z][a-z0-9]*(?:\.[a-z0-9_]+)+)"')
+    recorded: set[str] = set()
+    for f in (REPO_ROOT / "src" / "bty").rglob("*.py"):
+        for m in pat.finditer(f.read_text()):
+            recorded.add(m.group(1))
+    assert recorded, "no event kinds matched -- the regex drifted?"
+    missing = sorted(recorded - known)
+    assert not missing, (
+        "event kinds recorded in src but missing from KNOWN_EVENT_KINDS "
+        f"(so absent from the /ui/events filter dropdown): {missing}. "
+        "Add them to KNOWN_EVENT_KINDS in _events_log.py."
+    )
+
+
 def test_pxe_chain_test_uses_a_valid_boot_policy() -> None:
     """The QEMU PXE chain test (the release's integration gate) PUTs a
     machine assignment with a literal ``boot_policy``; it must be a
