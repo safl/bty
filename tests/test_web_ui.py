@@ -1274,8 +1274,21 @@ _LSHW_TREE = {
     "class": "system",
     "product": "Test Box",
     "children": [
-        {"id": "cpu", "class": "processor", "product": "Test CPU @ 3.0GHz"},
-        {"id": "memory", "class": "memory", "size": 17179869184},
+        {
+            "id": "cpu",
+            "class": "processor",
+            "product": "Test CPU @ 3.0GHz",
+            "configuration": {"cores": "4", "threads": "8"},
+        },
+        {
+            "id": "memory",
+            "class": "memory",
+            "size": 17179869184,
+            "children": [
+                {"id": "bank:0", "class": "memory", "size": 8589934592},
+                {"id": "bank:1", "class": "memory", "size": 8589934592},
+            ],
+        },
         {
             "id": "net",
             "class": "network",
@@ -1297,27 +1310,73 @@ def test_lshw_highlights_parses_cpu_ram_nics() -> None:
     hw = lshw_highlights(json.dumps(_LSHW_TREE))
     assert hw is not None
     assert hw["cpu"] == "Test CPU @ 3.0GHz"
+    assert hw["cpu_cores"] == 4
     assert hw["memory"] == "16.0 GiB"
+    assert hw["mem_modules"] == 2  # two populated banks
     assert hw["nics"][0]["mac"] == "aa:bb:cc:dd:ee:ff"
     assert hw["nics"][0]["name"] == "eth0"
     assert lshw_highlights(None) is None
     assert lshw_highlights("not json{") is None
 
 
-def test_ui_machine_detail_renders_hardware_card(client: TestClient) -> None:
-    """Once a box posts lshw, the Machine view shows a Hardware card
-    with the highlights + a raw-download link."""
+def test_lshw_highlights_sums_banks_when_container_has_no_size() -> None:
+    """When lshw puts the size on the bank:* children but not on the
+    'memory' container (a real hardware shape), the total comes from
+    summing the banks rather than reading blank."""
+    import json
+
+    from bty.web._ui import lshw_highlights
+
+    tree = {
+        "id": "sys",
+        "class": "system",
+        "children": [
+            {
+                "id": "memory",
+                "class": "memory",
+                "children": [
+                    {"id": "bank:0", "class": "memory", "size": 4294967296},
+                    {"id": "bank:1", "class": "memory", "size": 4294967296},
+                ],
+            }
+        ],
+    }
+    hw = lshw_highlights(json.dumps(tree))
+    assert hw is not None
+    assert hw["memory"] == "8.0 GiB"
+    assert hw["mem_modules"] == 2
+
+
+def test_ui_machine_detail_renders_inventory_card(client: TestClient) -> None:
+    """Once a box posts an inventory, the Machine view shows a "Machine
+    Inventory" card with the hardware highlights (CPU + cores, RAM +
+    modules, NICs), the drive list, and both raw-download links."""
     _login(client)
     mac = "aa:bb:cc:dd:ee:d0"
     client.get(f"/pxe/{mac}")  # auto-discover so a row exists
     # Inventory POST is the open /pxe endpoint -- no auth.
-    r = client.post(f"/pxe/{mac}/inventory", json={"disks": [], "lshw": _LSHW_TREE})
+    r = client.post(
+        f"/pxe/{mac}/inventory",
+        json={
+            "disks": [{"path": "/dev/sda", "size": "238.5G", "model": "SK hynix", "serial": "S1"}],
+            "lshw": _LSHW_TREE,
+        },
+    )
     assert r.status_code == 204, r.text
     body = client.get(f"/ui/machines/{mac}").text
-    assert 'id="hardware"' in body
+    assert 'id="inventory"' in body
+    assert "Machine Inventory" in body
+    # Both downloads.
     assert f"/machines/{mac}/lshw.json" in body
+    assert f"/machines/{mac}/disks.json" in body
+    # Hardware highlights incl. the new core / module counts.
     assert "Test CPU @ 3.0GHz" in body
+    assert "4 cores" in body
+    assert "2 modules" in body
     assert "aa:bb:cc:dd:ee:ff" in body
+    # Drives listed.
+    assert "/dev/sda" in body
+    assert "SK hynix" in body
 
 
 def test_ui_boot_page_renders_with_artifact_state(client: TestClient) -> None:

@@ -1438,23 +1438,41 @@ def lshw_highlights(blob: str | None) -> dict[str, Any] | None:
         return None
     roots = data if isinstance(data, list) else [data]
     cpu: str | None = None
-    mem_bytes: int | None = None
+    cpu_cores: int | None = None
+    container_bytes: int | None = None  # size on the "System Memory" node
+    bank_bytes = 0  # sum of populated DIMM/bank sizes
+    mem_modules = 0  # count of populated banks
     nics: list[dict[str, Any]] = []
 
     def _walk(node: Any) -> None:
-        nonlocal cpu, mem_bytes
+        nonlocal cpu, cpu_cores, container_bytes, bank_bytes, mem_modules
         if not isinstance(node, dict):
             return
         cls = node.get("class")
+        ident = node.get("id", "")
+        ident = ident if isinstance(ident, str) else ""
         if cls == "processor" and cpu is None:
             prod = node.get("product") or node.get("description")
             if isinstance(prod, str):
                 cpu = prod
+            conf = node.get("configuration")
+            if isinstance(conf, dict):
+                # lshw reports cores as a string ("4"); be liberal.
+                raw_cores = conf.get("cores") or conf.get("enabledcores")
+                if isinstance(raw_cores, int):
+                    cpu_cores = raw_cores
+                elif isinstance(raw_cores, str) and raw_cores.isdigit():
+                    cpu_cores = int(raw_cores)
         elif cls == "memory":
             size = node.get("size")
-            ident = node.get("id", "")
-            if isinstance(size, int) and isinstance(ident, str) and "memory" in ident:
-                mem_bytes = (mem_bytes or 0) + size
+            # A populated DIMM/bank (``bank:0`` etc.) -> count it + sum it.
+            # The "System Memory" container (``memory``) carries the total
+            # on systems that don't break out banks; keep it as fallback.
+            if ident.startswith("bank") and isinstance(size, int) and size > 0:
+                bank_bytes += size
+                mem_modules += 1
+            elif "memory" in ident and isinstance(size, int):
+                container_bytes = (container_bytes or 0) + size
         elif cls == "network":
             name = node.get("logicalname")
             if isinstance(name, list):
@@ -1472,8 +1490,18 @@ def lshw_highlights(blob: str | None) -> dict[str, Any] | None:
     for root in roots:
         _walk(root)
 
+    # Prefer the summed banks (works even when the container node has no
+    # size -- the case the old "container only" parser missed); fall back
+    # to the container total.
+    mem_bytes = bank_bytes or container_bytes
     mem_h = f"{mem_bytes / 1024**3:.1f} GiB" if mem_bytes else None
-    return {"cpu": cpu, "memory": mem_h, "nics": nics}
+    return {
+        "cpu": cpu,
+        "cpu_cores": cpu_cores,
+        "memory": mem_h,
+        "mem_modules": mem_modules or None,
+        "nics": nics,
+    }
 
 
 def _row_to_dict(row: Any) -> dict[str, Any]:

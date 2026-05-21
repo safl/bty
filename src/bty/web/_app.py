@@ -1436,6 +1436,37 @@ def create_app(
             headers={"Content-Disposition": f'attachment; filename="{mac_fname}-lshw.json"'},
         )
 
+    @app.get(
+        "/machines/{mac}/disks.json",
+        dependencies=[Depends(require_auth)],
+    )
+    def get_machine_disks(mac: str) -> Response:
+        """The lsblk-derived disk inventory (``known_disks``) the live
+        env last reported for this MAC, served verbatim for other tools.
+        404 if the machine has never posted an inventory."""
+        normalised = _normalise_mac(mac)
+        with _db.open_db(state_path) as conn:
+            row = conn.execute(
+                "SELECT known_disks FROM machines WHERE mac = ?", (normalised,)
+            ).fetchone()
+        if row is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"no machine record for {normalised}",
+            )
+        blob = row["known_disks"]
+        if not blob:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"no disk inventory for {normalised}",
+            )
+        mac_fname = normalised.replace(":", "-")
+        return Response(
+            content=blob,
+            media_type="application/json",
+            headers={"Content-Disposition": f'attachment; filename="{mac_fname}-disks.json"'},
+        )
+
     @app.put(
         "/machines/{mac}",
         response_model=_models.Machine,

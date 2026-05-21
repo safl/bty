@@ -1839,6 +1839,31 @@ def test_machine_lshw_404_for_unknown_mac(app_client: TestClient) -> None:
     assert r.status_code == 404
 
 
+def test_machine_disks_raw_download(app_client: TestClient) -> None:
+    """GET /machines/{mac}/disks.json serves the lsblk-derived disk
+    inventory verbatim (auth-gated, Windows-safe filename), 404s when no
+    inventory has been posted."""
+    mac = "aa:bb:cc:dd:ee:d7"
+    app_client.get(f"/pxe/{mac}")
+    # 404 before any inventory.
+    assert app_client.get(f"/machines/{mac}/disks.json", cookies=AUTH).status_code == 404
+    app_client.post(
+        f"/pxe/{mac}/inventory",
+        json={"disks": [{"path": "/dev/sda", "serial": "S1", "size": "8G"}]},
+    )
+    assert app_client.get(f"/machines/{mac}/disks.json").status_code == 401  # needs auth
+    dl = app_client.get(f"/machines/{mac}/disks.json", cookies=AUTH)
+    assert dl.status_code == 200
+    assert dl.headers["content-type"].startswith("application/json")
+    cd = dl.headers.get("content-disposition", "")
+    assert "filename=" in cd and ":" not in cd.split("filename=", 1)[1]
+    body = dl.json()
+    assert body[0]["path"] == "/dev/sda"
+    assert body[0]["serial"] == "S1"
+    # Unknown MAC -> 404.
+    assert app_client.get("/machines/00:11:22:33:44:fd/disks.json", cookies=AUTH).status_code == 404
+
+
 def test_auto_discovery_default_agrees_across_pxe_and_plan(app_client: TestClient) -> None:
     """Both auto-discovery sites (GET /pxe/{mac} and /pxe/{mac}/plan)
     must create the placeholder row with the SAME boot_policy -- a drift
