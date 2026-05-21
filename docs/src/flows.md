@@ -286,7 +286,7 @@ incidents on multi-disk hosts. The full picture, in event order:
    bty-web, chains to `/pxe/{mac}`. bty-web records the MAC
    (`machine.discovered` event), sets `boot_policy=bty-inventory`,
    returns the live-env chain (`ipxe_tui.j2`). Audit log gets a
-   `pxe.offered` row with `offer_kind=bty-inventory`.
+   `netboot.pxe.offered` row with `offer_kind=bty-inventory`.
 2. **Live env boots, ``bty`` starts.** ``bty`` runs on tty1; on
    startup it shells out to `lsblk` and POSTs the result to
    `/pxe/{mac}/inventory`. bty-web stores the inventory as JSON
@@ -316,7 +316,7 @@ The gate fires at multiple points:
   banner explaining how to fix it.
 - **`/pxe/{mac}` refuses the flash chain when `target_disk_serial`
   is empty.** Returns `ipxe.j2` (local fallback) and records a
-  `pxe.flash.no_target_disk` event so the operator can see on
+  `netboot.pxe.flash.no_target_disk` event so the operator can see on
   `/ui/events` why their box isn't reflashing.
 - **``bty`` in auto-flash mode refuses when the plan's serial
   doesn't match any current disk.** Prints an operator-readable
@@ -366,17 +366,17 @@ Always:
 - Inserts or updates the machine row (`machine.discovered` event
   fires on first contact; subsequent hits just touch
   `last_seen_at` + `last_seen_ip`).
-- Records `pxe.offered` event with the offer kind so an operator
+- Records `netboot.pxe.offered` event with the offer kind so an operator
   can ask "what did the server hand back to MAC X at time T?"
   without enabling debug logging.
 
 Conditional:
 
-- `pxe.flash.no_target_disk` fires when `boot_policy=bty-flash-always` /
+- `netboot.pxe.flash.no_target_disk` fires when `boot_policy=bty-flash-always` /
   `bty-flash-once` is set, an image is bound, the ref resolves, but
   `target_disk_serial` is empty. Distinct kind so the operator can
   filter for "why isn't this reflashing?" cases.
-- `pxe.flash.orphan_ref` fires when `boot_policy=bty-flash-always` is set and
+- `netboot.pxe.flash.orphan_ref` fires when `boot_policy=bty-flash-always` is set and
   an image is bound but the ref has no resolvable `catalog_entries`
   row. Different failure mode from `no_target_disk`; the binding
   itself is stale.
@@ -391,9 +391,9 @@ Conditional:
 | `machine.deleted`               | Operator `DELETE /machines/{mac}`.                                                                          |
 | `machine.flashed`               | Live env `POST /pxe/{mac}/done`.                                                                            |
 | `machine.inventory`             | Live env `POST /pxe/{mac}/inventory`.                                                                       |
-| `pxe.offered`                   | Every `GET /pxe/{mac}` hit. Details record what was returned.                                              |
-| `pxe.flash.orphan_ref`          | Flash chain refused due to dangling `bty_image_ref`.                                                       |
-| `pxe.flash.no_target_disk`      | Flash chain refused due to empty `target_disk_serial`.                                                     |
+| `netboot.pxe.offered`                   | Every `GET /pxe/{mac}` hit. Details record what was returned.                                              |
+| `netboot.pxe.flash.orphan_ref`          | Flash chain refused due to dangling `bty_image_ref`.                                                       |
+| `netboot.pxe.flash.no_target_disk`      | Flash chain refused due to empty `target_disk_serial`.                                                     |
 | `image.uploaded`                | Operator `PUT /images/{name}` succeeds.                                                                     |
 | `image.upload_failed`           | `PUT /images/{name}` failed (oversize, disk full, etc.).                                                   |
 | `image.hashed`                  | HashManager finishes computing the sha256 for an image.                                                     |
@@ -401,10 +401,10 @@ Conditional:
 | `catalog.entry.added`           | Operator `POST /catalog/entries` (form or JSON) succeeds.                                                  |
 | `catalog.entry.add_failed`      | sha resolve / oras resolve failed on `/catalog/entries`.                                                   |
 | `catalog.entry.deleted`         | Operator `DELETE /catalog/entries`.                                                                         |
-| `boot.release.fetched`          | `/ui/netboot/fetch-release` (or `POST /boot/releases`) successfully pulled artifacts.                          |
-| `boot.release.fetch_failed`     | Same path failed (404, sha mismatch, etc.).                                                                 |
-| `settings.tftp.controlled`      | Operator `POST /ui/settings/tftp-control` succeeded.                                                        |
-| `settings.tftp.control_failed`  | Same path failed (`sudo -n` denied, helper exit non-zero, etc.).                                            |
+| `netboot.artifacts.fetched`          | `/ui/netboot/fetch-release` (or `POST /boot/releases`) successfully pulled artifacts.                          |
+| `netboot.artifacts.fetch_failed`     | Same path failed (404, sha mismatch, etc.).                                                                 |
+| `netboot.tftp.controlled`      | Operator `POST /ui/settings/tftp-control` succeeded.                                                        |
+| `netboot.tftp.control_failed`  | Same path failed (`sudo -n` denied, helper exit non-zero, etc.).                                            |
 | `settings.pxe.activated`        | Legacy: operator armed the now-removed proxy-DHCP block.                                                    |
 | `settings.pxe.activate_failed`  | Legacy: same path failed.                                                                                    |
 | `auth.login.succeeded`          | Operator `POST /ui/login` with a valid OS password.                                                         |
@@ -441,7 +441,7 @@ the operator sees:
 
 | Gate                                                  | Trigger condition                                                  | Where it fires                          | Operator surface                                   |
 |-------------------------------------------------------|--------------------------------------------------------------------|-----------------------------------------|----------------------------------------------------|
-| Refuse flash chain without `target_disk_serial`        | `boot_policy=bty-flash-always`/`bty-flash-once`, image bound, target empty.        | `GET /pxe/{mac}`                        | `pxe.flash.no_target_disk` event; ipxe.j2 (exit to firmware). |
+| Refuse flash chain without `target_disk_serial`        | `boot_policy=bty-flash-always`/`bty-flash-once`, image bound, target empty.        | `GET /pxe/{mac}`                        | `netboot.pxe.flash.no_target_disk` event; ipxe.j2 (exit to firmware). |
 | Refuse `boot_policy=bty-flash-always` upsert without target       | Form posts `boot_policy=bty-flash-always` and `target_disk_serial=""`.         | `POST /ui/machines/{mac}`               | 303 to `/ui/machines/{mac}?error=...` flash banner. |
 | Refuse flash on serial mismatch at boot time           | Live env can't find a current disk whose serial matches the plan's `target_disk_serial`. | `bty` auto-flash on tty1 (live env)     | `bty` prints a red "No matching disk" Panel + non-zero exit; bty-on-tty1.service stays at the failed banner. |
 | Refuse oversize catalog upload                         | `/ui/catalog/upload` body > 1 MiB.                                  | `POST /ui/catalog/upload`               | 303 with `?error=...exceeded...`.                  |

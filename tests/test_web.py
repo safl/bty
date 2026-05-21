@@ -1943,10 +1943,10 @@ def test_pxe_flash_with_orphan_ref_logs_event(
         cookies=AUTH,
     ).json()["events"]
     kinds = [e["kind"] for e in events]
-    assert "pxe.flash.orphan_ref" in kinds
+    assert "netboot.pxe.flash.orphan_ref" in kinds
     # Details carry the dangling ref so the operator can grep
     # for it across catalog history.
-    orphan_evt = next(e for e in events if e["kind"] == "pxe.flash.orphan_ref")
+    orphan_evt = next(e for e in events if e["kind"] == "netboot.pxe.flash.orphan_ref")
     assert orphan_evt["details"]["bty_image_ref"] == orphan_ref
 
 
@@ -1990,7 +1990,7 @@ def test_pxe_flash_refuses_chain_logs_no_target_disk_event(
         cookies=AUTH,
     ).json()["events"]
     kinds = [e["kind"] for e in events]
-    assert "pxe.flash.no_target_disk" in kinds
+    assert "netboot.pxe.flash.no_target_disk" in kinds
 
 
 def test_machines_upsert_accepts_target_disk_serial(app_client: TestClient) -> None:
@@ -2177,7 +2177,7 @@ def test_pxe_hit_records_pxe_offered_event(app_client: TestClient) -> None:
         params={
             "subject_kind": "machine",
             "subject_id": "aa:bb:cc:dd:ee:f0",
-            "kind": "pxe.offered",
+            "kind": "netboot.pxe.offered",
         },
         cookies=AUTH,
     )
@@ -2185,7 +2185,7 @@ def test_pxe_hit_records_pxe_offered_event(app_client: TestClient) -> None:
     events = r.json()["events"]
     assert len(events) == 1
     ev = events[0]
-    assert ev["kind"] == "pxe.offered"
+    assert ev["kind"] == "netboot.pxe.offered"
     assert ev["subject_id"] == "aa:bb:cc:dd:ee:f0"
     assert ev["actor"] == "pxe-client"
     assert ev["details"]["offer"] == "sanboot"
@@ -2202,8 +2202,8 @@ def test_pxe_hit_records_inventory_offer_for_unknown_mac(app_client: TestClient)
         cookies=AUTH,
     )
     events = {e["kind"]: e for e in r.json()["events"]}
-    assert set(events) == {"machine.discovered", "pxe.offered"}
-    assert events["pxe.offered"]["details"]["offer"] == "bty-inventory"
+    assert set(events) == {"machine.discovered", "netboot.pxe.offered"}
+    assert events["netboot.pxe.offered"]["details"]["offer"] == "bty-inventory"
 
 
 def test_machines_upsert_accepts_flash_once(app_client: TestClient) -> None:
@@ -2526,7 +2526,7 @@ def test_events_filter_by_subject_id(app_client: TestClient) -> None:
     events = r.json()["events"]
     assert len(events) == 2
     assert {e["subject_id"] for e in events} == {"aa:bb:cc:dd:ee:01"}
-    assert {e["kind"] for e in events} == {"machine.discovered", "pxe.offered"}
+    assert {e["kind"] for e in events} == {"machine.discovered", "netboot.pxe.offered"}
 
 
 def test_ui_events_page_renders(app_client: TestClient) -> None:
@@ -2629,12 +2629,12 @@ def test_ui_events_page_renders_failure_with_danger_badge(
     )
     r = app_client.get(
         "/ui/events",
-        params={"kind": "boot.release.fetch_failed"},
+        params={"kind": "netboot.artifacts.fetch_failed"},
         cookies=AUTH,
     )
     assert r.status_code == 200
     body = r.text
-    assert "boot.release.fetch_failed" in body
+    assert "netboot.artifacts.fetch_failed" in body
     # Danger badge appears in the rendered row.
     assert "bg-danger" in body
 
@@ -3698,9 +3698,9 @@ def test_release_fetch_manager_backfills_from_events(tmp_path: Path) -> None:
     with _db.open_db(state_path) as conn:
         _events_log.record(
             conn,
-            kind="boot.release.fetched",
+            kind="netboot.artifacts.fetched",
             summary="release latest fetched",
-            subject_kind="boot",
+            subject_kind="netboot",
             subject_id="latest",
             actor="operator",
             source_ip="127.0.0.1",
@@ -3713,9 +3713,9 @@ def test_release_fetch_manager_backfills_from_events(tmp_path: Path) -> None:
         )
         _events_log.record(
             conn,
-            kind="boot.release.fetch_failed",
+            kind="netboot.artifacts.fetch_failed",
             summary="release v0.1.2 failed",
-            subject_kind="boot",
+            subject_kind="netboot",
             subject_id="v0.1.2",
             actor="operator",
             source_ip="127.0.0.1",
@@ -3759,18 +3759,18 @@ def test_release_fetch_manager_backfill_picks_most_recent_per_tag(
         # Older failure
         _events_log.record(
             conn,
-            kind="boot.release.fetch_failed",
+            kind="netboot.artifacts.fetch_failed",
             summary="latest failed first attempt",
-            subject_kind="boot",
+            subject_kind="netboot",
             subject_id="latest",
             details={"tag": "latest", "error": "old network blip"},
         )
         # Newer success
         _events_log.record(
             conn,
-            kind="boot.release.fetched",
+            kind="netboot.artifacts.fetched",
             summary="latest succeeded on retry",
-            subject_kind="boot",
+            subject_kind="netboot",
             subject_id="latest",
             details={"tag": "latest", "base_url": "https://example/latest", "total_bytes": 99},
         )
@@ -3859,10 +3859,10 @@ def test_release_fetch_manager_failure_logs_event(tmp_path: Path) -> None:
     asyncio.run(go())
 
     with _db.open_db(state_db) as conn:
-        rows = list_events(conn, kind="boot.release.fetch_failed")
+        rows = list_events(conn, kind="netboot.artifacts.fetch_failed")
     assert len(rows) == 1
     row = rows[0]
-    assert row.subject_kind == "boot"
+    assert row.subject_kind == "netboot"
     assert row.subject_id == "v9.9.9"
     assert row.actor == "system"
     assert row.details is not None

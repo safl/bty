@@ -1196,7 +1196,7 @@ def test_e2e_flash_safety_gate_no_target_disk_serial_logs_event(
             (mac,),
         ).fetchall()
     kinds = {r["kind"] for r in rows}
-    assert "pxe.flash.no_target_disk" in kinds, (
+    assert "netboot.pxe.flash.no_target_disk" in kinds, (
         f"safety gate fired but did not log pxe.flash.no_target_disk event "
         f"for operator debugging visibility. events: {kinds}"
     )

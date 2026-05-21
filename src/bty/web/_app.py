@@ -632,7 +632,7 @@ def create_app(
                 with _db.open_db(state_path) as conn:
                     _log_event(
                         conn,
-                        kind="pxe.flash.no_target_disk",
+                        kind="netboot.pxe.flash.no_target_disk",
                         summary=(
                             f"machine {normalised}: boot_policy={policy} but no "
                             "target_disk_serial picked; refusing flash chain"
@@ -671,7 +671,7 @@ def create_app(
                 with _db.open_db(state_path) as conn:
                     _log_event(
                         conn,
-                        kind="pxe.flash.orphan_ref",
+                        kind="netboot.pxe.flash.orphan_ref",
                         summary=f"machine {normalised} bound to ref={short}...: no catalog row",
                         subject_kind="machine",
                         subject_id=normalised,
@@ -715,7 +715,7 @@ def create_app(
         with _db.open_db(state_path) as conn:
             _log_event(
                 conn,
-                kind="pxe.offered",
+                kind="netboot.pxe.offered",
                 summary=offer_summary,
                 subject_kind="machine",
                 subject_id=normalised,
@@ -932,7 +932,7 @@ def create_app(
         with _db.open_db(state_path) as conn:
             _log_event(
                 conn,
-                kind="pxe.plan",
+                kind="netboot.pxe.plan",
                 summary=f"{normalised} plan offered: mode={plan['mode']} (policy={policy})",
                 subject_kind="machine",
                 subject_id=normalised,

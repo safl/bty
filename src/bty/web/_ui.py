@@ -874,7 +874,7 @@ def register_ui_routes(
             release_repo = _settings_store.resolve_release_repo(conn)
             release_tag = _settings_store.resolve_release_tag(conn)
             # Recent netboot activity for the page's "Activity" table.
-            boot_events = _events_log.list_events(conn, subject_kind="boot", limit=10)
+            boot_events = _events_log.list_events(conn, subject_kind="netboot", limit=10)
         return render(
             "ui/netboot.html",
             request,
@@ -912,7 +912,7 @@ def register_ui_routes(
         activity. The artifact inventory + TFTP daemon are on the Netboot
         page."""
         with _db.open_db(state_path) as conn:
-            boot_events = _events_log.list_events(conn, subject_kind="boot", limit=10)
+            boot_events = _events_log.list_events(conn, subject_kind="netboot", limit=10)
             release_repo = _settings_store.resolve_release_repo(conn)
             release_tag = _settings_store.resolve_release_tag(conn)
         return render(
@@ -1289,9 +1289,9 @@ def register_ui_routes(
             with _db.open_db(state_path) as conn:
                 _events_log.record(
                     conn,
-                    kind="settings.tftp.control_failed",
+                    kind="netboot.tftp.control_failed",
                     summary=f"TFTP {action!r} failed: {exc}",
-                    subject_kind="settings",
+                    subject_kind="netboot",
                     subject_id="tftp",
                     actor="operator",
                     source_ip=client_ip,
@@ -1306,9 +1306,9 @@ def register_ui_routes(
         with _db.open_db(state_path) as conn:
             _events_log.record(
                 conn,
-                kind="settings.tftp.controlled",
+                kind="netboot.tftp.controlled",
                 summary=f"TFTP daemon {action}",
-                subject_kind="settings",
+                subject_kind="netboot",
                 subject_id="tftp",
                 actor="operator",
                 source_ip=client_ip,
@@ -1341,9 +1341,9 @@ def register_ui_routes(
             with _db.open_db(state_path) as conn:
                 _events_log.record(
                     conn,
-                    kind="boot.release.fetch_failed",
+                    kind="netboot.artifacts.fetch_failed",
                     summary=f"boot release {resolved_tag!r} fetch failed: {exc}",
-                    subject_kind="boot",
+                    subject_kind="netboot",
                     subject_id=resolved_tag,
                     actor="operator",
                     source_ip=client_ip,
@@ -1358,9 +1358,9 @@ def register_ui_routes(
         with _db.open_db(state_path) as conn:
             _events_log.record(
                 conn,
-                kind="boot.release.fetched",
+                kind="netboot.artifacts.fetched",
                 summary=f"boot release {resolved_tag!r} fetched from {result.base_url}",
-                subject_kind="boot",
+                subject_kind="netboot",
                 subject_id=resolved_tag,
                 actor="operator",
                 source_ip=client_ip,

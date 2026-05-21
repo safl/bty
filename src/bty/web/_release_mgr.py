@@ -151,7 +151,7 @@ class ReleaseFetchManager(_BaseAsyncManager[ReleaseFetchState]):
             with _db.open_db(state_path) as conn:
                 rows = _events_log.list_events(
                     conn,
-                    subject_kind="boot",
+                    subject_kind="netboot",
                     limit=200,
                 )
         except Exception:
@@ -162,7 +162,7 @@ class ReleaseFetchManager(_BaseAsyncManager[ReleaseFetchState]):
         # ``list_events``.
         seen: set[str] = set()
         for ev in rows:
-            if ev.kind not in ("boot.release.fetched", "boot.release.fetch_failed"):
+            if ev.kind not in ("netboot.artifacts.fetched", "netboot.artifacts.fetch_failed"):
                 continue
             tag = ev.subject_id
             if not tag or tag in seen:
@@ -175,13 +175,15 @@ class ReleaseFetchManager(_BaseAsyncManager[ReleaseFetchState]):
                 started = None
             self._states[tag] = ReleaseFetchState(
                 tag=tag,
-                status="completed" if ev.kind == "boot.release.fetched" else "failed",
+                status="completed" if ev.kind == "netboot.artifacts.fetched" else "failed",
                 bytes_done=int(details.get("total_bytes") or 0),
                 bytes_total=int(details.get("total_bytes") or 0) or None,
                 started_at=started,
                 finished_at=started,
                 error=(
-                    str(details.get("error")) if ev.kind == "boot.release.fetch_failed" else None
+                    str(details.get("error"))
+                    if ev.kind == "netboot.artifacts.fetch_failed"
+                    else None
                 ),
                 base_url=(
                     details.get("base_url") if isinstance(details.get("base_url"), str) else None
@@ -307,9 +309,9 @@ class ReleaseFetchManager(_BaseAsyncManager[ReleaseFetchState]):
             with _db.open_db(self._state_path) as conn:
                 _log_event(
                     conn,
-                    kind="boot.release.fetched",
+                    kind="netboot.artifacts.fetched",
                     summary=f"boot release {state.tag!r} fetched from {state.base_url}",
-                    subject_kind="boot",
+                    subject_kind="netboot",
                     subject_id=state.tag,
                     actor="system",
                     details={
@@ -322,9 +324,9 @@ class ReleaseFetchManager(_BaseAsyncManager[ReleaseFetchState]):
             with _db.open_db(self._state_path) as conn:
                 _log_event(
                     conn,
-                    kind="boot.release.fetch_failed",
+                    kind="netboot.artifacts.fetch_failed",
                     summary=f"boot release {state.tag!r} fetch failed: {error or 'unknown error'}",
-                    subject_kind="boot",
+                    subject_kind="netboot",
                     subject_id=state.tag,
                     actor="system",
                     details={

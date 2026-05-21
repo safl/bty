@@ -749,7 +749,7 @@ def test_ui_fetches_page_shows_recent_activity_card(
     assert r.status_code == 200
     body = r.text
     assert "Recent netboot activity" in body
-    assert "boot.release.fetched" in body
+    assert "netboot.artifacts.fetched" in body
 
 
 def test_ui_machines_filter_assigned_excludes_discovered(client: TestClient) -> None:
@@ -1879,7 +1879,7 @@ def test_ui_settings_tftp_control_success_renders_green_flash(
     lives under /ui/netboot now; the POST URL is unchanged for
     backwards compat but the response is the boot template,
     not settings). The handler also records a
-    ``settings.tftp.controlled`` event."""
+    ``netboot.tftp.controlled`` event."""
     from bty.web import _sysconfig
 
     seen: list[str] = []
@@ -1899,10 +1899,10 @@ def test_ui_settings_tftp_control_success_renders_green_flash(
     # Event recorded.
     events = client.get(
         "/events",
-        params={"subject_kind": "settings", "subject_id": "tftp"},
+        params={"subject_kind": "netboot", "subject_id": "tftp"},
         cookies=AUTH,
     ).json()["events"]
-    assert any(e["kind"] == "settings.tftp.controlled" for e in events)
+    assert any(e["kind"] == "netboot.tftp.controlled" for e in events)
 
 
 def test_ui_settings_tftp_control_failure_renders_red_flash_and_logs_event(
@@ -1911,7 +1911,7 @@ def test_ui_settings_tftp_control_failure_renders_red_flash_and_logs_event(
 ) -> None:
     """A ``SysConfigError`` from the helper bounces back to the
     Netboot page (the TFTP panel's home now) with a red flash
-    AND a ``settings.tftp.control_failed`` event so the operator
+    AND a ``netboot.tftp.control_failed`` event so the operator
     sees the systemctl exit code in the audit log without
     having to ssh in."""
     from bty.web import _sysconfig
@@ -1928,10 +1928,10 @@ def test_ui_settings_tftp_control_failure_renders_red_flash_and_logs_event(
     assert "dnsmasq.service is masked" in body
     events = client.get(
         "/events",
-        params={"subject_kind": "settings", "subject_id": "tftp"},
+        params={"subject_kind": "netboot", "subject_id": "tftp"},
         cookies=AUTH,
     ).json()["events"]
-    failed = [e for e in events if e["kind"] == "settings.tftp.control_failed"]
+    failed = [e for e in events if e["kind"] == "netboot.tftp.control_failed"]
     assert len(failed) == 1
     assert failed[0]["details"]["action"] == "start"
 
@@ -1995,10 +1995,10 @@ def test_ui_boot_fetch_success_renders_green_flash(
     assert "12,345 bytes" in body
     events = client.get(
         "/events",
-        params={"subject_kind": "boot", "subject_id": "v0.1.2"},
+        params={"subject_kind": "netboot", "subject_id": "v0.1.2"},
         cookies=AUTH,
     ).json()["events"]
-    assert any(e["kind"] == "boot.release.fetched" for e in events)
+    assert any(e["kind"] == "netboot.artifacts.fetched" for e in events)
 
 
 def test_ui_boot_fetch_failure_renders_red_flash_and_logs_event(
@@ -2021,10 +2021,10 @@ def test_ui_boot_fetch_failure_renders_red_flash_and_logs_event(
     assert "Fetch failed" in r.text
     events = client.get(
         "/events",
-        params={"subject_kind": "boot", "subject_id": "v0.999.999"},
+        params={"subject_kind": "netboot", "subject_id": "v0.999.999"},
         cookies=AUTH,
     ).json()["events"]
-    failed = [e for e in events if e["kind"] == "boot.release.fetch_failed"]
+    failed = [e for e in events if e["kind"] == "netboot.artifacts.fetch_failed"]
     assert len(failed) == 1
     assert failed[0]["details"]["tag"] == "v0.999.999"
 

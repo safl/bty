@@ -298,7 +298,7 @@ def test_acknowledge_event_and_unacked_failure_count(tmp_path: Path) -> None:
     conn, close = _open(state)
     try:
         fail1 = _events_log.record(conn, kind="image.hash_failed", summary="boom 1")
-        fail2 = _events_log.record(conn, kind="boot.release.fetch_failed", summary="boom 2")
+        fail2 = _events_log.record(conn, kind="netboot.artifacts.fetch_failed", summary="boom 2")
         ok = _events_log.record(conn, kind="machine.flashed", summary="fine")
         conn.commit()
         # New events default to unacknowledged.
