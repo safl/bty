@@ -278,6 +278,17 @@ def pick_image_layer(manifest: dict[str, Any]) -> dict[str, Any]:
     """
     layers = manifest.get("layers")
     if not isinstance(layers, list) or not layers:
+        # A multi-arch image *index* (``manifests`` instead of
+        # ``layers``) is a common cause -- a rolling tag that resolves
+        # to an OCI index rather than a single artifact manifest. Name
+        # it so the operator points at a concrete manifest/digest
+        # instead of staring at "no layers".
+        if isinstance(manifest.get("manifests"), list) and manifest["manifests"]:
+            raise OrasError(
+                "oras ref resolved to a multi-arch image index, not a single "
+                "artifact manifest; reference a concrete platform manifest by "
+                "its @sha256:<digest> instead of the index tag"
+            )
         raise OrasError("manifest has no layers")
 
     image_like: list[dict[str, Any]] = []

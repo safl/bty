@@ -137,6 +137,21 @@ def test_pick_image_layer_raises_on_empty_layers() -> None:
         oras.pick_image_layer({"layers": []})
 
 
+def test_pick_image_layer_names_multiarch_index() -> None:
+    """A multi-arch image index (``manifests``, no ``layers``) gets a
+    specific error pointing the operator at a concrete digest, not the
+    generic 'no layers'."""
+    index = {
+        "mediaType": "application/vnd.oci.image.index.v1+json",
+        "manifests": [
+            {"digest": "sha256:" + "aa" * 32, "platform": {"architecture": "amd64"}},
+            {"digest": "sha256:" + "bb" * 32, "platform": {"architecture": "arm64"}},
+        ],
+    }
+    with pytest.raises(oras.OrasError, match="multi-arch image index"):
+        oras.pick_image_layer(index)
+
+
 def test_pick_image_layer_falls_back_when_all_look_like_sidecars() -> None:
     """If the picker filtered everything out (e.g. every layer is
     annotated as .sha256), fall back to picking the largest of the
