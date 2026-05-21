@@ -30,13 +30,16 @@
     <div class="card-body">
         <h2 class="h5 mb-3">Assignment</h2>
         <form action="/ui/machines/{{ m.mac }}" method="post">
-            {# Boot policy first: it drives which other fields matter.
-               Image + Target disk are only relevant for the flash chain;
-               local + tui ignore both. The inline script below hides the
-               irrelevant fields so the operator sees only what's
-               actionable for the chosen policy. #}
-            <div class="mb-3">
-                <label class="form-label" for="boot_policy">Boot policy</label>
+            {# Two tiers of config (see docs/concepts "general vs
+               per-policy"): the boot policy is the MODE selector; the
+               "Machine configuration" section below holds the machine's
+               GENERAL properties (image, target disk, sanboot drive,
+               hostname). Each policy READS a subset of those. The inline
+               script DIMS + annotates the fields the selected policy
+               ignores rather than hiding them, so the
+               general/consumed-by split stays visible to the operator. #}
+            <div class="mb-4">
+                <label class="form-label fw-semibold" for="boot_policy">Boot policy</label>
                 <select name="boot_policy" id="boot_policy" class="form-select">
                     {% for policy in boot_policies %}
                     <option value="{{ policy }}" {% if policy == m.boot_policy %}selected{% endif %}>{{ policy }}</option>
@@ -50,7 +53,8 @@
                     below; defaults to the first disk), falling back to the
                     firmware order if it can't.
                     <code>bty-flash-always</code>: PXE boots chain into the live env so the box
-                    re-flashes the assigned image every time (per-job CI cadence).
+                    re-flashes the assigned image every time, then sanboots the
+                    just-flashed disk before the next reflash (per-job CI cadence).
                     <code>bty-flash-once</code>: same as <code>bty-flash-always</code> for the next
                     PXE boot, then auto-flips to the configured settle policy
                     (Settings; default <code>local</code>) after the live env
@@ -62,27 +66,20 @@
                     inventory to bty-web (see Target disk below).
                 </div>
             </div>
-            <div class="mb-3" data-policy-relevant="sanboot bty-flash-always bty-flash-once">
-                <label class="form-label" for="sanboot_drive">Sanboot drive</label>
-                <input type="text" name="sanboot_drive" id="sanboot_drive"
-                       class="form-control font-monospace"
-                       value="{{ m.sanboot_drive or '' }}" placeholder="0x80"
-                       pattern="^0x[0-9a-fA-F]{1,2}$"
-                       title="iPXE BIOS drive to sanboot: 0x80 = first disk, 0x81 = second, ...">
-                <div class="form-text">
-                    Which local disk iPXE boots whenever bty sanboots this
-                    machine: <code>0x80</code> is the first disk, <code>0x81</code>
-                    the second, and so on. Leave blank for the default
-                    (<code>0x80</code>). iPXE selects by BIOS drive number, not by
-                    the Linux serial used for flashing. Applies to the
-                    <code>sanboot</code> policy, the one-shot disk boot after each
-                    <code>bty-flash-always</code> reflash, and a
-                    <code>bty-flash-once</code> machine that settles to
-                    <code>sanboot</code>.
-                </div>
-            </div>
+
+            <h3 class="h6 text-uppercase text-body-secondary border-top pt-3 mb-1">Machine configuration</h3>
+            <p class="form-text mt-0 mb-3">
+                Properties of this machine, independent of policy. The selected
+                boot policy reads the subset it needs; fields it ignores are
+                dimmed and marked <em>not used</em>. Values persist across
+                policy changes (e.g. a sanboot drive you calibrated under
+                <code>sanboot</code> still applies once you switch to a flash
+                policy).
+            </p>
+
             <div class="mb-3" data-policy-relevant="bty-flash-always bty-flash-once">
-                <label class="form-label" for="bty_image_ref">Image</label>
+                <label class="form-label" for="bty_image_ref">Image
+                    <span class="policy-usage small text-body-secondary fw-normal ms-1"></span></label>
                 <select name="bty_image_ref" id="bty_image_ref" class="form-select">
                     <option value="">- none (discovered, will boot from local disk) -</option>
                     {% for img in images %}
@@ -96,14 +93,14 @@
                     </option>
                     {% endfor %}
                 </select>
-            </div>
-            <div class="mb-3" data-policy-relevant="local bty-flash-always bty-flash-once bty-tui">
-                <label class="form-label" for="hostname">Hostname</label>
-                <input type="text" name="hostname" id="hostname" class="form-control"
-                       value="{{ m.hostname or '' }}" placeholder="(optional)">
+                <div class="form-text">
+                    Image bound for flashing. Read by <code>bty-flash-always</code>
+                    and <code>bty-flash-once</code>.
+                </div>
             </div>
             <div class="mb-3" data-policy-relevant="bty-flash-always bty-flash-once">
-                <label class="form-label" for="target_disk_serial">Target disk</label>
+                <label class="form-label" for="target_disk_serial">Target disk
+                    <span class="policy-usage small text-body-secondary fw-normal ms-1"></span></label>
                 {% if m.known_disks %}
                 <select name="target_disk_serial" id="target_disk_serial" class="form-select">
                     <option value="">- none picked (flash will refuse) -</option>
@@ -140,6 +137,32 @@
                 </div>
                 {% endif %}
             </div>
+            <div class="mb-3" data-policy-relevant="sanboot bty-flash-always bty-flash-once">
+                <label class="form-label" for="sanboot_drive">Sanboot drive
+                    <span class="policy-usage small text-body-secondary fw-normal ms-1"></span></label>
+                <input type="text" name="sanboot_drive" id="sanboot_drive"
+                       class="form-control font-monospace"
+                       value="{{ m.sanboot_drive or '' }}" placeholder="0x80"
+                       pattern="^0x[0-9a-fA-F]{1,2}$"
+                       title="iPXE BIOS drive to sanboot: 0x80 = first disk, 0x81 = second, ...">
+                <div class="form-text">
+                    Which local disk iPXE boots whenever bty sanboots this
+                    machine: <code>0x80</code> is the first disk, <code>0x81</code>
+                    the second, and so on. Leave blank for the default
+                    (<code>0x80</code>). iPXE selects by BIOS drive number, not by
+                    the Linux serial used for flashing. Read by the
+                    <code>sanboot</code> policy, the one-shot disk boot after each
+                    <code>bty-flash-always</code> reflash, and a
+                    <code>bty-flash-once</code> machine that settles to
+                    <code>sanboot</code>.
+                </div>
+            </div>
+            <div class="mb-3">
+                <label class="form-label" for="hostname">Hostname</label>
+                <input type="text" name="hostname" id="hostname" class="form-control"
+                       value="{{ m.hostname or '' }}" placeholder="(optional)">
+                <div class="form-text">Cosmetic label; not consumed by the boot chain.</div>
+            </div>
             <div class="d-flex justify-content-between">
                 <button type="submit" class="btn btn-primary">Save</button>
                 <button type="submit" formaction="/ui/machines/{{ m.mac }}/delete"
@@ -154,28 +177,32 @@
 
 <script>
 (function () {
-    // Show/hide form fields based on the selected boot_policy. Each
-    // optional field carries a ``data-policy-relevant`` attribute
-    // listing the policies it applies to (space-separated); we
-    // hide rows whose policy is not the current selection. Values
-    // in hidden rows still POST -- they don't get cleared -- so an
-    // operator who picks ``local`` doesn't lose the image binding
-    // they previously chose; flipping back to ``flash`` restores
-    // the form to where it was.
+    // Machine config is GENERAL (a property of the box); each policy
+    // READS a subset. Rather than hide the fields a policy ignores, we
+    // DIM them and tag them "not used by <policy>", so the
+    // general/consumed-by split stays visible. Each general field
+    // carries a ``data-policy-relevant`` attribute listing the
+    // policies that consume it (space-separated). All fields stay in
+    // the DOM and still POST -- dimming never clears a value, so a
+    // sanboot drive calibrated under ``sanboot`` survives a switch to
+    // a flash policy.
     const policySelect = document.getElementById("boot_policy");
     if (!policySelect) return;
     const targets = document.querySelectorAll("[data-policy-relevant]");
 
-    function applyVisibility() {
+    function applyUsage() {
         const current = policySelect.value;
         targets.forEach((el) => {
             const allowed = (el.getAttribute("data-policy-relevant") || "").split(/\s+/);
-            el.style.display = allowed.includes(current) ? "" : "none";
+            const consumed = allowed.includes(current);
+            el.classList.toggle("opacity-50", !consumed);
+            const note = el.querySelector(".policy-usage");
+            if (note) note.textContent = consumed ? "" : "(not used by " + current + ")";
         });
     }
 
-    policySelect.addEventListener("change", applyVisibility);
-    applyVisibility();
+    policySelect.addEventListener("change", applyUsage);
+    applyUsage();
 })();
 </script>
 
