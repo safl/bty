@@ -105,10 +105,20 @@ env; `sanboot` boots the local disk:
 - `bty-tui` - chain the live env in interactive mode. The target
   lands at `bty` on tty1 and the operator picks an image from the
   server's catalog by hand.
+- `bty-inventory` - to inventory what `bty-flash-always` is to
+  flashing: it alternates an inventory live-env boot then a sanboot
+  across PXE contacts (same mechanism). The active boot chains the
+  live env just to re-report the box's disks (no flash, no wizard),
+  then reboots; the next contact sanboots the disk. So every power
+  cycle refreshes the inventory before booting, surfacing swapped
+  hardware.
 
-The auto-discovery default for unknown MACs is `bty-tui`, so a new
-box PXE-booting against a fresh server appliance becomes a useful TUI
-session immediately - no per-MAC server-side configuration needed.
+The auto-discovery default for unknown MACs is `bty-inventory`, so a
+new box PXE-booting against a fresh server appliance self-reports its
+disks and then just boots - no per-MAC configuration needed, and the
+operator can assign a flash policy from the now-populated disk
+dropdown. (`bty-tui` is the explicit opt-in for "drop me at the
+wizard to flash by hand now".)
 
 The completion signal `POST /pxe/{mac}/done` always updates
 `last_flashed_at`. It mutates `boot_policy` only for `bty-flash-once`,

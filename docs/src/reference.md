@@ -55,6 +55,7 @@ inventory to `<server>/pxe/<mac>/inventory`, then GETs
 |---|---|
 | `auto` | Flash without prompts (the plan carries the image URL + target serial picked on the server side), then POST `/pxe/<mac>/done` and reboot. |
 | `interactive` | Drop into the wizard with the plan's catalog pre-loaded. Operator picks image + disk. |
+| `inventory` | Post the disk inventory, then reboot (no flash, no wizard). The next PXE contact sanboots the disk. Used by `boot_policy=bty-inventory`. |
 | `local` | Print a notice and exit. Firmware / local-disk boot handles it. |
 
 Network / parse failures fall through to `interactive` with the
@@ -242,9 +243,10 @@ tooling which can't carry a session cookie:
  the cmdline.)
 
  Auto-discovery: the first contact for an unknown MAC inserts a
- placeholder row (image=null, boot_policy=bty-tui) so the operator
- sees it in `GET /machines` and can claim it with `PUT
- /machines/{mac}`. Repeat contacts update `last_seen_at` /
+ placeholder row (image=null, boot_policy=bty-inventory) so the box
+ self-reports its disks and just boots; the operator sees it in
+ `GET /machines` with a populated disk dropdown and can claim it
+ with `PUT /machines/{mac}`. Repeat contacts update `last_seen_at` /
  `last_seen_ip`. Trust model: bty-web is meant for a homelab /
  CI network, not the open internet - anyone reachable can write
  discovery rows.
@@ -338,8 +340,9 @@ Machine = {
   "last_seen_ip":  "203.0.113.42" | null,
   "boot_policy":   "sanboot"                 # one of sanboot /
                  | "bty-flash-always"        # bty-flash-always /
-                 | "bty-flash-once"          # bty-flash-once / bty-tui;
-                 | "bty-tui",                # what /pxe/{mac} returns
+                 | "bty-flash-once"          # bty-flash-once /
+                 | "bty-tui"                 # bty-tui / bty-inventory;
+                 | "bty-inventory",          # what /pxe/{mac} returns
   "sanboot_drive": "0x80" | null,            # iPXE BIOS drive for sanboot
                                              # (null = default 0x80)
   "last_flashed_at": "<ISO 8601>" | null,    # set by POST /pxe/{mac}/done
@@ -360,9 +363,9 @@ MachineUpsert = {
   "hostname": str | null,
   "boot_policy": "sanboot"                   # default "sanboot" on PUT;
               | "bty-flash-always"           # auto-discovery sets
-              | "bty-flash-once"             # "bty-tui"; the flash
-              | "bty-tui",                   # policies require a
-                                             # target_disk_serial
+              | "bty-flash-once"             # "bty-inventory"; the
+              | "bty-tui"                    # flash policies require a
+              | "bty-inventory",             # target_disk_serial
   "sanboot_drive": str | null,               # iPXE BIOS drive for sanboot
                                              # (e.g. "0x80"; null = default)
   "target_disk_serial": str | null           # required when boot_policy is

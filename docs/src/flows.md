@@ -161,8 +161,10 @@ zero per-MAC configuration.
    (option 60/66/67) at the appliance using the Netboot page
    cheatsheet (bty serves TFTP but does not run DHCP).
 2. A target machine PXE-boots on the same segment for the first time.
-   `bty-web` auto-discovers the MAC, creates a `Machine` record with
-   `boot_policy=bty-tui`, and serves the iPXE-tui template
+   `bty-web` auto-discovers the MAC as `boot_policy=bty-inventory`
+   (it self-reports its disks, then sanboots). To drive it with the
+   interactive wizard instead, set `boot_policy=bty-tui` on the
+   machine; `bty-web` then serves the iPXE-tui template
    (`ipxe_tui.j2`).
 3. The target chains into the bty live env with `bty.server=URL`
    + `bty.mac=MAC` on the kernel cmdline (the iPXE template
@@ -246,7 +248,7 @@ fields plus three timestamps the server maintains:
 |----------------------|--------------------------------------------------------------------------|
 | `bty_image_ref`      | sha256 of canonicalised catalog `src`. Stable provenance ID; binds the image to flash. |
 | `hostname`           | RFC-1123 hostname (optional). Cosmetic; not consumed by the flash chain. |
-| `boot_policy`        | One of `sanboot` / `bty-flash-always` / `bty-flash-once` / `bty-tui` (default `sanboot`). |
+| `boot_policy`        | One of `sanboot` / `bty-flash-always` / `bty-flash-once` / `bty-tui` / `bty-inventory` (PUT default `sanboot`; auto-discovery default `bty-inventory`). |
 | `sanboot_drive`      | iPXE BIOS drive the `sanboot` policy boots (e.g. `0x80`; null = default first disk). |
 | `target_disk_serial` | Operator-picked serial number from the most recent inventory post.       |
 | `known_disks`        | JSON array of disks the live env's ``bty`` reported on startup.          |
@@ -265,6 +267,7 @@ parameters the policy needs.
 | `bty-flash-always` | `ipxe_flash.j2` for a fresh flash, then a one-shot `ipxe_sanboot.j2` of the just-flashed disk on the contact after the live-env artifact fetch (alternates flash then sanboot). Refuses (falls back to `ipxe.j2` exit) if no `target_disk_serial`. | No. Stays `bty-flash-always` (uses a transient `saw_flasher_boot` bit, not a policy change). |
 | `bty-flash-once`   | Same chain as `bty-flash-always`. Same `target_disk_serial` gate.                                                | Yes. Flips to `sanboot`. |
 | `bty-tui`          | `ipxe_tui.j2` (live env chain; ``bty`` on tty1 GETs /pxe/<mac>/plan -> ``mode=interactive``, drops into wizard). ``bty`` auto-posts inventory on startup. | No.                      |
+| `bty-inventory`    | Alternates the live-env chain (plan ``mode=inventory``: ``bty`` posts disks + reboots) then `ipxe_sanboot.j2`, via the same `saw_flasher_boot` bit as `bty-flash-always`. Re-collects inventory every cycle, so swapped hardware is found. The auto-discovery default. | No. Alternates via the bit. |
 
 The `bty-flash-once` policy is the "I want this box reimaged now, then
 leave it alone" pattern. It's distinct from `bty-flash-always` (which
@@ -281,9 +284,9 @@ incidents on multi-disk hosts. The full picture, in event order:
    box. The firmware PXE-DHCPs, gets `ipxe.efi` via TFTP, runs
    the embedded chain script, fetches `/pxe-bootstrap.ipxe` from
    bty-web, chains to `/pxe/{mac}`. bty-web records the MAC
-   (`machine.discovered` event), sets `boot_policy=bty-tui`, returns
-   the interactive chain (`ipxe_tui.j2`). Audit log gets a
-   `pxe.offered` row with `offer_kind=tui`.
+   (`machine.discovered` event), sets `boot_policy=bty-inventory`,
+   returns the live-env chain (`ipxe_tui.j2`). Audit log gets a
+   `pxe.offered` row with `offer_kind=bty-inventory`.
 2. **Live env boots, ``bty`` starts.** ``bty`` runs on tty1; on
    startup it shells out to `lsblk` and POSTs the result to
    `/pxe/{mac}/inventory`. bty-web stores the inventory as JSON
