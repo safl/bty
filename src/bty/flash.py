@@ -309,9 +309,17 @@ def probe_image_url(url: str, format_hint: str | None = None) -> ImageInfo:
     req = urllib.request.Request(url, method="HEAD")
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
+            # A malformed Content-Length must fold into "unknown size"
+            # (size_bytes stays 0) rather than crash the probe with an
+            # uncaught ValueError -- mirrors the guards in
+            # bty.catalog.fetch_src_to_cache / bty.web._releases._stream.
             cl = resp.headers.get("Content-Length")
-            if cl is not None:
-                size_bytes = int(cl)
+            try:
+                parsed_len = int(cl) if cl is not None else None
+            except ValueError:
+                parsed_len = None
+            if parsed_len is not None:
+                size_bytes = parsed_len
                 if fmt == "img":
                     # Raw .img: source size == virtual size.
                     virtual_size_bytes = size_bytes
@@ -1271,7 +1279,14 @@ def _flash_qcow2_from_url(url: str, target: Path, *, cancel: CancelCheck | None 
 def _sync_target(target: Path) -> None:
     """Flush kernel buffers; ``target`` accepted for symmetry with the partprobe sibling."""
     del target  # informational only at this stage
-    subprocess.run(["sync"], check=False)
+    # Bounded + best-effort: on a failing target disk ``sync`` can block
+    # in D-state indefinitely, which would wedge flash completion AFTER
+    # the bytes are already written. Bounding it matches the "never let
+    # a stuck IO subsystem hang bty" principle in _probe_run / bty.disks;
+    # a timeout is as ignorable as the non-zero exit ``check=False``
+    # already swallows.
+    with contextlib.suppress(subprocess.TimeoutExpired):
+        subprocess.run(["sync"], check=False, timeout=30)
 
 
 def _partprobe_target(target: Path) -> None:
@@ -1281,9 +1296,14 @@ def _partprobe_target(target: Path) -> None:
     queries see the new partition tree. Without it, an immediate
     follow-up (e.g. an external tool looking at partition labels)
     can race the kernel's partition scan and find no children.
+
+    Both calls are bounded + best-effort (see :func:`_sync_target`): a
+    stuck disk must not hang the post-flash housekeeping.
     """
-    subprocess.run(["partprobe", str(target)], check=False)
-    subprocess.run(["udevadm", "settle"], check=False)
+    with contextlib.suppress(subprocess.TimeoutExpired):
+        subprocess.run(["partprobe", str(target)], check=False, timeout=30)
+    with contextlib.suppress(subprocess.TimeoutExpired):
+        subprocess.run(["udevadm", "settle"], check=False, timeout=30)
 
 
 # ---------- Internal helpers --------------------------------------------------

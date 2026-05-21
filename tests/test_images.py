@@ -366,6 +366,23 @@ def test_read_bri_minimal(tmp_path: Path) -> None:
     assert remote.sha256 is None
 
 
+def test_read_bri_rejects_bool_size_bytes(tmp_path: Path) -> None:
+    """``size_bytes`` must be a real integer -- a TOML boolean (which is
+    an ``int`` subclass in Python) must not slip through as 0/1."""
+    bri = tmp_path / "b.bri"
+    bri.write_text('url = "https://example.invalid/x.img.gz"\nsize_bytes = true\n')
+    with pytest.raises(images.BriError, match="size_bytes must be an integer"):
+        images.read_bri(bri)
+
+
+def test_read_bri_rejects_negative_size_bytes(tmp_path: Path) -> None:
+    """A negative byte count is nonsense and is rejected."""
+    bri = tmp_path / "b.bri"
+    bri.write_text('url = "https://example.invalid/x.img.gz"\nsize_bytes = -5\n')
+    with pytest.raises(images.BriError, match="must not be negative"):
+        images.read_bri(bri)
+
+
 def test_read_bri_full(tmp_path: Path) -> None:
     """All optional fields populate when supplied."""
     bri = tmp_path / "demo.bri"

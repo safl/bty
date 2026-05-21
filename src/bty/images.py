@@ -324,8 +324,14 @@ def read_bri(path: Path) -> RemoteImage:
         raise BriError(f"{path}: format must be a string")
 
     size_bytes = raw.get("size_bytes")
-    if size_bytes is not None and not isinstance(size_bytes, int):
-        raise BriError(f"{path}: size_bytes must be an integer")
+    if size_bytes is not None:
+        # ``bool`` is a subclass of ``int``, so reject it explicitly --
+        # a TOML ``size_bytes = true`` must not slip through as 1. A
+        # negative byte count is nonsense too.
+        if isinstance(size_bytes, bool) or not isinstance(size_bytes, int):
+            raise BriError(f"{path}: size_bytes must be an integer")
+        if size_bytes < 0:
+            raise BriError(f"{path}: size_bytes must not be negative, got {size_bytes}")
 
     sha = raw.get("sha256")
     if sha is not None:

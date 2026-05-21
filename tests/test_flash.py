@@ -587,6 +587,42 @@ def test_probe_image_url_raw_img_uses_content_length_as_virtual(
     assert info.virtual_size_bytes == 98765
 
 
+def test_probe_image_url_tolerates_malformed_content_length(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A bogus Content-Length must fold into "unknown size" (0), not
+    crash the probe with an uncaught ValueError -- matches the guards
+    in catalog / releases."""
+
+    class _FakeResp:
+        headers: ClassVar[dict[str, str]] = {"Content-Length": "not-a-number"}
+
+        def __enter__(self) -> _FakeResp:
+            return self
+
+        def __exit__(self, *a: object) -> None:
+            pass
+
+    monkeypatch.setattr("urllib.request.urlopen", lambda *_a, **_kw: _FakeResp())
+    info = flash.probe_image_url("http://server/foo.img")
+    assert info.size_bytes == 0
+    assert info.virtual_size_bytes is None
+
+
+def test_sync_and_partprobe_swallow_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Post-flash housekeeping is bounded + best-effort: a ``sync`` /
+    ``partprobe`` / ``udevadm`` that times out (stuck disk) must not
+    raise -- the bytes are already written."""
+
+    def _timeout(cmd: list[str], **_kw: object) -> None:
+        raise flash.subprocess.TimeoutExpired(cmd, 30)
+
+    monkeypatch.setattr(flash.subprocess, "run", _timeout)
+    # Neither should propagate the TimeoutExpired.
+    flash._sync_target(Path("/dev/sdz"))
+    flash._partprobe_target(Path("/dev/sdz"))
+
+
 def test_probe_image_url_unreachable_raises_filenotfound(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
