@@ -94,7 +94,7 @@
         <div class="progress-bar progress-bar-striped progress-bar-animated"
              role="progressbar" style="width: 0%;" id="upload-progress-bar">0%</div>
     </div>
-    <div class="form-text small mx-3 mb-0" id="upload-status"></div>
+    <div class="form-text small mx-3 mb-0 d-none" id="upload-status"></div>
     <div class="table-responsive">
         <table class="table mb-0 align-middle">
             <thead class="table-light">
@@ -164,6 +164,7 @@
         };
         btn.disabled = true;
         progress.classList.remove("d-none");
+        status.classList.remove("d-none");
         bar.style.width = "0%";
         bar.textContent = "0%";
         status.textContent = "Uploading " + file.name + " (" + file.size.toLocaleString() + " bytes)...";
@@ -661,7 +662,7 @@
    /ui/events itself. Shown on every section so an operator
    doing an upload sees the recent activity context. #}
 {% with events=image_events,
-        title="Recent image-catalog activity",
+        title="Recent Events",
         link_to_full="/ui/events?subject_kind=image",
         card_id="images-activity" %}
 {% include "ui/_events_card.html" %}

@@ -160,7 +160,7 @@ def test_ui_dashboard_renders_after_login(client: TestClient) -> None:
     # Health Monitoring panel (renamed from "Sanity checklist").
     assert "Health Monitoring" in body
     # Recent-activity card title.
-    assert "Recent activity" in body
+    assert "Recent Events" in body
     # Navbar still carries the Machines nav-btn.
     assert 'href="/ui/machines">' in body
     assert "Machines" in body
@@ -237,7 +237,7 @@ def test_ui_dashboard_shows_recent_activity_after_a_pxe_event(client: TestClient
     r = client.get("/ui/dashboard")
     assert r.status_code == 200
     body = r.text
-    assert "Recent activity" in body
+    assert "Recent Events" in body
     assert "machine.discovered" in body
     assert 'href="/ui/events"' in body
 
@@ -748,7 +748,7 @@ def test_ui_fetches_page_shows_recent_activity_card(
     r = client.get("/ui/fetches")
     assert r.status_code == 200
     body = r.text
-    assert "Recent netboot activity" in body
+    assert "Recent Events" in body
     assert "netboot.artifacts.fetched" in body
 
 
