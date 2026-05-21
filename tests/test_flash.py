@@ -872,3 +872,113 @@ def test_flash_cancelled_subclasses_flash_error() -> None:
     a failure case. Subclassing preserves that contract; callers that
     want to distinguish catch FlashCancelled first."""
     assert issubclass(flash.FlashCancelled, flash.FlashError)
+
+
+# ----- UEFI boot-entry registration (efibootmgr) -------------------------
+
+
+def test_parse_boot_order_extracts_numbers() -> None:
+    out = "BootCurrent: 0001\nBootOrder: 0001,0003,0000\nBoot0000* x\n"
+    assert flash._parse_boot_order(out) == ["0001", "0003", "0000"]
+
+
+def test_parse_boot_order_missing_returns_empty() -> None:
+    assert flash._parse_boot_order("BootCurrent: 0001\n") == []
+
+
+def test_boot_entries_with_label_matches_label_only() -> None:
+    out = (
+        "BootOrder: 0000,0001\n"
+        "Boot0000* bty flashed\tHD(1,GPT)/File(\\EFI\\BOOT\\BOOTX64.EFI)\n"
+        "Boot0001* UEFI: PXE IPv4\tMAC(aabbcc)\n"
+        "Boot0002* bty flashed\tHD(1,GPT)\n"
+    )
+    assert flash._boot_entries_with_label(out, "bty flashed") == ["0000", "0002"]
+    assert flash._boot_entries_with_label(out, "ubuntu") == []
+
+
+def test_find_esp_partition_number_from_lsblk_partn() -> None:
+    lsblk = (
+        '{"blockdevices":[{"path":"/dev/sda","children":['
+        f'{{"path":"/dev/sda1","parttype":"{flash._ESP_TYPE_GUID}","partn":1}},'
+        '{"path":"/dev/sda2","parttype":"0fc63daf-8483-4772-8e79-3d69d8477de4","partn":2}'
+        "]}]}"
+    )
+    with patch("bty.flash.subprocess.run", return_value=MagicMock(stdout=lsblk)):
+        assert flash._find_esp_partition_number(Path("/dev/sda")) == 1
+
+
+def test_find_esp_partition_number_falls_back_to_path_digits() -> None:
+    # No PARTN column (older lsblk): parse the trailing digits of the path.
+    lsblk = (
+        '{"blockdevices":[{"path":"/dev/nvme0n1","children":['
+        f'{{"path":"/dev/nvme0n1p1","parttype":"{flash._ESP_TYPE_GUID}"}}'
+        "]}]}"
+    )
+    with patch("bty.flash.subprocess.run", return_value=MagicMock(stdout=lsblk)):
+        assert flash._find_esp_partition_number(Path("/dev/nvme0n1")) == 1
+
+
+def test_find_esp_partition_number_none_when_no_esp() -> None:
+    # The case the operator hit: a single ext4 root, no ESP at all.
+    lsblk = (
+        '{"blockdevices":[{"path":"/dev/sda","children":['
+        '{"path":"/dev/sda1","parttype":"0fc63daf-8483-4772-8e79-3d69d8477de4","partn":1}'
+        "]}]}"
+    )
+    with patch("bty.flash.subprocess.run", return_value=MagicMock(stdout=lsblk)):
+        assert flash._find_esp_partition_number(Path("/dev/sda")) is None
+
+
+def test_register_uefi_boot_entry_skips_on_bios(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("bty.flash.Path.is_dir", lambda self: False)
+    msg = flash.register_uefi_boot_entry(Path("/dev/sda"))
+    assert "not booted in UEFI" in msg
+
+
+def test_register_uefi_boot_entry_skips_without_efibootmgr(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("bty.flash.Path.is_dir", lambda self: True)
+    monkeypatch.setattr("bty.flash.shutil.which", lambda _x: None)
+    msg = flash.register_uefi_boot_entry(Path("/dev/sda"))
+    assert "efibootmgr not installed" in msg
+
+
+def test_register_uefi_boot_entry_skips_when_no_esp(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("bty.flash.Path.is_dir", lambda self: True)
+    monkeypatch.setattr("bty.flash.shutil.which", lambda _x: "/usr/sbin/efibootmgr")
+    monkeypatch.setattr("bty.flash._find_esp_partition_number", lambda _d: None)
+    msg = flash.register_uefi_boot_entry(Path("/dev/sda"))
+    assert "no EFI System Partition" in msg
+
+
+def test_register_uefi_boot_entry_happy_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("bty.flash.Path.is_dir", lambda self: True)
+    monkeypatch.setattr("bty.flash.shutil.which", lambda _x: "/usr/sbin/efibootmgr")
+    monkeypatch.setattr("bty.flash._find_esp_partition_number", lambda _d: 1)
+
+    calls: list[list[str]] = []
+    outputs = iter(
+        [
+            "BootOrder: 0001,0002\nBoot0001* UEFI PXE\nBoot0002* ubuntu\n",  # delete-scan
+            "BootOrder: 0001,0002\n",  # old_order
+            "BootOrder: 0009,0001,0002\nBoot0009* bty flashed\tHD\n",  # after --create
+            "",  # -o
+            "",  # -n
+        ]
+    )
+
+    def fake_run(args: list[str], **_kw: object) -> MagicMock:
+        calls.append(args)
+        return MagicMock(stdout=next(outputs))
+
+    monkeypatch.setattr("bty.flash.subprocess.run", fake_run)
+    msg = flash.register_uefi_boot_entry(Path("/dev/sda"))
+    assert "Boot0009" in msg and "/dev/sda" in msg
+    # netboot entries kept first, the new disk entry appended:
+    assert ["efibootmgr", "-o", "0001,0002,0009"] in calls
+    # one-shot BootNext set to the disk so this reboot lands on it:
+    assert ["efibootmgr", "-n", "0009"] in calls

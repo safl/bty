@@ -1227,6 +1227,7 @@ class BtyTui:
                     title="Done",
                 )
             )
+            self._register_uefi_boot_entry(plan)
             self._post_pxe_done_if_configured()
             self._state.post_flash = True
         else:
@@ -1797,6 +1798,25 @@ class BtyTui:
         plan = flash.make_plan(image_info, target_info)
         errors = flash.validate_plan(plan)
         return plan, errors
+
+    def _register_uefi_boot_entry(self, plan: flash.FlashPlan) -> None:
+        """After a successful flash, register a UEFI NVRAM boot entry
+        for the freshly-written disk so the firmware actually boots the
+        new OS. A dd'd image has no NVRAM entry, so a UEFI box otherwise
+        has nothing to boot and falls back to netboot. Best-effort and
+        UEFI-only (no-op on BIOS); the outcome is printed to the console
+        and never blocks the post-flash transition.
+        """
+        try:
+            msg = flash.register_uefi_boot_entry(plan.target.path)
+        except Exception as exc:  # boot-entry setup must never fail the flash
+            self._console.print(
+                f"[{_DANGER}]bty: could not register UEFI boot entry: {exc}[/] "
+                f"[{_MUTED}](flash succeeded; firmware may not boot the disk)[/]"
+            )
+            return
+        style = _OK if msg.startswith("registered") else _MUTED
+        self._console.print(f"[{style}]bty: {msg}[/]")
 
     def _post_pxe_done_if_configured(self) -> None:
         """Best-effort: POST ``/pxe/<mac>/done`` after a successful

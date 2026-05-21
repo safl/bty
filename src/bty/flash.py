@@ -25,6 +25,7 @@ from __future__ import annotations
 import contextlib
 import json
 import re
+import shutil
 import stat
 import subprocess
 import threading
@@ -708,6 +709,146 @@ def execute_plan(
     except FlashError as exc:
         _emit(progress, "failed", note=str(exc))
         raise
+
+
+# GPT partition-type GUID of an EFI System Partition (lowercase, as
+# ``lsblk`` reports it).
+_ESP_TYPE_GUID = "c12a7328-f81f-11d2-ba4b-00a0c93ec93b"
+# The UEFI removable-media fallback loader path. dd'd images almost
+# always carry this (it's what lets a stick / disk boot without an
+# NVRAM entry); backslash-separated because efibootmgr wants an EFI
+# path, not a POSIX one.
+_UEFI_FALLBACK_LOADER = "\\EFI\\BOOT\\BOOTX64.EFI"
+
+
+def _efibootmgr(args: list[str] | None = None) -> str:
+    """Run ``efibootmgr`` and return stdout. Raises on non-zero exit."""
+    return subprocess.run(
+        ["efibootmgr", *(args or [])],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    ).stdout
+
+
+def _parse_boot_order(efibootmgr_out: str) -> list[str]:
+    """Pull the ``BootOrder:`` entry numbers out of efibootmgr output."""
+    for line in efibootmgr_out.splitlines():
+        if line.startswith("BootOrder:"):
+            rest = line.split(":", 1)[1].strip()
+            return [x.strip() for x in rest.split(",") if x.strip()]
+    return []
+
+
+def _boot_entries_with_label(efibootmgr_out: str, label: str) -> list[str]:
+    """Entry numbers (``Boot####``) whose description equals ``label``.
+
+    efibootmgr prints ``Boot0007* <label>\\t<device-path>``; we match
+    the label portion so reflashes can drop their own prior entries
+    without touching the operator's / firmware's entries.
+    """
+    nums: list[str] = []
+    for line in efibootmgr_out.splitlines():
+        m = re.match(r"^Boot([0-9A-Fa-f]{4})\*?\s+(.*)$", line)
+        if m and m.group(2).split("\t", 1)[0].strip() == label:
+            nums.append(m.group(1))
+    return nums
+
+
+def _find_esp_partition_number(disk: Path) -> int | None:
+    """Return the 1-based partition number of ``disk``'s EFI System
+    Partition, or ``None`` if it has none. Reads ``lsblk -J``."""
+    try:
+        out = subprocess.run(
+            ["lsblk", "-J", "-o", "PATH,PARTTYPE,PARTN", str(disk)],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        ).stdout
+        data = json.loads(out)
+    except (FileNotFoundError, subprocess.SubprocessError, OSError, ValueError):
+        return None
+    for dev in data.get("blockdevices", []):
+        for child in dev.get("children") or []:
+            if (child.get("parttype") or "").lower() != _ESP_TYPE_GUID:
+                continue
+            partn = child.get("partn")
+            if partn is not None:
+                try:
+                    return int(partn)
+                except (TypeError, ValueError):
+                    pass
+            # Older lsblk has no PARTN: fall back to the trailing digits
+            # of the device path (/dev/sda1 -> 1, /dev/nvme0n1p1 -> 1).
+            m = re.search(r"(\d+)$", child.get("path") or "")
+            if m:
+                return int(m.group(1))
+    return None
+
+
+def register_uefi_boot_entry(target_disk: Path, *, label: str = "bty flashed") -> str:
+    """Register (and select for next boot) a UEFI NVRAM entry for a
+    freshly-flashed disk, returning a one-line human status.
+
+    A ``dd``-written image carries an EFI System Partition with a
+    bootloader but NO firmware boot entry (NVRAM lives in the firmware,
+    not the image), so a UEFI box has nothing in its boot order to boot
+    and falls back to netboot -- the box never comes up on its new OS.
+    This points the firmware at the ESP's fallback loader:
+
+      * creates an entry for ``\\EFI\\BOOT\\BOOTX64.EFI`` on the ESP,
+      * keeps the existing entries (the netboot entry the box just used)
+        FIRST in BootOrder so bty stays in control on later boots, with
+        the new entry appended,
+      * sets BootNext to the new entry so THIS reboot lands on the disk
+        regardless of whether the firmware falls through on iPXE exit.
+
+    Best-effort and UEFI-only: returns a "skipped ..." status (rather
+    than raising) when the box isn't UEFI, ``efibootmgr`` is absent, or
+    the disk has no ESP. A genuine ``efibootmgr`` failure propagates as
+    ``CalledProcessError`` for the caller to log.
+    """
+    if not Path("/sys/firmware/efi/efivars").is_dir():
+        return "skipped UEFI boot entry: box is not booted in UEFI mode (BIOS/CSM)"
+    if shutil.which("efibootmgr") is None:
+        return "skipped UEFI boot entry: efibootmgr not installed in the live env"
+    part = _find_esp_partition_number(target_disk)
+    if part is None:
+        return f"skipped UEFI boot entry: no EFI System Partition found on {target_disk}"
+
+    # Idempotent across reflashes: drop our own prior entries first.
+    for num in _boot_entries_with_label(_efibootmgr(), label):
+        _efibootmgr(["-b", num, "-B"])
+
+    old_order = _parse_boot_order(_efibootmgr())
+    # ``--create`` prepends the new entry to BootOrder, so it's whatever
+    # number BootOrder gained at the front.
+    after = _efibootmgr(
+        [
+            "--create",
+            "--disk",
+            str(target_disk),
+            "--part",
+            str(part),
+            "--loader",
+            _UEFI_FALLBACK_LOADER,
+            "--label",
+            label,
+        ]
+    )
+    new = next((n for n in _parse_boot_order(after) if n not in old_order), None)
+    if new is None:
+        return f"created UEFI boot entry on {target_disk} (could not confirm BootNext)"
+    # Netboot entries stay first (bty keeps control); the disk goes last
+    # in BootOrder but is set as the one-shot BootNext for this reboot.
+    _efibootmgr(["-o", ",".join([*old_order, new])])
+    _efibootmgr(["-n", new])
+    return (
+        f"registered UEFI boot entry Boot{new} -> {target_disk} "
+        f"(ESP partition {part}); next boot = the flashed disk"
+    )
 
 
 def _start_subprocess_log_pump(
