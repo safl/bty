@@ -120,9 +120,11 @@
                     {% endfor %}
                 </select>
                 <div class="form-text">
-                    <code>sanboot</code>: iPXE boots the local disk itself (drive
-                    below; defaults to the first disk), falling back to the
-                    firmware order if it can't. The default for an assigned box.
+                    <code>sanboot</code>: boot the local disk. On UEFI, hand
+                    control back to the firmware boot order (which boots the
+                    disk's EFI loader); on legacy BIOS, iPXE sanboots the drive
+                    below (defaults to the first disk). The default for an
+                    assigned box.
                     <code>bty-flash-always</code>: PXE boots chain into the live env so the box
                     re-flashes the assigned image every time, then sanboots the
                     just-flashed disk before the next reflash (per-job CI cadence).

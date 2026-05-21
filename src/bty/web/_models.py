@@ -24,11 +24,13 @@ MAC_PATTERN = r"^[0-9a-f]{2}(:[0-9a-f]{2}){5}$"
 
 # Boot-policy values: what ``GET /pxe/{mac}`` returns.
 #
-# - ``sanboot`` emits ``sanboot --drive <sanboot_drive> || exit``: iPXE
-#   boots the local disk itself (default ``0x80`` = first BIOS disk),
-#   falling back to ``exit`` (firmware boot order) if it can't. This is
-#   the way bty boots an already-provisioned machine, and the
-#   explicit-PUT default. The drive is a per-machine override
+# - ``sanboot`` boots the local disk, firmware-aware: on UEFI it
+#   ``exit``s to the firmware boot order (which boots the disk's EFI
+#   loader -- UEFI has no BIOS INT13 drive map for ``sanboot --drive``);
+#   on legacy BIOS it emits ``sanboot --drive <sanboot_drive>`` (default
+#   ``0x80`` = first BIOS disk) with ``|| exit`` as the firmware-order
+#   fallback. This is the way bty boots an already-provisioned machine,
+#   and the explicit-PUT default. The drive is a per-machine override
 #   (``sanboot_drive``); iPXE selects by BIOS drive number, not by
 #   Linux serial. (There is no separate ``local`` policy: a bare
 #   ``exit`` is just ``sanboot``'s fallback, and the no-assignment /

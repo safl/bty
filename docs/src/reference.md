@@ -229,11 +229,14 @@ tooling which can't carry a session cookie:
 - `GET /version` - `{"version": "..."}`
 - `GET /pxe/{mac}` - per-MAC iPXE script (`text/plain`). The
  response depends on the machine's `boot_policy`:
- - `sanboot` (default): iPXE `sanboot --drive <sanboot_drive> || exit`
- boots the local disk itself (default drive `0x80`), independent of
- the firmware boot order, falling back to `exit` if it can't. A
- machine with no usable assignment (or a stale policy) falls through
- to the same `sanboot 0x80 || exit`. Auto-discovery still applies to
+ - `sanboot` (default): boot the local disk, firmware-aware via iPXE's
+ `${platform}`. On UEFI the script is `iseq ${platform} efi && exit` -
+ hand back to the firmware boot order, which boots the disk's EFI
+ loader (UEFI has no BIOS INT13 drive map, so `sanboot --drive` can't
+ work there). On legacy BIOS it's `sanboot --no-describe --drive
+ <sanboot_drive>` (default `0x80`) with `|| exit` falling back to the
+ firmware order. A machine with no usable assignment (or a stale
+ policy) falls through to the same. Auto-discovery still applies to
  unknown MACs.
  - `bty-flash-always` / `bty-flash-once` + image assigned + target
  serial picked: chain into the live env over HTTP with kernel cmdline
