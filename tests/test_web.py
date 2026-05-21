@@ -4484,7 +4484,7 @@ def test_safe_path_accepts_plain_name(tmp_path: Path) -> None:
     ],
 )
 def test_safe_path_rejects_traversal_inputs(tmp_path: Path, bad: str) -> None:
-    """Each forbidden name shape raises 400 with detail 'bad name'.
+    """Each forbidden name shape raises 400 naming the bad input.
     Pinned individually so a future "drop the NUL check" edit fails
     on the specific case rather than masquerading as a generic
     upload-endpoint test failure."""
@@ -4495,7 +4495,10 @@ def test_safe_path_rejects_traversal_inputs(tmp_path: Path, bad: str) -> None:
     with pytest.raises(HTTPException) as excinfo:
         _safe_path(tmp_path, bad)
     assert excinfo.value.status_code == 400
-    assert excinfo.value.detail == "bad name"
+    # Detail names the offending input + the constraint (was a terse
+    # "bad name"). Both reject paths start "invalid name <repr>:".
+    assert "invalid name" in str(excinfo.value.detail)
+    assert repr(bad) in str(excinfo.value.detail)
 
 
 def test_safe_path_rejects_symlink_escape(tmp_path: Path) -> None:

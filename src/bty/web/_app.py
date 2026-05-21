@@ -2879,12 +2879,19 @@ def _safe_path(root: Path, name: str) -> Path:
     what to do with the resolved path (404 vs. open-for-write).
     """
     if not name or "/" in name or "\\" in name or "\x00" in name or name in {".", ".."}:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="bad name")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"invalid name {name!r}: must be a bare filename "
+            "(no '/', '\\', '..', or NUL bytes)",
+        )
     candidate = (root / name).resolve()
     try:
         candidate.relative_to(root.resolve())
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="bad name") from exc
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"invalid name {name!r}: resolves outside the allowed directory",
+        ) from exc
     return candidate
 
 

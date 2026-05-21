@@ -31,6 +31,7 @@ from fastapi import (
 )
 from fastapi.responses import HTMLResponse, RedirectResponse
 from jinja2 import Environment
+from pydantic import ValidationError
 
 import bty
 from bty import images as bty_images
@@ -476,6 +477,22 @@ def register_ui_routes(
                 sanboot_drive=sanboot_drive or None,
                 target_disk_serial=target_disk_serial or None,
             )
+        except ValidationError as exc:
+            # Pydantic's str() is a multi-line dump ending in a
+            # pydantic.dev URL -- useless in a one-line flash banner.
+            # Collapse to a concise ``field: message`` list instead.
+            detail = (
+                "; ".join(
+                    f"{'.'.join(str(p) for p in e['loc']) or 'field'}: {e['msg']}"
+                    for e in exc.errors()
+                )
+                or "invalid input"
+            )
+            return RedirectResponse(
+                f"/ui/machines/{normalised}?error="
+                + urllib.parse.quote(f"validation failed: {detail}", safe=""),
+                status_code=status.HTTP_303_SEE_OTHER,
+            )
         except ValueError as exc:
             return RedirectResponse(
                 f"/ui/machines/{normalised}?error="
@@ -504,9 +521,10 @@ def register_ui_routes(
             return RedirectResponse(
                 f"/ui/machines/{normalised}?error="
                 + urllib.parse.quote(
-                    "boot_policy=bty-flash-always requires a target disk to be picked; "
-                    "power-cycle the machine in 'bty-tui' mode first so it can "
-                    "report its disk inventory, then pick one here",
+                    f"boot_policy={validated.boot_policy} requires a target disk; "
+                    "pick one from the Target disk dropdown. If it's empty the "
+                    "machine hasn't reported its disks yet -- power-cycle it and it "
+                    "auto-reports them on its bty-inventory boot, then pick one here.",
                     safe="",
                 ),
                 status_code=status.HTTP_303_SEE_OTHER,

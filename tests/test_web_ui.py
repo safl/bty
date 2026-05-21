@@ -9,6 +9,7 @@ opt in to the authenticated path via ``cookies=AUTH`` (or call
 
 from __future__ import annotations
 
+import urllib.parse
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -1052,6 +1053,45 @@ def test_ui_machine_upsert_via_form(client: TestClient) -> None:
     assert api.json()["hostname"] == "bty-ui-test"
     # Form omits boot_policy -> dependency default applies (sanboot).
     assert api.json()["boot_policy"] == "sanboot"
+
+
+def test_ui_machine_upsert_invalid_field_gives_concise_banner(client: TestClient) -> None:
+    """A bad field (non-hex bty_image_ref) 303s back with a concise
+    ``field: message`` banner, not Pydantic's multi-line str() dump
+    (which ends in a pydantic.dev URL and reads terribly in an alert)."""
+    _login(client)
+    r = client.post(
+        "/ui/machines/aa:bb:cc:dd:ee:ff",
+        data={"bty_image_ref": "not-a-hex-digest!", "boot_policy": "sanboot"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    loc = r.headers["location"]
+    assert "?error=" in loc
+    decoded = urllib.parse.unquote(loc.split("?error=", 1)[1])
+    assert decoded.startswith("validation failed:")
+    assert "bty_image_ref" in decoded  # names the offending field
+    # Concise: single line, no Pydantic boilerplate / docs URL.
+    assert "\n" not in decoded
+    assert "pydantic.dev" not in decoded
+
+
+def test_ui_machine_upsert_flash_without_target_names_the_policy(client: TestClient) -> None:
+    """The flash-without-target gate banner names the actual policy the
+    operator picked (was hardcoded 'bty-flash-always') and points at the
+    Target disk dropdown / bty-inventory auto-report (not the stale
+    'set bty-tui mode' guidance)."""
+    _login(client)
+    r = client.post(
+        "/ui/machines/aa:bb:cc:dd:ee:ff",
+        data={"boot_policy": "bty-flash-once"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    decoded = urllib.parse.unquote(r.headers["location"].split("?error=", 1)[1])
+    assert "boot_policy=bty-flash-once requires a target disk" in decoded
+    assert "bty-inventory" in decoded
+    assert "bty-tui" not in decoded
 
 
 def test_ui_machine_upsert_persists_boot_policy_flash(client: TestClient) -> None:
