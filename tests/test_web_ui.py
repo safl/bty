@@ -592,20 +592,26 @@ def test_ui_boot_list_header_has_artifacts_and_tftp(client: TestClient) -> None:
 
 
 def test_ui_settings_shows_dhcp_pxe_cheatsheet(client: TestClient) -> None:
-    """The DHCP / PXE router-config cheatsheet moved to the Settings
-    page. It must render the four DHCP options bty needs the LAN
-    router to set (60 PXEClient / 66 next-server / 67 bootfile / 67
-    for user-class=iPXE), each labelled."""
+    """The DHCP / Network-boot router-config cheatsheet on the Settings
+    page renders BOTH net-boot paths: PXE-via-TFTP (60 PXEClient / 66
+    next-server / 67 bootfile / 67 for user-class=iPXE) and UEFI HTTP
+    Boot (60 HTTPClient / 67 full http URL to /boot/ipxe.efi)."""
     _login(client)
     r = client.get("/ui/settings")
     assert r.status_code == 200
     body = r.text
-    assert "DHCP / PXE" in body
+    assert "DHCP / Network boot" in body
     assert "Router-side configuration" in body
+    # PXE-via-TFTP path.
     assert "option 60" in body
     assert "PXEClient" in body
     assert "option 66" in body
     assert "option 67" in body
+    assert "pxe-bootstrap.ipxe" in body
+    # UEFI HTTP Boot path.
+    assert "HTTP Boot" in body
+    assert "HTTPClient" in body
+    assert "/boot/ipxe.efi" in body
 
 
 def test_ui_boot_shows_tftp_daemon_status(client: TestClient) -> None:

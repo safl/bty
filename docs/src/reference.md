@@ -489,11 +489,12 @@ templates, Bootstrap CSS, HTMX form posts).
 - `GET /ui/downloads` (Image Downloads) / `GET /ui/hashes` (Hashes) ->
  the per-image add forms + live download jobs, and the background SHA
  worker. Top-level pages reached from the navbar worker-icons.
-- The router-config **DHCP / PXE** cheatsheet (appliance-IP /
+- The router-config **DHCP / Network boot** cheatsheet (appliance-IP /
  interfaces table + option 60 / 66 / 67 values to paste into the LAN's
- DHCP server) lives on the Settings page (`/ui/settings#dhcp-pxe`).
- bty does NOT run any DHCP role; the operator's existing DHCP server
- points clients at this appliance for TFTP + HTTP-Boot fetches.
+ DHCP server, for both PXE-via-TFTP and UEFI HTTP Boot) lives on the
+ Settings page (`/ui/settings#dhcp-pxe`). bty does NOT run any DHCP
+ role; the operator's existing DHCP server points clients at this
+ appliance for TFTP + HTTP-Boot fetches.
 - `POST /ui/netboot/fetch-release` -> downloads
  `vmlinuz`/`initrd`/`squashfs`/`sha256` from
  `https://github.com/<BTY_BOOT_RELEASE_REPO>/releases/<tag>/download/`
@@ -502,7 +503,7 @@ templates, Bootstrap CSS, HTMX form posts).
 - `GET /ui/settings` -> the config map: read-only groups for every bty
  magic value (where each comes from -- env var / derived path /
  default), the editable **Upstream sources** (release repo / catalog
- URL / release tag) card, and the **DHCP / PXE** router cheatsheet.
+ URL / release tag) card, and the **DHCP / Network boot** router cheatsheet.
  Operator
  authentication is on the separate Account page (`/ui/account`,
  reached via the user pill): the credential is the OS password of the

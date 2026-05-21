@@ -17,7 +17,7 @@
             <span class="vr"></span>
             <a href="#settings-background-workers">Background workers</a>
             <span class="vr"></span>
-            <a href="#dhcp-pxe">DHCP / PXE</a>
+            <a href="#dhcp-pxe">DHCP / Network boot</a>
         </span>
     </div>
 </nav>
@@ -29,8 +29,9 @@
     Where every bty magic value comes from. Most are read-only (set via
     environment variable or derived from the state directory); the
     <strong>Upstream sources</strong> card is editable and persists in
-    the database. The <strong>DHCP / PXE</strong> cheatsheet below is the
-    router-side config to point PXE clients at this appliance. Operator
+    the database. The <strong>DHCP / Network boot</strong> cheatsheet below
+    is the router-side config to point PXE / HTTP-Boot clients at this
+    appliance. Operator
     authentication lives on the <a href="/ui/account">Account</a> page.
 {% endcall %}
 {% endblock %}
@@ -139,15 +140,17 @@
    fields -- bty doesn't run DHCP, the LAN router does. #}
 <div class="card mb-4" id="dhcp-pxe">
     <div class="card-header bg-light fw-semibold">
-        <i class="bi bi-hdd-network me-1"></i>DHCP / PXE
+        <i class="bi bi-hdd-network me-1"></i>DHCP / Network boot
     </div>
     <div class="card-body">
         <p class="text-muted">
             bty-server runs a TFTP daemon (dnsmasq) and serves boot
-            artifacts over HTTP. The DHCP side stays with your LAN's
-            router (or DHCP server); bty deliberately doesn't try
-            to replace it. Point your router at this appliance with
-            the settings below.
+            artifacts over HTTP, so targets can net-boot two ways:
+            <strong>PXE</strong> (legacy + UEFI, iPXE fetched over TFTP)
+            and <strong>UEFI HTTP Boot</strong> (iPXE fetched over HTTP,
+            no TFTP). The DHCP side stays with your LAN's router (or DHCP
+            server); bty deliberately doesn't try to replace it. Point
+            your router at this appliance with the settings below.
         </p>
 
         {% if missing_netboot_artifacts %}
@@ -205,6 +208,14 @@
             options on the DHCP service.
         </p>
 
+        {# Shorthand for "this appliance's IP", reused across both tables. #}
+        {% set bty_ip = primary.ipv4 if primary and primary.ipv4 else "<bty-server>" %}
+
+        <h4 class="h6 mt-3 fw-semibold">Option A &mdash; PXE (via TFTP)</h4>
+        <p class="text-muted small mb-2">
+            Legacy BIOS and UEFI PXE. The firmware TFTPs the iPXE binary
+            from this appliance, then iPXE chains on over HTTP.
+        </p>
         <table class="table table-sm">
             <thead>
                 <tr>
@@ -221,13 +232,7 @@
                 </tr>
                 <tr>
                     <td><code>option 66</code> / Next-Server</td>
-                    <td>
-                        {% if primary and primary.ipv4 %}
-                        <code>{{ primary.ipv4 }}</code>
-                        {% else %}
-                        <code>(this appliance's LAN IP)</code>
-                        {% endif %}
-                    </td>
+                    <td><code>{{ bty_ip }}</code></td>
                     <td>The TFTP server. Same box as bty-web.</td>
                 </tr>
                 <tr>
@@ -237,19 +242,52 @@
                 </tr>
                 <tr>
                     <td><code>option 67</code> for <code>user-class=iPXE</code></td>
-                    <td>
-                        <code>http://{% if primary and primary.ipv4 %}{{ primary.ipv4 }}{% else %}&lt;bty-server&gt;{% endif %}:8080/pxe-bootstrap.ipxe</code>
-                    </td>
+                    <td><code>http://{{ bty_ip }}:8080/pxe-bootstrap.ipxe</code></td>
                     <td>Stops iPXE chain-loop. Different bootfile when iPXE re-DHCPs.</td>
                 </tr>
             </tbody>
         </table>
 
+        <h4 class="h6 mt-4 fw-semibold">Option B &mdash; UEFI HTTP Boot (no TFTP)</h4>
+        <p class="text-muted small mb-2">
+            For firmware with UEFI HTTP Boot, the target fetches iPXE
+            directly over HTTP &mdash; no TFTP server in the path. Tag
+            HTTP-Boot clients (vendor-class <code>HTTPClient</code>) with
+            these instead of the PXE options above. Everything after iPXE
+            loads is identical to the PXE flow.
+        </p>
+        <table class="table table-sm">
+            <thead>
+                <tr>
+                    <th scope="col">Option</th>
+                    <th scope="col">Value</th>
+                    <th scope="col">Notes</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><code>option 60</code></td>
+                    <td><code>HTTPClient</code></td>
+                    <td>Vendor-class echo. UEFI HTTP-Boot firmware filters offers without it (the HTTP-Boot counterpart of <code>PXEClient</code>).</td>
+                </tr>
+                <tr>
+                    <td><code>option 66</code> / Next-Server</td>
+                    <td><code>{{ bty_ip }}</code></td>
+                    <td><strong>Still required.</strong> bty's iPXE binary chains on to <code>http://&lt;next-server&gt;:8080/pxe-bootstrap.ipxe</code>, so this must point here even though the bootfile below is a full URL.</td>
+                </tr>
+                <tr>
+                    <td><code>option 67</code> / Boot-Filename</td>
+                    <td><code>http://{{ bty_ip }}:8080/boot/ipxe.efi</code></td>
+                    <td>Full URL. The firmware HTTP-downloads iPXE directly &mdash; no TFTP roundtrip.</td>
+                </tr>
+            </tbody>
+        </table>
         <p class="form-text mt-2 mb-0">
-            For UEFI HTTP-Boot (vendor-class <code>HTTPClient</code>), point
-            <code>option 67</code> at
-            <code>http://{% if primary and primary.ipv4 %}{{ primary.ipv4 }}{% else %}&lt;bty-server&gt;{% endif %}:8080/boot/ipxe.efi</code>
-            instead (no TFTP roundtrip).
+            Both paths converge: once iPXE is running it fetches
+            <code>http://{{ bty_ip }}:8080/pxe-bootstrap.ipxe</code> and
+            then the per-MAC plan at <code>/pxe/&lt;mac&gt;</code>. The
+            only differences are the vendor class and how the iPXE binary
+            is delivered (TFTP vs HTTP).
         </p>
     </div>
 </div>

@@ -222,12 +222,12 @@ Initial UI tour:
   root). Fetching the artifacts happens on the **Artifact
   Fetches** page (the cloud worker-icon in the navbar); the
   router-config cheatsheet (option 60 / 66 / 67 to paste into
-  the LAN's DHCP server) lives on the Settings page under
-  **DHCP / PXE**. An in-page sub-nav jumps between List / TFTP
-  Daemon / Activity.
+  the LAN's DHCP server, for both PXE and UEFI HTTP Boot) lives
+  on the Settings page under **DHCP / Network boot**. An in-page
+  sub-nav jumps between List / TFTP Daemon / Activity.
 - **`/ui/settings`** - the read-only map of every bty config
   value plus the editable **Upstream sources** (release repo /
-  catalog URL / release tag) card, and the **DHCP / PXE**
+  catalog URL / release tag) card, and the **DHCP / Network boot**
   router cheatsheet. Operator-account info (PAM password +
   session-cookie rotation) is on the separate Account page,
   reached via the user pill.
@@ -261,6 +261,26 @@ The server's machine-detail page shows live progress + last
 flashed timestamp. Subsequent boots skip PXE (BIOS falls back to
 disk) and the target runs whatever the freshly-flashed image
 provisions to.
+
+### PXE or UEFI HTTP Boot
+
+The flow above assumes legacy/UEFI **PXE**: the firmware TFTPs the
+iPXE binary from the appliance. Firmware that supports **UEFI HTTP
+Boot** can skip TFTP entirely and fetch iPXE over HTTP. The only
+DHCP differences are the vendor class and the bootfile:
+
+| | PXE (TFTP) | UEFI HTTP Boot |
+|---|---|---|
+| Vendor class (option 60) | `PXEClient` | `HTTPClient` |
+| Next-server (option 66) | appliance IP | appliance IP (still required) |
+| Bootfile (option 67) | `ipxe.efi` | `http://<appliance>:8080/boot/ipxe.efi` |
+
+Option 66 stays pointed at the appliance for HTTP Boot too: bty's
+iPXE binary chains on to `http://<next-server>:8080/pxe-bootstrap.ipxe`,
+so it needs the next-server even though the bootfile is a full URL.
+Once iPXE is running, both paths are identical (fetch
+`/pxe-bootstrap.ipxe`, then the per-MAC plan). The exact values for
+your appliance are on the Settings page under **DHCP / Network boot**.
 
 ## Architecture at a glance
 
