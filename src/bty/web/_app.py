@@ -524,7 +524,7 @@ def create_app(
         assert row is not None
         machine = dict(row)
         publish_state_changed()
-        # Boot-policy decision tree (highest priority first):
+        # Boot-mode decision tree (highest priority first):
         #   - bty-tui                       -> live env, interactive wizard
         #   - sanboot                       -> iPXE sanboot the local disk
         #   - bty-flash-always / -once + ref + target disk -> live env auto-flash
@@ -1237,8 +1237,8 @@ def create_app(
              ``GET /images/<name>`` form for scripts / curl-based
              operators.
           2. 64-hex ID through :func:`_resolve_image_for_key`, which
-             handles ``bty_image_ref`` lookups (with eager cache-through
-             on miss) and the sha-keyed URLs the ``/images`` listing
+             handles ``bty_image_ref`` lookups (404 if the ref's bytes
+             aren't local yet) and the sha-keyed URLs the ``/images`` listing
              emits for known-content entries.
         """
         try:
@@ -1261,9 +1261,9 @@ def create_app(
         Returns the entry's ``name`` (preserves format-by-extension
         on the live-env side) or ``None`` for an orphaned binding (no
         catalog row matches this ref). The URL uses the ref itself,
-        not the content sha -- :func:`_resolve_image_for_key` does
-        the cache-through on the fly when the bound entry's
-        ``disk_image_sha`` is still NULL.
+        not the content sha. :func:`_resolve_image_for_key` serves it only
+        if the bytes are already local (image store / explicitly
+        downloaded); a remote ref not yet fetched 404s.
         """
         with _db.open_db(state_path) as conn:
             row = conn.execute(

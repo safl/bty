@@ -341,9 +341,9 @@ class DownloadManager(_BaseAsyncManager[DownloadState]):
 
         # Back-fill catalog_entries.disk_image_sha and emit a
         # ``catalog.cache.populated`` event on successful operator-
-        # initiated fetches of previously-un-sha'd entries. Symmetric
-        # with the live env's cache-through path so the audit log
-        # records the back-fill regardless of who triggered it.
+        # initiated fetches of previously-un-sha'd entries -- the only
+        # path that caches a remote image now (the serve-time
+        # cache-through was dropped).
         if (
             final_status == "completed"
             and computed_sha is not None

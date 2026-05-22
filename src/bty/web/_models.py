@@ -22,7 +22,7 @@ def _enum_pattern(values: tuple[str, ...]) -> str:
 # Canonical lower-case ``aa:bb:cc:dd:ee:ff`` MAC address.
 MAC_PATTERN = r"^[0-9a-f]{2}(:[0-9a-f]{2}){5}$"
 
-# Boot-policy values: what ``GET /pxe/{mac}`` returns.
+# Boot-mode values: what ``GET /pxe/{mac}`` returns.
 #
 # - ``sanboot`` boots the local disk, firmware-aware: on UEFI it
 #   ``exit``s to the firmware boot order (which boots the disk's EFI
@@ -116,9 +116,9 @@ class MachineUpsert(BaseModel):
         pattern=r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$",
     )
     boot_mode: str = Field(default=DEFAULT_BOOT_MODE, pattern=BOOT_MODE_PATTERN)
-    # iPXE BIOS drive the ``sanboot`` policy boots (``0x80`` first disk,
-    # ``0x81`` second, ...). ``None`` = use the default (``0x80``);
-    # ignored for non-sanboot policies. Distinct from
+    # iPXE BIOS drive the ``ipxe-exit`` mode sanboots on legacy BIOS
+    # (``0x80`` first disk, ``0x81`` second, ...). ``None`` = the default
+    # (``0x80``); ignored on UEFI + by non-ipxe-exit modes. Distinct from
     # ``target_disk_serial`` -- iPXE selects local disks by BIOS drive
     # number, not by the Linux serial the flash step matches on.
     sanboot_drive: str | None = Field(default=None, pattern=SANBOOT_DRIVE_PATTERN)
@@ -337,8 +337,8 @@ class CatalogEntryAdd(BaseModel):
       server fetches and parses the sha256-manifest body, picks the
       digest matching ``image_url``'s filename, and stores it as
       ``disk_image_sha``. Without it the entry is URL-only
-      (``disk_image_sha`` stays NULL until the first flash's
-      cache-through observes it); still bindable to a machine
+      (``disk_image_sha`` stays NULL until an explicit Download
+      fetches + hashes it); still bindable to a machine
       because binding targets ``bty_image_ref``, not the content sha.
     - For ``oras://`` URLs the server resolves the OCI manifest at
       add time, picks the disk-image layer, and uses the layer's

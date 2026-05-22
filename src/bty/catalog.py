@@ -668,11 +668,11 @@ def fetch_src_to_cache(
     :class:`CatalogError` is raised (the cache is never left in a
     half-written state).
 
-    Used by the bty-web PXE flash path's eager cache-through: when a
-    machine is bound to a ``bty_image_ref`` whose ``disk_image_sha``
-    is unknown (rolling oras tag never fetched, URL-only entry that
-    hasn't been resolved), the live env's ``GET /images/<ref>/<name>``
-    triggers this fetch + caches + serves the bytes.
+    Used by the bty-web ``DownloadManager`` for explicit,
+    operator-initiated fetches of a catalog entry into the cache. The
+    serve path (``GET /images/<ref>/<name>``) does NOT call this -- it
+    hands out only already-local bytes -- so a remote image must be
+    downloaded here first before it's flashable.
 
     ``src`` must be an http(s):// or oras:// URL; file:// srcs don't
     need fetching (bytes are already on disk under ``BTY_IMAGE_ROOT``)

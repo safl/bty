@@ -146,7 +146,7 @@
     <div class="card-body">
         <form action="/ui/machines/{{ m.mac }}" method="post">
             {# Two tiers of config (see docs/concepts "general vs
-               per-policy"): the boot policy is the MODE selector; the
+               per-mode"): the boot mode is the MODE selector; the
                "Machine configuration" section below holds the machine's
                GENERAL properties (image, target disk, sanboot drive,
                hostname). Each policy READS a subset of those. The inline
@@ -192,7 +192,7 @@
             <h3 class="h6 text-uppercase text-muted border-top pt-3 mb-1">Machine configuration</h3>
             <p class="form-text mt-0 mb-3">
                 Properties of this machine, independent of policy. The selected
-                boot policy reads the subset it needs; fields it ignores are
+                boot mode reads the subset it needs; fields it ignores are
                 dimmed and marked <em>not used</em>. Values persist across
                 policy changes (e.g. a sanboot drive you calibrated under
                 <code>sanboot</code> still applies once you switch to a flash
