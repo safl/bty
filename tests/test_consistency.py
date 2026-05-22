@@ -974,7 +974,7 @@ def test_live_env_chains_tag_boot_urls_with_mac() -> None:
 def test_every_boot_mode_is_handled_by_the_pxe_decision_tree() -> None:
     """Every value in ``BOOT_MODES`` must appear as a literal string
     in ``_app.py`` -- the PXE handler decides what to serve with an
-    explicit per-policy branch (``policy == "sanboot"``, ``policy in
+    explicit per-policy branch (``policy == "ipxe-exit"``, ``policy in
     ("bty-flash-always", "bty-flash-once")``, ...). A policy added to
     the tuple (or renamed) without a matching branch silently falls
     through to the default, serving the wrong thing on real hardware.

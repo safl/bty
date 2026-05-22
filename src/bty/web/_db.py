@@ -56,7 +56,7 @@ CREATE TABLE IF NOT EXISTS machines (
     discovered_at             TEXT,    -- first /pxe/{mac} contact (NULL if PUT-created)
     last_seen_at              TEXT,    -- most recent /pxe/{mac} contact
     last_seen_ip              TEXT,    -- source IP of most recent /pxe contact
-    boot_mode               TEXT NOT NULL DEFAULT 'sanboot',
+    boot_mode               TEXT NOT NULL DEFAULT 'ipxe-exit',
     -- iPXE BIOS drive the ``sanboot`` boot_mode boots (``0x80`` =
     -- first disk). NULL = use the default (``0x80``). Distinct from
     -- ``target_disk_serial``: iPXE picks local disks by BIOS drive

@@ -68,7 +68,7 @@ MAC_PATTERN = r"^[0-9a-f]{2}(:[0-9a-f]{2}){5}$"
 # ``bty-flash-always`` is unchanged so the per-job CI cadence reflashes
 # every cycle.
 BOOT_MODES = (
-    "sanboot",
+    "ipxe-exit",
     "bty-flash-always",
     "bty-flash-once",
     "bty-tui",

@@ -1072,7 +1072,7 @@ def test_machine_default_boot_mode_is_sanboot(app_client: TestClient) -> None:
         cookies=AUTH,
     )
     assert r.status_code == 200
-    assert r.json()["boot_mode"] == "sanboot"
+    assert r.json()["boot_mode"] == "ipxe-exit"
     assert r.json()["last_flashed_at"] is None
 
 
@@ -1331,14 +1331,14 @@ def test_pxe_plan_unknown_mac_auto_discovers_and_returns_inventory(
 
 
 def test_pxe_plan_sanboot_mode_returns_local_mode(app_client: TestClient) -> None:
-    """``boot_mode=sanboot`` -> plan ``mode=exit`` so ``bty`` exits
+    """``boot_mode=ipxe-exit`` -> plan ``mode=exit`` so ``bty`` exits
     cleanly (sanboot is handled at the iPXE layer; the box never
     reaches the live env). The plan ``mode`` token is a live-env
     signal distinct from any boot_mode."""
     mac = "aa:bb:cc:dd:ee:ff"
     app_client.put(
         f"/machines/{mac}",
-        json={"boot_mode": "sanboot"},
+        json={"boot_mode": "ipxe-exit"},
         cookies=AUTH,
     )
     r = app_client.get(f"/pxe/{mac}/plan")
@@ -1566,12 +1566,12 @@ def test_pxe_done_records_flash_without_mutating_mode(app_client: TestClient) ->
 
 
 def test_pxe_sanboot_mode_returns_sanboot_template(app_client: TestClient) -> None:
-    """``boot_mode=sanboot`` emits an iPXE ``sanboot --drive ... ||
+    """``boot_mode=ipxe-exit`` emits an iPXE ``sanboot --drive ... ||
     exit`` (bty boots the local disk itself), defaulting to drive
     0x80, NOT the flash chain."""
     app_client.put(
         "/machines/aa:bb:cc:dd:ee:01",
-        json={"boot_mode": "sanboot"},
+        json={"boot_mode": "ipxe-exit"},
         cookies=AUTH,
     )
     r = app_client.get("/pxe/aa:bb:cc:dd:ee:01")
@@ -1589,7 +1589,7 @@ def test_pxe_sanboot_mode_uses_per_machine_drive_override(app_client: TestClient
     boxes can point iPXE at the right BIOS drive."""
     app_client.put(
         "/machines/aa:bb:cc:dd:ee:02",
-        json={"boot_mode": "sanboot", "sanboot_drive": "0x81"},
+        json={"boot_mode": "ipxe-exit", "sanboot_drive": "0x81"},
         cookies=AUTH,
     )
     r = app_client.get("/pxe/aa:bb:cc:dd:ee:02")
@@ -1602,7 +1602,7 @@ def test_machine_upsert_rejects_malformed_sanboot_drive(app_client: TestClient) 
     a bad value is a 422 at the API edge."""
     r = app_client.put(
         "/machines/aa:bb:cc:dd:ee:03",
-        json={"boot_mode": "sanboot", "sanboot_drive": "sda"},
+        json={"boot_mode": "ipxe-exit", "sanboot_drive": "sda"},
         cookies=AUTH,
     )
     assert r.status_code == 422
@@ -1992,7 +1992,7 @@ def test_machines_upsert_accepts_target_disk_serial(app_client: TestClient) -> N
     r = app_client.put(
         "/machines/aa:bb:cc:dd:ee:ee",
         json={
-            "boot_mode": "sanboot",
+            "boot_mode": "ipxe-exit",
             "target_disk_serial": "Z9YHHRWZ",
         },
         cookies=AUTH,
@@ -2162,7 +2162,7 @@ def test_pxe_hit_records_pxe_offered_event(app_client: TestClient) -> None:
     ref = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
     app_client.put(
         "/machines/aa:bb:cc:dd:ee:f0",
-        json={"bty_image_ref": ref, "boot_mode": "sanboot"},
+        json={"bty_image_ref": ref, "boot_mode": "ipxe-exit"},
         cookies=AUTH,
     )
     app_client.get("/pxe/aa:bb:cc:dd:ee:f0")
@@ -2183,7 +2183,7 @@ def test_pxe_hit_records_pxe_offered_event(app_client: TestClient) -> None:
     assert ev["subject_id"] == "aa:bb:cc:dd:ee:f0"
     assert ev["actor"] == "pxe-client"
     assert ev["details"]["offer"] == "sanboot"
-    assert ev["details"]["boot_mode"] == "sanboot"
+    assert ev["details"]["boot_mode"] == "ipxe-exit"
 
 
 def test_pxe_hit_records_inventory_offer_for_unknown_mac(app_client: TestClient) -> None:
@@ -2333,7 +2333,7 @@ def test_events_carry_source_ip(app_client: TestClient) -> None:
     """
     mac = "aa:bb:cc:dd:ee:fe"
     app_client.get(f"/pxe/{mac}")
-    app_client.put(f"/machines/{mac}", json={"boot_mode": "sanboot"}, cookies=AUTH)
+    app_client.put(f"/machines/{mac}", json={"boot_mode": "ipxe-exit"}, cookies=AUTH)
     r = app_client.get("/events", cookies=AUTH)
     assert r.status_code == 200
     by_kind = {e["kind"]: e for e in r.json()["events"]}
@@ -2390,7 +2390,7 @@ def test_events_filter_by_actor(app_client: TestClient) -> None:
     app_client.get(f"/pxe/{mac}")  # pxe-client: machine.discovered
     app_client.put(  # operator: machine.upserted
         f"/machines/{mac}",
-        json={"boot_mode": "sanboot"},
+        json={"boot_mode": "ipxe-exit"},
         cookies=AUTH,
     )
     r = app_client.get("/events", params={"actor": "operator"}, cookies=AUTH)
@@ -2583,7 +2583,7 @@ def test_ui_events_page_footer_shows_filtered_when_filter_active(
     app_client.get("/pxe/aa:bb:cc:dd:ee:f9")
     app_client.put(
         "/machines/aa:bb:cc:dd:ee:f9",
-        json={"boot_mode": "sanboot"},
+        json={"boot_mode": "ipxe-exit"},
         cookies=AUTH,
     )
     # Unfiltered view: no "(filtered)" suffix.

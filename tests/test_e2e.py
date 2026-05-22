@@ -1322,7 +1322,7 @@ def test_e2e_machine_put_is_full_replace_not_partial_update(
 ) -> None:
     """PUT /machines/<mac> is REST-spec full replace. A PUT with
     only ``{"hostname": ...}`` resets every other field to its
-    Pydantic default (bty_image_ref=None, boot_mode=sanboot).
+    Pydantic default (bty_image_ref=None, boot_mode=ipxe-exit).
 
     Pin the contract: the UI's machine-edit form sends every
     field every time precisely because the API is full-replace.
@@ -1385,7 +1385,7 @@ def test_e2e_machine_put_is_full_replace_not_partial_update(
     assert m["hostname"] == "second-name", m
     # Full-replace contract: omitted fields reset to defaults.
     assert m["bty_image_ref"] is None, m
-    assert m["boot_mode"] == "sanboot", m
+    assert m["boot_mode"] == "ipxe-exit", m
     assert m["target_disk_serial"] is None, m
 
     # The operator-correct way to update a single field is to

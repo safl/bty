@@ -577,7 +577,7 @@ def create_app(
                     f"{normalised} offered inventory boot (bty collects disks + reboots)"
                 )
                 offer_details = {"offer": "bty-inventory"}
-        elif policy == "sanboot":
+        elif policy == "ipxe-exit":
             # iPXE boots the local disk itself (drive override, default
             # 0x80), with ``|| exit`` falling back to the firmware boot
             # order. Checked before the generic ``ref`` branch so a
@@ -586,7 +586,7 @@ def create_app(
             drive = machine.get("sanboot_drive") or _models.DEFAULT_SANBOOT_DRIVE
             template = jinja.get_template("ipxe_sanboot.j2")
             rendered = template.render(mac=normalised, machine=machine, drive=drive, policy=policy)
-            offer_kind = "sanboot"
+            offer_kind = "ipxe-exit"
             offer_summary = f"{normalised} offered sanboot (iPXE boots local drive {drive})"
             offer_details = {"offer": "sanboot", "sanboot_drive": drive}
         elif ref and policy in ("bty-flash-always", "bty-flash-once"):

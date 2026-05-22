@@ -718,7 +718,7 @@ def test_ui_machines_list_has_inline_add_form(client: TestClient) -> None:
 
 def test_ui_machines_inline_add_defaults_to_safe_sanboot_mode(client: TestClient) -> None:
     """The minimal inline add field stages a row by MAC only and
-    submits ``boot_mode=sanboot`` -- never a flash policy (which
+    submits ``boot_mode=ipxe-exit`` -- never a flash policy (which
     would need a target_disk_serial the box only reports after its
     first PXE check-in). Image binding + policy are set on the
     detail page.
@@ -726,7 +726,7 @@ def test_ui_machines_inline_add_defaults_to_safe_sanboot_mode(client: TestClient
     _login(client)
     body = client.get("/ui/machines").text
     # The submit JS hardcodes the safe default.
-    assert '"boot_mode", "sanboot"' in body
+    assert '"boot_mode", "ipxe-exit"' in body
     # No flash policy is offered/sent from the inline add.
     assert '"boot_mode", "bty-flash-always"' not in body
 
@@ -1014,7 +1014,7 @@ def test_ui_machine_save_is_audited(client: TestClient) -> None:
     # A second save is an update -> machine.upserted.
     client.post(
         f"/ui/machines/{mac}",
-        data={"boot_mode": "sanboot"},
+        data={"boot_mode": "ipxe-exit"},
         cookies=AUTH,
         follow_redirects=False,
     )
@@ -1036,7 +1036,7 @@ def test_ui_events_summary_linkifies_mac(client: TestClient) -> None:
     mac = "aa:bb:cc:dd:ee:42"
     client.post(
         f"/ui/machines/{mac}",
-        data={"boot_mode": "sanboot"},
+        data={"boot_mode": "ipxe-exit"},
         cookies=AUTH,
         follow_redirects=False,
     )
@@ -1069,7 +1069,7 @@ def test_ui_machine_upsert_form_rejects_non_hex_sha256(client: TestClient) -> No
         "/ui/machines/aa:bb:cc:dd:ee:ff",
         data={
             "bty_image_ref": "not-a-real-sha-just-garbage",
-            "boot_mode": "sanboot",
+            "boot_mode": "ipxe-exit",
         },
         follow_redirects=False,
     )
@@ -1160,7 +1160,7 @@ def test_ui_machine_upsert_via_form(client: TestClient) -> None:
     )
     assert api.json()["hostname"] == "bty-ui-test"
     # Form omits boot_mode -> dependency default applies (sanboot).
-    assert api.json()["boot_mode"] == "sanboot"
+    assert api.json()["boot_mode"] == "ipxe-exit"
 
 
 def test_ui_machine_upsert_invalid_field_gives_concise_banner(client: TestClient) -> None:
@@ -1170,7 +1170,7 @@ def test_ui_machine_upsert_invalid_field_gives_concise_banner(client: TestClient
     _login(client)
     r = client.post(
         "/ui/machines/aa:bb:cc:dd:ee:ff",
-        data={"bty_image_ref": "not-a-hex-digest!", "boot_mode": "sanboot"},
+        data={"bty_image_ref": "not-a-hex-digest!", "boot_mode": "ipxe-exit"},
         follow_redirects=False,
     )
     assert r.status_code == 303
@@ -1283,7 +1283,7 @@ def test_ui_machine_detail_renders_no_inventory_warning(client: TestClient) -> N
     # Seed a machine record without ever posting inventory.
     client.put(
         "/machines/aa:bb:cc:dd:ee:89",
-        json={"boot_mode": "sanboot"},
+        json={"boot_mode": "ipxe-exit"},
         cookies=AUTH,
     )
     r = client.get("/ui/machines/aa:bb:cc:dd:ee:89", cookies=AUTH)
@@ -1310,7 +1310,7 @@ def test_ui_machine_upsert_refuses_flash_without_target_disk(client: TestClient)
         "/machines/aa:bb:cc:dd:ee:ff",
         json={
             "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            "boot_mode": "sanboot",
+            "boot_mode": "ipxe-exit",
         },
         cookies=AUTH,
     )
@@ -1327,7 +1327,7 @@ def test_ui_machine_upsert_refuses_flash_without_target_disk(client: TestClient)
     assert "/ui/machines/aa:bb:cc:dd:ee:ff?error=" in r.headers["location"]
     api = client.get("/machines/aa:bb:cc:dd:ee:ff", cookies=AUTH).json()
     # Safety gate: didn't flip to flash.
-    assert api["boot_mode"] == "sanboot"
+    assert api["boot_mode"] == "ipxe-exit"
     assert api["target_disk_serial"] is None
 
 
@@ -1366,7 +1366,7 @@ def test_ui_machine_detail_renders_boot_mode_dropdown(client: TestClient) -> Non
     body = r.text
     assert 'name="boot_mode"' in body
     # Both options present, current value selected.
-    assert ">sanboot</option>" in body
+    assert ">ipxe-exit</option>" in body
     assert ">bty-flash-always</option>" in body
     assert 'value="bty-flash-always" selected' in body
 
@@ -1647,7 +1647,7 @@ def test_ui_machines_list_shows_boot_mode_badge(client: TestClient) -> None:
         "/machines/11:22:33:44:55:66",
         json={
             "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            "boot_mode": "sanboot",
+            "boot_mode": "ipxe-exit",
         },
         cookies=AUTH,
     )
@@ -1674,7 +1674,7 @@ def test_ui_machines_list_shows_boot_mode_badge(client: TestClient) -> None:
     # text is the full policy name).
     assert "bg-danger" in body and ">bty-flash-always<" in body
     assert ">bty-flash-once<" in body  # the bg-warning variant
-    assert "bg-dark" in body and ">sanboot<" in body
+    assert "bg-dark" in body and ">ipxe-exit<" in body
     assert "bg-info text-dark" in body and ">bty-tui<" in body
     assert "bg-primary" in body and ">bty-inventory<" in body
     # Table header has Boot column + Last flashed column.
