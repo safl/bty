@@ -202,7 +202,7 @@ sudo passwd bty
 Initial UI tour:
 
 - **`/ui/machines`** - register targets by MAC. Each machine gets a row
-  with assigned image + boot policy.
+  with assigned image + boot mode.
 - **`/ui/images`** - upload `*.img.zst` / `*.img.gz` / `*.img.xz` /
   `*.img.bz2` / `*.qcow2` images via PUT or drag-and-drop. These end up
   under `/var/lib/bty/images/` and stream to targets at flash time.
@@ -224,8 +224,8 @@ Initial UI tour:
 
 Once a target's MAC is registered with an assigned image, set the target's
 BIOS / UEFI to **boot from the network (PXE) first**. bty then drives every
-subsequent boot via `boot_policy`; you set the firmware order once. Mind
-the post-flash boot: with `boot_policy=sanboot` (the default) bty boots the
+subsequent boot via `boot_mode`; you set the firmware order once. Mind
+the post-flash boot: with `boot_mode=sanboot` (the default) bty boots the
 disk itself via iPXE, so the firmware order matters less; the `bty-flash-*`
 policies sanboot the just-flashed disk the same way. The drive is `0x80`
 (first disk) unless you set `sanboot_drive`. (A flashed box that won't boot
@@ -240,7 +240,7 @@ will:
 3. Boot the netboot kernel + initrd + squashfs trio. `bty-on-tty1.service`
    exec's `bty --server X --mac Y` on tty1; ``bty`` GETs
    `<server>/pxe/<mac>/plan`, sees ``mode=flash`` (because
-   boot_policy=bty-flash-always + ref + serial), writes the image to the
+   boot_mode=bty-flash-always + ref + serial), writes the image to the
    local disk, POSTs `/pxe/<mac>/done`, reboots.
 
 The server's machine-detail page shows live progress + last flashed

@@ -496,7 +496,7 @@ class BtyTui:
             - ``plan.mode == "interactive"`` -> interactive wizard with
               the catalog the server suggests
             - ``plan.mode == "inventory"`` -> post disk inventory, then
-              reboot (boot_policy=bty-inventory; next contact sanboots)
+              reboot (boot_mode=bty-inventory; next contact sanboots)
             - ``plan.mode == "exit"``    -> exit cleanly (nothing to do
               from bty's side; firmware sanboot handles the rest)
             - 404 / network failure       -> interactive wizard with
@@ -613,7 +613,7 @@ class BtyTui:
                     "assignment in the bty-server UI (/ui/machines)."
                 )
             if plan_action == "exit":
-                # The server says nothing to do here (boot_policy=sanboot
+                # The server says nothing to do here (boot_mode=sanboot
                 # or an unrecognised policy). Print a Panel so an operator
                 # hand-running ``bty --mac X`` from a workstation sees WHY
                 # the tool is exiting -- a silent ``sys.exit(0)`` looks
@@ -633,7 +633,7 @@ class BtyTui:
                 )
                 sys.exit(0)
             if plan_action == "inventory":
-                # boot_policy=bty-inventory: the box booted the live env
+                # boot_mode=bty-inventory: the box booted the live env
                 # only to (re)report its disks. Post inventory
                 # synchronously so it lands, then reboot -- the next PXE
                 # contact (saw_flasher_boot armed by the /boot fetch)

@@ -450,7 +450,7 @@ def create_app(
             if row is None:
                 # Auto-discovery: record an unassigned machine so the
                 # operator can see this MAC in /machines and decide
-                # what to do with it. ``boot_policy='bty-inventory'``
+                # what to do with it. ``boot_mode='bty-inventory'``
                 # makes the unknown MAC chain into the live env to self-
                 # report its disks, then sanboot -- so a new box auto-
                 # collects its inventory and just boots, with no prior
@@ -459,7 +459,7 @@ def create_app(
                 conn.execute(
                     """
                     INSERT INTO machines
-                        (mac, boot_policy,
+                        (mac, boot_mode,
                          discovered_at, last_seen_at, last_seen_ip,
                          created_at, updated_at)
                     VALUES (?, 'bty-inventory', ?, ?, ?, ?, ?)
@@ -521,7 +521,7 @@ def create_app(
         # consumed here on the following /pxe contact. Without this,
         # PXE-first firmware would reflash on every reboot forever.
         host = _request_host(request)
-        policy = machine.get("boot_policy")
+        policy = machine.get("boot_mode")
         ref = machine.get("bty_image_ref")
 
         # First decide the offer (template + summary + details).
@@ -671,7 +671,7 @@ def create_app(
                         conn,
                         kind="netboot.pxe.flash.no_target_disk",
                         summary=(
-                            f"machine {normalised}: boot_policy={policy} but no "
+                            f"machine {normalised}: boot_mode={policy} but no "
                             "target_disk_serial picked; refusing flash chain"
                         ),
                         subject_kind="machine",
@@ -681,7 +681,7 @@ def create_app(
                         details={
                             "bty_image_ref": ref,
                             "image_name": image_name,
-                            "boot_policy": policy,
+                            "boot_mode": policy,
                         },
                     )
                     conn.commit()
@@ -690,19 +690,19 @@ def create_app(
                 offer_kind = "exit-fallback"
                 offer_summary = (
                     f"{normalised} offered exit (firmware boot) "
-                    f"(boot_policy={policy} but no target_disk_serial picked)"
+                    f"(boot_mode={policy} but no target_disk_serial picked)"
                 )
                 offer_details = {
                     "offer": "exit-fallback",
                     "bty_image_ref": ref,
                     "reason": "no_target_disk",
-                    "boot_policy": policy,
+                    "boot_mode": policy,
                 }
             else:
                 # Orphaned binding: machine targets a ref that no
                 # catalog_entries row resolves. Falls back to ipxe.j2
                 # (exit to firmware), but the operator sees a louder
-                # event so the "boot_policy=bty-flash-always but ref is
+                # event so the "boot_mode=bty-flash-always but ref is
                 # dangling" case doesn't look like a normal hit.
                 short = str(ref)[:12]
                 with _db.open_db(state_path) as conn:
@@ -722,7 +722,7 @@ def create_app(
                 offer_kind = "exit-fallback"
                 offer_summary = (
                     f"{normalised} offered exit (firmware boot) "
-                    f"(boot_policy={policy} but ref={short}... is orphaned)"
+                    f"(boot_mode={policy} but ref={short}... is orphaned)"
                 )
                 offer_details = {
                     "offer": "exit-fallback",
@@ -732,7 +732,7 @@ def create_app(
         else:
             # Known machine that doesn't resolve to a chain: a flash
             # policy with no image ref bound, or a stale/invalid
-            # boot_policy. ipxe_unknown.j2 sanboots the first disk
+            # boot_mode. ipxe_unknown.j2 sanboots the first disk
             # (``sanboot --drive 0x80 || exit``), so the box still boots
             # whatever it has rather than wedging on the network.
             template = jinja.get_template("ipxe_unknown.j2")
@@ -758,7 +758,7 @@ def create_app(
                 subject_id=normalised,
                 actor="pxe-client",
                 source_ip=client_ip,
-                details={"boot_policy": policy, **offer_details, "offer_kind": offer_kind},
+                details={"boot_mode": policy, **offer_details, "offer_kind": offer_kind},
             )
             conn.commit()
 
@@ -775,7 +775,7 @@ def create_app(
         # other ``/pxe/*`` endpoints.
         #
         # Always updates ``last_flashed_at`` + ``updated_at``. For
-        # ``boot_policy=bty-flash-once`` we also flip the policy to
+        # ``boot_mode=bty-flash-once`` we also flip the policy to
         # ``sanboot`` here so the next PXE boot stops re-flashing and
         # boots the freshly-flashed disk (the box flashed, the
         # operator's "one reimage please" is satisfied, leave it
@@ -786,11 +786,11 @@ def create_app(
         client_ip = _client_ip(request)
         with _db.open_db(state_path) as conn:
             current = conn.execute(
-                "SELECT boot_policy FROM machines WHERE mac = ?",
+                "SELECT boot_mode FROM machines WHERE mac = ?",
                 (normalised,),
             ).fetchone()
             flipped_from_flash_once = (
-                current is not None and current["boot_policy"] == "bty-flash-once"
+                current is not None and current["boot_mode"] == "bty-flash-once"
             )
             if flipped_from_flash_once:
                 # Settle to sanboot: the box boots its freshly-flashed
@@ -798,7 +798,7 @@ def create_app(
                 # "boot the disk" policy; there is no separate local.)
                 cur = conn.execute(
                     "UPDATE machines SET last_flashed_at = ?, updated_at = ?, "
-                    "boot_policy = 'sanboot' WHERE mac = ?",
+                    "boot_mode = 'sanboot' WHERE mac = ?",
                     (now, now, normalised),
                 )
             else:
@@ -836,20 +836,20 @@ def create_app(
         Plan shapes (mode is the dispatch token):
 
         * ``{"mode": "flash", "image": URL, "target_disk_serial": S}``
-          -- boot_policy in (bty-flash-always, bty-flash-once) with a bindable ref
+          -- boot_mode in (bty-flash-always, bty-flash-once) with a bindable ref
           AND a target_disk_serial picked. ``bty`` runs the flash
           without prompts.
-        * ``{"mode": "interactive", "catalog": URL}`` -- boot_policy
+        * ``{"mode": "interactive", "catalog": URL}`` -- boot_mode
           ``tui``, OR a flash policy that can't be auto-resolved
           (no target serial, orphan ref). ``bty`` drops the operator
           into the wizard with the server's catalog pre-loaded.
-        * ``{"mode": "exit"}`` -- boot_policy=sanboot (handled at the
+        * ``{"mode": "exit"}`` -- boot_mode=sanboot (handled at the
           iPXE layer, so the box doesn't reach the live env) or any
           unrecognised policy. ``bty`` exits cleanly; the firmware /
           sanboot path handles boot.
 
         Unknown MACs auto-register (matches the ``/pxe/{mac}`` iPXE
-        endpoint) with boot_policy=bty-tui so a hand-launched ``bty
+        endpoint) with boot_mode=bty-tui so a hand-launched ``bty
         --mac X`` from a fresh box gets a wizard plan rather than
         a 404.
 
@@ -863,7 +863,7 @@ def create_app(
         after success). The machine record's ``bty_image_ref`` /
         ``target_disk_serial`` fields stay untouched by interactive
         flashes. Operators who want server-tracked flashes must
-        configure boot_policy=bty-flash-always + bind a ref + pick a serial.
+        configure boot_mode=bty-flash-always + bind a ref + pick a serial.
 
         Open endpoint: same trust model as the rest of /pxe/*
         (homelab / CI network, not the internet).
@@ -876,12 +876,12 @@ def create_app(
             if row is None:
                 # Auto-discovery: mirror /pxe/{mac}'s behaviour so a
                 # ``bty`` invocation against an unknown MAC creates a
-                # record (boot_policy=bty-inventory) instead of
+                # record (boot_mode=bty-inventory) instead of
                 # 404-ing.
                 conn.execute(
                     """
                     INSERT INTO machines
-                        (mac, boot_policy,
+                        (mac, boot_mode,
                          discovered_at, last_seen_at, last_seen_ip,
                          created_at, updated_at)
                     VALUES (?, 'bty-inventory', ?, ?, ?, ?, ?)
@@ -923,7 +923,7 @@ def create_app(
 
         host = _request_host(request)
         base = f"http://{host}"
-        policy = machine.get("boot_policy")
+        policy = machine.get("boot_mode")
         ref = machine.get("bty_image_ref")
 
         plan: dict[str, Any]
@@ -980,7 +980,7 @@ def create_app(
             plan = {"mode": "inventory"}
             offer_kind = "plan:inventory"
         else:
-            # boot_policy=sanboot (or any other / missing) -- ``bty``
+            # boot_mode=sanboot (or any other / missing) -- ``bty``
             # has nothing to do (sanboot is handled at the iPXE layer,
             # the box never chains into the live env); plan mode=exit
             # means "exit cleanly, let firmware / sanboot handle boot".
@@ -996,7 +996,7 @@ def create_app(
                 subject_id=normalised,
                 actor="pxe-client",
                 source_ip=client_ip,
-                details={"plan": plan, "boot_policy": policy, "offer_kind": offer_kind},
+                details={"plan": plan, "boot_mode": policy, "offer_kind": offer_kind},
             )
             conn.commit()
         return plan
@@ -1180,7 +1180,7 @@ def create_app(
                 """
                 UPDATE machines
                 SET saw_flasher_boot = 1, updated_at = ?
-                WHERE mac = ? AND boot_policy IN ('bty-flash-always', 'bty-inventory')
+                WHERE mac = ? AND boot_mode IN ('bty-flash-always', 'bty-inventory')
                 """,
                 (_now_iso(), mac),
             )
@@ -1557,13 +1557,13 @@ def create_app(
             conn.execute(
                 """
                 INSERT INTO machines
-                    (mac, bty_image_ref, hostname, boot_policy, sanboot_drive,
+                    (mac, bty_image_ref, hostname, boot_mode, sanboot_drive,
                      target_disk_serial, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(mac) DO UPDATE SET
                     bty_image_ref      = excluded.bty_image_ref,
                     hostname           = excluded.hostname,
-                    boot_policy        = excluded.boot_policy,
+                    boot_mode        = excluded.boot_mode,
                     sanboot_drive      = excluded.sanboot_drive,
                     target_disk_serial = excluded.target_disk_serial,
                     -- Reset the one-shot alternation bit: an operator
@@ -1579,7 +1579,7 @@ def create_app(
                     normalised,
                     body.bty_image_ref,
                     body.hostname,
-                    body.boot_policy,
+                    body.boot_mode,
                     body.sanboot_drive,
                     body.target_disk_serial,
                     created_at,
@@ -1596,7 +1596,7 @@ def create_app(
                 source_ip=_client_ip(request),
                 details={
                     "bty_image_ref": body.bty_image_ref,
-                    "boot_policy": body.boot_policy,
+                    "boot_mode": body.boot_mode,
                     "sanboot_drive": body.sanboot_drive,
                     "hostname": body.hostname,
                     "target_disk_serial": body.target_disk_serial,
@@ -2887,7 +2887,7 @@ def _row_to_machine(row: sqlite3.Row) -> _models.Machine:
         discovered_at=_iso_or_none(row["discovered_at"]),
         last_seen_at=_iso_or_none(row["last_seen_at"]),
         last_seen_ip=row["last_seen_ip"],
-        boot_policy=row["boot_policy"],
+        boot_mode=row["boot_mode"],
         sanboot_drive=_db.row_value(row, "sanboot_drive"),
         last_flashed_at=_iso_or_none(row["last_flashed_at"]),
         known_disks=parsed_disks,

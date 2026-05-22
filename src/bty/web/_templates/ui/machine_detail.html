@@ -154,10 +154,10 @@
                ignores rather than hiding them, so the
                general/consumed-by split stays visible to the operator. #}
             <div class="mb-4">
-                <label class="form-label fw-semibold" for="boot_policy">Boot policy</label>
-                <select name="boot_policy" id="boot_policy" class="form-select">
+                <label class="form-label fw-semibold" for="boot_mode">Boot policy</label>
+                <select name="boot_mode" id="boot_mode" class="form-select">
                     {% for policy in boot_policies %}
-                    <option value="{{ policy }}" {% if policy == m.boot_policy %}selected{% endif %}>{{ policy }}</option>
+                    <option value="{{ policy }}" {% if policy == m.boot_mode %}selected{% endif %}>{{ policy }}</option>
                     {% endfor %}
                 </select>
                 <div class="form-text">
@@ -245,7 +245,7 @@
                 {% else %}
                 <input type="hidden" name="target_disk_serial" value="{{ m.target_disk_serial or '' }}">
                 <div class="alert alert-warning small mb-0">
-                    No disk inventory yet for this machine. Set <code>boot_policy=bty-tui</code>
+                    No disk inventory yet for this machine. Set <code>boot_mode=bty-tui</code>
                     above and power-cycle the machine; <code>bty</code> will
                     report its disks to bty-web on startup and this dropdown
                     will populate.
@@ -301,7 +301,7 @@
     // the DOM and still POST -- dimming never clears a value, so a
     // sanboot drive calibrated under ``sanboot`` survives a switch to
     // a flash policy.
-    const policySelect = document.getElementById("boot_policy");
+    const policySelect = document.getElementById("boot_mode");
     if (!policySelect) return;
     const targets = document.querySelectorAll("[data-policy-relevant]");
 

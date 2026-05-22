@@ -183,7 +183,7 @@ def main(args, cijoe):
         log.info("Configuring full-DHCP for the isolated PXE segment via SSH")
         _ssh_setup_test_dhcp("127.0.0.1", ssh_port, cfg)
 
-        log.info(f"PUT /machines/{cfg['client_mac']} (boot_policy=bty-flash-always)")
+        log.info(f"PUT /machines/{cfg['client_mac']} (boot_mode=bty-flash-always)")
         _put_assignment("127.0.0.1", mgmt_port, token, cfg, bty_image_ref)
 
         # Client firmware: BIOS by default (proven, no OVMF dep). The
@@ -447,7 +447,7 @@ def _put_assignment(host, port, token, cfg, bty_image_ref):
     body = json.dumps(
         {
             "bty_image_ref": bty_image_ref,
-            "boot_policy": "bty-flash-always",
+            "boot_mode": "bty-flash-always",
             # v0.19.0+ safety gate: /pxe/{mac} refuses the flash
             # chain unless a target_disk_serial is picked. The
             # client VM's flash target is pinned to ``serial=

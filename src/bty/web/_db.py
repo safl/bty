@@ -56,8 +56,8 @@ CREATE TABLE IF NOT EXISTS machines (
     discovered_at             TEXT,    -- first /pxe/{mac} contact (NULL if PUT-created)
     last_seen_at              TEXT,    -- most recent /pxe/{mac} contact
     last_seen_ip              TEXT,    -- source IP of most recent /pxe contact
-    boot_policy               TEXT NOT NULL DEFAULT 'sanboot',
-    -- iPXE BIOS drive the ``sanboot`` boot_policy boots (``0x80`` =
+    boot_mode               TEXT NOT NULL DEFAULT 'sanboot',
+    -- iPXE BIOS drive the ``sanboot`` boot_mode boots (``0x80`` =
     -- first disk). NULL = use the default (``0x80``). Distinct from
     -- ``target_disk_serial``: iPXE picks local disks by BIOS drive
     -- number, not by the Linux serial the flash step matches.
@@ -186,7 +186,10 @@ class StaleSchemaError(RuntimeError):
 # ``SELECT`` blow up with ``no such column``.
 _REQUIRED_COLUMNS: dict[str, tuple[str, ...]] = {
     "events": ("source_ip",),
-    "machines": ("bty_image_ref", "known_disks", "target_disk_serial"),
+    # ``boot_mode`` (renamed from ``boot_policy``): listing it here forces
+    # a clean state.db reset on an old DB that still has ``boot_policy``,
+    # rather than a runtime "no such column" error.
+    "machines": ("bty_image_ref", "known_disks", "target_disk_serial", "boot_mode"),
     "catalog_entries": ("bty_image_ref", "disk_image_sha"),
 }
 

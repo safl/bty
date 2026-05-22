@@ -128,7 +128,7 @@ def test_version_is_open(app_client: TestClient) -> None:
 
 
 def test_pxe_for_unknown_mac_returns_tui_template(app_client: TestClient) -> None:
-    """An unknown MAC auto-discovers with ``boot_policy=bty-tui`` and is
+    """An unknown MAC auto-discovers with ``boot_mode=bty-tui`` and is
     served the interactive-live-env iPXE chain. This is "bty-on-a-USB
     but over the network": first PXE contact lands the operator at
     ``bty`` without any prior server-side configuration.
@@ -275,7 +275,7 @@ def test_pxe_for_known_mac_uses_assignment_template(app_client: TestClient) -> N
 def test_pxe_auto_discovers_unknown_mac(app_client: TestClient) -> None:
     """A /pxe contact for an unknown MAC creates a placeholder record so the
     operator sees the machine in /machines and can claim it. The default
-    ``boot_policy`` is ``bty-inventory``: the unknown MAC chains into the live
+    ``boot_mode`` is ``bty-inventory``: the unknown MAC chains into the live
     env to self-report its disks, then sanboots -- so a new box auto-collects
     its inventory and just boots, with no prior server-side configuration."""
     mac = "11:22:33:44:55:66"
@@ -298,7 +298,7 @@ def test_pxe_auto_discovers_unknown_mac(app_client: TestClient) -> None:
     body = found.json()
     assert body["mac"] == mac
     assert body["bty_image_ref"] is None  # discovered, not yet assigned
-    assert body["boot_policy"] == "bty-inventory"  # auto-discovery default
+    assert body["boot_mode"] == "bty-inventory"  # auto-discovery default
     assert body["discovered_at"] is not None
     assert body["last_seen_at"] is not None
 
@@ -1061,8 +1061,8 @@ def test_list_images_does_not_surface_bri_descriptors(tmp_path: Path) -> None:
 # ---------- boot policy + flash chain --------------------------
 
 
-def test_machine_default_boot_policy_is_sanboot(app_client: TestClient) -> None:
-    """A fresh PUT without an explicit boot_policy gets ``sanboot`` -
+def test_machine_default_boot_mode_is_sanboot(app_client: TestClient) -> None:
+    """A fresh PUT without an explicit boot_mode gets ``sanboot`` -
     boot the local disk; operators opt INTO reflashing explicitly."""
     r = app_client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
@@ -1072,7 +1072,7 @@ def test_machine_default_boot_policy_is_sanboot(app_client: TestClient) -> None:
         cookies=AUTH,
     )
     assert r.status_code == 200
-    assert r.json()["boot_policy"] == "sanboot"
+    assert r.json()["boot_mode"] == "sanboot"
     assert r.json()["last_flashed_at"] is None
 
 
@@ -1089,7 +1089,7 @@ def test_machine_upsert_rejects_malformed_sha256(app_client: TestClient) -> None
     ):
         r = app_client.put(
             "/machines/aa:bb:cc:dd:ee:ff",
-            json={"bty_image_ref": bad, "boot_policy": "bty-flash-always"},
+            json={"bty_image_ref": bad, "boot_mode": "bty-flash-always"},
             cookies=AUTH,
         )
         assert r.status_code == 422, f"expected 422 for {bad!r}, got {r.status_code}"
@@ -1168,7 +1168,7 @@ def test_machine_upsert_rejects_unknown_fields(app_client: TestClient) -> None:
         "/machines/aa:bb:cc:dd:ee:ff",
         json={
             "image": "stale-filename.qcow2",
-            "boot_policy": "bty-flash-always",
+            "boot_mode": "bty-flash-always",
         },
         cookies=AUTH,
     )
@@ -1182,25 +1182,25 @@ def test_machine_upsert_rejects_unknown_fields(app_client: TestClient) -> None:
     )
 
 
-def test_machine_upsert_accepts_boot_policy_flash(app_client: TestClient) -> None:
+def test_machine_upsert_accepts_boot_mode_flash(app_client: TestClient) -> None:
     r = app_client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
         json={
             "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            "boot_policy": "bty-flash-always",
+            "boot_mode": "bty-flash-always",
         },
         cookies=AUTH,
     )
     assert r.status_code == 200
-    assert r.json()["boot_policy"] == "bty-flash-always"
+    assert r.json()["boot_mode"] == "bty-flash-always"
 
 
-def test_machine_upsert_rejects_unknown_boot_policy(app_client: TestClient) -> None:
+def test_machine_upsert_rejects_unknown_boot_mode(app_client: TestClient) -> None:
     r = app_client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
         json={
             "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            "boot_policy": "yolo",
+            "boot_mode": "yolo",
         },
         cookies=AUTH,
     )
@@ -1210,7 +1210,7 @@ def test_machine_upsert_rejects_unknown_boot_policy(app_client: TestClient) -> N
 def test_pxe_default_sanboot_assigned_machine_returns_sanboot_template(
     app_client: TestClient,
 ) -> None:
-    """An image-assigned machine on the default boot_policy (sanboot):
+    """An image-assigned machine on the default boot_mode (sanboot):
     iPXE boots the local disk, NOT the flash chain. Reflashing is
     opt-in via a bty-flash-* policy, not implicit on assignment."""
     app_client.put(
@@ -1230,7 +1230,7 @@ def test_pxe_default_sanboot_assigned_machine_returns_sanboot_template(
 def test_pxe_flash_policy_returns_chain_with_args(
     app_client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """boot_policy=flash + bound image: chain into kernel/initrd
+    """boot_mode=flash + bound image: chain into kernel/initrd
     with the minimal ``bty.server`` + ``bty.mac`` cmdline params.
 
     Since v0.22.10 the kernel cmdline no longer carries
@@ -1269,7 +1269,7 @@ def test_pxe_flash_policy_returns_chain_with_args(
     ref = r.json()["bty_image_ref"]
     assert r.json()["disk_image_sha"] == flash_sha
 
-    # boot_policy=flash still requires an explicit target_disk_serial
+    # boot_mode=flash still requires an explicit target_disk_serial
     # to route to the ipxe_flash.j2 template (vs the local-fallback);
     # the serial itself is now delivered via the plan endpoint, not
     # the cmdline.
@@ -1277,7 +1277,7 @@ def test_pxe_flash_policy_returns_chain_with_args(
         "/machines/aa:bb:cc:dd:ee:ff",
         json={
             "bty_image_ref": ref,
-            "boot_policy": "bty-flash-always",
+            "boot_mode": "bty-flash-always",
             "target_disk_serial": "WD-WX12345",
         },
         cookies=AUTH,
@@ -1309,7 +1309,7 @@ def test_pxe_plan_unknown_mac_auto_discovers_and_returns_inventory(
 ) -> None:
     """``GET /pxe/<mac>/plan`` on an unknown MAC mirrors the iPXE
     auto-discovery path: creates a machine record with
-    ``boot_policy=bty-inventory`` and returns ``mode=inventory`` so
+    ``boot_mode=bty-inventory`` and returns ``mode=inventory`` so
     ``bty`` posts its disks and reboots into a sanboot.
 
     A new box self-collects its inventory with no prior server-side
@@ -1325,20 +1325,20 @@ def test_pxe_plan_unknown_mac_auto_discovers_and_returns_inventory(
     body = r.json()
     assert body["mode"] == "inventory"
 
-    # Auto-discovered as boot_policy=bty-inventory (matches /pxe/{mac}).
+    # Auto-discovered as boot_mode=bty-inventory (matches /pxe/{mac}).
     row = app_client.get(f"/machines/{mac}", cookies=AUTH).json()
-    assert row["boot_policy"] == "bty-inventory"
+    assert row["boot_mode"] == "bty-inventory"
 
 
-def test_pxe_plan_sanboot_policy_returns_local_mode(app_client: TestClient) -> None:
-    """``boot_policy=sanboot`` -> plan ``mode=exit`` so ``bty`` exits
+def test_pxe_plan_sanboot_mode_returns_local_mode(app_client: TestClient) -> None:
+    """``boot_mode=sanboot`` -> plan ``mode=exit`` so ``bty`` exits
     cleanly (sanboot is handled at the iPXE layer; the box never
     reaches the live env). The plan ``mode`` token is a live-env
-    signal distinct from any boot_policy."""
+    signal distinct from any boot_mode."""
     mac = "aa:bb:cc:dd:ee:ff"
     app_client.put(
         f"/machines/{mac}",
-        json={"boot_policy": "sanboot"},
+        json={"boot_mode": "sanboot"},
         cookies=AUTH,
     )
     r = app_client.get(f"/pxe/{mac}/plan")
@@ -1349,7 +1349,7 @@ def test_pxe_plan_sanboot_policy_returns_local_mode(app_client: TestClient) -> N
 def test_pxe_plan_flash_policy_with_target_returns_auto(
     app_client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """``boot_policy=flash`` + bindable ref + target_disk_serial ->
+    """``boot_mode=flash`` + bindable ref + target_disk_serial ->
     ``mode=flash`` with the image URL and target serial filled in.
     ``bty`` runs the flash without prompts.
 
@@ -1382,7 +1382,7 @@ def test_pxe_plan_flash_policy_with_target_returns_auto(
         f"/machines/{mac}",
         json={
             "bty_image_ref": ref,
-            "boot_policy": "bty-flash-always",
+            "boot_mode": "bty-flash-always",
             "target_disk_serial": "WD-WX12345",
         },
         cookies=AUTH,
@@ -1398,7 +1398,7 @@ def test_pxe_plan_flash_policy_with_target_returns_auto(
 def test_pxe_plan_flash_policy_without_target_falls_back_to_interactive(
     app_client: TestClient,
 ) -> None:
-    """``boot_policy=flash`` but no target_disk_serial picked yet ->
+    """``boot_mode=flash`` but no target_disk_serial picked yet ->
     falls back to ``mode=interactive``. The auto-flash safety gate
     (mirrored from the iPXE chain) refuses to guess at a disk."""
     mac = "aa:bb:cc:dd:ee:ff"
@@ -1406,7 +1406,7 @@ def test_pxe_plan_flash_policy_without_target_falls_back_to_interactive(
         f"/machines/{mac}",
         json={
             "bty_image_ref": "0123456789abcdef" * 4,
-            "boot_policy": "bty-flash-always",
+            "boot_mode": "bty-flash-always",
         },
         cookies=AUTH,
     )
@@ -1420,13 +1420,13 @@ def test_pxe_plan_flash_policy_without_target_falls_back_to_interactive(
 def test_pxe_plan_tui_policy_returns_interactive_with_catalog(
     app_client: TestClient,
 ) -> None:
-    """``boot_policy=bty-tui`` -> ``mode=interactive`` with the
+    """``boot_mode=bty-tui`` -> ``mode=interactive`` with the
     server's catalog. Matches the iPXE ipxe_tui.j2 semantic: the
     operator picks at run time."""
     mac = "aa:bb:cc:dd:ee:ff"
     app_client.put(
         f"/machines/{mac}",
-        json={"boot_policy": "bty-tui"},
+        json={"boot_mode": "bty-tui"},
         cookies=AUTH,
     )
     r = app_client.get(f"/pxe/{mac}/plan", headers={"Host": "bty.local:8080"})
@@ -1437,9 +1437,9 @@ def test_pxe_plan_tui_policy_returns_interactive_with_catalog(
 
 
 def test_pxe_tui_policy_returns_interactive_chain(app_client: TestClient) -> None:
-    """boot_policy=bty-tui: chain into the live env. ``bty-on-tty1.
+    """boot_mode=bty-tui: chain into the live env. ``bty-on-tty1.
     service`` launches ``bty``, which GETs ``/pxe/<mac>/plan`` and
-    drops the operator into the wizard for boot_policy=bty-tui.
+    drops the operator into the wizard for boot_mode=bty-tui.
 
     Since v0.22.10 the cmdline carries only ``bty.server`` +
     ``bty.mac``; ``bty.mode=interactive`` was retired alongside
@@ -1449,7 +1449,7 @@ def test_pxe_tui_policy_returns_interactive_chain(app_client: TestClient) -> Non
     """
     app_client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
-        json={"boot_policy": "bty-tui"},
+        json={"boot_mode": "bty-tui"},
         cookies=AUTH,
     )
     r = app_client.get("/pxe/aa:bb:cc:dd:ee:ff", headers={"Host": "bty.local:8080"})
@@ -1478,16 +1478,16 @@ def test_pxe_tui_policy_returns_interactive_chain(app_client: TestClient) -> Non
     assert "plymouth.enable=0" in body
 
 
-def test_machine_upsert_accepts_boot_policy_tui(app_client: TestClient) -> None:
-    """``boot_policy='bty-tui'`` is accepted by Pydantic validation alongside
+def test_machine_upsert_accepts_boot_mode_tui(app_client: TestClient) -> None:
+    """``boot_mode='bty-tui'`` is accepted by Pydantic validation alongside
     ``local`` and ``flash``."""
     r = app_client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
-        json={"boot_policy": "bty-tui"},
+        json={"boot_mode": "bty-tui"},
         cookies=AUTH,
     )
     assert r.status_code == 200
-    assert r.json()["boot_policy"] == "bty-tui"
+    assert r.json()["boot_mode"] == "bty-tui"
 
 
 def test_pxe_done_updates_last_flashed_at(app_client: TestClient) -> None:
@@ -1495,7 +1495,7 @@ def test_pxe_done_updates_last_flashed_at(app_client: TestClient) -> None:
         "/machines/aa:bb:cc:dd:ee:ff",
         json={
             "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            "boot_policy": "bty-flash-always",
+            "boot_mode": "bty-flash-always",
         },
         cookies=AUTH,
     )
@@ -1508,8 +1508,8 @@ def test_pxe_done_updates_last_flashed_at(app_client: TestClient) -> None:
     after = app_client.get("/machines/aa:bb:cc:dd:ee:ff", cookies=AUTH).json()
     assert after["last_flashed_at"] is not None
     # Critical: the policy is preserved. Per-job CI cadence stays
-    # boot_policy=flash across reflashes.
-    assert after["boot_policy"] == "bty-flash-always"
+    # boot_mode=flash across reflashes.
+    assert after["boot_mode"] == "bty-flash-always"
 
 
 def test_pxe_done_404_for_unknown_mac(app_client: TestClient) -> None:
@@ -1520,14 +1520,14 @@ def test_pxe_done_404_for_unknown_mac(app_client: TestClient) -> None:
 def test_pxe_flash_once_emits_flash_chain_like_flash(
     app_client: TestClient,
 ) -> None:
-    """``boot_policy=bty-flash-once`` returns the same iPXE flash chain
+    """``boot_mode=bty-flash-once`` returns the same iPXE flash chain
     as ``flash`` on the first PXE boot; it's only the completion
     signal that differs."""
     app_client.put(
         "/machines/11:22:33:44:55:66",
         json={
             "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            "boot_policy": "bty-flash-once",
+            "boot_mode": "bty-flash-once",
         },
         cookies=AUTH,
     )
@@ -1540,18 +1540,18 @@ def test_pxe_flash_once_emits_flash_chain_like_flash(
 
 def test_pxe_done_flips_flash_once_to_sanboot(app_client: TestClient) -> None:
     """``bty-flash-once`` is the one policy where the completion signal
-    mutates ``boot_policy``: it flips to ``sanboot`` so the box boots
+    mutates ``boot_mode``: it flips to ``sanboot`` so the box boots
     its freshly-flashed disk and stops reflashing itself."""
     app_client.put(
         "/machines/22:33:44:55:66:77",
         json={
             "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            "boot_policy": "bty-flash-once",
+            "boot_mode": "bty-flash-once",
         },
         cookies=AUTH,
     )
     before = app_client.get("/machines/22:33:44:55:66:77", cookies=AUTH).json()
-    assert before["boot_policy"] == "bty-flash-once"
+    assert before["boot_mode"] == "bty-flash-once"
     assert before["last_flashed_at"] is None
 
     r = app_client.post("/pxe/22:33:44:55:66:77/done")
@@ -1560,16 +1560,16 @@ def test_pxe_done_flips_flash_once_to_sanboot(app_client: TestClient) -> None:
     after = app_client.get("/machines/22:33:44:55:66:77", cookies=AUTH).json()
     assert after["last_flashed_at"] is not None
     # The completion signal flipped the policy.
-    assert after["boot_policy"] == "sanboot"
+    assert after["boot_mode"] == "sanboot"
 
 
-def test_pxe_sanboot_policy_returns_sanboot_template(app_client: TestClient) -> None:
-    """``boot_policy=sanboot`` emits an iPXE ``sanboot --drive ... ||
+def test_pxe_sanboot_mode_returns_sanboot_template(app_client: TestClient) -> None:
+    """``boot_mode=sanboot`` emits an iPXE ``sanboot --drive ... ||
     exit`` (bty boots the local disk itself), defaulting to drive
     0x80, NOT the flash chain."""
     app_client.put(
         "/machines/aa:bb:cc:dd:ee:01",
-        json={"boot_policy": "sanboot"},
+        json={"boot_mode": "sanboot"},
         cookies=AUTH,
     )
     r = app_client.get("/pxe/aa:bb:cc:dd:ee:01")
@@ -1582,12 +1582,12 @@ def test_pxe_sanboot_policy_returns_sanboot_template(app_client: TestClient) -> 
     assert "kernel" not in body
 
 
-def test_pxe_sanboot_policy_uses_per_machine_drive_override(app_client: TestClient) -> None:
+def test_pxe_sanboot_mode_uses_per_machine_drive_override(app_client: TestClient) -> None:
     """``sanboot_drive`` overrides the default 0x80 so multi-disk
     boxes can point iPXE at the right BIOS drive."""
     app_client.put(
         "/machines/aa:bb:cc:dd:ee:02",
-        json={"boot_policy": "sanboot", "sanboot_drive": "0x81"},
+        json={"boot_mode": "sanboot", "sanboot_drive": "0x81"},
         cookies=AUTH,
     )
     r = app_client.get("/pxe/aa:bb:cc:dd:ee:02")
@@ -1600,7 +1600,7 @@ def test_machine_upsert_rejects_malformed_sanboot_drive(app_client: TestClient) 
     a bad value is a 422 at the API edge."""
     r = app_client.put(
         "/machines/aa:bb:cc:dd:ee:03",
-        json={"boot_policy": "sanboot", "sanboot_drive": "sda"},
+        json={"boot_mode": "sanboot", "sanboot_drive": "sda"},
         cookies=AUTH,
     )
     assert r.status_code == 422
@@ -1618,19 +1618,19 @@ def test_pxe_done_flash_once_second_call_is_idempotent(
         "/machines/33:44:55:66:77:88",
         json={
             "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            "boot_policy": "bty-flash-once",
+            "boot_mode": "bty-flash-once",
         },
         cookies=AUTH,
     )
     # First /done flips to sanboot + records the event.
     r1 = app_client.post("/pxe/33:44:55:66:77:88/done")
     assert r1.status_code == 204
-    # Second /done: machine is now boot_policy=sanboot; the handler
+    # Second /done: machine is now boot_mode=sanboot; the handler
     # still hits the UPDATE path and returns 204 cleanly.
     r2 = app_client.post("/pxe/33:44:55:66:77:88/done")
     assert r2.status_code == 204
     after = app_client.get("/machines/33:44:55:66:77:88", cookies=AUTH).json()
-    assert after["boot_policy"] == "sanboot"
+    assert after["boot_mode"] == "sanboot"
     # Two flash events recorded -- one per /done call. The audit
     # trail captures the retry; the operator can see "this box
     # signalled twice in quick succession".
@@ -1810,7 +1810,7 @@ def test_upsert_resets_saw_flasher_boot(app_client: TestClient) -> None:
     flashing/inventorying."""
     mac = "aa:bb:cc:dd:ee:c4"
     # Make it bty-flash-always so the /boot fetch arms the bit.
-    app_client.put(f"/machines/{mac}", json={"boot_policy": "bty-flash-always"}, cookies=AUTH)
+    app_client.put(f"/machines/{mac}", json={"boot_mode": "bty-flash-always"}, cookies=AUTH)
     app_client.get(
         f"/boot/bty-netboot-x86_64.vmlinuz?mac={mac}", headers={"Host": "bty.local:8080"}
     )
@@ -1828,7 +1828,7 @@ def test_upsert_resets_saw_flasher_boot(app_client: TestClient) -> None:
 
     assert _saw() == 1, "precondition: /boot?mac= armed the bit"
     # Operator reconfigures -> bit resets.
-    app_client.put(f"/machines/{mac}", json={"boot_policy": "bty-flash-once"}, cookies=AUTH)
+    app_client.put(f"/machines/{mac}", json={"boot_mode": "bty-flash-once"}, cookies=AUTH)
     assert _saw() == 0
 
 
@@ -1866,14 +1866,14 @@ def test_machine_disks_raw_download(app_client: TestClient) -> None:
 
 def test_auto_discovery_default_agrees_across_pxe_and_plan(app_client: TestClient) -> None:
     """Both auto-discovery sites (GET /pxe/{mac} and /pxe/{mac}/plan)
-    must create the placeholder row with the SAME boot_policy -- a drift
+    must create the placeholder row with the SAME boot_mode -- a drift
     between the two INSERTs would make a box behave differently
     depending on which endpoint it hit first."""
     mac_a, mac_b = "0a:0a:0a:0a:0a:01", "0b:0b:0b:0b:0b:02"
     app_client.get(f"/pxe/{mac_a}")
     app_client.get(f"/pxe/{mac_b}/plan", headers={"Host": "bty.local:8080"})
-    pa = app_client.get(f"/machines/{mac_a}", cookies=AUTH).json()["boot_policy"]
-    pb = app_client.get(f"/machines/{mac_b}", cookies=AUTH).json()["boot_policy"]
+    pa = app_client.get(f"/machines/{mac_a}", cookies=AUTH).json()["boot_mode"]
+    pb = app_client.get(f"/machines/{mac_b}", cookies=AUTH).json()["boot_mode"]
     assert pa == pb == "bty-inventory"
 
 
@@ -1928,7 +1928,7 @@ def test_pxe_flash_with_orphan_ref_logs_event(
         "/machines/aa:bb:cc:dd:ee:bd",
         json={
             "bty_image_ref": orphan_ref,
-            "boot_policy": "bty-flash-always",
+            "boot_mode": "bty-flash-always",
             "target_disk_serial": "SN12345",
         },
         cookies=AUTH,
@@ -1955,7 +1955,7 @@ def test_pxe_flash_refuses_chain_logs_no_target_disk_event(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Safety gate end-to-end: seed a real catalog row so the ref
-    resolves, bind the machine to it with boot_policy=flash but
+    resolves, bind the machine to it with boot_mode=flash but
     leave target_disk_serial NULL. The /pxe hit returns ipxe.j2
     (local fallback) AND records pxe.flash.no_target_disk so the
     operator can see why the box isn't reflashing on /ui/events."""
@@ -1977,7 +1977,7 @@ def test_pxe_flash_refuses_chain_logs_no_target_disk_event(
     ref = add.json()["bty_image_ref"]
     app_client.put(
         "/machines/aa:bb:cc:dd:ee:dd",
-        json={"bty_image_ref": ref, "boot_policy": "bty-flash-always"},
+        json={"bty_image_ref": ref, "boot_mode": "bty-flash-always"},
         cookies=AUTH,
     )
     r = app_client.get("/pxe/aa:bb:cc:dd:ee:dd")
@@ -1998,7 +1998,7 @@ def test_machines_upsert_accepts_target_disk_serial(app_client: TestClient) -> N
     r = app_client.put(
         "/machines/aa:bb:cc:dd:ee:ee",
         json={
-            "boot_policy": "sanboot",
+            "boot_mode": "sanboot",
             "target_disk_serial": "Z9YHHRWZ",
         },
         cookies=AUTH,
@@ -2140,7 +2140,7 @@ def test_pxe_plan_flash_chain_carries_target_disk_serial(
         "/machines/aa:bb:cc:dd:ee:f6",
         json={
             "bty_image_ref": ref,
-            "boot_policy": "bty-flash-always",
+            "boot_mode": "bty-flash-always",
             "target_disk_serial": "WD-SERIAL-XYZ",
         },
         cookies=AUTH,
@@ -2168,7 +2168,7 @@ def test_pxe_hit_records_pxe_offered_event(app_client: TestClient) -> None:
     ref = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
     app_client.put(
         "/machines/aa:bb:cc:dd:ee:f0",
-        json={"bty_image_ref": ref, "boot_policy": "sanboot"},
+        json={"bty_image_ref": ref, "boot_mode": "sanboot"},
         cookies=AUTH,
     )
     app_client.get("/pxe/aa:bb:cc:dd:ee:f0")
@@ -2189,7 +2189,7 @@ def test_pxe_hit_records_pxe_offered_event(app_client: TestClient) -> None:
     assert ev["subject_id"] == "aa:bb:cc:dd:ee:f0"
     assert ev["actor"] == "pxe-client"
     assert ev["details"]["offer"] == "sanboot"
-    assert ev["details"]["boot_policy"] == "sanboot"
+    assert ev["details"]["boot_mode"] == "sanboot"
 
 
 def test_pxe_hit_records_inventory_offer_for_unknown_mac(app_client: TestClient) -> None:
@@ -2207,14 +2207,14 @@ def test_pxe_hit_records_inventory_offer_for_unknown_mac(app_client: TestClient)
 
 
 def test_machines_upsert_accepts_flash_once(app_client: TestClient) -> None:
-    """bty-flash-once is in BOOT_POLICIES so Pydantic accepts it."""
+    """bty-flash-once is in BOOT_MODES so Pydantic accepts it."""
     r = app_client.put(
         "/machines/33:44:55:66:77:88",
-        json={"boot_policy": "bty-flash-once"},
+        json={"boot_mode": "bty-flash-once"},
         cookies=AUTH,
     )
     assert r.status_code == 200, r.text
-    assert r.json()["boot_policy"] == "bty-flash-once"
+    assert r.json()["boot_mode"] == "bty-flash-once"
 
 
 # ---------- /events API (audit log) -------------------------------------
@@ -2250,7 +2250,7 @@ def test_events_list_includes_machine_lifecycle(app_client: TestClient) -> None:
         f"/machines/{mac}",
         json={
             "bty_image_ref": "0" * 64,
-            "boot_policy": "bty-flash-always",
+            "boot_mode": "bty-flash-always",
         },
         cookies=AUTH,
     )
@@ -2339,7 +2339,7 @@ def test_events_carry_source_ip(app_client: TestClient) -> None:
     """
     mac = "aa:bb:cc:dd:ee:fe"
     app_client.get(f"/pxe/{mac}")
-    app_client.put(f"/machines/{mac}", json={"boot_policy": "sanboot"}, cookies=AUTH)
+    app_client.put(f"/machines/{mac}", json={"boot_mode": "sanboot"}, cookies=AUTH)
     r = app_client.get("/events", cookies=AUTH)
     assert r.status_code == 200
     by_kind = {e["kind"]: e for e in r.json()["events"]}
@@ -2396,7 +2396,7 @@ def test_events_filter_by_actor(app_client: TestClient) -> None:
     app_client.get(f"/pxe/{mac}")  # pxe-client: machine.discovered
     app_client.put(  # operator: machine.upserted
         f"/machines/{mac}",
-        json={"boot_policy": "sanboot"},
+        json={"boot_mode": "sanboot"},
         cookies=AUTH,
     )
     r = app_client.get("/events", params={"actor": "operator"}, cookies=AUTH)
@@ -2589,7 +2589,7 @@ def test_ui_events_page_footer_shows_filtered_when_filter_active(
     app_client.get("/pxe/aa:bb:cc:dd:ee:f9")
     app_client.put(
         "/machines/aa:bb:cc:dd:ee:f9",
-        json={"boot_policy": "sanboot"},
+        json={"boot_mode": "sanboot"},
         cookies=AUTH,
     )
     # Unfiltered view: no "(filtered)" suffix.
@@ -4435,7 +4435,7 @@ def test_ui_machines_renders_timestamps_compactly(app_client: TestClient, tmp_pa
     state_path = tmp_path / "state.db"
     with _bty_db.open_db(state_path) as conn:
         conn.execute(
-            "INSERT INTO machines (mac, boot_policy, last_seen_at, created_at, updated_at) "
+            "INSERT INTO machines (mac, boot_mode, last_seen_at, created_at, updated_at) "
             "VALUES (?, ?, ?, ?, ?)",
             (
                 "aa:bb:cc:dd:ee:ff",

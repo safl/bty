@@ -324,7 +324,7 @@ def test_e2e_pxe_flash_chain_plan_carries_image_url_and_target_serial(
     app_client: TestClient,
 ) -> None:
     """Bind a known machine to a known catalog entry + target disk
-    serial, set boot_policy to bty-flash-once, GET /pxe/<mac>/plan: the
+    serial, set boot_mode to bty-flash-once, GET /pxe/<mac>/plan: the
     plan response must carry the image URL + target serial.
 
     v0.22.10 moved these out of the iPXE kernel cmdline and into
@@ -372,7 +372,7 @@ def test_e2e_pxe_flash_chain_plan_carries_image_url_and_target_serial(
         "/machines/aa:bb:cc:dd:ee:ff",
         json={
             "bty_image_ref": bty_image_ref,
-            "boot_policy": "bty-flash-once",
+            "boot_mode": "bty-flash-once",
             "target_disk_serial": "WD-WX12345",
         },
         cookies=AUTH,
@@ -450,7 +450,7 @@ def test_e2e_plan_handles_extensionless_oras_name(app_client: TestClient) -> Non
         "/machines/0c:bf:b4:c0:4b:42",
         json={
             "bty_image_ref": bty_image_ref,
-            "boot_policy": "bty-flash-once",
+            "boot_mode": "bty-flash-once",
             "target_disk_serial": "SSD-860-EVO",
         },
         cookies=AUTH,
@@ -498,7 +498,7 @@ def _seed_flashable_machine(app_client: TestClient, mac: str) -> None:
         f"/machines/{mac}",
         json={
             "bty_image_ref": bty_image_ref,
-            "boot_policy": "bty-flash-always",
+            "boot_mode": "bty-flash-always",
             "target_disk_serial": "WD-WX12345",
         },
         cookies=AUTH,
@@ -586,9 +586,7 @@ def test_e2e_boot_artifact_mac_arms_only_alternating_policies(app_client: TestCl
         (tui, "bty-tui"),
     ):
         assert (
-            app_client.put(
-                f"/machines/{mac}", json={"boot_policy": policy}, cookies=AUTH
-            ).status_code
+            app_client.put(f"/machines/{mac}", json={"boot_mode": policy}, cookies=AUTH).status_code
             == 200
         )
 
@@ -610,7 +608,7 @@ def test_e2e_inventory_alternates_liveenv_then_sanboot(app_client: TestClient) -
     mac = "ab:cd:ef:00:11:22"
     assert (
         app_client.put(
-            f"/machines/{mac}", json={"boot_policy": "bty-inventory"}, cookies=AUTH
+            f"/machines/{mac}", json={"boot_mode": "bty-inventory"}, cookies=AUTH
         ).status_code
         == 200
     )
@@ -950,7 +948,7 @@ def test_e2e_pxe_done_failure_is_isolated_from_machine_state(
         "/machines/12:34:56:78:9a:bc",
         json={
             "bty_image_ref": ref,
-            "boot_policy": "bty-flash-once",
+            "boot_mode": "bty-flash-once",
             "target_disk_serial": "WD-XX",
         },
         cookies=AUTH,
@@ -967,7 +965,7 @@ def test_e2e_pxe_done_failure_is_isolated_from_machine_state(
     r = app_client.get("/machines/12:34:56:78:9a:bc", cookies=AUTH)
     assert r.status_code == 200, r.text
     m = r.json()
-    assert m["boot_policy"] == "sanboot", m
+    assert m["boot_mode"] == "sanboot", m
     assert m["last_flashed_at"] is not None, m
 
 
@@ -1075,7 +1073,7 @@ def test_e2e_pxe_unknown_mac_then_inventory_then_flash_chain(
 
     r = app_client.get(f"/machines/{mac}", cookies=AUTH)
     assert r.status_code == 200, r.text
-    assert r.json()["boot_policy"] == "bty-inventory"
+    assert r.json()["boot_mode"] == "bty-inventory"
 
     plan = app_client.get(f"/pxe/{mac}/plan", headers={"Host": "bty.local:8080"}).json()
     assert plan["mode"] == "inventory"
@@ -1120,7 +1118,7 @@ def test_e2e_pxe_unknown_mac_then_inventory_then_flash_chain(
         f"/machines/{mac}",
         json={
             "bty_image_ref": ref,
-            "boot_policy": "bty-flash-once",
+            "boot_mode": "bty-flash-once",
             "target_disk_serial": "SER-1",
         },
         cookies=AUTH,
@@ -1145,7 +1143,7 @@ def test_e2e_pxe_unknown_mac_then_inventory_then_flash_chain(
     r = app_client.post(f"/pxe/{mac}/done")
     assert r.status_code in (200, 204), r.text
     r = app_client.get(f"/machines/{mac}", cookies=AUTH)
-    assert r.json()["boot_policy"] == "sanboot"
+    assert r.json()["boot_mode"] == "sanboot"
 
 
 def test_e2e_image_serve_routes_resolve_by_sha_or_filename(
@@ -1242,7 +1240,7 @@ def test_e2e_flash_safety_gate_no_target_disk_serial_logs_event(
     # Bind without target_disk_serial.
     r = app_client.put(
         f"/machines/{mac}",
-        json={"bty_image_ref": ref, "boot_policy": "bty-flash-once"},
+        json={"bty_image_ref": ref, "boot_mode": "bty-flash-once"},
         cookies=AUTH,
     )
     assert r.status_code == 200, r.text
@@ -1321,7 +1319,7 @@ def test_e2e_machine_put_is_full_replace_not_partial_update(
 ) -> None:
     """PUT /machines/<mac> is REST-spec full replace. A PUT with
     only ``{"hostname": ...}`` resets every other field to its
-    Pydantic default (bty_image_ref=None, boot_policy=sanboot).
+    Pydantic default (bty_image_ref=None, boot_mode=sanboot).
 
     Pin the contract: the UI's machine-edit form sends every
     field every time precisely because the API is full-replace.
@@ -1361,7 +1359,7 @@ def test_e2e_machine_put_is_full_replace_not_partial_update(
         f"/machines/{mac}",
         json={
             "bty_image_ref": ref,
-            "boot_policy": "bty-flash-once",
+            "boot_mode": "bty-flash-once",
             "target_disk_serial": "SER-Z",
             "hostname": "first-name",
         },
@@ -1384,7 +1382,7 @@ def test_e2e_machine_put_is_full_replace_not_partial_update(
     assert m["hostname"] == "second-name", m
     # Full-replace contract: omitted fields reset to defaults.
     assert m["bty_image_ref"] is None, m
-    assert m["boot_policy"] == "sanboot", m
+    assert m["boot_mode"] == "sanboot", m
     assert m["target_disk_serial"] is None, m
 
     # The operator-correct way to update a single field is to
@@ -1393,7 +1391,7 @@ def test_e2e_machine_put_is_full_replace_not_partial_update(
         f"/machines/{mac}",
         json={
             "bty_image_ref": ref,
-            "boot_policy": "bty-flash-once",
+            "boot_mode": "bty-flash-once",
             "target_disk_serial": "SER-Z",
             "hostname": "third-name",
         },

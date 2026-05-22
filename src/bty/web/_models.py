@@ -45,7 +45,7 @@ MAC_PATTERN = r"^[0-9a-f]{2}(:[0-9a-f]{2}){5}$"
 #   want this machine reimaged now, then leave it alone" -- distinct
 #   from ``bty-flash-always`` which reimages on every netboot cycle.
 # - ``bty-tui`` returns the live-env chain. ``bty`` on tty1 GETs
-#   /pxe/<mac>/plan and (for boot_policy=bty-tui) drops the operator
+#   /pxe/<mac>/plan and (for boot_mode=bty-tui) drops the operator
 #   into the wizard so they can pick an image from the server's
 #   catalog by hand.
 # - ``bty-inventory`` is to inventory what ``bty-flash-always`` is
@@ -64,10 +64,10 @@ MAC_PATTERN = r"^[0-9a-f]{2}(:[0-9a-f]{2}){5}$"
 #
 # Completion signal (``POST /pxe/{mac}/done``) updates
 # ``last_flashed_at`` regardless of policy; it only mutates
-# ``boot_policy`` for ``bty-flash-once`` (-> ``sanboot``).
+# ``boot_mode`` for ``bty-flash-once`` (-> ``sanboot``).
 # ``bty-flash-always`` is unchanged so the per-job CI cadence reflashes
 # every cycle.
-BOOT_POLICIES = (
+BOOT_MODES = (
     "sanboot",
     "bty-flash-always",
     "bty-flash-once",
@@ -80,15 +80,15 @@ BOOT_POLICIES = (
 # per-machine ``sanboot_drive`` overrides it.
 SANBOOT_DRIVE_PATTERN = r"^0x[0-9a-fA-F]{1,2}$"
 DEFAULT_SANBOOT_DRIVE = "0x80"
-BOOT_POLICY_PATTERN = _enum_pattern(BOOT_POLICIES)
-DEFAULT_BOOT_POLICY = BOOT_POLICIES[0]
+BOOT_MODE_PATTERN = _enum_pattern(BOOT_MODES)
+DEFAULT_BOOT_MODE = BOOT_MODES[0]
 
 
 class MachineUpsert(BaseModel):
     """Request body for ``PUT /machines/{mac}``.
 
     All fields are optional except for the implicit ``mac`` from the
-    path; ``boot_policy`` defaults to ``"sanboot"``. Binding targets
+    path; ``boot_mode`` defaults to ``"sanboot"``. Binding targets
     ``bty_image_ref`` (a stable provenance ID derived as
     ``sha256(canonicalise_src(src))``) rather than the content sha,
     so URL-only and rolling-tag oras entries are bindable; rename or
@@ -115,7 +115,7 @@ class MachineUpsert(BaseModel):
         max_length=253,
         pattern=r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$",
     )
-    boot_policy: str = Field(default=DEFAULT_BOOT_POLICY, pattern=BOOT_POLICY_PATTERN)
+    boot_mode: str = Field(default=DEFAULT_BOOT_MODE, pattern=BOOT_MODE_PATTERN)
     # iPXE BIOS drive the ``sanboot`` policy boots (``0x80`` first disk,
     # ``0x81`` second, ...). ``None`` = use the default (``0x80``);
     # ignored for non-sanboot policies. Distinct from
@@ -203,7 +203,7 @@ class Machine(BaseModel):
     # Updated on every ``GET /pxe/{mac}``.
     last_seen_at: datetime | None = None
     last_seen_ip: str | None = None
-    boot_policy: str = Field(default=DEFAULT_BOOT_POLICY, pattern=BOOT_POLICY_PATTERN)
+    boot_mode: str = Field(default=DEFAULT_BOOT_MODE, pattern=BOOT_MODE_PATTERN)
     # iPXE BIOS drive the ``sanboot`` policy boots; ``None`` = default
     # (``0x80``). See ``MachineUpsert.sanboot_drive``.
     sanboot_drive: str | None = Field(default=None, pattern=SANBOOT_DRIVE_PATTERN)

@@ -3,7 +3,7 @@
 # Assignment:
 #   image (ref):       {{ machine.bty_image_ref or "(none)" }}
 #   hostname:          {{ machine.hostname or "(none)" }}
-#   boot_policy:       {{ machine.boot_policy }}
+#   boot_mode:       {{ machine.boot_mode }}
 #
 # This template is the exit-to-firmware fallback, rendered for a
 # flash policy (``bty-flash-always`` / ``bty-flash-once``) that can't
@@ -13,6 +13,6 @@
 # /ui/events). ``exit`` returns control to the PXE ROM, which falls
 # through to the next boot device (typically the local disk).
 
-echo bty: {{ mac }} boot_policy={{ machine.boot_policy }} ref={{ (machine.bty_image_ref or "none")[:12] }}..., returning to local boot
+echo bty: {{ mac }} boot_mode={{ machine.boot_mode }} ref={{ (machine.bty_image_ref or "none")[:12] }}..., returning to local boot
 sleep 1
 exit

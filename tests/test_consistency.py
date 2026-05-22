@@ -795,9 +795,9 @@ def test_plan_modes_emitted_by_server_are_handled_by_the_client() -> None:
     )
 
 
-def test_every_boot_policy_has_a_machine_row_badge() -> None:
-    """Every ``BOOT_POLICIES`` value must have an explicit
-    ``m.boot_policy == '<value>'`` badge case in ``_machine_row.html``.
+def test_every_boot_mode_has_a_machine_row_badge() -> None:
+    """Every ``BOOT_MODES`` value must have an explicit
+    ``m.boot_mode == '<value>'`` badge case in ``_machine_row.html``.
 
     The template ends in an ``{% else %}`` "unrecognised boot policy
     (stale record)" fallback; without this pin a newly-added policy
@@ -806,13 +806,13 @@ def test_every_boot_policy_has_a_machine_row_badge() -> None:
     decision-tree-coverage pin -- the policy set is one source of
     truth, the badge ladder another.
     """
-    from bty.web._models import BOOT_POLICIES
+    from bty.web._models import BOOT_MODES
 
     body = (
         REPO_ROOT / "src" / "bty" / "web" / "_templates" / "ui" / "_machine_row.html"
     ).read_text()
-    cased = set(re.findall(r"m\.boot_policy == '([^']+)'", body))
-    missing = [p for p in BOOT_POLICIES if p not in cased]
+    cased = set(re.findall(r"m\.boot_mode == '([^']+)'", body))
+    missing = [p for p in BOOT_MODES if p not in cased]
     assert not missing, (
         f"boot policies with no explicit badge case in _machine_row.html: {missing!r}. "
         f"They'd fall to the grey 'unrecognised' badge. Add a {{% elif %}} branch."
@@ -848,10 +848,10 @@ def test_every_recorded_event_kind_is_registered() -> None:
     )
 
 
-def test_pxe_chain_test_uses_a_valid_boot_policy() -> None:
+def test_pxe_chain_test_uses_a_valid_boot_mode() -> None:
     """The QEMU PXE chain test (the release's integration gate) PUTs a
-    machine assignment with a literal ``boot_policy``; it must be a
-    current ``BOOT_POLICIES`` member.
+    machine assignment with a literal ``boot_mode``; it must be a
+    current ``BOOT_MODES`` member.
 
     A stale name 422s the assignment and fails the whole release before
     PyPI publish -- exactly what a v0.23.0 release run hit, because the
@@ -860,14 +860,14 @@ def test_pxe_chain_test_uses_a_valid_boot_policy() -> None:
     pipeline (needs media + qemu), so this string check runs in plain
     ``make ci`` to catch the drift early.
     """
-    from bty.web._models import BOOT_POLICIES
+    from bty.web._models import BOOT_MODES
 
     src = (REPO_ROOT / "cijoe" / "scripts" / "pxe_run_chain_test.py").read_text()
-    m = re.search(r'"boot_policy":\s*"([^"]+)"', src)
-    assert m is not None, "no boot_policy literal found in pxe_run_chain_test.py"
-    assert m.group(1) in BOOT_POLICIES, (
-        f"pxe_run_chain_test.py sends boot_policy={m.group(1)!r}, which is not in "
-        f"BOOT_POLICIES {BOOT_POLICIES!r}. The assignment PUT will 422 and fail the "
+    m = re.search(r'"boot_mode":\s*"([^"]+)"', src)
+    assert m is not None, "no boot_mode literal found in pxe_run_chain_test.py"
+    assert m.group(1) in BOOT_MODES, (
+        f"pxe_run_chain_test.py sends boot_mode={m.group(1)!r}, which is not in "
+        f"BOOT_MODES {BOOT_MODES!r}. The assignment PUT will 422 and fail the "
         f"release's PXE chain gate. Update the harness to a current policy."
     )
 
@@ -971,8 +971,8 @@ def test_live_env_chains_tag_boot_urls_with_mac() -> None:
     assert not violations, "live-env chain ?mac= tagging is wrong:\n" + "\n".join(violations)
 
 
-def test_every_boot_policy_is_handled_by_the_pxe_decision_tree() -> None:
-    """Every value in ``BOOT_POLICIES`` must appear as a literal string
+def test_every_boot_mode_is_handled_by_the_pxe_decision_tree() -> None:
+    """Every value in ``BOOT_MODES`` must appear as a literal string
     in ``_app.py`` -- the PXE handler decides what to serve with an
     explicit per-policy branch (``policy == "sanboot"``, ``policy in
     ("bty-flash-always", "bty-flash-once")``, ...). A policy added to
@@ -982,15 +982,15 @@ def test_every_boot_policy_is_handled_by_the_pxe_decision_tree() -> None:
     This is the exact bug shape the bty-* rename risked: the policy
     set is one source of truth, the decision tree another, and they
     can drift. Pin them together. The dropdown UI is already
-    drift-proof (it loops over ``BOOT_POLICIES`` directly), so the
+    drift-proof (it loops over ``BOOT_MODES`` directly), so the
     decision tree is the surface that needs a guard.
     """
-    from bty.web._models import BOOT_POLICIES
+    from bty.web._models import BOOT_MODES
 
     src = (REPO_ROOT / "src" / "bty" / "web" / "_app.py").read_text()
-    missing = [p for p in BOOT_POLICIES if f'"{p}"' not in src]
+    missing = [p for p in BOOT_MODES if f'"{p}"' not in src]
     assert not missing, (
-        f"boot policies in BOOT_POLICIES with no literal branch in _app.py: "
+        f"boot policies in BOOT_MODES with no literal branch in _app.py: "
         f"{missing!r}. The PXE decision tree handles each policy explicitly; "
         f"a policy with no branch falls through to the default and serves the "
         f"wrong iPXE config. Add (or fix) the branch in the GET /pxe/{{mac}} "

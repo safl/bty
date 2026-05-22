@@ -65,7 +65,7 @@ form.
 ## Machine record
 
 A `bty-web`-only concept. A persistent entry in the server's state keyed by
-MAC address that captures: assigned image, optional hostname, boot policy,
+MAC address that captures: assigned image, optional hostname, boot mode,
 and (after first PXE contact) last-seen IP + discovery timestamp. The
 server uses machine records to render per-MAC iPXE configurations.
 
@@ -77,7 +77,7 @@ raw), so a bty fleet doubles as a passive hardware inventory. The
 `bty-inventory` policy keeps that data fresh on boxes that otherwise just
 sanboot.
 
-## Boot policy
+## Boot mode
 
 A field on the [machine record](#machine-record) that decides what
 ``GET /pxe/{mac}`` serves on every PXE contact. The `bty-` prefix marks the
@@ -120,7 +120,7 @@ assign a flash policy from the now-populated disk dropdown. (`bty-tui` is
 the explicit opt-in for "drop me at the wizard to flash by hand now".)
 
 The completion signal `POST /pxe/{mac}/done` always updates
-`last_flashed_at`. It mutates `boot_policy` only for `bty-flash-once`,
+`last_flashed_at`. It mutates `boot_mode` only for `bty-flash-once`,
 flipping it to `sanboot` so the box boots its freshly-flashed disk.
 `bty-flash-always` is never modified, so the per-job CI cadence keeps
 reflashing.
@@ -130,7 +130,7 @@ reflashing.
 For a PXE-driven target, set its BIOS/UEFI firmware to **boot from the
 network (PXE) first**. bty-server then decides, per boot, whether the box
 re-flashes, drops into the wizard, or boots its disk - all driven by the
-machine's `boot_policy`, not by re-toggling the firmware each time.
+machine's `boot_mode`, not by re-toggling the firmware each time.
 
 What happens *after* a flash depends on the policy:
 
@@ -150,7 +150,7 @@ What happens *after* a flash depends on the policy:
   Cost: two firmware boots per cycle (one to flash, one to boot the disk).
 
 Calibrate `sanboot_drive` before relying on it: on a multi-disk box, first
-set `boot_policy=sanboot`, set `sanboot_drive`, and reboot to confirm the
+set `boot_mode=sanboot`, set `sanboot_drive`, and reboot to confirm the
 machine boots its disk. Then switch to `bty-flash-once` or
 `bty-flash-always` - the post-flash `sanboot` inherits the known-good drive
 (the field persists across the policy change), so the boot after a flash
@@ -180,12 +180,12 @@ save and exit. UEFI HTTP-Boot and legacy PXE+TFTP both work; see
 [machine record](#machine-record) on the server side:
 
 - **Server-controlled** (`plan.mode = "auto"`). Triggered when
-  `boot_policy in {bty-flash-always, bty-flash-once}` AND `bty_image_ref`
+  `boot_mode in {bty-flash-always, bty-flash-once}` AND `bty_image_ref`
   is bound AND `target_disk_serial` is picked. The plan response carries
   the image URL + target serial; `bty` flashes them without prompts. The
   server is the source of truth for *what gets flashed*.
 - **Interactive** (`plan.mode = "interactive"`). Triggered when
-  `boot_policy = bty-tui`, OR when a flash policy can't be auto-resolved
+  `boot_mode = bty-tui`, OR when a flash policy can't be auto-resolved
   (no serial picked / orphan ref). `bty` drops the operator into the wizard
   with the server's catalog pre-loaded; the operator picks any image and
   flashes any local disk.
@@ -199,7 +199,7 @@ interactive runs.
 
 Practical consequence: to have the server drive flashing - know which image
 is on each box, surface "this MAC will re-flash on next boot" in
-`/ui/machines`, make a flash repeatable - set `boot_policy=bty-flash-always`,
+`/ui/machines`, make a flash repeatable - set `boot_mode=bty-flash-always`,
 bind a `bty_image_ref`, and pick a `target_disk_serial` on the server side.
 Interactive mode is for "give me a box that boots `bty`, I'll decide
 locally" - the local pick stays local.

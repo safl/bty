@@ -693,7 +693,7 @@ def test_fetch_and_dispatch_plan_auto_populates_auto_image_and_serial(
 def test_fetch_and_dispatch_plan_inventory_returns_inventory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A ``mode=inventory`` plan (boot_policy=bty-inventory) dispatches
+    """A ``mode=inventory`` plan (boot_mode=bty-inventory) dispatches
     to the ``"inventory"`` token, so ``run()`` posts the disk inventory
     and reboots rather than dropping into the wizard."""
     monkeypatch.setenv("BTY_IMAGE_ROOT", str(tmp_path))

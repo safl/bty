@@ -40,8 +40,8 @@ from bty.web._auth import SESSION_AUTHED_KEY
 from bty.web._events_log import KNOWN_ACTORS, KNOWN_EVENT_KINDS, KNOWN_SUBJECT_KINDS
 from bty.web._events_log import normalize_ip as _normalize_ip
 from bty.web._models import (
-    BOOT_POLICIES,
-    DEFAULT_BOOT_POLICY,
+    BOOT_MODES,
+    DEFAULT_BOOT_MODE,
     CatalogEntryAdd,
     MachineUpsert,
 )
@@ -442,7 +442,7 @@ def register_ui_routes(
             request,
             m=_row_to_dict(row),
             images=catalog_options,
-            boot_policies=list(BOOT_POLICIES),
+            boot_policies=list(BOOT_MODES),
             machine_events=machine_events,
             hw=lshw_highlights(_db.row_value(row, "hw_lshw")),
             flash=flash,
@@ -459,7 +459,7 @@ def register_ui_routes(
         request: Request,
         bty_image_ref: Annotated[str, Form()] = "",
         hostname: Annotated[str, Form()] = "",
-        boot_policy: Annotated[str, Form()] = DEFAULT_BOOT_POLICY,
+        boot_mode: Annotated[str, Form()] = DEFAULT_BOOT_MODE,
         sanboot_drive: Annotated[str, Form()] = "",
         target_disk_serial: Annotated[str, Form()] = "",
     ) -> RedirectResponse:
@@ -474,7 +474,7 @@ def register_ui_routes(
             validated = MachineUpsert(
                 bty_image_ref=bty_image_ref or None,
                 hostname=hostname or None,
-                boot_policy=boot_policy,
+                boot_mode=boot_mode,
                 sanboot_drive=sanboot_drive or None,
                 target_disk_serial=target_disk_serial or None,
             )
@@ -500,15 +500,15 @@ def register_ui_routes(
                 + urllib.parse.quote(f"validation failed: {exc}", safe=""),
                 status_code=status.HTTP_303_SEE_OTHER,
             )
-        # ``boot_policy`` is pattern-checked by Pydantic above; the
+        # ``boot_mode`` is pattern-checked by Pydantic above; the
         # explicit set membership check is therefore redundant but
         # kept so the operator gets an enum-style error message.
-        if validated.boot_policy not in BOOT_POLICIES:
+        if validated.boot_mode not in BOOT_MODES:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"invalid boot_policy: {validated.boot_policy!r}",
+                detail=f"invalid boot_mode: {validated.boot_mode!r}",
             )
-        # Safety gate: boot_policy=bty-flash-always / bty-flash-once require a
+        # Safety gate: boot_mode=bty-flash-always / bty-flash-once require a
         # picked target_disk_serial. Without it /pxe/<mac>/plan
         # would fall back to mode=interactive anyway (the auto-
         # flash branch needs a serial); catching it here gives
@@ -516,13 +516,13 @@ def register_ui_routes(
         # instead of the operator being surprised by a wizard
         # prompt at flash time.
         if (
-            validated.boot_policy in ("bty-flash-always", "bty-flash-once")
+            validated.boot_mode in ("bty-flash-always", "bty-flash-once")
             and not validated.target_disk_serial
         ):
             return RedirectResponse(
                 f"/ui/machines/{normalised}?error="
                 + urllib.parse.quote(
-                    f"boot_policy={validated.boot_policy} requires a target disk; "
+                    f"boot_mode={validated.boot_mode} requires a target disk; "
                     "pick one from the Target disk dropdown. If it's empty the "
                     "machine hasn't reported its disks yet -- power-cycle it and it "
                     "auto-reports them on its bty-inventory boot, then pick one here.",
@@ -539,13 +539,13 @@ def register_ui_routes(
             conn.execute(
                 """
                 INSERT INTO machines
-                    (mac, bty_image_ref, hostname, boot_policy, sanboot_drive,
+                    (mac, bty_image_ref, hostname, boot_mode, sanboot_drive,
                      target_disk_serial, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(mac) DO UPDATE SET
                     bty_image_ref      = excluded.bty_image_ref,
                     hostname           = excluded.hostname,
-                    boot_policy        = excluded.boot_policy,
+                    boot_mode        = excluded.boot_mode,
                     sanboot_drive      = excluded.sanboot_drive,
                     target_disk_serial = excluded.target_disk_serial,
                     -- Reset the one-shot alternation bit (mirrors the
@@ -561,7 +561,7 @@ def register_ui_routes(
                     normalised,
                     validated.bty_image_ref,
                     validated.hostname,
-                    validated.boot_policy,
+                    validated.boot_mode,
                     validated.sanboot_drive,
                     validated.target_disk_serial,
                     created_at,
@@ -580,7 +580,7 @@ def register_ui_routes(
                 source_ip=_client_ip(request),
                 details={
                     "bty_image_ref": validated.bty_image_ref,
-                    "boot_policy": validated.boot_policy,
+                    "boot_mode": validated.boot_mode,
                     "sanboot_drive": validated.sanboot_drive,
                     "hostname": validated.hostname,
                     "target_disk_serial": validated.target_disk_serial,
@@ -1594,7 +1594,7 @@ def _row_to_dict(row: Any) -> dict[str, Any]:
         "discovered_at": row["discovered_at"],
         "last_seen_at": row["last_seen_at"],
         "last_seen_ip": row["last_seen_ip"],
-        "boot_policy": row["boot_policy"],
+        "boot_mode": row["boot_mode"],
         "sanboot_drive": _db.row_value(row, "sanboot_drive"),
         "last_flashed_at": row["last_flashed_at"],
         "known_disks": parsed_disks,

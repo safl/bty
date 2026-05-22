@@ -25,7 +25,7 @@ def test_init_db_creates_machines_table(tmp_path: Path) -> None:
         "discovered_at",
         "last_seen_at",
         "last_seen_ip",
-        "boot_policy",
+        "boot_mode",
         "last_flashed_at",
         "created_at",
         "updated_at",
@@ -128,7 +128,7 @@ def test_init_db_raises_on_machines_known_disks_missing(tmp_path: Path) -> None:
                 discovered_at      TEXT,
                 last_seen_at       TEXT,
                 last_seen_ip       TEXT,
-                boot_policy        TEXT NOT NULL DEFAULT 'local',
+                boot_mode        TEXT NOT NULL DEFAULT 'local',
                 last_flashed_at    TEXT,
                 created_at         TEXT NOT NULL,
                 updated_at         TEXT NOT NULL

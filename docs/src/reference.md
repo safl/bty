@@ -53,7 +53,7 @@ dispatches on the JSON response:
 |---|---|
 | `flash` | Flash without prompts (the plan carries the image URL + target serial picked on the server side), then POST `/pxe/<mac>/done` and reboot. |
 | `interactive` | Drop into the wizard with the plan's catalog pre-loaded. Operator picks image + disk. |
-| `inventory` | Post the disk inventory, then reboot (no flash, no wizard). The next PXE contact sanboots the disk. Used by `boot_policy=bty-inventory`. |
+| `inventory` | Post the disk inventory, then reboot (no flash, no wizard). The next PXE contact sanboots the disk. Used by `boot_mode=bty-inventory`. |
 | `exit` | Print a notice and exit. Firmware / local-disk boot handles it. |
 
 Network / parse failures fall through to `interactive` with the server's
@@ -222,7 +222,7 @@ carry a session cookie:
 - `GET /healthz` - `{"status": "ok"}`
 - `GET /version` - `{"version": "..."}`
 - `GET /pxe/{mac}` - per-MAC iPXE script (`text/plain`). The
- response depends on the machine's `boot_policy`:
+ response depends on the machine's `boot_mode`:
  - `sanboot` (default): boot the local disk, firmware-aware via iPXE's
  `${platform}`. On UEFI the script is `iseq ${platform} efi && exit` -
  hand back to the firmware boot order, which boots the disk's EFI
@@ -239,14 +239,14 @@ carry a session cookie:
  runs the flash.
 
  Auto-discovery: the first contact for an unknown MAC inserts a
- placeholder row (image=null, boot_policy=bty-inventory) so the box
+ placeholder row (image=null, boot_mode=bty-inventory) so the box
  self-reports its disks and just boots; the operator sees it in
  `GET /machines` with a populated disk dropdown and can claim it with
  `PUT /machines/{mac}`. Repeat contacts update `last_seen_at` /
  `last_seen_ip`. Trust model: bty-web is for a homelab / CI network, not
  the open internet - anyone reachable can write discovery rows.
 - `POST /pxe/{mac}/done` - completion signal from the live env after a
- successful flash. Updates `last_flashed_at`. Mutates `boot_policy` only
+ successful flash. Updates `last_flashed_at`. Mutates `boot_mode` only
  for `bty-flash-once`, flipping it to `sanboot` so the box boots its
  freshly-flashed disk and stops re-flashing. `bty-flash-always` is left
  untouched so the per-job CI cadence (constant reflashing) survives across
@@ -328,7 +328,7 @@ Machine = {
   "discovered_at": "<ISO 8601>" | null,      # first /pxe contact; null if PUT-only
   "last_seen_at":  "<ISO 8601>" | null,      # most recent /pxe contact
   "last_seen_ip":  "203.0.113.42" | null,
-  "boot_policy":   "sanboot"                 # one of sanboot /
+  "boot_mode":   "sanboot"                 # one of sanboot /
                  | "bty-flash-always"        # bty-flash-always /
                  | "bty-flash-once"          # bty-flash-once /
                  | "bty-tui"                 # bty-tui / bty-inventory;
@@ -351,14 +351,14 @@ Machine = {
 MachineUpsert = {
   "bty_image_ref": "<64-hex>" | null,
   "hostname": str | null,
-  "boot_policy": "sanboot"                   # default "sanboot" on PUT;
+  "boot_mode": "sanboot"                   # default "sanboot" on PUT;
               | "bty-flash-always"           # auto-discovery sets
               | "bty-flash-once"             # "bty-inventory"; the
               | "bty-tui"                    # flash policies require a
               | "bty-inventory",             # target_disk_serial
   "sanboot_drive": str | null,               # iPXE BIOS drive for sanboot
                                              # (e.g. "0x80"; null = default)
-  "target_disk_serial": str | null           # required when boot_policy is
+  "target_disk_serial": str | null           # required when boot_mode is
                                              # bty-flash-always / -once --
                                              # /ui/machines/{mac} POST
                                              # refuses without it

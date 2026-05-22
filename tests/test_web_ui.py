@@ -716,9 +716,9 @@ def test_ui_machines_list_has_inline_add_form(client: TestClient) -> None:
     assert 'href="/ui/machines?section=add"' not in body
 
 
-def test_ui_machines_inline_add_defaults_to_safe_sanboot_policy(client: TestClient) -> None:
+def test_ui_machines_inline_add_defaults_to_safe_sanboot_mode(client: TestClient) -> None:
     """The minimal inline add field stages a row by MAC only and
-    submits ``boot_policy=sanboot`` -- never a flash policy (which
+    submits ``boot_mode=sanboot`` -- never a flash policy (which
     would need a target_disk_serial the box only reports after its
     first PXE check-in). Image binding + policy are set on the
     detail page.
@@ -726,9 +726,9 @@ def test_ui_machines_inline_add_defaults_to_safe_sanboot_policy(client: TestClie
     _login(client)
     body = client.get("/ui/machines").text
     # The submit JS hardcodes the safe default.
-    assert '"boot_policy", "sanboot"' in body
+    assert '"boot_mode", "sanboot"' in body
     # No flash policy is offered/sent from the inline add.
-    assert '"boot_policy", "bty-flash-always"' not in body
+    assert '"boot_mode", "bty-flash-always"' not in body
 
 
 def test_ui_fetches_page_shows_recent_activity_card(
@@ -999,7 +999,7 @@ def test_ui_machine_save_is_audited(client: TestClient) -> None:
     assert (
         client.post(
             f"/ui/machines/{mac}",
-            data={"boot_policy": "bty-inventory"},
+            data={"boot_mode": "bty-inventory"},
             cookies=AUTH,
             follow_redirects=False,
         ).status_code
@@ -1014,7 +1014,7 @@ def test_ui_machine_save_is_audited(client: TestClient) -> None:
     # A second save is an update -> machine.upserted.
     client.post(
         f"/ui/machines/{mac}",
-        data={"boot_policy": "sanboot"},
+        data={"boot_mode": "sanboot"},
         cookies=AUTH,
         follow_redirects=False,
     )
@@ -1036,7 +1036,7 @@ def test_ui_events_summary_linkifies_mac(client: TestClient) -> None:
     mac = "aa:bb:cc:dd:ee:42"
     client.post(
         f"/ui/machines/{mac}",
-        data={"boot_policy": "sanboot"},
+        data={"boot_mode": "sanboot"},
         cookies=AUTH,
         follow_redirects=False,
     )
@@ -1069,7 +1069,7 @@ def test_ui_machine_upsert_form_rejects_non_hex_sha256(client: TestClient) -> No
         "/ui/machines/aa:bb:cc:dd:ee:ff",
         data={
             "bty_image_ref": "not-a-real-sha-just-garbage",
-            "boot_policy": "sanboot",
+            "boot_mode": "sanboot",
         },
         follow_redirects=False,
     )
@@ -1159,8 +1159,8 @@ def test_ui_machine_upsert_via_form(client: TestClient) -> None:
         == "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
     )
     assert api.json()["hostname"] == "bty-ui-test"
-    # Form omits boot_policy -> dependency default applies (sanboot).
-    assert api.json()["boot_policy"] == "sanboot"
+    # Form omits boot_mode -> dependency default applies (sanboot).
+    assert api.json()["boot_mode"] == "sanboot"
 
 
 def test_ui_machine_upsert_invalid_field_gives_concise_banner(client: TestClient) -> None:
@@ -1170,7 +1170,7 @@ def test_ui_machine_upsert_invalid_field_gives_concise_banner(client: TestClient
     _login(client)
     r = client.post(
         "/ui/machines/aa:bb:cc:dd:ee:ff",
-        data={"bty_image_ref": "not-a-hex-digest!", "boot_policy": "sanboot"},
+        data={"bty_image_ref": "not-a-hex-digest!", "boot_mode": "sanboot"},
         follow_redirects=False,
     )
     assert r.status_code == 303
@@ -1192,18 +1192,18 @@ def test_ui_machine_upsert_flash_without_target_names_the_policy(client: TestCli
     _login(client)
     r = client.post(
         "/ui/machines/aa:bb:cc:dd:ee:ff",
-        data={"boot_policy": "bty-flash-once"},
+        data={"boot_mode": "bty-flash-once"},
         follow_redirects=False,
     )
     assert r.status_code == 303
     decoded = urllib.parse.unquote(r.headers["location"].split("?error=", 1)[1])
-    assert "boot_policy=bty-flash-once requires a target disk" in decoded
+    assert "boot_mode=bty-flash-once requires a target disk" in decoded
     assert "bty-inventory" in decoded
     assert "bty-tui" not in decoded
 
 
-def test_ui_machine_upsert_persists_boot_policy_flash(client: TestClient) -> None:
-    """Form upsert with boot_policy=flash also requires the operator
+def test_ui_machine_upsert_persists_boot_mode_flash(client: TestClient) -> None:
+    """Form upsert with boot_mode=flash also requires the operator
     to have picked a target_disk_serial (post-v0.18 safety gate).
     The dropdown is populated from machines.known_disks after
     ``bty`` posts its inventory; this test sends the serial
@@ -1214,7 +1214,7 @@ def test_ui_machine_upsert_persists_boot_policy_flash(client: TestClient) -> Non
         data={
             "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
             "hostname": "",
-            "boot_policy": "bty-flash-always",
+            "boot_mode": "bty-flash-always",
             "target_disk_serial": "ATA-WDC-123456",
         },
     )
@@ -1223,7 +1223,7 @@ def test_ui_machine_upsert_persists_boot_policy_flash(client: TestClient) -> Non
         "/machines/aa:bb:cc:dd:ee:ff",
         cookies=AUTH,
     )
-    assert api.json()["boot_policy"] == "bty-flash-always"
+    assert api.json()["boot_mode"] == "bty-flash-always"
     assert api.json()["target_disk_serial"] == "ATA-WDC-123456"
 
 
@@ -1277,13 +1277,13 @@ def test_ui_machine_detail_renders_disk_inventory_dropdown(client: TestClient) -
 def test_ui_machine_detail_renders_no_inventory_warning(client: TestClient) -> None:
     """A machine that hasn't yet reported its inventory shows a
     yellow warning alert pointing at the recovery path ("set
-    boot_policy=bty-tui and power-cycle") instead of a broken empty
+    boot_mode=bty-tui and power-cycle") instead of a broken empty
     dropdown."""
     _login(client)
     # Seed a machine record without ever posting inventory.
     client.put(
         "/machines/aa:bb:cc:dd:ee:89",
-        json={"boot_policy": "sanboot"},
+        json={"boot_mode": "sanboot"},
         cookies=AUTH,
     )
     r = client.get("/ui/machines/aa:bb:cc:dd:ee:89", cookies=AUTH)
@@ -1300,17 +1300,17 @@ def test_ui_machine_detail_renders_no_inventory_warning(client: TestClient) -> N
 
 def test_ui_machine_upsert_refuses_flash_without_target_disk(client: TestClient) -> None:
     """Safety gate (operator request: refuse if target_disk is
-    unset). Setting boot_policy=flash without target_disk_serial
+    unset). Setting boot_mode=flash without target_disk_serial
     bounces back to /ui/machines/{mac} with a flash banner
     explaining how to fix it -- and the machine row does NOT
-    flip to boot_policy=flash."""
+    flip to boot_mode=flash."""
     _login(client)
     # Seed the machine first so the redirect target exists.
     client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
         json={
             "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            "boot_policy": "sanboot",
+            "boot_mode": "sanboot",
         },
         cookies=AUTH,
     )
@@ -1318,7 +1318,7 @@ def test_ui_machine_upsert_refuses_flash_without_target_disk(client: TestClient)
         "/ui/machines/aa:bb:cc:dd:ee:ff",
         data={
             "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            "boot_policy": "bty-flash-always",
+            "boot_mode": "bty-flash-always",
             "target_disk_serial": "",
         },
         follow_redirects=False,
@@ -1327,13 +1327,13 @@ def test_ui_machine_upsert_refuses_flash_without_target_disk(client: TestClient)
     assert "/ui/machines/aa:bb:cc:dd:ee:ff?error=" in r.headers["location"]
     api = client.get("/machines/aa:bb:cc:dd:ee:ff", cookies=AUTH).json()
     # Safety gate: didn't flip to flash.
-    assert api["boot_policy"] == "sanboot"
+    assert api["boot_mode"] == "sanboot"
     assert api["target_disk_serial"] is None
 
 
-def test_ui_machine_upsert_rejects_unknown_boot_policy(client: TestClient) -> None:
+def test_ui_machine_upsert_rejects_unknown_boot_mode(client: TestClient) -> None:
     """Form upsert routes through the same Pydantic ``MachineUpsert``
-    as the JSON API; an invalid ``boot_policy`` produces a 303 with
+    as the JSON API; an invalid ``boot_mode`` produces a 303 with
     an error flash (matches the catalog-form pattern) instead of a
     400 page that loses form context."""
     _login(client)
@@ -1341,30 +1341,30 @@ def test_ui_machine_upsert_rejects_unknown_boot_policy(client: TestClient) -> No
         "/ui/machines/aa:bb:cc:dd:ee:ff",
         data={
             "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            "boot_policy": "yolo",
+            "boot_mode": "yolo",
         },
         follow_redirects=False,
     )
     assert r.status_code == 303
     location = r.headers["location"]
     assert location.startswith("/ui/machines/aa:bb:cc:dd:ee:ff?error="), location
-    assert "boot_policy" in location
+    assert "boot_mode" in location
 
 
-def test_ui_machine_detail_renders_boot_policy_dropdown(client: TestClient) -> None:
+def test_ui_machine_detail_renders_boot_mode_dropdown(client: TestClient) -> None:
     _login(client)
     client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
         json={
             "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            "boot_policy": "bty-flash-always",
+            "boot_mode": "bty-flash-always",
         },
         cookies=AUTH,
     )
     r = client.get("/ui/machines/aa:bb:cc:dd:ee:ff")
     assert r.status_code == 200
     body = r.text
-    assert 'name="boot_policy"' in body
+    assert 'name="boot_mode"' in body
     # Both options present, current value selected.
     assert ">sanboot</option>" in body
     assert ">bty-flash-always</option>" in body
@@ -1633,13 +1633,13 @@ def test_ui_boot_fetch_requires_auth(client: TestClient) -> None:
     assert r.headers["location"] == "/ui/login"
 
 
-def test_ui_machines_list_shows_boot_policy_badge(client: TestClient) -> None:
+def test_ui_machines_list_shows_boot_mode_badge(client: TestClient) -> None:
     _login(client)
     client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
         json={
             "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            "boot_policy": "bty-flash-always",
+            "boot_mode": "bty-flash-always",
         },
         cookies=AUTH,
     )
@@ -1647,7 +1647,7 @@ def test_ui_machines_list_shows_boot_policy_badge(client: TestClient) -> None:
         "/machines/11:22:33:44:55:66",
         json={
             "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            "boot_policy": "sanboot",
+            "boot_mode": "sanboot",
         },
         cookies=AUTH,
     )
@@ -1655,16 +1655,16 @@ def test_ui_machines_list_shows_boot_policy_badge(client: TestClient) -> None:
         "/machines/22:33:44:55:66:77",
         json={
             "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            "boot_policy": "bty-flash-once",
+            "boot_mode": "bty-flash-once",
         },
         cookies=AUTH,
     )
     client.put(
         "/machines/33:44:55:66:77:88",
-        json={"boot_policy": "bty-tui"},
+        json={"boot_mode": "bty-tui"},
         cookies=AUTH,
     )
-    # Auto-discovery via /pxe lands a fifth row with boot_policy=bty-inventory
+    # Auto-discovery via /pxe lands a fifth row with boot_mode=bty-inventory
     # so we can exercise all five badge variants in one table.
     client.get("/pxe/aa:bb:cc:dd:ee:01")
     r = client.get("/ui/machines")

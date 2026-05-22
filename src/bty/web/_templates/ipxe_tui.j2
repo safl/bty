@@ -1,10 +1,10 @@
 #!ipxe
-# bty network-flash for {{ mac }} - interactive wizard mode (boot_policy=bty-tui)
+# bty network-flash for {{ mac }} - interactive wizard mode (boot_mode=bty-tui)
 #
-# ``boot_policy=bty-tui``: chain into the bty live env. The live env's
+# ``boot_mode=bty-tui``: chain into the bty live env. The live env's
 # bty-on-tty1 service exec's ``bty --server X --mac Y``;
 # ``bty`` GETs ``<server>/pxe/<mac>/plan`` and dispatches on the
-# JSON response. For ``boot_policy=bty-tui`` the plan endpoint returns
+# JSON response. For ``boot_mode=bty-tui`` the plan endpoint returns
 # ``{"mode": "interactive", "catalog": ...}`` and ``bty`` drops the
 # operator into the wizard with the server's catalog pre-loaded.
 #
