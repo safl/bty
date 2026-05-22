@@ -439,6 +439,24 @@ def _list_disks() -> list[dict[str, Any]]:
     return [d for d in all_disks if d.get("type") == "disk" and not d.get("ro")]
 
 
+def _uefi_boot_registration_enabled() -> bool:
+    """Whether to register a UEFI NVRAM boot entry after a flash.
+
+    OFF by default. Most firmware boots a freshly-flashed disk on its
+    own, and writing NVRAM on every flash proved risky on server boards
+    -- it once reordered an EPYC box's BootOrder so it stopped
+    netbooting. Opt in by setting ``BTY_REGISTER_UEFI_BOOT`` to a truthy
+    value (``1`` / ``true`` / ``yes`` / ``on``) only for firmware that
+    won't boot the disk without an explicit entry.
+    """
+    return os.environ.get("BTY_REGISTER_UEFI_BOOT", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
+
 # ---------------------------------------------------------------------------
 # The TUI itself. Sequential-screen wizard driven by a plain loop.
 # ---------------------------------------------------------------------------
@@ -1800,13 +1818,17 @@ class BtyTui:
         return plan, errors
 
     def _register_uefi_boot_entry(self, plan: flash.FlashPlan) -> None:
-        """After a successful flash, register a UEFI NVRAM boot entry
-        for the freshly-written disk so the firmware actually boots the
-        new OS. A dd'd image has no NVRAM entry, so a UEFI box otherwise
-        has nothing to boot and falls back to netboot. Best-effort and
+        """After a successful flash, optionally register a UEFI NVRAM
+        boot entry for the freshly-written disk.
+
+        OFF by default (opt in via ``BTY_REGISTER_UEFI_BOOT``): most
+        firmware boots the flashed disk on its own, and touching NVRAM
+        proved risky on server boards. When enabled it's best-effort and
         UEFI-only (no-op on BIOS); the outcome is printed to the console
         and never blocks the post-flash transition.
         """
+        if not _uefi_boot_registration_enabled():
+            return
         try:
             msg = flash.register_uefi_boot_entry(plan.target.path)
         except Exception as exc:  # boot-entry setup must never fail the flash

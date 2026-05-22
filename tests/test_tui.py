@@ -988,3 +988,18 @@ def test_screen_reboot_or_done_explicit_n_does_not_reboot(monkeypatch: Any) -> N
     monkeypatch.setattr(app, "_do_reboot", lambda: rebooted.append(True))
     assert app._screen_reboot_or_done() == "quit"
     assert rebooted == []
+
+
+def test_uefi_boot_registration_off_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """efibootmgr registration is opt-in: unset env -> disabled."""
+    monkeypatch.delenv("BTY_REGISTER_UEFI_BOOT", raising=False)
+    assert tui_app._uefi_boot_registration_enabled() is False
+
+
+def test_uefi_boot_registration_opt_in(monkeypatch: pytest.MonkeyPatch) -> None:
+    for truthy in ("1", "true", "YES", "On"):
+        monkeypatch.setenv("BTY_REGISTER_UEFI_BOOT", truthy)
+        assert tui_app._uefi_boot_registration_enabled() is True
+    for falsy in ("", "0", "false", "no", "off", "nonsense"):
+        monkeypatch.setenv("BTY_REGISTER_UEFI_BOOT", falsy)
+        assert tui_app._uefi_boot_registration_enabled() is False

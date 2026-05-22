@@ -163,6 +163,7 @@ and sensible defaults.
 | Variable | Purpose | Default |
 |-------------------|----------------------------------------------------------------|---------------------|
 | `BTY_IMAGE_ROOT` | Image root the `bty` wizard scans. | `/var/lib/bty/images` |
+| `BTY_REGISTER_UEFI_BOOT` | Opt in (`1`/`true`/`yes`/`on`) to register a UEFI NVRAM boot entry (one-shot `BootNext`) for the disk after a flash. Off by default: most firmware boots the flashed disk on its own, and touching NVRAM is risky on some server boards. | (unset = off) |
 
 ### Default paths
 
