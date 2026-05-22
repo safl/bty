@@ -112,9 +112,8 @@ the new `cached` / `sha256` state without manual refresh.
 
 ## CLI: the wizard is the operator surface
 
-v0.22.11+ collapsed the historical `bty inspect` / `bty flash` / `bty
-images` / `bty catalog` subcommands into the single ``bty`` console script
-(the wizard). Three invocation shapes:
+The single ``bty`` console script (the wizard) is the operator surface.
+Three invocation shapes:
 
 ```bash
 bty                              # interactive wizard, local image-root only
@@ -122,8 +121,8 @@ bty --catalog <URL>              # interactive wizard with the catalog pre-loade
 bty --server <X> --mac <Y>       # server-driven via GET <X>/pxe/<Y>/plan
 ```
 
-The wizard's catalog overlay accepts the same shapes the old ``--catalog``
-accepted: a local TOML path, an HTTP URL, an ``oras://`` reference, or a
+The wizard's catalog overlay accepts a local TOML path, an HTTP URL, an
+``oras://`` reference, or a
 bty-web instance's `/catalog.toml`. Local-only mode (no overlay) scans
 `BTY_IMAGE_ROOT` (or `/var/lib/bty/images`) and shows whatever flashable
 files are there.

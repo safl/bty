@@ -55,12 +55,11 @@ bty is one Python package - the `bty` module, distributed on PyPI as
 [`bty-lab`](https://pypi.org/project/bty-lab/) - with two console-script
 entry points, plus a sibling appliance-image builder:
 
-- `bty` - the operator-facing wizard (Rich-based) + library; subsumes the
-  retired ``bty-tui`` / ``bty inspect|flash|images|catalog`` subcommands as
-  of v0.22.10. ``--catalog SOURCE`` (a local TOML path, HTTP URL, or
-  ``oras://`` reference) overlays a portable catalog on the local
-  image-root scan. ``--server X --mac Y`` switches to server-driven mode
-  (GETs ``<X>/pxe/<Y>/plan`` and dispatches on the JSON response).
+- `bty` - the operator-facing wizard (Rich-based) + library.
+  ``--catalog SOURCE`` (a local TOML path, HTTP URL, or ``oras://``
+  reference) overlays a portable catalog on the local image-root scan.
+  ``--server X --mac Y`` switches to server-driven mode (GETs
+  ``<X>/pxe/<Y>/plan`` and dispatches on the JSON response).
 - `bty-web` - HTTP server + browser UI for fleet image flashing.
 - `bty-media/` - sibling directory (not a Python package); a cijoe-driven
   Debian appliance-image builder that produces the USB live and server

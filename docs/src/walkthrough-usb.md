@@ -213,9 +213,8 @@ need to flash.
 
 ## Step 5b: Scripted flashing via the bty-server plan endpoint
 
-v0.22.11+ retired the `bty flash` / `bty inspect` / `bty images`
-subcommands. To drive flashes from a fleet controller, run a `bty-web`
-appliance and target the per-MAC plan endpoint:
+To drive flashes from a fleet controller, run a `bty-web` appliance and
+target the per-MAC plan endpoint:
 
 1. On the appliance, bind the machine: PUT `/machines/<mac>` with
    `boot_policy=bty-flash-always`, a `bty_image_ref`, and a

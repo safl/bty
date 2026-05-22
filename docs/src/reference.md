@@ -236,8 +236,7 @@ carry a session cookie:
  serial picked: chain into the live env over HTTP with kernel cmdline
  `bty.server=` + `bty.mac=`. The live env's ``bty`` then GETs
  `/pxe/<mac>/plan` to retrieve the image URL + target_disk_serial and
- runs the flash. (v0.22.10+ retired the older shape that put those on
- the cmdline.)
+ runs the flash.
 
  Auto-discovery: the first contact for an unknown MAC inserts a
  placeholder row (image=null, boot_policy=bty-inventory) so the box
