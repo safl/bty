@@ -160,7 +160,9 @@
             </form>
             {% else %}
             <span class="text-muted ms-auto small">
-                <i class="bi bi-info-circle me-1"></i>Controls disabled (no daemon helper here)
+                <i class="bi bi-info-circle me-1"></i>dnsmasq isn't systemd-managed here
+                (e.g. the Docker container, where the entrypoint supervises it) -- no
+                start / stop / restart
             </span>
             {% endif %}
         </div>

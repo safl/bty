@@ -6,25 +6,24 @@ on every tagged release. It hosts bty-web's **image catalog**, **machine
 registry**, and **browser UI**. `bty --catalog SOURCE` clients (from the
 USB live env or a workstation) connect to it and pick images for flashing.
 
-This is not the bty-server appliance. The appliance bundles `dnsmasq` for
-TFTP on top of bty-web; the container is **HTTP-only by design**. That
-makes it the **HTTP-Boot / `boots-from` deployment lane**, production-fit
-for either of:
+This is not the bty-server appliance, but it bundles the same PXE stack:
+bty-web (HTTP + browser UI) plus `dnsmasq` serving the iPXE bootfiles over
+TFTP. Both boot lanes work:
 
-- **UEFI HTTP Boot targets**: the operator's LAN DHCP server serves DHCP
-  option 67 = `http://<bty-web>/ipxe.efi` (bty-web serves the iPXE binaries
-  from `/boot/` over HTTP). Modern UEFI firmware fetches the binary
-  natively, no TFTP in the path.
-- **`boots-from` USB sticks**: the operator boots a target from a
+- **UEFI HTTP Boot targets**: DHCP option 67 = `http://<bty-web>:8080/boot/ipxe.efi`;
+  modern UEFI firmware fetches the binary over HTTP, no TFTP in the path.
+- **TFTP PXE targets** (legacy BIOS, older UEFI): DHCP option 66 = the
+  container host's IP, option 67 = `ipxe.efi`; the container's dnsmasq
+  serves it over TFTP. Publish `69/udp` for this (see Quick start).
+- **`boots-from` USB sticks**: boot a target from a
   [`boots-from`](https://github.com/safl/boots-from) USB whose embedded
-  iPXE script chains to bty-web's `/pxe-bootstrap.ipxe`. The stick replaces
-  the firmware-driven PXE step entirely, so neither DHCP-PXE options nor a
-  TFTP daemon are needed on the LAN. Works on legacy BIOS too.
+  iPXE script chains to bty-web's `/pxe-bootstrap.ipxe`, replacing the
+  firmware PXE step entirely - no DHCP-PXE options or TFTP needed at all.
 
-For mixed-firmware fleets that include legacy BIOS or older UEFI that only
-support TFTP option 67, deploy the bty-server appliance instead (see
-[walkthrough-server.md](walkthrough-server.md)) - it bundles the TFTP
-daemon.
+The differences from the appliance are operational, not functional: the
+container's dnsmasq is launched by the entrypoint (not systemd), so the
+Netboot page shows its status but can't Start/Stop/Restart it, and there's
+no cloud-init / rootfs-grow (it's a container, not a disk image).
 
 ## When to use this
 
@@ -34,12 +33,10 @@ daemon.
   network-shared catalog of pre-built images instead of copying files to
   every stick.
 - **Local-dev backend** for `bty --catalog` work.
-- **Production HTTP-Boot or `boots-from` deployment** for fleets that don't
-  need a TFTP daemon (UEFI-HTTP-Boot-capable firmware or USB-driven
-  targets).
-
-For mixed-firmware fleets with TFTP-only PXE clients, deploy the bty-server
-appliance instead.
+- **Production PXE / HTTP-Boot deployment**: serves TFTP PXE, UEFI HTTP
+  Boot, and `boots-from` sticks. Reach for the bty-server appliance
+  instead when you want a turnkey disk image with systemd-managed services
+  rather than a container to run.
 
 ## Quick start
 
@@ -52,6 +49,7 @@ mkdir -p ./bty-data
 sudo chown -R 999:999 ./bty-data    # match the in-container bty user
 docker run -d --name bty-web \
   -p 8080:8080 \
+  -p 69:69/udp \
   -v "$PWD/bty-data":/var/lib/bty \
   ghcr.io/safl/bty-web:latest
 ```
@@ -62,9 +60,14 @@ image's ownership automatically):
 ```bash
 docker run -d --name bty-web \
   -p 8080:8080 \
+  -p 69:69/udp \
   -v bty-data:/var/lib/bty \
   ghcr.io/safl/bty-web:latest
 ```
+
+`69/udp` publishes TFTP for PXE clients (drop it if you only use HTTP
+Boot or `boots-from`). If TFTP transfers stall behind Docker's NAT, run
+with `--network host` instead of `-p`.
 
 Open <http://localhost:8080/ui> and log in with `bty / bty`. Drop
 `.img.zst` / `.qcow2` / `.img.gz` files into the data directory's `images/`
@@ -176,16 +179,17 @@ The published image is `linux/amd64` + `linux/arm64`. Pull from a Pi 4 or
 Pi 5 as easily as from an x86 host. Pure-Python wheel, so the only per-arch
 differences are the apt-installed system deps.
 
-## What is missing vs the appliance
+## Differences vs the appliance
 
-This container deliberately does not run:
+The container runs the same bty-web + dnsmasq (TFTP) stack as the
+appliance. The differences are operational:
 
-- `dnsmasq` for TFTP. The container is HTTP-only; UEFI HTTP-Boot targets
-  work directly against `/boot/ipxe.efi`. TFTP-only PXE clients need a
-  separate TFTP server (or the appliance image, which bundles dnsmasq).
-- Cloud-init / first-boot rootfs grow.
+- **TFTP daemon control**: the container's dnsmasq is launched by the
+  entrypoint, not systemd, so the Netboot page shows its status but can't
+  Start/Stop/Restart it (manage the daemon with `docker` instead).
+- **No cloud-init / first-boot rootfs grow**: it's a container image, not
+  a disk image.
 
-bty runs no DHCP role in either deployment shape: the operator's LAN DHCP
-server points PXE clients at bty (via option 60/66/67 tagging) whether bty
-runs as the appliance or this container. For HTTP-Boot-capable firmware,
-this container is a complete deployment.
+bty runs no DHCP role in either shape: the operator's LAN DHCP server
+points PXE clients at bty (via option 60/66/67 tagging) whether bty runs
+as the appliance or this container.
