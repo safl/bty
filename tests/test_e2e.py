@@ -390,6 +390,9 @@ def test_e2e_pxe_flash_chain_plan_carries_image_url_and_target_serial(
     assert plan["target_disk_serial"] == "WD-WX12345"
     assert "/images/" in plan["image"]
     assert bty_image_ref in plan["image"]
+    # The catalog format rides along so the client can flash an image
+    # whose URL name has no detectable extension (e.g. an oras title).
+    assert plan["format"] == "qcow2"
 
     # iPXE chain still renders the flash header comment block (so
     # an operator inspecting curl output sees the bound ref + serial)
@@ -413,6 +416,52 @@ def test_e2e_pxe_flash_chain_plan_carries_image_url_and_target_serial(
     # Retired: these moved to the plan endpoint.
     assert "bty.image_url" not in kernel_line
     assert "bty.target_disk_serial" not in kernel_line
+
+
+def test_e2e_plan_handles_extensionless_oras_name(app_client: TestClient) -> None:
+    """An oras entry's name is a descriptive title with no file
+    extension ("nosi fedora-sysdev (x86_64, rolling)"). The flash plan
+    must still let the client detect the format -- otherwise the flash
+    is rejected as "format not recognised" (the observed symptom). The
+    plan synthesises a URL name carrying the catalog format AND passes
+    the format explicitly."""
+    state_path: Path = app_client.app.state.state_path  # type: ignore[attr-defined]
+    src = "oras://ghcr.io/safl/nosi/fedora-sysdev:latest"
+    bty_image_ref = _catalog.image_ref_for_src(src)
+    with _bty_db.open_db(state_path) as conn:
+        conn.execute(
+            "INSERT INTO catalog_entries "
+            "(bty_image_ref, src, disk_image_sha, name, sha_url, format, "
+            "size_bytes, description, added_at) VALUES (?,?,?,?,?,?,?,?,?)",
+            (
+                bty_image_ref,
+                src,
+                None,
+                "nosi fedora-sysdev (x86_64, rolling)",  # no extension
+                None,
+                "img.gz",
+                None,
+                None,
+                "2026-05-22T00:00:00+00:00",
+            ),
+        )
+        conn.commit()
+    r = app_client.put(
+        "/machines/0c:bf:b4:c0:4b:42",
+        json={
+            "bty_image_ref": bty_image_ref,
+            "boot_policy": "bty-flash-once",
+            "target_disk_serial": "SSD-860-EVO",
+        },
+        cookies=AUTH,
+    )
+    assert r.status_code == 200, r.text
+    plan = app_client.get("/pxe/0c:bf:b4:c0:4b:42/plan", headers={"Host": "bty.local:8080"}).json()
+    assert plan["mode"] == "flash"
+    assert plan["format"] == "img.gz"
+    # URL name carries the format extension so even a client that detects
+    # format from the URL alone (no plan["format"]) succeeds.
+    assert plan["image"].endswith("/image.img.gz")
 
 
 def _seed_flashable_machine(app_client: TestClient, mac: str) -> None:

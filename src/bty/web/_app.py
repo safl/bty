@@ -932,12 +932,28 @@ def create_app(
             target_disk_serial = machine.get("target_disk_serial")
             image_name = _flash_target_for_ref(str(ref))
             if image_name is not None and target_disk_serial:
-                image_name_encoded = urllib.parse.quote(image_name, safe="")
+                fmt = _flash_format_for_ref(str(ref))
+                # The client detects image format from the URL name's
+                # extension. An oras title ("nosi fedora-sysdev (x86_64,
+                # rolling)") has none, so the flash gets rejected as
+                # "format not recognised". When the catalog name carries
+                # no usable extension, synthesise a filename from the
+                # stored format so even older clients detect it; the
+                # ``{ref}`` segment is what actually resolves the bytes,
+                # so the name is free to change.
+                if fmt and images.detect_format(Path(image_name)) is None:
+                    url_name = f"image.{fmt}"
+                else:
+                    url_name = image_name
+                image_name_encoded = urllib.parse.quote(url_name, safe="")
                 plan = {
                     "mode": "flash",
                     "image": f"{base}/images/{ref}/{image_name_encoded}",
                     "target_disk_serial": str(target_disk_serial),
                 }
+                # Also pass it explicitly for newer clients.
+                if fmt:
+                    plan["format"] = fmt
                 offer_kind = f"plan:flash:{policy}"
             else:
                 # Flash policy but the auto-resolve failed (no target
@@ -1236,6 +1252,22 @@ def create_app(
         if row is None:
             return None
         return str(row["name"])
+
+    def _flash_format_for_ref(ref: str) -> str | None:
+        """The catalog entry's stored ``format`` for a ref, or None.
+
+        The flash plan passes this to the client: the image URL's name
+        segment can be a descriptive title (e.g. an oras image's
+        ``nosi fedora-sysdev (x86_64, rolling)``) with no file
+        extension, so the client can't detect the format from the URL
+        alone and would reject the flash as "format not recognised".
+        """
+        with _db.open_db(state_path) as conn:
+            row = conn.execute(
+                "SELECT format FROM catalog_entries WHERE bty_image_ref = ?",
+                (ref,),
+            ).fetchone()
+        return str(row["format"]) if row and row["format"] else None
 
     def _resolve_image_for_key(key: str) -> Path | None:
         """Resolve a 64-hex key (bty_image_ref or disk_image_sha) to a
