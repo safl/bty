@@ -268,41 +268,15 @@ def _detect_stale_schema(conn: sqlite3.Connection, path: Path) -> None:
             )
 
 
-def _migrate_boot_policy_to_boot_mode(conn: sqlite3.Connection) -> None:
-    """One-off rename fixup for the v0.25.0 ``boot_policy`` ->
-    ``boot_mode`` column rename (and the ``sanboot`` -> ``ipxe-exit``
-    value rename).
-
-    A ``state.db`` from <= v0.24.0 still has ``boot_policy`` -- common on
-    a dedicated state disk that survives an OS reflash -- which would
-    otherwise trip :func:`_detect_stale_schema` into a hard crash-loop
-    (the appliance just won't start). Rename the column in place
-    (lossless) instead of forcing the operator to delete the DB. No-op
-    on a fresh DB, a DB with no ``machines`` table, or one already on
-    ``boot_mode``.
-
-    This is a single targeted rename, not a general migration apparatus:
-    bty pre-1.0 still has none, and breaking schema changes other than
-    this rename still go through the ``_detect_stale_schema`` wipe path.
-    """
-    cols = {row[1] for row in conn.execute("PRAGMA table_info(machines)").fetchall()}
-    if not cols or "boot_mode" in cols or "boot_policy" not in cols:
-        return
-    conn.execute("ALTER TABLE machines RENAME COLUMN boot_policy TO boot_mode")
-    conn.execute("UPDATE machines SET boot_mode = 'ipxe-exit' WHERE boot_mode = 'sanboot'")
-
-
 def init_db(path: Path) -> None:
     """Create ``path`` (and its parent directory) if missing; apply the schema.
 
-    Pre-1.0: no migrations, with one exception -- the
-    :func:`_migrate_boot_policy_to_boot_mode` rename fixup runs first so
-    a surviving pre-rename DB upgrades losslessly rather than crashing.
-    Otherwise the schema is whatever :data:`SCHEMA` says; idempotent for
-    first-init / fresh-create, a no-op for tables already there. An
-    existing DB still missing a required column (any breaking change
-    other than the handled rename) raises :class:`StaleSchemaError` with
-    operator-actionable recovery instructions.
+    Pre-1.0: no migrations. The schema is whatever :data:`SCHEMA`
+    says. Idempotent for first-init / fresh-create; calling against
+    an existing DB is a no-op for the tables already there. If an
+    existing DB has tables with missing columns (a stale schema
+    from an older bty-web), :class:`StaleSchemaError` is raised
+    with operator-actionable recovery instructions.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     # ``with sqlite3.connect(...)`` is a *transaction* context, not a
@@ -310,7 +284,6 @@ def init_db(path: Path) -> None:
     # connection open (closed only by refcount GC, fragile off
     # CPython). ``closing`` guarantees the fd is released here.
     with closing(sqlite3.connect(path)) as conn, conn:
-        _migrate_boot_policy_to_boot_mode(conn)
         _detect_stale_schema(conn, path)
         conn.executescript(SCHEMA)
         _apply_additive_columns(conn)
