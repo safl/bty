@@ -1,5 +1,26 @@
 {% extends "ui/_layout.html" %}
 {% block title %}{{ m.mac }} - bty-web{% endblock %}
+
+{% block subnav %}
+{# In-page jump links to this machine's cards, separated by vertical
+   rules. The Inventory link only shows once the box has reported. #}
+<nav class="navbar subnav-strip" aria-label="Machine sections">
+    <div class="container">
+        <span class="subnav-jumps d-flex align-items-center flex-wrap">
+            <a href="#machine-identity">Identity</a>
+            {% if m.hw_lshw or m.known_disks %}
+            <span class="vr"></span>
+            <a href="#inventory">Inventory</a>
+            {% endif %}
+            <span class="vr"></span>
+            <a href="#assignment">Assignment</a>
+            <span class="vr"></span>
+            <a href="#machine-activity">Activity</a>
+        </span>
+    </div>
+</nav>
+{% endblock %}
+
 {% block content %}
 <nav aria-label="breadcrumb">
     <ol class="breadcrumb">
@@ -8,9 +29,11 @@
     </ol>
 </nav>
 
-<div class="card mb-4">
+<div class="card mb-4" id="machine-identity">
+    <div class="card-header bg-light fw-semibold">
+        <i class="bi bi-pc-display me-1"></i><code>{{ m.mac }}</code>
+    </div>
     <div class="card-body">
-        <h1 class="h4 mb-3"><code>{{ m.mac }}</code></h1>
         <dl class="row mb-0">
             <dt class="col-sm-3">Discovered</dt>
             <dd class="col-sm-9" title="{{ m.discovered_at }}">{{ m.discovered_at | fmt_ts if m.discovered_at else "-" }}</dd>
@@ -36,13 +59,13 @@
         <span><i class="bi bi-cpu me-1"></i>Machine Inventory</span>
         <span class="d-flex gap-2">
             {% if m.hw_lshw %}
-            <a class="btn btn-sm btn-outline-secondary" href="/machines/{{ m.mac }}/lshw.json"
+            <a class="btn btn-sm btn-outline-primary" href="/machines/{{ m.mac }}/lshw.json"
                title="Full lshw -json tree (CPU / RAM / NICs / peripherals / firmware)">
                 <i class="bi bi-download me-1"></i>lshw.json
             </a>
             {% endif %}
             {% if m.known_disks %}
-            <a class="btn btn-sm btn-outline-secondary" href="/machines/{{ m.mac }}/disks.json"
+            <a class="btn btn-sm btn-outline-primary" href="/machines/{{ m.mac }}/disks.json"
                title="Disk inventory (lsblk-derived) as JSON">
                 <i class="bi bi-download me-1"></i>disks.json
             </a>
@@ -52,29 +75,31 @@
     <div class="card-body">
         <dl class="row mb-0">
             {% if hw and hw.cpu %}
-            <dt class="col-sm-3">CPU</dt>
+            <dt class="col-sm-3"><i class="bi bi-cpu me-1"></i>CPU</dt>
             <dd class="col-sm-9">{{ hw.cpu }}{% if hw.cpu_cores %} <span class="text-muted">({{ hw.cpu_cores }} core{{ "s" if hw.cpu_cores != 1 else "" }})</span>{% endif %}</dd>
             {% endif %}
             {% if hw and hw.memory %}
-            <dt class="col-sm-3">Memory</dt>
+            <dt class="col-sm-3"><i class="bi bi-memory me-1"></i>Memory</dt>
             <dd class="col-sm-9">{{ hw.memory }}{% if hw.mem_modules %} <span class="text-muted">({{ hw.mem_modules }} module{{ "s" if hw.mem_modules != 1 else "" }})</span>{% endif %}</dd>
             {% endif %}
             {% if hw and hw.nics %}
-            <dt class="col-sm-3">Network</dt>
+            <dt class="col-sm-3"><i class="bi bi-ethernet me-1"></i>Network</dt>
             <dd class="col-sm-9">
                 <ul class="list-unstyled mb-0">
                     {% for nic in hw.nics %}
+                    {% set is_identifying = nic.mac and m.mac and nic.mac|lower == m.mac|lower %}
                     <li>
-                        {% if nic.mac %}<code>{{ nic.mac }}</code>{% endif %}
+                        {% if nic.mac %}<code{% if is_identifying %} class="fw-bold"{% endif %}>{{ nic.mac }}</code>{% endif %}
                         {% if nic.name %} <span class="text-muted">{{ nic.name }}</span>{% endif %}
                         {% if nic.product %} - {{ nic.product }}{% endif %}
+                        {% if is_identifying %} <span class="badge bg-primary">this machine</span>{% endif %}
                     </li>
                     {% endfor %}
                 </ul>
             </dd>
             {% endif %}
             {% if m.known_disks %}
-            <dt class="col-sm-3">Drives</dt>
+            <dt class="col-sm-3"><i class="bi bi-hdd-stack me-1"></i>Drives</dt>
             <dd class="col-sm-9">
                 <ul class="list-unstyled mb-0">
                     {% for d in m.known_disks %}
@@ -100,9 +125,11 @@
 </div>
 {% endif %}
 
-<div class="card mb-4">
+<div class="card mb-4" id="assignment">
+    <div class="card-header bg-light fw-semibold">
+        <i class="bi bi-sliders me-1"></i>Assignment
+    </div>
     <div class="card-body">
-        <h2 class="h5 mb-3">Assignment</h2>
         <form action="/ui/machines/{{ m.mac }}" method="post">
             {# Two tiers of config (see docs/concepts "general vs
                per-policy"): the boot policy is the MODE selector; the
@@ -286,6 +313,7 @@
    same filter to /ui/events for drill-down. #}
 {% with events=machine_events,
         title="Recent Events",
+        card_id="machine-activity",
         link_to_full="/ui/events?subject_kind=machine&subject_id=" + m.mac %}
 {% include "ui/_events_card.html" %}
 {% endwith %}
