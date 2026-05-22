@@ -140,6 +140,48 @@ def test_init_db_raises_on_machines_known_disks_missing(tmp_path: Path) -> None:
         _db.init_db(state)
 
 
+def test_init_db_migrates_boot_policy_to_boot_mode(tmp_path: Path) -> None:
+    """A v0.24.0 state.db (machines.boot_policy, value 'sanboot') is
+    migrated in place to boot_mode / 'ipxe-exit' rather than crashing on
+    the v0.25.0 schema -- the dedicated-state-disk-survives-a-reflash
+    case. Other modes are preserved verbatim."""
+    import sqlite3
+
+    state = tmp_path / "state.db"
+    with sqlite3.connect(state) as conn:
+        conn.execute(
+            """
+            CREATE TABLE machines (
+                mac TEXT PRIMARY KEY, bty_image_ref TEXT, hostname TEXT,
+                discovered_at TEXT, last_seen_at TEXT, last_seen_ip TEXT,
+                boot_policy TEXT NOT NULL DEFAULT 'sanboot', sanboot_drive TEXT,
+                last_flashed_at TEXT, saw_flasher_boot INTEGER NOT NULL DEFAULT 0,
+                known_disks TEXT, known_disks_at TEXT, hw_lshw TEXT, hw_lshw_at TEXT,
+                target_disk_serial TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            "INSERT INTO machines (mac, boot_policy, created_at, updated_at) "
+            "VALUES ('aa:bb:cc:dd:ee:ff', 'sanboot', 't', 't')"
+        )
+        conn.execute(
+            "INSERT INTO machines (mac, boot_policy, created_at, updated_at) "
+            "VALUES ('11:22:33:44:55:66', 'bty-flash-once', 't', 't')"
+        )
+        conn.commit()
+
+    # Must NOT raise -- the rename fixup runs before the stale check.
+    _db.init_db(state)
+
+    with _db.open_db(state) as conn:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(machines)").fetchall()}
+        assert "boot_mode" in cols and "boot_policy" not in cols
+        modes = dict(conn.execute("SELECT mac, boot_mode FROM machines").fetchall())
+    assert modes["aa:bb:cc:dd:ee:ff"] == "ipxe-exit"  # sanboot -> ipxe-exit
+    assert modes["11:22:33:44:55:66"] == "bty-flash-once"  # preserved
+
+
 def test_init_db_raises_on_stale_schema(tmp_path: Path) -> None:
     """If state.db exists from an older bty-web (missing
     columns added in a later release), :func:`init_db` raises
