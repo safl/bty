@@ -822,12 +822,16 @@ def register_uefi_boot_entry(target_disk: Path, *, label: str = "bty flashed") -
     for num in _boot_entries_with_label(_efibootmgr(), label):
         _efibootmgr(["-b", num, "-B"])
 
-    old_order = _parse_boot_order(_efibootmgr())
-    # ``--create`` prepends the new entry to BootOrder, so it's whatever
-    # number BootOrder gained at the front.
-    after = _efibootmgr(
+    # ``--create-only`` registers the entry WITHOUT adding it to
+    # BootOrder. We deliberately NEVER rewrite BootOrder: doing so on
+    # server firmware risks dropping the box's real boot entries -- an
+    # earlier version that did ``-o <old_order>,<new>`` stranded an EPYC
+    # box out of UEFI when the old-order parse came back short. Instead
+    # we set only the one-shot ``BootNext``: the firmware consumes it
+    # after a single boot and the standing boot order is left untouched.
+    _efibootmgr(
         [
-            "--create",
+            "--create-only",
             "--disk",
             str(target_disk),
             "--part",
@@ -838,16 +842,16 @@ def register_uefi_boot_entry(target_disk: Path, *, label: str = "bty flashed") -
             label,
         ]
     )
-    new = next((n for n in _parse_boot_order(after) if n not in old_order), None)
-    if new is None:
+    # We just deleted any prior bty entries, so the entry carrying our
+    # label now is the one we just created.
+    nums = _boot_entries_with_label(_efibootmgr(), label)
+    if not nums:
         return f"created UEFI boot entry on {target_disk} (could not confirm BootNext)"
-    # Netboot entries stay first (bty keeps control); the disk goes last
-    # in BootOrder but is set as the one-shot BootNext for this reboot.
-    _efibootmgr(["-o", ",".join([*old_order, new])])
-    _efibootmgr(["-n", new])
+    new = nums[-1]
+    _efibootmgr(["-n", new])  # one-shot BootNext; BootOrder untouched
     return (
         f"registered UEFI boot entry Boot{new} -> {target_disk} "
-        f"(ESP partition {part}); next boot = the flashed disk"
+        f"(ESP partition {part}); BootNext set for the next boot, BootOrder untouched"
     )
 
 

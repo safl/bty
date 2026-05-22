@@ -963,10 +963,12 @@ def test_register_uefi_boot_entry_happy_path(monkeypatch: pytest.MonkeyPatch) ->
     calls: list[list[str]] = []
     outputs = iter(
         [
-            "BootOrder: 0001,0002\nBoot0001* UEFI PXE\nBoot0002* ubuntu\n",  # delete-scan
-            "BootOrder: 0001,0002\n",  # old_order
-            "BootOrder: 0009,0001,0002\nBoot0009* bty flashed\tHD\n",  # after --create
-            "",  # -o
+            "BootOrder: 0001,0002\nBoot0001* UEFI PXE\nBoot0002* ubuntu\n",  # delete-scan (no bty)
+            "",  # --create-only
+            (  # label-scan -> finds the just-created entry
+                "BootOrder: 0001,0002\nBoot0001* UEFI PXE\nBoot0002* ubuntu\n"
+                "Boot0009* bty flashed\tHD\n"
+            ),
             "",  # -n
         ]
     )
@@ -978,7 +980,9 @@ def test_register_uefi_boot_entry_happy_path(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr("bty.flash.subprocess.run", fake_run)
     msg = flash.register_uefi_boot_entry(Path("/dev/sda"))
     assert "Boot0009" in msg and "/dev/sda" in msg
-    # netboot entries kept first, the new disk entry appended:
-    assert ["efibootmgr", "-o", "0001,0002,0009"] in calls
-    # one-shot BootNext set to the disk so this reboot lands on it:
+    # Non-destructive: create-only (entry NOT added to BootOrder) + a
+    # one-shot BootNext. BootOrder must NEVER be rewritten -- doing so
+    # stranded an EPYC box out of its PXE entry.
+    assert any("--create-only" in c for c in calls)
     assert ["efibootmgr", "-n", "0009"] in calls
+    assert not any(c[:2] == ["efibootmgr", "-o"] for c in calls)
