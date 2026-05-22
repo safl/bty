@@ -72,6 +72,15 @@ pipx upgrade bty-lab            # or: pip install -U bty-lab
 sudo systemctl restart bty-web
 ```
 
+**Re-fetch the netboot artifacts after upgrading.** The live-env
+artifacts in `BTY_BOOT_DIR` (kernel / initrd / squashfs) are versioned
+and fetched separately from bty-web -- the package upgrade does NOT
+touch them. So a freshly-upgraded server keeps serving the *previous*
+live env until you refresh it: open `/ui/netboot` and click **Fetch
+latest artifacts** (or pin a tag under Settings -> Upstream sources
+first). Skip this and PXE clients boot the old live env against the new
+server -- a confusing version split.
+
 ### Upgrade the appliance image
 
 The server appliance is a disk image. To move to a newer build, write the
