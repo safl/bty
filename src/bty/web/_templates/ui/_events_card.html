@@ -52,7 +52,7 @@
                         {% endif %}
                         <span class="badge {{ badge }} small">{{ e.kind }}</span>
                     </td>
-                    <td><small>{{ e.summary }}</small></td>
+                    <td><small>{{ e.summary | linkify }}</small></td>
                     <td>
                         {% if e.source_ip %}
                         <a class="text-decoration-none"

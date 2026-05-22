@@ -177,7 +177,7 @@
                         {% endif %}
                         <span class="badge {{ badge }}">{{ e.kind }}</span>
                     </td>
-                    <td>{{ e.summary }}</td>
+                    <td>{{ e.summary | linkify }}</td>
                     <td>
                         {% if e.subject_kind == "machine" and e.subject_id %}
                         {# Machine subjects link directly to the

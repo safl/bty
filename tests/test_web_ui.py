@@ -986,6 +986,25 @@ def test_ui_machine_save_is_audited(client: TestClient) -> None:
     assert len(upserted) == 1
 
 
+def test_ui_events_summary_linkifies_mac(client: TestClient) -> None:
+    """The /ui/events Summary column linkifies MACs so an operator can
+    jump to the machine a row mentions. The ``{mac} created`` summary
+    yields ``...<code>{mac}</code></a> created`` -- the trailing word
+    proves the link is inside the summary text, not just the structured
+    Subject column (which has no trailing word)."""
+    _login(client)
+    mac = "aa:bb:cc:dd:ee:42"
+    client.post(
+        f"/ui/machines/{mac}",
+        data={"boot_policy": "sanboot"},
+        cookies=AUTH,
+        follow_redirects=False,
+    )
+    body = client.get("/ui/events", cookies=AUTH).text
+    assert f'href="/ui/machines/{mac}"' in body
+    assert "</code></a> created" in body
+
+
 def test_ui_machine_upsert_form_rejects_non_hex_sha256(client: TestClient) -> None:
     """The form-style ``POST /ui/machines/{mac}`` must apply the
     same Pydantic ``MachineUpsert`` validation as the JSON

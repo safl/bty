@@ -11,8 +11,10 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import html
 import json
 import os
+import re
 import sqlite3
 import sys
 import urllib.error
@@ -33,6 +35,7 @@ from fastapi.responses import (
 )
 from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader, select_autoescape
+from markupsafe import Markup
 from starlette.datastructures import UploadFile
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -316,6 +319,36 @@ def create_app(
         return dt.strftime("%Y-%m-%d %H:%M:%S")
 
     jinja.filters["fmt_ts"] = _fmt_ts
+
+    # Linkify free-text event summaries: turn MAC addresses into links to
+    # the machine page and http(s) URLs into clickable links, so an
+    # operator scanning /ui/events can jump straight to the machine /
+    # resource a row mentions. Everything outside a match is HTML-escaped,
+    # so this stays XSS-safe even though it returns markup.
+    _LINKIFY_RE = re.compile(
+        r"(?P<url>https?://[^\s<>\"']+)"
+        r"|(?P<mac>\b(?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}\b)"
+    )
+
+    def _linkify(value: object) -> Markup:
+        text = "" if value is None else str(value)
+        out: list[str] = []
+        last = 0
+        for m in _LINKIFY_RE.finditer(text):
+            out.append(html.escape(text[last : m.start()]))
+            if m.lastgroup == "url":
+                esc = html.escape(m.group("url"))
+                out.append(f'<a href="{esc}" target="_blank" rel="noopener">{esc}</a>')
+            else:
+                esc = html.escape(m.group("mac"))
+                # Machine MACs are stored normalised lowercase; link to
+                # that, show the original casing.
+                out.append(f'<a href="/ui/machines/{esc.lower()}"><code>{esc}</code></a>')
+            last = m.end()
+        out.append(html.escape(text[last:]))
+        return Markup("".join(out))
+
+    jinja.filters["linkify"] = _linkify
 
     _db.init_db(state_path)
 
