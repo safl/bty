@@ -39,6 +39,13 @@ bty_password = "bty"
 # in seconds against the client's 8 GiB blank disk.
 machine_image = "test.qcow2"
 
+# Client VM firmware: "bios" (default; QEMU SeaBIOS + NIC option ROM,
+# proven) or "uefi" (OVMF; exercises the UEFI netboot path -- the one
+# that broke and the common case on real hardware). UEFI needs the
+# ``ovmf`` package on the runner and falls back to BIOS with a warning
+# if it is absent. Flip to "uefi" once verified locally.
+client_firmware = "bios"
+
 # Synthesised PXE network. ``-netdev socket`` is just an L2 link with
 # no DHCP server of its own, so the test runs full DHCP (not proxy-
 # DHCP). The server static-IPs its PXE NIC; the client DHCPs into the

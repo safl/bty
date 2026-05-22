@@ -175,6 +175,7 @@ jobs:
             qemu-system-x86 \
             qemu-utils \
             genisoimage \
+            ovmf \
             zstd \
             cpu-checker
 

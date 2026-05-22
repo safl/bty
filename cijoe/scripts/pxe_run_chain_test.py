@@ -48,6 +48,7 @@ import errno
 import hashlib
 import json
 import logging as log
+import shutil
 import socket
 import subprocess
 import time
@@ -185,8 +186,20 @@ def main(args, cijoe):
         log.info(f"PUT /machines/{cfg['client_mac']} (boot_policy=bty-flash-always)")
         _put_assignment("127.0.0.1", mgmt_port, token, cfg, bty_image_ref)
 
-        log.info(f"Starting client VM (PXE boot, joined to socket :{pxe_socket_port})")
-        client = _start_client_vm(workspace, pxe_socket_port, client_log, cfg)
+        # Client firmware: BIOS by default (proven, no OVMF dep). The
+        # UEFI path is the one that broke + the common case on real
+        # hardware; select it with ``client_firmware = "uefi"`` once
+        # OVMF is available. If UEFI is requested but no OVMF is on the
+        # host, fall back to BIOS with a loud warning rather than fail.
+        firmware = str(cfg.get("client_firmware", "bios")).lower()
+        if firmware == "uefi" and _find_ovmf() is None:
+            log.warning("client_firmware=uefi but no OVMF found; falling back to BIOS")
+            firmware = "bios"
+        log.info(
+            f"Starting client VM (firmware={firmware}, PXE boot, "
+            f"joined to socket :{pxe_socket_port})"
+        )
+        client = _start_client_vm(workspace, pxe_socket_port, client_log, cfg, firmware)
 
         markers = _build_markers(cfg)
         seen = _wait_for_chain_markers(client_log, markers, CHAIN_TIMEOUT)
@@ -258,7 +271,30 @@ def _start_server_vm(qcow2, mgmt_port, ssh_port, socket_port, log_path, cfg):
     )
 
 
-def _start_client_vm(workspace, socket_port, log_path, cfg):
+# OVMF (UEFI firmware) split CODE/VARS pairs, newest Debian/Ubuntu
+# layout first. The CODE blob is read-only; VARS is a per-run writable
+# copy. The QEMU PXE chain test boots BIOS by default (proven, no OVMF
+# dependency); set ``client_firmware = "uefi"`` to exercise the UEFI
+# path -- which is the firmware that broke and the common case on real
+# hardware. See ``_find_ovmf``.
+_OVMF_PAIRS = (
+    ("/usr/share/OVMF/OVMF_CODE_4M.fd", "/usr/share/OVMF/OVMF_VARS_4M.fd"),
+    ("/usr/share/OVMF/OVMF_CODE.fd", "/usr/share/OVMF/OVMF_VARS.fd"),
+    ("/usr/share/ovmf/OVMF_CODE.fd", "/usr/share/ovmf/OVMF_VARS.fd"),
+)
+
+
+def _find_ovmf():
+    """Return ``(code_path, vars_template_path)`` for an installed OVMF
+    split build, or ``None`` if no OVMF firmware is on the host (so the
+    caller can fall back to BIOS rather than fail)."""
+    for code, vars_tpl in _OVMF_PAIRS:
+        if Path(code).is_file() and Path(vars_tpl).is_file():
+            return code, vars_tpl
+    return None
+
+
+def _start_client_vm(workspace, socket_port, log_path, cfg, firmware="bios"):
     blank_disk = workspace / "client-blank.qcow2"
     if not blank_disk.exists():
         subprocess.run(
@@ -266,11 +302,34 @@ def _start_client_vm(workspace, socket_port, log_path, cfg):
             check=True,
             capture_output=True,
         )
+    # UEFI: stage a writable copy of OVMF_VARS and prepend the pflash
+    # drives so the client boots OVMF firmware (which does its own UEFI
+    # PXE: DHCP -> TFTP ipxe.efi, which the server's dnsmasq overlay
+    # already serves for ``tag:efi``). BIOS keeps QEMU's default SeaBIOS
+    # + the NIC option ROM.
+    fw_args: list[str] = []
+    if firmware == "uefi":
+        ovmf = _find_ovmf()
+        if ovmf is None:
+            raise RuntimeError(
+                "client_firmware=uefi but no OVMF firmware found "
+                f"(looked for {[c for c, _ in _OVMF_PAIRS]}); install the 'ovmf' package"
+            )
+        code, vars_tpl = ovmf
+        vars_copy = workspace / "client-ovmf-vars.fd"
+        shutil.copy(vars_tpl, vars_copy)
+        fw_args = [
+            "-drive",
+            f"if=pflash,format=raw,unit=0,readonly=on,file={code}",
+            "-drive",
+            f"if=pflash,format=raw,unit=1,file={vars_copy}",
+        ]
     cmd = [
         "qemu-system-x86_64",
         "-enable-kvm",
         "-cpu",
         "host",
+        *fw_args,
         "-smp",
         "1",
         # Client VM RAM. live-boot streams the squashfs into tmpfs
