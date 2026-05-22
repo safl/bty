@@ -601,33 +601,43 @@ def create_app(
             target_disk_serial = machine.get("target_disk_serial")
             image_name = _flash_target_for_ref(str(ref))
             if image_name is not None and target_disk_serial:
-                if policy == "bty-flash-always" and machine.get("saw_flasher_boot"):
-                    # One-shot post-flash boot. Since we last served the
-                    # flash chain, this machine fetched a /boot artifact
-                    # with ``?mac=`` -- proof it booted the flasher and,
-                    # having now rebooted back to us, finished. Boot the
-                    # freshly-flashed disk once via sanboot instead of
-                    # reflashing, and CLEAR the bit so the next real
-                    # netboot (no artifact fetch in between) flips back
-                    # to the flash chain. This is what stops
-                    # bty-flash-always from looping forever under
-                    # PXE-first firmware (reboot -> PXE -> reflash -> ...).
+                if policy in ("bty-flash-always", "bty-flash-once") and machine.get(
+                    "saw_flasher_boot"
+                ):
+                    # The box fetched a /boot artifact with ``?mac=`` since
+                    # we served the flash chain -- proof it booted the
+                    # flasher, flashed, and rebooted back. Boot the
+                    # freshly-flashed disk via sanboot instead of
+                    # reflashing. The bit handling is what makes the two
+                    # modes differ (this is the "state" half of the
+                    # mode/state model):
+                    #   * bty-flash-always: CLEAR the bit, so the next real
+                    #     netboot (no artifact fetch in between) flips back
+                    #     to the flash chain -- the flash<->sanboot
+                    #     alternation that stops a PXE-first reflash loop.
+                    #   * bty-flash-once: KEEP the bit. This is terminal:
+                    #     the box sanboots its disk from now on. The mode
+                    #     STAYS bty-flash-once (no mutation to sanboot); it
+                    #     re-arms only when the operator re-saves the
+                    #     machine (which resets the bit).
                     drive = machine.get("sanboot_drive") or _models.DEFAULT_SANBOOT_DRIVE
                     template = jinja.get_template("ipxe_sanboot.j2")
                     rendered = template.render(
                         mac=normalised, machine=machine, drive=drive, policy=policy
                     )
-                    with _db.open_db(state_path) as conn:
-                        conn.execute(
-                            "UPDATE machines SET saw_flasher_boot = 0, updated_at = ? "
-                            "WHERE mac = ?",
-                            (now, normalised),
-                        )
-                        conn.commit()
-                    offer_kind = "bty-flash-always-sanboot"
-                    offer_summary = (
-                        f"{normalised} booting just-flashed disk (drive {drive}); "
-                        f"bty-flash-always re-arms on next netboot"
+                    if policy == "bty-flash-always":
+                        with _db.open_db(state_path) as conn:
+                            conn.execute(
+                                "UPDATE machines SET saw_flasher_boot = 0, updated_at = ? "
+                                "WHERE mac = ?",
+                                (now, normalised),
+                            )
+                            conn.commit()
+                    offer_kind = f"{policy}-sanboot"
+                    offer_summary = f"{normalised} booting just-flashed disk (drive {drive}); " + (
+                        "bty-flash-always re-arms on next netboot"
+                        if policy == "bty-flash-always"
+                        else "bty-flash-once complete (stays on this disk)"
                     )
                     offer_details = {
                         "offer": "sanboot",
@@ -774,46 +784,30 @@ def create_app(
         # networks (homelab / CI), not the open internet - same as the
         # other ``/pxe/*`` endpoints.
         #
-        # Always updates ``last_flashed_at`` + ``updated_at``. For
-        # ``boot_mode=bty-flash-once`` we also flip the policy to
-        # ``sanboot`` here so the next PXE boot stops re-flashing and
-        # boots the freshly-flashed disk (the box flashed, the
-        # operator's "one reimage please" is satisfied, leave it
-        # alone). ``bty-flash-always`` is unchanged -- the per-job CI
-        # cadence wants every cycle to reflash.
+        # Records ``last_flashed_at`` + ``updated_at``. It does NOT mutate
+        # ``boot_mode``: the mode is the operator's intent and stays put.
+        # The post-flash "boot the disk" behaviour comes from the
+        # ``saw_flasher_boot`` bit instead -- armed when the box fetched
+        # the flasher's /boot artifacts, it makes the next /pxe contact
+        # sanboot the freshly-flashed disk. For bty-flash-once that's
+        # terminal (the bit stays set, so it keeps booting the disk); for
+        # bty-flash-always the /pxe handler clears it to re-arm the next
+        # reflash. This is the mode/state split: mode = intent (here),
+        # state = the bit. (Pre-mode/state, this flipped flash-once ->
+        # sanboot, which lied about the operator's configured mode.)
         normalised = _normalise_mac(mac)
         now = _now_iso()
         client_ip = _client_ip(request)
         with _db.open_db(state_path) as conn:
-            current = conn.execute(
-                "SELECT boot_mode FROM machines WHERE mac = ?",
-                (normalised,),
-            ).fetchone()
-            flipped_from_flash_once = (
-                current is not None and current["boot_mode"] == "bty-flash-once"
+            cur = conn.execute(
+                "UPDATE machines SET last_flashed_at = ?, updated_at = ? WHERE mac = ?",
+                (now, now, normalised),
             )
-            if flipped_from_flash_once:
-                # Settle to sanboot: the box boots its freshly-flashed
-                # disk and stops reflashing. (sanboot is the only
-                # "boot the disk" policy; there is no separate local.)
-                cur = conn.execute(
-                    "UPDATE machines SET last_flashed_at = ?, updated_at = ?, "
-                    "boot_mode = 'sanboot' WHERE mac = ?",
-                    (now, now, normalised),
-                )
-            else:
-                cur = conn.execute(
-                    "UPDATE machines SET last_flashed_at = ?, updated_at = ? WHERE mac = ?",
-                    (now, now, normalised),
-                )
             if cur.rowcount > 0:
                 _log_event(
                     conn,
                     kind="machine.flashed",
-                    summary=(
-                        f"{normalised} signalled flash completion"
-                        + (" (bty-flash-once -> sanboot)" if flipped_from_flash_once else "")
-                    ),
+                    summary=f"{normalised} signalled flash completion",
                     subject_kind="machine",
                     subject_id=normalised,
                     actor="pxe-client",

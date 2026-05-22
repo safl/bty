@@ -1538,10 +1538,12 @@ def test_pxe_flash_once_emits_flash_chain_like_flash(
     assert "bty_image_ref" in r.text or "bty_flash_key" in r.text
 
 
-def test_pxe_done_flips_flash_once_to_sanboot(app_client: TestClient) -> None:
-    """``bty-flash-once`` is the one policy where the completion signal
-    mutates ``boot_mode``: it flips to ``sanboot`` so the box boots
-    its freshly-flashed disk and stops reflashing itself."""
+def test_pxe_done_records_flash_without_mutating_mode(app_client: TestClient) -> None:
+    """``/pxe/{mac}/done`` records last_flashed_at but does NOT mutate
+    boot_mode -- the mode is the operator's intent and stays put. The
+    post-flash "boot the disk" behaviour comes from the saw_flasher_boot
+    bit instead. (Pre-mode/state this flipped flash-once -> sanboot,
+    which lied about the configured mode.)"""
     app_client.put(
         "/machines/22:33:44:55:66:77",
         json={
@@ -1559,8 +1561,8 @@ def test_pxe_done_flips_flash_once_to_sanboot(app_client: TestClient) -> None:
 
     after = app_client.get("/machines/22:33:44:55:66:77", cookies=AUTH).json()
     assert after["last_flashed_at"] is not None
-    # The completion signal flipped the policy.
-    assert after["boot_mode"] == "sanboot"
+    # Mode is NOT mutated -- flash-once stays flash-once.
+    assert after["boot_mode"] == "bty-flash-once"
 
 
 def test_pxe_sanboot_mode_returns_sanboot_template(app_client: TestClient) -> None:
@@ -1609,11 +1611,10 @@ def test_machine_upsert_rejects_malformed_sanboot_drive(app_client: TestClient) 
 def test_pxe_done_flash_once_second_call_is_idempotent(
     app_client: TestClient,
 ) -> None:
-    """A second /pxe/{mac}/done call against a machine that already
-    flipped bty-flash-once -> sanboot on the first call returns 204
-    cleanly without raising or re-flipping anything. Important
-    for cosmic-ray retries from the live env (network blip
-    between the flash signal and the rebooting kernel)."""
+    """Two /pxe/{mac}/done calls in a row both return 204 cleanly and
+    leave boot_mode untouched (bty-flash-once stays flash-once). Guards
+    cosmic-ray retries from the live env (a network blip between the
+    flash signal and the rebooting kernel)."""
     app_client.put(
         "/machines/33:44:55:66:77:88",
         json={
@@ -1622,18 +1623,15 @@ def test_pxe_done_flash_once_second_call_is_idempotent(
         },
         cookies=AUTH,
     )
-    # First /done flips to sanboot + records the event.
     r1 = app_client.post("/pxe/33:44:55:66:77:88/done")
     assert r1.status_code == 204
-    # Second /done: machine is now boot_mode=sanboot; the handler
-    # still hits the UPDATE path and returns 204 cleanly.
     r2 = app_client.post("/pxe/33:44:55:66:77:88/done")
     assert r2.status_code == 204
     after = app_client.get("/machines/33:44:55:66:77:88", cookies=AUTH).json()
-    assert after["boot_mode"] == "sanboot"
+    # Mode stays put across both calls -- no mutation to sanboot.
+    assert after["boot_mode"] == "bty-flash-once"
     # Two flash events recorded -- one per /done call. The audit
-    # trail captures the retry; the operator can see "this box
-    # signalled twice in quick succession".
+    # trail captures the retry.
     events = app_client.get(
         "/events",
         params={
@@ -1644,10 +1642,6 @@ def test_pxe_done_flash_once_second_call_is_idempotent(
         cookies=AUTH,
     ).json()["events"]
     assert len(events) == 2
-    # First event's summary mentions the flip; second doesn't.
-    summaries = [e["summary"] for e in events]
-    assert any("bty-flash-once -> sanboot" in s for s in summaries)
-    assert sum(1 for s in summaries if "bty-flash-once -> sanboot" in s) == 1
 
 
 def test_pxe_inventory_persists_disks_and_logs_event(app_client: TestClient) -> None:

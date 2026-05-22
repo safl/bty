@@ -961,11 +961,12 @@ def test_e2e_pxe_done_failure_is_isolated_from_machine_state(
     r = app_client.post("/pxe/12:34:56:78:9a:bc/done")
     assert r.status_code in (200, 204), r.text
 
-    # Verify last_flashed_at populated + policy flipped to ``sanboot``.
+    # Verify last_flashed_at populated; boot_mode is NOT mutated
+    # (flash-once stays flash-once -- mode is the operator's intent).
     r = app_client.get("/machines/12:34:56:78:9a:bc", cookies=AUTH)
     assert r.status_code == 200, r.text
     m = r.json()
-    assert m["boot_mode"] == "sanboot", m
+    assert m["boot_mode"] == "bty-flash-once", m
     assert m["last_flashed_at"] is not None, m
 
 
@@ -1139,11 +1140,13 @@ def test_e2e_pxe_unknown_mac_then_inventory_then_flash_chain(
     assert plan["mode"] == "flash"
     assert plan["target_disk_serial"] == "SER-1"
     assert f"/images/{ref}/" in plan["image"]
-    # Done call flips bty-flash-once -> local.
+    # Done records the flash but does NOT mutate the mode -- flash-once
+    # stays flash-once (the saw_flasher_boot bit handles the post-flash
+    # disk boot, not a policy mutation).
     r = app_client.post(f"/pxe/{mac}/done")
     assert r.status_code in (200, 204), r.text
     r = app_client.get(f"/machines/{mac}", cookies=AUTH)
-    assert r.json()["boot_mode"] == "sanboot"
+    assert r.json()["boot_mode"] == "bty-flash-once"
 
 
 def test_e2e_image_serve_routes_resolve_by_sha_or_filename(
