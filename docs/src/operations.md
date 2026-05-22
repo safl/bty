@@ -48,6 +48,42 @@ sudo systemctl start bty-web
 Restore by putting the file(s) back under `/var/lib/bty` (bty-web
 stopped) and starting the service.
 
+## Portable export / import (operator data only)
+
+`tar`-copying the whole tree (above) is the verbatim option. The
+`bty-web export` / `import` subcommands are the **selective** one: they
+move only the operator-owned half of the state -- the machine hardware
+identities + image bindings, the catalog, and the local image files --
+and nothing bty manages itself. Reach for them to migrate to a new
+server (possibly a newer version) without dragging stale bty internals
+along, or to back up just the parts you typed in.
+
+```bash
+# On the old server (reads BTY_STATE_DIR + BTY_IMAGE_ROOT):
+bty-web export /tmp/bty-bundle
+
+# Copy /tmp/bty-bundle to the new server, then:
+bty-web import /tmp/bty-bundle
+```
+
+What a bundle carries, and what it deliberately leaves behind:
+
+| Travels | Stays behind (fresh on the destination) |
+|---|---|
+| Machine `mac` + `lshw` + disk inventory | The **boot mode** (every machine imports as `bty-inventory`) |
+| Image binding + `target_disk_serial` + `hostname` | The `saw_flasher_boot` state bit + `last_flashed_at` |
+| The image catalog (`catalog_entries`) | The netboot artifacts (re-fetch to match the new version) |
+| The local image files (`BTY_IMAGE_ROOT`) | Server settings + the audit log |
+
+Resetting the boot mode is the point: a freshly-migrated machine
+shouldn't auto-flash against netboot artifacts you haven't refreshed
+yet. Each box arrives as a re-discovered `bty-inventory` box with its
+hardware + binding pre-filled; you re-enable a flash mode once the new
+server is verified and its netboot artifacts re-fetched.
+
+A bundle is a plain directory (`manifest.json` + an `images/` folder),
+so `tar` it for archival.
+
 ## Upgrade
 
 bty pre-1.0 has **no database migration framework**. Two cases, and the

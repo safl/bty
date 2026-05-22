@@ -20,6 +20,42 @@ from pathlib import Path
 import bty
 
 
+def _run_portability(args: argparse.Namespace) -> None:
+    """Dispatch the ``export`` / ``import`` subcommands.
+
+    Resolves the same state dir + image root the server uses (from
+    ``BTY_STATE_DIR`` / ``BTY_IMAGE_ROOT``), then moves the
+    operator-owned state in/out of a bundle directory. Server-free: needs
+    only stdlib + ``bty.web``, so it works without the ``[web]`` extra.
+    """
+    from datetime import UTC, datetime
+
+    from bty.web import _portability
+    from bty.web._db import default_state_path
+
+    state_path = default_state_path()
+    image_root_env = os.environ.get("BTY_IMAGE_ROOT")
+    image_root = Path(image_root_env) if image_root_env else state_path.parent / "images"
+    now = datetime.now(UTC).isoformat()
+
+    if args.cmd == "export":
+        exp = _portability.export_bundle(
+            state_path, image_root, Path(args.dest), bty_version=bty.__version__, now=now
+        )
+        print(
+            f"bty-web export -> {exp.dest}: {exp.machines} machines, "
+            f"{exp.catalog_entries} catalog entries, {exp.images} image files"
+        )
+    else:  # import
+        imp = _portability.import_bundle(state_path, image_root, Path(args.src), now=now)
+        print(
+            f"bty-web import: {imp.machines} machines (as bty-inventory), "
+            f"{imp.catalog_entries} catalog entries, {imp.images} image files"
+        )
+        for line in imp.skipped:
+            print(f"  skipped: {line}", file=sys.stderr)
+
+
 def _resolve_secret_key(state_dir: Path) -> str:
     """Return the per-appliance session-cookie secret.
 
@@ -95,7 +131,27 @@ def main(argv: list[str] | None = None) -> None:
         action="version",
         version=f"bty-web {bty.__version__}",
     )
-    parser.parse_args(argv)
+    # Subcommands. Bare ``bty-web`` (no subcommand) still runs the server
+    # -- the subparser is optional so the systemd unit / container
+    # entrypoint is unchanged. ``export`` / ``import`` move the
+    # operator-owned half of the state (machines + catalog + image files)
+    # in/out of a portable bundle directory, for migration + backup.
+    sub = parser.add_subparsers(dest="cmd")
+    p_exp = sub.add_parser(
+        "export",
+        help="write machines + catalog + image files to a bundle directory",
+    )
+    p_exp.add_argument("dest", help="bundle directory to create/write")
+    p_imp = sub.add_parser(
+        "import",
+        help="load a bundle directory (machines come in as bty-inventory)",
+    )
+    p_imp.add_argument("src", help="bundle directory to read")
+    args = parser.parse_args(argv)
+
+    if args.cmd in ("export", "import"):
+        _run_portability(args)
+        return
 
     try:
         import uvicorn
