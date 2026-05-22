@@ -1,9 +1,14 @@
 #!ipxe
-# bty-web - no machine record for {{ mac }}
+# bty-web - no usable assignment for {{ mac }}
 #
-# Default behaviour: fall back to local boot. The operator can claim
+# Default behaviour: boot the local disk. The operator can claim/fix
 # this MAC by PUT /machines/{{ mac }} on the bty-web HTTP API.
+#
+# Firmware-aware, same as ipxe_sanboot.j2: UEFI has no BIOS INT13 drive
+# map, so ``sanboot --drive`` can't work there -- hand back to the
+# firmware boot order via ``exit`` instead. Legacy BIOS sanboots the
+# first disk directly.
 
-echo no bty assignment for {{ mac }}; falling back to local boot
+echo no usable bty assignment for {{ mac }}; booting local disk (platform=${platform})
 sleep 5
-sanboot --no-describe --drive 0x80 || exit
+iseq ${platform} efi && exit || sanboot --no-describe --drive 0x80 || exit

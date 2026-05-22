@@ -159,6 +159,30 @@ def test_delete_catalog_endpoints_have_ui_surface() -> None:
 # ----------------------------------------------------------------------
 
 
+def test_local_boot_ipxe_templates_are_firmware_aware() -> None:
+    """Any iPXE template that runs ``sanboot --drive`` must guard it
+    behind ``iseq ${platform} efi``.
+
+    ``sanboot --drive`` uses BIOS INT13 drive numbering, which does not
+    exist on UEFI -- so an unguarded one fails on every UEFI box (the
+    common case). The guard makes UEFI ``exit`` to the firmware boot
+    order instead. This pins the fix for ipxe_sanboot.j2 + ipxe_unknown.j2;
+    a bare BIOS sanboot in any served template is exactly how UEFI
+    netboot stayed broken (the QEMU chain test is BIOS-only).
+    """
+    tdir = REPO_ROOT / "src" / "bty" / "web" / "_templates"
+    for tpl in sorted(tdir.glob("*.j2")):
+        text = tpl.read_text()
+        runs_sanboot = any(
+            "sanboot --" in ln and not ln.lstrip().startswith("#") for ln in text.splitlines()
+        )
+        if runs_sanboot:
+            assert "iseq ${platform} efi" in text, (
+                f"{tpl.name} runs `sanboot --drive` (BIOS-only) without an "
+                "`iseq ${platform} efi` UEFI guard -- it will fail on UEFI targets"
+            )
+
+
 def test_ipxe_templates_share_baseline_cmdline_tokens() -> None:
     """Both ``ipxe_tui.j2`` and ``ipxe_flash.j2`` render kernel
     cmdlines for the SAME live env. Tokens that are essential for
