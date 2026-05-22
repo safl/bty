@@ -31,10 +31,24 @@
 
 <div class="card mb-4" id="machine-identity">
     <div class="card-header bg-light fw-semibold">
-        <i class="bi bi-pc-display me-1"></i><code>{{ m.mac }}</code>
+        <i class="bi bi-pc-display me-1"></i><code>{{ m.mac }}</code>{% if m.hostname %}
+        <span class="fw-normal text-muted ms-2">{{ m.hostname }}</span>{% endif %}
     </div>
     <div class="card-body">
         <dl class="row mb-0">
+            {% set bound = (images | selectattr('bty_image_ref', 'equalto', m.bty_image_ref) | first) if m.bty_image_ref else none %}
+            <dt class="col-sm-3"><i class="bi bi-disc me-1"></i>Image</dt>
+            <dd class="col-sm-9">
+                {% if bound %}
+                <a class="text-decoration-none" href="/ui/images"
+                   title="View in the image catalog">{{ bound.name }}</a>
+                <span class="text-muted">({{ bound.format or "?" }}{% if bound.size_bytes %}, {{ bound.size_bytes | filesizeformat(true) }}{% endif %})</span>
+                {% elif m.bty_image_ref %}
+                <span class="text-muted">ref {{ m.bty_image_ref[:12] }}... (no catalog entry)</span>
+                {% else %}
+                <span class="text-muted">none (boots from the local disk)</span>
+                {% endif %}
+            </dd>
             <dt class="col-sm-3">Discovered</dt>
             <dd class="col-sm-9" title="{{ m.discovered_at }}">{{ m.discovered_at | fmt_ts if m.discovered_at else "-" }}</dd>
             <dt class="col-sm-3">Last seen</dt>
@@ -190,7 +204,7 @@
                        the ref, which is stable across rolling tags and
                        cache state. #}
                     <option value="{{ img.bty_image_ref }}" {% if img.bty_image_ref == m.bty_image_ref %}selected{% endif %}>
-                        {{ img.name }} ({{ img.format or "?" }}, ref:{{ img.bty_image_ref[:12] }}{% if img.disk_image_sha %}, sha:{{ img.disk_image_sha[:12] }}{% endif %})
+                        {{ img.name }} ({{ img.format or "?" }}{% if img.size_bytes %}, {{ img.size_bytes | filesizeformat(true) }}{% endif %}, ref {{ img.bty_image_ref[:8] }})
                     </option>
                     {% endfor %}
                 </select>

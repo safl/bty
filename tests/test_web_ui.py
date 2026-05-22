@@ -38,6 +38,7 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClie
         secret_key=TEST_SECRET_KEY,
         image_root=image_root,
     )
+    app.state.state_path = state  # let tests seed the DB directly
 
     import pamela
 
@@ -859,6 +860,45 @@ def test_ui_machine_detail_renders(client: TestClient) -> None:
     r = client.get("/ui/machines/aa:bb:cc:dd:ee:ff")
     assert r.status_code == 200
     assert "aa:bb:cc:dd:ee:ff" in r.text
+
+
+def test_ui_machine_detail_shows_bound_image_and_hostname(client: TestClient) -> None:
+    """The identity card shows the bound image human-readably (name +
+    format + human size) linked to the catalog, and the hostname next to
+    the MAC -- not a bare cut-off ref/sha."""
+    from bty.web import _db as _bty_db
+
+    _login(client)
+    state_path = client.app.state.state_path  # type: ignore[attr-defined]
+    ref = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    with _bty_db.open_db(state_path) as conn:
+        conn.execute(
+            "INSERT INTO catalog_entries "
+            "(bty_image_ref, src, disk_image_sha, name, sha_url, format, "
+            "size_bytes, description, added_at) VALUES (?,?,?,?,?,?,?,?,?)",
+            (
+                ref,
+                "oras://ghcr.io/safl/nosi/fedora:latest",
+                None,
+                "nosi fedora-sysdev (x86_64, rolling)",
+                None,
+                "img.gz",
+                2_606_593_716,
+                None,
+                "2026-05-22T00:00:00+00:00",
+            ),
+        )
+        conn.commit()
+    client.put(
+        "/machines/aa:bb:cc:dd:ee:ff",
+        json={"bty_image_ref": ref, "hostname": "lab-fedora-01"},
+        cookies=AUTH,
+    )
+    body = client.get("/ui/machines/aa:bb:cc:dd:ee:ff").text
+    assert "nosi fedora-sysdev (x86_64, rolling)" in body  # human name
+    assert 'href="/ui/images"' in body  # links to the catalog
+    assert "GiB" in body  # 2.6e9 bytes -> filesizeformat "2.4 GiB"
+    assert "lab-fedora-01" in body  # hostname next to the MAC
 
 
 def test_ui_machine_detail_404(client: TestClient) -> None:

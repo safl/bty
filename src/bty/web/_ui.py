@@ -417,7 +417,7 @@ def register_ui_routes(
         # surfaces alongside the ref when known.
         with _db.open_db(state_path) as conn:
             catalog_rows = conn.execute(
-                "SELECT bty_image_ref, name, format, src, disk_image_sha "
+                "SELECT bty_image_ref, name, format, src, disk_image_sha, size_bytes "
                 "FROM catalog_entries ORDER BY name"
             ).fetchall()
         catalog_options = [dict(r) for r in catalog_rows]
