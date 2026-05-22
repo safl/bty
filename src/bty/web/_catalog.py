@@ -383,6 +383,29 @@ class DownloadManager(_BaseAsyncManager[DownloadState]):
                 # guarantee.
                 pass
 
+        # Symmetric failure event: a failed download is now the only way
+        # a remote image fails to come local (the serve-time
+        # cache-through was dropped), so record it in the audit log +
+        # Downloads history rather than only the transient in-memory
+        # state. Reuses the kind the backfill already reads.
+        if final_status == "failed" and self._state_path is not None:
+            from bty.web import _db, _events_log
+
+            try:
+                with _db.open_db(self._state_path) as conn:
+                    _events_log.record(
+                        conn,
+                        kind="catalog.fetch.sha_mismatch",
+                        summary=f"download {state.name!r} failed: {error}",
+                        subject_kind="catalog",
+                        subject_id=state.name,
+                        actor="operator",
+                        details={"name": state.name, "src": entry.src, "error": error},
+                    )
+                    conn.commit()
+            except Exception:
+                pass
+
         async with self._lock:
             state.status = final_status
             state.finished_at = time.time()

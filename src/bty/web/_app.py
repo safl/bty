@@ -1292,8 +1292,10 @@ def create_app(
 
     def _resolve_image_for_key(key: str) -> Path | None:
         """Resolve a 64-hex key (bty_image_ref or disk_image_sha) to a
-        local file path. Triggers eager cache-through if the bound
-        catalog row's bytes aren't on disk yet.
+        local file path that already exists, or ``None``. Never fetches:
+        the serve path only hands out bytes that are already local (an
+        image-store file, or a cache file an operator-initiated download
+        already populated).
 
         Resolution order:
 
@@ -1301,10 +1303,9 @@ def create_app(
            - disk_image_sha known + cache file present -> cache path
            - src is file:// + file exists -> local (HashManager will
              populate disk_image_sha asynchronously)
-           - else (remote src, no cache): fetch src -> cache,
-             UPDATE row.disk_image_sha, return new cache path.
-             Pre-pinned-sha mismatch on fetch returns ``None`` (the
-             caller surfaces a 502 and logs a sha_mismatch event).
+           - else (remote src, not yet cached locally): ``None`` -> the
+             caller 404s. Remote images are brought local deliberately
+             (Downloads / image store), not cache-through'd at serve time.
         2. ``key`` as raw ``disk_image_sha``: serves the sha-keyed
            URLs that the ``GET /images`` listing emits for entries
            whose content hash is known. Looks for the cache file
@@ -1322,7 +1323,6 @@ def create_app(
         if row is not None:
             sha: str | None = row["disk_image_sha"]
             src = str(row["src"])
-            ref = str(row["bty_image_ref"])
             if sha:
                 cached = catalog_cache_dir / sha
                 if cached.is_file():
@@ -1333,52 +1333,17 @@ def create_app(
                 if local.is_file():
                     return local
                 return None
-            # Remote src, no cache yet -- cache-through (Option A).
-            # Broad except: a urllib URLError / OSError / OrasError
-            # during cache-through used to propagate up and 500 the
-            # live env's image GET, leaving the flash chain dead.
-            # Now we log the failure as a sha_mismatch-shaped audit
-            # row (close enough -- the operator sees "cache-through
-            # failed for src") and return None so the caller raises
-            # a clean 404, which the live env can surface on tty1.
-            try:
-                cached, computed_sha = _catalog.fetch_src_to_cache(
-                    src,
-                    catalog_cache_dir,
-                    expected_sha=sha,
-                )
-            except Exception as exc:
-                with _db.open_db(state_path) as conn:
-                    _log_event(
-                        conn,
-                        kind="catalog.fetch.sha_mismatch",
-                        summary=f"cache-through {src!r}: {exc}",
-                        subject_kind="catalog",
-                        subject_id=ref,
-                        actor="pxe-client",
-                        details={
-                            "src": src,
-                            "error": f"{type(exc).__name__}: {exc}",
-                        },
-                    )
-                    conn.commit()
-                return None
-            with _db.open_db(state_path) as conn:
-                conn.execute(
-                    "UPDATE catalog_entries SET disk_image_sha = ? WHERE bty_image_ref = ?",
-                    (computed_sha, ref),
-                )
-                _log_event(
-                    conn,
-                    kind="catalog.cache.populated",
-                    summary=f"cache-through populated for {src!r}",
-                    subject_kind="catalog",
-                    subject_id=ref,
-                    actor="pxe-client",
-                    details={"src": src, "disk_image_sha": computed_sha},
-                )
-                conn.commit()
-            return cached
+            # Remote src (oras:// / http(s)://) with no local cache: NOT
+            # served. The transparent serve-time cache-through was
+            # dropped -- it download-then-served the whole image with no
+            # dedup, so a large oras image thrashed (concurrent fetches
+            # never completing) and the client's probe always timed out
+            # before the bytes were ready. Remote images are now brought
+            # local *deliberately* (the Downloads action, or dropping a
+            # file into the image store) before they're flashable; until
+            # then this resolves to a clean 404 the live env surfaces on
+            # tty1, instead of a multi-minute hang.
+            return None
         # (2) sha lookup -- serves the sha-keyed URLs emitted by the
         # ``GET /images`` listing for entries whose content hash is
         # known. Resolve via the catalog_entries row's src.

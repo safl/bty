@@ -668,13 +668,15 @@ def test_serve_image_cache_through_url_error_returns_404_not_500(
         os.environ.pop("BTY_STATE_DIR", None)
 
 
-def test_serve_image_does_cache_through_on_uncached_ref(
+def test_serve_image_404s_uncached_remote_ref_without_fetching(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """``GET /images/<ref>`` for a catalog row with NULL disk_image_sha
-    fetches upstream synchronously (Option A cache-through), writes
-    the bytes to ``$cache_dir/<sha>``, updates the row's
-    disk_image_sha, and serves the cached file."""
+    """``GET /images/<ref>`` for a remote catalog row with no local
+    cache returns 404 and does NOT fetch upstream -- the serve-time
+    cache-through was dropped (it download-then-served large images with
+    no dedup, so the client probe always timed out). Remote images are
+    brought local deliberately (the Downloads action / image store)
+    before they're servable."""
     import hashlib
     import io
     import os
@@ -748,25 +750,20 @@ def test_serve_image_does_cache_through_on_uncached_ref(
             ref = add.json()["bty_image_ref"]
             assert add.json()["disk_image_sha"] is None
 
-            # First GET triggers cache-through: fetch + cache + serve.
+            # GET for the uncached remote ref: clean 404, and crucially
+            # NO upstream fetch is triggered -- serving never fetches.
             r = client.get(f"/images/{ref}")
-            assert r.status_code == 200, r.text
-            assert r.content == payload
-            assert fetched["count"] == 1
+            assert r.status_code == 404, r.text
+            assert fetched["count"] == 0
 
-            # disk_image_sha is now populated on the row.
+            # The row's disk_image_sha stays NULL (the serve path neither
+            # fetched nor back-filled).
             rows = client.get("/catalog/entries", cookies=auth).json()
             row = next(r for r in rows if r["bty_image_ref"] == ref)
-            assert row["disk_image_sha"] == expected_sha
+            assert row["disk_image_sha"] is None
 
-            # Cache file landed at $cache_dir/<sha>.
-            assert (state_dir / "cache" / expected_sha).is_file()
-
-            # Second GET serves from cache -- no upstream fetch.
-            r = client.get(f"/images/{ref}")
-            assert r.status_code == 200
-            assert r.content == payload
-            assert fetched["count"] == 1
+            # No cache file was created by serving.
+            assert not (state_dir / "cache" / expected_sha).exists()
     finally:
         os.environ.pop("BTY_STATE_DIR", None)
 

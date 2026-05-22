@@ -256,7 +256,7 @@
                         <code title="{{ u.sha256 }}">{{ u.sha256[:12] }}...</code>
                         {% else %}
                         <span class="badge bg-warning text-dark"
-                              title="content sha not computed yet; the entry is still bindable because machines bind by bty_image_ref. The sha lands when the HashManager finishes or after the first cache-through fetch">unhashed</span>
+                              title="content sha not computed yet; the entry is still bindable because machines bind by bty_image_ref. The sha lands when the HashManager finishes (local files) or after an explicit Download (remote sources)">unhashed</span>
                         {% endif %}
                     </td>
                     <td><span class="badge bg-secondary">{{ u.format or "?" }}</span></td>
