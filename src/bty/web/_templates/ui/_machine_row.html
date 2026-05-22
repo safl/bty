@@ -24,8 +24,10 @@
         {% elif m.boot_mode == 'ipxe-exit' %}
         <span class="badge bg-dark" title="boot the local disk: UEFI hands back to firmware, BIOS sanboots the drive"><i class="bi bi-hdd-fill me-1"></i>{{ m.boot_mode }}</span>
         {% else %}
-        <span class="badge bg-secondary" title="unrecognised boot policy (stale record)"><i class="bi bi-hdd me-1"></i>{{ m.boot_mode }}</span>
+        <span class="badge bg-secondary" title="unrecognised boot mode (stale record)"><i class="bi bi-hdd me-1"></i>{{ m.boot_mode }}</span>
         {% endif %}
+        {% set _state = m | boot_state %}
+        {% if _state %}<div><small class="text-muted">{{ _state }}</small></div>{% endif %}
     </td>
     <td>{{ m.hostname or "-" }}</td>
     <td>

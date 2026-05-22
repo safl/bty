@@ -1595,6 +1595,9 @@ def _row_to_dict(row: Any) -> dict[str, Any]:
         "last_seen_at": row["last_seen_at"],
         "last_seen_ip": row["last_seen_ip"],
         "boot_mode": row["boot_mode"],
+        # Drives the derived "Boot state" badge (the boot_state Jinja
+        # filter) in the list + detail views.
+        "saw_flasher_boot": _db.row_value(row, "saw_flasher_boot", 0),
         "sanboot_drive": _db.row_value(row, "sanboot_drive"),
         "last_flashed_at": row["last_flashed_at"],
         "known_disks": parsed_disks,

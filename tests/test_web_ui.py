@@ -1682,6 +1682,40 @@ def test_ui_machines_list_shows_boot_mode_badge(client: TestClient) -> None:
     assert ">Last flashed</th>" in body
 
 
+def test_ui_machine_detail_shows_boot_state_tracking_the_bit(client: TestClient) -> None:
+    """The machine view shows the lifecycle State next to the mode,
+    derived from boot_mode + saw_flasher_boot: a bty-flash-once box reads
+    'pending flash' before it flashes and 'flashed; booting disk' once
+    the bit is armed (the box booted the flasher). The mode never
+    changes -- it stays bty-flash-once, not mutated to ipxe-exit."""
+    from bty.web import _db as _bty_db
+
+    _login(client)
+    client.put(
+        "/machines/aa:bb:cc:dd:ee:11",
+        json={"boot_mode": "bty-flash-once"},
+        cookies=AUTH,
+    )
+    body = client.get("/ui/machines/aa:bb:cc:dd:ee:11").text
+    assert "pending flash" in body
+
+    # Arm the bit the way a flasher /boot fetch would.
+    state_path = client.app.state.state_path  # type: ignore[attr-defined]
+    with _bty_db.open_db(state_path) as conn:
+        conn.execute(
+            "UPDATE machines SET saw_flasher_boot = 1 WHERE mac = ?",
+            ("aa:bb:cc:dd:ee:11",),
+        )
+        conn.commit()
+    body = client.get("/ui/machines/aa:bb:cc:dd:ee:11").text
+    assert "flashed; booting disk" in body
+    assert "pending flash" not in body
+    # Mode is unchanged -- still bty-flash-once, never mutated to ipxe-exit.
+    assert client.get("/machines/aa:bb:cc:dd:ee:11", cookies=AUTH).json()["boot_mode"] == (
+        "bty-flash-once"
+    )
+
+
 def test_ui_events_renders_older_link_when_full_page(
     client: TestClient,
 ) -> None:

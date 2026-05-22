@@ -350,6 +350,28 @@ def create_app(
 
     jinja.filters["linkify"] = _linkify
 
+    def _boot_state(m: object) -> str:
+        """Lifecycle state for a machine -- the 'where in the cycle' half
+        of the mode/state model, derived from boot_mode + the
+        ``saw_flasher_boot`` bit (no stored state column). Empty for the
+        non-alternating modes (ipxe-exit, bty-tui). The mode is the
+        operator's intent; this is the transient position within it.
+        """
+        try:
+            mode = m["boot_mode"]  # type: ignore[index]
+            armed = bool(m["saw_flasher_boot"])  # type: ignore[index]
+        except (KeyError, TypeError, IndexError):
+            return ""
+        if mode == "bty-flash-once":
+            return "flashed; booting disk" if armed else "pending flash"
+        if mode == "bty-flash-always":
+            return "flashed; booting disk" if armed else "ready to flash"
+        if mode == "bty-inventory":
+            return "inventoried; booting disk" if armed else "pending inventory"
+        return ""
+
+    jinja.filters["boot_state"] = _boot_state
+
     _db.init_db(state_path)
 
     app = FastAPI(title="bty-web", version=bty.__version__, lifespan=_lifespan)

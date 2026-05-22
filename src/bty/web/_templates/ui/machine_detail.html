@@ -154,29 +154,36 @@
                ignores rather than hiding them, so the
                general/consumed-by split stays visible to the operator. #}
             <div class="mb-4">
-                <label class="form-label fw-semibold" for="boot_mode">Boot policy</label>
+                <label class="form-label fw-semibold" for="boot_mode">Boot mode</label>
                 <select name="boot_mode" id="boot_mode" class="form-select">
                     {% for policy in boot_policies %}
                     <option value="{{ policy }}" {% if policy == m.boot_mode %}selected{% endif %}>{{ policy }}</option>
                     {% endfor %}
                 </select>
+                {% set _state = m | boot_state %}
+                {% if _state %}
+                <div class="form-text mt-2">
+                    Current state: <span class="badge bg-light text-dark border">{{ _state }}</span>
+                    <span class="text-muted">- derived from the mode + whether the box has booted the flasher; the mode is your intent, this is where it is in the cycle.</span>
+                </div>
+                {% endif %}
                 <div class="form-text">
-                    <code>sanboot</code>: boot the local disk. On UEFI, hand
+                    <code>ipxe-exit</code>: boot the local disk. On UEFI, hand
                     control back to the firmware boot order (which boots the
                     disk's EFI loader); on legacy BIOS, iPXE sanboots the drive
                     below (defaults to the first disk). The default for an
                     assigned box.
                     <code>bty-flash-always</code>: PXE boots chain into the live env so the box
-                    re-flashes the assigned image every time, then sanboots the
+                    re-flashes the assigned image every cycle, then boots the
                     just-flashed disk before the next reflash (per-job CI cadence).
-                    <code>bty-flash-once</code>: same as <code>bty-flash-always</code> for the next
-                    PXE boot, then auto-flips to <code>sanboot</code> after the live env
-                    signals completion.
+                    <code>bty-flash-once</code>: flashes on the next PXE boot only,
+                    then boots the disk on every boot after that - the mode stays
+                    <code>bty-flash-once</code> (re-save the machine to flash again).
                     <code>bty-tui</code>: PXE boots chain into the live env and <code>bty</code>
                     on tty1 drops the operator into the wizard to pick an image
                     by hand.
                     <code>bty-inventory</code>: each boot chains the live env just to
-                    re-report this box's disks, then sanboots the disk - so swapped
+                    re-report this box's disks, then boots the disk - so swapped
                     hardware is picked up. The auto-discovery default for unknown
                     MACs; it's how the Target disk dropdown below gets populated.
                 </div>
