@@ -554,6 +554,10 @@ class BtyTui:
         # a descriptive title (oras) with no extension, so format can't be
         # detected from the URL -- the server passes it explicitly.
         self._auto_format: str | None = None
+        # Descriptive image name from the plan (the catalog title). The
+        # image URL's basename can be a synthesised "image.<fmt>", so use
+        # this for the flash-screen display instead.
+        self._auto_name: str | None = None
 
     # ---------- entry --------------------------------------------------
 
@@ -714,6 +718,7 @@ class BtyTui:
             self._auto_image = payload.get("image")
             self._auto_target_disk_serial = payload.get("target_disk_serial")
             self._auto_format = payload.get("format")
+            self._auto_name = payload.get("name")
             if not self._auto_image or not self._auto_target_disk_serial:
                 self._catalog_load_error = (
                     f"server returned mode=flash but missing image/target_disk_serial: {payload!r}"
@@ -778,7 +783,7 @@ class BtyTui:
         image_arg = self._auto_image
         if "://" in image_arg:
             self._state.selected_image = _TuiImage(
-                name=_basename_from_url(image_arg) or "auto-flash-image",
+                name=self._auto_name or _basename_from_url(image_arg) or "auto-flash-image",
                 fmt=self._auto_format,
                 size_bytes=0,
                 url=image_arg,
@@ -786,7 +791,7 @@ class BtyTui:
         else:
             image_path = Path(image_arg)
             self._state.selected_image = _TuiImage(
-                name=image_path.name or "auto-flash-image",
+                name=self._auto_name or image_path.name or "auto-flash-image",
                 fmt=self._auto_format,
                 size_bytes=0,
                 path=image_path,

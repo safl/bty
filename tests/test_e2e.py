@@ -462,6 +462,9 @@ def test_e2e_plan_handles_extensionless_oras_name(app_client: TestClient) -> Non
     # URL name carries the format extension so even a client that detects
     # format from the URL alone (no plan["format"]) succeeds.
     assert plan["image"].endswith("/image.img.gz")
+    # ...but the descriptive title still rides along so the flash screen
+    # shows it instead of the synthesised "image.img.gz".
+    assert plan["name"] == "nosi fedora-sysdev (x86_64, rolling)"
 
 
 def _seed_flashable_machine(app_client: TestClient, mac: str) -> None:

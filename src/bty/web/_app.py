@@ -950,6 +950,11 @@ def create_app(
                     "mode": "flash",
                     "image": f"{base}/images/{ref}/{image_name_encoded}",
                     "target_disk_serial": str(target_disk_serial),
+                    # Descriptive catalog name for display: the image URL's
+                    # last segment may be a synthesised "image.<fmt>" (so
+                    # the client can detect format), which is uninformative
+                    # on the flash screen. ``name`` carries the real title.
+                    "name": image_name,
                 }
                 # Also pass it explicitly for newer clients.
                 if fmt:
