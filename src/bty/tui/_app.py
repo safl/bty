@@ -815,7 +815,12 @@ class BtyTui:
         for disk in all_disks:
             raw = disk.get("serial")
             present = raw.strip() if isinstance(raw, str) else raw
-            if present == target_serial:
+            # ``present`` guards the catastrophic case: never match a
+            # serial-less disk (present None/"") even if target_serial
+            # were somehow empty -- flashing the wrong disk is total
+            # data loss. Upstream guarantees target_serial is truthy;
+            # this is defence in depth.
+            if present and present == target_serial:
                 matched = disk
                 break
         if matched is None:
