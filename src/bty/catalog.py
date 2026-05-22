@@ -670,9 +670,10 @@ def fetch_src_to_cache(
 
     Used by the bty-web ``DownloadManager`` for explicit,
     operator-initiated fetches of a catalog entry into the cache. The
-    serve path (``GET /images/<ref>/<name>``) does NOT call this -- it
-    hands out only already-local bytes -- so a remote image must be
-    downloaded here first before it's flashable.
+    serve path (``GET /images/<ref>/<name>``) does NOT call this --
+    it serves a local file when present and otherwise stream-proxies
+    the source (see ``stream_src``). This explicit fetch is the only
+    thing that *caches* a remote image to disk.
 
     ``src`` must be an http(s):// or oras:// URL; file:// srcs don't
     need fetching (bytes are already on disk under ``BTY_IMAGE_ROOT``)
@@ -728,6 +729,55 @@ def fetch_src_to_cache(
         with contextlib.suppress(FileNotFoundError):
             tmp_path.unlink()
         raise
+
+
+def stream_src(
+    src: str,
+    *,
+    chunk_size: int = 1 << 20,
+    timeout: float = 300.0,
+) -> tuple[Iterator[bytes], int | None]:
+    """Open a remote ``src`` (oras:// / http(s)://) and return
+    ``(chunk_iterator, content_length_or_None)`` for streaming the bytes
+    straight through to a client WITHOUT caching to disk.
+
+    bty-web's image-serve path uses this to proxy a remote image to a
+    flashing client: bytes flow source -> server -> client as they
+    arrive (no buffer-then-serve, no .tmp), so the client's
+    ``curl | dd`` starts writing immediately and a large image never
+    times out a probe or thrashes a cache. ``file://`` srcs are already
+    local and raise ``ValueError``.
+
+    The returned iterator owns the connection and closes it when
+    exhausted (or when the consumer stops iterating + it's GC'd).
+    """
+    if src.startswith("oras://"):
+        from bty import oras as _oras
+
+        resolved = _oras.resolve_ref(src, timeout=timeout)
+        req = urllib.request.Request(resolved.blob_url, headers=resolved.headers)
+        resp = urllib.request.urlopen(req, timeout=timeout)
+    elif src.startswith(("http://", "https://")):
+        resp = urllib.request.urlopen(src, timeout=timeout)
+    else:
+        raise ValueError(f"stream_src handles only oras:// / http(s):// srcs: {src!r}")
+    try:
+        cl = resp.headers.get("Content-Length")
+        total = int(cl) if cl is not None else None
+    except (ValueError, AttributeError):
+        total = None
+
+    def _chunks() -> Iterator[bytes]:
+        try:
+            while True:
+                chunk = resp.read(chunk_size)
+                if not chunk:
+                    break
+                yield chunk
+        finally:
+            resp.close()
+
+    return _chunks(), total
 
 
 def _stream_with_digest(

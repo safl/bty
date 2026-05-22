@@ -610,15 +610,14 @@ def test_auto_import_hashes_unhashed_dir_scan_files(tmp_path: Path) -> None:
         assert entry["url"].endswith(f"/images/{expected_sha}/fresh.img")
 
 
-def test_serve_image_cache_through_url_error_returns_404_not_500(
+def test_serve_image_stream_source_error_returns_502_not_500(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A network failure during cache-through (URLError -- no
-    route, DNS, etc.) used to propagate up as a 500 from the
-    live env's image GET, leaving the flash chain dead. Now it
-    logs a sha_mismatch-shaped event and returns 404 cleanly so
-    the live env surfaces a recognisable error on tty1 instead
-    of a server-side traceback."""
+    """A network failure while streaming a remote source (URLError --
+    no route, DNS, etc.) returns a clean 502 Bad Gateway, not a 500
+    server traceback. The live env's image GET surfaces a recognisable
+    "source not reachable" on tty1; the client treats 502 the same as
+    any unreachable URL."""
     import hashlib
     import os
     import urllib.error
@@ -662,21 +661,21 @@ def test_serve_image_cache_through_url_error_returns_404_not_500(
                 )
                 conn.commit()
             r = client.get(f"/images/{ref}/img.img.gz")
-            # 404, not 500.
-            assert r.status_code == 404, r.text
+            # 502 (upstream source failed), not a 500 traceback.
+            assert r.status_code == 502, r.text
     finally:
         os.environ.pop("BTY_STATE_DIR", None)
 
 
-def test_serve_image_404s_uncached_remote_ref_without_fetching(
+def test_serve_image_streams_uncached_remote_ref(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """``GET /images/<ref>`` for a remote catalog row with no local
-    cache returns 404 and does NOT fetch upstream -- the serve-time
-    cache-through was dropped (it download-then-served large images with
-    no dedup, so the client probe always timed out). Remote images are
-    brought local deliberately (the Downloads action / image store)
-    before they're servable."""
+    cache STREAMS the source bytes straight through (no buffer, no
+    cache): 200 + the bytes, ``disk_image_sha`` stays NULL, and no cache
+    file is written. Each GET re-streams (the cache is populated only by
+    an explicit Download). This replaced the buffer-then-serve
+    cache-through that timed out the client's probe on large images."""
     import hashlib
     import io
     import os
@@ -750,20 +749,25 @@ def test_serve_image_404s_uncached_remote_ref_without_fetching(
             ref = add.json()["bty_image_ref"]
             assert add.json()["disk_image_sha"] is None
 
-            # GET for the uncached remote ref: clean 404, and crucially
-            # NO upstream fetch is triggered -- serving never fetches.
+            # GET streams the remote source straight through: 200 + the
+            # bytes, one upstream fetch.
             r = client.get(f"/images/{ref}")
-            assert r.status_code == 404, r.text
-            assert fetched["count"] == 0
+            assert r.status_code == 200, r.text
+            assert r.content == payload
+            assert fetched["count"] == 1
 
-            # The row's disk_image_sha stays NULL (the serve path neither
-            # fetched nor back-filled).
+            # Streaming never caches: disk_image_sha stays NULL + no cache
+            # file is written.
             rows = client.get("/catalog/entries", cookies=auth).json()
             row = next(r for r in rows if r["bty_image_ref"] == ref)
             assert row["disk_image_sha"] is None
-
-            # No cache file was created by serving.
             assert not (state_dir / "cache" / expected_sha).exists()
+
+            # A second GET re-streams (no cache to short-circuit).
+            r = client.get(f"/images/{ref}")
+            assert r.status_code == 200
+            assert r.content == payload
+            assert fetched["count"] == 2
     finally:
         os.environ.pop("BTY_STATE_DIR", None)
 

@@ -1228,7 +1228,7 @@ def create_app(
             _arm_flasher_boot(raw_mac)
         return _serve_safe_file(resolved_boot_root, name)
 
-    def _serve_image_by_key(key: str) -> FileResponse:
+    def _serve_image_by_key(key: str, request: Request) -> Response:
         """Resolve ``key`` (filename OR 64-hex ID) to bytes.
 
         Resolution order:
@@ -1236,10 +1236,13 @@ def create_app(
           1. Literal filename under ``image_root`` -- the bare
              ``GET /images/<name>`` form for scripts / curl-based
              operators.
-          2. 64-hex ID through :func:`_resolve_image_for_key`, which
-             handles ``bty_image_ref`` lookups (404 if the ref's bytes
-             aren't local yet) and the sha-keyed URLs the ``/images`` listing
-             emits for known-content entries.
+          2. 64-hex ID through :func:`_resolve_image_for_key` -> a local
+             file (image store, or an explicit-Download cache hit).
+          3. 64-hex ref/sha of a REMOTE catalog entry not cached locally
+             -> stream the source bytes straight through (no cache, no
+             buffer-then-serve): GET pipes the chunks, HEAD returns the
+             source's size. So a flashing client gets bytes immediately
+             and a large image never times out the probe.
         """
         try:
             return _serve_safe_file(resolved_image_root, key)
@@ -1249,10 +1252,58 @@ def create_app(
             resolved_path = _resolve_image_for_key(key)
             if resolved_path is not None:
                 return FileResponse(resolved_path, media_type="application/octet-stream")
+            src = _remote_src_for_key(key)
+            if src is not None:
+                return _stream_remote_image(src, request)
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"no such image: {key}",
         )
+
+    def _remote_src_for_key(key: str) -> str | None:
+        """The remote (oras:// / http(s)://) src for a 64-hex key
+        (bty_image_ref or disk_image_sha), or ``None`` if there's no
+        catalog row or its src is local (file://)."""
+        key_lower = key.lower()
+        with _db.open_db(state_path) as conn:
+            row = conn.execute(
+                "SELECT src FROM catalog_entries WHERE bty_image_ref = ? OR disk_image_sha = ?",
+                (key_lower, key_lower),
+            ).fetchone()
+        if row is None:
+            return None
+        src = str(row["src"])
+        return src if src.startswith(("oras://", "http://", "https://")) else None
+
+    def _stream_remote_image(src: str, request: Request) -> Response:
+        """Proxy a remote image straight through to the client, no cache.
+
+        HEAD resolves just the size (source HEAD / oras manifest); GET
+        pipes the source bytes as they arrive. A source that can't be
+        reached surfaces as 502 (the live env shows it on tty1) rather
+        than hanging.
+        """
+        if request.method == "HEAD":
+            from bty import flash as _flash
+
+            try:
+                info = _flash.probe_image_url(src)
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail=f"image source not reachable: {src} ({exc})",
+                ) from exc
+            headers = {"Content-Length": str(info.size_bytes)} if info.size_bytes else {}
+            return Response(headers=headers, media_type="application/octet-stream")
+        try:
+            chunks, total = _catalog.stream_src(src)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"image source not reachable: {src} ({exc})",
+            ) from exc
+        headers = {"Content-Length": str(total)} if total else {}
+        return StreamingResponse(chunks, media_type="application/octet-stream", headers=headers)
 
     def _flash_target_for_ref(ref: str) -> str | None:
         """Resolve a ``bty_image_ref`` to a display name so the iPXE
@@ -1261,9 +1312,9 @@ def create_app(
         Returns the entry's ``name`` (preserves format-by-extension
         on the live-env side) or ``None`` for an orphaned binding (no
         catalog row matches this ref). The URL uses the ref itself,
-        not the content sha. :func:`_resolve_image_for_key` serves it only
-        if the bytes are already local (image store / explicitly
-        downloaded); a remote ref not yet fetched 404s.
+        not the content sha. The serve path returns a local file when
+        present and otherwise stream-proxies the remote source, so the
+        URL works whether or not the image has been downloaded yet.
         """
         with _db.open_db(state_path) as conn:
             row = conn.execute(
@@ -1292,10 +1343,10 @@ def create_app(
 
     def _resolve_image_for_key(key: str) -> Path | None:
         """Resolve a 64-hex key (bty_image_ref or disk_image_sha) to a
-        local file path that already exists, or ``None``. Never fetches:
-        the serve path only hands out bytes that are already local (an
-        image-store file, or a cache file an operator-initiated download
-        already populated).
+        local file path that already exists, or ``None``. Never fetches
+        here: returns an image-store file or an explicit-Download cache
+        hit if present; otherwise ``None`` and the serve path
+        stream-proxies the remote source instead.
 
         Resolution order:
 
@@ -1304,8 +1355,8 @@ def create_app(
            - src is file:// + file exists -> local (HashManager will
              populate disk_image_sha asynchronously)
            - else (remote src, not yet cached locally): ``None`` -> the
-             caller 404s. Remote images are brought local deliberately
-             (Downloads / image store), not cache-through'd at serve time.
+             serve path stream-proxies the source (no cache). An explicit
+             Download is what caches a remote image to disk.
         2. ``key`` as raw ``disk_image_sha``: serves the sha-keyed
            URLs that the ``GET /images`` listing emits for entries
            whose content hash is known. Looks for the cache file
@@ -1370,7 +1421,7 @@ def create_app(
         methods=["GET", "HEAD"],
         include_in_schema=False,
     )
-    def serve_image(key: str) -> FileResponse:
+    def serve_image(key: str, request: Request) -> Response:
         """Serve image bytes by filename OR by SHA-256.
 
         Same trust model as /boot. The live env curls this to
@@ -1386,14 +1437,14 @@ def create_app(
         Starlette's FileResponse handles HEAD shape (200 +
         Content-Length, empty body) automatically.
         """
-        return _serve_image_by_key(key)
+        return _serve_image_by_key(key, request)
 
     @app.api_route(
         "/images/{key}/{name:path}",
         methods=["GET", "HEAD"],
         include_in_schema=False,
     )
-    def serve_image_with_name(key: str, name: str) -> FileResponse:
+    def serve_image_with_name(key: str, name: str, request: Request) -> Response:
         """``/images/<sha>/<filename>`` form. The ``key`` (SHA-256)
         binds the bytes; ``name`` is purely decorative -- it lets
         clients that derive image format from URL filename
@@ -1407,7 +1458,7 @@ def create_app(
         for the rationale.
         """
         del name  # informational only; lookup is by ``key``
-        return _serve_image_by_key(key)
+        return _serve_image_by_key(key, request)
 
     @app.get(
         "/events/machines",
