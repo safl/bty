@@ -151,7 +151,7 @@ configuration.
    not run DHCP).
 2. A target PXE-boots on the same segment for the first time. `bty-web`
    auto-discovers the MAC as `boot_mode=bty-inventory` (self-reports its
-   disks, then sanboots). To drive it with the interactive wizard instead,
+   disks, then boots the disk). To drive it with the interactive wizard instead,
    set `boot_mode=bty-tui` on the machine; `bty-web` then serves the
    iPXE-tui template (`ipxe_tui.j2`).
 3. The target chains into the bty live env with `bty.server=URL` +
@@ -209,12 +209,14 @@ demand, or on failure.
    then reboots automatically.
 6. The reboot lands back on PXE (PXE-first firmware). Because the box
    fetched the live-env artifacts during steps 4-5,
-   `boot_mode=bty-flash-always` now serves a one-shot `sanboot` of the
-   just-flashed disk instead of the flash chain, so the freshly imaged OS
-   boots. The next power cycle (no artifact fetch in between) serves the
-   flash chain again - so a per-job CI cadence reflashes every cycle while
-   still booting the image each time, no policy change. `bty-flash-once`
-   instead flips its policy to `sanboot` on completion (see below).
+   `boot_mode=bty-flash-always` now serves a one-shot boot of the
+   just-flashed disk (UEFI exit / BIOS sanboot) instead of the flash
+   chain, so the freshly imaged OS boots. The next power cycle (no
+   artifact fetch in between) serves the flash chain again - so a per-job
+   CI cadence reflashes every cycle while still booting the image each
+   time, no mode change. `bty-flash-once` works the same way but doesn't
+   re-arm, so after the one flash it keeps booting the disk - and it
+   stays `boot_mode=bty-flash-once` throughout (see below).
 7. First-boot bring-up (users, network, packages, hostnames) is the
    pre-built image's job, baked in via cloud-init / NoCloud user-data at
    image-build time. bty has no online provisioning step.
@@ -230,8 +232,8 @@ plus three timestamps the server maintains:
 |----------------------|--------------------------------------------------------------------------|
 | `bty_image_ref`      | sha256 of canonicalised catalog `src`. Stable provenance ID; binds the image to flash. |
 | `hostname`           | RFC-1123 hostname (optional). Cosmetic; not consumed by the flash chain. |
-| `boot_mode`        | One of `sanboot` / `bty-flash-always` / `bty-flash-once` / `bty-tui` / `bty-inventory` (PUT default `sanboot`; auto-discovery default `bty-inventory`). |
-| `sanboot_drive`      | iPXE BIOS drive the `sanboot` policy boots (e.g. `0x80`; null = default first disk). |
+| `boot_mode`        | One of `ipxe-exit` / `bty-flash-always` / `bty-flash-once` / `bty-tui` / `bty-inventory` (PUT default `ipxe-exit`; auto-discovery default `bty-inventory`). |
+| `sanboot_drive`      | iPXE BIOS drive for the legacy-BIOS disk boot (e.g. `0x80`; null = default first disk). BIOS only; on UEFI the box exits to firmware. |
 | `target_disk_serial` | Operator-picked serial number from the most recent inventory post.       |
 | `known_disks`        | JSON array of disks the live env's ``bty`` reported on startup.          |
 | `last_seen_at`       | Updated on every `GET /pxe/{mac}` hit.                                   |
@@ -243,19 +245,22 @@ parameters the policy needs.
 
 ### `boot_mode` values
 
-| Policy             | What `GET /pxe/{mac}` returns                                                                                    | Auto-flip on `pxe_done`? |
-|--------------------|-----------------------------------------------------------------------------------------------------------------|--------------------------|
-| `sanboot`          | `ipxe_sanboot.j2` (`sanboot --drive <sanboot_drive> \|\| exit` - iPXE boots the local disk itself). The default.  | No.                      |
-| `bty-flash-always` | `ipxe_flash.j2` for a fresh flash, then a one-shot `ipxe_sanboot.j2` of the just-flashed disk on the contact after the live-env artifact fetch (alternates flash then sanboot). Refuses (falls back to `ipxe.j2` exit) if no `target_disk_serial`. | No. Stays `bty-flash-always` (uses a transient `saw_flasher_boot` bit, not a policy change). |
-| `bty-flash-once`   | Same chain as `bty-flash-always`. Same `target_disk_serial` gate.                                                | Yes. Flips to `sanboot`. |
-| `bty-tui`          | `ipxe_tui.j2` (live env chain; ``bty`` on tty1 GETs /pxe/<mac>/plan -> ``mode=interactive``, drops into wizard). ``bty`` auto-posts inventory on startup. | No.                      |
-| `bty-inventory`    | Alternates the live-env chain (plan ``mode=inventory``: ``bty`` posts disks + reboots) then `ipxe_sanboot.j2`, via the same `saw_flasher_boot` bit as `bty-flash-always`. Re-collects inventory every cycle, so swapped hardware is found. The auto-discovery default. | No. Alternates via the bit. |
+| Mode               | What `GET /pxe/{mac}` returns                                                                                    | Mutates `boot_mode`? |
+|--------------------|-----------------------------------------------------------------------------------------------------------------|----------------------|
+| `ipxe-exit`        | `ipxe_sanboot.j2` - iPXE boots the local disk: UEFI `exit`s to the firmware boot order, legacy BIOS `sanboot --drive <sanboot_drive> \|\| exit`. The PUT default. | No. |
+| `bty-flash-always` | `ipxe_flash.j2` for a fresh flash, then a one-shot disk boot (`ipxe_sanboot.j2`) on the contact after the live-env artifact fetch (alternates flash then boot). Refuses (falls back to `ipxe.j2` exit) if no `target_disk_serial`. | No. The transient `saw_flasher_boot` bit drives the alternation. |
+| `bty-flash-once`   | Same chain + `target_disk_serial` gate as `bty-flash-always`, but the bit doesn't re-arm: after the one flash, every later contact serves the disk boot. | No. Stays `bty-flash-once`. |
+| `bty-tui`          | `ipxe_tui.j2` (live env chain; ``bty`` on tty1 GETs /pxe/<mac>/plan -> ``mode=interactive``, drops into wizard). ``bty`` auto-posts inventory on startup. | No. |
+| `bty-inventory`    | Alternates the live-env chain (plan ``mode=inventory``: ``bty`` posts disks + reboots) then the disk boot (`ipxe_sanboot.j2`), via the same `saw_flasher_boot` bit as `bty-flash-always`. Re-collects inventory every cycle, so swapped hardware is found. The auto-discovery default. | No. Alternates via the bit. |
 
-The `bty-flash-once` policy is the "reimage this box now, then leave it
-alone" pattern. It's distinct from `bty-flash-always` (which reimages on
-every netboot cycle, booting the disk in between via the one-shot sanboot,
-the per-job CI cadence). On completion it settles to `sanboot`, so the box
-boots its freshly-flashed disk.
+`boot_mode` is the operator's intent and is **never** rewritten by the
+server. `bty-flash-once` is the "reimage this box now, then leave it
+alone" pattern: it flashes on the next boot, then the `saw_flasher_boot`
+bit (armed when the box booted the flasher) makes every later contact
+boot the disk instead - while the record stays `bty-flash-once`. It
+differs from `bty-flash-always` only in that the bit never re-arms, so it
+won't reflash again until the operator re-saves the machine.
+`bty-flash-always` re-arms each cycle: the per-job CI cadence.
 
 ## Inventory + safety-gate flow
 
@@ -319,12 +324,11 @@ Always:
 - Updates `last_flashed_at` + `updated_at`.
 - Records `machine.flashed` event with the requesting IP.
 
-If the machine's `boot_mode == "bty-flash-once"`:
-
-- Flips `boot_mode` to `sanboot` in the same transaction. The next
-  PXE contact emits `sanboot` (iPXE boots the freshly-flashed disk).
-- The `machine.flashed` event summary calls this out:
-  `"... (bty-flash-once -> sanboot)"`.
+`boot_mode` is **not** touched - for any mode, including
+`bty-flash-once`. The mode is the operator's intent and stays put; the
+`saw_flasher_boot` bit (armed when the box booted the flasher) is what
+makes the next PXE contact boot the disk instead of reflashing, so a
+finished `bty-flash-once` still reads `bty-flash-once`.
 
 ### `POST /pxe/{mac}/inventory` (``bty`` reports disks)
 

@@ -79,94 +79,104 @@ sanboot.
 
 ## Boot mode
 
-A field on the [machine record](#machine-record) that decides what
-``GET /pxe/{mac}`` serves on every PXE contact. The `bty-` prefix marks the
-policies that PXE-boot into bty's own live env; `sanboot` boots the local
-disk:
+bty is a **control plane for booting machines**. A target's firmware is
+set to PXE-boot first (see [Firmware boot order](#firmware-boot-order)),
+so every power-on chains into iPXE, which asks bty-web what to do via
+``GET /pxe/{mac}``. The answer is the machine's **boot mode** - a field
+on the [machine record](#machine-record) that bty serves on every PXE
+contact. There's no per-boot firmware fiddling; the mode is the dial.
 
-- `sanboot` - iPXE boots the local disk itself
-  (`sanboot --drive <drive> || exit`). The drive defaults to `0x80` (first
-  BIOS disk), overridable per-machine via `sanboot_drive`; the `|| exit`
-  hands back to the firmware boot order if the drive isn't bootable. This
-  is how bty boots an already-provisioned machine, and the explicit-PUT
-  default. (There is no separate `local` policy: a bare `exit` is just
-  `sanboot`'s fallback, emitted internally on the no-assignment / error
-  paths.)
-- `bty-flash-always` - chain the live env in auto-flash mode for a fresh
-  flash, then boot the just-flashed disk once before the next reflash (the
-  per-job CI cadence). It does **not** loop: the server alternates
-  flash-chain then sanboot across PXE contacts (see
-  [Firmware boot order](#firmware-boot-order)), so under PXE-first firmware
-  the freshly-flashed image actually boots instead of being re-flashed on
-  every reboot.
-- `bty-flash-once` - flash exactly once: behaves like `bty-flash-always`
-  for the next boot, then the completion signal flips the policy to
-  `sanboot` so the box boots its freshly-flashed disk and stops
-  re-flashing.
-- `bty-tui` - chain the live env in interactive mode. The target lands at
-  `bty` on tty1 and the operator picks an image from the server's catalog
-  by hand.
-- `bty-inventory` - to inventory what `bty-flash-always` is to flashing:
-  alternates an inventory live-env boot then a sanboot across PXE contacts
-  (same mechanism). The active boot chains the live env just to re-report
-  the box's disks (no flash, no wizard), then reboots; the next contact
-  sanboots the disk. Every power cycle refreshes the inventory before
-  booting, surfacing swapped hardware.
+The modes are the things bty can do once a box checks in, in three
+groups:
 
-The auto-discovery default for unknown MACs is `bty-inventory`, so a new
-box PXE-booting against a fresh server appliance self-reports its disks and
-then just boots - no per-MAC configuration needed, and the operator can
-assign a flash policy from the now-populated disk dropdown. (`bty-tui` is
-the explicit opt-in for "drop me at the wizard to flash by hand now".)
+**Flash** (the primary job) - chain bty's live env and write a disk image
+to the target:
 
-The completion signal `POST /pxe/{mac}/done` always updates
-`last_flashed_at`. It mutates `boot_mode` only for `bty-flash-once`,
-flipping it to `sanboot` so the box boots its freshly-flashed disk.
-`bty-flash-always` is never modified, so the per-job CI cadence keeps
-reflashing.
+- `bty-flash-always` - flash on every cycle. The per-job CI cadence:
+  flash a fresh image, boot it once to run the job, reflash on the next
+  power cycle. It does **not** loop on the flasher (see
+  [Firmware boot order](#firmware-boot-order)).
+- `bty-flash-once` - flash on the next boot only, then boot the disk on
+  every boot after that. The mode **stays** `bty-flash-once` (it is not
+  rewritten); a one-shot state bit - armed when the box fetched the
+  flasher's artifacts - is what flips its behaviour from "flash" to "boot
+  the disk". Re-arm by re-saving the machine.
+- `bty-tui` - interactive flash. The box lands at `bty` on tty1 and the
+  operator picks an image from the server's catalog and flashes by hand.
+
+**Inventory** - `bty-inventory` chains the live env just to re-report the
+box's hardware (`lshw` + the disk list), then boots the disk. Like
+`bty-flash-always` it alternates an inventory boot then a disk boot
+across PXE contacts, so every power cycle refreshes the inventory and
+surfaces swapped hardware - no flash, no wizard. This is the
+auto-discovery default for unknown MACs, so a new box self-reports its
+disks against a fresh server and then just boots; the operator then
+assigns a flash mode from the now-populated disk dropdown.
+
+**Boot pass-through** - `ipxe-exit` is the short-circuit: iPXE does *not*
+load the live env at all, it hands the box straight to its installed OS.
+On UEFI it `exit`s back to the firmware boot order; on legacy BIOS it
+`sanboot`s the local disk by BIOS drive number (`0x80` = first disk,
+overridable per-machine via `sanboot_drive`). This is how bty boots an
+already-provisioned machine, and the explicit-PUT default. (`bty-tui` is
+the opt-in for "drop me at the wizard now".)
+
+The completion signal `POST /pxe/{mac}/done` updates `last_flashed_at`
+and nothing else - it **never** mutates `boot_mode`. The mode is the
+operator's intent; the post-flash "boot the disk" behaviour comes from
+the one-shot state bit, not from rewriting the mode. (Before this, a
+finished `bty-flash-once` was rewritten to a boot-the-disk mode, which
+lied about the operator's configured mode in the UI.)
 
 ## Firmware boot order
 
 For a PXE-driven target, set its BIOS/UEFI firmware to **boot from the
 network (PXE) first**. bty-server then decides, per boot, whether the box
-re-flashes, drops into the wizard, or boots its disk - all driven by the
-machine's `boot_mode`, not by re-toggling the firmware each time.
+re-flashes, re-inventories, drops into the wizard, or boots its disk -
+all driven by the machine's `boot_mode`, not by re-toggling the firmware
+each time.
 
-What happens *after* a flash depends on the policy:
+Booting the local disk (the `ipxe-exit` mode, and the post-flash boot of
+the flash modes) is firmware-aware:
 
-- With `sanboot`, iPXE boots the local disk itself, so the box boots the
-  flashed disk regardless of where the disk sits in the firmware order.
-  `sanboot` selects the disk by BIOS drive number (`0x80` = first disk),
-  not by the Linux serial used at flash time, so on a multi-disk box set
-  `sanboot_drive` to the right drive. The `|| exit` safety net hands back
-  to the firmware boot order if the chosen drive isn't bootable.
-- With `bty-flash-always`, the freshly-flashed disk boots even though PXE
-  is first: the server hands out the flash chain, sees the box fetch the
-  live-env artifacts (proof it booted the flasher), and on the *next* PXE
-  contact serves a one-shot `sanboot` of the just-flashed disk before
-  re-arming the flash chain. So the box reflashes, boots the image, runs,
-  and reflashes again on the next power cycle - it never loops on the
-  flasher without booting. The one-shot `sanboot` honours `sanboot_drive`.
-  Cost: two firmware boots per cycle (one to flash, one to boot the disk).
+- **UEFI** (the common case): iPXE hands control back to the firmware
+  boot order via `exit`, and the firmware boots the disk's EFI loader
+  (the next entry after network boot). bty doesn't need to know the
+  disk's identity - the firmware already does, and a dd'd image carries
+  its own ESP + bootloader. Nothing to configure.
+- **Legacy BIOS**: iPXE `sanboot`s the disk by BIOS drive number (`0x80`
+  = first disk), independent of the firmware boot order, with `|| exit`
+  as the fallback if that drive isn't bootable. On a multi-disk box set
+  `sanboot_drive` (it's a BIOS drive number, not the Linux serial the
+  flash step matches on).
 
-Calibrate `sanboot_drive` before relying on it: on a multi-disk box, first
-set `boot_mode=sanboot`, set `sanboot_drive`, and reboot to confirm the
-machine boots its disk. Then switch to `bty-flash-once` or
-`bty-flash-always` - the post-flash `sanboot` inherits the known-good drive
-(the field persists across the policy change), so the boot after a flash
-isn't a guess.
+The flash modes reach the freshly-flashed disk the same way, just
+deferred one PXE contact: the server hands out the flash chain, sees the
+box fetch the live-env artifacts (proof it booted the flasher), and on
+the *next* PXE contact serves a one-shot boot of the disk (UEFI exit /
+BIOS sanboot) instead of reflashing. `bty-flash-always` then re-arms the
+flash chain (reflash, boot, run, reflash - never looping on the flasher);
+`bty-flash-once` stays on the disk. Cost: two firmware boots per flash
+(one to flash, one to boot the disk).
 
-### When `sanboot` can't reach the disk
+On legacy BIOS, calibrate `sanboot_drive` before relying on it: set
+`boot_mode=ipxe-exit`, set `sanboot_drive`, and reboot to confirm the box
+boots its disk; then switch to a flash mode (the field persists, so the
+post-flash boot inherits the known-good drive). On UEFI there's nothing
+to calibrate - the firmware boot order handles it.
 
-`sanboot` boots by BIOS drive number, so the two failure modes are: a drive
-that isn't bootable (handled - `|| exit` hands back to the firmware order)
-and a multi-disk box where `0x80` isn't the disk you meant (handled - set
-`sanboot_drive`). The remaining edge is firmware where iPXE's `sanboot`
-itself is flaky (some UEFI / NVMe quirks). bty keeps no second "bare exit"
-policy for that case; if a target's firmware can't be driven by `sanboot`,
-build it a direct boot stick with
-[boots-from](https://github.com/safl/boots-from) rather than relying on the
-network path.
+### When the BIOS drive boot can't reach the disk
+
+A legacy-BIOS-only concern (`ipxe-exit` on UEFI just hands back to
+firmware). `sanboot` boots by BIOS drive number, so the failure modes
+are: a drive that isn't bootable (handled - `|| exit` falls back to the
+firmware order) and a multi-disk box where `0x80` isn't the disk you
+meant (handled - set `sanboot_drive`). The remaining edge is firmware
+where iPXE's `sanboot` itself is flaky. bty keeps no second policy for
+that; if a target's firmware can't be driven by `sanboot`, build it a
+direct boot stick with
+[boots-from](https://github.com/safl/boots-from) rather than relying on
+the network path.
 
 Practical setup: enter firmware setup (often F2 / F10 / Del at power-on),
 open the boot-order menu, put Network/PXE first and the target disk second,
