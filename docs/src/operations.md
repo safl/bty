@@ -19,6 +19,47 @@ A bty-server keeps everything in one directory, `BTY_STATE_DIR` (default
 A minimal backup is just `state.db`; a full backup is the whole
 `/var/lib/bty` tree.
 
+## Data separation and read-only-OS readiness
+
+bty-server is built so that **all mutable runtime state lives under
+`BTY_STATE_DIR` (`/var/lib/bty`)** -- the writable volume. The direction
+is that the OS rootfs can eventually be mounted **read-only**, so a power
+cut can't corrupt it and recovery is "reflash the immutable OS, re-adopt
+the writable volume." That flip isn't done yet; this section is the
+readiness checklist.
+
+bty-web's runtime writes already all land under `/var/lib/bty`, split
+into two classes:
+
+| Path | Class | Notes |
+|---|---|---|
+| `state.db` | precious | records: machines, catalog, settings, audit log |
+| `images/` | precious | image bytes (expensive to refetch) |
+| `cache/` | ephemeral | catalog download cache (refetchable) |
+| `boot/` | ephemeral | netboot artifacts -- **version-coupled**; refetch on a bty version bump |
+| `session-secret` | regenerable | cookie key |
+
+Precious = carry across a migration / back up (the `bty-web export`
+bundle covers exactly these). Ephemeral = safe to lose, re-created on
+demand. `boot/` is the subtle one: it lives on the writable volume (so a
+read-only OS is possible) but is re-fetched when it no longer matches the
+running bty-web version, rather than preserved as precious.
+
+**OS-level holdouts** -- what still writes outside `/var/lib/bty` and so
+must be handled before the rootfs can go `ro`:
+
+| Path | Why it's written | Mitigation at flip time |
+|---|---|---|
+| `/etc/shadow` | `passwd` rotates the UI / SSH credential | move the credential under `/var/lib/bty`, or an `/etc` overlay |
+| `/etc/issue` | boot banner writes the appliance IP | tmpfs `/etc/issue`, or render to a writable path |
+| `/etc/fstab` | `bty-state-migrate` adds the data-disk mount | migrate before sealing, or fstab on an overlay |
+| `/var/log` | journald | volatile journald / tmpfs `/var/log` |
+| `/var/lib/cloud`, `/etc/ssh` | first boot (cloud-init, host keys) | run first boot before sealing, or persist to the volume |
+
+The plan: keep `/var/lib/bty` the single writable volume, retire these
+holdouts one at a time, then flip the rootfs to `ro` with a small
+overlay / tmpfs for the unavoidable spots.
+
 ## Backup
 
 `state.db` is a single SQLite file. The safe way to copy a live database is
