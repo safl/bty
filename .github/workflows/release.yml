@@ -157,15 +157,16 @@ jobs:
       fail-fast: false
       matrix:
         # ``variant`` is the user-facing name (``make build VARIANT=...``);
-        # ``kind`` selects the right deps and upload step. The
-        # ``usb-x86`` variant uses the live-build iso-hybrid path
-        # (kind: live), not the cloud-init bake.
+        # ``kind`` selects the right deps and upload step. ``usb-x86``
+        # is intentionally NOT in this matrix -- it lives in the
+        # dedicated ``build-usb-x86`` job below so ``test-usb-grow``
+        # can fire as soon as the .iso is built (~12-15 min) instead
+        # of waiting for the slowest matrix entry (server-rpi at
+        # ~25 min).
         include:
           - variant: server-x86
             kind: disk
           - variant: netboot-x86
-            kind: live
-          - variant: usb-x86
             kind: live
           - variant: server-rpi
             kind: disk-rpi
@@ -322,8 +323,67 @@ jobs:
             ~/system_imaging/disk/bty-netboot-x86_64-v*.squashfs
             ~/system_imaging/disk/bty-netboot-x86_64-v*.sha256
 
-      - name: Upload artifact (usb-x86 variant)
-        if: matrix.variant == 'usb-x86'
+  # ---------------- usb-x86 (split out for early test-usb-grow gate) -------
+  # Same content as the matrix's previous ``usb-x86`` entry but as a
+  # standalone job so ``test-usb-grow`` can depend on just this (and
+  # not wait on server-rpi etc., which take ~2x longer). Dedup-vs-DRY
+  # tradeoff: a little YAML repetition for ~10 min off the test's
+  # critical path.
+  build-usb-x86:
+    name: Build usb-x86 image
+    needs: test
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install build dependencies (live)
+        run: |
+          set -eu
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            debootstrap squashfs-tools xorriso debian-archive-keyring \
+            exfatprogs exfat-fuse
+          POOL=http://ftp.debian.org/debian/pool/main/l/live-build
+          LB_DEB=$(curl -s "$POOL/" \
+              | grep -oE 'live-build_[0-9][^"<]*\.deb' \
+              | sort -V | tail -1)
+          if [ -z "$LB_DEB" ]; then
+              echo "could not find live-build .deb in $POOL/" >&2
+              exit 1
+          fi
+          echo "Fetching $LB_DEB"
+          wget -q "$POOL/$LB_DEB"
+          sudo dpkg -i "$LB_DEB"
+          lb --version
+
+      - name: Install cijoe
+        run: pipx install --force cijoe
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.1.0
+
+      - name: Build usb-x86 image
+        run: make build VARIANT=usb-x86
+
+      - name: Upload cijoe output
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: cijoe-output-usb-x86
+          path: cijoe/cijoe-output
+          if-no-files-found: warn
+
+      - name: Upload cijoe report.html
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: cijoe-report-usb-x86
+          path: cijoe/cijoe-output/report.html
+          if-no-files-found: warn
+
+      - name: Upload artifact (bty-usb-x86_64.iso)
         uses: actions/upload-artifact@v7
         with:
           name: bty-usb-x86_64-iso
@@ -407,7 +467,7 @@ jobs:
   # not a silently-eaten Popen stderr.
   test-usb-grow:
     name: USB auto-grow test (QEMU boot + parted)
-    needs: build-media
+    needs: build-usb-x86
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -502,7 +562,7 @@ jobs:
   # ---------------- ship ---------------------------------------------------
   attach-to-release:
     name: Attach artifacts to GitHub release
-    needs: [build-wheel, build-media, test-pxe, test-usb-grow, docs]
+    needs: [build-wheel, build-media, build-usb-x86, test-pxe, test-usb-grow, docs]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
