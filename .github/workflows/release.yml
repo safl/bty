@@ -398,20 +398,18 @@ jobs:
           path: cijoe/_build/test-pxe/
           if-no-files-found: warn
 
-  # ---------------- usb auto-grow test (non-gating) ------------------------
-  # Still runs on every tag push so the diagnostic output is captured,
-  # but NOT in the ``needs:`` of ``attach-to-release`` -- the test's
-  # QEMU + parted machinery wasn't stable in v0.25.4's first runs
-  # (likely runner KVM / boot-window flakiness; full diagnosis depends
-  # on the cijoe-output artifact). Until that's debugged, a flaky GHA
-  # path shouldn't block PyPI publish for what's otherwise a clean
-  # release.
+  # ---------------- usb auto-grow test (gating) ---------------------------
+  # Boots the freshly-built bty-usb ISO in QEMU on a 4 GiB raw disk,
+  # lets the first-boot bty-usb-grow service run, then ``parted``-s the
+  # disk image to assert the BTY_IMAGES partition grew. Full output
+  # capture (cijoe.run_local everywhere, serial log dumped on every
+  # outcome) so a failure leaves a real signal in the cijoe report,
+  # not a silently-eaten Popen stderr.
   test-usb-grow:
-    name: USB auto-grow test (QEMU boot + parted, non-gating)
+    name: USB auto-grow test (QEMU boot + parted)
     needs: build-media
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
-    continue-on-error: true
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
@@ -504,7 +502,7 @@ jobs:
   # ---------------- ship ---------------------------------------------------
   attach-to-release:
     name: Attach artifacts to GitHub release
-    needs: [build-wheel, build-media, test-pxe, docs]
+    needs: [build-wheel, build-media, test-pxe, test-usb-grow, docs]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:

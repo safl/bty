@@ -3,24 +3,17 @@ USB auto-grow end-to-end test
 =============================
 
 Verifies ``bty-usb-grow.service`` extends the BTY_IMAGES exFAT
-partition from its 32 MiB bake-time minimum to fill the underlying disk
-on first boot.
+partition from its 32 MiB bake-time minimum to fill the underlying
+disk on first boot. Boots the freshly-built .iso in QEMU (KVM) on a
+4 GiB raw disk, lets the live env's first-boot grow service run, then
+``parted``-s the disk image to assert the partition grew.
 
-Approach:
-
-1. Copy the built ``bty-usb-x86_64.iso`` into a 4 GiB raw file
-   (``truncate`` extends the file with zeros; the trailing space
-   simulates the empty tail of a larger USB stick).
-2. Boot the file in QEMU, headless, with serial captured.
-3. Wait a fixed boot+grow window, then power-cycle the VM.
-4. Inspect the post-boot partition table with ``parted``: assert the
-   trailing (BTY_IMAGES) partition grew well past the 32 MiB bake size.
-
-Doesn't depend on a serial marker -- bty-usb-grow's success log goes to
-the systemd journal, which doesn't auto-forward to ``/dev/console``.
-The disk-image inspection is the durable check: the resized partition
-table is persisted before the unit reports success, so a post-boot
-``parted`` read is authoritative.
+Output discipline: every shell call goes through ``cijoe.run_local``
+so its stdout + stderr land in the cijoe report. The QEMU run wraps
+in ``timeout`` so the command terminates cleanly (no Popen / DEVNULL
+plumbing that silently eats failure modes), and the serial log is
+``cat``'d to the report after QEMU exits regardless of outcome --
+"why didn't it grow?" answers itself.
 
 Retargetable: False
 """
@@ -31,146 +24,122 @@ import errno
 import logging as log
 import re
 import shutil
-import subprocess
 from argparse import ArgumentParser
 from pathlib import Path
 
-ISO_BASENAME = "bty-usb-x86_64.iso"
-# 4 GiB stick is plenty of headroom over the ~200 MiB ISO + 1 MiB
-# BTY_IMAGES, and small enough to keep the runner's disk + boot time
-# bounded.
-TEST_DISK_BYTES = 4 * 1024 * 1024 * 1024
-# Boot + grow window. Live env cold-boot in QEMU lands in the ~30-60s
-# range; bty-usb-grow itself is seconds (parted + mkfs.exfat on a
-# nearly-empty partition + tar restore of the ~few KB starter .bri
-# set). 180s is generous and bounded by the GHA job timeout.
-BOOT_WINDOW_SEC = 180
-# The 32 MiB bake size grown to a 4 GiB disk should land at >= ~3.5
-# GiB (the live env's CD-ROM partition + some metadata slack are
-# what's not BTY_IMAGES). 1 GiB is a comfortable floor that
-# distinguishes "grew" from "didn't grow" without needing to know
-# the exact final size.
-MIN_GROWN_BYTES = 1024 * 1024 * 1024
+ISO_BASENAME_GLOB = "bty-usb-x86_64-v*.iso"
+TEST_DISK_BYTES = 4 * 1024 * 1024 * 1024  # 4 GiB target stick
+# Boot + grow + idle window. Cold-boot in QEMU (KVM): ~30s; grow service:
+# seconds; we leave a wide buffer for slow GHA runners. ``timeout`` SIGKILLs
+# QEMU at the deadline; ``|| true`` keeps the shell exit clean.
+BOOT_WINDOW_SEC = 240
+# 32 MiB at bake -> ~3.5 GiB after grow on a 4 GiB stick. 1 GiB is a
+# comfortable floor that distinguishes "grew" from "did not grow" without
+# tying the test to the exact final size.
+MIN_GROWN_BYTES = 1 * 1024 * 1024 * 1024
 
 
 def add_args(parser: ArgumentParser):
-    del parser  # no flags; signature kept for cijoe consistency
+    del parser
 
 
 def main(args, cijoe):
     del args
     cfg = cijoe.getconf("test.usb_grow", {})
     iso_dir = Path(cfg.get("iso_dir") or (Path.home() / "system_imaging" / "disk"))
-    src_iso = iso_dir / ISO_BASENAME
-    if not src_iso.is_file():
-        log.error(f"ISO missing: {src_iso} (did the usb-x86 build run?)")
+    candidates = sorted(iso_dir.glob(ISO_BASENAME_GLOB))
+    if not candidates:
+        log.error(f"no {ISO_BASENAME_GLOB} found in {iso_dir} (did the usb-x86 build run?)")
         return errno.ENOENT
+    src_iso = candidates[-1]  # sorted: highest-version .iso wins
+    log.info(f"using {src_iso.name} ({src_iso.stat().st_size} bytes)")
 
     workspace = Path.cwd() / "_build" / "test-usb-grow"
     workspace.mkdir(parents=True, exist_ok=True)
     test_disk = workspace / "usb-grow-test.img"
     serial_log = workspace / "qemu.serial.log"
 
-    log.info(f"Staging {src_iso} ({src_iso.stat().st_size} bytes) -> {test_disk}")
+    log.info(f"staging {src_iso.name} -> {test_disk}")
     shutil.copy2(src_iso, test_disk)
-    log.info(f"Extending {test_disk} to {TEST_DISK_BYTES} bytes (4 GiB)")
+    log.info(f"extending {test_disk} to {TEST_DISK_BYTES} bytes (4 GiB)")
     with test_disk.open("r+b") as fh:
         fh.truncate(TEST_DISK_BYTES)
 
-    qemu_cmd = [
-        "qemu-system-x86_64",
-        "-enable-kvm",
-        "-cpu",
-        "host",
-        "-smp",
-        "2",
-        "-m",
-        "1G",
-        "-drive",
-        f"file={test_disk},format=raw,if=virtio",
-        "-nographic",
-        "-serial",
-        f"file:{serial_log}",
-        # bty-usb-grow runs entirely on local block devs; no network
-        # needed. The default NIC also slows boot by ~5s waiting for
-        # DHCP timeouts.
-        "-nic",
-        "none",
-        # ``-no-reboot``: when the live env's bty-on-tty1 wizard quits
-        # (or systemd reboots for any reason), QEMU exits instead of
-        # cycling. The test would otherwise hang past BOOT_WINDOW_SEC.
-        "-no-reboot",
-    ]
-    log.info(f"Booting QEMU (window={BOOT_WINDOW_SEC}s, serial -> {serial_log})")
-    proc = subprocess.Popen(
-        qemu_cmd,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    try:
-        try:
-            proc.wait(timeout=BOOT_WINDOW_SEC)
-            log.info("QEMU exited on its own (likely -no-reboot fired)")
-        except subprocess.TimeoutExpired:
-            log.info(f"Boot window elapsed ({BOOT_WINDOW_SEC}s); terminating QEMU")
-            proc.terminate()
-            try:
-                proc.wait(timeout=15)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                proc.wait(timeout=5)
-    except Exception as exc:
-        log.error(f"QEMU launch / wait failed: {exc}")
-        proc.kill()
+    # Sanity-check the inputs that the bake produces. If the BTY_IMAGES
+    # partition isn't visible on the file BEFORE we boot, the test would
+    # be measuring something other than auto-grow.
+    log.info("pre-boot partition table (parted):")
+    err, _ = cijoe.run_local(f"parted -ms {test_disk} unit B print")
+    if err:
+        log.error(f"pre-boot parted failed (err={err})")
         return errno.EIO
 
-    # Inspect the post-boot partition table. parted's machine-readable
-    # output is one row per partition:
-    #   <num>:<start>B:<end>B:<size>B:<fs>:<name>:<flags>
-    result = subprocess.run(
-        ["parted", "-ms", str(test_disk), "unit", "B", "print"],
-        capture_output=True,
-        text=True,
-        check=False,
+    # Single QEMU run, wall-clocked by ``timeout``. ``-enable-kvm`` requires
+    # /dev/kvm; the release.yml job installs cpu-checker + drops the udev
+    # rule so the runner user can open it. ``-cpu host`` passes through the
+    # runner's feature set so virtio + most modern paths work. Serial goes
+    # to a file we cat afterwards so the kernel boot log is in the cijoe
+    # report whether the test passes or fails.
+    log.info(f"booting QEMU (BOOT_WINDOW_SEC={BOOT_WINDOW_SEC})")
+    qemu_cmd = (
+        f"timeout --kill-after=10 {BOOT_WINDOW_SEC} "
+        f"qemu-system-x86_64 "
+        f"-enable-kvm -cpu host -smp 2 -m 1G "
+        f"-drive file={test_disk},format=raw,if=virtio "
+        f"-nographic -serial file:{serial_log} "
+        f"-nic none -no-reboot "
+        f"|| true"  # timeout's 124 + qemu's variable exit codes both OK.
     )
-    log.info(f"parted output (rc={result.returncode}):\n{result.stdout}")
-    if result.returncode != 0:
-        log.error(f"parted stderr: {result.stderr}")
-        _dump_serial_tail(serial_log)
+    err, _ = cijoe.run_local(qemu_cmd)
+    log.info(f"qemu exit handling done (cijoe err={err})")
+
+    # Always dump the serial log to the report. The bty-usb-grow service
+    # writes to /run/bty-usb-grow.status + syslog via ``logger -s``; the
+    # ``-s`` flag mirrors to stderr, which (with systemd's default forward
+    # rules) lands on the kernel console -> serial -> this file.
+    if serial_log.is_file():
+        log.info(f"serial log size: {serial_log.stat().st_size} bytes")
+        cijoe.run_local(f"cat {serial_log}")
+    else:
+        log.error(f"serial log NOT created at {serial_log} -- qemu likely never started")
+
+    # Post-boot inspection. The bty-usb-grow service rewrites the partition
+    # table via parted resizepart + mkfs.exfat; the kernel ack/sync flushes
+    # the new table to disk before the unit reports success, so a parted
+    # read of the disk image FILE here is authoritative even though the VM
+    # was killed.
+    log.info("post-boot partition table (parted):")
+    err, parted_out = cijoe.run_local(f"parted -ms {test_disk} unit B print")
+    if err:
+        log.error(f"post-boot parted failed (err={err})")
         return errno.EIO
 
+    parted_text = parted_out.output() if hasattr(parted_out, "output") else str(parted_out)
+
+    # parted -ms output: ``<num>:<start>B:<end>B:<size>B:<fs>:<name>:<flags>;``
+    # one line per partition (after the BYT;\n<disk>;\n preamble).
     largest = 0
-    for line in result.stdout.splitlines():
+    for line in parted_text.splitlines():
         m = re.match(r"^(\d+):(\d+)B:(\d+)B:(\d+)B:", line)
         if not m:
             continue
         size = int(m.group(4))
         if size > largest:
             largest = size
+    log.info(f"largest partition on disk image: {largest} bytes ({largest / (1 << 20):.1f} MiB)")
 
-    log.info(f"Largest partition on the test disk: {largest} bytes ({largest / (1 << 20):.1f} MiB)")
     if largest < MIN_GROWN_BYTES:
         log.error(
             f"FAIL: BTY_IMAGES did not grow. Largest partition is "
             f"{largest} bytes ({largest / (1 << 20):.1f} MiB); expected "
-            f">= {MIN_GROWN_BYTES} ({MIN_GROWN_BYTES / (1 << 30):.1f} GiB)."
+            f">= {MIN_GROWN_BYTES} bytes ({MIN_GROWN_BYTES / (1 << 30):.1f} GiB). "
+            f"Inspect the serial-log dump above for the bty-usb-grow service's "
+            f"trace + any kernel / systemd errors from the live env boot."
         )
-        _dump_serial_tail(serial_log)
         return errno.EPROTO
 
     log.info(
-        f"PASS: BTY_IMAGES grew from 32 MiB (bake) to "
-        f"{largest / (1 << 30):.2f} GiB (parted-observed) on first boot"
+        f"PASS: BTY_IMAGES grew to {largest / (1 << 30):.2f} GiB on first boot "
+        f"(bake-time min was 32 MiB; target stick was 4 GiB)."
     )
     return 0
-
-
-def _dump_serial_tail(path: Path, lines: int = 200) -> None:
-    if not path.is_file():
-        log.error(f"{path}: serial log missing")
-        return
-    body = path.read_text(encoding="utf-8", errors="replace")
-    log.error(f"--- last {lines} serial lines from {path} ---")
-    for line in body.splitlines()[-lines:]:
-        log.error(line)
