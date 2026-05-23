@@ -57,11 +57,28 @@ import urllib.request
 from argparse import ArgumentParser
 from pathlib import Path
 
-ARTIFACT_NAMES = (
-    "bty-netboot-x86_64.vmlinuz",
-    "bty-netboot-x86_64.initrd",
-    "bty-netboot-x86_64.squashfs",
+# Netboot trio names carry the bty version (read from pyproject.toml).
+ARTIFACT_NAME_FMTS = (
+    "bty-netboot-x86_64-v{version}.vmlinuz",
+    "bty-netboot-x86_64-v{version}.initrd",
+    "bty-netboot-x86_64-v{version}.squashfs",
 )
+
+
+def _read_bty_version() -> str:
+    """Read bty-lab's version from the repo's top-level pyproject.toml."""
+    pyproject = Path.cwd().parent / "pyproject.toml"
+    for line in pyproject.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("version") and "=" in stripped:
+            return stripped.split("=", 1)[1].strip().strip('"').strip("'")
+    raise RuntimeError(f"could not find version line in {pyproject}")
+
+
+def _artifact_names() -> tuple[str, ...]:
+    version = _read_bty_version()
+    return tuple(fmt.format(version=version) for fmt in ARTIFACT_NAME_FMTS)
+
 
 HEALTHZ_TIMEOUT = 600  # cloud-init + bty-web-init + bty-web takes a while.
 # 300s tripped on v0.22.4 with no underlying code change (runner-variance flake;
@@ -93,7 +110,8 @@ def main(args, cijoe):
             log.error(f"{label} missing: {path}")
             log.error("did pxe_customize_server run?")
             return errno.ENOENT
-    for name in ARTIFACT_NAMES:
+    artifact_names = _artifact_names()
+    for name in artifact_names:
         if not (boot_stage / name).is_file():
             log.error(f"live artifact missing in workspace: {boot_stage / name}")
             return errno.ENOENT
@@ -129,7 +147,7 @@ def main(args, cijoe):
             return errno.EACCES
 
         log.info("PUT /boot/<live trio>")
-        for name in ARTIFACT_NAMES:
+        for name in artifact_names:
             _put_file("127.0.0.1", mgmt_port, token, "/boot", boot_stage / name, name)
 
         log.info(f"PUT /images/{cfg['machine_image']} (1 MiB dummy)")

@@ -50,7 +50,7 @@ import tempfile
 from argparse import ArgumentParser
 from pathlib import Path
 
-PUBLISH_BASENAME = "bty-usb-x86_64.iso"
+PUBLISH_BASENAME_FMT = "bty-usb-x86_64-v{version}.iso"
 
 # Just enough room for the starter ``.bri`` descriptors (a few hundred
 # bytes each); operator images live elsewhere (bty-web catalog, or the
@@ -123,6 +123,7 @@ def main(args, cijoe):
     # -- bootloader menu, kernel boot, login, shell -- so the pre-built
     # stick can always be matched back to a release.
     bty_version = _read_bty_version(cijoe_dir)
+    iso_basename = PUBLISH_BASENAME_FMT.format(version=bty_version)
     log.info(f"Stamping bty version {bty_version} into live-build tree")
     err, _ = cijoe.run_local(
         f"sh -c 'grep -rlF __BTY_VERSION__ {build_dir} | "
@@ -195,7 +196,7 @@ def main(args, cijoe):
     # Publish under the user's uid/gid so subsequent steps don't
     # need privileges. ISO is owned by root (lb wrote it under sudo).
     uid, gid = os.geteuid(), os.getegid()
-    dst = publish_dir / PUBLISH_BASENAME
+    dst = publish_dir / iso_basename
     err, _ = cijoe.run_local(f"sudo cp {iso} {dst}")
     if err:
         log.error(f"failed to publish {iso} -> {dst}")
@@ -211,7 +212,7 @@ def main(args, cijoe):
     # The front of the file stays byte-identical so the boot path
     # is unchanged. dd / Etcher / Rufus all do byte-for-byte writes
     # and handle the larger artifact.
-    err = _extend_with_exfat(cijoe, dst)
+    err = _extend_with_exfat(cijoe, dst, bty_version)
     if err:
         return err
 
@@ -232,9 +233,9 @@ def main(args, cijoe):
     # 2 GiB per-release-asset upload limit. gzip was dropped: every
     # flasher (Etcher, RPi Imager, Rufus, dd) reads plain .iso
     # natively, and removing the compress step shaves CI time.
-    sha256_path = publish_dir / "bty-usb-x86_64.iso.sha256"
+    sha256_path = publish_dir / f"{iso_basename}.sha256"
     err, _ = cijoe.run_local(
-        f"sh -c 'cd {publish_dir} && sha256sum {PUBLISH_BASENAME} > {sha256_path}'"
+        f"sh -c 'cd {publish_dir} && sha256sum {iso_basename} > {sha256_path}'"
     )
     if err:
         log.error("failed computing sha256 manifest")
@@ -443,7 +444,7 @@ def _read_bty_version(cijoe_dir: Path) -> str:
     raise RuntimeError(f"could not find version line in {pyproject}")
 
 
-def _extend_with_exfat(cijoe, iso_path: Path) -> int:
+def _extend_with_exfat(cijoe, iso_path: Path, bty_version: str) -> int:
     """Relocate the EFI partition out of the iso-hybrid overlap, then
     append a trailing exFAT partition labelled BTY_IMAGES.
 
@@ -626,7 +627,7 @@ def _extend_with_exfat(cijoe, iso_path: Path) -> int:
     # stick that boots and finds no images is a broken artifact
     # that requires hands-on diagnosis to distinguish from a real
     # delivery problem.
-    err = _populate_bty_images_partition(cijoe, part_dev)
+    err = _populate_bty_images_partition(cijoe, part_dev, bty_version)
     if err:
         cijoe.run_local(f"sudo losetup -d {loop}")
         return err
@@ -704,16 +705,16 @@ _STARTER_BRIS: tuple[tuple[str, str], ...] = (
         "# minimal TOML: ``url`` is the only required field. See\n"
         "# bty.images.read_bri for the parser + the schema.\n"
         "\n"
-        'name = "bty-server (x86_64, latest)"\n'
-        'url = "https://github.com/safl/bty/releases/latest/download/'
-        'bty-server-x86_64.img.gz"\n'
+        'name = "bty-server (x86_64, v{version})"\n'
+        'url = "https://github.com/safl/bty/releases/download/v{version}/'
+        'bty-server-x86_64-v{version}.img.gz"\n'
         'format = "img.gz"\n'
-        'description = "Latest published bty-server appliance for x86_64"\n',
+        'description = "bty-server v{version} appliance for x86_64"\n',
     ),
 )
 
 
-def _populate_bty_images_partition(cijoe, part_dev: str) -> int:
+def _populate_bty_images_partition(cijoe, part_dev: str, bty_version: str) -> int:
     """Mount the freshly-mkfs'd BTY_IMAGES exFAT partition and drop
     the starter ``.bri`` set into it. Returns 0 on success, errno-
     style int on failure.
@@ -740,6 +741,11 @@ def _populate_bty_images_partition(cijoe, part_dev: str) -> int:
     # any of these fail we haven't touched the loop device yet.
     staged: list[tuple[str, Path]] = []
     for filename, body in _STARTER_BRIS:
+        # Bake the current release's version into the body's {version}
+        # placeholders. Only the bty-server .bri carries any (the
+        # oras://...:latest entries use rolling tags); the str.format
+        # call is a no-op on the others.
+        body = body.format(version=bty_version)
         fd, name = tempfile.mkstemp(prefix=f"{filename}.", suffix=".tmp")
         os.close(fd)
         src_path = Path(name)

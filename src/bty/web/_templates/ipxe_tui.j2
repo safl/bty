@@ -37,6 +37,6 @@ set bty-base http://{{ host }}
 # partitions (see ipxe_flash.j2 for the rationale). The stick's own
 # BTY_IMAGES catalog is mounted by its explicit label-gated mount unit,
 # not by gpt-auto, so it's unaffected.
-kernel ${bty-base}/boot/bty-netboot-x86_64.vmlinuz?mac={{ mac }} boot=live fetch=${bty-base}/boot/bty-netboot-x86_64.squashfs components console=tty0 console=ttyS0,115200 plymouth.enable=0 modprobe.blacklist=nouveau nouveau.modeset=0 systemd.gpt_auto=0 bty.server=${bty-base} bty.mac={{ mac }}
-initrd ${bty-base}/boot/bty-netboot-x86_64.initrd?mac={{ mac }}
+kernel ${bty-base}/boot/bty-netboot-x86_64-v{{ bty_version }}.vmlinuz?mac={{ mac }} boot=live fetch=${bty-base}/boot/bty-netboot-x86_64-v{{ bty_version }}.squashfs components console=tty0 console=ttyS0,115200 plymouth.enable=0 modprobe.blacklist=nouveau nouveau.modeset=0 systemd.gpt_auto=0 bty.server=${bty-base} bty.mac={{ mac }}
+initrd ${bty-base}/boot/bty-netboot-x86_64-v{{ bty_version }}.initrd?mac={{ mac }}
 boot

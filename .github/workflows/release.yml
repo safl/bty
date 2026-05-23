@@ -299,8 +299,8 @@ jobs:
         with:
           name: bty-server-x86_64-img-gz
           path: |
-            ~/system_imaging/disk/bty-server-x86_64.img.gz
-            ~/system_imaging/disk/bty-server-x86_64.img.gz.sha256
+            ~/system_imaging/disk/bty-server-x86_64-v*.img.gz
+            ~/system_imaging/disk/bty-server-x86_64-v*.img.gz.sha256
 
       - name: Upload artifact (server-rpi variant)
         if: matrix.kind == 'disk-rpi'
@@ -308,8 +308,8 @@ jobs:
         with:
           name: bty-server-rpi-arm64-img-gz
           path: |
-            ~/system_imaging/disk/bty-server-rpi-arm64.img.gz
-            ~/system_imaging/disk/bty-server-rpi-arm64.img.gz.sha256
+            ~/system_imaging/disk/bty-server-rpi-arm64-v*.img.gz
+            ~/system_imaging/disk/bty-server-rpi-arm64-v*.img.gz.sha256
 
       - name: Upload artifact (netboot-x86 variant)
         if: matrix.variant == 'netboot-x86'
@@ -317,10 +317,10 @@ jobs:
         with:
           name: bty-netboot-x86_64
           path: |
-            ~/system_imaging/disk/bty-netboot-x86_64.vmlinuz
-            ~/system_imaging/disk/bty-netboot-x86_64.initrd
-            ~/system_imaging/disk/bty-netboot-x86_64.squashfs
-            ~/system_imaging/disk/bty-netboot-x86_64.sha256
+            ~/system_imaging/disk/bty-netboot-x86_64-v*.vmlinuz
+            ~/system_imaging/disk/bty-netboot-x86_64-v*.initrd
+            ~/system_imaging/disk/bty-netboot-x86_64-v*.squashfs
+            ~/system_imaging/disk/bty-netboot-x86_64-v*.sha256
 
       - name: Upload artifact (usb-x86 variant)
         if: matrix.variant == 'usb-x86'
@@ -328,8 +328,8 @@ jobs:
         with:
           name: bty-usb-x86_64-iso
           path: |
-            ~/system_imaging/disk/bty-usb-x86_64.iso
-            ~/system_imaging/disk/bty-usb-x86_64.iso.sha256
+            ~/system_imaging/disk/bty-usb-x86_64-v*.iso
+            ~/system_imaging/disk/bty-usb-x86_64-v*.iso.sha256
 
   # ---------------- verify ------------------------------------------------
   test-pxe:

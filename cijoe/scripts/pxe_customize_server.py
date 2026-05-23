@@ -29,11 +29,34 @@ import shutil
 from argparse import ArgumentParser
 from pathlib import Path
 
-ARTIFACT_NAMES = (
-    "bty-netboot-x86_64.vmlinuz",
-    "bty-netboot-x86_64.initrd",
-    "bty-netboot-x86_64.squashfs",
+# Artifact names carry the bty version (set at runtime from the
+# repo's pyproject.toml so the chain test finds the freshly-built trio).
+ARTIFACT_NAME_FMTS = (
+    "bty-netboot-x86_64-v{version}.vmlinuz",
+    "bty-netboot-x86_64-v{version}.initrd",
+    "bty-netboot-x86_64-v{version}.squashfs",
 )
+
+
+def _read_bty_version() -> str:
+    """Read bty-lab's version from the repo's top-level pyproject.toml.
+    Mirrors :func:`usb_iso_build._read_bty_version`; kept inline to keep
+    each cijoe script standalone."""
+    pyproject = Path.cwd().parent / "pyproject.toml"
+    for line in pyproject.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("version") and "=" in stripped:
+            return stripped.split("=", 1)[1].strip().strip('"').strip("'")
+    raise RuntimeError(f"could not find version line in {pyproject}")
+
+
+def _artifact_names() -> tuple[str, ...]:
+    version = _read_bty_version()
+    return tuple(fmt.format(version=version) for fmt in ARTIFACT_NAME_FMTS)
+
+
+def _server_gz_name() -> str:
+    return f"bty-server-x86_64-v{_read_bty_version()}.img.gz"
 
 
 def add_args(parser: ArgumentParser):
@@ -48,8 +71,9 @@ def main(args, cijoe):
         return errno.EINVAL
 
     artifact_dir = Path(cfg["artifact_dir"])
+    artifact_names = _artifact_names()
     server_qcow2_src = artifact_dir / "bty-server-x86_64.qcow2"
-    server_gz = artifact_dir / "bty-server-x86_64.img.gz"
+    server_gz = artifact_dir / _server_gz_name()
 
     # Reconstitute the qcow2 from .img.gz when only the .gz is
     # present (CI shape: release.yml uploads only the operator-
@@ -77,7 +101,7 @@ def main(args, cijoe):
             return err
         server_raw.unlink(missing_ok=True)
 
-    for name in ARTIFACT_NAMES:
+    for name in artifact_names:
         if not (artifact_dir / name).is_file():
             log.error(f"live artifact missing: {artifact_dir / name}")
             log.error("Run `make build VARIANT=netboot-x86` from the repo root first")
@@ -114,7 +138,7 @@ def main(args, cijoe):
     # untouched.
     boot_stage = workspace / "boot"
     boot_stage.mkdir()
-    for name in ARTIFACT_NAMES:
+    for name in artifact_names:
         shutil.copy2(artifact_dir / name, boot_stage / name)
 
     log.info(f"Workspace ready at {workspace}")

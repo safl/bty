@@ -199,8 +199,19 @@ def test_ipxe_templates_share_baseline_cmdline_tokens() -> None:
     only (not the whole template body) so a comment mentioning
     a token can't spoof its presence.
     """
-    tui_body = (REPO_ROOT / "src" / "bty" / "web" / "_templates" / "ipxe_tui.j2").read_text()
-    flash_body = (REPO_ROOT / "src" / "bty" / "web" / "_templates" / "ipxe_flash.j2").read_text()
+    # Render the templates against the current bty version so the
+    # netboot URLs (which carry ``-v{{ bty_version }}``) are concrete
+    # before token-grep -- the production renderer sets bty_version
+    # as a Jinja global, so this mirrors what a real iPXE client sees.
+    import jinja2
+
+    import bty
+
+    tpl_dir = REPO_ROOT / "src" / "bty" / "web" / "_templates"
+    env = jinja2.Environment(loader=jinja2.FileSystemLoader(str(tpl_dir)))
+    env.globals["bty_version"] = bty.__version__
+    tui_body = env.get_template("ipxe_tui.j2").render(mac="{{ mac }}")
+    flash_body = env.get_template("ipxe_flash.j2").render(mac="{{ mac }}")
 
     def _kernel_line(body: str) -> str:
         for ln in body.splitlines():
@@ -211,9 +222,11 @@ def test_ipxe_templates_share_baseline_cmdline_tokens() -> None:
     tui = _kernel_line(tui_body)
     flash = _kernel_line(flash_body)
 
+    from bty.web._releases import ARTIFACT_NAMES
+
     baseline_tokens = (
         "boot=live",
-        "fetch=${bty-base}/boot/bty-netboot-x86_64.squashfs",
+        f"fetch=${{bty-base}}/boot/{ARTIFACT_NAMES[2]}",
         "components",
         "console=tty0",
         "console=ttyS0,115200",
@@ -950,8 +963,14 @@ def test_live_env_chains_tag_boot_urls_with_mac() -> None:
     # bit, so the squashfs tag is redundant anyway. Pin BOTH directions
     # so neither the loop bug (no tag) nor the live-boot bug (squashfs
     # tagged) can recur.
+    # The netboot URLs carry ``-v{{ bty_version }}`` in their basenames
+    # (since the version-in-filename convention landed); the regex matches
+    # either the rendered version-suffixed form OR the raw-template
+    # placeholder form so the test stays meaningful before and after
+    # rendering.
     artifact_re = re.compile(
-        r"/boot/bty-netboot-x86_64\.(vmlinuz|initrd|squashfs)(\?mac=\{\{ mac \}\})?"
+        r"/boot/bty-netboot-x86_64-v[^.]+\.(vmlinuz|initrd|squashfs)"
+        r"(\?mac=\{\{ mac \}\})?"
     )
     violations: list[str] = []
     for name in ("ipxe_flash.j2", "ipxe_tui.j2"):

@@ -288,6 +288,11 @@ def create_app(
         autoescape=select_autoescape(enabled_extensions=("html",)),
         keep_trailing_newline=True,
     )
+    # Expose the running bty-web version as a Jinja global so the iPXE
+    # templates can construct versioned /boot/<name> URLs without each
+    # render-site repeating the context plumbing. The netboot fetcher
+    # writes files with this same version into BTY_BOOT_DIR.
+    jinja.globals["bty_version"] = bty.__version__
 
     def _fmt_ts(value: object) -> str:
         """Render a timestamp compactly as ``YYYY-MM-DD HH:MM:SS``.

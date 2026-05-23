@@ -40,6 +40,7 @@ from bty import catalog as _catalog
 from bty import flash as _flash
 from bty.web import _db as _bty_db
 from bty.web._app import create_app
+from bty.web._releases import ARTIFACT_NAMES
 
 TEST_SERVICE_USER = "bty-test"
 TEST_SECRET_KEY = "test-secret-not-for-prod-use"
@@ -296,7 +297,7 @@ def test_e2e_pxe_chain_cmdline_carries_all_expected_tokens(
 
     required = (
         "boot=live",
-        "fetch=${bty-base}/boot/bty-netboot-x86_64.squashfs",
+        f"fetch=${{bty-base}}/boot/{ARTIFACT_NAMES[2]}",
         "plymouth.enable=0",
         "modprobe.blacklist=nouveau",
         "nouveau.modeset=0",
@@ -516,7 +517,7 @@ def test_e2e_flash_always_alternates_flash_then_sanboot(app_client: TestClient) 
     boot_root: Path = app_client.app.state.boot_root  # type: ignore[attr-defined]
     # Stage the kernel artifact so the /boot fetch returns 200 like a
     # real iPXE chainload.
-    (boot_root / "bty-netboot-x86_64.vmlinuz").write_bytes(b"\0" * 64)
+    (boot_root / ARTIFACT_NAMES[0]).write_bytes(b"\0" * 64)
 
     mac = "aa:bb:cc:dd:ee:ff"
     _seed_flashable_machine(app_client, mac)
@@ -547,7 +548,7 @@ def test_e2e_flash_always_alternates_flash_then_sanboot(app_client: TestClient) 
     assert f"?mac={mac}" in body, "flash-chain artifact URLs must carry ?mac="
 
     # 2. The box boots the flasher: it fetches a /boot artifact w/ ?mac=.
-    a = app_client.get(f"/boot/bty-netboot-x86_64.vmlinuz?mac={mac}", headers=host)
+    a = app_client.get(f"/boot/{ARTIFACT_NAMES[0]}?mac={mac}", headers=host)
     assert a.status_code == 200, a.text
 
     # 3. Post-flash contact: one-shot sanboot of the just-flashed disk.
@@ -567,7 +568,7 @@ def test_e2e_boot_artifact_mac_arms_only_alternating_policies(app_client: TestCl
     spurious post-boot sanboot)."""
     boot_root: Path = app_client.app.state.boot_root  # type: ignore[attr-defined]
     state_path: Path = app_client.app.state.state_path  # type: ignore[attr-defined]
-    (boot_root / "bty-netboot-x86_64.vmlinuz").write_bytes(b"\0" * 64)
+    (boot_root / ARTIFACT_NAMES[0]).write_bytes(b"\0" * 64)
     host = {"Host": "bty.local:8080"}
 
     def _saw(mac: str) -> int:
@@ -591,7 +592,7 @@ def test_e2e_boot_artifact_mac_arms_only_alternating_policies(app_client: TestCl
         )
 
     for mac in (always, inventory, tui):
-        app_client.get(f"/boot/bty-netboot-x86_64.vmlinuz?mac={mac}", headers=host)
+        app_client.get(f"/boot/{ARTIFACT_NAMES[0]}?mac={mac}", headers=host)
 
     assert _saw(always) == 1, "flash-always machine should be armed by /boot?mac="
     assert _saw(inventory) == 1, "bty-inventory machine should be armed by /boot?mac="
@@ -604,7 +605,7 @@ def test_e2e_inventory_alternates_liveenv_then_sanboot(app_client: TestClient) -
     so every cycle re-collects the disk inventory before booting the
     disk. Mirrors the bty-flash-always loop-break, minus the flash."""
     boot_root: Path = app_client.app.state.boot_root  # type: ignore[attr-defined]
-    (boot_root / "bty-netboot-x86_64.vmlinuz").write_bytes(b"\0" * 64)
+    (boot_root / ARTIFACT_NAMES[0]).write_bytes(b"\0" * 64)
     mac = "ab:cd:ef:00:11:22"
     assert (
         app_client.put(
@@ -637,10 +638,7 @@ def test_e2e_inventory_alternates_liveenv_then_sanboot(app_client: TestClient) -
     assert app_client.get(f"/pxe/{mac}/plan", headers=host).json()["mode"] == "inventory"
 
     # 2. Box boots the live env: fetches a /boot artifact w/ ?mac=.
-    assert (
-        app_client.get(f"/boot/bty-netboot-x86_64.vmlinuz?mac={mac}", headers=host).status_code
-        == 200
-    )
+    assert app_client.get(f"/boot/{ARTIFACT_NAMES[0]}?mac={mac}", headers=host).status_code == 200
 
     # 3. Post-inventory contact: one-shot sanboot of the disk.
     body = app_client.get(f"/pxe/{mac}", headers=host).text
@@ -745,15 +743,15 @@ def test_e2e_boot_artifact_route_supports_head_with_correct_content_length(
     """
     boot_root: Path = app_client.app.state.boot_root  # type: ignore[attr-defined]
     payload = b"fake-vmlinuz" * 100
-    (boot_root / "bty-netboot-x86_64.vmlinuz").write_bytes(payload)
+    (boot_root / ARTIFACT_NAMES[0]).write_bytes(payload)
 
-    head_r = app_client.head("/boot/bty-netboot-x86_64.vmlinuz")
+    head_r = app_client.head(f"/boot/{ARTIFACT_NAMES[0]}")
     assert head_r.status_code == 200, head_r.text
     assert head_r.content == b""
     head_cl = head_r.headers.get("content-length")
     assert head_cl == str(len(payload)), head_cl
 
-    get_r = app_client.get("/boot/bty-netboot-x86_64.vmlinuz")
+    get_r = app_client.get(f"/boot/{ARTIFACT_NAMES[0]}")
     assert get_r.status_code == 200, get_r.text
     assert get_r.content == payload
     assert get_r.headers.get("content-length") == head_cl

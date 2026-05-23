@@ -19,6 +19,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from bty.web._app import create_app
+from bty.web._releases import ARTIFACT_NAMES
 
 TEST_SERVICE_USER = "bty-test"
 TEST_SECRET_KEY = "test-secret-not-for-prod-use"
@@ -47,9 +48,9 @@ def app_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Test
     bty_state_dir = tmp_path / "bty-state"
     bty_state_dir.mkdir()
     # Seed a fake live-env triplet so /boot/{name} tests can hit real files.
-    (boot_root / "bty-netboot-x86_64.vmlinuz").write_bytes(b"fake-kernel")
-    (boot_root / "bty-netboot-x86_64.initrd").write_bytes(b"fake-initrd")
-    (boot_root / "bty-netboot-x86_64.squashfs").write_bytes(b"fake-squashfs")
+    (boot_root / ARTIFACT_NAMES[0]).write_bytes(b"fake-kernel")
+    (boot_root / ARTIFACT_NAMES[1]).write_bytes(b"fake-initrd")
+    (boot_root / ARTIFACT_NAMES[2]).write_bytes(b"fake-squashfs")
     # Seed an image too so /images/{name} tests work.
     (image_root / "demo.qcow2").write_bytes(b"fake-image")
     # Pin BTY_STATE_DIR so ``catalog.toml`` upload / fetch-release
@@ -487,9 +488,9 @@ def test_put_boot_uploads_to_boot_root(app_client: TestClient) -> None:
     under boot_root - this is how the live trio gets onto the
     appliance via the API instead of scp / fetch-from-release."""
     body = b"vmlinuz-bytes-here"
-    r = app_client.put("/boot/bty-netboot-x86_64.vmlinuz", content=body, cookies=AUTH)
+    r = app_client.put(f"/boot/{ARTIFACT_NAMES[0]}", content=body, cookies=AUTH)
     assert r.status_code == 200
-    served = app_client.get("/boot/bty-netboot-x86_64.vmlinuz")
+    served = app_client.get(f"/boot/{ARTIFACT_NAMES[0]}")
     assert served.status_code == 200
     assert served.content == body
 
@@ -1288,9 +1289,9 @@ def test_pxe_flash_policy_returns_chain_with_args(
     body = r.text
     assert body.startswith("#!ipxe"), body
     assert "set bty-base http://bty.local:8080" in body
-    assert "kernel ${bty-base}/boot/bty-netboot-x86_64.vmlinuz" in body
-    assert "initrd ${bty-base}/boot/bty-netboot-x86_64.initrd" in body
-    assert "fetch=${bty-base}/boot/bty-netboot-x86_64.squashfs" in body
+    assert f"kernel ${{bty-base}}/boot/{ARTIFACT_NAMES[0]}" in body
+    assert f"initrd ${{bty-base}}/boot/{ARTIFACT_NAMES[1]}" in body
+    assert f"fetch=${{bty-base}}/boot/{ARTIFACT_NAMES[2]}" in body
     assert "console=ttyS0,115200" in body
     assert "bty.server=${bty-base}" in body
     assert "bty.mac=aa:bb:cc:dd:ee:ff" in body
@@ -1458,8 +1459,8 @@ def test_pxe_tui_policy_returns_interactive_chain(app_client: TestClient) -> Non
     body = r.text
     assert body.startswith("#!ipxe"), body
     assert "set bty-base http://bty.local:8080" in body
-    assert "kernel ${bty-base}/boot/bty-netboot-x86_64.vmlinuz" in body
-    assert "initrd ${bty-base}/boot/bty-netboot-x86_64.initrd" in body
+    assert f"kernel ${{bty-base}}/boot/{ARTIFACT_NAMES[0]}" in body
+    assert f"initrd ${{bty-base}}/boot/{ARTIFACT_NAMES[1]}" in body
     assert "bty.server=${bty-base}" in body
     assert "bty.mac=aa:bb:cc:dd:ee:ff" in body
     # Retired in v0.22.10: dispatch happens at /pxe/<mac>/plan, not
@@ -1806,9 +1807,7 @@ def test_upsert_resets_saw_flasher_boot(app_client: TestClient) -> None:
     mac = "aa:bb:cc:dd:ee:c4"
     # Make it bty-flash-always so the /boot fetch arms the bit.
     app_client.put(f"/machines/{mac}", json={"boot_mode": "bty-flash-always"}, cookies=AUTH)
-    app_client.get(
-        f"/boot/bty-netboot-x86_64.vmlinuz?mac={mac}", headers={"Host": "bty.local:8080"}
-    )
+    app_client.get(f"/boot/{ARTIFACT_NAMES[0]}?mac={mac}", headers={"Host": "bty.local:8080"})
 
     def _saw() -> int:
         from bty.web import _db as _bty_db
@@ -2652,7 +2651,7 @@ def test_ui_events_page_shows_source_ip_column(app_client: TestClient) -> None:
 
 
 def test_boot_artifact_serves_file(app_client: TestClient) -> None:
-    r = app_client.get("/boot/bty-netboot-x86_64.vmlinuz")
+    r = app_client.get(f"/boot/{ARTIFACT_NAMES[0]}")
     assert r.status_code == 200
     assert r.content == b"fake-kernel"
 

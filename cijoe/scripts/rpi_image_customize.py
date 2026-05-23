@@ -101,6 +101,15 @@ def main(args, cijoe):
     gz_path = Path(image["publish"]["gz_path"])
     gzip_level = int(image["publish"].get("gzip_level", 9))
 
+    # Splice -v<version> before .img.gz so the published filename
+    # self-identifies (e.g. bty-server-rpi-arm64-v0.25.5.img.gz).
+    # Mirrors img_gz_publish.py's convention for the x86 server.
+    bty_version = _read_bty_version(Path.cwd().parent)
+    if gz_path.name.endswith(".img.gz"):
+        versioned = gz_path.name[: -len(".img.gz")] + f"-v{bty_version}.img.gz"
+        gz_path = gz_path.with_name(versioned)
+        log.info(f"versioned gz_path: {gz_path}")
+
     # 1. Download
     if not source_path.exists():
         source_path.parent.mkdir(parents=True, exist_ok=True)
@@ -447,3 +456,13 @@ def _sha256(path: Path) -> str:
         for chunk in iter(lambda: fh.read(1 << 20), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+def _read_bty_version(repo_root):
+    """Read bty-lab's version from the repo's top-level pyproject.toml."""
+    pyproject = repo_root / "pyproject.toml"
+    for line in pyproject.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("version") and "=" in stripped:
+            return stripped.split("=", 1)[1].strip().strip('"').strip("'")
+    raise RuntimeError(f"could not find version line in {pyproject}")

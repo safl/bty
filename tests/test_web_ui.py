@@ -17,6 +17,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from bty.web._app import create_app
+from bty.web._releases import ARTIFACT_NAMES, SHA256_NAME
 
 TEST_SERVICE_USER = "ui-test-user"
 TEST_SECRET_KEY = "test-secret-not-for-prod-use"
@@ -693,7 +694,7 @@ def test_ui_boot_section_unrecognised_falls_back_to_list(client: TestClient) -> 
     # Lands on list: the artifacts inventory (the Fetch trigger moved
     # to the Release fetches page).
     assert "<th>File</th>" in body
-    assert "bty-netboot-x86_64.vmlinuz" in body
+    assert ARTIFACT_NAMES[0] in body
     # Sub-nav strip still renders (just the List pill now; DHCP / PXE
     # moved to Settings and TFTP folded into this view).
     assert 'aria-label="Section sub-navigation"' in body
@@ -1491,10 +1492,10 @@ def test_ui_boot_page_renders_with_artifact_state(client: TestClient) -> None:
     assert r.status_code == 200
     body = r.text
     for name in (
-        "bty-netboot-x86_64.vmlinuz",
-        "bty-netboot-x86_64.initrd",
-        "bty-netboot-x86_64.squashfs",
-        "bty-netboot-x86_64.sha256",
+        ARTIFACT_NAMES[0],
+        ARTIFACT_NAMES[1],
+        ARTIFACT_NAMES[2],
+        SHA256_NAME,
     ):
         assert name in body, name
     # Empty boot dir => four "missing" badges (warning kind).
@@ -2031,7 +2032,7 @@ def test_ui_settings_tftp_control_success_renders_green_flash(
     # Page-level marker: the netboot artifact filename only renders
     # on /ui/netboot, not on /ui/settings -- proves the response came
     # from _render_netboot_page.
-    assert "bty-netboot-x86_64.vmlinuz" in body
+    assert ARTIFACT_NAMES[0] in body
     # Event recorded.
     events = client.get(
         "/events",

@@ -86,7 +86,7 @@ def test_fetch_release_404_propagates_as_fetch_error(
 ) -> None:
     base_url, src = serve_artifacts
     # Drop a required file to provoke a 404.
-    (src / "bty-netboot-x86_64.vmlinuz").unlink()
+    (src / ARTIFACT_NAMES[0]).unlink()
     boot_dir = tmp_path / "boot"
 
     with pytest.raises(FetchError, match="HTTP 404"):
@@ -101,7 +101,7 @@ def test_fetch_release_sha256_mismatch_raises(
 ) -> None:
     base_url, src = serve_artifacts
     # Corrupt one file post-manifest so the digest no longer matches.
-    (src / "bty-netboot-x86_64.initrd").write_bytes(b"tampered")
+    (src / ARTIFACT_NAMES[1]).write_bytes(b"tampered")
     boot_dir = tmp_path / "boot"
 
     with pytest.raises(FetchError, match="sha256 mismatch"):
@@ -116,11 +116,11 @@ def test_fetch_release_atomic_install(serve_artifacts: tuple[str, Path], tmp_pat
     base_url, src = serve_artifacts
     boot_dir = tmp_path / "boot"
     boot_dir.mkdir()
-    sentinel = boot_dir / "bty-netboot-x86_64.vmlinuz"
+    sentinel = boot_dir / ARTIFACT_NAMES[0]
     sentinel.write_bytes(b"old-kernel")
 
     # Cause a failure.
-    (src / "bty-netboot-x86_64.squashfs").unlink()
+    (src / ARTIFACT_NAMES[2]).unlink()
     with pytest.raises(FetchError):
         fetch_release(boot_dir, base_url=base_url)
 
@@ -146,10 +146,10 @@ def test_verify_sha256_manifest_streams_large_files(tmp_path: Path) -> None:
     # 3 MiB of varied bytes so the streaming loop runs 3 chunks.
     large = bytes(range(256)) * (3 * 1024 * 4)
     assert len(large) > 1 << 20
-    artifact = files_dir / "bty-netboot-x86_64.vmlinuz"
+    artifact = files_dir / ARTIFACT_NAMES[0]
     artifact.write_bytes(large)
     digest = hashlib.sha256(large).hexdigest()
-    (files_dir / SHA256_NAME).write_text(f"{digest}  bty-netboot-x86_64.vmlinuz\n")
+    (files_dir / SHA256_NAME).write_text(f"{digest}  {ARTIFACT_NAMES[0]}\n")
 
     # Should succeed; bad checksum would raise.
     _verify_sha256_manifest(files_dir / SHA256_NAME, files_dir)
@@ -200,10 +200,10 @@ def test_missing_netboot_artifacts_empty_dir_returns_all(tmp_path: Path) -> None
 def test_inspect_boot_dir_reports_present_and_missing(tmp_path: Path) -> None:
     boot_dir = tmp_path / "boot"
     boot_dir.mkdir()
-    (boot_dir / "bty-netboot-x86_64.vmlinuz").write_bytes(b"present")
+    (boot_dir / ARTIFACT_NAMES[0]).write_bytes(b"present")
 
     states = {s.name: s for s in inspect_boot_dir(boot_dir)}
-    assert states["bty-netboot-x86_64.vmlinuz"].present
-    assert states["bty-netboot-x86_64.vmlinuz"].size == len(b"present")
-    assert states["bty-netboot-x86_64.initrd"].present is False
-    assert states["bty-netboot-x86_64.initrd"].size is None
+    assert states[ARTIFACT_NAMES[0]].present
+    assert states[ARTIFACT_NAMES[0]].size == len(b"present")
+    assert states[ARTIFACT_NAMES[1]].present is False
+    assert states[ARTIFACT_NAMES[1]].size is None

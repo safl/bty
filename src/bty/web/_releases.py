@@ -31,14 +31,22 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TypeAlias
 
-# Names match the artifacts the ``netboot-x86`` variant publishes
-# (see ``cijoe/scripts/live_build.py::PUBLISH_BASENAMES``).
+from bty import __version__ as _BTY_VERSION
+
+# Artifact filenames carry bty-web's running version so an operator can
+# tell which release each file came from at a glance, and so multiple
+# versions can coexist in BTY_BOOT_DIR during upgrades. The ``netboot-x86``
+# variant publishes the matching names (see
+# ``cijoe/scripts/live_build.py::PUBLISH_BASENAME_FMTS``); bty-web fetches
+# the trio that matches its OWN version -- not "latest" -- so the kernel
+# / initrd / squashfs that the iPXE template references are guaranteed
+# to be the ones built for this server's version.
 ARTIFACT_NAMES: tuple[str, ...] = (
-    "bty-netboot-x86_64.vmlinuz",
-    "bty-netboot-x86_64.initrd",
-    "bty-netboot-x86_64.squashfs",
+    f"bty-netboot-x86_64-v{_BTY_VERSION}.vmlinuz",
+    f"bty-netboot-x86_64-v{_BTY_VERSION}.initrd",
+    f"bty-netboot-x86_64-v{_BTY_VERSION}.squashfs",
 )
-SHA256_NAME = "bty-netboot-x86_64.sha256"
+SHA256_NAME = f"bty-netboot-x86_64-v{_BTY_VERSION}.sha256"
 ALL_NAMES = (*ARTIFACT_NAMES, SHA256_NAME)
 
 DEFAULT_REPO = "safl/bty"
@@ -160,13 +168,21 @@ def fetch_release(
     boot_dir: Path,
     *,
     repo: str | None = None,
-    tag: str = "latest",
+    tag: str | None = None,
     base_url: str | None = None,
     progress: FetchProgressCallback | None = None,
     cancel: FetchCancelCheck | None = None,
     on_artifact_start: Callable[[str], None] | None = None,
 ) -> FetchResult:
-    """Download all expected artifacts for ``tag`` into ``boot_dir``.
+    """Download the netboot trio for ``tag`` into ``boot_dir``.
+
+    ``tag`` defaults to ``v<bty.__version__>`` -- the netboot artifacts
+    bty-web fetches match the running server's version, NOT
+    GitHub's "latest" release. A v0.25.5 bty-web fetches v0.25.5
+    artifacts; an upgrade to v0.25.6 will (re-)fetch the v0.25.6 trio
+    on next fetch. Versioned filenames make multi-version coexistence
+    in BTY_BOOT_DIR safe, and the iPXE templates rendered by this
+    server reference the matching version too.
 
     ``base_url`` overrides the GitHub URL construction (used by tests
     to point at a local ``http.server`` instead of github.com).
@@ -187,6 +203,7 @@ def fetch_release(
     fetch.
     """
     repo = repo or os.environ.get(ENV_RELEASE_REPO) or DEFAULT_REPO
+    tag = tag or f"v{_BTY_VERSION}"
     if base_url is None:
         if tag == "latest":
             base_url = f"https://github.com/{repo}/releases/latest/download"

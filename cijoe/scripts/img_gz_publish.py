@@ -63,6 +63,15 @@ def main(args, cijoe):
     gz_path = Path(publish["gz_path"])
     level = int(publish.get("gzip_level", 9))
 
+    # Splice -v<version> before .img.gz so the published filename
+    # self-identifies (e.g. bty-server-x86_64-v0.25.5.img.gz). Mirrors
+    # usb_iso_build.py's PUBLISH_BASENAME_FMT convention.
+    bty_version = _read_bty_version(Path.cwd().parent)
+    if gz_path.name.endswith(".img.gz"):
+        versioned = gz_path.name[: -len(".img.gz")] + f"-v{bty_version}.img.gz"
+        gz_path = gz_path.with_name(versioned)
+        log.info(f"versioned gz_path: {gz_path}")
+
     if not qcow2_path.exists():
         log.error(f"Baked qcow2 not found: {qcow2_path}")
         return errno.ENOENT
@@ -111,3 +120,18 @@ def _default_image_name(cijoe) -> str:
     # don't churn when variant strings change.
     role = variant.split("-")[0]
     return f"bty-{role}-x86_64"
+
+
+def _read_bty_version(repo_root: Path) -> str:
+    """Read the bty-lab version from the repo's top-level pyproject.toml.
+
+    Mirrors :func:`usb_iso_build._read_bty_version`. Kept as a small
+    local duplicate rather than a shared helper module so the cijoe
+    scripts stay drop-in-runnable without a sys.path tweak.
+    """
+    pyproject = repo_root / "pyproject.toml"
+    for line in pyproject.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("version") and "=" in stripped:
+            return stripped.split("=", 1)[1].strip().strip('"').strip("'")
+    raise RuntimeError(f"could not find version line in {pyproject}")

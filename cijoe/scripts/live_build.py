@@ -48,10 +48,10 @@ from pathlib import Path
 # stamped version string.
 from usb_iso_build import _read_bty_version
 
-PUBLISH_BASENAMES = (
-    "bty-netboot-x86_64.vmlinuz",
-    "bty-netboot-x86_64.initrd",
-    "bty-netboot-x86_64.squashfs",
+PUBLISH_BASENAME_FMTS = (
+    "bty-netboot-x86_64-v{version}.vmlinuz",
+    "bty-netboot-x86_64-v{version}.initrd",
+    "bty-netboot-x86_64-v{version}.squashfs",
 )
 
 
@@ -114,6 +114,8 @@ def main(args, cijoe):
     # version on tty2 and can't match a booted target back to a
     # release.
     bty_version = _read_bty_version(cijoe_dir)
+    publish_basenames = tuple(fmt.format(version=bty_version) for fmt in PUBLISH_BASENAME_FMTS)
+    sha256_basename = f"bty-netboot-x86_64-v{bty_version}.sha256"
     log.info(f"Stamping bty version {bty_version} into live-build tree")
     err, _ = cijoe.run_local(
         f"sh -c 'grep -rlF __BTY_VERSION__ {build_dir} | "
@@ -161,9 +163,9 @@ def main(args, cijoe):
     squashfs = squashfses[0]
 
     publish_map = (
-        (kernels[0], publish_dir / PUBLISH_BASENAMES[0]),
-        (initrds[0], publish_dir / PUBLISH_BASENAMES[1]),
-        (squashfs, publish_dir / PUBLISH_BASENAMES[2]),
+        (kernels[0], publish_dir / publish_basenames[0]),
+        (initrds[0], publish_dir / publish_basenames[1]),
+        (squashfs, publish_dir / publish_basenames[2]),
     )
 
     # The artifacts are owned by root (live-build wrote them under sudo);
@@ -179,9 +181,9 @@ def main(args, cijoe):
         cijoe.run_local(f"sudo chown {uid}:{gid} {dst}")
         log.info(f"published {dst}")
 
-    sha256_path = publish_dir / "bty-netboot-x86_64.sha256"
+    sha256_path = publish_dir / sha256_basename
     err, _ = cijoe.run_local(
-        f"sh -c 'cd {publish_dir} && sha256sum {' '.join(PUBLISH_BASENAMES)} > {sha256_path}'"
+        f"sh -c 'cd {publish_dir} && sha256sum {' '.join(publish_basenames)} > {sha256_path}'"
     )
     if err:
         log.error("failed computing sha256 manifest")

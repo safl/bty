@@ -170,7 +170,8 @@
 </div>
 
 <script>
-// "Fetch latest artifacts" enqueues the release fetch, then hands off
+// "Fetch artifacts" enqueues the release fetch (the trio matching the running
+// bty-web's version, NOT GitHub's latest), then hands off
 // to the Release fetches page to watch it progress (the live jobs
 // table + cancel live there now).
 window.fetchAndWatch = function () {

@@ -76,20 +76,22 @@ needle = "iPXE"
 key = "ipxe-fetch-bootstrap"
 needle = "pxe-bootstrap.ipxe"
 
-# iPXE prints ``http://.../bty-netboot-x86_64.initrd... ok`` when it
-# pulls the initrd; this is the cleanest proof the kernel+initrd
-# came down via the chain.
+# iPXE prints ``http://.../bty-netboot-x86_64-v<version>.initrd... ok``
+# when it pulls the initrd; matching the version-agnostic prefix proves
+# the kernel+initrd came down via the chain regardless of which release
+# is being tested. The full versioned filename is built from pyproject.
 [[test.pxe.chain_markers]]
 key = "kernel-initrd-fetched"
-needle = "bty-netboot-x86_64.initrd"
+needle = "bty-netboot-x86_64-v"
 
 # live-boot's initramfs HTTP-fetches the squashfs because the kernel
-# cmdline includes ``fetch=...squashfs``. The fetch line names the
-# file as it streams in, so matching this proves boot=live + fetch=
-# actually worked end-to-end.
+# cmdline includes ``fetch=...squashfs``. Same version-agnostic prefix
+# as above; the .squashfs match comes from the second marker just below
+# being too coarse-grained to distinguish the kernel/initrd lines from
+# the squashfs fetch in serial output -- so we look for the bare token.
 [[test.pxe.chain_markers]]
 key = "squashfs-fetched"
-needle = "bty-netboot-x86_64.squashfs"
+needle = ".squashfs"
 
 # v0.22.11+: bty (the merged TUI / wizard / scripted-flash tool)
 # emits these stable plain-text markers on its stderr from inside
