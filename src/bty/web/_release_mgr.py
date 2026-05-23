@@ -51,6 +51,37 @@ _TAG_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 
 
 @dataclass
+class ReleaseArtifactState:
+    """Live state of one artifact within a release-fetch job.
+
+    A release fetch grabs the netboot trio + the sha256 manifest --
+    four files total. Each file gets its own ``ReleaseArtifactState``
+    so the workers UI can render per-file rows + the navbar's
+    Downloads icon can count per-file (clicking "Fetch artifacts"
+    increments the counter by 4, finishing one drops it to 3).
+    """
+
+    name: str  # filename, e.g. "bty-netboot-x86_64-v0.25.7.vmlinuz"
+    status: str = "queued"  # queued | running | completed | cancelled | failed
+    bytes_done: int = 0
+    bytes_total: int | None = None
+    error: str | None = None
+    started_at: float | None = None
+    finished_at: float | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "status": self.status,
+            "bytes_done": self.bytes_done,
+            "bytes_total": self.bytes_total,
+            "error": self.error,
+            "started_at": self.started_at,
+            "finished_at": self.finished_at,
+        }
+
+
+@dataclass
 class ReleaseFetchState:
     """Live state of one release-fetch job.
 
@@ -58,6 +89,13 @@ class ReleaseFetchState:
     ``bytes_done`` / ``bytes_total`` / timestamps as the fetch
     proceeds, and the API serialises the current snapshot for
     ``GET /boot/releases``.
+
+    ``bytes_done`` / ``bytes_total`` / ``artifact`` reflect the
+    artifact CURRENTLY streaming (existing behaviour, used by
+    /ui/netboot). The newer ``artifacts`` dict carries one
+    :class:`ReleaseArtifactState` per file in the trio + manifest,
+    populated at enqueue time so the workers page can render queued
+    rows immediately and the navbar Downloads counter is per-file.
     """
 
     tag: str  # the tag the operator requested ("latest" or e.g. "v1.2.3") -- the job key
@@ -69,6 +107,10 @@ class ReleaseFetchState:
     finished_at: float | None = None
     error: str | None = None
     base_url: str | None = None  # populated on completion, for operator audit
+    # Per-artifact states, keyed by filename. Empty for backfilled
+    # states (events log doesn't carry per-artifact detail) and
+    # populated at enqueue time for live jobs.
+    artifacts: dict[str, ReleaseArtifactState] = field(default_factory=dict)
     # Threading.Event because the actual IO happens in a worker
     # thread (via ``asyncio.to_thread``); ``asyncio.Event`` is not
     # thread-safe to query from inside the thread.
@@ -88,6 +130,7 @@ class ReleaseFetchState:
             "finished_at": self.finished_at,
             "error": self.error,
             "base_url": self.base_url,
+            "artifacts": [a.to_dict() for a in self.artifacts.values()],
         }
 
 
@@ -213,6 +256,13 @@ class ReleaseFetchManager(_BaseAsyncManager[ReleaseFetchState]):
             if existing is not None and existing.status in ENQUEUE_DEDUP_STATES:
                 return existing
             state = ReleaseFetchState(tag=tag)
+            # Pre-populate the per-artifact dict at enqueue time. Lets
+            # the workers UI render all four queued rows the moment the
+            # operator presses "Fetch artifacts" -- no waiting for the
+            # worker to call ``on_artifact_start`` to discover the file
+            # list lazily.
+            for name in _releases.ALL_NAMES:
+                state.artifacts[name] = ReleaseArtifactState(name=name)
             self._states[tag] = state
             await self._queue.put(tag)
             return state
@@ -227,6 +277,13 @@ class ReleaseFetchManager(_BaseAsyncManager[ReleaseFetchState]):
         def _progress(done: int, total: int | None) -> None:
             state.bytes_done = done
             state.bytes_total = total
+            # Mirror onto the current per-artifact row so the workers
+            # UI can render per-file progress without translating from
+            # the parent state's "current artifact" field.
+            cur = state.artifacts.get(state.artifact or "")
+            if cur is not None:
+                cur.bytes_done = done
+                cur.bytes_total = total
 
         def _cancel() -> bool:
             return cancel_event.is_set()
@@ -236,9 +293,31 @@ class ReleaseFetchManager(_BaseAsyncManager[ReleaseFetchState]):
             # /ui/netboot live UI ticks per-file rather than carrying
             # the previous file's terminal value into the next
             # file's "0 / total" initial render.
+            now = time.time()
+            # Mark the previously-running artifact (if any) as
+            # completed -- ``fetch_release`` only advances to the
+            # next artifact once the prior one has finished
+            # streaming successfully.
+            prev = state.artifacts.get(state.artifact or "")
+            if prev is not None and prev.status == "running":
+                prev.status = "completed"
+                prev.finished_at = now
+                if prev.bytes_total is not None:
+                    prev.bytes_done = prev.bytes_total
             state.artifact = name
             state.bytes_done = 0
             state.bytes_total = None
+            cur = state.artifacts.get(name)
+            if cur is None:
+                # Defensive: file the worker is starting on isn't in
+                # the pre-populated set (release script picked up an
+                # extra artifact). Add it so the row appears in the UI.
+                cur = ReleaseArtifactState(name=name)
+                state.artifacts[name] = cur
+            cur.status = "running"
+            cur.started_at = now
+            cur.bytes_done = 0
+            cur.bytes_total = None
 
         # Resolve the release repo from the operator override (if any)
         # at fetch time, so a Settings change takes effect without a
@@ -294,6 +373,32 @@ class ReleaseFetchManager(_BaseAsyncManager[ReleaseFetchState]):
             state.error = error
             if base_url is not None:
                 state.base_url = base_url
+            # Propagate the terminal verdict onto the per-artifact rows.
+            # On success every artifact landed -> mark each completed.
+            # On failure the artifact currently streaming (if any) is
+            # the one that failed; queued siblings never started so
+            # they're cancelled.  On cancellation everything not yet
+            # completed is cancelled.
+            now_t = state.finished_at
+            for a in state.artifacts.values():
+                if final_status == "completed":
+                    if a.status != "completed":
+                        a.status = "completed"
+                        a.finished_at = now_t
+                        if a.bytes_total is not None:
+                            a.bytes_done = a.bytes_total
+                elif final_status == "cancelled":
+                    if a.status not in ("completed", "failed"):
+                        a.status = "cancelled"
+                        a.finished_at = now_t
+                else:  # failed
+                    if a.status == "running":
+                        a.status = "failed"
+                        a.error = error
+                        a.finished_at = now_t
+                    elif a.status == "queued":
+                        a.status = "cancelled"
+                        a.finished_at = now_t
 
         # Log terminal outcomes so the audit trail is symmetric:
         # successful fetches land ``netboot.artifacts.fetched``, failures
