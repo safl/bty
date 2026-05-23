@@ -63,10 +63,17 @@ steps:
     # ``After=dev-disk-by-label-BTY_IMAGES.device`` -- under Ventoy
     # that device never appears, so systemd waits its full
     # ``DefaultDeviceTimeoutSec`` (90s) before giving up and letting
-    # the chain proceed. Without this wait, our probe runs before
-    # discover even tries to mount anything. ``--wait`` makes
-    # ``is-active`` block until the system finishes booting.
-    - "systemctl is-active --wait bty-images-discover.service || true"
+    # the chain proceed.
+    #
+    # ``systemctl is-active --wait <svc>`` was the wrong tool: it
+    # only blocks while a unit is in a *transitioning* state
+    # (activating / deactivating). A unit with a queued-but-not-
+    # yet-started job (the Ventoy case here) is plain ``inactive``
+    # and ``--wait`` returns immediately. ``is-system-running
+    # --wait`` is the right primitive: it blocks until systemd
+    # leaves the ``starting`` state, which means every queued job
+    # has resolved.
+    - "systemctl is-system-running --wait || true"
     - "ls -la /dev/disk/by-label/ 2>&1 || true"
     - "lsblk -f"
     - "blkid"
@@ -85,7 +92,7 @@ steps:
     # Re-wait defensively in case the probe's barrier somehow didn't
     # block (e.g. a future systemctl behaviour change). Cheap: this
     # returns immediately if boot already settled.
-    - "systemctl is-active --wait bty-images-discover.service || true"
+    - "systemctl is-system-running --wait || true"
     # No BTY_IMAGES on the booted device (Ventoy loop-boot contract).
     - "test ! -e /dev/disk/by-label/BTY_IMAGES"
     # bty-images-discover finished + bind-mount happened.
