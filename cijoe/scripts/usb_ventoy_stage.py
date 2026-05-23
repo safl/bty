@@ -141,11 +141,26 @@ def main(args, cijoe):
         cijoe.run_local(f"sudo lsblk -bno NAME,SIZE,TYPE,LABEL,FSTYPE {loop_dev}")
 
         ventoy_data = f"{loop_dev}p1"
+        # Try kernel exfat first (fastest, what dev boxes with
+        # linux-modules-extra have), fall back to mount.exfat-fuse.
+        # Ubuntu's ``mount -t exfat`` does NOT auto-fall-back to FUSE
+        # when the kernel module is missing -- you have to call the
+        # FUSE helper explicitly. GHA's ubuntu-latest ships a stripped
+        # kernel without exfat in the base image (exfat lives in
+        # ``linux-modules-extra-$(uname -r)`` which isn't installed by
+        # default); the workflow's ``apt install exfat-fuse`` provides
+        # ``/sbin/mount.exfat-fuse`` as the userspace path.
         log.info(f"mounting {ventoy_data}")
-        err, _ = cijoe.run_local(f"sudo mount {ventoy_data} {mount_dir}")
+        err, _ = cijoe.run_local(f"sudo mount -t exfat {ventoy_data} {mount_dir}")
         if err:
-            log.error(f"mount {ventoy_data} failed (kernel exfat? exfat-fuse?)")
-            return errno.EIO
+            log.info("kernel exfat unavailable; falling back to mount.exfat-fuse")
+            err, _ = cijoe.run_local(f"sudo mount.exfat-fuse {ventoy_data} {mount_dir}")
+            if err:
+                log.error(
+                    f"both kernel and FUSE exfat mounts failed on {ventoy_data} "
+                    f"(install ``exfat-fuse`` or ``linux-modules-extra-$(uname -r)``)"
+                )
+                return errno.EIO
 
         try:
             # 4. Drop the .iso at the root of the Ventoy data partition.
