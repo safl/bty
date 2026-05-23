@@ -1,0 +1,26 @@
+doc: |
+  USB auto-grow end-to-end test
+  =============================
+
+  Verifies ``bty-usb-grow.service`` extends the BTY_IMAGES exFAT
+  partition from its 1 MiB bake-time minimum to fill the underlying
+  disk on first boot. The 1 MiB bake size keeps the .iso lean so it
+  ships uncompressed under GitHub's 2 GiB asset cap; without a working
+  grow-on-first-boot, every operator would dd a 200 MiB image onto a
+  64 GB stick and only get 1 MiB of usable BTY_IMAGES. This test is
+  the contract.
+
+  Steps:
+
+  1. ``usb_grow_test`` -- copies the built bty-usb-x86_64.iso into a
+     4 GiB raw file (the trailing zero-filled space simulates an empty
+     USB stick tail), boots it headless in QEMU with serial captured,
+     waits a fixed boot+grow window, then asserts via ``parted`` that
+     the trailing partition grew well past 1 MiB.
+
+  Wall clock: ~3-4 minutes per run. Serial log lands in the cijoe run
+  dir as an artifact of the report.
+
+steps:
+- name: usb_grow_test
+  uses: usb_grow_test

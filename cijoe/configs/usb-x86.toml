@@ -2,17 +2,18 @@
 #
 # Drives Debian's live-build to produce a hybrid ISO that boots both
 # from CD media and from a USB stick (BIOS + UEFI). The ISO ships
-# uncompressed (``bty-usb-x86_64.iso``) because the trimmed-to-1 MiB
-# artifact - including the trailing 4 GiB BTY_IMAGES exFAT
-# partition - exceeds GitHub's 2 GiB per-release-asset upload limit.
-# Operators on a GUI flasher (Balena Etcher / Raspberry Pi Imager /
-# Rufus DD-mode) open the .iso directly: no decompress step
-# .gz natively, no extra step needed. CLI:
+# uncompressed (``bty-usb-x86_64.iso``) at ~200 MiB: BTY_IMAGES is
+# just 1 MiB at bake time (auto-grows to fill the stick on first boot
+# via ``bty-usb-grow.service``), so the artifact is comfortably under
+# GitHub's 2 GiB per-release-asset limit without compression.
+#
+# Operators on a GUI flasher (Etcher / RPi Imager / Rufus DD-mode)
+# open the .iso directly -- no decompress step. CLI:
 #
 #     dd if=bty-usb-x86_64.iso of=/dev/sdX bs=4M
 #
-# (No decompress step -- v0.25.4+ ships .iso uncompressed.) Before
-# dropping onto a Ventoy stick; Ventoy doesn't auto-decompress.
+# Ventoy users: drop the .iso onto the Ventoy data partition; no
+# decompress step needed since v0.25.4.
 #
 # This is the live-build replacement for an earlier cloud-init bake
 # of the ``usb-x86`` variant; the cloud-init path was retired in

@@ -157,6 +157,14 @@ build:
 test-pxe:
 	cd cijoe && cijoe tasks/test-pxe.yaml --monitor -c configs/test-pxe.toml
 
+# ---------- USB auto-grow QEMU test -------------------------------------
+# Verifies bty-usb-grow.service extends BTY_IMAGES from 1 MiB at bake
+# to fill the underlying disk on first boot. Needs the bty-usb-x86_64.iso
+# built locally (``make build VARIANT=usb-x86``) or pre-staged under
+# ~/system_imaging/disk/. Wall clock ~3-4 min per run.
+test-usb-grow:
+	cd cijoe && cijoe tasks/test-usb-grow.yaml --monitor -c configs/test-usb-grow.toml
+
 # ---------- Docker ------------------------------------------------------
 
 # Local single-arch build of the bty-web container. Stages the

@@ -1,0 +1,11 @@
+# bty USB auto-grow test - config
+
+[cijoe.workflow]
+fail_fast = true
+
+[test.usb_grow]
+# Where the built ``bty-usb-x86_64.iso`` was published. Mirrors the
+# usb-x86 build's default and the test-pxe artifact-download
+# destination so the same path works locally (after ``make build
+# VARIANT=usb-x86``) and in CI (after ``actions/download-artifact``).
+iso_dir = "{{ local.env.HOME }}/system_imaging/disk"
