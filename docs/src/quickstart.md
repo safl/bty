@@ -40,13 +40,24 @@ from a checkout.
 
 ```bash
 mkdir -p ~/system_imaging/disk && cd ~/system_imaging/disk
-curl -fLO https://github.com/safl/bty/releases/latest/download/bty-usb-x86_64.iso
-curl -fLO https://github.com/safl/bty/releases/latest/download/bty-usb-x86_64.iso.sha256
-sha256sum -c bty-usb-x86_64.iso.sha256
+
+# Discover the current release via release.toml (stable URL); each
+# artifact's filename carries the version, so the manifest is the
+# single source of truth for "what's the latest".
+curl -fsSL -o release.toml \
+  https://github.com/safl/bty/releases/latest/download/release.toml
+VERSION=$(grep -E '^version *=' release.toml | head -1 | cut -d'"' -f2)
+echo "Latest bty release: v$VERSION"
+
+curl -fLO https://github.com/safl/bty/releases/download/v$VERSION/bty-usb-x86_64-v$VERSION.iso
+curl -fLO https://github.com/safl/bty/releases/download/v$VERSION/bty-usb-x86_64-v$VERSION.iso.sha256
+sha256sum -c bty-usb-x86_64-v$VERSION.iso.sha256
 ```
 
-`releases/latest/download/<name>` always points at the newest tag;
-swap `latest` for a specific tag (e.g. `v0.11.1`) if you want to pin.
+`releases/latest/download/release.toml` is a stable URL (GitHub
+redirects to the newest tag's copy) so the lookup never breaks across
+releases. To pin a specific version, swap `latest` for a tag (e.g.
+`v0.25.5`) and skip the `release.toml` step.
 
 **Build from source** (when you need to modify the image):
 
@@ -61,9 +72,9 @@ The build runs Debian's `live-build` (debootstrap + mksquashfs +
 mkinitramfs) to produce a hybrid ISO, appends a writable `BTY_IMAGES`
 exFAT partition, and gzip-compresses the result. Emits:
 
-- `~/system_imaging/disk/bty-usb-x86_64.iso` - distributable
+- `~/system_imaging/disk/bty-usb-x86_64-v<version>.iso` - distributable
   artifact (the file you decompress + `dd` to a USB stick).
-- `~/system_imaging/disk/bty-usb-x86_64.iso.sha256` - checksum.
+- `~/system_imaging/disk/bty-usb-x86_64-v<version>.iso.sha256` - checksum.
 
 ## Flash a USB stick
 
@@ -72,7 +83,7 @@ exFAT partition, and gzip-compresses the result. Emits:
 lsblk
 
 # /dev/sdX is the USB stick (NOT your local system disk).
-dd if=~/system_imaging/disk/bty-usb-x86_64.iso \
+dd if=~/system_imaging/disk/bty-usb-x86_64-v$VERSION.iso \
        sudo dd of=/dev/sdX bs=4M status=progress conv=fsync
 sync
 ```
