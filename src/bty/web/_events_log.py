@@ -116,6 +116,9 @@ KNOWN_EVENT_KINDS: tuple[str, ...] = (
     "netboot.tftp.controlled",
     "netboot.tftp.control_failed",
     "settings.upstream.updated",
+    "backup.created",
+    "backup.failed",
+    "backup.pruned",
     "auth.login.succeeded",
     "auth.login.failed",
     "auth.logout",
@@ -133,6 +136,7 @@ KNOWN_SUBJECT_KINDS: tuple[str, ...] = (
     "netboot",
     "settings",
     "auth",
+    "backup",
 )
 
 # Catalogue of ``actor`` values the rest of bty-web emits. Powers
