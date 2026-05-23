@@ -65,14 +65,28 @@ def main(args, cijoe):
     with test_disk.open("r+b") as fh:
         fh.truncate(TEST_DISK_BYTES)
 
-    # Sanity-check the inputs that the bake produces. If the BTY_IMAGES
-    # partition isn't visible on the file BEFORE we boot, the test would
-    # be measuring something other than auto-grow.
-    log.info("pre-boot partition table (parted):")
-    err, _ = cijoe.run_local(f"parted -ms {test_disk} unit B print")
+    # Sanity-check the inputs by attaching the file as a loop device with
+    # partition discovery (``losetup -fP``) -- that's the same view of the
+    # disk the kernel inside the QEMU VM will get, and also the view
+    # parted understands (parted reading the iso-hybrid file directly
+    # trips on the 2048-vs-512 sector mismatch + reports the table as
+    # ``unknown``; via a loop device the kernel does the sector math
+    # before parted sees it).
+    log.info("pre-boot inspection via loop device:")
+    err, out = cijoe.run_local(f"sudo losetup -fP --show {test_disk}")
     if err:
-        log.error(f"pre-boot parted failed (err={err})")
+        log.error(f"losetup -fP failed (err={err})")
         return errno.EIO
+    loop_dev = out.output().strip().splitlines()[-1].strip() if hasattr(out, "output") else ""
+    if not loop_dev.startswith("/dev/loop"):
+        log.error(f"unexpected losetup output: {out!r}")
+        return errno.EIO
+    log.info(f"loop device: {loop_dev}")
+    try:
+        cijoe.run_local("sudo udevadm settle --timeout=10")
+        cijoe.run_local(f"sudo parted -ms {loop_dev} unit B print")
+    finally:
+        cijoe.run_local(f"sudo losetup -d {loop_dev}")
 
     # Single QEMU run, wall-clocked by ``timeout``. ``-enable-kvm`` requires
     # /dev/kvm; the release.yml job installs cpu-checker + drops the udev
@@ -103,13 +117,27 @@ def main(args, cijoe):
     else:
         log.error(f"serial log NOT created at {serial_log} -- qemu likely never started")
 
-    # Post-boot inspection. The bty-usb-grow service rewrites the partition
-    # table via parted resizepart + mkfs.exfat; the kernel ack/sync flushes
-    # the new table to disk before the unit reports success, so a parted
-    # read of the disk image FILE here is authoritative even though the VM
-    # was killed.
-    log.info("post-boot partition table (parted):")
-    err, parted_out = cijoe.run_local(f"parted -ms {test_disk} unit B print")
+    # Post-boot inspection via a fresh loop device. bty-usb-grow inside
+    # the VM rewrites the partition table via parted resizepart +
+    # mkfs.exfat; the kernel ack/sync flushes the new table to disk
+    # before the unit reports success, so a parted read here (through
+    # losetup -P so the kernel does the geometry) is authoritative
+    # even though the VM is gone.
+    log.info("post-boot inspection via loop device:")
+    err, out = cijoe.run_local(f"sudo losetup -fP --show {test_disk}")
+    if err:
+        log.error(f"post-boot losetup -fP failed (err={err})")
+        return errno.EIO
+    loop_dev = out.output().strip().splitlines()[-1].strip() if hasattr(out, "output") else ""
+    if not loop_dev.startswith("/dev/loop"):
+        log.error(f"unexpected losetup output: {out!r}")
+        return errno.EIO
+    log.info(f"loop device: {loop_dev}")
+    try:
+        cijoe.run_local("sudo udevadm settle --timeout=10")
+        err, parted_out = cijoe.run_local(f"sudo parted -ms {loop_dev} unit B print")
+    finally:
+        cijoe.run_local(f"sudo losetup -d {loop_dev}")
     if err:
         log.error(f"post-boot parted failed (err={err})")
         return errno.EIO
