@@ -165,6 +165,15 @@ test-pxe:
 test-usb-grow:
 	cd cijoe && cijoe tasks/test-usb-grow.yaml --monitor -c configs/test-usb-grow.toml
 
+# ---------- USB Ventoy-boot QEMU test -----------------------------------
+# Real Ventoy install on a 4 GiB loop-attached disk, bty .iso + sentinel
+# image + catalog.toml dropped on the data partition, boots via Ventoy,
+# asserts the bty wizard's discovery surfaces both the local image and
+# the catalog entries. Wall clock ~5-7 min per run + a one-time Ventoy
+# tarball download.
+test-usb-ventoy:
+	cd cijoe && cijoe tasks/test-usb-ventoy.yaml --monitor -c configs/test-usb-ventoy.toml
+
 # ---------- Docker ------------------------------------------------------
 
 # Local single-arch build of the bty-web container. Stages the

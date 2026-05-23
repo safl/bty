@@ -1,0 +1,122 @@
+doc: |
+  bty + Ventoy end-to-end test
+  ============================
+
+  Verifies bty boots correctly when an operator does what an operator
+  actually does with Ventoy: install Ventoy on a stick, drop the bty
+  .iso onto it alongside their own image files + a catalog.toml, boot.
+
+  The Ventoy boot path is fundamentally different from the dd'd-USB
+  path:
+
+  - The .iso is loop-mounted by Ventoy, not flashed onto a disk -- the
+    kernel sees a CD-ROM-like device, with NO BTY_IMAGES partition.
+    ``bty-usb-grow.service`` MUST skip gracefully.
+  - Operator's image files + catalog live on the Ventoy *data*
+    partition (a separate block device the kernel enumerates).
+    ``bty-images-discover.service`` MUST find them + bind-mount the
+    matching directory at the canonical ``/var/lib/bty/images`` so
+    the wizard reads them via its normal image-root scan.
+  - bty's wizard (TUI) MUST see both the local image AND the
+    catalog.toml's entries through the same discovery code it uses
+    everywhere else.
+
+  All four contracts checked in-VM via the ``usb_ventoy_guest`` SSH
+  transport. The asserts run through ``/opt/bty/venv/bin/python3``
+  and import the wizard's own ``_list_local_images`` + the
+  ``bty.catalog`` loader -- same code paths the bty TUI runs.
+
+steps:
+- name: stage_ventoy_disk
+  uses: usb_ventoy_stage
+
+- name: guest_start
+  uses: qemu.guest_start
+  with:
+    guest_name: usb-ventoy
+
+- name: wait_for_guest_ssh
+  uses: core.wait_for_transport
+  with:
+    state: up
+    transport_name: usb_ventoy_guest
+    timeout: 300
+
+- name: probe_discovery_state
+  uses: core.cmdrunner
+  with:
+    transport: usb_ventoy_guest
+    commands:
+    - "ls -la /dev/disk/by-label/ 2>&1 || true"
+    - "lsblk -f"
+    - "mount | grep /var/lib/bty/images || echo NO_BIND_MOUNT"
+    - "ls -la /var/lib/bty/images/"
+    - "systemctl status bty-usb-grow.service --no-pager --full || true"
+    - "systemctl status bty-images-discover.service --no-pager --full || true"
+    - "journalctl -u bty-images-discover.service --no-pager --no-hostname || true"
+
+- name: assert_ventoy_contract
+  uses: core.cmdrunner
+  with:
+    transport: usb_ventoy_guest
+    commands:
+    # No BTY_IMAGES on the booted device (Ventoy loop-boot contract).
+    - "test ! -e /dev/disk/by-label/BTY_IMAGES"
+    # bty-images-discover finished + bind-mount happened.
+    - "systemctl is-active bty-images-discover.service"
+    - "mountpoint -q /var/lib/bty/images"
+
+- name: assert_wizard_sees_local_image
+  uses: core.cmdrunner
+  with:
+    transport: usb_ventoy_guest
+    commands:
+    # The wizard's discovery code (`_list_local_images`) MUST surface
+    # the sentinel image the stage step dropped on the Ventoy data
+    # partition.
+    - |
+      /opt/bty/venv/bin/python3 - <<'PY'
+      from pathlib import Path
+      from bty import images
+      from bty.tui import _app as tui
+      rows = tui._list_local_images(images.default_image_root())
+      names = [r.name for r in rows]
+      assert "demo-bty-ventoy-test.img.gz" in names, (
+          f"sentinel image not in TUI rows: {names}"
+      )
+      print(f"OK: TUI sees {len(rows)} local image(s): {names}")
+      PY
+
+- name: assert_wizard_sees_catalog
+  uses: core.cmdrunner
+  with:
+    transport: usb_ventoy_guest
+    commands:
+    # The wizard's catalog loader (`bty.catalog.load`) -- which the
+    # SELECT_CATALOG screen's [c] custom path uses for a file source
+    # -- MUST parse the operator-dropped catalog.toml and surface its
+    # entries.
+    - |
+      /opt/bty/venv/bin/python3 - <<'PY'
+      from pathlib import Path
+      from bty import catalog
+      cat = catalog.load(Path("/var/lib/bty/images/catalog.toml"))
+      names = [e.name for e in cat]
+      assert "ventoy-test-fedora-sysdev" in names, (
+          f"catalog entry not loaded: {names}"
+      )
+      print(f"OK: catalog loaded {len(names)} entry/ies: {names}")
+      PY
+
+- name: poweroff_guest
+  uses: core.cmdrunner
+  with:
+    transport: usb_ventoy_guest
+    commands:
+    - "systemctl poweroff -i || poweroff -f"
+
+- name: wait_for_termination
+  uses: qemu.guest_wait_for_termination
+  with:
+    guest_name: usb-ventoy
+    timeout: 60

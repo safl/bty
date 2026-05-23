@@ -1,0 +1,50 @@
+# bty USB Ventoy-boot test - cijoe config
+#
+# Verifies an operator's realistic Ventoy workflow:
+#   1. Install Ventoy onto a USB stick.
+#   2. Drop bty-usb-x86_64.iso + image files + a catalog.toml onto the
+#      Ventoy data partition (under bty-images/).
+#   3. Boot the stick; Ventoy menu auto-selects the only ISO + chains
+#      into the bty live env.
+#   4. ``bty-usb-grow.service`` skips correctly (no BTY_IMAGES partition
+#      on the booted device -- the .iso is loop-mounted, not dd'd).
+#   5. ``bty-images-discover.service`` finds the operator's drop on the
+#      Ventoy data partition and bind-mounts ``bty-images/`` at
+#      ``/var/lib/bty/images``.
+#   6. The bty wizard's discovery code sees both the operator's image
+#      file AND the catalog.toml's entries.
+
+[cijoe.task]
+fail_fast = true
+
+[qemu]
+img_bin = "qemu-img"
+
+[qemu.systems.x86_64]
+bin = "qemu-system-x86_64"
+
+[qemu.guests.usb-ventoy]
+path = "{{ local.env.HOME }}/system_imaging/usb-ventoy"
+system_label = "x86_64"
+system_args.kwa = { cpu = "host", smp = 2, m = "1G", accel = "kvm" }
+# IDE-hd: Ventoy's bootloader (a chainloaded GRUB) reads via BIOS
+# INT13 same as SYSLINUX -- virtio-blk is invisible to it. ``-boot d``
+# would be the CD-ROM hint; for a USB-stick-with-Ventoy emulation we
+# present as IDE-hd so the BIOS sees a bootable hard disk.
+system_args.raw = "-drive file={{ local.env.HOME }}/system_imaging/usb-ventoy/disk.img,format=raw,if=ide -no-reboot"
+# Distinct port from test-usb-grow (12222) so both tests can co-exist
+# locally during development.
+system_args.tcp_forward = { host = 12223, guest = 22 }
+
+[cijoe.transport.usb_ventoy_guest]
+username = "root"
+password = "bty"
+hostname = "localhost"
+port = 12223
+
+[test.usb_ventoy]
+iso_dir = "{{ local.env.HOME }}/system_imaging/disk"
+# Pinned Ventoy version so the test is reproducible. Bump deliberately
+# when validating a newer release; this is the version Ventoy2Disk.sh
+# we test against, not the version the operator must use in production.
+ventoy_version = "1.1.05"
