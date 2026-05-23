@@ -43,8 +43,8 @@ import bty
 from bty import catalog as _catalog
 from bty import images
 from bty import oras as _oras
+from bty.web import _backup, _db, _hash, _models, _release_mgr, _settings_store, _ui
 from bty.web import _catalog as _web_catalog
-from bty.web import _db, _hash, _models, _release_mgr, _settings_store, _ui
 from bty.web._auth import SESSION_COOKIE, require_auth
 from bty.web._events import MachineEvent, MachineEventBus, sse_format
 from bty.web._events_log import acknowledge_event as _acknowledge_event
@@ -98,6 +98,13 @@ def create_app(
     """
     resolved_image_root: Path = image_root or images.default_image_root()
     resolved_boot_root: Path = boot_root or (state_path.parent / "boot")
+    # Scheduled + on-demand backups land under ``backups/`` next to
+    # state.db so they survive the same migrate-the-state-dir flow as
+    # the image cache. Operators wanting them off the OS disk override
+    # via ``BTY_BACKUP_DIR``.
+    resolved_backups_root: Path = Path(
+        os.environ.get("BTY_BACKUP_DIR") or (state_path.parent / "backups")
+    )
     event_bus = MachineEventBus()
 
     # Optional catalog file + cache + DownloadManager. If no
@@ -143,6 +150,7 @@ def create_app(
     download_manager = _web_catalog.DownloadManager()
     hash_manager = _hash.HashManager()
     release_fetch_manager = _release_mgr.ReleaseFetchManager()
+    backup_manager = _backup.BackupManager()
 
     @asynccontextmanager
     async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -168,6 +176,16 @@ def create_app(
         # because fetching two GitHub releases in parallel is
         # operator-confusing and bandwidth-saturating.
         release_fetch_manager.start(resolved_boot_root, state_path=state_path)
+        # Backup manager: powers ``/workers/backups`` + the Backup
+        # tab's "Back up now" button. Wraps ``_portability.export_bundle``
+        # so a scheduled / on-demand backup ships the same operator-
+        # owned bundle the ``bty-web export`` CLI does.
+        backup_manager.start(
+            state_path,
+            resolved_image_root,
+            resolved_backups_root,
+            bty_version=bty.__version__,
+        )
         # Auto-import: ensure every dir-scan file under
         # ``resolved_image_root`` has a catalog_entries row keyed by
         # ``bty_image_ref = sha256("file://<rel-path>")``, then enqueue
@@ -214,6 +232,7 @@ def create_app(
                 await download_manager.stop()
             await hash_manager.stop()
             await release_fetch_manager.stop()
+            await backup_manager.stop()
 
     def _auto_import_dir_scan_rows() -> None:
         """Insert a ``catalog_entries`` row for every dir-scan file
@@ -1135,6 +1154,42 @@ def create_app(
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"no active release fetch for tag {tag!r}",
+            )
+        return state.to_dict()
+
+    # ---------- backups -----------------------------------------
+    # Mirrors the /catalog/downloads + /catalog/hashes + /boot/releases
+    # shape: GET lists the active jobs (queued + running + recent
+    # terminal states, same as the other managers' raw list); POST
+    # enqueues; DELETE cancels by backup_id. The workers page in the
+    # UI filters to queued + running only -- terminal rows evict
+    # from the UI on completion, and history lives in the events log.
+
+    @app.get("/workers/backups", dependencies=[Depends(require_auth)])
+    async def list_backups() -> dict[str, Any]:
+        states = await backup_manager.list()
+        return {
+            "backups_root": str(resolved_backups_root),
+            "max_parallel": backup_manager.max_parallel,
+            "backups": [s.to_dict() for s in states],
+        }
+
+    @app.post(
+        "/workers/backups",
+        status_code=status.HTTP_202_ACCEPTED,
+        dependencies=[Depends(require_auth)],
+    )
+    async def enqueue_backup(body: _models.BackupEnqueueRequest) -> dict[str, Any]:
+        state = await backup_manager.enqueue(trigger=body.trigger)
+        return state.to_dict()
+
+    @app.delete("/workers/backups/{backup_id}", dependencies=[Depends(require_auth)])
+    async def cancel_backup(backup_id: str) -> dict[str, Any]:
+        state = await backup_manager.cancel(backup_id)
+        if state is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"no active backup for id {backup_id!r}",
             )
         return state.to_dict()
 

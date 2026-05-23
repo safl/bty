@@ -123,6 +123,10 @@ def main(argv: list[str] | None = None) -> None:
             "                        (default 2)\n"
             "  BTY_HASH_MAX_PARALLEL max concurrent image hash jobs\n"
             "                        (default 1)\n"
+            "  BTY_BACKUP_DIR        directory scheduled / on-demand backups\n"
+            "                        land in (default <BTY_STATE_DIR>/backups)\n"
+            "  BTY_BACKUP_MAX_PARALLEL  max concurrent backup jobs (default 1;\n"
+            "                        concurrent exports would race on dest dirs)\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )

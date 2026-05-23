@@ -326,6 +326,22 @@ class ReleaseFetchRequest(BaseModel):
     tag: str = Field(default="latest", min_length=1, pattern=r"^[A-Za-z0-9._-]+$")
 
 
+class BackupEnqueueRequest(BaseModel):
+    """``POST /workers/backups`` body: enqueue a backup job.
+
+    ``trigger`` distinguishes operator-pressed "Back up now" runs
+    (``manual``) from the scheduler-loop's cadence-driven runs
+    (``scheduled``); only scheduled runs update the cadence anchor
+    (``backup.last_run_at``). The UI form only ever POSTs
+    ``manual``; the scheduler calls :meth:`BackupManager.enqueue`
+    directly and bypasses this model.
+    """
+
+    model_config = {"extra": "forbid"}
+
+    trigger: str = Field(default="manual", pattern=r"^(manual|scheduled)$")
+
+
 class CatalogEntryAdd(BaseModel):
     """``POST /catalog/entries`` body: add an operator-curated
     catalog entry by URL.
