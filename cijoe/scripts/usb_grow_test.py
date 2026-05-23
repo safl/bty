@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import errno
 import logging as log
-import re
 import shutil
 from argparse import ArgumentParser
 from pathlib import Path
@@ -72,7 +71,7 @@ def main(args, cijoe):
     # trips on the 2048-vs-512 sector mismatch + reports the table as
     # ``unknown``; via a loop device the kernel does the sector math
     # before parted sees it).
-    log.info("pre-boot inspection via loop device:")
+    log.info("pre-boot inspection via loop device + lsblk:")
     err, out = cijoe.run_local(f"sudo losetup -fP --show {test_disk}")
     if err:
         log.error(f"losetup -fP failed (err={err})")
@@ -84,7 +83,7 @@ def main(args, cijoe):
     log.info(f"loop device: {loop_dev}")
     try:
         cijoe.run_local("sudo udevadm settle --timeout=10")
-        cijoe.run_local(f"sudo parted -ms {loop_dev} unit B print")
+        cijoe.run_local(f"sudo lsblk -bno NAME,SIZE,TYPE,LABEL {loop_dev}")
     finally:
         cijoe.run_local(f"sudo losetup -d {loop_dev}")
 
@@ -95,11 +94,17 @@ def main(args, cijoe):
     # to a file we cat afterwards so the kernel boot log is in the cijoe
     # report whether the test passes or fails.
     log.info(f"booting QEMU (BOOT_WINDOW_SEC={BOOT_WINDOW_SEC})")
+    # ``if=ide`` rather than ``if=virtio``: SYSLINUX (the iso-hybrid
+    # bootloader) reads files via BIOS INT13, which only sees disks
+    # the BIOS enumerated. virtio disks bypass BIOS entirely -- the
+    # kernel can use them once it's loaded, but the bootloader can't
+    # find /live/vmlinuz before that. v0.25.5 retag #3 hit exactly
+    # this: ``Loading live... failed: No such file or directory``.
     qemu_cmd = (
         f"timeout --kill-after=10 {BOOT_WINDOW_SEC} "
         f"qemu-system-x86_64 "
         f"-enable-kvm -cpu host -smp 2 -m 1G "
-        f"-drive file={test_disk},format=raw,if=virtio "
+        f"-drive file={test_disk},format=raw,if=ide "
         f"-nographic -serial file:{serial_log} "
         f"-nic none -no-reboot "
         f"|| true"  # timeout's 124 + qemu's variable exit codes both OK.
@@ -117,13 +122,13 @@ def main(args, cijoe):
     else:
         log.error(f"serial log NOT created at {serial_log} -- qemu likely never started")
 
-    # Post-boot inspection via a fresh loop device. bty-usb-grow inside
-    # the VM rewrites the partition table via parted resizepart +
-    # mkfs.exfat; the kernel ack/sync flushes the new table to disk
-    # before the unit reports success, so a parted read here (through
-    # losetup -P so the kernel does the geometry) is authoritative
-    # even though the VM is gone.
-    log.info("post-boot inspection via loop device:")
+    # Post-boot inspection via a fresh loop device + ``lsblk`` (NOT
+    # parted: iso-hybrid's MBR triggers parted's "unknown table type"
+    # path even when the kernel sees the partitions fine, so parted
+    # prints just the disk and exits 1). ``lsblk -bno NAME,SIZE,TYPE``
+    # reads from sysfs -- same view bty-usb-grow had at flash time --
+    # and emits one ``part`` line per partition.
+    log.info("post-boot inspection via loop device + lsblk:")
     err, out = cijoe.run_local(f"sudo losetup -fP --show {test_disk}")
     if err:
         log.error(f"post-boot losetup -fP failed (err={err})")
@@ -133,25 +138,32 @@ def main(args, cijoe):
         log.error(f"unexpected losetup output: {out!r}")
         return errno.EIO
     log.info(f"loop device: {loop_dev}")
+    lsblk_text = ""
     try:
         cijoe.run_local("sudo udevadm settle --timeout=10")
-        err, parted_out = cijoe.run_local(f"sudo parted -ms {loop_dev} unit B print")
+        err, lsblk_out = cijoe.run_local(f"sudo lsblk -bno NAME,SIZE,TYPE {loop_dev}")
+        if not err and hasattr(lsblk_out, "output"):
+            lsblk_text = lsblk_out.output()
     finally:
         cijoe.run_local(f"sudo losetup -d {loop_dev}")
     if err:
-        log.error(f"post-boot parted failed (err={err})")
+        log.error(f"post-boot lsblk failed (err={err})")
         return errno.EIO
 
-    parted_text = parted_out.output() if hasattr(parted_out, "output") else str(parted_out)
-
-    # parted -ms output: ``<num>:<start>B:<end>B:<size>B:<fs>:<name>:<flags>;``
-    # one line per partition (after the BYT;\n<disk>;\n preamble).
+    # lsblk -bno NAME,SIZE,TYPE output:
+    #   loop0   4294967296 loop
+    #   loop0p1     614400 part
+    #   loop0p2  33554432  part
+    # Pick the largest ``part`` (largest is BTY_IMAGES after grow).
     largest = 0
-    for line in parted_text.splitlines():
-        m = re.match(r"^(\d+):(\d+)B:(\d+)B:(\d+)B:", line)
-        if not m:
+    for line in lsblk_text.splitlines():
+        parts = line.split()
+        if len(parts) < 3 or parts[-1] != "part":
             continue
-        size = int(m.group(4))
+        try:
+            size = int(parts[-2])
+        except ValueError:
+            continue
         if size > largest:
             largest = size
     log.info(f"largest partition on disk image: {largest} bytes ({largest / (1 << 20):.1f} MiB)")
