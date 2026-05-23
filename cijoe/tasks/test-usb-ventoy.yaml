@@ -57,13 +57,22 @@ steps:
   with:
     transport: usb_ventoy_guest
     commands:
+    # Reordered: cmdrunner stops on first non-zero, so put the
+    # diagnostic-rich commands BEFORE the assertion-shaped ``ls
+    # -la /var/lib/bty/images/`` (which returns ENOENT if discover
+    # didn't bind, killing the chain and hiding the journal).
+    # ``systemctl is-active`` is the sync barrier -- waits for the
+    # service to finish before we look at its side effects.
+    - "systemctl is-active bty-images-discover.service || true"
     - "ls -la /dev/disk/by-label/ 2>&1 || true"
     - "lsblk -f"
+    - "blkid"
+    - "dmsetup ls"
     - "mount | grep /var/lib/bty/images || echo NO_BIND_MOUNT"
-    - "ls -la /var/lib/bty/images/"
     - "systemctl status bty-usb-grow.service --no-pager --full || true"
     - "systemctl status bty-images-discover.service --no-pager --full || true"
     - "journalctl -u bty-images-discover.service --no-pager --no-hostname || true"
+    - "ls -la /var/lib/bty/images/ || true"
 
 - name: assert_ventoy_contract
   uses: core.cmdrunner

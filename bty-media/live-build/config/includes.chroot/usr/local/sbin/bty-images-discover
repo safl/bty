@@ -60,6 +60,36 @@ fi
 # the current shell (not a piped subshell) and ``exit`` propagates.
 list=$(lsblk -lnpo NAME,TYPE,FSTYPE 2>/dev/null || true)
 
+# Also enumerate dm-mapper passthroughs. ``lsblk`` hides dm devices
+# whose underlying disk is already listed (treated as children of
+# the parent block device), so it never reports them as part of
+# the flat listing. Ventoy 1.1.05 chainload creates two dm-linear
+# devices over the data partition:
+#
+#   - ``ventoy`` (dm-0): the chunk of the data partition that
+#     contains the chained .iso, mounted by live-config as
+#     ``/run/live/medium``. Holds /dev/sda1 open exclusively, so
+#     a direct ``mount /dev/sda1 ...`` returns
+#     ``Can't open blockdev``.
+#   - ``sda1`` (dm-1): a linear passthrough of the WHOLE data
+#     partition, present so the booted live env can still read
+#     the operator's files (catalog.toml + bty-images/) that sit
+#     on the data partition outside the .iso.
+#
+# ``blkid`` enumerates dm devices directly. We append any
+# ``/dev/dm-*`` that has a filesystem to the candidate list so the
+# loop below probes them with the same vfat/exfat + bty-images/
+# content checks as the lsblk-sourced entries.
+for _dev in $(blkid -o device 2>/dev/null); do
+    case "$_dev" in
+        /dev/dm-*) ;;
+        *) continue ;;
+    esac
+    _ft=$(blkid -o value -s TYPE "$_dev" 2>/dev/null || true)
+    list="$list
+$_dev part $_ft"
+done
+
 echo "bty-images-discover: enumerating block devices..."
 echo "$list" | sed 's/^/  /'
 

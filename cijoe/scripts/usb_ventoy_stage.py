@@ -190,11 +190,33 @@ def main(args, cijoe):
                 log.error("cp catalog.toml failed")
                 return errno.EIO
 
-            # 6. ventoy/ventoy.json: VTOY_MENU_TIMEOUT=1 so the menu
-            # auto-selects the only ISO without keyboard input.
+            # 6. ventoy/ventoy.json: configure for fully-headless
+            # auto-boot. Verified empirically (qemu monitor
+            # screendump of the stuck guest) -- Ventoy 1.1.05
+            # shows TWO menus that BOTH need a timeout knob:
+            #
+            #   - Primary menu (list of ISOs): VTOY_MENU_TIMEOUT=1
+            #     auto-picks the only entry.
+            #   - Secondary menu ("Boot in normal mode" / grub2 mode
+            #     / memdisk mode / File checksum / Return): only
+            #     VTOY_SECONDARY_TIMEOUT auto-confirms the default
+            #     ("Boot in normal mode"). The primary timeout
+            #     does NOT cascade.
+            #
+            # Without the secondary knob the guest sits at the
+            # boot-mode menu forever; no kernel ever boots, no
+            # sshd ever listens, wait_for_transport just sees
+            # slirp accept + EOF (the "Error reading SSH protocol
+            # banner" symptom that fooled an earlier diagnosis
+            # round).
             cijoe.run_local(f"sudo mkdir -p {mount_dir}/ventoy")
             ventoy_json_tmp.write_text(
-                '{\n  "control": [\n    {"VTOY_MENU_TIMEOUT": "1"}\n  ]\n}\n',
+                "{\n"
+                '  "control": [\n'
+                '    {"VTOY_MENU_TIMEOUT": "1"},\n'
+                '    {"VTOY_SECONDARY_TIMEOUT": "1"}\n'
+                "  ]\n"
+                "}\n",
                 encoding="utf-8",
             )
             err, _ = cijoe.run_local(f"sudo cp {ventoy_json_tmp} {mount_dir}/ventoy/ventoy.json")
