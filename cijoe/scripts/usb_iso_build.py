@@ -25,12 +25,9 @@ Workflow:
    edge of the artifact (sfdisk + losetup + mkfs.exfat) so the
    single dd-able file carries both the boot path and the
    operator's image catalog.
-5. Compress the pre-built ISO with ``gzip -9`` to get under GitHub's
-   2 GiB per-release-asset upload limit. gzip rather than xz: every
-   flasher (Etcher / Rufus / Raspberry Pi Imager) handles gzip
-   natively, and xz support drifts. Cost: ~50-100 MB larger output,
-   no operator-side downside.
-6. Write a sha256 manifest covering the .iso.gz.
+5. Write a sha256 manifest covering the .iso (uncompressed; the
+   ~200 MiB ISO is well under GitHub's 2 GiB asset limit since
+   BTY_IMAGES is 1 MiB at bake).
 
 The cwd at run time is ``cijoe/`` (the Makefile cd's there before
 invoking cijoe), so the bty-media tree lives at
@@ -54,47 +51,14 @@ from argparse import ArgumentParser
 from pathlib import Path
 
 PUBLISH_BASENAME = "bty-usb-x86_64.iso"
-PUBLISH_GZ_BASENAME = "bty-usb-x86_64.iso.gz"
 
-# Pre-allocate this much trailing space inside the pre-built ISO for
-# an exFAT partition labelled BTY_IMAGES. Operators ``dd`` the
-# pre-built artifact to a stick (Etcher / RPi Imager / Rufus DD-mode
-# read .iso.gz natively, no decompress step needed), drop
-# ``*.img.gz`` files into the writable exFAT partition from any
-# host OS, then boot.
-#
-# Sized for the single-stick offline workflow: operator carries one
-# stick to an air-gapped target with bty-server.img.gz already on
-# BTY_IMAGES. 2.1 GiB fits one server image (~1-1.5 GiB) plus a few
-# ``.bri`` descriptors, and keeps the artifact small enough to play
-# nicely with Ventoy + KVM-over-IP shims (piKVM / JetKVM) that
-# bypass this partition via the .bri-pointer flow or
-# bty-images-discover. Operators who want more space can grow the
-# partition on their host with gparted after dd-ing the stick; the
-# live env reads whatever exFAT size it finds.
-#
-# Encoded as ``2150M`` (mebibytes) rather than ``2.1G`` because GNU
-# ``truncate`` rejects fractional sizes -- ``+2.1G`` would error out
-# with ``Invalid number``. 2150 MiB is 2.0996 GiB, close enough to
-# the stated 2.1 GiB target.
-TRAILING_EXFAT_SIZE = "2150M"
-
-# Compress the pre-built ISO with gzip. We tried xz first (zstd lacks
-# GUI flasher support) but Etcher's bundled xz decompressor failed
-# on our output even after dropping ``-T0`` for single-stream /
-# single-block layout, and even after lowering preset levels. The
-# specific error -- "if a compressed image, please check that the
-# archive is not corrupted" -- fires regardless of how the .iso.xz
-# is shaped, so xz is effectively unsupported by Etcher in our
-# environment.
-#
-# Gzip is universally supported by Etcher / Rufus / Raspberry Pi
-# Imager / dd / Windows / macOS -- there's no Electron-bundled JS
-# gzip impl that misbehaves the way the xz one does. Trade-off vs
-# xz on our 4.4 GiB sparse-zero file: gzip output is ~50-100 MB
-# larger (~150 MB vs ~80 MB) but compatibility approaches 100%.
-# Bake time is comparable (~1-2 min on a CI runner).
-GZ_FLAGS = ["-9"]
+# Just enough room for the starter ``.bri`` descriptors (a few hundred
+# bytes each); operator images live elsewhere (bty-web catalog, or the
+# operator can grow + populate the partition by hand). The partition
+# auto-grows to fill the underlying disk on first boot via
+# ``bty-usb-grow.service``, so this is the minimum staged at bake time,
+# not the runtime size. Verified by the GHA auto-grow test.
+TRAILING_EXFAT_SIZE = "1M"
 
 
 def add_args(parser: ArgumentParser):
@@ -259,33 +223,21 @@ def main(args, cijoe):
     if err:
         return err
 
-    # Compress to .iso.gz. The raw ~2.5 GiB ISO would exceed GitHub's
-    # 2 GiB per-release-asset upload limit even at this shrunk size;
-    # gzip on our zero-heavy file (sparse exFAT region) brings it to
-    # a few hundred MiB.
-    # Operator UX: Etcher / RPi Imager / Rufus DD-mode read .iso.gz
-    # directly (no decompress step). For CLI:
-    #   gunzip -d --stdout bty-usb-x86_64.iso.gz | sudo dd of=/dev/sdX bs=4M
-    gz_dst = publish_dir / PUBLISH_GZ_BASENAME
-    gz_args = " ".join(GZ_FLAGS)
-    log.info(f"Compressing {dst} -> {gz_dst} (gzip {gz_args})")
-    # gzip writes ``<dst>.gz`` and removes ``<dst>`` on success;
-    # ``-f`` overwrites any pre-existing ``<dst>.gz``.
-    err, _ = cijoe.run_local(f"gzip {gz_args} -f {dst}")
-    if err:
-        log.error(f"gzip {gz_args} {dst} failed")
-        return err
-
-    sha256_path = publish_dir / "bty-usb-x86_64-iso-gz.sha256"
+    # Publish the .iso uncompressed. With BTY_IMAGES = 1 MiB at bake
+    # time, the total ISO is ~200 MiB -- comfortably under GitHub's
+    # 2 GiB per-release-asset upload limit. gzip was dropped: every
+    # flasher (Etcher, RPi Imager, Rufus, dd) reads plain .iso
+    # natively, and removing the compress step shaves CI time.
+    sha256_path = publish_dir / "bty-usb-x86_64.iso.sha256"
     err, _ = cijoe.run_local(
-        f"sh -c 'cd {publish_dir} && sha256sum {PUBLISH_GZ_BASENAME} > {sha256_path}'"
+        f"sh -c 'cd {publish_dir} && sha256sum {PUBLISH_BASENAME} > {sha256_path}'"
     )
     if err:
         log.error("failed computing sha256 manifest")
         return err
 
     cijoe.run_local(f"cat {sha256_path}")
-    cijoe.run_local(f"ls -la {gz_dst}")
+    cijoe.run_local(f"ls -la {dst}")
 
     return 0
 

@@ -45,9 +45,9 @@ version, so you can pin to "latest" or a specific tag.
 ```bash
 mkdir -p ~/system_imaging/disk && cd ~/system_imaging/disk
 
-curl -fLO https://github.com/safl/bty/releases/latest/download/bty-usb-x86_64.iso.gz
-curl -fLO https://github.com/safl/bty/releases/latest/download/bty-usb-x86_64.iso.gz.sha256
-sha256sum -c bty-usb-x86_64.iso.gz.sha256
+curl -fLO https://github.com/safl/bty/releases/latest/download/bty-usb-x86_64.iso
+curl -fLO https://github.com/safl/bty/releases/latest/download/bty-usb-x86_64.iso.sha256
+sha256sum -c bty-usb-x86_64.iso.sha256
 ```
 
 For a specific version, swap `latest` for the tag (e.g. `v0.11.1`).
@@ -69,8 +69,8 @@ When it finishes:
 
 ```text
 ~/system_imaging/disk/
-  bty-usb-x86_64.iso.gz             <- the file you'll write to the stick
-  bty-usb-x86_64-iso-gz.sha256
+  bty-usb-x86_64.iso             <- the file you'll write to the stick
+  bty-usb-x86_64.iso.sha256
 ```
 
 ## Step 2: Write the image to a USB stick
@@ -87,14 +87,14 @@ your stick. **Do not** confuse it with your laptop's internal disk.
 Two ways to write it:
 
 **GUI flashers** (Balena Etcher, Raspberry Pi Imager, Rufus in DD mode):
-open `bty-usb-x86_64.iso.gz` directly. They decompress `.gz` natively, no
+open `bty-usb-x86_64.iso` directly. They decompress `.gz` natively, no
 extra step.
 
 **Command line:**
 
 ```bash
-gunzip -d --stdout ~/system_imaging/disk/bty-usb-x86_64.iso.gz | \
-  sudo dd of=/dev/sdX bs=4M status=progress conv=fsync
+dd if=~/system_imaging/disk/bty-usb-x86_64.iso \
+       sudo dd of=/dev/sdX bs=4M status=progress conv=fsync
 sync
 ```
 
@@ -336,8 +336,9 @@ the stick).
 # Mount the Ventoy data partition.
 sudo mount /dev/disk/by-label/Ventoy /mnt
 
-# Decompress the bty .iso.gz - Ventoy boots .iso, not .iso.gz.
-gunzip -k ~/system_imaging/disk/bty-usb-x86_64.iso.gz
+# v0.25.4+ ships uncompressed .iso so Ventoy just boots it as-is.
+# (no decompress step needed -- v0.25.4+ ships uncompressed .iso)
+ls ~/system_imaging/disk/bty-usb-x86_64.iso
 
 # Copy the .iso to the Ventoy data partition.
 sudo cp ~/system_imaging/disk/bty-usb-x86_64.iso /mnt/
@@ -442,7 +443,8 @@ Upload your pre-built images via the bty-web Images page
 ```bash
 # Decompress on your workstation before uploading; piKVM doesn't
 # unzip on the fly.
-gunzip -k ~/system_imaging/disk/bty-usb-x86_64.iso.gz
+# (no decompress step needed -- v0.25.4+ ships uncompressed .iso)
+ls ~/system_imaging/disk/bty-usb-x86_64.iso
 ```
 
 In the piKVM web UI:
@@ -500,7 +502,8 @@ LAN). Pair the device with your JetKVM account, reach its web UI.
 #### Step 3: Upload `bty-usb-x86_64.iso` to JetKVM
 
 ```bash
-gunzip -k ~/system_imaging/disk/bty-usb-x86_64.iso.gz
+# (no decompress step needed -- v0.25.4+ ships uncompressed .iso)
+ls ~/system_imaging/disk/bty-usb-x86_64.iso
 ```
 
 In the JetKVM web UI:

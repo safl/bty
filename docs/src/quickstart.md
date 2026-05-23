@@ -40,9 +40,9 @@ from a checkout.
 
 ```bash
 mkdir -p ~/system_imaging/disk && cd ~/system_imaging/disk
-curl -fLO https://github.com/safl/bty/releases/latest/download/bty-usb-x86_64.iso.gz
-curl -fLO https://github.com/safl/bty/releases/latest/download/bty-usb-x86_64.iso.gz.sha256
-sha256sum -c bty-usb-x86_64.iso.gz.sha256
+curl -fLO https://github.com/safl/bty/releases/latest/download/bty-usb-x86_64.iso
+curl -fLO https://github.com/safl/bty/releases/latest/download/bty-usb-x86_64.iso.sha256
+sha256sum -c bty-usb-x86_64.iso.sha256
 ```
 
 `releases/latest/download/<name>` always points at the newest tag;
@@ -61,9 +61,9 @@ The build runs Debian's `live-build` (debootstrap + mksquashfs +
 mkinitramfs) to produce a hybrid ISO, appends a writable `BTY_IMAGES`
 exFAT partition, and gzip-compresses the result. Emits:
 
-- `~/system_imaging/disk/bty-usb-x86_64.iso.gz` - distributable
+- `~/system_imaging/disk/bty-usb-x86_64.iso` - distributable
   artifact (the file you decompress + `dd` to a USB stick).
-- `~/system_imaging/disk/bty-usb-x86_64-iso-gz.sha256` - checksum.
+- `~/system_imaging/disk/bty-usb-x86_64.iso.sha256` - checksum.
 
 ## Flash a USB stick
 
@@ -72,8 +72,8 @@ exFAT partition, and gzip-compresses the result. Emits:
 lsblk
 
 # /dev/sdX is the USB stick (NOT your local system disk).
-gunzip -d --stdout ~/system_imaging/disk/bty-usb-x86_64.iso.gz | \
-  sudo dd of=/dev/sdX bs=4M status=progress conv=fsync
+dd if=~/system_imaging/disk/bty-usb-x86_64.iso \
+       sudo dd of=/dev/sdX bs=4M status=progress conv=fsync
 sync
 ```
 

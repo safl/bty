@@ -78,7 +78,7 @@ target.
 
 The "USB live stick" in step 2 need not be physical. IP-KVM appliances
 (PiKVM, JetKVM, BMC IPMI virtual media, vendor-specific OoB consoles) can
-mount the bty `.iso.gz` artifact and expose it to the target as a USB or
+mount the bty `.iso` artifact and expose it to the target as a USB or
 CD-ROM device. The target boots into the bty live env exactly as from a
 physical stick; ``bty`` auto-launches on tty1; the operator types ``c``,
 fills in ``http://<host>:8080/catalog.toml``, picks an image, picks a
@@ -87,8 +87,7 @@ no one at the rack.
 
 Practical notes:
 
-- Use the `.iso.gz` artifact. Decompress it host-side first if your IP-KVM
-  only accepts plain `.iso` (most do).
+- Use the `.iso` artifact directly (uncompressed since v0.25.4).
 - bty's hybrid ISO works as either USB or CD-ROM; pick whichever your
   IP-KVM offers and the target's BIOS/UEFI prefers.
 - Keystroke latency over IP-KVM is real; the wizard's `Enter`-forward /
