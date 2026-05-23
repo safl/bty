@@ -1,11 +1,68 @@
-# bty USB auto-grow test - config
+# bty USB auto-grow test - cijoe config
+#
+# Two transports + one QEMU guest, wired together so the YAML task in
+# tasks/test-usb-grow.yaml can:
+#
+#   1. Stage a 4-GiB-truncated copy of the freshly-baked .iso at
+#      ``{qemu.guests.usb-grow.path}/disk.img`` (project-local
+#      ``usb_grow_stage`` script).
+#   2. ``qemu.guest_start`` launches QEMU with that disk attached as
+#      an IDE-hd (SYSLINUX needs BIOS INT13, not virtio), the live
+#      env's sshd port-forwarded to host:12222.
+#   3. ``core.wait_for_transport`` polls the SSH transport
+#      ``usb_grow_guest`` until it answers (replaces the heuristic
+#      ``is_up()`` serial-log grep).
+#   4. ``core.cmdrunner`` runs the in-VM diagnostics
+#      (``systemctl status bty-usb-grow.service``, ``journalctl -u
+#      bty-usb-grow.service``, ``cat /run/bty-usb-grow.status``,
+#      etc.) via the ``usb_grow_guest`` transport so the cijoe
+#      report carries everything needed for diagnosis.
+#   5. ``core.cmdrunner`` powers the guest off (``systemctl
+#      poweroff -i``); ``qemu.guest_wait_for_termination`` blocks
+#      until QEMU exits + flushes the partition table.
+#   6. ``usb_grow_assert`` loop-mounts the disk image + ``lsblk``-s
+#      it; PASS iff the largest partition is >= 1 GiB.
 
-[cijoe.workflow]
+[cijoe.task]
 fail_fast = true
 
+[qemu]
+img_bin = "qemu-img"
+
+[qemu.systems.x86_64]
+bin = "qemu-system-x86_64"
+
+# Used by qemu.guest_start / qemu.guest_kill /
+# qemu.guest_wait_for_termination. ``path`` is the working dir cijoe
+# manages (pid file, monitor socket, serial log). The disk itself
+# (``disk.img``) is dropped here by ``usb_grow_stage``; cijoe's
+# auto boot.img/bios.img handling is bypassed -- we want a RAW IDE
+# disk (set via ``system_args.raw``), not a qcow2 + virtio-blk one.
+[qemu.guests.usb-grow]
+path = "{{ local.env.HOME }}/system_imaging/usb-grow"
+system_label = "x86_64"
+system_args.kwa = { cpu = "host", smp = 2, m = "1G", accel = "kvm" }
+# Raw QEMU args (passed verbatim):
+#   - IDE-hd disk so SYSLINUX can read /live/vmlinuz via BIOS INT13.
+#     virtio-blk is invisible to the BIOS; the bootloader fails to
+#     find files before the kernel comes up.
+#   - ``-no-reboot`` so QEMU exits on poweroff (which the test
+#     triggers via SSH) rather than cycling.
+system_args.raw = "-drive file={{ local.env.HOME }}/system_imaging/usb-grow/disk.img,format=raw,if=ide -no-reboot"
+# Forward host:12222 -> guest:22 so cijoe's SSH transport can reach
+# the live env's sshd.
+system_args.tcp_forward = { host = 12222, guest = 22 }
+
+# SSH into the live env (root/bty are the lab credentials the bake's
+# boot banner advertises). Used by ``core.cmdrunner`` /
+# ``core.wait_for_transport`` with ``transport_name=usb_grow_guest``.
+[cijoe.transport.usb_grow_guest]
+username = "root"
+password = "bty"
+hostname = "localhost"
+port = 12222
+
+# Used by ``usb_grow_stage`` to locate the freshly-baked .iso. Mirrors
+# the usb-x86 build's default publish dir.
 [test.usb_grow]
-# Where the built ``bty-usb-x86_64.iso`` was published. Mirrors the
-# usb-x86 build's default and the test-pxe artifact-download
-# destination so the same path works locally (after ``make build
-# VARIANT=usb-x86``) and in CI (after ``actions/download-artifact``).
 iso_dir = "{{ local.env.HOME }}/system_imaging/disk"

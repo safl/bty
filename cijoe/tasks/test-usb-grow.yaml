@@ -3,24 +3,68 @@ doc: |
   =============================
 
   Verifies ``bty-usb-grow.service`` extends the BTY_IMAGES exFAT
-  partition from its 1 MiB bake-time minimum to fill the underlying
-  disk on first boot. The 1 MiB bake size keeps the .iso lean so it
-  ships uncompressed under GitHub's 2 GiB asset cap; without a working
-  grow-on-first-boot, every operator would dd a 200 MiB image onto a
-  64 GB stick and only get 1 MiB of usable BTY_IMAGES. This test is
-  the contract.
+  partition from its 32 MiB bake-time minimum to fill the
+  underlying disk on first boot.
 
-  Steps:
+  Composed entirely of cijoe primitives -- ``qemu.guest_start``,
+  ``core.wait_for_transport``, ``core.cmdrunner``,
+  ``qemu.guest_wait_for_termination`` -- plus two thin host-side
+  helpers (``usb_grow_stage`` to prep the disk, ``usb_grow_assert``
+  to inspect it post-boot). No subprocess.Popen, no hand-rolled
+  paramiko, no ``_ssh_ready`` polling -- if the test fails the
+  cijoe report carries the systemctl status + journal of
+  bty-usb-grow.service inside the VM, captured via the
+  ``usb_grow_guest`` SSH transport.
 
-  1. ``usb_grow_test`` -- copies the built bty-usb-x86_64.iso into a
-     4 GiB raw file (the trailing zero-filled space simulates an empty
-     USB stick tail), boots it headless in QEMU with serial captured,
-     waits a fixed boot+grow window, then asserts via ``parted`` that
-     the trailing partition grew well past 1 MiB.
+  Run locally with the same command CI runs:
 
-  Wall clock: ~3-4 minutes per run. Serial log lands in the cijoe run
-  dir as an artifact of the report.
+      sudo -v && make build VARIANT=usb-x86 && make test-usb-grow
+
+  (The bake stages a fresh .iso under ~/system_imaging/disk/;
+  ``usb_grow_stage`` copies + truncates it into the qemu guest
+  workspace under ~/system_imaging/usb-grow/disk.img.)
 
 steps:
-- name: usb_grow_test
-  uses: usb_grow_test
+- name: stage_test_disk
+  uses: usb_grow_stage
+
+- name: guest_start
+  uses: qemu.guest_start
+  with:
+    guest_name: usb-grow
+
+- name: wait_for_guest_ssh
+  uses: core.wait_for_transport
+  with:
+    state: up
+    transport_name: usb_grow_guest
+    timeout: 240
+
+- name: probe_in_vm_diagnostics
+  uses: core.cmdrunner
+  with:
+    transport: usb_grow_guest
+    commands:
+    - "lsblk -f /dev/sda"
+    - "ls -la /dev/disk/by-label/ 2>&1 || true"
+    - "blkid"
+    - "systemctl status bty-usb-grow.service --no-pager --full || true"
+    - "journalctl -u bty-usb-grow.service --no-pager --no-hostname || true"
+    - "cat /run/bty-usb-grow.status 2>&1 || echo NO_STATUS_FILE"
+    - "parted -ms /dev/sda unit B print || true"
+
+- name: poweroff_guest
+  uses: core.cmdrunner
+  with:
+    transport: usb_grow_guest
+    commands:
+    - "systemctl poweroff -i || poweroff -f"
+
+- name: wait_for_termination
+  uses: qemu.guest_wait_for_termination
+  with:
+    guest_name: usb-grow
+    timeout: 60
+
+- name: assert_grew
+  uses: usb_grow_assert
