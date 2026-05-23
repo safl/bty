@@ -25,6 +25,15 @@ name: Release
 #                                   asserts bty-usb-grow.service grew
 #                                   BTY_IMAGES from 1 MiB to fill the
 #                                   stick.
+#   4c. ``test-usb-ventoy``(gated)- installs Ventoy on a 4 GiB loop-
+#                                   attached disk, drops the bty .iso +
+#                                   a sentinel image + a catalog.toml
+#                                   onto the data partition, boots in
+#                                   QEMU. Asserts bty-images-discover
+#                                   bind-mounts the operator drop and
+#                                   the TUI's actual discovery code
+#                                   surfaces both the local image and
+#                                   the catalog entry.
 #   5. ``docs`` (gated)           - HTML + PDF build. Part of the
 #                                   release chain so a broken PDF
 #                                   (e.g. an unsupported MyST
@@ -519,6 +528,71 @@ jobs:
           path: cijoe/_build/test-usb-grow/
           if-no-files-found: warn
 
+  # ---------------- usb-ventoy verify -------------------------------------
+  # Real Ventoy install on a 4 GiB loop-attached disk + bty .iso +
+  # sentinel image + catalog.toml dropped on the data partition.
+  # Boots via QEMU, asserts inside the VM that the live env's
+  # bty-images-discover.service finds the operator drop and the bty
+  # TUI's actual discovery code surfaces both the local image and the
+  # catalog entry. Mirrors test-usb-grow's shape; needs exfat-fuse so
+  # the host can stage onto Ventoy's exFAT data partition (WSL2 dev
+  # boxes lack the kernel module, hence the local-run gap noted in
+  # the test commit -- CI is the verification path).
+  test-usb-ventoy:
+    name: USB Ventoy-boot test (QEMU + in-VM TUI/catalog asserts)
+    needs: build-usb-x86
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install host tools (qemu, exfat-fuse)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            qemu-system-x86 \
+            qemu-utils \
+            exfat-fuse \
+            exfatprogs \
+            cpu-checker
+
+      - name: Enable KVM access for the runner
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+              | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -l /dev/kvm
+
+      - name: Install cijoe
+        run: pipx install --force cijoe
+
+      - name: Download bty-usb ISO artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: bty-usb-x86_64-iso
+          path: ~/system_imaging/disk/
+
+      - name: Run USB Ventoy-boot test
+        run: make test-usb-ventoy
+
+      - name: Upload cijoe report on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: usb-ventoy-test-cijoe-output
+          path: cijoe/cijoe-output/
+          if-no-files-found: warn
+
+      - name: Upload test workspace on failure (disk image, serial log)
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: usb-ventoy-test-workspace
+          path: cijoe/_build/test-usb-ventoy/
+          if-no-files-found: warn
+
   # ---------------- docs (gates the release) -------------------------------
   docs:
     name: Build docs (HTML + PDF)
@@ -562,7 +636,7 @@ jobs:
   # ---------------- ship ---------------------------------------------------
   attach-to-release:
     name: Attach artifacts to GitHub release
-    needs: [build-wheel, build-media, build-usb-x86, test-pxe, test-usb-grow, docs]
+    needs: [build-wheel, build-media, build-usb-x86, test-pxe, test-usb-grow, test-usb-ventoy, docs]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
