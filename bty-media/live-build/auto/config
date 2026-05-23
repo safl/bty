@@ -56,7 +56,15 @@ set -e
 if [ "${BTY_USB_ISO:-}" = "1" ]; then
     BINARY_IMAGES=iso-hybrid
     BOOTLOADERS_OPTS="--bootloaders syslinux,grub-efi"
-    BOOTAPPEND="boot=live components noeject plymouth.enable=0 modprobe.blacklist=nouveau nouveau.modeset=0 systemd.gpt_auto=0 bty.version=__BTY_VERSION__"
+    # ``console=tty0 console=ttyS0,115200``: kernel + systemd boot
+    # messages go to BOTH the framebuffer (tty0, for real hardware
+    # operators) and the serial port (ttyS0, for QEMU/IP-KVM/anything
+    # capturing the serial). The LAST ``console=`` is the systemd
+    # default-stdout sink; we list ttyS0 last so the auto-grow test
+    # sees ``[ OK ] Started bty-usb-grow.service`` on its captured
+    # serial log. Harmless on real USB sticks without a serial port --
+    # writes are dropped.
+    BOOTAPPEND="boot=live components noeject plymouth.enable=0 modprobe.blacklist=nouveau nouveau.modeset=0 systemd.gpt_auto=0 console=tty0 console=ttyS0,115200 bty.version=__BTY_VERSION__"
 else
     BINARY_IMAGES=netboot
     BOOTLOADERS_OPTS=""
