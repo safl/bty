@@ -57,13 +57,16 @@ steps:
   with:
     transport: usb_ventoy_guest
     commands:
-    # Reordered: cmdrunner stops on first non-zero, so put the
-    # diagnostic-rich commands BEFORE the assertion-shaped ``ls
-    # -la /var/lib/bty/images/`` (which returns ENOENT if discover
-    # didn't bind, killing the chain and hiding the journal).
-    # ``systemctl is-active`` is the sync barrier -- waits for the
-    # service to finish before we look at its side effects.
-    - "systemctl is-active bty-images-discover.service || true"
+    # Wait for boot to settle before any probe. ssh.service comes up
+    # early (no chain dep on the data path); ``bty-images-discover``
+    # is blocked on bty-usb-grow.service, which itself
+    # ``After=dev-disk-by-label-BTY_IMAGES.device`` -- under Ventoy
+    # that device never appears, so systemd waits its full
+    # ``DefaultDeviceTimeoutSec`` (90s) before giving up and letting
+    # the chain proceed. Without this wait, our probe runs before
+    # discover even tries to mount anything. ``--wait`` makes
+    # ``is-active`` block until the system finishes booting.
+    - "systemctl is-active --wait bty-images-discover.service || true"
     - "ls -la /dev/disk/by-label/ 2>&1 || true"
     - "lsblk -f"
     - "blkid"
@@ -79,6 +82,10 @@ steps:
   with:
     transport: usb_ventoy_guest
     commands:
+    # Re-wait defensively in case the probe's barrier somehow didn't
+    # block (e.g. a future systemctl behaviour change). Cheap: this
+    # returns immediately if boot already settled.
+    - "systemctl is-active --wait bty-images-discover.service || true"
     # No BTY_IMAGES on the booted device (Ventoy loop-boot contract).
     - "test ! -e /dev/disk/by-label/BTY_IMAGES"
     # bty-images-discover finished + bind-mount happened.
