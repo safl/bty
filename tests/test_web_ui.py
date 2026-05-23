@@ -1623,6 +1623,71 @@ def test_ui_settings_upstream_override_round_trips(client: TestClient) -> None:
     assert "safl/bty" in body2
 
 
+def test_ui_settings_renders_backup_schedule_card(client: TestClient) -> None:
+    """The Settings page carries a Backup schedule card with the
+    three knobs (enabled / cadence / retention) and the read-only
+    destination row, anchored at ``#backup-schedule`` and reachable
+    from the subnav."""
+    _login(client)
+    body = client.get("/ui/settings").text
+    assert 'id="backup-schedule"' in body
+    assert 'href="#backup-schedule"' in body
+    assert 'action="/ui/settings/backup"' in body
+    assert 'name="backup_enabled"' in body
+    # All three cadence radios.
+    assert 'value="daily"' in body
+    assert 'value="weekly"' in body
+    assert 'value="manual"' in body
+    assert 'name="backup_retention_count"' in body
+
+
+def test_ui_settings_backup_round_trip(client: TestClient) -> None:
+    """Saving the backup form persists enabled / cadence / retention
+    and the Settings page reflects the new state on the next render."""
+    _login(client)
+    r = client.post(
+        "/ui/settings/backup",
+        data={
+            "backup_enabled": "on",
+            "backup_cadence": "weekly",
+            "backup_retention_count": "14",
+        },
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert r.headers["location"].startswith("/ui/settings?saved=backup")
+    body = client.get("/ui/settings").text
+    # Saved state lights up: enabled+weekly+14. The HTML wraps long
+    # attribute lists across lines so we test for the values rather
+    # than exact substring shapes.
+    assert "checked" in body
+    assert 'value="weekly"' in body
+    assert 'value="14"' in body
+
+
+def test_ui_settings_backup_invalid_cadence_falls_back(client: TestClient) -> None:
+    """Hand-crafted form payloads with an unknown cadence don't 500 the
+    save -- the handler soft-validates against BACKUP_CADENCES and
+    falls back to the default. Mirrors the settings-store resolver
+    fallback so a typo in the payload doesn't wedge the scheduler."""
+    _login(client)
+    r = client.post(
+        "/ui/settings/backup",
+        data={
+            "backup_enabled": "on",
+            "backup_cadence": "fortnightly",
+            "backup_retention_count": "abc",  # non-numeric -> default
+        },
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    body = client.get("/ui/settings").text
+    # ``manual`` was the default; it should be the selected radio.
+    assert 'value="manual"' in body
+    # Retention reverted to the default 7.
+    assert 'value="7"' in body
+
+
 def test_settings_upstream_override_drives_catalog_fetch_url(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:

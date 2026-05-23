@@ -9,6 +9,8 @@
         <span class="subnav-jumps d-flex align-items-center flex-wrap">
             <a href="#upstream-sources">Upstream sources</a>
             <span class="vr"></span>
+            <a href="#backup-schedule">Backup schedule</a>
+            <span class="vr"></span>
             <a href="#settings-identity">Identity</a>
             <span class="vr"></span>
             <a href="#settings-storage-paths">Storage paths</a>
@@ -86,6 +88,75 @@
                 <i class="bi bi-save me-1"></i>Save upstream sources
             </button>
             <span class="form-text small ms-2">Clear a field to revert it to the default.</span>
+        </form>
+    </div>
+</div>
+
+{# Editable: scheduled backup knobs. ``enabled`` + ``cadence`` +
+   ``retention`` persist in the settings table; the scheduler loop
+   reads them on every tick so a change here propagates within one
+   tick (60s) without restart. The on-disk destination is read-only
+   (env-overridable via BTY_BACKUP_DIR). #}
+<div class="card mb-4" id="backup-schedule">
+    <div class="card-header bg-light fw-semibold">
+        <i class="bi bi-shield-check me-1"></i>Backup schedule
+    </div>
+    <div class="card-body">
+        <form method="post" action="/ui/settings/backup">
+            <div class="form-check form-switch mb-3">
+                <input type="checkbox" class="form-check-input" id="backup_enabled"
+                       name="backup_enabled" {% if backup_enabled %}checked{% endif %}>
+                <label class="form-check-label" for="backup_enabled">
+                    Enable scheduled backups
+                </label>
+                <div class="form-text small">
+                    Off: bty never runs a backup on its own; operator triggers each
+                    one via "Back up now" on
+                    <a href="/ui/workers#backup">Workers</a>. On: the scheduler
+                    enqueues a backup whenever the cadence is due.
+                </div>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Cadence</label>
+                {% for c in backup_cadences %}
+                <div class="form-check">
+                    <input type="radio" class="form-check-input"
+                           id="backup_cadence_{{ c }}" name="backup_cadence" value="{{ c }}"
+                           {% if backup_cadence == c %}checked{% endif %}>
+                    <label class="form-check-label" for="backup_cadence_{{ c }}">
+                        {{ c }}
+                        {% if c == "daily" %}<span class="text-muted small">(every 24h since the last scheduled run)</span>
+                        {% elif c == "weekly" %}<span class="text-muted small">(every 7d since the last scheduled run)</span>
+                        {% elif c == "manual" %}<span class="text-muted small">(scheduler quiescent; operator triggers each backup)</span>
+                        {% endif %}
+                    </label>
+                </div>
+                {% endfor %}
+            </div>
+            <div class="mb-3">
+                <label for="backup_retention_count" class="form-label">Retention</label>
+                <input type="number" class="form-control" id="backup_retention_count"
+                       name="backup_retention_count" min="1" max="999"
+                       value="{{ backup_retention_count }}" style="max-width: 8rem;">
+                <div class="form-text small">
+                    Keep the N most recent backups under
+                    <code>{{ backups_root }}</code>. Older directories are deleted
+                    after every successful run. Set to 1 to keep only the latest.
+                </div>
+            </div>
+            <div class="mb-3 small">
+                <strong>Destination:</strong> <code>{{ backups_root }}</code>
+                {% if backup_last_run_at %}
+                <br><strong>Last scheduled run:</strong>
+                <code>{{ backup_last_run_at }}</code>
+                {% else %}
+                <br><strong>Last scheduled run:</strong>
+                <span class="text-muted">never</span>
+                {% endif %}
+            </div>
+            <button type="submit" class="btn btn-primary">
+                <i class="bi bi-save me-1"></i>Save backup schedule
+            </button>
         </form>
     </div>
 </div>

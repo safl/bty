@@ -116,6 +116,7 @@ KNOWN_EVENT_KINDS: tuple[str, ...] = (
     "netboot.tftp.controlled",
     "netboot.tftp.control_failed",
     "settings.upstream.updated",
+    "settings.backup.updated",
     "backup.created",
     "backup.failed",
     "backup.pruned",

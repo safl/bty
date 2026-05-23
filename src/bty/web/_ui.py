@@ -1279,6 +1279,13 @@ def register_ui_routes(
         # v4 address the operator points their router's Next-Server at.
         interfaces = _sysconfig.list_interfaces()
         primary = next((i for i in interfaces if i.ipv4), interfaces[0] if interfaces else None)
+        # Backup-schedule context for the Backup schedule card. Re-opens
+        # the DB; cheap and keeps the read close to where it's rendered.
+        with _db.open_db(state_path) as conn:
+            backup_enabled = _settings_store.resolve_backup_enabled(conn)
+            backup_cadence = _settings_store.resolve_backup_cadence(conn)
+            backup_retention_count = _settings_store.resolve_backup_retention(conn)
+            backup_last_run_at = _settings_store.get_backup_last_run_at(conn)
         return render(
             "ui/settings.html",
             request,
@@ -1289,6 +1296,12 @@ def register_ui_routes(
             interfaces=interfaces,
             primary=primary,
             boot_root=str(boot_root),
+            backups_root=str(backups_root),
+            backup_enabled=backup_enabled,
+            backup_cadence=backup_cadence,
+            backup_cadences=_settings_store.BACKUP_CADENCES,
+            backup_retention_count=backup_retention_count,
+            backup_last_run_at=backup_last_run_at,
             missing_netboot_artifacts=_releases.missing_netboot_artifacts(boot_root),
         )
 
@@ -1299,7 +1312,18 @@ def register_ui_routes(
         dependencies=[Depends(require_ui_auth)],
     )
     def ui_settings(request: Request, saved: str | None = None) -> HTMLResponse:
-        flash = "Upstream sources saved." if saved else None
+        # ``saved`` carries which form just submitted (so the success
+        # banner can be specific). The legacy upstream form posts back
+        # ``?saved=1`` for back-compat with old bookmarks; the backup
+        # form uses ``?saved=backup``.
+        flash_map = {
+            "1": "Upstream sources saved.",
+            "upstream": "Upstream sources saved.",
+            "backup": "Backup schedule saved.",
+        }
+        flash = flash_map.get(saved or "")
+        if saved and flash is None:
+            flash = "Saved."
         return _render_settings_page(request, flash=flash, flash_kind="success" if saved else None)
 
     @app.get(
@@ -1361,6 +1385,69 @@ def register_ui_routes(
             )
             conn.commit()
         return RedirectResponse("/ui/settings?saved=1", status_code=status.HTTP_303_SEE_OTHER)
+
+    @app.post(
+        "/ui/settings/backup",
+        include_in_schema=False,
+        dependencies=[Depends(require_ui_auth)],
+    )
+    def ui_settings_backup(
+        request: Request,
+        backup_enabled: Annotated[str, Form()] = "",
+        backup_cadence: Annotated[str, Form()] = "manual",
+        backup_retention_count: Annotated[str, Form()] = "",
+    ) -> RedirectResponse:
+        """Save the scheduled-backup knobs.
+
+        Form fields:
+          backup_enabled         -- checkbox; present (any truthy) =
+                                    enabled, absent (HTML omits unchecked
+                                    boxes entirely) = disabled.
+          backup_cadence         -- one of BACKUP_CADENCES; unknown
+                                    values reject as 422 via the
+                                    settings-store resolver fallback,
+                                    so we soft-validate here against the
+                                    same tuple.
+          backup_retention_count -- positive int; non-numeric / sub-1
+                                    reverts to the default via the
+                                    settings-store resolver.
+
+        Effects propagate within the scheduler's next tick (60s) -- no
+        restart needed.
+        """
+        cadence_raw = backup_cadence.strip()
+        cadence = (
+            cadence_raw
+            if cadence_raw in _settings_store.BACKUP_CADENCES
+            else _settings_store.DEFAULT_BACKUP_CADENCE
+        )
+        try:
+            retention = max(1, int(backup_retention_count))
+        except (TypeError, ValueError):
+            retention = _settings_store.DEFAULT_BACKUP_RETENTION
+        enabled = bool(backup_enabled)
+        with _db.open_db(state_path) as conn:
+            _settings_store.set_value(
+                conn, _settings_store.KEY_BACKUP_ENABLED, "1" if enabled else "0"
+            )
+            _settings_store.set_value(conn, _settings_store.KEY_BACKUP_CADENCE, cadence)
+            _settings_store.set_value(conn, _settings_store.KEY_BACKUP_RETENTION, str(retention))
+            _events_log.record(
+                conn,
+                kind="settings.backup.updated",
+                summary=(
+                    f"backup schedule: enabled={enabled}, cadence={cadence}, retention={retention}"
+                ),
+                subject_kind="settings",
+                subject_id="backup",
+                actor="operator",
+                source_ip=_client_ip(request),
+            )
+            conn.commit()
+        return RedirectResponse(
+            "/ui/settings?saved=backup#backup-schedule",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
 
     @app.post(
         "/ui/settings/tftp-control",
