@@ -1027,36 +1027,6 @@ def test_list_catalog_toml_url_encodes_special_chars_in_names(tmp_path: Path) ->
         assert "(" not in path_segment, f"unencoded paren in /catalog.toml src URL: {line!r}"
 
 
-def test_list_images_does_not_surface_bri_descriptors(tmp_path: Path) -> None:
-    """``.bri`` is the ``bty``-on-USB ad-hoc local-catalog
-    format; bty-web is the SHA-keyed managed-catalog model. A
-    ``.bri`` dropped into the server's image root must NOT
-    appear in ``GET /images`` -- it can't bind to a machine
-    (no SHA), so surfacing it would invite the operator to
-    bind something they then can't flash."""
-    image_root = tmp_path / "images"
-    image_root.mkdir()
-    (image_root / "demo.bri").write_text(
-        'url = "https://example.invalid/demo.img.gz"\nname = "Demo"\n'
-    )
-
-    state = tmp_path / "state.db"
-    app = create_app(
-        state_path=state,
-        service_user=TEST_SERVICE_USER,
-        secret_key=TEST_SECRET_KEY,
-        image_root=image_root,
-    )
-    with TestClient(app) as client:
-        r = client.get("/images")
-
-    assert r.status_code == 200
-    rows = r.json()
-    assert all(row["name"] != "Demo" for row in rows), (
-        f"unexpected .bri row in bty-web /images output: {rows}"
-    )
-
-
 # ---------- create_app sanity ----------------------------------------------
 
 

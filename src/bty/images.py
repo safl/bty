@@ -44,12 +44,10 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-import tomllib
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TypeAlias
-from urllib.parse import urlparse
 
 # Default image root. Operators override via the ``BTY_IMAGE_ROOT``
 # environment variable. The USB live appliance mounts the BTY_IMAGES
@@ -186,207 +184,6 @@ def list_images(root: Path) -> list[Image]:
                 sha256=_read_sidecar_sha(p),
             )
         )
-    return out
-
-
-# bty Remote Image (.bri) descriptor file extension. A tiny TOML
-# file the operator drops into BTY_IMAGES to advertise an image
-# that lives on the network rather than on the local filesystem.
-# Mailable / Slackable: an operator can attach a ``.bri`` to a
-# message and the recipient drops it into their own BTY_IMAGES to
-# get the same flashable entry. The ``url`` field accepts http(s)://
-# (plain HTTP fetch) and ``oras://`` (OCI registry artifact, resolved
-# via bty's ORAS adapter at flash time). Fresh USB sticks bake four
-# starter descriptors onto BTY_IMAGES: three nosi sysdev images via
-# ``oras://`` plus the bty-server appliance via a GitHub release URL.
-BRI_EXTENSION = ".bri"
-
-
-@dataclass(frozen=True)
-class RemoteImage:
-    """A bty Remote Image (.bri) descriptor.
-
-    Loaded from a tiny TOML file. The descriptor file path itself
-    lives on the local filesystem under BTY_IMAGES; the *image
-    bytes* it points at live at ``url``. Same role as :class:`Image`
-    but for over-the-network sources, so the catalog UI can show
-    "fetchable" images alongside local ones.
-
-    Required fields: ``url`` (the bytes' upstream location -- an
-    HTTP(S) URL or an ``oras://`` OCI registry reference resolved
-    via :mod:`bty.oras`). Everything else is optional with sensible
-    defaults: ``name`` falls back to the URL's last path segment,
-    ``format`` to the extension-derived format (or ``img.gz`` for
-    ``oras://`` refs, which have no filename to extension-sniff),
-    ``size_bytes`` and ``sha256`` stay ``None`` until the operator
-    (or a bty-side fetcher) materialises them.
-    """
-
-    name: str
-    url: str
-    path: Path  # the .bri descriptor file's location on disk
-    format: str | None = None
-    size_bytes: int | None = None
-    sha256: str | None = None
-    description: str | None = None
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "name": self.name,
-            "url": self.url,
-            "path": str(self.path),
-            "format": self.format,
-            "size_bytes": self.size_bytes,
-            "sha256": self.sha256,
-            "description": self.description,
-        }
-
-
-class BriError(Exception):
-    """Raised when a ``.bri`` descriptor fails to parse or validate.
-    Distinct from generic exceptions so callers (``bty``, tests)
-    can surface a friendly per-file error without crashing the whole
-    listing."""
-
-
-# .bri files are tiny key/value descriptors -- in practice a few
-# hundred bytes. 64 KiB caps a maliciously-large or wrong-file
-# (operator pasted an image into a .bri filename) without
-# rejecting any plausible real descriptor. Without this cap,
-# a 1 GiB file gets fully buffered into memory before tomllib
-# notices it isn't TOML.
-_BRI_MAX_BYTES = 64 * 1024
-
-
-def _name_from_url(url: str) -> str:
-    """Derive a display name from a URL by taking its last path
-    segment. ``https://host/path/foo.img.gz`` -> ``foo.img.gz``.
-    Empty or trailing-slash paths fall back to the netloc so the
-    operator at least sees *something* identifiable."""
-    parsed = urlparse(url)
-    last = parsed.path.rsplit("/", 1)[-1]
-    return last or parsed.netloc or url
-
-
-def read_bri(path: Path) -> RemoteImage:
-    """Parse one ``.bri`` TOML file into a :class:`RemoteImage`.
-    Raises :class:`BriError` on missing required fields or bad TOML.
-
-    Refuses files larger than :data:`_BRI_MAX_BYTES` so a wrong
-    file (e.g. an image accidentally renamed to ``.bri``) cannot
-    OOM the parser via ``tomllib.load``.
-    """
-    try:
-        size = path.stat().st_size
-    except OSError as exc:
-        raise BriError(f"{path}: cannot stat: {exc}") from exc
-    if size > _BRI_MAX_BYTES:
-        raise BriError(
-            f"{path}: file is {size} bytes, larger than the {_BRI_MAX_BYTES}-byte "
-            f".bri limit (this is likely not a descriptor)"
-        )
-    try:
-        with path.open("rb") as fh:
-            raw = tomllib.load(fh)
-    except tomllib.TOMLDecodeError as exc:
-        raise BriError(f"{path}: not valid TOML: {exc}") from exc
-    if not isinstance(raw, dict):
-        raise BriError(f"{path}: top-level must be a table")
-    url = raw.get("url")
-    if not isinstance(url, str) or not url.strip():
-        raise BriError(f"{path}: missing required field: url")
-    url = url.strip()
-    if not url.startswith(("http://", "https://", "oras://")):
-        raise BriError(f"{path}: url must start with http://, https://, or oras://, got {url!r}")
-
-    name = raw.get("name")
-    if name is None:
-        name = _name_from_url(url)
-    elif not isinstance(name, str):
-        raise BriError(f"{path}: name must be a string")
-    elif not name.strip():
-        raise BriError(f"{path}: name must not be empty")
-    else:
-        name = name.strip()
-
-    fmt = raw.get("format")
-    if fmt is None:
-        # Try to infer from URL last path segment so "img.gz",
-        # "iso.gz", etc. flow through the same detect_format logic
-        # used for local files. ``oras://`` refs don't have a filename
-        # in the URL (the artifact name lives in the manifest layer's
-        # title annotation), so default to ``img.gz`` -- the format
-        # nosi publishes and the practical default for any OCI-hosted
-        # disk image. Operators publishing other formats set ``format``
-        # explicitly in the .bri.
-        fmt = "img.gz" if url.startswith("oras://") else detect_format(Path(_name_from_url(url)))
-    elif not isinstance(fmt, str):
-        raise BriError(f"{path}: format must be a string")
-
-    size_bytes = raw.get("size_bytes")
-    if size_bytes is not None:
-        # ``bool`` is a subclass of ``int``, so reject it explicitly --
-        # a TOML ``size_bytes = true`` must not slip through as 1. A
-        # negative byte count is nonsense too.
-        if isinstance(size_bytes, bool) or not isinstance(size_bytes, int):
-            raise BriError(f"{path}: size_bytes must be an integer")
-        if size_bytes < 0:
-            raise BriError(f"{path}: size_bytes must not be negative, got {size_bytes}")
-
-    sha = raw.get("sha256")
-    if sha is not None:
-        if not isinstance(sha, str):
-            raise BriError(f"{path}: sha256 must be a string")
-        sha = sha.strip().lower()
-        if not is_sha256_hex(sha):
-            raise BriError(f"{path}: sha256 must be a 64-char lower-case hex string")
-
-    description = raw.get("description")
-    if description is not None and not isinstance(description, str):
-        raise BriError(f"{path}: description must be a string")
-
-    return RemoteImage(
-        name=str(name),
-        url=url,
-        path=path,
-        format=fmt,
-        size_bytes=size_bytes,
-        sha256=sha,
-        description=description,
-    )
-
-
-def list_remote_images(root: Path) -> list[RemoteImage]:
-    """List ``.bri`` descriptor files directly under ``root``
-    (non-recursive).
-
-    Mirrors :func:`list_images`'s shape but for the remote half of
-    the catalog. Malformed ``.bri`` files are silently skipped so
-    one bad descriptor doesn't break the whole listing.
-    :func:`inspect_image` re-raises :class:`BriError` on a bad
-    descriptor so an interactive tool can surface the symptom
-    loudly instead of swallowing it.
-    """
-    if not root.exists() or not root.is_dir():
-        return []
-    out: list[RemoteImage] = []
-    for p in sorted(root.iterdir()):
-        # Same symlink defense as ``list_images`` -- a ``.bri``
-        # symlink could point at an arbitrary TOML file outside
-        # ``root``; even though the descriptor itself is harmless
-        # to read, keeping the listing strictly intra-root makes
-        # the catalog's contents predictable.
-        if p.is_symlink():
-            continue
-        # Match the case-insensitive extension convention used by
-        # ``detect_format``; a stick prepared on Windows might
-        # surface ``.BRI`` from FAT32-style uppercasing.
-        if not p.is_file() or p.suffix.lower() != BRI_EXTENSION:
-            continue
-        try:
-            out.append(read_bri(p))
-        except BriError:
-            continue
     return out
 
 
@@ -562,11 +359,6 @@ def merge_with_catalog(
     well-pinned tests covered, but not the rolling-tag case the
     default catalog actually ships.
 
-    ``.bri`` (bty Remote Image) descriptors are deliberately NOT
-    folded in here. A ``.bri`` is a name/URL pointer; if surfaced
-    it would round-trip through this function as a CatalogEntry
-    too, but the surface lives in :func:`list_remote_images` and
-    catalog endpoints, not this merge.
     """
     # Local import: ``bty.catalog`` imports ``bty.images`` at
     # module load, so a top-of-file import here would cycle. By
@@ -810,30 +602,16 @@ def inspect_image(path: Path) -> dict[str, Any]:
     - ``img.xz`` -> the textual output of ``xz -l``
     - ``img.gz`` -> the textual output of ``gzip -l``
     - ``img.bz2`` -> nothing (bzip2 has no listing tool)
-    - ``.bri`` -> the parsed descriptor contents under ``detail`` and
-      ``format`` set to ``"bri"`` (the descriptor itself is metadata,
-      not the image bytes; ``size_bytes`` is the descriptor file's
-      size, not the upstream image's).
 
     Raises :class:`FileNotFoundError` if the path does not exist,
     :class:`IsADirectoryError` if the path is a directory (operator
     almost certainly meant a file inside; surfacing a "format='',
     size_bytes=40" record for a directory was misleading), or
-    :class:`BriError` if it's a malformed ``.bri`` descriptor.
     """
     if not path.exists():
         raise FileNotFoundError(path)
     if path.is_dir():
         raise IsADirectoryError(path)
-
-    if path.suffix.lower() == BRI_EXTENSION:
-        descriptor = read_bri(path)
-        return {
-            "path": str(path),
-            "format": "bri",
-            "size_bytes": path.stat().st_size,
-            "detail": descriptor.to_dict(),
-        }
 
     fmt = detect_format(path)
     info: dict[str, Any] = {
@@ -859,7 +637,7 @@ def inspect_image(path: Path) -> dict[str, Any]:
     # against e.g. README.md returned a confusing blank record
     # with format=''.
     if fmt is None:
-        supported = ", ".join(ext for ext, _ in _EXTENSIONS) + ", .bri"
+        supported = ", ".join(ext for ext, _ in _EXTENSIONS)
         info["detail_error"] = (
             f"unrecognised format for {path.name!r}; supported extensions: {supported}"
         )

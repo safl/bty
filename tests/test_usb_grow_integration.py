@@ -13,8 +13,9 @@ sparse image:
   ``BTY_IMAGES`` at the start, leaving ~48 MiB of free space behind
   it (mimicking the bty-usb on a 256 GB stick scenario at scale).
 * The partition is formatted exfat, mounted, seeded with a few
-  fake ``.bri`` descriptor files (the baked-in content the
-  service must preserve), and unmounted.
+  small fake content files (representative of whatever an operator
+  drops onto BTY_IMAGES; the grow service must preserve them),
+  and unmounted.
 * ``bty-usb-grow`` runs against the loop device.
 * We verify:
     - the partition now fills the disk (within end-of-disk slack)
@@ -60,8 +61,8 @@ SLACK_MIB = 1  # leading 1 MiB for the partition table
 
 # Content we expect to survive the grow.
 SEED_FILES = {
-    "bty-server.bri": b'{"name":"bty-server","url":"https://example/x.img.gz"}\n',
-    "ubuntu-24.04.bri": b'{"name":"ubuntu-24.04","url":"https://example/u.img.gz"}\n',
+    "bty-server.img.gz": b"\0fake-server-image-content\0",
+    "ubuntu-24.04.img.gz": b"\0fake-ubuntu-image-content\0",
     "README.txt": b"drop image files here\n",
 }
 

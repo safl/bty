@@ -253,6 +253,21 @@ def load_bytes(raw_bytes: bytes, *, source: str = "<bytes>") -> Catalog:
         entry = CatalogEntry.from_dict(raw_entry)
         if entry.name in seen_names:
             raise CatalogError(f"catalog at {source}: duplicate image name {entry.name!r}")
+        # Contract: a catalog manifest is a PUBLISHABLE artifact -- bty-server
+        # serves one, the GitHub release publishes one, an operator points
+        # ``bty --catalog`` at one. ``file://`` srcs are meaningless to any
+        # receiver other than the publisher's host (the path's gone the
+        # moment you copy the file elsewhere), so they cannot appear in a
+        # parsed catalog. Local files live in the image-root and are
+        # discovered separately (``images.list_images``); they never make
+        # it into a manifest.
+        if entry.src.startswith("file://"):
+            raise CatalogError(
+                f"catalog at {source}: entry {entry.name!r} has ``file://`` src "
+                f"({entry.src!r}); catalog manifests carry only remote sources "
+                f"(oras:// / http:// / https://) so the file is meaningful to a "
+                f"receiver. Local files belong in the image-root, not a manifest."
+            )
         seen_names.add(entry.name)
         entries.append(entry)
 

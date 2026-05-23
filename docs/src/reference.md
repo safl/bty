@@ -97,31 +97,6 @@ size_bytes = 1024
 optional in the schema; rolling tags (`oras://...:latest`) leave
 it null because the digest is resolved at flash time.
 
-### `.bri` descriptors (per-stick catalog)
-
-A USB stick's `BTY_IMAGES` partition can carry `.bri` (bty Remote Image)
-descriptors: tiny TOML pointers to remote images:
-
-```toml
-url = "https://github.com/safl/bty/releases/latest/download/bty-server-x86_64.img.gz"
-# Optional: name, format, size_bytes, sha256, description
-```
-
-The `url` field accepts:
-
-- `https://` (or `http://`) -- plain HTTP fetch.
-- `oras://<host>/<owner>/<repo>:<tag>` -- an OCI artifact published via
-  [ORAS](https://oras.land/) (the spec for non-container artifacts in a
-  container registry). bty resolves the tag to a content-addressed layer
-  digest at flash time and verifies the downloaded bytes against it. Use a
-  rolling tag (`:latest`) or pin to `@sha256:<hex>`. Anonymous-pull only:
-  no PAT, no docker login.
-
-Fresh USB sticks ship with four starter `.bri` files pre-staged on
-`BTY_IMAGES`: three nosi sysdev images (Debian / Ubuntu / Fedora, each via
-`oras://ghcr.io/safl/nosi/<v>:latest`) plus the bty-server appliance from
-the GitHub release URL. All four appear in the wizard catalog with no
-infrastructure setup.
 
 ### Recognised image formats
 
@@ -190,7 +165,7 @@ bty's modules are usable as a library. Stable entry points:
 | Module | Purpose |
 |------------------|-----------------------------------------------------------|
 | `bty.disks` | `list_disks() -> list[dict]` - block-device discovery. |
-| `bty.images` | `list_images(root)`, `inspect_image(path)`, `Image` dataclass, `detect_format(path)`, `default_image_root()`, `read_bri(path)`, `list_remote_images(root)`, `RemoteImage` / `BriError`. |
+| `bty.images` | `list_images(root)`, `inspect_image(path)`, `Image` dataclass, `detect_format(path)`, `default_image_root()`. |
 | `bty.oras` | `parse_ref(ref) -> OrasRef`, `resolve_ref(ref) -> ResolvedBlob`, `is_oras_url(url) -> bool`, `OrasError`. ORAS / OCI registry adapter for `oras://` URLs. |
 | `bty.catalog` | `Catalog`, `load_source(src)`, `load_bytes(...)`, `fetch_bytes(...)`. Portable catalog TOML loader. |
 | `bty.flash` | `execute_plan(plan, progress=, cancel=)`, `FlashPlan`, `FlashProgress`, `FlashError`. The flash machinery the wizard sits on top of. |

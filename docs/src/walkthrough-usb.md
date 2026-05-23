@@ -107,19 +107,11 @@ and you should now see the second partition labeled `BTY_IMAGES`.
 
 ## Step 3: Drop your image(s) onto BTY_IMAGES
 
-A fresh stick ships with four starter `.bri` (bty Remote Image) descriptors
-on the `BTY_IMAGES` partition, so you can flash without copying anything
-first:
-
-- `nosi-debian-sysdev-x86_64.bri` -- Debian 13 trixie sysdev image
-- `nosi-ubuntu-sysdev-x86_64.bri` -- Ubuntu 26.04 LTS resolute sysdev image
-- `nosi-fedora-sysdev-x86_64.bri` -- Fedora 44 sysdev image
-- `bty-server-x86_64.bri` -- latest bty-server appliance
-
-All three nosi entries use `oras://ghcr.io/safl/nosi/<variant>:latest`,
-which bty resolves at flash time to the current GHCR-published layer
-digest. The bty-server entry uses a GitHub release URL. See
-[`reference.md`](reference.md) for the `.bri` schema and `oras://` details.
+A fresh stick ships with a plain (empty) `BTY_IMAGES` partition.
+The default catalog of nosi + bty-server images is a release artifact
+(``https://github.com/safl/bty/releases/latest/download/catalog.toml``)
+the wizard offers as `[d] default` in the SELECT_CATALOG screen --
+no hard-coded entries baked onto the stick.
 
 To add your own pre-built images, mount the partition and drop files in.
 It's **exFAT**, so you can mount it on Linux, macOS, or Windows.
@@ -299,8 +291,7 @@ remote `bty-web` for the catalog because IP-KVMs expose the `.iso` as a
 single CD-ROM with no local storage for image files.
 
 **Always-available bty-server install shortcut.** Whatever delivery shape
-you use, fresh USB sticks ship with a `bty-server-x86_64.bri` descriptor on
-`BTY_IMAGES` pointing at the latest GitHub release. The wizard surfaces it
+you use, the wizard offers the default catalog (which includes bty-server) as `[d] default` in SELECT_CATALOG. The wizard surfaces it
 on the image list out of the box: pick it, pick a target disk, confirm. The
 image streams directly from GitHub through the live env to the target's
 disk; no local staging.
@@ -355,7 +346,7 @@ on the partition.
 sudo mkdir -p /mnt/bty-images
 
 # Copy as many pre-built images as you need. Supported extensions:
-# *.img.gz / *.img.zst / *.img.xz / *.img.bz2 / *.qcow2 / *.bri
+# *.img.gz / *.img.zst / *.img.xz / *.img.bz2 / *.qcow2 / *.img / *.iso / *.iso.gz
 # (bri is a tiny TOML pointer at a remote image URL).
 sudo cp /path/to/debian-13-server.img.gz /mnt/bty-images/
 sudo cp /path/to/ubuntu-26.04-server.img.gz /mnt/bty-images/
@@ -367,13 +358,13 @@ sudo umount /mnt
 The discovery service accepts either layout:
 
 1. **Recommended**: a `bty-images/` subfolder at the partition root with
-   your `.img.gz` / `.qcow2` / `.bri` files inside. Keeps pre-built images
+   your `.img.gz` / `.qcow2` / `.iso.gz` files inside. Keeps pre-built images
    visually separate from the `.iso` files Ventoy boots.
 2. **Quick-drop**: the same files at the partition root, alongside
    `bty-usb-x86_64.iso`. Less tidy but supported.
 
 The service tries the subfolder first, then falls back to the root. First
-match with at least one supported file (`.bri` / `.img*` / `.qcow2`) wins,
+match with at least one supported file (`.img*` / `.qcow2` / `.iso*`) wins,
 gets bind-mounted at `/var/lib/bty/images`, and `bty` picks it up.
 
 #### Step 4: Boot the target

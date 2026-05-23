@@ -40,10 +40,10 @@ partitions in an MBR isohybrid layout:
   region so Windows hosts enumerate the stick correctly.
 - **`BTY_IMAGES` partition** (2.1 GiB, exFAT, MBR label `BTY_IMAGES`).
   Holds pre-built images to flash onto target disks: room for a fleet of
-  small `.bri` descriptors plus one large `.img.gz` or a few smaller ones.
+  a few `.img.gz` / `.qcow2` files.
   Sized to play nicely with Ventoy (which hosts blobs on its own data
   partition) and KVM-over-IP shims like piKVM / JetKVM (which rely on
-  `.bri` pointers rather than bundled blobs). Grow with gparted if you need
+  smaller bundled blobs). Grow with gparted if you need
   more.
 
 bty auto-mounts `/dev/disk/by-label/BTY_IMAGES` at `/var/lib/bty/images` on
@@ -52,14 +52,14 @@ boot. The ``bty`` wizard scans this mount point by default, overridable via
 
 Operators populate the partition by mounting it on any Linux / macOS /
 Windows box (exFAT is read/write on all three) and dropping `.img.gz`,
-`.qcow2`, `.img.zst`, or `.bri` files into it. The partition is *not* under
+`.qcow2`, `.img.zst`, or `.img.gz` files into it. The partition is *not* under
 the live-boot SquashFS+tmpfs overlay, so files copied there persist.
 
-Fresh sticks ship with four starter `.bri` files on the partition: three
+Fresh sticks ship with an empty BTY_IMAGES partition. The default catalog of three
 nosi sysdev images via `oras://ghcr.io/...` (rolling `:latest` tags
 resolved to content-addressed layer digests at flash time) and the latest
 bty-server appliance via a GitHub release URL. See
-[`reference.md`](reference.md) for the `.bri` schema and `oras://` URL
+[`reference.md`](reference.md) for the catalog schema and `oras://` URL
 form.
 
 ## Machine record

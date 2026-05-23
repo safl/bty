@@ -118,7 +118,7 @@ class _WizardStage(IntEnum):
 class _TuiImage:
     """Unified catalog row.
 
-    Either ``path`` (local file) or ``url`` (remote / oras / .bri
+    Either ``path`` (local file) or ``url`` (remote / oras / catalog
     pointer) is populated. The rest of the TUI consumes this
     shape uniformly so local + remote sources blend into one list.
     """
@@ -400,13 +400,17 @@ class _State:
 
 
 def _list_local_images(image_root: Path) -> list[_TuiImage]:
-    """Local image-root scan -> TUI rows. ``.bri`` descriptors
-    surface as remote rows (url-bearing) so they flash through the
-    same URL pipeline as catalog entries.
+    """Local image-root scan -> TUI rows. Each file with a recognised
+    image extension (``.qcow2`` / ``.img`` / ``.img.{gz,zst,xz,bz2}`` /
+    ``.iso`` / ``.iso.gz``) surfaces as a local row (path-bearing).
+    Catalog entries (the bty-server's remote images, oras://, http://)
+    overlay on top via ``--catalog URL`` -- they are NOT discovered on
+    the local filesystem; the BTY_IMAGES partition is plain local
+    image files only.
     """
     if not image_root.exists() or not image_root.is_dir():
         return []
-    out: list[_TuiImage] = [
+    return [
         _TuiImage(
             name=img.name,
             fmt=img.format,
@@ -415,16 +419,6 @@ def _list_local_images(image_root: Path) -> list[_TuiImage]:
         )
         for img in images.list_images(image_root)
     ]
-    out.extend(
-        _TuiImage(
-            name=bri.name,
-            fmt=bri.format,
-            size_bytes=bri.size_bytes or 0,
-            url=bri.url,
-        )
-        for bri in images.list_remote_images(image_root)
-    )
-    return out
 
 
 def _list_disks() -> list[dict[str, Any]]:
@@ -1723,7 +1717,7 @@ class BtyTui:
                 self._catalog_load_error = f"{type(exc).__name__}: {exc}"
         # Dedup local + remote by the canonical ``bty_image_ref``
         # (``sha256(canonicalise_src(url))``). Local rows take
-        # precedence: a ``.bri`` pointer on the operator's USB stick
+        # precedence: a catalog entry (operator-set --catalog overlay)
         # and a catalog entry that target the SAME upstream
         # (typically ``oras://...``) collapse to one row instead of
         # showing both. Plain local image files without a ``url``

@@ -1,6 +1,6 @@
 """ORAS / OCI registry adapter for fetching disk images.
 
-Lets ``.bri`` descriptors point at OCI artifacts -- disk images
+Lets catalog ``[[images]]`` entries point at OCI artifacts -- disk images
 published via ORAS_ (OCI Registry As Storage), *not* container
 images -- via a tiny URL scheme prefix. Operators write::
 

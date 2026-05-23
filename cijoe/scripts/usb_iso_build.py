@@ -46,18 +46,21 @@ import json
 import logging as log
 import os
 import shutil
-import tempfile
 from argparse import ArgumentParser
 from pathlib import Path
 
 PUBLISH_BASENAME_FMT = "bty-usb-x86_64-v{version}.iso"
 
-# Just enough room for the starter ``.bri`` descriptors (a few hundred
-# bytes each); operator images live elsewhere (bty-web catalog, or the
-# operator can grow + populate the partition by hand). The partition
-# auto-grows to fill the underlying disk on first boot via
-# ``bty-usb-grow.service``, so this is the minimum staged at bake time,
-# not the runtime size. Verified by the GHA auto-grow test.
+# Just the BTY_IMAGES partition stub; the bake doesn't populate it.
+# Operators drop their own image files (.qcow2 / .img.gz / .img / .iso /
+# .iso.gz) onto the partition; the live env's image-root scan picks
+# them up. The catalog of nosi + bty-server images is a release-side
+# artifact (releases/latest/download/catalog.toml) the wizard offers
+# as [d] default in SELECT_CATALOG -- not something baked here.
+#
+# The partition auto-grows to fill the underlying disk on first boot
+# via ``bty-usb-grow.service``, so this is the minimum staged at bake
+# time, not the runtime size. Verified by the GHA auto-grow test.
 #
 # 32 MiB rather than 1 MiB: ``exfatprogs`` mkfs.exfat refuses very small
 # volumes (the 1 MiB attempt in v0.25.4 failed the bake); 32 MiB is
@@ -212,7 +215,7 @@ def main(args, cijoe):
     # The front of the file stays byte-identical so the boot path
     # is unchanged. dd / Etcher / Rufus all do byte-for-byte writes
     # and handle the larger artifact.
-    err = _extend_with_exfat(cijoe, dst, bty_version)
+    err = _extend_with_exfat(cijoe, dst)
     if err:
         return err
 
@@ -444,7 +447,7 @@ def _read_bty_version(cijoe_dir: Path) -> str:
     raise RuntimeError(f"could not find version line in {pyproject}")
 
 
-def _extend_with_exfat(cijoe, iso_path: Path, bty_version: str) -> int:
+def _extend_with_exfat(cijoe, iso_path: Path) -> int:
     """Relocate the EFI partition out of the iso-hybrid overlap, then
     append a trailing exFAT partition labelled BTY_IMAGES.
 
@@ -609,7 +612,7 @@ def _extend_with_exfat(cijoe, iso_path: Path, bty_version: str) -> int:
         log.error(f"mkfs.exfat {part_dev} failed")
         return err
 
-    # Drop a starter set of ``.bri`` descriptors into BTY_IMAGES so a
+    # The BTY_IMAGES partition stays empty here -- operator-managed; a
     # fresh stick boots with something flashable in the catalog. The
     # four entries are:
     #
@@ -621,17 +624,14 @@ def _extend_with_exfat(cijoe, iso_path: Path, bty_version: str) -> int:
     #
     # Fail-loud: if the populate step fails (mount failure, write
     # failure, exfat-fuse missing on the runner), the whole bake
-    # fails. The alternative -- silently shipping a stick with an
-    # empty BTY_IMAGES partition because the mount fell through to
-    # a "best-effort warning" path -- is strictly worse: a USB
-    # stick that boots and finds no images is a broken artifact
-    # that requires hands-on diagnosis to distinguish from a real
-    # delivery problem.
-    err = _populate_bty_images_partition(cijoe, part_dev, bty_version)
-    if err:
-        cijoe.run_local(f"sudo losetup -d {loop}")
-        return err
-
+    # The BTY_IMAGES partition is left empty -- it's plain operator
+    # storage for local image files (.qcow2 / .img.gz / .img / .iso /
+    # .iso.gz) discovered by ``images.list_images`` in the live env.
+    # The default catalog (oras nosi images + bty-server) is a
+    # separate release artifact (``releases/latest/download/catalog.toml``)
+    # the wizard offers as ``[d] default`` in SELECT_CATALOG. One
+    # concept (catalog) lives in one place (a URL); the stick stays a
+    # plain image-files area.
     err, _ = cijoe.run_local(f"sudo losetup -d {loop}")
     if err:
         log.error(f"losetup -d {loop} failed")
@@ -639,169 +639,3 @@ def _extend_with_exfat(cijoe, iso_path: Path, bty_version: str) -> int:
 
     log.info(f"Extended {iso_path} with BTY_IMAGES exFAT partition (p{part_num})")
     return 0
-
-
-# Starter .bri set baked into every USB stick's BTY_IMAGES partition.
-# Three nosi sysdev images via the ``oras://`` URL scheme (resolved by
-# bty's ORAS adapter at flash time -- rolling :latest tag, layer
-# digest verified-after-resolve), plus the bty-server appliance via
-# its GitHub release asset (built here, not in nosi). The ``oras://``
-# spelling -- distinct from ``ghcr:`` / ``docker pull ghcr.io/...``
-# -- signals that the artifacts are disk images stored as OCI
-# blobs, NOT runnable container images. Operators delete / edit /
-# replace these freely from a host OS; the files show up as ordinary
-# text on the exFAT partition.
-_STARTER_BRIS: tuple[tuple[str, str], ...] = (
-    (
-        "nosi-debian-sysdev-x86_64.bri",
-        "# bty Remote Image (.bri) descriptor.\n"
-        "#\n"
-        "# Drop your own .bri files alongside this one to advertise\n"
-        "# remote flashable images via bty's catalog. Format is\n"
-        "# minimal TOML: ``url`` is the only required field. See\n"
-        "# bty.images.read_bri for the parser + the schema.\n"
-        "#\n"
-        "# ``oras://`` URLs route through bty's ORAS adapter. The tag\n"
-        '# (e.g. "latest") is resolved to a content-addressed layer\n'
-        "# digest at flash time, so this stick stays current as nosi\n"
-        "# republishes. NOTE: oras:// is distinct from ``docker pull\n"
-        "# ghcr.io/...`` -- the artifact is a disk image stored as an\n"
-        "# OCI blob, NOT a runnable container image. To pin a specific\n"
-        '# build, replace ":latest" with "@sha256:<digest>".\n'
-        "\n"
-        'name = "nosi debian-sysdev (x86_64, rolling)"\n'
-        'url = "oras://ghcr.io/safl/nosi/debian-sysdev:latest"\n'
-        'format = "img.gz"\n'
-        'description = "Debian 13 trixie sysdev image, x86_64"\n',
-    ),
-    (
-        "nosi-ubuntu-sysdev-x86_64.bri",
-        "# bty Remote Image (.bri) descriptor.\n"
-        "#\n"
-        "# See nosi-debian-sysdev-x86_64.bri for ``oras://`` syntax notes.\n"
-        "\n"
-        'name = "nosi ubuntu-sysdev (x86_64, rolling)"\n'
-        'url = "oras://ghcr.io/safl/nosi/ubuntu-sysdev:latest"\n'
-        'format = "img.gz"\n'
-        'description = "Ubuntu 26.04 LTS resolute sysdev image, x86_64"\n',
-    ),
-    (
-        "nosi-fedora-sysdev-x86_64.bri",
-        "# bty Remote Image (.bri) descriptor.\n"
-        "#\n"
-        "# See nosi-debian-sysdev-x86_64.bri for ``oras://`` syntax notes.\n"
-        "\n"
-        'name = "nosi fedora-sysdev (x86_64, rolling)"\n'
-        'url = "oras://ghcr.io/safl/nosi/fedora-sysdev:latest"\n'
-        'format = "img.gz"\n'
-        'description = "Fedora 44 sysdev image, x86_64"\n',
-    ),
-    (
-        "bty-server-x86_64.bri",
-        "# bty Remote Image (.bri) descriptor.\n"
-        "#\n"
-        "# Drop your own .bri files alongside this one to advertise\n"
-        "# remote flashable images via bty's catalog. Format is\n"
-        "# minimal TOML: ``url`` is the only required field. See\n"
-        "# bty.images.read_bri for the parser + the schema.\n"
-        "\n"
-        'name = "bty-server (x86_64, v{version})"\n'
-        'url = "https://github.com/safl/bty/releases/download/v{version}/'
-        'bty-server-x86_64-v{version}.img.gz"\n'
-        'format = "img.gz"\n'
-        'description = "bty-server v{version} appliance for x86_64"\n',
-    ),
-)
-
-
-def _populate_bty_images_partition(cijoe, part_dev: str, bty_version: str) -> int:
-    """Mount the freshly-mkfs'd BTY_IMAGES exFAT partition and drop
-    the starter ``.bri`` set into it. Returns 0 on success, errno-
-    style int on failure.
-
-    Hardened against the silent-empty-partition failure mode:
-
-    - Each .bri body is staged locally to a tempfile *before* mount,
-      then ``sudo cp``'d in. Avoids heredoc-via-cijoe-shell quoting
-      semantics, which were the prime suspect for the silent empty-
-      partition bug (whatever shell ``cijoe.run_local`` uses,
-      ``cp src dst`` is unambiguous).
-    - Kernel ``mount -t exfat`` first; fall back to
-      ``mount.exfat-fuse`` when the kernel module isn't loadable on
-      the runner. release.yml's apt step installs both.
-    - Explicit ``sync <path>`` after each write so a subsequent
-      ``losetup -d`` (or kernel buffer dirty-on-detach quirk) can't
-      drop the bytes.
-    - ``ls`` + ``cat`` of each written file land in the bake log so
-      a silent zero-byte write can't pass the next CI bake either.
-    - Errno-style return propagates upward so the whole bake fails
-      rather than shipping a partition with broken .bri pointers.
-    """
-    # Stage every .bri body as a tempfile *now*, before mount. If
-    # any of these fail we haven't touched the loop device yet.
-    staged: list[tuple[str, Path]] = []
-    for filename, body in _STARTER_BRIS:
-        # Bake the current release's version into the body's {version}
-        # placeholders. Only the bty-server .bri carries any (the
-        # oras://...:latest entries use rolling tags); the str.format
-        # call is a no-op on the others.
-        body = body.format(version=bty_version)
-        fd, name = tempfile.mkstemp(prefix=f"{filename}.", suffix=".tmp")
-        os.close(fd)
-        src_path = Path(name)
-        src_path.write_text(body, encoding="utf-8")
-        staged.append((filename, src_path))
-
-    # ``mktemp -d`` for the mountpoint over a hardcoded path so
-    # parallel bake runs (CI matrix, two operators on one box) don't
-    # collide on it.
-    err, state = cijoe.run_local("mktemp -d -t bty-images-bake.XXXXXX")
-    if err:
-        log.error("mktemp -d failed; cannot populate BTY_IMAGES partition")
-        for _, src in staged:
-            src.unlink(missing_ok=True)
-        return errno.EIO
-    mount_dir = state.output().strip().splitlines()[-1].strip()
-
-    # Try kernel exfat first; fall back to fuse-exfat. GHA's
-    # ubuntu-latest carries the kernel module on most images; some
-    # minimal images need the fuse helper instead. release.yml's
-    # apt step installs both ``exfatprogs`` (mkfs.exfat) and
-    # ``exfat-fuse`` (mount.exfat-fuse) so both paths are present.
-    err, _ = cijoe.run_local(f"sudo mount -t exfat {part_dev} {mount_dir}")
-    if err:
-        err, _ = cijoe.run_local(f"sudo mount.exfat-fuse {part_dev} {mount_dir}")
-    if err:
-        log.error(
-            f"could not mount {part_dev} as exfat ({mount_dir}); "
-            "BTY_IMAGES populate FAILED -- check exfat / exfat-fuse on the bake runner"
-        )
-        cijoe.run_local(f"rmdir {mount_dir} 2>/dev/null || true")
-        for _, src in staged:
-            src.unlink(missing_ok=True)
-        return errno.ENODEV
-
-    try:
-        for filename, src_path in staged:
-            bri_path = f"{mount_dir}/{filename}"
-            err, _ = cijoe.run_local(f"sudo cp {src_path} {bri_path}")
-            if err:
-                log.error(f"cp {src_path} -> {bri_path} failed")
-                return errno.EIO
-            err, _ = cijoe.run_local(f"sudo sync {bri_path}")
-            if err:
-                log.error(f"sync {bri_path} failed")
-                return errno.EIO
-            log.info(f"Wrote starter .bri to BTY_IMAGES: {filename}")
-        # Visible verification in the bake log so a silent zero-byte
-        # write or wrong-file-count can't pass the next CI bake.
-        cijoe.run_local(f"ls -la {mount_dir}")
-        for filename, _ in staged:
-            cijoe.run_local(f"sudo cat {mount_dir}/{filename}")
-        return 0
-    finally:
-        # Always umount + drop tempdir + drop the staged source files.
-        cijoe.run_local(f"sudo umount {mount_dir}")
-        cijoe.run_local(f"rmdir {mount_dir} 2>/dev/null || true")
-        for _, src in staged:
-            src.unlink(missing_ok=True)

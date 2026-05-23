@@ -1,0 +1,40 @@
+version = 1
+
+# bty starter catalog -- published as a release asset
+# (``releases/latest/download/catalog.toml``). Operators point ``bty
+# --catalog <URL>`` (or the TUI's SELECT_CATALOG ``[d] default``)
+# here to get a non-empty image list without having to author a
+# catalog of their own. Refs are deliberately rolling: an operator
+# running the same URL two months apart picks up whatever nosi has
+# rebuilt in the meantime, with the layer digest verified at
+# flash time.
+#
+# This file is a template -- ``{version}`` is substituted with the
+# current bty-lab version at release time by
+# ``scripts/generate_catalog_toml.py``. Only the bty-server entry
+# carries the placeholder; the oras:// nosi entries use rolling
+# :latest tags that don't change per release.
+
+[[images]]
+name = "nosi debian-sysdev (x86_64, rolling)"
+src = "oras://ghcr.io/safl/nosi/debian-sysdev:latest"
+format = "img.gz"
+description = "Debian 13 trixie sysdev image, x86_64"
+
+[[images]]
+name = "nosi ubuntu-sysdev (x86_64, rolling)"
+src = "oras://ghcr.io/safl/nosi/ubuntu-sysdev:latest"
+format = "img.gz"
+description = "Ubuntu 26.04 LTS resolute sysdev image, x86_64"
+
+[[images]]
+name = "nosi fedora-sysdev (x86_64, rolling)"
+src = "oras://ghcr.io/safl/nosi/fedora-sysdev:latest"
+format = "img.gz"
+description = "Fedora 44 sysdev image, x86_64"
+
+[[images]]
+name = "bty-server (x86_64, v{version})"
+src = "https://github.com/safl/bty/releases/download/v{version}/bty-server-x86_64-v{version}.img.gz"
+format = "img.gz"
+description = "bty-server v{version} appliance for x86_64"

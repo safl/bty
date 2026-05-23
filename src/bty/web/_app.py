@@ -1746,16 +1746,6 @@ def create_app(
                     cached=u.cached,
                 )
             )
-        # ``.bri`` (bty Remote Image) descriptors are deliberately
-        # NOT surfaced here. ``.bri`` is the ``bty``-on-USB ad-hoc
-        # local-catalog format -- a tiny pointer file an operator
-        # drops next to their .img.gz files for quick "flash this
-        # URL" workflows. bty-web's catalog model is ref-keyed:
-        # machine bindings target a ``bty_image_ref`` derived from
-        # an entry's ``src``, so a ``.bri`` would need to be
-        # imported as a catalog_entries row first. Mixing the two
-        # surfaces here would invite the operator to bind a
-        # ``.bri`` they then can't actually flash.
         return out
 
     @app.get("/catalog.toml", response_class=PlainTextResponse)
@@ -1765,10 +1755,17 @@ def create_app(
         entries with ``name``/``src``/``sha256``/``format``/``size_bytes``).
 
         Same set of rows as ``GET /images`` (manifest + dir-scan +
-        operator-curated DB entries; ``.bri`` deliberately excluded),
-        but serialised so ``bty --catalog`` clients can consume it
-        with the same code path they use for static files hosted on
-        e.g. GitHub. Open route, same trust model as ``/images``.
+        operator-curated DB entries), but serialised so ``bty
+        --catalog`` clients can consume it with the same code path
+        they use for static files hosted on e.g. GitHub. Open route,
+        same trust model as ``/images``.
+
+        Contract: a catalog manifest carries only REMOTE srcs (the
+        receiver can't resolve ``file://`` off the publisher's host).
+        Cached entries are rewritten to ``http://<this-server>/images/...``
+        so they're reachable; dir-scan-only entries (file:// only, no
+        sha + no upstream URL) are skipped. Any entry that would still
+        leak a ``file://`` is dropped defensively below.
 
         Implemented as ``application/toml`` so a curl-then-eyeball
         round-trip shows a human-readable manifest, not a binary blob.
@@ -1800,6 +1797,14 @@ def create_app(
                 if upstream is None:
                     continue
                 src = upstream
+            # Defense-in-depth: a catalog manifest never publishes
+            # ``file://`` srcs (see the contract in the docstring).
+            # The cached/upstream branches above shouldn't emit one,
+            # but a future code path could regress; skip rather than
+            # ship a manifest that won't parse on the receiver
+            # (bty.catalog.load_bytes rejects file://).
+            if src.startswith("file://"):
+                continue
             # tomllib basic-string escaping: backslash + double-quote.
             # All other fields are sourced from validated state and
             # are either plain ASCII identifiers or already-quoted URLs.

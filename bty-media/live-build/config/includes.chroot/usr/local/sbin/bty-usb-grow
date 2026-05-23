@@ -28,7 +28,7 @@
 #
 #   * Hard size cap: if archived content would exceed
 #     ``MAX_CONTENT_MIB`` we bail rather than risk OOM in tmpfs.
-#     The bake-time content is just ``.bri`` descriptors (KB-scale)
+#     The bake-time content is empty (operator-owned image files only)
 #     plus optionally one ``bty-server.img.gz`` (~1 GiB); 4 GiB cap
 #     is comfortably above that.
 #   * Sentinel ``.bty-grown`` on the partition prevents re-runs

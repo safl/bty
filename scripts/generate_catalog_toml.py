@@ -1,32 +1,28 @@
 #!/usr/bin/env python3
 """Generate the default ``catalog.toml`` shipped as a bty release asset.
 
-Reads the bake-time ``_STARTER_BRIS`` data structure from
-``cijoe/scripts/usb_iso_build.py`` (the same four entries that get
-written as ``.bri`` files onto every USB stick's ``BTY_IMAGES``
-partition) and emits a single ``catalog.toml`` matching the
-``bty.catalog`` manifest schema:
-
-    version = 1
-
-    [[images]]
-    name        = "..."
-    src         = "oras://ghcr.io/safl/nosi/<variant>:latest"
-    format      = "img.gz"
-    description = "..."
+Reads the checked-in template ``starter_catalog.toml.in`` (next to
+this script), substitutes ``{version}`` with the current bty-lab
+version from ``pyproject.toml``, and writes the result to the output
+path (default: ``catalog.toml`` in the repo root).
 
 ``bty --catalog`` consumers point at::
 
     https://github.com/safl/bty/releases/latest/download/catalog.toml
 
-The release workflow runs this script and uploads the result alongside
-the wheels and appliance images.
+The release workflow runs this script and uploads the result
+alongside the wheels and appliance images.
+
+The catalog file is a release artifact, NOT something baked onto the
+USB stick -- the USB stick's BTY_IMAGES partition is plain operator-
+managed local image files (.qcow2 / .img.gz / .img / .iso / .iso.gz).
+The wizard merges local files + an optional ``--catalog`` overlay;
+the starter catalog is that overlay (the TUI's SELECT_CATALOG offers
+it as ``[d] default``).
 
 Rolling tags stay rolling: ``oras://`` refs are *not* pre-resolved
 to digests at generate-time. ``bty.oras.resolve_ref`` handles the
-manifest fetch + layer-digest verification at flash time, so an
-operator running the same catalog asset two months apart still gets
-whatever nosi has rebuilt in the meantime.
+manifest fetch + layer-digest verification at flash time.
 
 Run directly:
 
@@ -37,132 +33,39 @@ Defaults to writing ``catalog.toml`` in the repo root.
 
 from __future__ import annotations
 
-import ast
 import sys
 import tomllib
 from pathlib import Path
 
-
-def _find_starter_bris(usb_iso_build_path: Path) -> tuple[tuple[str, str], ...]:
-    """AST-extract ``_STARTER_BRIS`` from ``usb_iso_build.py``.
-
-    Avoids importing the cijoe module (which is a task script, not a
-    Python package; importing it triggers the cijoe runtime). Same
-    pattern :mod:`tests.test_smoke` uses to round-trip the literal.
-    Handles both ``Assign`` and ``AnnAssign`` so a future type-
-    annotated declaration doesn't silently break the generator.
-    """
-    tree = ast.parse(usb_iso_build_path.read_text())
-    for node in ast.walk(tree):
-        target_name: str | None = None
-        value_node: ast.expr | None = None
-        if (
-            isinstance(node, ast.Assign)
-            and len(node.targets) == 1
-            and isinstance(node.targets[0], ast.Name)
-        ):
-            target_name = node.targets[0].id
-            value_node = node.value
-        elif (
-            isinstance(node, ast.AnnAssign)
-            and isinstance(node.target, ast.Name)
-            and node.value is not None
-        ):
-            target_name = node.target.id
-            value_node = node.value
-        if target_name == "_STARTER_BRIS" and value_node is not None:
-            value = ast.literal_eval(value_node)
-            return tuple(value)
-    raise RuntimeError(f"_STARTER_BRIS not found in {usb_iso_build_path}")
+REPO_ROOT = Path(__file__).resolve().parents[1]
+TEMPLATE_PATH = Path(__file__).resolve().parent / "starter_catalog.toml.in"
 
 
-def _starter_bri_to_catalog_entry(_filename: str, body: str) -> dict[str, str]:
-    """Translate one starter .bri body (TOML with ``url = ...``) into
-    the dict shape ``bty.catalog.CatalogEntry.from_dict`` accepts
-    (``name`` / ``src`` / ``format`` / ``description``).
-
-    The schema difference is small but real: ``.bri`` files use
-    ``url`` because they describe one Remote Image; catalog
-    manifests use ``src`` because each entry sits in an ``[[images]]``
-    table that conceptually IS an image (the URL is the source of
-    its bytes). Same value, different key.
-    """
-    parsed = tomllib.loads(body)
-    entry: dict[str, str] = {
-        "name": parsed["name"],
-        "src": parsed["url"],
-    }
-    if "format" in parsed:
-        entry["format"] = parsed["format"]
-    if "description" in parsed:
-        entry["description"] = parsed["description"]
-    # NOTE: deliberately do NOT resolve oras:// refs to digests
-    # here. Rolling tags stay rolling; bty.oras handles the manifest
-    # fetch + digest verification at flash time.
-    return entry
+def _read_bty_version() -> str:
+    """Read the bty-lab version from ``pyproject.toml`` at repo root."""
+    pyproject = REPO_ROOT / "pyproject.toml"
+    for line in pyproject.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("version") and "=" in stripped:
+            return stripped.split("=", 1)[1].strip().strip('"').strip("'")
+    raise RuntimeError(f"could not find version line in {pyproject}")
 
 
-def _toml_escape(value: str) -> str:
-    """Escape a string for a TOML basic-string literal.
-
-    Catalog ``name`` / ``src`` / ``description`` are operator-
-    authored text; they could in theory carry backslashes or
-    double-quotes. Keep emission unambiguous.
-    """
-    return value.replace("\\", "\\\\").replace('"', '\\"')
-
-
-def render_catalog_toml(starter: tuple[tuple[str, str], ...]) -> str:
-    """Render the catalog TOML body from the starter .bri tuples."""
-    lines: list[str] = [
-        "# bty default catalog.",
-        "#",
-        "# Generated by scripts/generate_catalog_toml.py from the same",
-        "# starter .bri set that lands on every USB stick's BTY_IMAGES",
-        "# partition. Operators consume this via:",
-        "#",
-        "#   bty --catalog https://github.com/safl/bty/releases/latest/download/catalog.toml",
-        "#",
-        "# oras:// refs use rolling :latest tags; bty resolves the layer",
-        "# digest at flash time, so the catalog stays current as nosi",
-        "# republishes -- no need to re-fetch the catalog file itself.",
-        "",
-        "version = 1",
-        "",
-    ]
-    for filename, body in starter:
-        # ``filename`` is unused here (catalog manifests have no
-        # per-row filename concept; the .bri side names files for
-        # the operator's host-OS browser). Pass through to the
-        # helper so a future filename-aware policy has a hook.
-        entry = _starter_bri_to_catalog_entry(filename, body)
-        lines.append("[[images]]")
-        lines.append(f'name = "{_toml_escape(entry["name"])}"')
-        lines.append(f'src = "{_toml_escape(entry["src"])}"')
-        if "format" in entry:
-            lines.append(f'format = "{_toml_escape(entry["format"])}"')
-        if "description" in entry:
-            lines.append(f'description = "{_toml_escape(entry["description"])}"')
-        lines.append("")
-    return "\n".join(lines).rstrip() + "\n"
-
-
-def main(argv: list[str] | None = None) -> int:
-    argv = argv if argv is not None else sys.argv[1:]
-    repo_root = Path(__file__).resolve().parents[1]
-    usb_iso_build = repo_root / "cijoe" / "scripts" / "usb_iso_build.py"
-    if not usb_iso_build.exists():
-        print(f"ERROR: {usb_iso_build} not found", file=sys.stderr)
-        return 2
-    starter = _find_starter_bris(usb_iso_build)
-    output = repo_root / "catalog.toml"
-    if argv:
-        output = Path(argv[0])
-    body = render_catalog_toml(starter)
-    output.write_text(body)
-    print(f"Wrote {len(starter)} catalog entries to {output}", file=sys.stderr)
+def main(argv: list[str]) -> int:
+    out_path = Path(argv[1]) if len(argv) > 1 else REPO_ROOT / "catalog.toml"
+    template = TEMPLATE_PATH.read_text(encoding="utf-8")
+    bty_version = _read_bty_version()
+    rendered = template.format(version=bty_version)
+    # Parse-back round-trip: catches a malformed template / bad
+    # substitution before publishing. tomllib.loads raises on invalid
+    # TOML; ``bty.catalog.Catalog``'s schema check happens at the
+    # consistency-test layer, not here, so the release workflow
+    # doesn't drag in optional package extras.
+    tomllib.loads(rendered)
+    out_path.write_text(rendered, encoding="utf-8")
+    print(f"wrote {out_path} ({len(rendered)} bytes, bty v{bty_version})")
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(main(sys.argv))

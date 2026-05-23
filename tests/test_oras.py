@@ -246,7 +246,7 @@ def test_resolve_ref_digest_skips_manifest() -> None:
 def test_resolve_ref_uses_host_from_url_in_token_endpoint() -> None:
     """Token endpoint URL must follow the URL's host, not be hardcoded
     to ghcr.io. Verifies cross-registry support stays intact even
-    though only GHCR is exercised by the starter .bri set."""
+    though only GHCR is exercised by the starter catalog."""
     seen_urls: list[str] = []
 
     def _capturing_urlopen(req, timeout=None):

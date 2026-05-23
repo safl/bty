@@ -1,8 +1,6 @@
 """Smoke tests verifying the scaffold imports cleanly."""
 
-import ast
 import sys
-import tomllib
 from pathlib import Path
 
 import pytest
@@ -312,87 +310,34 @@ def test_server_cloudinit_ships_haveged() -> None:
     assert "update-initramfs -u" in body
 
 
-def test_usb_iso_build_starter_bris_parse_as_toml() -> None:
-    """The bake-time ``_STARTER_BRIS`` literal in ``usb_iso_build.py``
-    writes one .bri file per entry into the freshly-mkfs'd BTY_IMAGES
-    partition. If any entry's body isn't valid TOML (or doesn't pass
-    ``bty.images.read_bri``'s validation), every USB stick built from
-    the next release would ship with broken descriptors -- the live
-    env would skip them silently from the catalog. Guard with an
-    AST-extract + parse round-trip.
+def test_starter_catalog_template_renders_valid_catalog() -> None:
+    """The release-published catalog (``releases/latest/download/catalog.toml``)
+    is generated from ``scripts/starter_catalog.toml.in`` with ``{version}``
+    substituted at release time. A malformed template would ship a catalog
+    that ``bty --catalog`` couldn't parse -- guard by rendering with a
+    dummy version + round-tripping through ``bty.catalog``.
 
-    The bake script can't be imported directly from tests (it's a
-    cijoe task module, not a Python package), so we ast.parse the
-    file, locate the ``_STARTER_BRIS = (...)`` assignment, and
-    ``ast.literal_eval`` the tuple. This avoids running any of the
-    surrounding cijoe-dependent code paths.
+    The starter catalog was previously baked as .bri files on the USB
+    stick; v0.25.5+ ships it as a release artifact instead so there is
+    one catalog format, one mental model.
     """
-    from bty import images
+    from bty import catalog
 
-    script = Path(__file__).resolve().parents[1] / "cijoe" / "scripts" / "usb_iso_build.py"
-    tree = ast.parse(script.read_text())
-    starter = None
-    for node in ast.walk(tree):
-        target_name: str | None = None
-        value_node = None
-        if (
-            isinstance(node, ast.Assign)
-            and len(node.targets) == 1
-            and isinstance(node.targets[0], ast.Name)
-        ):
-            target_name = node.targets[0].id
-            value_node = node.value
-        elif (
-            isinstance(node, ast.AnnAssign)
-            and isinstance(node.target, ast.Name)
-            and node.value is not None
-        ):
-            target_name = node.target.id
-            value_node = node.value
-        if target_name == "_STARTER_BRIS" and value_node is not None:
-            starter = ast.literal_eval(value_node)
-            break
-    assert starter is not None, "_STARTER_BRIS not found in usb_iso_build.py"
-    assert len(starter) == 4, f"expected 4 starter .bri files, got {len(starter)}"
-
-    names = {filename for filename, _ in starter}
-    assert names == {
-        "nosi-debian-sysdev-x86_64.bri",
-        "nosi-ubuntu-sysdev-x86_64.bri",
-        "nosi-fedora-sysdev-x86_64.bri",
-        "bty-server-x86_64.bri",
-    }
-
-    # Each body must parse as TOML, declare a url, and round-trip
-    # through read_bri without raising. nosi entries should use
-    # ``oras://ghcr.io/``; the bty-server entry should use https.
-    for filename, body in starter:
-        parsed = tomllib.loads(body)
-        assert "url" in parsed, f"{filename}: missing url"
-        if filename.startswith("nosi-"):
-            assert parsed["url"].startswith("oras://ghcr.io/safl/nosi/"), (
-                f"{filename}: expected oras://ghcr.io/ URL, got {parsed['url']!r}"
-            )
-        else:
-            assert parsed["url"].startswith("https://github.com/safl/bty/releases/"), (
-                f"{filename}: expected GitHub release URL"
-            )
-        # Materialise to a tmp .bri to exercise read_bri's full
-        # validation, including the size cap and schema checks.
-        import tempfile
-
-        with tempfile.NamedTemporaryFile("w", suffix=".bri", delete=False) as fh:
-            fh.write(body)
-            tmp = Path(fh.name)
-        try:
-            remote = images.read_bri(tmp)
-            assert remote.url == parsed["url"]
-        finally:
-            tmp.unlink()
+    template = (
+        Path(__file__).resolve().parents[1] / "scripts" / "starter_catalog.toml.in"
+    ).read_text()
+    rendered = template.format(version="0.0.0")
+    cat = catalog.load_bytes(rendered.encode("utf-8"))
+    assert len(cat) >= 1
+    for entry in cat:
+        assert entry.src.startswith(("oras://", "http://", "https://")), (
+            f"catalog files must contain only remote srcs (the receiver can't "
+            f"resolve file:// off the publisher's host); got {entry.src!r}"
+        )
 
 
 def test_generate_catalog_toml_round_trips_through_catalog_load(tmp_path: Path) -> None:
-    """``scripts/generate_catalog_toml.py`` reads ``_STARTER_BRIS``
+    """``scripts/generate_catalog_toml.py`` reads the starter catalog template
     (the same source-of-truth as the BTY_IMAGES bake) and emits a
     catalog manifest matching the schema ``bty.catalog.load_bytes``
     parses. The release workflow runs this script; if the output
@@ -401,7 +346,7 @@ def test_generate_catalog_toml_round_trips_through_catalog_load(tmp_path: Path) 
 
     Guard: invoke the generator into a tmp file, then round-trip the
     bytes through ``bty.catalog.load_bytes`` and assert all four
-    entries land, all four use ``src`` (not the .bri-side ``url``
+    entries land, all use ``src`` (the catalog manifest schema's field
     key), and the oras:// entries don't carry a pre-pinned sha
     (rolling-tag invariant).
     """

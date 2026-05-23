@@ -22,8 +22,7 @@ Ad-hoc provisioning of a single box, no infrastructure on the network.
    `bty-media`).
 2. The live env auto-launches ``bty`` on tty1 via ``bty-on-tty1.service``.
    Without ``bty.mac=`` on the kernel cmdline, the wizard runs in
-   local-only mode: scans the ``BTY_IMAGES`` partition + any ``.bri``
-   descriptors there.
+   local-only mode: scans the ``BTY_IMAGES`` partition for local image files.
 3. Operator picks an image (Enter), picks a target disk (Enter), confirms
    the flash plan (y / Enter).
 4. bty writes the image and reports success.

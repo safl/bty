@@ -127,50 +127,6 @@ bty-web instance's `/catalog.toml`. Local-only mode (no overlay) scans
 `BTY_IMAGE_ROOT` (or `/var/lib/bty/images`) and shows whatever flashable
 files are there.
 
-### .bri descriptors (per-stick remote-image pointers)
-
-A ``.bri`` is a tiny TOML pointer at a remote image. Drop one into
-BTY_IMAGES (or, on a Ventoy / IP-KVM delivery, at the surrounding stick's
-partition root or in a ``bty-images/`` subfolder there) alongside your
-local files and it shows up in the wizard's image list, with ``source =
-remote`` and the upstream URL. Picking it kicks off the URL flash path.
-
-```toml
-# example .bri shape
-url = "https://my.example.com/images/debian-13-server.img.gz"
-# Optional: name, format, size_bytes, sha256, description
-```
-
-The ``url`` field also accepts an ``oras://`` reference pointing at an OCI
-artifact published via [ORAS](https://oras.land/) (OCI Registry As Storage,
-the spec for **non-container** artifacts in a container registry). The
-scheme is distinct from a ``docker pull ghcr.io/...`` reference because
-nosi-style disk images are not runnable container images; they are
-gzip-compressed raw disks stored as OCI blobs:
-
-```toml
-# rolling tag, bty resolves :latest to the current layer digest at flash time
-url = "oras://ghcr.io/safl/nosi/debian-sysdev:latest"
-
-# digest-pinned: same blob forever, no manifest fetch
-url = "oras://ghcr.io/safl/nosi/debian-sysdev@sha256:94e6..."
-```
-
-Any OCI v2 registry following the GHCR anonymous-pull convention
-works (``oras://quay.io/...``, ``oras://registry.example.com:5000/...``);
-GHCR is the one exercised in the starter set. Fresh USB sticks
-ship with four such .bri files pre-staged on the BTY_IMAGES
-partition (three nosi sysdev images plus the bty-server appliance).
-
-That's deliberate: the catalog story is a **server** concern. Operators who
-want the unified catalog (manifest + dir-scan + auto-imported sidecars)
-interact with it through bty-web: in the browser, or via ``bty --catalog
-SOURCE`` which consumes ``GET /catalog.toml`` and gets a single ``src`` per
-entry that the client just flashes from. No client-side resolution logic.
-
-Server-side catalog management lives in `/ui/images` (sub-nav: List / Fetch
-catalog / Upload catalog / Upload image / Upload image (from URL)) and the
-HTTP API below.
 
 ## HTTP API
 
