@@ -31,7 +31,11 @@ steps:
   uses: usb_ventoy_stage
 
 - name: guest_start
-  uses: qemu.guest_start
+  # Local variant of qemu.guest_start that skips the hardcoded
+  # 180s is_up wait; readiness is wait_for_transport's job below.
+  # Ventoy menu + chainload + bty live env boot routinely exceeds
+  # 180s under nested KVM on GHA runners.
+  uses: usb_ventoy_guest_start
   with:
     guest_name: usb-ventoy
 
@@ -40,7 +44,13 @@ steps:
   with:
     state: up
     transport_name: usb_ventoy_guest
-    timeout: 300
+    # 480s budget: GHA ubuntu-latest under nested KVM boots the
+    # bty live env in ~90-120s; Ventoy adds ~30-60s of menu +
+    # chainload; sshd readiness lags login by ~10s. 480s is the
+    # comfortable upper bound; anything past that is a real boot
+    # failure that the serial log (cijoe/_build/test-usb-ventoy/)
+    # should explain.
+    timeout: 480
 
 - name: probe_discovery_state
   uses: core.cmdrunner
