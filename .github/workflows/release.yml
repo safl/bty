@@ -590,7 +590,14 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: usb-ventoy-test-workspace
-          path: cijoe/_build/test-usb-ventoy/
+          # cijoe.qemu.wrapper.Guest writes the QEMU serial console to
+          # ``{qemu.guests.<name>.path}/serial.output``; for the
+          # ``usb-ventoy`` guest that path is ``~/system_imaging/usb-ventoy/``
+          # (NOT ``cijoe/_build/test-usb-ventoy/`` -- the latter is
+          # test-usb-grow's pattern that I wrongly copy-pasted earlier).
+          path: |
+            ~/system_imaging/usb-ventoy/serial.output
+            ~/system_imaging/usb-ventoy/disk.img
           if-no-files-found: warn
 
   # ---------------- docs (gates the release) -------------------------------
