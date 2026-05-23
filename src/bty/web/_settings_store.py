@@ -38,6 +38,26 @@ KEY_RELEASE_TAG = "upstream.release_tag"
 
 DEFAULT_RELEASE_TAG = "latest"
 
+# Scheduled-backup knobs. The Settings page exposes ``enabled`` +
+# ``cadence`` + ``retention``; the scheduler loop reads them on each
+# tick so a Settings change reflects within the next tick (no restart).
+# ``last_run_at`` is written by the scheduler itself after a successful
+# backup; it is NOT operator-editable from the UI -- the form only
+# shows the value if present.
+KEY_BACKUP_ENABLED = "backup.enabled"
+KEY_BACKUP_CADENCE = "backup.cadence"
+KEY_BACKUP_RETENTION = "backup.retention_count"
+KEY_BACKUP_LAST_RUN_AT = "backup.last_run_at"
+
+# ``manual`` keeps the scheduler quiescent -- the operator triggers
+# every backup by hand from the Backup tab. The two non-manual values
+# are anchor-from-last-run-at intervals (24h / 7d), NOT wall-clock
+# times -- a wall-clock anchor would need timezone + locale handling
+# we don't want to take on here.
+BACKUP_CADENCES: tuple[str, ...] = ("daily", "weekly", "manual")
+DEFAULT_BACKUP_CADENCE = "manual"
+DEFAULT_BACKUP_RETENTION = 7
+
 
 def get(conn: sqlite3.Connection, key: str) -> str | None:
     """Return the stored override for ``key``, or ``None`` if unset."""
@@ -92,3 +112,57 @@ def resolve_release_tag(conn: sqlite3.Connection) -> str:
     """The effective netboot release tag to fetch: override ->
     :data:`DEFAULT_RELEASE_TAG` (``latest``)."""
     return get(conn, KEY_RELEASE_TAG) or DEFAULT_RELEASE_TAG
+
+
+# ----- Backup schedule resolvers ----------------------------------------
+#
+# Booleans / ints / cadence strings round-trip through the same text-
+# valued settings table. Helpers below give callers typed reads with
+# defensible defaults; the Settings form writes via :func:`set_value`
+# and clears via :func:`clear`.
+
+
+def resolve_backup_enabled(conn: sqlite3.Connection) -> bool:
+    """Effective ``backup.enabled``. Stored as ``"1"`` / ``"0"`` for
+    easy human inspection of state.db; legacy ``"true"`` / ``"false"``
+    spelling tolerated (for hand-edited values)."""
+    raw = get(conn, KEY_BACKUP_ENABLED)
+    if raw is None:
+        return False
+    return raw.lower() in ("1", "true", "yes", "on")
+
+
+def resolve_backup_cadence(conn: sqlite3.Connection) -> str:
+    """Effective ``backup.cadence``. Unknown values fall back to the
+    default so a hand-edited typo doesn't wedge the scheduler -- this
+    matches the rest of the settings_store soft-validation pattern."""
+    raw = get(conn, KEY_BACKUP_CADENCE) or DEFAULT_BACKUP_CADENCE
+    return raw if raw in BACKUP_CADENCES else DEFAULT_BACKUP_CADENCE
+
+
+def resolve_backup_retention(conn: sqlite3.Connection) -> int:
+    """Effective ``backup.retention_count``. Non-numeric or sub-1
+    values fall back to the default (operator can clear the row to
+    reset)."""
+    raw = get(conn, KEY_BACKUP_RETENTION)
+    if raw is None:
+        return DEFAULT_BACKUP_RETENTION
+    try:
+        n = int(raw)
+    except ValueError:
+        return DEFAULT_BACKUP_RETENTION
+    return n if n >= 1 else DEFAULT_BACKUP_RETENTION
+
+
+def get_backup_last_run_at(conn: sqlite3.Connection) -> str | None:
+    """ISO-8601 timestamp of the most recent successful scheduled
+    backup, or ``None`` if no scheduled backup has succeeded yet.
+    Manual backups do NOT update this value -- the scheduler's
+    cadence math anchors to its own run history only."""
+    return get(conn, KEY_BACKUP_LAST_RUN_AT)
+
+
+def set_backup_last_run_at(conn: sqlite3.Connection, ts: str) -> None:
+    """Record an ISO-8601 timestamp for the scheduler's last successful
+    run. Caller owns the transaction."""
+    set_value(conn, KEY_BACKUP_LAST_RUN_AT, ts)

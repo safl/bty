@@ -81,3 +81,71 @@ def test_clear_reverts_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
         assert _settings_store.resolve_release_repo(conn) == "other/repo"
         _settings_store.clear(conn, _settings_store.KEY_RELEASE_REPO)
         assert _settings_store.resolve_release_repo(conn) == DEFAULT_REPO
+
+
+# ----- Backup schedule resolvers ----------------------------------------
+
+
+def test_backup_enabled_default_off(tmp_path: Path) -> None:
+    """No override -> False; scheduled backups are off until the operator
+    opts in via the Settings form."""
+    with _conn(tmp_path) as conn:
+        assert _settings_store.resolve_backup_enabled(conn) is False
+
+
+def test_backup_enabled_truthy_spellings(tmp_path: Path) -> None:
+    """Tolerant boolean parsing -- ``1`` is the canonical value the form
+    writes, but ``true`` / ``yes`` / ``on`` survive a hand-edit of
+    state.db."""
+    with _conn(tmp_path) as conn:
+        for raw in ("1", "true", "TRUE", "yes", "on"):
+            _settings_store.set_value(conn, _settings_store.KEY_BACKUP_ENABLED, raw)
+            assert _settings_store.resolve_backup_enabled(conn) is True, raw
+        for raw in ("0", "false", "no", "off", ""):
+            _settings_store.set_value(conn, _settings_store.KEY_BACKUP_ENABLED, raw)
+            assert _settings_store.resolve_backup_enabled(conn) is False, raw
+
+
+def test_backup_cadence_default_and_validation(tmp_path: Path) -> None:
+    """Unset -> default; unknown value -> default; known values stick."""
+    default = _settings_store.DEFAULT_BACKUP_CADENCE
+    with _conn(tmp_path) as conn:
+        assert _settings_store.resolve_backup_cadence(conn) == default
+        for cadence in _settings_store.BACKUP_CADENCES:
+            _settings_store.set_value(conn, _settings_store.KEY_BACKUP_CADENCE, cadence)
+            assert _settings_store.resolve_backup_cadence(conn) == cadence
+        # Hand-edited typo / unknown value falls back to default rather
+        # than wedging the scheduler.
+        _settings_store.set_value(conn, _settings_store.KEY_BACKUP_CADENCE, "fortnightly")
+        assert _settings_store.resolve_backup_cadence(conn) == default
+
+
+def test_backup_retention_default_and_validation(tmp_path: Path) -> None:
+    """Unset -> default; non-numeric -> default; sub-1 -> default;
+    positive int sticks."""
+    with _conn(tmp_path) as conn:
+        assert (
+            _settings_store.resolve_backup_retention(conn)
+            == _settings_store.DEFAULT_BACKUP_RETENTION
+        )
+        _settings_store.set_value(conn, _settings_store.KEY_BACKUP_RETENTION, "14")
+        assert _settings_store.resolve_backup_retention(conn) == 14
+        _settings_store.set_value(conn, _settings_store.KEY_BACKUP_RETENTION, "abc")
+        assert (
+            _settings_store.resolve_backup_retention(conn)
+            == _settings_store.DEFAULT_BACKUP_RETENTION
+        )
+        _settings_store.set_value(conn, _settings_store.KEY_BACKUP_RETENTION, "0")
+        assert (
+            _settings_store.resolve_backup_retention(conn)
+            == _settings_store.DEFAULT_BACKUP_RETENTION
+        )
+
+
+def test_backup_last_run_at_round_trip(tmp_path: Path) -> None:
+    """``last_run_at`` is written by the scheduler, not the form;
+    plain string round-trip."""
+    with _conn(tmp_path) as conn:
+        assert _settings_store.get_backup_last_run_at(conn) is None
+        _settings_store.set_backup_last_run_at(conn, "2026-05-24T08:00:00+00:00")
+        assert _settings_store.get_backup_last_run_at(conn) == "2026-05-24T08:00:00+00:00"
