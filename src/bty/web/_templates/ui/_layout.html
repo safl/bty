@@ -442,18 +442,18 @@
                    on. The release-fetch indicator stays pure status
                    (its page lives under Netboot). #}
                 <div class="nav-workers d-flex align-items-center"
-                     title="Image Downloads / Hashes (live job counts); Artifact Fetches">
-                    <a class="nav-worker {% if nav_active == 'downloads' %}active{% endif %}" href="/ui/downloads" title="Image Downloads (active job count)">
+                     title="Background workers (live counts): Downloads, Hashing, Backup. All point at /ui/workers with section anchors.">
+                    <a class="nav-worker {% if nav_active in ('workers', 'downloads', 'fetches') %}active{% endif %}" href="/ui/workers#downloads" title="Downloads (active jobs, counted per file)">
                         <i class="bi bi-arrow-down-circle"></i>
                         <span class="badge rounded-pill bg-primary nav-worker-badge d-none" data-worker="downloads">0</span>
                     </a>
-                    <a class="nav-worker {% if nav_active == 'hashes' %}active{% endif %}" href="/ui/hashes" title="Hashes (active job count)">
+                    <a class="nav-worker {% if nav_active in ('workers', 'hashes') %}active{% endif %}" href="/ui/workers#hashing" title="Hashing (active jobs)">
                         <i class="bi bi-hash"></i>
                         <span class="badge rounded-pill bg-warning text-dark nav-worker-badge d-none" data-worker="hashes">0</span>
                     </a>
-                    <a class="nav-worker {% if nav_active == 'fetches' %}active{% endif %}" href="/ui/fetches" title="Artifact Fetches (active job count)">
-                        <i class="bi bi-cloud-arrow-down"></i>
-                        <span class="badge rounded-pill bg-info text-dark nav-worker-badge d-none" data-worker="releases">0</span>
+                    <a class="nav-worker {% if nav_active == 'workers' %}active{% endif %}" href="/ui/workers#backup" title="Backup (scheduled + on-demand)">
+                        <i class="bi bi-shield-check"></i>
+                        <span class="badge rounded-pill bg-info text-dark nav-worker-badge d-none" data-worker="backups">0</span>
                     </a>
                     {# Live indicator: connection health to bty-web, after
                        a divider. Driven by the same poll that feeds the
@@ -557,16 +557,42 @@
 // authed). Skips polling while the tab is hidden.
 (function () {
     if (!document.querySelector(".nav-worker-badge")) return;
-    var SOURCES = [
-        { worker: "downloads", url: "/catalog/downloads", key: "downloads" },
-        { worker: "hashes",    url: "/catalog/hashes",    key: "hashes" },
-        { worker: "releases",  url: "/boot/releases",     key: "fetches" },
-    ];
-    function activeCount(jobs) {
+    // Each entry: {worker, url, key, count}. ``count`` is a function
+    // that takes the parsed JSON for the endpoint and returns the
+    // active-job count. Downloads is special: it sums catalog
+    // downloads (one count per row) AND per-artifact rows from each
+    // release fetch (one count per artifact in flight). That's why
+    // pressing "Fetch artifacts" makes the Downloads badge tick up
+    // by 4 (the trio + sha256 manifest) and tick down per file as
+    // each completes.
+    function activeCountFlat(jobs) {
         return (jobs || []).filter(function (j) {
             return j.status === "queued" || j.status === "running";
         }).length;
     }
+    var SOURCES = [
+        {
+            worker: "downloads",
+            urls: ["/catalog/downloads", "/boot/releases"],
+            count: function (catalog, releases) {
+                var n = activeCountFlat((catalog || {}).downloads);
+                ((releases || {}).fetches || []).forEach(function (rf) {
+                    n += activeCountFlat(rf.artifacts);
+                });
+                return n;
+            },
+        },
+        {
+            worker: "hashes",
+            urls: ["/catalog/hashes"],
+            count: function (h) { return activeCountFlat((h || {}).hashes); },
+        },
+        {
+            worker: "backups",
+            urls: ["/workers/backups"],
+            count: function (b) { return activeCountFlat((b || {}).backups); },
+        },
+    ];
     function setBadge(worker, n) {
         var b = document.querySelector('.nav-worker-badge[data-worker="' + worker + '"]');
         if (!b) return;
@@ -609,17 +635,23 @@
     }
     function poll() {
         if (document.hidden) return;
-        // ``allSettled`` so one endpoint failing doesn't hide the others;
-        // the live indicator is "connected" iff at least one reached the
-        // server, "offline" when every fetch rejects (network/server down).
+        // For each source, fetch ALL its URLs in parallel; the
+        // ``count`` callback receives the JSON of every URL in order.
+        // ``allSettled`` so one endpoint failing doesn't hide the
+        // others; the live indicator is "connected" iff at least one
+        // source's fetches all succeeded, "offline" when every source
+        // had at least one fetch reject.
         Promise.allSettled(SOURCES.map(function (s) {
-            return fetch(s.url, { credentials: "same-origin" })
-                .then(function (r) { return r.ok ? r.json() : null; })
-                .then(function (data) {
-                    var n = data ? activeCount(data[s.key]) : null;
-                    if (n !== null) setBadge(s.worker, n);
-                    return n;
-                });
+            var fetches = s.urls.map(function (u) {
+                return fetch(u, { credentials: "same-origin" })
+                    .then(function (r) { return r.ok ? r.json() : null; });
+            });
+            return Promise.all(fetches).then(function (jsons) {
+                if (jsons.some(function (j) { return j === null; })) return null;
+                var n = s.count.apply(null, jsons);
+                setBadge(s.worker, n);
+                return n;
+            });
         })).then(function (results) {
             var connected = false;
             var total = 0;

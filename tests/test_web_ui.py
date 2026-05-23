@@ -348,9 +348,12 @@ def test_ui_images_default_section_is_list_not_add_forms(client: TestClient) -> 
     assert r.status_code == 200
     body = r.text
     # Sub-nav strip present (just the List pill now). Downloads is a
-    # top-level navbar entry, no longer a sub-nav pill.
+    # top-level navbar entry, no longer a sub-nav pill. The navbar
+    # Downloads icon points at the merged Workers page anchor; the
+    # legacy /ui/downloads page continues to render its add-image
+    # forms for now.
     assert 'aria-label="Section sub-navigation"' in body
-    assert 'href="/ui/downloads"' in body
+    assert 'href="/ui/workers#downloads"' in body
     assert 'href="/ui/images?section=downloads"' not in body
     # Catalog header carries the inline Fetch + Upload-catalog controls.
     assert 'action="/ui/catalog/fetch-release"' in body
@@ -552,6 +555,36 @@ def test_ui_boot_default_section_is_list(client: TestClient) -> None:
     assert "<th>File</th>" in body
     assert 'id="enqueue-fetch-btn"' in body
     assert "bty-fetches-tbody" not in body
+
+
+def test_ui_workers_page_has_three_sections(client: TestClient) -> None:
+    """The merged Workers page (``/ui/workers``) carries three section
+    cards (Downloads / Hashing / Backup), each anchored, plus the
+    subnav jump links + the Back-up-now trigger. The page is a status
+    view -- only Backup has a trigger here; Downloads + Hashing
+    triggers stay on /ui/images and /ui/netboot."""
+    _login(client)
+    body = client.get("/ui/workers").text
+    # Three anchored cards.
+    assert 'id="downloads"' in body
+    assert 'id="hashing"' in body
+    assert 'id="backup"' in body
+    # Subnav jump links between them.
+    assert 'href="#downloads"' in body
+    assert 'href="#hashing"' in body
+    assert 'href="#backup"' in body
+    # The Backup card's "Back up now" trigger button.
+    assert 'id="bty-workers-backup-now"' in body
+    # Worker icons highlight on this page (nav_active == 'workers' lights
+    # all three: Downloads + Hashing + Backup).
+    assert body.count("nav-worker active") >= 1
+    # The page polls the four endpoints that feed the three sections.
+    assert '"/catalog/downloads"' in body
+    assert '"/boot/releases"' in body
+    assert '"/catalog/hashes"' in body
+    assert '"/workers/backups"' in body
+    # No "Fetch artifacts" trigger here (lives on /ui/netboot).
+    assert 'id="enqueue-fetch-btn"' not in body
 
 
 def test_ui_fetches_page_has_fetch_control_and_jobs_table(client: TestClient) -> None:

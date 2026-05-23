@@ -63,6 +63,7 @@ def register_ui_routes(
     service_user: str,
     image_root: Path,
     boot_root: Path,
+    backups_root: Path,
     publish_state_changed: Callable[[], None] = lambda: None,
     list_unified_images: Callable[[], list[bty_images.UnifiedImage]] | None = None,
 ) -> None:
@@ -265,7 +266,7 @@ def register_ui_routes(
                     else f"Missing: {', '.join(missing_netboot)}"
                 ),
                 "href": "/ui/netboot",
-                "fix_href": "/ui/fetches",
+                "fix_href": "/ui/workers#downloads",
                 "fix_label": "Fetch netboot artifacts",
             },
             {
@@ -712,6 +713,38 @@ def register_ui_routes(
         Reached from the navbar's "Active hashes" indicator (right of
         Settings)."""
         return _render_images_page(request, "hashes")
+
+    @app.get(
+        "/ui/workers",
+        response_class=HTMLResponse,
+        include_in_schema=False,
+        dependencies=[Depends(require_ui_auth)],
+    )
+    def ui_workers(request: Request) -> HTMLResponse:
+        """The merged background-workers page: Downloads (catalog +
+        release artifacts), Hashing, Backup. Active jobs only -- the
+        events log is the history. Triggers stay on their home pages
+        (catalog downloads on /ui/images, release artifacts on
+        /ui/netboot); only Backup has a trigger here.
+
+        The legacy ``/ui/downloads`` / ``/ui/hashes`` / ``/ui/fetches``
+        pages continue to render for now -- the navbar's three worker
+        icons all point at this merged page going forward, but the
+        legacy URLs still respond so direct links and operator muscle
+        memory keep working.
+        """
+        with _db.open_db(state_path) as conn:
+            backup_enabled = _settings_store.resolve_backup_enabled(conn)
+            backup_cadence = _settings_store.resolve_backup_cadence(conn)
+            backup_last_run_at = _settings_store.get_backup_last_run_at(conn)
+        return render(
+            "ui/workers.html",
+            request,
+            backups_root=str(backups_root),
+            backup_enabled=backup_enabled,
+            backup_cadence=backup_cadence,
+            backup_last_run_at=backup_last_run_at,
+        )
 
     @app.post(
         "/ui/catalog/entries",

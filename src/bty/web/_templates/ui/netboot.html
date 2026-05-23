@@ -185,7 +185,7 @@ window.fetchAndWatch = function () {
         body: JSON.stringify({ tag: tag }),
     }).then(function (r) {
         if (!r.ok) throw new Error("HTTP " + r.status);
-        window.location = "/ui/fetches";
+        window.location = "/ui/workers#downloads";
     }).catch(function (e) {
         alert("Fetch failed: " + e.message);
         btn.disabled = false;

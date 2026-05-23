@@ -2071,6 +2071,7 @@ def create_app(
         service_user=service_user,
         image_root=resolved_image_root,
         boot_root=resolved_boot_root,
+        backups_root=resolved_backups_root,
         publish_state_changed=publish_state_changed,
         list_unified_images=_list_unified_images,
     )

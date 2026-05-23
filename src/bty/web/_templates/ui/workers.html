@@ -1,0 +1,375 @@
+{% extends "ui/_layout.html" %}
+{% block title %}Workers - bty-web{% endblock %}
+
+{% block subnav %}
+{# In-page jump links between the three worker sections. #}
+<nav class="navbar subnav-strip" aria-label="Section sub-navigation">
+    <div class="container">
+        <span class="subnav-jumps d-flex align-items-center flex-wrap">
+            <a href="#downloads">Downloads</a>
+            <span class="vr"></span>
+            <a href="#hashing">Hashing</a>
+            <span class="vr"></span>
+            <a href="#backup">Backup</a>
+        </span>
+    </div>
+</nav>
+{% endblock %}
+
+{% block intro %}
+{% from "ui/_intro_box.html" import render as intro_box %}
+{% call intro_box() %}
+    Live view of bty-web's background workers. Only jobs that are
+    currently queued or running appear here; finished + failed jobs
+    drop out instantly. History lives in the
+    <a href="/ui/events">events log</a>. Triggers stay on their
+    home pages: catalog downloads on <a href="/ui/images">Images</a>,
+    release artifacts on <a href="/ui/netboot">Netboot</a>; only
+    Backup has a trigger here (the Back up now button).
+{% endcall %}
+{% endblock %}
+
+{% block content %}
+
+{# ---- Downloads (catalog entries + release-fetch artifacts merged) ---- #}
+<div class="card mb-4" id="downloads">
+    <div class="card-header bg-light fw-semibold d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <span><i class="bi bi-arrow-down-circle me-1"></i>Downloads
+              <span class="text-muted small bty-workers-poll-status ms-1"
+                    data-section="downloads">refreshing...</span></span>
+    </div>
+    <div class="table-responsive">
+        <table class="table mb-0 align-middle">
+            <thead class="table-light">
+                <tr>
+                    <th style="width: 35%;">Item</th>
+                    <th>Status</th>
+                    <th style="width: 35%;">Progress</th>
+                    <th>Bytes</th>
+                    <th class="text-end" style="width: 1%; white-space: nowrap;">Action</th>
+                </tr>
+            </thead>
+            <tbody class="bty-workers-downloads-tbody">
+                <tr><td colspan="5" class="text-muted">No active downloads.</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{# ---- Hashing (image SHA-256 jobs) ---- #}
+<div class="card mb-4" id="hashing">
+    <div class="card-header bg-light fw-semibold d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <span><i class="bi bi-hash me-1"></i>Hashing
+              <span class="text-muted small bty-workers-poll-status ms-1"
+                    data-section="hashing">refreshing...</span></span>
+    </div>
+    <div class="table-responsive">
+        <table class="table mb-0 align-middle">
+            <thead class="table-light">
+                <tr>
+                    <th style="width: 35%;">Image</th>
+                    <th>Status</th>
+                    <th style="width: 35%;">Progress</th>
+                    <th>Bytes</th>
+                    <th class="text-end" style="width: 1%; white-space: nowrap;">Action</th>
+                </tr>
+            </thead>
+            <tbody class="bty-workers-hashing-tbody">
+                <tr><td colspan="5" class="text-muted">No active hash jobs.</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{# ---- Backup ---- #}
+<div class="card mb-4" id="backup">
+    <div class="card-header bg-light fw-semibold d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <span><i class="bi bi-shield-check me-1"></i>Backup
+              <span class="text-muted small bty-workers-poll-status ms-1"
+                    data-section="backup">refreshing...</span></span>
+        <span class="d-flex gap-1 align-items-center">
+            <button type="button" class="btn btn-sm btn-primary text-nowrap"
+                    id="bty-workers-backup-now"
+                    title="Run a backup now -- writes a bundle to {{ backups_root }}">
+                <i class="bi bi-shield-plus me-1"></i>Back up now
+            </button>
+        </span>
+    </div>
+    <div class="card-body py-2 small text-muted border-bottom" id="bty-workers-backup-status">
+        <span class="me-3"><strong>Schedule:</strong>
+            {% if backup_enabled %}{{ backup_cadence }}{% else %}off{% endif %}
+            (<a href="/ui/settings#backup-schedule">change</a>)</span>
+        <span class="me-3"><strong>Last run:</strong>
+            {% if backup_last_run_at %}<code>{{ backup_last_run_at }}</code>{% else %}never{% endif %}</span>
+        <span class="me-3"><strong>Destination:</strong>
+            <code>{{ backups_root }}</code></span>
+    </div>
+    <div class="table-responsive">
+        <table class="table mb-0 align-middle">
+            <thead class="table-light">
+                <tr>
+                    <th style="width: 45%;">Backup ID</th>
+                    <th>Status</th>
+                    <th>Trigger</th>
+                    <th>Bytes</th>
+                    <th class="text-end" style="width: 1%; white-space: nowrap;">Action</th>
+                </tr>
+            </thead>
+            <tbody class="bty-workers-backup-tbody">
+                <tr><td colspan="5" class="text-muted">No active backups.</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+(function () {
+    function esc(s) {
+        return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+            return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+        });
+    }
+    function fmtBytes(n) {
+        if (n == null) return "-";
+        if (n < 1024) return n + " B";
+        var u = ["KiB", "MiB", "GiB", "TiB"], i = -1;
+        do { n /= 1024; i++; } while (n >= 1024 && i < u.length - 1);
+        return n.toFixed(1) + " " + u[i];
+    }
+    function statusBadge(s) {
+        var cls = {
+            "queued": "bg-secondary", "running": "bg-primary",
+            "completed": "bg-success", "cancelled": "bg-warning text-dark",
+            "failed": "bg-danger",
+        }[s] || "bg-secondary";
+        return '<span class="badge ' + cls + '">' + esc(s) + '</span>';
+    }
+    function progressBar(d) {
+        if (d.bytes_total == null) {
+            return '<div class="progress" style="height: 16px;">' +
+                   '<div class="progress-bar progress-bar-striped progress-bar-animated" ' +
+                   'style="width: 100%;">' + (d.status === "running" ? "..." : "") + '</div></div>';
+        }
+        var pct = d.bytes_total > 0 ? (100 * (d.bytes_done || 0) / d.bytes_total) : 0;
+        return '<div class="progress" style="height: 16px;">' +
+               '<div class="progress-bar" style="width: ' +
+               pct.toFixed(1) + '%;">' + pct.toFixed(1) + '%</div></div>';
+    }
+    function isActive(j) {
+        return j && (j.status === "queued" || j.status === "running");
+    }
+    function activeOnly(jobs) { return (jobs || []).filter(isActive); }
+
+    // ----- Downloads (catalog + release artifacts) -----
+    //
+    // The Downloads section unions two sources:
+    //   * /catalog/downloads -- one row per catalog entry being
+    //     fetched, keyed by ``name``.
+    //   * /boot/releases -- per-artifact rows from each release-fetch
+    //     job's ``artifacts`` array (post-Phase-E reshape).  A trio
+    //     fetch shows as four rows here (vmlinuz / initrd / squashfs
+    //     / sha256 manifest), one queued/running line each.
+    //
+    // Cancel button dispatches by kind:
+    //   * catalog -> DELETE /catalog/downloads/{name}
+    //   * release -> DELETE /boot/releases/{tag} (cancels the whole
+    //     tag -- per-artifact cancel doesn't exist; the worker
+    //     streams them sequentially anyway).
+    function renderDownloads(catalog, releases) {
+        var tbody = document.querySelector(".bty-workers-downloads-tbody");
+        if (!tbody) return;
+        var rows = [];
+        (catalog || []).forEach(function (j) {
+            if (!isActive(j)) return;
+            rows.push({
+                label: esc(j.name),
+                kind: "catalog",
+                key: j.name,
+                d: j,
+            });
+        });
+        (releases || []).forEach(function (rf) {
+            // Per-artifact rows; the parent state's tag is the cancel key.
+            (rf.artifacts || []).forEach(function (a) {
+                if (!isActive(a)) return;
+                rows.push({
+                    label: '<code>' + esc(rf.tag) + '</code> <small class="text-muted">' +
+                           esc(a.name) + '</small>',
+                    kind: "release",
+                    key: rf.tag,
+                    d: a,
+                });
+            });
+            // Defensive: pre-Phase-E states have no ``artifacts``
+            // array (e.g. backfilled from events).  Render a single
+            // tag-keyed row instead so the operator still sees the
+            // job exists.
+            if (!rf.artifacts || rf.artifacts.length === 0) {
+                if (!isActive(rf)) return;
+                rows.push({
+                    label: '<code>' + esc(rf.tag) + '</code>',
+                    kind: "release",
+                    key: rf.tag,
+                    d: rf,
+                });
+            }
+        });
+        if (!rows.length) {
+            tbody.innerHTML = '<tr><td colspan="5" class="text-muted">No active downloads.</td></tr>';
+            return;
+        }
+        // Order: running before queued; otherwise stable.
+        rows.sort(function (a, b) {
+            var aS = a.d.status === "running" ? 0 : 1;
+            var bS = b.d.status === "running" ? 0 : 1;
+            return aS - bS;
+        });
+        tbody.innerHTML = rows.map(function (r) {
+            var d = r.d;
+            var bytes = fmtBytes(d.bytes_done || 0);
+            if (d.bytes_total != null) bytes += " / " + fmtBytes(d.bytes_total);
+            var cancel = '<button type="button" class="btn btn-sm btn-outline-danger text-nowrap ' +
+                         'bty-workers-cancel" data-kind="' + r.kind + '" data-key="' +
+                         esc(r.key) + '"><i class="bi bi-x-circle me-1"></i>Cancel</button>';
+            return "<tr>" +
+                   "<td>" + r.label + "</td>" +
+                   "<td>" + statusBadge(d.status) + "</td>" +
+                   "<td>" + progressBar(d) + "</td>" +
+                   "<td class=\"small\">" + esc(bytes) + "</td>" +
+                   "<td class=\"text-end\">" + cancel + "</td>" +
+                   "</tr>";
+        }).join("");
+    }
+
+    // ----- Hashing -----
+    function renderHashing(jobs) {
+        var tbody = document.querySelector(".bty-workers-hashing-tbody");
+        if (!tbody) return;
+        var rows = activeOnly(jobs);
+        if (!rows.length) {
+            tbody.innerHTML = '<tr><td colspan="5" class="text-muted">No active hash jobs.</td></tr>';
+            return;
+        }
+        tbody.innerHTML = rows.map(function (d) {
+            var pseudo = { status: d.status, bytes_done: d.bytes_hashed || 0,
+                           bytes_total: d.bytes_total || null };
+            var bytes = fmtBytes(d.bytes_hashed || 0);
+            if (d.bytes_total) bytes += " / " + fmtBytes(d.bytes_total);
+            var cancel = '<button type="button" class="btn btn-sm btn-outline-danger text-nowrap ' +
+                         'bty-workers-cancel" data-kind="hash" data-key="' +
+                         esc(d.name) + '"><i class="bi bi-x-circle me-1"></i>Cancel</button>';
+            return "<tr>" +
+                   "<td><code>" + esc(d.name) + "</code></td>" +
+                   "<td>" + statusBadge(d.status) + "</td>" +
+                   "<td>" + progressBar(pseudo) + "</td>" +
+                   "<td class=\"small\">" + esc(bytes) + "</td>" +
+                   "<td class=\"text-end\">" + cancel + "</td>" +
+                   "</tr>";
+        }).join("");
+    }
+
+    // ----- Backup -----
+    function renderBackup(jobs) {
+        var tbody = document.querySelector(".bty-workers-backup-tbody");
+        if (!tbody) return;
+        var rows = activeOnly(jobs);
+        if (!rows.length) {
+            tbody.innerHTML = '<tr><td colspan="5" class="text-muted">No active backups.</td></tr>';
+            return;
+        }
+        tbody.innerHTML = rows.map(function (d) {
+            var cancel = '<button type="button" class="btn btn-sm btn-outline-danger text-nowrap ' +
+                         'bty-workers-cancel" data-kind="backup" data-key="' +
+                         esc(d.backup_id) + '"><i class="bi bi-x-circle me-1"></i>Cancel</button>';
+            return "<tr>" +
+                   "<td><code>" + esc(d.backup_id) + "</code></td>" +
+                   "<td>" + statusBadge(d.status) + "</td>" +
+                   "<td>" + esc(d.trigger || "") + "</td>" +
+                   "<td class=\"small\">" + esc(fmtBytes(d.bytes_written || 0)) + "</td>" +
+                   "<td class=\"text-end\">" + cancel + "</td>" +
+                   "</tr>";
+        }).join("");
+    }
+
+    function setStatus(section, text) {
+        var el = document.querySelector('.bty-workers-poll-status[data-section="' + section + '"]');
+        if (el) el.textContent = text;
+    }
+
+    function refresh() {
+        var ts = "updated " + new Date().toLocaleTimeString();
+        return Promise.allSettled([
+            fetch("/catalog/downloads", { credentials: "same-origin" })
+                .then(function (r) { return r.ok ? r.json() : null; }),
+            fetch("/boot/releases", { credentials: "same-origin" })
+                .then(function (r) { return r.ok ? r.json() : null; }),
+            fetch("/catalog/hashes", { credentials: "same-origin" })
+                .then(function (r) { return r.ok ? r.json() : null; }),
+            fetch("/workers/backups", { credentials: "same-origin" })
+                .then(function (r) { return r.ok ? r.json() : null; }),
+        ]).then(function (results) {
+            var dl = results[0].status === "fulfilled" ? results[0].value : null;
+            var rl = results[1].status === "fulfilled" ? results[1].value : null;
+            var hs = results[2].status === "fulfilled" ? results[2].value : null;
+            var bk = results[3].status === "fulfilled" ? results[3].value : null;
+            renderDownloads(dl ? dl.downloads : [], rl ? rl.fetches : []);
+            renderHashing(hs ? hs.hashes : []);
+            renderBackup(bk ? bk.backups : []);
+            setStatus("downloads", (dl && rl) ? ts : "(poll failed)");
+            setStatus("hashing",    hs       ? ts : "(poll failed)");
+            setStatus("backup",     bk       ? ts : "(poll failed)");
+        });
+    }
+
+    // Cancel by kind (event-delegated; rows re-render every poll).
+    document.addEventListener("click", function (ev) {
+        var btn = ev.target.closest(".bty-workers-cancel");
+        if (!btn) return;
+        var kind = btn.dataset.kind;
+        var key = btn.dataset.key;
+        if (!kind || !key) return;
+        var url = ({
+            "catalog": "/catalog/downloads/",
+            "release": "/boot/releases/",
+            "hash":    "/catalog/hashes/",
+            "backup":  "/workers/backups/",
+        }[kind] || "") + encodeURIComponent(key);
+        if (!url) return;
+        btn.disabled = true;
+        fetch(url, { method: "DELETE", credentials: "same-origin" })
+            .then(refresh)
+            .catch(function () { btn.disabled = false; });
+    });
+
+    // "Back up now" trigger -- the only enqueue button on this page.
+    var backupNow = document.getElementById("bty-workers-backup-now");
+    if (backupNow) {
+        backupNow.addEventListener("click", function () {
+            backupNow.disabled = true;
+            fetch("/workers/backups", {
+                method: "POST",
+                credentials: "same-origin",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ trigger: "manual" }),
+            }).then(function (r) {
+                if (!r.ok) throw new Error("HTTP " + r.status);
+                return refresh();
+            }).catch(function (e) {
+                alert("Backup failed to enqueue: " + e.message);
+            }).then(function () {
+                backupNow.disabled = false;
+            });
+        });
+    }
+
+    // Visibility-aware polling: 2s while visible, paused when hidden.
+    var handle = null;
+    function start() { if (!handle) { refresh(); handle = setInterval(refresh, 2000); } }
+    function stop()  { if (handle) { clearInterval(handle); handle = null; } }
+    document.addEventListener("visibilitychange", function () {
+        if (document.hidden) stop(); else start();
+    });
+    start();
+})();
+</script>
+{% endblock %}
