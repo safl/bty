@@ -131,14 +131,22 @@ if [ -e "${TMP}/${SENTINEL_FAILED}" ]; then
     exit 0
 fi
 
-# Free space behind the partition?
+# Free space behind the partition. Use ``blockdev`` (kernel-direct,
+# via sysfs) rather than ``parted -ms unit B print`` -- parted's MBR
+# classifier mis-identifies the bty-usb iso-hybrid layout as
+# ``unknown:`` and emits zero partition rows, so the awk extraction
+# came back empty and the script bailed before doing anything. The
+# QEMU auto-grow test caught this in v0.25.5 retag #9. blockdev
+# returns the partition's start sector + byte size; multiply +
+# add to get the on-disk end offset.
 DISK_BYTES=$(blockdev --getsize64 "${DISK}")
-PART_END=$(parted -ms "${DISK}" unit B print 2>/dev/null \
-    | awk -F: -v n="${PARTNUM}" '$1==n {gsub(/B/,"",$3); print $3}')
-if [ -z "${PART_END}" ]; then
-    log "could not read partition end from parted; skipping"
+PART_START_SECTORS=$(blockdev --getstart "${PART}" 2>/dev/null || true)
+PART_SIZE_BYTES=$(blockdev --getsize64 "${PART}" 2>/dev/null || true)
+if [ -z "${PART_START_SECTORS}" ] || [ -z "${PART_SIZE_BYTES}" ]; then
+    log "could not read partition geometry from blockdev (${PART}); skipping"
     exit 0
 fi
+PART_END=$((PART_START_SECTORS * 512 + PART_SIZE_BYTES))
 FREE=$((DISK_BYTES - PART_END))
 if [ "${FREE}" -lt "${SLACK_BYTES}" ]; then
     log "no significant free space behind partition (${FREE} B); skipping"
@@ -170,11 +178,16 @@ fi
 umount "${TMP}"
 trap 'rm -f "${STASH}"; rmdir "${TMP}" 2>/dev/null || true' EXIT
 
-# Resize the partition. ``parted resizepart`` rewrites the
-# partition table + asks the kernel to re-read; well under a
-# second on any modern USB.
-if ! parted -s "${DISK}" resizepart "${PARTNUM}" 100%; then
-    log "parted resizepart failed; aborting"
+# Resize the partition via ``sfdisk -N`` rather than ``parted
+# resizepart``: parted refuses to operate on a partition table it
+# classified as ``unknown`` (which the iso-hybrid MBR triggers), so
+# the resize fails the same way the inspect did. sfdisk reads + writes
+# the raw MBR without relying on parted's classifier; the input ``, +``
+# means "keep this partition's start, extend its size to fill the
+# disk." ``--no-reread`` skips the BLKRRPART that fails on
+# in-use devices (we ``partprobe`` immediately after instead).
+if ! printf ', +\n' | sfdisk --no-reread -N "${PARTNUM}" "${DISK}"; then
+    log "sfdisk extend failed; aborting"
     drop_failure_sentinel
     exit 1
 fi
