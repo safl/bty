@@ -138,9 +138,17 @@ do
     # above, so leaving the directive errors out at boot. Replace
     # it with ``default live`` (the LABEL defined in menu.cfg /
     # live.cfg), so syslinux boots that label directly.
+    # The default LABEL must match a real label in the INCLUDE'd
+    # menu.cfg. live-build trixie+ uses ``label live-amd64`` (the arch
+    # suffix), NOT ``label live``. Pointing ``default live`` at a
+    # non-existent label makes SYSLINUX treat the word as a filename
+    # and the boot fails with ``Loading live... failed: No such file
+    # or directory`` -- which is exactly how v0.25.5 retags #3 + #4
+    # surfaced. ``live-amd64`` matches the binary's label and so
+    # the auto-boot lands on the LABEL's KERNEL /live/vmlinuz line.
     sed -i \
         -e 's/^[[:space:]]*UI[[:space:]]\+\(gfxboot\|vesamenu\|menu\)\.c32.*//I' \
-        -e 's/^[[:space:]]*default[[:space:]]\+\(gfxboot\|vesamenu\|menu\)\.c32.*/default live/I' \
+        -e 's/^[[:space:]]*default[[:space:]]\+\(gfxboot\|vesamenu\|menu\)\.c32.*/default live-amd64/I' \
         "$cfg"
     # Force timeout + prompt regardless of what live-build set.
     sed -i \
