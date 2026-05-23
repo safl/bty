@@ -131,22 +131,24 @@ if [ -e "${TMP}/${SENTINEL_FAILED}" ]; then
     exit 0
 fi
 
-# Free space behind the partition. Use ``blockdev`` (kernel-direct,
-# via sysfs) rather than ``parted -ms unit B print`` -- parted's MBR
-# classifier mis-identifies the bty-usb iso-hybrid layout as
-# ``unknown:`` and emits zero partition rows, so the awk extraction
-# came back empty and the script bailed before doing anything. The
-# QEMU auto-grow test caught this in v0.25.5 retag #9. blockdev
-# returns the partition's start sector + byte size; multiply +
-# add to get the on-disk end offset.
+# Free space behind the partition. parted's MBR classifier rejects
+# the bty-usb iso-hybrid layout as ``unknown:`` and emits no
+# partition rows (caught by the QEMU auto-grow test). blockdev was
+# the first attempted bypass but ``--getstart /dev/sdaN`` returned
+# empty on that geometry too -- whatever util-linux version-or-quirk
+# is in play, we sidestep it by reading the kernel's own view via
+# sysfs (``/sys/class/block/sdaN/{start,size}``). Both files are 512-
+# byte-sector counts; multiplying + adding gives the on-disk byte
+# offset of the partition's end.
 DISK_BYTES=$(blockdev --getsize64 "${DISK}")
-PART_START_SECTORS=$(blockdev --getstart "${PART}" 2>/dev/null || true)
-PART_SIZE_BYTES=$(blockdev --getsize64 "${PART}" 2>/dev/null || true)
-if [ -z "${PART_START_SECTORS}" ] || [ -z "${PART_SIZE_BYTES}" ]; then
-    log "could not read partition geometry from blockdev (${PART}); skipping"
+SYSFS_PART="/sys/class/block/${PART_BASE}"
+PART_START_SECTORS=$(cat "${SYSFS_PART}/start" 2>/dev/null || true)
+PART_SIZE_SECTORS=$(cat "${SYSFS_PART}/size" 2>/dev/null || true)
+if [ -z "${PART_START_SECTORS}" ] || [ -z "${PART_SIZE_SECTORS}" ]; then
+    log "could not read sysfs partition geometry from ${SYSFS_PART} (start=${PART_START_SECTORS:-unset}, size=${PART_SIZE_SECTORS:-unset}); skipping"
     exit 0
 fi
-PART_END=$((PART_START_SECTORS * 512 + PART_SIZE_BYTES))
+PART_END=$(( (PART_START_SECTORS + PART_SIZE_SECTORS) * 512 ))
 FREE=$((DISK_BYTES - PART_END))
 if [ "${FREE}" -lt "${SLACK_BYTES}" ]; then
     log "no significant free space behind partition (${FREE} B); skipping"
