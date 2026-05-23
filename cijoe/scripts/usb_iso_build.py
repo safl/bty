@@ -27,7 +27,7 @@ Workflow:
    operator's image catalog.
 5. Write a sha256 manifest covering the .iso (uncompressed; the
    ~200 MiB ISO is well under GitHub's 2 GiB asset limit since
-   BTY_IMAGES is 1 MiB at bake).
+   BTY_IMAGES is 32 MiB at bake).
 
 The cwd at run time is ``cijoe/`` (the Makefile cd's there before
 invoking cijoe), so the bty-media tree lives at
@@ -58,7 +58,11 @@ PUBLISH_BASENAME = "bty-usb-x86_64.iso"
 # auto-grows to fill the underlying disk on first boot via
 # ``bty-usb-grow.service``, so this is the minimum staged at bake time,
 # not the runtime size. Verified by the GHA auto-grow test.
-TRAILING_EXFAT_SIZE = "1M"
+#
+# 32 MiB rather than 1 MiB: ``exfatprogs`` mkfs.exfat refuses very small
+# volumes (the 1 MiB attempt in v0.25.4 failed the bake); 32 MiB is
+# comfortably above the floor while still keeping the artifact ~200 MiB.
+TRAILING_EXFAT_SIZE = "32M"
 
 
 def add_args(parser: ArgumentParser):
@@ -223,7 +227,7 @@ def main(args, cijoe):
     if err:
         return err
 
-    # Publish the .iso uncompressed. With BTY_IMAGES = 1 MiB at bake
+    # Publish the .iso uncompressed. With BTY_IMAGES = 32 MiB at bake
     # time, the total ISO is ~200 MiB -- comfortably under GitHub's
     # 2 GiB per-release-asset upload limit. gzip was dropped: every
     # flasher (Etcher, RPi Imager, Rufus, dd) reads plain .iso

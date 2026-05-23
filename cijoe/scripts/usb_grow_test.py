@@ -3,7 +3,7 @@ USB auto-grow end-to-end test
 =============================
 
 Verifies ``bty-usb-grow.service`` extends the BTY_IMAGES exFAT
-partition from its 1 MiB bake-time minimum to fill the underlying disk
+partition from its 32 MiB bake-time minimum to fill the underlying disk
 on first boot.
 
 Approach:
@@ -14,7 +14,7 @@ Approach:
 2. Boot the file in QEMU, headless, with serial captured.
 3. Wait a fixed boot+grow window, then power-cycle the VM.
 4. Inspect the post-boot partition table with ``parted``: assert the
-   trailing (BTY_IMAGES) partition grew well past 1 MiB.
+   trailing (BTY_IMAGES) partition grew well past the 32 MiB bake size.
 
 Doesn't depend on a serial marker -- bty-usb-grow's success log goes to
 the systemd journal, which doesn't auto-forward to ``/dev/console``.
@@ -45,7 +45,7 @@ TEST_DISK_BYTES = 4 * 1024 * 1024 * 1024
 # nearly-empty partition + tar restore of the ~few KB starter .bri
 # set). 180s is generous and bounded by the GHA job timeout.
 BOOT_WINDOW_SEC = 180
-# The 1 MiB bake size grown to a 4 GiB disk should land at >= ~3.5
+# The 32 MiB bake size grown to a 4 GiB disk should land at >= ~3.5
 # GiB (the live env's CD-ROM partition + some metadata slack are
 # what's not BTY_IMAGES). 1 GiB is a comfortable floor that
 # distinguishes "grew" from "didn't grow" without needing to know
@@ -160,7 +160,7 @@ def main(args, cijoe):
         return errno.EPROTO
 
     log.info(
-        f"PASS: BTY_IMAGES grew from 1 MiB (bake) to "
+        f"PASS: BTY_IMAGES grew from 32 MiB (bake) to "
         f"{largest / (1 << 30):.2f} GiB (parted-observed) on first boot"
     )
     return 0
