@@ -210,3 +210,139 @@ def test_unknown_trigger_rejected(tmp_path: Path) -> None:
             await mgr.stop()
 
     _run(_drive())
+
+
+# ----- scheduler logic --------------------------------------------------
+
+
+def test_is_due_manual_never_fires() -> None:
+    """``cadence=manual`` never fires regardless of state."""
+    from datetime import UTC, datetime
+
+    from bty.web._backup import _is_due
+
+    now = datetime(2026, 5, 24, tzinfo=UTC)
+    assert _is_due(None, "manual", now) is False
+    assert _is_due("2020-01-01T00:00:00+00:00", "manual", now) is False
+
+
+def test_is_due_no_last_run_fires_immediately() -> None:
+    """First-time opt-in fires on the next tick so the operator can
+    confirm the schedule works without waiting a full cadence."""
+    from datetime import UTC, datetime
+
+    from bty.web._backup import _is_due
+
+    now = datetime(2026, 5, 24, tzinfo=UTC)
+    assert _is_due(None, "daily", now) is True
+    assert _is_due(None, "weekly", now) is True
+
+
+def test_is_due_daily_interval() -> None:
+    """Daily cadence fires when 24h have elapsed since the last run."""
+    from datetime import UTC, datetime, timedelta
+
+    from bty.web._backup import _is_due
+
+    now = datetime(2026, 5, 24, 12, 0, tzinfo=UTC)
+    just_now = (now - timedelta(hours=1)).isoformat()
+    yesterday = (now - timedelta(hours=23, minutes=59)).isoformat()
+    a_day_ago = (now - timedelta(hours=24, minutes=1)).isoformat()
+    assert _is_due(just_now, "daily", now) is False
+    assert _is_due(yesterday, "daily", now) is False
+    assert _is_due(a_day_ago, "daily", now) is True
+
+
+def test_is_due_weekly_interval() -> None:
+    """Weekly cadence fires when 7d have elapsed since the last run."""
+    from datetime import UTC, datetime, timedelta
+
+    from bty.web._backup import _is_due
+
+    now = datetime(2026, 5, 24, 12, 0, tzinfo=UTC)
+    three_days_ago = (now - timedelta(days=3)).isoformat()
+    a_week_ago = (now - timedelta(days=7, minutes=1)).isoformat()
+    assert _is_due(three_days_ago, "weekly", now) is False
+    assert _is_due(a_week_ago, "weekly", now) is True
+
+
+def test_is_due_unparseable_timestamp_fires() -> None:
+    """A garbage ``last_run_at`` (hand-edited state.db) is treated as
+    "no prior run" rather than silently never firing."""
+    from datetime import UTC, datetime
+
+    from bty.web._backup import _is_due
+
+    now = datetime(2026, 5, 24, tzinfo=UTC)
+    assert _is_due("not-a-timestamp", "daily", now) is True
+
+
+def test_scheduler_tick_disabled_does_nothing(tmp_path: Path) -> None:
+    """``backup.enabled=False`` -> the scheduler enqueues nothing."""
+
+    async def _drive() -> None:
+        from bty.web._backup import _scheduler_tick
+
+        state_path = _init_state(tmp_path)
+        mgr = BackupManager(max_parallel=1)
+        mgr.start(state_path, tmp_path / "images", tmp_path / "backups", bty_version="x")
+        try:
+            await _scheduler_tick(state_path, mgr)
+            assert await mgr.list() == []
+        finally:
+            await mgr.stop()
+
+    _run(_drive())
+
+
+def test_scheduler_tick_enqueues_when_due(tmp_path: Path) -> None:
+    """``enabled=True`` + ``cadence=daily`` + no prior run -> a
+    scheduled backup gets enqueued on the next tick."""
+
+    async def _drive() -> None:
+        from bty.web._backup import _scheduler_tick
+
+        state_path = _init_state(tmp_path)
+        with sqlite3.connect(state_path) as conn:
+            _settings_store.set_value(conn, _settings_store.KEY_BACKUP_ENABLED, "1")
+            _settings_store.set_value(conn, _settings_store.KEY_BACKUP_CADENCE, "daily")
+            conn.commit()
+        mgr = BackupManager(max_parallel=1)
+        mgr.start(state_path, tmp_path / "images", tmp_path / "backups", bty_version="x")
+        try:
+            await _scheduler_tick(state_path, mgr)
+            rows = await mgr.list()
+            assert len(rows) == 1
+            assert rows[0].trigger == "scheduled"
+        finally:
+            await mgr.stop()
+
+    _run(_drive())
+
+
+def test_scheduler_tick_skips_when_already_running(tmp_path: Path) -> None:
+    """When a scheduled backup is already queued or running, the tick
+    must NOT enqueue another one -- otherwise a slow backup gets piled
+    on top of itself every tick."""
+
+    async def _drive() -> None:
+        from bty.web._backup import _scheduler_tick
+
+        state_path = _init_state(tmp_path)
+        with sqlite3.connect(state_path) as conn:
+            _settings_store.set_value(conn, _settings_store.KEY_BACKUP_ENABLED, "1")
+            _settings_store.set_value(conn, _settings_store.KEY_BACKUP_CADENCE, "daily")
+            conn.commit()
+        mgr = BackupManager(max_parallel=1)
+        mgr.start(state_path, tmp_path / "images", tmp_path / "backups", bty_version="x")
+        try:
+            # Pre-seed a scheduled backup; tick shouldn't add a second.
+            await mgr.enqueue(trigger="scheduled")
+            await _scheduler_tick(state_path, mgr)
+            rows = await mgr.list()
+            # 1 from our pre-seed; tick added nothing.
+            assert len(rows) == 1, [r.backup_id for r in rows]
+        finally:
+            await mgr.stop()
+
+    _run(_drive())

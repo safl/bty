@@ -347,6 +347,98 @@ def _log_terminal(
         conn.commit()
 
 
+# ----- scheduler loop ----------------------------------------------------
+#
+# Long-running asyncio task that ticks every ``tick_interval`` seconds
+# and enqueues a ``trigger="scheduled"`` backup when the configured
+# cadence is due. Reads cadence + last_run_at + enabled on EVERY tick
+# so a Settings change reflects within one tick window without
+# bty-web restart.
+
+
+_CADENCE_SECONDS: dict[str, float] = {
+    "daily": 24 * 3600.0,
+    "weekly": 7 * 24 * 3600.0,
+}
+
+
+def _is_due(last_iso: str | None, cadence: str, now: datetime) -> bool:
+    """Decide whether a scheduled backup should fire.
+
+    ``last_iso`` is the ISO-8601 timestamp from ``backup.last_run_at``
+    (``None`` if no scheduled run has ever succeeded). ``cadence`` is
+    one of :data:`BACKUP_CADENCES`. ``now`` is the current time;
+    factored as an argument so tests can drive deterministic clocks.
+
+    Returns ``True`` if a fresh scheduled run is due:
+
+    * ``manual`` cadence -> never due (only "Back up now" runs).
+    * No prior run -> due immediately (lets the operator confirm the
+      schedule works without waiting a full cadence interval).
+    * Otherwise -> due iff ``now - last_iso`` >= cadence interval.
+    """
+    if cadence not in _CADENCE_SECONDS:
+        return False
+    if last_iso is None:
+        return True
+    try:
+        last_dt = datetime.fromisoformat(last_iso)
+    except ValueError:
+        return True
+    if last_dt.tzinfo is None:
+        last_dt = last_dt.replace(tzinfo=UTC)
+    elapsed = (now - last_dt).total_seconds()
+    return elapsed >= _CADENCE_SECONDS[cadence]
+
+
+async def _scheduler_tick(state_path: Path, manager: BackupManager) -> None:
+    """One scheduler iteration: read settings, decide if a scheduled
+    backup is due, enqueue if so. Skips when a scheduled backup is
+    already queued or running so a long-running backup doesn't get
+    re-enqueued every tick."""
+    with _db.open_db(state_path) as conn:
+        enabled = _settings_store.resolve_backup_enabled(conn)
+        cadence = _settings_store.resolve_backup_cadence(conn)
+        last = _settings_store.get_backup_last_run_at(conn)
+    if not enabled:
+        return
+    if not _is_due(last, cadence, datetime.now(UTC)):
+        return
+    # Don't pile on if a scheduled backup is already in flight.
+    active = await manager.list()
+    if any(s.trigger == "scheduled" and s.status in ("queued", "running") for s in active):
+        return
+    await manager.enqueue(trigger="scheduled")
+
+
+async def scheduler_loop(
+    state_path: Path,
+    manager: BackupManager,
+    stop_event: asyncio.Event,
+    *,
+    tick_interval: float = 60.0,
+) -> None:
+    """Run :func:`_scheduler_tick` every ``tick_interval`` seconds
+    until ``stop_event`` is set. Exceptions in a tick are caught +
+    logged so a transient DB error doesn't kill the scheduler.
+
+    Shutdown wakes immediately on ``stop_event`` rather than waiting
+    out the current sleep -- ``asyncio.wait_for(stop_event.wait(),
+    timeout=tick_interval)`` returns the moment stop is signalled,
+    times out (and loops) when the interval elapses normally.
+    """
+    while not stop_event.is_set():
+        try:
+            await _scheduler_tick(state_path, manager)
+        except Exception:
+            log.exception("backup scheduler tick failed")
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=tick_interval)
+            return
+        except TimeoutError:
+            continue
+
+
 def _resolve_max_parallel() -> int:
     """Read ``BTY_BACKUP_MAX_PARALLEL`` env override; default 1.
     Mirrors the pattern in :mod:`_hash` + :mod:`_release_mgr`."""

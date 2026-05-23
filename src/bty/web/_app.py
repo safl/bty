@@ -219,6 +219,15 @@ def create_app(
                 # suppression.
                 with contextlib.suppress(FileNotFoundError, ValueError):
                     await hash_manager.enqueue(img.name)
+        # Backup scheduler loop. Ticks every 60s; reads cadence +
+        # last_run_at on every tick so a Settings change reflects
+        # without restart. Stop signalled by ``backup_stop_event``,
+        # which lets the loop wake immediately on shutdown rather
+        # than waiting out the 60s sleep.
+        backup_stop_event = asyncio.Event()
+        backup_scheduler_task = asyncio.create_task(
+            _backup.scheduler_loop(state_path, backup_manager, backup_stop_event)
+        )
         try:
             yield
         finally:
@@ -228,6 +237,9 @@ def create_app(
             # hold the HTTP connection alive until uvicorn's 90s
             # graceful-shutdown timeout SIGKILLs the worker.
             await event_bus.close()
+            backup_stop_event.set()
+            with contextlib.suppress(asyncio.CancelledError):
+                await backup_scheduler_task
             if catalog_state.catalog is not None:
                 await download_manager.stop()
             await hash_manager.stop()
