@@ -1182,9 +1182,9 @@ def create_app(
     # Mirrors the /catalog/downloads + /catalog/hashes + /boot/releases
     # shape: GET lists the active jobs (queued + running + recent
     # terminal states, same as the other managers' raw list); POST
-    # enqueues; DELETE cancels by backup_id. The workers page in the
-    # UI filters to queued + running only -- terminal rows evict
-    # from the UI on completion, and history lives in the events log.
+    # enqueues; DELETE cancels by backup_id. ``/ui/backups`` filters
+    # to queued + running only -- terminal rows evict from the UI on
+    # completion, and history lives in the events log.
 
     @app.get("/workers/backups", dependencies=[Depends(require_auth)])
     async def list_backups() -> dict[str, Any]:

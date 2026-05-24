@@ -448,14 +448,21 @@ Bootstrap CSS, HTMX form posts).
  badge + Start / Stop / Restart buttons driven by the
  sudoers-permitted `bty-web-tftp` helper. An in-page sub-nav jumps
  between List / TFTP Daemon / Activity.
-- `GET /ui/workers` (Workers) -> the merged background-workers page:
- Downloads (catalog fetches + per-file release artifacts), Hashing,
- Backup. Active jobs only -- terminal rows evict on completion; the
- events log carries the history. The Backup card has a Back-up-now
- trigger; the other triggers stay on their home pages
- (`/ui/images` for catalog fetches, `/ui/netboot` for release
- artifacts). Reached from the three navbar worker icons; all three
- point at this merged page with anchor sections.
+- `GET /ui/downloads` (Downloads) -> active downloads list (catalog
+ fetches + per-file release artifacts merged) + the three
+ operator-add triggers: Fetch artifacts (netboot trio + sha256
+ manifest), Add image from URL (http(s):// or oras://), Upload
+ image (local file via XHR PUT). Recent activity card at the bottom
+ (catalog + image + netboot events). The Fetch-artifacts button
+ disables itself when all four netboot files are already present.
+- `GET /ui/hashing` (Hashing) -> active SHA-256 jobs + recent
+ ``image.hashed`` / ``image.hash_failed`` events. Per-image Hash
+ trigger stays on `/ui/images` (per-row).
+- `GET /ui/backups` (Backups) -> Back-up-now trigger + active
+ backups list + schedule summary (links to the Settings backup-
+ schedule card) + recent ``backup.created`` / ``backup.failed`` /
+ ``backup.pruned`` events. Each worker page lights only its own
+ navbar indicator.
 - The router-config **DHCP / Network boot** cheatsheet (appliance-IP /
  interfaces table + option 60 / 66 / 67 values to paste into the LAN's
  DHCP server, for both PXE-via-TFTP and UEFI HTTP Boot) lives on the

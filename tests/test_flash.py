@@ -877,15 +877,6 @@ def test_flash_cancelled_subclasses_flash_error() -> None:
 # ----- UEFI boot-entry registration (efibootmgr) -------------------------
 
 
-def test_parse_boot_order_extracts_numbers() -> None:
-    out = "BootCurrent: 0001\nBootOrder: 0001,0003,0000\nBoot0000* x\n"
-    assert flash._parse_boot_order(out) == ["0001", "0003", "0000"]
-
-
-def test_parse_boot_order_missing_returns_empty() -> None:
-    assert flash._parse_boot_order("BootCurrent: 0001\n") == []
-
-
 def test_boot_entries_with_label_matches_label_only() -> None:
     out = (
         "BootOrder: 0000,0001\n"

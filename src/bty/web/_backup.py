@@ -5,12 +5,12 @@ produces -- the operator's machines, catalog, and local image files
 laid out as a directory under :data:`backups_root`. The manager wires
 that primitive into the same per-key worker-pool model
 :class:`_BaseAsyncManager` uses for downloads + hashes + release
-fetches, so the worker indicator + workers page treat backups as
-just another job kind.
+fetches, so the worker indicator + the Backups page (``/ui/backups``)
+treat backups as just another job kind.
 
 Two entry points:
 
-* **Manual** -- the Backup tab's "Back up now" button calls
+* **Manual** -- the "Back up now" button on ``/ui/backups`` calls
   :meth:`enqueue` with ``trigger="manual"``. The scheduler's cadence
   is unaffected; manual runs are not recorded as the scheduler's
   ``last_run_at``.
@@ -29,7 +29,7 @@ reflects on the next backup without restart.
 History: backup outcomes land in the audit log as ``backup.created``
 / ``backup.failed`` / ``backup.pruned`` events. The manager itself
 does NOT backfill its in-memory state from those events on restart
--- the workers page only renders queued + running jobs (terminal
+-- ``/ui/backups`` only renders queued + running jobs (terminal
 states evict immediately from the UI), with history visible via the
 events log and the on-disk ``backups/`` directory.
 

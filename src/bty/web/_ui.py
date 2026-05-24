@@ -624,9 +624,10 @@ def register_ui_routes(
 
         The catalog list (merge of dir-scan files + catalog entries) is
         the page's primary content; the operator's "add a single image"
-        forms (upload local file + add-by-URL) sit in an inline card
-        below the list. Live progress of any fetch / hash / backup is on
-        the merged Workers page (``/ui/workers``).
+        forms (upload local file + add-by-URL) live on
+        ``/ui/downloads``. Live progress of any fetch / hash / backup
+        is on ``/ui/downloads`` / ``/ui/hashing`` / ``/ui/backups``
+        respectively.
 
         ``?error=<msg>`` lands in the layout's flash slot (the form-
         style ``POST /ui/catalog/entries`` 303s back with that param on
@@ -664,8 +665,9 @@ def register_ui_routes(
     )
     def ui_images(request: Request) -> HTMLResponse:
         """The image catalog: the SHA-keyed merge of dir-scan files +
-        catalog entries + an inline Add-image card. Live job progress
-        lives on the merged Workers page (``/ui/workers``)."""
+        catalog entries. Live job progress lives on the three worker
+        pages (``/ui/downloads`` / ``/ui/hashing`` / ``/ui/backups``);
+        the per-image Add forms live on ``/ui/downloads``."""
         return _render_images_page(request)
 
     @app.get(

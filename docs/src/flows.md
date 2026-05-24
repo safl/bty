@@ -369,6 +369,7 @@ Conditional:
 | `machine.flashed`               | Live env `POST /pxe/{mac}/done`.                                                                            |
 | `machine.inventory`             | Live env `POST /pxe/{mac}/inventory`.                                                                       |
 | `netboot.pxe.offered`                   | Every `GET /pxe/{mac}` hit. Details record what was returned.                                              |
+| `netboot.pxe.plan`                      | `GET /pxe/{mac}/plan` resolved a flash plan (image / target disk / boot args) for an auto-flash request.   |
 | `netboot.pxe.flash.orphan_ref`          | Flash chain refused due to dangling `bty_image_ref`.                                                       |
 | `netboot.pxe.flash.no_target_disk`      | Flash chain refused due to empty `target_disk_serial`.                                                     |
 | `image.uploaded`                | Operator `PUT /images/{name}` succeeds.                                                                     |
@@ -378,18 +379,27 @@ Conditional:
 | `catalog.entry.added`           | Operator `POST /catalog/entries` (form or JSON) succeeds.                                                  |
 | `catalog.entry.add_failed`      | sha resolve / oras resolve failed on `/catalog/entries`.                                                   |
 | `catalog.entry.deleted`         | Operator `DELETE /catalog/entries`.                                                                         |
+| `catalog.entries.imported`      | `POST /catalog/import` or the form-style `/ui/catalog/upload` / `/ui/catalog/fetch-release` ingested a catalog.toml. |
+| `catalog.cache.populated`       | DownloadManager finished fetching a catalog entry's bytes to the cache.                                     |
+| `catalog.cache.deleted`         | Operator `DELETE /catalog/cache/{name}` evicted cached bytes.                                              |
+| `catalog.fetch.sha_mismatch`    | DownloadManager fetched bytes whose sha256 didn't match the pinned `disk_image_sha`.                       |
 | `netboot.artifacts.fetched`          | `/ui/netboot/fetch-release` (or `POST /boot/releases`) successfully pulled artifacts.                          |
 | `netboot.artifacts.fetch_failed`     | Same path failed (404, sha mismatch, etc.).                                                                 |
 | `netboot.tftp.controlled`      | Operator `POST /ui/settings/tftp-control` succeeded.                                                        |
 | `netboot.tftp.control_failed`  | Same path failed (`sudo -n` denied, helper exit non-zero, etc.).                                            |
+| `settings.upstream.updated`     | Operator `POST /ui/settings/upstream` saved the release-repo / catalog-URL / release-tag overrides.        |
+| `settings.backup.updated`       | Operator `POST /ui/settings/backup` saved the scheduled-backup knobs (enabled / cadence / retention).      |
+| `backup.created`                | BackupManager wrote a fresh bundle directory under `backups_root` (manual or scheduled).                   |
+| `backup.failed`                 | BackupManager export errored; the partial bundle (if any) is cleaned up.                                   |
+| `backup.pruned`                 | Retention pass deleted an old backup directory after a successful run.                                     |
 | `auth.login.succeeded`          | Operator `POST /ui/login` with a valid OS password.                                                         |
 | `auth.login.failed`             | Same path with PAM rejection.                                                                                |
 | `auth.logout`                   | Operator `POST /ui/logout` from an authed session.                                                          |
 
-Every row carries `subject_kind` (`machine` / `image` / `catalog` / `boot`
-/ `settings` / `auth`), a `subject_id`, the requesting `source_ip`, the
-`actor` (`operator` / `pxe-client` / `system`), and a JSON `details` blob
-with kind-specific extras.
+Every row carries `subject_kind` (`machine` / `image` / `catalog` /
+`netboot` / `settings` / `auth` / `backup`), a `subject_id`, the
+requesting `source_ip`, the `actor` (`operator` / `pxe-client` /
+`system`), and a JSON `details` blob with kind-specific extras.
 
 ## Operator UI actions: a quick map
 

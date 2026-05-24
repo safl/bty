@@ -732,15 +732,6 @@ def _efibootmgr(args: list[str] | None = None) -> str:
     ).stdout
 
 
-def _parse_boot_order(efibootmgr_out: str) -> list[str]:
-    """Pull the ``BootOrder:`` entry numbers out of efibootmgr output."""
-    for line in efibootmgr_out.splitlines():
-        if line.startswith("BootOrder:"):
-            rest = line.split(":", 1)[1].strip()
-            return [x.strip() for x in rest.split(",") if x.strip()]
-    return []
-
-
 def _boot_entries_with_label(efibootmgr_out: str, label: str) -> list[str]:
     """Entry numbers (``Boot####``) whose description equals ``label``.
 

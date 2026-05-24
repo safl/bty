@@ -210,7 +210,7 @@ Initial UI tour:
   / `initrd` / `squashfs` / `sha256` manifest) plus a Start/Stop/Restart
   panel for the local `dnsmasq.service` (which serves the TFTP root). The
   "Fetch artifacts" button here enqueues all four files; per-file progress
-  shows on `/ui/workers#downloads` (the navbar's Downloads indicator).
+  shows on `/ui/downloads` (the navbar's Downloads indicator).
   The router-config cheatsheet (option 60 / 66 / 67 for the LAN's DHCP
   server, for both PXE and UEFI HTTP Boot) lives on the Settings page
   under **DHCP / Network boot**. An in-page sub-nav jumps between List /

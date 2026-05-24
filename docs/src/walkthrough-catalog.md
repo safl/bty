@@ -95,16 +95,21 @@ Operators who drop a file *after* server startup can either:
 `/ui/images` shows the **unified catalog** table: SHA prefix, names,
 format, sources (icons distinguish local file vs manifest URL), cached
 state, per-row Action button. Action shows "Hash" for unhashed dir-scan
-rows, "Fetch" for manifest entries not yet cached, or "-" for cached
-entries. Its header carries the **Fetch latest catalog** and **Upload
-catalog** controls; an in-page sub-nav jumps between the catalog **List**
-and the recent **Activity** table.
+rows, "Fetch" for manifest / DB entries not yet cached, or "-" for cached
+entries; while a job is in flight the button flips to "Downloading" /
+"Hashing" with a spinner and goes disabled until the job terminates.
+Its header carries the **Fetch latest catalog** and **Upload catalog**
+controls; an in-page sub-nav jumps between the catalog **List** and the
+recent **Activity** table.
 
-**Image Downloads** (add a single image by file or URL + the live fetch
-jobs) and **Hashes** (the background SHA worker) are their own top-level
-pages, reached from the worker-indicator icons in the navbar (right of
-Settings), not sub-tabs of Images. Each shows live progress with Cancel per
-row and auto-refreshes every ~2s.
+**Downloads** (`/ui/downloads`, the operator's add-stuff-to-bty home --
+Fetch artifacts / Add image from URL / Upload image triggers + the
+active downloads list) and **Hashing** (`/ui/hashing`, the background
+SHA worker) are their own top-level pages, reached from the worker-
+indicator icons in the navbar (right of Settings). **Backups**
+(`/ui/backups`) follows the same shape with a "Back up now" trigger.
+Each shows live progress with Cancel per row, auto-refreshes every
+~2s, and carries a recent-activity card at the bottom.
 
 When a Fetch or Hash transitions to `completed`, the page auto-reloads
 (after a brief delay so the 100% bar renders) so the catalog table picks up
