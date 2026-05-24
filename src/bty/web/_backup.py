@@ -48,6 +48,7 @@ import os
 import shutil
 import threading
 import time
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -433,6 +434,82 @@ def _read_bundle(path: Path) -> BackupOnDisk:
         images=images,
         bytes_on_disk=_dir_size(path),
     )
+
+
+def is_valid_backup_id(name: str) -> bool:
+    """Whether ``name`` matches the backup-id format the BackupManager
+    mints.
+
+    Public alias for the module-private :func:`_looks_like_backup_id`,
+    so route handlers can validate path segments coming off the URL
+    without reaching into ``_``-prefixed internals. Used as a path-
+    traversal guard: a request for
+    ``/ui/backups/{backup_id}/download`` will only resolve when the
+    segment shape itself matches an ISO-8601 slug, so the route can
+    never look at sibling directories of ``backups_root``.
+    """
+    return _looks_like_backup_id(name)
+
+
+def iter_bundle_tar(bundle: Path) -> Iterator[bytes]:
+    """Yield a streamed tar archive of ``bundle`` as ``bytes`` chunks.
+
+    Stores file paths relative to ``bundle.parent`` so the archive
+    expands to ``<backup_id>/manifest.json`` + ``<backup_id>/images/...``
+    when untarred (i.e. the backup_id ends up as the top-level folder,
+    matching what the operator expects after a download). The archive
+    is uncompressed (mode ``"w|"``): bundle contents are already
+    compressed (``.img.gz``, ``.img.zst``) and re-compressing only
+    burns CPU.
+
+    Streaming avoids materialising the full tar in memory for
+    multi-GiB bundles; the in-memory buffer holds at most one tar
+    member plus a 512-byte block header at a time.
+    """
+    import tarfile
+
+    if not bundle.is_dir():
+        raise FileNotFoundError(f"backup bundle does not exist: {bundle}")
+    parent = bundle.parent
+
+    class _ChunkBuf:
+        """File-like that tarfile writes into; ``drain()`` returns + clears."""
+
+        __slots__ = ("_buf",)
+
+        def __init__(self) -> None:
+            self._buf = bytearray()
+
+        def write(self, data: bytes) -> int:
+            self._buf.extend(data)
+            return len(data)
+
+        def drain(self) -> bytes:
+            out = bytes(self._buf)
+            self._buf.clear()
+            return out
+
+    buf = _ChunkBuf()
+    # ``mode="w|"`` is the seekless / streaming variant. tarfile will
+    # write member headers + data directly into our buffer rather than
+    # the seek-back-and-patch path it uses in seekable mode.
+    # mypy doesn't accept our minimal-protocol ChunkBuf as the typed
+    # ``_Fileobj`` protocol -- tarfile actually only calls ``write`` in
+    # the streaming-write path, so the ignore is safe.
+    with tarfile.open(fileobj=buf, mode="w|") as tf:  # type: ignore[call-overload]
+        # ``sorted`` for deterministic ordering across filesystems.
+        for path in sorted(bundle.rglob("*")):
+            if not path.is_file():
+                continue
+            tf.add(path, arcname=str(path.relative_to(parent)))
+            chunk = buf.drain()
+            if chunk:
+                yield chunk
+    # The tarfile.close() inside the with-block writes the end-of-archive
+    # padding; drain whatever's left.
+    chunk = buf.drain()
+    if chunk:
+        yield chunk
 
 
 def _log_terminal(

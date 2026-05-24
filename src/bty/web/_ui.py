@@ -29,7 +29,7 @@ from fastapi import (
     Response,
     status,
 )
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from jinja2 import Environment
 from pydantic import ValidationError
 
@@ -741,10 +741,14 @@ def register_ui_routes(
     def ui_backups(request: Request) -> HTMLResponse:
         """The Backups worker page: "Back up now" trigger + active
         backups + on-disk listing + schedule summary + recent backup
-        activity."""
+        activity. The retention number is surfaced alongside the
+        schedule so the operator can see how many bundles will be
+        kept after each successful backup (retention prunes on every
+        completion, regardless of manual / scheduled trigger)."""
         with _db.open_db(state_path) as conn:
             backup_enabled = _settings_store.resolve_backup_enabled(conn)
             backup_cadence = _settings_store.resolve_backup_cadence(conn)
+            backup_retention = _settings_store.resolve_backup_retention(conn)
             backup_last_run_at = _settings_store.get_backup_last_run_at(conn)
             backup_events = _events_log.list_events(conn, subject_kind="backup", limit=15)
         backups_on_disk = _backup.list_backups_on_disk(backups_root)
@@ -754,9 +758,45 @@ def register_ui_routes(
             backups_root=str(backups_root),
             backup_enabled=backup_enabled,
             backup_cadence=backup_cadence,
+            backup_retention=backup_retention,
             backup_last_run_at=backup_last_run_at,
             backup_events=backup_events,
             backups_on_disk=backups_on_disk,
+        )
+
+    @app.get(
+        "/ui/backups/{backup_id}/download",
+        include_in_schema=False,
+        dependencies=[Depends(require_ui_auth)],
+    )
+    def ui_backups_download(backup_id: str) -> StreamingResponse:
+        """Stream a tar archive of one backup bundle for the operator
+        to download to their laptop.
+
+        Validates the ``backup_id`` against the ISO-8601-slug format
+        before touching the filesystem (so a request like
+        ``/ui/backups/../etc/download`` can't traverse out of
+        ``backups_root``). Returns ``404`` if the slug is malformed
+        or the bundle directory is missing. Uncompressed ``.tar`` --
+        bundle contents are already compressed.
+        """
+        if not _backup.is_valid_backup_id(backup_id):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"backup not found: {backup_id!r}",
+            )
+        bundle = backups_root / backup_id
+        if not bundle.is_dir():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"backup not found: {backup_id!r}",
+            )
+        return StreamingResponse(
+            _backup.iter_bundle_tar(bundle),
+            media_type="application/x-tar",
+            headers={
+                "Content-Disposition": f'attachment; filename="{backup_id}.tar"',
+            },
         )
 
     @app.post(

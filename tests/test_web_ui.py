@@ -580,7 +580,8 @@ def test_ui_backups_has_back_up_now_and_activity(client: TestClient) -> None:
 def test_ui_backups_lists_existing_bundles(client: TestClient, tmp_path: Path) -> None:
     """When ``backups_root`` contains bundles, ``/ui/backups`` renders a
     row per bundle with its backup_id + machine / catalog / image
-    counts. The empty-state copy is gone.
+    counts. Each row carries a Download link to the streaming-tar
+    endpoint. The empty-state copy is gone.
 
     The ``client`` fixture's state.db is at ``tmp_path/state.db`` and
     the app derives ``backups_root`` as ``state.db.parent / "backups"``
@@ -609,6 +610,57 @@ def test_ui_backups_lists_existing_bundles(client: TestClient, tmp_path: Path) -
     assert "2026-05-23T10-00-00Z" in body
     assert "0.26.0" in body
     assert "No backups on disk yet" not in body
+    # Retention number lands in the schedule summary, regardless of
+    # whether the schedule itself is on/off -- it always applies on
+    # successful completion.
+    assert "Retention:" in body
+    assert "keep last 7" in body  # default retention is 7
+    # Each on-disk row carries a download link to the streaming-tar
+    # endpoint for that specific bundle.
+    assert 'href="/ui/backups/2026-05-23T10-00-00Z/download"' in body
+
+
+def test_ui_backups_download_streams_valid_tar(client: TestClient, tmp_path: Path) -> None:
+    """``GET /ui/backups/{id}/download`` streams a tar archive whose
+    members are rooted at the backup_id directory, with the correct
+    Content-Disposition for a browser save."""
+    import io
+    import tarfile
+
+    backups_root = tmp_path / "backups"
+    bundle = backups_root / "2026-05-23T10-00-00Z"
+    (bundle / "images").mkdir(parents=True)
+    (bundle / "images" / "demo.img.gz").write_bytes(b"x" * 256)
+    (bundle / "manifest.json").write_text('{"bty_export_version": 1}\n')
+
+    _login(client)
+    r = client.get("/ui/backups/2026-05-23T10-00-00Z/download")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "application/x-tar"
+    assert "2026-05-23T10-00-00Z.tar" in r.headers["content-disposition"]
+    with tarfile.open(fileobj=io.BytesIO(r.content), mode="r:") as tf:
+        assert sorted(tf.getnames()) == [
+            "2026-05-23T10-00-00Z/images/demo.img.gz",
+            "2026-05-23T10-00-00Z/manifest.json",
+        ]
+
+
+def test_ui_backups_download_rejects_invalid_id(client: TestClient) -> None:
+    """A backup_id that isn't an ISO-8601 slug returns 404 -- a
+    path-traversal attempt never reaches the filesystem."""
+    _login(client)
+    for bad in ("..", "not-a-date", "2026"):
+        r = client.get(f"/ui/backups/{bad}/download")
+        assert r.status_code == 404, bad
+
+
+def test_ui_backups_download_missing_bundle_404(client: TestClient) -> None:
+    """A correctly-shaped backup_id whose directory doesn't exist
+    returns 404 (not 500). Same 404 as the malformed-id case so the
+    operator can't enumerate other operators' bundle ids."""
+    _login(client)
+    r = client.get("/ui/backups/2026-05-23T10-00-00Z/download")
+    assert r.status_code == 404
 
 
 def test_ui_settings_shows_dhcp_pxe_cheatsheet(client: TestClient) -> None:

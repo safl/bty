@@ -44,6 +44,9 @@
         <span class="me-3"><strong>Schedule:</strong>
             {% if backup_enabled %}{{ backup_cadence }}{% else %}off{% endif %}
             (<a href="/ui/settings#backup-schedule">change</a>)</span>
+        <span class="me-3"><strong>Retention:</strong>
+            keep last {{ backup_retention }}
+            (prunes oldest on every successful backup)</span>
         <span class="me-3"><strong>Last scheduled run:</strong>
             {% if backup_last_run_at %}<code>{{ backup_last_run_at }}</code>{% else %}never{% endif %}</span>
         <span class="me-3"><strong>Destination:</strong>
@@ -182,11 +185,12 @@
                     <th class="text-end">Images</th>
                     <th class="text-end">Size</th>
                     <th>bty version</th>
+                    <th class="text-end" style="width: 1%; white-space: nowrap;">Download</th>
                 </tr>
             </thead>
             <tbody>
                 {% if not backups_on_disk %}
-                <tr><td colspan="6" class="text-muted">No backups on disk yet. Click <em>Back up now</em> above, or enable a schedule on the <a href="/ui/settings#backup-schedule">Settings</a> page.</td></tr>
+                <tr><td colspan="7" class="text-muted">No backups on disk yet. Click <em>Back up now</em> above, or enable a schedule on the <a href="/ui/settings#backup-schedule">Settings</a> page.</td></tr>
                 {% else %}
                 {% for b in backups_on_disk %}
                 <tr>
@@ -203,6 +207,13 @@
                         {%- else %}{{ '%.1f'|format(n / (1024 * 1024 * 1024 * 1024)) }} TiB{% endif %}
                     </td>
                     <td class="small text-muted">{{ b.bty_version or '(unreadable)' }}</td>
+                    <td class="text-end">
+                        <a class="btn btn-sm btn-outline-primary text-nowrap"
+                           href="/ui/backups/{{ b.backup_id }}/download"
+                           title="Download {{ b.backup_id }}.tar to this browser">
+                            <i class="bi bi-download me-1"></i>.tar
+                        </a>
+                    </td>
                 </tr>
                 {% endfor %}
                 {% endif %}

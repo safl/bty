@@ -432,3 +432,54 @@ def test_list_backups_on_disk_missing_root_returns_empty(tmp_path: Path) -> None
     from bty.web._backup import list_backups_on_disk
 
     assert list_backups_on_disk(tmp_path / "does-not-exist") == []
+
+
+def test_iter_bundle_tar_streams_archive_with_topdir(tmp_path: Path) -> None:
+    """``iter_bundle_tar`` yields a valid tar whose entries are rooted
+    at the backup_id directory (so ``tar -xf foo.tar`` produces a
+    sibling folder named after the bundle, not loose files in cwd)."""
+    import io
+    import tarfile
+
+    from bty.web._backup import iter_bundle_tar
+
+    bundle = tmp_path / "backups" / "2026-05-23T10-00-00Z"
+    (bundle / "images").mkdir(parents=True)
+    (bundle / "manifest.json").write_text('{"bty_export_version": 1}\n')
+    (bundle / "images" / "demo.img.gz").write_bytes(b"\x1f\x8b" + b"\x00" * 200)
+
+    blob = b"".join(iter_bundle_tar(bundle))
+    # Tar trailer is two 512-byte zero blocks; a non-trivial archive
+    # is well over that.
+    assert len(blob) > 1024
+    with tarfile.open(fileobj=io.BytesIO(blob), mode="r:") as tf:
+        names = sorted(tf.getnames())
+    assert names == [
+        "2026-05-23T10-00-00Z/images/demo.img.gz",
+        "2026-05-23T10-00-00Z/manifest.json",
+    ]
+
+
+def test_iter_bundle_tar_missing_raises(tmp_path: Path) -> None:
+    """A non-existent bundle path is a FileNotFoundError -- callers
+    decide whether to translate to 404 or surface a system error."""
+    from bty.web._backup import iter_bundle_tar
+
+    with pytest.raises(FileNotFoundError):
+        # Consume the generator; the check fires when iteration starts.
+        list(iter_bundle_tar(tmp_path / "no-such-bundle"))
+
+
+def test_is_valid_backup_id_accepts_iso_slug_only() -> None:
+    """The id validator is the path-traversal guard for the download
+    route: only ISO-8601 slugs (with optional ``-N`` suffix) pass."""
+    from bty.web._backup import is_valid_backup_id
+
+    assert is_valid_backup_id("2026-05-23T10-00-00Z") is True
+    assert is_valid_backup_id("2026-05-23T10-00-00Z-1") is True
+    # Traversal attempts + garbage all reject.
+    assert is_valid_backup_id("..") is False
+    assert is_valid_backup_id("../etc") is False
+    assert is_valid_backup_id("") is False
+    assert is_valid_backup_id("not-a-date") is False
+    assert is_valid_backup_id("2026/05/23") is False
