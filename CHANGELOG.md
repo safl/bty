@@ -9,6 +9,34 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.30.0] - 2026-05-24
+
+The "SSE polish" release. Two follow-ups to v0.29.0's bus migration:
+push-driven progress counters and a small shared-JS extraction so
+future helper additions don't fan out to three places.
+
+### Added
+
+- **Throttled progress events via SSE.** v0.29.0 fired SSE only on
+  state transitions (queued -> running -> terminal), so a long-
+  running download / hash showed a frozen byte counter until the
+  30s safety poll. New `_BaseAsyncManager._fire_progress(key, state)`
+  debounces per-key to at most one event per second; the catalog
+  download / hash / release-fetch progress callbacks publish
+  through it. Progress counters tick at ~1 Hz instead of frozen-
+  for-30-seconds, without flooding the bus on a fast NVMe read.
+- **`/static/bty-utils.js`** -- shared `window.btyUtils.esc(s)` +
+  `window.btyUtils.fmtBytes(n)` helpers. The three pages that
+  copy-pasted these (Backups, Downloads, Hashing) now alias them
+  locally so a future tweak (rounding precision, byte-unit labels,
+  escape semantics) is a one-place change.
+
+### Changed
+
+- **`_layout.html` includes `/static/bty-utils.js`** alongside the
+  existing htmx + sse vendored bundles. Every authed page sees
+  `window.btyUtils`.
+
 ## [0.29.0] - 2026-05-24
 
 The "SSE everywhere" release. Worker pages stop polling every 2s and
