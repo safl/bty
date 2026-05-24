@@ -85,6 +85,98 @@ def test_enqueue_unknown_name_raises(tmp_path: Path) -> None:
     _run(_drive())
 
 
+def test_enqueue_db_only_entry_via_lookup_callback(tmp_path: Path) -> None:
+    """Operator-added rows (Add image from URL form) live in the DB
+    but NOT in the parsed manifest. ``db_entry_lookup`` must resolve
+    them through to the worker, otherwise the per-row Fetch button
+    on /ui/images 404s silently with "no catalog entry named X"
+    even though the row exists in the catalog table.
+    """
+    payload = b"db-only-entry"
+    entry = _entry(payload, name="db-only.img.zst")
+
+    def _lookup(name: str) -> _catalog.CatalogEntry | None:
+        return entry if name == entry.name else None
+
+    async def _drive() -> None:
+        cache_dir = tmp_path / "cache"
+        cache_dir.mkdir()
+        (cache_dir / entry.sha256).write_bytes(payload)
+        # Empty manifest; the lookup callback is the only way the
+        # manager learns about ``db-only.img.zst``.
+        cat = _catalog.Catalog(version=1, entries=())
+        mgr = DownloadManager(max_parallel=1)
+        mgr.start(cat, cache_dir, db_entry_lookup=_lookup)
+        try:
+            state = await mgr.enqueue(entry.name)
+            # Sha pinned + already cached -> completed without a worker
+            # round-trip (the fast path).
+            assert state.status == "completed"
+            assert state.sha256 == entry.sha256
+        finally:
+            await mgr.stop()
+
+    _run(_drive())
+
+
+def test_enqueue_db_only_entry_runs_worker(tmp_path: Path) -> None:
+    """A DB-only entry that's NOT yet cached must actually download
+    through the worker -- i.e. ``_run_one`` re-resolves the entry
+    via the lookup callback (``self._catalog.by_name`` won't find
+    it; only the DB does), then dispatches fetch_to_cache. Without
+    this end-to-end path the per-row Fetch button on /ui/images
+    would enqueue successfully but the worker would fail to
+    re-resolve and mark the state ``failed`` with "catalog entry
+    vanished" -- exactly the "downloads never go anywhere" symptom.
+    """
+    payload = b"db-only-runs"
+    entry = _entry(payload, name="db-only-runs.img.zst")
+
+    def _lookup(name: str) -> _catalog.CatalogEntry | None:
+        return entry if name == entry.name else None
+
+    async def _drive() -> None:
+        cache_dir = tmp_path / "cache"
+        cache_dir.mkdir()
+        # No pre-cached file -- the worker MUST download.
+        cat = _catalog.Catalog(version=1, entries=())
+        mgr = DownloadManager(max_parallel=1)
+        mgr.start(cat, cache_dir, db_entry_lookup=_lookup)
+        try:
+            with patch("bty.catalog.urllib.request.urlopen", _mock_urlopen(payload)):
+                await mgr.enqueue(entry.name)
+                for _ in range(200):
+                    states = await mgr.list()
+                    if states and states[0].status in ("completed", "failed"):
+                        break
+                    await asyncio.sleep(0.01)
+            states = await mgr.list()
+            assert states and states[0].status == "completed", states[0] if states else None
+            assert (cache_dir / entry.sha256).is_file()
+        finally:
+            await mgr.stop()
+
+    _run(_drive())
+
+
+def test_enqueue_db_only_entry_no_lookup_raises(tmp_path: Path) -> None:
+    """When ``db_entry_lookup`` is None and the manifest doesn't have
+    the name, the manager raises KeyError -- the unit-test contract.
+    Production wires a non-None callback in _app.py's lifespan."""
+
+    async def _drive() -> None:
+        cat = _catalog.Catalog(version=1, entries=())
+        mgr = DownloadManager()
+        mgr.start(cat, tmp_path / "cache", db_entry_lookup=None)
+        try:
+            with pytest.raises(KeyError, match="no catalog entry named"):
+                await mgr.enqueue("only-in-db")
+        finally:
+            await mgr.stop()
+
+    _run(_drive())
+
+
 def test_enqueue_already_cached_shortcut(tmp_path: Path) -> None:
     """An entry whose SHA already lives in cache_dir lands as
     completed without being queued -- no worker round-trip."""
