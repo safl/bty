@@ -15,16 +15,48 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
+
+# SSE event name reserved for worker state-change notifications
+# (Backup / Hash / catalog Download / release Fetch managers). The
+# payload is a JSON object: ``{"kind": "backup", "key": "<state-key>",
+# "status": "<terminal>"}``.  Pages that subscribe to ``/events/workers``
+# treat each event as a "go refresh your table" signal rather than a
+# patch; the JSON endpoints (``/workers/backups`` / ``/catalog/hashes``
+# / ``/catalog/downloads`` / ``/boot/releases``) remain the
+# authoritative state read.
+WORKER_STATE_CHANGED = "worker-state-changed"
 
 
 @dataclass(frozen=True)
 class MachineEvent:
-    """A single bus event. ``html`` is the body sent to SSE subscribers."""
+    """A single bus event. ``html`` is the body sent to SSE subscribers.
+
+    Despite the name, this class carries any SSE event the bty bus
+    fans out: the original machines-mutation events for the
+    ``/events/machines`` stream AND worker state-change events for
+    ``/events/workers`` (``html`` carries a JSON payload in that case).
+    """
 
     name: str  # SSE event name routed to subscribers
     html: str
+
+
+def worker_event(kind: str, key: str, status: str) -> MachineEvent:
+    """Build a worker-state-change bus event with a JSON payload.
+
+    Lifespan binding in :mod:`_app` registers one of these as the
+    state listener on each manager (Backup / Hash / catalog Download
+    / release Fetch); the manager calls it after every observable
+    status transition and the bus fans the event out to all
+    ``/events/workers`` subscribers.
+    """
+    return MachineEvent(
+        name=WORKER_STATE_CHANGED,
+        html=json.dumps({"kind": kind, "key": key, "status": status}),
+    )
 
 
 class MachineEventBus:

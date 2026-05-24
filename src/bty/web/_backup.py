@@ -265,6 +265,9 @@ class BackupManager(_BaseAsyncManager[BackupState]):
         async with self._lock:
             state.status = final_status
             state.finished_at = time.time()
+        # SSE: notify subscribers of the terminal transition so the
+        # Backups page picks it up without waiting for its safety poll.
+        self._fire_state_change(state)
 
     def _prune_old_backups(self) -> None:
         """Delete oldest siblings under :data:`backups_root` to satisfy

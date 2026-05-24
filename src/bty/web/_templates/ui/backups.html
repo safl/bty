@@ -178,11 +178,18 @@
         });
     }
     var handle = null;
-    function start() { if (!handle) { refresh(); handle = setInterval(refresh, 2000); } }
+    // SSE is the fast-path signal (refresh() runs in ~tens of ms after
+    // a worker transitions); the 30s interval is the safety net for a
+    // silently-dropped EventSource. Was 2s pre-SSE.
+    function start() { if (!handle) { refresh(); handle = setInterval(refresh, 30000); } }
     function stop()  { if (handle) { clearInterval(handle); handle = null; } }
     document.addEventListener("visibilitychange", function () {
         if (document.hidden) stop(); else start();
     });
+    document.addEventListener("bty-worker-state-changed", function (e) {
+        if (e.detail && e.detail.kind === "backup") refresh();
+    });
+    document.addEventListener("bty-worker-events-connected", refresh);
     start();
 })();
 </script>

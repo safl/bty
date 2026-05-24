@@ -148,11 +148,17 @@
             .catch(function () { btn.disabled = false; });
     });
     var handle = null;
-    function start() { if (!handle) { refresh(); handle = setInterval(refresh, 2000); } }
+    // SSE-driven refresh; the 30s interval is a safety net for the rare
+    // case where the EventSource drops without auto-reconnect.
+    function start() { if (!handle) { refresh(); handle = setInterval(refresh, 30000); } }
     function stop()  { if (handle) { clearInterval(handle); handle = null; } }
     document.addEventListener("visibilitychange", function () {
         if (document.hidden) stop(); else start();
     });
+    document.addEventListener("bty-worker-state-changed", function (e) {
+        if (e.detail && e.detail.kind === "hash") refresh();
+    });
+    document.addEventListener("bty-worker-events-connected", refresh);
     start();
 })();
 </script>

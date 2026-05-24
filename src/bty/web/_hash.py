@@ -231,6 +231,7 @@ class HashManager(_BaseAsyncManager[HashState]):
                 state.bytes_hashed = state.bytes_total
                 state.started_at = state.finished_at = time.time()
                 self._states[name] = state
+                self._fire_state_change(state)
                 return state
             self._states[name] = state
             await self._queue.put(name)
@@ -282,6 +283,7 @@ class HashManager(_BaseAsyncManager[HashState]):
             state.error = error
             if sha is not None:
                 state.sha256 = sha
+        self._fire_state_change(state)
 
         # Log terminal outcomes so the audit trail is symmetric:
         # successful hashes land ``image.hashed`` with the sha;

@@ -46,7 +46,13 @@ from bty import oras as _oras
 from bty.web import _backup, _db, _hash, _models, _release_mgr, _settings_store, _ui
 from bty.web import _catalog as _web_catalog
 from bty.web._auth import SESSION_COOKIE, require_auth
-from bty.web._events import MachineEvent, MachineEventBus, sse_format
+from bty.web._events import (
+    WORKER_STATE_CHANGED,
+    MachineEvent,
+    MachineEventBus,
+    sse_format,
+    worker_event,
+)
 from bty.web._events_log import acknowledge_event as _acknowledge_event
 from bty.web._events_log import list_events as _list_events
 from bty.web._events_log import normalize_ip as _normalize_ip
@@ -158,6 +164,24 @@ def create_app(
         # capture the loop now so cross-thread publishes can hop in
         # via call_soon_threadsafe.
         event_bus.attach(asyncio.get_running_loop())
+        # Wire each worker manager's state-change listener to the
+        # bus. Every observable status transition (queued -> running,
+        # queued -> cancelled, running -> terminal) fans out as a
+        # ``worker-state-changed`` SSE event so the Backups / Hashing
+        # / Downloads / Netboot pages get push-driven refreshes
+        # instead of waiting on their safety poll.
+        download_manager.set_state_listener(
+            lambda s: event_bus.publish(worker_event("download", s.name, s.status))
+        )
+        hash_manager.set_state_listener(
+            lambda s: event_bus.publish(worker_event("hash", s.name, s.status))
+        )
+        release_fetch_manager.set_state_listener(
+            lambda s: event_bus.publish(worker_event("release", s.tag, s.status))
+        )
+        backup_manager.set_state_listener(
+            lambda s: event_bus.publish(worker_event("backup", s.backup_id, s.status))
+        )
         # The DownloadManager binds to whatever catalog source we have:
         # ``catalog_state.catalog`` (parsed catalog.toml, optional) plus a
         # DB lookup callback for entries that exist in
@@ -1560,6 +1584,37 @@ def create_app(
             yield sse_format("dashboard-machine", _machine_html)
             yield sse_format("dashboard-images", _images_html)
             async for event in event_bus.subscribe():
+                # Filter out worker-state events: the machines-stream
+                # client only cares about machine + dashboard fragments.
+                # Worker events are served on /events/workers.
+                if event.name == WORKER_STATE_CHANGED:
+                    continue
+                yield sse_format(event.name, event.html)
+
+        return StreamingResponse(stream(), media_type="text/event-stream")
+
+    @app.get(
+        "/events/workers",
+        dependencies=[Depends(require_auth)],
+        include_in_schema=False,
+    )
+    async def events_workers() -> StreamingResponse:
+        """Server-sent worker state-change stream.
+
+        Each ``worker-state-changed`` event carries a JSON payload --
+        ``{"kind": "<backup|hash|download|release>", "key": "...",
+        "status": "queued|running|completed|cancelled|failed"}`` --
+        emitted by every observable state transition in the four
+        worker managers. The client uses it as a push-driven "refresh
+        your table" signal; the JSON endpoints under ``/workers/...``
+        / ``/catalog/...`` / ``/boot/...`` remain the authoritative
+        state read.
+        """
+
+        async def stream() -> AsyncIterator[bytes]:
+            async for event in event_bus.subscribe():
+                if event.name != WORKER_STATE_CHANGED:
+                    continue
                 yield sse_format(event.name, event.html)
 
         return StreamingResponse(stream(), media_type="text/event-stream")

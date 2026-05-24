@@ -256,7 +256,10 @@
             });
         });
     }
-    var pollHandle = setInterval(syncButtonsFromPoll, 2000);
+    // SSE-driven sync; the 30s interval is a safety net for the rare
+    // case where the EventSource drops without auto-reconnect. Was 2s
+    // pre-SSE.
+    var pollHandle = setInterval(syncButtonsFromPoll, 30000);
     document.addEventListener("visibilitychange", function () {
         // Pause polling in a backgrounded tab.
         if (document.hidden && pollHandle) {
@@ -264,9 +267,16 @@
             pollHandle = null;
         } else if (!document.hidden && !pollHandle) {
             syncButtonsFromPoll();
-            pollHandle = setInterval(syncButtonsFromPoll, 2000);
+            pollHandle = setInterval(syncButtonsFromPoll, 30000);
         }
     });
+    document.addEventListener("bty-worker-state-changed", function (e) {
+        if (!e.detail) return;
+        if (e.detail.kind === "download" || e.detail.kind === "hash") {
+            syncButtonsFromPoll();
+        }
+    });
+    document.addEventListener("bty-worker-events-connected", syncButtonsFromPoll);
     syncButtonsFromPoll();  // initial draw, no wait
 
     document.addEventListener("click", function (ev) {

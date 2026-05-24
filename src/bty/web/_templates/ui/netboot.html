@@ -195,11 +195,17 @@
             }).catch(function () { /* transient; next tick retries */ });
     }
     var handle = null;
-    function start() { if (!handle) { poll(); handle = setInterval(poll, 2000); } }
+    // SSE-driven refresh; the 30s interval is a safety net for the rare
+    // case where the EventSource drops without auto-reconnect.
+    function start() { if (!handle) { poll(); handle = setInterval(poll, 30000); } }
     function stop()  { if (handle) { clearInterval(handle); handle = null; } }
     document.addEventListener("visibilitychange", function () {
         if (document.hidden) stop(); else start();
     });
+    document.addEventListener("bty-worker-state-changed", function (e) {
+        if (e.detail && e.detail.kind === "release") poll();
+    });
+    document.addEventListener("bty-worker-events-connected", poll);
     start();
 })();
 </script>

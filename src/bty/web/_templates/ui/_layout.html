@@ -665,12 +665,47 @@
         });
     }
     poll();
-    setInterval(poll, 5000);
+    // Slow safety poll. SSE handles the instant updates below;
+    // this is the recovery path for the (rare) case where the
+    // EventSource silently drops without an onerror auto-reconnect.
+    setInterval(poll, 30000);
     // Poll immediately when the tab regains focus so the indicator
     // recovers from "offline" without waiting out the interval.
     document.addEventListener("visibilitychange", function () {
         if (!document.hidden) poll();
     });
+
+    // ----- Shared worker-events SSE -------------------------------------
+    //
+    // One EventSource per tab; every page that wants push-driven worker
+    // updates listens for ``bty-worker-state-changed`` on ``document``.
+    // The slow setInterval above is the safety net; SSE is the fast
+    // path. EventSource auto-reconnects on the browser side -- on a
+    // successful (re)connect we replay a one-shot poll() so any events
+    // missed during the disconnect window land in the badge counts.
+    if (!window.btyWorkerEvents) {
+        var src = new EventSource("/events/workers");
+        src.addEventListener("worker-state-changed", function (e) {
+            // Refresh the navbar badges immediately.
+            poll();
+            // Dispatch a CustomEvent so the per-page polling pages can
+            // refresh their own tables without each opening its own
+            // EventSource.
+            try {
+                var payload = JSON.parse(e.data);
+                document.dispatchEvent(new CustomEvent(
+                    "bty-worker-state-changed",
+                    { detail: payload }
+                ));
+            } catch (_err) { /* malformed event; ignore */ }
+        });
+        src.addEventListener("open", function () {
+            // Replay-on-connect signal: pages do a one-shot catch-up
+            // fetch so a brief SSE disconnect doesn't leave them stale.
+            document.dispatchEvent(new Event("bty-worker-events-connected"));
+        });
+        window.btyWorkerEvents = src;
+    }
 })();
 </script>
 </body>

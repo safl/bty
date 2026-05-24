@@ -279,6 +279,7 @@ class DownloadManager(_BaseAsyncManager[DownloadState]):
                 state.bytes_total = size
                 state.started_at = state.finished_at = time.time()
                 self._states[name] = state
+                self._fire_state_change(state)
                 return state
             self._states[name] = state
             await self._queue.put(name)
@@ -314,6 +315,7 @@ class DownloadManager(_BaseAsyncManager[DownloadState]):
                 state.status = "failed"
                 state.error = "catalog entry vanished"
                 state.finished_at = time.time()
+            self._fire_state_change(state)
             return
 
         def _progress(downloaded: int, total: int | None) -> None:
@@ -443,6 +445,7 @@ class DownloadManager(_BaseAsyncManager[DownloadState]):
             state.status = final_status
             state.finished_at = time.time()
             state.error = error
+        self._fire_state_change(state)
 
 
 def _resolve_max_parallel() -> int:

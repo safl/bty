@@ -46,6 +46,7 @@ import asyncio
 import contextlib
 import threading
 import time
+from collections.abc import Callable
 from typing import Generic, Protocol, TypeVar
 
 # Lifecycle states a queued job may carry. ``queued`` and
@@ -84,10 +85,45 @@ class _BaseAsyncManager(Generic[StateT]):
         self._workers: list[asyncio.Task[None]] = []
         self._lock = asyncio.Lock()
         self._stopping = False
+        # SSE state-change listener. Set via :meth:`set_state_listener`
+        # in lifespan startup; the manager itself stays bus-agnostic so
+        # unit tests can drive it without standing up an event loop or
+        # publishing to a real bus.
+        self._on_state_change: Callable[[StateT], None] | None = None
 
     @property
     def max_parallel(self) -> int:
         return self._max_parallel
+
+    def set_state_listener(self, listener: Callable[[StateT], None]) -> None:
+        """Register a callback invoked after every observable status
+        transition (queued -> running, queued -> cancelled in stop/
+        cancel, and the running -> terminal flip the subclass body
+        calls :meth:`_fire_state_change` for).
+
+        The callback runs from whatever thread happens to be flipping
+        the status -- worker threads, the asyncio event loop, or a
+        request handler -- so the implementation must be thread-safe.
+        Exceptions are swallowed so a misbehaving listener can never
+        wedge the worker.
+        """
+        self._on_state_change = listener
+
+    def _fire_state_change(self, state: StateT) -> None:
+        """Invoke the registered listener (if any), swallowing errors.
+
+        Subclasses call this after writing a terminal status onto the
+        state; the base manager calls it itself on the queued->running
+        transition in :meth:`_worker` and on the queued->cancelled
+        transition in :meth:`stop` + :meth:`cancel`.
+        """
+        cb = self._on_state_change
+        if cb is None:
+            return
+        # Publishing must never fail the worker. The listener is
+        # responsible for its own resilience.
+        with contextlib.suppress(Exception):
+            cb(state)
 
     def _spawn_workers(self) -> None:
         """Spawn ``max_parallel`` workers. Subclass ``start()`` calls
@@ -102,6 +138,7 @@ class _BaseAsyncManager(Generic[StateT]):
         """Drain queued jobs, signal in-flight ones to abort, await
         worker termination. Idempotent."""
         self._stopping = True
+        cancelled_states: list[StateT] = []
         async with self._lock:
             for st in self._states.values():
                 if st.status in PENDING_STATES:
@@ -109,6 +146,11 @@ class _BaseAsyncManager(Generic[StateT]):
                     if st.status == "queued":
                         st.status = "cancelled"
                         st.finished_at = time.time()
+                        cancelled_states.append(st)
+        # Fire state-change events outside the lock; the listener may
+        # do non-trivial work (cross-thread SSE publish hop).
+        for st in cancelled_states:
+            self._fire_state_change(st)
         for w in self._workers:
             w.cancel()
         for w in self._workers:
@@ -122,6 +164,7 @@ class _BaseAsyncManager(Generic[StateT]):
         ``key``. Permissive on already-finished states: returns the
         state with no mutation, so the API layer can treat DELETE
         as idempotent."""
+        fire = False
         async with self._lock:
             state = self._states.get(key)
             if state is None:
@@ -132,7 +175,11 @@ class _BaseAsyncManager(Generic[StateT]):
             if state.status == "queued":
                 state.status = "cancelled"
                 state.finished_at = time.time()
-            return state
+                fire = True
+        # Notify SSE subscribers outside the lock.
+        if fire:
+            self._fire_state_change(state)
+        return state
 
     async def list(self) -> list[StateT]:
         async with self._lock:
@@ -154,6 +201,10 @@ class _BaseAsyncManager(Generic[StateT]):
                         continue
                     state.status = "running"
                     state.started_at = time.time()
+                # Outside the lock: emit the queued -> running
+                # transition so SSE subscribers see "now running" without
+                # waiting for the 30s safety poll.
+                self._fire_state_change(state)
                 await self._run_one(state)
             except asyncio.CancelledError:
                 return

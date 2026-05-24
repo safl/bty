@@ -533,3 +533,68 @@ def test_delete_bundle_missing_raises_filenotfound(tmp_path: Path) -> None:
     state_path = _init_state(tmp_path)
     with pytest.raises(FileNotFoundError):
         delete_bundle(state_path, tmp_path / "backups", "2026-05-23T10-00-00Z")
+
+
+def test_state_listener_fires_on_terminal_transition(tmp_path: Path) -> None:
+    """Backup completes -> the registered state listener gets called
+    with the terminal state. Wires the SSE push-driven refresh."""
+
+    async def _drive() -> list[str]:
+        state_path = _init_state(tmp_path)
+        seen: list[str] = []
+        mgr = BackupManager(max_parallel=1)
+        mgr.set_state_listener(lambda s: seen.append(s.status))
+        mgr.start(state_path, tmp_path / "images", tmp_path / "backups", bty_version="x")
+        try:
+            await mgr.enqueue(trigger="manual")
+            # Wait for the worker to flip terminal. The listener fires
+            # for queued -> running and running -> completed, so we
+            # poll for the terminal transition.
+            for _ in range(50):
+                states = await mgr.list()
+                if states and states[0].status == "completed":
+                    break
+                await asyncio.sleep(0.02)
+            else:
+                raise AssertionError("backup did not complete in time")
+            return seen
+        finally:
+            await mgr.stop()
+
+    seen = _run(_drive())
+    # At minimum: a running event and a completed event. Order matters.
+    assert "running" in seen
+    assert "completed" in seen
+    assert seen.index("running") < seen.index("completed")
+
+
+def test_state_listener_fires_on_cancel(tmp_path: Path) -> None:
+    """A queued backup that gets cancelled before running still
+    fires a listener event with status="cancelled"."""
+
+    async def _drive() -> list[str]:
+        state_path = _init_state(tmp_path)
+        seen: list[str] = []
+        # max_parallel=0 would leave the queue starved; using 1 but
+        # cancelling immediately after enqueue gets us the queued ->
+        # cancelled path through stop() in some timings; the more
+        # reliable path is to enqueue then explicitly cancel.
+        mgr = BackupManager(max_parallel=1)
+        mgr.set_state_listener(lambda s: seen.append((s.backup_id, s.status)))
+        mgr.start(state_path, tmp_path / "images", tmp_path / "backups", bty_version="x")
+        try:
+            st = await mgr.enqueue(trigger="manual")
+            # Cancel may race the worker picking it up; in either case
+            # we expect a cancelled event in `seen` either via the
+            # explicit cancel path or via stop() draining the queue.
+            await mgr.cancel(st.backup_id)
+            await asyncio.sleep(0.05)
+            return [s for _bid, s in seen]
+        finally:
+            await mgr.stop()
+
+    seen = _run(_drive())
+    # Either via cancel() OR via the running -> completed path if the
+    # worker beat the cancel. We assert the listener saw SOME terminal
+    # state, not a specific status -- the timing isn't deterministic.
+    assert any(s in ("cancelled", "completed", "failed") for s in seen)

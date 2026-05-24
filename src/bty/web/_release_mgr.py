@@ -400,6 +400,9 @@ class ReleaseFetchManager(_BaseAsyncManager[ReleaseFetchState]):
                     elif a.status == "queued":
                         a.status = "cancelled"
                         a.finished_at = now_t
+        # SSE: terminal transition outside the lock so the Netboot +
+        # Downloads pages don't wait for their safety poll.
+        self._fire_state_change(state)
 
         # Log terminal outcomes so the audit trail is symmetric:
         # successful fetches land ``netboot.artifacts.fetched``, failures

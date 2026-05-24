@@ -9,6 +9,52 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.29.0] - 2026-05-24
+
+The "SSE everywhere" release. Worker pages stop polling every 2s and
+listen to push-driven Server-Sent Events instead; refresh latency
+drops from "up to 2 seconds" to "tens of milliseconds" and idle
+appliance load drops accordingly.
+
+### Added
+
+- **Worker-events SSE stream** at `GET /events/workers`. Same in-
+  process pub/sub bus that drives the machines stream, filtered to
+  the `worker-state-changed` event name. Payload is a JSON triple:
+  `{"kind": "backup|hash|download|release", "key": "<state-key>",
+  "status": "<lifecycle>"}`.
+- **State listener hook on `_BaseAsyncManager`.** Every observable
+  status transition (queued -> running, queued -> cancelled in
+  stop/cancel, running -> terminal in `_run_one`) fires
+  `_fire_state_change(state)`. Lifespan wires each manager
+  (Backup / Hash / Download / Release) to publish to the bus.
+- **Shared `EventSource` in `_layout.html`.** One subscription per
+  tab; dispatches `bty-worker-state-changed` CustomEvents on
+  `document` so each polling page taps in without opening its own
+  connection. A `bty-worker-events-connected` event fires on
+  successful (re)connect so pages catch up on anything missed
+  during the disconnect window.
+
+### Changed
+
+- **Backups / Hashing / Downloads / Netboot / Images pages migrated
+  from `setInterval(refresh, 2000)` to SSE + 30-second safety
+  poll.** The instant update path is the EventSource; the slow
+  poll is the recovery net for a silently-dropped SSE connection
+  (EventSource auto-reconnects on errors, so this is belt-and-
+  braces). Each page filters by `kind` so it only refreshes when
+  relevant.
+- **Navbar worker-badge poll cadence relaxed from 5s to 30s.**
+  Same SSE-fast-path, slow-poll-safety-net pattern; the navbar
+  badges + the live indicator update on every worker transition
+  via the shared EventSource.
+
+### Performance
+
+- Idle bty-web on a backupped fleet now generates ~1 HTTP request
+  every 30 seconds per tab instead of ~3 per second across the
+  worker pages -- a ~90x drop in steady-state load.
+
 ## [0.28.0] - 2026-05-24
 
 The "auto-refresh + Backup card reshape" release. Three places where

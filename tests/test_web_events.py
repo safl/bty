@@ -225,3 +225,48 @@ def test_event_bus_close_after_event_still_delivers_event() -> None:
         return evt.html
 
     assert asyncio.run(scenario()) == "<row/>"
+
+
+def test_worker_event_payload_shape() -> None:
+    """``worker_event`` packs the (kind, key, status) triple as a JSON
+    payload under the well-known event name. The SSE wire format
+    treats the payload opaquely; the browser parses it back."""
+    import json
+
+    from bty.web._events import WORKER_STATE_CHANGED, worker_event
+
+    evt = worker_event("backup", "2026-05-23T10-00-00Z", "completed")
+    assert evt.name == WORKER_STATE_CHANGED
+    assert json.loads(evt.html) == {
+        "kind": "backup",
+        "key": "2026-05-23T10-00-00Z",
+        "status": "completed",
+    }
+
+
+def test_worker_event_emits_through_bus() -> None:
+    """End-to-end: ``worker_event`` builds an event the bus delivers
+    to subscribers with the well-known event name."""
+    from bty.web._events import WORKER_STATE_CHANGED, worker_event
+
+    async def scenario() -> tuple[str, str]:
+        bus = MachineEventBus()
+        received: list[MachineEvent] = []
+
+        async def consumer() -> None:
+            async for ev in bus.subscribe():
+                received.append(ev)
+                break  # one event is enough
+
+        task = asyncio.create_task(consumer())
+        await asyncio.sleep(0.01)
+        bus.publish(worker_event("hash", "demo.img.gz", "running"))
+        await asyncio.wait_for(task, timeout=1.0)
+        return received[0].name, received[0].html
+
+    name, payload = asyncio.run(scenario())
+    assert name == WORKER_STATE_CHANGED
+    import json as _json
+
+    assert _json.loads(payload)["kind"] == "hash"
+    assert _json.loads(payload)["status"] == "running"

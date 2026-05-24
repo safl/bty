@@ -2595,3 +2595,48 @@ def test_machines_page_subscribes_via_sse(client: TestClient) -> None:
     assert r.status_code == 200
     assert 'sse-connect="/events/machines"' in r.text
     assert 'sse-swap="machines-update"' in r.text
+
+
+def test_events_workers_requires_auth(client: TestClient) -> None:
+    """The worker-events SSE stream requires the same session-cookie
+    auth as the machines stream. (Same body-streaming caveat: we
+    don't read the body sync here; the bus unit tests cover the
+    streaming contract.)"""
+    r = client.get("/events/workers")
+    assert r.status_code == 401
+
+
+def test_layout_opens_shared_worker_events_source(client: TestClient) -> None:
+    """Every authed page bundles the shared EventSource that
+    dispatches ``bty-worker-state-changed`` CustomEvents on
+    ``document``; the polling pages listen on that document event to
+    refresh without each opening their own EventSource."""
+    _login(client)
+    body = client.get("/ui/backups").text
+    # The layout-level subscriber lives in _layout.html so it's on
+    # every page; we assert via /ui/backups since the test client
+    # already exercises that path.
+    assert 'new EventSource("/events/workers")' in body
+    assert "bty-worker-state-changed" in body
+    assert "bty-worker-events-connected" in body
+
+
+def test_polling_pages_listen_for_sse_events(client: TestClient) -> None:
+    """Each worker page listens for the shared CustomEvent (instead of
+    opening its own EventSource) AND filters by kind so it only
+    re-fetches when relevant."""
+    _login(client)
+
+    backups = client.get("/ui/backups").text
+    assert 'e.detail.kind === "backup"' in backups
+
+    hashing = client.get("/ui/hashing").text
+    assert 'e.detail.kind === "hash"' in hashing
+
+    downloads = client.get("/ui/downloads").text
+    # Downloads tracks both kinds.
+    assert 'e.detail.kind === "download"' in downloads
+    assert 'e.detail.kind === "release"' in downloads
+
+    netboot = client.get("/ui/netboot").text
+    assert 'e.detail.kind === "release"' in netboot
