@@ -1,0 +1,171 @@
+{% extends "ui/_layout.html" %}
+{% block title %}Backups - bty-web{% endblock %}
+
+{% block subnav %}
+<nav class="navbar subnav-strip" aria-label="Section sub-navigation">
+    <div class="container">
+        <span class="subnav-jumps d-flex align-items-center flex-wrap">
+            <a href="#backups-list">Active</a>
+            <span class="vr"></span>
+            <a href="#backups-activity">Activity</a>
+        </span>
+    </div>
+</nav>
+{% endblock %}
+
+{% block intro %}
+{% from "ui/_intro_box.html" import render as intro_box %}
+{% call intro_box() %}
+    Portable bundles of the operator-owned state (machines, catalog
+    entries, local image files) -- the same shape <code>bty-web
+    export</code> produces. Trigger one now with the button below, or
+    enable a scheduled cadence on the <a
+    href="/ui/settings#backup-schedule">Settings</a> page. Backups land
+    under <code>{{ backups_root }}</code>; retention prunes the oldest.
+{% endcall %}
+{% endblock %}
+
+{% block content %}
+<div class="card mb-3" id="backups-list">
+    <div class="card-header bg-light fw-semibold d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <span><i class="bi bi-shield-check me-1"></i>Backups
+              <span class="text-muted small bty-workers-poll-status ms-1">refreshing...</span></span>
+        <span class="d-flex gap-1 align-items-center">
+            <button type="button" class="btn btn-sm btn-primary text-nowrap"
+                    id="bty-workers-backup-now"
+                    title="Run a backup now -- writes a bundle to {{ backups_root }}">
+                <i class="bi bi-shield-plus me-1"></i>Back up now
+            </button>
+        </span>
+    </div>
+    <div class="card-body py-2 small text-muted border-bottom">
+        <span class="me-3"><strong>Schedule:</strong>
+            {% if backup_enabled %}{{ backup_cadence }}{% else %}off{% endif %}
+            (<a href="/ui/settings#backup-schedule">change</a>)</span>
+        <span class="me-3"><strong>Last scheduled run:</strong>
+            {% if backup_last_run_at %}<code>{{ backup_last_run_at }}</code>{% else %}never{% endif %}</span>
+        <span class="me-3"><strong>Destination:</strong>
+            <code>{{ backups_root }}</code></span>
+    </div>
+    <div class="table-responsive">
+        <table class="table mb-0 align-middle">
+            <thead class="table-light">
+                <tr>
+                    <th style="width: 45%;">Backup ID</th>
+                    <th>Status</th>
+                    <th>Trigger</th>
+                    <th>Bytes</th>
+                    <th class="text-end" style="width: 1%; white-space: nowrap;">Action</th>
+                </tr>
+            </thead>
+            <tbody class="bty-workers-backup-tbody">
+                <tr><td colspan="5" class="text-muted">No active backups.</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+(function () {
+    function esc(s) {
+        return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+            return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+        });
+    }
+    function fmtBytes(n) {
+        if (n == null) return "-";
+        if (n < 1024) return n + " B";
+        var u = ["KiB", "MiB", "GiB", "TiB"], i = -1;
+        do { n /= 1024; i++; } while (n >= 1024 && i < u.length - 1);
+        return n.toFixed(1) + " " + u[i];
+    }
+    function statusBadge(s) {
+        var cls = {
+            "queued": "bg-secondary", "running": "bg-primary",
+            "completed": "bg-success", "cancelled": "bg-warning text-dark",
+            "failed": "bg-danger",
+        }[s] || "bg-secondary";
+        return '<span class="badge ' + cls + '">' + esc(s) + '</span>';
+    }
+    function isActive(j) {
+        return j && (j.status === "queued" || j.status === "running");
+    }
+    function render(jobs) {
+        var tbody = document.querySelector(".bty-workers-backup-tbody");
+        if (!tbody) return;
+        var rows = (jobs || []).filter(isActive);
+        if (!rows.length) {
+            tbody.innerHTML = '<tr><td colspan="5" class="text-muted">No active backups.</td></tr>';
+            return;
+        }
+        tbody.innerHTML = rows.map(function (d) {
+            var cancel = '<button type="button" class="btn btn-sm btn-outline-danger text-nowrap ' +
+                         'bty-workers-cancel" data-id="' +
+                         esc(d.backup_id) + '"><i class="bi bi-x-circle me-1"></i>Cancel</button>';
+            return "<tr>" +
+                   "<td><code>" + esc(d.backup_id) + "</code></td>" +
+                   "<td>" + statusBadge(d.status) + "</td>" +
+                   "<td>" + esc(d.trigger || "") + "</td>" +
+                   "<td class=\"small\">" + esc(fmtBytes(d.bytes_written || 0)) + "</td>" +
+                   "<td class=\"text-end\">" + cancel + "</td>" +
+                   "</tr>";
+        }).join("");
+    }
+    function refresh() {
+        var ts = "updated " + new Date().toLocaleTimeString();
+        return fetch("/workers/backups", { credentials: "same-origin" })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (data) {
+                render(data ? data.backups : []);
+                var statusEl = document.querySelector(".bty-workers-poll-status");
+                if (statusEl) statusEl.textContent = data ? ts : "(poll failed)";
+            }).catch(function () {
+                var statusEl = document.querySelector(".bty-workers-poll-status");
+                if (statusEl) statusEl.textContent = "(poll failed)";
+            });
+    }
+    document.addEventListener("click", function (ev) {
+        var btn = ev.target.closest(".bty-workers-cancel");
+        if (!btn) return;
+        var bid = btn.dataset.id;
+        if (!bid) return;
+        btn.disabled = true;
+        fetch("/workers/backups/" + encodeURIComponent(bid),
+              { method: "DELETE", credentials: "same-origin" })
+            .then(refresh)
+            .catch(function () { btn.disabled = false; });
+    });
+    var backupNow = document.getElementById("bty-workers-backup-now");
+    if (backupNow) {
+        backupNow.addEventListener("click", function () {
+            backupNow.disabled = true;
+            fetch("/workers/backups", {
+                method: "POST",
+                credentials: "same-origin",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ trigger: "manual" }),
+            }).then(function (r) {
+                if (!r.ok) throw new Error("HTTP " + r.status);
+                return refresh();
+            }).catch(function (e) {
+                alert("Backup failed to enqueue: " + e.message);
+            }).then(function () { backupNow.disabled = false; });
+        });
+    }
+    var handle = null;
+    function start() { if (!handle) { refresh(); handle = setInterval(refresh, 2000); } }
+    function stop()  { if (handle) { clearInterval(handle); handle = null; } }
+    document.addEventListener("visibilitychange", function () {
+        if (document.hidden) stop(); else start();
+    });
+    start();
+})();
+</script>
+
+{% with events=backup_events,
+        title="Recent activity",
+        link_to_full="/ui/events?subject_kind=backup",
+        card_id="backups-activity" %}
+{% include "ui/_events_card.html" %}
+{% endwith %}
+{% endblock %}

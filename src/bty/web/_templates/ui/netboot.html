@@ -22,35 +22,26 @@
 {% from "ui/_intro_box.html" import render as intro_box %}
 {% call intro_box() %}
     The bty live env that PXE clients chain into when their
-    assignment has <code>boot_mode=bty-flash-always</code>. Until these files
-    are present, machines with <code>boot_mode=bty-flash-always</code> cannot
-    actually flash: hit <strong>Fetch artifacts</strong> below to
-    enqueue the trio + sha256 manifest and watch per-file progress on
-    the <a href="/ui/workers#downloads"><strong>Workers</strong></a>
-    page (the navbar's Downloads indicator). The TFTP daemon controls
-    are below; the router-side DHCP / PXE cheatsheet lives on the
-    <strong>Settings</strong> page.
+    assignment has <code>boot_mode=bty-flash-always</code>. Pure
+    inventory view: which files are present, sizes, sha256s,
+    last-fetched. The "Fetch artifacts" trigger lives on the
+    <a href="/ui/downloads"><strong>Downloads</strong></a> page
+    (under the navbar's Downloads icon); enqueue there and the rows
+    here tick from missing to present as each file lands. The TFTP
+    daemon controls are below; the router-side DHCP / PXE cheatsheet
+    lives on the <strong>Settings</strong> page.
 {% endcall %}
 {% endblock %}
 
 {% block content %}
-{# The netboot artifacts inventory: present/missing, size, sha256, and
-   a download link for each. The Fetch button enqueues the fetch and
-   hands off to the Workers page to watch per-file progress. #}
+{# Pure inventory: present/missing, size, sha256, last-fetched.
+   The Fetch trigger moved to /ui/downloads. #}
 <div class="card mb-4" id="netboot-list">
     <div class="card-header bg-light fw-semibold d-flex justify-content-between align-items-center flex-wrap gap-2">
         <span><i class="bi bi-box-seam me-1"></i>Netboot artifacts</span>
-        {# The release tag is an editable magic value (Settings ->
-           Upstream sources); the button just fetches whatever it
-           resolves to, then jumps to the Workers page's Downloads
-           section to watch per-file progress. #}
-        <button type="button" class="btn btn-sm btn-primary text-nowrap" id="enqueue-fetch-btn"
-                data-tag="{{ release_tag }}" onclick="fetchAndWatch();"
-                title="Fetch netboot artifacts for tag '{{ release_tag }}' from {{ release_repo }} and watch on the Workers page">
-            <i class="bi bi-cloud-download me-1"></i>Fetch
-            {% if release_tag == "latest" %}latest{% else %}<code>{{ release_tag }}</code>{% endif %}
-            artifacts
-        </button>
+        <a href="/ui/downloads" class="btn btn-sm btn-outline-primary text-nowrap">
+            <i class="bi bi-arrow-right me-1"></i>Fetch on the Downloads page
+        </a>
     </div>
     <div class="table-responsive">
         <table class="table mb-0 align-middle">
@@ -172,29 +163,9 @@
     </div>
 </div>
 
-<script>
-// "Fetch artifacts" enqueues the release fetch (the trio + sha256
-// matching the running bty-web's version, NOT GitHub's latest), then
-// hands off to /ui/workers#downloads to watch per-file progress
-// (the live rows + cancel buttons live there).
-window.fetchAndWatch = function () {
-    var btn = document.getElementById("enqueue-fetch-btn");
-    var tag = (btn.dataset.tag || "latest").trim() || "latest";
-    btn.disabled = true;
-    fetch("/boot/releases", {
-        method: "POST",
-        credentials: "same-origin",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tag: tag }),
-    }).then(function (r) {
-        if (!r.ok) throw new Error("HTTP " + r.status);
-        window.location = "/ui/workers#downloads";
-    }).catch(function (e) {
-        alert("Fetch failed: " + e.message);
-        btn.disabled = false;
-    });
-};
-</script>
+{# The Fetch trigger moved to /ui/downloads; nothing on this page
+   enqueues a fetch any more. The inventory table here just renders
+   the current present/missing state from inspect_boot_dir. #}
 
 {# Recent netboot activity (release fetches + fetch failures). The
    "Activity" sub-nav anchor jumps here; always rendered (empty-state

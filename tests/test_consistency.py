@@ -142,11 +142,14 @@ def test_delete_catalog_endpoints_have_ui_surface() -> None:
 
     missing = []
     for prefix in delete_paths:
-        # The JS handler hits the route via fetch("<prefix>/" + encoded);
-        # match on the prefix-with-slash substring.
-        target = prefix.rstrip("/") + '"'
-        target_slash = prefix.rstrip("/") + '/"'
-        if target not in template and target_slash not in template:
+        # The JS handler hits the route via either
+        # ``fetch("<prefix>/" + encoded)`` (path-param style) or
+        # ``fetch("<prefix>?src=" + encoded)`` (query-param style;
+        # /catalog/entries uses this so the operator's literal src
+        # URL doesn't need URL-segment encoding tricks).
+        base = prefix.rstrip("/")
+        candidates = (base + '"', base + '/"', base + "?")
+        if not any(c in template for c in candidates):
             missing.append(prefix)
     assert not missing, (
         f"DELETE catalog endpoints missing UI surface in images.html: "

@@ -266,7 +266,7 @@ def register_ui_routes(
                     else f"Missing: {', '.join(missing_netboot)}"
                 ),
                 "href": "/ui/netboot",
-                "fix_href": "/ui/workers#downloads",
+                "fix_href": "/ui/downloads",
                 "fix_label": "Fetch netboot artifacts",
             },
             {
@@ -669,28 +669,79 @@ def register_ui_routes(
         return _render_images_page(request)
 
     @app.get(
-        "/ui/workers",
+        "/ui/downloads",
         response_class=HTMLResponse,
         include_in_schema=False,
         dependencies=[Depends(require_ui_auth)],
     )
-    def ui_workers(request: Request) -> HTMLResponse:
-        """The merged background-workers page: Downloads (catalog +
-        release artifacts), Hashing, Backup. Active jobs only -- the
-        events log is the history. Triggers stay on their home pages
-        (catalog downloads on /ui/images, release artifacts on
-        /ui/netboot); only Backup has a trigger here."""
+    def ui_downloads(request: Request) -> HTMLResponse:
+        """The Downloads worker page: trigger buttons (Fetch artifacts,
+        Add image from URL, Upload image) + active downloads table
+        (merging catalog entries + per-file release artifacts) +
+        recent download-relevant activity at the bottom."""
+        with _db.open_db(state_path) as conn:
+            release_repo = _settings_store.resolve_release_repo(conn)
+            release_tag = _settings_store.resolve_release_tag(conn)
+            # Recent events that drove downloads: catalog adds, image
+            # uploads, netboot artifact fetches.
+            download_events: list[_events_log.Event] = []
+            for kind in ("catalog", "image", "netboot"):
+                download_events.extend(_events_log.list_events(conn, subject_kind=kind, limit=10))
+        download_events.sort(key=lambda e: e.id, reverse=True)
+        download_events = download_events[:15]
+        return render(
+            "ui/downloads.html",
+            request,
+            release_repo=release_repo,
+            release_tag=release_tag,
+            download_events=download_events,
+        )
+
+    @app.get(
+        "/ui/hashing",
+        response_class=HTMLResponse,
+        include_in_schema=False,
+        dependencies=[Depends(require_ui_auth)],
+    )
+    def ui_hashing(request: Request) -> HTMLResponse:
+        """The Hashing worker page: active SHA-256 jobs + recent hash
+        completion / failure events at the bottom."""
+        with _db.open_db(state_path) as conn:
+            # Filter image events to hash-relevant kinds only.
+            hashing_events = [
+                ev
+                for ev in _events_log.list_events(conn, subject_kind="image", limit=40)
+                if ev.kind in ("image.hashed", "image.hash_failed")
+            ][:15]
+        return render(
+            "ui/hashing.html",
+            request,
+            image_root=str(image_root),
+            hashing_events=hashing_events,
+        )
+
+    @app.get(
+        "/ui/backups",
+        response_class=HTMLResponse,
+        include_in_schema=False,
+        dependencies=[Depends(require_ui_auth)],
+    )
+    def ui_backups(request: Request) -> HTMLResponse:
+        """The Backups worker page: "Back up now" trigger + active
+        backups + schedule summary + recent backup activity."""
         with _db.open_db(state_path) as conn:
             backup_enabled = _settings_store.resolve_backup_enabled(conn)
             backup_cadence = _settings_store.resolve_backup_cadence(conn)
             backup_last_run_at = _settings_store.get_backup_last_run_at(conn)
+            backup_events = _events_log.list_events(conn, subject_kind="backup", limit=15)
         return render(
-            "ui/workers.html",
+            "ui/backups.html",
             request,
             backups_root=str(backups_root),
             backup_enabled=backup_enabled,
             backup_cadence=backup_cadence,
             backup_last_run_at=backup_last_run_at,
+            backup_events=backup_events,
         )
 
     @app.post(
@@ -902,13 +953,13 @@ def register_ui_routes(
         """The netboot artifacts inventory (present/missing, size,
         sha256, download) plus the TFTP daemon control.
 
-        The artifacts header still carries a "Fetch latest artifacts"
-        button, but it enqueues the fetch and hands off to the Workers
-        page (``/ui/workers#downloads``, under the navbar's Downloads
-        icon) to watch per-file progress. The router-side DHCP / PXE
-        cheatsheet moved to Settings. Operator-side artifact uploads
-        stay scripted via the auth-gated ``PUT /boot/{name}`` route,
-        not the browser.
+        Pure inventory view (which files are present, sizes, sha256s,
+        last-fetched). The "Fetch artifacts" trigger lives on the
+        Downloads page now (``/ui/downloads``) -- enqueue there and
+        come back here to see the rows tick from missing to present.
+        The router-side DHCP / PXE cheatsheet moved to Settings.
+        Operator-side artifact uploads stay scripted via the auth-
+        gated ``PUT /boot/{name}`` route, not the browser.
         """
         with _db.open_db(state_path) as conn:
             release_repo = _settings_store.resolve_release_repo(conn)

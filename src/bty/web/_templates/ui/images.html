@@ -9,8 +9,6 @@
         <span class="subnav-jumps d-flex align-items-center flex-wrap">
             <a href="#images-list">List</a>
             <span class="vr"></span>
-            <a href="#add-image">Add image</a>
-            <span class="vr"></span>
             <a href="#images-activity">Activity</a>
         </span>
     </div>
@@ -25,11 +23,11 @@
     catalog entries): the header carries <em>Fetch latest catalog</em>
     (pull the bty release catalog) and <em>Upload catalog</em>
     (a catalog.toml). Files dropped into <code>{{ image_root }}</code>
-    are picked up and hashed automatically; add individual images via
-    the <strong>Add image</strong> card below, or trigger a fetch on
-    any catalog entry that isn't cached yet.
-    Live download / hash progress is on
-    <a href="/ui/workers">Workers</a>.
+    are picked up and hashed automatically; per-row Fetch / Hash
+    buttons enqueue jobs visible on the
+    <a href="/ui/downloads">Downloads</a> /
+    <a href="/ui/hashing">Hashing</a> pages. Add a single image (URL or
+    upload) from <a href="/ui/downloads">Downloads</a>.
 {% endcall %}
 {% endblock %}
 
@@ -175,59 +173,9 @@
     </div>
 </div>
 
-{# Add image: a single image (upload a local file, or add by
-   http(s):// / oras:// URL). Job progress on /ui/workers. #}
-<div class="card mb-3" id="add-image">
-    <div class="card-header bg-light fw-semibold d-flex justify-content-between align-items-center flex-nowrap gap-2 py-1">
-        <span class="text-nowrap"><i class="bi bi-plus-circle me-1"></i>Add image</span>
-        <span class="d-flex flex-nowrap align-items-center gap-2" style="min-width: 0;">
-            {# type="text" not type="url": browsers reject oras:// under
-               HTML5 URL validation; server-side Pydantic still validates. #}
-            <form method="post" action="/ui/catalog/entries"
-                  class="d-flex align-items-center gap-1 m-0" style="min-width: 0;">
-                <input type="text" required class="form-control form-control-sm"
-                       id="image_url" name="image_url"
-                       style="max-width: 18rem; min-width: 0;"
-                       placeholder="https://...img.gz  |  oras://owner/repo:tag"
-                       title="http(s):// trusts the upstream bytes on first flash and back-fills disk_image_sha; oras:// resolves the OCI manifest digest at add time.">
-                <button type="submit" class="btn btn-sm btn-primary flex-shrink-0 text-nowrap">
-                    <i class="bi bi-cloud-download me-1"></i>Fetch from URL
-                </button>
-            </form>
-            <div class="vr"></div>
-            {# Streams via XHR PUT /images/<name>; the HashManager
-               auto-enqueues a SHA on the post-write hook. #}
-            <span class="d-flex gap-1 align-items-center" style="min-width: 0;">
-                <input type="file" class="form-control form-control-sm" id="upload-file"
-                       style="max-width: 15rem; min-width: 0;"
-                       accept=".qcow2,.img,.img.zst,.img.xz,.img.gz,.img.bz2,.iso,.iso.gz"
-                       title="Streams into the image root via PUT /images/<name>; SHA-256 auto-computed after.">
-                <button type="button" class="btn btn-sm btn-primary flex-shrink-0 text-nowrap"
-                        id="upload-btn" onclick="uploadSelectedFile();" disabled>
-                    <i class="bi bi-upload me-1"></i>Upload
-                </button>
-            </span>
-        </span>
-    </div>
-    <div class="progress d-none mx-3 mt-2" id="upload-progress" style="height: 1rem;">
-        <div class="progress-bar progress-bar-striped progress-bar-animated"
-             role="progressbar" style="width: 0%;" id="upload-progress-bar">0%</div>
-    </div>
-    <div class="form-text small mx-3 mb-2 d-none" id="upload-status"></div>
-</div>
-
 <script>
 (function () {
     "use strict";
-
-    // Enable Upload once a file is picked.
-    var input = document.getElementById("upload-file");
-    var btn = document.getElementById("upload-btn");
-    if (input && btn) {
-        input.addEventListener("change", function () {
-            btn.disabled = !input.files || input.files.length === 0;
-        });
-    }
 
     // Per-row catalog actions. Triggers enqueue against the manager
     // endpoints; live progress + cancel UI lives on /ui/workers.
@@ -307,48 +255,6 @@
     });
 })();
 
-function uploadSelectedFile() {
-    var input = document.getElementById("upload-file");
-    var btn = document.getElementById("upload-btn");
-    var progress = document.getElementById("upload-progress");
-    var bar = document.getElementById("upload-progress-bar");
-    var status = document.getElementById("upload-status");
-    if (!input.files || !input.files.length) return;
-    var file = input.files[0];
-    var url = "/images/" + encodeURIComponent(file.name);
-    var xhr = new XMLHttpRequest();
-    xhr.open("PUT", url, true);
-    xhr.setRequestHeader("Content-Type", "application/octet-stream");
-    xhr.withCredentials = true;
-    xhr.upload.onprogress = function (ev) {
-        if (!ev.lengthComputable) return;
-        var pct = Math.round(ev.loaded * 100 / ev.total);
-        bar.style.width = pct + "%";
-        bar.textContent = pct + "%";
-    };
-    xhr.onload = function () {
-        if (xhr.status >= 200 && xhr.status < 300) {
-            status.textContent = "Upload complete; redirecting to catalog...";
-            setTimeout(function () { window.location = "/ui/images"; }, 600);
-        } else {
-            status.textContent = "Upload failed: HTTP " + xhr.status + " " + xhr.responseText;
-            btn.disabled = false;
-            progress.classList.add("d-none");
-        }
-    };
-    xhr.onerror = function () {
-        status.textContent = "Upload failed: network error";
-        btn.disabled = false;
-        progress.classList.add("d-none");
-    };
-    btn.disabled = true;
-    progress.classList.remove("d-none");
-    status.classList.remove("d-none");
-    bar.style.width = "0%";
-    bar.textContent = "0%";
-    status.textContent = "Uploading " + file.name + " (" + file.size.toLocaleString() + " bytes)...";
-    xhr.send(file);
-}
 </script>
 
 {# Image-relevant event slice (uploads, hashes, catalog adds /
