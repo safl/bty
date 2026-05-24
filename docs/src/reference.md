@@ -432,8 +432,8 @@ Bootstrap CSS, HTMX form posts).
 - `POST /ui/machines/{mac}/delete` -> delete record
 - `GET /ui/images` -> image catalog page (the unified dir-scan +
  catalog-entry listing, with Fetch-latest-catalog / Upload-catalog
- controls in its header). The per-image "Add by URL" + upload widgets
- live on the Image Downloads page (`/ui/downloads`).
+ controls in its header). The "Add image" card below the list
+ carries the per-image "Add by URL" + local-upload widgets.
 - `POST /ui/catalog/entries` (form) and
  `POST /catalog/entries` (JSON) -> add an operator-curated
  catalog entry. ``image_url`` accepts http(s):// URLs and
@@ -443,17 +443,19 @@ Bootstrap CSS, HTMX form posts).
  the optional sha_url branch (manifest is authoritative).
 - `GET /ui/netboot` (Netboot) -> the netboot artifacts inventory
  (present/missing per artifact, sizes, last-fetched timestamps, with a
- Fetch button that hands off to the Artifact Fetches page) plus the
+ Fetch button that hands off to the Workers page) plus the
  **TFTP daemon** panel: live `systemctl is-active dnsmasq.service`
  badge + Start / Stop / Restart buttons driven by the
  sudoers-permitted `bty-web-tftp` helper. An in-page sub-nav jumps
  between List / TFTP Daemon / Activity.
-- `GET /ui/fetches` (Artifact Fetches) -> the **Fetch latest
- artifacts** trigger + the live "active + recent fetches" polling
- table. Reached from the cloud worker-icon in the navbar.
-- `GET /ui/downloads` (Image Downloads) / `GET /ui/hashes` (Hashes) ->
- the per-image add forms + live download jobs, and the background SHA
- worker. Top-level pages reached from the navbar worker-icons.
+- `GET /ui/workers` (Workers) -> the merged background-workers page:
+ Downloads (catalog fetches + per-file release artifacts), Hashing,
+ Backup. Active jobs only -- terminal rows evict on completion; the
+ events log carries the history. The Backup card has a Back-up-now
+ trigger; the other triggers stay on their home pages
+ (`/ui/images` for catalog fetches, `/ui/netboot` for release
+ artifacts). Reached from the three navbar worker icons; all three
+ point at this merged page with anchor sections.
 - The router-config **DHCP / Network boot** cheatsheet (appliance-IP /
  interfaces table + option 60 / 66 / 67 values to paste into the LAN's
  DHCP server, for both PXE-via-TFTP and UEFI HTTP Boot) lives on the

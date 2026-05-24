@@ -1,21 +1,15 @@
 {% extends "ui/_layout.html" %}
-{% block title %}{% if section == "downloads" %}Image Downloads{% elif section == "hashes" %}Hashes{% else %}Images{% endif %} - bty-web{% endblock %}
+{% block title %}Images - bty-web{% endblock %}
 
 {% block subnav %}
-{# In-page jump links to the page's two tables (the main list + the
-   activity table), separated by a vertical rule. The List anchor points
-   at whichever table this section shows (catalog / downloads / hashes);
-   Activity points at the shared image-catalog activity table. #}
+{# In-page jump links: List + Activity. The Downloads / Hashes sub-sections
+   are gone -- their live status now lives on /ui/workers. #}
 <nav class="navbar subnav-strip" aria-label="Section sub-navigation">
     <div class="container">
         <span class="subnav-jumps d-flex align-items-center flex-wrap">
-            {% if section == "downloads" %}
-            <a href="#downloads-list">List</a>
-            {% elif section == "hashes" %}
-            <a href="#hashes-list">List</a>
-            {% else %}
             <a href="#images-list">List</a>
-            {% endif %}
+            <span class="vr"></span>
+            <a href="#add-image">Add image</a>
             <span class="vr"></span>
             <a href="#images-activity">Activity</a>
         </span>
@@ -26,188 +20,29 @@
 {% block intro %}
 {% from "ui/_intro_box.html" import render as intro_box %}
 {% call intro_box() %}
-    {% if section == "downloads" %}
-    Add a single image (upload a local file, or add one by
-    http(s):// / oras:// URL) and watch the live fetch jobs below.
-    Reach this page any time from the <strong>Image Downloads</strong>
-    indicator in the navbar, right of Settings.
-    {% elif section == "hashes" %}
-    Background SHA-256 hashing of files under
-    <code>{{ image_root }}</code>: dropped-in images are hashed
-    automatically (one at a time by default, so small hardware stays
-    responsive). Reach this page from the <strong>hashes</strong>
-    indicator in the navbar.
-    {% else %}
     Pre-built system images bty flashes onto target disks, content-
     addressed by sha256. This is the merged catalog (dir scan +
-    catalog entries): its header carries <em>Fetch latest catalog</em>
+    catalog entries): the header carries <em>Fetch latest catalog</em>
     (pull the bty release catalog) and <em>Upload catalog</em>
     (a catalog.toml). Files dropped into <code>{{ image_root }}</code>
-    are picked up and hashed automatically; add individual images from
-    the <strong>Image Downloads</strong> page.
-    {% endif %}
+    are picked up and hashed automatically; add individual images via
+    the <strong>Add image</strong> card below, or trigger a fetch on
+    any catalog entry that isn't cached yet.
+    Live download / hash progress is on
+    <a href="/ui/workers">Workers</a>.
 {% endcall %}
 {% endblock %}
 
 {% block content %}
-{% if section == "downloads" %}
-{# Downloads: the two add-image controls (add by URL, upload a local
-   file) live inline in the table header, split by a vertical rule; the
-   live download-jobs table is below. #}
-<div class="card mb-3" id="downloads-list">
-    {# ``py-1`` + ``flex-nowrap`` keep this a single tight row: the two
-       add-image forms used to wrap to a second line (doubling the
-       header height) on a narrow window. The inputs shrink (min-width:0)
-       instead, and the button labels stay on one line (text-nowrap). #}
-    <div class="card-header bg-light fw-semibold d-flex justify-content-between align-items-center flex-nowrap gap-2 py-1">
-        <span class="text-nowrap"><i class="bi bi-arrow-down-circle me-1"></i>Image Downloads
-              <span class="text-muted small bty-poll-status ms-1">refreshing...</span></span>
-        <span class="d-flex flex-nowrap align-items-center gap-2" style="min-width: 0;">
-            {# type="text" not type="url": browsers reject oras:// under
-               HTML5 URL validation; server-side Pydantic still validates. #}
-            <form method="post" action="/ui/catalog/entries" class="d-flex align-items-center gap-1 m-0" style="min-width: 0;">
-                <input type="text" required class="form-control form-control-sm" id="image_url" name="image_url"
-                       style="max-width: 18rem; min-width: 0;"
-                       placeholder="https://...img.gz  |  oras://owner/repo:tag"
-                       title="http(s):// trusts the upstream bytes on first flash and back-fills disk_image_sha; oras:// resolves the OCI manifest digest at add time.">
-                <button type="submit" class="btn btn-sm btn-primary flex-shrink-0 text-nowrap">
-                    <i class="bi bi-cloud-download me-1"></i>Fetch from URL
-                </button>
-            </form>
-            <div class="vr"></div>
-            {# Streams via XHR PUT /images/<name>; the HashManager
-               auto-enqueues a SHA on the post-write hook. #}
-            <span class="d-flex gap-1 align-items-center" style="min-width: 0;">
-                <input type="file" class="form-control form-control-sm" id="upload-file"
-                       style="max-width: 15rem; min-width: 0;"
-                       accept=".qcow2,.img,.img.zst,.img.xz,.img.gz,.img.bz2,.iso,.iso.gz"
-                       title="Streams into the image root via PUT /images/<name>; SHA-256 auto-computed after.">
-                <button type="button" class="btn btn-sm btn-primary flex-shrink-0 text-nowrap" id="upload-btn"
-                        onclick="uploadSelectedFile();" disabled>
-                    <i class="bi bi-upload me-1"></i>Upload
-                </button>
-            </span>
-        </span>
-    </div>
-    {# Upload progress (hidden until an upload runs). #}
-    <div class="progress d-none mx-3 mt-2" id="upload-progress" style="height: 1rem;">
-        <div class="progress-bar progress-bar-striped progress-bar-animated"
-             role="progressbar" style="width: 0%;" id="upload-progress-bar">0%</div>
-    </div>
-    <div class="form-text small mx-3 mb-0 d-none" id="upload-status"></div>
-    <div class="table-responsive">
-        <table class="table mb-0 align-middle">
-            <thead class="table-light">
-                <tr>
-                    <th>Name</th>
-                    <th>Status</th>
-                    <th style="width: 30%;">Progress</th>
-                    <th>Bytes</th>
-                    <th class="text-end" style="width: 1%; white-space: nowrap;">Action</th>
-                </tr>
-            </thead>
-            <tbody class="bty-downloads-tbody">
-                <tr><td colspan="5" class="text-muted">No downloads yet.</td></tr>
-            </tbody>
-        </table>
-    </div>
-</div>
 
-<script>
-    // Enable Upload once a file is picked. The IIFE runs after the
-    // header markup above, so #upload-file already exists.
-    (function () {
-        var input = document.getElementById("upload-file");
-        var btn = document.getElementById("upload-btn");
-        if (!input || !btn) return;
-        input.addEventListener("change", function () {
-            btn.disabled = !input.files || input.files.length === 0;
-        });
-    })();
-
-    function uploadSelectedFile() {
-        var input = document.getElementById("upload-file");
-        var btn = document.getElementById("upload-btn");
-        var progress = document.getElementById("upload-progress");
-        var bar = document.getElementById("upload-progress-bar");
-        var status = document.getElementById("upload-status");
-        if (!input.files || !input.files.length) return;
-        var file = input.files[0];
-        // PUT /images/<filename> takes raw bytes. Server uses the
-        // path-segment name; ``filename`` from <input type=file> is
-        // already just the basename in browsers.
-        var url = "/images/" + encodeURIComponent(file.name);
-        var xhr = new XMLHttpRequest();
-        xhr.open("PUT", url, true);
-        xhr.setRequestHeader("Content-Type", "application/octet-stream");
-        xhr.withCredentials = true;
-        xhr.upload.onprogress = function (ev) {
-            if (!ev.lengthComputable) return;
-            var pct = Math.round(ev.loaded * 100 / ev.total);
-            bar.style.width = pct + "%";
-            bar.textContent = pct + "%";
-        };
-        xhr.onload = function () {
-            if (xhr.status >= 200 && xhr.status < 300) {
-                status.textContent = "Upload complete; redirecting to catalog...";
-                setTimeout(function () { window.location = "/ui/images"; }, 600);
-            } else {
-                status.textContent = "Upload failed: HTTP " + xhr.status + " " + xhr.responseText;
-                btn.disabled = false;
-                progress.classList.add("d-none");
-            }
-        };
-        xhr.onerror = function () {
-            status.textContent = "Upload failed: network error";
-            btn.disabled = false;
-            progress.classList.add("d-none");
-        };
-        btn.disabled = true;
-        progress.classList.remove("d-none");
-        status.classList.remove("d-none");
-        bar.style.width = "0%";
-        bar.textContent = "0%";
-        status.textContent = "Uploading " + file.name + " (" + file.size.toLocaleString() + " bytes)...";
-        xhr.send(file);
-    }
-</script>
-{% elif section == "hashes" %}
-<div class="card mb-3" id="hashes-list">
-    <div class="card-header bg-light fw-semibold">
-        <i class="bi bi-hash me-1"></i>Hashes
-        <small class="text-muted ms-2">background SHA-256 of dir-scan files; default 1 at a time so small hardware (Pi / NUC) stays responsive</small>
-    </div>
-    <div class="table-responsive">
-        <table class="table mb-0 align-middle">
-            <thead class="table-light">
-                <tr>
-                    <th>Name</th>
-                    <th>Status</th>
-                    <th style="width: 30%;">Progress</th>
-                    <th>Bytes</th>
-                    <th class="text-end" style="width: 1%; white-space: nowrap;">Action</th>
-                </tr>
-            </thead>
-            <tbody class="bty-hashes-tbody">
-                <tr><td colspan="5" class="text-muted">No hashes yet.</td></tr>
-            </tbody>
-        </table>
-    </div>
-</div>
-{% else %}
-
+{# Catalog list: the operator's "what images do I have" view. Header
+   carries the two catalog-shape actions (Upload catalog / Fetch latest
+   catalog). The per-row Action column triggers fetch / hash / cache-
+   delete / entry-delete; results show on /ui/workers. #}
 <div class="card mb-3" id="images-list">
-    {# ``py-1`` + ``flex-nowrap``: keep the catalog actions a single
-       tight row instead of wrapping to a second line on a narrow
-       window. The upload input shrinks; button labels stay intact. #}
     <div class="card-header bg-light fw-semibold d-flex justify-content-between align-items-center flex-nowrap gap-2 py-1">
         <span class="text-nowrap"><i class="bi bi-list-ul me-1"></i>Images</span>
-        {# Two catalog actions side by side, separated by a vertical
-           rule: upload a local catalog.toml, or fetch the bty release
-           catalog.toml in one click (both were dropped sub-nav pages). #}
         <span class="d-flex flex-nowrap align-items-center gap-2" style="min-width: 0;">
-            {# Parsed before it replaces the current catalog
-               ({{ manifest_path }}); a bad file bounces back. #}
             <form method="post" action="/ui/catalog/upload" enctype="multipart/form-data"
                   class="d-flex align-items-center gap-1 m-0" style="min-width: 0;">
                 <input type="file" required name="file" accept=".toml"
@@ -231,10 +66,6 @@
             <thead class="table-light">
                 <tr>
                     <th>Name(s)</th>
-                    {# Observed content sha (``disk_image_sha`` on
-                       the catalog row). Machines bind via
-                       ``bty_image_ref`` -- shown in the machine-
-                       detail picker, not here. #}
                     <th>Content SHA</th>
                     <th>Format</th>
                     <th>Sources</th>
@@ -281,16 +112,13 @@
                     </td>
                     <td class="text-end text-nowrap">
                         {# Dispatch by source shape, not just sha presence:
-                           - Has a ``local`` source and no sha -> the file is
-                             on disk and just needs hashing. Hash button.
+                           - Has a ``local`` source and no sha -> file on disk
+                             needs hashing. Hash button.
                            - No local source -> bytes need fetching. Fetch
                              button. Works for un-sha'd URL / oras entries
                              (the DownloadManager downloads + computes sha +
                              back-fills catalog_entries.disk_image_sha) AND
-                             for sha-pinned entries not yet in cache.
-                           Previously every un-sha'd entry rendered the
-                           Hash button, which 404'd on URL-only rows
-                           because HashManager requires a local file. #}
+                             for sha-pinned entries not yet in cache. #}
                         {% set has_local = u.sources|selectattr('kind','equalto','local')|list|length > 0 %}
                         {% if not u.sha256 and has_local %}
                         <button type="button"
@@ -305,18 +133,6 @@
                             <i class="bi bi-cloud-download me-1"></i>Fetch
                         </button>
                         {% endif %}
-                        {# Evict cached bytes. Available for any entry
-                           whose bytes are in the cache dir
-                           (``$BTY_STATE_DIR/cache/<sha>``). Backed by
-                           ``DELETE /catalog/cache/{name}`` which
-                           unlinks the cached file but preserves the
-                           catalog entry's metadata -- the next Fetch
-                           re-downloads. Useful for forcing a
-                           re-pull when a rolling tag has rotated
-                           upstream. Suppressed for purely-local rows
-                           (``local`` source only) since deleting
-                           those would unlink the operator's source
-                           file rather than just a cache copy. #}
                         {% set has_remote = u.sources|selectattr('kind','in',['manifest','url'])|list|length > 0 %}
                         {% if u.cached and has_remote %}
                         <button type="button"
@@ -327,14 +143,6 @@
                             <i class="bi bi-eraser"></i>
                         </button>
                         {% endif %}
-                        {# Delete the catalog entry. Backed by
-                           ``DELETE /catalog/entries?src=<src>`` which
-                           wipes the catalog_entries row. The button
-                           shows for every entry that has at least one
-                           ``manifest`` or ``url``-kind source (i.e.
-                           everything except local-only dir-scan rows,
-                           where the right delete action is to remove
-                           the underlying file). #}
                         {% if has_remote %}
                         {% set entry_src = u.sources|selectattr('kind','in',['manifest','url'])|map(attribute='location')|first %}
                         <button type="button"
@@ -354,207 +162,75 @@
                 {% if not unified %}
                 <tr><td colspan="6" class="text-muted text-center py-3">
                     No images yet. Use <strong>Fetch latest</strong> or
-                    <strong>Upload</strong> above, or drop a
+                    <strong>Upload catalog</strong> above, drop a
                     <code>.qcow2</code> / <code>.img</code> /
                     <code>.img.zst</code> / <code>.img.xz</code> /
                     <code>.img.gz</code> / <code>.img.bz2</code> file into
-                    <code>{{ image_root }}</code>.
+                    <code>{{ image_root }}</code>, or add one via the
+                    <strong>Add image</strong> card below.
                 </td></tr>
                 {% endif %}
             </tbody>
         </table>
     </div>
 </div>
-{% endif %}
+
+{# Add image: a single image (upload a local file, or add by
+   http(s):// / oras:// URL). Job progress on /ui/workers. #}
+<div class="card mb-3" id="add-image">
+    <div class="card-header bg-light fw-semibold d-flex justify-content-between align-items-center flex-nowrap gap-2 py-1">
+        <span class="text-nowrap"><i class="bi bi-plus-circle me-1"></i>Add image</span>
+        <span class="d-flex flex-nowrap align-items-center gap-2" style="min-width: 0;">
+            {# type="text" not type="url": browsers reject oras:// under
+               HTML5 URL validation; server-side Pydantic still validates. #}
+            <form method="post" action="/ui/catalog/entries"
+                  class="d-flex align-items-center gap-1 m-0" style="min-width: 0;">
+                <input type="text" required class="form-control form-control-sm"
+                       id="image_url" name="image_url"
+                       style="max-width: 18rem; min-width: 0;"
+                       placeholder="https://...img.gz  |  oras://owner/repo:tag"
+                       title="http(s):// trusts the upstream bytes on first flash and back-fills disk_image_sha; oras:// resolves the OCI manifest digest at add time.">
+                <button type="submit" class="btn btn-sm btn-primary flex-shrink-0 text-nowrap">
+                    <i class="bi bi-cloud-download me-1"></i>Fetch from URL
+                </button>
+            </form>
+            <div class="vr"></div>
+            {# Streams via XHR PUT /images/<name>; the HashManager
+               auto-enqueues a SHA on the post-write hook. #}
+            <span class="d-flex gap-1 align-items-center" style="min-width: 0;">
+                <input type="file" class="form-control form-control-sm" id="upload-file"
+                       style="max-width: 15rem; min-width: 0;"
+                       accept=".qcow2,.img,.img.zst,.img.xz,.img.gz,.img.bz2,.iso,.iso.gz"
+                       title="Streams into the image root via PUT /images/<name>; SHA-256 auto-computed after.">
+                <button type="button" class="btn btn-sm btn-primary flex-shrink-0 text-nowrap"
+                        id="upload-btn" onclick="uploadSelectedFile();" disabled>
+                    <i class="bi bi-upload me-1"></i>Upload
+                </button>
+            </span>
+        </span>
+    </div>
+    <div class="progress d-none mx-3 mt-2" id="upload-progress" style="height: 1rem;">
+        <div class="progress-bar progress-bar-striped progress-bar-animated"
+             role="progressbar" style="width: 0%;" id="upload-progress-bar">0%</div>
+    </div>
+    <div class="form-text small mx-3 mb-2 d-none" id="upload-status"></div>
+</div>
 
 <script>
 (function () {
     "use strict";
 
-    // HTML-escape arbitrary strings before innerHTML interpolation.
-    // ``d.name`` is operator-controlled (catalog manifest entries
-    // and operator-added URL entries), and Pydantic's
-    // ``CatalogEnqueueRequest`` only blocks path-traversal chars
-    // (``/`` ``\`` NUL) -- not HTML metacharacters. Without esc()
-    // an authenticated operator could craft a catalog entry whose
-    // name embeds ``<script>``; with esc() that just renders as
-    // visible text. Defence-in-depth.
-    function esc(v) {
-        if (v === null || v === undefined) return "";
-        return String(v)
-            .replace(/&/g, "&amp;")
-            .replace(/</g, "&lt;")
-            .replace(/>/g, "&gt;")
-            .replace(/"/g, "&quot;")
-            .replace(/'/g, "&#39;");
-    }
-
-    function fmtBytes(n) {
-        if (n === null || n === undefined) return "-";
-        if (n < 1024) return n + " B";
-        var units = ["KiB", "MiB", "GiB", "TiB"];
-        var v = n / 1024;
-        var i = 0;
-        while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
-        return v.toFixed(1) + " " + units[i];
-    }
-
-    function statusBadge(status) {
-        var cls = {
-            "queued":    "bg-secondary",
-            "running":   "bg-primary",
-            "completed": "bg-success",
-            "cancelled": "bg-warning text-dark",
-            "failed":    "bg-danger",
-        }[status] || "bg-secondary";
-        return '<span class="badge ' + cls + '">' + esc(status) + '</span>';
-    }
-
-    function progressBar(d) {
-        if (d.bytes_total === null || d.bytes_total === undefined) {
-            return '<div class="progress" style="height: 16px;">' +
-                   '<div class="progress-bar progress-bar-striped progress-bar-animated" ' +
-                   'style="width: 100%;">' + (d.status === "running" ? "..." : "") + '</div></div>';
-        }
-        var pct = d.bytes_total > 0 ? (100 * d.bytes_downloaded / d.bytes_total) : 0;
-        var color = d.status === "completed" ? "bg-success" :
-                    d.status === "failed"    ? "bg-danger"  :
-                    d.status === "cancelled" ? "bg-warning" : "";
-        return '<div class="progress" style="height: 16px;">' +
-               '<div class="progress-bar ' + color + '" style="width: ' +
-               pct.toFixed(1) + '%;">' + pct.toFixed(1) + '%</div></div>';
-    }
-
-    function renderJobs(tbody, jobs, byteField, cancelEndpoint, emptyMsg) {
-        if (!tbody) return;
-        if (jobs.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="5" class="text-muted">' +
-                              emptyMsg + '</td></tr>';
-            return;
-        }
-        var order = { "running": 0, "queued": 1, "failed": 2, "cancelled": 3, "completed": 4 };
-        jobs.sort(function (a, b) {
-            return (order[a.status] || 9) - (order[b.status] || 9);
-        });
-        var rows = jobs.map(function (d) {
-            var dl = d[byteField] || 0;
-            var bytes = fmtBytes(dl);
-            // Both download + hash carry bytes_total, but the
-            // download mode allows null (Content-Length absent)
-            // whereas hashing always knows the size from stat().
-            if (d.bytes_total !== null && d.bytes_total !== undefined) {
-                bytes += " / " + fmtBytes(d.bytes_total);
-            }
-            // Adapt progress shape to the renderer (which keys on
-            // ``bytes_downloaded``).
-            var pdata = {
-                bytes_downloaded: dl,
-                bytes_total: d.bytes_total,
-                status: d.status,
-            };
-            return "<tr>" +
-                   "<td><code>" + esc(d.name) + "</code></td>" +
-                   "<td>" + statusBadge(d.status) + "</td>" +
-                   "<td>" + progressBar(pdata) + "</td>" +
-                   "<td class=\"small\">" + esc(bytes) + "</td>" +
-                   "<td class=\"text-end\">" + actionCellFor(d, cancelEndpoint) + "</td>" +
-                   "</tr>";
-        });
-        tbody.innerHTML = rows.join("");
-    }
-
-    function actionCellFor(d, cancelEndpoint) {
-        if (d.status === "queued" || d.status === "running") {
-            return '<button type="button" class="btn btn-sm btn-outline-danger text-nowrap bty-cancel-btn" ' +
-                   'data-name="' + esc(d.name) + '" data-endpoint="' + esc(cancelEndpoint) + '">' +
-                   '<i class="bi bi-x-circle me-1"></i>Cancel</button>';
-        }
-        if (d.status === "failed") {
-            return '<span class="text-danger small" title="' + esc(d.error || "") + '">' +
-                   '<i class="bi bi-exclamation-triangle me-1"></i>' +
-                   esc((d.error || "failed").substring(0, 60)) + '</span>';
-        }
-        return "";
-    }
-
-    var pollHandle = null;
-    var lastSeenCompleted = new Set();  // download:<name> | hash:<name>
-    var firstPoll = true;
-    function refresh() {
-        var statusEl = document.querySelector(".bty-poll-status");
-        // Both endpoints in parallel; render whichever returns
-        // first without blocking the other.
-        var pDl = fetch("/catalog/downloads", { credentials: "same-origin" })
-            .then(function (r) { return r.json(); })
-            .then(function (data) {
-                var downloads = data.downloads || [];
-                renderJobs(
-                    document.querySelector(".bty-downloads-tbody"),
-                    downloads,
-                    "bytes_downloaded",
-                    "/catalog/downloads/",
-                    "No downloads yet."
-                );
-                return downloads.map(function (d) {
-                    return { kind: "download", name: d.name, status: d.status };
-                });
-            }).catch(function () { return []; });
-        var pHa = fetch("/catalog/hashes", { credentials: "same-origin" })
-            .then(function (r) { return r.json(); })
-            .then(function (data) {
-                var hashes = data.hashes || [];
-                renderJobs(
-                    document.querySelector(".bty-hashes-tbody"),
-                    hashes,
-                    "bytes_hashed",
-                    "/catalog/hashes/",
-                    "No hashes yet."
-                );
-                return hashes.map(function (h) {
-                    return { kind: "hash", name: h.name, status: h.status };
-                });
-            }).catch(function () { return []; });
-        return Promise.all([pDl, pHa]).then(function (results) {
-            var jobs = results[0].concat(results[1]);
-            if (statusEl) statusEl.textContent = "updated " +
-                new Date().toLocaleTimeString();
-            if (firstPoll) {
-                jobs.forEach(function (j) {
-                    if (j.status === "completed") {
-                        lastSeenCompleted.add(j.kind + ":" + j.name);
-                    }
-                });
-                firstPoll = false;
-                return;
-            }
-            // A newly-completed download means a catalog row's
-            // ``cached`` flipped; a newly-completed hash means an
-            // image's ``sha256`` flipped. Either way the catalog
-            // table needs to reload to pick the change up.
-            jobs.forEach(function (j) {
-                var key = j.kind + ":" + j.name;
-                if (j.status === "completed" && !lastSeenCompleted.has(key)) {
-                    lastSeenCompleted.add(key);
-                    setTimeout(function () { window.location.reload(); }, 800);
-                }
-            });
-        }).catch(function (err) {
-            if (statusEl) statusEl.textContent = "poll failed: " + err.message;
+    // Enable Upload once a file is picked.
+    var input = document.getElementById("upload-file");
+    var btn = document.getElementById("upload-btn");
+    if (input && btn) {
+        input.addEventListener("change", function () {
+            btn.disabled = !input.files || input.files.length === 0;
         });
     }
 
-    function startPolling() {
-        refresh();
-        pollHandle = setInterval(refresh, 2000);
-    }
-    function stopPolling() {
-        if (pollHandle !== null) clearInterval(pollHandle);
-        pollHandle = null;
-    }
-    document.addEventListener("visibilitychange", function () {
-        if (document.hidden) stopPolling(); else startPolling();
-    });
-
+    // Per-row catalog actions. Triggers enqueue against the manager
+    // endpoints; live progress + cancel UI lives on /ui/workers.
     document.addEventListener("click", function (ev) {
         var fetchBtn = ev.target.closest(".bty-fetch-btn");
         if (fetchBtn) {
@@ -567,16 +243,11 @@
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ name: name }),
             }).then(function () {
-                // Re-enable on success too: this button is in the catalog
-                // table, which has no polling refresh, so without this it
-                // stays greyed until a full page reload. Re-enqueue is
-                // harmless (the download manager dedups queued/running);
-                // progress shows in the Downloads table below.
+                // Re-enable so the operator can re-fire if they want
+                // (the manager dedups against queued/running). Progress
+                // is on /ui/workers.
                 fetchBtn.disabled = false;
-                refresh();
-            }).catch(function () {
-                fetchBtn.disabled = false;
-            });
+            }).catch(function () { fetchBtn.disabled = false; });
             return;
         }
         var hashBtn = ev.target.closest(".bty-hash-btn");
@@ -590,26 +261,8 @@
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ name: name }),
             }).then(function () {
-                // Same as the Fetch button: re-enable on success since
-                // the catalog table isn't on a refresh timer.
                 hashBtn.disabled = false;
-                refresh();
-            }).catch(function () {
-                hashBtn.disabled = false;
-            });
-            return;
-        }
-        var cancelBtn = ev.target.closest(".bty-cancel-btn");
-        if (cancelBtn) {
-            ev.preventDefault();
-            var name = cancelBtn.getAttribute("data-name");
-            var endpoint = cancelBtn.getAttribute("data-endpoint") ||
-                           "/catalog/downloads/";
-            cancelBtn.disabled = true;
-            fetch(endpoint + encodeURIComponent(name), {
-                method: "DELETE",
-                credentials: "same-origin",
-            }).then(refresh);
+            }).catch(function () { hashBtn.disabled = false; });
             return;
         }
         var entryDeleteBtn = ev.target.closest(".bty-catalog-entry-delete-btn");
@@ -623,25 +276,17 @@
                 credentials: "same-origin",
             }).then(function (resp) {
                 if (resp.ok) {
-                    // Full reload so the row disappears + flash banner
-                    // (if any) renders. Refresh just hits the polling
-                    // endpoints; we want the page tree re-rendered.
                     window.location.reload();
                     return;
                 }
                 resp.text().then(function (body) {
                     var msg;
-                    try {
-                        msg = JSON.parse(body).detail || body;
-                    } catch (_e) {
-                        msg = body || ("HTTP " + resp.status);
-                    }
+                    try { msg = JSON.parse(body).detail || body; }
+                    catch (_e) { msg = body || ("HTTP " + resp.status); }
                     alert("Could not remove entry:\n\n" + msg);
                     entryDeleteBtn.disabled = false;
                 });
-            }).catch(function () {
-                entryDeleteBtn.disabled = false;
-            });
+            }).catch(function () { entryDeleteBtn.disabled = false; });
             return;
         }
         var cacheDeleteBtn = ev.target.closest(".bty-cache-delete-btn");
@@ -656,24 +301,58 @@
                 method: "DELETE",
                 credentials: "same-origin",
             }).then(function () {
-                // Reload so the row's badge flips ``cached`` -> ``available``
-                // and the action column re-renders with the Fetch button.
                 window.location.reload();
-            }).catch(function () {
-                cacheDeleteBtn.disabled = false;
-            });
+            }).catch(function () { cacheDeleteBtn.disabled = false; });
         }
     });
-
-    startPolling();
 })();
+
+function uploadSelectedFile() {
+    var input = document.getElementById("upload-file");
+    var btn = document.getElementById("upload-btn");
+    var progress = document.getElementById("upload-progress");
+    var bar = document.getElementById("upload-progress-bar");
+    var status = document.getElementById("upload-status");
+    if (!input.files || !input.files.length) return;
+    var file = input.files[0];
+    var url = "/images/" + encodeURIComponent(file.name);
+    var xhr = new XMLHttpRequest();
+    xhr.open("PUT", url, true);
+    xhr.setRequestHeader("Content-Type", "application/octet-stream");
+    xhr.withCredentials = true;
+    xhr.upload.onprogress = function (ev) {
+        if (!ev.lengthComputable) return;
+        var pct = Math.round(ev.loaded * 100 / ev.total);
+        bar.style.width = pct + "%";
+        bar.textContent = pct + "%";
+    };
+    xhr.onload = function () {
+        if (xhr.status >= 200 && xhr.status < 300) {
+            status.textContent = "Upload complete; redirecting to catalog...";
+            setTimeout(function () { window.location = "/ui/images"; }, 600);
+        } else {
+            status.textContent = "Upload failed: HTTP " + xhr.status + " " + xhr.responseText;
+            btn.disabled = false;
+            progress.classList.add("d-none");
+        }
+    };
+    xhr.onerror = function () {
+        status.textContent = "Upload failed: network error";
+        btn.disabled = false;
+        progress.classList.add("d-none");
+    };
+    btn.disabled = true;
+    progress.classList.remove("d-none");
+    status.classList.remove("d-none");
+    bar.style.width = "0%";
+    bar.textContent = "0%";
+    status.textContent = "Uploading " + file.name + " (" + file.size.toLocaleString() + " bytes)...";
+    xhr.send(file);
+}
 </script>
 
 {# Image-relevant event slice (uploads, hashes, catalog adds /
-   deletes). The /ui/events drill-down filters to subject_kind=
-   image; catalog rows are picked up via the broader filter at
-   /ui/events itself. Shown on every section so an operator
-   doing an upload sees the recent activity context. #}
+   deletes). #}
 {% with events=image_events,
         title="Recent Events",
         link_to_full="/ui/events?subject_kind=image",

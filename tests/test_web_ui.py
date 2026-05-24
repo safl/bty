@@ -337,75 +337,49 @@ def test_ui_dashboard_state_row_green_when_migrated_and_valid(
 # ---------------------------------------------------------------------
 
 
-def test_ui_images_default_section_is_list_not_add_forms(client: TestClient) -> None:
-    """Bare ``GET /ui/images`` lands on the list section: the unified
-    catalog table, with Fetch-latest + Upload-catalog controls inline
-    in its header -- but NOT the per-image add forms (upload-image /
-    upload-from-URL), which now live in the Downloads section.
+def test_ui_images_carries_catalog_actions_and_add_image_card(client: TestClient) -> None:
+    """``/ui/images`` is the merged catalog page: catalog actions in the
+    list header (Fetch latest catalog + Upload catalog), an Add-image
+    card with the URL + local-upload forms, and the activity table.
+    Subnav jumps cover List + Add image + Activity. There are no more
+    ?section sub-tabs and no live job tables -- those moved to
+    ``/ui/workers``.
     """
     _login(client)
-    r = client.get("/ui/images")
-    assert r.status_code == 200
-    body = r.text
-    # Sub-nav strip present (just the List pill now). Downloads is a
-    # top-level navbar entry, no longer a sub-nav pill. The navbar
-    # Downloads icon points at the merged Workers page anchor; the
-    # legacy /ui/downloads page continues to render its add-image
-    # forms for now.
+    body = client.get("/ui/images").text
+    # Subnav reflects the three anchors on the page now.
     assert 'aria-label="Section sub-navigation"' in body
-    assert 'href="/ui/workers#downloads"' in body
-    assert 'href="/ui/images?section=downloads"' not in body
-    # Catalog header carries the inline Fetch + Upload-catalog controls.
+    assert 'href="#images-list"' in body
+    assert 'href="#add-image"' in body
+    assert 'href="#images-activity"' in body
+    # Catalog actions in the list header.
     assert 'action="/ui/catalog/fetch-release"' in body
     assert 'action="/ui/catalog/upload"' in body
     assert 'accept=".toml"' in body
-    # But the per-image add forms live in the Downloads section.
-    assert 'id="image_url"' not in body
-    assert 'id="upload-file"' not in body
-
-
-def test_ui_downloads_page_has_add_forms(client: TestClient) -> None:
-    """The top-level Downloads page (``/ui/downloads``) carries the
-    image-add forms (upload a local file + add by URL) above the live
-    download-jobs table -- moved here out of the Images sub-nav."""
-    _login(client)
-    r = client.get("/ui/downloads")
-    assert r.status_code == 200
-    body = r.text
-    # Add-by-URL form.
+    # Add-image card carries both add controls.
     assert 'id="image_url"' in body
     assert 'action="/ui/catalog/entries"' in body
-    # Upload-file form.
     assert 'id="upload-file"' in body
-    # The live downloads table is here too.
-    assert "bty-downloads-tbody" in body
-    # The navbar downloads indicator is active; the page carries the
-    # List / Activity jump sub-nav.
-    assert "nav-worker active" in body
-    assert 'href="#downloads-list"' in body
-    assert 'href="#images-activity"' in body
+    # Live job tables MOVED to /ui/workers -- not on this page.
+    assert "bty-downloads-tbody" not in body
+    assert "bty-hashes-tbody" not in body
 
 
-def test_ui_hashes_page_has_hashes_table(client: TestClient) -> None:
-    """The top-level Hashes page (``/ui/hashes``) shows the background
-    sha worker pane, lights its navbar indicator active, and carries the
-    List / Activity jump sub-nav."""
+def test_legacy_worker_urls_are_gone(client: TestClient) -> None:
+    """The pre-merge /ui/downloads, /ui/hashes, /ui/fetches routes are
+    removed. The merged Workers page (/ui/workers) is the canonical
+    home for active jobs; the operator triggers stay on /ui/images
+    (catalog) and /ui/netboot (release artifacts).
+    """
     _login(client)
-    r = client.get("/ui/hashes")
-    assert r.status_code == 200
-    body = r.text
-    assert "bty-hashes-tbody" in body
-    assert "nav-worker active" in body
-    assert 'href="#hashes-list"' in body
-    assert 'href="#images-activity"' in body
+    for url in ("/ui/downloads", "/ui/hashes", "/ui/fetches"):
+        r = client.get(url)
+        assert r.status_code == 404, f"{url} should be gone, got {r.status_code}"
 
 
 def test_ui_images_list_header_has_fetch_and_upload_catalog(client: TestClient) -> None:
-    """The Images table header on the list view carries the Fetch
-    (release catalog.toml) button + the Upload-catalog file form, the
-    controls moved here from the dropped ``?section=fetch`` /
-    ``?section=upload-catalog`` pages. Buttons spell out the noun
-    ("catalog") and a rule separates the two actions."""
+    """The Images table header carries the Fetch (release catalog.toml)
+    button + the Upload-catalog file form, separated by a rule."""
     _login(client)
     body = client.get("/ui/images").text
     assert 'action="/ui/catalog/fetch-release"' in body
@@ -413,8 +387,9 @@ def test_ui_images_list_header_has_fetch_and_upload_catalog(client: TestClient) 
     assert 'action="/ui/catalog/upload"' in body
     assert "Upload catalog" in body
     assert 'accept=".toml"' in body
-    # The add-by-URL form is still its own section, not on the list.
-    assert 'id="image_url"' not in body
+    # The add-by-URL form lives in the Add-image card below the list.
+    assert 'id="image_url"' in body
+    assert 'id="add-image"' in body
 
 
 def test_top_level_nav_highlights_active_page(client: TestClient) -> None:
@@ -497,24 +472,22 @@ def test_subnavs_drop_the_redundant_list_pill(client: TestClient) -> None:
 
     # Every content page carries the section-jump sub-nav strip with
     # in-page anchor links (no aria-current pills -- those were the old
-    # ?section= page links).
+    # ?section= page links).  /ui/workers is the merged worker page;
+    # the old /ui/downloads /ui/hashes /ui/fetches pages are gone.
     for path in (
         "/ui/images",
         "/ui/netboot",
         "/ui/machines",
         "/ui/events",
-        "/ui/downloads",
-        "/ui/hashes",
-        "/ui/fetches",
+        "/ui/workers",
         "/ui/dashboard",
     ):
         body = client.get(path).text
         assert 'aria-label="Section sub-navigation"' in body, path
         assert _aria_current_hrefs(body) == [], path
 
-    # The worker pages also light their navbar indicator active.
-    for path in ("/ui/downloads", "/ui/hashes", "/ui/fetches"):
-        assert "nav-worker active" in client.get(path).text, path
+    # The merged Workers page lights every navbar worker indicator.
+    assert "nav-worker active" in client.get("/ui/workers").text
 
     # Settings carries its own section-jump sub-nav (anchor links + rules).
     settings = client.get("/ui/settings").text
@@ -523,17 +496,17 @@ def test_subnavs_drop_the_redundant_list_pill(client: TestClient) -> None:
     assert 'href="#dhcp-pxe"' in settings
 
 
-def test_ui_images_section_unrecognised_falls_back_to_list(client: TestClient) -> None:
-    """A bookmark / typo / scripted call with a bogus section value
-    must NOT 500 the page. Server clamps to the default list
-    section."""
+def test_ui_images_ignores_unknown_query_params(client: TestClient) -> None:
+    """``?section=...`` was the old per-tab selector. With the page
+    merged, those query params are ignored: a bookmark / typo / scripted
+    call must NOT 500 the page, and rendering must land on the merged
+    catalog view either way."""
     _login(client)
     r = client.get("/ui/images?section=garbage")
     assert r.status_code == 200
     body = r.text
-    # Lands on list (no add-form markers).
-    assert 'id="image_url"' not in body
-    # Sub-nav strip still renders (the List pill).
+    # Add-image card is part of the merged page now.
+    assert 'id="image_url"' in body
     assert 'aria-label="Section sub-navigation"' in body
 
 
@@ -577,7 +550,10 @@ def test_ui_workers_page_has_three_sections(client: TestClient) -> None:
     assert 'id="bty-workers-backup-now"' in body
     # Worker icons highlight on this page (nav_active == 'workers' lights
     # all three: Downloads + Hashing + Backup).
-    assert body.count("nav-worker active") >= 1
+    # All three worker icons highlight on this page (single nav_active
+    # value lights every icon -- no more split between downloads /
+    # hashes / fetches).
+    assert body.count("nav-worker active") == 3
     # The page polls the four endpoints that feed the three sections.
     assert '"/catalog/downloads"' in body
     assert '"/boot/releases"' in body
@@ -585,25 +561,6 @@ def test_ui_workers_page_has_three_sections(client: TestClient) -> None:
     assert '"/workers/backups"' in body
     # No "Fetch artifacts" trigger here (lives on /ui/netboot).
     assert 'id="enqueue-fetch-btn"' not in body
-
-
-def test_ui_fetches_page_has_fetch_control_and_jobs_table(client: TestClient) -> None:
-    """The Release fetches page (``/ui/fetches``, under the navbar's
-    release-fetch worker icon) carries the "Fetch latest artifacts"
-    trigger and a live jobs table that polls GET /boot/releases. It's a
-    top-level page: the worker indicator is active and there's no section
-    sub-nav."""
-    _login(client)
-    body = client.get("/ui/fetches").text
-    assert "Artifact Fetches" in body
-    assert 'id="enqueue-fetch-btn"' in body
-    assert 'data-tag="latest"' in body
-    assert "bty-fetches-tbody" in body
-    assert '"/boot/releases"' in body
-    # Worker icon active; the page carries the List / Activity jump nav.
-    assert "nav-worker active" in body
-    assert 'href="#fetches-list"' in body
-    assert 'href="#netboot-activity"' in body
 
 
 def test_ui_boot_list_header_has_artifacts_and_tftp(client: TestClient) -> None:
@@ -763,28 +720,6 @@ def test_ui_machines_inline_add_defaults_to_safe_sanboot_mode(client: TestClient
     assert '"boot_mode", "ipxe-exit"' in body
     # No flash policy is offered/sent from the inline add.
     assert '"boot_mode", "bty-flash-always"' not in body
-
-
-def test_ui_fetches_page_shows_recent_activity_card(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The Release fetches page reuses ``_events_card.html`` to show the
-    last 10 boot.* events (release fetches + fetch failures). Trigger a
-    successful sync fetch first so a row exists."""
-    _login(client)
-
-    def fake_fetch(boot_dir, *_a, **_kw):  # type: ignore[no-untyped-def]
-        from bty.web._releases import FetchResult
-
-        return FetchResult(base_url="https://test.invalid/x", artifacts=("a",), total_bytes=42)
-
-    monkeypatch.setattr("bty.web._releases.fetch_release", fake_fetch)
-    client.post("/ui/netboot/fetch-release", data={"tag": "v0.0.1"})
-    r = client.get("/ui/fetches")
-    assert r.status_code == 200
-    body = r.text
-    assert "Recent Events" in body
-    assert "netboot.artifacts.fetched" in body
 
 
 def test_ui_machines_filter_assigned_excludes_discovered(client: TestClient) -> None:
@@ -1535,15 +1470,12 @@ def test_ui_boot_page_renders_with_artifact_state(client: TestClient) -> None:
     assert body.count("missing</span>") == 4
     assert body.count('class="badge bg-warning text-dark"') >= 4
     # The Fetch button is on this inventory view (it hands off to the
-    # Release fetches page); the live jobs table lives on /ui/fetches.
+    # Workers page); the live jobs table lives on /ui/workers.
     assert 'id="enqueue-fetch-btn"' in body
     assert "bty-fetches-tbody" not in body
-    # The Release fetches page carries the poller + the live jobs table +
-    # the cleaned-up JS shape (no never-set ``_just_completed_marker``).
-    fetches_body = client.get("/ui/fetches").text
-    assert "/boot/releases" in fetches_body
-    assert "_just_completed_marker" not in fetches_body
-    assert "bty-fetches-tbody" in fetches_body
+    workers_body = client.get("/ui/workers").text
+    assert "/boot/releases" in workers_body
+    assert "bty-workers-downloads-tbody" in workers_body
 
 
 # ---------- Phase E: settings page ----------------------------------------

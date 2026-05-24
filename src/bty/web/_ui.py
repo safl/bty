@@ -619,20 +619,14 @@ def register_ui_routes(
         publish_state_changed()
         return RedirectResponse("/ui/machines", status_code=status.HTTP_303_SEE_OTHER)
 
-    def _render_images_page(request: Request, section: str) -> HTMLResponse:
-        """Build the shared context for the image-catalog family of
-        pages and render ``ui/images.html`` for ``section``.
+    def _render_images_page(request: Request) -> HTMLResponse:
+        """Build the context for ``/ui/images`` and render the template.
 
-        ``section`` selects which body the template renders:
-
-        * ``list``      -- the SHA-keyed catalog merge (the ``/ui/images``
-          landing); its header carries the inline Fetch-latest
-          (release catalog.toml) + Upload-catalog controls.
-        * ``downloads`` -- the image-add forms (upload a local file, or
-          add by http(s):// / oras:// URL) above the live download-jobs
-          table. Top-level page at ``/ui/downloads``.
-        * ``hashes``    -- the background sha worker pane. Top-level
-          page at ``/ui/hashes``.
+        The catalog list (merge of dir-scan files + catalog entries) is
+        the page's primary content; the operator's "add a single image"
+        forms (upload local file + add-by-URL) sit in an inline card
+        below the list. Live progress of any fetch / hash / backup is on
+        the merged Workers page (``/ui/workers``).
 
         ``?error=<msg>`` lands in the layout's flash slot (the form-
         style ``POST /ui/catalog/entries`` 303s back with that param on
@@ -640,25 +634,14 @@ def register_ui_routes(
         """
         unified = list_unified_images() if list_unified_images is not None else []
         flash = request.query_params.get("error")
-        # Catalog manifest path + release repo for the list view's
-        # "Catalog manifest" card. ``state_path.parent`` is the resolved
-        # state dir create_app was given, so this stays consistent with
-        # the Settings page even when ``state_path`` was passed
-        # explicitly rather than derived from ``BTY_STATE_DIR``.
         catalog_manifest_path = os.environ.get("BTY_CATALOG_FILE") or str(
             state_path.parent / "catalog.toml"
         )
-        # Image-relevant slice of the event log: uploads, hash
-        # completions, catalog entry add/delete. Top 15 keeps the
-        # page short; full timeline at /ui/events.
         with _db.open_db(state_path) as conn:
-            # Effective release repo: operator override -> env ->
-            # default. Drives the fetch-catalog button's title.
             release_repo = _settings_store.resolve_release_repo(conn)
             image_events = []
             for kind in ("image", "catalog"):
                 image_events.extend(_events_log.list_events(conn, subject_kind=kind, limit=10))
-        # Sort by id desc and clip to top 15.
         image_events.sort(key=lambda e: e.id, reverse=True)
         image_events = image_events[:15]
         return render(
@@ -669,7 +652,6 @@ def register_ui_routes(
             image_events=image_events,
             manifest_path=catalog_manifest_path,
             release_repo=release_repo,
-            section=section,
             flash=flash,
             flash_kind="danger" if flash else None,
         )
@@ -682,37 +664,9 @@ def register_ui_routes(
     )
     def ui_images(request: Request) -> HTMLResponse:
         """The image catalog: the SHA-keyed merge of dir-scan files +
-        catalog entries, with the inline Fetch-latest / Upload-catalog
-        controls in its header. Downloads and Hashes used to be
-        ``?section=`` sub-tabs here; they are now top-level pages
-        (``/ui/downloads``, ``/ui/hashes``) reached from the navbar's
-        worker indicators right of Settings."""
-        return _render_images_page(request, "list")
-
-    @app.get(
-        "/ui/downloads",
-        response_class=HTMLResponse,
-        include_in_schema=False,
-        dependencies=[Depends(require_ui_auth)],
-    )
-    def ui_downloads(request: Request) -> HTMLResponse:
-        """Top-level Downloads page: the image-add forms (upload a local
-        file, or add by URL) above the live download-jobs table. Reached
-        from the navbar's "Active downloads" indicator (right of
-        Settings)."""
-        return _render_images_page(request, "downloads")
-
-    @app.get(
-        "/ui/hashes",
-        response_class=HTMLResponse,
-        include_in_schema=False,
-        dependencies=[Depends(require_ui_auth)],
-    )
-    def ui_hashes(request: Request) -> HTMLResponse:
-        """Top-level Hashes page: the background SHA-256 worker pane.
-        Reached from the navbar's "Active hashes" indicator (right of
-        Settings)."""
-        return _render_images_page(request, "hashes")
+        catalog entries + an inline Add-image card. Live job progress
+        lives on the merged Workers page (``/ui/workers``)."""
+        return _render_images_page(request)
 
     @app.get(
         "/ui/workers",
@@ -725,14 +679,7 @@ def register_ui_routes(
         release artifacts), Hashing, Backup. Active jobs only -- the
         events log is the history. Triggers stay on their home pages
         (catalog downloads on /ui/images, release artifacts on
-        /ui/netboot); only Backup has a trigger here.
-
-        The legacy ``/ui/downloads`` / ``/ui/hashes`` / ``/ui/fetches``
-        pages continue to render for now -- the navbar's three worker
-        icons all point at this merged page going forward, but the
-        legacy URLs still respond so direct links and operator muscle
-        memory keep working.
-        """
+        /ui/netboot); only Backup has a trigger here."""
         with _db.open_db(state_path) as conn:
             backup_enabled = _settings_store.resolve_backup_enabled(conn)
             backup_cadence = _settings_store.resolve_backup_cadence(conn)
@@ -956,11 +903,12 @@ def register_ui_routes(
         sha256, download) plus the TFTP daemon control.
 
         The artifacts header still carries a "Fetch latest artifacts"
-        button, but it enqueues the fetch and hands off to the Release
-        fetches page (``/ui/fetches``, under the navbar worker icon) to
-        watch progress. The router-side DHCP / PXE cheatsheet moved to
-        Settings. Operator-side artifact uploads stay scripted via the
-        auth-gated ``PUT /boot/{name}`` route, not the browser.
+        button, but it enqueues the fetch and hands off to the Workers
+        page (``/ui/workers#downloads``, under the navbar's Downloads
+        icon) to watch per-file progress. The router-side DHCP / PXE
+        cheatsheet moved to Settings. Operator-side artifact uploads
+        stay scripted via the auth-gated ``PUT /boot/{name}`` route,
+        not the browser.
         """
         with _db.open_db(state_path) as conn:
             release_repo = _settings_store.resolve_release_repo(conn)
@@ -990,41 +938,6 @@ def register_ui_routes(
     )
     def ui_netboot(request: Request) -> HTMLResponse:
         return _render_netboot_page(request)
-
-    def _render_fetches_page(
-        request: Request,
-        *,
-        flash: str | None = None,
-        flash_kind: str | None = None,
-    ) -> HTMLResponse:
-        """The Release fetches page (under the navbar's release-fetch
-        worker indicator, right of Settings): the "Fetch latest
-        artifacts" trigger and the live release-fetch jobs table (active
-        + recent, event-backfilled on restart), plus recent netboot
-        activity. The artifact inventory + TFTP daemon are on the Netboot
-        page."""
-        with _db.open_db(state_path) as conn:
-            boot_events = _events_log.list_events(conn, subject_kind="netboot", limit=10)
-            release_repo = _settings_store.resolve_release_repo(conn)
-            release_tag = _settings_store.resolve_release_tag(conn)
-        return render(
-            "ui/fetches.html",
-            request,
-            release_repo=release_repo,
-            release_tag=release_tag,
-            boot_events=boot_events,
-            flash=flash,
-            flash_kind=flash_kind,
-        )
-
-    @app.get(
-        "/ui/fetches",
-        response_class=HTMLResponse,
-        include_in_schema=False,
-        dependencies=[Depends(require_ui_auth)],
-    )
-    def ui_fetches(request: Request) -> HTMLResponse:
-        return _render_fetches_page(request)
 
     # ----- event log -----------------------------------------------------
 
