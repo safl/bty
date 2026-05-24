@@ -663,6 +663,67 @@ def test_ui_backups_download_missing_bundle_404(client: TestClient) -> None:
     assert r.status_code == 404
 
 
+def test_ui_backups_delete_removes_bundle_and_logs(client: TestClient, tmp_path: Path) -> None:
+    """``DELETE /ui/backups/{id}`` rmtree's the bundle, returns the
+    snapshotted counts, and the next page render shows the row gone."""
+    import json
+
+    backups_root = tmp_path / "backups"
+    bundle = backups_root / "2026-05-23T10-00-00Z"
+    (bundle / "images").mkdir(parents=True)
+    (bundle / "images" / "demo.img.gz").write_bytes(b"x" * 128)
+    (bundle / "manifest.json").write_text(
+        json.dumps(
+            {
+                "bty_export_version": 1,
+                "machines": [{"mac": "aa:bb:cc:dd:ee:01"}],
+                "catalog_entries": [{"name": "demo"}],
+            }
+        )
+    )
+
+    _login(client)
+    # Pre-check: the row is there.
+    body = client.get("/ui/backups").text
+    assert "2026-05-23T10-00-00Z" in body
+    assert 'class="btn-group btn-group-sm"' in body  # action group rendered
+    assert "bty-backups-delete" in body
+
+    r = client.delete("/ui/backups/2026-05-23T10-00-00Z")
+    assert r.status_code == 200
+    payload = r.json()
+    assert payload["backup_id"] == "2026-05-23T10-00-00Z"
+    assert payload["machines"] == 1
+    assert payload["images"] == 1
+
+    # Bundle is gone from disk + the on-disk table reverts to its
+    # empty state. (The backup_id will still appear in the Activity
+    # card as part of the ``backup.deleted`` event summary, so we
+    # assert via the empty-state copy rather than absence of the id.)
+    assert not bundle.exists()
+    body = client.get("/ui/backups").text
+    assert "No backups on disk yet" in body
+
+
+def test_ui_backups_delete_rejects_invalid_id(client: TestClient) -> None:
+    """A delete against a malformed slug returns 404 -- the validator
+    runs before any filesystem access. (URL ``..`` is normalised away
+    by Starlette before the route sees it, so the path-traversal
+    coverage uses slug-shaped strings that actually reach the
+    validator.)"""
+    _login(client)
+    for bad in ("not-a-date", "2026", "2026-05-23T99-99-99Z", "etc"):
+        r = client.delete(f"/ui/backups/{bad}")
+        assert r.status_code == 404, bad
+
+
+def test_ui_backups_delete_missing_bundle_404(client: TestClient) -> None:
+    """A well-shaped id whose bundle doesn't exist returns 404."""
+    _login(client)
+    r = client.delete("/ui/backups/2026-05-23T10-00-00Z")
+    assert r.status_code == 404
+
+
 def test_ui_settings_shows_dhcp_pxe_cheatsheet(client: TestClient) -> None:
     """The DHCP / Network-boot router-config cheatsheet on the Settings
     page renders BOTH net-boot paths: PXE-via-TFTP (60 PXEClient / 66

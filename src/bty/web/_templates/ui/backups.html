@@ -185,7 +185,7 @@
                     <th class="text-end">Images</th>
                     <th class="text-end">Size</th>
                     <th>bty version</th>
-                    <th class="text-end" style="width: 1%; white-space: nowrap;">Download</th>
+                    <th class="text-end" style="width: 1%; white-space: nowrap;">Actions</th>
                 </tr>
             </thead>
             <tbody>
@@ -208,11 +208,19 @@
                     </td>
                     <td class="small text-muted">{{ b.bty_version or '(unreadable)' }}</td>
                     <td class="text-end">
-                        <a class="btn btn-sm btn-outline-primary text-nowrap"
-                           href="/ui/backups/{{ b.backup_id }}/download"
-                           title="Download {{ b.backup_id }}.tar to this browser">
-                            <i class="bi bi-download me-1"></i>.tar
-                        </a>
+                        <div class="btn-group btn-group-sm" role="group">
+                            <a class="btn btn-outline-primary text-nowrap"
+                               href="/ui/backups/{{ b.backup_id }}/download"
+                               title="Download {{ b.backup_id }}.tar to this browser">
+                                <i class="bi bi-download me-1"></i>.tar
+                            </a>
+                            <button type="button"
+                                    class="btn btn-outline-danger text-nowrap bty-backups-delete"
+                                    data-backup-id="{{ b.backup_id }}"
+                                    title="Delete {{ b.backup_id }} from {{ backups_root }}">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </div>
                     </td>
                 </tr>
                 {% endfor %}
@@ -221,6 +229,36 @@
         </table>
     </div>
 </div>
+
+<script>
+(function () {
+    // Confirm-then-DELETE handler for the per-row trash button. The
+    // server validates the slug before touching the filesystem; here
+    // we just guard against an accidental click + reload the page on
+    // success so the operator sees the row gone + a fresh event in
+    // the activity card.
+    document.addEventListener("click", function (ev) {
+        var btn = ev.target.closest(".bty-backups-delete");
+        if (!btn) return;
+        var bid = btn.dataset.backupId;
+        if (!bid) return;
+        if (!window.confirm("Delete backup " + bid + "?\n\nThis removes the bundle from disk. The action is logged but cannot be undone.")) {
+            return;
+        }
+        btn.disabled = true;
+        fetch("/ui/backups/" + encodeURIComponent(bid), {
+            method: "DELETE",
+            credentials: "same-origin",
+        }).then(function (r) {
+            if (!r.ok) throw new Error("HTTP " + r.status);
+            window.location.reload();
+        }).catch(function (e) {
+            alert("Delete failed: " + e.message);
+            btn.disabled = false;
+        });
+    });
+})();
+</script>
 
 {% with events=backup_events,
         title="Recent activity",

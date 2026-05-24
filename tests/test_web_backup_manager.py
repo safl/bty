@@ -483,3 +483,53 @@ def test_is_valid_backup_id_accepts_iso_slug_only() -> None:
     assert is_valid_backup_id("") is False
     assert is_valid_backup_id("not-a-date") is False
     assert is_valid_backup_id("2026/05/23") is False
+
+
+def test_delete_bundle_rmtree_logs_event(tmp_path: Path) -> None:
+    """``delete_bundle`` removes the directory + emits a
+    ``backup.deleted`` event with the snapshotted counts."""
+    import json
+
+    from bty.web._backup import delete_bundle
+
+    state_path = _init_state(tmp_path)
+    backups_root = tmp_path / "backups"
+    bundle = backups_root / "2026-05-23T10-00-00Z"
+    (bundle / "images").mkdir(parents=True)
+    (bundle / "images" / "demo.img.gz").write_bytes(b"x" * 256)
+    (bundle / "manifest.json").write_text(
+        json.dumps(
+            {
+                "bty_export_version": 1,
+                "machines": [{"mac": "aa:bb:cc:dd:ee:01"}],
+                "catalog_entries": [{"name": "demo"}],
+            }
+        )
+    )
+
+    snapshot = delete_bundle(state_path, backups_root, "2026-05-23T10-00-00Z")
+    assert not bundle.exists()
+    assert snapshot.machines == 1
+    assert snapshot.catalog_entries == 1
+    assert snapshot.images == 1
+
+    # Audit log carries the new event with the snapshot counts.
+    with sqlite3.connect(state_path) as conn:
+        conn.row_factory = sqlite3.Row
+        events = _events_log.list_events(conn, subject_kind="backup", limit=10)
+    kinds = [e.kind for e in events]
+    assert "backup.deleted" in kinds
+    deleted = next(e for e in events if e.kind == "backup.deleted")
+    assert deleted.subject_id == "2026-05-23T10-00-00Z"
+    assert deleted.details["machines"] == 1
+    assert deleted.details["images"] == 1
+
+
+def test_delete_bundle_missing_raises_filenotfound(tmp_path: Path) -> None:
+    """A delete against a non-existent backup_id is a
+    FileNotFoundError -- callers translate to 404."""
+    from bty.web._backup import delete_bundle
+
+    state_path = _init_state(tmp_path)
+    with pytest.raises(FileNotFoundError):
+        delete_bundle(state_path, tmp_path / "backups", "2026-05-23T10-00-00Z")

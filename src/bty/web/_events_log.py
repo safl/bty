@@ -120,6 +120,7 @@ KNOWN_EVENT_KINDS: tuple[str, ...] = (
     "backup.created",
     "backup.failed",
     "backup.pruned",
+    "backup.deleted",
     "auth.login.succeeded",
     "auth.login.failed",
     "auth.logout",

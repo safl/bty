@@ -799,6 +799,41 @@ def register_ui_routes(
             },
         )
 
+    @app.delete(
+        "/ui/backups/{backup_id}",
+        include_in_schema=False,
+        dependencies=[Depends(require_ui_auth)],
+    )
+    def ui_backups_delete(backup_id: str) -> dict[str, Any]:
+        """Operator-initiated delete of one on-disk backup bundle.
+
+        Distinct from the cancel-in-flight route on ``/workers/backups``
+        -- this targets a completed bundle sitting in ``backups_root``,
+        not a queued / running job. Validates the slug before touching
+        the filesystem (same guard as the download endpoint), then
+        ``rmtree`` + records a ``backup.deleted`` audit event. The
+        UI then re-renders the page to reflect the new list.
+        """
+        if not _backup.is_valid_backup_id(backup_id):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"backup not found: {backup_id!r}",
+            )
+        try:
+            snapshot = _backup.delete_bundle(state_path, backups_root, backup_id)
+        except FileNotFoundError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"backup not found: {backup_id!r}",
+            ) from exc
+        return {
+            "backup_id": snapshot.backup_id,
+            "machines": snapshot.machines,
+            "catalog_entries": snapshot.catalog_entries,
+            "images": snapshot.images,
+            "bytes_on_disk": snapshot.bytes_on_disk,
+        }
+
     @app.post(
         "/ui/catalog/entries",
         include_in_schema=False,

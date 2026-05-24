@@ -9,6 +9,85 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.27.0] - 2026-05-24
+
+The "Backups page complete" + pre-1.0 strict-validation release.
+
+### Added
+
+- **On-disk backup listing on `/ui/backups`.** A new "Backups on
+  disk" card lists every bundle under `$BTY_BACKUP_DIR` -- newest
+  first -- with machine / catalog / image counts pulled from each
+  bundle's `manifest.json`, total bytes-on-disk, and the bty
+  version that produced it. Empty-state copy points the operator
+  at the trigger / Settings cadence. A bundle with a missing or
+  malformed manifest still lists with blank metadata so orphans
+  are visible to the operator instead of silently hidden.
+- **Per-bundle tar download.** Each on-disk row carries a `.tar`
+  button pointing at `GET /ui/backups/{backup_id}/download`,
+  which streams an uncompressed tar via `tarfile.open(mode="w|")`.
+  Members are rooted at the backup_id directory so
+  `tar -xf 2026-05-23T10-00-00Z.tar` produces a same-named
+  folder ready for `bty-web import`. Multi-GiB bundles don't
+  materialise in memory -- the per-chunk buffer holds at most
+  one tar member at a time.
+- **Per-bundle delete.** Each on-disk row carries a trash button
+  hitting `DELETE /ui/backups/{backup_id}` (with a JS confirm
+  prompt). `rmtree` + a new `backup.deleted` audit event with
+  the snapshotted counts. The operator now has full CRUD over
+  backups from the UI: trigger, download, delete; the scheduler
+  + retention still own automatic creation + pruning.
+- **Retention number visible.** The schedule summary on
+  `/ui/backups` now shows `Retention: keep last N (prunes oldest
+  on every successful backup)`. Retention already applied to
+  every successful backup regardless of trigger; only the
+  operator-facing surface was missing.
+
+### Changed
+
+- **`resolve_backup_*` resolvers are strict.** A non-canonical
+  value in state.db now raises `SettingValueError` instead of
+  silently coercing to a default. The Settings form already
+  writes canonical values ("1" / "0" / known cadence / positive
+  int), so live deployments are unaffected; only a hand-edit of
+  state.db can trip the new path. The form handler returns 422
+  (not a silent 303 with the value coerced) on unknown cadence
+  or non-numeric / sub-1 retention.
+- **`?saved=upstream` replaces `?saved=1`.** The upstream-settings
+  form's success redirect uses the canonical key. Unknown
+  `?saved=X` values now skip the banner instead of falling back
+  to a generic "Saved." -- a hand-crafted URL can't echo
+  arbitrary strings into the UI. Pre-1.0 policy: dropped the
+  legacy `"1"` flash key with no back-compat shim.
+- **`BTY_WEB_PORT` validation is strict.** A typo'd or out-of-
+  range value hard-exits with status 2 + a clear error, instead
+  of silently warning + falling back to 8080. Operators who set
+  the env var meant it; silent fallback masks the bug until they
+  notice the port didn't take effect.
+
+### Fixed
+
+- **`/ui/backups` no longer hides empty state.** The page previously
+  required at least one in-flight or recent backup to look useful;
+  fresh appliances showed an empty table with no hint of what to
+  do next. The new on-disk card carries an explicit "click Back
+  up now, or enable a schedule" pointer.
+
+### Removed
+
+- **Historical "what used to be here (v0.14 - v0.17.1)" memorial
+  block in `_sysconfig.py`.** Pre-1.0 doesn't owe operators a
+  tour of removed code; git history serves that purpose.
+- **Defensive pre-Phase-E JS branch in `downloads.html`.** The
+  fallback for `ReleaseFetchState` rows without an `artifacts`
+  array served no live code path -- the per-artifact split has
+  been authoritative since landing.
+
+### Audit log
+
+- New event kind: `backup.deleted` (operator-initiated removal
+  of an on-disk bundle).
+
 ## [0.26.0] - 2026-05-24
 
 The "workers reshape + scheduled backups + Ventoy CI" release.

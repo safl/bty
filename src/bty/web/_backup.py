@@ -27,7 +27,8 @@ The retention setting reads at run time so a Settings change
 reflects on the next backup without restart.
 
 History: backup outcomes land in the audit log as ``backup.created``
-/ ``backup.failed`` / ``backup.pruned`` events. The manager itself
+/ ``backup.failed`` / ``backup.pruned`` / ``backup.deleted`` events.
+The manager itself
 does NOT backfill its in-memory state from those events on restart
 -- ``/ui/backups`` only renders queued + running jobs (terminal
 states evict immediately from the UI), with history visible via the
@@ -449,6 +450,49 @@ def is_valid_backup_id(name: str) -> bool:
     never look at sibling directories of ``backups_root``.
     """
     return _looks_like_backup_id(name)
+
+
+def delete_bundle(state_path: Path, backups_root: Path, backup_id: str) -> BackupOnDisk:
+    """Remove one bundle directory from disk + log an audit event.
+
+    Caller MUST have validated ``backup_id`` against
+    :func:`is_valid_backup_id` already -- this helper trusts the
+    shape and joins ``backups_root / backup_id`` without further
+    sanitising. Returns the :class:`BackupOnDisk` snapshot captured
+    just before the rmtree, so the event log entry + UI feedback
+    can name the counts the operator just lost.
+
+    Raises :class:`FileNotFoundError` if no such bundle exists --
+    the route handler translates that to a 404.
+    """
+    bundle = backups_root / backup_id
+    if not bundle.is_dir():
+        raise FileNotFoundError(f"no such backup: {backup_id}")
+    snapshot = _read_bundle(bundle)
+    shutil.rmtree(bundle)
+    with _db.open_db(state_path) as conn:
+        _log_event(
+            conn,
+            kind="backup.deleted",
+            summary=(
+                f"backup {backup_id!r} deleted by operator "
+                f"({snapshot.machines} machines, "
+                f"{snapshot.catalog_entries} catalog entries, "
+                f"{snapshot.images} images, {snapshot.bytes_on_disk} bytes)"
+            ),
+            subject_kind="backup",
+            subject_id=backup_id,
+            actor="operator",
+            details={
+                "backup_id": backup_id,
+                "machines": snapshot.machines,
+                "catalog_entries": snapshot.catalog_entries,
+                "images": snapshot.images,
+                "bytes_on_disk": snapshot.bytes_on_disk,
+            },
+        )
+        conn.commit()
+    return snapshot
 
 
 def iter_bundle_tar(bundle: Path) -> Iterator[bytes]:
