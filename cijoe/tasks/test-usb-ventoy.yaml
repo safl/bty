@@ -141,6 +141,29 @@ steps:
       print(f"OK: catalog loaded {len(names)} entry/ies: {names}")
       PY
 
+- name: assert_wizard_rendered_on_tty1
+  uses: core.cmdrunner
+  with:
+    transport: usb_ventoy_guest
+    commands:
+    # CI gap exposed by a v0.30.0 operator report: nothing here
+    # actually invoked the ``bty`` binary or confirmed
+    # bty-on-tty1.service had rendered the wizard on tty1. The two
+    # asserts above ran Python imports + catalog parsing -- both
+    # would pass even if the bty entry point itself were wedged
+    # (failed Rich init, BtyTui constructor crash, wrapper script
+    # exiting before exec). /dev/vcs1 is the kernel's snapshot of
+    # tty1's framebuffer; ``Pick an image source`` is a string ONLY
+    # the rendered wizard produces -- the wrapper's pre-Rich
+    # ``bty is starting...`` deliberately doesn't match, so a bty
+    # binary that prints the banner then crashes before drawing
+    # fails here. 60s budget for cold-cache import chains.
+    - "systemctl is-active bty-on-tty1.service"
+    - "for i in $(seq 1 60); do grep -q 'Pick an image source' /dev/vcs1 && break; sleep 1; done"
+    - "cat /run/bty.status 2>&1 || echo NO_STATUS_FILE"
+    - "tr -cd '[:print:]\\n' < /dev/vcs1 | head -10 || true"
+    - "grep -q 'Pick an image source' /dev/vcs1"
+
 - name: poweroff_guest
   uses: core.cmdrunner
   with:
