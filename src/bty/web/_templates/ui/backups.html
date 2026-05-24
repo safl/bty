@@ -116,12 +116,32 @@
                    "</tr>";
         }).join("");
     }
+    // Active-job count from the previous poll. The on-disk listing +
+    // Recent activity cards are server-rendered; when a backup
+    // transitions from active to terminal (queued|running -> done)
+    // we need a fresh server render so they reflect the new bundle +
+    // the new event row. Tracking this lets us reload exactly once
+    // per backup completion -- not every poll, and not when nothing
+    // changed.
+    var lastActiveCount = 0;
     function refresh() {
         var ts = "updated " + new Date().toLocaleTimeString();
         return fetch("/workers/backups", { credentials: "same-origin" })
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (data) {
-                render(data ? data.backups : []);
+                var jobs = (data && data.backups) || [];
+                render(jobs);
+                var activeCount = jobs.filter(isActive).length;
+                if (lastActiveCount > 0 && activeCount === 0) {
+                    // A backup just finished. Reload so the on-disk +
+                    // activity cards pick up the new state. The worker
+                    // commits to the DB + prunes before flipping status
+                    // to terminal, so the page render is coherent at
+                    // the moment we observe activeCount drop to 0.
+                    window.location.reload();
+                    return;
+                }
+                lastActiveCount = activeCount;
                 var statusEl = document.querySelector(".bty-workers-poll-status");
                 if (statusEl) statusEl.textContent = data ? ts : "(poll failed)";
             }).catch(function () {

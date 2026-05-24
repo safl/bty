@@ -167,6 +167,43 @@
    enqueues a fetch any more. The inventory table here just renders
    the current present/missing state from inspect_boot_dir. #}
 
+<script>
+(function () {
+    // The artifacts table + the Recent events card are server-rendered
+    // off inspect_boot_dir() + the events log. When the operator
+    // enqueues a fetch on /ui/downloads and the fetch completes, this
+    // page has no idea -- the badges stay "missing" until manual
+    // refresh. Poll /boot/releases for fetch status; reload when an
+    // active fetch transitions to terminal (completed | failed) so
+    // the present/missing badges + the activity card update on their
+    // own. Same idiom as the Backups page's lastActiveCount reload.
+    var lastActiveCount = 0;
+    function isActive(f) {
+        return f && (f.status === "queued" || f.status === "running");
+    }
+    function poll() {
+        return fetch("/boot/releases", { credentials: "same-origin" })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (data) {
+                var fetches = (data && data.fetches) || [];
+                var activeCount = fetches.filter(isActive).length;
+                if (lastActiveCount > 0 && activeCount === 0) {
+                    window.location.reload();
+                    return;
+                }
+                lastActiveCount = activeCount;
+            }).catch(function () { /* transient; next tick retries */ });
+    }
+    var handle = null;
+    function start() { if (!handle) { poll(); handle = setInterval(poll, 2000); } }
+    function stop()  { if (handle) { clearInterval(handle); handle = null; } }
+    document.addEventListener("visibilitychange", function () {
+        if (document.hidden) stop(); else start();
+    });
+    start();
+})();
+</script>
+
 {# Recent netboot activity (release fetches + fetch failures). The
    "Activity" sub-nav anchor jumps here; always rendered (empty-state
    row when there's nothing yet). #}

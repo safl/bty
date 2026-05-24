@@ -110,12 +110,25 @@
                    "</tr>";
         }).join("");
     }
+    // Active-job count from the previous poll. The Recent activity
+    // card + the cached-sha badges on /ui/images are server-rendered;
+    // when a hash transitions from active to terminal we reload so
+    // the operator sees the new event + the updated badges without
+    // a manual refresh. Same idiom as the Backups page.
+    var lastActiveCount = 0;
     function refresh() {
         var ts = "updated " + new Date().toLocaleTimeString();
         return fetch("/catalog/hashes", { credentials: "same-origin" })
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (data) {
-                render(data ? data.hashes : []);
+                var jobs = (data && data.hashes) || [];
+                render(jobs);
+                var activeCount = jobs.filter(isActive).length;
+                if (lastActiveCount > 0 && activeCount === 0) {
+                    window.location.reload();
+                    return;
+                }
+                lastActiveCount = activeCount;
                 var statusEl = document.querySelector(".bty-workers-poll-status");
                 if (statusEl) statusEl.textContent = data ? ts : "(poll failed)";
             }).catch(function () {

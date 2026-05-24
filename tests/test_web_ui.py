@@ -724,6 +724,21 @@ def test_ui_backups_delete_missing_bundle_404(client: TestClient) -> None:
     assert r.status_code == 404
 
 
+def test_ui_backups_page_auto_reload_on_completion(client: TestClient) -> None:
+    """The Backups page polling JS reloads on the active-count
+    transition (>0 -> 0), so the on-disk + Recent activity cards
+    update on their own when a backup finishes. We can't drive the
+    JS in this hermetic test; just assert the source carries the
+    transition trigger so we won't silently regress to "operator
+    must reload manually"."""
+    _login(client)
+    body = client.get("/ui/backups").text
+    # Closure variable + the reload trigger live together in the
+    # refresh() function; assert both shapes appear.
+    assert "lastActiveCount" in body
+    assert "window.location.reload" in body
+
+
 def test_ui_settings_shows_dhcp_pxe_cheatsheet(client: TestClient) -> None:
     """The DHCP / Network-boot router-config cheatsheet on the Settings
     page renders BOTH net-boot paths: PXE-via-TFTP (60 PXEClient / 66
@@ -1700,7 +1715,10 @@ def test_ui_settings_renders_backup_schedule_card(client: TestClient) -> None:
     """The Settings page carries a Backup schedule card with the
     three knobs (enabled / cadence / retention) and the read-only
     destination row, anchored at ``#backup-schedule`` and reachable
-    from the subnav."""
+    from the subnav. The always-relevant block (Retention + Destination
+    + Last run) sits above an ``<hr>`` separator, with the optional
+    schedule knobs (Enable + Cadence) below it -- so an operator who
+    never enables the scheduler still sees what matters."""
     _login(client)
     body = client.get("/ui/settings").text
     assert 'id="backup-schedule"' in body
@@ -1712,6 +1730,18 @@ def test_ui_settings_renders_backup_schedule_card(client: TestClient) -> None:
     assert 'value="weekly"' in body
     assert 'value="manual"' in body
     assert 'name="backup_retention_count"' in body
+    # Layout: Retention + Destination + Last-run come BEFORE the <hr>
+    # which comes BEFORE the Enable/Cadence schedule knobs. Slice the
+    # backup-schedule card out and check the order.
+    card_start = body.index('id="backup-schedule"')
+    card_end = body.index("Save backup schedule", card_start)
+    card = body[card_start:card_end]
+    retention_at = card.index('name="backup_retention_count"')
+    hr_at = card.index("<hr")
+    enable_at = card.index('name="backup_enabled"')
+    assert retention_at < hr_at < enable_at, (
+        f"backup card order wrong: retention={retention_at} hr={hr_at} enable={enable_at}"
+    )
 
 
 def test_ui_settings_backup_round_trip(client: TestClient) -> None:

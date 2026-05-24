@@ -103,6 +103,35 @@
     </div>
     <div class="card-body">
         <form method="post" action="/ui/settings/backup">
+            {# Always-relevant block: retention applies on every successful
+               backup (manual or scheduled), and destination + last-run are
+               useful regardless of whether the scheduler is enabled. The
+               schedule (enable + cadence) is the optional layer below the
+               <hr> -- it only matters if the operator wants bty to fire
+               backups on its own. #}
+            <div class="mb-3">
+                <label for="backup_retention_count" class="form-label">Retention</label>
+                <input type="number" class="form-control" id="backup_retention_count"
+                       name="backup_retention_count" min="1" max="999"
+                       value="{{ backup_retention_count }}" style="max-width: 8rem;">
+                <div class="form-text small">
+                    Keep the N most recent backups under
+                    <code>{{ backups_root }}</code>. Older directories are deleted
+                    after every successful run -- manual or scheduled. Set to 1 to
+                    keep only the latest.
+                </div>
+            </div>
+            <div class="mb-3 small">
+                <strong>Destination:</strong> <code>{{ backups_root }}</code>
+                {% if backup_last_run_at %}
+                <br><strong>Last scheduled run:</strong>
+                <code>{{ backup_last_run_at }}</code>
+                {% else %}
+                <br><strong>Last scheduled run:</strong>
+                <span class="text-muted">never</span>
+                {% endif %}
+            </div>
+            <hr class="my-4">
             <div class="form-check form-switch mb-3">
                 <input type="checkbox" class="form-check-input" id="backup_enabled"
                        name="backup_enabled" {% if backup_enabled %}checked{% endif %}>
@@ -132,27 +161,6 @@
                     </label>
                 </div>
                 {% endfor %}
-            </div>
-            <div class="mb-3">
-                <label for="backup_retention_count" class="form-label">Retention</label>
-                <input type="number" class="form-control" id="backup_retention_count"
-                       name="backup_retention_count" min="1" max="999"
-                       value="{{ backup_retention_count }}" style="max-width: 8rem;">
-                <div class="form-text small">
-                    Keep the N most recent backups under
-                    <code>{{ backups_root }}</code>. Older directories are deleted
-                    after every successful run. Set to 1 to keep only the latest.
-                </div>
-            </div>
-            <div class="mb-3 small">
-                <strong>Destination:</strong> <code>{{ backups_root }}</code>
-                {% if backup_last_run_at %}
-                <br><strong>Last scheduled run:</strong>
-                <code>{{ backup_last_run_at }}</code>
-                {% else %}
-                <br><strong>Last scheduled run:</strong>
-                <span class="text-muted">never</span>
-                {% endif %}
             </div>
             <button type="submit" class="btn btn-primary">
                 <i class="bi bi-save me-1"></i>Save backup schedule

@@ -9,6 +9,44 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.28.0] - 2026-05-24
+
+The "auto-refresh + Backup card reshape" release. Three places where
+the operator used to have to manually reload the page now refresh on
+their own.
+
+### Added
+
+- **Backups page auto-reloads on completion.** When the polling loop
+  observes a backup transitioning from active to terminal (the
+  active-job count drops to 0), the page reloads so the on-disk
+  listing + Recent activity cards reflect the new bundle + the new
+  event without the operator pressing F5. Same trick as the
+  Downloads page's `seenCompletedKeys`, but tracked as a closure-
+  level `lastActiveCount`.
+- **Hashing page auto-reloads on completion.** Mirrors the Backups
+  pattern: when a hash job completes, the page reloads so the cached
+  sha badge on /ui/images + the Recent activity card pick up the
+  new state.
+- **Netboot page auto-reloads when a release fetch completes.** The
+  artifact present/missing badges + the Recent events card were
+  server-rendered and went stale until the operator hit refresh.
+  New lightweight poller checks `/boot/releases` every 2s; reloads
+  when an active fetch hits a terminal state.
+
+### Changed
+
+- **Backup schedule card reorganised.** Retention + Destination +
+  Last scheduled run move to the top of the form, above an `<hr>`;
+  the optional Enable + Cadence knobs live below. Retention applies
+  to every successful backup (manual or scheduled) so it's an
+  always-relevant knob, not a property of the schedule.
+- **/ui/images per-row Actions standardised to `btn-group btn-
+  group-sm`.** Hash / Fetch / Cache-delete / Catalog-delete now sit
+  flush in a Bootstrap button group, same idiom as the Backups page's
+  Download + Delete column. The `ms-1` margin spacing pattern is
+  gone.
+
 ## [0.27.0] - 2026-05-24
 
 The "Backups page complete" + pre-1.0 strict-validation release.

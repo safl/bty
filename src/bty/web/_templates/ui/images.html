@@ -118,40 +118,49 @@
                              back-fills catalog_entries.disk_image_sha) AND
                              for sha-pinned entries not yet in cache. #}
                         {% set has_local = u.sources|selectattr('kind','equalto','local')|list|length > 0 %}
-                        {% if not u.sha256 and has_local %}
-                        <button type="button"
-                                class="btn btn-sm btn-warning text-nowrap bty-hash-btn"
-                                data-name="{{ u.names[0] }}">
-                            <i class="bi bi-hash me-1"></i>Hash
-                        </button>
-                        {% elif not u.cached %}
-                        <button type="button"
-                                class="btn btn-sm btn-primary text-nowrap bty-fetch-btn"
-                                data-name="{{ u.names[0] }}">
-                            <i class="bi bi-cloud-download me-1"></i>Fetch
-                        </button>
-                        {% endif %}
                         {% set has_remote = u.sources|selectattr('kind','in',['manifest','url'])|list|length > 0 %}
-                        {% if u.cached and has_remote %}
-                        <button type="button"
-                                class="btn btn-sm btn-outline-warning ms-1 bty-cache-delete-btn"
-                                data-name="{{ u.names[0] }}"
-                                title="Delete cached bytes (entry stays; Fetch re-downloads)"
-                                aria-label="Delete cached bytes">
-                            <i class="bi bi-eraser"></i>
-                        </button>
-                        {% endif %}
-                        {% if has_remote %}
                         {% set entry_src = u.sources|selectattr('kind','in',['manifest','url'])|map(attribute='location')|first %}
-                        <button type="button"
-                                class="btn btn-sm btn-outline-danger ms-1 bty-catalog-entry-delete-btn"
-                                data-src="{{ entry_src }}"
-                                title="Remove this entry from the catalog"
-                                aria-label="Remove this entry from the catalog">
-                            <i class="bi bi-trash"></i>
-                        </button>
-                        {% endif %}
-                        {% if not has_remote and not u.cached and not (not u.sha256 and has_local) %}
+                        {# Render per-row actions as a Bootstrap btn-group
+                           so the buttons sit flush -- same idiom as the
+                           Backups page's Download + Delete. The group is
+                           omitted entirely when no action applies (sha-
+                           pinned + cached + has_remote=False), in which
+                           case the cell shows a muted dash. #}
+                        {% if has_remote or u.cached or (not u.sha256 and has_local) %}
+                        <div class="btn-group btn-group-sm" role="group">
+                            {% if not u.sha256 and has_local %}
+                            <button type="button"
+                                    class="btn btn-warning text-nowrap bty-hash-btn"
+                                    data-name="{{ u.names[0] }}">
+                                <i class="bi bi-hash me-1"></i>Hash
+                            </button>
+                            {% elif not u.cached %}
+                            <button type="button"
+                                    class="btn btn-primary text-nowrap bty-fetch-btn"
+                                    data-name="{{ u.names[0] }}">
+                                <i class="bi bi-cloud-download me-1"></i>Fetch
+                            </button>
+                            {% endif %}
+                            {% if u.cached and has_remote %}
+                            <button type="button"
+                                    class="btn btn-outline-warning bty-cache-delete-btn"
+                                    data-name="{{ u.names[0] }}"
+                                    title="Delete cached bytes (entry stays; Fetch re-downloads)"
+                                    aria-label="Delete cached bytes">
+                                <i class="bi bi-eraser"></i>
+                            </button>
+                            {% endif %}
+                            {% if has_remote %}
+                            <button type="button"
+                                    class="btn btn-outline-danger bty-catalog-entry-delete-btn"
+                                    data-src="{{ entry_src }}"
+                                    title="Remove this entry from the catalog"
+                                    aria-label="Remove this entry from the catalog">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                            {% endif %}
+                        </div>
+                        {% else %}
                         <span class="text-muted small">-</span>
                         {% endif %}
                     </td>
