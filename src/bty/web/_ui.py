@@ -1289,18 +1289,16 @@ def register_ui_routes(
     )
     def ui_settings(request: Request, saved: str | None = None) -> HTMLResponse:
         # ``saved`` carries which form just submitted (so the success
-        # banner can be specific). The legacy upstream form posts back
-        # ``?saved=1`` for back-compat with old bookmarks; the backup
-        # form uses ``?saved=backup``.
+        # banner can be specific). Upstream POSTs back ``?saved=upstream``;
+        # backup POSTs back ``?saved=backup``. Unknown values render the
+        # page without a banner -- a hand-crafted ``?saved=foo`` won't
+        # echo arbitrary strings into the UI.
         flash_map = {
-            "1": "Upstream sources saved.",
             "upstream": "Upstream sources saved.",
             "backup": "Backup schedule saved.",
         }
         flash = flash_map.get(saved or "")
-        if saved and flash is None:
-            flash = "Saved."
-        return _render_settings_page(request, flash=flash, flash_kind="success" if saved else None)
+        return _render_settings_page(request, flash=flash, flash_kind="success" if flash else None)
 
     @app.get(
         "/ui/account",
@@ -1360,7 +1358,9 @@ def register_ui_routes(
                 source_ip=_client_ip(request),
             )
             conn.commit()
-        return RedirectResponse("/ui/settings?saved=1", status_code=status.HTTP_303_SEE_OTHER)
+        return RedirectResponse(
+            "/ui/settings?saved=upstream", status_code=status.HTTP_303_SEE_OTHER
+        )
 
     @app.post(
         "/ui/settings/backup",
@@ -1379,28 +1379,35 @@ def register_ui_routes(
           backup_enabled         -- checkbox; present (any truthy) =
                                     enabled, absent (HTML omits unchecked
                                     boxes entirely) = disabled.
-          backup_cadence         -- one of BACKUP_CADENCES; unknown
-                                    values reject as 422 via the
-                                    settings-store resolver fallback,
-                                    so we soft-validate here against the
-                                    same tuple.
-          backup_retention_count -- positive int; non-numeric / sub-1
-                                    reverts to the default via the
-                                    settings-store resolver.
+          backup_cadence         -- one of BACKUP_CADENCES; an unknown
+                                    value returns 422 -- no soft fallback.
+          backup_retention_count -- positive int (>= 1); non-numeric or
+                                    sub-1 returns 422.
 
         Effects propagate within the scheduler's next tick (60s) -- no
         restart needed.
         """
-        cadence_raw = backup_cadence.strip()
-        cadence = (
-            cadence_raw
-            if cadence_raw in _settings_store.BACKUP_CADENCES
-            else _settings_store.DEFAULT_BACKUP_CADENCE
-        )
+        cadence = backup_cadence.strip()
+        if cadence not in _settings_store.BACKUP_CADENCES:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=(
+                    f"backup_cadence={cadence!r} is not a known cadence "
+                    f"(expected one of {', '.join(_settings_store.BACKUP_CADENCES)})"
+                ),
+            )
         try:
-            retention = max(1, int(backup_retention_count))
-        except (TypeError, ValueError):
-            retention = _settings_store.DEFAULT_BACKUP_RETENTION
+            retention = int(backup_retention_count)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=f"backup_retention_count={backup_retention_count!r} is not an integer",
+            ) from exc
+        if retention < 1:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=f"backup_retention_count={retention} is out of range (must be >= 1)",
+            )
         enabled = bool(backup_enabled)
         with _db.open_db(state_path) as conn:
             _settings_store.set_value(

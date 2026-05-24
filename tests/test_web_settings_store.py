@@ -93,36 +93,41 @@ def test_backup_enabled_default_off(tmp_path: Path) -> None:
         assert _settings_store.resolve_backup_enabled(conn) is False
 
 
-def test_backup_enabled_truthy_spellings(tmp_path: Path) -> None:
-    """Tolerant boolean parsing -- ``1`` is the canonical value the form
-    writes, but ``true`` / ``yes`` / ``on`` survive a hand-edit of
-    state.db."""
+def test_backup_enabled_strict_canonical(tmp_path: Path) -> None:
+    """Only the canonical ``"1"`` / ``"0"`` spellings round-trip; anything
+    else (legacy ``"true"`` / ``"on"``, empty string, garbage) raises
+    :class:`SettingValueError` so a hand-edited state.db is loud rather
+    than silently rolling forward as enabled-or-not."""
     with _conn(tmp_path) as conn:
-        for raw in ("1", "true", "TRUE", "yes", "on"):
+        _settings_store.set_value(conn, _settings_store.KEY_BACKUP_ENABLED, "1")
+        assert _settings_store.resolve_backup_enabled(conn) is True
+        _settings_store.set_value(conn, _settings_store.KEY_BACKUP_ENABLED, "0")
+        assert _settings_store.resolve_backup_enabled(conn) is False
+        for raw in ("true", "false", "yes", "no", "on", "off", "", "TRUE"):
             _settings_store.set_value(conn, _settings_store.KEY_BACKUP_ENABLED, raw)
-            assert _settings_store.resolve_backup_enabled(conn) is True, raw
-        for raw in ("0", "false", "no", "off", ""):
-            _settings_store.set_value(conn, _settings_store.KEY_BACKUP_ENABLED, raw)
-            assert _settings_store.resolve_backup_enabled(conn) is False, raw
+            with pytest.raises(_settings_store.SettingValueError):
+                _settings_store.resolve_backup_enabled(conn)
 
 
-def test_backup_cadence_default_and_validation(tmp_path: Path) -> None:
-    """Unset -> default; unknown value -> default; known values stick."""
+def test_backup_cadence_default_and_strict_validation(tmp_path: Path) -> None:
+    """Unset -> default; known values stick; unknown value RAISES
+    rather than silently falling back to the default -- a hand-edited
+    cadence has to be corrected before the scheduler will run."""
     default = _settings_store.DEFAULT_BACKUP_CADENCE
     with _conn(tmp_path) as conn:
         assert _settings_store.resolve_backup_cadence(conn) == default
         for cadence in _settings_store.BACKUP_CADENCES:
             _settings_store.set_value(conn, _settings_store.KEY_BACKUP_CADENCE, cadence)
             assert _settings_store.resolve_backup_cadence(conn) == cadence
-        # Hand-edited typo / unknown value falls back to default rather
-        # than wedging the scheduler.
         _settings_store.set_value(conn, _settings_store.KEY_BACKUP_CADENCE, "fortnightly")
-        assert _settings_store.resolve_backup_cadence(conn) == default
+        with pytest.raises(_settings_store.SettingValueError):
+            _settings_store.resolve_backup_cadence(conn)
 
 
-def test_backup_retention_default_and_validation(tmp_path: Path) -> None:
-    """Unset -> default; non-numeric -> default; sub-1 -> default;
-    positive int sticks."""
+def test_backup_retention_default_and_strict_validation(tmp_path: Path) -> None:
+    """Unset -> default; positive int sticks; non-numeric or sub-1
+    RAISES rather than silently falling back -- pre-1.0 wants loud
+    state.db corruption, not silent rollover."""
     with _conn(tmp_path) as conn:
         assert (
             _settings_store.resolve_backup_retention(conn)
@@ -130,16 +135,10 @@ def test_backup_retention_default_and_validation(tmp_path: Path) -> None:
         )
         _settings_store.set_value(conn, _settings_store.KEY_BACKUP_RETENTION, "14")
         assert _settings_store.resolve_backup_retention(conn) == 14
-        _settings_store.set_value(conn, _settings_store.KEY_BACKUP_RETENTION, "abc")
-        assert (
-            _settings_store.resolve_backup_retention(conn)
-            == _settings_store.DEFAULT_BACKUP_RETENTION
-        )
-        _settings_store.set_value(conn, _settings_store.KEY_BACKUP_RETENTION, "0")
-        assert (
-            _settings_store.resolve_backup_retention(conn)
-            == _settings_store.DEFAULT_BACKUP_RETENTION
-        )
+        for raw in ("abc", "0", "-1", "1.5", ""):
+            _settings_store.set_value(conn, _settings_store.KEY_BACKUP_RETENTION, raw)
+            with pytest.raises(_settings_store.SettingValueError):
+                _settings_store.resolve_backup_retention(conn)
 
 
 def test_backup_last_run_at_round_trip(tmp_path: Path) -> None:

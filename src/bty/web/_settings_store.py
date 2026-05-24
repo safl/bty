@@ -117,41 +117,74 @@ def resolve_release_tag(conn: sqlite3.Connection) -> str:
 # ----- Backup schedule resolvers ----------------------------------------
 #
 # Booleans / ints / cadence strings round-trip through the same text-
-# valued settings table. Helpers below give callers typed reads with
-# defensible defaults; the Settings form writes via :func:`set_value`
-# and clears via :func:`clear`.
+# valued settings table. Helpers below give callers typed reads;
+# the Settings form writes via :func:`set_value` and clears via
+# :func:`clear`. Resolvers are strict: a stored value that does not
+# match the canonical form raises -- pre-1.0 wants a loud signal that
+# state.db has been hand-edited into something the UI no longer
+# understands, not a silent fallback that hides the divergence.
+
+
+class SettingValueError(ValueError):
+    """Raised when a stored settings value can't be parsed.
+
+    The Settings form normalises every value to its canonical form
+    before persisting (``"1"`` / ``"0"`` for booleans, one of
+    :data:`BACKUP_CADENCES` for cadence, a positive int for retention).
+    A resolver only fires this when something else -- typically a
+    hand-edit of state.db or a stale row left over from an older
+    schema -- put a non-canonical value into the row. Operators can
+    clear the offending key via the Settings form (or
+    ``sqlite3 state.db "DELETE FROM settings WHERE key=...;"``) to
+    revert to the default.
+    """
 
 
 def resolve_backup_enabled(conn: sqlite3.Connection) -> bool:
-    """Effective ``backup.enabled``. Stored as ``"1"`` / ``"0"`` for
-    easy human inspection of state.db; legacy ``"true"`` / ``"false"``
-    spelling tolerated (for hand-edited values)."""
+    """Effective ``backup.enabled``. ``None`` (unset) -> ``False``;
+    ``"1"`` -> ``True``; ``"0"`` -> ``False``; anything else raises
+    :class:`SettingValueError`."""
     raw = get(conn, KEY_BACKUP_ENABLED)
     if raw is None:
         return False
-    return raw.lower() in ("1", "true", "yes", "on")
+    if raw == "1":
+        return True
+    if raw == "0":
+        return False
+    raise SettingValueError(f"{KEY_BACKUP_ENABLED}={raw!r} is not canonical (expected '1' or '0')")
 
 
 def resolve_backup_cadence(conn: sqlite3.Connection) -> str:
-    """Effective ``backup.cadence``. Unknown values fall back to the
-    default so a hand-edited typo doesn't wedge the scheduler -- this
-    matches the rest of the settings_store soft-validation pattern."""
-    raw = get(conn, KEY_BACKUP_CADENCE) or DEFAULT_BACKUP_CADENCE
-    return raw if raw in BACKUP_CADENCES else DEFAULT_BACKUP_CADENCE
+    """Effective ``backup.cadence``. ``None`` (unset) ->
+    :data:`DEFAULT_BACKUP_CADENCE`; a value in :data:`BACKUP_CADENCES`
+    is returned as-is; anything else raises
+    :class:`SettingValueError`."""
+    raw = get(conn, KEY_BACKUP_CADENCE)
+    if raw is None:
+        return DEFAULT_BACKUP_CADENCE
+    if raw in BACKUP_CADENCES:
+        return raw
+    raise SettingValueError(
+        f"{KEY_BACKUP_CADENCE}={raw!r} is not a known cadence "
+        f"(expected one of {', '.join(BACKUP_CADENCES)})"
+    )
 
 
 def resolve_backup_retention(conn: sqlite3.Connection) -> int:
-    """Effective ``backup.retention_count``. Non-numeric or sub-1
-    values fall back to the default (operator can clear the row to
-    reset)."""
+    """Effective ``backup.retention_count``. ``None`` (unset) ->
+    :data:`DEFAULT_BACKUP_RETENTION`; a positive int (as decimal
+    string) is returned as-is; anything else raises
+    :class:`SettingValueError`."""
     raw = get(conn, KEY_BACKUP_RETENTION)
     if raw is None:
         return DEFAULT_BACKUP_RETENTION
     try:
         n = int(raw)
-    except ValueError:
-        return DEFAULT_BACKUP_RETENTION
-    return n if n >= 1 else DEFAULT_BACKUP_RETENTION
+    except ValueError as exc:
+        raise SettingValueError(f"{KEY_BACKUP_RETENTION}={raw!r} is not an integer") from exc
+    if n < 1:
+        raise SettingValueError(f"{KEY_BACKUP_RETENTION}={n} is out of range (must be >= 1)")
+    return n
 
 
 def get_backup_last_run_at(conn: sqlite3.Connection) -> str | None:

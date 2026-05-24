@@ -1531,7 +1531,7 @@ def test_ui_settings_upstream_override_round_trips(client: TestClient) -> None:
         follow_redirects=False,
     )
     assert r.status_code == 303
-    assert r.headers["location"] == "/ui/settings?saved=1"
+    assert r.headers["location"] == "/ui/settings?saved=upstream"
     body = client.get("/ui/settings").text
     assert "acme/bty-fork" in body
     assert "https://example.invalid/catalog.toml" in body
@@ -1585,27 +1585,40 @@ def test_ui_settings_backup_round_trip(client: TestClient) -> None:
     assert 'value="14"' in body
 
 
-def test_ui_settings_backup_invalid_cadence_falls_back(client: TestClient) -> None:
-    """Hand-crafted form payloads with an unknown cadence don't 500 the
-    save -- the handler soft-validates against BACKUP_CADENCES and
-    falls back to the default. Mirrors the settings-store resolver
-    fallback so a typo in the payload doesn't wedge the scheduler."""
+def test_ui_settings_backup_invalid_cadence_rejects(client: TestClient) -> None:
+    """Hand-crafted form payloads with an unknown cadence return 422
+    rather than silently coercing to the default. Pre-1.0 keeps form
+    validation strict so a typo is loud rather than rolling the
+    operator's input forward as something else."""
     _login(client)
     r = client.post(
         "/ui/settings/backup",
         data={
             "backup_enabled": "on",
             "backup_cadence": "fortnightly",
-            "backup_retention_count": "abc",  # non-numeric -> default
+            "backup_retention_count": "14",
         },
         follow_redirects=False,
     )
-    assert r.status_code == 303
-    body = client.get("/ui/settings").text
-    # ``manual`` was the default; it should be the selected radio.
-    assert 'value="manual"' in body
-    # Retention reverted to the default 7.
-    assert 'value="7"' in body
+    assert r.status_code == 422
+    assert "fortnightly" in r.text
+
+
+def test_ui_settings_backup_invalid_retention_rejects(client: TestClient) -> None:
+    """Non-numeric / sub-1 ``backup_retention_count`` returns 422.
+    Same strict-form rationale as the cadence test above."""
+    _login(client)
+    for bad in ("abc", "0", "-3"):
+        r = client.post(
+            "/ui/settings/backup",
+            data={
+                "backup_enabled": "on",
+                "backup_cadence": "weekly",
+                "backup_retention_count": bad,
+            },
+            follow_redirects=False,
+        )
+        assert r.status_code == 422, bad
 
 
 def test_settings_upstream_override_drives_catalog_fetch_url(
