@@ -4,6 +4,19 @@
 # cijoe pipelines) is irrelevant for the container build and just
 # slows the COPY phase.
 
+# Explicit deny patterns for paths Docker's context loader must NOT
+# descend into. These dirs are populated by sudo'd cijoe pipelines
+# + live-build, and the loader hits "permission denied" on root-
+# owned subdirs even though the catch-all ``*`` below would
+# semantically exclude their files anyway. Listing the dirs
+# explicitly lets BuildKit short-circuit before the readdir trips.
+# ``make docker-clean`` also nukes these via sudo, but the
+# defensive entries here mean the build survives stale state.
+cijoe/_build
+cijoe/cijoe-output
+cijoe/cijoe-archive
+bty-media/live-build/cache
+
 *
 
 !dist/

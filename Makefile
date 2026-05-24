@@ -217,6 +217,16 @@ docker-clean:
 	-docker stop bty-web 2>/dev/null
 	-docker image rm bty-web:dev 2>/dev/null
 	-sudo rm -rf bty-data
+	# cijoe's sudo'd live-build steps leave root-owned files under
+	# cijoe/_build/ + cijoe/cijoe-output/ + cijoe/cijoe-archive/.
+	# Docker's context-loader walks the whole working dir to build
+	# the build context tarball -- a root-owned subdir errors with
+	# "error from sender: open ...: permission denied" before the
+	# Dockerfile even runs. Sweep them here, alongside the bty-data
+	# cleanup, since docker-clean already needs sudo. Tracked in the
+	# cijoe-upstream-followup memory; remove this once cijoe chowns
+	# back to ${SUDO_USER} after sudo'd steps.
+	-sudo rm -rf cijoe/_build cijoe/cijoe-output cijoe/cijoe-archive
 
 # ---------- Docs --------------------------------------------------------
 

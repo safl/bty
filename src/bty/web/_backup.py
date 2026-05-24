@@ -209,9 +209,14 @@ class BackupManager(_BaseAsyncManager[BackupState]):
                 if dest.is_dir():
                     shutil.rmtree(dest)
 
+        # Stash export totals onto the state, but DON'T flip the
+        # operator-visible status to a terminal value yet -- the job
+        # isn't truly done until retention has been enforced.  Flipping
+        # status here would also race the test's poll-for-completed:
+        # an external observer waiting on ``status=="completed"`` would
+        # exit before _prune_old_backups finishes, see a half-pruned
+        # ``backups_root``, and miss the expected post-prune steady state.
         async with self._lock:
-            state.status = final_status
-            state.finished_at = time.time()
             state.error = error
             state.machines = machines
             state.catalog_entries = catalog_entries
@@ -219,7 +224,9 @@ class BackupManager(_BaseAsyncManager[BackupState]):
             state.bytes_written = bytes_written
 
         # Log + prune happen outside the lock so they don't block other
-        # operations against the manager.
+        # operations against the manager. Both run before the status flip
+        # below so any observer that sees ``completed`` also sees the
+        # pruned filesystem.
         if final_status == "completed":
             _log_terminal(
                 state_path,
@@ -245,6 +252,11 @@ class BackupManager(_BaseAsyncManager[BackupState]):
                 state=state,
                 summary_text=f"backup {backup_id!r} failed: {error or 'unknown error'}",
             )
+
+        # Now the job is fully done: terminal status visible to observers.
+        async with self._lock:
+            state.status = final_status
+            state.finished_at = time.time()
 
     def _prune_old_backups(self) -> None:
         """Delete oldest siblings under :data:`backups_root` to satisfy
