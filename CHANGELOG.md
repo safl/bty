@@ -9,6 +9,25 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.30.1] - 2026-05-25
+
+CI gap close: the release pipeline now asserts the bty wizard
+actually rendered on tty1 of the freshly-baked USB ISO, not just
+that the partition grew. No operator-facing behaviour change.
+
+### Changed
+
+- **`test-usb-grow` + `test-usb-ventoy` assert wizard renders on
+  tty1.** Both tasks now grep `/dev/vcs1` (the kernel's text-snapshot
+  of tty1's framebuffer) for `Pick an image source` -- a string only
+  the rendered wizard produces. The wrapper's pre-Rich
+  `bty is starting...` deliberately doesn't match, so a bty that
+  prints the banner then crashes fails the assertion. 60s read
+  budget for cold-cache import chains. Catches a real-shaped
+  regression class (failed Rich init, BtyTui constructor crash,
+  wrapper exit before exec) that v0.27..v0.30 would have shipped
+  undetected.
+
 ## [0.30.0] - 2026-05-24
 
 The "SSE polish" release. Two follow-ups to v0.29.0's bus migration:
