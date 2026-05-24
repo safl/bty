@@ -9,6 +9,31 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.30.2] - 2026-05-25
+
+Fixes `bty-flash-once` re-flashing on every PXE boot instead of
+terminating after one flash. Real operator-impact bug surfaced by
+audit logs showing the same machine flashing twice within three
+minutes.
+
+### Fixed
+
+- **`bty-flash-once` is now actually one-shot.** The `/boot/<name>?mac=`
+  arm site's WHERE clause was missing `bty-flash-once`, so the
+  `saw_flasher_boot` bit never got set for that mode -- which made
+  the plan resolver's "bit set -> sanboot the just-flashed disk"
+  branch unreachable. Every post-flash PXE contact fell through to
+  the flash branch and re-served the flash chain, an infinite reflash
+  loop on the mode whose entire point is "flash once". Fix is
+  one-line: include `'bty-flash-once'` in the arm WHERE clause
+  alongside `bty-flash-always` and `bty-inventory`. Added an e2e
+  regression test (`test_e2e_flash_once_terminates_after_first_flash`)
+  that asserts the bit stays set across multiple post-flash PXE
+  contacts; the existing `test_e2e_boot_artifact_mac_arms_only_alternating
+  _policies` test now covers all three bit-consuming policies + both
+  non-armed modes (bty-tui, ipxe-exit) so this regression class can't
+  slip past CI again.
+
 ## [0.30.1] - 2026-05-25
 
 CI gap close: the release pipeline now asserts the bty wizard
