@@ -1287,14 +1287,17 @@ def create_app(
         """Mark that ``raw_mac`` fetched a live-env artifact -- proof it
         actually booted the live env, which is stronger evidence than
         the ``/pxe`` config GET (that only means "we told it to boot").
-        One-shot state transition for the alternating policies: the next
-        ``GET /pxe/{mac}`` consumes the bit and serves a sanboot of the
-        local disk instead of re-running the live-env boot.
-        ``bty-flash-always`` uses it to boot the just-flashed disk;
-        ``bty-inventory`` to boot the disk after re-collecting
-        inventory. The WHERE clause confines arming to those two
-        policies so the bit's lifecycle can't leak into others (a
-        typo'd or stale ``?mac=`` is a no-op)."""
+        One-shot state transition for the bit-consuming policies: the
+        next ``GET /pxe/{mac}`` reads the bit and serves a sanboot of
+        the local disk instead of re-running the live-env boot.
+        ``bty-flash-always`` uses it to boot the just-flashed disk
+        once before alternating back to flash; ``bty-flash-once`` keeps
+        it set as the terminal state (re-armed only when the operator
+        re-saves the machine); ``bty-inventory`` uses it to boot the
+        disk after re-collecting inventory. The WHERE clause confines
+        arming to those three policies so the bit's lifecycle can't
+        leak into others (a typo'd or stale ``?mac=`` is a no-op on
+        sanboot / bty-tui)."""
         try:
             mac = _normalise_mac(raw_mac)
         except HTTPException:
@@ -1304,7 +1307,9 @@ def create_app(
                 """
                 UPDATE machines
                 SET saw_flasher_boot = 1, updated_at = ?
-                WHERE mac = ? AND boot_mode IN ('bty-flash-always', 'bty-inventory')
+                WHERE mac = ? AND boot_mode IN (
+                    'bty-flash-always', 'bty-flash-once', 'bty-inventory'
+                )
                 """,
                 (_now_iso(), mac),
             )

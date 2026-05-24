@@ -561,11 +561,89 @@ def test_e2e_flash_always_alternates_flash_then_sanboot(app_client: TestClient) 
     assert "kernel" in _directives(body) and "sanboot" not in _directives(body)
 
 
+def test_e2e_flash_once_terminates_after_first_flash(app_client: TestClient) -> None:
+    """bty-flash-once must flash exactly once then sanboot the disk on
+    every subsequent PXE contact -- NOT alternate like bty-flash-always.
+    Regression test for v0.30.x: the /boot ``?mac=`` arm site's WHERE
+    clause excluded bty-flash-once, so the plan resolver's "bit set ->
+    sanboot" branch was unreachable and the box re-flashed on every PXE
+    contact forever. Surfaced by an operator audit log showing two
+    flash cycles in three minutes on a flash-once machine.
+    """
+    boot_root: Path = app_client.app.state.boot_root  # type: ignore[attr-defined]
+    (boot_root / ARTIFACT_NAMES[0]).write_bytes(b"\0" * 64)
+
+    mac = "0c:bf:b4:c0:4b:42"
+    _seed_flashable_machine(app_client, mac)
+    # Helper seeds as bty-flash-always; re-PUT the full machine record
+    # with bty-flash-once. ``MachineUpsert`` is a full upsert (unspecified
+    # fields use model defaults -> clear bty_image_ref / target_disk_serial
+    # and we'd land on ipxe.j2 with no flash chain), so we must re-supply
+    # both. The PUT also resets saw_flasher_boot so we start pre-flash.
+    image_root: Path = app_client.app.state.image_root  # type: ignore[attr-defined]
+    bty_image_ref = _catalog.image_ref_for_src("file://demo.qcow2")
+    del image_root  # only needed via the seeded helper; ref already produced
+    r = app_client.put(
+        f"/machines/{mac}",
+        json={
+            "bty_image_ref": bty_image_ref,
+            "boot_mode": "bty-flash-once",
+            "target_disk_serial": "WD-WX12345",
+        },
+        cookies=AUTH,
+    )
+    assert r.status_code == 200, r.text
+    host = {"Host": "bty.local:8080"}
+
+    def _directives(body: str) -> set[str]:
+        out: set[str] = set()
+        for ln in body.splitlines():
+            s = ln.strip()
+            if not s or s.startswith("#"):
+                continue
+            for part in s.replace("&&", "||").split("||"):
+                toks = part.split()
+                if toks:
+                    out.add(toks[0])
+        return out
+
+    # 1. First contact: flash chain (saw_flasher_boot is 0).
+    body = app_client.get(f"/pxe/{mac}", headers=host).text
+    assert "kernel" in _directives(body) and "sanboot" not in _directives(body)
+    assert f"?mac={mac}" in body, "flash chain must tag artifact URLs"
+
+    # 2. The box boots the flasher: /boot fetch arms saw_flasher_boot.
+    a = app_client.get(f"/boot/{ARTIFACT_NAMES[0]}?mac={mac}", headers=host)
+    assert a.status_code == 200, a.text
+
+    # 3. Post-flash contact: sanboot the just-flashed disk.
+    body = app_client.get(f"/pxe/{mac}", headers=host).text
+    assert "sanboot" in _directives(body), f"expected sanboot after flasher boot: {body!r}"
+    assert "kernel" not in _directives(body)
+
+    # 4. CRITICAL: subsequent /pxe contacts WITHOUT another /boot fetch
+    # MUST still serve sanboot -- bty-flash-once is terminal, unlike
+    # bty-flash-always which re-arms here. The bug was exactly this:
+    # the bit was never set, so step 3 fell through to the flash branch
+    # AND step 4 would also flash, looping forever.
+    for _ in range(3):
+        body = app_client.get(f"/pxe/{mac}", headers=host).text
+        assert "sanboot" in _directives(body), (
+            f"bty-flash-once must stay terminal after first flash; got non-sanboot body: {body!r}"
+        )
+        assert "kernel" not in _directives(body)
+
+
 def test_e2e_boot_artifact_mac_arms_only_alternating_policies(app_client: TestClient) -> None:
-    """The /boot ``?mac=`` arming is confined to the alternating
-    policies (bty-flash-always, bty-inventory), so the one-shot sanboot
-    bit can't leak into others (a flash-once / tui box never gets a
-    spurious post-boot sanboot)."""
+    """The /boot ``?mac=`` arming is confined to the three bit-consuming
+    policies (bty-flash-always, bty-flash-once, bty-inventory), so the
+    one-shot sanboot bit can't leak into others (a sanboot / bty-tui
+    box never gets a spurious post-boot sanboot). bty-flash-once is
+    included because its plan resolver reads the bit to flip to a
+    terminal sanboot of the just-flashed disk -- without arming, the
+    machine would re-flash on every PXE contact forever (v0.30.1 retag
+    #2 regression: the bit was missing from the WHERE clause so the
+    flip path was unreachable)."""
     boot_root: Path = app_client.app.state.boot_root  # type: ignore[attr-defined]
     state_path: Path = app_client.app.state.state_path  # type: ignore[attr-defined]
     (boot_root / ARTIFACT_NAMES[0]).write_bytes(b"\0" * 64)
@@ -579,24 +657,30 @@ def test_e2e_boot_artifact_mac_arms_only_alternating_policies(app_client: TestCl
         return int(row["saw_flasher_boot"])
 
     always = "11:11:11:11:11:11"
+    once = "44:44:44:44:44:44"
     inventory = "22:22:22:22:22:22"
     tui = "33:33:33:33:33:33"
+    sanboot = "55:55:55:55:55:55"
     for mac, policy in (
         (always, "bty-flash-always"),
+        (once, "bty-flash-once"),
         (inventory, "bty-inventory"),
         (tui, "bty-tui"),
+        (sanboot, "ipxe-exit"),
     ):
         assert (
             app_client.put(f"/machines/{mac}", json={"boot_mode": policy}, cookies=AUTH).status_code
             == 200
         )
 
-    for mac in (always, inventory, tui):
+    for mac in (always, once, inventory, tui, sanboot):
         app_client.get(f"/boot/{ARTIFACT_NAMES[0]}?mac={mac}", headers=host)
 
     assert _saw(always) == 1, "flash-always machine should be armed by /boot?mac="
+    assert _saw(once) == 1, "flash-once machine should be armed by /boot?mac="
     assert _saw(inventory) == 1, "bty-inventory machine should be armed by /boot?mac="
     assert _saw(tui) == 0, "bty-tui machine must NOT be armed"
+    assert _saw(sanboot) == 0, "ipxe-exit machine must NOT be armed"
 
 
 def test_e2e_inventory_alternates_liveenv_then_sanboot(app_client: TestClient) -> None:
