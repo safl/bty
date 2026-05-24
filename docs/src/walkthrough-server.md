@@ -207,11 +207,12 @@ Initial UI tour:
   `*.img.bz2` / `*.qcow2` images via PUT or drag-and-drop. These end up
   under `/var/lib/bty/images/` and stream to targets at flash time.
 - **`/ui/netboot`** (Netboot) - the netboot artifacts inventory (`vmlinuz`
-  / `initrd` / `squashfs`) plus a Start/Stop/Restart panel for the local
-  `dnsmasq.service` (which serves the TFTP root). Fetching the artifacts
-  happens on the **Artifact Fetches** page (the cloud worker-icon in the
-  navbar); the router-config cheatsheet (option 60 / 66 / 67 for the LAN's
-  DHCP server, for both PXE and UEFI HTTP Boot) lives on the Settings page
+  / `initrd` / `squashfs` / `sha256` manifest) plus a Start/Stop/Restart
+  panel for the local `dnsmasq.service` (which serves the TFTP root). The
+  "Fetch artifacts" button here enqueues all four files; per-file progress
+  shows on `/ui/workers#downloads` (the navbar's Downloads indicator).
+  The router-config cheatsheet (option 60 / 66 / 67 for the LAN's DHCP
+  server, for both PXE and UEFI HTTP Boot) lives on the Settings page
   under **DHCP / Network boot**. An in-page sub-nav jumps between List /
   TFTP Daemon / Activity.
 - **`/ui/settings`** - the read-only map of every bty config value plus the
