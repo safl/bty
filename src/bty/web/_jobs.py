@@ -90,6 +90,8 @@ class _BaseAsyncManager(Generic[StateT]):
         # unit tests can drive it without standing up an event loop or
         # publishing to a real bus.
         self._on_state_change: Callable[[StateT], None] | None = None
+        # Per-key clock for :meth:`_fire_progress`'s throttle.
+        self._progress_last_fired: dict[str, float] = {}
 
     @property
     def max_parallel(self) -> int:
@@ -122,6 +124,39 @@ class _BaseAsyncManager(Generic[StateT]):
             return
         # Publishing must never fail the worker. The listener is
         # responsible for its own resilience.
+        with contextlib.suppress(Exception):
+            cb(state)
+
+    # Per-key throttle clock for :meth:`_fire_progress`. ``key`` is the
+    # state's primary key (filename / catalog-name / tag / backup-id);
+    # the worker calls ``_fire_progress(key, state)`` from its progress
+    # callback and the base class debounces to at most one event per
+    # :data:`_PROGRESS_MIN_INTERVAL` seconds per key. The bus would
+    # cope with a faster cadence but the browser doesn't need it and
+    # the wire bandwidth is wasted.
+    _PROGRESS_MIN_INTERVAL = 1.0
+
+    def _fire_progress(self, key: str, state: StateT) -> None:
+        """Throttled progress publish.
+
+        The per-job progress callbacks (download bytes, hash bytes,
+        release artifact bytes) call this on every chunk; the base
+        class collapses bursts to at most one SSE event per second per
+        key. Without throttling, a fast NVMe read on a 50 GiB image
+        would fire hundreds of events per second through the bus and
+        flood the EventSource client.
+
+        Like :meth:`_fire_state_change`, exceptions never propagate --
+        publish failures must not wedge the worker.
+        """
+        cb = self._on_state_change
+        if cb is None:
+            return
+        now = time.time()
+        last = self._progress_last_fired.get(key, 0.0)
+        if now - last < self._PROGRESS_MIN_INTERVAL:
+            return
+        self._progress_last_fired[key] = now
         with contextlib.suppress(Exception):
             cb(state)
 

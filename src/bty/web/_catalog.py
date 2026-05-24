@@ -322,6 +322,9 @@ class DownloadManager(_BaseAsyncManager[DownloadState]):
             state.bytes_downloaded = downloaded
             if total is not None:
                 state.bytes_total = total
+            # Throttled SSE progress event so the Downloads page's
+            # byte counter ticks at ~1 Hz without flooding the bus.
+            self._fire_progress(state.name, state)
 
         def _cancel() -> bool:
             return cancel_event.is_set()

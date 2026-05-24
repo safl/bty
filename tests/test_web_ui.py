@@ -2530,10 +2530,23 @@ def test_static_assets_served_locally(client: TestClient) -> None:
         ("/static/bootstrap.min.css", b".container"),
         ("/static/htmx.min.js", b"htmx"),
         ("/static/sse.js", b"sse"),
+        ("/static/bty-utils.js", b"btyUtils"),
     ]:
         r = client.get(path)
         assert r.status_code == 200, f"{path}: {r.status_code}"
         assert sniff in r.content, f"{path} missing expected marker {sniff!r}"
+
+
+def test_layout_loads_bty_utils(client: TestClient) -> None:
+    """Every authed page bundles the shared JS helpers (``esc`` +
+    ``fmtBytes``) from /static/bty-utils.js. Pages alias them locally
+    via ``window.btyUtils`` so a future helper addition lands in one
+    place instead of three."""
+    _login(client)
+    body = client.get("/ui/backups").text
+    assert "/static/bty-utils.js" in body
+    assert "window.btyUtils.esc" in body
+    assert "window.btyUtils.fmtBytes" in body
 
 
 def test_layout_has_no_external_origins(client: TestClient) -> None:

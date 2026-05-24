@@ -246,6 +246,9 @@ class HashManager(_BaseAsyncManager[HashState]):
         def _progress(hashed: int, total: int) -> None:
             state.bytes_hashed = hashed
             state.bytes_total = total
+            # Throttled SSE progress event so the Hashing page's byte
+            # counter ticks at ~1 Hz without flooding the bus.
+            self._fire_progress(state.name, state)
 
         def _cancel() -> bool:
             return cancel_event.is_set()

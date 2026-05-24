@@ -51,18 +51,10 @@
 
 <script>
 (function () {
-    function esc(s) {
-        return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
-            return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
-        });
-    }
-    function fmtBytes(n) {
-        if (n == null) return "-";
-        if (n < 1024) return n + " B";
-        var u = ["KiB", "MiB", "GiB", "TiB"], i = -1;
-        do { n /= 1024; i++; } while (n >= 1024 && i < u.length - 1);
-        return n.toFixed(1) + " " + u[i];
-    }
+    // esc + fmtBytes come from /static/bty-utils.js (loaded by the
+    // layout); local aliases keep the per-page <script> readable.
+    var esc = window.btyUtils.esc;
+    var fmtBytes = window.btyUtils.fmtBytes;
     function statusBadge(s) {
         var cls = {
             "queued": "bg-secondary", "running": "bg-primary",

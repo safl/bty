@@ -270,3 +270,62 @@ def test_worker_event_emits_through_bus() -> None:
 
     assert _json.loads(payload)["kind"] == "hash"
     assert _json.loads(payload)["status"] == "running"
+
+
+def test_fire_progress_throttles_to_once_per_second() -> None:
+    """Burst calls to ``_fire_progress`` collapse to one event per key
+    per :data:`_PROGRESS_MIN_INTERVAL` window. Without throttling a
+    fast hash on a 50 GiB image would flood the bus."""
+    from bty.web._jobs import _BaseAsyncManager
+
+    class _FakeState:
+        def __init__(self) -> None:
+            self.status = "running"
+            self.started_at = None
+            self.finished_at = None
+            import threading
+
+            self._cancel = threading.Event()
+
+    seen: list[float] = []
+    mgr: _BaseAsyncManager[_FakeState] = _BaseAsyncManager(max_parallel=1)
+    mgr.set_state_listener(lambda _s: seen.append(0))  # value irrelevant
+    state = _FakeState()
+
+    # Fire 1000 progress events back-to-back; the throttle should
+    # collapse them to a single delivery (the first one).
+    for _ in range(1000):
+        mgr._fire_progress("k", state)
+    assert len(seen) == 1, len(seen)
+
+    # Advance the throttle clock past the interval; the next fire
+    # should deliver again.
+    mgr._progress_last_fired["k"] = 0.0  # pretend it's been a long time
+    mgr._fire_progress("k", state)
+    assert len(seen) == 2
+
+    # Per-key isolation: a different key tracks its own clock.
+    mgr._fire_progress("other", state)
+    assert len(seen) == 3
+
+
+def test_fire_progress_no_listener_is_noop() -> None:
+    """Without a registered listener, ``_fire_progress`` is a no-op
+    even on burst calls. (Defensive: the manager must not crash if
+    the lifespan binding hasn't run yet.)"""
+    from bty.web._jobs import _BaseAsyncManager
+
+    class _FakeState:
+        def __init__(self) -> None:
+            self.status = "running"
+            self.started_at = None
+            self.finished_at = None
+            import threading
+
+            self._cancel = threading.Event()
+
+    mgr: _BaseAsyncManager[_FakeState] = _BaseAsyncManager(max_parallel=1)
+    state = _FakeState()
+    for _ in range(100):
+        mgr._fire_progress("k", state)
+    # No assertion needed; reaching this line without exception is the test.

@@ -285,6 +285,9 @@ class ReleaseFetchManager(_BaseAsyncManager[ReleaseFetchState]):
             if cur is not None:
                 cur.bytes_done = done
                 cur.bytes_total = total
+            # Throttled SSE progress event so the Netboot + Downloads
+            # pages tick the per-file byte counter at ~1 Hz.
+            self._fire_progress(state.tag, state)
 
         def _cancel() -> bool:
             return cancel_event.is_set()
