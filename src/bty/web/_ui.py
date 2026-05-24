@@ -35,7 +35,7 @@ from pydantic import ValidationError
 
 import bty
 from bty import images as bty_images
-from bty.web import _db, _events_log, _releases, _settings_store, _sysconfig
+from bty.web import _backup, _db, _events_log, _releases, _settings_store, _sysconfig
 from bty.web._auth import SESSION_AUTHED_KEY
 from bty.web._events_log import KNOWN_ACTORS, KNOWN_EVENT_KINDS, KNOWN_SUBJECT_KINDS
 from bty.web._events_log import normalize_ip as _normalize_ip
@@ -740,12 +740,14 @@ def register_ui_routes(
     )
     def ui_backups(request: Request) -> HTMLResponse:
         """The Backups worker page: "Back up now" trigger + active
-        backups + schedule summary + recent backup activity."""
+        backups + on-disk listing + schedule summary + recent backup
+        activity."""
         with _db.open_db(state_path) as conn:
             backup_enabled = _settings_store.resolve_backup_enabled(conn)
             backup_cadence = _settings_store.resolve_backup_cadence(conn)
             backup_last_run_at = _settings_store.get_backup_last_run_at(conn)
             backup_events = _events_log.list_events(conn, subject_kind="backup", limit=15)
+        backups_on_disk = _backup.list_backups_on_disk(backups_root)
         return render(
             "ui/backups.html",
             request,
@@ -754,6 +756,7 @@ def register_ui_routes(
             backup_cadence=backup_cadence,
             backup_last_run_at=backup_last_run_at,
             backup_events=backup_events,
+            backups_on_disk=backups_on_disk,
         )
 
     @app.post(

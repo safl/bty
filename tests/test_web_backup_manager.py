@@ -346,3 +346,89 @@ def test_scheduler_tick_skips_when_already_running(tmp_path: Path) -> None:
             await mgr.stop()
 
     _run(_drive())
+
+
+def test_list_backups_on_disk_enumerates_and_reads_manifest(tmp_path: Path) -> None:
+    """A directory under ``backups_root`` whose name is an ISO-8601 slug
+    shows up with manifest-derived counts + a bytes-on-disk total."""
+    import json
+
+    from bty.web._backup import list_backups_on_disk
+
+    backups_root = tmp_path / "backups"
+    backups_root.mkdir()
+
+    # Bundle #1: older, two machines + one catalog entry + one image.
+    older = backups_root / "2026-05-23T10-00-00Z"
+    (older / "images").mkdir(parents=True)
+    (older / "images" / "demo.img.gz").write_bytes(b"\x00" * 2048)
+    (older / "manifest.json").write_text(
+        json.dumps(
+            {
+                "bty_export_version": 1,
+                "exported_at": "2026-05-23T10:00:00+00:00",
+                "bty_version": "0.26.0",
+                "machines": [{"mac": "aa:bb:cc:dd:ee:01"}, {"mac": "aa:bb:cc:dd:ee:02"}],
+                "catalog_entries": [{"name": "demo"}],
+            }
+        )
+    )
+    # Bundle #2: newer, empty manifest counts.
+    newer = backups_root / "2026-05-24T09-00-00Z"
+    newer.mkdir()
+    (newer / "manifest.json").write_text(
+        json.dumps(
+            {
+                "bty_export_version": 1,
+                "exported_at": "2026-05-24T09:00:00+00:00",
+                "bty_version": "0.26.1",
+                "machines": [],
+                "catalog_entries": [],
+            }
+        )
+    )
+
+    # Non-bundle siblings: a notes file + a directory not matching the
+    # ID format must NOT show up in the listing.
+    (backups_root / "README.txt").write_text("operator notes")
+    (backups_root / "not-a-backup").mkdir()
+
+    out = list_backups_on_disk(backups_root)
+    assert [b.backup_id for b in out] == [
+        "2026-05-24T09-00-00Z",  # newest first
+        "2026-05-23T10-00-00Z",
+    ]
+    older_row = out[1]
+    assert older_row.machines == 2
+    assert older_row.catalog_entries == 1
+    assert older_row.images == 1
+    assert older_row.bty_version == "0.26.0"
+    assert older_row.bytes_on_disk >= 2048  # at least the image file
+
+
+def test_list_backups_on_disk_handles_missing_manifest(tmp_path: Path) -> None:
+    """A bundle dir without a manifest.json still lists -- the operator
+    can see the orphan and clean it up rather than the UI hiding it."""
+    from bty.web._backup import list_backups_on_disk
+
+    backups_root = tmp_path / "backups"
+    orphan = backups_root / "2026-05-22T08-00-00Z"
+    orphan.mkdir(parents=True)
+    (orphan / "stray.bin").write_bytes(b"x")
+
+    out = list_backups_on_disk(backups_root)
+    assert len(out) == 1
+    assert out[0].backup_id == "2026-05-22T08-00-00Z"
+    assert out[0].machines == 0
+    assert out[0].catalog_entries == 0
+    assert out[0].images == 0
+    assert out[0].bty_version is None
+    assert out[0].exported_at is None
+
+
+def test_list_backups_on_disk_missing_root_returns_empty(tmp_path: Path) -> None:
+    """No ``backups_root`` -> empty list (no crash). Covers a fresh
+    install where the operator hasn't run any backups yet."""
+    from bty.web._backup import list_backups_on_disk
+
+    assert list_backups_on_disk(tmp_path / "does-not-exist") == []

@@ -561,14 +561,54 @@ def test_ui_hashing_has_active_jobs_and_activity(client: TestClient) -> None:
 
 def test_ui_backups_has_back_up_now_and_activity(client: TestClient) -> None:
     """``/ui/backups`` carries the Back-up-now trigger, the active
-    backups tbody, schedule summary, and the recent backup events."""
+    backups tbody, the on-disk listing card, schedule summary, and
+    the recent backup events."""
     _login(client)
     body = client.get("/ui/backups").text
     assert 'id="bty-workers-backup-now"' in body
     assert "bty-workers-backup-tbody" in body
+    assert 'id="backups-on-disk"' in body
     assert 'id="backups-activity"' in body
     # Schedule summary references the Settings knob.
     assert 'href="/ui/settings#backup-schedule"' in body
+    # Subnav exposes a jump to the on-disk listing.
+    assert 'href="#backups-on-disk"' in body
+    # Empty-state copy points the operator at the trigger / schedule.
+    assert "No backups on disk yet" in body
+
+
+def test_ui_backups_lists_existing_bundles(client: TestClient, tmp_path: Path) -> None:
+    """When ``backups_root`` contains bundles, ``/ui/backups`` renders a
+    row per bundle with its backup_id + machine / catalog / image
+    counts. The empty-state copy is gone.
+
+    The ``client`` fixture's state.db is at ``tmp_path/state.db`` and
+    the app derives ``backups_root`` as ``state.db.parent / "backups"``
+    when ``BTY_BACKUP_DIR`` is unset -- so a bundle dropped into
+    ``tmp_path/backups`` shows up without any patching."""
+    import json
+
+    backups_root = tmp_path / "backups"
+    bundle = backups_root / "2026-05-23T10-00-00Z"
+    (bundle / "images").mkdir(parents=True)
+    (bundle / "images" / "demo.img.gz").write_bytes(b"\x00" * 1024)
+    (bundle / "manifest.json").write_text(
+        json.dumps(
+            {
+                "bty_export_version": 1,
+                "exported_at": "2026-05-23T10:00:00+00:00",
+                "bty_version": "0.26.0",
+                "machines": [{"mac": "aa:bb:cc:dd:ee:01"}],
+                "catalog_entries": [{"name": "demo"}],
+            }
+        )
+    )
+
+    _login(client)
+    body = client.get("/ui/backups").text
+    assert "2026-05-23T10-00-00Z" in body
+    assert "0.26.0" in body
+    assert "No backups on disk yet" not in body
 
 
 def test_ui_settings_shows_dhcp_pxe_cheatsheet(client: TestClient) -> None:

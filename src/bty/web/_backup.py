@@ -335,6 +335,106 @@ def _dir_size(path: Path) -> int:
     return total
 
 
+# ----- on-disk listing --------------------------------------------------
+#
+# The Backups page enumerates the directories under ``backups_root`` so
+# the operator can see which bundles actually exist on disk -- the active
+# / activity cards above only show in-flight + recent jobs, which is not
+# enough to answer "what backups do I have right now?" after a few
+# scheduled runs have come and gone from the events table.
+
+
+@dataclass(frozen=True)
+class BackupOnDisk:
+    """A bundle the BackupManager (or an offline ``bty-web export``) wrote
+    under :data:`backups_root`.
+
+    Manifest fields read from the bundle's ``manifest.json``; counts of
+    machines / catalog entries / image files come from the manifest +
+    a directory scan. ``bytes_on_disk`` is the sum of all files in the
+    bundle (manifest + images), used to surface "this is the big one"
+    to the operator at a glance.
+
+    A bundle whose ``manifest.json`` is missing or malformed still
+    appears in the list (``exported_at`` / ``bty_version`` are
+    ``None``, counts are 0) so the operator can see it and clean it
+    up rather than silently hiding it.
+    """
+
+    backup_id: str
+    path: Path
+    exported_at: str | None
+    bty_version: str | None
+    machines: int
+    catalog_entries: int
+    images: int
+    bytes_on_disk: int
+
+
+def list_backups_on_disk(backups_root: Path) -> list[BackupOnDisk]:
+    """Enumerate bundles under ``backups_root``, newest first.
+
+    Only directories whose name matches the backup-id format are
+    listed; the operator may drop unrelated files (notes, checksums)
+    into the backups dir without confusing this view. Sort is by
+    backup-id (ISO-8601 slug), reversed -- so the most recent run
+    is at the top.
+    """
+    if not backups_root.is_dir():
+        return []
+    out: list[BackupOnDisk] = []
+    for entry in sorted(backups_root.iterdir(), key=lambda p: p.name, reverse=True):
+        if not entry.is_dir() or not _looks_like_backup_id(entry.name):
+            continue
+        out.append(_read_bundle(entry))
+    return out
+
+
+def _read_bundle(path: Path) -> BackupOnDisk:
+    """Build a :class:`BackupOnDisk` from a bundle directory.
+
+    Robust to a missing or malformed ``manifest.json`` -- pre-1.0
+    strictness applies to settings the UI controls; this is a passive
+    survey of operator-owned files and we want to SHOW garbage rather
+    than hide it.
+    """
+    import json
+
+    manifest_path = path / "manifest.json"
+    exported_at: str | None = None
+    bty_version: str | None = None
+    machines = 0
+    catalog_entries = 0
+    if manifest_path.is_file():
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            if isinstance(manifest, dict):
+                ea = manifest.get("exported_at")
+                bv = manifest.get("bty_version")
+                exported_at = ea if isinstance(ea, str) else None
+                bty_version = bv if isinstance(bv, str) else None
+                ms = manifest.get("machines")
+                cs = manifest.get("catalog_entries")
+                machines = len(ms) if isinstance(ms, list) else 0
+                catalog_entries = len(cs) if isinstance(cs, list) else 0
+        except (OSError, ValueError):
+            # Unparseable manifest -- the bundle still lists with
+            # blank metadata so the operator can find + delete it.
+            pass
+    images_dir = path / "images"
+    images = sum(1 for f in images_dir.iterdir() if f.is_file()) if images_dir.is_dir() else 0
+    return BackupOnDisk(
+        backup_id=path.name,
+        path=path,
+        exported_at=exported_at,
+        bty_version=bty_version,
+        machines=machines,
+        catalog_entries=catalog_entries,
+        images=images,
+        bytes_on_disk=_dir_size(path),
+    )
+
+
 def _log_terminal(
     state_path: Path,
     *,
