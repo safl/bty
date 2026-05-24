@@ -158,12 +158,20 @@ def create_app(
         # capture the loop now so cross-thread publishes can hop in
         # via call_soon_threadsafe.
         event_bus.attach(asyncio.get_running_loop())
-        if catalog_state.catalog is not None:
-            download_manager.start(
-                catalog_state.catalog,
-                catalog_cache_dir,
-                state_path=state_path,
-            )
+        # The DownloadManager binds to whatever catalog source we have:
+        # ``catalog_state.catalog`` (parsed catalog.toml, optional) plus a
+        # DB lookup callback for entries that exist in
+        # ``catalog_entries`` but not in the manifest -- typically rows
+        # added by the operator via the "Add image from URL" form on
+        # /ui/downloads, which inserts to DB but doesn't touch
+        # catalog.toml. Without the DB fallback those entries appear on
+        # /ui/images but their per-row Fetch button 404s.
+        download_manager.start(
+            catalog_state.catalog,
+            catalog_cache_dir,
+            state_path=state_path,
+            db_entry_lookup=_lookup_db_catalog_entry,
+        )
         # The hash manager always starts -- it operates on
         # ``image_root``, which exists for every bty-web shape
         # (appliance, container, dev). Default parallelism is 1
@@ -240,8 +248,9 @@ def create_app(
             backup_stop_event.set()
             with contextlib.suppress(asyncio.CancelledError):
                 await backup_scheduler_task
-            if catalog_state.catalog is not None:
-                await download_manager.stop()
+            # DownloadManager always starts (catalog-less appliances
+            # still have a DB-driven download path), so always stop.
+            await download_manager.stop()
             await hash_manager.stop()
             await release_fetch_manager.stop()
             await backup_manager.stop()
@@ -2038,6 +2047,28 @@ def create_app(
             for row in rows
         )
 
+    def _lookup_db_catalog_entry(name: str) -> _catalog.CatalogEntry | None:
+        """DB-only ``CatalogEntry`` lookup by name. Returns ``None`` if no
+        catalog_entries row has that name. Used by the DownloadManager
+        as a fallback when an entry is in the DB but not in the parsed
+        ``catalog.toml`` (the Add-image-from-URL form path)."""
+        with _db.open_db(state_path) as conn:
+            row = conn.execute(
+                "SELECT disk_image_sha, name, src, format, size_bytes, description "
+                "FROM catalog_entries WHERE name = ? LIMIT 1",
+                (name,),
+            ).fetchone()
+        if row is None:
+            return None
+        return _catalog.CatalogEntry(
+            name=row["name"],
+            src=row["src"],
+            sha256=row["disk_image_sha"],
+            format=row["format"],
+            size_bytes=row["size_bytes"],
+            description=row["description"],
+        )
+
     def _list_unified_images() -> list[images.UnifiedImage]:
         """Unified image listing: dir-scan files + operator-curated
         ``catalog_entries`` rows + content-cache, folded through the
@@ -2617,12 +2648,16 @@ def create_app(
         new_catalog = _catalog.load(manifest_path)
         # Tear the old manager down first so its in-flight downloads
         # don't bleed into the new manager's queue with stale entry
-        # references.
-        if catalog_state.catalog is not None:
-            await download_manager.stop()
+        # references. DownloadManager now always-starts so always-stop.
+        await download_manager.stop()
         catalog_state.catalog = new_catalog
         _auto_import_manifest_rows(new_catalog)
-        download_manager.start(new_catalog, catalog_cache_dir, state_path=state_path)
+        download_manager.start(
+            new_catalog,
+            catalog_cache_dir,
+            state_path=state_path,
+            db_entry_lookup=_lookup_db_catalog_entry,
+        )
         publish_state_changed()
 
     # URL for "Fetch from bty project release" -- mirrors the
@@ -2797,11 +2832,14 @@ def create_app(
 
     @app.get("/catalog/downloads")
     async def list_downloads(_: str = Depends(require_auth)) -> dict[str, Any]:
-        if catalog_state.catalog is None:
-            return {"catalog": None, "downloads": []}
+        # DownloadManager always starts now (catalog-less appliances
+        # still have a DB-driven download path); "no catalog" is no
+        # longer a hard 404 here.  The ``catalog`` field stays in the
+        # response so the UI can distinguish manifest-backed setups
+        # from DB-only ones if it ever needs to.
         states = await download_manager.list()
         return {
-            "catalog": str(manifest_path),
+            "catalog": str(manifest_path) if catalog_state.catalog is not None else None,
             "cache_dir": str(catalog_cache_dir),
             "max_parallel": download_manager.max_parallel,
             "downloads": [s.to_dict() for s in states],
@@ -2812,11 +2850,6 @@ def create_app(
         body: _models.CatalogEnqueueRequest,
         _: str = Depends(require_auth),
     ) -> dict[str, Any]:
-        if catalog_state.catalog is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="no catalog configured",
-            )
         try:
             state = await download_manager.enqueue(body.name)
         except KeyError as exc:
@@ -2831,11 +2864,6 @@ def create_app(
         name: str,
         _: str = Depends(require_auth),
     ) -> dict[str, Any]:
-        if catalog_state.catalog is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="no catalog configured",
-            )
         state = await download_manager.cancel(name)
         if state is None:
             raise HTTPException(

@@ -2924,26 +2924,31 @@ def test_catalog_downloads_requires_auth(app_client: TestClient) -> None:
 
 def test_catalog_downloads_no_manifest_returns_empty(app_client: TestClient) -> None:
     """The fixture's app has no ``catalog.toml`` -- the endpoint
-    returns ``{"catalog": null, "downloads": []}`` rather than
-    404, so the UI's polling loop has something stable to render.
-    """
+    returns ``catalog=None`` + empty downloads list, plus the
+    DownloadManager state (``cache_dir`` + ``max_parallel``) the
+    UI uses for its caption. Stable shape so the polling loop has
+    something to render."""
     r = app_client.get("/catalog/downloads", cookies=AUTH)
     assert r.status_code == 200
     body = r.json()
-    assert body == {"catalog": None, "downloads": []}
+    assert body["catalog"] is None
+    assert body["downloads"] == []
+    assert "cache_dir" in body
+    assert "max_parallel" in body
 
 
 def test_catalog_downloads_post_without_manifest_404(app_client: TestClient) -> None:
-    """POSTing an enqueue against a server without a manifest is a
-    404 with a clear message -- the operator hasn't authored a
-    catalog yet."""
+    """POSTing an enqueue against an unknown name is a 404 with a
+    clear message. The DownloadManager now always-starts (catalog-less
+    appliances still have a DB-driven download path), so the failure
+    mode is "no entry named X" rather than "no catalog configured"."""
     r = app_client.post(
         "/catalog/downloads",
         json={"name": "anything"},
         cookies=AUTH,
     )
     assert r.status_code == 404
-    assert "no catalog" in r.json()["detail"]
+    assert "no catalog entry named" in r.json()["detail"]
 
 
 def test_catalog_downloads_delete_requires_auth(app_client: TestClient) -> None:
@@ -2953,12 +2958,14 @@ def test_catalog_downloads_delete_requires_auth(app_client: TestClient) -> None:
     assert r.status_code == 401
 
 
-def test_catalog_downloads_delete_no_manifest_404(app_client: TestClient) -> None:
-    """Cancel against an app with no catalog configured -> 404,
-    not 500. Same shape as POST /catalog/downloads."""
+def test_catalog_downloads_delete_no_active_404(app_client: TestClient) -> None:
+    """Cancel against an unknown download -> 404, not 500. Same shape
+    as POST /catalog/downloads; the manager always-starts now so the
+    failure mode is "no active download" rather than the legacy
+    "no catalog configured"."""
     r = app_client.delete("/catalog/downloads/anything", cookies=AUTH)
     assert r.status_code == 404
-    assert "no catalog" in r.json()["detail"]
+    assert "no active download" in r.json()["detail"]
 
 
 def test_catalog_hashes_requires_auth(app_client: TestClient) -> None:

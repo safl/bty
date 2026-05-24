@@ -31,6 +31,7 @@ import asyncio
 import os
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -113,12 +114,20 @@ class DownloadManager(_BaseAsyncManager[DownloadState]):
         # after a successful fetch on entries that had no pinned sha.
         # Tests that exercise the manager standalone leave this None.
         self._state_path: Path | None = None
+        # Optional callback for "look up an entry not in the manifest".
+        # In production this falls back to the ``catalog_entries`` DB
+        # table so operator-added rows (via the "Add image from URL"
+        # form, which inserts into DB but does NOT touch
+        # ``catalog.toml``) are downloadable. Unit tests of the manager
+        # leave it ``None`` and only exercise manifest-backed entries.
+        self._db_entry_lookup: Callable[[str], _catalog.CatalogEntry | None] | None = None
 
     def start(
         self,
-        catalog: _catalog.Catalog,
+        catalog: _catalog.Catalog | None,
         cache_dir: Path,
         state_path: Path | None = None,
+        db_entry_lookup: Callable[[str], _catalog.CatalogEntry | None] | None = None,
     ) -> None:
         """Bind the manager to a manifest + cache dir and spawn workers.
 
@@ -131,13 +140,36 @@ class DownloadManager(_BaseAsyncManager[DownloadState]):
           ``catalog.cache.populated`` / ``catalog.fetch.sha_mismatch``
           events so the /ui/images Downloads table shows recent
           activity across bty-web restarts.
+
+        ``db_entry_lookup`` is the fallback for entries that exist in
+        the ``catalog_entries`` DB table but not in the parsed
+        manifest -- typically operator-added URL / oras:// rows from
+        the Add-image form, which insert into DB without touching
+        ``catalog.toml``. Without this, those entries appear on
+        /ui/images (the unified list reads from DB) but their per-row
+        Fetch button 404s here ("no catalog entry named ..."). The
+        callback returns a freshly-loaded :class:`CatalogEntry` for
+        ``name`` or ``None`` if no DB row matches.
         """
         self._catalog = catalog
         self._cache_dir = cache_dir
         self._state_path = state_path
+        self._db_entry_lookup = db_entry_lookup
         if state_path is not None:
             self._backfill_from_events(state_path)
         self._spawn_workers()
+
+    def _lookup_entry(self, name: str) -> _catalog.CatalogEntry | None:
+        """Find a catalog entry by name. Manifest first, then the DB
+        fallback if a lookup callback was provided. ``None`` if neither
+        source knows the name."""
+        if self._catalog is not None:
+            entry = self._catalog.by_name(name)
+            if entry is not None:
+                return entry
+        if self._db_entry_lookup is not None:
+            return self._db_entry_lookup(name)
+        return None
 
     def _backfill_from_events(self, state_path: Path) -> None:
         """Repopulate ``_states`` with recent terminal outcomes from
@@ -220,9 +252,9 @@ class DownloadManager(_BaseAsyncManager[DownloadState]):
         and lines up with :class:`bty.web._hash.HashManager`.
         """
         _reject_traversal_name(name)
-        if self._catalog is None or self._cache_dir is None:
+        if self._cache_dir is None:
             raise RuntimeError("DownloadManager not started")
-        entry = self._catalog.by_name(name)
+        entry = self._lookup_entry(name)
         if entry is None:
             raise KeyError(f"no catalog entry named {name!r}")
 
@@ -267,15 +299,16 @@ class DownloadManager(_BaseAsyncManager[DownloadState]):
           it; the back-fill UPDATEs the catalog row so the entry
           shows ``Cached`` + a content-sha on the next page load.
         """
-        assert self._catalog is not None
         assert self._cache_dir is not None
         cancel_event = state._cancel
 
         # Re-resolve the entry inside the worker. ``enqueue`` looked
-        # it up at submit time, but the manifest could in theory
-        # have been reloaded between then and now; re-resolving
-        # at run time keeps us honest and is cheap.
-        entry = self._catalog.by_name(state.name)
+        # it up at submit time, but the manifest / DB could in theory
+        # have changed between then and now; re-resolving at run time
+        # keeps us honest and is cheap. Falls back to DB via
+        # ``_lookup_entry`` so operator-added rows (Add-image form)
+        # resolve here too.
+        entry = self._lookup_entry(state.name)
         if entry is None:
             async with self._lock:
                 state.status = "failed"
