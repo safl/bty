@@ -193,20 +193,22 @@ def main(argv: list[str] | None = None) -> None:
     try:
         port = int(raw_port)
     except ValueError:
-        # A typo'd BTY_WEB_PORT used to crash bty-web at start with
-        # an unhelpful ValueError traceback. Emit a clear systemd-
-        # journal-readable error and fall back to the default port.
+        # Pre-1.0 policy: no read-side leniency for invalid config.
+        # A typo'd BTY_WEB_PORT exits with a clear error rather than
+        # silently binding 8080 -- the operator's intent isn't
+        # "default" but "fix my typo".
         print(
-            f"bty-web: BTY_WEB_PORT={raw_port!r} is not an integer; falling back to 8080",
+            f"bty-web: BTY_WEB_PORT={raw_port!r} is not an integer; "
+            f"set it to a number between 1 and 65535 (default 8080)",
             file=sys.stderr,
         )
-        port = 8080
+        sys.exit(2)
     if not (1 <= port <= 65535):
         print(
-            f"bty-web: BTY_WEB_PORT={port} is out of range (1-65535); falling back to 8080",
+            f"bty-web: BTY_WEB_PORT={port} is out of range (must be 1-65535; default 8080)",
             file=sys.stderr,
         )
-        port = 8080
+        sys.exit(2)
 
     # ``timeout_graceful_shutdown`` bounds how long uvicorn waits
     # for in-flight requests to drain on SIGTERM. SSE streams used

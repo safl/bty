@@ -182,17 +182,6 @@
                     d: normalize(a),
                 });
             });
-            // Defensive: pre-Phase-E states have no ``artifacts`` array
-            // (e.g. backfilled from events). Render as a single tag-keyed row.
-            if (!rf.artifacts || rf.artifacts.length === 0) {
-                if (!isActive(rf)) return;
-                rows.push({
-                    label: '<code>' + esc(rf.tag) + '</code>',
-                    kind: "release",
-                    key: rf.tag,
-                    d: normalize(rf),
-                });
-            }
         });
         if (!rows.length) {
             tbody.innerHTML = '<tr><td colspan="5" class="text-muted">No active downloads.</td></tr>';

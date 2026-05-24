@@ -1,8 +1,6 @@
 """System-config helpers for the ``/ui/netboot`` page (DHCP / PXE +
 TFTP daemon sub-sections).
 
-What's here:
-
 * :func:`list_interfaces` -- enumerate non-loopback network
   interfaces with their IPv4 / operstate. Used to suggest the
   bty-server's own IP to the operator in the router-config
@@ -13,12 +11,6 @@ What's here:
   TFTP root; the operator may want to stop or restart it from
   the UI without SSHing in (the buttons live on the Netboot
   list view, below the artifacts table).
-
-What used to be here (v0.14 - v0.17.1, removed in v0.18):
-proxy-DHCP activate / deactivate helpers, per-daemon journald
-event reader. bty no longer runs its own DHCP proxy or TFTP
-daemon -- the operator's router owns DHCP (with PXE option
-tagging), dnsmasq serves TFTP from the same appliance.
 """
 
 from __future__ import annotations
