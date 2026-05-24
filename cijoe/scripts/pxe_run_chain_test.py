@@ -131,12 +131,16 @@ def main(args, cijoe):
             HEALTHZ_TIMEOUT,
             "bty-web /healthz",
         ):
-            # On timeout the server log is the only window into what's
-            # happening inside the VM -- without it, a /healthz miss
-            # looks identical for "cloud-init slow", "wheel install
-            # broken", "bty-web crashed", "network never came up".
+            # On timeout the server log is the kernel-side window into
+            # what's happening; the in-vm journal dump (via SSH) is the
+            # bty-web process-side window. Without the journal a
+            # /healthz miss looks identical for "cloud-init slow",
+            # "wheel install broken", "bty-web crashed", "network never
+            # came up".
             log.error("server VM serial-console tail (last 300 lines):")
             _dump_tail(server_log, 300)
+            log.error("attempting in-vm diagnostics over SSH (best-effort):")
+            _dump_in_vm_diagnostics("127.0.0.1", ssh_port, cfg["bty_password"], cfg)
             return errno.ETIMEDOUT
 
         log.info("POST /ui/login (PAM, default appliance credential)")
@@ -724,3 +728,64 @@ def _dump_tail(path, lines):
     log.error(f"--- last {lines} lines of {path} ---")
     for line in body.splitlines()[-lines:]:
         log.error(line)
+
+
+def _dump_in_vm_diagnostics(host, port, password, cfg):
+    """SSH into the server VM and dump bty-web's process state +
+    recent journal lines. Called when /healthz times out -- the
+    kernel serial log shows boot reached multi-user.target but
+    can't see why bty-web isn't answering. The journal usually
+    has the actual stacktrace.
+
+    Best-effort: if sshd hasn't come up yet (cloud-init still
+    running, networkd not started, etc.), each step short-circuits
+    with a single error line rather than hanging the test on a
+    silent SSH connect.
+    """
+    if not _ssh_ready(host, port):
+        log.error(f"in-vm SSH on {host}:{port} not reachable; skipping journal dump")
+        return
+    try:
+        import paramiko
+    except Exception as exc:  # pragma: no cover - import-time, hard to hit
+        log.error(f"paramiko import failed: {exc}; skipping journal dump")
+        return
+
+    cmds = (
+        ("systemctl is-system-running --wait", "system state"),
+        ("systemctl status bty-web-init.service --no-pager --full", "bty-web-init"),
+        ("systemctl status bty-web.service --no-pager --full", "bty-web"),
+        ("journalctl -u bty-web-init.service --no-pager --no-hostname", "bty-web-init journal"),
+        ("journalctl -u bty-web.service --no-pager --no-hostname -n 200", "bty-web journal (200)"),
+        ("ls -la /etc/default/bty-web /var/lib/bty 2>&1 || true", "state dir + env file"),
+    )
+    user = cfg.get("ssh_user", "odus")
+    ssh_password = cfg.get("ssh_password", password)
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    try:
+        client.connect(
+            host,
+            port=port,
+            username=user,
+            password=ssh_password,
+            timeout=10,
+            allow_agent=False,
+            look_for_keys=False,
+        )
+    except Exception as exc:
+        log.error(f"in-vm SSH connect failed: {exc}")
+        return
+    try:
+        for cmd, label in cmds:
+            log.error(f"--- in-vm: {label} ---")
+            try:
+                _, stdout, stderr = client.exec_command(cmd, timeout=20)
+                out = stdout.read().decode(errors="replace")
+                err = stderr.read().decode(errors="replace")
+                for line in (out + err).splitlines():
+                    log.error(line)
+            except Exception as exc:
+                log.error(f"{cmd!r}: {exc}")
+    finally:
+        client.close()

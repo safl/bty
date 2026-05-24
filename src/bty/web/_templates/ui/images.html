@@ -178,39 +178,123 @@
     "use strict";
 
     // Per-row catalog actions. Triggers enqueue against the manager
-    // endpoints; live progress + cancel UI lives on /ui/workers.
+    // endpoints; live progress + cancel UI lives on /ui/downloads
+    // and /ui/hashing.
+    //
+    // A 2s poll mirrors active /catalog/downloads + /catalog/hashes
+    // state onto the per-row Fetch / Hash buttons so the catalog
+    // table reflects "this entry is downloading" without the operator
+    // having to flip pages. The button shows ``Downloading`` /
+    // ``Hashing`` while a job is queued or running for its name,
+    // returns to ``Fetch`` / ``Hash`` (or is removed entirely when
+    // the row caches) when the job terminates. The completion case
+    // triggers a page reload so the catalog row's ``cached`` badge
+    // + Action column re-render.
+    function setBtnStateBusy(btn, busyLabel, busyIcon) {
+        // Preserve the original label + icon on first transition so
+        // we can restore on terminal status.
+        if (!btn.dataset.originalLabel) {
+            btn.dataset.originalLabel = btn.innerHTML;
+        }
+        btn.disabled = true;
+        btn.innerHTML = '<i class="bi ' + busyIcon + ' me-1"></i>' + busyLabel;
+    }
+    function setBtnStateIdle(btn) {
+        if (btn.dataset.originalLabel) {
+            btn.innerHTML = btn.dataset.originalLabel;
+        }
+        btn.disabled = false;
+    }
+    function syncButtonsFromPoll() {
+        // Build sets of names with an active (queued | running) job
+        // for each kind; flip every matching button.  ``allSettled``
+        // so one bad endpoint doesn't break the other.
+        Promise.allSettled([
+            fetch("/catalog/downloads", { credentials: "same-origin" })
+                .then(function (r) { return r.ok ? r.json() : null; }),
+            fetch("/catalog/hashes", { credentials: "same-origin" })
+                .then(function (r) { return r.ok ? r.json() : null; }),
+        ]).then(function (results) {
+            var dl = results[0].status === "fulfilled" ? results[0].value : null;
+            var hs = results[1].status === "fulfilled" ? results[1].value : null;
+            var activeDl = new Set();
+            (dl && dl.downloads || []).forEach(function (j) {
+                if (j.status === "queued" || j.status === "running") activeDl.add(j.name);
+            });
+            var activeHs = new Set();
+            (hs && hs.hashes || []).forEach(function (j) {
+                if (j.status === "queued" || j.status === "running") activeHs.add(j.name);
+            });
+            document.querySelectorAll(".bty-fetch-btn").forEach(function (btn) {
+                var name = btn.getAttribute("data-name");
+                if (activeDl.has(name)) {
+                    setBtnStateBusy(btn, "Downloading", "bi-arrow-repeat");
+                } else if (btn.dataset.originalLabel) {
+                    // We previously marked this button busy and the
+                    // job is no longer active -> it terminated. Reload
+                    // so the catalog row's ``cached`` badge + Action
+                    // column re-render with the new state.
+                    window.location.reload();
+                }
+            });
+            document.querySelectorAll(".bty-hash-btn").forEach(function (btn) {
+                var name = btn.getAttribute("data-name");
+                if (activeHs.has(name)) {
+                    setBtnStateBusy(btn, "Hashing", "bi-arrow-repeat");
+                } else if (btn.dataset.originalLabel) {
+                    window.location.reload();
+                }
+            });
+        });
+    }
+    var pollHandle = setInterval(syncButtonsFromPoll, 2000);
+    document.addEventListener("visibilitychange", function () {
+        // Pause polling in a backgrounded tab.
+        if (document.hidden && pollHandle) {
+            clearInterval(pollHandle);
+            pollHandle = null;
+        } else if (!document.hidden && !pollHandle) {
+            syncButtonsFromPoll();
+            pollHandle = setInterval(syncButtonsFromPoll, 2000);
+        }
+    });
+    syncButtonsFromPoll();  // initial draw, no wait
+
     document.addEventListener("click", function (ev) {
         var fetchBtn = ev.target.closest(".bty-fetch-btn");
         if (fetchBtn) {
             ev.preventDefault();
             var name = fetchBtn.getAttribute("data-name");
-            fetchBtn.disabled = true;
+            setBtnStateBusy(fetchBtn, "Downloading", "bi-arrow-repeat");
             fetch("/catalog/downloads", {
                 method: "POST",
                 credentials: "same-origin",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ name: name }),
-            }).then(function () {
-                // Re-enable so the operator can re-fire if they want
-                // (the manager dedups against queued/running). Progress
-                // is on /ui/workers.
-                fetchBtn.disabled = false;
-            }).catch(function () { fetchBtn.disabled = false; });
+            }).then(function (r) {
+                if (!r.ok) throw new Error("HTTP " + r.status);
+                // Don't restore the button -- the poller above will
+                // either hold it busy (job queued / running) or
+                // reload the page (job terminated, catalog state
+                // changed).
+            }).catch(function () {
+                setBtnStateIdle(fetchBtn);
+            });
             return;
         }
         var hashBtn = ev.target.closest(".bty-hash-btn");
         if (hashBtn) {
             ev.preventDefault();
             var name = hashBtn.getAttribute("data-name");
-            hashBtn.disabled = true;
+            setBtnStateBusy(hashBtn, "Hashing", "bi-arrow-repeat");
             fetch("/catalog/hashes", {
                 method: "POST",
                 credentials: "same-origin",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ name: name }),
-            }).then(function () {
-                hashBtn.disabled = false;
-            }).catch(function () { hashBtn.disabled = false; });
+            }).then(function (r) {
+                if (!r.ok) throw new Error("HTTP " + r.status);
+            }).catch(function () { setBtnStateIdle(hashBtn); });
             return;
         }
         var entryDeleteBtn = ev.target.closest(".bty-catalog-entry-delete-btn");

@@ -34,15 +34,23 @@
         <span class="d-flex flex-wrap align-items-center gap-2" style="min-width: 0;">
             {# Fetch artifacts: enqueues the netboot trio + sha256
                manifest. The release tag is an editable magic value
-               (Settings -> Upstream sources); this button just fetches
-               whatever it resolves to and the per-file rows show up in
-               the table below. #}
+               (Settings -> Upstream sources). Disabled when all four
+               files are already cached on disk; re-enables when one
+               disappears (operator ``rm``, state-dir migrate, etc.).
+               Removing the cache to force a re-fetch is intentionally
+               a CLI affordance, not a UI one -- the Netboot page
+               shows which file maps to which path. #}
             <button type="button" class="btn btn-sm btn-primary text-nowrap"
                     id="bty-downloads-fetch-artifacts-btn"
                     data-tag="{{ release_tag }}"
-                    title="Fetch netboot artifacts for tag '{{ release_tag }}' from {{ release_repo }}">
+                    {% if artifacts_all_cached %}disabled
+                    title="Netboot artifacts for tag '{{ release_tag }}' are already cached. Remove a file from the boot directory (see Netboot page) to re-fetch."
+                    {% else %}
+                    title="Fetch netboot artifacts for tag '{{ release_tag }}' from {{ release_repo }}"
+                    {% endif %}>
                 <i class="bi bi-cloud-download me-1"></i>Fetch artifacts
                 {% if release_tag == "latest" %}<small>(latest)</small>{% else %}<code>{{ release_tag }}</code>{% endif %}
+                {% if artifacts_all_cached %}<i class="bi bi-check-circle ms-1" title="cached"></i>{% endif %}
             </button>
             <div class="vr"></div>
             {# Add image from URL: http(s):// trusts the upstream bytes
@@ -198,6 +206,11 @@
         }).join("");
     }
 
+    // Track which keys completed since the last poll so we can reload
+    // the page once any release-fetch terminates. The reload picks up
+    // the freshly-cached state into the server-rendered button (e.g.
+    // disables Fetch artifacts when all four files landed).
+    var seenCompletedKeys = null;  // null until the first poll seeds it
     function refresh() {
         var ts = "updated " + new Date().toLocaleTimeString();
         return Promise.allSettled([
@@ -211,6 +224,30 @@
             renderDownloads(dl ? dl.downloads : [], rl ? rl.fetches : []);
             var statusEl = document.querySelector(".bty-workers-poll-status");
             if (statusEl) statusEl.textContent = (dl && rl) ? ts : "(poll failed)";
+
+            // Detect a newly-terminal release fetch + reload so the
+            // server-rendered button state updates.
+            var nowCompleted = new Set();
+            (rl ? rl.fetches : []).forEach(function (f) {
+                if (f.status === "completed" || f.status === "failed") {
+                    nowCompleted.add("release:" + f.tag);
+                }
+            });
+            (dl ? dl.downloads : []).forEach(function (d) {
+                if (d.status === "completed" || d.status === "failed") {
+                    nowCompleted.add("catalog:" + d.name);
+                }
+            });
+            if (seenCompletedKeys === null) {
+                seenCompletedKeys = nowCompleted;
+                return;
+            }
+            var fresh = false;
+            nowCompleted.forEach(function (k) {
+                if (!seenCompletedKeys.has(k)) fresh = true;
+            });
+            seenCompletedKeys = nowCompleted;
+            if (fresh) setTimeout(function () { window.location.reload(); }, 400);
         });
     }
 
@@ -231,7 +268,11 @@
             .catch(function () { btn.disabled = false; });
     });
 
-    // "Fetch artifacts" trigger.
+    // "Fetch artifacts" trigger. The button disables immediately on
+    // click and STAYS disabled while the fetch runs -- the polling
+    // loop above reloads the page on completion, which picks up the
+    // freshly-cached state into the server-rendered disabled / enabled
+    // bit. Re-enable only on a synchronous enqueue error.
     var fetchBtn = document.getElementById("bty-downloads-fetch-artifacts-btn");
     if (fetchBtn) {
         fetchBtn.addEventListener("click", function () {
@@ -247,7 +288,8 @@
                 return refresh();
             }).catch(function (e) {
                 alert("Fetch failed: " + e.message);
-            }).then(function () { fetchBtn.disabled = false; });
+                fetchBtn.disabled = false;
+            });
         });
     }
 

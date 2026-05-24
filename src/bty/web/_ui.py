@@ -678,23 +678,33 @@ def register_ui_routes(
         """The Downloads worker page: trigger buttons (Fetch artifacts,
         Add image from URL, Upload image) + active downloads table
         (merging catalog entries + per-file release artifacts) +
-        recent download-relevant activity at the bottom."""
+        recent download-relevant activity at the bottom.
+
+        ``artifacts_all_cached`` lets the template disable the Fetch
+        artifacts button when the trio + sha256 manifest are all
+        present locally. The button re-enables when one or more
+        files disappear from boot_root (e.g. the operator manually
+        ``rm``s them, or the dir is wiped on a state-dir migrate).
+        """
         with _db.open_db(state_path) as conn:
             release_repo = _settings_store.resolve_release_repo(conn)
             release_tag = _settings_store.resolve_release_tag(conn)
-            # Recent events that drove downloads: catalog adds, image
-            # uploads, netboot artifact fetches.
             download_events: list[_events_log.Event] = []
             for kind in ("catalog", "image", "netboot"):
                 download_events.extend(_events_log.list_events(conn, subject_kind=kind, limit=10))
         download_events.sort(key=lambda e: e.id, reverse=True)
         download_events = download_events[:15]
+        # ``inspect_boot_dir`` returns one ArtifactState per file in
+        # the trio + manifest; ``a.present`` is the cached-on-disk bit.
+        artifacts = _releases.inspect_boot_dir(boot_root)
+        artifacts_all_cached = bool(artifacts) and all(a.present for a in artifacts)
         return render(
             "ui/downloads.html",
             request,
             release_repo=release_repo,
             release_tag=release_tag,
             download_events=download_events,
+            artifacts_all_cached=artifacts_all_cached,
         )
 
     @app.get(
