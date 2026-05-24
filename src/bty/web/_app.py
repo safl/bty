@@ -1253,7 +1253,10 @@ def create_app(
             changed = _acknowledge_event(conn, event_id)
             conn.commit()
         if not changed:
-            raise HTTPException(status_code=404, detail=f"no event with id {event_id}")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"no event with id {event_id}",
+            )
         return {"id": event_id, "acknowledged": True}
 
     def _arm_flasher_boot(raw_mac: str) -> None:

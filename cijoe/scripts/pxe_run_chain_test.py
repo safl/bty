@@ -57,6 +57,8 @@ import urllib.request
 from argparse import ArgumentParser
 from pathlib import Path
 
+import paramiko  # cijoe dependency; required by every PXE chain test
+
 # Netboot trio names carry the bty version (read from pyproject.toml).
 ARTIFACT_NAME_FMTS = (
     "bty-netboot-x86_64-v{version}.vmlinuz",
@@ -614,8 +616,6 @@ def _ssh_setup_test_dhcp(host, port, cfg):
     ``-netdev socket`` with nothing else on it, so we need full
     DHCP - injected entirely from the test side.
     """
-    import paramiko
-
     pxe_iface = f"{cfg.get('nic_prefix', 'ens')}{int(cfg['pxe_nic_slot'])}"
 
     # Static IP for the PXE NIC. dnsmasq's ``bind-dynamic`` only
@@ -751,11 +751,6 @@ def _dump_in_vm_diagnostics(host, port, cfg):
     """
     if not _ssh_ready(host, port):
         log.error(f"in-vm SSH on {host}:{port} not reachable; skipping journal dump")
-        return
-    try:
-        import paramiko
-    except Exception as exc:  # pragma: no cover - import-time, hard to hit
-        log.error(f"paramiko import failed: {exc}; skipping journal dump")
         return
 
     cmds = (

@@ -2968,6 +2968,49 @@ def test_catalog_downloads_delete_no_active_404(app_client: TestClient) -> None:
     assert "no active download" in r.json()["detail"]
 
 
+def test_catalog_downloads_db_only_entry_enqueues(
+    app_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Integration test for the operator-add path: a row in
+    ``catalog_entries`` (added via the form / JSON API, NOT via
+    ``catalog.toml``) must be enqueueable through ``POST /catalog/
+    downloads``. The DownloadManager falls back to the DB lookup
+    callback when the manifest doesn't have the name -- without
+    that fallback, this path returns 404 even though the row is
+    plainly there on /ui/images."""
+    # The /catalog/entries endpoint HEAD-probes the URL for
+    # Content-Length; stub that out so the test doesn't make a
+    # network call.
+    from bty.web import _app
+
+    monkeypatch.setattr(_app, "_head_content_length", lambda _u: None)
+
+    # Insert a DB-only entry via the JSON endpoint (mirrors what the
+    # /ui/catalog/entries form does -- catalog.toml untouched).
+    r = app_client.post(
+        "/catalog/entries",
+        json={"image_url": "https://example.invalid/db-only-fixture.img.gz"},
+        cookies=AUTH,
+    )
+    assert r.status_code in (200, 201), r.json()
+
+    # Now enqueue a download for the same name. Pre-fix this returned
+    # 404 ("no catalog entry named ..."); post-fix it returns 202
+    # because the DB fallback resolves the entry.
+    r = app_client.post(
+        "/catalog/downloads",
+        json={"name": "db-only-fixture.img.gz"},
+        cookies=AUTH,
+    )
+    assert r.status_code == 202, r.json()
+    body = r.json()
+    assert body["name"] == "db-only-fixture.img.gz"
+    # Status is one of the lifecycle states -- the manager may have
+    # picked the job up + failed at the (invalid) URL between enqueue
+    # and the response.
+    assert body["status"] in ("queued", "running", "completed", "failed"), body
+
+
 def test_catalog_hashes_requires_auth(app_client: TestClient) -> None:
     r = app_client.get("/catalog/hashes")
     assert r.status_code == 401

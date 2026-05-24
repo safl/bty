@@ -66,6 +66,12 @@ DEFAULT_MAX_PARALLEL = 1  # one backup at a time; concurrent exports would race 
 # (exFAT in particular rejects ``:`` in filenames).
 _BACKUP_ID_FMT = "%Y-%m-%dT%H-%M-%SZ"
 
+# Valid trigger values for :meth:`BackupManager.enqueue`. ``manual``
+# is the operator-pressed "Back up now"; ``scheduled`` is the
+# scheduler loop's cadence-driven enqueue. Only ``scheduled`` runs
+# update the ``backup.last_run_at`` settings key (the cadence anchor).
+BACKUP_TRIGGERS: tuple[str, ...] = ("manual", "scheduled")
+
 
 @dataclass
 class BackupState:
@@ -84,7 +90,7 @@ class BackupState:
     images: int = 0
     bytes_written: int = 0
     dest_path: str | None = None  # absolute path of the bundle directory
-    trigger: str = "manual"  # "manual" | "scheduled"
+    trigger: str = "manual"  # one of :data:`BACKUP_TRIGGERS`
     error: str | None = None
     # See :class:`HashState._cancel` for the threading.Event choice.
     _cancel: threading.Event = field(default_factory=threading.Event, repr=False)
@@ -150,8 +156,8 @@ class BackupManager(_BaseAsyncManager[BackupState]):
         collide on disk."""
         if self._state_path is None:
             raise RuntimeError("BackupManager not started")
-        if trigger not in ("manual", "scheduled"):
-            raise ValueError(f"unknown trigger {trigger!r}")
+        if trigger not in BACKUP_TRIGGERS:
+            raise ValueError(f"unknown trigger {trigger!r}; expected one of {BACKUP_TRIGGERS}")
         base = datetime.now(UTC).strftime(_BACKUP_ID_FMT)
         async with self._lock:
             backup_id = base
