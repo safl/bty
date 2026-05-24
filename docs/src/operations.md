@@ -89,6 +89,34 @@ sudo systemctl start bty-web
 Restore by putting the file(s) back under `/var/lib/bty` (bty-web
 stopped) and starting the service.
 
+### Scheduled backups (UI-driven, since v0.25.7)
+
+The `/ui/backups` page carries a **Back up now** trigger plus a
+**Schedule** card on `/ui/settings#backup-schedule` for cadence
+(`daily` / `weekly` / `manual`) + retention (keep N most recent).
+The scheduler ticks every 60s; a change in Settings takes effect
+on the next tick without restarting bty-web.
+
+Each backup is a directory written under `$BTY_BACKUP_DIR`
+(default `$BTY_STATE_DIR/backups`) named after the ISO-8601
+timestamp, e.g. `2026-05-24T08-00-00Z/`. The bundle layout is
+identical to what `bty-web export` produces (`manifest.json` +
+`images/`), so a scheduled backup is interchangeable with a
+manual one. Retention prunes the oldest siblings after every
+successful run.
+
+Two env vars tune the feature when the in-UI knobs aren't enough:
+
+| Variable                     | Default                       | Meaning                                                              |
+|------------------------------|-------------------------------|----------------------------------------------------------------------|
+| `BTY_BACKUP_DIR`             | `$BTY_STATE_DIR/backups`      | Where backup directories land. Move off the OS disk if you want them to survive an OS reflash. |
+| `BTY_BACKUP_MAX_PARALLEL`    | `1`                           | Max concurrent backup jobs. Concurrent exports race on dest dirs; leave at 1 unless you have a reason. |
+
+History lands in the audit log under `subject_kind=backup` (kinds
+`backup.created` / `backup.failed` / `backup.pruned`); the
+`/ui/backups` page also surfaces the recent rows in a card at
+the bottom.
+
 ## Portable export / import (operator data only)
 
 `tar`-copying the whole tree (above) is the verbatim option. The
@@ -106,6 +134,11 @@ bty-web export /tmp/bty-bundle
 # Copy /tmp/bty-bundle to the new server, then:
 bty-web import /tmp/bty-bundle
 ```
+
+The in-UI **Back up now** trigger on `/ui/backups` produces the
+same bundle shape; reach for the CLI when scripting (cron / ssh
+into the appliance / packaging into an archive pipeline) and the
+UI when you want an ad-hoc snapshot without leaving the browser.
 
 What a bundle carries, and what it deliberately leaves behind:
 

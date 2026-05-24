@@ -767,21 +767,41 @@ def _dump_in_vm_diagnostics(host, port, cfg):
         ("ls -la /etc/default/bty-web /var/lib/bty 2>&1 || true", "state dir + env file"),
     )
     user = cfg.get("ssh_user", "odus")
-    ssh_password = cfg.get("ssh_password", "odus.321")
+    # Try several credentials in order. ``odus`` is the appliance's
+    # shell user; the cooked-image password is ``odus.321``
+    # (per ``cloudinit-base-server.user``) but stale builds or
+    # partial cloud-init runs sometimes leave it as plain ``odus``
+    # -- and on a half-cooked image where cloud-init's chpasswd
+    # hasn't run yet, neither will work and we want the actual
+    # failure mode to surface as "no creds worked", not just
+    # "Authentication failed" which is ambiguous between
+    # bad-password and user-doesn't-exist.
+    candidates = [cfg.get("ssh_password")] if cfg.get("ssh_password") else []
+    candidates.extend(("odus.321", "odus"))
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    try:
-        client.connect(
-            host,
-            port=port,
-            username=user,
-            password=ssh_password,
-            timeout=10,
-            allow_agent=False,
-            look_for_keys=False,
+    last_exc: Exception | None = None
+    for pw in candidates:
+        try:
+            client.connect(
+                host,
+                port=port,
+                username=user,
+                password=pw,
+                timeout=10,
+                allow_agent=False,
+                look_for_keys=False,
+            )
+            last_exc = None
+            break
+        except Exception as exc:
+            last_exc = exc
+            continue
+    if last_exc is not None:
+        log.error(
+            f"in-vm SSH connect failed for {user}@{host}:{port} "
+            f"with {len(candidates)} password candidate(s): {last_exc}"
         )
-    except Exception as exc:
-        log.error(f"in-vm SSH connect failed: {exc}")
         return
     try:
         for cmd, label in cmds:
