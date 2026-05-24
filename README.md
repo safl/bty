@@ -13,6 +13,7 @@
 [![PyPI](https://img.shields.io/pypi/v/bty-lab.svg)](https://pypi.org/project/bty-lab/)
 [![Python](https://img.shields.io/pypi/pyversions/bty-lab.svg)](https://pypi.org/project/bty-lab/)
 [![Container](https://img.shields.io/badge/container-ghcr.io%2Fsafl%2Fbty--web-blue)](https://github.com/safl/bty/pkgs/container/bty-web)
+[![Changelog](https://img.shields.io/badge/changelog-CHANGELOG.md-blue)](https://github.com/safl/bty/blob/main/CHANGELOG.md)
 
 Flash a single bare-metal box ad-hoc with a USB stick, or reflash a
 whole fleet remotely from a single controller -- bty works with or
