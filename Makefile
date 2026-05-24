@@ -199,7 +199,12 @@ docker-build:
 # ``docker run -v bty-data:/var/lib/bty ...`` with a managed
 # volume (no chown needed, harder to inspect from the host).
 docker-run:
-	mkdir -p bty-data/images
+	# Pre-create the dirs bty-web will write to and chown them to the
+	# bty UID (1000) so the entrypoint's writability preflight passes.
+	# ``images/`` covers operator-curated images; ``backups/`` covers
+	# the v0.26+ scheduled-backup destination (``$BTY_BACKUP_DIR``
+	# default).
+	mkdir -p bty-data/images bty-data/backups
 	sudo chown -R 1000:1000 bty-data
 	docker run -d --name bty-web --rm -p 8080:8080 -p 69:69/udp \
 	    -v "$(CURDIR)/bty-data":/var/lib/bty bty-web:dev

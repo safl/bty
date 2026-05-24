@@ -123,8 +123,11 @@ jobs:
       # explicit in this one file.
       - run: uv run ruff check
       - run: uv run ruff format --check
-      # mypy is single-version; only run it on the 3.12 matrix slot
-      # to avoid duplicating across the matrix.
+      # mypy only on one matrix slot: typecheck output is identical
+      # across Python versions (mypy reads pyproject's
+      # ``python_version = "3.11"`` not the runtime), so duplicating it
+      # 4x would burn CI minutes for no extra signal. 3.12 is the
+      # arbitrary single slot.
       - if: matrix.python == '3.12'
         run: uv run mypy src
       - run: uv run pytest

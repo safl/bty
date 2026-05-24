@@ -80,6 +80,7 @@ if [ -z "${BTY_QUIET:-}" ]; then
 
   Image catalog: ${BTY_IMAGE_ROOT:-/var/lib/bty/images}
   State dir:     ${BTY_STATE_DIR:-/var/lib/bty}
+  Backups:       ${BTY_BACKUP_DIR:-${BTY_STATE_DIR:-/var/lib/bty}/backups}
   Browser UI:    http://<host>:${BTY_WEB_PORT:-8080}/ui
 
   Connect bty wizard clients with:
