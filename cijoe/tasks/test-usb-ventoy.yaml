@@ -153,16 +153,26 @@ steps:
     # would pass even if the bty entry point itself were wedged
     # (failed Rich init, BtyTui constructor crash, wrapper script
     # exiting before exec). /dev/vcs1 is the kernel's snapshot of
-    # tty1's framebuffer; ``Pick an image source`` is a string ONLY
-    # the rendered wizard produces -- the wrapper's pre-Rich
-    # ``bty is starting...`` deliberately doesn't match, so a bty
-    # binary that prints the banner then crashes before drawing
-    # fails here. 60s budget for cold-cache import chains.
+    # tty1's framebuffer.
+    #
+    # We grep for ``image_root:`` -- the Rich panel body renders
+    # this line on EVERY wizard stage (SELECT_CATALOG through
+    # REBOOT). The Ventoy stage seeds a sentinel image into the
+    # data partition, which triggers the wizard's auto-skip-Stage-1
+    # rule (catalog_chosen=True if local images exist) -- so any
+    # stage-specific match like ``Pick an image source`` wouldn't
+    # fire here. ``image_root:`` works on whichever stage the
+    # wizard lands on.
+    #
+    # The pre-Rich wrapper output (``bty is starting...``) does NOT
+    # contain ``image_root:``, so a bty that prints the banner then
+    # crashes before drawing fails this assertion. 60s budget for
+    # cold-cache import chains.
     - "systemctl is-active bty-on-tty1.service"
-    - "for i in $(seq 1 60); do grep -q 'Pick an image source' /dev/vcs1 && break; sleep 1; done"
+    - "for i in $(seq 1 60); do grep -q 'image_root:' /dev/vcs1 && break; sleep 1; done"
     - "cat /run/bty.status 2>&1 || echo NO_STATUS_FILE"
     - "tr -cd '[:print:]\\n' < /dev/vcs1 | head -10 || true"
-    - "grep -q 'Pick an image source' /dev/vcs1"
+    - "grep -q 'image_root:' /dev/vcs1"
 
 - name: poweroff_guest
   uses: core.cmdrunner

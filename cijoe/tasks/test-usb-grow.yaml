@@ -68,20 +68,25 @@ steps:
     # PyPI undetected.
     #
     # /dev/vcs1 is the kernel's text-snapshot of tty1's framebuffer
-    # contents. We grep for ``Pick an image source`` -- a string
-    # that ONLY the rendered wizard produces. The pre-Rich wrapper
-    # output (``bty is starting...``) deliberately doesn't match,
-    # so a bty binary that prints the wrapper banner then crashes
-    # before drawing fails this assertion.
+    # contents. We grep for ``image_root:`` -- a string the Rich
+    # panel body renders on EVERY wizard stage (Stage 1 SELECT_CATALOG
+    # through Stage 5 REBOOT). Stage-specific strings like
+    # ``Pick an image source`` only appear on Stage 1 and break
+    # when the wizard auto-skips to Stage 2 because the image-root
+    # has local images (the v0.30.1 retag #1 failure mode).
+    #
+    # The pre-Rich wrapper output (``bty is starting...``) does NOT
+    # contain ``image_root:``, so a bty that prints the wrapper
+    # banner then crashes before drawing fails this assertion.
     #
     # 60s budget: Rich + bty.catalog + bty.flash + bty.oras imports
     # take ~5-10s on a hot KVM guest, ~15-25s cold. The runner is
     # cold every release.
     - "systemctl is-active bty-on-tty1.service"
-    - "for i in $(seq 1 60); do grep -q 'Pick an image source' /dev/vcs1 && break; sleep 1; done"
+    - "for i in $(seq 1 60); do grep -q 'image_root:' /dev/vcs1 && break; sleep 1; done"
     - "cat /run/bty.status 2>&1 || echo NO_STATUS_FILE"
     - "tr -cd '[:print:]\\n' < /dev/vcs1 | head -10 || true"
-    - "grep -q 'Pick an image source' /dev/vcs1"
+    - "grep -q 'image_root:' /dev/vcs1"
 
 - name: poweroff_guest
   uses: core.cmdrunner
