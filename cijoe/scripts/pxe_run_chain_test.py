@@ -140,7 +140,7 @@ def main(args, cijoe):
             log.error("server VM serial-console tail (last 300 lines):")
             _dump_tail(server_log, 300)
             log.error("attempting in-vm diagnostics over SSH (best-effort):")
-            _dump_in_vm_diagnostics("127.0.0.1", ssh_port, cfg["bty_password"], cfg)
+            _dump_in_vm_diagnostics("127.0.0.1", ssh_port, cfg)
             return errno.ETIMEDOUT
 
         log.info("POST /ui/login (PAM, default appliance credential)")
@@ -730,12 +730,19 @@ def _dump_tail(path, lines):
         log.error(line)
 
 
-def _dump_in_vm_diagnostics(host, port, password, cfg):
+def _dump_in_vm_diagnostics(host, port, cfg):
     """SSH into the server VM and dump bty-web's process state +
     recent journal lines. Called when /healthz times out -- the
     kernel serial log shows boot reached multi-user.target but
     can't see why bty-web isn't answering. The journal usually
     has the actual stacktrace.
+
+    SSH credentials are the appliance's shell account
+    (``odus`` / ``odus.321`` by default; cfg-overridable via
+    ``ssh_user`` / ``ssh_password``) -- NOT the web ``bty/bty``
+    PAM creds used by /ui/login. ``bty`` doesn't have an interactive
+    shell + a shared password by design (web auth + sudoers-pinned
+    shell are separate surfaces).
 
     Best-effort: if sshd hasn't come up yet (cloud-init still
     running, networkd not started, etc.), each step short-circuits
@@ -760,7 +767,7 @@ def _dump_in_vm_diagnostics(host, port, password, cfg):
         ("ls -la /etc/default/bty-web /var/lib/bty 2>&1 || true", "state dir + env file"),
     )
     user = cfg.get("ssh_user", "odus")
-    ssh_password = cfg.get("ssh_password", password)
+    ssh_password = cfg.get("ssh_password", "odus.321")
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     try:
