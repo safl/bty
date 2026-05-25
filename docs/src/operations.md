@@ -161,26 +161,55 @@ subdir), so `tar` it for archival.
 
 bty pre-1.0 has **no database migration framework**. v0.31.0+ enforces
 this strictly: bty-web carries the exact `bty.__version__` that created
-`state.db` in a `bty_version` table, and refuses to start when the
-running code's version doesn't match. Every release is therefore
-breaking for state, by design. The fix is one of:
+`state.db` in a `bty_version` table, and refuses the existing DB when
+the running code's version doesn't match. Every release is therefore
+breaking for state, by design.
 
-- **Wipe-and-restart.** Delete `state.db` (it's recreated empty on next
-  start). Loses machine records, image bindings, settings, audit log;
-  the image files in `BTY_IMAGE_ROOT` and netboot artifacts in
-  `BTY_BOOT_DIR` survive. Operator re-binds via the UI.
-- **Export-wipe-import.** Run `bty-web export <bundle-dir>` on the OLD
-  release BEFORE upgrading. Upgrade. Wipe `state.db`. Run `bty-web
-  import <bundle-dir>` on the new release. The slim bundle carries
-  every file under `BTY_IMAGE_ROOT` plus a minimal per-machine record
-  (`mac` + `hw_lshw` + `known_disks`) so hardware identity survives;
-  bindings (`boot_mode`, `bty_image_ref`, `target_disk_serial`) reset
-  to defaults and the operator re-binds. See "Backup".
+### Recovery wizard (v0.32.0+)
 
-If bty-web refuses to start with a `VersionMismatchError`, the
-journal message names both the stored and the running version plus
-the exact `rm` command to run. Take a backup (`bty-web export`)
-before wiping.
+When bty-web boots against a mismatched `state.db`, it does NOT die
+in the journal. Instead it serves an **interactive recovery wizard**
+on the same port. Hit the appliance URL in a browser; the wizard
+walks the operator through the checklist:
+
+1. **State detected** — shows stored vs running version + at-risk
+   row counts (machines, catalog entries, audit events).
+2. **Choose recovery strategy:**
+   - **Wipe and start fresh** — discards machine records, bindings,
+     settings, audit log. Files under `BTY_IMAGE_ROOT` and netboot
+     artifacts in `BTY_BOOT_DIR` survive. Operator re-binds via the
+     UI after the restart.
+   - **Wipe and import from backup** — picks a previously-exported
+     v2 bundle from `${BTY_STATE_DIR}/backups/`. Hardware identity
+     (mac + lshw + known_disks) restores; bindings reset.
+   - **Manual shell recipe** — for operators who'd rather run the
+     wipe themselves.
+3. **bty-web restarts** with a clean DB (auto-ticks).
+4. **Verify** — page auto-redirects to `/ui/dashboard` once the
+   normal app is up.
+
+### CLI-driven recovery (for headless / scripted upgrades)
+
+If you can't reach the wizard (e.g. shipping a fleet upgrade via
+ssh):
+
+```bash
+# (optional) preserve hardware inventory across the wipe:
+sudo bty-web export /var/lib/bty/backups/pre-$(date +%Y%m%d)
+
+sudo systemctl stop bty-web
+sudo rm /var/lib/bty/state.db
+sudo systemctl start bty-web
+
+# (optional, paired with the export above):
+sudo bty-web import /var/lib/bty/backups/pre-$(date +%Y%m%d)
+```
+
+The slim bundle format carries every file under `BTY_IMAGE_ROOT`
+plus a minimal per-machine record (`mac` + `hw_lshw` +
+`known_disks`); bindings (`boot_mode`, `bty_image_ref`,
+`target_disk_serial`) reset to defaults and the operator re-binds.
+See "Backup".
 
 ### Upgrade in place (pip / pipx install)
 

@@ -301,6 +301,40 @@ Protected routes (session cookie required):
 | GET | `/catalog/hashes` | - | list of hash states |
 | DELETE | `/catalog/hashes/{name}` | - | 200 with state; 404 if not active |
 
+### Recovery-mode routes (v0.32.0+)
+
+When `bty.web._db.check_db` reports the on-disk `state.db` doesn't
+match the running release (pre-versioning DB, or stamped with a
+different `bty_version`), bty-web serves a minimal **recovery
+wizard** on the same port instead of the full app. The wizard's
+routes:
+
+| Method | Path | Body | Returns |
+|---|---|---|---|
+| GET | `/` | - | 303 redirect to `/ui/recovery` |
+| GET | `/ui/recovery` | - | HTML wizard page (checklist) |
+| GET | `/ui/recovery/status` | - | `{state, stored_version, running_version, needs_recovery, at_risk, backups_count}` (the wizard polls this) |
+| POST | `/ui/recovery/wipe` | - | `{status: "wiped", path, next}`; bty-web exits + systemd restarts |
+| POST | `/ui/recovery/wipe-and-import` | `{"backup_id": str}` | `{status: "imported", machines, files}`; bty-web exits + systemd restarts |
+| GET | `/healthz` | - | 503 with `{status: "recovery", reason}` |
+| (any other path) | - | 503 with HTML meta-refresh to `/ui/recovery` |
+
+Error responses on the destructive POSTs:
+
+- 400 — `backup_id` empty / contains path separator / NUL
+- 404 — bundle directory or `manifest.json` missing
+- 409 — bundle's `bty_export_version` doesn't match (v1 vs v2)
+- 500 — `PermissionError` during wipe or copy (hint includes chmod
+  recovery)
+- 507 (`Insufficient Storage`) — `OSError` during the copy loop;
+  partial copies are unlinked before the response returns
+
+Normal-mode routes (everything above this section) are not
+available while bty-web is in recovery mode; they return 503 with
+a redirect-back-to-wizard HTML body so a bookmarked
+`/ui/dashboard` lands the operator at the wizard rather than a
+JSON error.
+
 ``POST /catalog/import`` parses the TOML at ``source`` (path,
 ``http(s)://``, or ``oras://``) via ``bty.catalog.load_source`` and adds
 each entry to the catalog as metadata. **No bytes are fetched at import
