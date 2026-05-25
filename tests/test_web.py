@@ -2837,38 +2837,52 @@ def test_serve_image_resolves_by_sha_dir_scan(tmp_path: Path) -> None:
         assert r.content == payload
 
 
-def test_serve_image_resolves_by_sha_cache(tmp_path: Path) -> None:
-    """``GET /images/<sha>`` resolves to the catalog cache when
-    the SHA is present there (manifest blobs that were fetched)."""
+def test_serve_image_resolves_by_sha_via_catalog_entry(tmp_path: Path) -> None:
+    """``GET /images/<sha>`` resolves to the URL-keyed file under
+    image_root when a matching ``catalog_entries`` row carries that
+    disk_image_sha. v0.31.0+: there is no separate cache dir -- the
+    lookup goes (sha -> catalog_entries row -> local_filename_for ->
+    image_root/<catalog-...>) rather than sha -> cache_dir/<sha>."""
     import hashlib
+
+    from bty import catalog as _catalog_mod
+    from bty.web import _db as _bty_db_mod
 
     image_root = tmp_path / "images"
     image_root.mkdir()
     state_dir = tmp_path / "state"
     state_dir.mkdir()
-    cache_dir = state_dir / "cache"
-    cache_dir.mkdir()
     payload = b"fetch-by-sha-cache"
     sha = hashlib.sha256(payload).hexdigest()
-    (cache_dir / sha).write_bytes(payload)
+    src = "https://example.com/fetch-by-sha.img"
+    name = "fetch-by-sha.img"
+    fmt = "img"
+    ref = _catalog_mod.image_ref_for_src(src)
+    local_filename = _catalog_mod.local_filename_for(ref, name, fmt)
+    (image_root / local_filename).write_bytes(payload)
 
     state = state_dir / "state.db"
-    import os
-
-    os.environ["BTY_STATE_DIR"] = str(state_dir)
-    try:
-        app = create_app(
-            state_path=state,
-            service_user=TEST_SERVICE_USER,
-            secret_key=TEST_SECRET_KEY,
-            image_root=image_root,
+    # Seed a catalog_entries row matching the sha so the lookup path
+    # has something to find.
+    with _bty_db_mod.open_db(state) as conn:
+        conn.execute(
+            "INSERT INTO catalog_entries "
+            "(bty_image_ref, src, disk_image_sha, name, format, added_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (ref, src, sha, name, fmt, "2026-05-25T00:00:00+00:00"),
         )
-        with TestClient(app) as client:
-            r = client.get(f"/images/{sha}")
-            assert r.status_code == 200
-            assert r.content == payload
-    finally:
-        os.environ.pop("BTY_STATE_DIR", None)
+        conn.commit()
+
+    app = create_app(
+        state_path=state,
+        service_user=TEST_SERVICE_USER,
+        secret_key=TEST_SECRET_KEY,
+        image_root=image_root,
+    )
+    with TestClient(app) as client:
+        r = client.get(f"/images/{sha}")
+        assert r.status_code == 200
+        assert r.content == payload
 
 
 def test_serve_image_404_for_unknown_sha(app_client: TestClient) -> None:
@@ -2925,15 +2939,17 @@ def test_catalog_downloads_requires_auth(app_client: TestClient) -> None:
 def test_catalog_downloads_no_manifest_returns_empty(app_client: TestClient) -> None:
     """The fixture's app has no ``catalog.toml`` -- the endpoint
     returns ``catalog=None`` + empty downloads list, plus the
-    DownloadManager state (``cache_dir`` + ``max_parallel``) the
+    DownloadManager state (``image_root`` + ``max_parallel``) the
     UI uses for its caption. Stable shape so the polling loop has
-    something to render."""
+    something to render. v0.31.0+: ``image_root`` replaces the old
+    ``cache_dir`` field (catalog-fetched files merged into the
+    image_root under ``catalog-<ref:12>-<slug>.<ext>`` names)."""
     r = app_client.get("/catalog/downloads", cookies=AUTH)
     assert r.status_code == 200
     body = r.json()
     assert body["catalog"] is None
     assert body["downloads"] == []
-    assert "cache_dir" in body
+    assert "image_root" in body
     assert "max_parallel" in body
 
 
@@ -3262,29 +3278,35 @@ def test_catalog_cache_delete_unlinks_file_keeps_entry(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """``DELETE /catalog/cache/{name}`` removes the cached bytes at
-    ``$cache_dir/<sha256>`` and leaves the catalog entry in place.
-    The follow-up ``GET /catalog/entries`` still shows the row;
-    ``GET /images`` shows it as ``cached=False`` so the operator can
-    re-enqueue a fetch."""
+    ``$image_root/catalog-<ref:12>-<slug>.<ext>`` and leaves the catalog
+    entry in place. v0.31.0+: file lives under image_root with URL-
+    keyed name (no separate cache dir). Follow-up
+    ``GET /catalog/entries`` still shows the row; ``GET /images`` shows
+    it as ``cached=False`` so the operator can re-enqueue a fetch."""
     import hashlib
     import io
     import json as _json
     import os
 
+    from bty import catalog as _catalog_mod
+
     state_dir = tmp_path / "state"
     state_dir.mkdir()
-    cache_dir = state_dir / "cache"
-    cache_dir.mkdir()
     image_root = tmp_path / "images"
     image_root.mkdir()
     boot_root = tmp_path / "boot"
     boot_root.mkdir()
 
-    # Stage a fake cached file at the SHA the oras manifest below will
-    # carry. The endpoint should unlink it on success.
+    # Stage a fake cached file at the URL-keyed filename. The catalog
+    # entry is created via the API below; pre-compute what filename
+    # the entry will land at so the file is in place when the DELETE
+    # arrives.
     payload = b"cached-bytes-to-evict"
     sha = hashlib.sha256(payload).hexdigest()
-    cached_file = cache_dir / sha
+    src = "oras://ghcr.io/safl/test/deletable:latest"
+    ref = _catalog_mod.image_ref_for_src(src)
+    cached_filename = _catalog_mod.local_filename_for(ref, "deletable.img.gz", "img.gz")
+    cached_file = image_root / cached_filename
     cached_file.write_bytes(payload)
 
     # Mock the oras manifest fetch so adding an entry via the API
@@ -3370,8 +3392,11 @@ def test_catalog_cache_delete_unlinks_file_keeps_entry(
             assert not cached_file.exists()
             r = client.get("/catalog/entries", cookies=auth_cookies)
             assert r.status_code == 200
-            assert len(r.json()) == 1
-            assert r.json()[0]["name"] == "deletable.img.gz"
+            entries = r.json()
+            names = [e["name"] for e in entries]
+            assert "deletable.img.gz" in names, (
+                f"deletable entry should survive DELETE; got names={names!r}"
+            )
     finally:
         os.environ.pop("BTY_STATE_DIR", None)
 
@@ -3396,7 +3421,10 @@ def test_catalog_cache_delete_idempotent_no_cached_file(
     r = app_client.delete("/catalog/cache/uncached.img.gz", cookies=AUTH)
     assert r.status_code == 200
     assert r.json()["deleted"] is False
-    assert r.json()["reason"] == "no sha256 for name"
+    # v0.31.0+: catalog files have a URL-keyed local_filename regardless
+    # of sha-pin status, so "no sha256 for name" no longer applies. The
+    # reason for the missing file is just "not cached".
+    assert r.json()["reason"] == "not cached"
 
 
 def test_catalog_cache_delete_requires_auth(app_client: TestClient) -> None:

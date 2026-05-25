@@ -9,6 +9,74 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.31.0] - 2026-05-25
+
+**BREAKING:** state.db wipes on upgrade. bty-web now refuses to start
+on an old DB. The cross-release path is `bty-web export` (slim bundle
+of images + cached files + hardware inventory) then wipe + import on
+the new release.
+
+### Added
+
+- **Hard `bty_version` check at bty-web startup.** state.db carries
+  the exact `bty.__version__` that created it in a new `bty_version`
+  table; on startup, mismatch (or a pre-versioning DB with data
+  tables but no marker row) raises `VersionMismatchError` with an
+  operator-actionable recovery message and bty-web refuses to start.
+  Pre-1.0 policy is no migration apparatus -- every release wipes
+  state (or migrates via export/wipe/import). Replaces the soft per-
+  column `StaleSchemaError` machinery which let pre-versioning DBs
+  silently survive into incompatible code paths (the v0.30.x footgun
+  that motivated this release).
+
+### Changed
+
+- **Cache → image_root merge.** No more separate
+  `BTY_CATALOG_CACHE_DIR` / `/var/lib/bty/cache/`. Catalog-fetched
+  files now land under the operator's `BTY_IMAGE_ROOT` (i.e.
+  `/var/lib/bty/images/`) with a URL-keyed name:
+  `catalog-<bty_image_ref[:12]>-<slug(name)>.<ext>`. Operator-typed
+  files keep their original filenames. One mental model, one
+  directory, one `ls` to inventory everything. The catalog-prefix
+  + 12-hex namespace guarantees same-URL idempotency and rules out
+  cross-entry collisions at any plausible homelab catalog size.
+
+  Operator impact on upgrade: existing files in `/var/lib/bty/cache/`
+  are orphaned (not deleted). Re-fetch via the Downloads UI lands
+  them at the new URL-keyed path; the operator can `rm -rf
+  /var/lib/bty/cache/` to reclaim disk once they're confident.
+
+- **Slim export/import format (bundle version 2).** `bty-web export`
+  now carries:
+
+  | What | Why |
+  |---|---|
+  | Everything under `BTY_IMAGE_ROOT` (flat `files/` subdir) | Re-downloads are expensive; bytes ARE the value |
+  | Per-machine: `mac` + `hw_lshw` + `known_disks` (+timestamps) | Hardware inventory is expensive to re-collect via PXE |
+
+  Drops (operator re-types on the destination): catalog entries,
+  machine bindings (`boot_mode` / `bty_image_ref` / `target_disk_serial`
+  / `sanboot_drive` / `hostname`), `saw_flasher_boot` state, audit
+  log, settings, backups. Version 1 bundles (pre-v0.31.0) are not
+  migratable -- regenerate on the source release before upgrading.
+
+- **`fetch_to_cache` no longer requires `entry.sha256`.** Rolling-tag
+  ORAS entries (`oras://...:latest`) get a stable URL-keyed local
+  filename and benefit from on-disk dedup the same way sha-pinned
+  entries do. Verification still fires when a sha is pinned.
+
+### Removed
+
+- `bty.catalog.default_cache_dir()`. Callers use
+  `bty.images.default_image_root()` everywhere the cache used to be.
+- `BTY_CATALOG_CACHE_DIR` env var and the "Image cache" row on the
+  Settings page.
+- `BackupState.catalog_entries` and `BackupState.images` (-> single
+  `BackupState.files` field); same for `BackupOnDisk`.
+- The per-column `_REQUIRED_COLUMNS` / `_ADDITIVE_COLUMNS` /
+  `StaleSchemaError` machinery in `bty.web._db` (superseded by the
+  version-stamp check).
+
 ## [0.30.2] - 2026-05-25
 
 Fixes `bty-flash-once` re-flashing on every PXE boot instead of

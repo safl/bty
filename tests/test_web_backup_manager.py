@@ -40,7 +40,7 @@ def test_enqueue_creates_unique_ids(tmp_path: Path) -> None:
     async def _drive() -> None:
         state_path = _init_state(tmp_path)
         mgr = BackupManager(max_parallel=1)
-        mgr.start(state_path, tmp_path / "images", tmp_path / "backups", bty_version="x")
+        mgr.start(state_path, tmp_path / "images", tmp_path / "backups")
         try:
             a = await mgr.enqueue()
             b = await mgr.enqueue()
@@ -63,7 +63,7 @@ def test_enqueue_runs_to_completion(tmp_path: Path) -> None:
         backups_root = tmp_path / "backups"
         (image_root / "demo.img").write_bytes(b"x" * 1024)
         mgr = BackupManager(max_parallel=1)
-        mgr.start(state_path, image_root, backups_root, bty_version="test")
+        mgr.start(state_path, image_root, backups_root)
         try:
             state = await mgr.enqueue()
             for _ in range(200):
@@ -74,11 +74,11 @@ def test_enqueue_runs_to_completion(tmp_path: Path) -> None:
             states = await mgr.list()
             assert len(states) == 1
             assert states[0].status == "completed", states[0].error
-            assert states[0].images == 1
+            assert states[0].files == 1
             assert states[0].bytes_written > 0
             assert state.dest_path is not None
             assert (Path(state.dest_path) / "manifest.json").is_file()
-            assert (Path(state.dest_path) / "images" / "demo.img").is_file()
+            assert (Path(state.dest_path) / "files" / "demo.img").is_file()
         finally:
             await mgr.stop()
         # Audit-log entry recorded?
@@ -98,7 +98,7 @@ def test_manual_trigger_does_not_update_last_run_at(tmp_path: Path) -> None:
     async def _drive() -> None:
         state_path = _init_state(tmp_path)
         mgr = BackupManager(max_parallel=1)
-        mgr.start(state_path, tmp_path / "images", tmp_path / "backups", bty_version="x")
+        mgr.start(state_path, tmp_path / "images", tmp_path / "backups")
         try:
             await mgr.enqueue(trigger="manual")
             for _ in range(200):
@@ -121,7 +121,7 @@ def test_scheduled_trigger_updates_last_run_at(tmp_path: Path) -> None:
     async def _drive() -> None:
         state_path = _init_state(tmp_path)
         mgr = BackupManager(max_parallel=1)
-        mgr.start(state_path, tmp_path / "images", tmp_path / "backups", bty_version="x")
+        mgr.start(state_path, tmp_path / "images", tmp_path / "backups")
         try:
             await mgr.enqueue(trigger="scheduled")
             for _ in range(200):
@@ -158,7 +158,7 @@ def test_retention_prunes_oldest(tmp_path: Path) -> None:
             conn.commit()
 
         mgr = BackupManager(max_parallel=1)
-        mgr.start(state_path, tmp_path / "images", backups_root, bty_version="x")
+        mgr.start(state_path, tmp_path / "images", backups_root)
         try:
             await mgr.enqueue()
             for _ in range(200):
@@ -202,7 +202,7 @@ def test_unknown_trigger_rejected(tmp_path: Path) -> None:
     async def _drive() -> None:
         state_path = _init_state(tmp_path)
         mgr = BackupManager(max_parallel=1)
-        mgr.start(state_path, tmp_path / "images", tmp_path / "backups", bty_version="x")
+        mgr.start(state_path, tmp_path / "images", tmp_path / "backups")
         try:
             with pytest.raises(ValueError, match=r"unknown trigger"):
                 await mgr.enqueue(trigger="wat")
@@ -285,7 +285,7 @@ def test_scheduler_tick_disabled_does_nothing(tmp_path: Path) -> None:
 
         state_path = _init_state(tmp_path)
         mgr = BackupManager(max_parallel=1)
-        mgr.start(state_path, tmp_path / "images", tmp_path / "backups", bty_version="x")
+        mgr.start(state_path, tmp_path / "images", tmp_path / "backups")
         try:
             await _scheduler_tick(state_path, mgr)
             assert await mgr.list() == []
@@ -308,7 +308,7 @@ def test_scheduler_tick_enqueues_when_due(tmp_path: Path) -> None:
             _settings_store.set_value(conn, _settings_store.KEY_BACKUP_CADENCE, "daily")
             conn.commit()
         mgr = BackupManager(max_parallel=1)
-        mgr.start(state_path, tmp_path / "images", tmp_path / "backups", bty_version="x")
+        mgr.start(state_path, tmp_path / "images", tmp_path / "backups")
         try:
             await _scheduler_tick(state_path, mgr)
             rows = await mgr.list()
@@ -334,7 +334,7 @@ def test_scheduler_tick_skips_when_already_running(tmp_path: Path) -> None:
             _settings_store.set_value(conn, _settings_store.KEY_BACKUP_CADENCE, "daily")
             conn.commit()
         mgr = BackupManager(max_parallel=1)
-        mgr.start(state_path, tmp_path / "images", tmp_path / "backups", bty_version="x")
+        mgr.start(state_path, tmp_path / "images", tmp_path / "backups")
         try:
             # Pre-seed a scheduled backup; tick shouldn't add a second.
             await mgr.enqueue(trigger="scheduled")
@@ -358,18 +358,17 @@ def test_list_backups_on_disk_enumerates_and_reads_manifest(tmp_path: Path) -> N
     backups_root = tmp_path / "backups"
     backups_root.mkdir()
 
-    # Bundle #1: older, two machines + one catalog entry + one image.
+    # Bundle #1: older, two machines + one file. v0.31.0+ slim format.
     older = backups_root / "2026-05-23T10-00-00Z"
-    (older / "images").mkdir(parents=True)
-    (older / "images" / "demo.img.gz").write_bytes(b"\x00" * 2048)
+    (older / "files").mkdir(parents=True)
+    (older / "files" / "demo.img.gz").write_bytes(b"\x00" * 2048)
     (older / "manifest.json").write_text(
         json.dumps(
             {
-                "bty_export_version": 1,
+                "bty_export_version": 2,
                 "exported_at": "2026-05-23T10:00:00+00:00",
-                "bty_version": "0.26.0",
+                "exported_by_bty_version": "0.31.0",
                 "machines": [{"mac": "aa:bb:cc:dd:ee:01"}, {"mac": "aa:bb:cc:dd:ee:02"}],
-                "catalog_entries": [{"name": "demo"}],
             }
         )
     )
@@ -379,11 +378,10 @@ def test_list_backups_on_disk_enumerates_and_reads_manifest(tmp_path: Path) -> N
     (newer / "manifest.json").write_text(
         json.dumps(
             {
-                "bty_export_version": 1,
+                "bty_export_version": 2,
                 "exported_at": "2026-05-24T09:00:00+00:00",
-                "bty_version": "0.26.1",
+                "exported_by_bty_version": "0.31.1",
                 "machines": [],
-                "catalog_entries": [],
             }
         )
     )
@@ -400,10 +398,9 @@ def test_list_backups_on_disk_enumerates_and_reads_manifest(tmp_path: Path) -> N
     ]
     older_row = out[1]
     assert older_row.machines == 2
-    assert older_row.catalog_entries == 1
-    assert older_row.images == 1
-    assert older_row.bty_version == "0.26.0"
-    assert older_row.bytes_on_disk >= 2048  # at least the image file
+    assert older_row.files == 1
+    assert older_row.bty_version == "0.31.0"
+    assert older_row.bytes_on_disk >= 2048  # at least the file payload
 
 
 def test_list_backups_on_disk_handles_missing_manifest(tmp_path: Path) -> None:
@@ -420,8 +417,7 @@ def test_list_backups_on_disk_handles_missing_manifest(tmp_path: Path) -> None:
     assert len(out) == 1
     assert out[0].backup_id == "2026-05-22T08-00-00Z"
     assert out[0].machines == 0
-    assert out[0].catalog_entries == 0
-    assert out[0].images == 0
+    assert out[0].files == 0
     assert out[0].bty_version is None
     assert out[0].exported_at is None
 
@@ -495,14 +491,13 @@ def test_delete_bundle_rmtree_logs_event(tmp_path: Path) -> None:
     state_path = _init_state(tmp_path)
     backups_root = tmp_path / "backups"
     bundle = backups_root / "2026-05-23T10-00-00Z"
-    (bundle / "images").mkdir(parents=True)
-    (bundle / "images" / "demo.img.gz").write_bytes(b"x" * 256)
+    (bundle / "files").mkdir(parents=True)
+    (bundle / "files" / "demo.img.gz").write_bytes(b"x" * 256)
     (bundle / "manifest.json").write_text(
         json.dumps(
             {
-                "bty_export_version": 1,
+                "bty_export_version": 2,
                 "machines": [{"mac": "aa:bb:cc:dd:ee:01"}],
-                "catalog_entries": [{"name": "demo"}],
             }
         )
     )
@@ -510,8 +505,7 @@ def test_delete_bundle_rmtree_logs_event(tmp_path: Path) -> None:
     snapshot = delete_bundle(state_path, backups_root, "2026-05-23T10-00-00Z")
     assert not bundle.exists()
     assert snapshot.machines == 1
-    assert snapshot.catalog_entries == 1
-    assert snapshot.images == 1
+    assert snapshot.files == 1
 
     # Audit log carries the new event with the snapshot counts.
     with sqlite3.connect(state_path) as conn:
@@ -521,8 +515,9 @@ def test_delete_bundle_rmtree_logs_event(tmp_path: Path) -> None:
     assert "backup.deleted" in kinds
     deleted = next(e for e in events if e.kind == "backup.deleted")
     assert deleted.subject_id == "2026-05-23T10-00-00Z"
+    assert deleted.details is not None
     assert deleted.details["machines"] == 1
-    assert deleted.details["images"] == 1
+    assert deleted.details["files"] == 1
 
 
 def test_delete_bundle_missing_raises_filenotfound(tmp_path: Path) -> None:
@@ -544,7 +539,7 @@ def test_state_listener_fires_on_terminal_transition(tmp_path: Path) -> None:
         seen: list[str] = []
         mgr = BackupManager(max_parallel=1)
         mgr.set_state_listener(lambda s: seen.append(s.status))
-        mgr.start(state_path, tmp_path / "images", tmp_path / "backups", bty_version="x")
+        mgr.start(state_path, tmp_path / "images", tmp_path / "backups")
         try:
             await mgr.enqueue(trigger="manual")
             # Wait for the worker to flip terminal. The listener fires
@@ -581,7 +576,7 @@ def test_state_listener_fires_on_cancel(tmp_path: Path) -> None:
         # reliable path is to enqueue then explicitly cancel.
         mgr = BackupManager(max_parallel=1)
         mgr.set_state_listener(lambda s: seen.append((s.backup_id, s.status)))
-        mgr.start(state_path, tmp_path / "images", tmp_path / "backups", bty_version="x")
+        mgr.start(state_path, tmp_path / "images", tmp_path / "backups")
         try:
             st = await mgr.enqueue(trigger="manual")
             # Cancel may race the worker picking it up; in either case

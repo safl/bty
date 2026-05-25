@@ -207,21 +207,24 @@ def _mock_urlopen(payload: bytes):
 def test_fetch_to_cache_success(tmp_path: Path) -> None:
     payload = b"fake image bytes"
     entry = _entry(payload)
-    cache_dir = tmp_path / "cache"
+    image_root = tmp_path / "images"
     with patch("urllib.request.urlopen", _mock_urlopen(payload)):
-        cached = catalog.fetch_to_cache(entry, cache_dir)
+        cached = catalog.fetch_to_cache(entry, image_root)
     assert cached.is_file()
     assert cached.read_bytes() == payload
-    assert cached.name == entry.sha256
+    # v0.31.0+: URL-keyed local filename, not the content sha.
+    assert cached.name == entry.local_filename()
+    assert cached.name.startswith("catalog-")
 
 
 def test_fetch_to_cache_idempotent(tmp_path: Path) -> None:
     payload = b"fake image bytes"
     entry = _entry(payload)
-    cache_dir = tmp_path / "cache"
-    cache_dir.mkdir()
-    # Pre-populate the cache as if we had fetched before.
-    target = cache_dir / entry.sha256
+    image_root = tmp_path / "images"
+    image_root.mkdir()
+    # Pre-populate as if we had fetched before. v0.31.0+: file is
+    # named by URL-keyed local_filename, not content sha.
+    target = image_root / entry.local_filename()
     target.write_bytes(payload)
 
     # urlopen would error if called; idempotency means it isn't.
@@ -229,7 +232,7 @@ def test_fetch_to_cache_idempotent(tmp_path: Path) -> None:
         raise AssertionError("urlopen should not be called when cached")
 
     with patch("urllib.request.urlopen", _boom):
-        cached = catalog.fetch_to_cache(entry, cache_dir)
+        cached = catalog.fetch_to_cache(entry, image_root)
     assert cached == target
 
 
@@ -255,12 +258,12 @@ def test_fetch_to_cache_sha_mismatch_discards_temp(tmp_path: Path) -> None:
 
 
 def test_is_cached_true_when_file_present(tmp_path: Path) -> None:
-    cache_dir = tmp_path / "cache"
-    cache_dir.mkdir()
+    image_root = tmp_path / "images"
+    image_root.mkdir()
     entry = _entry(b"x")
-    assert not catalog.is_cached(entry, cache_dir)
-    (cache_dir / entry.sha256).write_bytes(b"x")
-    assert catalog.is_cached(entry, cache_dir)
+    assert not catalog.is_cached(entry, image_root)
+    (image_root / entry.local_filename()).write_bytes(b"x")
+    assert catalog.is_cached(entry, image_root)
 
 
 def test_fetch_to_cache_progress_callback(tmp_path: Path) -> None:
@@ -337,11 +340,11 @@ def test_fetch_to_cache_cached_entry_emits_terminal_progress(
     a clean 100% terminal state instead of a stuck 0%."""
     payload = b"already-here"
     entry = _entry(payload)
-    cache_dir = tmp_path / "cache"
-    cache_dir.mkdir()
-    (cache_dir / entry.sha256).write_bytes(payload)
+    image_root = tmp_path / "images"
+    image_root.mkdir()
+    (image_root / entry.local_filename()).write_bytes(payload)
     progress_log: list[tuple[int, int | None]] = []
-    catalog.fetch_to_cache(entry, cache_dir, progress=lambda d, t: progress_log.append((d, t)))
+    catalog.fetch_to_cache(entry, image_root, progress=lambda d, t: progress_log.append((d, t)))
     assert progress_log == [(len(payload), len(payload))]
 
 
@@ -365,12 +368,11 @@ def test_default_manifest_path_falls_back_to_state_dir(
     assert catalog.default_manifest_path() == tmp_path / "catalog.toml"
 
 
-def test_default_cache_dir_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("BTY_STATE_DIR", str(tmp_path))
-    monkeypatch.delenv("BTY_CATALOG_CACHE_DIR", raising=False)
-    assert catalog.default_cache_dir() == tmp_path / "cache"
-    monkeypatch.setenv("BTY_CATALOG_CACHE_DIR", "/var/cache/bty")
-    assert catalog.default_cache_dir() == Path("/var/cache/bty")
+# ``default_cache_dir`` removed in v0.31.0: there is no separate
+# cache directory anymore -- catalog files land under the image_root
+# with URL-derived ``catalog-<ref:12>-<slug>.<ext>`` filenames. The
+# pertinent env-var tests live alongside ``default_image_root`` in
+# tests/test_images.py.
 
 
 # ---------- sha256 manifest parsing ----------------------------------------
@@ -498,19 +500,23 @@ def test_catalog_entry_accepts_http_src_without_sha256() -> None:
     assert entry.src.startswith("https://github.com/safl/bty/releases/")
 
 
-def test_catalog_entry_cached_path_raises_when_sha_is_none(tmp_path: Path) -> None:
-    """``oras://`` entries don't carry a pre-pinned digest, so the
-    sha-keyed cache path is meaningless for them. Raise loudly
-    rather than fall back to a synthetic key -- the cache layer is
-    only ever exercised by bty-web's sha-bound flow."""
+def test_catalog_entry_cached_path_works_without_sha(tmp_path: Path) -> None:
+    """v0.31.0+: the on-disk filename is URL-derived
+    (``catalog-<ref:12>-<slug>.<ext>``), not content-sha-derived, so
+    ``cached_path`` returns a usable path even for ``oras://`` rolling-
+    tag entries with no pinned digest. Filename is stable and unique
+    across all entries by construction (URLs canonicalise to distinct
+    refs)."""
     entry = catalog.CatalogEntry.from_dict(
         {
             "name": "no-sha",
             "src": "oras://ghcr.io/owner/repo:latest",
         }
     )
-    with pytest.raises(catalog.CatalogError, match="cached_path requires a sha256"):
-        entry.cached_path(tmp_path)
+    path = entry.cached_path(tmp_path)
+    assert path.parent == tmp_path
+    assert path.name.startswith("catalog-")
+    assert path.name == entry.local_filename()
 
 
 def test_catalog_entry_accepts_explicit_null_sha256() -> None:

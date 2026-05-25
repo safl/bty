@@ -1568,9 +1568,9 @@ def test_e2e_random_catalog_names_round_trip_through_url_emitter(
     import urllib.parse
 
     state_path: Path = app_client.app.state.state_path  # type: ignore[attr-defined]
-    bty_state_dir: Path = app_client.app.state.tmp_path / "bty-state"  # type: ignore[attr-defined]
-    cache_dir = bty_state_dir / "cache"
-    cache_dir.mkdir(parents=True, exist_ok=True)
+    image_root: Path = app_client.app.state.image_root  # type: ignore[attr-defined]
+    image_root.mkdir(parents=True, exist_ok=True)
+    from bty.catalog import image_ref_for_src, local_filename_for
 
     test_names = (
         "simple",
@@ -1590,19 +1590,29 @@ def test_e2e_random_catalog_names_round_trip_through_url_emitter(
     # ``/images/<sha>/<encoded-name>`` URL shape (where the
     # name segment is the encoded display name). For un-cached
     # entries the server emits the upstream src verbatim and
-    # the name doesn't appear in the URL at all.
+    # the name doesn't appear in the URL at all. v0.31.0+: a
+    # row is "cached" when ``image_root/<local_filename_for(...)>``
+    # exists (URL-keyed; no separate cache dir).
     with _bty_db.open_db(state_path) as conn:
         for i, name in enumerate(test_names):
             sha = f"{i:064x}"
-            (cache_dir / sha).write_bytes(b"\0")  # cache hit -> "cached"
+            src = f"https://example.invalid/upstream-{i}"
+            # ``bty_image_ref`` must equal ``image_ref_for_src(src)``
+            # by contract -- store the canonical value (not a synthetic
+            # one) so the merge's ``image_ref_for_src(entry.src)``
+            # recomputation matches what's in the DB and the URL-keyed
+            # local_filename check finds the staged file.
+            ref = image_ref_for_src(src)
+            cached_filename = local_filename_for(ref, name, "img.gz")
+            (image_root / cached_filename).write_bytes(b"\0")  # cache hit -> "cached"
             conn.execute(
                 "INSERT INTO catalog_entries "
                 "(bty_image_ref, src, disk_image_sha, name, "
                 "sha_url, format, size_bytes, description, added_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
-                    f"{i + 1000:064x}",  # different from sha to keep distinct keys
-                    f"https://example.invalid/upstream-{i}",
+                    ref,
+                    src,
                     sha,
                     name,
                     None,

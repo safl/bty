@@ -1,8 +1,8 @@
-"""bty catalog manifest with src URLs + content-addressed cache.
+"""bty catalog manifest with src URLs + URL-keyed local filenames.
 
 A catalog manifest (TOML, ``${BTY_STATE_DIR}/catalog.toml`` by
-default) lists named images with upstream ``src`` URLs and pinned
-``sha256`` digests:
+default) lists named images with upstream ``src`` URLs and (optional)
+pinned ``sha256`` digests:
 
 .. code-block:: toml
 
@@ -15,11 +15,15 @@ default) lists named images with upstream ``src`` URLs and pinned
     format = "img.zst"
 
 The fetcher downloads each ``src`` on demand, verifies SHA-256
-against the manifest, and atomically writes into a content-
-addressed cache (``${BTY_STATE_DIR}/cache/<sha256>``). The cache
-key is the SHA itself so duplicate hashes across manifest entries
-dedupe naturally; corrupted bytes never serve, since SHA mismatch
-fails before the temp file is renamed into place.
+against the manifest if one is given, and atomically writes the
+file into the operator's ``BTY_IMAGE_ROOT`` directory with a
+URL-derived name: ``catalog-<bty_image_ref[:12]>-<slug(name)>.<ext>``
+(e.g. ``catalog-8e54fdb21522-nosi-debian-sysdev.img.gz``). Same URL
+hashes to the same filename, so re-fetches are idempotent and
+catalog files dedup naturally with the operator's local images
+under a single directory -- no separate ``cache/`` subdir, no
+sha-keyed content addressing. The ``catalog-`` prefix calls out
+catalog-fetched files vs operator-typed ones at a glance.
 
 Module is stdlib-only -- ``tomllib`` is in Python 3.11+ stdlib,
 ``hashlib`` / ``urllib`` / ``shutil`` are too. ``bty`` and
@@ -33,6 +37,7 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import os
+import re
 import tempfile
 import tomllib
 import urllib.error
@@ -44,6 +49,53 @@ from pathlib import Path
 from typing import IO, Any, Self, TypeAlias
 
 from bty import images as _images
+
+# Filename prefix for catalog-fetched images under the image_root.
+# Discovery code uses this to tell apart operator-typed files (no
+# prefix) from catalog-cached ones (with the prefix + URL-derived
+# hash so two distinct URLs never collide on disk).
+_CATALOG_PREFIX = "catalog-"
+# Length of the bty_image_ref segment in catalog filenames. 12 hex
+# chars is 48 bits, collision-free at any plausible homelab catalog
+# size; long enough to be useful for human disambiguation, short
+# enough not to dominate the filename.
+_CATALOG_REF_LEN = 12
+
+# Slug character set: lower-case ASCII alnum + hyphen + underscore.
+# Anything else collapses to a single hyphen so the filename stays
+# portable across filesystems.
+_SLUG_BAD = re.compile(r"[^a-z0-9_]+")
+_SLUG_DEDUP = re.compile(r"-+")
+
+
+def _slugify(text: str) -> str:
+    """Filename-safe lower-case ASCII slug.
+
+    "nosi debian-sysdev (x86_64, rolling)" -> "nosi-debian-sysdev-x86_64-rolling"
+
+    The slug carries no semantic weight (uniqueness lives in the
+    ``bty_image_ref`` prefix); it's only there to keep ``ls`` legible
+    when an operator browses the image_root.
+    """
+    s = _SLUG_BAD.sub("-", text.lower())
+    s = _SLUG_DEDUP.sub("-", s).strip("-")
+    return s or "image"
+
+
+def local_filename_for(bty_image_ref: str, name: str, fmt: str | None) -> str:
+    """Compose the on-disk filename for a catalog-fetched image from
+    its raw fields. Used by bty-web's image-serving path where the
+    catalog row is read from the DB and a full :class:`CatalogEntry`
+    isn't constructed -- mirror of :meth:`CatalogEntry.local_filename`
+    over the same field set.
+
+    Pattern: ``catalog-<bty_image_ref[:12]>-<slug(name)>.<ext>``.
+    """
+    ref_prefix = bty_image_ref[:_CATALOG_REF_LEN]
+    slug = _slugify(name)
+    ext = (fmt or "img").lstrip(".")
+    return f"{_CATALOG_PREFIX}{ref_prefix}-{slug}.{ext}"
+
 
 # Manifest schema version this implementation understands.
 SCHEMA_VERSION = 1
@@ -173,24 +225,35 @@ class CatalogEntry:
             description=raw.get("description"),
         )
 
-    def cached_path(self, cache_dir: Path) -> Path:
-        """Where this entry's bytes live once cached. Content-
-        addressed by SHA so multiple entries pointing at the same
-        upstream blob share one file.
+    def local_filename(self) -> str:
+        """The on-disk filename this entry's bytes land at under the
+        image_root. Pattern: ``catalog-<bty_image_ref[:12]>-<slug>.<ext>``.
 
-        Raises :class:`CatalogError` if the entry has no ``sha256``
-        (oras:// rolling-tag entries in a portable catalog don't
-        carry one; they're flash-only and never enter the manifest-
-        cache path).
+        Derived purely from ``src`` (via ``bty_image_ref``), ``name``,
+        and ``format``. Same URL -> same filename, independent of
+        whether sha256 is pinned. No requirement on ``sha256``: ORAS
+        rolling-tag entries (``oras://...:latest``) get a stable
+        filename and benefit from on-disk dedup just like pinned
+        entries do.
+
+        ``format`` defaults to ``"img"`` if missing -- catalog entries
+        always carry a format in practice (``from_dict`` defaults it
+        from the name's extension), so this fallback is only for hand-
+        constructed test entries.
         """
-        if self.sha256 is None:
-            raise CatalogError(
-                f"catalog entry {self.name!r}: cached_path requires a sha256 "
-                f"but this entry has none (oras:// rolling-tag entries don't "
-                f"carry a pre-pinned digest; they flash directly without "
-                f"hitting the sha-keyed cache)"
-            )
-        return cache_dir / self.sha256
+        return local_filename_for(self.ref, self.name, self.format)
+
+    def cached_path(self, image_root: Path) -> Path:
+        """Where this entry's bytes live once fetched. URL-keyed via
+        ``local_filename`` so a re-fetch of the same ``src`` lands on
+        the same file (idempotent), and two distinct ``src`` URLs
+        never collide.
+
+        Same return shape as ``image_root / local_filename()`` -- kept
+        as a method on ``CatalogEntry`` for the natural call site
+        ``entry.cached_path(image_root)``.
+        """
+        return image_root / self.local_filename()
 
 
 @dataclass(frozen=True)
@@ -384,17 +447,11 @@ def default_manifest_path() -> Path | None:
     return None
 
 
-def default_cache_dir() -> Path:
-    """Resolve the cache directory from the environment.
-
-    Order: ``$BTY_CATALOG_CACHE_DIR`` (explicit), else
-    ``${BTY_STATE_DIR}/cache`` (default colocation).
-    """
-    explicit = os.environ.get("BTY_CATALOG_CACHE_DIR")
-    if explicit:
-        return Path(explicit)
-    state_dir = Path(os.environ.get("BTY_STATE_DIR", "/var/lib/bty"))
-    return state_dir / "cache"
+# ``default_cache_dir`` was removed in v0.31.0 when catalog files moved
+# under the image_root with URL-derived ``catalog-<ref:12>-<slug>.<ext>``
+# names. There is no separate cache directory anymore -- callers use
+# ``bty.images.default_image_root()`` and pass it everywhere this
+# module used to take ``cache_dir``.
 
 
 # ---------------------------------------------------------------------------
@@ -545,14 +602,13 @@ def image_ref_for_src(src: str) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-def is_cached(entry: CatalogEntry, cache_dir: Path) -> bool:
-    """``True`` iff the cache holds a file matching this entry's
-    SHA-256. We trust the filename (which IS the SHA) and the
-    presence of a regular file; full re-verification on every read
-    would be expensive for multi-GiB images, so we only verify on
-    write."""
-    cached = entry.cached_path(cache_dir)
-    return cached.is_file()
+def is_cached(entry: CatalogEntry, image_root: Path) -> bool:
+    """``True`` iff the image_root holds a file at this entry's URL-
+    keyed ``local_filename``. We trust the filename (which encodes the
+    bty_image_ref) and the presence of a regular file; full re-
+    verification on every read would be expensive for multi-GiB
+    images, so we only verify on write."""
+    return entry.cached_path(image_root).is_file()
 
 
 ProgressCallback: TypeAlias = Callable[[int, "int | None"], None]
@@ -569,33 +625,30 @@ fetcher (running in a worker thread) can be aborted from outside."""
 
 def fetch_to_cache(
     entry: CatalogEntry,
-    cache_dir: Path,
+    image_root: Path,
     *,
     timeout: float = 300.0,
     chunk_size: int = 1 << 20,  # 1 MiB
     progress: ProgressCallback | None = None,
     cancel: CancelCheck | None = None,
 ) -> Path:
-    """Download ``entry.src`` into ``cache_dir/<sha>``, verifying
-    SHA-256 against ``entry.sha256``.
+    """Download ``entry.src`` into ``image_root / entry.local_filename()``,
+    verifying SHA-256 against ``entry.sha256`` when one is pinned.
 
-    Idempotent: if the cached file already exists, no-op (we trust
-    that we wrote it under the correct SHA). On SHA mismatch or
-    cancellation the temp file is removed before raising; the cache
-    is never left in a half-written state. Atomic via ``os.replace``
-    after the SHA check passes.
+    Idempotent: if the file already exists, no-op (the URL-keyed
+    filename means same src always lands the same path). On SHA
+    mismatch or cancellation the temp file is removed before raising;
+    the image_root is never left with a half-written file. Atomic via
+    ``os.replace`` after the SHA check passes.
 
     ``progress(downloaded, total_or_none)`` is called once per chunk
     written, with ``total`` from the upstream ``Content-Length`` if
     available. ``cancel()`` is polled between chunks; returning
     ``True`` raises :class:`CatalogCancelled`. Both are optional.
 
-    Returns the cached path on success.
+    Returns the final path on success.
     """
-    # ``cached_path`` raises if sha is None, so the assertion is a
-    # type-narrowing aid for mypy: from here on entry.sha256 is str.
-    cached = entry.cached_path(cache_dir)
-    assert entry.sha256 is not None
+    cached = entry.cached_path(image_root)
     if cached.is_file():
         # Even a cached entry should announce itself as "100% done"
         # so a UI that registered the request before the cache check
@@ -605,12 +658,14 @@ def fetch_to_cache(
             progress(size, size)
         return cached
 
-    cache_dir.mkdir(parents=True, exist_ok=True)
+    image_root.mkdir(parents=True, exist_ok=True)
 
-    # Stream into a temp file in the same dir as the eventual
+    # Stream into a hidden temp file in the same dir as the eventual
     # target so the final ``os.replace`` is a single rename within
-    # the same filesystem (no cross-device copy).
-    fd, tmp_name = tempfile.mkstemp(prefix=f".{entry.sha256[:8]}.", dir=cache_dir)
+    # the same filesystem (no cross-device copy). ``.<ref:8>.`` prefix
+    # is debuggable (operator can grep partial downloads) and won't
+    # collide with the final ``catalog-`` filename.
+    fd, tmp_name = tempfile.mkstemp(prefix=f".{entry.ref[:8]}.", dir=image_root)
     tmp_path = Path(tmp_name)
     try:
         digest = hashlib.sha256()
@@ -648,7 +703,11 @@ def fetch_to_cache(
                 total=total,
             )
         actual = digest.hexdigest()
-        if actual != entry.sha256:
+        # Only verify when the manifest pinned a sha256; rolling-tag
+        # entries (``oras://...:latest``) don't carry one. The
+        # observed hash still gets returned via the local file's
+        # ``catalog_entries.disk_image_sha`` write at the call site.
+        if entry.sha256 is not None and actual != entry.sha256:
             raise CatalogError(
                 f"catalog fetch {entry.name!r}: sha256 mismatch "
                 f"(expected {entry.sha256}, got {actual}); discarded"
@@ -665,43 +724,44 @@ def fetch_to_cache(
 
 def fetch_src_to_cache(
     src: str,
-    cache_dir: Path,
+    image_root: Path,
     *,
+    local_filename: str,
     expected_sha: str | None = None,
     timeout: float = 300.0,
     chunk_size: int = 1 << 20,  # 1 MiB
     progress: ProgressCallback | None = None,
     cancel: CancelCheck | None = None,
 ) -> tuple[Path, str]:
-    """Eagerly fetch a remote ``src`` into the content-addressed cache.
+    """Eagerly fetch a remote ``src`` into ``image_root / local_filename``,
+    computing the SHA-256 as bytes flow.
 
     Unlike :func:`fetch_to_cache`, this variant does NOT require the
     SHA to be known in advance. It streams the bytes from ``src``,
-    computes the sha as bytes flow, and atomic-renames into
-    ``cache_dir/<sha>``. When ``expected_sha`` is given, the streamed
-    digest must match it; on mismatch the temp file is discarded and
-    :class:`CatalogError` is raised (the cache is never left in a
-    half-written state).
+    computes the sha, and atomic-renames into the URL-keyed local
+    filename. When ``expected_sha`` is given, the streamed digest
+    must match it; on mismatch the temp file is discarded and
+    :class:`CatalogError` is raised (the image_root is never left
+    with a half-written file).
 
     Used by the bty-web ``DownloadManager`` for explicit,
-    operator-initiated fetches of a catalog entry into the cache. The
-    serve path (``GET /images/<ref>/<name>``) does NOT call this --
-    it serves a local file when present and otherwise stream-proxies
-    the source (see ``stream_src``). This explicit fetch is the only
-    thing that *caches* a remote image to disk.
+    operator-initiated fetches of a catalog entry whose ``sha256``
+    field was empty -- the manager passes ``local_filename`` from
+    ``entry.local_filename()`` so the on-disk shape matches
+    :func:`fetch_to_cache`'s for sha-pinned entries.
 
     ``src`` must be an http(s):// or oras:// URL; file:// srcs don't
     need fetching (bytes are already on disk under ``BTY_IMAGE_ROOT``)
     and a :class:`ValueError` surfaces instead.
 
-    Returns ``(cache_path, computed_sha)``.
+    Returns ``(local_path, computed_sha)``.
     """
     if src.startswith("file://"):
         raise ValueError(
             f"fetch_src_to_cache does not handle file:// srcs (bytes are already local): {src!r}"
         )
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    tmp_path = cache_dir / f".tmp.{os.urandom(8).hex()}"
+    image_root.mkdir(parents=True, exist_ok=True)
+    tmp_path = image_root / f".tmp.{os.urandom(8).hex()}"
     digest = hashlib.sha256()
     try:
         if src.startswith("oras://"):
@@ -737,7 +797,7 @@ def fetch_src_to_cache(
                 f"fetch_src_to_cache {src!r}: sha256 mismatch "
                 f"(expected {expected_sha}, got {actual}); discarded"
             )
-        cached = cache_dir / actual
+        cached = image_root / local_filename
         os.replace(tmp_path, cached)
         return cached, actual
     except BaseException:

@@ -39,19 +39,11 @@ def _run_portability(args: argparse.Namespace) -> None:
     now = datetime.now(UTC).isoformat()
 
     if args.cmd == "export":
-        exp = _portability.export_bundle(
-            state_path, image_root, Path(args.dest), bty_version=bty.__version__, now=now
-        )
-        print(
-            f"bty-web export -> {exp.dest}: {exp.machines} machines, "
-            f"{exp.catalog_entries} catalog entries, {exp.images} image files"
-        )
+        exp = _portability.export_bundle(state_path, image_root, Path(args.dest), now=now)
+        print(f"bty-web export -> {exp.dest}: {exp.machines} machines, {exp.files} files")
     else:  # import
         imp = _portability.import_bundle(state_path, image_root, Path(args.src), now=now)
-        print(
-            f"bty-web import: {imp.machines} machines (as bty-inventory), "
-            f"{imp.catalog_entries} catalog entries, {imp.images} image files"
-        )
+        print(f"bty-web import: {imp.machines} machines (as bty-inventory), {imp.files} files")
         for line in imp.skipped:
             print(f"  skipped: {line}", file=sys.stderr)
 
@@ -117,10 +109,10 @@ def main(argv: list[str] | None = None) -> None:
             "                        client IP from X-Forwarded-For; only\n"
             "                        enable behind a reverse proxy that\n"
             "                        strips inbound X-Forwarded-For\n"
-            "  BTY_CATALOG_CACHE_DIR image cache directory (default\n"
-            "                        <BTY_STATE_DIR>/cache)\n"
             "  BTY_CATALOG_MAX_PARALLEL  max concurrent catalog downloads\n"
-            "                        (default 2)\n"
+            "                        (default 2; catalog-fetched files\n"
+            "                        live under <BTY_IMAGE_ROOT> with\n"
+            "                        catalog-<ref:12>-<slug>.<ext> names)\n"
             "  BTY_HASH_MAX_PARALLEL max concurrent image hash jobs\n"
             "                        (default 1)\n"
             "  BTY_BACKUP_DIR        directory scheduled / on-demand backups\n"

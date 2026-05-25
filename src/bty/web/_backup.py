@@ -88,8 +88,7 @@ class BackupState:
     started_at: float | None = None
     finished_at: float | None = None
     machines: int = 0
-    catalog_entries: int = 0
-    images: int = 0
+    files: int = 0
     bytes_written: int = 0
     dest_path: str | None = None  # absolute path of the bundle directory
     trigger: str = "manual"  # one of :data:`BACKUP_TRIGGERS`
@@ -104,8 +103,7 @@ class BackupState:
             "started_at": self.started_at,
             "finished_at": self.finished_at,
             "machines": self.machines,
-            "catalog_entries": self.catalog_entries,
-            "images": self.images,
+            "files": self.files,
             "bytes_written": self.bytes_written,
             "dest_path": self.dest_path,
             "trigger": self.trigger,
@@ -131,24 +129,22 @@ class BackupManager(_BaseAsyncManager[BackupState]):
         self._state_path: Path | None = None
         self._image_root: Path | None = None
         self._backups_root: Path | None = None
-        self._bty_version: str | None = None
 
     def start(
         self,
         state_path: Path,
         image_root: Path,
         backups_root: Path,
-        bty_version: str,
     ) -> None:
-        """Spawn the worker pool. All four binds are required: the
-        export writes to ``backups_root / <id>`` and reads operator-
-        owned state from ``state_path`` + image files from
-        ``image_root``; ``bty_version`` lands in the bundle's
-        manifest so an operator can see which release produced it."""
+        """Spawn the worker pool. The export writes to
+        ``backups_root / <id>``, reads operator-owned state from
+        ``state_path``, and copies files from ``image_root``. The
+        running ``bty.__version__`` is stamped into the bundle's
+        manifest by ``export_bundle`` -- no separate plumbing
+        needed."""
         self._state_path = state_path
         self._image_root = image_root
         self._backups_root = backups_root
-        self._bty_version = bty_version
         backups_root.mkdir(parents=True, exist_ok=True)
         self._spawn_workers()
 
@@ -178,11 +174,9 @@ class BackupManager(_BaseAsyncManager[BackupState]):
         assert self._state_path is not None
         assert self._image_root is not None
         assert self._backups_root is not None
-        assert self._bty_version is not None
         state_path = self._state_path
         image_root = self._image_root
         backups_root = self._backups_root
-        bty_version = self._bty_version
         backup_id = state.backup_id
         dest = backups_root / backup_id
         state.dest_path = str(dest)
@@ -194,22 +188,19 @@ class BackupManager(_BaseAsyncManager[BackupState]):
                 state_path,
                 image_root,
                 dest,
-                bty_version=bty_version,
                 now=now_iso,
             )
             final_status = "completed"
             error: str | None = None
             machines = summary.machines
-            catalog_entries = summary.catalog_entries
-            images = summary.images
+            files = summary.files
             bytes_written = _dir_size(dest)
         except Exception as exc:
             log.exception("backup %s failed", backup_id)
             final_status = "failed"
             error = f"{type(exc).__name__}: {exc}"
             machines = 0
-            catalog_entries = 0
-            images = 0
+            files = 0
             bytes_written = 0
             # Best-effort cleanup of a partial bundle; never let cleanup
             # masking the original error.
@@ -227,8 +218,7 @@ class BackupManager(_BaseAsyncManager[BackupState]):
         async with self._lock:
             state.error = error
             state.machines = machines
-            state.catalog_entries = catalog_entries
-            state.images = images
+            state.files = files
             state.bytes_written = bytes_written
 
         # Log + prune happen outside the lock so they don't block other
@@ -242,8 +232,7 @@ class BackupManager(_BaseAsyncManager[BackupState]):
                 state=state,
                 summary_text=(
                     f"backup {backup_id!r} created ({machines} machines, "
-                    f"{catalog_entries} catalog entries, {images} images, "
-                    f"{bytes_written} bytes)"
+                    f"{files} files, {bytes_written} bytes)"
                 ),
             )
             # Update last_run_at only for scheduler-triggered backups;
@@ -371,8 +360,7 @@ class BackupOnDisk:
     exported_at: str | None
     bty_version: str | None
     machines: int
-    catalog_entries: int
-    images: int
+    files: int
     bytes_on_disk: int
 
 
@@ -409,33 +397,32 @@ def _read_bundle(path: Path) -> BackupOnDisk:
     exported_at: str | None = None
     bty_version: str | None = None
     machines = 0
-    catalog_entries = 0
     if manifest_path.is_file():
         try:
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             if isinstance(manifest, dict):
                 ea = manifest.get("exported_at")
-                bv = manifest.get("bty_version")
+                # ``exported_by_bty_version`` is the slim-format key
+                # (v2+); fall back to the v1 ``bty_version`` for any
+                # legacy bundles still sitting on disk.
+                bv = manifest.get("exported_by_bty_version") or manifest.get("bty_version")
                 exported_at = ea if isinstance(ea, str) else None
                 bty_version = bv if isinstance(bv, str) else None
                 ms = manifest.get("machines")
-                cs = manifest.get("catalog_entries")
                 machines = len(ms) if isinstance(ms, list) else 0
-                catalog_entries = len(cs) if isinstance(cs, list) else 0
         except (OSError, ValueError):
             # Unparseable manifest -- the bundle still lists with
             # blank metadata so the operator can find + delete it.
             pass
-    images_dir = path / "images"
-    images = sum(1 for f in images_dir.iterdir() if f.is_file()) if images_dir.is_dir() else 0
+    files_dir = path / "files"
+    files = sum(1 for f in files_dir.iterdir() if f.is_file()) if files_dir.is_dir() else 0
     return BackupOnDisk(
         backup_id=path.name,
         path=path,
         exported_at=exported_at,
         bty_version=bty_version,
         machines=machines,
-        catalog_entries=catalog_entries,
-        images=images,
+        files=files,
         bytes_on_disk=_dir_size(path),
     )
 
@@ -480,8 +467,8 @@ def delete_bundle(state_path: Path, backups_root: Path, backup_id: str) -> Backu
             summary=(
                 f"backup {backup_id!r} deleted by operator "
                 f"({snapshot.machines} machines, "
-                f"{snapshot.catalog_entries} catalog entries, "
-                f"{snapshot.images} images, {snapshot.bytes_on_disk} bytes)"
+                f"{snapshot.files} files, "
+                f"{snapshot.bytes_on_disk} bytes)"
             ),
             subject_kind="backup",
             subject_id=backup_id,
@@ -489,8 +476,7 @@ def delete_bundle(state_path: Path, backups_root: Path, backup_id: str) -> Backu
             details={
                 "backup_id": backup_id,
                 "machines": snapshot.machines,
-                "catalog_entries": snapshot.catalog_entries,
-                "images": snapshot.images,
+                "files": snapshot.files,
                 "bytes_on_disk": snapshot.bytes_on_disk,
             },
         )
@@ -502,7 +488,7 @@ def iter_bundle_tar(bundle: Path) -> Iterator[bytes]:
     """Yield a streamed tar archive of ``bundle`` as ``bytes`` chunks.
 
     Stores file paths relative to ``bundle.parent`` so the archive
-    expands to ``<backup_id>/manifest.json`` + ``<backup_id>/images/...``
+    expands to ``<backup_id>/manifest.json`` + ``<backup_id>/files/...``
     when untarred (i.e. the backup_id ends up as the top-level folder,
     matching what the operator expects after a download). The archive
     is uncompressed (mode ``"w|"``): bundle contents are already
@@ -580,8 +566,7 @@ def _log_terminal(
                 "trigger": state.trigger,
                 "dest_path": state.dest_path,
                 "machines": state.machines,
-                "catalog_entries": state.catalog_entries,
-                "images": state.images,
+                "files": state.files,
                 "bytes_written": state.bytes_written,
                 "error": state.error,
             },

@@ -100,16 +100,19 @@ class DownloadState:
 class DownloadManager(_BaseAsyncManager[DownloadState]):
     """Async worker-pool scheduler for catalog fetches.
 
-    ``start(catalog, cache_dir)`` spawns workers, ``enqueue(name)``
+    ``start(catalog, image_root)`` spawns workers, ``enqueue(name)``
     queues a job (idempotent on already-queued / completed /
     running), ``cancel(name)`` flips the per-job event, ``stop()``
-    drains.
+    drains. v0.31.0+: writes land at
+    ``image_root / entry.local_filename()`` -- no separate cache_dir,
+    operator-typed and catalog-fetched images coexist under one
+    directory differentiated by the ``catalog-`` filename prefix.
     """
 
     def __init__(self, max_parallel: int | None = None) -> None:
         super().__init__(max_parallel or _resolve_max_parallel())
         self._catalog: _catalog.Catalog | None = None
-        self._cache_dir: Path | None = None
+        self._image_root: Path | None = None
         # When set, the worker back-fills ``catalog_entries.disk_image_sha``
         # after a successful fetch on entries that had no pinned sha.
         # Tests that exercise the manager standalone leave this None.
@@ -125,11 +128,11 @@ class DownloadManager(_BaseAsyncManager[DownloadState]):
     def start(
         self,
         catalog: _catalog.Catalog | None,
-        cache_dir: Path,
+        image_root: Path,
         state_path: Path | None = None,
         db_entry_lookup: Callable[[str], _catalog.CatalogEntry | None] | None = None,
     ) -> None:
-        """Bind the manager to a manifest + cache dir and spawn workers.
+        """Bind the manager to a manifest + image_root and spawn workers.
 
         ``state_path`` enables two behaviours:
 
@@ -152,7 +155,7 @@ class DownloadManager(_BaseAsyncManager[DownloadState]):
         ``name`` or ``None`` if no DB row matches.
         """
         self._catalog = catalog
-        self._cache_dir = cache_dir
+        self._image_root = image_root
         self._state_path = state_path
         self._db_entry_lookup = db_entry_lookup
         if state_path is not None:
@@ -252,7 +255,7 @@ class DownloadManager(_BaseAsyncManager[DownloadState]):
         and lines up with :class:`bty.web._hash.HashManager`.
         """
         _reject_traversal_name(name)
-        if self._cache_dir is None:
+        if self._image_root is None:
             raise RuntimeError("DownloadManager not started")
         entry = self._lookup_entry(name)
         if entry is None:
@@ -268,12 +271,12 @@ class DownloadManager(_BaseAsyncManager[DownloadState]):
                 sha256=entry.sha256,
                 src=entry.src,
             )
-            # If sha is pinned AND already cached on disk, mark
-            # complete immediately. The un-sha'd case can't take
-            # this shortcut because ``is_cached`` needs a sha to
-            # build the cache path.
-            if entry.sha256 is not None and _catalog.is_cached(entry, self._cache_dir):
-                size = entry.cached_path(self._cache_dir).stat().st_size
+            # If already on disk at the URL-keyed filename, mark complete
+            # immediately. v0.31.0+: works for both sha-pinned and
+            # un-sha'd entries because ``local_filename`` derives from
+            # the URL via bty_image_ref, no sha required.
+            if _catalog.is_cached(entry, self._image_root):
+                size = entry.cached_path(self._image_root).stat().st_size
                 state.status = "completed"
                 state.bytes_downloaded = size
                 state.bytes_total = size
@@ -300,7 +303,7 @@ class DownloadManager(_BaseAsyncManager[DownloadState]):
           it; the back-fill UPDATEs the catalog row so the entry
           shows ``Cached`` + a content-sha on the next page load.
         """
-        assert self._cache_dir is not None
+        assert self._image_root is not None
         cancel_event = state._cancel
 
         # Re-resolve the entry inside the worker. ``enqueue`` looked
@@ -335,7 +338,7 @@ class DownloadManager(_BaseAsyncManager[DownloadState]):
                 await asyncio.to_thread(
                     _catalog.fetch_to_cache,
                     entry,
-                    self._cache_dir,
+                    self._image_root,
                     progress=_progress,
                     cancel=_cancel,
                 )
@@ -343,11 +346,12 @@ class DownloadManager(_BaseAsyncManager[DownloadState]):
             else:
                 # Un-sha'd entry: download + compute sha + back-fill.
                 # ``fetch_src_to_cache`` returns ``(path, sha)`` and
-                # writes to ``cache_dir/<computed_sha>``.
+                # writes to ``image_root/<entry.local_filename>``.
                 _cached, computed_sha = await asyncio.to_thread(
                     _catalog.fetch_src_to_cache,
                     entry.src,
-                    self._cache_dir,
+                    self._image_root,
+                    local_filename=entry.local_filename(),
                     expected_sha=None,
                     progress=_progress,
                     cancel=_cancel,

@@ -228,7 +228,7 @@ def test_merge_with_catalog_dedupes_by_sha(tmp_path: Path) -> None:
         format="img",
         size_bytes=8,
     )
-    merged = images.merge_with_catalog(image_root, [manifest], cache_dir)
+    merged = images.merge_with_catalog(image_root, [manifest])
     assert len(merged) == 1
     u = merged[0]
     assert u.sha256 == sha
@@ -259,7 +259,7 @@ def test_merge_with_catalog_unhashed_dirscan_kept_separate(tmp_path: Path) -> No
         format="img",
         size_bytes=64,
     )
-    merged = images.merge_with_catalog(image_root, [manifest], cache_dir)
+    merged = images.merge_with_catalog(image_root, [manifest])
     # SHA-keyed first, unhashed last.
     assert merged[0].sha256 == manifest_sha
     assert merged[1].sha256 is None
@@ -297,7 +297,7 @@ def test_merge_with_catalog_handles_manifest_entry_without_sha256(tmp_path: Path
         format="img",
         size_bytes=128,
     )
-    merged = images.merge_with_catalog(image_root, [rolling, pinned], cache_dir)
+    merged = images.merge_with_catalog(image_root, [rolling, pinned])
     # SHA-keyed first, unhashed last.
     assert len(merged) == 2
     assert merged[0].sha256 == pinned_sha
@@ -306,33 +306,38 @@ def test_merge_with_catalog_handles_manifest_entry_without_sha256(tmp_path: Path
     assert merged[1].cached is False
 
 
-def test_merge_with_catalog_manifest_only_uses_cache_dir(tmp_path: Path) -> None:
-    """A manifest entry with no matching local file shows
-    ``cached=True`` iff the SHA exists under the content-
-    addressed cache directory."""
+def test_merge_with_catalog_manifest_only_uses_image_root(tmp_path: Path) -> None:
+    """A manifest entry with no matching operator-typed local file shows
+    ``cached=True`` iff the URL-keyed ``catalog-<ref:12>-<slug>.<ext>``
+    file exists under the image_root. v0.31.0+: no separate cache_dir;
+    catalog-fetched files live alongside operator-typed ones."""
     from types import SimpleNamespace
 
+    from bty.catalog import image_ref_for_src, local_filename_for
+
     image_root = tmp_path / "imgs"
-    cache_dir = tmp_path / "cache"
     image_root.mkdir()
-    cache_dir.mkdir()
-    sha = "c" * 64
-    (cache_dir / sha).write_bytes(b"cached blob")
+    src = "https://example.com/cached.img"
+    name = "cached.img"
+    fmt = "img"
+    ref = image_ref_for_src(src)
+    cached_filename = local_filename_for(ref, name, fmt)
+    (image_root / cached_filename).write_bytes(b"cached blob")
 
     manifest = SimpleNamespace(
-        sha256=sha,
-        name="cached.img",
-        src="https://example.com/cached.img",
-        format="img",
+        sha256="c" * 64,
+        name=name,
+        src=src,
+        format=fmt,
         size_bytes=11,
     )
-    merged = images.merge_with_catalog(image_root, [manifest], cache_dir)
-    assert merged[0].sha256 == sha
+    merged = images.merge_with_catalog(image_root, [manifest])
+    assert merged[0].sha256 == "c" * 64
     assert merged[0].cached is True
 
-    # Same manifest entry but the cache file is absent.
-    (cache_dir / sha).unlink()
-    merged2 = images.merge_with_catalog(image_root, [manifest], cache_dir)
+    # Same manifest entry but the cached file is absent.
+    (image_root / cached_filename).unlink()
+    merged2 = images.merge_with_catalog(image_root, [manifest])
     assert merged2[0].cached is False
 
 

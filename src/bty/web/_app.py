@@ -113,14 +113,19 @@ def create_app(
     )
     event_bus = MachineEventBus()
 
-    # Optional catalog file + cache + DownloadManager. If no
-    # catalog is configured (operator hasn't authored one), the
-    # ``DownloadManager`` simply isn't started and the
-    # ``/catalog/downloads/*`` + ``/catalog/hashes/*`` endpoints
-    # return 404. Operator-curated entries (``POST /catalog/entries``)
-    # work independently of the catalog. ``BTY_CATALOG_FILE`` and
-    # ``BTY_CATALOG_CACHE_DIR`` override the defaults derived from
+    # Optional catalog file + DownloadManager. If no catalog is
+    # configured (operator hasn't authored one), the ``DownloadManager``
+    # simply isn't started and the ``/catalog/downloads/*`` +
+    # ``/catalog/hashes/*`` endpoints return 404. Operator-curated
+    # entries (``POST /catalog/entries``) work independently of the
+    # catalog. ``BTY_CATALOG_FILE`` overrides the default derived from
     # ``BTY_STATE_DIR``.
+    #
+    # v0.31.0+: there is no separate ``BTY_CATALOG_CACHE_DIR`` --
+    # catalog-fetched files land under the image_root with URL-derived
+    # ``catalog-<ref:12>-<slug>.<ext>`` filenames (see
+    # :meth:`bty.catalog.CatalogEntry.local_filename`), differentiated
+    # from operator-typed images by the prefix.
     #
     # The catalog path is treated as the "always this file" location
     # so the UI can write a fresh ``catalog.toml`` to it and reload
@@ -131,7 +136,6 @@ def create_app(
     if manifest_path is None:
         state_dir = Path(os.environ.get("BTY_STATE_DIR", "/var/lib/bty"))
         manifest_path = state_dir / "catalog.toml"
-    catalog_cache_dir = _catalog.default_cache_dir()
 
     # Mutable holder so a runtime reload (operator uploads a new
     # catalog.toml from /ui/images) propagates to every closure-
@@ -192,7 +196,7 @@ def create_app(
         # /ui/images but their per-row Fetch button 404s.
         download_manager.start(
             catalog_state.catalog,
-            catalog_cache_dir,
+            resolved_image_root,
             state_path=state_path,
             db_entry_lookup=_lookup_db_catalog_entry,
         )
@@ -216,7 +220,6 @@ def create_app(
             state_path,
             resolved_image_root,
             resolved_backups_root,
-            bty_version=bty.__version__,
         )
         # Auto-import: ensure every dir-scan file under
         # ``resolved_image_root`` has a catalog_entries row keyed by
@@ -1477,20 +1480,22 @@ def create_app(
            ``file://`` src.
         """
         key_lower = key.lower()
-        # (1) ref lookup.
+        # (1) ref lookup. Catalog-fetched files live at the URL-keyed
+        # ``catalog-<ref:12>-<slug>.<ext>`` filename under the
+        # image_root (v0.31.0+ -- no separate cache dir).
         with _db.open_db(state_path) as conn:
             row = conn.execute(
-                "SELECT bty_image_ref, src, disk_image_sha "
+                "SELECT bty_image_ref, src, name, format "
                 "FROM catalog_entries WHERE bty_image_ref = ?",
                 (key_lower,),
             ).fetchone()
         if row is not None:
-            sha: str | None = row["disk_image_sha"]
+            local = resolved_image_root / _catalog.local_filename_for(
+                row["bty_image_ref"], row["name"], row["format"]
+            )
+            if local.is_file():
+                return local
             src = str(row["src"])
-            if sha:
-                cached = catalog_cache_dir / sha
-                if cached.is_file():
-                    return cached
             if src.startswith("file://"):
                 rel = src[len("file://") :]
                 local = resolved_image_root / rel
@@ -1510,17 +1515,21 @@ def create_app(
             return None
         # (2) sha lookup -- serves the sha-keyed URLs emitted by the
         # ``GET /images`` listing for entries whose content hash is
-        # known. Resolve via the catalog_entries row's src.
+        # known. Resolve via the catalog_entries row to the URL-keyed
+        # local filename.
         if images.is_sha256_hex(key_lower):
-            cached = catalog_cache_dir / key_lower
-            if cached.is_file():
-                return cached
             with _db.open_db(state_path) as conn:
                 row = conn.execute(
-                    "SELECT src FROM catalog_entries WHERE disk_image_sha = ?",
+                    "SELECT bty_image_ref, src, name, format FROM catalog_entries "
+                    "WHERE disk_image_sha = ?",
                     (key_lower,),
                 ).fetchone()
             if row is not None:
+                local = resolved_image_root / _catalog.local_filename_for(
+                    row["bty_image_ref"], row["name"], row["format"]
+                )
+                if local.is_file():
+                    return local
                 src = str(row["src"])
                 if src.startswith("file://"):
                     rel = src[len("file://") :]
@@ -2155,7 +2164,6 @@ def create_app(
         return images.merge_with_catalog(
             resolved_image_root,
             db_entries,
-            catalog_cache_dir,
         )
 
     _ui.register_ui_routes(
@@ -2717,7 +2725,7 @@ def create_app(
         _auto_import_manifest_rows(new_catalog)
         download_manager.start(
             new_catalog,
-            catalog_cache_dir,
+            resolved_image_root,
             state_path=state_path,
             db_entry_lookup=_lookup_db_catalog_entry,
         )
@@ -2903,7 +2911,7 @@ def create_app(
         states = await download_manager.list()
         return {
             "catalog": str(manifest_path) if catalog_state.catalog is not None else None,
-            "cache_dir": str(catalog_cache_dir),
+            "image_root": str(resolved_image_root),
             "max_parallel": download_manager.max_parallel,
             "downloads": [s.to_dict() for s in states],
         }
@@ -2943,14 +2951,16 @@ def create_app(
         """Delete the cached bytes for a named catalog entry; keep
         the entry's metadata.
 
-        Looks up the entry's sha256 (DB ``catalog_entries`` first;
-        then the static manifest if loaded), unlinks
-        ``$cache_dir/<sha256>`` if it exists. Idempotent: a missing
-        file or unknown name both return ``{"deleted": false}``
-        with a ``reason`` string. The catalog entry's metadata is
-        preserved, so the row keeps surfacing in ``/images`` as
-        "available" (not cached) and ``POST /catalog/downloads``
-        re-fetches on demand.
+        v0.31.0+: cached files live at
+        ``image_root / catalog-<ref:12>-<slug>.<ext>`` (URL-keyed name,
+        no separate cache dir). Unlinks the per-entry file by composing
+        its ``local_filename_for`` from the DB row's ``bty_image_ref +
+        name + format`` (or the parsed manifest entry's ``ref + name +
+        format`` if the manifest is the source of truth). Idempotent:
+        a missing file or unknown name both return ``{"deleted":
+        false}`` with a ``reason`` string. Metadata is preserved, so
+        the row keeps surfacing in ``/images`` as "available" (not
+        cached) and ``POST /catalog/downloads`` re-fetches on demand.
 
         Used by the ``/ui/images`` bulk "Delete local copy" toolbar
         action; per-name dispatch keeps the response surface symmetric
@@ -2963,27 +2973,35 @@ def create_app(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"invalid name: {name!r}",
             )
+        local_filename: str | None = None
         sha: str | None = None
         with _db.open_db(state_path) as conn:
             row = conn.execute(
-                "SELECT disk_image_sha FROM catalog_entries WHERE name = ?",
+                "SELECT bty_image_ref, name, format, disk_image_sha "
+                "FROM catalog_entries WHERE name = ?",
                 (name,),
             ).fetchone()
-            if row and row["disk_image_sha"]:
-                sha = str(row["disk_image_sha"])
-        if sha is None and catalog_state.catalog is not None:
+            if row:
+                local_filename = _catalog.local_filename_for(
+                    row["bty_image_ref"], row["name"], row["format"]
+                )
+                if row["disk_image_sha"]:
+                    sha = str(row["disk_image_sha"])
+        if local_filename is None and catalog_state.catalog is not None:
             entry = catalog_state.catalog.by_name(name)
-            if entry is not None and entry.sha256 is not None:
+            if entry is not None:
+                local_filename = entry.local_filename()
                 sha = entry.sha256
-        if sha is None:
-            return {"name": name, "deleted": False, "reason": "no sha256 for name"}
-        cached_file = catalog_cache_dir / sha
+        if local_filename is None:
+            return {"name": name, "deleted": False, "reason": "unknown catalog entry"}
+        cached_file = resolved_image_root / local_filename
         if not cached_file.exists():
             return {
                 "name": name,
                 "deleted": False,
                 "reason": "not cached",
                 "disk_image_sha": sha,
+                "local_filename": local_filename,
             }
         cached_file.unlink()
         with _db.open_db(state_path) as conn:

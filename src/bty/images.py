@@ -312,7 +312,6 @@ class UnifiedImage:
 def merge_with_catalog(
     image_root: Path,
     manifest_entries: Iterable[Any],
-    cache_dir: Path,
 ) -> list[UnifiedImage]:
     """Build the unified image listing.
 
@@ -321,7 +320,12 @@ def merge_with_catalog(
       * ``image_root``: directory scanned via :func:`list_images`.
         Files with a sidecar ``<file>.sha256`` get their SHA
         populated; files without remain unhashed (sha256=None
-        on the resulting :class:`UnifiedImage`).
+        on the resulting :class:`UnifiedImage`). v0.31.0+: also
+        contains catalog-fetched files named
+        ``catalog-<ref:12>-<slug>.<ext>``, treated identically to
+        operator-typed files in pass 1 (their presence under the
+        URL-keyed name implies cached=True for the matching catalog
+        manifest entry in pass 2).
       * ``manifest_entries``: iterable of catalog entries
         (``bty.catalog.CatalogEntry`` or anything structurally
         equivalent: ``name`` / ``src`` / ``sha256`` / ``format`` /
@@ -330,9 +334,6 @@ def merge_with_catalog(
         module load; the local import for :func:`image_ref_for_src`
         below resolves only at call time, after the catalog
         module is fully initialised.
-      * ``cache_dir``: where the content-addressed cache lives
-        (``${BTY_STATE_DIR}/cache``). Used to determine ``cached``
-        for SHAs that are NOT present as a local file.
 
     Merge rule -- two collapse axes, both applied:
 
@@ -453,13 +454,21 @@ def merge_with_catalog(
     # Pass 2: catalog manifest entries (and any structurally-
     # equivalent records the caller fed in -- the web layer
     # passes operator-added catalog_entries rows here too).
+    from bty.catalog import local_filename_for
+
     for entry in manifest_entries:
         try:
             ref = image_ref_for_src(entry.src)
         except ValueError:
             continue  # malformed src; skip
         manifest_src = ImageSource(kind="manifest", location=str(entry.src))
-        cache_hit = entry.sha256 is not None and (cache_dir / entry.sha256).is_file()
+        # v0.31.0+: catalog-fetched files live in image_root under
+        # ``catalog-<ref:12>-<slug>.<ext>``. Pass 1 already added them
+        # as ``local`` sources; this lookup is the secondary path
+        # when pass 1 hasn't run (e.g. an entry whose local file
+        # hasn't been scanned yet) but the file is on disk.
+        cached_filename = local_filename_for(ref, entry.name, entry.format)
+        cache_hit = (image_root / cached_filename).is_file()
         add_entry(
             ref=ref,
             sha256=entry.sha256,

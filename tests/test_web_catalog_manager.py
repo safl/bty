@@ -99,14 +99,14 @@ def test_enqueue_db_only_entry_via_lookup_callback(tmp_path: Path) -> None:
         return entry if name == entry.name else None
 
     async def _drive() -> None:
-        cache_dir = tmp_path / "cache"
-        cache_dir.mkdir()
-        (cache_dir / entry.sha256).write_bytes(payload)
+        image_root = tmp_path / "images"
+        image_root.mkdir()
+        (image_root / entry.local_filename()).write_bytes(payload)
         # Empty manifest; the lookup callback is the only way the
         # manager learns about ``db-only.img.zst``.
         cat = _catalog.Catalog(version=1, entries=())
         mgr = DownloadManager(max_parallel=1)
-        mgr.start(cat, cache_dir, db_entry_lookup=_lookup)
+        mgr.start(cat, image_root, db_entry_lookup=_lookup)
         try:
             state = await mgr.enqueue(entry.name)
             # Sha pinned + already cached -> completed without a worker
@@ -136,12 +136,12 @@ def test_enqueue_db_only_entry_runs_worker(tmp_path: Path) -> None:
         return entry if name == entry.name else None
 
     async def _drive() -> None:
-        cache_dir = tmp_path / "cache"
-        cache_dir.mkdir()
+        image_root = tmp_path / "images"
+        image_root.mkdir()
         # No pre-cached file -- the worker MUST download.
         cat = _catalog.Catalog(version=1, entries=())
         mgr = DownloadManager(max_parallel=1)
-        mgr.start(cat, cache_dir, db_entry_lookup=_lookup)
+        mgr.start(cat, image_root, db_entry_lookup=_lookup)
         try:
             with patch("bty.catalog.urllib.request.urlopen", _mock_urlopen(payload)):
                 await mgr.enqueue(entry.name)
@@ -152,7 +152,7 @@ def test_enqueue_db_only_entry_runs_worker(tmp_path: Path) -> None:
                     await asyncio.sleep(0.01)
             states = await mgr.list()
             assert states and states[0].status == "completed", states[0] if states else None
-            assert (cache_dir / entry.sha256).is_file()
+            assert (image_root / entry.local_filename()).is_file()
         finally:
             await mgr.stop()
 
@@ -178,19 +178,19 @@ def test_enqueue_db_only_entry_no_lookup_raises(tmp_path: Path) -> None:
 
 
 def test_enqueue_already_cached_shortcut(tmp_path: Path) -> None:
-    """An entry whose SHA already lives in cache_dir lands as
+    """An entry whose SHA already lives in image_root lands as
     completed without being queued -- no worker round-trip."""
 
     async def _drive() -> None:
         payload = b"already-here"
         entry = _entry(payload)
-        cache_dir = tmp_path / "cache"
-        cache_dir.mkdir()
-        (cache_dir / entry.sha256).write_bytes(payload)
+        image_root = tmp_path / "images"
+        image_root.mkdir()
+        (image_root / entry.local_filename()).write_bytes(payload)
 
         cat = _catalog.Catalog(version=1, entries=(entry,))
         mgr = DownloadManager(max_parallel=1)
-        mgr.start(cat, cache_dir)
+        mgr.start(cat, image_root)
         try:
             state = await mgr.enqueue(entry.name)
             assert state.status == "completed"
@@ -207,7 +207,7 @@ def test_enqueue_runs_to_completion_for_unhashed_entry(tmp_path: Path) -> None:
     (rolling oras tag, URL-only entry not yet hashed) used to
     crash the worker because fetch_to_cache requires a pinned sha.
     The manager now dispatches to fetch_src_to_cache for un-sha'd
-    entries: download + compute sha + write to cache_dir/<sha>,
+    entries: download + compute sha + write to image_root/<sha>,
     set state.sha256 to the computed value, and back-fill
     catalog_entries.disk_image_sha when state_path is given.
     """
@@ -222,7 +222,7 @@ def test_enqueue_runs_to_completion_for_unhashed_entry(tmp_path: Path) -> None:
             sha256=None,
         )
         cat = _catalog.Catalog(version=1, entries=(entry,))
-        cache_dir = tmp_path / "cache"
+        image_root = tmp_path / "images"
         state_path = tmp_path / "state.db"
         # Seed an existing catalog_entries row so the back-fill
         # update has something to land on.
@@ -244,7 +244,7 @@ def test_enqueue_runs_to_completion_for_unhashed_entry(tmp_path: Path) -> None:
             conn.commit()
         mgr = DownloadManager(max_parallel=1)
         with patch("urllib.request.urlopen", _mock_urlopen(payload)):
-            mgr.start(cat, cache_dir, state_path=state_path)
+            mgr.start(cat, image_root, state_path=state_path)
             try:
                 await mgr.enqueue(entry.name)
                 for _ in range(100):
@@ -259,8 +259,9 @@ def test_enqueue_runs_to_completion_for_unhashed_entry(tmp_path: Path) -> None:
                 assert states[0].sha256 == computed_sha
             finally:
                 await mgr.stop()
-        # File landed at cache_dir/<computed_sha>.
-        cached = cache_dir / computed_sha
+        # File landed at image_root/<entry.local_filename()> (URL-keyed,
+        # not sha-keyed -- v0.31.0+ naming).
+        cached = image_root / entry.local_filename()
         assert cached.is_file()
         assert cached.read_bytes() == payload
         # Back-fill: catalog_entries row now carries the sha.
@@ -289,8 +290,8 @@ def test_download_manager_backfills_from_events(tmp_path: Path) -> None:
 
     async def _drive() -> None:
         state_path = tmp_path / "state.db"
-        cache_dir = tmp_path / "cache"
-        cache_dir.mkdir()
+        image_root = tmp_path / "images"
+        image_root.mkdir()
         _db.init_db(state_path)
         import sqlite3
 
@@ -323,7 +324,7 @@ def test_download_manager_backfills_from_events(tmp_path: Path) -> None:
             conn.commit()
         cat = _catalog.Catalog(version=1, entries=())
         mgr = DownloadManager(max_parallel=1)
-        mgr.start(cat, cache_dir, state_path=state_path)
+        mgr.start(cat, image_root, state_path=state_path)
         try:
             states = await mgr.list()
             assert len(states) == 1
@@ -345,10 +346,10 @@ def test_enqueue_runs_to_completion(tmp_path: Path) -> None:
         payload = b"a" * (1 << 12)  # 4 KiB so the test is fast
         entry = _entry(payload)
         cat = _catalog.Catalog(version=1, entries=(entry,))
-        cache_dir = tmp_path / "cache"
+        image_root = tmp_path / "images"
         mgr = DownloadManager(max_parallel=1)
         with patch("urllib.request.urlopen", _mock_urlopen(payload)):
-            mgr.start(cat, cache_dir)
+            mgr.start(cat, image_root)
             try:
                 await mgr.enqueue(entry.name)
                 # Poll briefly for completion.
@@ -363,7 +364,7 @@ def test_enqueue_runs_to_completion(tmp_path: Path) -> None:
                 assert states[0].bytes_downloaded == len(payload)
             finally:
                 await mgr.stop()
-        cached = cache_dir / entry.sha256
+        cached = image_root / entry.local_filename()
         assert cached.is_file()
         assert cached.read_bytes() == payload
 
@@ -384,11 +385,11 @@ def test_cancel_queued_immediate_state_flip(tmp_path: Path) -> None:
         payload = b"x" * 64
         entries = tuple(_entry(payload, name=f"e{i}.img.zst") for i in range(3))
         cat = _catalog.Catalog(version=1, entries=entries)
-        cache_dir = tmp_path / "cache"
+        image_root = tmp_path / "images"
         block = threading.Event()
         mgr = DownloadManager(max_parallel=1)
         with patch("urllib.request.urlopen", _mock_urlopen(payload, hold=block)):
-            mgr.start(cat, cache_dir)
+            mgr.start(cat, image_root)
             try:
                 await mgr.enqueue("e0.img.zst")  # picked up immediately
                 queued_state = await mgr.enqueue("e1.img.zst")

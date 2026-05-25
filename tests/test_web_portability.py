@@ -1,15 +1,18 @@
-"""Round-trip tests for the export/import (migration / backup) tool.
+"""Round-trip tests for the slim export/import (migration / backup) tool.
 
-The contract: the operator-owned half of the state (machine hardware
-identities + bindings, the catalog, the local image files) travels; the
-boot mode does NOT (machines arrive as bty-inventory), and the transient
-state bit + server timestamps reset.
+v0.31.0+ contract: the bundle carries ONLY ``BTY_IMAGE_ROOT`` files
+(operator-typed + catalog-fetched flat) and minimal per-machine
+records (``mac``, ``hw_lshw``, ``known_disks``). Everything else
+(boot mode, image bindings, catalog entries, settings, audit log)
+is operator-re-typed on the destination appliance.
 """
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
+
+import pytest
 
 from bty.web import _db, _portability
 
@@ -18,7 +21,13 @@ def _seed(state_path: Path, image_root: Path) -> None:
     _db.init_db(state_path)
     image_root.mkdir(parents=True, exist_ok=True)
     (image_root / "demo.img").write_bytes(b"\xff" * 64)
+    # Stage a representative catalog-fetched filename too -- the slim
+    # bundle should carry it byte-identical alongside the operator file.
+    (image_root / "catalog-deadbeefcafe-fedora-sysdev.img.gz").write_bytes(b"\xaa" * 32)
     with _db.open_db(state_path) as conn:
+        # The slim format intentionally drops catalog_entries on export
+        # and bindings on the machine row -- but the source DB still
+        # has them. We're testing that they DON'T travel.
         conn.execute(
             "INSERT INTO catalog_entries (bty_image_ref, src, disk_image_sha, name, "
             "sha_url, format, size_bytes, description, added_at) VALUES (?,?,?,?,?,?,?,?,?)",
@@ -64,14 +73,36 @@ def test_export_import_round_trip(tmp_path: Path) -> None:
     _seed(src_state, src_images)
 
     bundle = tmp_path / "bundle"
-    exp = _portability.export_bundle(
-        src_state, src_images, bundle, bty_version="9.9.9", now="2026-05-22T02:00:00+00:00"
-    )
-    assert (exp.machines, exp.catalog_entries, exp.images) == (1, 1, 1)
+    exp = _portability.export_bundle(src_state, src_images, bundle, now="2026-05-22T02:00:00+00:00")
+    # Slim format: only machines + files (no catalog_entries / images
+    # split). Both files land in the flat files/ subdir.
+    assert exp.machines == 1
+    assert exp.files == 2
+
     manifest = json.loads((bundle / "manifest.json").read_text())
-    # boot_mode is deliberately NOT in the bundle.
-    assert "boot_mode" not in manifest["machines"][0]
-    assert (bundle / "images" / "demo.img").is_file()
+    # Slim machine record: only mac + hardware-inventory fields.
+    machine = manifest["machines"][0]
+    assert machine["mac"] == "aa:bb:cc:dd:ee:ff"
+    assert machine["hw_lshw"] == '{"id": "system"}'
+    assert "/dev/sda" in machine["known_disks"]
+    # Bindings + boot_mode + transient state DELIBERATELY absent.
+    for forbidden in (
+        "boot_mode",
+        "bty_image_ref",
+        "target_disk_serial",
+        "sanboot_drive",
+        "hostname",
+        "saw_flasher_boot",
+        "last_flashed_at",
+    ):
+        assert forbidden not in machine, f"slim format must not export {forbidden}"
+    # No catalog_entries section at all.
+    assert "catalog_entries" not in manifest
+    # Files land flat under files/, not split images/ + cache/.
+    assert (bundle / "files" / "demo.img").is_file()
+    assert (bundle / "files" / "catalog-deadbeefcafe-fedora-sysdev.img.gz").is_file()
+    assert not (bundle / "images").exists()
+    assert not (bundle / "cache").exists()
 
     # Import into a fresh destination (the migration case).
     dst_state = tmp_path / "dst" / "state.db"
@@ -79,32 +110,31 @@ def test_export_import_round_trip(tmp_path: Path) -> None:
     dst_images = tmp_path / "dst" / "images"
     _db.init_db(dst_state)
     imp = _portability.import_bundle(dst_state, dst_images, bundle, now="2026-05-22T03:00:00+00:00")
-    assert (imp.machines, imp.catalog_entries, imp.images) == (1, 1, 1)
+    assert (imp.machines, imp.files) == (1, 2)
     assert imp.skipped == []
 
     with _db.open_db(dst_state) as conn:
         m = dict(
             conn.execute("SELECT * FROM machines WHERE mac=?", ("aa:bb:cc:dd:ee:ff",)).fetchone()
         )
-        c = dict(
-            conn.execute(
-                "SELECT * FROM catalog_entries WHERE bty_image_ref=?", ("ref-demo",)
-            ).fetchone()
-        )
-    # Operator-owned fields carried over...
-    assert m["hostname"] == "lab-box"
-    assert m["bty_image_ref"] == "ref-demo"
-    assert m["target_disk_serial"] == "SER1"
-    assert m["sanboot_drive"] == "0x80"
+        c_count = conn.execute("SELECT COUNT(*) FROM catalog_entries").fetchone()[0]
+    # Slim import: hardware fingerprint carried, NOTHING else.
     assert m["hw_lshw"] == '{"id": "system"}'
     assert "/dev/sda" in m["known_disks"]
-    # ...but the boot mode resets to bty-inventory + transient state clears.
+    # Bindings reset on import (operator re-binds on the new appliance).
+    assert m["hostname"] is None
+    assert m["bty_image_ref"] is None
+    assert m["target_disk_serial"] is None
+    assert m["sanboot_drive"] is None
     assert m["boot_mode"] == "bty-inventory"
     assert m["saw_flasher_boot"] == 0
     assert m["last_flashed_at"] is None
-    # Catalog + image file present at the destination.
-    assert c["name"] == "demo.img"
+    # Catalog rows are NOT imported -- re-import the catalog on the
+    # new appliance.
+    assert c_count == 0
+    # Files present at the destination's image_root.
     assert (dst_images / "demo.img").read_bytes() == b"\xff" * 64
+    assert (dst_images / "catalog-deadbeefcafe-fedora-sysdev.img.gz").read_bytes() == b"\xaa" * 32
 
 
 def test_import_rejects_unknown_bundle_version(tmp_path: Path) -> None:
@@ -113,9 +143,18 @@ def test_import_rejects_unknown_bundle_version(tmp_path: Path) -> None:
     (bundle / "manifest.json").write_text(json.dumps({"bty_export_version": 999}))
     state = tmp_path / "state.db"
     _db.init_db(state)
-    try:
+    with pytest.raises(_portability.BundleVersionMismatch, match="bty_export_version=999"):
         _portability.import_bundle(state, tmp_path / "img", bundle, now="x")
-    except ValueError as exc:
-        assert "unsupported bundle version" in str(exc)
-    else:
-        raise AssertionError("expected ValueError on version mismatch")
+
+
+def test_import_rejects_v1_legacy_bundle(tmp_path: Path) -> None:
+    """v1 bundles (pre-v0.31.0, with separate ``images/`` / ``cache/``
+    subdirs + machine bindings + catalog_entries section) are no longer
+    migratable. Pre-1.0 policy: regenerate on the source release."""
+    bundle = tmp_path / "b"
+    bundle.mkdir()
+    (bundle / "manifest.json").write_text(json.dumps({"bty_export_version": 1}))
+    state = tmp_path / "state.db"
+    _db.init_db(state)
+    with pytest.raises(_portability.BundleVersionMismatch, match="bty_export_version=1"):
+        _portability.import_bundle(state, tmp_path / "img", bundle, now="x")

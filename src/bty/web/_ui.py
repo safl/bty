@@ -829,8 +829,7 @@ def register_ui_routes(
         return {
             "backup_id": snapshot.backup_id,
             "machines": snapshot.machines,
-            "catalog_entries": snapshot.catalog_entries,
-            "images": snapshot.images,
+            "files": snapshot.files,
             "bytes_on_disk": snapshot.bytes_on_disk,
         }
 
@@ -1221,7 +1220,6 @@ def register_ui_routes(
         # state.db so they survive a restart.
         state_dir = state_path.parent
         catalog_file = os.environ.get("BTY_CATALOG_FILE") or str(state_dir / "catalog.toml")
-        cache_dir = os.environ.get("BTY_CATALOG_CACHE_DIR") or str(state_dir / "cache")
         session_secret = os.environ.get("BTY_SESSION_SECRET")
         with _db.open_db(state_path) as conn:
             release_repo = _settings_store.resolve_release_repo(conn)
@@ -1269,9 +1267,6 @@ def register_ui_routes(
                         catalog_file,
                         "BTY_CATALOG_FILE",
                         "<state dir>/catalog.toml",
-                    ),
-                    _config_row(
-                        "Image cache", cache_dir, "BTY_CATALOG_CACHE_DIR", "<state dir>/cache"
                     ),
                     _config_row(
                         "Session secret",
