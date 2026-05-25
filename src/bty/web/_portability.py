@@ -44,6 +44,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import bty
 
@@ -122,11 +123,11 @@ def export_bundle(
     return ExportSummary(len(machines), dest)
 
 
-def _decode_machine(row: dict) -> dict:
+def _decode_machine(row: dict[str, Any]) -> dict[str, Any]:
     """Decode the JSON-TEXT columns (``known_disks``, ``hw_lshw``) so the
     exported inventory carries native objects/arrays. NULL stays NULL;
     malformed JSON degrades to NULL rather than crashing the export."""
-    out = dict(row)
+    out: dict[str, Any] = dict(row)
     for col in ("known_disks", "hw_lshw"):
         raw = out.get(col)
         if raw is None:
