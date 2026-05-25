@@ -356,6 +356,83 @@ def test_other_routes_return_503_redirecting_to_wizard(tmp_path: Path) -> None:
         assert "/ui/recovery" in r.text, path
 
 
+def test_recovery_wizard_renders_recovered_banner_when_db_is_ok(tmp_path: Path) -> None:
+    """v0.32.1: after a wipe + systemd-restart, the polling browser
+    sometimes hits the OLD recovery-mode process between the response
+    flush and the actual ``os._exit(0)``. The state.db is GONE at
+    that point, so ``check_db`` returns FRESH (not needs_recovery).
+    The wizard must render a "Recovery complete -- redirecting" banner
+    in that case, NOT the destructive checklist. Otherwise the
+    operator sees three big red action cards against a healthy DB
+    and gets a confusing UX.
+    """
+    state_path = tmp_path / "state.db"
+    # Build the recovery app while the DB is pre-versioning (so the
+    # constructor path matches production), then DELETE state.db
+    # before the GET to simulate the "post-wipe before normal-mode
+    # binds" window.
+    _stand_up_pre_versioning_db(state_path)
+    db_check = _db.check_db(state_path)
+    app = _recovery.build_recovery_app(
+        state_path=state_path,
+        image_root=tmp_path / "images",
+        backups_root=tmp_path / "backups",
+        secret_key="test",
+        service_user="test",
+        db_check=db_check,
+    )
+    state_path.unlink()  # simulate post-wipe
+    client = TestClient(app)
+    body = client.get("/ui/recovery").text
+    assert "Recovery complete" in body, "must show recovered banner, not checklist"
+    # Destructive button HTML must NOT render against a healthy DB.
+    # (Their IDs still appear in the page's JS via getElementById,
+    # which is harmless -- the JS guards on `if (btnWipe)`. The
+    # CHECK here is the actual ``<button id="btn-wipe">`` markup
+    # absent so an operator can't click an action that doesn't
+    # apply.)
+    assert 'id="btn-wipe"' not in body
+    assert 'id="btn-import"' not in body
+    # Auto-redirect script wires up.
+    assert "/ui/dashboard" in body
+
+
+def test_recovery_wizard_flags_unreadable_backups(tmp_path: Path) -> None:
+    """v0.32.1: a bundle whose ``files/`` subdir is unreadable
+    (chmod 000, broken NFS, etc.) used to silently show "0 files"
+    in the picker, indistinguishable from a deliberately-empty
+    bundle. The helper now marks ``unreadable=True`` for either a
+    missing manifest OR an unreadable files-dir, and the template
+    disables the option + adds the "unreadable manifest" tag."""
+    backups_root = tmp_path / "backups"
+    bundle = backups_root / "2026-05-25T09-00-00Z"
+    files_dir = bundle / "files"
+    files_dir.mkdir(parents=True)
+    (files_dir / "demo.img.gz").write_bytes(b"\0" * 16)
+    (bundle / "manifest.json").write_text(
+        json.dumps(
+            {
+                "bty_export_version": 2,
+                "exported_at": "2026-05-25T09:00:00+00:00",
+                "exported_by_bty_version": "0.32.0",
+                "machines": [],
+            }
+        )
+    )
+    # chmod 000 the files dir so iterdir raises PermissionError.
+    files_dir.chmod(0o000)
+    try:
+        listing = _recovery._read_backup_listing(backups_root)
+        assert len(listing) == 1
+        assert listing[0]["unreadable"] is True, (
+            "unreadable files/ subdir must flip ``unreadable=True`` so the "
+            "picker disables the bundle and labels it"
+        )
+    finally:
+        # Restore for cleanup; pytest's tmp_path teardown requires read.
+        files_dir.chmod(0o755)
+
+
 def test_healthz_returns_503_in_recovery_mode(tmp_path: Path) -> None:
     """``/healthz`` is a stable probe endpoint (CI, ops dashboards);
     in recovery mode it must report unhealthy + tell the prober why.

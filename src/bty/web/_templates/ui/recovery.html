@@ -59,6 +59,26 @@
 
 <main class="container py-4" style="max-width: 900px;">
 
+  {% if recovered %}
+    {# Operator's polling browser raced ahead of systemd's restart
+       window and hit the OLD recovery-mode process AFTER the wipe
+       landed. The DB is now OK; auto-redirect with a clear status
+       so they don't think they need to do anything else. #}
+    <div class="alert alert-success mb-4">
+      <div class="d-flex align-items-start">
+        <i class="bi bi-check-circle-fill me-3" style="font-size: 1.75rem;"></i>
+        <div>
+          <h2 class="alert-heading h5 mb-1">Recovery complete</h2>
+          <p class="mb-2">{{ reason }}</p>
+          <p class="mb-0 small text-muted">
+            <a href="/ui/dashboard">Go to the dashboard</a> if the redirect
+            doesn't fire in a few seconds.
+          </p>
+        </div>
+      </div>
+    </div>
+    <script>setTimeout(function () { window.location.href = "/ui/dashboard"; }, 1500);</script>
+  {% else %}
   {# ===== Banner: what happened + why this page exists ===== #}
   <div class="alert alert-warning mb-4">
     <div class="d-flex align-items-start">
@@ -75,6 +95,8 @@
       </div>
     </div>
   </div>
+  {% endif %}
+  {% if not recovered %}
 
   {# ===== Step 1: What we found ===== #}
   <div class="card mb-3 bty-checklist-item done">
@@ -218,6 +240,7 @@
       </p>
     </div>
   </div>
+  {% endif %}{# not recovered #}
 
 </main>
 
@@ -249,14 +272,60 @@
         if (icon) icon.className = "bi bi-check-circle-fill text-success me-2";
     }
 
+    // Page-level guard against double-submits (A4): once an action
+    // is in flight, every other button click + every page reload
+    // path that would re-issue a POST is blocked. Surviving a
+    // hard-refresh isn't possible from JS alone, but the inflight
+    // flag at least catches the within-page double-click race.
+    var inflight = false;
+    function takeInflight() {
+        if (inflight) return false;
+        inflight = true;
+        // Disable both action buttons regardless of which fired.
+        if (btnWipe) btnWipe.disabled = true;
+        if (btnImport) btnImport.disabled = true;
+        // Discourage navigation-away while the destructive action
+        // executes -- mid-write tab close on the wipe path leaves
+        // the operator unsure whether to refresh-and-retry.
+        window.onbeforeunload = function () {
+            return "Recovery in progress. Leave the tab open until it completes.";
+        };
+        return true;
+    }
+    function releaseInflight() {
+        inflight = false;
+        if (btnWipe) btnWipe.disabled = false;
+        if (btnImport) btnImport.disabled = false;
+        window.onbeforeunload = null;
+    }
+
     function pollUntilRecovered() {
         // Recovery is "done" when /ui/recovery/status either returns
         // a non-recovery state OR the endpoint stops responding (the
         // normal-mode app's catchall doesn't serve this path with the
         // same shape -- a 404 / different JSON means we're back).
+        //
+        // Bounded so a wedged bty-web doesn't trap the page forever:
+        // 60 attempts at 1s = 1 min, enough for any reasonable
+        // systemd Restart=on-failure + uvicorn bind. After the cap,
+        // render an error card with a manual-recovery hint instead
+        // of polling silently.
         var tries = 0;
+        var maxTries = 60;
         var interval = setInterval(function () {
             tries += 1;
+            if (tries > maxTries) {
+                clearInterval(interval);
+                stepRestart.classList.remove("active");
+                stepRestart.classList.add("pending");
+                restartStatus.innerHTML =
+                    '<span class="text-danger"><i class="bi bi-exclamation-octagon me-1"></i>' +
+                    "bty-web didn't come back after " + maxTries + "s. " +
+                    "Check the journal (<code>journalctl -u bty-web</code>) on the appliance, " +
+                    "then reload this page.</span>";
+                releaseInflight();
+                return;
+            }
             fetch("/ui/recovery/status", { cache: "no-store" })
                 .then(function (r) {
                     if (!r.ok) {
@@ -265,6 +334,9 @@
                         clearInterval(interval);
                         setDone(stepVerify);
                         verifyStatus.textContent = "Normal mode is up. Redirecting...";
+                        // Clear the unload-warning before navigating
+                        // away so the redirect doesn't get blocked.
+                        window.onbeforeunload = null;
                         setTimeout(function () { window.location.href = "/ui/dashboard"; }, 800);
                         return;
                     }
@@ -276,14 +348,19 @@
                         // Still on the recovery process but DB is now
                         // OK -- shouldn't happen normally; reload.
                         clearInterval(interval);
+                        window.onbeforeunload = null;
                         window.location.reload();
                     }
                 })
                 .catch(function () {
                     // Connection refused / DNS / socket: bty-web is
-                    // mid-restart. Keep polling.
+                    // mid-restart. Keep polling but surface the
+                    // attempt count so the operator can tell a
+                    // genuinely wedged restart from a normal 5s
+                    // bounce. Cap is enforced above.
                     restartStatus.textContent =
-                        "bty-web is restarting (attempt " + tries + "). Waiting for it to come back...";
+                        "bty-web is restarting (attempt " + tries + " / " + maxTries +
+                        "). Waiting for it to come back...";
                 });
         }, 1000);
     }
@@ -291,7 +368,7 @@
     if (btnWipe) {
         btnWipe.addEventListener("click", function () {
             if (!confirm("Wipe state.db and restart bty-web? Operator state will be lost.")) return;
-            btnWipe.disabled = true;
+            if (!takeInflight()) return;  // double-click guard
             wipeStatus.textContent = "Wiping...";
             setActive(stepRestart);
             restartStatus.textContent = "Wipe in progress; bty-web will restart shortly...";
@@ -299,11 +376,11 @@
                 .then(function (r) { return r.json(); })
                 .then(function () {
                     wipeStatus.textContent = "Wiped. Restarting bty-web...";
-                    pollUntilRecovered();
+                    pollUntilRecovered();  // releases inflight on timeout
                 })
                 .catch(function (e) {
                     wipeStatus.textContent = "Error: " + e;
-                    btnWipe.disabled = false;
+                    releaseInflight();
                 });
         });
     }
@@ -312,7 +389,7 @@
             var bid = backupSelect ? backupSelect.value : "";
             if (!bid) return;
             if (!confirm("Wipe state.db and import bundle " + bid + "? Operator-typed state will be lost; hardware inventory from the bundle will be restored.")) return;
-            btnImport.disabled = true;
+            if (!takeInflight()) return;  // double-click guard
             importStatus.textContent = "Wiping + importing...";
             setActive(stepRestart);
             restartStatus.textContent = "Wipe + import in progress; bty-web will restart shortly...";
@@ -332,7 +409,7 @@
                 })
                 .catch(function (e) {
                     importStatus.textContent = "Error: " + e.message;
-                    btnImport.disabled = false;
+                    releaseInflight();
                 });
         });
     }

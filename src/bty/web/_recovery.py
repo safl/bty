@@ -119,8 +119,14 @@ def _read_backup_listing(backups_root: Path) -> list[dict[str, Any]]:
             info["unreadable"] = True
         files_dir = entry / "files"
         if files_dir.is_dir():
-            with contextlib.suppress(OSError):
+            try:
                 info["files"] = sum(1 for f in files_dir.iterdir() if f.is_file())
+            except OSError:
+                # Unreadable files/ subdir -- the operator should see
+                # the bundle disabled in the picker rather than silently
+                # showing "0 files." Map it to the same UI state as
+                # unreadable=True so the template renders a warning.
+                info["unreadable"] = True
         out.append(info)
     return out
 
@@ -247,6 +253,15 @@ def build_recovery_app(
         fresh = _db.check_db(state_path)
         backups = _read_backup_listing(backups_root)
         at_risk = _read_at_risk_counts(state_path)
+        # ``recovered`` is True when this page renders against a DB
+        # that no longer needs recovery -- e.g. the operator's
+        # browser polled /ui/recovery between the wipe and the
+        # systemd restart, so the OLD process answered with the
+        # checklist while the NEW (normal-mode) process was still
+        # binding the port. The template hides the destructive
+        # action cards and shows an "already recovered" banner +
+        # auto-redirect.
+        recovered = not fresh.needs_recovery
         # Map db state -> human reason; the template renders these
         # as the first checklist item's body.
         if fresh.state == _db.DbState.PRE_VERSIONING:
@@ -263,20 +278,21 @@ def build_recovery_app(
                 f"release wipes state (or migrates via export+wipe+import)."
             )
         else:
-            # OK / FRESH ended up here: build_recovery_app shouldn't
-            # have been called. Render a neutral message + a link
-            # back to /ui/dashboard so reload-polling browsers don't
-            # get stuck on this page when systemd's restart picks
-            # up the normal app.
+            # OK / FRESH ended up here. Operator's polling browser
+            # probably hit the OLD process between wipe and systemd
+            # restart -- the template renders an "already recovered"
+            # banner + auto-redirect so the operator doesn't stare
+            # at a confused checklist.
             reason = (
-                "state.db is fine; this page should not be visible. "
-                "Reload to land on the normal dashboard."
+                "state.db is now compatible with this bty-web release. "
+                "Recovery is complete -- redirecting to the dashboard."
             )
         return jinja.get_template("ui/recovery.html").render(
             db_state=fresh.state,
             stored_version=fresh.stored_version,
             running_version=fresh.running_version,
             reason=reason,
+            recovered=recovered,
             at_risk=at_risk,
             backups=backups,
             state_path=str(state_path),
@@ -354,11 +370,47 @@ def build_recovery_app(
         try:
             summary = _portability.import_bundle(state_path, image_root, bundle_path, now=now)
         except _portability.BundleVersionMismatch as exc:
+            # Format-version mismatch (bundle is from a release with
+            # a different export schema). 409 because the operator
+            # CAN retry with a different bundle.
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=str(exc),
             ) from exc
-        except Exception as exc:  # surface import errors verbatim
+        except FileNotFoundError as exc:
+            # ``manifest.json`` missing from the bundle dir, or the
+            # bundle disappeared between the dir-check above and
+            # import_bundle's read. Operator-actionable: pick a
+            # different bundle.
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"bundle is incomplete: {exc}",
+            ) from exc
+        except PermissionError as exc:
+            # EACCES on the wipe or copy step. Operator-actionable:
+            # check filesystem permissions on the appliance.
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=(
+                    f"permission denied during import: {exc}. "
+                    f"Check ownership/mode of {state_path.parent} and "
+                    f"{image_root} on the appliance."
+                ),
+            ) from exc
+        except OSError as exc:
+            # Disk full, I/O error, partial-copy rollback that
+            # ``import_bundle`` already cleaned up. Operator-
+            # actionable: free space and retry.
+            raise HTTPException(
+                status_code=status.HTTP_507_INSUFFICIENT_STORAGE,
+                detail=(
+                    f"storage error during import: {exc}. "
+                    f"Free up space under {image_root.parent} and retry. "
+                    f"Partial copies (if any) have been cleaned up; "
+                    f"state.db was wiped and will be re-stamped on next start."
+                ),
+            ) from exc
+        except Exception as exc:  # surface unknown import errors verbatim
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"import failed: {type(exc).__name__}: {exc}",

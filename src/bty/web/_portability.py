@@ -41,6 +41,7 @@ tolerant (just machine inventory + raw image files).
 
 from __future__ import annotations
 
+import contextlib
 import json
 import shutil
 from dataclasses import dataclass, field
@@ -200,9 +201,35 @@ def import_bundle(
     image_root.mkdir(parents=True, exist_ok=True)
     n_files = 0
     files_src = src / "files"
+    # Track every destination path we created so a mid-loop failure
+    # (disk full, EACCES, ENOSPC) can unwind without leaving partial
+    # files in image_root. v0.32.0 shipped without this -- a failure
+    # on file N of M left N-1 files in place with the DB already
+    # committed, so the next start saw a half-imported state.
+    copied: list[Path] = []
     if files_src.is_dir():
-        for f in sorted(files_src.iterdir()):
-            if f.is_file():
-                shutil.copy2(f, image_root / f.name)
-                n_files += 1
+        try:
+            for f in sorted(files_src.iterdir()):
+                if f.is_file():
+                    dest = image_root / f.name
+                    shutil.copy2(f, dest)
+                    copied.append(dest)
+                    n_files += 1
+        except OSError as exc:
+            # Best-effort cleanup of partial copies before re-raising.
+            # Operator sees the import fail; image_root is left as
+            # it was before the import attempt (modulo files that
+            # were already there with the same name -- shutil.copy2
+            # overwrites, and we don't try to undo overwrites since
+            # the originals are gone). The recovery UI surfaces the
+            # error to the operator and offers a retry / different
+            # bundle.
+            for dest in copied:
+                with contextlib.suppress(OSError):
+                    dest.unlink()
+            raise OSError(
+                f"import_bundle: copy failed after {n_files} files "
+                f"({type(exc).__name__}: {exc}); cleaned up {len(copied)} "
+                f"partial copies. image_root left at pre-import state."
+            ) from exc
     return ImportSummary(n_m, n_files)

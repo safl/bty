@@ -9,6 +9,56 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.32.1] - 2026-05-25
+
+Polish pass on v0.32.0's recovery wizard + the underlying import
+path. Fixes the rougher edges a real operator would hit on first
+use.
+
+### Fixed
+
+- **Recovery wizard polls forever on a wedged restart.** The JS
+  side now caps polling at 60 attempts (1 minute), then renders a
+  red error card with a `journalctl -u bty-web` hint instead of
+  spinning silently. Previously a bty-web that didn't come back
+  (broken state.db path, port conflict, dependency missing) left
+  the operator staring at "Waiting for it to come back..." forever.
+- **Double-click race on the recovery POST actions.** Page-level
+  `inflight` flag now blocks every action button + cancels
+  beforeunload navigation while a wipe/import is in progress. A
+  hard-refresh during the destructive action no longer slips a
+  second POST through before the first finishes.
+- **Half-imported state after a copy failure.** `import_bundle`'s
+  file-copy loop now tracks every destination it creates; an
+  `OSError` mid-loop unlinks the partial copies before re-raising
+  so the operator sees image_root in its pre-import state instead
+  of a half-loaded mess. Re-raises as an annotated `OSError`
+  naming the failing file count + the cleanup count. New regression
+  test (`test_import_rolls_back_partial_file_copies_on_oserror`).
+- **Wizard rendered the destructive checklist against an OK DB.**
+  When the operator's browser polled `/ui/recovery` between the
+  wipe response and systemd's restart, the OLD recovery-mode
+  process answered with the full action checklist against a now-
+  fresh state.db. v0.32.1 detects `not needs_recovery` in the
+  render path and shows a "Recovery complete -- redirecting"
+  banner instead, with a 1.5s auto-redirect to `/ui/dashboard`.
+- **Unreadable bundle file-dirs silently showed "0 files".** The
+  picker now flags any bundle whose `files/` subdir raises
+  `OSError` on `iterdir` as `unreadable=True` (same UI state as
+  a missing manifest), so the operator sees the bundle disabled
+  + labeled "unreadable manifest" instead of selecting an
+  unloadable one.
+
+### Changed
+
+- **`POST /ui/recovery/wipe-and-import` error responses** now
+  categorise: `BundleVersionMismatch` -> 409, missing manifest /
+  bundle -> 404, `PermissionError` -> 500 with chmod hint,
+  `OSError` (disk full) -> **507 Insufficient Storage** with a
+  free-space hint, anything else -> 500 with `TypeName: message`.
+  Operator sees a recoverable next step in the wizard error
+  panel instead of a bare 500.
+
 ## [0.32.0] - 2026-05-25
 
 Recovery-mode UI: when `bty-web` boots against a `state.db` that

@@ -147,6 +147,71 @@ def test_import_rejects_unknown_bundle_version(tmp_path: Path) -> None:
         _portability.import_bundle(state, tmp_path / "img", bundle, now="x")
 
 
+def test_import_rolls_back_partial_file_copies_on_oserror(tmp_path: Path) -> None:
+    """v0.32.1: ``import_bundle``'s file-copy loop is half-atomic --
+    if any single ``shutil.copy2`` raises ``OSError`` (disk full,
+    permissions, race), every file already copied gets unlinked
+    before the exception re-raises. This avoids the partial-import
+    state v0.32.0 ran into: DB transaction committed, then file N
+    of M failed to copy, leaving N-1 files in image_root with no
+    rollback path.
+
+    Reproduce by making the destination image_root read-only after
+    the first file has been copied; the second copy hits PermissionError,
+    the helper catches it, unlinks the first, and re-raises an
+    annotated OSError.
+    """
+    src_state = tmp_path / "src" / "state.db"
+    src_state.parent.mkdir()
+    src_images = tmp_path / "src" / "images"
+    src_images.mkdir(parents=True, exist_ok=True)
+    (src_images / "first.img.gz").write_bytes(b"\xaa" * 16)
+    (src_images / "second.img.gz").write_bytes(b"\xbb" * 16)
+    _db.init_db(src_state)
+    bundle = tmp_path / "bundle"
+    _portability.export_bundle(src_state, src_images, bundle, now="x")
+    assert (bundle / "files" / "first.img.gz").is_file()
+    assert (bundle / "files" / "second.img.gz").is_file()
+
+    dst_state = tmp_path / "dst" / "state.db"
+    dst_state.parent.mkdir()
+    dst_images = tmp_path / "dst" / "images"
+    dst_images.mkdir(parents=True, exist_ok=True)
+
+    # Monkeypatch ``shutil.copy2`` so the SECOND call raises. The
+    # first call lands "first.img.gz" in dst_images; the helper must
+    # unlink it before re-raising.
+    import shutil as _shutil
+
+    real_copy = _shutil.copy2
+    calls: list[Path] = []
+
+    def fake_copy(src: Path, dst: Path, *args: object, **kw: object) -> Path:
+        calls.append(Path(dst))
+        if len(calls) >= 2:
+            raise OSError("ENOSPC: simulated disk full")
+        return Path(real_copy(src, dst, *args, **kw))
+
+    import bty.web._portability as _portability_mod
+
+    _portability_mod.shutil.copy2 = fake_copy  # type: ignore[assignment]
+    try:
+        with pytest.raises(OSError, match="copy failed after 1 files"):
+            _portability.import_bundle(dst_state, dst_images, bundle, now="y")
+    finally:
+        _portability_mod.shutil.copy2 = real_copy  # type: ignore[assignment]
+
+    # The first file (successfully copied before the failure) must
+    # have been cleaned up. Operator sees image_root in its pre-import
+    # state, not a half-loaded mess.
+    remaining = sorted(p.name for p in dst_images.iterdir())
+    assert remaining == [], (
+        f"partial copy not cleaned up: dst_images={remaining!r} "
+        f"(expected empty; the rollback step should have unlinked "
+        f"first.img.gz before re-raising)"
+    )
+
+
 def test_import_rejects_v1_legacy_bundle(tmp_path: Path) -> None:
     """v1 bundles (pre-v0.31.0, with separate ``images/`` / ``cache/``
     subdirs + machine bindings + catalog_entries section) are no longer
