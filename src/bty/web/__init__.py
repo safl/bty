@@ -53,23 +53,55 @@ def _run_portability(args: argparse.Namespace) -> None:
 def _resolve_secret_key(state_dir: Path) -> str:
     """Return the per-appliance session-cookie secret.
 
-    Read from ``$BTY_SESSION_SECRET`` if set (CI tests, debugging);
-    otherwise from ``<state_dir>/session-secret``. If neither exists,
-    generate a 32-byte URL-safe key, persist it under ``state_dir``
-    with mode 0640, and return it. The appliance pre-creates
-    this file in ``bty-web-init``; this fallback covers fresh dev /
-    local installs where bty-web is launched without that step.
+    Read from ``$BTY_SESSION_SECRET`` if set + non-empty (CI tests,
+    debugging); otherwise from ``<state_dir>/session-secret`` if it
+    exists + non-empty. Otherwise generate a 32-byte URL-safe key,
+    persist it under ``state_dir`` with mode 0640, and return it.
+
+    An empty/whitespace value from either source is treated as
+    "not set" and falls through to generation. A literal empty
+    string would silently degrade ``SessionMiddleware``'s HMAC to a
+    predictable signature -- forgeable session cookies on the LAN
+    segment -- so we never let one through. Causes that produce an
+    empty value in practice:
+
+    - operator sets ``BTY_SESSION_SECRET=""`` thinking they're
+      "clearing" the override
+    - a half-written ``session-secret`` file from a crashed first
+      boot (the prior implementation's ``Path.write_text`` wasn't
+      atomic; a process kill between open and write left the file
+      empty / truncated)
+    - operator manually ``touch``-ed the file expecting it to be
+      populated
+
+    Persisting now writes through a same-dir tempfile + atomic
+    rename so a crash mid-write either leaves the OLD file (if any)
+    or no file (if first boot); never a truncated one. The
+    appliance still pre-creates this file in ``bty-web-init``; this
+    fallback covers fresh dev / local installs where bty-web is
+    launched without that step.
     """
-    env_key = os.environ.get("BTY_SESSION_SECRET")
+    env_key = (os.environ.get("BTY_SESSION_SECRET") or "").strip()
     if env_key:
         return env_key
     secret_path = state_dir / "session-secret"
-    if secret_path.exists():
-        return secret_path.read_text(encoding="utf-8").strip()
+    if secret_path.is_file():
+        existing = secret_path.read_text(encoding="utf-8").strip()
+        if existing:
+            return existing
+        # File present but empty / whitespace -- treat as missing
+        # and regenerate atomically. The empty file gets overwritten
+        # by the rename below.
     state_dir.mkdir(parents=True, exist_ok=True)
     key = secrets.token_urlsafe(32)
-    secret_path.write_text(key + "\n", encoding="utf-8")
-    secret_path.chmod(0o640)
+    # Atomic write: same-dir tempfile -> rename. Avoids a partially-
+    # written file becoming the loaded secret across a crash; cross-
+    # device renames aren't a concern because the tempfile shares
+    # ``state_dir``.
+    tmp = secret_path.with_name(f".{secret_path.name}.{secrets.token_hex(4)}.tmp")
+    tmp.write_text(key + "\n", encoding="utf-8")
+    tmp.chmod(0o640)
+    tmp.replace(secret_path)
     return key
 
 

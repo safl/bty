@@ -9,6 +9,58 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.33.8] - 2026-05-26
+
+**Harden session-secret resolution against empty / corrupt values.**
+Third real bug this evening, found by reasoning rather than survey.
+
+### The bug
+
+`_resolve_secret_key` in `bty.web.__init__` silently passed an empty
+string through to `SessionMiddleware` when:
+
+- `BTY_SESSION_SECRET=""` was set in env (operator "clearing" the
+  override by setting it to empty)
+- the on-disk `session-secret` file existed but was empty / pure
+  whitespace (e.g. a half-written file from a crashed first boot
+  -- `Path.write_text` isn't atomic, so a `SIGKILL` between open
+  and write left an empty truncated file that the next start
+  loaded as the HMAC key)
+- an operator `touch`-ed the file expecting bty-web to populate it
+
+`SessionMiddleware` happily accepts `secret_key=""` and signs every
+session cookie with a predictable HMAC. On a LAN segment with even
+one curious user, forging an admin session cookie is trivial.
+
+### The fix
+
+`_resolve_secret_key` now treats any empty / whitespace value from
+either env or file as "not set" and falls through to the
+generate-and-persist path. Generation uses a same-dir tempfile +
+`Path.replace` (atomic rename) so a crash mid-write either leaves
+the previous file intact or no file at all -- never a truncated /
+empty one. The empty file (if present) gets overwritten by the
+rename.
+
+### Tests
+
+Five regression tests in `test_smoke.py`:
+
+- `test_resolve_secret_key_rejects_empty_env`
+- `test_resolve_secret_key_rejects_whitespace_env`
+- `test_resolve_secret_key_rejects_empty_file`
+- `test_resolve_secret_key_rejects_whitespace_file`
+- `test_resolve_secret_key_persist_is_atomic` -- no `.tmp` debris
+  after a successful generate
+
+### Operator impact
+
+If your appliance has an empty `session-secret` file, the next
+bty-web start regenerates one. All existing session cookies
+invalidate -- operators re-log in once, with `bty-web` now signing
+cookies under an actual key. Subsequent restarts reuse the
+persisted key as before.
+
 ## [0.33.7] - 2026-05-25
 
 **Fix the netboot fetch button when the operator clicks

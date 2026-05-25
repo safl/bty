@@ -144,6 +144,96 @@ def test_resolve_secret_key_generates_and_persists(
     assert second == first
 
 
+def test_resolve_secret_key_rejects_empty_env(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """REGRESSION (v0.33.8): an empty ``BTY_SESSION_SECRET`` env var
+    must be treated as unset, falling through to file / generation.
+    SessionMiddleware silently accepts an empty HMAC key, which
+    makes the resulting session cookies forgeable by anyone on the
+    LAN segment -- so we never let one through, no matter where the
+    empty value came from."""
+    from bty.web import _resolve_secret_key
+
+    monkeypatch.setenv("BTY_SESSION_SECRET", "")
+    fresh = tmp_path / "new-state"
+    key = _resolve_secret_key(fresh)
+    assert key  # generated, non-empty
+    assert key != "", "empty env must NOT pass through"
+    # And the on-disk file must carry the generated key, not be empty.
+    persisted = (fresh / "session-secret").read_text(encoding="utf-8").strip()
+    assert persisted == key
+
+
+def test_resolve_secret_key_rejects_whitespace_env(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Whitespace-only env values are treated as empty (same risk
+    profile as an actual empty string -- ``.strip()`` returns
+    empty, SessionMiddleware would accept it)."""
+    from bty.web import _resolve_secret_key
+
+    monkeypatch.setenv("BTY_SESSION_SECRET", "   \n\t  ")
+    fresh = tmp_path / "new-state"
+    key = _resolve_secret_key(fresh)
+    assert key.strip() != ""
+
+
+def test_resolve_secret_key_rejects_empty_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """REGRESSION (v0.33.8): an empty session-secret file (a
+    half-written file from a crashed first boot, an operator
+    ``touch``, ...) must NOT be used as the HMAC key. Same forgeable-
+    cookie risk as the empty-env case. The function must regenerate
+    + atomically rewrite, leaving a NON-empty file behind."""
+    from bty.web import _resolve_secret_key
+
+    monkeypatch.delenv("BTY_SESSION_SECRET", raising=False)
+    secret_file = tmp_path / "session-secret"
+    secret_file.write_text("", encoding="utf-8")
+
+    key = _resolve_secret_key(tmp_path)
+    assert key  # non-empty
+    # The empty file was replaced with the generated key.
+    persisted = secret_file.read_text(encoding="utf-8").strip()
+    assert persisted == key
+    assert persisted != ""
+
+
+def test_resolve_secret_key_rejects_whitespace_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A file containing only whitespace is functionally empty for
+    HMAC purposes; treat it as missing and regenerate."""
+    from bty.web import _resolve_secret_key
+
+    monkeypatch.delenv("BTY_SESSION_SECRET", raising=False)
+    secret_file = tmp_path / "session-secret"
+    secret_file.write_text("\n\n   \t\n", encoding="utf-8")
+
+    key = _resolve_secret_key(tmp_path)
+    assert key.strip() != ""
+    assert key == secret_file.read_text(encoding="utf-8").strip()
+
+
+def test_resolve_secret_key_persist_is_atomic(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The generate-and-persist path must write through a same-dir
+    tempfile + rename so a crash mid-write can't leave a truncated
+    secret on disk. We can't easily inject a crash; instead we
+    assert no ``.tmp`` debris is left after a successful generate."""
+    from bty.web import _resolve_secret_key
+
+    monkeypatch.delenv("BTY_SESSION_SECRET", raising=False)
+    fresh = tmp_path / "new-state"
+    _resolve_secret_key(fresh)
+
+    leftovers = [p for p in fresh.iterdir() if p.name.endswith(".tmp")]
+    assert not leftovers, f"atomic-write tempfiles must not be left behind: {leftovers!r}"
+
+
 def test_server_cloudinit_base_is_valid_yaml() -> None:
     """``bty-media/auxiliary/cloudinit-base-server.user`` is read by
     cloud-init at bake time -- a YAML syntax error means the bake VM
