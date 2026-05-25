@@ -1,19 +1,19 @@
 """Tests for ``bty.web._db`` schema initialisation.
 
 Pre-1.0: ``init_db`` is a one-liner over ``CREATE TABLE IF NOT
-EXISTS`` plus a strict ``bty_version`` match check -- no migration
-apparatus, no per-column stale-schema detection. Every release that
-bumps ``bty.__version__`` is a release that requires a state.db
-wipe (or export+wipe+import). These tests pin both halves of that
-contract.
+EXISTS`` plus auto-rotation on version mismatch. The DB carries a
+``bty_version`` marker; when it disagrees with the running code (or
+data tables exist without a marker -- a pre-versioning DB), ``init_db``
+renames the old ``state.db`` to ``state.db.<from>.<ts>.bak`` and
+creates a fresh one in its place. A ``system.schema_reset`` event is
+recorded so the dashboard tripwire surfaces the rotation.
 """
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
-
-import pytest
 
 import bty
 from bty.web import _db
@@ -65,8 +65,8 @@ def test_init_db_creates_events_table(tmp_path: Path) -> None:
 
 def test_init_db_stamps_current_version_on_fresh_db(tmp_path: Path) -> None:
     """A freshly-created state.db has the running ``bty.__version__``
-    in the ``bty_version`` table -- this is what later starts check
-    against to refuse stale DBs."""
+    in the ``bty_version`` table -- this is what the rotate-or-keep
+    decision checks on subsequent inits."""
     state = tmp_path / "state.db"
     _db.init_db(state)
     with sqlite3.connect(state) as conn:
@@ -77,258 +77,177 @@ def test_init_db_stamps_current_version_on_fresh_db(tmp_path: Path) -> None:
 
 def test_init_db_idempotent(tmp_path: Path) -> None:
     """``init_db`` is called on every ``open_db``; double-call against
-    a DB that already has the current version row must be a no-op."""
+    a DB that already has the current version row must be a no-op (no
+    rotation, no duplicate marker row)."""
     state = tmp_path / "state.db"
     _db.init_db(state)
-    _db.init_db(state)  # second call must not raise
+    _db.init_db(state)
     with sqlite3.connect(state) as conn:
         rows = conn.execute("SELECT version FROM bty_version").fetchall()
-    # Still exactly one version row (PRIMARY KEY means inserting a
-    # second of the same value would raise; the implementation must
-    # skip the INSERT when the marker already exists).
     assert len(rows) == 1
     assert rows[0][0] == bty.__version__
+    # No spurious .bak files on the idempotent path.
+    assert not list(state.parent.glob("state.db.*.bak"))
 
 
-def test_init_db_raises_on_pre_versioning_db(tmp_path: Path) -> None:
+def test_init_db_rotates_pre_versioning_db(tmp_path: Path) -> None:
     """A state.db with data tables but no ``bty_version`` row is a
-    pre-versioning DB from an older bty release. Pre-1.0 policy has
-    no migration apparatus -- refuse with operator-actionable
-    instructions instead of silently mixing schemas."""
+    pre-versioning DB from an older bty release. ``init_db`` rotates
+    it to ``.bak`` and creates a fresh DB in its place. The old DB
+    is preserved on disk for forensics."""
     state = tmp_path / "state.db"
-    # Create a minimal pre-versioning DB shape (one data table, no
-    # bty_version table). Mirrors the real-world scenario where the
-    # operator's state.db survived a reflash via bty-state-migrate but
-    # was created by a bty release that predates this check.
     with sqlite3.connect(state) as conn:
         conn.execute(
-            """
-            CREATE TABLE machines (
-                mac          TEXT PRIMARY KEY,
-                created_at   TEXT NOT NULL,
-                updated_at   TEXT NOT NULL
-            )
-            """
+            "CREATE TABLE machines (mac TEXT PRIMARY KEY, created_at TEXT, updated_at TEXT)"
+        )
+        conn.execute(
+            "INSERT INTO machines (mac, created_at, updated_at) VALUES (?, ?, ?)",
+            ("aa:bb:cc:dd:ee:ff", "2026-05-25T00:00:00+00:00", "2026-05-25T00:00:00+00:00"),
         )
         conn.commit()
-    with pytest.raises(_db.VersionMismatchError, match="pre-versioning DB"):
-        _db.init_db(state)
 
-
-def test_init_db_raises_on_version_mismatch(tmp_path: Path) -> None:
-    """A state.db whose ``bty_version`` row doesn't match the running
-    code must be refused. Pre-1.0 policy: every release wipes state
-    (or migrates via export+wipe+import)."""
-    state = tmp_path / "state.db"
-    # Stand up a valid v0.X DB with a different version stamped.
     _db.init_db(state)
+
+    # Fresh DB at the original path, stamped with the running version.
     with sqlite3.connect(state) as conn:
-        conn.execute("UPDATE bty_version SET version = ?", ("0.0.1-fake-old-release",))
-        conn.commit()
-    with pytest.raises(_db.VersionMismatchError, match=r"0\.0\.1-fake-old-release"):
-        _db.init_db(state)
-
-
-def test_init_db_refuses_pre_versioning_db_across_restart_retries(tmp_path: Path) -> None:
-    """REGRESSION (v0.31.0 -> v0.31.1): init_db must refuse a pre-
-    versioning DB on EVERY call, not just the first. The earlier
-    implementation ran ``conn.executescript(SCHEMA)`` BEFORE checking,
-    and ``sqlite3.executescript`` issues an implicit COMMIT, so the
-    very act of refusing left ``CREATE TABLE IF NOT EXISTS
-    bty_version`` committed to disk (empty table). systemd's
-    ``Restart=on-failure`` retried 5s later; the second call saw the
-    marker table existed, treated the empty-row case as "fresh DB,
-    stamp it", and silently accepted the franken-state.
-
-    Surfaced in production: an operator upgraded an appliance with
-    its state.db on a separate disk (bty-state-migrate setup); the
-    v0.31.0 hard check fired once, then systemd restarted bty-web
-    and the second start succeeded. Old machine inventory + audit
-    log carried into v0.31.0 with a stamped bty_version=0.31.0 row.
-
-    Three consecutive init_db calls against the same pre-versioning
-    state.db must all raise. No DB mutation may slip through across
-    the failed attempts.
-    """
-    import sqlite3 as _sqlite
-
-    state = tmp_path / "state.db"
-    # Stand up a pre-versioning DB (data table present, no
-    # bty_version table at all).
-    with _sqlite.connect(state) as conn:
-        conn.execute(
-            """
-            CREATE TABLE machines (
-                mac          TEXT PRIMARY KEY,
-                created_at   TEXT NOT NULL,
-                updated_at   TEXT NOT NULL
-            )
-            """
-        )
-        conn.commit()
-
-    # First call: refused.
-    with pytest.raises(_db.VersionMismatchError):
-        _db.init_db(state)
-
-    # CRITICAL: the failed first call must NOT have created the
-    # ``bty_version`` table (which is what the v0.31.0 bug did via
-    # the implicit-commit-before-executescript on the SCHEMA run).
-    with _sqlite.connect(state) as conn:
-        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-    assert "bty_version" not in tables, (
-        "init_db's refuse path must not leave a partial bty_version table; "
-        "otherwise the next systemd-Restart=on-failure attempt would see "
-        f"the table exist and accept the DB. Found tables: {tables!r}"
-    )
-
-    # Second + third call (modelling systemd retries): still refused,
-    # with the same error class. Same shape every time.
-    with pytest.raises(_db.VersionMismatchError):
-        _db.init_db(state)
-    with pytest.raises(_db.VersionMismatchError):
-        _db.init_db(state)
-
-
-def test_init_db_refuses_mismatched_version_without_mutating(tmp_path: Path) -> None:
-    """The version-mismatch refuse path must also leave the DB
-    untouched (so the operator's ``bty-web export`` on the OLD
-    release reads consistent state). Mirror of the pre-versioning
-    test for the "different version stamped" case."""
-    import sqlite3 as _sqlite
-
-    state = tmp_path / "state.db"
-    _db.init_db(state)  # stamp current version
-    with _sqlite.connect(state) as conn:
-        conn.execute("UPDATE bty_version SET version = ?", ("0.0.1-fake-old",))
-        conn.commit()
-        # Snapshot the schema for comparison.
-        before = sorted(
-            r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
-        )
-
-    with pytest.raises(_db.VersionMismatchError, match=r"0\.0\.1-fake-old"):
-        _db.init_db(state)
-
-    with _sqlite.connect(state) as conn:
-        after = sorted(
-            r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
-        )
-        # Marker still says the OLD version (refuse path didn't
-        # touch it).
         stored = conn.execute("SELECT version FROM bty_version").fetchone()[0]
-    assert before == after, "refuse path must not add/drop tables"
-    assert stored == "0.0.1-fake-old", "refuse path must not update the marker"
+        machines_rows = conn.execute("SELECT mac FROM machines").fetchall()
+    assert stored == bty.__version__
+    assert machines_rows == [], "fresh DB must have no machine rows from the rotated-out DB"
+
+    # The rotated .bak file exists and contains the pre-versioning
+    # tables (no bty_version table; the original machine row preserved).
+    baks = list(state.parent.glob("state.db.pre-versioning.*.bak"))
+    assert len(baks) == 1, f"expected one .bak, found {baks!r}"
+    with sqlite3.connect(baks[0]) as conn:
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        old_macs = [r[0] for r in conn.execute("SELECT mac FROM machines")]
+    assert "bty_version" not in tables, ".bak preserves the original (pre-versioning) shape"
+    assert "machines" in tables
+    assert old_macs == ["aa:bb:cc:dd:ee:ff"]
 
 
-def test_check_db_fresh_db(tmp_path: Path) -> None:
-    """A non-existent state.db reports FRESH so the recovery flow
-    knows ``init_db`` will create + stamp on first start."""
-    state = tmp_path / "state.db"
-    r = _db.check_db(state)
-    assert r.state == _db.DbState.FRESH
-    assert r.stored_version is None
-    assert r.has_data_tables is False
-    assert r.running_version == bty.__version__
-    assert r.needs_recovery is False
-
-
-def test_check_db_ok_after_init(tmp_path: Path) -> None:
-    """A freshly-init'd DB reports OK with the running version stamped.
-    ``has_data_tables`` is True because SCHEMA creates the (empty)
-    machines/catalog_entries/events/settings tables on init -- the
-    flag flips on any non-marker table, populated or not."""
-    state = tmp_path / "state.db"
-    _db.init_db(state)
-    r = _db.check_db(state)
-    assert r.state == _db.DbState.OK
-    assert r.stored_version == bty.__version__
-    assert r.needs_recovery is False
-
-
-def test_check_db_pre_versioning(tmp_path: Path) -> None:
-    """A DB with data tables but no ``bty_version`` row reports
-    PRE_VERSIONING -- the recovery UI uses this to render the
-    "old release; wipe + import" wizard."""
-    state = tmp_path / "state.db"
-    with sqlite3.connect(state) as conn:
-        conn.execute("CREATE TABLE machines (mac TEXT PRIMARY KEY)")
-        conn.execute("INSERT INTO machines VALUES (?)", ("aa:bb:cc:dd:ee:ff",))
-        conn.commit()
-    r = _db.check_db(state)
-    assert r.state == _db.DbState.PRE_VERSIONING
-    assert r.stored_version is None
-    assert r.has_data_tables is True
-    assert r.needs_recovery is True
-
-
-def test_check_db_mismatch(tmp_path: Path) -> None:
-    """A DB with a stamped version that doesn't match the running
-    code reports MISMATCH + the stored value so the recovery UI
-    can say "this DB was created by bty v0.27.4; you are running
-    v0.32.0."""
+def test_init_db_rotates_mismatched_version_db(tmp_path: Path) -> None:
+    """A state.db whose ``bty_version`` row doesn't match the running
+    code is rotated and replaced with a fresh DB. The .bak file is
+    named after the stored (old) version so the operator can grep
+    history."""
     state = tmp_path / "state.db"
     _db.init_db(state)
     with sqlite3.connect(state) as conn:
         conn.execute("UPDATE bty_version SET version = ?", ("0.27.4",))
         conn.commit()
-    r = _db.check_db(state)
-    assert r.state == _db.DbState.MISMATCH
-    assert r.stored_version == "0.27.4"
-    assert r.needs_recovery is True
 
+    _db.init_db(state)
 
-def test_check_db_does_not_mutate(tmp_path: Path) -> None:
-    """``check_db`` is a non-mutating probe (opens read-only); the
-    recovery UI calls it repeatedly while the operator decides what
-    to do, and any DB write would either (a) create the file when
-    it shouldn't or (b) leak the marker table across systemd
-    retries like the v0.31.0 bug did."""
-    state = tmp_path / "state.db"
-    # Pre-versioning DB: data table without marker.
     with sqlite3.connect(state) as conn:
-        conn.execute("CREATE TABLE machines (mac TEXT)")
-        conn.commit()
-    before = state.stat().st_size
+        stored = conn.execute("SELECT version FROM bty_version").fetchone()[0]
+    assert stored == bty.__version__
 
-    _db.check_db(state)
-    _db.check_db(state)
-    _db.check_db(state)
-
-    after = state.stat().st_size
-    assert before == after, "check_db must not mutate the file"
-    with sqlite3.connect(state) as conn:
-        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-    assert "bty_version" not in tables, (
-        "check_db must not create the marker table on a pre-versioning DB"
-    )
+    baks = list(state.parent.glob("state.db.0.27.4.*.bak"))
+    assert len(baks) == 1, f"expected one .bak named after old version, found {baks!r}"
 
 
-def test_check_db_missing_file_is_fresh(tmp_path: Path) -> None:
-    """A check against a path that doesn't exist returns FRESH without
-    creating the file -- the recovery flow uses this to decide which
-    UI to mount before bty-web has ever stamped anything."""
-    nonexistent = tmp_path / "nope" / "state.db"
-    r = _db.check_db(nonexistent)
-    assert r.state == _db.DbState.FRESH
-    assert not nonexistent.exists()
-    assert not nonexistent.parent.exists()
-
-
-def test_version_mismatch_error_carries_running_version(tmp_path: Path) -> None:
-    """The error message names BOTH the stored version (so the operator
-    knows which release the DB came from) AND the running version
-    (so they know which release they're upgrading TO). Together with
-    the ``rm state.db`` recovery line, that's all the operator needs."""
+def test_init_db_records_schema_reset_event_on_rotation(tmp_path: Path) -> None:
+    """The rotation is recorded as a ``system.schema_reset`` event
+    with details {from_version, to_version, archived_at} so the
+    operator can see + acknowledge the upgrade from /ui/events."""
     state = tmp_path / "state.db"
     _db.init_db(state)
     with sqlite3.connect(state) as conn:
-        conn.execute("UPDATE bty_version SET version = ?", ("0.99.99",))
+        conn.execute("UPDATE bty_version SET version = ?", ("0.27.4",))
         conn.commit()
-    with pytest.raises(_db.VersionMismatchError) as exc:
-        _db.init_db(state)
-    msg = str(exc.value)
-    assert "0.99.99" in msg, "error must name the stored (old) version"
-    assert bty.__version__ in msg, "error must name the running (new) version"
-    assert "rm" in msg, "error must include the wipe-recovery command"
-    assert "export" in msg, "error must mention the export/import preservation path"
+
+    _db.init_db(state)
+
+    with sqlite3.connect(state) as conn:
+        rows = conn.execute(
+            "SELECT kind, actor, summary, details, acknowledged "
+            "FROM events WHERE kind = 'system.schema_reset'"
+        ).fetchall()
+    assert len(rows) == 1, f"expected one schema_reset event, got {rows!r}"
+    kind, actor, summary, details_json, acknowledged = rows[0]
+    assert kind == "system.schema_reset"
+    assert actor == "system"
+    assert "0.27.4" in summary
+    assert bty.__version__ in summary
+    assert "BTY_IMAGE_ROOT preserved" in summary
+    assert acknowledged == 0, "schema_reset must surface as unacknowledged tripwire"
+    details = json.loads(details_json)
+    assert details["from_version"] == "0.27.4"
+    assert details["to_version"] == bty.__version__
+    assert ".bak" in details["archived_at"]
+
+
+def test_init_db_no_event_on_idempotent_call(tmp_path: Path) -> None:
+    """Calling ``init_db`` against an already-matching DB must not
+    record a schema_reset event -- the tripwire would fire on every
+    request otherwise."""
+    state = tmp_path / "state.db"
+    _db.init_db(state)
+    _db.init_db(state)
+    with sqlite3.connect(state) as conn:
+        count = conn.execute(
+            "SELECT COUNT(*) FROM events WHERE kind = 'system.schema_reset'"
+        ).fetchone()[0]
+    assert count == 0
+
+
+def test_init_db_rotation_drops_sidecars(tmp_path: Path) -> None:
+    """sqlite's -journal / -wal / -shm sidecars refer to the .db
+    file by name. After rotation they would orphan (pointing to a
+    file the next ``state.db`` doesn't own). ``init_db`` unlinks
+    them so the fresh DB starts with clean WAL state."""
+    state = tmp_path / "state.db"
+    _db.init_db(state)
+    # Force a stale stored version so rotation will fire.
+    with sqlite3.connect(state) as conn:
+        conn.execute("UPDATE bty_version SET version = ?", ("0.0.1-old",))
+        conn.commit()
+    # Synthesise WAL sidecars next to state.db. ``init_db`` doesn't
+    # care about the contents -- only that they're gone after rotation.
+    journal = state.parent / "state.db-journal"
+    wal = state.parent / "state.db-wal"
+    shm = state.parent / "state.db-shm"
+    journal.write_bytes(b"stale-journal")
+    wal.write_bytes(b"stale-wal")
+    shm.write_bytes(b"stale-shm")
+
+    _db.init_db(state)
+
+    assert not journal.exists(), "stale -journal must be unlinked on rotation"
+    assert not wal.exists(), "stale -wal must be unlinked on rotation"
+    assert not shm.exists(), "stale -shm must be unlinked on rotation"
+
+
+def test_init_db_rotation_handles_bak_collision(tmp_path: Path) -> None:
+    """Two rotations in the same second (or against a pre-existing
+    .bak with the same name) get distinct filenames so neither
+    overwrites the other."""
+    state = tmp_path / "state.db"
+    _db.init_db(state)
+    with sqlite3.connect(state) as conn:
+        conn.execute("UPDATE bty_version SET version = ?", ("0.0.1-old",))
+        conn.commit()
+    # First rotation.
+    _db.init_db(state)
+    # Force a second mismatch and rotate again.
+    with sqlite3.connect(state) as conn:
+        conn.execute("UPDATE bty_version SET version = ?", ("0.0.1-old",))
+        conn.commit()
+    _db.init_db(state)
+
+    baks = sorted(state.parent.glob("state.db.0.0.1-old.*.bak"))
+    assert len(baks) == 2, f"expected two distinct .bak files, found {baks!r}"
+
+
+def test_init_db_does_not_touch_existing_bak_on_idempotent_init(tmp_path: Path) -> None:
+    """A pre-existing .bak file from a prior rotation must be left
+    alone on an idempotent init -- it's the operator's forensics
+    archive, not something the next boot rewrites."""
+    state = tmp_path / "state.db"
+    _db.init_db(state)
+    sentinel = state.parent / "state.db.0.27.4.20260101T000000Z.bak"
+    sentinel.write_bytes(b"older-rotation-sentinel")
+    _db.init_db(state)  # idempotent; should not touch the .bak
+    assert sentinel.read_bytes() == b"older-rotation-sentinel"

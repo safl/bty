@@ -1,9 +1,10 @@
 """Tests for ``bty.web._security``.
 
-The validator centralises a rule duplicated across five sites
-(catalog / hash / app / recovery wizard); pinning its accept +
-reject behaviour in one place is what makes the centralisation
-worth doing. Mirror coverage of the per-site checks we replaced.
+The validator centralises a rule duplicated across multiple sites
+(catalog / hash / app / portability bundle ids); pinning its
+accept + reject behaviour in one place is what makes the
+centralisation worth doing. Mirror coverage of the per-site
+checks we replaced.
 """
 
 from __future__ import annotations

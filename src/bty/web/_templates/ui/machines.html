@@ -27,8 +27,7 @@
 {% endblock %}
 
 {% block content %}
-{# v0.32.4: post-delete flash banner. Mirrors the recovery wizard's
-   "ultra-explicit" UX -- a non-trivial action (delete a machine
+{# Post-delete flash banner. A non-trivial action (delete a machine
    record) deserves operator feedback whether or not the row
    actually existed. ``?deleted=<mac>`` after a real removal;
    ``?missing=<mac>`` when the row was already gone (stale tab,

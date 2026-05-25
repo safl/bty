@@ -124,6 +124,7 @@ KNOWN_EVENT_KINDS: tuple[str, ...] = (
     "auth.login.succeeded",
     "auth.login.failed",
     "auth.logout",
+    "system.schema_reset",
 )
 
 # Catalogue of ``subject_kind`` values. Powers the /ui/events

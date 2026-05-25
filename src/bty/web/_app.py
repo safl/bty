@@ -107,35 +107,17 @@ def create_app(
     # Scheduled + on-demand backups land under ``backups/`` next to
     # state.db so they survive the same migrate-the-state-dir flow as
     # the image cache. Operators wanting them off the OS disk override
-    # via ``BTY_BACKUP_DIR``. Resolved here (BEFORE the recovery-mode
-    # branch) so the wizard can list the same directory for its
-    # backup-picker.
+    # via ``BTY_BACKUP_DIR``.
     resolved_backups_root: Path = Path(
         os.environ.get("BTY_BACKUP_DIR") or (state_path.parent / "backups")
     )
 
-    # Pre-startup DB probe. v0.32.0+ recovery contract: if state.db's
-    # ``bty_version`` marker disagrees with the running release (or
-    # the DB is pre-versioning, no marker at all), serve a recovery
-    # wizard on the same port instead of crashing into the journal
-    # like v0.31.x did. The operator picks wipe-and-fresh /
-    # wipe-and-import-bundle / shell-recipe from the styled
-    # checklist; bty-web executes the choice and ``os._exit(0)`` so
-    # systemd's Restart=on-failure brings up a fresh process that
-    # falls through this branch (DB is OK now) and builds the normal
-    # app.
-    from . import _recovery
-
-    db_check = _db.check_db(state_path)
-    if db_check.needs_recovery:
-        return _recovery.build_recovery_app(
-            state_path=state_path,
-            image_root=resolved_image_root,
-            backups_root=resolved_backups_root,
-            secret_key=secret_key,
-            service_user=service_user,
-            db_check=db_check,
-        )
+    # v0.33.0+: schema mismatches are handled by ``_db.init_db``
+    # auto-rotating ``state.db`` to ``state.db.<from>.<ts>.bak`` and
+    # creating a fresh DB. The rotation is recorded as a
+    # ``system.schema_reset`` event so the dashboard tripwire
+    # surfaces it. No recovery-wizard branch here; ``open_db`` at
+    # lifespan start does the right thing on its own.
 
     event_bus = MachineEventBus()
 

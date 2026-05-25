@@ -8,22 +8,37 @@ State lives at ``$BTY_STATE_DIR/state.db`` (default
 
 Pre-1.0: the schema is whatever ``CREATE TABLE`` says here. There is
 no migration apparatus. The DB carries the exact ``bty.__version__``
-that created it in the ``bty_version`` table; bty-web refuses to
-start if the running version doesn't match. Every release is
-therefore breaking for state -- by design. The cross-release path
-is ``bty-web export`` (slim bundle of images + cached files +
-hardware inventory) then wipe and import on the new release. Plain
-operator state (image bindings, boot policies, settings) is re-
-typed on the new appliance, by design.
+that created it in the ``bty_version`` table.
+
+**Schema-mismatch behavior (v0.33.0+).** When ``init_db`` sees a
+``state.db`` whose stored version disagrees with the running release
+(or has data tables but no marker at all - a pre-versioning DB), it
+**rotates** the old DB to ``state.db.<from>.<ts>.bak`` and creates a
+fresh schema in its place. The old DB is preserved on disk for
+forensics but the running appliance starts clean. A
+``system.schema_reset`` event is recorded in the fresh DB so the
+dashboard tripwire surfaces it; operators acknowledge from
+``/ui/events``.
+
+The earlier "refuse to start" + recovery-wizard approach (v0.31.x /
+v0.32.x) was overengineered: ``state.db`` is regenerable
+(bindings re-discover on next PXE contact, audit log is cosmetic,
+settings are a tiny handful), and pre-1.0 explicitly says no
+migration apparatus. Auto-rotation is the simplest correct
+behavior - the operator-irreplaceable state (image files under
+``BTY_IMAGE_ROOT``) is never touched. Operators who want hardware
+inventory preserved across upgrades use ``bty-web export`` /
+``bty-web import``.
 """
 
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
 from collections.abc import Iterator
 from contextlib import closing, contextmanager
-from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -178,240 +193,125 @@ CREATE TABLE IF NOT EXISTS settings (
 );
 
 -- Single-row marker recording the ``bty.__version__`` that created
--- this state.db. ``init_db`` refuses to start bty-web if the stored
--- version doesn't EXACTLY match the running code. Pre-1.0 policy:
--- no migration apparatus, no patch-release leniency, no schema-
--- version integer that operators have to track separately. Every
--- release that ships a wheel to PyPI is a release that wipes state
--- (or migrates via export/import). Operators who want to preserve
--- hardware inventory across an upgrade run ``bty-web export`` on
--- the running version, wipe state.db, install the new version, and
--- ``bty-web import`` on the new release -- the slim bundle format
--- is version-tolerant.
+-- this state.db. On version mismatch ``init_db`` rotates the existing
+-- DB to ``state.db.<from>.<ts>.bak`` and creates a fresh one.
 CREATE TABLE IF NOT EXISTS bty_version (
     version  TEXT NOT NULL PRIMARY KEY
 );
 """
 
 
-class VersionMismatchError(RuntimeError):
-    """Raised when state.db's ``bty_version`` row doesn't match the
-    running ``bty.__version__``, OR the DB has data tables but no
-    ``bty_version`` row (pre-versioning DB from an older release).
-    The recovery is ``rm state.db`` (and ``bty-web import`` afterwards
-    if hardware inventory should be preserved). Pre-1.0: no migration
-    apparatus."""
+def _bak_path(state_path: Path, from_version: str) -> Path:
+    """Build the rotation target for ``state.db``.
 
-
-# DB state classifier. Returned by :func:`check_db` so callers
-# (specifically ``bty.web._app.create_app``) can decide whether to
-# build the full app or a recovery-mode app -- without raising.
-# v0.32.0+: when bty-web boots against a mismatched / pre-versioning
-# DB, it starts a minimal recovery UI on the same port instead of
-# dying in the journal, so the operator gets a styled wizard in the
-# browser. ``init_db`` keeps raising for callers that want the strict
-# "refuse to proceed" semantics; ``check_db`` is the non-mutating
-# probe the recovery flow uses.
-class DbState:
-    """Sentinel values returned by :func:`check_db`."""
-
-    FRESH = "fresh"  # no tables at all; init_db would stamp + return
-    OK = "ok"  # marker matches running bty.__version__
-    PRE_VERSIONING = "pre_versioning"  # data tables exist, no marker
-    MISMATCH = "mismatch"  # marker present but != running version
-
-
-@dataclass(frozen=True)
-class DbCheckResult:
-    """Outcome of a non-mutating ``check_db`` probe.
-
-    The recovery UI renders directly from these fields so the
-    operator sees a faithful summary of what bty-web found.
+    Format: ``state.db.<sanitised-from>.<UTC-iso-compact>.bak``. The
+    timestamp prevents collisions when a single appliance bounces
+    through multiple releases. The version goes through a
+    [^0-9A-Za-z.-]-stripping pass so a hypothetical bad-actor version
+    string can't smuggle a path separator into the filename.
     """
-
-    state: str  # one of :class:`DbState` values
-    stored_version: str | None  # ``bty_version`` row's value, or None
-    running_version: str  # bty.__version__
-    has_data_tables: bool  # True iff any data table other than sqlite_sequence/bty_version
-    path: Path
-
-    @property
-    def needs_recovery(self) -> bool:
-        """True iff bty-web should run in recovery mode instead of normal."""
-        return self.state in (DbState.PRE_VERSIONING, DbState.MISMATCH)
+    ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    safe = re.sub(r"[^0-9A-Za-z.-]", "_", from_version) or "unknown"
+    return state_path.with_name(f"{state_path.name}.{safe}.{ts}.bak")
 
 
-def check_db(path: Path) -> DbCheckResult:
-    """Non-mutating probe of ``path``'s shape vs the running bty version.
+def _rotate_to_bak(state_path: Path, from_version: str) -> Path:
+    """Move ``state.db`` to a versioned ``.bak`` and drop sidecars.
 
-    Returns a :class:`DbCheckResult` describing what's on disk. Does
-    NOT create / alter / stamp anything -- safe to call from a
-    recovery-mode startup that needs to keep the operator's data
-    readable until they decide what to do with it.
+    sqlite3 WAL sidecars (``-journal`` / ``-wal`` / ``-shm``) refer
+    to the main DB by filename; renaming the main file alone orphans
+    them. Unlink them after rotation so a future ``state.db`` (about
+    to be created by the caller) doesn't pick up stale pages from
+    the previous DB's WAL.
 
-    A missing path returns ``DbState.FRESH`` (``init_db`` would
-    create + stamp it). An unreadable / locked DB still returns a
-    best-effort guess; downstream callers must handle a partial
-    result rather than crash.
+    Same-second collisions get a numeric suffix; unlikely on a
+    typical upgrade cadence but cheap to handle.
     """
-    if not path.exists():
-        return DbCheckResult(
-            state=DbState.FRESH,
-            stored_version=None,
-            running_version=bty.__version__,
-            has_data_tables=False,
-            path=path,
-        )
-    # Open read-only to avoid creating the file or writing a journal
-    # if the DB is fine. ``mode=ro`` is the URI form sqlite3 supports.
-    uri = f"file:{path}?mode=ro"
-    try:
-        with closing(sqlite3.connect(uri, uri=True)) as conn:
-            tables = {
-                r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
-            }
-            has_data_tables = bool(tables - {"sqlite_sequence", "bty_version"})
-            stored: str | None = None
-            if "bty_version" in tables:
-                row = conn.execute("SELECT version FROM bty_version LIMIT 1").fetchone()
-                if row is not None:
-                    stored = row[0]
-    except sqlite3.Error:
-        # Corrupt / locked / not a sqlite file -- treat as
-        # pre-versioning so the recovery UI surfaces it.
-        return DbCheckResult(
-            state=DbState.PRE_VERSIONING,
-            stored_version=None,
-            running_version=bty.__version__,
-            has_data_tables=True,
-            path=path,
-        )
-
-    if not has_data_tables and stored is None:
-        return DbCheckResult(
-            state=DbState.FRESH,
-            stored_version=None,
-            running_version=bty.__version__,
-            has_data_tables=False,
-            path=path,
-        )
-    if stored is None:
-        return DbCheckResult(
-            state=DbState.PRE_VERSIONING,
-            stored_version=None,
-            running_version=bty.__version__,
-            has_data_tables=has_data_tables,
-            path=path,
-        )
-    if stored != bty.__version__:
-        return DbCheckResult(
-            state=DbState.MISMATCH,
-            stored_version=stored,
-            running_version=bty.__version__,
-            has_data_tables=has_data_tables,
-            path=path,
-        )
-    return DbCheckResult(
-        state=DbState.OK,
-        stored_version=stored,
-        running_version=bty.__version__,
-        has_data_tables=has_data_tables,
-        path=path,
-    )
+    target = _bak_path(state_path, from_version)
+    counter = 1
+    while target.exists():
+        target = state_path.with_name(f"{_bak_path(state_path, from_version).stem}.{counter}.bak")
+        counter += 1
+    state_path.rename(target)
+    for suffix in ("-journal", "-wal", "-shm"):
+        (state_path.parent / f"{state_path.name}{suffix}").unlink(missing_ok=True)
+    return target
 
 
 def init_db(path: Path) -> None:
     """Create ``path`` (and its parent directory) if missing; apply
-    the schema; verify the ``bty_version`` marker matches.
+    the schema; stamp the ``bty_version`` marker.
 
-    Pre-1.0: no migrations. The DB carries a ``bty_version`` row with
-    the ``bty.__version__`` that created it; bty-web REFUSES to start
-    if the running version doesn't match exactly. The recovery is
-    documented in the :class:`VersionMismatchError` message and in
-    operations.md. Every release that bumps ``__version__`` is a
-    release that requires a state.db wipe (or export+wipe+import).
+    On schema mismatch (stored marker != running version, or data
+    tables exist without a marker -- pre-versioning DB), the old
+    ``state.db`` is rotated to ``state.db.<from>.<ts>.bak`` and a
+    fresh DB is created in its place. The rotation is recorded as a
+    ``system.schema_reset`` event in the fresh DB so the dashboard
+    tripwire surfaces it.
 
-    Fresh DB (no tables at all) gets the current version stamped on
-    init. A DB with data tables but no ``bty_version`` row is a pre-
-    versioning install -- refuse with a clear message.
+    Pre-1.0 contract (see module docstring): no migration apparatus,
+    no schema-version integer, no operator intervention on upgrade.
+    Operator-irreplaceable state (image files under
+    ``BTY_IMAGE_ROOT``) is never touched by this function.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
-    # ``with sqlite3.connect(...)`` is a *transaction* context, not a
-    # *close* context -- it commits/rolls back but leaves the
-    # connection open (closed only by refcount GC, fragile off
-    # CPython). ``closing`` guarantees the fd is released here.
+
+    rotated_from: str | None = None
+    rotated_to: Path | None = None
+
+    if path.exists():
+        # Probe the existing DB in a separate connection. We need to
+        # know "fresh / matches / mismatches / pre-versioning" BEFORE
+        # touching the file, because rotating only makes sense if we
+        # actually find a stale schema.
+        with closing(sqlite3.connect(path)) as probe:
+            tables = {
+                r[0] for r in probe.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            }
+            has_data = bool(tables - {"sqlite_sequence", "bty_version"})
+            stored: str | None = None
+            if "bty_version" in tables:
+                row = probe.execute("SELECT version FROM bty_version LIMIT 1").fetchone()
+                if row is not None:
+                    stored = row[0]
+
+        if has_data and stored is None:
+            rotated_from = "pre-versioning"
+        elif stored is not None and stored != bty.__version__:
+            rotated_from = stored
+
+        if rotated_from is not None:
+            rotated_to = _rotate_to_bak(path, rotated_from)
+
+    # Path is now either non-existent (first boot, or just rotated)
+    # or an in-place same-version DB (idempotent re-init). Apply the
+    # schema + stamp the marker if it's not stamped yet.
     with closing(sqlite3.connect(path)) as conn, conn:
-        # Pre-SCHEMA pass: catch a pre-versioning DB BEFORE doing
-        # anything that mutates the DB. The earlier version of this
-        # check ran ``executescript(SCHEMA)`` first and only then
-        # decided to raise -- but ``sqlite3.executescript`` issues an
-        # implicit COMMIT, so the ``CREATE TABLE IF NOT EXISTS
-        # bty_version`` inside SCHEMA committed regardless of what
-        # came after. On the next systemd restart, ``bty_version``
-        # existed (empty), ``had_marker_before_schema`` flipped True,
-        # and the refuse condition silently inverted to "fresh DB, go
-        # stamp the marker." The franken-state slipped through. We
-        # now decide BEFORE running SCHEMA: if data tables exist and
-        # the marker table doesn't, refuse without touching anything.
-        existing_tables = {
-            r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
-        }
-        has_data_tables = bool(existing_tables - {"sqlite_sequence", "bty_version"})
-        marker_table_existed = "bty_version" in existing_tables
-
-        if has_data_tables and not marker_table_existed:
-            # Pre-versioning DB. Refuse before SCHEMA runs so the next
-            # invocation (after systemd's Restart=on-failure retry)
-            # hits the same condition rather than seeing a half-
-            # created marker table.
-            raise VersionMismatchError(
-                f"bty-web: state.db at {path} has data tables but no "
-                f"bty_version table -- this is a pre-versioning DB from "
-                f"an older bty release. Pre-1.0 policy: no migration "
-                f"apparatus.\n\n"
-                f"Recovery (loses operator state -- bindings, settings, "
-                f"audit log):\n"
-                f"  sudo systemctl stop bty-web\n"
-                f"  sudo rm {path}\n"
-                f"  sudo systemctl start bty-web\n\n"
-                f"To preserve hardware inventory across the wipe, run "
-                f"``bty-web export`` on the OLD version BEFORE wiping, "
-                f"then ``bty-web import`` on the new release. See "
-                f"operations.md."
-            )
-
-        if marker_table_existed:
-            # Check the stored version BEFORE SCHEMA in the same
-            # mutation-free way -- a mismatched marker means we refuse
-            # to touch the DB at all, leaving any export attempt on the
-            # OLD release reading consistent state.
-            stored_row = conn.execute("SELECT version FROM bty_version LIMIT 1").fetchone()
-            if stored_row is not None and stored_row[0] != bty.__version__:
-                raise VersionMismatchError(
-                    f"bty-web: state.db at {path} carries bty_version "
-                    f"{stored_row[0]!r}, but the running code is "
-                    f"{bty.__version__!r}. Pre-1.0 policy: no migration "
-                    f"apparatus -- every release wipes state.\n\n"
-                    f"Recovery (loses operator state):\n"
-                    f"  sudo systemctl stop bty-web\n"
-                    f"  sudo rm {path}\n"
-                    f"  sudo systemctl start bty-web\n\n"
-                    f"To preserve hardware inventory (MAC + lshw + "
-                    f"known_disks) across the wipe, run ``bty-web export`` "
-                    f"on the OLD version BEFORE upgrading, then "
-                    f"``bty-web import`` on the new release. See "
-                    f"operations.md."
-                )
-
-        # All clear: either a fresh DB (no tables at all) or an
-        # already-versioned DB that matches the running code. Apply
-        # the schema + stamp the marker if it's not stamped yet.
         conn.executescript(SCHEMA)
 
         stored_row = conn.execute("SELECT version FROM bty_version LIMIT 1").fetchone()
         if stored_row is None:
             conn.execute("INSERT INTO bty_version (version) VALUES (?)", (bty.__version__,))
-        # Same-version case: idempotent no-op.
+
+        if rotated_from is not None and rotated_to is not None:
+            # Lazy import: ``_events_log`` imports ``_db`` at module
+            # load (circular if imported eagerly here).
+            from . import _events_log
+
+            _events_log.record(
+                conn,
+                kind="system.schema_reset",
+                actor="system",
+                summary=(
+                    f"state.db rotated on upgrade ({rotated_from} -> {bty.__version__}). "
+                    f"Machine bindings + audit log reset; images under BTY_IMAGE_ROOT preserved."
+                ),
+                details={
+                    "from_version": rotated_from,
+                    "to_version": bty.__version__,
+                    "archived_at": str(rotated_to),
+                },
+            )
 
 
 @contextmanager

@@ -40,9 +40,9 @@ def validate_basename(name: str, *, label: str = "name") -> None:
     """Reject ``name`` if it's anything other than a plain basename.
 
     Mirrors the historical per-module ``_reject_traversal_name``
-    helpers (catalog manager, hash manager) + the recovery wizard's
-    inline ``backup_id`` check + the ``/catalog/cache/{name}`` route
-    validator. All five sites had the same rule expressed in
+    helpers (catalog manager, hash manager) + the
+    ``/catalog/cache/{name}`` route validator + bundle-id checks in
+    the export/import flow. The sites had the same rule expressed in
     slightly different shapes; this one helper is the auditable
     single source of truth.
 

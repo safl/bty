@@ -1769,12 +1769,12 @@ def _row_to_dict(row: Any) -> dict[str, Any]:
     directly. Bad JSON degrades to ``None`` so a stale row
     can't 500 the detail page.
 
-    The columns are part of the current schema (the hard
-    ``bty_version`` check in ``_db.init_db`` refuses to start
-    against a DB created by a different release), so a missing
-    column would surface at startup as a ``VersionMismatchError``
-    rather than letting a ``KeyError`` slip through here. We can
-    index directly.
+    The columns are part of the current schema -- ``_db.init_db``
+    auto-rotates any stale-schema ``state.db`` to ``.bak`` on
+    startup and creates a fresh one stamped with the running
+    version, so by the time this function runs the row always
+    matches the schema defined in ``_db.SCHEMA``. We can index
+    directly.
     """
     raw_disks = row["known_disks"]
     parsed_disks: list[dict[str, Any]] | None = None

@@ -9,6 +9,68 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.33.0] - 2026-05-25
+
+**Schema mismatches now auto-rotate; the recovery wizard is gone.**
+The v0.32.x interactive recovery flow (browser checklist, polling
+JS, `os._exit(0)` dance, `_recovery.py`, `recovery.html`) was
+overengineered for what `state.db` actually is. The DB holds
+machine bindings (re-discovered on next PXE contact), an audit log
+(cosmetic), a catalog cache index (regenerated), and a handful of
+settings -- all of it regenerable. Operator-irreplaceable state
+lives in image files under `BTY_IMAGE_ROOT`, which neither code
+path ever touches.
+
+The new shape: on `bty_version` mismatch (or a pre-versioning DB
+with no marker), `_db.init_db` renames `state.db` to
+`state.db.<from>.<UTC-iso>.bak`, unlinks the WAL sidecars, and
+creates a fresh DB stamped with the running version. A
+`system.schema_reset` event is recorded so the dashboard tripwire
+surfaces the rotation; operators acknowledge from `/ui/events`.
+No wizard, no polling, no operator confirmation step -- the
+appliance just works after `systemctl restart bty-web`.
+
+### Removed
+
+- **`bty.web._recovery` module** (build_recovery_app + all
+  POST handlers + the per-action exit scheduler).
+- **`_templates/ui/recovery.html`** wizard template.
+- **`bty.web._db.VersionMismatchError`** -- no longer raised;
+  schema mismatch is non-exceptional.
+- **`bty.web._db.check_db` / `DbCheckResult` / `DbState`** --
+  the non-mutating probe used by the recovery dispatch.
+- **15 recovery-mode integration tests** (`tests/test_web_recovery.py`).
+- **Recovery-mode routes documentation** in operations.md +
+  reference.md.
+
+### Added
+
+- **`bty.web._db._rotate_to_bak(state_path, from_version)`** --
+  renames `state.db` to a timestamped `.bak`, drops sidecars,
+  returns the new path. Collision-safe (numeric suffix on
+  same-second double-rotation).
+- **`system.schema_reset` event kind**, recorded by `init_db`
+  when rotation fires. `details = {from_version, to_version,
+  archived_at}`; surfaces as an unacknowledged dashboard
+  tripwire.
+- **8 new `init_db` rotation tests** (`tests/test_web_db.py`):
+  pre-versioning rotation, mismatch rotation, event recording,
+  idempotent no-op, sidecar cleanup, collision handling,
+  forensics-preservation, `.bak`-untouched-on-idempotent.
+
+### Operator impact
+
+- **Upgrade path is no-op-on-the-operator.** Update bty-web,
+  systemctl restart, dashboard shows an unacknowledged
+  `system.schema_reset` event the operator dismisses. Machine
+  bindings rebuild as PXE clients re-check-in.
+- **Recovering specific rows from an old DB** is `sqlite3
+  /var/lib/bty/state.db.<from>.<ts>.bak "SELECT ..."`. The
+  `.bak` is a normal sqlite file; `rm` to discard.
+- **Hardware-inventory preservation** still goes through
+  `bty-web export` (before upgrade) + `bty-web import` (after),
+  same as v0.31.0+ -- the slim v2 bundle format is unchanged.
+
 ## [0.32.4] - 2026-05-25
 
 Round 7 polish: machine-delete UX feedback + docs caught up to

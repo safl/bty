@@ -159,49 +159,51 @@ subdir), so `tar` it for archival.
 
 ## Upgrade
 
-bty pre-1.0 has **no database migration framework**. v0.31.0+ enforces
-this strictly: bty-web carries the exact `bty.__version__` that created
-`state.db` in a `bty_version` table, and refuses the existing DB when
-the running code's version doesn't match. Every release is therefore
-breaking for state, by design.
+bty pre-1.0 has **no database migration framework**. The DB carries
+the exact `bty.__version__` that created it in a `bty_version`
+table. When the running release doesn't match, bty-web automatically
+rotates the old `state.db` to `state.db.<from>.<ts>.bak` and creates
+a fresh one in its place. Every release is therefore breaking for
+state, by design -- but the operator does nothing.
 
-### Recovery wizard (v0.32.0+)
+### Auto-rotate on schema mismatch (v0.33.0+)
 
-When bty-web boots against a mismatched `state.db`, it does NOT die
-in the journal. Instead it serves an **interactive recovery wizard**
-on the same port. Hit the appliance URL in a browser; the wizard
-walks the operator through the checklist:
+On bty-web startup, if the stored `bty_version` disagrees with the
+running release (or the DB is pre-versioning -- data tables present
+without the marker), `init_db` does:
 
-1. **State detected** — shows stored vs running version + at-risk
-   row counts (machines, catalog entries, audit events).
-2. **Choose recovery strategy:**
-   - **Wipe and start fresh** — discards machine records, bindings,
-     settings, audit log. Files under `BTY_IMAGE_ROOT` and netboot
-     artifacts in `BTY_BOOT_DIR` survive. Operator re-binds via the
-     UI after the restart.
-   - **Wipe and import from backup** — picks a previously-exported
-     v2 bundle from `${BTY_STATE_DIR}/backups/`. Hardware identity
-     (mac + lshw + known_disks) restores; bindings reset.
-   - **Manual shell recipe** — for operators who'd rather run the
-     wipe themselves.
-3. **bty-web restarts** with a clean DB (auto-ticks).
-4. **Verify** — page auto-redirects to `/ui/dashboard` once the
-   normal app is up.
+1. **Renames** `state.db` to `state.db.<from-version>.<UTC-iso>.bak`
+   (e.g. `state.db.0.27.4.20260525T101530Z.bak`). The old DB is
+   preserved on disk for forensics.
+2. **Unlinks** the WAL sidecars (`state.db-journal` / `-wal` /
+   `-shm`) so the fresh DB doesn't pick up stale pages.
+3. **Creates** a fresh `state.db` with the running release's schema,
+   stamped with `bty.__version__`.
+4. **Records** a `system.schema_reset` event with details
+   `{from_version, to_version, archived_at}`. The event surfaces as
+   an unacknowledged tripwire on `/ui/dashboard`; acknowledge it
+   from `/ui/events`.
 
-### CLI-driven recovery (for headless / scripted upgrades)
+Operator-irreplaceable state lives outside `state.db`:
 
-If you can't reach the wizard (e.g. shipping a fleet upgrade via
-ssh):
+- **Image files** under `BTY_IMAGE_ROOT` -- not touched.
+- **Netboot artifacts** under `BTY_BOOT_DIR` -- not touched.
+- **Backup bundles** under `${BTY_STATE_DIR}/backups/` -- not touched.
+
+What rotation discards: machine bindings, hostnames, the audit log,
+operator-overridden settings, the catalog cache index. Bindings
+re-discover on the next PXE contact from each machine.
+
+### Preserve hardware inventory across an upgrade
+
+If you want MAC + `lshw` + `known_disks` to survive the rotation,
+export *before* upgrading and import after:
 
 ```bash
-# (optional) preserve hardware inventory across the wipe:
+# Before upgrade: snapshot to a portable bundle.
 sudo bty-web export /var/lib/bty/backups/pre-$(date +%Y%m%d)
 
-sudo systemctl stop bty-web
-sudo rm /var/lib/bty/state.db
-sudo systemctl start bty-web
-
-# (optional, paired with the export above):
+# Upgrade bty-web (pip / pipx / appliance image), then:
 sudo bty-web import /var/lib/bty/backups/pre-$(date +%Y%m%d)
 ```
 
@@ -210,6 +212,18 @@ plus a minimal per-machine record (`mac` + `hw_lshw` +
 `known_disks`); bindings (`boot_mode`, `bty_image_ref`,
 `target_disk_serial`) reset to defaults and the operator re-binds.
 See "Backup".
+
+### Recovering an old `.bak`
+
+The rotated DB is a normal sqlite file. Read it with the `sqlite3`
+CLI to recover specific rows:
+
+```bash
+sqlite3 /var/lib/bty/state.db.0.27.4.20260525T101530Z.bak \
+    "SELECT mac, bty_image_ref, boot_mode FROM machines"
+```
+
+Once you no longer need it, `rm` it like any other file.
 
 ### Upgrade in place (pip / pipx install)
 
