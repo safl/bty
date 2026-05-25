@@ -23,10 +23,14 @@ import bty
 def _run_portability(args: argparse.Namespace) -> None:
     """Dispatch the ``export`` / ``import`` subcommands.
 
-    Resolves the same state dir + image root the server uses (from
-    ``BTY_STATE_DIR`` / ``BTY_IMAGE_ROOT``), then moves the
-    operator-owned state in/out of a bundle directory. Server-free: needs
-    only stdlib + ``bty.web``, so it works without the ``[web]`` extra.
+    Resolves the same state dir the server uses (from
+    ``BTY_STATE_DIR``), then writes / reads a v3 metadata-only
+    inventory bundle. Server-free: needs only stdlib + ``bty.web``,
+    so it works without the ``[web]`` extra.
+
+    v0.33.2+: the bundle is just ``<dest>/inventory.json`` -- no
+    image bytes. The image-store disk and the catalog handle bytes
+    separately.
     """
     from datetime import UTC, datetime
 
@@ -128,17 +132,19 @@ def main(argv: list[str] | None = None) -> None:
     # Subcommands. Bare ``bty-web`` (no subcommand) still runs the server
     # -- the subparser is optional so the systemd unit / container
     # entrypoint is unchanged. ``export`` / ``import`` move the
-    # operator-owned half of the state (machines + catalog + image files)
-    # in/out of a portable bundle directory, for migration + backup.
+    # per-machine hardware identity (mac + hw_lshw + known_disks) in/out
+    # of a metadata-only inventory.json bundle, for migration + backup.
+    # Image bytes are NOT included; rsync / disk-copy / catalog re-fetch
+    # handles those.
     sub = parser.add_subparsers(dest="cmd")
     p_exp = sub.add_parser(
         "export",
-        help="write machines + catalog + image files to a bundle directory",
+        help="write a metadata-only inventory bundle (mac + lshw + known_disks)",
     )
-    p_exp.add_argument("dest", help="bundle directory to create/write")
+    p_exp.add_argument("dest", help="bundle directory to create (holds inventory.json)")
     p_imp = sub.add_parser(
         "import",
-        help="load a bundle directory (machines come in as bty-inventory)",
+        help="load an inventory bundle (machines arrive as bty-inventory)",
     )
     p_imp.add_argument("src", help="bundle directory to read")
     args = parser.parse_args(argv)

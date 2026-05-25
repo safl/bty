@@ -2966,9 +2966,14 @@ def create_app(
         try:
             state = await download_manager.enqueue(body.name)
         except KeyError as exc:
+            # ``str(KeyError("msg"))`` is ``"'msg'"`` with literal
+            # single quotes (KeyError applies ``repr`` to its arg);
+            # surface the args[0] form so the 404 detail isn't
+            # wrapped in operator-confusing extra quotes.
+            msg = exc.args[0] if exc.args else f"no catalog entry named {body.name!r}"
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=str(exc),
+                detail=msg,
             ) from exc
         return state.to_dict()
 

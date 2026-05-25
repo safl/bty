@@ -9,6 +9,41 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.33.5] - 2026-05-25
+
+Round 5: error-message hygiene + CLI help drift.
+
+### Fixed
+
+- **404 detail leaked `repr` quotes.** `POST /catalog/downloads`
+  with a missing name returned a 404 whose `detail` field was
+  `"'no catalog entry named ...'"` -- with literal single quotes,
+  because `str(KeyError("msg"))` is `"'msg'"` (KeyError applies
+  `repr` to its arg, unlike other built-in exceptions). The handler
+  now reads `exc.args[0]` so the operator-visible detail is plain
+  text. Regression test pinned in `test_web.py`.
+
+### Changed (CLI help text)
+
+- **`bty-web export --help`** previously claimed "write machines +
+  catalog + image files to a bundle directory" -- post-v0.33.2
+  metadata-only, the bundle holds only `inventory.json` with
+  per-machine hw identity. Updated help to "write a metadata-only
+  inventory bundle (mac + lshw + known_disks)"; the `dest`
+  argument help now says "bundle directory to create (holds
+  inventory.json)".
+- **`bty-web import --help`** updated to "load an inventory bundle"
+  (was "load a bundle directory").
+- Subparser preamble comment in `bty.web.__init__._run_portability`
+  updated to match: no longer claims to move catalog or image
+  files, only inventory.
+
+### Operator impact
+
+`bty-web export --help` now describes the post-v0.33.2 reality.
+404 details on the catalog-downloads enqueue path no longer carry
+extra single-quotes around the message.
+
 ## [0.33.4] - 2026-05-25
 
 Two more rounds following Round 1+2 of v0.33.3. Different angles:

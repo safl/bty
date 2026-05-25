@@ -3022,7 +3022,13 @@ def test_catalog_downloads_post_without_manifest_404(app_client: TestClient) -> 
         cookies=AUTH,
     )
     assert r.status_code == 404
-    assert "no catalog entry named" in r.json()["detail"]
+    detail = r.json()["detail"]
+    assert "no catalog entry named" in detail
+    # Regression (v0.33.5): str(KeyError("msg")) is "'msg'" with literal
+    # single quotes (KeyError wraps via repr). The handler must surface
+    # ``exc.args[0]`` so the operator-visible detail isn't wrapped in
+    # extra quotes.
+    assert not detail.startswith("'"), f"KeyError-wrapped detail leaked the repr quotes: {detail!r}"
 
 
 def test_catalog_downloads_delete_requires_auth(app_client: TestClient) -> None:
