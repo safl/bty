@@ -507,6 +507,72 @@ def test_recovery_wizard_flags_unreadable_backups(tmp_path: Path) -> None:
         files_dir.chmod(0o755)
 
 
+def test_wipe_and_import_categorises_disk_full_as_507(
+    tmp_path: Path, _no_exit: None
+) -> None:
+    """v0.32.1: a mid-import ``OSError`` (disk full, ENOSPC) returns
+    a **507 Insufficient Storage** with the actual error text + a
+    "free space and retry" hint, NOT a bare 500. The operator can
+    read the response detail in the wizard's error panel and know
+    what to do next.
+
+    Stand up a valid v2 bundle, monkeypatch ``import_bundle`` to
+    raise ``OSError`` (the real scenario this fires on), and check
+    the response shape.
+    """
+    state_path = tmp_path / "state.db"
+    image_root = tmp_path / "images"
+    backups_root = tmp_path / "backups"
+    _stand_up_pre_versioning_db(state_path)
+
+    bundle = backups_root / "2026-05-25T11-00-00Z"
+    (bundle / "files").mkdir(parents=True)
+    (bundle / "manifest.json").write_text(
+        json.dumps(
+            {
+                "bty_export_version": 2,
+                "exported_at": "2026-05-25T11:00:00+00:00",
+                "exported_by_bty_version": "0.32.1",
+                "machines": [],
+            }
+        )
+    )
+
+    import bty.web._portability as _portability_mod
+
+    original = _portability_mod.import_bundle
+
+    def fake_import(*args: object, **kwargs: object) -> object:
+        raise OSError("ENOSPC: simulated disk full mid-copy")
+
+    _portability_mod.import_bundle = fake_import  # type: ignore[assignment]
+    try:
+        db_check = _db.check_db(state_path)
+        app = _recovery.build_recovery_app(
+            state_path=state_path,
+            image_root=image_root,
+            backups_root=backups_root,
+            secret_key="test",
+            service_user="test",
+            db_check=db_check,
+        )
+        client = TestClient(app)
+        r = client.post(
+            "/ui/recovery/wipe-and-import",
+            json={"backup_id": "2026-05-25T11-00-00Z"},
+        )
+    finally:
+        _portability_mod.import_bundle = original  # type: ignore[assignment]
+
+    assert r.status_code == 507, r.text  # Insufficient Storage
+    detail = r.json()["detail"]
+    # Original error text surfaces verbatim so the operator sees
+    # the specific failure (ENOSPC vs EROFS vs EIO).
+    assert "ENOSPC" in detail
+    # Actionable next-step hint included.
+    assert "Free up space" in detail
+
+
 def test_healthz_returns_503_in_recovery_mode(tmp_path: Path) -> None:
     """``/healthz`` is a stable probe endpoint (CI, ops dashboards);
     in recovery mode it must report unhealthy + tell the prober why.
