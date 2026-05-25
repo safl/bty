@@ -1,49 +1,43 @@
-"""Slim portable export / import of bty-web state.
+"""Metadata-only portable export / import of bty-web state.
 
-v0.31.0+: trimmed to "carry the data that's expensive or impossible
-to re-collect; re-do operator decisions on the new appliance." The
-bundle carries:
-
-  - the contents of ``BTY_IMAGE_ROOT`` (both operator-typed images
-    and catalog-fetched ``catalog-<ref:12>-<slug>.<ext>`` files,
-    merged into one flat ``files/`` subdir);
-  - a minimal per-machine record: ``mac``, ``hw_lshw`` (lshw -json
-    blob), ``known_disks`` (lsblk-style array), and the timestamps
-    on each.
-
-It deliberately does NOT carry:
-
-  - catalog entries (re-import the catalog on the new appliance);
-  - per-machine bindings (``boot_mode``, ``bty_image_ref``,
-    ``target_disk_serial``, ``sanboot_drive``, ``hostname``) --
-    operator re-binds in the new appliance;
-  - ``saw_flasher_boot`` state, audit log, settings, backups.
+v0.33.2+: the bundle is just ``manifest.json``. No image bytes, no
+``files/`` subdir. The expensive-and-hard-to-recollect data is the
+per-machine hardware identity (mac + lshw + known_disks); image
+bytes are recoverable from the upstream catalog or already on the
+image-store disk.
 
 Bundle layout::
 
     <bundle>/
       manifest.json   # {bty_export_version, exported_at,
                       #  exported_by_bty_version, machines: [...] }
-      files/          # everything from BTY_IMAGE_ROOT (flat)
 
-``manifest.json`` carries ``bty_export_version`` (currently 2). The
-import refuses anything else -- the format is version-tolerant in
-the sense that a v2 bundle imports cleanly on any bty release that
-understands the v2 format, but a v1 bundle (pre-v0.31.0, separate
-images/ + cache/ subdirs + machine-bindings + catalog_entries)
-isn't migratable; the operator regenerates the bundle on the source
-release.
+``manifest.json`` carries ``bty_export_version`` (currently 3). The
+import refuses anything else. Pre-1.0 policy: bundles don't migrate
+across major-format bumps -- regenerate on the source release.
 
-It also carries ``exported_by_bty_version`` for diagnostics, but
-that's informational only -- the slim payload is by design version-
-tolerant (just machine inventory + raw image files).
+Why metadata-only: a routine backup runs daily on a cadence, so the
+size matters. Earlier releases (v0.31.0 through v0.33.1) shipped
+full image_root in every bundle, which produced multi-GiB "backups"
+that were dominated by catalog cache files the appliance can just
+re-fetch. Splitting image transport out of backup means a daily
+backup is dozens of KiB and finishes in milliseconds; an operator
+who wants to move an appliance's image_root to a new box uses
+``rsync`` or just moves the image-store disk.
+
+The bundle deliberately does NOT carry:
+
+  - image bytes (re-fetch from catalog or copy the image disk);
+  - catalog entries (re-import the catalog on the new appliance);
+  - per-machine bindings (``boot_mode``, ``bty_image_ref``,
+    ``target_disk_serial``, ``sanboot_drive``, ``hostname``) --
+    operator re-binds in the new appliance;
+  - ``saw_flasher_boot`` state, audit log, settings, backups.
 """
 
 from __future__ import annotations
 
-import contextlib
 import json
-import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -51,10 +45,10 @@ import bty
 
 from . import _db
 
-# Bumped from 1 in v0.31.0 -- breaking change to bundle layout
-# (flat files/ instead of images/ + cache/; no catalog_entries
-# section; slim machine records).
-_EXPORT_VERSION = 2
+# v3 = metadata-only (no files/ subdir). v2 was metadata + full
+# image_root copy; v1 was the pre-v0.31.0 layout. Both refused on
+# import -- regenerate on the source release.
+_EXPORT_VERSION = 3
 
 # Per-machine columns the slim export carries. Mac + lshw +
 # known_disks (the "what hardware does this MAC bind to") is the
@@ -72,14 +66,12 @@ _MACHINE_EXPORT_COLS = (
 @dataclass
 class ExportSummary:
     machines: int
-    files: int
     dest: Path
 
 
 @dataclass
 class ImportSummary:
     machines: int
-    files: int
     skipped: list[str] = field(default_factory=list)
 
 
@@ -93,18 +85,16 @@ class BundleVersionMismatch(ValueError):
 
 def export_bundle(
     state_path: Path,
-    image_root: Path,
     dest: Path,
     *,
     now: str,
 ) -> ExportSummary:
-    """Write a slim portable bundle of preservable state to ``dest``.
+    """Write a metadata-only bundle of preservable state to ``dest``.
 
     Reads minimal machine records (mac + hw_lshw + known_disks +
-    their timestamps) from ``state_path`` and copies everything
-    under ``image_root`` (operator-typed images AND catalog-fetched
-    ``catalog-<ref:12>-<slug>.<ext>`` files, treated identically)
-    into ``dest/files/``. ``dest`` is created if absent.
+    their timestamps) from ``state_path`` and writes them to
+    ``dest/manifest.json``. ``dest`` is created if absent. No image
+    bytes are touched -- this is the routine-backup primitive.
     """
     dest.mkdir(parents=True, exist_ok=True)
     with _db.open_db(state_path) as conn:
@@ -119,35 +109,22 @@ def export_bundle(
         "machines": machines,
     }
     (dest / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
-
-    files_dest = dest / "files"
-    files_dest.mkdir(exist_ok=True)
-    n_files = 0
-    if image_root.is_dir():
-        for f in sorted(image_root.iterdir()):
-            if f.is_file():
-                shutil.copy2(f, files_dest / f.name)
-                n_files += 1
-    return ExportSummary(len(machines), n_files, dest)
+    return ExportSummary(len(machines), dest)
 
 
 def import_bundle(
     state_path: Path,
-    image_root: Path,
     src: Path,
     *,
     now: str,
 ) -> ImportSummary:
     """Load a bundle written by :func:`export_bundle` into
-    ``state_path`` + ``image_root``.
+    ``state_path``.
 
     Machines are inserted as ``boot_mode=bty-inventory`` with empty
     bindings + the transient state reset; existing rows (same mac)
-    are replaced. Files under ``files/`` are copied into the running
-    ``image_root`` -- catalog-prefixed files keep their URL-keyed
-    name so the new appliance's catalog re-import wires the
-    "cached" state automatically. Operator-typed files just sit
-    there alongside.
+    are replaced. The machine arrives as a freshly-discovered box
+    with just its hardware fingerprint pre-filled.
 
     Raises :class:`BundleVersionMismatch` if the bundle's version
     doesn't match the format this release understands.
@@ -160,17 +137,14 @@ def import_bundle(
     if ver != _EXPORT_VERSION:
         raise BundleVersionMismatch(
             f"bundle bty_export_version={ver!r}, expected {_EXPORT_VERSION!r}. "
-            f"v0.31.0 introduced a slim bundle format (flat files/ + minimal "
-            f"machine records); v1 bundles (pre-v0.31.0) aren't migratable -- "
-            f"regenerate on the source release."
+            f"v0.33.2 introduced a metadata-only bundle format; older bundles "
+            f"(v1: pre-v0.31.0, v2: v0.31.0..v0.33.1 with image bytes) aren't "
+            f"migratable -- regenerate on the source release."
         )
 
     n_m = 0
     with _db.open_db(state_path) as conn:
         for m in manifest.get("machines", []):
-            # boot_mode forced to bty-inventory + bindings/timestamps
-            # reset. The machine arrives as a freshly-discovered box
-            # with just its hardware fingerprint pre-filled.
             conn.execute(
                 """
                 INSERT OR REPLACE INTO machines
@@ -198,38 +172,4 @@ def import_bundle(
             n_m += 1
         conn.commit()
 
-    image_root.mkdir(parents=True, exist_ok=True)
-    n_files = 0
-    files_src = src / "files"
-    # Track every destination path we created so a mid-loop failure
-    # (disk full, EACCES, ENOSPC) can unwind without leaving partial
-    # files in image_root. v0.32.0 shipped without this -- a failure
-    # on file N of M left N-1 files in place with the DB already
-    # committed, so the next start saw a half-imported state.
-    copied: list[Path] = []
-    if files_src.is_dir():
-        try:
-            for f in sorted(files_src.iterdir()):
-                if f.is_file():
-                    dest = image_root / f.name
-                    shutil.copy2(f, dest)
-                    copied.append(dest)
-                    n_files += 1
-        except OSError as exc:
-            # Best-effort cleanup of partial copies before re-raising.
-            # Operator sees the import fail; image_root is left as
-            # it was before the import attempt (modulo files that
-            # were already there with the same name -- shutil.copy2
-            # overwrites, and we don't try to undo overwrites since
-            # the originals are gone). The recovery UI surfaces the
-            # error to the operator and offers a retry / different
-            # bundle.
-            for dest in copied:
-                with contextlib.suppress(OSError):
-                    dest.unlink()
-            raise OSError(
-                f"import_bundle: copy failed after {n_files} files "
-                f"({type(exc).__name__}: {exc}); cleaned up {len(copied)} "
-                f"partial copies. image_root left at pre-import state."
-            ) from exc
-    return ImportSummary(n_m, n_files)
+    return ImportSummary(n_m)

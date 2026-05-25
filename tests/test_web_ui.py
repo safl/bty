@@ -591,14 +591,13 @@ def test_ui_backups_lists_existing_bundles(client: TestClient, tmp_path: Path) -
 
     backups_root = tmp_path / "backups"
     bundle = backups_root / "2026-05-23T10-00-00Z"
-    (bundle / "files").mkdir(parents=True)
-    (bundle / "files" / "demo.img.gz").write_bytes(b"\x00" * 1024)
+    bundle.mkdir(parents=True)
     (bundle / "manifest.json").write_text(
         json.dumps(
             {
-                "bty_export_version": 2,
+                "bty_export_version": 3,
                 "exported_at": "2026-05-23T10:00:00+00:00",
-                "exported_by_bty_version": "0.31.0",
+                "exported_by_bty_version": "0.33.2",
                 "machines": [{"mac": "aa:bb:cc:dd:ee:01"}],
             }
         )
@@ -607,7 +606,7 @@ def test_ui_backups_lists_existing_bundles(client: TestClient, tmp_path: Path) -
     _login(client)
     body = client.get("/ui/backups").text
     assert "2026-05-23T10-00-00Z" in body
-    assert "0.31.0" in body
+    assert "0.33.2" in body
     assert "No backups on disk yet" not in body
     # Retention number lands in the schedule summary, regardless of
     # whether the schedule itself is on/off -- it always applies on
@@ -628,9 +627,8 @@ def test_ui_backups_download_streams_valid_tar(client: TestClient, tmp_path: Pat
 
     backups_root = tmp_path / "backups"
     bundle = backups_root / "2026-05-23T10-00-00Z"
-    (bundle / "files").mkdir(parents=True)
-    (bundle / "files" / "demo.img.gz").write_bytes(b"x" * 256)
-    (bundle / "manifest.json").write_text('{"bty_export_version": 2}\n')
+    bundle.mkdir(parents=True)
+    (bundle / "manifest.json").write_text('{"bty_export_version": 3}\n')
 
     _login(client)
     r = client.get("/ui/backups/2026-05-23T10-00-00Z/download")
@@ -639,7 +637,6 @@ def test_ui_backups_download_streams_valid_tar(client: TestClient, tmp_path: Pat
     assert "2026-05-23T10-00-00Z.tar" in r.headers["content-disposition"]
     with tarfile.open(fileobj=io.BytesIO(r.content), mode="r:") as tf:
         assert sorted(tf.getnames()) == [
-            "2026-05-23T10-00-00Z/files/demo.img.gz",
             "2026-05-23T10-00-00Z/manifest.json",
         ]
 
@@ -669,12 +666,11 @@ def test_ui_backups_delete_removes_bundle_and_logs(client: TestClient, tmp_path:
 
     backups_root = tmp_path / "backups"
     bundle = backups_root / "2026-05-23T10-00-00Z"
-    (bundle / "files").mkdir(parents=True)
-    (bundle / "files" / "demo.img.gz").write_bytes(b"x" * 128)
+    bundle.mkdir(parents=True)
     (bundle / "manifest.json").write_text(
         json.dumps(
             {
-                "bty_export_version": 2,
+                "bty_export_version": 3,
                 "machines": [{"mac": "aa:bb:cc:dd:ee:01"}],
             }
         )
@@ -692,7 +688,6 @@ def test_ui_backups_delete_removes_bundle_and_logs(client: TestClient, tmp_path:
     payload = r.json()
     assert payload["backup_id"] == "2026-05-23T10-00-00Z"
     assert payload["machines"] == 1
-    assert payload["files"] == 1
 
     # Bundle is gone from disk + the on-disk table reverts to its
     # empty state. (The backup_id will still appear in the Activity

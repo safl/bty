@@ -18,10 +18,12 @@
 {% block intro %}
 {% from "ui/_intro_box.html" import render as intro_box %}
 {% call intro_box() %}
-    Portable bundles of the operator-owned state (machines, catalog
-    entries, local image files) -- the same shape <code>bty-web
-    export</code> produces. Trigger one now with the button below, or
-    enable a scheduled cadence on the <a
+    Metadata-only bundles of the per-machine hardware identity (MAC +
+    <code>lshw</code> + <code>known_disks</code>) -- the same shape
+    <code>bty-web export</code> produces. Image bytes live in
+    <code>BTY_IMAGE_ROOT</code> and are NOT included; they're either
+    still on disk or re-fetchable from the catalog. Trigger one now
+    with the button below, or enable a scheduled cadence on the <a
     href="/ui/settings#backup-schedule">Settings</a> page. Backups land
     under <code>{{ backups_root }}</code>; retention prunes the oldest.
 {% endcall %}

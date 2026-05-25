@@ -851,7 +851,6 @@ def register_ui_routes(
         return {
             "backup_id": snapshot.backup_id,
             "machines": snapshot.machines,
-            "files": snapshot.files,
             "bytes_on_disk": snapshot.bytes_on_disk,
         }
 

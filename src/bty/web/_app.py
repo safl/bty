@@ -226,7 +226,6 @@ def create_app(
         # owned bundle the ``bty-web export`` CLI does.
         backup_manager.start(
             state_path,
-            resolved_image_root,
             resolved_backups_root,
         )
         # Auto-import: ensure every dir-scan file under

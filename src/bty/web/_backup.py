@@ -1,12 +1,16 @@
 """Scheduled + on-demand backup of the operator-owned state.
 
 A backup is exactly what :func:`bty.web._portability.export_bundle`
-produces -- the operator's machines, catalog, and local image files
-laid out as a directory under :data:`backups_root`. The manager wires
-that primitive into the same per-key worker-pool model
-:class:`_BaseAsyncManager` uses for downloads + hashes + release
-fetches, so the worker indicator + the Backups page (``/ui/backups``)
-treat backups as just another job kind.
+produces -- v0.33.2+: a metadata-only bundle (just
+``manifest.json``) carrying the per-machine hardware identity
+(mac + lshw + known_disks). No image bytes; image files live in
+``BTY_IMAGE_ROOT`` and are either still on disk or re-fetchable
+from the catalog. The bundle lands as a directory under
+:data:`backups_root`. The manager wires this primitive into the
+same per-key worker-pool model :class:`_BaseAsyncManager` uses for
+downloads + hashes + release fetches, so the worker indicator +
+the Backups page (``/ui/backups``) treat backups as just another
+job kind.
 
 Two entry points:
 
@@ -35,10 +39,9 @@ states evict immediately from the UI), with history visible via the
 events log and the on-disk ``backups/`` directory.
 
 Cancel semantics: queued backups cancel cleanly (the job never
-runs). Running backups cannot be aborted mid-export today --
-``shutil.copy2`` inside :func:`export_bundle` doesn't honour a
-cancel callback. A running cancel flips the cancel event but the
-backup completes; the resulting directory is left in place.
+runs). Running backups are effectively un-cancellable because
+the metadata-only export finishes in milliseconds -- the cancel
+event flips while the write is already done.
 """
 
 from __future__ import annotations
@@ -88,7 +91,6 @@ class BackupState:
     started_at: float | None = None
     finished_at: float | None = None
     machines: int = 0
-    files: int = 0
     bytes_written: int = 0
     dest_path: str | None = None  # absolute path of the bundle directory
     trigger: str = "manual"  # one of :data:`BACKUP_TRIGGERS`
@@ -103,7 +105,6 @@ class BackupState:
             "started_at": self.started_at,
             "finished_at": self.finished_at,
             "machines": self.machines,
-            "files": self.files,
             "bytes_written": self.bytes_written,
             "dest_path": self.dest_path,
             "trigger": self.trigger,
@@ -114,10 +115,10 @@ class BackupState:
 class BackupManager(_BaseAsyncManager[BackupState]):
     """Async worker for backup jobs.
 
-    ``start(state_path, image_root, backups_root, bty_version)`` spawns
-    the worker pool, ``enqueue(trigger)`` queues a job (always queues
-    a NEW row -- backups are never idempotent), ``cancel(backup_id)``
-    flips the per-job cancel event.
+    ``start(state_path, backups_root)`` spawns the worker pool,
+    ``enqueue(trigger)`` queues a job (always queues a NEW row --
+    backups are never idempotent), ``cancel(backup_id)`` flips the
+    per-job cancel event.
 
     Unlike the other three managers there is no ``_backfill_from_events``
     here on purpose: the new workers UI renders queued + running only,
@@ -127,23 +128,18 @@ class BackupManager(_BaseAsyncManager[BackupState]):
     def __init__(self, max_parallel: int | None = None) -> None:
         super().__init__(max_parallel or _resolve_max_parallel())
         self._state_path: Path | None = None
-        self._image_root: Path | None = None
         self._backups_root: Path | None = None
 
     def start(
         self,
         state_path: Path,
-        image_root: Path,
         backups_root: Path,
     ) -> None:
-        """Spawn the worker pool. The export writes to
-        ``backups_root / <id>``, reads operator-owned state from
-        ``state_path``, and copies files from ``image_root``. The
-        running ``bty.__version__`` is stamped into the bundle's
-        manifest by ``export_bundle`` -- no separate plumbing
-        needed."""
+        """Spawn the worker pool. The export writes a metadata-only
+        bundle to ``backups_root / <id>``. The running
+        ``bty.__version__`` is stamped into the bundle's manifest by
+        ``export_bundle`` -- no separate plumbing needed."""
         self._state_path = state_path
-        self._image_root = image_root
         self._backups_root = backups_root
         backups_root.mkdir(parents=True, exist_ok=True)
         self._spawn_workers()
@@ -172,10 +168,8 @@ class BackupManager(_BaseAsyncManager[BackupState]):
         """Run a single backup in a worker thread, write the terminal
         outcome back into ``state``, prune old backups + log events."""
         assert self._state_path is not None
-        assert self._image_root is not None
         assert self._backups_root is not None
         state_path = self._state_path
-        image_root = self._image_root
         backups_root = self._backups_root
         backup_id = state.backup_id
         dest = backups_root / backup_id
@@ -186,21 +180,18 @@ class BackupManager(_BaseAsyncManager[BackupState]):
             summary = await asyncio.to_thread(
                 _portability.export_bundle,
                 state_path,
-                image_root,
                 dest,
                 now=now_iso,
             )
             final_status = "completed"
             error: str | None = None
             machines = summary.machines
-            files = summary.files
             bytes_written = _dir_size(dest)
         except Exception as exc:
             log.exception("backup %s failed", backup_id)
             final_status = "failed"
             error = f"{type(exc).__name__}: {exc}"
             machines = 0
-            files = 0
             bytes_written = 0
             # Best-effort cleanup of a partial bundle; never let cleanup
             # masking the original error.
@@ -218,7 +209,6 @@ class BackupManager(_BaseAsyncManager[BackupState]):
         async with self._lock:
             state.error = error
             state.machines = machines
-            state.files = files
             state.bytes_written = bytes_written
 
         # Log + prune happen outside the lock so they don't block other
@@ -231,8 +221,7 @@ class BackupManager(_BaseAsyncManager[BackupState]):
                 kind="backup.created",
                 state=state,
                 summary_text=(
-                    f"backup {backup_id!r} created ({machines} machines, "
-                    f"{files} files, {bytes_written} bytes)"
+                    f"backup {backup_id!r} created ({machines} machines, {bytes_written} bytes)"
                 ),
             )
             # Update last_run_at only for scheduler-triggered backups;
@@ -343,15 +332,15 @@ class BackupOnDisk:
     """A bundle the BackupManager (or an offline ``bty-web export``) wrote
     under :data:`backups_root`.
 
-    Manifest fields read from the bundle's ``manifest.json``; counts of
-    machines / catalog entries / image files come from the manifest +
-    a directory scan. ``bytes_on_disk`` is the sum of all files in the
-    bundle (manifest + images), used to surface "this is the big one"
-    to the operator at a glance.
+    Manifest fields read from the bundle's ``manifest.json``; the
+    machine count comes from the manifest. ``bytes_on_disk`` is the
+    size of the bundle directory (just ``manifest.json`` in v3),
+    surfaced so the operator can sanity-check that "backup of 12 KiB"
+    actually looks like a metadata bundle.
 
     A bundle whose ``manifest.json`` is missing or malformed still
     appears in the list (``exported_at`` / ``bty_version`` are
-    ``None``, counts are 0) so the operator can see it and clean it
+    ``None``, machines is 0) so the operator can see it and clean it
     up rather than silently hiding it.
     """
 
@@ -360,7 +349,6 @@ class BackupOnDisk:
     exported_at: str | None
     bty_version: str | None
     machines: int
-    files: int
     bytes_on_disk: int
 
 
@@ -414,15 +402,12 @@ def _read_bundle(path: Path) -> BackupOnDisk:
             # Unparseable manifest -- the bundle still lists with
             # blank metadata so the operator can find + delete it.
             pass
-    files_dir = path / "files"
-    files = sum(1 for f in files_dir.iterdir() if f.is_file()) if files_dir.is_dir() else 0
     return BackupOnDisk(
         backup_id=path.name,
         path=path,
         exported_at=exported_at,
         bty_version=bty_version,
         machines=machines,
-        files=files,
         bytes_on_disk=_dir_size(path),
     )
 
@@ -467,7 +452,6 @@ def delete_bundle(state_path: Path, backups_root: Path, backup_id: str) -> Backu
             summary=(
                 f"backup {backup_id!r} deleted by operator "
                 f"({snapshot.machines} machines, "
-                f"{snapshot.files} files, "
                 f"{snapshot.bytes_on_disk} bytes)"
             ),
             subject_kind="backup",
@@ -476,7 +460,6 @@ def delete_bundle(state_path: Path, backups_root: Path, backup_id: str) -> Backu
             details={
                 "backup_id": backup_id,
                 "machines": snapshot.machines,
-                "files": snapshot.files,
                 "bytes_on_disk": snapshot.bytes_on_disk,
             },
         )
@@ -566,7 +549,6 @@ def _log_terminal(
                 "trigger": state.trigger,
                 "dest_path": state.dest_path,
                 "machines": state.machines,
-                "files": state.files,
                 "bytes_written": state.bytes_written,
                 "error": state.error,
             },

@@ -34,16 +34,14 @@ def _run_portability(args: argparse.Namespace) -> None:
     from bty.web._db import default_state_path
 
     state_path = default_state_path()
-    image_root_env = os.environ.get("BTY_IMAGE_ROOT")
-    image_root = Path(image_root_env) if image_root_env else state_path.parent / "images"
     now = datetime.now(UTC).isoformat()
 
     if args.cmd == "export":
-        exp = _portability.export_bundle(state_path, image_root, Path(args.dest), now=now)
-        print(f"bty-web export -> {exp.dest}: {exp.machines} machines, {exp.files} files")
+        exp = _portability.export_bundle(state_path, Path(args.dest), now=now)
+        print(f"bty-web export -> {exp.dest}: {exp.machines} machines")
     else:  # import
-        imp = _portability.import_bundle(state_path, image_root, Path(args.src), now=now)
-        print(f"bty-web import: {imp.machines} machines (as bty-inventory), {imp.files} files")
+        imp = _portability.import_bundle(state_path, Path(args.src), now=now)
+        print(f"bty-web import: {imp.machines} machines (as bty-inventory)")
         for line in imp.skipped:
             print(f"  skipped: {line}", file=sys.stderr)
 

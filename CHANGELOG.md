@@ -9,6 +9,62 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.33.2] - 2026-05-25
+
+**Backups are metadata-only. No image bytes.** v0.31.0 through
+v0.33.1 shipped full image_root in every backup bundle, which
+produced multi-GiB "backups" dominated by catalog cache files the
+appliance can just re-fetch. The v3 bundle format is just
+`manifest.json` with the per-machine hardware identity (mac +
+`lshw` + `known_disks`). A backup now fits in dozens of KiB and
+finishes in milliseconds.
+
+The data model the user named: backup = mac + lshw + lsblk. Import
+= add the machines with that hardware attached. Image files carry
+their `bty_image_ref` prefix in the filename
+(`catalog-<ref:12>-<slug>.<ext>`); they associate with catalog
+entries automatically when both exist on the same appliance (v0.33.1
+fix). No image bytes ever travel in a backup.
+
+### Changed
+
+- **`export_bundle(state_path, dest, *, now)`** -- dropped the
+  `image_root` parameter; the bundle no longer copies image
+  bytes. Returns `ExportSummary(machines, dest)`; the `files`
+  count is gone.
+- **`import_bundle(state_path, src, *, now)`** -- same drop;
+  returns `ImportSummary(machines)`. Half-import rollback is gone
+  because there's nothing to roll back -- the only mutation is
+  the `INSERT OR REPLACE` over the `machines` table.
+- **`_EXPORT_VERSION = 3`**. v1 (pre-v0.31.0) and v2 (v0.31.0..
+  v0.33.1, with image bytes) both refuse on import. Pre-1.0
+  policy: regenerate on the source release.
+- **`BackupManager.start(state_path, backups_root)`** -- dropped
+  the `image_root` parameter; backups no longer touch image_root.
+- **`BackupState` / `BackupOnDisk`** -- dropped the `files`
+  field. The Backups page shows machine count + bytes-on-disk
+  (bundle directory size) only.
+- **`bty-web export` / `bty-web import` CLI** -- same arg drop;
+  the help text reflects metadata-only semantics.
+- **`/ui/backups` intro copy** -- now says "metadata-only ...
+  image bytes live in BTY_IMAGE_ROOT and are NOT included".
+
+### Operator impact
+
+- A scheduled or "Back up now" run produces a single-file bundle
+  whose `manifest.json` lists the per-machine hardware identity.
+  Tens of KiB even with hundreds of machines.
+- Existing v2 bundles on disk still list on `/ui/backups` (with
+  blank metadata if their manifest is unparseable), but
+  `bty-web import` against them returns `BundleVersionMismatch`.
+  Regenerate on the source release if you need a v3 bundle.
+- After a fresh-appliance reflash + `bty-web import <bundle>`,
+  the machines re-appear with `boot_mode=bty-inventory` and just
+  their hw_lshw + known_disks. The operator re-binds image +
+  policy. If the image-store disk survived the reflash, the
+  `catalog-<ref:12>-<slug>.<ext>` files associate with their
+  catalog entries automatically.
+
 ## [0.33.1] - 2026-05-25
 
 **Fix duplicate /ui/images rows when a catalog entry is cached.**
