@@ -341,6 +341,55 @@ def test_merge_with_catalog_manifest_only_uses_image_root(tmp_path: Path) -> Non
     assert merged2[0].cached is False
 
 
+def test_merge_with_catalog_skips_catalog_cache_files_in_dir_scan(tmp_path: Path) -> None:
+    """REGRESSION (v0.33.0 -> v0.33.1): a ``catalog-<ref:12>-<slug>.<ext>``
+    file under the image_root is the cache form of an upstream catalog
+    entry; the merge must NOT emit a separate UnifiedImage for it (with
+    src=file://catalog-...) alongside the real catalog entry. Without
+    this skip the same image surfaced twice on /ui/images -- once with
+    the upstream name, once with the raw cache filename.
+
+    Surfaced visually: two rows ("nosi fedora-sysdev (x86_64, rolling)"
+    and "catalog-e3a4d87079ad-nosi-fedora-sysdev-x86_64-rolling.img.gz")
+    listing the same underlying file.
+    """
+    from types import SimpleNamespace
+
+    from bty.catalog import image_ref_for_src, local_filename_for
+
+    image_root = tmp_path / "imgs"
+    image_root.mkdir()
+    upstream_src = "oras://ghcr.io/safl/nosi/fedora-sysdev:latest"
+    name = "nosi fedora-sysdev (x86_64, rolling)"
+    fmt = "img.gz"
+    ref = image_ref_for_src(upstream_src)
+    cache_filename = local_filename_for(ref, name, fmt)
+    (image_root / cache_filename).write_bytes(b"cached blob")
+
+    manifest = SimpleNamespace(
+        sha256=None,
+        name=name,
+        src=upstream_src,
+        format=fmt,
+        size_bytes=11,
+    )
+    merged = images.merge_with_catalog(image_root, [manifest])
+    # Exactly one row: the catalog entry, with cached=True (the
+    # cache file is recognised) and the human upstream name.
+    assert len(merged) == 1, (
+        f"expected one merged row (catalog cache file folded into "
+        f"its catalog entry), got {[u.names for u in merged]!r}"
+    )
+    assert merged[0].names == (name,)
+    assert merged[0].cached is True
+    # And critically: no source carrying the raw cache filename as
+    # a file:// src -- that's the v0.33.0 duplicate-row shape.
+    src_locations = {s.location for s in merged[0].sources}
+    assert all("catalog-" not in loc.rsplit("/", 1)[-1] for loc in src_locations), (
+        f"merged row must not list file://catalog-... as a source: {src_locations!r}"
+    )
+
+
 def test_ensure_sha256_computes_and_writes_sidecar(tmp_path: Path) -> None:
     """First call hashes the file + writes the sidecar; second call
     is O(1) because the sidecar is cached."""

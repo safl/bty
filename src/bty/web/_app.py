@@ -334,6 +334,19 @@ def create_app(
                     # that got remounted mid-scan -- skip rather than
                     # auto-import.
                     continue
+                # v0.33.1: catalog-fetched cache files
+                # (``catalog-<ref:12>-<slug>.<ext>``) are owned by
+                # an existing catalog entry whose src is the
+                # upstream URL. Auto-importing them as separate
+                # entries (with src=``file://catalog-...``) creates
+                # a duplicate row on /ui/images alongside the real
+                # catalog entry, with the raw filename as its
+                # "name" -- the bug visible in the operator
+                # screenshot. Skip them; pass 2 of merge_with_catalog
+                # picks them up via its cache-hit lookup against the
+                # already-present catalog row.
+                if _catalog.is_catalog_cache_filename(img.path.name):
+                    continue
                 src = "file://" + rel.as_posix()
                 try:
                     ref = _catalog.image_ref_for_src(src)

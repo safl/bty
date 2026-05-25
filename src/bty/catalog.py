@@ -55,6 +55,22 @@ from bty import images as _images
 # prefix) from catalog-cached ones (with the prefix + URL-derived
 # hash so two distinct URLs never collide on disk).
 _CATALOG_PREFIX = "catalog-"
+
+
+def is_catalog_cache_filename(name: str) -> bool:
+    """True iff ``name`` is the basename of a catalog-fetched cache
+    file (``catalog-<ref:12>-<slug>.<ext>``). Used by the dir-scan
+    paths (``images.merge_with_catalog`` pass 1, the
+    ``_auto_import_dir_scan_rows`` startup pass) to recognise cache
+    files as belonging to an existing catalog entry rather than as
+    standalone operator-typed images. Without this gate the same
+    image surfaces twice on ``/ui/images`` -- once as the catalog
+    entry, once as a synthetic ``file://`` entry derived from its
+    cache filename.
+    """
+    return name.startswith(_CATALOG_PREFIX)
+
+
 # Length of the bty_image_ref segment in catalog filenames. 12 hex
 # chars is 48 bits, collision-free at any plausible homelab catalog
 # size; long enough to be useful for human disambiguation, short

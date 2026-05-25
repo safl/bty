@@ -426,7 +426,15 @@ def merge_with_catalog(
     # Pass 1: directory scan. Each file becomes one entry; its
     # provenance ref is computed from the ``file://<rel-path>``
     # form so it matches whatever the auto-import wrote into
-    # ``catalog_entries``.
+    # ``catalog_entries``. Catalog-cache files (``catalog-<ref:12>-
+    # <slug>.<ext>``) are skipped here -- they're owned by an
+    # existing catalog entry whose src is the upstream URL, and
+    # pass 2 picks them up via its cache-hit lookup. Listing them
+    # here as standalone images creates the v0.33.0 duplicate-row
+    # bug where the same image appears twice on /ui/images (once
+    # with the upstream name, once with the raw cache filename).
+    from bty.catalog import is_catalog_cache_filename
+
     for img in list_images(image_root):
         try:
             rel = img.path.relative_to(image_root)
@@ -434,6 +442,8 @@ def merge_with_catalog(
             # Symlink escaped the root, or scan ran against a
             # remounted-mid-stream root. Skip rather than mint a
             # ref against an unrooted absolute path.
+            continue
+        if is_catalog_cache_filename(img.path.name):
             continue
         src = "file://" + rel.as_posix()
         try:

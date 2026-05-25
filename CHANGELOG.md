@@ -9,6 +9,45 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.33.1] - 2026-05-25
+
+**Fix duplicate /ui/images rows when a catalog entry is cached.**
+v0.33.0 (and the v0.31.0+ catalog-prefix rollout before it)
+auto-imported every file under `BTY_IMAGE_ROOT` as a synthetic
+`catalog_entries` row with `src = file://<name>`. For files in
+the `catalog-<ref:12>-<slug>.<ext>` cache form, that minted a
+second row whose `bty_image_ref` didn't match the upstream
+catalog entry's ref, so `/ui/images` rendered both the upstream
+entry ("nosi fedora-sysdev (x86_64, rolling)") and a synthetic
+twin showing the raw filename as Name. The synthetic row also
+carried a `file:` source pointing at the same on-disk file as
+the upstream entry's local source -- a give-away that the merge
+was treating one image as two.
+
+### Fixed
+
+- **`bty.images.merge_with_catalog` pass 1** skips
+  catalog-prefixed filenames; pass 2 picks them up via the
+  cache-hit lookup against the real catalog entry.
+- **`_app._auto_import_dir_scan_rows`** skips catalog-prefixed
+  filenames; the upstream catalog entry already owns them.
+
+### Added
+
+- **`bty.catalog.is_catalog_cache_filename(name)`** predicate -- the
+  one place the dir-scan paths consult to recognise cache files.
+- **Two regression tests** (`test_merge_with_catalog_skips_catalog_
+  cache_files_in_dir_scan`, `test_auto_import_skips_catalog_cache_
+  files`) covering the visible-screenshot shape end-to-end.
+
+### Operator impact
+
+After upgrading + restarting bty-web, `/ui/images` shows one row
+per logical image again. Existing duplicate `catalog_entries`
+rows from a v0.33.0 DB clear on the next `state.db` rotation
+(or via `DELETE FROM catalog_entries WHERE src LIKE 'file://catalog-%'`
+if you want to drop them in place).
+
 ## [0.33.0] - 2026-05-25
 
 **Schema mismatches now auto-rotate; the recovery wizard is gone.**

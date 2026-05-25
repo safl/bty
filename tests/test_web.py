@@ -843,6 +843,64 @@ def test_auto_import_inserts_catalog_entries_row_per_dir_scan_file(
         os.environ.pop("BTY_STATE_DIR", None)
 
 
+def test_auto_import_skips_catalog_cache_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """REGRESSION (v0.33.0 -> v0.33.1): the auto-import sweep must not
+    create synthetic ``catalog_entries`` rows for ``catalog-<ref:12>-
+    <slug>.<ext>`` cache files. Those files are owned by an upstream
+    catalog entry; auto-importing them with ``src=file://catalog-...``
+    creates a second row whose ``bty_image_ref`` doesn't match the
+    upstream entry's ref, and /ui/images then renders both rows for
+    the same logical image."""
+    import os
+
+    image_root = tmp_path / "images"
+    image_root.mkdir()
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+
+    # Drop two files: one operator-typed (should be auto-imported)
+    # and one catalog-prefixed (must be skipped).
+    (image_root / "operator.img").write_bytes(b"operator-typed")
+    (image_root / "catalog-deadbeef0123-nosi-fedora-rolling.img.gz").write_bytes(
+        b"a catalog-cache form belonging to some upstream entry"
+    )
+
+    state = state_dir / "state.db"
+    os.environ["BTY_STATE_DIR"] = str(state_dir)
+    try:
+        app = create_app(
+            state_path=state,
+            service_user=TEST_SERVICE_USER,
+            secret_key=TEST_SECRET_KEY,
+            image_root=image_root,
+        )
+        import pamela
+
+        monkeypatch.setattr(pamela, "authenticate", lambda *a, **kw: True)
+        with TestClient(app) as client:
+            r = client.post(
+                "/ui/login",
+                data={"password": "pytest-password"},
+                follow_redirects=False,
+            )
+            cookie = r.cookies.get("bty-token")
+            assert cookie is not None
+            auth = {"bty-token": cookie}
+
+            rows = client.get("/catalog/entries", cookies=auth).json()
+            srcs = {r["src"] for r in rows}
+            assert "file://operator.img" in srcs, "operator-typed file must still auto-import"
+            catalog_srcs = [s for s in srcs if "catalog-" in s]
+            assert not catalog_srcs, (
+                f"catalog cache files must not auto-import as their own "
+                f"catalog_entries row; found {catalog_srcs!r}"
+            )
+    finally:
+        os.environ.pop("BTY_STATE_DIR", None)
+
+
 def test_list_images_returns_files_under_image_root(
     tmp_path: Path,
 ) -> None:
