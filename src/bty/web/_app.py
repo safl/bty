@@ -104,6 +104,15 @@ def create_app(
     """
     resolved_image_root: Path = image_root or images.default_image_root()
     resolved_boot_root: Path = boot_root or (state_path.parent / "boot")
+    # Scheduled + on-demand backups land under ``backups/`` next to
+    # state.db so they survive the same migrate-the-state-dir flow as
+    # the image cache. Operators wanting them off the OS disk override
+    # via ``BTY_BACKUP_DIR``. Resolved here (BEFORE the recovery-mode
+    # branch) so the wizard can list the same directory for its
+    # backup-picker.
+    resolved_backups_root: Path = Path(
+        os.environ.get("BTY_BACKUP_DIR") or (state_path.parent / "backups")
+    )
 
     # Pre-startup DB probe. v0.32.0+ recovery contract: if state.db's
     # ``bty_version`` marker disagrees with the running release (or
@@ -119,9 +128,6 @@ def create_app(
 
     db_check = _db.check_db(state_path)
     if db_check.needs_recovery:
-        resolved_backups_root: Path = Path(
-            os.environ.get("BTY_BACKUP_DIR") or (state_path.parent / "backups")
-        )
         return _recovery.build_recovery_app(
             state_path=state_path,
             image_root=resolved_image_root,
@@ -131,13 +137,6 @@ def create_app(
             db_check=db_check,
         )
 
-    # Scheduled + on-demand backups land under ``backups/`` next to
-    # state.db so they survive the same migrate-the-state-dir flow as
-    # the image cache. Operators wanting them off the OS disk override
-    # via ``BTY_BACKUP_DIR``.
-    resolved_backups_root: Path = Path(
-        os.environ.get("BTY_BACKUP_DIR") or (state_path.parent / "backups")
-    )
     event_bus = MachineEventBus()
 
     # Optional catalog file + DownloadManager. If no catalog is

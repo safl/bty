@@ -37,11 +37,14 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, closing
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
 
 import bty
+
+if TYPE_CHECKING:
+    from fastapi import FastAPI
 
 from . import _db, _portability
 
@@ -171,7 +174,7 @@ def build_recovery_app(
     secret_key: str,
     service_user: str,
     db_check: _db.DbCheckResult,
-) -> Any:
+) -> FastAPI:
     """Return a minimal FastAPI app for recovery mode.
 
     Routes (every non-recovery route returns 503):
@@ -406,11 +409,11 @@ def build_recovery_app(
         return HTMLResponse(body, status_code=status.HTTP_503_SERVICE_UNAVAILABLE)
 
     # Stash the check result on app state so tests can introspect.
-    app.state.db_check = db_check  # type: ignore[attr-defined]
-    app.state.state_path = state_path  # type: ignore[attr-defined]
-    app.state.backups_root = backups_root  # type: ignore[attr-defined]
-    app.state.image_root = image_root  # type: ignore[attr-defined]
-    app.state.recovery_mode = True  # type: ignore[attr-defined]
+    app.state.db_check = db_check
+    app.state.state_path = state_path
+    app.state.backups_root = backups_root
+    app.state.image_root = image_root
+    app.state.recovery_mode = True
 
     return app
 
