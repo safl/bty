@@ -448,16 +448,21 @@ def create_app(
 
     jinja.filters["linkify"] = _linkify
 
-    def _boot_state(m: object) -> str:
+    def _boot_state(m: Any) -> str:
         """Lifecycle state for a machine -- the 'where in the cycle' half
         of the mode/state model, derived from boot_mode + the
         ``saw_flasher_boot`` bit (no stored state column). Empty for the
         non-alternating modes (ipxe-exit, bty-tui). The mode is the
         operator's intent; this is the transient position within it.
+
+        ``m`` is ``Any`` because Jinja can pass us a ``sqlite3.Row``,
+        a plain dict, or a Pydantic dataclass depending on the call
+        site -- they all index by string key. The try/except below
+        catches the not-a-mapping case at runtime.
         """
         try:
-            mode = m["boot_mode"]  # type: ignore[index]
-            armed = bool(m["saw_flasher_boot"])  # type: ignore[index]
+            mode = m["boot_mode"]
+            armed = bool(m["saw_flasher_boot"])
         except (KeyError, TypeError, IndexError):
             return ""
         if mode == "bty-flash-once":
