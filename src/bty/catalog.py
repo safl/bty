@@ -628,7 +628,7 @@ def is_cached(entry: CatalogEntry, image_root: Path) -> bool:
 
 
 ProgressCallback: TypeAlias = Callable[[int, "int | None"], None]
-"""Signature: ``progress(bytes_downloaded, total_bytes_or_None)``.
+"""Signature: ``progress(bytes_done, total_bytes_or_None)``.
 Called once per chunk written. ``total_bytes`` is the upstream
 ``Content-Length`` if the server sent one (most do), else ``None``."""
 

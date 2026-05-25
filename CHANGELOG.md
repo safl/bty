@@ -9,6 +9,58 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.33.4] - 2026-05-25
+
+Two more rounds following Round 1+2 of v0.33.3. Different angles:
+operator-facing doc truth, and cross-manager consistency.
+
+### Round 3: doc-truth fixes
+
+A survey of operator-visible text caught two drifts from the
+v0.33.x reshape:
+
+- **`docs/src/operations.md`** -- the storage-classification table
+  used to claim the `bty-web export` bundle "covers exactly" the
+  precious paths (state.db + images/). It now distinguishes the
+  two precious classes: state.db carries via the v3 metadata
+  bundle; image bytes do NOT travel in the bundle and move via
+  `rsync` / disk-copy / catalog re-fetch.
+- **`docs/src/reference.md`** -- the "State export / import
+  format" section was a stub ("populated alongside the feature").
+  Now documents v3: shape of `inventory.json`, version semantics,
+  what import restores.
+
+### Round 4: unify byte counters to `bytes_done`
+
+Four manager classes (Download / Hash / ReleaseFetch / Backup)
+each tracked progress under a different field name:
+`bytes_downloaded` / `bytes_hashed` / `bytes_done` /
+`bytes_written`. The `downloads.html` template already carried a
+shim normalising `bytes_downloaded -> bytes_done` so the single
+progress-bar JS could render both -- the giveaway that the
+inconsistency was a known papercut.
+
+All four now expose `bytes_done`. JSON API output for `/workers/*`
+and `/catalog/downloads` / `/catalog/hashes` / `/workers/backups`
+endpoints carry the same field name. Progress-callback type-alias
+docstrings in `bty.catalog` + `bty.images` updated to the new
+parameter name.
+
+- **Removed**: the JS normalisation shim in
+  `_templates/ui/downloads.html` and the parallel pseudo-object
+  trick in `_templates/ui/hashing.html`.
+- **Documented**: `BackupManager._run_one` now carries an inline
+  comment explaining why -- unlike its three siblings -- it does
+  NOT poll `state._cancel` in the worker loop (metadata-only
+  export finishes in milliseconds; the Protocol shape still
+  requires the field).
+
+### Operator impact
+
+- **Breaking** (pre-1.0 OK): if you scrape the bty-web JSON API,
+  the `bytes_downloaded` / `bytes_hashed` / `bytes_written` keys
+  are gone. Read `bytes_done` instead.
+
 ## [0.33.3] - 2026-05-25
 
 Two simplification rounds following v0.33.2's metadata-only backup

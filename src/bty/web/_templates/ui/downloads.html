@@ -136,20 +136,6 @@
         return j && (j.status === "queued" || j.status === "running");
     }
 
-    // The two managers use different field names for the
-    // bytes-so-far counter: catalog DownloadState exposes
-    // ``bytes_downloaded``, ReleaseArtifactState exposes
-    // ``bytes_done``. Normalise into ``bytes_done`` here so the
-    // single ``progressBar`` + bytes formatter doesn't care which
-    // source the row came from. Without this, catalog downloads
-    // show 0% / 0 B regardless of actual progress (the symptom
-    // that drove this fix).
-    function normalize(d) {
-        if (d.bytes_done == null && d.bytes_downloaded != null) {
-            d.bytes_done = d.bytes_downloaded;
-        }
-        return d;
-    }
     function renderDownloads(catalog, releases) {
         var tbody = document.querySelector(".bty-workers-downloads-tbody");
         if (!tbody) return;
@@ -160,7 +146,7 @@
                 label: esc(j.name),
                 kind: "catalog",
                 key: j.name,
-                d: normalize(j),
+                d: j,
             });
         });
         (releases || []).forEach(function (rf) {
@@ -171,7 +157,7 @@
                            esc(a.name) + '</small>',
                     kind: "release",
                     key: rf.tag,
-                    d: normalize(a),
+                    d: a,
                 });
             });
         });

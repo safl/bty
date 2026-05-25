@@ -70,7 +70,7 @@ def test_enqueue_already_hashed_shortcut(tmp_path: Path) -> None:
             state = await mgr.enqueue("demo.img")
             assert state.status == "completed"
             assert state.sha256 == sha
-            assert state.bytes_hashed == len(payload)
+            assert state.bytes_done == len(payload)
             assert state.bytes_total == len(payload)
         finally:
             await mgr.stop()
@@ -203,7 +203,7 @@ def test_hash_manager_backfills_from_events(tmp_path: Path) -> None:
             by_name = {s.name: s for s in states}
             assert by_name["demo.img.zst"].status == "completed"
             assert by_name["demo.img.zst"].sha256 == "c" * 64
-            assert by_name["demo.img.zst"].bytes_hashed == 1234
+            assert by_name["demo.img.zst"].bytes_done == 1234
             assert by_name["broken.img.gz"].status == "failed"
             assert "disk on fire" in (by_name["broken.img.gz"].error or "")
         finally:

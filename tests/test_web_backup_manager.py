@@ -72,7 +72,7 @@ def test_enqueue_runs_to_completion(tmp_path: Path) -> None:
             states = await mgr.list()
             assert len(states) == 1
             assert states[0].status == "completed", states[0].error
-            assert states[0].bytes_written > 0
+            assert states[0].bytes_done > 0
             assert state.dest_path is not None
             assert (Path(state.dest_path) / "inventory.json").is_file()
             # v0.33.2: metadata-only bundles. No files/ subdir.

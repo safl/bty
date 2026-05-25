@@ -90,7 +90,7 @@ class BackupState:
     started_at: float | None = None
     finished_at: float | None = None
     machines: int = 0
-    bytes_written: int = 0
+    bytes_done: int = 0
     dest_path: str | None = None  # absolute path of the bundle directory
     trigger: str = "manual"  # one of :data:`BACKUP_TRIGGERS`
     error: str | None = None
@@ -104,7 +104,7 @@ class BackupState:
             "started_at": self.started_at,
             "finished_at": self.finished_at,
             "machines": self.machines,
-            "bytes_written": self.bytes_written,
+            "bytes_done": self.bytes_done,
             "dest_path": self.dest_path,
             "trigger": self.trigger,
             "error": self.error,
@@ -165,7 +165,17 @@ class BackupManager(_BaseAsyncManager[BackupState]):
 
     async def _run_one(self, state: BackupState) -> None:
         """Run a single backup in a worker thread, write the terminal
-        outcome back into ``state``, prune old backups + log events."""
+        outcome back into ``state``, prune old backups + log events.
+
+        Unlike DownloadManager / HashManager / ReleaseFetchManager,
+        this method does NOT poll ``state._cancel`` in the worker
+        loop. A v3 metadata-only export is a single ``json.dumps`` +
+        write, finishing in milliseconds; there is no window where a
+        cancel signal could land between "started" and "completed".
+        The ``_cancel`` field still lives on the dataclass because the
+        ``_BaseAsyncManager`` Protocol requires it and the queued-
+        backup cancel path (job dropped before it runs) sets it.
+        """
         assert self._state_path is not None
         assert self._backups_root is not None
         state_path = self._state_path
@@ -185,13 +195,13 @@ class BackupManager(_BaseAsyncManager[BackupState]):
             final_status = "completed"
             error: str | None = None
             machines = summary.machines
-            bytes_written = _bundle_size(dest)
+            bytes_done = _bundle_size(dest)
         except Exception as exc:
             log.exception("backup %s failed", backup_id)
             final_status = "failed"
             error = f"{type(exc).__name__}: {exc}"
             machines = 0
-            bytes_written = 0
+            bytes_done = 0
             # Best-effort cleanup of a partial bundle; never let cleanup
             # masking the original error.
             with _suppress_oserror():
@@ -208,7 +218,7 @@ class BackupManager(_BaseAsyncManager[BackupState]):
         async with self._lock:
             state.error = error
             state.machines = machines
-            state.bytes_written = bytes_written
+            state.bytes_done = bytes_done
 
         # Log + prune happen outside the lock so they don't block other
         # operations against the manager. Both run before the status flip
@@ -220,7 +230,7 @@ class BackupManager(_BaseAsyncManager[BackupState]):
                 kind="backup.created",
                 state=state,
                 summary_text=(
-                    f"backup {backup_id!r} created ({machines} machines, {bytes_written} bytes)"
+                    f"backup {backup_id!r} created ({machines} machines, {bytes_done} bytes)"
                 ),
             )
             # Update last_run_at only for scheduler-triggered backups;
@@ -485,7 +495,7 @@ def _log_terminal(
                 "trigger": state.trigger,
                 "dest_path": state.dest_path,
                 "machines": state.machines,
-                "bytes_written": state.bytes_written,
+                "bytes_done": state.bytes_done,
                 "error": state.error,
             },
         )

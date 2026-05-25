@@ -507,7 +507,7 @@ class HashCancelled(Exception):
 
 
 HashProgressCallback: TypeAlias = Callable[[int, int], None]
-"""Signature: ``progress(bytes_hashed, total_bytes)``. Called once
+"""Signature: ``progress(bytes_done, total_bytes)``. Called once
 per chunk processed; ``total_bytes`` is the file's pre-hash size
 (``Path.stat().st_size``)."""
 

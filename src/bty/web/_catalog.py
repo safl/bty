@@ -64,7 +64,7 @@ class DownloadState:
     """Live state of a single catalog fetch.
 
     Mutable on purpose -- the worker updates ``status`` /
-    ``bytes_downloaded`` / ``bytes_total`` / timestamps as the
+    ``bytes_done`` / ``bytes_total`` / timestamps as the
     download proceeds, and the API serialises the current snapshot
     for ``GET /catalog/downloads``.
     """
@@ -73,7 +73,7 @@ class DownloadState:
     sha256: str | None
     src: str
     status: str = "queued"  # queued | running | completed | cancelled | failed
-    bytes_downloaded: int = 0
+    bytes_done: int = 0
     bytes_total: int | None = None
     started_at: float | None = None
     finished_at: float | None = None
@@ -92,7 +92,7 @@ class DownloadState:
             "sha256": self.sha256,
             "src": self.src,
             "status": self.status,
-            "bytes_downloaded": self.bytes_downloaded,
+            "bytes_done": self.bytes_done,
             "bytes_total": self.bytes_total,
             "started_at": self.started_at,
             "finished_at": self.finished_at,
@@ -233,7 +233,7 @@ class DownloadManager(_BaseAsyncManager[DownloadState]):
                 sha256=sha,
                 src=src,
                 status="completed" if ev.kind == "catalog.cache.populated" else "failed",
-                bytes_downloaded=size,
+                bytes_done=size,
                 bytes_total=size or None,
                 started_at=started,
                 finished_at=started,
@@ -281,7 +281,7 @@ class DownloadManager(_BaseAsyncManager[DownloadState]):
             if _catalog.is_cached(entry, self._image_root):
                 size = entry.cached_path(self._image_root).stat().st_size
                 state.status = "completed"
-                state.bytes_downloaded = size
+                state.bytes_done = size
                 state.bytes_total = size
                 state.started_at = state.finished_at = time.time()
                 self._states[name] = state
@@ -325,7 +325,7 @@ class DownloadManager(_BaseAsyncManager[DownloadState]):
             return
 
         def _progress(downloaded: int, total: int | None) -> None:
-            state.bytes_downloaded = downloaded
+            state.bytes_done = downloaded
             if total is not None:
                 state.bytes_total = total
             # Throttled SSE progress event so the Downloads page's
@@ -415,7 +415,7 @@ class DownloadManager(_BaseAsyncManager[DownloadState]):
                             "name": state.name,
                             "src": entry.src,
                             "disk_image_sha": computed_sha,
-                            "size_bytes": state.bytes_total or state.bytes_downloaded,
+                            "size_bytes": state.bytes_total or state.bytes_done,
                         },
                     )
                     conn.commit()

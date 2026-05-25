@@ -38,11 +38,26 @@ into two classes:
 | `boot/` | ephemeral | netboot artifacts -- **version-coupled**; refetch on a bty version bump |
 | `session-secret` | regenerable | cookie key |
 
-Precious = carry across a migration / back up (the `bty-web export`
-bundle covers exactly these). Ephemeral = safe to lose, re-created on
-demand. `boot/` is the subtle one: it lives on the writable volume (so a
-read-only OS is possible) but is re-fetched when it no longer matches the
-running bty-web version, rather than preserved as precious.
+Precious = carry across a migration / back up. The split between the
+two precious classes matters because they migrate differently:
+
+- `state.db` carries machine **bindings** + audit log + settings;
+  v0.33.0+ auto-rotates it on a version mismatch. The `bty-web export`
+  bundle (v3, metadata-only) carries the per-machine **hardware
+  identity** (mac + hw_lshw + known_disks) so a re-imported machine
+  shows up pre-fingerprinted; bindings reset and the operator re-binds.
+- `images/` carries the **bytes**. The export bundle does NOT include
+  these (a single appliance can hold tens of GiB; daily backups would
+  thrash). Move them by `rsync`-ing the directory, copying the
+  image-store disk, or re-fetching from the catalog on the new
+  appliance. The `catalog-<ref:12>-<slug>.<ext>` naming convention
+  associates cached files with their catalog entries by content-hash
+  prefix, so a re-imported `images/` re-wires automatically.
+
+Ephemeral = safe to lose, re-created on demand. `boot/` is the subtle
+one: it lives on the writable volume (so a read-only OS is possible)
+but is re-fetched when it no longer matches the running bty-web
+version, rather than preserved as precious.
 
 **OS-level holdouts** -- what still writes outside `/var/lib/bty` and so
 must be handled before the rootfs can go `ro`:

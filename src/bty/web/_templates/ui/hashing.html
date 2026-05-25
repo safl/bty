@@ -86,9 +86,7 @@
             return;
         }
         tbody.innerHTML = rows.map(function (d) {
-            var pseudo = { status: d.status, bytes_done: d.bytes_hashed || 0,
-                           bytes_total: d.bytes_total || null };
-            var bytes = fmtBytes(d.bytes_hashed || 0);
+            var bytes = fmtBytes(d.bytes_done || 0);
             if (d.bytes_total) bytes += " / " + fmtBytes(d.bytes_total);
             var cancel = '<button type="button" class="btn btn-sm btn-outline-danger text-nowrap ' +
                          'bty-workers-cancel" data-name="' +
@@ -96,7 +94,7 @@
             return "<tr>" +
                    "<td><code>" + esc(d.name) + "</code></td>" +
                    "<td>" + statusBadge(d.status) + "</td>" +
-                   "<td>" + progressBar(pseudo) + "</td>" +
+                   "<td>" + progressBar(d) + "</td>" +
                    "<td class=\"small\">" + esc(bytes) + "</td>" +
                    "<td class=\"text-end\">" + cancel + "</td>" +
                    "</tr>";

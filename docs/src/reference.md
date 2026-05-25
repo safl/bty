@@ -572,5 +572,31 @@ Schemas for the on-disk configuration files used by `bty` and
 
 ## State export / import format
 
-Format of the archive produced by `bty-web`'s state export, and
-expected by import. Populated alongside the export/import feature.
+v0.33.2+ (`bty_export_version = 3`): a directory containing a single
+`inventory.json`. No image bytes; v1 (pre-v0.31.0) and v2
+(v0.31.0..v0.33.1, with image bytes) bundles are refused on import.
+
+`inventory.json` shape:
+
+```json
+{
+  "bty_export_version": 3,
+  "exported_at": "2026-05-25T14:30:00+00:00",
+  "exported_by_bty_version": "0.33.2",
+  "machines": [
+    {
+      "mac": "aa:bb:cc:dd:ee:ff",
+      "known_disks": [{"path": "/dev/sda", "serial": "..."}],
+      "known_disks_at": "2026-05-25T10:00:00+00:00",
+      "hw_lshw": {"id": "system", "product": "...", "children": [...]},
+      "hw_lshw_at": "2026-05-25T10:00:00+00:00"
+    }
+  ]
+}
+```
+
+`known_disks` and `hw_lshw` are native objects/arrays (not
+re-encoded JSON strings), so `jq '.machines[].hw_lshw.product'`
+works directly. Import inserts each machine as
+`boot_mode=bty-inventory` with bindings cleared; the operator
+re-binds image + boot mode after `bty-web import`.

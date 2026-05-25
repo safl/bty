@@ -5,7 +5,7 @@ FastAPI app:
 
   * enqueue creates a queued state and a worker picks it up.
   * already-cached entries skip the queue and land at completed
-    with bytes_downloaded == bytes_total immediately.
+    with bytes_done == bytes_total immediately.
   * cancel flips state to cancelled.
   * unknown names produce KeyError / None as appropriate.
 
@@ -194,7 +194,7 @@ def test_enqueue_already_cached_shortcut(tmp_path: Path) -> None:
         try:
             state = await mgr.enqueue(entry.name)
             assert state.status == "completed"
-            assert state.bytes_downloaded == len(payload)
+            assert state.bytes_done == len(payload)
             assert state.bytes_total == len(payload)
         finally:
             await mgr.stop()
@@ -331,7 +331,7 @@ def test_download_manager_backfills_from_events(tmp_path: Path) -> None:
             assert states[0].name == "rolling.img.gz"
             assert states[0].status == "completed"
             assert states[0].sha256 == "a" * 64
-            assert states[0].bytes_downloaded == 12345
+            assert states[0].bytes_done == 12345
         finally:
             await mgr.stop()
 
@@ -361,7 +361,7 @@ def test_enqueue_runs_to_completion(tmp_path: Path) -> None:
                 states = await mgr.list()
                 assert len(states) == 1
                 assert states[0].status == "completed"
-                assert states[0].bytes_downloaded == len(payload)
+                assert states[0].bytes_done == len(payload)
             finally:
                 await mgr.stop()
         cached = image_root / entry.local_filename()

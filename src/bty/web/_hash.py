@@ -67,7 +67,7 @@ class HashState:
     """Live state of a single hash job.
 
     Mutable on purpose -- the worker updates ``status`` /
-    ``bytes_hashed`` / ``bytes_total`` / timestamps as the hash
+    ``bytes_done`` / ``bytes_total`` / timestamps as the hash
     proceeds, and the API serialises the current snapshot for
     ``GET /catalog/hashes``.
     """
@@ -75,7 +75,7 @@ class HashState:
     name: str  # filename (relative to image_root) -- the hash key
     path: str  # absolute path on disk
     status: str = "queued"  # queued | running | completed | cancelled | failed
-    bytes_hashed: int = 0
+    bytes_done: int = 0
     bytes_total: int = 0
     sha256: str | None = None  # populated when status="completed"
     started_at: float | None = None
@@ -94,7 +94,7 @@ class HashState:
             "name": self.name,
             "path": self.path,
             "status": self.status,
-            "bytes_hashed": self.bytes_hashed,
+            "bytes_done": self.bytes_done,
             "bytes_total": self.bytes_total,
             "sha256": self.sha256,
             "started_at": self.started_at,
@@ -193,7 +193,7 @@ class HashManager(_BaseAsyncManager[HashState]):
                 name=name,
                 path=path,
                 status="completed" if ev.kind == "image.hashed" else "failed",
-                bytes_hashed=size,
+                bytes_done=size,
                 bytes_total=size,
                 sha256=sha,
                 started_at=started,
@@ -239,7 +239,7 @@ class HashManager(_BaseAsyncManager[HashState]):
             if cached is not None:
                 state.status = "completed"
                 state.sha256 = cached
-                state.bytes_hashed = state.bytes_total
+                state.bytes_done = state.bytes_total
                 state.started_at = state.finished_at = time.time()
                 self._states[name] = state
                 self._fire_state_change(state)
@@ -255,7 +255,7 @@ class HashManager(_BaseAsyncManager[HashState]):
         cancel_event = state._cancel
 
         def _progress(hashed: int, total: int) -> None:
-            state.bytes_hashed = hashed
+            state.bytes_done = hashed
             state.bytes_total = total
             # Throttled SSE progress event so the Hashing page's byte
             # counter ticks at ~1 Hz without flooding the bus.

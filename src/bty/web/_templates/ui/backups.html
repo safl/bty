@@ -105,7 +105,7 @@
                    "<td><code>" + esc(d.backup_id) + "</code></td>" +
                    "<td>" + statusBadge(d.status) + "</td>" +
                    "<td>" + esc(d.trigger || "") + "</td>" +
-                   "<td class=\"small\">" + esc(fmtBytes(d.bytes_written || 0)) + "</td>" +
+                   "<td class=\"small\">" + esc(fmtBytes(d.bytes_done || 0)) + "</td>" +
                    "<td class=\"text-end\">" + cancel + "</td>" +
                    "</tr>";
         }).join("");
