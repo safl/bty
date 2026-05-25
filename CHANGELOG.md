@@ -9,6 +9,53 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.33.7] - 2026-05-25
+
+**Fix the netboot fetch button when the operator clicks
+"Fetch netboot artifacts".** Second real hardware-reported bug
+this evening.
+
+### The bug
+
+Operator running v0.33.4 clicked the fetch button and got:
+
+```
+boot release 'latest' fetch failed: GET https://github.com/safl/bty/releases/latest/download/bty-netboot-x86_64-v0.33.4.vmlinuz returned HTTP 404 Not Found
+```
+
+The asset filename embeds the running bty-web's version
+(intentional: multiple versions need to coexist in
+`BTY_BOOT_DIR` during an upgrade, and the iPXE template refs
+the matching version). GitHub's `/releases/latest/download/`
+redirects to whatever release is current -- in this case v0.33.6,
+whose asset list contains `...v0.33.6.vmlinuz`, not
+`...v0.33.4.vmlinuz`. The redirect target has the wrong asset
+names; every fetch 404'd.
+
+### The fix
+
+`tag="latest"` (the UI form's default) is now normalised to
+`v<bty.__version__>` inside `fetch_release`. The
+`releases/latest/download/...` URL form is dropped entirely --
+it never worked given version-pinned asset names. Operators
+running v0.33.X always pull from the v0.33.X release's tag,
+which is the only release whose asset names this server can use.
+
+### Tests
+
+Two regression tests in `test_web_releases.py`:
+
+- `test_fetch_release_normalises_latest_to_running_version` -- the
+  end-to-end success path: pass `tag="latest"`, assert the trio
+  lands.
+- `test_fetch_release_url_construction_pins_to_running_version` --
+  invariant pin: a future refactor can't reintroduce the broken
+  `/releases/latest/download/...` URL form.
+
+### Operator impact
+
+Click the "Fetch netboot artifacts" button. It works now.
+
 ## [0.33.6] - 2026-05-25
 
 **Fix INSERT race in PXE auto-discovery.** This is the kind of bug

@@ -184,6 +184,18 @@ def fetch_release(
     in BTY_BOOT_DIR safe, and the iPXE templates rendered by this
     server reference the matching version too.
 
+    The string ``"latest"`` is accepted as a synonym for ``None`` for
+    backward compatibility with the UI form -- it resolves to
+    ``v<bty.__version__>``. The old behavior (constructing
+    ``releases/latest/download/...`` URLs) was broken: GitHub's
+    "latest" redirect would route to whatever release was current,
+    whose version-pinned asset filenames would not match what the
+    running bty-web asked for, returning 404. A bty-web v0.33.4
+    fetching from a "latest" that resolved to v0.33.6 would ask for
+    ``bty-netboot-x86_64-v0.33.4.vmlinuz`` in v0.33.6's asset list and
+    miss every time. Operators only ever want THIS server's artifacts,
+    so we now always pin to the running version.
+
     ``base_url`` overrides the GitHub URL construction (used by tests
     to point at a local ``http.server`` instead of github.com).
     Raises :class:`FetchError` on any failure; on success the boot dir
@@ -203,12 +215,14 @@ def fetch_release(
     fetch.
     """
     repo = repo or os.environ.get(ENV_RELEASE_REPO) or DEFAULT_REPO
-    tag = tag or f"v{_BTY_VERSION}"
+    # "latest" is the UI form's historical default; it can't actually
+    # work (see docstring) so we normalise it to the running version's
+    # tag, which is the only tag whose asset filenames match what this
+    # server asks for.
+    if not tag or tag == "latest":
+        tag = f"v{_BTY_VERSION}"
     if base_url is None:
-        if tag == "latest":
-            base_url = f"https://github.com/{repo}/releases/latest/download"
-        else:
-            base_url = f"https://github.com/{repo}/releases/download/{tag}"
+        base_url = f"https://github.com/{repo}/releases/download/{tag}"
     base_url = base_url.rstrip("/")
 
     # The tempdir lives *inside* ``boot_dir`` (rather than the system
