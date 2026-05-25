@@ -52,7 +52,6 @@ import os
 import shutil
 import threading
 import time
-from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -186,7 +185,7 @@ class BackupManager(_BaseAsyncManager[BackupState]):
             final_status = "completed"
             error: str | None = None
             machines = summary.machines
-            bytes_written = _dir_size(dest)
+            bytes_written = _bundle_size(dest)
         except Exception as exc:
             log.exception("backup %s failed", backup_id)
             final_status = "failed"
@@ -303,19 +302,20 @@ def _looks_like_backup_id(name: str) -> bool:
     return True
 
 
-def _dir_size(path: Path) -> int:
-    """Sum of file sizes under ``path``. Best-effort: a stat failure on
-    one file falls through; the result is informational (operators see
-    "Backup is ~3 GiB" in the UI), not load-bearing."""
-    total = 0
-    for root, _, files in os.walk(path):
-        for f in files:
-            fp = Path(root) / f
-            try:
-                total += fp.stat().st_size
-            except OSError:
-                continue
-    return total
+def _bundle_size(path: Path) -> int:
+    """Size of the v3 ``inventory.json`` inside ``path``, or 0 if it's
+    missing. Best-effort: a stat failure returns 0 -- the value is
+    informational (operators see "Backup is 4 KiB" in the UI), not
+    load-bearing.
+
+    v3 bundles are one file, so this is a single stat rather than a
+    ``os.walk`` summation. Existing on-disk v2 bundles with image
+    bytes show as the size of just their inventory file (which is
+    what's actually still readable on the new release)."""
+    try:
+        return (path / "inventory.json").stat().st_size
+    except OSError:
+        return 0
 
 
 # ----- on-disk listing --------------------------------------------------
@@ -390,10 +390,7 @@ def _read_bundle(path: Path) -> BackupOnDisk:
             inventory = json.loads(inventory_path.read_text(encoding="utf-8"))
             if isinstance(inventory, dict):
                 ea = inventory.get("exported_at")
-                # ``exported_by_bty_version`` is the slim-format key
-                # (v2+); fall back to the v1 ``bty_version`` for any
-                # legacy bundles still sitting on disk.
-                bv = inventory.get("exported_by_bty_version") or inventory.get("bty_version")
+                bv = inventory.get("exported_by_bty_version")
                 exported_at = ea if isinstance(ea, str) else None
                 bty_version = bv if isinstance(bv, str) else None
                 ms = inventory.get("machines")
@@ -408,7 +405,7 @@ def _read_bundle(path: Path) -> BackupOnDisk:
         exported_at=exported_at,
         bty_version=bty_version,
         machines=machines,
-        bytes_on_disk=_dir_size(path),
+        bytes_on_disk=_bundle_size(path),
     )
 
 
@@ -465,67 +462,6 @@ def delete_bundle(state_path: Path, backups_root: Path, backup_id: str) -> Backu
         )
         conn.commit()
     return snapshot
-
-
-def iter_bundle_tar(bundle: Path) -> Iterator[bytes]:
-    """Yield a streamed tar archive of ``bundle`` as ``bytes`` chunks.
-
-    Stores file paths relative to ``bundle.parent`` so the archive
-    expands to ``<backup_id>/inventory.json``
-    when untarred (i.e. the backup_id ends up as the top-level folder,
-    matching what the operator expects after a download). The archive
-    is uncompressed (mode ``"w|"``): bundle contents are already
-    compressed (``.img.gz``, ``.img.zst``) and re-compressing only
-    burns CPU.
-
-    Streaming avoids materialising the full tar in memory for
-    multi-GiB bundles; the in-memory buffer holds at most one tar
-    member plus a 512-byte block header at a time.
-    """
-    import tarfile
-
-    if not bundle.is_dir():
-        raise FileNotFoundError(f"backup bundle does not exist: {bundle}")
-    parent = bundle.parent
-
-    class _ChunkBuf:
-        """File-like that tarfile writes into; ``drain()`` returns + clears."""
-
-        __slots__ = ("_buf",)
-
-        def __init__(self) -> None:
-            self._buf = bytearray()
-
-        def write(self, data: bytes) -> int:
-            self._buf.extend(data)
-            return len(data)
-
-        def drain(self) -> bytes:
-            out = bytes(self._buf)
-            self._buf.clear()
-            return out
-
-    buf = _ChunkBuf()
-    # ``mode="w|"`` is the seekless / streaming variant. tarfile will
-    # write member headers + data directly into our buffer rather than
-    # the seek-back-and-patch path it uses in seekable mode.
-    # mypy doesn't accept our minimal-protocol ChunkBuf as the typed
-    # ``_Fileobj`` protocol -- tarfile actually only calls ``write`` in
-    # the streaming-write path, so the ignore is safe.
-    with tarfile.open(fileobj=buf, mode="w|") as tf:  # type: ignore[call-overload]
-        # ``sorted`` for deterministic ordering across filesystems.
-        for path in sorted(bundle.rglob("*")):
-            if not path.is_file():
-                continue
-            tf.add(path, arcname=str(path.relative_to(parent)))
-            chunk = buf.drain()
-            if chunk:
-                yield chunk
-    # The tarfile.close() inside the with-block writes the end-of-archive
-    # padding; drain whatever's left.
-    chunk = buf.drain()
-    if chunk:
-        yield chunk
 
 
 def _log_terminal(

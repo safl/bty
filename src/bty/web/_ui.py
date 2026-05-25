@@ -29,7 +29,7 @@ from fastapi import (
     Response,
     status,
 )
-from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from jinja2 import Environment
 from pydantic import ValidationError
 
@@ -791,16 +791,21 @@ def register_ui_routes(
         include_in_schema=False,
         dependencies=[Depends(require_ui_auth)],
     )
-    def ui_backups_download(backup_id: str) -> StreamingResponse:
-        """Stream a tar archive of one backup bundle for the operator
-        to download to their laptop.
+    def ui_backups_download(backup_id: str) -> FileResponse:
+        """Serve the bundle's ``inventory.json`` for the operator to
+        download to their laptop.
+
+        v3 bundles are one file, so this just streams ``inventory.json``
+        as ``application/json``. The Content-Disposition filename is
+        ``<backup_id>.json`` so the file lands with a self-describing
+        name even when the browser saves several at once.
 
         Validates the ``backup_id`` against the ISO-8601-slug format
         before touching the filesystem (so a request like
         ``/ui/backups/../etc/download`` can't traverse out of
-        ``backups_root``). Returns ``404`` if the slug is malformed
-        or the bundle directory is missing. Uncompressed ``.tar`` --
-        bundle contents are already compressed.
+        ``backups_root``). Returns ``404`` if the slug is malformed,
+        the bundle directory is missing, or the bundle has no
+        ``inventory.json``.
         """
         if not _backup.is_valid_backup_id(backup_id):
             raise HTTPException(
@@ -808,17 +813,16 @@ def register_ui_routes(
                 detail=f"backup not found: {backup_id!r}",
             )
         bundle = backups_root / backup_id
-        if not bundle.is_dir():
+        inventory = bundle / "inventory.json"
+        if not inventory.is_file():
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"backup not found: {backup_id!r}",
             )
-        return StreamingResponse(
-            _backup.iter_bundle_tar(bundle),
-            media_type="application/x-tar",
-            headers={
-                "Content-Disposition": f'attachment; filename="{backup_id}.tar"',
-            },
+        return FileResponse(
+            inventory,
+            media_type="application/json",
+            filename=f"{backup_id}.json",
         )
 
     @app.delete(

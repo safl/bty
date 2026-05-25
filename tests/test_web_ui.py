@@ -618,27 +618,26 @@ def test_ui_backups_lists_existing_bundles(client: TestClient, tmp_path: Path) -
     assert 'href="/ui/backups/2026-05-23T10-00-00Z/download"' in body
 
 
-def test_ui_backups_download_streams_valid_tar(client: TestClient, tmp_path: Path) -> None:
-    """``GET /ui/backups/{id}/download`` streams a tar archive whose
-    members are rooted at the backup_id directory, with the correct
-    Content-Disposition for a browser save."""
-    import io
-    import tarfile
+def test_ui_backups_download_serves_inventory_json(client: TestClient, tmp_path: Path) -> None:
+    """``GET /ui/backups/{id}/download`` serves the bundle's
+    ``inventory.json`` directly as ``application/json``, with a
+    ``Content-Disposition: attachment; filename="<id>.json"`` so the
+    operator's browser saves it with a self-describing name. v3
+    bundles are one file -- no tar wrapping."""
+    import json as _json
 
     backups_root = tmp_path / "backups"
     bundle = backups_root / "2026-05-23T10-00-00Z"
     bundle.mkdir(parents=True)
-    (bundle / "inventory.json").write_text('{"bty_export_version": 3}\n')
+    inventory = {"bty_export_version": 3, "machines": [{"mac": "aa:bb:cc:dd:ee:01"}]}
+    (bundle / "inventory.json").write_text(_json.dumps(inventory) + "\n")
 
     _login(client)
     r = client.get("/ui/backups/2026-05-23T10-00-00Z/download")
     assert r.status_code == 200
-    assert r.headers["content-type"] == "application/x-tar"
-    assert "2026-05-23T10-00-00Z.tar" in r.headers["content-disposition"]
-    with tarfile.open(fileobj=io.BytesIO(r.content), mode="r:") as tf:
-        assert sorted(tf.getnames()) == [
-            "2026-05-23T10-00-00Z/inventory.json",
-        ]
+    assert r.headers["content-type"].startswith("application/json")
+    assert "2026-05-23T10-00-00Z.json" in r.headers["content-disposition"]
+    assert r.json() == inventory
 
 
 def test_ui_backups_download_rejects_invalid_id(client: TestClient) -> None:

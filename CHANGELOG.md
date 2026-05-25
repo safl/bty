@@ -9,6 +9,51 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.33.3] - 2026-05-25
+
+Two simplification rounds following v0.33.2's metadata-only backup
+shape. Each round was an after-the-fact "this is now overkill"
+catch.
+
+### Round 1: drop the tar-stream download wrapper
+
+`iter_bundle_tar` streamed a custom tar archive of the bundle dir
+into the HTTP response via a `_ChunkBuf` file-like; the gymnast
+made sense when bundles were multi-GiB. v3 bundles are one
+`inventory.json`, so `/ui/backups/{id}/download` now serves the
+file directly via `FileResponse` as `application/json`.
+Content-Disposition is `attachment; filename="<id>.json"` so the
+browser saves it with a self-describing name.
+
+- **Removed**: `bty.web._backup.iter_bundle_tar`,
+  `_ChunkBuf`, the `tarfile` / `mypy` ignore hack, and the
+  two tar-roundtrip tests.
+- **Changed**: the operator's download button now reads ".json"
+  (was ".tar").
+
+### Round 2: dead-code sweep
+
+- **`_dir_size` -> `_bundle_size`**: was a full `os.walk` of the
+  bundle dir; v3 bundles are one file so it's a single stat.
+  Existing on-disk v2 bundles now report just their inventory
+  size, which is what's actually portable across the upgrade.
+- **Dropped v1 fallback in `_read_bundle`**: line previously
+  read `inventory.get("exported_by_bty_version") or inventory.
+  get("bty_version")` to be charitable to pre-v0.31.0 bundles.
+  Pre-1.0 policy refuses v1 on import; the listing-page
+  fallback was dead.
+- **Kept `BackupState._cancel`**: the field looked dead
+  (metadata-only export finishes in milliseconds; no cancel
+  check in `_run_one`), but it's required by the
+  `_BaseAsyncManager` Protocol that the cancel API operates on.
+  Removing it would break the shape contract for no win.
+
+### Operator impact
+
+The backup download button gives you a `.json` you can `jq` (or
+diff across appliances) directly. No more "unpack the tar first"
+step.
+
 ## [0.33.2] - 2026-05-25
 
 **Backups are metadata-only. No image bytes.** v0.31.0 through
