@@ -9,6 +9,65 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.33.6] - 2026-05-25
+
+**Fix INSERT race in PXE auto-discovery.** This is the kind of bug
+that bites on hardware and is hard to reproduce -- exactly what the
+operator-pointed-out shortcoming of the prior polish rounds.
+
+### The bug
+
+`/pxe/{mac}` and `/pxe/{mac}/plan` did:
+
+```python
+row = SELECT * FROM machines WHERE mac = ?
+if row is None:
+    INSERT INTO machines (mac, ...) VALUES (?, ...)
+    log machine.discovered
+    commit
+```
+
+bty-web runs the handler in a thread pool (sync `def`, not
+`async def`). Two PXE requests for the same fresh MAC arriving
+nearly simultaneously -- iPXE retry, dnsmasq retransmit, BMC
+twitching -- both passed the `SELECT` with `row=None`. Both fired
+the `INSERT`. The second one hit `UNIQUE(mac)` on the PK and
+raised `sqlite3.IntegrityError`, FastAPI returned 500. iPXE's own
+retry would succeed on the next attempt, so the operator saw
+intermittent 500s in the journal without a reliable repro path.
+
+### The fix
+
+`/pxe/{mac}` and `/pxe/{mac}/plan` now do an atomic
+`INSERT ... ON CONFLICT(mac) DO UPDATE ... RETURNING ..., (created_at = ?) AS is_new`.
+The upsert is idempotent under contention; the `is_new` flag from
+`RETURNING` tells the handler whether to log the `machine.discovered`
+event. `_now_iso()` is microsecond-precise, so the
+created_at-equality check distinguishes inserts from updates
+reliably (two real PXE arrivals don't collide on the microsecond).
+
+### Tests
+
+Three regression tests in `tests/test_web.py`:
+
+- `test_pxe_concurrent_discovery_no_race` -- N parallel `/pxe/{mac}`
+  hits via `ThreadPoolExecutor`, asserts all 200 and exactly one
+  `machine.discovered` event.
+- `test_pxe_plan_concurrent_discovery_no_race` -- same shape for
+  `/pxe/{mac}/plan`.
+- `test_pxe_discovery_returning_clause_is_race_safe_under_direct_sqlite_repro`
+  -- pins the SQL shape against a real sqlite DB with two
+  connections, so a future "simplify the upsert" refactor can't
+  silently regress to plain INSERT.
+
+### Operator impact
+
+If you're running bty-web on hardware with PXE-retry-happy iPXE
+firmware or a flaky lab switch, the intermittent 500s on /pxe go
+away. No data migration needed: the SQL upsert against an existing
+machine row is a no-op no-op (last_seen_at + last_seen_ip update,
+discovered_at preserved via COALESCE).
+
 ## [0.33.5] - 2026-05-25
 
 Round 5: error-message hygiene + CLI help drift.

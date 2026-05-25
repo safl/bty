@@ -2228,6 +2228,151 @@ def test_pxe_hit_records_inventory_offer_for_unknown_mac(app_client: TestClient)
     assert events["netboot.pxe.offered"]["details"]["offer"] == "bty-inventory"
 
 
+def test_pxe_concurrent_discovery_no_race(app_client: TestClient) -> None:
+    """REGRESSION (v0.33.6): two concurrent ``/pxe/{mac}`` requests
+    for the same fresh MAC must not return 500. Pre-fix did
+    SELECT-then-plain-INSERT inside a thread-pool handler, so two
+    iPXE-retry-induced parallel requests could both see ``row=None``
+    and both fire ``INSERT``, with the second hitting
+    ``UNIQUE(mac)`` -> ``sqlite3.IntegrityError`` -> 500 in the journal.
+
+    The TestClient + a thread pool doesn't reliably reproduce the
+    race (Starlette serialises sync handlers through one event loop
+    thread), but the post-fix path is idempotent under any
+    interleaving, so we just hammer the route with N parallel
+    requests for the same MAC and assert every response is 2xx and
+    only ONE ``machine.discovered`` event lands.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    mac = "aa:bb:cc:dd:ee:f2"
+    n = 8
+
+    def hit() -> int:
+        return app_client.get(f"/pxe/{mac}").status_code
+
+    with ThreadPoolExecutor(max_workers=n) as pool:
+        statuses = list(pool.map(lambda _: hit(), range(n)))
+
+    assert all(s == 200 for s in statuses), f"expected all 200, got {statuses!r}"
+
+    r = app_client.get(
+        "/events",
+        params={
+            "subject_kind": "machine",
+            "subject_id": mac,
+            "kind": "machine.discovered",
+        },
+        cookies=AUTH,
+    )
+    discovery_events = r.json()["events"]
+    assert len(discovery_events) == 1, (
+        f"machine.discovered must fire exactly once across {n} concurrent /pxe hits "
+        f"(the upsert RETURNING clause is the gate); got {len(discovery_events)}"
+    )
+
+
+def test_pxe_plan_concurrent_discovery_no_race(app_client: TestClient) -> None:
+    """Mirror of the /pxe/{mac} race test for /pxe/{mac}/plan, which
+    used the same SELECT-then-INSERT shape before v0.33.6."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    mac = "aa:bb:cc:dd:ee:f3"
+    n = 8
+
+    def hit() -> int:
+        return app_client.get(f"/pxe/{mac}/plan").status_code
+
+    with ThreadPoolExecutor(max_workers=n) as pool:
+        statuses = list(pool.map(lambda _: hit(), range(n)))
+
+    assert all(s == 200 for s in statuses), f"expected all 200, got {statuses!r}"
+
+    r = app_client.get(
+        "/events",
+        params={
+            "subject_kind": "machine",
+            "subject_id": mac,
+            "kind": "machine.discovered",
+        },
+        cookies=AUTH,
+    )
+    assert len(r.json()["events"]) == 1
+
+
+def test_pxe_discovery_returning_clause_is_race_safe_under_direct_sqlite_repro(
+    tmp_path: Path,
+) -> None:
+    """REGRESSION (v0.33.6): pin the actual race shape against a real
+    sqlite DB so a future "let's simplify the upsert" refactor can't
+    silently regress to plain INSERT.
+
+    Pre-fix the handler ran ``SELECT WHERE mac=?`` then plain INSERT;
+    two threads that both passed the SELECT then both fired INSERT
+    would have the second hit ``UNIQUE constraint failed:
+    machines.mac``. Post-fix uses ``INSERT ... ON CONFLICT(mac) DO
+    UPDATE ... RETURNING ..., (created_at=?) AS is_new`` so the second
+    attempt is a quiet UPDATE.
+
+    This test exercises the SQL directly (not through TestClient) so
+    it pins the *atomic-upsert* invariant rather than relying on
+    thread scheduling.
+    """
+    import sqlite3 as _sqlite
+
+    from bty.web import _db
+
+    state = tmp_path / "state.db"
+    _db.init_db(state)
+    mac = "aa:bb:cc:dd:ee:99"
+    # The handler passes ``_now_iso()`` which is microsecond-precise; two
+    # real PXE requests yield distinct strings. Use distinct fixtures to
+    # match that contract.
+    now_a = "2026-05-25T12:00:00.000001+00:00"
+    now_b = "2026-05-25T12:00:00.000002+00:00"
+
+    upsert_sql = """
+        INSERT INTO machines
+            (mac, boot_mode,
+             discovered_at, last_seen_at, last_seen_ip,
+             created_at, updated_at)
+        VALUES (?, 'bty-inventory', ?, ?, ?, ?, ?)
+        ON CONFLICT(mac) DO UPDATE SET
+            last_seen_at  = excluded.last_seen_at,
+            last_seen_ip  = excluded.last_seen_ip,
+            discovered_at = COALESCE(machines.discovered_at, excluded.discovered_at),
+            updated_at    = excluded.updated_at
+        RETURNING *, (created_at = ?) AS is_new
+    """
+
+    # Two separate connections, simulating two thread-pool workers.
+    conn_a = _sqlite.connect(state, timeout=5.0)
+    conn_a.row_factory = _sqlite.Row
+    conn_b = _sqlite.connect(state, timeout=5.0)
+    conn_b.row_factory = _sqlite.Row
+    try:
+        # Thread A wins the discovery.
+        args_a = (mac, now_a, now_a, "10.0.0.1", now_a, now_a, now_a)
+        row_a = conn_a.execute(upsert_sql, args_a).fetchone()
+        conn_a.commit()
+        assert row_a["is_new"] == 1, "first upsert must report is_new=1"
+
+        # Thread B arrives after A committed. With the pre-fix SQL,
+        # this would have been a plain INSERT and raised IntegrityError;
+        # with the upsert it's a quiet UPDATE and is_new=0 (the row's
+        # ``created_at`` is still now_a, not now_b).
+        args_b = (mac, now_b, now_b, "10.0.0.2", now_b, now_b, now_b)
+        row_b = conn_b.execute(upsert_sql, args_b).fetchone()
+        conn_b.commit()
+        assert row_b["is_new"] == 0, "second upsert must report is_new=0 (race-safe)"
+        assert row_b["mac"] == mac
+        assert row_b["created_at"] == now_a, "created_at must stay at first insert's value"
+        assert row_b["updated_at"] == now_b, "updated_at must move to second upsert's value"
+    finally:
+        conn_a.close()
+        conn_b.close()
+
+
 def test_machines_upsert_accepts_flash_once(app_client: TestClient) -> None:
     """bty-flash-once is in BOOT_MODES so Pydantic accepts it."""
     r = app_client.put(

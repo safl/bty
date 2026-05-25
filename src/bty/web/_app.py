@@ -578,33 +578,46 @@ def create_app(
         client_ip = _client_ip(request)
         now = _now_iso()
         with _db.open_db(state_path) as conn:
-            row = conn.execute("SELECT * FROM machines WHERE mac = ?", (normalised,)).fetchone()
-            if row is None:
-                # Auto-discovery: record an unassigned machine so the
-                # operator can see this MAC in /machines and decide
-                # what to do with it. ``boot_mode='bty-inventory'``
-                # makes the unknown MAC chain into the live env to self-
-                # report its disks, then sanboot -- so a new box auto-
-                # collects its inventory and just boots, with no prior
-                # server-side configuration. The operator then assigns a
-                # flash policy from the now-populated disk dropdown.
-                conn.execute(
-                    """
-                    INSERT INTO machines
-                        (mac, boot_mode,
-                         discovered_at, last_seen_at, last_seen_ip,
-                         created_at, updated_at)
-                    VALUES (?, 'bty-inventory', ?, ?, ?, ?, ?)
-                    """,
-                    (normalised, now, now, client_ip, now, now),
-                )
-                # First /pxe contact = the moment a machine becomes
-                # visible to the operator. Worth a row in the audit
-                # log so they can see "this MAC first checked in at
-                # X" without paging through stale records. Only
-                # logged on the discovery path (the else branch
-                # below is "we've seen this MAC before" -- too
-                # noisy to log every chain into the live env).
+            # Race-safe discovery: pre-v0.33.6 did SELECT then plain
+            # INSERT, which UNIQUE-violated under concurrent /pxe
+            # requests for the same fresh MAC (iPXE retry, dnsmasq
+            # retransmit) -- the second handler got
+            # sqlite3.IntegrityError and bty-web returned 500. Under
+            # iPXE's own retry the next attempt would succeed, so the
+            # operator saw flaky journal noise without a reliable
+            # repro.
+            #
+            # Now: atomic INSERT ... ON CONFLICT(mac) DO UPDATE on
+            # every contact. ``RETURNING`` tells us whether the row
+            # is new (created_at == excluded.created_at -> insert
+            # branch fired) so we only log the discovery event once.
+            # ``COALESCE(machines.discovered_at, excluded.discovered_at)``
+            # keeps the first-seen timestamp stable across UPDATE
+            # branches.
+            row = conn.execute(
+                """
+                INSERT INTO machines
+                    (mac, boot_mode,
+                     discovered_at, last_seen_at, last_seen_ip,
+                     created_at, updated_at)
+                VALUES (?, 'bty-inventory', ?, ?, ?, ?, ?)
+                ON CONFLICT(mac) DO UPDATE SET
+                    last_seen_at  = excluded.last_seen_at,
+                    last_seen_ip  = excluded.last_seen_ip,
+                    discovered_at = COALESCE(machines.discovered_at, excluded.discovered_at),
+                    updated_at    = excluded.updated_at
+                RETURNING *, (created_at = ?) AS is_new
+                """,
+                (normalised, now, now, client_ip, now, now, now),
+            ).fetchone()
+            assert row is not None
+            if row["is_new"]:
+                # First /pxe contact -- worth a row in the audit log
+                # so the operator can see "this MAC first checked in
+                # at X" without paging through stale records. Only
+                # logged on the discovery path; the upsert branch
+                # would be too noisy to log every chain into the
+                # live env.
                 _log_event(
                     conn,
                     kind="machine.discovered",
@@ -614,25 +627,12 @@ def create_app(
                     actor="pxe-client",
                     source_ip=client_ip,
                 )
-                conn.commit()
-                row = conn.execute("SELECT * FROM machines WHERE mac = ?", (normalised,)).fetchone()
-            else:
-                conn.execute(
-                    """
-                    UPDATE machines
-                    SET last_seen_at = ?,
-                        last_seen_ip = ?,
-                        discovered_at = COALESCE(discovered_at, ?),
-                        updated_at = ?
-                    WHERE mac = ?
-                    """,
-                    (now, client_ip, now, now, normalised),
-                )
-                conn.commit()
-                row = conn.execute("SELECT * FROM machines WHERE mac = ?", (normalised,)).fetchone()
+            conn.commit()
 
-        assert row is not None
         machine = dict(row)
+        # ``is_new`` is a synthetic column from the RETURNING clause;
+        # downstream policy logic only knows about real machine columns.
+        machine.pop("is_new", None)
         publish_state_changed()
         # Boot-mode decision tree (highest priority first):
         #   - bty-tui                       -> live env, interactive wizard
@@ -998,22 +998,29 @@ def create_app(
         client_ip = _client_ip(request)
         now = _now_iso()
         with _db.open_db(state_path) as conn:
-            row = conn.execute("SELECT * FROM machines WHERE mac = ?", (normalised,)).fetchone()
-            if row is None:
-                # Auto-discovery: mirror /pxe/{mac}'s behaviour so a
-                # ``bty`` invocation against an unknown MAC creates a
-                # record (boot_mode=bty-inventory) instead of
-                # 404-ing.
-                conn.execute(
-                    """
-                    INSERT INTO machines
-                        (mac, boot_mode,
-                         discovered_at, last_seen_at, last_seen_ip,
-                         created_at, updated_at)
-                    VALUES (?, 'bty-inventory', ?, ?, ?, ?, ?)
-                    """,
-                    (normalised, now, now, client_ip, now, now),
-                )
+            # Race-safe discovery: mirror /pxe/{mac}'s upsert shape
+            # (see v0.33.6 fix). Two concurrent /pxe/.../plan requests
+            # for the same fresh MAC used to race on plain INSERT and
+            # one returned 500. The atomic ON CONFLICT path is
+            # idempotent under contention.
+            row = conn.execute(
+                """
+                INSERT INTO machines
+                    (mac, boot_mode,
+                     discovered_at, last_seen_at, last_seen_ip,
+                     created_at, updated_at)
+                VALUES (?, 'bty-inventory', ?, ?, ?, ?, ?)
+                ON CONFLICT(mac) DO UPDATE SET
+                    last_seen_at  = excluded.last_seen_at,
+                    last_seen_ip  = excluded.last_seen_ip,
+                    discovered_at = COALESCE(machines.discovered_at, excluded.discovered_at),
+                    updated_at    = excluded.updated_at
+                RETURNING *, (created_at = ?) AS is_new
+                """,
+                (normalised, now, now, client_ip, now, now, now),
+            ).fetchone()
+            assert row is not None
+            if row["is_new"]:
                 _log_event(
                     conn,
                     kind="machine.discovered",
@@ -1026,25 +1033,10 @@ def create_app(
                     actor="pxe-client",
                     source_ip=client_ip,
                 )
-                conn.commit()
-                row = conn.execute("SELECT * FROM machines WHERE mac = ?", (normalised,)).fetchone()
-            else:
-                conn.execute(
-                    """
-                    UPDATE machines
-                    SET last_seen_at = ?,
-                        last_seen_ip = ?,
-                        discovered_at = COALESCE(discovered_at, ?),
-                        updated_at = ?
-                    WHERE mac = ?
-                    """,
-                    (now, client_ip, now, now, normalised),
-                )
-                conn.commit()
-                row = conn.execute("SELECT * FROM machines WHERE mac = ?", (normalised,)).fetchone()
+            conn.commit()
 
-        assert row is not None
         machine = dict(row)
+        machine.pop("is_new", None)
         publish_state_changed()
 
         host = _request_host(request)
