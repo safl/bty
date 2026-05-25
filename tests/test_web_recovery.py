@@ -397,6 +397,80 @@ def test_recovery_wizard_renders_recovered_banner_when_db_is_ok(tmp_path: Path) 
     assert "/ui/dashboard" in body
 
 
+def test_wipe_and_import_rejects_bundle_with_missing_manifest(
+    tmp_path: Path, _no_exit: None
+) -> None:
+    """v0.32.1+: a bundle dir whose ``manifest.json`` is missing
+    (operator pointed at an empty dir, an unrelated dir under
+    backups/, or a half-copied bundle) returns 404 with a clear
+    "bundle is incomplete" message -- AND state.db is preserved
+    (the wipe step is guarded by the bundle pre-check). Without
+    this guard the operator would end up with a wiped DB AND no
+    successful import."""
+    state_path = tmp_path / "state.db"
+    _stand_up_pre_versioning_db(state_path)
+    backups_root = tmp_path / "backups"
+    bad_bundle = backups_root / "2026-05-25T10-00-00Z"
+    bad_bundle.mkdir(parents=True)
+    # Bundle dir exists but no manifest.json.
+    db_check = _db.check_db(state_path)
+    app = _recovery.build_recovery_app(
+        state_path=state_path,
+        image_root=tmp_path / "images",
+        backups_root=backups_root,
+        secret_key="test",
+        service_user="test",
+        db_check=db_check,
+    )
+    client = TestClient(app)
+    r = client.post(
+        "/ui/recovery/wipe-and-import",
+        json={"backup_id": "2026-05-25T10-00-00Z"},
+    )
+    assert r.status_code == 404, r.text
+    assert "no backup bundle" in r.json()["detail"]
+    # state.db must be untouched by the pre-flight refusal.
+    assert state_path.exists()
+
+
+def test_create_app_dispatches_to_recovery_when_db_is_pre_versioning(tmp_path: Path) -> None:
+    """v0.32.0+ contract: ``create_app`` must dispatch to the
+    recovery FastAPI app when ``check_db`` reports needs_recovery.
+    Integration-test the branch from the operator's POV (hit /
+    against the assembled app) so a regression in the dispatch
+    branches (e.g. the recovery-mode short-circuit moves below
+    ``init_db()`` and the original ``VersionMismatchError`` raises
+    again) surfaces as a test failure, not a journal error in
+    production."""
+    state_path = tmp_path / "state.db"
+    _stand_up_pre_versioning_db(state_path)
+
+    from bty.web._app import create_app
+
+    app = create_app(
+        state_path=state_path,
+        service_user="test-user",
+        secret_key="test-secret",
+        image_root=tmp_path / "images",
+        boot_root=tmp_path / "boot",
+    )
+    # Recovery app stashes a flag on app.state; tests-only sentinel.
+    assert getattr(app.state, "recovery_mode", False) is True, (
+        "create_app must build the recovery app (not the full one) "
+        "when check_db reports needs_recovery"
+    )
+    client = TestClient(app)
+    # Root redirects to the wizard.
+    r = client.get("/", follow_redirects=False)
+    assert r.status_code == 303
+    assert r.headers["location"] == "/ui/recovery"
+    # A normal-mode-only route returns the 503 catchall, not 200 or
+    # 500 -- so a bookmarked /ui/dashboard during recovery lands the
+    # operator at the wizard, not at a misleading 200.
+    r = client.get("/ui/dashboard")
+    assert r.status_code == 503
+
+
 def test_recovery_wizard_flags_unreadable_backups(tmp_path: Path) -> None:
     """v0.32.1: a bundle whose ``files/`` subdir is unreadable
     (chmod 000, broken NFS, etc.) used to silently show "0 files"

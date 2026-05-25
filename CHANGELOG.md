@@ -9,6 +9,36 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.32.2] - 2026-05-25
+
+Round 2 of the improvement grind: a startup perf fix + test
+coverage on the recovery-dispatch branch and bundle preflight.
+
+### Fixed
+
+- **`bty-web` startup ran `images.list_images(image_root)` twice.**
+  Once inside `_auto_import_dir_scan_rows`, once just below for
+  the hash-enqueue loop. On a Pi-class appliance with many image
+  files, two full inode walks per startup add up. v0.32.2 hoists
+  the scan into the lifespan caller, threads the result through
+  both consumers via a new `_auto_import_dir_scan_rows(scanned)`
+  parameter. Single-call invariant verified against the existing
+  test suite (no behavior change; only the count of `list_images`
+  invocations differs).
+
+### Added
+
+- **`test_wipe_and_import_rejects_bundle_with_missing_manifest`**:
+  recovery wizard's preflight refuses a bundle dir whose
+  `manifest.json` is absent BEFORE wiping state.db. Locks the
+  invariant that a bad operator pick can't leave the appliance
+  with both wiped state AND no successful import.
+- **`test_create_app_dispatches_to_recovery_when_db_is_pre_versioning`**:
+  integration test asserting `create_app` returns the recovery
+  app (not the full app) when `check_db` reports needs_recovery.
+  A regression that moves the recovery dispatch below `init_db()`
+  would now fail at test time instead of in production journals.
+
 ## [0.32.1] - 2026-05-25
 
 Polish pass on v0.32.0's recovery wizard + the underlying import

@@ -261,14 +261,23 @@ def create_app(
         # file via the UI; preserve their description, etc.).
         # Operator-initiated work queues behind these jobs by FIFO
         # order; parallelism cap (default 1) keeps a Pi responsive.
-        _auto_import_dir_scan_rows()
+        # Single ``list_images`` scan up front + thread it through
+        # the two consumers: auto-import to ``catalog_entries`` and
+        # auto-enqueue unhashed files for the HashManager. Previous
+        # versions called ``list_images`` twice in this block (once
+        # inside ``_auto_import_dir_scan_rows``, once just below for
+        # the hash enqueue), so a full filesystem scan ran twice on
+        # every bty-web startup -- 2x the inode reads on a Pi for
+        # no reason.
+        startup_images = images.list_images(resolved_image_root)
+        _auto_import_dir_scan_rows(startup_images)
         # And the symmetric path for manifest entries: a catalog.toml
         # that survived a restart (operator uploaded it, then bty-web
         # restarted) needs its entries reflected in catalog_entries
         # so the /ui/machines/{mac} dropdown shows them.
         if catalog_state.catalog is not None:
             _auto_import_manifest_rows(catalog_state.catalog)
-        for img in images.list_images(resolved_image_root):
+        for img in startup_images:
             if img.sha256 is None:
                 # ``FileNotFoundError`` -- file vanished between the
                 # ``list_images`` scan and the enqueue (harmless).
@@ -308,9 +317,13 @@ def create_app(
             await release_fetch_manager.stop()
             await backup_manager.stop()
 
-    def _auto_import_dir_scan_rows() -> None:
+    def _auto_import_dir_scan_rows(scanned: list[images.Image]) -> None:
         """Insert a ``catalog_entries`` row for every dir-scan file
         under ``resolved_image_root`` that doesn't already have one.
+
+        ``scanned`` is the result of ``images.list_images`` from the
+        lifespan; passed in (rather than recomputed here) so the
+        filesystem scan happens once per startup, not twice.
 
         Src shape: ``file://<rel-path>`` (path relative to image
         root; root-relocation invariant, so moving the image-store
@@ -331,7 +344,7 @@ def create_app(
         """
         now = _now_iso()
         with _db.open_db(state_path) as conn:
-            for img in images.list_images(resolved_image_root):
+            for img in scanned:
                 try:
                     rel = img.path.relative_to(resolved_image_root)
                 except ValueError:
@@ -2078,8 +2091,12 @@ def create_app(
             # file so the operator can bind a machine by its
             # ``bty_image_ref`` immediately, without waiting for a
             # bty-web restart's lifespan sweep. Idempotent
-            # (``INSERT OR IGNORE`` + ``COALESCE`` UPDATE).
-            _auto_import_dir_scan_rows()
+            # (``INSERT OR IGNORE`` + ``COALESCE`` UPDATE). The
+            # upload only added one file, so a fresh dir-scan is the
+            # honest input; calling the helper with the full
+            # ``list_images`` result keeps the function signature
+            # consistent with the startup caller.
+            _auto_import_dir_scan_rows(images.list_images(resolved_image_root))
             with _db.open_db(state_path) as conn:
                 _log_event(
                     conn,
