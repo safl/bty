@@ -221,6 +221,100 @@ def test_init_db_refuses_mismatched_version_without_mutating(tmp_path: Path) -> 
     assert stored == "0.0.1-fake-old", "refuse path must not update the marker"
 
 
+def test_check_db_fresh_db(tmp_path: Path) -> None:
+    """A non-existent state.db reports FRESH so the recovery flow
+    knows ``init_db`` will create + stamp on first start."""
+    state = tmp_path / "state.db"
+    r = _db.check_db(state)
+    assert r.state == _db.DbState.FRESH
+    assert r.stored_version is None
+    assert r.has_data_tables is False
+    assert r.running_version == bty.__version__
+    assert r.needs_recovery is False
+
+
+def test_check_db_ok_after_init(tmp_path: Path) -> None:
+    """A freshly-init'd DB reports OK with the running version stamped.
+    ``has_data_tables`` is True because SCHEMA creates the (empty)
+    machines/catalog_entries/events/settings tables on init -- the
+    flag flips on any non-marker table, populated or not."""
+    state = tmp_path / "state.db"
+    _db.init_db(state)
+    r = _db.check_db(state)
+    assert r.state == _db.DbState.OK
+    assert r.stored_version == bty.__version__
+    assert r.needs_recovery is False
+
+
+def test_check_db_pre_versioning(tmp_path: Path) -> None:
+    """A DB with data tables but no ``bty_version`` row reports
+    PRE_VERSIONING -- the recovery UI uses this to render the
+    "old release; wipe + import" wizard."""
+    state = tmp_path / "state.db"
+    with sqlite3.connect(state) as conn:
+        conn.execute("CREATE TABLE machines (mac TEXT PRIMARY KEY)")
+        conn.execute("INSERT INTO machines VALUES (?)", ("aa:bb:cc:dd:ee:ff",))
+        conn.commit()
+    r = _db.check_db(state)
+    assert r.state == _db.DbState.PRE_VERSIONING
+    assert r.stored_version is None
+    assert r.has_data_tables is True
+    assert r.needs_recovery is True
+
+
+def test_check_db_mismatch(tmp_path: Path) -> None:
+    """A DB with a stamped version that doesn't match the running
+    code reports MISMATCH + the stored value so the recovery UI
+    can say "this DB was created by bty v0.27.4; you are running
+    v0.32.0."""
+    state = tmp_path / "state.db"
+    _db.init_db(state)
+    with sqlite3.connect(state) as conn:
+        conn.execute("UPDATE bty_version SET version = ?", ("0.27.4",))
+        conn.commit()
+    r = _db.check_db(state)
+    assert r.state == _db.DbState.MISMATCH
+    assert r.stored_version == "0.27.4"
+    assert r.needs_recovery is True
+
+
+def test_check_db_does_not_mutate(tmp_path: Path) -> None:
+    """``check_db`` is a non-mutating probe (opens read-only); the
+    recovery UI calls it repeatedly while the operator decides what
+    to do, and any DB write would either (a) create the file when
+    it shouldn't or (b) leak the marker table across systemd
+    retries like the v0.31.0 bug did."""
+    state = tmp_path / "state.db"
+    # Pre-versioning DB: data table without marker.
+    with sqlite3.connect(state) as conn:
+        conn.execute("CREATE TABLE machines (mac TEXT)")
+        conn.commit()
+    before = state.stat().st_size
+
+    _db.check_db(state)
+    _db.check_db(state)
+    _db.check_db(state)
+
+    after = state.stat().st_size
+    assert before == after, "check_db must not mutate the file"
+    with sqlite3.connect(state) as conn:
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    assert "bty_version" not in tables, (
+        "check_db must not create the marker table on a pre-versioning DB"
+    )
+
+
+def test_check_db_missing_file_is_fresh(tmp_path: Path) -> None:
+    """A check against a path that doesn't exist returns FRESH without
+    creating the file -- the recovery flow uses this to decide which
+    UI to mount before bty-web has ever stamped anything."""
+    nonexistent = tmp_path / "nope" / "state.db"
+    r = _db.check_db(nonexistent)
+    assert r.state == _db.DbState.FRESH
+    assert not nonexistent.exists()
+    assert not nonexistent.parent.exists()
+
+
 def test_version_mismatch_error_carries_running_version(tmp_path: Path) -> None:
     """The error message names BOTH the stored version (so the operator
     knows which release the DB came from) AND the running version

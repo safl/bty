@@ -23,6 +23,7 @@ import os
 import sqlite3
 from collections.abc import Iterator
 from contextlib import closing, contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -200,6 +201,123 @@ class VersionMismatchError(RuntimeError):
     The recovery is ``rm state.db`` (and ``bty-web import`` afterwards
     if hardware inventory should be preserved). Pre-1.0: no migration
     apparatus."""
+
+
+# DB state classifier. Returned by :func:`check_db` so callers
+# (specifically ``bty.web._app.create_app``) can decide whether to
+# build the full app or a recovery-mode app -- without raising.
+# v0.32.0+: when bty-web boots against a mismatched / pre-versioning
+# DB, it starts a minimal recovery UI on the same port instead of
+# dying in the journal, so the operator gets a styled wizard in the
+# browser. ``init_db`` keeps raising for callers that want the strict
+# "refuse to proceed" semantics; ``check_db`` is the non-mutating
+# probe the recovery flow uses.
+class DbState:
+    """Sentinel values returned by :func:`check_db`."""
+
+    FRESH = "fresh"  # no tables at all; init_db would stamp + return
+    OK = "ok"  # marker matches running bty.__version__
+    PRE_VERSIONING = "pre_versioning"  # data tables exist, no marker
+    MISMATCH = "mismatch"  # marker present but != running version
+
+
+@dataclass(frozen=True)
+class DbCheckResult:
+    """Outcome of a non-mutating ``check_db`` probe.
+
+    The recovery UI renders directly from these fields so the
+    operator sees a faithful summary of what bty-web found.
+    """
+
+    state: str  # one of :class:`DbState` values
+    stored_version: str | None  # ``bty_version`` row's value, or None
+    running_version: str  # bty.__version__
+    has_data_tables: bool  # True iff any data table other than sqlite_sequence/bty_version
+    path: Path
+
+    @property
+    def needs_recovery(self) -> bool:
+        """True iff bty-web should run in recovery mode instead of normal."""
+        return self.state in (DbState.PRE_VERSIONING, DbState.MISMATCH)
+
+
+def check_db(path: Path) -> DbCheckResult:
+    """Non-mutating probe of ``path``'s shape vs the running bty version.
+
+    Returns a :class:`DbCheckResult` describing what's on disk. Does
+    NOT create / alter / stamp anything -- safe to call from a
+    recovery-mode startup that needs to keep the operator's data
+    readable until they decide what to do with it.
+
+    A missing path returns ``DbState.FRESH`` (``init_db`` would
+    create + stamp it). An unreadable / locked DB still returns a
+    best-effort guess; downstream callers must handle a partial
+    result rather than crash.
+    """
+    if not path.exists():
+        return DbCheckResult(
+            state=DbState.FRESH,
+            stored_version=None,
+            running_version=bty.__version__,
+            has_data_tables=False,
+            path=path,
+        )
+    # Open read-only to avoid creating the file or writing a journal
+    # if the DB is fine. ``mode=ro`` is the URI form sqlite3 supports.
+    uri = f"file:{path}?mode=ro"
+    try:
+        with closing(sqlite3.connect(uri, uri=True)) as conn:
+            tables = {
+                r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            }
+            has_data_tables = bool(tables - {"sqlite_sequence", "bty_version"})
+            stored: str | None = None
+            if "bty_version" in tables:
+                row = conn.execute("SELECT version FROM bty_version LIMIT 1").fetchone()
+                if row is not None:
+                    stored = row[0]
+    except sqlite3.Error:
+        # Corrupt / locked / not a sqlite file -- treat as
+        # pre-versioning so the recovery UI surfaces it.
+        return DbCheckResult(
+            state=DbState.PRE_VERSIONING,
+            stored_version=None,
+            running_version=bty.__version__,
+            has_data_tables=True,
+            path=path,
+        )
+
+    if not has_data_tables and stored is None:
+        return DbCheckResult(
+            state=DbState.FRESH,
+            stored_version=None,
+            running_version=bty.__version__,
+            has_data_tables=False,
+            path=path,
+        )
+    if stored is None:
+        return DbCheckResult(
+            state=DbState.PRE_VERSIONING,
+            stored_version=None,
+            running_version=bty.__version__,
+            has_data_tables=has_data_tables,
+            path=path,
+        )
+    if stored != bty.__version__:
+        return DbCheckResult(
+            state=DbState.MISMATCH,
+            stored_version=stored,
+            running_version=bty.__version__,
+            has_data_tables=has_data_tables,
+            path=path,
+        )
+    return DbCheckResult(
+        state=DbState.OK,
+        stored_version=stored,
+        running_version=bty.__version__,
+        has_data_tables=has_data_tables,
+        path=path,
+    )
 
 
 def init_db(path: Path) -> None:

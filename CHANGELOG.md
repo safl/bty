@@ -9,6 +9,67 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.32.0] - 2026-05-25
+
+Recovery-mode UI: when `bty-web` boots against a `state.db` that
+doesn't match the running release (v0.31.x's hard-check refusal
+class), it now serves an **interactive recovery wizard** on the
+same port instead of dying with a journal-only error. The
+operator hits the appliance URL in a browser, lands on a styled
+checklist, picks a recovery strategy, and bty-web executes it.
+
+### Added
+
+- **`bty.web._db.check_db(path)`** -- non-mutating probe that
+  returns a `DbCheckResult` describing the state (`OK`, `FRESH`,
+  `PRE_VERSIONING`, `MISMATCH`) without raising. Replaces the
+  "always raise, let the caller try / except" shape for the
+  recovery flow's needs.
+- **`bty.web._recovery.build_recovery_app(...)`** -- minimal
+  FastAPI app served when `check_db` reports a mismatch. Routes:
+  - `GET /` -> redirect to `/ui/recovery`
+  - `GET /ui/recovery` -> the wizard page
+  - `GET /ui/recovery/status` -> JSON poll (the wizard's JS
+    polls this to detect when bty-web has restarted into normal
+    mode and auto-redirects)
+  - `POST /ui/recovery/wipe` -> unlink `state.db` (+ sqlite
+    sidecars) and schedule `os._exit(0)` so systemd's
+    `Restart=on-failure` brings up a fresh process
+  - `POST /ui/recovery/wipe-and-import` body=`{"backup_id":
+    "..."}` -> wipe + import a v2 bundle from
+    `backups_root/<backup_id>`, then exit
+  - `GET /healthz` -> 503 with reason (so automated probers see
+    the unhealthy state)
+  - Everything else -> 503 with a meta-refresh back to
+    `/ui/recovery` (so a bookmarked normal-mode URL doesn't
+    leave the operator on a JSON error page)
+
+- **Recovery wizard template** (`_templates/ui/recovery.html`):
+  ultra-explicit banner ("bty-web needs operator attention"),
+  current state summary (stored version vs running version,
+  at-risk row counts), three recovery strategy cards
+  (wipe-and-fresh / wipe-and-import-from-backup / manual shell
+  recipe), and an auto-progressing checklist (steps 3 + 4 tick
+  green as the operator's chosen action proceeds + bty-web
+  restarts into normal mode).
+
+### Changed
+
+- **`create_app`** dispatches to the recovery app when
+  `check_db` reports a needs-recovery state, instead of letting
+  `init_db` raise out into the journal. The full app is built
+  only when the DB is OK or FRESH; everything else goes through
+  the wizard.
+
+### Why this matters
+
+The v0.31.0 hard-check was correct policy (refuse to silently
+mix schemas) but the UX was painful: bty-web died in a journal
+loop, the operator had to ssh in and read the systemd error to
+find the `rm state.db` recovery command. v0.32.0 keeps the
+policy (no silent migration) but moves the recovery
+conversation into the browser where the operator already is.
+
 ## [0.31.1] - 2026-05-25
 
 Critical fix for the v0.31.0 hard `bty_version` DB check, plus a
