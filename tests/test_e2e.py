@@ -1712,33 +1712,31 @@ def test_e2e_auth_flow_login_access_logout_denied(
 # ----------------------------------------------------------------------
 
 
-def test_e2e_state_db_schema_matches_init_db_output(tmp_path: Path) -> None:
-    """The schema defined in ``bty.web._db.SCHEMA`` must match what
-    ``init_db`` produces on a fresh DB AND the ``_REQUIRED_COLUMNS``
-    dictionary used by ``_detect_stale_schema``. A drift between
-    these is the regression shape that surfaces as "operator
-    upgraded bty-lab + their state.db now has unknown columns".
+def test_e2e_state_db_schema_stamps_bty_version_on_fresh_db(tmp_path: Path) -> None:
+    """The fresh state.db ``init_db`` produces carries a ``bty_version``
+    row matching the running ``bty.__version__``. This is the
+    contract bty-web checks on every startup to refuse stale DBs --
+    if the stamp ever drifts (e.g. SCHEMA stops creating the table,
+    or init_db stops INSERTing the version), the next release would
+    accept an "empty" DB as fresh and silently keep the stale state.
     """
     state = tmp_path / "state.db"
     _bty_db.init_db(state)
-    # Every required column listed in _REQUIRED_COLUMNS must
-    # actually exist on the freshly-initialised DB.
     import sqlite3
 
     con = sqlite3.connect(state)
     con.row_factory = sqlite3.Row
     try:
-        for table, required in _bty_db._REQUIRED_COLUMNS.items():
-            rows = con.execute(f"PRAGMA table_info({table})").fetchall()
-            assert rows, f"_REQUIRED_COLUMNS lists table {table!r} but it wasn't created by init_db"
-            cols = {r["name"] for r in rows}
-            missing = set(required) - cols
-            assert not missing, (
-                f"_REQUIRED_COLUMNS expects {missing!r} on {table!r} "
-                f"but init_db produced {cols!r}. Drift between SCHEMA "
-                f"and _REQUIRED_COLUMNS -- bumping schema must update "
-                f"both atomically."
-            )
+        rows = con.execute("SELECT version FROM bty_version").fetchall()
+        assert len(rows) == 1, f"expected exactly one bty_version row, got {len(rows)}"
+        import bty as _bty_pkg
+
+        assert rows[0]["version"] == _bty_pkg.__version__, (
+            f"bty_version row {rows[0]['version']!r} does not match running "
+            f"bty.__version__ {_bty_pkg.__version__!r} -- init_db stopped "
+            f"stamping the version. The hard-mismatch check at next startup "
+            f"would falsely treat this DB as a pre-versioning install."
+        )
     finally:
         con.close()
 

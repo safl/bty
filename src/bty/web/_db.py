@@ -7,10 +7,14 @@ State lives at ``$BTY_STATE_DIR/state.db`` (default
 ``/var/lib/bty/state.db`` to match the appliance image's expectations).
 
 Pre-1.0: the schema is whatever ``CREATE TABLE`` says here. There is
-no migration apparatus -- breaking changes are landed by the operator
-wiping ``state.db`` (the appliance is trivial to redeploy and machine
-records are operator-typed). A proper migration framework will land
-before the 1.0 tag.
+no migration apparatus. The DB carries the exact ``bty.__version__``
+that created it in the ``bty_version`` table; bty-web refuses to
+start if the running version doesn't match. Every release is
+therefore breaking for state -- by design. The cross-release path
+is ``bty-web export`` (slim bundle of images + cached files +
+hardware inventory) then wipe and import on the new release. Plain
+operator state (image bindings, boot policies, settings) is re-
+typed on the new appliance, by design.
 """
 
 from __future__ import annotations
@@ -21,6 +25,8 @@ from collections.abc import Iterator
 from contextlib import closing, contextmanager
 from pathlib import Path
 from typing import Any
+
+import bty
 
 DEFAULT_STATE_DIR = Path("/var/lib/bty")
 
@@ -169,114 +175,47 @@ CREATE TABLE IF NOT EXISTS settings (
     value      TEXT NOT NULL,
     updated_at TEXT NOT NULL        -- ISO 8601 UTC of the last write
 );
+
+-- Single-row marker recording the ``bty.__version__`` that created
+-- this state.db. ``init_db`` refuses to start bty-web if the stored
+-- version doesn't EXACTLY match the running code. Pre-1.0 policy:
+-- no migration apparatus, no patch-release leniency, no schema-
+-- version integer that operators have to track separately. Every
+-- release that ships a wheel to PyPI is a release that wipes state
+-- (or migrates via export/import). Operators who want to preserve
+-- hardware inventory across an upgrade run ``bty-web export`` on
+-- the running version, wipe state.db, install the new version, and
+-- ``bty-web import`` on the new release -- the slim bundle format
+-- is version-tolerant.
+CREATE TABLE IF NOT EXISTS bty_version (
+    version  TEXT NOT NULL PRIMARY KEY
+);
 """
 
 
-class StaleSchemaError(RuntimeError):
-    """Raised when state.db exists but is missing required columns.
-    Pre-1.0 has no migration apparatus; the fix is to wipe state.db.
-    The error message names the missing columns + path so an
-    operator can act without grepping the source."""
-
-
-# Columns the current schema requires. Each entry is checked on
-# every ``init_db`` call against an existing DB; a missing column
-# raises :class:`StaleSchemaError` with an operator-actionable
-# message ("rm state.db") instead of letting the first subsequent
-# ``SELECT`` blow up with ``no such column``.
-_REQUIRED_COLUMNS: dict[str, tuple[str, ...]] = {
-    "events": ("source_ip",),
-    # ``boot_mode`` (renamed from ``boot_policy``): listing it here forces
-    # a clean state.db reset on an old DB that still has ``boot_policy``,
-    # rather than a runtime "no such column" error.
-    "machines": ("bty_image_ref", "known_disks", "target_disk_serial", "boot_mode"),
-    "catalog_entries": ("bty_image_ref", "disk_image_sha"),
-}
-
-
-# Columns added after their table's initial release that carry a
-# DEFAULT, so they can be backfilled in place with a plain
-# ``ALTER TABLE ... ADD COLUMN`` rather than forcing a state.db wipe.
-# This is the narrow exception to the "no migrations" rule: a
-# defaulted column is non-destructive to add, and wiping the whole
-# DB (losing machine inventory) just to gain an events flag would
-# defeat bty-state-migrate's persist-across-reflash promise.
-# Strictly-required columns with no sensible default still go through
-# ``_REQUIRED_COLUMNS`` + the wipe path.
-_ADDITIVE_COLUMNS: dict[str, dict[str, str]] = {
-    "events": {
-        "acknowledged": "INTEGER NOT NULL DEFAULT 0",
-    },
-    "machines": {
-        # Nullable (NULL = use the default sanboot drive, 0x80), so a
-        # plain ADD COLUMN backfills existing rows with NULL.
-        "sanboot_drive": "TEXT",
-        # One-shot bty-flash-always loop-break bit; existing rows
-        # backfill to 0 (not yet seen a post-flash artifact fetch).
-        "saw_flasher_boot": "INTEGER NOT NULL DEFAULT 0",
-        # Full lshw -json hardware blob + its timestamp; nullable, so a
-        # plain ADD COLUMN backfills existing rows with NULL.
-        "hw_lshw": "TEXT",
-        "hw_lshw_at": "TEXT",
-    },
-}
-
-
-def _apply_additive_columns(conn: sqlite3.Connection) -> None:
-    """Add any missing defaulted columns from :data:`_ADDITIVE_COLUMNS`.
-
-    Idempotent: runs after the ``CREATE TABLE IF NOT EXISTS`` pass so
-    a fresh DB already has the column (the ALTER is skipped); an older
-    DB gets the column added in place with its default backfilled.
-    Table + column names are internal constants, never user input, so
-    the f-string SQL carries no injection surface.
-    """
-    for table, cols in _ADDITIVE_COLUMNS.items():
-        rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
-        if not rows:
-            continue  # fresh DB: SCHEMA already created it with the column
-        existing = {r[1] for r in rows}
-        for name, decl in cols.items():
-            if name not in existing:
-                conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
-
-
-def _detect_stale_schema(conn: sqlite3.Connection, path: Path) -> None:
-    """Raise :class:`StaleSchemaError` if any expected column is
-    missing on an existing table. Pre-1.0: the recovery is ``rm
-    <state.db>`` and let bty-web recreate it.
-
-    Tables that don't exist yet (fresh DB) are skipped; the
-    ``CREATE TABLE IF NOT EXISTS`` in :data:`SCHEMA` will create
-    them with the current shape.
-    """
-    for table, required in _REQUIRED_COLUMNS.items():
-        rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
-        if not rows:
-            continue  # table doesn't exist yet -- SCHEMA will create it
-        existing = {r[1] for r in rows}
-        missing = [c for c in required if c not in existing]
-        if missing:
-            raise StaleSchemaError(
-                f"bty-web state.db at {path} is missing columns "
-                f"{missing!r} on table {table!r}. Pre-1.0 has no "
-                f"migrations apparatus -- delete the file "
-                f"(``rm {path}``) and let bty-web recreate it on "
-                f"next startup. Existing machine records will be "
-                f"lost; auto-discovery will re-populate from "
-                f"first PXE contact."
-            )
+class VersionMismatchError(RuntimeError):
+    """Raised when state.db's ``bty_version`` row doesn't match the
+    running ``bty.__version__``, OR the DB has data tables but no
+    ``bty_version`` row (pre-versioning DB from an older release).
+    The recovery is ``rm state.db`` (and ``bty-web import`` afterwards
+    if hardware inventory should be preserved). Pre-1.0: no migration
+    apparatus."""
 
 
 def init_db(path: Path) -> None:
-    """Create ``path`` (and its parent directory) if missing; apply the schema.
+    """Create ``path`` (and its parent directory) if missing; apply
+    the schema; verify the ``bty_version`` marker matches.
 
-    Pre-1.0: no migrations. The schema is whatever :data:`SCHEMA`
-    says. Idempotent for first-init / fresh-create; calling against
-    an existing DB is a no-op for the tables already there. If an
-    existing DB has tables with missing columns (a stale schema
-    from an older bty-web), :class:`StaleSchemaError` is raised
-    with operator-actionable recovery instructions.
+    Pre-1.0: no migrations. The DB carries a ``bty_version`` row with
+    the ``bty.__version__`` that created it; bty-web REFUSES to start
+    if the running version doesn't match exactly. The recovery is
+    documented in the :class:`VersionMismatchError` message and in
+    operations.md. Every release that bumps ``__version__`` is a
+    release that requires a state.db wipe (or export+wipe+import).
+
+    Fresh DB (no tables at all) gets the current version stamped on
+    init. A DB with data tables but no ``bty_version`` row is a pre-
+    versioning install -- refuse with a clear message.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     # ``with sqlite3.connect(...)`` is a *transaction* context, not a
@@ -284,9 +223,60 @@ def init_db(path: Path) -> None:
     # connection open (closed only by refcount GC, fragile off
     # CPython). ``closing`` guarantees the fd is released here.
     with closing(sqlite3.connect(path)) as conn, conn:
-        _detect_stale_schema(conn, path)
+        # Pre-SCHEMA pass: catch pre-versioning DBs (data tables exist
+        # but no bty_version table) before the IF NOT EXISTS creates
+        # the marker and masks the condition.
+        existing_tables = {
+            r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
+        has_data_tables = bool(existing_tables - {"sqlite_sequence"})
+        had_marker_before_schema = "bty_version" in existing_tables
+
         conn.executescript(SCHEMA)
-        _apply_additive_columns(conn)
+
+        stored_row = conn.execute("SELECT version FROM bty_version LIMIT 1").fetchone()
+
+        if stored_row is None:
+            # No marker row yet. Either a fresh DB (had_data_tables=False
+            # before SCHEMA -- harmless to stamp) or a pre-versioning DB
+            # (had_data_tables=True, had_marker_before_schema=False --
+            # the marker table only exists because SCHEMA just made it).
+            if has_data_tables and not had_marker_before_schema:
+                raise VersionMismatchError(
+                    f"bty-web: state.db at {path} has data tables but no "
+                    f"bty_version row -- this is a pre-versioning DB from "
+                    f"an older bty release. Pre-1.0 policy: no migration "
+                    f"apparatus.\n\n"
+                    f"Recovery (loses operator state -- bindings, settings, "
+                    f"audit log):\n"
+                    f"  sudo systemctl stop bty-web\n"
+                    f"  sudo rm {path}\n"
+                    f"  sudo systemctl start bty-web\n\n"
+                    f"To preserve hardware inventory across the wipe, run "
+                    f"``bty-web export`` on the OLD version BEFORE wiping, "
+                    f"then ``bty-web import`` on the new release. See "
+                    f"operations.md."
+                )
+            conn.execute("INSERT INTO bty_version (version) VALUES (?)", (bty.__version__,))
+            return
+
+        stored_version = stored_row[0]
+        if stored_version != bty.__version__:
+            raise VersionMismatchError(
+                f"bty-web: state.db at {path} carries bty_version "
+                f"{stored_version!r}, but the running code is "
+                f"{bty.__version__!r}. Pre-1.0 policy: no migration "
+                f"apparatus -- every release wipes state.\n\n"
+                f"Recovery (loses operator state):\n"
+                f"  sudo systemctl stop bty-web\n"
+                f"  sudo rm {path}\n"
+                f"  sudo systemctl start bty-web\n\n"
+                f"To preserve hardware inventory (MAC + lshw + known_disks) "
+                f"across the wipe, run ``bty-web export`` on the OLD version "
+                f"BEFORE upgrading, then ``bty-web import`` on the new "
+                f"release. See operations.md."
+            )
+        # Same version: idempotent no-op.
 
 
 @contextmanager

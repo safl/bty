@@ -1,8 +1,11 @@
 """Tests for ``bty.web._db`` schema initialisation.
 
 Pre-1.0: ``init_db`` is a one-liner over ``CREATE TABLE IF NOT
-EXISTS`` -- no migration apparatus. These tests pin the table
-shape so a future schema edit can't silently drop a column.
+EXISTS`` plus a strict ``bty_version`` match check -- no migration
+apparatus, no per-column stale-schema detection. Every release that
+bumps ``bty.__version__`` is a release that requires a state.db
+wipe (or export+wipe+import). These tests pin both halves of that
+contract.
 """
 
 from __future__ import annotations
@@ -10,6 +13,9 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
+import pytest
+
+import bty
 from bty.web import _db
 
 
@@ -57,113 +63,86 @@ def test_init_db_creates_events_table(tmp_path: Path) -> None:
     } <= cols
 
 
-def test_init_db_backfills_acknowledged_on_old_events_table(tmp_path: Path) -> None:
-    """A state.db whose ``events`` table predates the ``acknowledged``
-    column gets it added in place (additive migration), NOT a
-    StaleSchemaError wipe -- the column carries a DEFAULT so existing
-    rows survive. This is the persist-across-reflash contract: adding
-    an events flag must not cost the operator their machine inventory.
-    """
+def test_init_db_stamps_current_version_on_fresh_db(tmp_path: Path) -> None:
+    """A freshly-created state.db has the running ``bty.__version__``
+    in the ``bty_version`` table -- this is what later starts check
+    against to refuse stale DBs."""
     state = tmp_path / "state.db"
-    # Pre-``acknowledged`` events table with one row, plus the columns
-    # _REQUIRED_COLUMNS checks so we exercise the additive path (not
-    # the stale-wipe path).
+    _db.init_db(state)
     with sqlite3.connect(state) as conn:
-        conn.execute(
-            """
-            CREATE TABLE events (
-                id            INTEGER PRIMARY KEY AUTOINCREMENT,
-                ts            TEXT NOT NULL,
-                kind          TEXT NOT NULL,
-                subject_kind  TEXT,
-                subject_id    TEXT,
-                actor         TEXT,
-                source_ip     TEXT,
-                summary       TEXT NOT NULL,
-                details       TEXT
-            )
-            """
-        )
-        conn.execute(
-            "INSERT INTO events (ts, kind, summary) VALUES (?, ?, ?)",
-            ("2026-01-01T00:00:00+00:00", "image.hash_failed", "old failure"),
-        )
-        conn.commit()
-    _db.init_db(state)  # must not raise; must add the column
-    with sqlite3.connect(state) as conn:
-        cols = {row[1] for row in conn.execute("PRAGMA table_info(events)")}
-        assert "acknowledged" in cols
-        # The pre-existing row is backfilled to the default (0).
-        row = conn.execute("SELECT acknowledged FROM events").fetchone()
-    assert row[0] == 0
+        row = conn.execute("SELECT version FROM bty_version").fetchone()
+    assert row is not None
+    assert row[0] == bty.__version__
 
 
 def test_init_db_idempotent(tmp_path: Path) -> None:
-    """``init_db`` is called on every ``open_db``; double-call must be a no-op."""
+    """``init_db`` is called on every ``open_db``; double-call against
+    a DB that already has the current version row must be a no-op."""
     state = tmp_path / "state.db"
     _db.init_db(state)
     _db.init_db(state)  # second call must not raise
+    with sqlite3.connect(state) as conn:
+        rows = conn.execute("SELECT version FROM bty_version").fetchall()
+    # Still exactly one version row (PRIMARY KEY means inserting a
+    # second of the same value would raise; the implementation must
+    # skip the INSERT when the marker already exists).
+    assert len(rows) == 1
+    assert rows[0][0] == bty.__version__
 
 
-def test_init_db_raises_on_machines_known_disks_missing(tmp_path: Path) -> None:
-    """A state.db from v0.18 (machines table without
-    ``known_disks`` / ``target_disk_serial``) must trigger
-    StaleSchemaError so the operator gets the ``rm state.db``
-    recovery hint, not a silent insert that fails on the next
-    query."""
-    import sqlite3
-
-    import pytest
-
+def test_init_db_raises_on_pre_versioning_db(tmp_path: Path) -> None:
+    """A state.db with data tables but no ``bty_version`` row is a
+    pre-versioning DB from an older bty release. Pre-1.0 policy has
+    no migration apparatus -- refuse with operator-actionable
+    instructions instead of silently mixing schemas."""
     state = tmp_path / "state.db"
-    # Create the v0.18-shaped machines table -- missing the v0.19
-    # disk columns.
+    # Create a minimal pre-versioning DB shape (one data table, no
+    # bty_version table). Mirrors the real-world scenario where the
+    # operator's state.db survived a reflash via bty-state-migrate but
+    # was created by a bty release that predates this check.
     with sqlite3.connect(state) as conn:
         conn.execute(
             """
             CREATE TABLE machines (
-                mac                TEXT PRIMARY KEY,
-                bty_image_ref      TEXT,
-                hostname           TEXT,
-                discovered_at      TEXT,
-                last_seen_at       TEXT,
-                last_seen_ip       TEXT,
-                boot_mode        TEXT NOT NULL DEFAULT 'local',
-                last_flashed_at    TEXT,
-                created_at         TEXT NOT NULL,
-                updated_at         TEXT NOT NULL
+                mac          TEXT PRIMARY KEY,
+                created_at   TEXT NOT NULL,
+                updated_at   TEXT NOT NULL
             )
             """
         )
         conn.commit()
-    with pytest.raises(_db.StaleSchemaError, match="known_disks"):
+    with pytest.raises(_db.VersionMismatchError, match="pre-versioning DB"):
         _db.init_db(state)
 
 
-def test_init_db_raises_on_stale_schema(tmp_path: Path) -> None:
-    """If state.db exists from an older bty-web (missing
-    columns added in a later release), :func:`init_db` raises
-    :class:`StaleSchemaError` with operator-actionable recovery
-    instructions instead of letting a later ``SELECT`` blow up
-    with ``no such column``."""
-    import sqlite3
-
-    import pytest
-
+def test_init_db_raises_on_version_mismatch(tmp_path: Path) -> None:
+    """A state.db whose ``bty_version`` row doesn't match the running
+    code must be refused. Pre-1.0 policy: every release wipes state
+    (or migrates via export+wipe+import)."""
     state = tmp_path / "state.db"
-    # Create an older-style events table missing ``source_ip`` --
-    # simulates a stale state.db from before audit-log IP tracking.
+    # Stand up a valid v0.X DB with a different version stamped.
+    _db.init_db(state)
     with sqlite3.connect(state) as conn:
-        conn.execute(
-            """
-            CREATE TABLE events (
-                id            INTEGER PRIMARY KEY AUTOINCREMENT,
-                ts            TEXT NOT NULL,
-                kind          TEXT NOT NULL,
-                summary       TEXT NOT NULL
-            )
-            """
-        )
+        conn.execute("UPDATE bty_version SET version = ?", ("0.0.1-fake-old-release",))
         conn.commit()
-    with pytest.raises(_db.StaleSchemaError, match="source_ip"):
+    with pytest.raises(_db.VersionMismatchError, match=r"0\.0\.1-fake-old-release"):
         _db.init_db(state)
+
+
+def test_version_mismatch_error_carries_running_version(tmp_path: Path) -> None:
+    """The error message names BOTH the stored version (so the operator
+    knows which release the DB came from) AND the running version
+    (so they know which release they're upgrading TO). Together with
+    the ``rm state.db`` recovery line, that's all the operator needs."""
+    state = tmp_path / "state.db"
+    _db.init_db(state)
+    with sqlite3.connect(state) as conn:
+        conn.execute("UPDATE bty_version SET version = ?", ("0.99.99",))
+        conn.commit()
+    with pytest.raises(_db.VersionMismatchError) as exc:
+        _db.init_db(state)
+    msg = str(exc.value)
+    assert "0.99.99" in msg, "error must name the stored (old) version"
+    assert bty.__version__ in msg, "error must name the running (new) version"
+    assert "rm" in msg, "error must include the wipe-recovery command"
+    assert "export" in msg, "error must mention the export/import preservation path"
