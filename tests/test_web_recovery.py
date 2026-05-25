@@ -507,9 +507,7 @@ def test_recovery_wizard_flags_unreadable_backups(tmp_path: Path) -> None:
         files_dir.chmod(0o755)
 
 
-def test_wipe_and_import_categorises_disk_full_as_507(
-    tmp_path: Path, _no_exit: None
-) -> None:
+def test_wipe_and_import_categorises_disk_full_as_507(tmp_path: Path, _no_exit: None) -> None:
     """v0.32.1: a mid-import ``OSError`` (disk full, ENOSPC) returns
     a **507 Insufficient Storage** with the actual error text + a
     "free space and retry" hint, NOT a bare 500. The operator can

@@ -46,7 +46,7 @@ import bty
 if TYPE_CHECKING:
     from fastapi import FastAPI
 
-from . import _db, _portability
+from . import _db, _portability, _security
 
 
 class _WipeAndImportBody(BaseModel):
@@ -347,18 +347,16 @@ def build_recovery_app(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="state.db is OK; refusing to wipe + import",
             )
-        # Validate backup_id shape (basename, no traversal).
-        if (
-            not backup_id
-            or backup_id in (".", "..")
-            or "/" in backup_id
-            or "\\" in backup_id
-            or "\x00" in backup_id
-        ):
+        # Validate backup_id shape (basename, no traversal). Routes
+        # through the shared :func:`bty.web._security.validate_basename`
+        # so the rule lives in one place across the codebase.
+        try:
+            _security.validate_basename(backup_id, label="backup_id")
+        except ValueError as exc:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"invalid backup_id: {backup_id!r}",
-            )
+                detail=str(exc),
+            ) from exc
         bundle_path = backups_root / backup_id
         if not bundle_path.is_dir() or not (bundle_path / "manifest.json").is_file():
             raise HTTPException(
@@ -470,6 +468,9 @@ def build_recovery_app(
     return app
 
 
+_exit_scheduled = False
+
+
 def _schedule_exit_after_response() -> None:
     """Schedule ``os._exit(0)`` to fire shortly after the current
     HTTP response flushes.
@@ -481,12 +482,25 @@ def _schedule_exit_after_response() -> None:
     against the half-wiped state -- systemd's restart picks up a
     clean process.
 
+    Idempotent against repeated calls: a single module-level guard
+    ensures only ONE exit thread is spawned even if a second wipe
+    POST arrives during the 500ms response-flush window. The second
+    request's wipe step is a no-op (state.db is already unlinked by
+    then; the unlink helper is idempotent against missing files),
+    so the only race we need to win is "don't fire two os._exit
+    threads racing each other".
+
     Side effect by design: a 200 OK response reaches the operator's
     browser, then the process dies. The browser's status poll on
     ``/ui/recovery/status`` gets connection errors for a few seconds
     until the new process binds the port; the wizard's polling code
     treats that as "wipe in progress, keep retrying."
     """
+    global _exit_scheduled
+    if _exit_scheduled:
+        return
+    _exit_scheduled = True
+
     import threading
     import time
 

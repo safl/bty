@@ -9,6 +9,50 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.32.3] - 2026-05-25
+
+Round 4 of the post-v0.32.0 improvement grind: security boundary
+DRY-up, concurrency hardening, observability fixes.
+
+### Added
+
+- **`bty.web._security.validate_basename`** -- shared rejector for
+  path-traversal-y inputs (NUL, `/`, `\\`, `.`, `..`, empty).
+  Replaces five duplicated implementations of the same rule
+  across `_catalog._reject_traversal_name`,
+  `_hash._reject_traversal_name`, `_app.delete_catalog_cache`,
+  `_recovery._wipe_and_import`, and the `e45f93b` D5 test path.
+  Carries a ``label`` kwarg so 400-message text identifies which
+  field was rejected. 21 new tests in
+  `tests/test_web_security.py` lock down the accept/reject
+  matrix.
+
+### Fixed
+
+- **Concurrent wipe race in the recovery wizard.** v0.32.0's
+  `_schedule_exit_after_response` would spawn TWO `os._exit(0)`
+  threads if a second `POST /ui/recovery/wipe` arrived during the
+  500ms response-flush window. v0.32.3 gates on a module-level
+  ``_exit_scheduled`` flag so only one exit thread runs. The
+  second request's wipe step is already idempotent (the unlink
+  helper soft-skips missing files), so this just closes the race
+  on the exit side.
+- **sqlite WAL deadlock starves shutdown.** `open_db` connected
+  without an explicit timeout. If a future WAL writer wedges
+  (out-of-process holder, broken NFS), the lifespan teardown
+  would hang forever waiting on `conn.close()`. v0.32.3 sets
+  `timeout=5.0` explicitly so lock waits are bounded -- matches
+  sqlite's stdlib default but makes the contract auditable.
+- **Silent exception swallows on DB-write failures.** Three
+  back-fill paths in `_catalog.py` and `_hash.py` caught
+  `Exception: pass` to keep the appliance up when state.db is
+  briefly unavailable -- correct behaviour, but a corrupt DB
+  that rejects every back-fill vanished from the journal too.
+  v0.32.3 logs the exception with `log.exception(...)` so a
+  repeating failure shows up under
+  `journalctl -u bty-web --grep backfill` without changing
+  the soft-fail semantics.
+
 ## [0.32.2] - 2026-05-25
 
 Round 2 of the improvement grind: a startup perf fix + test

@@ -416,9 +416,19 @@ def init_db(path: Path) -> None:
 
 @contextmanager
 def open_db(path: Path) -> Iterator[sqlite3.Connection]:
-    """Open ``path``, ensure schema is applied, yield a Row-factory connection."""
+    """Open ``path``, ensure schema is applied, yield a Row-factory connection.
+
+    ``timeout=5.0`` on the connect call bounds the wait if another
+    process holds the write lock (sqlite's default is 5s already,
+    but the value is implicit; making it explicit makes the
+    contract auditable + protects against a future stdlib default
+    drift). On a single-bty-web appliance the WAL writer never
+    contends with anything else, but our lifespan teardown waits
+    on connection close -- without a bounded timeout, a wedged
+    writer could starve systemd's shutdown sequence.
+    """
     init_db(path)
-    conn = sqlite3.connect(path)
+    conn = sqlite3.connect(path, timeout=5.0)
     conn.row_factory = sqlite3.Row
     try:
         yield conn

@@ -26,6 +26,7 @@ sidecar-cached short-circuit, and the ``_run_one`` body.
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import threading
 import time
@@ -39,23 +40,26 @@ from bty.web import _db
 from bty.web._events_log import record as _log_event
 from bty.web._jobs import ENQUEUE_DEDUP_STATES, _BaseAsyncManager
 
+_log = logging.getLogger(__name__)
+
 # Default cap on simultaneous hashes. Tuned for small homelab
 # hardware (Pi 4, old NUCs, mini-PCs); env-overridable.
 DEFAULT_MAX_PARALLEL = 1
 
 
 def _reject_traversal_name(name: str) -> None:
-    """Reject anything that's not a plain basename.
+    """Reject anything that's not a plain basename. Thin alias for
+    :func:`bty.web._security.validate_basename` -- the security
+    module is the auditable single source of truth for the rule.
 
     The FastAPI layer's ``_safe_path`` rejects these on public
     routes; mirroring the check at the manager boundary means a
     direct call from a non-API caller (auto-import, tests) can
     never resolve outside ``image_root``.
     """
-    if not name or name in (".", "..") or "/" in name or "\\" in name or "\0" in name:
-        raise ValueError(
-            f"invalid name {name!r}: must be a basename without path separators or NUL bytes"
-        )
+    from bty.web._security import validate_basename
+
+    validate_basename(name, label="name")
 
 
 @dataclass
@@ -151,6 +155,13 @@ class HashManager(_BaseAsyncManager[HashState]):
                     limit=400,
                 )
         except Exception:
+            # state.db locked / corrupt at startup; the backfill
+            # is purely a UX nicety (recent hash history in the UI)
+            # so we soft-fail rather than crash bty-web. Log so a
+            # repeated failure doesn't vanish silently in the
+            # journal -- a corrupt DB that resists every backfill
+            # is worth surfacing.
+            _log.exception("hash-history backfill failed; UI will start empty")
             return
         seen: set[str] = set()
         for ev in rows:

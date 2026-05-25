@@ -28,6 +28,7 @@ Lifecycle plumbing lives in :class:`bty.web._jobs._BaseAsyncManager`.
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import threading
 import time
@@ -40,20 +41,22 @@ from typing import Any
 from bty import catalog as _catalog
 from bty.web._jobs import ENQUEUE_DEDUP_STATES, _BaseAsyncManager
 
+_log = logging.getLogger(__name__)
+
 # Default cap on simultaneous downloads. Tuned so a typical homelab
 # uplink isn't saturated by N parallel fetches; bumpable via env.
 DEFAULT_MAX_PARALLEL = 2
 
 
 def _reject_traversal_name(name: str) -> None:
-    """Reject anything that's not a plain basename. Mirrors the
-    same check on :class:`bty.web._hash.HashManager` so a
-    non-API caller can't slip a path-traversal name past the
-    catalog lookup."""
-    if not name or name in (".", "..") or "/" in name or "\\" in name or "\0" in name:
-        raise ValueError(
-            f"invalid name {name!r}: must be a basename without path separators or NUL bytes"
-        )
+    """Reject anything that's not a plain basename. Thin alias for
+    :func:`bty.web._security.validate_basename` -- the security
+    module is the auditable single source of truth for the rule;
+    this wrapper keeps the existing local name for compatibility
+    with the rest of the file."""
+    from bty.web._security import validate_basename
+
+    validate_basename(name, label="name")
 
 
 @dataclass
@@ -422,8 +425,14 @@ class DownloadManager(_BaseAsyncManager[DownloadState]):
                 # operator's next page-load triggers a fresh sha
                 # detection via the merge_with_catalog path, so the
                 # back-fill is a UX nicety, not a correctness
-                # guarantee.
-                pass
+                # guarantee. Log loudly so a repeated failure isn't
+                # silent in the journal -- a corrupt state.db that
+                # rejects every back-fill should surface, not vanish.
+                _log.exception(
+                    "catalog backfill failed for %s (file is cached on "
+                    "disk; UI will re-detect on next page load)",
+                    state.name,
+                )
 
         # Symmetric failure event: a failed download is now the only way
         # a remote image fails to come local (the serve-time
@@ -446,7 +455,13 @@ class DownloadManager(_BaseAsyncManager[DownloadState]):
                     )
                     conn.commit()
             except Exception:
-                pass
+                # Same rationale as the back-fill swallow above:
+                # this is an audit-log nicety, not a correctness
+                # guarantee. Logging keeps a repeated failure visible.
+                _log.exception(
+                    "catalog.fetch.sha_mismatch event-log write failed for %s",
+                    state.name,
+                )
 
         async with self._lock:
             state.status = final_status

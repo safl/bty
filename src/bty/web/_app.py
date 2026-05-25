@@ -43,7 +43,7 @@ import bty
 from bty import catalog as _catalog
 from bty import images
 from bty import oras as _oras
-from bty.web import _backup, _db, _hash, _models, _release_mgr, _settings_store, _ui
+from bty.web import _backup, _db, _hash, _models, _release_mgr, _security, _settings_store, _ui
 from bty.web import _catalog as _web_catalog
 from bty.web._auth import SESSION_COOKIE, require_auth
 from bty.web._events import (
@@ -3016,11 +3016,13 @@ def create_app(
         Path-separator characters or NUL in ``name`` are rejected at
         the boundary, same rule as :class:`CatalogEnqueueRequest`.
         """
-        if not name or any(c in name for c in ("/", "\\", "\x00")) or name in (".", ".."):
+        try:
+            _security.validate_basename(name, label="name")
+        except ValueError as exc:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"invalid name: {name!r}",
-            )
+                detail=str(exc),
+            ) from exc
         local_filename: str | None = None
         sha: str | None = None
         with _db.open_db(state_path) as conn:
