@@ -9,6 +9,55 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.33.9] - 2026-05-26
+
+**Targeted test coverage for the worst gap.** Operator-pointed
+critique: every API endpoint / function / UX experience must be
+tested, otherwise it's broken. The three real bugs found in the
+v0.33.x arc (PXE INSERT race, netboot fetch URL, session secret)
+all lived in code paths that lacked dedicated tests.
+
+A `coverage run pytest` pass showed `_release_mgr` at 66% -- the
+worst gap. The manager wraps `_releases.fetch_release` (where
+v0.33.7's bug lived) in an asyncio worker pool. The 66% was
+incidental coverage from `/ui/netboot` integration tests that
+don't reach the failed / cancelled / dedup / backfill branches.
+
+### Added
+
+- **`tests/test_web_release_mgr.py`** -- 14 dedicated tests
+  covering:
+  - enqueue input validation (path-traversal tag, before-start
+    error)
+  - happy path: queued -> running -> completed with per-artifact
+    state propagation + terminal audit event
+  - same-tag dedup while running (operator double-clicks
+    "Fetch artifacts")
+  - FetchError -> failed with error preserved + audit event
+  - unexpected exception -> failed with typed prefix
+  - FetchCancelled -> cancelled with NO audit event (operator-
+    initiated, not a failure)
+  - cancel-vs-IO-error race: cancel flag set + FetchError ->
+    cancelled (the manager re-classifies)
+  - backfill from completed event
+  - backfill from failed event
+  - backfill dedups per-tag to newest verdict
+  - backfill soft-fails on corrupt DB
+  - `ReleaseArtifactState.to_dict` shape pin
+  - `ReleaseFetchState.to_dict` includes artifacts sub-array
+
+### Coverage
+
+`_release_mgr` 66% -> 93%. Total suite 793 -> 807 tests.
+
+### Acknowledgement of scope
+
+This closes one gap. The remaining 12 percentage points (88% ->
+100%) is multi-day work and would require coverage on async SSE
+streams, lifespan teardown, and several rare error branches in
+`_app.py`. Future rounds tackle specific gaps as they get
+correlated with operator-reported failures.
+
 ## [0.33.8] - 2026-05-26
 
 **Harden session-secret resolution against empty / corrupt values.**
