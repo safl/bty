@@ -11,7 +11,10 @@ feed the catalog:
 2. **Manifest**: a TOML file at `BTY_CATALOG_FILE` (default
    `${BTY_STATE_DIR}/catalog.toml`) listing named entries with upstream
    `src` URLs and pinned `sha256` digests. Entries are fetched on demand
-   and cached by hash under `${BTY_STATE_DIR}/cache/<sha256>`.
+   and land under `BTY_IMAGE_ROOT` with a URL-keyed filename:
+   `catalog-<bty_image_ref[:12]>-<slug(name)>.<ext>` (v0.31.0+; same URL
+   always lands the same filename, so re-fetches are idempotent and
+   catalog files coexist with operator-typed ones in a single directory).
 
 Both sources merge by SHA-256: an image present locally AND declared in the
 manifest renders as a single row with both names and both sources.
@@ -158,20 +161,24 @@ browser UI).
 
 | Var | Default | Purpose |
 |---|---|---|
-| `BTY_IMAGE_ROOT` | `/var/lib/bty/images` | dir-scan source |
-| `BTY_STATE_DIR` | `/var/lib/bty` | base for catalog + cache + state.db |
+| `BTY_IMAGE_ROOT` | `/var/lib/bty/images` | dir-scan source AND landing dir for catalog-fetched files (v0.31.0+: no separate `cache/` subdir) |
+| `BTY_STATE_DIR` | `/var/lib/bty` | base for catalog + state.db |
 | `BTY_CATALOG_FILE` | `${BTY_STATE_DIR}/catalog.toml` | catalog file path |
-| `BTY_CATALOG_CACHE_DIR` | `${BTY_STATE_DIR}/cache` | content-addressed cache |
 | `BTY_CATALOG_MAX_PARALLEL` | `2` | concurrent downloads |
 | `BTY_HASH_MAX_PARALLEL` | `1` | concurrent hashes (low: small hardware) |
 
 ## Cache eviction
 
-The cache is unbounded in v1. Manual eviction:
+The catalog files under `BTY_IMAGE_ROOT` are unbounded. Per-entry
+eviction is the `DELETE /catalog/cache/{name}` endpoint (or its
+"Delete local copy" UI counterpart on `/ui/images`); a sweep is
+just removing the `catalog-` prefixed files:
 
 ```bash
-sudo rm -rf /var/lib/bty/cache/*
+sudo rm -f /var/lib/bty/images/catalog-*
 ```
+
+Operator-typed files (no `catalog-` prefix) are untouched.
 
 A future release may add LRU + size-cap eviction; until then, plan for
 cache size = sum of every image fetched since the last manual rm.

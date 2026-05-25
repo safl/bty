@@ -142,11 +142,37 @@ and sensible defaults.
 
 ### Default paths
 
-- `/var/lib/bty/images` - image root. The USB live appliance
- auto-mounts the `BTY_IMAGES` partition here. The server appliance
- auto-mounts a `LABEL=BTY_IMAGE_STORE` disk here (if one is present)
- so the image cache survives reflashes; see
+- `/var/lib/bty/images` - image root. Holds operator-typed image
+ files alongside catalog-fetched files named
+ `catalog-<bty_image_ref[:12]>-<slug(name)>.<ext>` (v0.31.0+; no
+ separate `cache/` subdir). The USB live appliance auto-mounts the
+ `BTY_IMAGES` partition here. The server appliance auto-mounts a
+ `LABEL=BTY_IMAGE_STORE` disk here (if one is present) so the
+ collection survives reflashes; see
  [walkthrough-image-store](walkthrough-image-store.md).
+
+### Catalog file naming
+
+Files under `BTY_IMAGE_ROOT` split into two visually-obvious classes
+on disk (v0.31.0+):
+
+- **Operator-typed images** keep whatever filename the operator
+ chose at upload / scp / drop-in time (e.g. `my-fedora.qcow2`,
+ `bty-server-x86_64-v0.30.2.img.gz`).
+- **Catalog-fetched files** land under a URL-derived name:
+ `catalog-<bty_image_ref[:12]>-<slug(name)>.<ext>` -- e.g.
+ `catalog-8e54fdb21522-nosi-debian-sysdev.img.gz`. The 12-hex
+ segment is the first 12 chars of `sha256(canonicalise_src(src))`
+ (48 bits, collision-free at any plausible homelab catalog size);
+ the slug is a filename-safe lower-case ASCII rendering of the
+ catalog entry's `name` field. Same URL hashes to the same
+ filename, so a re-fetch is a no-op when the file is already there.
+
+`ls /var/lib/bty/images/ | grep '^catalog-'` lists every catalog-
+fetched file; the rest are operator-typed. The
+`DELETE /catalog/cache/{name}` endpoint unlinks the URL-keyed file
+for one catalog entry; `rm -f /var/lib/bty/images/catalog-*` is a
+full sweep that leaves operator-typed files alone.
 
 ### Appliance helpers
 
@@ -283,10 +309,11 @@ operator triggers a fetch (the ``/ui/images`` "Fetch" button or ``POST
 /catalog/downloads``). Idempotent: re-importing the same source skips
 duplicates by ``src``.
 
-``DELETE /catalog/cache/{name}`` unlinks ``$cache_dir/<sha256>`` for the
-named entry; the catalog row is preserved. The next ``GET /images`` listing
+``DELETE /catalog/cache/{name}`` unlinks the URL-keyed local file
+(``$image_root/catalog-<ref:12>-<slug>.<ext>``, v0.31.0+) for the named
+entry; the catalog row is preserved. The next ``GET /images`` listing
 shows the row as ``cached: false`` so the operator can re-enqueue a fetch.
-Idempotent: missing cache file or unknown name both return 200 with
+Idempotent: missing local file or unknown name both return 200 with
 ``deleted: false`` and a ``reason`` string.
 
 MAC addresses are accepted in any case + `:`-or-`-` separated, and

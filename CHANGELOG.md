@@ -9,6 +9,68 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.31.1] - 2026-05-25
+
+Critical fix for the v0.31.0 hard `bty_version` DB check, plus a
+quality grind through the documentation + tests left stale by the
+v0.31.0 cache→images merge.
+
+### Fixed
+
+- **Hard `bty_version` check leaked across `systemd Restart=on-failure`
+  retries.** v0.31.0's `_db.init_db` ran `conn.executescript(SCHEMA)`
+  BEFORE the refuse condition; `sqlite3.executescript` issues an
+  implicit COMMIT, so the new `bty_version` table (empty) got
+  committed to disk even when the call then raised
+  `VersionMismatchError`. systemd retried 5s later; the second call
+  saw the marker table existed, treated the empty row as "fresh DB,
+  stamp it", and silently accepted the franken-state (old machine
+  inventory + audit log carried into v0.31.0 under a stamped
+  `bty_version=0.31.0` row). Surfaced in production: an operator
+  with `bty-state-migrate` (state.db on a separate disk) upgraded
+  the appliance disk, hit the bug, and saw old `bty-flash-once` +
+  events in the v0.31.0 UI.
+
+  Fix: refuse BEFORE `executescript` runs so no mutation slips
+  through. Same shape for the version-mismatch path -- the refuse
+  branch leaves the DB exactly as it was, so the operator's
+  `bty-web export` on the OLD release reads consistent state.
+  Regression test
+  (`test_init_db_refuses_pre_versioning_db_across_restart_retries`)
+  exercises three consecutive `init_db` calls against the same
+  pre-versioning DB and asserts no marker table appears after the
+  failed first call.
+
+### Changed
+
+- **Documentation sweep for v0.31.0's cache→images merge.**
+  `README.md`, `AGENTS.md`, `docs/src/operations.md`,
+  `docs/src/walkthrough-image-store.md`,
+  `docs/src/walkthrough-catalog.md`, `docs/src/walkthrough-usb.md`,
+  `docs/src/reference.md`, `docs/src/dependencies.md`, and
+  `docs/src/flows.md` updated to describe the new
+  `BTY_IMAGE_ROOT`-only layout, the
+  `catalog-<ref:12>-<slug(name)>.<ext>` naming, and the
+  hard-version-check upgrade flow. `AGENTS.md`'s `boot_policy`
+  references updated to the v0.23.0 `boot_mode` vocabulary with
+  the v0.25.0 mode/state split documented. New "Catalog file
+  naming" section in `reference.md` explains the URL-keyed name
+  scheme.
+- **`_ui.py:_row_to_dict` docstring** updated -- no longer cites
+  the dropped `_REQUIRED_COLUMNS` / `StaleSchemaError` machinery;
+  cites the `bty_version` hard check instead.
+
+### Added
+
+- **`local_filename_for` edge-case tests** in `tests/test_catalog.py`:
+  unicode names (slug strips to ASCII), very long names (no
+  truncation; ref-prefix still disambiguates), consecutive
+  separator collapse, leading-dot format normalisation,
+  format=None default, empty/all-non-ASCII name fallback to
+  `image`, idempotence on same inputs, distinct URLs producing
+  distinct filenames. Pure-function coverage so the on-disk dedup
+  contract is locked in.
+
 ## [0.31.0] - 2026-05-25
 
 **BREAKING:** state.db wipes on upgrade. bty-web now refuses to start

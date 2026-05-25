@@ -2,12 +2,14 @@
 
 The bty-server appliance ships as a single rootfs image
 (`bty-server-x86_64.img.gz`). Out of the box, all bty state lives on the
-flashed disk under `/var/lib/bty`: the image cache (`cache/`), netboot
-artifacts (`boot/`), uploaded images (`images/`), and bty-web's SQLite
-database (`state.db`, which holds the machine inventory, catalog, and
-boot-mode assignments). Fine for a first-look install, but **reflashing
-the appliance erases all of it**: the operator re-downloads every image and
-re-inventories every machine.
+flashed disk under `/var/lib/bty`: image files (`images/`, holding both
+operator-typed images and catalog-fetched files named
+`catalog-<ref:12>-<slug>.<ext>` per v0.31.0+), netboot artifacts
+(`boot/`), and bty-web's SQLite database (`state.db`, which holds the
+machine inventory, catalog metadata, and boot-mode assignments). Fine
+for a first-look install, but **reflashing the appliance erases all of
+it**: the operator re-downloads every image and re-inventories every
+machine.
 
 This walkthrough moves `/var/lib/bty` onto a **separate disk** with
 `bty-state-migrate`. After the one-time setup, a reflash upgrades or repairs

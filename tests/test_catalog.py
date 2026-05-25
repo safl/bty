@@ -533,6 +533,123 @@ def test_catalog_entry_accepts_explicit_null_sha256() -> None:
     assert entry.sha256 is None
 
 
+# -----------------------------------------------------------------------
+# local_filename_for / _slugify edge cases (v0.31.0+)
+# -----------------------------------------------------------------------
+#
+# ``local_filename_for`` is pure math over (ref, name, format) and lands
+# on disk -- every variant the operator-typed ``name`` field can take
+# must produce a portable filename. The ref-prefix carries uniqueness;
+# the slug is purely cosmetic ``ls`` legibility, so its rules are kept
+# small and predictable.
+
+
+def test_local_filename_for_basic_shape() -> None:
+    """The canonical shape is ``catalog-<ref:12>-<slug>.<ext>``: a 12-char
+    ref prefix (lower-hex), a slug derived from the operator-typed name,
+    and the format as the extension. Anchoring this lets the discovery
+    code regex against it confidently."""
+    ref = "a" * 64
+    f = catalog.local_filename_for(ref, "fedora-sysdev", "img.gz")
+    assert f == "catalog-aaaaaaaaaaaa-fedora-sysdev.img.gz"
+
+
+def test_local_filename_for_unicode_name_slugs_to_ascii() -> None:
+    """Operator-typed names can contain unicode (catalog publishers
+    are international); the slug strips to lower-case ASCII alnum +
+    hyphen + underscore so the filename stays portable across
+    filesystems (NTFS, exFAT, ext4 with restrictive locales, FAT32)."""
+    ref = "0" * 64
+    f = catalog.local_filename_for(ref, "smart “quotes”", "img")
+    # Unicode chars collapse to one hyphen each (no semantic loss --
+    # uniqueness lives in the ref-prefix).
+    assert f.startswith("catalog-000000000000-")
+    # No bytes outside [a-z0-9_-].
+    slug_and_ext = f[len("catalog-000000000000-") :]
+    assert all(c.isalnum() or c in "-_." for c in slug_and_ext)
+
+
+def test_local_filename_for_very_long_name_no_truncation() -> None:
+    """A long catalog name produces a long filename; we do NOT truncate
+    (collision-by-truncation would silently merge two entries with
+    different long names but identical prefixes -- worse than a long
+    path). Filesystems used in practice (ext4, exfat, NTFS) all support
+    names well past 200 chars."""
+    ref = "f" * 64
+    long_name = "x" * 200
+    f = catalog.local_filename_for(ref, long_name, "img.gz")
+    assert f == f"catalog-{'f' * 12}-{long_name}.img.gz"
+    # Length sanity: under typical filesystems' per-component cap (255).
+    assert len(f) < 255
+
+
+def test_local_filename_for_collapses_consecutive_separators() -> None:
+    """The slug collapses runs of non-alnum-underscore characters to a
+    single hyphen so a name like ``foo   bar`` doesn't become
+    ``foo---bar`` -- nicer ``ls`` output, and stable across whatever
+    whitespace the operator typed."""
+    ref = "1" * 64
+    f = catalog.local_filename_for(ref, "foo   bar  (rev 2)", "img")
+    # Whitespace + parens + space collapse to single hyphens; trailing
+    # hyphens stripped.
+    assert f == "catalog-111111111111-foo-bar-rev-2.img"
+
+
+def test_local_filename_for_strips_leading_dot_from_format() -> None:
+    """The ``format`` field is occasionally stored with a leading dot
+    (``.img.gz``) by mistake or from a stricter producer; the helper
+    tolerates it so the filename doesn't end up as ``...img.gz..img.gz``
+    or similar."""
+    ref = "2" * 64
+    f = catalog.local_filename_for(ref, "name", ".img.gz")
+    assert f == "catalog-222222222222-name.img.gz"
+
+
+def test_local_filename_for_format_none_defaults_to_img() -> None:
+    """A catalog entry with no ``format`` set (rare; ``from_dict``
+    defaults it from the name's extension) still produces a usable
+    filename. ``img`` is the catch-all so the result is a readable
+    placeholder rather than a name ending in a bare dot."""
+    ref = "3" * 64
+    f = catalog.local_filename_for(ref, "no-format", None)
+    assert f == "catalog-333333333333-no-format.img"
+
+
+def test_local_filename_for_empty_name_falls_back_to_image_slug() -> None:
+    """An empty / all-non-ASCII name slugs to the literal string
+    ``image`` so the filename keeps the canonical shape (the ref-
+    prefix still disambiguates -- two empty-name entries with
+    different URLs land at different filenames)."""
+    ref = "4" * 64
+    f = catalog.local_filename_for(ref, "ÿÿÿ", "img.gz")
+    assert f == "catalog-444444444444-image.img.gz"
+
+
+def test_local_filename_for_same_inputs_idempotent() -> None:
+    """Same (ref, name, format) -> same filename, every call. This is
+    the on-disk dedup contract -- fetch_to_cache writing a second time
+    overwrites the same file rather than producing a parallel."""
+    ref = "5" * 64
+    a = catalog.local_filename_for(ref, "demo", "img")
+    b = catalog.local_filename_for(ref, "demo", "img")
+    assert a == b
+
+
+def test_local_filename_for_different_urls_distinct_filenames() -> None:
+    """Two distinct ``src`` URLs canonicalise to two distinct refs (by
+    construction, in :func:`image_ref_for_src`); the local_filename
+    derives from the ref so they end up at distinct filenames even
+    if the operator-typed ``name`` is identical. This is what rules
+    out on-disk collisions between catalog entries."""
+    ref_a = catalog.image_ref_for_src("oras://ghcr.io/owner/repo-a:latest")
+    ref_b = catalog.image_ref_for_src("oras://ghcr.io/owner/repo-b:latest")
+    f_a = catalog.local_filename_for(ref_a, "shared-name", "img")
+    f_b = catalog.local_filename_for(ref_b, "shared-name", "img")
+    assert f_a != f_b
+    assert f_a.endswith("-shared-name.img")
+    assert f_b.endswith("-shared-name.img")
+
+
 # ---------------------------------------------------------------------------
 # Canonicalisation + image-ref derivation.
 # Every per-scheme canonicalisation rule is covered here so a future

@@ -129,6 +129,98 @@ def test_init_db_raises_on_version_mismatch(tmp_path: Path) -> None:
         _db.init_db(state)
 
 
+def test_init_db_refuses_pre_versioning_db_across_restart_retries(tmp_path: Path) -> None:
+    """REGRESSION (v0.31.0 -> v0.31.1): init_db must refuse a pre-
+    versioning DB on EVERY call, not just the first. The earlier
+    implementation ran ``conn.executescript(SCHEMA)`` BEFORE checking,
+    and ``sqlite3.executescript`` issues an implicit COMMIT, so the
+    very act of refusing left ``CREATE TABLE IF NOT EXISTS
+    bty_version`` committed to disk (empty table). systemd's
+    ``Restart=on-failure`` retried 5s later; the second call saw the
+    marker table existed, treated the empty-row case as "fresh DB,
+    stamp it", and silently accepted the franken-state.
+
+    Surfaced in production: an operator upgraded an appliance with
+    its state.db on a separate disk (bty-state-migrate setup); the
+    v0.31.0 hard check fired once, then systemd restarted bty-web
+    and the second start succeeded. Old machine inventory + audit
+    log carried into v0.31.0 with a stamped bty_version=0.31.0 row.
+
+    Three consecutive init_db calls against the same pre-versioning
+    state.db must all raise. No DB mutation may slip through across
+    the failed attempts.
+    """
+    import sqlite3 as _sqlite
+
+    state = tmp_path / "state.db"
+    # Stand up a pre-versioning DB (data table present, no
+    # bty_version table at all).
+    with _sqlite.connect(state) as conn:
+        conn.execute(
+            """
+            CREATE TABLE machines (
+                mac          TEXT PRIMARY KEY,
+                created_at   TEXT NOT NULL,
+                updated_at   TEXT NOT NULL
+            )
+            """
+        )
+        conn.commit()
+
+    # First call: refused.
+    with pytest.raises(_db.VersionMismatchError):
+        _db.init_db(state)
+
+    # CRITICAL: the failed first call must NOT have created the
+    # ``bty_version`` table (which is what the v0.31.0 bug did via
+    # the implicit-commit-before-executescript on the SCHEMA run).
+    with _sqlite.connect(state) as conn:
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    assert "bty_version" not in tables, (
+        "init_db's refuse path must not leave a partial bty_version table; "
+        "otherwise the next systemd-Restart=on-failure attempt would see "
+        f"the table exist and accept the DB. Found tables: {tables!r}"
+    )
+
+    # Second + third call (modelling systemd retries): still refused,
+    # with the same error class. Same shape every time.
+    with pytest.raises(_db.VersionMismatchError):
+        _db.init_db(state)
+    with pytest.raises(_db.VersionMismatchError):
+        _db.init_db(state)
+
+
+def test_init_db_refuses_mismatched_version_without_mutating(tmp_path: Path) -> None:
+    """The version-mismatch refuse path must also leave the DB
+    untouched (so the operator's ``bty-web export`` on the OLD
+    release reads consistent state). Mirror of the pre-versioning
+    test for the "different version stamped" case."""
+    import sqlite3 as _sqlite
+
+    state = tmp_path / "state.db"
+    _db.init_db(state)  # stamp current version
+    with _sqlite.connect(state) as conn:
+        conn.execute("UPDATE bty_version SET version = ?", ("0.0.1-fake-old",))
+        conn.commit()
+        # Snapshot the schema for comparison.
+        before = sorted(
+            r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        )
+
+    with pytest.raises(_db.VersionMismatchError, match=r"0\.0\.1-fake-old"):
+        _db.init_db(state)
+
+    with _sqlite.connect(state) as conn:
+        after = sorted(
+            r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        )
+        # Marker still says the OLD version (refuse path didn't
+        # touch it).
+        stored = conn.execute("SELECT version FROM bty_version").fetchone()[0]
+    assert before == after, "refuse path must not add/drop tables"
+    assert stored == "0.0.1-fake-old", "refuse path must not update the marker"
+
+
 def test_version_mismatch_error_carries_running_version(tmp_path: Path) -> None:
     """The error message names BOTH the stored version (so the operator
     knows which release the DB came from) AND the running version

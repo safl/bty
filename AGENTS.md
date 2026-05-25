@@ -38,7 +38,7 @@ The end-to-end contract for "make MAC X receive image Y":
    PUT /machines/{mac}
    Content-Type: application/json
    { "bty_image_ref":     "<64-hex>",
-     "boot_policy":       "flash" | "flash-once",
+     "boot_mode":         "bty-flash-always" | "bty-flash-once",
      "target_disk_serial": "<lsblk SERIAL>"  }
    ```
 
@@ -142,45 +142,61 @@ form is lower-case `aa:bb:cc:dd:ee:ff`):
 `reference.md`; breaking changes to those shapes will land under a
 versioned URL prefix (`/v2/...`). Agents key off field names.
 
-## Boot policy
+## Boot mode
 
-Each machine carries a `boot_policy`:
+Each machine carries a `boot_mode` (renamed from `boot_policy`
+in v0.23.0). The mode is the operator's intent and is never
+mutated by the server; the transient post-flash state lives in
+the `saw_flasher_boot` bit instead (see the mode/state split
+introduced in v0.25.0).
 
-- `local` -- every PXE boot returns the sanboot fallback even if
-  an image is assigned. Stable / production stance; the explicit-
-  PUT default for assigned machines.
-- `flash` -- every PXE boot returns the live-env chain; the plan
-  endpoint then returns `mode=auto` (if a ref + serial are bound)
-  so the box reflashes itself every time. Per-job CI cadence.
-- `flash-once` -- same chain as `flash`. `POST /pxe/{mac}/done`
-  flips it to `local` so the box doesn't re-flash on the next
-  boot. For "I want this machine reimaged now, then leave it
-  alone".
-- `tui` -- every PXE boot returns the live-env chain; the plan
+- `ipxe-exit` -- every PXE boot returns the iPXE `exit` chain so
+  the firmware boots the local disk. Stable / production stance;
+  the explicit-PUT default for assigned machines.
+- `bty-flash-always` -- per-PXE-contact alternation: flash chain
+  on contact N, one-shot sanboot of the just-flashed disk on
+  contact N+1 (driven by the `saw_flasher_boot` bit, armed on
+  `/boot?mac=` artifact fetch). Plan returns `mode=flash` (if a
+  ref + serial are bound). Per-job CI cadence: the box reflashes
+  itself every netboot, books its disk once between reflashes
+  under PXE-first firmware so it doesn't loop.
+- `bty-flash-once` -- same flash chain as `bty-flash-always`, but
+  the `saw_flasher_boot` bit stays armed after the first flash
+  completes (terminal). Every subsequent PXE contact serves
+  sanboot. For "I want this machine reimaged now, then leave it
+  alone". Re-armed only when the operator re-saves the machine.
+- `bty-tui` -- every PXE boot returns the live-env chain; the plan
   endpoint returns `mode=interactive` so the operator picks at
   the tty1 wizard. **Auto-discovery default for unknown MACs**:
   first PXE contact lands the operator at the wizard without
   prior server-side configuration.
+- `bty-inventory` -- alternates a live-env inventory boot (bty
+  collects disks + lshw, posts to `/pxe/{mac}/inventory`, reboots)
+  with a sanboot of the disk on the next contact. Auto-discovery
+  default for fleet machines; same `saw_flasher_boot` bit drives
+  the alternation as `bty-flash-always`.
 
-**Server-vs-client truth asymmetry.** `mode=auto` is the only
-path that makes the server the source of truth for what gets
+**Server-vs-client truth asymmetry.** `mode=flash` is the only
+plan that makes the server the source of truth for what gets
 flashed. `mode=interactive` hands the operator the catalog but
 **does NOT** receive the operator's pick back; `bty` posts
 `/pxe/<mac>/done` after a successful flash but the
 `bty_image_ref` / `target_disk_serial` fields are unchanged.
 Agents that want server-tracked flashes must configure
-`boot_policy=flash` with a bound ref + serial.
+`boot_mode=bty-flash-always` (or `bty-flash-once` for the
+single-shot case) with a bound ref + serial.
 
 The completion signal `POST /pxe/{mac}/done` updates
-`last_flashed_at` and flips `flash-once` -> `local`; it does NOT
-modify `boot_policy` for `flash` (so per-job CI cadence survives
-across reflashes) or `tui`.
+`last_flashed_at` only; it does NOT mutate `boot_mode`. The
+post-flash "boot the disk" behaviour comes from the
+`saw_flasher_boot` bit (armed on `/boot?mac=` artifact fetch,
+consumed by the next `/pxe/{mac}`).
 
 ## Auto-discovery
 
 A `GET /pxe/{mac}` for an unknown MAC creates an unassigned
 `Machine` record (`bty_image_ref == null`,
-`boot_policy == 'tui'`) with `discovered_at` / `last_seen_at` /
+`boot_mode == 'bty-tui'`) with `discovered_at` / `last_seen_at` /
 `last_seen_ip` set, and returns the live-env iPXE chain so the
 operator lands at the wizard on the target's tty1. Agents poll
 `GET /machines` to find newly-discovered MACs and claim them with
@@ -217,7 +233,8 @@ this appliance via the canonical option-66 (next-server) +
 option-67 (bootfile) tagging plus the option-60 "PXEClient"
 vendor-class echo. Two-stage chain: PXE ROM ->
 `undionly.kpxe`/`ipxe.efi` -> bty-web's `/pxe-bootstrap.ipxe` ->
-per-MAC `/pxe/{mac}` chain (template depends on `boot_policy`).
+per-MAC `/pxe/{mac}` chain (template depends on `boot_mode` +
+the `saw_flasher_boot` bit for the alternating modes).
 
 ## Conventions agents can rely on
 

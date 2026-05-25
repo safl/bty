@@ -410,7 +410,7 @@ requesting `source_ip`, the `actor` (`operator` / `pxe-client` /
 | Bind image + disk + policy on a machine   | `POST /ui/machines/{mac}`            | UPSERT. Refuses `boot_mode=bty-flash-always` without `target_disk_serial`. Records `machine.{created,upserted}`. |
 | Delete a machine record                   | `POST /ui/machines/{mac}/delete`     | DELETE row. Records `machine.deleted`.                                                              |
 | Add catalog entry by URL                  | `POST /ui/catalog/entries`           | sha-resolve (if `sha_url` given) -> INSERT `catalog_entries`. Records `catalog.entry.{added,add_failed}`. |
-| Delete a catalog entry                    | `DELETE /catalog/entries?src=...`    | Removes the row; image cache is left in place. Records `catalog.entry.deleted`.                     |
+| Delete a catalog entry                    | `DELETE /catalog/entries?src=...`    | Removes the row; the URL-keyed local file (`catalog-<ref:12>-<slug>.<ext>` under `BTY_IMAGE_ROOT`) is left in place. Records `catalog.entry.deleted`. |
 | Upload a `catalog.toml` manifest          | `POST /ui/catalog/upload`            | Validates + atomic-renames into `${BTY_STATE_DIR}/catalog.toml`. Reloads DownloadManager.            |
 | Fetch `catalog.toml` from the project release | `POST /ui/catalog/fetch-release` | Pulls `releases/latest/download/catalog.toml`, same persist + reload as upload.                     |
 | Upload an image                           | `PUT /images/{name}` (XHR from form) | Streams into `BTY_IMAGES`. Auto-enqueues sha256 hash. Records `image.{uploaded,upload_failed}`.     |

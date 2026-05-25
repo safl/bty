@@ -223,60 +223,77 @@ def init_db(path: Path) -> None:
     # connection open (closed only by refcount GC, fragile off
     # CPython). ``closing`` guarantees the fd is released here.
     with closing(sqlite3.connect(path)) as conn, conn:
-        # Pre-SCHEMA pass: catch pre-versioning DBs (data tables exist
-        # but no bty_version table) before the IF NOT EXISTS creates
-        # the marker and masks the condition.
+        # Pre-SCHEMA pass: catch a pre-versioning DB BEFORE doing
+        # anything that mutates the DB. The earlier version of this
+        # check ran ``executescript(SCHEMA)`` first and only then
+        # decided to raise -- but ``sqlite3.executescript`` issues an
+        # implicit COMMIT, so the ``CREATE TABLE IF NOT EXISTS
+        # bty_version`` inside SCHEMA committed regardless of what
+        # came after. On the next systemd restart, ``bty_version``
+        # existed (empty), ``had_marker_before_schema`` flipped True,
+        # and the refuse condition silently inverted to "fresh DB, go
+        # stamp the marker." The franken-state slipped through. We
+        # now decide BEFORE running SCHEMA: if data tables exist and
+        # the marker table doesn't, refuse without touching anything.
         existing_tables = {
             r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
         }
-        has_data_tables = bool(existing_tables - {"sqlite_sequence"})
-        had_marker_before_schema = "bty_version" in existing_tables
+        has_data_tables = bool(existing_tables - {"sqlite_sequence", "bty_version"})
+        marker_table_existed = "bty_version" in existing_tables
 
-        conn.executescript(SCHEMA)
-
-        stored_row = conn.execute("SELECT version FROM bty_version LIMIT 1").fetchone()
-
-        if stored_row is None:
-            # No marker row yet. Either a fresh DB (had_data_tables=False
-            # before SCHEMA -- harmless to stamp) or a pre-versioning DB
-            # (had_data_tables=True, had_marker_before_schema=False --
-            # the marker table only exists because SCHEMA just made it).
-            if has_data_tables and not had_marker_before_schema:
-                raise VersionMismatchError(
-                    f"bty-web: state.db at {path} has data tables but no "
-                    f"bty_version row -- this is a pre-versioning DB from "
-                    f"an older bty release. Pre-1.0 policy: no migration "
-                    f"apparatus.\n\n"
-                    f"Recovery (loses operator state -- bindings, settings, "
-                    f"audit log):\n"
-                    f"  sudo systemctl stop bty-web\n"
-                    f"  sudo rm {path}\n"
-                    f"  sudo systemctl start bty-web\n\n"
-                    f"To preserve hardware inventory across the wipe, run "
-                    f"``bty-web export`` on the OLD version BEFORE wiping, "
-                    f"then ``bty-web import`` on the new release. See "
-                    f"operations.md."
-                )
-            conn.execute("INSERT INTO bty_version (version) VALUES (?)", (bty.__version__,))
-            return
-
-        stored_version = stored_row[0]
-        if stored_version != bty.__version__:
+        if has_data_tables and not marker_table_existed:
+            # Pre-versioning DB. Refuse before SCHEMA runs so the next
+            # invocation (after systemd's Restart=on-failure retry)
+            # hits the same condition rather than seeing a half-
+            # created marker table.
             raise VersionMismatchError(
-                f"bty-web: state.db at {path} carries bty_version "
-                f"{stored_version!r}, but the running code is "
-                f"{bty.__version__!r}. Pre-1.0 policy: no migration "
-                f"apparatus -- every release wipes state.\n\n"
-                f"Recovery (loses operator state):\n"
+                f"bty-web: state.db at {path} has data tables but no "
+                f"bty_version table -- this is a pre-versioning DB from "
+                f"an older bty release. Pre-1.0 policy: no migration "
+                f"apparatus.\n\n"
+                f"Recovery (loses operator state -- bindings, settings, "
+                f"audit log):\n"
                 f"  sudo systemctl stop bty-web\n"
                 f"  sudo rm {path}\n"
                 f"  sudo systemctl start bty-web\n\n"
-                f"To preserve hardware inventory (MAC + lshw + known_disks) "
-                f"across the wipe, run ``bty-web export`` on the OLD version "
-                f"BEFORE upgrading, then ``bty-web import`` on the new "
-                f"release. See operations.md."
+                f"To preserve hardware inventory across the wipe, run "
+                f"``bty-web export`` on the OLD version BEFORE wiping, "
+                f"then ``bty-web import`` on the new release. See "
+                f"operations.md."
             )
-        # Same version: idempotent no-op.
+
+        if marker_table_existed:
+            # Check the stored version BEFORE SCHEMA in the same
+            # mutation-free way -- a mismatched marker means we refuse
+            # to touch the DB at all, leaving any export attempt on the
+            # OLD release reading consistent state.
+            stored_row = conn.execute("SELECT version FROM bty_version LIMIT 1").fetchone()
+            if stored_row is not None and stored_row[0] != bty.__version__:
+                raise VersionMismatchError(
+                    f"bty-web: state.db at {path} carries bty_version "
+                    f"{stored_row[0]!r}, but the running code is "
+                    f"{bty.__version__!r}. Pre-1.0 policy: no migration "
+                    f"apparatus -- every release wipes state.\n\n"
+                    f"Recovery (loses operator state):\n"
+                    f"  sudo systemctl stop bty-web\n"
+                    f"  sudo rm {path}\n"
+                    f"  sudo systemctl start bty-web\n\n"
+                    f"To preserve hardware inventory (MAC + lshw + "
+                    f"known_disks) across the wipe, run ``bty-web export`` "
+                    f"on the OLD version BEFORE upgrading, then "
+                    f"``bty-web import`` on the new release. See "
+                    f"operations.md."
+                )
+
+        # All clear: either a fresh DB (no tables at all) or an
+        # already-versioned DB that matches the running code. Apply
+        # the schema + stamp the marker if it's not stamped yet.
+        conn.executescript(SCHEMA)
+
+        stored_row = conn.execute("SELECT version FROM bty_version LIMIT 1").fetchone()
+        if stored_row is None:
+            conn.execute("INSERT INTO bty_version (version) VALUES (?)", (bty.__version__,))
+        # Same-version case: idempotent no-op.
 
 
 @contextmanager

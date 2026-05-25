@@ -12,7 +12,7 @@ A bty-server keeps everything in one directory, `BTY_STATE_DIR` (default
 | Path | What | Backup? |
 |---|---|---|
 | `state.db` | The SQLite database: machine records, MAC->image assignments, catalog metadata, server settings, sessions, and the audit log. | **Yes** -- this is the irreplaceable bit. |
-| `images/` | The local image cache (`BTY_IMAGE_ROOT`). | Optional -- re-fetchable from the catalog. |
+| `images/` | All image files (`BTY_IMAGE_ROOT`): operator-typed images + catalog-fetched files (named `catalog-<ref:12>-<slug>.<ext>`, v0.31.0+). | Optional -- catalog files re-fetchable from upstream; operator-typed files are irreplaceable. |
 | `boot/` | The netboot artifacts (`BTY_BOOT_DIR`: kernel / initrd / squashfs). | Optional -- re-fetchable via "Fetch netboot artifacts". |
 | `catalog.toml` | The active catalog manifest. | Optional -- re-fetchable from the upstream. |
 
@@ -34,8 +34,7 @@ into two classes:
 | Path | Class | Notes |
 |---|---|---|
 | `state.db` | precious | records: machines, catalog, settings, audit log |
-| `images/` | precious | image bytes (expensive to refetch) |
-| `cache/` | ephemeral | catalog download cache (refetchable) |
+| `images/` | precious | all image bytes (operator-typed + catalog-fetched, expensive to refetch); v0.31.0+ merged the old `cache/` subdir in here under `catalog-<ref:12>-<slug>.<ext>` names |
 | `boot/` | ephemeral | netboot artifacts -- **version-coupled**; refetch on a bty version bump |
 | `session-secret` | regenerable | cookie key |
 
@@ -155,23 +154,33 @@ yet. Each box arrives as a re-discovered `bty-inventory` box with its
 hardware + binding pre-filled; you re-enable a flash mode once the new
 server is verified and its netboot artifacts re-fetched.
 
-A bundle is a plain directory (`manifest.json` + an `images/` folder),
-so `tar` it for archival.
+A bundle is a plain directory (`manifest.json` + a flat `files/`
+subdir), so `tar` it for archival.
 
 ## Upgrade
 
-bty pre-1.0 has **no database migration framework**. Two cases, and the
-common one is painless:
+bty pre-1.0 has **no database migration framework**. v0.31.0+ enforces
+this strictly: bty-web carries the exact `bty.__version__` that created
+`state.db` in a `bty_version` table, and refuses to start when the
+running code's version doesn't match. Every release is therefore
+breaking for state, by design. The fix is one of:
 
-- **Additive schema changes (the usual case).** New defaulted / nullable
-  columns are added automatically with `ALTER TABLE ... ADD COLUMN` on the
-  next start. Your records survive untouched. Most releases are this.
-- **Breaking schema changes (rare).** If a release changes a *required*
-  column, bty-web refuses to start against an old `state.db` rather than
-  silently corrupting it; the fix is to **delete `state.db`** (rebuilt
-  empty on next start). Such releases call this out in their notes. **Back
-  up first** (above) so you can re-enter records, or let auto-discovery +
-  the operator re-assign.
+- **Wipe-and-restart.** Delete `state.db` (it's recreated empty on next
+  start). Loses machine records, image bindings, settings, audit log;
+  the image files in `BTY_IMAGE_ROOT` and netboot artifacts in
+  `BTY_BOOT_DIR` survive. Operator re-binds via the UI.
+- **Export-wipe-import.** Run `bty-web export <bundle-dir>` on the OLD
+  release BEFORE upgrading. Upgrade. Wipe `state.db`. Run `bty-web
+  import <bundle-dir>` on the new release. The slim bundle carries
+  every file under `BTY_IMAGE_ROOT` plus a minimal per-machine record
+  (`mac` + `hw_lshw` + `known_disks`) so hardware identity survives;
+  bindings (`boot_mode`, `bty_image_ref`, `target_disk_serial`) reset
+  to defaults and the operator re-binds. See "Backup".
+
+If bty-web refuses to start with a `VersionMismatchError`, the
+journal message names both the stored and the running version plus
+the exact `rm` command to run. Take a backup (`bty-web export`)
+before wiping.
 
 ### Upgrade in place (pip / pipx install)
 

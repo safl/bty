@@ -53,7 +53,7 @@ bty
 
 | Shape | What it is | When it fits |
 |---|---|---|
-| **USB live stick** | bty boots from a flash drive, runs `bty`, flashes the box it's plugged into. Fresh sticks ship with four starter `.bri` pointers (Debian / Ubuntu / Fedora sysdev images via `oras://ghcr.io/safl/nosi/...`, plus bty-server) so the catalog is non-empty out of the box. | Single-machine local imaging |
+| **USB live stick** | bty boots from a flash drive, runs `bty`, flashes the box it's plugged into. Fresh sticks ship with a starter `catalog.toml` (Debian / Ubuntu / Fedora sysdev images via `oras://ghcr.io/safl/nosi/...`, plus bty-server) so the wizard's image picker is non-empty out of the box. | Single-machine local imaging |
 | **USB + portable catalog** | Same stick, plus `bty --catalog <SOURCE>` pointed at a TOML catalog hosted anywhere (a local file, an HTTP URL, an `oras://` reference, or a bty-web instance's `/catalog.toml`). | A handful of boxes, shared image library |
 | **PXE-boot appliance** | bty-web on a Pi or x86 box runs DHCP/TFTP/HTTP; targets PXE-chain into a netboot live env that runs `bty --server X --mac Y` on tty1, which fetches a per-MAC plan and either auto-flashes or drops the operator into the wizard | CI fleets, racks, anything you don't want to walk to |
 
@@ -89,10 +89,11 @@ story:
   already have. `bty-web` instances serve the same shape at
   `GET /catalog.toml`, so a running server is "just another catalog
   source".
-- **`.bri` descriptors are the per-stick analogue.** A USB stick's
-  `BTY_IMAGES` partition can carry `.bri` files (one-image-per-file
-  TOML pointers, including `oras://` URLs). The TUI merges them
-  with whatever `--catalog` source the operator passed.
+- **One catalog format end to end.** A USB stick's `BTY_IMAGES`
+  partition can carry a `catalog.toml` alongside image files; the
+  wizard discovers + merges the local catalog with whatever
+  `--catalog` source the operator passed. Same schema as the
+  server-published catalog, no separate per-stick format.
 
 Why this shape: images and catalog metadata are content-addressed
 artifacts, not container images. The OCI ecosystem already solves

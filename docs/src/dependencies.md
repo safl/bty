@@ -110,8 +110,7 @@ every component.
 | `BTY_SESSION_SECRET` | `bty-web` | (generated, persisted under `BTY_STATE_DIR`) | Cookie key override; useful for multi-instance |
 | `BTY_BOOT_RELEASE_REPO` | `bty-web` | `safl/bty` | GitHub releases repo to fetch boot artifacts from |
 | `BTY_CATALOG_FILE` | `bty-web` | `${BTY_STATE_DIR}/catalog.toml` | Catalog file path (TOML; see walkthrough-catalog.md) |
-| `BTY_CATALOG_CACHE_DIR` | `bty-web` | `${BTY_STATE_DIR}/cache` | Content-addressed blob cache |
-| `BTY_CATALOG_MAX_PARALLEL` | `bty-web` | `2` | Concurrent catalog downloads |
+| `BTY_CATALOG_MAX_PARALLEL` | `bty-web` | `2` | Concurrent catalog downloads; fetched files land under `BTY_IMAGE_ROOT` with `catalog-<ref:12>-<slug>.<ext>` names (v0.31.0+; no separate cache dir) |
 | `BTY_HASH_MAX_PARALLEL` | `bty-web` | `1` | Concurrent SHA-256 hashes (low: Pi/NUC-friendly) |
 | `BTY_MAX_UPLOAD_BYTES` | `bty-web` | `200 GiB` | Hard cap on `PUT /images/{name}` body size; rejected uploads land an `image.upload_failed` audit row |
 | `BTY_TRUSTED_PROXY` | `bty-web` | unset | When set (any truthy), read client IP from `X-Forwarded-For`; only enable behind a reverse proxy that strips inbound X-F-F |
