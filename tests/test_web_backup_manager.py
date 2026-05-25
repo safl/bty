@@ -74,7 +74,7 @@ def test_enqueue_runs_to_completion(tmp_path: Path) -> None:
             assert states[0].status == "completed", states[0].error
             assert states[0].bytes_written > 0
             assert state.dest_path is not None
-            assert (Path(state.dest_path) / "manifest.json").is_file()
+            assert (Path(state.dest_path) / "inventory.json").is_file()
             # v0.33.2: metadata-only bundles. No files/ subdir.
             assert not (Path(state.dest_path) / "files").exists()
         finally:
@@ -146,7 +146,7 @@ def test_retention_prunes_oldest(tmp_path: Path) -> None:
         # Three pre-existing fake backups. Names sort chronologically.
         for slug in ("2026-05-22T00-00-00Z", "2026-05-23T00-00-00Z", "2026-05-24T00-00-00Z"):
             (backups_root / slug).mkdir()
-            (backups_root / slug / "manifest.json").write_text("{}")
+            (backups_root / slug / "inventory.json").write_text("{}")
         # An operator-dropped sibling that doesn't match the id pattern:
         # MUST survive the prune.
         (backups_root / "operator-notes.txt").write_text("hello")
@@ -346,9 +346,9 @@ def test_scheduler_tick_skips_when_already_running(tmp_path: Path) -> None:
     _run(_drive())
 
 
-def test_list_backups_on_disk_enumerates_and_reads_manifest(tmp_path: Path) -> None:
+def test_list_backups_on_disk_enumerates_and_reads_inventory(tmp_path: Path) -> None:
     """A directory under ``backups_root`` whose name is an ISO-8601 slug
-    shows up with manifest-derived counts + a bytes-on-disk total."""
+    shows up with inventory-derived counts + a bytes-on-disk total."""
     import json
 
     from bty.web._backup import list_backups_on_disk
@@ -359,7 +359,7 @@ def test_list_backups_on_disk_enumerates_and_reads_manifest(tmp_path: Path) -> N
     # Bundle #1: older, two machines. v0.33.2 metadata-only format.
     older = backups_root / "2026-05-23T10-00-00Z"
     older.mkdir()
-    (older / "manifest.json").write_text(
+    (older / "inventory.json").write_text(
         json.dumps(
             {
                 "bty_export_version": 3,
@@ -369,10 +369,10 @@ def test_list_backups_on_disk_enumerates_and_reads_manifest(tmp_path: Path) -> N
             }
         )
     )
-    # Bundle #2: newer, empty manifest.
+    # Bundle #2: newer, empty inventory.
     newer = backups_root / "2026-05-24T09-00-00Z"
     newer.mkdir()
-    (newer / "manifest.json").write_text(
+    (newer / "inventory.json").write_text(
         json.dumps(
             {
                 "bty_export_version": 3,
@@ -396,12 +396,13 @@ def test_list_backups_on_disk_enumerates_and_reads_manifest(tmp_path: Path) -> N
     older_row = out[1]
     assert older_row.machines == 2
     assert older_row.bty_version == "0.33.2"
-    assert older_row.bytes_on_disk > 0  # at least the manifest
+    assert older_row.bytes_on_disk > 0  # at least the inventory
 
 
-def test_list_backups_on_disk_handles_missing_manifest(tmp_path: Path) -> None:
-    """A bundle dir without a manifest.json still lists -- the operator
-    can see the orphan and clean it up rather than the UI hiding it."""
+def test_list_backups_on_disk_handles_missing_inventory(tmp_path: Path) -> None:
+    """A bundle dir without an inventory.json still lists -- the
+    operator can see the orphan and clean it up rather than the UI
+    hiding it."""
     from bty.web._backup import list_backups_on_disk
 
     backups_root = tmp_path / "backups"
@@ -436,7 +437,7 @@ def test_iter_bundle_tar_streams_archive_with_topdir(tmp_path: Path) -> None:
 
     bundle = tmp_path / "backups" / "2026-05-23T10-00-00Z"
     (bundle / "images").mkdir(parents=True)
-    (bundle / "manifest.json").write_text('{"bty_export_version": 1}\n')
+    (bundle / "inventory.json").write_text('{"bty_export_version": 1}\n')
     (bundle / "images" / "demo.img.gz").write_bytes(b"\x1f\x8b" + b"\x00" * 200)
 
     blob = b"".join(iter_bundle_tar(bundle))
@@ -447,7 +448,7 @@ def test_iter_bundle_tar_streams_archive_with_topdir(tmp_path: Path) -> None:
         names = sorted(tf.getnames())
     assert names == [
         "2026-05-23T10-00-00Z/images/demo.img.gz",
-        "2026-05-23T10-00-00Z/manifest.json",
+        "2026-05-23T10-00-00Z/inventory.json",
     ]
 
 
@@ -487,7 +488,7 @@ def test_delete_bundle_rmtree_logs_event(tmp_path: Path) -> None:
     backups_root = tmp_path / "backups"
     bundle = backups_root / "2026-05-23T10-00-00Z"
     bundle.mkdir(parents=True)
-    (bundle / "manifest.json").write_text(
+    (bundle / "inventory.json").write_text(
         json.dumps(
             {
                 "bty_export_version": 3,

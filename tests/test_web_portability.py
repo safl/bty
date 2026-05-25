@@ -1,6 +1,6 @@
 """Round-trip tests for the metadata-only export/import tool.
 
-v0.33.2+ contract: the bundle is just ``manifest.json``; no image
+v0.33.2+ contract: the bundle is just ``inventory.json``; no image
 bytes, no ``files/`` subdir. The bundle carries minimal per-machine
 records (``mac``, ``hw_lshw``, ``known_disks``). Everything else
 (boot mode, image bindings, catalog entries, settings, audit log)
@@ -73,12 +73,12 @@ def test_export_import_round_trip(tmp_path: Path) -> None:
     # v3 metadata-only: just the machines.
     assert exp.machines == 1
 
-    manifest = json.loads((bundle / "manifest.json").read_text())
-    assert manifest["bty_export_version"] == 3
+    inventory = json.loads((bundle / "inventory.json").read_text())
+    assert inventory["bty_export_version"] == 3
     # Slim machine record: only mac + hardware-inventory fields.
     # known_disks + hw_lshw decode to NATIVE shapes (array / object),
     # not re-encoded JSON strings -- so the bundle is jq-readable.
-    machine = manifest["machines"][0]
+    machine = inventory["machines"][0]
     assert machine["mac"] == "aa:bb:cc:dd:ee:ff"
     assert machine["hw_lshw"] == {"id": "system"}
     assert isinstance(machine["known_disks"], list)
@@ -96,7 +96,7 @@ def test_export_import_round_trip(tmp_path: Path) -> None:
     ):
         assert forbidden not in machine, f"slim format must not export {forbidden}"
     # No catalog_entries section.
-    assert "catalog_entries" not in manifest
+    assert "catalog_entries" not in inventory
     # CRITICALLY: no files/ subdir. v3 is metadata-only.
     assert not (bundle / "files").exists(), (
         "v3 bundles must not carry image bytes; that's what made daily "
@@ -105,7 +105,7 @@ def test_export_import_round_trip(tmp_path: Path) -> None:
     assert not (bundle / "images").exists()
     assert not (bundle / "cache").exists()
     # Bundle size should be small (just the JSON).
-    bundle_bytes = (bundle / "manifest.json").stat().st_size
+    bundle_bytes = (bundle / "inventory.json").stat().st_size
     assert bundle_bytes < 10_000, f"metadata-only bundle should be tiny, got {bundle_bytes} bytes"
 
     # Import into a fresh destination (the migration case).
@@ -140,7 +140,7 @@ def test_export_import_round_trip(tmp_path: Path) -> None:
 def test_import_rejects_unknown_bundle_version(tmp_path: Path) -> None:
     bundle = tmp_path / "b"
     bundle.mkdir()
-    (bundle / "manifest.json").write_text(json.dumps({"bty_export_version": 999}))
+    (bundle / "inventory.json").write_text(json.dumps({"bty_export_version": 999}))
     state = tmp_path / "state.db"
     _db.init_db(state)
     with pytest.raises(_portability.BundleVersionMismatch, match="bty_export_version=999"):
@@ -153,7 +153,7 @@ def test_import_rejects_v1_legacy_bundle(tmp_path: Path) -> None:
     on the source release."""
     bundle = tmp_path / "b"
     bundle.mkdir()
-    (bundle / "manifest.json").write_text(json.dumps({"bty_export_version": 1}))
+    (bundle / "inventory.json").write_text(json.dumps({"bty_export_version": 1}))
     state = tmp_path / "state.db"
     _db.init_db(state)
     with pytest.raises(_portability.BundleVersionMismatch, match="bty_export_version=1"):
@@ -166,7 +166,7 @@ def test_import_rejects_v2_legacy_bundle(tmp_path: Path) -> None:
     must regenerate on the source release."""
     bundle = tmp_path / "b"
     bundle.mkdir()
-    (bundle / "manifest.json").write_text(json.dumps({"bty_export_version": 2}))
+    (bundle / "inventory.json").write_text(json.dumps({"bty_export_version": 2}))
     state = tmp_path / "state.db"
     _db.init_db(state)
     with pytest.raises(_portability.BundleVersionMismatch, match="bty_export_version=2"):

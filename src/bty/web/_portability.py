@@ -1,20 +1,24 @@
 """Metadata-only portable export / import of bty-web state.
 
-v0.33.2+: the bundle is just ``manifest.json``. No image bytes, no
-``files/`` subdir. The expensive-and-hard-to-recollect data is the
-per-machine hardware identity (mac + lshw + known_disks); image
-bytes are recoverable from the upstream catalog or already on the
-image-store disk.
+v0.33.2+: the bundle is just ``inventory.json``. No image bytes,
+no ``files/`` subdir. The expensive-and-hard-to-recollect data is
+the per-machine hardware identity (mac + lshw + known_disks);
+image bytes are recoverable from the upstream catalog or already
+on the image-store disk.
 
 Bundle layout::
 
     <bundle>/
-      manifest.json   # {bty_export_version, exported_at,
-                      #  exported_by_bty_version, machines: [...] }
+      inventory.json   # {bty_export_version, exported_at,
+                       #  exported_by_bty_version, machines: [...] }
 
-``manifest.json`` carries ``bty_export_version`` (currently 3). The
-import refuses anything else. Pre-1.0 policy: bundles don't migrate
-across major-format bumps -- regenerate on the source release.
+``inventory.json`` carries ``bty_export_version`` (currently 3).
+The import refuses anything else. Pre-1.0 policy: bundles don't
+migrate across major-format bumps -- regenerate on the source
+release. The name reflects what the file actually is: a machine
+inventory (mac + lshw + known_disks), distinct from the catalog
+``manifest`` (``${BTY_STATE_DIR}/catalog.toml`` -- a different
+file with a different schema).
 
 Why metadata-only: a routine backup runs daily on a cadence, so the
 size matters. Earlier releases (v0.31.0 through v0.33.1) shipped
@@ -93,12 +97,13 @@ def export_bundle(
 
     Reads minimal machine records (mac + hw_lshw + known_disks +
     their timestamps) from ``state_path`` and writes them to
-    ``dest/manifest.json``. ``dest`` is created if absent. No image
-    bytes are touched -- this is the routine-backup primitive.
+    ``dest/inventory.json``. ``dest`` is created if absent. No
+    image bytes are touched -- this is the routine-backup
+    primitive.
 
     ``known_disks`` and ``hw_lshw`` live in sqlite as JSON-encoded
     TEXT; ``_decode_machine`` decodes them on the way out so the
-    manifest carries native objects/arrays rather than re-encoded
+    inventory carries native objects/arrays rather than re-encoded
     strings. Operators can ``jq`` it without an extra decode step.
     """
     dest.mkdir(parents=True, exist_ok=True)
@@ -107,19 +112,19 @@ def export_bundle(
             f"SELECT {', '.join(_MACHINE_EXPORT_COLS)} FROM machines ORDER BY mac"
         ).fetchall()
     machines = [_decode_machine(dict(r)) for r in m_rows]
-    manifest = {
+    inventory = {
         "bty_export_version": _EXPORT_VERSION,
         "exported_at": now,
         "exported_by_bty_version": bty.__version__,
         "machines": machines,
     }
-    (dest / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+    (dest / "inventory.json").write_text(json.dumps(inventory, indent=2) + "\n")
     return ExportSummary(len(machines), dest)
 
 
 def _decode_machine(row: dict) -> dict:
     """Decode the JSON-TEXT columns (``known_disks``, ``hw_lshw``) so the
-    exported manifest carries native objects/arrays. NULL stays NULL;
+    exported inventory carries native objects/arrays. NULL stays NULL;
     malformed JSON degrades to NULL rather than crashing the export."""
     out = dict(row)
     for col in ("known_disks", "hw_lshw"):
@@ -163,11 +168,11 @@ def import_bundle(
     Raises :class:`BundleVersionMismatch` if the bundle's version
     doesn't match the format this release understands.
     """
-    manifest_path = src / "manifest.json"
-    if not manifest_path.is_file():
-        raise FileNotFoundError(f"no manifest.json in bundle: {src}")
-    manifest = json.loads(manifest_path.read_text())
-    ver = manifest.get("bty_export_version")
+    inventory_path = src / "inventory.json"
+    if not inventory_path.is_file():
+        raise FileNotFoundError(f"no inventory.json in bundle: {src}")
+    inventory = json.loads(inventory_path.read_text())
+    ver = inventory.get("bty_export_version")
     if ver != _EXPORT_VERSION:
         raise BundleVersionMismatch(
             f"bundle bty_export_version={ver!r}, expected {_EXPORT_VERSION!r}. "
@@ -178,7 +183,7 @@ def import_bundle(
 
     n_m = 0
     with _db.open_db(state_path) as conn:
-        for m in manifest.get("machines", []):
+        for m in inventory.get("machines", []):
             conn.execute(
                 """
                 INSERT OR REPLACE INTO machines

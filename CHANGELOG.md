@@ -15,9 +15,13 @@ operator-facing summary.
 v0.33.1 shipped full image_root in every backup bundle, which
 produced multi-GiB "backups" dominated by catalog cache files the
 appliance can just re-fetch. The v3 bundle format is just
-`manifest.json` with the per-machine hardware identity (mac +
+`inventory.json` (renamed from `manifest.json` -- the file is a
+machine inventory; "manifest" stays reserved for the catalog
+manifest TOML) with the per-machine hardware identity (mac +
 `lshw` + `known_disks`). A backup now fits in dozens of KiB and
-finishes in milliseconds.
+finishes in milliseconds. The two JSON fields decode to native
+objects/arrays (not re-encoded strings), so the file is
+`jq`-readable as-is.
 
 The data model the user named: backup = mac + lshw + lsblk. Import
 = add the machines with that hardware attached. Image files carry
@@ -52,7 +56,7 @@ fix). No image bytes ever travel in a backup.
 ### Operator impact
 
 - A scheduled or "Back up now" run produces a single-file bundle
-  whose `manifest.json` lists the per-machine hardware identity.
+  whose `inventory.json` lists the per-machine hardware identity.
   Tens of KiB even with hundreds of machines.
 - Existing v2 bundles on disk still list on `/ui/backups` (with
   blank metadata if their manifest is unparseable), but

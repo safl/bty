@@ -99,10 +99,13 @@ on the next tick without restarting bty-web.
 Each backup is a directory written under `$BTY_BACKUP_DIR`
 (default `$BTY_STATE_DIR/backups`) named after the ISO-8601
 timestamp, e.g. `2026-05-24T08-00-00Z/`. The bundle layout is
-identical to what `bty-web export` produces (`manifest.json` +
-`images/`), so a scheduled backup is interchangeable with a
-manual one. Retention prunes the oldest siblings after every
-successful run.
+identical to what `bty-web export` produces (a single
+`inventory.json` carrying per-machine `mac` + `hw_lshw` +
+`known_disks`), so a scheduled backup is interchangeable with a
+manual one. Image bytes are NOT included -- they live in
+`BTY_IMAGE_ROOT` and re-associate with catalog entries on import
+via the `catalog-<ref:12>-<slug>.<ext>` filename prefix.
+Retention prunes the oldest siblings after every successful run.
 
 Two env vars tune the feature when the in-UI knobs aren't enough:
 
@@ -154,8 +157,8 @@ yet. Each box arrives as a re-discovered `bty-inventory` box with its
 hardware + binding pre-filled; you re-enable a flash mode once the new
 server is verified and its netboot artifacts re-fetched.
 
-A bundle is a plain directory (`manifest.json` + a flat `files/`
-subdir), so `tar` it for archival.
+A bundle is a plain directory (a single `inventory.json`), so
+`tar` it -- or just `cp` -- for archival.
 
 ## Upgrade
 

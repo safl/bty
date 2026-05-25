@@ -592,7 +592,7 @@ def test_ui_backups_lists_existing_bundles(client: TestClient, tmp_path: Path) -
     backups_root = tmp_path / "backups"
     bundle = backups_root / "2026-05-23T10-00-00Z"
     bundle.mkdir(parents=True)
-    (bundle / "manifest.json").write_text(
+    (bundle / "inventory.json").write_text(
         json.dumps(
             {
                 "bty_export_version": 3,
@@ -628,7 +628,7 @@ def test_ui_backups_download_streams_valid_tar(client: TestClient, tmp_path: Pat
     backups_root = tmp_path / "backups"
     bundle = backups_root / "2026-05-23T10-00-00Z"
     bundle.mkdir(parents=True)
-    (bundle / "manifest.json").write_text('{"bty_export_version": 3}\n')
+    (bundle / "inventory.json").write_text('{"bty_export_version": 3}\n')
 
     _login(client)
     r = client.get("/ui/backups/2026-05-23T10-00-00Z/download")
@@ -637,7 +637,7 @@ def test_ui_backups_download_streams_valid_tar(client: TestClient, tmp_path: Pat
     assert "2026-05-23T10-00-00Z.tar" in r.headers["content-disposition"]
     with tarfile.open(fileobj=io.BytesIO(r.content), mode="r:") as tf:
         assert sorted(tf.getnames()) == [
-            "2026-05-23T10-00-00Z/manifest.json",
+            "2026-05-23T10-00-00Z/inventory.json",
         ]
 
 
@@ -667,7 +667,7 @@ def test_ui_backups_delete_removes_bundle_and_logs(client: TestClient, tmp_path:
     backups_root = tmp_path / "backups"
     bundle = backups_root / "2026-05-23T10-00-00Z"
     bundle.mkdir(parents=True)
-    (bundle / "manifest.json").write_text(
+    (bundle / "inventory.json").write_text(
         json.dumps(
             {
                 "bty_export_version": 3,

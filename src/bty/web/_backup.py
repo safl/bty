@@ -2,7 +2,7 @@
 
 A backup is exactly what :func:`bty.web._portability.export_bundle`
 produces -- v0.33.2+: a metadata-only bundle (just
-``manifest.json``) carrying the per-machine hardware identity
+``inventory.json``) carrying the per-machine hardware identity
 (mac + lshw + known_disks). No image bytes; image files live in
 ``BTY_IMAGE_ROOT`` and are either still on disk or re-fetchable
 from the catalog. The bundle lands as a directory under
@@ -332,13 +332,13 @@ class BackupOnDisk:
     """A bundle the BackupManager (or an offline ``bty-web export``) wrote
     under :data:`backups_root`.
 
-    Manifest fields read from the bundle's ``manifest.json``; the
-    machine count comes from the manifest. ``bytes_on_disk`` is the
-    size of the bundle directory (just ``manifest.json`` in v3),
-    surfaced so the operator can sanity-check that "backup of 12 KiB"
-    actually looks like a metadata bundle.
+    Fields read from the bundle's ``inventory.json``; the machine
+    count comes from the inventory. ``bytes_on_disk`` is the size of
+    the bundle directory (just ``inventory.json`` in v3), surfaced so
+    the operator can sanity-check that "backup of 12 KiB" actually
+    looks like a metadata bundle.
 
-    A bundle whose ``manifest.json`` is missing or malformed still
+    A bundle whose ``inventory.json`` is missing or malformed still
     appears in the list (``exported_at`` / ``bty_version`` are
     ``None``, machines is 0) so the operator can see it and clean it
     up rather than silently hiding it.
@@ -374,32 +374,32 @@ def list_backups_on_disk(backups_root: Path) -> list[BackupOnDisk]:
 def _read_bundle(path: Path) -> BackupOnDisk:
     """Build a :class:`BackupOnDisk` from a bundle directory.
 
-    Robust to a missing or malformed ``manifest.json`` -- pre-1.0
+    Robust to a missing or malformed ``inventory.json`` -- pre-1.0
     strictness applies to settings the UI controls; this is a passive
     survey of operator-owned files and we want to SHOW garbage rather
     than hide it.
     """
     import json
 
-    manifest_path = path / "manifest.json"
+    inventory_path = path / "inventory.json"
     exported_at: str | None = None
     bty_version: str | None = None
     machines = 0
-    if manifest_path.is_file():
+    if inventory_path.is_file():
         try:
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-            if isinstance(manifest, dict):
-                ea = manifest.get("exported_at")
+            inventory = json.loads(inventory_path.read_text(encoding="utf-8"))
+            if isinstance(inventory, dict):
+                ea = inventory.get("exported_at")
                 # ``exported_by_bty_version`` is the slim-format key
                 # (v2+); fall back to the v1 ``bty_version`` for any
                 # legacy bundles still sitting on disk.
-                bv = manifest.get("exported_by_bty_version") or manifest.get("bty_version")
+                bv = inventory.get("exported_by_bty_version") or inventory.get("bty_version")
                 exported_at = ea if isinstance(ea, str) else None
                 bty_version = bv if isinstance(bv, str) else None
-                ms = manifest.get("machines")
+                ms = inventory.get("machines")
                 machines = len(ms) if isinstance(ms, list) else 0
         except (OSError, ValueError):
-            # Unparseable manifest -- the bundle still lists with
+            # Unparseable inventory -- the bundle still lists with
             # blank metadata so the operator can find + delete it.
             pass
     return BackupOnDisk(
@@ -471,7 +471,7 @@ def iter_bundle_tar(bundle: Path) -> Iterator[bytes]:
     """Yield a streamed tar archive of ``bundle`` as ``bytes`` chunks.
 
     Stores file paths relative to ``bundle.parent`` so the archive
-    expands to ``<backup_id>/manifest.json`` + ``<backup_id>/files/...``
+    expands to ``<backup_id>/inventory.json``
     when untarred (i.e. the backup_id ends up as the top-level folder,
     matching what the operator expects after a download). The archive
     is uncompressed (mode ``"w|"``): bundle contents are already
