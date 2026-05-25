@@ -95,13 +95,18 @@ def export_bundle(
     their timestamps) from ``state_path`` and writes them to
     ``dest/manifest.json``. ``dest`` is created if absent. No image
     bytes are touched -- this is the routine-backup primitive.
+
+    ``known_disks`` and ``hw_lshw`` live in sqlite as JSON-encoded
+    TEXT; ``_decode_machine`` decodes them on the way out so the
+    manifest carries native objects/arrays rather than re-encoded
+    strings. Operators can ``jq`` it without an extra decode step.
     """
     dest.mkdir(parents=True, exist_ok=True)
     with _db.open_db(state_path) as conn:
         m_rows = conn.execute(
             f"SELECT {', '.join(_MACHINE_EXPORT_COLS)} FROM machines ORDER BY mac"
         ).fetchall()
-    machines = [dict(r) for r in m_rows]
+    machines = [_decode_machine(dict(r)) for r in m_rows]
     manifest = {
         "bty_export_version": _EXPORT_VERSION,
         "exported_at": now,
@@ -110,6 +115,35 @@ def export_bundle(
     }
     (dest / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     return ExportSummary(len(machines), dest)
+
+
+def _decode_machine(row: dict) -> dict:
+    """Decode the JSON-TEXT columns (``known_disks``, ``hw_lshw``) so the
+    exported manifest carries native objects/arrays. NULL stays NULL;
+    malformed JSON degrades to NULL rather than crashing the export."""
+    out = dict(row)
+    for col in ("known_disks", "hw_lshw"):
+        raw = out.get(col)
+        if raw is None:
+            continue
+        try:
+            out[col] = json.loads(raw)
+        except (TypeError, ValueError):
+            out[col] = None
+    return out
+
+
+def _encode_machine_field(value: object) -> str | None:
+    """Inverse of :func:`_decode_machine` for one column. ``None``
+    round-trips; everything else is re-encoded as JSON TEXT for
+    sqlite storage."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        # A legacy v3 bundle authored by an earlier v0.33.2 build
+        # carried JSON-string columns; accept either shape on import.
+        return value
+    return json.dumps(value)
 
 
 def import_bundle(
@@ -161,9 +195,9 @@ def import_bundle(
                 """,
                 (
                     m.get("mac"),
-                    m.get("known_disks"),
+                    _encode_machine_field(m.get("known_disks")),
                     m.get("known_disks_at"),
-                    m.get("hw_lshw"),
+                    _encode_machine_field(m.get("hw_lshw")),
                     m.get("hw_lshw_at"),
                     now,
                     now,

@@ -76,10 +76,14 @@ def test_export_import_round_trip(tmp_path: Path) -> None:
     manifest = json.loads((bundle / "manifest.json").read_text())
     assert manifest["bty_export_version"] == 3
     # Slim machine record: only mac + hardware-inventory fields.
+    # known_disks + hw_lshw decode to NATIVE shapes (array / object),
+    # not re-encoded JSON strings -- so the bundle is jq-readable.
     machine = manifest["machines"][0]
     assert machine["mac"] == "aa:bb:cc:dd:ee:ff"
-    assert machine["hw_lshw"] == '{"id": "system"}'
-    assert "/dev/sda" in machine["known_disks"]
+    assert machine["hw_lshw"] == {"id": "system"}
+    assert isinstance(machine["known_disks"], list)
+    assert machine["known_disks"][0]["path"] == "/dev/sda"
+    assert machine["known_disks"][0]["serial"] == "SER1"
     # Bindings + boot_mode + transient state DELIBERATELY absent.
     for forbidden in (
         "boot_mode",
