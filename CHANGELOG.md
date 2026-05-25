@@ -9,6 +9,33 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.32.4] - 2026-05-25
+
+Round 7 polish: machine-delete UX feedback + docs caught up to
+v0.32.0's recovery wizard.
+
+### Changed
+
+- **`POST /ui/machines/<mac>/delete` now flashes the outcome.**
+  Previously the form silently 303'd to `/ui/machines` whether or
+  not the row existed -- a stale tab clicking delete on an
+  already-removed MAC got the same redirect as a real delete with
+  no signal. v0.32.4 returns ``?deleted=<mac>`` on real removal
+  (green success banner) or ``?missing=<mac>`` on no-op (yellow
+  info banner: "was not found -- already deleted, or never
+  bound"). Banners auto-dismiss after 5s.
+
+### Documentation
+
+- `docs/src/operations.md` -- upgrade section now describes the
+  v0.32.0+ recovery wizard checklist alongside the CLI-driven
+  alternative for headless / scripted upgrades.
+- `docs/src/reference.md` -- new "Recovery-mode routes (v0.32.0+)"
+  table documenting `/`, `/ui/recovery`,
+  `/ui/recovery/status`, `/ui/recovery/wipe`,
+  `/ui/recovery/wipe-and-import`, `/healthz`, the catchall 503,
+  and the error-response shape (400 / 404 / 409 / 500 / 507).
+
 ## [0.32.3] - 2026-05-25
 
 Round 4 of the post-v0.32.0 improvement grind: security boundary

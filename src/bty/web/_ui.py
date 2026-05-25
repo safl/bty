@@ -388,6 +388,12 @@ def register_ui_routes(
             # posts) for the page's "Activity" table.
             machine_events = _events_log.list_events(conn, subject_kind="machine", limit=10)
         machines = [_row_to_dict(r) for r in rows]
+        # v0.32.4: ``?deleted=<mac>`` / ``?missing=<mac>`` carried over
+        # from ``POST /ui/machines/{mac}/delete`` so the operator gets a
+        # success / no-op-but-acknowledged flash banner instead of a
+        # silent redirect.
+        flash_deleted = request.query_params.get("deleted")
+        flash_missing = request.query_params.get("missing")
         return render(
             "ui/machines.html",
             request,
@@ -395,6 +401,8 @@ def register_ui_routes(
             active_filter=active_filter,
             section=section,
             machine_events=machine_events,
+            flash_deleted=flash_deleted,
+            flash_missing=flash_missing,
         )
 
     @app.get(
@@ -600,12 +608,22 @@ def register_ui_routes(
         """Form-style delete. Records a ``machine.deleted`` event
         with the operator's IP so /ui/events is symmetric across
         the JSON API delete + this form delete. Pre-fix the form
-        path silently removed the row with no audit trail."""
+        path silently removed the row with no audit trail.
+
+        v0.32.4: the redirect URL carries ``?deleted=<mac>`` on a
+        real removal OR ``?missing=<mac>`` when the row was already
+        gone (a stale tab on /ui/machines after another operator
+        deleted the same MAC, or a hand-typed URL against a never-
+        bound MAC). /ui/machines renders the corresponding flash so
+        the operator gets feedback either way -- previously a
+        no-op delete redirected silently with no signal.
+        """
         normalised = _normalise_mac(mac)
         client_ip = _client_ip(request)
         with _db.open_db(state_path) as conn:
             cur = conn.execute("DELETE FROM machines WHERE mac = ?", (normalised,))
-            if cur.rowcount > 0:
+            deleted = cur.rowcount > 0
+            if deleted:
                 _events_log.record(
                     conn,
                     kind="machine.deleted",
@@ -617,7 +635,11 @@ def register_ui_routes(
                 )
             conn.commit()
         publish_state_changed()
-        return RedirectResponse("/ui/machines", status_code=status.HTTP_303_SEE_OTHER)
+        flash_key = "deleted" if deleted else "missing"
+        return RedirectResponse(
+            f"/ui/machines?{flash_key}={normalised}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
 
     def _render_images_page(request: Request) -> HTMLResponse:
         """Build the context for ``/ui/images`` and render the template.

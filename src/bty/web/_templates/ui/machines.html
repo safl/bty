@@ -27,6 +27,30 @@
 {% endblock %}
 
 {% block content %}
+{# v0.32.4: post-delete flash banner. Mirrors the recovery wizard's
+   "ultra-explicit" UX -- a non-trivial action (delete a machine
+   record) deserves operator feedback whether or not the row
+   actually existed. ``?deleted=<mac>`` after a real removal;
+   ``?missing=<mac>`` when the row was already gone (stale tab,
+   re-clicked delete). Auto-dismiss after 5 seconds via the
+   bootstrap data-bs-dismiss + setTimeout below. #}
+{% if flash_deleted %}
+  <div class="alert alert-success alert-dismissible fade show" role="alert" id="bty-flash">
+    <i class="bi bi-check-circle-fill me-1"></i>
+    Deleted machine <code>{{ flash_deleted }}</code>.
+    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+  </div>
+{% elif flash_missing %}
+  <div class="alert alert-warning alert-dismissible fade show" role="alert" id="bty-flash">
+    <i class="bi bi-info-circle me-1"></i>
+    Machine <code>{{ flash_missing }}</code> was not found (already deleted, or never bound).
+    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+  </div>
+{% endif %}
+{% if flash_deleted or flash_missing %}
+  <script>setTimeout(function () { var el = document.getElementById("bty-flash"); if (el) el.remove(); }, 5000);</script>
+{% endif %}
+
 {# The live table of all machines, with a minimal inline add-by-MAC
    field in the header. Machines also auto-appear on first PXE
    contact; the inline Add just stages a row early. #}

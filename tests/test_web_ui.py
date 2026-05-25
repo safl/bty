@@ -2066,13 +2066,59 @@ def test_ui_machine_delete_via_form(client: TestClient) -> None:
         },
         cookies=AUTH,
     )
-    r = client.post("/ui/machines/aa:bb:cc:dd:ee:ff/delete")
+    r = client.post("/ui/machines/aa:bb:cc:dd:ee:ff/delete", follow_redirects=False)
     assert r.status_code == 303
+    # v0.32.4: real delete redirects with ``?deleted=<mac>`` so the
+    # /ui/machines render can render a success flash banner. ``:`` in
+    # the MAC isn't percent-encoded in the query string (Starlette
+    # treats it as reserved-but-allowed); the browser passes it through
+    # to the request.query_params reader unchanged.
+    assert "deleted=aa:bb:cc:dd:ee:ff" in r.headers["location"]
     api = client.get(
         "/machines/aa:bb:cc:dd:ee:ff",
         cookies=AUTH,
     )
     assert api.status_code == 404
+
+
+def test_ui_machine_delete_missing_mac_flashes_missing(client: TestClient) -> None:
+    """v0.32.4: ``POST /ui/machines/<mac>/delete`` against a MAC that
+    doesn't exist (stale tab, hand-typed URL, second click after another
+    operator's delete) redirects to ``/ui/machines?missing=<mac>``
+    instead of silently 303'ing to ``/ui/machines``. The destination
+    page renders a yellow info banner so the operator sees feedback
+    either way -- the previous silent no-op left them wondering whether
+    the click registered."""
+    _login(client)
+    r = client.post(
+        "/ui/machines/de:ad:be:ef:00:00/delete", follow_redirects=False
+    )
+    assert r.status_code == 303
+    assert "missing=de:ad:be:ef:00:00" in r.headers["location"]
+    # Follow the redirect and assert the missing-banner copy lands.
+    body = client.get(r.headers["location"]).text
+    assert "was not found" in body
+    assert "de:ad:be:ef:00:00" in body
+
+
+def test_ui_machine_delete_real_deletion_flashes_deleted(client: TestClient) -> None:
+    """Symmetric to the missing test: a real delete lands on
+    ``?deleted=<mac>`` and the destination page renders the green
+    success banner."""
+    _login(client)
+    mac = "11:22:33:44:55:66"
+    client.put(
+        f"/machines/{mac}",
+        json={
+            "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        },
+        cookies=AUTH,
+    )
+    r = client.post(f"/ui/machines/{mac}/delete", follow_redirects=False)
+    assert r.status_code == 303
+    body = client.get(r.headers["location"]).text
+    assert "Deleted machine" in body
+    assert mac in body
 
 
 def test_ui_images_renders(client: TestClient) -> None:
