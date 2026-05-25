@@ -2090,9 +2090,7 @@ def test_ui_machine_delete_missing_mac_flashes_missing(client: TestClient) -> No
     either way -- the previous silent no-op left them wondering whether
     the click registered."""
     _login(client)
-    r = client.post(
-        "/ui/machines/de:ad:be:ef:00:00/delete", follow_redirects=False
-    )
+    r = client.post("/ui/machines/de:ad:be:ef:00:00/delete", follow_redirects=False)
     assert r.status_code == 303
     assert "missing=de:ad:be:ef:00:00" in r.headers["location"]
     # Follow the redirect and assert the missing-banner copy lands.
