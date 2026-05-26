@@ -1107,6 +1107,105 @@ def test_ui_catalog_entry_form_happy_path_lands_row_and_303s(
     assert any("charlie.img.gz" in e["summary"] for e in events)
 
 
+def test_ui_catalog_entry_form_oras_branch(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The oras:// branch of /ui/catalog/entries: resolve_ref is
+    called server-side; digest, name, format, size_bytes come from
+    the manifest; row inserts with the resolved metadata. Mirrors
+    the JSON ``POST /catalog/entries`` oras path but exercises the
+    Form-based UI handler (913-975 of _ui.py was the uncovered
+    block)."""
+    from bty import oras as _oras
+
+    fake_blob = _oras.ResolvedBlob(
+        blob_url="https://ghcr.io/v2/safl/nosi/blobs/sha256:" + "a" * 64,
+        headers={"Authorization": "Bearer fake"},
+        digest="sha256:" + "a" * 64,
+        size=12345,
+        title="nosi-debian-sysdev.img.gz",
+    )
+    monkeypatch.setattr(_oras, "resolve_ref", lambda url: fake_blob)
+    _login(client)
+
+    r = client.post(
+        "/ui/catalog/entries",
+        data={"image_url": "oras://ghcr.io/safl/nosi/debian-sysdev:latest"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert r.headers["location"] == "/ui/images"
+
+    entries = client.get("/catalog/entries", cookies=AUTH).json()
+    oras_row = next(
+        (e for e in entries if e["src"] == "oras://ghcr.io/safl/nosi/debian-sysdev:latest"),
+        None,
+    )
+    assert oras_row is not None
+    assert oras_row["disk_image_sha"] == "a" * 64  # algorithm prefix stripped
+    assert oras_row["name"] == "nosi-debian-sysdev.img.gz"
+    assert oras_row["format"] == "img.gz"
+    assert oras_row["size_bytes"] == 12345
+
+
+def test_ui_catalog_entry_form_oras_resolve_failure(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If ``resolve_ref`` raises (registry unreachable, bad ref),
+    the operator gets a 303 back to /ui/images with an ``?error=``
+    query param -- NOT a 500 traceback. Pin the error-channel
+    shape so a refactor can't silently regress to a wedge."""
+    from bty import oras as _oras
+
+    def _boom(url: str) -> _oras.ResolvedBlob:
+        raise _oras.OrasError("simulated registry unreachable")
+
+    monkeypatch.setattr(_oras, "resolve_ref", _boom)
+    _login(client)
+
+    r = client.post(
+        "/ui/catalog/entries",
+        data={"image_url": "oras://ghcr.io/bad/ref:latest"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    loc = r.headers["location"]
+    assert loc.startswith("/ui/images?error=")
+    assert "oras+resolve+failed" in loc or "oras%20resolve%20failed" in loc
+
+
+def test_ui_catalog_entry_form_oras_duplicate_redirects_with_error(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Submitting the same oras URL twice hits the UNIQUE(src)
+    constraint. The handler catches the IntegrityError and
+    redirects with ``?error=already+exists`` rather than 500'ing.
+    """
+    from bty import oras as _oras
+
+    fake_blob = _oras.ResolvedBlob(
+        blob_url="x",
+        headers={},
+        digest="sha256:" + "b" * 64,
+        size=10,
+        title="dup.img.gz",
+    )
+    monkeypatch.setattr(_oras, "resolve_ref", lambda url: fake_blob)
+    _login(client)
+
+    url = "oras://ghcr.io/safl/dup:latest"
+    r1 = client.post("/ui/catalog/entries", data={"image_url": url}, follow_redirects=False)
+    assert r1.status_code == 303
+    assert r1.headers["location"] == "/ui/images"
+
+    r2 = client.post("/ui/catalog/entries", data={"image_url": url}, follow_redirects=False)
+    assert r2.status_code == 303
+    assert "already+exists" in r2.headers["location"]
+
+
 def test_ui_machine_save_is_audited(client: TestClient) -> None:
     """Changing a machine via the browser UI records machine.created /
     machine.upserted, same as the JSON PUT path -- so operator config

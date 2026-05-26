@@ -9,6 +9,30 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.33.14] - 2026-05-26
+
+**UI catalog-entry add: oras:// branch tested.** The JSON
+`POST /catalog/entries` oras path is tested; the parallel Form
+endpoint at `POST /ui/catalog/entries` had only its http(s)
+branch covered. The oras branch (lines 913-975 of `_ui.py` --
+~60 lines) was previously the largest uncovered block.
+
+Three new tests in `test_web_ui.py`:
+
+- happy path: oras URL resolves via `oras.resolve_ref`, row
+  inserts with digest / name / format / size_bytes from the
+  manifest, 303 to `/ui/images`
+- resolve failure: `OrasError` from `resolve_ref` redirects with
+  `?error=oras+resolve+failed` rather than 500-ing
+- duplicate src: re-submitting the same oras URL hits
+  `UNIQUE(src)` and redirects with `?error=already+exists`
+
+### Coverage
+
+- `_ui.py` 91% -> 94%
+- Total suite: 825 -> 828 tests
+- Overall: 91% -> 92%
+
 ## [0.33.13] - 2026-05-26
 
 **Backup manager helper coverage.** Two small utility-function
