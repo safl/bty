@@ -3264,6 +3264,71 @@ def test_workers_backups_delete_requires_auth(app_client: TestClient) -> None:
     assert r.status_code == 401
 
 
+def test_workers_backups_post_invalid_trigger_returns_422(app_client: TestClient) -> None:
+    """``trigger`` must be one of ``{"manual", "scheduled"}``. An
+    unknown value gets rejected at the Pydantic layer (422) rather
+    than silently triggering a backup with a bogus tag in the
+    ``backup.created`` event."""
+    r = app_client.post(
+        "/workers/backups",
+        json={"trigger": "totally-bogus"},
+        cookies=AUTH,
+    )
+    assert r.status_code == 422, r.text
+
+
+# ---------- HEAD /boot/{name} edge cases ----------------------------------
+#
+# UEFI HTTP-Boot firmware HEADs the URL before GET; if the artifact is
+# missing it must surface 404 cleanly so the firmware can fall back to
+# the next boot order entry, not stall on a server error.
+
+
+def test_http_boot_head_missing_artifact_returns_404(app_client: TestClient) -> None:
+    """HEAD against a non-existent /boot artifact returns 404 (with
+    empty body, matching the HEAD contract). Without this, UEFI
+    HTTP-Boot firmware that does a HEAD probe before GET would see
+    a server error and abort the boot order traversal."""
+    r = app_client.head("/boot/definitely-not-an-artifact.bin")
+    assert r.status_code == 404
+    assert r.content == b""
+
+
+# ---------- HEAD /images/{key} edge cases ---------------------------------
+
+
+def test_head_images_missing_returns_404(app_client: TestClient) -> None:
+    """Same UEFI HEAD-probe story for /images/<sha>. A missing image
+    returns 404 not 500."""
+    # 64-hex pattern but file isn't on disk.
+    nonexistent = "0" * 64
+    r = app_client.head(f"/images/{nonexistent}")
+    assert r.status_code == 404
+    assert r.content == b""
+
+
+# ---------- DELETE /catalog/entries edge cases ----------------------------
+
+
+def test_delete_catalog_entry_unknown_src_returns_404(app_client: TestClient) -> None:
+    """Deleting a src that isn't in the catalog -> 404, not 500.
+    Operator-clickable Delete on a stale UI tab shouldn't crash
+    bty-web."""
+    r = app_client.request(
+        "DELETE",
+        "/catalog/entries?src=https://example.invalid/never-existed.img",
+        cookies=AUTH,
+    )
+    assert r.status_code == 404
+    assert "no catalog entry" in r.json()["detail"]
+
+
+def test_delete_catalog_entry_requires_auth(app_client: TestClient) -> None:
+    """The catalog delete is operator-only; unauth'd clients get 401."""
+    r = app_client.request("DELETE", "/catalog/entries?src=anything")
+    assert r.status_code == 401
+
+
 def test_pxe_flash_mode_with_no_ref_falls_back_to_unknown(
     app_client: TestClient,
 ) -> None:

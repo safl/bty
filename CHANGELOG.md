@@ -9,6 +9,49 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.33.15] - 2026-05-26
+
+**Edge-case audit + targeted 4xx-path tests.** Operator-pointed
+question: are edge cases and variations tested? Honest audit of
+all 72 (method, path) pairs:
+
+- 71/72 had at least one status-code assertion
+- 41/72 had at least one 4xx error path tested
+- 29/72 had ONLY success-path coverage (some legitimately have no
+  4xx -- `/healthz`, `/version`, static UI renders behind 303
+  auth redirects)
+
+Closed the realistic operator-triggerable error paths in this
+batch:
+
+- `POST /workers/backups` invalid trigger -> 422 (was untested;
+  Pydantic enum rejection now pinned)
+- `HEAD /boot/{name}` missing artifact -> 404 with empty body
+  (UEFI HTTP-Boot firmware HEADs before GET; a 500 here would
+  break boot order fallback)
+- `HEAD /images/{key}` missing -> 404 (same UEFI HEAD-probe story)
+- `DELETE /catalog/entries` unknown src -> 404 (stale UI tab
+  clicking delete on a deleted row gets a clean error, not 500)
+- `DELETE /catalog/entries` no auth -> 401
+
+Suite 828 -> 833.
+
+### What's still uncovered
+
+Routes with no 4xx test left (less realistic / lower risk):
+
+- Most read-only GETs that auth-redirect on 401 already (these
+  have implicit error coverage via the auth gate)
+- `/healthz`, `/version`, `/pxe-bootstrap.ipxe` -- legitimately
+  success-only
+- `POST /ui/settings/{upstream,backup,tftp-control}` form-validation
+  edge cases (invalid retention, bogus tag)
+- `POST /ui/catalog/entries` http(s) branch edge cases (empty
+  image_url, malformed sha_url)
+
+These are real but lower-blast-radius than the ones closed here.
+Continue tackling per concrete operator hits.
+
 ## [0.33.14] - 2026-05-26
 
 **UI catalog-entry add: oras:// branch tested.** The JSON
