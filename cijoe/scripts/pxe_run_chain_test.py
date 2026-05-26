@@ -770,7 +770,7 @@ def _assert_storage_marker(host, port, cfg):
         timeout=10,
     )
     try:
-        stdin, stdout, stderr = client.exec_command(
+        _stdin, stdout, stderr = client.exec_command(
             "cat /var/lib/bty/images/.bty-storage.json", timeout=10
         )
         body = stdout.read().decode("utf-8", errors="replace")
@@ -786,9 +786,7 @@ def _assert_storage_marker(host, port, cfg):
         try:
             data = _json.loads(body)
         except ValueError as exc:
-            raise RuntimeError(
-                f"marker JSON is malformed: {exc}; body={body!r}"
-            ) from exc
+            raise RuntimeError(f"marker JSON is malformed: {exc}; body={body!r}") from exc
         version = data.get("format_version")
         # The constant lives in bty.catalog.STORAGE_FORMAT_VERSION
         # but the test runs in cijoe's own venv; hardcode the
