@@ -172,6 +172,34 @@ def create_app(
 
     @asynccontextmanager
     async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        # Storage-format check / write. On a fresh image_root the
+        # marker is created with the current ``STORAGE_FORMAT_VERSION``;
+        # on subsequent starts a mismatch raises StorageFormatMismatch
+        # (bty.catalog) with operator-actionable remediation.
+        # Independent of the bty package version: this number bumps
+        # ONLY when the on-disk layout / filename grammar changes in
+        # a way older bty-web can't read.
+        _catalog.check_or_write_storage_marker(resolved_image_root)
+        # Survey image_root for files that don't match any documented
+        # storage convention. Log a one-line warning per offender so
+        # an operator who dropped notes / random tools into the
+        # image_root sees the noise pointed at them. This is
+        # diagnostic only -- the offender doesn't break anything; the
+        # discovery + auto-import paths still ignore unknowns.
+        import logging as _logging
+
+        _lifespan_log = _logging.getLogger(__name__)
+        for fp in resolved_image_root.iterdir():
+            if not fp.is_file():
+                continue
+            if not _catalog.is_recognised_image_store_filename(fp.name):
+                _lifespan_log.warning(
+                    "image_root carries unrecognised file %s (not a "
+                    "catalog-<ref>-<slug>.<ext> cache file, not an image, "
+                    "not a sidecar / partial / storage marker); ignored by "
+                    "the discovery scan",
+                    fp.name,
+                )
         # The SSE event bus accepts publishes from worker threads -
         # capture the loop now so cross-thread publishes can hop in
         # via call_soon_threadsafe.

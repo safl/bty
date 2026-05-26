@@ -50,9 +50,27 @@ import bty
 
 from . import _db
 
-# v3 = metadata-only (no files/ subdir). v2 was metadata + full
-# image_root copy; v1 was the pre-v0.31.0 layout. Both refused on
-# import -- regenerate on the source release.
+# The inventory bundle's on-disk format version. INDEPENDENT of
+# ``bty.__version__``: this number is bumped ONLY when the
+# ``inventory.json`` shape changes (fields added, removed, or
+# their semantics change). It does NOT bump for every bty release
+# -- a v3 bundle written by bty v0.33.2 must be importable by any
+# future bty release that still understands v3, and the export
+# from bty v0.34.0 / v0.35.0 / ... still writes v3 unless the
+# shape itself changes.
+#
+# History:
+#   v1 -- pre-v0.31.0 layout (images/ + cache/ subdirs + machine
+#         bindings + catalog_entries section). No longer
+#         importable.
+#   v2 -- v0.31.0..v0.33.1 (flat files/ + slim machine records).
+#         No longer importable; image bytes are now out of scope
+#         for the bundle.
+#   v3 -- v0.33.2+ metadata-only: just inventory.json with mac +
+#         lshw + known_disks per machine.
+#
+# Import refuses any version that isn't equal to this constant.
+# Pre-1.0 policy: bundles don't migrate across major-format bumps.
 _EXPORT_VERSION = 3
 
 # Per-machine columns the slim export carries. Mac + lshw +

@@ -803,3 +803,107 @@ def test_image_ref_for_src_distinguishes_local_vs_remote_with_same_name() -> Non
     a = catalog.image_ref_for_src("file://debian.img.gz")
     b = catalog.image_ref_for_src("https://example.com/debian.img.gz")
     assert a != b
+
+
+# ---------- storage-format marker -------------------------------------------
+
+
+def test_storage_marker_written_on_fresh_image_root(tmp_path: Path) -> None:
+    """First call against a fresh image_root creates
+    ``.bty-storage.json`` carrying the current STORAGE_FORMAT_VERSION
+    + a creation timestamp + the bty version that wrote it
+    (diagnostic only)."""
+    from bty.catalog import STORAGE_FORMAT_VERSION, check_or_write_storage_marker
+
+    v = check_or_write_storage_marker(tmp_path)
+    assert v == STORAGE_FORMAT_VERSION
+    marker = tmp_path / ".bty-storage.json"
+    import json as _json
+
+    data = _json.loads(marker.read_text(encoding="utf-8"))
+    assert data["format_version"] == STORAGE_FORMAT_VERSION
+    assert "created_at" in data
+    assert "created_by_bty_version" in data
+
+
+def test_storage_marker_idempotent_on_match(tmp_path: Path) -> None:
+    """A second call against the same marker is a no-op: doesn't
+    rewrite the marker (created_at would otherwise drift)."""
+    from bty.catalog import check_or_write_storage_marker
+
+    check_or_write_storage_marker(tmp_path)
+    marker = tmp_path / ".bty-storage.json"
+    first = marker.read_text(encoding="utf-8")
+    check_or_write_storage_marker(tmp_path)
+    second = marker.read_text(encoding="utf-8")
+    assert first == second, "matching-version call must not rewrite the marker"
+
+
+def test_storage_marker_rejects_mismatch(tmp_path: Path) -> None:
+    """A marker stamped with a different format_version raises
+    StorageFormatMismatch with operator-facing remediation text."""
+    import json as _json
+
+    from bty.catalog import StorageFormatMismatch, check_or_write_storage_marker
+
+    (tmp_path / ".bty-storage.json").write_text(
+        _json.dumps({"format_version": 99, "created_at": "fake", "created_by_bty_version": "x"})
+    )
+    with pytest.raises(StorageFormatMismatch) as exc:
+        check_or_write_storage_marker(tmp_path)
+    msg = str(exc.value)
+    # The message names both versions + tells the operator what to do.
+    assert "v99" in msg
+    assert "Alt+F2" in msg or "shell" in msg
+    assert "archive" in msg or "wipe" in msg or "rm" in msg.lower()
+
+
+def test_storage_marker_rejects_malformed_json(tmp_path: Path) -> None:
+    """A corrupt / non-JSON marker file raises StorageFormatMismatch
+    rather than crashing bty-web at startup. Could happen if a
+    partial write was interrupted (cosmic ray, OOM kill mid-flush)."""
+    from bty.catalog import StorageFormatMismatch, check_or_write_storage_marker
+
+    (tmp_path / ".bty-storage.json").write_text("this is not json {{{ ")
+    with pytest.raises(StorageFormatMismatch, match="unreadable / malformed"):
+        check_or_write_storage_marker(tmp_path)
+
+
+# ---------- image-store filename recognition --------------------------------
+
+
+def test_recognised_filenames_accept_documented_shapes(tmp_path: Path) -> None:
+    """Every name the storage layer documents as legal must be
+    recognised. New file types added to the convention need a
+    matching predicate update."""
+    from bty.catalog import is_recognised_image_store_filename
+
+    legal = [
+        "catalog-deadbeefcafe-nosi-fedora.img.gz",  # catalog cache
+        "operator.img.gz",  # operator-typed (img.gz format)
+        "operator.qcow2",  # operator-typed (qcow2 format)
+        "operator.img",  # operator-typed (raw img format)
+        "any-image-name.img.gz.sha256",  # sidecar
+        "any-image-name.img.gz.partial",  # streamed upload in progress
+        ".bty-storage.json",  # marker itself
+        ".abc12345.tmp-xyz",  # mid-fetch tempfile
+    ]
+    for name in legal:
+        assert is_recognised_image_store_filename(name), name
+
+
+def test_recognised_filenames_reject_unconventional(tmp_path: Path) -> None:
+    """Operator-dropped notes, README, random scripts -- none of
+    these match an image extension or sidecar pattern. The lifespan
+    survey warns about them so the operator can clean up."""
+    from bty.catalog import is_recognised_image_store_filename
+
+    bad = [
+        "README.md",
+        "notes.txt",
+        "screenshot.png",
+        "some-binary",
+        "test.json",  # the .bty-storage.json hidden marker is OK, this isn't
+    ]
+    for name in bad:
+        assert not is_recognised_image_store_filename(name), name

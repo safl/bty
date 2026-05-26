@@ -9,6 +9,66 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.33.19] - 2026-05-26
+
+**Storage format version + inventory-format decoupling.** Operator-
+pointed: the on-disk layout needs a version number independent of
+`bty.__version__`, and unconventional files in image_root should
+warn loudly so the operator notices.
+
+### Added
+
+- **`bty.catalog.STORAGE_FORMAT_VERSION` = 1.** Constant naming
+  the on-disk layout / filename grammar version. Independent of
+  the bty package version; bumped ONLY when the convention
+  changes (filename pattern, sidecar shape, etc.). v1 covers the
+  v0.31.0+ scheme (`catalog-<ref:12>-<slug>.<ext>` for cache files,
+  operator-typed for the rest, `.sha256` sidecars, `.partial`
+  upload-in-progress, mid-fetch tempfiles).
+- **`.bty-storage.json` marker.** Written into `image_root` on
+  first bty-web start; carries `{format_version, created_at,
+  created_by_bty_version}`. Read on every subsequent start.
+- **`bty.catalog.check_or_write_storage_marker(image_root)`.**
+  Idempotent on matching version. On mismatch raises
+  `StorageFormatMismatch` with operator-facing remediation text
+  (drop to a shell with Alt+F2, archive image_root, restart). On
+  malformed JSON (interrupted write, etc.) same error.
+- **`bty.catalog.is_recognised_image_store_filename(name)`.**
+  Predicate listing every legal name shape. Used by the lifespan
+  startup to scan image_root + log warnings for unconventional
+  files (operator notes, half-downloaded tools, stray scripts) so
+  they're visible rather than silently ignored.
+
+### Clarified
+
+- **`bty_export_version` in inventory.json is independent of
+  `bty.__version__`.** Documented in `_portability.py`: the
+  number bumps ONLY when the `inventory.json` shape changes,
+  NOT on every bty release. A v3 bundle written by bty v0.33.2
+  must remain importable by any future bty release that still
+  understands v3. Pre-1.0 policy: bundles don't migrate across
+  major-format bumps; import refuses any version != current.
+
+### Tests
+
+Six new in `tests/test_catalog.py`:
+
+- marker written on fresh image_root
+- marker idempotent on matching version (doesn't drift created_at)
+- StorageFormatMismatch on stamp mismatch (+ remediation text)
+- StorageFormatMismatch on malformed JSON
+- recognised-filename predicate accepts documented shapes
+- recognised-filename predicate rejects operator-droppings
+
+Suite 844 -> 850.
+
+### Deferred
+
+`bty-state-init` CLI tool (operator-typed: wipe + format + populate
+a fresh state disk) is bigger; queued for a follow-up round once
+the storage-format-version pattern proves out under hardware
+testing.
+
 ## [0.33.18] - 2026-05-26
 
 **/pxe/{mac}/plan contract tests for the operator-facing edge cases.**

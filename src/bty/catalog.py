@@ -56,6 +56,24 @@ from bty import images as _images
 # hash so two distinct URLs never collide on disk).
 _CATALOG_PREFIX = "catalog-"
 
+# Image-store naming-convention version. Independent of
+# ``bty.__version__``: this number is bumped ONLY when the on-disk
+# layout / filename grammar changes in a way that older bty-web
+# can no longer read. The current scheme (v1):
+#
+#   image_root/
+#     <operator-typed>.<ext>            # operator uploaded / dropped
+#     catalog-<ref:12>-<slug>.<ext>     # bty-fetched from a catalog entry
+#     <file>.sha256                     # sidecar manifests (any of the above)
+#     .bty-storage.json                 # marker; carries this version
+#
+# The marker file is created on first bty-web startup against a
+# fresh image_root and validated on every subsequent start. A
+# mismatch makes bty-web bail (operator-facing message points at
+# bty-state-init / shell remediation) rather than silently treating
+# a future layout as the current one.
+STORAGE_FORMAT_VERSION = 1
+
 
 def is_catalog_cache_filename(name: str) -> bool:
     """True iff ``name`` is the basename of a catalog-fetched cache
@@ -69,6 +87,133 @@ def is_catalog_cache_filename(name: str) -> bool:
     cache filename.
     """
     return name.startswith(_CATALOG_PREFIX)
+
+
+# Files under image_root the storage layer recognises explicitly.
+# Everything else triggers an "unconventional name" warning on scan
+# so an operator who dropped a stray file (notes, a non-bty backup,
+# a half-downloaded curl that didn't atomic-rename) can see it.
+# The dot-prefixed marker + sha256 sidecars are bookkeeping;
+# catalog- + operator-typed image extensions are payload.
+_STORAGE_MARKER_FILENAME = ".bty-storage.json"
+
+
+class StorageFormatMismatch(RuntimeError):
+    """Raised by :func:`check_or_write_storage_marker` when the marker
+    on disk doesn't match the version this bty-web understands. The
+    message is operator-facing: it names the on-disk version, the
+    running version, and recommends the manual cleanup path."""
+
+
+def check_or_write_storage_marker(image_root: Path) -> int:
+    """Validate (or create) ``image_root/.bty-storage.json``.
+
+    On first use (fresh image_root, no marker), writes the current
+    :data:`STORAGE_FORMAT_VERSION` + creation timestamp. On
+    subsequent calls, reads the marker; if the stored version
+    matches, returns the version + does nothing.
+
+    If the stored version DOES NOT match the running
+    ``STORAGE_FORMAT_VERSION``, raises :class:`StorageFormatMismatch`
+    so the bty-web start aborts. Operator response: drop to a
+    shell, archive / wipe the state directory, re-init the
+    storage layout (``bty-state-init`` -- a follow-up tool; for
+    now ``rm -rf $image_root/*`` then restart). The on-disk
+    layout can't be silently upgraded because the naming /
+    semantics may have diverged.
+
+    Returns the version on disk (or just-written) so callers can
+    log it.
+    """
+    import json
+    from datetime import UTC, datetime
+
+    image_root.mkdir(parents=True, exist_ok=True)
+    marker = image_root / _STORAGE_MARKER_FILENAME
+    if marker.is_file():
+        try:
+            data = json.loads(marker.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise StorageFormatMismatch(
+                f"image-store marker {marker} is unreadable / malformed "
+                f"({exc!r}). The image_root may be corrupt or was created "
+                f"by a non-bty process. Inspect, then either restore from "
+                f"backup or wipe + re-init (drop to a shell with Alt+F2, "
+                f"archive {image_root!s} / *, restart bty-web)."
+            ) from exc
+        stored = data.get("format_version")
+        if stored != STORAGE_FORMAT_VERSION:
+            raise StorageFormatMismatch(
+                f"image-store at {image_root} uses storage format "
+                f"v{stored!r}; this bty-web understands v{STORAGE_FORMAT_VERSION}. "
+                f"Older / newer layouts are NOT auto-migrated -- the "
+                f"naming conventions may have diverged. Operator action: "
+                f"drop to a shell (Alt+F2), archive the contents of "
+                f"{image_root!s} (e.g. ``mv {image_root!s} {image_root!s}.bak``) "
+                f"then restart bty-web -- a fresh image_root will get "
+                f"the current marker on init."
+            )
+        return int(stored)
+    # No marker: this is a fresh / never-used image_root. Stamp it.
+    marker.write_text(
+        json.dumps(
+            {
+                "format_version": STORAGE_FORMAT_VERSION,
+                "created_at": datetime.now(UTC).isoformat(),
+                "created_by_bty_version": _bty_version_for_marker(),
+            },
+            indent=2,
+        )
+        + "\n"
+    )
+    return STORAGE_FORMAT_VERSION
+
+
+def _bty_version_for_marker() -> str:
+    """Read ``bty.__version__`` for the storage-marker's diagnostic
+    field. Lazy-imported so this module can be parsed even before
+    bty.__init__ has populated __version__ (which would be
+    pathological but cheap to guard against)."""
+    try:
+        import bty
+
+        return str(bty.__version__)
+    except Exception:
+        return "unknown"
+
+
+def is_recognised_image_store_filename(name: str) -> bool:
+    """True iff ``name`` follows one of the documented image-store
+    conventions (v1):
+
+    - ``catalog-<ref:12>-<slug>.<ext>`` catalog-fetched cache file
+    - ``<any>.<known-image-ext>`` operator-typed image
+    - ``<file>.sha256`` sidecar
+    - ``.bty-storage.json`` storage marker
+    - ``.<ref:8>.<random>`` mid-fetch tempfile (cleaned up on
+      success, leaks on crash; tolerated, not warned about)
+
+    Anything else is operator-droppings or a stray file from a
+    failed migration -- callers use this to decide whether to
+    warn / bail.
+    """
+    if name == _STORAGE_MARKER_FILENAME:
+        return True
+    if name.endswith(".sha256"):
+        return True
+    if name.endswith(".partial"):
+        # Upload-in-progress sidecar (bty.web._app._stream_upload).
+        return True
+    # Mid-fetch tempfile from catalog.fetch_to_cache: ``.<ref:8>.<random>``.
+    # The leading dot + non-recognised extension would otherwise warn;
+    # tolerate so a crashed fetch doesn't leak operator-facing noise.
+    if name.startswith(".") and "." in name[1:]:
+        return True
+    # Image extensions live in bty.images.detect_format; check by
+    # path-only detection so we don't read the file.
+    from bty.images import detect_format
+
+    return detect_format(Path(name)) is not None
 
 
 # Length of the bty_image_ref segment in catalog filenames. 12 hex
