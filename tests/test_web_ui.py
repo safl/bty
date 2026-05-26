@@ -1988,38 +1988,124 @@ def test_ui_machines_list_shows_boot_mode_badge(client: TestClient) -> None:
     assert ">Last flashed</th>" in body
 
 
-def test_ui_machine_detail_shows_boot_state_tracking_the_bit(client: TestClient) -> None:
+def test_ui_machine_detail_shows_boot_state_tracking_signals(client: TestClient) -> None:
     """The machine view shows the lifecycle State next to the mode,
-    derived from boot_mode + saw_flasher_boot: a bty-flash-once box reads
-    'pending flash' before it flashes and 'flashed; booting disk' once
-    the bit is armed (the box booted the flasher). The mode never
-    changes -- it stays bty-flash-once, not mutated to ipxe-exit."""
+    derived from boot_mode + saw_flasher_boot + the completion
+    signal column (``last_flashed_at`` / ``known_disks_at``).
+
+    Three states for a bty-flash-once machine:
+      - pre-PXE: ``pending flash``
+      - PXE/iPXE chain ran (saw_flasher_boot=1) but no /done POST yet:
+        ``live env running; awaiting flash``
+      - /done POST landed (last_flashed_at set): ``flashed; booting disk``
+
+    Pre-v0.33.22 the middle state didn't exist -- ``saw_flasher_boot``
+    alone flipped the label to ``flashed; booting disk``, lying until
+    the flasher actually completed.
+    """
     from bty.web import _db as _bty_db
 
     _login(client)
+    mac = "aa:bb:cc:dd:ee:11"
     client.put(
-        "/machines/aa:bb:cc:dd:ee:11",
+        f"/machines/{mac}",
         json={"boot_mode": "bty-flash-once"},
         cookies=AUTH,
     )
-    body = client.get("/ui/machines/aa:bb:cc:dd:ee:11").text
+    body = client.get(f"/ui/machines/{mac}").text
     assert "pending flash" in body
 
-    # Arm the bit the way a flasher /boot fetch would.
     state_path = client.app.state.state_path  # type: ignore[attr-defined]
+    # Arm saw_flasher_boot the way a flasher /boot fetch would.
+    # last_flashed_at is still NULL -- live env booted, but the
+    # flasher hasn't completed yet (no /pxe/{mac}/done POST).
     with _bty_db.open_db(state_path) as conn:
         conn.execute(
             "UPDATE machines SET saw_flasher_boot = 1 WHERE mac = ?",
-            ("aa:bb:cc:dd:ee:11",),
+            (mac,),
         )
         conn.commit()
-    body = client.get("/ui/machines/aa:bb:cc:dd:ee:11").text
-    assert "flashed; booting disk" in body
-    assert "pending flash" not in body
-    # Mode is unchanged -- still bty-flash-once, never mutated to ipxe-exit.
-    assert client.get("/machines/aa:bb:cc:dd:ee:11", cookies=AUTH).json()["boot_mode"] == (
-        "bty-flash-once"
+    body = client.get(f"/ui/machines/{mac}").text
+    assert "live env running; awaiting flash" in body, (
+        f"REGRESSION (v0.33.22): saw_flasher_boot alone must NOT imply "
+        f"'flashed; booting disk'. body excerpt: "
+        f"{[ln for ln in body.splitlines() if 'flash' in ln.lower()]!r}"
     )
+    assert "flashed; booting disk" not in body
+    assert "pending flash" not in body
+
+    # /pxe/{mac}/done POST landed -> last_flashed_at populated. NOW
+    # the box has actually flashed; the label flips to the
+    # "booting the just-flashed disk" state.
+    with _bty_db.open_db(state_path) as conn:
+        conn.execute(
+            "UPDATE machines SET last_flashed_at = ? WHERE mac = ?",
+            ("2026-05-26T12:00:00+00:00", mac),
+        )
+        conn.commit()
+    body = client.get(f"/ui/machines/{mac}").text
+    assert "flashed; booting disk" in body
+    assert "live env running; awaiting flash" not in body
+    # Mode is unchanged -- still bty-flash-once.
+    assert client.get(f"/machines/{mac}", cookies=AUTH).json()["boot_mode"] == "bty-flash-once"
+
+
+def test_ui_machine_detail_inventory_state_requires_actual_inventory(
+    client: TestClient,
+) -> None:
+    """REGRESSION (v0.33.22 operator report): a bty-inventory machine
+    showed 'inventoried; booting disk' the moment ``saw_flasher_boot``
+    flipped -- i.e. when the live env's iPXE chain pulled
+    ``/boot/kernel?mac=X``, BEFORE the live env had a chance to
+    actually run, let alone POST ``/pxe/{mac}/inventory``.
+
+    Post-fix the label only lights up when ``known_disks_at`` is set
+    (which only the inventory POST writes). The in-between state --
+    iPXE chain ran but no inventory yet -- gets its own honest
+    'live env running; awaiting inventory' label.
+    """
+    from bty.web import _db as _bty_db
+
+    _login(client)
+    mac = "aa:bb:cc:dd:ee:12"
+    # bty-inventory is the default for auto-discovered machines; an
+    # operator can also PUT it explicitly.
+    client.put(
+        f"/machines/{mac}",
+        json={"boot_mode": "bty-inventory"},
+        cookies=AUTH,
+    )
+    body = client.get(f"/ui/machines/{mac}").text
+    assert "pending inventory" in body
+
+    state_path = client.app.state.state_path  # type: ignore[attr-defined]
+    # The box booted iPXE + fetched /boot/kernel?mac= -> saw_flasher_boot
+    # flipped to 1. The live env's bty has NOT yet POSTed the inventory.
+    with _bty_db.open_db(state_path) as conn:
+        conn.execute(
+            "UPDATE machines SET saw_flasher_boot = 1 WHERE mac = ?",
+            (mac,),
+        )
+        conn.commit()
+    body = client.get(f"/ui/machines/{mac}").text
+    assert "live env running; awaiting inventory" in body, (
+        f"REGRESSION: saw_flasher_boot alone must NOT light up "
+        f"'inventoried; booting disk'. body excerpt: "
+        f"{[ln for ln in body.splitlines() if 'invent' in ln.lower()]!r}"
+    )
+    assert "inventoried; booting disk" not in body
+
+    # The live env POSTs /pxe/{mac}/inventory -> known_disks_at + the
+    # JSON blob land. NOW the box has actually inventoried.
+    with _bty_db.open_db(state_path) as conn:
+        conn.execute(
+            "UPDATE machines SET known_disks_at = ?, known_disks = ? WHERE mac = ?",
+            ("2026-05-26T12:00:00+00:00", '[{"path": "/dev/sda", "serial": "S1"}]', mac),
+        )
+        conn.commit()
+    body = client.get(f"/ui/machines/{mac}").text
+    assert "inventoried; booting disk" in body
+    assert "live env running; awaiting inventory" not in body
 
 
 def test_ui_events_renders_older_link_when_full_page(

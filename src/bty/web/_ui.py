@@ -554,16 +554,23 @@ def register_ui_routes(
                 ON CONFLICT(mac) DO UPDATE SET
                     bty_image_ref      = excluded.bty_image_ref,
                     hostname           = excluded.hostname,
-                    boot_mode        = excluded.boot_mode,
+                    boot_mode          = excluded.boot_mode,
                     sanboot_drive      = excluded.sanboot_drive,
                     target_disk_serial = excluded.target_disk_serial,
-                    -- Reset the one-shot alternation bit (mirrors the
-                    -- JSON PUT /machines path): an operator changing
-                    -- policy here starts a fresh cycle, so a stale
-                    -- arming left over from a prior bty-flash-always /
-                    -- bty-inventory boot can't make the next /pxe
-                    -- wrongly sanboot instead of flashing / inventorying.
-                    saw_flasher_boot   = 0,
+                    -- v0.33.22+: reset the one-shot alternation bit
+                    -- ONLY when a policy-affecting field changes
+                    -- (boot_mode, bty_image_ref, target_disk_serial).
+                    -- Hostname / sanboot_drive don't invalidate the
+                    -- in-flight cycle. Mirrors the JSON PUT /machines
+                    -- path; both must stay in sync.
+                    saw_flasher_boot   = CASE
+                        WHEN machines.boot_mode != excluded.boot_mode THEN 0
+                        WHEN COALESCE(machines.bty_image_ref, '')
+                             != COALESCE(excluded.bty_image_ref, '') THEN 0
+                        WHEN COALESCE(machines.target_disk_serial, '')
+                             != COALESCE(excluded.target_disk_serial, '') THEN 0
+                        ELSE machines.saw_flasher_boot
+                    END,
                     updated_at         = excluded.updated_at
                 """,
                 (

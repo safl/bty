@@ -9,6 +9,66 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.33.22] - 2026-05-26
+
+**Two state-machine fixes operator-pointed in.**
+
+### State-label honesty (the operator's report)
+
+Pre-fix: `bty-inventory` machines showed "inventoried; booting
+disk" the moment `saw_flasher_boot` flipped to 1 -- i.e. when
+the iPXE chain pulled `/boot/kernel?mac=X`, BEFORE the live env
+had a chance to run `bty` or POST `/pxe/{mac}/inventory`. The
+label lied for the seconds-to-minutes between iPXE chainload
+and the actual inventory POST.
+
+Same bug shape for flash modes: "flashed; booting disk" fired
+on the iPXE arm, not on `/pxe/{mac}/done`.
+
+`bty.web._app._boot_state()` now requires the matching
+COMPLETION signal:
+
+- bty-inventory + armed + `known_disks_at IS NOT NULL`
+  -> `inventoried; booting disk`
+- bty-flash-* + armed + `last_flashed_at IS NOT NULL`
+  -> `flashed; booting disk`
+- armed but no completion signal yet -> new honest label
+  `live env running; awaiting <inventory|flash>`
+- not armed -> `pending <flash|inventory>` / `ready to flash`
+
+### Selective `saw_flasher_boot` reset on upsert
+
+Pre-fix: ANY `PUT /machines/{mac}` (or the UI form upsert) reset
+`saw_flasher_boot` to 0 -- including pure-cosmetic changes like
+hostname or sanboot_drive. An operator renaming a box mid-flash
+silently interrupted the in-flight cycle; next /pxe served the
+flash chain instead of the post-flash sanboot.
+
+Post-fix: the reset is gated by a `CASE` that fires only when
+a CYCLE-INVALIDATING field changes:
+
+- `boot_mode` (intent changed)
+- `bty_image_ref` (bound image changed; sanbooting the disk
+  holding the OLD image is wrong)
+- `target_disk_serial` (target changed; sanbooting an
+  unflashed-by-this-cycle disk is wrong)
+
+`hostname` and `sanboot_drive` are display / boot modifiers that
+don't invalidate the cycle. The same fix applies to the JSON
+`PUT /machines/{mac}` and the UI form `POST /ui/machines/{mac}`
+paths -- both must stay in lockstep.
+
+### Tests
+
+Five new tests in `test_web.py` covering the upsert matrix
+(boot_mode change, ref change, target change all reset; hostname
+change + sanboot_drive change preserve), plus two new tests in
+`test_web_ui.py` pinning the three-state label transitions
+(pending -> live env running -> done) for both inventory and
+flash modes.
+
+Suite 854 -> 859.
+
 ## [0.33.21] - 2026-05-26
 
 **Add storage-marker assertion to the QEMU PXE chain test.** The

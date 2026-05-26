@@ -1827,31 +1827,171 @@ def test_pxe_inventory_oversize_lshw_skipped_keeps_prior(
     assert inv[0]["details"]["lshw"] is False
 
 
-def test_upsert_resets_saw_flasher_boot(app_client: TestClient) -> None:
-    """An operator upsert clears the one-shot saw_flasher_boot bit, so a
-    stale arming left from a prior bty-flash-always/bty-inventory boot
-    can't make the next PXE contact wrongly sanboot instead of
-    flashing/inventorying."""
+def _saw_flasher_bit_for(app_client: TestClient, mac: str) -> int:
+    """Helper: read the saw_flasher_boot column directly from state.db
+    for the machine row identified by ``mac``."""
+    from bty.web import _db as _bty_db
+
+    state_path: Path = app_client.app.state.state_path  # type: ignore[attr-defined]
+    with _bty_db.open_db(state_path) as conn:
+        return int(
+            conn.execute("SELECT saw_flasher_boot FROM machines WHERE mac = ?", (mac,)).fetchone()[
+                "saw_flasher_boot"
+            ]
+        )
+
+
+def test_upsert_resets_saw_flasher_boot_on_boot_mode_change(app_client: TestClient) -> None:
+    """boot_mode changes invalidate the in-flight cycle: a
+    flash-always machine half-way through the flash chain becomes a
+    flash-once machine with the bit cleared (so the next /pxe
+    serves the flash chain, not a stale sanboot)."""
     mac = "aa:bb:cc:dd:ee:c4"
-    # Make it bty-flash-always so the /boot fetch arms the bit.
     app_client.put(f"/machines/{mac}", json={"boot_mode": "bty-flash-always"}, cookies=AUTH)
     app_client.get(f"/boot/{ARTIFACT_NAMES[0]}?mac={mac}", headers={"Host": "bty.local:8080"})
+    assert _saw_flasher_bit_for(app_client, mac) == 1, "precondition: /boot?mac= armed"
 
-    def _saw() -> int:
-        from bty.web import _db as _bty_db
-
-        state_path: Path = app_client.app.state.state_path  # type: ignore[attr-defined]
-        with _bty_db.open_db(state_path) as conn:
-            return int(
-                conn.execute(
-                    "SELECT saw_flasher_boot FROM machines WHERE mac = ?", (mac,)
-                ).fetchone()["saw_flasher_boot"]
-            )
-
-    assert _saw() == 1, "precondition: /boot?mac= armed the bit"
-    # Operator reconfigures -> bit resets.
     app_client.put(f"/machines/{mac}", json={"boot_mode": "bty-flash-once"}, cookies=AUTH)
-    assert _saw() == 0
+    assert _saw_flasher_bit_for(app_client, mac) == 0
+
+
+def test_upsert_resets_saw_flasher_boot_on_image_ref_change(app_client: TestClient) -> None:
+    """bty_image_ref changes invalidate the cycle. If armed=1 and
+    the operator pivots to a different image, the next /pxe must
+    NOT sanboot the disk that holds the OLD image (which the
+    operator just decided isn't the right one). Reset to force a
+    flash of the new image."""
+    mac = "aa:bb:cc:dd:ee:c5"
+    ref_a = "a" * 64
+    ref_b = "b" * 64
+    app_client.put(
+        f"/machines/{mac}",
+        json={
+            "boot_mode": "bty-flash-always",
+            "bty_image_ref": ref_a,
+            "target_disk_serial": "SN1",
+        },
+        cookies=AUTH,
+    )
+    app_client.get(f"/boot/{ARTIFACT_NAMES[0]}?mac={mac}", headers={"Host": "bty.local:8080"})
+    assert _saw_flasher_bit_for(app_client, mac) == 1
+
+    # Same mode + target; only image_ref changes.
+    app_client.put(
+        f"/machines/{mac}",
+        json={
+            "boot_mode": "bty-flash-always",
+            "bty_image_ref": ref_b,
+            "target_disk_serial": "SN1",
+        },
+        cookies=AUTH,
+    )
+    assert _saw_flasher_bit_for(app_client, mac) == 0
+
+
+def test_upsert_resets_saw_flasher_boot_on_target_disk_serial_change(
+    app_client: TestClient,
+) -> None:
+    """target_disk_serial changes invalidate the cycle. The box may
+    have been flashing the OLD target; sanbooting it now is wrong
+    (the new target_disk_serial doesn't match what got written)."""
+    mac = "aa:bb:cc:dd:ee:c6"
+    ref = "c" * 64
+    app_client.put(
+        f"/machines/{mac}",
+        json={
+            "boot_mode": "bty-flash-always",
+            "bty_image_ref": ref,
+            "target_disk_serial": "SN-OLD",
+        },
+        cookies=AUTH,
+    )
+    app_client.get(f"/boot/{ARTIFACT_NAMES[0]}?mac={mac}", headers={"Host": "bty.local:8080"})
+    assert _saw_flasher_bit_for(app_client, mac) == 1
+
+    app_client.put(
+        f"/machines/{mac}",
+        json={
+            "boot_mode": "bty-flash-always",
+            "bty_image_ref": ref,
+            "target_disk_serial": "SN-NEW",
+        },
+        cookies=AUTH,
+    )
+    assert _saw_flasher_bit_for(app_client, mac) == 0
+
+
+def test_upsert_preserves_saw_flasher_boot_on_hostname_only_change(
+    app_client: TestClient,
+) -> None:
+    """REGRESSION (v0.33.22): pre-fix, ANY upsert reset
+    saw_flasher_boot. An operator renaming a box mid-flash (or
+    tweaking sanboot_drive) silently interrupted the in-flight
+    cycle. Post-fix, cosmetic-only changes preserve the bit."""
+    mac = "aa:bb:cc:dd:ee:c7"
+    ref = "d" * 64
+    app_client.put(
+        f"/machines/{mac}",
+        json={
+            "boot_mode": "bty-flash-always",
+            "bty_image_ref": ref,
+            "target_disk_serial": "SN1",
+        },
+        cookies=AUTH,
+    )
+    app_client.get(f"/boot/{ARTIFACT_NAMES[0]}?mac={mac}", headers={"Host": "bty.local:8080"})
+    assert _saw_flasher_bit_for(app_client, mac) == 1
+
+    # Only hostname changes; the cycle-invalidating fields stay.
+    app_client.put(
+        f"/machines/{mac}",
+        json={
+            "boot_mode": "bty-flash-always",
+            "bty_image_ref": ref,
+            "target_disk_serial": "SN1",
+            "hostname": "lab-box-1",
+        },
+        cookies=AUTH,
+    )
+    assert _saw_flasher_bit_for(app_client, mac) == 1, (
+        "REGRESSION: hostname-only upsert must not disrupt the in-flight cycle. "
+        "Pre-v0.33.22 the saw_flasher_boot=0 unconditional reset meant the next "
+        "/pxe served the flash chain instead of the post-flash sanboot."
+    )
+
+
+def test_upsert_preserves_saw_flasher_boot_on_sanboot_drive_only_change(
+    app_client: TestClient,
+) -> None:
+    """Same as the hostname case but for sanboot_drive. The drive
+    selector is read at sanboot template render time; changing it
+    doesn't invalidate the in-flight flash."""
+    mac = "aa:bb:cc:dd:ee:c8"
+    ref = "e" * 64
+    app_client.put(
+        f"/machines/{mac}",
+        json={
+            "boot_mode": "bty-flash-always",
+            "bty_image_ref": ref,
+            "target_disk_serial": "SN1",
+            "sanboot_drive": "0x80",
+        },
+        cookies=AUTH,
+    )
+    app_client.get(f"/boot/{ARTIFACT_NAMES[0]}?mac={mac}", headers={"Host": "bty.local:8080"})
+    assert _saw_flasher_bit_for(app_client, mac) == 1
+
+    app_client.put(
+        f"/machines/{mac}",
+        json={
+            "boot_mode": "bty-flash-always",
+            "bty_image_ref": ref,
+            "target_disk_serial": "SN1",
+            "sanboot_drive": "0x81",
+        },
+        cookies=AUTH,
+    )
+    assert _saw_flasher_bit_for(app_client, mac) == 1
 
 
 def test_machine_lshw_404_for_unknown_mac(app_client: TestClient) -> None:
