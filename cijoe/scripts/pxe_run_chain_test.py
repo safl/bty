@@ -234,6 +234,19 @@ def main(args, cijoe):
             _dump_tail(client_log, 200)
             return errno.EPROTO
 
+        # Storage-format assertion (v0.33.19+): the server VM's
+        # lifespan must have stamped image_root/.bty-storage.json on
+        # first start. SSH back in + verify. A missing or wrong
+        # marker means a future bty-web start against the same disk
+        # would either skip the validation (silently degraded) or
+        # crash (StorageFormatMismatch on every restart).
+        log.info("Asserting storage marker present in server VM /var/lib/bty/images/")
+        try:
+            _assert_storage_marker("127.0.0.1", ssh_port, cfg)
+        except Exception as exc:
+            log.error(f"storage marker assertion failed: {exc}")
+            return errno.EPROTO
+
         log.info("PXE chain test PASSED - all markers seen on client serial console")
         return 0
 
@@ -728,6 +741,73 @@ def _dump_tail(path, lines):
     log.error(f"--- last {lines} lines of {path} ---")
     for line in body.splitlines()[-lines:]:
         log.error(line)
+
+
+def _assert_storage_marker(host, port, cfg):
+    """SSH into the server VM and verify
+    ``/var/lib/bty/images/.bty-storage.json`` exists + carries the
+    expected ``format_version``. v0.33.19+: bty-web's lifespan
+    writes this marker on first start; a missing / mismatched marker
+    means a subsequent restart would either silently skip the
+    validation (degraded) or hard-fail (StorageFormatMismatch).
+
+    Uses the same odus SSH path as ``_dump_in_vm_diagnostics``.
+    Raises on any failure -- caller turns that into an EPROTO so
+    the test reports a clear "post-chain assertion failed" failure
+    rather than collapsing it into the generic chain timeout.
+    """
+    import json as _json
+
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    client.connect(
+        host,
+        port=port,
+        username=cfg.get("ssh_user", "odus"),
+        password=cfg.get("ssh_password", "odus.321"),
+        allow_agent=False,
+        look_for_keys=False,
+        timeout=10,
+    )
+    try:
+        stdin, stdout, stderr = client.exec_command(
+            "cat /var/lib/bty/images/.bty-storage.json", timeout=10
+        )
+        body = stdout.read().decode("utf-8", errors="replace")
+        err = stderr.read().decode("utf-8", errors="replace")
+        rc = stdout.channel.recv_exit_status()
+        if rc != 0:
+            raise RuntimeError(
+                f"marker read failed (rc={rc}): {err.strip()!r}. "
+                f"Either the lifespan didn't write it (regression in "
+                f"check_or_write_storage_marker) or the file lives "
+                f"elsewhere than /var/lib/bty/images/."
+            )
+        try:
+            data = _json.loads(body)
+        except ValueError as exc:
+            raise RuntimeError(
+                f"marker JSON is malformed: {exc}; body={body!r}"
+            ) from exc
+        version = data.get("format_version")
+        # The constant lives in bty.catalog.STORAGE_FORMAT_VERSION
+        # but the test runs in cijoe's own venv; hardcode the
+        # expected value + bump in lockstep with the source when
+        # the on-disk layout actually changes.
+        expected = 1
+        if version != expected:
+            raise RuntimeError(
+                f"marker has format_version={version!r}; expected {expected!r}. "
+                f"If the storage layout changed, bump the expected version here "
+                f"AND in bty.catalog.STORAGE_FORMAT_VERSION."
+            )
+        log.info(
+            "storage marker OK: format_version=%s, created_by_bty_version=%s",
+            version,
+            data.get("created_by_bty_version"),
+        )
+    finally:
+        client.close()
 
 
 def _dump_in_vm_diagnostics(host, port, cfg):

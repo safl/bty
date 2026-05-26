@@ -9,6 +9,28 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.33.21] - 2026-05-26
+
+**Add storage-marker assertion to the QEMU PXE chain test.** The
+v0.33.19 storage-format marker is written by bty-web's lifespan;
+unit tests verify the helper, but no QEMU-level test confirmed the
+marker actually lands in a real server VM after a real boot.
+
+The cijoe `pxe_run_chain_test.py` now SSHes back into the server
+VM after the chain succeeds, reads
+`/var/lib/bty/images/.bty-storage.json`, and asserts
+`format_version == 1`. A regression in the lifespan write (skipped
+on certain paths, written to the wrong directory, malformed JSON)
+fails the PXE chain test loudly rather than just the unit tests --
+the operator-visible failure mode is "appliance boots but rejects
+its own image_root on the NEXT restart", which is exactly the
+class of thing only a real-boot test catches.
+
+The expected version (1) is hardcoded in the cijoe script; if the
+on-disk layout actually changes the operator-bumps
+`STORAGE_FORMAT_VERSION` in `bty.catalog` AND the literal in the
+PXE test in lockstep.
+
 ## [0.33.20] - 2026-05-26
 
 **`bty-state-init` tool.** Sibling of `bty-state-migrate`: wipes,
