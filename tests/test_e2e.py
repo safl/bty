@@ -804,26 +804,32 @@ def test_e2e_catalog_with_mixed_entry_shapes_renders_each_once(
     assert r.status_code == 200, r.text
     page = r.text
 
-    # Each manifest entry name appears exactly once in a row-level
-    # cell. Count the strict occurrences in <td> contexts vs
-    # decorative occurrences in title=, hidden inputs, etc.
+    # v0.33.29+: action column now always renders 5 buttons per row
+    # (4 of which carry data-name=). The previous "count name
+    # occurrences" heuristic over-counts now; the regression target
+    # (entry rendered as TWO rows) is more precisely caught by
+    # counting <tr data-row-name="..."> rows.
+    import re
+
+    rows = re.findall(r'<tr data-row-name="([^"]+)"', page)
+    # Each row's name appears exactly once.
+    seen: dict[str, int] = {}
+    for nm in rows:
+        seen[nm] = seen.get(nm, 0) + 1
+    duplicates = {n: c for n, c in seen.items() if c > 1}
+    assert not duplicates, (
+        f"entries rendered as multiple rows on /ui/images: {duplicates}. "
+        "Regression of the v0.19.7 duplicate-render bug (no-sha entries "
+        "rendered twice via the by_sha merge + url_only paths)."
+    )
+    # Each manifest entry name appears in at least one row's cell.
     for name in (
         "Pinned HTTP",
         "Rolling ORAS (rolling)",
         "Human Named (x86_64, rolling)",
         "local-image.img.gz",
     ):
-        count = page.count(name)
-        # Each entry may appear in: row cell (1), possibly a title= hint (1),
-        # possibly a confirm-dialog data-attr (1). Upper bound is 3.
-        # The bug shape was 6-8 occurrences (entry rendered twice on
-        # the merge + url_only paths, each carrying its own cell + title).
-        assert 1 <= count <= 3, (
-            f"entry {name!r} rendered {count} times on /ui/images; "
-            f"expected 1-3 (one row + optional hover/data attrs). "
-            "If count is in the 4+ range the duplicate-rendering "
-            "regression is back."
-        )
+        assert name in page, f"entry {name!r} missing from /ui/images"
 
 
 # ----------------------------------------------------------------------

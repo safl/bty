@@ -73,7 +73,7 @@
             </thead>
             <tbody>
                 {% for u in unified %}
-                <tr>
+                <tr data-row-name="{{ u.names[0] }}">
                     <td>
                         <i class="bi bi-file-earmark-binary text-secondary me-1"></i>
                         {% for n in u.names %}
@@ -109,60 +109,79 @@
                         {% endif %}
                     </td>
                     <td class="text-end text-nowrap">
-                        {# Dispatch by source shape, not just sha presence:
-                           - Has a ``local`` source and no sha -> file on disk
-                             needs hashing. Hash button.
-                           - No local source -> bytes need fetching. Fetch
-                             button. Works for un-sha'd URL / oras entries
-                             (the DownloadManager downloads + computes sha +
-                             back-fills catalog_entries.disk_image_sha) AND
-                             for sha-pinned entries not yet in cache. #}
+                        {# All five actions always render so the column
+                           is visually consistent row-to-row; each is
+                           ``disabled`` when its applicability gate is
+                           false, with a tooltip explaining why. The
+                           operator scanning the column sees the same
+                           shape every row; what changes is which
+                           buttons are bright vs. greyed out.
+
+                           Gates by source shape:
+                           - Hash: has-local AND no-sha (file on disk
+                             still needs its sha computed).
+                           - Fetch: has-remote AND not-cached (bytes
+                             need to land locally).
+                           - Update: has-remote AND cached (re-pull
+                             the upstream bytes; rolling oras tags).
+                           - Cache delete: has-remote AND cached (drop
+                             the local copy; entry stays).
+                           - Entry delete: has-remote (remove the
+                             catalog row entirely). Local-only uploads
+                             aren't deletable here -- the operator
+                             manages those via the filesystem. #}
                         {% set has_local = u.sources|selectattr('kind','equalto','local')|list|length > 0 %}
                         {% set has_remote = u.sources|selectattr('kind','in',['manifest','url'])|list|length > 0 %}
                         {% set entry_src = u.sources|selectattr('kind','in',['manifest','url'])|map(attribute='location')|first %}
-                        {# Render per-row actions as a Bootstrap btn-group
-                           so the buttons sit flush -- same idiom as the
-                           Backups page's Download + Delete. The group is
-                           omitted entirely when no action applies (sha-
-                           pinned + cached + has_remote=False), in which
-                           case the cell shows a muted dash. #}
-                        {% if has_remote or u.cached or (not u.sha256 and has_local) %}
+                        {% set hash_on = has_local and not u.sha256 %}
+                        {% set fetch_on = has_remote and not u.cached %}
+                        {% set update_on = has_remote and u.cached %}
+                        {% set cache_del_on = has_remote and u.cached %}
+                        {% set entry_del_on = has_remote %}
                         <div class="btn-group btn-group-sm" role="group">
-                            {% if not u.sha256 and has_local %}
                             <button type="button"
                                     class="btn btn-warning text-nowrap bty-hash-btn"
-                                    data-name="{{ u.names[0] }}">
+                                    data-name="{{ u.names[0] }}"
+                                    {% if not hash_on %}disabled
+                                    title="Hash applies to operator-uploaded files that haven't been hashed yet."
+                                    {% else %}title="Compute the content sha for this file."{% endif %}>
                                 <i class="bi bi-hash me-1"></i>Hash
                             </button>
-                            {% elif not u.cached %}
                             <button type="button"
                                     class="btn btn-primary text-nowrap bty-fetch-btn"
-                                    data-name="{{ u.names[0] }}">
+                                    data-name="{{ u.names[0] }}"
+                                    {% if not fetch_on %}disabled
+                                    title="Fetch applies to remote entries whose bytes are not on local disk yet."
+                                    {% else %}title="Download the bytes from the remote source."{% endif %}>
                                 <i class="bi bi-cloud-download me-1"></i>Fetch
                             </button>
-                            {% endif %}
-                            {% if u.cached and has_remote %}
+                            <button type="button"
+                                    class="btn btn-outline-primary text-nowrap bty-update-btn"
+                                    data-name="{{ u.names[0] }}"
+                                    {% if not update_on %}disabled
+                                    title="Update applies to remote entries already cached locally; re-pulls the upstream bytes (useful for rolling oras tags)."
+                                    {% else %}title="Re-pull from the remote source. Useful for rolling oras tags whose upstream changed."{% endif %}>
+                                <i class="bi bi-arrow-repeat me-1"></i>Update
+                            </button>
                             <button type="button"
                                     class="btn btn-outline-warning bty-cache-delete-btn"
                                     data-name="{{ u.names[0] }}"
-                                    title="Delete cached bytes (entry stays; Fetch re-downloads)"
+                                    {% if not cache_del_on %}disabled
+                                    title="Cache delete applies when bytes are cached locally AND the entry has a remote source (so Fetch can re-download)."
+                                    {% else %}title="Delete cached bytes (entry stays; Fetch re-downloads)."{% endif %}
                                     aria-label="Delete cached bytes">
                                 <i class="bi bi-eraser"></i>
                             </button>
-                            {% endif %}
-                            {% if has_remote %}
                             <button type="button"
                                     class="btn btn-outline-danger bty-catalog-entry-delete-btn"
-                                    data-src="{{ entry_src }}"
-                                    title="Remove this entry from the catalog"
+                                    {% if entry_src %}data-src="{{ entry_src }}"{% endif %}
+                                    {% if not entry_del_on %}disabled
+                                    title="Entry delete applies to remote catalog entries. Local-only uploads are managed via the filesystem (remove the file from image_root)."
+                                    {% else %}title="Remove this entry from the catalog."{% endif %}
                                     aria-label="Remove this entry from the catalog">
                                 <i class="bi bi-trash"></i>
                             </button>
-                            {% endif %}
                         </div>
-                        {% else %}
-                        <span class="text-muted small">-</span>
-                        {% endif %}
                     </td>
                 </tr>
                 {% endfor %}
@@ -216,8 +235,12 @@
     }
     function syncButtonsFromPoll() {
         // Build sets of names with an active (queued | running) job
-        // for each kind; flip every matching button.  ``allSettled``
-        // so one bad endpoint doesn't break the other.
+        // for each kind; mark every row in either set as "busy" and
+        // disable ALL buttons on that row. The operator can't trigger
+        // a second action while one is in flight; cancellation goes
+        // through /ui/downloads or /ui/hashing where the dedicated
+        // worker page exposes a Cancel button. ``allSettled`` so one
+        // bad endpoint doesn't break the other.
         Promise.allSettled([
             fetch("/catalog/downloads", { credentials: "same-origin" })
                 .then(function (r) { return r.ok ? r.json() : null; }),
@@ -234,23 +257,49 @@
             (hs && hs.hashes || []).forEach(function (j) {
                 if (j.status === "queued" || j.status === "running") activeHs.add(j.name);
             });
-            document.querySelectorAll(".bty-fetch-btn").forEach(function (btn) {
-                var name = btn.getAttribute("data-name");
-                if (activeDl.has(name)) {
-                    setBtnStateBusy(btn, "Downloading", "bi-arrow-repeat");
-                } else if (btn.dataset.originalLabel) {
-                    // We previously marked this button busy and the
-                    // job is no longer active -> it terminated. Reload
-                    // so the catalog row's ``cached`` badge + Action
-                    // column re-render with the new state.
-                    window.location.reload();
-                }
-            });
-            document.querySelectorAll(".bty-hash-btn").forEach(function (btn) {
-                var name = btn.getAttribute("data-name");
-                if (activeHs.has(name)) {
-                    setBtnStateBusy(btn, "Hashing", "bi-arrow-repeat");
-                } else if (btn.dataset.originalLabel) {
+            document.querySelectorAll("tr[data-row-name]").forEach(function (tr) {
+                var name = tr.getAttribute("data-row-name");
+                var dlActive = activeDl.has(name);
+                var hsActive = activeHs.has(name);
+                var busy = dlActive || hsActive;
+                if (busy) {
+                    // Remember each button's pre-busy ``disabled`` state
+                    // so we know what to restore IF a reload doesn't
+                    // happen (currently it always does, but the snapshot
+                    // is cheap insurance).
+                    tr.querySelectorAll(".btn-group button").forEach(function (btn) {
+                        if (btn.dataset.preBusyDisabled === undefined) {
+                            btn.dataset.preBusyDisabled = btn.disabled ? "1" : "0";
+                        }
+                        btn.disabled = true;
+                    });
+                    tr.dataset.wasBusy = "1";
+                    // Light up the busy label on the appropriate button:
+                    // for a download, whichever of Fetch / Update was
+                    // applicable in the template (the one with
+                    // preBusyDisabled === "0"). For a hash, the Hash
+                    // button.
+                    if (dlActive) {
+                        var fetchBtn = tr.querySelector(".bty-fetch-btn");
+                        var updateBtn = tr.querySelector(".bty-update-btn");
+                        if (updateBtn && updateBtn.dataset.preBusyDisabled === "0") {
+                            setBtnStateBusy(updateBtn, "Updating", "bi-arrow-repeat");
+                        } else if (fetchBtn && fetchBtn.dataset.preBusyDisabled === "0") {
+                            setBtnStateBusy(fetchBtn, "Downloading", "bi-arrow-repeat");
+                        }
+                    }
+                    if (hsActive) {
+                        var hashBtn = tr.querySelector(".bty-hash-btn");
+                        if (hashBtn && hashBtn.dataset.preBusyDisabled === "0") {
+                            setBtnStateBusy(hashBtn, "Hashing", "bi-arrow-repeat");
+                        }
+                    }
+                } else if (tr.dataset.wasBusy === "1") {
+                    // Transitioned busy -> idle. Reload so the row's
+                    // ``Local copy`` badge + per-button applicability
+                    // re-render with the new state (e.g., cached: yes
+                    // after a successful fetch; cached: no after a
+                    // cache delete).
                     window.location.reload();
                 }
             });
@@ -298,6 +347,42 @@
                 // changed).
             }).catch(function () {
                 setBtnStateIdle(fetchBtn);
+            });
+            return;
+        }
+        var updateBtn = ev.target.closest(".bty-update-btn");
+        if (updateBtn) {
+            ev.preventDefault();
+            var name = updateBtn.getAttribute("data-name");
+            if (!confirm(
+                "Re-pull the remote bytes for this image?\n\n" + name +
+                "\n\nThe cached local copy will be deleted, then re-downloaded " +
+                "from the remote source. Useful for rolling oras tags whose " +
+                "upstream has changed."
+            )) return;
+            setBtnStateBusy(updateBtn, "Updating", "bi-arrow-repeat");
+            // DELETE first, then POST. The catalog-cache DELETE clears
+            // the local file; the subsequent enqueue lands a fresh
+            // "queued" DownloadState (DownloadManager.enqueue's
+            // missing-cache gate makes the worker re-run rather than
+            // echoing the stale "completed" state back). The button
+            // stays busy via the poller; on terminal status the page
+            // reloads to re-render with the fresh cached state.
+            fetch("/catalog/cache/" + encodeURIComponent(name), {
+                method: "DELETE",
+                credentials: "same-origin",
+            }).then(function (r) {
+                if (!r.ok && r.status !== 404) throw new Error("DELETE HTTP " + r.status);
+                return fetch("/catalog/downloads", {
+                    method: "POST",
+                    credentials: "same-origin",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ name: name }),
+                });
+            }).then(function (r) {
+                if (!r.ok) throw new Error("POST HTTP " + r.status);
+            }).catch(function () {
+                setBtnStateIdle(updateBtn);
             });
             return;
         }

@@ -2387,33 +2387,37 @@ def test_ui_images_renders_fetch_button_for_unhashed_url_entry(
     body = r.text
     # The row exists.
     assert "rolling.img.gz" in body
-    # Fetch button is rendered for this entry.
-    assert "bty-fetch-btn" in body
-    # The bug: this entry must NOT carry a hash button.
-    # The dir-scan demo.qcow2 also lacks a sha (no sidecar in the
-    # fixture), so the Hash button still appears for THAT row.
-    # We assert specifically that the URL-row's neighbourhood
-    # does not have a hash button by checking the per-row marker.
-    # ``data-name="rolling.img.gz"`` should only appear on
-    # ``bty-fetch-btn`` (not ``bty-hash-btn``) for this row.
-    fetch_idx = body.find('data-name="rolling.img.gz"')
-    hash_idx_before_fetch = body.rfind("bty-hash-btn", 0, fetch_idx)
-    hash_idx_after_fetch = body.find("bty-hash-btn", fetch_idx)
-    fetch_btn_idx = body.rfind("bty-fetch-btn", 0, fetch_idx)
-    # The fetch-btn class must be on the SAME button as the data-
-    # name for rolling.img.gz, so its closest preceding bty-*-btn
-    # marker must be bty-fetch-btn.
-    assert fetch_btn_idx != -1
-    assert fetch_btn_idx > (hash_idx_before_fetch or -1) if hash_idx_before_fetch != -1 else True
-    # And the nearest following bty-hash-btn (if any) is for a
-    # later row, not this row.
-    if hash_idx_after_fetch != -1:
-        # The following hash-btn shouldn't carry rolling.img.gz's
-        # data-name.
-        next_data_name_idx = body.find('data-name="', hash_idx_after_fetch)
-        if next_data_name_idx != -1:
-            chunk = body[next_data_name_idx : next_data_name_idx + 80]
-            assert "rolling.img.gz" not in chunk
+    # v0.33.29+: all five action buttons always render; the
+    # applicability gate is the ``disabled`` attribute (not
+    # presence). For a URL-only entry that's never been cached:
+    #   * Fetch:  ENABLED  (remote source, not cached)
+    #   * Hash:   disabled (no local source)
+    #   * Update: disabled (not cached)
+    #   * Cache delete: disabled (not cached)
+    #   * Entry delete: ENABLED (has remote source)
+    # The original test guard was "no Hash button for URL-only
+    # entries"; the new equivalent is "Hash button is disabled
+    # for this row".
+    import re
+
+    row_match = re.search(
+        r'<tr data-row-name="rolling\.img\.gz".*?</tr>',
+        body,
+        flags=re.DOTALL,
+    )
+    assert row_match is not None, "expected a row tagged rolling.img.gz"
+    row_html = row_match.group(0)
+    # Fetch is enabled; Hash is disabled.
+    fetch_btn = re.search(r"<button[^>]*bty-fetch-btn[^>]*>", row_html)
+    hash_btn = re.search(r"<button[^>]*bty-hash-btn[^>]*>", row_html)
+    assert fetch_btn is not None
+    assert hash_btn is not None
+    assert "disabled" not in fetch_btn.group(0), (
+        f"Fetch should be enabled on a URL-only entry: {fetch_btn.group(0)!r}"
+    )
+    assert "disabled" in hash_btn.group(0), (
+        f"Hash should be disabled on a URL-only entry: {hash_btn.group(0)!r}"
+    )
 
 
 def test_ui_images_renders_cache_delete_button_when_cached(
