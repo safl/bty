@@ -1484,18 +1484,58 @@ def create_app(
         status_code=status.HTTP_202_ACCEPTED,
         dependencies=[Depends(require_auth)],
     )
-    async def enqueue_backup(body: _models.BackupEnqueueRequest) -> dict[str, Any]:
+    async def enqueue_backup(
+        body: _models.BackupEnqueueRequest, request: Request
+    ) -> dict[str, Any]:
         state = await backup_manager.enqueue(trigger=body.trigger)
+        # Lifecycle audit event: operator-initiated backup. Scheduler-
+        # driven backups go through ``_backup.scheduler_loop`` which
+        # emits its own request event with actor=system; this handler
+        # is operator-only (the ``trigger`` field defaults to "manual"
+        # but the scheduler uses the same enqueue path with
+        # "scheduled" -- so we look at body.trigger to set the actor
+        # correctly even though most callers will hit "manual" here).
+        is_scheduler = body.trigger == "scheduled"
+        with _db.open_db(state_path) as conn:
+            _log_event(
+                conn,
+                kind="backup.create.requested",
+                summary=(
+                    f"scheduler requested {state.backup_id!r}"
+                    if is_scheduler
+                    else f"operator requested backup {state.backup_id!r}"
+                ),
+                subject_kind="backup",
+                subject_id=state.backup_id,
+                actor="system" if is_scheduler else "operator",
+                source_ip=None if is_scheduler else _client_ip(request),
+                details={"backup_id": state.backup_id, "trigger": body.trigger},
+            )
+            conn.commit()
         return state.to_dict()
 
     @app.delete("/workers/backups/{backup_id}", dependencies=[Depends(require_auth)])
-    async def cancel_backup(backup_id: str) -> dict[str, Any]:
+    async def cancel_backup(backup_id: str, request: Request) -> dict[str, Any]:
         state = await backup_manager.cancel(backup_id)
         if state is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"no active backup for id {backup_id!r}",
             )
+        # Operator-side cancel event; worker writes its own
+        # backup.create.cancelled when it observes the flag.
+        with _db.open_db(state_path) as conn:
+            _log_event(
+                conn,
+                kind="backup.create.cancelled",
+                summary=f"operator cancelled backup {backup_id!r}",
+                subject_kind="backup",
+                subject_id=backup_id,
+                actor="operator",
+                source_ip=_client_ip(request),
+                details={"backup_id": backup_id, "source": "operator"},
+            )
+            conn.commit()
         return state.to_dict()
 
     # ---------- event log ---------------------------------------

@@ -3861,6 +3861,44 @@ def test_workers_backups_delete_requires_auth(app_client: TestClient) -> None:
     assert r.status_code == 401
 
 
+def test_workers_backups_post_emits_lifecycle_events(app_client: TestClient) -> None:
+    """v0.33.29+: POST /workers/backups triggers the full lifecycle:
+    backup.create.requested (operator click) -> backup.create.started
+    (worker pickup) -> backup.created (terminal success). Lets an
+    operator scrolling /ui/events see "did the click register? did
+    the worker pick it up? did it finish?" without inferring from
+    absence."""
+    import time
+
+    r = app_client.post("/workers/backups", json={"trigger": "manual"}, cookies=AUTH)
+    assert r.status_code == 202, r.text
+    backup_id = r.json()["backup_id"]
+    # Backup is metadata-only; finishes in milliseconds. Poll
+    # briefly for the terminal.
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline:
+        body = app_client.get("/workers/backups", cookies=AUTH).json()
+        match = next((b for b in body["backups"] if b["backup_id"] == backup_id), None)
+        if match and match["status"] in ("completed", "failed"):
+            break
+        time.sleep(0.05)
+    events = app_client.get(
+        "/events",
+        params={"subject_kind": "backup", "subject_id": backup_id},
+        cookies=AUTH,
+    ).json()["events"]
+    kinds = [e["kind"] for e in reversed(events)]  # oldest first
+    assert "backup.create.requested" in kinds, kinds
+    assert "backup.create.started" in kinds, kinds
+    assert "backup.created" in kinds, kinds
+    # Ordering: requested -> started -> created.
+    assert (
+        kinds.index("backup.create.requested")
+        < kinds.index("backup.create.started")
+        < kinds.index("backup.created")
+    ), kinds
+
+
 def test_workers_backups_post_invalid_trigger_returns_422(app_client: TestClient) -> None:
     """``trigger`` must be one of ``{"manual", "scheduled"}``. An
     unknown value gets rejected at the Pydantic layer (422) rather

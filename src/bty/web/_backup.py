@@ -184,6 +184,25 @@ class BackupManager(_BaseAsyncManager[BackupState]):
         dest = backups_root / backup_id
         state.dest_path = str(dest)
 
+        # Lifecycle audit event: worker started the backup. Pairs
+        # with the request-side ``backup.create.requested`` (logged
+        # by either the POST /workers/backups handler or the
+        # scheduler_loop's enqueue site).
+        try:
+            with _db.open_db(state_path) as conn:
+                _log_event(
+                    conn,
+                    kind="backup.create.started",
+                    summary=f"worker started backup {backup_id!r}",
+                    subject_kind="backup",
+                    subject_id=backup_id,
+                    actor="system",
+                    details={"backup_id": backup_id, "trigger": state.trigger},
+                )
+                conn.commit()
+        except Exception:
+            log.exception("backup.create.started event-log write failed for %s", backup_id)
+
         now_iso = datetime.now(UTC).isoformat()
         try:
             summary = await asyncio.to_thread(
@@ -563,7 +582,28 @@ async def _scheduler_tick(state_path: Path, manager: BackupManager) -> None:
     active = await manager.list()
     if any(s.trigger == "scheduled" and s.status in ("queued", "running") for s in active):
         return
-    await manager.enqueue(trigger="scheduled")
+    state = await manager.enqueue(trigger="scheduled")
+    # Lifecycle audit event: the scheduler is the "operator" here
+    # (actor=system). The HTTP POST /workers/backups handler emits
+    # the matching event for operator-driven runs; this one keeps
+    # the audit log symmetric across both initiation paths.
+    try:
+        with _db.open_db(state_path) as conn:
+            _log_event(
+                conn,
+                kind="backup.create.requested",
+                summary=f"scheduler requested backup {state.backup_id!r}",
+                subject_kind="backup",
+                subject_id=state.backup_id,
+                actor="system",
+                details={"backup_id": state.backup_id, "trigger": "scheduled"},
+            )
+            conn.commit()
+    except Exception:
+        log.exception(
+            "backup.create.requested event-log write failed for %s (scheduler tick)",
+            state.backup_id,
+        )
 
 
 async def scheduler_loop(
