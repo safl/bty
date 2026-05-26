@@ -143,7 +143,7 @@ class DownloadManager(_BaseAsyncManager[DownloadState]):
           ``catalog_entries.disk_image_sha`` (and emit a
           ``catalog.cache.populated`` event) on completion.
         * The in-memory states pre-populate from recent
-          ``catalog.cache.populated`` / ``catalog.fetch.sha_mismatch``
+          ``catalog.cache.populated`` / ``catalog.fetch.failed``
           events so the /ui/images Downloads table shows recent
           activity across bty-web restarts.
 
@@ -183,7 +183,7 @@ class DownloadManager(_BaseAsyncManager[DownloadState]):
         history across restarts.
 
         Reads ``catalog.cache.populated`` (success) and
-        ``catalog.fetch.sha_mismatch`` (failure) events; newest-per-
+        ``catalog.fetch.failed`` (failure) events; newest-per-
         name wins. Soft-fails on any DB exception so a corrupt
         state.db can't keep bty-web from starting.
         """
@@ -202,7 +202,7 @@ class DownloadManager(_BaseAsyncManager[DownloadState]):
         for ev in rows:
             if ev.kind not in (
                 "catalog.cache.populated",
-                "catalog.fetch.sha_mismatch",
+                "catalog.fetch.failed",
             ):
                 continue
             details = ev.details or {}
@@ -238,7 +238,7 @@ class DownloadManager(_BaseAsyncManager[DownloadState]):
                 started_at=started,
                 finished_at=started,
                 error=(
-                    str(details.get("error")) if ev.kind == "catalog.fetch.sha_mismatch" else None
+                    str(details.get("error")) if ev.kind == "catalog.fetch.failed" else None
                 ),
             )
 
@@ -343,6 +343,33 @@ class DownloadManager(_BaseAsyncManager[DownloadState]):
             self._fire_state_change(state)
             return
 
+        # Lifecycle audit event: "worker started this job". Pairs with
+        # the request-side ``catalog.fetch.requested`` (handler) and
+        # the eventual terminal event. Lets an operator tell apart
+        # "still queued behind 3 other downloads" from "actually
+        # running" -- today's /ui/events couldn't distinguish them
+        # without scraping ``/catalog/downloads`` state.
+        if self._state_path is not None:
+            from bty.web import _db, _events_log
+
+            try:
+                with _db.open_db(self._state_path) as conn:
+                    _events_log.record(
+                        conn,
+                        kind="catalog.fetch.started",
+                        summary=f"worker picked up fetch of {state.name!r}",
+                        subject_kind="catalog",
+                        subject_id=state.name,
+                        actor="system",
+                        details={"name": state.name, "src": entry.src},
+                    )
+                    conn.commit()
+            except Exception:
+                _log.exception(
+                    "catalog.fetch.started event-log write failed for %s",
+                    state.name,
+                )
+
         def _progress(downloaded: int, total: int | None) -> None:
             state.bytes_done = downloaded
             if total is not None:
@@ -404,34 +431,40 @@ class DownloadManager(_BaseAsyncManager[DownloadState]):
                 )
 
         # Back-fill catalog_entries.disk_image_sha and emit a
-        # ``catalog.cache.populated`` event on successful operator-
-        # initiated fetches of previously-un-sha'd entries -- the only
-        # path that caches a remote image now (the serve-time
-        # cache-through was dropped).
+        # terminal ``catalog.cache.populated`` event on successful
+        # fetches. v0.33.29+: fires for BOTH sha-pinned and un-sha'd
+        # entries (pre-fix the event only fired for un-sha'd, leaving
+        # sha-pinned downloads with no terminal in the audit log --
+        # an operator scrolling /ui/events saw .requested + .started
+        # with no closure). The backfill UPDATE is still gated on
+        # ``entry.sha256 is None`` because sha-pinned rows already
+        # carry the sha; nothing to write.
         if (
             final_status == "completed"
             and computed_sha is not None
-            and entry.sha256 is None
             and self._state_path is not None
         ):
             from bty.web import _db, _events_log
 
             try:
                 with _db.open_db(self._state_path) as conn:
-                    # Match by ``src`` (the immutable source URL the
-                    # CatalogEntry was built from), not ``name``.
-                    # ``name`` is a free-text display label with no
-                    # UNIQUE constraint, so two operator-curated rows
-                    # for different upstreams that happen to share a
-                    # display name ("debian.iso") would both have their
-                    # disk_image_sha clobbered by a single completed
-                    # download. ``src`` is the only stable identifier
-                    # the DownloadManager carries through the fetch.
-                    conn.execute(
-                        "UPDATE catalog_entries SET disk_image_sha = ? "
-                        "WHERE src = ? AND disk_image_sha IS NULL",
-                        (computed_sha, entry.src),
-                    )
+                    if entry.sha256 is None:
+                        # Match by ``src`` (the immutable source URL
+                        # the CatalogEntry was built from), not
+                        # ``name``. ``name`` is a free-text display
+                        # label with no UNIQUE constraint, so two
+                        # operator-curated rows for different
+                        # upstreams that happen to share a display
+                        # name ("debian.iso") would both have their
+                        # disk_image_sha clobbered by a single
+                        # completed download. ``src`` is the only
+                        # stable identifier the DownloadManager carries
+                        # through the fetch.
+                        conn.execute(
+                            "UPDATE catalog_entries SET disk_image_sha = ? "
+                            "WHERE src = ? AND disk_image_sha IS NULL",
+                            (computed_sha, entry.src),
+                        )
                     _events_log.record(
                         conn,
                         kind="catalog.cache.populated",
@@ -462,32 +495,78 @@ class DownloadManager(_BaseAsyncManager[DownloadState]):
                     state.name,
                 )
 
-        # Symmetric failure event: a failed download is now the only way
-        # a remote image fails to come local (the serve-time
-        # cache-through was dropped), so record it in the audit log +
-        # Downloads history rather than only the transient in-memory
-        # state. Reuses the kind the backfill already reads.
-        if final_status == "failed" and self._state_path is not None:
+        # Terminal lifecycle events for non-success outcomes. A
+        # failed download is now the only way a remote image fails
+        # to come local (the serve-time cache-through was dropped),
+        # so record it in the audit log + Downloads history rather
+        # than only the transient in-memory state. The cancelled
+        # branch closes the audit-log loop on operator-initiated
+        # stops: pre-fix the manager flipped _states + published an
+        # SSE event but wrote nothing to /ui/events, so a scrolling
+        # operator saw "requested ... " with no follow-up. Both kinds
+        # mirror the new ``catalog.fetch.requested`` / ``.started``
+        # pair so an operator can read the full lifecycle on
+        # /ui/events without inferring from absence.
+        if final_status in ("failed", "cancelled") and self._state_path is not None:
             from bty.web import _db, _events_log
 
+            # Per-failure-mode summary kept here; the kind literal
+            # below is inlined so the audit-log catalogue's
+            # forward-direction grep (``test_known_event_kinds_has_no_unused_entries``)
+            # sees BOTH terminal kinds emitted from this module.
+            terminal_summary = (
+                f"download {state.name!r} failed: {error}"
+                if final_status == "failed"
+                else f"download {state.name!r} cancelled"
+            )
             try:
                 with _db.open_db(self._state_path) as conn:
-                    _events_log.record(
-                        conn,
-                        kind="catalog.fetch.sha_mismatch",
-                        summary=f"download {state.name!r} failed: {error}",
-                        subject_kind="catalog",
-                        subject_id=state.name,
-                        actor="operator",
-                        details={"name": state.name, "src": entry.src, "error": error},
-                    )
+                    # Two separate kind= literals so the
+                    # forward-direction grep in
+                    # test_known_event_kinds_has_no_unused_entries
+                    # picks both up.
+                    if final_status == "failed":
+                        _events_log.record(
+                            conn,
+                            kind="catalog.fetch.failed",
+                            summary=terminal_summary,
+                            subject_kind="catalog",
+                            subject_id=state.name,
+                            actor="system",
+                            details={
+                                "name": state.name,
+                                "src": entry.src,
+                                "error": error,
+                            },
+                        )
+                    else:
+                        # The cancellation that originated from an
+                        # operator click is logged by the HTTP handler
+                        # too (with source_ip + actor=operator); this
+                        # worker-side row carries actor=system because
+                        # the worker is the one observing the cancel
+                        # flag and writing the terminal status.
+                        _events_log.record(
+                            conn,
+                            kind="catalog.fetch.cancelled",
+                            summary=terminal_summary,
+                            subject_kind="catalog",
+                            subject_id=state.name,
+                            actor="system",
+                            details={
+                                "name": state.name,
+                                "src": entry.src,
+                                "error": error,
+                            },
+                        )
                     conn.commit()
             except Exception:
                 # Same rationale as the back-fill swallow above:
                 # this is an audit-log nicety, not a correctness
                 # guarantee. Logging keeps a repeated failure visible.
                 _log.exception(
-                    "catalog.fetch.sha_mismatch event-log write failed for %s",
+                    "catalog.fetch.%s event-log write failed for %s",
+                    final_status,
                     state.name,
                 )
 

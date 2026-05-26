@@ -177,6 +177,116 @@ def test_enqueue_db_only_entry_no_lookup_raises(tmp_path: Path) -> None:
     _run(_drive())
 
 
+def test_fetch_lifecycle_emits_started_then_terminal(tmp_path: Path) -> None:
+    """v0.33.29+: a successful catalog fetch lands three lifecycle
+    events on the audit log: the request-side ``catalog.fetch.requested``
+    (logged by the HTTP handler -- not exercised here; this test
+    drives the manager directly), the worker-side ``catalog.fetch.started``
+    (right when ``_run_one`` picks the job up), and the existing
+    terminal ``catalog.cache.populated`` (success). For a cancelled
+    fetch the terminal is ``catalog.fetch.cancelled`` instead.
+    Lets an operator scrolling /ui/events see the full lifecycle
+    instead of inferring queue-vs-running state from absence.
+    """
+    from bty.web import _db
+    from bty.web._events_log import list_events
+
+    state_path = tmp_path / "state.db"
+    _db.init_db(state_path)
+    payload = b"lifecycle-bytes" * 100
+    entry = _entry(payload, name="lifecycle.img.zst")
+    cat = _catalog.Catalog(version=1, entries=(entry,))
+    image_root = tmp_path / "images"
+    image_root.mkdir()
+
+    async def _drive() -> None:
+        mgr = DownloadManager(max_parallel=1)
+        with patch("urllib.request.urlopen", _mock_urlopen(payload)):
+            mgr.start(cat, image_root, state_path=state_path)
+            try:
+                await mgr.enqueue(entry.name)
+                for _ in range(200):
+                    states = await mgr.list()
+                    if states and states[0].status == "completed":
+                        break
+                    await asyncio.sleep(0.01)
+            finally:
+                await mgr.stop()
+
+    _run(_drive())
+
+    with _db.open_db(state_path) as conn:
+        events = list_events(conn, subject_kind="catalog", limit=20)
+    kinds = [e.kind for e in reversed(events)]  # oldest first
+    # Started lands before the terminal.
+    assert "catalog.fetch.started" in kinds, kinds
+    # No requested event because we drove the manager directly,
+    # bypassing the HTTP handler (which is where .requested fires).
+    started_idx = kinds.index("catalog.fetch.started")
+    # Terminal is populated (the success path).
+    assert "catalog.cache.populated" in kinds, kinds
+    populated_idx = kinds.index("catalog.cache.populated")
+    assert started_idx < populated_idx, (
+        f"started must come before populated; got order {kinds}"
+    )
+
+
+def test_fetch_lifecycle_emits_cancelled_terminal(tmp_path: Path) -> None:
+    """Cancel-during-fetch lands ``catalog.fetch.started`` +
+    ``catalog.fetch.cancelled`` (no ``catalog.cache.populated``).
+    Pre-fix the manager flipped _states to ``cancelled`` + published
+    an SSE event but wrote nothing to /ui/events, so an operator
+    scrolling the timeline saw started -> nothing."""
+    from bty.web import _db
+    from bty.web._events_log import list_events
+
+    state_path = tmp_path / "state.db"
+    _db.init_db(state_path)
+    payload = b"cancel-me" * 1024
+    entry = _entry(payload, name="cancel.img.zst")
+    cat = _catalog.Catalog(version=1, entries=(entry,))
+    image_root = tmp_path / "images"
+    image_root.mkdir()
+
+    async def _drive() -> None:
+        hold = threading.Event()
+        mgr = DownloadManager(max_parallel=1)
+        with patch("urllib.request.urlopen", _mock_urlopen(payload, hold=hold)):
+            mgr.start(cat, image_root, state_path=state_path)
+            try:
+                await mgr.enqueue(entry.name)
+                # Wait for the worker to enter "running" so we know
+                # the .started event landed.
+                for _ in range(200):
+                    states = await mgr.list()
+                    if states and states[0].status == "running":
+                        break
+                    await asyncio.sleep(0.01)
+                # Cancel; release the hold so the worker observes
+                # the cancel flag and unwinds cleanly.
+                await mgr.cancel(entry.name)
+                hold.set()
+                for _ in range(200):
+                    states = await mgr.list()
+                    if states and states[0].status == "cancelled":
+                        break
+                    await asyncio.sleep(0.01)
+            finally:
+                hold.set()
+                await mgr.stop()
+
+    _run(_drive())
+
+    with _db.open_db(state_path) as conn:
+        events = list_events(conn, subject_kind="catalog", limit=20)
+    kinds = [e.kind for e in reversed(events)]
+    assert "catalog.fetch.started" in kinds, kinds
+    assert "catalog.fetch.cancelled" in kinds, kinds
+    assert "catalog.cache.populated" not in kinds, (
+        f"cancel must not emit populated; got {kinds}"
+    )
+
+
 def test_enqueue_re_runs_when_cached_file_was_deleted(tmp_path: Path) -> None:
     """Operator-reported bug (v0.33.15): after a successful fetch
     of an oras:// (or any) entry, the operator deletes the cached

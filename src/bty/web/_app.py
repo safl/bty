@@ -3239,6 +3239,7 @@ def create_app(
     @app.post("/catalog/downloads", status_code=status.HTTP_202_ACCEPTED)
     async def enqueue_download(
         body: _models.CatalogEnqueueRequest,
+        request: Request,
         _: str = Depends(require_auth),
     ) -> dict[str, Any]:
         try:
@@ -3253,11 +3254,31 @@ def create_app(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=msg,
             ) from exc
+        # Lifecycle audit event: "operator clicked Fetch". Pairs with
+        # the worker-side ``catalog.fetch.started`` (when the worker
+        # actually picks the job up off the queue) and the eventual
+        # terminal ``catalog.cache.populated`` / ``catalog.fetch.failed``
+        # / ``catalog.fetch.cancelled``. Lets an operator see "yes the
+        # click registered" in /ui/events immediately, not in a minute
+        # when the worker either succeeds or fails.
+        with _db.open_db(state_path) as conn:
+            _log_event(
+                conn,
+                kind="catalog.fetch.requested",
+                summary=f"operator requested fetch of catalog entry {body.name!r}",
+                subject_kind="catalog",
+                subject_id=body.name,
+                actor="operator",
+                source_ip=_client_ip(request),
+                details={"name": body.name},
+            )
+            conn.commit()
         return state.to_dict()
 
     @app.delete("/catalog/downloads/{name}")
     async def cancel_download(
         name: str,
+        request: Request,
         _: str = Depends(require_auth),
     ) -> dict[str, Any]:
         state = await download_manager.cancel(name)
@@ -3266,6 +3287,27 @@ def create_app(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"no active download named {name!r}",
             )
+        # Lifecycle audit event: operator-initiated cancel. The
+        # worker writes its own ``catalog.fetch.cancelled`` when it
+        # observes the flag and unwinds; this handler-side event
+        # carries the source_ip + actor=operator so a /ui/events
+        # filter on actor=operator picks up the cancel intent.
+        # Without this row, the worker-side cancelled event lands
+        # with actor=system and the operator can't distinguish
+        # "I cancelled it" from "the system cancelled it"
+        # (e.g. shutdown drain).
+        with _db.open_db(state_path) as conn:
+            _log_event(
+                conn,
+                kind="catalog.fetch.cancelled",
+                summary=f"operator cancelled fetch of {name!r}",
+                subject_kind="catalog",
+                subject_id=name,
+                actor="operator",
+                source_ip=_client_ip(request),
+                details={"name": name, "source": "operator"},
+            )
+            conn.commit()
         return state.to_dict()
 
     @app.delete(
