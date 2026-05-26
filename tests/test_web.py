@@ -3329,6 +3329,282 @@ def test_delete_catalog_entry_requires_auth(app_client: TestClient) -> None:
     assert r.status_code == 401
 
 
+# ---------- full reflash-cycle state machine ------------------------------
+#
+# bty's reason for existence. The interplay of:
+#
+#   1. /pxe/{mac}            -- server picks a chain based on policy
+#                                + saw_flasher_boot bit
+#   2. /boot/{name}?mac=X    -- arming step: live env fetched a
+#                                /boot artifact => sets bit
+#   3. /pxe/{mac}/done       -- live env reports success (does NOT
+#                                mutate boot_mode; v0.25+ contract)
+#   4. /pxe/{mac}            -- next contact: sanboot vs flash chain
+#                                decided by bit + policy
+#
+# Only one slice was tested before (operator-upsert resets the bit).
+# These tests pin the full state machine so the v0.30.2-class bug
+# ("flash-once behaved like flash-always") can't regress silently.
+
+
+def _seed_flashable_machine(
+    app_client: TestClient, mac: str, *, boot_mode: str, monkeypatch: pytest.MonkeyPatch
+) -> str:
+    """Set up a machine that's flash-ready: catalog entry exists, ref
+    bound, target_disk_serial picked. Returns the ref so callers can
+    cross-reference if they need to."""
+    flash_sha = "deadbeef" * 8
+    monkeypatch.setattr(
+        "urllib.request.urlopen",
+        lambda *_a, **_kw: _MockResp(b"", {"Content-Length": "0"}),
+    )
+    monkeypatch.setattr("bty.catalog.fetch_sha256_for_url", lambda *_a, **_kw: flash_sha)
+    add = app_client.post(
+        "/catalog/entries",
+        json={
+            "image_url": f"https://example.invalid/{mac.replace(':', '')}.img.gz",
+            "sha_url": f"https://example.invalid/{mac.replace(':', '')}.img.gz.sha256",
+        },
+        cookies=AUTH,
+    )
+    assert add.status_code == 201, add.text
+    ref = add.json()["bty_image_ref"]
+    app_client.put(
+        f"/machines/{mac}",
+        json={
+            "bty_image_ref": ref,
+            "boot_mode": boot_mode,
+            "target_disk_serial": "REFLASH-SERIAL",
+        },
+        cookies=AUTH,
+    )
+    return ref
+
+
+def _saw_flasher_bit(app_client: TestClient, mac: str) -> int:
+    """Read the saw_flasher_boot bit directly from state.db."""
+    from bty.web import _db as _bty_db
+
+    state_path: Path = app_client.app.state.state_path  # type: ignore[attr-defined]
+    with _bty_db.open_db(state_path) as conn:
+        return int(
+            conn.execute("SELECT saw_flasher_boot FROM machines WHERE mac = ?", (mac,)).fetchone()[
+                "saw_flasher_boot"
+            ]
+        )
+
+
+def _latest_offer_kind(app_client: TestClient, mac: str) -> str:
+    """Return the offer_kind from the most recent ``netboot.pxe.offered``
+    event for ``mac``. Tests use this to assert which iPXE chain the
+    server handed back without scraping the rendered text."""
+    r = app_client.get(
+        "/events",
+        params={"subject_kind": "machine", "subject_id": mac, "kind": "netboot.pxe.offered"},
+        cookies=AUTH,
+    )
+    events = r.json()["events"]
+    assert events, f"no netboot.pxe.offered events for {mac!r}"
+    # /events is newest-first.
+    return str(events[0]["details"]["offer_kind"])
+
+
+def test_reflash_lifecycle_bty_flash_always_alternates(
+    app_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``bty-flash-always`` alternates flash-chain vs sanboot across
+    reboots so the box actually boots its just-flashed disk once
+    before being reflashed.
+
+    Cycle:
+        PXE  -> flash chain (offer=bty-flash-always)
+        /boot?mac= (arming step)
+        PXE  -> sanboot the just-flashed disk (offer=bty-flash-always-sanboot)
+                + bit CLEARED
+        PXE  -> flash chain again (offer=bty-flash-always)
+                + bit stays 0 (cleared until next /boot)
+    """
+    mac = "aa:bb:cc:dd:ee:a1"
+    _seed_flashable_machine(app_client, mac, boot_mode="bty-flash-always", monkeypatch=monkeypatch)
+
+    # Iter 1: PXE -> flash chain offered.
+    r = app_client.get(f"/pxe/{mac}", headers={"Host": "bty.local:8080"})
+    assert r.status_code == 200
+    assert _latest_offer_kind(app_client, mac) == "bty-flash-always"
+    assert _saw_flasher_bit(app_client, mac) == 0
+
+    # Live env booted -> fetches a /boot artifact with ?mac= -> arm.
+    app_client.get(f"/boot/{ARTIFACT_NAMES[0]}?mac={mac}", headers={"Host": "bty.local:8080"})
+    assert _saw_flasher_bit(app_client, mac) == 1
+
+    # Iter 2: PXE -> sanboot the just-flashed disk; bit cleared.
+    r = app_client.get(f"/pxe/{mac}", headers={"Host": "bty.local:8080"})
+    assert r.status_code == 200
+    assert _latest_offer_kind(app_client, mac) == "bty-flash-always-sanboot"
+    assert _saw_flasher_bit(app_client, mac) == 0, "bit must be cleared after sanboot serve"
+
+    # Iter 3: PXE again (no /boot fetch since iter 2) -> flash chain.
+    r = app_client.get(f"/pxe/{mac}", headers={"Host": "bty.local:8080"})
+    assert r.status_code == 200
+    assert _latest_offer_kind(app_client, mac) == "bty-flash-always"
+    assert _saw_flasher_bit(app_client, mac) == 0
+
+
+def test_reflash_lifecycle_bty_flash_once_is_terminal(
+    app_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``bty-flash-once`` is terminal: after the box has been flashed
+    once + booted the disk, every subsequent /pxe contact must
+    serve sanboot. The bit STAYS armed (NOT cleared) so a re-PXE
+    can't re-trigger the flash chain.
+
+    Cycle:
+        PXE  -> flash chain (offer=bty-flash-once)
+        /boot?mac= (arming step)
+        PXE  -> sanboot (offer=bty-flash-once-sanboot) + bit KEPT
+        PXE  -> sanboot again (offer=bty-flash-once-sanboot) + bit KEPT
+    """
+    mac = "aa:bb:cc:dd:ee:a2"
+    _seed_flashable_machine(app_client, mac, boot_mode="bty-flash-once", monkeypatch=monkeypatch)
+
+    # Iter 1: flash chain.
+    app_client.get(f"/pxe/{mac}", headers={"Host": "bty.local:8080"})
+    assert _latest_offer_kind(app_client, mac) == "bty-flash-once"
+    assert _saw_flasher_bit(app_client, mac) == 0
+
+    # Live env arms the bit.
+    app_client.get(f"/boot/{ARTIFACT_NAMES[0]}?mac={mac}", headers={"Host": "bty.local:8080"})
+    assert _saw_flasher_bit(app_client, mac) == 1
+
+    # Iter 2: sanboot, bit KEPT (this is the terminal contract --
+    # was broken pre-v0.30.2: the code cleared the bit for both
+    # flash-once and flash-always, making flash-once reflash on
+    # next /pxe).
+    app_client.get(f"/pxe/{mac}", headers={"Host": "bty.local:8080"})
+    assert _latest_offer_kind(app_client, mac) == "bty-flash-once-sanboot"
+    assert _saw_flasher_bit(app_client, mac) == 1, (
+        "REGRESSION: bty-flash-once must KEEP the bit armed (terminal state); "
+        "clearing it would make the next /pxe serve the flash chain and reflash"
+    )
+
+    # Iter 3: still sanboot -- forever, until operator re-saves.
+    app_client.get(f"/pxe/{mac}", headers={"Host": "bty.local:8080"})
+    assert _latest_offer_kind(app_client, mac) == "bty-flash-once-sanboot"
+    assert _saw_flasher_bit(app_client, mac) == 1
+
+
+def test_pxe_done_does_not_mutate_boot_mode(
+    app_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``POST /pxe/{mac}/done`` updates last_flashed_at + records a
+    machine.flashed event, but MUST NOT mutate boot_mode (the
+    mode/state split: mode is the operator's intent, state is the
+    saw_flasher_boot bit). Pre-v0.25 this flipped flash-once ->
+    sanboot, which lied about the operator's configured mode."""
+    mac = "aa:bb:cc:dd:ee:a3"
+    _seed_flashable_machine(app_client, mac, boot_mode="bty-flash-once", monkeypatch=monkeypatch)
+
+    r = app_client.post(f"/pxe/{mac}/done")
+    assert r.status_code == 204
+
+    # Mode unchanged.
+    machine = app_client.get(f"/machines/{mac}", cookies=AUTH).json()
+    assert machine["boot_mode"] == "bty-flash-once"
+    assert machine["last_flashed_at"] is not None
+
+
+def test_boot_fetch_does_not_arm_sanboot_machine(app_client: TestClient) -> None:
+    """If a machine in ``ipxe-exit`` (operator chose "boot local disk")
+    somehow fetches /boot with ?mac= (mis-typed by a curl test, MAC
+    rotation, etc.), the bit MUST NOT arm -- those policies don't
+    consume the bit and a stray arm would leak into a future flash
+    cycle if the operator later switched to bty-flash-always."""
+    mac = "aa:bb:cc:dd:ee:a4"
+    app_client.put(
+        f"/machines/{mac}",
+        json={"boot_mode": "ipxe-exit"},
+        cookies=AUTH,
+    )
+    app_client.get(f"/boot/{ARTIFACT_NAMES[0]}?mac={mac}", headers={"Host": "bty.local:8080"})
+    from bty.web import _db as _bty_db
+
+    state_path: Path = app_client.app.state.state_path  # type: ignore[attr-defined]
+    with _bty_db.open_db(state_path) as conn:
+        bit = conn.execute(
+            "SELECT saw_flasher_boot FROM machines WHERE mac = ?", (mac,)
+        ).fetchone()["saw_flasher_boot"]
+    assert bit == 0, (
+        "the arming WHERE clause must confine saw_flasher_boot to "
+        "bty-flash-always / bty-flash-once / bty-inventory -- a stray "
+        "/boot?mac= on a sanboot machine MUST NOT leak the bit"
+    )
+
+
+def test_boot_fetch_arms_bty_inventory(app_client: TestClient) -> None:
+    """``bty-inventory`` also consumes saw_flasher_boot (boot live
+    env, post inventory, sanboot once, then re-cycle). /boot?mac=
+    for an inventory-mode machine MUST arm so the next /pxe serves
+    the post-inventory sanboot."""
+    mac = "aa:bb:cc:dd:ee:a5"
+    # bty-inventory is the default on auto-discovered machines.
+    app_client.get(f"/pxe/{mac}", headers={"Host": "bty.local:8080"})
+    app_client.get(f"/boot/{ARTIFACT_NAMES[0]}?mac={mac}", headers={"Host": "bty.local:8080"})
+    from bty.web import _db as _bty_db
+
+    state_path: Path = app_client.app.state.state_path  # type: ignore[attr-defined]
+    with _bty_db.open_db(state_path) as conn:
+        bit = conn.execute(
+            "SELECT saw_flasher_boot FROM machines WHERE mac = ?", (mac,)
+        ).fetchone()["saw_flasher_boot"]
+    assert bit == 1
+
+
+def test_reflash_lifecycle_pxe_offered_event_per_iteration(
+    app_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every /pxe contact lands one netboot.pxe.offered event with
+    the offer_kind. Audit-log timeline = full reflash history. If a
+    future refactor stops emitting events on the sanboot branch,
+    operators lose visibility into "did the box come back?".
+
+    Real-world cadence (PXE-first BIOS):
+
+        PXE  flash  -- bit=0 -> flash chain
+        /boot       -- bit -> 1
+        PXE sanboot -- bit=1 -> sanboot, bit -> 0
+        PXE flash   -- box reboots without re-fetching /boot
+                       (the disk booted; bit stays 0) -> flash again
+        /boot       -- bit -> 1
+        PXE sanboot -- bit=1 -> sanboot, bit -> 0
+    """
+    mac = "aa:bb:cc:dd:ee:a6"
+    _seed_flashable_machine(app_client, mac, boot_mode="bty-flash-always", monkeypatch=monkeypatch)
+
+    # Cycle 1.
+    app_client.get(f"/pxe/{mac}", headers={"Host": "bty.local:8080"})  # flash
+    app_client.get(f"/boot/{ARTIFACT_NAMES[0]}?mac={mac}", headers={"Host": "bty.local:8080"})
+    app_client.get(f"/pxe/{mac}", headers={"Host": "bty.local:8080"})  # sanboot + clear
+    # Box booted the disk, ran the OS, operator power-cycled later.
+    # Cycle 2 begins.
+    app_client.get(f"/pxe/{mac}", headers={"Host": "bty.local:8080"})  # flash (bit=0)
+    app_client.get(f"/boot/{ARTIFACT_NAMES[0]}?mac={mac}", headers={"Host": "bty.local:8080"})
+    app_client.get(f"/pxe/{mac}", headers={"Host": "bty.local:8080"})  # sanboot + clear
+
+    r = app_client.get(
+        "/events",
+        params={"subject_kind": "machine", "subject_id": mac, "kind": "netboot.pxe.offered"},
+        cookies=AUTH,
+    )
+    events = r.json()["events"]
+    offers = [e["details"]["offer_kind"] for e in events]
+    # 4 /pxe hits -> 4 offers. Newest first: sanboot, flash, sanboot, flash.
+    assert len(offers) >= 4, offers
+    assert offers[0] == "bty-flash-always-sanboot"
+    assert offers[1] == "bty-flash-always"
+    assert offers[2] == "bty-flash-always-sanboot"
+    assert offers[3] == "bty-flash-always"
+
+
 def test_pxe_flash_mode_with_no_ref_falls_back_to_unknown(
     app_client: TestClient,
 ) -> None:

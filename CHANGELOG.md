@@ -9,6 +9,51 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.33.16] - 2026-05-26
+
+**Full reflash-cycle state-machine tests.** Operator-pointed:
+"how about the challenging re-flash-application-path?". This IS
+the reason bty exists, and only one slice (operator-upsert resets
+the bit) had explicit coverage. v0.30.2 fixed a real "flash-once
+behaved like flash-always" bug; nothing pinned that contract.
+
+### Added (6 tests)
+
+End-to-end state-machine coverage in `tests/test_web.py`:
+
+- **`test_reflash_lifecycle_bty_flash_always_alternates`** -- full
+  cycle: PXE serves flash chain (bit=0) -> `/boot/{name}?mac=`
+  arms bit -> next PXE serves sanboot AND clears bit -> next PXE
+  serves flash chain again. The clear-on-consume is what makes
+  the alternation work; the bit re-arms on the next /boot fetch.
+- **`test_reflash_lifecycle_bty_flash_once_is_terminal`** -- the
+  v0.30.2 regression test: after one flash + /boot arm, every
+  subsequent /pxe must serve sanboot WITHOUT clearing the bit.
+  Terminal state. Operator re-saves the machine to start a fresh
+  flash cycle.
+- **`test_pxe_done_does_not_mutate_boot_mode`** -- the v0.25
+  mode/state contract: `/pxe/{mac}/done` updates last_flashed_at
+  + logs `machine.flashed` but MUST NOT mutate boot_mode (mode is
+  intent; state is the bit).
+- **`test_boot_fetch_does_not_arm_sanboot_machine`** -- the WHERE
+  clause in `_arm_flasher_boot` confines arming to flash + inventory
+  policies. A stray `/boot?mac=` for an ipxe-exit machine MUST
+  NOT leak the bit (would surprise the operator if they later
+  switched policy).
+- **`test_boot_fetch_arms_bty_inventory`** -- inventory mode
+  also consumes the bit (boot live env, post inventory, sanboot,
+  recycle). Pin that `/boot?mac=` does arm for bty-inventory.
+- **`test_reflash_lifecycle_pxe_offered_event_per_iteration`** --
+  two full cycles produce exactly 4 `netboot.pxe.offered` events
+  in the audit log with alternating offer_kind. The operator's
+  visibility into "did the box come back?" is the audit timeline;
+  a refactor that drops events on the sanboot branch is caught.
+
+### Coverage
+
+Suite 833 -> 839. The reflash state machine -- the actual
+appliance contract -- is now pinned end-to-end.
+
 ## [0.33.15] - 2026-05-26
 
 **Edge-case audit + targeted 4xx-path tests.** Operator-pointed
