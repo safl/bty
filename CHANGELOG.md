@@ -9,6 +9,39 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.33.12] - 2026-05-26
+
+**Operator-facing edge cases get explicit tests.**
+
+### `_verify_sha256_manifest` error paths (5 tests)
+
+The sha256-manifest verifier runs after every netboot fetch. The
+success path was tested via `test_fetch_release_round_trips`, but
+each operator-facing failure mode had no dedicated test:
+
+- malformed manifest line (corrupted upstream / partial CDN upload)
+- referenced file missing from files_dir
+- self-reference + blank lines skipped (some sha256sum
+  invocations emit these)
+- `*` / `./` filename prefix stripped (binary-mode and
+  operator-edited manifests)
+- empty manifest rejected (an empty file would otherwise "pass"
+  verification silently)
+
+### `/pxe/{mac}` flash-mode-without-ref branch (1 test)
+
+`PUT /machines/{mac}` accepts `boot_mode=bty-flash-always` without
+a `bty_image_ref` bound -- the machine is in a "policy picked but
+image not yet selected" state. The PXE handler's response to this
+state landed in the ``ipxe_unknown.j2`` fallback branch, which had
+no test. Now pinned: the audit event records ``offer_kind="unknown"``.
+
+### Coverage
+
+- `_releases.py` 83% -> ~95% (rough)
+- Total suite: 817 -> 823 tests
+- Overall: 90% -> 91%
+
 ## [0.33.11] - 2026-05-26
 
 **Two integration-level tests for behaviors that had no end-to-end

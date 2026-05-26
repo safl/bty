@@ -188,6 +188,80 @@ def test_fetch_release_url_construction_pins_to_running_version() -> None:
         )
 
 
+def test_verify_sha256_manifest_rejects_malformed_line(tmp_path: Path) -> None:
+    """A line that isn't `<hex>  <name>` shape must surface a clear
+    ValueError. Operators see this when the upstream release ships
+    a corrupted manifest (rare but real -- partial uploads, CDN
+    truncation)."""
+    from bty.web._releases import SHA256_NAME, _verify_sha256_manifest
+
+    (tmp_path / SHA256_NAME).write_text("just-one-token-no-filename\n")
+    with pytest.raises(ValueError, match="malformed line"):
+        _verify_sha256_manifest(tmp_path / SHA256_NAME, tmp_path)
+
+
+def test_verify_sha256_manifest_rejects_missing_target(tmp_path: Path) -> None:
+    """A manifest that references a filename absent from files_dir
+    is a clear operator-facing failure (the upstream release is
+    incomplete or the local tempdir lost a file mid-fetch). Surface
+    via ValueError with the offending filename in the message."""
+    from bty.web._releases import SHA256_NAME, _verify_sha256_manifest
+
+    (tmp_path / SHA256_NAME).write_text(
+        "0000000000000000000000000000000000000000000000000000000000000000  not-on-disk.bin\n"
+    )
+    with pytest.raises(ValueError, match="missing file"):
+        _verify_sha256_manifest(tmp_path / SHA256_NAME, tmp_path)
+
+
+def test_verify_sha256_manifest_skips_self_and_blank_lines(tmp_path: Path) -> None:
+    """The manifest may include a self-reference (some sha256sum
+    invocations do); the verifier must skip it rather than 404 on
+    its own missing-file check. Blank / whitespace-only lines are
+    also skipped."""
+    import hashlib
+
+    from bty.web._releases import SHA256_NAME, _verify_sha256_manifest
+
+    payload = b"art"
+    (tmp_path / "art.bin").write_bytes(payload)
+    digest = hashlib.sha256(payload).hexdigest()
+    self_digest = "0" * 64
+    (tmp_path / SHA256_NAME).write_text(
+        f"\n   \n{digest}  art.bin\n{self_digest}  {SHA256_NAME}\n"  # self-reference -- must skip
+    )
+    # Must not raise.
+    _verify_sha256_manifest(tmp_path / SHA256_NAME, tmp_path)
+
+
+def test_verify_sha256_manifest_strips_star_and_dotslash_prefix(tmp_path: Path) -> None:
+    """``sha256sum --binary`` prefixes names with ``*``;
+    operator-edited manifests sometimes use ``./``. Both prefixes
+    must be tolerated (the canonical filename is what's on disk)."""
+    import hashlib
+
+    from bty.web._releases import SHA256_NAME, _verify_sha256_manifest
+
+    payload = b"contents"
+    (tmp_path / "thing.bin").write_bytes(payload)
+    digest = hashlib.sha256(payload).hexdigest()
+    (tmp_path / SHA256_NAME).write_text(f"{digest}  *./thing.bin\n")
+    _verify_sha256_manifest(tmp_path / SHA256_NAME, tmp_path)
+
+
+def test_verify_sha256_manifest_empty_manifest_raises(tmp_path: Path) -> None:
+    """A manifest with no usable entries (after skipping blanks +
+    self-reference) is rejected. Otherwise a corrupted upstream
+    release would "pass verification" by being empty -- the
+    operator would think the fetch succeeded and the live env
+    would later fail to boot."""
+    from bty.web._releases import SHA256_NAME, _verify_sha256_manifest
+
+    (tmp_path / SHA256_NAME).write_text("\n\n\n")
+    with pytest.raises(ValueError, match="empty"):
+        _verify_sha256_manifest(tmp_path / SHA256_NAME, tmp_path)
+
+
 def test_verify_sha256_manifest_streams_large_files(tmp_path: Path) -> None:
     """``_verify_sha256_manifest`` must hash artifacts in chunks
     rather than via ``Path.read_bytes()``. A Pi 4 / small NUC

@@ -3264,6 +3264,44 @@ def test_workers_backups_delete_requires_auth(app_client: TestClient) -> None:
     assert r.status_code == 401
 
 
+def test_pxe_flash_mode_with_no_ref_falls_back_to_unknown(
+    app_client: TestClient,
+) -> None:
+    """A machine with ``boot_mode=bty-flash-always`` but NO
+    ``bty_image_ref`` bound hits the ``ipxe_unknown.j2`` fallback
+    template (sanboots first disk, falls back to firmware exit).
+    Pre-this-test the branch was uncovered -- the JSON PUT
+    /machines/{mac} accepts this shape (the policy-without-image
+    state), so the PXE handler's behavior under that state needs
+    to be pinned.
+
+    The offer_kind in the audit event lands as ``"unknown"``."""
+    mac = "aa:bb:cc:dd:ee:55"
+    # Stage the machine with a flash policy but no image binding.
+    r = app_client.put(
+        f"/machines/{mac}",
+        json={"boot_mode": "bty-flash-always", "target_disk_serial": "SERIAL-X"},
+        cookies=AUTH,
+    )
+    assert r.status_code == 200, r.text
+
+    r = app_client.get(f"/pxe/{mac}")
+    assert r.status_code == 200
+    # The rendered chain doesn't matter much for the contract; the
+    # event log is the authoritative record of what was offered.
+    r = app_client.get(
+        "/events",
+        params={"subject_kind": "machine", "subject_id": mac, "kind": "netboot.pxe.offered"},
+        cookies=AUTH,
+    )
+    events = r.json()["events"]
+    assert len(events) >= 1
+    assert events[0]["details"]["offer_kind"] == "unknown", (
+        f"flash-mode-without-ref must offer 'unknown', got "
+        f"{events[0]['details'].get('offer_kind')!r}"
+    )
+
+
 def test_create_app_rotates_stale_state_db_end_to_end(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
