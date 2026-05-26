@@ -550,7 +550,7 @@ def test_ui_downloads_has_all_three_triggers(client: TestClient) -> None:
 
 def test_ui_hashing_has_active_jobs_and_activity(client: TestClient) -> None:
     """``/ui/hashing`` carries the live hash-jobs tbody + recent
-    image.hashed / image.hash_failed events."""
+    image.hashed / image.hash.failed events."""
     _login(client)
     body = client.get("/ui/hashing").text
     assert "bty-workers-hashing-tbody" in body
@@ -2537,7 +2537,7 @@ def test_ui_settings_tftp_control_failure_renders_red_flash_and_logs_event(
 ) -> None:
     """A ``SysConfigError`` from the helper bounces back to the
     Netboot page (the TFTP panel's home now) with a red flash
-    AND a ``netboot.tftp.control_failed`` event so the operator
+    AND a ``netboot.tftp.control.failed`` event so the operator
     sees the systemctl exit code in the audit log without
     having to ssh in."""
     from bty.web import _sysconfig
@@ -2557,7 +2557,7 @@ def test_ui_settings_tftp_control_failure_renders_red_flash_and_logs_event(
         params={"subject_kind": "netboot", "subject_id": "tftp"},
         cookies=AUTH,
     ).json()["events"]
-    failed = [e for e in events if e["kind"] == "netboot.tftp.control_failed"]
+    failed = [e for e in events if e["kind"] == "netboot.tftp.control.failed"]
     assert len(failed) == 1
     assert failed[0]["details"]["action"] == "start"
 
@@ -2633,7 +2633,7 @@ def test_ui_boot_fetch_failure_renders_red_flash_and_logs_event(
 ) -> None:
     """``FetchError`` (no network / 404 release tag / sha mismatch)
     surfaces on the page with a red flash + a
-    ``netboot.artifacts.fetch_failed`` event."""
+    ``netboot.artifacts.fetch.failed`` event."""
     from bty.web import _releases
 
     def _raise(boot_root_arg: Path, *, tag: str) -> _releases.FetchResult:
@@ -2650,7 +2650,7 @@ def test_ui_boot_fetch_failure_renders_red_flash_and_logs_event(
         params={"subject_kind": "netboot", "subject_id": "v0.999.999"},
         cookies=AUTH,
     ).json()["events"]
-    failed = [e for e in events if e["kind"] == "netboot.artifacts.fetch_failed"]
+    failed = [e for e in events if e["kind"] == "netboot.artifacts.fetch.failed"]
     assert len(failed) == 1
     assert failed[0]["details"]["tag"] == "v0.999.999"
 
@@ -2688,7 +2688,7 @@ def test_ui_boot_fetch_empty_tag_falls_back_to_latest(
 
 def _seed_failed_event(client: TestClient, monkeypatch: pytest.MonkeyPatch, tag: str) -> int:
     """Drive the boot-fetch-failure path to record one
-    ``netboot.artifacts.fetch_failed`` event; return its id (newest)."""
+    ``netboot.artifacts.fetch.failed`` event; return its id (newest)."""
     from bty.web import _releases
 
     def _raise(boot_root_arg: Path, *, tag: str) -> _releases.FetchResult:

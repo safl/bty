@@ -203,7 +203,7 @@ def test_enqueue_deduplicates_running_tag(tmp_path: Path, monkeypatch: pytest.Mo
 
 def test_enqueue_fetch_error_lands_failed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A FetchError from fetch_release flips the state to failed
-    with the error message preserved + a ``netboot.artifacts.fetch_failed``
+    with the error message preserved + a ``netboot.artifacts.fetch.failed``
     audit event."""
 
     def fake_fetch_release(boot_dir: Path, **kwargs: Any) -> _releases.FetchResult:
@@ -233,7 +233,7 @@ def test_enqueue_fetch_error_lands_failed(tmp_path: Path, monkeypatch: pytest.Mo
             conn.row_factory = sqlite3.Row
             events = _events_log.list_events(conn, subject_kind="netboot", limit=10)
         kinds = [e.kind for e in events]
-        assert "netboot.artifacts.fetch_failed" in kinds, kinds
+        assert "netboot.artifacts.fetch.failed" in kinds, kinds
 
     _run(_drive())
 
@@ -307,7 +307,7 @@ def test_enqueue_cancel_lands_cancelled(tmp_path: Path, monkeypatch: pytest.Monk
             events = _events_log.list_events(conn, subject_kind="netboot", limit=10)
         kinds = [e.kind for e in events]
         # Cancellation is operator-initiated -- not logged as a fetch event.
-        assert "netboot.artifacts.fetch_failed" not in kinds
+        assert "netboot.artifacts.fetch.failed" not in kinds
         assert "netboot.artifacts.fetched" not in kinds
 
 
@@ -420,7 +420,7 @@ def test_backfill_restores_failed_state_from_events(tmp_path: Path) -> None:
         with _db.open_db(state_path) as conn:
             _events_log.record(
                 conn,
-                kind="netboot.artifacts.fetch_failed",
+                kind="netboot.artifacts.fetch.failed",
                 summary="boot release 'v0.99.0' fetch failed",
                 subject_kind="netboot",
                 subject_id="v0.99.0",
@@ -453,7 +453,7 @@ def test_backfill_dedups_to_latest_event_per_tag(tmp_path: Path) -> None:
         with _db.open_db(state_path) as conn:
             _events_log.record(
                 conn,
-                kind="netboot.artifacts.fetch_failed",
+                kind="netboot.artifacts.fetch.failed",
                 summary="first attempt failed",
                 subject_kind="netboot",
                 subject_id="v1.0.0",

@@ -164,7 +164,7 @@ def test_run_hash_cancel_with_concurrent_oserror_marks_cancelled(tmp_path: Path)
 
 def test_hash_manager_backfills_from_events(tmp_path: Path) -> None:
     """``HashManager.start(state_path=...)`` repopulates ``_states``
-    from recent image.hashed / image.hash_failed events so the
+    from recent image.hashed / image.hash.failed events so the
     /ui/images Hashes table survives a bty-web restart. Mirrors
     the DownloadManager + ReleaseFetchManager backfill."""
     from bty.web import _db, _events_log
@@ -186,7 +186,7 @@ def test_hash_manager_backfills_from_events(tmp_path: Path) -> None:
         )
         _events_log.record(
             conn,
-            kind="image.hash_failed",
+            kind="image.hash.failed",
             summary="broken.img.gz failed",
             subject_kind="image",
             subject_id="broken.img.gz",
@@ -227,7 +227,7 @@ def test_hash_manager_backfill_newest_per_name_wins(tmp_path: Path) -> None:
         # Older event (e.g. failed import attempt).
         _events_log.record(
             conn,
-            kind="image.hash_failed",
+            kind="image.hash.failed",
             summary="early failure",
             subject_kind="image",
             subject_id="demo.img.gz",
@@ -308,7 +308,7 @@ def test_hash_manager_backfill_tolerates_corrupted_ts(tmp_path: Path) -> None:
 
 def test_hash_failed_event_is_recorded(tmp_path: Path) -> None:
     """A genuinely-failed hash (IO error, not operator cancel)
-    must land an ``image.hash_failed`` event in the audit log
+    must land an ``image.hash.failed`` event in the audit log
     so /ui/events shows the operator "this file tried to import
     and crashed" without polling /catalog/hashes. The matching
     success path emits ``image.hashed``; symmetric coverage."""
@@ -342,7 +342,7 @@ def test_hash_failed_event_is_recorded(tmp_path: Path) -> None:
     _run(_drive())
 
     with _db.open_db(state_db) as conn:
-        rows = list_events(conn, kind="image.hash_failed")
+        rows = list_events(conn, kind="image.hash.failed")
     assert len(rows) == 1
     row = rows[0]
     assert row.subject_kind == "image"

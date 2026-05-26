@@ -215,8 +215,8 @@ def register_ui_routes(
             # Same ``kind LIKE '%failed'`` predicate the /ui/events
             # ``?failed=1`` filter uses (list_events(failed_only=True)),
             # so the "Review errors" deep link lands on exactly this
-            # family: image.upload_failed / image.hash_failed /
-            # catalog.entry.add_failed / netboot.artifacts.fetch_failed /
+            # family: image.upload.failed / image.hash.failed /
+            # catalog.entry.add.failed / netboot.artifacts.fetch.failed /
             # settings.tftp.control_failed / auth.login.failed.
             error_event_count = _events_log.count_unacknowledged_failures(conn)
             # Recent activity slice for the dashboard's "what just
@@ -772,7 +772,7 @@ def register_ui_routes(
             hashing_events = [
                 ev
                 for ev in _events_log.list_events(conn, subject_kind="image", limit=40)
-                if ev.kind in ("image.hashed", "image.hash_failed")
+                if ev.kind in ("image.hashed", "image.hash.failed")
             ][:15]
         return render(
             "ui/hashing.html",
@@ -1590,7 +1590,7 @@ def register_ui_routes(
             with _db.open_db(state_path) as conn:
                 _events_log.record(
                     conn,
-                    kind="netboot.tftp.control_failed",
+                    kind="netboot.tftp.control.failed",
                     summary=f"TFTP {action!r} failed: {exc}",
                     subject_kind="netboot",
                     subject_id="tftp",
@@ -1642,7 +1642,7 @@ def register_ui_routes(
             with _db.open_db(state_path) as conn:
                 _events_log.record(
                     conn,
-                    kind="netboot.artifacts.fetch_failed",
+                    kind="netboot.artifacts.fetch.failed",
                     summary=f"boot release {resolved_tag!r} fetch failed: {exc}",
                     subject_kind="netboot",
                     subject_id=resolved_tag,

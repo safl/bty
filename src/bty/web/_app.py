@@ -2306,7 +2306,7 @@ def create_app(
         returns immediately and the operator can watch progress
         via ``/catalog/hashes``.
 
-        Failure path logs ``image.upload_failed`` so the audit log
+        Failure path logs ``image.upload.failed`` so the audit log
         is symmetric with the success path's ``image.uploaded``.
         Operators scanning /ui/events see "this upload was tried
         and rejected" with the underlying error.
@@ -2317,7 +2317,7 @@ def create_app(
             with _db.open_db(state_path) as conn:
                 _log_event(
                     conn,
-                    kind="image.upload_failed",
+                    kind="image.upload.failed",
                     summary=f"image {name!r} upload failed: {exc.detail}",
                     subject_kind="image",
                     subject_id=name,
@@ -2334,7 +2334,7 @@ def create_app(
             with _db.open_db(state_path) as conn:
                 _log_event(
                     conn,
-                    kind="image.upload_failed",
+                    kind="image.upload.failed",
                     summary=f"image {name!r} upload failed: {type(exc).__name__}: {exc}",
                     subject_kind="image",
                     subject_id=name,
@@ -2572,7 +2572,7 @@ def create_app(
                 with _db.open_db(state_path) as conn:
                     _log_event(
                         conn,
-                        kind="catalog.entry.add_failed",
+                        kind="catalog.entry.add.failed",
                         summary=f"catalog entry add failed for {body.image_url!r}: {exc}",
                         subject_kind="catalog",
                         subject_id=body.image_url,
@@ -2665,7 +2665,7 @@ def create_app(
                 with _db.open_db(state_path) as conn:
                     _log_event(
                         conn,
-                        kind="catalog.entry.add_failed",
+                        kind="catalog.entry.add.failed",
                         summary=f"catalog entry add failed for {body.image_url!r}: {exc}",
                         subject_kind="catalog",
                         subject_id=body.image_url,

@@ -3124,7 +3124,7 @@ def test_events_filter_failed_only_returns_only_failure_kinds(
     operator's "show me everything that broke" triage view --
     one toggle instead of cycling through 6+ failure kinds in
     the per-kind dropdown."""
-    # Force a netboot.artifacts.fetch_failed event (deterministic).
+    # Force a netboot.artifacts.fetch.failed event (deterministic).
     from bty.web import _releases
 
     def _explode(*_a: object, **_kw: object) -> None:
@@ -3191,7 +3191,7 @@ def test_catalog_entry_add_sha_failure_logs_event(
     """When ``POST /catalog/entries`` is given an image_url +
     sha_url and the sha resolution fails (CatalogError from
     bty.catalog.fetch_sha256_for_url), a
-    ``catalog.entry.add_failed`` event lands in the audit log
+    ``catalog.entry.add.failed`` event lands in the audit log
     instead of just a bare 400 response."""
     from bty import catalog as _catalog
 
@@ -3208,7 +3208,7 @@ def test_catalog_entry_add_sha_failure_logs_event(
         cookies=AUTH,
     )
     assert r.status_code == 400
-    r = app_client.get("/events", params={"kind": "catalog.entry.add_failed"}, cookies=AUTH)
+    r = app_client.get("/events", params={"kind": "catalog.entry.add.failed"}, cookies=AUTH)
     events = r.json()["events"]
     assert len(events) == 1
     row = events[0]
@@ -3223,7 +3223,7 @@ def test_image_upload_oversized_logs_failure_event(
     app_client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """An upload that exceeds ``BTY_MAX_UPLOAD_BYTES`` lands an
-    ``image.upload_failed`` event so the audit trail is symmetric
+    ``image.upload.failed`` event so the audit trail is symmetric
     with the success path's ``image.uploaded``. Force the cap
     very low so the test fixture's ~10-byte payload trips it."""
     monkeypatch.setenv("BTY_MAX_UPLOAD_BYTES", "5")
@@ -3233,7 +3233,7 @@ def test_image_upload_oversized_logs_failure_event(
         cookies=AUTH,
     )
     assert r.status_code == 413
-    r = app_client.get("/events", params={"kind": "image.upload_failed"}, cookies=AUTH)
+    r = app_client.get("/events", params={"kind": "image.upload.failed"}, cookies=AUTH)
     events = r.json()["events"]
     assert len(events) == 1
     row = events[0]
@@ -3247,7 +3247,7 @@ def test_image_upload_oserror_logs_failure_event(
     app_client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """An OSError mid-upload (disk full, read-only fs, etc.) also
-    lands an ``image.upload_failed`` event so the audit trail
+    lands an ``image.upload.failed`` event so the audit trail
     isn't only HTTPException-shaped failures.
 
     Starlette's TestClient re-raises server exceptions by default
@@ -3266,7 +3266,7 @@ def test_image_upload_oserror_logs_failure_event(
             content=b"...",
             cookies=AUTH,
         )
-    r = app_client.get("/events", params={"kind": "image.upload_failed"}, cookies=AUTH)
+    r = app_client.get("/events", params={"kind": "image.upload.failed"}, cookies=AUTH)
     events = r.json()["events"]
     assert len(events) == 1
     row = events[0]
@@ -3373,11 +3373,11 @@ def test_ui_events_page_renders_failure_with_danger_badge(
     """Failure-kind events (anything ending ``.failed`` or
     ``_failed``) render with the ``bg-danger`` Bootstrap badge so
     they pop in a long log instead of blending in with their
-    success siblings (``image.hashed`` vs ``image.hash_failed``,
+    success siblings (``image.hashed`` vs ``image.hash.failed``,
     same family / different colour). Guards the
     failed-kind branch in the events / per-machine templates
     against a future refactor of the badge map."""
-    # Trigger a netboot.artifacts.fetch_failed event (deterministic --
+    # Trigger a netboot.artifacts.fetch.failed event (deterministic --
     # monkeypatch the fetch to raise FetchError).
     from bty.web import _releases
 
@@ -3393,12 +3393,12 @@ def test_ui_events_page_renders_failure_with_danger_badge(
     )
     r = app_client.get(
         "/ui/events",
-        params={"kind": "netboot.artifacts.fetch_failed"},
+        params={"kind": "netboot.artifacts.fetch.failed"},
         cookies=AUTH,
     )
     assert r.status_code == 200
     body = r.text
-    assert "netboot.artifacts.fetch_failed" in body
+    assert "netboot.artifacts.fetch.failed" in body
     # Danger badge appears in the rendered row.
     assert "bg-danger" in body
 
@@ -5580,7 +5580,7 @@ def test_release_fetch_manager_backfills_from_events(tmp_path: Path) -> None:
     made the /ui/netboot "Active + recent fetches" table show "No
     fetches yet." even when artifacts were clearly present on
     disk. The fix backfills from netboot.artifacts.fetched /
-    netboot.artifacts.fetch_failed events on ``start()``.
+    netboot.artifacts.fetch.failed events on ``start()``.
 
     Seeds two events on a fresh state.db, then starts a manager
     against it and asserts that the manager's state mirror the
@@ -5611,7 +5611,7 @@ def test_release_fetch_manager_backfills_from_events(tmp_path: Path) -> None:
         )
         _events_log.record(
             conn,
-            kind="netboot.artifacts.fetch_failed",
+            kind="netboot.artifacts.fetch.failed",
             summary="release v0.1.2 failed",
             subject_kind="netboot",
             subject_id="v0.1.2",
@@ -5657,7 +5657,7 @@ def test_release_fetch_manager_backfill_picks_most_recent_per_tag(
         # Older failure
         _events_log.record(
             conn,
-            kind="netboot.artifacts.fetch_failed",
+            kind="netboot.artifacts.fetch.failed",
             summary="latest failed first attempt",
             subject_kind="netboot",
             subject_id="latest",
@@ -5725,7 +5725,7 @@ def test_release_fetch_manager_run_fetch_cancel_overrides_fetch_error(
 
 def test_release_fetch_manager_failure_logs_event(tmp_path: Path) -> None:
     """A genuinely-failed fetch (urllib error, not operator cancel)
-    must land a ``netboot.artifacts.fetch_failed`` event in the audit
+    must land a ``netboot.artifacts.fetch.failed`` event in the audit
     log. Symmetric with the success path's ``netboot.artifacts.fetched``
     so the operator can see "this fetch tried + crashed" via
     /ui/events instead of polling /boot/releases."""
@@ -5757,7 +5757,7 @@ def test_release_fetch_manager_failure_logs_event(tmp_path: Path) -> None:
     asyncio.run(go())
 
     with _db.open_db(state_db) as conn:
-        rows = list_events(conn, kind="netboot.artifacts.fetch_failed")
+        rows = list_events(conn, kind="netboot.artifacts.fetch.failed")
     assert len(rows) == 1
     row = rows[0]
     assert row.subject_kind == "netboot"

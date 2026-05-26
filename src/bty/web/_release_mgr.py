@@ -156,7 +156,7 @@ class ReleaseFetchManager(_BaseAsyncManager[ReleaseFetchState]):
         synchronous /ui/netboot/fetch-release path. Tests omit it.
 
         Also backfills ``_states`` from recent
-        ``netboot.artifacts.fetched`` / ``netboot.artifacts.fetch_failed``
+        ``netboot.artifacts.fetched`` / ``netboot.artifacts.fetch.failed``
         events when ``state_path`` is given. The manager's
         ``_states`` dict is otherwise lost on restart, which made
         the /ui/netboot "Active + recent fetches" table show
@@ -174,7 +174,7 @@ class ReleaseFetchManager(_BaseAsyncManager[ReleaseFetchState]):
         """Repopulate ``_states`` with recent fetch outcomes.
 
         Reads the latest ``netboot.artifacts.fetched`` /
-        ``netboot.artifacts.fetch_failed`` rows from the events table
+        ``netboot.artifacts.fetch.failed`` rows from the events table
         (per-tag dedupe: the most recent terminal event for each
         tag wins). The reconstructed states show ``status=completed``
         or ``status=failed`` with the original ts as
@@ -206,7 +206,7 @@ class ReleaseFetchManager(_BaseAsyncManager[ReleaseFetchState]):
         # ``list_events``.
         seen: set[str] = set()
         for ev in rows:
-            if ev.kind not in ("netboot.artifacts.fetched", "netboot.artifacts.fetch_failed"):
+            if ev.kind not in ("netboot.artifacts.fetched", "netboot.artifacts.fetch.failed"):
                 continue
             tag = ev.subject_id
             if not tag or tag in seen:
@@ -226,7 +226,7 @@ class ReleaseFetchManager(_BaseAsyncManager[ReleaseFetchState]):
                 finished_at=started,
                 error=(
                     str(details.get("error"))
-                    if ev.kind == "netboot.artifacts.fetch_failed"
+                    if ev.kind == "netboot.artifacts.fetch.failed"
                     else None
                 ),
                 base_url=(
@@ -409,7 +409,7 @@ class ReleaseFetchManager(_BaseAsyncManager[ReleaseFetchState]):
 
         # Log terminal outcomes so the audit trail is symmetric:
         # successful fetches land ``netboot.artifacts.fetched``, failures
-        # land ``netboot.artifacts.fetch_failed`` with the error so the
+        # land ``netboot.artifacts.fetch.failed`` with the error so the
         # operator can see "this fetch tried + crashed" in
         # /ui/events without polling /boot/releases. Cancelled
         # fetches are operator-initiated and not logged.
@@ -436,7 +436,7 @@ class ReleaseFetchManager(_BaseAsyncManager[ReleaseFetchState]):
             with _db.open_db(self._state_path) as conn:
                 _log_event(
                     conn,
-                    kind="netboot.artifacts.fetch_failed",
+                    kind="netboot.artifacts.fetch.failed",
                     summary=f"boot release {state.tag!r} fetch failed: {error or 'unknown error'}",
                     subject_kind="netboot",
                     subject_id=state.tag,

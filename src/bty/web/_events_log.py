@@ -101,20 +101,20 @@ KNOWN_EVENT_KINDS: tuple[str, ...] = (
     "netboot.flasher.armed",
     "pxe.client.orphan",
     "image.uploaded",
-    "image.upload_failed",
+    "image.upload.failed",
     "image.hashed",
-    "image.hash_failed",
+    "image.hash.failed",
     "catalog.entry.added",
-    "catalog.entry.add_failed",
+    "catalog.entry.add.failed",
     "catalog.entry.deleted",
     "catalog.entries.imported",
     "catalog.cache.deleted",
     "catalog.cache.populated",
     "catalog.fetch.sha_mismatch",
     "netboot.artifacts.fetched",
-    "netboot.artifacts.fetch_failed",
+    "netboot.artifacts.fetch.failed",
     "netboot.tftp.controlled",
-    "netboot.tftp.control_failed",
+    "netboot.tftp.control.failed",
     "settings.upstream.updated",
     "settings.backup.updated",
     "backup.created",
@@ -274,7 +274,7 @@ def list_events(
     if failed_only:
         # Failure kinds end either in ``.failed`` (e.g.
         # ``machine.task.failed``) or ``_failed`` (e.g.
-        # ``image.hash_failed``). LIKE matches both via the
+        # ``image.hash.failed``). LIKE matches both via the
         # ``%failed`` suffix; a stricter check would need an
         # OR of two LIKE clauses but the simpler form is
         # sufficient here -- ``failed`` is rare enough as a

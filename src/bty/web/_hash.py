@@ -124,7 +124,7 @@ class HashManager(_BaseAsyncManager[HashState]):
         availability roll forward in /ui/events. Tests omit it.
 
         Also backfills ``_states`` from recent ``image.hashed`` /
-        ``image.hash_failed`` events when ``state_path`` is given.
+        ``image.hash.failed`` events when ``state_path`` is given.
         The /ui/images Hashes table is otherwise empty after every
         bty-web restart even when sidecar .sha256 files are
         already on disk; the backfill keeps history visible.
@@ -140,7 +140,7 @@ class HashManager(_BaseAsyncManager[HashState]):
     def _backfill_from_events(self, state_path: Path) -> None:
         """Repopulate ``_states`` with recent terminal hash outcomes.
 
-        Reads ``image.hashed`` (success) + ``image.hash_failed``
+        Reads ``image.hashed`` (success) + ``image.hash.failed``
         (failure) events; newest-per-name wins. Soft-fails on any
         DB exception so a corrupt state.db can't keep bty-web
         from starting -- backfill is a UX nicety, not a
@@ -166,7 +166,7 @@ class HashManager(_BaseAsyncManager[HashState]):
             return
         seen: set[str] = set()
         for ev in rows:
-            if ev.kind not in ("image.hashed", "image.hash_failed"):
+            if ev.kind not in ("image.hashed", "image.hash.failed"):
                 continue
             name = ev.subject_id
             if not name or name in seen:
@@ -199,7 +199,7 @@ class HashManager(_BaseAsyncManager[HashState]):
                 sha256=sha,
                 started_at=started,
                 finished_at=started,
-                error=(str(details.get("error")) if ev.kind == "image.hash_failed" else None),
+                error=(str(details.get("error")) if ev.kind == "image.hash.failed" else None),
             )
 
     async def enqueue(self, name: str) -> HashState:
@@ -302,7 +302,7 @@ class HashManager(_BaseAsyncManager[HashState]):
 
         # Log terminal outcomes so the audit trail is symmetric:
         # successful hashes land ``image.hashed`` with the sha;
-        # failures land ``image.hash_failed`` with the error so an
+        # failures land ``image.hash.failed`` with the error so an
         # operator scanning /ui/events can see "this file was
         # supposed to import but couldn't" without having to
         # poll /catalog/hashes. Cancelled hashes are operator-
@@ -364,7 +364,7 @@ class HashManager(_BaseAsyncManager[HashState]):
             with _db.open_db(self._state_path) as conn:
                 _log_event(
                     conn,
-                    kind="image.hash_failed",
+                    kind="image.hash.failed",
                     summary=f"image {state.name!r} hash failed: {error or 'unknown error'}",
                     subject_kind="image",
                     subject_id=state.name,
