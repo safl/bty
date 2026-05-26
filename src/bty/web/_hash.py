@@ -265,6 +265,32 @@ class HashManager(_BaseAsyncManager[HashState]):
         def _cancel() -> bool:
             return cancel_event.is_set()
 
+        # Lifecycle audit event: "worker started this hash". The Hash
+        # button was dropped in v0.33.28+, so the matching ``.requested``
+        # phase only exists conceptually -- every hash is enqueued by
+        # auto-import (lifespan startup) or by the DownloadManager's
+        # backfill chain. ``.started`` still gives operators "this
+        # file is actively being hashed" visibility on /ui/events,
+        # which is otherwise opaque until the terminal event lands.
+        if self._state_path is not None:
+            try:
+                with _db.open_db(self._state_path) as conn:
+                    _log_event(
+                        conn,
+                        kind="image.hash.started",
+                        summary=f"worker started hashing {state.name!r}",
+                        subject_kind="image",
+                        subject_id=state.name,
+                        actor="system",
+                        details={"name": state.name, "path": state.path},
+                    )
+                    conn.commit()
+            except Exception:
+                _log.exception(
+                    "image.hash.started event-log write failed for %s",
+                    state.name,
+                )
+
         try:
             sha = await asyncio.to_thread(
                 _images.ensure_sha256,
@@ -373,6 +399,22 @@ class HashManager(_BaseAsyncManager[HashState]):
                         "name": state.name,
                         "error": error,
                     },
+                )
+                conn.commit()
+        elif final_status == "cancelled":
+            # Pre-fix the manager flipped _states + published an SSE
+            # event but wrote nothing to the audit log, so an
+            # operator scrolling /ui/events saw .started with no
+            # follow-up. Now the cancel closes the loop.
+            with _db.open_db(self._state_path) as conn:
+                _log_event(
+                    conn,
+                    kind="image.hash.cancelled",
+                    summary=f"image {state.name!r} hash cancelled",
+                    subject_kind="image",
+                    subject_id=state.name,
+                    actor="system",
+                    details={"name": state.name},
                 )
                 conn.commit()
 

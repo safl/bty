@@ -554,3 +554,59 @@ def test_enqueue_explicit_hash_cancelled_lands_cancelled(
             await mgr.stop()
 
     _run(_drive())
+
+    # v0.33.29+: the cancelled terminal lands an audit event too,
+    # closing the lifecycle loop. Pre-fix the manager flipped
+    # _states but wrote nothing to /ui/events; an operator
+    # scrolling the timeline saw started -> nothing.
+    from bty.web._events_log import list_events as _list_events
+
+    with _db.open_db(state_path) as conn:
+        events = _list_events(conn, subject_kind="image", limit=20)
+    kinds = [e.kind for e in reversed(events)]  # oldest first
+    assert "image.hash.started" in kinds, kinds
+    assert "image.hash.cancelled" in kinds, kinds
+    assert "image.hashed" not in kinds
+    started_idx = kinds.index("image.hash.started")
+    cancelled_idx = kinds.index("image.hash.cancelled")
+    assert started_idx < cancelled_idx
+
+
+def test_hash_lifecycle_emits_started_before_terminal(tmp_path: Path) -> None:
+    """v0.33.29+: every hash now emits ``image.hash.started`` when
+    the worker picks it up + ``image.hashed`` (success) /
+    ``image.hash.failed`` / ``image.hash.cancelled`` as terminal.
+    Operators get queue-vs-running visibility on /ui/events instead
+    of inferring from absence."""
+    from bty.web import _db
+    from bty.web._events_log import list_events as _list_events
+    from bty.web._hash import HashManager
+
+    image_root = tmp_path / "images"
+    image_root.mkdir()
+    payload = b"happy-path-bytes" * 64
+    (image_root / "happy.img").write_bytes(payload)
+    state_path = tmp_path / "state.db"
+    _db.init_db(state_path)
+
+    async def _drive() -> None:
+        mgr = HashManager(max_parallel=1)
+        mgr.start(image_root, state_path=state_path)
+        try:
+            await mgr.enqueue("happy.img")
+            for _ in range(200):
+                states = await mgr.list()
+                if states and states[0].status == "completed":
+                    break
+                await asyncio.sleep(0.01)
+        finally:
+            await mgr.stop()
+
+    _run(_drive())
+
+    with _db.open_db(state_path) as conn:
+        events = _list_events(conn, subject_kind="image", limit=20)
+    kinds = [e.kind for e in reversed(events)]  # oldest first
+    assert "image.hash.started" in kinds, kinds
+    assert "image.hashed" in kinds, kinds
+    assert kinds.index("image.hash.started") < kinds.index("image.hashed")
