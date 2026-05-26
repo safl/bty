@@ -770,8 +770,13 @@ def _assert_storage_marker(host, port, cfg):
         timeout=10,
     )
     try:
+        # /var/lib/bty/images is mode 0750 bty:bty (set by
+        # bty-web-init); the odus SSH user isn't in the bty group
+        # so a direct ``cat`` gets EACCES. ``sudo`` is the same
+        # path an operator would use to inspect the file on a
+        # live appliance.
         _stdin, stdout, stderr = client.exec_command(
-            "cat /var/lib/bty/images/.bty-storage.json", timeout=10
+            "sudo cat /var/lib/bty/images/.bty-storage.json", timeout=10
         )
         body = stdout.read().decode("utf-8", errors="replace")
         err = stderr.read().decode("utf-8", errors="replace")
