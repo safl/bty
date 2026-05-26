@@ -9,6 +9,24 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.33.13] - 2026-05-26
+
+**Backup manager helper coverage.** Two small utility-function
+gaps closed:
+
+- **`_resolve_max_parallel`**: tests for `BTY_BACKUP_MAX_PARALLEL`
+  env-var parsing (numeric, out-of-range, non-numeric fallback,
+  unset). Same shape as the v0.33.10 hash-manager addition --
+  three managers all read their own env var; operators who set
+  one might typo a similar one.
+- **`_suppress_oserror`**: tests that the context manager swallows
+  ``OSError`` subclasses (used around best-effort rmtree cleanup),
+  propagates non-OSError exceptions unchanged, and exits cleanly
+  on success. Pinned semantics so a future "simpler" rewrite that
+  also swallows unrelated bugs would fail loudly.
+
+Suite 823 -> 825.
+
 ## [0.33.12] - 2026-05-26
 
 **Operator-facing edge cases get explicit tests.**

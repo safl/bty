@@ -550,3 +550,59 @@ def test_state_listener_fires_on_cancel(tmp_path: Path) -> None:
     # worker beat the cancel. We assert the listener saw SOME terminal
     # state, not a specific status -- the timing isn't deterministic.
     assert any(s in ("cancelled", "completed", "failed") for s in seen)
+
+
+def test_resolve_max_parallel_env_var(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``BTY_BACKUP_MAX_PARALLEL`` overrides the default; out-of-range
+    or non-numeric values fall back to the default rather than
+    raising at startup. Same shape as the sibling
+    ``test_resolve_max_parallel_env_var`` in test_web_hash_manager.py
+    -- the three managers all read their own env var the same way,
+    and operators who set one might typo a similar one."""
+    from bty.web._backup import DEFAULT_MAX_PARALLEL, _resolve_max_parallel
+
+    monkeypatch.setenv("BTY_BACKUP_MAX_PARALLEL", "3")
+    assert _resolve_max_parallel() == 3
+
+    monkeypatch.setenv("BTY_BACKUP_MAX_PARALLEL", "0")
+    assert _resolve_max_parallel() == DEFAULT_MAX_PARALLEL
+
+    monkeypatch.setenv("BTY_BACKUP_MAX_PARALLEL", "-2")
+    assert _resolve_max_parallel() == DEFAULT_MAX_PARALLEL
+
+    monkeypatch.setenv("BTY_BACKUP_MAX_PARALLEL", "not-a-number")
+    assert _resolve_max_parallel() == DEFAULT_MAX_PARALLEL
+
+    monkeypatch.delenv("BTY_BACKUP_MAX_PARALLEL", raising=False)
+    assert _resolve_max_parallel() == DEFAULT_MAX_PARALLEL
+
+
+def test_suppress_oserror_swallows_oserror_only() -> None:
+    """``_suppress_oserror`` is used around best-effort filesystem
+    cleanup (rmtree of a partial bundle dir). It must:
+
+    - swallow OSError + subclasses (FileNotFoundError, PermissionError),
+      so cleanup failure doesn't mask the original error
+    - propagate non-OSError exceptions unchanged (so an unrelated
+      bug in cleanup code still surfaces, not silently disappears)
+    - log the swallowed error at warning level
+    """
+    from bty.web._backup import _suppress_oserror
+
+    # OSError + subclasses swallowed.
+    with _suppress_oserror():
+        raise FileNotFoundError("simulated")
+    with _suppress_oserror():
+        raise PermissionError("simulated")
+    with _suppress_oserror():
+        raise OSError("simulated")
+
+    # Non-OSError exceptions propagate.
+    with pytest.raises(ValueError, match="not swallowed"), _suppress_oserror():
+        raise ValueError("not swallowed")
+    with pytest.raises(KeyError, match="not swallowed"), _suppress_oserror():
+        raise KeyError("not swallowed")
+
+    # Normal exit (no exception) passes through.
+    with _suppress_oserror():
+        pass
