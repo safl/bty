@@ -473,6 +473,60 @@ def test_enqueue_rejects_traversal_names(tmp_path: Path) -> None:
     _run(_drive())
 
 
+def test_run_handles_catalog_entry_vanished_mid_download(tmp_path: Path) -> None:
+    """REGRESSION: an operator can DELETE a catalog entry while a
+    fetch is queued / running. By the time the worker picks the
+    job up, the entry may have vanished -- _lookup_entry returns
+    None inside _run_one. The manager must mark the state failed
+    with a clear message rather than crash the worker thread on
+    AttributeError("'NoneType' has no attribute 'sha256'").
+    """
+
+    async def _drive() -> None:
+        entry = _catalog.CatalogEntry(
+            name="ghost.img.gz",
+            src="https://example.com/ghost.img.gz",
+            sha256=None,
+        )
+        cat = _catalog.Catalog(version=1, entries=(entry,))
+        image_root = tmp_path / "images"
+        image_root.mkdir()
+
+        mgr = DownloadManager(max_parallel=1)
+        mgr.start(cat, image_root)
+
+        # Patch _lookup_entry to return the entry on enqueue (so the
+        # job queues normally) then None on the worker's second
+        # lookup inside _run_one (simulating mid-flight delete --
+        # operator hit DELETE while the fetch was queued).
+        call_count = {"n": 0}
+        real_lookup = mgr._lookup_entry
+
+        def flaky_lookup(name: str) -> _catalog.CatalogEntry | None:
+            call_count["n"] += 1
+            if call_count["n"] >= 2:
+                return None
+            return real_lookup(name)
+
+        mgr._lookup_entry = flaky_lookup  # type: ignore[method-assign]
+        try:
+            await mgr.enqueue(entry.name)
+            for _ in range(200):
+                states = await mgr.list()
+                if states and states[0].status in ("completed", "failed", "cancelled"):
+                    break
+                await asyncio.sleep(0.01)
+            terminal = (await mgr.list())[0]
+            assert terminal.status == "failed", (
+                f"vanished-entry must land as failed (not crashed); got {terminal.status!r}"
+            )
+            assert terminal.error == "catalog entry vanished"
+        finally:
+            await mgr.stop()
+
+    _run(_drive())
+
+
 def test_download_state_to_dict_omits_unpicklable_event() -> None:
     """``DownloadState.to_dict`` must not emit the
     ``threading.Event`` (which contains an unpicklable

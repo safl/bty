@@ -9,6 +9,48 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.33.11] - 2026-05-26
+
+**Two integration-level tests for behaviors that had no end-to-end
+coverage.**
+
+### Schema-rotation runs on real app startup
+
+The init_db-level rotation tests (`test_web_db.py`) prove the SQL
+primitive works. But nothing pinned that `create_app` actually
+invokes the rotation on its way up. A refactor that moved init_db
+behind a flag, or skipped it during app build, would have left the
+unit tests passing while real bty-web silently failed to rotate.
+
+`test_create_app_rotates_stale_state_db_end_to_end` stamps a
+state.db with a fake-old version, builds the app via `create_app`,
+hits `/healthz`, and asserts:
+
+- the `state.db.<oldver>.<ts>.bak` file exists alongside the fresh DB
+- the fresh DB carries `bty.__version__` and has no leftover rows
+- exactly one `system.schema_reset` event landed
+- the `.bak` still contains the pre-rotation operator row
+
+### DownloadManager: vanished-catalog-entry
+
+`_catalog.py` had no test for the "operator deleted the catalog
+entry mid-fetch" branch. Pre-this-round the worker would have
+silently AttributeError'd on `entry.sha256` if `_lookup_entry`
+returned None at the worker's second lookup. The branch has a
+proper handler (status=failed with "catalog entry vanished")
+but no test pinned it.
+
+`test_run_handles_catalog_entry_vanished_mid_download` enqueues a
+job, monkey-patches `_lookup_entry` to return None after the
+enqueue-time lookup, asserts the state lands at
+status=failed with `error="catalog entry vanished"`.
+
+### Coverage
+
+- `_catalog.py` 81% -> 85%
+- Total suite: 815 -> 817 tests
+- Overall: 88% -> 90%
+
 ## [0.33.10] - 2026-05-26
 
 **Continue closing test gaps.** Two specific holes:

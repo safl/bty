@@ -3264,6 +3264,85 @@ def test_workers_backups_delete_requires_auth(app_client: TestClient) -> None:
     assert r.status_code == 401
 
 
+def test_create_app_rotates_stale_state_db_end_to_end(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """INTEGRATION (v0.33.0 contract): a state.db whose bty_version
+    disagrees with the running release must be rotated to a .bak by
+    the time ``create_app`` finishes building the app. The init_db-
+    level rotation tests in test_web_db.py cover the SQL primitive,
+    but only an end-to-end app-build catches a refactor that puts
+    the rotation behind a flag, skips it on app startup, or moves
+    init_db to a different entry point.
+
+    Pre-condition: state.db exists, stamped with an old version,
+    contains an operator-typed machine row to prove it was non-empty.
+    Post-condition: a ``state.db.<oldver>.<ts>.bak`` file exists; the
+    fresh state.db carries the running version and one
+    ``system.schema_reset`` event in the events table.
+    """
+    import sqlite3 as _sqlite
+
+    import bty
+    from bty.web import _db
+
+    state = tmp_path / "state.db"
+    image_root = tmp_path / "images"
+    image_root.mkdir()
+    bty_state_dir = tmp_path / "bty-state"
+    bty_state_dir.mkdir()
+    monkeypatch.setenv("BTY_STATE_DIR", str(bty_state_dir))
+
+    # Stamp state.db with a non-current version + a sentinel row so
+    # we can prove the rotation preserved the OLD DB while leaving
+    # the fresh DB empty of machines.
+    _db.init_db(state)
+    with _sqlite.connect(state) as conn:
+        conn.execute("UPDATE bty_version SET version = ?", ("0.0.1-fake-old",))
+        conn.execute(
+            "INSERT INTO machines (mac, boot_mode, created_at, updated_at) "
+            "VALUES (?, 'bty-inventory', ?, ?)",
+            ("aa:bb:cc:dd:ee:ff", "2026-05-26T00:00:00+00:00", "2026-05-26T00:00:00+00:00"),
+        )
+        conn.commit()
+
+    # Build the app -- this triggers the rotation as part of
+    # init_db (called via open_db inside create_app's lifespan).
+    app = create_app(
+        state_path=state,
+        service_user=TEST_SERVICE_USER,
+        secret_key=TEST_SECRET_KEY,
+        image_root=image_root,
+    )
+    with TestClient(app) as client:
+        # /healthz forces the lifespan to fully start (open_db
+        # against the fresh state.db).
+        r = client.get("/healthz")
+        assert r.status_code == 200
+
+    # The rotated .bak exists and is named for the old version.
+    baks = list(tmp_path.glob("state.db.0.0.1-fake-old.*.bak"))
+    assert len(baks) == 1, f"expected one .bak, found {[b.name for b in baks]!r}"
+
+    # The fresh state.db carries the running version + one
+    # schema_reset event + no machines (rotated out with the old DB).
+    with _sqlite.connect(state) as conn:
+        version_row = conn.execute("SELECT version FROM bty_version").fetchone()
+        machines_count = conn.execute("SELECT COUNT(*) FROM machines").fetchone()[0]
+        reset_events = conn.execute(
+            "SELECT details FROM events WHERE kind = 'system.schema_reset'"
+        ).fetchall()
+    assert version_row[0] == bty.__version__
+    assert machines_count == 0, "rotated state.db must not carry pre-rotation rows"
+    assert len(reset_events) == 1, "exactly one system.schema_reset event must surface"
+
+    # The .bak still has the operator's pre-rotation machine row, so
+    # they can sqlite3-spelunk if they need to recover something.
+    with _sqlite.connect(baks[0]) as conn:
+        old_machines = [r[0] for r in conn.execute("SELECT mac FROM machines")]
+    assert old_machines == ["aa:bb:cc:dd:ee:ff"]
+
+
 def test_catalog_downloads_db_only_entry_enqueues(
     app_client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
