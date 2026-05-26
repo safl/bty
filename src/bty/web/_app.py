@@ -1415,18 +1415,51 @@ def create_app(
         status_code=status.HTTP_202_ACCEPTED,
         dependencies=[Depends(require_auth)],
     )
-    async def enqueue_release_fetch(body: _models.ReleaseFetchRequest) -> dict[str, Any]:
+    async def enqueue_release_fetch(
+        body: _models.ReleaseFetchRequest, request: Request
+    ) -> dict[str, Any]:
         state = await release_fetch_manager.enqueue(body.tag)
+        # Lifecycle audit event: operator-initiated release fetch.
+        # Pairs with the worker-side ``netboot.artifacts.fetch.started``
+        # and the eventual terminal event.
+        with _db.open_db(state_path) as conn:
+            _log_event(
+                conn,
+                kind="netboot.artifacts.fetch.requested",
+                summary=f"operator requested release fetch for tag {body.tag!r}",
+                subject_kind="netboot",
+                subject_id=body.tag,
+                actor="operator",
+                source_ip=_client_ip(request),
+                details={"tag": body.tag},
+            )
+            conn.commit()
         return state.to_dict()
 
     @app.delete("/boot/releases/{tag}", dependencies=[Depends(require_auth)])
-    async def cancel_release_fetch(tag: str) -> dict[str, Any]:
+    async def cancel_release_fetch(tag: str, request: Request) -> dict[str, Any]:
         state = await release_fetch_manager.cancel(tag)
         if state is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"no active release fetch for tag {tag!r}",
             )
+        # Operator-side cancel event. The worker writes its own
+        # ``netboot.artifacts.fetch.cancelled`` when it observes the
+        # flag; this row carries source_ip + actor=operator so the
+        # /ui/events filter on actor=operator picks up the intent.
+        with _db.open_db(state_path) as conn:
+            _log_event(
+                conn,
+                kind="netboot.artifacts.fetch.cancelled",
+                summary=f"operator cancelled release fetch for tag {tag!r}",
+                subject_kind="netboot",
+                subject_id=tag,
+                actor="operator",
+                source_ip=_client_ip(request),
+                details={"tag": tag, "source": "operator"},
+            )
+            conn.commit()
         return state.to_dict()
 
     # ---------- backups -----------------------------------------

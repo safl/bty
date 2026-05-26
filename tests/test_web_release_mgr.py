@@ -139,9 +139,19 @@ def test_enqueue_runs_to_completion(tmp_path: Path, monkeypatch: pytest.MonkeyPa
         # Terminal event lands in the audit log.
         with sqlite3.connect(state_path) as conn:
             conn.row_factory = sqlite3.Row
-            events = _events_log.list_events(conn, subject_kind="netboot", limit=10)
+            events = _events_log.list_events(conn, subject_kind="netboot", limit=20)
         kinds = [e.kind for e in events]
         assert "netboot.artifacts.fetched" in kinds, kinds
+        # v0.33.29+: full lifecycle visible in the audit log.
+        # ``.requested`` only fires when an operator hits the HTTP
+        # handler (not via this direct-manager test), so we don't
+        # assert on it here. ``.started`` is worker-side; check
+        # ordering relative to the terminal.
+        assert "netboot.artifacts.fetch.started" in kinds, kinds
+        kinds_in_order = [e.kind for e in reversed(events)]  # oldest first
+        assert kinds_in_order.index("netboot.artifacts.fetch.started") < kinds_in_order.index(
+            "netboot.artifacts.fetched"
+        )
 
     _run(_drive())
 

@@ -26,6 +26,7 @@ Lifecycle plumbing lives in :class:`bty.web._jobs._BaseAsyncManager`.
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 import threading
 import time
@@ -37,6 +38,8 @@ from typing import Any
 from bty.web import _db, _releases, _settings_store
 from bty.web._events_log import record as _log_event
 from bty.web._jobs import ENQUEUE_DEDUP_STATES, _BaseAsyncManager
+
+_log = logging.getLogger(__name__)
 
 # Default cap on simultaneous release fetches. Tuned for "one
 # release at a time" semantics; bumping is unusual.
@@ -332,6 +335,27 @@ class ReleaseFetchManager(_BaseAsyncManager[ReleaseFetchState]):
             with _db.open_db(self._state_path) as conn:
                 repo = _settings_store.get(conn, _settings_store.KEY_RELEASE_REPO)
 
+        # Lifecycle audit event: worker picked up the release fetch.
+        # Pairs with the request-side ``netboot.artifacts.fetch.requested``.
+        if self._state_path is not None:
+            try:
+                with _db.open_db(self._state_path) as conn:
+                    _log_event(
+                        conn,
+                        kind="netboot.artifacts.fetch.started",
+                        summary=f"worker picked up release fetch for tag {state.tag!r}",
+                        subject_kind="netboot",
+                        subject_id=state.tag,
+                        actor="system",
+                        details={"tag": state.tag, "repo": repo},
+                    )
+                    conn.commit()
+            except Exception:
+                _log.exception(
+                    "netboot.artifacts.fetch.started event-log write failed for %s",
+                    state.tag,
+                )
+
         try:
             result = await asyncio.to_thread(
                 _releases.fetch_release,
@@ -445,5 +469,23 @@ class ReleaseFetchManager(_BaseAsyncManager[ReleaseFetchState]):
                         "tag": state.tag,
                         "error": error,
                     },
+                )
+                conn.commit()
+        elif final_status == "cancelled":
+            # Worker-side cancel acknowledgement. The HTTP DELETE
+            # handler logs an actor=operator event with source_ip;
+            # this worker row carries actor=system so the operator
+            # can distinguish "I cancelled it" from "the system
+            # cancelled it" (e.g. shutdown drain). Pre-fix the
+            # cancel was silent in the audit log.
+            with _db.open_db(self._state_path) as conn:
+                _log_event(
+                    conn,
+                    kind="netboot.artifacts.fetch.cancelled",
+                    summary=f"boot release {state.tag!r} fetch cancelled",
+                    subject_kind="netboot",
+                    subject_id=state.tag,
+                    actor="system",
+                    details={"tag": state.tag},
                 )
                 conn.commit()
