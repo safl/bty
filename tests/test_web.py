@@ -3559,6 +3559,160 @@ def test_boot_fetch_arms_bty_inventory(app_client: TestClient) -> None:
     assert bit == 1
 
 
+def test_pxe_plan_synthesises_url_filename_for_extensionless_name(
+    app_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """REGRESSION: an oras catalog entry's name is the layer's title
+    annotation -- often a descriptive string with no file extension
+    (``"nosi fedora-sysdev (x86_64, rolling)"`` is the canonical
+    example). The live env's ``bty`` detects image format from the
+    URL's last-segment extension; an extensionless URL gets
+    "format not recognised" + the flash refuses.
+
+    Server-side workaround: when the catalog row's stored ``format``
+    is set but the name has no detectable extension, synthesise
+    ``image.<fmt>`` for the URL's name segment while keeping the
+    real descriptive name in the plan's ``name`` field. The live env
+    extracts format from the URL; the operator sees the title on
+    the flash screen.
+
+    Without this pin a refactor that simplifies the URL-name path
+    silently breaks oras entries with descriptive titles.
+    """
+    from bty import oras as _oras
+
+    fake_blob = _oras.ResolvedBlob(
+        blob_url="https://ghcr.io/v2/safl/nosi/blobs/sha256:" + "a" * 64,
+        headers={},
+        digest="sha256:" + "a" * 64,
+        size=42_000_000,
+        title="nosi fedora-sysdev (x86_64, rolling)",  # no extension!
+    )
+    monkeypatch.setattr(_oras, "resolve_ref", lambda url: fake_blob)
+
+    src = "oras://ghcr.io/safl/nosi/fedora-sysdev:latest"
+    r = app_client.post("/catalog/entries", json={"image_url": src}, cookies=AUTH)
+    assert r.status_code == 201, r.text
+    body = r.json()
+    ref = body["bty_image_ref"]
+    # The catalog entry stores format derived from the title's
+    # extension (here None -> defaults to "img.gz" per the handler).
+    assert body["format"] == "img.gz"
+    assert body["name"] == "nosi fedora-sysdev (x86_64, rolling)"
+
+    mac = "aa:bb:cc:dd:ee:b1"
+    app_client.put(
+        f"/machines/{mac}",
+        json={
+            "bty_image_ref": ref,
+            "boot_mode": "bty-flash-always",
+            "target_disk_serial": "ORAS-SERIAL",
+        },
+        cookies=AUTH,
+    )
+    plan = app_client.get(f"/pxe/{mac}/plan", headers={"Host": "bty.local:8080"}).json()
+    assert plan["mode"] == "flash"
+    assert plan["target_disk_serial"] == "ORAS-SERIAL"
+    # The descriptive name lands on the plan's ``name`` field, the
+    # live env displays this on the flash screen.
+    assert plan["name"] == "nosi fedora-sysdev (x86_64, rolling)"
+    # The plan also carries the format explicitly for newer clients.
+    assert plan["format"] == "img.gz"
+    # CRITICAL: the URL's last segment must be a parseable filename
+    # with a recognisable extension, NOT the URL-encoded descriptive
+    # title. Older clients detect format from the URL alone.
+    assert plan["image"].startswith(f"http://bty.local:8080/images/{ref}/")
+    url_last_segment = plan["image"].rsplit("/", 1)[-1]
+    # Decoded last segment is "image.img.gz" -- the synthesised
+    # filename. Crucially NOT the URL-encoded descriptive title
+    # (which would be ``nosi%20fedora-sysdev%20%28x86_64%2C%20rolling%29``
+    # with no extension after the close-paren).
+    import urllib.parse
+
+    decoded = urllib.parse.unquote(url_last_segment)
+    assert decoded == "image.img.gz", (
+        f"REGRESSION: oras catalog entries with extensionless names "
+        f"must synthesise a parseable filename in the plan's image "
+        f"URL; got last-segment {decoded!r}. Live env flash will "
+        f"refuse with 'format not recognised' if this isn't"
+        f"{'.img.gz' if 'gz' in decoded else 'a known extension'} ."
+    )
+
+
+def test_pxe_plan_keeps_name_when_it_has_extension(
+    app_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The synthesis path triggers ONLY when the catalog name lacks a
+    detectable extension. For an http(s) entry with a real filename
+    (``demo.img.gz``), the URL's last segment must keep that name
+    verbatim -- not silently rewrite to ``image.img.gz``."""
+
+    def fake_urlopen(*_a, **_kw):
+        return _MockResp(b"", headers={"Content-Length": "12345"})
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    flash_sha = "0123456789abcdef" * 4
+    monkeypatch.setattr("bty.catalog.fetch_sha256_for_url", lambda *_a, **_kw: flash_sha)
+    r = app_client.post(
+        "/catalog/entries",
+        json={
+            "image_url": "https://example.invalid/demo.img.gz",
+            "sha_url": "https://example.invalid/demo.img.gz.sha256",
+        },
+        cookies=AUTH,
+    )
+    assert r.status_code == 201
+    ref = r.json()["bty_image_ref"]
+
+    mac = "aa:bb:cc:dd:ee:b2"
+    app_client.put(
+        f"/machines/{mac}",
+        json={
+            "bty_image_ref": ref,
+            "boot_mode": "bty-flash-always",
+            "target_disk_serial": "PLAIN-SERIAL",
+        },
+        cookies=AUTH,
+    )
+    plan = app_client.get(f"/pxe/{mac}/plan", headers={"Host": "bty.local:8080"}).json()
+    assert plan["mode"] == "flash"
+    assert plan["name"] == "demo.img.gz"
+    # URL last segment IS the real filename (no synthesis).
+    last_segment = plan["image"].rsplit("/", 1)[-1]
+    import urllib.parse
+
+    assert urllib.parse.unquote(last_segment) == "demo.img.gz"
+
+
+def test_pxe_plan_orphan_ref_falls_back_to_interactive(
+    app_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Machine is bound to a ``bty_image_ref`` whose catalog entry
+    has been DELETED. /pxe/{mac}/plan must NOT 500 -- the live env
+    should be able to fall back to the wizard and let the operator
+    pick another image. Real scenario: operator binds machine A to
+    catalog entry X, then deletes entry X, then machine A reboots.
+    """
+    # Bind to a 64-hex ref that has no catalog row.
+    mac = "aa:bb:cc:dd:ee:b3"
+    orphan_ref = "deadbeef" * 8
+    app_client.put(
+        f"/machines/{mac}",
+        json={
+            "bty_image_ref": orphan_ref,
+            "boot_mode": "bty-flash-always",
+            "target_disk_serial": "ORPHAN-SERIAL",
+        },
+        cookies=AUTH,
+    )
+    plan = app_client.get(f"/pxe/{mac}/plan", headers={"Host": "bty.local:8080"}).json()
+    # No catalog row to resolve -> live env falls back to wizard.
+    assert plan["mode"] == "interactive", (
+        f"orphan ref must fall back to wizard, not crash; got {plan!r}"
+    )
+    assert "catalog" in plan
+
+
 def test_appliance_upgrade_with_persistent_state_disk(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

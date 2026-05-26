@@ -9,6 +9,35 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.33.18] - 2026-05-26
+
+**/pxe/{mac}/plan contract tests for the operator-facing edge cases.**
+Operator framing: most hardware bugs are QEMU-testable; the
+appliance contract surfaces (plan endpoint) is exactly that.
+
+### Pinned three plan-shape invariants
+
+- **Extensionless catalog name -> URL filename synthesis.** An oras
+  catalog entry's title is the layer annotation, typically a
+  descriptive string with no file extension
+  (`"nosi fedora-sysdev (x86_64, rolling)"`). The live env's bty
+  detects format from the URL's last segment; an extensionless
+  URL gets "format not recognised" + flash refused. The handler
+  synthesises `image.<fmt>` for the URL while keeping the
+  descriptive title in the plan's `name` field. Pinned.
+- **Real filename round-trips unchanged.** When the catalog name
+  HAS a detectable extension (`demo.img.gz`), the URL keeps it
+  verbatim. The synthesis triggers ONLY on the extensionless case.
+- **Orphan-ref plan falls back to interactive.** Operator deletes
+  a catalog entry while a machine is bound to its ref. The bound
+  machine's `/pxe/{mac}/plan` MUST NOT 500 -- it returns
+  `mode=interactive` so the live env's wizard lets the operator
+  pick another image.
+
+### Coverage
+
+Suite 841 -> 844.
+
 ## [0.33.17] - 2026-05-26
 
 **Appliance upgrade path: integration test caught a real bug.**
