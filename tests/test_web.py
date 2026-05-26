@@ -3193,6 +3193,77 @@ def test_catalog_downloads_delete_no_active_404(app_client: TestClient) -> None:
     assert "no active download" in r.json()["detail"]
 
 
+# ---------- /workers/backups HTTP layer -----------------------------------
+#
+# The BackupManager has direct tests in test_web_backup_manager.py, but the
+# HTTP layer that wraps it (GET/POST/DELETE /workers/backups) had zero
+# end-to-end coverage. Three small tests fill the gap.
+
+
+def test_workers_backups_get_requires_auth(app_client: TestClient) -> None:
+    """Unauth'd GET returns 401 -- the backup list reveals operator-
+    pressed timings + bundle ids, so it's behind the same cookie as
+    every other operator-facing JSON API."""
+    r = app_client.get("/workers/backups")
+    assert r.status_code == 401
+
+
+def test_workers_backups_get_empty_returns_stable_shape(app_client: TestClient) -> None:
+    """Fresh fixture: no backups have run. The endpoint still returns
+    a parseable JSON envelope so the Backups page's polling loop
+    renders an empty-state row instead of crashing on a None field."""
+    r = app_client.get("/workers/backups", cookies=AUTH)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["backups"] == []
+    assert "backups_root" in body
+    assert "max_parallel" in body
+    assert isinstance(body["max_parallel"], int) and body["max_parallel"] >= 1
+
+
+def test_workers_backups_post_runs_to_completion(app_client: TestClient) -> None:
+    """POST without body enqueues a manual backup. Status code is 202
+    (accepted); body carries the freshly-minted backup_id. A
+    follow-up GET reflects the job in the list."""
+    r = app_client.post("/workers/backups", json={"trigger": "manual"}, cookies=AUTH)
+    assert r.status_code == 202, r.text
+    enqueued = r.json()
+    assert enqueued["status"] in ("queued", "running", "completed")
+    assert "backup_id" in enqueued
+    # Poll the list until the backup reaches a terminal state. The
+    # metadata-only export finishes in milliseconds so the cap is generous.
+    import time
+
+    deadline = time.monotonic() + 5.0
+    body: dict = {}
+    while time.monotonic() < deadline:
+        body = app_client.get("/workers/backups", cookies=AUTH).json()
+        if body["backups"] and body["backups"][0]["status"] in (
+            "completed",
+            "failed",
+            "cancelled",
+        ):
+            break
+        time.sleep(0.05)
+    assert body.get("backups"), "the enqueued backup must surface on the list"
+    assert body["backups"][0]["backup_id"] == enqueued["backup_id"]
+
+
+def test_workers_backups_delete_unknown_returns_404(app_client: TestClient) -> None:
+    """Cancelling against an unknown backup_id is a 404 (not 500),
+    matching the sibling /catalog/downloads cancel shape."""
+    r = app_client.delete("/workers/backups/2026-99-99T00-00-00Z", cookies=AUTH)
+    assert r.status_code == 404
+    assert "no active backup" in r.json()["detail"]
+
+
+def test_workers_backups_delete_requires_auth(app_client: TestClient) -> None:
+    """Cancel needs the cookie; otherwise an unauth'd client could
+    cancel operator-initiated backups."""
+    r = app_client.delete("/workers/backups/anything")
+    assert r.status_code == 401
+
+
 def test_catalog_downloads_db_only_entry_enqueues(
     app_client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -9,6 +9,48 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.33.10] - 2026-05-26
+
+**Continue closing test gaps.** Two specific holes:
+
+### `/workers/backups` HTTP layer
+
+The BackupManager has direct tests, but the three HTTP routes that
+wrap it (`GET / POST / DELETE /workers/backups`) had zero
+end-to-end coverage. The `/ui/backups` page polls these three
+endpoints; if the HTTP layer drifted, the UI would surface a
+confusing 500 / 422 instead of the JSON shape the JS expects.
+
+Added 5 tests in `test_web.py`:
+
+- `test_workers_backups_get_requires_auth` -- unauth -> 401
+- `test_workers_backups_get_empty_returns_stable_shape` -- fresh
+  fixture returns parseable envelope
+- `test_workers_backups_post_runs_to_completion` -- POST enqueue
+  -> 202; follow-up GET reflects the job; backup terminates
+- `test_workers_backups_delete_unknown_returns_404` -- cancel
+  against unknown id -> 404, not 500
+- `test_workers_backups_delete_requires_auth` -- cancel needs cookie
+
+### `HashManager` enqueue / cancel / parallelism
+
+`_hash.py` was at 89%. The before-start error, env-var-driven
+parallelism resolution, and explicit `HashCancelled` cancel path
+had no tests. Added 3 tests in `test_web_hash_manager.py`:
+
+- `test_enqueue_before_start_raises` -- RuntimeError if not started
+- `test_resolve_max_parallel_env_var` -- `BTY_HASH_MAX_PARALLEL`
+  parsing, including out-of-range and non-numeric fallback
+- `test_enqueue_explicit_hash_cancelled_lands_cancelled` -- the
+  worker raising `HashCancelled` directly flips status=cancelled
+  (vs the cancel-during-IO-error race already covered)
+
+### Coverage
+
+- `_hash.py` 89% -> 96%
+- `_app.py` 90% -> 91% (workers/backups + side-effect coverage)
+- Total suite: 807 -> 815 tests
+
 ## [0.33.9] - 2026-05-26
 
 **Targeted test coverage for the worst gap.** Operator-pointed

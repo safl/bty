@@ -366,3 +366,83 @@ def test_hash_state_to_dict_omits_unpicklable_event() -> None:
 
     encoded = json.dumps(d)
     assert json.loads(encoded)["name"] == "x.img"
+
+
+def test_enqueue_before_start_raises(tmp_path: Path) -> None:
+    """``enqueue`` without ``start`` is a programmer error -- mirrors
+    the ReleaseFetchManager / DownloadManager safety check. The
+    image_root isn't bound yet so the hash worker would have no
+    file to hash. Surface as RuntimeError rather than crashing in
+    the worker thread."""
+    from bty.web._hash import HashManager
+
+    async def _drive() -> None:
+        mgr = HashManager(max_parallel=1)
+        with pytest.raises(RuntimeError, match="not started"):
+            await mgr.enqueue("anything.img")
+
+    _run(_drive())
+
+
+def test_resolve_max_parallel_env_var(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``BTY_HASH_MAX_PARALLEL`` overrides the default. Out-of-range
+    or non-numeric values fall back to the default rather than
+    raising at startup."""
+    from bty.web._hash import DEFAULT_MAX_PARALLEL, _resolve_max_parallel
+
+    monkeypatch.setenv("BTY_HASH_MAX_PARALLEL", "4")
+    assert _resolve_max_parallel() == 4
+
+    monkeypatch.setenv("BTY_HASH_MAX_PARALLEL", "0")
+    assert _resolve_max_parallel() == DEFAULT_MAX_PARALLEL
+
+    monkeypatch.setenv("BTY_HASH_MAX_PARALLEL", "-1")
+    assert _resolve_max_parallel() == DEFAULT_MAX_PARALLEL
+
+    monkeypatch.setenv("BTY_HASH_MAX_PARALLEL", "abc")
+    assert _resolve_max_parallel() == DEFAULT_MAX_PARALLEL
+
+    monkeypatch.delenv("BTY_HASH_MAX_PARALLEL", raising=False)
+    assert _resolve_max_parallel() == DEFAULT_MAX_PARALLEL
+
+
+def test_enqueue_explicit_hash_cancelled_lands_cancelled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """If ``_images.ensure_sha256`` raises ``HashCancelled``
+    explicitly (the cancel check between chunks fires before any
+    other exception), the state lands at ``cancelled`` with no
+    error message. Distinct from the cancel-during-IO race covered
+    by ``test_run_hash_cancel_with_concurrent_oserror_marks_cancelled``."""
+    from bty import images as _images
+    from bty.web import _db, _hash
+    from bty.web._hash import HashManager
+
+    image_root = tmp_path / "images"
+    image_root.mkdir()
+    (image_root / "demo.img").write_bytes(b"x" * 1024)
+    state_path = tmp_path / "state.db"
+    _db.init_db(state_path)
+
+    def fake_ensure_sha256(*_a: object, **_kw: object) -> str:
+        raise _images.HashCancelled("operator cancelled")
+
+    monkeypatch.setattr(_hash._images, "ensure_sha256", fake_ensure_sha256)
+
+    async def _drive() -> None:
+        mgr = HashManager(max_parallel=1)
+        mgr.start(image_root, state_path=state_path)
+        try:
+            await mgr.enqueue("demo.img")
+            for _ in range(200):
+                states = await mgr.list()
+                if states and states[0].status in ("completed", "failed", "cancelled"):
+                    break
+                await asyncio.sleep(0.01)
+            terminal = (await mgr.list())[0]
+            assert terminal.status == "cancelled"
+            assert terminal.error is None
+        finally:
+            await mgr.stop()
+
+    _run(_drive())
