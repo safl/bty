@@ -3559,6 +3559,274 @@ def test_boot_fetch_arms_bty_inventory(app_client: TestClient) -> None:
     assert bit == 1
 
 
+def test_appliance_upgrade_with_persistent_state_disk(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """INTEGRATION: the operator-critical upgrade path.
+
+    Real-world scenario:
+      * Operator runs a bty-server appliance with ``/var/lib/bty`` on
+        a SEPARATE disk (the BTY_IMAGE_STORE pattern). state.db,
+        images/, backups/ all live there.
+      * Operator reflashes the OS via USB: the OS disk is wiped, the
+        state disk survives intact.
+      * New OS boots, mounts the state disk at /var/lib/bty.
+      * bty-web (new version) starts against the existing state dir.
+
+    Three distinct contracts must hold for the upgrade to actually
+    work end-to-end:
+
+      1. ``init_db`` rotates the stale state.db automatically
+         (v0.33.0+ contract).
+      2. Image files in image_root survive untouched -- specifically
+         the ``catalog-<ref:12>-<slug>.<ext>`` cache files MUST be
+         re-associatable with their catalog entries by the new
+         release.
+      3. The pre-upgrade ``bty-web export`` bundle (v3) imports
+         cleanly on the new release: machines re-appear with their
+         hw_lshw + known_disks; the operator re-binds images.
+
+    Each contract had unit-level tests but the full upgrade path
+    had no integration coverage. This test plays the whole scenario
+    end-to-end so a refactor that breaks the COMPOSED contract --
+    not just one piece -- gets caught.
+    """
+    import sqlite3 as _sqlite
+
+    import bty
+    from bty import catalog as _catalog
+    from bty.web import _db, _portability
+
+    # --- "Old appliance": v0.X has been running here for a while.
+    # The state disk mount point. After the OS reflash, the new bty-web
+    # will be pointed at this same directory.
+    state_dir = tmp_path / "var-lib-bty"
+    state_dir.mkdir()
+    state_path = state_dir / "state.db"
+    image_root = state_dir / "images"
+    image_root.mkdir()
+    backups_root = state_dir / "backups"
+    backups_root.mkdir()
+    monkeypatch.setenv("BTY_STATE_DIR", str(state_dir))
+    monkeypatch.setenv("BTY_IMAGE_ROOT", str(image_root))
+    monkeypatch.setenv("BTY_BACKUP_DIR", str(backups_root))
+
+    # Old appliance stamped state.db with a previous-version marker.
+    # We don't have an "old bty-web" available, so we initialise with
+    # the current schema then rewrite the marker to look stale --
+    # which is exactly what the live appliance scenario looks like
+    # from the new bty-web's point of view.
+    _db.init_db(state_path)
+    with _sqlite.connect(state_path) as conn:
+        conn.execute("UPDATE bty_version SET version = ?", ("0.30.0",))
+        # An operator-bound machine the old appliance was managing.
+        conn.execute(
+            "INSERT INTO machines "
+            "(mac, bty_image_ref, hostname, boot_mode, target_disk_serial, "
+            " known_disks, known_disks_at, hw_lshw, hw_lshw_at, "
+            " created_at, updated_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                "aa:bb:cc:dd:ee:01",
+                "old-ref-deadbeef" * 4,
+                "lab-box-1",
+                "bty-flash-once",
+                "SN-100",
+                '[{"path": "/dev/sda", "serial": "SN-100"}]',
+                "2026-05-25T00:00:00+00:00",
+                '{"id": "lab-box-1-system"}',
+                "2026-05-25T00:00:00+00:00",
+                "2026-05-20T00:00:00+00:00",
+                "2026-05-25T00:00:00+00:00",
+            ),
+        )
+        conn.commit()
+
+    # The operator ran ``bty-web export`` on the OLD release before
+    # the reflash. We simulate that by writing the v3 inventory.json
+    # directly -- exercising open_db here would trigger the rotation
+    # AHEAD of the new bty-web's startup, which is the wrong story.
+    # The realistic sequence is:
+    #   OLD bty-web export -> reflash -> NEW bty-web starts (rotates)
+    # so the bundle on disk pre-dates the rotation.
+    bundle = backups_root / "pre-upgrade-snapshot"
+    bundle.mkdir()
+    inventory_path = bundle / "inventory.json"
+    import json as _json
+
+    inventory_path.write_text(
+        _json.dumps(
+            {
+                "bty_export_version": 3,
+                "exported_at": "2026-05-26T08:00:00+00:00",
+                "exported_by_bty_version": "0.30.0",
+                "machines": [
+                    {
+                        "mac": "aa:bb:cc:dd:ee:01",
+                        "known_disks": [{"path": "/dev/sda", "serial": "SN-100"}],
+                        "known_disks_at": "2026-05-25T00:00:00+00:00",
+                        "hw_lshw": {"id": "lab-box-1-system"},
+                        "hw_lshw_at": "2026-05-25T00:00:00+00:00",
+                    }
+                ],
+            }
+        )
+    )
+
+    # Image-store disk also has a catalog-cached image file the old
+    # bty-web fetched (URL-keyed name -- v0.31.0+ convention).
+    # When the operator re-imports the catalog on the new appliance,
+    # this file must associate with the catalog entry automatically
+    # (no re-fetch, no operator re-pick).
+    cached_image_name = "ubuntu-22.04-bty.img.gz"
+    cached_src = "https://example.invalid/ubuntu-22.04-bty.img.gz"
+    cached_ref = _catalog.image_ref_for_src(cached_src)
+    cached_filename = _catalog.local_filename_for(cached_ref, cached_image_name, "img.gz")
+    cached_payload = b"the persistent image bytes"
+    (image_root / cached_filename).write_bytes(cached_payload)
+    # The old bty-web's HashManager already wrote the .sha256 sidecar
+    # before the reflash. Pre-create it so the new release's
+    # merge_with_catalog picks up the cached file's content sha
+    # without waiting for the new HashManager to re-hash.
+    import hashlib
+
+    cached_sha = hashlib.sha256(cached_payload).hexdigest()
+    (image_root / f"{cached_filename}.sha256").write_text(f"{cached_sha}  {cached_filename}\n")
+    # An operator-typed image too (no catalog prefix).
+    (image_root / "operator-uploaded.img").write_bytes(b"some-operator-bytes")
+
+    # --- OS REFLASH point: the OS disk is wiped and a new one is
+    # written. The state_dir is on a separate disk; nothing here
+    # changed. bty-web NEW version now boots against this dir.
+
+    app = create_app(
+        state_path=state_path,
+        service_user=TEST_SERVICE_USER,
+        secret_key=TEST_SECRET_KEY,
+        image_root=image_root,
+        boot_root=state_dir / "boot",
+    )
+    with TestClient(app) as client:
+        # Login so the cookie-protected endpoints work below.
+        import pamela
+
+        monkeypatch.setattr(pamela, "authenticate", lambda *a, **kw: True)
+        login = client.post(
+            "/ui/login", data={"password": "pytest-password"}, follow_redirects=False
+        )
+        cookie = login.cookies.get("bty-token")
+        assert cookie is not None
+        auth_cookies = {"bty-token": cookie}
+
+        # Force lifespan startup by hitting an endpoint.
+        assert client.get("/healthz").status_code == 200
+
+        # Contract #1: state.db ROTATED to .bak.
+        baks = list(state_dir.glob("state.db.0.30.0.*.bak"))
+        assert len(baks) == 1, (
+            f"expected one rotated .bak alongside the new state.db, "
+            f"found {[b.name for b in baks]!r}"
+        )
+        with _sqlite.connect(state_path) as conn:
+            ver = conn.execute("SELECT version FROM bty_version").fetchone()[0]
+            machine_count = conn.execute("SELECT COUNT(*) FROM machines").fetchone()[0]
+        assert ver == bty.__version__
+        assert machine_count == 0
+
+        # Contract #2: image_root SURVIVED. Auto-import scans
+        # image_root + sees the operator-typed file; the
+        # catalog-prefixed file is SKIPPED (v0.33.1) because it
+        # belongs to a catalog entry the operator re-imports separately.
+        import time
+
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            rows = client.get("/catalog/entries", cookies=auth_cookies).json()
+            srcs = {r["src"] for r in rows}
+            if "file://operator-uploaded.img" in srcs:
+                break
+            time.sleep(0.05)
+        rows = client.get("/catalog/entries", cookies=auth_cookies).json()
+        srcs = {r["src"] for r in rows}
+        assert "file://operator-uploaded.img" in srcs, (
+            "operator-typed file in image_root must auto-import as a catalog entry "
+            "on new-release startup"
+        )
+        assert not any("file://catalog-" in s for s in srcs), (
+            f"catalog-cache file must not synthesise its own catalog row; "
+            f"got {[s for s in srcs if 'catalog-' in s]!r}"
+        )
+
+        # Contract #3: bty-web import of the pre-upgrade bundle
+        # restores the machine record.
+        imp = _portability.import_bundle(state_path, bundle, now="2026-05-26T09:00:00+00:00")
+        assert imp.machines == 1
+
+        m = client.get("/machines/aa:bb:cc:dd:ee:01", cookies=auth_cookies).json()
+        assert m["mac"] == "aa:bb:cc:dd:ee:01"
+        assert isinstance(m["known_disks"], list)
+        assert m["known_disks"][0]["serial"] == "SN-100"
+        # Bindings reset on import.
+        assert m["bty_image_ref"] is None
+        assert m["target_disk_serial"] is None
+        assert m["boot_mode"] == "bty-inventory"
+        assert m["last_flashed_at"] is None
+        # hw_lshw landed too -- exposed via the raw download endpoint
+        # (the Machine model doesn't carry the JSON blob, but the
+        # dedicated /lshw.json route serves it).
+        lshw = client.get("/machines/aa:bb:cc:dd:ee:01/lshw.json", cookies=auth_cookies).json()
+        assert lshw == {"id": "lab-box-1-system"}
+
+        # Contract #2 (cont.): operator adds the catalog entry whose
+        # bytes are ALREADY on disk. The /images listing must show
+        # it as cached=True without a re-fetch -- proof that
+        # catalog-prefix association survives the upgrade.
+        monkeypatch.setattr("bty.web._app._head_content_length", lambda url: 9876, raising=False)
+        add = client.post(
+            "/catalog/entries",
+            json={"image_url": cached_src},
+            cookies=auth_cookies,
+        )
+        assert add.status_code == 201, add.text
+
+        images_listing = client.get("/images", cookies=auth_cookies).json()
+        ubuntu = next(
+            (img for img in images_listing if img.get("ref") == cached_ref),
+            None,
+        )
+        assert ubuntu is not None, (
+            f"upstream catalog entry must surface in /images; got names: "
+            f"{[img.get('names') for img in images_listing]!r}"
+        )
+        assert ubuntu["cached"] is True, (
+            "REGRESSION: catalog-<ref:12>-<slug>.<ext> file in image_root "
+            "from the pre-upgrade appliance must re-associate with its "
+            "catalog entry automatically (cached=True). If this fails, "
+            "every upgrade forces operators to re-download every cached "
+            "image -- the appliance-on-separate-disk upgrade story is "
+            "broken."
+        )
+
+        # Operator re-binds the imported machine to the cached image
+        # + sets the target disk -- proves the full upgrade flow
+        # gets the operator back to a flashable state with NO bytes
+        # re-fetched.
+        rebind = client.put(
+            "/machines/aa:bb:cc:dd:ee:01",
+            json={
+                "bty_image_ref": cached_ref,
+                "boot_mode": "bty-flash-once",
+                "target_disk_serial": "SN-100",
+            },
+            cookies=auth_cookies,
+        )
+        assert rebind.status_code == 200
+        # The pre-upgrade .bak + the export bundle are both still on
+        # disk -- forensics + a re-do-the-import lifeline.
+        assert baks[0].is_file()
+        assert inventory_path.is_file()
+
+
 def test_reflash_lifecycle_pxe_offered_event_per_iteration(
     app_client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:

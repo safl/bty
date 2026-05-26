@@ -478,10 +478,27 @@ def merge_with_catalog(
         # when pass 1 hasn't run (e.g. an entry whose local file
         # hasn't been scanned yet) but the file is on disk.
         cached_filename = local_filename_for(ref, entry.name, entry.format)
-        cache_hit = (image_root / cached_filename).is_file()
+        cached_path = image_root / cached_filename
+        cache_hit = cached_path.is_file()
+        # If the file is cached on disk and the catalog row doesn't
+        # carry a content sha, pick up the sidecar's sha (written by
+        # HashManager / ``ensure_sha256``). Without this, an operator
+        # re-adding a catalog entry on an upgraded appliance whose
+        # image_root survived the OS reflash would see the entry as
+        # "available, not cached" in /ui/images, because the catalog
+        # row's ``disk_image_sha`` is NULL and ``cached=True without
+        # sha`` is defensively skipped by /images. The sidecar is the
+        # canonical content hash; the catalog row's null is just "we
+        # haven't observed it via our own download path" -- a
+        # condition the operator-upgrade flow trips on every reflash.
+        effective_sha = entry.sha256
+        if cache_hit and effective_sha is None:
+            sidecar_sha = _read_sidecar_sha(cached_path)
+            if sidecar_sha is not None:
+                effective_sha = sidecar_sha
         add_entry(
             ref=ref,
-            sha256=entry.sha256,
+            sha256=effective_sha,
             name=entry.name,
             format_=entry.format,
             size_bytes=entry.size_bytes,

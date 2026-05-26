@@ -341,6 +341,65 @@ def test_merge_with_catalog_manifest_only_uses_image_root(tmp_path: Path) -> Non
     assert merged2[0].cached is False
 
 
+def test_merge_with_catalog_picks_up_sidecar_for_uncached_entry(tmp_path: Path) -> None:
+    """REGRESSION (v0.33.17): a catalog entry whose
+    ``catalog-<ref:12>-<slug>.<ext>`` cache file exists in image_root
+    AND has a ``.sha256`` sidecar must surface with the SIDECAR's
+    sha as the ``UnifiedImage.sha256`` even when the catalog row
+    itself carries ``sha256=None``.
+
+    Surfaced by the appliance-upgrade integration test: an operator
+    upgrades a bty-web with a separate state disk (image_root
+    survives). The cached file + its sidecar are still on disk;
+    they were hashed by the old release's HashManager. The new
+    bty-web's auto-import skips the catalog-prefixed file
+    (v0.33.1), so the file's sha never reaches the catalog row's
+    ``disk_image_sha`` -- it stays NULL. Pre-this-fix, /images then
+    defensively dropped the entry (cached=True + sha=None is
+    impossible -- except it WASN'T after the v0.33.1 skip).
+
+    With this fix the merge reads the sidecar at cache-hit time, so
+    the sha lands on the UnifiedImage even when the catalog row
+    hasn't been refreshed.
+    """
+    import hashlib
+    from types import SimpleNamespace
+
+    from bty.catalog import image_ref_for_src, local_filename_for
+
+    image_root = tmp_path / "imgs"
+    image_root.mkdir()
+    upstream_src = "https://example.invalid/u.img.gz"
+    name = "u.img.gz"
+    fmt = "img.gz"
+    ref = image_ref_for_src(upstream_src)
+    cache_filename = local_filename_for(ref, name, fmt)
+    payload = b"persistent image bytes"
+    (image_root / cache_filename).write_bytes(payload)
+    expected_sha = hashlib.sha256(payload).hexdigest()
+    (image_root / f"{cache_filename}.sha256").write_text(f"{expected_sha}  {cache_filename}\n")
+
+    # Catalog row WITHOUT a sha (e.g. operator added the entry by URL
+    # without a sha_url, or it's an oras entry whose sha hasn't been
+    # back-filled on this release).
+    manifest = SimpleNamespace(
+        sha256=None,
+        name=name,
+        src=upstream_src,
+        format=fmt,
+        size_bytes=len(payload),
+    )
+    merged = images.merge_with_catalog(image_root, [manifest])
+    assert len(merged) == 1
+    u = merged[0]
+    assert u.cached is True
+    assert u.sha256 == expected_sha, (
+        "merge must read the cached file's sidecar to populate "
+        "UnifiedImage.sha256 when the catalog row's disk_image_sha "
+        "is NULL"
+    )
+
+
 def test_merge_with_catalog_skips_catalog_cache_files_in_dir_scan(tmp_path: Path) -> None:
     """REGRESSION (v0.33.0 -> v0.33.1): a ``catalog-<ref:12>-<slug>.<ext>``
     file under the image_root is the cache form of an upstream catalog

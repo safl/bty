@@ -9,6 +9,65 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.33.17] - 2026-05-26
+
+**Appliance upgrade path: integration test caught a real bug.**
+Operator-pointed: test the path where an existing appliance gets
+reflashed but the state disk (state.db, images/, backups/) survives.
+
+### The bug
+
+Writing the end-to-end integration test surfaced a fourth contract
+that nothing pinned:
+
+- Old appliance ran for a while; image_root has a
+  `catalog-<ref:12>-<slug>.<ext>` cache file the old release fetched
+  + a `.sha256` sidecar the old HashManager wrote.
+- OS gets reflashed; the state disk survives untouched.
+- New bty-web starts: state.db rotates (contract #1 -- pinned).
+- Operator re-adds the catalog entry by URL (the catalog table got
+  rotated out with state.db).
+- New row's `disk_image_sha` is NULL because the operator didn't
+  give a sha_url. The cached file is on disk; the sidecar carries
+  its actual sha.
+- **Pre-this-fix**: `merge_with_catalog` populated the
+  `UnifiedImage.sha256` from `entry.sha256` (NULL) -- and
+  `/images` defensively drops `cached=True + sha=None` rows
+  because it can't build the `/images/<sha>/<name>` URL without
+  the sha. The cached entry vanished from `/ui/images`. The
+  operator would think the upgrade lost their cached images and
+  re-download them.
+
+### The fix
+
+`bty.images.merge_with_catalog` pass 2 now reads the cached file's
+`.sha256` sidecar when `cache_hit=True` and `entry.sha256 is None`.
+The sidecar is the canonical content hash; the catalog row's NULL
+is just "we haven't observed it via our own download path." After
+the fix, the upgraded appliance recognises every cached image the
+old release left behind.
+
+### Added tests
+
+- `test_appliance_upgrade_with_persistent_state_disk` -- the full
+  E2E scenario in `test_web.py`. Old appliance state seeded with
+  v0.30.0 marker + a bound machine + a cached catalog file +
+  operator-typed image + pre-upgrade export bundle. New bty-web
+  starts, rotates state.db, auto-imports operator-typed, refuses
+  to auto-import catalog-prefixed (v0.33.1), import bundle restores
+  hardware identity, operator re-adds catalog entry, /images
+  recognises the cached file via sidecar (the bug above).
+- `test_merge_with_catalog_picks_up_sidecar_for_uncached_entry` --
+  unit-level regression test in `test_images.py` pinning the
+  sidecar-read invariant so a refactor can't silently regress.
+
+### Operator impact
+
+Upgrade the appliance + reflash the OS disk. After bty-web starts,
+re-add catalog entries by URL (no sha_url needed). The previously-
+cached images surface as `cached=True` in `/ui/images` because
+their sidecars carry the canonical hash. No re-downloads.
+
 ## [0.33.16] - 2026-05-26
 
 **Full reflash-cycle state-machine tests.** Operator-pointed:
