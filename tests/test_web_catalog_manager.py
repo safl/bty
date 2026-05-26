@@ -177,6 +177,72 @@ def test_enqueue_db_only_entry_no_lookup_raises(tmp_path: Path) -> None:
     _run(_drive())
 
 
+def test_enqueue_re_runs_when_cached_file_was_deleted(tmp_path: Path) -> None:
+    """Operator-reported bug (v0.33.15): after a successful fetch
+    of an oras:// (or any) entry, the operator deletes the cached
+    file from disk. Clicking Fetch again on /ui/images briefly
+    shows "Downloading..." but no worker actually runs; refresh
+    flips the button back to "FETCH" because the file is missing.
+
+    Root cause: ``ENQUEUE_DEDUP_STATES`` includes ``completed``, so
+    the manager echoed the stale "completed" state back without
+    checking whether the cache file still existed. The fix: when
+    the dedup branch sees ``completed`` but the file is gone, fall
+    through to a fresh enqueue so the worker actually re-fetches.
+    """
+
+    async def _drive() -> None:
+        payload = b"deleted-then-refetched" * 100
+        entry = _entry(payload, name="re-fetch.img.zst")
+        cat = _catalog.Catalog(version=1, entries=(entry,))
+        image_root = tmp_path / "images"
+        image_root.mkdir()
+        # Pre-cache: first fetch lands "completed" via the
+        # is_cached fast path.
+        (image_root / entry.local_filename()).write_bytes(payload)
+
+        mgr = DownloadManager(max_parallel=1)
+        mgr.start(cat, image_root)
+        try:
+            first = await mgr.enqueue(entry.name)
+            assert first.status == "completed", first
+
+            # Operator deletes the cache file.
+            (image_root / entry.local_filename()).unlink()
+
+            # Click "Fetch" again. Pre-fix: the dedup branch
+            # returns the stale "completed" state -> no worker
+            # round-trip -> file stays gone. Post-fix: dedup
+            # honours the missing-file signal and falls through
+            # to a fresh enqueue -> worker runs -> file restored.
+            with patch("urllib.request.urlopen", _mock_urlopen(payload)):
+                refetch = await mgr.enqueue(entry.name)
+                # Either re-queued or already-completed-after-rerun;
+                # both are OK as long as a fresh state was created
+                # (not the stale one echoed back).
+                for _ in range(200):
+                    states = await mgr.list()
+                    if states and states[0].status == "completed":
+                        break
+                    await asyncio.sleep(0.01)
+            states = await mgr.list()
+            assert len(states) == 1
+            assert states[0].status == "completed"
+            # The file is back on disk.
+            assert (image_root / entry.local_filename()).is_file()
+            # The refetch state is NOT the same object as the first
+            # one (a fresh DownloadState was created).
+            assert refetch is not first, (
+                "DownloadManager echoed the stale 'completed' state back "
+                "instead of running a fresh worker; the missing-file gate "
+                "in enqueue did not fire"
+            )
+        finally:
+            await mgr.stop()
+
+    _run(_drive())
+
+
 def test_enqueue_already_cached_shortcut(tmp_path: Path) -> None:
     """An entry whose SHA already lives in image_root lands as
     completed without being queued -- no worker round-trip."""

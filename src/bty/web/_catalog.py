@@ -266,9 +266,28 @@ class DownloadManager(_BaseAsyncManager[DownloadState]):
 
         async with self._lock:
             existing = self._states.get(name)
-            if existing is not None and existing.status in ENQUEUE_DEDUP_STATES:
+            # ``completed`` with a missing cache file is STALE:
+            # the operator deleted the file out from under us
+            # between the first successful fetch and this enqueue.
+            # Echoing the stale state back would make the UI's Fetch
+            # button briefly flip to "Downloading..." then re-render
+            # as "FETCH" on the next refresh (because /ui/images
+            # keys "is cached" off the filesystem, not ``_states``)
+            # -- which looks broken to the operator. Fall through to
+            # a fresh enqueue so the worker actually re-fetches.
+            # ``queued`` / ``running`` stay idempotent (the worker
+            # is already on it).
+            if (
+                existing is not None
+                and existing.status in ENQUEUE_DEDUP_STATES
+                and not (
+                    existing.status == "completed"
+                    and not _catalog.is_cached(entry, self._image_root)
+                )
+            ):
                 return existing
-            # ``cancelled`` / ``failed`` (or no existing state) -- create a fresh one.
+            # ``cancelled`` / ``failed`` / stale-completed (or no
+            # existing state) -- create a fresh one.
             state = DownloadState(
                 name=entry.name,
                 sha256=entry.sha256,
