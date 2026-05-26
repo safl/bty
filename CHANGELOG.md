@@ -9,6 +9,42 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.33.23] - 2026-05-26
+
+**Audit-log event for the saw_flasher_boot 0->1 transition.** The
+last silent state transition gets an event.
+
+Pre-fix, every state change in the machine lifecycle landed an
+audit-log event EXCEPT the `/boot/{name}?mac=X` arm of
+`saw_flasher_boot`. Operators following a machine's timeline on
+`/ui/events` had to correlate raw /boot artifact fetches (not
+machine events) with the next `/pxe` contact's offer_kind to
+deduce when the live env actually ran.
+
+`/boot/{name}?mac=X` now logs `netboot.flasher.armed` -- ONLY on
+the 0->1 transition. The UPDATE WHERE clause restricts the write
+to `saw_flasher_boot = 0` so idempotent re-arms (kernel + initrd
++ squashfs all hit the route in one live-env boot) are no-ops on
+the bit AND don't spam the event log. Combined with the v0.33.22
+state-label honesty fix, the timeline now reads:
+
+  - `machine.discovered`       (first /pxe contact)
+  - `netboot.pxe.offered`      (per /pxe hit, with offer_kind)
+  - `netboot.flasher.armed`    (live env booted into the box)
+  - `machine.inventory`        (live env POSTed disks)
+    OR `machine.flashed`       (live env POSTed /done)
+  - `netboot.pxe.offered`      (next /pxe, served sanboot)
+
+Two new regression tests in `test_web.py`:
+
+- one /pxe arm cycle that hits /boot three times must emit
+  exactly ONE armed event (not three)
+- machines in `ipxe-exit` / `bty-tui` modes that don't consume
+  the bit MUST NOT log an armed event (the arm WHERE clause
+  skips them)
+
+Suite 859 -> 861.
+
 ## [0.33.22] - 2026-05-26
 
 **Two state-machine fixes operator-pointed in.**

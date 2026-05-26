@@ -1960,6 +1960,68 @@ def test_upsert_preserves_saw_flasher_boot_on_hostname_only_change(
     )
 
 
+def test_boot_fetch_logs_netboot_flasher_armed_on_first_arm(
+    app_client: TestClient,
+) -> None:
+    """v0.33.23+: the 0->1 transition of saw_flasher_boot lands a
+    ``netboot.flasher.armed`` event so an operator's /ui/events
+    timeline shows the live-env arm without inferring it from a
+    chain of /boot fetches + the next /pxe contact's offer_kind.
+
+    Subsequent /boot fetches in the same cycle (kernel + initrd +
+    squashfs hit the route separately) are no-ops on the bit and
+    MUST NOT spam the audit log."""
+    mac = "aa:bb:cc:dd:ee:ca"
+    app_client.put(f"/machines/{mac}", json={"boot_mode": "bty-flash-always"}, cookies=AUTH)
+
+    # First /boot artifact fetch (the kernel) -- arms the bit.
+    app_client.get(f"/boot/{ARTIFACT_NAMES[0]}?mac={mac}", headers={"Host": "bty.local:8080"})
+    # Two more /boot fetches simulating initrd + squashfs in the
+    # same live-env boot.
+    app_client.get(f"/boot/{ARTIFACT_NAMES[1]}?mac={mac}", headers={"Host": "bty.local:8080"})
+    app_client.get(f"/boot/{ARTIFACT_NAMES[2]}?mac={mac}", headers={"Host": "bty.local:8080"})
+
+    r = app_client.get(
+        "/events",
+        params={
+            "subject_kind": "machine",
+            "subject_id": mac,
+            "kind": "netboot.flasher.armed",
+        },
+        cookies=AUTH,
+    )
+    armed_events = r.json()["events"]
+    assert len(armed_events) == 1, (
+        f"exactly ONE armed event per cycle (the 0->1 transition); "
+        f"got {len(armed_events)} -- idempotent re-arms must not spam"
+    )
+    assert "saw_flasher_boot" in armed_events[0]["summary"]
+
+
+def test_boot_fetch_skips_arm_event_for_ineligible_boot_mode(
+    app_client: TestClient,
+) -> None:
+    """Boxes in ipxe-exit / bty-tui mode don't consume the bit, so
+    the arm WHERE clause skips them. No UPDATE -> no event. Logging
+    an arm event for a machine the bit won't be read for would be
+    operator-misleading."""
+    mac = "aa:bb:cc:dd:ee:cb"
+    # ipxe-exit: doesn't consume saw_flasher_boot.
+    app_client.put(f"/machines/{mac}", json={"boot_mode": "ipxe-exit"}, cookies=AUTH)
+    app_client.get(f"/boot/{ARTIFACT_NAMES[0]}?mac={mac}", headers={"Host": "bty.local:8080"})
+
+    r = app_client.get(
+        "/events",
+        params={
+            "subject_kind": "machine",
+            "subject_id": mac,
+            "kind": "netboot.flasher.armed",
+        },
+        cookies=AUTH,
+    )
+    assert r.json()["events"] == []
+
+
 def test_upsert_preserves_saw_flasher_boot_on_sanboot_drive_only_change(
     app_client: TestClient,
 ) -> None:

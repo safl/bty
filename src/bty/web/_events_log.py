@@ -100,6 +100,7 @@ KNOWN_EVENT_KINDS: tuple[str, ...] = (
     "netboot.pxe.plan",
     "netboot.pxe.flash.orphan_ref",
     "netboot.pxe.flash.no_target_disk",
+    "netboot.flasher.armed",
     "image.uploaded",
     "image.upload_failed",
     "image.hashed",

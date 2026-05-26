@@ -1403,16 +1403,45 @@ def create_app(
         except HTTPException:
             return  # malformed ?mac= -- ignore, just serve the file
         with _db.open_db(state_path) as conn:
-            conn.execute(
+            # Restrict the UPDATE to the 0->1 transition so an
+            # idempotent re-arm (the live env pulls kernel + initrd +
+            # squashfs in one boot -> three /boot fetches -> three
+            # arm calls) doesn't spam the audit log. rowcount == 1
+            # iff the bit actually transitioned this call.
+            cur = conn.execute(
                 """
                 UPDATE machines
                 SET saw_flasher_boot = 1, updated_at = ?
-                WHERE mac = ? AND boot_mode IN (
+                WHERE mac = ?
+                  AND boot_mode IN (
                     'bty-flash-always', 'bty-flash-once', 'bty-inventory'
-                )
+                  )
+                  AND saw_flasher_boot = 0
                 """,
                 (_now_iso(), mac),
             )
+            if cur.rowcount > 0:
+                # v0.33.23+: log the 0->1 transition so operators see
+                # "iPXE chain pulled the kernel" in the audit timeline
+                # without correlating /boot fetches to /pxe contacts.
+                # Combined with the v0.33.22 state-label honesty fix,
+                # an operator can now distinguish:
+                #   * pre-arm (state=pending) - box hasn't PXE-booted
+                #   * armed but no completion (state=live env running) -
+                #     iPXE fetched the kernel; live env in flight
+                #   * armed + completion (state=inventoried/flashed) -
+                #     the live env actually finished its job
+                # without needing to know about saw_flasher_boot at all.
+                _log_event(
+                    conn,
+                    kind="netboot.flasher.armed",
+                    summary=(
+                        f"{mac} fetched a /boot artifact: saw_flasher_boot armed; live env booting"
+                    ),
+                    subject_kind="machine",
+                    subject_id=mac,
+                    actor="pxe-client",
+                )
             conn.commit()
 
     @app.api_route(
