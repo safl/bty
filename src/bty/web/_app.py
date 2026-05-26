@@ -115,7 +115,7 @@ def create_app(
     # v0.33.0+: schema mismatches are handled by ``_db.init_db``
     # auto-rotating ``state.db`` to ``state.db.<from>.<ts>.bak`` and
     # creating a fresh DB. The rotation is recorded as a
-    # ``system.schema_reset`` event so the dashboard tripwire
+    # ``system.schema.reset`` event so the dashboard tripwire
     # surfaces it. No recovery-wizard branch here; ``open_db`` at
     # lifespan start does the right thing on its own.
 

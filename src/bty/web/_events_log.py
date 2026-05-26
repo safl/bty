@@ -22,7 +22,7 @@ Conventions:
   the event is about. ``machine`` / mac, ``image`` / sha or name,
   ``catalog`` / src URL, ``boot`` / release-tag, ``settings`` /
   panel-name. Either may be ``None`` for global events
-  (``settings.tftp.controlled``).
+  (``netboot.tftp.controlled``).
 - ``actor`` distinguishes operator-initiated changes from
   system-initiated ones (auto-discovery, hash completion).
   See :data:`KNOWN_ACTORS` for the catalogue of conventional
@@ -135,7 +135,7 @@ KNOWN_EVENT_KINDS: tuple[str, ...] = (
     "auth.login.succeeded",
     "auth.login.failed",
     "auth.logout",
-    "system.schema_reset",
+    "system.schema.reset",
 )
 
 # Catalogue of ``subject_kind`` values. Powers the /ui/events

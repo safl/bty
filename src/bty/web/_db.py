@@ -16,7 +16,7 @@ that created it in the ``bty_version`` table.
 **rotates** the old DB to ``state.db.<from>.<ts>.bak`` and creates a
 fresh schema in its place. The old DB is preserved on disk for
 forensics but the running appliance starts clean. A
-``system.schema_reset`` event is recorded in the fresh DB so the
+``system.schema.reset`` event is recorded in the fresh DB so the
 dashboard tripwire surfaces it; operators acknowledge from
 ``/ui/events``.
 
@@ -246,7 +246,7 @@ def init_db(path: Path) -> None:
     tables exist without a marker -- pre-versioning DB), the old
     ``state.db`` is rotated to ``state.db.<from>.<ts>.bak`` and a
     fresh DB is created in its place. The rotation is recorded as a
-    ``system.schema_reset`` event in the fresh DB so the dashboard
+    ``system.schema.reset`` event in the fresh DB so the dashboard
     tripwire surfaces it.
 
     Pre-1.0 contract (see module docstring): no migration apparatus,
@@ -300,7 +300,7 @@ def init_db(path: Path) -> None:
 
             _events_log.record(
                 conn,
-                kind="system.schema_reset",
+                kind="system.schema.reset",
                 actor="system",
                 summary=(
                     f"state.db rotated on upgrade ({rotated_from} -> {bty.__version__}). "

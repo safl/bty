@@ -237,9 +237,7 @@ class DownloadManager(_BaseAsyncManager[DownloadState]):
                 bytes_total=size or None,
                 started_at=started,
                 finished_at=started,
-                error=(
-                    str(details.get("error")) if ev.kind == "catalog.fetch.failed" else None
-                ),
+                error=(str(details.get("error")) if ev.kind == "catalog.fetch.failed" else None),
             )
 
     async def enqueue(self, name: str) -> DownloadState:

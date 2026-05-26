@@ -5,7 +5,7 @@ EXISTS`` plus auto-rotation on version mismatch. The DB carries a
 ``bty_version`` marker; when it disagrees with the running code (or
 data tables exist without a marker -- a pre-versioning DB), ``init_db``
 renames the old ``state.db`` to ``state.db.<from>.<ts>.bak`` and
-creates a fresh one in its place. A ``system.schema_reset`` event is
+creates a fresh one in its place. A ``system.schema.reset`` event is
 recorded so the dashboard tripwire surfaces the rotation.
 """
 
@@ -149,7 +149,7 @@ def test_init_db_rotates_mismatched_version_db(tmp_path: Path) -> None:
 
 
 def test_init_db_records_schema_reset_event_on_rotation(tmp_path: Path) -> None:
-    """The rotation is recorded as a ``system.schema_reset`` event
+    """The rotation is recorded as a ``system.schema.reset`` event
     with details {from_version, to_version, archived_at} so the
     operator can see + acknowledge the upgrade from /ui/events."""
     state = tmp_path / "state.db"
@@ -163,11 +163,11 @@ def test_init_db_records_schema_reset_event_on_rotation(tmp_path: Path) -> None:
     with sqlite3.connect(state) as conn:
         rows = conn.execute(
             "SELECT kind, actor, summary, details, acknowledged "
-            "FROM events WHERE kind = 'system.schema_reset'"
+            "FROM events WHERE kind = 'system.schema.reset'"
         ).fetchall()
     assert len(rows) == 1, f"expected one schema_reset event, got {rows!r}"
     kind, actor, summary, details_json, acknowledged = rows[0]
-    assert kind == "system.schema_reset"
+    assert kind == "system.schema.reset"
     assert actor == "system"
     assert "0.27.4" in summary
     assert bty.__version__ in summary
@@ -188,7 +188,7 @@ def test_init_db_no_event_on_idempotent_call(tmp_path: Path) -> None:
     _db.init_db(state)
     with sqlite3.connect(state) as conn:
         count = conn.execute(
-            "SELECT COUNT(*) FROM events WHERE kind = 'system.schema_reset'"
+            "SELECT COUNT(*) FROM events WHERE kind = 'system.schema.reset'"
         ).fetchone()[0]
     assert count == 0
 

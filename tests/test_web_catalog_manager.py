@@ -226,9 +226,7 @@ def test_fetch_lifecycle_emits_started_then_terminal(tmp_path: Path) -> None:
     # Terminal is populated (the success path).
     assert "catalog.cache.populated" in kinds, kinds
     populated_idx = kinds.index("catalog.cache.populated")
-    assert started_idx < populated_idx, (
-        f"started must come before populated; got order {kinds}"
-    )
+    assert started_idx < populated_idx, f"started must come before populated; got order {kinds}"
 
 
 def test_fetch_lifecycle_emits_cancelled_terminal(tmp_path: Path) -> None:
@@ -282,9 +280,7 @@ def test_fetch_lifecycle_emits_cancelled_terminal(tmp_path: Path) -> None:
     kinds = [e.kind for e in reversed(events)]
     assert "catalog.fetch.started" in kinds, kinds
     assert "catalog.fetch.cancelled" in kinds, kinds
-    assert "catalog.cache.populated" not in kinds, (
-        f"cancel must not emit populated; got {kinds}"
-    )
+    assert "catalog.cache.populated" not in kinds, f"cancel must not emit populated; got {kinds}"
 
 
 def test_enqueue_re_runs_when_cached_file_was_deleted(tmp_path: Path) -> None:

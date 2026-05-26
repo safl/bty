@@ -4814,7 +4814,7 @@ def test_create_app_rotates_stale_state_db_end_to_end(
     contains an operator-typed machine row to prove it was non-empty.
     Post-condition: a ``state.db.<oldver>.<ts>.bak`` file exists; the
     fresh state.db carries the running version and one
-    ``system.schema_reset`` event in the events table.
+    ``system.schema.reset`` event in the events table.
     """
     import sqlite3 as _sqlite
 
@@ -4865,11 +4865,11 @@ def test_create_app_rotates_stale_state_db_end_to_end(
         version_row = conn.execute("SELECT version FROM bty_version").fetchone()
         machines_count = conn.execute("SELECT COUNT(*) FROM machines").fetchone()[0]
         reset_events = conn.execute(
-            "SELECT details FROM events WHERE kind = 'system.schema_reset'"
+            "SELECT details FROM events WHERE kind = 'system.schema.reset'"
         ).fetchall()
     assert version_row[0] == bty.__version__
     assert machines_count == 0, "rotated state.db must not carry pre-rotation rows"
-    assert len(reset_events) == 1, "exactly one system.schema_reset event must surface"
+    assert len(reset_events) == 1, "exactly one system.schema.reset event must surface"
 
     # The .bak still has the operator's pre-rotation machine row, so
     # they can sqlite3-spelunk if they need to recover something.
