@@ -2387,17 +2387,19 @@ def test_ui_images_renders_fetch_button_for_unhashed_url_entry(
     body = r.text
     # The row exists.
     assert "rolling.img.gz" in body
-    # v0.33.29+: all five action buttons always render; the
-    # applicability gate is the ``disabled`` attribute (not
-    # presence). For a URL-only entry that's never been cached:
+    # v0.33.29+: action buttons always render; the applicability
+    # gate is the ``disabled`` attribute. For a URL-only entry
+    # that's never been cached:
     #   * Fetch:  ENABLED  (remote source, not cached)
-    #   * Hash:   disabled (no local source)
     #   * Update: disabled (not cached)
     #   * Cache delete: disabled (not cached)
     #   * Entry delete: ENABLED (has remote source)
-    # The original test guard was "no Hash button for URL-only
-    # entries"; the new equivalent is "Hash button is disabled
-    # for this row".
+    # The Hash button was dropped entirely -- every path into
+    # image_root already auto-enqueues a hash; the per-row Hash
+    # button only helped a niche "ssh + scp into image_root"
+    # workflow that wasn't worth a button. The original guard
+    # ("no Hash button for URL-only entries") trivially holds
+    # now that no row has a Hash button at all.
     import re
 
     row_match = re.search(
@@ -2407,16 +2409,14 @@ def test_ui_images_renders_fetch_button_for_unhashed_url_entry(
     )
     assert row_match is not None, "expected a row tagged rolling.img.gz"
     row_html = row_match.group(0)
-    # Fetch is enabled; Hash is disabled.
     fetch_btn = re.search(r"<button[^>]*bty-fetch-btn[^>]*>", row_html)
-    hash_btn = re.search(r"<button[^>]*bty-hash-btn[^>]*>", row_html)
     assert fetch_btn is not None
-    assert hash_btn is not None
     assert "disabled" not in fetch_btn.group(0), (
         f"Fetch should be enabled on a URL-only entry: {fetch_btn.group(0)!r}"
     )
-    assert "disabled" in hash_btn.group(0), (
-        f"Hash should be disabled on a URL-only entry: {hash_btn.group(0)!r}"
+    # And confirm the Hash button is gone entirely.
+    assert "bty-hash-btn" not in row_html, (
+        "Hash button removed in v0.33.29+; should not appear on any row"
     )
 
 

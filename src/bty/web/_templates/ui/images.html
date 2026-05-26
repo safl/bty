@@ -109,7 +109,7 @@
                         {% endif %}
                     </td>
                     <td class="text-end text-nowrap">
-                        {# All five actions always render so the column
+                        {# All four actions always render so the column
                            is visually consistent row-to-row; each is
                            ``disabled`` when its applicability gate is
                            false, with a tooltip explaining why. The
@@ -118,8 +118,6 @@
                            buttons are bright vs. greyed out.
 
                            Gates by source shape:
-                           - Hash: has-local AND no-sha (file on disk
-                             still needs its sha computed).
                            - Fetch: has-remote AND not-cached (bytes
                              need to land locally).
                            - Update: has-remote AND cached (re-pull
@@ -129,24 +127,26 @@
                            - Entry delete: has-remote (remove the
                              catalog row entirely). Local-only uploads
                              aren't deletable here -- the operator
-                             manages those via the filesystem. #}
-                        {% set has_local = u.sources|selectattr('kind','equalto','local')|list|length > 0 %}
+                             manages those via the filesystem.
+
+                           Hashing has no manual button: every path
+                           that lands bytes in image_root (PUT
+                           /images, lifespan auto-import, DownloadManager
+                           fetch) already auto-enqueues / computes the
+                           sha. The only state a manual Hash would
+                           help is an operator dropping a file via
+                           SSH/scp at runtime; that's a rare-enough
+                           workflow that "restart bty-web" is the
+                           accepted answer. /ui/hashing still shows
+                           background hash progress driven by the
+                           auto-import sweep. #}
                         {% set has_remote = u.sources|selectattr('kind','in',['manifest','url'])|list|length > 0 %}
                         {% set entry_src = u.sources|selectattr('kind','in',['manifest','url'])|map(attribute='location')|first %}
-                        {% set hash_on = has_local and not u.sha256 %}
                         {% set fetch_on = has_remote and not u.cached %}
                         {% set update_on = has_remote and u.cached %}
                         {% set cache_del_on = has_remote and u.cached %}
                         {% set entry_del_on = has_remote %}
                         <div class="btn-group btn-group-sm" role="group">
-                            <button type="button"
-                                    class="btn btn-warning text-nowrap bty-hash-btn"
-                                    data-name="{{ u.names[0] }}"
-                                    {% if not hash_on %}disabled
-                                    title="Hash applies to operator-uploaded files that haven't been hashed yet."
-                                    {% else %}title="Compute the content sha for this file."{% endif %}>
-                                <i class="bi bi-hash me-1"></i>Hash
-                            </button>
                             <button type="button"
                                     class="btn btn-primary text-nowrap bty-fetch-btn"
                                     data-name="{{ u.names[0] }}"
@@ -288,12 +288,14 @@
                             setBtnStateBusy(fetchBtn, "Downloading", "bi-arrow-repeat");
                         }
                     }
-                    if (hsActive) {
-                        var hashBtn = tr.querySelector(".bty-hash-btn");
-                        if (hashBtn && hashBtn.dataset.preBusyDisabled === "0") {
-                            setBtnStateBusy(hashBtn, "Hashing", "bi-arrow-repeat");
-                        }
-                    }
+                    // hsActive contributes to the busy gate (no
+                    // action can run while a background hash is in
+                    // flight) but has no per-row button to light up
+                    // -- the Hash button was dropped because every
+                    // path into image_root already auto-enqueues
+                    // (PUT /images, lifespan auto-import, DownloadManager
+                    // fetch). /ui/hashing still surfaces the progress
+                    // for an operator who wants to see it.
                 } else if (tr.dataset.wasBusy === "1") {
                     // Transitioned busy -> idle. Reload so the row's
                     // ``Local copy`` badge + per-button applicability
@@ -384,21 +386,6 @@
             }).catch(function () {
                 setBtnStateIdle(updateBtn);
             });
-            return;
-        }
-        var hashBtn = ev.target.closest(".bty-hash-btn");
-        if (hashBtn) {
-            ev.preventDefault();
-            var name = hashBtn.getAttribute("data-name");
-            setBtnStateBusy(hashBtn, "Hashing", "bi-arrow-repeat");
-            fetch("/catalog/hashes", {
-                method: "POST",
-                credentials: "same-origin",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ name: name }),
-            }).then(function (r) {
-                if (!r.ok) throw new Error("HTTP " + r.status);
-            }).catch(function () { setBtnStateIdle(hashBtn); });
             return;
         }
         var entryDeleteBtn = ev.target.closest(".bty-catalog-entry-delete-btn");
