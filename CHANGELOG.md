@@ -9,6 +9,127 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.33.29] - 2026-05-26
+
+**Audit-log lifecycle for deferred operations + /ui/images UX
+refinements.** Eleven commits split into two themes.
+
+### Audit-log: requested -> started -> terminal lifecycle
+
+The audit log used to capture only terminal events
+(``image.hashed``, ``backup.created``, ``catalog.cache.populated``,
+``netboot.artifacts.fetched``). For deferred ops (worker-backed),
+this meant /ui/events showed nothing between the operator's click
+and the worker's eventual outcome -- which can be minutes for
+catalog fetches and release downloads.
+
+Now each deferred op writes three lifecycle phases:
+
+- ``.requested`` -- HTTP handler accepted the request and
+  enqueued. Actor=``operator`` when the operator clicked
+  (carries source_ip); actor=``system`` for internal triggers
+  (the backup scheduler tick).
+- ``.started`` -- Worker pulled the job off the queue and
+  began work. Actor=``system``.
+- ``.cancelled`` -- Operator-initiated stops now land in the
+  audit log; pre-fix the manager flipped ``_states`` + fired
+  SSE but wrote nothing to /ui/events. Both the HTTP DELETE
+  handler (actor=operator + source_ip) AND the worker
+  (actor=system, observed the cancel flag) emit it, so the
+  operator can distinguish "I cancelled it" from a shutdown
+  drain.
+
+Concrete new kinds:
+
+- ``catalog.fetch.requested`` / ``.started`` / ``.cancelled`` /
+  ``.failed`` (also replaces the misleading
+  ``catalog.fetch.sha_mismatch``, which fired for ALL fetch
+  failures, not just sha mismatches)
+- ``image.hash.started`` / ``.cancelled`` (no ``.requested``:
+  the per-row Hash button was removed in this batch; every
+  hash now arrives via auto-import or DownloadManager
+  back-fill, both system-initiated)
+- ``netboot.artifacts.fetch.requested`` / ``.started`` /
+  ``.cancelled``
+- ``backup.create.requested`` / ``.started`` / ``.cancelled``
+
+Plus a one-time rename pass for consistency:
+
+- ``image.hash_failed`` -> ``image.hash.failed``
+- ``image.upload_failed`` -> ``image.upload.failed``
+- ``catalog.entry.add_failed`` -> ``catalog.entry.add.failed``
+- ``netboot.artifacts.fetch_failed`` -> ``netboot.artifacts.fetch.failed``
+- ``netboot.tftp.control_failed`` -> ``netboot.tftp.control.failed``
+- ``system.schema_reset`` -> ``system.schema.reset``
+
+Pre-1.0 break-freely (no migration / back-compat shim).
+Operators with custom event-log scrapers will need to grep
+for the dotted names.
+
+Additional fix: ``catalog.cache.populated`` now fires for BOTH
+sha-pinned AND un-sha'd fetches. Pre-fix it only fired for
+un-sha'd entries because the gate was tied to the
+disk_image_sha backfill UPDATE. Sha-pinned downloads had no
+terminal success in the audit log -- an operator scrolling
+/ui/events saw .requested + .started with no closure. The
+backfill UPDATE itself remains gated on entry.sha256 is None
+(sha-pinned rows already carry the sha).
+
+### /ui/images UX
+
+**Always-render action buttons + new Update.** The per-row
+action column used to hide buttons whose preconditions weren't
+met. Now all four (Fetch, Update, Cache delete, Entry delete)
+always render with consistent placement; each ``disabled`` when
+its applicability gate is false, with a tooltip explaining
+why. The operator scanning the column sees the same shape
+every row.
+
+**New "Update" button:** enabled iff a catalog entry has a
+remote source AND a local copy exists. Click chains
+DELETE /catalog/cache/{name} + POST /catalog/downloads -- the
+natural workflow for rolling oras tags whose upstream changed.
+Relies on the new ``catalog.fetch`` lifecycle so /ui/events
+clearly shows the re-pull.
+
+**Row-busy disable:** when ANY worker job (download or hash)
+is queued/running for a row's name, ALL buttons on that row
+disable. Cancellation goes through /ui/downloads or /ui/hashing
+where each manager exposes its dedicated Cancel button.
+
+**Hash button dropped.** Every path into image_root already
+auto-enqueues a hash (PUT /images upload, lifespan
+auto-import, DownloadManager fetch). The per-row Hash button
+only helped a niche "ssh + scp into image_root at runtime"
+workflow where "restart bty-web" is the accepted answer.
+
+**Content SHA clickable to copy.** The cell renders the first
+8 chars + a clipboard icon; click copies the full sha256 to
+the clipboard via the modern Clipboard API (with a hidden-
+textarea fallback for non-HTTPS contexts). A brief check-icon
+swap confirms the copy. Pre-fix operators had to triple-click,
+copy, and prune the trailing ellipsis manually.
+
+**Local copy badge** clearer wording: column header renamed
+``Cached`` -> ``Local copy``, cell values ``cached`` /
+``available`` -> ``yes`` / ``no``. Dashboard pill renamed
+the same way; the separate "Local" pill (which counts
+operator-uploaded entries by source-kind, distinct from
+"has local bytes") renamed to "Uploaded" to disambiguate.
+
+### Bug fix
+
+**``DownloadManager.enqueue`` re-runs when the cache file is
+missing.** Operator-reported (v0.33.15): deleting the cached
+local copy of an oras-src image, then clicking Fetch, briefly
+flipped the button to "Downloading..." but no worker actually
+ran -- the dedup branch returned the stale "completed" state.
+Now the dedup branch verifies the cache file still exists for
+``completed`` entries; if it's gone, fall through to a fresh
+enqueue.
+
+Suite 879 -> 884.
+
 ## [0.33.28] - 2026-05-26
 
 **Deep-pass cleanup on PXE state machine, audit log honesty, and
