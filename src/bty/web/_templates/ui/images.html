@@ -67,7 +67,7 @@
                     <th>Content SHA</th>
                     <th>Format</th>
                     <th>Sources</th>
-                    <th>Cached</th>
+                    <th title="Whether the bytes are on this appliance's image_root. Directly uploaded images and successfully fetched catalog entries are 'yes'; un-fetched remote entries are 'no'.">Local copy</th>
                     <th class="text-end" style="width: 1%; white-space: nowrap;">Action</th>
                 </tr>
             </thead>
@@ -103,9 +103,9 @@
                     </td>
                     <td>
                         {% if u.cached %}
-                        <span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>cached</span>
+                        <span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>yes</span>
                         {% else %}
-                        <span class="badge bg-light text-dark border">available</span>
+                        <span class="badge bg-light text-dark border">no</span>
                         {% endif %}
                     </td>
                     <td class="text-end text-nowrap">
