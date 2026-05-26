@@ -557,12 +557,16 @@ def register_ui_routes(
                     boot_mode          = excluded.boot_mode,
                     sanboot_drive      = excluded.sanboot_drive,
                     target_disk_serial = excluded.target_disk_serial,
-                    -- v0.33.22+: reset the one-shot alternation bit
-                    -- ONLY when a policy-affecting field changes
-                    -- (boot_mode, bty_image_ref, target_disk_serial).
-                    -- Hostname / sanboot_drive don't invalidate the
-                    -- in-flight cycle. Mirrors the JSON PUT /machines
-                    -- path; both must stay in sync.
+                    -- Reset the one-shot alternation bit + completion
+                    -- signals ONLY when a policy-affecting field
+                    -- changes (boot_mode, bty_image_ref,
+                    -- target_disk_serial). Hostname / sanboot_drive
+                    -- don't invalidate the in-flight cycle. Mirrors
+                    -- the JSON PUT /machines path; both must stay
+                    -- in sync. See PUT for the rationale on why
+                    -- the completion signals need clearing too
+                    -- (stale last_flashed_at + a future crashed
+                    -- flasher cycle = sanboot of a half-flashed disk).
                     saw_flasher_boot   = CASE
                         WHEN machines.boot_mode != excluded.boot_mode THEN 0
                         WHEN COALESCE(machines.bty_image_ref, '')
@@ -570,6 +574,22 @@ def register_ui_routes(
                         WHEN COALESCE(machines.target_disk_serial, '')
                              != COALESCE(excluded.target_disk_serial, '') THEN 0
                         ELSE machines.saw_flasher_boot
+                    END,
+                    last_flashed_at    = CASE
+                        WHEN machines.boot_mode != excluded.boot_mode THEN NULL
+                        WHEN COALESCE(machines.bty_image_ref, '')
+                             != COALESCE(excluded.bty_image_ref, '') THEN NULL
+                        WHEN COALESCE(machines.target_disk_serial, '')
+                             != COALESCE(excluded.target_disk_serial, '') THEN NULL
+                        ELSE machines.last_flashed_at
+                    END,
+                    known_disks_at     = CASE
+                        WHEN machines.boot_mode != excluded.boot_mode THEN NULL
+                        WHEN COALESCE(machines.bty_image_ref, '')
+                             != COALESCE(excluded.bty_image_ref, '') THEN NULL
+                        WHEN COALESCE(machines.target_disk_serial, '')
+                             != COALESCE(excluded.target_disk_serial, '') THEN NULL
+                        ELSE machines.known_disks_at
                     END,
                     updated_at         = excluded.updated_at
                 """,
@@ -1438,6 +1458,15 @@ def register_ui_routes(
         cu = catalog_url.strip()
         rt = release_tag.strip()
         with _db.open_db(state_path) as conn:
+            # Snapshot the previous explicit overrides (None = was on
+            # default) BEFORE the writes so the audit event can carry
+            # both before + after. Pre-fix the event only recorded the
+            # post-change state; a drift-tracking script or an operator
+            # auditing "what changed?" had no way to see the prior
+            # values. Both go in details now.
+            old_rr = _settings_store.get(conn, _settings_store.KEY_RELEASE_REPO)
+            old_cu = _settings_store.get(conn, _settings_store.KEY_CATALOG_URL)
+            old_rt = _settings_store.get(conn, _settings_store.KEY_RELEASE_TAG)
             if rr:
                 _settings_store.set_value(conn, _settings_store.KEY_RELEASE_REPO, rr)
             else:
@@ -1461,6 +1490,11 @@ def register_ui_routes(
                 subject_id="upstream",
                 actor="operator",
                 source_ip=_client_ip(request),
+                details={
+                    "release_repo": {"old": old_rr, "new": rr or None},
+                    "catalog_url": {"old": old_cu, "new": cu or None},
+                    "release_tag": {"old": old_rt, "new": rt or None},
+                },
             )
             conn.commit()
         return RedirectResponse(

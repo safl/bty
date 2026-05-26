@@ -35,6 +35,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from bty import catalog as _catalog
 from bty import images as _images
 from bty.web import _db
 from bty.web._events_log import record as _log_event
@@ -311,19 +312,40 @@ class HashManager(_BaseAsyncManager[HashState]):
             return
         if final_status == "completed" and sha is not None:
             with _db.open_db(self._state_path) as conn:
-                # Propagate the computed sha into the catalog row
-                # that's already keyed by ``file://<name>``. The auto-
-                # import sweep on bty-web startup inserts the row
-                # with ``disk_image_sha = NULL`` so the catalog has
-                # entries the operator can bind to; this UPDATE makes
-                # those rows bindable in the flash flow (PXE handler
-                # resolves ref -> disk_image_sha -> /images/<sha>).
-                # Match by src rather than ref so that this code path
-                # stays decoupled from the canonicalisation helper.
-                conn.execute(
+                # Propagate the computed sha into the owning catalog
+                # row. The auto-import sweep on bty-web startup
+                # inserts dir-scan rows with ``disk_image_sha = NULL``
+                # so the catalog has entries the operator can bind to;
+                # this UPDATE makes them bindable in the flash flow
+                # (PXE handler resolves ref -> disk_image_sha ->
+                # /images/<sha>).
+                #
+                # Two matching strategies, applied in order:
+                # 1. Operator-typed dir-scan file: match by
+                #    ``src = file://<name>`` (auto-import wrote that
+                #    src for the row).
+                # 2. Catalog-fetched cache file: match by the 12-hex
+                #    ``bty_image_ref`` prefix encoded in the filename.
+                #    The row's src is the upstream URL, not
+                #    ``file://catalog-...``, so the src-keyed UPDATE
+                #    in (1) wouldn't find it. The hash auto-enqueue
+                #    skips these on startup (DownloadManager already
+                #    backfilled disk_image_sha at fetch time), but a
+                #    manual ``POST /catalog/hashes/<name>`` should
+                #    still land the sha on the right row.
+                cur = conn.execute(
                     "UPDATE catalog_entries SET disk_image_sha = ? WHERE src = ?",
                     (sha, f"file://{state.name}"),
                 )
+                if cur.rowcount == 0:
+                    ref_prefix = _catalog.ref_prefix_from_cache_filename(state.name)
+                    if ref_prefix is not None:
+                        conn.execute(
+                            "UPDATE catalog_entries SET disk_image_sha = ? "
+                            "WHERE bty_image_ref LIKE ? "
+                            "AND (disk_image_sha IS NULL OR disk_image_sha = ?)",
+                            (sha, f"{ref_prefix}%", sha),
+                        )
                 _log_event(
                     conn,
                     kind="image.hashed",

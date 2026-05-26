@@ -287,17 +287,30 @@ def create_app(
         if catalog_state.catalog is not None:
             _auto_import_manifest_rows(catalog_state.catalog)
         for img in startup_images:
-            if img.sha256 is None:
-                # ``FileNotFoundError`` -- file vanished between the
-                # ``list_images`` scan and the enqueue (harmless).
-                # ``ValueError`` -- the traversal guard in
-                # ``HashManager.enqueue`` rejects suspect basenames;
-                # ``list_images`` shouldn't surface any but a freshly-
-                # created file named ``..`` (impossible) or ``.``
-                # (likewise) would crash startup without this
-                # suppression.
-                with contextlib.suppress(FileNotFoundError, ValueError):
-                    await hash_manager.enqueue(img.name)
+            if img.sha256 is not None:
+                continue
+            # Skip catalog-fetched cache files: the DownloadManager
+            # computes the sha while bytes flow during fetch and
+            # writes it directly to ``catalog_entries.disk_image_sha``
+            # for the owning row (no .sha256 sidecar is written).
+            # Re-hashing them on every restart wastes I/O and (on a
+            # Pi-class box with multi-GiB images) blocks the operator
+            # binding flow behind the queue. The catalog row's sha is
+            # already authoritative -- ``GET /images/<sha>`` serves
+            # the file by cache-hit lookup regardless of whether the
+            # filesystem has a sidecar.
+            if _catalog.is_catalog_cache_filename(img.name):
+                continue
+            # ``FileNotFoundError`` -- file vanished between the
+            # ``list_images`` scan and the enqueue (harmless).
+            # ``ValueError`` -- the traversal guard in
+            # ``HashManager.enqueue`` rejects suspect basenames;
+            # ``list_images`` shouldn't surface any but a freshly-
+            # created file named ``..`` (impossible) or ``.``
+            # (likewise) would crash startup without this
+            # suppression.
+            with contextlib.suppress(FileNotFoundError, ValueError):
+                await hash_manager.enqueue(img.name)
         # Backup scheduler loop. Ticks every 60s; reads cadence +
         # last_run_at on every tick so a Settings change reflects
         # without restart. Stop signalled by ``backup_stop_event``,
@@ -310,12 +323,16 @@ def create_app(
         try:
             yield
         finally:
-            # Wake every SSE subscribe() generator so the
-            # StreamingResponse exits its yield loop. Without this,
-            # browser tabs left open on /ui/machines or /ui/dashboard
-            # hold the HTTP connection alive until uvicorn's 90s
-            # graceful-shutdown timeout SIGKILLs the worker.
-            await event_bus.close()
+            # Teardown order matters: drain the workers FIRST so any
+            # final state-change publish (e.g., a hash that completes
+            # 100ms before SIGTERM) makes it through the bus and to
+            # the SSE subscribers BEFORE the bus closes. Pre-fix the
+            # bus closed first, then ``stop()`` was awaited -- the
+            # last-instant worker publish saw ``loop.is_running()``
+            # still True and ``call_soon_threadsafe`` succeeded, but
+            # the loop was already past the point where SSE
+            # subscribers would drain it; the event was effectively
+            # dropped.
             backup_stop_event.set()
             with contextlib.suppress(asyncio.CancelledError):
                 await backup_scheduler_task
@@ -325,6 +342,12 @@ def create_app(
             await hash_manager.stop()
             await release_fetch_manager.stop()
             await backup_manager.stop()
+            # Wake every SSE subscribe() generator so the
+            # StreamingResponse exits its yield loop. Without this,
+            # browser tabs left open on /ui/machines or /ui/dashboard
+            # hold the HTTP connection alive until uvicorn's 90s
+            # graceful-shutdown timeout SIGKILLs the worker.
+            await event_bus.close()
 
     def _auto_import_dir_scan_rows(scanned: list[images.Image]) -> None:
         """Insert a ``catalog_entries`` row for every dir-scan file
@@ -645,40 +668,52 @@ def create_app(
         client_ip = _client_ip(request)
         now = _now_iso()
         with _db.open_db(state_path) as conn:
-            # Race-safe discovery: pre-v0.33.6 did SELECT then plain
-            # INSERT, which UNIQUE-violated under concurrent /pxe
-            # requests for the same fresh MAC (iPXE retry, dnsmasq
-            # retransmit) -- the second handler got
-            # sqlite3.IntegrityError and bty-web returned 500. Under
-            # iPXE's own retry the next attempt would succeed, so the
-            # operator saw flaky journal noise without a reliable
-            # repro.
+            # Race-safe discovery. Two concurrent /pxe requests for
+            # the same fresh MAC (iPXE retry, dnsmasq retransmit)
+            # used to UNIQUE-violate the plain INSERT path; v0.33.6
+            # moved to INSERT ... ON CONFLICT DO UPDATE ... RETURNING
+            # which was race-safe on the row but had a subtle
+            # discriminator race: the ``(created_at = ?) AS is_new``
+            # synthetic column relied on timestamp comparison, so two
+            # requests whose ``_now_iso()`` happened to tie (possible
+            # on systems with lower clock resolution) BOTH saw
+            # is_new=True and both logged a discovery event.
             #
-            # Now: atomic INSERT ... ON CONFLICT(mac) DO UPDATE on
-            # every contact. ``RETURNING`` tells us whether the row
-            # is new (created_at == excluded.created_at -> insert
-            # branch fired) so we only log the discovery event once.
-            # ``COALESCE(machines.discovered_at, excluded.discovered_at)``
-            # keeps the first-seen timestamp stable across UPDATE
-            # branches.
-            row = conn.execute(
+            # v0.33.25+: split into INSERT-or-skip + UPDATE-touch.
+            # The INSERT carries ``ON CONFLICT DO NOTHING RETURNING
+            # 1`` -- the RETURNING row materialises iff the insert
+            # actually fired (DO NOTHING suppresses it on conflict).
+            # That's the canonical race-safe "did I create the row?"
+            # signal in SQLite. The UPDATE then runs unconditionally
+            # to refresh last_seen_*. Both statements share one
+            # transaction so the pair stays atomic.
+            inserted = conn.execute(
                 """
                 INSERT INTO machines
                     (mac, boot_mode,
                      discovered_at, last_seen_at, last_seen_ip,
                      created_at, updated_at)
                 VALUES (?, 'bty-inventory', ?, ?, ?, ?, ?)
-                ON CONFLICT(mac) DO UPDATE SET
-                    last_seen_at  = excluded.last_seen_at,
-                    last_seen_ip  = excluded.last_seen_ip,
-                    discovered_at = COALESCE(machines.discovered_at, excluded.discovered_at),
-                    updated_at    = excluded.updated_at
-                RETURNING *, (created_at = ?) AS is_new
+                ON CONFLICT(mac) DO NOTHING
+                RETURNING 1
                 """,
-                (normalised, now, now, client_ip, now, now, now),
+                (normalised, now, now, client_ip, now, now),
+            ).fetchone()
+            is_new = inserted is not None
+            row = conn.execute(
+                """
+                UPDATE machines
+                   SET last_seen_at  = ?,
+                       last_seen_ip  = ?,
+                       updated_at    = ?,
+                       discovered_at = COALESCE(discovered_at, ?)
+                 WHERE mac = ?
+                RETURNING *
+                """,
+                (now, client_ip, now, now, normalised),
             ).fetchone()
             assert row is not None
-            if row["is_new"]:
+            if is_new:
                 # First /pxe contact -- worth a row in the audit log
                 # so the operator can see "this MAC first checked in
                 # at X" without paging through stale records. Only
@@ -693,13 +728,25 @@ def create_app(
                     subject_id=normalised,
                     actor="pxe-client",
                     source_ip=client_ip,
+                    # Mirror the shape of ``machine.created`` /
+                    # ``machine.upserted``: same 5 keys with the
+                    # row's actual values at discovery time. The
+                    # auto-created row carries the bty-inventory
+                    # default; everything else is NULL until the
+                    # operator binds it. Symmetric payloads let
+                    # the operator pivot on a MAC across the audit
+                    # log without each event having a different shape.
+                    details={
+                        "bty_image_ref": None,
+                        "boot_mode": "bty-inventory",
+                        "sanboot_drive": None,
+                        "hostname": None,
+                        "target_disk_serial": None,
+                    },
                 )
             conn.commit()
 
         machine = dict(row)
-        # ``is_new`` is a synthetic column from the RETURNING clause;
-        # downstream policy logic only knows about real machine columns.
-        machine.pop("is_new", None)
         publish_state_changed()
         # Boot-mode decision tree (highest priority first):
         #   - bty-tui                       -> live env, interactive wizard
@@ -723,13 +770,22 @@ def create_app(
         policy = machine.get("boot_mode")
         ref = machine.get("bty_image_ref")
 
-        # First decide the offer (template + summary + details).
-        # This keeps the "what did we hand out" decision in one
-        # place so the per-hit event log mirrors the actual render.
+        # First decide the offer (template + summary + details) and
+        # gather any pending side-effects (saw_flasher_boot clear).
+        # The single ``with _db.open_db`` at the end of the handler
+        # applies them in one transaction alongside the always-runs
+        # ``pxe.offered`` event. Pre-v0.33.26 each branch opened its
+        # own connection; six open_db calls per request was
+        # gratuitous on a hot path. Flash-failure branches (orphan
+        # ref / no target disk) used to log standalone events too;
+        # that info is already encoded as the ``reason`` in
+        # ``pxe.offered.details`` so the standalone events were
+        # duplicative noise.
         rendered: str
         offer_kind: str
         offer_summary: str
         offer_details: dict[str, Any]
+        clear_saw_flasher_boot = False
 
         if policy == "bty-tui":
             template = jinja.get_template("ipxe_tui.j2")
@@ -739,25 +795,30 @@ def create_app(
             offer_details = {"offer": "bty-tui"}
         elif policy == "bty-inventory":
             # Inventory-then-sanboot, alternating like bty-flash-always
-            # (same saw_flasher_boot bit). When the box has just booted
-            # the live env (bit armed via GET /boot/...?mac=), serve a
-            # sanboot of its disk and clear the bit; otherwise serve the
-            # live-env chain so ``bty`` re-collects + posts inventory and
-            # reboots (plan mode=inventory). Net: every power cycle
-            # refreshes the inventory before booting the disk, so swapped
-            # hardware is discovered.
-            if machine.get("saw_flasher_boot"):
+            # (same saw_flasher_boot bit). When the box has booted the
+            # live env (bit armed via GET /boot/...?mac=) AND the live
+            # env actually POSTed inventory (``known_disks_at`` is set),
+            # serve a sanboot + clear the bit. Otherwise serve the
+            # live-env chain.
+            #
+            # v0.33.24+: the bit ALONE used to gate the sanboot serve.
+            # If the live env crashed between fetching /boot and POSTing
+            # /pxe/{mac}/inventory, the bit stayed armed and the server
+            # served sanboot of an empty disk -- the box failed to boot,
+            # cycled, the next /pxe cleared the bit, then re-served the
+            # inventory chain. One wasted sanboot cycle per crashed
+            # inventory. Now: armed-without-known_disks_at is treated as
+            # "live env didn't complete; retry the chain". Self-healing
+            # without the wasted sanboot.
+            armed = bool(machine.get("saw_flasher_boot"))
+            has_inventory = bool(machine.get("known_disks_at"))
+            if armed and has_inventory:
                 drive = machine.get("sanboot_drive") or _models.DEFAULT_SANBOOT_DRIVE
                 template = jinja.get_template("ipxe_sanboot.j2")
                 rendered = template.render(
                     mac=normalised, machine=machine, drive=drive, policy=policy
                 )
-                with _db.open_db(state_path) as conn:
-                    conn.execute(
-                        "UPDATE machines SET saw_flasher_boot = 0, updated_at = ? WHERE mac = ?",
-                        (now, normalised),
-                    )
-                    conn.commit()
+                clear_saw_flasher_boot = True
                 offer_kind = "bty-inventory-sanboot"
                 offer_summary = (
                     f"{normalised} booting disk (drive {drive}) after inventory; "
@@ -772,10 +833,20 @@ def create_app(
                 template = jinja.get_template("ipxe_tui.j2")
                 rendered = template.render(mac=normalised, machine=machine, host=host)
                 offer_kind = "bty-inventory"
-                offer_summary = (
-                    f"{normalised} offered inventory boot (bty collects disks + reboots)"
-                )
-                offer_details = {"offer": "bty-inventory"}
+                if armed and not has_inventory:
+                    offer_summary = (
+                        f"{normalised} re-offered inventory boot "
+                        f"(prior live env armed but didn't POST inventory)"
+                    )
+                    offer_details = {
+                        "offer": "bty-inventory",
+                        "retry_after_armed_no_post": True,
+                    }
+                else:
+                    offer_summary = (
+                        f"{normalised} offered inventory boot (bty collects disks + reboots)"
+                    )
+                    offer_details = {"offer": "bty-inventory"}
         elif policy == "ipxe-exit":
             # iPXE boots the local disk itself (drive override, default
             # 0x80), with ``|| exit`` falling back to the firmware boot
@@ -800,38 +871,38 @@ def create_app(
             target_disk_serial = machine.get("target_disk_serial")
             image_name = _flash_target_for_ref(str(ref))
             if image_name is not None and target_disk_serial:
-                if policy in ("bty-flash-always", "bty-flash-once") and machine.get(
-                    "saw_flasher_boot"
-                ):
-                    # The box fetched a /boot artifact with ``?mac=`` since
-                    # we served the flash chain -- proof it booted the
-                    # flasher, flashed, and rebooted back. Boot the
-                    # freshly-flashed disk via sanboot instead of
-                    # reflashing. The bit handling is what makes the two
-                    # modes differ (this is the "state" half of the
-                    # mode/state model):
-                    #   * bty-flash-always: CLEAR the bit, so the next real
-                    #     netboot (no artifact fetch in between) flips back
-                    #     to the flash chain -- the flash<->sanboot
-                    #     alternation that stops a PXE-first reflash loop.
-                    #   * bty-flash-once: KEEP the bit. This is terminal:
+                armed = bool(machine.get("saw_flasher_boot"))
+                has_flashed = bool(machine.get("last_flashed_at"))
+                if armed and has_flashed:
+                    # The box fetched a /boot artifact AND POSTed
+                    # /pxe/{mac}/done since we served the flash chain --
+                    # proof it actually flashed (not just iPXE-armed).
+                    # Serve sanboot of the just-flashed disk. The bit
+                    # handling is what makes the two modes differ:
+                    #   * bty-flash-always: CLEAR the bit, so the next
+                    #     real netboot flips back to the flash chain --
+                    #     the flash<->sanboot alternation that stops a
+                    #     PXE-first reflash loop.
+                    #   * bty-flash-once: KEEP the bit. Terminal state:
                     #     the box sanboots its disk from now on. The mode
-                    #     STAYS bty-flash-once (no mutation to sanboot); it
-                    #     re-arms only when the operator re-saves the
-                    #     machine (which resets the bit).
+                    #     STAYS bty-flash-once; re-arms only when the
+                    #     operator re-saves the machine.
+                    #
+                    # v0.33.24+: armed-without-last_flashed_at used to
+                    # also serve sanboot. That sanbooted a half-flashed
+                    # disk -- bty-flash-always recovered via the next
+                    # cycle (wasted one sanboot); bty-flash-once was
+                    # TERMINALLY STUCK on the half-flashed disk and
+                    # required operator intervention. Now armed-without-
+                    # last_flashed_at re-serves the flash chain so the
+                    # crashed flasher retries until /done lands.
                     drive = machine.get("sanboot_drive") or _models.DEFAULT_SANBOOT_DRIVE
                     template = jinja.get_template("ipxe_sanboot.j2")
                     rendered = template.render(
                         mac=normalised, machine=machine, drive=drive, policy=policy
                     )
                     if policy == "bty-flash-always":
-                        with _db.open_db(state_path) as conn:
-                            conn.execute(
-                                "UPDATE machines SET saw_flasher_boot = 0, updated_at = ? "
-                                "WHERE mac = ?",
-                                (now, normalised),
-                            )
-                            conn.commit()
+                        clear_saw_flasher_boot = True
                     offer_kind = f"{policy}-sanboot"
                     offer_summary = f"{normalised} booting just-flashed disk (drive {drive}); " + (
                         "bty-flash-always re-arms on next netboot"
@@ -860,40 +931,41 @@ def create_app(
                     )
                     offer_kind = policy  # "bty-flash-always" or "bty-flash-once"
                     short = str(ref)[:12]
-                    offer_summary = (
-                        f"{normalised} offered {policy} for ref={short}... "
-                        f"({image_name}, target serial {target_disk_serial})"
-                    )
-                    offer_details = {
-                        "offer": policy,
-                        "bty_image_ref": ref,
-                        "image_name": image_name,
-                        "target_disk_serial": target_disk_serial,
-                    }
-            elif image_name is not None and not target_disk_serial:
-                # Image binding is resolvable but no target disk
-                # picked. Fall back to ipxe.j2 (exit to firmware) and
-                # log a distinct event so the operator can tell this
-                # case apart from "orphan ref / no bindable image".
-                with _db.open_db(state_path) as conn:
-                    _log_event(
-                        conn,
-                        kind="netboot.pxe.flash.no_target_disk",
-                        summary=(
-                            f"machine {normalised}: boot_mode={policy} but no "
-                            "target_disk_serial picked; refusing flash chain"
-                        ),
-                        subject_kind="machine",
-                        subject_id=normalised,
-                        actor="pxe-client",
-                        source_ip=client_ip,
-                        details={
+                    # Distinguish a fresh-cycle offer from a retry-because-
+                    # crashed-flasher offer for the audit log. Both serve
+                    # the same template (the flash chain), but the
+                    # ``retry_after_armed_no_done`` flag tells the
+                    # operator "the last cycle armed the bit but never
+                    # /done'd; the flasher crashed mid-flash".
+                    if armed and not has_flashed:
+                        offer_summary = (
+                            f"{normalised} re-offered {policy} for ref={short}... "
+                            f"(prior live env armed but didn't POST /done)"
+                        )
+                        offer_details = {
+                            "offer": policy,
                             "bty_image_ref": ref,
                             "image_name": image_name,
-                            "boot_mode": policy,
-                        },
-                    )
-                    conn.commit()
+                            "target_disk_serial": target_disk_serial,
+                            "retry_after_armed_no_done": True,
+                        }
+                    else:
+                        offer_summary = (
+                            f"{normalised} offered {policy} for ref={short}... "
+                            f"({image_name}, target serial {target_disk_serial})"
+                        )
+                        offer_details = {
+                            "offer": policy,
+                            "bty_image_ref": ref,
+                            "image_name": image_name,
+                            "target_disk_serial": target_disk_serial,
+                        }
+            elif image_name is not None and not target_disk_serial:
+                # Image binding is resolvable but no target disk
+                # picked. Fall back to ipxe.j2 (exit to firmware).
+                # The ``reason: no_target_disk`` flag in the always-
+                # runs pxe.offered event makes this distinguishable
+                # from "orphan ref / no bindable image" on /ui/events.
                 template = jinja.get_template("ipxe.j2")
                 rendered = template.render(mac=normalised, machine=machine)
                 offer_kind = "exit-fallback"
@@ -910,22 +982,10 @@ def create_app(
             else:
                 # Orphaned binding: machine targets a ref that no
                 # catalog_entries row resolves. Falls back to ipxe.j2
-                # (exit to firmware), but the operator sees a louder
-                # event so the "boot_mode=bty-flash-always but ref is
-                # dangling" case doesn't look like a normal hit.
+                # (exit to firmware). The ``reason: orphan_ref`` flag
+                # in the always-runs pxe.offered event surfaces this
+                # to the operator on /ui/events.
                 short = str(ref)[:12]
-                with _db.open_db(state_path) as conn:
-                    _log_event(
-                        conn,
-                        kind="netboot.pxe.flash.orphan_ref",
-                        summary=f"machine {normalised} bound to ref={short}...: no catalog row",
-                        subject_kind="machine",
-                        subject_id=normalised,
-                        actor="pxe-client",
-                        source_ip=client_ip,
-                        details={"bty_image_ref": ref},
-                    )
-                    conn.commit()
                 template = jinja.get_template("ipxe.j2")
                 rendered = template.render(mac=normalised, machine=machine)
                 offer_kind = "exit-fallback"
@@ -950,15 +1010,19 @@ def create_app(
             offer_summary = f"{normalised} offered sanboot/exit -- no bty_image_ref bound"
             offer_details = {"offer": "unknown"}
 
-        # Audit every PXE hit. Cheap (one INSERT) and gives the
-        # operator a full timeline of "client X showed up, server
-        # offered Y". The events table is append-only with no
+        # Apply collected side-effects + audit every PXE hit in one
+        # transaction. The events table is append-only with no
         # retention cap today; long-running per-job CI loops will
         # grow it indefinitely. If that becomes a problem, the
         # ``netboot.pxe.offered`` kind is a natural candidate for a
         # subject-id-keyed rolling-window prune ("keep the last 100
         # per MAC").
         with _db.open_db(state_path) as conn:
+            if clear_saw_flasher_boot:
+                conn.execute(
+                    "UPDATE machines SET saw_flasher_boot = 0, updated_at = ? WHERE mac = ?",
+                    (now, normalised),
+                )
             _log_event(
                 conn,
                 kind="netboot.pxe.offered",
@@ -998,9 +1062,13 @@ def create_app(
         now = _now_iso()
         client_ip = _client_ip(request)
         with _db.open_db(state_path) as conn:
+            # last_seen_at + last_seen_ip touched alongside the
+            # completion signal so /ui/machines reflects the most
+            # recent contact (the /done POST IS a live-env heartbeat).
             cur = conn.execute(
-                "UPDATE machines SET last_flashed_at = ?, updated_at = ? WHERE mac = ?",
-                (now, now, normalised),
+                "UPDATE machines SET last_flashed_at = ?, "
+                "last_seen_at = ?, last_seen_ip = ?, updated_at = ? WHERE mac = ?",
+                (now, now, client_ip, now, normalised),
             )
             if cur.rowcount > 0:
                 _log_event(
@@ -1011,6 +1079,26 @@ def create_app(
                     subject_id=normalised,
                     actor="pxe-client",
                     source_ip=client_ip,
+                )
+            else:
+                # Surface the orphan to /ui/events so the operator
+                # can see "a live env reported /done for a MAC we
+                # don't know about". Three plausible causes:
+                # operator deleted the machine mid-cycle, the live
+                # env is from a foreign bty-web, or someone is
+                # poking the endpoint directly.
+                _log_event(
+                    conn,
+                    kind="pxe.client.orphan",
+                    summary=(
+                        f"{normalised} POSTed /done but no machine record exists "
+                        f"(operator deleted mid-cycle, or MAC mismatch from a foreign live env)"
+                    ),
+                    subject_kind="machine",
+                    subject_id=normalised,
+                    actor="pxe-client",
+                    source_ip=client_ip,
+                    details={"signal": "done"},
                 )
             conn.commit()
         if cur.rowcount == 0:
@@ -1065,29 +1153,36 @@ def create_app(
         client_ip = _client_ip(request)
         now = _now_iso()
         with _db.open_db(state_path) as conn:
-            # Race-safe discovery: mirror /pxe/{mac}'s upsert shape
-            # (see v0.33.6 fix). Two concurrent /pxe/.../plan requests
-            # for the same fresh MAC used to race on plain INSERT and
-            # one returned 500. The atomic ON CONFLICT path is
-            # idempotent under contention.
-            row = conn.execute(
+            # Race-safe discovery: see /pxe/{mac}'s upsert comment for
+            # the rationale on INSERT...DO NOTHING RETURNING 1 (race-
+            # safe is_new) followed by an unconditional UPDATE.
+            inserted = conn.execute(
                 """
                 INSERT INTO machines
                     (mac, boot_mode,
                      discovered_at, last_seen_at, last_seen_ip,
                      created_at, updated_at)
                 VALUES (?, 'bty-inventory', ?, ?, ?, ?, ?)
-                ON CONFLICT(mac) DO UPDATE SET
-                    last_seen_at  = excluded.last_seen_at,
-                    last_seen_ip  = excluded.last_seen_ip,
-                    discovered_at = COALESCE(machines.discovered_at, excluded.discovered_at),
-                    updated_at    = excluded.updated_at
-                RETURNING *, (created_at = ?) AS is_new
+                ON CONFLICT(mac) DO NOTHING
+                RETURNING 1
                 """,
-                (normalised, now, now, client_ip, now, now, now),
+                (normalised, now, now, client_ip, now, now),
+            ).fetchone()
+            is_new = inserted is not None
+            row = conn.execute(
+                """
+                UPDATE machines
+                   SET last_seen_at  = ?,
+                       last_seen_ip  = ?,
+                       updated_at    = ?,
+                       discovered_at = COALESCE(discovered_at, ?)
+                 WHERE mac = ?
+                RETURNING *
+                """,
+                (now, client_ip, now, now, normalised),
             ).fetchone()
             assert row is not None
-            if row["is_new"]:
+            if is_new:
                 _log_event(
                     conn,
                     kind="machine.discovered",
@@ -1099,11 +1194,19 @@ def create_app(
                     subject_id=normalised,
                     actor="pxe-client",
                     source_ip=client_ip,
+                    # Mirror ``machine.created`` / ``machine.upserted``;
+                    # see /pxe/{mac} for rationale.
+                    details={
+                        "bty_image_ref": None,
+                        "boot_mode": "bty-inventory",
+                        "sanboot_drive": None,
+                        "hostname": None,
+                        "target_disk_serial": None,
+                    },
                 )
             conn.commit()
 
         machine = dict(row)
-        machine.pop("is_new", None)
         publish_state_changed()
 
         host = _request_host(request)
@@ -1233,14 +1336,38 @@ def create_app(
             else:
                 lshw_oversize = True
         with _db.open_db(state_path) as conn:
+            # last_seen_at + last_seen_ip touched alongside the
+            # completion signal: an inventory POST is a live-env
+            # heartbeat too. Pre-fix the operator's "last seen"
+            # timestamp on /ui/machines could lag the most recent
+            # contact by minutes if the live env POSTed inventory
+            # then sat at the wizard.
             cur = conn.execute(
                 "UPDATE machines SET known_disks = ?, known_disks_at = ?, "
                 "hw_lshw = COALESCE(?, hw_lshw), "
                 "hw_lshw_at = CASE WHEN ? IS NOT NULL THEN ? ELSE hw_lshw_at END, "
+                "last_seen_at = ?, last_seen_ip = ?, "
                 "updated_at = ? WHERE mac = ?",
-                (disks_json, now, lshw_json, lshw_json, now, now, normalised),
+                (disks_json, now, lshw_json, lshw_json, now, now, client_ip, now, normalised),
             )
             if cur.rowcount == 0:
+                _log_event(
+                    conn,
+                    kind="pxe.client.orphan",
+                    summary=(
+                        f"{normalised} POSTed /inventory but no machine record exists "
+                        f"(operator deleted mid-cycle, or MAC mismatch from a foreign live env)"
+                    ),
+                    subject_kind="machine",
+                    subject_id=normalised,
+                    actor="pxe-client",
+                    source_ip=client_ip,
+                    details={
+                        "signal": "inventory",
+                        "disk_count": len(body.disks),
+                    },
+                )
+                conn.commit()
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail=f"no machine record for {normalised}",
@@ -1383,7 +1510,7 @@ def create_app(
             )
         return {"id": event_id, "acknowledged": True}
 
-    def _arm_flasher_boot(raw_mac: str) -> None:
+    def _arm_flasher_boot(raw_mac: str, client_ip: str | None) -> None:
         """Mark that ``raw_mac`` fetched a live-env artifact -- proof it
         actually booted the live env, which is stronger evidence than
         the ``/pxe`` config GET (that only means "we told it to boot").
@@ -1397,17 +1524,32 @@ def create_app(
         disk after re-collecting inventory. The WHERE clause confines
         arming to those three policies so the bit's lifecycle can't
         leak into others (a typo'd or stale ``?mac=`` is a no-op on
-        sanboot / bty-tui)."""
+        sanboot / bty-tui).
+
+        last_seen_at + last_seen_ip get touched too: a /boot fetch
+        is a live-env heartbeat, and an operator looking at
+        /ui/machines should see the boot-time contact reflected
+        even if no /pxe call lands between the chain and the live
+        env's eventual /done or /inventory POST.
+        """
         try:
             mac = _normalise_mac(raw_mac)
         except HTTPException:
             return  # malformed ?mac= -- ignore, just serve the file
+        now = _now_iso()
         with _db.open_db(state_path) as conn:
-            # Restrict the UPDATE to the 0->1 transition so an
-            # idempotent re-arm (the live env pulls kernel + initrd +
-            # squashfs in one boot -> three /boot fetches -> three
-            # arm calls) doesn't spam the audit log. rowcount == 1
-            # iff the bit actually transitioned this call.
+            # Restrict the saw_flasher_boot WRITE to the 0->1
+            # transition so an idempotent re-arm (the live env pulls
+            # kernel + initrd + squashfs in one boot -> three /boot
+            # fetches -> three arm calls) doesn't spam the audit log.
+            # rowcount == 1 iff the bit actually transitioned this
+            # call. The last_seen_* updates ARE unconditional via a
+            # separate UPDATE so every fetch refreshes the heartbeat
+            # regardless of bit state.
+            conn.execute(
+                "UPDATE machines SET last_seen_at = ?, last_seen_ip = ? WHERE mac = ?",
+                (now, client_ip, mac),
+            )
             cur = conn.execute(
                 """
                 UPDATE machines
@@ -1418,7 +1560,7 @@ def create_app(
                   )
                   AND saw_flasher_boot = 0
                 """,
-                (_now_iso(), mac),
+                (now, mac),
             )
             if cur.rowcount > 0:
                 # v0.33.23+: log the 0->1 transition so operators see
@@ -1467,7 +1609,7 @@ def create_app(
         # the firmware committed to fetching this artifact.
         raw_mac = request.query_params.get("mac")
         if raw_mac:
-            _arm_flasher_boot(raw_mac)
+            _arm_flasher_boot(raw_mac, _client_ip(request))
         return _serve_safe_file(resolved_boot_root, name)
 
     def _serve_image_by_key(key: str, request: Request) -> Response:
@@ -1895,6 +2037,19 @@ def create_app(
                     --
                     -- Hostname / sanboot_drive are display + boot
                     -- modifiers that don't invalidate the cycle.
+                    -- saw_flasher_boot resets on any of the three
+                    -- policy-affecting changes; same CASE expression
+                    -- mirrored across last_flashed_at + known_disks_at
+                    -- below because those completion signals belong
+                    -- to the OLD cycle. Pre-fix, an operator rebinding
+                    -- a flashed machine (e.g. flash-once -> sanboot
+                    -- -> flash-once for a fresh flash) left
+                    -- last_flashed_at intact -- so a future crashed
+                    -- flasher cycle that armed the bit but never
+                    -- /done'd would still see has_flashed=True and
+                    -- the /pxe consume would sanboot the
+                    -- half-flashed disk. Clearing the completion
+                    -- signal on policy change closes that hole.
                     saw_flasher_boot   = CASE
                         WHEN machines.boot_mode != excluded.boot_mode THEN 0
                         WHEN COALESCE(machines.bty_image_ref, '')
@@ -1902,6 +2057,22 @@ def create_app(
                         WHEN COALESCE(machines.target_disk_serial, '')
                              != COALESCE(excluded.target_disk_serial, '') THEN 0
                         ELSE machines.saw_flasher_boot
+                    END,
+                    last_flashed_at    = CASE
+                        WHEN machines.boot_mode != excluded.boot_mode THEN NULL
+                        WHEN COALESCE(machines.bty_image_ref, '')
+                             != COALESCE(excluded.bty_image_ref, '') THEN NULL
+                        WHEN COALESCE(machines.target_disk_serial, '')
+                             != COALESCE(excluded.target_disk_serial, '') THEN NULL
+                        ELSE machines.last_flashed_at
+                    END,
+                    known_disks_at     = CASE
+                        WHEN machines.boot_mode != excluded.boot_mode THEN NULL
+                        WHEN COALESCE(machines.bty_image_ref, '')
+                             != COALESCE(excluded.bty_image_ref, '') THEN NULL
+                        WHEN COALESCE(machines.target_disk_serial, '')
+                             != COALESCE(excluded.target_disk_serial, '') THEN NULL
+                        ELSE machines.known_disks_at
                     END,
                     updated_at         = excluded.updated_at
                 """,

@@ -611,6 +611,55 @@ def test_auto_import_hashes_unhashed_dir_scan_files(tmp_path: Path) -> None:
         assert entry["url"].endswith(f"/images/{expected_sha}/fresh.img")
 
 
+def test_auto_import_skips_catalog_cache_files_in_hash_enqueue(tmp_path: Path) -> None:
+    """v0.33.28+: the lifespan's hash auto-enqueue loop must skip
+    catalog-fetched cache files (``catalog-<ref:12>-<slug>.<ext>``).
+    The DownloadManager computes the sha while bytes flow during
+    fetch and writes it directly to ``catalog_entries.disk_image_sha``
+    -- no .sha256 sidecar is left behind. Re-hashing on every restart
+    wasted I/O and, on Pi-class boxes with multi-GiB images, blocked
+    the operator binding flow behind the redundant queue.
+
+    Asserts no sidecar materialises for the catalog-cache file even
+    after we give the hash worker a generous window to run.
+    """
+    import time
+
+    image_root = tmp_path / "images"
+    image_root.mkdir()
+    # An operator-typed file (gets hashed) + a catalog-cache file
+    # (must be skipped).
+    (image_root / "operator.img").write_bytes(b"operator payload")
+    catalog_cache_name = "catalog-0123456789ab-someimage.img"
+    (image_root / catalog_cache_name).write_bytes(b"catalog cached payload")
+
+    state = tmp_path / "state.db"
+    app = create_app(
+        state_path=state,
+        service_user=TEST_SERVICE_USER,
+        secret_key=TEST_SECRET_KEY,
+        image_root=image_root,
+    )
+    operator_sidecar = image_root / "operator.img.sha256"
+    catalog_sidecar = image_root / f"{catalog_cache_name}.sha256"
+
+    with TestClient(app):
+        # Wait for the operator file's sidecar to land (proves the
+        # auto-enqueue loop ran at least one cycle).
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline and not operator_sidecar.exists():
+            time.sleep(0.05)
+        assert operator_sidecar.exists(), "lifespan didn't process the operator file"
+        # Give the catalog cache file the same window. It should
+        # STILL not have a sidecar because the enqueue loop skipped it.
+        time.sleep(0.2)
+        assert not catalog_sidecar.exists(), (
+            "catalog-prefix cache file was re-hashed on startup; "
+            "the auto-enqueue loop must skip catalog-<ref:12>-... files "
+            "(DownloadManager already backfilled disk_image_sha at fetch)."
+        )
+
+
 def test_serve_image_stream_source_error_returns_502_not_500(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1547,6 +1596,52 @@ def test_pxe_done_404_for_unknown_mac(app_client: TestClient) -> None:
     assert r.status_code == 404
 
 
+def test_pxe_done_404_logs_orphan_event(app_client: TestClient) -> None:
+    """v0.33.28+: when a live env POSTs /done for a MAC bty-web has
+    no row for (operator deleted mid-cycle, foreign live env), the
+    404 also lands a ``pxe.client.orphan`` event so /ui/events shows
+    "a box tried to report flash completion for an unknown MAC".
+    Without the event the anomaly was silent."""
+    mac = "00:11:22:33:44:65"
+    r = app_client.post(f"/pxe/{mac}/done")
+    assert r.status_code == 404
+    events = app_client.get(
+        "/events",
+        params={"subject_kind": "machine", "subject_id": mac, "kind": "pxe.client.orphan"},
+        cookies=AUTH,
+    ).json()["events"]
+    assert len(events) == 1
+    assert events[0]["details"]["signal"] == "done"
+
+
+def test_pxe_done_touches_last_seen_at(app_client: TestClient) -> None:
+    """v0.33.28+: /done POST refreshes last_seen_at so /ui/machines
+    reflects the most recent live-env contact. Pre-fix the last-seen
+    timestamp could lag the actual contact by minutes (the live env
+    POSTed /done but no /pxe call landed for a while afterward)."""
+    mac = "aa:bb:cc:dd:ee:90"
+    app_client.put(
+        f"/machines/{mac}",
+        json={
+            "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "boot_mode": "bty-flash-once",
+        },
+        cookies=AUTH,
+    )
+    # First /pxe sets last_seen_at to T0.
+    app_client.get(f"/pxe/{mac}")
+    before = app_client.get(f"/machines/{mac}", cookies=AUTH).json()
+    last_seen_t0 = before["last_seen_at"]
+    assert last_seen_t0 is not None
+    # /done should refresh last_seen_at to T1 > T0.
+    import time
+
+    time.sleep(0.01)
+    assert app_client.post(f"/pxe/{mac}/done").status_code == 204
+    after = app_client.get(f"/machines/{mac}", cookies=AUTH).json()
+    assert after["last_seen_at"] > last_seen_t0
+
+
 def test_pxe_flash_once_emits_flash_chain_like_flash(
     app_client: TestClient,
 ) -> None:
@@ -1998,6 +2093,63 @@ def test_boot_fetch_logs_netboot_flasher_armed_on_first_arm(
     assert "saw_flasher_boot" in armed_events[0]["summary"]
 
 
+def test_boot_fetch_touches_last_seen_at_unconditionally(
+    app_client: TestClient,
+) -> None:
+    """v0.33.28+: /boot/{name}?mac= touches last_seen_at + last_seen_ip
+    on every fetch (kernel + initrd + squashfs), not just the bit's
+    0->1 transition. A /boot fetch is a live-env heartbeat and the
+    operator's /ui/machines should reflect each one, even when the
+    bit has already armed (no policy match for the bit also means
+    no last_seen_at update would happen via the bit-gated UPDATE)."""
+    import time
+
+    mac = "aa:bb:cc:dd:ee:cc"
+    app_client.put(f"/machines/{mac}", json={"boot_mode": "bty-flash-always"}, cookies=AUTH)
+    app_client.get(f"/pxe/{mac}", headers={"Host": "bty.local:8080"})
+    before = app_client.get(f"/machines/{mac}", cookies=AUTH).json()
+    last_seen_t0 = before["last_seen_at"]
+    assert last_seen_t0 is not None
+
+    # First /boot fetch: bit transitions 0->1 AND last_seen_at moves.
+    time.sleep(0.01)
+    app_client.get(f"/boot/{ARTIFACT_NAMES[0]}?mac={mac}", headers={"Host": "bty.local:8080"})
+    mid = app_client.get(f"/machines/{mac}", cookies=AUTH).json()
+    last_seen_t1 = mid["last_seen_at"]
+    assert last_seen_t1 > last_seen_t0
+
+    # Second /boot fetch (idempotent re-arm): bit stays at 1 but
+    # last_seen_at STILL moves -- the unconditional last_seen UPDATE
+    # is separate from the bit-gated transition UPDATE.
+    time.sleep(0.01)
+    app_client.get(f"/boot/{ARTIFACT_NAMES[1]}?mac={mac}", headers={"Host": "bty.local:8080"})
+    final = app_client.get(f"/machines/{mac}", cookies=AUTH).json()
+    assert final["last_seen_at"] > last_seen_t1
+
+
+def test_boot_fetch_touches_last_seen_at_even_for_ineligible_mode(
+    app_client: TestClient,
+) -> None:
+    """A /boot fetch with ?mac=X for a machine in ipxe-exit / bty-tui
+    mode doesn't arm the bit (the WHERE policy filter rejects the
+    bit UPDATE), but last_seen_at MUST still move. The fetch IS a
+    contact regardless of policy; the operator's /ui/machines
+    should reflect it."""
+    import time
+
+    mac = "aa:bb:cc:dd:ee:cd"
+    app_client.put(f"/machines/{mac}", json={"boot_mode": "ipxe-exit"}, cookies=AUTH)
+    app_client.get(f"/pxe/{mac}", headers={"Host": "bty.local:8080"})
+    before = app_client.get(f"/machines/{mac}", cookies=AUTH).json()
+    last_seen_t0 = before["last_seen_at"]
+    assert last_seen_t0 is not None
+
+    time.sleep(0.01)
+    app_client.get(f"/boot/{ARTIFACT_NAMES[0]}?mac={mac}", headers={"Host": "bty.local:8080"})
+    after = app_client.get(f"/machines/{mac}", cookies=AUTH).json()
+    assert after["last_seen_at"] > last_seen_t0
+
+
 def test_boot_fetch_skips_arm_event_for_ineligible_boot_mode(
     app_client: TestClient,
 ) -> None:
@@ -2020,6 +2172,128 @@ def test_boot_fetch_skips_arm_event_for_ineligible_boot_mode(
         cookies=AUTH,
     )
     assert r.json()["events"] == []
+
+
+def test_upsert_clears_completion_signals_on_boot_mode_change(
+    app_client: TestClient,
+) -> None:
+    """v0.33.28+: when an operator changes boot_mode on PUT
+    /machines/{mac}, the in-flight cycle's completion signals
+    (last_flashed_at, known_disks_at) get cleared alongside
+    saw_flasher_boot. Pre-fix, stale last_flashed_at + a future
+    crashed flasher cycle = the /pxe consume served sanboot of a
+    half-flashed disk (armed=True + has_flashed=True from the OLD
+    cycle satisfied the consume gate even though the box just
+    crashed mid-flash).
+    """
+    mac = "aa:bb:cc:dd:ee:e0"
+    # Initial: bty-flash-once + a known flash completion.
+    app_client.put(
+        f"/machines/{mac}",
+        json={
+            "bty_image_ref": "1111111111111111111111111111111111111111111111111111111111111111",
+            "boot_mode": "bty-flash-once",
+            "target_disk_serial": "SN-AAA",
+        },
+        cookies=AUTH,
+    )
+    app_client.get(f"/pxe/{mac}")  # discovery
+    app_client.get(f"/boot/{ARTIFACT_NAMES[0]}?mac={mac}", headers={"Host": "bty.local:8080"})
+    assert app_client.post(f"/pxe/{mac}/done").status_code == 204
+    # Confirm completion signal landed.
+    before = app_client.get(f"/machines/{mac}", cookies=AUTH).json()
+    assert before["last_flashed_at"] is not None
+    # Operator rebinds: change boot_mode -> bty-inventory. Old
+    # cycle's last_flashed_at must clear.
+    app_client.put(
+        f"/machines/{mac}",
+        json={
+            "bty_image_ref": "1111111111111111111111111111111111111111111111111111111111111111",
+            "boot_mode": "bty-inventory",
+            "target_disk_serial": "SN-AAA",
+        },
+        cookies=AUTH,
+    )
+    after = app_client.get(f"/machines/{mac}", cookies=AUTH).json()
+    assert after["last_flashed_at"] is None, (
+        "boot_mode change must clear last_flashed_at; stale signal would let "
+        "a future crashed flasher cycle wrongly satisfy /pxe consume gate"
+    )
+
+
+def test_upsert_clears_completion_signals_on_target_disk_change(
+    app_client: TestClient,
+) -> None:
+    """Target-disk-serial change has the same blast radius as a
+    boot_mode change: the completion signals belong to the OLD
+    cycle (which targeted a different disk) and must clear."""
+    mac = "aa:bb:cc:dd:ee:e1"
+    app_client.put(
+        f"/machines/{mac}",
+        json={
+            "bty_image_ref": "2222222222222222222222222222222222222222222222222222222222222222",
+            "boot_mode": "bty-flash-always",
+            "target_disk_serial": "SN-BBB",
+        },
+        cookies=AUTH,
+    )
+    app_client.get(f"/pxe/{mac}")
+    app_client.get(f"/boot/{ARTIFACT_NAMES[0]}?mac={mac}", headers={"Host": "bty.local:8080"})
+    assert app_client.post(f"/pxe/{mac}/done").status_code == 204
+    before = app_client.get(f"/machines/{mac}", cookies=AUTH).json()
+    assert before["last_flashed_at"] is not None
+    # Same mode, but operator picked a new target disk.
+    app_client.put(
+        f"/machines/{mac}",
+        json={
+            "bty_image_ref": "2222222222222222222222222222222222222222222222222222222222222222",
+            "boot_mode": "bty-flash-always",
+            "target_disk_serial": "SN-CCC",
+        },
+        cookies=AUTH,
+    )
+    after = app_client.get(f"/machines/{mac}", cookies=AUTH).json()
+    assert after["last_flashed_at"] is None
+
+
+def test_upsert_preserves_completion_signals_on_cosmetic_change(
+    app_client: TestClient,
+) -> None:
+    """Hostname / sanboot_drive are display modifiers; they don't
+    invalidate the cycle. Pre-fix CASE-WHEN gates this on PUT for
+    saw_flasher_boot; v0.33.28 extends the same to completion
+    signals -- those must NOT clear on cosmetic edits or operators
+    can't relabel a flashed box without losing its flash history."""
+    mac = "aa:bb:cc:dd:ee:e2"
+    app_client.put(
+        f"/machines/{mac}",
+        json={
+            "bty_image_ref": "3333333333333333333333333333333333333333333333333333333333333333",
+            "boot_mode": "bty-flash-once",
+            "target_disk_serial": "SN-DDD",
+            "hostname": "node-a",
+        },
+        cookies=AUTH,
+    )
+    app_client.get(f"/pxe/{mac}")
+    app_client.get(f"/boot/{ARTIFACT_NAMES[0]}?mac={mac}", headers={"Host": "bty.local:8080"})
+    assert app_client.post(f"/pxe/{mac}/done").status_code == 204
+    before = app_client.get(f"/machines/{mac}", cookies=AUTH).json()
+    last_flashed_t0 = before["last_flashed_at"]
+    assert last_flashed_t0 is not None
+    # Hostname-only edit: preserves last_flashed_at.
+    app_client.put(
+        f"/machines/{mac}",
+        json={
+            "bty_image_ref": "3333333333333333333333333333333333333333333333333333333333333333",
+            "boot_mode": "bty-flash-once",
+            "target_disk_serial": "SN-DDD",
+            "hostname": "node-a-renamed",
+        },
+        cookies=AUTH,
+    )
+    after = app_client.get(f"/machines/{mac}", cookies=AUTH).json()
+    assert after["last_flashed_at"] == last_flashed_t0
 
 
 def test_upsert_preserves_saw_flasher_boot_on_sanboot_drive_only_change(
@@ -2112,6 +2386,52 @@ def test_pxe_inventory_404_for_unknown_mac(app_client: TestClient) -> None:
     assert r.status_code == 404
 
 
+def test_pxe_inventory_404_logs_orphan_event(app_client: TestClient) -> None:
+    """v0.33.28+: same /ui/events surface as the /done variant.
+    A live env that POSTs inventory for a deleted machine should
+    show up in the audit log so the operator can correlate."""
+    mac = "00:11:22:33:44:99"
+    r = app_client.post(
+        f"/pxe/{mac}/inventory",
+        json={"disks": [{"path": "/dev/sda", "serial": "GHOST"}]},
+    )
+    assert r.status_code == 404
+    events = app_client.get(
+        "/events",
+        params={"subject_kind": "machine", "subject_id": mac, "kind": "pxe.client.orphan"},
+        cookies=AUTH,
+    ).json()["events"]
+    assert len(events) == 1
+    assert events[0]["details"]["signal"] == "inventory"
+    assert events[0]["details"]["disk_count"] == 1
+
+
+def test_pxe_inventory_touches_last_seen_at(app_client: TestClient) -> None:
+    """v0.33.28+: inventory POST refreshes last_seen_at so a machine
+    in bty-inventory mode that sits at the wizard after posting
+    inventory still shows a recent last-seen timestamp."""
+    mac = "aa:bb:cc:dd:ee:91"
+    app_client.put(
+        f"/machines/{mac}",
+        json={"boot_mode": "bty-inventory"},
+        cookies=AUTH,
+    )
+    app_client.get(f"/pxe/{mac}")
+    before = app_client.get(f"/machines/{mac}", cookies=AUTH).json()
+    last_seen_t0 = before["last_seen_at"]
+    assert last_seen_t0 is not None
+    import time
+
+    time.sleep(0.01)
+    r = app_client.post(
+        f"/pxe/{mac}/inventory",
+        json={"disks": [{"path": "/dev/sda", "serial": "SN-LIVE"}]},
+    )
+    assert r.status_code == 204
+    after = app_client.get(f"/machines/{mac}", cookies=AUTH).json()
+    assert after["last_seen_at"] > last_seen_t0
+
+
 def test_pxe_inventory_rejects_oversize_list(app_client: TestClient) -> None:
     """64-disk cap on the inventory list (matches the InventoryPost
     Pydantic max_length). 65 disks gets a 422."""
@@ -2131,20 +2451,16 @@ def test_pxe_inventory_rejects_oversize_list(app_client: TestClient) -> None:
     assert r.status_code == 422
 
 
-def test_pxe_flash_with_orphan_ref_logs_event(
+def test_pxe_flash_with_orphan_ref_surfaces_reason_on_offered_event(
     app_client: TestClient,
 ) -> None:
     """Operator-visible failure mode: machine bound to a
     ``bty_image_ref`` whose catalog_entries row has been deleted.
-    /pxe returns the local fallback (ipxe.j2) AND records a
-    ``pxe.flash.orphan_ref`` event so the operator can see why
-    the box stopped reflashing on /ui/events instead of
-    debugging dnsmasq.
-
-    Distinct kind from ``pxe.flash.no_target_disk`` because the
-    failure cause is different: orphan_ref = the operator's
-    image binding points at a deleted entry; no_target_disk =
-    the operator forgot to pick a target disk.
+    /pxe returns the local fallback (ipxe.j2) and the always-runs
+    ``netboot.pxe.offered`` event carries ``reason: orphan_ref`` +
+    the dangling ref in its details payload. v0.33.26+ collapsed
+    the standalone ``pxe.flash.orphan_ref`` event into the offered
+    event's reason field (one event, not two).
     """
     # Bind to a ref that doesn't exist in catalog_entries.
     orphan_ref = "deadbeef" * 8
@@ -2166,23 +2482,24 @@ def test_pxe_flash_with_orphan_ref_logs_event(
         params={"subject_kind": "machine", "subject_id": "aa:bb:cc:dd:ee:bd"},
         cookies=AUTH,
     ).json()["events"]
-    kinds = [e["kind"] for e in events]
-    assert "netboot.pxe.flash.orphan_ref" in kinds
-    # Details carry the dangling ref so the operator can grep
-    # for it across catalog history.
-    orphan_evt = next(e for e in events if e["kind"] == "netboot.pxe.flash.orphan_ref")
-    assert orphan_evt["details"]["bty_image_ref"] == orphan_ref
+    offered = next(e for e in events if e["kind"] == "netboot.pxe.offered")
+    assert offered["details"]["reason"] == "orphan_ref"
+    assert offered["details"]["bty_image_ref"] == orphan_ref
+    assert offered["details"]["offer_kind"] == "exit-fallback"
 
 
-def test_pxe_flash_refuses_chain_logs_no_target_disk_event(
+def test_pxe_flash_refuses_chain_surfaces_reason_on_offered_event(
     app_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Safety gate end-to-end: seed a real catalog row so the ref
     resolves, bind the machine to it with boot_mode=flash but
     leave target_disk_serial NULL. The /pxe hit returns ipxe.j2
-    (local fallback) AND records pxe.flash.no_target_disk so the
-    operator can see why the box isn't reflashing on /ui/events."""
+    (local fallback) and the always-runs ``netboot.pxe.offered``
+    event carries ``reason: no_target_disk`` so the operator can
+    see why the box isn't reflashing on /ui/events. v0.33.26+
+    collapsed the standalone ``pxe.flash.no_target_disk`` event
+    into the offered event's reason field."""
     flash_sha = "abcdef0123456789" * 4
     monkeypatch.setattr(
         "urllib.request.urlopen",
@@ -2213,8 +2530,10 @@ def test_pxe_flash_refuses_chain_logs_no_target_disk_event(
         params={"subject_kind": "machine", "subject_id": "aa:bb:cc:dd:ee:dd"},
         cookies=AUTH,
     ).json()["events"]
-    kinds = [e["kind"] for e in events]
-    assert "netboot.pxe.flash.no_target_disk" in kinds
+    offered = next(e for e in events if e["kind"] == "netboot.pxe.offered")
+    assert offered["details"]["reason"] == "no_target_disk"
+    assert offered["details"]["boot_mode"] == "bty-flash-always"
+    assert offered["details"]["bty_image_ref"] == ref
 
 
 def test_machines_upsert_accepts_target_disk_serial(app_client: TestClient) -> None:
@@ -2430,6 +2749,64 @@ def test_pxe_hit_records_inventory_offer_for_unknown_mac(app_client: TestClient)
     assert events["netboot.pxe.offered"]["details"]["offer"] == "bty-inventory"
 
 
+def test_machine_discovered_details_mirror_upserted_shape(app_client: TestClient) -> None:
+    """v0.33.27+: the ``machine.discovered`` audit event carries the
+    same 5-key details payload shape as ``machine.created`` /
+    ``machine.upserted`` (bty_image_ref, boot_mode, sanboot_drive,
+    hostname, target_disk_serial). At discovery time only boot_mode
+    has a value (the auto-default ``bty-inventory``); the rest are
+    explicitly NULL so an operator pivoting on a MAC across the
+    audit log sees a consistent payload shape, not a missing-keys
+    surprise on the discovery row."""
+    app_client.get("/pxe/aa:bb:cc:dd:ee:f7")
+    r = app_client.get(
+        "/events",
+        params={
+            "subject_kind": "machine",
+            "subject_id": "aa:bb:cc:dd:ee:f7",
+            "kind": "machine.discovered",
+        },
+        cookies=AUTH,
+    )
+    evts = r.json()["events"]
+    assert len(evts) == 1
+    details = evts[0]["details"]
+    assert details == {
+        "bty_image_ref": None,
+        "boot_mode": "bty-inventory",
+        "sanboot_drive": None,
+        "hostname": None,
+        "target_disk_serial": None,
+    }
+
+
+def test_machine_discovered_via_plan_endpoint_carries_same_details(
+    app_client: TestClient,
+) -> None:
+    """The /pxe/{mac}/plan discovery path emits the same details
+    payload as /pxe/{mac} so the two discovery routes don't drift
+    apart."""
+    app_client.get("/pxe/aa:bb:cc:dd:ee:f8/plan")
+    r = app_client.get(
+        "/events",
+        params={
+            "subject_kind": "machine",
+            "subject_id": "aa:bb:cc:dd:ee:f8",
+            "kind": "machine.discovered",
+        },
+        cookies=AUTH,
+    )
+    evts = r.json()["events"]
+    assert len(evts) == 1
+    assert evts[0]["details"] == {
+        "bty_image_ref": None,
+        "boot_mode": "bty-inventory",
+        "sanboot_drive": None,
+        "hostname": None,
+        "target_disk_serial": None,
+    }
+
+
 def test_pxe_concurrent_discovery_no_race(app_client: TestClient) -> None:
     """REGRESSION (v0.33.6): two concurrent ``/pxe/{mac}`` requests
     for the same fresh MAC must not return 500. Pre-fix did
@@ -2502,23 +2879,30 @@ def test_pxe_plan_concurrent_discovery_no_race(app_client: TestClient) -> None:
     assert len(r.json()["events"]) == 1
 
 
-def test_pxe_discovery_returning_clause_is_race_safe_under_direct_sqlite_repro(
+def test_pxe_discovery_is_race_safe_under_direct_sqlite_repro(
     tmp_path: Path,
 ) -> None:
-    """REGRESSION (v0.33.6): pin the actual race shape against a real
-    sqlite DB so a future "let's simplify the upsert" refactor can't
-    silently regress to plain INSERT.
+    """REGRESSION (v0.33.6 + v0.33.25): pin the discovery race shape
+    against a real sqlite DB so a future refactor can't silently
+    regress.
 
-    Pre-fix the handler ran ``SELECT WHERE mac=?`` then plain INSERT;
-    two threads that both passed the SELECT then both fired INSERT
-    would have the second hit ``UNIQUE constraint failed:
-    machines.mac``. Post-fix uses ``INSERT ... ON CONFLICT(mac) DO
-    UPDATE ... RETURNING ..., (created_at=?) AS is_new`` so the second
-    attempt is a quiet UPDATE.
+    Two layers being verified together:
 
-    This test exercises the SQL directly (not through TestClient) so
-    it pins the *atomic-upsert* invariant rather than relying on
-    thread scheduling.
+    1. **Row race** (v0.33.6): two threads inserting the same fresh
+       MAC must not raise ``UNIQUE constraint failed`` -- the second
+       upsert is a quiet no-op. The pre-v0.33.6 ``SELECT then plain
+       INSERT`` would have raised; ``INSERT ... ON CONFLICT DO
+       NOTHING`` keeps it quiet.
+
+    2. **is_new discriminator race** (v0.33.25): the pre-v0.33.25
+       discriminator was ``(created_at = ?) AS is_new`` -- a timestamp
+       compare. If two requests' ``_now_iso()`` happened to TIE (low-
+       resolution clock, virtualised host), BOTH saw is_new=1 and
+       BOTH logged the discovery event. The post-v0.33.25 pattern
+       uses ``INSERT ... ON CONFLICT DO NOTHING RETURNING 1`` -- the
+       RETURNING row materialises iff the insert fired -- which is
+       timestamp-independent. Hit it with two same-timestamp writes
+       and assert only the first gets RETURNING populated.
     """
     import sqlite3 as _sqlite
 
@@ -2527,24 +2911,20 @@ def test_pxe_discovery_returning_clause_is_race_safe_under_direct_sqlite_repro(
     state = tmp_path / "state.db"
     _db.init_db(state)
     mac = "aa:bb:cc:dd:ee:99"
-    # The handler passes ``_now_iso()`` which is microsecond-precise; two
-    # real PXE requests yield distinct strings. Use distinct fixtures to
-    # match that contract.
-    now_a = "2026-05-25T12:00:00.000001+00:00"
-    now_b = "2026-05-25T12:00:00.000002+00:00"
+    # Force a timestamp TIE between the two writers. Under the old
+    # ``(created_at = ?)`` discriminator this was the bug case; the
+    # new pattern is timestamp-independent and must still get it right.
+    now = "2026-05-25T12:00:00.000000+00:00"
+    later = "2026-05-25T12:00:01.000000+00:00"
 
-    upsert_sql = """
+    discover_sql = """
         INSERT INTO machines
             (mac, boot_mode,
              discovered_at, last_seen_at, last_seen_ip,
              created_at, updated_at)
         VALUES (?, 'bty-inventory', ?, ?, ?, ?, ?)
-        ON CONFLICT(mac) DO UPDATE SET
-            last_seen_at  = excluded.last_seen_at,
-            last_seen_ip  = excluded.last_seen_ip,
-            discovered_at = COALESCE(machines.discovered_at, excluded.discovered_at),
-            updated_at    = excluded.updated_at
-        RETURNING *, (created_at = ?) AS is_new
+        ON CONFLICT(mac) DO NOTHING
+        RETURNING 1
     """
 
     # Two separate connections, simulating two thread-pool workers.
@@ -2553,23 +2933,38 @@ def test_pxe_discovery_returning_clause_is_race_safe_under_direct_sqlite_repro(
     conn_b = _sqlite.connect(state, timeout=5.0)
     conn_b.row_factory = _sqlite.Row
     try:
-        # Thread A wins the discovery.
-        args_a = (mac, now_a, now_a, "10.0.0.1", now_a, now_a, now_a)
-        row_a = conn_a.execute(upsert_sql, args_a).fetchone()
+        # Thread A wins discovery.
+        args_a = (mac, now, now, "10.0.0.1", now, now)
+        inserted_a = conn_a.execute(discover_sql, args_a).fetchone()
         conn_a.commit()
-        assert row_a["is_new"] == 1, "first upsert must report is_new=1"
+        assert inserted_a is not None, "first INSERT must populate RETURNING (is_new)"
 
-        # Thread B arrives after A committed. With the pre-fix SQL,
-        # this would have been a plain INSERT and raised IntegrityError;
-        # with the upsert it's a quiet UPDATE and is_new=0 (the row's
-        # ``created_at`` is still now_a, not now_b).
-        args_b = (mac, now_b, now_b, "10.0.0.2", now_b, now_b, now_b)
-        row_b = conn_b.execute(upsert_sql, args_b).fetchone()
+        # Thread B arrives with the SAME timestamp as A. Pre-v0.33.25
+        # this is the timestamp-tie bug; post-fix the second writer's
+        # RETURNING is empty because DO NOTHING suppresses it.
+        args_b = (mac, now, now, "10.0.0.2", now, now)
+        inserted_b = conn_b.execute(discover_sql, args_b).fetchone()
         conn_b.commit()
-        assert row_b["is_new"] == 0, "second upsert must report is_new=0 (race-safe)"
-        assert row_b["mac"] == mac
-        assert row_b["created_at"] == now_a, "created_at must stay at first insert's value"
-        assert row_b["updated_at"] == now_b, "updated_at must move to second upsert's value"
+        assert inserted_b is None, "second INSERT must NOT populate RETURNING (is_new=False)"
+
+        # The follow-up UPDATE (the second statement in the handler)
+        # still touches last_seen_*; verify the contract.
+        row = conn_b.execute(
+            """
+            UPDATE machines
+               SET last_seen_at  = ?,
+                   last_seen_ip  = ?,
+                   updated_at    = ?,
+                   discovered_at = COALESCE(discovered_at, ?)
+             WHERE mac = ?
+            RETURNING *
+            """,
+            (later, "10.0.0.2", later, later, mac),
+        ).fetchone()
+        assert row is not None
+        assert row["created_at"] == now, "created_at must stay at first insert's value"
+        assert row["updated_at"] == later
+        assert row["last_seen_ip"] == "10.0.0.2"
     finally:
         conn_a.close()
         conn_b.close()
@@ -3618,9 +4013,13 @@ def test_reflash_lifecycle_bty_flash_always_alternates(
     reboots so the box actually boots its just-flashed disk once
     before being reflashed.
 
-    Cycle:
+    v0.33.24+: the sanboot consume requires BOTH ``saw_flasher_boot``
+    (iPXE armed) AND ``last_flashed_at`` (live env actually called
+    /pxe/{mac}/done). Cycle:
+
         PXE  -> flash chain (offer=bty-flash-always)
         /boot?mac= (arming step)
+        /pxe/{mac}/done (live env finished -> last_flashed_at set)
         PXE  -> sanboot the just-flashed disk (offer=bty-flash-always-sanboot)
                 + bit CLEARED
         PXE  -> flash chain again (offer=bty-flash-always)
@@ -3638,6 +4037,8 @@ def test_reflash_lifecycle_bty_flash_always_alternates(
     # Live env booted -> fetches a /boot artifact with ?mac= -> arm.
     app_client.get(f"/boot/{ARTIFACT_NAMES[0]}?mac={mac}", headers={"Host": "bty.local:8080"})
     assert _saw_flasher_bit(app_client, mac) == 1
+    # Live env actually completed -> /pxe/{mac}/done POST.
+    app_client.post(f"/pxe/{mac}/done")
 
     # Iter 2: PXE -> sanboot the just-flashed disk; bit cleared.
     r = app_client.get(f"/pxe/{mac}", headers={"Host": "bty.local:8080"})
@@ -3660,9 +4061,15 @@ def test_reflash_lifecycle_bty_flash_once_is_terminal(
     serve sanboot. The bit STAYS armed (NOT cleared) so a re-PXE
     can't re-trigger the flash chain.
 
+    v0.33.24+: requires the /pxe/{mac}/done POST to fire before
+    the sanboot consume path -- iPXE arm alone (without /done) now
+    re-serves the flash chain so a crashed flasher self-heals
+    instead of looping on a stuck sanboot.
+
     Cycle:
         PXE  -> flash chain (offer=bty-flash-once)
         /boot?mac= (arming step)
+        /pxe/{mac}/done (live env finished -> last_flashed_at set)
         PXE  -> sanboot (offer=bty-flash-once-sanboot) + bit KEPT
         PXE  -> sanboot again (offer=bty-flash-once-sanboot) + bit KEPT
     """
@@ -3674,9 +4081,10 @@ def test_reflash_lifecycle_bty_flash_once_is_terminal(
     assert _latest_offer_kind(app_client, mac) == "bty-flash-once"
     assert _saw_flasher_bit(app_client, mac) == 0
 
-    # Live env arms the bit.
+    # Live env arms the bit AND completes (/done).
     app_client.get(f"/boot/{ARTIFACT_NAMES[0]}?mac={mac}", headers={"Host": "bty.local:8080"})
     assert _saw_flasher_bit(app_client, mac) == 1
+    app_client.post(f"/pxe/{mac}/done")
 
     # Iter 2: sanboot, bit KEPT (this is the terminal contract --
     # was broken pre-v0.30.2: the code cleared the bit for both
@@ -3693,6 +4101,91 @@ def test_reflash_lifecycle_bty_flash_once_is_terminal(
     app_client.get(f"/pxe/{mac}", headers={"Host": "bty.local:8080"})
     assert _latest_offer_kind(app_client, mac) == "bty-flash-once-sanboot"
     assert _saw_flasher_bit(app_client, mac) == 1
+
+
+def test_reflash_lifecycle_crashed_flasher_retries_chain(
+    app_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """v0.33.24+: if the live env arms ``saw_flasher_boot`` (via /boot
+    fetch) but crashes BEFORE calling /pxe/{mac}/done, the next /pxe
+    contact must re-serve the flash chain -- NOT sanboot a
+    half-flashed disk.
+
+    Pre-fix behaviour was: armed -> sanboot regardless of /done.
+    For bty-flash-once that meant a crashed flasher landed in a
+    permanently-stuck-sanboot state requiring operator intervention.
+    For bty-flash-always the next cycle self-healed via the
+    bit-clear, but at the cost of one wasted sanboot of an
+    unflashed disk.
+
+    With the gate on ``last_flashed_at``, both modes auto-retry the
+    chain until /done lands.
+    """
+    mac = "aa:bb:cc:dd:ee:a7"
+    _seed_flashable_machine(app_client, mac, boot_mode="bty-flash-once", monkeypatch=monkeypatch)
+
+    # Iter 1: flash chain.
+    app_client.get(f"/pxe/{mac}", headers={"Host": "bty.local:8080"})
+    assert _latest_offer_kind(app_client, mac) == "bty-flash-once"
+
+    # Live env boots + arms -- then crashes before /done.
+    app_client.get(f"/boot/{ARTIFACT_NAMES[0]}?mac={mac}", headers={"Host": "bty.local:8080"})
+    assert _saw_flasher_bit(app_client, mac) == 1
+    # NO /pxe/{mac}/done call.
+
+    # Iter 2: PXE -> RE-SERVES the flash chain (NOT sanboot).
+    app_client.get(f"/pxe/{mac}", headers={"Host": "bty.local:8080"})
+    offer = _latest_offer_kind(app_client, mac)
+    assert offer == "bty-flash-once", (
+        f"REGRESSION (v0.33.24): armed without /done must re-serve the flash chain; "
+        f"got {offer!r}. Pre-fix served bty-flash-once-sanboot and stuck the box."
+    )
+    # The audit event details the retry reason for operator visibility.
+    r = app_client.get(
+        "/events",
+        params={"subject_kind": "machine", "subject_id": mac, "kind": "netboot.pxe.offered"},
+        cookies=AUTH,
+    )
+    latest = r.json()["events"][0]
+    assert latest["details"].get("retry_after_armed_no_done") is True
+
+    # Now the (retry) live env succeeds + posts /done.
+    app_client.get(f"/boot/{ARTIFACT_NAMES[0]}?mac={mac}", headers={"Host": "bty.local:8080"})
+    app_client.post(f"/pxe/{mac}/done")
+
+    # Iter 3: NOW the sanboot consume fires (armed + last_flashed_at).
+    app_client.get(f"/pxe/{mac}", headers={"Host": "bty.local:8080"})
+    assert _latest_offer_kind(app_client, mac) == "bty-flash-once-sanboot"
+
+
+def test_reflash_lifecycle_inventory_crashed_live_env_retries(
+    app_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Same fix shape for bty-inventory: armed without /pxe/{mac}/inventory
+    POST -> re-serve the inventory chain instead of sanbooting an
+    empty disk."""
+    mac = "aa:bb:cc:dd:ee:a8"
+    app_client.put(f"/machines/{mac}", json={"boot_mode": "bty-inventory"}, cookies=AUTH)
+
+    # Iter 1: inventory chain.
+    app_client.get(f"/pxe/{mac}", headers={"Host": "bty.local:8080"})
+    assert _latest_offer_kind(app_client, mac) == "bty-inventory"
+
+    # Live env arms but crashes before inventory POST.
+    app_client.get(f"/boot/{ARTIFACT_NAMES[0]}?mac={mac}", headers={"Host": "bty.local:8080"})
+    assert _saw_flasher_bit(app_client, mac) == 1
+    # NO /pxe/{mac}/inventory POST.
+
+    # Iter 2: PXE -> re-serves inventory chain.
+    app_client.get(f"/pxe/{mac}", headers={"Host": "bty.local:8080"})
+    assert _latest_offer_kind(app_client, mac) == "bty-inventory"
+    r = app_client.get(
+        "/events",
+        params={"subject_kind": "machine", "subject_id": mac, "kind": "netboot.pxe.offered"},
+        cookies=AUTH,
+    )
+    latest = r.json()["events"][0]
+    assert latest["details"].get("retry_after_armed_no_post") is True
 
 
 def test_pxe_done_does_not_mutate_boot_mode(
@@ -4204,14 +4697,15 @@ def test_reflash_lifecycle_pxe_offered_event_per_iteration(
     mac = "aa:bb:cc:dd:ee:a6"
     _seed_flashable_machine(app_client, mac, boot_mode="bty-flash-always", monkeypatch=monkeypatch)
 
-    # Cycle 1.
+    # Cycle 1: flash, arm, /done, sanboot.
     app_client.get(f"/pxe/{mac}", headers={"Host": "bty.local:8080"})  # flash
     app_client.get(f"/boot/{ARTIFACT_NAMES[0]}?mac={mac}", headers={"Host": "bty.local:8080"})
+    app_client.post(f"/pxe/{mac}/done")  # v0.33.24+: required to graduate to sanboot
     app_client.get(f"/pxe/{mac}", headers={"Host": "bty.local:8080"})  # sanboot + clear
-    # Box booted the disk, ran the OS, operator power-cycled later.
-    # Cycle 2 begins.
+    # Cycle 2: flash, arm, /done, sanboot.
     app_client.get(f"/pxe/{mac}", headers={"Host": "bty.local:8080"})  # flash (bit=0)
     app_client.get(f"/boot/{ARTIFACT_NAMES[0]}?mac={mac}", headers={"Host": "bty.local:8080"})
+    app_client.post(f"/pxe/{mac}/done")
     app_client.get(f"/pxe/{mac}", headers={"Host": "bty.local:8080"})  # sanboot + clear
 
     r = app_client.get(

@@ -9,6 +9,205 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.33.28] - 2026-05-26
+
+**Deep-pass cleanup on PXE state machine, audit log honesty, and
+HashManager.** Seven distinct findings from a state-changes deep
+audit, batched into one release.
+
+### Crashed-flasher / crashed-live-env self-healing (F1)
+
+The `/pxe/{mac}` consume of `saw_flasher_boot` now gates on the
+completion signal, not the arm bit alone. Pre-fix, the bit alone
+gated the sanboot serve. If the live env crashed between fetching
+`/boot/...?mac=` (which arms the bit) and posting its completion
+signal (`/pxe/{mac}/inventory` for inventory mode, `/pxe/{mac}/done`
+for flash modes), `bty-web` happily sanbooted the (empty /
+half-flashed) disk. Two failure modes followed:
+
+- `bty-flash-always` and `bty-inventory`: one wasted sanboot cycle
+  per crashed live env -- the box couldn't boot the disk,
+  power-cycled, the next `/pxe` cleared the bit, then re-served
+  the chain. Self-recovered, but a visible operator-facing burp.
+- `bty-flash-once`: TERMINALLY stuck on the half-flashed disk.
+  The mode's "stop after one flash" contract made the next `/pxe`
+  STILL serve sanboot of the bad disk. Required operator
+  intervention (re-save the machine) to re-arm the flash.
+
+Post-fix: `armed && completion_signal` gates the sanboot.
+Armed-without-completion treats the live env as crashed and
+re-serves the chain. Self-healing without operator intervention;
+`bty-flash-once` retries until `/done` lands. The retry serve is
+distinguishable in the audit log via `netboot.pxe.offered`
+details: `retry_after_armed_no_done: true` (flash modes) or
+`retry_after_armed_no_post: true` (inventory).
+
+### Race-safe `is_new` discriminator for discovery upsert (F2)
+
+Pre-fix, the discovery handler used
+``INSERT ... ON CONFLICT DO UPDATE RETURNING *, (created_at = ?) AS is_new``.
+The row race itself was safe (v0.33.6), but the ``is_new``
+discriminator did a timestamp compare -- which could TIE on hosts
+with low-resolution clocks (some VMs, slow virtualised guests).
+Two concurrent requests whose ``_now_iso()`` produced the same
+string both saw ``is_new=1`` and both logged a
+``machine.discovered`` event for the same MAC.
+
+Post-fix: split into ``INSERT ... ON CONFLICT DO NOTHING RETURNING
+1`` + unconditional UPDATE. The RETURNING row materialises iff
+the insert actually fired (DO NOTHING suppresses it on conflict)
+-- timestamp-independent, the canonical race-safe "did I create
+the row?" signal in SQLite. The UPDATE then refreshes
+``last_seen_*`` and ``COALESCE``s ``discovered_at`` so PUT-created
+rows still backfill on first /pxe contact.
+
+### /pxe handler: 6 sqlite connections -> 2 (F3)
+
+The /pxe/{mac} handler used to open up to six separate sqlite
+connections per request: discovery upsert, ``saw_flasher_boot``
+clears in two policy branches, two flash-failure events, and the
+always-runs ``pxe.offered`` event. Each ``open_db()`` runs schema-
+init / PRAGMA setup and creates an implicit transaction; six per
+PXE hit was gratuitous on the hottest server route.
+
+Refactored to gather any saw_flasher_boot clear via a flag set
+during the policy decision, then apply it alongside the offered
+event in one final transaction. Two connections per request.
+
+### `machine.discovered` event payload symmetry (F4)
+
+The audit log's ``machine.discovered`` event used to land without
+a ``details`` payload. Sibling events (``machine.created`` /
+``machine.upserted``) carry a five-key payload (bty_image_ref,
+boot_mode, sanboot_drive, hostname, target_disk_serial); an
+operator pivoting on a MAC across the audit log saw a missing-keys
+surprise on the discovery row. Now: the discovery emit (both
+``/pxe/{mac}`` and ``/pxe/{mac}/plan``) carries the same five
+keys. At discovery time only ``boot_mode`` has a value (the
+auto-default ``bty-inventory``); the rest are explicitly NULL.
+
+### Drop redundant flash-failure events (F5)
+
+``netboot.pxe.flash.orphan_ref`` and ``netboot.pxe.flash.no_target_disk``
+used to land as standalone events. But the always-runs
+``netboot.pxe.offered`` event already carries ``reason:
+orphan_ref`` / ``reason: no_target_disk`` in its details payload
+-- the standalone events were duplicates. Dropped both from
+``KNOWN_EVENT_KINDS``; operators tracking flash failures should
+pivot on ``netboot.pxe.offered`` events where ``details.reason``
+is set.
+
+### HashManager: skip catalog cache files on startup (F12)
+
+The lifespan walks ``BTY_IMAGE_ROOT`` and queues a hash job for
+every file without a ``.sha256`` sidecar. Catalog-fetched cache
+files (``catalog-<ref:12>-<slug>.<ext>``) are special: the
+DownloadManager computes the sha while bytes flow during fetch
+and writes it straight to ``catalog_entries.disk_image_sha`` (no
+sidecar). They were getting re-hashed on every startup, wasting
+I/O and (on a Pi-class box with multi-GiB images) blocking the
+operator binding flow behind a redundant queue. Now skipped:
+``is_catalog_cache_filename`` gates the enqueue.
+
+### HashManager: backfill catalog row on manual hash (F13)
+
+When an operator manually triggers a hash of a catalog-cache file
+(``POST /catalog/hashes/<name>``), the HashManager terminal
+callback's previous UPDATE matched ``WHERE src = 'file://<name>'``
+-- which wouldn't find the owning catalog row (its src is the
+upstream URL, not ``file://catalog-...``). A second UPDATE
+matches by the 12-hex ``bty_image_ref`` prefix encoded in the
+cache filename when the first one returns rowcount=0. Lands the
+sha on the right row even when the row's src has nothing to do
+with the local cache filename. New helper
+``bty.catalog.ref_prefix_from_cache_filename``, mirror of
+``local_filename_for``.
+
+### /pxe/{mac}/inventory heartbeat (F6)
+
+The inventory POST used to update ``known_disks_at`` without
+touching ``last_seen_at`` / ``last_seen_ip``. A machine in
+``bty-inventory`` mode that POSTed inventory and then sat at the
+wizard showed a stale ``last seen X minutes ago`` on
+/ui/machines, even though the live env was clearly alive minutes
+ago. Now the UPDATE refreshes the heartbeat alongside the
+completion signal.
+
+### /boot/{name} heartbeat on every fetch (F7)
+
+The ``/boot/{name}?mac=`` arm path's UPDATE was gated on the
+0->1 transition (which is correct for ``saw_flasher_boot``) but
+that also meant idempotent re-arms (kernel + initrd + squashfs
+in one boot) didn't touch ``last_seen_at``. Same for machines in
+``ipxe-exit`` / ``bty-tui`` mode whose policy filter blocks the
+bit UPDATE entirely -- their /boot fetches were heartbeat-
+invisible. Now split into an unconditional ``last_seen``
+UPDATE + the existing bit-gated transition UPDATE so every
+fetch refreshes the operator's view.
+
+### Operator rebind clears completion signals (F8)
+
+PUT /machines/{mac} (and the matching UI form upsert) already
+reset ``saw_flasher_boot`` on policy-affecting changes
+(boot_mode, bty_image_ref, target_disk_serial) via a CASE WHEN
+expression. The completion signals (``last_flashed_at``,
+``known_disks_at``) used to survive the same edit, which re-opened
+the failure mode F1 closed: stale ``last_flashed_at`` + a future
+crashed flasher cycle = the /pxe consume gate saw armed=True AND
+has_flashed=True (from the OLD cycle) and sanbooted a
+half-flashed disk. Now the same CASE WHEN clears both completion
+signals on policy change; hostname / sanboot_drive remain
+cosmetic edits that preserve the signals.
+
+### Audit events for orphan /done and /inventory (F9)
+
+A live env POSTing /done or /inventory for a MAC bty-web has no
+row for (operator deleted mid-cycle, MAC from a foreign live env,
+direct endpoint poke) used to 404 silently with no audit trail.
+Now both 404 paths log a ``pxe.client.orphan`` event with
+``details.signal`` in ``{"done", "inventory"}`` so the operator
+can correlate "this MAC tried to report; we have no row" on
+/ui/events.
+
+### Round 3 (uncovered ground)
+
+### DownloadManager backfill keys on src not name (F10)
+
+The catalog.cache.populated backfill UPDATE matched by
+``WHERE name = ?``. ``name`` is a free-text display label with
+NO UNIQUE constraint in catalog_entries -- two operator-curated
+rows for different upstream URLs that happened to share a
+display name (``debian.iso`` from different mirrors) would BOTH
+have their disk_image_sha clobbered by a single completed
+fetch. Now keyed on ``src`` (the immutable source URL the
+CatalogEntry was built from). Regression test pins the
+name-collision scenario.
+
+### settings.upstream.updated captures old + new (F11)
+
+The settings.upstream.updated event used to record only the
+post-change values (in the summary string, not details). An
+operator auditing "what was the catalog URL before?" or a
+drift-tracking script comparing successive events had no
+before/after visibility. Now the event's details dict carries
+``{release_repo, catalog_url, release_tag}`` -> ``{old, new}``
+for every save.
+
+### Lifespan teardown order: drain workers before closing the bus (F14)
+
+The lifespan finally block used to call ``event_bus.close()``
+FIRST, then await ``stop()`` on each manager. Final worker
+state-changes (a hash that completes 100ms before SIGTERM)
+saw ``loop.is_running()`` still True and
+``call_soon_threadsafe`` succeeded, but the loop was already
+past the point where SSE subscribers would drain it -- the
+event got dropped silently. Reordered: stop the four managers
+(download / hash / release-fetch / backup) FIRST, THEN close
+the bus. The backup scheduler task still wakes first via its
+event so the loop body exits before SIGKILL window.
+
+Suite 861 -> 879.
+
 ## [0.33.23] - 2026-05-26
 
 **Audit-log event for the saw_flasher_boot 0->1 transition.** The

@@ -89,6 +89,31 @@ def is_catalog_cache_filename(name: str) -> bool:
     return name.startswith(_CATALOG_PREFIX)
 
 
+def ref_prefix_from_cache_filename(name: str) -> str | None:
+    """Extract the 12-hex ``bty_image_ref`` prefix encoded in a
+    catalog-cache filename, or ``None`` if ``name`` is not a
+    well-formed cache filename. Mirror of :func:`local_filename_for`:
+    composes catalog-<ref:12>-... -> ref:12.
+
+    Used by the HashManager terminal callback to backfill
+    ``catalog_entries.disk_image_sha`` for an operator-triggered
+    hash of a catalog-cache file -- the row's ``src`` is the
+    upstream URL (not ``file://catalog-...``), so the src-keyed
+    UPDATE there can't find it; the ref-prefix LIKE WHERE clause
+    does.
+    """
+    if not name.startswith(_CATALOG_PREFIX):
+        return None
+    rest = name[len(_CATALOG_PREFIX) :]
+    sep = rest.find("-")
+    if sep != _CATALOG_REF_LEN:
+        return None
+    prefix = rest[:_CATALOG_REF_LEN]
+    if any(c not in "0123456789abcdef" for c in prefix):
+        return None
+    return prefix
+
+
 # Files under image_root the storage layer recognises explicitly.
 # Everything else triggers an "unconventional name" warning on scan
 # so an operator who dropped a stray file (notes, a non-bty backup,

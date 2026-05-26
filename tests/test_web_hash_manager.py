@@ -352,6 +352,114 @@ def test_hash_failed_event_is_recorded(tmp_path: Path) -> None:
     assert "disk on fire" in row.details["error"]
 
 
+def test_hash_completion_backfills_catalog_entries_by_file_src(tmp_path: Path) -> None:
+    """Happy path: an operator-typed dir-scan file's catalog_entries
+    row has src=``file://<name>``. When the HashManager finishes
+    hashing it, the disk_image_sha column gets backfilled (the
+    PXE flash flow needs disk_image_sha to be non-NULL to serve
+    /images/<sha>). v0.33.x has the matching UPDATE in
+    HashManager._run_one terminal callback."""
+    from bty.web import _db
+    from bty.web._hash import HashManager
+
+    state_db = tmp_path / "state.db"
+    _db.init_db(state_db)
+    payload = b"x" * 256
+    target = tmp_path / "operator.img"
+    target.write_bytes(payload)
+    expected_sha = hashlib.sha256(payload).hexdigest()
+    ref = "abc1234567890def1234567890abc1234567890abc1234567890abc1234567890"[:64]
+    with _db.open_db(state_db) as conn:
+        conn.execute(
+            "INSERT INTO catalog_entries (bty_image_ref, src, name, format, "
+            "size_bytes, added_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (ref, "file://operator.img", "operator.img", "img", 256, "2026-05-26T00:00:00+00:00"),
+        )
+        conn.commit()
+
+    async def _drive() -> None:
+        mgr = HashManager(max_parallel=1)
+        mgr.start(tmp_path, state_path=state_db)
+        try:
+            await mgr.enqueue("operator.img")
+            for _ in range(100):
+                states = await mgr.list()
+                if states and states[0].status == "completed":
+                    break
+                await asyncio.sleep(0.01)
+        finally:
+            await mgr.stop()
+
+    _run(_drive())
+
+    with _db.open_db(state_db) as conn:
+        row = conn.execute(
+            "SELECT disk_image_sha FROM catalog_entries WHERE src = ?",
+            ("file://operator.img",),
+        ).fetchone()
+    assert row["disk_image_sha"] == expected_sha
+
+
+def test_hash_completion_backfills_catalog_entries_by_ref_prefix(tmp_path: Path) -> None:
+    """v0.33.28+: a catalog-fetched cache file's catalog_entries row
+    has src=<upstream URL>, NOT ``file://catalog-<ref:12>-...``. A
+    manual ``POST /catalog/hashes/<catalog-name>`` would compute the
+    sha but the src-keyed UPDATE wouldn't find the row. The
+    ref-prefix LIKE clause does -- the 12-hex prefix in the cache
+    filename matches the catalog_entries.bty_image_ref column.
+    Without this backfill, a manual re-hash leaves the catalog
+    row's disk_image_sha NULL even though the file is fully hashed
+    and ready to serve."""
+    from bty.web import _db
+    from bty.web._hash import HashManager
+
+    state_db = tmp_path / "state.db"
+    _db.init_db(state_db)
+    payload = b"y" * 256
+    expected_sha = hashlib.sha256(payload).hexdigest()
+    # Construct a catalog row whose 12-hex bty_image_ref prefix
+    # matches the filename we'll write under image_root.
+    ref = "0123456789ab" + "f" * 52  # 64 hex chars, prefix '0123456789ab'
+    cache_name = "catalog-0123456789ab-someimage.img"
+    (tmp_path / cache_name).write_bytes(payload)
+    with _db.open_db(state_db) as conn:
+        conn.execute(
+            "INSERT INTO catalog_entries (bty_image_ref, src, name, format, "
+            "size_bytes, added_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                ref,
+                "https://example.invalid/someimage.img",
+                "someimage",
+                "img",
+                256,
+                "2026-05-26T00:00:00+00:00",
+            ),
+        )
+        conn.commit()
+
+    async def _drive() -> None:
+        mgr = HashManager(max_parallel=1)
+        mgr.start(tmp_path, state_path=state_db)
+        try:
+            await mgr.enqueue(cache_name)
+            for _ in range(100):
+                states = await mgr.list()
+                if states and states[0].status == "completed":
+                    break
+                await asyncio.sleep(0.01)
+        finally:
+            await mgr.stop()
+
+    _run(_drive())
+
+    with _db.open_db(state_db) as conn:
+        row = conn.execute(
+            "SELECT disk_image_sha FROM catalog_entries WHERE bty_image_ref = ?",
+            (ref,),
+        ).fetchone()
+    assert row["disk_image_sha"] == expected_sha
+
+
 def test_hash_state_to_dict_omits_unpicklable_event() -> None:
     """``HashState.to_dict`` must JSON-serialise without the
     ``threading.Event`` slipping through (which would explode

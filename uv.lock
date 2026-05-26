@@ -39,7 +39,7 @@ wheels = [
 
 [[package]]
 name = "bty-lab"
-version = "0.33.22"
+version = "0.33.28"
 source = { editable = "." }
 
 [package.optional-dependencies]

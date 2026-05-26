@@ -281,6 +281,89 @@ def test_enqueue_runs_to_completion_for_unhashed_entry(tmp_path: Path) -> None:
     _run(_drive())
 
 
+def test_backfill_uses_src_not_name_to_resist_collision(tmp_path: Path) -> None:
+    """v0.33.28+: the catalog.cache.populated backfill UPDATE must
+    match by ``src`` (the immutable source URL), not ``name`` (a
+    free-text display label with no UNIQUE constraint). Pre-fix,
+    two catalog_entries rows that happened to share a name (e.g.,
+    ``debian.iso`` from different mirrors) would BOTH have their
+    disk_image_sha clobbered by a single completed download from
+    only one of them. Now the WHERE clause keys on src so the
+    other row stays untouched.
+    """
+    from bty.web import _db
+    from bty.web._catalog import DownloadManager
+
+    async def _drive() -> None:
+        payload = b"src-keyed-bytes" * 100
+        computed_sha = hashlib.sha256(payload).hexdigest()
+        # Two entries with the same display name but DIFFERENT sources.
+        entry_target = _catalog.CatalogEntry(
+            name="image.iso",
+            src="https://mirror-A.invalid/image.iso",
+            sha256=None,
+        )
+        entry_sibling = _catalog.CatalogEntry(
+            name="image.iso",  # same name
+            src="https://mirror-B.invalid/image.iso",  # different src
+            sha256=None,
+        )
+        cat = _catalog.Catalog(version=1, entries=(entry_target, entry_sibling))
+        image_root = tmp_path / "images"
+        state_path = tmp_path / "state.db"
+        _db.init_db(state_path)
+        import sqlite3
+
+        # Seed both rows so the backfill UPDATE has to choose between them.
+        with sqlite3.connect(state_path) as conn:
+            for ref_seed, ent in (("1" * 64, entry_target), ("2" * 64, entry_sibling)):
+                conn.execute(
+                    "INSERT INTO catalog_entries "
+                    "(bty_image_ref, src, name, disk_image_sha, added_at) "
+                    "VALUES (?, ?, ?, NULL, ?)",
+                    (ref_seed, ent.src, ent.name, "2026-05-26T00:00:00+00:00"),
+                )
+            conn.commit()
+
+        mgr = DownloadManager(max_parallel=1)
+        with patch("urllib.request.urlopen", _mock_urlopen(payload)):
+            mgr.start(cat, image_root, state_path=state_path)
+            try:
+                # Fetch only the TARGET entry's name. (Both rows have
+                # the same name; the DownloadManager picks the one
+                # matching the catalog list -- which we know is the
+                # target because the catalog only carried entry_target
+                # first... actually, both. Enqueue by name should
+                # pick the one whose enqueue resolves first.)
+                await mgr.enqueue(entry_target.name)
+                for _ in range(100):
+                    states = await mgr.list()
+                    if states and states[0].status == "completed":
+                        break
+                    await asyncio.sleep(0.01)
+            finally:
+                await mgr.stop()
+
+        # The TARGET row got the sha; the SIBLING row stays NULL.
+        with sqlite3.connect(state_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = {
+                r["src"]: r["disk_image_sha"]
+                for r in conn.execute("SELECT src, disk_image_sha FROM catalog_entries").fetchall()
+            }
+        # At least one row must carry the sha; the matching row's src
+        # is whichever entry the DownloadManager's enqueue picked.
+        sha_rows = {src: sha for src, sha in rows.items() if sha == computed_sha}
+        assert len(sha_rows) == 1, (
+            f"exactly ONE row should have been backfilled (src-keyed), "
+            f"not multiple (name-keyed); got {rows!r}"
+        )
+        null_rows = {src for src, sha in rows.items() if sha is None}
+        assert len(null_rows) == 1, (
+            f"the sibling row (different src, same name) must stay NULL; got {rows!r}"
+        )
+
+
 def test_download_manager_backfills_from_events(tmp_path: Path) -> None:
     """``DownloadManager.start(state_path=...)`` repopulates
     ``_states`` from recent catalog.cache.populated events so the

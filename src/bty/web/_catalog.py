@@ -399,10 +399,19 @@ class DownloadManager(_BaseAsyncManager[DownloadState]):
 
             try:
                 with _db.open_db(self._state_path) as conn:
+                    # Match by ``src`` (the immutable source URL the
+                    # CatalogEntry was built from), not ``name``.
+                    # ``name`` is a free-text display label with no
+                    # UNIQUE constraint, so two operator-curated rows
+                    # for different upstreams that happen to share a
+                    # display name ("debian.iso") would both have their
+                    # disk_image_sha clobbered by a single completed
+                    # download. ``src`` is the only stable identifier
+                    # the DownloadManager carries through the fetch.
                     conn.execute(
                         "UPDATE catalog_entries SET disk_image_sha = ? "
-                        "WHERE name = ? AND disk_image_sha IS NULL",
-                        (computed_sha, state.name),
+                        "WHERE src = ? AND disk_image_sha IS NULL",
+                        (computed_sha, entry.src),
                     )
                     _events_log.record(
                         conn,

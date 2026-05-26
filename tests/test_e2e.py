@@ -27,6 +27,7 @@ chain works end-to-end on production-shaped inputs.
 from __future__ import annotations
 
 import hashlib
+import json
 import typing
 import urllib.error
 import urllib.request
@@ -550,6 +551,10 @@ def test_e2e_flash_always_alternates_flash_then_sanboot(app_client: TestClient) 
     # 2. The box boots the flasher: it fetches a /boot artifact w/ ?mac=.
     a = app_client.get(f"/boot/{ARTIFACT_NAMES[0]}?mac={mac}", headers=host)
     assert a.status_code == 200, a.text
+    # 2a. Flasher completes -> /pxe/{mac}/done. Required (v0.33.24+) for
+    # the sanboot consume to fire; armed-without-/done re-serves the
+    # flash chain.
+    assert app_client.post(f"/pxe/{mac}/done").status_code == 204
 
     # 3. Post-flash contact: one-shot sanboot of the just-flashed disk.
     body = app_client.get(f"/pxe/{mac}", headers=host).text
@@ -615,6 +620,9 @@ def test_e2e_flash_once_terminates_after_first_flash(app_client: TestClient) -> 
     # 2. The box boots the flasher: /boot fetch arms saw_flasher_boot.
     a = app_client.get(f"/boot/{ARTIFACT_NAMES[0]}?mac={mac}", headers=host)
     assert a.status_code == 200, a.text
+    # 2a. Flasher completes -> /pxe/{mac}/done (v0.33.24+ requirement
+    # for the sanboot consume; armed-without-/done re-serves the chain).
+    assert app_client.post(f"/pxe/{mac}/done").status_code == 204
 
     # 3. Post-flash contact: sanboot the just-flashed disk.
     body = app_client.get(f"/pxe/{mac}", headers=host).text
@@ -723,6 +731,13 @@ def test_e2e_inventory_alternates_liveenv_then_sanboot(app_client: TestClient) -
 
     # 2. Box boots the live env: fetches a /boot artifact w/ ?mac=.
     assert app_client.get(f"/boot/{ARTIFACT_NAMES[0]}?mac={mac}", headers=host).status_code == 200
+    # 2a. Live env's bty POSTs inventory (v0.33.24+ requirement for
+    # the sanboot consume; armed-without-inventory re-serves the chain).
+    inv_post = app_client.post(
+        f"/pxe/{mac}/inventory",
+        json={"disks": [{"path": "/dev/sda", "serial": "SN-LIVE"}]},
+    )
+    assert inv_post.status_code == 204, inv_post.text
 
     # 3. Post-inventory contact: one-shot sanboot of the disk.
     body = app_client.get(f"/pxe/{mac}", headers=host).text
@@ -1279,15 +1294,17 @@ def test_e2e_image_serve_routes_resolve_by_sha_or_filename(
     assert by_name.content == by_sha.content == payload
 
 
-def test_e2e_flash_safety_gate_no_target_disk_serial_logs_event(
+def test_e2e_flash_safety_gate_no_target_disk_serial_surfaces_reason(
     app_client: TestClient,
 ) -> None:
     """Operator binds a machine to a ref with bty-flash-once policy
     but forgets to set ``target_disk_serial``. The safety gate in
     /pxe/<mac> must:
       1. Refuse to render ipxe_flash.j2 (would wipe wrong disk).
-      2. Log a ``pxe.flash.no_target_disk`` event for operator
-         debugging visibility.
+      2. Carry ``reason: no_target_disk`` in the always-runs
+         ``netboot.pxe.offered`` event's details (v0.33.26+
+         collapsed the standalone failure event into the offered
+         event's reason field).
       3. Fall through to the local-boot / sanboot template.
 
     Regression coverage for the v0.13.x-era safety gate that exists
@@ -1339,16 +1356,17 @@ def test_e2e_flash_safety_gate_no_target_disk_serial_logs_event(
         "This is the regression that would wipe the wrong disk on a multi-disk host."
     )
 
-    # And the event log records the refusal.
+    # And the offered event's details carry the refusal reason.
     with _bty_db.open_db(state_path) as conn:
         rows = conn.execute(
-            "SELECT kind FROM events WHERE subject_id = ? ORDER BY id DESC LIMIT 5",
+            "SELECT kind, details FROM events WHERE subject_id = ? ORDER BY id DESC LIMIT 5",
             (mac,),
         ).fetchall()
-    kinds = {r["kind"] for r in rows}
-    assert "netboot.pxe.flash.no_target_disk" in kinds, (
-        f"safety gate fired but did not log pxe.flash.no_target_disk event "
-        f"for operator debugging visibility. events: {kinds}"
+    offered = next(r for r in rows if r["kind"] == "netboot.pxe.offered")
+    details = json.loads(offered["details"])
+    assert details["reason"] == "no_target_disk", (
+        f"safety gate fired but pxe.offered did not carry "
+        f"reason=no_target_disk in details: {details}"
     )
 
 

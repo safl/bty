@@ -1802,6 +1802,56 @@ def test_ui_settings_upstream_override_round_trips(client: TestClient) -> None:
     assert "safl/bty" in body2
 
 
+def test_ui_settings_upstream_audit_event_captures_old_and_new(
+    client: TestClient,
+) -> None:
+    """v0.33.28+: settings.upstream.updated event details carries
+    both ``old`` and ``new`` for each of the three knobs. Pre-fix
+    the event only had the summary string with the new values; an
+    operator auditing "what was the catalog URL before this change?"
+    or a drift-tracking script comparing successive events had no
+    before/after visibility. Now details has the structured
+    {release_repo, catalog_url, release_tag} -> {old, new} shape."""
+    _login(client)
+    # Initial save: olds are all None (defaults in effect).
+    r1 = client.post(
+        "/ui/settings/upstream",
+        data={
+            "release_repo": "acme/bty-fork",
+            "catalog_url": "https://first.invalid/catalog.toml",
+            "release_tag": "v1.0.0",
+        },
+        follow_redirects=False,
+    )
+    assert r1.status_code == 303
+    # Change two of three values + clear one to test all three shapes.
+    r2 = client.post(
+        "/ui/settings/upstream",
+        data={
+            "release_repo": "acme/bty-fork",  # unchanged
+            "catalog_url": "https://second.invalid/catalog.toml",
+            "release_tag": "",  # cleared
+        },
+        follow_redirects=False,
+    )
+    assert r2.status_code == 303
+    events = client.get(
+        "/events",
+        params={"kind": "settings.upstream.updated"},
+    ).json()["events"]
+    assert len(events) >= 2
+    # The newest event captures the second save -- the BEFORE state
+    # of which was the first save's values.
+    newest = events[0]
+    d = newest["details"]
+    assert d["release_repo"] == {"old": "acme/bty-fork", "new": "acme/bty-fork"}
+    assert d["catalog_url"] == {
+        "old": "https://first.invalid/catalog.toml",
+        "new": "https://second.invalid/catalog.toml",
+    }
+    assert d["release_tag"] == {"old": "v1.0.0", "new": None}
+
+
 def test_ui_settings_renders_backup_schedule_card(client: TestClient) -> None:
     """The Settings page carries a Backup schedule card with the
     three knobs (enabled / cadence / retention) and the read-only
