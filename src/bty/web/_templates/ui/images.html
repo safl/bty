@@ -82,7 +82,12 @@
                     </td>
                     <td>
                         {% if u.sha256 %}
-                        <code title="{{ u.sha256 }}">{{ u.sha256[:12] }}...</code>
+                        <button type="button"
+                                class="btn btn-sm btn-link p-0 align-baseline bty-sha-copy text-decoration-none"
+                                data-sha="{{ u.sha256 }}"
+                                title="Click to copy the full sha256 ({{ u.sha256 }}) to the clipboard.">
+                            <code>{{ u.sha256[:8] }}</code><i class="bi bi-clipboard ms-1"></i>
+                        </button>
                         {% else %}
                         <span class="badge bg-warning text-dark"
                               title="content sha not computed yet; the entry is still bindable because machines bind by bty_image_ref. The sha lands when the HashManager finishes (local files) or after an explicit Download (remote sources)">unhashed</span>
@@ -330,7 +335,59 @@
     document.addEventListener("bty-worker-events-connected", syncButtonsFromPoll);
     syncButtonsFromPoll();  // initial draw, no wait
 
+    function fallbackCopy(text) {
+        // Non-HTTPS / no-Clipboard-API fallback: hidden textarea +
+        // document.execCommand("copy"). Returns true on success.
+        try {
+            var ta = document.createElement("textarea");
+            ta.value = text;
+            ta.setAttribute("readonly", "");
+            ta.style.position = "absolute";
+            ta.style.left = "-9999px";
+            document.body.appendChild(ta);
+            ta.select();
+            var ok = document.execCommand("copy");
+            document.body.removeChild(ta);
+            return ok;
+        } catch (e) {
+            return false;
+        }
+    }
+
+    function flashCopyFeedback(btn) {
+        // Brief visual confirmation: swap the clipboard icon for a
+        // check, restore after 1.2s. Same pattern as `journalctl
+        // --copy` UI affordances.
+        var icon = btn.querySelector("i.bi");
+        if (!icon) return;
+        var orig = icon.className;
+        icon.className = "bi bi-check2 ms-1 text-success";
+        window.setTimeout(function () {
+            icon.className = orig;
+        }, 1200);
+    }
+
     document.addEventListener("click", function (ev) {
+        var shaBtn = ev.target.closest(".bty-sha-copy");
+        if (shaBtn) {
+            ev.preventDefault();
+            var sha = shaBtn.getAttribute("data-sha");
+            if (!sha) return;
+            // Modern clipboard API; falls back to a hidden textarea
+            // + execCommand for browsers without it (and for non-HTTPS
+            // contexts where Clipboard API is unavailable). bty-web
+            // typically runs on http://lab-ip:8080, so the fallback
+            // path is the common one.
+            var done = function () { flashCopyFeedback(shaBtn); };
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(sha).then(done).catch(function () {
+                    fallbackCopy(sha) && done();
+                });
+            } else if (fallbackCopy(sha)) {
+                done();
+            }
+            return;
+        }
         var fetchBtn = ev.target.closest(".bty-fetch-btn");
         if (fetchBtn) {
             ev.preventDefault();
