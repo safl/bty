@@ -9,6 +9,44 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.33.20] - 2026-05-26
+
+**`bty-state-init` tool.** Sibling of `bty-state-migrate`: wipes,
+partitions (GPT), formats (ext4, label `BTY_IMAGE_STORE`), and
+mounts a target disk at `/var/lib/bty`. Differs from migrate by
+NOT copying the existing state -- it's for starting fresh.
+
+### Why two tools
+
+- `bty-state-migrate /dev/sdX` -- relocate the current state to a
+  separate disk. Copies `/var/lib/bty` contents onto the new disk
+  before mount.
+- `bty-state-init /dev/sdX` -- prepare a fresh disk, discard any
+  existing state. Leaves the mount empty; bty-web's first-start
+  lifespan stamps `state.db` + writes `images/.bty-storage.json`
+  so the populate path lives in one place (the v0.33.19 storage
+  marker logic).
+
+### Safety rails (same as migrate)
+
+- refuses to format the rootfs disk
+- refuses a device with currently-mounted partitions
+- refuses when `/var/lib/bty` is already a separate mount
+  (`bty-state-init` is more conservative than migrate's no-op:
+  unmount first if you really want a reset)
+- confirmation prompt unless `--yes`
+
+### Tests + docs
+
+- `tests/test_state_init.py` -- subprocess smoke tests for the
+  argument parser + non-destructive validation rails
+  (help, no-args, unknown-flag, non-root / non-block-device)
+- `docs/src/walkthrough-image-store.md` carries a new
+  "Starting from scratch with a fresh disk" section explaining
+  when to use which tool
+
+Suite 850 -> 854.
+
 ## [0.33.19] - 2026-05-26
 
 **Storage format version + inventory-format decoupling.** Operator-

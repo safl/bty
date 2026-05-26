@@ -101,6 +101,29 @@ so by the time it starts, the cache, netboot artifacts, and machine
 inventory are where they were before the reflash. No operator action, no
 re-inventorying.
 
+## Starting from scratch with a fresh disk
+
+If you'd rather start with an empty BTY_IMAGE_STORE volume (no
+state-dir contents copied from the rootfs -- you want bty fully reset),
+use `bty-state-init` instead of `bty-state-migrate`:
+
+```bash
+sudo bty-state-init /dev/sdX
+```
+
+Same validation rails (refuses the rootfs disk, refuses
+already-mounted partitions, prompts for confirmation), same
+wipe + GPT + ext4 + label + fstab + mount flow. The difference is
+that `bty-state-init` does NOT copy your existing `/var/lib/bty` --
+it discards it. bty-web's first-start lifespan stamps `state.db`
+and writes `images/.bty-storage.json` on the empty mount, so the
+populate path lives in one place (the running code) rather than
+duplicated in the shell script.
+
+Use `bty-state-migrate` when you want to RELOCATE the current
+state to a separate disk; use `bty-state-init` when you want to
+RESET to an empty state on a separate disk.
+
 ## Day-2: moving the state to a different machine
 
 The disk is portable: unplug it, plug it into another bty-server box,
