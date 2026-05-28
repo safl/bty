@@ -1098,14 +1098,20 @@ def _flash_bz2(
 def _flash_qcow2(image: Path, target: Path) -> None:
     """Write a qcow2 to a block device by converting to raw in place.
 
-    qemu-img convert ``-p`` emits percentage-based progress to stderr
-    in a different format than ``dd``; byte-level progress for qcow2
-    is not yet plumbed through to the ``writing_progress`` event.
+    Byte-level progress for qcow2 isn't plumbed through to the
+    ``writing_progress`` event, so ``-p`` is dropped and stderr is
+    captured instead: a failed convert then surfaces qemu-img's actual
+    diagnostic (``Could not open ...``, permission denied, a corrupt
+    -image message) in the ``FlashError`` rather than a bare exit code,
+    which is what an operator needs when a block-device write fails.
     """
-    cmd = ["qemu-img", "convert", "-p", "-O", "raw", str(image), str(target)]
-    rc = subprocess.run(cmd, check=False).returncode
-    if rc != 0:
-        raise FlashError(f"qemu-img convert exited {rc} writing {image} -> {target}")
+    cmd = ["qemu-img", "convert", "-O", "raw", str(image), str(target)]
+    proc = subprocess.run(cmd, check=False, stderr=subprocess.PIPE, text=True)
+    if proc.returncode != 0:
+        detail = (proc.stderr or "").strip() or "no stderr captured"
+        raise FlashError(
+            f"qemu-img convert exited {proc.returncode} writing {image} -> {target}: {detail}"
+        )
 
 
 # ---------- URL-streaming variants -------------------------------------------
