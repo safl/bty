@@ -9,6 +9,33 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.34.0] - 2026-05-28
+
+**Robustness pass: clearer flash failures, sturdier disk discovery,
+and a hardened image bake.** No behaviour change for a working
+appliance; the wins show up when something goes wrong.
+
+- **Failed qcow2 flashes now report the real reason.** A failed
+  ``qemu-img convert`` previously surfaced only a numeric exit code;
+  bty now captures qemu-img's diagnostic (``Could not open ...``,
+  permission denied, corrupt-image) and includes it in the error,
+  which is what an operator needs when a block-device write fails.
+- **Disk discovery degrades gracefully** if ``lsblk`` returns
+  unparseable JSON (a zero-exit-with-empty-output edge on cut-down
+  busybox builds) instead of crashing the disk picker.
+- **The server-image bake fails loudly instead of shipping a broken
+  image.** ``diskimage_build`` now verifies cloud-init actually
+  completed (gated on a marker echoed only if the whole ``set -eu``
+  runcmd succeeded) and dumps the offending command on failure --
+  and the r8125 DKMS build now targets the kernel whose headers are
+  installed (the trixie-backports kernel the appliance boots) rather
+  than a blind ``ls | head -1``, which on a kernel-version drift had
+  silently shipped an appliance whose bty-web never started.
+- Internal: corrected two inaccurate docstrings/comments (the audit
+  ``record()`` commit contract and the backup-cancel event note) and
+  strengthened /ui/images action-button + scheduler-audit test
+  coverage.
+
 ## [0.33.30] - 2026-05-28
 
 **Starter catalog refreshed for nosi's renamed variants.** nosi
