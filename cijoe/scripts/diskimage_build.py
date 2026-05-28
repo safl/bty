@@ -95,10 +95,93 @@ def _wait_for_poweroff(guest, timeout_s: int) -> bool:
     return False
 
 
+# Substrings (matched case-insensitively) that flag the line that
+# aborted provisioning: apt/dpkg resolution failures, pip resolution
+# failures, shell/python errors, and the cloud-final unit failure.
+_ERR_SUBSTRINGS = (
+    "unable to locate package",
+    "has no installation candidate",
+    "is not going to be installed",
+    "unmet dependencies",
+    "broken packages",
+    "failed to fetch",
+    "dpkg: error",
+    "sub-process",
+    "returned a non-zero",
+    "returned an error code",
+    "traceback (most recent call last)",
+    "no module named",
+    "command not found",
+    "could not find a version",
+    "no matching distribution",
+    "error:",
+    "fatal:",
+    "failed to start cloud-final",
+)
+
+# Substrings of the systemd poweroff/teardown cascade. The build VM
+# powers off after cloud-init (success OR failure), emitting ~100 lines
+# of "Stopped/Removed/Unmounting ..." teardown that would swamp a blind
+# tail. Filtered out of the no-explicit-error fallback dump so it shows
+# actual provisioning output, not teardown.
+_TEARDOWN_MARKERS = (
+    "stopped ",
+    "stopping ",
+    "stopped target",
+    "stopping target",
+    "removed slice",
+    "unmounting ",
+    "unmounted ",
+    "closed ",
+    "unset ",
+    "deactivat",
+    "reached target shutdown",
+    "reached target umount",
+    "reached target final",
+    "reached target poweroff",
+    "systemd-shutdown",
+    "sd-umount",
+    "sd-remount",
+    "power down",
+    "powering off",
+    "reboot:",
+    "acpi: pm:",
+    "kvm: exiting",
+    "syncing filesystems",
+)
+
+
+def _dump_cloudinit_failure(text: str) -> None:
+    """Log the slice of the build VM's serial console that names the
+    command which aborted provisioning: the error-line context if any
+    error signature matched, else the provisioning tail with the
+    systemd teardown cascade filtered out."""
+    lines = [ln.rstrip("\r") for ln in text.splitlines() if ln.strip()]
+    low = [ln.lower() for ln in lines]
+    err_idx = [i for i, ln in enumerate(low) if any(sig in ln for sig in _ERR_SUBSTRINGS)]
+    if err_idx:
+        lo = max(0, err_idx[0] - 6)
+        hi = min(len(lines), err_idx[-1] + 6)
+        if hi - lo > 250:
+            lo = max(0, err_idx[-1] - 244)
+        log.error("--- cloud-init error context (build VM serial) ---")
+        for ln in lines[lo:hi]:
+            log.error(ln)
+        return
+    keep = [
+        ln
+        for ln, lo_ln in zip(lines, low, strict=True)
+        if not any(m in lo_ln for m in _TEARDOWN_MARKERS)
+    ]
+    log.error("--- cloud-init output tail (no explicit error matched) ---")
+    for ln in (keep or lines)[-200:]:
+        log.error(ln)
+
+
 def _gate_on_cloudinit_marker(guest) -> int:
     """Verify cloud-init fully provisioned the build VM. Returns 0 on
-    success; on failure logs the serial-console tail (which names the
-    command that aborted provisioning) and returns an errno."""
+    success; on failure logs the serial section that names the command
+    which aborted provisioning and returns an errno."""
     serial = guest.serial
     text = serial.read_text(errors="replace") if serial.exists() else ""
     if _CLOUDINIT_OK_MARKER in text:
@@ -107,12 +190,9 @@ def _gate_on_cloudinit_marker(guest) -> int:
     log.error(
         f"cloud-init did not complete: marker {_CLOUDINIT_OK_MARKER!r} absent "
         "from the build VM's serial console. The disk is half-provisioned "
-        "(boots, but bty-web never starts) -- refusing to capture it. The "
-        "cloud-init console tail follows; the last command shown is where "
-        "provisioning aborted under set -eu:"
+        "(boots, but bty-web never starts) -- refusing to capture it."
     )
-    for line in text.splitlines()[-150:]:
-        log.error(line)
+    _dump_cloudinit_failure(text)
     return errno.EIO
 
 
@@ -270,12 +350,8 @@ def main(args, cijoe):
 
     if not _wait_for_poweroff(guest, _BAKE_TIMEOUT_S):
         log.error(f"build VM did not power off within {_BAKE_TIMEOUT_S}s; aborting bake")
-        for line in (
-            guest.serial.read_text(errors="replace").splitlines()[-150:]
-            if guest.serial.exists()
-            else []
-        ):
-            log.error(line)
+        if guest.serial.exists():
+            _dump_cloudinit_failure(guest.serial.read_text(errors="replace"))
         guest.kill()
         return errno.ETIMEDOUT
 
