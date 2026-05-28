@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import errno
 import logging as log
+import os
 import time
 from argparse import ArgumentParser
 from pathlib import Path
@@ -44,6 +45,75 @@ DISK_SIZE = "6G"
 # escalating backoff before failing the release.
 _DOWNLOAD_RETRIES = 3
 _DOWNLOAD_BACKOFF_S = (5, 15, 45)
+
+# Bake success-gate. The cloud-init userdata's final ``runcmd`` entry
+# echoes this exact marker to ``/dev/console`` -- and because the
+# userdata runs the whole concatenated runcmd script under ``set -eu``,
+# the marker is reached ONLY if every provisioning command succeeded.
+# A drifted unpinned dependency (or any other failing command) aborts
+# the script before the echo, so the marker never appears on the serial
+# console. We boot the build VM daemonized (serial -> file), wait for
+# it to power off, then refuse to capture the disk if the marker is
+# absent -- turning a silent half-provisioned image (which boots but
+# never brings up bty-web) into a loud bake failure that names the
+# offending command in the serial tail. Keep this string in sync with
+# the ``echo`` in ``bty-media/auxiliary/cloudinit-base-server.user``.
+_CLOUDINIT_OK_MARKER = "BTY-CLOUDINIT-PROVISION-OK"
+
+# Upper bound on how long cloud-init may take inside the build VM
+# (apt install + python venv + pip install of the [web] extra + cijoe,
+# from a cold cloud image). Generous: the build-media CI job budgets
+# 90 min for the whole variant. On timeout we dump the serial tail and
+# fail rather than hang to the job-level limit.
+_BAKE_TIMEOUT_S = 2400
+
+
+def _wait_for_poweroff(guest, timeout_s: int) -> bool:
+    """Block until the daemonized build VM powers off (cloud-init's
+    ``power_state``), or ``timeout_s`` elapses. Returns True iff the
+    guest terminated.
+
+    Polls process liveness via ``os.kill(pid, 0)`` rather than the
+    pidfile alone: a clean qemu exit unlinks the pidfile, but checking
+    the process directly is robust even if it doesn't.
+    """
+    pid = guest.get_pid()
+    if pid == 0:
+        return True
+    waited = 0
+    while waited < timeout_s:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return True
+        except PermissionError:
+            pass  # alive, just not signalable by us -- treat as running
+        if guest.get_pid() == 0:
+            return True
+        time.sleep(2)
+        waited += 2
+    return False
+
+
+def _gate_on_cloudinit_marker(guest) -> int:
+    """Verify cloud-init fully provisioned the build VM. Returns 0 on
+    success; on failure logs the serial-console tail (which names the
+    command that aborted provisioning) and returns an errno."""
+    serial = guest.serial
+    text = serial.read_text(errors="replace") if serial.exists() else ""
+    if _CLOUDINIT_OK_MARKER in text:
+        log.info("cloud-init provisioning marker found; image fully provisioned")
+        return 0
+    log.error(
+        f"cloud-init did not complete: marker {_CLOUDINIT_OK_MARKER!r} absent "
+        "from the build VM's serial console. The disk is half-provisioned "
+        "(boots, but bty-web never starts) -- refusing to capture it. The "
+        "cloud-init console tail follows; the last command shown is where "
+        "provisioning aborted under set -eu:"
+    )
+    for line in text.splitlines()[-150:]:
+        log.error(line)
+    return errno.EIO
 
 
 def _download_with_retry(url: str, dst: Path) -> int:
@@ -188,9 +258,29 @@ def main(args, cijoe):
         log.error("Failed creating seed ISO")
         return err
 
-    err = guest.start(daemonize=False, extra_args=["-cdrom", str(seed_img)])
+    # Daemonize so the serial console is captured to ``guest.serial``
+    # (the wrapper routes serial -> file in daemonize mode). cloud-init
+    # provisions, echoes the success marker to /dev/console, then powers
+    # off; we wait for that, then gate on the marker before capturing.
+    guest.serial.unlink(missing_ok=True)
+    err = guest.start(daemonize=True, extra_args=["-cdrom", str(seed_img)])
     if err:
-        log.error("Cloud-init provisioning failed")
+        log.error("Cloud-init provisioning failed (qemu did not launch)")
+        return err
+
+    if not _wait_for_poweroff(guest, _BAKE_TIMEOUT_S):
+        log.error(f"build VM did not power off within {_BAKE_TIMEOUT_S}s; aborting bake")
+        for line in (
+            guest.serial.read_text(errors="replace").splitlines()[-150:]
+            if guest.serial.exists()
+            else []
+        ):
+            log.error(line)
+        guest.kill()
+        return errno.ETIMEDOUT
+
+    err = _gate_on_cloudinit_marker(guest)
+    if err:
         return err
 
     disk_path = Path(disk["path"])

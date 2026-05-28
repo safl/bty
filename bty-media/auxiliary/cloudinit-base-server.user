@@ -9,6 +9,15 @@
 # write_files block by gen_userdata.py. The bty-lab wheel staged by
 # scripts/bty_wheel_stage.py rides through there as well.
 
+# Tee every cloud-init stage's stdout/stderr to the serial console
+# (/dev/console -> ttyS0) on top of the usual log file. The bake
+# orchestrator (cijoe/scripts/diskimage_build.py) captures the build
+# VM's serial console to a file; teeing here means a failed bake can
+# show exactly which provisioning command aborted, instead of the
+# error dying in /var/log/cloud-init-output.log on the discarded VM.
+output:
+  all: "| tee -a /var/log/cloud-init-output.log /dev/console"
+
 hostname: __BTY_HOSTNAME__
 fqdn: __BTY_HOSTNAME__.local
 manage_etc_hosts: true
@@ -535,6 +544,15 @@ runcmd:
   - apt-get clean
   - rm -rf /var/lib/apt/lists/*
   - rm -rf /root/.cache /home/*/.cache
+
+  # Bake success-gate sentinel: MUST be the last runcmd entry. The
+  # whole concatenated runcmd script runs under the ``set -eu`` set at
+  # the top, so this echo is reached ONLY if every preceding command
+  # succeeded. diskimage_build.py greps the build VM's serial console
+  # for this exact string and refuses to capture a half-provisioned
+  # disk when it's absent. Keep in sync with ``_CLOUDINIT_OK_MARKER``
+  # in cijoe/scripts/diskimage_build.py.
+  - echo 'BTY-CLOUDINIT-PROVISION-OK' > /dev/console
 
 power_state:
   mode: poweroff
