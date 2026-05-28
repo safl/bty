@@ -36,7 +36,17 @@ def list_disks() -> list[dict[str, Any]]:
         # in <100ms on every box I've tested.
         timeout=10,
     )
-    payload = json.loads(proc.stdout)
+    try:
+        payload = json.loads(proc.stdout)
+    except json.JSONDecodeError as exc:
+        # lsblk exited 0 but emitted non-JSON. ``check=True`` covers a
+        # non-zero exit, but a zero-exit-with-truncated/empty-stdout
+        # (seen on cut-down busybox lsblk builds) would otherwise raise
+        # an uncaught ``ValueError`` and crash disk selection. Surface
+        # it as a SubprocessError so the callers that already guard
+        # lsblk failures (the TUI disk picker, the CLI) degrade to "no
+        # disks discoverable" instead of tracing back.
+        raise subprocess.SubprocessError(f"lsblk returned unparseable JSON: {exc}") from exc
     devices: list[dict[str, Any]] = payload.get("blockdevices", [])
 
     out: list[dict[str, Any]] = []
