@@ -2414,6 +2414,26 @@ def test_ui_images_renders_fetch_button_for_unhashed_url_entry(
     assert "disabled" not in fetch_btn.group(0), (
         f"Fetch should be enabled on a URL-only entry: {fetch_btn.group(0)!r}"
     )
+    # Update + Cache-delete gate on ``cached``; a never-cached entry
+    # must render them DISABLED (the always-render-with-disabled
+    # contract -- presence of the button alone is not enough to prove
+    # the gate works).
+    update_btn = re.search(r"<button[^>]*bty-update-btn[^>]*>", row_html)
+    assert update_btn is not None and "disabled" in update_btn.group(0), (
+        f"Update must be disabled on an un-cached entry: "
+        f"{update_btn.group(0) if update_btn else None!r}"
+    )
+    cache_del_btn = re.search(r"<button[^>]*bty-cache-delete-btn[^>]*>", row_html)
+    assert cache_del_btn is not None and "disabled" in cache_del_btn.group(0), (
+        f"Cache-delete must be disabled when nothing is cached: "
+        f"{cache_del_btn.group(0) if cache_del_btn else None!r}"
+    )
+    # Entry-delete is gated only on has-remote, so it IS enabled here.
+    entry_del_btn = re.search(r"<button[^>]*bty-catalog-entry-delete-btn[^>]*>", row_html)
+    assert entry_del_btn is not None and "disabled" not in entry_del_btn.group(0), (
+        f"Entry-delete must be enabled for a remote entry: "
+        f"{entry_del_btn.group(0) if entry_del_btn else None!r}"
+    )
     # And confirm the Hash button is gone entirely.
     assert "bty-hash-btn" not in row_html, (
         "Hash button removed in v0.33.29+; should not appear on any row"
@@ -2443,12 +2463,22 @@ def test_ui_images_renders_cache_delete_button_when_cached(
     # Set up a state.db with one entry pointing at a cached file.
     state_path = tmp_path / "state.db"
     _bty_db.init_db(state_path)
-    # Seed the cache directory + sha sidecar so the merge marks
-    # the row as ``cached``.
-    cache_dir = tmp_path / "bty-state" / "cache"
-    cache_dir.mkdir(parents=True)
+    # Mark the row ``cached`` by placing bytes at the URL-keyed local
+    # filename under the app's image_root. Since v0.31.0 the cache IS
+    # the image_root (no separate cache dir); ``is_cached`` trusts the
+    # presence of a file at ``image_root/local_filename_for(ref, name,
+    # fmt)``. (The client fixture's image_root is ``tmp_path/images``.)
+    # merge_with_catalog recomputes the ref from the *src* (not the
+    # stored bty_image_ref column), so the cached filename must key on
+    # image_ref_for_src(src), exactly as the merge does.
+    from bty import catalog as _bty_catalog
+
     sha = "a" * 64
-    (cache_dir / sha).write_bytes(b"\0" * 256)
+    src = "oras://ghcr.io/example/foo:latest"
+    image_root = tmp_path / "images"
+    _ref = _bty_catalog.image_ref_for_src(src)
+    cached_name = _bty_catalog.local_filename_for(_ref, "Example image (rolling)", "img.gz")
+    (image_root / cached_name).write_bytes(b"\0" * 256)
 
     with _bty_db.open_db(state_path) as conn:
         conn.execute(
@@ -2458,7 +2488,7 @@ def test_ui_images_renders_cache_delete_button_when_cached(
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 "b" * 64,
-                "oras://ghcr.io/example/foo:latest",
+                src,
                 sha,
                 "Example image (rolling)",
                 None,
@@ -2482,6 +2512,40 @@ def test_ui_images_renders_cache_delete_button_when_cached(
     assert "bty-catalog-entry-delete-btn" in body, (
         "missing entry-delete button on a manifest-source entry; "
         "operator can't remove the entry from the UI"
+    )
+    # Strengthen beyond mere presence: on a cached remote entry the
+    # gates must put Update + Cache-delete ENABLED and Fetch DISABLED
+    # (always-render-with-disabled contract). A bare "button in body"
+    # check would still pass if every gate were inverted.
+    import re
+
+    # The client fixture also seeds a local demo.qcow2 row, so scope to
+    # the catalog row by its unique content sha rather than assuming a
+    # single body row.
+    rows = re.findall(r'<tr data-row-name="[^"]*".*?</tr>', body, flags=re.DOTALL)
+    row_html = next((r for r in rows if ("a" * 64) in r), None)
+    assert row_html is not None, "expected the cached catalog row (by sha)"
+    update_btn = re.search(r"<button[^>]*bty-update-btn[^>]*>", row_html)
+    assert update_btn is not None and "disabled" not in update_btn.group(0), (
+        f"Update must be enabled on a cached remote entry: "
+        f"{update_btn.group(0) if update_btn else None!r}"
+    )
+    cache_del_btn = re.search(r"<button[^>]*bty-cache-delete-btn[^>]*>", row_html)
+    assert cache_del_btn is not None and "disabled" not in cache_del_btn.group(0), (
+        f"Cache-delete must be enabled on a cached entry: "
+        f"{cache_del_btn.group(0) if cache_del_btn else None!r}"
+    )
+    fetch_btn = re.search(r"<button[^>]*bty-fetch-btn[^>]*>", row_html)
+    assert fetch_btn is not None and "disabled" in fetch_btn.group(0), (
+        f"Fetch must be disabled once bytes are cached: "
+        f"{fetch_btn.group(0) if fetch_btn else None!r}"
+    )
+    # Content SHA copy button: carries the FULL 64-hex sha in data-sha
+    # while the visible <code> shows only the 8-char prefix.
+    data_sha = re.search(r'data-sha="([0-9a-f]{64})"', row_html)
+    assert data_sha is not None, "sha-copy button must carry a full 64-hex sha in data-sha"
+    assert f"<code>{data_sha.group(1)[:8]}</code>" in row_html, (
+        "visible Content SHA must be the 8-char prefix of the full data-sha"
     )
 
 

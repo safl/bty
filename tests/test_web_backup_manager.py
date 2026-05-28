@@ -312,6 +312,15 @@ def test_scheduler_tick_enqueues_when_due(tmp_path: Path) -> None:
             rows = await mgr.list()
             assert len(rows) == 1
             assert rows[0].trigger == "scheduled"
+            # The scheduler-initiated request lands an audit event with
+            # actor=system -- the symmetric counterpart to the operator
+            # HTTP handler's backup.create.requested (actor=operator).
+            # Without this, a regression that drops the scheduler-side
+            # event would be invisible (the enqueue still happens).
+            with _db.open_db(state_path) as conn:
+                reqs = _events_log.list_events(conn, kind="backup.create.requested")
+            assert len(reqs) == 1, reqs
+            assert reqs[0].actor == "system"
         finally:
             await mgr.stop()
 
