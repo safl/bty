@@ -256,7 +256,27 @@ runcmd:
   # introduces a regression.
   - |
     set -eu
-    KVER=$(ls /lib/modules | head -1)
+    # Build against the kernel whose headers are actually installed --
+    # the linux-headers-amd64 (trixie-backports) kernel that the
+    # appliance boots after reflash -- NOT whatever the bake VM happens
+    # to be running. The Debian daily cloud image boots its own stock
+    # kernel (e.g. 6.12.x+deb13); installing linux-{image,headers}-amd64
+    # from backports adds a newer kernel + its headers but does not
+    # reboot the bake VM. A blind ``ls /lib/modules | head -1`` picks
+    # the alphabetically-first dir, which is the running stock kernel
+    # whose headers are absent -- so ``dkms build`` failed with "kernel
+    # headers ... cannot be found" and (under set -eu) aborted the rest
+    # of cloud-init's runcmd. Pick the highest-versioned modules dir
+    # that has a ``build`` symlink (headers present) instead.
+    KVER=""
+    for moddir in /lib/modules/*/; do
+        [ -e "${moddir}build" ] || continue
+        KVER=$(basename "${moddir}")
+    done
+    if [ -z "${KVER}" ]; then
+        echo "r8125-dkms: no installed kernel headers under /lib/modules" >&2
+        exit 1
+    fi
     rm -rf /usr/src/r8125-build
     git clone --depth 1 --branch master \
         https://github.com/awesometic/realtek-r8125-dkms.git \

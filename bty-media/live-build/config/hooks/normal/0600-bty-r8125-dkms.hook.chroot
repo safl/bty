@@ -47,9 +47,21 @@ set -eu
 R8125_REPO="https://github.com/awesometic/realtek-r8125-dkms.git"
 R8125_REV="master"
 
-KVER=$(ls /lib/modules 2>/dev/null | head -1 || true)
+# Build against the kernel whose headers are actually installed,
+# selected by the presence of a ``build`` symlink rather than a blind
+# ``ls | head -1``. In this chroot that is normally the single
+# linux-image-amd64 (trixie-backports) kernel, but picking by headers
+# keeps the bake correct if a second kernel ever lands here -- the same
+# desync that broke the server cloud-init bake, where the build VM ran
+# a stock kernel while only the backports kernel's headers were present
+# and ``head -1`` selected the header-less one.
+KVER=""
+for moddir in /lib/modules/*/; do
+    [ -e "${moddir}build" ] || continue
+    KVER=$(basename "${moddir}")
+done
 if [ -z "${KVER}" ]; then
-    echo "0600-bty-r8125-dkms: no kernel in /lib/modules; chroot package install must run first" >&2
+    echo "0600-bty-r8125-dkms: no installed kernel headers under /lib/modules; chroot package install must run first" >&2
     exit 1
 fi
 
