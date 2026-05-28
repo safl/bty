@@ -14,24 +14,53 @@ version = 1
 # ``scripts/generate_catalog_toml.py``. Only the bty-server entry
 # carries the placeholder; the oras:// nosi entries use rolling
 # :latest tags that don't change per release.
+#
+# The nosi entries mirror nosi's own published catalog
+# (https://github.com/safl/nosi/releases/latest/download/catalog.toml),
+# which is the canonical, auto-generated source. The wsl rootfs is
+# absent: it's imported via ``wsl --import``, not flashed.
 
 [[images]]
-name = "nosi debian-sysdev (x86_64, rolling)"
-src = "oras://ghcr.io/safl/nosi/debian-sysdev:latest"
+name = "nosi debian-13-headless (x86_64, rolling)"
+src = "oras://ghcr.io/safl/nosi/debian-13-headless:latest"
 format = "img.gz"
-description = "Debian 13 trixie sysdev image, x86_64"
+description = "Debian 13 (trixie) headless. The nicer user-land choices and stability; general-purpose headless base when HW-vendor stacks aren't load-bearing."
 
 [[images]]
-name = "nosi ubuntu-sysdev (x86_64, rolling)"
-src = "oras://ghcr.io/safl/nosi/ubuntu-sysdev:latest"
+name = "nosi ubuntu-2404-headless (x86_64, rolling)"
+src = "oras://ghcr.io/safl/nosi/ubuntu-2404-headless:latest"
 format = "img.gz"
-description = "Ubuntu 26.04 LTS resolute sysdev image, x86_64"
+description = "Ubuntu 24.04 LTS (noble) headless. For HW to get driver-support for CUDA / ROCm devices and Mellanox NICs / DPUs."
 
 [[images]]
-name = "nosi fedora-sysdev (x86_64, rolling)"
-src = "oras://ghcr.io/safl/nosi/fedora-sysdev:latest"
+name = "nosi ubuntu-2604-headless (x86_64, rolling)"
+src = "oras://ghcr.io/safl/nosi/ubuntu-2604-headless:latest"
 format = "img.gz"
-description = "Fedora 44 sysdev image, x86_64"
+description = "Ubuntu 26.04 LTS (resolute) headless. For a more recent kernel and user-land packages on Ubuntu LTS."
+
+[[images]]
+name = "nosi fedora-44-headless (x86_64, rolling)"
+src = "oras://ghcr.io/safl/nosi/fedora-44-headless:latest"
+format = "img.gz"
+description = "Fedora 44 headless. An alternative from the RHEL family for operators in Red-Hat-shaped environments (dnf, SELinux, RHEL/EL package universe)."
+
+[[images]]
+name = "nosi fedora-44-desktop (x86_64, rolling)"
+src = "oras://ghcr.io/safl/nosi/fedora-44-desktop:latest"
+format = "img.gz"
+description = "Fedora 44 desktop. Sway tiling Wayland compositor + tuigreet greeter + Firefox + audio / bluetooth / power-management on top of the headless baseline. For personal laptop / workstation use."
+
+[[images]]
+name = "nosi freebsd-14-headless (x86_64, rolling)"
+src = "oras://ghcr.io/safl/nosi/freebsd-14-headless:latest"
+format = "img.gz"
+description = "FreeBSD 14.4-RELEASE headless scaffold. Phase 1: cloud-init bake + identity + baseline packages + kernel source; no provision chain yet."
+
+[[images]]
+name = "nosi freebsd-15-headless (x86_64, rolling)"
+src = "oras://ghcr.io/safl/nosi/freebsd-15-headless:latest"
+format = "img.gz"
+description = "FreeBSD 15.0-RELEASE headless scaffold. Phase 1: cloud-init bake + identity + baseline packages + kernel source; no provision chain yet."
 
 [[images]]
 name = "bty-server (x86_64, v{version})"

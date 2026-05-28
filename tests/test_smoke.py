@@ -435,10 +435,10 @@ def test_generate_catalog_toml_round_trips_through_catalog_load(tmp_path: Path) 
     the release asset stops working.
 
     Guard: invoke the generator into a tmp file, then round-trip the
-    bytes through ``bty.catalog.load_bytes`` and assert all four
-    entries land, all use ``src`` (the catalog manifest schema's field
-    key), and the oras:// entries don't carry a pre-pinned sha
-    (rolling-tag invariant).
+    bytes through ``bty.catalog.load_bytes`` and assert all entries
+    land, all use ``src`` (the catalog manifest schema's field key),
+    and the oras:// entries don't carry a pre-pinned sha (rolling-tag
+    invariant).
     """
     import subprocess as _sp
 
@@ -461,12 +461,13 @@ def test_generate_catalog_toml_round_trips_through_catalog_load(tmp_path: Path) 
 
     catalog_obj = _catalog.load_bytes(output.read_bytes(), source=str(output))
     assert catalog_obj.version == 1
-    assert len(catalog_obj.entries) == 4
-    # Same four images as the BTY_IMAGES starter set: three nosi
-    # sysdev images plus the bty-server appliance.
+    assert len(catalog_obj.entries) == 8
+    # The starter set: seven nosi flashable images (Debian / Ubuntu /
+    # Fedora / FreeBSD headless + Fedora desktop) plus the bty-server
+    # appliance.
     nosi_entries = [e for e in catalog_obj.entries if "nosi" in e.name]
     server_entries = [e for e in catalog_obj.entries if "bty-server" in e.name]
-    assert len(nosi_entries) == 3
+    assert len(nosi_entries) == 7
     assert len(server_entries) == 1
     # Rolling-tag invariant: oras:// entries are sha-less. Pre-
     # pinning at generate time would freeze the catalog and defeat

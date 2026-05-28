@@ -470,7 +470,7 @@ carried the boot env.
 
 For bty's published default catalog without typing the URL, type `d`
 instead at the source-pick prompt: that's the bty release catalog (Debian /
-Ubuntu / Fedora sysdev images plus bty-server).
+Ubuntu / Fedora / FreeBSD headless images plus a Fedora desktop and bty-server).
 
 ### JetKVM (remote catalog only)
 

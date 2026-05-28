@@ -55,8 +55,8 @@ Windows box (exFAT is read/write on all three) and dropping `.img.gz`,
 `.qcow2`, `.img.zst`, or `.img.gz` files into it. The partition is *not* under
 the live-boot SquashFS+tmpfs overlay, so files copied there persist.
 
-Fresh sticks ship with an empty BTY_IMAGES partition. The default catalog of three
-nosi sysdev images via `oras://ghcr.io/...` (rolling `:latest` tags
+Fresh sticks ship with an empty BTY_IMAGES partition. The default catalog of seven
+nosi images via `oras://ghcr.io/...` (rolling `:latest` tags
 resolved to content-addressed layer digests at flash time) and the latest
 bty-server appliance via a GitHub release URL. See
 [`reference.md`](reference.md) for the catalog schema and `oras://` URL

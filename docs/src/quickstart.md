@@ -90,8 +90,8 @@ sync
 
 The stick now has the bty live-boot ISO9660 + EFI partitions plus a 2.1 GiB
 exFAT partition labelled `BTY_IMAGES`
-descriptors (nosi Debian / Ubuntu / Fedora sysdev images via
-`oras://ghcr.io/safl/nosi/...`, plus bty-server) so the catalog is
+descriptors (nosi Debian / Ubuntu / Fedora / FreeBSD headless images plus a
+Fedora desktop, via `oras://ghcr.io/safl/nosi/...`, plus bty-server) so the catalog is
 non-empty out of the box, with room for a typical `bty-server` image (~1-
 1.5 GiB compressed) plus headroom. The smaller partition makes the .iso
 friendlier to Ventoy hosts and KVM-over-IP shims (piKVM / JetKVM). For more

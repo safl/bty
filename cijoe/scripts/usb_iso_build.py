@@ -614,9 +614,9 @@ def _extend_with_exfat(cijoe, iso_path: Path) -> int:
 
     # The BTY_IMAGES partition stays empty here -- operator-managed; a
     # fresh stick boots with something flashable in the catalog. The
-    # four entries are:
+    # eight entries are:
     #
-    # - 3x nosi sysdev images via ``oras://ghcr.io/safl/nosi/<variant>:latest``,
+    # - 7x nosi flashable images via ``oras://ghcr.io/safl/nosi/<variant>:latest``,
     #   resolved by bty's ORAS adapter to the current published layer
     #   digest at flash time (rolling).
     # - 1x bty-server appliance via the GitHub release asset URL
