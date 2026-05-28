@@ -9,6 +9,17 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.33.30] - 2026-05-28
+
+**Starter catalog refreshed for nosi's renamed variants.** nosi
+renamed its images from ``<distro>-sysdev`` to numbered
+``<distro>-<version>-<shape>``, so the shipped starter catalog
+pointed at repos that no longer publish. The catalog now lists the
+seven flashable variants (Debian / Ubuntu / Fedora / FreeBSD
+headless, plus a Fedora desktop); docs and the USB-ISO build were
+updated to match. No behaviour change to bty itself -- a fresh
+install just gets a catalog whose entries resolve again.
+
 ## [0.33.29] - 2026-05-26
 
 **Audit-log lifecycle for deferred operations + /ui/images UX
