@@ -1522,8 +1522,11 @@ def create_app(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"no active backup for id {backup_id!r}",
             )
-        # Operator-side cancel event; worker writes its own
-        # backup.create.cancelled when it observes the flag.
+        # Operator-side cancel event. Unlike the catalog/release
+        # workers, the backup worker does NOT emit a sibling
+        # backup.create.cancelled: a running backup completes in
+        # milliseconds and isn't interrupted mid-flight, so this
+        # handler's event is the only cancelled record.
         with _db.open_db(state_path) as conn:
             _log_event(
                 conn,

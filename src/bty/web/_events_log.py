@@ -211,9 +211,10 @@ def record(
     Caller owns the transaction: this does not ``commit`` so the
     record can be batched into the same transaction as the change
     that produced the event (e.g. machine upsert + event in one
-    UPDATE / INSERT pair). If the caller doesn't manage their own
-    transaction, the surrounding ``open_db`` ``conn.commit()`` at
-    the end of the with-block flushes the row.
+    UPDATE / INSERT pair). ``open_db`` does NOT commit on exit (it
+    only closes the connection), so a caller that wants the row
+    persisted MUST call ``conn.commit()`` itself -- otherwise the
+    INSERT is rolled back when the connection closes.
 
     ``source_ip`` is the IP that initiated / observed the event:
     the operator's request client host for operator events, the
