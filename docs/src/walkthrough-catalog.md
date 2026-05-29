@@ -182,4 +182,3 @@ Operator-typed files (no `catalog-` prefix) are untouched.
 
 A future release may add LRU + size-cap eviction; until then, plan for
 cache size = sum of every image fetched since the last manual rm.
-

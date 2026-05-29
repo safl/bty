@@ -76,7 +76,7 @@ case "${PHASE}" in
     early) PHASE_NUM=1 ; PHASE_NOTE="kernel handed off -- starting init" ;;
     mid)   PHASE_NUM=2 ; PHASE_NOTE="network online" ;;
     late)  PHASE_NUM=3 ; PHASE_NOTE="multi-user reached -- handing off to ${MODE}" ;;
-    *)     PHASE_NUM=? ; PHASE_NOTE="${PHASE}" ;;
+    *)     PHASE_NUM='?' ; PHASE_NOTE="${PHASE}" ;;
 esac
 
 BANNER="[ INFO ] BTY ${VERSION} | ${VARIANT} / ${MODE} | step ${PHASE_NUM} of 3 -- ${PHASE_NOTE}"

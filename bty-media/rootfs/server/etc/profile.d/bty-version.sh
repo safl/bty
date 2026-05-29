@@ -1,3 +1,4 @@
+# shellcheck shell=sh
 # Show the bty version on every interactive shell start so the
 # operator can read it back without invoking ``bty --version``
 # themselves. ``__BTY_VERSION__`` is substituted at bake time by

@@ -1,0 +1,49 @@
+# Code-quality gate for bty. Install once with `make hooks` (runs
+# `pre-commit install`); thereafter every `git commit` runs these against
+# the staged files. CI runs the same set over the whole tree via the
+# `lint` job in .github/workflows/ci.yml. Bump pinned revs with
+# `pre-commit autoupdate`.
+#
+# ruff reads bty's canonical [tool.ruff] config from pyproject.toml; the
+# rev below is pinned to the same ruff version as uv.lock so the hook and
+# `uv run ruff` never disagree. Kept in lockstep with safl/nosi.
+
+# Vendored, minified third-party assets: never reformat them (and a stray
+# final-newline edit would churn a file we don't own / could break SRI).
+exclude: '\.min\.(css|js)$'
+
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.15
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: https://github.com/koalaman/shellcheck-precommit
+    rev: v0.11.0
+    hooks:
+      # docker/entrypoint.sh, scripts/, and the profile.d snippets.
+      # --external-sources lets sourced helpers resolve (SC1091);
+      # --severity=warning skips purely-stylistic info nags.
+      - id: shellcheck
+        args: [--severity=warning, --external-sources]
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-merge-conflict
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: check-yaml
+      # No check-toml: cijoe/configs/*.toml are Jinja-templated, which a
+      # strict TOML parser rejects.
+      - id: check-added-large-files
+        args: [--maxkb=1024]
+      - id: check-shebang-scripts-are-executable
+        # iPXE scripts (#!ipxe) and the Jinja templates that emit them open
+        # with a format marker, not a kernel shebang; they're rendered or
+        # served, never executed, so they must stay non-executable.
+        exclude: '\.(j2|ipxe)$'

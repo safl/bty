@@ -1,3 +1,4 @@
+# shellcheck shell=sh
 # Show the bty version on every interactive shell start so operators
 # can read it back without invoking ``bty --version`` themselves. The
 # placeholder gets substituted by ``cijoe/scripts/usb_iso_build.py``
