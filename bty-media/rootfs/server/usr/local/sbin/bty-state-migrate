@@ -193,7 +193,7 @@ rmdir "$TMP_MNT" 2>/dev/null || true
 # reflashed appliance this is a no-op; the grep guard keeps re-runs
 # idempotent). ``nofail`` so a diskless appliance still boots on its
 # rootfs $STATE_DIR.
-if ! grep -qE "^LABEL=$LABEL[[:space:]]" /etc/fstab; then
+if ! grep -qE "^LABEL=${LABEL}[[:space:]]" /etc/fstab; then
     echo "Adding fstab line ..."
     printf 'LABEL=%s %s ext4 nofail,x-systemd.device-timeout=10s 0 2\n' \
         "$LABEL" "$STATE_DIR" >> /etc/fstab

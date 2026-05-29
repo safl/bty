@@ -27,7 +27,7 @@ endif
 .DEFAULT_GOAL := help
 
 .PHONY: help \
-        deps test lint format format-check typecheck ci wheel tui \
+        deps hooks test lint format format-check typecheck ci wheel tui \
         media-deps build test-pxe \
         docker-build docker-run docker-clean \
         docs-html docs-pdf docs-serve \
@@ -38,6 +38,7 @@ help:
 	@echo ""
 	@echo "Dev (Python package, no sudo, no network beyond uv):"
 	@echo "  deps          uv sync --all-extras --group dev"
+	@echo "  hooks         install pre-commit git hooks (ruff + shellcheck + hygiene)"
 	@echo "  test          pytest (excludes integration / pxe markers)"
 	@echo "  lint          ruff check"
 	@echo "  format        ruff format (writes)"
@@ -77,6 +78,14 @@ help:
 
 deps:
 	$(UV) sync --all-extras --group dev
+
+# Install the git hooks (pre-commit itself: `pipx install pre-commit`).
+# After this, every `git commit` runs ruff (lint+format via the pinned
+# rev), shellcheck, and the hygiene hooks on the staged files. Run the
+# whole set over the tree with `pre-commit run --all-files`. See
+# .pre-commit-config.yaml; CI runs the same set in the lint job.
+hooks:
+	pre-commit install
 
 test:
 	$(UV) run pytest

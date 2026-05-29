@@ -9,4 +9,3 @@
   This rootfs is a read-only squashfs with a tmpfs overlay -- any
   changes vanish on reboot. Files dropped onto BTY_IMAGES from
   another host persist on the stick.
-

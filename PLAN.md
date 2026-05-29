@@ -368,7 +368,7 @@ Documentation lives in `docs/` and follows the aisio convention:
 - `docs/src/` - Sphinx + MyST markdown sources.
 - `docs/tooling/` - Python package providing dev commands, installed via
   `pipx install ./tooling`.
-- Build commands: `bty-docs-serve` (live-rebuild dev server), 
+- Build commands: `bty-docs-serve` (live-rebuild dev server),
   `bty-docs-build-html`, `bty-docs-build-pdf`. Both HTML and PDF (LaTeX) are
   first-class outputs.
 

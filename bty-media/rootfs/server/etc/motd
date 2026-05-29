@@ -12,4 +12,3 @@
   PXE: point your LAN DHCP server (option 60/66/67) at this
   appliance; the browser UI's Netboot page has the cheatsheet.
   bty serves TFTP but does not run DHCP.
-

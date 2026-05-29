@@ -10,14 +10,16 @@ jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
+    # Runs the full pre-commit set (.pre-commit-config.yaml): ruff check +
+    # ruff format, shellcheck, and the hygiene hooks. The ruff hook is
+    # pinned to the same version as uv.lock, so this matches `make lint` /
+    # `uv run ruff` locally while also covering shell + hygiene.
     steps:
       - uses: actions/checkout@v6
-      - uses: astral-sh/setup-uv@v8.1.0
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: uv sync --all-extras --group dev
-      - run: uv run ruff check
-      - run: uv run ruff format --check
+      - uses: pre-commit/action@v3.0.1
 
   typecheck:
     name: Type check
