@@ -1,0 +1,20 @@
+# Podman Quadlet unit -> generates bty-tftp.service. Serves TFTP for BIOS/legacy
+# PXE clients. Install: copy into /etc/containers/systemd/ (root) then
+# `systemctl daemon-reload`.
+[Unit]
+Description=bty TFTP sidecar (BIOS PXE bootstrap)
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+Image=ghcr.io/safl/bty-tftp:latest
+AutoUpdate=registry
+# Host networking: TFTP's data transfer uses an ephemeral UDP port.
+Network=host
+Volume=bty-tftproot:/tftproot
+
+[Service]
+Restart=always
+
+[Install]
+WantedBy=multi-user.target default.target

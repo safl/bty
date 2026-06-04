@@ -14,12 +14,11 @@ name: Release
 #                                   of sync.
 #   1. ``test``                   - lint + typecheck + pytest matrix.
 #   2. ``build-wheel`` (gated)    - uv build of the bty-lab wheel + sdist.
-#   3. ``build-media`` (gated)    - all three bty-media variants in
-#                                   parallel (usb, server, live).
-#   4. ``test-pxe`` (gated)       - server + client QEMU VMs;
-#                                   end-to-end PXE chain test
-#                                   against the freshly-built
-#                                   server image + live trio.
+#   3. ``build-media`` (gated)    - the netboot live image (usb-x86
+#                                   builds in its own job below).
+#   4. ``test-pxe`` (gated)       - brings bty up as containers and
+#                                   PXE-boots a client QEMU VM against
+#                                   it; asserts the chain end-to-end.
 #   4b. ``test-usb-grow`` (gated) - boots the freshly-built bty-usb
 #                                   ISO on a 4 GiB raw disk in QEMU,
 #                                   asserts bty-usb-grow.service grew
@@ -54,7 +53,7 @@ name: Release
 #
 # ``workflow_dispatch`` runs ``test`` + ``build-wheel`` only - smoke
 # test of the package side. Ad-hoc media builds happen locally via
-# the top-level Makefile (``make build VARIANT=usb-x86|server-x86|netboot-x86``).
+# the top-level Makefile (``make build VARIANT=usb-x86|netboot-x86``).
 #
 # First publish (claiming the bty-lab name) requires a one-time PyPI
 # setup: register a Pending Publisher on https://pypi.org targeting:
@@ -155,67 +154,23 @@ jobs:
     # Tag-only - workflow_dispatch builds the wheel only.
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
-    # The server-x86 cloud-init bake runs in ~11 min normally; the
-    # other variants finish in <30. The failure mode is a HANG, not
-    # slowness: the in-VM steps (apt / git clone / pip) have no
-    # timeout, so a transient upstream stall makes cloud-init block,
-    # the VM never powers off, and the job eats its whole budget. A
-    # 45 min cap fails such a hang fast instead of burning 90, and
-    # the ``cijoe-output`` artifact (uploaded below, if: always())
-    # carries the captured guest console + report.html for the
-    # post-mortem.
+    # The netboot-x86 live build finishes in <30 min. The failure mode is a
+    # HANG, not slowness (the in-VM apt / git clone / pip steps have no
+    # timeout), so a 45 min cap fails a stuck build fast; the ``cijoe-output``
+    # artifact (uploaded below, if: always()) carries the captured console +
+    # report.html for the post-mortem.
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
-        # ``variant`` is the user-facing name (``make build VARIANT=...``);
-        # ``kind`` selects the right deps and upload step. ``usb-x86``
-        # is intentionally NOT in this matrix -- it lives in the
-        # dedicated ``build-usb-x86`` job below so ``test-usb-grow``
-        # can fire as soon as the .iso is built (~12-15 min) instead
-        # of waiting for the slowest matrix entry (server-rpi at
-        # ~25 min).
+        # ``variant`` is the user-facing name (``make build VARIANT=...``).
+        # ``usb-x86`` lives in the dedicated ``build-usb-x86`` job below so
+        # ``test-usb-grow`` can fire as soon as the .iso is built.
         include:
-          - variant: server-x86
-            kind: disk
           - variant: netboot-x86
             kind: live
-          - variant: server-rpi
-            kind: disk-rpi
     steps:
       - uses: actions/checkout@v6
-
-      - name: Install build dependencies (disk-image variants)
-        if: matrix.kind == 'disk'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            qemu-system-x86 \
-            qemu-utils \
-            genisoimage \
-            ovmf \
-            zstd \
-            cpu-checker
-
-      - name: Install build dependencies (server-rpi variant)
-        # Cross-arch image customisation: download Pi OS Lite arm64,
-        # losetup-mount, chroot in via qemu-aarch64-static (binfmt-support
-        # auto-registers the handler on install). xz-utils for the
-        # upstream image's .xz; parted/e2fsprogs to grow the rootfs
-        # partition; gzip ships in coreutils for the final ``.img.gz``.
-        if: matrix.kind == 'disk-rpi'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            qemu-user-static \
-            binfmt-support \
-            xz-utils \
-            zstd \
-            parted \
-            e2fsprogs
-          # Sanity: verify binfmt registered the aarch64 handler.
-          ls /proc/sys/fs/binfmt_misc/qemu-aarch64 || \
-            (echo "binfmt_misc qemu-aarch64 not registered" >&2; exit 1)
 
       - name: Install build dependencies (live variant)
         # Ubuntu's ``live-build`` package (20230502 on Noble) still
@@ -405,26 +360,31 @@ jobs:
 
   # ---------------- verify ------------------------------------------------
   test-pxe:
-    name: PXE chain test (server + client QEMU VMs)
+    name: PXE chain test (containerized bty + client QEMU VM)
     needs: build-media
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # IN PROGRESS: the server side runs as containers (bty-web + withcache via
+    # deploy/compose.yml); the client is a QEMU VM that PXE-boots against it.
+    # The cijoe harness (`make test-pxe`) is moving to a host-bridge network
+    # model so the container and the client VM share an L2 segment, with a
+    # test-side DHCP on the bridge. Until that lands this job is expected to
+    # fail, which keeps the release gated.
     steps:
       - uses: actions/checkout@v6
 
-      - name: Install host tools (qemu, zstd)
+      - name: Install host tools (qemu, bridge, dhcp)
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             qemu-system-x86 \
             qemu-utils \
-            zstd \
+            dnsmasq \
+            iproute2 \
             cpu-checker
 
       - name: Enable KVM access for the runner
-        # The chain test boots two QEMU VMs that need /dev/kvm. Same
-        # udev workaround as the build-media job.
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
               | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -435,22 +395,15 @@ jobs:
       - name: Install cijoe
         run: pipx install --force cijoe
 
-      - name: Download server image artifact
-        uses: actions/download-artifact@v8
-        with:
-          name: bty-server-x86_64-img-gz
-          path: ~/system_imaging/disk/
-
       - name: Download netboot artifacts
         uses: actions/download-artifact@v8
         with:
           name: bty-netboot-x86_64
           path: ~/system_imaging/disk/
 
-      # The cijoe ``pxe_customize_server`` step rehydrates
-      # ``bty-server-x86_64.qcow2`` from the .img.gz on its own
-      # when the qcow2 is missing, so no separate decompress step is
-      # needed here - same code path as a local ``make test-pxe``.
+      - name: Bring up bty + withcache (containers)
+        run: podman compose -f deploy/compose.yml up -d
+
       - name: Run PXE chain test
         run: make test-pxe
 
@@ -462,7 +415,7 @@ jobs:
           path: cijoe/cijoe-output/
           if-no-files-found: warn
 
-      - name: Upload test workspace on failure (qcow2, serial logs)
+      - name: Upload test workspace on failure (serial logs)
         if: failure()
         uses: actions/upload-artifact@v7
         with:
@@ -677,7 +630,7 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           path: gathered/
-          pattern: '{dist,bty-*-img-gz,bty-netboot-x86_64,bty-usb-x86_64-iso,docs-pdf}'
+          pattern: '{dist,bty-netboot-x86_64,bty-usb-x86_64-iso,docs-pdf}'
       - name: List gathered artifacts
         run: find gathered -type f | sort
       - name: Generate release.toml manifest
@@ -744,8 +697,6 @@ jobs:
           files: |
             gathered/dist/*
             gathered/bty-usb-x86_64-iso/*
-            gathered/bty-server-x86_64-img-gz/*
-            gathered/bty-server-rpi-arm64-img-gz/*
             gathered/bty-netboot-x86_64/*
             gathered/docs-pdf/*
             catalog.toml
@@ -845,5 +796,41 @@ jobs:
             BTY_VERSION=${{ steps.version.outputs.version }}
           # Cache layers across runs so subsequent tags only rebuild
           # what changed (typically just the wheel install layer).
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  publish-tftp:
+    name: Publish bty-tftp container to ghcr.io
+    # Independent of the wheel/release: the TFTP sidecar is debian + ipxe NBPs
+    # serving a shared bootfiles volume for BIOS PXE bootstrap (deploy/tftp).
+    needs: [test]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      packages: write
+      contents: read
+    env:
+      DOCKER_BUILD_RECORD_UPLOAD: "false"
+    steps:
+      - uses: actions/checkout@v6
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v6
+        with:
+          context: deploy/tftp
+          file: deploy/tftp/Containerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ghcr.io/safl/bty-tftp:${{ steps.version.outputs.version }}
+            ghcr.io/safl/bty-tftp:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max

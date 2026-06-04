@@ -1,0 +1,66 @@
+# Run bty + withcache as containers on a host with podman (e.g. a nosi headless
+# image). bty is the policy/PXE layer; withcache holds the image bytes. Pull new
+# images to upgrade.
+#
+#   # one-time: this host's LAN address that booting clients reach
+#   export HOST_ADDR=10.0.0.5
+#   export WITHCACHE_ADMIN_PASSWORD=change-me
+#
+#   podman compose -f deploy/compose.yml up -d
+#   #   http://<host>:8080/ui   (bty)      http://<host>:3000/   (withcache)
+#
+#   # add TFTP for BIOS clients that bootstrap over it:
+#   podman compose -f deploy/compose.yml --profile tftp up -d
+#
+# Your LAN's DHCP server points clients at this host (next-server/bootfile, or
+# HTTPClient).
+
+services:
+  withcache:
+    image: ghcr.io/safl/withcache:latest
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      WITHCACHE_ADMIN_PASSWORD: ${WITHCACHE_ADMIN_PASSWORD:-}
+    # Cap the cache (delete artifacts in the UI to free space when full):
+    # command: ["withcache-server","--host","0.0.0.0","--port","3000",
+    #           "--data-dir","/data","--max-bytes","100G"]
+    volumes:
+      - withcache-data:/data
+
+  bty-web:
+    image: ghcr.io/safl/bty-web:latest
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      # bty prefers withcache as the image SOURCE for artifacts it holds, and
+      # serves the origin for the rest. bty hands this URL to booting clients,
+      # so set it to the host's LAN address those machines reach.
+      BTY_WITHCACHE_URL: http://${HOST_ADDR:?set HOST_ADDR to this host's LAN address}:3000
+    volumes:
+      - bty-data:/var/lib/bty
+      # Shared with the tftp sidecar; bootfiles served over TFTP live here.
+      - bty-tftproot:/var/lib/bty/tftproot
+    depends_on:
+      - withcache
+
+  # TFTP for BIOS/legacy PXE clients: they fetch the iPXE NBP over udp/69, then
+  # chainload bty's HTTP iPXE script. TFTP's data transfer uses an ephemeral UDP
+  # port, so this service uses host networking; bty-web and withcache use the
+  # bridge with published ports. The shared volume is seeded with stock iPXE
+  # NBPs on first run; bty or the operator can place custom bootfiles in it.
+  tftp:
+    image: ghcr.io/safl/bty-tftp:latest
+    # For local development, build it instead: `podman build -t bty-tftp deploy/tftp`.
+    profiles: ["tftp"]
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - bty-tftproot:/tftproot
+
+volumes:
+  withcache-data:
+  bty-data:
+  bty-tftproot:
