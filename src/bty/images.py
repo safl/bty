@@ -19,14 +19,10 @@ not forced on operators with their own pipelines.
   decompress .gz natively (xz tripped Etcher's bundled
   decompressor regardless of how the file was shaped; gzip has
   no equivalent quirk). Stick prep is a one-shot, host-side cost.
-- The **server appliance images** ship as ``.img.gz``
-  (``bty-server-x86_64.img.gz``,
-  ``bty-server-rpi-arm64.img.gz``). Universal flasher compat
-  wins for one-shot setup; zstd's flash-time-decompression edge
-  is irrelevant for the bty-server appliance itself, which is
-  flashed once during initial setup -- the per-job reflash hot
-  path applies to operator-supplied target images, not to
-  bty-shipped artifacts.
+  Universal flasher compat wins for media written once during
+  setup; zstd's flash-time-decompression edge is irrelevant for a
+  one-shot write -- the per-job reflash hot path applies to
+  operator-supplied target images, not to bty-shipped artifacts.
 - Operators running per-job CI reflash on a fast disk can pick
   ``.img.zst`` for their own images and the flash code will
   stream-decompress at zstd's ~800-1500 MB/s. zstd's only

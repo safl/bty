@@ -6,21 +6,21 @@ on every tagged release. It hosts bty-web's **image catalog**, **machine
 registry**, and **browser UI**. `bty --catalog SOURCE` clients (from the
 USB live env or a workstation) connect to it and pick images for flashing.
 
-It bundles the full PXE stack: bty-web (HTTP + browser UI) plus `dnsmasq`
-serving the iPXE bootfiles over TFTP. Both boot lanes work:
+This container is HTTP-only: bty-web serves the UI, the per-MAC PXE plans,
+the boot artifacts, and the images over HTTP on `:8080`. Targets boot one
+of three ways:
 
 - **UEFI HTTP Boot targets**: DHCP option 67 = `http://<bty-web>:8080/boot/ipxe.efi`;
   modern UEFI firmware fetches the binary over HTTP, no TFTP in the path.
-- **TFTP PXE targets** (legacy BIOS, older UEFI): DHCP option 66 = the
-  container host's IP, option 67 = `ipxe.efi`; the container's dnsmasq
-  serves it over TFTP. Publish `69/udp` for this (see Quick start).
+- **TFTP PXE targets** (legacy BIOS, older UEFI) that can only bootstrap
+  over TFTP: add the `bty-tftp` sidecar, which serves the ~1 MB iPXE
+  bootfile over udp/69 and is part of the compose / Quadlet deploy under
+  [`deploy/`](https://github.com/safl/bty/tree/main/deploy). This container
+  serves no TFTP itself.
 - **`boots-from` USB sticks**: boot a target from a
   [`boots-from`](https://github.com/safl/boots-from) USB whose embedded
   iPXE script chains to bty-web's `/pxe-bootstrap.ipxe`, replacing the
-  firmware PXE step entirely - no DHCP-PXE options or TFTP needed at all.
-
-The container's dnsmasq is launched by the entrypoint (not systemd), so the
-Netboot page shows its status but can't Start/Stop/Restart it.
+  firmware PXE step entirely -- no DHCP-PXE options or TFTP needed at all.
 
 ## When to use this
 
@@ -30,8 +30,9 @@ Netboot page shows its status but can't Start/Stop/Restart it.
   network-shared catalog of pre-built images instead of copying files to
   every stick.
 - **Local-dev backend** for `bty --catalog` work.
-- **Production PXE / HTTP-Boot deployment**: serves TFTP PXE, UEFI HTTP
-  Boot, and `boots-from` sticks. For boot-autostart with systemd-managed
+- **Production PXE / HTTP-Boot deployment**: UEFI HTTP Boot and
+  `boots-from` sticks work against this container directly; for legacy TFTP
+  PXE add the `bty-tftp` sidecar. For boot-autostart with systemd-managed
   services, use the Quadlet units in
   [`deploy/quadlet/`](https://github.com/safl/bty/blob/main/deploy/quadlet/)
   (see [`deploy/README.md`](https://github.com/safl/bty/blob/main/deploy/README.md)).
@@ -47,7 +48,6 @@ mkdir -p ./bty-data
 sudo chown -R 1000:1000 ./bty-data    # match the in-container bty user
 docker run -d --name bty-web \
   -p 8080:8080 \
-  -p 69:69/udp \
   -v "$PWD/bty-data":/var/lib/bty \
   ghcr.io/safl/bty-web:latest
 ```
@@ -58,35 +58,39 @@ image's ownership automatically):
 ```bash
 docker run -d --name bty-web \
   -p 8080:8080 \
-  -p 69:69/udp \
   -v bty-data:/var/lib/bty \
   ghcr.io/safl/bty-web:latest
 ```
 
-`69/udp` publishes TFTP for PXE clients (drop it if you only use HTTP
-Boot or `boots-from`). If TFTP transfers stall behind Docker's NAT, run
-with `--network host` instead of `-p`.
+This container is HTTP-only -- it publishes just `:8080`. Legacy TFTP PXE
+is handled by the separate `bty-tftp` sidecar (see
+[`deploy/`](https://github.com/safl/bty/tree/main/deploy)).
 
 Open <http://localhost:8080/ui>; with no `BTY_ADMIN_PASSWORD` set the
 operator UI is open (bty-web logs a startup warning). Drop
 `.img.zst` / `.qcow2` / `.img.gz` files into the data directory's `images/`
 subfolder and they appear in the catalog after a refresh.
 
-If the bind-mount permission isn't right, the entrypoint exits with a
-one-line fix command instead of crashing deep in a Python traceback.
+If the bind-mount isn't writable by uid 1000, bty-web can't create
+`state.db` on startup; pre-create and chown the dir as shown above (or
+use a docker-managed volume).
 
-## Compose
+## Compose / orchestrated deploy
 
-The repo ships a sample under
-[`docker/docker-compose.yml`](https://github.com/safl/bty/blob/main/docker/docker-compose.yml):
+For a multi-service stack -- bty-web + the withcache image cache + an
+optional TFTP sidecar -- use the compose file and Quadlet units under
+[`deploy/`](https://github.com/safl/bty/tree/main/deploy):
 
 ```bash
-curl -fLO https://raw.githubusercontent.com/safl/bty/main/docker/docker-compose.yml
-docker compose up -d
+export HOST_ADDR=10.0.0.5                 # this host's LAN address
+export BTY_ADMIN_PASSWORD=change-me
+export WITHCACHE_ADMIN_PASSWORD=change-me
+podman compose -f deploy/compose.yml up -d
 ```
 
-Same defaults: `:8080` published, `./bty-data/` bind-mounted as the
-volume, `restart: unless-stopped`.
+See [`deploy/README.md`](https://github.com/safl/bty/blob/main/deploy/README.md)
+and [walkthrough-server.md](walkthrough-server.md) for the full stack, the
+TFTP profile, and boot-autostart via Quadlet.
 
 ## Connecting `bty`
 
@@ -123,7 +127,6 @@ before exposing past a trusted LAN.** Pass it on the `docker run`:
 docker run -d --name bty-web \
   -e BTY_ADMIN_PASSWORD=your-secret \
   -p 8080:8080 \
-  -p 69:69/udp \
   -v bty-data:/var/lib/bty \
   ghcr.io/safl/bty-web:latest
 ```
@@ -158,7 +161,6 @@ and copying the file. Migrations run automatically on every start.
 | `BTY_BOOT_DIR` | `${BTY_STATE_DIR}/boot` | Kernel/initrd/squashfs (PXE boot artifacts) |
 | `BTY_SESSION_SECRET` | (generated) | Cookie key override; useful for multi-instance |
 | `BTY_ADMIN_PASSWORD` | unset | Gates the operator UI (constant-time compare); unset = open, with a startup warning |
-| `BTY_QUIET` | unset | Suppress the start-up banner |
 
 ## Building locally
 
@@ -179,9 +181,9 @@ differences are the apt-installed system deps.
 
 ## Operational notes
 
-- **TFTP daemon control**: the container's dnsmasq is launched by the
-  entrypoint, not systemd, so the Netboot page shows its status but can't
-  Start/Stop/Restart it (manage the daemon with `docker` instead).
+- **No bundled TFTP**: this container serves only HTTP. Legacy TFTP PXE is
+  the `bty-tftp` sidecar's job (see `deploy/`); the Netboot page's TFTP
+  daemon controls apply to a host/systemd install, not this container.
 - **State on a named volume**: bty's DB and images live under
   `/var/lib/bty`; bind-mount or volume-mount it so state survives container
   re-pulls.

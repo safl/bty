@@ -1042,9 +1042,6 @@ def test_bty_web_help_documents_every_env_var() -> None:
         src = (web / name).read_text()
         env_keys.update(re.findall(r'os\.environ\.get\(\s*"(BTY_[A-Z0-9_]+)"', src))
         env_keys.update(re.findall(r'os\.environ\[\s*"(BTY_[A-Z0-9_]+)"', src))
-    # BTY_QUIET is a docker-entrypoint shell knob, not read by the
-    # Python runtime; not expected in the Python --help.
-    env_keys.discard("BTY_QUIET")
     assert env_keys, "scan should find at least one BTY_* lookup"
 
     # The name must appear in the --help description block (we

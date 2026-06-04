@@ -23,7 +23,7 @@ repos:
   - repo: https://github.com/koalaman/shellcheck-precommit
     rev: v0.11.0
     hooks:
-      # docker/entrypoint.sh, scripts/, and the profile.d snippets.
+      # the cijoe/media shell scripts and the profile.d snippets.
       # --external-sources lets sourced helpers resolve (SC1091);
       # --severity=warning skips purely-stylistic info nags.
       - id: shellcheck

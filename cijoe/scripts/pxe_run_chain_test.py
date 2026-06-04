@@ -277,7 +277,7 @@ def _run_container(image, admin_password):
     """Run the bty-web container detached, publishing :8080, with the admin
     password set so the test exercises the gated login path. No volume: the
     image's /var/lib/bty is writable by the bty user, and the test is
-    throwaway. BTY_QUIET silences the credentials banner."""
+    throwaway."""
     subprocess.run(
         ["podman", "rm", "-f", CONTAINER_NAME],
         stdout=subprocess.DEVNULL,
@@ -291,8 +291,6 @@ def _run_container(image, admin_password):
             "-d",
             "--name",
             CONTAINER_NAME,
-            "-e",
-            "BTY_QUIET=1",
             "-e",
             f"BTY_ADMIN_PASSWORD={admin_password}",
             "-p",
