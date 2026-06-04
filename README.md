@@ -7,7 +7,7 @@
 > Pronounced "battie" (rhymes with "batty") - the blue bat up top is the
 > mascot, so when in doubt say it like the critter.
 
-[![CI](https://github.com/safl/bty/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/safl/bty/actions/workflows/ci.yml)
+[![CI](https://github.com/safl/bty/actions/workflows/ci-cd.yml/badge.svg?branch=main)](https://github.com/safl/bty/actions/workflows/ci-cd.yml)
 [![Docs](https://github.com/safl/bty/actions/workflows/docs.yml/badge.svg?branch=main)](https://github.com/safl/bty/actions/workflows/docs.yml)
 [![Documentation](https://img.shields.io/badge/docs-safl.dk%2Fbty-blue)](https://safl.dk/bty)
 [![PyPI](https://img.shields.io/pypi/v/bty-lab.svg)](https://pypi.org/project/bty-lab/)
@@ -56,7 +56,7 @@ bty
 |---|---|---|
 | **USB live stick** | bty boots from a flash drive, runs `bty`, flashes the box it's plugged into. Fresh sticks ship with a starter `catalog.toml` (Debian / Ubuntu / Fedora / FreeBSD headless images plus a Fedora desktop, via `oras://ghcr.io/safl/nosi/...`) so the wizard's image picker is non-empty out of the box. | Single-machine local imaging |
 | **USB + portable catalog** | Same stick, plus `bty --catalog <SOURCE>` pointed at a TOML catalog hosted anywhere (a local file, an HTTP URL, an `oras://` reference, or a bty-web instance's `/catalog.toml`). | A handful of boxes, shared image library |
-| **PXE-boot server** | Run bty-web as a container (`deploy/compose.yml` or `deploy/quadlet/`, with an optional tftp sidecar) on a Pi or x86 box; it serves HTTP plus TFTP, and your LAN DHCP points PXE clients at it. Targets PXE-chain into a netboot live env that runs `bty --server X --mac Y` on tty1, which fetches a per-MAC plan and either auto-flashes or drops the operator into the wizard. See [`deploy/README.md`](deploy/README.md). | CI fleets, racks, anything you don't want to walk to |
+| **PXE-boot server** | Run bty-web as a container (`deploy/compose.yml` or `deploy/quadlet/`, with an optional tftp sidecar) on a Pi or x86 box; bty-web serves everything over HTTP and the sidecar adds TFTP for legacy BIOS, and your LAN DHCP points PXE clients at it. Targets PXE-chain into a netboot live env that runs `bty --server X --mac Y` on tty1, which fetches a per-MAC plan and either auto-flashes or drops the operator into the wizard. See [`deploy/README.md`](deploy/README.md). | CI fleets, racks, anything you don't want to walk to |
 
 All three share the same Python codebase, the same image catalog, the
 same SHA-keyed machine bindings.
@@ -162,7 +162,7 @@ PyPI - with two console scripts:
 pipx install "bty-lab[tui]"     # `bty` (Rich-based wizard, the
                                 #  operator-facing tool)
 pipx install "bty-lab[web]"     # adds `bty-web` (FastAPI + Pydantic,
-                                #  the controller appliance)
+                                #  the HTTP controller)
 pipx install "bty-lab[all]"     # everything
 ```
 

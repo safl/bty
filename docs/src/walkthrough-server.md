@@ -11,9 +11,10 @@ Run `bty-web` as a container. The deploy ships three pieces:
    plans, boot artifacts, and images over HTTP on `:8080`.
 2. **withcache** (`ghcr.io/safl/withcache`) -- a URL-keyed artifact cache that
    holds the image bytes, so a fleet pulls each image once.
-3. **tftp** (`ghcr.io/safl/bty-tftp`, optional) -- a dnsmasq TFTP sidecar that
-   serves the iPXE bootfiles for legacy BIOS / older UEFI clients that bootstrap
-   over TFTP.
+3. **tftp** (`ghcr.io/safl/bty-tftp`, optional) -- a small TFTP sidecar that
+   serves the ~1 MB iPXE bootfile for legacy BIOS / older UEFI clients that
+   bootstrap over TFTP. It serves only the bootfile; the kernel / initrd /
+   squashfs come from bty-web over HTTP.
 
 The operator UI is gated by `$BTY_ADMIN_PASSWORD` (unset = open, with a startup
 warning). End state after `up`: a browser URL ready to register machines and
@@ -112,12 +113,15 @@ the freshly-flashed image provisions to.
 - **UEFI Secure Boot** isn't supported: the bty netboot kernel isn't
   shim-signed. Disable Secure Boot on targets you're PXE-flashing, or use the
   USB stick flow.
-- **iPXE chain-loop**. After the firmware TFTPs `ipxe.efi`, iPXE re-DHCPs with
-  `user-class=iPXE`; stock iPXE re-fetches itself unless your LAN DHCP returns a
-  different bootfile (e.g. `http://<host>:8080/pxe-bootstrap.ipxe`) when it sees
-  `user-class=iPXE`. Most modern DHCP servers (UniFi via config.gateway.json or
-  Kea client-classes, dnsmasq via `dhcp-userclass`, ISC-DHCPd via conditional
-  `if`) support this.
+- **Single bootfile, no DHCP userclass logic** (UEFI). Stock iPXE re-DHCPs
+  after it loads and re-fetches the DHCP bootfile -- itself -- unless the DHCP
+  server hands iPXE a *different* bootfile by matching `user-class=iPXE`. bty
+  sidesteps that: its custom `ipxe.efi` (baked into the bty-web and bty-tftp
+  images) embeds `chain http://${next-server}:8080/pxe-bootstrap.ipxe`, so the
+  operator's DHCP only ever needs one bootfile and no userclass rules. The
+  legacy-BIOS `undionly.kpxe` is stock, so BIOS still needs the userclass trick
+  (UniFi / Kea client-classes, dnsmasq `dhcp-userclass`, ISC-DHCPd conditional
+  `if`) -- and BIOS is unverified anyway (below).
 - **UEFI tested, legacy BIOS not yet**. bty's netboot path has so far been
   exercised only on UEFI targets. The legacy-BIOS branch (`sanboot --drive`
   instead of the UEFI hand-back to firmware) is implemented but not field-tested;
