@@ -106,7 +106,6 @@ block (compose / Quadlet / Dockerfile) covers every component.
 | `BTY_MAX_UPLOAD_BYTES` | `bty-web` | `200 GiB` | Hard cap on `PUT /images/{name}` body size; rejected uploads land an `image.upload_failed` audit row |
 | `BTY_TRUSTED_PROXY` | `bty-web` | unset | When set (any truthy), read client IP from `X-Forwarded-For`; only enable behind a reverse proxy that strips inbound X-F-F |
 | `BTY_ADMIN_PASSWORD` | `bty-web` | unset | Gates the operator UI (constant-time compare); unset = open, with a startup warning |
-| `BTY_QUIET` | container entrypoint | unset | Suppress the start-up banner |
 
 ``bty`` also accepts `--catalog SOURCE` to pre-load a catalog and `--server
 X --mac Y` for server-driven dispatch. See `reference.md > CLI` for the
