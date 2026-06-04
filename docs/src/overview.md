@@ -28,10 +28,12 @@ bridges the two:
   `/catalog.toml` endpoint. Flash still happens locally; only the catalog
   is centralised. Best for a small team sharing pre-built images without a
   full PXE server.
-- **PXE-driven (no operator).** Full `bty-server` appliance running
-  `bty-web` and the iPXE/TFTP/HTTP services. Fleet members are registered
-  by MAC address; reflashes happen on schedule, on demand, or on failure
-  with no operator at the target. Best for CI fleets and lab automation.
+- **PXE-driven (no operator).** `bty-web` run as a container
+  (`deploy/compose.yml` / `deploy/quadlet/`, with an optional tftp
+  sidecar), serving the UI, per-MAC PXE plans, boot artifacts, and images
+  over HTTP. Fleet members are registered by MAC address; reflashes happen
+  on schedule, on demand, or on failure with no operator at the target.
+  Best for CI fleets and lab automation.
 
 All three wrap the same `bty` runtime: same image catalog format, same
 target-disk operations. The difference is whether the catalog ships on the
@@ -53,7 +55,7 @@ FOG, iVentoy, and others.
 
 bty is one Python package - the `bty` module, distributed on PyPI as
 [`bty-lab`](https://pypi.org/project/bty-lab/) - with two console-script
-entry points, plus a sibling appliance-image builder:
+entry points, plus a sibling media builder:
 
 - `bty` - the operator-facing wizard (Rich-based) + library.
   ``--catalog SOURCE`` (a local TOML path, HTTP URL, or ``oras://``
@@ -62,7 +64,7 @@ entry points, plus a sibling appliance-image builder:
   ``<X>/pxe/<Y>/plan`` and dispatches on the JSON response).
 - `bty-web` - HTTP server + browser UI for fleet image flashing.
 - `bty-media/` - sibling directory (not a Python package); a cijoe-driven
-  Debian appliance-image builder that produces the USB live and server
-  images.
+  Debian media builder that produces the USB live ISO and the netboot
+  live-env trio (kernel / initrd / squashfs).
 
 See the [components](components.md) chapter for details on each.

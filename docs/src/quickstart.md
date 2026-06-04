@@ -6,8 +6,8 @@ network via the bty-web server.
 
 ## Lowest-barrier trial: bty-web in Docker
 
-To poke at the browser UI before committing to a USB stick or an
-appliance, pull the published container:
+To poke at the browser UI before committing to a USB stick or the full PXE
+deploy, pull the published container:
 
 ```bash
 docker run -d --name bty-web \
@@ -26,9 +26,10 @@ Connect a `bty --catalog http://<host>:8080/catalog.toml` from a USB live
 stick or a workstation to flash from this catalog without burning images
 onto every stick.
 
-The container has no dnsmasq / TFTP / iPXE - it's the catalog + UI shape,
-not the PXE shape. For PXE-driven unattended flashing, build (or download)
-the bty-server appliance image. Full details and rotation guidance:
+A bare `docker run` of bty-web is HTTP-only - the catalog + UI shape. For
+PXE-driven unattended flashing, run the full deploy
+(`podman compose -f deploy/compose.yml --profile tftp up -d`), which adds
+withcache and the `bty-tftp` sidecar. Full details and rotation guidance:
 [walkthrough-server-docker.md](walkthrough-server-docker.md).
 
 ## Get the USB live image
@@ -89,14 +90,14 @@ sync
 ```
 
 The stick now has the bty live-boot ISO9660 + EFI partitions plus a 2.1 GiB
-exFAT partition labelled `BTY_IMAGES`
-descriptors (nosi Debian / Ubuntu / Fedora / FreeBSD headless images plus a
-Fedora desktop, via `oras://ghcr.io/safl/nosi/...`, plus bty-server) so the catalog is
-non-empty out of the box, with room for a typical `bty-server` image (~1-
-1.5 GiB compressed) plus headroom. The smaller partition makes the .iso
-friendlier to Ventoy hosts and KVM-over-IP shims (piKVM / JetKVM). For more
-space, grow `BTY_IMAGES` on your host with gparted after writing the
-stick.
+exFAT partition labelled `BTY_IMAGES`. The wizard's `[d] default` catalog
+(nosi Debian / Ubuntu / Fedora / FreeBSD headless images plus a Fedora
+desktop, via `oras://ghcr.io/safl/nosi/...`) streams from GHCR at flash
+time, so the partition starts empty and has room for a typical headless
+image (~1-1.5 GiB compressed) plus headroom. The smaller partition makes
+the .iso friendlier to Ventoy hosts and KVM-over-IP shims (piKVM /
+JetKVM). For more space, grow `BTY_IMAGES` on your host with gparted after
+writing the stick.
 
 ## Drop images onto the stick
 
@@ -173,9 +174,9 @@ See [Reference](reference.md) for the full cmdline surface.
 ### Network flashing via the bty-web server
 
 `bty-web` is the HTTP server side of bty - browser UI + REST API + the iPXE
-chain a target boots into for network-flash. The server appliance image
-(`make build VARIANT=server-x86`) ships preconfigured; for a quick local
-test run it directly:
+chain a target boots into for network-flash. The container deploy
+(`deploy/compose.yml`) wires it up with withcache and the optional TFTP
+sidecar; for a quick local test run it directly:
 
 ```bash
 # On the server (or any box you're testing on):
@@ -220,12 +221,11 @@ flashes the target's local disk.
 cookie-backed session. The dashboard shows machine / image counts; the
 **Machines** page is a live table that updates via Server-Sent Events as
 PXE clients self-discover. The **Netboot** page has a per-interface
-cheatsheet for pointing your LAN DHCP server (option 60/66/67) at the
-appliance; bty serves TFTP but does not run DHCP.
+cheatsheet for pointing your LAN DHCP server (option 60/66/67) at the bty
+host; bty serves TFTP (via the sidecar) but does not run DHCP.
 
 All client-side assets (Bootstrap CSS, Bootstrap Icons, HTMX, htmx-ext-sse)
-are vendored in the wheel - the appliance contacts no external CDN at
-runtime.
+are vendored in the wheel - bty-web contacts no external CDN at runtime.
 
 ## What is coming
 

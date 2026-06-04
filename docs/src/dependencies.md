@@ -53,26 +53,24 @@ by pip) plus:
   rotate by changing the env var and restarting bty-web.
 - `qemu-img` (above) so the server can inspect uploaded images.
 
-## To use the bty-server appliance for PXE
+## To run the PXE-flash server
 
-The shipped `server-x86` and `server-rpi` appliance images bundle
-everything needed; this list is for reference if rebuilding your own.
+Run `bty-web` (and [withcache](https://github.com/safl/withcache)) as
+containers with podman; the only host dependency is the container runtime.
+See [`deploy/README.md`](https://github.com/safl/bty/blob/main/deploy/README.md)
+for the compose / Quadlet layout.
 
-| Binary / package | Used for |
-|---|---|
-| `dnsmasq` | TFTP for the PXE chain (bty does not run any DHCP role) |
-| `ipxe` | the iPXE BIOS / UEFI ROMs (`undionly.kpxe`, `ipxe.efi`) chain-loaded by booting clients |
-| `systemd-networkd` | NIC management on the appliance |
-| `cloud-init` | first-boot user / password / network setup |
-| `cloud-utils` | `growpart` for `bty-grow-rootfs.service` |
+| Service | Image | Used for |
+|---|---|---|
+| bty-web | `ghcr.io/safl/bty-web` | UI, per-MAC PXE plans, boot artifacts, and images over HTTP |
+| withcache | `ghcr.io/safl/withcache` | URL-keyed artifact cache; bty's preferred image source |
+| tftp *(profile `tftp`)* | `ghcr.io/safl/bty-tftp` | serves the ~1 MB iPXE bootfile over TFTP for BIOS / legacy clients |
 
-The appliance ships dnsmasq for TFTP; the Docker container
-(`ghcr.io/safl/bty-web`) is HTTP-only. UEFI HTTP-Boot targets
-work against either deployment; TFTP-only PXE clients need the
-appliance (or a separately-run TFTP server next to the
-container). DHCP stays with the operator's LAN in both cases.
+UEFI HTTP-Boot targets fetch the iPXE binary from bty-web over HTTP, so no
+TFTP is needed end-to-end; the `tftp` sidecar covers clients that bootstrap
+over TFTP option 67. DHCP stays with the operator's LAN in both cases.
 
-## To build the appliance images yourself
+## To build the bty media yourself
 
 `make build VARIANT=...` under `bty-media/` runs cijoe pipelines
 that need:
@@ -80,8 +78,6 @@ that need:
 | Dependency | Used by which variant |
 |---|---|
 | `live-build` + `debootstrap` + `squashfs-tools` + `xorriso` + `exfatprogs` | `usb-x86`, `netboot-x86` |
-| `qemu-system-x86_64` + KVM + `cloud-image-utils` | `server-x86` (cloud-init bake in QEMU) |
-| `qemu-user-static` + `binfmt_misc` + `losetup` + `xz-utils` | `server-rpi` (mount + chroot Raspberry Pi OS Lite, which ships as `.img.xz`) |
 | `cijoe` | all variants (orchestration) |
 | Passwordless `sudo` | all variants (live-build / loopback mounts / mkfs need it) |
 
@@ -92,9 +88,8 @@ for at runtime.
 ## Environment variables
 
 Every env var bty's runtime reads, with the consuming process and the
-default. The wizard + web read from the same set, so a single
-``/etc/default/bty-web`` (appliance) or ``ENV`` block (Dockerfile) covers
-every component.
+default. The wizard + web read from the same set, so a single ``ENV``
+block (compose / Quadlet / Dockerfile) covers every component.
 
 | Var | Read by | Default | Purpose |
 |---|---|---|---|

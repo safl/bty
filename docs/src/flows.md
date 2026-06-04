@@ -36,7 +36,7 @@ The whole flow runs offline. No network, no server, no MAC registration.
 A middle shape between the offline direct flash and the PXE-driven flows.
 The operator boots from the same USB live stick but points the wizard at a
 network-shared `bty-web` for the catalog. Useful for a small team that
-wants one place for pre-built images without the appliance + PXE stack.
+wants one place for pre-built images without the full PXE deploy.
 
 1. Someone (operator's workstation, a homelab server, a dev box) runs
    `bty-web`. The lowest-friction shape is the published container:
@@ -47,9 +47,9 @@ wants one place for pre-built images without the appliance + PXE stack.
    ```
 
    Pre-built images dropped into the volume show up in the `/images`
-   endpoint. The bare-metal `bty-server` appliance also serves `/images`
-   and works identically as a catalog source - any `bty-web` instance
-   does.
+   endpoint. Any `bty-web` instance serves `/images` and works identically
+   as a catalog source, whether run from a bare `docker run` or the full
+   `deploy/compose.yml` stack.
 
 2. Operator boots a target from the bty USB live stick. ``bty``
    auto-launches in local-only mode (no ``--mac`` on cmdline). On the first
@@ -142,13 +142,12 @@ The "bty-on-a-USB but over the network" path. Default behaviour for any MAC
 the server has never seen, so onboarding a new box needs zero per-MAC
 configuration.
 
-1. Operator stands up the bty server image (`dd` to disk, boot). The web UI
-   is gated by `$BTY_ADMIN_PASSWORD` (unset = open, with a startup warning;
-   rotate by changing the env var and restarting bty-web) and SSH is `odus /
-   odus.321` (rotate with `passwd`); point your LAN DHCP server (option
-   60/66/67) at the
-   appliance using the Netboot page cheatsheet (bty serves TFTP but does
-   not run DHCP).
+1. Operator brings up the bty-web container deploy
+   (`podman compose -f deploy/compose.yml --profile tftp up -d`). The web
+   UI is gated by `$BTY_ADMIN_PASSWORD` (unset = open, with a startup
+   warning; rotate by changing the env var and restarting bty-web); point
+   your LAN DHCP server (option 60/66/67) at the host using the Netboot
+   page cheatsheet (bty serves TFTP via the sidecar but does not run DHCP).
 2. A target PXE-boots on the same segment for the first time. `bty-web`
    auto-discovers the MAC as `boot_mode=bty-inventory` (self-reports its
    disks, then boots the disk). To drive it with the interactive wizard instead,
@@ -185,7 +184,7 @@ wizard session reachable via IPMI / serial console.
 Fleet-managed provisioning, where targets are reflashed on schedule, on
 demand, or on failure.
 
-1. Server appliance is already up (same setup as the interactive flow
+1. The bty-web deploy is already up (same setup as the interactive flow
    above).
 2. The target's first PXE contact creates a `Machine` record with
    `boot_mode=bty-tui`. The live env runs ``bty`` on tty1, which

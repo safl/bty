@@ -108,7 +108,7 @@ and you should now see the second partition labeled `BTY_IMAGES`.
 ## Step 3: Drop your image(s) onto BTY_IMAGES
 
 A fresh stick ships with a plain (empty) `BTY_IMAGES` partition.
-The default catalog of nosi + bty-server images is a release artifact
+The default catalog of nosi images is a release artifact
 (``https://github.com/safl/bty/releases/latest/download/catalog.toml``)
 the wizard offers as `[d] default` in the SELECT_CATALOG screen --
 no hard-coded entries baked onto the stick.
@@ -155,7 +155,7 @@ stick from the boot menu. The boot-menu key varies by vendor:
 
 The bty live env auto-logins as `root` on `tty1`. Two ways to flash: `bty`
 interactively (the operator picks an image and disk by hand, recommended
-for one-offs) or plan-driven against a `bty-server` (the appliance answers
+for one-offs) or plan-driven against a `bty-web` server (it answers
 `bty --mac` with a pre-bound image and target, recommended for fleets).
 
 ## Step 5a: Flash with `bty` (interactive)
@@ -203,17 +203,17 @@ browse images and disks, but the Flash button is disabled and
 need to flash.
 ```
 
-## Step 5b: Scripted flashing via the bty-server plan endpoint
+## Step 5b: Scripted flashing via the bty-web plan endpoint
 
-To drive flashes from a fleet controller, run a `bty-web` appliance and
+To drive flashes from a fleet controller, run a `bty-web` server and
 target the per-MAC plan endpoint:
 
-1. On the appliance, bind the machine: PUT `/machines/<mac>` with
+1. On the server, bind the machine: PUT `/machines/<mac>` with
    `boot_mode=bty-flash-always`, a `bty_image_ref`, and a
    `target_disk_serial`.
-2. On the target, run `bty --server <appliance> --mac <self-mac>`. bty GETs
+2. On the target, run `bty --server <host> --mac <self-mac>`. bty GETs
    `<server>/pxe/<mac>/plan`, sees `mode=flash`, streams the image straight
-   from the appliance, runs `dd`, signals `/pxe/<mac>/done`, and reboots.
+   from bty-web, runs `dd`, signals `/pxe/<mac>/done`, and reboots.
    Same chrome as the interactive wizard, no operator input.
 
 The PXE-boot flow does this automatically: the live env's
@@ -290,15 +290,16 @@ The Ventoy path also carries the image catalog; the IP-KVM paths use a
 remote `bty-web` for the catalog because IP-KVMs expose the `.iso` as a
 single CD-ROM with no local storage for image files.
 
-**Always-available bty-server install shortcut.** Whatever delivery shape
-you use, the wizard offers the default catalog (which includes bty-server) as `[d] default` in SELECT_CATALOG. The wizard surfaces it
-on the image list out of the box: pick it, pick a target disk, confirm. The
-image streams directly from GitHub through the live env to the target's
-disk; no local staging.
+**Always-available default catalog.** Whatever delivery shape you use, the
+wizard offers the default catalog (the nosi headless + desktop images) as
+`[d] default` in SELECT_CATALOG. The wizard surfaces those entries on the
+image list out of the box: pick one, pick a target disk, confirm. The image
+streams directly from GHCR through the live env to the target's disk; no
+local staging.
 
-Network constraint: the live env needs HTTPS reachability to `github.com` /
-`objects.githubusercontent.com` at flash time. Air-gapped operators should
-ship their own `bty-server.img.gz` via the Ventoy `bty-images/` folder path
+Network constraint: the live env needs HTTPS reachability to
+`ghcr.io` (and its blob CDN) at flash time. Air-gapped operators should
+ship their own image files via the Ventoy `bty-images/` folder path
 below instead.
 
 ### Ventoy
@@ -470,8 +471,8 @@ from `bty-web` through the live env to the target's disk; piKVM only
 carried the boot env.
 
 For bty's published default catalog without typing the URL, type `d`
-instead at the source-pick prompt: that's the bty release catalog (Debian /
-Ubuntu / Fedora / FreeBSD headless images plus a Fedora desktop and bty-server).
+instead at the source-pick prompt: that's the bty release catalog (nosi
+Debian / Ubuntu / Fedora / FreeBSD headless images plus a Fedora desktop).
 
 ### JetKVM (remote catalog only)
 
@@ -517,15 +518,10 @@ URL (e.g. `http://10.0.0.5:8080/catalog.toml`). The catalog populates from
 the server; images stream through the JetKVM-booted live env to the
 target's disk.
 
-To bootstrap the very first `bty-server` (no existing one to point at),
-press `i` instead of `c`: the built-in shortcut installs `bty-server`
-directly from GitHub's latest release.
-
 ## What's next
 
-* For provisioning many machines at once over the network, see the
- server-appliance section in [Quickstart](quickstart.md#network-flashing-via-the-bty-web-server).
- (A full server-appliance walkthrough is queued; until then the quickstart
- covers the same ground at lower depth.)
+* For provisioning many machines at once over the network, see
+ [Set up a bty server](walkthrough-server.md) and the in-depth
+ [bty-web container guide](walkthrough-server-docker.md).
 * For the full CLI surface, see [Reference](reference.md).
 * For how the live env works under the hood, see [Concepts](concepts.md).
