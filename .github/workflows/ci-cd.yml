@@ -63,7 +63,7 @@ name: CI
 #   PyPI Project Name:  bty-lab
 #   Owner:              safl
 #   Repository:         bty
-#   Workflow filename:  release.yml
+#   Workflow filename:  ci-cd.yml
 #   Environment name:   pypi
 # Then push a ``v*`` tag (e.g. ``v0.1.0``) and this workflow claims
 # and uploads the release.

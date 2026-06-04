@@ -187,7 +187,7 @@ test-usb-ventoy:
 
 # Local single-arch build of the bty-web container. Stages the
 # wheel into ./dist/ first so the Dockerfile's COPY finds it.
-# Multi-arch + push lives in .github/workflows/release.yml --
+# Multi-arch + push lives in .github/workflows/ci-cd.yml --
 # this target is the "smoke test it on my laptop" path.
 .PHONY: docker-build docker-run
 

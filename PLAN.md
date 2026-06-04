@@ -458,7 +458,7 @@ Landed after the original 1.0 list:
        packaging variant. Driven by a new `usb-iso` cijoe variant
        (`cijoe/configs/usb-iso.toml`, `cijoe/tasks/usb.yaml`,
        `cijoe/scripts/usb_iso_build.py`); marked experimental in
-       the release.yml media matrix until proven on real hardware.
+       the ci-cd.yml media matrix until proven on real hardware.
     2. **[done]** Make `bty-on-tty1.service` graceful when no
        `bty.server` / `bty.mac` is on the kernel cmdline: the
        wrapper script forwards no flags and `bty-tui` falls back

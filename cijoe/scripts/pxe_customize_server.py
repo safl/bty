@@ -76,7 +76,7 @@ def main(args, cijoe):
     server_gz = artifact_dir / _server_gz_name()
 
     # Reconstitute the qcow2 from .img.gz when only the .gz is
-    # present (CI shape: release.yml uploads only the operator-
+    # present (CI shape: ci-cd.yml uploads only the operator-
     # shippable .img.gz). Locally a fresh ``make build
     # VARIANT=server-x86`` leaves the qcow2 next to the .gz, so this
     # is a no-op.
