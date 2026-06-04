@@ -1,43 +1,26 @@
 """
-Run the PXE chain test against the production server qcow2
-============================================================
+PXE chain test: containerized bty-web + a bridged QEMU client
+=============================================================
 
-Boots two QEMU VMs sharing an L2 segment via ``-netdev socket``:
+Brings bty-web up as a container and PXE-boots a QEMU client VM against it over
+a host bridge:
 
-- Server: dual NIC. ``bty-web-init.service`` creates the state dir
-  tree on first boot and writes ``/etc/default/bty-web``;
-  ``bty-web.service`` starts. The mgmt NIC is QEMU user-mode with
-  a host port-forward so the script can drive bty-web's HTTP API.
-  The PXE NIC opens a socket listener for the client to dial in.
-  Auth uses the appliance's baked-in default credential
-  (``bty / bty``, set by ``cloudinit-base-server.user`` at image
-  build time) - same model as PiKVM, Octoprint, etc.
+- Server: the bty-web container (built by ``pxe_prepare`` from this checkout)
+  publishes its HTTP API on the host and bakes the ``bty / bty`` credential, so
+  the test drives the production HTTP API directly (``POST /ui/login``,
+  ``PUT /boot/<name>``, ``PUT /images/<name>``, ``PUT /machines/<mac>``). It is
+  reachable from the client over a host bridge that carries the server-side IP.
 
-- Client: single NIC joined to the server's PXE socket. PXE-boot
-  enabled. Blank virtio disk attached as the flash target. After
-  the chain runs, ``bty`` in auto-flash mode (driven by the plan
-  endpoint) pulls the dummy image we uploaded earlier, writes it
-  to /dev/vda, and reaches the ``bty: flash complete; rebooting``
-  marker on /dev/console.
+- DHCP + TFTP: a test-side dnsmasq bound to the bridge hands the client an
+  address and the iPXE NBP, then chainloads bty-web's HTTP iPXE script. bty
+  serves no DHCP; this is test-side machinery for the synthetic segment.
 
-The test uses production paths for everything except DHCP setup
-on the synthesised PXE segment. ``POST /ui/login`` uses the
-default credential, ``PUT /boot/<name>`` and ``PUT /images/<name>``
-upload the artifacts, and ``PUT /machines/<mac>`` pins the per-MAC
-plan.
+- Client: a QEMU VM with a tap on the bridge and a blank virtio disk. After the
+  chain runs, ``bty`` in auto-flash mode pulls the dummy image, writes it to
+  /dev/vda, and reaches ``bty: flash complete; rebooting`` on /dev/console.
 
-DHCP is the one piece that has to be test-side: the server VM and
-client VM share an isolated ``-netdev socket`` segment with no
-external DHCP server, and bty itself never runs DHCP (v0.18 dropped
-proxy-DHCP permanently after two failed attempts -- production
-deployments rely on the operator's existing LAN DHCP server). So
-the test SSHes in as ``odus`` and drops a test-only
-``/etc/dnsmasq.d/test-fulldhcp.conf`` plus restarts dnsmasq. None
-of that machinery exists in production bty.
-
-Asserts the chain progresses by tailing the client's serial-console
-log for marker strings configured in
-``[test.pxe.chain_markers]``.
+Asserts the chain progresses by tailing the client serial console for the
+markers in ``[test.pxe.chain_markers]``. Needs root (bridge/tap/dnsmasq) and KVM.
 
 Retargetable: False
 """
@@ -49,7 +32,6 @@ import hashlib
 import json
 import logging as log
 import shutil
-import socket
 import subprocess
 import time
 import urllib.error
@@ -57,18 +39,22 @@ import urllib.request
 from argparse import ArgumentParser
 from pathlib import Path
 
-import paramiko  # cijoe dependency; required by every PXE chain test
-
-# Netboot trio names carry the bty version (read from pyproject.toml).
 ARTIFACT_NAME_FMTS = (
     "bty-netboot-x86_64-v{version}.vmlinuz",
     "bty-netboot-x86_64-v{version}.initrd",
     "bty-netboot-x86_64-v{version}.squashfs",
 )
 
+# bty-web publishes :8080; the test reaches it on the host (seeding via
+# loopback, the client via the bridge IP).
+BTY_HTTP_PORT = 8080
+CONTAINER_NAME = "bty-pxe-test"
+
+HEALTHZ_TIMEOUT = 180  # container start is far quicker than a VM boot
+CHAIN_TIMEOUT = 600  # total for all client-side markers to appear
+
 
 def _read_bty_version() -> str:
-    """Read bty-lab's version from the repo's top-level pyproject.toml."""
     pyproject = Path.cwd().parent / "pyproject.toml"
     for line in pyproject.read_text(encoding="utf-8").splitlines():
         stripped = line.strip()
@@ -80,13 +66,6 @@ def _read_bty_version() -> str:
 def _artifact_names() -> tuple[str, ...]:
     version = _read_bty_version()
     return tuple(fmt.format(version=version) for fmt in ARTIFACT_NAME_FMTS)
-
-
-HEALTHZ_TIMEOUT = 600  # cloud-init + bty-web-init + bty-web takes a while.
-# 300s tripped on v0.22.4 with no underlying code change (runner-variance flake;
-# bty-web/web-init untouched since v0.22.0). 600s gives the slow tail of GHA's
-# nested-KVM runners a real chance without unbounding the wait.
-CHAIN_TIMEOUT = 600  # total for all client-side markers to appear
 
 
 def add_args(parser: ArgumentParser):
@@ -101,219 +80,238 @@ def main(args, cijoe):
         return errno.EINVAL
 
     workspace = Path.cwd() / "_build" / "test-pxe"
-    server_qcow2 = workspace / "server.qcow2"
     boot_stage = workspace / "boot"
     dummy_image = workspace / "test-image.qcow2"
-    for path, label in (
-        (server_qcow2, "server qcow2"),
-        (dummy_image, "dummy image"),
-    ):
-        if not path.is_file():
-            log.error(f"{label} missing: {path}")
-            log.error("did pxe_customize_server run?")
-            return errno.ENOENT
+    tftproot = workspace / "tftproot"
+    if not dummy_image.is_file():
+        log.error(f"dummy image missing: {dummy_image} (did pxe_prepare run?)")
+        return errno.ENOENT
     artifact_names = _artifact_names()
     for name in artifact_names:
         if not (boot_stage / name).is_file():
             log.error(f"live artifact missing in workspace: {boot_stage / name}")
             return errno.ENOENT
 
-    pxe_socket_port = _free_port()
-    mgmt_port = _free_port()
-    ssh_port = _free_port()
-    server_log = workspace / "server.serial.log"
+    image = cfg.get("bty_image", "bty-web:pxetest")
+    seed_base = f"http://127.0.0.1:{BTY_HTTP_PORT}"
     client_log = workspace / "client.serial.log"
 
-    server = _start_server_vm(server_qcow2, mgmt_port, ssh_port, pxe_socket_port, server_log, cfg)
+    container = None
+    dnsmasq = None
     client = None
+    net_up = False
     try:
-        log.info(f"Waiting for bty-web /healthz on 127.0.0.1:{mgmt_port}")
-        if not _wait_until(
-            lambda: _http_ready("127.0.0.1", mgmt_port),
-            HEALTHZ_TIMEOUT,
-            "bty-web /healthz",
-        ):
-            # On timeout the server log is the kernel-side window into
-            # what's happening; the in-vm journal dump (via SSH) is the
-            # bty-web process-side window. Without the journal a
-            # /healthz miss looks identical for "cloud-init slow",
-            # "wheel install broken", "bty-web crashed", "network never
-            # came up".
-            log.error("server VM serial-console tail (last 300 lines):")
-            _dump_tail(server_log, 300)
-            log.error("attempting in-vm diagnostics over SSH (best-effort):")
-            _dump_in_vm_diagnostics("127.0.0.1", ssh_port, cfg)
+        _setup_network(cfg, tftproot)
+        net_up = True
+        dnsmasq = _start_dnsmasq(cfg, tftproot, workspace)
+        container = _run_container(image, cfg["bty_password"])
+
+        log.info(f"Waiting for bty-web /healthz on {seed_base}")
+        if not _wait_until(lambda: _http_ready(seed_base), HEALTHZ_TIMEOUT, "bty-web /healthz"):
+            log.error("bty-web container did not become healthy; logs:")
+            _dump_container_logs()
             return errno.ETIMEDOUT
 
-        log.info("POST /ui/login (PAM, default appliance credential)")
+        log.info("POST /ui/login (PAM, container default credential bty/bty)")
         try:
-            token = _login("127.0.0.1", mgmt_port, cfg["bty_password"])
+            token = _login(seed_base, cfg["bty_password"])
         except Exception as exc:
             log.error(f"login failed: {exc}")
             return errno.EACCES
 
         log.info("PUT /boot/<live trio>")
         for name in artifact_names:
-            _put_file("127.0.0.1", mgmt_port, token, "/boot", boot_stage / name, name)
+            _put_file(seed_base, token, "/boot", boot_stage / name, name)
 
-        log.info(f"PUT /images/{cfg['machine_image']} (1 MiB dummy)")
-        _put_file(
-            "127.0.0.1",
-            mgmt_port,
-            token,
-            "/images",
-            dummy_image,
-            cfg["machine_image"],
-        )
-        # PUT /images runs the auto-import sweep, which inserts a
-        # catalog_entries row keyed by
-        # ``bty_image_ref = sha256("file://<machine_image>")``. The
-        # machine binding (below) targets that ref. The content sha
-        # is uploaded as a sidecar so the HashManager populates
-        # ``disk_image_sha`` synchronously; otherwise the client
-        # could PXE-boot before the hash worker writes the column
-        # and the cache-through fetch would have nothing to verify.
+        log.info(f"PUT /images/{cfg['machine_image']} (1 MiB dummy) + sha256 sidecar")
+        _put_file(seed_base, token, "/images", dummy_image, cfg["machine_image"])
         dummy_sha = _sha256_file(dummy_image)
-        sidecar_name = f"{cfg['machine_image']}.sha256"
+        sidecar = f"{cfg['machine_image']}.sha256"
         sidecar_body = f"{dummy_sha}  {cfg['machine_image']}\n".encode()
-        log.info(f"PUT /images/{sidecar_name} (pin SHA synchronously)")
-        _put_bytes(
-            "127.0.0.1",
-            mgmt_port,
-            token,
-            "/images",
-            sidecar_body,
-            sidecar_name,
-        )
-        # Canonical ref for the just-uploaded file. Mirrors
-        # ``bty.catalog.image_ref_for_src`` for the file:// scheme
-        # without importing the package (cijoe runs in its own venv).
+        _put_bytes(seed_base, token, "/images", sidecar_body, sidecar)
+
+        # Canonical ref for the uploaded file (mirrors image_ref_for_src for
+        # file://, without importing bty into cijoe's venv).
         bty_image_ref = hashlib.sha256(f"file://{cfg['machine_image']}".encode()).hexdigest()
-
-        # Wait for sshd to come up + drop the test-only dnsmasq
-        # config that does full DHCP on the synthesised PXE
-        # segment. bty itself never runs DHCP -- production relies
-        # on the operator's LAN DHCP, but the isolated socket-net
-        # has nothing on it, so the test injects DHCP itself.
-        log.info(f"Waiting for sshd on 127.0.0.1:{ssh_port}")
-        if not _wait_until(
-            lambda: _ssh_ready("127.0.0.1", ssh_port),
-            HEALTHZ_TIMEOUT,
-            "sshd",
-        ):
-            log.error("server VM serial-console tail (last 300 lines):")
-            _dump_tail(server_log, 300)
-            return errno.ETIMEDOUT
-        log.info("Configuring full-DHCP for the isolated PXE segment via SSH")
-        _ssh_setup_test_dhcp("127.0.0.1", ssh_port, cfg)
-
         log.info(f"PUT /machines/{cfg['client_mac']} (boot_mode=bty-flash-always)")
-        _put_assignment("127.0.0.1", mgmt_port, token, cfg, bty_image_ref)
+        _put_assignment(seed_base, token, cfg, bty_image_ref)
 
-        # Client firmware: BIOS by default (proven, no OVMF dep). The
-        # UEFI path is the one that broke + the common case on real
-        # hardware; select it with ``client_firmware = "uefi"`` once
-        # OVMF is available. If UEFI is requested but no OVMF is on the
-        # host, fall back to BIOS with a loud warning rather than fail.
         firmware = str(cfg.get("client_firmware", "bios")).lower()
         if firmware == "uefi" and _find_ovmf() is None:
             log.warning("client_firmware=uefi but no OVMF found; falling back to BIOS")
             firmware = "bios"
-        log.info(
-            f"Starting client VM (firmware={firmware}, PXE boot, "
-            f"joined to socket :{pxe_socket_port})"
-        )
-        client = _start_client_vm(workspace, pxe_socket_port, client_log, cfg, firmware)
+        log.info(f"Starting client VM (firmware={firmware}, PXE boot on {cfg['tap_iface']})")
+        client = _start_client_vm(workspace, cfg, client_log, firmware)
 
         markers = _build_markers(cfg)
         seen = _wait_for_chain_markers(client_log, markers, CHAIN_TIMEOUT)
-
         missing = [k for k, ok in seen.items() if not ok]
         if missing:
             log.error(f"PXE chain incomplete; missing markers: {', '.join(missing)}")
             _dump_tail(client_log, 200)
-            return errno.EPROTO
-
-        # Storage-format assertion (v0.33.19+): the server VM's
-        # lifespan must have stamped image_root/.bty-storage.json on
-        # first start. SSH back in + verify. A missing or wrong
-        # marker means a future bty-web start against the same disk
-        # would either skip the validation (silently degraded) or
-        # crash (StorageFormatMismatch on every restart).
-        log.info("Asserting storage marker present in server VM /var/lib/bty/images/")
-        try:
-            _assert_storage_marker("127.0.0.1", ssh_port, cfg)
-        except Exception as exc:
-            log.error(f"storage marker assertion failed: {exc}")
+            _dump_container_logs()
             return errno.EPROTO
 
         log.info("PXE chain test PASSED - all markers seen on client serial console")
         return 0
-
     finally:
-        for proc, name in ((client, "client"), (server, "server")):
-            if proc is None:
-                continue
-            log.info(f"Terminating {name} VM (pid={proc.pid})")
-            proc.terminate()
-            try:
-                proc.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                proc.wait(timeout=5)
+        if client is not None:
+            _terminate(client, "client VM")
+        _stop_container(container)
+        if dnsmasq is not None:
+            _terminate(dnsmasq, "dnsmasq", sudo=True)
+        if net_up:
+            _teardown_network(cfg)
 
 
-# ---------- VM lifecycle ---------------------------------------------------
+# ---------- network: host bridge + tap + dnsmasq ---------------------------
 
 
-def _start_server_vm(qcow2, mgmt_port, ssh_port, socket_port, log_path, cfg):
-    cmd = [
-        "qemu-system-x86_64",
-        "-enable-kvm",
-        "-cpu",
-        "host",
-        "-smp",
-        "2",
-        "-m",
-        "2G",
-        "-drive",
-        f"file={qcow2},if=virtio",
-        "-nographic",
-        "-serial",
-        f"file:{log_path}",
-        # Mgmt NIC: user-mode with two host port-forwards: 8080 for
-        # bty-web's HTTP API, 22 for the test-side SSH that drops
-        # the test-only full-DHCP dnsmasq overlay (the synthesised
-        # socket-net segment has no real DHCP, and bty itself never
-        # runs DHCP in production).
-        "-netdev",
-        (
-            f"user,id=mgmt,"
-            f"hostfwd=tcp:127.0.0.1:{mgmt_port}-:8080,"
-            f"hostfwd=tcp:127.0.0.1:{ssh_port}-:22"
-        ),
-        "-device",
-        f"virtio-net,netdev=mgmt,addr=0x{int(cfg['mgmt_nic_slot']):x}",
-        # PXE NIC: socket listener for the client to dial in.
-        "-netdev",
-        f"socket,id=pxe,listen=:{socket_port}",
-        "-device",
-        f"virtio-net,netdev=pxe,addr=0x{int(cfg['pxe_nic_slot']):x}",
-    ]
-    return subprocess.Popen(
-        cmd,
+def _setup_network(cfg, tftproot):
+    """Create the bridge carrying the server-side IP and a client tap on it.
+    The tap is owned by the current user so the (non-root) QEMU client can open
+    it. Seed the TFTP root with the iPXE NBPs from the distro ``ipxe`` package."""
+    bridge = cfg["bridge"]
+    tap = cfg["tap_iface"]
+    ip = cfg["server_pxe_ip"]
+    user = _whoami()
+
+    _teardown_network(cfg)  # idempotent: clear any leftovers from a prior run
+    _sudo(["ip", "link", "add", bridge, "type", "bridge"])
+    _sudo(["ip", "addr", "add", f"{ip}/24", "dev", bridge])
+    _sudo(["ip", "link", "set", bridge, "up"])
+    _sudo(["ip", "tuntap", "add", "dev", tap, "mode", "tap", "user", user])
+    _sudo(["ip", "link", "set", tap, "master", bridge])
+    _sudo(["ip", "link", "set", tap, "up"])
+
+    tftproot.mkdir(parents=True, exist_ok=True)
+    for nbp in ("undionly.kpxe", "ipxe.efi"):
+        src = Path("/usr/lib/ipxe") / nbp
+        if src.is_file():
+            shutil.copy2(src, tftproot / nbp)
+        else:
+            log.warning(f"iPXE NBP not found: {src} (install the 'ipxe' package)")
+
+
+def _teardown_network(cfg):
+    bridge = cfg["bridge"]
+    tap = cfg["tap_iface"]
+    # Best-effort; ignore failures (interfaces may not exist).
+    _sudo(["ip", "link", "set", tap, "down"], check=False)
+    _sudo(["ip", "link", "del", tap], check=False)
+    _sudo(["ip", "link", "set", bridge, "down"], check=False)
+    _sudo(["ip", "link", "del", bridge], check=False)
+
+
+def _start_dnsmasq(cfg, tftproot, workspace):
+    """Test-side dnsmasq on the bridge: full DHCP + TFTP, chainloading bty-web's
+    HTTP iPXE script. bty serves no DHCP; this is the synthetic segment's only
+    DHCP source."""
+    conf = workspace / "dnsmasq.conf"
+    server_ip = cfg["server_pxe_ip"]
+    conf.write_text(
+        "# Test-only DHCP+TFTP for the synthetic PXE bridge (test machinery,\n"
+        "# not part of bty: production relies on the operator's LAN DHCP).\n"
+        f"interface={cfg['bridge']}\n"
+        "bind-interfaces\n"
+        "except-interface=lo\n"
+        f"dhcp-range={cfg['dhcp_range_lo']},{cfg['dhcp_range_hi']},{cfg['pxe_netmask']},1h\n"
+        "enable-tftp\n"
+        f"tftp-root={tftproot}\n"
+        "dhcp-match=set:bios,option:client-arch,0\n"
+        "dhcp-match=set:efi,option:client-arch,7\n"
+        "dhcp-match=set:efi,option:client-arch,9\n"
+        "dhcp-userclass=set:ipxe,iPXE\n"
+        "dhcp-boot=tag:!ipxe,tag:bios,undionly.kpxe\n"
+        "dhcp-boot=tag:!ipxe,tag:efi,ipxe.efi\n"
+        f"dhcp-boot=tag:ipxe,http://{server_ip}:{BTY_HTTP_PORT}/pxe-bootstrap.ipxe\n",
+        encoding="utf-8",
+    )
+    log_path = workspace / "dnsmasq.log"
+    proc = subprocess.Popen(
+        [
+            "sudo",
+            "-n",
+            "dnsmasq",
+            "--keep-in-foreground",
+            "--log-facility=-",
+            f"--conf-file={conf}",
+        ],
         stdin=subprocess.DEVNULL,
+        stdout=open(log_path, "wb"),  # noqa: SIM115 - lives for the dnsmasq process
+        stderr=subprocess.STDOUT,
+    )
+    return proc
+
+
+def _whoami():
+    import getpass
+
+    return getpass.getuser()
+
+
+# ---------- bty-web container ----------------------------------------------
+
+
+def _run_container(image, admin_password):
+    """Run the bty-web container detached, publishing :8080, with the admin
+    password set so the test exercises the gated login path. No volume: the
+    image's /var/lib/bty is writable by the bty user, and the test is
+    throwaway. BTY_QUIET silences the credentials banner."""
+    subprocess.run(
+        ["podman", "rm", "-f", CONTAINER_NAME],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    subprocess.run(
+        [
+            "podman",
+            "run",
+            "-d",
+            "--name",
+            CONTAINER_NAME,
+            "-e",
+            "BTY_QUIET=1",
+            "-e",
+            f"BTY_ADMIN_PASSWORD={admin_password}",
+            "-p",
+            f"{BTY_HTTP_PORT}:{BTY_HTTP_PORT}",
+            image,
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return CONTAINER_NAME
+
+
+def _stop_container(name):
+    if name is None:
+        return
+    subprocess.run(
+        ["podman", "rm", "-f", name],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
     )
 
 
-# OVMF (UEFI firmware) split CODE/VARS pairs, newest Debian/Ubuntu
-# layout first. The CODE blob is read-only; VARS is a per-run writable
-# copy. The QEMU PXE chain test boots BIOS by default (proven, no OVMF
-# dependency); set ``client_firmware = "uefi"`` to exercise the UEFI
-# path -- which is the firmware that broke and the common case on real
-# hardware. See ``_find_ovmf``.
+def _dump_container_logs():
+    log.error(f"--- podman logs {CONTAINER_NAME} ---")
+    res = subprocess.run(
+        ["podman", "logs", "--tail", "200", CONTAINER_NAME],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    for line in (res.stdout + res.stderr).splitlines():
+        log.error(line)
+
+
+# ---------- client VM ------------------------------------------------------
+
+
 _OVMF_PAIRS = (
     ("/usr/share/OVMF/OVMF_CODE_4M.fd", "/usr/share/OVMF/OVMF_VARS_4M.fd"),
     ("/usr/share/OVMF/OVMF_CODE.fd", "/usr/share/OVMF/OVMF_VARS.fd"),
@@ -322,16 +320,13 @@ _OVMF_PAIRS = (
 
 
 def _find_ovmf():
-    """Return ``(code_path, vars_template_path)`` for an installed OVMF
-    split build, or ``None`` if no OVMF firmware is on the host (so the
-    caller can fall back to BIOS rather than fail)."""
     for code, vars_tpl in _OVMF_PAIRS:
         if Path(code).is_file() and Path(vars_tpl).is_file():
             return code, vars_tpl
     return None
 
 
-def _start_client_vm(workspace, socket_port, log_path, cfg, firmware="bios"):
+def _start_client_vm(workspace, cfg, log_path, firmware="bios"):
     blank_disk = workspace / "client-blank.qcow2"
     if not blank_disk.exists():
         subprocess.run(
@@ -339,19 +334,11 @@ def _start_client_vm(workspace, socket_port, log_path, cfg, firmware="bios"):
             check=True,
             capture_output=True,
         )
-    # UEFI: stage a writable copy of OVMF_VARS and prepend the pflash
-    # drives so the client boots OVMF firmware (which does its own UEFI
-    # PXE: DHCP -> TFTP ipxe.efi, which the server's dnsmasq overlay
-    # already serves for ``tag:efi``). BIOS keeps QEMU's default SeaBIOS
-    # + the NIC option ROM.
     fw_args: list[str] = []
     if firmware == "uefi":
         ovmf = _find_ovmf()
         if ovmf is None:
-            raise RuntimeError(
-                "client_firmware=uefi but no OVMF firmware found "
-                f"(looked for {[c for c, _ in _OVMF_PAIRS]}); install the 'ovmf' package"
-            )
+            raise RuntimeError("client_firmware=uefi but no OVMF firmware found")
         code, vars_tpl = ovmf
         vars_copy = workspace / "client-ovmf-vars.fd"
         shutil.copy(vars_tpl, vars_copy)
@@ -369,31 +356,11 @@ def _start_client_vm(workspace, socket_port, log_path, cfg, firmware="bios"):
         *fw_args,
         "-smp",
         "1",
-        # Client VM RAM. live-boot streams the squashfs into tmpfs
-        # via the ``fetch=`` cmdline param before pivot-root, so the
-        # client needs squashfs_size + working_set RAM before
-        # anything else happens. The bty live env squashfs is ~650
-        # MiB with non-free-firmware + network-manager, which OOMs a
-        # 1 GiB VM mid-wget. 2 GiB gives roughly 1.3 GiB of headroom
-        # over the squashfs size; bump again if we ever add another
-        # ~500 MiB to the live env.
+        # live-boot streams the ~650 MiB squashfs into tmpfs before pivot, so the
+        # client needs headroom over the squashfs size.
         "-m",
         "2G",
-        # Pin a stable serial on the flash target so the bty-web
-        # safety gate's ``target_disk_serial`` match succeeds.
-        # ``BTYTEST`` is the value the per-MAC binding (below)
-        # ships in the plan endpoint's ``target_disk_serial``
-        # field; the live env's ``bty`` in auto-flash mode looks
-        # it up via lsblk.
-        #
-        # Two-stage drive+device split: ``serial=`` on ``-drive
-        # if=virtio`` is a legacy QEMU shortcut that some QEMU
-        # builds reject silently (process exits before opening
-        # the serial-console file, so the test sees an empty
-        # client.serial.log + every chain-marker missing). The
-        # explicit ``-drive ...,if=none`` + ``-device virtio-
-        # blk-pci,drive=,serial=`` form is the canonical split
-        # and works on every QEMU version we test against.
+        # Stable serial so bty-web's target_disk_serial safety gate matches.
         "-drive",
         f"file={blank_disk},if=none,id=flashdrive,format=qcow2",
         "-device",
@@ -403,41 +370,32 @@ def _start_client_vm(workspace, socket_port, log_path, cfg, firmware="bios"):
         f"file:{log_path}",
         "-boot",
         "n",
+        # PXE NIC on the host bridge via a pre-created, user-owned tap.
         "-netdev",
-        f"socket,id=pxe,connect=:{socket_port}",
+        f"tap,id=pxe,ifname={cfg['tap_iface']},script=no,downscript=no",
         "-device",
         f"virtio-net,netdev=pxe,mac={cfg['client_mac']},bootindex=1",
     ]
     return subprocess.Popen(
-        cmd,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
     )
 
 
-# ---------- HTTP helpers ---------------------------------------------------
+# ---------- HTTP seeding (production API) -----------------------------------
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
-    """``/ui/login`` returns 303; we want the Set-Cookie header from
-    that response, not the redirect target. Disable urllib's default
-    redirect-follow."""
-
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         del req, fp, code, msg, headers, newurl
 
 
-def _login(host, port, password):
-    """Drive ``POST /ui/login`` with the appliance password and capture
-    the ``bty-token`` cookie from the Set-Cookie header. Same flow a
-    browser does when the operator submits the login form."""
+def _login(base, password):
     import http.cookies
     import urllib.parse
 
     body = urllib.parse.urlencode({"password": password}).encode("utf-8")
     req = urllib.request.Request(
-        f"http://{host}:{port}/ui/login",
+        f"{base}/ui/login",
         data=body,
         method="POST",
         headers={"Content-Type": "application/x-www-form-urlencoded"},
@@ -445,8 +403,7 @@ def _login(host, port, password):
     opener = urllib.request.build_opener(_NoRedirect())
     try:
         resp = opener.open(req, timeout=10)
-        status = resp.status
-        set_cookie = resp.headers.get("Set-Cookie", "")
+        status, set_cookie = resp.status, resp.headers.get("Set-Cookie", "")
     except urllib.error.HTTPError as exc:
         status = exc.code
         set_cookie = exc.headers.get("Set-Cookie", "") if exc.headers else ""
@@ -459,10 +416,8 @@ def _login(host, port, password):
     return cookie["bty-token"].value
 
 
-def _put_file(host, port, token, base_path, src_path, name):
-    """``PUT /<base>/<name>`` with the file as the body. Streams to
-    avoid loading large squashfs / kernel artifacts into memory."""
-    url = f"http://{host}:{port}{base_path}/{name}"
+def _put_file(base, token, base_path, src_path, name):
+    url = f"{base}{base_path}/{name}"
     size = src_path.stat().st_size
     with src_path.open("rb") as fh:
         req = urllib.request.Request(
@@ -480,39 +435,8 @@ def _put_file(host, port, token, base_path, src_path, name):
                 raise RuntimeError(f"PUT {url} returned {resp.status}")
 
 
-def _put_assignment(host, port, token, cfg, bty_image_ref):
-    body = json.dumps(
-        {
-            "bty_image_ref": bty_image_ref,
-            "boot_mode": "bty-flash-always",
-            # v0.19.0+ safety gate: /pxe/{mac} refuses the flash
-            # chain unless a target_disk_serial is picked. The
-            # client VM's flash target is pinned to ``serial=
-            # BTYTEST`` in _start_client_vm; ``bty`` in auto-flash
-            # mode matches the plan's target_disk_serial against
-            # lsblk's SERIAL field.
-            "target_disk_serial": "BTYTEST",
-        }
-    ).encode("utf-8")
-    req = urllib.request.Request(
-        f"http://{host}:{port}/machines/{cfg['client_mac']}",
-        data=body,
-        method="PUT",
-        headers={
-            "Cookie": f"bty-token={token}",
-            "Content-Type": "application/json",
-        },
-    )
-    with urllib.request.urlopen(req, timeout=10) as resp:
-        if resp.status != 200:
-            raise RuntimeError(f"PUT /machines returned {resp.status}")
-
-
-def _put_bytes(host, port, token, base_path, body, name):
-    """``PUT /<base>/<name>`` with ``body`` (bytes) as the request
-    body. Sibling of ``_put_file`` for in-memory payloads (sidecars,
-    etc.) where the file isn't on disk."""
-    url = f"http://{host}:{port}{base_path}/{name}"
+def _put_bytes(base, token, base_path, body, name):
+    url = f"{base}{base_path}/{name}"
     req = urllib.request.Request(
         url,
         data=body,
@@ -528,10 +452,26 @@ def _put_bytes(host, port, token, base_path, body, name):
             raise RuntimeError(f"PUT {url} returned {resp.status}")
 
 
+def _put_assignment(base, token, cfg, bty_image_ref):
+    body = json.dumps(
+        {
+            "bty_image_ref": bty_image_ref,
+            "boot_mode": "bty-flash-always",
+            "target_disk_serial": "BTYTEST",
+        }
+    ).encode("utf-8")
+    req = urllib.request.Request(
+        f"{base}/machines/{cfg['client_mac']}",
+        data=body,
+        method="PUT",
+        headers={"Cookie": f"bty-token={token}", "Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        if resp.status != 200:
+            raise RuntimeError(f"PUT /machines returned {resp.status}")
+
+
 def _sha256_file(path):
-    """SHA-256 of ``path``'s bytes as a 64-char lower-case hex
-    string. Streamed read so a multi-GiB target image doesn't
-    pin all of RAM."""
     h = hashlib.sha256()
     with open(path, "rb") as f:
         for chunk in iter(lambda: f.read(1 << 20), b""):
@@ -539,21 +479,10 @@ def _sha256_file(path):
     return h.hexdigest()
 
 
-# ---------- chain markers --------------------------------------------------
+# ---------- markers + small utils ------------------------------------------
 
 
 def _build_markers(cfg):
-    """Return ``[(key, needle), ...]`` from config, with the per-MAC
-    chain marker derived from the configured client MAC.
-
-    iPXE prints fetched URLs with the MAC in ``${mac:hexhyp}`` form
-    (hyphenated, e.g. ``52-54-00-11-22-33``), not the canonical
-    colon form. Build the marker accordingly so the assertion
-    matches what shows up on the serial console. In QEMU the client
-    VM has a single NIC so ``${mac}`` is net0; on bare-metal
-    multi-NIC hosts the template uses the active-NIC MAC, which
-    is the right one regardless of which physical port booted.
-    """
     out = [(entry["key"], entry["needle"]) for entry in cfg.get("chain_markers", [])]
     mac_hyphen = cfg["client_mac"].replace(":", "-")
     out.append(("ipxe-fetch-permac", f"/pxe/{mac_hyphen}"))
@@ -576,17 +505,6 @@ def _wait_for_chain_markers(log_path, markers, timeout):
     return seen
 
 
-# ---------- helpers --------------------------------------------------------
-
-
-def _free_port():
-    s = socket.socket()
-    s.bind(("127.0.0.1", 0))
-    port = s.getsockname()[1]
-    s.close()
-    return port
-
-
 def _wait_until(predicate, timeout, what):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -597,140 +515,12 @@ def _wait_until(predicate, timeout, what):
     return False
 
 
-def _http_ready(host, port):
+def _http_ready(base):
     try:
-        with urllib.request.urlopen(f"http://{host}:{port}/healthz", timeout=2):
+        with urllib.request.urlopen(f"{base}/healthz", timeout=2):
             return True
     except Exception:
         return False
-
-
-def _ssh_ready(host, port):
-    """Quick check that sshd is accepting connections on ``port``.
-
-    Doesn't authenticate - just opens a socket and reads the server
-    banner. Used as the wait predicate before we try password auth.
-    """
-    try:
-        with socket.create_connection((host, port), timeout=2) as sock:
-            banner = sock.recv(64)
-        return banner.startswith(b"SSH-")
-    except OSError:
-        return False
-
-
-def _ssh_setup_test_dhcp(host, port, cfg):
-    """SSH in as ``odus``, drop a test-only dnsmasq full-DHCP config,
-    restart dnsmasq.
-
-    bty itself never runs DHCP (v0.18 dropped proxy-DHCP after two
-    failed attempts; production relies on the operator's LAN DHCP
-    server). The chain test's PXE segment is a synthesised
-    ``-netdev socket`` with nothing else on it, so we need full
-    DHCP - injected entirely from the test side.
-    """
-    pxe_iface = f"{cfg.get('nic_prefix', 'ens')}{int(cfg['pxe_nic_slot'])}"
-
-    # Static IP for the PXE NIC. dnsmasq's ``bind-dynamic`` only
-    # binds to interfaces that have an address, so without this the
-    # full-DHCP block sits idle and the client's PXE ROM gets no
-    # answer. Drop a higher-priority systemd-networkd file alongside
-    # the production ``10-bty-default.network`` (which DHCPs
-    # everything) so just this one NIC is pinned.
-    # ``ConfigureWithoutCarrier=yes`` makes networkd assign the
-    # static IP even when the link has no carrier. The chain test's
-    # PXE socket-net only gains carrier once the CLIENT VM connects
-    # to it, which happens AFTER this SSH-setup step. Without this
-    # flag, networkd waits for carrier, dnsmasq's ``bind-dynamic``
-    # finds no IP to bind to on ``ens4``, and the client's PXE
-    # DHCPDISCOVER goes unanswered (iPXE prints
-    # ``ipxe.org/040ee119`` and gives up).
-    pxe_network = (
-        "[Match]\n"
-        f"Name={pxe_iface}\n"
-        "\n"
-        "[Link]\n"
-        "RequiredForOnline=no\n"
-        "\n"
-        "[Network]\n"
-        f"Address={cfg['server_pxe_ip']}/24\n"
-        "DHCP=no\n"
-        "ConfigureWithoutCarrier=yes\n"
-    )
-
-    overlay = (
-        "# Test-only full-DHCP overlay written by pxe_run_chain_test.\n"
-        "# bty itself never configures DHCP -- production relies on the\n"
-        "# operator's LAN DHCP server. This file is test-side machinery\n"
-        "# for the synthetic socket-net segment.\n"
-        "\n"
-        "bind-dynamic\n"
-        f"interface={pxe_iface}\n"
-        f"dhcp-range={cfg['dhcp_range_lo']},{cfg['dhcp_range_hi']},"
-        f"{cfg['pxe_netmask']},1h\n"
-        "\n"
-        "dhcp-match=set:bios,option:client-arch,0\n"
-        "dhcp-match=set:efi,option:client-arch,7\n"
-        "dhcp-match=set:efi,option:client-arch,9\n"
-        "dhcp-userclass=set:ipxe,iPXE\n"
-        "\n"
-        "dhcp-boot=tag:!ipxe,tag:bios,undionly.kpxe\n"
-        "dhcp-boot=tag:!ipxe,tag:efi,ipxe.efi\n"
-        "dhcp-boot=tag:ipxe,http://${next-server}:8080/pxe-bootstrap.ipxe\n"
-    )
-
-    client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    # ``allow_agent=False`` and ``look_for_keys=False`` keep paramiko
-    # from picking up the dev's ssh-agent / id_ed25519 by accident.
-    client.connect(
-        host,
-        port=port,
-        username="odus",
-        password="odus.321",
-        allow_agent=False,
-        look_for_keys=False,
-        timeout=15,
-    )
-    try:
-        # Drop both the static-IP .network file and the dnsmasq
-        # overlay, then ``networkctl reload`` (picks up the new
-        # .network without restarting networkd) and restart dnsmasq
-        # so it sees the now-bound interface.
-        # ``networkctl reload`` picks up new .network files, but it
-        # does NOT re-match existing links against the new files -
-        # ``ens4`` was already bound to the catch-all
-        # 10-bty-default.network at boot. ``networkctl reconfigure
-        # <link>`` forces networkd to re-evaluate which .network
-        # applies (now picking the higher-priority 20-bty-pxe-test
-        # we just dropped) and re-apply it. Then a brief settle so
-        # the address shows up before dnsmasq restarts.
-        cmd = (
-            f"sudo -n install -d -m 0755 /etc/dnsmasq.d /etc/systemd/network && "
-            f"echo {_quote_for_shell(pxe_network)} | "
-            f"sudo -n tee /etc/systemd/network/05-bty-pxe-test.network > /dev/null && "
-            f"echo {_quote_for_shell(overlay)} | "
-            f"sudo -n tee /etc/dnsmasq.d/test-fulldhcp.conf > /dev/null && "
-            f"sudo -n networkctl reload && "
-            f"sudo -n networkctl reconfigure {pxe_iface} && "
-            f"for i in 1 2 3 4 5; do "
-            f"  ip -4 -br addr show {pxe_iface} | grep -q 192.168.99.1/ && break; "
-            f"  sleep 1; "
-            f"done && "
-            f"sudo -n systemctl restart dnsmasq.service"
-        )
-        _stdin, stdout, stderr = client.exec_command(cmd, timeout=30)
-        rc = stdout.channel.recv_exit_status()
-        if rc != 0:
-            err = stderr.read().decode("utf-8", "replace")
-            raise RuntimeError(f"dnsmasq overlay failed (rc={rc}): {err}")
-    finally:
-        client.close()
-
-
-def _quote_for_shell(text):
-    """Single-quote ``text`` for safe interpolation into a shell string."""
-    return "'" + text.replace("'", "'\\''") + "'"
 
 
 def _dump_tail(path, lines):
@@ -743,154 +533,19 @@ def _dump_tail(path, lines):
         log.error(line)
 
 
-def _assert_storage_marker(host, port, cfg):
-    """SSH into the server VM and verify
-    ``/var/lib/bty/images/.bty-storage.json`` exists + carries the
-    expected ``format_version``. v0.33.19+: bty-web's lifespan
-    writes this marker on first start; a missing / mismatched marker
-    means a subsequent restart would either silently skip the
-    validation (degraded) or hard-fail (StorageFormatMismatch).
+def _sudo(cmd, check=True):
+    return subprocess.run(["sudo", "-n", *cmd], check=check, capture_output=True, text=True)
 
-    Uses the same odus SSH path as ``_dump_in_vm_diagnostics``.
-    Raises on any failure -- caller turns that into an EPROTO so
-    the test reports a clear "post-chain assertion failed" failure
-    rather than collapsing it into the generic chain timeout.
-    """
-    import json as _json
 
-    client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    client.connect(
-        host,
-        port=port,
-        username=cfg.get("ssh_user", "odus"),
-        password=cfg.get("ssh_password", "odus.321"),
-        allow_agent=False,
-        look_for_keys=False,
-        timeout=10,
-    )
+def _terminate(proc, what, sudo=False):
+    log.info(f"Terminating {what} (pid={proc.pid})")
+    if sudo:
+        # dnsmasq runs under sudo, so the child is root; signal via sudo kill.
+        subprocess.run(["sudo", "-n", "kill", str(proc.pid)], check=False)
+    else:
+        proc.terminate()
     try:
-        # /var/lib/bty/images is mode 0750 bty:bty (set by
-        # bty-web-init); the odus SSH user isn't in the bty group
-        # so a direct ``cat`` gets EACCES. ``sudo`` is the same
-        # path an operator would use to inspect the file on a
-        # live appliance.
-        _stdin, stdout, stderr = client.exec_command(
-            "sudo cat /var/lib/bty/images/.bty-storage.json", timeout=10
-        )
-        body = stdout.read().decode("utf-8", errors="replace")
-        err = stderr.read().decode("utf-8", errors="replace")
-        rc = stdout.channel.recv_exit_status()
-        if rc != 0:
-            raise RuntimeError(
-                f"marker read failed (rc={rc}): {err.strip()!r}. "
-                f"Either the lifespan didn't write it (regression in "
-                f"check_or_write_storage_marker) or the file lives "
-                f"elsewhere than /var/lib/bty/images/."
-            )
-        try:
-            data = _json.loads(body)
-        except ValueError as exc:
-            raise RuntimeError(f"marker JSON is malformed: {exc}; body={body!r}") from exc
-        version = data.get("format_version")
-        # The constant lives in bty.catalog.STORAGE_FORMAT_VERSION
-        # but the test runs in cijoe's own venv; hardcode the
-        # expected value + bump in lockstep with the source when
-        # the on-disk layout actually changes.
-        expected = 1
-        if version != expected:
-            raise RuntimeError(
-                f"marker has format_version={version!r}; expected {expected!r}. "
-                f"If the storage layout changed, bump the expected version here "
-                f"AND in bty.catalog.STORAGE_FORMAT_VERSION."
-            )
-        log.info(
-            "storage marker OK: format_version=%s, created_by_bty_version=%s",
-            version,
-            data.get("created_by_bty_version"),
-        )
-    finally:
-        client.close()
-
-
-def _dump_in_vm_diagnostics(host, port, cfg):
-    """SSH into the server VM and dump bty-web's process state +
-    recent journal lines. Called when /healthz times out -- the
-    kernel serial log shows boot reached multi-user.target but
-    can't see why bty-web isn't answering. The journal usually
-    has the actual stacktrace.
-
-    SSH credentials are the appliance's shell account
-    (``odus`` / ``odus.321`` by default; cfg-overridable via
-    ``ssh_user`` / ``ssh_password``) -- NOT the web ``bty/bty``
-    PAM creds used by /ui/login. ``bty`` doesn't have an interactive
-    shell + a shared password by design (web auth + sudoers-pinned
-    shell are separate surfaces).
-
-    Best-effort: if sshd hasn't come up yet (cloud-init still
-    running, networkd not started, etc.), each step short-circuits
-    with a single error line rather than hanging the test on a
-    silent SSH connect.
-    """
-    if not _ssh_ready(host, port):
-        log.error(f"in-vm SSH on {host}:{port} not reachable; skipping journal dump")
-        return
-
-    cmds = (
-        ("systemctl is-system-running --wait", "system state"),
-        ("systemctl status bty-web-init.service --no-pager --full", "bty-web-init"),
-        ("systemctl status bty-web.service --no-pager --full", "bty-web"),
-        ("journalctl -u bty-web-init.service --no-pager --no-hostname", "bty-web-init journal"),
-        ("journalctl -u bty-web.service --no-pager --no-hostname -n 200", "bty-web journal (200)"),
-        ("ls -la /etc/default/bty-web /var/lib/bty 2>&1 || true", "state dir + env file"),
-    )
-    user = cfg.get("ssh_user", "odus")
-    # Try several credentials in order. ``odus`` is the appliance's
-    # shell user; the cooked-image password is ``odus.321``
-    # (per ``cloudinit-base-server.user``) but stale builds or
-    # partial cloud-init runs sometimes leave it as plain ``odus``
-    # -- and on a half-cooked image where cloud-init's chpasswd
-    # hasn't run yet, neither will work and we want the actual
-    # failure mode to surface as "no creds worked", not just
-    # "Authentication failed" which is ambiguous between
-    # bad-password and user-doesn't-exist.
-    candidates = [cfg.get("ssh_password")] if cfg.get("ssh_password") else []
-    candidates.extend(("odus.321", "odus"))
-    client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    last_exc: Exception | None = None
-    for pw in candidates:
-        try:
-            client.connect(
-                host,
-                port=port,
-                username=user,
-                password=pw,
-                timeout=10,
-                allow_agent=False,
-                look_for_keys=False,
-            )
-            last_exc = None
-            break
-        except Exception as exc:
-            last_exc = exc
-            continue
-    if last_exc is not None:
-        log.error(
-            f"in-vm SSH connect failed for {user}@{host}:{port} "
-            f"with {len(candidates)} password candidate(s): {last_exc}"
-        )
-        return
-    try:
-        for cmd, label in cmds:
-            log.error(f"--- in-vm: {label} ---")
-            try:
-                _, stdout, stderr = client.exec_command(cmd, timeout=20)
-                out = stdout.read().decode(errors="replace")
-                err = stderr.read().decode(errors="replace")
-                for line in (out + err).splitlines():
-                    log.error(line)
-            except Exception as exc:
-                log.error(f"{cmd!r}: {exc}")
-    finally:
-        client.close()
+        proc.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait(timeout=5)

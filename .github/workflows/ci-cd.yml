@@ -411,22 +411,21 @@ jobs:
     needs: build-media
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    # IN PROGRESS: the server side runs as containers (bty-web + withcache via
-    # deploy/compose.yml); the client is a QEMU VM that PXE-boots against it.
-    # The cijoe harness (`make test-pxe`) is moving to a host-bridge network
-    # model so the container and the client VM share an L2 segment, with a
-    # test-side DHCP on the bridge. Until that lands this job is expected to
-    # fail, which keeps the release gated.
+    # The bty-web container (built from this checkout) is the server; a QEMU
+    # client PXE-boots against it over a host bridge, with a test-side dnsmasq
+    # (DHCP + TFTP) on the bridge. `make test-pxe` builds the image and runs the
+    # whole chain (cijoe/scripts/pxe_prepare.py + pxe_run_chain_test.py).
     steps:
       - uses: actions/checkout@v6
 
-      - name: Install host tools (qemu, bridge, dhcp)
+      - name: Install host tools (qemu, dnsmasq, ipxe, bridge)
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             qemu-system-x86 \
             qemu-utils \
             dnsmasq \
+            ipxe \
             iproute2 \
             cpu-checker
 
@@ -441,16 +440,16 @@ jobs:
       - name: Install cijoe
         run: pipx install --force cijoe
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.1.0
+
       - name: Download netboot artifacts
         uses: actions/download-artifact@v8
         with:
           name: bty-netboot-x86_64
           path: ~/system_imaging/disk/
 
-      - name: Bring up bty + withcache (containers)
-        run: podman compose -f deploy/compose.yml up -d
-
-      - name: Run PXE chain test
+      - name: Run PXE chain test (builds the bty-web image, runs the chain)
         run: make test-pxe
 
       - name: Upload cijoe report on failure
