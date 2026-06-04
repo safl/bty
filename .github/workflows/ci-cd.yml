@@ -639,6 +639,35 @@ jobs:
           name: docs-pdf
           path: docs/_build/latex/bty.pdf
 
+  # On a green main build, tag a new version so the publish jobs (which run on
+  # the tag) fire. Gated on the full suite via `needs`, so a red main (including
+  # a failing test-pxe) never gets tagged. The tag is pushed with RELEASE_PAT
+  # because a GITHUB_TOKEN push would not trigger this workflow.
+  tag-release:
+    needs: [lint, test, flash-integration, build-wheel, build-media, build-usb-x86, test-pxe, test-usb-grow, test-usb-ventoy, docs]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_PAT }}
+      - name: Tag the version if it is new
+        run: |
+          set -euo pipefail
+          version=$(grep -m1 '^version = ' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
+          test -n "$version" || { echo "could not read version from pyproject.toml"; exit 1; }
+          tag="v${version}"
+          if git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null 2>&1; then
+            echo "${tag} already exists; nothing to do."
+            exit 0
+          fi
+          git tag "${tag}"
+          git push origin "${tag}"
+          echo "Tagged ${tag}; ci-cd.yml will publish it."
+
   # ---------------- ship ---------------------------------------------------
   attach-to-release:
     name: Attach artifacts to GitHub release
