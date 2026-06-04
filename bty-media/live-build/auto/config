@@ -32,7 +32,7 @@
 # fetches ``dists/<release>/main/Contents-<arch>.gz`` from the
 # per-component layout Debian now publishes. Ubuntu's stock
 # live-build 20230502 still uses the obsolete top-level URL and
-# 404s on every active Debian release; release.yml's live job
+# 404s on every active Debian release; ci-cd.yml's live job
 # pulls the trixie .deb explicitly to work around that.
 set -e
 
