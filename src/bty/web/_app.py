@@ -43,7 +43,17 @@ import bty
 from bty import catalog as _catalog
 from bty import images
 from bty import oras as _oras
-from bty.web import _backup, _db, _hash, _models, _release_mgr, _security, _settings_store, _ui
+from bty.web import (
+    _backup,
+    _db,
+    _hash,
+    _models,
+    _release_mgr,
+    _security,
+    _settings_store,
+    _ui,
+    _withcache,
+)
 from bty.web import _catalog as _web_catalog
 from bty.web._auth import SESSION_COOKIE, require_auth
 from bty.web._events import (
@@ -1234,9 +1244,23 @@ def create_app(
                 else:
                     url_name = image_name
                 image_name_encoded = urllib.parse.quote(url_name, safe="")
+                image_url = f"{base}/images/{ref}/{image_name_encoded}"
+                # Prefer a configured withcache as the source, but only for an
+                # https origin it already holds. Otherwise serve via /images
+                # exactly as before (which serves a local copy or streams the
+                # origin), so a cold/unset/unreachable withcache never breaks a
+                # flash. The is_cached HEAD also warms an auto-fetch withcache,
+                # so the next boot of this image flips to the cache. (oras refs
+                # need token-authenticated pre-seeding -- handled separately.)
+                src = _flash_src_for_ref(str(ref))
+                if src and src.startswith(("http://", "https://")):
+                    with _db.open_db(state_path) as conn:
+                        withcache_url = _settings_store.resolve_withcache_url(conn)
+                    if withcache_url and _withcache.is_cached(withcache_url, src):
+                        image_url = _withcache.blob_url(withcache_url, src)
                 plan = {
                     "mode": "flash",
-                    "image": f"{base}/images/{ref}/{image_name_encoded}",
+                    "image": image_url,
                     "target_disk_serial": str(target_disk_serial),
                     # Descriptive catalog name for display: the image URL's
                     # last segment may be a synthesised "image.<fmt>" (so
@@ -1800,6 +1824,17 @@ def create_app(
                 (ref,),
             ).fetchone()
         return str(row["format"]) if row and row["format"] else None
+
+    def _flash_src_for_ref(ref: str) -> str | None:
+        """The catalog entry's origin ``src`` for a ref, or None. Used to build
+        the withcache serve URL, since withcache keys on the origin URL, not on
+        bty's ``/images`` URL."""
+        with _db.open_db(state_path) as conn:
+            row = conn.execute(
+                "SELECT src FROM catalog_entries WHERE bty_image_ref = ?",
+                (ref,),
+            ).fetchone()
+        return str(row["src"]) if row and row["src"] else None
 
     def _resolve_image_for_key(key: str) -> Path | None:
         """Resolve a 64-hex key (bty_image_ref or disk_image_sha) to a
