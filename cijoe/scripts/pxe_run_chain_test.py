@@ -6,8 +6,8 @@ Brings bty-web up as a container and PXE-boots a QEMU client VM against it over
 a host bridge:
 
 - Server: the bty-web container (built by ``pxe_prepare`` from this checkout)
-  publishes its HTTP API on the host and bakes the ``bty / bty`` credential, so
-  the test drives the production HTTP API directly (``POST /ui/login``,
+  publishes its HTTP API on the host with ``BTY_ADMIN_PASSWORD`` set, so the
+  test drives the production HTTP API directly (``POST /ui/login``,
   ``PUT /boot/<name>``, ``PUT /images/<name>``, ``PUT /machines/<mac>``). It is
   reachable from the client over a host bridge that carries the server-side IP.
 
@@ -112,7 +112,7 @@ def main(args, cijoe):
             _dump_container_logs()
             return errno.ETIMEDOUT
 
-        log.info("POST /ui/login (PAM, container default credential bty/bty)")
+        log.info("POST /ui/login (BTY_ADMIN_PASSWORD set on the container)")
         try:
             token = _login(seed_base, cfg["bty_password"])
         except Exception as exc:
@@ -184,6 +184,16 @@ def _setup_network(cfg, tftproot):
     _sudo(["ip", "link", "set", tap, "master", bridge])
     _sudo(["ip", "link", "set", tap, "up"])
 
+    # On a runner with docker installed, ``br_netfilter`` is loaded and the
+    # FORWARD policy is DROP, so frames crossing a Linux bridge get passed to
+    # iptables and the client's DHCP broadcast can be dropped. Make this
+    # synthetic test bridge bypass iptables entirely. Best-effort: the sysctl
+    # only exists when br_netfilter is loaded (and if it isn't, there's nothing
+    # filtering the bridge anyway).
+    _sudo(["sysctl", "-w", "net.bridge.bridge-nf-call-iptables=0"], check=False)
+    _sudo(["sysctl", "-w", "net.bridge.bridge-nf-call-ip6tables=0"], check=False)
+    _sudo(["sysctl", "-w", "net.bridge.bridge-nf-call-arptables=0"], check=False)
+
     tftproot.mkdir(parents=True, exist_ok=True)
     for nbp in ("undionly.kpxe", "ipxe.efi"):
         src = Path("/usr/lib/ipxe") / nbp
@@ -209,9 +219,19 @@ def _start_dnsmasq(cfg, tftproot, workspace):
     DHCP source."""
     conf = workspace / "dnsmasq.conf"
     server_ip = cfg["server_pxe_ip"]
+    # dnsmasq is launched as root (via sudo) but drops privileges after binding
+    # its sockets. Its default drop target is ``nobody``/``dnsmasq``, which on a
+    # CI runner cannot traverse the 0750 ``/home/<user>`` to reach the workspace
+    # tftp-root -> "TFTP directory inaccessible: Permission denied -> FAILED to
+    # start up", i.e. no DHCP at all. Pin the drop target to the user who owns
+    # the workspace (and the tap) so the tftp-root stays readable.
+    user = _whoami()
     conf.write_text(
         "# Test-only DHCP+TFTP for the synthetic PXE bridge (test machinery,\n"
         "# not part of bty: production relies on the operator's LAN DHCP).\n"
+        "port=0\n"  # DHCP + TFTP only; no DNS service (nothing for it to bind 53)
+        f"user={user}\n"  # don't drop to 'nobody'; keep the runner-owned tftp-root readable
+        "log-dhcp\n"  # log DHCP transactions so a future failure leaves a trail
         f"interface={cfg['bridge']}\n"
         "bind-interfaces\n"
         "except-interface=lo\n"
