@@ -68,9 +68,10 @@ sudo systemctl start withcache.service bty-web.service   # + bty-tftp.service fo
 
 ## Notes
 
-- **Bootfiles** live in the shared `bty-tftproot` volume: the tftp sidecar seeds
-  it with stock iPXE NBPs on first run, and bty (or the operator) can place
-  custom bootfiles in the same volume to take precedence.
+- **Bootfiles** (the ~1 MB iPXE NBPs, including bty's custom embedded-chain
+  `ipxe.efi`) are baked into the `bty-tftp` image and served directly -- no
+  volume, no shared data. bty-web serves the same `ipxe.efi` over HTTP for UEFI
+  HTTP-Boot, and the kernel / initrd / squashfs over HTTP as well.
 - **Consuming the cache from code:** bty uses the stdlib `withcache.client`
   library to build cache URLs and probe the cache. The bty-web image installs
   `withcache` from PyPI.

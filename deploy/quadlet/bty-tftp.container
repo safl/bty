@@ -9,9 +9,9 @@ Wants=network-online.target
 [Container]
 Image=ghcr.io/safl/bty-tftp:latest
 AutoUpdate=registry
-# Host networking: TFTP's data transfer uses an ephemeral UDP port.
+# Host networking: TFTP's data transfer uses an ephemeral UDP port. The NBPs
+# are baked into the image, so there's no volume to mount.
 Network=host
-Volume=bty-tftproot:/tftproot
 
 [Service]
 Restart=always
