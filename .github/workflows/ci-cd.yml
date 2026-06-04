@@ -198,6 +198,35 @@ jobs:
           path: dist/
           if-no-files-found: error
 
+  build-ipxe:
+    name: Build custom iPXE (x86_64-efi)
+    # bty's embedded-chain ipxe.efi: the bootstrap NBP whose script chains
+    # to bty-web's HTTP /pxe-bootstrap.ipxe, so the operator's DHCP needs
+    # only a single bootfile (no userclass logic). Baked into the bty-web
+    # (HTTP-Boot) and bty-tftp (TFTP) images and attached to the release.
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install iPXE build toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential liblzma-dev mtools perl git
+      - name: Build custom ipxe.efi
+        run: make ipxe IPXE_OUT="$PWD/dist/ipxe"
+      - name: Name it with the package version
+        run: |
+          set -euo pipefail
+          version=$(grep -m1 '^version = ' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
+          test -n "$version" || { echo "could not read version"; exit 1; }
+          mv dist/ipxe/ipxe.efi "dist/ipxe/bty-ipxe-x86_64-v${version}.efi"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: bty-ipxe-x86_64
+          path: dist/ipxe/bty-ipxe-x86_64-v*.efi
+          if-no-files-found: error
+
   build-media:
     name: Build ${{ matrix.variant }} image
     needs: test
@@ -308,24 +337,6 @@ jobs:
           name: cijoe-report-${{ matrix.variant }}
           path: cijoe/cijoe-output/report.html
           if-no-files-found: warn
-
-      - name: Upload artifact (server-x86 variant)
-        if: matrix.kind == 'disk'
-        uses: actions/upload-artifact@v7
-        with:
-          name: bty-server-x86_64-img-gz
-          path: |
-            ~/system_imaging/disk/bty-server-x86_64-v*.img.gz
-            ~/system_imaging/disk/bty-server-x86_64-v*.img.gz.sha256
-
-      - name: Upload artifact (server-rpi variant)
-        if: matrix.kind == 'disk-rpi'
-        uses: actions/upload-artifact@v7
-        with:
-          name: bty-server-rpi-arm64-img-gz
-          path: |
-            ~/system_imaging/disk/bty-server-rpi-arm64-v*.img.gz
-            ~/system_imaging/disk/bty-server-rpi-arm64-v*.img.gz.sha256
 
       - name: Upload artifact (netboot-x86 variant)
         if: matrix.variant == 'netboot-x86'
@@ -644,7 +655,7 @@ jobs:
   # a failing test-pxe) never gets tagged. The tag is pushed with RELEASE_PAT
   # because a GITHUB_TOKEN push would not trigger this workflow.
   tag-release:
-    needs: [lint, test, flash-integration, build-wheel, build-media, build-usb-x86, test-pxe, test-usb-grow, test-usb-ventoy, docs]
+    needs: [lint, test, flash-integration, build-wheel, build-ipxe, build-media, build-usb-x86, test-pxe, test-usb-grow, test-usb-ventoy, docs]
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
@@ -671,7 +682,7 @@ jobs:
   # ---------------- ship ---------------------------------------------------
   attach-to-release:
     name: Attach artifacts to GitHub release
-    needs: [build-wheel, build-media, build-usb-x86, test-pxe, test-usb-grow, test-usb-ventoy, docs]
+    needs: [build-wheel, build-ipxe, build-media, build-usb-x86, test-pxe, test-usb-grow, test-usb-ventoy, docs]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
@@ -684,11 +695,10 @@ jobs:
         # BTY_IMAGES, so the repo needs to be on disk in this job.
         uses: actions/checkout@v4
       - name: Generate catalog.toml from _STARTER_BRIS
-        # bty's default portable catalog: 7 nosi flashable images (via
-        # rolling oras:// tags) + bty-server (GitHub release URL).
-        # Rolling tags stay rolling -- bty.oras resolves the layer
-        # digest at flash time, so this file stays current as nosi
-        # republishes without needing a bty re-release.
+        # bty's default portable catalog: 7 nosi flashable images via
+        # rolling oras:// tags. Rolling tags stay rolling -- bty.oras
+        # resolves the layer digest at flash time, so this file stays
+        # current as nosi republishes without needing a bty re-release.
         run: |
           set -eu
           python scripts/generate_catalog_toml.py catalog.toml
@@ -702,7 +712,7 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           path: gathered/
-          pattern: '{dist,bty-netboot-x86_64,bty-usb-x86_64-iso,docs-pdf}'
+          pattern: '{dist,bty-ipxe-x86_64,bty-netboot-x86_64,bty-usb-x86_64-iso,docs-pdf}'
       - name: List gathered artifacts
         run: find gathered -type f | sort
       - name: Generate release.toml manifest
@@ -768,6 +778,7 @@ jobs:
           # root.
           files: |
             gathered/dist/*
+            gathered/bty-ipxe-x86_64/*
             gathered/bty-usb-x86_64-iso/*
             gathered/bty-netboot-x86_64/*
             gathered/docs-pdf/*
@@ -816,7 +827,7 @@ jobs:
     # built in the ``build-wheel`` job, not a PyPI download. If PyPI
     # publication fails, we still want the container published so
     # operators can pull a working trial image from ghcr.io.
-    needs: [attach-to-release]
+    needs: [attach-to-release, build-ipxe]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
@@ -838,6 +849,16 @@ jobs:
         with:
           name: dist
           path: dist/
+      - name: Stage custom iPXE into the build context
+        # bty-web bakes it under docker/seed/ and seeds /boot from it on
+        # startup for UEFI HTTP-Boot. amd64 only; arm64 falls back to the
+        # absent-seed no-op (operator can drop a custom binary in /boot).
+        uses: actions/download-artifact@v8
+        with:
+          name: bty-ipxe-x86_64
+          path: docker/seed/
+      - name: Normalise iPXE filename for seeding
+        run: mv docker/seed/bty-ipxe-x86_64-v*.efi docker/seed/ipxe.efi
       - uses: docker/setup-qemu-action@v3
         # arm64 builds run via QEMU on the amd64 GHA runner.
       - uses: docker/setup-buildx-action@v3
@@ -873,9 +894,10 @@ jobs:
 
   publish-tftp:
     name: Publish bty-tftp container to ghcr.io
-    # Independent of the wheel/release: the TFTP sidecar is debian + ipxe NBPs
-    # serving a shared bootfiles volume for BIOS PXE bootstrap (deploy/tftp).
-    needs: [test]
+    # The TFTP sidecar is debian + ipxe serving the ~1 MB NBP for BIOS/UEFI
+    # PXE bootstrap (deploy/tftp). It bakes bty's custom embedded-chain
+    # ipxe.efi over the stock one, so it needs the build-ipxe artifact.
+    needs: [test, build-ipxe]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
@@ -885,6 +907,15 @@ jobs:
       DOCKER_BUILD_RECORD_UPLOAD: "false"
     steps:
       - uses: actions/checkout@v6
+      - name: Stage custom iPXE into the build context
+        # Overrides the stock ipxe.efi the Containerfile installs. amd64
+        # only; the arm64 image keeps stock (documented chain-loop caveat).
+        uses: actions/download-artifact@v8
+        with:
+          name: bty-ipxe-x86_64
+          path: deploy/tftp/seed/
+      - name: Normalise iPXE filename for seeding
+        run: mv deploy/tftp/seed/bty-ipxe-x86_64-v*.efi deploy/tftp/seed/ipxe.efi
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3

@@ -1059,57 +1059,40 @@ def test_bty_web_help_documents_every_env_var() -> None:
     )
 
 
-def test_dnsmasq_tftp_root_agrees_across_deployment_shapes() -> None:
-    """The bty-web container (docker/dnsmasq.conf) and the
-    bty-server appliance (rootfs .../dnsmasq.d/bty-pxe.conf) both
-    run dnsmasq as the TFTP daemon. They must agree on the
-    ``tftp-root`` -- it's where the iPXE binaries (``ipxe.efi`` /
-    ``undionly.kpxe``) are staged, and a PXE client that fetches
-    a bootfile from one path while the daemon serves another just
-    404s. The Dockerfile stages the binaries into that same root,
-    so pin all three to one another.
+def test_tftp_sidecar_serves_its_baked_nbp_dir() -> None:
+    """The bty-tftp sidecar bakes the iPXE NBPs into one directory and
+    serves that same directory over TFTP. If the ``cp`` target dir and
+    the ``in.tftpd`` serve dir drift, clients 404 on the bootfile. Pin
+    the two to each other (bty-web is HTTP-only now, so this self-check
+    on the sidecar replaces the old container-vs-appliance dnsmasq check).
     """
-    docker_conf = (REPO_ROOT / "docker" / "dnsmasq.conf").read_text()
-    appliance_conf = (
-        REPO_ROOT / "bty-media" / "rootfs" / "server" / "etc" / "dnsmasq.d" / "bty-pxe.conf"
-    ).read_text()
-    dockerfile = (REPO_ROOT / "docker" / "Dockerfile").read_text()
+    containerfile = (REPO_ROOT / "deploy" / "tftp" / "Containerfile").read_text()
 
-    def _tftp_root(conf: str) -> str | None:
-        m = re.search(r"^tftp-root=(\S+)", conf, re.MULTILINE)
-        return m.group(1) if m else None
-
-    docker_root = _tftp_root(docker_conf)
-    appliance_root = _tftp_root(appliance_conf)
-    assert docker_root, "docker/dnsmasq.conf must set tftp-root"
-    assert appliance_root, "appliance bty-pxe.conf must set tftp-root"
-    assert docker_root == appliance_root, (
-        f"dnsmasq tftp-root mismatch: docker={docker_root!r} vs "
-        f"appliance={appliance_root!r}. PXE clients would 404 on "
-        f"the bootfile from one deployment shape."
+    # The ENTRYPOINT's last arg is the dir in.tftpd serves.
+    serve = re.search(r'ENTRYPOINT\s+\[.*"([^"]+)"\s*\]', containerfile)
+    assert serve, "deploy/tftp/Containerfile must have an in.tftpd ENTRYPOINT"
+    serve_dir = serve.group(1)
+    assert serve_dir == "/opt/ipxe", (
+        f"tftp sidecar serves {serve_dir!r}; the NBPs are staged into /opt/ipxe"
     )
-    # The Dockerfile must stage the iPXE binaries into that same root.
-    assert f"{docker_root}/ipxe.efi" in dockerfile, (
-        f"Dockerfile should stage ipxe.efi into {docker_root} (the configured tftp-root)"
+    # The stock NBPs are copied into that same dir.
+    assert f"{serve_dir}/" in containerfile or f" {serve_dir}\n" in containerfile, (
+        f"Containerfile should copy the iPXE NBPs into {serve_dir} (the served dir)"
     )
 
 
 def test_docker_bty_uid_aligned_across_surfaces() -> None:
-    """The Dockerfile pins the in-container bty user to a fixed
-    UID; the Makefile ``docker-run`` target chowns the host-side
-    bind-mount to the same UID; the docker-compose comments
-    document it. If any of those three drift the
-    ``make docker-clean docker-build docker-run`` flow comes up
-    and immediately exits 1 (the entrypoint's writability
-    preflight kicks in) and the operator sees nothing on
-    http://localhost:8080/ui -- the exact bug v0.22.11 shipped.
+    """The Dockerfile pins the in-container bty user to a fixed UID and
+    the Makefile ``docker-run`` target chowns the host-side bind-mount to
+    the same UID. If they drift, the bind-mount isn't writable by the bty
+    user and bty-web can't write state.db -- the operator sees nothing on
+    http://localhost:8080/ui.
 
-    Pin the alignment so a future Dockerfile bump that changes
-    the UID has to also bump the Makefile + compose surfaces.
+    Pin the alignment so a future Dockerfile UID bump also bumps the
+    Makefile chown.
     """
     dockerfile = (REPO_ROOT / "docker" / "Dockerfile").read_text()
     makefile = (REPO_ROOT / "Makefile").read_text()
-    compose = (REPO_ROOT / "docker" / "docker-compose.yml").read_text()
 
     uid_match = re.search(r"useradd\s+--uid\s+(\d+)\s+--gid\s+\d+", dockerfile)
     assert uid_match, (
@@ -1124,48 +1107,27 @@ def test_docker_bty_uid_aligned_across_surfaces() -> None:
     assert chown_match.group(1) == uid and chown_match.group(2) == uid, (
         f"Makefile chowns bty-data to {chown_match.group(1)}:{chown_match.group(2)} "
         f"but Dockerfile pins bty to uid {uid}. Align them or the "
-        f"entrypoint's writability preflight will reject the bind-mount."
-    )
-
-    # docker-compose.yml documents the UID in operator comments.
-    # Look for the literal "(uid N" so a future operator copying
-    # the chown command finds the right number.
-    assert f"(uid {uid}" in compose, (
-        f"docker-compose.yml comments should reference uid {uid} "
-        f"(matching the Dockerfile pin); operator copy-paste relies "
-        f"on that number being current."
+        f"bind-mount won't be writable by the bty user."
     )
 
 
-def test_docker_run_and_compose_publish_same_ports() -> None:
-    """``make docker-run`` (the manual single-command path) and
-    ``docker-compose.yml`` (the orchestrated path) should publish
-    the same port set. Otherwise the operator's mental model
-    silently differs between deployment shapes -- e.g. compose
-    serves TFTP but the make target doesn't, and a PXE client
-    appears to be unreachable from one but not the other.
+def test_docker_run_publishes_http_only() -> None:
+    """The bty-web container is HTTP-only -- TFTP moved to the separate
+    bty-tftp sidecar. ``make docker-run`` must publish just 8080:8080 and
+    must NOT publish udp/69 again (a regression would imply the container
+    is back to bundling dnsmasq, which it isn't).
     """
     makefile = (REPO_ROOT / "Makefile").read_text()
-    compose = (REPO_ROOT / "docker" / "docker-compose.yml").read_text()
-
-    # Match ``-p HOST:CONTAINER[/proto]`` flags in the docker-run
-    # rule. ``-p 69:69/udp`` -> ("69", "69", "udp"). TCP is the
-    # default when /proto is missing; normalise.
     make_ports = {
         f"{host}:{cont}/{proto or 'tcp'}"
         for host, cont, proto in re.findall(r"-p\s+(\d+):(\d+)(?:/(tcp|udp))?", makefile)
     }
-    # docker-compose YAML: ``"HOST:CONTAINER[/proto]"`` strings
-    # inside the ports list. Same regex shape.
-    compose_ports = {
-        f"{host}:{cont}/{proto or 'tcp'}"
-        for host, cont, proto in re.findall(r'"(\d+):(\d+)(?:/(tcp|udp))?"', compose)
-    }
-    assert make_ports == compose_ports, (
-        f"Makefile docker-run ports {sorted(make_ports)} != "
-        f"docker-compose.yml ports {sorted(compose_ports)}. "
-        f"One deployment shape can't reach a service the other "
-        f"can; align them or the operator gets surprises."
+    assert "8080:8080/tcp" in make_ports, (
+        f"Makefile docker-run must publish 8080:8080; got {sorted(make_ports)}"
+    )
+    assert not any("69" in p for p in make_ports), (
+        f"Makefile docker-run still publishes udp/69 {sorted(make_ports)} -- "
+        f"the bty-web container is HTTP-only; TFTP is the bty-tftp sidecar."
     )
 
 
@@ -1175,26 +1137,22 @@ def test_docker_healthcheck_honors_configured_port() -> None:
     overrides the port (``docker run -e BTY_WEB_PORT=9000``) would
     otherwise get a permanently-unhealthy container -- the probe
     keeps hitting the stale default while bty-web listens
-    elsewhere. The fix is shell-form CMD with runtime env
-    expansion (``${BTY_WEB_PORT:-8080}``); guard against a
-    regression back to a literal ``:8080`` in the probe URL.
+    elsewhere. The probe reads ``BTY_WEB_PORT`` from the environment at
+    runtime (a Python one-liner, no curl dependency); guard against a
+    regression to a literal ``:8080`` in the probe URL.
     """
     dockerfile = (REPO_ROOT / "docker" / "Dockerfile").read_text()
     healthcheck = next(
-        (
-            line
-            for line in dockerfile.splitlines()
-            if "curl" in line and "healthz" in line and "http" in line
-        ),
+        (line for line in dockerfile.splitlines() if "healthz" in line and "http" in line),
         None,
     )
-    assert healthcheck is not None, "Dockerfile HEALTHCHECK curl line not found"
-    assert "${BTY_WEB_PORT" in healthcheck, (
-        f"HEALTHCHECK must expand BTY_WEB_PORT at runtime, got: {healthcheck.strip()!r}. "
+    assert healthcheck is not None, "Dockerfile HEALTHCHECK healthz probe not found"
+    assert "BTY_WEB_PORT" in healthcheck, (
+        f"HEALTHCHECK must read BTY_WEB_PORT at runtime, got: {healthcheck.strip()!r}. "
         f"A hardcoded port breaks the health probe for any operator who overrides it."
     )
     assert "127.0.0.1:8080/healthz" not in healthcheck, (
-        "HEALTHCHECK appears to hardcode :8080 again -- use ${BTY_WEB_PORT:-8080}."
+        "HEALTHCHECK appears to hardcode :8080 again -- read BTY_WEB_PORT instead."
     )
 
 
