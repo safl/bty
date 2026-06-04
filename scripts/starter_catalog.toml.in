@@ -11,9 +11,8 @@ version = 1
 #
 # This file is a template -- ``{version}`` is substituted with the
 # current bty-lab version at release time by
-# ``scripts/generate_catalog_toml.py``. Only the bty-server entry
-# carries the placeholder; the oras:// nosi entries use rolling
-# :latest tags that don't change per release.
+# ``scripts/generate_catalog_toml.py``. The oras:// nosi entries use
+# rolling :latest tags that don't change per release.
 #
 # The nosi entries mirror nosi's own published catalog
 # (https://github.com/safl/nosi/releases/latest/download/catalog.toml),
@@ -61,9 +60,3 @@ name = "nosi freebsd-15-headless (x86_64, rolling)"
 src = "oras://ghcr.io/safl/nosi/freebsd-15-headless:latest"
 format = "img.gz"
 description = "FreeBSD 15.0-RELEASE headless scaffold. Phase 1: cloud-init bake + identity + baseline packages + kernel source; no provision chain yet."
-
-[[images]]
-name = "bty-server (x86_64, v{version})"
-src = "https://github.com/safl/bty/releases/download/v{version}/bty-server-x86_64-v{version}.img.gz"
-format = "img.gz"
-description = "bty-server v{version} appliance for x86_64"
