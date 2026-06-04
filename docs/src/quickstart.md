@@ -14,7 +14,7 @@ docker run -d --name bty-web \
   -p 8080:8080 \
   -v bty-data:/var/lib/bty \
   ghcr.io/safl/bty-web:latest
-# -> http://localhost:8080/ui   (login: bty / bty)
+# -> http://localhost:8080/ui   (operator UI open; set BTY_ADMIN_PASSWORD to gate it)
 ```
 
 The docker-managed volume (`-v bty-data:/var/lib/bty`) is the simplest
@@ -183,9 +183,10 @@ export BTY_STATE_DIR=/var/lib/bty
 bty-web   # listens on 0.0.0.0:8080 by default
 ```
 
-Auth is OS-PAM against the bty service user (the account bty-web runs as).
-On the appliance image the default is `bty / bty`; rotate with `sudo passwd
-bty` before exposing. The browser UI at `http://server:8080/ui/login` is
+The operator UI is gated by `$BTY_ADMIN_PASSWORD` (constant-time compare);
+when it is unset the UI is open and bty-web logs a startup warning. Set it
+before exposing, and rotate by changing the env var and restarting bty-web.
+The browser UI at `http://server:8080/ui/login` is
 the primary operator entry point; ``GET /pxe/{mac}`` (the route PXE clients
 hit) is open and needs no auth.
 
@@ -215,7 +216,7 @@ flashes the target's local disk.
 
 ### Browser UI
 
-`http://server:8080/ui/login` - the same `bty / bty` credential gets you a
+`http://server:8080/ui/login` - the `$BTY_ADMIN_PASSWORD` value gets you a
 cookie-backed session. The dashboard shows machine / image counts; the
 **Machines** page is a live table that updates via Server-Sent Events as
 PXE clients self-discover. The **Netboot** page has a per-interface

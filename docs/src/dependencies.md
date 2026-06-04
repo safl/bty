@@ -11,8 +11,7 @@ used.
 ```bash
 pipx install "bty-lab[tui]"     # `bty` wizard (Rich-based; the
                                 #  operator-facing tool)
-pipx install "bty-lab[web]"     # adds `bty-web` (FastAPI, Uvicorn,
-                                #  pamela)
+pipx install "bty-lab[web]"     # adds `bty-web` (FastAPI, Uvicorn)
 pipx install "bty-lab[all]"     # everything
 ```
 
@@ -46,15 +45,12 @@ uses stdlib urllib through `bty.oras`.
 
 ## To run bty-web
 
-The `[web]` extra (fastapi, uvicorn, pamela, jinja2 are pulled in
+The `[web]` extra (fastapi, uvicorn, jinja2 are pulled in
 by pip) plus:
 
-- `libpam0g` + `libpam-modules` if you want PAM-based `/ui/login`
-  (this is the default; the appliance and the Docker container both
-  ship it).
-- A user account on the host whose password you'll log in with
-  (the appliance + container ship `bty / bty` and tell you to
-  rotate it).
+- `$BTY_ADMIN_PASSWORD` to gate the operator UI (constant-time compare).
+  When it is unset the UI is open and bty-web logs a startup warning;
+  rotate by changing the env var and restarting bty-web.
 - `qemu-img` (above) so the server can inspect uploaded images.
 
 ## To use the bty-server appliance for PXE
@@ -114,7 +110,8 @@ every component.
 | `BTY_HASH_MAX_PARALLEL` | `bty-web` | `1` | Concurrent SHA-256 hashes (low: Pi/NUC-friendly) |
 | `BTY_MAX_UPLOAD_BYTES` | `bty-web` | `200 GiB` | Hard cap on `PUT /images/{name}` body size; rejected uploads land an `image.upload_failed` audit row |
 | `BTY_TRUSTED_PROXY` | `bty-web` | unset | When set (any truthy), read client IP from `X-Forwarded-For`; only enable behind a reverse proxy that strips inbound X-F-F |
-| `BTY_QUIET` | container entrypoint | unset | Suppress the start-up banner with default credentials |
+| `BTY_ADMIN_PASSWORD` | `bty-web` | unset | Gates the operator UI (constant-time compare); unset = open, with a startup warning |
+| `BTY_QUIET` | container entrypoint | unset | Suppress the start-up banner |
 
 ``bty`` also accepts `--catalog SOURCE` to pre-load a catalog and `--server
 X --mac Y` for server-driven dispatch. See `reference.md > CLI` for the

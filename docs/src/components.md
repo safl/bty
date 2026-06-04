@@ -139,8 +139,8 @@ control bytes onto ttyS0).
 delivered as an SD-card image for arm64. Built by mounting the upstream
 Raspberry Pi OS Lite image and customising it in a `qemu-aarch64-static`
 chroot. Operator `dd`'s the resulting `.img.gz` (after `gunzip`) to an SD
-card and boots a Pi 4 or Pi 5; first-boot ends at the same `bty / bty`
-credential as the x86 server image.
+card and boots a Pi 4 or Pi 5; first-boot ends at the same
+`$BTY_ADMIN_PASSWORD`-gated operator UI as the x86 server image.
 
 **Network-flash live env (`netboot-x86`).** Kernel + initrd + squashfs trio
 that PXE clients chain into. Built via Debian's `live-build`. The chroot
@@ -191,9 +191,10 @@ The intended operator experience is appliance-grade:
    the wizard's starter catalog, flash) the image onto the server
    host's disk (or SD card, for the Pi variant).
 2. Boot. Network comes up via DHCP; the appliance auto-starts
-   `bty-web` on `:8080` with a default `bty / bty` credential and an
-   `odus` admin user with passwordless sudo.
-3. SSH in once to rotate the password (`sudo passwd bty`) and then
+   `bty-web` on `:8080`, the operator UI gated by `$BTY_ADMIN_PASSWORD`
+   (unset = open, with a startup warning), and an `odus` admin user with
+   passwordless sudo.
+3. Set `$BTY_ADMIN_PASSWORD` (and restart bty-web) to gate the UI, then
    open `/ui/login` in a browser.
 4. The Netboot page shows how to point your LAN DHCP server (option
    60/66/67) at the appliance (bty serves TFTP, not DHCP); everything

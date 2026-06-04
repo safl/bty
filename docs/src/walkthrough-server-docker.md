@@ -69,7 +69,8 @@ docker run -d --name bty-web \
 Boot or `boots-from`). If TFTP transfers stall behind Docker's NAT, run
 with `--network host` instead of `-p`.
 
-Open <http://localhost:8080/ui> and log in with `bty / bty`. Drop
+Open <http://localhost:8080/ui>; with no `BTY_ADMIN_PASSWORD` set the
+operator UI is open (bty-web logs a startup warning). Drop
 `.img.zst` / `.qcow2` / `.img.gz` files into the data directory's `images/`
 subfolder and they appear in the catalog after a refresh.
 
@@ -114,26 +115,24 @@ catalog through the live env to the target's disk; no operator copy step.
 For one-shot ad-hoc flashes (no MAC binding), the wizard's URL accept
 covers HTTP and `oras://` sources via `bty --catalog ...`.
 
-## Rotating the default credentials
+## Gating the operator UI
 
-The pre-built image ships with `bty / bty` so the operator can start
-poking immediately. **Rotate before exposing past a trusted LAN.**
+The operator UI is gated by `$BTY_ADMIN_PASSWORD` (constant-time compare);
+when it is unset the UI is open and bty-web logs a startup warning. **Set it
+before exposing past a trusted LAN.** Pass it on the `docker run`:
 
 ```bash
-docker exec -it -u root bty-web passwd bty
+docker run -d --name bty-web \
+  -e BTY_ADMIN_PASSWORD=your-secret \
+  -p 8080:8080 \
+  -p 69:69/udp \
+  -v bty-data:/var/lib/bty \
+  ghcr.io/safl/bty-web:latest
 ```
 
-The `-u root` runs `passwd` as root inside the container so it prompts only
-for the new password (skipping "current password" the way `passwd bty`
-would when invoked as the bty user). The new hash lands in `/etc/shadow`
-inside the container; restart-resilient, since pamela reads `/etc/shadow`
-directly on every auth call.
-
-> If you rebuild or pull a fresh image, the password resets to
-> `bty / bty` because the new container's `/etc/shadow` comes
-> from the image. To survive image upgrades, bind-mount
-> `/etc/shadow` from the host or set up an external auth proxy
-> in front of bty-web.
+Rotate by changing `BTY_ADMIN_PASSWORD` and restarting the container; the
+setting survives image rebuilds and pulls since it lives in the run command
+(or your compose file), not in the image.
 
 ## Volume layout
 
@@ -160,7 +159,8 @@ and copying the file. Migrations run automatically on every start.
 | `BTY_IMAGE_ROOT` | `/var/lib/bty/images` | Image catalog directory |
 | `BTY_BOOT_DIR` | `${BTY_STATE_DIR}/boot` | Kernel/initrd/squashfs (PXE boot artifacts) |
 | `BTY_SESSION_SECRET` | (generated) | Cookie key override; useful for multi-instance |
-| `BTY_QUIET` | unset | Suppress the start-up banner with default credentials |
+| `BTY_ADMIN_PASSWORD` | unset | Gates the operator UI (constant-time compare); unset = open, with a startup warning |
+| `BTY_QUIET` | unset | Suppress the start-up banner |
 
 ## Building locally
 

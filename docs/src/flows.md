@@ -142,9 +142,11 @@ The "bty-on-a-USB but over the network" path. Default behaviour for any MAC
 the server has never seen, so onboarding a new box needs zero per-MAC
 configuration.
 
-1. Operator stands up the bty server image (`dd` to disk, boot). Default
-   credentials are `bty / bty` (web UI) and `odus / odus.321` (SSH); rotate
-   with `passwd`, and point your LAN DHCP server (option 60/66/67) at the
+1. Operator stands up the bty server image (`dd` to disk, boot). The web UI
+   is gated by `$BTY_ADMIN_PASSWORD` (unset = open, with a startup warning;
+   rotate by changing the env var and restarting bty-web) and SSH is `odus /
+   odus.321` (rotate with `passwd`); point your LAN DHCP server (option
+   60/66/67) at the
    appliance using the Netboot page cheatsheet (bty serves TFTP but does
    not run DHCP).
 2. A target PXE-boots on the same segment for the first time. `bty-web`
@@ -392,8 +394,8 @@ Conditional:
 | `backup.created`                | BackupManager wrote a fresh bundle directory under `backups_root` (manual or scheduled).                   |
 | `backup.failed`                 | BackupManager export errored; the partial bundle (if any) is cleaned up.                                   |
 | `backup.pruned`                 | Retention pass deleted an old backup directory after a successful run.                                     |
-| `auth.login.succeeded`          | Operator `POST /ui/login` with a valid OS password.                                                         |
-| `auth.login.failed`             | Same path with PAM rejection.                                                                                |
+| `auth.login.succeeded`          | Operator `POST /ui/login` with a password matching `$BTY_ADMIN_PASSWORD`.                                    |
+| `auth.login.failed`             | Same path with a mismatched password.                                                                       |
 | `auth.logout`                   | Operator `POST /ui/logout` from an authed session.                                                          |
 
 Every row carries `subject_kind` (`machine` / `image` / `catalog` /
@@ -405,7 +407,7 @@ requesting `source_ip`, the `actor` (`operator` / `pxe-client` /
 
 | Action                                    | UI path                              | What happens server-side                                                                           |
 |-------------------------------------------|--------------------------------------|----------------------------------------------------------------------------------------------------|
-| Log in                                    | `POST /ui/login`                     | PAM authenticate -> session cookie. Records `auth.login.{succeeded,failed}`.                       |
+| Log in                                    | `POST /ui/login`                     | Constant-time compare against `$BTY_ADMIN_PASSWORD` -> session cookie. Records `auth.login.{succeeded,failed}`. |
 | Log out                                   | `POST /ui/logout`                    | Clears session cookie. Records `auth.logout`.                                                       |
 | Bind image + disk + policy on a machine   | `POST /ui/machines/{mac}`            | UPSERT. Refuses `boot_mode=bty-flash-always` without `target_disk_serial`. Records `machine.{created,upserted}`. |
 | Delete a machine record                   | `POST /ui/machines/{mac}/delete`     | DELETE row. Records `machine.deleted`.                                                              |
@@ -432,6 +434,6 @@ Where bty-web refuses what the operator asked, and what the operator sees:
 | Refuse oversize image upload                           | `PUT /images/{name}` body > `BTY_MAX_UPLOAD_BYTES` (200 GiB).      | `PUT /images/{name}`                    | 413 Content Too Large; `image.upload_failed`.       |
 | Refuse non-TOML catalog upload                         | Filename extension not `.toml`/`.tml` OR TOML parse fails.          | `POST /ui/catalog/upload`               | 303 with `?error=...` flash. On-disk manifest preserved on parse failure. |
 | Refuse non-2xx catalog fetch-release body             | HTTPError 404, URLError, TimeoutError, or non-TOML body.            | `POST /ui/catalog/fetch-release`        | 303 with `?error=...`.                              |
-| Refuse PAM-rejected login                              | `pamela.authenticate` raises PAMError.                              | `POST /ui/login`                        | Login form re-rendered with `Invalid password for ...`. |
+| Refuse mismatched login                                | Submitted password does not match `$BTY_ADMIN_PASSWORD`.            | `POST /ui/login`                        | Login form re-rendered with `Invalid password`.    |
 | Refuse unknown `boot_mode`                           | Pydantic pattern check on `BOOT_POLICIES`.                          | `PUT /machines/{mac}` + form sibling   | 422 (JSON) / 303 with flash (form).                |
 | Refuse path-traversal in upload `{name}`               | `..%2F` or `..` segments in `PUT /images/{name}` / `PUT /boot/{name}`. | `_safe_path` boundary check         | 400 / 404 / 405 depending on the request shape.     |

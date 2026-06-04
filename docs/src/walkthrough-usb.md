@@ -415,8 +415,9 @@ docker run -d --name bty-web \
   ghcr.io/safl/bty-web:latest
 ```
 
-Default credentials are `bty / bty`. Note the host's IP (e.g. `10.0.0.5`);
-the target needs to reach it on TCP 8080.
+With no `BTY_ADMIN_PASSWORD` set the operator UI is open (bty-web logs a
+startup warning); set it to gate the UI. Note the host's IP (e.g.
+`10.0.0.5`); the target needs to reach it on TCP 8080.
 
 Upload your pre-built images via the bty-web Images page
 (`http://10.0.0.5:8080/ui/images`).
