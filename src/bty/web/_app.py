@@ -15,6 +15,7 @@ import html
 import json
 import os
 import re
+import shutil
 import sqlite3
 import sys
 import urllib.error
@@ -262,6 +263,11 @@ def create_app(
         # progress + cancel buttons). Default parallelism is 1
         # because fetching two GitHub releases in parallel is
         # operator-confusing and bandwidth-saturating.
+        # Seed boot_root with baked bootstrap artifacts (the container
+        # image bakes bty's custom iPXE binary here) so UEFI HTTP-Boot
+        # clients can fetch GET /boot/ipxe.efi out of the box. No-op on
+        # host / dev installs (BTY_BOOT_SEED_DIR unset).
+        _seed_boot_dir(resolved_boot_root)
         release_fetch_manager.start(resolved_boot_root, state_path=state_path)
         # Backup manager: powers ``/workers/backups`` + the Backup
         # tab's "Back up now" button. Wraps ``_portability.export_bundle``
@@ -3679,6 +3685,45 @@ def _client_ip(request: Request) -> str | None:
             if first:
                 return _normalize_ip(first)
     return _normalize_ip(request.client.host if request.client else None)
+
+
+def _seed_boot_dir(boot_root: Path) -> None:
+    """Seed ``boot_root`` with baked bootstrap artifacts on startup.
+
+    The container image bakes bty's custom iPXE binary (the one whose
+    embedded script chains to ``/pxe-bootstrap.ipxe``, so the operator's
+    DHCP only needs a single bootfile) under ``$BTY_BOOT_SEED_DIR``. Copy
+    any file from there into ``boot_root`` when it isn't already present,
+    so UEFI HTTP-Boot clients can fetch ``GET /boot/ipxe.efi`` out of the
+    box.
+
+    A no-op when ``BTY_BOOT_SEED_DIR`` is unset (host / dev installs) or
+    its directory is absent. Existing files are never overwritten, so an
+    operator-placed bootfile always wins.
+    """
+    import logging as _logging
+
+    seed_dir = os.environ.get("BTY_BOOT_SEED_DIR")
+    if not seed_dir:
+        return
+    src = Path(seed_dir)
+    if not src.is_dir():
+        return
+    boot_root.mkdir(parents=True, exist_ok=True)
+    seed_log = _logging.getLogger(__name__)
+    for item in sorted(src.iterdir()):
+        # Skip dotfiles so a ``.gitkeep`` placeholder in an
+        # otherwise-empty seed dir (dev builds) isn't published.
+        if item.name.startswith(".") or not item.is_file():
+            continue
+        dst = boot_root / item.name
+        if dst.exists():
+            continue
+        try:
+            shutil.copy2(item, dst)
+            seed_log.info("seeded boot artifact %s into %s", item.name, boot_root)
+        except OSError as exc:
+            seed_log.warning("could not seed boot artifact %s: %s", item.name, exc)
 
 
 def _safe_path(root: Path, name: str) -> Path:

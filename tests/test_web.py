@@ -6472,3 +6472,67 @@ def test_safe_path_rejects_symlink_escape(tmp_path: Path) -> None:
     with pytest.raises(HTTPException) as excinfo:
         _safe_path(root, "innocent")
     assert excinfo.value.status_code == 400
+
+
+def test_seed_boot_dir_copies_baked_artifact(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The container bakes its custom ipxe.efi under BTY_BOOT_SEED_DIR;
+    startup copies it into an empty boot_root so GET /boot/ipxe.efi works
+    out of the box."""
+    from bty.web._app import _seed_boot_dir
+
+    seed = tmp_path / "seed"
+    seed.mkdir()
+    (seed / "ipxe.efi").write_bytes(b"BAKED")
+    boot = tmp_path / "boot"
+
+    monkeypatch.setenv("BTY_BOOT_SEED_DIR", str(seed))
+    _seed_boot_dir(boot)
+    assert (boot / "ipxe.efi").read_bytes() == b"BAKED"
+
+
+def test_seed_boot_dir_skips_dotfile_placeholder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A .gitkeep placeholder in an otherwise-empty seed dir (dev builds)
+    is not published into boot_root."""
+    from bty.web._app import _seed_boot_dir
+
+    seed = tmp_path / "seed"
+    seed.mkdir()
+    (seed / ".gitkeep").write_bytes(b"")
+    boot = tmp_path / "boot"
+
+    monkeypatch.setenv("BTY_BOOT_SEED_DIR", str(seed))
+    _seed_boot_dir(boot)
+    assert not (boot / ".gitkeep").exists()
+
+
+def test_seed_boot_dir_never_overwrites_operator_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An operator-placed bootfile in boot_root always wins over the baked one."""
+    from bty.web._app import _seed_boot_dir
+
+    seed = tmp_path / "seed"
+    seed.mkdir()
+    (seed / "ipxe.efi").write_bytes(b"BAKED")
+    boot = tmp_path / "boot"
+    boot.mkdir()
+    (boot / "ipxe.efi").write_bytes(b"OPERATOR")
+
+    monkeypatch.setenv("BTY_BOOT_SEED_DIR", str(seed))
+    _seed_boot_dir(boot)
+    assert (boot / "ipxe.efi").read_bytes() == b"OPERATOR"
+
+
+def test_seed_boot_dir_noop_when_unset(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Host / dev installs leave BTY_BOOT_SEED_DIR unset; seeding is a no-op
+    and does not create boot_root."""
+    from bty.web._app import _seed_boot_dir
+
+    monkeypatch.delenv("BTY_BOOT_SEED_DIR", raising=False)
+    boot = tmp_path / "boot"
+    _seed_boot_dir(boot)
+    assert not boot.exists()

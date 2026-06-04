@@ -3,14 +3,17 @@ TFTP daemon sub-sections).
 
 * :func:`list_interfaces` -- enumerate non-loopback network
   interfaces with their IPv4 / operstate. Used to suggest the
-  bty-server's own IP to the operator in the router-config
+  bty host's own IP to the operator in the router-config
   cheatsheet (the DHCP / PXE card on the Settings page).
 * :func:`tftp_status` / :func:`control_tftp` -- read ``systemctl
   is-active dnsmasq.service`` and shell out to a sudo'd helper
-  for start / stop / restart. dnsmasq serves the appliance's
-  TFTP root; the operator may want to stop or restart it from
-  the UI without SSHing in (the buttons live on the Netboot
-  list view, below the artifacts table).
+  for start / stop / restart. These apply to a host/systemd
+  install of bty-web that runs a co-located ``dnsmasq`` TFTP
+  service, letting the operator stop or restart it from the UI
+  without SSHing in (the buttons live on the Netboot list view,
+  below the artifacts table). The container deploy serves TFTP
+  from a separate sidecar instead, so these controls are simply
+  absent there (see :func:`tftp_controllable`).
 """
 
 from __future__ import annotations
@@ -24,10 +27,10 @@ from pathlib import Path
 SYSNET_PATH = Path("/sys/class/net")
 TFTP_HELPER = "/usr/local/sbin/bty-web-tftp"
 
-# The systemd unit that owns the TFTP root on the appliance. One
-# constant + the helper script that hardcodes the same name --
-# kept in lockstep on purpose; ``tftp_status`` shouldn't be
-# pointing at a different unit than the helper restarts.
+# The systemd unit that owns the TFTP root on a host/systemd
+# install. One constant + the helper script that hardcodes the
+# same name -- kept in lockstep on purpose; ``tftp_status``
+# shouldn't be pointing at a different unit than the helper restarts.
 TFTP_UNIT = "dnsmasq.service"
 
 # Allowlist of actions the helper accepts. Mirrored on the Python
@@ -82,10 +85,11 @@ def tftp_status() -> DaemonStatus:
         return DaemonStatus(state=(result.stdout or "").strip() or "unknown")
     except (subprocess.TimeoutExpired, FileNotFoundError):
         pass
-    # No systemd around -- try pgrep. Useful inside the bty-web
-    # Docker container where dnsmasq is launched by the entrypoint
-    # and systemd isn't running. ``pgrep -x dnsmasq`` exits 0 when
-    # there's a process named exactly ``dnsmasq``, 1 otherwise.
+    # No systemd around -- try pgrep, for a non-systemd host that
+    # runs dnsmasq as a bare process. ``pgrep -x dnsmasq`` exits 0
+    # when there's a process named exactly ``dnsmasq``, 1 otherwise.
+    # In the container deploy bty-web serves no TFTP (the sidecar
+    # does), so this reports ``inactive`` there -- expected.
     try:
         rc = subprocess.run(
             ["pgrep", "-x", "dnsmasq"],
@@ -103,12 +107,12 @@ def tftp_controllable() -> bool:
     the TFTP daemon. Requires the sudo'd helper to be installed
     AND ``sudo`` itself on PATH.
 
-    Inside the bty-web Docker container neither is present (the
-    container's dnsmasq is supervised by the entrypoint, not by
-    systemd, and the bty user has no sudo grant); on the bty-server
-    appliance both are present from the bake. The UI hides the
-    Start/Stop/Restart buttons when this returns False so the
-    operator isn't offered controls that would fail.
+    Most installs lack the helper (the container deploy serves TFTP
+    from a separate sidecar, and the bty user has no sudo grant), so
+    this returns False and the UI hides the Start/Stop/Restart
+    buttons. A host/systemd install that installs the sudo'd helper
+    gets the controls. The UI hides them when this returns False so
+    the operator isn't offered controls that would fail.
     """
     return Path(TFTP_HELPER).is_file() and (
         Path("/usr/bin/sudo").is_file() or Path("/bin/sudo").is_file()
