@@ -64,7 +64,7 @@ must be handled before the rootfs can go `ro`:
 
 | Path | Why it's written | Mitigation at flip time |
 |---|---|---|
-| `/etc/shadow` | `passwd` rotates the UI / SSH credential | move the credential under `/var/lib/bty`, or an `/etc` overlay |
+| `/etc/shadow` | `passwd` rotates the SSH credential (the UI password lives in `$BTY_ADMIN_PASSWORD`) | move the credential under `/var/lib/bty`, or an `/etc` overlay |
 | `/etc/issue` | boot banner writes the appliance IP | tmpfs `/etc/issue`, or render to a writable path |
 | `/etc/fstab` | `bty-state-migrate` adds the data-disk mount | migrate before sealing, or fstab on an overlay |
 | `/var/log` | journald | volatile journald / tmpfs `/var/log` |

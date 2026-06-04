@@ -217,7 +217,7 @@ docker-run:
 	sudo chown -R 1000:1000 bty-data
 	docker run -d --name bty-web --rm -p 8080:8080 -p 69:69/udp \
 	    -v "$(CURDIR)/bty-data":/var/lib/bty bty-web:dev
-	@echo "bty-web running on http://localhost:8080/ui (login: bty / bty)"
+	@echo "bty-web running on http://localhost:8080/ui (operator UI gated by \$$BTY_ADMIN_PASSWORD; unset = open)"
 	@echo "TFTP serving iPXE binaries on udp/69 (parity with docker-compose)"
 	@echo "logs: docker logs -f bty-web ; stop: docker stop bty-web"
 

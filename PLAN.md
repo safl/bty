@@ -189,11 +189,12 @@ appliance-grade:
    from the starter `.bri` catalog) the image onto the server
    host's disk (or SD card, for the Pi).
 2. Boot. Network comes up via DHCP; the appliance auto-starts
-   `bty-web` on `:8080` with the default `bty / bty` PAM credential
-   and an `odus` SSH admin user (passwordless sudo).
+   `bty-web` on `:8080`, the operator UI gated by `$BTY_ADMIN_PASSWORD`
+   (unset = open, with a startup warning), and an `odus` SSH admin user
+   (passwordless sudo).
 3. Open `http://<host>:8080/` in a browser - the bare host redirects
-   to the login form. Default `bty / bty` credential gets you in;
-   rotate with `sudo passwd bty` on the appliance before exposing.
+   to the login form. The `$BTY_ADMIN_PASSWORD` value gets you in;
+   rotate by changing the env var and restarting bty-web before exposing.
 4. From that point on, the server is driven entirely through the web
    UI for fleet operations (machine assignments, image catalog, boot
    artifacts). The Settings page activates the dnsmasq proxy-DHCP
@@ -434,7 +435,7 @@ Landed after the original 1.0 list:
     configuration ("bty-on-a-USB but over the network").
 17. **[done]** `server-rpi` variant - SD-card image for Raspberry Pi
     4 / 5. Built by chrooting into Raspberry Pi OS Lite arm64 via
-    `qemu-aarch64-static`. Same `bty / bty` PAM credential and
+    `qemu-aarch64-static`. Same `$BTY_ADMIN_PASSWORD`-gated operator UI and
     `odus / odus` SSH admin as the x86 server image.
 18. **[done]** Auth simplification - dropped the `bty-ctl` console
     script, the `/auth/login` / `/auth/logout` HTTP endpoints, the

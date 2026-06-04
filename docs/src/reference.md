@@ -206,10 +206,11 @@ not listed above as internal.
 
 ### Auth
 
-Single-tenant PAM authentication. bty-web runs as a Linux service user
-(typically ``bty``); the only credential is **that user's OS password**.
-``passwd bty`` rotates it. ``POST /ui/login`` (form-encoded
-``password=...``) PAM-checks the password and flips
+Single-admin-password authentication. The operator UI is gated by
+``$BTY_ADMIN_PASSWORD``; when it is unset the UI is open (bty-web logs a
+startup warning). Rotate by changing the env var and restarting bty-web.
+``POST /ui/login`` (form-encoded ``password=...``) constant-time-compares
+the password against ``$BTY_ADMIN_PASSWORD`` and flips
 ``request.session["bty_authed"] = True``; the session is a server-signed
 cookie managed by Starlette's :class:`SessionMiddleware` (cookie name
 ``bty-token``, sliding 7-day TTL). No DB-backed session table: the cookie
@@ -455,7 +456,7 @@ Bootstrap CSS, HTMX form posts).
 
 - `GET /ui` -> 303 redirect to `/ui/dashboard`
 - `GET /ui/login` -> login form
-- `POST /ui/login` -> validates the password against PAM and flips
+- `POST /ui/login` -> constant-time-compares the password against `$BTY_ADMIN_PASSWORD` and flips
  ``request.session["bty_authed"] = True``; SessionMiddleware emits
  the signed `bty-token` cookie on the redirect response
  (``SameSite=Strict``).
@@ -520,8 +521,8 @@ Bootstrap CSS, HTMX form posts).
  the editable **Upstream sources** (release repo / catalog URL / release
  tag) card, and the **DHCP / Network boot** router cheatsheet. Operator
  authentication is on the separate Account page (`/ui/account`, reached
- via the user pill): the credential is the OS password of the bty service
- user, rotated with `sudo passwd bty`; to invalidate every session at
+ via the user pill): the credential is `$BTY_ADMIN_PASSWORD`, rotated by
+ changing the env var and restarting bty-web; to invalidate every session at
  once, rotate the cookie-signing secret with `rm
  /var/lib/bty/session-secret && systemctl restart bty-web`.
 - `POST /ui/settings/upstream` / `POST /ui/settings/flash` -> persist

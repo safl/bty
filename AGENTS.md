@@ -100,10 +100,10 @@ Rich markup. Pinned in `bty.tui._app._run_auto`.
 Backed by SQLite at `${BTY_STATE_DIR}/state.db`. Single uvicorn
 worker (the SSE bus is in-process).
 
-**Auth.** Single-tenant PAM against the bty service user (the OS
-account `bty-web` runs as; `bty / bty` by default on the
-appliance). `POST /ui/login` (form-encoded `password=...`)
-PAM-checks the password and flips
+**Auth.** The operator UI is gated by `$BTY_ADMIN_PASSWORD` (unset =
+open, with a startup warning); rotate by changing the env var and
+restarting bty-web. `POST /ui/login` (form-encoded `password=...`)
+constant-time-compares the password against `$BTY_ADMIN_PASSWORD` and flips
 `request.session["bty_authed"] = True`; the session is a server-
 signed cookie via Starlette's `SessionMiddleware` (cookie name
 `bty-token`). Protected routes read the session via the auth

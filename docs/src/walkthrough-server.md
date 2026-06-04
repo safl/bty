@@ -15,10 +15,10 @@ Two paths:
    Customisation of the upstream Pi OS Lite image via qemu-aarch64-static
    chroot, output as a dd-able `.img.gz`.
 
-Both ship the same bty-web + PXE stack with the same default credentials
-(`bty` / `bty` for the browser UI, `odus` / `odus` for SSH admin). End
-state after first boot: a browser URL on tty1, ready to register machines
-and serve images.
+Both ship the same bty-web + PXE stack: the operator UI is gated by
+`$BTY_ADMIN_PASSWORD` (unset = open, with a startup warning) and SSH admin
+is `odus` / `odus`. End state after first boot: a browser URL on tty1, ready
+to register machines and serve images.
 
 ## Prerequisites
 
@@ -159,7 +159,8 @@ Power on the target. The bty-server image:
    `bty-grow-rootfs.service`).
 2. Brings up systemd-networkd against the operator's LAN.
 3. Runs `bty-web-init.service` once to set up the state directory tree and
-   rewrite `/etc/issue` with the actual server URL + default credentials.
+   rewrite `/etc/issue` with the actual server URL, the operator UI gating
+   status (`$BTY_ADMIN_PASSWORD`), and the SSH admin login.
 4. Starts `bty-web.service` (long-running) on port 8080.
 5. Starts `dnsmasq.service` for TFTP (the appliance runs no DHCP role; bty
    stays out of DHCP and relies on the operator's existing LAN DHCP server
@@ -172,7 +173,7 @@ Tty1 ends up showing something like:
   bty 0.8.2 server appliance
 
   Browser UI:    http://192.168.1.42:8080
-  Default login: bty / bty (rotate before exposing this server)
+  Operator UI:   gated by $BTY_ADMIN_PASSWORD (unset = open; set before exposing)
   SSH admin:     odus / odus.321
 
   Configure your LAN DHCP server to point PXE clients at this
@@ -189,14 +190,17 @@ The version string updates per release.
 
 ## Step 4: Log in via the browser
 
-Open the URL shown on tty1 from any machine on the same LAN. Default
-browser-UI credentials are `bty / bty`. **Rotate before exposing this
-server** beyond a trusted network:
+Open the URL shown on tty1 from any machine on the same LAN. The operator
+UI is gated by `$BTY_ADMIN_PASSWORD`; when it is unset the UI is open and
+bty-web logs a startup warning. **Set it before exposing this server**
+beyond a trusted network, and rotate by changing the env var and restarting
+bty-web:
 
 ```bash
 # SSH in as the admin user (default: odus / odus.321, passwordless sudo)
 ssh odus@<server-ip>
-sudo passwd bty
+# set BTY_ADMIN_PASSWORD in the bty-web service environment, then:
+sudo systemctl restart bty-web
 ```
 
 Initial UI tour:
@@ -218,8 +222,8 @@ Initial UI tour:
 - **`/ui/settings`** - the read-only map of every bty config value plus the
   editable **Upstream sources** (release repo / catalog URL / release tag)
   card, and the **DHCP / Network boot** router cheatsheet. Operator-account
-  info (PAM password + session-cookie rotation) is on the separate Account
-  page, reached via the user pill.
+  info (`$BTY_ADMIN_PASSWORD` + session-cookie rotation) is on the separate
+  Account page, reached via the user pill.
 
 ## Step 5: Flash a target over PXE
 
@@ -305,9 +309,11 @@ The pre-built image prioritises "works on first boot" over "locked down for
 the open internet". Address these before exposing the server beyond a
 trusted LAN:
 
-- **Default credentials.** Rotate `bty / bty` (browser UI) and `odus /
-  odus.321` (SSH admin) on first login: `sudo passwd bty`, `sudo passwd
-  odus`. The `/etc/issue` banner reminds you on every console login.
+- **Operator UI password.** Set `$BTY_ADMIN_PASSWORD` (and restart bty-web)
+  to gate the browser UI; when unset the UI is open and bty-web logs a
+  startup warning. Rotate the SSH admin `odus / odus.321` on first login
+  with `sudo passwd odus`. The `/etc/issue` banner reminds you on every
+  console login.
 - **Per-instance SSH host keys.** `bty-ssh-host-keys.service` runs
   `ssh-keygen -A` on first boot of each freshly-flashed instance, so every
   appliance has unique host keys.
