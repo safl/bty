@@ -7,8 +7,8 @@ forwards the event to the wire.
 
 Scope: single-process. Run ``uvicorn`` with one worker (the default
 for ``uvicorn.run(app, ...)``); a multi-worker deployment would need
-a real broker (Redis pub/sub, NATS, …) which we don't need for an
-appliance serving a homelab fleet.
+a real broker (Redis pub/sub, NATS, …) which we don't need for a
+bty-web instance serving a homelab fleet.
 """
 
 from __future__ import annotations

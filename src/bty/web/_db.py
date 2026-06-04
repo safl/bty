@@ -4,7 +4,8 @@ Uses stdlib :mod:`sqlite3` - no SQLAlchemy or SQLModel dep. The schema
 is small enough to evolve by hand.
 
 State lives at ``$BTY_STATE_DIR/state.db`` (default
-``/var/lib/bty/state.db`` to match the appliance image's expectations).
+``/var/lib/bty/state.db``, the path the bty-web container and host
+units expect).
 
 Pre-1.0: the schema is whatever ``CREATE TABLE`` says here. There is
 no migration apparatus. The DB carries the exact ``bty.__version__``
@@ -15,7 +16,7 @@ that created it in the ``bty_version`` table.
 (or has data tables but no marker at all - a pre-versioning DB), it
 **rotates** the old DB to ``state.db.<from>.<ts>.bak`` and creates a
 fresh schema in its place. The old DB is preserved on disk for
-forensics but the running appliance starts clean. A
+forensics but the running server starts clean. A
 ``system.schema.reset`` event is recorded in the fresh DB so the
 dashboard tripwire surfaces it; operators acknowledge from
 ``/ui/events``.
@@ -205,7 +206,7 @@ def _bak_path(state_path: Path, from_version: str) -> Path:
     """Build the rotation target for ``state.db``.
 
     Format: ``state.db.<sanitised-from>.<UTC-iso-compact>.bak``. The
-    timestamp prevents collisions when a single appliance bounces
+    timestamp prevents collisions when a single bty-web instance bounces
     through multiple releases. The version goes through a
     [^0-9A-Za-z.-]-stripping pass so a hypothetical bad-actor version
     string can't smuggle a path separator into the filename.
@@ -322,7 +323,7 @@ def open_db(path: Path) -> Iterator[sqlite3.Connection]:
     process holds the write lock (sqlite's default is 5s already,
     but the value is implicit; making it explicit makes the
     contract auditable + protects against a future stdlib default
-    drift). On a single-bty-web appliance the WAL writer never
+    drift). On a single-bty-web instance the WAL writer never
     contends with anything else, but our lifespan teardown waits
     on connection close -- without a bounded timeout, a wedged
     writer could starve systemd's shutdown sequence.

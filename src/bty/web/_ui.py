@@ -215,7 +215,7 @@ def register_ui_routes(
             recent_events = _events_log.list_events(conn, limit=10)
         # Health Monitoring: the conditions that must hold for PXE +
         # flash to work, plus an error-events tripwire. One glance at
-        # "is this appliance ready to do its job", each row deep-
+        # "is this server ready to do its job", each row deep-
         # linking to the page that owns it (with a fix action on fail).
         missing_netboot = _releases.missing_netboot_artifacts(boot_root)
         tftp = _sysconfig.tftp_status()
@@ -307,8 +307,8 @@ def register_ui_routes(
                 # reflash); otherwise an advisory INFO row (a blue "i",
                 # never a red cross): a rootfs-only install is fully
                 # functional, the dedicated disk is recommended, not
-                # required. No fix link: bty-state-migrate is an
-                # appliance CLI, not a web action.
+                # required. No fix link: bty-state-migrate is a
+                # host CLI command, not a web action.
                 "label": "State on a dedicated disk",
                 "ok": state_valid,
                 "info": not state_valid,
@@ -1364,7 +1364,7 @@ def register_ui_routes(
             },
         ]
         # Network context for the DHCP / PXE cheatsheet (moved here from
-        # the Netboot page): the appliance's interfaces + the primary
+        # the Netboot page): the server's interfaces + the primary
         # v4 address the operator points their router's Next-Server at.
         interfaces = _sysconfig.list_interfaces()
         primary = next((i for i in interfaces if i.ipv4), interfaces[0] if interfaces else None)

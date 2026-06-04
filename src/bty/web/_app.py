@@ -100,18 +100,18 @@ def create_app(
     ``POST /ui/login`` is gated by ``$BTY_ADMIN_PASSWORD`` (open when unset);
     tests set that env var.
 
-    ``secret_key`` is the per-appliance random key used by Starlette's
+    ``secret_key`` is the per-server random key used by Starlette's
     :class:`SessionMiddleware` to sign session cookies. It must persist
     across bty-web restarts (otherwise every restart logs everyone out)
-    and must be unique per appliance (otherwise a cookie minted by one
-    server is valid on another). On the appliance,
-    ``bty-web-init`` writes a 32-byte random key to
-    ``/var/lib/bty/session-secret`` on first boot.
+    and must be unique per server (otherwise a cookie minted by one
+    server is valid on another). bty-web generates a 32-byte random key
+    at ``/var/lib/bty/session-secret`` on first start when none is
+    supplied via ``$BTY_SESSION_SECRET`` or an existing file.
 
     ``boot_root`` is where the live-env artifacts (kernel + initrd +
     squashfs) live for the ``GET /boot/{name}`` endpoint; defaults to
-    ``state_path.parent / "boot"`` (i.e. ``/var/lib/bty/boot`` on a
-    stock appliance).
+    ``state_path.parent / "boot"`` (i.e. ``/var/lib/bty/boot`` in the
+    default layout).
     """
     resolved_image_root: Path = image_root or images.default_image_root()
     resolved_boot_root: Path = boot_root or (state_path.parent / "boot")
@@ -254,7 +254,7 @@ def create_app(
         )
         # The hash manager always starts -- it operates on
         # ``image_root``, which exists for every bty-web shape
-        # (appliance, container, dev). Default parallelism is 1
+        # (container, host, dev). Default parallelism is 1
         # so a Pi-class box doesn't get hammered if multiple big
         # images need importing at once.
         hash_manager.start(resolved_image_root, state_path=state_path)
@@ -357,7 +357,7 @@ def create_app(
             backup_stop_event.set()
             with contextlib.suppress(asyncio.CancelledError):
                 await backup_scheduler_task
-            # DownloadManager always starts (catalog-less appliances
+            # DownloadManager always starts (catalog-less instances
             # still have a DB-driven download path), so always stop.
             await download_manager.stop()
             await hash_manager.stop()
@@ -380,7 +380,7 @@ def create_app(
 
         Src shape: ``file://<rel-path>`` (path relative to image
         root; root-relocation invariant, so moving the image-store
-        disk between appliances does not change refs). Ref:
+        disk between hosts does not change refs). Ref:
         ``sha256(canonicalise_src(src))`` from
         ``bty.catalog.image_ref_for_src``. ``disk_image_sha`` is
         populated when the file has a ``.sha256`` sidecar already;
@@ -606,11 +606,11 @@ def create_app(
         session_cookie=SESSION_COOKIE,
         max_age=_SESSION_MAX_AGE,
         same_site="strict",
-        https_only=False,  # appliance is plain HTTP on a homelab segment
+        https_only=False,  # bty-web serves plain HTTP on a homelab segment
     )
 
     # Vendored client-side assets (Bootstrap CSS, HTMX, htmx-ext-sse)
-    # ship inside the wheel so the appliance has no runtime CDN
+    # ship inside the wheel so bty-web has no runtime CDN
     # dependency. See ``_static/README.md`` for provenance.
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
@@ -3345,7 +3345,7 @@ def create_app(
 
     @app.get("/catalog/downloads")
     async def list_downloads(_: str = Depends(require_auth)) -> dict[str, Any]:
-        # DownloadManager always starts now (catalog-less appliances
+        # DownloadManager always starts now (catalog-less instances
         # still have a DB-driven download path); "no catalog" is no
         # longer a hard 404 here.  The ``catalog`` field stays in the
         # response so the UI can distinguish manifest-backed setups
@@ -3637,7 +3637,7 @@ def _request_host(request: Request) -> str:
     Prefers the ``Host`` header (what the client actually typed in the
     URL bar); falls back to the parsed request URL when the header is
     missing -- bare TestClient and tightly-curated reverse proxies can
-    omit it. Default port mirrors the appliance's listen port.
+    omit it. Default port mirrors the server's listen port.
 
     If both the Host header AND ``request.url.hostname`` are unset
     (synthetic Request constructed without scope, rare), returns a

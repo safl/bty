@@ -46,7 +46,7 @@ from pathlib import Path
 from typing import Any, TypeAlias
 
 # Default image root. Operators override via the ``BTY_IMAGE_ROOT``
-# environment variable. The USB live appliance mounts the BTY_IMAGES
+# environment variable. The USB live stick mounts the BTY_IMAGES
 # partition here.
 DEFAULT_IMAGE_ROOT = Path("/var/lib/bty/images")
 
@@ -479,7 +479,7 @@ def merge_with_catalog(
         # If the file is cached on disk and the catalog row doesn't
         # carry a content sha, pick up the sidecar's sha (written by
         # HashManager / ``ensure_sha256``). Without this, an operator
-        # re-adding a catalog entry on an upgraded appliance whose
+        # re-adding a catalog entry on an upgraded host whose
         # image_root survived the OS reflash would see the entry as
         # "available, not cached" in /ui/images, because the catalog
         # row's ``disk_image_sha`` is NULL and ``cached=True without

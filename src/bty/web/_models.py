@@ -280,7 +280,7 @@ class HealthResponse(BaseModel):
 class VersionResponse(BaseModel):
     """``GET /version`` response body. Carries the running bty-lab
     package version so operators (and CI smoke tests) can verify
-    which release the appliance has installed without ssh'ing in
+    which release the bty-web server has installed without ssh'ing in
     to read ``pip show``."""
 
     version: str

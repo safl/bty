@@ -228,7 +228,7 @@ def fetch_release(
     # The tempdir lives *inside* ``boot_dir`` (rather than the system
     # default ``/tmp``) so the final ``Path.replace`` is a same-
     # filesystem rename. Crossing mounts (the prod layout has
-    # ``/var/lib/bty`` on its own volume on appliances)
+    # ``/var/lib/bty`` on its own volume on the bty-web host)
     # raises ``OSError 18 Invalid cross-device link`` from the
     # rename syscall.
     boot_dir.mkdir(parents=True, exist_ok=True)
