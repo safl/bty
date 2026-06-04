@@ -1,0 +1,2 @@
+# CI drops the custom ipxe.efi here before building the bty-web image.
+# Dev builds keep just this placeholder (seeding is then a no-op).

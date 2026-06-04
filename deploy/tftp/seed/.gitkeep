@@ -1,0 +1,2 @@
+# CI drops the custom ipxe.efi here before building the bty-tftp image.
+# Dev builds keep just this placeholder (the sidecar serves stock NBPs).
