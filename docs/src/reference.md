@@ -10,10 +10,11 @@ copy; substitute `latest` for a specific tag (e.g. `v0.11.1`) to pin.
 
 | Asset | What it is | URL (latest) |
 |---|---|---|
-| `bty-usb-x86_64.iso` (+ `.sha256`) | Bootable USB live ISO with a built-in writable `BTY_IMAGES` exFAT partition (32 MiB at bake; auto-grows to fill the stick on first boot via `bty-usb-grow.service`). Uncompressed: open in Etcher / RPi Imager / Rufus / dd directly. CLI: `dd if=bty-usb-x86_64.iso of=/dev/sdX bs=4M`. | <https://github.com/safl/bty/releases/latest/download/bty-usb-x86_64.iso> |
-| `bty-server-x86_64.img.gz` (+ `.sha256`) | Server appliance image, x86_64 (browser UI + iPXE + dnsmasq). Boot in QEMU or `dd` to a disk. | <https://github.com/safl/bty/releases/latest/download/bty-server-x86_64.img.gz> |
-| `bty-server-rpi-arm64.img.gz` (+ `.sha256`) | Server appliance image for Raspberry Pi 4 / 5 (arm64). Write with `dd` to an SD card. | <https://github.com/safl/bty/releases/latest/download/bty-server-rpi-arm64.img.gz> |
-| `bty-netboot-x86_64.{vmlinuz,initrd,squashfs}` (+ `bty-netboot-x86_64.sha256`) | Netboot trio for PXE-flash clients. Drop into the server's `BTY_BOOT_DIR` (or click "Fetch netboot artifacts" on `/ui/netboot`). | <https://github.com/safl/bty/releases/latest/download/bty-netboot-x86_64.vmlinuz> |
+| `bty-usb-x86_64-v*.iso` (+ `.sha256`) | Bootable USB live ISO with a built-in writable `BTY_IMAGES` exFAT partition (32 MiB at bake; auto-grows to fill the stick on first boot via `bty-usb-grow.service`). Uncompressed: open in Etcher / RPi Imager / Rufus / dd directly. CLI: `dd if=bty-usb-x86_64-v*.iso of=/dev/sdX bs=4M`. | <https://github.com/safl/bty/releases/latest/download/bty-usb-x86_64.iso> |
+| `bty-ipxe-x86_64-v*.efi` | bty's custom iPXE UEFI binary with the embedded chain to `/pxe-bootstrap.ipxe`. Served by bty-web over HTTP for UEFI HTTP Boot and baked into the `bty-tftp` sidecar image. | <https://github.com/safl/bty/releases> |
+| `bty-netboot-x86_64-v*.{vmlinuz,initrd,squashfs}` (+ `.sha256`) | Netboot trio for PXE-flash clients. Drop into the server's `BTY_BOOT_DIR` (or click "Fetch netboot artifacts" on `/ui/netboot`). | <https://github.com/safl/bty/releases/latest/download/bty-netboot-x86_64.vmlinuz> |
+| `catalog.toml` | The default image catalog (`oras://ghcr.io/safl/nosi/...` entries) the `bty` wizard offers as `[d] default`. | <https://github.com/safl/bty/releases/latest/download/catalog.toml> |
+| `release.toml` | Release manifest: the version plus the asset filenames for the tag. Stable URL for "what's the latest". | <https://github.com/safl/bty/releases/latest/download/release.toml> |
 | `bty.pdf` | Offline copy of the docs (this site, rendered by Sphinx + LaTeX). | <https://github.com/safl/bty/releases/latest/download/bty.pdf> |
 | `bty_lab-X.Y.Z-py3-none-any.whl` / `.tar.gz` | Python wheel + sdist. Mirrored on PyPI as [`bty-lab`](https://pypi.org/project/bty-lab/) - prefer `pipx install bty-lab` over downloading by hand. | <https://github.com/safl/bty/releases> |
 
@@ -39,7 +40,7 @@ metadata) and exits. `bty --help` documents every flag inline.
 
 bty-server base URL or hostname. Bare hostnames are accepted; missing
 scheme defaults to `http://`. Pair with a LAN DNS entry (or `/etc/hosts`
-line) pointing at the appliance and `bty --mac X` just works. The
+line) pointing at the bty-web host and `bty --mac X` just works. The
 PXE-booted live env sets this from the kernel cmdline (`bty.server=...`).
 
 ### `--mac MAC`
@@ -111,12 +112,11 @@ Tarballs (`.tar.gz`, `.tgz`, etc.) are **not** supported: the gzip/xz/bzip2
 layer applied to a tarball yields a TAR stream, not an image, and writing
 TAR headers into the MBR is a wrong-answer. Extract first.
 
-bty ships its appliance images (`bty-server-x86_64.img.gz`,
-`bty-server-rpi-arm64.img.gz`) as gzip for
-universal flasher support: Etcher / Rufus / Imager / dd all decompress gzip
-natively, without the version-cliff issues that bit us with xz (Etcher's
-bundled xz handler) and zstd (older Etcher pre-1.18). The flash path inside
-the wizard accepts every format above for operator-supplied target images.
+gzip is the safe default for distributed images: Etcher / Rufus / Imager /
+dd all decompress it natively, without the version-cliff issues that bit us
+with xz (Etcher's bundled xz handler) and zstd (older Etcher pre-1.18). The
+flash path inside the wizard accepts every format above for
+operator-supplied target images.
 
 ### Image root
 
@@ -124,9 +124,9 @@ The local image-root is resolved in this order:
 
 1. `BTY_IMAGE_ROOT` environment variable.
 2. `/var/lib/bty/images` (the USB live env auto-mounts the
-   `BTY_IMAGES` exFAT partition here; the server appliance
-   auto-mounts a `LABEL=BTY_IMAGE_STORE` second disk here so the
-   cache survives reflashes).
+   `BTY_IMAGES` exFAT partition here; the bty-web container backs
+   `/var/lib/bty` with the `bty-data` named volume so the cache
+   survives image upgrades).
 
 ## Configuration
 
@@ -145,10 +145,10 @@ and sensible defaults.
 - `/var/lib/bty/images` - image root. Holds operator-typed image
  files alongside catalog-fetched files named
  `catalog-<bty_image_ref[:12]>-<slug(name)>.<ext>` (v0.31.0+; no
- separate `cache/` subdir). The USB live appliance auto-mounts the
- `BTY_IMAGES` partition here. The server appliance auto-mounts a
- `LABEL=BTY_IMAGE_STORE` disk here (if one is present) so the
- collection survives reflashes; see
+ separate `cache/` subdir). The USB live env auto-mounts the
+ `BTY_IMAGES` partition here. In the container deploy `/var/lib/bty`
+ is the `bty-data` named volume, so the collection survives image
+ upgrades; see
  [walkthrough-image-store](walkthrough-image-store.md).
 
 ### Catalog file naming
@@ -158,7 +158,7 @@ on disk (v0.31.0+):
 
 - **Operator-typed images** keep whatever filename the operator
  chose at upload / scp / drop-in time (e.g. `my-fedora.qcow2`,
- `bty-server-x86_64-v0.30.2.img.gz`).
+ `debian-13-server.img.gz`).
 - **Catalog-fetched files** land under a URL-derived name:
  `catalog-<bty_image_ref[:12]>-<slug(name)>.<ext>` -- e.g.
  `catalog-8e54fdb21522-nosi-debian-sysdev.img.gz`. The 12-hex
@@ -173,16 +173,6 @@ fetched file; the rest are operator-typed. The
 `DELETE /catalog/cache/{name}` endpoint unlinks the URL-keyed file
 for one catalog entry; `rm -f /var/lib/bty/images/catalog-*` is a
 full sweep that leaves operator-typed files alone.
-
-### Appliance helpers
-
-These ship with the bty-server appliance only (not the bty-lab
-Python package).
-
-| Helper | Purpose |
-|---|---|
-| `bty-state-migrate [--yes] DEVICE` | Move the whole bty state dir `/var/lib/bty` (images, netboot artifacts, content cache, `state.db`) onto a 2nd disk (ext4, label `BTY_IMAGE_STORE`, mounted at `/var/lib/bty`) so it survives an OS reflash. Stops bty-web, copies + verifies before removing the rootfs copy, updates `/etc/fstab` for auto-mount. Run once; the labelled disk auto-mounts after reflashes (the venv stays on the rootfs and upgrades with the reflash). |
-| `bty-web-tftp <start\|stop\|restart>` | Control the local `dnsmasq.service` (which owns the TFTP root). Driven by the browser UI's TFTP daemon Start/Stop/Restart buttons on the Netboot page (`/ui/netboot`). |
 
 ## Python API
 
@@ -214,9 +204,9 @@ the password against ``$BTY_ADMIN_PASSWORD`` and flips
 ``request.session["bty_authed"] = True``; the session is a server-signed
 cookie managed by Starlette's :class:`SessionMiddleware` (cookie name
 ``bty-token``, sliding 7-day TTL). No DB-backed session table: the cookie
-value is the session, signed against the per-appliance key at
+value is the session, signed against the per-instance key at
 ``/var/lib/bty/session-secret`` (generated by ``bty-web-init`` on first
-boot). ``POST /ui/logout`` clears the session.
+start). ``POST /ui/logout`` clears the session.
 
 Open routes, reachable by PXE clients and other live-env tooling that can't
 carry a session cookie:
@@ -505,12 +495,12 @@ Bootstrap CSS, HTMX form posts).
  schedule card) + recent ``backup.created`` / ``backup.failed`` /
  ``backup.pruned`` events. Each worker page lights only its own
  navbar indicator.
-- The router-config **DHCP / Network boot** cheatsheet (appliance-IP /
+- The router-config **DHCP / Network boot** cheatsheet (host-IP /
  interfaces table + option 60 / 66 / 67 values to paste into the LAN's
  DHCP server, for both PXE-via-TFTP and UEFI HTTP Boot) lives on the
  Settings page (`/ui/settings#dhcp-pxe`). bty does NOT run any DHCP
  role; the operator's existing DHCP server points clients at this
- appliance for TFTP + HTTP-Boot fetches.
+ host for TFTP + HTTP-Boot fetches.
 - `POST /ui/netboot/fetch-release` -> downloads
  `vmlinuz`/`initrd`/`squashfs`/`sha256` from
  `https://github.com/<BTY_BOOT_RELEASE_REPO>/releases/<tag>/download/`
@@ -540,7 +530,7 @@ the session dict; ``SessionMiddleware`` emits a deletion cookie.
 #### Static assets (offline-friendly)
 
 Bootstrap CSS, HTMX, and the HTMX SSE extension are **vendored** into the
-wheel under `bty.web._static/` and served at `/static/`. The appliance
+wheel under `bty.web._static/` and served at `/static/`. bty-web
 contacts no CDN at runtime; all browser code is served from the same
 origin. See `src/bty/web/_static/README.md` for asset versions and the
 refresh procedure.
@@ -563,8 +553,8 @@ The endpoint:
 The fan-out bus is in-process; slow consumers are silently dropped (every
 event carries the full snapshot, so they catch up on the next mutation).
 **Single uvicorn worker** is required: a multi-worker deployment would need
-a real broker (Redis pub/sub, NATS, ...), overkill for an appliance serving
-a homelab fleet.
+a real broker (Redis pub/sub, NATS, ...), overkill for a single bty-web
+serving a homelab fleet.
 
 ## Configuration schemas
 

@@ -74,9 +74,9 @@ whatever someone else has already built.
 ## Image creation - Packer, mkosi, debian-live, jkab
 
 Complementary, not competing. These build the pre-built images bty
-consumes. `bty-media` is itself in this category for its appliance images,
-but that is an internal concern; users mostly bring their own pre-built
-images.
+consumes. `bty-media` is itself in this category for its boot media (the
+USB live ISO and the netboot live-env trio), but that is an internal
+concern; users mostly bring their own pre-built images.
 
 ## Manual flashers - dd, Etcher, Rufus, Ventoy
 
@@ -92,7 +92,7 @@ The combination:
 
 1. Image-deploy (not installer-driven).
 2. OS-agnostic (any image, including vendor-pinned and non-Linux).
-3. Single-appliance-server topology (homelab-scale, not data-center).
+3. Single-server topology (homelab-scale, not data-center).
 4. Both ad-hoc USB and DevOps server in one project (most pick one).
 5. Modern, lightweight stack (NUC-class hardware, not a cluster).
 6. Flasher only: post-flash bring-up is the image builder's job

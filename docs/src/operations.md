@@ -1,13 +1,12 @@
 # Operations: backup, upgrade, migrate
 
-Looking after a running bty-server appliance: back its state up, upgrade
-the software, and move it to new hardware (or onto a dedicated disk that
-survives a reflash).
+Looking after a running bty-web: back its state up, upgrade the software,
+and move it to new hardware (or a new host).
 
 ## What counts as state
 
-A bty-server keeps everything in one directory, `BTY_STATE_DIR` (default
-`/var/lib/bty`):
+bty-web keeps everything in one directory, `BTY_STATE_DIR` (default
+`/var/lib/bty`; the `bty-data` named volume in the container deploy):
 
 | Path | What | Backup? |
 |---|---|---|
@@ -21,12 +20,11 @@ A minimal backup is just `state.db`; a full backup is the whole
 
 ## Data separation and read-only-OS readiness
 
-bty-server is built so that **all mutable runtime state lives under
-`BTY_STATE_DIR` (`/var/lib/bty`)** -- the writable volume. The direction
-is that the OS rootfs can eventually be mounted **read-only**, so a power
-cut can't corrupt it and recovery is "reflash the immutable OS, re-adopt
-the writable volume." That flip isn't done yet; this section is the
-readiness checklist.
+bty-web is built so that **all mutable runtime state lives under
+`BTY_STATE_DIR` (`/var/lib/bty`)** -- a single writable volume. In the
+container deploy that volume is `bty-data`: the container image is
+immutable and recovery is "pull a new image, re-attach the volume." The
+rest of this section is the readiness checklist for that split.
 
 bty-web's runtime writes already all land under `/var/lib/bty`, split
 into two classes:
@@ -47,10 +45,10 @@ two precious classes matters because they migrate differently:
   identity** (mac + hw_lshw + known_disks) so a re-imported machine
   shows up pre-fingerprinted; bindings reset and the operator re-binds.
 - `images/` carries the **bytes**. The export bundle does NOT include
-  these (a single appliance can hold tens of GiB; daily backups would
+  these (a single host can hold tens of GiB; daily backups would
   thrash). Move them by `rsync`-ing the directory, copying the
-  image-store disk, or re-fetching from the catalog on the new
-  appliance. The `catalog-<ref:12>-<slug>.<ext>` naming convention
+  `bty-data` volume, or re-fetching from the catalog on the new
+  host. The `catalog-<ref:12>-<slug>.<ext>` naming convention
   associates cached files with their catalog entries by content-hash
   prefix, so a re-imported `images/` re-wires automatically.
 
@@ -59,20 +57,11 @@ one: it lives on the writable volume (so a read-only OS is possible)
 but is re-fetched when it no longer matches the running bty-web
 version, rather than preserved as precious.
 
-**OS-level holdouts** -- what still writes outside `/var/lib/bty` and so
-must be handled before the rootfs can go `ro`:
-
-| Path | Why it's written | Mitigation at flip time |
-|---|---|---|
-| `/etc/shadow` | `passwd` rotates the SSH credential (the UI password lives in `$BTY_ADMIN_PASSWORD`) | move the credential under `/var/lib/bty`, or an `/etc` overlay |
-| `/etc/issue` | boot banner writes the appliance IP | tmpfs `/etc/issue`, or render to a writable path |
-| `/etc/fstab` | `bty-state-migrate` adds the data-disk mount | migrate before sealing, or fstab on an overlay |
-| `/var/log` | journald | volatile journald / tmpfs `/var/log` |
-| `/var/lib/cloud`, `/etc/ssh` | first boot (cloud-init, host keys) | run first boot before sealing, or persist to the volume |
-
-The plan: keep `/var/lib/bty` the single writable volume, retire these
-holdouts one at a time, then flip the rootfs to `ro` with a small
-overlay / tmpfs for the unavoidable spots.
+The container deploy already realises this split: the bty-web container
+image is immutable, and `/var/lib/bty` is the `bty-data` named volume that
+carries everything precious. `$BTY_ADMIN_PASSWORD` is supplied via the
+container env rather than written into the image. Pulling a new image and
+re-attaching the volume is the whole upgrade.
 
 ## Backup
 
@@ -153,9 +142,9 @@ bty-web import /tmp/bty-bundle
 ```
 
 The in-UI **Back up now** trigger on `/ui/backups` produces the
-same bundle shape; reach for the CLI when scripting (cron / ssh
-into the appliance / packaging into an archive pipeline) and the
-UI when you want an ad-hoc snapshot without leaving the browser.
+same bundle shape; reach for the CLI when scripting (cron / a
+`podman exec` into the container / packaging into an archive pipeline)
+and the UI when you want an ad-hoc snapshot without leaving the browser.
 
 What a bundle carries, and what it deliberately leaves behind:
 
@@ -221,7 +210,7 @@ export *before* upgrading and import after:
 # Before upgrade: snapshot to a portable bundle.
 sudo bty-web export /var/lib/bty/backups/pre-$(date +%Y%m%d)
 
-# Upgrade bty-web (pip / pipx / appliance image), then:
+# Upgrade bty-web (pip / pipx / container image pull), then:
 sudo bty-web import /var/lib/bty/backups/pre-$(date +%Y%m%d)
 ```
 
@@ -261,41 +250,26 @@ latest artifacts** (or pin a tag under Settings -> Upstream sources
 first). Skip this and PXE clients boot the old live env against the new
 server -- a confusing version split.
 
-### Upgrade the appliance image
+### Upgrade the container deploy
 
-The server appliance is a disk image. To move to a newer build, write the
-new image (see [Set up a bty server appliance](walkthrough-server.md)) and
-restore your state. A **dedicated state disk** pays off here: if
-`/var/lib/bty` lives on its own disk (next section), reflashing the OS disk
-leaves your records, images, and netboot artifacts intact. Without one,
-restore your `state.db` backup after the reflash.
+In the container deploy the upgrade is a pull + restart, with the
+`bty-data` named volume carrying state across:
 
-## Migrate (new hardware, or a dedicated disk)
-
-### To new hardware
-
-Stop bty-web on the old box, copy `/var/lib/bty` to the new one (same
-path), start bty-web there. The MAC->image assignments and audit log come
-with it; only the appliance's own IP changes.
-
-### Onto a dedicated disk (survives an OS reflash)
-
-The server image ships `bty-state-migrate`, which moves the whole state
-directory onto a second disk so it persists across OS reflashes (the
-CI-driven "reflash the appliance per job" workflow). It formats the target
-disk ext4 with the label `BTY_IMAGE_STORE`, copies the current
-`/var/lib/bty` onto it, and adds the matching `fstab` line so
-`/var/lib/bty` mounts from that disk on every boot:
-
-```text
-LABEL=BTY_IMAGE_STORE /var/lib/bty ext4 nofail,x-systemd.device-timeout=10s 0 2
+```sh
+podman compose -f deploy/compose.yml pull
+podman compose -f deploy/compose.yml up -d
 ```
 
-Run it on the appliance with the second disk attached (it prompts before
-formatting unless you pass `--yes`; it refuses to format the rootfs disk).
-After that, reflashing the OS disk and rebooting brings the same state back
-automatically: every appliance image bakes that `fstab` line in, with
-`nofail` so a diskless appliance still boots off the rootfs `/var/lib/bty`.
-When a `BTY_IMAGE_STORE` disk is present it mounts at `/var/lib/bty`, so a
-freshly reflashed appliance re-adopts the existing state disk with no
-manual step.
+`AutoUpdate=registry` plus `podman-auto-update.timer` automate this for the
+Quadlet units. After the pull, **re-fetch the netboot artifacts** (open
+`/ui/netboot` -> Fetch latest artifacts) so PXE clients boot a live env
+matching the new bty-web version. See
+[`deploy/README.md`](https://github.com/safl/bty/blob/main/deploy/README.md).
+
+## Migrate to a new host
+
+Stop bty-web on the old host, copy `/var/lib/bty` (or the `bty-data`
+volume) to the new one at the same path, start bty-web there. The
+MAC->image assignments and audit log come with it; only the host's own IP
+changes. Re-point your LAN DHCP at the new host's IP and re-fetch the
+netboot artifacts on the new instance.

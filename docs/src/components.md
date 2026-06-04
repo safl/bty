@@ -2,7 +2,7 @@
 
 bty is one Python package - the `bty` module, distributed on PyPI as
 [`bty-lab`](https://pypi.org/project/bty-lab/) - with three console-script
-entry points, plus a sibling appliance-image builder (`bty-media/`).
+entry points, plus a sibling media builder (`bty-media/`).
 
 ## How the pieces connect
 
@@ -10,42 +10,38 @@ Three delivery shapes, the same `bty` library at the centre:
 
 ```
    Self-contained USB        USB + network catalog        PXE-driven (no operator)
-   (no infra)                (light infra)                (full appliance)
+   (no infra)                (light infra)                (container deploy)
 
    operator's box            operator's box               operator's workstation
    |                         |                            | browser
    v                         v                            v
  +----------------+      +----------------+            +-----------------+
- |  bty-usb       |      |  bty-usb       |            |  bty-server     |
- |  live env      |      |  live env      |            |  appliance      |
- |                |      |                |            |                 |
- | +------------+ |      | +------------+ |            | +-------------+ |
- | | bty        | |      | | bty        | |    HTTP    | | bty-web     | |
- | | (local     | |      | | --catalog  +-+----------->+ | iPXE/TFTP/  | |
- | |  catalog)  | |      | |   SOURCE)  | | (catalog)  | | dnsmasq     | |
- | +-----+------+ |      | +-----+------+ |            | +------+------+ |
- +-------+--------+      +-------+--------+            +--------+--------+
-         |                       |                              |
-         |  dd to disk           | dd to disk                   | iPXE
-         | (BTY_IMAGES)          | (image fetched               | chain ->
-         |                       |   from catalog               | live env ->
-         v                       |   server)                    | bty in
-   +-----------+                 v                              | flash mode
-   | target    |           +-----------+                        v
-   | machine   |           | target    |                  +---------------+
-   | local     |           | machine   |                  | target machine|
-   | disk      |           | local     |                  | netboot env   |
-   +-----------+           | disk      |                  | -> local disk |
-                           +-----------+                  +---------------+
-
-                              ^                                  ^
-                              | network catalog                  | full PXE
-                              | source (one of):                 | server
-                              |                                  |
-                              | * ghcr.io/safl/bty-web           | bty-server-x86
-                              |   (Docker; trial / small team)   | bty-server-rpi
-                              | * bty-server appliance           |
-                              |   (also serves catalog over HTTP)|
+ |  bty-usb       |      |  bty-usb       |            |  host (podman)  |
+ |  live env      |      |  live env      |            |                 |
+ |                |      |                |            | +-------------+ |
+ | +------------+ |      | +------------+ |            | | bty-web     | |
+ | | bty        | |      | | bty        | |    HTTP    | | (HTTP UI /  | |
+ | | (local     | |      | | --catalog  +-+----------->+ |  PXE plans) | |
+ | |  catalog)  | |      | |   SOURCE)  | | (catalog)  | | + bty-tftp  | |
+ | +-----+------+ |      | +-----+------+ |            | | (optional)  | |
+ +-------+--------+      +-------+--------+            | +------+------+ |
+         |                       |                     +--------+--------+
+         |  dd to disk           | dd to disk                   |
+         | (BTY_IMAGES)          | (image fetched               | iPXE
+         |                       |   from catalog               | chain ->
+         v                       |   server)                    | live env ->
+   +-----------+                 v                              | bty in
+   | target    |           +-----------+                        | flash mode
+   | machine   |           | target    |                        v
+   | local     |           | machine   |                  +---------------+
+   | disk      |           | local     |                  | target machine|
+   +-----------+           | disk      |                  | netboot env   |
+                           +-----------+                  | -> local disk |
+                                                          +---------------+
+                              ^
+                              | network catalog source: any bty-web
+                              | instance (the ghcr.io/safl/bty-web
+                              | container also serves catalog over HTTP)
 ```
 
 The `bty` package implements the flashing logic (`bty.flash`,
@@ -55,9 +51,9 @@ server) are the two UI shells; in the netboot live env, ``bty`` is launched
 on tty1 by `bty-on-tty1.service` and dispatches via the bty-web plan
 endpoint - no separate auto-flash service. Same operations, different
 delivery vehicles. The middle shape (`--catalog SOURCE`, typically pointed
-at a bty-web instance's `/catalog.toml`) is where the Docker container
+at a bty-web instance's `/catalog.toml`) is where the container
 fits: a single command on a workstation gives a small team a shared image
-catalog without the appliance.
+catalog without the full PXE deploy.
 
 ## `bty` (wizard + library)
 
@@ -84,8 +80,8 @@ pipx install "bty-lab[tui]"
 
 ## `bty-web` (HTTP server + browser UI)
 
-HTTP server with a browser UI, intended to run on the bty server
-appliance. Hosts:
+HTTP server with a browser UI, intended to run as the `bty-web`
+container. Hosts:
 
 - MAC-address-keyed assignment of image to machine.
 - Per-MAC iPXE configuration rendering.
@@ -113,10 +109,10 @@ copying the file.
 The runtime is sized for modest x86 hardware: lightweight Python web
 framework, no heavy front-end build pipeline, no JVM dependencies.
 
-## `bty-media/` (appliance-image builder)
+## `bty-media/` (media builder)
 
-Sibling directory at the repo root. Not a Python package. Builds four
-appliance variants from a shared rootfs overlay:
+Sibling directory at the repo root. Not a Python package. Builds the boot
+media from a shared rootfs overlay:
 
 **USB live image (`usb-x86`).** Bootable USB stick carrying the `bty`
 runtime and an exFAT `BTY_IMAGES` partition for pre-built images. Operator
@@ -124,30 +120,13 @@ plugs it in, boots a target; ``bty`` auto-launches on tty1 and walks
 through pick + flash. Self-contained and offline. Direct-flash delivery
 vehicle.
 
-**Server image, x86_64 (`server-x86`).** Installable disk image that, once
-written to a host's disk and booted, runs the bty provisioning server
-(`bty-web`, the iPXE/TFTP/HTTP services PXE clients chain through, the
-network-flash live environment those clients boot into, and a storage
-layout for the image library). One artifact, ready to serve a fleet.
-Headless: a plain-ASCII `/etc/issue` + `/etc/motd` identify the appliance
-on the serial console and over SSH; no graphical boot splash and no
-ASCII-art banner (a server is most often watched via the serial console,
-where backslash-laden art confuses agetty's escape parser and emits VT100
-control bytes onto ttyS0).
-
-**Server image, Raspberry Pi 4 / 5 (`server-rpi`).** Same appliance role,
-delivered as an SD-card image for arm64. Built by mounting the upstream
-Raspberry Pi OS Lite image and customising it in a `qemu-aarch64-static`
-chroot. Operator `dd`'s the resulting `.img.gz` (after `gunzip`) to an SD
-card and boots a Pi 4 or Pi 5; first-boot ends at the same
-`$BTY_ADMIN_PASSWORD`-gated operator UI as the x86 server image.
-
 **Network-flash live env (`netboot-x86`).** Kernel + initrd + squashfs trio
 that PXE clients chain into. Built via Debian's `live-build`. The chroot
 ships `bty-on-tty1.service` (unconditional; runs on every boot), which
 exec's `bty --server X --mac Y` (values from `/proc/cmdline`); ``bty`` GETs
 `<server>/pxe/<mac>/plan` and dispatches (auto-flash without prompts,
-interactive wizard, or no-op-and-exit).
+interactive wizard, or no-op-and-exit). bty-web serves this trio over HTTP
+so PXE clients chain straight into it.
 
 ## `ghcr.io/safl/bty-web` (Docker container)
 
@@ -168,9 +147,9 @@ deployment lane** for fleets where either:
   nor a TFTP daemon are needed on the LAN.
 
 For mixed-firmware fleets that include **legacy BIOS** or older UEFI
-implementations that only support TFTP option 67, use the `bty-server`
-appliance instead - it bundles ``dnsmasq`` configured for TFTP serving
-alongside bty-web.
+implementations that only support TFTP option 67, bring up the `bty-tftp`
+sidecar (compose profile `tftp`) alongside bty-web - it serves the iPXE
+bootfile over TFTP for those clients.
 
 Use cases:
 
@@ -185,26 +164,23 @@ Use cases:
 See [`walkthrough-server-docker.md`](walkthrough-server-docker.md) for the
 full operator guide.
 
-The intended operator experience is appliance-grade:
+The intended operator experience:
 
-1. `dd` (or boot the bty USB live, pick the bty-server entry from
-   the wizard's starter catalog, flash) the image onto the server
-   host's disk (or SD card, for the Pi variant).
-2. Boot. Network comes up via DHCP; the appliance auto-starts
-   `bty-web` on `:8080`, the operator UI gated by `$BTY_ADMIN_PASSWORD`
-   (unset = open, with a startup warning), and an `odus` admin user with
-   passwordless sudo.
-3. Set `$BTY_ADMIN_PASSWORD` (and restart bty-web) to gate the UI, then
-   open `/ui/login` in a browser.
-4. The Netboot page shows how to point your LAN DHCP server (option
-   60/66/67) at the appliance (bty serves TFTP, not DHCP); everything
-   else (machine assignments, image catalog, boot artifacts) is
+1. On a host with podman, `podman compose -f deploy/compose.yml up -d`
+   brings up bty-web on `:8080` and withcache on `:3000` (add
+   `--profile tftp` for the TFTP sidecar). See
+   [`deploy/README.md`](https://github.com/safl/bty/blob/main/deploy/README.md).
+2. The operator UI is gated by `$BTY_ADMIN_PASSWORD` (unset = open, with a
+   startup warning); set it in the compose env and open `/ui/login` in a
+   browser.
+3. The Netboot page shows how to point your LAN DHCP server (option
+   60/66/67) at the host (bty serves TFTP via the sidecar, not DHCP);
+   everything else (machine assignments, image catalog, boot artifacts) is
    browser-driven from that point on.
 
-*Hardware targets.* `server-x86` runs on any amd64 box that boots a Debian
-cloud image: older Intel NUCs, discarded 1U servers, recent GMKtec
-mini-PCs. The same artifact also boots as a VM disk. `server-rpi` targets
-the 64-bit Raspberry Pis (4 and 5); both boot the SD-card image natively.
+*Hardware targets.* The multi-arch container runs on any amd64 or arm64
+host with a container runtime: older Intel NUCs, discarded 1U servers,
+recent GMKtec mini-PCs, or a 64-bit Raspberry Pi 4 / 5.
 
 ## No post-flash provisioning
 

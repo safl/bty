@@ -55,12 +55,11 @@ Windows box (exFAT is read/write on all three) and dropping `.img.gz`,
 `.qcow2`, `.img.zst`, or `.img.gz` files into it. The partition is *not* under
 the live-boot SquashFS+tmpfs overlay, so files copied there persist.
 
-Fresh sticks ship with an empty BTY_IMAGES partition. The default catalog of seven
-nosi images via `oras://ghcr.io/...` (rolling `:latest` tags
-resolved to content-addressed layer digests at flash time) and the latest
-bty-server appliance via a GitHub release URL. See
-[`reference.md`](reference.md) for the catalog schema and `oras://` URL
-form.
+Fresh sticks ship with an empty BTY_IMAGES partition. The wizard's
+`[d] default` catalog is seven nosi images via `oras://ghcr.io/...`
+(rolling `:latest` tags resolved to content-addressed layer digests at
+flash time). See [`reference.md`](reference.md) for the catalog schema and
+`oras://` URL form.
 
 ## Machine record
 
@@ -131,7 +130,7 @@ lied about the operator's configured mode in the UI.)
 ## Firmware boot order
 
 For a PXE-driven target, set its BIOS/UEFI firmware to **boot from the
-network (PXE) first**. bty-server then decides, per boot, whether the box
+network (PXE) first**. bty-web then decides, per boot, whether the box
 re-flashes, re-inventories, drops into the wizard, or boots its disk -
 all driven by the machine's `boot_mode`, not by re-toggling the firmware
 each time.
