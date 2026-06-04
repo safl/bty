@@ -1,9 +1,9 @@
 # bty.web static assets
 
-Vendored client-side assets so the bty-web appliance does **not** need
-internet access at runtime. The bty server image is intended to live on
-homelab / CI networks; pulling resources from a CDN every page load
-would defeat the offline-friendly design.
+Vendored client-side assets so bty-web does **not** need internet access
+at runtime. bty-web is intended to live on homelab / CI networks; pulling
+resources from a CDN every page load would defeat the offline-friendly
+design.
 
 ## What is here
 
@@ -22,7 +22,7 @@ All served by FastAPI under ``/static/`` at runtime. Hatchling includes
 this directory in the wheel automatically (no special config needed -
 all files under ``src/bty/`` ship by default).
 
-**Strict no-CDN guarantee.** Neither the appliance nor the operator's
+**Strict no-CDN guarantee.** Neither bty-web nor the operator's
 browser fetches anything from a third-party origin while using
 bty-web. Specifically, the upstream Bootswatch Sandstone CSS ships
 with an ``@import url(https://fonts.googleapis.com/...)`` declaration

@@ -51,7 +51,7 @@ def _run_portability(args: argparse.Namespace) -> None:
 
 
 def _resolve_secret_key(state_dir: Path) -> str:
-    """Return the per-appliance session-cookie secret.
+    """Return the per-server session-cookie secret.
 
     Read from ``$BTY_SESSION_SECRET`` if set + non-empty (CI tests,
     debugging); otherwise from ``<state_dir>/session-secret`` if it
@@ -76,10 +76,12 @@ def _resolve_secret_key(state_dir: Path) -> str:
 
     Persisting now writes through a same-dir tempfile + atomic
     rename so a crash mid-write either leaves the OLD file (if any)
-    or no file (if first boot); never a truncated one. The
-    appliance still pre-creates this file in ``bty-web-init``; this
-    fallback covers fresh dev / local installs where bty-web is
-    launched without that step.
+    or no file (if first boot); never a truncated one. bty-web
+    generates and persists this key on first start when neither the
+    env var nor an existing file supplies one, so a fresh container
+    or host install works without any pre-seeding step. Operators
+    who want a fixed key across rebuilds can mount one in or set
+    ``$BTY_SESSION_SECRET``.
     """
     env_key = (os.environ.get("BTY_SESSION_SECRET") or "").strip()
     if env_key:
@@ -119,7 +121,7 @@ def main(argv: list[str] | None = None) -> None:
         description=(
             "bty-web: HTTP server with browser UI for fleet image flashing.\n\n"
             "All runtime configuration is read from the environment so the\n"
-            "appliance's systemd unit (and the bty-web container) can supply\n"
+            "bty-web systemd unit (and the bty-web container) can supply\n"
             "values without command-line plumbing:\n\n"
             "  BTY_WEB_HOST          bind address (default 0.0.0.0)\n"
             "  BTY_WEB_PORT          bind port (default 8080; clamped to 1-65535)\n"

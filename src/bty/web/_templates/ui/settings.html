@@ -33,7 +33,7 @@
     <strong>Upstream sources</strong> card is editable and persists in
     the database. The <strong>DHCP / Network boot</strong> cheatsheet below
     is the router-side config to point PXE / HTTP-Boot clients at this
-    appliance. Operator
+    host. Operator
     authentication lives on the <a href="/ui/account">Account</a> page.
 {% endcall %}
 {% endblock %}
@@ -295,7 +295,7 @@
         <h4 class="h6 mt-3 fw-semibold">Option A &mdash; PXE (via TFTP)</h4>
         <p class="text-muted small mb-2">
             Legacy BIOS and UEFI PXE. The firmware TFTPs the iPXE binary
-            from this appliance, then iPXE chains on over HTTP.
+            from this host, then iPXE chains on over HTTP.
         </p>
         <table class="table table-sm">
             <thead class="table-light">

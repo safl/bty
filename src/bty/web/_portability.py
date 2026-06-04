@@ -23,19 +23,19 @@ file with a different schema).
 Why metadata-only: a routine backup runs daily on a cadence, so the
 size matters. Earlier releases (v0.31.0 through v0.33.1) shipped
 full image_root in every bundle, which produced multi-GiB "backups"
-that were dominated by catalog cache files the appliance can just
-re-fetch. Splitting image transport out of backup means a daily
+that were dominated by catalog cache files the bty-web server can
+just re-fetch. Splitting image transport out of backup means a daily
 backup is dozens of KiB and finishes in milliseconds; an operator
-who wants to move an appliance's image_root to a new box uses
+who wants to move a bty-web image_root to a new box uses
 ``rsync`` or just moves the image-store disk.
 
 The bundle deliberately does NOT carry:
 
   - image bytes (re-fetch from catalog or copy the image disk);
-  - catalog entries (re-import the catalog on the new appliance);
+  - catalog entries (re-import the catalog on the new host);
   - per-machine bindings (``boot_mode``, ``bty_image_ref``,
     ``target_disk_serial``, ``sanboot_drive``, ``hostname``) --
-    operator re-binds in the new appliance;
+    operator re-binds on the new host;
   - ``saw_flasher_boot`` state, audit log, settings, backups.
 """
 
@@ -76,7 +76,7 @@ _EXPORT_VERSION = 3
 # Per-machine columns the slim export carries. Mac + lshw +
 # known_disks (the "what hardware does this MAC bind to") is the
 # expensive-to-re-collect part; everything else gets re-typed by
-# the operator on the new appliance.
+# the operator on the new host.
 _MACHINE_EXPORT_COLS = (
     "mac",
     "known_disks",

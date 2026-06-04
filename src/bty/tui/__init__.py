@@ -18,7 +18,7 @@ import bty
 
 # Default ``--server`` value for the wizard. ``bty-server`` is the
 # canonical LAN-DNS / mDNS hostname operators are encouraged to point
-# at their appliance, so ``bty --mac X`` against a fresh box Just
+# at their bty-web server, so ``bty --mac X`` against a fresh box Just
 # Works without any flags. Owned here (the [tui]-extra-free entry
 # module) so the argparse default and ``BtyTui``'s constructor default
 # can both depend on it without the import dragging in Rich.
@@ -68,7 +68,7 @@ def main(argv: list[str] | None = None, *, prog: str = "bty") -> None:
         default=DEFAULT_SERVER,
         help=f"bty-server base URL or hostname. Default ``{DEFAULT_SERVER}`` "
         "(operator convenience: pair with a LAN DNS entry pointing at "
-        "the appliance and ``bty --mac X`` just works). The netboot "
+        "the bty-web server and ``bty --mac X`` just works). The netboot "
         "and USB-PXE paths pass this explicitly via ``bty.server=`` "
         "on the kernel cmdline. Bare hostnames are accepted; missing "
         "scheme defaults to ``http://``.",
