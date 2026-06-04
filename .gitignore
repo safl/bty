@@ -109,10 +109,10 @@ ENV/
 cijoe/_build/
 cijoe/cijoe-output/
 cijoe/cijoe-archive/
-# Generated each build by cijoe/scripts/gen_userdata.py; never edit by hand.
+# Stale local cloud-init userdata artifact from the retired appliance
+# bake; never tracked.
 bty-media/auxiliary/cloudinit-userdata.user
 # Staged by cijoe/scripts/bty_wheel_stage.py for variants that bake bty in.
-bty-media/rootfs/server/opt/bty/bty_lab-*.whl
 bty-media/live-build/config/includes.chroot/opt/bty/bty_lab-*.whl
 
 # IDE

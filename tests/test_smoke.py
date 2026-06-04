@@ -108,15 +108,15 @@ def test_resolve_secret_key_env_wins(monkeypatch: pytest.MonkeyPatch, tmp_path: 
 def test_resolve_secret_key_reads_existing_file(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Without env override, the persisted secret is reused so the
-    appliance survives a bty-web restart without invalidating
+    """Without env override, the persisted secret is reused so
+    bty-web survives a restart without invalidating
     every operator's session cookie."""
     from bty.web import _resolve_secret_key
 
     monkeypatch.delenv("BTY_SESSION_SECRET", raising=False)
     secret_file = tmp_path / "session-secret"
-    # Trailing whitespace must be stripped -- bty-web-init writes
-    # ``key + "\n"`` so file-round-trip cycles add one.
+    # Trailing whitespace must be stripped -- the secret is written
+    # as ``key + "\n"`` so file-round-trip cycles add one.
     secret_file.write_text("persisted-key\n", encoding="utf-8")
 
     assert _resolve_secret_key(tmp_path) == "persisted-key"
@@ -234,36 +234,6 @@ def test_resolve_secret_key_persist_is_atomic(
     assert not leftovers, f"atomic-write tempfiles must not be left behind: {leftovers!r}"
 
 
-def test_server_cloudinit_base_is_valid_yaml() -> None:
-    """``bty-media/auxiliary/cloudinit-base-server.user`` is read by
-    cloud-init at bake time -- a YAML syntax error means the bake VM
-    fails to start cloud-init and the operator gets to find out via
-    a 30-minute CI run instead of in seconds locally.
-
-    Pin parseability so any future runcmd / packages edit that
-    breaks indentation or quoting fails fast. PyYAML is available
-    via the dev group (transitive via uv); skip if it isn't.
-    """
-    try:
-        import yaml
-    except ImportError:
-        pytest.skip("PyYAML not installed in this environment")
-
-    from pathlib import Path
-
-    repo_root = Path(__file__).resolve().parents[1]
-    base = repo_root / "bty-media" / "auxiliary" / "cloudinit-base-server.user"
-    data = yaml.safe_load(base.read_text())
-    assert isinstance(data, dict), (
-        f"cloud-config must parse to a top-level mapping; got {type(data).__name__}"
-    )
-    # The two blocks the bake actually relies on -- if a future
-    # edit accidentally drops them, the bake silently produces a
-    # broken appliance. Pin minimal structure.
-    assert "packages" in data and isinstance(data["packages"], list)
-    assert "runcmd" in data and isinstance(data["runcmd"], list)
-
-
 def test_etc_issue_uses_only_documented_agetty_escapes() -> None:
     """``/etc/issue`` is rendered by agetty at login-prompt time;
     every ``\\<char>`` sequence in the file is interpreted by
@@ -272,8 +242,7 @@ def test_etc_issue_uses_only_documented_agetty_escapes() -> None:
     control bytes onto the serial console right before the
     login banner.
 
-    Pin both the rootfs-shipped /etc/issue AND the heredoc
-    bty-web-init writes on first boot so any "spice up the
+    Pin the USB live-env /etc/issue so any "spice up the
     banner" attempt with backslash-laden ASCII gets caught here
     instead of by an operator watching CI logs.
 
@@ -301,103 +270,9 @@ def test_etc_issue_uses_only_documented_agetty_escapes() -> None:
                     f"emits VT100 escapes onto ``console=ttyS0``)"
                 )
 
-    # All shipped /etc/issue files: the server bake's
-    # pre-first-boot one, and the USB live-env's. The runtime
-    # issue bty-web-init writes on first boot is checked
-    # separately below.
-    for relpath in (
-        "bty-media/rootfs/server/etc/issue",
-        "bty-media/live-build/config/includes.chroot/etc/issue",
-    ):
-        path = repo_root / relpath
-        _check_issue_body(path.read_text(), str(path))
-
-    # bty-web-init writes a runtime /etc/issue via heredoc; extract
-    # the heredoc body and check it the same way.
-    web_init = repo_root / "bty-media/rootfs/server/usr/local/sbin/bty-web-init"
-    body = web_init.read_text()
-    m = re.search(r"cat > /etc/issue <<'EOF'\n(.*?)\nEOF", body, flags=re.DOTALL)
-    assert m is not None, "bty-web-init no longer writes /etc/issue via heredoc -- update this test"
-    _check_issue_body(m.group(1), f"{web_init}:/etc/issue heredoc")
-
-
-def test_server_cloudinit_does_not_install_plymouth() -> None:
-    """The bty-server cloudinit base must not (re-)introduce
-    plymouth: its quit/teardown leaks VT100 escape sequences onto
-    ``console=ttyS0`` serial consoles, which is the operator's
-    primary boot-watch surface for headless servers.
-
-    Plymouth has been added and dropped multiple times when
-    operators have asked for a boot splash; pin it out so the next
-    "let's add the splash back" attempt gets caught by tests
-    instead of by an operator watching a fresh appliance boot.
-
-    Two layers of defense are pinned here:
-
-    1. Plymouth is not in the ``packages:`` list (so cloud-init
-       doesn't ADD it).
-    2. ``apt-get -y purge plymouth`` is in ``runcmd:`` (so
-       plymouth is REMOVED if the Debian-13 daily cloud-image
-       baseline pre-installed it -- the packages-list removal
-       alone is not enough).
-    """
-    from pathlib import Path
-
-    repo_root = Path(__file__).resolve().parents[1]
-    base = repo_root / "bty-media" / "auxiliary" / "cloudinit-base-server.user"
-    body = base.read_text()
-    # Layer 1: ``- plymouth`` / ``- plymouth-themes`` are the YAML
-    # list-item forms in the ``packages:`` block;
-    # ``plymouth-set-default-theme`` is the runcmd handle. Each is
-    # a clear signal of plymouth being installed / configured.
-    # Inline comments using the word are fine (the comment block
-    # documents *why* plymouth isn't shipped).
-    assert "\n  - plymouth\n" not in body
-    assert "\n  - plymouth-themes\n" not in body
-    assert "plymouth-set-default-theme" not in body
-    # Layer 2: defensive purge in runcmd. Pin the literal command
-    # so a refactor that "tidies" the runcmd block doesn't drop it.
-    assert "apt-get -y purge plymouth" in body
-
-
-def test_server_cloudinit_ships_haveged() -> None:
-    """Entropy starvation on N97-class hardware caused 20-minute
-    systemd-journald start times even on RDRAND-capable CPUs (the
-    kernel CSPRNG can briefly block on ``getrandom()`` before the
-    trust-cpu logic settles). Ship ``haveged`` (CPU-jitter entropy
-    daemon) + explicit ``random.trust_cpu=on
-    random.trust_bootloader=on`` cmdline flags so boot doesn't
-    depend on the kernel's compile-time defaults. Pin both layers."""
-    from pathlib import Path
-
-    repo_root = Path(__file__).resolve().parents[1]
-    base = repo_root / "bty-media" / "auxiliary" / "cloudinit-base-server.user"
-    body = base.read_text()
-    # Layer 1: ``- haveged`` in the packages list.
-    assert "\n  - haveged\n" in body
-    # Layer 2: kernel cmdline trust hints.
-    assert "random.trust_cpu=on" in body
-    assert "random.trust_bootloader=on" in body
-    # Bare-metal firmware + kernel + ``noresume`` for arbitrary
-    # hardware. The kernel comes from trixie-backports (newer
-    # in-tree drivers, e.g. r8169 RTL8125/8126 fixes, rtw89),
-    # firmware via the ``firmware-linux-nonfree`` metapackage
-    # which Depends on every individual firmware-* package. Pin
-    # both layers so any "tidy the packages list" attempt
-    # doesn't silently regress HW coverage. Pin the backports
-    # source line too: without it the apt pin can't resolve to
-    # the newer candidate version.
-    assert "\n  - linux-image-amd64\n" in body
-    assert "\n  - firmware-linux-nonfree\n" in body
-    assert "trixie-backports" in body
-    assert "noresume" in body
-    # ``MODULES=most`` initramfs rebuild for broad bare-metal
-    # driver coverage. The cloud image's default ``MODULES=dep``
-    # initrd misses drivers for hardware that wasn't in the bake
-    # VM (N97 slow boot symptom). Pin the rebuild so any "tidy
-    # this up" attempt doesn't restore the regression.
-    assert "MODULES=most" in body
-    assert "update-initramfs -u" in body
+    # The USB live-env's shipped /etc/issue.
+    path = repo_root / "bty-media/live-build/config/includes.chroot/etc/issue"
+    _check_issue_body(path.read_text(), str(path))
 
 
 def test_starter_catalog_template_renders_valid_catalog() -> None:
@@ -549,19 +424,15 @@ def test_plymouth_is_not_baked_into_the_live_env() -> None:
     assert not plymouth_hook, f"stale plymouth hook(s): {plymouth_hook}"
 
 
-def test_nouveau_blacklisted_across_all_three_images() -> None:
+def test_nouveau_blacklisted_across_the_live_images() -> None:
     """Nouveau (in-tree Nvidia driver) stalls early boot 10-60s on
     Maxwell/Pascal/Turing cards probing for firmware bty does not
-    need. Blacklist invariant: every bty image variant must ship
-    the modprobe.d config so any Nvidia-equipped target PXE-boots
+    need. Blacklist invariant: the bty live env must ship the
+    modprobe.d config so any Nvidia-equipped target PXE-boots
     or USB-boots without the nouveau stall.
 
-    Three locations:
-
-    * live env (bty-usb + bty-netboot): drops to /etc/modprobe.d/
-      via the live-build includes.chroot tree.
-    * bty-server appliance: same path via rootfs/server/ which
-      cloud-init's write_files block lands at /etc/modprobe.d/.
+    The live env (bty-usb + bty-netboot) drops to /etc/modprobe.d/
+    via the live-build includes.chroot tree.
 
     Plus belt-and-braces kernel cmdline. modprobe.d only catches
     later module loads; initramfs-resolved modules can sneak in
@@ -579,33 +450,21 @@ def test_nouveau_blacklisted_across_all_three_images() -> None:
         / "modprobe.d"
         / "zz-bty-blacklist-nouveau.conf"
     )
-    server_conf = (
-        repo_root
-        / "bty-media"
-        / "rootfs"
-        / "server"
-        / "etc"
-        / "modprobe.d"
-        / "zz-bty-blacklist-nouveau.conf"
+    assert live_conf.is_file(), f"missing nouveau blacklist at {live_conf}"
+    body = live_conf.read_text()
+    assert "blacklist nouveau" in body, f"{live_conf} missing 'blacklist nouveau' directive"
+    assert "install nouveau /bin/true" in body, (
+        f"{live_conf} missing 'install nouveau /bin/true' belt-and-braces"
     )
-    for conf in (live_conf, server_conf):
-        assert conf.is_file(), f"missing nouveau blacklist at {conf}"
-        body = conf.read_text()
-        assert "blacklist nouveau" in body, f"{conf} missing 'blacklist nouveau' directive"
-        assert "install nouveau /bin/true" in body, (
-            f"{conf} missing 'install nouveau /bin/true' belt-and-braces"
-        )
 
-    # Kernel cmdline coverage: both iPXE templates and the server
-    # cloud-init's GRUB_CMDLINE_LINUX_DEFAULT EXTRA. Don't pin the
-    # exact ordering -- just that ``modprobe.blacklist=nouveau``
-    # appears in each so a future template edit can't silently
-    # drop it.
+    # Kernel cmdline coverage: both iPXE templates and the live-build
+    # auto/config. Don't pin the exact ordering -- just that
+    # ``modprobe.blacklist=nouveau`` appears in each so a future
+    # template edit can't silently drop it.
     ipxe_tui = repo_root / "src" / "bty" / "web" / "_templates" / "ipxe_tui.j2"
     ipxe_flash = repo_root / "src" / "bty" / "web" / "_templates" / "ipxe_flash.j2"
-    cloudinit = repo_root / "bty-media" / "auxiliary" / "cloudinit-base-server.user"
     auto_config = repo_root / "bty-media" / "live-build" / "auto" / "config"
-    for path in (ipxe_tui, ipxe_flash, cloudinit, auto_config):
+    for path in (ipxe_tui, ipxe_flash, auto_config):
         body = path.read_text()
         assert "modprobe.blacklist=nouveau" in body, (
             f"{path} missing 'modprobe.blacklist=nouveau' on the kernel cmdline"

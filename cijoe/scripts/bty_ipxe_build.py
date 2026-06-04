@@ -3,20 +3,13 @@ Build a slim bty-flavoured iPXE binary
 ======================================
 
 Clones iPXE upstream, copies in bty's embed script + general.h trim
-overrides, and builds ``bin-x86_64-efi/ipxe.efi``. Two entry points share
-the build core (:func:`build_ipxe_efi`):
+overrides, and builds ``bin-x86_64-efi/ipxe.efi`` via the build core
+(:func:`build_ipxe_efi`).
 
-* **Standalone CLI** (``python3 cijoe/scripts/bty_ipxe_build.py --out
-  DIR`` / ``make ipxe``) -- copies the binary into DIR. CI uses this to
-  stage the custom iPXE into the bty-web and bty-tftp image build
-  contexts, so the container deploy gets the one-bootfile chain guarantee.
-* **cijoe** (:func:`main`) -- the legacy ``server-x86`` media bake; stages
-  into the bty-media rootfs tree at:
-
-  * ``.../tftpboot/ipxe.efi`` -- served via TFTP; the operator's LAN DHCP
-    points PXE clients at this file.
-  * ``.../var/lib/bty/boot/ipxe.efi`` -- served via HTTP by bty-web for
-    UEFI HTTP-Boot clients.
+The standalone CLI (``python3 cijoe/scripts/bty_ipxe_build.py --out DIR``
+/ ``make ipxe``) copies the binary into DIR. CI uses this to stage the
+custom iPXE into the bty-web and bty-tftp image build contexts, so the
+container deploy gets the one-bootfile chain guarantee.
 
 Why custom build (vs. shipping Debian's stock ``/usr/lib/ipxe/
 ipxe.efi`` as a symlink):
@@ -39,30 +32,17 @@ Build inputs (under ``bty-media/auxiliary/``):
   firmware on UNDI 3.0.22 accepted that size; bigger builds
   failed to load).
 
-Variant gating:
-
-* ``server-x86`` -- builds + stages the x86_64-EFI binary.
-* ``server-rpi`` -- arm64 build of ipxe.efi is a follow-up
-  (different EMBED target, separate cross-compile setup).
-  For now the RPi bake symlinks Debian's stock and accepts the
-  chain-loop limitation -- documented in the deployment notes.
-* ``usb-x86`` / ``netboot-x86`` -- no TFTP-served iPXE; skipped.
-
 Retargetable: False
 """
 
 from __future__ import annotations
 
-import errno
 import logging as log
 import shutil
 import subprocess
 import sys
 from argparse import ArgumentParser
 from pathlib import Path
-
-# Variants we build for. Others (rpi, netboot, usb) get skipped.
-SUPPORTED_VARIANTS: tuple[str, ...] = ("server-x86",)
 
 # Upstream iPXE source.
 IPXE_REPO = "https://github.com/ipxe/ipxe.git"
@@ -76,10 +56,6 @@ IPXE_REPO = "https://github.com/ipxe/ipxe.git"
 IPXE_REV = "master"
 
 
-def add_args(parser: ArgumentParser):
-    del parser  # no flags; signature kept for cijoe consistency
-
-
 class IpxeBuildError(RuntimeError):
     """The iPXE clone / compile failed; message is operator-actionable."""
 
@@ -87,8 +63,7 @@ class IpxeBuildError(RuntimeError):
 def build_ipxe_efi(aux: Path, build_root: Path) -> Path:
     """Clone iPXE, stage bty's embed script + trim, build and return the
     path to ``bin-x86_64-efi/ipxe.efi``. Raises :class:`IpxeBuildError` on
-    any failure. Shared by the cijoe entry point (server media bake) and the
-    standalone CLI (container / CI artifact)."""
+    any failure. Used by the standalone CLI (container / CI artifact)."""
     embed_src = aux / "ipxe-embed.ipxe"
     general_src = aux / "ipxe-local-general.h"
     for required in (embed_src, general_src):
@@ -145,41 +120,6 @@ def build_ipxe_efi(aux: Path, build_root: Path) -> Path:
         raise IpxeBuildError(f"expected build output not found: {built}")
     log.info(f"Built {built} ({built.stat().st_size} bytes)")
     return built
-
-
-def main(args, cijoe):
-    """cijoe entry point: build + stage into the server-media rootfs.
-
-    Retained for the (legacy) ``server-x86`` media bake; the container deploy
-    builds the same binary via the standalone CLI below (``make ipxe``)."""
-    del args
-    cijoe_dir = Path.cwd()
-    repo_root = cijoe_dir.parent
-    bty_media = repo_root / "bty-media"
-
-    variant = cijoe.getconf("bty", {}).get("variant", "server-x86")
-    if variant not in SUPPORTED_VARIANTS:
-        log.info(f"Skipping iPXE build (variant={variant!r}; nothing to bake)")
-        return 0
-
-    try:
-        built = build_ipxe_efi(bty_media / "auxiliary", cijoe_dir / "_build" / "ipxe")
-    except IpxeBuildError as exc:
-        log.error(str(exc))
-        return errno.EIO
-
-    # Stage into the server-media rootfs at /var/lib/tftpboot/ and
-    # /var/lib/bty/boot/, replacing the symlink-to-Debian-stock path.
-    tftp_dst = bty_media / "rootfs" / "server" / "var" / "lib" / "tftpboot" / "ipxe.efi"
-    http_dst = bty_media / "rootfs" / "server" / "var" / "lib" / "bty" / "boot" / "ipxe.efi"
-    for dst in (tftp_dst, http_dst):
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        if dst.is_symlink() or dst.exists():
-            dst.unlink()
-        shutil.copy2(built, dst)
-        log.info(f"Staged {dst}")
-
-    return 0
 
 
 def _standalone(argv: list[str] | None = None) -> int:

@@ -491,13 +491,13 @@ def test_catalog_entry_accepts_http_src_without_sha256() -> None:
     required" at use-time via ``cached_path``."""
     entry = catalog.CatalogEntry.from_dict(
         {
-            "name": "bty-server-latest",
-            "src": "https://github.com/safl/bty/releases/latest/download/bty-server-x86_64.img.gz",
+            "name": "debian-13-server-latest",
+            "src": "https://example.com/debian-13-server.img.gz",
             "format": "img.gz",
         }
     )
     assert entry.sha256 is None
-    assert entry.src.startswith("https://github.com/safl/bty/releases/")
+    assert entry.src.startswith("https://")
 
 
 def test_catalog_entry_cached_path_works_without_sha(tmp_path: Path) -> None:

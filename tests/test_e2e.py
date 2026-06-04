@@ -1077,13 +1077,13 @@ def test_e2e_pxe_done_failure_is_isolated_from_machine_state(
 
 
 def test_e2e_modprobe_blacklist_files_match_kernel_cmdline_intent() -> None:
-    """The repo ships ``zz-bty-blacklist-nouveau.conf`` in the live env
-    + server rootfs, and ``modprobe.blacklist=nouveau nouveau.modeset=0``
-    on the kernel cmdline at four locations (two iPXE templates,
-    auto/config BOOTAPPEND, cloud-init GRUB_CMDLINE EXTRA).
+    """The repo ships ``zz-bty-blacklist-nouveau.conf`` in the live env,
+    and ``modprobe.blacklist=nouveau nouveau.modeset=0`` on the kernel
+    cmdline at three locations (two iPXE templates, auto/config
+    BOOTAPPEND).
 
     A future change that adds another GPU driver to the blacklist
-    must do it in ALL FIVE places, not just some, or the cmdline /
+    must do it in ALL of these places, not just some, or the cmdline /
     config drift will silently let the driver load on some boot
     paths and not others.
 
@@ -1103,18 +1103,9 @@ def test_e2e_modprobe_blacklist_files_match_kernel_cmdline_intent() -> None:
         / "modprobe.d"
         / "zz-bty-blacklist-nouveau.conf"
     )
-    server_conf = (
-        repo_root
-        / "bty-media"
-        / "rootfs"
-        / "server"
-        / "etc"
-        / "modprobe.d"
-        / "zz-bty-blacklist-nouveau.conf"
-    )
     # Extract blacklisted modules.
     drivers = set()
-    for path in (live_conf, server_conf):
+    for path in (live_conf,):
         for line in path.read_text().splitlines():
             stripped = line.strip()
             if stripped.startswith("blacklist "):
@@ -1128,7 +1119,6 @@ def test_e2e_modprobe_blacklist_files_match_kernel_cmdline_intent() -> None:
         repo_root / "src" / "bty" / "web" / "_templates" / "ipxe_tui.j2",
         repo_root / "src" / "bty" / "web" / "_templates" / "ipxe_flash.j2",
         repo_root / "bty-media" / "live-build" / "auto" / "config",
-        repo_root / "bty-media" / "auxiliary" / "cloudinit-base-server.user",
     )
     for path in cmdline_files:
         body = path.read_text()

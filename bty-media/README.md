@@ -1,6 +1,6 @@
 # bty-media
 
-Source content for the bty appliance images. Four variants:
+Source content for the bty media images. Two variants:
 
 - **USB live image** (`VARIANT=usb-x86`) - bootable USB carrying the
   bty runtime + a writable exFAT `BTY_IMAGES` partition for pre-built
@@ -8,12 +8,6 @@ Source content for the bty appliance images. Four variants:
   shipped gzip-compressed as `bty-usb-x86_64.iso.gz` (Etcher / Rufus
   / Raspberry Pi Imager all decompress `.gz` natively; xz tripped
   Etcher's bundled handler regardless of preset).
-- **Server image, x86_64** (`VARIANT=server-x86`) - installable disk
-  image for the bty server appliance (`bty-web` + PXE boot stack).
-  Cloud-init bake in QEMU.
-- **Server image, Raspberry Pi 4/5** (`VARIANT=server-rpi`) - same
-  appliance role on arm64 for SD-card delivery to a Pi. Built via
-  losetup-mount + chroot in `qemu-aarch64-static`.
 - **Network-flash live env** (`VARIANT=netboot-x86`) - kernel + initrd +
   squashfs that PXE clients chain into. Built via live-build
   (`netboot` output). Carries the bty runtime plus a
@@ -22,25 +16,18 @@ Source content for the bty appliance images. Four variants:
   then GETs `<server>/pxe/<mac>/plan` and dispatches (auto-flash,
   interactive wizard, or no-op).
 
-This directory holds the **content** baked into the images: cloud-init
-base templates (server only), rootfs trees that live-build /
-cloud-init fold in, and the live-build config tree. The cijoe
+This directory holds the **content** baked into the images: the rootfs
+trees that live-build folds in and the live-build config tree. The cijoe
 **orchestration** (configs, tasks, scripts) that consumes this
 content lives at `cijoe/` at the repo root.
 
 Operators drive everything via the top-level Makefile:
-`make build VARIANT=usb-x86|server-x86|server-rpi|netboot-x86`.
+`make build VARIANT=usb-x86|netboot-x86`.
 
 ## Layout
 
-- `auxiliary/cloudinit-base-server.user` - cloud-init base template
-  for the server bake. (usb-x86 uses live-build, no cloud-init.)
 - `auxiliary/cloudinit-metadata.meta` - shared cloud-init metadata.
-- `rootfs/common/` - files baked into every disk-image variant.
-- `rootfs/server/` - files baked into the server image. Each file
-  becomes a cloud-init `write_files` entry whose `path` mirrors the
-  file's path under the role subdirectory. Binary files (anything
-  that is not valid UTF-8) are emitted with `encoding: b64`.
+- `rootfs/common/` - files baked into every variant.
 - `live-build/` - live-build config tree shared by `usb-x86` (which
   uses `iso-hybrid` output) and `netboot-x86` (which uses `netboot`
   output). The `BTY_USB_ISO=1` env var switches `auto/config`
@@ -51,31 +38,11 @@ Operators drive everything via the top-level Makefile:
 From the repo root:
 
 ```
-make build VARIANT=usb-x86|server-x86|server-rpi|netboot-x86
+make build VARIANT=usb-x86|netboot-x86
 ```
 
-dispatches to one of four cijoe task files. The Makefile picks the
+dispatches to one of two cijoe task files. The Makefile picks the
 right one based on the variant:
-
-- `server-x86` -> `cijoe tasks/build.yaml` (cloud-init bake of a
-  Debian cloud image inside QEMU). Steps:
-
-  1. **`bty_wheel_stage`** - builds a `bty-lab` wheel from the
-     parent repo via `uv build` and stages it under
-     `rootfs/server/opt/bty/`. The wheel is base64-inlined into
-     cloud-init by the next step and `pip install`ed into a system
-     venv at `/opt/bty/venv` during the bake.
-  2. **`gen_userdata`** - assembles the cloud-init userdata file by
-     inlining files under `rootfs/common/` and `rootfs/server/` as
-     `write_files` entries on top of
-     `auxiliary/cloudinit-base-server.user`.
-  3. **`diskimage_build`** - downloads the Debian 13 cloud image,
-     resizes the qcow2 boot disk, builds the cloud-init seed.iso,
-     and boots QEMU. cloud-init provisions the system and powers
-     off; the baked qcow2 is compacted via `qemu-img convert -c`.
-  4. **`img_gz_publish`** - converts the qcow2 to raw and
-     gzip-compresses the result into a `dd`-able `.img.gz`,
-     alongside a sha256sum.
 
 - `usb-x86` -> `cijoe tasks/usb.yaml`. Drives Debian's `live-build`
   with `BTY_USB_ISO=1` selecting `iso-hybrid` output, then post-
@@ -84,29 +51,17 @@ right one based on the variant:
   gzip-compresses it. Output is `bty-usb-x86_64.iso.gz`. No QEMU
   full-system bake.
 
-- `server-rpi` -> `cijoe tasks/build-rpi.yaml`. Customises Raspberry
-  Pi OS Lite arm64 in place: download upstream image, grow + losetup-
-  mount, drop the `rootfs/server/` overlay, chroot via
-  `qemu-aarch64-static` to install packages + create users + install
-  the bty-lab venv, then re-compress to `.img.gz`. Two steps:
-  `bty_wheel_stage` then `rpi_image_customize`.
-
 - `netboot-x86` -> `cijoe tasks/netboot.yaml`. Drives Debian's `live-build`
   (debootstrap + mksquashfs + mkinitramfs) directly on the build
   host - no QEMU, no cloud-init. Output is the kernel + initrd +
   squashfs trio for PXE chain-boot.
 
-## Build prerequisites
+Both variants stage the bty-lab wheel via `bty_wheel_stage` into the
+live-build chroot includes, then drive live-build via `live_build`;
+usb-x86 additionally runs `usb_iso_build` for the exFAT `BTY_IMAGES`
+post-processing.
 
-server-x86 (cloud-init bake):
-- `qemu-system-x86_64` and `qemu-img` (Debian package
-  `qemu-system-x86` and `qemu-utils`)
-- `mkisofs` (Debian package `genisoimage`)
-- `zstd`
-- KVM acceleration (configured in `configs/server-x86.toml`); without
-  it the cloud-init bake step is impractically slow
-- `uv` for `bty_wheel_stage` to build the bty-lab wheel; install
-  with `pipx install uv` if needed
+## Build prerequisites
 
 usb-x86 + netboot-x86 (live-build):
 - `live-build` (`sudo apt install live-build`)
@@ -116,27 +71,15 @@ usb-x86 + netboot-x86 (live-build):
   (`mkfs.exfat`)
 - `xz-utils` for compressing the final usb-x86 artifact (always
   present on Ubuntu/Debian; listed for completeness)
+- `uv` for `bty_wheel_stage` to build the bty-lab wheel; install
+  with `pipx install uv` if needed
 - Passwordless `sudo` - live-build's chroot operations are
   privileged; CI runners have NOPASSWD by default
-
-server-rpi (chroot in qemu-user):
-- `qemu-user-static` + `binfmt-support` (registers the
-  `qemu-aarch64` handler so amd64 hosts can chroot into arm64
-  rootfs)
-- `xz-utils`, `parted`, `e2fsprogs`, `zstd` for image extraction,
-  loopback growth, and final compression
 
 All variants:
 - `cijoe` (install via `make media-deps`, which runs `pipx install cijoe`)
 
 ## Output
-
-server-x86:
-- `~/system_imaging/disk/bty-server-x86_64.qcow2` - baked, compacted
-  qcow2 (intermediate; useful for QEMU smoke tests).
-- `~/system_imaging/disk/bty-server-x86_64.img.gz` - final
-  artifact. Decompress with `gunzip` and pipe to `dd` (or feed
-  directly to Etcher / Raspberry Pi Imager / Rufus DD-mode).
 
 usb-x86:
 - `~/system_imaging/disk/bty-usb-x86_64.iso.gz` - final artifact.
@@ -146,10 +89,6 @@ usb-x86:
   Decompress to `.iso` first (`gunzip ...`) before dropping onto a
   Ventoy stick; Ventoy doesn't auto-decompress.
 
-server-rpi:
-- `~/system_imaging/disk/bty-server-rpi-arm64.img.gz` - final
-  artifact for `dd` to an SD card.
-
 netboot-x86:
 - `~/system_imaging/disk/bty-netboot-x86_64.vmlinuz` - kernel
 - `~/system_imaging/disk/bty-netboot-x86_64.initrd` - initramfs
@@ -158,14 +97,11 @@ netboot-x86:
 
 ## Status
 
-All four variants ship on every tagged release at
+Both variants ship on every tagged release at
 [the GitHub releases page](https://github.com/safl/bty/releases).
 The end-to-end PXE chain test (``make test-pxe``) gates each release
-on usb-x86, server-x86, and netboot-x86 building cleanly and the
-chain working end to end. server-rpi (Raspberry Pi 4 / 5) builds in
-the same matrix but isn't covered by the PXE chain test (which is
-amd64-only); first-boot smoke-testing happens out-of-band on real
-hardware. Most operators never run this build pipeline themselves -
+on usb-x86 and netboot-x86 building cleanly and the chain working end
+to end. Most operators never run this build pipeline themselves -
 ``bty-media/`` exists for contributors who want to modify the image.
 
 - **usb-x86.** The `.iso.gz` decompresses to a hybrid ISO
@@ -188,32 +124,10 @@ hardware. Most operators never run this build pipeline themselves -
   The end-to-end PXE chain (server hands a per-MAC iPXE plan, client
   loads the live trio, flashes a target disk, signals done) is
   exercised by `make test-pxe` and runs in CI on every push.
-- **server-x86.** Bootable Debian cloud-image hosting `bty-web`. The
-  browser UI is gated by `$BTY_ADMIN_PASSWORD` (unset = open, with a
-  startup warning) plus a signed session cookie; set the env var in the
-  bty-web service environment and restart to rotate. An `odus` admin
-  user is also baked in (with passwordless sudo) for SSH-side
-  maintenance. The server image's
-  `bty-web-init.service` oneshot creates `BTY_STATE_DIR`, initialises
-  the SQLite schema, and rewrites `/etc/issue` to point operators at
-  `http://<ip>:8080/ui`. dnsmasq serves TFTP for the iPXE binaries;
-  the operator points their LAN DHCP server (option 60/66/67) at the
-  appliance (bty does not run DHCP), using the per-interface
-  cheatsheet on the browser UI's Netboot page.
-- **server-rpi.** Same appliance role on arm64, delivered as an SD-card
-  image for Raspberry Pi 4 / 5. Built by mounting the upstream
-  Raspberry Pi OS Lite arm64 image via losetup and customising it in a
-  qemu-aarch64-static chroot (no QEMU full-system bake): apt install,
-  bty + odus user creation, bty-lab venv install, service enables.
-  Same `$BTY_ADMIN_PASSWORD` UI gating and `odus / odus.321` SSH admin
-  as the x86 server image; same `bty-web-init.service` first-boot.
 
-  ### Running bty-web
+## Running bty-web
 
-  The supported way to stand up a long-running bty-web is the
-  container deploy (`deploy/compose.yml` / `deploy/quadlet/`); see
-  [`deploy/README.md`](../deploy/README.md) and
-  [walkthrough-server-docker.md](../docs/src/walkthrough-server-docker.md).
-  The `server-x86` / `server-rpi` recipes above remain buildable from
-  source for operators who want a disk-image rootfs; they are not part
-  of the release matrix.
+The supported way to stand up a long-running bty-web is the
+container deploy (`deploy/compose.yml` / `deploy/quadlet/`); see
+[`deploy/README.md`](../deploy/README.md) and
+[walkthrough-server-docker.md](../docs/src/walkthrough-server-docker.md).

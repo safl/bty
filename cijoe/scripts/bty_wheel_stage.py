@@ -5,10 +5,6 @@ Stage the bty-lab wheel for variants that bake bty into their image
 Builds a wheel from the parent repo via ``uv build`` and copies it
 into a per-variant staging directory under ``bty-media/``:
 
-- ``server-x86`` / ``server-rpi`` ->
-  ``bty-media/rootfs/server/opt/bty/`` (consumed by the cloud-init
-  ``write_files`` block emitted by ``gen_userdata.py``; the server's
-  runcmd ``pip install``s it into ``/opt/bty/venv``).
 - ``netboot-x86`` / ``usb-x86`` ->
   ``bty-media/live-build/config/includes.chroot/opt/bty/`` (consumed
   by the live-build hook ``0500-bty-install.hook.chroot``, which
@@ -34,8 +30,6 @@ from pathlib import Path
 # Variant -> destination directory relative to ``bty-media/``.
 # Variants not listed here are skipped with rc=0.
 TARGET_DIRS: dict[str, Path] = {
-    "server-x86": Path("rootfs") / "server" / "opt" / "bty",
-    "server-rpi": Path("rootfs") / "server" / "opt" / "bty",
     "netboot-x86": Path("live-build") / "config" / "includes.chroot" / "opt" / "bty",
     "usb-x86": Path("live-build") / "config" / "includes.chroot" / "opt" / "bty",
 }
