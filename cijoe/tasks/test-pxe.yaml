@@ -1,43 +1,31 @@
 doc: |
-  PXE chain end-to-end test
-  =========================
+  PXE chain end-to-end test (containerized bty-web + bridged QEMU client)
+  =======================================================================
 
-  Spins up two QEMU VMs sharing an L2 segment via ``-netdev socket``:
-  the server VM runs the bty server image unmodified (default
-  ``bty / bty`` PAM credential, ``odus / odus.321`` SSH admin); the client
-  VM PXE-boots on that segment. The test asserts the chain completes
-  by grepping the client's serial-console log for marker strings
-  emitted at each stage of the boot pipeline (iPXE binary loaded,
-  /pxe-bootstrap.ipxe fetched, per-MAC chain fetched, kernel +
-  initrd + squashfs loaded, ``bty: auto-flash starting`` /
-  ``bty: flash complete; rebooting`` markers on /dev/console).
+  Brings bty-web up as a container and PXE-boots a QEMU client VM against it
+  over a host bridge. Asserts the chain completes by grepping the client's
+  serial-console log for marker strings emitted at each stage of the boot
+  pipeline (iPXE binary loaded, /pxe-bootstrap.ipxe fetched, per-MAC chain
+  fetched, kernel + initrd + squashfs loaded, ``bty: auto-flash starting`` /
+  ``bty: flash complete; rebooting`` on /dev/console).
 
   Steps:
 
-  1. ``pxe_customize_server`` - copies the pre-built server qcow2 to
-     the cijoe run dir and stages the live trio + a small dummy image
-     for upload. No virt-customisation - the production qcow2 is
-     booted as-is and the test drives the HTTP API to seed
-     assignments.
+  1. ``pxe_prepare`` - builds the bty-web image from this checkout and stages
+     the live trio + a small dummy flash image for upload.
 
-  2. ``pxe_run_chain_test`` - starts the server VM (mgmt NIC with
-     ``hostfwd`` for HTTP-API access + PXE NIC on the socket), waits
-     for ``/healthz``, drives ``POST /ui/login`` to mint a session
-     cookie, ``PUT``s the live trio + dummy image and an assignment
-     for the client's MAC with ``boot_mode=bty-flash-always``, then SSHes in
-     as ``odus`` to drop a test-only full-DHCP dnsmasq overlay (bty
-     itself never runs DHCP in production; this is genuinely
-     test-side machinery for the isolated socket-net segment).
-     Starts the client VM (PXE-boot, joined to the same socket),
-     tails the client serial log, asserts every chain marker
-     appears within the deadline.
+  2. ``pxe_run_chain_test`` - creates a host bridge + client tap, starts a
+     test-side dnsmasq (DHCP + TFTP) on the bridge, runs the bty-web container
+     (published :8080, gated by the admin password), drives the HTTP API to seed
+     the live trio + dummy image + a per-MAC ``boot_mode=bty-flash-always``
+     assignment, starts the client VM (PXE-boot on the tap), tails the client
+     serial log, and asserts every chain marker appears within the deadline.
 
-  Wall clock: 5-10 minutes per run. Server + client serial logs land
-  in the cijoe run dir as artifacts of the report.
+  Needs root (bridge/tap/dnsmasq) and KVM. Wall clock: a few minutes per run.
 
 steps:
-- name: pxe_customize_server
-  uses: pxe_customize_server
+- name: pxe_prepare
+  uses: pxe_prepare
 
 - name: pxe_run_chain_test
   uses: pxe_run_chain_test

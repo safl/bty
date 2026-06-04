@@ -1,20 +1,14 @@
-# bty PXE chain test (Phase 2 / Tier 1 verification)
-#
-# End-to-end smoke test of the network-flash chain: server VM runs
-# dnsmasq + bty-web; client VM PXE-boots on a shared L2 segment;
-# script asserts the full chain happens by grepping the client's
-# serial console for marker strings.
+# bty PXE chain test: containerized bty-web + a bridged QEMU client.
 #
 # Usage:
 #   cijoe tasks/test-pxe.yaml --monitor -c configs/test-pxe.toml
 #
 # Pre-conditions:
-# - bty-server-x86_64.qcow2 + bty-netboot-x86_64.{vmlinuz,initrd,squashfs}
-#   pre-built under ``~/system_imaging/disk/`` (run ``make build
-#   VARIANT=server-x86`` and ``make build VARIANT=netboot-x86`` first).
-# - ``qemu-system-x86_64`` + ``genisoimage`` on PATH.
-# - KVM accessible (the bake VMs run with ``-enable-kvm``).
-# - Wall clock per run: 5-10 minutes.
+# - bty-netboot-x86_64.{vmlinuz,initrd,squashfs} pre-built under
+#   ``~/system_imaging/disk/`` (run ``make build VARIANT=netboot-x86`` first).
+# - podman, qemu-system-x86_64, dnsmasq, ipxe (NBPs), iproute2 on PATH.
+# - passwordless sudo (the test creates a bridge/tap + runs dnsmasq).
+# - KVM accessible.
 
 [bty]
 variant = "test-pxe"
@@ -23,51 +17,34 @@ variant = "test-pxe"
 fail_fast = true
 
 [test.pxe]
-# Pre-built artifacts live here; ``make build VARIANT=...`` populates
-# this dir. Same convention as the disk-image / live build pipelines.
+# Pre-built netboot artifacts live here; ``make build VARIANT=...`` populates it.
 artifact_dir = "{{ local.env.HOME }}/system_imaging/disk"
 
-# Default appliance credential. The server image bakes ``bty:bty``
-# at build time (cloudinit-base-server.user runs chpasswd); the
-# chain step uses it to ``POST /ui/login`` exactly the way any
-# operator would on a freshly booted appliance.
-bty_password = "bty"
+# bty-web container image tag (built by pxe_prepare from this checkout).
+bty_image = "bty-web:pxetest"
 
-# Image name used for the assignment + the dummy file the customise
-# step stages locally for the chain step to upload via
-# ``PUT /images/<name>``. Tiny 1 MiB qcow2 so the flash completes
-# in seconds against the client's 8 GiB blank disk.
+# Admin password set on the container; the chain step logs in with it.
+bty_password = "test-admin-pw"
+
+# Dummy image name uploaded via PUT /images/<name> and bound to the client MAC.
 machine_image = "test.qcow2"
 
-# Client VM firmware: "bios" (default; QEMU SeaBIOS + NIC option ROM,
-# proven) or "uefi" (OVMF; exercises the UEFI netboot path -- the one
-# that broke and the common case on real hardware). UEFI needs the
-# ``ovmf`` package on the runner and falls back to BIOS with a warning
-# if it is absent. Flip to "uefi" once verified locally.
+# Client VM firmware: "bios" (SeaBIOS + NIC option ROM) or "uefi" (OVMF).
 client_firmware = "bios"
-
-# Synthesised PXE network. ``-netdev socket`` is just an L2 link with
-# no DHCP server of its own, so the test runs full DHCP (not proxy-
-# DHCP). The server static-IPs its PXE NIC; the client DHCPs into the
-# range below.
 client_mac = "52:54:00:11:22:33"
-pxe_netmask = "255.255.255.0"
+
+# Host bridge for the synthetic PXE segment: bty-web (published :8080) and the
+# client VM (via a tap) share L2; a test-side dnsmasq on the bridge does DHCP +
+# TFTP. bty serves no DHCP; this is test machinery.
+bridge = "br-pxe"
+tap_iface = "tap-pxe"
 server_pxe_ip = "192.168.99.1"
+pxe_netmask = "255.255.255.0"
 dhcp_range_lo = "192.168.99.50"
 dhcp_range_hi = "192.168.99.150"
 
-# QEMU PCI slots pinned so udev's predictable naming gives stable
-# interface names inside the guest. On Debian 13 / systemd 257
-# QEMU virtio devices render as ``ens<slot>`` (slot-based hotplug
-# naming), not ``enp0s<slot>`` (PCI bus/slot naming). The script
-# uses the prefix below to compose Match= and interface= entries.
-mgmt_nic_slot = 3
-pxe_nic_slot = 4
-nic_prefix = "ens"
-
-# Markers asserted on the client serial console (must all appear
-# within the chain timeout). The ``/pxe/<mac>`` chain step is added
-# by the script itself from ``client_mac``.
+# Markers asserted on the client serial console (all must appear within the
+# chain timeout). The per-MAC ``/pxe/<mac>`` marker is added by the script.
 [[test.pxe.chain_markers]]
 key = "ipxe-loaded"
 needle = "iPXE"
@@ -76,39 +53,18 @@ needle = "iPXE"
 key = "ipxe-fetch-bootstrap"
 needle = "pxe-bootstrap.ipxe"
 
-# iPXE prints ``http://.../bty-netboot-x86_64-v<version>.initrd... ok``
-# when it pulls the initrd; matching the version-agnostic prefix proves
-# the kernel+initrd came down via the chain regardless of which release
-# is being tested. The full versioned filename is built from pyproject.
 [[test.pxe.chain_markers]]
 key = "kernel-initrd-fetched"
 needle = "bty-netboot-x86_64-v"
 
-# live-boot's initramfs HTTP-fetches the squashfs because the kernel
-# cmdline includes ``fetch=...squashfs``. Same version-agnostic prefix
-# as above; the .squashfs match comes from the second marker just below
-# being too coarse-grained to distinguish the kernel/initrd lines from
-# the squashfs fetch in serial output -- so we look for the bare token.
 [[test.pxe.chain_markers]]
 key = "squashfs-fetched"
 needle = ".squashfs"
 
-# v0.22.11+: bty (the merged TUI / wizard / scripted-flash tool)
-# emits these stable plain-text markers on its stderr from inside
-# the live env. Earlier releases used the now-retired
-# ``bty-flash-on-boot.service`` and matched ``bty-flash-on-boot``
-# in the journalctl banner; both moved into ``bty`` directly when
-# v0.22.10 collapsed the two units. The markers are pinned in
-# ``bty.tui._app._run_auto``: a chain-test failure means the
-# auto-flash path didn't fire, not that the print format drifted.
 [[test.pxe.chain_markers]]
 key = "auto-flash-started"
 needle = "bty: auto-flash starting"
 
-# Printed by ``bty`` only after the flash subprocess returned 0
-# AND the /pxe/<mac>/done POST has been attempted; proves the
-# dummy image landed on /dev/vda and the completion-signal /
-# reboot path is reachable.
 [[test.pxe.chain_markers]]
 key = "flash-complete"
 needle = "bty: flash complete; rebooting"
