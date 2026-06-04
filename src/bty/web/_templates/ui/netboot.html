@@ -114,10 +114,12 @@
     </div>
     <div class="card-body">
         <p class="text-muted">
-            The local <code>dnsmasq.service</code> serves the TFTP root
-            (<code>/var/lib/tftpboot</code>). Stop it to take PXE offline
-            without disabling DHCP; restart it to pick up new bootfiles
-            staged into the TFTP root.
+            On a host/systemd install a co-located
+            <code>dnsmasq.service</code> serves the TFTP root. Stop it to
+            take PXE offline without disabling DHCP; restart it to pick up
+            new bootfiles staged into the TFTP root. The container deploy
+            serves TFTP from a separate sidecar instead, so these controls
+            don't appear there.
             <a href="/ui/settings#dhcp-pxe" class="ms-1">
                 <i class="bi bi-box-arrow-up-right me-1"></i>DHCP / PXE config details
             </a>
@@ -155,7 +157,7 @@
             {% else %}
             <span class="text-muted ms-auto small">
                 <i class="bi bi-info-circle me-1"></i>dnsmasq isn't systemd-managed here
-                (e.g. the Docker container, where the entrypoint supervises it) -- no
+                (e.g. the container deploy, where TFTP is a separate sidecar) -- no
                 start / stop / restart
             </span>
             {% endif %}

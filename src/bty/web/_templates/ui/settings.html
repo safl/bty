@@ -215,7 +215,7 @@
 
 {# Router-side cheatsheet (moved here from the Netboot page). The bits
    the operator pastes into UniFi / pfSense / dnsmasq DHCP config to
-   point PXE clients at this appliance. Reference-only; no editable
+   point PXE clients at this host. Reference-only; no editable
    fields -- bty doesn't run DHCP, the LAN router does. #}
 <div class="card mb-4" id="dhcp-pxe">
     <div class="card-header bg-light fw-semibold">
@@ -223,13 +223,15 @@
     </div>
     <div class="card-body">
         <p class="text-muted">
-            bty-server runs a TFTP daemon (dnsmasq) and serves boot
-            artifacts over HTTP, so targets can net-boot two ways:
-            <strong>PXE</strong> (legacy + UEFI, iPXE fetched over TFTP)
-            and <strong>UEFI HTTP Boot</strong> (iPXE fetched over HTTP,
-            no TFTP). The DHCP side stays with your LAN's router (or DHCP
-            server); bty deliberately doesn't try to replace it. Point
-            your router at this appliance with the settings below.
+            Targets can net-boot two ways: <strong>PXE</strong> (legacy
+            + UEFI, iPXE fetched over TFTP) and <strong>UEFI HTTP
+            Boot</strong> (iPXE fetched over HTTP, no TFTP). bty serves
+            the boot artifacts and per-MAC iPXE scripts over HTTP; TFTP
+            is served by the tftp sidecar (container deploy) or a
+            co-located dnsmasq (host install). The DHCP side stays with
+            your LAN's router (or DHCP server); bty deliberately doesn't
+            try to replace it. Point your router at this host with the
+            settings below.
         </p>
 
         {% if missing_netboot_artifacts %}
@@ -250,7 +252,7 @@
         </div>
         {% endif %}
 
-        <h3 class="h6 mt-3">This appliance</h3>
+        <h3 class="h6 mt-3">This host</h3>
         <table class="table table-sm mb-3">
             <thead class="table-light">
                 <tr>
@@ -287,8 +289,8 @@
             options on the DHCP service.
         </p>
 
-        {# Shorthand for "this appliance's IP", reused across both tables. #}
-        {% set bty_ip = primary.ipv4 if primary and primary.ipv4 else "<bty-server>" %}
+        {# Shorthand for "this host's IP", reused across both tables. #}
+        {% set bty_ip = primary.ipv4 if primary and primary.ipv4 else "<bty-host>" %}
 
         <h4 class="h6 mt-3 fw-semibold">Option A &mdash; PXE (via TFTP)</h4>
         <p class="text-muted small mb-2">
