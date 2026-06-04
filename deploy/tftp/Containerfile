@@ -1,0 +1,25 @@
+# TFTP server for BIOS/legacy PXE bootstrap. It serves a directory (the shared
+# bootfiles volume) over udp/69: a BIOS client fetches the iPXE NBP from here,
+# then chainloads bty's HTTP iPXE script. Enable it with the compose `tftp`
+# profile.
+#
+# The shared volume is seeded from the distro's iPXE NBPs on first run (see
+# entrypoint.sh); bty or the operator can place custom bootfiles in the same
+# volume to take precedence.
+FROM debian:bookworm-slim
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends tftpd-hpa ipxe \
+ && rm -rf /var/lib/apt/lists/*
+
+# Stock NBPs used to seed an empty volume: ipxe.efi (UEFI-via-TFTP) and
+# undionly.kpxe (BIOS); snponly.efi is included when the package ships it.
+RUN mkdir -p /opt/ipxe \
+ && cp -a /usr/lib/ipxe/undionly.kpxe /usr/lib/ipxe/ipxe.efi /opt/ipxe/ \
+ && cp -a /usr/lib/ipxe/snponly.efi /opt/ipxe/ 2>/dev/null || true
+
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+EXPOSE 69/udp
+ENTRYPOINT ["/entrypoint.sh"]

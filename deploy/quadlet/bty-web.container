@@ -1,0 +1,22 @@
+# Podman Quadlet unit -> generates bty-web.service.
+# Install: copy into /etc/containers/systemd/ (root) then `systemctl daemon-reload`.
+# Edit HOST_ADDR below to this host's LAN address (clients fetch from it).
+[Unit]
+Description=bty-web
+After=network-online.target withcache.service
+Wants=network-online.target
+
+[Container]
+Image=ghcr.io/safl/bty-web:latest
+AutoUpdate=registry
+PublishPort=8080:8080
+Volume=bty-data:/var/lib/bty
+Volume=bty-tftproot:/var/lib/bty/tftproot
+# Must be THIS HOST's LAN address, not a container name (booting clients fetch it).
+Environment=BTY_WITHCACHE_URL=http://HOST_ADDR:3000
+
+[Service]
+Restart=always
+
+[Install]
+WantedBy=multi-user.target default.target

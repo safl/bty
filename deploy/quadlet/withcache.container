@@ -1,0 +1,19 @@
+# Podman Quadlet unit -> generates withcache.service.
+# Install: copy into /etc/containers/systemd/ (root) then `systemctl daemon-reload`.
+[Unit]
+Description=withcache cache-host
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+Image=ghcr.io/safl/withcache:latest
+AutoUpdate=registry
+PublishPort=3000:3000
+Volume=withcache-data:/data
+Environment=WITHCACHE_ADMIN_PASSWORD=change-me
+
+[Service]
+Restart=always
+
+[Install]
+WantedBy=multi-user.target default.target
