@@ -1,6 +1,9 @@
-name: Release
+name: CI
 
-# Single unified release. Pushing a ``v*`` tag runs:
+# Single unified pipeline. The full build + test suite runs on every PR and on
+# pushes to ``main`` (catching issues before they land); pushing a ``v*`` tag
+# runs the same suite and additionally publishes (the publish jobs are tag-
+# gated). The numbered jobs below:
 #   0. ``check-not-published``    - aborts the workflow before any
 #                                   artifact is rebuilt if PyPI
 #                                   already has the tag's version.
@@ -66,7 +69,10 @@ name: Release
 # and uploads the release.
 
 on:
+  pull_request:
+    branches: [main]
   push:
+    branches: [main]
     tags: ["v*"]
   workflow_dispatch:
 
@@ -131,6 +137,50 @@ jobs:
         run: uv run mypy src
       - run: uv run pytest
 
+  # Full pre-commit set (ruff + shellcheck + hygiene), matching local `make lint`.
+  lint:
+    name: Lint (pre-commit)
+    needs: check-not-published
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: pre-commit/action@v3.0.1
+
+  flash-integration:
+    name: Flash integration (loop device)
+    needs: check-not-published
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v8.1.0
+        with:
+          python-version: "3.12"
+      - name: Install tools the integration tests need
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            qemu-utils \
+            zstd \
+            gdisk \
+            e2fsprogs \
+            parted \
+            exfatprogs \
+            exfat-fuse
+          sudo modprobe exfat 2>/dev/null || true
+          if ! grep -qw exfat /proc/filesystems 2>/dev/null; then
+            FUSE_HELPER=$(command -v mount.exfat-fuse || true)
+            if [ -n "${FUSE_HELPER}" ] && [ ! -e /sbin/mount.exfat ]; then
+              sudo ln -sf "${FUSE_HELPER}" /sbin/mount.exfat
+            fi
+          fi
+      - run: uv sync --all-extras --group dev
+      # Integration tests use losetup + dd against a real loop device, so they
+      # need root; the default pytest run excludes them (pyproject addopts).
+      - run: sudo -E env "PATH=$PATH" uv run pytest -m integration -v
+
   # ---------------- build --------------------------------------------------
   build-wheel:
     name: Build wheel + sdist
@@ -151,8 +201,6 @@ jobs:
   build-media:
     name: Build ${{ matrix.variant }} image
     needs: test
-    # Tag-only - workflow_dispatch builds the wheel only.
-    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     # The netboot-x86 live build finishes in <30 min. The failure mode is a
     # HANG, not slowness (the in-VM apt / git clone / pip steps have no
@@ -299,7 +347,6 @@ jobs:
   build-usb-x86:
     name: Build usb-x86 image
     needs: test
-    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -362,7 +409,6 @@ jobs:
   test-pxe:
     name: PXE chain test (containerized bty + client QEMU VM)
     needs: build-media
-    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     # IN PROGRESS: the server side runs as containers (bty-web + withcache via
@@ -433,7 +479,6 @@ jobs:
   test-usb-grow:
     name: USB auto-grow test (QEMU boot + parted)
     needs: build-usb-x86
-    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -497,7 +542,6 @@ jobs:
   test-usb-ventoy:
     name: USB Ventoy-boot test (QEMU + in-VM TUI/catalog asserts)
     needs: build-usb-x86
-    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
