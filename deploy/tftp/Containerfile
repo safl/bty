@@ -1,11 +1,9 @@
-# TFTP server for BIOS/legacy PXE bootstrap. It serves a directory (the shared
-# bootfiles volume) over udp/69: a BIOS client fetches the iPXE NBP from here,
-# then chainloads bty's HTTP iPXE script. Enable it with the compose `tftp`
-# profile.
-#
-# The shared volume is seeded from /opt/ipxe on first run (see
-# entrypoint.sh); bty or the operator can place custom bootfiles in the same
-# volume to take precedence.
+# TFTP server for BIOS/legacy PXE bootstrap. It serves the small iPXE NBP
+# (~1 MB: ipxe.efi for UEFI-via-TFTP, undionly.kpxe for BIOS) over udp/69;
+# the client then chainloads bty's HTTP iPXE script and fetches everything
+# else (kernel / initrd / squashfs) from bty-web over HTTP. The NBPs are
+# baked into the image -- no volume, no shared data. Enable it with the
+# compose `tftp` profile.
 FROM debian:bookworm-slim
 
 RUN apt-get update \
@@ -13,10 +11,12 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 # Stock NBPs as the baseline: ipxe.efi (UEFI-via-TFTP) and undionly.kpxe
-# (BIOS); snponly.efi is included when the package ships it.
+# (BIOS); snponly.efi is included when the package ships it. ``-L``
+# dereferences (the package ships ipxe.efi as a symlink to /boot/ipxe.efi,
+# which would dangle under the TFTP --secure chroot).
 RUN mkdir -p /opt/ipxe \
- && cp -a /usr/lib/ipxe/undionly.kpxe /usr/lib/ipxe/ipxe.efi /opt/ipxe/ \
- && cp -a /usr/lib/ipxe/snponly.efi /opt/ipxe/ 2>/dev/null || true
+ && cp -L /usr/lib/ipxe/undionly.kpxe /usr/lib/ipxe/ipxe.efi /opt/ipxe/ \
+ && cp -L /usr/lib/ipxe/snponly.efi /opt/ipxe/ 2>/dev/null || true
 
 # Override ipxe.efi with bty's custom embedded-chain build when CI has
 # staged it into deploy/tftp/seed/ (dev builds keep just .gitkeep, so the
@@ -27,8 +27,7 @@ RUN mkdir -p /opt/ipxe \
 COPY seed/ /opt/ipxe-custom/
 RUN cp -a /opt/ipxe-custom/. /opt/ipxe/ 2>/dev/null || true; rm -f /opt/ipxe/.gitkeep
 
-COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
-
 EXPOSE 69/udp
-ENTRYPOINT ["/entrypoint.sh"]
+# Serve the baked NBP dir read-only. --secure chroots clients to it; the
+# data transfer uses an ephemeral UDP port, so run with host networking.
+ENTRYPOINT ["/usr/sbin/in.tftpd", "--foreground", "--address", "0.0.0.0:69", "--secure", "/opt/ipxe"]

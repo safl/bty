@@ -41,26 +41,22 @@ services:
       BTY_WITHCACHE_URL: http://${HOST_ADDR:?set HOST_ADDR to this host's LAN address}:3000
     volumes:
       - bty-data:/var/lib/bty
-      # Shared with the tftp sidecar; bootfiles served over TFTP live here.
-      - bty-tftproot:/var/lib/bty/tftproot
     depends_on:
       - withcache
 
-  # TFTP for BIOS/legacy PXE clients: they fetch the iPXE NBP over udp/69, then
-  # chainload bty's HTTP iPXE script. TFTP's data transfer uses an ephemeral UDP
-  # port, so this service uses host networking; bty-web and withcache use the
-  # bridge with published ports. The shared volume is seeded with stock iPXE
-  # NBPs on first run; bty or the operator can place custom bootfiles in it.
+  # TFTP for BIOS/legacy PXE clients: they fetch the small iPXE NBP over udp/69,
+  # then chainload bty's HTTP iPXE script and pull kernel / initrd / squashfs
+  # from bty-web over HTTP. TFTP's data transfer uses an ephemeral UDP port, so
+  # this service uses host networking; bty-web and withcache use the bridge with
+  # published ports. The NBPs (including bty's custom embedded-chain ipxe.efi)
+  # are baked into the image -- no volume, no shared data.
   tftp:
     image: ghcr.io/safl/bty-tftp:latest
     # For local development, build it instead: `podman build -t bty-tftp deploy/tftp`.
     profiles: ["tftp"]
     restart: unless-stopped
     network_mode: host
-    volumes:
-      - bty-tftproot:/tftproot
 
 volumes:
   withcache-data:
   bty-data:
-  bty-tftproot:
