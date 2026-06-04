@@ -40,13 +40,13 @@ no cloud-init / rootfs-grow (it's a container, not a disk image).
 
 ## Quick start
 
-The container runs `bty-web` as the unprivileged `bty` user (uid 999),
+The container runs `bty-web` as the unprivileged `bty` user (uid 1000),
 matching the bare-metal appliance. Pre-create the host data dir with that
 ownership before starting (one-time, host-side):
 
 ```bash
 mkdir -p ./bty-data
-sudo chown -R 999:999 ./bty-data    # match the in-container bty user
+sudo chown -R 1000:1000 ./bty-data    # match the in-container bty user
 docker run -d --name bty-web \
   -p 8080:8080 \
   -p 69:69/udp \
