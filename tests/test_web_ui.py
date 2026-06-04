@@ -1,10 +1,10 @@
 """Tests for the bty-web browser UI.
 
 Cookie-based auth flow, server-rendered pages via TestClient. The
-fixture monkeypatches ``pamela.authenticate`` to always succeed and
-drives ``POST /ui/login`` once to mint a real session cookie; tests
-opt in to the authenticated path via ``cookies=AUTH`` (or call
-``_login(client)`` for the sticky form).
+fixture sets ``$BTY_ADMIN_PASSWORD`` to enable auth and drives
+``POST /ui/login`` once with that password to mint a real session
+cookie; tests opt in to the authenticated path via ``cookies=AUTH``
+(or call ``_login(client)`` for the sticky form).
 """
 
 from __future__ import annotations
@@ -21,6 +21,7 @@ from bty.web._releases import ARTIFACT_NAMES, SHA256_NAME
 
 TEST_SERVICE_USER = "ui-test-user"
 TEST_SECRET_KEY = "test-secret-not-for-prod-use"
+TEST_PASSWORD = "test-admin-pw"
 
 # Mutated by the fixture so tests calling the API with
 # ``cookies=AUTH`` get the cookie they need.
@@ -29,6 +30,7 @@ AUTH: dict[str, str] = {}
 
 @pytest.fixture
 def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
+    monkeypatch.setenv("BTY_ADMIN_PASSWORD", TEST_PASSWORD)
     image_root = tmp_path / "images"
     image_root.mkdir()
     (image_root / "demo.qcow2").write_bytes(b"\0" * 16)
@@ -41,19 +43,15 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClie
     )
     app.state.state_path = state  # let tests seed the DB directly
 
-    import pamela
-
-    monkeypatch.setattr(pamela, "authenticate", lambda *a, **kw: True)
-
     # ``follow_redirects=False`` so we can assert on 303 hops.
     with TestClient(app, follow_redirects=False) as c:
-        # Drive /ui/login once with PAM monkeypatched so we have a
+        # Drive /ui/login once with the admin password so we have a
         # real session cookie value tests can re-attach via
         # ``cookies=AUTH``. Don't leave it sticky on the client -
         # tests opt in by passing ``cookies=AUTH`` (matches the
         # ``_login(client)`` helper below for tests that want the
         # sticky form).
-        r = c.post("/ui/login", data={"password": "x"}, follow_redirects=False)
+        r = c.post("/ui/login", data={"password": TEST_PASSWORD}, follow_redirects=False)
         assert r.status_code == 303, r.text
         cookie_value = r.cookies.get("bty-token")
         assert cookie_value is not None
@@ -102,29 +100,21 @@ def test_ui_login_form_renders(client: TestClient) -> None:
     r = client.get("/ui/login")
     assert r.status_code == 200
     assert "Log in" in r.text
-    # Form prompts for the OS password of the service user; the
-    # username is fixed at server-startup so it isn't a form field.
+    # Form prompts for the single admin password (``$BTY_ADMIN_PASSWORD``);
+    # there is no username field.
     assert 'name="password"' in r.text
-    assert TEST_SERVICE_USER in r.text
+    assert "BTY_ADMIN_PASSWORD" in r.text
 
 
 def test_ui_login_invalid_password_re_renders_with_error(client: TestClient) -> None:
-    from unittest.mock import patch
-
-    import pamela
-
-    with patch("pamela.authenticate", side_effect=pamela.PAMError("bad password")):
-        r = client.post("/ui/login", data={"password": "wrong"})
+    r = client.post("/ui/login", data={"password": "wrong"})
     assert r.status_code == 200
     assert "Invalid password" in r.text
     assert "bty-token" not in client.cookies
 
 
 def test_ui_login_valid_password_sets_cookie_and_redirects(client: TestClient) -> None:
-    from unittest.mock import patch
-
-    with patch("pamela.authenticate", return_value=True):
-        r = client.post("/ui/login", data={"password": "hunter2"})
+    r = client.post("/ui/login", data={"password": TEST_PASSWORD})
     assert r.status_code == 303
     assert r.headers["location"] == "/ui/dashboard"
     assert "bty-token" in client.cookies
@@ -205,6 +195,7 @@ def test_ui_dashboard_renders_with_zero_state(
     bty_state_dir = tmp_path / "bty-state"
     bty_state_dir.mkdir()
     monkeypatch.setenv("BTY_STATE_DIR", str(bty_state_dir))
+    monkeypatch.setenv("BTY_ADMIN_PASSWORD", TEST_PASSWORD)
     fresh_app = create_app(
         state_path=state,
         service_user=TEST_SERVICE_USER,
@@ -212,11 +203,8 @@ def test_ui_dashboard_renders_with_zero_state(
         image_root=image_root,
     )
 
-    import pamela
-
-    monkeypatch.setattr(pamela, "authenticate", lambda *a, **kw: True)
     with TestClient(fresh_app, follow_redirects=False) as c:
-        login = c.post("/ui/login", data={"password": "x"})
+        login = c.post("/ui/login", data={"password": TEST_PASSWORD})
         assert login.status_code == 303
         r = c.get("/ui/dashboard")
         assert r.status_code == 200
@@ -1769,7 +1757,7 @@ def test_ui_account_holds_authentication(client: TestClient) -> None:
     assert r.status_code == 200
     body = r.text
     assert "Authentication" in body
-    assert "passwd" in body
+    assert "BTY_ADMIN_PASSWORD" in body
     # bty config is elsewhere.
     assert "Upstream sources" not in body
     assert 'href="/ui/settings"' in body
@@ -2219,6 +2207,7 @@ def test_ui_machine_detail_dropdown_lists_manifest_entry_after_upload(
     bty_state_dir = tmp_path / "bty-state"
     bty_state_dir.mkdir()
     monkeypatch.setenv("BTY_STATE_DIR", str(bty_state_dir))
+    monkeypatch.setenv("BTY_ADMIN_PASSWORD", TEST_PASSWORD)
     fresh_app = create_app(
         state_path=tmp_path / "state.db",
         service_user=TEST_SERVICE_USER,
@@ -2226,12 +2215,8 @@ def test_ui_machine_detail_dropdown_lists_manifest_entry_after_upload(
         image_root=image_root,
     )
 
-    import pamela
-
-    monkeypatch.setattr(pamela, "authenticate", lambda *a, **kw: True)
-
     with TestClient(fresh_app, follow_redirects=False) as c:
-        login = c.post("/ui/login", data={"password": "x"})
+        login = c.post("/ui/login", data={"password": TEST_PASSWORD})
         assert login.status_code == 303
         body = (
             b"version = 1\n\n"

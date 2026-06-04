@@ -74,9 +74,7 @@ if [ -z "${BTY_QUIET:-}" ]; then
 ========================================================================
   bty-web container: HTTP on :${BTY_WEB_PORT:-8080}, TFTP on udp/69
 
-  Default credentials: bty / bty
-  -> ROTATE before exposing past a trusted LAN:
-       docker exec -it <container> passwd bty
+  Operator UI auth: set BTY_ADMIN_PASSWORD to gate /ui (unset = OPEN).
 
   Image catalog: ${BTY_IMAGE_ROOT:-/var/lib/bty/images}
   State dir:     ${BTY_STATE_DIR:-/var/lib/bty}

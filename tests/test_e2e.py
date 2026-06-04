@@ -45,6 +45,7 @@ from bty.web._releases import ARTIFACT_NAMES
 
 TEST_SERVICE_USER = "bty-test"
 TEST_SECRET_KEY = "test-secret-not-for-prod-use"
+TEST_PASSWORD = "test-admin-pw"
 
 AUTH: dict[str, str] = {}
 
@@ -64,6 +65,7 @@ def app_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Test
     bty_state_dir = tmp_path / "bty-state"
     bty_state_dir.mkdir()
     monkeypatch.setenv("BTY_STATE_DIR", str(bty_state_dir))
+    monkeypatch.setenv("BTY_ADMIN_PASSWORD", TEST_PASSWORD)
     app = create_app(
         state_path=state,
         service_user=TEST_SERVICE_USER,
@@ -72,14 +74,10 @@ def app_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Test
         boot_root=boot_root,
     )
 
-    import pamela
-
-    monkeypatch.setattr(pamela, "authenticate", lambda *_a, **_kw: True)
-
     with TestClient(app) as client:
         r = client.post(
             "/ui/login",
-            data={"password": "pytest-password"},
+            data={"password": TEST_PASSWORD},
             follow_redirects=False,
         )
         assert r.status_code == 303, r.text
@@ -1703,7 +1701,7 @@ def test_e2e_auth_flow_login_access_logout_denied(
     #    captures that. Verify a fresh login still works.
     r = app_client.post(
         "/ui/login",
-        data={"password": "pytest-password"},
+        data={"password": TEST_PASSWORD},
         follow_redirects=False,
     )
     assert r.status_code == 303, r.text

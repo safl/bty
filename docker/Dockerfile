@@ -55,8 +55,6 @@ LABEL org.opencontainers.image.title="bty-web" \
 #     UI's TFTP badge still reflects whether dnsmasq is alive.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-        libpam0g \
-        libpam-modules \
         qemu-utils \
         tini \
         ca-certificates \
@@ -101,17 +99,9 @@ RUN set -eu; \
     pip install --no-cache-dir "${WHL}[web]"; \
     rm -rf /tmp/wheels
 
-# Default credentials: ``bty / bty``. PAM auth gates ``/ui/login``;
-# the cooked image needs a known password the operator can use the
-# moment the container is up. Same model the appliance uses; same
-# rotation responsibility (rotate before exposing).
-#
-# The bty user runs the bty-web process at runtime (see USER below).
-# pamela's auth path goes through pam_unix -> the setgid-shadow
-# ``unix_chkpwd`` binary, which can read /etc/shadow without bty-
-# web itself having shadow-group access. Same pattern the appliance
-# uses (``User=bty`` in bty-web.service); aligning the container
-# avoids divergent privilege levels between deployment shapes.
+# The bty user runs the bty-web process at runtime (see USER below). The
+# operator UI is gated by ``$BTY_ADMIN_PASSWORD`` (set it at run time; unset
+# leaves the UI open, with a startup warning).
 #
 # ``--uid 1000`` pins the UID so the operator's host-side ``chown
 # -R 1000:1000 ./bty-data`` doesn't break when apt's package order
@@ -121,8 +111,7 @@ RUN set -eu; \
 # / docs would all silently fall out of sync.
 RUN groupadd --gid 1000 bty \
  && useradd --uid 1000 --gid 1000 --no-create-home \
-        --shell /usr/sbin/nologin bty \
- && echo 'bty:bty' | chpasswd
+        --shell /usr/sbin/nologin bty
 
 # State + image directories. Operator volume-mounts ``/var/lib/bty``;
 # bty-web writes ``state.db``, ``session-secret``, and the image
@@ -161,11 +150,8 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
 COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod 0755 /entrypoint.sh
 
-# Run as the unprivileged bty user (matches the appliance's
-# ``User=bty`` in bty-web.service). PAM authentication still works:
-# pam_unix delegates to the setgid-shadow ``unix_chkpwd`` binary
-# which reads /etc/shadow on bty-web's behalf. tini reaps zombies
-# and forwards signals so SIGTERM lands on bty-web within ~100ms
-# instead of the 10s docker-stop timeout.
+# Run as the unprivileged bty user. tini reaps zombies and forwards signals
+# so SIGTERM lands on bty-web within ~100ms instead of the 10s docker-stop
+# timeout.
 USER bty
 ENTRYPOINT ["/usr/bin/tini", "--", "/entrypoint.sh"]

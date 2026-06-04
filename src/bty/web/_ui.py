@@ -35,7 +35,7 @@ from pydantic import ValidationError
 
 import bty
 from bty import images as bty_images
-from bty.web import _backup, _db, _events_log, _releases, _settings_store, _sysconfig
+from bty.web import _auth, _backup, _db, _events_log, _releases, _settings_store, _sysconfig
 from bty.web._auth import SESSION_AUTHED_KEY
 from bty.web._events_log import KNOWN_ACTORS, KNOWN_EVENT_KINDS, KNOWN_SUBJECT_KINDS
 from bty.web._events_log import normalize_ip as _normalize_ip
@@ -69,8 +69,8 @@ def register_ui_routes(
 ) -> None:
     """Attach the ``/ui`` HTML routes (and exception handler) to ``app``.
 
-    ``service_user`` is the Linux account whose OS password gates
-    ``/ui/login``. ``publish_state_changed`` is invoked after any
+    ``service_user`` is the Linux account bty-web runs as (shown in the
+    UI for context). ``publish_state_changed`` is invoked after any
     UI form mutates a machine record, so SSE subscribers see the
     change immediately. The default no-op makes this module testable
     in isolation; the real app passes the bus-publishing callable.
@@ -98,7 +98,8 @@ def register_ui_routes(
         return RedirectResponse("/ui/login", status_code=status.HTTP_303_SEE_OTHER)
 
     def require_ui_auth(request: Request) -> None:
-        if not request.session.get(SESSION_AUTHED_KEY):
+        # Open when no admin password is configured (see _auth.auth_enabled).
+        if _auth.auth_enabled() and not request.session.get(SESSION_AUTHED_KEY):
             raise NotAuthenticated
 
     # ----- entry / auth ----------------------------------------------------
@@ -109,11 +110,10 @@ def register_ui_routes(
 
     @app.get("/ui/login", include_in_schema=False)
     def ui_login_form(request: Request) -> Response:
-        # Already authed -> skip the form entirely. Lets ``GET /``
-        # (which 303s here) act as a smart entry point: unauthed
-        # visitors see the login form, authed visitors land at the
-        # dashboard.
-        if request.session.get(SESSION_AUTHED_KEY):
+        # When the instance is open (no password) or the visitor is already
+        # authed, skip the form and land on the dashboard. Lets ``GET /``
+        # (which 303s here) act as a smart entry point.
+        if not _auth.auth_enabled() or request.session.get(SESSION_AUTHED_KEY):
             return RedirectResponse("/ui/dashboard", status_code=status.HTTP_303_SEE_OTHER)
         return render("ui/login.html", request)
 
@@ -122,46 +122,34 @@ def register_ui_routes(
         request: Request,
         password: Annotated[str, Form()],
     ) -> Response:
-        # Lazily import pamela so missing libpam doesn't break module
-        # import. pamela is in the ``[web]`` extras alongside fastapi.
-        import pamela
-
         client_ip = _client_ip(request)
-        try:
-            pamela.authenticate(service_user, password, service="login")
-        except pamela.PAMError:
-            # Failed login: record so an operator scanning
-            # /ui/events sees brute-force attempts. Subject is the
-            # OS username we tried to authenticate; source_ip is
-            # the request client. Actor is the username (best
-            # available) -- we don't know who they really are.
+        # Open instance: nothing to check, land on the dashboard.
+        if not _auth.auth_enabled():
+            return RedirectResponse("/ui/dashboard", status_code=status.HTTP_303_SEE_OTHER)
+        if not _auth.check_password(password):
+            # Failed login: record so an operator scanning /ui/events sees
+            # brute-force attempts.
             with _db.open_db(state_path) as conn:
                 _events_log.record(
                     conn,
                     kind="auth.login.failed",
-                    summary=f"login failed for user {service_user!r}",
+                    summary="operator login failed (invalid password)",
                     subject_kind="auth",
-                    subject_id=service_user,
-                    actor=service_user,
+                    subject_id="operator",
+                    actor="operator",
                     source_ip=client_ip,
                 )
                 conn.commit()
-            return render(
-                "ui/login.html",
-                request,
-                error=f"Invalid password for {service_user!r}.",
-            )
-        # Success path. Record so the audit log shows session
-        # boundaries (operator may correlate "this IP did X
-        # between Y and Z" with login + logout pairs).
+            return render("ui/login.html", request, error="Invalid password.")
+        # Success path. Record so the audit log shows session boundaries.
         with _db.open_db(state_path) as conn:
             _events_log.record(
                 conn,
                 kind="auth.login.succeeded",
-                summary=f"login succeeded for user {service_user!r}",
+                summary="operator login succeeded",
                 subject_kind="auth",
-                subject_id=service_user,
-                actor=service_user,
+                subject_id="operator",
+                actor="operator",
                 source_ip=client_ip,
             )
             conn.commit()
@@ -184,10 +172,10 @@ def register_ui_routes(
                 _events_log.record(
                     conn,
                     kind="auth.logout",
-                    summary=f"logout for user {service_user!r}",
+                    summary="operator logout",
                     subject_kind="auth",
-                    subject_id=service_user,
-                    actor=service_user,
+                    subject_id="operator",
+                    actor="operator",
                     source_ip=_client_ip(request),
                 )
                 conn.commit()

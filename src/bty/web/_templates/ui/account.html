@@ -35,9 +35,9 @@
     </div>
     <div class="card-body">
         <p class="text-muted mb-0">
-            bty-web is gated by the OS password of the
-            <code>{{ service_user }}</code> account. To rotate the credential,
-            run <code>sudo passwd {{ service_user }}</code> on the server.
+            bty-web is gated by the admin password set via
+            <code>BTY_ADMIN_PASSWORD</code> on the server. To rotate the
+            credential, change that value and restart bty-web.
             Sessions are server-signed cookies (Starlette's
             <code>SessionMiddleware</code>) with a sliding 7-day TTL. To
             invalidate every existing session in one shot, rotate the
