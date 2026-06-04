@@ -6,9 +6,8 @@ on every tagged release. It hosts bty-web's **image catalog**, **machine
 registry**, and **browser UI**. `bty --catalog SOURCE` clients (from the
 USB live env or a workstation) connect to it and pick images for flashing.
 
-This is not the bty-server appliance, but it bundles the same PXE stack:
-bty-web (HTTP + browser UI) plus `dnsmasq` serving the iPXE bootfiles over
-TFTP. Both boot lanes work:
+It bundles the full PXE stack: bty-web (HTTP + browser UI) plus `dnsmasq`
+serving the iPXE bootfiles over TFTP. Both boot lanes work:
 
 - **UEFI HTTP Boot targets**: DHCP option 67 = `http://<bty-web>:8080/boot/ipxe.efi`;
   modern UEFI firmware fetches the binary over HTTP, no TFTP in the path.
@@ -20,10 +19,8 @@ TFTP. Both boot lanes work:
   iPXE script chains to bty-web's `/pxe-bootstrap.ipxe`, replacing the
   firmware PXE step entirely - no DHCP-PXE options or TFTP needed at all.
 
-The differences from the appliance are operational, not functional: the
-container's dnsmasq is launched by the entrypoint (not systemd), so the
-Netboot page shows its status but can't Start/Stop/Restart it, and there's
-no cloud-init / rootfs-grow (it's a container, not a disk image).
+The container's dnsmasq is launched by the entrypoint (not systemd), so the
+Netboot page shows its status but can't Start/Stop/Restart it.
 
 ## When to use this
 
@@ -34,15 +31,16 @@ no cloud-init / rootfs-grow (it's a container, not a disk image).
   every stick.
 - **Local-dev backend** for `bty --catalog` work.
 - **Production PXE / HTTP-Boot deployment**: serves TFTP PXE, UEFI HTTP
-  Boot, and `boots-from` sticks. Reach for the bty-server appliance
-  instead when you want a turnkey disk image with systemd-managed services
-  rather than a container to run.
+  Boot, and `boots-from` sticks. For boot-autostart with systemd-managed
+  services, use the Quadlet units in
+  [`deploy/quadlet/`](https://github.com/safl/bty/blob/main/deploy/quadlet/)
+  (see [`deploy/README.md`](https://github.com/safl/bty/blob/main/deploy/README.md)).
 
 ## Quick start
 
-The container runs `bty-web` as the unprivileged `bty` user (uid 1000),
-matching the bare-metal appliance. Pre-create the host data dir with that
-ownership before starting (one-time, host-side):
+The container runs `bty-web` as the unprivileged `bty` user (uid 1000).
+Pre-create the host data dir with that ownership before starting (one-time,
+host-side):
 
 ```bash
 mkdir -p ./bty-data
@@ -105,7 +103,7 @@ local machine running `bty`.
 
 ## Scripted flash via the plan endpoint (no wizard)
 
-For batch / CI workflows: bind the machine on the appliance with
+For batch / CI workflows: bind the machine on the server with
 `boot_mode=bty-flash-always` + a `bty_image_ref` + a `target_disk_serial`,
 then on the target run `bty --server <host> --mac <self-mac>`. The wizard
 skips and the flash runs scripted (`mode=flash` from `GET
@@ -179,17 +177,14 @@ The published image is `linux/amd64` + `linux/arm64`. Pull from a Pi 4 or
 Pi 5 as easily as from an x86 host. Pure-Python wheel, so the only per-arch
 differences are the apt-installed system deps.
 
-## Differences vs the appliance
-
-The container runs the same bty-web + dnsmasq (TFTP) stack as the
-appliance. The differences are operational:
+## Operational notes
 
 - **TFTP daemon control**: the container's dnsmasq is launched by the
   entrypoint, not systemd, so the Netboot page shows its status but can't
   Start/Stop/Restart it (manage the daemon with `docker` instead).
-- **No cloud-init / first-boot rootfs grow**: it's a container image, not
-  a disk image.
+- **State on a named volume**: bty's DB and images live under
+  `/var/lib/bty`; bind-mount or volume-mount it so state survives container
+  re-pulls.
 
-bty runs no DHCP role in either shape: the operator's LAN DHCP server
-points PXE clients at bty (via option 60/66/67 tagging) whether bty runs
-as the appliance or this container.
+bty runs no DHCP role: the operator's LAN DHCP server points PXE clients at
+bty (via option 60/66/67 tagging).

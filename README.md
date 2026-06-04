@@ -54,18 +54,18 @@ bty
 
 | Shape | What it is | When it fits |
 |---|---|---|
-| **USB live stick** | bty boots from a flash drive, runs `bty`, flashes the box it's plugged into. Fresh sticks ship with a starter `catalog.toml` (Debian / Ubuntu / Fedora / FreeBSD headless images plus a Fedora desktop, via `oras://ghcr.io/safl/nosi/...`, plus bty-server) so the wizard's image picker is non-empty out of the box. | Single-machine local imaging |
+| **USB live stick** | bty boots from a flash drive, runs `bty`, flashes the box it's plugged into. Fresh sticks ship with a starter `catalog.toml` (Debian / Ubuntu / Fedora / FreeBSD headless images plus a Fedora desktop, via `oras://ghcr.io/safl/nosi/...`) so the wizard's image picker is non-empty out of the box. | Single-machine local imaging |
 | **USB + portable catalog** | Same stick, plus `bty --catalog <SOURCE>` pointed at a TOML catalog hosted anywhere (a local file, an HTTP URL, an `oras://` reference, or a bty-web instance's `/catalog.toml`). | A handful of boxes, shared image library |
-| **PXE-boot appliance** | bty-web on a Pi or x86 box serves TFTP/HTTP (your LAN DHCP points PXE clients at it); targets PXE-chain into a netboot live env that runs `bty --server X --mac Y` on tty1, which fetches a per-MAC plan and either auto-flashes or drops the operator into the wizard | CI fleets, racks, anything you don't want to walk to |
+| **PXE-boot server** | Run bty-web as a container (`deploy/compose.yml` or `deploy/quadlet/`, with an optional tftp sidecar) on a Pi or x86 box; it serves HTTP plus TFTP, and your LAN DHCP points PXE clients at it. Targets PXE-chain into a netboot live env that runs `bty --server X --mac Y` on tty1, which fetches a per-MAC plan and either auto-flashes or drops the operator into the wizard. See [`deploy/README.md`](deploy/README.md). | CI fleets, racks, anything you don't want to walk to |
 
 All three share the same Python codebase, the same image catalog, the
 same SHA-keyed machine bindings.
 
-The PXE-boot appliance also separates rootfs from image cache: drop a
-2nd disk in, run `sudo bty-image-store-init /dev/sdX` once, and the
-image library survives appliance reflashes. The new appliance auto-
-mounts the labelled disk at `/var/lib/bty/images`; no operator action
-required.
+The container deploy keeps rootfs separate from the image cache:
+`/var/lib/bty` is a named volume that survives container restarts and
+re-pulls, and the image cache can be delegated to the withcache
+sidecar so multiple targets pull each image once. See
+[`deploy/README.md`](deploy/README.md) for the volume layout.
 
 ## ORAS-published images and portable catalogs
 
@@ -146,10 +146,11 @@ option 67 = `http://<bty>:8080/ipxe.efi`) or pairing with a
 [`boots-from`](https://github.com/safl/boots-from) USB stick
 (operator boots the stick, embedded iPXE chains to bty's HTTP
 endpoint). For fleets that need TFTP (legacy BIOS + UEFI
-firmware that only does TFTP option 67), use the
-**`bty-server` appliance** -- it bundles dnsmasq for TFTP
-serving alongside bty-web.
-See [`docs/src/walkthrough-server-docker.md`](docs/src/walkthrough-server-docker.md)
+firmware that only does TFTP option 67), run the **container
+deploy** with the tftp sidecar: `deploy/compose.yml` brings up
+bty-web alongside a dnsmasq TFTP server. See
+[`deploy/README.md`](deploy/README.md) and
+[`docs/src/walkthrough-server-docker.md`](docs/src/walkthrough-server-docker.md)
 for bind-mount permissions, env vars, and password rotation.
 
 ## Install
@@ -172,15 +173,18 @@ launches the local-image wizard, `bty --catalog URL` pre-loads a
 catalog, `bty --server X --mac Y` fetches a per-MAC plan from the
 server and dispatches (auto-flash / interactive / no-op).
 
-For an appliance you can boot directly (USB stick, server image,
-PXE-chain live env), grab the bake from
+For media you can boot directly (USB flasher stick, PXE-chain
+netboot live env), grab the bake from
 [GitHub Releases](https://github.com/safl/bty/releases). The
-appliance builder lives under [`bty-media/`](bty-media/).
+media builder lives under [`bty-media/`](bty-media/). To run
+bty-web as a controller, use the container deploy under
+[`deploy/`](deploy/).
 
 ## Status
 
 Pre-1.0 but actively shipping. Every tag publishes wheels (PyPI),
-appliance images, and the bty-web container. The end-to-end PXE flow
+boot media (USB flasher + netboot live env), and the bty-web
+container. The end-to-end PXE flow
 (server + netboot live env + target flash + completion signal) runs
 in CI on every push. CLI flags and wire formats may still shift
 between minor versions until 1.0 - watch the `schema_version` field

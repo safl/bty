@@ -461,14 +461,11 @@ def test_generate_catalog_toml_round_trips_through_catalog_load(tmp_path: Path) 
 
     catalog_obj = _catalog.load_bytes(output.read_bytes(), source=str(output))
     assert catalog_obj.version == 1
-    assert len(catalog_obj.entries) == 8
+    assert len(catalog_obj.entries) == 7
     # The starter set: seven nosi flashable images (Debian / Ubuntu /
-    # Fedora / FreeBSD headless + Fedora desktop) plus the bty-server
-    # appliance.
+    # Fedora / FreeBSD headless + Fedora desktop).
     nosi_entries = [e for e in catalog_obj.entries if "nosi" in e.name]
-    server_entries = [e for e in catalog_obj.entries if "bty-server" in e.name]
     assert len(nosi_entries) == 7
-    assert len(server_entries) == 1
     # Rolling-tag invariant: oras:// entries are sha-less. Pre-
     # pinning at generate time would freeze the catalog and defeat
     # the whole point of the rolling tags.
@@ -478,9 +475,6 @@ def test_generate_catalog_toml_round_trips_through_catalog_load(tmp_path: Path) 
             f"{entry.name} has a pre-pinned sha256; generator should leave "
             f"oras:// rolling tags unresolved so they stay current"
         )
-    # bty-server entry uses a plain https URL (GitHub release
-    # asset); generator preserves the same shape.
-    assert server_entries[0].src.startswith("https://github.com/safl/bty/releases/")
 
 
 def test_mascot_logo_is_in_sync_across_assets() -> None:

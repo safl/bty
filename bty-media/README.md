@@ -188,11 +188,12 @@ hardware. Most operators never run this build pipeline themselves -
   The end-to-end PXE chain (server hands a per-MAC iPXE plan, client
   loads the live trio, flashes a target disk, signals done) is
   exercised by `make test-pxe` and runs in CI on every push.
-- **server-x86.** Bootable Debian cloud-image hosting `bty-web` with
-  single-tenant PAM auth: the `bty` service user is the sole
-  principal, default credential `bty / bty`, rotated on the appliance
-  with `sudo passwd bty`. An `odus` admin user is also baked in (with
-  passwordless sudo) for SSH-side maintenance. The server image's
+- **server-x86.** Bootable Debian cloud-image hosting `bty-web`. The
+  browser UI is gated by `$BTY_ADMIN_PASSWORD` (unset = open, with a
+  startup warning) plus a signed session cookie; set the env var in the
+  bty-web service environment and restart to rotate. An `odus` admin
+  user is also baked in (with passwordless sudo) for SSH-side
+  maintenance. The server image's
   `bty-web-init.service` oneshot creates `BTY_STATE_DIR`, initialises
   the SQLite schema, and rewrites `/etc/issue` to point operators at
   `http://<ip>:8080/ui`. dnsmasq serves TFTP for the iPXE binaries;
@@ -204,21 +205,15 @@ hardware. Most operators never run this build pipeline themselves -
   Raspberry Pi OS Lite arm64 image via losetup and customising it in a
   qemu-aarch64-static chroot (no QEMU full-system bake): apt install,
   bty + odus user creation, bty-lab venv install, service enables.
-  Same `bty / bty` PAM credential and `odus / odus.321` SSH admin as
-  the x86 server image; same `bty-web-init.service` first-boot.
+  Same `$BTY_ADMIN_PASSWORD` UI gating and `odus / odus.321` SSH admin
+  as the x86 server image; same `bty-web-init.service` first-boot.
 
-  ### Operator first-boot
+  ### Running bty-web
 
-  1. Write the `.img.gz` to the server's disk (or attach as a VM
-     disk). Pre-built artifacts at
-     <https://github.com/safl/bty/releases/latest/download/bty-server-x86_64.img.gz>.
-  2. Boot. The login prompt's banner shows the browser UI URL.
-  3. Log in to `/ui/login` with `bty / bty` (or rotate first via
-     `sudo passwd bty` on the appliance).
-  4. Populate the netboot env: on `/ui/boot`, click "Fetch
-     netboot artifacts" to pull the kernel / initrd / squashfs.
-     Then configure your LAN's DHCP server (option 60 "PXEClient"
-     / 66 next-server / 67 bootfile) to point PXE clients at the
-     appliance -- the `/ui/boot?section=dhcp-pxe` cheatsheet has
-     the exact values for your interfaces. bty does not run DHCP
-     itself.
+  The supported way to stand up a long-running bty-web is the
+  container deploy (`deploy/compose.yml` / `deploy/quadlet/`); see
+  [`deploy/README.md`](../deploy/README.md) and
+  [walkthrough-server-docker.md](../docs/src/walkthrough-server-docker.md).
+  The `server-x86` / `server-rpi` recipes above remain buildable from
+  source for operators who want a disk-image rootfs; they are not part
+  of the release matrix.
