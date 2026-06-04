@@ -38,6 +38,13 @@ KEY_RELEASE_TAG = "upstream.release_tag"
 
 DEFAULT_RELEASE_TAG = "latest"
 
+# Optional withcache cache-host. When set, bty prefers it as the image
+# *source* for artifacts it already holds (else serves the artifact as
+# before). Resolves override -> env -> unset, so it can be configured via
+# the systemd unit ($BTY_WITHCACHE_URL) without a DB write.
+KEY_WITHCACHE_URL = "withcache.url"
+ENV_WITHCACHE_URL = "BTY_WITHCACHE_URL"
+
 # Scheduled-backup knobs. The Settings page exposes ``enabled`` +
 # ``cadence`` + ``retention``; the scheduler loop reads them on each
 # tick so a Settings change reflects within the next tick (no restart).
@@ -112,6 +119,13 @@ def resolve_release_tag(conn: sqlite3.Connection) -> str:
     """The effective netboot release tag to fetch: override ->
     :data:`DEFAULT_RELEASE_TAG` (``latest``)."""
     return get(conn, KEY_RELEASE_TAG) or DEFAULT_RELEASE_TAG
+
+
+def resolve_withcache_url(conn: sqlite3.Connection) -> str | None:
+    """The withcache cache-host base URL, or ``None`` if unconfigured:
+    override -> ``$BTY_WITHCACHE_URL`` -> None. When None, bty serves images
+    exactly as before."""
+    return get(conn, KEY_WITHCACHE_URL) or os.environ.get(ENV_WITHCACHE_URL) or None
 
 
 # ----- Backup schedule resolvers ----------------------------------------
