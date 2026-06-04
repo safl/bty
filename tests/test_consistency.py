@@ -281,38 +281,22 @@ def test_bty_version_substitution_runs_in_every_bake_script() -> None:
     chroot tree must also include it.
     """
     scripts_dir = REPO_ROOT / "cijoe" / "scripts"
-    # Bake scripts that emit live-env / appliance artifacts derived
-    # from the bty-media trees. Each must substitute
-    # ``__BTY_VERSION__`` via SOME mechanism. The substitution
-    # mechanism varies by bake style:
+    # Bake scripts that emit live-env artifacts derived from the
+    # bty-media trees. Each must substitute ``__BTY_VERSION__`` via
+    # SOME mechanism:
     #
     #   * usb_iso_build.py + live_build.py shell out to ``sed -i``
     #     across the copied live-build tree (the trees mostly carry
     #     templated text files like /etc/issue, /etc/motd, the
     #     boot-banner script).
-    #   * gen_userdata.py renders cloud-init user-data for the
-    #     server appliance from rootfs/server/. It does the
-    #     substitution in-Python via ``text.replace(...)`` because
-    #     cloud-init's write_files YAML is generated string-by-
-    #     string and a single sed pass over the rendered YAML
-    #     would also rewrite the placeholder inside any binary
-    #     base64 block.
     bake_scripts: list[tuple[Path, tuple[str, ...]]] = [
         (scripts_dir / "usb_iso_build.py", ("sed -i s/__BTY_VERSION__/",)),
         (scripts_dir / "live_build.py", ("sed -i s/__BTY_VERSION__/",)),
-        # gen_userdata's in-Python replace; either spelling is fine.
-        (
-            scripts_dir / "gen_userdata.py",
-            (
-                'replace("__BTY_VERSION__"',
-                "replace('__BTY_VERSION__'",
-            ),
-        ),
     ]
     for script, substitution_hints in bake_scripts:
         body = script.read_text()
         assert "__BTY_VERSION__" in body, (
-            f"{script.name} produces a live-env / appliance artifact but contains no "
+            f"{script.name} produces a live-env artifact but contains no "
             "__BTY_VERSION__ substitution. The booted target's /etc/issue / motd "
             "/ shell prompt will carry the literal placeholder."
         )
@@ -407,8 +391,6 @@ def test_plymouth_kill_token_on_every_cmdline_insertion_point() -> None:
 
       * iPXE templates (already tested elsewhere)
       * live-build auto/config BOOTAPPEND (both branches)
-      * cloud-init's GRUB_CMDLINE_LINUX_DEFAULT EXTRA on the
-        server appliance
 
     Asserts the token is present in every cmdline insertion site
     rather than only on some.
@@ -417,7 +399,6 @@ def test_plymouth_kill_token_on_every_cmdline_insertion_point() -> None:
         REPO_ROOT / "src" / "bty" / "web" / "_templates" / "ipxe_tui.j2",
         REPO_ROOT / "src" / "bty" / "web" / "_templates" / "ipxe_flash.j2",
         REPO_ROOT / "bty-media" / "live-build" / "auto" / "config",
-        REPO_ROOT / "bty-media" / "auxiliary" / "cloudinit-base-server.user",
     )
     missing = []
     for path in cmdline_sources:
@@ -558,112 +539,6 @@ def test_boot_banner_script_and_units_exist_and_are_wired() -> None:
         assert f"systemctl enable bty-banner-{phase}.service" in hook_body, (
             f"enable hook does not enable bty-banner-{phase}.service"
         )
-
-
-# ----------------------------------------------------------------------
-# 12. bty-boot-banner script + units stay byte-identical across trees
-# ----------------------------------------------------------------------
-
-
-def test_boot_banner_files_synced_across_live_env_and_server_trees() -> None:
-    """The banner script + most units are duplicated between
-    ``bty-media/live-build/config/includes.chroot/`` (live env)
-    and ``bty-media/rootfs/server/`` (appliance) -- live-build's
-    chroot includes are NOT shared with the cloud-init rootfs.
-    A manual ``cp`` is the current sync mechanism; this test
-    keeps the two copies honest.
-
-    Exception: ``bty-banner-late.service`` has a slightly
-    divergent ``[Unit]`` block (different commentary, different
-    references in the doc comment) but the ``[Service]`` and
-    ``[Install]`` sections must match byte-for-byte. Critically:
-    NEITHER copy may carry a ``Before=`` directive. The unit is
-    ``After=multi-user.target`` AND ``WantedBy=multi-user.target``;
-    adding ``Before=<anything-also-WantedBy-multi-user.target>``
-    creates an ordering cycle that systemd silently breaks by
-    dropping a unit from the boot transaction. This bit us on
-    v0.22.4 when the appliance's ``Before=bty-web.service`` got
-    bty-web silently removed from the boot, so /healthz never
-    answered. Test guards both trees against re-introducing the
-    trap.
-    """
-    import hashlib
-
-    live = REPO_ROOT / "bty-media" / "live-build" / "config" / "includes.chroot"
-    server = REPO_ROOT / "bty-media" / "rootfs" / "server"
-
-    # Script: byte-for-byte identical.
-    live_script = live / "usr" / "local" / "sbin" / "bty-boot-banner"
-    server_script = server / "usr" / "local" / "sbin" / "bty-boot-banner"
-    assert live_script.is_file(), f"missing {live_script}"
-    assert server_script.is_file(), f"missing {server_script}"
-    assert (
-        hashlib.sha256(live_script.read_bytes()).hexdigest()
-        == hashlib.sha256(server_script.read_bytes()).hexdigest()
-    ), (
-        "bty-boot-banner drifted between the live-env and "
-        "server-rootfs trees. Sync via:\n"
-        f"  cp {live_script.relative_to(REPO_ROOT)} {server_script.relative_to(REPO_ROOT)}"
-    )
-
-    # Early + mid units: identical.
-    for phase in ("early", "mid"):
-        live_unit = live / "etc" / "systemd" / "system" / f"bty-banner-{phase}.service"
-        server_unit = server / "etc" / "systemd" / "system" / f"bty-banner-{phase}.service"
-        assert live_unit.read_bytes() == server_unit.read_bytes(), (
-            f"bty-banner-{phase}.service drifted; sync the file"
-        )
-
-    # Late unit: [Unit] section is intentionally divergent
-    # (different Before= + different commentary explaining the
-    # hand-off target). [Service] + [Install] sections must
-    # match -- those are the load-bearing pieces.
-    live_late = (live / "etc" / "systemd" / "system" / "bty-banner-late.service").read_text()
-    server_late = (server / "etc" / "systemd" / "system" / "bty-banner-late.service").read_text()
-
-    def _section(body: str, name: str) -> str:
-        """Extract the named ini-style section from a systemd unit."""
-        lines: list[str] = []
-        in_section = False
-        for raw in body.splitlines():
-            stripped = raw.strip()
-            if stripped.startswith("[") and stripped.endswith("]"):
-                in_section = stripped == f"[{name}]"
-                continue
-            if in_section and stripped:
-                lines.append(raw)
-        return "\n".join(lines)
-
-    assert _section(live_late, "Service") == _section(server_late, "Service"), (
-        "bty-banner-late.service [Service] block drifted; reconcile."
-    )
-    assert _section(live_late, "Install") == _section(server_late, "Install"), (
-        "bty-banner-late.service [Install] block drifted; reconcile."
-    )
-
-    # Cycle-trap guard: NEITHER copy may have a ``Before=`` directive
-    # while being ``After=multi-user.target`` + ``WantedBy=multi-user.
-    # target``. See the docstring above for the v0.22.4 incident.
-    for label, body in (("live", live_late), ("server", server_late)):
-        unit_section = _section(body, "Unit")
-        for line in unit_section.splitlines():
-            assert not line.strip().startswith("Before="), (
-                f"bty-banner-late.service ({label} tree) has a "
-                f"``Before=`` directive: {line.strip()!r}. This "
-                f"creates an ordering cycle with the multi-user."
-                f"target wantedby; systemd will silently drop a "
-                f"service from boot. Drop the Before= line."
-            )
-
-    # Server has the marker files; live env does not.
-    server_variant = server / "etc" / "bty" / "variant"
-    server_mode = server / "etc" / "bty" / "mode"
-    assert server_variant.is_file() and server_variant.read_text().strip(), (
-        f"server rootfs missing /etc/bty/variant marker: {server_variant}"
-    )
-    assert server_mode.is_file() and server_mode.read_text().strip(), (
-        f"server rootfs missing /etc/bty/mode marker: {server_mode}"
-    )
 
 
 # ----------------------------------------------------------------------
@@ -1162,10 +1037,8 @@ def test_publish_scripts_write_basename_into_sha256_sidecar() -> None:
     Otherwise an operator's ``sha256sum -c <artifact>.sha256``
     (documented in docs/src/walkthrough-*.md) looks for a
     nonexistent ``/home/runner/.../<artifact>`` and fails. The
-    netboot / usb scripts already used ``cd <dir> && sha256sum
-    <basename>``; img_gz_publish + diskimage_build embedded the
-    absolute path until this was pinned (broke ``-c`` for the
-    server-x86 image). Scripts that build the sidecar in-Python via
+    netboot / usb scripts use ``cd <dir> && sha256sum <basename>``.
+    Scripts that build the sidecar in-Python via
     ``write_text(f"{digest}  {path.name}")`` carry no shell
     ``sha256sum`` redirect and are naturally exempt.
     """
@@ -1180,62 +1053,3 @@ def test_publish_scripts_write_basename_into_sha256_sidecar() -> None:
                 f"an operator's ``sha256sum -c``. Use ``cd {{dir}} && sha256sum "
                 f"{{name}} > {{name}}.sha256``. Offending line: {line.strip()!r}"
             )
-
-
-def test_state_disk_mounts_at_state_dir_not_images_subdir() -> None:
-    """The persistent-state disk (LABEL=BTY_IMAGE_STORE) must mount at
-    the whole state dir ``/var/lib/bty``, NOT the ``images/`` subdir.
-
-    Pre-0.22.17 mounted only ``/var/lib/bty/images`` -- but the bulk of
-    bty's data (the multi-GB content ``cache/`` and ``state.db``) are
-    SIBLINGS of ``images/`` under the state dir, so they stayed on the
-    rootfs and were lost on reflash. ``bty-state-migrate`` + the baked
-    fstab line now target the state dir itself. Pin all three surfaces
-    (cloud-init fstab line, the migrate script, the bty-web mount
-    ordering) so the granularity bug can't regress.
-    """
-    cloudinit = (REPO_ROOT / "bty-media" / "auxiliary" / "cloudinit-base-server.user").read_text(
-        encoding="utf-8"
-    )
-    fstab_lines = [
-        ln for ln in cloudinit.splitlines() if "LABEL=BTY_IMAGE_STORE" in ln and "ext4" in ln
-    ]
-    assert fstab_lines, "no LABEL=BTY_IMAGE_STORE fstab line in the server cloud-init"
-    for ln in fstab_lines:
-        assert "BTY_IMAGE_STORE /var/lib/bty " in ln, (
-            f"state disk must mount at /var/lib/bty (the whole state dir), not a subdir; "
-            f"got: {ln.strip()!r}"
-        )
-        assert "/var/lib/bty/images " not in ln, (
-            "fstab mounts the images/ subdir again -- that strands cache/ + state.db on the "
-            "rootfs (the pre-0.22.17 bug). Mount /var/lib/bty itself."
-        )
-
-    migrate = (
-        REPO_ROOT
-        / "bty-media"
-        / "rootfs"
-        / "server"
-        / "usr"
-        / "local"
-        / "sbin"
-        / "bty-state-migrate"
-    ).read_text(encoding="utf-8")
-    assert "STATE_DIR=/var/lib/bty\n" in migrate, (
-        "bty-state-migrate must target STATE_DIR=/var/lib/bty"
-    )
-
-    bty_web = (
-        REPO_ROOT
-        / "bty-media"
-        / "rootfs"
-        / "server"
-        / "etc"
-        / "systemd"
-        / "system"
-        / "bty-web.service"
-    ).read_text(encoding="utf-8")
-    assert "After=var-lib-bty.mount" in bty_web, (
-        "bty-web.service must order After=var-lib-bty.mount so it reads state from the "
-        "migrated disk, not the rootfs underneath a slow-to-mount disk"
-    )

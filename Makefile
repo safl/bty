@@ -2,7 +2,7 @@
 #
 # All common operations in one place; ``make help`` lists them.
 # Operators run everything from the repo root: ``make build
-# VARIANT=server-x86``, ``make test``, ``make ci``, etc.
+# VARIANT=usb-x86``, ``make test``, ``make ci``, etc.
 
 UV      ?= uv
 VARIANT ?= usb-x86
@@ -11,17 +11,10 @@ VARIANT ?= usb-x86
 #  - usb-x86 uses the live-build iso-hybrid pipeline (usb.yaml).
 #  - netboot-x86 uses the live-build netboot pipeline (netboot.yaml).
 #    Renamed from live-x86 to disambiguate from usb-x86 (also "live").
-#  - server-x86 uses the cloud-init-in-QEMU bake (build.yaml)
-#  - server-rpi mounts a Raspberry Pi OS image and chroots via
-#    qemu-aarch64-static (build-rpi.yaml)
 ifeq ($(VARIANT),netboot-x86)
 MEDIA_TASK := tasks/netboot.yaml
-else ifeq ($(VARIANT),usb-x86)
-MEDIA_TASK := tasks/usb.yaml
-else ifeq ($(VARIANT),server-rpi)
-MEDIA_TASK := tasks/build-rpi.yaml
 else
-MEDIA_TASK := tasks/build.yaml
+MEDIA_TASK := tasks/usb.yaml
 endif
 
 .DEFAULT_GOAL := help
@@ -56,15 +49,13 @@ help:
 	@echo "  test-pxe      end-to-end PXE chain test (server + client QEMU VMs)"
 	@echo "                  (needs QEMU + KVM; ~5-10 min wall clock)"
 	@echo ""
-	@echo "Variant: $(VARIANT)  (override with VARIANT=server-x86, server-rpi, netboot-x86, ...)"
+	@echo "Variant: $(VARIANT)  (override with VARIANT=netboot-x86, ...)"
 	@echo "  usb-x86      - bootable USB live ISO via live-build (.iso.gz, x86_64)"
-	@echo "  server-x86   - server appliance image (.img.gz, x86_64; needs qemu-system-x86_64 + KVM)"
-	@echo "  server-rpi   - server appliance for Raspberry Pi 4/5 (.img.gz, arm64; needs qemu-user-static + binfmt_misc)"
 	@echo "  netboot-x86  - kernel + initrd + squashfs trio for PXE-flash clients (x86_64)"
 	@echo ""
 	@echo "Docker (trial / image-library bty-web container):"
 	@echo "  docker-build  uv build + docker build -> bty-web:dev (single-arch, local)"
-	@echo "  docker-run    run bty-web:dev with ./bty-data/ bind-mount on :8080 + udp/69 (TFTP)"
+	@echo "  docker-run    run bty-web:dev with ./bty-data/ bind-mount on :8080 (HTTP only)"
 	@echo "  docker-clean  stop container, remove bty-web:dev image, wipe ./bty-data/"
 	@echo ""
 	@echo "Docs (bty-docs sibling; ``pipx install ./docs/tooling`` first):"
@@ -144,18 +135,11 @@ media-deps:
 
 # Build a media image. Pick the variant via ``VARIANT=...``:
 #   make build VARIANT=usb-x86      - bootable USB live ISO (.iso.gz, x86_64)
-#   make build VARIANT=server-x86   - server appliance (.img.gz, x86_64)
-#   make build VARIANT=server-rpi   - server appliance for RPi 4/5 (.img.gz, arm64)
 #   make build VARIANT=netboot-x86  - kernel + initrd + squashfs for PXE clients
 #
-# server-x86 uses cloud-init in QEMU (cijoe/tasks/build.yaml) and
-# needs ``qemu-system-x86_64`` + KVM accessible. netboot-x86 +
-# usb-x86 both use live-build (cijoe/tasks/netboot.yaml,
+# netboot-x86 + usb-x86 both use live-build (cijoe/tasks/netboot.yaml,
 # cijoe/tasks/usb.yaml) and need ``live-build`` on the host plus
-# passwordless sudo. server-rpi (cijoe/tasks/build-rpi.yaml)
-# customises Raspberry Pi OS Lite arm64 via losetup +
-# qemu-aarch64-static chroot; needs ``qemu-user-static`` + binfmt_misc
-# + passwordless sudo.
+# passwordless sudo.
 build:
 	cd cijoe && cijoe $(MEDIA_TASK) --monitor -c configs/$(VARIANT).toml
 
@@ -169,10 +153,11 @@ ipxe:
 	python3 cijoe/scripts/bty_ipxe_build.py --out "$(IPXE_OUT)"
 	@echo "custom ipxe.efi -> $(IPXE_OUT)/ipxe.efi"
 
-# End-to-end PXE chain test: server + client QEMU VMs sharing an L2
-# segment via -netdev socket. Test-side dnsmasq does full DHCP for
-# the isolated segment (bty itself never runs DHCP). Requires
-# pre-built server + live artifacts under ~/system_imaging/disk/.
+# End-to-end PXE chain test: the bty-web container as the server + a
+# client QEMU VM PXE-booting against it over a host bridge. Test-side
+# dnsmasq does DHCP + TFTP for the isolated segment (bty never runs
+# DHCP). Requires podman + QEMU + KVM and the netboot artifacts under
+# ~/system_imaging/disk/ (build with ``make build VARIANT=netboot-x86``).
 # Wall clock 5-10 min per run.
 test-pxe:
 	cd cijoe && cijoe tasks/test-pxe.yaml --monitor -c configs/test-pxe.toml

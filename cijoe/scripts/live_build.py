@@ -3,12 +3,11 @@ Build the bty network-boot live env via live-build
 ==================================================
 
 Drives Debian's live-build to produce kernel + initrd + squashfs
-artifacts that bty-server hosts over HTTP for PXE clients to chain
-into via iPXE. Structurally different from ``diskimage_build``
-(which bakes a .img.zst via QEMU + cloud-init) - live-build runs
-debootstrap, mksquashfs, and mkinitramfs directly on the build
-host, no QEMU. Same chroot config tree as ``usb_iso_build``; only
-the binary-images output mode differs.
+artifacts that bty-web hosts over HTTP for PXE clients to chain
+into via iPXE. live-build runs debootstrap, mksquashfs, and
+mkinitramfs directly on the build host, no QEMU. Same chroot config
+tree as ``usb_iso_build``; only the binary-images output mode
+differs.
 
 Workflow:
 

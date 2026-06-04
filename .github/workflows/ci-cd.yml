@@ -352,7 +352,7 @@ jobs:
   # ---------------- usb-x86 (split out for early test-usb-grow gate) -------
   # Same content as the matrix's previous ``usb-x86`` entry but as a
   # standalone job so ``test-usb-grow`` can depend on just this (and
-  # not wait on server-rpi etc., which take ~2x longer). Dedup-vs-DRY
+  # not wait on the other build jobs). Dedup-vs-DRY
   # tradeoff: a little YAML repetition for ~10 min off the test's
   # critical path.
   build-usb-x86:
