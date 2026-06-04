@@ -28,7 +28,7 @@ endif
 
 .PHONY: help \
         deps hooks test lint format format-check typecheck ci wheel tui \
-        media-deps build test-pxe \
+        media-deps build ipxe test-pxe \
         docker-build docker-run docker-clean \
         docs-html docs-pdf docs-serve \
         clean
@@ -52,6 +52,7 @@ help:
 	@echo "  media-deps    pipx install cijoe"
 	@echo "  build         build a media image (override VARIANT below)"
 	@echo "                  -> ~/system_imaging/disk/bty-<variant>.*"
+	@echo "  ipxe          build bty's custom iPXE -> IPXE_OUT/ipxe.efi (default dist/ipxe/)"
 	@echo "  test-pxe      end-to-end PXE chain test (server + client QEMU VMs)"
 	@echo "                  (needs QEMU + KVM; ~5-10 min wall clock)"
 	@echo ""
@@ -157,6 +158,16 @@ media-deps:
 # + passwordless sudo.
 build:
 	cd cijoe && cijoe $(MEDIA_TASK) --monitor -c configs/$(VARIANT).toml
+
+# Build bty's custom embedded-chain iPXE (~1 MB bin-x86_64-efi/ipxe.efi)
+# and copy it into IPXE_OUT. CI runs this, then stages ipxe.efi into the
+# bty-web (docker/seed/) and bty-tftp (deploy/tftp/seed/) build contexts.
+# Needs an iPXE build toolchain (build-essential liblzma-dev mtools perl)
+# + git on PATH; no sudo, no cijoe.
+IPXE_OUT ?= $(CURDIR)/dist/ipxe
+ipxe:
+	python3 cijoe/scripts/bty_ipxe_build.py --out "$(IPXE_OUT)"
+	@echo "custom ipxe.efi -> $(IPXE_OUT)/ipxe.efi"
 
 # End-to-end PXE chain test: server + client QEMU VMs sharing an L2
 # segment via -netdev socket. Test-side dnsmasq does full DHCP for
