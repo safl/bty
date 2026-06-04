@@ -135,8 +135,9 @@ A multi-arch container is published on every release:
 
 ```bash
 docker run -d --name bty-web -p 8080:8080 -v bty-data:/var/lib/bty \
+  -e BTY_ADMIN_PASSWORD=change-me \
   ghcr.io/safl/bty-web:latest
-# -> http://localhost:8080/ui   (login: bty / bty)
+# -> http://localhost:8080/ui   (gated by BTY_ADMIN_PASSWORD; unset = open)
 ```
 
 HTTP-only - no TFTP daemon bundled in the container. The

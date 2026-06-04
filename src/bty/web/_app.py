@@ -55,7 +55,7 @@ from bty.web import (
     _withcache,
 )
 from bty.web import _catalog as _web_catalog
-from bty.web._auth import SESSION_COOKIE, require_auth
+from bty.web._auth import SESSION_COOKIE, auth_enabled, require_auth
 from bty.web._events import (
     WORKER_STATE_CHANGED,
     MachineEvent,
@@ -94,10 +94,10 @@ def create_app(
 ) -> FastAPI:
     """Build the FastAPI app. All config flows through this function.
 
-    ``service_user`` is the Linux account whose OS password gates
-    ``POST /ui/login`` - typically the user bty-web is running as
-    (resolved from ``geteuid`` in :func:`bty.web.main`). Tests pass a
-    fixture name and monkeypatch ``pamela.authenticate``.
+    ``service_user`` is the Linux account bty-web runs as (resolved from
+    ``geteuid`` in :func:`bty.web.main`), shown in the UI for context.
+    ``POST /ui/login`` is gated by ``$BTY_ADMIN_PASSWORD`` (open when unset);
+    tests set that env var.
 
     ``secret_key`` is the per-appliance random key used by Starlette's
     :class:`SessionMiddleware` to sign session cookies. It must persist
@@ -199,6 +199,11 @@ def create_app(
         import logging as _logging
 
         _lifespan_log = _logging.getLogger(__name__)
+        if not auth_enabled():
+            _lifespan_log.warning(
+                "BTY_ADMIN_PASSWORD is not set - the operator UI is OPEN "
+                "(unauthenticated). Set it to gate /ui."
+            )
         for fp in resolved_image_root.iterdir():
             if not fp.is_file():
                 continue
