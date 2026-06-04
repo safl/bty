@@ -3,7 +3,7 @@
 # then chainloads bty's HTTP iPXE script. Enable it with the compose `tftp`
 # profile.
 #
-# The shared volume is seeded from the distro's iPXE NBPs on first run (see
+# The shared volume is seeded from /opt/ipxe on first run (see
 # entrypoint.sh); bty or the operator can place custom bootfiles in the same
 # volume to take precedence.
 FROM debian:bookworm-slim
@@ -12,11 +12,20 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends tftpd-hpa ipxe \
  && rm -rf /var/lib/apt/lists/*
 
-# Stock NBPs used to seed an empty volume: ipxe.efi (UEFI-via-TFTP) and
-# undionly.kpxe (BIOS); snponly.efi is included when the package ships it.
+# Stock NBPs as the baseline: ipxe.efi (UEFI-via-TFTP) and undionly.kpxe
+# (BIOS); snponly.efi is included when the package ships it.
 RUN mkdir -p /opt/ipxe \
  && cp -a /usr/lib/ipxe/undionly.kpxe /usr/lib/ipxe/ipxe.efi /opt/ipxe/ \
  && cp -a /usr/lib/ipxe/snponly.efi /opt/ipxe/ 2>/dev/null || true
+
+# Override ipxe.efi with bty's custom embedded-chain build when CI has
+# staged it into deploy/tftp/seed/ (dev builds keep just .gitkeep, so the
+# stock NBPs above stand). The custom binary carries the embedded
+# ``chain http://${next-server}:8080/pxe-bootstrap.ipxe`` so the operator's
+# DHCP only needs a single bootfile -- no userclass logic. (x86_64-efi
+# only; BIOS undionly.kpxe stays stock.)
+COPY seed/ /opt/ipxe-custom/
+RUN cp -a /opt/ipxe-custom/. /opt/ipxe/ 2>/dev/null || true; rm -f /opt/ipxe/.gitkeep
 
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
