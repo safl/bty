@@ -32,7 +32,7 @@ clone needed; `uv` (or `pipx`) on the host is enough:
 uvx bty-lab init ./bty-host             # writes compose.yml + .env.example + README
 cd bty-host
 cp .env.example .env
-$EDITOR .env                            # set HOST_ADDR + WITHCACHE_ADMIN_PASSWORD
+"${EDITOR:-vi}" .env                            # set HOST_ADDR + WITHCACHE_ADMIN_PASSWORD
 podman compose up -d                    # bty: :8080/ui  withcache: :3000/
 
 # BIOS PXE clients also need TFTP (UEFI HTTP Boot does not):
