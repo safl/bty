@@ -31,6 +31,10 @@ def main(argv: list[str] | None = None, *, prog: str = "bty") -> None:
     Defers loading the Rich-based app until invocation time so a
     missing ``[tui]`` extra produces a clear "reinstall with extras"
     message rather than a raw ``ModuleNotFoundError``.
+
+    The deploy-bootstrap surface lives in :mod:`bty.deploy` (the
+    ``bty-lab init`` console script) so this script stays lean -- one
+    job, one wizard.
     """
     parser = argparse.ArgumentParser(
         prog=prog,
@@ -53,7 +57,10 @@ def main(argv: list[str] | None = None, *, prog: str = "bty") -> None:
             "The operator-facing surface is intentionally narrow: in\n"
             "server-driven mode every knob (image, target disk, catalog\n"
             "overlay) comes from the bty-server's machine record, not the\n"
-            "cmdline. --catalog is only useful for hand-driven runs."
+            "cmdline. --catalog is only useful for hand-driven runs.\n\n"
+            "To bootstrap a bty-web + withcache container deploy, use the\n"
+            "sibling ``bty-lab init`` script (runnable via\n"
+            "``uvx bty-lab init`` without installing)."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )

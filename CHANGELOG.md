@@ -9,6 +9,45 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [Unreleased]
+
+**One-command container deploy: `uvx bty-lab init`.** No more cloning
+the repo to grab `deploy/compose.yml`; bty now ships a dedicated
+``bty-lab`` console script that emits a ready-to-run compose stack
+pinned to its own version.
+
+- **New ``bty-lab init [DEST]`` console script.** Writes
+  `compose.yml`, `.env.example`, and a per-deploy `README.md` for a
+  `bty-web` + `withcache` stack on any host that has `uv` (or `pipx`)
+  installed -- no clone, no `--from` indirection. `bty-web` and
+  `bty-tftp` image tags are pinned to the bty CLI version that
+  produced the file, so the compose and the image bytes always match.
+  Re-running with `--force` refreshes an existing deploy against a
+  newer bty release. `--systemd` additionally emits Podman Quadlet
+  units for boot-autostart. `--data-dir` re-roots state onto a chosen
+  disk; default is `./data/{bty,withcache}` bind-mounted next to
+  `compose.yml`. `--print` streams the compose to stdout for pipeline
+  use.
+- **``bty-lab`` is a standalone script, separate from ``bty``.** The
+  flash wizard stays single-purpose (and a bare ``uvx bty-lab`` does
+  NOT pull in Rich or FastAPI); the lab-init module imports nothing
+  from the [tui] / [web] extras. A bare ``bty-lab`` (no subcommand)
+  prints usage pointing at ``bty`` for the wizard, so somebody running
+  ``pipx run bty-lab`` blind learns about the sibling commands.
+- **First-boot needs no UI configuration step.** The emitted compose
+  passes `BTY_WITHCACHE_URL=http://${HOST_ADDR}:3000` to bty-web,
+  which auto-discovers withcache on every request -- the operator
+  edits only `HOST_ADDR` + `WITHCACHE_ADMIN_PASSWORD` in `.env`.
+- **Operator-visible state directories.** The deploy now uses host
+  bind-mounts (`./data/bty/`, `./data/withcache/`) instead of named
+  volumes; state is where the operator put it, easy to back up and
+  migrate.
+- **Documentation re-anchored around the new flow** -- the
+  quickstart, walkthroughs, and `deploy/README.md` lead with
+  `uvx bty-lab init` instead of "clone + `podman compose -f
+  deploy/compose.yml`". The "lowest-barrier docker trial" framing is
+  replaced by the canonical container deploy.
+
 ## [0.34.0] - 2026-05-28
 
 **Robustness pass: clearer flash failures, sturdier disk discovery,
