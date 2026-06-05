@@ -38,7 +38,7 @@ A minimal start with `uvx bty-lab init` -- no clone required, `uv` (or
 uvx bty-lab init ./bty-host       # writes compose.yml + .env.example + README
 cd bty-host
 cp .env.example .env
-$EDITOR .env                      # set HOST_ADDR + WITHCACHE_ADMIN_PASSWORD
+"${EDITOR:-vi}" .env                      # set HOST_ADDR + WITHCACHE_ADMIN_PASSWORD
 podman compose up -d
 #   bty:       http://<host>:8080/ui
 #   withcache: http://<host>:3000/

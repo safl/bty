@@ -13,7 +13,7 @@ No clone required. With `uv` (or `pipx`) on the host:
 uvx bty-lab init ./bty-host                   # writes compose.yml + .env.example + README
 cd bty-host
 cp .env.example .env
-$EDITOR .env                                  # set HOST_ADDR + WITHCACHE_ADMIN_PASSWORD
+"${EDITOR:-vi}" .env                                  # set HOST_ADDR + WITHCACHE_ADMIN_PASSWORD
 podman compose up -d
 #   bty-web:   http://<host>:8080/ui
 #   withcache: http://<host>:3000/
@@ -54,7 +54,7 @@ different host = copy these two directories + the `.env` + `compose.yml`.
 
 ```sh
 uvx bty-lab init ./bty-host --systemd
-cd bty-host && cp .env.example .env && $EDITOR .env
+cd bty-host && cp .env.example .env && "${EDITOR:-vi}" .env
 sudo cp quadlet/*.container /etc/containers/systemd/
 sudo systemctl daemon-reload
 sudo systemctl start withcache.service bty-web.service
