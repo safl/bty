@@ -28,12 +28,13 @@ bridges the two:
   `/catalog.toml` endpoint. Flash still happens locally; only the catalog
   is centralised. Best for a small team sharing pre-built images without a
   full PXE server.
-- **PXE-driven (no operator).** `bty-web` run as a container
-  (`deploy/compose.yml` / `deploy/quadlet/`, with an optional tftp
-  sidecar), serving the UI, per-MAC PXE plans, boot artifacts, and images
-  over HTTP. Fleet members are registered by MAC address; reflashes happen
-  on schedule, on demand, or on failure with no operator at the target.
-  Best for CI fleets and lab automation.
+- **PXE-driven (no operator).** `bty-web` run as a container alongside
+  `withcache` (the image cache) and an optional tftp sidecar -- bootstrap
+  with `uvx bty-lab init ./bty-host` and `podman compose up -d`. The stack
+  serves the UI, per-MAC PXE plans, boot artifacts, and images over HTTP.
+  Fleet members are registered by MAC address; reflashes happen on
+  schedule, on demand, or on failure with no operator at the target. Best
+  for CI fleets and lab automation.
 
 All three wrap the same `bty` runtime: same image catalog format, same
 target-disk operations. The difference is whether the catalog ships on the

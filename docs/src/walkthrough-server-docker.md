@@ -22,75 +22,54 @@ of three ways:
   iPXE script chains to bty-web's `/pxe-bootstrap.ipxe`, replacing the
   firmware PXE step entirely -- no DHCP-PXE options or TFTP needed at all.
 
-## When to use this
+## Quick start -- the canonical container deploy
 
-- **Trial / kicking the tires**: poke at the bty-web UI without flashing an
-  SD card or burning a NUC.
-- **Image library**: a fleet of operators carry bty USB sticks and want a
-  network-shared catalog of pre-built images instead of copying files to
-  every stick.
-- **Local-dev backend** for `bty --catalog` work.
-- **Production PXE / HTTP-Boot deployment**: UEFI HTTP Boot and
-  `boots-from` sticks work against this container directly; for legacy TFTP
-  PXE add the `bty-tftp` sidecar. For boot-autostart with systemd-managed
-  services, use the Quadlet units in
-  [`deploy/quadlet/`](https://github.com/safl/bty/blob/main/deploy/quadlet/)
-  (see [`deploy/README.md`](https://github.com/safl/bty/blob/main/deploy/README.md)).
-
-## Quick start
-
-The container runs `bty-web` as the unprivileged `bty` user (uid 1000).
-Pre-create the host data dir with that ownership before starting (one-time,
-host-side):
+`uvx bty-lab init` writes a ready-to-run compose stack (bty-web +
+withcache, plus an optional TFTP sidecar) into a directory you choose. No
+clone needed; `uv` (or `pipx`) on the host is enough:
 
 ```bash
-mkdir -p ./bty-data
-sudo chown -R 1000:1000 ./bty-data    # match the in-container bty user
-docker run -d --name bty-web \
-  -p 8080:8080 \
-  -v "$PWD/bty-data":/var/lib/bty \
-  ghcr.io/safl/bty-web:latest
+uvx bty-lab init ./bty-host             # writes compose.yml + .env.example + README
+cd bty-host
+cp .env.example .env
+$EDITOR .env                            # set HOST_ADDR + WITHCACHE_ADMIN_PASSWORD
+podman compose up -d                    # bty: :8080/ui  withcache: :3000/
+
+# BIOS PXE clients also need TFTP (UEFI HTTP Boot does not):
+podman compose --profile tftp up -d
 ```
 
-Or skip the chown by using a docker-managed volume (inherits the
-image's ownership automatically):
+The emitted `compose.yml` pins the `bty-web` / `bty-tftp` image tags to the
+bty CLI version that produced it -- the compose and the image bytes are
+guaranteed to match. Upgrade with `uvx bty-lab init --force .` then
+`podman compose pull && podman compose up -d`. State under `data/` survives
+the restart.
+
+`bty-web` reads `$BTY_WITHCACHE_URL` (set by the compose) at boot and
+auto-wires withcache as its image source -- no UI configuration step.
+
+Pass `--systemd` to additionally emit Podman Quadlet units under
+`quadlet/` for boot-autostart via systemd. See
+[`deploy/README.md`](https://github.com/safl/bty/blob/main/deploy/README.md)
+for the full details.
+
+## Bare `docker run` (dev / single-container)
+
+For contributor work on the bty-web UI alone -- no withcache, no PXE -- a
+bare `docker run` works too. The container runs `bty-web` as uid 1000;
+either pre-chown a bind-mount or use a docker-managed volume so first-boot
+can write `state.db`:
 
 ```bash
 docker run -d --name bty-web \
   -p 8080:8080 \
   -v bty-data:/var/lib/bty \
   ghcr.io/safl/bty-web:latest
+# -> http://localhost:8080/ui   (UI open; set BTY_ADMIN_PASSWORD to gate it)
 ```
 
-This container is HTTP-only -- it publishes just `:8080`. Legacy TFTP PXE
-is handled by the separate `bty-tftp` sidecar (see
-[`deploy/`](https://github.com/safl/bty/tree/main/deploy)).
-
-Open <http://localhost:8080/ui>; with no `BTY_ADMIN_PASSWORD` set the
-operator UI is open (bty-web logs a startup warning). Drop
-`.img.zst` / `.qcow2` / `.img.gz` files into the data directory's `images/`
-subfolder and they appear in the catalog after a refresh.
-
-If the bind-mount isn't writable by uid 1000, bty-web can't create
-`state.db` on startup; pre-create and chown the dir as shown above (or
-use a docker-managed volume).
-
-## Compose / orchestrated deploy
-
-For a multi-service stack -- bty-web + the withcache image cache + an
-optional TFTP sidecar -- use the compose file and Quadlet units under
-[`deploy/`](https://github.com/safl/bty/tree/main/deploy):
-
-```bash
-export HOST_ADDR=10.0.0.5                 # this host's LAN address
-export BTY_ADMIN_PASSWORD=change-me
-export WITHCACHE_ADMIN_PASSWORD=change-me
-podman compose -f deploy/compose.yml up -d
-```
-
-See [`deploy/README.md`](https://github.com/safl/bty/blob/main/deploy/README.md)
-and [walkthrough-server.md](walkthrough-server.md) for the full stack, the
-TFTP profile, and boot-autostart via Quadlet.
+This is HTTP-only -- legacy TFTP PXE needs the `bty-tftp` sidecar in the
+compose deploy above.
 
 ## Connecting `bty`
 

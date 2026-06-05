@@ -56,7 +56,7 @@ bty
 |---|---|---|
 | **USB live stick** | bty boots from a flash drive, runs `bty`, flashes the box it's plugged into. Fresh sticks ship with a starter `catalog.toml` (Debian / Ubuntu / Fedora / FreeBSD headless images plus a Fedora desktop, via `oras://ghcr.io/safl/nosi/...`) so the wizard's image picker is non-empty out of the box. | Single-machine local imaging |
 | **USB + portable catalog** | Same stick, plus `bty --catalog <SOURCE>` pointed at a TOML catalog hosted anywhere (a local file, an HTTP URL, an `oras://` reference, or a bty-web instance's `/catalog.toml`). | A handful of boxes, shared image library |
-| **PXE-boot server** | Run bty-web as a container (`deploy/compose.yml` or `deploy/quadlet/`, with an optional tftp sidecar) on a Pi or x86 box; bty-web serves everything over HTTP and the sidecar adds TFTP for legacy BIOS, and your LAN DHCP points PXE clients at it. Targets PXE-chain into a netboot live env that runs `bty --server X --mac Y` on tty1, which fetches a per-MAC plan and either auto-flashes or drops the operator into the wizard. See [`deploy/README.md`](deploy/README.md). | CI fleets, racks, anything you don't want to walk to |
+| **PXE-boot server** | `uvx bty-lab init ./bty-host && cd bty-host && cp .env.example .env && $EDITOR .env && podman compose up -d` brings up bty-web + withcache on a Pi or x86 box -- no clone required. An optional tftp sidecar covers legacy BIOS, and your LAN DHCP points PXE clients at the host. Targets PXE-chain into a netboot live env that runs `bty --server X --mac Y` on tty1, which fetches a per-MAC plan and either auto-flashes or drops the operator into the wizard. See [`deploy/README.md`](deploy/README.md). | CI fleets, racks, anything you don't want to walk to |
 
 All three share the same Python codebase, the same image catalog, the
 same SHA-keyed machine bindings.
@@ -129,29 +129,32 @@ piggybacks on that without dragging in the docker / podman runtime.
   is for trusted networks (homelab, CI segment), not the open
   internet.
 
-## Try it without flashing anything
+## Stand up a bty server
 
-A multi-arch container is published on every release:
+The canonical deploy is two containers (`bty-web` + `withcache`, plus
+an optional `bty-tftp` sidecar). With `uv` (or `pipx`) on the host, no
+clone required:
 
 ```bash
-docker run -d --name bty-web -p 8080:8080 -v bty-data:/var/lib/bty \
-  -e BTY_ADMIN_PASSWORD=change-me \
-  ghcr.io/safl/bty-web:latest
-# -> http://localhost:8080/ui   (gated by BTY_ADMIN_PASSWORD; unset = open)
+uvx bty-lab init ./bty-host             # writes compose.yml + .env.example + README
+cd bty-host
+cp .env.example .env
+$EDITOR .env                            # set HOST_ADDR + WITHCACHE_ADMIN_PASSWORD
+podman compose up -d
+#   bty-web:   http://<host>:8080/ui   (UI gated by BTY_ADMIN_PASSWORD)
+#   withcache: http://<host>:3000/
+
+# BIOS PXE clients also need TFTP (UEFI HTTP Boot does not):
+podman compose --profile tftp up -d
 ```
 
-HTTP-only - no TFTP daemon bundled in the container. The
-container's lane is **UEFI HTTP Boot** (operator's DHCP serves
-option 67 = `http://<bty>:8080/ipxe.efi`) or pairing with a
-[`boots-from`](https://github.com/safl/boots-from) USB stick
-(operator boots the stick, embedded iPXE chains to bty's HTTP
-endpoint). For fleets that need TFTP (legacy BIOS + UEFI
-firmware that only does TFTP option 67), run the **container
-deploy** with the tftp sidecar: `deploy/compose.yml` brings up
-bty-web alongside a dnsmasq TFTP server. See
+`init` pins the `bty-web` and `bty-tftp` image tags to the bty CLI
+version that ran it -- compose and image bytes are guaranteed to
+match. Re-run with `--force` to refresh against a newer release.
+Add `--systemd` for Podman Quadlet units that auto-start on boot. See
 [`deploy/README.md`](deploy/README.md) and
 [`docs/src/walkthrough-server-docker.md`](docs/src/walkthrough-server-docker.md)
-for bind-mount permissions, env vars, and password rotation.
+for bind-mount layout, env vars, and Quadlet install steps.
 
 ## Install
 
