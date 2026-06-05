@@ -9,7 +9,7 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
-## [Unreleased]
+## [0.36.0] - 2026-06-05
 
 **One-command container deploy: `uvx bty-lab init`.** No more cloning
 the repo to grab `deploy/compose.yml`; bty now ships a dedicated
