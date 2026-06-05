@@ -72,10 +72,47 @@ def test_env_example_has_required_keys(tmp_path: Path) -> None:
     dest = tmp_path / "bty-host"
     deploy_mod.init_main([str(dest)])
     body = (dest / ".env.example").read_text(encoding="utf-8")
-    assert "HOST_ADDR=" in body
-    assert "WITHCACHE_ADMIN_PASSWORD=" in body
-    # Hint about the data-dir override is included.
-    assert "BTY_HOST_DATA_DIR=" in body
+    # Required (uncommented):
+    assert "\nHOST_ADDR=" in body
+    assert "\nWITHCACHE_ADMIN_PASSWORD=" in body
+    # Strongly recommended (commented; operator opts in):
+    assert "# BTY_ADMIN_PASSWORD=" in body
+    # Common (commented):
+    assert "# BTY_HOST_DATA_DIR=" in body
+    # Advanced knobs are documented so operators don't have to chase
+    # them down in the docs. If any of these disappear, an operator
+    # will have to grep the bty-web source to discover the var name.
+    for var in (
+        "BTY_BOOT_RELEASE_REPO",
+        "BTY_TRUSTED_PROXY",
+        "BTY_SESSION_SECRET",
+        "BTY_MAX_UPLOAD_BYTES",
+        "BTY_CATALOG_MAX_PARALLEL",
+        "BTY_HASH_MAX_PARALLEL",
+        "BTY_BACKUP_MAX_PARALLEL",
+    ):
+        assert f"# {var}=" in body, f"{var} not documented in .env.example"
+
+
+def test_compose_plumbs_optional_env_vars_through(tmp_path: Path) -> None:
+    """The compose env block must reference every optional knob that
+    appears in .env.example so uncommenting in .env immediately
+    propagates -- without a corresponding ``VAR: ${{VAR:-}}`` entry
+    the operator's .env change is silently ignored."""
+    dest = tmp_path / "bty-host"
+    deploy_mod.init_main([str(dest)])
+    body = (dest / "compose.yml").read_text(encoding="utf-8")
+    for var in (
+        "BTY_ADMIN_PASSWORD",
+        "BTY_BOOT_RELEASE_REPO",
+        "BTY_TRUSTED_PROXY",
+        "BTY_SESSION_SECRET",
+        "BTY_MAX_UPLOAD_BYTES",
+        "BTY_CATALOG_MAX_PARALLEL",
+        "BTY_HASH_MAX_PARALLEL",
+        "BTY_BACKUP_MAX_PARALLEL",
+    ):
+        assert f"{var}: ${{{var}:-}}" in body, f"{var} not plumbed through compose"
 
 
 # ---- Mode flags --------------------------------------------------------------
