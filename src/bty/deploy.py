@@ -84,6 +84,17 @@ services:
       # from the booting machines -- not 127.0.0.1, not a container
       # name).
       BTY_WITHCACHE_URL: http://${{HOST_ADDR:?set HOST_ADDR to this host's LAN address}}:3000
+      # Every other knob below is optional: empty string == unset (bty-web
+      # treats them identically). Uncomment the matching line in .env to
+      # override; the compose layer plumbs each one straight through.
+      BTY_ADMIN_PASSWORD: ${{BTY_ADMIN_PASSWORD:-}}
+      BTY_BOOT_RELEASE_REPO: ${{BTY_BOOT_RELEASE_REPO:-}}
+      BTY_TRUSTED_PROXY: ${{BTY_TRUSTED_PROXY:-}}
+      BTY_SESSION_SECRET: ${{BTY_SESSION_SECRET:-}}
+      BTY_MAX_UPLOAD_BYTES: ${{BTY_MAX_UPLOAD_BYTES:-}}
+      BTY_CATALOG_MAX_PARALLEL: ${{BTY_CATALOG_MAX_PARALLEL:-}}
+      BTY_HASH_MAX_PARALLEL: ${{BTY_HASH_MAX_PARALLEL:-}}
+      BTY_BACKUP_MAX_PARALLEL: ${{BTY_BACKUP_MAX_PARALLEL:-}}
     volumes:
       - ${{BTY_HOST_DATA_DIR:-./data}}/bty:/var/lib/bty
     depends_on:
@@ -103,8 +114,12 @@ services:
 def _env_example(default_data_dir: str) -> str:
     """Render the .env.example body."""
     return f"""\
-# Copy to .env and edit. The compose file refuses to start if HOST_ADDR
-# or WITHCACHE_ADMIN_PASSWORD are unset.
+# Copy to .env and edit. The compose file refuses to start unless
+# HOST_ADDR and WITHCACHE_ADMIN_PASSWORD are set; everything below
+# the REQUIRED block has a sane default and stays empty/unset unless
+# you uncomment.
+
+# ==== REQUIRED ====
 
 # This host's LAN address. Booting clients fetch images + boot scripts
 # from here, so it MUST be reachable from those machines -- NOT
@@ -114,9 +129,51 @@ HOST_ADDR=10.0.0.5
 # Operator login for the withcache UI at http://<host>:3000/.
 WITHCACHE_ADMIN_PASSWORD=change-me
 
+# ==== STRONGLY RECOMMENDED ====
+
+# Gates the bty-web operator UI at http://<host>:8080/ui (constant-
+# time password compare). UNSET = UI open (bty-web logs a startup
+# warning on first boot). Set this before exposing past a trusted
+# LAN.
+# BTY_ADMIN_PASSWORD=change-me
+
+# ==== COMMON CUSTOMISATIONS ====
+
 # Where state lives on the host. Default: ./data (relative to this
 # directory). Point at a bigger disk for larger fleets:
 # BTY_HOST_DATA_DIR={default_data_dir}
+
+# ==== ADVANCED ====
+
+# Override which GitHub repo bty fetches netboot artifacts (live env
+# kernel/initrd/squashfs) from. Default: safl/bty. Useful when running
+# off a fork or a private mirror.
+# BTY_BOOT_RELEASE_REPO=your-fork/bty
+
+# Trust the X-Forwarded-* headers from this CIDR or single address
+# (set when bty-web sits behind nginx / traefik / Caddy so it can
+# recover the original client's address + scheme for audit logs and
+# absolute-URL generation). Default: unset (no header trust).
+# BTY_TRUSTED_PROXY=10.0.0.0/8
+
+# Pin a stable bty-web session-cookie secret. Default: a fresh random
+# secret generated and persisted in state.db on first start (re-used
+# across container restarts). Override only if you need the secret to
+# be reproducible (multi-instance, blue/green) or rotated on a
+# schedule.
+# BTY_SESSION_SECRET=<32-byte hex>
+
+# Per-request upload cap for the operator UI's image-upload form.
+# Default: 200 GiB. Bump for very large images, drop for small
+# fleets or untrusted networks.
+# BTY_MAX_UPLOAD_BYTES=214748364800
+
+# Concurrent-worker caps. Defaults are sane for most fleets; raise
+# carefully if the host has the CPU + disk bandwidth, drop on small
+# boxes (Raspberry Pi, low-spec mini-PCs).
+# BTY_CATALOG_MAX_PARALLEL=2
+# BTY_HASH_MAX_PARALLEL=1
+# BTY_BACKUP_MAX_PARALLEL=1
 """
 
 
