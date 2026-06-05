@@ -51,6 +51,13 @@ all = [
 [project.scripts]
 bty = "bty.tui:main"
 bty-web = "bty.web:main"
+# ``bty-lab`` hosts deployment + operator helpers (currently just
+# ``init`` -- emit a compose deploy). Separate from ``bty`` so the
+# flash-wizard CLI stays single-purpose. The script name matches the
+# PyPI distribution so ``uvx bty-lab init ...`` and
+# ``pipx run bty-lab init ...`` work without ``--from`` -- both tools
+# look for a script whose name matches the package.
+bty-lab = "bty.deploy:main"
 
 [project.urls]
 Homepage = "https://safl.dk/bty/"
