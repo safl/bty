@@ -49,7 +49,7 @@ wants one place for pre-built images without the full PXE deploy.
    Pre-built images dropped into the volume show up in the `/images`
    endpoint. Any `bty-web` instance serves `/images` and works identically
    as a catalog source, whether run from a bare `docker run` or the full
-   `deploy/compose.yml` stack.
+   `uvx bty-lab init` stack.
 
 2. Operator boots a target from the bty USB live stick. ``bty``
    auto-launches in local-only mode (no ``--mac`` on cmdline). On the first
@@ -142,12 +142,15 @@ The "bty-on-a-USB but over the network" path. Default behaviour for any MAC
 the server has never seen, so onboarding a new box needs zero per-MAC
 configuration.
 
-1. Operator brings up the bty-web container deploy
-   (`podman compose -f deploy/compose.yml --profile tftp up -d`). The web
-   UI is gated by `$BTY_ADMIN_PASSWORD` (unset = open, with a startup
-   warning; rotate by changing the env var and restarting bty-web); point
-   your LAN DHCP server (option 60/66/67) at the host using the Netboot
-   page cheatsheet (bty serves TFTP via the sidecar but does not run DHCP).
+1. Operator brings up the bty-web container deploy:
+   `uvx bty-lab init ./bty-host`, set `HOST_ADDR` + passwords in
+   `bty-host/.env`, then `podman compose -f bty-host/compose.yml
+   --profile tftp up -d`. The web UI is gated by
+   `$BTY_ADMIN_PASSWORD` (unset = open, with a startup warning;
+   rotate by changing the env var and restarting bty-web); point your
+   LAN DHCP server (option 60/66/67) at the host using the Netboot
+   page cheatsheet (bty serves TFTP via the sidecar but does not run
+   DHCP).
 2. A target PXE-boots on the same segment for the first time. `bty-web`
    auto-discovers the MAC as `boot_mode=bty-inventory` (self-reports its
    disks, then boots the disk). To drive it with the interactive wizard instead,

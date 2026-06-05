@@ -31,25 +31,29 @@ The canonical, step-by-step instructions live with the deploy assets:
   bty-web container in depth: both PXE boot lanes (UEFI HTTP Boot and TFTP
   PXE), bind-mount permissions, env vars, and password rotation.
 
-A minimal start with podman compose:
+A minimal start with `uvx bty-lab init` -- no clone required, `uv` (or
+`pipx`) on the host is enough:
 
 ```sh
-export HOST_ADDR=10.0.0.5                 # this host's LAN address
-export BTY_ADMIN_PASSWORD=change-me       # gates the bty-web operator UI
-export WITHCACHE_ADMIN_PASSWORD=change-me # gates withcache's operator UI
-
-podman compose -f deploy/compose.yml up -d
+uvx bty-lab init ./bty-host       # writes compose.yml + .env.example + README
+cd bty-host
+cp .env.example .env
+$EDITOR .env                      # set HOST_ADDR + WITHCACHE_ADMIN_PASSWORD
+podman compose up -d
 #   bty:       http://<host>:8080/ui
 #   withcache: http://<host>:3000/
 
 # add TFTP for BIOS clients that bootstrap over it:
-podman compose -f deploy/compose.yml --profile tftp up -d
+podman compose --profile tftp up -d
 ```
 
-State (bty's DB and images, withcache's blobs) lives in named volumes and
-survives container restarts and image re-pulls. The image cache is delegated to
-withcache, so multiple targets pull each image once. To upgrade, `pull` the new
-images and `up -d` again.
+`init` pins the `bty-web` / `bty-tftp` image tags to the bty CLI version that
+emitted the compose, so the file you get and the bytes you pull match. State
+(bty's DB and images, withcache's blobs) lives in host bind-mounts under
+`./data/` and survives container restarts and image re-pulls. The image cache
+is delegated to withcache, so multiple targets pull each image once. To
+upgrade, re-run `uvx bty-lab init --force .` then
+`podman compose pull && podman compose up -d`.
 
 ## Configure DHCP
 

@@ -252,24 +252,27 @@ server -- a confusing version split.
 
 ### Upgrade the container deploy
 
-In the container deploy the upgrade is a pull + restart, with the
-`bty-data` named volume carrying state across:
+In the container deploy the upgrade is a `init --force` (regenerates
+compose with new image pins) + pull + restart. State under `data/` carries
+across:
 
 ```sh
-podman compose -f deploy/compose.yml pull
-podman compose -f deploy/compose.yml up -d
+cd ./bty-host                       # the dir you bootstrapped with `init`
+uvx bty-lab init --force .          # regenerates compose.yml against newer bty
+podman compose pull
+podman compose up -d
 ```
 
-`AutoUpdate=registry` plus `podman-auto-update.timer` automate this for the
-Quadlet units. After the pull, **re-fetch the netboot artifacts** (open
-`/ui/netboot` -> Fetch latest artifacts) so PXE clients boot a live env
-matching the new bty-web version. See
+`AutoUpdate=registry` plus `podman-auto-update.timer` automate the pull
+step for the Quadlet variant (`init --systemd`). After the pull, **re-fetch
+the netboot artifacts** (open `/ui/netboot` -> Fetch latest artifacts) so
+PXE clients boot a live env matching the new bty-web version. See
 [`deploy/README.md`](https://github.com/safl/bty/blob/main/deploy/README.md).
 
 ## Migrate to a new host
 
-Stop bty-web on the old host, copy `/var/lib/bty` (or the `bty-data`
-volume) to the new one at the same path, start bty-web there. The
-MAC->image assignments and audit log come with it; only the host's own IP
-changes. Re-point your LAN DHCP at the new host's IP and re-fetch the
-netboot artifacts on the new instance.
+Stop bty-web on the old host, copy the deploy directory's `data/` tree
+(or `/var/lib/bty` for a host install) to the new host, and start bty-web
+there. The MAC->image assignments and audit log come with it; only the
+host's own IP changes. Re-point your LAN DHCP at the new host's IP and
+re-fetch the netboot artifacts on the new instance.

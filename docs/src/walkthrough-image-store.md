@@ -13,19 +13,20 @@ bty-web keeps all of its mutable state under `/var/lib/bty`:
 
 ## Where it lives in the container deploy
 
-The container deploy backs `/var/lib/bty` with the `bty-data` named
-volume (`deploy/compose.yml`, `deploy/quadlet/`). The volume is the unit
-of persistence: it outlives the container, so `podman compose pull` +
+The container deploy backs `/var/lib/bty` with a host bind-mount at
+`./data/bty/` next to the generated `compose.yml` (or the absolute path
+you pass to `bty-lab init --data-dir`). The directory is the unit of
+persistence: it outlives the container, so `podman compose pull` +
 `up -d` upgrades bty-web to a new image while the image store, netboot
 artifacts, and machine inventory stay put. See
 [`deploy/README.md`](https://github.com/safl/bty/blob/main/deploy/README.md)
-for the compose / Quadlet layout and the upgrade flow, and
+for the layout and the upgrade flow, and
 [walkthrough-server.md](walkthrough-server.md) for standing the stack up.
 
 The image bytes themselves are delegated to
 [withcache](https://github.com/safl/withcache): bty prefers the cache as
 the image source for artifacts it holds, so a fleet pulls each image once.
-withcache keeps its blobs in its own named volume.
+withcache keeps its blobs in `./data/withcache/` next to bty's state.
 
 ## Adding images
 

@@ -4,33 +4,40 @@ What bty can do today, ordered the way an operator meets it: build a
 delivery medium, boot a target, flash a disk, then drive a fleet over the
 network via the bty-web server.
 
-## Lowest-barrier trial: bty-web in Docker
+## Deploy the bty server
 
-To poke at the browser UI before committing to a USB stick or the full PXE
-deploy, pull the published container:
+The canonical bty deploy is two containers: `bty-web` (policy + PXE + UI)
+and `withcache` (image cache), plus an optional `bty-tftp` sidecar for
+BIOS PXE clients. Bootstrap a fresh host without cloning the repo:
 
 ```bash
-docker run -d --name bty-web \
-  -p 8080:8080 \
-  -v bty-data:/var/lib/bty \
-  ghcr.io/safl/bty-web:latest
-# -> http://localhost:8080/ui   (operator UI open; set BTY_ADMIN_PASSWORD to gate it)
+uvx bty-lab init ./bty-host                   # writes compose.yml + .env.example + README
+cd bty-host
+cp .env.example .env
+$EDITOR .env                                  # set HOST_ADDR + WITHCACHE_ADMIN_PASSWORD
+podman compose up -d
+#   bty-web:   http://<host>:8080/ui
+#   withcache: http://<host>:3000/
 ```
 
-The docker-managed volume (`-v bty-data:/var/lib/bty`) is the simplest
-start; the in-container bty user owns it. For bind-mounts (files show up in
-the host filesystem) pre-chown the dir to uid 999 (the bty user) - the
-entrypoint checks and exits with a clear hint if it cannot write.
+`init` pins the `bty-web` / `bty-tftp` image tags to the bty CLI version
+that emitted the file -- compose and image bytes are guaranteed to match.
+Upgrade with `uvx bty-lab init --force .` followed by `podman compose pull`
++ `up -d`. State under `data/` survives.
 
-Connect a `bty --catalog http://<host>:8080/catalog.toml` from a USB live
-stick or a workstation to flash from this catalog without burning images
-onto every stick.
+`bty-web` reads `$BTY_WITHCACHE_URL` (set by the compose file) on boot and
+auto-wires withcache as its image source -- no UI configuration step.
 
-A bare `docker run` of bty-web is HTTP-only - the catalog + UI shape. For
-PXE-driven unattended flashing, run the full deploy
-(`podman compose -f deploy/compose.yml --profile tftp up -d`), which adds
-withcache and the `bty-tftp` sidecar. Full details and rotation guidance:
-[walkthrough-server-docker.md](walkthrough-server-docker.md).
+For BIOS-PXE clients add the TFTP sidecar:
+
+```bash
+podman compose --profile tftp up -d
+```
+
+For systemd auto-start on boot, pass `--systemd` to `init`; that adds
+Quadlet units under `quadlet/`. Full details:
+[`deploy/README.md`](https://github.com/safl/bty/blob/main/deploy/README.md)
+and [walkthrough-server-docker.md](walkthrough-server-docker.md).
 
 ## Get the USB live image
 
@@ -174,9 +181,10 @@ See [Reference](reference.md) for the full cmdline surface.
 ### Network flashing via the bty-web server
 
 `bty-web` is the HTTP server side of bty - browser UI + REST API + the iPXE
-chain a target boots into for network-flash. The container deploy
-(`deploy/compose.yml`) wires it up with withcache and the optional TFTP
-sidecar; for a quick local test run it directly:
+chain a target boots into for network-flash. The canonical deploy is the
+container stack from the [Deploy the bty server](#deploy-the-bty-server)
+section above (`uvx bty-lab init`). For contributor / dev work on a
+checkout you can also run it directly:
 
 ```bash
 # On the server (or any box you're testing on):
