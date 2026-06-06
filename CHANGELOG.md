@@ -9,6 +9,59 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.37.0] - 2026-06-06
+
+**Polish pass on the v0.36.0 ``bty-lab init`` bootstrap, from
+real-world reproduction on a fresh nosi-built lab host.** All
+operator-facing; nothing breaks for hosts already running
+v0.36.0 except the values-file rename below.
+
+- **BREAKING (early adopters only): the values file is now
+  ``envvars``, not ``.env``.** ``bty-lab init`` writes
+  ``envvars.example`` and the rendered compose / README walk the
+  operator through ``cp envvars.example envvars && export
+  COMPOSE_ENV_FILES=envvars && podman compose up -d``. Reason:
+  ``.env`` is a dotfile -- invisible in ``ls`` -- and an operator
+  scanning the deploy directory after the bootstrap couldn't tell
+  whether the file existed. ``envvars`` (the Apache convention)
+  shows up in plain ``ls`` and is self-describing.
+
+  **Migration for an existing v0.36.0 deploy:** ``mv .env
+  envvars`` then either ``export COMPOSE_ENV_FILES=envvars``
+  once per shell or pass ``--env-file envvars`` on every
+  ``podman compose`` invocation. Or re-run ``uvx bty-lab init
+  --force .`` to regenerate the deploy directory with the new
+  layout (state in ``data/`` survives).
+
+- **Every operator-facing env var is now documented in
+  ``envvars.example`` and plumbed through the compose env block.**
+  Previously only ``HOST_ADDR`` / ``WITHCACHE_ADMIN_PASSWORD`` /
+  ``BTY_HOST_DATA_DIR`` were surfaced; now ``BTY_ADMIN_PASSWORD``
+  (gates the bty-web UI -- previously you had to grep the source to
+  find this), ``BTY_BOOT_RELEASE_REPO``, ``BTY_TRUSTED_PROXY``,
+  ``BTY_SESSION_SECRET``, ``BTY_MAX_UPLOAD_BYTES``, and the three
+  ``BTY_*_MAX_PARALLEL`` knobs are documented (commented-out, with
+  default values + a one-line rationale each) and the compose
+  references each with ``VAR: ${VAR:-}`` so uncommenting in
+  ``envvars`` immediately reaches the container. Tests pin both
+  sides of the contract.
+
+- **Quickstart chain no longer dies on an unset ``$EDITOR``.**
+  Previously the rendered ``Next:`` hint and docs read ``cp
+  envvars.example envvars && $EDITOR envvars && podman compose
+  up -d``; on a fresh shell with ``EDITOR`` unset bash expanded
+  that to ``envvars`` and tried to exec the values file,
+  reporting ``-bash: envvars: command not found``. The chain now
+  uses ``"${EDITOR:-vi}"`` so ``vi`` is the universal fallback.
+
+- **Operator-friction hints in the runtime ``Next:`` line:** the
+  hint now mentions the ``--profile tftp`` variant (BIOS-PXE
+  clients; UEFI HTTP-Boot doesn't need it) and the
+  ``pipx install podman-compose`` prereq (``podman compose`` is a
+  wrapper that requires an external compose backend on PATH;
+  with none installed the bootstrap errors with a seven-line
+  "looking up compose provider failed" trace).
+
 ## [0.36.0] - 2026-06-05
 
 **One-command container deploy: `uvx bty-lab init`.** No more cloning
