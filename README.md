@@ -56,7 +56,7 @@ bty
 |---|---|---|
 | **USB live stick** | bty boots from a flash drive, runs `bty`, flashes the box it's plugged into. Fresh sticks ship with a starter `catalog.toml` (Debian / Ubuntu / Fedora / FreeBSD headless images plus a Fedora desktop, via `oras://ghcr.io/safl/nosi/...`) so the wizard's image picker is non-empty out of the box. | Single-machine local imaging |
 | **USB + portable catalog** | Same stick, plus `bty --catalog <SOURCE>` pointed at a TOML catalog hosted anywhere (a local file, an HTTP URL, an `oras://` reference, or a bty-web instance's `/catalog.toml`). | A handful of boxes, shared image library |
-| **PXE-boot server** | `uvx bty-lab init ./bty-host && cd bty-host && cp .env.example .env && "${EDITOR:-vi}" .env && podman compose up -d` brings up bty-web + withcache on a Pi or x86 box -- no clone required. An optional tftp sidecar covers legacy BIOS, and your LAN DHCP points PXE clients at the host. Targets PXE-chain into a netboot live env that runs `bty --server X --mac Y` on tty1, which fetches a per-MAC plan and either auto-flashes or drops the operator into the wizard. See [`deploy/README.md`](deploy/README.md). | CI fleets, racks, anything you don't want to walk to |
+| **PXE-boot server** | `uvx bty-lab init ./bty-host && cd bty-host && cp envvars.example envvars && "${EDITOR:-vi}" envvars && COMPOSE_ENV_FILES=envvars podman compose up -d` brings up bty-web + withcache on a Pi or x86 box -- no clone required. An optional tftp sidecar covers legacy BIOS, and your LAN DHCP points PXE clients at the host. Targets PXE-chain into a netboot live env that runs `bty --server X --mac Y` on tty1, which fetches a per-MAC plan and either auto-flashes or drops the operator into the wizard. See [`deploy/README.md`](deploy/README.md). | CI fleets, racks, anything you don't want to walk to |
 
 All three share the same Python codebase, the same image catalog, the
 same SHA-keyed machine bindings.
@@ -136,10 +136,10 @@ an optional `bty-tftp` sidecar). With `uv` (or `pipx`) on the host, no
 clone required:
 
 ```bash
-uvx bty-lab init ./bty-host             # writes compose.yml + .env.example + README
+uvx bty-lab init ./bty-host             # writes compose.yml + envvars.example + README
 cd bty-host
-cp .env.example .env
-"${EDITOR:-vi}" .env                            # set HOST_ADDR + WITHCACHE_ADMIN_PASSWORD
+cp envvars.example envvars
+"${EDITOR:-vi}" envvars                            # set HOST_ADDR + WITHCACHE_ADMIN_PASSWORD
 podman compose up -d
 #   bty-web:   http://<host>:8080/ui   (UI gated by BTY_ADMIN_PASSWORD)
 #   withcache: http://<host>:3000/

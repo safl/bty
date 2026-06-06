@@ -29,14 +29,15 @@ withcache, plus an optional TFTP sidecar) into a directory you choose. No
 clone needed; `uv` (or `pipx`) on the host is enough:
 
 ```bash
-uvx bty-lab init ./bty-host             # writes compose.yml + .env.example + README
+uvx bty-lab init ./bty-host             # writes compose.yml + envvars.example + README
 cd bty-host
-cp .env.example .env
-"${EDITOR:-vi}" .env                            # set HOST_ADDR + WITHCACHE_ADMIN_PASSWORD
-podman compose up -d                    # bty: :8080/ui  withcache: :3000/
+cp envvars.example envvars
+"${EDITOR:-vi}" envvars                  # set HOST_ADDR + WITHCACHE_ADMIN_PASSWORD
+export COMPOSE_ENV_FILES=envvars         # so `podman compose` reads `envvars`
+podman compose up -d                     # bty: :8080/ui  withcache: :3000/
 
 # BIOS PXE clients also need TFTP (UEFI HTTP Boot does not):
-podman compose --profile tftp up -d
+podman compose up -d --profile tftp
 ```
 
 The emitted `compose.yml` pins the `bty-web` / `bty-tftp` image tags to the

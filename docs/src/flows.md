@@ -144,7 +144,7 @@ configuration.
 
 1. Operator brings up the bty-web container deploy:
    `uvx bty-lab init ./bty-host`, set `HOST_ADDR` + passwords in
-   `bty-host/.env`, then `podman compose -f bty-host/compose.yml
+   `bty-host/envvars`, then `podman compose -f bty-host/compose.yml --env-file bty-host/envvars
    --profile tftp up -d`. The web UI is gated by
    `$BTY_ADMIN_PASSWORD` (unset = open, with a startup warning;
    rotate by changing the env var and restarting bty-web); point your
