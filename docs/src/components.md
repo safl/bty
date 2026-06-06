@@ -167,7 +167,7 @@ full operator guide.
 The intended operator experience:
 
 1. On a host with podman, `uvx bty-lab init ./bty-host` writes a compose
-   stack into `./bty-host/`; `cp .env.example .env`, set `HOST_ADDR` +
+   stack into `./bty-host/`; `cp envvars.example envvars`, set `HOST_ADDR` +
    passwords, then `podman compose up -d` brings up bty-web on `:8080` and
    withcache on `:3000` (add `--profile tftp` for the TFTP sidecar). See
    [`deploy/README.md`](https://github.com/safl/bty/blob/main/deploy/README.md).

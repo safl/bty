@@ -27,7 +27,7 @@ def test_default_dest_writes_three_files(
     dest = tmp_path / "bty-host"
     deploy_mod.init_main([str(dest)])
     assert (dest / "compose.yml").is_file()
-    assert (dest / ".env.example").is_file()
+    assert (dest / "envvars.example").is_file()
     assert (dest / "README.md").is_file()
     # Bind-mount roots are pre-created so the operator can see where state
     # will land before starting the stack.
@@ -71,7 +71,7 @@ def test_compose_uses_bind_mount_data_dirs(tmp_path: Path) -> None:
 def test_env_example_has_required_keys(tmp_path: Path) -> None:
     dest = tmp_path / "bty-host"
     deploy_mod.init_main([str(dest)])
-    body = (dest / ".env.example").read_text(encoding="utf-8")
+    body = (dest / "envvars.example").read_text(encoding="utf-8")
     # Required (uncommented):
     assert "\nHOST_ADDR=" in body
     assert "\nWITHCACHE_ADMIN_PASSWORD=" in body
@@ -91,14 +91,14 @@ def test_env_example_has_required_keys(tmp_path: Path) -> None:
         "BTY_HASH_MAX_PARALLEL",
         "BTY_BACKUP_MAX_PARALLEL",
     ):
-        assert f"# {var}=" in body, f"{var} not documented in .env.example"
+        assert f"# {var}=" in body, f"{var} not documented in envvars.example"
 
 
 def test_compose_plumbs_optional_env_vars_through(tmp_path: Path) -> None:
     """The compose env block must reference every optional knob that
-    appears in .env.example so uncommenting in .env immediately
+    appears in envvars.example so uncommenting in envvars immediately
     propagates -- without a corresponding ``VAR: ${{VAR:-}}`` entry
-    the operator's .env change is silently ignored."""
+    the operator's envvars change is silently ignored."""
     dest = tmp_path / "bty-host"
     deploy_mod.init_main([str(dest)])
     body = (dest / "compose.yml").read_text(encoding="utf-8")
@@ -199,7 +199,7 @@ def test_main_routes_init_to_init_main(tmp_path: Path) -> None:
     dest = tmp_path / "bty-host"
     deploy_mod.main(["init", str(dest)])
     assert (dest / "compose.yml").is_file()
-    assert (dest / ".env.example").is_file()
+    assert (dest / "envvars.example").is_file()
 
 
 def test_main_stays_standalone(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

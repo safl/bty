@@ -11,10 +11,11 @@ and `withcache` (image cache), plus an optional `bty-tftp` sidecar for
 BIOS PXE clients. Bootstrap a fresh host without cloning the repo:
 
 ```bash
-uvx bty-lab init ./bty-host                   # writes compose.yml + .env.example + README
+uvx bty-lab init ./bty-host                   # writes compose.yml + envvars.example + README
 cd bty-host
-cp .env.example .env
-"${EDITOR:-vi}" .env                                  # set HOST_ADDR + WITHCACHE_ADMIN_PASSWORD
+cp envvars.example envvars
+"${EDITOR:-vi}" envvars                       # set HOST_ADDR + WITHCACHE_ADMIN_PASSWORD
+export COMPOSE_ENV_FILES=envvars              # so `podman compose` reads `envvars`
 podman compose up -d
 #   bty-web:   http://<host>:8080/ui
 #   withcache: http://<host>:3000/

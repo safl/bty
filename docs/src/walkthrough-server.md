@@ -35,16 +35,17 @@ A minimal start with `uvx bty-lab init` -- no clone required, `uv` (or
 `pipx`) on the host is enough:
 
 ```sh
-uvx bty-lab init ./bty-host       # writes compose.yml + .env.example + README
+uvx bty-lab init ./bty-host       # writes compose.yml + envvars.example + README
 cd bty-host
-cp .env.example .env
-"${EDITOR:-vi}" .env                      # set HOST_ADDR + WITHCACHE_ADMIN_PASSWORD
+cp envvars.example envvars
+"${EDITOR:-vi}" envvars            # set HOST_ADDR + WITHCACHE_ADMIN_PASSWORD
+export COMPOSE_ENV_FILES=envvars   # so `podman compose` reads `envvars`
 podman compose up -d
 #   bty:       http://<host>:8080/ui
 #   withcache: http://<host>:3000/
 
 # add TFTP for BIOS clients that bootstrap over it:
-podman compose --profile tftp up -d
+podman compose up -d --profile tftp
 ```
 
 `init` pins the `bty-web` / `bty-tftp` image tags to the bty CLI version that

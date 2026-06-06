@@ -10,10 +10,11 @@ over TFTP for BIOS-PXE clients (UEFI HTTP-Boot does not need it).
 No clone required. With `uv` (or `pipx`) on the host:
 
 ```sh
-uvx bty-lab init ./bty-host                   # writes compose.yml + .env.example + README
+uvx bty-lab init ./bty-host                   # writes compose.yml + envvars.example + README
 cd bty-host
-cp .env.example .env
-"${EDITOR:-vi}" .env                                  # set HOST_ADDR + WITHCACHE_ADMIN_PASSWORD
+cp envvars.example envvars
+"${EDITOR:-vi}" envvars                       # set HOST_ADDR + WITHCACHE_ADMIN_PASSWORD
+export COMPOSE_ENV_FILES=envvars              # so `podman compose` loads `envvars` (not `.env`)
 podman compose up -d
 #   bty-web:   http://<host>:8080/ui
 #   withcache: http://<host>:3000/
@@ -23,11 +24,12 @@ podman compose up -d
 that ran it -- so the compose file you get and the image bytes you pull are
 guaranteed to match. To upgrade, re-run `uvx bty-lab init --force .` and
 `podman compose pull && podman compose up -d`. State under `data/` survives
-the restart.
+the restart. (Without `COMPOSE_ENV_FILES=envvars` exported, append
+`--env-file envvars` to every compose call.)
 
 `bty-web` reads `$BTY_WITHCACHE_URL` (set by the compose file) on boot and
 auto-wires withcache as its image source. No UI configuration is needed for
-first boot; just `HOST_ADDR` + a password in `.env`.
+first boot; just `HOST_ADDR` + a password in `envvars`.
 
 For BIOS clients that PXE-boot via TFTP:
 
@@ -45,8 +47,8 @@ where state goes:
 - `./data/withcache/` -- withcache's `/data` (cached image blobs).
 
 Put state on a dedicated disk by passing `--data-dir /srv/bty/data` to `init`
-(or by setting `BTY_HOST_DATA_DIR=/srv/bty/data` in `.env`). Migrating to a
-different host = copy these two directories + the `.env` + `compose.yml`.
+(or by setting `BTY_HOST_DATA_DIR=/srv/bty/data` in `envvars`). Migrating to a
+different host = copy these two directories + the `envvars` + `compose.yml`.
 
 ## Auto-start on boot (systemd via Quadlet)
 
@@ -54,7 +56,7 @@ different host = copy these two directories + the `.env` + `compose.yml`.
 
 ```sh
 uvx bty-lab init ./bty-host --systemd
-cd bty-host && cp .env.example .env && "${EDITOR:-vi}" .env
+cd bty-host && cp envvars.example envvars && "${EDITOR:-vi}" envvars
 sudo cp quadlet/*.container /etc/containers/systemd/
 sudo systemctl daemon-reload
 sudo systemctl start withcache.service bty-web.service
