@@ -35,7 +35,7 @@ def test_default_dest_writes_three_files(
     assert (dest / "data" / "withcache").is_dir()
     captured = capsys.readouterr()
     assert "wrote 3 files" in captured.err
-    assert "podman compose up -d" in captured.err
+    assert "podman compose --profile tftp up -d" in captured.err
 
 
 def test_compose_pins_to_current_bty_version(tmp_path: Path) -> None:
@@ -252,3 +252,241 @@ def test_main_version_flag(capsys: pytest.CaptureFixture[str]) -> None:
     assert excinfo.value.code == 0
     out = capsys.readouterr().out
     assert bty.__version__ in out
+
+
+# ---- deploy + upgrade subcommands -------------------------------------------
+
+
+@pytest.fixture
+def _patched_runtime(monkeypatch: pytest.MonkeyPatch) -> dict[str, list]:
+    """Stub the runtime side-effects of `deploy` / `upgrade`:
+
+    - prereqs always pass (podman + podman-compose simulated as on PATH).
+    - host-addr auto-detection returns a stable address (so test output
+      doesn't drift with the developer's NIC layout).
+    - ``_run`` accumulates invocations into a list rather than spawning
+      podman / systemctl.
+    - ``_install_quadlets`` is a no-op (system path / root not exercised
+      here; covered separately).
+
+    Returns the calls dict the test can inspect."""
+    calls: dict[str, list] = {"run": [], "quadlets": []}
+
+    def fake_run(cmd, *, cwd=None, env=None):  # type: ignore[no-untyped-def]
+        calls["run"].append((list(cmd), cwd))
+
+    def fake_install_quadlets(dest, *, force):  # type: ignore[no-untyped-def]
+        # Mimic the real return shape; record for assertions.
+        calls["quadlets"].append((Path(dest), force))
+        return [deploy_mod.QUADLET_SYSTEM_DIR / "bty-web.container"]
+
+    monkeypatch.setattr(deploy_mod, "_run", fake_run)
+    monkeypatch.setattr(deploy_mod, "_install_quadlets", fake_install_quadlets)
+    monkeypatch.setattr(deploy_mod.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(deploy_mod, "_detect_host_addr", lambda: "10.20.30.200")
+    monkeypatch.setattr(deploy_mod.os, "geteuid", lambda: 0)
+    return calls
+
+
+def test_deploy_emits_envvars_and_runs_compose(
+    tmp_path: Path, _patched_runtime: dict[str, list]
+) -> None:
+    """``deploy`` writes a real ``envvars`` (not just .example) with the
+    detected HOST_ADDR + the historic-PAM "bty" admin password default
+    (session secret stays random crypto material), and runs ``podman
+    compose pull`` + ``up -d``."""
+    dest = tmp_path / "bty-host"
+    deploy_mod.deploy_main([str(dest)])
+
+    envvars = (dest / "envvars").read_text(encoding="utf-8")
+    assert "\nHOST_ADDR=10.20.30.200\n" in envvars
+    # Admin passwords default to "bty" (memorable, matches PAM convention).
+    assert "\nBTY_ADMIN_PASSWORD=bty\n" in envvars
+    assert "\nWITHCACHE_ADMIN_PASSWORD=bty\n" in envvars
+    # Session secret is random crypto material -- just assert it's filled.
+    session_line = next(
+        line for line in envvars.splitlines() if line.startswith("BTY_SESSION_SECRET=")
+    )
+    assert len(session_line.split("=", 1)[1]) >= 32
+
+    # podman compose pull + up -d both ran, with --profile tftp baked in.
+    run_cmds = [cmd for cmd, _ in _patched_runtime["run"]]
+    assert ["podman", "compose", "--env-file", "envvars", "--profile", "tftp", "pull"] in run_cmds
+    assert [
+        "podman",
+        "compose",
+        "--env-file",
+        "envvars",
+        "--profile",
+        "tftp",
+        "up",
+        "-d",
+    ] in run_cmds
+
+
+def test_deploy_systemd_installs_quadlets_and_starts_services(
+    tmp_path: Path, _patched_runtime: dict[str, list]
+) -> None:
+    """``deploy --systemd`` also installs Quadlet units, runs
+    daemon-reload, and starts the services."""
+    dest = tmp_path / "bty-host"
+    deploy_mod.deploy_main([str(dest), "--systemd"])
+
+    assert len(_patched_runtime["quadlets"]) == 1
+    run_cmds = [cmd for cmd, _ in _patched_runtime["run"]]
+    assert ["systemctl", "daemon-reload"] in run_cmds
+    # The systemctl start invocation lists all three services in one call.
+    starts = [cmd for cmd in run_cmds if cmd[:2] == ["systemctl", "start"]]
+    assert len(starts) == 1
+    assert set(starts[0][2:]) == set(deploy_mod._SYSTEMD_SERVICES)
+
+
+def test_deploy_host_addr_override(tmp_path: Path, _patched_runtime: dict[str, list]) -> None:
+    """``--host-addr`` overrides auto-detection and lands in envvars."""
+    dest = tmp_path / "bty-host"
+    deploy_mod.deploy_main([str(dest), "--host-addr", "192.168.50.10"])
+    assert "\nHOST_ADDR=192.168.50.10\n" in (dest / "envvars").read_text(encoding="utf-8")
+
+
+def test_deploy_refuses_existing_envvars_without_force(
+    tmp_path: Path, _patched_runtime: dict[str, list]
+) -> None:
+    """Pre-existing ``envvars`` is preserved unless ``--force`` -- a
+    silent overwrite would replace operator-set passwords."""
+    dest = tmp_path / "bty-host"
+    deploy_mod.deploy_main([str(dest)])  # first run lands envvars
+    with pytest.raises(SystemExit) as excinfo:
+        deploy_mod.deploy_main([str(dest)])  # second run, no --force
+    assert excinfo.value.code == 1
+
+
+def test_deploy_force_overwrites_envvars(tmp_path: Path, _patched_runtime: dict[str, list]) -> None:
+    """``--force`` regenerates everything, including envvars (admin
+    passwords reset to the "bty" default, session secret rotates to a
+    fresh random value)."""
+    dest = tmp_path / "bty-host"
+    deploy_mod.deploy_main([str(dest)])
+    sess1 = next(
+        line
+        for line in (dest / "envvars").read_text().splitlines()
+        if line.startswith("BTY_SESSION_SECRET=")
+    )
+    deploy_mod.deploy_main([str(dest), "--force"])
+    sess2 = next(
+        line
+        for line in (dest / "envvars").read_text().splitlines()
+        if line.startswith("BTY_SESSION_SECRET=")
+    )
+    # Session secret rotates on --force (it's fresh random each time).
+    assert sess1 != sess2
+
+
+def test_deploy_missing_prereq_aborts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``-f`` does NOT bypass missing prereqs -- the deploy genuinely
+    can't proceed without podman / a compose backend."""
+    monkeypatch.setattr(deploy_mod.shutil, "which", lambda name: None)
+    with pytest.raises(SystemExit) as excinfo:
+        deploy_mod.deploy_main([str(tmp_path / "bty-host"), "--force"])
+    assert excinfo.value.code == 1
+    err = capsys.readouterr().err
+    assert "podman" in err
+
+
+def test_deploy_systemd_without_root_aborts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``--systemd`` writes to /etc/containers/systemd and runs
+    systemctl -- both need root. Refuse cleanly with a re-run hint."""
+    monkeypatch.setattr(deploy_mod.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(deploy_mod.os, "geteuid", lambda: 1000)
+    with pytest.raises(SystemExit) as excinfo:
+        deploy_mod.deploy_main([str(tmp_path / "bty-host"), "--systemd"])
+    assert excinfo.value.code == 1
+    err = capsys.readouterr().err
+    assert "root" in err.lower() or "sudo" in err
+
+
+def test_upgrade_refuses_without_existing_compose(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`upgrade` is for an existing deploy -- refuse if compose.yml /
+    envvars are missing so the operator doesn't accidentally regenerate
+    over a stale dir."""
+    with pytest.raises(SystemExit) as excinfo:
+        deploy_mod.upgrade_main([str(tmp_path / "bty-host")])
+    assert excinfo.value.code == 1
+    assert "deploy" in capsys.readouterr().err
+
+
+def test_upgrade_pulls_and_restarts_compose_managed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, _patched_runtime: dict[str, list]
+) -> None:
+    """`upgrade` on a compose-managed stack pulls + re-`up -d`s."""
+    dest = tmp_path / "bty-host"
+    deploy_mod.deploy_main([str(dest)])  # set up the deploy
+    _patched_runtime["run"].clear()
+
+    # Force the Quadlet-detect check to see no installed units.
+    def _no_quadlets(self):  # type: ignore[no-untyped-def]
+        return not str(self).startswith("/etc/containers/systemd")
+
+    monkeypatch.setattr(Path, "exists", _no_quadlets)
+
+    # Pre-create compose + envvars existence checks pass (they were written
+    # by the deploy call above).
+    deploy_mod.upgrade_main([str(dest)])
+    run_cmds = [cmd for cmd, _ in _patched_runtime["run"]]
+    assert any(c[-1] == "pull" for c in run_cmds)
+    assert any(c[-2:] == ["up", "-d"] for c in run_cmds)
+    # No systemctl on a compose-managed upgrade.
+    assert not any(c[0] == "systemctl" for c in run_cmds)
+
+
+def test_upgrade_quadlet_managed_detects_and_uses_systemctl(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, _patched_runtime: dict[str, list]
+) -> None:
+    """When Quadlet units exist under /etc/containers/systemd, upgrade
+    auto-detects and uses daemon-reload + restart instead of compose up."""
+    dest = tmp_path / "bty-host"
+    deploy_mod.deploy_main([str(dest), "--systemd"])
+    _patched_runtime["run"].clear()
+    _patched_runtime["quadlets"].clear()
+    # Stub Path.exists so the QUADLET_SYSTEM_DIR check fires True.
+    real_exists = Path.exists
+
+    def fake_exists(self):  # type: ignore[no-untyped-def]
+        if str(self).startswith("/etc/containers/systemd"):
+            return True
+        return real_exists(self)
+
+    monkeypatch.setattr(Path, "exists", fake_exists)
+
+    deploy_mod.upgrade_main([str(dest)])
+    run_cmds = [cmd for cmd, _ in _patched_runtime["run"]]
+    assert ["systemctl", "daemon-reload"] in run_cmds
+    restarts = [cmd for cmd in run_cmds if cmd[:2] == ["systemctl", "restart"]]
+    assert len(restarts) == 1
+    assert set(restarts[0][2:]) == set(deploy_mod._SYSTEMD_SERVICES)
+
+
+def test_main_dispatches_deploy_and_upgrade(
+    tmp_path: Path, _patched_runtime: dict[str, list]
+) -> None:
+    """The top-level dispatcher routes `deploy` and `upgrade` to their
+    handlers (regression for the subcommand-sniff list)."""
+    dest = tmp_path / "bty-host"
+    deploy_mod.main(["deploy", str(dest)])
+    assert (dest / "envvars").is_file()
+    deploy_mod.main(["upgrade", str(dest)])  # would crash if dispatcher missed it
+
+
+def test_main_help_lists_all_three_subcommands(capsys: pytest.CaptureFixture[str]) -> None:
+    """No-arg help mentions init / deploy / upgrade, so an operator who
+    runs `pipx run bty-lab` blind discovers all three."""
+    with pytest.raises(SystemExit):
+        deploy_mod.main([])
+    err = capsys.readouterr().err
+    for subcommand in ("init", "deploy", "upgrade"):
+        assert subcommand in err

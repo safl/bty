@@ -252,15 +252,24 @@ server -- a confusing version split.
 
 ### Upgrade the container deploy
 
-In the container deploy the upgrade is a `init --force` (regenerates
-compose with new image pins) + pull + restart. State under `data/` carries
-across:
+In the container deploy the upgrade is a single `bty-lab upgrade` call.
+It regenerates compose against the CLI's bty version (image-tag pin moves
+forward), preserves `envvars` + `data/`, pulls new images, and restarts
+the stack -- auto-detecting whether to drive that via `podman compose up
+-d` (plain) or `systemctl restart` (Quadlet-managed):
 
 ```sh
-cd ./bty-host                       # the dir you bootstrapped with `init`
+uvx bty-lab upgrade /opt/bty        # the dir you bootstrapped with `init` / `deploy`
+```
+
+For step-by-step control, run the pieces manually (re-emit, then pull +
+restart):
+
+```sh
+cd /opt/bty
 uvx bty-lab init --force .          # regenerates compose.yml against newer bty
-podman compose pull
-podman compose up -d
+podman compose --env-file envvars --profile tftp pull
+podman compose --env-file envvars --profile tftp up -d
 ```
 
 `AutoUpdate=registry` plus `podman-auto-update.timer` automate the pull

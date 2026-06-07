@@ -24,35 +24,44 @@ of three ways:
 
 ## Quick start -- the canonical container deploy
 
-`uvx bty-lab init` writes a ready-to-run compose stack (bty-web +
-withcache, plus an optional TFTP sidecar) into a directory you choose. No
-clone needed; `uv` (or `pipx`) on the host is enough:
+`uvx bty-lab deploy` writes the compose stack (bty-web + withcache, plus
+an optional TFTP sidecar), auto-fills envvars, and brings it up in one
+shot. No clone needed; `uv` (or `pipx`) on the host is enough:
 
 ```bash
-uvx bty-lab init ./bty-host             # writes compose.yml + envvars.example + README
-cd bty-host
-cp envvars.example envvars
-"${EDITOR:-vi}" envvars                  # set HOST_ADDR + WITHCACHE_ADMIN_PASSWORD
-export COMPOSE_ENV_FILES=envvars         # so `podman compose` reads `envvars`
-podman compose up -d                     # bty: :8080/ui  withcache: :3000/
-
-# BIOS PXE clients also need TFTP (UEFI HTTP Boot does not):
-podman compose up -d --profile tftp
+sudo mkdir -p /opt/bty && sudo chown "$USER:$USER" /opt/bty
+uvx bty-lab deploy /opt/bty
+#   bty: :8080/ui  withcache: :3000/
 ```
 
-The emitted `compose.yml` pins the `bty-web` / `bty-tftp` image tags to the
-bty CLI version that produced it -- the compose and the image bytes are
-guaranteed to match. Upgrade with `uvx bty-lab init --force .` then
-`podman compose pull && podman compose up -d`. State under `data/` survives
-the restart.
+`deploy` detects `HOST_ADDR` from the host's outbound-route IP and
+generates random passwords (printed in the final summary, also written to
+`/opt/bty/envvars`). Pass `--host-addr 192.0.2.10` to override the
+detection, or `--force` to overwrite an existing `envvars`.
+
+For systemd-managed auto-start on boot, add `--systemd` (installs Podman
+Quadlet units to `/etc/containers/systemd/` and starts them; requires
+root):
+
+```bash
+sudo uvx bty-lab deploy /opt/bty --systemd
+```
+
+Upgrade against a newer bty release in one shot:
+
+```bash
+uvx bty-lab upgrade /opt/bty     # auto-detects compose- vs Quadlet-managed
+```
+
+`upgrade` preserves `envvars` + `data/`, regenerates compose against the
+CLI's bty version, `podman compose pull`s, then restarts (or `systemctl
+restart`s for Quadlet-managed stacks).
 
 `bty-web` reads `$BTY_WITHCACHE_URL` (set by the compose) at boot and
 auto-wires withcache as its image source -- no UI configuration step.
-
-Pass `--systemd` to additionally emit Podman Quadlet units under
-`quadlet/` for boot-autostart via systemd. See
-[`deploy/README.md`](https://github.com/safl/bty/blob/main/deploy/README.md)
-for the full details.
+For inspect-then-apply control, use `bty-lab init` instead; it emits the
+same files without side effects. Full details:
+[`deploy/README.md`](https://github.com/safl/bty/blob/main/deploy/README.md).
 
 ## Bare `docker run` (dev / single-container)
 
