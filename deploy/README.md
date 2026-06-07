@@ -5,37 +5,43 @@ bty's recommended deploy is two containers on a podman/docker host: `bty-web`
 URL-keyed image cache). An optional `bty-tftp` sidecar serves the iPXE NBP
 over TFTP for BIOS-PXE clients (UEFI HTTP-Boot does not need it).
 
-## Quickstart -- `uvx bty-lab init`
+## Quickstart -- `uvx bty-lab deploy`
 
 No clone required. With `uv` (or `pipx`) on the host:
 
 ```sh
-uvx bty-lab init ./bty-host                   # writes compose.yml + envvars.example + README
-cd bty-host
-cp envvars.example envvars
-"${EDITOR:-vi}" envvars                       # set HOST_ADDR + WITHCACHE_ADMIN_PASSWORD
-export COMPOSE_ENV_FILES=envvars              # so `podman compose` loads `envvars` (not `.env`)
-podman compose up -d
+sudo mkdir -p /opt/bty && sudo chown "$USER:$USER" /opt/bty
+uvx bty-lab deploy /opt/bty
 #   bty-web:   http://<host>:8080/ui
 #   withcache: http://<host>:3000/
 ```
 
-`init` pins the `bty-web` and `bty-tftp` image tags to the bty CLI version
-that ran it -- so the compose file you get and the image bytes you pull are
-guaranteed to match. To upgrade, re-run `uvx bty-lab init --force .` and
-`podman compose pull && podman compose up -d`. State under `data/` survives
-the restart. (Without `COMPOSE_ENV_FILES=envvars` exported, append
-`--env-file envvars` to every compose call.)
+`deploy` emits compose.yml + an auto-filled `envvars` (HOST_ADDR detected
+from the host's outbound-route IP, random passwords + session secret
+generated) and runs `podman compose --profile tftp pull` + `up -d`. The
+final summary prints the generated passwords (also written to
+`/opt/bty/envvars`).
 
 `bty-web` reads `$BTY_WITHCACHE_URL` (set by the compose file) on boot and
 auto-wires withcache as its image source. No UI configuration is needed for
-first boot; just `HOST_ADDR` + a password in `envvars`.
+first boot.
 
-For BIOS clients that PXE-boot via TFTP:
+## Three subcommands
 
-```sh
-podman compose --profile tftp up -d
-```
+- **`bty-lab init [DEST]`** -- emit compose.yml + `envvars.example` +
+  README only. No side effects: no envvars filled, no pulls, no service
+  starts. Use this when you want to inspect / customise before applying.
+- **`bty-lab deploy [DEST]`** -- emit files + auto-fill envvars + bring
+  up the stack via `podman compose --profile tftp up -d`. Pass
+  `--systemd` to also install Podman Quadlet units to
+  `/etc/containers/systemd/` and start them via systemctl (requires
+  root). `-f` / `--force` overwrites existing files; it does NOT bypass
+  missing prereqs.
+- **`bty-lab upgrade [DEST]`** -- re-emit compose against this CLI's
+  bty version (image-tag pin moves forward), preserve `envvars` + `data/`,
+  `podman compose pull`, then restart. Auto-detects a Quadlet-managed
+  stack (units present under `/etc/containers/systemd/`) and uses
+  `systemctl daemon-reload` + `restart` in that case.
 
 ## Where the state lives
 
@@ -52,21 +58,27 @@ different host = copy these two directories + the `envvars` + `compose.yml`.
 
 ## Auto-start on boot (systemd via Quadlet)
 
-`bty-lab init --systemd` additionally writes Podman Quadlet units:
+`bty-lab deploy --systemd` is the one-shot path -- it writes the Quadlet
+units to the deploy dir, copies them to `/etc/containers/systemd/`, runs
+`daemon-reload`, and starts the services:
 
 ```sh
-uvx bty-lab init ./bty-host --systemd
-cd bty-host && cp envvars.example envvars && "${EDITOR:-vi}" envvars
-sudo cp quadlet/*.container /etc/containers/systemd/
-sudo systemctl daemon-reload
-sudo systemctl start withcache.service bty-web.service
-# Optional, for BIOS PXE clients:
-sudo systemctl start bty-tftp.service
+sudo mkdir -p /opt/bty && sudo chown "$USER:$USER" /opt/bty
+sudo uvx bty-lab deploy /opt/bty --systemd
 ```
 
 The Quadlet units bake `data/` as an absolute path (systemd does not run in
 the operator's cwd). `AutoUpdate=registry` + `podman-auto-update.timer`
-pull new images and restart services in place.
+pull new images and restart services in place. To upgrade against a newer
+bty release in one shot:
+
+```sh
+sudo uvx bty-lab upgrade /opt/bty
+```
+
+If you'd rather inspect the units before installing, `bty-lab init
+--systemd` emits them under `<DEST>/quadlet/` and you can `sudo cp`,
+`daemon-reload`, and `systemctl start` manually.
 
 ## How the caching behaves
 

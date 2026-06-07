@@ -143,8 +143,9 @@ the server has never seen, so onboarding a new box needs zero per-MAC
 configuration.
 
 1. Operator brings up the bty-web container deploy:
-   `uvx bty-lab init ./bty-host`, set `HOST_ADDR` + passwords in
-   `bty-host/envvars`, then `podman compose -f bty-host/compose.yml --env-file bty-host/envvars
+   `uvx bty-lab init /opt/bty` (create + chown the dir first), set
+   `HOST_ADDR` + passwords in `/opt/bty/envvars`, then
+   `podman compose -f /opt/bty/compose.yml --env-file /opt/bty/envvars
    --profile tftp up -d`. The web UI is gated by
    `$BTY_ADMIN_PASSWORD` (unset = open, with a startup warning;
    rotate by changing the env var and restarting bty-web); point your

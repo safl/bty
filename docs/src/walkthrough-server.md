@@ -31,30 +31,25 @@ The canonical, step-by-step instructions live with the deploy assets:
   bty-web container in depth: both PXE boot lanes (UEFI HTTP Boot and TFTP
   PXE), bind-mount permissions, env vars, and password rotation.
 
-A minimal start with `uvx bty-lab init` -- no clone required, `uv` (or
+A one-shot start with `uvx bty-lab deploy` -- no clone required, `uv` (or
 `pipx`) on the host is enough:
 
 ```sh
-uvx bty-lab init ./bty-host       # writes compose.yml + envvars.example + README
-cd bty-host
-cp envvars.example envvars
-"${EDITOR:-vi}" envvars            # set HOST_ADDR + WITHCACHE_ADMIN_PASSWORD
-export COMPOSE_ENV_FILES=envvars   # so `podman compose` reads `envvars`
-podman compose up -d
+sudo mkdir -p /opt/bty && sudo chown "$USER:$USER" /opt/bty
+uvx bty-lab deploy /opt/bty        # auto-fills envvars + brings up the stack
 #   bty:       http://<host>:8080/ui
 #   withcache: http://<host>:3000/
-
-# add TFTP for BIOS clients that bootstrap over it:
-podman compose up -d --profile tftp
 ```
 
-`init` pins the `bty-web` / `bty-tftp` image tags to the bty CLI version that
-emitted the compose, so the file you get and the bytes you pull match. State
-(bty's DB and images, withcache's blobs) lives in host bind-mounts under
-`./data/` and survives container restarts and image re-pulls. The image cache
-is delegated to withcache, so multiple targets pull each image once. To
-upgrade, re-run `uvx bty-lab init --force .` then
-`podman compose pull && podman compose up -d`.
+`deploy` detects `HOST_ADDR` from the host's outbound-route IP, generates
+random passwords + a session secret into `envvars`, then runs `podman
+compose --profile tftp pull` + `up -d`. The generated passwords are
+printed in the final summary and also written to `/opt/bty/envvars`. The
+emitted `compose.yml` pins the `bty-web` / `bty-tftp` image tags to the
+bty CLI version that ran the command, so compose and image bytes match.
+State (bty's DB and images, withcache's blobs) lives in host bind-mounts
+under `./data/` and survives container restarts and image re-pulls. To
+upgrade in place, re-run `uvx bty-lab upgrade /opt/bty`.
 
 ## Configure DHCP
 

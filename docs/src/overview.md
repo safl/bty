@@ -30,7 +30,7 @@ bridges the two:
   full PXE server.
 - **PXE-driven (no operator).** `bty-web` run as a container alongside
   `withcache` (the image cache) and an optional tftp sidecar -- bootstrap
-  with `uvx bty-lab init ./bty-host` and `podman compose up -d`. The stack
+  with `uvx bty-lab init /opt/bty` and `podman compose up -d`. The stack
   serves the UI, per-MAC PXE plans, boot artifacts, and images over HTTP.
   Fleet members are registered by MAC address; reflashes happen on
   schedule, on demand, or on failure with no operator at the target. Best
