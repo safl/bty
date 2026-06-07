@@ -9,6 +9,66 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.39.0] - 2026-06-07
+
+**Polish pass on the v0.38.0 ``bty-lab deploy``, from real-world
+reproduction on a fresh nosi-built lab host.** The headline fix is
+the broken container-tag pin (``:v0.38.0`` vs the actual GHCR tag
+``:0.38.0``) that made every deploy land in "manifest unknown".
+Bundled with that: the deploy/upgrade UX gets quieter, more
+auto-detecting, and self-cleaning so the canonical install is a
+single ``sudo uvx bty-lab deploy /opt/bty``.
+
+### Fixed
+
+- **GHCR tag pin matches what CI publishes.** ``compose.yml`` and the
+  Quadlet ``Image=`` lines previously emitted ``ghcr.io/safl/bty-web:v{version}``
+  with a leading ``v``, but the publish job strips that prefix (the
+  201 historical container tags are all ``0.x.y``, no ``v``). Every
+  ``deploy`` failed with "manifest unknown" on bty-web + bty-tftp;
+  only ``withcache:latest`` came up. Drop the ``v`` from all four
+  template positions.
+
+### Changed
+
+- **`bty-lab deploy` auto-detects install mode from euid** (BREAKING:
+  the previous ``--systemd`` flag is removed). Run as root: full
+  system install (TFTP sidecar + Podman Quadlet units installed to
+  ``/etc/containers/systemd/`` + systemctl autostart). Run as a
+  regular user: compose-only install -- no TFTP, no autostart, with
+  a loud "limitations" block at the end naming exactly what was
+  skipped and the ``sudo`` re-run command to promote. The
+  privileged side is what ``sudo`` already implies; ``--systemd``
+  was redundant.
+- **`bty-lab deploy` handles the deploy-dir prep itself** -- no more
+  ``sudo mkdir -p /opt/bty && sudo chown "$USER:$USER" /opt/bty``
+  preamble. Run as root, the dest is created if missing and the
+  whole emitted tree is chowned back to ``$SUDO_USER`` so the
+  operator can ``vim envvars`` without sudo afterwards.
+- **`[N/M]` step numbering** on every ``deploy`` / ``upgrade`` step.
+  Totals are computed up front from the auto-detected mode flags --
+  14 steps for a root+sudo deploy, 10 for a user-mode deploy, etc.
+  Operator sees position-in-run as the install streams.
+- **`upgrade` follows the same root/user auto-detect.** Refuses
+  cleanly when the stack is Quadlet-managed but the upgrade was
+  invoked without root -- a plain ``podman compose up -d`` would
+  race the systemd-managed containers.
+
+### Docs
+
+- **Sidebar wordmark removed** -- Furo's ``sidebar_hide_name: True``
+  drops the redundant "bty" text next to the mascot logo. The H1 on
+  the landing page also drops the ``bty -`` prefix; the logo + alt
+  text identify the project on their own.
+- **Tutorials fetch the release asset directly.** Ventoy / piKVM /
+  JetKVM / BMC tutorials all referenced ``~/system_imaging/disk/...``
+  (a build-host artifact path) -- now use the standard
+  ``release.toml`` discovery pattern that ``quickstart.md`` already
+  uses. Also fixes a stale ``.iso.gz`` filename in ``bmc.md`` --
+  current releases ship uncompressed ``.iso`` only.
+- **Docs landing CI badge fixed** -- ``ci.yml`` -> ``ci-cd.yml`` to
+  match the actual workflow file. Was 404'ing in the sidebar.
+
 ## [0.38.0] - 2026-06-07
 
 **`bty-lab deploy` + `upgrade` subcommands so first-boot of a bty
