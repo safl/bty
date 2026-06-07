@@ -36,17 +36,20 @@ Upload your pre-built images via the bty-web Images page
 3. Network: piKVM to your LAN.
 4. Open piKVM's web UI in a browser.
 
-## Step 3: Upload `bty-usb-x86_64.iso` to piKVM
+## Step 3: Upload the bty USB ISO to piKVM
 
 ```bash
-# v0.25.4+ ships uncompressed .iso -- no decompress step needed.
-ls ~/system_imaging/disk/bty-usb-x86_64.iso
+# Discover the current release + download the USB ISO. For a specific
+# version, replace `latest` with a tag like v0.38.0.
+VERSION=$(curl -fsSL https://github.com/safl/bty/releases/latest/download/release.toml \
+  | grep -oP 'version = "\K[^"]+')
+curl -fLO https://github.com/safl/bty/releases/download/v$VERSION/bty-usb-x86_64-v$VERSION.iso
 ```
 
 In the piKVM web UI:
 
 1. Open the "Storage" page.
-2. Click "Upload" and select `bty-usb-x86_64.iso`.
+2. Click "Upload" and select `bty-usb-x86_64-v$VERSION.iso`.
 3. Wait for the upload to finish.
 4. Pick the entry; in the dialog, set "Mode" to **CD-ROM**.
 5. Click "Connect" (or the analogous "Attach" button).

@@ -49,13 +49,16 @@ gives you the same virtual-media flow without the vendor paywall.
 
 The vendor UIs differ in detail but the flow is the same:
 
-1. **Decompress the bty ISO** on the workstation talking to the BMC:
+1. **Download the bty ISO** on the workstation talking to the BMC.
+   For a specific version, replace `latest` with a tag like `v0.38.0`:
    ```bash
-   curl -fLO https://github.com/safl/bty/releases/latest/download/bty-usb-x86_64-v$VERSION.iso.gz
-   gunzip bty-usb-x86_64-v$VERSION.iso.gz
+   VERSION=$(curl -fsSL https://github.com/safl/bty/releases/latest/download/release.toml \
+     | grep -oP 'version = "\K[^"]+')
+   curl -fLO https://github.com/safl/bty/releases/download/v$VERSION/bty-usb-x86_64-v$VERSION.iso
    ```
 2. **Open the BMC's remote-console / KVM viewer**, then open the
-   **Virtual Media** panel. Attach the `.iso` as a virtual CD-ROM.
+   **Virtual Media** panel. Attach `bty-usb-x86_64-v$VERSION.iso` as
+   a virtual CD-ROM.
    - Supermicro: *Remote Control > iKVM/HTML5 > Virtual Media*.
    - iDRAC: *Configuration > Virtual Media > Connect*.
    - iLO: *Remote Console > Virtual Media > Image File CD/DVD-ROM*.

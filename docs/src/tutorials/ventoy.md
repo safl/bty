@@ -18,15 +18,19 @@ macOS. After install, the stick has two partitions: a small EFI /
 bootloader partition and a large exFAT data partition labelled `Ventoy`
 (the rest of the stick).
 
-## Step 2: Stage `bty-usb-x86_64.iso` on the Ventoy partition
+## Step 2: Stage the bty USB ISO on the Ventoy partition
 
 ```bash
+# Discover the current release version + download the USB ISO. The
+# release.toml URL always redirects to the newest tag, so this picks
+# up whatever's latest. For a specific version, replace `latest` with
+# a tag like v0.38.0.
+VERSION=$(curl -fsSL https://github.com/safl/bty/releases/latest/download/release.toml \
+  | grep -oP 'version = "\K[^"]+')
+curl -fLO https://github.com/safl/bty/releases/download/v$VERSION/bty-usb-x86_64-v$VERSION.iso
+
 sudo mount /dev/disk/by-label/Ventoy /mnt
-
-# v0.25.4+ ships uncompressed .iso so Ventoy just boots it as-is.
-ls ~/system_imaging/disk/bty-usb-x86_64.iso
-
-sudo cp ~/system_imaging/disk/bty-usb-x86_64.iso /mnt/
+sudo cp bty-usb-x86_64-v$VERSION.iso /mnt/
 ```
 
 The `.iso` can sit at the root of the Ventoy partition or in any
@@ -53,7 +57,7 @@ The discovery service accepts either layout:
    pre-built images visually separate from the `.iso` files Ventoy
    boots.
 2. **Quick-drop**: the same files at the partition root, alongside
-   `bty-usb-x86_64.iso`. Less tidy but supported.
+   `bty-usb-x86_64-v$VERSION.iso`. Less tidy but supported.
 
 The service tries the subfolder first, then falls back to the root.
 First match with at least one supported file (`.img*` / `.qcow2` /
@@ -65,7 +69,7 @@ picks it up.
 1. Plug the Ventoy stick into the target machine.
 2. Power-cycle the target, enter the BIOS/UEFI boot menu, pick the
    Ventoy stick.
-3. Ventoy's menu appears. Pick `bty-usb-x86_64.iso`.
+3. Ventoy's menu appears. Pick `bty-usb-x86_64-v$VERSION.iso`.
 4. bty live env boots. `bty-images-discover.service` scans the attached
    partitions, finds `bty-images/` on the Ventoy stick, and
    bind-mounts it at `/var/lib/bty/images`.
