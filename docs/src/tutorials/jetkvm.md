@@ -1,37 +1,45 @@
 # bty via JetKVM (KVM-over-IP)
 
-[JetKVM](https://jetkvm.com/) is a compact KVM-over-IP dongle with a
-web UI for video, keyboard / mouse, and **virtual media** (mounts an
-uploaded ISO to the target as a USB device). The bty workflow is
-identical to [PiKVM](pikvm.md) -- the only difference is the host UI.
+[JetKVM](https://jetkvm.com) is a compact commercial IP-KVM
+(USB-stick-shaped) with mass-storage emulation. Same constraint as
+[piKVM](pikvm.md): the `.iso` is hosted as a single CD-ROM, so there is
+no local storage for image files. Use a remote `bty-web` for the
+catalog.
 
-## Why use this combo
+## Step 1: Set up a `bty-web` server reachable from the target
 
-- Tiny remote-access dongle for a small lab / home-rack: bolt one onto a
-  box, drive its boot media remotely.
-- Same keyboard-only bty wizard you'd run from a stick, accessible over
-  the browser.
+Same as [piKVM Step 1](pikvm.md#step-1-set-up-a-bty-web-server-reachable-from-the-target).
+Run a `bty-web` instance somewhere on the LAN; note its IP and port.
 
-## Steps
+## Step 2: Connect JetKVM to the target
 
-1. **Grab the bty ISO** on the workstation that talks to the JetKVM web
-   UI:
-   ```bash
-   curl -fLO https://github.com/safl/bty/releases/latest/download/bty-usb-x86_64-v$VERSION.iso.gz
-   gunzip bty-usb-x86_64-v$VERSION.iso.gz
-   ```
-2. **Upload + mount.** In the JetKVM UI, open the **Virtual Media** /
-   storage panel, upload the `.iso`, and attach it as a USB / CD-ROM
-   device to the target.
-3. **Boot the target from virtual media.** Power-cycle or reset via the
-   JetKVM power control; pick the virtual device in firmware boot menu.
-4. **Run the wizard.** bty on tty1, keyboard-driven, same as a physical
-   stick.
+Cable per the JetKVM quickstart (USB-C from JetKVM to target; JetKVM
+to LAN). Pair the device with your JetKVM account, reach its web UI.
 
-## Caveats
+## Step 3: Upload `bty-usb-x86_64.iso` to JetKVM
 
-- **Catalog source.** As with PiKVM, the virtual-media ISO is read-only,
-  so `BTY_IMAGES` is empty. Use `--catalog` against a bty-web instance
-  or fall back to the `[d] default` GHCR-streaming catalog.
-- **Stream quality vs flash speed.** The JetKVM stream is for operator
-  input; the actual image bytes flow over the target's NIC.
+```bash
+# v0.25.4+ ships uncompressed .iso -- no decompress step needed.
+ls ~/system_imaging/disk/bty-usb-x86_64.iso
+```
+
+In the JetKVM web UI:
+
+1. Open the "Virtual Media" panel.
+2. Upload `bty-usb-x86_64.iso`.
+3. Mount the uploaded image as a virtual CD-ROM.
+
+## Step 4: Boot the target
+
+1. Power-cycle the target via JetKVM's power-control page.
+2. In the HDMI viewer, enter the target's boot menu and pick the
+   JetKVM virtual storage device.
+3. The bty live env boots; `bty` opens on tty1.
+
+## Step 5: Point `bty` at the remote `bty-web` catalog
+
+Same as [piKVM Step 5](pikvm.md#step-5-point-bty-at-the-remote-bty-web-catalog):
+type `c` at the source-pick prompt, enter the catalog URL (e.g.
+`http://10.0.0.5:8080/catalog.toml`). The catalog populates from the
+server; images stream through the JetKVM-booted live env to the
+target's disk.
