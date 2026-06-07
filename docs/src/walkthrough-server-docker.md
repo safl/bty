@@ -30,23 +30,24 @@ shot. No clone needed; `uv` (or `pipx`) on the host is enough:
 
 ```bash
 sudo mkdir -p /opt/bty && sudo chown "$USER:$USER" /opt/bty
-uvx bty-lab deploy /opt/bty
+sudo uvx bty-lab deploy /opt/bty
 #   bty: :8080/ui  withcache: :3000/   (login: bty / bty)
 ```
 
-`deploy` detects `HOST_ADDR` from the host's outbound-route IP and writes
-admin passwords (default `bty`) into `/opt/bty/envvars`. Change them
-before exposing the host past a trusted LAN. Pass `--host-addr
+`deploy` detects install mode from your euid: as root, the full system
+install (TFTP sidecar + Quadlet units + systemctl autostart); as a
+regular user, the compose-only install (no TFTP, no autostart, with a
+warning listing exactly what was skipped). `HOST_ADDR` is detected from
+the host's outbound-route IP; admin passwords default to `bty`. Change
+them before exposing the host past a trusted LAN. Pass `--host-addr
 192.0.2.10` to override detection, or `--force` to overwrite an existing
 `envvars`.
 
-For systemd-managed auto-start on boot, add `--systemd` (installs Podman
-Quadlet units to `/etc/containers/systemd/` and starts them; requires
-root):
-
-```bash
-sudo uvx bty-lab deploy /opt/bty --systemd
-```
+The `sudo` is what triggers the full install: Podman Quadlet units land
+in `/etc/containers/systemd/`, the services start via systemctl, and the
+stack survives host reboots. Without `sudo` the same command lands a
+compose-only user install (operator-managed lifecycle, no autostart) --
+useful for development hosts where you don't want systemd in the loop.
 
 Upgrade against a newer bty release in one shot:
 

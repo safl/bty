@@ -324,21 +324,76 @@ def test_deploy_emits_envvars_and_runs_compose(
     ] in run_cmds
 
 
-def test_deploy_systemd_installs_quadlets_and_starts_services(
+def test_deploy_as_root_does_system_install(
     tmp_path: Path, _patched_runtime: dict[str, list]
 ) -> None:
-    """``deploy --systemd`` also installs Quadlet units, runs
-    daemon-reload, and starts the services."""
+    """Run as root, ``deploy`` does the full system install: TFTP
+    sidecar in the compose call + Quadlet units installed + systemctl
+    daemon-reload + service start."""
     dest = tmp_path / "bty-host"
-    deploy_mod.deploy_main([str(dest), "--systemd"])
+    deploy_mod.deploy_main([str(dest)])  # _patched_runtime fakes geteuid==0
 
-    assert len(_patched_runtime["quadlets"]) == 1
+    # TFTP profile is included on the compose calls.
     run_cmds = [cmd for cmd, _ in _patched_runtime["run"]]
+    assert ["podman", "compose", "--env-file", "envvars", "--profile", "tftp", "pull"] in run_cmds
+    assert [
+        "podman",
+        "compose",
+        "--env-file",
+        "envvars",
+        "--profile",
+        "tftp",
+        "up",
+        "-d",
+    ] in run_cmds
+    # Quadlet units installed + systemctl invocations.
+    assert len(_patched_runtime["quadlets"]) == 1
     assert ["systemctl", "daemon-reload"] in run_cmds
-    # The systemctl start invocation lists all three services in one call.
     starts = [cmd for cmd in run_cmds if cmd[:2] == ["systemctl", "start"]]
     assert len(starts) == 1
     assert set(starts[0][2:]) == set(deploy_mod._SYSTEMD_SERVICES)
+
+
+def test_deploy_as_non_root_does_user_install(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, _patched_runtime: dict[str, list]
+) -> None:
+    """Run as non-root, ``deploy`` does the compose-only user install:
+    no TFTP profile, no Quadlet install, no systemctl, plus a loud
+    "limitations" warning naming exactly what's missing + the re-run
+    command to promote to a system install."""
+    monkeypatch.setattr(deploy_mod.os, "geteuid", lambda: 1000)
+    dest = tmp_path / "bty-host"
+    deploy_mod.deploy_main([str(dest)])
+
+    run_cmds = [cmd for cmd, _ in _patched_runtime["run"]]
+    # Compose runs without the --profile tftp flag (TFTP needs root for UDP/69).
+    assert ["podman", "compose", "--env-file", "envvars", "pull"] in run_cmds
+    assert ["podman", "compose", "--env-file", "envvars", "up", "-d"] in run_cmds
+    # No --profile tftp in any compose call.
+    assert not any("--profile" in cmd for cmd in run_cmds if cmd[:2] == ["podman", "compose"])
+    # No Quadlets installed, no systemctl.
+    assert _patched_runtime["quadlets"] == []
+    assert not any(cmd[0] == "systemctl" for cmd in run_cmds)
+
+
+def test_deploy_user_install_warns_about_limitations(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    _patched_runtime: dict[str, list],
+) -> None:
+    """The user-install path must surface exactly what's missing and
+    how to promote -- without this, operators see no autostart on
+    reboot and don't realise why."""
+    monkeypatch.setattr(deploy_mod.os, "geteuid", lambda: 1000)
+    dest = tmp_path / "bty-host"
+    deploy_mod.deploy_main([str(dest)])
+    err = capsys.readouterr().err
+    assert "user install [non-root]" in err
+    assert "No autostart" in err
+    assert "No TFTP sidecar" in err
+    # The re-run command must be present so the operator can copy-paste.
+    assert f"sudo bty-lab deploy {dest} --force" in err
 
 
 def test_deploy_host_addr_override(tmp_path: Path, _patched_runtime: dict[str, list]) -> None:
@@ -394,18 +449,37 @@ def test_deploy_missing_prereq_aborts(
     assert "podman" in err
 
 
-def test_deploy_systemd_without_root_aborts(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+def test_upgrade_refuses_quadlet_managed_without_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    _patched_runtime: dict[str, list],
 ) -> None:
-    """``--systemd`` writes to /etc/containers/systemd and runs
-    systemctl -- both need root. Refuse cleanly with a re-run hint."""
-    monkeypatch.setattr(deploy_mod.shutil, "which", lambda name: f"/usr/bin/{name}")
+    """Upgrading a Quadlet-managed stack as non-root would race the
+    running systemd-managed containers via `podman compose up -d`. The
+    new auto-detect refuses cleanly with a re-run hint."""
+    dest = tmp_path / "bty-host"
+    deploy_mod.deploy_main([str(dest)])  # full system install (root)
+    _patched_runtime["run"].clear()
+
+    # Pretend the operator now invokes upgrade as a normal user, but
+    # the Quadlet units are still installed system-wide.
     monkeypatch.setattr(deploy_mod.os, "geteuid", lambda: 1000)
+    real_exists = Path.exists
+
+    def fake_exists(self):  # type: ignore[no-untyped-def]
+        if str(self).startswith("/etc/containers/systemd"):
+            return True
+        return real_exists(self)
+
+    monkeypatch.setattr(Path, "exists", fake_exists)
+
     with pytest.raises(SystemExit) as excinfo:
-        deploy_mod.deploy_main([str(tmp_path / "bty-host"), "--systemd"])
+        deploy_mod.upgrade_main([str(dest)])
     assert excinfo.value.code == 1
     err = capsys.readouterr().err
-    assert "root" in err.lower() or "sudo" in err
+    assert "Quadlet-managed" in err
+    assert f"sudo bty-lab upgrade {dest}" in err
 
 
 def test_upgrade_refuses_without_existing_compose(
@@ -444,13 +518,15 @@ def test_upgrade_pulls_and_restarts_compose_managed(
     assert not any(c[0] == "systemctl" for c in run_cmds)
 
 
-def test_upgrade_quadlet_managed_detects_and_uses_systemctl(
+def test_upgrade_quadlet_managed_as_root_uses_systemctl(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, _patched_runtime: dict[str, list]
 ) -> None:
-    """When Quadlet units exist under /etc/containers/systemd, upgrade
-    auto-detects and uses daemon-reload + restart instead of compose up."""
+    """When Quadlet units exist under /etc/containers/systemd and
+    upgrade runs as root, it refreshes the units + daemon-reload +
+    systemctl restart (instead of `podman compose up -d` which would
+    race the running systemd-managed containers)."""
     dest = tmp_path / "bty-host"
-    deploy_mod.deploy_main([str(dest), "--systemd"])
+    deploy_mod.deploy_main([str(dest)])  # system install (root via fixture)
     _patched_runtime["run"].clear()
     _patched_runtime["quadlets"].clear()
     # Stub Path.exists so the QUADLET_SYSTEM_DIR check fires True.

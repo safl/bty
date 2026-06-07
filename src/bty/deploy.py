@@ -44,7 +44,7 @@ import bty
 QUADLET_SYSTEM_DIR = Path("/etc/containers/systemd")
 
 # Service names the Quadlet units in this module generate. Used by
-# `deploy --systemd` (start them) and `upgrade` (detect Quadlet-managed
+# `deploy` (as root: start them) and `upgrade` (detect Quadlet-managed
 # stack + restart).
 _SYSTEMD_SERVICES = ("withcache.service", "bty-web.service", "bty-tftp.service")
 
@@ -561,12 +561,17 @@ def _require_prereqs(*, with_systemd: bool, prog: str) -> str:
         sys.exit(1)
 
     if with_systemd:
+        # The system install path needs systemctl + root for the
+        # Quadlet install + service start. `deploy` / `upgrade` call us
+        # with with_systemd=True only when we're already running as
+        # root, so the geteuid check is a safety net for direct callers
+        # (init --systemd just writes files, doesn't enter this branch).
         if shutil.which("systemctl") is None:
-            print(f"{prog}: --systemd needs systemctl on PATH", file=sys.stderr)
+            print(f"{prog}: the system install needs systemctl on PATH", file=sys.stderr)
             sys.exit(1)
         if os.geteuid() != 0:
             print(
-                f"{prog}: --systemd installs units under {QUADLET_SYSTEM_DIR} "
+                f"{prog}: the system install writes units under {QUADLET_SYSTEM_DIR} "
                 "and runs systemctl, both of which require root.\n"
                 f"  sudo {prog} ...",
                 file=sys.stderr,
@@ -748,11 +753,20 @@ def init_main(argv: list[str] | None = None, *, prog: str = "bty-lab init") -> N
 
 def deploy_main(argv: list[str] | None = None, *, prog: str = "bty-lab deploy") -> None:
     """The ``bty-lab deploy`` subcommand: emit files, auto-fill envvars
-    with detected ``HOST_ADDR`` + generated secrets, then bring the
-    stack up via ``podman compose --profile tftp up -d``. With
-    ``--systemd``, also installs Quadlet units under
-    :data:`QUADLET_SYSTEM_DIR`, runs ``systemctl daemon-reload``, and
-    starts the services.
+    with detected ``HOST_ADDR`` + ``"bty"`` admin passwords, then bring
+    the stack up via ``podman compose ... up -d``.
+
+    Mode is auto-detected from the operator's euid:
+
+    - **root** ("system install"): includes the TFTP sidecar
+      (``--profile tftp``), installs Quadlet units under
+      :data:`QUADLET_SYSTEM_DIR`, runs ``systemctl daemon-reload``,
+      starts the services. Stack survives host reboots.
+    - **non-root** ("user install"): compose-only. Skips the TFTP
+      sidecar (binds privileged UDP/69), no Quadlet install, no
+      systemctl. Operator must re-run ``podman compose up -d`` after
+      host reboot. UEFI HTTP Boot works; legacy BIOS PXE clients
+      need TFTP and so won't work in this mode.
 
     Side-effecting by design -- prefer :func:`init_main` when you want
     the files without the stand-up. ``--force`` overwrites existing
@@ -762,12 +776,13 @@ def deploy_main(argv: list[str] | None = None, *, prog: str = "bty-lab deploy") 
         prog=prog,
         description=(
             "Stand up the bty-web + withcache compose stack in one shot. "
-            "Emits the compose files, auto-fills envvars (HOST_ADDR + "
-            "generated passwords + session secret), and runs `podman "
-            "compose --profile tftp up -d`. With --systemd, also "
-            "installs Podman Quadlet units to "
-            f"{QUADLET_SYSTEM_DIR} and starts them via systemctl "
-            "(requires root)."
+            "Auto-detects install mode from your euid: as root, does the "
+            "full install (TFTP sidecar + Podman Quadlet units installed "
+            f"to {QUADLET_SYSTEM_DIR} + systemctl start, so the stack "
+            "survives reboots); as a regular user, does the compose-only "
+            "install (no TFTP, no autostart). The user-install path "
+            "prints the limitations + re-run command at the end so it's "
+            "easy to upgrade to a system install later."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -784,13 +799,6 @@ def deploy_main(argv: list[str] | None = None, *, prog: str = "bty-lab deploy") 
         action="store_true",
         help="Overwrite existing compose.yml / envvars / Quadlet units. "
         "Does NOT bypass missing prereqs (podman / podman-compose / systemctl).",
-    )
-    parser.add_argument(
-        "--systemd",
-        action="store_true",
-        help="Also install Podman Quadlet units to "
-        f"{QUADLET_SYSTEM_DIR} and start the services via systemctl. "
-        "Requires root.",
     )
     parser.add_argument(
         "--data-dir",
@@ -814,9 +822,13 @@ def deploy_main(argv: list[str] | None = None, *, prog: str = "bty-lab deploy") 
     data_dir: Path = args.data_dir if args.data_dir is not None else (dest / "data")
     data_dir_abs = data_dir.resolve()
 
+    is_root = os.geteuid() == 0
+    mode_label = "system install [root]" if is_root else "user install [non-root]"
+
     _step("checking prereqs")
-    backend = _require_prereqs(with_systemd=args.systemd, prog=prog)
+    backend = _require_prereqs(with_systemd=is_root, prog=prog)
     _step("prereqs OK", detail=backend)
+    _step("install mode", detail=mode_label)
 
     _step(f"emitting compose files into {dest}")
     try:
@@ -824,7 +836,7 @@ def deploy_main(argv: list[str] | None = None, *, prog: str = "bty-lab deploy") 
             dest,
             data_dir_abs=data_dir_abs,
             version=version,
-            with_systemd=args.systemd,
+            with_systemd=is_root,
             force=args.force,
         )
     except FileExistsError as exc:
@@ -880,13 +892,17 @@ def deploy_main(argv: list[str] | None = None, *, prog: str = "bty-lab deploy") 
     )
     _step("wrote envvars", detail=str(envvars_path))
 
+    # Root mode pulls + starts with the TFTP profile so the bty-tftp
+    # sidecar comes up alongside bty-web and withcache. Non-root mode
+    # skips it (TFTP needs root for UDP/69), so the stack still works
+    # for UEFI HTTP-Boot but not for legacy BIOS PXE clients.
+    compose_args = ["--profile", "tftp"] if is_root else []
     _step("pulling images")
-    _compose(dest, ["--profile", "tftp", "pull"])
-
+    _compose(dest, [*compose_args, "pull"])
     _step("starting stack")
-    _compose(dest, ["--profile", "tftp", "up", "-d"])
+    _compose(dest, [*compose_args, "up", "-d"])
 
-    if args.systemd:
+    if is_root:
         _step(f"installing Quadlet units to {QUADLET_SYSTEM_DIR}")
         try:
             installed = _install_quadlets(dest, force=args.force)
@@ -903,7 +919,7 @@ def deploy_main(argv: list[str] | None = None, *, prog: str = "bty-lab deploy") 
         _systemctl(["start", *_SYSTEMD_SERVICES])
 
     print("", file=sys.stderr)
-    _step("deploy complete")
+    _step("deploy complete", detail=mode_label)
     print(
         f"  bty-web UI:  http://{host_addr}:8080/ui   (login: {admin_pw} / {admin_pw})\n"
         f"  withcache:   http://{host_addr}:3000/     (login: {withcache_pw} / {withcache_pw})\n"
@@ -912,6 +928,24 @@ def deploy_main(argv: list[str] | None = None, *, prog: str = "bty-lab deploy") 
         f"  the host past a trusted LAN.",
         file=sys.stderr,
     )
+
+    if not is_root:
+        # Loud + specific user-mode limitations so the operator knows
+        # what they didn't get and exactly how to upgrade to a system
+        # install when they're ready.
+        print(
+            "\n"
+            f"  Heads up: this was a user install (non-root). Active limitations:\n"
+            "    - No autostart on host reboot. Restart manually after a reboot:\n"
+            f"        cd {dest} && COMPOSE_ENV_FILES=envvars podman compose up -d\n"
+            "    - No TFTP sidecar (binds privileged UDP/69 -- needs root).\n"
+            "      UEFI HTTP Boot works; legacy BIOS PXE clients won't.\n"
+            "\n"
+            "  Upgrade to a system install (installs Quadlet units +\n"
+            "  systemctl autostart + TFTP sidecar) by re-running as root:\n"
+            f"    sudo {prog} {dest} --force",
+            file=sys.stderr,
+        )
 
 
 def upgrade_main(argv: list[str] | None = None, *, prog: str = "bty-lab upgrade") -> None:
@@ -974,10 +1008,28 @@ def upgrade_main(argv: list[str] | None = None, *, prog: str = "bty-lab upgrade"
         (QUADLET_SYSTEM_DIR / u).exists()
         for u in ("bty-web.container", "withcache.container", "bty-tftp.container")
     )
+    is_root = os.geteuid() == 0
+
+    # Quadlet refresh + systemctl restart need root. If the stack is
+    # Quadlet-managed and we're not root, refuse cleanly -- a compose
+    # restart would race the running systemd-managed containers.
+    if quadlet_managed and not is_root:
+        print(
+            f"{prog}: {dest} is Quadlet-managed (system install) but "
+            "you're not root.\n"
+            "  Quadlet unit refresh + systemctl restart need root. "
+            f"Re-run as:\n"
+            f"    sudo {prog} {dest}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    mode_label = "system install [root]" if is_root else "user install [non-root]"
 
     _step("checking prereqs")
-    backend = _require_prereqs(with_systemd=quadlet_managed, prog=prog)
+    backend = _require_prereqs(with_systemd=is_root, prog=prog)
     _step("prereqs OK", detail=backend)
+    _step("install mode", detail=mode_label)
 
     _step(
         f"regenerating compose files [bty {version}]",
@@ -987,15 +1039,18 @@ def upgrade_main(argv: list[str] | None = None, *, prog: str = "bty-lab upgrade"
         dest,
         data_dir_abs=data_dir_abs,
         version=version,
-        with_systemd=quadlet_managed,
+        with_systemd=is_root,
         force=True,
     )
     for p in written:
         print(f"  {p.relative_to(dest.parent) if dest.parent != Path() else p}", file=sys.stderr)
     _step("envvars preserved", detail=str(envvars_path))
 
+    # Match the deploy-time profile choice: root pulls + restarts with
+    # the TFTP sidecar, non-root skips it (UEFI HTTP-Boot only).
+    compose_args = ["--profile", "tftp"] if is_root else []
     _step("pulling images")
-    _compose(dest, ["--profile", "tftp", "pull"])
+    _compose(dest, [*compose_args, "pull"])
 
     if quadlet_managed:
         _step(f"refreshing Quadlet units in {QUADLET_SYSTEM_DIR}")
@@ -1010,10 +1065,23 @@ def upgrade_main(argv: list[str] | None = None, *, prog: str = "bty-lab upgrade"
         _systemctl(["restart", *_SYSTEMD_SERVICES])
     else:
         _step("restarting stack")
-        _compose(dest, ["--profile", "tftp", "up", "-d"])
+        _compose(dest, [*compose_args, "up", "-d"])
 
     print("", file=sys.stderr)
-    _step(f"upgrade to bty {version} complete")
+    _step(f"upgrade to bty {version} complete", detail=mode_label)
+
+    if not is_root and not quadlet_managed:
+        # Same warning as deploy: surface what a non-root upgrade
+        # didn't get them, so they can promote to a system install if
+        # they want autostart / TFTP.
+        print(
+            "\n"
+            "  Heads up: this was a user install upgrade (non-root). The\n"
+            "  stack still has no autostart on host reboot, and no TFTP\n"
+            "  sidecar. Promote to a system install:\n"
+            f"    sudo bty-lab deploy {dest} --force",
+            file=sys.stderr,
+        )
 
 
 def main(argv: list[str] | None = None, *, prog: str = "bty-lab") -> None:
@@ -1050,16 +1118,19 @@ def main(argv: list[str] | None = None, *, prog: str = "bty-lab") -> None:
             "Subcommands:\n"
             f"  {prog} init [DEST]      Emit ready-to-run compose files (no side effects).\n"
             f"  {prog} deploy [DEST]    Emit files + auto-fill envvars + bring up the\n"
-            "                          stack via `podman compose --profile tftp up -d`.\n"
-            "                          With --systemd, also installs Podman Quadlet units\n"
-            f"                          to {QUADLET_SYSTEM_DIR} and starts them (root).\n"
+            "                          stack. Auto-detects install mode from euid:\n"
+            "                          as root, full system install (TFTP sidecar +\n"
+            f"                          Quadlet units in {QUADLET_SYSTEM_DIR}\n"
+            "                          + systemctl autostart); as a regular user,\n"
+            "                          compose-only (no TFTP, no autostart, with a\n"
+            "                          warning listing exactly what was skipped).\n"
             f"  {prog} upgrade [DEST]   Re-emit compose against this CLI's bty version,\n"
             "                          pull new images, restart the stack (preserves\n"
-            "                          envvars + data/).\n\n"
+            "                          envvars + data/). Same root vs user mode rules.\n\n"
             "Pass --help to any subcommand for its full flag set.\n\n"
-            "Quick start:\n"
+            "Quick start (full system install, recommended):\n"
             '  sudo mkdir -p /opt/bty && sudo chown "$USER:$USER" /opt/bty\n'
-            "  uvx bty-lab deploy /opt/bty\n\n"
+            "  sudo uvx bty-lab deploy /opt/bty\n\n"
             "Other commands in this distribution:\n"
             "  bty      Interactive flash wizard (TUI). Requires the [tui] extra:\n"
             "             pipx install 'bty-lab[tui]'\n"
