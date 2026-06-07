@@ -23,8 +23,7 @@ serve images.
 ## Stand it up
 
 ```sh
-sudo mkdir -p /opt/bty && sudo chown "$USER:$USER" /opt/bty
-uvx bty-lab deploy /opt/bty
+sudo uvx bty-lab deploy /opt/bty
 #   bty:       http://<host>:8080/ui     (login: bty / bty)
 #   withcache: http://<host>:3000/       (login: bty / bty)
 ```
