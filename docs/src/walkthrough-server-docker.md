@@ -31,13 +31,14 @@ shot. No clone needed; `uv` (or `pipx`) on the host is enough:
 ```bash
 sudo mkdir -p /opt/bty && sudo chown "$USER:$USER" /opt/bty
 uvx bty-lab deploy /opt/bty
-#   bty: :8080/ui  withcache: :3000/
+#   bty: :8080/ui  withcache: :3000/   (login: bty / bty)
 ```
 
-`deploy` detects `HOST_ADDR` from the host's outbound-route IP and
-generates random passwords (printed in the final summary, also written to
-`/opt/bty/envvars`). Pass `--host-addr 192.0.2.10` to override the
-detection, or `--force` to overwrite an existing `envvars`.
+`deploy` detects `HOST_ADDR` from the host's outbound-route IP and writes
+admin passwords (default `bty`) into `/opt/bty/envvars`. Change them
+before exposing the host past a trusted LAN. Pass `--host-addr
+192.0.2.10` to override detection, or `--force` to overwrite an existing
+`envvars`.
 
 For systemd-managed auto-start on boot, add `--systemd` (installs Podman
 Quadlet units to `/etc/containers/systemd/` and starts them; requires

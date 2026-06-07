@@ -22,34 +22,19 @@ serve images.
 
 ## Stand it up
 
-The canonical, step-by-step instructions live with the deploy assets:
-
-- [`deploy/README.md`](https://github.com/safl/bty/blob/main/deploy/README.md)
-  -- compose quick-start, the optional TFTP profile, Quadlet units for
-  boot-autostart, the withcache wiring, and the named-volume layout.
-- [`walkthrough-server-docker.md`](walkthrough-server-docker.md) -- the
-  bty-web container in depth: both PXE boot lanes (UEFI HTTP Boot and TFTP
-  PXE), bind-mount permissions, env vars, and password rotation.
-
-A one-shot start with `uvx bty-lab deploy` -- no clone required, `uv` (or
-`pipx`) on the host is enough:
-
 ```sh
 sudo mkdir -p /opt/bty && sudo chown "$USER:$USER" /opt/bty
-uvx bty-lab deploy /opt/bty        # auto-fills envvars + brings up the stack
-#   bty:       http://<host>:8080/ui
-#   withcache: http://<host>:3000/
+uvx bty-lab deploy /opt/bty
+#   bty:       http://<host>:8080/ui     (login: bty / bty)
+#   withcache: http://<host>:3000/       (login: bty / bty)
 ```
 
-`deploy` detects `HOST_ADDR` from the host's outbound-route IP, generates
-random passwords + a session secret into `envvars`, then runs `podman
-compose --profile tftp pull` + `up -d`. The generated passwords are
-printed in the final summary and also written to `/opt/bty/envvars`. The
-emitted `compose.yml` pins the `bty-web` / `bty-tftp` image tags to the
-bty CLI version that ran the command, so compose and image bytes match.
-State (bty's DB and images, withcache's blobs) lives in host bind-mounts
-under `./data/` and survives container restarts and image re-pulls. To
-upgrade in place, re-run `uvx bty-lab upgrade /opt/bty`.
+That's the full bring-up. The remainder of this walkthrough -- DHCP
+wiring, the PXE flash flow, known limitations -- is what you do once the
+server is running. For the deploy mechanics (bind-mount layout,
+`--systemd` Quadlet install, `upgrade` semantics, password rotation), see
+[`deploy/README.md`](https://github.com/safl/bty/blob/main/deploy/README.md)
+and [`walkthrough-server-docker.md`](walkthrough-server-docker.md).
 
 ## Configure DHCP
 

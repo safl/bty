@@ -12,18 +12,18 @@ No clone required. With `uv` (or `pipx`) on the host:
 ```sh
 sudo mkdir -p /opt/bty && sudo chown "$USER:$USER" /opt/bty
 uvx bty-lab deploy /opt/bty
-#   bty-web:   http://<host>:8080/ui
-#   withcache: http://<host>:3000/
+#   bty-web:   http://<host>:8080/ui     (login: bty / bty)
+#   withcache: http://<host>:3000/       (login: bty / bty)
 ```
 
-`deploy` emits compose.yml + an auto-filled `envvars` (HOST_ADDR detected
-from the host's outbound-route IP, random passwords + session secret
-generated) and runs `podman compose --profile tftp pull` + `up -d`. The
-final summary prints the generated passwords (also written to
-`/opt/bty/envvars`).
+`deploy` writes compose.yml + an auto-filled `envvars` (HOST_ADDR
+detected from the host's outbound-route IP; admin passwords default to
+`bty`; session secret stays random) and runs `podman compose --profile
+tftp pull` + `up -d`. Change the passwords in `/opt/bty/envvars` before
+exposing past trusted LAN.
 
-`bty-web` reads `$BTY_WITHCACHE_URL` (set by the compose file) on boot and
-auto-wires withcache as its image source. No UI configuration is needed for
+`bty-web` reads `$BTY_WITHCACHE_URL` from the compose file at boot and
+auto-wires withcache as its image source -- no UI configuration step on
 first boot.
 
 ## Three subcommands
