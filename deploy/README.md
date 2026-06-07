@@ -10,16 +10,17 @@ over TFTP for BIOS-PXE clients (UEFI HTTP-Boot does not need it).
 No clone required. With `uv` (or `pipx`) on the host:
 
 ```sh
-sudo mkdir -p /opt/bty && sudo chown "$USER:$USER" /opt/bty
-uvx bty-lab deploy /opt/bty
+sudo uvx bty-lab deploy /opt/bty
 #   bty-web:   http://<host>:8080/ui     (login: bty / bty)
 #   withcache: http://<host>:3000/       (login: bty / bty)
 ```
 
-`deploy` writes compose.yml + an auto-filled `envvars` (HOST_ADDR
-detected from the host's outbound-route IP; admin passwords default to
-`bty`; session secret stays random) and runs `podman compose --profile
-tftp pull` + `up -d`. Change the passwords in `/opt/bty/envvars` before
+`deploy` creates `/opt/bty` if it doesn't exist and chowns it back to
+`$SUDO_USER` so you can edit `envvars` without `sudo` afterwards.
+It writes compose.yml + an auto-filled `envvars` (HOST_ADDR detected
+from the host's outbound-route IP; admin passwords default to `bty`;
+session secret stays random) and runs `podman compose --profile tftp
+pull` + `up -d`. Change the passwords in `/opt/bty/envvars` before
 exposing past trusted LAN.
 
 `bty-web` reads `$BTY_WITHCACHE_URL` from the compose file at boot and
@@ -63,7 +64,6 @@ to `/etc/containers/systemd/` and starts the services. No extra flag --
 the privileged side of the install is what `sudo` already implies:
 
 ```sh
-sudo mkdir -p /opt/bty && sudo chown "$USER:$USER" /opt/bty
 sudo uvx bty-lab deploy /opt/bty
 ```
 

@@ -376,6 +376,55 @@ def test_deploy_as_non_root_does_user_install(
     assert not any(cmd[0] == "systemctl" for cmd in run_cmds)
 
 
+def test_deploy_under_sudo_chowns_dir_to_sudo_user(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    _patched_runtime: dict[str, list],
+) -> None:
+    """Running under `sudo` (root + ``$SUDO_USER`` set) should hand
+    the deploy dir back to the original operator so they can edit
+    `envvars` without sudo afterwards. The post-deploy chown is what
+    eliminates the `sudo mkdir + chown` pre-step the docs used to
+    require -- without this test, a regression would silently re-leave
+    the dir root-owned."""
+    import os as _os
+    import pwd
+
+    me = pwd.getpwuid(_os.getuid())  # use the test runner's own pwd entry
+    monkeypatch.setenv("SUDO_USER", me.pw_name)
+    chowns: list[tuple[str, int, int]] = []
+    monkeypatch.setattr(deploy_mod.os, "chown", lambda p, u, g: chowns.append((str(p), u, g)))
+
+    dest = tmp_path / "bty-host"
+    deploy_mod.deploy_main([str(dest)])
+
+    # The dest dir itself + envvars + every emitted file gets handed
+    # to the operator. We don't care about the exact count, just that
+    # the dir and the envvars file were touched.
+    chowned_paths = {p for p, _, _ in chowns}
+    assert str(dest) in chowned_paths
+    assert str(dest / "envvars") in chowned_paths
+    # All chowns go to the SUDO_USER's uid/gid.
+    assert all((u, g) == (me.pw_uid, me.pw_gid) for _, u, g in chowns)
+
+
+def test_deploy_without_sudo_user_skips_chown(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    _patched_runtime: dict[str, list],
+) -> None:
+    """No ``$SUDO_USER`` means we were invoked directly as root, not
+    via sudo -- silently skip the chown (don't guess at who the
+    "real" operator might be)."""
+    monkeypatch.delenv("SUDO_USER", raising=False)
+    chowns: list[object] = []
+    monkeypatch.setattr(deploy_mod.os, "chown", lambda *a, **kw: chowns.append(a))
+
+    dest = tmp_path / "bty-host"
+    deploy_mod.deploy_main([str(dest)])
+    assert chowns == []
+
+
 def test_deploy_user_install_warns_about_limitations(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

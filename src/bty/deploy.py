@@ -609,6 +609,33 @@ def _systemctl(args: list[str]) -> None:
     _run(["systemctl", *args])
 
 
+def _chown_to_sudo_user(paths: list[Path]) -> tuple[str, int, int] | None:
+    """When running under ``sudo`` (root + ``$SUDO_USER`` set), chown
+    each path to the original operator so they can edit ``envvars``
+    (and inspect the rest of the deploy dir) without needing ``sudo``
+    afterwards. Returns ``(user, uid, gid)`` on success, or ``None``
+    when the chown was skipped (not running under sudo, or
+    ``$SUDO_USER`` is missing from ``/etc/passwd``).
+
+    Does NOT recurse into ``data/`` -- those bind-mount dirs are
+    populated by the containers and get the container-uid ownership
+    podman wants; chowning them out from under podman would break
+    rootful bind-mount semantics."""
+    sudo_user = os.environ.get("SUDO_USER")
+    if os.geteuid() != 0 or not sudo_user:
+        return None
+    try:
+        import pwd
+
+        pw = pwd.getpwnam(sudo_user)
+    except KeyError:
+        return None
+    for p in paths:
+        if p.exists():
+            os.chown(p, pw.pw_uid, pw.pw_gid)
+    return (sudo_user, pw.pw_uid, pw.pw_gid)
+
+
 def _install_quadlets(dest: Path, *, force: bool) -> list[Path]:
     """Copy ``dest/quadlet/*.container`` to ``QUADLET_SYSTEM_DIR``.
     Returns the list of installed paths. Refuses to overwrite existing
@@ -891,6 +918,15 @@ def deploy_main(argv: list[str] | None = None, *, prog: str = "bty-lab deploy") 
         encoding="utf-8",
     )
     _step("wrote envvars", detail=str(envvars_path))
+
+    # Hand the deploy dir back to the original operator so they can
+    # edit envvars / inspect compose.yml without sudo afterwards. Only
+    # fires under `sudo bty-lab deploy ...` (root + SUDO_USER set);
+    # silent no-op when deploy was invoked as the operator already.
+    chown_info = _chown_to_sudo_user([dest, *written, envvars_path])
+    if chown_info is not None:
+        user, _uid, _gid = chown_info
+        _step("handed deploy dir to operator", detail=user)
 
     # Root mode pulls + starts with the TFTP profile so the bty-tftp
     # sidecar comes up alongside bty-web and withcache. Non-root mode

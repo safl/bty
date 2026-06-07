@@ -29,7 +29,6 @@ an optional TFTP sidecar), auto-fills envvars, and brings it up in one
 shot. No clone needed; `uv` (or `pipx`) on the host is enough:
 
 ```bash
-sudo mkdir -p /opt/bty && sudo chown "$USER:$USER" /opt/bty
 sudo uvx bty-lab deploy /opt/bty
 #   bty: :8080/ui  withcache: :3000/   (login: bty / bty)
 ```
