@@ -21,7 +21,7 @@ persistence: it outlives the container, so `podman compose pull` +
 artifacts, and machine inventory stay put. See
 [`deploy/README.md`](https://github.com/safl/bty/blob/main/deploy/README.md)
 for the layout and the upgrade flow, and
-[walkthrough-server.md](walkthrough-server.md) for standing the stack up.
+[bty via netboot](tutorials/bty-netboot.md) for standing the stack up.
 
 The image bytes themselves are delegated to
 [withcache](https://github.com/safl/withcache): bty prefers the cache as

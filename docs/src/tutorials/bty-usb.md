@@ -1,4 +1,4 @@
-# Flash a target with the USB live image
+# bty via bty-usb
 
 The fastest path to "I just bty-flashed a box":
 
@@ -285,18 +285,15 @@ sudo umount /dev/sdX*
 ## Alternative delivery shapes
 
 The bty `.iso` is a hybrid bootable image that also works in Ventoy
-multi-boot sticks, IP-KVM virtual-media flows, and server BMCs --
-useful when you don't want to dedicate a stick to bty or when the
-target has no on-site hands. Step-by-step walkthroughs:
+multi-boot sticks and BMC / IP-KVM virtual-media flows -- useful when
+you don't want to dedicate a stick to bty or when the target has no
+on-site hands. Step-by-step walkthroughs:
 
-- [Ventoy multi-boot stick](tutorials/ventoy.md) -- one stick carries
-  the bty boot env *and* your pre-built target images.
-- [piKVM](tutorials/pikvm.md) / [JetKVM](tutorials/jetkvm.md) --
-  remote boot via IP-KVM virtual media; uses a remote `bty-web`
-  for the image catalog (the IP-KVM only carries the boot env).
-- [Server BMCs (Supermicro / iDRAC / iLO)](tutorials/bmc.md) -- same
-  pattern via the vendor's KVM-over-IP, with license-paywall caveats
-  up front.
+- [bty via bty-ventoy](bty-ventoy.md) -- one stick carries the bty
+  boot env *and* your pre-built target images.
+- [bty via BMC / OOB-MGMT](bmc.md) -- remote boot via IP-KVM virtual
+  media (piKVM / JetKVM URL-load examples + proprietary server BMC
+  caveats).
 
 **Always-available default catalog.** Whatever delivery shape you use,
 the wizard offers the default catalog (the nosi headless + desktop
@@ -308,12 +305,12 @@ the target's disk; no local staging.
 Network constraint: the live env needs HTTPS reachability to `ghcr.io`
 (and its blob CDN) at flash time. Air-gapped operators should ship
 their own image files via the Ventoy `bty-images/` folder path
-described in the [Ventoy tutorial](tutorials/ventoy.md).
+described in the [Ventoy tutorial](bty-ventoy.md).
 
 ## What's next
 
 * For provisioning many machines at once over the network, see
- [Set up a bty server](walkthrough-server.md) and the in-depth
- [bty-web container guide](walkthrough-server-docker.md).
-* For the full CLI surface, see [Reference](reference.md).
-* For how the live env works under the hood, see [Concepts](concepts.md).
+ [bty via netboot](bty-netboot.md) and the in-depth
+ [bty-web container guide](../walkthrough-server-docker.md).
+* For the full CLI surface, see [Reference](../reference.md).
+* For how the live env works under the hood, see [Concepts](../concepts.md).
