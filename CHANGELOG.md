@@ -9,6 +9,56 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.38.0] - 2026-06-07
+
+**`bty-lab deploy` + `upgrade` subcommands so first-boot of a bty
+server is one command instead of a five-step chain.** The deploy
+emits compose files, auto-fills `envvars` (HOST_ADDR detected from
+the host's outbound-route IP; admin passwords default to ``bty``
+matching the historic PAM convention; session secret stays random),
+and runs ``podman compose --profile tftp pull`` + ``up -d``. With
+``--systemd``, also installs Podman Quadlet units to
+``/etc/containers/systemd/`` and starts the services (requires root).
+``upgrade`` is the in-place version-bump path: regenerates compose
+against the CLI's bty version, preserves ``envvars`` + ``data/``,
+pulls + restarts -- auto-detecting Quadlet-managed vs compose-managed
+stacks.
+
+- ``uvx bty-lab deploy /opt/bty`` -- bring up bty-web + withcache in
+  one command. Visual ``==> step: detail`` phase headers throughout;
+  subprocess output (pull, compose up, systemctl) streams between
+  boundaries.
+- ``uvx bty-lab upgrade /opt/bty`` -- in-place upgrade. Detects
+  Quadlet-managed stacks from installed units under
+  ``/etc/containers/systemd/`` and uses ``systemctl daemon-reload``
+  + ``restart`` in that case; otherwise ``podman compose pull`` +
+  ``up -d``.
+- ``bty-lab init`` (existing) now surfaces ``PermissionError`` from
+  the dest mkdir with a ``sudo mkdir + chown`` hint instead of a
+  bare traceback inside the ``uvx`` wrapper. Probes for a compose
+  backend on PATH; warns if missing instead of failing with the
+  cryptic "looking up compose provider failed" later. Runtime
+  ``Next:`` block trimmed to three lines with ``--profile tftp``
+  baked in, plus a pointer to ``bty-lab deploy`` for the one-shot
+  path.
+- Docs landing page (``docs/src/index.md``) simplified nosi-style:
+  mascot moves to the sidebar via ``html_logo``, body trims to a
+  two-paragraph tagline + toctrees.
+- New Tutorials section: ``ventoy.md``, ``pikvm.md``, ``jetkvm.md``,
+  ``bmc.md`` (Supermicro / iDRAC / iLO virtual media, with the
+  license-paywall caveats up front).
+
+### Operator notes
+
+- The default admin password is ``bty``. Change it in
+  ``/opt/bty/envvars`` before exposing the host past a trusted LAN.
+- The deploy dir needs to be writable by the operator. The docs
+  lead with ``sudo mkdir -p /opt/bty && sudo chown "$USER:$USER"
+  /opt/bty`` so first-boot doesn't trip the silent-fail mode where
+  ``$EDITOR envvars`` opens an empty buffer.
+- ``init`` stays available for inspect-before-apply control: same
+  files, no side effects.
+
 ## [0.37.0] - 2026-06-06
 
 **Polish pass on the v0.36.0 ``bty-lab init`` bootstrap, from
