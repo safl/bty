@@ -520,15 +520,39 @@ BTY_SESSION_SECRET={session_secret}
 # ---- Visual step printer + subprocess wrappers ------------------------------
 
 
+# Module-level step counter, set up by :func:`_steps_begin` and bumped
+# by every :func:`_step` call. Lives in module state (rather than being
+# threaded through every helper) so the existing ``_step(...)`` call
+# sites stay one-liners. Deploy / upgrade are not re-entrant, so the
+# global is safe in practice.
+_STEP_CURRENT = 0
+_STEP_TOTAL = 0
+
+
+def _steps_begin(total: int) -> None:
+    """Reset the step counter and set the total for ``[N/M]`` headers.
+
+    Call once at the top of :func:`deploy_main` / :func:`upgrade_main`
+    after the mode-detection logic has decided how many steps the run
+    will fire (root/non-root + sudo-chown + Quadlet-managed all swing
+    the total)."""
+    global _STEP_CURRENT, _STEP_TOTAL
+    _STEP_CURRENT = 0
+    _STEP_TOTAL = total
+
+
 def _step(label: str, *, detail: str | None = None) -> None:
-    """Print a visible phase boundary: ``==> label`` (or ``==> label:
-    detail`` when a detail string is given). Subprocess output that
-    follows streams through to stderr so the operator sees what's
-    happening between boundaries."""
+    """Print a visible phase boundary, prefixed with ``[N/M]`` when
+    :func:`_steps_begin` has been called, or ``==>`` otherwise.
+    Subprocess output that follows streams through to stderr so the
+    operator sees what's happening between boundaries."""
+    global _STEP_CURRENT
+    _STEP_CURRENT += 1
+    prefix = f"[{_STEP_CURRENT}/{_STEP_TOTAL}]" if _STEP_TOTAL > 0 else "==>"
     if detail is not None:
-        print(f"==> {label}: {detail}", file=sys.stderr)
+        print(f"{prefix} {label}: {detail}", file=sys.stderr)
     else:
-        print(f"==> {label}", file=sys.stderr)
+        print(f"{prefix} {label}", file=sys.stderr)
 
 
 def _require_prereqs(*, with_systemd: bool, prog: str) -> str:
@@ -851,6 +875,14 @@ def deploy_main(argv: list[str] | None = None, *, prog: str = "bty-lab deploy") 
 
     is_root = os.geteuid() == 0
     mode_label = "system install [root]" if is_root else "user install [non-root]"
+    will_chown = is_root and bool(os.environ.get("SUDO_USER"))
+
+    # Step total swings with mode + sudo presence. Counts: prereqs,
+    # prereqs-OK, install-mode, emit-files, HOST_ADDR, passwords,
+    # envvars, [chown?], pull, start, [quadlets, daemon-reload,
+    # start-svcs]*root, deploy-complete.
+    total = 10 + (1 if will_chown else 0) + (3 if is_root else 0)
+    _steps_begin(total)
 
     _step("checking prereqs")
     backend = _require_prereqs(with_systemd=is_root, prog=prog)
@@ -1061,6 +1093,12 @@ def upgrade_main(argv: list[str] | None = None, *, prog: str = "bty-lab upgrade"
         sys.exit(1)
 
     mode_label = "system install [root]" if is_root else "user install [non-root]"
+
+    # Step total for upgrade. Counts: prereqs, prereqs-OK, install-mode,
+    # regen-files, envvars-preserved, pull, [quadlets, daemon-reload,
+    # restart-svcs]*quadlet OR [restart-stack]*compose, upgrade-complete.
+    total = 7 + (3 if quadlet_managed else 1)
+    _steps_begin(total)
 
     _step("checking prereqs")
     backend = _require_prereqs(with_systemd=is_root, prog=prog)
