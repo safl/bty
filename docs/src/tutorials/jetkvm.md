@@ -16,17 +16,20 @@ Run a `bty-web` instance somewhere on the LAN; note its IP and port.
 Cable per the JetKVM quickstart (USB-C from JetKVM to target; JetKVM
 to LAN). Pair the device with your JetKVM account, reach its web UI.
 
-## Step 3: Upload `bty-usb-x86_64.iso` to JetKVM
+## Step 3: Upload the bty USB ISO to JetKVM
 
 ```bash
-# v0.25.4+ ships uncompressed .iso -- no decompress step needed.
-ls ~/system_imaging/disk/bty-usb-x86_64.iso
+# Discover the current release + download the USB ISO. For a specific
+# version, replace `latest` with a tag like v0.38.0.
+VERSION=$(curl -fsSL https://github.com/safl/bty/releases/latest/download/release.toml \
+  | grep -oP 'version = "\K[^"]+')
+curl -fLO https://github.com/safl/bty/releases/download/v$VERSION/bty-usb-x86_64-v$VERSION.iso
 ```
 
 In the JetKVM web UI:
 
 1. Open the "Virtual Media" panel.
-2. Upload `bty-usb-x86_64.iso`.
+2. Upload `bty-usb-x86_64-v$VERSION.iso`.
 3. Mount the uploaded image as a virtual CD-ROM.
 
 ## Step 4: Boot the target
