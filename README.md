@@ -137,24 +137,21 @@ clone required:
 
 ```bash
 sudo mkdir -p /opt/bty && sudo chown "$USER:$USER" /opt/bty
-uvx bty-lab deploy /opt/bty         # auto-fills envvars + brings up the stack
-#   bty-web:   http://<host>:8080/ui
-#   withcache: http://<host>:3000/
+uvx bty-lab deploy /opt/bty
+#   bty-web:   http://<host>:8080/ui     (login: bty / bty)
+#   withcache: http://<host>:3000/       (login: bty / bty)
 ```
 
-`deploy` detects `HOST_ADDR` from the host's outbound-route IP, generates
-random passwords + a session secret into `envvars`, then runs `podman
-compose --profile tftp pull` + `up -d`. The generated passwords are
-printed in the final summary and saved to `/opt/bty/envvars`.
+`deploy` writes `envvars` (HOST_ADDR auto-detected, admin passwords
+default to `bty`), pulls images, and brings up the stack. Change the
+passwords in `/opt/bty/envvars` before exposing past trusted LAN.
 
-Add `--systemd` to also install Podman Quadlet units under
-`/etc/containers/systemd/` and start them via systemctl (requires root).
-Upgrade in place with `uvx bty-lab upgrade /opt/bty` (auto-detects
-compose- vs Quadlet-managed). For inspect-before-apply control, `uvx
-bty-lab init /opt/bty` emits the same files without side effects. See
-[`deploy/README.md`](deploy/README.md) and
-[`docs/src/walkthrough-server-docker.md`](docs/src/walkthrough-server-docker.md)
-for full details.
+`uvx bty-lab deploy /opt/bty --systemd` installs Podman Quadlet units
+to `/etc/containers/systemd/` and starts the services via systemctl
+(requires root). `uvx bty-lab upgrade /opt/bty` upgrades in place
+(auto-detects compose- vs Quadlet-managed). `uvx bty-lab init
+/opt/bty` emits files only -- no side effects. See
+[`deploy/README.md`](deploy/README.md) for the full surface.
 
 ## Install
 

@@ -6,47 +6,28 @@ network via the bty-web server.
 
 ## Deploy the bty server
 
-The canonical bty deploy is two containers: `bty-web` (policy + PXE + UI)
-and `withcache` (image cache), plus an optional `bty-tftp` sidecar for
-BIOS PXE clients. Bootstrap a fresh host without cloning the repo:
-
 ```bash
 sudo mkdir -p /opt/bty && sudo chown "$USER:$USER" /opt/bty
 uvx bty-lab deploy /opt/bty
-#   bty-web:   http://<host>:8080/ui
-#   withcache: http://<host>:3000/
+#   bty-web:   http://<host>:8080/ui     (login: bty / bty)
+#   withcache: http://<host>:3000/       (login: bty / bty)
 ```
 
-`deploy` emits the compose files, auto-detects `HOST_ADDR` from the host's
-outbound-route IP, generates random passwords + a session secret into
-`envvars`, then runs `podman compose --profile tftp pull` + `up -d`. The
-final summary prints the generated passwords (also saved in
-`/opt/bty/envvars`).
+That's it. `deploy` writes `envvars` (HOST_ADDR auto-detected from the
+host's outbound-route IP; admin passwords default to `bty`), pulls
+images, and brings up `bty-web` + `withcache` (+ a TFTP sidecar for
+legacy BIOS PXE clients). Change the passwords in `/opt/bty/envvars`
+before exposing past trusted LAN.
 
-Add `--systemd` to also install Podman Quadlet units under
-`/etc/containers/systemd/` and start them via systemctl (requires root):
+- `uvx bty-lab deploy /opt/bty --systemd` -- also installs Podman
+  Quadlet units to `/etc/containers/systemd/` and starts them via
+  systemctl (requires root).
+- `uvx bty-lab upgrade /opt/bty` -- in-place upgrade. Auto-detects
+  compose- vs Quadlet-managed; preserves `envvars` + `data/`.
+- `uvx bty-lab init /opt/bty` -- emit files only, no side effects
+  (inspect / customise before applying).
 
-```bash
-sudo uvx bty-lab deploy /opt/bty --systemd
-```
-
-Upgrade in place against a newer bty release (preserves `envvars` and
-`data/`):
-
-```bash
-uvx bty-lab upgrade /opt/bty            # auto-detects compose- vs Quadlet-managed
-```
-
-`bty-web` reads `$BTY_WITHCACHE_URL` (set by the compose file) on boot and
-auto-wires withcache as its image source -- no UI configuration step. The
-`tftp` profile brings up the `bty-tftp` sidecar for legacy BIOS clients;
-drop the `--profile tftp` flag if your fleet is UEFI-only.
-
-To inspect or customise the files before bringing the stack up, use
-`bty-lab init` instead -- it emits the same files without side effects.
-
-Full details (bind-mount layout, env vars, all `init` / `deploy` /
-`upgrade` flags):
+Bind-mount layout, env vars, the full subcommand surface:
 [`deploy/README.md`](https://github.com/safl/bty/blob/main/deploy/README.md)
 and [walkthrough-server-docker.md](walkthrough-server-docker.md).
 
