@@ -446,7 +446,11 @@ def _detect_host_addr() -> str:
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
         s.connect(("198.51.100.1", 80))
-        return s.getsockname()[0]
+        # getsockname() returns Any per typeshed (the tuple shape
+        # depends on the address family); coerce to str for the
+        # IPv4 case we constructed the socket for.
+        addr: str = s.getsockname()[0]
+        return addr
     except OSError:
         return "127.0.0.1"
     finally:
