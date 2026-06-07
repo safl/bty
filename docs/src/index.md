@@ -26,21 +26,19 @@ of pre-built images works. bty just writes the bytes.
 
 overview
 quickstart
-walkthrough-usb
-walkthrough-server
-walkthrough-server-docker
 walkthrough-catalog
 walkthrough-image-store
+walkthrough-server-docker
 ```
 
 ```{toctree}
 :maxdepth: 2
 :caption: Tutorials
 
-tutorials/ventoy
-tutorials/pikvm
-tutorials/jetkvm
+tutorials/bty-usb
+tutorials/bty-ventoy
 tutorials/bmc
+tutorials/bty-netboot
 ```
 
 ```{toctree}

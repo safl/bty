@@ -1,4 +1,4 @@
-# bty on a Ventoy USB stick
+# bty via bty-ventoy
 
 [Ventoy](https://www.ventoy.net) lets one USB stick boot any of dozens
 of `.iso` files via a menu at power-on. The Ventoy data partition

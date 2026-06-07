@@ -1,83 +1,145 @@
-# bty via a server BMC (Supermicro / iDRAC / iLO)
+# bty via BMC / OOB-MGMT
 
-Server-class hardware ships with a baseboard management controller
-(BMC): a small always-on management computer with its own NIC, web UI,
-and KVM-over-IP / virtual-media features. The major vendors:
+BMCs (baseboard management controllers) and IP-KVM dongles expose a
+target's HDMI output, USB ports, and power control over the network.
+Most also provide **virtual media** -- mounting an ISO as a virtual
+USB stick or CD-ROM that the target sees as a real boot device.
+That's the path bty piggybacks on: hand the BMC the bty USB `.iso`,
+set the target to boot from the virtual device, then drive the wizard
+through the BMC's HDMI viewer the same way you would sitting at the
+machine.
 
-| Vendor | BMC name |
-|---|---|
-| Supermicro | IPMI / SuperServer |
-| Dell | iDRAC |
-| HPE | iLO |
-| Lenovo | XClarity Controller (XCC) |
-| ASRock Rack | BMC |
-| AMI MegaRAC | many OEMs |
+**Why this is the operator's favourite path for remote bring-up:**
+[piKVM](https://pikvm.org) and [JetKVM](https://jetkvm.com) both
+accept the GitHub release artifact URL directly. You don't download
+the `.iso` to your workstation first -- the BMC fetches it from
+GitHub itself at GitHub-CDN speed, not at your workstation's upload
+speed. The flow is: paste a URL, click connect, power-cycle.
 
-bty's USB ISO is just a bootable hybrid ISO, so any BMC with a
-**virtual CD-ROM / virtual USB** feature can mount it and boot the
-host into bty. The flash flow is then identical to a physical stick:
-the bty wizard runs on tty1, you drive it through the BMC's HTML5 /
-Java KVM viewer, and the image bytes are fetched over the target's
-main NIC.
+For server-class BMCs (Supermicro, iDRAC, iLO, XCC), virtual media
+is usually paywalled and the firmware-side UI is sometimes a Java
+applet. See [Proprietary server BMCs](#proprietary-server-bmcs) at
+the bottom; the practical workaround is a [Ventoy USB stick](bty-ventoy.md)
+plugged into the server's USB port.
 
-## License caveats (read before you buy hardware)
+## The release URL we'll paste
 
-Virtual-media is the gateway feature -- and most BMC vendors paywall it.
-Plan for it up front:
+The bty release artifact lives at a stable, GitHub-CDN-backed URL:
 
-- **Supermicro** -- virtual media is part of the **Out-Of-Band (OOB)**
-  license, a one-time per-board upgrade
-  ([SFT-OOB-LIC](https://www.supermicro.com/en/solutions/management-software/bmc-resources)).
-  Without it, the BMC's KVM viewer works but the **Virtual Media** /
-  CD-ROM mount option is greyed out. Cheap, but you have to remember to
-  buy it before you need it.
-- **Dell iDRAC** -- virtual media requires **iDRAC Enterprise** (or
-  Datacenter), not the Express tier some servers ship with. Check the
-  service tag's entitlements before you assume virtual media works.
-- **HPE iLO** -- virtual media requires the **iLO Advanced** license
-  (vs the bundled iLO Standard). Same situation as iDRAC: paid tier.
-- **Lenovo XCC** -- "remote presence" (KVM + virtual media) is the **XCC
-  Platinum** upgrade on most current ThinkSystems.
-- **ASRock Rack / open-firmware OpenBMC variants** -- typically include
-  virtual media in the base firmware; no separate license.
+```
+https://github.com/safl/bty/releases/download/v$VERSION/bty-usb-x86_64-v$VERSION.iso
+```
 
-For one-off bring-up of a few machines, a [PiKVM](pikvm.md) or
-[JetKVM](jetkvm.md) dongle is often cheaper than the BMC upgrade and
-gives you the same virtual-media flow without the vendor paywall.
+Replace `$VERSION` with the release you want (e.g. `0.39.0`), or
+look up the latest via `release.toml`:
 
-## Steps
+```bash
+VERSION=$(curl -fsSL https://github.com/safl/bty/releases/latest/download/release.toml \
+  | grep -oP 'version = "\K[^"]+')
+echo "https://github.com/safl/bty/releases/download/v$VERSION/bty-usb-x86_64-v$VERSION.iso"
+```
 
-The vendor UIs differ in detail but the flow is the same:
+## piKVM (load by URL)
 
-1. **Download the bty ISO** on the workstation talking to the BMC.
-   For a specific version, replace `latest` with a tag like `v0.38.0`:
-   ```bash
-   VERSION=$(curl -fsSL https://github.com/safl/bty/releases/latest/download/release.toml \
-     | grep -oP 'version = "\K[^"]+')
-   curl -fLO https://github.com/safl/bty/releases/download/v$VERSION/bty-usb-x86_64-v$VERSION.iso
-   ```
-2. **Open the BMC's remote-console / KVM viewer**, then open the
-   **Virtual Media** panel. Attach `bty-usb-x86_64-v$VERSION.iso` as
-   a virtual CD-ROM.
+[piKVM](https://pikvm.org) is a Raspberry-Pi-based IP-KVM. HDMI in,
+USB OTG out, KVM-over-IP web UI, mass-storage emulation.
+
+### Step 1: Hand piKVM the .iso URL
+
+In the piKVM web UI:
+
+1. Open the **Storage** page.
+2. Click **Add image from URL** (or the upload form's "URL" tab).
+3. Paste the release URL from above.
+4. Wait for piKVM to fetch (~600 MB at GitHub-CDN speed).
+5. Set "Mode" to **CD-ROM**.
+6. Click **Connect**.
+
+### Step 2: Boot the target
+
+1. piKVM **Power** page -> power-cycle.
+2. In the HDMI viewer, watch BIOS/UEFI come up.
+3. Pick the piKVM virtual storage device in the boot menu.
+4. The bty live env boots; `bty` opens on tty1.
+
+### Step 3: Point bty at a remote catalog
+
+The piKVM-mounted `.iso` is read-only with no local storage for
+target images. Point `bty` at a remote `bty-web` catalog:
+
+1. At the source-pick prompt, type `c` (custom).
+2. Enter the catalog URL: `http://<bty-host>:8080/catalog.toml`.
+3. Pick an image; `bty` streams it from `bty-web` through the
+   live env to the target's disk.
+
+For bty's published default catalog without typing the URL, type
+`d` at the source-pick prompt -- that's the bty release catalog
+(nosi Debian / Ubuntu / Fedora / FreeBSD headless images plus a
+Fedora desktop).
+
+If you don't already have a `bty-web` instance, see
+[bty via netboot](bty-netboot.md) -- one `sudo uvx bty-lab deploy
+/opt/bty` and you have one.
+
+## JetKVM (load by URL)
+
+[JetKVM](https://jetkvm.com) is a compact commercial IP-KVM
+(USB-stick-shaped) with mass-storage emulation. Same constraint as
+piKVM: the `.iso` is hosted as a single CD-ROM, so use a remote
+`bty-web` for the image catalog.
+
+### Step 1: Hand JetKVM the .iso URL
+
+In the JetKVM web UI:
+
+1. Open the **Virtual Media** panel.
+2. Pick **Mount from URL** (the "URL" tab on the mount dialog).
+3. Paste the release URL from above.
+4. Mount as a virtual CD-ROM.
+
+### Step 2 + 3: Boot and catalog
+
+Identical to piKVM Steps 2 and 3 above.
+
+## Proprietary server BMCs
+
+Server-class hardware ships with a BMC with similar virtual-media
+features, but two practical gotchas: vendor licensing and Java.
+
+| Vendor       | BMC name                              | Virtual-media gating                   |
+|---|---|---|
+| Supermicro   | IPMI / SuperServer                    | **SFT-OOB-LIC** (one-time per board)   |
+| Dell         | iDRAC                                 | **iDRAC Enterprise** (not Express)     |
+| HPE          | iLO                                   | **iLO Advanced**                       |
+| Lenovo       | XClarity Controller (XCC)             | **XCC Platinum**                       |
+| ASRock Rack  | BMC                                   | Usually free in base firmware          |
+| AMI MegaRAC  | many OEMs                             | Varies by vendor                       |
+
+Older firmware also drops you into a Java applet that's painful to
+keep running on modern desktops. HTML5-only firmware (post-2018-ish)
+is much friendlier.
+
+**The practical workaround for both license + Java pain: plug a
+[Ventoy USB stick](bty-ventoy.md) into the server's USB port and
+boot from it.** The BMC's HDMI viewer still works for video +
+remote keyboard during the bty wizard; you just sidestep the
+virtual-media licence and any Java applet. One Ventoy stick boots
+bty alongside whatever other rescue / install ISOs you carry,
+which is also handy for one-off vendor installers.
+
+If you do have the licence and the HTML5 viewer, the flow mirrors
+piKVM / JetKVM but URL-load is usually not supported -- you
+download the `.iso` to your workstation first and upload via the
+BMC UI:
+
+1. Download the bty `.iso` (see [The release URL](#the-release-url-well-paste)).
+2. Open the BMC's remote-console / KVM viewer, then the **Virtual
+   Media** panel. Upload + attach as a virtual CD-ROM:
    - Supermicro: *Remote Control > iKVM/HTML5 > Virtual Media*.
    - iDRAC: *Configuration > Virtual Media > Connect*.
    - iLO: *Remote Console > Virtual Media > Image File CD/DVD-ROM*.
-3. **Set the boot order to the virtual CD-ROM** (typically via the BMC's
-   one-time boot menu so it doesn't persist), then power-cycle the host
-   from the BMC.
-4. **Drive the wizard.** bty comes up on tty1 inside the KVM viewer:
-   pick image, pick disk, confirm flash, reboot. Image bytes flow over
-   the target's main NIC; the BMC channel only carries video + HID.
-
-## Caveats
-
-- **Image catalog source.** Same as with PiKVM / JetKVM: the virtual
-  ISO is read-only, so `BTY_IMAGES` is empty. Use `[d] default` (streams
-  from GHCR via `oras://`) or `--catalog` against your bty-web instance.
-- **Java KVM viewers.** Older iDRAC / iLO firmware drops you into a
-  Java applet that's painful to keep running on modern desktops.
-  HTML5-only firmware (post-2018-ish) is much friendlier.
-- **Network reach at flash time.** The target's main NIC must have a
-  DHCP lease and reach the image source (GHCR over the internet, or
-  your bty-web on the LAN). The BMC's management network is irrelevant
-  to the actual image transfer.
+3. Set the boot order to the virtual CD-ROM (one-time boot menu is
+   easiest), then power-cycle from the BMC.
+4. Drive the wizard via the BMC's HDMI viewer; `bty` comes up on
+   tty1.
+5. Point at a remote catalog (same as piKVM Step 3 above).

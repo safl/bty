@@ -180,7 +180,7 @@ the network path.
 Practical setup: enter firmware setup (often F2 / F10 / Del at power-on),
 open the boot-order menu, put Network/PXE first and the target disk second,
 save and exit. UEFI HTTP-Boot and legacy PXE+TFTP both work; see
-[DHCP / PXE](walkthrough-server.md) for the router-side options.
+[DHCP / PXE](tutorials/bty-netboot.md) for the router-side options.
 
 ## Server-controlled vs interactive: who decides which image gets flashed
 

@@ -1,4 +1,4 @@
-# Set up a bty server
+# bty via netboot (bty-web container deploy)
 
 The network-flash flow needs a long-running `bty-web`: it serves the browser
 UI, the per-MAC PXE plans, the iPXE bootfiles, and the image bytes. The
@@ -33,7 +33,7 @@ wiring, the PXE flash flow, known limitations -- is what you do once the
 server is running. For the deploy mechanics (bind-mount layout,
 `--systemd` Quadlet install, `upgrade` semantics, password rotation), see
 [`deploy/README.md`](https://github.com/safl/bty/blob/main/deploy/README.md)
-and [`walkthrough-server-docker.md`](walkthrough-server-docker.md).
+and [`walkthrough-server-docker.md`](../walkthrough-server-docker.md).
 
 ## Configure DHCP
 
@@ -64,7 +64,7 @@ drive -- and the `bty-flash-*` modes boot the just-flashed disk the same way.
 On legacy BIOS the drive is `0x80` (first disk) unless you set `sanboot_drive`;
 on UEFI there's nothing to set. (A flashed box that won't boot is almost always
 a firmware / drive-number problem; see
-[Firmware boot order](concepts.md#firmware-boot-order).) On power-on it will:
+[Firmware boot order](../concepts.md#firmware-boot-order).) On power-on it will:
 
 1. DHCP-discover from your LAN's DHCP server, configured to return option
    66/67 pointing at the bty host.
@@ -85,7 +85,7 @@ the freshly-flashed image provisions to.
 - PXE-flash any number of targets to a registered image, hands-free, in
   parallel.
 - Mix the network-flash flow (this walkthrough) with the USB-stick flow
-  ([walkthrough-usb](walkthrough-usb.md)): both run the same `bty` flash code,
+  ([bty via bty-usb](bty-usb.md)): both run the same `bty` flash code,
   driven by the plan endpoint vs the local wizard.
 - Swap images per-target without rebooting the server.
 
