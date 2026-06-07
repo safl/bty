@@ -8,20 +8,27 @@ network via the bty-web server.
 
 ```bash
 sudo mkdir -p /opt/bty && sudo chown "$USER:$USER" /opt/bty
-uvx bty-lab deploy /opt/bty
+sudo uvx bty-lab deploy /opt/bty
 #   bty-web:   http://<host>:8080/ui     (login: bty / bty)
 #   withcache: http://<host>:3000/       (login: bty / bty)
 ```
 
-That's it. `deploy` writes `envvars` (HOST_ADDR auto-detected from the
-host's outbound-route IP; admin passwords default to `bty`), pulls
-images, and brings up `bty-web` + `withcache` (+ a TFTP sidecar for
-legacy BIOS PXE clients). Change the passwords in `/opt/bty/envvars`
+That's it. `deploy` auto-detects install mode from your euid:
+
+- **As root (recommended)** -- full **system install**: writes
+  `envvars`, brings up the stack *with* the TFTP sidecar, installs
+  Podman Quadlet units to `/etc/containers/systemd/`, and starts the
+  services via systemctl. Stack survives host reboots.
+- **As a regular user** -- **user install**: compose-only. No TFTP
+  sidecar (binds privileged UDP/69), no autostart. Operator must
+  re-run `podman compose up -d` after host reboot. UEFI HTTP Boot
+  works; legacy BIOS PXE clients won't. The CLI prints exactly what
+  was skipped and how to promote to a system install at the end.
+
+`HOST_ADDR` is detected from the host's outbound-route IP; admin
+passwords default to `bty`. Change the passwords in `/opt/bty/envvars`
 before exposing past trusted LAN.
 
-- `uvx bty-lab deploy /opt/bty --systemd` -- also installs Podman
-  Quadlet units to `/etc/containers/systemd/` and starts them via
-  systemctl (requires root).
 - `uvx bty-lab upgrade /opt/bty` -- in-place upgrade. Auto-detects
   compose- vs Quadlet-managed; preserves `envvars` + `data/`.
 - `uvx bty-lab init /opt/bty` -- emit files only, no side effects

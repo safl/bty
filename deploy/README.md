@@ -58,13 +58,13 @@ different host = copy these two directories + the `envvars` + `compose.yml`.
 
 ## Auto-start on boot (systemd via Quadlet)
 
-`bty-lab deploy --systemd` is the one-shot path -- it writes the Quadlet
-units to the deploy dir, copies them to `/etc/containers/systemd/`, runs
-`daemon-reload`, and starts the services:
+Run `bty-lab deploy` as root and it auto-installs Podman Quadlet units
+to `/etc/containers/systemd/` and starts the services. No extra flag --
+the privileged side of the install is what `sudo` already implies:
 
 ```sh
 sudo mkdir -p /opt/bty && sudo chown "$USER:$USER" /opt/bty
-sudo uvx bty-lab deploy /opt/bty --systemd
+sudo uvx bty-lab deploy /opt/bty
 ```
 
 The Quadlet units bake `data/` as an absolute path (systemd does not run in

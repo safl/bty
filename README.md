@@ -137,21 +137,26 @@ clone required:
 
 ```bash
 sudo mkdir -p /opt/bty && sudo chown "$USER:$USER" /opt/bty
-uvx bty-lab deploy /opt/bty
+sudo uvx bty-lab deploy /opt/bty
 #   bty-web:   http://<host>:8080/ui     (login: bty / bty)
 #   withcache: http://<host>:3000/       (login: bty / bty)
 ```
 
-`deploy` writes `envvars` (HOST_ADDR auto-detected, admin passwords
-default to `bty`), pulls images, and brings up the stack. Change the
-passwords in `/opt/bty/envvars` before exposing past trusted LAN.
+`deploy` auto-detects install mode from your euid:
 
-`uvx bty-lab deploy /opt/bty --systemd` installs Podman Quadlet units
-to `/etc/containers/systemd/` and starts the services via systemctl
-(requires root). `uvx bty-lab upgrade /opt/bty` upgrades in place
-(auto-detects compose- vs Quadlet-managed). `uvx bty-lab init
-/opt/bty` emits files only -- no side effects. See
-[`deploy/README.md`](deploy/README.md) for the full surface.
+- **As root** (system install): writes `envvars`, brings up the stack
+  with the TFTP sidecar, installs Podman Quadlet units to
+  `/etc/containers/systemd/`, starts services via systemctl. Survives
+  host reboots.
+- **As a regular user** (user install): compose-only. No TFTP, no
+  autostart. The CLI prints what was skipped and the sudo re-run
+  command to promote to a system install.
+
+`HOST_ADDR` is detected from the host's outbound-route IP; admin
+passwords default to `bty`. Change them in `/opt/bty/envvars` before
+exposing past trusted LAN. `uvx bty-lab upgrade /opt/bty` upgrades in
+place; `uvx bty-lab init /opt/bty` emits files only (no side effects).
+See [`deploy/README.md`](deploy/README.md) for the full surface.
 
 ## Install
 
