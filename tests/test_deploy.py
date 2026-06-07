@@ -42,8 +42,8 @@ def test_compose_pins_to_current_bty_version(tmp_path: Path) -> None:
     dest = tmp_path / "bty-host"
     deploy_mod.init_main([str(dest)])
     body = (dest / "compose.yml").read_text(encoding="utf-8")
-    assert f"ghcr.io/safl/bty-web:v{bty.__version__}" in body
-    assert f"ghcr.io/safl/bty-tftp:v{bty.__version__}" in body
+    assert f"ghcr.io/safl/bty-web:{bty.__version__}" in body
+    assert f"ghcr.io/safl/bty-tftp:{bty.__version__}" in body
     # withcache is an external project and stays on :latest.
     assert "ghcr.io/safl/withcache:latest" in body
 
@@ -122,7 +122,7 @@ def test_print_emits_compose_to_stdout(tmp_path: Path, capsys: pytest.CaptureFix
     deploy_mod.init_main(["--print"])
     captured = capsys.readouterr()
     assert "services:" in captured.out
-    assert f"ghcr.io/safl/bty-web:v{bty.__version__}" in captured.out
+    assert f"ghcr.io/safl/bty-web:{bty.__version__}" in captured.out
     # No files written and no progress text on stderr in --print mode.
     assert not (tmp_path / "compose.yml").exists()
     assert "wrote" not in captured.err
@@ -164,7 +164,7 @@ def test_systemd_emits_quadlet_units_with_absolute_paths(tmp_path: Path) -> None
     # paths MUST be absolute.
     expected = (dest / "data" / "bty").resolve()
     assert f"Volume={expected}:/var/lib/bty:Z" in web
-    assert f"Image=ghcr.io/safl/bty-web:v{bty.__version__}" in web
+    assert f"Image=ghcr.io/safl/bty-web:{bty.__version__}" in web
 
 
 def test_data_dir_override_baked_into_quadlets(tmp_path: Path) -> None:

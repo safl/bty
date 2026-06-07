@@ -91,7 +91,7 @@ services:
       - ${{BTY_HOST_DATA_DIR:-./data}}/withcache:/data
 
   bty-web:
-    image: ghcr.io/safl/bty-web:v{version}
+    image: ghcr.io/safl/bty-web:{version}
     restart: unless-stopped
     ports:
       - "8080:8080"
@@ -119,7 +119,7 @@ services:
       - withcache
 
   tftp:
-    image: ghcr.io/safl/bty-tftp:v{version}
+    image: ghcr.io/safl/bty-tftp:{version}
     profiles: ["tftp"]
     restart: unless-stopped
     # TFTP's data transfer hops to an ephemeral UDP port, so the sidecar
@@ -299,7 +299,7 @@ After=network-online.target withcache.service
 Wants=network-online.target
 
 [Container]
-Image=ghcr.io/safl/bty-web:v{version}
+Image=ghcr.io/safl/bty-web:{version}
 AutoUpdate=registry
 PublishPort=8080:8080
 Volume={data_dir_abs}/bty:/var/lib/bty:Z
@@ -353,7 +353,7 @@ After=network-online.target
 Wants=network-online.target
 
 [Container]
-Image=ghcr.io/safl/bty-tftp:v{version}
+Image=ghcr.io/safl/bty-tftp:{version}
 AutoUpdate=registry
 # TFTP data transfer uses an ephemeral UDP port; host networking is the
 # simplest way to make that work. The NBPs are baked into the image.
