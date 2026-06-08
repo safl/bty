@@ -1255,20 +1255,24 @@ def create_app(
                 else:
                     url_name = image_name
                 image_name_encoded = urllib.parse.quote(url_name, safe="")
+                # ORAS catalog entries still flow through bty-web's /images
+                # proxy (oras blob fetch needs the bearer token bty-web
+                # holds; withcache speaks plain HTTP).
                 image_url = f"{base}/images/{ref}/{image_name_encoded}"
-                # Prefer a configured withcache as the source, but only for an
-                # https origin it already holds. Otherwise serve via /images
-                # exactly as before (which serves a local copy or streams the
-                # origin), so a cold/unset/unreachable withcache never breaks a
-                # flash. The is_cached HEAD also warms an auto-fetch withcache,
-                # so the next boot of this image flips to the cache. (oras refs
-                # need token-authenticated pre-seeding -- handled separately.)
                 src = _flash_src_for_ref(str(ref))
                 if src and src.startswith(("http://", "https://")):
+                    # HTTPS source: bty-web is out of the bytes path. Prefer a
+                    # configured withcache when it already holds the blob (the
+                    # is_cached HEAD also warms withcache's auto-fetch for the
+                    # next boot). Otherwise hand the live env the origin URL
+                    # directly -- withcache 404s on a miss anyway, so going
+                    # through it on cold cache would just fail.
                     with _db.open_db(state_path) as conn:
                         withcache_url = _settings_store.resolve_withcache_url(conn)
                     if withcache_url and _withcache.is_cached(withcache_url, src):
                         image_url = _withcache.blob_url(withcache_url, src)
+                    else:
+                        image_url = src
                 plan = {
                     "mode": "flash",
                     "image": image_url,
