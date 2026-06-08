@@ -44,8 +44,8 @@ sudo mkdir -p /mnt/bty-images
 
 # Supported extensions:
 # *.img.gz / *.img.zst / *.img.xz / *.img.bz2 / *.qcow2 / *.img / *.iso / *.iso.gz
-sudo cp /path/to/debian-13-server.img.gz /mnt/bty-images/
-sudo cp /path/to/ubuntu-26.04-server.img.gz /mnt/bty-images/
+sudo cp /path/to/nosi-debian-sysdev-x86_64.img.gz /mnt/bty-images/
+sudo cp /path/to/nosi-fedora-sysdev-x86_64.img.gz /mnt/bty-images/
 
 sudo umount /mnt
 ```
