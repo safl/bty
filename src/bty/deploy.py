@@ -660,6 +660,31 @@ def _chown_to_sudo_user(paths: list[Path]) -> tuple[str, int, int] | None:
     return (sudo_user, pw.pw_uid, pw.pw_gid)
 
 
+def _prepare_data_dirs(data_dir_abs: Path) -> list[Path]:
+    """Pre-create the bind-mount targets that ``compose.yml`` mounts
+    into ``withcache`` (`/data`) and ``bty-web`` (`/var/lib/bty`), and
+    open them up so the containers can write regardless of what UID
+    their image's ``USER`` directive resolves to.
+
+    Why world-writable: withcache's image runs as ``app``, bty-web's
+    as ``bty``. Those UIDs vary across image rebuilds and don't match
+    the host operator's UID. ``chmod 0o777`` on these two appliance-
+    local state dirs avoids a per-image UID lookup AND respects the
+    image authors' choice to drop privileges inside the container.
+
+    The bty-tftp service has no volume mount (its NBPs are baked into
+    the image), so it's not part of this dance.
+
+    Returns the list of created paths for the ``_step`` log line."""
+    created: list[Path] = []
+    for sub in ("withcache", "bty"):
+        p = data_dir_abs / sub
+        p.mkdir(parents=True, exist_ok=True)
+        p.chmod(0o777)
+        created.append(p)
+    return created
+
+
 def _install_quadlets(dest: Path, *, force: bool) -> list[Path]:
     """Copy ``dest/quadlet/*.container`` to ``QUADLET_SYSTEM_DIR``.
     Returns the list of installed paths. Refuses to overwrite existing
@@ -879,9 +904,9 @@ def deploy_main(argv: list[str] | None = None, *, prog: str = "bty-lab deploy") 
 
     # Step total swings with mode + sudo presence. Counts: prereqs,
     # prereqs-OK, install-mode, emit-files, HOST_ADDR, passwords,
-    # envvars, [chown?], pull, start, [quadlets, daemon-reload,
-    # start-svcs]*root, deploy-complete.
-    total = 10 + (1 if will_chown else 0) + (3 if is_root else 0)
+    # envvars, [chown?], prep-data, pull, start, [quadlets,
+    # daemon-reload, start-svcs]*root, deploy-complete.
+    total = 11 + (1 if will_chown else 0) + (3 if is_root else 0)
     _steps_begin(total)
 
     _step("checking prereqs")
@@ -959,6 +984,13 @@ def deploy_main(argv: list[str] | None = None, *, prog: str = "bty-lab deploy") 
     if chown_info is not None:
         user, _uid, _gid = chown_info
         _step("handed deploy dir to operator", detail=user)
+
+    # Pre-create + open up the volume-mount targets BEFORE compose up.
+    # Without this, withcache (USER app) and bty-web (USER bty) can't
+    # write under data/ on the rootful host bind-mount and crash on
+    # first start. See _prepare_data_dirs for the full why.
+    created = _prepare_data_dirs(data_dir_abs)
+    _step("prepared data dirs", detail=" ".join(str(p) for p in created))
 
     # Root mode pulls + starts with the TFTP profile so the bty-tftp
     # sidecar comes up alongside bty-web and withcache. Non-root mode
@@ -1095,9 +1127,10 @@ def upgrade_main(argv: list[str] | None = None, *, prog: str = "bty-lab upgrade"
     mode_label = "system install [root]" if is_root else "user install [non-root]"
 
     # Step total for upgrade. Counts: prereqs, prereqs-OK, install-mode,
-    # regen-files, envvars-preserved, pull, [quadlets, daemon-reload,
-    # restart-svcs]*quadlet OR [restart-stack]*compose, upgrade-complete.
-    total = 7 + (3 if quadlet_managed else 1)
+    # regen-files, envvars-preserved, prep-data, pull, [quadlets,
+    # daemon-reload, restart-svcs]*quadlet OR [restart-stack]*compose,
+    # upgrade-complete.
+    total = 8 + (3 if quadlet_managed else 1)
     _steps_begin(total)
 
     _step("checking prereqs")
@@ -1119,6 +1152,11 @@ def upgrade_main(argv: list[str] | None = None, *, prog: str = "bty-lab upgrade"
     for p in written:
         print(f"  {p.relative_to(dest.parent) if dest.parent != Path() else p}", file=sys.stderr)
     _step("envvars preserved", detail=str(envvars_path))
+
+    # Same data-dir prep as deploy_main -- idempotent, so re-running
+    # upgrade on an already-running stack is a no-op.
+    created = _prepare_data_dirs(data_dir_abs)
+    _step("prepared data dirs", detail=" ".join(str(p) for p in created))
 
     # Match the deploy-time profile choice: root pulls + restarts with
     # the TFTP sidecar, non-root skips it (UEFI HTTP-Boot only).
