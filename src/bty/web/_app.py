@@ -47,7 +47,6 @@ from bty import oras as _oras
 from bty.web import (
     _backup,
     _db,
-    _hash,
     _models,
     _release_mgr,
     _settings_store,
@@ -162,7 +161,6 @@ def create_app(
             # fresh catalog from the UI to recover.
             print(f"bty-web: catalog at {manifest_path}: {exc}", file=sys.stderr)
             catalog_state.catalog = None
-    hash_manager = _hash.HashManager()
     release_fetch_manager = _release_mgr.ReleaseFetchManager()
     backup_manager = _backup.BackupManager()
 
@@ -211,21 +209,12 @@ def create_app(
         # ``worker-state-changed`` SSE event so the Backups / Hashing
         # / Downloads / Netboot pages get push-driven refreshes
         # instead of waiting on their safety poll.
-        hash_manager.set_state_listener(
-            lambda s: event_bus.publish(worker_event("hash", s.name, s.status))
-        )
         release_fetch_manager.set_state_listener(
             lambda s: event_bus.publish(worker_event("release", s.tag, s.status))
         )
         backup_manager.set_state_listener(
             lambda s: event_bus.publish(worker_event("backup", s.backup_id, s.status))
         )
-        # The hash manager always starts -- it operates on
-        # ``image_root``, which exists for every bty-web shape
-        # (container, host, dev). Default parallelism is 1
-        # so a Pi-class box doesn't get hammered if multiple big
-        # images need importing at once.
-        hash_manager.start(resolved_image_root, state_path=state_path)
         # Release-fetch manager: powers the trackable
         # /boot/releases endpoints (and the /ui/netboot page's
         # progress + cancel buttons). Default parallelism is 1
@@ -247,26 +236,12 @@ def create_app(
         )
         # Auto-import: ensure every dir-scan file under
         # ``resolved_image_root`` has a catalog_entries row keyed by
-        # ``bty_image_ref = sha256("file://<rel-path>")``, then enqueue
-        # the HashManager for any without a known ``disk_image_sha``.
-        # The row exists immediately (so the operator can bind to it
-        # without waiting for hashing); the HashManager populates
-        # ``disk_image_sha`` in the background and the PXE flash path
-        # becomes viable once the hash lands.
-        #
-        # Idempotent: ``INSERT OR IGNORE`` skips rows whose src is
-        # already in the table (the operator may have curated the
-        # file via the UI; preserve their description, etc.).
-        # Operator-initiated work queues behind these jobs by FIFO
-        # order; parallelism cap (default 1) keeps a Pi responsive.
-        # Single ``list_images`` scan up front + thread it through
-        # the two consumers: auto-import to ``catalog_entries`` and
-        # auto-enqueue unhashed files for the HashManager. Previous
-        # versions called ``list_images`` twice in this block (once
-        # inside ``_auto_import_dir_scan_rows``, once just below for
-        # the hash enqueue), so a full filesystem scan ran twice on
-        # every bty-web startup -- 2x the inode reads on a Pi for
-        # no reason.
+        # ``bty_image_ref = sha256("file://<rel-path>")``. The row
+        # exists immediately so the operator can bind to it without
+        # waiting for a re-scan. Idempotent: ``INSERT OR IGNORE``
+        # skips rows whose src is already in the table (the operator
+        # may have curated the file via the UI; preserve their
+        # description, etc.).
         startup_images = images.list_images(resolved_image_root)
         _auto_import_dir_scan_rows(startup_images)
         # And the symmetric path for manifest entries: a catalog.toml
@@ -275,31 +250,6 @@ def create_app(
         # so the /ui/machines/{mac} dropdown shows them.
         if catalog_state.catalog is not None:
             _auto_import_manifest_rows(catalog_state.catalog)
-        for img in startup_images:
-            if img.sha256 is not None:
-                continue
-            # Skip catalog-fetched cache files: the DownloadManager
-            # computes the sha while bytes flow during fetch and
-            # writes it directly to ``catalog_entries.disk_image_sha``
-            # for the owning row (no .sha256 sidecar is written).
-            # Re-hashing them on every restart wastes I/O and (on a
-            # Pi-class box with multi-GiB images) blocks the operator
-            # binding flow behind the queue. The catalog row's sha is
-            # already authoritative -- ``GET /images/<sha>`` serves
-            # the file by cache-hit lookup regardless of whether the
-            # filesystem has a sidecar.
-            if _catalog.is_catalog_cache_filename(img.name):
-                continue
-            # ``FileNotFoundError`` -- file vanished between the
-            # ``list_images`` scan and the enqueue (harmless).
-            # ``ValueError`` -- the traversal guard in
-            # ``HashManager.enqueue`` rejects suspect basenames;
-            # ``list_images`` shouldn't surface any but a freshly-
-            # created file named ``..`` (impossible) or ``.``
-            # (likewise) would crash startup without this
-            # suppression.
-            with contextlib.suppress(FileNotFoundError, ValueError):
-                await hash_manager.enqueue(img.name)
         # Backup scheduler loop. Ticks every 60s; reads cadence +
         # last_run_at on every tick so a Settings change reflects
         # without restart. Stop signalled by ``backup_stop_event``,
@@ -325,7 +275,6 @@ def create_app(
             backup_stop_event.set()
             with contextlib.suppress(asyncio.CancelledError):
                 await backup_scheduler_task
-            await hash_manager.stop()
             await release_fetch_manager.stop()
             await backup_manager.stop()
             # Wake every SSE subscribe() generator so the
@@ -2378,103 +2327,6 @@ def create_app(
         return PlainTextResponse(content=body, media_type="application/toml")
 
     @app.put(
-        "/images/{name}",
-        dependencies=[Depends(require_auth)],
-        include_in_schema=False,
-    )
-    async def upload_image(name: str, request: Request) -> dict[str, object]:
-        """Stream-upload an image into the image root.
-
-        Body is the raw image bytes (``Content-Type:
-        application/octet-stream``). Atomic via a ``.partial`` sibling
-        + rename. Returns the resolved path + bytes-written on
-        success; replaces an existing file with the same name.
-
-        Auto-enqueues a hash job after the write so the new image
-        appears in the unified ``/images`` listing on the next
-        request without waiting for a server restart. The
-        HashManager runs a single worker by default; the upload
-        returns immediately and the operator can watch progress
-        via ``/catalog/hashes``.
-
-        Failure path logs ``image.upload.failed`` so the audit log
-        is symmetric with the success path's ``image.uploaded``.
-        Operators scanning /ui/events see "this upload was tried
-        and rejected" with the underlying error.
-        """
-        try:
-            result = await _stream_upload(request, resolved_image_root, name)
-        except HTTPException as exc:
-            with _db.open_db(state_path) as conn:
-                _log_event(
-                    conn,
-                    kind="image.upload.failed",
-                    summary=f"image {name!r} upload failed: {exc.detail}",
-                    subject_kind="image",
-                    subject_id=name,
-                    actor="operator",
-                    source_ip=_client_ip(request),
-                    details={"status_code": exc.status_code, "error": str(exc.detail)},
-                )
-                conn.commit()
-            raise
-        except OSError as exc:
-            # Disk full / read-only filesystem / etc. ``_stream_upload``
-            # already cleaned up the .partial; we just record the
-            # failure and let it propagate to a 500 response.
-            with _db.open_db(state_path) as conn:
-                _log_event(
-                    conn,
-                    kind="image.upload.failed",
-                    summary=f"image {name!r} upload failed: {type(exc).__name__}: {exc}",
-                    subject_kind="image",
-                    subject_id=name,
-                    actor="operator",
-                    source_ip=_client_ip(request),
-                    details={"status_code": 500, "error": f"{type(exc).__name__}: {exc}"},
-                )
-                conn.commit()
-            raise
-        # Image catalog count changes; refresh the dashboard fragment.
-        publish_state_changed()
-        # Trigger an import for the just-uploaded file UNLESS it's
-        # itself a sidecar (operators occasionally upload the
-        # ``<file>.sha256`` after the image): hashing a sidecar
-        # would be nonsense + would write a ``.sha256.sha256``
-        # cousin. ``list_images`` already filters sidecars; the
-        # auto-import lifespan would have skipped this entry, so
-        # we mirror that guard here.
-        if not name.endswith(".sha256"):
-            # ``_stream_upload`` already raises on write failure, so
-            # FileNotFoundError shouldn't reach here -- suppressed
-            # defensively for robustness against a transient unlink.
-            with contextlib.suppress(FileNotFoundError):
-                await hash_manager.enqueue(name)
-            # Insert/refresh the ``catalog_entries`` row for this
-            # file so the operator can bind a machine by its
-            # ``bty_image_ref`` immediately, without waiting for a
-            # bty-web restart's lifespan sweep. Idempotent
-            # (``INSERT OR IGNORE`` + ``COALESCE`` UPDATE). The
-            # upload only added one file, so a fresh dir-scan is the
-            # honest input; calling the helper with the full
-            # ``list_images`` result keeps the function signature
-            # consistent with the startup caller.
-            _auto_import_dir_scan_rows(images.list_images(resolved_image_root))
-            with _db.open_db(state_path) as conn:
-                _log_event(
-                    conn,
-                    kind="image.uploaded",
-                    summary=f"image {name!r} uploaded ({result['size_bytes']} bytes)",
-                    subject_kind="image",
-                    subject_id=name,
-                    actor="operator",
-                    source_ip=_client_ip(request),
-                    details={"size_bytes": result["size_bytes"]},
-                )
-                conn.commit()
-        return result
-
-    @app.put(
         "/boot/{name}",
         dependencies=[Depends(require_auth)],
         include_in_schema=False,
@@ -3301,47 +3153,6 @@ def create_app(
         manifest_path.write_bytes(content)
         await _reload_catalog_from_disk()
         return RedirectResponse("/ui/images", status_code=status.HTTP_303_SEE_OTHER)
-
-    # ---------- catalog hash manager --------------------------------------
-    # Hashing is independent of the manifest -- always available so
-    # an operator can compute SHA-256 sidecars for dir-scan files
-    # whether or not they author a catalog.toml.
-
-    @app.get("/catalog/hashes")
-    async def list_hashes(_: str = Depends(require_auth)) -> dict[str, Any]:
-        states = await hash_manager.list()
-        return {
-            "image_root": str(resolved_image_root),
-            "max_parallel": hash_manager.max_parallel,
-            "hashes": [s.to_dict() for s in states],
-        }
-
-    @app.post("/catalog/hashes", status_code=status.HTTP_202_ACCEPTED)
-    async def enqueue_hash(
-        body: _models.CatalogEnqueueRequest,
-        _: str = Depends(require_auth),
-    ) -> dict[str, Any]:
-        try:
-            state = await hash_manager.enqueue(body.name)
-        except FileNotFoundError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=str(exc),
-            ) from exc
-        return state.to_dict()
-
-    @app.delete("/catalog/hashes/{name}")
-    async def cancel_hash(
-        name: str,
-        _: str = Depends(require_auth),
-    ) -> dict[str, Any]:
-        state = await hash_manager.cancel(name)
-        if state is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"no active hash named {name!r}",
-            )
-        return state.to_dict()
 
     return app
 

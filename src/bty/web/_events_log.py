@@ -100,12 +100,6 @@ KNOWN_EVENT_KINDS: tuple[str, ...] = (
     "netboot.pxe.plan",
     "netboot.flasher.armed",
     "pxe.client.orphan",
-    "image.uploaded",
-    "image.upload.failed",
-    "image.hashed",
-    "image.hash.started",
-    "image.hash.failed",
-    "image.hash.cancelled",
     "catalog.entry.added",
     "catalog.entry.add.failed",
     "catalog.entry.deleted",
@@ -139,7 +133,6 @@ KNOWN_EVENT_KINDS: tuple[str, ...] = (
 # not enforce membership so a typo can't 500 a request.
 KNOWN_SUBJECT_KINDS: tuple[str, ...] = (
     "machine",
-    "image",
     "catalog",
     "netboot",
     "settings",

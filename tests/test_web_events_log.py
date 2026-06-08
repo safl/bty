@@ -98,10 +98,10 @@ def test_list_filters_by_kind(tmp_path: Path) -> None:
     conn, close = _open(state)
     try:
         _events_log.record(conn, kind="machine.discovered", summary="m1")
-        _events_log.record(conn, kind="image.uploaded", summary="i1")
+        _events_log.record(conn, kind="catalog.entries.imported", summary="i1")
         _events_log.record(conn, kind="machine.flashed", summary="m2")
         conn.commit()
-        rows = _events_log.list_events(conn, kind="image.uploaded")
+        rows = _events_log.list_events(conn, kind="catalog.entries.imported")
     finally:
         close()
     assert [r.summary for r in rows] == ["i1"]
@@ -209,7 +209,7 @@ def test_list_clamps_limit(tmp_path: Path) -> None:
         assert rows == []  # still works (clamped to 1)
         # Above cap: insert 600 rows, ask for 1000, get 500.
         for i in range(600):
-            _events_log.record(conn, kind="image.hashed", summary=f"e{i}")
+            _events_log.record(conn, kind="machine.discovered", summary=f"e{i}")
         conn.commit()
         rows = _events_log.list_events(conn, limit=1000)
     finally:
@@ -267,7 +267,7 @@ def test_details_round_trip(tmp_path: Path) -> None:
     try:
         _events_log.record(
             conn,
-            kind="image.uploaded",
+            kind="machine.discovered",
             summary="upload",
             details={"size_bytes": 12345, "name": "demo.qcow2"},
         )
@@ -281,7 +281,7 @@ def test_details_round_trip(tmp_path: Path) -> None:
     finally:
         close()
     by_kind = {r.kind: r for r in rows}
-    assert by_kind["image.uploaded"].details == {"size_bytes": 12345, "name": "demo.qcow2"}
+    assert by_kind["machine.discovered"].details == {"size_bytes": 12345, "name": "demo.qcow2"}
     assert by_kind["junk"].details is None  # malformed -> None, not crash
 
 

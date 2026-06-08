@@ -350,137 +350,6 @@ def test_pxe_does_not_overwrite_assignment(app_client: TestClient) -> None:
 # ---------- image / boot upload --------------------------------------------
 
 
-def test_put_image_uploads_to_image_root(app_client: TestClient) -> None:
-    """``PUT /images/{name}`` lands the body bytes at
-    ``image_root/<name>`` and the file is round-trippable via the
-    open ``GET /images/{name}``."""
-    body = b"\x01\x02\x03" * 1024
-    r = app_client.put("/images/upload.qcow2", content=body, cookies=AUTH)
-    assert r.status_code == 200, r.text
-    payload = r.json()
-    assert payload["name"] == "upload.qcow2"
-    assert payload["size_bytes"] == len(body)
-    # Same bytes flow back via the open serve route.
-    served = app_client.get("/images/upload.qcow2")
-    assert served.status_code == 200
-    assert served.content == body
-
-
-def test_put_image_overwrites_existing(app_client: TestClient) -> None:
-    first = app_client.put("/images/x.qcow2", content=b"old", cookies=AUTH)
-    assert first.status_code == 200
-    second = app_client.put("/images/x.qcow2", content=b"newer-bytes", cookies=AUTH)
-    assert second.status_code == 200
-    assert second.json()["size_bytes"] == len(b"newer-bytes")
-    assert app_client.get("/images/x.qcow2").content == b"newer-bytes"
-
-
-def test_put_image_rejects_path_traversal(app_client: TestClient) -> None:
-    """``..`` and slashes mustn't escape the image root. FastAPI's
-    path converter already strips raw ``/`` from ``{name}``, but
-    URL-encoded variants and ``..`` need an explicit reject."""
-    r = app_client.put("/images/..%2Fescape.qcow2", content=b"x", cookies=AUTH)
-    # Three valid rejects: 400 (explicit traversal-reject), 404 (no
-    # such file), 405 (URL-decoded path becomes ``..%2F...`` which
-    # routes onto the GET /images/{key}/{name:path} pattern and
-    # PUT isn't allowed there). All three deny the upload; the
-    # vulnerability would be a 200 + actual write outside image_root.
-    assert r.status_code in {400, 404, 405}
-
-
-def test_put_image_requires_auth(app_client: TestClient) -> None:
-    r = app_client.put("/images/x.qcow2", content=b"x")
-    assert r.status_code == 401
-
-
-def test_put_image_rejects_oversized_upload(
-    app_client: TestClient,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """``_stream_upload`` caps the body at ``BTY_MAX_UPLOAD_BYTES``
-    (default 200 GiB; tunable via env). Without the cap a runaway
-    script or hostile request that streams forever would fill the
-    image-root partition. The cap kills the upload mid-stream, the
-    .partial cleanup branch unlinks the half-written file, and the
-    response is 413."""
-    # Set a tiny cap so the test doesn't actually need to push GiBs.
-    monkeypatch.setenv("BTY_MAX_UPLOAD_BYTES", "16")
-
-    # 64-byte payload, well past the 16-byte cap.
-    payload = b"a" * 64
-    r = app_client.put("/images/oversized.img", content=payload, cookies=AUTH)
-    assert r.status_code == 413
-    # Partial cleanup: no oversized.img or oversized.img.partial
-    # left in the image-root. ``demo.qcow2`` from the fixture is
-    # expected; its ``.sha256`` sidecar may also be present
-    # (auto-import races the test). Anything ``oversized*`` would
-    # be the bug.
-    image_root = tmp_path / "images"
-    leftovers = sorted(p.name for p in image_root.iterdir() if p.name.startswith("oversized"))
-    assert leftovers == [], f"upload cap left behind: {leftovers}"
-
-
-def test_put_image_inserts_catalog_entries_row_immediately(
-    app_client: TestClient,
-) -> None:
-    """``PUT /images/{name}`` runs the auto-import sweep after a
-    successful upload so the new file lands in ``catalog_entries``
-    (keyed by ``bty_image_ref``) without waiting for the HashManager
-    or a bty-web restart. Verifies the operator can immediately bind
-    a machine by the new ref."""
-    from bty.catalog import image_ref_for_src
-
-    body = b"auto-import-on-upload-bytes"
-    r = app_client.put("/images/just-uploaded.img", content=body, cookies=AUTH)
-    assert r.status_code == 200, r.text
-    rows = app_client.get("/catalog/entries", cookies=AUTH).json()
-    by_src = {row["src"]: row for row in rows}
-    src = "file://just-uploaded.img"
-    assert src in by_src, f"expected catalog row for {src!r}; got {sorted(by_src)}"
-    expected_ref = image_ref_for_src(src)
-    assert by_src[src]["bty_image_ref"] == expected_ref
-
-
-def test_put_image_triggers_hash_so_entry_appears_in_listing(
-    app_client: TestClient,
-    tmp_path: Path,
-) -> None:
-    """A successful PUT /images/{name} enqueues a hash job so the
-    image surfaces in /images on the next request without waiting
-    for the next server restart's auto-import sweep. Without this,
-    operators uploading via the API would see the file land but
-    ``bty --catalog`` clients would not see it as flashable until
-    bty-web bounced.
-    """
-    import hashlib
-    import time
-
-    payload = b"upload-and-hash"
-    expected_sha = hashlib.sha256(payload).hexdigest()
-    r = app_client.put("/images/uploaded.img", content=payload, cookies=AUTH)
-    assert r.status_code == 200
-    # The auto-import sweep on upload inserts a ``catalog_entries``
-    # row with ``disk_image_sha=None`` immediately, so the row
-    # appears before the HashManager finishes. Poll for the URL to
-    # flip from the ``file://`` src (unhashed) to
-    # ``/images/<sha>/<name>`` (hash worker done).
-    deadline = time.monotonic() + 5.0
-    sha_url = f"/images/{expected_sha}/uploaded.img"
-    r2 = app_client.get("/images")  # initial fetch so r2 is always bound
-    while time.monotonic() < deadline:
-        by_name = {row["name"]: row for row in r2.json()}
-        url = by_name.get("uploaded.img", {}).get("url", "")
-        if url.endswith(sha_url):
-            break
-        time.sleep(0.05)
-        r2 = app_client.get("/images")
-    rows = r2.json()
-    by_name = {row["name"]: row for row in rows}
-    assert "uploaded.img" in by_name, "upload didn't trigger an auto-hash"
-    assert by_name["uploaded.img"]["url"].endswith(sha_url)
-
-
 def test_put_boot_uploads_to_boot_root(app_client: TestClient) -> None:
     """``PUT /boot/{name}`` symmetric to /images/{name} but lands
     under boot_root - this is how the live trio gets onto the
@@ -527,30 +396,7 @@ def test_put_boot_rejects_oversized_upload(
     assert leftovers == [], f"upload cap left behind: {leftovers}"
 
 
-def test_put_image_empty_body_writes_zero_byte_file(app_client: TestClient) -> None:
-    """An empty body is a 0-byte file. Not an error -- the upload
-    completes, the file exists, just empty. Documents the
-    behaviour so a future "reject empty uploads" change has a
-    test to flip."""
-    r = app_client.put("/images/zero.qcow2", content=b"", cookies=AUTH)
-    assert r.status_code == 200
-    assert r.json()["size_bytes"] == 0
-    served = app_client.get("/images/zero.qcow2")
-    assert served.status_code == 200
-    assert served.content == b""
-
-
 # ---------- images ----------------------------------------------------------
-
-
-def test_list_images_returns_seeded_fixture(app_client: TestClient) -> None:
-    """The fixture seeds ``demo.qcow2`` so the file-serving routes
-    have something to return; ``GET /images`` exposes it via the
-    image catalog."""
-    r = app_client.get("/images", cookies=AUTH)
-    assert r.status_code == 200
-    rows = r.json()
-    assert {row["name"] for row in rows} == {"demo.qcow2"}
 
 
 def test_list_images_is_open_for_pxe_clients(app_client: TestClient) -> None:
@@ -560,102 +406,6 @@ def test_list_images_is_open_for_pxe_clients(app_client: TestClient) -> None:
     (already open) and the other ``/pxe/`` routes."""
     r = app_client.get("/images")  # no Authorization header
     assert r.status_code == 200
-
-
-def test_auto_import_hashes_unhashed_dir_scan_files(tmp_path: Path) -> None:
-    """bty-web's lifespan walks ``BTY_IMAGE_ROOT`` at startup and
-    enqueues a hash job for every file without a ``.sha256``
-    sidecar. After the hashing settles, the file is listable via
-    ``/images`` with a server URL.
-
-    Asserts the auto-import path fires; uses tiny payloads + a
-    short polling loop for the sidecar to avoid flake on slow CI.
-    """
-    import hashlib
-    import time
-
-    image_root = tmp_path / "images"
-    image_root.mkdir()
-    payload = b"auto-import me"
-    expected_sha = hashlib.sha256(payload).hexdigest()
-    img_path = image_root / "fresh.img"
-    img_path.write_bytes(payload)
-    sidecar = image_root / "fresh.img.sha256"
-    assert not sidecar.exists()
-
-    state = tmp_path / "state.db"
-    app = create_app(
-        state_path=state,
-        service_user=TEST_SERVICE_USER,
-        secret_key=TEST_SECRET_KEY,
-        image_root=image_root,
-    )
-    with TestClient(app) as client:
-        # The lifespan's auto-import enqueues the hash job; the
-        # HashManager processes it in a worker thread. Wait briefly
-        # for the sidecar to land (tiny file -> ms-scale).
-        deadline = time.monotonic() + 5.0
-        while time.monotonic() < deadline and not sidecar.exists():
-            time.sleep(0.05)
-        assert sidecar.exists(), "auto-import didn't write the sidecar"
-        # Sidecar carries the right digest.
-        assert sidecar.read_text().strip().split()[0] == expected_sha
-        # /images now lists the entry with a server URL.
-        r = client.get("/images")
-        rows = r.json()
-        names = {row["name"] for row in rows}
-        assert "fresh.img" in names
-        entry = next(row for row in rows if row["name"] == "fresh.img")
-        assert entry["url"].endswith(f"/images/{expected_sha}/fresh.img")
-
-
-def test_auto_import_skips_catalog_cache_files_in_hash_enqueue(tmp_path: Path) -> None:
-    """v0.33.28+: the lifespan's hash auto-enqueue loop must skip
-    catalog-fetched cache files (``catalog-<ref:12>-<slug>.<ext>``).
-    The DownloadManager computes the sha while bytes flow during
-    fetch and writes it directly to ``catalog_entries.disk_image_sha``
-    -- no .sha256 sidecar is left behind. Re-hashing on every restart
-    wasted I/O and, on Pi-class boxes with multi-GiB images, blocked
-    the operator binding flow behind the redundant queue.
-
-    Asserts no sidecar materialises for the catalog-cache file even
-    after we give the hash worker a generous window to run.
-    """
-    import time
-
-    image_root = tmp_path / "images"
-    image_root.mkdir()
-    # An operator-typed file (gets hashed) + a catalog-cache file
-    # (must be skipped).
-    (image_root / "operator.img").write_bytes(b"operator payload")
-    catalog_cache_name = "catalog-0123456789ab-someimage.img"
-    (image_root / catalog_cache_name).write_bytes(b"catalog cached payload")
-
-    state = tmp_path / "state.db"
-    app = create_app(
-        state_path=state,
-        service_user=TEST_SERVICE_USER,
-        secret_key=TEST_SECRET_KEY,
-        image_root=image_root,
-    )
-    operator_sidecar = image_root / "operator.img.sha256"
-    catalog_sidecar = image_root / f"{catalog_cache_name}.sha256"
-
-    with TestClient(app):
-        # Wait for the operator file's sidecar to land (proves the
-        # auto-enqueue loop ran at least one cycle).
-        deadline = time.monotonic() + 5.0
-        while time.monotonic() < deadline and not operator_sidecar.exists():
-            time.sleep(0.05)
-        assert operator_sidecar.exists(), "lifespan didn't process the operator file"
-        # Give the catalog cache file the same window. It should
-        # STILL not have a sidecar because the enqueue loop skipped it.
-        time.sleep(0.2)
-        assert not catalog_sidecar.exists(), (
-            "catalog-prefix cache file was re-hashed on startup; "
-            "the auto-enqueue loop must skip catalog-<ref:12>-... files "
-            "(DownloadManager already backfilled disk_image_sha at fetch)."
-        )
 
 
 def test_serve_image_stream_source_error_returns_502_not_500(
@@ -822,23 +572,19 @@ def test_auto_import_inserts_catalog_entries_row_per_dir_scan_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Auto-import sweep: every dir-scan file lands in
-    ``catalog_entries`` with src ``file://<name>``, computed
-    ``bty_image_ref``, and (once hashed) ``disk_image_sha``.
+    ``catalog_entries`` with src ``file://<name>`` and a computed
+    ``bty_image_ref``. Makes the file bindable via the UI picker
+    without the operator manually adding a URL. Idempotent on bty-web
+    restart (``INSERT OR IGNORE``).
 
-    Makes the file bindable via the UI picker without waiting for
-    the operator to manually add a URL. Idempotent on bty-web
-    restart (``INSERT OR IGNORE``)."""
-    import hashlib
+    v0.40: ``disk_image_sha`` stays NULL (HashManager is gone)."""
     import os
-    import time
 
     image_root = tmp_path / "images"
     image_root.mkdir()
     state_dir = tmp_path / "state"
     state_dir.mkdir()
-    payload = b"auto-import as catalog row"
-    expected_sha = hashlib.sha256(payload).hexdigest()
-    (image_root / "demo.img").write_bytes(payload)
+    (image_root / "demo.img").write_bytes(b"auto-import as catalog row")
 
     state = state_dir / "state.db"
     os.environ["BTY_STATE_DIR"] = str(state_dir)
@@ -861,27 +607,11 @@ def test_auto_import_inserts_catalog_entries_row_per_dir_scan_file(
             assert cookie is not None
             auth = {"bty-token": cookie}
 
-            # Wait for the auto-import sweep + hash to settle.
-            sidecar = image_root / "demo.img.sha256"
-            deadline = time.monotonic() + 5.0
-            while time.monotonic() < deadline and not sidecar.exists():
-                time.sleep(0.05)
-            assert sidecar.exists()
-
             rows = client.get("/catalog/entries", cookies=auth).json()
             row = next(r for r in rows if r["src"] == "file://demo.img")
             assert row["name"] == "demo.img"
             assert len(row["bty_image_ref"]) == 64
-            # disk_image_sha propagates from HashManager terminal step
-            # via UPDATE of the catalog_entries row.
-            deadline = time.monotonic() + 5.0
-            while time.monotonic() < deadline:
-                rows = client.get("/catalog/entries", cookies=auth).json()
-                row = next(r for r in rows if r["src"] == "file://demo.img")
-                if row["disk_image_sha"] == expected_sha:
-                    break
-                time.sleep(0.05)
-            assert row["disk_image_sha"] == expected_sha
+            assert row["disk_image_sha"] is None
     finally:
         os.environ.pop("BTY_STATE_DIR", None)
 
@@ -3085,31 +2815,6 @@ def test_events_list_includes_machine_lifecycle(app_client: TestClient) -> None:
             assert e["subject_id"] == mac
 
 
-def test_events_include_image_hashed_from_auto_import(app_client: TestClient) -> None:
-    """The lifespan startup auto-imports image_root files without
-    sidecars; the HashManager logs ``image.hashed`` as ``actor=
-    'system'`` once each completes. The fixture seeds
-    ``demo.qcow2`` so a row should be present by the time the
-    test runs.
-
-    Filter by kind to dodge the bare-list ordering -- relying on
-    "the first event" would be brittle if the lifespan grew more
-    auto-import work.
-    """
-    r = app_client.get("/events", params={"kind": "image.hashed"}, cookies=AUTH)
-    assert r.status_code == 200
-    events = r.json()["events"]
-    assert events, "expected an image.hashed row from auto-import"
-    row = events[0]
-    assert row["actor"] == "system"
-    assert row["subject_kind"] == "image"
-    assert row["subject_id"] == "demo.qcow2"
-    # Sha lands in details.
-    assert row["details"] is not None
-    assert isinstance(row["details"]["sha256"], str)
-    assert len(row["details"]["sha256"]) == 64
-
-
 def test_source_ip_uses_x_forwarded_for_when_trusted_proxy(
     app_client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -3270,61 +2975,6 @@ def test_catalog_entry_add_sha_failure_logs_event(
     assert "upstream gave 404" in row["details"]["error"]
 
 
-def test_image_upload_oversized_logs_failure_event(
-    app_client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """An upload that exceeds ``BTY_MAX_UPLOAD_BYTES`` lands an
-    ``image.upload.failed`` event so the audit trail is symmetric
-    with the success path's ``image.uploaded``. Force the cap
-    very low so the test fixture's ~10-byte payload trips it."""
-    monkeypatch.setenv("BTY_MAX_UPLOAD_BYTES", "5")
-    r = app_client.put(
-        "/images/big.qcow2",
-        content=b"this is more than 5 bytes",
-        cookies=AUTH,
-    )
-    assert r.status_code == 413
-    r = app_client.get("/events", params={"kind": "image.upload.failed"}, cookies=AUTH)
-    events = r.json()["events"]
-    assert len(events) == 1
-    row = events[0]
-    assert row["actor"] == "operator"
-    assert row["subject_kind"] == "image"
-    assert row["subject_id"] == "big.qcow2"
-    assert row["details"]["status_code"] == 413
-
-
-def test_image_upload_oserror_logs_failure_event(
-    app_client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """An OSError mid-upload (disk full, read-only fs, etc.) also
-    lands an ``image.upload.failed`` event so the audit trail
-    isn't only HTTPException-shaped failures.
-
-    Starlette's TestClient re-raises server exceptions by default
-    (``raise_server_exceptions=True``); we accept the OSError
-    propagating in-test and assert the event was recorded
-    *before* the re-raise."""
-    from bty.web import _app
-
-    async def boom(*_a: object, **_kw: object) -> dict[str, object]:
-        raise OSError(28, "No space left on device")
-
-    monkeypatch.setattr(_app, "_stream_upload", boom)
-    with pytest.raises(OSError, match="No space left on device"):
-        app_client.put(
-            "/images/whatever.qcow2",
-            content=b"...",
-            cookies=AUTH,
-        )
-    r = app_client.get("/events", params={"kind": "image.upload.failed"}, cookies=AUTH)
-    events = r.json()["events"]
-    assert len(events) == 1
-    row = events[0]
-    assert row["details"]["status_code"] == 500
-    assert "No space left on device" in row["details"]["error"]
-
-
 def test_events_filter_by_subject_id(app_client: TestClient) -> None:
     """The per-MAC embedded card on /ui/machines/{mac} drives this
     filter -- only events for the given MAC come back. The /pxe
@@ -3371,24 +3021,6 @@ def test_ui_events_page_renders_filtered(app_client: TestClient) -> None:
     body = r.text
     assert "machine.discovered" in body
     assert "aa:bb:cc:dd:ee:ff" in body
-
-
-def test_ui_events_page_image_subject_links_to_filter(app_client: TestClient) -> None:
-    """Non-machine subjects (image / catalog / boot / settings)
-    have no detail page, so the subject_id cell pivots into the
-    timeline filtered by that subject. Regression-class: an
-    earlier version rendered them as plain ``<code>`` text with
-    no pivot, leaving operators with no way to see "everything
-    that touched this image"."""
-    # Auto-import seeds an image.hashed event with subject_kind=image
-    # and subject_id="demo.qcow2" via the lifespan startup.
-    r = app_client.get("/ui/events", params={"kind": "image.hashed"}, cookies=AUTH)
-    assert r.status_code == 200
-    body = r.text
-    assert "demo.qcow2" in body
-    # Pivot URL: subject_kind + subject_id both URL-encoded.
-    # ``&amp;`` between params (HTML-compliant escape).
-    assert "/ui/events?subject_kind=image&amp;subject_id=demo.qcow2" in body
 
 
 def test_ui_events_page_footer_shows_filtered_when_filter_active(
@@ -4865,41 +4497,6 @@ def test_create_app_rotates_stale_state_db_end_to_end(
     assert old_machines == ["aa:bb:cc:dd:ee:ff"]
 
 
-def test_catalog_hashes_requires_auth(app_client: TestClient) -> None:
-    r = app_client.get("/catalog/hashes")
-    assert r.status_code == 401
-
-
-def test_catalog_hashes_listing_includes_max_parallel(
-    app_client: TestClient,
-) -> None:
-    """``GET /catalog/hashes`` always returns ``image_root`` +
-    ``max_parallel`` + ``hashes``. Lets the UI render the
-    bty-web hash-pane caption without a separate config endpoint.
-    """
-    r = app_client.get("/catalog/hashes", cookies=AUTH)
-    assert r.status_code == 200
-    body = r.json()
-    assert "image_root" in body
-    assert body["max_parallel"] >= 1
-    assert isinstance(body["hashes"], list)
-
-
-def test_catalog_hashes_post_unknown_file_404(app_client: TestClient) -> None:
-    r = app_client.post(
-        "/catalog/hashes",
-        json={"name": "no-such-file.img"},
-        cookies=AUTH,
-    )
-    assert r.status_code == 404
-    assert "no image file" in r.json()["detail"]
-
-
-def test_catalog_hashes_cancel_unknown_404(app_client: TestClient) -> None:
-    r = app_client.delete("/catalog/hashes/never-was", cookies=AUTH)
-    assert r.status_code == 404
-
-
 # ---------- operator-curated catalog entries -------------------------------
 
 
@@ -6148,20 +5745,6 @@ def test_ui_machines_renders_timestamps_compactly(app_client: TestClient, tmp_pa
     assert "2026-05-17 20:21:09 UTC" not in page.text
     # Raw form kept in the title= attribute for hover precision.
     assert 'title="2026-05-17T20:21:09.155109+00:00"' in page.text
-
-
-def test_catalog_enqueue_request_rejects_traversal_name(app_client: TestClient) -> None:
-    """``CatalogEnqueueRequest.name`` (used by ``POST /catalog/hashes``)
-    rejects path-traversal characters at the Pydantic layer. Layered
-    with the manager-side check so the surface returns a clean 422
-    instead of a 500 from ``ValueError``."""
-    for bad in ("../etc/passwd", "foo/bar", "name\\with\\backslash", "with\0nul"):
-        r = app_client.post(
-            "/catalog/hashes",
-            json={"name": bad},
-            cookies=AUTH,
-        )
-        assert r.status_code == 422, f"expected 422 for {bad!r}, got {r.status_code}"
 
 
 # --------------------------------------------------------------------------

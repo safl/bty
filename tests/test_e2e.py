@@ -200,54 +200,6 @@ def test_e2e_real_default_catalog_round_trips_through_probe_url(
 # ----------------------------------------------------------------------
 
 
-def test_e2e_uploaded_image_routes_round_trip_with_special_chars(
-    app_client: TestClient,
-) -> None:
-    """Upload an image with a "normal" filename, then exercise both
-    URL shapes (``/images/<sha>``, ``/images/<sha>/<name>``) with
-    both methods (HEAD, GET). Catches:
-
-      * HEAD-on-images route returning 405 (v0.20.7 regression).
-      * Content-Length absent from HEAD (Starlette FileResponse
-        contract).
-      * Per-request size mismatches (HEAD claims X bytes, GET
-        delivers Y).
-
-    The "special char" twist: percent-encode the name segment
-    in the HEAD/GET to ensure routing tolerates it.
-    """
-    payload = b"\0" * 4096
-    encoded = "foo%20bar.img.gz"  # space in name, percent-encoded
-    # PUT requires auth.
-    r = app_client.put(
-        f"/images/{encoded}",
-        content=payload,
-        cookies=AUTH,
-    )
-    # 200 OK (overwrite) or 201 Created (new) -- either is success.
-    assert r.status_code in (200, 201), r.text
-    sha = hashlib.sha256(payload).hexdigest()
-
-    # Bare /images/{key} -- by filename.
-    for method in ("HEAD", "GET"):
-        r = app_client.request(method, f"/images/{encoded}")
-        assert r.status_code == 200, (method, r.text)
-        assert r.headers.get("content-length") == str(len(payload)), (
-            method,
-            r.headers,
-        )
-        if method == "GET":
-            assert r.content == payload
-        else:
-            assert r.content == b""
-
-    # /images/{key}/{name:path} -- ``name`` is decorative.
-    for method in ("HEAD", "GET"):
-        r = app_client.request(method, f"/images/{sha}/{encoded}")
-        assert r.status_code == 200, (method, r.text)
-        assert r.headers.get("content-length") == str(len(payload))
-
-
 # ----------------------------------------------------------------------
 # 3. /pxe/<mac> -> kernel cmdline tokens are well-formed
 # ----------------------------------------------------------------------
