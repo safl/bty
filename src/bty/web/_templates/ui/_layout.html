@@ -444,13 +444,9 @@
                    (its page lives under Netboot). #}
                 <div class="nav-workers d-flex align-items-center"
                      title="Background workers (live counts): Downloads, Hashing, Backups">
-                    <a class="nav-worker {% if nav_active == 'downloads' %}active{% endif %}" href="/ui/downloads" title="Downloads (active jobs, counted per file)">
+                    <a class="nav-worker {% if nav_active == 'downloads' %}active{% endif %}" href="/ui/downloads" title="Downloads (active netboot artifact fetches)">
                         <i class="bi bi-arrow-down-circle"></i>
                         <span class="badge rounded-pill bg-primary nav-worker-badge d-none" data-worker="downloads">0</span>
-                    </a>
-                    <a class="nav-worker {% if nav_active == 'hashing' %}active{% endif %}" href="/ui/hashing" title="Hashing (active jobs)">
-                        <i class="bi bi-hash"></i>
-                        <span class="badge rounded-pill bg-warning text-dark nav-worker-badge d-none" data-worker="hashes">0</span>
                     </a>
                     <a class="nav-worker {% if nav_active == 'backups' %}active{% endif %}" href="/ui/backups" title="Backups (scheduled + on-demand)">
                         <i class="bi bi-shield-check"></i>

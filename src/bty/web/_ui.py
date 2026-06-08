@@ -747,29 +747,6 @@ def register_ui_routes(
         )
 
     @app.get(
-        "/ui/hashing",
-        response_class=HTMLResponse,
-        include_in_schema=False,
-        dependencies=[Depends(require_ui_auth)],
-    )
-    def ui_hashing(request: Request) -> HTMLResponse:
-        """The Hashing worker page: active SHA-256 jobs + recent hash
-        completion / failure events at the bottom."""
-        with _db.open_db(state_path) as conn:
-            # Filter image events to hash-relevant kinds only.
-            hashing_events = [
-                ev
-                for ev in _events_log.list_events(conn, subject_kind="image", limit=40)
-                if ev.kind in ("image.hashed", "image.hash.failed")
-            ][:15]
-        return render(
-            "ui/hashing.html",
-            request,
-            image_root=str(image_root),
-            hashing_events=hashing_events,
-        )
-
-    @app.get(
         "/ui/backups",
         response_class=HTMLResponse,
         include_in_schema=False,

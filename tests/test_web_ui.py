@@ -349,19 +349,21 @@ def test_ui_images_is_catalog_listing_only(client: TestClient) -> None:
 
 
 def test_worker_pages_exist_separately(client: TestClient) -> None:
-    """Three separate worker pages: Downloads, Hashing, Backups. Each
-    renders standalone with its own active-jobs section + recent
-    activity card. No merged /ui/workers page."""
+    """Two separate worker pages: Downloads, Backups. Each renders
+    standalone with its own active-jobs section + recent activity
+    card. (Hashing went away in v0.40; no merged /ui/workers page.)"""
     _login(client)
-    for url in ("/ui/downloads", "/ui/hashing", "/ui/backups"):
+    for url in ("/ui/downloads", "/ui/backups"):
         r = client.get(url)
         assert r.status_code == 200, f"{url} should render, got {r.status_code}"
     # The previous merged page is gone.
     assert client.get("/ui/workers").status_code == 404
     # And the previously-removed legacy URLs that the workers reshape
     # removed: /ui/hashes (now /ui/hashing) and /ui/fetches (now folded
-    # into /ui/downloads).
+    # into /ui/downloads). /ui/hashing itself went away in v0.40 (no
+    # more HashManager).
     assert client.get("/ui/hashes").status_code == 404
+    assert client.get("/ui/hashing").status_code == 404
     assert client.get("/ui/fetches").status_code == 404
 
 
@@ -459,15 +461,14 @@ def test_subnavs_drop_the_redundant_list_pill(client: TestClient) -> None:
 
     # Every content page carries the section-jump sub-nav strip with
     # in-page anchor links (no aria-current pills -- those were the old
-    # ?section= page links). The three worker pages are now individual
-    # (Downloads / Hashing / Backups).
+    # ?section= page links). The worker pages are now individual
+    # (Downloads / Backups; Hashing went away in v0.40).
     for path in (
         "/ui/images",
         "/ui/netboot",
         "/ui/machines",
         "/ui/events",
         "/ui/downloads",
-        "/ui/hashing",
         "/ui/backups",
         "/ui/dashboard",
     ):
@@ -477,7 +478,6 @@ def test_subnavs_drop_the_redundant_list_pill(client: TestClient) -> None:
 
     # Each worker page lights ONLY its own navbar indicator.
     assert client.get("/ui/downloads").text.count("nav-worker active") == 1
-    assert client.get("/ui/hashing").text.count("nav-worker active") == 1
     assert client.get("/ui/backups").text.count("nav-worker active") == 1
 
     # Settings carries its own section-jump sub-nav (anchor links + rules).
@@ -534,17 +534,6 @@ def test_ui_downloads_has_all_three_triggers(client: TestClient) -> None:
     assert "bty-workers-downloads-tbody" in body
     # Activity card at the bottom (recent download-related events).
     assert 'id="downloads-activity"' in body
-
-
-def test_ui_hashing_has_active_jobs_and_activity(client: TestClient) -> None:
-    """``/ui/hashing`` carries the live hash-jobs tbody + recent
-    image.hashed / image.hash.failed events."""
-    _login(client)
-    body = client.get("/ui/hashing").text
-    assert "bty-workers-hashing-tbody" in body
-    assert 'id="hashing-activity"' in body
-    # No trigger button -- hashes are enqueued from /ui/images per-row.
-    assert 'id="bty-workers-backup-now"' not in body
 
 
 def test_ui_backups_has_back_up_now_and_activity(client: TestClient) -> None:
@@ -2961,14 +2950,12 @@ def test_layout_opens_shared_worker_events_source(client: TestClient) -> None:
 def test_polling_pages_listen_for_sse_events(client: TestClient) -> None:
     """Each worker page listens for the shared CustomEvent (instead of
     opening its own EventSource) AND filters by kind so it only
-    re-fetches when relevant."""
+    re-fetches when relevant. (v0.40: /ui/hashing went away with
+    HashManager.)"""
     _login(client)
 
     backups = client.get("/ui/backups").text
     assert 'e.detail.kind === "backup"' in backups
-
-    hashing = client.get("/ui/hashing").text
-    assert 'e.detail.kind === "hash"' in hashing
 
     downloads = client.get("/ui/downloads").text
     # Downloads tracks both kinds.
