@@ -123,16 +123,30 @@ def main(args, cijoe):
         for name in artifact_names:
             _put_file(seed_base, token, "/boot", boot_stage / name, name)
 
-        log.info(f"PUT /images/{cfg['machine_image']} (1 MiB dummy) + sha256 sidecar")
-        _put_file(seed_base, token, "/images", dummy_image, cfg["machine_image"])
+        # v0.40+: bty-web doesn't accept image uploads. We stage the
+        # dummy image under /boot (which still takes arbitrary uploads
+        # via PUT /boot/<name>) and register it as a catalog entry whose
+        # ``image_url`` points at this server's /boot serve path. The
+        # plan endpoint then hands the live env this URL directly --
+        # bty-web is out of the bytes plane for the catalog entry's
+        # https origin, but /boot's open file-serve still flows the
+        # bytes. Functionally equivalent to the old upload + sidecar
+        # path; structurally fits the v0.40 catalogs-only model.
+        log.info(f"PUT /boot/{cfg['machine_image']} (1 MiB dummy) + sha256 sidecar")
+        _put_file(seed_base, token, "/boot", dummy_image, cfg["machine_image"])
         dummy_sha = _sha256_file(dummy_image)
         sidecar = f"{cfg['machine_image']}.sha256"
         sidecar_body = f"{dummy_sha}  {cfg['machine_image']}\n".encode()
-        _put_bytes(seed_base, token, "/images", sidecar_body, sidecar)
+        _put_bytes(seed_base, token, "/boot", sidecar_body, sidecar)
 
-        # Canonical ref for the uploaded file (mirrors image_ref_for_src for
-        # file://, without importing bty into cijoe's venv).
-        bty_image_ref = hashlib.sha256(f"file://{cfg['machine_image']}".encode()).hexdigest()
+        # Catalog entry URL must be reachable from the client VM, not
+        # from loopback. Use the bridge IP the live env will see.
+        catalog_url_base = f"http://{cfg['server_pxe_ip']}:{BTY_HTTP_PORT}"
+        image_url = f"{catalog_url_base}/boot/{cfg['machine_image']}"
+        sha_url = f"{catalog_url_base}/boot/{sidecar}"
+        log.info(f"POST /catalog/entries (image_url={image_url})")
+        bty_image_ref = _add_catalog_entry(seed_base, token, image_url, sha_url)
+
         log.info(f"PUT /machines/{cfg['client_mac']} (boot_mode=bty-flash-always)")
         _put_assignment(seed_base, token, cfg, bty_image_ref)
 
@@ -468,6 +482,27 @@ def _put_bytes(base, token, base_path, body, name):
     with urllib.request.urlopen(req, timeout=30) as resp:
         if resp.status not in (200, 201):
             raise RuntimeError(f"PUT {url} returned {resp.status}")
+
+
+def _add_catalog_entry(base, token, image_url, sha_url):
+    """POST /catalog/entries with image_url + sha_url, return the
+    server-assigned ``bty_image_ref``. Mirrors the operator-add path
+    from the UI (``POST /ui/catalog/entries``) but via the JSON API."""
+    body = json.dumps({"image_url": image_url, "sha_url": sha_url}).encode("utf-8")
+    req = urllib.request.Request(
+        f"{base}/catalog/entries",
+        data=body,
+        method="POST",
+        headers={"Cookie": f"bty-token={token}", "Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        if resp.status not in (200, 201):
+            raise RuntimeError(f"POST /catalog/entries returned {resp.status}")
+        payload = json.loads(resp.read().decode("utf-8"))
+    ref = payload.get("bty_image_ref")
+    if not isinstance(ref, str) or len(ref) != 64:
+        raise RuntimeError(f"catalog entry did not return a usable bty_image_ref: {payload!r}")
+    return ref
 
 
 def _put_assignment(base, token, cfg, bty_image_ref):
