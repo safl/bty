@@ -112,7 +112,7 @@ into it:
 
 ```bash
 sudo mount /dev/disk/by-label/BTY_IMAGES /mnt
-sudo cp /path/to/my-image.img.gz /mnt/
+sudo cp /path/to/nosi-debian-sysdev-x86_64.img.gz /mnt/
 sudo umount /mnt
 ```
 
