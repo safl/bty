@@ -83,6 +83,12 @@ services:
   withcache:
     image: ghcr.io/safl/withcache:latest
     restart: unless-stopped
+    # Hard-set the resolver so this works on stock Ubuntu hosts where
+    # systemd-resolved owns /etc/resolv.conf and aardvark-dns isn't
+    # installed. Override BTY_DNS in envvars to point at an internal
+    # resolver if the host is on a corporate LAN.
+    dns:
+      - ${{BTY_DNS:-1.1.1.1}}
     ports:
       - "3000:3000"
     environment:
@@ -93,6 +99,9 @@ services:
   bty-web:
     image: ghcr.io/safl/bty-web:{version}
     restart: unless-stopped
+    # See note on withcache.dns -- same reason.
+    dns:
+      - ${{BTY_DNS:-1.1.1.1}}
     ports:
       - "8080:8080"
     environment:
@@ -160,6 +169,13 @@ WITHCACHE_ADMIN_PASSWORD=change-me
 # Where state lives on the host. Default: ./data (relative to this
 # directory). Point at a bigger disk for larger fleets:
 # BTY_HOST_DATA_DIR={default_data_dir}
+
+# Resolver bty-web + withcache use for outbound DNS (GitHub release
+# artifacts, GHCR blob pulls). Default: 1.1.1.1, which sidesteps
+# stock-Ubuntu hosts where /etc/resolv.conf points at the
+# systemd-resolved stub (127.0.0.53) that containers can't reach.
+# Set to an internal resolver if the host is on a corporate LAN.
+# BTY_DNS=192.168.1.1
 
 # ==== ADVANCED ====
 
@@ -303,6 +319,10 @@ Image=ghcr.io/safl/bty-web:{version}
 AutoUpdate=registry
 PublishPort=8080:8080
 Volume={data_dir_abs}/bty:/var/lib/bty:Z
+# Hard-set DNS so external lookups work on stock Ubuntu hosts where
+# systemd-resolved owns /etc/resolv.conf and aardvark-dns isn't
+# installed. Edit if the host needs an internal resolver.
+DNS=1.1.1.1
 Environment=BTY_WITHCACHE_URL=http://HOST_ADDR_HERE:3000
 
 [Service]
@@ -331,6 +351,8 @@ Image=ghcr.io/safl/withcache:latest
 AutoUpdate=registry
 PublishPort=3000:3000
 Volume={data_dir_abs}/withcache:/data:Z
+# See note on bty-web's DNS= -- same reason.
+DNS=1.1.1.1
 Environment=WITHCACHE_ADMIN_PASSWORD=change-me
 
 [Service]
@@ -498,6 +520,11 @@ BTY_SESSION_SECRET={session_secret}
 # Where state lives on the host. Default: ./data (relative to this
 # directory). Point at a bigger disk for larger fleets:
 # BTY_HOST_DATA_DIR={data_dir_abs}
+
+# Resolver bty-web + withcache use for outbound DNS. Default: 1.1.1.1,
+# which sidesteps stock-Ubuntu hosts where /etc/resolv.conf points at
+# 127.0.0.53. Set to an internal resolver if needed.
+# BTY_DNS=192.168.1.1
 
 # ==== ADVANCED ====
 
