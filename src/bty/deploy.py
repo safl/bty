@@ -280,8 +280,8 @@ just `HOST_ADDR` + a password in `envvars`.
 
 ## Where the state lives
 
-- `data/bty/`       -- bty-web's `/var/lib/bty` (state.db, image cache,
-  backups). Bind-mounted into the container.
+- `data/bty/`       -- bty-web's `/var/lib/bty` (state.db, catalogs,
+  netboot artifacts, backups). Bind-mounted into the container.
 - `data/withcache/` -- withcache's `/data` (cached image blobs).
 
 Override the parent path with `BTY_HOST_DATA_DIR=<absolute-path>` in

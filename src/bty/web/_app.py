@@ -87,8 +87,8 @@ def create_app(
     state_path: Path,
     service_user: str,
     secret_key: str,
-    image_root: Path | None = None,
     boot_root: Path | None = None,
+    image_root: Path | None = None,
 ) -> FastAPI:
     """Build the FastAPI app. All config flows through this function.
 
@@ -110,7 +110,12 @@ def create_app(
     ``state_path.parent / "boot"`` (i.e. ``/var/lib/bty/boot`` in the
     default layout).
     """
-    resolved_image_root: Path = image_root or images.default_image_root()
+    # ``image_root`` is accepted for backwards compatibility with callers
+    # that still pass it (the test fixture is the main one); v0.40 took
+    # bty-web out of the bytes path entirely, so the value is no longer
+    # read anywhere. Slated for removal once the test fixture stops
+    # threading it through.
+    del image_root
     resolved_boot_root: Path = boot_root or (state_path.parent / "boot")
     # Scheduled + on-demand backups land under ``backups/`` next to
     # state.db so they survive the same migrate-the-state-dir flow as
@@ -166,20 +171,6 @@ def create_app(
 
     @asynccontextmanager
     async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
-        # Storage-format check / write. On a fresh image_root the
-        # marker is created with the current ``STORAGE_FORMAT_VERSION``;
-        # on subsequent starts a mismatch raises StorageFormatMismatch
-        # (bty.catalog) with operator-actionable remediation.
-        # Independent of the bty package version: this number bumps
-        # ONLY when the on-disk layout / filename grammar changes in
-        # a way older bty-web can't read.
-        _catalog.check_or_write_storage_marker(resolved_image_root)
-        # Survey image_root for files that don't match any documented
-        # storage convention. Log a one-line warning per offender so
-        # an operator who dropped notes / random tools into the
-        # image_root sees the noise pointed at them. This is
-        # diagnostic only -- the offender doesn't break anything; the
-        # discovery + auto-import paths still ignore unknowns.
         import logging as _logging
 
         _lifespan_log = _logging.getLogger(__name__)
@@ -188,17 +179,6 @@ def create_app(
                 "BTY_ADMIN_PASSWORD is not set - the operator UI is OPEN "
                 "(unauthenticated). Set it to gate /ui."
             )
-        for fp in resolved_image_root.iterdir():
-            if not fp.is_file():
-                continue
-            if not _catalog.is_recognised_image_store_filename(fp.name):
-                _lifespan_log.warning(
-                    "image_root carries unrecognised file %s (not a "
-                    "catalog-<ref>-<slug>.<ext> cache file, not an image, "
-                    "not a sidecar / partial / storage marker); ignored by "
-                    "the discovery scan",
-                    fp.name,
-                )
         # The SSE event bus accepts publishes from worker threads -
         # capture the loop now so cross-thread publishes can hop in
         # via call_soon_threadsafe.
@@ -234,20 +214,10 @@ def create_app(
             state_path,
             resolved_backups_root,
         )
-        # Auto-import: ensure every dir-scan file under
-        # ``resolved_image_root`` has a catalog_entries row keyed by
-        # ``bty_image_ref = sha256("file://<rel-path>")``. The row
-        # exists immediately so the operator can bind to it without
-        # waiting for a re-scan. Idempotent: ``INSERT OR IGNORE``
-        # skips rows whose src is already in the table (the operator
-        # may have curated the file via the UI; preserve their
-        # description, etc.).
-        startup_images = images.list_images(resolved_image_root)
-        _auto_import_dir_scan_rows(startup_images)
-        # And the symmetric path for manifest entries: a catalog.toml
-        # that survived a restart (operator uploaded it, then bty-web
-        # restarted) needs its entries reflected in catalog_entries
-        # so the /ui/machines/{mac} dropdown shows them.
+        # Auto-import manifest entries: a catalog.toml that survived a
+        # restart (operator uploaded it, then bty-web restarted) needs
+        # its entries reflected in catalog_entries so the
+        # /ui/machines/{mac} dropdown shows them.
         if catalog_state.catalog is not None:
             _auto_import_manifest_rows(catalog_state.catalog)
         # Backup scheduler loop. Ticks every 60s; reads cadence +
@@ -283,89 +253,6 @@ def create_app(
             # hold the HTTP connection alive until uvicorn's 90s
             # graceful-shutdown timeout SIGKILLs the worker.
             await event_bus.close()
-
-    def _auto_import_dir_scan_rows(scanned: list[images.Image]) -> None:
-        """Insert a ``catalog_entries`` row for every dir-scan file
-        under ``resolved_image_root`` that doesn't already have one.
-
-        ``scanned`` is the result of ``images.list_images`` from the
-        lifespan; passed in (rather than recomputed here) so the
-        filesystem scan happens once per startup, not twice.
-
-        Src shape: ``file://<rel-path>`` (path relative to image
-        root; root-relocation invariant, so moving the image-store
-        disk between hosts does not change refs). Ref:
-        ``sha256(canonicalise_src(src))`` from
-        ``bty.catalog.image_ref_for_src``. ``disk_image_sha`` is
-        populated when the file has a ``.sha256`` sidecar already;
-        otherwise it stays NULL until the HashManager finishes the
-        background hash.
-
-        Idempotent via ``INSERT OR IGNORE``: operator-curated rows
-        from ``POST /catalog/entries`` (or the UI form) that target
-        the same src keep their descriptions / sha_url intact.
-        ``UPDATE`` on the disk_image_sha column for rows that newly
-        gained a sidecar between bty-web restarts -- without this,
-        a sidecar that landed while bty-web was down wouldn't make
-        the entry bindable.
-        """
-        now = _now_iso()
-        with _db.open_db(state_path) as conn:
-            for img in scanned:
-                try:
-                    rel = img.path.relative_to(resolved_image_root)
-                except ValueError:
-                    # Symlink that escaped the root, or an image_root
-                    # that got remounted mid-scan -- skip rather than
-                    # auto-import.
-                    continue
-                # v0.33.1: catalog-fetched cache files
-                # (``catalog-<ref:12>-<slug>.<ext>``) are owned by
-                # an existing catalog entry whose src is the
-                # upstream URL. Auto-importing them as separate
-                # entries (with src=``file://catalog-...``) creates
-                # a duplicate row on /ui/images alongside the real
-                # catalog entry, with the raw filename as its
-                # "name" -- the bug visible in the operator
-                # screenshot. Skip them; pass 2 of merge_with_catalog
-                # picks them up via its cache-hit lookup against the
-                # already-present catalog row.
-                if _catalog.is_catalog_cache_filename(img.path.name):
-                    continue
-                src = "file://" + rel.as_posix()
-                try:
-                    ref = _catalog.image_ref_for_src(src)
-                except ValueError:
-                    continue  # path can't be canonicalised; skip silently
-                conn.execute(
-                    "INSERT OR IGNORE INTO catalog_entries "
-                    "(bty_image_ref, src, disk_image_sha, name, sha_url, "
-                    "format, size_bytes, description, added_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (
-                        ref,
-                        src,
-                        img.sha256,
-                        img.name,
-                        None,
-                        img.format,
-                        img.size_bytes,
-                        None,
-                        now,
-                    ),
-                )
-                # If the file has a sidecar that landed since the row
-                # was last seen, propagate it. ``COALESCE`` keeps any
-                # existing value to avoid overwriting an operator-
-                # pinned ``disk_image_sha`` with a stale read.
-                if img.sha256 is not None:
-                    conn.execute(
-                        "UPDATE catalog_entries "
-                        "SET disk_image_sha = COALESCE(disk_image_sha, ?) "
-                        "WHERE bty_image_ref = ?",
-                        (img.sha256, ref),
-                    )
-            conn.commit()
 
     jinja = Environment(
         loader=FileSystemLoader(str(TEMPLATES_DIR)),
@@ -1642,31 +1529,17 @@ def create_app(
         return _serve_safe_file(resolved_boot_root, name)
 
     def _serve_image_by_key(key: str, request: Request) -> Response:
-        """Resolve ``key`` (filename OR 64-hex ID) to bytes.
+        """Stream-proxy an oras:// catalog entry by 64-hex ref / sha.
 
-        Resolution order:
-
-          1. Literal filename under ``image_root`` -- the bare
-             ``GET /images/<name>`` form for scripts / curl-based
-             operators.
-          2. 64-hex ID through :func:`_resolve_image_for_key` -> a local
-             file (image store, or an explicit-Download cache hit).
-          3. 64-hex ref/sha of a REMOTE catalog entry not cached locally
-             -> stream the source bytes straight through (no cache, no
-             buffer-then-serve): GET pipes the chunks, HEAD returns the
-             source's size. So a flashing client gets bytes immediately
-             and a large image never times out the probe.
-        """
-        try:
-            return _serve_safe_file(resolved_image_root, key)
-        except HTTPException:
-            pass
+        v0.40: bty-web is out of the bytes path for https sources (the
+        plan endpoint hands the live env the origin URL directly, or
+        a withcache URL when the cache is warm). The only thing
+        ``/images/{key}`` still does is proxy oras:// blobs, because
+        withcache speaks plain HTTP and can't resolve an OCI manifest
+        + inject the bearer token. Unknown / non-oras keys 404."""
         if images.is_sha256_hex(key.lower()):
-            resolved_path = _resolve_image_for_key(key)
-            if resolved_path is not None:
-                return FileResponse(resolved_path, media_type="application/octet-stream")
             src = _remote_src_for_key(key)
-            if src is not None:
+            if src is not None and src.startswith("oras://"):
                 return _stream_remote_image(src, request)
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -1674,9 +1547,10 @@ def create_app(
         )
 
     def _remote_src_for_key(key: str) -> str | None:
-        """The remote (oras:// / http(s)://) src for a 64-hex key
-        (bty_image_ref or disk_image_sha), or ``None`` if there's no
-        catalog row or its src is local (file://)."""
+        """The oras:// src for a 64-hex key (bty_image_ref or
+        disk_image_sha), or ``None``. Non-oras srcs go through the
+        plan endpoint (origin URL or withcache rewrite); ``/images``
+        never serves them."""
         key_lower = key.lower()
         with _db.open_db(state_path) as conn:
             row = conn.execute(
@@ -1686,7 +1560,7 @@ def create_app(
         if row is None:
             return None
         src = str(row["src"])
-        return src if src.startswith(("oras://", "http://", "https://")) else None
+        return src if src.startswith("oras://") else None
 
     def _stream_remote_image(src: str, request: Request) -> Response:
         """Proxy a remote image straight through to the client, no cache.
@@ -1764,87 +1638,6 @@ def create_app(
                 (ref,),
             ).fetchone()
         return str(row["src"]) if row and row["src"] else None
-
-    def _resolve_image_for_key(key: str) -> Path | None:
-        """Resolve a 64-hex key (bty_image_ref or disk_image_sha) to a
-        local file path that already exists, or ``None``. Never fetches
-        here: returns an image-store file or an explicit-Download cache
-        hit if present; otherwise ``None`` and the serve path
-        stream-proxies the remote source instead.
-
-        Resolution order:
-
-        1. ``key`` as ``bty_image_ref``: look up catalog_entries.
-           - disk_image_sha known + cache file present -> cache path
-           - src is file:// + file exists -> local (HashManager will
-             populate disk_image_sha asynchronously)
-           - else (remote src, not yet cached locally): ``None`` -> the
-             serve path stream-proxies the source (no cache). An explicit
-             Download is what caches a remote image to disk.
-        2. ``key`` as raw ``disk_image_sha``: serves the sha-keyed
-           URLs that the ``GET /images`` listing emits for entries
-           whose content hash is known. Looks for the cache file
-           first, then falls back to the catalog_entries row's
-           ``file://`` src.
-        """
-        key_lower = key.lower()
-        # (1) ref lookup. Catalog-fetched files live at the URL-keyed
-        # ``catalog-<ref:12>-<slug>.<ext>`` filename under the
-        # image_root (v0.31.0+ -- no separate cache dir).
-        with _db.open_db(state_path) as conn:
-            row = conn.execute(
-                "SELECT bty_image_ref, src, name, format "
-                "FROM catalog_entries WHERE bty_image_ref = ?",
-                (key_lower,),
-            ).fetchone()
-        if row is not None:
-            local = resolved_image_root / _catalog.local_filename_for(
-                row["bty_image_ref"], row["name"], row["format"]
-            )
-            if local.is_file():
-                return local
-            src = str(row["src"])
-            if src.startswith("file://"):
-                rel = src[len("file://") :]
-                local = resolved_image_root / rel
-                if local.is_file():
-                    return local
-                return None
-            # Remote src (oras:// / http(s)://) with no local cache: NOT
-            # served. The transparent serve-time cache-through was
-            # dropped -- it download-then-served the whole image with no
-            # dedup, so a large oras image thrashed (concurrent fetches
-            # never completing) and the client's probe always timed out
-            # before the bytes were ready. Remote images are now brought
-            # local *deliberately* (the Downloads action, or dropping a
-            # file into the image store) before they're flashable; until
-            # then this resolves to a clean 404 the live env surfaces on
-            # tty1, instead of a multi-minute hang.
-            return None
-        # (2) sha lookup -- serves the sha-keyed URLs emitted by the
-        # ``GET /images`` listing for entries whose content hash is
-        # known. Resolve via the catalog_entries row to the URL-keyed
-        # local filename.
-        if images.is_sha256_hex(key_lower):
-            with _db.open_db(state_path) as conn:
-                row = conn.execute(
-                    "SELECT bty_image_ref, src, name, format FROM catalog_entries "
-                    "WHERE disk_image_sha = ?",
-                    (key_lower,),
-                ).fetchone()
-            if row is not None:
-                local = resolved_image_root / _catalog.local_filename_for(
-                    row["bty_image_ref"], row["name"], row["format"]
-                )
-                if local.is_file():
-                    return local
-                src = str(row["src"])
-                if src.startswith("file://"):
-                    rel = src[len("file://") :]
-                    local = resolved_image_root / rel
-                    if local.is_file():
-                        return local
-        return None
 
     @app.api_route(
         "/images/{key}",
@@ -2405,36 +2198,36 @@ def create_app(
         )
 
     def _list_unified_images() -> list[images.UnifiedImage]:
-        """Unified image listing: dir-scan files + operator-curated
-        ``catalog_entries`` rows + content-cache, folded through the
-        same ref-keyed + sha-keyed merge.
+        """Build the unified image listing from ``catalog_entries`` rows.
 
-        The ``catalog_entries`` DB table is the authoritative
-        catalog. ``catalog.toml`` is treated as an import seed
-        (``_auto_import_manifest_rows`` at startup, and again after
-        a UI upload / fetch-release reload), not a live overlay
-        whose deletions get re-injected -- so operator removals via
-        ``DELETE /catalog/entries`` stick across renders + restarts.
-        Re-importing the catalog is an explicit operator action
-        (``POST /catalog/import`` or the UI's catalog upload form).
-
-        Recomputed per call so an operator who drops new files into
-        BTY_IMAGE_ROOT (or whose catalog fetch just completed, or
-        who added a URL via the UI) sees the change on the next
-        page load without restarting bty-web.
+        v0.40: bty-web no longer owns image bytes; ``catalog_entries``
+        is the only source of truth. Each row produces one
+        :class:`UnifiedImage`. ``cached`` is always False -- bty-web
+        doesn't track withcache's contents here; the live env / wizard
+        flashes whichever URL the plan or catalog hands it.
         """
-        db_entries = _load_db_catalog_entries()
-        return images.merge_with_catalog(
-            resolved_image_root,
-            db_entries,
-        )
+        out: list[images.UnifiedImage] = []
+        for entry in _load_db_catalog_entries():
+            ref = _catalog.image_ref_for_src(entry.src)
+            source = images.ImageSource(kind="manifest", location=entry.src)
+            out.append(
+                images.UnifiedImage(
+                    ref=ref,
+                    sha256=entry.sha256,
+                    names=(entry.name,),
+                    format=entry.format,
+                    size_bytes=entry.size_bytes,
+                    sources=(source,),
+                    cached=False,
+                )
+            )
+        return out
 
     _ui.register_ui_routes(
         app,
         jinja=jinja,
         state_path=state_path,
         service_user=service_user,
-        image_root=resolved_image_root,
         boot_root=resolved_boot_root,
         backups_root=resolved_backups_root,
         publish_state_changed=publish_state_changed,

@@ -125,10 +125,8 @@ def main(argv: list[str] | None = None) -> None:
             "values without command-line plumbing:\n\n"
             "  BTY_WEB_HOST          bind address (default 0.0.0.0)\n"
             "  BTY_WEB_PORT          bind port (default 8080; clamped to 1-65535)\n"
-            "  BTY_STATE_DIR         state directory holding state.db / cache /\n"
+            "  BTY_STATE_DIR         state directory holding state.db /\n"
             "                        session-secret (default /var/lib/bty)\n"
-            "  BTY_IMAGE_ROOT        directory of operator-uploaded images\n"
-            "                        (default /var/lib/bty/images)\n"
             "  BTY_BOOT_DIR          directory of netboot artifacts (kernel /\n"
             "                        initrd / squashfs); default <BTY_STATE_DIR>/\n"
             "                        boot\n"
@@ -140,21 +138,15 @@ def main(argv: list[str] | None = None) -> None:
             "                        catalog.toml from (default safl/bty)\n"
             "  BTY_CATALOG_FILE      catalog.toml path (default <BTY_STATE_DIR>/\n"
             "                        catalog.toml)\n"
+            "  BTY_MAX_UPLOAD_BYTES  cap on /boot upload body size in bytes\n"
+            "                        (default 200 GiB; values <= 0 ignored)\n"
             "  BTY_SESSION_SECRET    override the persisted session-cookie key\n"
             "                        (default: read/create <BTY_STATE_DIR>/\n"
             "                        session-secret)\n"
-            "  BTY_MAX_UPLOAD_BYTES  cap on image-upload body size in bytes\n"
-            "                        (default 200 GiB; values <= 0 ignored)\n"
             "  BTY_TRUSTED_PROXY     when set (any truthy value), read the\n"
             "                        client IP from X-Forwarded-For; only\n"
             "                        enable behind a reverse proxy that\n"
             "                        strips inbound X-Forwarded-For\n"
-            "  BTY_CATALOG_MAX_PARALLEL  max concurrent catalog downloads\n"
-            "                        (default 2; catalog-fetched files\n"
-            "                        live under <BTY_IMAGE_ROOT> with\n"
-            "                        catalog-<ref:12>-<slug>.<ext> names)\n"
-            "  BTY_HASH_MAX_PARALLEL max concurrent image hash jobs\n"
-            "                        (default 1)\n"
             "  BTY_BACKUP_DIR        directory scheduled / on-demand backups\n"
             "                        land in (default <BTY_STATE_DIR>/backups)\n"
             "  BTY_BACKUP_MAX_PARALLEL  max concurrent backup jobs (default 1;\n"
@@ -208,8 +200,6 @@ def main(argv: list[str] | None = None) -> None:
     service_user = pwd.getpwuid(os.geteuid()).pw_name
 
     state_path = default_state_path()
-    image_root_env = os.environ.get("BTY_IMAGE_ROOT")
-    image_root = Path(image_root_env) if image_root_env else None
     boot_root_env = os.environ.get("BTY_BOOT_DIR")
     boot_root = Path(boot_root_env) if boot_root_env else None
     secret_key = _resolve_secret_key(state_path.parent)
@@ -218,7 +208,6 @@ def main(argv: list[str] | None = None) -> None:
         state_path=state_path,
         service_user=service_user,
         secret_key=secret_key,
-        image_root=image_root,
         boot_root=boot_root,
     )
 

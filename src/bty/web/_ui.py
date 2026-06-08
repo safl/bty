@@ -61,7 +61,6 @@ def register_ui_routes(
     jinja: Environment,
     state_path: Path,
     service_user: str,
-    image_root: Path,
     boot_root: Path,
     backups_root: Path,
     publish_state_changed: Callable[[], None] = lambda: None,
@@ -238,12 +237,7 @@ def register_ui_routes(
                 return False
             return True
 
-        state_valid = (
-            state_migrated
-            and state_path.exists()
-            and _under(image_root, state_dir)
-            and _under(boot_root, state_dir)
-        )
+        state_valid = state_migrated and state_path.exists() and _under(boot_root, state_dir)
         sanity = [
             {
                 "label": "Netboot artifacts present",
@@ -686,7 +680,6 @@ def register_ui_routes(
             "ui/images.html",
             request,
             unified=unified,
-            image_root=str(image_root),
             image_events=image_events,
             manifest_path=catalog_manifest_path,
             release_repo=release_repo,
@@ -1277,7 +1270,6 @@ def register_ui_routes(
                 "rows": [
                     _config_row("State directory", state_dir, "BTY_STATE_DIR", "/var/lib/bty"),
                     _config_row("Database", state_path, None, "<state dir>/state.db"),
-                    _config_row("Image root", image_root, "BTY_IMAGE_ROOT", "/var/lib/bty/images"),
                     _config_row("Netboot directory", boot_root, "BTY_BOOT_DIR", "<state dir>/boot"),
                     _config_row(
                         "Catalog manifest",
@@ -1319,18 +1311,6 @@ def register_ui_routes(
                 "title": "Background workers",
                 "icon": "cpu",
                 "rows": [
-                    _config_row(
-                        "Catalog downloads (parallel)",
-                        os.environ.get("BTY_CATALOG_MAX_PARALLEL", "2"),
-                        "BTY_CATALOG_MAX_PARALLEL",
-                        "2",
-                    ),
-                    _config_row(
-                        "Image hashing (parallel)",
-                        os.environ.get("BTY_HASH_MAX_PARALLEL", "1"),
-                        "BTY_HASH_MAX_PARALLEL",
-                        "1",
-                    ),
                     _config_row(
                         "Release-fetch user agent",
                         _releases.DEFAULT_USER_AGENT,
