@@ -1424,9 +1424,11 @@ def test_pxe_plan_flash_policy_with_target_returns_auto(
     ``mode=flash`` with the image URL and target serial filled in.
     ``bty`` runs the flash without prompts.
 
-    The image URL takes the same ``/images/<ref>/<name>`` shape as
-    the ipxe_flash.j2 chain -- serve_image cache-through resolves
-    the ref to bytes server-side."""
+    For an https catalog entry without a withcache configured, the
+    plan emits the origin URL directly -- bty-web is out of the
+    bytes path. (v0.40: dropped the ``/images`` stream-proxy fallback
+    for https sources; withcache 404s on miss anyway, and the live env
+    fetches origin happily.)"""
     flash_sha = "0123456789abcdef" * 4
 
     def fake_urlopen(*_a, **_kw):  # type: ignore[no-untyped-def]
@@ -1463,7 +1465,59 @@ def test_pxe_plan_flash_policy_with_target_returns_auto(
     body = r.json()
     assert body["mode"] == "flash"
     assert body["target_disk_serial"] == "WD-WX12345"
-    assert body["image"].startswith(f"http://bty.local:8080/images/{ref}/")
+    # No withcache configured -> live env fetches direct from origin.
+    assert body["image"] == "https://example.invalid/demo.img.gz"
+
+
+def test_pxe_plan_flash_uses_withcache_url_when_blob_is_cached(
+    app_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When a withcache is configured AND already holds the origin
+    blob (is_cached True), the plan returns withcache's ``/b/<token>/``
+    URL so the live env streams from the warm cache instead of
+    re-fetching from origin every boot. On a cold cache (is_cached
+    False) the plan returns the origin URL directly -- see
+    ``test_pxe_plan_flash_policy_with_target_returns_auto``."""
+    from bty.web import _settings_store, _withcache
+
+    flash_sha = "0123456789abcdef" * 4
+
+    def fake_urlopen(*_a, **_kw):  # type: ignore[no-untyped-def]
+        return _MockResp(b"", headers={"Content-Length": "0"})
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr("bty.catalog.fetch_sha256_for_url", lambda *_a, **_kw: flash_sha)
+    # Pin a withcache URL via the override key.
+    monkeypatch.setenv(_settings_store.ENV_WITHCACHE_URL, "http://cache.invalid:3000")
+    # Force is_cached -> True without standing up a stub server.
+    monkeypatch.setattr(_withcache, "is_cached", lambda *_a, **_kw: True)
+
+    r = app_client.post(
+        "/catalog/entries",
+        json={
+            "image_url": "https://example.invalid/demo.img.gz",
+            "sha_url": "https://example.invalid/demo.img.gz.sha256",
+        },
+        cookies=AUTH,
+    )
+    assert r.status_code == 201, r.text
+    ref = r.json()["bty_image_ref"]
+
+    mac = "aa:bb:cc:dd:ee:c0"
+    app_client.put(
+        f"/machines/{mac}",
+        json={
+            "bty_image_ref": ref,
+            "boot_mode": "bty-flash-always",
+            "target_disk_serial": "WC-CACHED-SERIAL",
+        },
+        cookies=AUTH,
+    )
+    plan = app_client.get(f"/pxe/{mac}/plan", headers={"Host": "bty.local:8080"}).json()
+    assert plan["mode"] == "flash"
+    # Plan rewrites to withcache's ``/b/<urlsafe-b64(origin)>/<basename>``.
+    assert plan["image"].startswith("http://cache.invalid:3000/b/")
+    assert plan["image"].endswith("/demo.img.gz")
 
 
 def test_pxe_plan_flash_policy_without_target_falls_back_to_interactive(
@@ -4407,11 +4461,10 @@ def test_pxe_plan_keeps_name_when_it_has_extension(
     plan = app_client.get(f"/pxe/{mac}/plan", headers={"Host": "bty.local:8080"}).json()
     assert plan["mode"] == "flash"
     assert plan["name"] == "demo.img.gz"
-    # URL last segment IS the real filename (no synthesis).
-    last_segment = plan["image"].rsplit("/", 1)[-1]
-    import urllib.parse
-
-    assert urllib.parse.unquote(last_segment) == "demo.img.gz"
+    # https + no withcache -> origin URL straight through. The
+    # synthesis-when-extension-is-missing path only fires when
+    # bty-web builds a /images URL (still hit for oras entries).
+    assert plan["image"] == "https://example.invalid/demo.img.gz"
 
 
 def test_pxe_plan_orphan_ref_falls_back_to_interactive(
