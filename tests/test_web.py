@@ -3782,65 +3782,6 @@ def test_serve_image_with_name_resolves_by_sha(tmp_path: Path) -> None:
 # ---------- /catalog endpoints ---------------------------------------------
 
 
-def test_catalog_downloads_requires_auth(app_client: TestClient) -> None:
-    r = app_client.get("/catalog/downloads")
-    assert r.status_code == 401
-
-
-def test_catalog_downloads_no_manifest_returns_empty(app_client: TestClient) -> None:
-    """The fixture's app has no ``catalog.toml`` -- the endpoint
-    returns ``catalog=None`` + empty downloads list, plus the
-    DownloadManager state (``image_root`` + ``max_parallel``) the
-    UI uses for its caption. Stable shape so the polling loop has
-    something to render. v0.31.0+: ``image_root`` replaces the old
-    ``cache_dir`` field (catalog-fetched files merged into the
-    image_root under ``catalog-<ref:12>-<slug>.<ext>`` names)."""
-    r = app_client.get("/catalog/downloads", cookies=AUTH)
-    assert r.status_code == 200
-    body = r.json()
-    assert body["catalog"] is None
-    assert body["downloads"] == []
-    assert "image_root" in body
-    assert "max_parallel" in body
-
-
-def test_catalog_downloads_post_without_manifest_404(app_client: TestClient) -> None:
-    """POSTing an enqueue against an unknown name is a 404 with a
-    clear message. The DownloadManager now always-starts (catalog-less
-    appliances still have a DB-driven download path), so the failure
-    mode is "no entry named X" rather than "no catalog configured"."""
-    r = app_client.post(
-        "/catalog/downloads",
-        json={"name": "anything"},
-        cookies=AUTH,
-    )
-    assert r.status_code == 404
-    detail = r.json()["detail"]
-    assert "no catalog entry named" in detail
-    # Regression (v0.33.5): str(KeyError("msg")) is "'msg'" with literal
-    # single quotes (KeyError wraps via repr). The handler must surface
-    # ``exc.args[0]`` so the operator-visible detail isn't wrapped in
-    # extra quotes.
-    assert not detail.startswith("'"), f"KeyError-wrapped detail leaked the repr quotes: {detail!r}"
-
-
-def test_catalog_downloads_delete_requires_auth(app_client: TestClient) -> None:
-    """Cancelling a download requires the cookie; otherwise an
-    unauth'd client could disrupt operator-initiated work."""
-    r = app_client.delete("/catalog/downloads/anything")
-    assert r.status_code == 401
-
-
-def test_catalog_downloads_delete_no_active_404(app_client: TestClient) -> None:
-    """Cancel against an unknown download -> 404, not 500. Same shape
-    as POST /catalog/downloads; the manager always-starts now so the
-    failure mode is "no active download" rather than the legacy
-    "no catalog configured"."""
-    r = app_client.delete("/catalog/downloads/anything", cookies=AUTH)
-    assert r.status_code == 404
-    assert "no active download" in r.json()["detail"]
-
-
 # ---------- /workers/backups HTTP layer -----------------------------------
 #
 # The BackupManager has direct tests in test_web_backup_manager.py, but the
@@ -4924,49 +4865,6 @@ def test_create_app_rotates_stale_state_db_end_to_end(
     assert old_machines == ["aa:bb:cc:dd:ee:ff"]
 
 
-def test_catalog_downloads_db_only_entry_enqueues(
-    app_client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Integration test for the operator-add path: a row in
-    ``catalog_entries`` (added via the form / JSON API, NOT via
-    ``catalog.toml``) must be enqueueable through ``POST /catalog/
-    downloads``. The DownloadManager falls back to the DB lookup
-    callback when the manifest doesn't have the name -- without
-    that fallback, this path returns 404 even though the row is
-    plainly there on /ui/images."""
-    # The /catalog/entries endpoint HEAD-probes the URL for
-    # Content-Length; stub that out so the test doesn't make a
-    # network call.
-    from bty.web import _app
-
-    monkeypatch.setattr(_app, "_head_content_length", lambda _u: None)
-
-    # Insert a DB-only entry via the JSON endpoint (mirrors what the
-    # /ui/catalog/entries form does -- catalog.toml untouched).
-    r = app_client.post(
-        "/catalog/entries",
-        json={"image_url": "https://example.invalid/db-only-fixture.img.gz"},
-        cookies=AUTH,
-    )
-    assert r.status_code in (200, 201), r.json()
-
-    # Now enqueue a download for the same name. Pre-fix this returned
-    # 404 ("no catalog entry named ..."); post-fix it returns 202
-    # because the DB fallback resolves the entry.
-    r = app_client.post(
-        "/catalog/downloads",
-        json={"name": "db-only-fixture.img.gz"},
-        cookies=AUTH,
-    )
-    assert r.status_code == 202, r.json()
-    body = r.json()
-    assert body["name"] == "db-only-fixture.img.gz"
-    # Status is one of the lifecycle states -- the manager may have
-    # picked the job up + failed at the (invalid) URL between enqueue
-    # and the response.
-    assert body["status"] in ("queued", "running", "completed", "failed"), body
-
-
 def test_catalog_hashes_requires_auth(app_client: TestClient) -> None:
     r = app_client.get("/catalog/hashes")
     assert r.status_code == 401
@@ -5212,162 +5110,6 @@ def test_catalog_entries_list_and_delete(
     r = app_client.get("/catalog/entries", cookies=AUTH)
     remaining = {row["src"] for row in r.json()}
     assert url not in remaining
-
-
-def test_catalog_cache_delete_unlinks_file_keeps_entry(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """``DELETE /catalog/cache/{name}`` removes the cached bytes at
-    ``$image_root/catalog-<ref:12>-<slug>.<ext>`` and leaves the catalog
-    entry in place. v0.31.0+: file lives under image_root with URL-
-    keyed name (no separate cache dir). Follow-up
-    ``GET /catalog/entries`` still shows the row; ``GET /images`` shows
-    it as ``cached=False`` so the operator can re-enqueue a fetch."""
-    import hashlib
-    import io
-    import json as _json
-    import os
-
-    from bty import catalog as _catalog_mod
-
-    state_dir = tmp_path / "state"
-    state_dir.mkdir()
-    image_root = tmp_path / "images"
-    image_root.mkdir()
-    boot_root = tmp_path / "boot"
-    boot_root.mkdir()
-
-    # Stage a fake cached file at the URL-keyed filename. The catalog
-    # entry is created via the API below; pre-compute what filename
-    # the entry will land at so the file is in place when the DELETE
-    # arrives.
-    payload = b"cached-bytes-to-evict"
-    sha = hashlib.sha256(payload).hexdigest()
-    src = "oras://ghcr.io/safl/test/deletable:latest"
-    ref = _catalog_mod.image_ref_for_src(src)
-    cached_filename = _catalog_mod.local_filename_for(ref, "deletable.img.gz", "img.gz")
-    cached_file = image_root / cached_filename
-    cached_file.write_bytes(payload)
-
-    # Mock the oras manifest fetch so adding an entry via the API
-    # carries the SHA we just staged. Reuses the helper-style _Resp
-    # pattern from ``test_catalog_entries_add_with_oras_ref_resolves_manifest``.
-    manifest = {
-        "schemaVersion": 2,
-        "mediaType": "application/vnd.oci.image.manifest.v1+json",
-        "layers": [
-            {
-                "mediaType": "application/vnd.nosi.disk-image.layer.v1+gzip",
-                "digest": f"sha256:{sha}",
-                "size": len(payload),
-                "annotations": {"org.opencontainers.image.title": "deletable.img.gz"},
-            },
-        ],
-    }
-
-    def fake_urlopen(req, *_a, **_kw):  # type: ignore[no-untyped-def]
-        url = req if isinstance(req, str) else req.full_url
-
-        class _Resp(io.BytesIO):
-            headers: typing.ClassVar[dict[str, str]] = {}
-
-            def __enter__(self):  # type: ignore[no-untyped-def]
-                return self
-
-            def __exit__(self, *_args):  # type: ignore[no-untyped-def]
-                return None
-
-        if "/token" in url:
-            return _Resp(_json.dumps({"token": "anon-tok"}).encode())
-        if "/manifests/" in url:
-            return _Resp(_json.dumps(manifest).encode())
-        raise AssertionError(f"unexpected URL: {url}")
-
-    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
-
-    os.environ["BTY_STATE_DIR"] = str(state_dir)
-    monkeypatch.setenv("BTY_ADMIN_PASSWORD", TEST_PASSWORD)
-    try:
-        app = create_app(
-            state_path=state_dir / "state.db",
-            service_user=TEST_SERVICE_USER,
-            secret_key=TEST_SECRET_KEY,
-            image_root=image_root,
-            boot_root=boot_root,
-        )
-
-        with TestClient(app) as client:
-            r = client.post(
-                "/ui/login",
-                data={"password": TEST_PASSWORD},
-                follow_redirects=False,
-            )
-            assert r.status_code == 303
-            cookie = r.cookies.get("bty-token")
-            assert cookie is not None
-            auth_cookies = {"bty-token": cookie}
-
-            # Add an oras entry; the cached SHA matches the file we
-            # pre-staged.
-            r = client.post(
-                "/catalog/entries",
-                json={"image_url": "oras://ghcr.io/safl/test/deletable:latest"},
-                cookies=auth_cookies,
-            )
-            assert r.status_code == 201, r.text
-
-            # Cache file exists pre-delete.
-            assert cached_file.exists()
-
-            # Delete the cached bytes only.
-            r = client.delete("/catalog/cache/deletable.img.gz", cookies=auth_cookies)
-            assert r.status_code == 200, r.text
-            body = r.json()
-            assert body["deleted"] is True
-            assert body["disk_image_sha"] == sha
-
-            # File is gone; entry remains.
-            assert not cached_file.exists()
-            r = client.get("/catalog/entries", cookies=auth_cookies)
-            assert r.status_code == 200
-            entries = r.json()
-            names = [e["name"] for e in entries]
-            assert "deletable.img.gz" in names, (
-                f"deletable entry should survive DELETE; got names={names!r}"
-            )
-    finally:
-        os.environ.pop("BTY_STATE_DIR", None)
-
-
-def test_catalog_cache_delete_idempotent_no_cached_file(
-    app_client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """When the entry exists but no cached file is present, the
-    delete endpoint returns 200 with ``deleted=False, reason="not
-    cached"``. Idempotent: repeated calls don't error."""
-
-    def fake_urlopen(*_a, **_kw):  # type: ignore[no-untyped-def]
-        return _MockResp(b"", headers={"Content-Length": "0"})
-
-    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
-    # URL-only entry: sha256 is NULL.
-    app_client.post(
-        "/catalog/entries",
-        json={"image_url": "https://example.invalid/uncached.img.gz"},
-        cookies=AUTH,
-    )
-    r = app_client.delete("/catalog/cache/uncached.img.gz", cookies=AUTH)
-    assert r.status_code == 200
-    assert r.json()["deleted"] is False
-    # v0.31.0+: catalog files have a URL-keyed local_filename regardless
-    # of sha-pin status, so "no sha256 for name" no longer applies. The
-    # reason for the missing file is just "not cached".
-    assert r.json()["reason"] == "not cached"
-
-
-def test_catalog_cache_delete_requires_auth(app_client: TestClient) -> None:
-    r = app_client.delete("/catalog/cache/some.img.gz")
-    assert r.status_code == 401
 
 
 def test_catalog_import_from_local_path(app_client: TestClient, tmp_path: Path) -> None:
@@ -5967,13 +5709,8 @@ def test_ui_catalog_upload_imports_into_db_and_303s_on_success(
     app_client: TestClient,
 ) -> None:
     """Upload a valid catalog -> entries are imported into the
-    ``catalog_entries`` DB, the bytes are written to
-    ``manifest_path`` and the DownloadManager binds, 303 back to
-    /ui/images without an error param. Symmetric with
-    ``test_ui_catalog_fetch_release_imports_into_db_and_303s``:
-    without the write+reload step, per-row Fetch buttons on
-    /ui/images would 404 right after a successful upload.
-    """
+    ``catalog_entries`` DB, the bytes are written to ``manifest_path``,
+    303 back to /ui/images without an error param."""
     body = b'version = 1\n\n[[images]]\nname = "demo"\nsrc = "https://example.com/demo.img.zst"\n'
     r = app_client.post(
         "/ui/catalog/upload",
@@ -5987,15 +5724,6 @@ def test_ui_catalog_upload_imports_into_db_and_303s_on_success(
     # from catalog_entries) -- evidence the import landed in the DB.
     listing = app_client.get("/catalog/entries", cookies=AUTH).json()
     assert any(e["src"] == "https://example.com/demo.img.zst" for e in listing)
-    # /catalog/downloads reports a non-null ``catalog`` -- proves
-    # the write+reload happened so the DownloadManager is bound
-    # and per-row Fetch buttons will work.
-    downloads = app_client.get("/catalog/downloads", cookies=AUTH).json()
-    assert downloads["catalog"] is not None, (
-        "upload-catalog must write the bytes to manifest_path + "
-        "reload so the DownloadManager binds; without it the "
-        "per-row Fetch buttons would 404."
-    )
 
 
 def test_ui_catalog_upload_rejects_bad_manifest_keeps_existing(
@@ -6055,11 +5783,8 @@ def test_ui_catalog_fetch_release_imports_into_db_and_303s(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Fetch-release stubs urlopen, imports the bytes' entries into
-    ``catalog_entries``, writes the bytes to ``manifest_path`` and
-    reloads so the DownloadManager binds, then 303s back to
-    /ui/images. Without the write+reload step, per-row Fetch
-    buttons on /ui/images would 404 with "no catalog configured".
-    """
+    ``catalog_entries``, writes the bytes to ``manifest_path``, then
+    303s back to /ui/images."""
     body = b'version = 1\n\n[[images]]\nname = "rel"\nsrc = "https://example.com/rel.img.zst"\n'
 
     import urllib.request as _urlreq
@@ -6074,16 +5799,6 @@ def test_ui_catalog_fetch_release_imports_into_db_and_303s(
     assert r.headers["location"] == "/ui/images"
     listing = app_client.get("/catalog/entries", cookies=AUTH).json()
     assert any(e["src"] == "https://example.com/rel.img.zst" for e in listing)
-    # /catalog/downloads must now report a non-null ``catalog``
-    # (proves the write+reload happened). Without that step
-    # POST /catalog/downloads would 404; the symmetric GET
-    # would return ``{"catalog": null, ...}``.
-    downloads = app_client.get("/catalog/downloads", cookies=AUTH).json()
-    assert downloads["catalog"] is not None, (
-        "fetch-release must write the catalog to manifest_path + "
-        "reload so the DownloadManager binds; without it the "
-        "per-row Fetch buttons would 404."
-    )
 
 
 # ---------- /ui/catalog/upload and /ui/catalog/fetch-release error matrix --
@@ -6436,20 +6151,13 @@ def test_ui_machines_renders_timestamps_compactly(app_client: TestClient, tmp_pa
 
 
 def test_catalog_enqueue_request_rejects_traversal_name(app_client: TestClient) -> None:
-    """``CatalogEnqueueRequest.name`` (used by both
-    ``POST /catalog/downloads`` and ``POST /catalog/hashes``)
-    rejects path-traversal characters at the Pydantic layer.
-    Layered with the manager-side check so both surfaces return
-    a clean 422 instead of a 500 from ``ValueError``."""
+    """``CatalogEnqueueRequest.name`` (used by ``POST /catalog/hashes``)
+    rejects path-traversal characters at the Pydantic layer. Layered
+    with the manager-side check so the surface returns a clean 422
+    instead of a 500 from ``ValueError``."""
     for bad in ("../etc/passwd", "foo/bar", "name\\with\\backslash", "with\0nul"):
         r = app_client.post(
             "/catalog/hashes",
-            json={"name": bad},
-            cookies=AUTH,
-        )
-        assert r.status_code == 422, f"expected 422 for {bad!r}, got {r.status_code}"
-        r = app_client.post(
-            "/catalog/downloads",
             json={"name": bad},
             cookies=AUTH,
         )
