@@ -50,12 +50,10 @@ from bty.web import (
     _hash,
     _models,
     _release_mgr,
-    _security,
     _settings_store,
     _ui,
     _withcache,
 )
-from bty.web import _catalog as _web_catalog
 from bty.web._auth import SESSION_COOKIE, auth_enabled, require_auth
 from bty.web._events import (
     WORKER_STATE_CHANGED,
@@ -132,24 +130,12 @@ def create_app(
 
     event_bus = MachineEventBus()
 
-    # Optional catalog file + DownloadManager. If no catalog is
-    # configured (operator hasn't authored one), the ``DownloadManager``
-    # simply isn't started and the ``/catalog/downloads/*`` +
-    # ``/catalog/hashes/*`` endpoints return 404. Operator-curated
-    # entries (``POST /catalog/entries``) work independently of the
-    # catalog. ``BTY_CATALOG_FILE`` overrides the default derived from
-    # ``BTY_STATE_DIR``.
-    #
-    # v0.31.0+: there is no separate ``BTY_CATALOG_CACHE_DIR`` --
-    # catalog-fetched files land under the image_root with URL-derived
-    # ``catalog-<ref:12>-<slug>.<ext>`` filenames (see
-    # :meth:`bty.catalog.CatalogEntry.local_filename`), differentiated
-    # from operator-typed images by the prefix.
-    #
-    # The catalog path is treated as the "always this file" location
-    # so the UI can write a fresh ``catalog.toml`` to it and reload
-    # in-process. When ``$BTY_CATALOG_FILE`` is unset and the default
-    # file doesn't exist yet, we still pin the default path so a
+    # Optional catalog file. ``BTY_CATALOG_FILE`` overrides the default
+    # derived from ``BTY_STATE_DIR``. The catalog path is treated as
+    # the "always this file" location so the UI can write a fresh
+    # ``catalog.toml`` to it and reload in-process. When
+    # ``$BTY_CATALOG_FILE`` is unset and the default file doesn't
+    # exist yet, we still pin the default path so a
     # ``/ui/catalog/upload`` upload knows where to land.
     manifest_path = _catalog.default_manifest_path()
     if manifest_path is None:
@@ -176,7 +162,6 @@ def create_app(
             # fresh catalog from the UI to recover.
             print(f"bty-web: catalog at {manifest_path}: {exc}", file=sys.stderr)
             catalog_state.catalog = None
-    download_manager = _web_catalog.DownloadManager()
     hash_manager = _hash.HashManager()
     release_fetch_manager = _release_mgr.ReleaseFetchManager()
     backup_manager = _backup.BackupManager()
@@ -226,9 +211,6 @@ def create_app(
         # ``worker-state-changed`` SSE event so the Backups / Hashing
         # / Downloads / Netboot pages get push-driven refreshes
         # instead of waiting on their safety poll.
-        download_manager.set_state_listener(
-            lambda s: event_bus.publish(worker_event("download", s.name, s.status))
-        )
         hash_manager.set_state_listener(
             lambda s: event_bus.publish(worker_event("hash", s.name, s.status))
         )
@@ -237,20 +219,6 @@ def create_app(
         )
         backup_manager.set_state_listener(
             lambda s: event_bus.publish(worker_event("backup", s.backup_id, s.status))
-        )
-        # The DownloadManager binds to whatever catalog source we have:
-        # ``catalog_state.catalog`` (parsed catalog.toml, optional) plus a
-        # DB lookup callback for entries that exist in
-        # ``catalog_entries`` but not in the manifest -- typically rows
-        # added by the operator via the "Add image from URL" form on
-        # /ui/downloads, which inserts to DB but doesn't touch
-        # catalog.toml. Without the DB fallback those entries appear on
-        # /ui/images but their per-row Fetch button 404s.
-        download_manager.start(
-            catalog_state.catalog,
-            resolved_image_root,
-            state_path=state_path,
-            db_entry_lookup=_lookup_db_catalog_entry,
         )
         # The hash manager always starts -- it operates on
         # ``image_root``, which exists for every bty-web shape
@@ -357,9 +325,6 @@ def create_app(
             backup_stop_event.set()
             with contextlib.suppress(asyncio.CancelledError):
                 await backup_scheduler_task
-            # DownloadManager always starts (catalog-less instances
-            # still have a DB-driven download path), so always stop.
-            await download_manager.stop()
             await hash_manager.stop()
             await release_fetch_manager.stop()
             await backup_manager.stop()
@@ -3149,7 +3114,7 @@ def create_app(
             conn.commit()
 
     async def _reload_catalog_from_disk() -> None:
-        """Re-read ``manifest_path`` and restart the DownloadManager.
+        """Re-read ``manifest_path`` and refresh the in-process catalog.
 
         Called after a manifest write (UI upload or release fetch).
         Raises :class:`_catalog.CatalogError` on parse failure -- the
@@ -3163,18 +3128,8 @@ def create_app(
         step. Idempotent (``INSERT OR IGNORE``).
         """
         new_catalog = _catalog.load(manifest_path)
-        # Tear the old manager down first so its in-flight downloads
-        # don't bleed into the new manager's queue with stale entry
-        # references. DownloadManager now always-starts so always-stop.
-        await download_manager.stop()
         catalog_state.catalog = new_catalog
         _auto_import_manifest_rows(new_catalog)
-        download_manager.start(
-            new_catalog,
-            resolved_image_root,
-            state_path=state_path,
-            db_entry_lookup=_lookup_db_catalog_entry,
-        )
         publish_state_changed()
 
     # URL for "Fetch from bty project release" -- mirrors the
@@ -3346,172 +3301,6 @@ def create_app(
         manifest_path.write_bytes(content)
         await _reload_catalog_from_disk()
         return RedirectResponse("/ui/images", status_code=status.HTTP_303_SEE_OTHER)
-
-    @app.get("/catalog/downloads")
-    async def list_downloads(_: str = Depends(require_auth)) -> dict[str, Any]:
-        # DownloadManager always starts now (catalog-less instances
-        # still have a DB-driven download path); "no catalog" is no
-        # longer a hard 404 here.  The ``catalog`` field stays in the
-        # response so the UI can distinguish manifest-backed setups
-        # from DB-only ones if it ever needs to.
-        states = await download_manager.list()
-        return {
-            "catalog": str(manifest_path) if catalog_state.catalog is not None else None,
-            "image_root": str(resolved_image_root),
-            "max_parallel": download_manager.max_parallel,
-            "downloads": [s.to_dict() for s in states],
-        }
-
-    @app.post("/catalog/downloads", status_code=status.HTTP_202_ACCEPTED)
-    async def enqueue_download(
-        body: _models.CatalogEnqueueRequest,
-        request: Request,
-        _: str = Depends(require_auth),
-    ) -> dict[str, Any]:
-        try:
-            state = await download_manager.enqueue(body.name)
-        except KeyError as exc:
-            # ``str(KeyError("msg"))`` is ``"'msg'"`` with literal
-            # single quotes (KeyError applies ``repr`` to its arg);
-            # surface the args[0] form so the 404 detail isn't
-            # wrapped in operator-confusing extra quotes.
-            msg = exc.args[0] if exc.args else f"no catalog entry named {body.name!r}"
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=msg,
-            ) from exc
-        # Lifecycle audit event: "operator clicked Fetch". Pairs with
-        # the worker-side ``catalog.fetch.started`` (when the worker
-        # actually picks the job up off the queue) and the eventual
-        # terminal ``catalog.cache.populated`` / ``catalog.fetch.failed``
-        # / ``catalog.fetch.cancelled``. Lets an operator see "yes the
-        # click registered" in /ui/events immediately, not in a minute
-        # when the worker either succeeds or fails.
-        with _db.open_db(state_path) as conn:
-            _log_event(
-                conn,
-                kind="catalog.fetch.requested",
-                summary=f"operator requested fetch of catalog entry {body.name!r}",
-                subject_kind="catalog",
-                subject_id=body.name,
-                actor="operator",
-                source_ip=_client_ip(request),
-                details={"name": body.name},
-            )
-            conn.commit()
-        return state.to_dict()
-
-    @app.delete("/catalog/downloads/{name}")
-    async def cancel_download(
-        name: str,
-        request: Request,
-        _: str = Depends(require_auth),
-    ) -> dict[str, Any]:
-        state = await download_manager.cancel(name)
-        if state is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"no active download named {name!r}",
-            )
-        # Lifecycle audit event: operator-initiated cancel. The
-        # worker writes its own ``catalog.fetch.cancelled`` when it
-        # observes the flag and unwinds; this handler-side event
-        # carries the source_ip + actor=operator so a /ui/events
-        # filter on actor=operator picks up the cancel intent.
-        # Without this row, the worker-side cancelled event lands
-        # with actor=system and the operator can't distinguish
-        # "I cancelled it" from "the system cancelled it"
-        # (e.g. shutdown drain).
-        with _db.open_db(state_path) as conn:
-            _log_event(
-                conn,
-                kind="catalog.fetch.cancelled",
-                summary=f"operator cancelled fetch of {name!r}",
-                subject_kind="catalog",
-                subject_id=name,
-                actor="operator",
-                source_ip=_client_ip(request),
-                details={"name": name, "source": "operator"},
-            )
-            conn.commit()
-        return state.to_dict()
-
-    @app.delete(
-        "/catalog/cache/{name}",
-        dependencies=[Depends(require_auth)],
-    )
-    def delete_catalog_cache(name: str, request: Request) -> dict[str, Any]:
-        """Delete the cached bytes for a named catalog entry; keep
-        the entry's metadata.
-
-        v0.31.0+: cached files live at
-        ``image_root / catalog-<ref:12>-<slug>.<ext>`` (URL-keyed name,
-        no separate cache dir). Unlinks the per-entry file by composing
-        its ``local_filename_for`` from the DB row's ``bty_image_ref +
-        name + format`` (or the parsed manifest entry's ``ref + name +
-        format`` if the manifest is the source of truth). Idempotent:
-        a missing file or unknown name both return ``{"deleted":
-        false}`` with a ``reason`` string. Metadata is preserved, so
-        the row keeps surfacing in ``/images`` as "available" (not
-        cached) and ``POST /catalog/downloads`` re-fetches on demand.
-
-        Used by the ``/ui/images`` bulk "Delete local copy" toolbar
-        action; per-name dispatch keeps the response surface symmetric
-        with the per-name ``POST /catalog/downloads`` enqueue path.
-        Path-separator characters or NUL in ``name`` are rejected at
-        the boundary, same rule as :class:`CatalogEnqueueRequest`.
-        """
-        try:
-            _security.validate_basename(name, label="name")
-        except ValueError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=str(exc),
-            ) from exc
-        local_filename: str | None = None
-        sha: str | None = None
-        with _db.open_db(state_path) as conn:
-            row = conn.execute(
-                "SELECT bty_image_ref, name, format, disk_image_sha "
-                "FROM catalog_entries WHERE name = ?",
-                (name,),
-            ).fetchone()
-            if row:
-                local_filename = _catalog.local_filename_for(
-                    row["bty_image_ref"], row["name"], row["format"]
-                )
-                if row["disk_image_sha"]:
-                    sha = str(row["disk_image_sha"])
-        if local_filename is None and catalog_state.catalog is not None:
-            entry = catalog_state.catalog.by_name(name)
-            if entry is not None:
-                local_filename = entry.local_filename()
-                sha = entry.sha256
-        if local_filename is None:
-            return {"name": name, "deleted": False, "reason": "unknown catalog entry"}
-        cached_file = resolved_image_root / local_filename
-        if not cached_file.exists():
-            return {
-                "name": name,
-                "deleted": False,
-                "reason": "not cached",
-                "disk_image_sha": sha,
-                "local_filename": local_filename,
-            }
-        cached_file.unlink()
-        with _db.open_db(state_path) as conn:
-            _log_event(
-                conn,
-                kind="catalog.cache.deleted",
-                summary=f"deleted cached file for {name!r}",
-                subject_kind="catalog",
-                subject_id=name,
-                actor="operator",
-                source_ip=_client_ip(request),
-                details={"name": name, "disk_image_sha": sha},
-            )
-            conn.commit()
-        return {"name": name, "deleted": True, "disk_image_sha": sha}
 
     # ---------- catalog hash manager --------------------------------------
     # Hashing is independent of the manifest -- always available so
