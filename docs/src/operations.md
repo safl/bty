@@ -11,9 +11,13 @@ bty-web keeps everything in one directory, `BTY_STATE_DIR` (default
 | Path | What | Backup? |
 |---|---|---|
 | `state.db` | The SQLite database: machine records, MAC->image assignments, catalog metadata, server settings, sessions, and the audit log. | **Yes** -- this is the irreplaceable bit. |
-| `images/` | All image files (`BTY_IMAGE_ROOT`): operator-typed images + catalog-fetched files (named `catalog-<ref:12>-<slug>.<ext>`, v0.31.0+). | Optional -- catalog files re-fetchable from upstream; operator-typed files are irreplaceable. |
 | `boot/` | The netboot artifacts (`BTY_BOOT_DIR`: kernel / initrd / squashfs). | Optional -- re-fetchable via "Fetch netboot artifacts". |
 | `catalog.toml` | The active catalog manifest. | Optional -- re-fetchable from the upstream. |
+
+bty-web (v0.40+) holds no image bytes. Image bytes live in
+[withcache](https://github.com/safl/withcache) under
+`./data/withcache/`, populated on first flash of each URL and
+backed up independently.
 
 A minimal backup is just `state.db`; a full backup is the whole
 `/var/lib/bty` tree.
@@ -32,25 +36,20 @@ into two classes:
 | Path | Class | Notes |
 |---|---|---|
 | `state.db` | precious | records: machines, catalog, settings, audit log |
-| `images/` | precious | all image bytes (operator-typed + catalog-fetched, expensive to refetch); v0.31.0+ merged the old `cache/` subdir in here under `catalog-<ref:12>-<slug>.<ext>` names |
 | `boot/` | ephemeral | netboot artifacts -- **version-coupled**; refetch on a bty version bump |
 | `session-secret` | regenerable | cookie key |
 
-Precious = carry across a migration / back up. The split between the
-two precious classes matters because they migrate differently:
+Precious = carry across a migration / back up. `state.db` carries the
+machine **bindings** + audit log + settings; v0.33.0+ auto-rotates it
+on a version mismatch. The `bty-web export` bundle (v3, metadata-only)
+carries the per-machine **hardware identity** (mac + hw_lshw +
+known_disks) so a re-imported machine shows up pre-fingerprinted;
+bindings reset and the operator re-binds.
 
-- `state.db` carries machine **bindings** + audit log + settings;
-  v0.33.0+ auto-rotates it on a version mismatch. The `bty-web export`
-  bundle (v3, metadata-only) carries the per-machine **hardware
-  identity** (mac + hw_lshw + known_disks) so a re-imported machine
-  shows up pre-fingerprinted; bindings reset and the operator re-binds.
-- `images/` carries the **bytes**. The export bundle does NOT include
-  these (a single host can hold tens of GiB; daily backups would
-  thrash). Move them by `rsync`-ing the directory, copying the
-  `bty-data` volume, or re-fetching from the catalog on the new
-  host. The `catalog-<ref:12>-<slug>.<ext>` naming convention
-  associates cached files with their catalog entries by content-hash
-  prefix, so a re-imported `images/` re-wires automatically.
+Image bytes live in withcache (separate process, separate data dir,
+backed up independently). v0.40+ took bty-web out of the bytes plane;
+the live env streams from withcache or from the catalog URL's origin,
+never from bty-web's filesystem.
 
 Ephemeral = safe to lose, re-created on demand. `boot/` is the subtle
 one: it lives on the writable volume (so a read-only OS is possible)
@@ -106,9 +105,8 @@ timestamp, e.g. `2026-05-24T08-00-00Z/`. The bundle layout is
 identical to what `bty-web export` produces (a single
 `inventory.json` carrying per-machine `mac` + `hw_lshw` +
 `known_disks`), so a scheduled backup is interchangeable with a
-manual one. Image bytes are NOT included -- they live in
-`BTY_IMAGE_ROOT` and re-associate with catalog entries on import
-via the `catalog-<ref:12>-<slug>.<ext>` filename prefix.
+manual one. Image bytes are NOT included -- bty-web doesn't have
+any (v0.40+); withcache holds the cached blobs independently.
 Retention prunes the oldest siblings after every successful run.
 
 Two env vars tune the feature when the in-UI knobs aren't enough:
@@ -134,7 +132,7 @@ server (possibly a newer version) without dragging stale bty internals
 along, or to back up just the parts you typed in.
 
 ```bash
-# On the old server (reads BTY_STATE_DIR + BTY_IMAGE_ROOT):
+# On the old server (reads BTY_STATE_DIR):
 bty-web export /tmp/bty-bundle
 
 # Copy /tmp/bty-bundle to the new server, then:
@@ -153,7 +151,7 @@ What a bundle carries, and what it deliberately leaves behind:
 | Machine `mac` + `lshw` + disk inventory | The **boot mode** (every machine imports as `bty-inventory`) |
 | Image binding + `target_disk_serial` + `hostname` | The `saw_flasher_boot` state bit + `last_flashed_at` |
 | The image catalog (`catalog_entries`) | The netboot artifacts (re-fetch to match the new version) |
-| The local image files (`BTY_IMAGE_ROOT`) | Server settings + the audit log |
+|  | Server settings + the audit log |
 
 Resetting the boot mode is the point: a freshly-migrated machine
 shouldn't auto-flash against netboot artifacts you haven't refreshed
@@ -193,9 +191,10 @@ without the marker), `init_db` does:
 
 Operator-irreplaceable state lives outside `state.db`:
 
-- **Image files** under `BTY_IMAGE_ROOT` -- not touched.
 - **Netboot artifacts** under `BTY_BOOT_DIR` -- not touched.
 - **Backup bundles** under `${BTY_STATE_DIR}/backups/` -- not touched.
+- **Withcache blobs** under the separate withcache data dir -- not
+  touched (different process).
 
 What rotation discards: machine bindings, hostnames, the audit log,
 operator-overridden settings, the catalog cache index. Bindings
@@ -214,11 +213,10 @@ sudo bty-web export /var/lib/bty/backups/pre-$(date +%Y%m%d)
 sudo bty-web import /var/lib/bty/backups/pre-$(date +%Y%m%d)
 ```
 
-The slim bundle format carries every file under `BTY_IMAGE_ROOT`
-plus a minimal per-machine record (`mac` + `hw_lshw` +
-`known_disks`); bindings (`boot_mode`, `bty_image_ref`,
-`target_disk_serial`) reset to defaults and the operator re-binds.
-See "Backup".
+The slim bundle format carries a minimal per-machine record
+(`mac` + `hw_lshw` + `known_disks`) plus the catalog rows;
+bindings (`boot_mode`, `bty_image_ref`, `target_disk_serial`)
+reset to defaults and the operator re-binds. See "Backup".
 
 ### Recovering an old `.bak`
 

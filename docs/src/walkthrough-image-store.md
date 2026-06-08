@@ -1,52 +1,88 @@
-# Walkthrough: persistent state and the image store
+# Walkthrough: persistent state and where image bytes live
 
-bty-web keeps all of its mutable state under `/var/lib/bty`:
+bty-web's mutable state under `/var/lib/bty` is small and metadata-only:
 
-- `images/` -- the image store (`BTY_IMAGE_ROOT`): operator-typed images
-  alongside catalog-fetched files named `catalog-<ref:12>-<slug>.<ext>`
-  (v0.31.0+).
-- `boot/` -- the netboot artifacts (`BTY_BOOT_DIR`: kernel / initrd /
-  squashfs).
-- `state.db` -- bty-web's SQLite database (machine inventory, catalog
-  metadata, boot-mode assignments, audit log).
+- `state.db` -- SQLite database (machine inventory, catalog entries,
+  boot-mode assignments, audit log, settings).
+- `boot/` -- netboot artifacts (kernel / initrd / squashfs) served via
+  TFTP + HTTP-Boot. `BTY_BOOT_DIR` overrides the path.
+- `catalog.toml` -- the manifest the operator uploaded (or that
+  fetch-from-release pulled). Re-importable; not load-bearing once
+  rows are in `catalog_entries`.
 - `session-secret` -- the cookie-signing key.
 
-## Where it lives in the container deploy
+There is **no image store**. v0.40 (catalogs, not bytes) moved image
+bytes entirely out of bty-web. Operators add a catalog entry pointing
+at a URL; the live env streams from that URL when it flashes.
+
+## Who holds the bytes
+
+- **withcache** (`./data/withcache/`) -- transparent HTTP cache.
+  Warms on first flash of a given URL; subsequent flashes hit the
+  warm cache. Backs up independently of bty-web; restore is just
+  dropping its on-disk blobs back into the data dir.
+- **upstream** -- the URL the catalog entry references. GHCR via
+  `oras://`, GitHub release assets, an operator's own nginx, S3 --
+  whatever serves HTTP(S) or the OCI registry protocol.
+
+bty-web's plan endpoint returns one of two URLs to the live env:
+
+1. **withcache warm** -- the `/b/<urlsafe-b64(origin)>/<basename>`
+   serve URL. The HEAD bty-web does before returning the URL warms
+   withcache's auto-fetch path on a miss; subsequent boots flip to
+   cached.
+2. **withcache cold or unconfigured** -- the origin URL itself.
+   bty-web is out of the bytes path; the live env streams direct.
+
+For `oras://` catalog entries bty-web stays in the bytes path: it
+proxies through `/images/<ref>` because withcache speaks plain HTTP
+and can't pull an OCI manifest + inject the bearer token. (A v0.41+
+follow-up could teach withcache about oras and shrink /images
+further.)
+
+## Container deploy
 
 The container deploy backs `/var/lib/bty` with a host bind-mount at
-`./data/bty/` next to the generated `compose.yml` (or the absolute path
-you pass to `bty-lab init --data-dir`). The directory is the unit of
-persistence: it outlives the container, so `podman compose pull` +
-`up -d` upgrades bty-web to a new image while the image store, netboot
-artifacts, and machine inventory stay put. See
+`./data/bty/` next to the generated `compose.yml`. The directory is
+the unit of persistence: it outlives the container, so
+`podman compose pull` + `up -d` upgrades bty-web while state.db,
+catalogs, netboot artifacts, and machine inventory stay put. See
 [`deploy/README.md`](https://github.com/safl/bty/blob/main/deploy/README.md)
 for the layout and the upgrade flow, and
 [bty via netboot](tutorials/bty-netboot.md) for standing the stack up.
 
-The image bytes themselves are delegated to
-[withcache](https://github.com/safl/withcache): bty prefers the cache as
-the image source for artifacts it holds, so a fleet pulls each image once.
-withcache keeps its blobs in `./data/withcache/` next to bty's state.
-
 ## Adding images
 
-Drop images into the store the same way regardless of deploy:
+Three paths, all of which write rows to `catalog_entries`; none of
+which puts bytes anywhere on bty-web's filesystem:
 
-- **Operator-typed files** keep whatever filename you upload / scp / drop
-  in (e.g. `my-fedora.qcow2`, `debian-13-server.img.gz`).
-- **Catalog-fetched files** land under a URL-derived name,
-  `catalog-<ref:12>-<slug>.<ext>`, fetched by the `/ui/images` Fetch
-  button or `POST /catalog/downloads`.
+- **Catalog upload** -- `POST /ui/catalog/upload` of a TOML manifest.
+  Use this when you have a curated catalog file (the bty release
+  publishes one for nosi images).
+- **Fetch from release** -- `POST /ui/catalog/fetch-release`.
+  Pulls the bty default catalog from
+  `https://github.com/safl/bty/releases/latest/download/catalog.toml`.
+- **Add by URL** -- `POST /catalog/entries` with `image_url` (and
+  optionally `sha_url`). For an ad-hoc image that doesn't live in a
+  catalog: host it on your own HTTP server / push to a registry, then
+  add the URL.
 
-`ls /var/lib/bty/images/ | grep '^catalog-'` lists every catalog-fetched
-file; the rest are operator-typed.
+There is no upload form for image bytes. There is no drop-zone
+directory.
 
 ## Backups
 
-A minimal backup is `state.db`; a full backup is the whole
-`/var/lib/bty` tree (or the `bty-data` volume). The `/ui/backups` page
-drives scheduled and on-demand backups, and `bty-web export` / `import`
-move the operator-owned half of the state (machine identities, bindings,
-catalog, image files) to a new host. See
-[operations.md](operations.md) for backup, upgrade, and migrate
+A backup is `state.db` + the catalog files. The whole `/var/lib/bty`
+tree tars cleanly. The `/ui/backups` page drives scheduled and
+on-demand backups (v3 bundle, metadata-only); `bty-web export` /
+`import` move the operator-owned half of the state (machines + their
+hardware identity) to a new host.
+
+Withcache is backed up independently -- its data dir is just a
+directory of blobs keyed by `urlsafe-b64(origin)`. Re-deploy bty-web,
+re-deploy withcache, and bty-web HEADs the catalog URLs on first
+request to learn the hit/miss state of the world without any
+re-download orchestration.
+
+See [operations.md](operations.md) for backup, upgrade, and migrate
 procedures.
