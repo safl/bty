@@ -147,7 +147,6 @@ and copying the file. Migrations run automatically on every start.
 | `BTY_WEB_HOST` | `0.0.0.0` | Listen address |
 | `BTY_WEB_PORT` | `8080` | Listen port |
 | `BTY_STATE_DIR` | `/var/lib/bty` | Where `state.db` and `session-secret` live |
-| `BTY_IMAGE_ROOT` | `/var/lib/bty/images` | Image catalog directory |
 | `BTY_BOOT_DIR` | `${BTY_STATE_DIR}/boot` | Kernel/initrd/squashfs (PXE boot artifacts) |
 | `BTY_SESSION_SECRET` | (generated) | Cookie key override; useful for multi-instance |
 | `BTY_ADMIN_PASSWORD` | unset | Gates the operator UI (constant-time compare); unset = open, with a startup warning |
