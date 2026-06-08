@@ -9,6 +9,77 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.40.0] - 2026-06-09
+
+**bty-web is out of the image-bytes plane.** Image bytes now live
+exclusively in [withcache](https://github.com/safl/withcache); bty-web
+holds the catalog (URL -> manifest entry), the machine inventory, the
+audit log, and the netboot artifacts. One rule: *bty has catalogs;
+withcache has bytes.*
+
+Released as a ~3500-line subtraction across five refactor commits.
+
+### Removed
+
+- **DownloadManager + ``/catalog/downloads`` endpoints.** The Fetch
+  button on ``/ui/images``, the explicit-download lifecycle, the
+  ``catalog.cache.populated`` / ``catalog.fetch.*`` audit events --
+  all gone. The live env's flash request warms withcache directly via
+  the HEAD probe in the plan endpoint.
+- **HashManager + ``/catalog/hashes`` endpoints.** The background
+  SHA-256 worker, the ``image.hashed`` / ``image.hash.*`` events, and
+  the ``/ui/hashing`` page. ``catalog_entries.disk_image_sha`` stays
+  for catalog-declared shas; no more late backfill.
+- **Image upload** (``PUT /images/{name}``). No drag-and-drop in the
+  UI, no curl-PUT, no ``image.uploaded`` events. Ad-hoc images: host
+  on your own nginx / GHCR / S3 and add a catalog entry pointing at
+  it. ``PUT /boot/{name}`` survives for netboot artifacts.
+- **``BTY_IMAGE_ROOT``.** No image-store directory. bty-web's
+  lifespan no longer dir-scans the filesystem; ``/var/lib/bty/`` is
+  now ``state.db + boot/ + catalogs + session-secret`` only.
+  ``BTY_CATALOG_MAX_PARALLEL`` and ``BTY_HASH_MAX_PARALLEL`` envvars
+  retired alongside their managers.
+- **``/ui/images`` Fetch / Hash buttons and the ``data-cached`` status
+  badge.** Catalog entries render with their src URL and the catalog
+  metadata only.
+
+### Changed
+
+- **Plan endpoint URL contract.**
+  - HTTPS + withcache configured + warm -> withcache's
+    ``/b/<urlsafe-b64(origin)>/<basename>`` URL (unchanged).
+  - HTTPS + withcache cold or unconfigured -> the **origin URL
+    directly** (was: ``/images/{ref}/{name}`` stream-proxy). bty-web
+    is out of the bytes path for https sources entirely.
+  - ORAS -> ``/images/{ref}/{name}``; bty-web proxies for the
+    bearer-token resolve (withcache doesn't speak oras yet; v0.41
+    follow-up).
+- ``GET /images/{key}`` shrinks to oras-only stream-proxy. Unknown
+  keys, https-only catalog entries, and literal filename lookups all
+  404 now.
+
+### Migration
+
+Upgrade in place with ``bty-lab upgrade /opt/bty`` then re-deploy.
+Existing files under ``./data/bty/images/`` are no longer read or
+written; ``rm -rf`` them to reclaim disk after confirming the
+withcache deploy serves the same URLs (HEAD them at
+``http://<host>:3000/b/<urlsafe-b64(origin)>/<basename>``).
+
+Operator-uploaded images that didn't live at a URL on the old deploy
+need re-homing: drop them onto an HTTP server, push to GHCR via
+``oras``, or any other URL-addressable store, then add a catalog
+entry.
+
+state.db survives untouched -- the ``catalog_entries.disk_image_sha``
+column stays nullable; rows without it just lose the sha display.
+
+### Test impact
+
+922 -> 834 (-88). Dir-scan, sha-by-filename, local-file serving,
+image-upload, image-store-survives-upgrade, mixed-shape-no-dupes,
+and the entire DownloadManager + HashManager test files gone.
+
 ## [0.39.1] - 2026-06-08
 
 **Hot-fix: two unrelated stock-Ubuntu-host gotchas that made v0.39.0's
