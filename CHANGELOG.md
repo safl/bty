@@ -9,6 +9,39 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.39.1] - 2026-06-08
+
+**Hot-fix: two unrelated stock-Ubuntu-host gotchas that made v0.39.0's
+``bty-lab deploy`` unusable in real-world reproduction.** Both surface
+on a stock Ubuntu host with ``podman-compose`` installed but no other
+podman / netavark deep-dive done.
+
+### Fixed
+
+- **``deploy`` and ``upgrade`` pre-create the bind-mount targets writable
+  for any container UID.** withcache's image runs as USER ``app``,
+  bty-web's as USER ``bty``. When podman auto-created ``./data/withcache``
+  and ``./data/bty`` they came up root-owned mode 0o755 -- not writable
+  for those non-root container UIDs. withcache crashed on
+  ``Permission denied: '/data/blobs'`` and bty-web stuck at ``Created``
+  via ``depends_on``. Fix: ``mkdir -p`` + ``chmod 0o777`` BEFORE
+  ``compose pull/up``. World-writable is the right tradeoff here
+  (single-tenant appliance host, the dir already holds operator-trusted
+  bytes), and image USER directives stay respected.
+- **Container DNS hardcoded to sidestep the systemd-resolved /
+  missing-aardvark-dns combo.** Containers got ``nameserver 10.89.0.1``
+  (podman's bridge gateway, where ``aardvark-dns`` is supposed to forward
+  from -- but it isn't installed by default on Ubuntu). Result: every
+  outbound lookup failed:
+  ``release fetch failed: <urlopen error [Errno -3] Temporary failure in name resolution>``.
+  Compose + Quadlets now emit ``dns: 1.1.1.1`` (overridable via the new
+  ``BTY_DNS`` envvar for internal-resolver LANs). Bty's inter-service
+  traffic already routes via host IP, so the earlier
+  "aardvark-dns binary not found" warning is now genuinely cosmetic and
+  ``apt remove aardvark-dns`` works without breaking the stack.
+- Step counters bump 14 -> 15 (sudo-root path) and the equivalent in
+  ``upgrade`` to include the new ``prepared data dirs`` step.
+
 ## [0.39.0] - 2026-06-07
 
 **Polish pass on the v0.38.0 ``bty-lab deploy``, from real-world
