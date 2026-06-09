@@ -9,6 +9,34 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.41.4] - 2026-06-09
+
+**Polish pass on the v0.41.3 UI work.**
+
+### Added
+
+- ``make web`` -- fast iterate-locally target. Runs ``uv run
+  bty-web`` straight from the source tree with state under
+  ``/tmp/bty-web-dev``; skips the container entirely so rootless-
+  Docker's uid-namespace woes don't block the day-to-day loop.
+  Log in with the well-known default password ``bty``.
+
+### Fixed
+
+- The ``Fetch '<tag>' catalog`` / ``Fetch '<tag>' artifacts``
+  buttons rendered the tag inside ``<code>``, which Bootstrap
+  colours pink-red at ~2:1 contrast against the primary-blue
+  button background -- effectively unreadable. Use ``<strong>``
+  instead (plain bold, inherits the button's white text).
+
+### Changed
+
+- Settings page's compact read-only cards (Identity / Storage
+  paths / Network / Background workers) reorder each row from
+  ``LABEL`` / ``VALUE`` / ``ENV_VAR`` to ``LABEL`` / ``ENV_VAR``
+  / ``VALUE`` -- matching the natural ``VAR=value`` shape an
+  operator types into a shell.
+
 ## [0.41.3] - 2026-06-09
 
 **Always-on auth + tag/repo separation + live TFTP probe + Settings grid.**
