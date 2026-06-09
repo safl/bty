@@ -12,13 +12,9 @@ import subprocess
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
 from bty.web._sysconfig import (
     DaemonStatus,
     Interface,
-    SysConfigError,
-    control_tftp,
     list_interfaces,
     tftp_status,
 )
@@ -104,7 +100,7 @@ def test_list_interfaces_tolerates_missing_ip_tool(tmp_path: Path) -> None:
     assert out[0].ipv4 is None
 
 
-# ---------- DaemonStatus / tftp_status / control_tftp ---------------------
+# ---------- DaemonStatus / tftp_status ----------------------------------
 
 
 def test_daemon_status_is_active_true_only_for_active() -> None:
@@ -149,53 +145,6 @@ def test_tftp_status_returns_unknown_on_timeout() -> None:
         assert tftp_status().state == "unknown"
 
 
-def test_control_tftp_shells_helper_via_sudo() -> None:
-    completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
-    with patch("bty.web._sysconfig.subprocess.run", return_value=completed) as mock_run:
-        control_tftp("restart")
-    cmd = mock_run.call_args[0][0]
-    assert cmd[:2] == ["sudo", "-n"]
-    assert cmd[2].endswith("/bty-web-tftp")
-    assert cmd[3:] == ["restart"]
-
-
-def test_control_tftp_rejects_unknown_action() -> None:
-    with pytest.raises(SysConfigError, match="unknown action"):
-        control_tftp("enable")  # not in allowlist
-
-
-def test_control_tftp_helper_failure_wraps_as_sysconfig_error() -> None:
-    err = subprocess.CalledProcessError(
-        returncode=1, cmd=["sudo"], stderr="Failed to restart dnsmasq.service\n"
-    )
-    with (
-        patch("bty.web._sysconfig.subprocess.run", side_effect=err),
-        pytest.raises(SysConfigError, match="exited 1"),
-    ):
-        control_tftp("restart")
-
-
-def test_control_tftp_helper_timeout_wraps_as_sysconfig_error() -> None:
-    """If systemctl wedges and the 30s timeout fires, the user
-    should get a SysConfigError flash, not a raw subprocess
-    exception bubbling to the UI."""
-    with (
-        patch(
-            "bty.web._sysconfig.subprocess.run",
-            side_effect=subprocess.TimeoutExpired(cmd=["sudo"], timeout=30),
-        ),
-        pytest.raises(SysConfigError, match="tftp helper failed"),
-    ):
-        control_tftp("restart")
-
-
-def test_control_tftp_empty_action_gets_friendly_error() -> None:
-    """Form field arriving as an empty string surfaces a clean
-    error rather than the generic 'unknown action: \\'\\'' path."""
-    with pytest.raises(SysConfigError, match="no action specified"):
-        control_tftp("")
-
-
 def test_tftp_status_masked_state_passes_through() -> None:
     """``systemctl is-active`` returns 'inactive' for masked units
     (and 'masked' on some systemd versions). Either way the
@@ -205,41 +154,6 @@ def test_tftp_status_masked_state_passes_through() -> None:
         status = tftp_status()
     assert status.state == "masked"
     assert status.is_active is False
-
-
-def test_tftp_controllable_requires_helper_and_sudo() -> None:
-    """The UI hides Start/Stop/Restart buttons when sudo or the
-    helper isn't installed (Docker container case). On a clean
-    test host neither path exists; on the appliance both do.
-
-    Stronger than just "returns a bool": exercises each of the
-    three branches by monkey-patching ``Path.is_file`` so we
-    don't depend on the test host's actual filesystem.
-    """
-    from bty.web._sysconfig import tftp_controllable
-
-    # Always-True: both helper + sudo present.
-    with patch.object(Path, "is_file", lambda self: True):
-        assert tftp_controllable() is True
-
-    # Helper missing: sudo present but bty-web-tftp absent.
-    def _no_helper(self: Path) -> bool:
-        return not str(self).endswith("bty-web-tftp")
-
-    with patch.object(Path, "is_file", _no_helper):
-        assert tftp_controllable() is False
-
-    # sudo missing: helper present, neither /usr/bin/sudo nor
-    # /bin/sudo on the host.
-    def _no_sudo(self: Path) -> bool:
-        return "sudo" not in str(self)
-
-    with patch.object(Path, "is_file", _no_sudo):
-        assert tftp_controllable() is False
-
-    # Both missing.
-    with patch.object(Path, "is_file", lambda self: False):
-        assert tftp_controllable() is False
 
 
 def test_tftp_status_falls_back_to_pgrep_when_systemctl_missing() -> None:

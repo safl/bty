@@ -21,8 +21,7 @@ Conventions:
 - ``subject_kind`` + ``subject_id`` together identify the entity
   the event is about. ``machine`` / mac, ``image`` / sha or name,
   ``catalog`` / src URL, ``boot`` / release-tag, ``settings`` /
-  panel-name. Either may be ``None`` for global events
-  (``netboot.tftp.controlled``).
+  panel-name. Either may be ``None`` for global events.
 - ``actor`` distinguishes operator-initiated changes from
   system-initiated ones (auto-discovery, hash completion).
   See :data:`KNOWN_ACTORS` for the catalogue of conventional
@@ -109,8 +108,6 @@ KNOWN_EVENT_KINDS: tuple[str, ...] = (
     "netboot.artifacts.fetch.started",
     "netboot.artifacts.fetch.cancelled",
     "netboot.artifacts.fetch.failed",
-    "netboot.tftp.controlled",
-    "netboot.tftp.control.failed",
     "settings.upstream.updated",
     "settings.backup.updated",
     "backup.created",

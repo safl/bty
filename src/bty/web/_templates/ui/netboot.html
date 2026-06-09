@@ -2,13 +2,14 @@
 {% block title %}Netboot artifacts - bty-web{% endblock %}
 
 {% block subnav %}
-{# In-page jump links to the artifacts inventory + the activity table,
-   separated by a vertical rule. (DHCP / PXE moved to Settings, the
-   live fetch jobs to /ui/downloads, TFTP into the body.) #}
+{# Three jump links: artifacts inventory (with live fetch UI),
+   TFTP daemon control, recent activity. v0.41.2+: the old
+   /ui/downloads page collapsed into here since the only
+   downloads bty-web does are netboot artifacts. #}
 <nav class="navbar subnav-strip" aria-label="Section sub-navigation">
     <div class="container">
         <span class="subnav-jumps d-flex align-items-center flex-wrap">
-            <a href="#netboot-list">List</a>
+            <a href="#netboot-list">Artifacts</a>
             <span class="vr"></span>
             <a href="#netboot-tftp">TFTP Daemon</a>
             <span class="vr"></span>
@@ -21,27 +22,39 @@
 {% block intro %}
 {% from "ui/_intro_box.html" import render as intro_box %}
 {% call intro_box() %}
-    The bty live env that PXE clients chain into when their
-    assignment has <code>boot_mode=bty-flash-always</code>. Pure
-    inventory view: which files are present, sizes, sha256s,
-    last-fetched. The "Fetch artifacts" trigger lives on the
-    <a href="/ui/downloads"><strong>Downloads</strong></a> page
-    (under the navbar's Downloads icon); enqueue there and the rows
-    here tick from missing to present as each file lands. The TFTP
-    daemon controls are below; the router-side DHCP / PXE cheatsheet
-    lives on the <strong>Settings</strong> page.
+    The bty live env PXE clients chain into when their assignment has
+    <code>boot_mode=bty-flash-always</code>. Trigger a fetch from the
+    artifacts header to pull the kernel + initrd + squashfs + sha256
+    manifest for tag <code>{{ release_tag }}</code> from
+    <code>{{ release_repo }}</code>; rows below tick from missing to
+    present as each file lands. The TFTP daemon controls are below;
+    the router-side DHCP / PXE cheatsheet lives on the
+    <strong>Settings</strong> page.
 {% endcall %}
 {% endblock %}
 
 {% block content %}
-{# Pure inventory: present/missing, size, sha256, last-fetched.
-   The Fetch trigger moved to /ui/downloads. #}
 <div class="card mb-4" id="netboot-list">
-    <div class="card-header bg-light fw-semibold d-flex justify-content-between align-items-center flex-wrap gap-2">
-        <span><i class="bi bi-box-seam me-1"></i>Netboot artifacts</span>
-        <a href="/ui/downloads" class="btn btn-sm btn-outline-primary text-nowrap">
-            <i class="bi bi-arrow-right me-1"></i>Fetch on the Downloads page
-        </a>
+    <div class="card-header bg-light fw-semibold d-flex justify-content-between align-items-center flex-wrap gap-2 py-2">
+        <span><i class="bi bi-box-seam me-1"></i>Netboot artifacts
+              <span class="text-muted small bty-workers-poll-status ms-1">refreshing...</span></span>
+        {# Fetch artifacts: enqueues the netboot trio + sha256 manifest.
+           The release tag is an editable magic value (Settings ->
+           Upstream sources). Disabled when all four files are already
+           cached on disk; re-enables when one disappears (operator
+           ``rm``, state-dir migrate, etc.). #}
+        <button type="button" class="btn btn-sm btn-primary text-nowrap"
+                id="bty-downloads-fetch-artifacts-btn"
+                data-tag="{{ release_tag }}"
+                {% if artifacts_all_cached %}disabled
+                title="Netboot artifacts for tag '{{ release_tag }}' are already cached. Remove a file from the boot directory below to re-fetch."
+                {% else %}
+                title="Fetch netboot artifacts for tag '{{ release_tag }}' from {{ release_repo }}"
+                {% endif %}>
+            <i class="bi bi-cloud-download me-1"></i>Fetch artifacts
+            {% if release_tag == "latest" %}<small>(latest)</small>{% else %}<code>{{ release_tag }}</code>{% endif %}
+            {% if artifacts_all_cached %}<i class="bi bi-check-circle ms-1" title="cached"></i>{% endif %}
+        </button>
     </div>
     <div class="table-responsive">
         <table class="table mb-0 align-middle">
@@ -106,25 +119,41 @@
     </div>
 </div>
 
-{# Local dnsmasq.service state + start/stop/restart. The "take PXE
-   offline briefly" knob, next to the artifacts it serves. #}
+{# Active fetch jobs (release-tag rows, one progress bar per artifact).
+   Hidden when no fetch is in flight; appears when "Fetch artifacts"
+   is clicked. Cancel re-arms the trigger button. #}
+<div class="card mb-4" id="netboot-active">
+    <div class="card-header bg-light fw-semibold">
+        <i class="bi bi-arrow-down-circle me-1"></i>Active fetches
+    </div>
+    <div class="table-responsive">
+        <table class="table mb-0 align-middle">
+            <thead class="table-light">
+                <tr>
+                    <th style="width: 35%;">Item</th>
+                    <th>Status</th>
+                    <th style="width: 35%;">Progress</th>
+                    <th>Bytes</th>
+                    <th class="text-end" style="width: 1%; white-space: nowrap;">Action</th>
+                </tr>
+            </thead>
+            <tbody class="bty-workers-downloads-tbody">
+                <tr><td colspan="5" class="text-muted">No active fetches.</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{# TFTP daemon: observational only. Lifecycle (start / stop / restart)
+   belongs to systemd or Podman, not the web UI. The card just
+   surfaces what bty-web can see: the local ``dnsmasq.service`` state,
+   what that state implies, and where to look next. #}
 <div class="card mb-4" id="netboot-tftp">
     <div class="card-header bg-light fw-semibold">
         <i class="bi bi-cpu me-1"></i>TFTP daemon
     </div>
     <div class="card-body">
-        <p class="text-muted">
-            On a host/systemd install a co-located
-            <code>dnsmasq.service</code> serves the TFTP root. Stop it to
-            take PXE offline without disabling DHCP; restart it to pick up
-            new bootfiles staged into the TFTP root. The container deploy
-            serves TFTP from a separate sidecar instead, so these controls
-            don't appear there.
-            <a href="/ui/settings#dhcp-pxe" class="ms-1">
-                <i class="bi bi-box-arrow-up-right me-1"></i>DHCP / PXE config details
-            </a>
-        </p>
-        <div class="d-flex align-items-center gap-3">
+        <div class="d-flex align-items-center gap-3 mb-2">
             <div>
                 {% if tftp.state == 'active' %}
                 <span class="badge bg-success fs-6">{{ tftp.state }}</span>
@@ -137,84 +166,186 @@
                 {% endif %}
                 <code class="ms-2">dnsmasq.service</code>
             </div>
-            {% if tftp_controllable %}
-            <form action="/ui/settings/tftp-control" method="post" class="d-inline-flex gap-1 m-0 ms-auto">
-                <button type="submit" name="action" value="start"
-                        class="btn btn-sm btn-outline-success"
-                        {% if tftp.is_active %}disabled{% endif %}>
-                    <i class="bi bi-play-fill me-1"></i>Start
-                </button>
-                <button type="submit" name="action" value="stop"
-                        class="btn btn-sm btn-outline-secondary"
-                        {% if not tftp.is_active %}disabled{% endif %}>
-                    <i class="bi bi-stop-fill me-1"></i>Stop
-                </button>
-                <button type="submit" name="action" value="restart"
-                        class="btn btn-sm btn-outline-warning">
-                    <i class="bi bi-arrow-clockwise me-1"></i>Restart
-                </button>
-            </form>
-            {% else %}
-            <span class="text-muted ms-auto small">
-                <i class="bi bi-info-circle me-1"></i>dnsmasq isn't systemd-managed here
-                (e.g. the container deploy, where TFTP is a separate sidecar) -- no
-                start / stop / restart
-            </span>
-            {% endif %}
         </div>
+        <p class="text-muted mb-2 small">
+            {% if tftp.state == 'active' %}
+            A co-located <code>dnsmasq</code> is up; PXE clients on this
+            subnet can reach the TFTP root. The Artifacts table above is
+            the canonical "are the bootfiles there" check.
+            {% elif tftp.state in ('inactive', 'unknown') %}
+            No local <code>dnsmasq</code> is running. This is normal for
+            the container deploy, which serves TFTP from a separate
+            sidecar (out of bty-web's view) -- verify with
+            <code>systemctl status bty-tftp</code> or
+            <code>podman ps</code>. On a host/systemd install, an
+            inactive state means PXE is offline.
+            {% else %}
+            <code>dnsmasq.service</code> reports <code>{{ tftp.state }}</code>.
+            Check <code>journalctl -u dnsmasq.service</code> for the
+            most recent failure on the bty host.
+            {% endif %}
+            <a href="/ui/settings#dhcp-pxe" class="ms-1">
+                <i class="bi bi-box-arrow-up-right me-1"></i>DHCP / PXE cheatsheet
+            </a>
+        </p>
     </div>
 </div>
 
-{# The Fetch trigger moved to /ui/downloads; nothing on this page
-   enqueues a fetch any more. The inventory table here just renders
-   the current present/missing state from inspect_boot_dir. #}
-
 <script>
 (function () {
-    // The artifacts table + the Recent events card are server-rendered
-    // off inspect_boot_dir() + the events log. When the operator
-    // enqueues a fetch on /ui/downloads and the fetch completes, this
-    // page has no idea -- the badges stay "missing" until manual
-    // refresh. Poll /boot/releases for fetch status; reload when an
-    // active fetch transitions to terminal (completed | failed) so
-    // the present/missing badges + the activity card update on their
-    // own. Same idiom as the Backups page's lastActiveCount reload.
-    var lastActiveCount = 0;
-    function isActive(f) {
-        return f && (f.status === "queued" || f.status === "running");
+    // esc + fmtBytes come from /static/bty-utils.js (loaded by the
+    // layout); local aliases keep the per-page <script> readable.
+    var esc = window.btyUtils.esc;
+    var fmtBytes = window.btyUtils.fmtBytes;
+    function statusBadge(s) {
+        var cls = {
+            "queued": "bg-secondary", "running": "bg-primary",
+            "completed": "bg-success", "cancelled": "bg-warning text-dark",
+            "failed": "bg-danger",
+        }[s] || "bg-secondary";
+        return '<span class="badge ' + cls + '">' + esc(s) + '</span>';
     }
-    function poll() {
+    function progressBar(d) {
+        if (d.bytes_total == null) {
+            return '<div class="progress" style="height: 16px;">' +
+                   '<div class="progress-bar progress-bar-striped progress-bar-animated" ' +
+                   'style="width: 100%;">' + (d.status === "running" ? "..." : "") + '</div></div>';
+        }
+        var pct = d.bytes_total > 0 ? (100 * (d.bytes_done || 0) / d.bytes_total) : 0;
+        return '<div class="progress" style="height: 16px;">' +
+               '<div class="progress-bar" style="width: ' +
+               pct.toFixed(1) + '%;">' + pct.toFixed(1) + '%</div></div>';
+    }
+    function isActive(j) {
+        return j && (j.status === "queued" || j.status === "running");
+    }
+
+    function renderActive(releases) {
+        var tbody = document.querySelector(".bty-workers-downloads-tbody");
+        if (!tbody) return;
+        var rows = [];
+        (releases || []).forEach(function (rf) {
+            (rf.artifacts || []).forEach(function (a) {
+                if (!isActive(a)) return;
+                rows.push({
+                    label: '<code>' + esc(rf.tag) + '</code> <small class="text-muted">' +
+                           esc(a.name) + '</small>',
+                    key: rf.tag,
+                    d: a,
+                });
+            });
+        });
+        if (!rows.length) {
+            tbody.innerHTML = '<tr><td colspan="5" class="text-muted">No active fetches.</td></tr>';
+            return;
+        }
+        rows.sort(function (a, b) {
+            var aS = a.d.status === "running" ? 0 : 1;
+            var bS = b.d.status === "running" ? 0 : 1;
+            return aS - bS;
+        });
+        tbody.innerHTML = rows.map(function (r) {
+            var d = r.d;
+            var bytes = fmtBytes(d.bytes_done || 0);
+            if (d.bytes_total != null) bytes += " / " + fmtBytes(d.bytes_total);
+            var cancel = '<button type="button" class="btn btn-sm btn-outline-danger text-nowrap ' +
+                         'bty-workers-cancel" data-key="' +
+                         esc(r.key) + '"><i class="bi bi-x-circle me-1"></i>Cancel</button>';
+            return "<tr>" +
+                   "<td>" + r.label + "</td>" +
+                   "<td>" + statusBadge(d.status) + "</td>" +
+                   "<td>" + progressBar(d) + "</td>" +
+                   "<td class=\"small\">" + esc(bytes) + "</td>" +
+                   "<td class=\"text-end\">" + cancel + "</td>" +
+                   "</tr>";
+        }).join("");
+    }
+
+    // Track which keys completed since the last poll so we can reload
+    // the page once any release-fetch terminates. The reload picks up
+    // the freshly-cached state into the server-rendered artifacts
+    // table + the Fetch artifacts button's disabled bit.
+    var seenCompletedKeys = null;
+    function refresh() {
+        var ts = "updated " + new Date().toLocaleTimeString();
         return fetch("/boot/releases", { credentials: "same-origin" })
             .then(function (r) { return r.ok ? r.json() : null; })
-            .then(function (data) {
-                var fetches = (data && data.fetches) || [];
-                var activeCount = fetches.filter(isActive).length;
-                if (lastActiveCount > 0 && activeCount === 0) {
-                    window.location.reload();
+            .then(function (rl) {
+                renderActive(rl ? rl.fetches : []);
+                var statusEl = document.querySelector(".bty-workers-poll-status");
+                if (statusEl) statusEl.textContent = rl ? ts : "(poll failed)";
+                var nowCompleted = new Set();
+                (rl ? rl.fetches : []).forEach(function (f) {
+                    if (f.status === "completed" || f.status === "failed") {
+                        nowCompleted.add("release:" + f.tag);
+                    }
+                });
+                if (seenCompletedKeys === null) {
+                    seenCompletedKeys = nowCompleted;
                     return;
                 }
-                lastActiveCount = activeCount;
-            }).catch(function () { /* transient; next tick retries */ });
+                var fresh = false;
+                nowCompleted.forEach(function (k) {
+                    if (!seenCompletedKeys.has(k)) fresh = true;
+                });
+                seenCompletedKeys = nowCompleted;
+                if (fresh) setTimeout(function () { window.location.reload(); }, 400);
+            });
     }
-    var handle = null;
+
+    // Cancel an in-flight row (event-delegated; rows re-render every poll).
+    document.addEventListener("click", function (ev) {
+        var btn = ev.target.closest(".bty-workers-cancel");
+        if (!btn) return;
+        var url = "/boot/releases/" + encodeURIComponent(btn.dataset.key);
+        btn.disabled = true;
+        fetch(url, { method: "DELETE", credentials: "same-origin" })
+            .then(refresh)
+            .catch(function () { btn.disabled = false; });
+    });
+
+    // "Fetch artifacts" trigger. The button disables immediately on
+    // click and STAYS disabled while the fetch runs -- the polling
+    // loop above reloads the page on completion, which picks up the
+    // freshly-cached state into the server-rendered disabled / enabled
+    // bit. Re-enable only on a synchronous enqueue error.
+    var fetchBtn = document.getElementById("bty-downloads-fetch-artifacts-btn");
+    if (fetchBtn) {
+        fetchBtn.addEventListener("click", function () {
+            var tag = (fetchBtn.dataset.tag || "latest").trim() || "latest";
+            fetchBtn.disabled = true;
+            fetch("/boot/releases", {
+                method: "POST",
+                credentials: "same-origin",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ tag: tag }),
+            }).then(function (r) {
+                if (!r.ok) throw new Error("HTTP " + r.status);
+                return refresh();
+            }).catch(function (e) {
+                alert("Fetch failed: " + e.message);
+                fetchBtn.disabled = false;
+            });
+        });
+    }
+
     // SSE-driven refresh; the 30s interval is a safety net for the rare
     // case where the EventSource drops without auto-reconnect.
-    function start() { if (!handle) { poll(); handle = setInterval(poll, 30000); } }
+    var handle = null;
+    function start() { if (!handle) { refresh(); handle = setInterval(refresh, 30000); } }
     function stop()  { if (handle) { clearInterval(handle); handle = null; } }
     document.addEventListener("visibilitychange", function () {
         if (document.hidden) stop(); else start();
     });
     document.addEventListener("bty-worker-state-changed", function (e) {
-        if (e.detail && e.detail.kind === "release") poll();
+        if (e.detail && e.detail.kind === "release") refresh();
     });
-    document.addEventListener("bty-worker-events-connected", poll);
+    document.addEventListener("bty-worker-events-connected", refresh);
     start();
 })();
 </script>
 
-{# Recent netboot activity (release fetches + fetch failures). The
-   "Activity" sub-nav anchor jumps here; always rendered (empty-state
-   row when there's nothing yet). #}
+{# Recent netboot activity (release fetches + fetch failures). #}
 {% with events=boot_events,
         title="Recent Events",
         link_to_full="/ui/events?subject_kind=netboot",

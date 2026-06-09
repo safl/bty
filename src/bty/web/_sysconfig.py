@@ -5,15 +5,14 @@ TFTP daemon sub-sections).
   interfaces with their IPv4 / operstate. Used to suggest the
   bty host's own IP to the operator in the router-config
   cheatsheet (the DHCP / PXE card on the Settings page).
-* :func:`tftp_status` / :func:`control_tftp` -- read ``systemctl
-  is-active dnsmasq.service`` and shell out to a sudo'd helper
-  for start / stop / restart. These apply to a host/systemd
-  install of bty-web that runs a co-located ``dnsmasq`` TFTP
-  service, letting the operator stop or restart it from the UI
-  without SSHing in (the buttons live on the Netboot list view,
-  below the artifacts table). The container deploy serves TFTP
-  from a separate sidecar instead, so these controls are simply
-  absent there (see :func:`tftp_controllable`).
+* :func:`tftp_status` -- report ``systemctl is-active
+  dnsmasq.service`` (or a ``pgrep dnsmasq`` fallback) as a pure
+  observability signal on ``/ui/netboot``. The UI no longer
+  start/stop/restarts the daemon: that's a host- or container-
+  lifecycle concern (systemd / Podman / Quadlet), not an
+  operator click target. The container deploy serves TFTP from
+  a separate sidecar; in that env this reports ``inactive`` and
+  the UI's accompanying text explains why.
 """
 
 from __future__ import annotations
@@ -25,22 +24,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 SYSNET_PATH = Path("/sys/class/net")
-TFTP_HELPER = "/usr/local/sbin/bty-web-tftp"
 
 # The systemd unit that owns the TFTP root on a host/systemd
-# install. One constant + the helper script that hardcodes the
-# same name -- kept in lockstep on purpose; ``tftp_status``
-# shouldn't be pointing at a different unit than the helper restarts.
+# install. ``tftp_status`` queries this one; the container
+# deploy's sidecar runs outside our visibility.
 TFTP_UNIT = "dnsmasq.service"
-
-# Allowlist of actions the helper accepts. Mirrored on the Python
-# side so a typo here fails fast with a clean SysConfigError
-# instead of getting a confusing systemctl error from the helper.
-TFTP_ACTIONS: tuple[str, ...] = ("start", "stop", "restart")
-
-
-class SysConfigError(Exception):
-    """Helper failed; the message is safe to surface to the UI."""
 
 
 @dataclass(frozen=True)
@@ -100,55 +88,6 @@ def tftp_status() -> DaemonStatus:
     except (subprocess.TimeoutExpired, FileNotFoundError):
         return DaemonStatus(state="unknown")
     return DaemonStatus(state="active" if rc == 0 else "inactive")
-
-
-def tftp_controllable() -> bool:
-    """``True`` when the UI can offer Start / Stop / Restart for
-    the TFTP daemon. Requires the sudo'd helper to be installed
-    AND ``sudo`` itself on PATH.
-
-    Most installs lack the helper (the container deploy serves TFTP
-    from a separate sidecar, and the bty user has no sudo grant), so
-    this returns False and the UI hides the Start/Stop/Restart
-    buttons. A host/systemd install that installs the sudo'd helper
-    gets the controls. The UI hides them when this returns False so
-    the operator isn't offered controls that would fail.
-    """
-    return Path(TFTP_HELPER).is_file() and (
-        Path("/usr/bin/sudo").is_file() or Path("/bin/sudo").is_file()
-    )
-
-
-def control_tftp(action: str) -> None:
-    """Invoke the TFTP daemon-control helper (sudo'd) to
-    start / stop / restart ``dnsmasq.service``.
-
-    The helper validates ``action`` against the same allowlist
-    we check here; both sides keeping the allowlist means a typo
-    on either side fails fast with a clear error instead of an
-    unexpected systemctl invocation as root.
-    """
-    if not action:
-        # Surfaces nicely instead of the generic "unknown action:
-        # ''" path. The form field arriving empty would otherwise
-        # show as an empty-quoted error in the flash.
-        raise SysConfigError("no action specified")
-    if action not in TFTP_ACTIONS:
-        raise SysConfigError(f"unknown action: {action!r} (allowed: {', '.join(TFTP_ACTIONS)})")
-    try:
-        subprocess.run(
-            ["sudo", "-n", TFTP_HELPER, action],
-            capture_output=True,
-            text=True,
-            check=True,
-            timeout=30,
-        )
-    except subprocess.CalledProcessError as exc:
-        raise SysConfigError(
-            f"tftp helper exited {exc.returncode}: {(exc.stderr or '').strip()}"
-        ) from exc
-    except (subprocess.TimeoutExpired, FileNotFoundError) as exc:
-        raise SysConfigError(f"tftp helper failed: {exc}") from exc
 
 
 @dataclass(frozen=True)
