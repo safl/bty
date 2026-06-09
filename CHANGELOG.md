@@ -9,6 +9,48 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.41.2] - 2026-06-09
+
+**UI consolidation + open-access nav fix.** Three things ship together:
+
+### Fixed
+
+- ``logged_in`` in the layout context was False on every page when
+  ``$BTY_ADMIN_PASSWORD`` was unset -- so an open-access install
+  (the default for a fresh deploy) rendered with NO nav buttons
+  (Machines / Images / Netboot / Settings all gone). The render
+  helper now treats "auth disabled" as logged-in so the nav cluster
+  renders for the open-access path. The Logout button stays hidden
+  on auth-disabled installs (no session to clear).
+
+### Changed
+
+- ``/ui/netboot`` absorbs the active release-fetch table + the
+  Fetch artifacts trigger that used to live on ``/ui/downloads``.
+  The legacy ``/ui/downloads`` route is removed; bookmarks that
+  pointed there now 404. The navbar drops its standalone Downloads
+  worker pill (release-fetch progress is on /ui/netboot directly).
+- ``/ui/images`` header reorders to ``Add image | Upload catalog |
+  Fetch latest catalog`` -- the most common operator add-path
+  (single URL) lands first.
+- ``/ui/dashboard`` Images Summary drops the ``Uploaded`` and
+  ``Local copy`` rows. Total / HTTP / ORAS are the surviving
+  counts now that bty-web is out of the image-bytes plane.
+- TFTP daemon card on ``/ui/netboot`` is observation-only: status
+  badge + a short triage hint pointing at ``systemctl status
+  bty-tftp`` (container deploys) or ``journalctl -u dnsmasq.service``
+  (host installs). The Start / Stop / Restart buttons + the
+  ``/ui/settings/tftp-control`` POST route + the sudo'd
+  ``bty-web-tftp`` helper concept are removed; daemon lifecycle is
+  a systemd / Podman concern, not an operator click target.
+
+### Removed
+
+- ``/ui/downloads`` route + ``downloads.html`` template
+- ``/ui/settings/tftp-control`` route
+- ``_sysconfig.control_tftp`` + ``tftp_controllable`` + ``SysConfigError`` + ``TFTP_HELPER`` + ``TFTP_ACTIONS``
+- ``netboot.tftp.controlled`` + ``netboot.tftp.control.failed`` event kinds
+
 ## [0.41.1] - 2026-06-09
 
 **Hot-fix: ``bty-lab deploy`` in root mode left compose-managed
