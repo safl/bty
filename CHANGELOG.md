@@ -9,6 +9,56 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.41.3] - 2026-06-09
+
+**Always-on auth + tag/repo separation + live TFTP probe + Settings grid.**
+
+### Security
+
+- **BREAKING**: auth is now always on. The prior "no
+  ``$BTY_ADMIN_PASSWORD`` -> open UI" behaviour was a footgun --
+  a fresh deploy or a forgotten env var left every mutating route
+  open. ``$BTY_ADMIN_PASSWORD`` still overrides, but with the env
+  unset the active password is the literal string ``"bty"``
+  (well-known default, logged on startup + flagged in a yellow
+  alert on the login form). Deploys that relied on the open-access
+  default must set ``$BTY_ADMIN_PASSWORD`` to a real value AND/OR
+  accept that operators log in with ``bty`` until they do.
+- ``_auth.auth_enabled()`` is removed (auth is always on);
+  ``admin_password()`` now returns a non-None string;
+  ``using_default_password()`` powers the UI warning.
+
+### Changed
+
+- Settings: **release repo** + **catalog release tag** +
+  **netboot release tag** replace the prior single "catalog URL"
+  + "netboot release tag" pair. The catalog URL is derived from
+  the repo + the catalog tag; pin them independently to flow
+  catalog updates while keeping netboot artifacts on a known
+  release (or vice-versa). The fetch buttons reword to
+  **Fetch '<tag>' catalog** and **Fetch '<tag>' artifacts** so
+  the active tag is visible at the click site.
+- Settings layout: two-column row of editable cards
+  (Upstream sources | Backup schedule), then a four-column row
+  of read-only diagnostic cards (Identity | Storage paths |
+  Network | Background workers), then the full-width DHCP /
+  Network Boot cheatsheet. Compact list-group rendering replaces
+  the wide 4-column tables in the read-only cards.
+- ``/ui/netboot`` TFTP card now ships a live network probe:
+  bty-web sends a TFTP RRQ for ``ipxe.efi`` to
+  ``$BTY_TFTP_PROBE_HOST`` (default ``127.0.0.1:69``) and
+  reports reachable / file-present as two independent signals.
+  Localhost is the default probe target; override the env var to
+  point at a TFTP daemon hosted elsewhere.
+
+### Removed
+
+- ``_settings_store.KEY_CATALOG_URL`` + ``default_catalog_url``
+  (URL is derived now, not stored). ``KEY_CATALOG_TAG`` +
+  ``KEY_NETBOOT_TAG`` take their place. ``resolve_release_tag``
+  + ``DEFAULT_RELEASE_TAG`` survive as one-release aliases for
+  ``resolve_netboot_tag`` + ``DEFAULT_TAG``; remove after v0.42.
+
 ## [0.41.2] - 2026-06-09
 
 **UI consolidation + open-access nav fix.** Three things ship together:
