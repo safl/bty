@@ -118,15 +118,19 @@ with xz (Etcher's bundled xz handler) and zstd (older Etcher pre-1.18). The
 flash path inside the wizard accepts every format above for
 operator-supplied target images.
 
-### Image root
+### Image root (bty CLI only)
 
-The local image-root is resolved in this order:
+The `bty` wizard scans a local directory for flashable image files
+on the host it runs on -- typically the USB live env's `BTY_IMAGES`
+exFAT partition. Resolved in this order:
 
 1. `BTY_IMAGE_ROOT` environment variable.
 2. `/var/lib/bty/images` (the USB live env auto-mounts the
-   `BTY_IMAGES` exFAT partition here; the bty-web container backs
-   `/var/lib/bty` with the `bty-data` named volume so the cache
-   survives image upgrades).
+   `BTY_IMAGES` partition here).
+
+bty-web (v0.40+) does NOT use this directory; it has no image-store.
+See [walkthrough-image-store](walkthrough-image-store.md) for the
+server-side bytes model (withcache + URL-only catalog entries).
 
 ## Configuration
 
@@ -137,42 +141,18 @@ and sensible defaults.
 
 | Variable | Purpose | Default |
 |-------------------|----------------------------------------------------------------|---------------------|
-| `BTY_IMAGE_ROOT` | Image root the `bty` wizard scans. | `/var/lib/bty/images` |
+| `BTY_IMAGE_ROOT` | Image root the `bty` wizard scans (CLI only; bty-web ignores it). | `/var/lib/bty/images` |
 | `BTY_REGISTER_UEFI_BOOT` | Opt in (`1`/`true`/`yes`/`on`) to register a UEFI NVRAM boot entry (one-shot `BootNext`) for the disk after a flash. Off by default: most firmware boots the flashed disk on its own, and touching NVRAM is risky on some server boards. | (unset = off) |
 
 ### Default paths
 
-- `/var/lib/bty/images` - image root. Holds operator-typed image
- files alongside catalog-fetched files named
- `catalog-<bty_image_ref[:12]>-<slug(name)>.<ext>` (v0.31.0+; no
- separate `cache/` subdir). The USB live env auto-mounts the
- `BTY_IMAGES` partition here. In the container deploy `/var/lib/bty`
- is the `bty-data` named volume, so the collection survives image
- upgrades; see
- [walkthrough-image-store](walkthrough-image-store.md).
-
-### Catalog file naming
-
-Files under `BTY_IMAGE_ROOT` split into two visually-obvious classes
-on disk (v0.31.0+):
-
-- **Operator-typed images** keep whatever filename the operator
- chose at upload / scp / drop-in time (e.g. `my-fedora.qcow2`,
- `debian-13-server.img.gz`).
-- **Catalog-fetched files** land under a URL-derived name:
- `catalog-<bty_image_ref[:12]>-<slug(name)>.<ext>` -- e.g.
- `catalog-8e54fdb21522-nosi-debian-sysdev.img.gz`. The 12-hex
- segment is the first 12 chars of `sha256(canonicalise_src(src))`
- (48 bits, collision-free at any plausible homelab catalog size);
- the slug is a filename-safe lower-case ASCII rendering of the
- catalog entry's `name` field. Same URL hashes to the same
- filename, so a re-fetch is a no-op when the file is already there.
-
-`ls /var/lib/bty/images/ | grep '^catalog-'` lists every catalog-
-fetched file; the rest are operator-typed. The
-`DELETE /catalog/cache/{name}` endpoint unlinks the URL-keyed file
-for one catalog entry; `rm -f /var/lib/bty/images/catalog-*` is a
-full sweep that leaves operator-typed files alone.
+- `/var/lib/bty/` -- bty-web state directory. Holds `state.db` +
+  `boot/` (netboot artifacts) + `catalog.toml` (the active
+  manifest) + `session-secret`. v0.40+: no image-store subdirectory.
+- `/var/lib/bty/images` -- USB live env's auto-mount point for the
+  `BTY_IMAGES` partition. Used only by the `bty` CLI, not bty-web.
+  See [walkthrough-image-store](walkthrough-image-store.md) for the
+  bty-web server-side model (withcache + URL-only catalog entries).
 
 ## Python API
 
@@ -254,21 +234,21 @@ carry a session cookie:
  (default `/var/lib/bty/boot/`). Same trust model as `/pxe/*`. Operators
  populate the dir via the browser UI's "Fetch netboot artifacts" button on
  the Netboot page, or with the auth-gated `PUT /boot/{name}` upload route.
-- `GET /images/{key}` and `GET /images/{key}/{name}` - serve image bytes
- from `BTY_IMAGE_ROOT` (or the catalog cache). ``key`` may be a filename,
- a ``bty_image_ref``, or a ``disk_image_sha``; the trailing ``{name}``
- form is decorative (preserves format-by-extension client-side). Used by
- the live env to download the assigned image; reachable by anyone on the
- network. Companion auth-gated upload route at `PUT /images/{name}`.
+- `GET /images/{key}` and `GET /images/{key}/{name}` - oras-only
+ stream-proxy. ``key`` must be a 64-hex ``bty_image_ref`` or
+ ``disk_image_sha`` whose catalog row carries an ``oras://`` src.
+ The trailing ``{name}`` form is decorative (preserves
+ format-by-extension client-side). https:// catalog entries hand
+ the live env the origin URL directly (or a withcache rewrite) via
+ the plan endpoint, so they never reach /images.
 - `GET /images` - list the catalog (array of `ImageEntry`). Open for the
  same reason as `GET /images/{key}`: the PXE-booted ``bty`` flow needs to
- enumerate from inside the live env without bootstrapping a session, and
- discovery adds no capability beyond the already-open byte-serving route.
+ enumerate from inside the live env without bootstrapping a session.
 - `GET /catalog.toml` - same row set as `GET /images`, serialised as a
  `bty.catalog.Catalog` TOML manifest (``version = 1``, ``[[images]]``
  tables). Open for the same reason; consumed by `bty --catalog` so the
  same client code path that handles static files (e.g. on GitHub releases)
- works against a live bty-web. Entries without a sha256 are skipped.
+ works against a live bty-web.
 
 Protected routes (session cookie required):
 
@@ -284,13 +264,10 @@ Protected routes (session cookie required):
 | GET | `/catalog/entries` | - | array of catalog rows |
 | DELETE | `/catalog/entries?src=URL` | - | 204 (404 if missing) |
 | POST | `/catalog/import?source=...` | - | `{imported, skipped, errors}` |
-| POST | `/catalog/downloads` | `CatalogEnqueueRequest` | download state (202) |
-| GET | `/catalog/downloads` | - | list of download states |
-| DELETE | `/catalog/downloads/{name}` | - | 200 with state; 404 if not active |
-| DELETE | `/catalog/cache/{name}` | - | `{deleted, sha256?}`; idempotent |
-| POST | `/catalog/hashes` | `CatalogEnqueueRequest` | hash state (202) |
-| GET | `/catalog/hashes` | - | list of hash states |
-| DELETE | `/catalog/hashes/{name}` | - | 200 with state; 404 if not active |
+| POST | `/ui/catalog/upload` | (multipart `file`) | 303 -> `/ui/images` |
+| POST | `/ui/catalog/fetch-release` | - | 303 -> `/ui/images` (pulls default catalog) |
+| GET / POST / DELETE | `/workers/backups` | (BackupManager) | trigger / list / cancel backups |
+| GET / POST / DELETE | `/boot/releases` | (ReleaseFetchManager) | trigger / list / cancel netboot-artifact pulls |
 
 ### Schema mismatch on upgrade (v0.33.0+)
 
@@ -309,17 +286,9 @@ specific rows. See operations.md for the full upgrade flow.
 ``POST /catalog/import`` parses the TOML at ``source`` (path,
 ``http(s)://``, or ``oras://``) via ``bty.catalog.load_source`` and adds
 each entry to the catalog as metadata. **No bytes are fetched at import
-time**; each row surfaces in ``/images`` as ``cached: false`` until the
-operator triggers a fetch (the ``/ui/images`` "Fetch" button or ``POST
-/catalog/downloads``). Idempotent: re-importing the same source skips
-duplicates by ``src``.
-
-``DELETE /catalog/cache/{name}`` unlinks the URL-keyed local file
-(``$image_root/catalog-<ref:12>-<slug>.<ext>``, v0.31.0+) for the named
-entry; the catalog row is preserved. The next ``GET /images`` listing
-shows the row as ``cached: false`` so the operator can re-enqueue a fetch.
-Idempotent: missing local file or unknown name both return 200 with
-``deleted: false`` and a ``reason`` string.
+time** -- v0.40+ bty-web has no image-store; the live env streams
+each entry's URL directly (via withcache when warm) at flash time.
+Idempotent: re-importing the same source skips duplicates by ``src``.
 
 MAC addresses are accepted in any case + `:`-or-`-` separated, and
 normalised to lower-case `aa:bb:cc:dd:ee:ff`.
@@ -375,9 +344,11 @@ MachineUpsert = {
 CatalogEntry (as returned by `GET /catalog/entries`) = {
   "bty_image_ref":  "<64-hex>",                # PK; sha256(canonicalise_src(src))
   "src":            "file://..." | "https://..." | "oras://...",
-  "disk_image_sha": "<64-hex>" | null,         # observed content sha;
-                                               # populated by HashManager (file://)
-                                               # or fetch-to-cache (remote)
+  "disk_image_sha": "<64-hex>" | null,         # declared content sha;
+                                               # populated only when the
+                                               # publisher pinned it (TOML
+                                               # sha256, sha_url, or oras
+                                               # layer digest)
   "name":           "<filename>",
   "format":         "img.gz" | "img.zst" | ...,
   "size_bytes":     int | null,
@@ -433,7 +404,6 @@ or absent blob leaves any prior one intact).
 | Variable | Purpose | Default |
 |---|---|---|
 | `BTY_STATE_DIR` | Where `state.db` lives | `/var/lib/bty` |
-| `BTY_IMAGE_ROOT` | Image catalog directory | `/var/lib/bty/images` |
 | `BTY_BOOT_DIR` | Live-env artifacts (`/boot/{name}` source) | `${BTY_STATE_DIR}/boot` |
 | `BTY_BOOT_RELEASE_REPO` | GitHub repo (`<owner>/<name>`) the "Fetch netboot artifacts" UI pulls live-env artifacts from | `safl/bty` |
 | `BTY_WEB_HOST` | uvicorn bind address | `0.0.0.0` |
