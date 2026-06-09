@@ -94,26 +94,29 @@ def test_bty_web_main_version_flag(capsys: pytest.CaptureFixture[str]) -> None:
     assert bty.__version__ in out
 
 
-def test_resolve_secret_key_env_wins(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """``BTY_SESSION_SECRET`` takes precedence over any on-disk file."""
-    from bty.web import _resolve_secret_key
+def test_resolve_secret_key_cfg_wins(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """A configured ``cfg.server.session_secret`` (via bty.toml or
+    its env override ``BTY_SERVER_SESSION_SECRET``) takes precedence
+    over any on-disk file."""
+    from bty.web import _config, _resolve_secret_key
 
     secret_file = tmp_path / "session-secret"
     secret_file.write_text("from-disk\n", encoding="utf-8")
-    monkeypatch.setenv("BTY_SESSION_SECRET", "from-env")
+    monkeypatch.setenv("BTY_SERVER_SESSION_SECRET", "from-cfg")
+    # Re-load the active config so the env override above takes effect.
+    _config.set_active_config(_config.load_config([]))
 
-    assert _resolve_secret_key(tmp_path) == "from-env"
+    assert _resolve_secret_key(tmp_path) == "from-cfg"
 
 
-def test_resolve_secret_key_reads_existing_file(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_resolve_secret_key_reads_existing_file(tmp_path: Path) -> None:
     """Without env override, the persisted secret is reused so
     bty-web survives a restart without invalidating
-    every operator's session cookie."""
+    every operator's session cookie. The autouse conftest fixture
+    installs an env-free default Config, so ``cfg.server.session_secret``
+    is empty and the function falls through to the disk file."""
     from bty.web import _resolve_secret_key
 
-    monkeypatch.delenv("BTY_SESSION_SECRET", raising=False)
     secret_file = tmp_path / "session-secret"
     # Trailing whitespace must be stripped -- the secret is written
     # as ``key + "\n"`` so file-round-trip cycles add one.
@@ -122,15 +125,12 @@ def test_resolve_secret_key_reads_existing_file(
     assert _resolve_secret_key(tmp_path) == "persisted-key"
 
 
-def test_resolve_secret_key_generates_and_persists(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """Fresh ``state_dir`` (no env, no file): generate a key,
+def test_resolve_secret_key_generates_and_persists(tmp_path: Path) -> None:
+    """Fresh ``state_dir`` (no cfg override, no file): generate a key,
     write it with mode 0640, return it. Second call must read
     the same value back (idempotent across restarts)."""
     from bty.web import _resolve_secret_key
 
-    monkeypatch.delenv("BTY_SESSION_SECRET", raising=False)
     fresh = tmp_path / "new-state"
     assert not fresh.exists()
 

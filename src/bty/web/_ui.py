@@ -35,7 +35,16 @@ from pydantic import ValidationError
 
 import bty
 from bty import images as bty_images
-from bty.web import _auth, _backup, _db, _events_log, _releases, _settings_store, _sysconfig
+from bty.web import (
+    _auth,
+    _backup,
+    _config,
+    _db,
+    _events_log,
+    _releases,
+    _settings_store,
+    _sysconfig,
+)
 from bty.web._auth import SESSION_AUTHED_KEY
 from bty.web._events_log import KNOWN_ACTORS, KNOWN_EVENT_KINDS, KNOWN_SUBJECT_KINDS
 from bty.web._events_log import normalize_ip as _normalize_ip
@@ -667,9 +676,7 @@ def register_ui_routes(
         """
         unified = list_unified_images() if list_unified_images is not None else []
         flash = request.query_params.get("error")
-        catalog_manifest_path = os.environ.get("BTY_CATALOG_FILE") or str(
-            state_path.parent / "catalog.toml"
-        )
+        catalog_manifest_path = str(_config.cfg().catalog_file)
         with _db.open_db(state_path) as conn:
             release_repo = _settings_store.resolve_release_repo(conn)
             catalog_tag = _settings_store.resolve_catalog_tag(conn)
@@ -1196,9 +1203,9 @@ def register_ui_routes(
         # derived path / default), plus the one editable card: the
         # upstream sources (release repo + catalog URL), persisted in
         # state.db so they survive a restart.
+        cfg = _config.cfg()
         state_dir = state_path.parent
-        catalog_file = os.environ.get("BTY_CATALOG_FILE") or str(state_dir / "catalog.toml")
-        session_secret = os.environ.get("BTY_SESSION_SECRET")
+        catalog_file = str(cfg.catalog_file)
         with _db.open_db(state_path) as conn:
             release_repo = _settings_store.resolve_release_repo(conn)
             catalog_url = _settings_store.resolve_catalog_url(conn)
@@ -1238,19 +1245,29 @@ def register_ui_routes(
                 "title": "Storage paths",
                 "icon": "hdd",
                 "rows": [
-                    _config_row("State directory", state_dir, "BTY_STATE_DIR", "/var/lib/bty"),
+                    _config_row(
+                        "State directory",
+                        cfg.state_dir,
+                        "BTY_PATHS_STATE_DIR",
+                        "/var/lib/bty",
+                    ),
                     _config_row("Database", state_path, None, "<state dir>/state.db"),
-                    _config_row("Netboot directory", boot_root, "BTY_BOOT_DIR", "<state dir>/boot"),
+                    _config_row(
+                        "Netboot directory",
+                        cfg.boot_dir,
+                        "BTY_PATHS_BOOT_DIR",
+                        "<state dir>/boot",
+                    ),
                     _config_row(
                         "Catalog manifest",
                         catalog_file,
-                        "BTY_CATALOG_FILE",
+                        "BTY_PATHS_CATALOG_FILE",
                         "<state dir>/catalog.toml",
                     ),
                     _config_row(
                         "Session secret",
-                        session_secret or str(state_dir / "session-secret"),
-                        "BTY_SESSION_SECRET",
+                        cfg.server.session_secret or str(state_dir / "session-secret"),
+                        "BTY_SERVER_SESSION_SECRET",
                         "<state dir>/session-secret",
                     ),
                 ],
@@ -1259,30 +1276,23 @@ def register_ui_routes(
                 "title": "Network",
                 "icon": "hdd-network",
                 "rows": [
-                    _config_row(
-                        "Bind host",
-                        os.environ.get("BTY_WEB_HOST", "0.0.0.0"),
-                        "BTY_WEB_HOST",
-                        "0.0.0.0",
-                    ),
-                    _config_row(
-                        "Bind port", os.environ.get("BTY_WEB_PORT", "8080"), "BTY_WEB_PORT", "8080"
-                    ),
+                    _config_row("Bind host", cfg.server.host, "BTY_SERVER_HOST", "0.0.0.0"),
+                    _config_row("Bind port", str(cfg.server.port), "BTY_SERVER_PORT", "8080"),
                     _config_row(
                         "Trust X-Forwarded-For",
-                        "yes" if os.environ.get("BTY_TRUSTED_PROXY") else "no",
-                        "BTY_TRUSTED_PROXY",
+                        "yes" if cfg.server.trusted_proxy else "no",
+                        "BTY_SERVER_TRUSTED_PROXY",
                         "no",
                     ),
                     _config_row(
                         "TFTP probe target",
-                        _sysconfig.default_tftp_probe_host(),
-                        "BTY_TFTP_PROBE_HOST",
+                        cfg.netboot.tftp_probe_host,
+                        "BTY_NETBOOT_TFTP_PROBE_HOST",
                         "127.0.0.1",
                     ),
                     _config_row(
                         "withcache base URL",
-                        os.environ.get("BTY_WITHCACHE_URL") or "(unset)",
+                        cfg.withcache.url or "(unset)",
                         "BTY_WITHCACHE_URL",
                         "(unset; bty-web streams from origin)",
                     ),
@@ -1733,11 +1743,12 @@ def _client_ip(request: Request) -> str | None:
     """Mirror of ``bty.web._app._client_ip``: read the request's
     client host and feed it through :func:`_events_log.normalize_ip`
     so v4-mapped-v6 addresses collapse to bare v4 before hitting
-    the audit log. ``BTY_TRUSTED_PROXY`` opts into reading
+    the audit log. ``[server] trusted_proxy`` (env override
+    ``BTY_SERVER_TRUSTED_PROXY``) opts into reading
     ``X-Forwarded-For`` for deployments behind a reverse proxy.
     Duplicated here rather than imported because ``_app`` already
     imports this module (circular)."""
-    if os.environ.get("BTY_TRUSTED_PROXY"):
+    if _config.cfg().server.trusted_proxy:
         xff = request.headers.get("x-forwarded-for")
         if xff:
             first = xff.split(",", 1)[0].strip()

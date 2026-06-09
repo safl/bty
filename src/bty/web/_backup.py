@@ -635,18 +635,27 @@ async def scheduler_loop(
 
 
 def _resolve_max_parallel() -> int:
-    """Read ``BTY_BACKUP_MAX_PARALLEL`` env override; default 1.
-    Mirrors the pattern in :mod:`_hash` + :mod:`_release_mgr`."""
-    raw = os.environ.get("BTY_BACKUP_MAX_PARALLEL")
-    if raw is None:
-        return DEFAULT_MAX_PARALLEL
+    """Read ``[tuning] backup_max_parallel`` (env override
+    ``BTY_TUNING_BACKUP_MAX_PARALLEL``) from the active config;
+    clamp non-positive values to :data:`DEFAULT_MAX_PARALLEL`."""
+    from bty.web._config import cfg as _cfg
+
     try:
-        n = int(raw)
-        if n < 1:
-            raise ValueError
-        return n
-    except ValueError:
-        return DEFAULT_MAX_PARALLEL
+        n = _cfg().tuning.backup_max_parallel
+        return n if n >= 1 else DEFAULT_MAX_PARALLEL
+    except RuntimeError:
+        # No active config -- direct-call test / import. Fall back
+        # to the legacy env name so existing fixtures still work.
+        raw = os.environ.get("BTY_TUNING_BACKUP_MAX_PARALLEL") or os.environ.get(
+            "BTY_BACKUP_MAX_PARALLEL"
+        )
+        if raw is None:
+            return DEFAULT_MAX_PARALLEL
+        try:
+            n = int(raw)
+            return n if n >= 1 else DEFAULT_MAX_PARALLEL
+        except ValueError:
+            return DEFAULT_MAX_PARALLEL
 
 
 class _suppress_oserror:

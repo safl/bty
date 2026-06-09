@@ -568,21 +568,38 @@ def test_resolve_max_parallel_env_var(monkeypatch: pytest.MonkeyPatch) -> None:
     ``test_resolve_max_parallel_env_var`` in test_web_hash_manager.py
     -- the three managers all read their own env var the same way,
     and operators who set one might typo a similar one."""
+    from bty.web import _config
     from bty.web._backup import DEFAULT_MAX_PARALLEL, _resolve_max_parallel
 
-    monkeypatch.setenv("BTY_BACKUP_MAX_PARALLEL", "3")
+    def _set_and_reload(value: str) -> None:
+        if value == "":
+            monkeypatch.delenv("BTY_BACKUP_MAX_PARALLEL", raising=False)
+        else:
+            monkeypatch.setenv("BTY_BACKUP_MAX_PARALLEL", value)
+        _config.set_active_config(_config.load_config(None))
+
+    _set_and_reload("3")
     assert _resolve_max_parallel() == 3
 
-    monkeypatch.setenv("BTY_BACKUP_MAX_PARALLEL", "0")
+    _set_and_reload("0")
     assert _resolve_max_parallel() == DEFAULT_MAX_PARALLEL
 
-    monkeypatch.setenv("BTY_BACKUP_MAX_PARALLEL", "-2")
+    # Negative ints coerce cleanly (int("-2") == -2) but the
+    # resolver clamps to the default since concurrency < 1 is
+    # nonsense.
+    _set_and_reload("-2")
     assert _resolve_max_parallel() == DEFAULT_MAX_PARALLEL
+
+    # Non-numeric value fails the env -> int coerce at load time.
+    # v0.42 surfaces that as a startup ValueError (typo-loud)
+    # rather than the silent-fallback the pre-v0.42 resolver did.
+    import pytest as _pytest
 
     monkeypatch.setenv("BTY_BACKUP_MAX_PARALLEL", "not-a-number")
-    assert _resolve_max_parallel() == DEFAULT_MAX_PARALLEL
+    with _pytest.raises(ValueError):
+        _config.set_active_config(_config.load_config(None))
 
-    monkeypatch.delenv("BTY_BACKUP_MAX_PARALLEL", raising=False)
+    _set_and_reload("")
     assert _resolve_max_parallel() == DEFAULT_MAX_PARALLEL
 
 

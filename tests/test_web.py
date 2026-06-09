@@ -382,7 +382,12 @@ def test_put_boot_rejects_oversized_upload(
     the cap behaviour applies to both. Verify directly so a future
     refactor that splits the two paths can't silently drop the
     cap on /boot."""
+    from bty.web import _config
+
     monkeypatch.setenv("BTY_MAX_UPLOAD_BYTES", "16")
+    # Cfg is loaded once at create_app time; reload now that the test
+    # has set the env override the upload-cap reader consults.
+    _config.set_active_config(_config.load_config(None))
     payload = b"a" * 64
     r = app_client.put("/boot/oversized.efi", content=payload, cookies=AUTH)
     assert r.status_code == 413
@@ -2370,7 +2375,10 @@ def test_source_ip_uses_x_forwarded_for_when_trusted_proxy(
     ``request.client.host``. This is what bty-web operators behind
     nginx / caddy need so audit rows show the real client IP, not
     the proxy's loopback."""
+    from bty.web import _config
+
     monkeypatch.setenv("BTY_TRUSTED_PROXY", "1")
+    _config.set_active_config(_config.load_config(None))
     mac = "aa:bb:cc:dd:ee:f8"
     app_client.get(f"/pxe/{mac}", headers={"X-Forwarded-For": "192.168.1.42, 10.0.0.1"})
     r = app_client.get("/events", params={"kind": "machine.discovered"}, cookies=AUTH)
