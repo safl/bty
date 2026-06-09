@@ -651,6 +651,120 @@ def test_upgrade_refuses_without_existing_compose(
     assert "deploy" in capsys.readouterr().err
 
 
+def test_envvars_to_bty_toml_carries_overrides_across(tmp_path: Path) -> None:
+    """``_envvars_to_bty_toml`` translates a v0.41 ``envvars`` file
+    into the v0.42 bty.toml shape, mapping each ``BTY_*`` key to its
+    matching ``[section] key`` entry. Operator-tuned values (admin
+    password, custom state_dir, etc.) carry across the upgrade."""
+    env_path = tmp_path / "envvars"
+    env_path.write_text(
+        "HOST_ADDR=10.20.30.40\n"
+        "BTY_ADMIN_PASSWORD=changeme\n"
+        "BTY_SESSION_SECRET=fixed-secret\n"
+        "BTY_STATE_DIR=/srv/bty\n"
+        "# BTY_BOOT_DIR=...  # left commented\n"
+        'BTY_TRUSTED_PROXY="10.0.0.0/8"\n',
+        encoding="utf-8",
+    )
+    out = deploy_mod._envvars_to_bty_toml(env_path, host_addr="10.20.30.40")
+    # Operator-tuned values flow through.
+    assert 'password = "changeme"' in out
+    assert 'session_secret = "fixed-secret"' in out
+    assert 'state_dir = "/srv/bty"' in out
+    assert 'trusted_proxy = "10.0.0.0/8"' in out
+    # Commented-out lines in envvars don't leak through.
+    assert "boot_dir" not in out or "# boot_dir" in out
+    # HOST_ADDR seeds the derived withcache + TFTP probe entries.
+    assert 'url = "http://10.20.30.40:3000"' in out
+    assert 'tftp_probe_host = "10.20.30.40"' in out
+
+
+def test_envvars_to_bty_toml_uses_schema_defaults_when_envvars_empty(
+    tmp_path: Path,
+) -> None:
+    """An empty envvars file -> the migrator emits a bty.toml with
+    schema defaults + a freshly-generated session_secret. Lets a
+    v0.41 deploy that never customised anything upgrade cleanly."""
+    env_path = tmp_path / "envvars"
+    env_path.write_text("HOST_ADDR=10.0.0.5\n", encoding="utf-8")
+    out = deploy_mod._envvars_to_bty_toml(env_path, host_addr="10.0.0.5")
+    assert 'password = "bty"' in out  # default admin password
+    assert 'host = "0.0.0.0"' in out
+    assert "session_secret = " in out  # auto-generated, but present
+    assert 'url = "http://10.0.0.5:3000"' in out
+
+
+def test_upgrade_emits_bty_toml_when_missing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    _patched_runtime: dict[str, list],
+) -> None:
+    """A v0.41-era deploy on disk has compose + envvars but NO
+    bty.toml. ``bty-lab upgrade`` must emit one (translated from
+    envvars) so the new compose / Quadlet's bind-mount target
+    exists. An already-present bty.toml is preserved."""
+    dest = tmp_path / "bty-host"
+    deploy_mod.deploy_main([str(dest)])  # writes both envvars + bty.toml
+    # Simulate a v0.41 deploy: drop the bty.toml deploy_main wrote.
+    bty_toml = dest / "bty.toml"
+    bty_toml.unlink()
+    _patched_runtime["run"].clear()
+
+    # Force the Quadlet-detect check to see no installed units so
+    # upgrade takes the compose path (simpler runtime expectations).
+    # Wrap the real exists so unrelated Path.exists() calls (incl.
+    # the upgrade's own ``bty.toml.exists()`` test) keep their
+    # real filesystem semantics; only the Quadlet check is mocked.
+    real_exists = Path.exists
+
+    def _no_quadlets(self):  # type: ignore[no-untyped-def]
+        if str(self).startswith("/etc/containers/systemd"):
+            return False
+        return real_exists(self)
+
+    monkeypatch.setattr(Path, "exists", _no_quadlets)
+
+    deploy_mod.upgrade_main([str(dest)])
+    assert bty_toml.is_file(), "upgrade must emit bty.toml when missing"
+    # Mode 0640 (contains the admin password + session secret).
+    assert bty_toml.stat().st_mode & 0o777 == 0o640
+    body = bty_toml.read_text(encoding="utf-8")
+    assert "[admin]" in body
+    assert "[server]" in body
+    assert "[withcache]" in body
+
+
+def test_upgrade_preserves_existing_bty_toml(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    _patched_runtime: dict[str, list],
+) -> None:
+    """When bty.toml already exists, upgrade leaves it alone --
+    the operator's edits (made via the Settings page or by hand)
+    are preserved verbatim across version bumps."""
+    dest = tmp_path / "bty-host"
+    deploy_mod.deploy_main([str(dest)])
+    # Replace the deploy_main-emitted bty.toml with a fingerprinted
+    # operator-edited version.
+    bty_toml = dest / "bty.toml"
+    fingerprint = '# operator-edited fingerprint xyzzy\n[admin]\npassword = "operator-changed"\n'
+    bty_toml.write_text(fingerprint, encoding="utf-8")
+    _patched_runtime["run"].clear()
+
+    real_exists = Path.exists
+
+    def _no_quadlets(self):  # type: ignore[no-untyped-def]
+        if str(self).startswith("/etc/containers/systemd"):
+            return False
+        return real_exists(self)
+
+    monkeypatch.setattr(Path, "exists", _no_quadlets)
+
+    deploy_mod.upgrade_main([str(dest)])
+    # Verbatim preservation -- including the fingerprint comment.
+    assert bty_toml.read_text(encoding="utf-8") == fingerprint
+
+
 def test_upgrade_pulls_and_restarts_compose_managed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, _patched_runtime: dict[str, list]
 ) -> None:
