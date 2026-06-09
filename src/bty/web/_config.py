@@ -300,6 +300,30 @@ def _default_search_paths() -> list[Path]:
     ]
 
 
+# Legacy env-var aliases. v0.41 used these flat names; v0.42 follows
+# the ``BTY_<SECTION>_<KEY>`` convention. The alias table lets v0.41
+# deploys keep working without re-editing envvars / compose; the
+# canonical new name still wins if both are set. Remove after v0.43
+# (operators have one release to migrate to bty.toml or the new env
+# names).
+_LEGACY_ENV_ALIASES: dict[str, tuple[str, str]] = {
+    # legacy env name           -> (section, key)
+    "BTY_ADMIN_PASSWORD": ("admin", "password"),
+    "BTY_STATE_DIR": ("paths", "state_dir"),
+    "BTY_BOOT_DIR": ("paths", "boot_dir"),
+    "BTY_BACKUP_DIR": ("paths", "backup_dir"),
+    "BTY_CATALOG_FILE": ("paths", "catalog_file"),
+    "BTY_WEB_HOST": ("server", "host"),
+    "BTY_WEB_PORT": ("server", "port"),
+    "BTY_TRUSTED_PROXY": ("server", "trusted_proxy"),
+    "BTY_SESSION_SECRET": ("server", "session_secret"),
+    "BTY_WITHCACHE_URL": ("withcache", "url"),
+    "BTY_TFTP_PROBE_HOST": ("netboot", "tftp_probe_host"),
+    "BTY_MAX_UPLOAD_BYTES": ("tuning", "max_upload_bytes"),
+    "BTY_BACKUP_MAX_PARALLEL": ("tuning", "backup_max_parallel"),
+}
+
+
 def _apply_env_overrides(data: dict[str, Any], sources: dict[str, str]) -> None:
     """Walk the Config schema and overlay any matching env-var
     overrides onto ``data``. A field ``[section] key`` is overridden
@@ -314,8 +338,25 @@ def _apply_env_overrides(data: dict[str, Any], sources: dict[str, str]) -> None:
     Every applied override stamps ``sources[<section.key>] =
     "env(<NAME>)"`` so the Settings UI can mark the field read-only
     + surface the env var name responsible.
+
+    Legacy v0.41 env names (see :data:`_LEGACY_ENV_ALIASES`) are
+    also honoured -- the canonical new name wins when both are set,
+    so a deploy with both BTY_STATE_DIR (legacy) and
+    BTY_PATHS_STATE_DIR (new) takes the new value.
     """
     section_types = get_type_hints(Config)
+    # Legacy aliases first; the canonical pass below overrides if
+    # both are set.
+    for legacy_name, (section_name, field_name) in _LEGACY_ENV_ALIASES.items():
+        raw = os.environ.get(legacy_name)
+        if raw is None or raw == "":
+            continue
+        section_cls = section_types[section_name]
+        fld_type = next(f.type for f in fields(section_cls) if f.name == field_name)
+        section_data = data.setdefault(section_name, {})
+        section_data[field_name] = _coerce(raw, fld_type)
+        sources[f"{section_name}.{field_name}"] = f"env({legacy_name})"
+    # Canonical BTY_<SECTION>_<KEY> overrides.
     for section_name, section_cls in section_types.items():
         section_data = data.setdefault(section_name, {})
         for fld in fields(section_cls):

@@ -934,26 +934,21 @@ def test_bty_web_env_vars_are_covered_by_config_schema() -> None:
     # field via the section/key convention; removing it from this
     # list is how the migration is enforced.
     legacy_pending_migration: set[str] = {
-        # callers still on direct env reads (legacy v0.41 names):
+        # _db.default_state_path falls back to the legacy env name
+        # when no active config is installed (direct-call paths --
+        # test fixtures, the inventory CLI). The legacy alias also
+        # wires the env into cfg.paths.state_dir at load_config time,
+        # so this remains a soft alias.
         "BTY_STATE_DIR",
-        "BTY_BOOT_DIR",
-        "BTY_BACKUP_DIR",
-        "BTY_CATALOG_FILE",
+        # _init.py's _resolve_secret_key falls back to the legacy
+        # env name when no active config is installed.
         "BTY_SESSION_SECRET",
-        "BTY_TRUSTED_PROXY",
-        "BTY_WEB_HOST",
-        "BTY_WEB_PORT",
-        "BTY_WITHCACHE_URL",
-        "BTY_TFTP_PROBE_HOST",
-        "BTY_MAX_UPLOAD_BYTES",
+        # _backup.py's _resolve_max_parallel falls back the same way.
+        "BTY_BACKUP_MAX_PARALLEL",
         # _app.py only consults this on startup to seed boot artifacts
         # into BTY_BOOT_DIR if the container shipped baked ones; not
         # an operator-facing config knob.
         "BTY_BOOT_SEED_DIR",
-        # _settings_store / _releases use these via a module-level
-        # alias rather than a direct os.environ read; the scan won't
-        # actually see them but list them so the test text documents
-        # the surface.
     }
 
     allowed = schema_keys | legacy_pending_migration

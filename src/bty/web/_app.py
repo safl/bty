@@ -91,31 +91,52 @@ def create_app(
 ) -> FastAPI:
     """Build the FastAPI app. All config flows through this function.
 
+    Re-resolves the active config from the current environment before
+    building the app. ``main()`` already calls ``set_active_config``
+    upstream; the re-load here is idempotent for production AND lets
+    tests monkeypatch ``BTY_*`` env vars after the conftest's default
+    install: their changes show up because we re-read on every
+    ``create_app`` call.
+
     ``service_user`` is the Linux account bty-web runs as (resolved from
     ``geteuid`` in :func:`bty.web.main`), shown in the UI for context.
-    ``POST /ui/login`` is gated by ``$BTY_ADMIN_PASSWORD`` (open when unset);
-    tests set that env var.
+    ``POST /ui/login`` is gated by ``cfg.admin.password`` (default
+    ``"bty"``, env override ``BTY_ADMIN_PASSWORD``).
 
     ``secret_key`` is the per-server random key used by Starlette's
     :class:`SessionMiddleware` to sign session cookies. It must persist
     across bty-web restarts (otherwise every restart logs everyone out)
     and must be unique per server (otherwise a cookie minted by one
     server is valid on another). bty-web generates a 32-byte random key
-    at ``/var/lib/bty/session-secret`` on first start when none is
-    supplied via ``$BTY_SESSION_SECRET`` or an existing file.
+    at ``<state_dir>/session-secret`` on first start when none is
+    supplied via ``cfg.server.session_secret`` (TOML or env) or an
+    existing file.
 
     ``boot_root`` is where the live-env artifacts (kernel + initrd +
     squashfs) live for the ``GET /boot/{name}`` endpoint; defaults to
     ``state_path.parent / "boot"`` (i.e. ``/var/lib/bty/boot`` in the
     default layout).
     """
+    from bty.web import _config as _config_mod
+
+    _config_mod.set_active_config(_config_mod.load_config(None))
+
     resolved_boot_root: Path = boot_root or (state_path.parent / "boot")
     # Scheduled + on-demand backups land under ``backups/`` next to
     # state.db so they survive the same migrate-the-state-dir flow as
     # the image cache. Operators wanting them off the OS disk override
-    # via ``BTY_BACKUP_DIR``.
-    resolved_backups_root: Path = Path(
-        os.environ.get("BTY_BACKUP_DIR") or (state_path.parent / "backups")
+    # via ``[paths] backup_dir`` in bty.toml (env override:
+    # ``BTY_PATHS_BACKUP_DIR`` / legacy ``BTY_BACKUP_DIR``). The cfg
+    # field's blank-default resolves to ``<state_dir>/backups`` but
+    # state_path here may diverge from cfg.state_dir (test fixtures
+    # pass a temp state_path without setting cfg.state_dir), so honour
+    # the explicit cfg override iff set; else hang the dir off
+    # state_path's parent (the caller's actual state dir).
+    from bty.web._config import cfg as _cfg
+
+    _cfg_backup = _cfg().paths.backup_dir
+    resolved_backups_root: Path = (
+        Path(_cfg_backup) if _cfg_backup else (state_path.parent / "backups")
     )
 
     # v0.33.0+: schema mismatches are handled by ``_db.init_db``
@@ -127,17 +148,17 @@ def create_app(
 
     event_bus = MachineEventBus()
 
-    # Optional catalog file. ``BTY_CATALOG_FILE`` overrides the default
-    # derived from ``BTY_STATE_DIR``. The catalog path is treated as
-    # the "always this file" location so the UI can write a fresh
-    # ``catalog.toml`` to it and reload in-process. When
-    # ``$BTY_CATALOG_FILE`` is unset and the default file doesn't
+    # Optional catalog file. ``[paths] catalog_file`` (env override
+    # ``BTY_PATHS_CATALOG_FILE``) wins over the ``<state_dir>/catalog.toml``
+    # default. The catalog path is treated as the "always this file"
+    # location so the UI can write a fresh ``catalog.toml`` to it and
+    # reload in-process. When unset and the default file doesn't
     # exist yet, we still pin the default path so a
     # ``/ui/catalog/upload`` upload knows where to land.
     manifest_path = _catalog.default_manifest_path()
     if manifest_path is None:
-        state_dir = Path(os.environ.get("BTY_STATE_DIR", "/var/lib/bty"))
-        manifest_path = state_dir / "catalog.toml"
+        _cfg_catalog = _cfg().paths.catalog_file
+        manifest_path = Path(_cfg_catalog) if _cfg_catalog else (state_path.parent / "catalog.toml")
 
     # Mutable holder so a runtime reload (operator uploads a new
     # catalog.toml from /ui/images) propagates to every closure-
@@ -3033,14 +3054,16 @@ def _client_ip(request: Request) -> str | None:
     connects) collapses to the bare v4 form. Without this, the
     same client shows up as two distinct rows in the audit log.
 
-    When ``BTY_TRUSTED_PROXY`` is set in the environment (any
-    truthy value), the leftmost ``X-Forwarded-For`` entry takes
-    precedence so audit rows reflect the real client IP rather
-    than the reverse-proxy's loopback. Off by default because
-    the header is client-spoofable: only enable it when bty-web
-    is configured behind a proxy that strips inbound X-F-F.
+    When ``[server] trusted_proxy`` is set (env override
+    ``BTY_SERVER_TRUSTED_PROXY``), the leftmost ``X-Forwarded-For``
+    entry takes precedence so audit rows reflect the real client
+    IP rather than the reverse-proxy's loopback. Off by default
+    because the header is client-spoofable: only enable it when
+    bty-web is configured behind a proxy that strips inbound X-F-F.
     """
-    if os.environ.get("BTY_TRUSTED_PROXY"):
+    from bty.web._config import cfg as _cfg
+
+    if _cfg().server.trusted_proxy:
         xff = request.headers.get("x-forwarded-for")
         if xff:
             # X-F-F is a comma-separated chain (proxy-near-client
@@ -3139,14 +3162,13 @@ _CATALOG_UPLOAD_MAX_BYTES = 1 * 1024 * 1024
 
 
 def _max_upload_bytes() -> int:
-    """Resolve the upload size cap from ``BTY_MAX_UPLOAD_BYTES`` or default."""
-    raw = os.environ.get("BTY_MAX_UPLOAD_BYTES")
-    if raw is None:
-        return _DEFAULT_MAX_UPLOAD_BYTES
-    try:
-        value = int(raw)
-    except ValueError:
-        return _DEFAULT_MAX_UPLOAD_BYTES
+    """Resolve the upload size cap from ``[tuning] max_upload_bytes``
+    (env override ``BTY_TUNING_MAX_UPLOAD_BYTES``) or the schema
+    default. Non-positive values clamp to the default -- a
+    pathological ``0`` would otherwise reject every upload."""
+    from bty.web._config import cfg as _cfg
+
+    value = _cfg().tuning.max_upload_bytes
     return value if value > 0 else _DEFAULT_MAX_UPLOAD_BYTES
 
 

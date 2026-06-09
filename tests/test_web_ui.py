@@ -1710,7 +1710,10 @@ def test_ui_settings_renders_when_authed(client: TestClient) -> None:
     assert 'id="netboot_tag"' in body
     # Read-only config groups: storage + the Identity magic values.
     assert "Storage paths" in body
-    assert "BTY_STATE_DIR" in body
+    # v0.42+: the convention is BTY_<SECTION>_<KEY>; the legacy
+    # BTY_STATE_DIR alias still works but the page surfaces the
+    # canonical name.
+    assert "BTY_PATHS_STATE_DIR" in body
     assert "Service user" in body
     assert "github.com/safl/bty" in body  # project URL listed as a magic value
     assert f"{bty.__version__}" in body
