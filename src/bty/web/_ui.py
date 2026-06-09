@@ -671,11 +671,7 @@ def register_ui_routes(
         )
         with _db.open_db(state_path) as conn:
             release_repo = _settings_store.resolve_release_repo(conn)
-            image_events = []
-            for kind in ("image", "catalog"):
-                image_events.extend(_events_log.list_events(conn, subject_kind=kind, limit=10))
-        image_events.sort(key=lambda e: e.id, reverse=True)
-        image_events = image_events[:15]
+            image_events = _events_log.list_events(conn, subject_kind="catalog", limit=15)
         return render(
             "ui/images.html",
             request,

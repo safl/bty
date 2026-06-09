@@ -2,8 +2,6 @@
 {% block title %}Images - bty-web{% endblock %}
 
 {% block subnav %}
-{# In-page jump links: List + Activity. The Downloads / Hashes sub-sections
-   are gone -- their live status lives on /ui/downloads + /ui/hashing. #}
 <nav class="navbar subnav-strip" aria-label="Section sub-navigation">
     <div class="container">
         <span class="subnav-jumps d-flex align-items-center flex-wrap">
@@ -18,25 +16,18 @@
 {% block intro %}
 {% from "ui/_intro_box.html" import render as intro_box %}
 {% call intro_box() %}
-    Pre-built system images bty flashes onto target disks, content-
-    addressed by sha256. This is the merged catalog (dir scan +
-    catalog entries): the header carries <em>Fetch latest catalog</em>
-    (pull the bty release catalog) and <em>Upload catalog</em>
-    (a catalog.toml). Files dropped into <code>{{ image_root }}</code>
-    are picked up and hashed automatically; per-row Fetch / Hash
-    buttons enqueue jobs visible on the
-    <a href="/ui/downloads">Downloads</a> /
-    <a href="/ui/hashing">Hashing</a> pages. Add a single image (URL or
-    upload) from <a href="/ui/downloads">Downloads</a>.
+    The image catalog. Each entry references a URL (https or oras)
+    the live env flashes from. v0.40+: bty-web doesn't host image
+    bytes -- withcache holds them when warm, the upstream origin
+    serves them when cold. The header carries
+    <em>Fetch latest catalog</em> (pull the bty release catalog) and
+    <em>Upload catalog</em> (a catalog.toml). Add a single entry
+    from <a href="/ui/downloads">Downloads</a>.
 {% endcall %}
 {% endblock %}
 
 {% block content %}
 
-{# Catalog list: the operator's "what images do I have" view. Header
-   carries the two catalog-shape actions (Upload catalog / Fetch latest
-   catalog). The per-row Action column triggers fetch / hash / cache-
-   delete / entry-delete; results show on /ui/downloads + /ui/hashing. #}
 <div class="card mb-3" id="images-list">
     <div class="card-header bg-light fw-semibold d-flex justify-content-between align-items-center flex-nowrap gap-2 py-1">
         <span class="text-nowrap"><i class="bi bi-list-ul me-1"></i>Images</span>
@@ -63,22 +54,20 @@
         <table class="table table-hover mb-0 align-middle">
             <thead class="table-light">
                 <tr>
-                    <th>Name(s)</th>
+                    <th>Name</th>
                     <th>Content SHA</th>
                     <th>Format</th>
-                    <th>Sources</th>
-                    <th title="Whether the bytes are on this server's image_root. Directly uploaded images and successfully fetched catalog entries are 'yes'; un-fetched remote entries are 'no'.">Local copy</th>
+                    <th>Source</th>
                     <th class="text-end" style="width: 1%; white-space: nowrap;">Action</th>
                 </tr>
             </thead>
             <tbody>
                 {% for u in unified %}
+                {% set entry_src = u.sources|map(attribute='location')|first %}
                 <tr data-row-name="{{ u.names[0] }}">
                     <td>
                         <i class="bi bi-file-earmark-binary text-secondary me-1"></i>
-                        {% for n in u.names %}
-                        <code>{{ n }}</code>{% if not loop.last %}, {% endif %}
-                        {% endfor %}
+                        <code>{{ u.names[0] }}</code>
                     </td>
                     <td>
                         {% if u.sha256 %}
@@ -89,116 +78,37 @@
                             <code>{{ u.sha256[:8] }}</code><i class="bi bi-clipboard ms-1"></i>
                         </button>
                         {% else %}
-                        <span class="badge bg-warning text-dark"
-                              title="content sha not computed yet; the entry is still bindable because machines bind by bty_image_ref. The sha lands when the HashManager finishes (local files) or after an explicit Download (remote sources)">unhashed</span>
+                        <span class="badge bg-light text-dark border"
+                              title="no sha declared in the catalog entry. The live env still flashes the URL; an opt-in v0.41 verifier will hash the stream and compare against this column when set.">unset</span>
                         {% endif %}
                     </td>
                     <td><span class="badge bg-secondary">{{ u.format or "?" }}</span></td>
                     <td class="small">
-                        {% for s in u.sources %}
-                        {% if s.kind == "local" %}
-                        <i class="bi bi-hdd text-muted me-1" title="local file"></i><code>{{ s.location }}</code>
-                        {% elif s.kind == "url" %}
-                        <i class="bi bi-cloud-plus text-muted me-1" title="operator-added URL"></i><code>{{ s.location }}</code>
+                        {% if entry_src %}
+                        {% if entry_src.startswith('oras://') %}
+                        <i class="bi bi-box-seam text-muted me-1" title="oras (OCI registry)"></i>
                         {% else %}
-                        <i class="bi bi-cloud text-muted me-1" title="manifest src"></i><code>{{ s.location }}</code>
+                        <i class="bi bi-cloud text-muted me-1" title="https"></i>
                         {% endif %}
-                        {% if not loop.last %}<br>{% endif %}
-                        {% endfor %}
-                    </td>
-                    <td>
-                        {% if u.cached %}
-                        <span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>yes</span>
-                        {% else %}
-                        <span class="badge bg-light text-dark border">no</span>
+                        <code>{{ entry_src }}</code>
                         {% endif %}
                     </td>
                     <td class="text-end text-nowrap">
-                        {# All four actions always render so the column
-                           is visually consistent row-to-row; each is
-                           ``disabled`` when its applicability gate is
-                           false, with a tooltip explaining why. The
-                           operator scanning the column sees the same
-                           shape every row; what changes is which
-                           buttons are bright vs. greyed out.
-
-                           Gates by source shape:
-                           - Fetch: has-remote AND not-cached (bytes
-                             need to land locally).
-                           - Update: has-remote AND cached (re-pull
-                             the upstream bytes; rolling oras tags).
-                           - Cache delete: has-remote AND cached (drop
-                             the local copy; entry stays).
-                           - Entry delete: has-remote (remove the
-                             catalog row entirely). Local-only uploads
-                             aren't deletable here -- the operator
-                             manages those via the filesystem.
-
-                           Hashing has no manual button: every path
-                           that lands bytes in image_root (PUT
-                           /images, lifespan auto-import, DownloadManager
-                           fetch) already auto-enqueues / computes the
-                           sha. The only state a manual Hash would
-                           help is an operator dropping a file via
-                           SSH/scp at runtime; that's a rare-enough
-                           workflow that "restart bty-web" is the
-                           accepted answer. /ui/hashing still shows
-                           background hash progress driven by the
-                           auto-import sweep. #}
-                        {% set has_remote = u.sources|selectattr('kind','in',['manifest','url'])|list|length > 0 %}
-                        {% set entry_src = u.sources|selectattr('kind','in',['manifest','url'])|map(attribute='location')|first %}
-                        {% set fetch_on = has_remote and not u.cached %}
-                        {% set update_on = has_remote and u.cached %}
-                        {% set cache_del_on = has_remote and u.cached %}
-                        {% set entry_del_on = has_remote %}
-                        <div class="btn-group btn-group-sm" role="group">
-                            <button type="button"
-                                    class="btn btn-primary text-nowrap bty-fetch-btn"
-                                    data-name="{{ u.names[0] }}"
-                                    {% if not fetch_on %}disabled
-                                    title="Fetch applies to remote entries whose bytes are not on local disk yet."
-                                    {% else %}title="Download the bytes from the remote source."{% endif %}>
-                                <i class="bi bi-cloud-download me-1"></i>Fetch
-                            </button>
-                            <button type="button"
-                                    class="btn btn-outline-primary text-nowrap bty-update-btn"
-                                    data-name="{{ u.names[0] }}"
-                                    {% if not update_on %}disabled
-                                    title="Update applies to remote entries already cached locally; re-pulls the upstream bytes (useful for rolling oras tags)."
-                                    {% else %}title="Re-pull from the remote source. Useful for rolling oras tags whose upstream changed."{% endif %}>
-                                <i class="bi bi-arrow-repeat me-1"></i>Update
-                            </button>
-                            <button type="button"
-                                    class="btn btn-outline-warning bty-cache-delete-btn"
-                                    data-name="{{ u.names[0] }}"
-                                    {% if not cache_del_on %}disabled
-                                    title="Cache delete applies when bytes are cached locally AND the entry has a remote source (so Fetch can re-download)."
-                                    {% else %}title="Delete cached bytes (entry stays; Fetch re-downloads)."{% endif %}
-                                    aria-label="Delete cached bytes">
-                                <i class="bi bi-eraser"></i>
-                            </button>
-                            <button type="button"
-                                    class="btn btn-outline-danger bty-catalog-entry-delete-btn"
-                                    {% if entry_src %}data-src="{{ entry_src }}"{% endif %}
-                                    {% if not entry_del_on %}disabled
-                                    title="Entry delete applies to remote catalog entries. Local-only uploads are managed via the filesystem (remove the file from image_root)."
-                                    {% else %}title="Remove this entry from the catalog."{% endif %}
-                                    aria-label="Remove this entry from the catalog">
-                                <i class="bi bi-trash"></i>
-                            </button>
-                        </div>
+                        <button type="button"
+                                class="btn btn-sm btn-outline-danger bty-catalog-entry-delete-btn"
+                                {% if entry_src %}data-src="{{ entry_src }}"{% endif %}
+                                title="Remove this entry from the catalog."
+                                aria-label="Remove this entry from the catalog">
+                            <i class="bi bi-trash"></i>
+                        </button>
                     </td>
                 </tr>
                 {% endfor %}
                 {% if not unified %}
-                <tr><td colspan="6" class="text-muted text-center py-3">
-                    No images yet. Use <strong>Fetch latest</strong> or
-                    <strong>Upload catalog</strong> above, drop a
-                    <code>.qcow2</code> / <code>.img</code> /
-                    <code>.img.zst</code> / <code>.img.xz</code> /
-                    <code>.img.gz</code> / <code>.img.bz2</code> file into
-                    <code>{{ image_root }}</code>, or add one via the
-                    <strong>Add image</strong> card below.
+                <tr><td colspan="5" class="text-muted text-center py-3">
+                    No catalog entries yet. Use <strong>Fetch latest catalog</strong>
+                    or <strong>Upload catalog</strong> above, or add a single
+                    entry from <a href="/ui/downloads">Downloads</a>.
                 </td></tr>
                 {% endif %}
             </tbody>
@@ -209,131 +119,6 @@
 <script>
 (function () {
     "use strict";
-
-    // Per-row catalog actions. Triggers enqueue against the manager
-    // endpoints; live progress + cancel UI lives on /ui/downloads
-    // and /ui/hashing (the merged /ui/workers page was split apart).
-    //
-    // A 2s poll mirrors active /catalog/downloads + /catalog/hashes
-    // state onto the per-row Fetch / Hash buttons so the catalog
-    // table reflects "this entry is downloading" without the operator
-    // having to flip pages. The button shows ``Downloading`` /
-    // ``Hashing`` while a job is queued or running for its name,
-    // returns to ``Fetch`` / ``Hash`` (or is removed entirely when
-    // the row caches) when the job terminates. The completion case
-    // triggers a page reload so the catalog row's ``cached`` badge
-    // + Action column re-render.
-    function setBtnStateBusy(btn, busyLabel, busyIcon) {
-        // Preserve the original label + icon on first transition so
-        // we can restore on terminal status.
-        if (!btn.dataset.originalLabel) {
-            btn.dataset.originalLabel = btn.innerHTML;
-        }
-        btn.disabled = true;
-        btn.innerHTML = '<i class="bi ' + busyIcon + ' me-1"></i>' + busyLabel;
-    }
-    function setBtnStateIdle(btn) {
-        if (btn.dataset.originalLabel) {
-            btn.innerHTML = btn.dataset.originalLabel;
-        }
-        btn.disabled = false;
-    }
-    function syncButtonsFromPoll() {
-        // Build sets of names with an active (queued | running) job
-        // for each kind; mark every row in either set as "busy" and
-        // disable ALL buttons on that row. The operator can't trigger
-        // a second action while one is in flight; cancellation goes
-        // through /ui/downloads or /ui/hashing where the dedicated
-        // worker page exposes a Cancel button. ``allSettled`` so one
-        // bad endpoint doesn't break the other.
-        Promise.allSettled([
-            fetch("/catalog/downloads", { credentials: "same-origin" })
-                .then(function (r) { return r.ok ? r.json() : null; }),
-            fetch("/catalog/hashes", { credentials: "same-origin" })
-                .then(function (r) { return r.ok ? r.json() : null; }),
-        ]).then(function (results) {
-            var dl = results[0].status === "fulfilled" ? results[0].value : null;
-            var hs = results[1].status === "fulfilled" ? results[1].value : null;
-            var activeDl = new Set();
-            (dl && dl.downloads || []).forEach(function (j) {
-                if (j.status === "queued" || j.status === "running") activeDl.add(j.name);
-            });
-            var activeHs = new Set();
-            (hs && hs.hashes || []).forEach(function (j) {
-                if (j.status === "queued" || j.status === "running") activeHs.add(j.name);
-            });
-            document.querySelectorAll("tr[data-row-name]").forEach(function (tr) {
-                var name = tr.getAttribute("data-row-name");
-                var dlActive = activeDl.has(name);
-                var hsActive = activeHs.has(name);
-                var busy = dlActive || hsActive;
-                if (busy) {
-                    // Remember each button's pre-busy ``disabled`` state
-                    // so we know what to restore IF a reload doesn't
-                    // happen (currently it always does, but the snapshot
-                    // is cheap insurance).
-                    tr.querySelectorAll(".btn-group button").forEach(function (btn) {
-                        if (btn.dataset.preBusyDisabled === undefined) {
-                            btn.dataset.preBusyDisabled = btn.disabled ? "1" : "0";
-                        }
-                        btn.disabled = true;
-                    });
-                    tr.dataset.wasBusy = "1";
-                    // Light up the busy label on the appropriate button:
-                    // for a download, whichever of Fetch / Update was
-                    // applicable in the template (the one with
-                    // preBusyDisabled === "0"). For a hash, the Hash
-                    // button.
-                    if (dlActive) {
-                        var fetchBtn = tr.querySelector(".bty-fetch-btn");
-                        var updateBtn = tr.querySelector(".bty-update-btn");
-                        if (updateBtn && updateBtn.dataset.preBusyDisabled === "0") {
-                            setBtnStateBusy(updateBtn, "Updating", "bi-arrow-repeat");
-                        } else if (fetchBtn && fetchBtn.dataset.preBusyDisabled === "0") {
-                            setBtnStateBusy(fetchBtn, "Downloading", "bi-arrow-repeat");
-                        }
-                    }
-                    // hsActive contributes to the busy gate (no
-                    // action can run while a background hash is in
-                    // flight) but has no per-row button to light up
-                    // -- the Hash button was dropped because every
-                    // path into image_root already auto-enqueues
-                    // (PUT /images, lifespan auto-import, DownloadManager
-                    // fetch). /ui/hashing still surfaces the progress
-                    // for an operator who wants to see it.
-                } else if (tr.dataset.wasBusy === "1") {
-                    // Transitioned busy -> idle. Reload so the row's
-                    // ``Local copy`` badge + per-button applicability
-                    // re-render with the new state (e.g., cached: yes
-                    // after a successful fetch; cached: no after a
-                    // cache delete).
-                    window.location.reload();
-                }
-            });
-        });
-    }
-    // SSE-driven sync; the 30s interval is a safety net for the rare
-    // case where the EventSource drops without auto-reconnect. Was 2s
-    // pre-SSE.
-    var pollHandle = setInterval(syncButtonsFromPoll, 30000);
-    document.addEventListener("visibilitychange", function () {
-        // Pause polling in a backgrounded tab.
-        if (document.hidden && pollHandle) {
-            clearInterval(pollHandle);
-            pollHandle = null;
-        } else if (!document.hidden && !pollHandle) {
-            syncButtonsFromPoll();
-            pollHandle = setInterval(syncButtonsFromPoll, 30000);
-        }
-    });
-    document.addEventListener("bty-worker-state-changed", function (e) {
-        if (!e.detail) return;
-        if (e.detail.kind === "download" || e.detail.kind === "hash") {
-            syncButtonsFromPoll();
-        }
-    });
-    document.addEventListener("bty-worker-events-connected", syncButtonsFromPoll);
-    syncButtonsFromPoll();  // initial draw, no wait
 
     function fallbackCopy(text) {
         // Non-HTTPS / no-Clipboard-API fallback: hidden textarea +
@@ -355,9 +140,6 @@
     }
 
     function flashCopyFeedback(btn) {
-        // Brief visual confirmation: swap the clipboard icon for a
-        // check, restore after 1.2s. Same pattern as `journalctl
-        // --copy` UI affordances.
         var icon = btn.querySelector("i.bi");
         if (!icon) return;
         var orig = icon.className;
@@ -373,11 +155,6 @@
             ev.preventDefault();
             var sha = shaBtn.getAttribute("data-sha");
             if (!sha) return;
-            // Modern clipboard API; falls back to a hidden textarea
-            // + execCommand for browsers without it (and for non-HTTPS
-            // contexts where Clipboard API is unavailable). bty-web
-            // typically runs on http://lab-ip:8080, so the fallback
-            // path is the common one.
             var done = function () { flashCopyFeedback(shaBtn); };
             if (navigator.clipboard && navigator.clipboard.writeText) {
                 navigator.clipboard.writeText(sha).then(done).catch(function () {
@@ -386,63 +163,6 @@
             } else if (fallbackCopy(sha)) {
                 done();
             }
-            return;
-        }
-        var fetchBtn = ev.target.closest(".bty-fetch-btn");
-        if (fetchBtn) {
-            ev.preventDefault();
-            var name = fetchBtn.getAttribute("data-name");
-            setBtnStateBusy(fetchBtn, "Downloading", "bi-arrow-repeat");
-            fetch("/catalog/downloads", {
-                method: "POST",
-                credentials: "same-origin",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ name: name }),
-            }).then(function (r) {
-                if (!r.ok) throw new Error("HTTP " + r.status);
-                // Don't restore the button -- the poller above will
-                // either hold it busy (job queued / running) or
-                // reload the page (job terminated, catalog state
-                // changed).
-            }).catch(function () {
-                setBtnStateIdle(fetchBtn);
-            });
-            return;
-        }
-        var updateBtn = ev.target.closest(".bty-update-btn");
-        if (updateBtn) {
-            ev.preventDefault();
-            var name = updateBtn.getAttribute("data-name");
-            if (!confirm(
-                "Re-pull the remote bytes for this image?\n\n" + name +
-                "\n\nThe cached local copy will be deleted, then re-downloaded " +
-                "from the remote source. Useful for rolling oras tags whose " +
-                "upstream has changed."
-            )) return;
-            setBtnStateBusy(updateBtn, "Updating", "bi-arrow-repeat");
-            // DELETE first, then POST. The catalog-cache DELETE clears
-            // the local file; the subsequent enqueue lands a fresh
-            // "queued" DownloadState (DownloadManager.enqueue's
-            // missing-cache gate makes the worker re-run rather than
-            // echoing the stale "completed" state back). The button
-            // stays busy via the poller; on terminal status the page
-            // reloads to re-render with the fresh cached state.
-            fetch("/catalog/cache/" + encodeURIComponent(name), {
-                method: "DELETE",
-                credentials: "same-origin",
-            }).then(function (r) {
-                if (!r.ok && r.status !== 404) throw new Error("DELETE HTTP " + r.status);
-                return fetch("/catalog/downloads", {
-                    method: "POST",
-                    credentials: "same-origin",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ name: name }),
-                });
-            }).then(function (r) {
-                if (!r.ok) throw new Error("POST HTTP " + r.status);
-            }).catch(function () {
-                setBtnStateIdle(updateBtn);
-            });
             return;
         }
         var entryDeleteBtn = ev.target.closest(".bty-catalog-entry-delete-btn");
@@ -467,33 +187,15 @@
                     entryDeleteBtn.disabled = false;
                 });
             }).catch(function () { entryDeleteBtn.disabled = false; });
-            return;
-        }
-        var cacheDeleteBtn = ev.target.closest(".bty-cache-delete-btn");
-        if (cacheDeleteBtn) {
-            ev.preventDefault();
-            var name = cacheDeleteBtn.getAttribute("data-name");
-            if (!confirm("Delete the cached bytes for this image?\n\n" +
-                         name + "\n\nThe catalog entry stays; the next " +
-                         "Fetch re-downloads.")) return;
-            cacheDeleteBtn.disabled = true;
-            fetch("/catalog/cache/" + encodeURIComponent(name), {
-                method: "DELETE",
-                credentials: "same-origin",
-            }).then(function () {
-                window.location.reload();
-            }).catch(function () { cacheDeleteBtn.disabled = false; });
         }
     });
 })();
-
 </script>
 
-{# Image-relevant event slice (uploads, hashes, catalog adds /
-   deletes). #}
+{# Catalog event slice (entry adds / deletes / imports). #}
 {% with events=image_events,
         title="Recent Events",
-        link_to_full="/ui/events?subject_kind=image",
+        link_to_full="/ui/events?subject_kind=catalog",
         card_id="images-activity" %}
 {% include "ui/_events_card.html" %}
 {% endwith %}
