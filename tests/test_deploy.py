@@ -651,6 +651,45 @@ def test_upgrade_refuses_without_existing_compose(
     assert "deploy" in capsys.readouterr().err
 
 
+def test_show_config_main_dumps_provenance(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``bty-lab show-config --config <PATH>`` prints every Config
+    field with its current value + provenance tag. Useful for
+    operators tracing "where does this value come from?" without
+    booting bty-web."""
+    bty_toml = tmp_path / "bty.toml"
+    bty_toml.write_text(
+        '[admin]\npassword = "from-toml"\n[server]\nport = 9090\n',
+        encoding="utf-8",
+    )
+    deploy_mod.show_config_main(["--config", str(bty_toml)])
+    out = capsys.readouterr().out
+    # Header surfaces loaded files + primary write target.
+    assert str(bty_toml) in out
+    assert "primary toml:" in out
+    # TOML-sourced values are tagged with the file path.
+    assert f'password = "from-toml"    # toml({bty_toml})' in out
+    assert f"port = 9090    # toml({bty_toml})" in out
+    # Default values are tagged "default".
+    assert 'host = "0.0.0.0"    # default' in out
+
+
+def test_show_config_main_with_env_override_surfaces_env_tag(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """An env-override shows up tagged ``env(BTY_<NAME>)`` so the
+    operator can see exactly which env var beat the TOML."""
+    bty_toml = tmp_path / "bty.toml"
+    bty_toml.write_text('[admin]\npassword = "from-toml"\n', encoding="utf-8")
+    monkeypatch.setenv("BTY_ADMIN_PASSWORD", "from-env")
+    deploy_mod.show_config_main(["--config", str(bty_toml)])
+    out = capsys.readouterr().out
+    assert 'password = "from-env"    # env(BTY_ADMIN_PASSWORD)' in out
+
+
 def test_envvars_to_bty_toml_carries_overrides_across(tmp_path: Path) -> None:
     """``_envvars_to_bty_toml`` translates a v0.41 ``envvars`` file
     into the v0.42 bty.toml shape, mapping each ``BTY_*`` key to its

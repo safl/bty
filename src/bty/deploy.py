@@ -1520,6 +1520,85 @@ def upgrade_main(argv: list[str] | None = None, *, prog: str = "bty-lab upgrade"
         )
 
 
+def show_config_main(argv: list[str] | None = None, *, prog: str = "bty-lab show-config") -> None:
+    """The ``bty-lab show-config`` subcommand: dump the effective
+    Config + per-key provenance to stdout.
+
+    Same loader as ``bty-web`` consults at startup, so an operator
+    SSH'd into a host can answer "where does this value come from?"
+    (default / which TOML file / which env var) without booting the
+    server. Useful for debugging surprise behaviour without going
+    through the UI -- and works even when bty-web is offline.
+
+    ``--config PATH`` -- same flag as ``bty-web``; overrides the
+    default search list.
+    """
+    parser = argparse.ArgumentParser(
+        prog=prog,
+        description=(
+            "Print the effective bty.toml-driven config + per-key provenance "
+            "(default / toml(<path>) / env(<NAME>)). Same loader as "
+            "``bty-web`` boots from."
+        ),
+    )
+    parser.add_argument(
+        "--config",
+        action="append",
+        default=None,
+        metavar="PATH",
+        help=(
+            "TOML config file OR directory of drop-ins. Repeatable; each later "
+            "one overrides earlier per-key. Overrides the default search list "
+            "($BTY_CONFIG_FILE / $BTY_CONFIG_DIR / /etc/bty / <state_dir>/bty.toml)."
+        ),
+    )
+    args = parser.parse_args(argv)
+
+    # Import here so ``bty-lab`` cold-startup stays standalone --
+    # ``bty.web._config`` is itself stdlib-only, but the import path
+    # is unnecessary unless the operator actually wants to inspect.
+    try:
+        from bty.web import _config as cfg_mod
+    except ImportError as exc:
+        print(
+            f"{prog}: cannot import bty.web._config ({exc}); reinstall with "
+            '`pipx install "bty-lab[web]"` if it was uninstalled.',
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    paths: list[Path] | None = [Path(p) for p in args.config] if args.config else None
+    loaded = cfg_mod.load_config(paths)
+    cfg = loaded.cfg
+
+    # Surface where the loader looked + which files contributed +
+    # which file the Settings page would write back to. Operators
+    # tracing "why isn't my change taking effect?" usually want this
+    # first.
+    print("# bty config")
+    print(f"#   loaded files:    {', '.join(str(p) for p in loaded.loaded_files) or '(none)'}")
+    print(f"#   primary toml:    {loaded.primary_toml or '(no writable bty.toml found)'}")
+    print()
+
+    from dataclasses import fields
+    from typing import get_type_hints
+
+    section_types = get_type_hints(cfg_mod.Config)
+    for section_name, section_cls in section_types.items():
+        print(f"[{section_name}]")
+        section_obj = getattr(cfg, section_name)
+        for fld in fields(section_cls):
+            value = getattr(section_obj, fld.name)
+            dotted = f"{section_name}.{fld.name}"
+            source = loaded.sources.get(dotted, "default")
+            # Pretty-format the value for the TOML-ish display: quote
+            # strings, leave ints bare. Mirrors how the operator would
+            # write it in bty.toml.
+            rendered = f'"{value}"' if isinstance(value, str) else str(value)
+            print(f"  {fld.name} = {rendered}    # {source}")
+        print()
+
+
 def main(argv: list[str] | None = None, *, prog: str = "bty-lab") -> None:
     """Console-script entry point for ``bty-lab``.
 
@@ -1546,6 +1625,9 @@ def main(argv: list[str] | None = None, *, prog: str = "bty-lab") -> None:
     if argv and argv[0] == "upgrade":
         upgrade_main(argv[1:], prog=f"{prog} upgrade")
         return
+    if argv and argv[0] == "show-config":
+        show_config_main(argv[1:], prog=f"{prog} show-config")
+        return
 
     parser = argparse.ArgumentParser(
         prog=prog,
@@ -1562,7 +1644,11 @@ def main(argv: list[str] | None = None, *, prog: str = "bty-lab") -> None:
             "                          warning listing exactly what was skipped).\n"
             f"  {prog} upgrade [DEST]   Re-emit compose against this CLI's bty version,\n"
             "                          pull new images, restart the stack (preserves\n"
-            "                          envvars + data/). Same root vs user mode rules.\n\n"
+            "                          envvars + data/). Same root vs user mode rules.\n"
+            f"  {prog} show-config      Print the effective bty.toml-driven config +\n"
+            "                          per-key provenance (default / TOML file /\n"
+            "                          env var). Useful for debugging without\n"
+            "                          booting bty-web.\n\n"
             "Pass --help to any subcommand for its full flag set.\n\n"
             "Quick start (full system install, recommended):\n"
             '  sudo mkdir -p /opt/bty && sudo chown "$USER:$USER" /opt/bty\n'
