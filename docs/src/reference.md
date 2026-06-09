@@ -444,22 +444,13 @@ Bootstrap CSS, HTMX form posts).
  digest as the entry's sha256 (= machine-bindable), and skips
  the optional sha_url branch (manifest is authoritative).
 - `GET /ui/netboot` (Netboot) -> the netboot artifacts inventory
- (present/missing per artifact, sizes, last-fetched timestamps, with a
- Fetch button that hands off to the Workers page) plus the
- **TFTP daemon** panel: live `systemctl is-active dnsmasq.service`
- badge + Start / Stop / Restart buttons driven by the
- sudoers-permitted `bty-web-tftp` helper. An in-page sub-nav jumps
- between List / TFTP Daemon / Activity.
-- `GET /ui/downloads` (Downloads) -> active downloads list (catalog
- fetches + per-file release artifacts merged) + the three
- operator-add triggers: Fetch artifacts (netboot trio + sha256
- manifest), Add image from URL (http(s):// or oras://), Upload
- image (local file via XHR PUT). Recent activity card at the bottom
- (catalog + image + netboot events). The Fetch-artifacts button
- disables itself when all four netboot files are already present.
-- `GET /ui/hashing` (Hashing) -> active SHA-256 jobs + recent
- ``image.hashed`` / ``image.hash_failed`` events. Per-image Hash
- trigger stays on `/ui/images` (per-row).
+ (present/missing per artifact, sizes, last-fetched timestamps) +
+ the Fetch artifacts trigger and active-fetch table (release trio +
+ sha256 manifest) + an observation-only **TFTP daemon** panel: the
+ live `systemctl is-active dnsmasq.service` state badge plus a
+ short triage hint. Lifecycle (start/stop/restart) is left to
+ systemd / Podman; the UI no longer drives it. An in-page sub-nav
+ jumps between Artifacts / TFTP Daemon / Activity.
 - `GET /ui/backups` (Backups) -> Back-up-now trigger + active
  backups list + schedule summary (links to the Settings backup-
  schedule card) + recent ``backup.created`` / ``backup.failed`` /

@@ -523,7 +523,7 @@ def test_backfill_soft_fails_on_corrupt_db(tmp_path: Path) -> None:
 def test_release_artifact_state_to_dict_round_trip() -> None:
     """``to_dict`` is what the API surfaces to the workers UI. Pin
     the field set so a refactor can't silently drop fields the
-    /ui/downloads progress bar relies on."""
+    /ui/netboot progress bar relies on."""
     art = ReleaseArtifactState(
         name="bty-netboot-x86_64-v1.0.0.vmlinuz",
         status="running",

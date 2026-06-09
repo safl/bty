@@ -97,9 +97,9 @@ class ReleaseFetchState:
     artifact CURRENTLY streaming (existing behaviour, used by
     /ui/netboot). The newer ``artifacts`` dict carries one
     :class:`ReleaseArtifactState` per file in the trio + manifest,
-    populated at enqueue time so the Downloads page (``/ui/downloads``)
-    can render queued rows immediately and the navbar Downloads
-    counter is per-file.
+    populated at enqueue time so the Netboot page (``/ui/netboot``)
+    can render queued rows immediately and the navbar counter is
+    per-file.
     """
 
     tag: str  # the tag the operator requested ("latest" or e.g. "v1.2.3") -- the job key
