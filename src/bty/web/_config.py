@@ -436,6 +436,52 @@ def _pick_primary_toml(candidates: list[Path]) -> Path | None:
     return None
 
 
+# ---- Process-wide active config (set once at startup) -----------------------
+#
+# bty-web has ONE Config per process; threading it through every call
+# site that used to do ``os.environ.get("BTY_*")`` would touch dozens
+# of signatures. The singleton pattern (set once in ``bty.web.__init__.
+# main()``, read everywhere else) keeps the cutover surgical. Tests
+# inject via ``set_active_config`` in a fixture.
+#
+# Reading ``active_config()`` BEFORE ``set_active_config()`` raises --
+# rather than silently returning a default-only Config that doesn't
+# match the operator's bty.toml, the call site must be ordered after
+# startup. The exception message names the call site responsible.
+
+_ACTIVE: LoadedConfig | None = None
+
+
+def set_active_config(loaded: LoadedConfig) -> None:
+    """Install ``loaded`` as the process-wide active config. Called
+    exactly once from ``bty.web.__init__.main()`` after CLI / env /
+    TOML have been resolved; tests call it from fixtures to inject a
+    bespoke config."""
+    global _ACTIVE
+    _ACTIVE = loaded
+
+
+def active_config() -> LoadedConfig:
+    """Return the process-wide active config. Raises ``RuntimeError``
+    if called before :func:`set_active_config` -- the explicit failure
+    is loud, while a silent default would be a subtle "operator's
+    config is being ignored" bug."""
+    if _ACTIVE is None:
+        raise RuntimeError(
+            "bty.web._config.active_config() called before set_active_config(); "
+            "ensure bty.web.__init__.main() ran (or, in a test, install a "
+            "Config via set_active_config in a fixture)"
+        )
+    return _ACTIVE
+
+
+def cfg() -> Config:
+    """Shorthand for ``active_config().cfg`` -- the common-case
+    accessor when a caller doesn't also need provenance / loaded
+    files."""
+    return active_config().cfg
+
+
 def save_value(path: Path, section: str, key: str, value: str | int) -> None:
     """Persist a single ``[section] key = value`` into ``path``.
 

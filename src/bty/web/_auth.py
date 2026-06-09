@@ -44,12 +44,24 @@ DEFAULT_ADMIN_PASSWORD = "bty"
 def admin_password() -> str:
     """The active admin password.
 
-    ``$BTY_ADMIN_PASSWORD`` wins if set + non-empty; otherwise
-    :data:`DEFAULT_ADMIN_PASSWORD`. Never returns ``None`` -- auth is
-    always on.
+    Reads from ``cfg.admin.password`` -- whose value chain is
+    ``[admin] password`` in bty.toml, overridden by
+    ``BTY_ADMIN_PASSWORD`` env var, defaulting to ``"bty"``.
+    Never returns ``None`` -- auth is always on.
+
+    Falls back to the legacy env-var-only read when called before
+    the active config is installed (e.g. test fixtures that import
+    ``_auth`` without first booting bty-web). The fallback keeps the
+    pre-v0.42 contract intact for those paths.
     """
-    env = (os.environ.get(ADMIN_PASSWORD_ENV) or "").strip()
-    return env or DEFAULT_ADMIN_PASSWORD
+    try:
+        from bty.web._config import cfg as _cfg
+
+        configured = (_cfg().admin.password or "").strip()
+        return configured or DEFAULT_ADMIN_PASSWORD
+    except RuntimeError:
+        env = (os.environ.get(ADMIN_PASSWORD_ENV) or "").strip()
+        return env or DEFAULT_ADMIN_PASSWORD
 
 
 def using_default_password() -> bool:
