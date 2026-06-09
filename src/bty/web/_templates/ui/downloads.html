@@ -69,26 +69,8 @@
                     <i class="bi bi-cloud-plus me-1"></i>Add image from URL
                 </button>
             </form>
-            <div class="vr"></div>
-            {# Streams via XHR PUT /images/<name>; HashManager
-               auto-enqueues the sha256 on the post-write hook. #}
-            <span class="d-flex gap-1 align-items-center" style="min-width: 0;">
-                <input type="file" class="form-control form-control-sm" id="upload-file"
-                       style="max-width: 15rem; min-width: 0;"
-                       accept=".qcow2,.img,.img.zst,.img.xz,.img.gz,.img.bz2,.iso,.iso.gz"
-                       title="Streams into the image root via PUT /images/<name>; SHA-256 auto-computed after.">
-                <button type="button" class="btn btn-sm btn-primary flex-shrink-0 text-nowrap"
-                        id="upload-btn" onclick="uploadSelectedFile();" disabled>
-                    <i class="bi bi-upload me-1"></i>Upload image
-                </button>
-            </span>
         </span>
     </div>
-    <div class="progress d-none mx-3 mt-2" id="upload-progress" style="height: 1rem;">
-        <div class="progress-bar progress-bar-striped progress-bar-animated"
-             role="progressbar" style="width: 0%;" id="upload-progress-bar">0%</div>
-    </div>
-    <div class="form-text small mx-3 mb-0 d-none" id="upload-status"></div>
     <div class="table-responsive">
         <table class="table mb-0 align-middle">
             <thead class="table-light">
@@ -194,42 +176,29 @@
     var seenCompletedKeys = null;  // null until the first poll seeds it
     function refresh() {
         var ts = "updated " + new Date().toLocaleTimeString();
-        return Promise.allSettled([
-            fetch("/catalog/downloads", { credentials: "same-origin" })
-                .then(function (r) { return r.ok ? r.json() : null; }),
-            fetch("/boot/releases", { credentials: "same-origin" })
-                .then(function (r) { return r.ok ? r.json() : null; }),
-        ]).then(function (results) {
-            var dl = results[0].status === "fulfilled" ? results[0].value : null;
-            var rl = results[1].status === "fulfilled" ? results[1].value : null;
-            renderDownloads(dl ? dl.downloads : [], rl ? rl.fetches : []);
-            var statusEl = document.querySelector(".bty-workers-poll-status");
-            if (statusEl) statusEl.textContent = (dl && rl) ? ts : "(poll failed)";
-
-            // Detect a newly-terminal release fetch + reload so the
-            // server-rendered button state updates.
-            var nowCompleted = new Set();
-            (rl ? rl.fetches : []).forEach(function (f) {
-                if (f.status === "completed" || f.status === "failed") {
-                    nowCompleted.add("release:" + f.tag);
+        return fetch("/boot/releases", { credentials: "same-origin" })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (rl) {
+                renderDownloads([], rl ? rl.fetches : []);
+                var statusEl = document.querySelector(".bty-workers-poll-status");
+                if (statusEl) statusEl.textContent = rl ? ts : "(poll failed)";
+                var nowCompleted = new Set();
+                (rl ? rl.fetches : []).forEach(function (f) {
+                    if (f.status === "completed" || f.status === "failed") {
+                        nowCompleted.add("release:" + f.tag);
+                    }
+                });
+                if (seenCompletedKeys === null) {
+                    seenCompletedKeys = nowCompleted;
+                    return;
                 }
-            });
-            (dl ? dl.downloads : []).forEach(function (d) {
-                if (d.status === "completed" || d.status === "failed") {
-                    nowCompleted.add("catalog:" + d.name);
-                }
-            });
-            if (seenCompletedKeys === null) {
+                var fresh = false;
+                nowCompleted.forEach(function (k) {
+                    if (!seenCompletedKeys.has(k)) fresh = true;
+                });
                 seenCompletedKeys = nowCompleted;
-                return;
-            }
-            var fresh = false;
-            nowCompleted.forEach(function (k) {
-                if (!seenCompletedKeys.has(k)) fresh = true;
+                if (fresh) setTimeout(function () { window.location.reload(); }, 400);
             });
-            seenCompletedKeys = nowCompleted;
-            if (fresh) setTimeout(function () { window.location.reload(); }, 400);
-        });
     }
 
     // Cancel an in-flight row (event-delegated; rows re-render every poll).
@@ -238,11 +207,8 @@
         if (!btn) return;
         var kind = btn.dataset.kind;
         var key = btn.dataset.key;
-        var url = ({
-            "catalog": "/catalog/downloads/",
-            "release": "/boot/releases/",
-        }[kind] || "") + encodeURIComponent(key);
-        if (!url) return;
+        if (kind !== "release") return;
+        var url = "/boot/releases/" + encodeURIComponent(key);
         btn.disabled = true;
         fetch(url, { method: "DELETE", credentials: "same-origin" })
             .then(refresh)
@@ -274,15 +240,6 @@
         });
     }
 
-    // Enable Upload once a file is picked.
-    var fileInput = document.getElementById("upload-file");
-    var uploadBtn = document.getElementById("upload-btn");
-    if (fileInput && uploadBtn) {
-        fileInput.addEventListener("change", function () {
-            uploadBtn.disabled = !fileInput.files || fileInput.files.length === 0;
-        });
-    }
-
     // SSE-driven refresh; the 30s interval is a safety net for the rare
     // case where the EventSource drops without auto-reconnect. The page
     // tracks both catalog downloads and release fetches, so it listens
@@ -300,49 +257,6 @@
     document.addEventListener("bty-worker-events-connected", refresh);
     start();
 })();
-
-function uploadSelectedFile() {
-    var input = document.getElementById("upload-file");
-    var btn = document.getElementById("upload-btn");
-    var progress = document.getElementById("upload-progress");
-    var bar = document.getElementById("upload-progress-bar");
-    var status = document.getElementById("upload-status");
-    if (!input.files || !input.files.length) return;
-    var file = input.files[0];
-    var url = "/images/" + encodeURIComponent(file.name);
-    var xhr = new XMLHttpRequest();
-    xhr.open("PUT", url, true);
-    xhr.setRequestHeader("Content-Type", "application/octet-stream");
-    xhr.withCredentials = true;
-    xhr.upload.onprogress = function (ev) {
-        if (!ev.lengthComputable) return;
-        var pct = Math.round(ev.loaded * 100 / ev.total);
-        bar.style.width = pct + "%";
-        bar.textContent = pct + "%";
-    };
-    xhr.onload = function () {
-        if (xhr.status >= 200 && xhr.status < 300) {
-            status.textContent = "Upload complete; refreshing...";
-            setTimeout(function () { window.location = "/ui/downloads"; }, 600);
-        } else {
-            status.textContent = "Upload failed: HTTP " + xhr.status + " " + xhr.responseText;
-            btn.disabled = false;
-            progress.classList.add("d-none");
-        }
-    };
-    xhr.onerror = function () {
-        status.textContent = "Upload failed: network error";
-        btn.disabled = false;
-        progress.classList.add("d-none");
-    };
-    btn.disabled = true;
-    progress.classList.remove("d-none");
-    status.classList.remove("d-none");
-    bar.style.width = "0%";
-    bar.textContent = "0%";
-    status.textContent = "Uploading " + file.name + " (" + file.size.toLocaleString() + " bytes)...";
-    xhr.send(file);
-}
 </script>
 
 {% with events=download_events,

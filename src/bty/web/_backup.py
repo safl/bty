@@ -167,12 +167,12 @@ class BackupManager(_BaseAsyncManager[BackupState]):
         """Run a single backup in a worker thread, write the terminal
         outcome back into ``state``, prune old backups + log events.
 
-        Unlike DownloadManager / HashManager / ReleaseFetchManager,
-        this method does NOT poll ``state._cancel`` in the worker
-        loop. A v3 metadata-only export is a single ``json.dumps`` +
-        write, finishing in milliseconds; there is no window where a
-        cancel signal could land between "started" and "completed".
-        The ``_cancel`` field still lives on the dataclass because the
+        Unlike ReleaseFetchManager, this method does NOT poll
+        ``state._cancel`` in the worker loop. A v3 metadata-only
+        export is a single ``json.dumps`` + write, finishing in
+        milliseconds; there is no window where a cancel signal could
+        land between "started" and "completed". The ``_cancel`` field
+        still lives on the dataclass because the
         ``_BaseAsyncManager`` Protocol requires it and the queued-
         backup cancel path (job dropped before it runs) sets it.
         """

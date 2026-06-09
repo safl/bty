@@ -88,9 +88,8 @@ class FetchCancelled(Exception):
     as a normal control-flow signal, not an error condition."""
 
 
-# Type aliases mirror :mod:`bty.catalog`'s ``fetch_to_cache`` shape so
-# the manager wiring is structurally identical to DownloadManager /
-# HashManager / ReleaseFetchManager.
+# Type aliases for the streaming-fetch callback shape. Same contract
+# the BackupManager uses in :mod:`bty.web._backup`.
 FetchProgressCallback: TypeAlias = Callable[[int, "int | None"], None]
 """Signature: ``progress(bytes_done, total_bytes_or_None)``. Called
 once per chunk written for the *currently-streaming* artifact.

@@ -2168,28 +2168,6 @@ def create_app(
             for row in rows
         )
 
-    def _lookup_db_catalog_entry(name: str) -> _catalog.CatalogEntry | None:
-        """DB-only ``CatalogEntry`` lookup by name. Returns ``None`` if no
-        catalog_entries row has that name. Used by the DownloadManager
-        as a fallback when an entry is in the DB but not in the parsed
-        ``catalog.toml`` (the Add-image-from-URL form path)."""
-        with _db.open_db(state_path) as conn:
-            row = conn.execute(
-                "SELECT disk_image_sha, name, src, format, size_bytes, description "
-                "FROM catalog_entries WHERE name = ? LIMIT 1",
-                (name,),
-            ).fetchone()
-        if row is None:
-            return None
-        return _catalog.CatalogEntry(
-            name=row["name"],
-            src=row["src"],
-            sha256=row["disk_image_sha"],
-            format=row["format"],
-            size_bytes=row["size_bytes"],
-            description=row["description"],
-        )
-
     def _list_unified_images() -> list[images.UnifiedImage]:
         """Build the unified image listing from ``catalog_entries`` rows.
 
@@ -2231,9 +2209,8 @@ def create_app(
     # ``catalog_entries`` table in state.db backs a UI form where the
     # operator pastes ``image-url`` + optional ``sha-url`` and hits
     # Add. The shape mirrors a catalog.toml manifest entry, so once
-    # written the row flows through ``merge_with_catalog`` and shows
-    # in the operator's catalog page like any other entry. No
-    # filesystem dance; no TOML editing.
+    # written the row appears on the operator's catalog page like any
+    # other entry. No filesystem dance; no TOML editing.
 
     @app.post(
         "/catalog/entries",
@@ -2848,10 +2825,8 @@ def create_app(
         # Parse the uploaded TOML and import each entry into the
         # ``catalog_entries`` DB so the table on /ui/images picks
         # the rows up. Also persist the bytes to ``manifest_path``
-        # and reload the in-process catalog so the DownloadManager
-        # binds to it -- without that step the "Fetch" buttons on
-        # the resulting rows fall through to ``/catalog/downloads``
-        # and get a 404 "no catalog manifest configured".
+        # so the import is durable across restarts (the lifespan
+        # auto-import seeds the DB from this file on the next boot).
         try:
             parsed = _catalog.load_bytes(content, source="<upload>")
         except _catalog.CatalogError as exc:
@@ -2929,11 +2904,9 @@ def create_app(
                 status_code=status.HTTP_303_SEE_OTHER,
             )
         # Import rows into the ``catalog_entries`` DB AND persist
-        # the bytes to ``manifest_path`` + reload, so the
-        # DownloadManager binds and the "Fetch" buttons on the
-        # imported rows actually work. Without the write+reload,
-        # ``POST /catalog/downloads`` 404s with "no catalog
-        # configured" right after a successful import.
+        # the bytes to ``manifest_path`` so the import is durable
+        # across restarts (the lifespan auto-import seeds the DB
+        # from this file on the next boot).
         _import_parsed_catalog(parsed, source=catalog_url, source_ip=None)
         manifest_path.parent.mkdir(parents=True, exist_ok=True)
         manifest_path.write_bytes(content)

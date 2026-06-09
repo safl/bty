@@ -312,8 +312,8 @@ def probe_image_url(url: str, format_hint: str | None = None) -> ImageInfo:
         with urllib.request.urlopen(req, timeout=30) as resp:
             # A malformed Content-Length must fold into "unknown size"
             # (size_bytes stays 0) rather than crash the probe with an
-            # uncaught ValueError -- mirrors the guards in
-            # bty.catalog.fetch_src_to_cache / bty.web._releases._stream.
+            # uncaught ValueError -- mirrors the guard in
+            # ``bty.web._releases._stream``.
             cl = resp.headers.get("Content-Length")
             try:
                 parsed_len = int(cl) if cl is not None else None

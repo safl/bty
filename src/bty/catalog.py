@@ -68,17 +68,13 @@ class CatalogEntry:
     name a format detection wouldn't infer (e.g. extension-less
     files served from a CDN).
 
-    ``sha256`` is optional in the schema. Different consumers have
-    different needs:
-
-    - ``bty --catalog`` (portable catalog: display + flash from src)
-      ignores sha; the digest verification happens at flash time
-      for ``oras://`` (manifest layer digest) or relies on TLS for
-      http(s).
-    - bty-web's manifest cache (``$BTY_STATE_DIR/catalog.toml`` +
-      ``fetch_to_cache``) needs sha for the SHA-keyed cache and
-      machine binding; ``cached_path`` raises if it's None so the
-      cache layer can't accidentally use a sha-less entry.
+    ``sha256`` is optional in the schema. Both ``bty --catalog``
+    (portable catalog: display + flash from src) and bty-web's
+    /images proxy flash from ``src`` without ever requiring a
+    sha. Digest verification happens at flash time for ``oras://``
+    (the manifest layer digest is the URL); for ``http(s)://`` TLS
+    is the in-flight guarantee. The optional ``sha256`` exists for
+    a future stream-verify check (issue #10) and for UI display.
 
     The schema decoupling is intentional: rolling tags (``oras://
     ...:latest``, ``github.com/.../releases/latest/download/...``)
@@ -349,13 +345,6 @@ def default_manifest_path() -> Path | None:
     if candidate.exists():
         return candidate
     return None
-
-
-# ``default_cache_dir`` was removed in v0.31.0 when catalog files moved
-# under the image_root with URL-derived ``catalog-<ref:12>-<slug>.<ext>``
-# names. There is no separate cache directory anymore -- callers use
-# ``bty.images.default_image_root()`` and pass it everywhere this
-# module used to take ``cache_dir``.
 
 
 # ---------------------------------------------------------------------------
