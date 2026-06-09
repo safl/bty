@@ -77,7 +77,18 @@ def register_ui_routes(
 
     def render(name: str, request: Request, **ctx: Any) -> HTMLResponse:
         ctx.setdefault("version", bty.__version__)
-        ctx.setdefault("logged_in", bool(request.session.get(SESSION_AUTHED_KEY)))
+        # The layout's nav cluster keys off ``logged_in``; treat
+        # auth-disabled installs (``$BTY_ADMIN_PASSWORD`` unset --
+        # the default for a fresh deploy) as "interactive" so the
+        # nav doesn't vanish on the open-access path. The layout
+        # also reads ``auth_enabled`` directly to hide the Logout
+        # button when there's no session to clear.
+        auth_on = _auth.auth_enabled()
+        ctx.setdefault("auth_enabled", auth_on)
+        ctx.setdefault(
+            "logged_in",
+            (not auth_on) or bool(request.session.get(SESSION_AUTHED_KEY)),
+        )
         ctx.setdefault("service_user", service_user)
         # Top-level path segment under /ui/ - the layout uses this to
         # mark the active nav button. ``request.url.path`` is the full
@@ -218,7 +229,6 @@ def register_ui_routes(
         # linking to the page that owns it (with a fix action on fail).
         missing_netboot = _releases.missing_netboot_artifacts(boot_root)
         tftp = _sysconfig.tftp_status()
-        tftp_controllable = _sysconfig.tftp_controllable()
         catalog_ok = catalog_entry_count > 0 or counts["img_total"] > 0
         # Dedicated-disk state check. Green when the state dir is a
         # mount that actually holds the live data (the DB plus the
@@ -248,7 +258,7 @@ def register_ui_routes(
                     else f"Missing: {', '.join(missing_netboot)}"
                 ),
                 "href": "/ui/netboot",
-                "fix_href": "/ui/downloads",
+                "fix_href": "/ui/netboot",
                 "fix_label": "Fetch netboot artifacts",
             },
             {
@@ -268,17 +278,17 @@ def register_ui_routes(
                 "ok": tftp.is_active,
                 "detail": (
                     f"dnsmasq.service is {tftp.state}."
-                    if tftp_controllable or tftp.state == "active"
+                    if tftp.state == "active"
                     else (
                         f"dnsmasq.service is {tftp.state} "
-                        "(no daemon helper here, the container "
-                        "or operator owns the lifecycle)."
+                        "(container deploys run TFTP from a sidecar "
+                        "outside bty-web's visibility -- check the "
+                        "sidecar's status if PXE is failing)."
                     )
                 ),
                 "href": "/ui/netboot",
-                # The TFTP daemon control now lives on the Netboot
-                # list view (below the artifacts table); "fix" is the
-                # same as "view".
+                # The Netboot page is purely observational; "fix" is
+                # the same as "view".
                 "fix_href": "/ui/netboot",
                 "fix_label": "TFTP daemon",
             },
@@ -653,12 +663,11 @@ def register_ui_routes(
     def _render_images_page(request: Request) -> HTMLResponse:
         """Build the context for ``/ui/images`` and render the template.
 
-        The catalog list (merge of dir-scan files + catalog entries) is
-        the page's primary content; the operator's "add a single image"
-        forms (upload local file + add-by-URL) live on
-        ``/ui/downloads``. Live progress of any fetch / hash / backup
-        is on ``/ui/downloads`` / ``/ui/hashing`` / ``/ui/backups``
-        respectively.
+        The catalog list (``catalog_entries`` rows) is the page's
+        primary content. Three add-paths live in the header: upload
+        a ``catalog.toml`` (``POST /ui/catalog/upload``), fetch the
+        release catalog (``POST /ui/catalog/fetch-release``), or add
+        a single URL (``POST /ui/catalog/entries``).
 
         ``?error=<msg>`` lands in the layout's flash slot (the form-
         style ``POST /ui/catalog/entries`` 303s back with that param on
@@ -690,50 +699,11 @@ def register_ui_routes(
         dependencies=[Depends(require_ui_auth)],
     )
     def ui_images(request: Request) -> HTMLResponse:
-        """The image catalog: the SHA-keyed merge of dir-scan files +
-        catalog entries. Live job progress lives on the three worker
-        pages (``/ui/downloads`` / ``/ui/hashing`` / ``/ui/backups``);
-        the per-image Add forms live on ``/ui/downloads``."""
+        """The image catalog: one row per ``catalog_entries`` row.
+        Add-paths (upload TOML / fetch release / add URL) live in the
+        page's header; active netboot fetches live on ``/ui/netboot``;
+        backups on ``/ui/backups``."""
         return _render_images_page(request)
-
-    @app.get(
-        "/ui/downloads",
-        response_class=HTMLResponse,
-        include_in_schema=False,
-        dependencies=[Depends(require_ui_auth)],
-    )
-    def ui_downloads(request: Request) -> HTMLResponse:
-        """The Downloads worker page: trigger buttons (Fetch artifacts,
-        Add image from URL, Upload image) + active downloads table
-        (merging catalog entries + per-file release artifacts) +
-        recent download-relevant activity at the bottom.
-
-        ``artifacts_all_cached`` lets the template disable the Fetch
-        artifacts button when the trio + sha256 manifest are all
-        present locally. The button re-enables when one or more
-        files disappear from boot_root (e.g. the operator manually
-        ``rm``s them, or the dir is wiped on a state-dir migrate).
-        """
-        with _db.open_db(state_path) as conn:
-            release_repo = _settings_store.resolve_release_repo(conn)
-            release_tag = _settings_store.resolve_release_tag(conn)
-            download_events: list[_events_log.Event] = []
-            for kind in ("catalog", "image", "netboot"):
-                download_events.extend(_events_log.list_events(conn, subject_kind=kind, limit=10))
-        download_events.sort(key=lambda e: e.id, reverse=True)
-        download_events = download_events[:15]
-        # ``inspect_boot_dir`` returns one ArtifactState per file in
-        # the trio + manifest; ``a.present`` is the cached-on-disk bit.
-        artifacts = _releases.inspect_boot_dir(boot_root)
-        artifacts_all_cached = bool(artifacts) and all(a.present for a in artifacts)
-        return render(
-            "ui/downloads.html",
-            request,
-            release_repo=release_repo,
-            release_tag=release_tag,
-            download_events=download_events,
-            artifacts_all_cached=artifacts_all_cached,
-        )
 
     @app.get(
         "/ui/backups",
@@ -1046,16 +1016,19 @@ def register_ui_routes(
         flash_kind: str | None = None,
     ) -> HTMLResponse:
         """The netboot artifacts inventory (present/missing, size,
-        sha256, download) plus the TFTP daemon control.
+        sha256, download), the Fetch-artifacts trigger + active-jobs
+        table, plus the TFTP daemon control.
 
-        Pure inventory view (which files are present, sizes, sha256s,
-        last-fetched). The "Fetch artifacts" trigger lives on the
-        Downloads page now (``/ui/downloads``) -- enqueue there and
-        come back here to see the rows tick from missing to present.
-        The router-side DHCP / PXE cheatsheet moved to Settings.
-        Operator-side artifact uploads stay scripted via the auth-
-        gated ``PUT /boot/{name}`` route, not the browser.
+        v0.41.2+: the old ``/ui/downloads`` page collapsed into this
+        one since bty-web's only download workload is the netboot
+        artifact trio. ``artifacts_all_cached`` lets the template
+        disable the Fetch artifacts button when the trio + sha256
+        manifest are all present locally; it re-enables when one
+        disappears (operator ``rm``, state-dir migrate, etc.).
+        Router-side DHCP / PXE cheatsheet lives on the Settings page.
         """
+        artifacts = _releases.inspect_boot_dir(boot_root)
+        artifacts_all_cached = bool(artifacts) and all(a.present for a in artifacts)
         with _db.open_db(state_path) as conn:
             release_repo = _settings_store.resolve_release_repo(conn)
             release_tag = _settings_store.resolve_release_tag(conn)
@@ -1065,7 +1038,8 @@ def register_ui_routes(
             "ui/netboot.html",
             request,
             boot_root=str(boot_root),
-            artifacts=_releases.inspect_boot_dir(boot_root),
+            artifacts=artifacts,
+            artifacts_all_cached=artifacts_all_cached,
             artifact_shas=_releases.boot_artifact_shas(boot_root),
             release_repo=release_repo,
             release_tag=release_tag,
@@ -1073,7 +1047,6 @@ def register_ui_routes(
             flash=flash,
             flash_kind=flash_kind,
             tftp=_sysconfig.tftp_status(),
-            tftp_controllable=_sysconfig.tftp_controllable(),
         )
 
     @app.get(
@@ -1510,57 +1483,6 @@ def register_ui_routes(
         return RedirectResponse(
             "/ui/settings?saved=backup#backup-schedule",
             status_code=status.HTTP_303_SEE_OTHER,
-        )
-
-    @app.post(
-        "/ui/settings/tftp-control",
-        include_in_schema=False,
-        dependencies=[Depends(require_ui_auth)],
-    )
-    def ui_settings_tftp_control(
-        request: Request,
-        action: Annotated[str, Form()] = "",
-    ) -> HTMLResponse:
-        # Start / Stop / Restart dnsmasq.service (the local TFTP
-        # daemon). Operator triage: "TFTP isn't responding -> restart
-        # it"; "I want to take PXE offline briefly -> stop it".
-        client_ip = _client_ip(request)
-        try:
-            _sysconfig.control_tftp(action)
-        except _sysconfig.SysConfigError as exc:
-            with _db.open_db(state_path) as conn:
-                _events_log.record(
-                    conn,
-                    kind="netboot.tftp.control.failed",
-                    summary=f"TFTP {action!r} failed: {exc}",
-                    subject_kind="netboot",
-                    subject_id="tftp",
-                    actor="operator",
-                    source_ip=client_ip,
-                    details={"action": action, "error": str(exc)},
-                )
-                conn.commit()
-            return _render_netboot_page(
-                request,
-                flash=f"{action} of TFTP daemon failed: {exc}",
-                flash_kind="danger",
-            )
-        with _db.open_db(state_path) as conn:
-            _events_log.record(
-                conn,
-                kind="netboot.tftp.controlled",
-                summary=f"TFTP daemon {action}",
-                subject_kind="netboot",
-                subject_id="tftp",
-                actor="operator",
-                source_ip=client_ip,
-                details={"action": action},
-            )
-            conn.commit()
-        return _render_netboot_page(
-            request,
-            flash=f"{action.capitalize()}ed TFTP daemon.",
-            flash_kind="success",
         )
 
     @app.post(

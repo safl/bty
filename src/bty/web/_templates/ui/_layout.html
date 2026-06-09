@@ -436,18 +436,15 @@
                 <a class="nav-btn {% if nav_active == 'settings' %}active{% endif %}" href="/ui/settings">
                     <i class="bi bi-sliders"></i>Settings
                 </a>
-                {# Downloads + Hashes are top-level pages right of
-                   Settings: the icon links to the page, the badge lights
-                   when its manager has queued/running jobs, and the
-                   ``active`` class emphasizes the one whose page you're
-                   on. The release-fetch indicator stays pure status
-                   (its page lives under Netboot). #}
+                {# Backups is a top-level worker indicator: the icon links
+                   to the page, the badge lights when the manager has
+                   queued/running jobs, and the ``active`` class
+                   emphasizes when you're on its page. Active netboot
+                   artifact fetches show on the Netboot page directly
+                   (no separate indicator needed -- the Netboot nav-btn
+                   above takes you there). #}
                 <div class="nav-workers d-flex align-items-center"
-                     title="Background workers (live counts): Downloads, Hashing, Backups">
-                    <a class="nav-worker {% if nav_active == 'downloads' %}active{% endif %}" href="/ui/downloads" title="Downloads (active netboot artifact fetches)">
-                        <i class="bi bi-arrow-down-circle"></i>
-                        <span class="badge rounded-pill bg-primary nav-worker-badge d-none" data-worker="downloads">0</span>
-                    </a>
+                     title="Background workers (live counts): Backups">
                     <a class="nav-worker {% if nav_active == 'backups' %}active{% endif %}" href="/ui/backups" title="Backups (scheduled + on-demand)">
                         <i class="bi bi-shield-check"></i>
                         <span class="badge rounded-pill bg-info text-dark nav-worker-badge d-none" data-worker="backups">0</span>
@@ -468,13 +465,17 @@
             <div class="user-bar mt-2 mt-md-0"
                  title="OS user that bty-web is running as">
                 {# The operator name doubles as the Account link (auth /
-                   session management). #}
+                   session management). On auth-disabled installs the
+                   Logout button is dropped (no session to clear); the
+                   Account link stays so the operator can still set
+                   ``$BTY_ADMIN_PASSWORD`` from the UI. #}
                 <a href="/ui/account"
                    class="user-bar-name user-bar-action {% if nav_active == 'account' %}active{% endif %}"
                    title="Operator account (authentication)">
                     <i class="bi bi-person-circle"></i>
                     <code>{{ service_user }}</code>
                 </a>
+                {% if auth_enabled %}
                 <span class="user-bar-divider"></span>
                 <form action="/ui/logout" method="post" class="m-0 d-inline-flex">
                     <button type="submit" class="user-bar-action user-bar-logout"
@@ -482,6 +483,7 @@
                         <i class="bi bi-box-arrow-right"></i>
                     </button>
                 </form>
+                {% endif %}
             </div>
         </div>
         {% endif %}
@@ -554,31 +556,15 @@
 // authed). Skips polling while the tab is hidden.
 (function () {
     if (!document.querySelector(".nav-worker-badge")) return;
-    // Each entry: {worker, url, key, count}. ``count`` is a function
-    // that takes the parsed JSON for the endpoint and returns the
-    // active-job count. Downloads is special: it sums catalog
-    // downloads (one count per row) AND per-artifact rows from each
-    // release fetch (one count per artifact in flight). That's why
-    // pressing "Fetch artifacts" makes the Downloads badge tick up
-    // by 4 (the trio + sha256 manifest) and tick down per file as
-    // each completes.
+    // Each entry: {worker, url, count}. ``count`` is a function that
+    // takes the parsed JSON for the endpoint and returns the active-job
+    // count for the navbar badge.
     function activeCountFlat(jobs) {
         return (jobs || []).filter(function (j) {
             return j.status === "queued" || j.status === "running";
         }).length;
     }
     var SOURCES = [
-        {
-            worker: "downloads",
-            urls: ["/boot/releases"],
-            count: function (releases) {
-                var n = 0;
-                ((releases || {}).fetches || []).forEach(function (rf) {
-                    n += activeCountFlat(rf.artifacts);
-                });
-                return n;
-            },
-        },
         {
             worker: "backups",
             urls: ["/workers/backups"],
