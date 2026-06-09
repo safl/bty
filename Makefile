@@ -203,10 +203,11 @@ docker-build:
 # HTTP only -- TFTP is the separate bty-tftp sidecar (deploy/).
 docker-run:
 	# Pre-create the dirs bty-web writes to and chown them to the bty
-	# UID (1000) so the bind-mount is writable. ``images/`` covers
-	# operator-curated images; ``backups/`` covers the scheduled-backup
-	# destination (``$BTY_BACKUP_DIR`` default).
-	mkdir -p bty-data/images bty-data/backups
+	# UID (1000) so the bind-mount is writable. v0.40+: bty-web no
+	# longer owns image bytes (those live in withcache); the dirs
+	# we need are ``boot/`` (netboot artifacts) and ``backups/``
+	# (scheduled-backup destination).
+	mkdir -p bty-data/boot bty-data/backups
 	sudo chown -R 1000:1000 bty-data
 	docker run -d --name bty-web --rm -p 8080:8080 \
 	    -v "$(CURDIR)/bty-data":/var/lib/bty bty-web:dev
