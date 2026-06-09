@@ -15,16 +15,6 @@
             <a href="/ui/images" class="fw-semibold text-decoration-none">{{ img_total }}</a>
         </li>
         <li class="list-group-item d-flex justify-content-between align-items-center">
-            <span class="text-muted"
-                  title="entries whose bytes are present on this server's image_root (uploaded OR successfully fetched)"><i class="bi bi-check-circle fs-6 me-1"></i>Local copy</span>
-            <span>{{ img_cached }}</span>
-        </li>
-        <li class="list-group-item d-flex justify-content-between align-items-center">
-            <span class="text-muted"
-                  title="entries the operator uploaded directly (source kind = local); always have a local copy"><i class="bi bi-hdd fs-6 me-1"></i>Uploaded</span>
-            <span>{{ img_local }}</span>
-        </li>
-        <li class="list-group-item d-flex justify-content-between align-items-center">
             <span class="text-muted"><i class="bi bi-globe fs-6 me-1"></i>HTTP</span>
             <span>{{ img_http }}</span>
         </li>

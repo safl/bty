@@ -19,10 +19,10 @@
     The image catalog. Each entry references a URL (https or oras)
     the live env flashes from. v0.40+: bty-web doesn't host image
     bytes -- withcache holds them when warm, the upstream origin
-    serves them when cold. The header carries
-    <em>Fetch latest catalog</em> (pull the bty release catalog) and
-    <em>Upload catalog</em> (a catalog.toml). Add a single entry
-    from <a href="/ui/downloads">Downloads</a>.
+    serves them when cold. The header carries three add-paths:
+    <em>Add image</em> (a single URL), <em>Upload catalog</em>
+    (a catalog.toml), and <em>Fetch latest catalog</em> (pull the
+    bty release catalog).
 {% endcall %}
 {% endblock %}
 
@@ -32,6 +32,24 @@
     <div class="card-header bg-light fw-semibold d-flex justify-content-between align-items-center flex-nowrap gap-2 py-1">
         <span class="text-nowrap"><i class="bi bi-list-ul me-1"></i>Images</span>
         <span class="d-flex flex-nowrap align-items-center gap-2" style="min-width: 0;">
+            {# Single-entry add: http(s):// trusts the upstream bytes on
+               first flash; oras:// resolves the OCI manifest at add time.
+               ``type="text"`` not ``url`` since browsers reject oras://
+               under HTML5 URL validation; the server-side Pydantic still
+               validates. The most common add-path lives first so the
+               operator's eye lands on it. #}
+            <form method="post" action="/ui/catalog/entries"
+                  class="d-flex align-items-center gap-1 m-0" style="min-width: 0;">
+                <input type="text" required class="form-control form-control-sm"
+                       id="image_url" name="image_url"
+                       style="max-width: 18rem; min-width: 0;"
+                       placeholder="https://...img.gz  |  oras://owner/repo:tag"
+                       title="http(s):// trusts the upstream bytes on first flash; oras:// resolves the OCI manifest digest at add time.">
+                <button type="submit" class="btn btn-sm btn-primary flex-shrink-0 text-nowrap">
+                    <i class="bi bi-cloud-plus me-1"></i>Add image
+                </button>
+            </form>
+            <div class="vr"></div>
             <form method="post" action="/ui/catalog/upload" enctype="multipart/form-data"
                   class="d-flex align-items-center gap-1 m-0" style="min-width: 0;">
                 <input type="file" required name="file" accept=".toml"
@@ -106,9 +124,9 @@
                 {% endfor %}
                 {% if not unified %}
                 <tr><td colspan="5" class="text-muted text-center py-3">
-                    No catalog entries yet. Use <strong>Fetch latest catalog</strong>
-                    or <strong>Upload catalog</strong> above, or add a single
-                    entry from <a href="/ui/downloads">Downloads</a>.
+                    No catalog entries yet. Use <strong>Add image</strong>,
+                    <strong>Upload catalog</strong>, or
+                    <strong>Fetch latest catalog</strong> in the header above.
                 </td></tr>
                 {% endif %}
             </tbody>
