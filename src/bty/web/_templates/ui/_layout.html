@@ -570,19 +570,14 @@
     var SOURCES = [
         {
             worker: "downloads",
-            urls: ["/catalog/downloads", "/boot/releases"],
-            count: function (catalog, releases) {
-                var n = activeCountFlat((catalog || {}).downloads);
+            urls: ["/boot/releases"],
+            count: function (releases) {
+                var n = 0;
                 ((releases || {}).fetches || []).forEach(function (rf) {
                     n += activeCountFlat(rf.artifacts);
                 });
                 return n;
             },
-        },
-        {
-            worker: "hashes",
-            urls: ["/catalog/hashes"],
-            count: function (h) { return activeCountFlat((h || {}).hashes); },
         },
         {
             worker: "backups",

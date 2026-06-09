@@ -94,9 +94,8 @@ class Image:
 
     ``sha256`` is the lower-case hex SHA-256 of the image bytes when
     a cached value is available (sidecar ``.sha256`` file or
-    in-memory). ``None`` means "not yet computed" -- callers that
-    need it (machine binding, manifest cross-ref) call
-    :func:`ensure_sha256` to materialise it lazily.
+    in-memory). ``None`` means "no sidecar present"; callers compute
+    on demand if they need it.
     """
 
     name: str
@@ -137,11 +136,11 @@ def list_images(root: Path) -> list[Image]:
     """List supported images directly under ``root`` (non-recursive).
 
     Reads any cached SHA from the sidecar ``<file>.sha256`` if
-    present (cheap; the operator may have written it themselves
-    or a prior :func:`ensure_sha256` call did). Does NOT compute
-    SHA on the fly -- multi-GiB hashing on every catalog list
-    would be punishing. Callers that need the SHA call
-    :func:`ensure_sha256` for the entries that matter.
+    present (cheap; an operator may have computed it via
+    ``sha256sum > <file>.sha256``). Does NOT compute SHA on the fly
+    -- multi-GiB hashing on every listing would be punishing; this
+    is for the ``bty`` CLI's USB-stick scan path where O(1) listing
+    matters.
     """
     if not root.exists() or not root.is_dir():
         return []
@@ -217,8 +216,8 @@ def _read_sidecar_sha(image_path: Path) -> str | None:
 
     Returns ``None`` (not an error) if the sidecar is missing,
     unreadable, or the digest doesn't look like a 64-char lower-
-    case hex string. The caller will treat None as "not yet
-    computed" and fall back to :func:`ensure_sha256` if it cares.
+    case hex string. Callers treat None as "no sidecar" and decide
+    whether to compute on demand.
     """
     sidecar = _sidecar_path(image_path)
     try:
@@ -276,12 +275,13 @@ class UnifiedImage:
     ``oras://a`` and ``http://b``), and the same ref can map to
     different content over time (rolling tag re-push).
 
-    Merge collapse rule: same content-sha or same ref collapse into
-    one entry; otherwise distinct. See :func:`merge_with_catalog`.
-
     ``names`` collects every label the image goes by; ``sources``
     every fetch path; ``cached`` is True iff a local file exists or
-    the content-addressed cache holds the SHA.
+    the content-addressed cache holds the SHA. v0.40+: bty-web's
+    ``_list_unified_images`` builds these straight from
+    ``catalog_entries`` rows (one row per entry, ``cached=False``
+    always); the merge that produced multi-name entries went with
+    ``merge_with_catalog``.
     """
 
     ref: str

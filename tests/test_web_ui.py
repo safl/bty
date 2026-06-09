@@ -517,17 +517,20 @@ def test_ui_boot_renders_without_fetch_trigger(client: TestClient) -> None:
 
 
 def test_ui_downloads_has_all_three_triggers(client: TestClient) -> None:
-    """``/ui/downloads`` carries all three operator-add triggers:
-    Fetch artifacts (netboot trio + sha), Upload image (local file),
-    Add image from URL. The active-downloads table renders below; the
-    activity card with recent download events is at the bottom."""
+    """``/ui/downloads`` carries the two surviving operator-add
+    triggers: Fetch artifacts (netboot trio + sha), Add image from URL.
+    The Upload-image trigger (PUT /images) went away in v0.40 with the
+    image-bytes-out-of-bty-web refactor. The active-jobs table renders
+    below; the activity card with recent download events is at the
+    bottom."""
     _login(client)
     body = client.get("/ui/downloads").text
-    # Three trigger controls.
+    # Surviving trigger controls.
     assert 'id="bty-downloads-fetch-artifacts-btn"' in body
     assert 'id="image_url"' in body
     assert 'action="/ui/catalog/entries"' in body
-    assert 'id="upload-file"' in body
+    # Upload form is gone (PUT /images deleted in v0.40).
+    assert 'id="upload-file"' not in body
     # Active-jobs tbody.
     assert "bty-workers-downloads-tbody" in body
     # Activity card at the bottom (recent download-related events).
@@ -753,12 +756,12 @@ def test_ui_layout_renders_top_level_live_indicator(client: TestClient) -> None:
     _login(client)
     body = client.get("/ui/dashboard").text
     assert 'id="nav-live"' in body
-    assert "nav-live-sep" in body  # divider after downloads/hashes/artifacts
+    assert "nav-live-sep" in body  # divider after downloads/backups
     assert "function setLive" in body
-    # The poller it rides on targets all three worker endpoints.
-    assert "/catalog/downloads" in body
-    assert "/catalog/hashes" in body
+    # The poller it rides on targets the two surviving worker endpoints
+    # (DownloadManager + HashManager went away in v0.40).
     assert "/boot/releases" in body
+    assert "/workers/backups" in body
 
 
 def test_ui_layout_renders_version_in_navbar_outside_brand(client: TestClient) -> None:

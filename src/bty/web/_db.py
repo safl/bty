@@ -134,11 +134,11 @@ CREATE TABLE IF NOT EXISTS machines (
 -- whose content happens to match end up as distinct entries with
 -- potentially-equal ``disk_image_sha``.
 --
--- ``disk_image_sha`` is the OBSERVED content hash. Populated:
---   - on first cache via fetch-to-cache (remote);
---   - on hash-by-HashManager for local file://;
---   - if pre-pinned in the source TOML manifest (import flow).
--- May stay NULL for an entry that has never been hashed/fetched.
+-- ``disk_image_sha`` is the OBSERVED content hash. Populated only
+-- when the catalog source declares it (TOML manifest's ``sha256``,
+-- the operator-supplied ``sha_url`` adjacent to an https entry, or
+-- the digest baked into an oras blob layer). May stay NULL for any
+-- entry whose publisher did not pin a sha.
 CREATE TABLE IF NOT EXISTS catalog_entries (
     bty_image_ref  TEXT PRIMARY KEY,
     src            TEXT NOT NULL UNIQUE,

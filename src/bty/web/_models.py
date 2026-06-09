@@ -232,18 +232,11 @@ class ImageEntry(BaseModel):
     * Dir-scan file with ``.sha256`` sidecar (or auto-imported)
       -> ``url`` points at the bty-web server (``/images/<sha>``);
       the server serves the bytes.
-    * Manifest entry that has been fetched + cached -> same as
-      above, ``url`` points at the bty-web server.
-    * Manifest entry not yet cached -> ``url`` is the upstream
-      manifest ``src``; the client streams bytes directly from
-      upstream during flash. The operator can hit "Fetch" in the
-      browser UI to populate the cache, after which the entry's
-      ``url`` flips to the server form on the next listing.
-    * Dir-scan file without a sidecar AND no manifest entry ->
-      excluded from the listing until bty-web's auto-import
-      computes its SHA in the background. The HashManager picks
-      these up at startup with a single worker so a Pi 4 does
-      not get hammered.
+    v0.40+: bty-web does not host image bytes. Every entry's
+    ``url`` is either the upstream origin URL (https:// or
+    oras://) or a withcache ``/b/<token>/`` URL when the plan
+    endpoint resolves the entry's bytes to a warm cache. The
+    live env flashes from ``url`` directly.
 
     ``sha_short`` is a 12-char prefix of the entry's content sha
     (``disk_image_sha``) for display only -- used by the browser

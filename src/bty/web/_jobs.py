@@ -1,22 +1,22 @@
 """Shared asyncio-supervised worker-pool scaffolding.
 
-bty-web has three managers that drive the same shape: an asyncio
-worker pool over an :class:`asyncio.Queue` of keys, a per-key
-``State`` dataclass with ``status`` / ``started_at`` / ``finished_at``
-/ ``error`` / ``_cancel: threading.Event``, and a
+bty-web's worker managers (post-v0.40: ReleaseFetchManager and
+BackupManager) drive the same shape: an asyncio worker pool over an
+:class:`asyncio.Queue` of keys, a per-key ``State`` dataclass with
+``status`` / ``started_at`` / ``finished_at`` / ``error`` /
+``_cancel: threading.Event``, and a
 :meth:`asyncio.to_thread`-wrapped blocking job body. The differences
 are confined to:
 
-  * the bind args (image-root / catalog+cache-dir / boot-root),
-  * the state class and its key (filename / catalog-name / tag),
-  * the per-key idempotency rules (HashManager has a sidecar-cached
-    short-circuit; the others don't),
+  * the bind args (boot-root / state-path / backups-root),
+  * the state class and its key (tag / backup-id),
+  * the per-key idempotency rules,
   * the body of :meth:`_run_one`.
 
 Everything else -- ``stop()``, ``cancel()``, ``list()``, the
 ``_worker`` queue loop, the cancel-vs-IO-error race resolution
-on terminal status -- is identical across all three. This module
-extracts the identical parts to a generic base.
+on terminal status -- is identical. This module extracts the
+identical parts to a generic base.
 
 Subclasses MUST:
 
@@ -57,9 +57,9 @@ from typing import Generic, Protocol, TypeVar
 JOB_STATES: tuple[str, ...] = ("queued", "running", "completed", "cancelled", "failed")
 PENDING_STATES: frozenset[str] = frozenset(("queued", "running"))
 # "Already done successfully or about to be" -- the per-key dedup
-# guard in DownloadManager / HashManager / ReleaseFetchManager
-# uses this to short-circuit re-enqueues. Cancelled / failed are
-# excluded so an operator can retry.
+# guard in ReleaseFetchManager / BackupManager uses this to
+# short-circuit re-enqueues. Cancelled / failed are excluded so
+# an operator can retry.
 ENQUEUE_DEDUP_STATES: frozenset[str] = frozenset(("queued", "running", "completed"))
 
 

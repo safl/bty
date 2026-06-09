@@ -60,14 +60,13 @@ COPY docker/seed/ /usr/share/bty/boot-seed/
 # host-side ``chown -R 1000:1000 ./bty-data`` matches across rebuilds.
 RUN groupadd --gid 1000 bty \
  && useradd --uid 1000 --gid 1000 --no-create-home --shell /usr/sbin/nologin bty \
- && install -d -o bty -g bty -m 0750 /var/lib/bty /var/lib/bty/images
+ && install -d -o bty -g bty -m 0750 /var/lib/bty /var/lib/bty/boot
 VOLUME /var/lib/bty
 
 # bty-web reads these; defaults match the on-image layout. The operator
 # UI is gated by ``$BTY_ADMIN_PASSWORD`` (set at run time; unset leaves
 # it open, with a startup warning).
 ENV BTY_STATE_DIR=/var/lib/bty \
-    BTY_IMAGE_ROOT=/var/lib/bty/images \
     BTY_BOOT_DIR=/var/lib/bty/boot \
     BTY_BOOT_SEED_DIR=/usr/share/bty/boot-seed \
     BTY_WEB_HOST=0.0.0.0 \
