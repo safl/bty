@@ -1019,17 +1019,25 @@ def deploy_main(argv: list[str] | None = None, *, prog: str = "bty-lab deploy") 
     created = _prepare_data_dirs(data_dir_abs)
     _step("prepared data dirs", detail=" ".join(str(p) for p in created))
 
-    # Root mode pulls + starts with the TFTP profile so the bty-tftp
-    # sidecar comes up alongside bty-web and withcache. Non-root mode
-    # skips it (TFTP needs root for UDP/69), so the stack still works
-    # for UEFI HTTP-Boot but not for legacy BIOS PXE clients.
+    # Root mode pulls images via compose (warm the registry cache), then
+    # hands off lifecycle to Quadlet + systemd entirely. Critically: NO
+    # ``compose up -d`` in root mode -- the Quadlet-managed services bind
+    # the same ports (8080 / 3000 / TFTP 69), so running both at once
+    # blocks systemctl start with "port already in use". Non-root mode
+    # keeps compose as the lifecycle (no Quadlets to hand off to).
     compose_args = ["--profile", "tftp"] if is_root else []
     _step("pulling images")
     _compose(dest, [*compose_args, "pull"])
-    _step("starting stack")
-    _compose(dest, [*compose_args, "up", "-d"])
 
     if is_root:
+        # Tear down any leftover compose-managed containers from a prior
+        # ``bty-lab deploy`` (this is idempotent -- no-op on a fresh
+        # host). Without this, an upgrade-in-place that re-ran deploy
+        # would have compose containers binding the ports the Quadlet
+        # services need, and systemctl start would fail.
+        _step("clearing compose-managed containers")
+        _compose(dest, [*compose_args, "down"])
+
         _step(f"installing Quadlet units to {QUADLET_SYSTEM_DIR}")
         try:
             installed = _install_quadlets(dest, force=args.force)
@@ -1044,6 +1052,9 @@ def deploy_main(argv: list[str] | None = None, *, prog: str = "bty-lab deploy") 
 
         _step("starting systemd services")
         _systemctl(["start", *_SYSTEMD_SERVICES])
+    else:
+        _step("starting stack")
+        _compose(dest, [*compose_args, "up", "-d"])
 
     print("", file=sys.stderr)
     _step("deploy complete", detail=mode_label)

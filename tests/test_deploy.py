@@ -363,8 +363,9 @@ def test_deploy_emits_envvars_and_runs_compose(
 ) -> None:
     """``deploy`` writes a real ``envvars`` (not just .example) with the
     detected HOST_ADDR + the historic-PAM "bty" admin password default
-    (session secret stays random crypto material), and runs ``podman
-    compose pull`` + ``up -d``."""
+    (session secret stays random crypto material). Root mode runs
+    ``podman compose pull`` + ``down`` (clean up leftovers; Quadlet
+    takes over from there)."""
     dest = tmp_path / "bty-host"
     deploy_mod.deploy_main([str(dest)])
 
@@ -379,7 +380,7 @@ def test_deploy_emits_envvars_and_runs_compose(
     )
     assert len(session_line.split("=", 1)[1]) >= 32
 
-    # podman compose pull + up -d both ran, with --profile tftp baked in.
+    # podman compose pull + down both ran, with --profile tftp baked in.
     run_cmds = [cmd for cmd, _ in _patched_runtime["run"]]
     assert ["podman", "compose", "--env-file", "envvars", "--profile", "tftp", "pull"] in run_cmds
     assert [
@@ -389,8 +390,7 @@ def test_deploy_emits_envvars_and_runs_compose(
         "envvars",
         "--profile",
         "tftp",
-        "up",
-        "-d",
+        "down",
     ] in run_cmds
 
 
@@ -398,14 +398,20 @@ def test_deploy_as_root_does_system_install(
     tmp_path: Path, _patched_runtime: dict[str, list]
 ) -> None:
     """Run as root, ``deploy`` does the full system install: TFTP
-    sidecar in the compose call + Quadlet units installed + systemctl
-    daemon-reload + service start."""
+    sidecar in the compose call + ``compose down`` to clear leftovers
+    + Quadlet units installed + systemctl daemon-reload + service start.
+
+    Critical: root mode must NOT ``compose up -d``. The Quadlet-managed
+    services bind the same ports (8080/3000/69); running both at once
+    blocks systemctl start with "port already in use" (v0.41.1 bug)."""
     dest = tmp_path / "bty-host"
     deploy_mod.deploy_main([str(dest)])  # _patched_runtime fakes geteuid==0
 
     # TFTP profile is included on the compose calls.
     run_cmds = [cmd for cmd, _ in _patched_runtime["run"]]
     assert ["podman", "compose", "--env-file", "envvars", "--profile", "tftp", "pull"] in run_cmds
+    # Root mode CLEARS leftover compose containers (idempotent on fresh
+    # hosts) but does NOT start any.
     assert [
         "podman",
         "compose",
@@ -413,9 +419,12 @@ def test_deploy_as_root_does_system_install(
         "envvars",
         "--profile",
         "tftp",
-        "up",
-        "-d",
+        "down",
     ] in run_cmds
+    # Regression: ``compose up -d`` must NOT appear in root mode.
+    assert not any(cmd[:2] == ["podman", "compose"] and "up" in cmd for cmd in run_cmds), (
+        "root-mode deploy must hand off to Quadlet, not start via compose"
+    )
     # Quadlet units installed + systemctl invocations.
     assert len(_patched_runtime["quadlets"]) == 1
     assert ["systemctl", "daemon-reload"] in run_cmds
