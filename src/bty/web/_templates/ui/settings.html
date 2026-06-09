@@ -207,10 +207,13 @@
                       title="built-in default: {{ r.default }}">default</span>
                 {% endif %}
             </div>
-            <div class="text-break"><code class="small">{{ r.value }}</code></div>
+            {# Env var name first, value second -- the natural reading
+               order ("VAR=value", same shape an operator types into a
+               shell). #}
             {% if r.env %}
-            <div class="small text-muted"><code>{{ r.env }}</code></div>
+            <div class="small"><code class="text-muted">{{ r.env }}</code></div>
             {% endif %}
+            <div class="text-break"><code class="small">{{ r.value }}</code></div>
         </li>
         {% endfor %}
     </ul>
