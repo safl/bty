@@ -38,6 +38,11 @@ web = [
     # cookie. Pulled in as a transitive of fastapi sometimes; pin
     # explicitly so the cookie path can't disappear on a slim install.
     "itsdangerous>=2.1",
+    # v0.42+: Settings-page edits round-trip through tomlkit so the
+    # operator's comments + ordering in bty.toml survive. stdlib
+    # ``tomllib`` is read-only; ``tomli-w`` would work for writes
+    # but doesn't preserve existing formatting.
+    "tomlkit>=0.12",
 ]
 all = [
     "rich>=13",
@@ -46,6 +51,7 @@ all = [
     "jinja2>=3.1",
     "python-multipart>=0.0.9",
     "itsdangerous>=2.1",
+    "tomlkit>=0.12",
 ]
 
 [project.scripts]
