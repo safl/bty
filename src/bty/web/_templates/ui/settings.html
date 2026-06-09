@@ -39,48 +39,53 @@
 {% endblock %}
 
 {% block content %}
-{# Editable: the two upstream URLs. Empty field clears the override and
-   reverts to env / default. Both take effect on the next fetch. #}
-<div class="card mb-4" id="upstream-sources">
+{# Two-up row: the editable Upstream sources + Backup schedule cards.
+   ``h-100`` + the wrapping ``row g-3`` keep both cards the same height
+   regardless of which one's content is longer. #}
+<div class="row g-3 mb-3">
+<div class="col-md-6">
+<div class="card h-100" id="upstream-sources">
     <div class="card-header bg-light fw-semibold">
         <i class="bi bi-cloud-arrow-down me-1"></i>Upstream sources
     </div>
     <div class="card-body">
         <form method="post" action="/ui/settings/upstream">
             <div class="mb-3">
-                <label for="release_repo" class="form-label">Netboot release repo</label>
+                <label for="release_repo" class="form-label">Release repo</label>
                 <input type="text" class="form-control font-monospace" id="release_repo"
                        name="release_repo" placeholder="{{ upstream.release_repo_default }}"
                        value="{{ upstream.release_repo_override or '' }}">
                 <div class="form-text small">
-                    GitHub <code>owner/repo</code> the netboot artifacts (and the
-                    default catalog URL) are pulled from. Effective:
+                    GitHub <code>owner/repo</code> both the netboot artifacts
+                    and the catalog are pulled from. Effective:
                     <code>{{ upstream.release_repo }}</code>{% if not upstream.release_repo_override %}
                     (default; leave blank to keep){% endif %}.
                 </div>
             </div>
             <div class="mb-3">
-                <label for="catalog_url" class="form-label">Catalog URL</label>
-                <input type="text" class="form-control font-monospace" id="catalog_url"
-                       name="catalog_url" placeholder="{{ upstream.catalog_url_default }}"
-                       value="{{ upstream.catalog_url_override or '' }}">
+                <label for="catalog_tag" class="form-label">Catalog release tag</label>
+                <input type="text" class="form-control font-monospace" id="catalog_tag"
+                       name="catalog_tag" placeholder="{{ upstream.catalog_tag_default }}"
+                       value="{{ upstream.catalog_tag_override or '' }}">
                 <div class="form-text small">
-                    Full URL the <em>Fetch latest catalog</em> action downloads
-                    <code>catalog.toml</code> from. Effective:
-                    <code>{{ upstream.catalog_url }}</code>{% if not upstream.catalog_url_override %}
-                    (derived from the release repo; leave blank to keep){% endif %}.
+                    Which release the <em>Fetch '{{ upstream.catalog_tag }}' catalog</em>
+                    button on the <a href="/ui/images">Images</a> page pulls:
+                    <code>latest</code> or a tag like <code>v0.23.0</code>. Effective:
+                    <code>{{ upstream.catalog_tag }}</code>{% if not upstream.catalog_tag_override %}
+                    (default; leave blank to keep){% endif %}. Resolves to:
+                    <code>{{ upstream.catalog_url }}</code>.
                 </div>
             </div>
             <div class="mb-3">
-                <label for="release_tag" class="form-label">Netboot release tag</label>
-                <input type="text" class="form-control font-monospace" id="release_tag"
-                       name="release_tag" placeholder="{{ upstream.release_tag_default }}"
-                       value="{{ upstream.release_tag_override or '' }}">
+                <label for="netboot_tag" class="form-label">Netboot release tag</label>
+                <input type="text" class="form-control font-monospace" id="netboot_tag"
+                       name="netboot_tag" placeholder="{{ upstream.netboot_tag_default }}"
+                       value="{{ upstream.netboot_tag_override or '' }}">
                 <div class="form-text small">
-                    Which release the <em>Fetch artifacts</em> button on the
-                    <a href="/ui/netboot">Netboot</a> page pulls: <code>latest</code>
-                    or a tag like <code>v0.23.0</code>. Effective:
-                    <code>{{ upstream.release_tag }}</code>{% if not upstream.release_tag_override %}
+                    Which release the <em>Fetch '{{ upstream.netboot_tag }}' artifacts</em>
+                    button on the <a href="/ui/netboot">Netboot</a> page pulls:
+                    <code>latest</code> or a tag like <code>v0.23.0</code>. Effective:
+                    <code>{{ upstream.netboot_tag }}</code>{% if not upstream.netboot_tag_override %}
                     (default; leave blank to keep){% endif %}.
                 </div>
             </div>
@@ -91,13 +96,15 @@
         </form>
     </div>
 </div>
+</div>{# /col upstream-sources #}
 
+<div class="col-md-6">
 {# Editable: scheduled backup knobs. ``enabled`` + ``cadence`` +
    ``retention`` persist in the settings table; the scheduler loop
    reads them on every tick so a change here propagates within one
    tick (60s) without restart. The on-disk destination is read-only
    (env-overridable via BTY_BACKUP_DIR). #}
-<div class="card mb-4" id="backup-schedule">
+<div class="card h-100" id="backup-schedule">
     <div class="card-header bg-light fw-semibold">
         <i class="bi bi-shield-check me-1"></i>Backup schedule
     </div>
@@ -168,50 +175,49 @@
         </form>
     </div>
 </div>
+</div>{# /col backup-schedule #}
+</div>{# /row upstream + backup #}
 
-{# Read-only: the magic values, grouped, each row tagged with where the
-   live value came from (env var / derived path / default). #}
+{# Four-up row of the read-only config groups (Identity / Storage /
+   Network / Background workers). Each card uses a compact
+   list-group layout instead of the wide 4-column table the single-
+   column form had: at col-lg-3 each card is too narrow for a
+   table-with-source-and-env column set, so the source badge sits
+   inline with the value and the env-var name renders as a small
+   muted line below. On medium screens cards stack 2-up; on phones
+   1-up. #}
+<div class="row g-3 mb-3">
 {% for group in config_groups %}
-<div class="card mb-4" id="settings-{{ group.title|lower|replace(' ', '-') }}">
+<div class="col-md-6 col-lg-3">
+<div class="card h-100" id="settings-{{ group.title|lower|replace(' ', '-') }}">
     <div class="card-header bg-light fw-semibold">
         <i class="bi bi-{{ group.icon }} me-1"></i>{{ group.title }}
     </div>
-    <div class="table-responsive">
-        <table class="table table-sm mb-0 align-middle">
-            <thead class="table-light">
-                <tr>
-                    <th style="width: 18rem;">Setting</th>
-                    <th>Value</th>
-                    <th style="width: 1%; white-space: nowrap;">Source</th>
-                    <th style="width: 1%; white-space: nowrap;">Env var</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for r in group.rows %}
-                <tr>
-                    <td>{{ r.label }}</td>
-                    <td><code class="small">{{ r.value }}</code></td>
-                    <td>
-                        {% if r.source == "env" %}
-                        <span class="badge bg-primary" title="set via environment variable">env</span>
-                        {% elif r.source == "derived" %}
-                        <span class="badge bg-secondary" title="derived from another path">derived</span>
-                        {% else %}
-                        <span class="badge bg-light text-dark border"
-                              title="built-in default: {{ r.default }}">default</span>
-                        {% endif %}
-                    </td>
-                    <td>
-                        {% if r.env %}<code class="small text-muted">{{ r.env }}</code>
-                        {% else %}<span class="text-muted small">-</span>{% endif %}
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
+    <ul class="list-group list-group-flush small">
+        {% for r in group.rows %}
+        <li class="list-group-item">
+            <div class="d-flex justify-content-between align-items-start gap-2">
+                <span class="text-muted">{{ r.label }}</span>
+                {% if r.source == "env" %}
+                <span class="badge bg-primary" title="set via environment variable">env</span>
+                {% elif r.source == "derived" %}
+                <span class="badge bg-secondary" title="derived from another path">derived</span>
+                {% else %}
+                <span class="badge bg-light text-dark border"
+                      title="built-in default: {{ r.default }}">default</span>
+                {% endif %}
+            </div>
+            <div class="text-break"><code class="small">{{ r.value }}</code></div>
+            {% if r.env %}
+            <div class="small text-muted"><code>{{ r.env }}</code></div>
+            {% endif %}
+        </li>
+        {% endfor %}
+    </ul>
+</div>
 </div>
 {% endfor %}
+</div>{# /row config_groups #}
 
 {# Router-side cheatsheet (moved here from the Netboot page). The bits
    the operator pastes into UniFi / pfSense / dnsmasq DHCP config to

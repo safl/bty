@@ -25,10 +25,10 @@
     The bty live env PXE clients chain into when their assignment has
     <code>boot_mode=bty-flash-always</code>. Trigger a fetch from the
     artifacts header to pull the kernel + initrd + squashfs + sha256
-    manifest for tag <code>{{ release_tag }}</code> from
+    manifest for tag <code>{{ netboot_tag }}</code> from
     <code>{{ release_repo }}</code>; rows below tick from missing to
-    present as each file lands. The TFTP daemon controls are below;
-    the router-side DHCP / PXE cheatsheet lives on the
+    present as each file lands. The TFTP daemon panel is purely
+    observational; the router-side DHCP / PXE cheatsheet lives on the
     <strong>Settings</strong> page.
 {% endcall %}
 {% endblock %}
@@ -45,14 +45,13 @@
            ``rm``, state-dir migrate, etc.). #}
         <button type="button" class="btn btn-sm btn-primary text-nowrap"
                 id="bty-downloads-fetch-artifacts-btn"
-                data-tag="{{ release_tag }}"
+                data-tag="{{ netboot_tag }}"
                 {% if artifacts_all_cached %}disabled
-                title="Netboot artifacts for tag '{{ release_tag }}' are already cached. Remove a file from the boot directory below to re-fetch."
+                title="Netboot artifacts for tag '{{ netboot_tag }}' are already cached. Remove a file from the boot directory below to re-fetch."
                 {% else %}
-                title="Fetch netboot artifacts for tag '{{ release_tag }}' from {{ release_repo }}"
+                title="Fetch netboot artifacts for tag '{{ netboot_tag }}' from {{ release_repo }}"
                 {% endif %}>
-            <i class="bi bi-cloud-download me-1"></i>Fetch artifacts
-            {% if release_tag == "latest" %}<small>(latest)</small>{% else %}<code>{{ release_tag }}</code>{% endif %}
+            <i class="bi bi-cloud-download me-1"></i>Fetch '<code>{{ netboot_tag }}</code>' artifacts
             {% if artifacts_all_cached %}<i class="bi bi-check-circle ms-1" title="cached"></i>{% endif %}
         </button>
     </div>
@@ -153,38 +152,89 @@
         <i class="bi bi-cpu me-1"></i>TFTP daemon
     </div>
     <div class="card-body">
-        <div class="d-flex align-items-center gap-3 mb-2">
-            <div>
-                {% if tftp.state == 'active' %}
-                <span class="badge bg-success fs-6">{{ tftp.state }}</span>
-                {% elif tftp.state == 'failed' %}
-                <span class="badge bg-danger fs-6">{{ tftp.state }}</span>
-                {% elif tftp.state in ('activating', 'deactivating', 'reloading') %}
-                <span class="badge bg-warning text-dark fs-6">{{ tftp.state }}</span>
-                {% else %}
-                <span class="badge bg-secondary fs-6">{{ tftp.state }}</span>
-                {% endif %}
-                <code class="ms-2">dnsmasq.service</code>
-            </div>
-        </div>
-        <p class="text-muted mb-2 small">
-            {% if tftp.state == 'active' %}
-            A co-located <code>dnsmasq</code> is up; PXE clients on this
-            subnet can reach the TFTP root. The Artifacts table above is
-            the canonical "are the bootfiles there" check.
-            {% elif tftp.state in ('inactive', 'unknown') %}
-            No local <code>dnsmasq</code> is running. This is normal for
-            the container deploy, which serves TFTP from a separate
-            sidecar (out of bty-web's view) -- verify with
-            <code>systemctl status bty-tftp</code> or
-            <code>podman ps</code>. On a host/systemd install, an
-            inactive state means PXE is offline.
+        <h3 class="h6 mb-2">Network probe</h3>
+        <table class="table table-sm mb-2 align-middle">
+            <tbody>
+                <tr>
+                    <th scope="row" class="text-muted small" style="width: 14rem;">Target</th>
+                    <td><code>{{ tftp_probe.host }}:{{ tftp_probe.port }}</code></td>
+                </tr>
+                <tr>
+                    <th scope="row" class="text-muted small">Reachable</th>
+                    <td>
+                        {% if tftp_probe.reachable %}
+                        <span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>yes</span>
+                        {% else %}
+                        <span class="badge bg-danger"><i class="bi bi-x-circle me-1"></i>no</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row" class="text-muted small">
+                        <code>{{ tftp_probe.filename }}</code> present
+                    </th>
+                    <td>
+                        {% if tftp_probe.file_present %}
+                        <span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>yes</span>
+                        {% elif tftp_probe.reachable %}
+                        <span class="badge bg-warning text-dark"><i class="bi bi-exclamation-circle me-1"></i>missing</span>
+                        {% else %}
+                        <span class="badge bg-secondary">unknown</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row" class="text-muted small">Detail</th>
+                    <td><small class="text-muted">{{ tftp_probe.detail or "-" }}</small></td>
+                </tr>
+            </tbody>
+        </table>
+        <p class="text-muted small mb-3">
+            {% if tftp_probe.ok %}
+            The TFTP server at <code>{{ tftp_probe.host }}:{{ tftp_probe.port }}</code>
+            is up and serves the UEFI iPXE bootfile -- PXE clients on this subnet
+            should chainload successfully.
+            {% elif tftp_probe.reachable %}
+            The server is reachable but doesn't have
+            <code>{{ tftp_probe.filename }}</code>. UEFI PXE-Boot clients will 404
+            at the bootfile step. Check the TFTP root contents (the bty-tftp
+            sidecar bakes <code>ipxe.efi</code> in by default).
             {% else %}
-            <code>dnsmasq.service</code> reports <code>{{ tftp.state }}</code>.
-            Check <code>journalctl -u dnsmasq.service</code> for the
-            most recent failure on the bty host.
+            Nothing answered on <code>{{ tftp_probe.host }}:{{ tftp_probe.port }}</code>.
+            On a container deploy: is <code>bty-tftp.service</code> up
+            (<code>systemctl status bty-tftp</code> /
+            <code>podman ps</code>)? On a host install:
+            <code>systemctl status dnsmasq.service</code>. Override the probe
+            target with <code>$BTY_TFTP_PROBE_HOST</code> if your TFTP daemon
+            lives elsewhere (e.g. on the LAN router).
             {% endif %}
-            <a href="/ui/settings#dhcp-pxe" class="ms-1">
+        </p>
+
+        <h3 class="h6 mt-3 mb-2">Local <code>dnsmasq.service</code></h3>
+        <div class="d-flex align-items-center gap-2 mb-2">
+            {% if tftp.state == 'active' %}
+            <span class="badge bg-success fs-6">{{ tftp.state }}</span>
+            {% elif tftp.state == 'failed' %}
+            <span class="badge bg-danger fs-6">{{ tftp.state }}</span>
+            {% elif tftp.state in ('activating', 'deactivating', 'reloading') %}
+            <span class="badge bg-warning text-dark fs-6">{{ tftp.state }}</span>
+            {% else %}
+            <span class="badge bg-secondary fs-6">{{ tftp.state }}</span>
+            {% endif %}
+            <small class="text-muted">
+                {% if tftp.state == 'active' %}
+                co-located dnsmasq is running on this host
+                {% elif tftp.state in ('inactive', 'unknown') %}
+                no local dnsmasq (normal in container deploys; the
+                bty-tftp sidecar runs separately and the probe above
+                is the canonical signal there)
+                {% else %}
+                check <code>journalctl -u dnsmasq.service</code>
+                {% endif %}
+            </small>
+        </div>
+        <p class="text-muted small mb-0">
+            <a href="/ui/settings#dhcp-pxe">
                 <i class="bi bi-box-arrow-up-right me-1"></i>DHCP / PXE cheatsheet
             </a>
         </p>
