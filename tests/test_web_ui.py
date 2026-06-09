@@ -39,7 +39,6 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClie
         state_path=state,
         service_user=TEST_SERVICE_USER,
         secret_key=TEST_SECRET_KEY,
-        image_root=image_root,
     )
     app.state.state_path = state  # let tests seed the DB directly
 
@@ -200,7 +199,6 @@ def test_ui_dashboard_renders_with_zero_state(
         state_path=state,
         service_user=TEST_SERVICE_USER,
         secret_key=TEST_SECRET_KEY,
-        image_root=image_root,
     )
 
     with TestClient(fresh_app, follow_redirects=False) as c:
@@ -2201,7 +2199,6 @@ def test_ui_machine_detail_dropdown_lists_manifest_entry_after_upload(
         state_path=tmp_path / "state.db",
         service_user=TEST_SERVICE_USER,
         secret_key=TEST_SECRET_KEY,
-        image_root=image_root,
     )
 
     with TestClient(fresh_app, follow_redirects=False) as c:
