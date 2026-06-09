@@ -174,6 +174,140 @@ def test_tftp_status_falls_back_to_pgrep_when_systemctl_missing() -> None:
     assert status.state == "active"
 
 
+# ---------- tftp_probe ----------------------------------------------------
+
+
+def test_tftp_probe_reports_file_present_on_data_reply() -> None:
+    """A DATA opcode (3) means the server has the file -- both
+    legs of the probe should report success."""
+    import struct as _struct
+
+    from bty.web._sysconfig import tftp_probe
+
+    fake_data = _struct.pack("!HH", 3, 1) + b"x" * 510  # DATA, block 1, payload
+
+    class FakeSock:
+        def __init__(self) -> None:
+            self.sent: list[tuple] = []
+
+        def settimeout(self, _t: float) -> None:
+            return None
+
+        def sendto(self, pkt: bytes, addr: tuple) -> None:
+            self.sent.append((pkt, addr))
+
+        def recvfrom(self, _n: int) -> tuple[bytes, tuple]:
+            return fake_data, ("127.0.0.1", 33000)
+
+        def close(self) -> None:
+            return None
+
+    fake = FakeSock()
+    with patch("bty.web._sysconfig.socket.socket", return_value=fake):
+        result = tftp_probe(host="127.0.0.1")
+    assert result.reachable is True
+    assert result.file_present is True
+    assert result.ok is True
+    # RRQ packet structure: opcode 1, filename, NUL, "octet", NUL.
+    sent_pkt = fake.sent[0][0]
+    assert sent_pkt.startswith(b"\x00\x01")
+    assert b"ipxe.efi\x00octet\x00" in sent_pkt
+
+
+def test_tftp_probe_reports_missing_on_error_reply() -> None:
+    """An ERROR opcode (5) means the server is up but the file
+    isn't there -- reachable yes, file_present no."""
+    import struct as _struct
+
+    from bty.web._sysconfig import tftp_probe
+
+    fake_data = _struct.pack("!HH", 5, 1) + b"File not found\x00"
+
+    class FakeSock:
+        def settimeout(self, _t: float) -> None:
+            return None
+
+        def sendto(self, _pkt: bytes, _addr: tuple) -> None:
+            return None
+
+        def recvfrom(self, _n: int) -> tuple[bytes, tuple]:
+            return fake_data, ("127.0.0.1", 33000)
+
+        def close(self) -> None:
+            return None
+
+    with patch("bty.web._sysconfig.socket.socket", return_value=FakeSock()):
+        result = tftp_probe(host="127.0.0.1")
+    assert result.reachable is True
+    assert result.file_present is False
+    assert result.ok is False
+    assert "File not found" in result.detail
+
+
+def test_tftp_probe_timeout_means_unreachable() -> None:
+    """No reply within the timeout -> reachable=False, file_present
+    irrelevant. The detail string includes the host:port + timeout
+    so an operator can see exactly what bty-web tried."""
+
+    from bty.web._sysconfig import tftp_probe
+
+    class FakeSock:
+        def settimeout(self, _t: float) -> None:
+            return None
+
+        def sendto(self, _pkt: bytes, _addr: tuple) -> None:
+            return None
+
+        def recvfrom(self, _n: int) -> tuple[bytes, tuple]:
+            raise TimeoutError
+
+        def close(self) -> None:
+            return None
+
+    with patch("bty.web._sysconfig.socket.socket", return_value=FakeSock()):
+        result = tftp_probe(host="127.0.0.1", timeout_s=0.05)
+    assert result.reachable is False
+    assert result.file_present is False
+    assert "127.0.0.1:69" in result.detail
+
+
+def test_tftp_probe_oserror_is_unreachable_not_500() -> None:
+    """Connection refused / no-route surfaces as reachable=False
+    with the exception class + message in detail -- the UI never
+    sees a 500 from a bad probe target."""
+    from bty.web._sysconfig import tftp_probe
+
+    class FakeSock:
+        def settimeout(self, _t: float) -> None:
+            return None
+
+        def sendto(self, _pkt: bytes, _addr: tuple) -> None:
+            raise ConnectionRefusedError("nope")
+
+        def recvfrom(self, _n: int) -> tuple[bytes, tuple]:
+            raise AssertionError("should not be reached")
+
+        def close(self) -> None:
+            return None
+
+    with patch("bty.web._sysconfig.socket.socket", return_value=FakeSock()):
+        result = tftp_probe(host="127.0.0.1")
+    assert result.reachable is False
+    assert "ConnectionRefusedError" in result.detail
+
+
+def test_default_tftp_probe_host_respects_env(monkeypatch: object) -> None:
+    """``$BTY_TFTP_PROBE_HOST`` overrides the localhost default
+    so a deploy with TFTP on a separate machine still probes the
+    right place."""
+    from bty.web._sysconfig import default_tftp_probe_host
+
+    monkeypatch.setenv("BTY_TFTP_PROBE_HOST", "10.20.30.40")  # type: ignore[attr-defined]
+    assert default_tftp_probe_host() == "10.20.30.40"
+    monkeypatch.delenv("BTY_TFTP_PROBE_HOST")  # type: ignore[attr-defined]
+    assert default_tftp_probe_host() == "127.0.0.1"
+
+
 def test_tftp_status_pgrep_missing_returns_inactive() -> None:
     """pgrep returns 1 when no matching process. UI shows
     inactive badge (grey)."""
