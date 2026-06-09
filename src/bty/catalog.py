@@ -1,4 +1,4 @@
-"""bty catalog manifest with src URLs + URL-keyed local filenames.
+"""bty catalog manifest: TOML parser + URL canonicalisation.
 
 A catalog manifest (TOML, ``${BTY_STATE_DIR}/catalog.toml`` by
 default) lists named images with upstream ``src`` URLs and (optional)
@@ -14,274 +14,33 @@ pinned ``sha256`` digests:
     sha256 = "abc123..."
     format = "img.zst"
 
-The fetcher downloads each ``src`` on demand, verifies SHA-256
-against the manifest if one is given, and atomically writes the
-file into the operator's ``BTY_IMAGE_ROOT`` directory with a
-URL-derived name: ``catalog-<bty_image_ref[:12]>-<slug(name)>.<ext>``
-(e.g. ``catalog-8e54fdb21522-nosi-debian-sysdev.img.gz``). Same URL
-hashes to the same filename, so re-fetches are idempotent and
-catalog files dedup naturally with the operator's local images
-under a single directory -- no separate ``cache/`` subdir, no
-sha-keyed content addressing. The ``catalog-`` prefix calls out
-catalog-fetched files vs operator-typed ones at a glance.
+v0.40+: bty-web no longer holds image bytes. The live env fetches
+each ``src`` directly (or via withcache when the cache is warm); this
+module is the schema parser + URL canonicaliser + the ``stream_src``
+proxy helper bty-web's /images route uses for oras-style sources.
+``image_ref_for_src`` produces the stable provenance id machine
+bindings target -- pure math over the canonical URL.
 
 Module is stdlib-only -- ``tomllib`` is in Python 3.11+ stdlib,
-``hashlib`` / ``urllib`` / ``shutil`` are too. ``bty`` and
-``bty-web`` both consume this module without dragging in any
-extra dependency beyond their own (rich for ``bty``, fastapi /
-uvicorn for ``bty-web``).
+``hashlib`` / ``urllib`` are too. ``bty`` and ``bty-web`` both
+consume this module without dragging in any extra dependency beyond
+their own.
 """
 
 from __future__ import annotations
 
-import contextlib
 import hashlib
 import os
-import re
-import tempfile
 import tomllib
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import IO, Any, Self, TypeAlias
+from typing import Any, Self
 
 from bty import images as _images
-
-# Filename prefix for catalog-fetched images under the image_root.
-# Discovery code uses this to tell apart operator-typed files (no
-# prefix) from catalog-cached ones (with the prefix + URL-derived
-# hash so two distinct URLs never collide on disk).
-_CATALOG_PREFIX = "catalog-"
-
-# Image-store naming-convention version. Independent of
-# ``bty.__version__``: this number is bumped ONLY when the on-disk
-# layout / filename grammar changes in a way that older bty-web
-# can no longer read. The current scheme (v1):
-#
-#   image_root/
-#     <operator-typed>.<ext>            # operator uploaded / dropped
-#     catalog-<ref:12>-<slug>.<ext>     # bty-fetched from a catalog entry
-#     <file>.sha256                     # sidecar manifests (any of the above)
-#     .bty-storage.json                 # marker; carries this version
-#
-# The marker file is created on first bty-web startup against a
-# fresh image_root and validated on every subsequent start. A
-# mismatch makes bty-web bail (operator-facing message points at
-# bty-state-init / shell remediation) rather than silently treating
-# a future layout as the current one.
-STORAGE_FORMAT_VERSION = 1
-
-
-def is_catalog_cache_filename(name: str) -> bool:
-    """True iff ``name`` is the basename of a catalog-fetched cache
-    file (``catalog-<ref:12>-<slug>.<ext>``). Used by the dir-scan
-    paths (``images.merge_with_catalog`` pass 1, the
-    ``_auto_import_dir_scan_rows`` startup pass) to recognise cache
-    files as belonging to an existing catalog entry rather than as
-    standalone operator-typed images. Without this gate the same
-    image surfaces twice on ``/ui/images`` -- once as the catalog
-    entry, once as a synthetic ``file://`` entry derived from its
-    cache filename.
-    """
-    return name.startswith(_CATALOG_PREFIX)
-
-
-def ref_prefix_from_cache_filename(name: str) -> str | None:
-    """Extract the 12-hex ``bty_image_ref`` prefix encoded in a
-    catalog-cache filename, or ``None`` if ``name`` is not a
-    well-formed cache filename. Mirror of :func:`local_filename_for`:
-    composes catalog-<ref:12>-... -> ref:12.
-
-    Used by the HashManager terminal callback to backfill
-    ``catalog_entries.disk_image_sha`` for an operator-triggered
-    hash of a catalog-cache file -- the row's ``src`` is the
-    upstream URL (not ``file://catalog-...``), so the src-keyed
-    UPDATE there can't find it; the ref-prefix LIKE WHERE clause
-    does.
-    """
-    if not name.startswith(_CATALOG_PREFIX):
-        return None
-    rest = name[len(_CATALOG_PREFIX) :]
-    sep = rest.find("-")
-    if sep != _CATALOG_REF_LEN:
-        return None
-    prefix = rest[:_CATALOG_REF_LEN]
-    if any(c not in "0123456789abcdef" for c in prefix):
-        return None
-    return prefix
-
-
-# Files under image_root the storage layer recognises explicitly.
-# Everything else triggers an "unconventional name" warning on scan
-# so an operator who dropped a stray file (notes, a non-bty backup,
-# a half-downloaded curl that didn't atomic-rename) can see it.
-# The dot-prefixed marker + sha256 sidecars are bookkeeping;
-# catalog- + operator-typed image extensions are payload.
-_STORAGE_MARKER_FILENAME = ".bty-storage.json"
-
-
-class StorageFormatMismatch(RuntimeError):
-    """Raised by :func:`check_or_write_storage_marker` when the marker
-    on disk doesn't match the version this bty-web understands. The
-    message is operator-facing: it names the on-disk version, the
-    running version, and recommends the manual cleanup path."""
-
-
-def check_or_write_storage_marker(image_root: Path) -> int:
-    """Validate (or create) ``image_root/.bty-storage.json``.
-
-    On first use (fresh image_root, no marker), writes the current
-    :data:`STORAGE_FORMAT_VERSION` + creation timestamp. On
-    subsequent calls, reads the marker; if the stored version
-    matches, returns the version + does nothing.
-
-    If the stored version DOES NOT match the running
-    ``STORAGE_FORMAT_VERSION``, raises :class:`StorageFormatMismatch`
-    so the bty-web start aborts. Operator response: drop to a
-    shell, archive / wipe the state directory, re-init the
-    storage layout (``bty-state-init`` -- a follow-up tool; for
-    now ``rm -rf $image_root/*`` then restart). The on-disk
-    layout can't be silently upgraded because the naming /
-    semantics may have diverged.
-
-    Returns the version on disk (or just-written) so callers can
-    log it.
-    """
-    import json
-    from datetime import UTC, datetime
-
-    image_root.mkdir(parents=True, exist_ok=True)
-    marker = image_root / _STORAGE_MARKER_FILENAME
-    if marker.is_file():
-        try:
-            data = json.loads(marker.read_text(encoding="utf-8"))
-        except (OSError, ValueError) as exc:
-            raise StorageFormatMismatch(
-                f"image-store marker {marker} is unreadable / malformed "
-                f"({exc!r}). The image_root may be corrupt or was created "
-                f"by a non-bty process. Inspect, then either restore from "
-                f"backup or wipe + re-init (drop to a shell with Alt+F2, "
-                f"archive {image_root!s} / *, restart bty-web)."
-            ) from exc
-        stored = data.get("format_version")
-        if stored != STORAGE_FORMAT_VERSION:
-            raise StorageFormatMismatch(
-                f"image-store at {image_root} uses storage format "
-                f"v{stored!r}; this bty-web understands v{STORAGE_FORMAT_VERSION}. "
-                f"Older / newer layouts are NOT auto-migrated -- the "
-                f"naming conventions may have diverged. Operator action: "
-                f"drop to a shell (Alt+F2), archive the contents of "
-                f"{image_root!s} (e.g. ``mv {image_root!s} {image_root!s}.bak``) "
-                f"then restart bty-web -- a fresh image_root will get "
-                f"the current marker on init."
-            )
-        return int(stored)
-    # No marker: this is a fresh / never-used image_root. Stamp it.
-    marker.write_text(
-        json.dumps(
-            {
-                "format_version": STORAGE_FORMAT_VERSION,
-                "created_at": datetime.now(UTC).isoformat(),
-                "created_by_bty_version": _bty_version_for_marker(),
-            },
-            indent=2,
-        )
-        + "\n"
-    )
-    return STORAGE_FORMAT_VERSION
-
-
-def _bty_version_for_marker() -> str:
-    """Read ``bty.__version__`` for the storage-marker's diagnostic
-    field. Lazy-imported so this module can be parsed even before
-    bty.__init__ has populated __version__ (which would be
-    pathological but cheap to guard against)."""
-    try:
-        import bty
-
-        return str(bty.__version__)
-    except Exception:
-        return "unknown"
-
-
-def is_recognised_image_store_filename(name: str) -> bool:
-    """True iff ``name`` follows one of the documented image-store
-    conventions (v1):
-
-    - ``catalog-<ref:12>-<slug>.<ext>`` catalog-fetched cache file
-    - ``<any>.<known-image-ext>`` operator-typed image
-    - ``<file>.sha256`` sidecar
-    - ``.bty-storage.json`` storage marker
-    - ``.<ref:8>.<random>`` mid-fetch tempfile (cleaned up on
-      success, leaks on crash; tolerated, not warned about)
-
-    Anything else is operator-droppings or a stray file from a
-    failed migration -- callers use this to decide whether to
-    warn / bail.
-    """
-    if name == _STORAGE_MARKER_FILENAME:
-        return True
-    if name.endswith(".sha256"):
-        return True
-    if name.endswith(".partial"):
-        # Upload-in-progress sidecar (bty.web._app._stream_upload).
-        return True
-    # Mid-fetch tempfile from catalog.fetch_to_cache: ``.<ref:8>.<random>``.
-    # The leading dot + non-recognised extension would otherwise warn;
-    # tolerate so a crashed fetch doesn't leak operator-facing noise.
-    if name.startswith(".") and "." in name[1:]:
-        return True
-    # Image extensions live in bty.images.detect_format; check by
-    # path-only detection so we don't read the file.
-    from bty.images import detect_format
-
-    return detect_format(Path(name)) is not None
-
-
-# Length of the bty_image_ref segment in catalog filenames. 12 hex
-# chars is 48 bits, collision-free at any plausible homelab catalog
-# size; long enough to be useful for human disambiguation, short
-# enough not to dominate the filename.
-_CATALOG_REF_LEN = 12
-
-# Slug character set: lower-case ASCII alnum + hyphen + underscore.
-# Anything else collapses to a single hyphen so the filename stays
-# portable across filesystems.
-_SLUG_BAD = re.compile(r"[^a-z0-9_]+")
-_SLUG_DEDUP = re.compile(r"-+")
-
-
-def _slugify(text: str) -> str:
-    """Filename-safe lower-case ASCII slug.
-
-    "nosi debian-sysdev (x86_64, rolling)" -> "nosi-debian-sysdev-x86_64-rolling"
-
-    The slug carries no semantic weight (uniqueness lives in the
-    ``bty_image_ref`` prefix); it's only there to keep ``ls`` legible
-    when an operator browses the image_root.
-    """
-    s = _SLUG_BAD.sub("-", text.lower())
-    s = _SLUG_DEDUP.sub("-", s).strip("-")
-    return s or "image"
-
-
-def local_filename_for(bty_image_ref: str, name: str, fmt: str | None) -> str:
-    """Compose the on-disk filename for a catalog-fetched image from
-    its raw fields. Used by bty-web's image-serving path where the
-    catalog row is read from the DB and a full :class:`CatalogEntry`
-    isn't constructed -- mirror of :meth:`CatalogEntry.local_filename`
-    over the same field set.
-
-    Pattern: ``catalog-<bty_image_ref[:12]>-<slug(name)>.<ext>``.
-    """
-    ref_prefix = bty_image_ref[:_CATALOG_REF_LEN]
-    slug = _slugify(name)
-    ext = (fmt or "img").lstrip(".")
-    return f"{_CATALOG_PREFIX}{ref_prefix}-{slug}.{ext}"
-
 
 # Manifest schema version this implementation understands.
 SCHEMA_VERSION = 1
@@ -295,17 +54,6 @@ class CatalogError(Exception):
     match the UI (the sha256-sidecar checksum file is a distinct
     "manifest" and keeps that term). Subclass only when a call
     site needs to discriminate.
-    """
-
-
-class CatalogCancelled(Exception):
-    """Raised by :func:`fetch_to_cache` when a caller-supplied
-    cancel callback returns ``True`` between chunks.
-
-    Distinct from :class:`CatalogError` because cancellation is
-    a normal control flow (the operator clicked Cancel), not an
-    error condition. Callers that want to treat both alike can
-    ``except (CatalogError, CatalogCancelled)``.
     """
 
 
@@ -410,36 +158,6 @@ class CatalogEntry:
             size_bytes=int(raw["size_bytes"]) if raw.get("size_bytes") is not None else None,
             description=raw.get("description"),
         )
-
-    def local_filename(self) -> str:
-        """The on-disk filename this entry's bytes land at under the
-        image_root. Pattern: ``catalog-<bty_image_ref[:12]>-<slug>.<ext>``.
-
-        Derived purely from ``src`` (via ``bty_image_ref``), ``name``,
-        and ``format``. Same URL -> same filename, independent of
-        whether sha256 is pinned. No requirement on ``sha256``: ORAS
-        rolling-tag entries (``oras://...:latest``) get a stable
-        filename and benefit from on-disk dedup just like pinned
-        entries do.
-
-        ``format`` defaults to ``"img"`` if missing -- catalog entries
-        always carry a format in practice (``from_dict`` defaults it
-        from the name's extension), so this fallback is only for hand-
-        constructed test entries.
-        """
-        return local_filename_for(self.ref, self.name, self.format)
-
-    def cached_path(self, image_root: Path) -> Path:
-        """Where this entry's bytes live once fetched. URL-keyed via
-        ``local_filename`` so a re-fetch of the same ``src`` lands on
-        the same file (idempotent), and two distinct ``src`` URLs
-        never collide.
-
-        Same return shape as ``image_root / local_filename()`` -- kept
-        as a method on ``CatalogEntry`` for the natural call site
-        ``entry.cached_path(image_root)``.
-        """
-        return image_root / self.local_filename()
 
 
 @dataclass(frozen=True)
@@ -788,210 +506,6 @@ def image_ref_for_src(src: str) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-def is_cached(entry: CatalogEntry, image_root: Path) -> bool:
-    """``True`` iff the image_root holds a file at this entry's URL-
-    keyed ``local_filename``. We trust the filename (which encodes the
-    bty_image_ref) and the presence of a regular file; full re-
-    verification on every read would be expensive for multi-GiB
-    images, so we only verify on write."""
-    return entry.cached_path(image_root).is_file()
-
-
-ProgressCallback: TypeAlias = Callable[[int, "int | None"], None]
-"""Signature: ``progress(bytes_done, total_bytes_or_None)``.
-Called once per chunk written. ``total_bytes`` is the upstream
-``Content-Length`` if the server sent one (most do), else ``None``."""
-
-CancelCheck: TypeAlias = Callable[[], bool]
-"""Signature: ``cancel() -> bool``. Polled between chunks; returning
-``True`` raises :class:`CatalogCancelled`. Use this with
-``threading.Event.is_set`` or ``asyncio.Event.is_set`` so the
-fetcher (running in a worker thread) can be aborted from outside."""
-
-
-def fetch_to_cache(
-    entry: CatalogEntry,
-    image_root: Path,
-    *,
-    timeout: float = 300.0,
-    chunk_size: int = 1 << 20,  # 1 MiB
-    progress: ProgressCallback | None = None,
-    cancel: CancelCheck | None = None,
-) -> Path:
-    """Download ``entry.src`` into ``image_root / entry.local_filename()``,
-    verifying SHA-256 against ``entry.sha256`` when one is pinned.
-
-    Idempotent: if the file already exists, no-op (the URL-keyed
-    filename means same src always lands the same path). On SHA
-    mismatch or cancellation the temp file is removed before raising;
-    the image_root is never left with a half-written file. Atomic via
-    ``os.replace`` after the SHA check passes.
-
-    ``progress(downloaded, total_or_none)`` is called once per chunk
-    written, with ``total`` from the upstream ``Content-Length`` if
-    available. ``cancel()`` is polled between chunks; returning
-    ``True`` raises :class:`CatalogCancelled`. Both are optional.
-
-    Returns the final path on success.
-    """
-    cached = entry.cached_path(image_root)
-    if cached.is_file():
-        # Even a cached entry should announce itself as "100% done"
-        # so a UI that registered the request before the cache check
-        # gets a clean terminal state.
-        if progress is not None:
-            size = cached.stat().st_size
-            progress(size, size)
-        return cached
-
-    image_root.mkdir(parents=True, exist_ok=True)
-
-    # Stream into a hidden temp file in the same dir as the eventual
-    # target so the final ``os.replace`` is a single rename within
-    # the same filesystem (no cross-device copy). ``.<ref:8>.`` prefix
-    # is debuggable (operator can grep partial downloads) and won't
-    # collide with the final ``catalog-`` filename.
-    fd, tmp_name = tempfile.mkstemp(prefix=f".{entry.ref[:8]}.", dir=image_root)
-    tmp_path = Path(tmp_name)
-    try:
-        digest = hashlib.sha256()
-        # ``oras://`` entries route through bty.oras to resolve the
-        # manifest layer and inject a bearer-token Authorization
-        # header on the blob GET. Plain http(s) URLs use urlopen
-        # with the URL directly. urllib.request.urlopen accepts
-        # both ``str`` and ``Request``.
-        fetch_request: str | urllib.request.Request
-        if entry.src.startswith("oras://"):
-            from bty import oras as _oras
-
-            resolved = _oras.resolve_ref(entry.src, timeout=timeout)
-            fetch_request = urllib.request.Request(resolved.blob_url, headers=resolved.headers)
-        else:
-            fetch_request = entry.src
-        with (
-            os.fdopen(fd, "wb") as out,
-            urllib.request.urlopen(fetch_request, timeout=timeout) as resp,
-        ):
-            # Try to extract Content-Length; not all servers send it.
-            total: int | None
-            try:
-                cl = resp.headers.get("Content-Length")
-                total = int(cl) if cl is not None else None
-            except (ValueError, AttributeError):
-                total = None
-            _stream_with_digest(
-                resp,
-                out,
-                digest,
-                chunk_size,
-                progress=progress,
-                cancel=cancel,
-                total=total,
-            )
-        actual = digest.hexdigest()
-        # Only verify when the manifest pinned a sha256; rolling-tag
-        # entries (``oras://...:latest``) don't carry one. The
-        # observed hash still gets returned via the local file's
-        # ``catalog_entries.disk_image_sha`` write at the call site.
-        if entry.sha256 is not None and actual != entry.sha256:
-            raise CatalogError(
-                f"catalog fetch {entry.name!r}: sha256 mismatch "
-                f"(expected {entry.sha256}, got {actual}); discarded"
-            )
-        os.replace(tmp_path, cached)
-        return cached
-    except BaseException:
-        # Any failure (network, SHA mismatch, cancellation,
-        # KeyboardInterrupt) leaves no half-written cache entry behind.
-        with contextlib.suppress(FileNotFoundError):
-            tmp_path.unlink()
-        raise
-
-
-def fetch_src_to_cache(
-    src: str,
-    image_root: Path,
-    *,
-    local_filename: str,
-    expected_sha: str | None = None,
-    timeout: float = 300.0,
-    chunk_size: int = 1 << 20,  # 1 MiB
-    progress: ProgressCallback | None = None,
-    cancel: CancelCheck | None = None,
-) -> tuple[Path, str]:
-    """Eagerly fetch a remote ``src`` into ``image_root / local_filename``,
-    computing the SHA-256 as bytes flow.
-
-    Unlike :func:`fetch_to_cache`, this variant does NOT require the
-    SHA to be known in advance. It streams the bytes from ``src``,
-    computes the sha, and atomic-renames into the URL-keyed local
-    filename. When ``expected_sha`` is given, the streamed digest
-    must match it; on mismatch the temp file is discarded and
-    :class:`CatalogError` is raised (the image_root is never left
-    with a half-written file).
-
-    Used by the bty-web ``DownloadManager`` for explicit,
-    operator-initiated fetches of a catalog entry whose ``sha256``
-    field was empty -- the manager passes ``local_filename`` from
-    ``entry.local_filename()`` so the on-disk shape matches
-    :func:`fetch_to_cache`'s for sha-pinned entries.
-
-    ``src`` must be an http(s):// or oras:// URL; file:// srcs don't
-    need fetching (bytes are already on disk under ``BTY_IMAGE_ROOT``)
-    and a :class:`ValueError` surfaces instead.
-
-    Returns ``(local_path, computed_sha)``.
-    """
-    if src.startswith("file://"):
-        raise ValueError(
-            f"fetch_src_to_cache does not handle file:// srcs (bytes are already local): {src!r}"
-        )
-    image_root.mkdir(parents=True, exist_ok=True)
-    tmp_path = image_root / f".tmp.{os.urandom(8).hex()}"
-    digest = hashlib.sha256()
-    try:
-        if src.startswith("oras://"):
-            from bty import oras as _oras
-
-            resolved = _oras.resolve_ref(src, timeout=timeout)
-            req = urllib.request.Request(resolved.blob_url, headers=resolved.headers)
-            opener = urllib.request.urlopen(req, timeout=timeout)
-        else:
-            opener = urllib.request.urlopen(src, timeout=timeout)
-        with opener as resp, tmp_path.open("wb") as out:
-            # Read the header once and guard the parse: a malformed
-            # ``Content-Length`` should fold into "unknown total"
-            # rather than crash the fetch (mirrors ``fetch_to_cache``
-            # and ``_releases._stream``).
-            try:
-                cl = resp.headers.get("Content-Length")
-                total = int(cl) if cl is not None else None
-            except (ValueError, AttributeError):
-                total = None
-            _stream_with_digest(
-                resp,
-                out,
-                digest,
-                chunk_size,
-                progress=progress,
-                cancel=cancel,
-                total=total,
-            )
-        actual = digest.hexdigest()
-        if expected_sha is not None and actual != expected_sha.lower():
-            raise CatalogError(
-                f"fetch_src_to_cache {src!r}: sha256 mismatch "
-                f"(expected {expected_sha}, got {actual}); discarded"
-            )
-        cached = image_root / local_filename
-        os.replace(tmp_path, cached)
-        return cached, actual
-    except BaseException:
-        with contextlib.suppress(FileNotFoundError):
-            tmp_path.unlink()
-        raise
-
-
 def stream_src(
     src: str,
     *,
@@ -1039,39 +553,6 @@ def stream_src(
             resp.close()
 
     return _chunks(), total
-
-
-def _stream_with_digest(
-    src: IO[bytes],
-    dst: IO[bytes],
-    digest: hashlib._Hash,
-    chunk_size: int,
-    *,
-    progress: ProgressCallback | None,
-    cancel: CancelCheck | None,
-    total: int | None,
-) -> None:
-    """Pump bytes from ``src`` to ``dst`` in chunks while updating
-    the running SHA. Caller owns the ``digest.hexdigest()`` check.
-
-    Polls ``cancel()`` between chunks (1 MiB granularity by
-    default -- a multi-GiB download cancels within seconds, not
-    minutes), and reports ``progress(downloaded, total)`` per chunk.
-    """
-    downloaded = 0
-    if progress is not None:
-        progress(0, total)
-    while True:
-        if cancel is not None and cancel():
-            raise CatalogCancelled("fetch cancelled by caller")
-        chunk = src.read(chunk_size)
-        if not chunk:
-            return
-        dst.write(chunk)
-        digest.update(chunk)
-        downloaded += len(chunk)
-        if progress is not None:
-            progress(downloaded, total)
 
 
 def parse_sha256_manifest(text: str, target_name: str | None = None) -> str:
