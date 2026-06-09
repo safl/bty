@@ -1179,17 +1179,57 @@ def register_ui_routes(
 
     # ----- settings -------------------------------------------------------
 
-    def _config_row(label: str, value: object, env: str | None, default: str) -> dict[str, Any]:
-        """One read-only config row. ``source`` is "env" when an env var
-        is set, else "default" (the built-in / derived value), so the
-        operator can see why a magic value is what it is."""
-        source = "env" if (env and os.environ.get(env)) else "default"
+    def _config_row(
+        label: str,
+        value: object,
+        env: str | None,
+        default: str,
+        *,
+        section: str | None = None,
+        key: str | None = None,
+    ) -> dict[str, Any]:
+        """One config row for the Settings page.
+
+        v0.42+: when ``section`` + ``key`` are passed, the row is an
+        editable Config field; the template renders an inline form
+        that POSTs to ``/ui/settings/config/edit`` and write-backs to
+        ``cfg.primary_toml`` via ``_config.save_value``. The row is
+        read-only iff (a) no ``section`` / ``key`` is set (display-
+        only diagnostic like "bty version") OR (b) the value is
+        currently sourced from an env var (the env wins; editing
+        the TOML wouldn't take effect until env is unset).
+
+        ``source`` is read from the LoadedConfig's per-key
+        ``sources`` map so the badge reflects the actual provenance
+        chain, not a heuristic.
+        """
+        loaded = _config.active_config()
+        if section and key:
+            dotted = f"{section}.{key}"
+            raw_source = loaded.sources.get(dotted, "default")
+        else:
+            raw_source = "default"  # display-only row (e.g. bty version)
+        # Squash the source string to a coarse bucket the template
+        # branches on. ``raw_source`` may be ``"toml(/etc/bty/bty.toml)"``
+        # or ``"env(BTY_ADMIN_PASSWORD)"`` -- keep the detail for the
+        # tooltip but show a one-word badge.
+        if raw_source.startswith("env("):
+            source_bucket = "env"
+        elif raw_source.startswith("toml("):
+            source_bucket = "toml"
+        else:
+            source_bucket = "default"
+        editable = section is not None and key is not None and source_bucket != "env"
         return {
             "label": label,
             "value": str(value),
             "env": env,
             "default": default,
-            "source": source,
+            "source": source_bucket,
+            "source_detail": raw_source,
+            "section": section,
+            "key": key,
+            "editable": editable,
         }
 
     def _render_settings_page(
@@ -1247,28 +1287,36 @@ def register_ui_routes(
                 "rows": [
                     _config_row(
                         "State directory",
-                        cfg.state_dir,
+                        cfg.paths.state_dir,
                         "BTY_PATHS_STATE_DIR",
                         "/var/lib/bty",
+                        section="paths",
+                        key="state_dir",
                     ),
                     _config_row("Database", state_path, None, "<state dir>/state.db"),
                     _config_row(
                         "Netboot directory",
-                        cfg.boot_dir,
+                        cfg.paths.boot_dir or str(cfg.boot_dir),
                         "BTY_PATHS_BOOT_DIR",
                         "<state dir>/boot",
+                        section="paths",
+                        key="boot_dir",
                     ),
                     _config_row(
                         "Catalog manifest",
-                        catalog_file,
+                        cfg.paths.catalog_file or catalog_file,
                         "BTY_PATHS_CATALOG_FILE",
                         "<state dir>/catalog.toml",
+                        section="paths",
+                        key="catalog_file",
                     ),
                     _config_row(
                         "Session secret",
                         cfg.server.session_secret or str(state_dir / "session-secret"),
                         "BTY_SERVER_SESSION_SECRET",
                         "<state dir>/session-secret",
+                        section="server",
+                        key="session_secret",
                     ),
                 ],
             },
@@ -1276,25 +1324,45 @@ def register_ui_routes(
                 "title": "Network",
                 "icon": "hdd-network",
                 "rows": [
-                    _config_row("Bind host", cfg.server.host, "BTY_SERVER_HOST", "0.0.0.0"),
-                    _config_row("Bind port", str(cfg.server.port), "BTY_SERVER_PORT", "8080"),
+                    _config_row(
+                        "Bind host",
+                        cfg.server.host,
+                        "BTY_SERVER_HOST",
+                        "0.0.0.0",
+                        section="server",
+                        key="host",
+                    ),
+                    _config_row(
+                        "Bind port",
+                        str(cfg.server.port),
+                        "BTY_SERVER_PORT",
+                        "8080",
+                        section="server",
+                        key="port",
+                    ),
                     _config_row(
                         "Trust X-Forwarded-For",
-                        "yes" if cfg.server.trusted_proxy else "no",
+                        cfg.server.trusted_proxy or "(off)",
                         "BTY_SERVER_TRUSTED_PROXY",
-                        "no",
+                        "(off)",
+                        section="server",
+                        key="trusted_proxy",
                     ),
                     _config_row(
                         "TFTP probe target",
                         cfg.netboot.tftp_probe_host,
                         "BTY_NETBOOT_TFTP_PROBE_HOST",
                         "127.0.0.1",
+                        section="netboot",
+                        key="tftp_probe_host",
                     ),
                     _config_row(
                         "withcache base URL",
                         cfg.withcache.url or "(unset)",
                         "BTY_WITHCACHE_URL",
                         "(unset; bty-web streams from origin)",
+                        section="withcache",
+                        key="url",
                     ),
                 ],
             },
@@ -1340,6 +1408,15 @@ def register_ui_routes(
             backup_retention_count=backup_retention_count,
             backup_last_run_at=backup_last_run_at,
             missing_netboot_artifacts=_releases.missing_netboot_artifacts(boot_root),
+            # Provenance / write-target info for the editable config
+            # rows: the path the Settings POST handler writes to (or
+            # None when the operator hasn't installed a TOML yet).
+            config_primary_toml=(
+                str(_config.active_config().primary_toml)
+                if _config.active_config().primary_toml is not None
+                else None
+            ),
+            config_loaded_files=[str(p) for p in _config.active_config().loaded_files],
         )
 
     @app.get(
@@ -1373,6 +1450,156 @@ def register_ui_routes(
         # bty-config Settings page. version + service_user come from the
         # global render context.
         return render("ui/account.html", request)
+
+    @app.post(
+        "/ui/settings/config/edit",
+        include_in_schema=False,
+        dependencies=[Depends(require_ui_auth)],
+    )
+    def ui_settings_config_edit(
+        request: Request,
+        section: Annotated[str, Form()] = "",
+        key: Annotated[str, Form()] = "",
+        value: Annotated[str, Form()] = "",
+    ) -> RedirectResponse:
+        """Persist a single config edit from the Settings page into
+        the operator's bty.toml.
+
+        Per-row inline edit form on /ui/settings posts ``section`` +
+        ``key`` + ``value``. The handler validates the key is part
+        of the Config schema (no arbitrary write paths) + the
+        section/key combo IS editable (not env-overridden +
+        ``primary_toml`` is writable), then calls
+        ``_config.save_value`` to round-trip through tomlkit.
+        Coerces ``value`` to int when the schema field is typed as
+        int (``server.port`` / ``tuning.*``); empty string is treated
+        as "clear" and removes the override (reverts to default).
+
+        Records ``settings.config.updated`` (or ``.failed``) so the
+        audit log carries before/after for the bty-toml edit
+        trail. The next-reload picks up the change; bty-web reloads
+        on restart, OR the operator can call this endpoint and the
+        SAME process reloads the active config inline so the change
+        shows up on the next page render.
+        """
+        from dataclasses import fields
+        from typing import get_type_hints
+
+        from bty.web._config import Config as _ConfigCls
+
+        client_ip = _client_ip(request)
+        section = section.strip()
+        key = key.strip()
+        value = value.strip()
+
+        # Validate section/key against the schema -- the form can
+        # only target keys that exist in Config. Stops a hand-
+        # crafted POST from writing arbitrary TOML keys.
+        section_types = get_type_hints(_ConfigCls)
+        if section not in section_types:
+            return RedirectResponse(
+                "/ui/settings?error=unknown+section",
+                status_code=status.HTTP_303_SEE_OTHER,
+            )
+        valid_keys = {f.name: f.type for f in fields(section_types[section])}
+        if key not in valid_keys:
+            return RedirectResponse(
+                "/ui/settings?error=unknown+key",
+                status_code=status.HTTP_303_SEE_OTHER,
+            )
+
+        loaded = _config.active_config()
+        primary = loaded.primary_toml
+        if primary is None:
+            return RedirectResponse(
+                "/ui/settings?error=no+writable+bty.toml",
+                status_code=status.HTTP_303_SEE_OTHER,
+            )
+
+        # Refuse to write a key that's currently env-overridden --
+        # the TOML write would silently no-op as the env wins. The
+        # template hides edit forms for those rows, but a hand-
+        # crafted POST could still try.
+        dotted = f"{section}.{key}"
+        cur_source = loaded.sources.get(dotted, "default")
+        if cur_source.startswith("env("):
+            return RedirectResponse(
+                f"/ui/settings?error=env+override+for+{dotted}",
+                status_code=status.HTTP_303_SEE_OTHER,
+            )
+
+        # Coerce value to the schema's declared type. Int fields
+        # accept blank (treated as "no override" -- delete the key
+        # from the TOML so the default takes effect).
+        declared = valid_keys[key]
+        coerced: str | int
+        try:
+            if value == "":
+                coerced = ""
+            elif declared in (int, "int"):
+                coerced = int(value)
+            else:
+                coerced = value
+        except ValueError:
+            return RedirectResponse(
+                f"/ui/settings?error=invalid+value+for+{dotted}",
+                status_code=status.HTTP_303_SEE_OTHER,
+            )
+
+        # Capture old value for the audit row before the write.
+        old_value = _read_dotted(loaded.cfg, section, key)
+        try:
+            if coerced == "":
+                # Remove the key so the default takes over. Use
+                # ``tomlkit``'s in-place delete to preserve comments.
+                _delete_toml_key(primary, section, key)
+            else:
+                _config.save_value(primary, section, key, coerced)
+        except OSError as exc:
+            with _db.open_db(state_path) as conn:
+                _events_log.record(
+                    conn,
+                    kind="settings.config.failed",
+                    summary=f"bty.toml write failed: {exc}",
+                    subject_kind="settings",
+                    subject_id=dotted,
+                    actor="operator",
+                    source_ip=client_ip,
+                    details={"section": section, "key": key, "error": str(exc)},
+                )
+                conn.commit()
+            return RedirectResponse(
+                f"/ui/settings?error=write+failed+{dotted}",
+                status_code=status.HTTP_303_SEE_OTHER,
+            )
+
+        # Reload the active config so the next render sees the new
+        # value without a process restart.
+        _config.set_active_config(_config.load_config(None))
+
+        with _db.open_db(state_path) as conn:
+            _events_log.record(
+                conn,
+                kind="settings.config.updated",
+                summary=f"bty.toml: {dotted} = {coerced!r}",
+                subject_kind="settings",
+                subject_id=dotted,
+                actor="operator",
+                source_ip=client_ip,
+                details={
+                    "section": section,
+                    "key": key,
+                    "old": str(old_value),
+                    "new": "" if coerced == "" else str(coerced),
+                    "path": str(primary),
+                },
+            )
+            conn.commit()
+
+        return RedirectResponse(
+            "/ui/settings?saved=config",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
 
     @app.post(
         "/ui/settings/upstream",
@@ -1686,6 +1913,39 @@ def lshw_highlights(blob: str | None) -> dict[str, Any] | None:
         "mem_modules": mem_modules or None,
         "nics": nics,
     }
+
+
+def _read_dotted(cfg_obj: Any, section: str, key: str) -> Any:
+    """Read ``cfg.<section>.<key>`` -- the path-walk version of
+    Python attribute access. Used by the Settings edit handler to
+    capture the BEFORE value for the audit row without hand-rolling
+    a switch per section."""
+    section_obj = getattr(cfg_obj, section)
+    return getattr(section_obj, key)
+
+
+def _delete_toml_key(path: Path, section: str, key: str) -> None:
+    """Remove ``[section] key`` from the TOML at ``path``, preserving
+    operator formatting via tomlkit. No-op if the file / section /
+    key doesn't exist (the caller already validated; this is the
+    on-disk path).
+
+    Atomic via tempfile + rename, same shape as ``save_value``."""
+    import os
+
+    import tomlkit
+
+    if not path.is_file():
+        return
+    with path.open("r", encoding="utf-8") as f:
+        doc = tomlkit.parse(f.read())
+    if section not in doc or key not in doc[section]:
+        return
+    del doc[section][key]
+    tmp = path.with_name(f".{path.name}.tmp")
+    tmp.write_text(tomlkit.dumps(doc), encoding="utf-8")
+    os.chmod(tmp, 0o640)
+    tmp.replace(path)
 
 
 def _row_to_dict(row: Any) -> dict[str, Any]:

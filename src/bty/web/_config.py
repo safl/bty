@@ -280,24 +280,38 @@ def _expand_paths(paths: list[Path]) -> list[Path]:
 def _default_search_paths() -> list[Path]:
     """The standard search order when no explicit ``paths`` is given.
 
-    Operators who want a different layout pass ``--config`` or set
-    ``$BTY_CONFIG_FILE`` / ``$BTY_CONFIG_DIR``. The defaults aim at
-    the most common deploys:
+    Operators who want a different layout pass ``--config`` (a CLI
+    arg) or set ``$BTY_CONFIG_FILE`` / ``$BTY_CONFIG_DIR``. The
+    defaults aim at the most common deploys:
 
     * ``/etc/bty/conf.d/*.toml`` -- system-wide drop-ins
     * ``/etc/bty/bty.toml`` -- system-wide single file
+    * ``$BTY_CONFIG_DIR`` -- operator-pointed drop-in directory
+    * ``$BTY_CONFIG_FILE`` -- operator-pointed single file
     * ``<state_dir>/bty.toml`` -- host-local single file
 
-    The state_dir candidate uses the env-var override if set so an
-    operator who points ``BTY_PATHS_STATE_DIR`` at ``/srv/bty`` also
-    gets ``/srv/bty/bty.toml`` picked up.
+    Each later candidate overrides earlier per-key.  The state_dir
+    candidate uses the env-var override if set so an operator who
+    points ``BTY_PATHS_STATE_DIR`` at ``/srv/bty`` also gets
+    ``/srv/bty/bty.toml`` picked up.
     """
-    state_dir = Path(os.environ.get("BTY_PATHS_STATE_DIR") or DEFAULT_STATE_DIR)
-    return [
+    state_dir = Path(
+        os.environ.get("BTY_PATHS_STATE_DIR")
+        or os.environ.get("BTY_STATE_DIR")  # legacy alias
+        or DEFAULT_STATE_DIR
+    )
+    candidates: list[Path] = [
         DEFAULT_SYSTEM_CONF_DIR,
         DEFAULT_SYSTEM_CONFIG_FILE,
-        state_dir / "bty.toml",
     ]
+    dpath = (os.environ.get("BTY_CONFIG_DIR") or "").strip()
+    if dpath:
+        candidates.append(Path(dpath))
+    fpath = (os.environ.get("BTY_CONFIG_FILE") or "").strip()
+    if fpath:
+        candidates.append(Path(fpath))
+    candidates.append(state_dir / "bty.toml")
+    return candidates
 
 
 # Legacy env-var aliases. v0.41 used these flat names; v0.42 follows

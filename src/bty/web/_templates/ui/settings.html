@@ -178,14 +178,20 @@
 </div>{# /col backup-schedule #}
 </div>{# /row upstream + backup #}
 
-{# Four-up row of the read-only config groups (Identity / Storage /
-   Network / Background workers). Each card uses a compact
-   list-group layout instead of the wide 4-column table the single-
-   column form had: at col-lg-3 each card is too narrow for a
-   table-with-source-and-env column set, so the source badge sits
-   inline with the value and the env-var name renders as a small
-   muted line below. On medium screens cards stack 2-up; on phones
-   1-up. #}
+{# Four-up row of the config groups (Identity / Storage / Network /
+   Background workers). Each card uses a compact list-group layout
+   instead of the wide 4-column table the single-column form had:
+   at col-lg-3 each card is too narrow for a table-with-source-and-
+   env column set, so the source badge sits inline with the value
+   and the env-var name renders as a small muted line below. On
+   medium screens cards stack 2-up; on phones 1-up.
+
+   v0.42+: rows that map to a Config field carry an inline edit
+   form (POST -> /ui/settings/config/edit -> save_value to the
+   primary bty.toml). Env-overridden rows render the input as
+   disabled with a hint -- the TOML write wouldn't take effect
+   until the env is unset. Pure-display rows (e.g. "bty version")
+   keep the read-only shape. #}
 <div class="row g-3 mb-3">
 {% for group in config_groups %}
 <div class="col-md-6 col-lg-3">
@@ -199,21 +205,43 @@
             <div class="d-flex justify-content-between align-items-start gap-2">
                 <span class="text-muted">{{ r.label }}</span>
                 {% if r.source == "env" %}
-                <span class="badge bg-primary" title="set via environment variable">env</span>
-                {% elif r.source == "derived" %}
-                <span class="badge bg-secondary" title="derived from another path">derived</span>
+                <span class="badge bg-primary"
+                      title="overridden by environment variable: {{ r.source_detail }}">env</span>
+                {% elif r.source == "toml" %}
+                <span class="badge bg-success"
+                      title="set via bty.toml: {{ r.source_detail }}">toml</span>
                 {% else %}
                 <span class="badge bg-light text-dark border"
                       title="built-in default: {{ r.default }}">default</span>
                 {% endif %}
             </div>
-            {# Env var name first, value second -- the natural reading
-               order ("VAR=value", same shape an operator types into a
-               shell). #}
             {% if r.env %}
             <div class="small"><code class="text-muted">{{ r.env }}</code></div>
             {% endif %}
+            {% if r.editable %}
+            <form method="post" action="/ui/settings/config/edit"
+                  class="d-flex gap-1 mt-1 align-items-center">
+                <input type="hidden" name="section" value="{{ r.section }}">
+                <input type="hidden" name="key" value="{{ r.key }}">
+                <input type="text" name="value" value="{{ r.value }}"
+                       class="form-control form-control-sm font-monospace"
+                       style="min-width: 0;"
+                       title="Edit {{ r.section }}.{{ r.key }} -- blank clears the override">
+                <button type="submit" class="btn btn-sm btn-primary text-nowrap"
+                        title="Save to {{ config_primary_toml or '(no bty.toml configured)' }}">
+                    <i class="bi bi-save"></i>
+                </button>
+            </form>
+            {% elif r.source == "env" %}
+            {# Env-overridden: show the current value as a disabled
+               input + a hint that the env wins. #}
+            <input type="text" value="{{ r.value }}" disabled
+                   class="form-control form-control-sm font-monospace mt-1"
+                   title="Environment override active: {{ r.source_detail }}. Unset the env var to let bty.toml take effect.">
+            {% else %}
+            {# Pure-display row (e.g. bty version). #}
             <div class="text-break"><code class="small">{{ r.value }}</code></div>
+            {% endif %}
         </li>
         {% endfor %}
     </ul>
@@ -221,6 +249,20 @@
 </div>
 {% endfor %}
 </div>{# /row config_groups #}
+
+{# Source-of-truth banner: when the operator opens Settings and
+   nothing is configured at the bty.toml layer (or none of the
+   candidate paths are writable), surface that clearly -- editing
+   below either no-ops or has nowhere to land. #}
+{% if not config_primary_toml %}
+<div class="alert alert-warning small mb-3">
+    <i class="bi bi-exclamation-triangle me-1"></i>
+    No writable <code>bty.toml</code> in the config search path.
+    Settings edits below have nowhere to persist. Set
+    <code>$BTY_CONFIG_FILE</code> to a writable path or create
+    <code>&lt;state_dir&gt;/bty.toml</code>.
+</div>
+{% endif %}
 
 {# Router-side cheatsheet (moved here from the Netboot page). The bits
    the operator pastes into UniFi / pfSense / dnsmasq DHCP config to
