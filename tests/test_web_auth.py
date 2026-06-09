@@ -2,9 +2,13 @@
 
 The cookie is a Starlette ``SessionMiddleware``-signed payload; we don't try to
 decode it. Tests exercise the visible behaviour: ``/ui/login`` gates mutation
-routes on the admin password (``$BTY_ADMIN_PASSWORD``), the cookie carries
-authed state across requests, missing/wrong cookies 401, and an instance with
-no password configured leaves the UI open.
+routes on the admin password (``$BTY_ADMIN_PASSWORD`` overrides; the literal
+``"bty"`` is the well-known default when unset), the cookie carries authed
+state across requests, and missing / wrong cookies 401.
+
+Auth is ALWAYS on -- there is no "open instance" mode. The well-known
+default password makes a fresh deploy come up without operator config, but
+every request still goes through the login gate.
 """
 
 from __future__ import annotations
@@ -128,14 +132,30 @@ def test_logout_clears_the_session(client: TestClient) -> None:
     assert client.get("/machines").status_code == 401
 
 
-# ---------- open instance (no password configured) -------------------------
+# ---------- default password (no env var) ----------------------------------
 
 
-def test_open_instance_allows_protected_routes_without_login(
+def test_default_password_still_gates_protected_routes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """With BTY_ADMIN_PASSWORD unset the UI is open: protected routes answer
-    without a session cookie (a startup warning is logged)."""
+    """With BTY_ADMIN_PASSWORD unset, ``bty`` is the active password. The
+    UI is NOT open: a request without a session cookie 401s, and the
+    operator can log in with the literal string ``"bty"``."""
     monkeypatch.delenv("BTY_ADMIN_PASSWORD", raising=False)
     with _make_client(tmp_path) as c:
+        # Unauthed access is still 401 -- no bypass.
+        assert c.get("/machines").status_code == 401
+        # Logging in with the well-known default works.
+        r = c.post("/ui/login", data={"password": "bty"}, follow_redirects=False)
+        assert r.status_code == 303
         assert c.get("/machines").status_code == 200
+
+
+def test_default_password_login_form_warns(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """``/ui/login`` flags the well-known default in the form so an
+    operator browsing in sees a "change me" callout."""
+    monkeypatch.delenv("BTY_ADMIN_PASSWORD", raising=False)
+    with _make_client(tmp_path) as c:
+        body = c.get("/ui/login").text
+        assert "well-known default" in body
+        assert "BTY_ADMIN_PASSWORD" in body
