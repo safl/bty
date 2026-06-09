@@ -9,6 +9,33 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.41.1] - 2026-06-09
+
+**Hot-fix: ``bty-lab deploy`` in root mode left compose-managed
+containers holding the ports the Quadlet services needed.**
+
+Symptom on the lab box: ``[11/15] starting stack`` succeeded
+(compose brought up ``bty_withcache_1`` / ``bty_bty-web_1`` /
+``bty_tftp_1``), then ``[14/15] starting systemd services``
+failed with ``Job for withcache.service failed`` + ``Job for
+bty-web.service failed`` because the compose containers were
+still holding ``:3000`` + ``:8080``.
+
+### Fixed
+
+- ``deploy_main`` in root mode no longer ``compose up``s. The
+  ``compose pull`` stays (warms the registry cache); ``compose up
+  -d`` is replaced by ``compose down`` (clears leftover compose-
+  managed containers from a prior install -- idempotent on a fresh
+  host). Quadlet + systemd then own the lifecycle.
+- Non-root mode is unchanged: ``compose up -d`` remains the
+  lifecycle there (no Quadlets to hand off to).
+- ``upgrade_main`` was already correct -- only ``deploy_main`` had
+  the bug.
+
+Regression test ``test_deploy_as_root_does_system_install`` asserts
+``compose up`` never appears in the root-mode runtime call sequence.
+
 ## [0.41.0] - 2026-06-09
 
 **Cleanup release: ~2300 LoC of dead code + stale references removed
