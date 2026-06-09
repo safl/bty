@@ -53,7 +53,7 @@ from bty.web import (
     _ui,
     _withcache,
 )
-from bty.web._auth import SESSION_COOKIE, auth_enabled, require_auth
+from bty.web._auth import SESSION_COOKIE, require_auth, using_default_password
 from bty.web._events import (
     WORKER_STATE_CHANGED,
     MachineEvent,
@@ -167,10 +167,11 @@ def create_app(
         import logging as _logging
 
         _lifespan_log = _logging.getLogger(__name__)
-        if not auth_enabled():
+        if using_default_password():
             _lifespan_log.warning(
-                "BTY_ADMIN_PASSWORD is not set - the operator UI is OPEN "
-                "(unauthenticated). Set it to gate /ui."
+                "BTY_ADMIN_PASSWORD is not set - using the well-known default "
+                "password 'bty'. Change it via $BTY_ADMIN_PASSWORD for any "
+                "deploy reachable beyond localhost."
             )
         # The SSE event bus accepts publishes from worker threads -
         # capture the loop now so cross-thread publishes can hop in

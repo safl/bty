@@ -464,18 +464,15 @@
             <span class="navbar-version me-2">v{{ version }}</span>
             <div class="user-bar mt-2 mt-md-0"
                  title="OS user that bty-web is running as">
-                {# The operator name doubles as the Account link (auth /
-                   session management). On auth-disabled installs the
-                   Logout button is dropped (no session to clear); the
-                   Account link stays so the operator can still set
-                   ``$BTY_ADMIN_PASSWORD`` from the UI. #}
+                {# Auth is always on. The operator name doubles as the
+                   Account link (where the change-password form lives);
+                   Logout sits beside it, separated by a thin rule. #}
                 <a href="/ui/account"
                    class="user-bar-name user-bar-action {% if nav_active == 'account' %}active{% endif %}"
                    title="Operator account (authentication)">
                     <i class="bi bi-person-circle"></i>
                     <code>{{ service_user }}</code>
                 </a>
-                {% if auth_enabled %}
                 <span class="user-bar-divider"></span>
                 <form action="/ui/logout" method="post" class="m-0 d-inline-flex">
                     <button type="submit" class="user-bar-action user-bar-logout"
@@ -483,7 +480,6 @@
                         <i class="bi bi-box-arrow-right"></i>
                     </button>
                 </form>
-                {% endif %}
             </div>
         </div>
         {% endif %}

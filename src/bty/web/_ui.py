@@ -77,18 +77,11 @@ def register_ui_routes(
 
     def render(name: str, request: Request, **ctx: Any) -> HTMLResponse:
         ctx.setdefault("version", bty.__version__)
-        # The layout's nav cluster keys off ``logged_in``; treat
-        # auth-disabled installs (``$BTY_ADMIN_PASSWORD`` unset --
-        # the default for a fresh deploy) as "interactive" so the
-        # nav doesn't vanish on the open-access path. The layout
-        # also reads ``auth_enabled`` directly to hide the Logout
-        # button when there's no session to clear.
-        auth_on = _auth.auth_enabled()
-        ctx.setdefault("auth_enabled", auth_on)
-        ctx.setdefault(
-            "logged_in",
-            (not auth_on) or bool(request.session.get(SESSION_AUTHED_KEY)),
-        )
+        # Auth is always on; ``logged_in`` is purely session-derived.
+        # Templates can opt-in to a "using the default password"
+        # banner via ``using_default_password``.
+        ctx.setdefault("logged_in", bool(request.session.get(SESSION_AUTHED_KEY)))
+        ctx.setdefault("using_default_password", _auth.using_default_password())
         ctx.setdefault("service_user", service_user)
         # Top-level path segment under /ui/ - the layout uses this to
         # mark the active nav button. ``request.url.path`` is the full
@@ -108,8 +101,11 @@ def register_ui_routes(
         return RedirectResponse("/ui/login", status_code=status.HTTP_303_SEE_OTHER)
 
     def require_ui_auth(request: Request) -> None:
-        # Open when no admin password is configured (see _auth.auth_enabled).
-        if _auth.auth_enabled() and not request.session.get(SESSION_AUTHED_KEY):
+        # Auth is always on. 401-on-API-routes is handled by
+        # ``_auth.require_auth``; UI routes bounce through here so the
+        # exception handler can 303 to /ui/login instead of returning
+        # a JSON 401 the browser can't act on.
+        if not request.session.get(SESSION_AUTHED_KEY):
             raise NotAuthenticated
 
     # ----- entry / auth ----------------------------------------------------
@@ -120,10 +116,9 @@ def register_ui_routes(
 
     @app.get("/ui/login", include_in_schema=False)
     def ui_login_form(request: Request) -> Response:
-        # When the instance is open (no password) or the visitor is already
-        # authed, skip the form and land on the dashboard. Lets ``GET /``
-        # (which 303s here) act as a smart entry point.
-        if not _auth.auth_enabled() or request.session.get(SESSION_AUTHED_KEY):
+        # Already authed -> skip the form and land on the dashboard.
+        # Lets ``GET /`` (which 303s here) act as a smart entry point.
+        if request.session.get(SESSION_AUTHED_KEY):
             return RedirectResponse("/ui/dashboard", status_code=status.HTTP_303_SEE_OTHER)
         return render("ui/login.html", request)
 
@@ -133,9 +128,6 @@ def register_ui_routes(
         password: Annotated[str, Form()],
     ) -> Response:
         client_ip = _client_ip(request)
-        # Open instance: nothing to check, land on the dashboard.
-        if not _auth.auth_enabled():
-            return RedirectResponse("/ui/dashboard", status_code=status.HTTP_303_SEE_OTHER)
         if not _auth.check_password(password):
             # Failed login: record so an operator scanning /ui/events sees
             # brute-force attempts.
