@@ -13,6 +13,10 @@ PublishPort=8080:8080
 Volume=bty-data:/var/lib/bty
 # Must be THIS HOST's LAN address, not a container name (booting clients fetch it).
 Environment=BTY_WITHCACHE_URL=http://HOST_ADDR:3000
+# TFTP probe target for the Netboot page diagnostic. bty-tftp uses host
+# networking, so udp/69 is on the host's LAN address (not on bty-web's
+# loopback). Same HOST_ADDR substitution as BTY_WITHCACHE_URL above.
+Environment=BTY_TFTP_PROBE_HOST=HOST_ADDR
 
 [Service]
 Restart=always
