@@ -50,23 +50,48 @@ def _run_portability(args: argparse.Namespace) -> None:
             print(f"  skipped: {line}", file=sys.stderr)
 
 
+def _resolve_config_paths(cli_paths: list[str] | None) -> list[Path] | None:
+    """Build the candidate path list for :func:`_config.load_config`
+    from the operator's inputs.
+
+    Precedence: ``--config`` flag(s) > ``$BTY_CONFIG_FILE`` /
+    ``$BTY_CONFIG_DIR`` env > default search (None -> the loader's
+    built-in list). Returning ``None`` from this helper means "no
+    operator-explicit choice, use the default search list" -- which is
+    the common case for stock deploys.
+    """
+    if cli_paths:
+        return [Path(p) for p in cli_paths]
+    env_paths: list[Path] = []
+    fpath = os.environ.get("BTY_CONFIG_FILE", "").strip()
+    if fpath:
+        env_paths.append(Path(fpath))
+    dpath = os.environ.get("BTY_CONFIG_DIR", "").strip()
+    if dpath:
+        env_paths.append(Path(dpath))
+    return env_paths or None
+
+
 def _resolve_secret_key(state_dir: Path) -> str:
     """Return the per-server session-cookie secret.
 
-    Read from ``$BTY_SESSION_SECRET`` if set + non-empty (CI tests,
-    debugging); otherwise from ``<state_dir>/session-secret`` if it
-    exists + non-empty. Otherwise generate a 32-byte URL-safe key,
-    persist it under ``state_dir`` with mode 0640, and return it.
+    Resolution chain:
+
+    1. ``cfg.server.session_secret`` (TOML or its env override
+       ``BTY_SERVER_SESSION_SECRET``) if set + non-empty.
+    2. ``<state_dir>/session-secret`` if the file exists + non-empty.
+    3. Otherwise: generate a fresh 32-byte URL-safe key, persist it
+       under ``state_dir`` with mode 0640, and return it.
 
     An empty/whitespace value from either source is treated as
     "not set" and falls through to generation. A literal empty
-    string would silently degrade ``SessionMiddleware``'s HMAC to a
-    predictable signature -- forgeable session cookies on the LAN
-    segment -- so we never let one through. Causes that produce an
-    empty value in practice:
+    string would silently degrade the HMAC to a predictable
+    signature -- forgeable session cookies on the LAN segment -- so
+    we never let one through. Causes that produce an empty value
+    in practice:
 
-    - operator sets ``BTY_SESSION_SECRET=""`` thinking they're
-      "clearing" the override
+    - operator sets ``session_secret = ""`` in bty.toml thinking
+      they're "clearing" the override
     - a half-written ``session-secret`` file from a crashed first
       boot (the prior implementation's ``Path.write_text`` wasn't
       atomic; a process kill between open and write left the file
@@ -76,16 +101,24 @@ def _resolve_secret_key(state_dir: Path) -> str:
 
     Persisting now writes through a same-dir tempfile + atomic
     rename so a crash mid-write either leaves the OLD file (if any)
-    or no file (if first boot); never a truncated one. bty-web
-    generates and persists this key on first start when neither the
-    env var nor an existing file supplies one, so a fresh container
-    or host install works without any pre-seeding step. Operators
-    who want a fixed key across rebuilds can mount one in or set
-    ``$BTY_SESSION_SECRET``.
+    or no file (if first boot); never a truncated one.
     """
-    env_key = (os.environ.get("BTY_SESSION_SECRET") or "").strip()
-    if env_key:
-        return env_key
+    try:
+        from bty.web._config import cfg as _cfg
+
+        configured = (_cfg().server.session_secret or "").strip()
+    except RuntimeError:
+        # No active config (test that calls this directly without
+        # booting main(), or a hypothetical pre-init caller). Fall
+        # back to the legacy + new env names so direct-call use
+        # stays predictable.
+        configured = (
+            os.environ.get("BTY_SERVER_SESSION_SECRET")
+            or os.environ.get("BTY_SESSION_SECRET")
+            or ""
+        ).strip()
+    if configured:
+        return configured
     secret_path = state_dir / "session-secret"
     if secret_path.is_file():
         existing = secret_path.read_text(encoding="utf-8").strip()
@@ -120,44 +153,17 @@ def main(argv: list[str] | None = None) -> None:
         prog="bty-web",
         description=(
             "bty-web: HTTP server with browser UI for fleet image flashing.\n\n"
-            "All runtime configuration is read from the environment so the\n"
-            "bty-web systemd unit (and the bty-web container) can supply\n"
-            "values without command-line plumbing:\n\n"
-            "  BTY_WEB_HOST          bind address (default 0.0.0.0)\n"
-            "  BTY_WEB_PORT          bind port (default 8080; clamped to 1-65535)\n"
-            "  BTY_STATE_DIR         state directory holding state.db /\n"
-            "                        session-secret (default /var/lib/bty)\n"
-            "  BTY_BOOT_DIR          directory of netboot artifacts (kernel /\n"
-            "                        initrd / squashfs); default <BTY_STATE_DIR>/\n"
-            "                        boot\n"
-            "  BTY_BOOT_SEED_DIR     directory of baked bootstrap artifacts (the\n"
-            "                        container image's custom ipxe.efi) copied\n"
-            "                        into BTY_BOOT_DIR on startup when absent;\n"
-            "                        unset on host/dev installs (no-op)\n"
-            "  BTY_BOOT_RELEASE_REPO GitHub repo to fetch netboot artifacts +\n"
-            "                        catalog.toml from (default safl/bty)\n"
-            "  BTY_CATALOG_FILE      catalog.toml path (default <BTY_STATE_DIR>/\n"
-            "                        catalog.toml)\n"
-            "  BTY_MAX_UPLOAD_BYTES  cap on /boot upload body size in bytes\n"
-            "                        (default 200 GiB; values <= 0 ignored)\n"
-            "  BTY_SESSION_SECRET    override the persisted session-cookie key\n"
-            "                        (default: read/create <BTY_STATE_DIR>/\n"
-            "                        session-secret)\n"
-            "  BTY_TRUSTED_PROXY     when set (any truthy value), read the\n"
-            "                        client IP from X-Forwarded-For; only\n"
-            "                        enable behind a reverse proxy that\n"
-            "                        strips inbound X-Forwarded-For\n"
-            "  BTY_BACKUP_DIR        directory scheduled / on-demand backups\n"
-            "                        land in (default <BTY_STATE_DIR>/backups)\n"
-            "  BTY_BACKUP_MAX_PARALLEL  max concurrent backup jobs (default 1;\n"
-            "                        concurrent exports would race on dest dirs)\n"
-            "  BTY_WITHCACHE_URL     base URL of the withcache cache-host\n"
-            "                        (default unset; bty-web then streams from\n"
-            "                        origin instead of routing through withcache)\n"
-            "  BTY_TFTP_PROBE_HOST   target for the Netboot page TFTP probe\n"
-            "                        (default 127.0.0.1; container deploys\n"
-            "                        set this to the host's LAN address since\n"
-            "                        bty-tftp uses network_mode: host)\n"
+            "Configuration is layered: built-in defaults < TOML config files <\n"
+            "environment variables. Each layer overrides the prior PER KEY, not\n"
+            "per file -- one env override doesn't force the rest to be set.\n\n"
+            "TOML search order (when --config isn't passed):\n"
+            "  1. $BTY_CONFIG_FILE or $BTY_CONFIG_DIR (if set)\n"
+            "  2. /etc/bty/conf.d/*.toml (drop-ins, lexicographic order)\n"
+            "  3. /etc/bty/bty.toml\n"
+            "  4. <state_dir>/bty.toml\n\n"
+            "Per-key env override: BTY_<SECTION>_<KEY>. Example: BTY_SERVER_PORT\n"
+            "overrides [server] port. The bty.toml schema lives in\n"
+            "bty.web._config (one section dataclass per [section]).\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -165,6 +171,18 @@ def main(argv: list[str] | None = None) -> None:
         "--version",
         action="version",
         version=f"bty-web {bty.__version__}",
+    )
+    parser.add_argument(
+        "--config",
+        action="append",
+        default=None,
+        metavar="PATH",
+        help=(
+            "TOML config file OR directory of drop-ins. Repeatable; each later "
+            "--config overrides earlier ones per-key. Overrides the default "
+            "search list ($BTY_CONFIG_FILE / $BTY_CONFIG_DIR / /etc/bty/ / "
+            "<state_dir>/bty.toml)."
+        ),
     )
     # Subcommands. Bare ``bty-web`` (no subcommand) still runs the server
     # -- the subparser is optional so the systemd unit / container
@@ -194,7 +212,6 @@ def main(argv: list[str] | None = None) -> None:
         import uvicorn
 
         from bty.web._app import create_app
-        from bty.web._db import default_state_path
     except ImportError as exc:
         print(
             f"bty-web {bty.__version__}: required dependency is not installed "
@@ -206,9 +223,20 @@ def main(argv: list[str] | None = None) -> None:
 
     service_user = pwd.getpwuid(os.geteuid()).pw_name
 
-    state_path = default_state_path()
-    boot_root_env = os.environ.get("BTY_BOOT_DIR")
-    boot_root = Path(boot_root_env) if boot_root_env else None
+    # Build the layered config (defaults < TOML files < env vars) and
+    # install it as the process-wide singleton. Every module that
+    # used to do ``os.environ.get("BTY_*")`` reads from this Config
+    # now; the env-var convention persists as a per-key override
+    # layer (BTY_<SECTION>_<KEY>) on top of bty.toml.
+    from bty.web import _config as cfg_mod
+
+    paths = _resolve_config_paths(args.config)
+    loaded = cfg_mod.load_config(paths)
+    cfg_mod.set_active_config(loaded)
+    cfg = loaded.cfg
+
+    state_path = cfg.state_db
+    boot_root: Path | None = cfg.boot_dir
     secret_key = _resolve_secret_key(state_path.parent)
 
     app = create_app(
@@ -218,8 +246,8 @@ def main(argv: list[str] | None = None) -> None:
         boot_root=boot_root,
     )
 
-    host = os.environ.get("BTY_WEB_HOST", "0.0.0.0")
-    raw_port = os.environ.get("BTY_WEB_PORT", "8080")
+    host = cfg.server.host
+    raw_port = str(cfg.server.port)
     try:
         port = int(raw_port)
     except ValueError:
