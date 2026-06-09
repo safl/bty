@@ -19,6 +19,9 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import os
+import socket
+import struct
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -29,6 +32,20 @@ SYSNET_PATH = Path("/sys/class/net")
 # install. ``tftp_status`` queries this one; the container
 # deploy's sidecar runs outside our visibility.
 TFTP_UNIT = "dnsmasq.service"
+
+# Default TFTP probe target. Operator can override via
+# $BTY_TFTP_PROBE_HOST when the daemon lives somewhere other than
+# the bty host (e.g. an upstream router). The default port 69 is
+# the IANA TFTP port and isn't expected to vary in homelab setups.
+ENV_TFTP_PROBE_HOST = "BTY_TFTP_PROBE_HOST"
+DEFAULT_TFTP_PROBE_HOST = "127.0.0.1"
+DEFAULT_TFTP_PROBE_PORT = 69
+
+# Default filename to probe for. ``ipxe.efi`` is the UEFI iPXE
+# bootfile bty's tftp sidecar always ships; if the operator's TFTP
+# server doesn't have it, every UEFI PXE-Boot client on the LAN
+# 404s on the first DHCP -> TFTP step.
+DEFAULT_TFTP_PROBE_FILENAME = "ipxe.efi"
 
 
 @dataclass(frozen=True)
@@ -88,6 +105,145 @@ def tftp_status() -> DaemonStatus:
     except (subprocess.TimeoutExpired, FileNotFoundError):
         return DaemonStatus(state="unknown")
     return DaemonStatus(state="active" if rc == 0 else "inactive")
+
+
+@dataclass(frozen=True)
+class TftpProbeResult:
+    """Outcome of a single TFTP probe.
+
+    The operator's question is "is the TFTP server reachable AND
+    does it have the bootfile clients ask for?" -- two independent
+    failure modes, each with its own remediation. The shape carries
+    both so the UI can show either "no route to host" vs "host
+    answered but file missing" without a second probe round-trip.
+
+    * ``host`` / ``port`` / ``filename`` -- what was probed (echoed
+      back so the UI doesn't have to recompute it).
+    * ``reachable`` -- a TFTP RRQ for ``filename`` got SOMETHING
+      back from the server (a DATA packet OR an ERROR packet); if
+      False, the server didn't respond inside ``timeout_s``.
+    * ``file_present`` -- the server answered with a DATA opcode (3)
+      rather than ERROR (5). Only meaningful when ``reachable`` is
+      True.
+    * ``detail`` -- short human-readable explanation. The TFTP
+      ERROR packet's text (if any) lands here when the file is
+      missing; a socket-level error message lands here on
+      unreachable.
+    """
+
+    host: str
+    port: int
+    filename: str
+    reachable: bool
+    file_present: bool
+    detail: str
+
+    @property
+    def ok(self) -> bool:
+        """True iff both legs of the probe succeeded."""
+        return self.reachable and self.file_present
+
+
+def default_tftp_probe_host() -> str:
+    """Effective probe host: ``$BTY_TFTP_PROBE_HOST`` if set + non-
+    empty, else :data:`DEFAULT_TFTP_PROBE_HOST` (``127.0.0.1``)."""
+    return os.environ.get(ENV_TFTP_PROBE_HOST, "").strip() or DEFAULT_TFTP_PROBE_HOST
+
+
+def tftp_probe(
+    host: str | None = None,
+    port: int = DEFAULT_TFTP_PROBE_PORT,
+    filename: str = DEFAULT_TFTP_PROBE_FILENAME,
+    timeout_s: float = 1.5,
+) -> TftpProbeResult:
+    """Send a TFTP RRQ for ``filename`` and report what came back.
+
+    Implements RFC 1350 just far enough to round-trip one request:
+
+    * Opcode 1 (RRQ) + filename + NUL + ``"octet"`` + NUL goes out
+      as a single UDP datagram.
+    * The first reply is enough to tell us: DATA (opcode 3) means
+      the file exists, ERROR (opcode 5) means the server is up but
+      the file isn't there (the ERROR carries an ASCII message
+      after the 2-byte error code). No reply within ``timeout_s``
+      means the server is unreachable (the port is dropped, the
+      daemon isn't running, or the network path is blocked).
+
+    We do NOT ack the DATA packet, so the server quietly drops the
+    transfer state on its own retry timer. Cheap probe, no
+    cleanup, no risk of leaking a half-open transfer.
+
+    Errors that should never bubble to the UI as a 500 are caught
+    and reported as ``reachable=False`` with the exception's
+    message in ``detail``.
+    """
+    target = (host or default_tftp_probe_host()).strip()
+    # RRQ packet: \x00\x01 + filename + \x00 + "octet" + \x00
+    pkt = b"\x00\x01" + filename.encode("ascii", errors="replace") + b"\x00octet\x00"
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.settimeout(timeout_s)
+    try:
+        sock.sendto(pkt, (target, port))
+        data, _addr = sock.recvfrom(1024)
+    except TimeoutError:
+        return TftpProbeResult(
+            host=target,
+            port=port,
+            filename=filename,
+            reachable=False,
+            file_present=False,
+            detail=f"no reply from {target}:{port} within {timeout_s:.1f}s",
+        )
+    except OSError as exc:
+        # Connection refused, no route, name resolution failure, etc.
+        return TftpProbeResult(
+            host=target,
+            port=port,
+            filename=filename,
+            reachable=False,
+            file_present=False,
+            detail=f"{type(exc).__name__}: {exc}",
+        )
+    finally:
+        sock.close()
+    if len(data) < 2:
+        return TftpProbeResult(
+            host=target,
+            port=port,
+            filename=filename,
+            reachable=True,
+            file_present=False,
+            detail=f"server replied with {len(data)} bytes (truncated)",
+        )
+    opcode = struct.unpack("!H", data[:2])[0]
+    if opcode == 3:  # DATA
+        return TftpProbeResult(
+            host=target,
+            port=port,
+            filename=filename,
+            reachable=True,
+            file_present=True,
+            detail=f"server returned a DATA packet ({len(data)} bytes)",
+        )
+    if opcode == 5:  # ERROR
+        # ERROR = opcode(2) + errcode(2) + ASCIIZ message
+        msg = data[4:].split(b"\x00", 1)[0].decode("ascii", errors="replace")
+        return TftpProbeResult(
+            host=target,
+            port=port,
+            filename=filename,
+            reachable=True,
+            file_present=False,
+            detail=f"server returned ERROR: {msg or '(no message)'}",
+        )
+    return TftpProbeResult(
+        host=target,
+        port=port,
+        filename=filename,
+        reachable=True,
+        file_present=False,
+        detail=f"server returned unexpected opcode {opcode}",
+    )
 
 
 @dataclass(frozen=True)
