@@ -32,7 +32,6 @@ def _make_client(tmp_path: Path) -> TestClient:
         state_path=state,
         service_user=TEST_SERVICE_USER,
         secret_key=TEST_SECRET_KEY,
-        image_root=image_root,
         boot_root=boot_root,
     )
     return TestClient(app)

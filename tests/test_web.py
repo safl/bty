@@ -42,8 +42,6 @@ def app_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Test
     omits it to test the unauthed path).
     """
     state = tmp_path / "state.db"
-    image_root = tmp_path / "images"
-    image_root.mkdir()
     boot_root = tmp_path / "boot"
     boot_root.mkdir()
     bty_state_dir = tmp_path / "bty-state"
@@ -52,8 +50,6 @@ def app_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Test
     (boot_root / ARTIFACT_NAMES[0]).write_bytes(b"fake-kernel")
     (boot_root / ARTIFACT_NAMES[1]).write_bytes(b"fake-initrd")
     (boot_root / ARTIFACT_NAMES[2]).write_bytes(b"fake-squashfs")
-    # Seed an image too so /images/{name} tests work.
-    (image_root / "demo.qcow2").write_bytes(b"fake-image")
     # Pin BTY_STATE_DIR so ``catalog.toml`` upload / fetch-release
     # tests can find the on-disk manifest under tmp_path. The default
     # is /var/lib/bty which would be unwritable in CI.
@@ -63,7 +59,6 @@ def app_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Test
         state_path=state,
         service_user=TEST_SERVICE_USER,
         secret_key=TEST_SECRET_KEY,
-        image_root=image_root,
         boot_root=boot_root,
     )
 
@@ -3548,8 +3543,6 @@ def test_create_app_rotates_stale_state_db_end_to_end(
     from bty.web import _db
 
     state = tmp_path / "state.db"
-    image_root = tmp_path / "images"
-    image_root.mkdir()
     bty_state_dir = tmp_path / "bty-state"
     bty_state_dir.mkdir()
     monkeypatch.setenv("BTY_STATE_DIR", str(bty_state_dir))
@@ -3573,7 +3566,6 @@ def test_create_app_rotates_stale_state_db_end_to_end(
         state_path=state,
         service_user=TEST_SERVICE_USER,
         secret_key=TEST_SECRET_KEY,
-        image_root=image_root,
     )
     with TestClient(app) as client:
         # /healthz forces the lifespan to fully start (open_db

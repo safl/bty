@@ -1,6 +1,6 @@
 """FastAPI application for bty-web.
 
-``create_app(state_path, service_user, image_root)`` returns a fully
+``create_app(state_path, service_user, secret_key, boot_root)`` returns a fully
 wired FastAPI instance. Tests construct one with a tmp_path SQLite +
 a fixture service user (PAM gets monkeypatched in those tests).
 ``main()`` (in :mod:`bty.web.__init__`) builds one from environment
@@ -88,7 +88,6 @@ def create_app(
     service_user: str,
     secret_key: str,
     boot_root: Path | None = None,
-    image_root: Path | None = None,
 ) -> FastAPI:
     """Build the FastAPI app. All config flows through this function.
 
@@ -110,12 +109,6 @@ def create_app(
     ``state_path.parent / "boot"`` (i.e. ``/var/lib/bty/boot`` in the
     default layout).
     """
-    # ``image_root`` is accepted for backwards compatibility with callers
-    # that still pass it (the test fixture is the main one); v0.40 took
-    # bty-web out of the bytes path entirely, so the value is no longer
-    # read anywhere. Slated for removal once the test fixture stops
-    # threading it through.
-    del image_root
     resolved_boot_root: Path = boot_root or (state_path.parent / "boot")
     # Scheduled + on-demand backups land under ``backups/`` next to
     # state.db so they survive the same migrate-the-state-dir flow as
