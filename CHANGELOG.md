@@ -9,6 +9,76 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.41.0] - 2026-06-09
+
+**Cleanup release: ~2300 LoC of dead code + stale references removed
+in the wake of v0.40's catalogs-not-bytes refactor.** No behavioural
+changes for operators -- everything still works exactly as v0.40 did.
+
+### Removed (code)
+
+- ``/ui/images`` **Fetch / Update / Cache-delete buttons + their JS
+  handlers** -- the underlying ``/catalog/downloads`` and
+  ``/catalog/cache/{name}`` endpoints were deleted in v0.40; the
+  buttons silently 404'd.
+- ``/ui/downloads`` **Upload-image trigger** + ``uploadSelectedFile()``
+  JS -- posted to ``PUT /images/{name}`` (deleted in v0.40).
+- **Navbar worker polling** of ``/catalog/downloads`` +
+  ``/catalog/hashes`` -- both 404 since v0.40; collapsed to the
+  surviving ``/boot/releases`` + ``/workers/backups`` sources.
+- ``bty.catalog`` orphans: the entire ``catalog-<ref:12>-<slug>.<ext>``
+  naming machinery (``_CATALOG_PREFIX``, ``_CATALOG_REF_LEN``,
+  ``_slugify``, ``local_filename_for``, ``is_catalog_cache_filename``,
+  ``ref_prefix_from_cache_filename``), the storage-format marker
+  (``StorageFormatMismatch``, ``check_or_write_storage_marker``,
+  ``STORAGE_FORMAT_VERSION``, ``_STORAGE_MARKER_FILENAME``), the
+  DownloadManager byte-pump (``is_cached``, ``fetch_to_cache``,
+  ``fetch_src_to_cache``, ``_stream_with_digest``, ``CatalogCancelled``,
+  ``ProgressCallback``, ``CancelCheck``),
+  ``CatalogEntry.local_filename`` / ``.cached_path`` methods.
+- ``bty.images`` orphans: ``merge_with_catalog``, ``ensure_sha256``,
+  ``HashCancelled``, ``HashProgressCallback``, ``HashCancelCheck``.
+- ``bty.web._app`` orphans: ``_lookup_db_catalog_entry`` (the
+  DownloadManager DB-only fallback), the ``image_root`` no-op kwarg
+  on ``create_app``.
+
+### Removed (deploy / Makefile / Dockerfile)
+
+- ``docker/Dockerfile``: ``ENV BTY_IMAGE_ROOT=/var/lib/bty/images``
+  + the ``install -d`` line that pre-created the directory.
+- ``Makefile`` ``docker-run`` target: stopped pre-creating
+  ``bty-data/images/`` (now creates ``bty-data/boot/`` +
+  ``bty-data/backups/``).
+
+### Documentation
+
+- ``walkthrough-catalog.md`` rewritten end-to-end for the v0.40
+  model (no dir-scan, no Hash/Fetch buttons, no DownloadManager).
+- ``flows.md`` audit-log + actions + safety-gates tables trimmed
+  for deleted endpoints + event kinds.
+- ``walkthrough-image-store.md`` + ``operations.md`` +
+  ``walkthrough-server-docker.md`` had their first-pass rewrites
+  in PR #11; this round finishes the long-tail.
+- ``reference.md`` rewritten: deleted-endpoint rows out of the
+  protected-routes table, ``BTY_IMAGE_ROOT`` scoped to the ``bty``
+  CLI only, ``CatalogEntry.disk_image_sha`` comment realigned to
+  "populated only when the publisher pinned it".
+- Module / function docstrings across ``bty.catalog``,
+  ``bty.images``, ``bty.flash``, ``bty.web._app``, ``_jobs``,
+  ``_releases``, ``_backup``, ``_models``, ``_db`` updated to drop
+  references to deleted symbols (``HashManager``, ``DownloadManager``,
+  ``merge_with_catalog``, ``ensure_sha256``, ``fetch_to_cache``,
+  ``fetch_src_to_cache``, ``local_filename_for``).
+
+### Test churn
+
+834 (v0.40) -> 803 tests. Net -31, all dead-test deletions
+(``test_fetch_to_cache_*``, ``test_is_cached_*``,
+``test_local_filename_for_*``, ``test_storage_marker_*``,
+``test_recognised_filenames_*``, ``test_merge_with_catalog_*``,
+``test_ensure_sha256_*``). Two UI-test assertions updated for the
+trimmed navbar poll endpoints + the gone-Upload-image trigger.
+
 ## [0.40.0] - 2026-06-09
 
 **bty-web is out of the image-bytes plane.** Image bytes now live
