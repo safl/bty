@@ -48,18 +48,19 @@ def test_compose_pins_to_current_bty_version(tmp_path: Path) -> None:
     assert "ghcr.io/safl/withcache:latest" in body
 
 
-def test_compose_wires_first_boot_withcache_env(tmp_path: Path) -> None:
-    """bty-web auto-discovers withcache via $BTY_WITHCACHE_URL on every
-    request -- the compose file is responsible for setting it. If this
-    assertion ever fails, first-boot becomes a UI-configuration step.
-
-    v0.41.5+: the compose entry is the nested ``${BTY_WITHCACHE_URL:-
-    http://${HOST_ADDR:?...}:3000}`` form so an operator can override
-    the default via envvars without editing compose.yml."""
+def test_compose_wires_first_boot_config_file(tmp_path: Path) -> None:
+    """v0.42+: bty-web's runtime config is the bty.toml file, not
+    per-knob env vars. The compose entry plumbs ONE env var
+    (``BTY_CONFIG_FILE``) + a bind-mount of ``bty.toml`` into the
+    container -- everything else (withcache URL, TFTP probe host,
+    admin password, ...) is keys in that file. Without this pin a
+    refactor could silently drop the mount and bty-web would come
+    up on the schema defaults."""
     dest = tmp_path / "bty-host"
     deploy_mod.init_main([str(dest)])
     body = (dest / "compose.yml").read_text(encoding="utf-8")
-    assert "BTY_WITHCACHE_URL: ${BTY_WITHCACHE_URL:-http://${HOST_ADDR" in body
+    assert "BTY_CONFIG_FILE: /etc/bty/bty.toml" in body
+    assert "./bty.toml:/etc/bty/bty.toml" in body
 
 
 def test_compose_uses_bind_mount_data_dirs(tmp_path: Path) -> None:
@@ -168,25 +169,31 @@ def test_env_example_has_required_keys(tmp_path: Path) -> None:
         assert f"# {var}=" in body, f"{var} not documented in envvars.example"
 
 
-def test_compose_plumbs_optional_env_vars_through(tmp_path: Path) -> None:
-    """The compose env block must reference every optional knob that
-    appears in envvars.example so uncommenting in envvars immediately
-    propagates -- without a corresponding ``VAR: ${{VAR:-}}`` entry
-    the operator's envvars change is silently ignored."""
+def test_compose_does_not_plumb_per_knob_env_vars(tmp_path: Path) -> None:
+    """v0.42+: every operator knob lives in ``bty.toml``, not in
+    individual env vars. The compose env block carries ONE entry --
+    ``BTY_CONFIG_FILE`` pointing at the bind-mounted TOML; the rest
+    that used to live here (``BTY_ADMIN_PASSWORD`` /
+    ``BTY_SESSION_SECRET`` / ...) were removed.
+
+    Per-key env overrides still work for operators who want them
+    (the loader recognises ``BTY_<SECTION>_<KEY>`` on top of TOML),
+    but they're not plumbed by default -- the operator sets them
+    on the container at run time / in their k8s manifest.
+    """
     dest = tmp_path / "bty-host"
     deploy_mod.init_main([str(dest)])
     body = (dest / "compose.yml").read_text(encoding="utf-8")
+    assert "BTY_CONFIG_FILE: /etc/bty/bty.toml" in body
     for var in (
         "BTY_ADMIN_PASSWORD",
-        "BTY_BOOT_RELEASE_REPO",
-        "BTY_TRUSTED_PROXY",
         "BTY_SESSION_SECRET",
         "BTY_MAX_UPLOAD_BYTES",
-        "BTY_CATALOG_MAX_PARALLEL",
-        "BTY_HASH_MAX_PARALLEL",
         "BTY_BACKUP_MAX_PARALLEL",
     ):
-        assert f"{var}: ${{{var}:-}}" in body, f"{var} not plumbed through compose"
+        assert f"{var}: ${{{var}:-}}" not in body, (
+            f"{var} should not be plumbed through compose any more"
+        )
 
 
 # ---- Mode flags --------------------------------------------------------------
@@ -436,22 +443,23 @@ def test_deploy_as_root_does_system_install(
     assert len(starts) == 1
     assert set(starts[0][2:]) == set(deploy_mod._SYSTEMD_SERVICES)
 
-    # Regression: the bty-web Quadlet must NOT carry a literal
-    # ``HOST_ADDR_HERE`` placeholder. Quadlets don't expand env-file
-    # references the way Compose does, so a placeholder would leave
-    # bty-web with a broken BTY_WITHCACHE_URL hostname + a TFTP probe
-    # pointed at nothing. deploy_main resolves host_addr first and
-    # bakes it into the unit body before _emit_deploy_files writes it.
+    # v0.42+: the operator's runtime knobs live in bty.toml, not in
+    # Quadlet ``Environment=`` lines. The Quadlet bind-mounts
+    # ``<dest>/bty.toml`` in and sets ``BTY_CONFIG_FILE`` to point
+    # at it; ``deploy_main`` resolves the absolute dest path so
+    # that bind-mount target isn't a placeholder string.
     bty_web_unit = (dest / "quadlet" / "bty-web.container").read_text(encoding="utf-8")
     assert "HOST_ADDR_HERE" not in bty_web_unit
-    # BTY_TFTP_PROBE_HOST + BTY_WITHCACHE_URL both reference an actual
-    # IP-ish string (NOT empty, NOT the placeholder). _patched_runtime
-    # fakes the detect; the value just needs to be present + non-empty.
+    assert "BTY_TOML_HOST_PATH_HERE" not in bty_web_unit
+    assert "Environment=BTY_CONFIG_FILE=/etc/bty/bty.toml" in bty_web_unit
+    # Bind-mount of the toml file is present with an absolute host
+    # path that resolves to <dest>/bty.toml.
     import re
 
-    prefix = "Environment=BTY_TFTP_PROBE_HOST="
-    probe_line = next(line for line in bty_web_unit.splitlines() if line.startswith(prefix))
-    assert re.match(r"^Environment=BTY_TFTP_PROBE_HOST=\S+$", probe_line)
+    m = re.search(r"Volume=(\S+):/etc/bty/bty.toml:Z", bty_web_unit)
+    assert m is not None, "bty.toml bind-mount missing from Quadlet"
+    assert m.group(1).endswith("/bty.toml")
+    assert m.group(1).startswith("/")  # absolute path
 
 
 def test_deploy_as_non_root_does_user_install(

@@ -9,6 +9,70 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.42.0] - 2026-06-10
+
+**bty-web operator config moves from env vars to ``bty.toml``.**
+
+The v0.41-era ``envvars`` shell file and the ~17 ``$BTY_*`` env vars
+it plumbed through ``compose.yml`` / Quadlet were a 12-factor relic
+that didn't fit a long-running daemon. v0.42 makes ``bty.toml`` the
+canonical config: one structured file the operator edits (or the
+Settings page round-trips edits through), layered with per-key env
+overrides for k8s Secrets / one-shot dev runs.
+
+### Added
+
+- ``src/bty/web/_config.py`` -- ``Config`` dataclass + nested section
+  dataclasses covering every operator-tunable knob, with a layered
+  loader (defaults < TOML files < env vars), per-key provenance
+  tracking, and a ``tomlkit``-based writer that preserves operator
+  comments + ordering across round-trips.
+- ``--config PATH`` CLI flag for ``bty-web`` (repeatable; each later
+  one overrides earlier per-key). Plus ``$BTY_CONFIG_FILE`` /
+  ``$BTY_CONFIG_DIR`` env conventions.
+- Drop-in config directories (``/etc/bty/conf.d/*.toml`` loaded in
+  lexicographic order) following the nginx / sshd convention.
+- ``BTY_<SECTION>_<KEY>`` env-override convention. Setting one key
+  via env doesn't force the rest to be set.
+- Default config search list when nothing is passed: ``/etc/bty/conf.d/``,
+  ``/etc/bty/bty.toml``, ``<state_dir>/bty.toml``.
+
+### Changed
+
+- ``bty-lab deploy`` writes a populated ``bty.toml`` alongside
+  ``envvars``. ``envvars`` shrinks to the compose-substitution
+  basics (``HOST_ADDR``, ``WITHCACHE_ADMIN_PASSWORD``); the BTY_*
+  knobs move to ``bty.toml``.
+- ``compose.yml`` ``bty-web`` env block shrinks from ~10 entries
+  to one (``BTY_CONFIG_FILE=/etc/bty/bty.toml``) + a bind-mount
+  of ``./bty.toml`` into the container at ``/etc/bty/bty.toml``.
+- Quadlet ``bty-web.container`` likewise: a single ``Environment=``
+  + a ``Volume=`` of the absolute ``<dest>/bty.toml`` path.
+- Settings page rows now surface the canonical ``BTY_<SECTION>_<KEY>``
+  env names (e.g. ``BTY_PATHS_STATE_DIR`` instead of ``BTY_STATE_DIR``).
+- ``bty-web --help`` description rewritten: documents the layered
+  resolution + the override convention, drops the per-knob list.
+
+### Compatibility
+
+- **Legacy env names still work as aliases for one release.** The
+  loader's ``_LEGACY_ENV_ALIASES`` table maps the v0.41 flat names
+  (``BTY_STATE_DIR`` -> ``[paths] state_dir`` etc.) onto the new
+  schema so an unmodified ``envvars`` keeps working. Removal
+  scheduled for v0.43; new deploys + the Settings page surface only
+  the canonical names.
+- ``bty-lab upgrade`` preserves both ``envvars`` AND the existing
+  ``bty.toml`` if present.
+
+### Removed
+
+- The per-knob ``Environment=`` lines in compose / Quadlet
+  (``BTY_ADMIN_PASSWORD`` / ``BTY_SESSION_SECRET`` /
+  ``BTY_MAX_UPLOAD_BYTES`` / ``BTY_BACKUP_MAX_PARALLEL`` etc.).
+  Operators wanting per-key env overrides set them directly on the
+  container (``-e BTY_<SECTION>_<KEY>=...``) rather than going
+  through ``envvars``.
+
 ## [0.41.5] - 2026-06-09
 
 **TFTP probe + withcache URL now reach the right host on container deploys.**
