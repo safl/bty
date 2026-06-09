@@ -40,6 +40,7 @@ help:
 	@echo "  ci            lint + format-check + typecheck + test"
 	@echo "  wheel         uv build  -> dist/bty_lab-X.Y.Z-py3-none-any.whl + sdist"
 	@echo "  tui           launch the bty wizard locally (IMAGE_ROOT=path, CATALOG=URL|default)"
+	@echo "  web           run bty-web locally on :8080 (state under /tmp/bty-web-dev, no container)"
 	@echo ""
 	@echo "Media (cijoe pipelines under cijoe/; require passwordless sudo):"
 	@echo "  media-deps    pipx install cijoe"
@@ -126,6 +127,33 @@ else ifdef CATALOG
 else
 	BTY_IMAGE_ROOT=$(IMAGE_ROOT) $(UV) run bty
 endif
+
+# Run bty-web straight from the source tree with state under
+# /tmp/bty-web-dev. Skips the container entirely -- under rootless
+# Docker the bind-mount uid mapping makes ``make docker-run``
+# painful; this is the fast iterate-locally path. /tmp keeps the
+# state out of the repo (no .gitignore noise) and survives across
+# tab closures + restarts within the same boot.
+#
+#   make web                          -- :8080 with state in /tmp/bty-web-dev
+#   make web BTY_WEB_PORT=8088        -- pick a different port
+#   make web STATE_DIR=/tmp/foo       -- state somewhere else
+#
+# Auth is always on (v0.41.3+); the default password is ``bty``
+# when ``BTY_ADMIN_PASSWORD`` is unset. Pass an env var on the
+# command line to override (``make web BTY_ADMIN_PASSWORD=hunter2``).
+.PHONY: web
+STATE_DIR ?= /tmp/bty-web-dev
+BTY_WEB_PORT ?= 8080
+web:
+	@mkdir -p $(STATE_DIR)/boot $(STATE_DIR)/backups
+	@echo "bty-web -> http://localhost:$(BTY_WEB_PORT)/ui (login: bty)"
+	@echo "  state dir: $(STATE_DIR)"
+	@echo "  Ctrl-C to stop."
+	BTY_STATE_DIR=$(STATE_DIR) \
+	BTY_BOOT_DIR=$(STATE_DIR)/boot \
+	BTY_WEB_PORT=$(BTY_WEB_PORT) \
+	$(UV) run bty-web
 
 # ---------- Media (bty-media/ via cijoe) ---------------------------------
 
