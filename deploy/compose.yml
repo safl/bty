@@ -37,8 +37,16 @@ services:
     environment:
       # bty prefers withcache as the image SOURCE for artifacts it holds, and
       # serves the origin for the rest. bty hands this URL to booting clients,
-      # so set it to the host's LAN address those machines reach.
-      BTY_WITHCACHE_URL: http://${HOST_ADDR:?set HOST_ADDR to this host's LAN address}:3000
+      # so set it to the host's LAN address those machines reach. Override
+      # by exporting BTY_WITHCACHE_URL before ``podman compose up`` if
+      # withcache lives elsewhere.
+      BTY_WITHCACHE_URL: ${BTY_WITHCACHE_URL:-http://${HOST_ADDR:?set HOST_ADDR}:3000}
+      # TFTP probe target for the Netboot page diagnostic. The bty-tftp
+      # sidecar uses ``network_mode: host`` -- so udp/69 is on the host's
+      # LAN address, not on bty-web's bridge-network loopback. Default to
+      # HOST_ADDR; override BTY_TFTP_PROBE_HOST if TFTP runs elsewhere
+      # (e.g. on the LAN router).
+      BTY_TFTP_PROBE_HOST: ${BTY_TFTP_PROBE_HOST:-${HOST_ADDR}}
     volumes:
       - bty-data:/var/lib/bty
     depends_on:

@@ -9,6 +9,44 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.41.5] - 2026-06-09
+
+**TFTP probe + withcache URL now reach the right host on container deploys.**
+
+### Fixed
+
+- ``BTY_TFTP_PROBE_HOST`` defaulted to ``127.0.0.1``, which on a
+  container deploy resolves to bty-web's own loopback -- not the
+  ``bty-tftp`` sidecar (which uses ``network_mode: host`` and binds
+  udp/69 on the host's LAN address). The Netboot page's TFTP probe
+  always reported "unreachable". The bty-web compose service +
+  Quadlet unit now bake ``BTY_TFTP_PROBE_HOST=${HOST_ADDR}`` by
+  default; operators can still override in envvars.
+- ``_quadlet_bty_web`` previously left ``HOST_ADDR_HERE`` as a
+  literal placeholder in the emitted Quadlet, since Quadlets don't
+  expand env-file references the way Compose does. ``deploy_main``
+  now detects ``host_addr`` BEFORE emitting and bakes the real LAN
+  IP into the unit body; ``upgrade_main`` reads it back from the
+  preserved ``envvars`` file. The stand-alone ``bty-lab init
+  --systemd`` path (no host_addr known) still emits the placeholder
+  + a hand-edit note in the header.
+
+### Added
+
+- Both ``BTY_WITHCACHE_URL`` and ``BTY_TFTP_PROBE_HOST`` are now
+  override-able via envvars (compose entries use the ``${VAR:-
+  default}`` form). envvars.example carries commented-out hints for
+  each. ``bty-web --help`` documents both.
+- Settings -> Network card surfaces ``withcache base URL`` +
+  ``TFTP probe target`` rows so operators can see where bty-web
+  is pointing without dredging the env.
+
+### Removed
+
+- Settings -> Network card drops the static ``TFTP systemd unit:
+  dnsmasq.service`` row -- meaningless on container deploys, and
+  the TFTP probe (now correctly targeted) is the canonical signal.
+
 ## [0.41.4] - 2026-06-09
 
 **Polish pass on the v0.41.3 UI work.**

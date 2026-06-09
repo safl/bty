@@ -51,11 +51,15 @@ def test_compose_pins_to_current_bty_version(tmp_path: Path) -> None:
 def test_compose_wires_first_boot_withcache_env(tmp_path: Path) -> None:
     """bty-web auto-discovers withcache via $BTY_WITHCACHE_URL on every
     request -- the compose file is responsible for setting it. If this
-    assertion ever fails, first-boot becomes a UI-configuration step."""
+    assertion ever fails, first-boot becomes a UI-configuration step.
+
+    v0.41.5+: the compose entry is the nested ``${BTY_WITHCACHE_URL:-
+    http://${HOST_ADDR:?...}:3000}`` form so an operator can override
+    the default via envvars without editing compose.yml."""
     dest = tmp_path / "bty-host"
     deploy_mod.init_main([str(dest)])
     body = (dest / "compose.yml").read_text(encoding="utf-8")
-    assert "BTY_WITHCACHE_URL: http://${HOST_ADDR" in body
+    assert "BTY_WITHCACHE_URL: ${BTY_WITHCACHE_URL:-http://${HOST_ADDR" in body
 
 
 def test_compose_uses_bind_mount_data_dirs(tmp_path: Path) -> None:
@@ -431,6 +435,23 @@ def test_deploy_as_root_does_system_install(
     starts = [cmd for cmd in run_cmds if cmd[:2] == ["systemctl", "start"]]
     assert len(starts) == 1
     assert set(starts[0][2:]) == set(deploy_mod._SYSTEMD_SERVICES)
+
+    # Regression: the bty-web Quadlet must NOT carry a literal
+    # ``HOST_ADDR_HERE`` placeholder. Quadlets don't expand env-file
+    # references the way Compose does, so a placeholder would leave
+    # bty-web with a broken BTY_WITHCACHE_URL hostname + a TFTP probe
+    # pointed at nothing. deploy_main resolves host_addr first and
+    # bakes it into the unit body before _emit_deploy_files writes it.
+    bty_web_unit = (dest / "quadlet" / "bty-web.container").read_text(encoding="utf-8")
+    assert "HOST_ADDR_HERE" not in bty_web_unit
+    # BTY_TFTP_PROBE_HOST + BTY_WITHCACHE_URL both reference an actual
+    # IP-ish string (NOT empty, NOT the placeholder). _patched_runtime
+    # fakes the detect; the value just needs to be present + non-empty.
+    import re
+
+    prefix = "Environment=BTY_TFTP_PROBE_HOST="
+    probe_line = next(line for line in bty_web_unit.splitlines() if line.startswith(prefix))
+    assert re.match(r"^Environment=BTY_TFTP_PROBE_HOST=\S+$", probe_line)
 
 
 def test_deploy_as_non_root_does_user_install(

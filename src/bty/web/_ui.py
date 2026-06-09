@@ -1274,7 +1274,18 @@ def register_ui_routes(
                         "BTY_TRUSTED_PROXY",
                         "no",
                     ),
-                    _config_row("TFTP systemd unit", _sysconfig.TFTP_UNIT, None, "dnsmasq.service"),
+                    _config_row(
+                        "TFTP probe target",
+                        _sysconfig.default_tftp_probe_host(),
+                        "BTY_TFTP_PROBE_HOST",
+                        "127.0.0.1",
+                    ),
+                    _config_row(
+                        "withcache base URL",
+                        os.environ.get("BTY_WITHCACHE_URL") or "(unset)",
+                        "BTY_WITHCACHE_URL",
+                        "(unset; bty-web streams from origin)",
+                    ),
                 ],
             },
             {

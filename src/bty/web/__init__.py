@@ -151,6 +151,13 @@ def main(argv: list[str] | None = None) -> None:
             "                        land in (default <BTY_STATE_DIR>/backups)\n"
             "  BTY_BACKUP_MAX_PARALLEL  max concurrent backup jobs (default 1;\n"
             "                        concurrent exports would race on dest dirs)\n"
+            "  BTY_WITHCACHE_URL     base URL of the withcache cache-host\n"
+            "                        (default unset; bty-web then streams from\n"
+            "                        origin instead of routing through withcache)\n"
+            "  BTY_TFTP_PROBE_HOST   target for the Netboot page TFTP probe\n"
+            "                        (default 127.0.0.1; container deploys\n"
+            "                        set this to the host's LAN address since\n"
+            "                        bty-tftp uses network_mode: host)\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
