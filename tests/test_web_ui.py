@@ -1739,6 +1739,142 @@ def test_ui_account_holds_authentication(client: TestClient) -> None:
     assert 'href="/ui/settings"' in body
 
 
+def test_ui_settings_config_edit_writes_to_primary_toml(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Per-row inline edit form on /ui/settings posts to
+    /ui/settings/config/edit, which writes the new value into
+    cfg.primary_toml via _config.save_value. The next page render
+    reads it back out (the handler also reloads the active config
+    in-process so the operator doesn't have to restart bty-web)."""
+    from bty.web import _config
+
+    bty_toml = tmp_path / "bty.toml"
+    bty_toml.write_text('[server]\nhost = "0.0.0.0"\n', encoding="utf-8")
+    monkeypatch.setenv("BTY_CONFIG_FILE", str(bty_toml))
+    _config.set_active_config(_config.load_config(None))
+
+    _login(client)
+    r = client.post(
+        "/ui/settings/config/edit",
+        data={"section": "server", "key": "host", "value": "192.168.1.5"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert r.headers["location"] == "/ui/settings?saved=config"
+    # File round-trip.
+    new = bty_toml.read_text(encoding="utf-8")
+    assert 'host = "192.168.1.5"' in new
+    # Active config reloaded in-process.
+    assert _config.cfg().server.host == "192.168.1.5"
+
+
+def test_ui_settings_config_edit_clear_removes_the_key(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An empty value clears the override -- the TOML key is removed
+    so the schema default takes over."""
+    from bty.web import _config
+
+    bty_toml = tmp_path / "bty.toml"
+    bty_toml.write_text('[server]\nhost = "192.168.1.5"\n', encoding="utf-8")
+    monkeypatch.setenv("BTY_CONFIG_FILE", str(bty_toml))
+    _config.set_active_config(_config.load_config(None))
+
+    _login(client)
+    r = client.post(
+        "/ui/settings/config/edit",
+        data={"section": "server", "key": "host", "value": ""},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    # Key gone from the file; default ("0.0.0.0") takes over in the
+    # reloaded active config.
+    assert "host = " not in bty_toml.read_text(encoding="utf-8")
+    assert _config.cfg().server.host == "0.0.0.0"
+
+
+def test_ui_settings_config_edit_refuses_env_overridden_key(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When a key is currently env-overridden, the TOML write would
+    silently no-op (env wins). The handler refuses with an explicit
+    flash so the operator doesn't think the edit took effect."""
+    from bty.web import _config
+
+    bty_toml = tmp_path / "bty.toml"
+    bty_toml.write_text("[server]\n", encoding="utf-8")
+    monkeypatch.setenv("BTY_CONFIG_FILE", str(bty_toml))
+    monkeypatch.setenv("BTY_SERVER_HOST", "10.0.0.1")
+    _config.set_active_config(_config.load_config(None))
+
+    _login(client)
+    r = client.post(
+        "/ui/settings/config/edit",
+        data={"section": "server", "key": "host", "value": "192.168.1.5"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert "error=env+override" in r.headers["location"]
+    # File untouched.
+    assert "192.168.1.5" not in bty_toml.read_text(encoding="utf-8")
+
+
+def test_ui_settings_config_edit_rejects_unknown_section_or_key(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A hand-crafted POST that targets a section / key the schema
+    doesn't know returns 303 with an error flash rather than
+    writing arbitrary TOML."""
+    from bty.web import _config
+
+    bty_toml = tmp_path / "bty.toml"
+    bty_toml.write_text("", encoding="utf-8")
+    monkeypatch.setenv("BTY_CONFIG_FILE", str(bty_toml))
+    _config.set_active_config(_config.load_config(None))
+
+    _login(client)
+    r = client.post(
+        "/ui/settings/config/edit",
+        data={"section": "rogue", "key": "host", "value": "x"},
+        follow_redirects=False,
+    )
+    assert r.headers["location"] == "/ui/settings?error=unknown+section"
+    r = client.post(
+        "/ui/settings/config/edit",
+        data={"section": "server", "key": "rogue_key", "value": "x"},
+        follow_redirects=False,
+    )
+    assert r.headers["location"] == "/ui/settings?error=unknown+key"
+    # File still empty -- no rogue keys written.
+    assert "rogue" not in bty_toml.read_text(encoding="utf-8")
+
+
+def test_ui_settings_renders_inline_edit_forms_for_editable_rows(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The Settings page renders an inline edit form for each
+    Config-backed row + a save button. Env-overridden rows render
+    a disabled input instead."""
+    from bty.web import _config
+
+    bty_toml = tmp_path / "bty.toml"
+    bty_toml.write_text("", encoding="utf-8")
+    monkeypatch.setenv("BTY_CONFIG_FILE", str(bty_toml))
+    monkeypatch.setenv("BTY_SERVER_HOST", "10.0.0.1")  # env-override on host
+    _config.set_active_config(_config.load_config(None))
+
+    _login(client)
+    body = client.get("/ui/settings").text
+    # Editable row (server.port -- not env-overridden) has an edit form.
+    assert 'action="/ui/settings/config/edit"' in body
+    assert 'name="section" value="server"' in body
+    assert 'name="key" value="port"' in body
+    # Env-overridden row (server.host) renders a disabled input,
+    # NOT an edit form for that specific key.
+    assert 'name="key" value="host"' not in body
+
+
 def test_ui_settings_upstream_override_round_trips(client: TestClient) -> None:
     """Saving an upstream override persists it; the Settings page then
     shows it as the override value, and clearing the field reverts to

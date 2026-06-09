@@ -110,6 +110,8 @@ KNOWN_EVENT_KINDS: tuple[str, ...] = (
     "netboot.artifacts.fetch.failed",
     "settings.upstream.updated",
     "settings.backup.updated",
+    "settings.config.updated",
+    "settings.config.failed",
     "backup.created",
     "backup.create.requested",
     "backup.create.started",
