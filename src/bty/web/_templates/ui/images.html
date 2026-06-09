@@ -62,8 +62,8 @@
             <div class="vr"></div>
             <form method="post" action="/ui/catalog/fetch-release" class="m-0">
                 <button type="submit" class="btn btn-sm btn-primary flex-shrink-0 text-nowrap"
-                        title="Pull releases/latest/download/catalog.toml from {{ release_repo }} and import its entries">
-                    <i class="bi bi-cloud-download me-1"></i>Fetch latest catalog
+                        title="Pull catalog.toml for tag '{{ catalog_tag }}' from {{ release_repo }} and import its entries">
+                    <i class="bi bi-cloud-download me-1"></i>Fetch '<code>{{ catalog_tag }}</code>' catalog
                 </button>
             </form>
         </span>

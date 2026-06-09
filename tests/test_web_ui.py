@@ -1700,12 +1700,14 @@ def test_ui_settings_renders_when_authed(client: TestClient) -> None:
     r = client.get("/ui/settings")
     assert r.status_code == 200
     body = r.text
-    # Editable upstream card: all three fields + the save form.
+    # Editable upstream card: release repo + the two tag fields +
+    # the save form. (v0.41.3+: catalog URL became a derived view of
+    # repo + catalog_tag; the form-field id is gone.)
     assert "Upstream sources" in body
     assert 'action="/ui/settings/upstream"' in body
     assert 'id="release_repo"' in body
-    assert 'id="catalog_url"' in body
-    assert 'id="release_tag"' in body
+    assert 'id="catalog_tag"' in body
+    assert 'id="netboot_tag"' in body
     # Read-only config groups: storage + the Identity magic values.
     assert "Storage paths" in body
     assert "BTY_STATE_DIR" in body
@@ -1739,12 +1741,13 @@ def test_ui_settings_upstream_override_round_trips(client: TestClient) -> None:
     shows it as the override value, and clearing the field reverts to
     the default."""
     _login(client)
-    # Save both overrides.
+    # Save repo + catalog tag overrides.
     r = client.post(
         "/ui/settings/upstream",
         data={
             "release_repo": "acme/bty-fork",
-            "catalog_url": "https://example.invalid/catalog.toml",
+            "catalog_tag": "v1.2.3",
+            "netboot_tag": "v1.2.3",
         },
         follow_redirects=False,
     )
@@ -1752,11 +1755,15 @@ def test_ui_settings_upstream_override_round_trips(client: TestClient) -> None:
     assert r.headers["location"] == "/ui/settings?saved=upstream"
     body = client.get("/ui/settings").text
     assert "acme/bty-fork" in body
-    assert "https://example.invalid/catalog.toml" in body
-    # Clearing the repo field reverts it to the default repo.
-    client.post("/ui/settings/upstream", data={"release_repo": "", "catalog_url": ""})
+    assert "v1.2.3" in body
+    # The derived catalog URL uses the explicit-tag form.
+    assert "releases/download/v1.2.3/catalog.toml" in body
+    # Clearing every field reverts to defaults.
+    client.post(
+        "/ui/settings/upstream",
+        data={"release_repo": "", "catalog_tag": "", "netboot_tag": ""},
+    )
     body2 = client.get("/ui/settings").text
-    # The override value is gone; the default repo drives the page.
     assert "acme/bty-fork" not in body2
     assert "safl/bty" in body2
 
@@ -1765,20 +1772,18 @@ def test_ui_settings_upstream_audit_event_captures_old_and_new(
     client: TestClient,
 ) -> None:
     """v0.33.28+: settings.upstream.updated event details carries
-    both ``old`` and ``new`` for each of the three knobs. Pre-fix
-    the event only had the summary string with the new values; an
-    operator auditing "what was the catalog URL before this change?"
-    or a drift-tracking script comparing successive events had no
-    before/after visibility. Now details has the structured
-    {release_repo, catalog_url, release_tag} -> {old, new} shape."""
+    both ``old`` and ``new`` for each of the three knobs. v0.41.3+
+    the third knob is ``netboot_tag`` (the old ``catalog_url``
+    standalone override is gone -- it's derived from repo + catalog
+    tag now)."""
     _login(client)
     # Initial save: olds are all None (defaults in effect).
     r1 = client.post(
         "/ui/settings/upstream",
         data={
             "release_repo": "acme/bty-fork",
-            "catalog_url": "https://first.invalid/catalog.toml",
-            "release_tag": "v1.0.0",
+            "catalog_tag": "v1.0.0",
+            "netboot_tag": "v1.0.0",
         },
         follow_redirects=False,
     )
@@ -1788,8 +1793,8 @@ def test_ui_settings_upstream_audit_event_captures_old_and_new(
         "/ui/settings/upstream",
         data={
             "release_repo": "acme/bty-fork",  # unchanged
-            "catalog_url": "https://second.invalid/catalog.toml",
-            "release_tag": "",  # cleared
+            "catalog_tag": "v1.1.0",  # changed
+            "netboot_tag": "",  # cleared
         },
         follow_redirects=False,
     )
@@ -1804,11 +1809,8 @@ def test_ui_settings_upstream_audit_event_captures_old_and_new(
     newest = events[0]
     d = newest["details"]
     assert d["release_repo"] == {"old": "acme/bty-fork", "new": "acme/bty-fork"}
-    assert d["catalog_url"] == {
-        "old": "https://first.invalid/catalog.toml",
-        "new": "https://second.invalid/catalog.toml",
-    }
-    assert d["release_tag"] == {"old": "v1.0.0", "new": None}
+    assert d["catalog_tag"] == {"old": "v1.0.0", "new": "v1.1.0"}
+    assert d["netboot_tag"] == {"old": "v1.0.0", "new": None}
 
 
 def test_ui_settings_renders_backup_schedule_card(client: TestClient) -> None:
@@ -1908,14 +1910,19 @@ def test_settings_upstream_override_drives_catalog_fetch_url(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The catalog-fetch handler resolves its URL from the override at
-    request time, so a saved Catalog URL is what gets fetched."""
+    request time. v0.41.3+: a saved repo + catalog tag together build
+    the URL (there's no separate URL override any more)."""
     import urllib.error
     import urllib.request
 
     _login(client)
     client.post(
         "/ui/settings/upstream",
-        data={"release_repo": "", "catalog_url": "https://example.invalid/custom.toml"},
+        data={
+            "release_repo": "acme/widgets",
+            "catalog_tag": "v9.9.9",
+            "netboot_tag": "",
+        },
     )
     seen: list[str] = []
 
@@ -1925,7 +1932,7 @@ def test_settings_upstream_override_drives_catalog_fetch_url(
 
     monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen)
     client.post("/ui/catalog/fetch-release", follow_redirects=False)
-    assert seen == ["https://example.invalid/custom.toml"]
+    assert seen == ["https://github.com/acme/widgets/releases/download/v9.9.9/catalog.toml"]
 
 
 def test_ui_settings_requires_auth(client: TestClient) -> None:

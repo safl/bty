@@ -6,19 +6,20 @@ Most bty-web configuration is env-var / default driven and read-only
 value comes from). A small set of values can be overridden here and
 persisted across restarts without touching the systemd unit:
 
-- :data:`KEY_RELEASE_REPO` -- the GitHub ``owner/repo`` the netboot
-  release fetch pulls artifacts from.
-- :data:`KEY_CATALOG_URL` -- the full URL the "Fetch latest catalog"
-  action downloads ``catalog.toml`` from.
-- :data:`KEY_RELEASE_TAG` -- the release tag the "Fetch latest
-  artifacts" action targets (``latest`` by default).
+- :data:`KEY_RELEASE_REPO` -- the GitHub ``owner/repo`` both the
+  netboot and the catalog fetches pull from.
+- :data:`KEY_CATALOG_TAG` -- the release tag the "Fetch catalog"
+  action targets (``latest`` by default).
+- :data:`KEY_NETBOOT_TAG` -- the release tag the "Fetch artifacts"
+  action targets (``latest`` by default). The two tags are
+  independent so an operator can pin netboot artifacts to a known-
+  good release while still pulling the moving catalog tip.
 
 Resolution order is override (this table) -> environment variable ->
 built-in default, so an unset key transparently falls back to the
-existing behaviour. Not every key has an env layer:
-:data:`KEY_RELEASE_REPO` reads :data:`ENV_RELEASE_REPO`, while
-:data:`KEY_CATALOG_URL` and :data:`KEY_RELEASE_TAG` resolve straight
-from override to default.
+existing behaviour. Only :data:`KEY_RELEASE_REPO` has an env layer
+(:data:`ENV_RELEASE_REPO`); the two tag keys resolve straight from
+override to :data:`DEFAULT_TAG` (``latest``).
 """
 
 from __future__ import annotations
@@ -33,10 +34,17 @@ from bty.web._releases import DEFAULT_REPO, ENV_RELEASE_REPO
 # env-var name has a single definition; ``KEY_RELEASE_REPO`` falls back
 # to it (via :func:`default_release_repo`) before the built-in default.
 KEY_RELEASE_REPO = "upstream.release_repo"
-KEY_CATALOG_URL = "upstream.catalog_url"
-KEY_RELEASE_TAG = "upstream.release_tag"
+KEY_CATALOG_TAG = "upstream.catalog_tag"
+KEY_NETBOOT_TAG = "upstream.netboot_tag"
 
-DEFAULT_RELEASE_TAG = "latest"
+# Default tag for both catalog and netboot fetches. GitHub resolves
+# ``latest`` to the most recent non-prerelease, non-draft tag.
+DEFAULT_TAG = "latest"
+
+# Back-compat alias so callers (and tests) using the old name keep
+# working until they migrate to ``DEFAULT_TAG`` -- this is a pre-1.0
+# rename so the alias can go away in a subsequent release.
+DEFAULT_RELEASE_TAG = DEFAULT_TAG
 
 # Optional withcache cache-host. When set, bty prefers it as the image
 # *source* for artifacts it already holds (else serves the artifact as
@@ -104,21 +112,37 @@ def resolve_release_repo(conn: sqlite3.Connection) -> str:
     return get(conn, KEY_RELEASE_REPO) or default_release_repo()
 
 
-def default_catalog_url(repo: str) -> str:
-    """The catalog.toml URL bty fetches by default for ``repo``."""
-    return f"https://github.com/{repo}/releases/latest/download/catalog.toml"
+def catalog_url_for(repo: str, tag: str) -> str:
+    """The catalog.toml URL bty fetches for a given repo + tag.
+    ``latest`` uses GitHub's redirect path (``releases/latest/download/``);
+    everything else uses the explicit ``releases/download/<tag>/`` form."""
+    if tag == "latest":
+        return f"https://github.com/{repo}/releases/latest/download/catalog.toml"
+    return f"https://github.com/{repo}/releases/download/{tag}/catalog.toml"
+
+
+def resolve_catalog_tag(conn: sqlite3.Connection) -> str:
+    """The effective catalog release tag to fetch: override ->
+    :data:`DEFAULT_TAG` (``latest``)."""
+    return get(conn, KEY_CATALOG_TAG) or DEFAULT_TAG
 
 
 def resolve_catalog_url(conn: sqlite3.Connection) -> str:
-    """The effective catalog URL: override -> URL built from the
-    effective release repo."""
-    return get(conn, KEY_CATALOG_URL) or default_catalog_url(resolve_release_repo(conn))
+    """The effective catalog URL, derived from the current repo +
+    catalog tag. There is no separate override for the URL itself;
+    operators tweak the repo and/or the tag instead."""
+    return catalog_url_for(resolve_release_repo(conn), resolve_catalog_tag(conn))
 
 
-def resolve_release_tag(conn: sqlite3.Connection) -> str:
+def resolve_netboot_tag(conn: sqlite3.Connection) -> str:
     """The effective netboot release tag to fetch: override ->
-    :data:`DEFAULT_RELEASE_TAG` (``latest``)."""
-    return get(conn, KEY_RELEASE_TAG) or DEFAULT_RELEASE_TAG
+    :data:`DEFAULT_TAG` (``latest``)."""
+    return get(conn, KEY_NETBOOT_TAG) or DEFAULT_TAG
+
+
+# Pre-1.0 alias kept for one release so callers can migrate in lock-
+# step. New code should call :func:`resolve_netboot_tag` directly.
+resolve_release_tag = resolve_netboot_tag
 
 
 def resolve_withcache_url(conn: sqlite3.Connection) -> str | None:
