@@ -27,7 +27,7 @@ exposing past trusted LAN.
 auto-wires withcache as its image source -- no UI configuration step on
 first boot.
 
-## Three subcommands
+## Subcommands
 
 - **`bty-lab init [DEST]`** -- emit compose.yml + `envvars.example` +
   README only. No side effects: no envvars filled, no pulls, no service
@@ -43,6 +43,14 @@ first boot.
   `podman compose pull`, then restart. Auto-detects a Quadlet-managed
   stack (units present under `/etc/containers/systemd/`) and uses
   `systemctl daemon-reload` + `restart` in that case.
+- **`bty-lab purge [DEST]`** -- the inverse of deploy: stop + remove the
+  stack (auto-detects compose vs Quadlet/systemd, same as `upgrade`).
+  Teardown is tolerant of an already-gone service / container. By default
+  it KEEPS `data/` and the deploy directory; `--data` also deletes host
+  state, `--all` also removes the deploy directory (implies `--data`), and
+  `--images` drops the pulled container images. The destructive flags are
+  gated by a `y/N` confirmation (skip with `--yes`). Removing system-wide
+  Quadlet units needs root.
 
 ## Where the state lives
 
