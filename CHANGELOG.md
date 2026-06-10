@@ -36,6 +36,13 @@ overrides for k8s Secrets / one-shot dev runs.
   via env doesn't force the rest to be set.
 - Default config search list when nothing is passed: ``/etc/bty/conf.d/``,
   ``/etc/bty/bty.toml``, ``<state_dir>/bty.toml``.
+- ``bty-lab purge [DEST]`` -- the inverse of ``deploy``: stops + removes
+  the stack (auto-detects compose vs Quadlet/systemd, like ``upgrade``).
+  Keeps ``data/`` and the deploy dir by default; ``--data`` deletes host
+  state, ``--all`` also removes the deploy dir (implies ``--data``),
+  ``--images`` drops the pulled images. Destructive flags are gated by a
+  ``y/N`` confirm (skip with ``--yes``); teardown tolerates an
+  already-gone service / container so a half-removed deploy still purges.
 
 ### Changed
 
