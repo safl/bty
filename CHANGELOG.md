@@ -9,6 +9,33 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.44.0] - 2026-06-10
+
+### Fixed
+
+- **withcache was silently bypassed on container deploys.** The flash
+  path's `resolve_withcache_url` read a DB override then
+  `$BTY_WITHCACHE_URL` then nothing -- it never consulted
+  `cfg.withcache.url`. v0.42 moved the URL into `bty.toml` and the slim
+  compose/Quadlet stopped setting the env var, so a stock deploy
+  resolved no URL: images streamed from origin, withcache got no HEAD
+  and stayed empty even though `bty.toml` had the URL. The resolver now
+  layers DB override > `cfg.withcache.url` > `$BTY_WITHCACHE_URL` > none.
+
+### Added
+
+- **Per-entry "Check" action on the Images page.** Each catalog row
+  gets a Check button that probes, point-in-time, whether the origin is
+  reachable (and how big) and whether withcache already holds it. The
+  withcache HEAD also warms an auto-fetch withcache, so Check on a miss
+  doubles as a one-click "start caching this" -- check again shortly and
+  it flips to cached. A dead origin is reported inline, not as an error.
+- **The withcache decision is now observable on the flash path.**
+  `is_cached` logs each HEAD (info on hit/miss, warning on an
+  unreachable cache), and the per-machine `netboot.pxe.plan` event
+  records `withcache = {configured, hit, served_from}` -- visible in
+  `/ui/events`.
+
 ## [0.43.1] - 2026-06-10
 
 ### Changed
