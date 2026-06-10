@@ -479,8 +479,9 @@ Bootstrap CSS, HTMX form posts).
  the editable **Upstream sources** (release repo / catalog URL / release
  tag) card, and the **DHCP / Network boot** router cheatsheet. Operator
  authentication is on the separate Account page (`/ui/account`, reached
- via the user pill): the credential is `$BTY_ADMIN_PASSWORD`, rotated by
- changing the env var and restarting bty-web; to invalidate every session at
+ via the user pill): the credential is ``[admin] password`` in
+ ``bty.toml`` (env override `BTY_ADMIN_PASSWORD`), rotated by changing
+ the value and restarting bty-web; to invalidate every session at
  once, rotate the cookie-signing secret with `rm
  /var/lib/bty/session-secret && systemctl restart bty-web`.
 - `POST /ui/settings/upstream` / `POST /ui/settings/flash` -> persist

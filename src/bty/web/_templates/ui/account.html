@@ -35,9 +35,11 @@
     </div>
     <div class="card-body">
         <p class="text-muted mb-0">
-            bty-web is gated by the admin password set via
-            <code>BTY_ADMIN_PASSWORD</code> on the server. To rotate the
-            credential, change that value and restart bty-web.
+            bty-web is gated by the admin password: <code>[admin]
+            password</code> in <code>bty.toml</code>, editable on the
+            <a href="/ui/settings">Settings</a> page (env override
+            <code>BTY_ADMIN_PASSWORD</code>). To rotate the credential,
+            change the value and restart bty-web.
             Sessions are server-signed cookies (Starlette's
             <code>SessionMiddleware</code>) with a sliding 7-day TTL. To
             invalidate every existing session in one shot, rotate the
