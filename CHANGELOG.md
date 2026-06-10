@@ -9,6 +9,43 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.43.1] - 2026-06-10
+
+### Changed
+
+- **The well-known default password is now `bty-lab` (was `bty`) for
+  BOTH bty-web and withcache.** A stock `bty-lab deploy` writes it to
+  `envvars` / `bty.toml` and prints it; change it before exposing the
+  host. bty-web's runtime fallback (when nothing is configured) is the
+  same value.
+
+### Fixed
+
+- **`bty-lab deploy --systemd` baked the wrong withcache password into
+  the Quadlet unit.** The generated `withcache.container` hardcoded
+  `WITHCACHE_ADMIN_PASSWORD=change-me` while the deploy summary +
+  `envvars` advertised a different password, so operators following the
+  printed credential were locked out of withcache. The deploy/upgrade
+  paths now bake the chosen password into the unit; the stand-alone
+  `init --systemd` reference unit keeps the editable placeholder.
+- **Settings-page edits failed on container deploys.** Saving config
+  rename-replaced onto the `bty.toml` bind mount, which fails with
+  `EBUSY`; added an in-place-write fallback. The generated compose also
+  mounted `bty.toml` read-only, contradicting the Quadlet's RW mount --
+  dropped the `:ro`. Reference `deploy/compose.yml` +
+  `deploy/quadlet/bty-web.container` refreshed to the v0.42 bty.toml
+  shape (they still showed the old envvars-era env lines).
+- Documentation corrected: the env-var tables and `/ui/login` text said
+  `BTY_ADMIN_PASSWORD` unset meant "open access"; auth has been always-on
+  since v0.41.3.
+
+### Internal
+
+- The two `/ui/images` form-post paths now record `catalog.entry.add.failed`
+  on a duplicate add, matching the JSON endpoint (audit-trail parity).
+- Tests for the v0.41 legacy env-alias contract; `actions/checkout@v6`
+  across all CI jobs; assorted dead-code / stale-comment cleanup.
+
 ## [0.43.0] - 2026-06-10
 
 ### Added
