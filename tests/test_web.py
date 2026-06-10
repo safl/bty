@@ -4875,9 +4875,10 @@ def test_ui_catalog_fetch_release_is_idempotent_on_repeated_imports(
         "https://example.com/releases/latest/download/gamma.img.gz",
     ):
         assert html.count(src) >= 1, f"missing src {src!r} on /ui/images"
-        assert html.count(src) <= 2, (
+        assert html.count(src) <= 3, (
             f"src {src!r} rendered {html.count(src)} times on /ui/images; "
-            "expected at most 2 (entry row + binding hint). Dedup invariant "
+            "expected at most 3 per entry (Source cell + Check button "
+            "data-src + Delete button data-src). Dedup invariant "
             "(UNIQUE on catalog_entries.src) was violated."
         )
 
