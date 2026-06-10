@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import ipaddress
 import json
-import os
 import socket
 import struct
 import subprocess
@@ -33,12 +32,11 @@ SYSNET_PATH = Path("/sys/class/net")
 # deploy's sidecar runs outside our visibility.
 TFTP_UNIT = "dnsmasq.service"
 
-# Default TFTP probe target. Operator can override via
-# $BTY_TFTP_PROBE_HOST when the daemon lives somewhere other than
-# the bty host (e.g. an upstream router). The default port 69 is
-# the IANA TFTP port and isn't expected to vary in homelab setups.
-ENV_TFTP_PROBE_HOST = "BTY_TFTP_PROBE_HOST"
-DEFAULT_TFTP_PROBE_HOST = "127.0.0.1"
+# The TFTP probe target host is resolved from config
+# (``Config.effective_tftp_probe_host``) and passed in by the caller --
+# this module no longer reads an env var of its own, so there is one
+# source of truth. The default port 69 is the IANA TFTP port and isn't
+# expected to vary in homelab setups.
 DEFAULT_TFTP_PROBE_PORT = 69
 
 # Default filename to probe for. ``ipxe.efi`` is the UEFI iPXE
@@ -144,14 +142,8 @@ class TftpProbeResult:
         return self.reachable and self.file_present
 
 
-def default_tftp_probe_host() -> str:
-    """Effective probe host: ``$BTY_TFTP_PROBE_HOST`` if set + non-
-    empty, else :data:`DEFAULT_TFTP_PROBE_HOST` (``127.0.0.1``)."""
-    return os.environ.get(ENV_TFTP_PROBE_HOST, "").strip() or DEFAULT_TFTP_PROBE_HOST
-
-
 def tftp_probe(
-    host: str | None = None,
+    host: str,
     port: int = DEFAULT_TFTP_PROBE_PORT,
     filename: str = DEFAULT_TFTP_PROBE_FILENAME,
     timeout_s: float = 1.5,
@@ -177,7 +169,7 @@ def tftp_probe(
     and reported as ``reachable=False`` with the exception's
     message in ``detail``.
     """
-    target = (host or default_tftp_probe_host()).strip()
+    target = host.strip()
     # RRQ packet: \x00\x01 + filename + \x00 + "octet" + \x00
     pkt = b"\x00\x01" + filename.encode("ascii", errors="replace") + b"\x00octet\x00"
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
