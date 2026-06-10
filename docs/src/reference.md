@@ -401,6 +401,13 @@ or absent blob leaves any prior one intact).
 
 ### Configuration
 
+v0.42+: the canonical operator config is a ``bty.toml`` file (located
+via ``BTY_CONFIG_FILE`` / ``BTY_CONFIG_DIR``, or the default search
+list ``/etc/bty/conf.d/`` -> ``/etc/bty/bty.toml`` ->
+``<state_dir>/bty.toml``), with per-key env overrides following the
+``BTY_<SECTION>_<KEY>`` convention. The flat names below keep working
+as legacy aliases for one release.
+
 | Variable | Purpose | Default |
 |---|---|---|
 | `BTY_STATE_DIR` | Where `state.db` lives | `/var/lib/bty` |
@@ -416,7 +423,7 @@ Bootstrap CSS, HTMX form posts).
 
 - `GET /ui` -> 303 redirect to `/ui/dashboard`
 - `GET /ui/login` -> login form
-- `POST /ui/login` -> constant-time-compares the password against `$BTY_ADMIN_PASSWORD` and flips
+- `POST /ui/login` -> constant-time-compares the password against ``[admin] password`` from ``bty.toml`` (env override `BTY_ADMIN_PASSWORD`; default `bty`) and flips
  ``request.session["bty_authed"] = True``; SessionMiddleware emits
  the signed `bty-token` cookie on the redirect response
  (``SameSite=Strict``).

@@ -91,6 +91,13 @@ Every env var bty's runtime reads, with the consuming process and the
 default. The wizard + web read from the same set, so a single ``ENV``
 block (compose / Quadlet / Dockerfile) covers every component.
 
+> **v0.42+:** ``bty-web``'s canonical config is a ``bty.toml`` file
+> (pointed at via ``BTY_CONFIG_FILE`` / ``BTY_CONFIG_DIR``); per-key
+> env overrides follow the ``BTY_<SECTION>_<KEY>`` convention (e.g.
+> ``BTY_SERVER_PORT``). The flat ``bty-web`` names below
+> (``BTY_WEB_PORT``, ``BTY_STATE_DIR``, ...) keep working as legacy
+> aliases for one release; new deploys should author ``bty.toml``.
+
 | Var | Read by | Default | Purpose |
 |---|---|---|---|
 | `BTY_IMAGE_ROOT` | `bty`, `bty-web` | `/var/lib/bty/images` | Image catalog directory |
@@ -105,7 +112,7 @@ block (compose / Quadlet / Dockerfile) covers every component.
 | `BTY_HASH_MAX_PARALLEL` | `bty-web` | `1` | Concurrent SHA-256 hashes (low: Pi/NUC-friendly) |
 | `BTY_MAX_UPLOAD_BYTES` | `bty-web` | `200 GiB` | Hard cap on `PUT /images/{name}` body size; rejected uploads land an `image.upload_failed` audit row |
 | `BTY_TRUSTED_PROXY` | `bty-web` | unset | When set (any truthy), read client IP from `X-Forwarded-For`; only enable behind a reverse proxy that strips inbound X-F-F |
-| `BTY_ADMIN_PASSWORD` | `bty-web` | unset | Gates the operator UI (constant-time compare); unset = open, with a startup warning |
+| `BTY_ADMIN_PASSWORD` | `bty-web` | `bty` | Gates the operator UI (constant-time compare); auth is always on -- unset falls back to the well-known default `bty`, with a startup warning until it is changed |
 
 ``bty`` also accepts `--catalog SOURCE` to pre-load a catalog and `--server
 X --mac Y` for server-driven dispatch. See `reference.md > CLI` for the
