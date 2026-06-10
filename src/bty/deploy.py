@@ -114,7 +114,9 @@ services:
       BTY_CONFIG_FILE: /etc/bty/bty.toml
     volumes:
       - ${{BTY_HOST_DATA_DIR:-./data}}/bty:/var/lib/bty
-      - ./bty.toml:/etc/bty/bty.toml:ro
+      # RW (no :ro) so Settings-page edits land back on the host file,
+      # matching the Quadlet unit's mount.
+      - ./bty.toml:/etc/bty/bty.toml
     depends_on:
       - withcache
 
