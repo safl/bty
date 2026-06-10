@@ -920,6 +920,20 @@ def register_ui_routes(
                     )
                     conn.commit()
                 except sqlite3.IntegrityError:
+                    # Audit the rejection too -- the JSON endpoint logs
+                    # its add failures, so the /ui/events trail should
+                    # not silently miss the form-post path.
+                    _events_log.record(
+                        conn,
+                        kind="catalog.entry.add.failed",
+                        summary=f"catalog entry add failed (duplicate): {name}",
+                        subject_kind="catalog",
+                        subject_id=image_url,
+                        actor="operator",
+                        source_ip=_client_ip(request),
+                        details={"name": name, "error": "already exists"},
+                    )
+                    conn.commit()
                     return RedirectResponse(
                         "/ui/images?error=already+exists",
                         status_code=status.HTTP_303_SEE_OTHER,
@@ -1002,6 +1016,18 @@ def register_ui_routes(
                 )
                 conn.commit()
             except sqlite3.IntegrityError:
+                # Same audit-the-rejection rationale as the oras path.
+                _events_log.record(
+                    conn,
+                    kind="catalog.entry.add.failed",
+                    summary=f"catalog entry add failed (duplicate): {name}",
+                    subject_kind="catalog",
+                    subject_id=image_url,
+                    actor="operator",
+                    source_ip=_client_ip(request),
+                    details={"name": name, "error": "already exists"},
+                )
+                conn.commit()
                 return RedirectResponse(
                     "/ui/images?error=already+exists",
                     status_code=status.HTTP_303_SEE_OTHER,
