@@ -11,14 +11,14 @@ No clone required. With `uv` (or `pipx`) on the host:
 
 ```sh
 sudo uvx bty-lab deploy /opt/bty
-#   bty-web:   http://<host>:8080/ui     (login: bty / bty)
-#   withcache: http://<host>:3000/       (login: bty / bty)
+#   bty-web:   http://<host>:8080/ui     (login: bty-lab / bty-lab)
+#   withcache: http://<host>:3000/       (login: bty-lab / bty-lab)
 ```
 
 `deploy` creates `/opt/bty` if it doesn't exist and chowns it back to
 `$SUDO_USER` so you can edit `envvars` without `sudo` afterwards.
 It writes compose.yml + an auto-filled `envvars` (HOST_ADDR detected
-from the host's outbound-route IP; admin passwords default to `bty`;
+from the host's outbound-route IP; admin passwords default to `bty-lab`;
 session secret stays random) and runs `podman compose --profile tftp
 pull` + `up -d`. Change the passwords in `/opt/bty/envvars` before
 exposing past trusted LAN.
