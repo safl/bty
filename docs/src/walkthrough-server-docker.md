@@ -142,6 +142,11 @@ and copying the file. Migrations run automatically on every start.
 
 ## Environment variables
 
+v0.42+: the canonical config is a ``bty.toml`` file mounted into the
+container and pointed at via ``BTY_CONFIG_FILE`` (the generated
+compose / Quadlet deploys do exactly this); the flat names below keep
+working as legacy aliases for one release.
+
 | Var | Default | Purpose |
 |---|---|---|
 | `BTY_WEB_HOST` | `0.0.0.0` | Listen address |
@@ -149,7 +154,7 @@ and copying the file. Migrations run automatically on every start.
 | `BTY_STATE_DIR` | `/var/lib/bty` | Where `state.db` and `session-secret` live |
 | `BTY_BOOT_DIR` | `${BTY_STATE_DIR}/boot` | Kernel/initrd/squashfs (PXE boot artifacts) |
 | `BTY_SESSION_SECRET` | (generated) | Cookie key override; useful for multi-instance |
-| `BTY_ADMIN_PASSWORD` | unset | Gates the operator UI (constant-time compare); unset = open, with a startup warning |
+| `BTY_ADMIN_PASSWORD` | `bty` | Gates the operator UI (constant-time compare); auth is always on -- unset falls back to the well-known default `bty`, with a startup warning until it is changed |
 
 ## Building locally
 
