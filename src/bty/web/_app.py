@@ -53,7 +53,12 @@ from bty.web import (
     _ui,
     _withcache,
 )
-from bty.web._auth import SESSION_COOKIE, require_auth, using_default_password
+from bty.web._auth import (
+    DEFAULT_ADMIN_PASSWORD,
+    SESSION_COOKIE,
+    require_auth,
+    using_default_password,
+)
 from bty.web._events import (
     WORKER_STATE_CHANGED,
     MachineEvent,
@@ -190,9 +195,10 @@ def create_app(
         _lifespan_log = _logging.getLogger(__name__)
         if using_default_password():
             _lifespan_log.warning(
-                "BTY_ADMIN_PASSWORD is not set - using the well-known default "
-                "password 'bty'. Change it via $BTY_ADMIN_PASSWORD for any "
-                "deploy reachable beyond localhost."
+                "Admin password is the well-known default %r. Change "
+                "[admin] password in bty.toml (or $BTY_ADMIN_PASSWORD) "
+                "for any deploy reachable beyond localhost.",
+                DEFAULT_ADMIN_PASSWORD,
             )
         # The SSE event bus accepts publishes from worker threads -
         # capture the loop now so cross-thread publishes can hop in

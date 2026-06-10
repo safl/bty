@@ -138,15 +138,21 @@ def test_logout_clears_the_session(client: TestClient) -> None:
 def test_default_password_still_gates_protected_routes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """With BTY_ADMIN_PASSWORD unset, ``bty`` is the active password. The
-    UI is NOT open: a request without a session cookie 401s, and the
-    operator can log in with the literal string ``"bty"``."""
+    """With BTY_ADMIN_PASSWORD unset, the well-known default is the
+    active password. The UI is NOT open: a request without a session
+    cookie 401s, and the operator can log in with that default."""
+    from bty.web._auth import DEFAULT_ADMIN_PASSWORD
+
     monkeypatch.delenv("BTY_ADMIN_PASSWORD", raising=False)
     with _make_client(tmp_path) as c:
         # Unauthed access is still 401 -- no bypass.
         assert c.get("/machines").status_code == 401
         # Logging in with the well-known default works.
-        r = c.post("/ui/login", data={"password": "bty"}, follow_redirects=False)
+        r = c.post(
+            "/ui/login",
+            data={"password": DEFAULT_ADMIN_PASSWORD},
+            follow_redirects=False,
+        )
         assert r.status_code == 303
         assert c.get("/machines").status_code == 200
 

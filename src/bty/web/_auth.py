@@ -7,12 +7,12 @@ managed by Starlette's :class:`SessionMiddleware`, so no DB session table is
 needed.
 
 The password is sourced from ``$BTY_ADMIN_PASSWORD`` if set + non-empty,
-otherwise falls back to the literal string :data:`DEFAULT_ADMIN_PASSWORD`
-(``"bty"``). Auth is ALWAYS on -- there is no "open access" mode; an unset
-env var just means the operator gets the well-known default until they
-override it. The startup banner logs a warning when the default is in use
-so an operator who's actually exposed bty-web doesn't silently ship with
-``bty / bty``.
+otherwise falls back to :data:`DEFAULT_ADMIN_PASSWORD` (``"bty-lab"``).
+Auth is ALWAYS on -- there is no "open access" mode; an unset env var
+just means the operator gets the well-known default until they override
+it. The startup banner logs a warning when the default is in use so an
+operator who's actually exposed bty-web doesn't silently ship with
+``bty-lab / bty-lab``.
 
 Failure modes return 401; ``/ui/*`` routes catch the exception in a middleware
 and redirect to ``/ui/login``.
@@ -25,6 +25,12 @@ import os
 
 from fastapi import HTTPException, Request, status
 
+# Fallback password when ``$BTY_ADMIN_PASSWORD`` is unset. Re-exported
+# from _config (the dataclass default) rather than redefined, so the
+# two can never drift -- ``using_default_password`` compares against it.
+# The ``as`` alias marks it an explicit re-export for mypy.
+from bty.web._config import DEFAULT_ADMIN_PASSWORD as DEFAULT_ADMIN_PASSWORD
+
 # Session-cookie name. Set explicitly so the PXE chain test and operator
 # scripts can grep for a stable token in Set-Cookie.
 SESSION_COOKIE = "bty-token"
@@ -32,13 +38,8 @@ SESSION_COOKIE = "bty-token"
 # Session key the auth dep checks. Set on successful /ui/login.
 SESSION_AUTHED_KEY = "bty_authed"
 
-# Admin password env var. Overrides the well-known default below.
+# Admin password env var. Overrides the well-known default.
 ADMIN_PASSWORD_ENV = "BTY_ADMIN_PASSWORD"
-
-# Fallback password when ``$BTY_ADMIN_PASSWORD`` is unset. Auth is always
-# on; this just means a fresh deploy can be opened with a known string and
-# the operator should change it. Documented + warned about on startup.
-DEFAULT_ADMIN_PASSWORD = "bty"
 
 
 def admin_password() -> str:
@@ -46,7 +47,7 @@ def admin_password() -> str:
 
     Reads from ``cfg.admin.password`` -- whose value chain is
     ``[admin] password`` in bty.toml, overridden by
-    ``BTY_ADMIN_PASSWORD`` env var, defaulting to ``"bty"``.
+    ``BTY_ADMIN_PASSWORD`` env var, defaulting to ``"bty-lab"``.
     Never returns ``None`` -- auth is always on.
 
     Falls back to the legacy env-var-only read when called before

@@ -248,6 +248,35 @@ def test_systemd_emits_quadlet_units_with_absolute_paths(tmp_path: Path) -> None
     assert f"Image=ghcr.io/safl/bty-web:{bty.__version__}" in web
 
 
+def test_deploy_bakes_password_into_withcache_quadlet(
+    tmp_path: Path, _patched_runtime: dict[str, list]
+) -> None:
+    """Regression: a root `deploy` must bake the chosen password into
+    the withcache Quadlet unit, not leave the `change-me` placeholder.
+    The unit is installed straight away, so a placeholder there would
+    silently override the credential the deploy summary + envvars
+    advertise (login would fail with the documented password)."""
+    dest = tmp_path / "bty-host"
+    deploy_mod.deploy_main([str(dest)])  # root (geteuid==0 via fixture)
+    withcache = (dest / "quadlet" / "withcache.container").read_text(encoding="utf-8")
+    assert f"Environment=WITHCACHE_ADMIN_PASSWORD={deploy_mod.DEFAULT_DEPLOY_PASSWORD}" in withcache
+    assert "change-me" not in withcache
+    # ...and it matches what envvars + the bty-web admin share.
+    envvars = (dest / "envvars").read_text(encoding="utf-8")
+    assert f"WITHCACHE_ADMIN_PASSWORD={deploy_mod.DEFAULT_DEPLOY_PASSWORD}" in envvars
+
+
+def test_init_withcache_quadlet_keeps_placeholder(tmp_path: Path) -> None:
+    """The stand-alone `init --systemd` reference path has no chosen
+    password, so its withcache unit keeps the editable placeholder +
+    the "edit before installing" note."""
+    dest = tmp_path / "bty-host"
+    deploy_mod.init_main([str(dest), "--systemd"])
+    withcache = (dest / "quadlet" / "withcache.container").read_text(encoding="utf-8")
+    assert "Environment=WITHCACHE_ADMIN_PASSWORD=change-me" in withcache
+    assert "Edit Environment=WITHCACHE_ADMIN_PASSWORD before installing." in withcache
+
+
 def test_data_dir_override_baked_into_quadlets(tmp_path: Path) -> None:
     dest = tmp_path / "bty-host"
     custom = tmp_path / "elsewhere" / "state"
@@ -374,8 +403,8 @@ def test_deploy_emits_envvars_and_runs_compose(
     tmp_path: Path, _patched_runtime: dict[str, list]
 ) -> None:
     """``deploy`` writes a real ``envvars`` (not just .example) with the
-    detected HOST_ADDR + the historic-PAM "bty" admin password default
-    (session secret stays random crypto material). Root mode runs
+    detected HOST_ADDR + the well-known default password for both
+    services (session secret stays random crypto material). Root mode runs
     ``podman compose pull`` + ``down`` (clean up leftovers; Quadlet
     takes over from there)."""
     dest = tmp_path / "bty-host"
@@ -383,9 +412,9 @@ def test_deploy_emits_envvars_and_runs_compose(
 
     envvars = (dest / "envvars").read_text(encoding="utf-8")
     assert "\nHOST_ADDR=10.20.30.200\n" in envvars
-    # Admin passwords default to "bty" (memorable, matches PAM convention).
-    assert "\nBTY_ADMIN_PASSWORD=bty\n" in envvars
-    assert "\nWITHCACHE_ADMIN_PASSWORD=bty\n" in envvars
+    # Both services default to the same memorable password.
+    assert f"\nBTY_ADMIN_PASSWORD={deploy_mod.DEFAULT_DEPLOY_PASSWORD}\n" in envvars
+    assert f"\nWITHCACHE_ADMIN_PASSWORD={deploy_mod.DEFAULT_DEPLOY_PASSWORD}\n" in envvars
     # Session secret is random crypto material -- just assert it's filled.
     session_line = next(
         line for line in envvars.splitlines() if line.startswith("BTY_SESSION_SECRET=")
@@ -575,8 +604,8 @@ def test_deploy_refuses_existing_envvars_without_force(
 
 def test_deploy_force_overwrites_envvars(tmp_path: Path, _patched_runtime: dict[str, list]) -> None:
     """``--force`` regenerates everything, including envvars (admin
-    passwords reset to the "bty" default, session secret rotates to a
-    fresh random value)."""
+    passwords reset to the well-known default, session secret rotates
+    to a fresh random value)."""
     dest = tmp_path / "bty-host"
     deploy_mod.deploy_main([str(dest)])
     sess1 = next(
@@ -728,7 +757,7 @@ def test_envvars_to_bty_toml_uses_schema_defaults_when_envvars_empty(
     env_path = tmp_path / "envvars"
     env_path.write_text("HOST_ADDR=10.0.0.5\n", encoding="utf-8")
     out = deploy_mod._envvars_to_bty_toml(env_path, host_addr="10.0.0.5")
-    assert 'password = "bty"' in out  # default admin password
+    assert f'password = "{deploy_mod.DEFAULT_DEPLOY_PASSWORD}"' in out  # default admin password
     assert 'host = "0.0.0.0"' in out
     assert "session_secret = " in out  # auto-generated, but present
     assert 'url = "http://10.0.0.5:3000"' in out
