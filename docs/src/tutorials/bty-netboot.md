@@ -24,8 +24,8 @@ serve images.
 
 ```sh
 sudo uvx bty-lab deploy /opt/bty
-#   bty:       http://<host>:8080/ui     (login: bty / bty)
-#   withcache: http://<host>:3000/       (login: bty / bty)
+#   bty:       http://<host>:8080/ui     (login: bty-lab / bty-lab)
+#   withcache: http://<host>:3000/       (login: bty-lab / bty-lab)
 ```
 
 That's the full bring-up. The remainder of this walkthrough -- DHCP

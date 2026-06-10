@@ -30,14 +30,14 @@ shot. No clone needed; `uv` (or `pipx`) on the host is enough:
 
 ```bash
 sudo uvx bty-lab deploy /opt/bty
-#   bty: :8080/ui  withcache: :3000/   (login: bty / bty)
+#   bty: :8080/ui  withcache: :3000/   (login: bty-lab / bty-lab)
 ```
 
 `deploy` detects install mode from your euid: as root, the full system
 install (TFTP sidecar + Quadlet units + systemctl autostart); as a
 regular user, the compose-only install (no TFTP, no autostart, with a
 warning listing exactly what was skipped). `HOST_ADDR` is detected from
-the host's outbound-route IP; admin passwords default to `bty`. Change
+the host's outbound-route IP; admin passwords default to `bty-lab`. Change
 them before exposing the host past a trusted LAN. Pass `--host-addr
 192.0.2.10` to override detection, or `--force` to overwrite an existing
 `envvars`.
@@ -154,7 +154,7 @@ working as legacy aliases for one release.
 | `BTY_STATE_DIR` | `/var/lib/bty` | Where `state.db` and `session-secret` live |
 | `BTY_BOOT_DIR` | `${BTY_STATE_DIR}/boot` | Kernel/initrd/squashfs (PXE boot artifacts) |
 | `BTY_SESSION_SECRET` | (generated) | Cookie key override; useful for multi-instance |
-| `BTY_ADMIN_PASSWORD` | `bty` | Gates the operator UI (constant-time compare); auth is always on -- unset falls back to the well-known default `bty`, with a startup warning until it is changed |
+| `BTY_ADMIN_PASSWORD` | `bty-lab` | Gates the operator UI (constant-time compare); auth is always on -- unset falls back to the well-known default `bty-lab`, with a startup warning until it is changed |
 
 ## Building locally
 

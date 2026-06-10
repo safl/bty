@@ -112,7 +112,7 @@ block (compose / Quadlet / Dockerfile) covers every component.
 | `BTY_HASH_MAX_PARALLEL` | `bty-web` | `1` | Concurrent SHA-256 hashes (low: Pi/NUC-friendly) |
 | `BTY_MAX_UPLOAD_BYTES` | `bty-web` | `200 GiB` | Hard cap on `PUT /images/{name}` body size; rejected uploads land an `image.upload_failed` audit row |
 | `BTY_TRUSTED_PROXY` | `bty-web` | unset | When set (any truthy), read client IP from `X-Forwarded-For`; only enable behind a reverse proxy that strips inbound X-F-F |
-| `BTY_ADMIN_PASSWORD` | `bty-web` | `bty` | Gates the operator UI (constant-time compare); auth is always on -- unset falls back to the well-known default `bty`, with a startup warning until it is changed |
+| `BTY_ADMIN_PASSWORD` | `bty-web` | `bty-lab` | Gates the operator UI (constant-time compare); auth is always on -- unset falls back to the well-known default `bty-lab`, with a startup warning until it is changed |
 
 ``bty`` also accepts `--catalog SOURCE` to pre-load a catalog and `--server
 X --mac Y` for server-driven dispatch. See `reference.md > CLI` for the

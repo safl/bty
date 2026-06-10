@@ -423,7 +423,7 @@ Bootstrap CSS, HTMX form posts).
 
 - `GET /ui` -> 303 redirect to `/ui/dashboard`
 - `GET /ui/login` -> login form
-- `POST /ui/login` -> constant-time-compares the password against ``[admin] password`` from ``bty.toml`` (env override `BTY_ADMIN_PASSWORD`; default `bty`) and flips
+- `POST /ui/login` -> constant-time-compares the password against ``[admin] password`` from ``bty.toml`` (env override `BTY_ADMIN_PASSWORD`; default `bty-lab`) and flips
  ``request.session["bty_authed"] = True``; SessionMiddleware emits
  the signed `bty-token` cookie on the redirect response
  (``SameSite=Strict``).

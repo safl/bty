@@ -137,8 +137,8 @@ clone required:
 
 ```bash
 sudo uvx bty-lab deploy /opt/bty
-#   bty-web:   http://<host>:8080/ui     (login: bty / bty)
-#   withcache: http://<host>:3000/       (login: bty / bty)
+#   bty-web:   http://<host>:8080/ui     (login: bty-lab / bty-lab)
+#   withcache: http://<host>:3000/       (login: bty-lab / bty-lab)
 ```
 
 `deploy` auto-detects install mode from your euid:
@@ -152,7 +152,7 @@ sudo uvx bty-lab deploy /opt/bty
   command to promote to a system install.
 
 `HOST_ADDR` is detected from the host's outbound-route IP; admin
-passwords default to `bty`. Change them in `/opt/bty/envvars` before
+passwords default to `bty-lab`. Change them in `/opt/bty/envvars` before
 exposing past trusted LAN. `uvx bty-lab upgrade /opt/bty` upgrades in
 place; `uvx bty-lab init /opt/bty` emits files only (no side effects).
 See [`deploy/README.md`](deploy/README.md) for the full surface.

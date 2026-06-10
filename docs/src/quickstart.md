@@ -8,8 +8,8 @@ network via the bty-web server.
 
 ```bash
 sudo uvx bty-lab deploy /opt/bty
-#   bty-web:   http://<host>:8080/ui     (login: bty / bty)
-#   withcache: http://<host>:3000/       (login: bty / bty)
+#   bty-web:   http://<host>:8080/ui     (login: bty-lab / bty-lab)
+#   withcache: http://<host>:3000/       (login: bty-lab / bty-lab)
 ```
 
 That's it. `deploy` auto-detects install mode from your euid:
@@ -25,7 +25,7 @@ That's it. `deploy` auto-detects install mode from your euid:
   was skipped and how to promote to a system install at the end.
 
 `HOST_ADDR` is detected from the host's outbound-route IP; admin
-passwords default to `bty`. Change the passwords in `/opt/bty/envvars`
+passwords default to `bty-lab`. Change the passwords in `/opt/bty/envvars`
 before exposing past trusted LAN.
 
 - `uvx bty-lab upgrade /opt/bty` -- in-place upgrade. Auto-detects
@@ -201,7 +201,7 @@ To script mutations from a shell, drive `/ui/login` once to get the cookie,
 then attach it on subsequent requests:
 
 ```bash
-COOKIE=$(curl -sS -i -X POST -d "password=bty" \
+COOKIE=$(curl -sS -i -X POST -d "password=bty-lab" \
    http://server:8080/ui/login \
    | grep -i '^set-cookie:.*bty-token' | sed 's/.*bty-token=\([^;]*\).*/\1/')
 
