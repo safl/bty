@@ -47,10 +47,11 @@ DEFAULT_SYSTEM_CONF_DIR = Path("/etc/bty/conf.d")
 DEFAULT_SYSTEM_CONFIG_FILE = Path("/etc/bty/bty.toml")
 DEFAULT_STATE_DIR = "/var/lib/bty"
 
-# The well-known default password (matches the v0.41.3 "bty" decision).
-# Logged on startup so an operator who's actually exposed bty-web
-# doesn't silently ship with the default.
-DEFAULT_ADMIN_PASSWORD = "bty"
+# The well-known default password. Logged on startup so an operator
+# who's actually exposed bty-web doesn't silently ship with it. Shared
+# with the withcache deploy default so a stock deploy has one memorable
+# credential for both services.
+DEFAULT_ADMIN_PASSWORD = "bty-lab"
 
 
 @dataclass(frozen=True)
