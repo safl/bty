@@ -34,6 +34,7 @@ Missing paths are silently skipped -- a fresh deploy with no
 
 from __future__ import annotations
 
+import errno
 import os
 import socket
 import tomllib
@@ -613,9 +614,22 @@ def save_value(path: Path, section: str, key: str, value: str | int) -> None:
     # since these values include the admin password.
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f".{path.name}.tmp")
-    tmp.write_text(tomlkit.dumps(doc), encoding="utf-8")
+    body = tomlkit.dumps(doc)
+    tmp.write_text(body, encoding="utf-8")
     os.chmod(tmp, 0o640)
-    tmp.replace(path)
+    try:
+        tmp.replace(path)
+    except OSError as exc:
+        if exc.errno not in (errno.EBUSY, errno.EXDEV):
+            raise
+        # ``path`` is a single-file bind mount (the container deploys
+        # mount ``<dest>/bty.toml`` at ``/etc/bty/bty.toml``): rename
+        # onto a mount point fails with EBUSY no matter the mount's
+        # rw/ro flags. Fall back to an in-place write -- not atomic,
+        # but the tempfile next to it still holds the full body for
+        # manual recovery if the write is interrupted.
+        path.write_text(body, encoding="utf-8")
+        tmp.unlink(missing_ok=True)
 
 
 def detect_host_addr() -> str:

@@ -326,6 +326,34 @@ def test_save_value_atomic_no_tmpfile_left_behind(tmp_path: Path) -> None:
     assert leftovers == []
 
 
+def test_save_value_falls_back_to_in_place_on_ebusy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The container deploys bind-mount ``bty.toml`` as a single file
+    at ``/etc/bty/bty.toml``; rename onto a mount point fails with
+    EBUSY regardless of the mount's rw flag. save_value must fall back
+    to an in-place write so Settings-page edits work in containers."""
+    import errno
+
+    p = tmp_path / "bty.toml"
+    p.write_text('[admin]\npassword = "old"\n', encoding="utf-8")
+
+    real_replace = Path.replace
+
+    def ebusy_replace(self: Path, target):  # type: ignore[no-untyped-def]
+        if Path(target) == p:
+            raise OSError(errno.EBUSY, "Device or resource busy")
+        return real_replace(self, target)
+
+    monkeypatch.setattr(Path, "replace", ebusy_replace)
+    save_value(p, "admin", "password", "new")
+
+    assert 'password = "new"' in p.read_text(encoding="utf-8")
+    # The fallback also cleans up its tempfile.
+    leftovers = [child.name for child in tmp_path.iterdir() if child.name.startswith(".")]
+    assert leftovers == []
+
+
 # ---------- primary_toml semantics -------------------------------------------
 
 

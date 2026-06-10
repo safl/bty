@@ -1,6 +1,8 @@
 # Podman Quadlet unit -> generates bty-web.service.
-# Install: copy into /etc/containers/systemd/ (root) then `systemctl daemon-reload`.
-# Edit HOST_ADDR below to this host's LAN address (clients fetch from it).
+# Reference copy; operators usually consume the generated one via
+# `bty-lab init --systemd` (it bakes absolute host paths). To use this
+# file directly: replace the two *_HERE placeholders below, copy into
+# /etc/containers/systemd/ (root), then `systemctl daemon-reload`.
 [Unit]
 Description=bty-web
 After=network-online.target withcache.service
@@ -10,13 +12,17 @@ Wants=network-online.target
 Image=ghcr.io/safl/bty-web:latest
 AutoUpdate=registry
 PublishPort=8080:8080
-Volume=bty-data:/var/lib/bty
-# Must be THIS HOST's LAN address, not a container name (booting clients fetch it).
-Environment=BTY_WITHCACHE_URL=http://HOST_ADDR:3000
-# TFTP probe target for the Netboot page diagnostic. bty-tftp uses host
-# networking, so udp/69 is on the host's LAN address (not on bty-web's
-# loopback). Same HOST_ADDR substitution as BTY_WITHCACHE_URL above.
-Environment=BTY_TFTP_PROBE_HOST=HOST_ADDR
+Volume=BTY_DATA_DIR_HERE/bty:/var/lib/bty:Z
+# v0.42+: operator config is a TOML file on the host, bind-mounted at
+# /etc/bty/bty.toml. Edit that file directly or via the Settings page.
+# The mount is RW (no :ro) so Settings writes land back on the host
+# file. bty-web re-reads on each restart.
+Volume=BTY_TOML_HOST_PATH_HERE:/etc/bty/bty.toml:Z
+Environment=BTY_CONFIG_FILE=/etc/bty/bty.toml
+# Hard-set DNS so external lookups work on stock Ubuntu hosts where
+# systemd-resolved owns /etc/resolv.conf and aardvark-dns isn't
+# installed. Edit if the host needs an internal resolver.
+DNS=1.1.1.1
 
 [Service]
 Restart=always
