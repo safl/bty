@@ -340,8 +340,10 @@
             options on the DHCP service.
         </p>
 
-        {# Shorthand for "this host's IP", reused across both tables. #}
-        {% set bty_ip = primary.ipv4 if primary and primary.ipv4 else "<bty-host>" %}
+        {# Shorthand for "this host's IP", reused across both tables.
+           Prefer the configured advertised host (withcache URL host),
+           falling back to the sniffed primary interface. #}
+        {% set bty_ip = suggested_host if suggested_host else (primary.ipv4 if primary and primary.ipv4 else "<bty-host>") %}
 
         <h4 class="h6 mt-3 fw-semibold">Option A &mdash; PXE (via TFTP)</h4>
         <p class="text-muted small mb-2">

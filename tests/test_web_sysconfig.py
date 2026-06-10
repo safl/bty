@@ -296,16 +296,10 @@ def test_tftp_probe_oserror_is_unreachable_not_500() -> None:
     assert "ConnectionRefusedError" in result.detail
 
 
-def test_default_tftp_probe_host_respects_env(monkeypatch: object) -> None:
-    """``$BTY_TFTP_PROBE_HOST`` overrides the localhost default
-    so a deploy with TFTP on a separate machine still probes the
-    right place."""
-    from bty.web._sysconfig import default_tftp_probe_host
-
-    monkeypatch.setenv("BTY_TFTP_PROBE_HOST", "10.20.30.40")  # type: ignore[attr-defined]
-    assert default_tftp_probe_host() == "10.20.30.40"
-    monkeypatch.delenv("BTY_TFTP_PROBE_HOST")  # type: ignore[attr-defined]
-    assert default_tftp_probe_host() == "127.0.0.1"
+# NOTE: probe-host resolution moved into Config
+# (``effective_tftp_probe_host`` / ``advertised_host``); ``tftp_probe``
+# now takes an explicit ``host`` and no longer reads an env var of its
+# own. The resolution is covered in tests/test_web_config.py.
 
 
 def test_tftp_status_pgrep_missing_returns_inactive() -> None:

@@ -40,6 +40,7 @@ import tomllib
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Any, get_type_hints
+from urllib.parse import urlparse
 
 DEFAULT_SYSTEM_CONF_DIR = Path("/etc/bty/conf.d")
 DEFAULT_SYSTEM_CONFIG_FILE = Path("/etc/bty/bty.toml")
@@ -123,13 +124,17 @@ class NetbootConfig:
     """Netboot / TFTP integration section.
 
     ``tftp_probe_host`` is where the /ui/netboot diagnostic sends its
-    TFTP RRQ to test reachability. Default ``127.0.0.1`` works for
-    host installs (co-located dnsmasq). Container deploys set this to
-    the host's LAN address (the ``bty-tftp`` sidecar uses
-    ``network_mode: host``). Env: ``BTY_NETBOOT_TFTP_PROBE_HOST``.
+    TFTP RRQ to test reachability. Leave it **blank** (the default) and
+    the probe auto-targets the host of :attr:`WithcacheConfig.url` -- the
+    LAN address clients already reach this host at, where the
+    ``network_mode: host`` ``bty-tftp`` sidecar serves udp/69. Set it
+    explicitly only when the TFTP daemon lives somewhere else (e.g. a
+    co-located host install -> ``127.0.0.1``, or the LAN router). See
+    :meth:`Config.effective_tftp_probe_host`.
+    Env: ``BTY_NETBOOT_TFTP_PROBE_HOST``.
     """
 
-    tftp_probe_host: str = "127.0.0.1"
+    tftp_probe_host: str = ""
 
 
 @dataclass(frozen=True)
@@ -187,6 +192,38 @@ class Config:
     @property
     def state_db(self) -> Path:
         return self.state_dir / "state.db"
+
+    # ---- Derived network resolvers ---------------------------------------
+
+    @property
+    def advertised_host(self) -> str | None:
+        """The LAN address booting clients reach this host at.
+
+        Derived from :attr:`WithcacheConfig.url` (``http://<host>:3000``)
+        -- the one address the operator already configures and that bty
+        hands to clients. ``None`` when no withcache URL is set (a pure
+        host install with no cache), in which case callers fall back to
+        interface sniffing / loopback.
+        """
+        if not self.withcache.url:
+            return None
+        return urlparse(self.withcache.url).hostname or None
+
+    @property
+    def effective_tftp_probe_host(self) -> str:
+        """Where the /ui/netboot TFTP probe should aim.
+
+        Resolution order: an explicit ``[netboot] tftp_probe_host``
+        wins; otherwise the :attr:`advertised_host` (the host-networked
+        ``bty-tftp`` sidecar listens on the host's LAN address, not on
+        bty-web's bridge loopback); falling back to ``127.0.0.1`` only
+        when neither is set (co-located host install). This is the
+        single source the probe reads -- there is no separate env path.
+        """
+        explicit = self.netboot.tftp_probe_host.strip()
+        if explicit:
+            return explicit
+        return self.advertised_host or "127.0.0.1"
 
 
 # ---- Loader -----------------------------------------------------------------

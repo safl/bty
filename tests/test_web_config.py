@@ -76,6 +76,53 @@ def test_single_toml_overrides_defaults(tmp_path: Path) -> None:
     assert r.primary_toml == p
 
 
+def test_tftp_probe_host_derives_from_withcache_url(tmp_path: Path) -> None:
+    """Unset ``[netboot] tftp_probe_host`` resolves to the withcache
+    URL's host -- the LAN address clients reach, where the
+    host-networked bty-tftp sidecar serves udp/69. This is the bug
+    that broke the /ui/netboot probe: the default must not be loopback
+    when a withcache host is configured."""
+    p = _toml(
+        tmp_path,
+        "bty.toml",
+        """
+        [withcache]
+        url = "http://192.168.1.110:3000"
+        """,
+    )
+    cfg = load_config([p]).cfg
+    assert cfg.netboot.tftp_probe_host == ""  # unset
+    assert cfg.advertised_host == "192.168.1.110"
+    assert cfg.effective_tftp_probe_host == "192.168.1.110"
+
+
+def test_tftp_probe_host_explicit_overrides_withcache(tmp_path: Path) -> None:
+    """An explicit ``[netboot] tftp_probe_host`` wins over the derived
+    withcache host (TFTP-on-the-router case)."""
+    p = _toml(
+        tmp_path,
+        "bty.toml",
+        """
+        [withcache]
+        url = "http://192.168.1.110:3000"
+
+        [netboot]
+        tftp_probe_host = "192.168.1.1"
+        """,
+    )
+    cfg = load_config([p]).cfg
+    assert cfg.effective_tftp_probe_host == "192.168.1.1"
+
+
+def test_tftp_probe_host_falls_back_to_loopback(tmp_path: Path) -> None:
+    """No withcache URL and no explicit probe host -> loopback (a
+    co-located host install where TFTP runs on the same box)."""
+    p = _toml(tmp_path, "bty.toml", '[admin]\npassword = "x"\n')
+    cfg = load_config([p]).cfg
+    assert cfg.advertised_host is None
+    assert cfg.effective_tftp_probe_host == "127.0.0.1"
+
+
 def test_unknown_section_or_key_ignored(tmp_path: Path) -> None:
     """Forward-compat: a TOML carrying a section / key bty-web
     doesn't know yet must not blow up. Newer bty.toml on an older
