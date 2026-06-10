@@ -661,7 +661,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
           token: ${{ secrets.RELEASE_PAT }}
@@ -693,7 +693,7 @@ jobs:
         # The catalog generator reads ``cijoe/scripts/usb_iso_build.py``
         # to AST-extract the same ``_STARTER_BRIS`` set baked onto
         # BTY_IMAGES, so the repo needs to be on disk in this job.
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Generate catalog.toml from _STARTER_BRIS
         # bty's default portable catalog: 7 nosi flashable images via
         # rolling oras:// tags. Rolling tags stay rolling -- bty.oras

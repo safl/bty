@@ -345,10 +345,10 @@ def inspect_image(path: Path) -> dict[str, Any]:
     - ``img.gz`` -> the textual output of ``gzip -l``
     - ``img.bz2`` -> nothing (bzip2 has no listing tool)
 
-    Raises :class:`FileNotFoundError` if the path does not exist,
+    Raises :class:`FileNotFoundError` if the path does not exist, or
     :class:`IsADirectoryError` if the path is a directory (operator
     almost certainly meant a file inside; surfacing a "format='',
-    size_bytes=40" record for a directory was misleading), or
+    size_bytes=40" record for a directory was misleading).
     """
     if not path.exists():
         raise FileNotFoundError(path)
