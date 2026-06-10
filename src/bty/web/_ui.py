@@ -1038,7 +1038,6 @@ def register_ui_routes(
         return render(
             "ui/netboot.html",
             request,
-            boot_root=str(boot_root),
             artifacts=artifacts,
             artifacts_all_cached=artifacts_all_cached,
             artifact_shas=_releases.boot_artifact_shas(boot_root),

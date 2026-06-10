@@ -253,6 +253,42 @@ def test_env_int_coerce_raises_on_garbage(monkeypatch: pytest.MonkeyPatch) -> No
         load_config([])
 
 
+def test_every_legacy_env_alias_maps_to_its_config_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The v0.41 flat env names must keep working until their
+    scheduled removal -- this is the backward-compat contract an
+    unmodified v0.41 ``envvars`` file relies on. Iterates the alias
+    table itself so a new entry is covered automatically."""
+    from bty.web._config import _LEGACY_ENV_ALIASES
+
+    # Unique numeric strings work for both str- and int-typed fields
+    # (the loader coerces by the dataclass's declared type).
+    expected: dict[str, str] = {}
+    for i, env_name in enumerate(sorted(_LEGACY_ENV_ALIASES)):
+        value = str(7000 + i)
+        monkeypatch.setenv(env_name, value)
+        expected[env_name] = value
+
+    r = load_config([])
+    for env_name, (section, key) in _LEGACY_ENV_ALIASES.items():
+        actual = getattr(getattr(r.cfg, section), key)
+        assert str(actual) == expected[env_name], f"{env_name} -> [{section}] {key}"
+        assert r.sources[f"{section}.{key}"] == f"env({env_name})"
+
+
+def test_canonical_env_name_wins_over_legacy_alias(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When both the legacy and the canonical env name are set, the
+    canonical one wins (documented migration semantics)."""
+    monkeypatch.setenv("BTY_WEB_PORT", "1111")  # legacy
+    monkeypatch.setenv("BTY_SERVER_PORT", "2222")  # canonical
+    r = load_config([])
+    assert r.cfg.server.port == 2222
+    assert r.sources["server.port"] == "env(BTY_SERVER_PORT)"
+
+
 # ---------- derived path resolvers -------------------------------------------
 
 
