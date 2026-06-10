@@ -146,10 +146,33 @@ resolve_release_tag = resolve_netboot_tag
 
 
 def resolve_withcache_url(conn: sqlite3.Connection) -> str | None:
-    """The withcache cache-host base URL, or ``None`` if unconfigured:
-    override -> ``$BTY_WITHCACHE_URL`` -> None. When None, bty serves images
-    exactly as before."""
-    return get(conn, KEY_WITHCACHE_URL) or os.environ.get(ENV_WITHCACHE_URL) or None
+    """The withcache cache-host base URL, or ``None`` if unconfigured.
+
+    Resolution: a DB override (set via Settings -> Upstream) wins;
+    then ``[withcache] url`` from ``bty.toml`` (``cfg.withcache.url``);
+    then the ``$BTY_WITHCACHE_URL`` env var directly; else ``None``
+    (bty streams from origin URLs).
+
+    Reading ``cfg.withcache.url`` is load-bearing: v0.42 moved the
+    withcache URL into ``bty.toml`` and the generated compose / Quadlet
+    no longer set ``$BTY_WITHCACHE_URL``. Before this, a stock container
+    deploy resolved ``None`` here -- withcache was silently bypassed on
+    the flash path (no HEAD, empty cache) even though bty.toml had the
+    URL. The direct env read stays as the last fallback so a var set
+    after the config was built (or before it's installed -- CLI paths /
+    early startup) is still honoured."""
+    override = get(conn, KEY_WITHCACHE_URL)
+    if override:
+        return override
+    try:
+        from bty.web._config import cfg as _cfg
+
+        configured = (_cfg().withcache.url or "").strip()
+    except RuntimeError:
+        configured = ""
+    if configured:
+        return configured
+    return (os.environ.get(ENV_WITHCACHE_URL) or "").strip() or None
 
 
 # ----- Backup schedule resolvers ----------------------------------------

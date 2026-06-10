@@ -82,3 +82,29 @@ def test_resolve_withcache_url_precedence(tmp_path: Path, monkeypatch: pytest.Mo
         assert _settings_store.resolve_withcache_url(conn) == "http://env-cache:3000"
         _settings_store.set_value(conn, _settings_store.KEY_WITHCACHE_URL, "http://db:3000")
         assert _settings_store.resolve_withcache_url(conn) == "http://db:3000"  # override wins
+
+
+def test_resolve_withcache_url_reads_cfg_from_bty_toml(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression: the URL lives in bty.toml ([withcache] url) on v0.42+
+    container deploys, and the slim compose/Quadlet no longer set
+    $BTY_WITHCACHE_URL. The resolver MUST consult cfg.withcache.url, or
+    withcache is silently bypassed on the flash path. Precedence:
+    DB override > cfg.withcache.url > $BTY_WITHCACHE_URL > None."""
+    from bty.web import _config
+
+    monkeypatch.delenv(_settings_store.ENV_WITHCACHE_URL, raising=False)
+    toml = tmp_path / "bty.toml"
+    toml.write_text('[withcache]\nurl = "http://from-toml:3000"\n', encoding="utf-8")
+    _config.set_active_config(_config.load_config([toml]))
+
+    with _conn(tmp_path) as conn:
+        # No DB key, no env -> cfg.withcache.url wins.
+        assert _settings_store.resolve_withcache_url(conn) == "http://from-toml:3000"
+        # A DB override still beats bty.toml.
+        _settings_store.set_value(conn, _settings_store.KEY_WITHCACHE_URL, "http://db:3000")
+        assert _settings_store.resolve_withcache_url(conn) == "http://db:3000"
+
+    # Restore the empty-config default so later tests aren't polluted.
+    _config.set_active_config(_config.load_config([]))
