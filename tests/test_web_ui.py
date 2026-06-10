@@ -2788,3 +2788,98 @@ def test_polling_pages_listen_for_sse_events(client: TestClient) -> None:
 
     netboot = client.get("/ui/netboot").text
     assert 'e.detail.kind === "release"' in netboot
+
+
+# ---------- catalog entry "Check" action -----------------------------------
+
+
+def test_catalog_entry_check_origin_reachable_and_cached(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The Check action reports origin reachability + size and the
+    withcache hit/miss for an http(s) source."""
+    from bty import flash as _flash
+    from bty.web import _settings_store, _withcache
+
+    monkeypatch.setattr(
+        _flash,
+        "probe_image_url",
+        lambda *_a, **_kw: _flash.ImageInfo(
+            path=None,
+            url="https://ex/img.gz",
+            format="img.gz",
+            size_bytes=2147483648,
+            virtual_size_bytes=None,
+        ),
+    )
+    monkeypatch.setattr(_settings_store, "resolve_withcache_url", lambda _c: "http://cache:3000")
+    monkeypatch.setattr(_withcache, "is_cached", lambda *_a, **_kw: True)
+
+    r = client.post(
+        "/ui/catalog/entries/check",
+        data={"src": "https://ex/img.gz"},
+        cookies=AUTH,
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["origin"] == {"reachable": True, "size_bytes": 2147483648, "format": "img.gz"}
+    assert body["withcache"] == {"configured": True, "hit": True, "warmed": False}
+    assert body["checked_at"]
+
+
+def test_catalog_entry_check_unreachable_origin_is_not_500(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A dead origin is normal data, not a server error: HTTP 200 with
+    origin.reachable=false + the message."""
+    from bty import flash as _flash
+    from bty.web import _settings_store
+
+    def boom(*_a, **_kw):  # type: ignore[no-untyped-def]
+        raise FileNotFoundError("image URL not reachable: https://ex/gone.img.gz (404)")
+
+    monkeypatch.setattr(_flash, "probe_image_url", boom)
+    monkeypatch.setattr(_settings_store, "resolve_withcache_url", lambda _c: None)
+
+    r = client.post(
+        "/ui/catalog/entries/check",
+        data={"src": "https://ex/gone.img.gz"},
+        cookies=AUTH,
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["origin"]["reachable"] is False
+    assert "not reachable" in body["origin"]["error"]
+    assert body["withcache"] == {"configured": False}
+
+
+def test_catalog_entry_check_oras_marks_withcache_not_applicable(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """oras:// sources flow through bty-web's proxy, not withcache, so
+    the cache leg is reported as not-applicable rather than a misleading
+    miss."""
+    from bty import flash as _flash
+    from bty.web import _settings_store, _withcache
+
+    monkeypatch.setattr(
+        _flash,
+        "probe_image_url",
+        lambda *_a, **_kw: _flash.ImageInfo(
+            path=None, url="oras://reg/img", format="img.gz", size_bytes=0, virtual_size_bytes=None
+        ),
+    )
+    monkeypatch.setattr(_settings_store, "resolve_withcache_url", lambda _c: "http://cache:3000")
+
+    def fail(*_a, **_kw):  # type: ignore[no-untyped-def]
+        raise AssertionError("is_cached must not be probed for oras sources")
+
+    monkeypatch.setattr(_withcache, "is_cached", fail)
+
+    r = client.post(
+        "/ui/catalog/entries/check",
+        data={"src": "oras://reg/img"},
+        cookies=AUTH,
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["withcache"] == {"configured": True, "applicable": False}

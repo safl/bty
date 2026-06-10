@@ -811,6 +811,60 @@ def register_ui_routes(
         }
 
     @app.post(
+        "/ui/catalog/entries/check",
+        include_in_schema=False,
+        dependencies=[Depends(require_ui_auth)],
+    )
+    def ui_catalog_entry_check(
+        src: Annotated[str, Form()],
+    ) -> dict[str, Any]:
+        """Ad-hoc "Check" for one catalog source: is the origin
+        reachable (+ how big), and does withcache already hold it?
+
+        The withcache HEAD also warms an auto-fetch cache, so on a miss
+        this doubles as a one-click "start caching it" -- click again
+        shortly and it flips to cached. Strictly point-in-time: the
+        result can change at any moment (a network blip, or withcache
+        finishing a background fill). Never 500s on a dead origin -- an
+        unreachable source is a normal result here (reported as
+        ``origin.reachable = false``), same as the catalog-add path."""
+        from bty import flash as _flash
+        from bty.web import _withcache
+
+        origin: dict[str, Any]
+        try:
+            info = _flash.probe_image_url(src)
+            origin = {
+                "reachable": True,
+                "size_bytes": info.size_bytes or None,
+                "format": info.format,
+            }
+        except Exception as exc:
+            # FileNotFoundError (unreachable / 4xx / 5xx / oras resolve
+            # fail) or ValueError (unsupported scheme) -- both are
+            # "not deployable right now", not server errors.
+            origin = {"reachable": False, "error": str(exc)}
+
+        with _db.open_db(state_path) as conn:
+            withcache_url = _settings_store.resolve_withcache_url(conn)
+        if not withcache_url:
+            withcache = {"configured": False}
+        elif src.startswith(("http://", "https://")):
+            hit = _withcache.is_cached(withcache_url, src)
+            withcache = {"configured": True, "hit": hit, "warmed": not hit}
+        else:
+            # oras:// flows through bty-web's /images proxy (needs the
+            # bearer token); withcache only fronts plain-HTTP origins.
+            withcache = {"configured": True, "applicable": False}
+
+        return {
+            "src": src,
+            "origin": origin,
+            "withcache": withcache,
+            "checked_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        }
+
+    @app.post(
         "/ui/catalog/entries",
         include_in_schema=False,
         dependencies=[Depends(require_ui_auth)],

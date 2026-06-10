@@ -76,6 +76,7 @@
                     <th>Content SHA</th>
                     <th>Format</th>
                     <th>Source</th>
+                    <th>Status</th>
                     <th class="text-end" style="width: 1%; white-space: nowrap;">Action</th>
                 </tr>
             </thead>
@@ -111,7 +112,19 @@
                         <code>{{ entry_src }}</code>
                         {% endif %}
                     </td>
+                    <td class="small bty-check-result text-muted">
+                        <span class="text-muted">&mdash;</span>
+                    </td>
                     <td class="text-end text-nowrap">
+                        {% if entry_src %}
+                        <button type="button"
+                                class="btn btn-sm btn-outline-secondary bty-catalog-entry-check-btn me-1"
+                                data-src="{{ entry_src }}"
+                                title="Check whether the origin is reachable and whether withcache already holds it (the check also warms an auto-fetch withcache)."
+                                aria-label="Check origin reachability and withcache status">
+                            <i class="bi bi-arrow-repeat"></i> Check
+                        </button>
+                        {% endif %}
                         <button type="button"
                                 class="btn btn-sm btn-outline-danger bty-catalog-entry-delete-btn"
                                 {% if entry_src %}data-src="{{ entry_src }}"{% endif %}
@@ -123,7 +136,7 @@
                 </tr>
                 {% endfor %}
                 {% if not unified %}
-                <tr><td colspan="5" class="text-muted text-center py-3">
+                <tr><td colspan="6" class="text-muted text-center py-3">
                     No catalog entries yet. Use <strong>Add image</strong>,
                     <strong>Upload catalog</strong>, or
                     <strong>Fetch latest catalog</strong> in the header above.
@@ -167,6 +180,47 @@
         }, 1200);
     }
 
+    function fmtBytes(n) {
+        if (!n || n <= 0) return "";
+        var u = ["B", "KiB", "MiB", "GiB", "TiB"], i = 0, v = n;
+        while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+        return v.toFixed(i ? 1 : 0) + " " + u[i];
+    }
+
+    function esc(s) {
+        return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) {
+            return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+        });
+    }
+
+    function badge(cls, text, title) {
+        return '<span class="badge ' + cls + '"'
+            + (title ? ' title="' + esc(title) + '"' : "")
+            + '>' + esc(text) + '</span>';
+    }
+
+    function renderCheck(d) {
+        var o = d.origin || {}, w = d.withcache || {}, parts = [];
+        if (o.reachable) {
+            var sz = fmtBytes(o.size_bytes);
+            parts.push(badge("bg-success", "origin OK" + (sz ? " · " + sz : "")));
+        } else {
+            parts.push(badge("bg-danger", "origin down", o.error || ""));
+        }
+        if (!w.configured) {
+            parts.push(badge("bg-secondary", "no withcache"));
+        } else if (w.applicable === false) {
+            parts.push(badge("bg-secondary", "withcache n/a", "oras flows through bty-web, not withcache"));
+        } else if (w.hit) {
+            parts.push(badge("bg-success", "cached"));
+        } else {
+            parts.push(badge("bg-warning text-dark", "warming", "not cached yet; the check enqueued a background fetch -- check again shortly"));
+        }
+        var ts = String(d.checked_at || "").replace("T", " ").replace("+00:00", "Z");
+        return parts.join(" ")
+            + '<div class="text-muted" style="font-size:0.75em;">' + esc(ts) + '</div>';
+    }
+
     document.addEventListener("click", function (ev) {
         var shaBtn = ev.target.closest(".bty-sha-copy");
         if (shaBtn) {
@@ -205,6 +259,40 @@
                     entryDeleteBtn.disabled = false;
                 });
             }).catch(function () { entryDeleteBtn.disabled = false; });
+            return;
+        }
+        var checkBtn = ev.target.closest(".bty-catalog-entry-check-btn");
+        if (checkBtn) {
+            ev.preventDefault();
+            var csrc = checkBtn.getAttribute("data-src");
+            if (!csrc) return;
+            var row = checkBtn.closest("tr");
+            var cell = row ? row.querySelector(".bty-check-result") : null;
+            checkBtn.disabled = true;
+            if (cell) {
+                cell.innerHTML = '<span class="spinner-border spinner-border-sm text-secondary" '
+                    + 'role="status" aria-hidden="true"></span>';
+            }
+            var body = new URLSearchParams();
+            body.append("src", csrc);
+            fetch("/ui/catalog/entries/check", {
+                method: "POST",
+                credentials: "same-origin",
+                headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                body: body.toString(),
+            }).then(function (resp) {
+                return resp.json().then(function (data) {
+                    if (!resp.ok) throw new Error((data && data.detail) || ("HTTP " + resp.status));
+                    if (cell) cell.innerHTML = renderCheck(data);
+                });
+            }).catch(function (e) {
+                if (cell) {
+                    cell.innerHTML = '<span class="text-danger">check failed: '
+                        + esc(e.message) + '</span>';
+                } else {
+                    alert("Check failed: " + e.message);
+                }
+            }).then(function () { checkBtn.disabled = false; });
         }
     });
 })();
