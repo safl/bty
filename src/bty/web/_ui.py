@@ -1049,10 +1049,13 @@ def register_ui_routes(
             flash_kind=flash_kind,
             tftp=_sysconfig.tftp_status(),
             # Diagnostic probe: TFTP host reachable + ipxe.efi present?
-            # The render is request-time so a config / sidecar change
-            # reflects on the next page load. ~1.5s in the worst case
-            # (probe timeout); on the fast path < 5 ms.
-            tftp_probe=_sysconfig.tftp_probe(),
+            # Target resolves from config (explicit [netboot]
+            # tftp_probe_host, else the withcache URL host) -- one source
+            # of truth, so an upgrade that drops an env var can't silently
+            # point this at loopback. The render is request-time so a
+            # config / sidecar change reflects on the next page load.
+            # ~1.5s in the worst case (probe timeout); fast path < 5 ms.
+            tftp_probe=_sysconfig.tftp_probe(host=_config.cfg().effective_tftp_probe_host),
         )
 
     @app.get(
@@ -1352,7 +1355,11 @@ def register_ui_routes(
                         "TFTP probe target",
                         cfg.netboot.tftp_probe_host,
                         "BTY_NETBOOT_TFTP_PROBE_HOST",
-                        "127.0.0.1",
+                        # When unset, the probe derives the target from
+                        # the withcache URL host -- show that resolved
+                        # value as the default so the operator sees where
+                        # it actually aims, not a misleading 127.0.0.1.
+                        cfg.effective_tftp_probe_host,
                         section="netboot",
                         key="tftp_probe_host",
                     ),
@@ -1380,10 +1387,17 @@ def register_ui_routes(
             },
         ]
         # Network context for the DHCP / PXE cheatsheet (moved here from
-        # the Netboot page): the server's interfaces + the primary
-        # v4 address the operator points their router's Next-Server at.
+        # the Netboot page): the server's interfaces + the address the
+        # operator points their router's Next-Server at. Prefer the
+        # configured advertised host (the withcache URL's host -- the
+        # address clients actually reach) over interface sniffing, which
+        # inside a bridge-network container sees container-internal NICs,
+        # not the host's LAN address.
         interfaces = _sysconfig.list_interfaces()
         primary = next((i for i in interfaces if i.ipv4), interfaces[0] if interfaces else None)
+        suggested_host = _config.cfg().advertised_host or (
+            primary.ipv4 if primary and primary.ipv4 else None
+        )
         # Backup-schedule context for the Backup schedule card. Re-opens
         # the DB; cheap and keeps the read close to where it's rendered.
         with _db.open_db(state_path) as conn:
@@ -1400,6 +1414,7 @@ def register_ui_routes(
             config_groups=config_groups,
             interfaces=interfaces,
             primary=primary,
+            suggested_host=suggested_host,
             boot_root=str(boot_root),
             backups_root=str(backups_root),
             backup_enabled=backup_enabled,

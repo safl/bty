@@ -204,8 +204,10 @@
             On a container deploy: is <code>bty-tftp.service</code> up
             (<code>systemctl status bty-tftp</code> /
             <code>podman ps</code>)? On a host install:
-            <code>systemctl status dnsmasq.service</code>. Override the probe
-            target with <code>$BTY_TFTP_PROBE_HOST</code> if your TFTP daemon
+            <code>systemctl status dnsmasq.service</code>. The probe aims at
+            the withcache host by default; override it with
+            <code>[netboot] tftp_probe_host</code> (env
+            <code>$BTY_NETBOOT_TFTP_PROBE_HOST</code>) if your TFTP daemon
             lives elsewhere (e.g. on the LAN router).
             {% endif %}
         </p>
