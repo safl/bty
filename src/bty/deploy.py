@@ -862,32 +862,50 @@ def _require_prereqs(*, with_systemd: bool, prog: str) -> str:
     return backend
 
 
-def _run(cmd: list[str], *, cwd: Path | None = None, env: dict[str, str] | None = None) -> None:
+def _run(
+    cmd: list[str],
+    *,
+    cwd: Path | None = None,
+    env: dict[str, str] | None = None,
+    check: bool = True,
+) -> int:
     """Run ``cmd`` with stdout/stderr inherited so the operator sees
-    progress. Exits 1 on non-zero status. Factored so tests can patch
-    this single point."""
+    progress. Factored so tests can patch this single point.
+
+    With ``check`` (the default), exits 1 on non-zero status. With
+    ``check=False`` it instead prints a warning and returns the exit
+    code, letting the caller press on -- used by ``purge`` where a
+    teardown step hitting an already-gone service / container is
+    expected, not fatal."""
     proc = subprocess.run(cmd, cwd=cwd, env=env, check=False)
     if proc.returncode != 0:
+        if check:
+            print(
+                f"\nbty-lab: `{' '.join(cmd)}` exited {proc.returncode}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
         print(
-            f"\nbty-lab: `{' '.join(cmd)}` exited {proc.returncode}",
+            f"  (ignored) `{' '.join(cmd)}` exited {proc.returncode}",
             file=sys.stderr,
         )
-        sys.exit(1)
+    return proc.returncode
 
 
-def _compose(dest: Path, args: list[str]) -> None:
+def _compose(dest: Path, args: list[str], *, check: bool = True) -> None:
     """Invoke `podman compose` in ``dest`` with the deploy's envvars file
     already wired up via ``--env-file`` so the operator doesn't need
     ``COMPOSE_ENV_FILES`` exported."""
     _run(
         ["podman", "compose", "--env-file", "envvars", *args],
         cwd=dest,
+        check=check,
     )
 
 
-def _systemctl(args: list[str]) -> None:
+def _systemctl(args: list[str], *, check: bool = True) -> None:
     """Invoke systemctl with output inherited."""
-    _run(["systemctl", *args])
+    _run(["systemctl", *args], check=check)
 
 
 def _chown_to_sudo_user(paths: list[Path]) -> tuple[str, int, int] | None:
@@ -956,6 +974,41 @@ def _install_quadlets(dest: Path, *, force: bool) -> list[Path]:
         shutil.copy2(unit, target)
         installed.append(target)
     return installed
+
+
+def _remove_quadlets() -> list[Path]:
+    """Delete bty's Quadlet unit files from :data:`QUADLET_SYSTEM_DIR`.
+    Inverse of :func:`_install_quadlets`. Returns the removed paths;
+    units that aren't present are silently skipped (idempotent)."""
+    removed: list[Path] = []
+    for name in ("bty-web.container", "withcache.container", "bty-tftp.container"):
+        target = QUADLET_SYSTEM_DIR / name
+        if target.exists():
+            target.unlink()
+            removed.append(target)
+    return removed
+
+
+def _confirm(prompt: str, *, assume_yes: bool) -> bool:
+    """y/N confirmation gate for destructive operations.
+
+    Returns True to proceed. ``assume_yes`` skips the prompt (for
+    scripted / unattended runs). On a non-interactive stdin (no TTY)
+    without ``assume_yes`` it refuses rather than block or guess -- a
+    purge shouldn't fire unattended just because it was piped."""
+    if assume_yes:
+        return True
+    if not sys.stdin.isatty():
+        print(
+            "  refusing to proceed unattended: stdin is not a TTY. Re-run with --yes to confirm.",
+            file=sys.stderr,
+        )
+        return False
+    try:
+        ans = input(f"{prompt} [y/N] ").strip().lower()
+    except EOFError:
+        return False
+    return ans in ("y", "yes")
 
 
 def init_main(argv: list[str] | None = None, *, prog: str = "bty-lab init") -> None:
@@ -1520,6 +1573,215 @@ def upgrade_main(argv: list[str] | None = None, *, prog: str = "bty-lab upgrade"
         )
 
 
+def purge_main(argv: list[str] | None = None, *, prog: str = "bty-lab purge") -> None:
+    """The ``bty-lab purge`` subcommand: tear a deploy back down -- the
+    inverse of ``deploy`` / ``upgrade``.
+
+    Stops and removes the running stack (compose-managed or
+    Quadlet/systemd-managed, auto-detected the same way ``upgrade``
+    does), and optionally deletes the host state and the deploy
+    directory. Teardown steps are tolerant -- a service or container
+    that's already gone is logged and skipped, not fatal -- so a
+    half-removed deploy still purges cleanly. The destructive parts
+    (data, deploy dir) are gated behind explicit flags AND a y/N
+    confirmation (skip with --yes)."""
+    parser = argparse.ArgumentParser(
+        prog=prog,
+        description=(
+            "Tear down a bty-lab deploy: stop + remove the stack "
+            "(compose or Quadlet/systemd, auto-detected) and, with the "
+            "destructive flags, delete host state and the deploy "
+            "directory. The inverse of deploy/upgrade. Idempotent: "
+            "re-running on an already-removed stack is a no-op."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "dest",
+        nargs="?",
+        type=Path,
+        default=DEFAULT_DEST,
+        help=f"Deploy directory. Default: {DEFAULT_DEST}",
+    )
+    parser.add_argument(
+        "--data-dir",
+        type=Path,
+        default=None,
+        help="Where bty/withcache host state lives, if not <DEST>/data "
+        "(must match the original deploy's --data-dir).",
+    )
+    parser.add_argument(
+        "--data",
+        action="store_true",
+        help="Also delete host state: <data-dir>/bty (state.db, image "
+        "cache, backups) and <data-dir>/withcache (cached blobs). "
+        "DESTRUCTIVE and irreversible.",
+    )
+    parser.add_argument(
+        "--images",
+        action="store_true",
+        help="Also remove the pulled container images "
+        "(bty-web / withcache / bty-tftp) for this CLI's bty version.",
+    )
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Also delete the deploy directory itself (compose.yml, "
+        "envvars, bty.toml, quadlet/). Implies --data. DESTRUCTIVE.",
+    )
+    parser.add_argument(
+        "-y",
+        "--yes",
+        action="store_true",
+        help="Skip the confirmation prompt (for scripted / unattended runs).",
+    )
+    args = parser.parse_args(argv)
+
+    dest: Path = args.dest
+    data_dir: Path = args.data_dir if args.data_dir is not None else (dest / "data")
+    data_dir_abs = data_dir.resolve()
+
+    remove_data = bool(args.data or args.all)
+    remove_dir = bool(args.all)
+
+    compose_path = dest / "compose.yml"
+    quadlet_managed = any(
+        (QUADLET_SYSTEM_DIR / u).exists()
+        for u in ("bty-web.container", "withcache.container", "bty-tftp.container")
+    )
+
+    # Nothing to do: no compose file here AND no Quadlet units installed.
+    if not compose_path.exists() and not quadlet_managed:
+        print(
+            f"{prog}: nothing to purge -- no compose.yml in {dest} and no bty "
+            f"Quadlet units in {QUADLET_SYSTEM_DIR}.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    if shutil.which("podman") is None:
+        print(f"{prog}: podman is not on PATH; cannot tear down the stack.", file=sys.stderr)
+        sys.exit(1)
+
+    is_root = os.geteuid() == 0
+    # Quadlet teardown (systemctl + unit removal under /etc) needs root.
+    if quadlet_managed and not is_root:
+        print(
+            f"{prog}: {dest} is Quadlet-managed (system install) but you're "
+            "not root.\n"
+            "  Stopping services + removing units under "
+            f"{QUADLET_SYSTEM_DIR} needs root. Re-run as:\n"
+            f"    sudo {prog} {' '.join(argv or sys.argv[1:])}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    mode_label = "Quadlet/systemd" if quadlet_managed else "compose"
+
+    # Spell out exactly what's about to be removed before the gate, so
+    # the operator sees the destructive scope (data / dir) up front.
+    print(f"About to purge the {mode_label}-managed bty deploy at {dest}:", file=sys.stderr)
+    if quadlet_managed:
+        print(
+            f"  - stop {', '.join(_SYSTEMD_SERVICES)} + remove their Quadlet units",
+            file=sys.stderr,
+        )
+    else:
+        print("  - podman compose down (containers + network)", file=sys.stderr)
+    if args.images:
+        print("  - remove the bty-web / withcache / bty-tftp images", file=sys.stderr)
+    if remove_data:
+        print(
+            f"  - DELETE host state: {data_dir_abs}/bty and {data_dir_abs}/withcache",
+            file=sys.stderr,
+        )
+    if remove_dir:
+        print(f"  - DELETE the deploy directory: {dest}", file=sys.stderr)
+    if not remove_data and not remove_dir:
+        print(
+            "  (host state in data/ and the deploy directory are KEPT; "
+            "pass --data / --all to remove them)",
+            file=sys.stderr,
+        )
+
+    if not _confirm("Proceed?", assume_yes=args.yes):
+        print(f"{prog}: aborted; nothing was changed.", file=sys.stderr)
+        sys.exit(1)
+
+    # Step count: teardown (1) [+ unit-removal + daemon-reload when
+    # Quadlet] [+ images] [+ data] [+ dir] + done.
+    total = (
+        1
+        + (2 if quadlet_managed else 0)
+        + int(args.images)
+        + int(remove_data)
+        + int(remove_dir)
+        + 1
+    )
+    _steps_begin(total)
+
+    if quadlet_managed:
+        _step("stopping systemd services")
+        # Tolerant: an already-stopped / never-started unit is fine.
+        _systemctl(["stop", *_SYSTEMD_SERVICES], check=False)
+
+        _step(f"removing Quadlet units from {QUADLET_SYSTEM_DIR}")
+        removed = _remove_quadlets()
+        for p in removed:
+            print(f"  {p}", file=sys.stderr)
+
+        _step("systemctl daemon-reload")
+        _systemctl(["daemon-reload"], check=False)
+        # Clear any lingering failed state for the now-gone units.
+        _systemctl(["reset-failed", *_SYSTEMD_SERVICES], check=False)
+    else:
+        _step("tearing down compose stack")
+        # --profile tftp so the sidecar is included regardless of how it
+        # was brought up; --volumes only when we're also dropping data
+        # (the generated compose uses bind-mounts, but a named-volume
+        # deploy needs it). Tolerant: a not-running stack is fine.
+        down_args = ["--profile", "tftp", "down", "--remove-orphans"]
+        if remove_data:
+            down_args.append("--volumes")
+        if compose_path.exists():
+            _compose(dest, down_args, check=False)
+        else:
+            print("  (no compose.yml; skipping compose down)", file=sys.stderr)
+
+    if args.images:
+        _step("removing container images")
+        version = bty.__version__
+        images = [
+            f"ghcr.io/safl/bty-web:{version}",
+            "ghcr.io/safl/withcache:latest",
+            f"ghcr.io/safl/bty-tftp:{version}",
+        ]
+        # Tolerant: an image still in use elsewhere, or a tag that was
+        # never pulled, shouldn't abort the purge.
+        _run(["podman", "rmi", *images], check=False)
+
+    if remove_data:
+        _step("deleting host state")
+        for sub in ("bty", "withcache"):
+            target = data_dir_abs / sub
+            if target.exists():
+                shutil.rmtree(target, ignore_errors=True)
+                print(f"  removed {target}", file=sys.stderr)
+            else:
+                print(f"  (absent) {target}", file=sys.stderr)
+
+    if remove_dir:
+        _step("deleting deploy directory")
+        if dest.exists():
+            shutil.rmtree(dest, ignore_errors=True)
+            print(f"  removed {dest}", file=sys.stderr)
+        else:
+            print(f"  (absent) {dest}", file=sys.stderr)
+
+    print("", file=sys.stderr)
+    _step("purge complete", detail=mode_label)
+
+
 def show_config_main(argv: list[str] | None = None, *, prog: str = "bty-lab show-config") -> None:
     """The ``bty-lab show-config`` subcommand: dump the effective
     Config + per-key provenance to stdout.
@@ -1628,6 +1890,9 @@ def main(argv: list[str] | None = None, *, prog: str = "bty-lab") -> None:
     if argv and argv[0] == "show-config":
         show_config_main(argv[1:], prog=f"{prog} show-config")
         return
+    if argv and argv[0] == "purge":
+        purge_main(argv[1:], prog=f"{prog} purge")
+        return
 
     parser = argparse.ArgumentParser(
         prog=prog,
@@ -1648,7 +1913,11 @@ def main(argv: list[str] | None = None, *, prog: str = "bty-lab") -> None:
             f"  {prog} show-config      Print the effective bty.toml-driven config +\n"
             "                          per-key provenance (default / TOML file /\n"
             "                          env var). Useful for debugging without\n"
-            "                          booting bty-web.\n\n"
+            "                          booting bty-web.\n"
+            f"  {prog} purge [DEST]     Tear the stack back down (inverse of deploy):\n"
+            "                          stop + remove containers (compose or Quadlet).\n"
+            "                          --data also deletes host state, --all also the\n"
+            "                          deploy dir; both gated by a y/N confirm.\n\n"
             "Pass --help to any subcommand for its full flag set.\n\n"
             "Quick start (full system install, recommended):\n"
             '  sudo mkdir -p /opt/bty && sudo chown "$USER:$USER" /opt/bty\n'
