@@ -9,6 +9,37 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.43.0] - 2026-06-10
+
+### Added
+
+- ``bty-lab purge [DEST]`` -- the inverse of ``deploy``: stops + removes
+  the stack (auto-detects compose vs Quadlet/systemd, like ``upgrade``).
+  Keeps ``data/`` and the deploy dir by default; ``--data`` deletes host
+  state, ``--all`` also removes the deploy dir (implies ``--data``),
+  ``--images`` drops the pulled images. Destructive flags are gated by a
+  ``y/N`` confirm (skip with ``--yes``); teardown tolerates an
+  already-gone service / container so a half-removed deploy still purges.
+  Completes the ``deploy`` / ``upgrade`` / ``purge`` operator lifecycle.
+
+### Fixed
+
+- **The ``/ui/netboot`` TFTP probe no longer hard-codes ``127.0.0.1``.**
+  It now resolves its target from config -- an explicit ``[netboot]
+  tftp_probe_host`` if set, otherwise the host of the withcache URL (the
+  LAN address clients reach, where the ``network_mode: host`` ``bty-tftp``
+  sidecar serves udp/69). Previously the probe read a separate
+  ``$BTY_TFTP_PROBE_HOST`` env var that the v0.42 slim-down dropped,
+  silently falling back to loopback and reporting an otherwise-healthy
+  TFTP server as unreachable. The ``[netboot] tftp_probe_host`` config
+  key is now actually consulted (it was only displayed on the Settings
+  page before), and the field default changed from ``"127.0.0.1"`` to
+  ``""`` (= derive).
+- The Settings-page DHCP/PXE cheatsheet suggests the configured advertised
+  host (withcache URL host) for ``Next-Server`` instead of a sniffed
+  container-internal interface, which inside a bridge-network container
+  pointed at the wrong address.
+
 ## [0.42.0] - 2026-06-10
 
 **bty-web operator config moves from env vars to ``bty.toml``.**
