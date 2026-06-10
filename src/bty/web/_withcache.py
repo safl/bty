@@ -20,10 +20,13 @@ own ``_shim.blob_url`` / server decoding -- it is the contract between the two.
 from __future__ import annotations
 
 import base64
+import logging
 import os
 import urllib.error
 import urllib.parse
 import urllib.request
+
+_log = logging.getLogger(__name__)
 
 # Never block a boot plan on a slow/unreachable cache.
 PROBE_TIMEOUT = 3  # seconds
@@ -51,11 +54,19 @@ def is_cached(withcache: str, origin: str, timeout: float = PROBE_TIMEOUT) -> bo
     """True if withcache already holds ``origin`` (HEAD -> 200). A miss (404),
     an unreachable cache, or any error returns False -- the caller then serves
     the artifact itself. The HEAD also warms an auto-fetch withcache."""
-    req = urllib.request.Request(blob_url(withcache, origin), method="HEAD")
+    url = blob_url(withcache, origin)
+    req = urllib.request.Request(url, method="HEAD")
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return bool(resp.status == 200)
-    except urllib.error.HTTPError:
-        return False  # 404 miss (now recorded + enqueued by withcache)
-    except (urllib.error.URLError, OSError):
-        return False  # unreachable / timeout -> serve it ourselves
+            hit = bool(resp.status == 200)
+            _log.info("withcache HEAD %s -> %d (%s)", url, resp.status, "hit" if hit else "miss")
+            return hit
+    except urllib.error.HTTPError as exc:
+        # 404 miss (now recorded + enqueued by an auto-fetch withcache).
+        _log.info("withcache HEAD %s -> %d (miss)", url, exc.code)
+        return False
+    except (urllib.error.URLError, OSError) as exc:
+        # Unreachable / timeout -> serve it ourselves. A misconfig
+        # signal worth surfacing, not silently swallowing.
+        _log.warning("withcache HEAD %s unreachable: %s -- serving origin", url, exc)
+        return False

@@ -800,6 +800,71 @@ def test_pxe_plan_flash_uses_withcache_url_when_blob_is_cached(
     # Plan rewrites to withcache's ``/b/<urlsafe-b64(origin)>/<basename>``.
     assert plan["image"].startswith("http://cache.invalid:3000/b/")
     assert plan["image"].endswith("/demo.img.gz")
+    # Observability: the plan event records the withcache decision so the
+    # operator can see in /ui/events that the boot streamed from cache.
+    events = app_client.get(
+        "/events",
+        params={"subject_kind": "machine", "subject_id": mac, "kind": "netboot.pxe.plan"},
+        cookies=AUTH,
+    ).json()["events"]
+    assert events, "expected a netboot.pxe.plan event"
+    assert events[0]["details"]["withcache"] == {
+        "configured": True,
+        "hit": True,
+        "served_from": "withcache",
+    }
+
+
+def test_pxe_plan_flash_records_origin_when_withcache_misses(
+    app_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """On a cache miss the plan serves origin AND the plan event records
+    served_from=origin / hit=False -- the operator can tell withcache was
+    consulted but didn't have it (so it's now warming)."""
+    from bty.web import _settings_store, _withcache
+
+    flash_sha = "fedcba9876543210" * 4
+
+    def fake_urlopen(*_a, **_kw):  # type: ignore[no-untyped-def]
+        return _MockResp(b"", headers={"Content-Length": "0"})
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr("bty.catalog.fetch_sha256_for_url", lambda *_a, **_kw: flash_sha)
+    monkeypatch.setenv(_settings_store.ENV_WITHCACHE_URL, "http://cache.invalid:3000")
+    monkeypatch.setattr(_withcache, "is_cached", lambda *_a, **_kw: False)  # cold
+
+    r = app_client.post(
+        "/catalog/entries",
+        json={
+            "image_url": "https://example.invalid/cold.img.gz",
+            "sha_url": "https://example.invalid/cold.img.gz.sha256",
+        },
+        cookies=AUTH,
+    )
+    assert r.status_code == 201, r.text
+    ref = r.json()["bty_image_ref"]
+    mac = "aa:bb:cc:dd:ee:c1"
+    app_client.put(
+        f"/machines/{mac}",
+        json={
+            "bty_image_ref": ref,
+            "boot_mode": "bty-flash-always",
+            "target_disk_serial": "WC-COLD-SERIAL",
+        },
+        cookies=AUTH,
+    )
+    plan = app_client.get(f"/pxe/{mac}/plan", headers={"Host": "bty.local:8080"}).json()
+    assert plan["image"] == "https://example.invalid/cold.img.gz"  # origin, not /b/
+    events = app_client.get(
+        "/events",
+        params={"subject_kind": "machine", "subject_id": mac, "kind": "netboot.pxe.plan"},
+        cookies=AUTH,
+    ).json()["events"]
+    assert events[0]["details"]["withcache"] == {
+        "configured": True,
+        "hit": False,
+        "served_from": "origin",
+    }
 
 
 def test_pxe_plan_flash_policy_without_target_falls_back_to_interactive(
