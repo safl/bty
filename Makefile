@@ -150,9 +150,9 @@ web:
 	@echo "bty-web -> http://localhost:$(BTY_WEB_PORT)/ui (login: bty)"
 	@echo "  state dir: $(STATE_DIR)"
 	@echo "  Ctrl-C to stop."
-	BTY_STATE_DIR=$(STATE_DIR) \
-	BTY_BOOT_DIR=$(STATE_DIR)/boot \
-	BTY_WEB_PORT=$(BTY_WEB_PORT) \
+	BTY_PATHS_STATE_DIR=$(STATE_DIR) \
+	BTY_PATHS_BOOT_DIR=$(STATE_DIR)/boot \
+	BTY_SERVER_PORT=$(BTY_WEB_PORT) \
 	$(UV) run bty-web
 
 # ---------- Media (bty-media/ via cijoe) ---------------------------------
