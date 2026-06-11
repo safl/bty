@@ -16,6 +16,7 @@ from bty.web._sysconfig import (
     DaemonStatus,
     Interface,
     list_interfaces,
+    running_in_container,
     tftp_status,
 )
 
@@ -135,6 +136,32 @@ def test_tftp_status_returns_unknown_when_systemctl_missing() -> None:
         side_effect=FileNotFoundError("systemctl"),
     ):
         assert tftp_status().state == "unknown"
+
+
+def test_running_in_container_detects_podman_sentinel(tmp_path: Path) -> None:
+    """``/run/.containerenv`` is the podman-and-OCI sentinel. With it
+    present and ``/.dockerenv`` absent, the detector still trips."""
+    sentinel = tmp_path / "containerenv"
+
+    def remap(raw: str) -> Path:
+        if raw == "/run/.containerenv":
+            return sentinel
+        return Path(raw)
+
+    with patch("bty.web._sysconfig.Path", side_effect=remap):
+        sentinel.touch()
+        assert running_in_container() is True
+
+
+def test_running_in_container_false_on_bare_host(tmp_path: Path) -> None:
+    """Neither sentinel present (typical bare-metal Debian / Ubuntu
+    host): the detector returns False so the dashboard keeps treating
+    ``dnsmasq.service unknown`` as a warning, not an advisory."""
+    with patch(
+        "bty.web._sysconfig.Path",
+        side_effect=lambda p: tmp_path / "missing" / Path(p).name,
+    ):
+        assert running_in_container() is False
 
 
 def test_tftp_status_returns_unknown_on_timeout() -> None:

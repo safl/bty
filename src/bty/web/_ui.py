@@ -278,14 +278,28 @@ def register_ui_routes(
             {
                 "label": "TFTP daemon running",
                 "ok": tftp.is_active,
+                # On a container deploy bty-web can't see into the
+                # bty-tftp sidecar (its dnsmasq runs in another
+                # container, in a different mount namespace, and on
+                # host networking) so the local probe reports
+                # ``unknown``. That is not a failure: the Netboot
+                # page's network probe is the canonical signal in
+                # that mode. Render as advisory rather than warning
+                # so a healthy container deploy doesn't look broken.
+                # On a bare-metal deploy ``unknown`` still means the
+                # operator needs to look; keep the warning there.
+                "info": tftp.state == "unknown" and _sysconfig.running_in_container(),
                 "detail": (
-                    f"dnsmasq.service is {tftp.state}."
+                    "dnsmasq.service is active."
                     if tftp.state == "active"
                     else (
-                        f"dnsmasq.service is {tftp.state} "
-                        "(container deploys run TFTP from a sidecar "
-                        "outside bty-web's visibility -- check the "
-                        "sidecar's status if PXE is failing)."
+                        "bty-web is running in a container; the "
+                        "bty-tftp sidecar's dnsmasq lives in a "
+                        "different mount namespace and isn't "
+                        "visible from here. The Netboot page's "
+                        "network probe is the canonical signal."
+                        if tftp.state == "unknown" and _sysconfig.running_in_container()
+                        else f"dnsmasq.service is {tftp.state}."
                     )
                 ),
                 "href": "/ui/netboot",
