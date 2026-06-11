@@ -83,6 +83,15 @@ _RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
 _RETRY_ATTEMPTS = 3
 _RETRY_BACKOFF = 0.5  # seconds; exponential: 0.5, 1.0 between attempts
 
+# Defensive ceiling on the metadata-fetch response body. Real-world
+# OCI tokens are <2 KiB and manifests are <100 KiB; anything beyond
+# this is either a misconfigured registry or a deliberately hostile
+# response. Capping the read keeps a runaway registry from exhausting
+# bty-web's RAM on a tag resolve. Blob bytes do NOT go through this
+# helper (they stream via withcache or the /images proxy with their
+# own bounds).
+_MAX_METADATA_BYTES = 10 * 1024 * 1024  # 10 MiB
+
 # Accept type covers OCI v1 + Docker v2 manifest media types so the
 # registry doesn't bounce us with a 406 if the package was originally
 # pushed as a Docker manifest.
@@ -218,7 +227,14 @@ def _urlopen_retry(req: urllib.request.Request | str, *, timeout: float) -> byte
     for attempt in range(_RETRY_ATTEMPTS):
         try:
             with urllib.request.urlopen(req, timeout=timeout) as resp:
-                return bytes(resp.read())
+                # Cap the read: a registry that returns a 500 MiB
+                # "manifest" should fail loud, not silently consume
+                # process RAM. ``read(N)`` returns up to N bytes; we
+                # take N+1 and reject the response if it overflows.
+                data = bytes(resp.read(_MAX_METADATA_BYTES + 1))
+                if len(data) > _MAX_METADATA_BYTES:
+                    raise OrasError(f"oras metadata response exceeded {_MAX_METADATA_BYTES} bytes")
+                return data
         except urllib.error.HTTPError as exc:
             if exc.code not in _RETRYABLE_STATUS:
                 raise
