@@ -4,8 +4,8 @@ otherwise serves the artifact itself exactly as before.
 
 bty stays the policy/PXE layer; withcache (https://github.com/safl/withcache)
 owns the bytes. For an origin URL, :func:`blob_url` builds withcache's
-path-encoded serve URL and :func:`is_cached` asks withcache -- a cheap ``HEAD``
-on its open read path -- whether it already holds that artifact. The HEAD also
+path-encoded serve URL and :func:`is_cached` asks withcache via a cheap ``HEAD``
+on its open read path whether it already holds that artifact. The HEAD also
 *warms* withcache: a cold miss is recorded and, in withcache's auto-fetch mode,
 enqueues the background fill, so the next check flips to cached.
 
@@ -14,7 +14,8 @@ error means "not cached", and bty serves the artifact itself as before. So
 turning withcache on can only add caching, never break a boot.
 
 The ``/b/<urlsafe-b64(origin)>/<basename>`` encoding MUST match withcache's
-own ``_shim.blob_url`` / server decoding -- it is the contract between the two.
+own ``_shim.blob_url`` / server decoding; that path layout is the contract
+between the two.
 """
 
 from __future__ import annotations
