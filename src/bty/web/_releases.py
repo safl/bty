@@ -38,9 +38,9 @@ from bty import __version__ as _BTY_VERSION
 # versions can coexist in BTY_BOOT_DIR during upgrades. The ``netboot-x86``
 # variant publishes the matching names (see
 # ``cijoe/scripts/live_build.py::PUBLISH_BASENAME_FMTS``); bty-web fetches
-# the trio that matches its OWN version -- not "latest" -- so the kernel
-# / initrd / squashfs that the iPXE template references are guaranteed
-# to be the ones built for this server's version.
+# the trio that matches its OWN version (not "latest") so the kernel,
+# initrd, and squashfs the iPXE template references are guaranteed to
+# be the ones built for this server's version.
 ARTIFACT_NAMES: tuple[str, ...] = (
     f"bty-netboot-x86_64-v{_BTY_VERSION}.vmlinuz",
     f"bty-netboot-x86_64-v{_BTY_VERSION}.initrd",
