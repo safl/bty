@@ -942,12 +942,13 @@ def register_ui_routes(
                 try:
                     conn.execute(
                         "INSERT INTO catalog_entries "
-                        "(bty_image_ref, src, disk_image_sha, name, sha_url, "
+                        "(bty_image_ref, src, resolved_src, disk_image_sha, name, sha_url, "
                         "format, size_bytes, description, added_at) "
-                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                         (
                             bty_image_ref,
                             image_url,
+                            resolved.blob_url,
                             sha256,
                             name,
                             None,
@@ -1038,11 +1039,12 @@ def register_ui_routes(
             try:
                 conn.execute(
                     "INSERT INTO catalog_entries "
-                    "(bty_image_ref, src, disk_image_sha, name, sha_url, "
+                    "(bty_image_ref, src, resolved_src, disk_image_sha, name, sha_url, "
                     "format, size_bytes, description, added_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         bty_image_ref,
+                        image_url,
                         image_url,
                         sha256,
                         name,
