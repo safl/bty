@@ -644,11 +644,10 @@ def _resolve_max_parallel() -> int:
         n = _cfg().tuning.backup_max_parallel
         return n if n >= 1 else DEFAULT_MAX_PARALLEL
     except RuntimeError:
-        # No active config -- direct-call test / import. Fall back
-        # to the legacy env name so existing fixtures still work.
-        raw = os.environ.get("BTY_TUNING_BACKUP_MAX_PARALLEL") or os.environ.get(
-            "BTY_BACKUP_MAX_PARALLEL"
-        )
+        # No active config (direct-call test / import path). Read the
+        # canonical env name directly so test fixtures that bypass
+        # config loading still work.
+        raw = os.environ.get("BTY_TUNING_BACKUP_MAX_PARALLEL")
         if raw is None:
             return DEFAULT_MAX_PARALLEL
         try:

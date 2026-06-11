@@ -81,7 +81,7 @@ def default_state_path() -> Path:
         # No active config yet (very early startup, or a CLI subcommand
         # that bypasses the FastAPI app). Fall back to the env var
         # alone so the pre-v0.42 contract still works for those.
-        env = os.environ.get("BTY_PATHS_STATE_DIR") or os.environ.get("BTY_STATE_DIR")
+        env = os.environ.get("BTY_PATHS_STATE_DIR")
         base = Path(env) if env else DEFAULT_STATE_DIR
         return base / "state.db"
 

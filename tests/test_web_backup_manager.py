@@ -562,7 +562,7 @@ def test_state_listener_fires_on_cancel(tmp_path: Path) -> None:
 
 
 def test_resolve_max_parallel_env_var(monkeypatch: pytest.MonkeyPatch) -> None:
-    """``BTY_BACKUP_MAX_PARALLEL`` overrides the default; out-of-range
+    """``BTY_TUNING_BACKUP_MAX_PARALLEL`` overrides the default; out-of-range
     or non-numeric values fall back to the default rather than
     raising at startup. Same shape as the sibling
     ``test_resolve_max_parallel_env_var`` in test_web_hash_manager.py
@@ -573,9 +573,9 @@ def test_resolve_max_parallel_env_var(monkeypatch: pytest.MonkeyPatch) -> None:
 
     def _set_and_reload(value: str) -> None:
         if value == "":
-            monkeypatch.delenv("BTY_BACKUP_MAX_PARALLEL", raising=False)
+            monkeypatch.delenv("BTY_TUNING_BACKUP_MAX_PARALLEL", raising=False)
         else:
-            monkeypatch.setenv("BTY_BACKUP_MAX_PARALLEL", value)
+            monkeypatch.setenv("BTY_TUNING_BACKUP_MAX_PARALLEL", value)
         _config.set_active_config(_config.load_config(None))
 
     _set_and_reload("3")
@@ -595,7 +595,7 @@ def test_resolve_max_parallel_env_var(monkeypatch: pytest.MonkeyPatch) -> None:
     # rather than the silent-fallback the pre-v0.42 resolver did.
     import pytest as _pytest
 
-    monkeypatch.setenv("BTY_BACKUP_MAX_PARALLEL", "not-a-number")
+    monkeypatch.setenv("BTY_TUNING_BACKUP_MAX_PARALLEL", "not-a-number")
     with _pytest.raises(ValueError):
         _config.set_active_config(_config.load_config(None))
 

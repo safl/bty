@@ -384,7 +384,7 @@ def test_put_boot_rejects_oversized_upload(
     cap on /boot."""
     from bty.web import _config
 
-    monkeypatch.setenv("BTY_MAX_UPLOAD_BYTES", "16")
+    monkeypatch.setenv("BTY_TUNING_MAX_UPLOAD_BYTES", "16")
     # Cfg is loaded once at create_app time; reload now that the test
     # has set the env override the upload-cap reader consults.
     _config.set_active_config(_config.load_config(None))
@@ -2435,14 +2435,14 @@ def test_events_list_includes_machine_lifecycle(app_client: TestClient) -> None:
 def test_source_ip_uses_x_forwarded_for_when_trusted_proxy(
     app_client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """When ``BTY_TRUSTED_PROXY`` is set, ``_client_ip`` reads the
-    leftmost ``X-Forwarded-For`` value instead of
+    """When ``BTY_SERVER_TRUSTED_PROXY`` is set, ``_client_ip`` reads
+    the leftmost ``X-Forwarded-For`` value instead of
     ``request.client.host``. This is what bty-web operators behind
     nginx / caddy need so audit rows show the real client IP, not
     the proxy's loopback."""
     from bty.web import _config
 
-    monkeypatch.setenv("BTY_TRUSTED_PROXY", "1")
+    monkeypatch.setenv("BTY_SERVER_TRUSTED_PROXY", "1")
     _config.set_active_config(_config.load_config(None))
     mac = "aa:bb:cc:dd:ee:f8"
     app_client.get(f"/pxe/{mac}", headers={"X-Forwarded-For": "192.168.1.42, 10.0.0.1"})
@@ -2455,9 +2455,9 @@ def test_source_ip_uses_x_forwarded_for_when_trusted_proxy(
 def test_source_ip_ignores_x_forwarded_for_when_proxy_not_trusted(
     app_client: TestClient,
 ) -> None:
-    """Without ``BTY_TRUSTED_PROXY``, ``X-Forwarded-For`` is ignored
-    (the header is client-spoofable). Defensive default: we trust
-    only the connection-level ``request.client.host``."""
+    """Without ``BTY_SERVER_TRUSTED_PROXY``, ``X-Forwarded-For`` is
+    ignored (the header is client-spoofable). Defensive default: we
+    trust only the connection-level ``request.client.host``."""
     mac = "aa:bb:cc:dd:ee:f7"
     app_client.get(f"/pxe/{mac}", headers={"X-Forwarded-For": "1.2.3.4"})
     r = app_client.get("/events", params={"kind": "machine.discovered"}, cookies=AUTH)
