@@ -2182,9 +2182,10 @@ def create_app(
     async def upload_boot_artifact(name: str, request: Request) -> dict[str, object]:
         """Stream-upload a live-env artifact into the boot dir.
 
-        Same shape as ``PUT /images/{name}`` - the live trio
-        (vmlinuz / initrd / squashfs) goes here so the iPXE chain
-        finds it via the open ``GET /boot/{name}`` route.
+        The live trio (vmlinuz / initrd / squashfs) lands here so the
+        iPXE chain finds it via the open ``GET /boot/{name}`` route.
+        Body is capped at ``cfg.tuning.max_upload_bytes`` and the name
+        is checked against path traversal via ``_safe_path``.
         """
         return await _stream_upload(request, resolved_boot_root, name)
 
