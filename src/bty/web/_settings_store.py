@@ -41,11 +41,6 @@ KEY_NETBOOT_TAG = "upstream.netboot_tag"
 # ``latest`` to the most recent non-prerelease, non-draft tag.
 DEFAULT_TAG = "latest"
 
-# Back-compat alias so callers (and tests) using the old name keep
-# working until they migrate to ``DEFAULT_TAG`` -- this is a pre-1.0
-# rename so the alias can go away in a subsequent release.
-DEFAULT_RELEASE_TAG = DEFAULT_TAG
-
 # Optional withcache cache-host. When set, bty prefers it as the image
 # *source* for artifacts it already holds (else serves the artifact as
 # before). Resolves override -> env -> unset, so it can be configured via
@@ -138,11 +133,6 @@ def resolve_netboot_tag(conn: sqlite3.Connection) -> str:
     """The effective netboot release tag to fetch: override ->
     :data:`DEFAULT_TAG` (``latest``)."""
     return get(conn, KEY_NETBOOT_TAG) or DEFAULT_TAG
-
-
-# Pre-1.0 alias kept for one release so callers can migrate in lock-
-# step. New code should call :func:`resolve_netboot_tag` directly.
-resolve_release_tag = resolve_netboot_tag
 
 
 def resolve_withcache_url(conn: sqlite3.Connection) -> str | None:

@@ -82,14 +82,6 @@ def test_netboot_tag_default_and_override(tmp_path: Path) -> None:
         assert _settings_store.resolve_netboot_tag(conn) == "v1.2.3"
 
 
-def test_release_tag_alias_still_returns_netboot_tag(tmp_path: Path) -> None:
-    """``resolve_release_tag`` + ``DEFAULT_RELEASE_TAG`` are pre-1.0
-    aliases for the netboot-tag resolver; remove after one release."""
-    with _conn(tmp_path) as conn:
-        assert _settings_store.resolve_release_tag(conn) == _settings_store.DEFAULT_RELEASE_TAG
-        assert _settings_store.DEFAULT_RELEASE_TAG == _settings_store.DEFAULT_TAG
-
-
 def test_clear_reverts_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv(ENV_RELEASE_REPO, raising=False)
     with _conn(tmp_path) as conn:
