@@ -636,10 +636,17 @@ def _detect_host_addr() -> str:
     UDP-connects to a TEST-NET-2 address (no packet sent on UDP-connect;
     the kernel just chooses an outbound interface) and reads the local
     socket address. Returns whichever IP the host would actually use for
-    outbound traffic -- almost always the LAN address bty-web should
+    outbound traffic, almost always the LAN address bty-web should
     advertise. Falls back to ``127.0.0.1`` when no route is available;
-    the deploy hint surfaces this so the operator can override."""
+    the deploy hint surfaces this so the operator can override.
+
+    The ``settimeout`` is belt-and-braces: UDP-connect doesn't normally
+    block (the kernel returns immediately after the route lookup), but
+    a pathological resolver should not be able to hang ``bty-lab init``
+    indefinitely. Matches the same probe in :func:`bty.web._config.detect_host_addr`.
+    """
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.settimeout(5)
     try:
         s.connect(("198.51.100.1", 80))
         # getsockname() returns Any per typeshed (the tuple shape
