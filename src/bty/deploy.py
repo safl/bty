@@ -308,20 +308,18 @@ bumps those pins. State in `data/` survives the restart.
 def _quadlet_bty_web(
     version: str,
     data_dir_abs: Path,
-    host_addr: str | None = None,
     dest_abs: Path | None = None,
 ) -> str:
     """Render the bty-web Quadlet unit.
 
-    ``host_addr`` baked in when known (deploy_main path): the unit lands
-    with the real LAN IP in BTY_WITHCACHE_URL + BTY_TFTP_PROBE_HOST, so
-    no hand-edit is required. ``None`` (the stand-alone ``bty-lab init
+    v0.42+ the unit carries only ``BTY_CONFIG_FILE`` + a bind-mount of
+    ``bty.toml`` -- every operator knob (withcache URL, TFTP probe host,
+    ...) lives in that file, so the LAN address is no longer baked into
+    ``Environment=`` lines. ``dest_abs`` set (deploy_main path): the
+    bind-mount carries the absolute ``<dest>/bty.toml`` path so no
+    hand-edit is required. ``None`` (the stand-alone ``bty-lab init
     --systemd`` path -- operator inspects + edits before installing)
-    emits ``HOST_ADDR_HERE`` placeholders and a hand-edit note in the
-    header. Quadlets DON'T expand env-file references the way Compose
-    does, so a literal placeholder would leave bty-web with broken DNS
-    + a failing TFTP probe; substituting at emit time is the only place
-    in the pipeline that has the value.
+    emits a ``BTY_TOML_HOST_PATH_HERE`` placeholder + a hand-edit note.
     """
     edit_note = (
         ""
@@ -331,11 +329,6 @@ def _quadlet_bty_web(
             "# absolute path to ``bty.toml`` on this host before installing.\n#\n"
         )
     )
-    # ``host_addr`` is no longer baked into Environment= lines --
-    # v0.42 moved every operator knob into bty.toml. Kept as a
-    # signature arg for one release in case a downstream still calls
-    # with it positionally; we explicitly ignore it.
-    _ = host_addr
     toml_host_path = (
         str(dest_abs / "bty.toml") if dest_abs is not None else "BTY_TOML_HOST_PATH_HERE"
     )
@@ -461,7 +454,6 @@ def _emit_deploy_files(
     version: str,
     with_systemd: bool,
     force: bool,
-    host_addr: str | None = None,
     withcache_pw: str | None = None,
 ) -> list[Path]:
     """Emit compose.yml + envvars.example + README + (optional) Quadlet
@@ -490,7 +482,7 @@ def _emit_deploy_files(
         for fname, body in (
             (
                 "bty-web.container",
-                _quadlet_bty_web(version, data_dir_abs, host_addr, dest_abs=dest_abs),
+                _quadlet_bty_web(version, data_dir_abs, dest_abs=dest_abs),
             ),
             (
                 "withcache.container",
@@ -1284,7 +1276,6 @@ def deploy_main(argv: list[str] | None = None, *, prog: str = "bty-lab deploy") 
             version=version,
             with_systemd=is_root,
             force=args.force,
-            host_addr=host_addr,
             withcache_pw=withcache_pw,
         )
     except FileExistsError as exc:
@@ -1545,7 +1536,6 @@ def upgrade_main(argv: list[str] | None = None, *, prog: str = "bty-lab upgrade"
         version=version,
         with_systemd=is_root,
         force=True,
-        host_addr=host_addr,
         withcache_pw=DEFAULT_DEPLOY_PASSWORD,
     )
     for p in written:
