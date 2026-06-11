@@ -2856,9 +2856,14 @@ def test_catalog_entry_check_unreachable_origin_is_not_500(
 def test_catalog_entry_check_oras_marks_withcache_not_applicable(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """oras:// sources flow through bty-web's proxy, not withcache, so
-    the cache leg is reported as not-applicable rather than a misleading
-    miss."""
+    """An oras src with NO matching catalog row (e.g. an operator
+    pasting one into the Check form without adding it first) reports
+    ``applicable: false`` because there's no stored ``resolved_src``
+    canonical URL to warm. Once added via ``POST /catalog/entries``
+    the import-time resolution populates ``resolved_src`` and the
+    next Check warms withcache against that URL (see
+    :func:`test_catalog_entry_check_oras_with_resolved_src_warms_withcache`).
+    """
     from bty import flash as _flash
     from bty.web import _settings_store, _withcache
 
@@ -2872,7 +2877,7 @@ def test_catalog_entry_check_oras_marks_withcache_not_applicable(
     monkeypatch.setattr(_settings_store, "resolve_withcache_url", lambda _c: "http://cache:3000")
 
     def fail(*_a, **_kw):  # type: ignore[no-untyped-def]
-        raise AssertionError("is_cached must not be probed for oras sources")
+        raise AssertionError("is_cached must not be probed when no resolved_src is stored")
 
     monkeypatch.setattr(_withcache, "is_cached", fail)
 
@@ -2883,3 +2888,71 @@ def test_catalog_entry_check_oras_marks_withcache_not_applicable(
     )
     assert r.status_code == 200, r.text
     assert r.json()["withcache"] == {"configured": True, "applicable": False}
+
+
+def test_catalog_entry_check_oras_with_resolved_src_warms_withcache(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An oras catalog row whose import-time resolution populated
+    ``resolved_src`` warms withcache against that canonical URL, with
+    a fresh OCI bearer minted just-in-time and supplied as the HEAD's
+    ``Authorization`` header. From withcache 0.4.0 the header is
+    forwarded into the background fetch worker so the cache fills on
+    the first probe."""
+    from bty import flash as _flash
+    from bty import oras as _oras
+    from bty.web import _settings_store, _withcache
+
+    src = "oras://ghcr.io/safl/nosi/freebsd-14-headless:latest"
+    blob_url = "https://ghcr.io/v2/safl/nosi/freebsd-14-headless/blobs/sha256:deadbeef"
+
+    monkeypatch.setattr(
+        _oras,
+        "resolve_ref",
+        lambda *_a, **_kw: _oras.ResolvedBlob(
+            blob_url=blob_url,
+            headers={"Authorization": "Bearer x"},
+            digest="sha256:deadbeef",
+            size=0,
+            title="img.zst",
+        ),
+    )
+    monkeypatch.setattr(_settings_store, "resolve_withcache_url", lambda _c: "http://cache:3000")
+    monkeypatch.setattr(
+        _flash,
+        "probe_image_url",
+        lambda *_a, **_kw: _flash.ImageInfo(
+            path=None, url=src, format="img.zst", size_bytes=0, virtual_size_bytes=None
+        ),
+    )
+
+    # Stub the OCI anon-token mint so the test doesn't hit ghcr.io.
+    monkeypatch.setattr(_oras, "fetch_anonymous_token", lambda *_a, **_kw: "fresh-bearer")
+
+    captured: dict[str, object] = {}
+
+    def fake_is_cached(withcache_url, origin, headers=None, **_kw):  # type: ignore[no-untyped-def]
+        captured["withcache_url"] = withcache_url
+        captured["origin"] = origin
+        captured["headers"] = headers
+        return False  # cold cache; the HEAD enqueued the auth-bearing fetch
+
+    monkeypatch.setattr(_withcache, "is_cached", fake_is_cached)
+
+    # Seed the catalog row so the Check button sees the resolved_src.
+    r = client.post(
+        "/catalog/entries",
+        json={"image_url": src},
+        cookies=AUTH,
+    )
+    assert r.status_code == 201, r.text
+
+    r = client.post("/ui/catalog/entries/check", data={"src": src}, cookies=AUTH)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["withcache"] == {"configured": True, "hit": False, "warmed": True}
+    # The HEAD went to withcache for the canonical blob URL, with a fresh
+    # bearer on Authorization. Withcache 0.4.0 forwards that into the fetch
+    # worker, so the (cold) auto-fetch will actually pull from ghcr.io.
+    assert captured["origin"] == blob_url
+    assert captured["headers"] == {"Authorization": "Bearer fresh-bearer"}
