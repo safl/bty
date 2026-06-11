@@ -134,8 +134,9 @@ def test_fetch_release_normalises_latest_to_running_version(
     running bty-web's version, not to GitHub's "latest" release.
 
     Asset filenames are version-pinned to the running server (so
-    multiple bty-web versions can coexist in BTY_BOOT_DIR during an
-    upgrade, and the iPXE template references the matching version).
+    multiple bty-web versions can coexist under ``[paths] boot_dir``
+    during an upgrade, and the iPXE template references the matching
+    version).
     GitHub's ``/releases/latest/download/`` redirects to whatever
     release is current. A bty-web v0.33.4 calling fetch_release with
     tag="latest" used to construct

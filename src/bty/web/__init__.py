@@ -108,15 +108,11 @@ def _resolve_secret_key(state_dir: Path) -> str:
 
         configured = (_cfg().server.session_secret or "").strip()
     except RuntimeError:
-        # No active config (test that calls this directly without
-        # booting main(), or a hypothetical pre-init caller). Fall
-        # back to the legacy + new env names so direct-call use
-        # stays predictable.
-        configured = (
-            os.environ.get("BTY_SERVER_SESSION_SECRET")
-            or os.environ.get("BTY_SESSION_SECRET")
-            or ""
-        ).strip()
+        # No active config (direct-call test path that didn't boot
+        # main(), or a hypothetical pre-init caller). Read the
+        # canonical env name only; the v0.42 legacy alias was
+        # removed in v0.45.
+        configured = (os.environ.get("BTY_SERVER_SESSION_SECRET") or "").strip()
     if configured:
         return configured
     secret_path = state_dir / "session-secret"

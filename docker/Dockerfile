@@ -63,21 +63,26 @@ RUN groupadd --gid 1000 bty \
  && install -d -o bty -g bty -m 0750 /var/lib/bty /var/lib/bty/boot
 VOLUME /var/lib/bty
 
-# bty-web reads these; defaults match the on-image layout. The operator
-# UI is gated by ``$BTY_ADMIN_PASSWORD`` (set at run time; unset leaves
-# it open, with a startup warning).
-ENV BTY_STATE_DIR=/var/lib/bty \
-    BTY_BOOT_DIR=/var/lib/bty/boot \
+# bty-web reads these; defaults match the on-image layout. v0.45
+# canonical names: BTY_<SECTION>_<KEY> per the bty.toml schema (the
+# v0.41 flat aliases were removed). The operator UI is gated by
+# ``$BTY_ADMIN_PASSWORD`` (set at run time; unset leaves it open
+# with a startup warning).
+ENV BTY_PATHS_STATE_DIR=/var/lib/bty \
+    BTY_PATHS_BOOT_DIR=/var/lib/bty/boot \
     BTY_BOOT_SEED_DIR=/usr/share/bty/boot-seed \
-    BTY_WEB_HOST=0.0.0.0 \
-    BTY_WEB_PORT=8080
+    BTY_SERVER_HOST=0.0.0.0 \
+    BTY_SERVER_PORT=8080
 
 EXPOSE 8080
 
 # Purpose-built health endpoint, probed in-process (no curl dep). 30s
-# start-period covers cold-start (imports + sqlite migrations).
+# start-period covers cold-start (imports + sqlite migrations). The
+# probe reads BTY_SERVER_PORT so an operator override
+# (``docker run -e BTY_SERVER_PORT=9000``) keeps the healthcheck
+# pointed at the right port instead of the stale Dockerfile default.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
-    CMD ["python", "-c", "import os,sys,urllib.request; p=os.environ.get('BTY_WEB_PORT','8080'); sys.exit(0 if urllib.request.urlopen(f'http://127.0.0.1:{p}/healthz',timeout=3).status==200 else 1)"]
+    CMD ["python", "-c", "import os,sys,urllib.request; p=os.environ.get('BTY_SERVER_PORT','8080'); sys.exit(0 if urllib.request.urlopen(f'http://127.0.0.1:{p}/healthz',timeout=3).status==200 else 1)"]
 
 USER bty
 ENTRYPOINT ["bty-web"]

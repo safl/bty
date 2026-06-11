@@ -929,29 +929,18 @@ def test_bty_web_env_vars_are_covered_by_config_schema() -> None:
         for fld in fields(section_cls):
             schema_keys.add(f"BTY_{section_name.upper()}_{fld.name.upper()}")
 
-    # Legacy names still read directly by call sites pending
-    # migration to ``cfg.*``. Each entry should map to a Config
-    # field via the section/key convention; removing it from this
-    # list is how the migration is enforced.
-    legacy_pending_migration: set[str] = {
-        # _db.default_state_path falls back to the legacy env name
-        # when no active config is installed (direct-call paths --
-        # test fixtures, the inventory CLI). The legacy alias also
-        # wires the env into cfg.paths.state_dir at load_config time,
-        # so this remains a soft alias.
-        "BTY_STATE_DIR",
-        # _init.py's _resolve_secret_key falls back to the legacy
-        # env name when no active config is installed.
-        "BTY_SESSION_SECRET",
-        # _backup.py's _resolve_max_parallel falls back the same way.
-        "BTY_BACKUP_MAX_PARALLEL",
+    # Env names read outside the Config schema, kept as a deliberate
+    # allowlist so a new direct ``os.environ.get`` lookup fails this
+    # test until either the env name is added to the Config schema
+    # or justified here.
+    out_of_schema: set[str] = {
         # _app.py only consults this on startup to seed boot artifacts
-        # into BTY_BOOT_DIR if the container shipped baked ones; not
-        # an operator-facing config knob.
+        # into [paths] boot_dir if the container shipped baked ones;
+        # not an operator-facing config knob.
         "BTY_BOOT_SEED_DIR",
     }
 
-    allowed = schema_keys | legacy_pending_migration
+    allowed = schema_keys | out_of_schema
     missing = sorted(k for k in env_keys if k not in allowed)
     assert not missing, (
         f"bty-web reads env vars that aren't in the Config schema and "
@@ -1037,13 +1026,15 @@ def test_docker_run_publishes_http_only() -> None:
 
 def test_docker_healthcheck_honors_configured_port() -> None:
     """The container's HEALTHCHECK must probe the *configured*
-    ``BTY_WEB_PORT``, not a hardcoded port. An operator who
-    overrides the port (``docker run -e BTY_WEB_PORT=9000``) would
-    otherwise get a permanently-unhealthy container -- the probe
-    keeps hitting the stale default while bty-web listens
-    elsewhere. The probe reads ``BTY_WEB_PORT`` from the environment at
-    runtime (a Python one-liner, no curl dependency); guard against a
-    regression to a literal ``:8080`` in the probe URL.
+    ``BTY_SERVER_PORT`` (the canonical v0.45 name; the v0.41 flat
+    ``BTY_WEB_PORT`` alias was removed), not a hardcoded port. An
+    operator who overrides the port (``docker run -e
+    BTY_SERVER_PORT=9000``) would otherwise get a permanently-
+    unhealthy container; the probe keeps hitting the stale default
+    while bty-web listens elsewhere. The probe reads
+    ``BTY_SERVER_PORT`` from the environment at runtime (a Python
+    one-liner, no curl dependency); guard against a regression to a
+    literal ``:8080`` in the probe URL.
     """
     dockerfile = (REPO_ROOT / "docker" / "Dockerfile").read_text()
     healthcheck = next(
@@ -1051,12 +1042,12 @@ def test_docker_healthcheck_honors_configured_port() -> None:
         None,
     )
     assert healthcheck is not None, "Dockerfile HEALTHCHECK healthz probe not found"
-    assert "BTY_WEB_PORT" in healthcheck, (
-        f"HEALTHCHECK must read BTY_WEB_PORT at runtime, got: {healthcheck.strip()!r}. "
+    assert "BTY_SERVER_PORT" in healthcheck, (
+        f"HEALTHCHECK must read BTY_SERVER_PORT at runtime, got: {healthcheck.strip()!r}. "
         f"A hardcoded port breaks the health probe for any operator who overrides it."
     )
     assert "127.0.0.1:8080/healthz" not in healthcheck, (
-        "HEALTHCHECK appears to hardcode :8080 again -- read BTY_WEB_PORT instead."
+        "HEALTHCHECK appears to hardcode :8080 again; read BTY_SERVER_PORT instead."
     )
 
 

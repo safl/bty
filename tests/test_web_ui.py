@@ -545,7 +545,7 @@ def test_ui_backups_lists_existing_bundles(client: TestClient, tmp_path: Path) -
 
     The ``client`` fixture's state.db is at ``tmp_path/state.db`` and
     the app derives ``backups_root`` as ``state.db.parent / "backups"``
-    when ``BTY_BACKUP_DIR`` is unset -- so a bundle dropped into
+    when ``[paths] backup_dir`` is unset, so a bundle dropped into
     ``tmp_path/backups`` shows up without any patching."""
     import json
 
