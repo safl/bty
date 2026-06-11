@@ -47,13 +47,14 @@ from bty.web import (
 )
 from bty.web._auth import SESSION_AUTHED_KEY
 from bty.web._events_log import KNOWN_ACTORS, KNOWN_EVENT_KINDS, KNOWN_SUBJECT_KINDS
-from bty.web._events_log import normalize_ip as _normalize_ip
 from bty.web._models import (
     BOOT_MODES,
     DEFAULT_BOOT_MODE,
     CatalogEntryAdd,
     MachineUpsert,
 )
+from bty.web._reqctx import client_ip as _client_ip
+from bty.web._reqctx import normalise_mac as _normalise_mac
 
 
 class NotAuthenticated(Exception):
@@ -2091,37 +2092,6 @@ def _row_to_dict(row: Any) -> dict[str, Any]:
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
     }
-
-
-def _client_ip(request: Request) -> str | None:
-    """Mirror of ``bty.web._app._client_ip``: read the request's
-    client host and feed it through :func:`_events_log.normalize_ip`
-    so v4-mapped-v6 addresses collapse to bare v4 before hitting
-    the audit log. ``[server] trusted_proxy`` (env override
-    ``BTY_SERVER_TRUSTED_PROXY``) opts into reading
-    ``X-Forwarded-For`` for deployments behind a reverse proxy.
-    Duplicated here rather than imported because ``_app`` already
-    imports this module (circular)."""
-    if _config.cfg().server.trusted_proxy:
-        xff = request.headers.get("x-forwarded-for")
-        if xff:
-            first = xff.split(",", 1)[0].strip()
-            if first:
-                return _normalize_ip(first)
-    return _normalize_ip(request.client.host if request.client else None)
-
-
-def _normalise_mac(raw: str) -> str:
-    cleaned = raw.lower().replace("-", ":")
-    parts = cleaned.split(":")
-    if len(parts) != 6 or any(
-        len(p) != 2 or any(c not in "0123456789abcdef" for c in p) for p in parts
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"invalid MAC: {raw!r}",
-        )
-    return cleaned
 
 
 def _now_iso() -> str:
