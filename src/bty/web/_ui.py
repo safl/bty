@@ -693,7 +693,7 @@ def register_ui_routes(
         flash = request.query_params.get("error")
         catalog_manifest_path = str(_config.cfg().catalog_file)
         with _db.open_db(state_path) as conn:
-            release_repo = _settings_store.resolve_release_repo(conn)
+            catalog_repo = _settings_store.resolve_catalog_repo(conn)
             catalog_tag = _settings_store.resolve_catalog_tag(conn)
             image_events = _events_log.list_events(conn, subject_kind="catalog", limit=15)
         return render(
@@ -702,7 +702,7 @@ def register_ui_routes(
             unified=unified,
             image_events=image_events,
             manifest_path=catalog_manifest_path,
-            release_repo=release_repo,
+            catalog_repo=catalog_repo,
             catalog_tag=catalog_tag,
             flash=flash,
             flash_kind="danger" if flash else None,
@@ -1164,7 +1164,7 @@ def register_ui_routes(
         artifacts = _releases.inspect_boot_dir(boot_root)
         artifacts_all_cached = bool(artifacts) and all(a.present for a in artifacts)
         with _db.open_db(state_path) as conn:
-            release_repo = _settings_store.resolve_release_repo(conn)
+            netboot_repo = _settings_store.resolve_netboot_repo(conn)
             netboot_tag = _settings_store.resolve_netboot_tag(conn)
             # Recent netboot activity for the page's "Activity" table.
             boot_events = _events_log.list_events(conn, subject_kind="netboot", limit=10)
@@ -1174,7 +1174,7 @@ def register_ui_routes(
             artifacts=artifacts,
             artifacts_all_cached=artifacts_all_cached,
             artifact_shas=_releases.boot_artifact_shas(boot_root),
-            release_repo=release_repo,
+            netboot_repo=netboot_repo,
             netboot_tag=netboot_tag,
             boot_events=boot_events,
             flash=flash,
@@ -1382,21 +1382,26 @@ def register_ui_routes(
         state_dir = state_path.parent
         catalog_file = str(cfg.catalog_file)
         with _db.open_db(state_path) as conn:
-            release_repo = _settings_store.resolve_release_repo(conn)
+            netboot_repo = _settings_store.resolve_netboot_repo(conn)
+            catalog_repo = _settings_store.resolve_catalog_repo(conn)
             catalog_url = _settings_store.resolve_catalog_url(conn)
             catalog_tag = _settings_store.resolve_catalog_tag(conn)
             netboot_tag = _settings_store.resolve_netboot_tag(conn)
-            repo_override = _settings_store.get(conn, _settings_store.KEY_RELEASE_REPO)
+            netboot_repo_override = _settings_store.get(conn, _settings_store.KEY_NETBOOT_REPO)
+            catalog_repo_override = _settings_store.get(conn, _settings_store.KEY_CATALOG_REPO)
             catalog_tag_override = _settings_store.get(conn, _settings_store.KEY_CATALOG_TAG)
             netboot_tag_override = _settings_store.get(conn, _settings_store.KEY_NETBOOT_TAG)
         upstream = {
-            "release_repo": release_repo,
-            "release_repo_override": repo_override,
-            "release_repo_default": _settings_store.default_release_repo(),
+            "netboot_repo": netboot_repo,
+            "netboot_repo_override": netboot_repo_override,
+            "netboot_repo_default": _settings_store.default_netboot_repo(),
+            "catalog_repo": catalog_repo,
+            "catalog_repo_override": catalog_repo_override,
+            "catalog_repo_default": _settings_store.default_catalog_repo(),
             "catalog_tag": catalog_tag,
             "catalog_tag_override": catalog_tag_override,
             "catalog_tag_default": _settings_store.DEFAULT_TAG,
-            "catalog_url": catalog_url,  # derived view (repo + catalog_tag)
+            "catalog_url": catalog_url,  # derived view (catalog_repo + catalog_tag)
             "netboot_tag": netboot_tag,
             "netboot_tag_override": netboot_tag_override,
             "netboot_tag_default": _settings_store.DEFAULT_TAG,
@@ -1755,42 +1760,45 @@ def register_ui_routes(
     )
     def ui_settings_upstream(
         request: Request,
-        release_repo: Annotated[str, Form()] = "",
+        netboot_repo: Annotated[str, Form()] = "",
+        catalog_repo: Annotated[str, Form()] = "",
         catalog_tag: Annotated[str, Form()] = "",
         netboot_tag: Annotated[str, Form()] = "",
     ) -> RedirectResponse:
-        """Save (or clear) the three editable upstream overrides:
-        release repo, catalog tag, netboot tag. An empty field clears
-        that override, reverting to the default. All three take effect
-        on the next fetch without a restart, since the fetch sites
-        resolve from this store at request time."""
-        rr = release_repo.strip()
+        """Save (or clear) the four editable upstream overrides:
+        netboot repo, catalog repo, catalog tag, netboot tag. An empty
+        field clears that override, reverting to the built-in default.
+        All four take effect on the next fetch without a restart,
+        since the fetch sites resolve from this store at request time.
+        """
+        nr = netboot_repo.strip()
+        cr = catalog_repo.strip()
         ct = catalog_tag.strip()
         nt = netboot_tag.strip()
         with _db.open_db(state_path) as conn:
             # Snapshot the previous explicit overrides (None = was on
             # default) BEFORE the writes so the audit event can carry
             # both before + after.
-            old_rr = _settings_store.get(conn, _settings_store.KEY_RELEASE_REPO)
+            old_nr = _settings_store.get(conn, _settings_store.KEY_NETBOOT_REPO)
+            old_cr = _settings_store.get(conn, _settings_store.KEY_CATALOG_REPO)
             old_ct = _settings_store.get(conn, _settings_store.KEY_CATALOG_TAG)
             old_nt = _settings_store.get(conn, _settings_store.KEY_NETBOOT_TAG)
-            if rr:
-                _settings_store.set_value(conn, _settings_store.KEY_RELEASE_REPO, rr)
-            else:
-                _settings_store.clear(conn, _settings_store.KEY_RELEASE_REPO)
-            if ct:
-                _settings_store.set_value(conn, _settings_store.KEY_CATALOG_TAG, ct)
-            else:
-                _settings_store.clear(conn, _settings_store.KEY_CATALOG_TAG)
-            if nt:
-                _settings_store.set_value(conn, _settings_store.KEY_NETBOOT_TAG, nt)
-            else:
-                _settings_store.clear(conn, _settings_store.KEY_NETBOOT_TAG)
+            for value, key in (
+                (nr, _settings_store.KEY_NETBOOT_REPO),
+                (cr, _settings_store.KEY_CATALOG_REPO),
+                (ct, _settings_store.KEY_CATALOG_TAG),
+                (nt, _settings_store.KEY_NETBOOT_TAG),
+            ):
+                if value:
+                    _settings_store.set_value(conn, key, value)
+                else:
+                    _settings_store.clear(conn, key)
             _events_log.record(
                 conn,
                 kind="settings.upstream.updated",
                 summary=(
-                    f"upstream sources set: repo={rr or '(default)'}, "
+                    f"upstream sources set: netboot_repo={nr or '(default)'}, "
+                    f"catalog_repo={cr or '(default)'}, "
                     f"catalog_tag={ct or '(default)'}, "
                     f"netboot_tag={nt or '(default)'}"
                 ),
@@ -1799,7 +1807,8 @@ def register_ui_routes(
                 actor="operator",
                 source_ip=_client_ip(request),
                 details={
-                    "release_repo": {"old": old_rr, "new": rr or None},
+                    "netboot_repo": {"old": old_nr, "new": nr or None},
+                    "catalog_repo": {"old": old_cr, "new": cr or None},
                     "catalog_tag": {"old": old_ct, "new": ct or None},
                     "netboot_tag": {"old": old_nt, "new": nt or None},
                 },

@@ -49,7 +49,18 @@ ARTIFACT_NAMES: tuple[str, ...] = (
 SHA256_NAME = f"bty-netboot-x86_64-v{_BTY_VERSION}.sha256"
 ALL_NAMES = (*ARTIFACT_NAMES, SHA256_NAME)
 
-DEFAULT_REPO = "safl/bty"
+# Netboot release repo: the kernel / initrd / squashfs artifacts. These
+# are built and uploaded by bty's own CI, so ``safl/bty`` is the canonical
+# source. An operator forking bty points their bty-web at their fork.
+DEFAULT_NETBOOT_REPO = "safl/bty"
+
+# Catalog release repo: bty consumes the upstream nosi project's
+# auto-generated catalog rather than republishing a hand-maintained
+# mirror. nosi's CI uploads ``catalog.toml`` to every release; bty
+# fetches from there. An operator with their own image-builder ahead of
+# nosi (custom variants, extra distros) overrides this in
+# Settings > Upstream sources.
+DEFAULT_CATALOG_REPO = "safl/nosi"
 DEFAULT_USER_AGENT = "bty-web release-fetcher"
 
 # Env var that overrides the release repo when no explicit ``repo`` is
@@ -213,7 +224,7 @@ def fetch_release(
     the artifact field stayed None across the whole multi-file
     fetch.
     """
-    repo = repo or os.environ.get(ENV_RELEASE_REPO) or DEFAULT_REPO
+    repo = repo or os.environ.get(ENV_RELEASE_REPO) or DEFAULT_NETBOOT_REPO
     # "latest" is the UI form's historical default; it can't actually
     # work (see docstring) so we normalise it to the running version's
     # tag, which is the only tag whose asset filenames match what this

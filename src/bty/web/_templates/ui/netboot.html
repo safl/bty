@@ -26,7 +26,7 @@
     <code>boot_mode=bty-flash-always</code>. Trigger a fetch from the
     artifacts header to pull the kernel + initrd + squashfs + sha256
     manifest for tag <code>{{ netboot_tag }}</code> from
-    <code>{{ release_repo }}</code>; rows below tick from missing to
+    <code>{{ netboot_repo }}</code>; rows below tick from missing to
     present as each file lands. The TFTP daemon panel is purely
     observational; the router-side DHCP / PXE cheatsheet lives on the
     <strong>Settings</strong> page.
@@ -49,7 +49,7 @@
                 {% if artifacts_all_cached %}disabled
                 title="Netboot artifacts for tag '{{ netboot_tag }}' are already cached. Remove a file from the boot directory below to re-fetch."
                 {% else %}
-                title="Fetch netboot artifacts for tag '{{ netboot_tag }}' from {{ release_repo }}"
+                title="Fetch netboot artifacts for tag '{{ netboot_tag }}' from {{ netboot_repo }}"
                 {% endif %}>
             <i class="bi bi-cloud-download me-1"></i>Fetch '<strong>{{ netboot_tag }}</strong>' artifacts
             {% if artifacts_all_cached %}<i class="bi bi-check-circle ms-1" title="cached"></i>{% endif %}
