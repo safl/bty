@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from bty.web import _db, _settings_store
-from bty.web._releases import DEFAULT_REPO, ENV_RELEASE_REPO
+from bty.web._releases import DEFAULT_CATALOG_REPO, DEFAULT_NETBOOT_REPO, ENV_RELEASE_REPO
 
 
 def _conn(tmp_path: Path) -> sqlite3.Connection:
@@ -23,44 +23,78 @@ def _conn(tmp_path: Path) -> sqlite3.Connection:
     return sqlite3.connect(state)
 
 
-def test_release_repo_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """No override, no env -> the built-in default repo."""
+def test_netboot_repo_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """No override, no env -> the built-in default netboot repo (safl/bty)."""
     monkeypatch.delenv(ENV_RELEASE_REPO, raising=False)
     with _conn(tmp_path) as conn:
-        assert _settings_store.resolve_release_repo(conn) == DEFAULT_REPO
+        assert _settings_store.resolve_netboot_repo(conn) == DEFAULT_NETBOOT_REPO
 
 
-def test_release_repo_env_overrides_default(
+def test_netboot_repo_env_overrides_default(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv(ENV_RELEASE_REPO, "acme/widgets")
     with _conn(tmp_path) as conn:
-        assert _settings_store.resolve_release_repo(conn) == "acme/widgets"
+        assert _settings_store.resolve_netboot_repo(conn) == "acme/widgets"
 
 
-def test_release_repo_db_override_wins_over_env(
+def test_netboot_repo_db_override_wins_over_env(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv(ENV_RELEASE_REPO, "acme/widgets")
     with _conn(tmp_path) as conn:
-        _settings_store.set_value(conn, _settings_store.KEY_RELEASE_REPO, "other/repo")
-        assert _settings_store.resolve_release_repo(conn) == "other/repo"
+        _settings_store.set_value(conn, _settings_store.KEY_NETBOOT_REPO, "other/repo")
+        assert _settings_store.resolve_netboot_repo(conn) == "other/repo"
 
 
-def test_catalog_url_derives_from_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """With no overrides, the catalog URL is built from the effective
-    release repo + the default tag (``latest``)."""
+def test_catalog_repo_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """No override -> the built-in default catalog repo (safl/nosi).
+    The catalog repo has NO env-layer fallback; only an explicit
+    Settings override beats the default."""
+    monkeypatch.delenv(ENV_RELEASE_REPO, raising=False)
+    with _conn(tmp_path) as conn:
+        assert _settings_store.resolve_catalog_repo(conn) == DEFAULT_CATALOG_REPO
+
+
+def test_catalog_repo_independent_of_netboot_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``$BTY_BOOT_RELEASE_REPO`` only repoints the netboot repo;
+    the catalog repo stays on its own default until explicitly
+    overridden."""
     monkeypatch.setenv(ENV_RELEASE_REPO, "acme/widgets")
     with _conn(tmp_path) as conn:
+        assert _settings_store.resolve_netboot_repo(conn) == "acme/widgets"
+        assert _settings_store.resolve_catalog_repo(conn) == DEFAULT_CATALOG_REPO
+
+
+def test_catalog_url_derives_from_catalog_repo(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With no overrides, the catalog URL is built from the catalog
+    repo + the default tag (``latest``). The catalog URL is NOT
+    affected by ``$BTY_BOOT_RELEASE_REPO`` (which only points the
+    netboot fetch)."""
+    monkeypatch.delenv(ENV_RELEASE_REPO, raising=False)
+    with _conn(tmp_path) as conn:
+        url = _settings_store.resolve_catalog_url(conn)
+    assert url == f"https://github.com/{DEFAULT_CATALOG_REPO}/releases/latest/download/catalog.toml"
+
+
+def test_catalog_url_uses_catalog_repo_override(tmp_path: Path) -> None:
+    """A ``KEY_CATALOG_REPO`` override repoints the catalog URL; the
+    netboot fetch is untouched."""
+    with _conn(tmp_path) as conn:
+        _settings_store.set_value(conn, _settings_store.KEY_CATALOG_REPO, "acme/widgets")
         url = _settings_store.resolve_catalog_url(conn)
     assert url == "https://github.com/acme/widgets/releases/latest/download/catalog.toml"
 
 
-def test_catalog_tag_override_changes_url(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_catalog_tag_override_changes_url(tmp_path: Path) -> None:
     """Pinning the catalog tag flips the URL to the explicit-tag
     ``releases/download/<tag>/`` form."""
-    monkeypatch.setenv(ENV_RELEASE_REPO, "acme/widgets")
     with _conn(tmp_path) as conn:
+        _settings_store.set_value(conn, _settings_store.KEY_CATALOG_REPO, "acme/widgets")
         _settings_store.set_value(conn, _settings_store.KEY_CATALOG_TAG, "v1.2.3")
         assert _settings_store.resolve_catalog_tag(conn) == "v1.2.3"
         assert (
@@ -82,13 +116,17 @@ def test_netboot_tag_default_and_override(tmp_path: Path) -> None:
         assert _settings_store.resolve_netboot_tag(conn) == "v1.2.3"
 
 
-def test_clear_reverts_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_clear_reverts_overrides(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv(ENV_RELEASE_REPO, raising=False)
     with _conn(tmp_path) as conn:
-        _settings_store.set_value(conn, _settings_store.KEY_RELEASE_REPO, "other/repo")
-        assert _settings_store.resolve_release_repo(conn) == "other/repo"
-        _settings_store.clear(conn, _settings_store.KEY_RELEASE_REPO)
-        assert _settings_store.resolve_release_repo(conn) == DEFAULT_REPO
+        _settings_store.set_value(conn, _settings_store.KEY_NETBOOT_REPO, "fork/netboot")
+        _settings_store.set_value(conn, _settings_store.KEY_CATALOG_REPO, "fork/catalog")
+        assert _settings_store.resolve_netboot_repo(conn) == "fork/netboot"
+        assert _settings_store.resolve_catalog_repo(conn) == "fork/catalog"
+        _settings_store.clear(conn, _settings_store.KEY_NETBOOT_REPO)
+        _settings_store.clear(conn, _settings_store.KEY_CATALOG_REPO)
+        assert _settings_store.resolve_netboot_repo(conn) == DEFAULT_NETBOOT_REPO
+        assert _settings_store.resolve_catalog_repo(conn) == DEFAULT_CATALOG_REPO
 
 
 # ----- Backup schedule resolvers ----------------------------------------

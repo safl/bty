@@ -333,7 +333,7 @@ class ReleaseFetchManager(_BaseAsyncManager[ReleaseFetchState]):
         repo: str | None = None
         if self._state_path is not None:
             with _db.open_db(self._state_path) as conn:
-                repo = _settings_store.get(conn, _settings_store.KEY_RELEASE_REPO)
+                repo = _settings_store.get(conn, _settings_store.KEY_NETBOOT_REPO)
 
         # Lifecycle audit event: worker picked up the release fetch.
         # Pairs with the request-side ``netboot.artifacts.fetch.requested``.

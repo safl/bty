@@ -51,14 +51,29 @@
     <div class="card-body">
         <form method="post" action="/ui/settings/upstream">
             <div class="mb-3">
-                <label for="release_repo" class="form-label">Release repo</label>
-                <input type="text" class="form-control font-monospace" id="release_repo"
-                       name="release_repo" placeholder="{{ upstream.release_repo_default }}"
-                       value="{{ upstream.release_repo_override or '' }}">
+                <label for="netboot_repo" class="form-label">Netboot repo</label>
+                <input type="text" class="form-control font-monospace" id="netboot_repo"
+                       name="netboot_repo" placeholder="{{ upstream.netboot_repo_default }}"
+                       value="{{ upstream.netboot_repo_override or '' }}">
                 <div class="form-text small">
-                    GitHub <code>owner/repo</code> both the netboot artifacts
-                    and the catalog are pulled from. Effective:
-                    <code>{{ upstream.release_repo }}</code>{% if not upstream.release_repo_override %}
+                    GitHub <code>owner/repo</code> the netboot artifacts
+                    (vmlinuz / initrd / squashfs) are pulled from.
+                    Effective: <code>{{ upstream.netboot_repo }}</code>{% if not upstream.netboot_repo_override %}
+                    (default; leave blank to keep){% endif %}.
+                </div>
+            </div>
+            <div class="mb-3">
+                <label for="catalog_repo" class="form-label">Catalog repo</label>
+                <input type="text" class="form-control font-monospace" id="catalog_repo"
+                       name="catalog_repo" placeholder="{{ upstream.catalog_repo_default }}"
+                       value="{{ upstream.catalog_repo_override or '' }}">
+                <div class="form-text small">
+                    GitHub <code>owner/repo</code> the
+                    <code>catalog.toml</code> is pulled from. Defaults
+                    to the upstream image-builder
+                    (<code>{{ upstream.catalog_repo_default }}</code>);
+                    point at a fork for a custom image set. Effective:
+                    <code>{{ upstream.catalog_repo }}</code>{% if not upstream.catalog_repo_override %}
                     (default; leave blank to keep){% endif %}.
                 </div>
             </div>

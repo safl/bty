@@ -6,8 +6,13 @@ Most bty-web configuration is env-var / default driven and read-only
 value comes from). A small set of values can be overridden here and
 persisted across restarts without touching the systemd unit:
 
-- :data:`KEY_RELEASE_REPO` -- the GitHub ``owner/repo`` both the
-  netboot and the catalog fetches pull from.
+- :data:`KEY_NETBOOT_REPO` -- the GitHub ``owner/repo`` the netboot
+  artifact fetch (vmlinuz / initrd / squashfs) pulls from. Default
+  ``safl/bty``.
+- :data:`KEY_CATALOG_REPO` -- the GitHub ``owner/repo`` the catalog
+  fetch pulls ``catalog.toml`` from. Default ``safl/nosi``: bty
+  consumes the upstream image-builder's auto-generated catalog
+  rather than republishing a hand-maintained mirror.
 - :data:`KEY_CATALOG_TAG` -- the release tag the "Fetch catalog"
   action targets (``latest`` by default).
 - :data:`KEY_NETBOOT_TAG` -- the release tag the "Fetch artifacts"
@@ -17,9 +22,10 @@ persisted across restarts without touching the systemd unit:
 
 Resolution order is override (this table) -> environment variable ->
 built-in default, so an unset key transparently falls back to the
-existing behaviour. Only :data:`KEY_RELEASE_REPO` has an env layer
-(:data:`ENV_RELEASE_REPO`); the two tag keys resolve straight from
-override to :data:`DEFAULT_TAG` (``latest``).
+existing behaviour. Only :data:`KEY_NETBOOT_REPO` has an env layer
+(:data:`ENV_RELEASE_REPO` is ``BTY_BOOT_RELEASE_REPO``); the catalog
+repo and the two tag keys resolve straight from override to their
+built-in defaults.
 """
 
 from __future__ import annotations
@@ -28,12 +34,13 @@ import os
 import sqlite3
 from datetime import UTC, datetime
 
-from bty.web._releases import DEFAULT_REPO, ENV_RELEASE_REPO
+from bty.web._releases import DEFAULT_CATALOG_REPO, DEFAULT_NETBOOT_REPO, ENV_RELEASE_REPO
 
 # ``ENV_RELEASE_REPO`` is imported from :mod:`bty.web._releases` so the
-# env-var name has a single definition; ``KEY_RELEASE_REPO`` falls back
-# to it (via :func:`default_release_repo`) before the built-in default.
-KEY_RELEASE_REPO = "upstream.release_repo"
+# env-var name has a single definition; ``KEY_NETBOOT_REPO`` falls back
+# to it (via :func:`default_netboot_repo`) before the built-in default.
+KEY_NETBOOT_REPO = "upstream.netboot_repo"
+KEY_CATALOG_REPO = "upstream.catalog_repo"
 KEY_CATALOG_TAG = "upstream.catalog_tag"
 KEY_NETBOOT_TAG = "upstream.netboot_tag"
 
@@ -96,15 +103,32 @@ def clear(conn: sqlite3.Connection, key: str) -> None:
     conn.execute("DELETE FROM settings WHERE key = ?", (key,))
 
 
-def default_release_repo() -> str:
-    """The release repo from the environment, else the built-in default
-    (ignores any DB override)."""
-    return os.environ.get(ENV_RELEASE_REPO) or DEFAULT_REPO
+def default_netboot_repo() -> str:
+    """The netboot release repo from the environment, else the built-in
+    default (ignores any DB override). bty's own CI publishes the
+    ``vmlinuz`` / ``initrd`` / ``squashfs`` artifacts to this repo's
+    releases; an operator forking bty points their fork here via
+    ``$BTY_BOOT_RELEASE_REPO``."""
+    return os.environ.get(ENV_RELEASE_REPO) or DEFAULT_NETBOOT_REPO
 
 
-def resolve_release_repo(conn: sqlite3.Connection) -> str:
+def default_catalog_repo() -> str:
+    """The catalog repo's built-in default. bty consumes the upstream
+    nosi project's auto-generated ``catalog.toml`` rather than
+    republishing a mirror. No env-layer override: operators with a
+    different upstream override via the Settings page (the resulting
+    DB row beats this default)."""
+    return DEFAULT_CATALOG_REPO
+
+
+def resolve_netboot_repo(conn: sqlite3.Connection) -> str:
     """The effective netboot release repo: override -> env -> default."""
-    return get(conn, KEY_RELEASE_REPO) or default_release_repo()
+    return get(conn, KEY_NETBOOT_REPO) or default_netboot_repo()
+
+
+def resolve_catalog_repo(conn: sqlite3.Connection) -> str:
+    """The effective catalog repo: override -> default."""
+    return get(conn, KEY_CATALOG_REPO) or default_catalog_repo()
 
 
 def catalog_url_for(repo: str, tag: str) -> str:
@@ -123,10 +147,10 @@ def resolve_catalog_tag(conn: sqlite3.Connection) -> str:
 
 
 def resolve_catalog_url(conn: sqlite3.Connection) -> str:
-    """The effective catalog URL, derived from the current repo +
-    catalog tag. There is no separate override for the URL itself;
-    operators tweak the repo and/or the tag instead."""
-    return catalog_url_for(resolve_release_repo(conn), resolve_catalog_tag(conn))
+    """The effective catalog URL, derived from the current catalog repo
+    + tag. There is no separate override for the URL itself; operators
+    tweak the catalog repo and/or the tag instead."""
+    return catalog_url_for(resolve_catalog_repo(conn), resolve_catalog_tag(conn))
 
 
 def resolve_netboot_tag(conn: sqlite3.Connection) -> str:
