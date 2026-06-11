@@ -91,28 +91,23 @@ Every env var bty's runtime reads, with the consuming process and the
 default. The wizard + web read from the same set, so a single ``ENV``
 block (compose / Quadlet / Dockerfile) covers every component.
 
-> **v0.42+:** ``bty-web``'s canonical config is a ``bty.toml`` file
-> (pointed at via ``BTY_CONFIG_FILE`` / ``BTY_CONFIG_DIR``); per-key
-> env overrides follow the ``BTY_<SECTION>_<KEY>`` convention (e.g.
-> ``BTY_SERVER_PORT``). The flat ``bty-web`` names below
-> (``BTY_WEB_PORT``, ``BTY_STATE_DIR``, ...) keep working as legacy
-> aliases for one release; new deploys should author ``bty.toml``.
+``bty-web``'s canonical config is a ``bty.toml`` file (pointed at via
+``BTY_CONFIG_FILE`` / ``BTY_CONFIG_DIR``); per-key env overrides
+follow the ``BTY_<SECTION>_<KEY>`` convention (e.g. ``BTY_SERVER_PORT``,
+``BTY_PATHS_STATE_DIR``). See ``walkthrough-server-docker.md`` for
+the full schema and the deploy-time emit.
+
+The table below lists the env vars bty-web reads outside the
+``bty.toml`` flow plus the legacy ``BTY_IMAGE_ROOT`` knob the ``bty``
+wizard still honours for its local-images browser.
 
 | Var | Read by | Default | Purpose |
 |---|---|---|---|
-| `BTY_IMAGE_ROOT` | `bty`, `bty-web` | `/var/lib/bty/images` | Image catalog directory |
-| `BTY_STATE_DIR` | `bty-web` | `/var/lib/bty` | Where `state.db`, `session-secret`, etc. live |
-| `BTY_BOOT_DIR` | `bty-web` | `${BTY_STATE_DIR}/boot` | Kernel / initrd / squashfs (PXE boot artifacts) |
-| `BTY_WEB_HOST` | `bty-web` | `0.0.0.0` | Listen address |
-| `BTY_WEB_PORT` | `bty-web` | `8080` | Listen port |
-| `BTY_SESSION_SECRET` | `bty-web` | (generated, persisted under `BTY_STATE_DIR`) | Cookie key override; useful for multi-instance |
-| `BTY_BOOT_RELEASE_REPO` | `bty-web` | `safl/bty` | GitHub releases repo to fetch boot artifacts from |
-| `BTY_CATALOG_FILE` | `bty-web` | `${BTY_STATE_DIR}/catalog.toml` | Catalog file path (TOML; see walkthrough-catalog.md) |
-| `BTY_CATALOG_MAX_PARALLEL` | `bty-web` | `2` | Concurrent catalog downloads; fetched files land under `BTY_IMAGE_ROOT` with `catalog-<ref:12>-<slug>.<ext>` names (v0.31.0+; no separate cache dir) |
-| `BTY_HASH_MAX_PARALLEL` | `bty-web` | `1` | Concurrent SHA-256 hashes (low: Pi/NUC-friendly) |
-| `BTY_MAX_UPLOAD_BYTES` | `bty-web` | `200 GiB` | Hard cap on `PUT /images/{name}` body size; rejected uploads land an `image.upload_failed` audit row |
-| `BTY_TRUSTED_PROXY` | `bty-web` | unset | When set (any truthy), read client IP from `X-Forwarded-For`; only enable behind a reverse proxy that strips inbound X-F-F |
-| `BTY_ADMIN_PASSWORD` | `bty-web` | `bty-lab` | Gates the operator UI (constant-time compare); auth is always on -- unset falls back to the well-known default `bty-lab`, with a startup warning until it is changed |
+| `BTY_IMAGE_ROOT` | `bty` | `/var/lib/bty/images` | TUI local-images browser root (no longer used by `bty-web`; v0.40+ `bty-web` is bytes-less) |
+| `BTY_CONFIG_FILE` | `bty-web` | unset | Explicit `bty.toml` path; overrides the default `/etc/bty/bty.toml` + `<state_dir>/bty.toml` search |
+| `BTY_CONFIG_DIR` | `bty-web` | unset | Explicit `conf.d/` directory; layered on top of the single-file config |
+| `BTY_ADMIN_PASSWORD` | `bty-web` | `bty-lab` | Direct env shortcut for the admin password; otherwise authored as `[admin] password` in `bty.toml`. Constant-time compare; auth is always on |
+| `BTY_BOOT_RELEASE_REPO` | `bty-web` | `safl/bty` | GitHub repo to fetch boot artifacts from; consulted directly by `bty.web._releases` |
 
 ``bty`` also accepts `--catalog SOURCE` to pre-load a catalog and `--server
 X --mac Y` for server-driven dispatch. See `reference.md > CLI` for the
