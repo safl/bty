@@ -378,9 +378,11 @@ def _patched_runtime(monkeypatch: pytest.MonkeyPatch) -> dict[str, list]:
       podman / systemctl.
     - ``_install_quadlets`` is a no-op (system path / root not exercised
       here; covered separately).
+    - ``_install_netavark_firewall_drop_in`` is a no-op for the same
+      reason (writes under /etc/containers/containers.conf.d).
 
     Returns the calls dict the test can inspect."""
-    calls: dict[str, list] = {"run": [], "quadlets": []}
+    calls: dict[str, list] = {"run": [], "quadlets": [], "firewall_drop_in": []}
 
     def fake_run(cmd, *, cwd=None, env=None, check=True):  # type: ignore[no-untyped-def]
         calls["run"].append((list(cmd), cwd))
@@ -391,8 +393,13 @@ def _patched_runtime(monkeypatch: pytest.MonkeyPatch) -> dict[str, list]:
         calls["quadlets"].append((Path(dest), force))
         return [deploy_mod.QUADLET_SYSTEM_DIR / "bty-web.container"]
 
+    def fake_install_drop_in():  # type: ignore[no-untyped-def]
+        calls["firewall_drop_in"].append(deploy_mod.NETAVARK_FIREWALL_DROP_IN)
+        return deploy_mod.NETAVARK_FIREWALL_DROP_IN
+
     monkeypatch.setattr(deploy_mod, "_run", fake_run)
     monkeypatch.setattr(deploy_mod, "_install_quadlets", fake_install_quadlets)
+    monkeypatch.setattr(deploy_mod, "_install_netavark_firewall_drop_in", fake_install_drop_in)
     monkeypatch.setattr(deploy_mod.shutil, "which", lambda name: f"/usr/bin/{name}")
     monkeypatch.setattr(deploy_mod, "_detect_host_addr", lambda: "10.20.30.200")
     monkeypatch.setattr(deploy_mod.os, "geteuid", lambda: 0)
@@ -869,6 +876,7 @@ def test_upgrade_quadlet_managed_as_root_uses_systemctl(
     deploy_mod.deploy_main([str(dest)])  # system install (root via fixture)
     _patched_runtime["run"].clear()
     _patched_runtime["quadlets"].clear()
+    _patched_runtime["firewall_drop_in"].clear()
     # Stub Path.exists so the QUADLET_SYSTEM_DIR check fires True.
     real_exists = Path.exists
 
@@ -885,6 +893,54 @@ def test_upgrade_quadlet_managed_as_root_uses_systemctl(
     restarts = [cmd for cmd in run_cmds if cmd[:2] == ["systemctl", "restart"]]
     assert len(restarts) == 1
     assert set(restarts[0][2:]) == set(deploy_mod._SYSTEMD_SERVICES)
+    # The netavark firewall drop-in is refreshed on every Quadlet-managed
+    # upgrade (idempotent: a same-content file is left alone, see the
+    # focused round-trip test).
+    assert len(_patched_runtime["firewall_drop_in"]) == 1
+
+
+def test_deploy_as_root_installs_netavark_firewall_drop_in(
+    tmp_path: Path, _patched_runtime: dict[str, list]
+) -> None:
+    """A root-mode ``bty-lab deploy`` writes the netavark firewall-
+    backend pin so the bty stack starts on hosts that don't ship the
+    ``nftables`` package (the v0.44.2 lab-box footgun: podman/netavark
+    defaulted to nftables and exited 127 on nft-less Debian trixie)."""
+    dest = tmp_path / "bty-host"
+    deploy_mod.deploy_main([str(dest)])
+    assert len(_patched_runtime["firewall_drop_in"]) == 1
+
+
+def test_netavark_firewall_drop_in_round_trip_is_idempotent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Direct round-trip test of the two helpers against a tmp_path
+    that stands in for ``/etc/containers/containers.conf.d/``.
+
+    The first install writes the file; a second call against the same
+    content is a no-op (returns ``None``). ``_remove`` deletes; calling
+    it again is a no-op. Mirrors the Quadlet-install semantics so a
+    re-run of ``deploy`` / ``upgrade`` doesn't churn the inode."""
+    fake_dir = tmp_path / "containers.conf.d"
+    fake_file = fake_dir / "zz-bty-firewall.conf"
+    monkeypatch.setattr(deploy_mod, "CONTAINERS_CONF_D_DIR", fake_dir)
+    monkeypatch.setattr(deploy_mod, "NETAVARK_FIREWALL_DROP_IN", fake_file)
+
+    assert deploy_mod._install_netavark_firewall_drop_in() == fake_file
+    assert fake_file.exists()
+    body = fake_file.read_text()
+    assert "[network]" in body and 'firewall_driver = "iptables"' in body
+    # Same content already on disk: no-op write, no return value.
+    assert deploy_mod._install_netavark_firewall_drop_in() is None
+    # Drift: an operator edited it. We own the path, so we overwrite.
+    fake_file.write_text("# drifted\n")
+    assert deploy_mod._install_netavark_firewall_drop_in() == fake_file
+    assert fake_file.read_text() == body
+
+    assert deploy_mod._remove_netavark_firewall_drop_in() == fake_file
+    assert not fake_file.exists()
+    # Already gone: idempotent.
+    assert deploy_mod._remove_netavark_firewall_drop_in() is None
 
 
 def test_main_dispatches_deploy_and_upgrade(
@@ -973,6 +1029,11 @@ def test_purge_quadlet_managed_as_root_stops_and_removes_units(
         deploy_mod,
         "_remove_quadlets",
         lambda: [deploy_mod.QUADLET_SYSTEM_DIR / "bty-web.container"],
+    )
+    monkeypatch.setattr(
+        deploy_mod,
+        "_remove_netavark_firewall_drop_in",
+        lambda: deploy_mod.NETAVARK_FIREWALL_DROP_IN,
     )
     real_exists = Path.exists
 
