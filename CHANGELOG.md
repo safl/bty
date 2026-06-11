@@ -9,6 +9,65 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.45.1] - 2026-06-11
+
+Technical-debt sweep across six rounds: 15 separate findings, none
+operator-visible on its own, all aimed at trimming the surface that
+had accumulated since the v0.40/v0.42 cleanups.
+
+### Fixed
+
+- **Dashboard's "TFTP daemon running" row** no longer cross-flags
+  a container deploy where bty-web has no visibility into the
+  bty-tftp sidecar (advisory blue ``i`` when ``running_in_container()``
+  + state is ``unknown``, kept as a warning on bare-metal).
+- **Container deploys with ``-e BTY_SERVER_PORT=...`` overrides**
+  now stay healthy: the Dockerfile's HEALTHCHECK probes
+  ``BTY_SERVER_PORT`` (the canonical name) instead of the legacy
+  ``BTY_WEB_PORT`` it had been pinning at the stale 8080 default.
+
+### Changed (cleanup)
+
+- **Legacy v0.42 env-alias table removed.** ``_LEGACY_ENV_ALIASES``
+  (mapping ``BTY_WEB_PORT`` / ``BTY_STATE_DIR`` / ``BTY_MAX_UPLOAD_BYTES``
+  / ... onto the canonical ``BTY_<SECTION>_<KEY>`` convention) was a
+  one-release migration shim; it had outlived its window (we're now
+  three releases past v0.42). Direct ``BTY_STATE_DIR`` /
+  ``BTY_SESSION_SECRET`` / ``BTY_BACKUP_MAX_PARALLEL`` fallback reads
+  in early-boot bootstrap paths are also gone. Operators upgrading
+  from a v0.41 envvars deploy still get the one-shot
+  ``bty-lab upgrade`` migration that translates envvars → bty.toml.
+- The container Dockerfile + tests now consistently use the
+  canonical names (``BTY_PATHS_STATE_DIR``, ``BTY_PATHS_BOOT_DIR``,
+  ``BTY_SERVER_HOST``, ``BTY_SERVER_PORT``).
+- ``docs/src/dependencies.md`` env-vars table rewritten for the
+  v0.45 bty.toml shape; the obsolete ``BTY_CATALOG_MAX_PARALLEL`` /
+  ``BTY_HASH_MAX_PARALLEL`` / ``BTY_MAX_UPLOAD_BYTES`` /
+  ``BTY_IMAGE_ROOT`` rows are gone.
+- Schema-rotation event summary in ``state.db`` (``system.schema.reset``)
+  no longer claims to preserve "images under BTY_IMAGE_ROOT"; it
+  describes the actual v0.40+ bytes-plane layout (withcache volume
+  / oras registry).
+- Stale comment cross-refs to v0.40-removed endpoints
+  (``/catalog/downloads``, ``/catalog/hashes``, ``/catalog/cache/{name}``,
+  ``PUT /images/{name}``) scrubbed from ``_events.py``, ``_app.py``,
+  ``_security.py``, and ``_backup.py``.
+- Em-dash-substitute ``--`` removed from inline prose comments in
+  ``oras.py``, ``_portability.py``, ``_releases.py``, ``_withcache.py``,
+  and ``_reqctx.py`` (per the repo's "no em-dashes, no ASCII --"
+  prose rule).
+
+### Defensive
+
+- ``bty.deploy._detect_host_addr``'s LAN-IP UDP probe gains an
+  explicit ``settimeout(5)`` matching the sibling probe in
+  ``bty.web._config``; a pathological resolver cannot hang
+  ``bty-lab init``.
+- ``bty.oras._urlopen_retry`` (the OCI token / manifest fetcher)
+  caps the response body at 10 MiB. A hostile registry returning
+  a 500 MiB "manifest" now raises ``OrasError`` instead of
+  consuming heap.
+
 ## [0.45.0] - 2026-06-11
 
 Oras catalog entries now warm withcache the same way https entries
