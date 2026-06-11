@@ -210,11 +210,11 @@
         if (!w.configured) {
             parts.push(badge("bg-secondary", "no withcache"));
         } else if (w.applicable === false) {
-            parts.push(badge("bg-secondary", "withcache n/a", "oras flows through bty-web, not withcache"));
+            parts.push(badge("bg-secondary", "withcache n/a", "no resolved URL for this scheme; only http(s) and oras catalog entries warm the cache"));
         } else if (w.hit) {
             parts.push(badge("bg-success", "cached"));
         } else {
-            parts.push(badge("bg-warning text-dark", "warming", "not cached yet; the check enqueued a background fetch -- check again shortly"));
+            parts.push(badge("bg-warning text-dark", "warming", "not cached yet; the check enqueued a background fetch, click again shortly"));
         }
         var ts = String(d.checked_at || "").replace("T", " ").replace("+00:00", "Z");
         return parts.join(" ")

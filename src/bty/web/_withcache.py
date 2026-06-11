@@ -50,12 +50,29 @@ def blob_url(withcache: str, origin: str) -> str:
     return f"{_base(withcache)}/b/{token}/{urllib.parse.quote(_basename(origin))}"
 
 
-def is_cached(withcache: str, origin: str, timeout: float = PROBE_TIMEOUT) -> bool:
+def is_cached(
+    withcache: str,
+    origin: str,
+    timeout: float = PROBE_TIMEOUT,
+    headers: dict[str, str] | None = None,
+) -> bool:
     """True if withcache already holds ``origin`` (HEAD -> 200). A miss (404),
-    an unreachable cache, or any error returns False -- the caller then serves
-    the artifact itself. The HEAD also warms an auto-fetch withcache."""
+    an unreachable cache, or any error returns False, the caller then serves
+    the artifact itself. The HEAD also warms an auto-fetch withcache.
+
+    ``headers`` (optional) attaches request headers to the HEAD. From v0.4.0
+    withcache forwards the client-supplied ``Authorization`` header into the
+    background-fetch worker, so a consumer that has just minted an OCI
+    bearer (the bty oras case: a fresh anon token against ghcr.io for the
+    catalog entry's resolved blob URL) can warm a token-gated origin in
+    one probe. Cache hits are still served bearer-free (cached bytes never
+    revisit the origin).
+    """
     url = blob_url(withcache, origin)
     req = urllib.request.Request(url, method="HEAD")
+    if headers:
+        for k, v in headers.items():
+            req.add_header(k, v)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             hit = bool(resp.status == 200)
@@ -66,7 +83,7 @@ def is_cached(withcache: str, origin: str, timeout: float = PROBE_TIMEOUT) -> bo
         _log.info("withcache HEAD %s -> %d (miss)", url, exc.code)
         return False
     except (urllib.error.URLError, OSError) as exc:
-        # Unreachable / timeout -> serve it ourselves. A misconfig
-        # signal worth surfacing, not silently swallowing.
-        _log.warning("withcache HEAD %s unreachable: %s -- serving origin", url, exc)
+        # Unreachable / timeout: serve it ourselves. A misconfig signal worth
+        # surfacing, not silently swallowing.
+        _log.warning("withcache HEAD %s unreachable: %s; serving origin", url, exc)
         return False

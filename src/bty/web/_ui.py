@@ -823,13 +823,23 @@ def register_ui_routes(
         reachable (+ how big), and does withcache already hold it?
 
         The withcache HEAD also warms an auto-fetch cache, so on a miss
-        this doubles as a one-click "start caching it" -- click again
+        this doubles as a one-click "start caching it": click again
         shortly and it flips to cached. Strictly point-in-time: the
         result can change at any moment (a network blip, or withcache
-        finishing a background fill). Never 500s on a dead origin -- an
+        finishing a background fill). Never 500s on a dead origin: an
         unreachable source is a normal result here (reported as
-        ``origin.reachable = false``), same as the catalog-add path."""
+        ``origin.reachable = false``), same as the catalog-add path.
+
+        For ``oras://`` srcs bty-web warms withcache against the
+        ``resolved_src`` blob URL the catalog row carries (populated
+        at import time by ``bty.oras.resolve_ref``). A fresh
+        anonymous OCI bearer is minted on every Check and sent on
+        the withcache HEAD; withcache forwards the ``Authorization``
+        into its background fetch worker (withcache 0.4.0+), so the
+        cache fills against a token-gated origin in one probe.
+        """
         from bty import flash as _flash
+        from bty import oras as _oras
         from bty.web import _withcache
 
         origin: dict[str, Any]
@@ -842,20 +852,46 @@ def register_ui_routes(
             }
         except Exception as exc:
             # FileNotFoundError (unreachable / 4xx / 5xx / oras resolve
-            # fail) or ValueError (unsupported scheme) -- both are
-            # "not deployable right now", not server errors.
+            # fail) or ValueError (unsupported scheme): both are "not
+            # deployable right now", not server errors.
             origin = {"reachable": False, "error": str(exc)}
 
         with _db.open_db(state_path) as conn:
             withcache_url = _settings_store.resolve_withcache_url(conn)
+            row = conn.execute(
+                "SELECT resolved_src FROM catalog_entries WHERE src = ?", (src,)
+            ).fetchone()
+        resolved_src = row["resolved_src"] if row else None
+
         if not withcache_url:
             withcache = {"configured": False}
-        elif src.startswith(("http://", "https://")):
+        elif resolved_src is None and src.startswith(("http://", "https://")):
+            # Pre-resolved-src catalog row (legacy schema or a fresh
+            # row whose import-time resolution failed). Fall back to
+            # treating ``src`` as the URL directly.
             hit = _withcache.is_cached(withcache_url, src)
             withcache = {"configured": True, "hit": hit, "warmed": not hit}
+        elif resolved_src is not None:
+            # New unified path: a stored canonical URL, possibly with
+            # a freshly-minted bearer for an oras-backed row.
+            headers: dict[str, str] | None = None
+            if src.startswith("oras://"):
+                try:
+                    ref = _oras.parse_ref(src)
+                    token = _oras.fetch_anonymous_token(ref.host, ref.repository)
+                    headers = {"Authorization": f"Bearer {token}"}
+                except _oras.OrasError as exc:
+                    # Token mint failed: HEAD anonymously. Withcache
+                    # records the miss but the worker fetch will 401;
+                    # operator sees "warming" until the next Check.
+                    headers = None
+                    origin.setdefault("warnings", []).append(f"token mint: {exc}")
+            hit = _withcache.is_cached(withcache_url, resolved_src, headers=headers)
+            withcache = {"configured": True, "hit": hit, "warmed": not hit}
         else:
-            # oras:// flows through bty-web's /images proxy (needs the
-            # bearer token); withcache only fronts plain-HTTP origins.
+            # ``file://`` or another scheme with no resolved_src: not
+            # applicable. Operators who want caching for these add an
+            # HTTPS or oras catalog entry pointing at the same bytes.
             withcache = {"configured": True, "applicable": False}
 
         return {
