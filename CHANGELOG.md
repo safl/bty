@@ -9,6 +9,54 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.45.0] - 2026-06-11
+
+Oras catalog entries now warm withcache the same way https entries
+always have. The plan-endpoint and the dashboard's Check button
+converge on one stored "canonical URL" per catalog row.
+
+### Added
+
+- New `catalog_entries.resolved_src` column carrying the canonical
+  plain-HTTPS URL the row actually fetches from. For https sources
+  this equals `src`; for `oras://` sources it's the registry blob
+  URL (`https://<host>/v2/<repo>/blobs/sha256:<digest>`) resolved
+  once at catalog import via `bty.oras.resolve_ref`. Pre-1.0
+  schema change; existing DBs auto-rotate per `_db.py`'s
+  schema-mismatch handler, so operators upgrading get a clean
+  schema and re-import (or auto-import re-seeds from
+  `catalog.toml`).
+- `_withcache.is_cached` gains an optional `headers=` kwarg
+  matching the new sibling withcache-0.4.0 contract.
+
+### Changed
+
+- **Dashboard "Check" button warms withcache for oras entries.**
+  Previously the Check on an `oras://` row reported
+  `withcache n/a` because withcache spoke plain HTTP only. The
+  Check now reads the row's `resolved_src`, mints a fresh
+  anonymous OCI bearer just-in-time, and HEADs withcache with
+  `Authorization: Bearer ...`. Withcache 0.4.0+ forwards that
+  header into its background fetch worker so a 401-gated blob
+  actually fills the cache on the first probe.
+- **PXE plan rewrite uses `resolved_src` for the cache key.**
+  On a cache hit the plan returns withcache's `/b/<token>/` URL
+  regardless of the original scheme; on a cold cache an https
+  origin still flows direct, while oras stays on bty-web's
+  `/images/{ref}` proxy (the live env can't carry an OCI bearer
+  per fetch). The `cache_decision` recorded for `/ui/events` now
+  distinguishes `served_from = withcache | origin | bty-web-proxy`.
+- The "withcache n/a" badge survives only for catalog rows with a
+  NULL `resolved_src` (file:// or a failed import).
+
+### Requires
+
+- The container deploy needs `ghcr.io/safl/withcache:0.4.0`
+  (or `:latest` once the release rolls). The Authorization
+  forwarding added there is what makes the oras warm-cache flow
+  actually fetch instead of 401ing anonymously. Stock
+  `bty-lab upgrade` pulls the latest tag.
+
 ## [0.44.3] - 2026-06-11
 
 Deploy hotfix: bty-web and withcache containers now start on hosts
