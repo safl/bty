@@ -20,8 +20,8 @@ endif
 .DEFAULT_GOAL := help
 
 .PHONY: help \
-        deps hooks test lint format format-check typecheck ci wheel tui \
-        media-deps build ipxe test-pxe \
+        deps hooks test lint format format-check typecheck ci wheel tui web \
+        media-deps build ipxe test-pxe test-usb-grow test-usb-ventoy \
         docker-build docker-run docker-clean \
         docs-html docs-pdf docs-serve \
         clean
