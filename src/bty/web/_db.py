@@ -156,9 +156,21 @@ CREATE TABLE IF NOT EXISTS machines (
 -- the operator-supplied ``sha_url`` adjacent to an https entry, or
 -- the digest baked into an oras blob layer). May stay NULL for any
 -- entry whose publisher did not pin a sha.
+--
+-- ``resolved_src`` is the plain-HTTPS URL the catalog row actually
+-- fetches from. For ``http(s)://`` srcs this equals ``src``. For
+-- ``oras://`` srcs this is the registry blob URL (e.g.
+-- ``https://ghcr.io/v2/<repo>/blobs/sha256:<digest>``) that bty-web
+-- resolves once at catalog import via ``bty.oras.resolve_ref``;
+-- everything downstream (the withcache HEAD probe, the PXE plan's
+-- ``serve_url`` rewrite, the ``/images/{ref}`` proxy fallback) keys
+-- on this URL so withcache stays oras-blind. NULL only for legacy
+-- rows that pre-date import-time resolution (a fresh schema never
+-- writes NULL).
 CREATE TABLE IF NOT EXISTS catalog_entries (
     bty_image_ref  TEXT PRIMARY KEY,
     src            TEXT NOT NULL UNIQUE,
+    resolved_src   TEXT,
     disk_image_sha TEXT,
     name           TEXT NOT NULL,
     sha_url        TEXT,

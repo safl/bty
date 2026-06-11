@@ -2354,12 +2354,13 @@ def create_app(
                 try:
                     conn.execute(
                         "INSERT INTO catalog_entries "
-                        "(bty_image_ref, src, disk_image_sha, name, sha_url, "
+                        "(bty_image_ref, src, resolved_src, disk_image_sha, name, sha_url, "
                         "format, size_bytes, description, added_at) "
-                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                         (
                             bty_image_ref,
                             body.image_url,
+                            resolved.blob_url,
                             sha256,
                             name,
                             None,
@@ -2460,11 +2461,12 @@ def create_app(
             try:
                 conn.execute(
                     "INSERT INTO catalog_entries "
-                    "(bty_image_ref, src, disk_image_sha, name, sha_url, "
+                    "(bty_image_ref, src, resolved_src, disk_image_sha, name, sha_url, "
                     "format, size_bytes, description, added_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         bty_image_ref,
+                        body.image_url,
                         body.image_url,
                         sha256,
                         name,
@@ -2515,8 +2517,8 @@ def create_app(
     def list_catalog_entries() -> list[dict[str, Any]]:
         with _db.open_db(state_path) as conn:
             rows = conn.execute(
-                "SELECT bty_image_ref, src, disk_image_sha, name, sha_url, format, size_bytes, "
-                "description, added_at "
+                "SELECT bty_image_ref, src, resolved_src, disk_image_sha, name, sha_url, "
+                "format, size_bytes, description, added_at "
                 "FROM catalog_entries ORDER BY added_at"
             ).fetchall()
         return [dict(row) for row in rows]
@@ -2648,16 +2650,26 @@ def create_app(
                 sha = entry.sha256
                 fmt = entry.format
                 size_bytes = entry.size_bytes
-                if sha is None and entry.src.startswith("oras://"):
+                # Default: a plain HTTPS catalog entry is fetchable as-is;
+                # oras entries need a manifest walk to produce the canonical
+                # registry blob URL, and a ``file://`` entry has no URL
+                # withcache or the PXE plan would ever talk to (the local
+                # path is the path).
+                resolved_src: str | None = (
+                    entry.src if entry.src.startswith(("http://", "https://")) else None
+                )
+                if entry.src.startswith("oras://"):
                     # Best-effort oras resolution: try to pin sha + size
-                    # from the registry manifest. On failure (offline /
-                    # registry unreachable / private registry needing
-                    # auth) we still insert the entry, just without
-                    # the sha+size pre-filled. The row is bindable via
-                    # ``bty_image_ref`` even without sha, and the first
-                    # cache-fetch will populate ``disk_image_sha`` then.
-                    # Strict-fail mode would refuse offline imports
-                    # which is operator-hostile for sealed environments.
+                    # AND populate ``resolved_src`` with the canonical
+                    # registry blob URL so withcache (which is oras-blind)
+                    # can warm against it. On failure (offline / registry
+                    # unreachable / private registry needing auth) we still
+                    # insert the entry, just without ``resolved_src`` /
+                    # sha / size pre-filled. The row is bindable via
+                    # ``bty_image_ref`` even without sha, and a later
+                    # ``Check`` / re-import will fill in what's missing.
+                    # Strict-fail mode would refuse offline imports which
+                    # is operator-hostile for sealed environments.
                     try:
                         resolved = _oras.resolve_ref(entry.src)
                     except _oras.OrasError as exc:
@@ -2665,7 +2677,9 @@ def create_app(
                             {"name": entry.name, "error": f"oras (kept without sha): {exc}"}
                         )
                     else:
-                        sha = resolved.digest.removeprefix("sha256:")
+                        resolved_src = resolved.blob_url
+                        if sha is None:
+                            sha = resolved.digest.removeprefix("sha256:")
                         if size_bytes is None:
                             size_bytes = resolved.size
                 try:
@@ -2676,12 +2690,13 @@ def create_app(
                 try:
                     conn.execute(
                         "INSERT INTO catalog_entries "
-                        "(bty_image_ref, src, disk_image_sha, name, sha_url, "
+                        "(bty_image_ref, src, resolved_src, disk_image_sha, name, sha_url, "
                         "format, size_bytes, description, added_at) "
-                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                         (
                             bty_image_ref,
                             entry.src,
+                            resolved_src,
                             sha,
                             entry.name,
                             None,
