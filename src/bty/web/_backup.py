@@ -1,12 +1,12 @@
 """Scheduled + on-demand backup of the operator-owned state.
 
 A backup is exactly what :func:`bty.web._portability.export_bundle`
-produces -- v0.33.2+: a metadata-only bundle (just
-``inventory.json``) carrying the per-machine hardware identity
-(mac + lshw + known_disks). No image bytes; image files live in
-``BTY_IMAGE_ROOT`` and are either still on disk or re-fetchable
-from the catalog. The bundle lands as a directory under
-:data:`backups_root`. The manager wires this primitive into the
+produces, a metadata-only bundle (just ``inventory.json``) carrying
+the per-machine hardware identity (mac + lshw + known_disks). No
+image bytes: v0.40+ took bty-web out of the bytes plane, so image
+artifacts live in withcache's volume or oras at the registry and
+are re-fetchable from the catalog. The bundle lands as a directory
+under :data:`backups_root`. The manager wires this primitive into the
 same per-key worker-pool model :class:`_BaseAsyncManager` uses for
 downloads + hashes + release fetches, so the worker indicator +
 the Backups page (``/ui/backups``) treat backups as just another
