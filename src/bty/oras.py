@@ -75,10 +75,10 @@ from typing import Any
 
 ORAS_SCHEME = "oras://"
 
-# Transient HTTP statuses worth retrying: 429 (rate limit -- common on
+# Transient HTTP statuses worth retrying: 429 (rate limit, common on
 # GHCR / Docker Hub under load) plus the gateway/server-blip 5xx range.
 # Everything else (401/403 auth, 404 not-found, other 4xx) is permanent
-# and raised immediately -- retrying would just stall the flash.
+# and raised immediately, since retrying would just stall the flash.
 _RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
 _RETRY_ATTEMPTS = 3
 _RETRY_BACKOFF = 0.5  # seconds; exponential: 0.5, 1.0 between attempts
@@ -297,7 +297,7 @@ def fetch_anonymous_token(host: str, repository: str, *, timeout: float = 30.0) 
     try:
         return _token_from_endpoint(conv_url, host, repository, timeout=timeout)
     except (OSError, json.JSONDecodeError, ValueError, OrasError) as conv_exc:
-        # Convention failed -- try spec discovery before giving up.
+        # Convention failed; try spec discovery before giving up.
         challenge = _discover_bearer_challenge(host, timeout=timeout)
         realm = challenge.get("realm")
         if realm:
@@ -310,7 +310,7 @@ def fetch_anonymous_token(host: str, repository: str, *, timeout: float = 30.0) 
                     f"oras token fetch failed for {host}/{repository} via discovered "
                     f"realm {realm}: {exc}"
                 ) from exc
-        # No usable discovery -- surface the original conventional error.
+        # No usable discovery; surface the original conventional error.
         raise OrasError(
             f"oras token fetch failed for {host}/{repository}: {conv_exc}"
         ) from conv_exc
@@ -368,7 +368,7 @@ def pick_image_layer(manifest: dict[str, Any]) -> dict[str, Any]:
     layers = manifest.get("layers")
     if not isinstance(layers, list) or not layers:
         # A multi-arch image *index* (``manifests`` instead of
-        # ``layers``) is a common cause -- a rolling tag that resolves
+        # ``layers``) is a common cause: a rolling tag that resolves
         # to an OCI index rather than a single artifact manifest. Name
         # it so the operator points at a concrete manifest/digest
         # instead of staring at "no layers".
