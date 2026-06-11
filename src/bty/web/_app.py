@@ -1067,21 +1067,22 @@ def create_app(
         if policy in ("bty-flash-always", "bty-flash-once") and ref:
             target_disk_serial = machine.get("target_disk_serial")
             # One DB connection for the whole flash-plan resolution: the
-            # catalog binding (name/format/src) plus the withcache lookup,
-            # rather than an open-per-field on this hot path. is_cached's
-            # network HEAD stays OUTSIDE the connection (below).
+            # catalog binding (name/format/src/resolved_src) plus the
+            # withcache lookup, rather than an open-per-field on this hot
+            # path. is_cached's network HEAD stays OUTSIDE the connection.
             with _db.open_db(state_path) as conn:
                 _b = conn.execute(
-                    "SELECT name, format, src FROM catalog_entries WHERE bty_image_ref = ?",
+                    "SELECT name, format, src, resolved_src FROM catalog_entries "
+                    "WHERE bty_image_ref = ?",
                     (str(ref),),
                 ).fetchone()
                 image_name = str(_b["name"]) if _b and _b["name"] else None
                 fmt = str(_b["format"]) if _b and _b["format"] else None
                 src = str(_b["src"]) if _b and _b["src"] else None
-                is_http_src = bool(src and src.startswith(("http://", "https://")))
+                resolved_src = str(_b["resolved_src"]) if _b and _b["resolved_src"] else None
                 withcache_url = (
                     _settings_store.resolve_withcache_url(conn)
-                    if image_name is not None and target_disk_serial and is_http_src
+                    if image_name is not None and target_disk_serial and resolved_src
                     else None
                 )
             if image_name is not None and target_disk_serial:
@@ -1098,31 +1099,53 @@ def create_app(
                 else:
                     url_name = image_name
                 image_name_encoded = urllib.parse.quote(url_name, safe="")
-                # ORAS catalog entries still flow through bty-web's /images
-                # proxy (oras blob fetch needs the bearer token bty-web
-                # holds; withcache speaks plain HTTP).
+                # Default fallback: bty-web's /images proxy. Used for
+                # oras catalog entries when withcache is unconfigured or
+                # cold (bty-web does the oras dance + stream-proxies the
+                # bytes), and as the catch-all for any catalog row whose
+                # ``resolved_src`` is NULL (legacy schema / failed import).
+                # An https origin is reset back to its direct URL just
+                # below; oras stays on the proxy by design (the live env
+                # can't carry a fresh OCI bearer per fetch).
                 image_url = f"{base}/images/{ref}/{image_name_encoded}"
-                if src is not None and is_http_src:
-                    # HTTPS source: bty-web is out of the bytes path. Prefer a
-                    # configured withcache (resolved above) when it already
-                    # holds the blob -- the is_cached HEAD also warms
-                    # withcache's auto-fetch for the next boot. Otherwise hand
-                    # the live env the origin URL directly; withcache 404s on a
-                    # miss anyway, so going through it on cold cache would fail.
-                    if withcache_url and _withcache.is_cached(withcache_url, src):
-                        image_url = _withcache.blob_url(withcache_url, src)
+                is_oras = src is not None and src.startswith("oras://")
+                if resolved_src is not None:
+                    # New unified path: a canonical plain-HTTPS URL the
+                    # catalog row stored at import time (or the same URL
+                    # as ``src`` for an http(s) entry). Mint a fresh
+                    # OCI bearer for oras-resolved entries so withcache
+                    # 0.4.0+ can forward it into the background fetch
+                    # worker; HTTPS entries probe anonymously.
+                    head_headers: dict[str, str] | None = None
+                    if is_oras:
+                        try:
+                            ref_oras = _oras.parse_ref(str(src))
+                            token = _oras.fetch_anonymous_token(ref_oras.host, ref_oras.repository)
+                            head_headers = {"Authorization": f"Bearer {token}"}
+                        except _oras.OrasError:
+                            head_headers = None
+                    if withcache_url and _withcache.is_cached(
+                        withcache_url, resolved_src, headers=head_headers
+                    ):
+                        image_url = _withcache.blob_url(withcache_url, resolved_src)
                         cache_hit = True
-                    else:
-                        image_url = src
+                    elif not is_oras:
+                        # Cold cache / no cache for an https origin: let the
+                        # live env fetch direct, bty-web is out of the bytes
+                        # path. For oras the default `/images/{ref}` proxy
+                        # stays in place (live env has no bearer).
+                        image_url = resolved_src
                         cache_hit = False
-                    # Record the decision so the operator can see, in
-                    # /ui/events + the log, whether the boot streamed
-                    # from withcache or origin (and whether a configured
-                    # cache is even being consulted).
+                    else:
+                        cache_hit = False
                     cache_decision = {
                         "configured": bool(withcache_url),
                         "hit": cache_hit if withcache_url else None,
-                        "served_from": "withcache" if cache_hit else "origin",
+                        "served_from": (
+                            "withcache"
+                            if cache_hit
+                            else ("origin" if not is_oras else "bty-web-proxy")
+                        ),
                     }
                 plan = {
                     "mode": "flash",
