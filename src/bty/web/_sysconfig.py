@@ -68,6 +68,30 @@ class DaemonStatus:
         return self.state == "active"
 
 
+def running_in_container() -> bool:
+    """``True`` when bty-web is itself running inside a podman/docker
+    container.
+
+    Both runtimes drop a sentinel into the container's filesystem
+    that's missing on the host:
+
+    * ``/run/.containerenv`` (podman, OCI image-spec)
+    * ``/.dockerenv`` (docker)
+
+    The check is filesystem-only, so it's cheap and works without
+    the ``container`` env var (which podman doesn't propagate to
+    Quadlet-launched units by default).
+
+    Used by the dashboard's TFTP health row: in a container deploy
+    bty-web can't see the bty-tftp sidecar's dnsmasq (different
+    mount namespace; the sidecar runs on host networking but is a
+    separate container), so a "service unknown" reading there is
+    expected, not a failure. The Netboot page's network probe is
+    the canonical signal in that mode.
+    """
+    return Path("/run/.containerenv").exists() or Path("/.dockerenv").exists()
+
+
 def tftp_status() -> DaemonStatus:
     """Return the ``dnsmasq.service`` state.
 
