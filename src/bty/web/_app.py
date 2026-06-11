@@ -1381,12 +1381,13 @@ def create_app(
         return state.to_dict()
 
     # ---------- backups -----------------------------------------
-    # Mirrors the /catalog/downloads + /catalog/hashes + /boot/releases
-    # shape: GET lists the active jobs (queued + running + recent
-    # terminal states, same as the other managers' raw list); POST
-    # enqueues; DELETE cancels by backup_id. ``/ui/backups`` filters
-    # to queued + running only -- terminal rows evict from the UI on
-    # completion, and history lives in the events log.
+    # Mirrors the /boot/releases shape (the only other worker-pool
+    # manager left after the v0.40 catalog/download + hash cleanup):
+    # GET lists active jobs (queued + running + recent terminal
+    # states); POST enqueues; DELETE cancels by backup_id.
+    # ``/ui/backups`` filters to queued + running only; terminal
+    # rows evict from the UI on completion, and history lives in
+    # the events log.
 
     @app.get("/workers/backups", dependencies=[Depends(require_auth)])
     async def list_backups() -> dict[str, Any]:
@@ -2597,10 +2598,11 @@ def create_app(
         through :func:`bty.catalog.load_source` so the same client-
         side fetcher ``bty`` uses applies here.
 
-        **Metadata-only**. Bytes are NOT fetched at import time; each
-        imported entry surfaces in ``/images`` as ``cached=False``.
-        The operator's "Fetch" button (or ``POST /catalog/downloads``)
-        materialises bytes on demand.
+        **Metadata-only**. Bytes are NOT fetched at import time. From
+        v0.40 the catalog-Download manager + the per-entry Fetch
+        button are gone; bytes materialise on demand at flash time
+        via the withcache warm-fetch path (oras + https) or bty-web's
+        own ``/images/{ref}`` proxy on a cold cache.
 
         Per-entry behaviour:
 
