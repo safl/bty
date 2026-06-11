@@ -3,7 +3,7 @@
 The cookie is a Starlette ``SessionMiddleware``-signed payload; we don't try to
 decode it. Tests exercise the visible behaviour: ``/ui/login`` gates mutation
 routes on the admin password (``$BTY_ADMIN_PASSWORD`` overrides; the literal
-``"bty"`` is the well-known default when unset), the cookie carries authed
+``"bty-lab"`` is the well-known default when unset), the cookie carries authed
 state across requests, and missing / wrong cookies 401.
 
 Auth is ALWAYS on -- there is no "open instance" mode. The well-known

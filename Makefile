@@ -139,7 +139,7 @@ endif
 #   make web BTY_WEB_PORT=8088        -- pick a different port
 #   make web STATE_DIR=/tmp/foo       -- state somewhere else
 #
-# Auth is always on (v0.41.3+); the default password is ``bty``
+# Auth is always on (v0.41.3+); the default password is ``bty-lab``
 # when ``BTY_ADMIN_PASSWORD`` is unset. Pass an env var on the
 # command line to override (``make web BTY_ADMIN_PASSWORD=hunter2``).
 .PHONY: web
@@ -147,7 +147,7 @@ STATE_DIR ?= /tmp/bty-web-dev
 BTY_WEB_PORT ?= 8080
 web:
 	@mkdir -p $(STATE_DIR)/boot $(STATE_DIR)/backups
-	@echo "bty-web -> http://localhost:$(BTY_WEB_PORT)/ui (login: bty)"
+	@echo "bty-web -> http://localhost:$(BTY_WEB_PORT)/ui (login: bty-lab)"
 	@echo "  state dir: $(STATE_DIR)"
 	@echo "  Ctrl-C to stop."
 	BTY_PATHS_STATE_DIR=$(STATE_DIR) \
