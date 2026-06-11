@@ -9,6 +9,28 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.44.2] - 2026-06-11
+
+Live-env hotfix: r8125 module-loading shape on Secure-Boot hardware,
+plus a small at-the-console triage tooling bump.
+
+### Fixed
+
+- **Live ISO on Secure-Boot hardware now keeps the NIC.** The previous
+  `zz-bty-r8125-prefer.conf` aliased the RTL8125 modalias to the
+  unsigned DKMS r8125 module, which the kernel rejects under
+  `[integrity]` lockdown with EKEYREJECTED. With no fallback, the NIC
+  stayed dark for the whole boot (observed on ASUS PN51-E1 stock
+  firmware). The new shape is `softdep r8169 pre: r8125`: udev still
+  loads the signed in-tree r8169, and r8125 is attempted as a soft
+  pre-dep so it can still win the bind on a non-Secure-Boot G10.
+
+### Added
+
+- `pciutils` and `usbutils` baked into the live env so an operator at
+  the console has `lspci -k` and `lsusb -t` for "why isn't this
+  hardware visible?" triage without falling back to a /sys walk.
+
 ## [0.44.1] - 2026-06-11
 
 Maintenance release: technical-debt sweep, no behaviour change for
