@@ -14,11 +14,11 @@ Bundle layout::
 
 ``inventory.json`` carries ``bty_export_version`` (currently 3).
 The import refuses anything else. Pre-1.0 policy: bundles don't
-migrate across major-format bumps -- regenerate on the source
+migrate across major-format bumps; regenerate on the source
 release. The name reflects what the file actually is: a machine
 inventory (mac + lshw + known_disks), distinct from the catalog
-``manifest`` (``${BTY_STATE_DIR}/catalog.toml`` -- a different
-file with a different schema).
+``manifest`` (``<state_dir>/catalog.toml``; a different file with
+a different schema).
 
 Why metadata-only: a routine backup runs daily on a cadence, so the
 size matters. Earlier releases (v0.31.0 through v0.33.1) shipped
@@ -100,9 +100,8 @@ class ImportSummary:
 class BundleVersionMismatch(ValueError):
     """Raised by :func:`import_bundle` when the bundle's
     ``bty_export_version`` doesn't match the running code's
-    expected value. Pre-1.0 policy: bundles don't migrate
-    across major-format bumps -- regenerate on the source
-    release."""
+    expected value. Pre-1.0 policy: bundles don't migrate across
+    major-format bumps; regenerate on the source release."""
 
 
 def export_bundle(
@@ -116,12 +115,11 @@ def export_bundle(
     Reads minimal machine records (mac + hw_lshw + known_disks +
     their timestamps) from ``state_path`` and writes them to
     ``dest/inventory.json``. ``dest`` is created if absent. No
-    image bytes are touched -- this is the routine-backup
-    primitive.
+    image bytes are touched; this is the routine-backup primitive.
 
     ``known_disks`` and ``hw_lshw`` live in sqlite as JSON-encoded
     TEXT; ``_decode_machine`` decodes them on the way out so the
-    inventory carries native objects/arrays rather than re-encoded
+    inventory carries native objects + arrays rather than re-encoded
     strings. Operators can ``jq`` it without an extra decode step.
     """
     dest.mkdir(parents=True, exist_ok=True)
@@ -196,7 +194,7 @@ def import_bundle(
             f"bundle bty_export_version={ver!r}, expected {_EXPORT_VERSION!r}. "
             f"v0.33.2 introduced a metadata-only bundle format; older bundles "
             f"(v1: pre-v0.31.0, v2: v0.31.0..v0.33.1 with image bytes) aren't "
-            f"migratable -- regenerate on the source release."
+            f"migratable; regenerate on the source release."
         )
 
     n_m = 0
