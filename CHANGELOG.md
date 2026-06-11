@@ -9,6 +9,53 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.46.0] - 2026-06-11
+
+bty stops publishing its own ``catalog.toml`` mirror and consumes
+the upstream image-builder's auto-generated catalog directly.
+Default catalog source flips from ``safl/bty`` (a 7-variant hand-
+maintained mirror) to ``safl/nosi`` (the 16-variant canonical
+catalog that nosi's CI publishes on every release).
+
+### Added
+
+- ``Settings > Upstream sources`` gains a separate
+  ``Catalog repo`` field (default ``safl/nosi``) alongside the
+  existing ``Netboot repo`` field (default ``safl/bty``). The
+  two are independent: an operator can fork bty for custom
+  netboot artifacts while still pulling the upstream catalog,
+  and vice versa.
+
+### Changed (operator-visible)
+
+- **Default catalog is now nosi's**, so the variants nosi
+  publishes but bty's stale mirror did not (Proxmox, the lxc
+  variants, ubuntu-2604-wsl, ubuntu-2604-docker, rpios-13
+  headless + desktop, debian-13-desktop) appear out of the box.
+- **Settings page**: the ``Release repo`` field is gone; in its
+  place the two new fields above. An operator who had pinned the
+  legacy ``upstream.release_repo`` override needs to re-pin
+  through the two new knobs (pre-1.0 break-freely, no migration
+  shim).
+
+### Removed
+
+- ``scripts/generate_catalog_toml.py`` and
+  ``scripts/starter_catalog.toml.in``. The CI step that ran them
+  and the ``catalog.toml`` release-asset upload. Bty's release
+  pages drop one asset; operators pointing
+  ``--catalog https://github.com/safl/bty/releases/latest/download/catalog.toml``
+  at the bty release switch to
+  ``https://github.com/safl/nosi/releases/latest/download/catalog.toml``.
+- ``_settings_store.KEY_RELEASE_REPO`` /
+  ``resolve_release_repo`` / ``default_release_repo`` and the
+  ``_releases.DEFAULT_REPO`` alias. Their replacements are
+  ``KEY_NETBOOT_REPO`` / ``KEY_CATALOG_REPO`` /
+  ``resolve_netboot_repo`` / ``resolve_catalog_repo`` /
+  ``default_netboot_repo`` / ``default_catalog_repo``, with
+  ``DEFAULT_NETBOOT_REPO`` and ``DEFAULT_CATALOG_REPO`` as the
+  built-in constants.
+
 ## [0.45.1] - 2026-06-11
 
 Technical-debt sweep across six rounds: 15 separate findings, none
