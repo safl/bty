@@ -3,7 +3,7 @@ layers: client-IP normalisation and MAC canonicalisation.
 
 These live in their own module rather than in ``_app`` because ``_app``
 imports ``_ui`` (to register the UI routes), so ``_ui`` can't import
-``_app`` at module load -- the two would form an import cycle. A neutral
+``_app`` at module load (the two would form an import cycle). A neutral
 low-level module both can import breaks the cycle without the copy-paste
 the two layers used to carry.
 """
@@ -20,7 +20,7 @@ def client_ip(request: Request) -> str | None:
     """Return the request's client IP, normalised for storage.
 
     Wraps ``request.client.host`` in ``_events_log.normalize_ip``
-    so a v4-mapped-v6 address (``::ffff:192.168.1.5`` -- the form
+    so a v4-mapped-v6 address (``::ffff:192.168.1.5``, the form
     Starlette returns when bty-web binds on ``::`` and a v4 client
     connects) collapses to the bare v4 form. Without this, the
     same client shows up as two distinct rows in the audit log.
