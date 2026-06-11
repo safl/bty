@@ -1066,9 +1066,25 @@ def create_app(
         cache_decision: dict[str, Any] | None = None
         if policy in ("bty-flash-always", "bty-flash-once") and ref:
             target_disk_serial = machine.get("target_disk_serial")
-            image_name = _flash_target_for_ref(str(ref))
+            # One DB connection for the whole flash-plan resolution: the
+            # catalog binding (name/format/src) plus the withcache lookup,
+            # rather than an open-per-field on this hot path. is_cached's
+            # network HEAD stays OUTSIDE the connection (below).
+            with _db.open_db(state_path) as conn:
+                _b = conn.execute(
+                    "SELECT name, format, src FROM catalog_entries WHERE bty_image_ref = ?",
+                    (str(ref),),
+                ).fetchone()
+                image_name = str(_b["name"]) if _b and _b["name"] else None
+                fmt = str(_b["format"]) if _b and _b["format"] else None
+                src = str(_b["src"]) if _b and _b["src"] else None
+                is_http_src = bool(src and src.startswith(("http://", "https://")))
+                withcache_url = (
+                    _settings_store.resolve_withcache_url(conn)
+                    if image_name is not None and target_disk_serial and is_http_src
+                    else None
+                )
             if image_name is not None and target_disk_serial:
-                fmt = _flash_format_for_ref(str(ref))
                 # The client detects image format from the URL name's
                 # extension. An oras title ("nosi fedora-sysdev (x86_64,
                 # rolling)") has none, so the flash gets rejected as
@@ -1086,16 +1102,13 @@ def create_app(
                 # proxy (oras blob fetch needs the bearer token bty-web
                 # holds; withcache speaks plain HTTP).
                 image_url = f"{base}/images/{ref}/{image_name_encoded}"
-                src = _flash_src_for_ref(str(ref))
-                if src and src.startswith(("http://", "https://")):
+                if src is not None and is_http_src:
                     # HTTPS source: bty-web is out of the bytes path. Prefer a
-                    # configured withcache when it already holds the blob (the
-                    # is_cached HEAD also warms withcache's auto-fetch for the
-                    # next boot). Otherwise hand the live env the origin URL
-                    # directly -- withcache 404s on a miss anyway, so going
-                    # through it on cold cache would just fail.
-                    with _db.open_db(state_path) as conn:
-                        withcache_url = _settings_store.resolve_withcache_url(conn)
+                    # configured withcache (resolved above) when it already
+                    # holds the blob -- the is_cached HEAD also warms
+                    # withcache's auto-fetch for the next boot. Otherwise hand
+                    # the live env the origin URL directly; withcache 404s on a
+                    # miss anyway, so going through it on cold cache would fail.
                     if withcache_url and _withcache.is_cached(withcache_url, src):
                         image_url = _withcache.blob_url(withcache_url, src)
                         cache_hit = True
@@ -1654,32 +1667,9 @@ def create_app(
             return None
         return str(row["name"])
 
-    def _flash_format_for_ref(ref: str) -> str | None:
-        """The catalog entry's stored ``format`` for a ref, or None.
-
-        The flash plan passes this to the client: the image URL's name
-        segment can be a descriptive title (e.g. an oras image's
-        ``nosi fedora-sysdev (x86_64, rolling)``) with no file
-        extension, so the client can't detect the format from the URL
-        alone and would reject the flash as "format not recognised".
-        """
-        with _db.open_db(state_path) as conn:
-            row = conn.execute(
-                "SELECT format FROM catalog_entries WHERE bty_image_ref = ?",
-                (ref,),
-            ).fetchone()
-        return str(row["format"]) if row and row["format"] else None
-
-    def _flash_src_for_ref(ref: str) -> str | None:
-        """The catalog entry's origin ``src`` for a ref, or None. Used to build
-        the withcache serve URL, since withcache keys on the origin URL, not on
-        bty's ``/images`` URL."""
-        with _db.open_db(state_path) as conn:
-            row = conn.execute(
-                "SELECT src FROM catalog_entries WHERE bty_image_ref = ?",
-                (ref,),
-            ).fetchone()
-        return str(row["src"]) if row and row["src"] else None
+    # The flash plan resolves name/format/src in one query inline (see
+    # pxe_plan); ``_flash_target_for_ref`` is kept as a single-field
+    # helper because the iPXE ``/pxe`` handler needs only the name.
 
     @app.api_route(
         "/images/{key}",
