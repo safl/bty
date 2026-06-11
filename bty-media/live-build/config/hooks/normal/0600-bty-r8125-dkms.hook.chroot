@@ -17,26 +17,35 @@
 # project.
 #
 # Safety invariant: the bake must NOT degrade hardware that
-# doesn't have an RTL8125-family NIC. Specifically:
+# doesn't have an RTL8125-family NIC, AND must not silently lose
+# the NIC on a Secure-Boot target where the unsigned DKMS module
+# is rejected by kernel lockdown. The mechanism used here is a
+# softdep (see the heredoc lower down), NOT a modalias rewrite.
+# Specifically:
 #
-# * Machines with RTL8168 / RTL8169 (older Realtek 1GbE): the
-#   in-tree r8169 driver continues to claim them. Our modprobe
-#   alias scopes r8125-preference to PCI device IDs 0x8125 and
-#   0x8126 only; r8169's other device IDs aren't touched.
+# * Machines with RTL8168 / RTL8169 (older Realtek 1GbE): r8125
+#   doesn't register for those device IDs even when loaded, so
+#   r8169 still binds them. No impact.
 # * Machines with Intel / Broadcom / Mellanox / etc.: neither
 #   r8125 nor r8169 would auto-load. No impact.
-# * Machines with the RTL8125 family BUT where r8169 works fine:
-#   the alias forces r8125 instead. Operator can override by
-#   masking /etc/modprobe.d/zz-bty-r8125-prefer.conf:
+# * Machines with the RTL8125 family on a Secure-Boot-DISABLED
+#   kernel: r8125 loads as a soft pre-dep of r8169, claims the
+#   RTL8125 device, r8169 has nothing left to bind. r8125 wins.
+# * Machines with the RTL8125 family on a Secure-Boot-ENABLED
+#   kernel (e.g. ASUS PN51-E1 stock firmware): r8125 is rejected
+#   by ``[integrity]`` lockdown with EKEYREJECTED, the softdep
+#   failure is logged and non-fatal, r8169 loads and binds the
+#   RTL8125 device. NIC works; some Realtek-2.5GbE-specific perf
+#   knobs in r8125 are lost but PXE/HTTP throughput is fine.
+#
+# Operator override to force r8169 even where r8125 would load:
 #       ln -s /dev/null /etc/modprobe.d/zz-bty-r8125-prefer.conf
-#       update-initramfs -u
-#   then on next boot r8169 wins by alphabetical-modalias default.
+#       update-initramfs -u && reboot
 #
 # The awesometic DKMS install script ships a flat
 # ``blacklist r8169`` modprobe entry that would impact non-2.5GbE
-# Realtek hardware (RTL8168 / RTL8169). The end-of-hook
-# ``rm -f`` removes that file; our zz-bty-r8125-prefer.conf takes
-# its place with the narrower device-id-scoped alias.
+# Realtek hardware. The end-of-hook ``rm -f`` removes that file;
+# our zz-bty-r8125-prefer.conf takes its place.
 
 set -eu
 
@@ -103,24 +112,42 @@ depmod -a "${KVER}"
 # Realtek hardware (RTL8168 / RTL8169) keeps using r8169.
 rm -f /etc/modprobe.d/r8125-dkms.conf /etc/modprobe.d/blacklist-r8169.conf
 
-# Narrow override: for RTL8125 (PCI device 0x8125, including the
-# B revision) and RTL8126 (0x8126), load r8125 instead of r8169.
-# Every other Realtek device ID falls through to r8169 as before.
-# The modalias wildcards match any subvendor/subdevice/class to
-# cover OEM-rebadged cards (vendor inside the NIC reports the
-# same device ID; only the subvendor differs).
+# Prefer r8125 for RTL8125-family devices via a softdep, NOT a
+# modalias rewrite. softdep is the right tool here because:
+#
+# 1. A ``/etc/modprobe.d`` alias REPLACES the kmod ``modules.alias``
+#    matches for that modalias; it doesn't union with them. So an
+#    alias-based override leaves no fallback if the named module
+#    fails to load.
+# 2. The DKMS-built r8125.ko.xz is UNSIGNED. On a target with UEFI
+#    Secure Boot enabled the kernel runs in ``[integrity]``
+#    lockdown and rejects unsigned modules with EKEYREJECTED
+#    (``modprobe: Key was rejected by service``). udev's
+#    auto-load then has nothing to bind -- NIC dark, PXE flash
+#    fails before bty ever appears. Observed on ASUS PN51-E1
+#    (RTL8125B + Secure Boot on by default in firmware).
+#
+# ``softdep r8169 pre: r8125`` keeps the kmod modalias resolution
+# pointed at r8169 (so udev still picks an in-tree, signed module)
+# and asks modprobe to load r8125 first as a *soft* pre-dep. Soft
+# dep failures are non-fatal: on a Secure-Boot box r8125 is
+# rejected, the failure is logged, and r8169 still loads and binds
+# the RTL8125 device. On a non-Secure-Boot G10 r8125 loads first,
+# claims the RTL8125B device, and r8169 has nothing to bind.
+# Other Realtek device IDs (RTL8168 / RTL8169 1GbE family) are
+# unaffected -- r8169 still wins outright since r8125 doesn't
+# register for those device IDs even when loaded.
+#
+# Operator override to force r8169-only (e.g. when r8125 misbehaves
+# on a specific board):
+#   ln -s /dev/null /etc/modprobe.d/zz-bty-r8125-prefer.conf
+#   update-initramfs -u && reboot
 cat > /etc/modprobe.d/zz-bty-r8125-prefer.conf <<'EOF'
 # bty: prefer the out-of-tree r8125 driver for the RTL8125 / B and
-# RTL8126 2.5GbE family ONLY. Other Realtek device IDs fall
-# through to the in-tree r8169.
-#
-# Targets the GMKTec NUCBOX G10 (Ryzen 5) where the upstream
-# Realtek r8125 reliably brings the link up but the in-tree
-# r8169 in kernel 6.13+ sometimes flaps. Operator override:
-# ``ln -s /dev/null /etc/modprobe.d/zz-bty-r8125-prefer.conf``
-# + ``update-initramfs -u`` + reboot returns to in-tree r8169.
-alias pci:v000010ECd00008125sv*sd*bc*sc*i* r8125
-alias pci:v000010ECd00008126sv*sd*bc*sc*i* r8125
+# RTL8126 2.5GbE family by loading it before r8169. If r8125 can't
+# load (Secure-Boot kernel rejects the unsigned DKMS module), the
+# softdep failure is non-fatal and r8169 binds as fallback.
+softdep r8169 pre: r8125
 
 # Disable Energy-Efficient Ethernet on r8125. EEE can cause
 # auto-negotiate flapping with some switches; safer to leave it
