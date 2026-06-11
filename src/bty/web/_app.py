@@ -49,6 +49,7 @@ from bty.web import (
     _db,
     _models,
     _release_mgr,
+    _security,
     _settings_store,
     _ui,
     _withcache,
@@ -3102,12 +3103,16 @@ def _safe_path(root: Path, name: str) -> Path:
     Rejects names with slashes, ``..``, NULs, etc. Caller decides
     what to do with the resolved path (404 vs. open-for-write).
     """
-    if not name or "/" in name or "\\" in name or "\x00" in name or name in {".", ".."}:
+    # Single-source the "is this a bare basename?" rule via _security;
+    # keep this endpoint's own wording so the message stays stable.
+    try:
+        _security.validate_basename(name)
+    except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"invalid name {name!r}: must be a bare filename "
             "(no '/', '\\', '..', or NUL bytes)",
-        )
+        ) from exc
     candidate = (root / name).resolve()
     try:
         candidate.relative_to(root.resolve())
