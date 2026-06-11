@@ -39,12 +39,14 @@ _BAD_NAMES: frozenset[str] = frozenset((".", ".."))
 def validate_basename(name: str, *, label: str = "name") -> None:
     """Reject ``name`` if it's anything other than a plain basename.
 
-    Mirrors the historical per-module ``_reject_traversal_name``
-    helpers (catalog manager, hash manager) + the
-    ``/catalog/cache/{name}`` route validator + bundle-id checks in
-    the export/import flow. The sites had the same rule expressed in
-    slightly different shapes; this one helper is the auditable
-    single source of truth.
+    Replaces a family of per-module ``_reject_traversal_name``
+    helpers that earlier bty-web releases scattered across the
+    catalog manager, the hash manager, the ``/catalog/cache/{name}``
+    route, and the export/import bundle-id checks (the first two
+    plus the cache route were retired in v0.40; the export/import
+    one still routes through this helper). Each site had the same
+    rule expressed in slightly different shapes; this one helper is
+    the auditable single source of truth.
 
     ``label`` lands in the error message so the operator can tell
     which input was rejected when multiple basenames flow through
