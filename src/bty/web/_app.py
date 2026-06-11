@@ -68,8 +68,9 @@ from bty.web._events import (
 )
 from bty.web._events_log import acknowledge_event as _acknowledge_event
 from bty.web._events_log import list_events as _list_events
-from bty.web._events_log import normalize_ip as _normalize_ip
 from bty.web._events_log import record as _log_event
+from bty.web._reqctx import client_ip as _client_ip
+from bty.web._reqctx import normalise_mac as _normalise_mac
 
 # Session cookie max-age. Sliding TTL on the browser side; Starlette's
 # SessionMiddleware refreshes the cookie on each authed response, so
@@ -2966,20 +2967,6 @@ def create_app(
 # ---------- helpers -----------------------------------------------------------
 
 
-def _normalise_mac(raw: str) -> str:
-    """Return a canonical lower-case ``aa:bb:cc:dd:ee:ff`` MAC, or 400."""
-    cleaned = raw.lower().replace("-", ":")
-    parts = cleaned.split(":")
-    if len(parts) != 6 or any(
-        len(p) != 2 or any(c not in "0123456789abcdef" for c in p) for p in parts
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"invalid MAC: {raw!r}",
-        )
-    return cleaned
-
-
 def _row_to_machine(row: sqlite3.Row) -> _models.Machine:
     """Decode a sqlite3.Row into a ``_models.Machine``.
 
@@ -3068,35 +3055,6 @@ def _request_origin(request: Request) -> str:
     """Return the ``scheme://host:port`` origin the client used."""
     scheme = request.url.scheme or "http"
     return f"{scheme}://{_request_host(request)}"
-
-
-def _client_ip(request: Request) -> str | None:
-    """Return the request's client IP, normalised for storage.
-
-    Wraps ``request.client.host`` in ``_events_log.normalize_ip``
-    so a v4-mapped-v6 address (``::ffff:192.168.1.5`` -- the form
-    Starlette returns when bty-web binds on ``::`` and a v4 client
-    connects) collapses to the bare v4 form. Without this, the
-    same client shows up as two distinct rows in the audit log.
-
-    When ``[server] trusted_proxy`` is set (env override
-    ``BTY_SERVER_TRUSTED_PROXY``), the leftmost ``X-Forwarded-For``
-    entry takes precedence so audit rows reflect the real client
-    IP rather than the reverse-proxy's loopback. Off by default
-    because the header is client-spoofable: only enable it when
-    bty-web is configured behind a proxy that strips inbound X-F-F.
-    """
-    from bty.web._config import cfg as _cfg
-
-    if _cfg().server.trusted_proxy:
-        xff = request.headers.get("x-forwarded-for")
-        if xff:
-            # X-F-F is a comma-separated chain (proxy-near-client
-            # first); the leftmost entry is the originating client.
-            first = xff.split(",", 1)[0].strip()
-            if first:
-                return _normalize_ip(first)
-    return _normalize_ip(request.client.host if request.client else None)
 
 
 def _seed_boot_dir(boot_root: Path) -> None:
