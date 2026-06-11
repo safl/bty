@@ -9,6 +9,31 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.44.3] - 2026-06-11
+
+Deploy hotfix: bty-web and withcache containers now start on hosts
+without the `nftables` package, plus a small dead-knob doc trim.
+
+### Fixed
+
+- **`bty-lab deploy` and `upgrade` now drop a
+  `/etc/containers/containers.conf.d/zz-bty-firewall.conf` that pins
+  podman/netavark to the iptables backend.** Without it, a freshly
+  imaged Debian trixie host that ships only iptables (and not the
+  optional `nftables` package) hit `netavark: nftables error: unable
+  to execute nft: No such file or directory` and the bty-web /
+  withcache containers exited 127 with no useful surface in their
+  own logs. bty-tftp escaped because it uses host networking and
+  doesn't go through netavark. `purge` removes the drop-in.
+
+### Changed
+
+- The dead `BTY_CATALOG_MAX_PARALLEL` and `BTY_HASH_MAX_PARALLEL`
+  knobs are gone from `envvars.example` and the live envvars
+  `bty-lab deploy` renders. The DownloadManager / HashManager
+  subsystems they tuned were removed back in v0.40; the env vars
+  outlived them in the docs only. `BTY_BACKUP_MAX_PARALLEL` stays.
+
 ## [0.44.2] - 2026-06-11
 
 Live-env hotfix: r8125 module-loading shape on Secure-Boot hardware,
