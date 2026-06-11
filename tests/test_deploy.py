@@ -162,8 +162,6 @@ def test_env_example_has_required_keys(tmp_path: Path) -> None:
         "BTY_TRUSTED_PROXY",
         "BTY_SESSION_SECRET",
         "BTY_MAX_UPLOAD_BYTES",
-        "BTY_CATALOG_MAX_PARALLEL",
-        "BTY_HASH_MAX_PARALLEL",
         "BTY_BACKUP_MAX_PARALLEL",
     ):
         assert f"# {var}=" in body, f"{var} not documented in envvars.example"

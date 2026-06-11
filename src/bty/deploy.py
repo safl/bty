@@ -220,11 +220,8 @@ WITHCACHE_ADMIN_PASSWORD=change-me
 # fleets or untrusted networks.
 # BTY_MAX_UPLOAD_BYTES=214748364800
 
-# Concurrent-worker caps. Defaults are sane for most fleets; raise
-# carefully if the host has the CPU + disk bandwidth, drop on small
-# boxes (Raspberry Pi, low-spec mini-PCs).
-# BTY_CATALOG_MAX_PARALLEL=2
-# BTY_HASH_MAX_PARALLEL=1
+# Concurrent-worker cap for the backup scheduler. Default is sane
+# for most fleets; raise if the host has the CPU + disk bandwidth.
 # BTY_BACKUP_MAX_PARALLEL=1
 """
 
@@ -801,9 +798,7 @@ BTY_SESSION_SECRET={session_secret}
 # Per-request upload cap for the operator UI's image-upload form.
 # BTY_MAX_UPLOAD_BYTES=214748364800
 
-# Concurrent-worker caps.
-# BTY_CATALOG_MAX_PARALLEL=2
-# BTY_HASH_MAX_PARALLEL=1
+# Concurrent-worker cap for the backup scheduler.
 # BTY_BACKUP_MAX_PARALLEL=1
 """
 
