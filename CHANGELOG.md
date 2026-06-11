@@ -9,6 +9,30 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.44.1] - 2026-06-11
+
+Maintenance release: technical-debt sweep, no behaviour change for
+operators beyond the items below.
+
+### Changed
+
+- The per-MAC boot-plan request (`pxe_plan`) now opens the state DB
+  once per flash request instead of four times (catalog binding +
+  withcache lookup share one connection).
+- The live-env `systemctl reboot` and the host-IP autodetect socket are
+  now bounded by timeouts, so a wedged systemd / resolver can't hang
+  them.
+
+### Internal
+
+- Deduped `_normalise_mac` / `_client_ip` into a shared `_reqctx`
+  module; `_safe_path` now routes its basename check through
+  `_security.validate_basename`.
+- Dropped dead code: the unused `host_addr` Quadlet param and the
+  pre-1.0 `resolve_release_tag` / `DEFAULT_RELEASE_TAG` aliases.
+- Doc / Makefile fixups (default password is `bty-lab`; `.PHONY`
+  completeness).
+
 ## [0.44.0] - 2026-06-10
 
 ### Fixed
