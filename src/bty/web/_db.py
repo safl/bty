@@ -26,10 +26,12 @@ v0.32.x) was overengineered: ``state.db`` is regenerable
 (bindings re-discover on next PXE contact, audit log is cosmetic,
 settings are a tiny handful), and pre-1.0 explicitly says no
 migration apparatus. Auto-rotation is the simplest correct
-behavior - the operator-irreplaceable state (image files under
-``BTY_IMAGE_ROOT``) is never touched. Operators who want hardware
-inventory preserved across upgrades use ``bty-web export`` /
-``bty-web import``.
+behavior. Image bytes are not on bty-web's disk anyway (v0.40
+took bty-web out of the bytes plane; withcache caches blobs in
+its own volume; oras streams from the registry), so a rotation
+on the bty-web state.db cannot lose images.  Operators who want
+hardware inventory preserved across upgrades use ``bty-web
+export`` / ``bty-web import``.
 """
 
 from __future__ import annotations
@@ -281,8 +283,9 @@ def init_db(path: Path) -> None:
 
     Pre-1.0 contract (see module docstring): no migration apparatus,
     no schema-version integer, no operator intervention on upgrade.
-    Operator-irreplaceable state (image files under
-    ``BTY_IMAGE_ROOT``) is never touched by this function.
+    Image bytes are not on bty-web's disk in v0.40+ (withcache holds
+    cached blobs in its own volume; oras streams from the registry),
+    so a rotation here cannot lose them.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -334,7 +337,8 @@ def init_db(path: Path) -> None:
                 actor="system",
                 summary=(
                     f"state.db rotated on upgrade ({rotated_from} -> {bty.__version__}). "
-                    f"Machine bindings + audit log reset; images under BTY_IMAGE_ROOT preserved."
+                    f"Machine bindings + audit log reset; image bytes "
+                    f"(withcache volume / oras registry) are untouched."
                 ),
                 details={
                     "from_version": rotated_from,

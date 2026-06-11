@@ -171,7 +171,7 @@ def test_init_db_records_schema_reset_event_on_rotation(tmp_path: Path) -> None:
     assert actor == "system"
     assert "0.27.4" in summary
     assert bty.__version__ in summary
-    assert "BTY_IMAGE_ROOT preserved" in summary
+    assert "image bytes" in summary  # withcache volume + oras registry, not on this DB
     assert acknowledged == 0, "schema_reset must surface as unacknowledged tripwire"
     details = json.loads(details_json)
     assert details["from_version"] == "0.27.4"
