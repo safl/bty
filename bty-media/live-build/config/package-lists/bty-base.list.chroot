@@ -158,3 +158,15 @@ linux-headers-amd64
 # its chroot, so NM is the sole network manager here and
 # nothing competes for interface ownership.
 network-manager
+
+# Hardware diagnosis tooling. ``lshw`` (the inventory uploader)
+# does a structured tree dump but is verbose for at-the-console
+# triage; ``lspci -k`` / ``lsusb -t`` are the muscle memory an
+# operator reaches for when a NIC isn't probing or a USB device
+# is missing. Cheap on disk (~1 MiB each), saves a /sys-walk
+# every time something doesn't show up. Added after the ASUS
+# PN51-E1 / Secure-Boot r8125-rejection triage, where the
+# missing ``lspci`` cost an extra round of /sys/bus/pci/devices/
+# uevent reads before the NIC chipset was even identified.
+pciutils
+usbutils
