@@ -1916,8 +1916,12 @@ class BtyTui:
 
     def _do_reboot(self) -> None:
         self._console.print(f"[{_ACCENT}]Rebooting now ...[/]")
-        with contextlib.suppress(FileNotFoundError, OSError):
-            subprocess.run(["systemctl", "reboot"], check=False)
+        # ``systemctl reboot`` returns promptly after handing off to
+        # systemd; bound it so a wedged systemd can't hang the live env
+        # at the flash-done screen forever (the box reboots out from
+        # under us on success, so a generous cap is fine).
+        with contextlib.suppress(FileNotFoundError, OSError, subprocess.TimeoutExpired):
+            subprocess.run(["systemctl", "reboot"], check=False, timeout=15)
 
 
 # ---------------------------------------------------------------------------
