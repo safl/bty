@@ -647,6 +647,10 @@ def detect_host_addr() -> str:
     when no route is available; callers may want to surface that.
     """
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    # UDP-connect just selects an outbound route (no packet sent), so it
+    # won't normally block -- but bound the call anyway for consistency
+    # with the other probes and to guard a pathological resolver.
+    s.settimeout(5)
     try:
         s.connect(("198.51.100.1", 80))
         addr: str = s.getsockname()[0]
