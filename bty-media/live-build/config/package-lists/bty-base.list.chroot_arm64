@@ -1,0 +1,27 @@
+# arm64-only packages, layered on top of the arch-agnostic
+# ``bty-base.list.chroot`` by live-build when ``--architectures
+# arm64`` is active. Consumed by the ``usb-rpi`` Raspberry-Pi
+# flasher variant (Pi5 / CM5 / Pi4 USB-boot).
+
+# The arm64 kernel.
+linux-image-arm64
+
+# ``raspi-firmware`` ships the closed-source Pi boot chain
+# (``bootcode.bin``, ``start*.elf``, ``fixup*.dat``) plus the stock
+# device-tree blobs (``bcm2711-*.dtb`` for Pi4, ``bcm2712-*.dtb``
+# for Pi5 / CM5) into ``/usr/lib/raspi-firmware/``. The post-
+# process step (``bty-media/scripts/pack_rpi_img.py``) copies
+# those files into the FAT32 boot partition of the final raw
+# image, alongside the live-build kernel + initrd. Without this
+# package the Pi has nothing to load at power-on.
+raspi-firmware
+
+# Pi WiFi + Bluetooth firmware. ``firmware-linux-nonfree`` already
+# Depends on brcm80211 transitively, but list it explicitly so
+# the package set advertises Pi-board WiFi support; an operator
+# who reads this file should see WiFi/BT is intentionally
+# included. ``firmware-misc-nonfree`` covers the wider grab-bag
+# of one-off arm64 device firmware (some PHY and EEPROM blobs)
+# that brcm80211 alone doesn't pull.
+firmware-brcm80211
+firmware-misc-nonfree

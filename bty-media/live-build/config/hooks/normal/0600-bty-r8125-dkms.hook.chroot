@@ -49,6 +49,18 @@
 
 set -eu
 
+# arch guard: the r8125 driver targets Realtek 2.5GbE chipsets on
+# x86 mini-PCs (GMKTec NUCBOX G10 et al.); arm64 boards don't ship
+# those NICs (the Pi family uses Broadcom WiFi or Realtek 1GbE
+# RTL8211, neither of which speak this driver). On a non-amd64
+# build the chroot has no linux-headers-amd64 + no dkms either
+# (see ``bty-base.list.chroot_amd64``), so attempting the build
+# would fail. Skip cleanly.
+if [ "$(dpkg --print-architecture)" != "amd64" ]; then
+    echo "0600-bty-r8125-dkms: skipping on $(dpkg --print-architecture)"
+    exit 0
+fi
+
 # Source repo. ``master`` is the only branch the repo maintains;
 # the repo's HEAD is kept in lockstep with Realtek's latest
 # published driver source. If a specific upstream Realtek version
