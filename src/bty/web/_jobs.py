@@ -44,10 +44,13 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import threading
 import time
 from collections.abc import Callable
 from typing import Generic, Protocol, TypeVar
+
+_log = logging.getLogger(__name__)
 
 # Lifecycle states a queued job may carry. ``queued`` and
 # ``running`` are non-terminal; the rest are terminal. Cancellable
@@ -69,6 +72,12 @@ class _CancelableState(Protocol):
     status: str
     started_at: float | None
     finished_at: float | None
+    # ``error`` is the slot the base manager's worker-exception safety
+    # net writes into when ``_run_one`` leaks an exception. Production
+    # subclasses (ReleaseFetchState, BackupState) already carry this
+    # field; declaring it in the protocol lets the base manager assign
+    # to it without ``setattr`` games.
+    error: str | None
     _cancel: threading.Event
 
 
@@ -229,6 +238,7 @@ class _BaseAsyncManager(Generic[StateT]):
                 key = await self._queue.get()
             except asyncio.CancelledError:
                 return
+            running_state: StateT | None = None
             try:
                 async with self._lock:
                     state = self._states.get(key)
@@ -236,6 +246,7 @@ class _BaseAsyncManager(Generic[StateT]):
                         continue
                     state.status = "running"
                     state.started_at = time.time()
+                    running_state = state
                 # Outside the lock: emit the queued -> running
                 # transition so SSE subscribers see "now running" without
                 # waiting for the 30s safety poll.
@@ -243,6 +254,24 @@ class _BaseAsyncManager(Generic[StateT]):
                 await self._run_one(state)
             except asyncio.CancelledError:
                 return
+            except Exception as exc:
+                # Subclass ``_run_one`` is expected to write the
+                # terminal status itself (it owns per-manager fields
+                # like ``error`` and the artifact sub-state). If it
+                # leaks an exception instead, the job would stay in
+                # "running" forever and the worker slot would silently
+                # die. Catch here so the worker survives, mark the
+                # state failed as a safety net, and let SSE/UI render
+                # the failure rather than the operator staring at a
+                # forever-running job.
+                _log.exception("%s worker bottomed out on key %r", type(self).__name__, key)
+                if running_state is not None:
+                    async with self._lock:
+                        if running_state.status == "running":
+                            running_state.status = "failed"
+                            running_state.finished_at = time.time()
+                            running_state.error = f"{type(exc).__name__}: {exc}"
+                    self._fire_state_change(running_state)
 
     async def _run_one(self, state: StateT) -> None:
         """Per-job body. Subclasses must override.
