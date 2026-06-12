@@ -1,0 +1,50 @@
+# amd64-only packages, layered on top of the arch-agnostic
+# ``bty-base.list.chroot`` by live-build when ``--architectures
+# amd64`` is active. Consumed by the ``usb-x86`` and ``netboot-x86``
+# variants.
+
+# The amd64 kernel. Pinned to trixie-backports via
+# ``config/preferences/backports.pref.chroot``.
+linux-image-amd64
+
+# CPU microcode. Both vendor packages installed so the same live
+# env runs unmodified on Intel and AMD targets (the bake produces
+# one squashfs; the kernel picks whichever vendor matches the
+# running CPU at early boot). Pinned to trixie-backports via
+# ``backports.pref.chroot`` so we ship the vendor's most recent
+# published errata fixes.
+#
+# Why the live env needs microcode: PXE-booted targets sit on
+# raw bare metal: no hypervisor, no host already-loaded ucode.
+# Without these packages the kernel uses the factory-shipped
+# microcode revision, which on modern Ryzen and recent Intel
+# cores misses Spectre / SRBDS / Reptar / Inception / etc.
+# mitigations + various sporadic stability fixes. The initrd
+# hook from each package writes an early-microcode segment to
+# the initrd image so the load happens BEFORE driver init.
+# Negligible squashfs cost (~10 MiB across both vendors).
+intel-microcode
+amd64-microcode
+
+# Out-of-tree Realtek r8125 DKMS driver (built into the chroot
+# kernel by ``hooks/normal/0600-bty-r8125-dkms.hook.chroot``). The
+# in-tree ``r8169`` driver in kernel 6.13+ covers the RTL8125
+# family in theory, but on some consumer mini-PCs (GMKTec NUCBOX
+# G10 in particular) the upstream Realtek ``r8125`` variant has
+# device-init quirks the in-tree driver hasn't picked up. Baking
+# both gives the kernel a choice: a ``softdep r8169 pre: r8125``
+# in /etc/modprobe.d wires r8125 in as a soft pre-dep of r8169 so
+# r8125 wins on hardware that wants it, while still falling back
+# to in-tree r8169 if r8125 can't load (typical case: UEFI Secure
+# Boot rejects the unsigned DKMS module under ``[integrity]``
+# lockdown). Details in the hook's header comment.
+#
+# The packages here pull the DKMS build environment so the hook
+# can compile the .ko inside the chroot; the hook also removes
+# the build-time-only packages after install to keep the squashfs
+# slim. linux-headers-amd64 is pinned to backports via
+# ``config/preferences/backports.pref.chroot`` so the headers
+# match the linux-image-amd64 the chroot installs.
+dkms
+build-essential
+linux-headers-amd64

@@ -51,6 +51,18 @@ set -eu
 # the hook returns).
 cd ..
 
+# No-op on builds that don't emit an isolinux/grub-efi tree:
+# the netboot-x86 variant emits a plain kernel+initrd+squashfs
+# trio (PXE chains the kernel directly), and the usb-rpi arm64
+# variant boots via the Pi firmware chain (no syslinux / no grub).
+# In both cases ``binary/isolinux/`` and ``binary/boot/grub/``
+# never exist, so this hook has nothing to do. Skip cleanly so
+# the bake doesn't fail trying to operate on absent directories.
+if [ ! -d binary/isolinux ] && [ ! -d binary/boot/grub ]; then
+    echo "0500-bty-skip-bootloader-menu: no isolinux/grub tree; skipping (Pi or netboot build)" >&2
+    exit 0
+fi
+
 # Hook-ran sentinel. ``cijoe/scripts/usb_iso_build.py``'s verify
 # step asserts this file exists post-build, catching the "hook
 # didn't actually execute" class of bugs.
