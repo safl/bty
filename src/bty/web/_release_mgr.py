@@ -202,6 +202,7 @@ class ReleaseFetchManager(_BaseAsyncManager[ReleaseFetchState]):
                     limit=200,
                 )
         except Exception:
+            _log.debug("netboot backfill from events skipped", exc_info=True)
             return
 
         # Walk newest-first; first terminal event per tag wins.
