@@ -12,8 +12,8 @@ Workflow:
 
 1. Copy ``bty-media/live-build/`` (the live-build config tree) into
    a fresh ``cijoe/_build/usb-x86/`` working dir.
-2. Run ``sudo env BTY_USB_ISO=1 lb clean --all && lb build``. The
-   env var drives ``auto/config`` into iso-hybrid mode (binary
+2. Run ``sudo env BTY_VARIANT=usb-x86 lb clean --all && lb build``.
+   The env var drives ``auto/config`` into iso-hybrid mode (binary
    images, bootloaders, kernel cmdline appendices); ``sudo env``
    is needed because sudo strips the environment by default. The
    var must be present at every lb invocation because ``lb build``
@@ -136,29 +136,31 @@ def main(args, cijoe):
         log.error("__BTY_VERSION__ substitution failed")
         return err
 
-    # Drive auto/config into iso-hybrid mode via the ``BTY_USB_ISO``
-    # env var (``BTY_USB_ISO=1`` selects iso-hybrid + syslinux + grub-
-    # efi; unset selects netboot for the netboot-x86 variant). The env
-    # var has to be set in the invocation environment of every ``lb``
-    # call, because ``lb build`` re-runs ``lb config`` (which re-runs
-    # ``auto/config``) during its own setup; flag-based overrides at
-    # the initial config call get clobbered by that re-run.
+    # Drive auto/config into iso-hybrid mode via the ``BTY_VARIANT``
+    # env var (``BTY_VARIANT=usb-x86`` selects iso-hybrid + syslinux +
+    # grub-efi; ``netboot-x86`` selects the netboot trio;
+    # ``usb-rpi`` selects arm64 + netboot for the Pi flasher). The
+    # env var has to be set in the invocation environment of every
+    # ``lb`` call, because ``lb build`` re-runs ``lb config`` (which
+    # re-runs ``auto/config``) during its own setup; flag-based
+    # overrides at the initial config call get clobbered by that
+    # re-run.
     #
     # ``bty-on-tty1.service`` fires unconditionally on every live
     # env boot (v0.22.10+ retired the cmdline-mode gating). With no
     # ``bty.server`` / ``bty.mac`` on the cmdline the wrapper script
     # forwards no flags and ``bty`` falls back to scanning the local
-    # image-root -- the offline USB-boot mode.
+    # image-root; the offline USB-boot mode.
     #
     # ``sudo env`` is used (instead of ``sudo`` with shell variable
     # assignment) because sudo strips environment by default; ``env``
-    # ensures BTY_USB_ISO is in the invoked process's environment
+    # ensures BTY_VARIANT is in the invoked process's environment
     # under root rather than the caller's.
-    log.info(f"Running lb build in {build_dir} (BTY_USB_ISO=1)")
+    log.info(f"Running lb build in {build_dir} (BTY_VARIANT=usb-x86)")
     err, _ = cijoe.run_local(
         f"sh -c 'cd {build_dir} && "
-        "sudo env BTY_USB_ISO=1 lb clean --all && "
-        "sudo env BTY_USB_ISO=1 lb build'"
+        "sudo env BTY_VARIANT=usb-x86 lb clean --all && "
+        "sudo env BTY_VARIANT=usb-x86 lb build'"
     )
     if err:
         log.error("lb build failed; see live-build.log under the build dir")

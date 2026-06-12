@@ -28,10 +28,11 @@ Operators drive everything via the top-level Makefile:
 
 - `auxiliary/cloudinit-metadata.meta` - shared cloud-init metadata.
 - `rootfs/common/` - files baked into every variant.
-- `live-build/` - live-build config tree shared by `usb-x86` (which
-  uses `iso-hybrid` output) and `netboot-x86` (which uses `netboot`
-  output). The `BTY_USB_ISO=1` env var switches `auto/config`
-  between the two modes.
+- `live-build/` - live-build config tree shared across every
+  variant. The ``BTY_VARIANT`` env var selects the shape:
+  ``usb-x86`` -> amd64 iso-hybrid; ``netboot-x86`` -> amd64 netboot
+  trio; ``usb-rpi`` -> arm64 netboot trio (wrapped into a
+  Pi-bootable raw image by ``scripts/pack_rpi_img.py`` after lb).
 
 ## Pipeline
 
@@ -45,16 +46,27 @@ dispatches to one of two cijoe task files. The Makefile picks the
 right one based on the variant:
 
 - `usb-x86` -> `cijoe tasks/usb.yaml`. Drives Debian's `live-build`
-  with `BTY_USB_ISO=1` selecting `iso-hybrid` output, then post-
-  processes the pre-built ISO to append a writable exFAT `BTY_IMAGES`
-  partition (`sfdisk --append`, `losetup -fP`, `mkfs.exfat`) and
-  gzip-compresses it. Output is `bty-usb-x86_64.iso.gz`. No QEMU
-  full-system bake.
+  with `BTY_VARIANT=usb-x86` selecting `iso-hybrid` output, then
+  post-processes the pre-built ISO to append a writable exFAT
+  `BTY_IMAGES` partition (`sfdisk --append`, `losetup -fP`,
+  `mkfs.exfat`) and gzip-compresses it. Output is
+  `bty-usb-x86_64.iso.gz`. No QEMU full-system bake.
 
-- `netboot-x86` -> `cijoe tasks/netboot.yaml`. Drives Debian's `live-build`
-  (debootstrap + mksquashfs + mkinitramfs) directly on the build
-  host - no QEMU, no cloud-init. Output is the kernel + initrd +
-  squashfs trio for PXE chain-boot.
+- `netboot-x86` -> `cijoe tasks/netboot.yaml`. Drives Debian's
+  `live-build` (debootstrap + mksquashfs + mkinitramfs) directly
+  on the build host: no QEMU, no cloud-init. Output is the kernel
+  + initrd + squashfs trio for PXE chain-boot.
+
+- `usb-rpi` -> `cijoe tasks/usb-rpi.yaml`. Drives `live-build`
+  with `BTY_VARIANT=usb-rpi` (`--architectures arm64
+  --binary-images netboot`) on a native arm64 builder, then
+  `scripts/pack_rpi_img.py` assembles a Pi-bootable raw disk
+  image: FAT32 partition with `raspi-firmware` blobs + kernel
+  + initrd + `config.txt` + `cmdline.txt`, an ext4 partition
+  carrying the squashfs as `/live/filesystem.squashfs`, and a
+  small exFAT `BTY_IMAGES` partition. Output is
+  `bty-usb-rpi-arm64.img.gz`. Operator dd's it to a USB stick
+  and boots a CM5 / Pi5 / Pi4 from it.
 
 Both variants stage the bty-lab wheel via `bty_wheel_stage` into the
 live-build chroot includes, then drive live-build via `live_build`;

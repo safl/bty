@@ -4,36 +4,49 @@
 # live-build invokes this script when (re)configuring the build dir
 # (typically the first ``lb build`` run, and again whenever ``lb build``
 # itself calls ``lb config``). Encodes our lb config args: Debian
-# trixie, amd64, no debian-installer, no memtest, no apt recommends,
-# no security.
+# trixie, no debian-installer, no memtest, no apt recommends, no
+# security. Architecture + binary-image-shape + bootloader options
+# are derived from the ``BTY_VARIANT`` environment variable.
 #
-# Two output modes, switched by the ``BTY_USB_ISO`` environment
-# variable:
+# Variants:
 #
-#   - **default (netboot)**: kernel + initrd + squashfs trio for the
-#     ``live-x86`` PXE-flash flow. Server hosts these three files
-#     over HTTP and clients chain into them via iPXE.
-#   - **BTY_USB_ISO=1 (iso-hybrid)**: hybrid ISO image bootable from
-#     CD or USB stick (BIOS + UEFI). Used by the ``usb-iso`` variant.
-#     Adds ``--bootloaders syslinux,grub-efi`` for dual-firmware
-#     boot. No ``bty.*`` cmdline params: USB-local boot has no
-#     bty-server URL or self-MAC to pin, and ``bty-on-tty1.service``
-#     fires unconditionally (v0.22.10+ retired the
-#     ConditionKernelCommandLine gating).
+#   - ``netboot-x86`` (default): amd64 kernel + initrd + squashfs
+#     trio for the PXE flow. Server hosts these three files over
+#     HTTP and clients chain into them via iPXE.
+#   - ``usb-x86``: amd64 hybrid ISO image bootable from CD or USB
+#     (BIOS + UEFI). Adds ``--bootloaders syslinux,grub-efi`` for
+#     dual-firmware boot. No ``bty.*`` cmdline params: USB-local
+#     boot has no bty-server URL or self-MAC to pin, and
+#     ``bty-on-tty1.service`` fires unconditionally
+#     (v0.22.10+ retired the ConditionKernelCommandLine gating).
+#   - ``usb-rpi``: arm64 kernel + initrd + squashfs for a
+#     Raspberry-Pi USB-flasher. lb produces the netboot trio; the
+#     bty-media post-processing step (``pack_rpi_img.py``) assembles
+#     a Pi-bootable raw disk image with a FAT32 firmware partition
+#     and the squashfs on its own ext4 partition. The kernel
+#     cmdline uses ``console=serial0,115200`` (Pi firmware overlays
+#     the right ``ttyAMAx`` per board revision, so the same image
+#     boots Pi4 / Pi5 / CM5 without per-board branching).
 #
-# Both modes use the same chroot package set + hooks; only the binary
-# packaging differs. ``lb build`` re-runs this script during its
-# internal ``lb config`` step, so the env var must be set in the
-# build invocation's environment - not just at the initial config
-# call. ``cijoe/scripts/usb_iso_build.py`` does this via ``sudo env
-# BTY_USB_ISO=1 lb build``.
+# All variants share the same chroot package set + hooks. Per-arch
+# package divergence (linux-image-amd64 vs linux-image-arm64, the
+# x86-only r8125 DKMS hook, the Pi firmware blobs from
+# raspi-firmware) lives in arch-suffixed .list.chroot files that
+# live-build only consumes when the matching ``--architectures`` is
+# active.
+#
+# ``lb build`` re-runs this script during its internal ``lb config``
+# step, so ``BTY_VARIANT`` must be set in the build invocation's
+# environment, not just at the initial config call (sudo strips env
+# by default; ``cijoe/scripts/usb_iso_build.py`` and the new
+# ``usb_rpi_build.py`` use ``sudo env BTY_VARIANT=...``).
 #
 # Requires live-build 20240208+ (Debian trixie or newer) which
 # fetches ``dists/<release>/main/Contents-<arch>.gz`` from the
 # per-component layout Debian now publishes. Ubuntu's stock
 # live-build 20230502 still uses the obsolete top-level URL and
-# 404s on every active Debian release; ci-cd.yml's live job
-# pulls the trixie .deb explicitly to work around that.
+# 404s on every active Debian release; ci-cd.yml's media build jobs
+# pull the trixie .deb explicitly to work around that.
 set -e
 
 # Plymouth was retired in v0.22.1: the kernel-stage graphical splash
@@ -44,42 +57,72 @@ set -e
 # init messages; ``/etc/issue`` (rendered by agetty on tty1) carries
 # the bty identity. ``plymouth.enable=0`` stays on the cmdline as
 # belt-and-braces in case plymouth ever gets pulled in transitively
-# by a future package change -- with no package installed it's a
+# by a future package change: with no package installed it's a
 # no-op.
 
 # Transparency: NO ``quiet``, NO ``splash``. bty wants the full
-# kernel + systemd boot stream visible on tty1/serial -- a wedge
-# between `[ OK ] Started X` and `[ OK ] Started Y` is immediately
-# diagnostic. Same reason plymouth was retired (v0.22.1): hiding
-# init output makes operator debugging harder, polish is not worth
-# the opacity.
-if [ "${BTY_USB_ISO:-}" = "1" ]; then
-    BINARY_IMAGES=iso-hybrid
-    BOOTLOADERS_OPTS="--bootloaders syslinux,grub-efi"
-    # ``console=tty0 console=ttyS0,115200``: kernel + systemd boot
-    # messages go to BOTH the framebuffer (tty0, for real hardware
-    # operators) and the serial port (ttyS0, for QEMU/IP-KVM/anything
-    # capturing the serial). The LAST ``console=`` is the systemd
-    # default-stdout sink; we list ttyS0 last so the auto-grow test
-    # sees ``[ OK ] Started bty-usb-grow.service`` on its captured
-    # serial log. Harmless on real USB sticks without a serial port --
-    # writes are dropped.
-    BOOTAPPEND="boot=live components noeject plymouth.enable=0 modprobe.blacklist=nouveau nouveau.modeset=0 systemd.gpt_auto=0 console=tty0 console=ttyS0,115200 bty.version=__BTY_VERSION__"
-else
-    BINARY_IMAGES=netboot
-    BOOTLOADERS_OPTS=""
-    # The PXE-flash chain (server's ipxe_flash.j2 / ipxe_tui.j2)
-    # appends ``bty.server=...`` + ``bty.mac=...`` per-client at
-    # render time, so the chroot's static bootappend doesn't carry
-    # them.
-    BOOTAPPEND="boot=live components plymouth.enable=0 modprobe.blacklist=nouveau nouveau.modeset=0 systemd.gpt_auto=0 bty.version=__BTY_VERSION__"
-fi
+# kernel + systemd boot stream visible on tty1/serial; a wedge
+# between ``[ OK ] Started X`` and ``[ OK ] Started Y`` is
+# immediately diagnostic. Same reason plymouth was retired (v0.22.1):
+# hiding init output makes operator debugging harder, polish is not
+# worth the opacity.
+
+BTY_VARIANT="${BTY_VARIANT:-netboot-x86}"
+
+case "${BTY_VARIANT}" in
+    netboot-x86)
+        ARCH=amd64
+        BINARY_IMAGES=netboot
+        BOOTLOADERS_OPTS=""
+        # The PXE-flash chain (server's ipxe_flash.j2 / ipxe_tui.j2)
+        # appends ``bty.server=...`` + ``bty.mac=...`` per-client at
+        # render time, so the chroot's static bootappend doesn't carry
+        # them.
+        BOOTAPPEND="boot=live components plymouth.enable=0 modprobe.blacklist=nouveau nouveau.modeset=0 systemd.gpt_auto=0 bty.version=__BTY_VERSION__"
+        ;;
+    usb-x86)
+        ARCH=amd64
+        BINARY_IMAGES=iso-hybrid
+        BOOTLOADERS_OPTS="--bootloaders syslinux,grub-efi"
+        # ``console=tty0 console=ttyS0,115200``: kernel + systemd boot
+        # messages go to BOTH the framebuffer (tty0, for real hardware
+        # operators) and the serial port (ttyS0, for QEMU/IP-KVM/anything
+        # capturing the serial). The LAST ``console=`` is the systemd
+        # default-stdout sink; we list ttyS0 last so the auto-grow test
+        # sees ``[ OK ] Started bty-usb-grow.service`` on its captured
+        # serial log. Harmless on real USB sticks without a serial port:
+        # writes are dropped.
+        BOOTAPPEND="boot=live components noeject plymouth.enable=0 modprobe.blacklist=nouveau nouveau.modeset=0 systemd.gpt_auto=0 console=tty0 console=ttyS0,115200 bty.version=__BTY_VERSION__"
+        ;;
+    usb-rpi)
+        ARCH=arm64
+        # Pi firmware boots directly from FAT32 partition 1, no
+        # bootloader binary involved. lb's ``netboot`` mode emits
+        # the kernel + initrd + squashfs trio which the post-process
+        # step (``bty-media/scripts/pack_rpi_img.py``) wraps into a
+        # Pi-bootable disk image alongside the raspi-firmware blobs.
+        BINARY_IMAGES=netboot
+        BOOTLOADERS_OPTS=""
+        # ``console=tty1 console=serial0,115200``: Pi firmware
+        # overlays ``serial0`` onto the right ``ttyAMAx`` per board
+        # revision (ttyAMA0 on Pi4, ttyAMA10 on Pi5/CM5), so one
+        # cmdline boots every supported board. The bty-usb-grow
+        # service is also live here so the BTY_IMAGES partition
+        # auto-grows on first boot.
+        BOOTAPPEND="boot=live components plymouth.enable=0 systemd.gpt_auto=0 console=tty1 console=serial0,115200 bty.version=__BTY_VERSION__"
+        ;;
+    *)
+        echo "auto/config: unknown BTY_VARIANT=${BTY_VARIANT}" >&2
+        echo "  valid: netboot-x86 | usb-x86 | usb-rpi" >&2
+        exit 2
+        ;;
+esac
 
 # shellcheck disable=SC2086 # BOOTLOADERS_OPTS is intentionally word-split
 lb config noauto \
     --mode debian \
     --distribution trixie \
-    --architectures amd64 \
+    --architectures "${ARCH}" \
     --archive-areas "main non-free-firmware" \
     --firmware-chroot true \
     --binary-images "${BINARY_IMAGES}" \
@@ -103,7 +146,7 @@ lb config noauto \
 # bnx2/bnx2x, netronome, nvidia-graphics, amd-graphics, and a long
 # tail of server-NIC + old-WiFi blobs). The size cost (~300 MiB
 # compressed) buys "boots on whatever bare-metal box the operator
-# points it at" -- the alternative is the operator hits a missing
+# points it at"; the alternative is the operator hits a missing
 # firmware -> driver init failure -> dead NIC and can't proceed.
 # A curated list is too narrow: Realtek WiFi/BT chipsets alone
 # span half a dozen firmware packages and consumer mini-PCs cycle
@@ -114,5 +157,5 @@ lb config noauto \
 # newest kernel + firmware Debian ships, not just trixie's.
 # Bootloader-menu suppression: see
 # ``hooks/binary/0500-bty-skip-bootloader-menu.hook.binary``. Don't
-# add ``--syslinux-timeout`` here -- live-build trixie doesn't
+# add ``--syslinux-timeout`` here; live-build trixie doesn't
 # recognise that flag and ``lb config`` errors out.
