@@ -9,6 +9,62 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.47.0] - 2026-06-12
+
+New ``usb-rpi`` arm64 image variant: a USB-bootable Raspberry-Pi
+flasher (CM5 on IO-board, Pi5, Pi4) that runs the bty TUI on the
+Pi itself and writes the operator's chosen catalog image onto
+local eMMC or NVMe.
+
+### Added
+
+- ``bty-usb-rpi-arm64-v<version>.img.gz`` release asset. ``dd`` it
+  to a USB stick, plug into a CM5 / Pi5 / Pi4, USB-boot, pick a
+  catalog image + target disk in the wizard. Headline workflow:
+  reflashing a CM5 in a closed IO-case (eMMC) without the
+  jumper-rpiboot-Etcher disassembly dance, or reflashing a Pi5
+  NVMe HAT in situ.
+- ``BTY_VARIANT`` tri-state environment knob driving
+  ``bty-media/live-build/auto/config``: ``netboot-x86`` (default,
+  amd64 PXE trio), ``usb-x86`` (amd64 hybrid ISO), or
+  ``usb-rpi`` (arm64 netboot trio + Pi-image packaging
+  post-process).
+- ``bty-media/scripts/pack_rpi_img.py`` assembles a 3-partition
+  raw disk image from the lb arm64 output: FAT32 ``RPIBOOT``
+  with the ``raspi-firmware`` blobs + kernel + initrd +
+  ``config.txt`` (``dtparam=pciex1`` for Pi5 NVMe enumeration) +
+  ``cmdline.txt``, ext4 ``BTY_LIVE`` holding the squashfs at
+  ``/live/filesystem.squashfs``, exFAT ``BTY_IMAGES`` scratch
+  (auto-grows on first boot via ``bty-usb-grow.service``).
+- New CI job ``build-usb-rpi`` on a native arm64
+  ``ubuntu-24.04-arm`` runner, gating ``tag-release`` and
+  ``attach-to-release`` the same way ``build-usb-x86`` does.
+- New tutorial ``docs/src/tutorials/bty-usb-rpi.md`` covering
+  download, dd-to-USB, the CM5 / Pi5 / Pi4 BOOT_ORDER prereq,
+  the on-Pi flow, and local QEMU-virt verification for
+  developers.
+
+### Changed
+
+- ``BTY_USB_ISO=1`` env knob removed (pre-1.0 break-freely; the
+  two ``cijoe/scripts`` callers are updated). Replaced by
+  ``BTY_VARIANT=<variant>``.
+- ``bty-media/live-build/config/package-lists/bty-base.list.chroot``
+  split into arch-agnostic +
+  ``bty-base.list.chroot_amd64`` (x86 kernel + microcode + DKMS
+  build env) + ``bty-base.list.chroot_arm64`` (arm64 kernel +
+  ``raspi-firmware`` + Pi WiFi firmware). live-build only
+  consumes a suffixed file when the matching ``--architectures``
+  is active.
+- The r8125 DKMS hook
+  (``0600-bty-r8125-dkms.hook.chroot``) early-exits on
+  non-amd64; the bootloader-menu suppression binary hook
+  (``0500-bty-skip-bootloader-menu.hook.binary``) early-exits
+  when neither ``binary/isolinux/`` nor ``binary/boot/grub/``
+  exists (the case on every non-iso-hybrid build).
+- ``make build VARIANT=usb-rpi`` route added to the Makefile;
+  ``make help`` advertises it.
+
 ## [0.46.0] - 2026-06-11
 
 bty stops publishing its own ``catalog.toml`` mirror and consumes
