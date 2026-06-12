@@ -117,11 +117,14 @@ wheel:
 #
 # Sample invocations:
 #   make tui IMAGE_ROOT=/tmp/bty-images
-#   make tui CATALOG=https://github.com/safl/bty/releases/latest/download/catalog.toml
+#   make tui CATALOG=https://github.com/safl/nosi/releases/latest/download/catalog.toml
 #   make tui CATALOG=default
 .PHONY: tui
 IMAGE_ROOT ?= /tmp/bty-images
-TUI_DEFAULT_CATALOG := https://github.com/safl/bty/releases/latest/download/catalog.toml
+# v0.46 pointed the default catalog at the upstream image-builder
+# (``safl/nosi``); the prior ``safl/bty/releases/latest/download/
+# catalog.toml`` 404s since v0.46 stopped publishing that asset.
+TUI_DEFAULT_CATALOG := https://github.com/safl/nosi/releases/latest/download/catalog.toml
 # v0.22.11+: ``bty`` is the merged console script. Image-root comes
 # from ``BTY_IMAGE_ROOT`` (no ``--image-root`` flag any more) and the
 # only catalog input is ``--catalog URL`` (no separate default-knob).

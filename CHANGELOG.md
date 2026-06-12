@@ -44,6 +44,18 @@ local eMMC or NVMe.
   the on-Pi flow, and local QEMU-virt verification for
   developers.
 
+### Fixed
+
+- **TUI's ``[d] default`` catalog shortcut no longer 404s.** v0.46
+  stopped publishing a bty-side ``catalog.toml`` mirror but the
+  TUI's ``_BTY_DEFAULT_CATALOG_URL`` (the wizard's ``[d] default``,
+  the ``make tui CATALOG=default`` developer shortcut, and the
+  operator-facing reference docs) was missed and still pointed at
+  the now-absent ``safl/bty/releases/latest/download/catalog.toml``.
+  Repointed at the upstream image-builder's catalog
+  (``safl/nosi/releases/latest/download/catalog.toml``) so the TUI
+  matches the bty-web side.
+
 ### Changed
 
 - ``BTY_USB_ISO=1`` env knob removed (pre-1.0 break-freely; the

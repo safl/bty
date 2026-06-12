@@ -293,7 +293,12 @@ def collect_lshw(*, timeout: float = 30.0) -> object | None:
     return parsed
 
 
-_BTY_DEFAULT_CATALOG_URL = "https://github.com/safl/bty/releases/latest/download/catalog.toml"
+# v0.46 stopped publishing a bty-side catalog.toml mirror and pointed
+# bty-web at the upstream image-builder (``safl/nosi``); the wizard's
+# ``[d] default`` shortcut tracks the same source so both consumers
+# resolve to one catalog. The bty release no longer ships a
+# catalog.toml asset, so the old URL would 404.
+_BTY_DEFAULT_CATALOG_URL = "https://github.com/safl/nosi/releases/latest/download/catalog.toml"
 
 
 # ---------------------------------------------------------------------------
