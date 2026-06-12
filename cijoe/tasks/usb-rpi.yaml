@@ -1,0 +1,48 @@
+doc: |
+  bty USB-Pi flasher build (live-build + Pi-image packaging)
+  ===========================================================
+
+  Builds an arm64 Raspberry-Pi-bootable raw disk image so an
+  operator can USB-boot a CM5 / Pi5 / Pi4 directly into the bty
+  flash TUI and reflash the box's eMMC or NVMe HAT without
+  taking the enclosure apart. Same chroot package set + hooks as
+  the x86 variants; the only divergences are
+  ``--architectures arm64``, the arm64-only package list
+  (``bty-base.list.chroot_arm64`` with ``linux-image-arm64`` +
+  ``raspi-firmware`` + Pi WiFi firmware), and the Pi-image
+  packaging post-process step (live-build can't emit Pi-bootable
+  images natively because the Pi boot ROM reads from FAT32
+  partition 1 rather than via syslinux / grub).
+
+  Steps:
+
+  1. ``bty_wheel_stage`` - builds the bty-lab wheel from the
+     parent repo and stages it under
+     ``live-build/config/includes.chroot/opt/bty/``. live-build's
+     chroot hook installs it (with the ``[tui]`` extra) into
+     ``/opt/bty/venv``.
+  2. ``usb_rpi_build`` - copies ``live-build/`` into a working
+     dir, sets ``BTY_VARIANT=usb-rpi`` so ``auto/config`` selects
+     ``--architectures arm64 --binary-images netboot``, runs
+     ``lb clean --all && lb build``, then invokes
+     ``bty-media/scripts/pack_rpi_img.py`` to wrap the
+     kernel/initrd/squashfs in a Pi-bootable 3-partition raw
+     image (FAT32 RPIBOOT + ext4 BTY_LIVE with the squashfs +
+     exFAT BTY_IMAGES scratch). Publishes
+     ``bty-usb-rpi-arm64-v<version>.img.gz`` plus a sha256
+     manifest under ``publish.dir``.
+
+  Requires: live-build on the build host plus passwordless sudo
+  (live-build's chroot operations + the loop-mount + mkfs steps
+  in pack_rpi_img.py are privileged). The build host MUST be
+  native arm64 (``ubuntu-24.04-arm`` on GitHub Actions; a local
+  Pi5 / equivalent for dev). Cross-build via qemu-user-static
+  is not supported here: the chroot-stage hooks misbehave under
+  binfmt.
+
+steps:
+- name: bty_wheel_stage
+  uses: bty_wheel_stage
+
+- name: usb_rpi_build
+  uses: usb_rpi_build

@@ -1,0 +1,35 @@
+# bty USB-Pi flasher (arm64) - build configuration
+#
+# Drives Debian's live-build (arm64, ``--binary-images netboot``) on
+# a native arm64 host to produce the kernel + initrd + squashfs trio,
+# then ``bty-media/scripts/pack_rpi_img.py`` assembles a Pi-bootable
+# 3-partition raw disk image around them (FAT32 RPIBOOT with the Pi
+# firmware + kernel + cmdline + config, ext4 BTY_LIVE carrying the
+# squashfs, exFAT BTY_IMAGES for operator image files).
+#
+# Output is ``bty-usb-rpi-arm64-v<version>.img.gz``. Operator
+# workflow:
+#
+#     gunzip -c bty-usb-rpi-arm64-v0.47.0.img.gz | sudo dd of=/dev/sdX bs=4M conv=fsync
+#
+# Then plug into a CM5 (on IO-board) / Pi5 / Pi4 and power on.
+# Once the bty TUI is up the operator picks a nosi rpios image
+# from the default catalog (``safl/nosi``) and flashes to
+# ``/dev/mmcblk0`` (CM5 eMMC) or ``/dev/nvme0n1`` (Pi5 NVMe HAT).
+#
+# Usage:
+#   cijoe tasks/usb-rpi.yaml --config configs/usb-rpi.toml --monitor
+# (or via the Makefile dispatcher: ``make build VARIANT=usb-rpi``)
+
+[bty]
+variant = "usb-rpi"
+hostname = "bty-usb"
+timezone = "UTC"
+
+[cijoe.workflow]
+fail_fast = true
+
+# Where the published artifact lands. Mirrors the other variants
+# so all images live under one tree.
+[system-imaging.images.bty-usb-rpi-arm64]
+publish.dir = "{{ local.env.HOME }}/system_imaging/disk"
