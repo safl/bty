@@ -11,8 +11,14 @@ VARIANT ?= usb-x86
 #  - usb-x86 uses the live-build iso-hybrid pipeline (usb.yaml).
 #  - netboot-x86 uses the live-build netboot pipeline (netboot.yaml).
 #    Renamed from live-x86 to disambiguate from usb-x86 (also "live").
+#  - usb-rpi uses the live-build arm64 netboot pipeline plus the
+#    Pi-image packaging step (usb-rpi.yaml). Build host MUST be
+#    native arm64 (``ubuntu-24.04-arm`` on GHA; a local Pi5 / etc.
+#    for dev). Cross-build via qemu-user is not supported.
 ifeq ($(VARIANT),netboot-x86)
 MEDIA_TASK := tasks/netboot.yaml
+else ifeq ($(VARIANT),usb-rpi)
+MEDIA_TASK := tasks/usb-rpi.yaml
 else
 MEDIA_TASK := tasks/usb.yaml
 endif
@@ -53,6 +59,7 @@ help:
 	@echo "Variant: $(VARIANT)  (override with VARIANT=netboot-x86, ...)"
 	@echo "  usb-x86      - bootable USB live ISO via live-build (.iso.gz, x86_64)"
 	@echo "  netboot-x86  - kernel + initrd + squashfs trio for PXE-flash clients (x86_64)"
+	@echo "  usb-rpi      - Raspberry-Pi USB-bootable flasher (.img.gz, arm64; CM5/Pi5/Pi4)"
 	@echo ""
 	@echo "Docker (trial / image-library bty-web container):"
 	@echo "  docker-build  uv build + docker build -> bty-web:dev (single-arch, local)"
@@ -164,10 +171,13 @@ media-deps:
 # Build a media image. Pick the variant via ``VARIANT=...``:
 #   make build VARIANT=usb-x86      - bootable USB live ISO (.iso.gz, x86_64)
 #   make build VARIANT=netboot-x86  - kernel + initrd + squashfs for PXE clients
+#   make build VARIANT=usb-rpi      - Raspberry-Pi USB-bootable flasher
+#                                     (.img.gz, arm64; build host MUST be
+#                                     native arm64)
 #
-# netboot-x86 + usb-x86 both use live-build (cijoe/tasks/netboot.yaml,
-# cijoe/tasks/usb.yaml) and need ``live-build`` on the host plus
-# passwordless sudo.
+# All variants use live-build (cijoe/tasks/netboot.yaml,
+# cijoe/tasks/usb.yaml, cijoe/tasks/usb-rpi.yaml) and need
+# ``live-build`` on the host plus passwordless sudo.
 build:
 	cd cijoe && cijoe $(MEDIA_TASK) --monitor -c configs/$(VARIANT).toml
 
