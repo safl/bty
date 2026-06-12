@@ -36,6 +36,7 @@ walkthrough-server-docker
 :caption: Tutorials
 
 tutorials/bty-usb
+tutorials/bty-usb-rpi
 tutorials/bty-ventoy
 tutorials/bmc
 tutorials/bty-netboot
