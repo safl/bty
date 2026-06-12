@@ -416,6 +416,76 @@ jobs:
             ~/system_imaging/disk/bty-usb-x86_64-v*.iso
             ~/system_imaging/disk/bty-usb-x86_64-v*.iso.sha256
 
+  # Pi-flasher arm64 image. Native arm64 (``ubuntu-24.04-arm``, free
+  # for public repos since Jan 2024) rather than cross-build via
+  # qemu-user-static: live-build's chroot-stage hooks are
+  # binfmt-fragile and 5-10x slower under qemu. The build flow is
+  # the same shape as usb-x86 (apt + live-build .deb + cijoe + uv +
+  # ``make build``); the divergence is in ``cijoe/tasks/usb-rpi.yaml``
+  # which calls ``pack_rpi_img.py`` to wrap the lb output into a
+  # Pi-bootable raw image.
+  build-usb-rpi:
+    name: Build usb-rpi image
+    needs: test
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install build dependencies (live + Pi-image pack)
+        run: |
+          set -eu
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            debootstrap squashfs-tools xorriso debian-archive-keyring \
+            exfatprogs exfat-fuse dosfstools e2fsprogs mount util-linux \
+            gzip
+          POOL=http://ftp.debian.org/debian/pool/main/l/live-build
+          LB_DEB=$(curl -s "$POOL/" \
+              | grep -oE 'live-build_[0-9][^"<]*\.deb' \
+              | sort -V | tail -1)
+          if [ -z "$LB_DEB" ]; then
+              echo "could not find live-build .deb in $POOL/" >&2
+              exit 1
+          fi
+          echo "Fetching $LB_DEB"
+          wget -q "$POOL/$LB_DEB"
+          sudo dpkg -i "$LB_DEB"
+          lb --version
+
+      - name: Install cijoe
+        run: pipx install --force cijoe
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.1.0
+
+      - name: Build usb-rpi image
+        run: make build VARIANT=usb-rpi
+
+      - name: Upload cijoe output
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: cijoe-output-usb-rpi
+          path: cijoe/cijoe-output
+          if-no-files-found: warn
+
+      - name: Upload cijoe report.html
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: cijoe-report-usb-rpi
+          path: cijoe/cijoe-output/report.html
+          if-no-files-found: warn
+
+      - name: Upload artifact (bty-usb-rpi-arm64.img.gz)
+        uses: actions/upload-artifact@v7
+        with:
+          name: bty-usb-rpi-arm64
+          path: |
+            ~/system_imaging/disk/bty-usb-rpi-arm64-v*.img.gz
+            ~/system_imaging/disk/bty-usb-rpi-arm64-v*.img.gz.sha256
+
   # ---------------- verify ------------------------------------------------
   test-pxe:
     name: PXE chain test (containerized bty + client QEMU VM)
@@ -655,7 +725,7 @@ jobs:
   # a failing test-pxe) never gets tagged. The tag is pushed with RELEASE_PAT
   # because a GITHUB_TOKEN push would not trigger this workflow.
   tag-release:
-    needs: [lint, test, flash-integration, build-wheel, build-ipxe, build-media, build-usb-x86, test-pxe, test-usb-grow, test-usb-ventoy, docs]
+    needs: [lint, test, flash-integration, build-wheel, build-ipxe, build-media, build-usb-x86, build-usb-rpi, test-pxe, test-usb-grow, test-usb-ventoy, docs]
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
@@ -682,7 +752,7 @@ jobs:
   # ---------------- ship ---------------------------------------------------
   attach-to-release:
     name: Attach artifacts to GitHub release
-    needs: [build-wheel, build-ipxe, build-media, build-usb-x86, test-pxe, test-usb-grow, test-usb-ventoy, docs]
+    needs: [build-wheel, build-ipxe, build-media, build-usb-x86, build-usb-rpi, test-pxe, test-usb-grow, test-usb-ventoy, docs]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
@@ -697,7 +767,7 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           path: gathered/
-          pattern: '{dist,bty-ipxe-x86_64,bty-netboot-x86_64,bty-usb-x86_64-iso,docs-pdf}'
+          pattern: '{dist,bty-ipxe-x86_64,bty-netboot-x86_64,bty-usb-x86_64-iso,bty-usb-rpi-arm64,docs-pdf}'
       - name: List gathered artifacts
         run: find gathered -type f | sort
       - name: Generate release.toml manifest
@@ -766,6 +836,7 @@ jobs:
             gathered/bty-ipxe-x86_64/*
             gathered/bty-usb-x86_64-iso/*
             gathered/bty-netboot-x86_64/*
+            gathered/bty-usb-rpi-arm64/*
             gathered/docs-pdf/*
             release.toml
           fail_on_unmatched_files: true
