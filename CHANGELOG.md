@@ -9,6 +9,52 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.48.0] - 2026-06-12
+
+Doc + observability sweep after v0.47.0. The /reference release-
+artifacts table and the bty-media README now advertise the
+``usb-rpi`` variant explicitly; a worker-loop safety net in
+``_BaseAsyncManager`` keeps a buggy ``_run_one`` from wedging a
+slot; an event-log backfill that bailed silently now leaves a
+debug breadcrumb; and a dead CI matrix branch is removed.
+
+### Added
+
+- ``_BaseAsyncManager._worker`` (used by ReleaseFetchManager +
+  BackupManager) wraps the per-key dispatch in a worker-loop
+  safety net: if ``_run_one`` leaks any exception, the worker
+  logs it, marks the state ``failed`` with a typed ``error``,
+  and stays alive to pull the next key. Production subclasses
+  already catch their own exceptions; this is defence-in-depth
+  for the day one doesn't.
+- ``_release_mgr.ReleaseFetchManager.backfill_from_events`` now
+  emits a ``log.debug`` (with traceback) when it soft-fails. The
+  soft-fail behaviour itself is unchanged (a corrupt events row
+  or a freshly-created DB without the table is not fatal at
+  startup); the breadcrumb just makes a real schema/data
+  problem visible when debug logging is on.
+
+### Fixed
+
+- ``/reference``'s release-artifacts table now lists the
+  ``bty-usb-rpi-arm64-v*.img.gz`` asset that v0.47.0 added.
+  Previously operators browsing /reference saw only the x86
+  artifacts and had no signal that the arm64 image existed.
+- ``bty-media/README.md`` re-headers as "three variants",
+  extends every ``make build VARIANT=...`` usage line to include
+  ``usb-rpi``, retitles the "Build prerequisites" block from
+  "usb-x86 + netboot-x86" to "All three variants", and corrects
+  a stale ``--binary-images netboot`` caption to ``tar``
+  (v0.47.0 dot-release switched arm64 away from ``netboot`` to
+  dodge lb's x86-only tftpboot pipeline).
+
+### Removed
+
+- Dead ``Enable KVM access for the runner`` step from
+  ``.github/workflows/ci-cd.yml``'s ``build-media`` job. The
+  step gated itself on ``matrix.kind == 'disk'`` but the matrix
+  only carries ``kind: live``; the step never ran.
+
 ## [0.47.0] - 2026-06-12
 
 New ``usb-rpi`` arm64 image variant: a USB-bootable Raspberry-Pi
