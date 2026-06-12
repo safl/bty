@@ -57,11 +57,12 @@ Three paths, all of which write rows to `catalog_entries`; none of
 which puts bytes anywhere on bty-web's filesystem:
 
 - **Catalog upload** -- `POST /ui/catalog/upload` of a TOML manifest.
-  Use this when you have a curated catalog file (the bty release
-  publishes one for nosi images).
+  Use this when you have a curated catalog file (the upstream
+  ``safl/nosi`` image-builder publishes one auto-generated per
+  release).
 - **Fetch from release** -- `POST /ui/catalog/fetch-release`.
-  Pulls the bty default catalog from
-  `https://github.com/safl/bty/releases/latest/download/catalog.toml`.
+  Pulls the default catalog from
+  `https://github.com/safl/nosi/releases/latest/download/catalog.toml`.
 - **Add by URL** -- `POST /catalog/entries` with `image_url` (and
   optionally `sha_url`). For an ad-hoc image that doesn't live in a
   catalog: host it on your own HTTP server / push to a registry, then
