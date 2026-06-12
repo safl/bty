@@ -1,6 +1,6 @@
 # bty-media
 
-Source content for the bty media images. Two variants:
+Source content for the bty media images. Three variants:
 
 - **USB live image** (`VARIANT=usb-x86`) - bootable USB carrying the
   bty runtime + a writable exFAT `BTY_IMAGES` partition for pre-built
@@ -15,6 +15,13 @@ Source content for the bty media images. Two variants:
   from `/proc/cmdline` and exec's `bty --server X --mac Y`; ``bty``
   then GETs `<server>/pxe/<mac>/plan` and dispatches (auto-flash,
   interactive wizard, or no-op).
+- **Raspberry-Pi USB flasher** (`VARIANT=usb-rpi`) - arm64 image that
+  boots a CM5 / Pi5 / Pi4 from a USB stick into the same bty TUI as
+  `usb-x86`, sized for in-situ flashing of local eMMC / NVMe.
+  Built via live-build (`--architectures arm64 --binary-images tar`)
+  then wrapped into a Pi-bootable raw image by
+  `scripts/pack_rpi_img.py`. Shipped gzip-compressed as
+  `bty-usb-rpi-arm64.img.gz`.
 
 This directory holds the **content** baked into the images: the rootfs
 trees that live-build folds in and the live-build config tree. The cijoe
@@ -22,7 +29,7 @@ trees that live-build folds in and the live-build config tree. The cijoe
 content lives at `cijoe/` at the repo root.
 
 Operators drive everything via the top-level Makefile:
-`make build VARIANT=usb-x86|netboot-x86`.
+`make build VARIANT=usb-x86|netboot-x86|usb-rpi`.
 
 ## Layout
 
@@ -39,10 +46,10 @@ Operators drive everything via the top-level Makefile:
 From the repo root:
 
 ```
-make build VARIANT=usb-x86|netboot-x86
+make build VARIANT=usb-x86|netboot-x86|usb-rpi
 ```
 
-dispatches to one of two cijoe task files. The Makefile picks the
+dispatches to one of three cijoe task files. The Makefile picks the
 right one based on the variant:
 
 - `usb-x86` -> `cijoe tasks/usb.yaml`. Drives Debian's `live-build`
@@ -59,7 +66,7 @@ right one based on the variant:
 
 - `usb-rpi` -> `cijoe tasks/usb-rpi.yaml`. Drives `live-build`
   with `BTY_VARIANT=usb-rpi` (`--architectures arm64
-  --binary-images netboot`) on a native arm64 builder, then
+  --binary-images tar`) on a native arm64 builder, then
   `scripts/pack_rpi_img.py` assembles a Pi-bootable raw disk
   image: FAT32 partition with `raspi-firmware` blobs + kernel
   + initrd + `config.txt` + `cmdline.txt`, an ext4 partition
@@ -68,14 +75,15 @@ right one based on the variant:
   `bty-usb-rpi-arm64.img.gz`. Operator dd's it to a USB stick
   and boots a CM5 / Pi5 / Pi4 from it.
 
-Both variants stage the bty-lab wheel via `bty_wheel_stage` into the
-live-build chroot includes, then drive live-build via `live_build`;
-usb-x86 additionally runs `usb_iso_build` for the exFAT `BTY_IMAGES`
-post-processing.
+All three variants stage the bty-lab wheel via `bty_wheel_stage`
+into the live-build chroot includes, then drive live-build via
+`live_build`; usb-x86 additionally runs `usb_iso_build` for the
+exFAT `BTY_IMAGES` post-processing, and usb-rpi runs
+`usb_rpi_build` to wrap the lb output into a Pi-bootable image.
 
 ## Build prerequisites
 
-usb-x86 + netboot-x86 (live-build):
+All three variants (live-build):
 - `live-build` (`sudo apt install live-build`)
 - `debootstrap`, `squashfs-tools`, `xorriso` (pulled in by
   `live-build`'s recommends, or install explicitly)
