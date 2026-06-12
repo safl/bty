@@ -5,10 +5,12 @@ Stage the bty-lab wheel for variants that bake bty into their image
 Builds a wheel from the parent repo via ``uv build`` and copies it
 into a per-variant staging directory under ``bty-media/``:
 
-- ``netboot-x86`` / ``usb-x86`` ->
+- ``netboot-x86`` / ``usb-x86`` / ``usb-rpi`` ->
   ``bty-media/live-build/config/includes.chroot/opt/bty/`` (consumed
   by the live-build hook ``0500-bty-install.hook.chroot``, which
-  ``pip install``s it into the chroot's ``/opt/bty/venv``).
+  ``pip install``s it into the chroot's ``/opt/bty/venv``). All
+  three variants share the same chroot tree; only the bake's
+  binary-image shape and target architecture differ.
 
 The cwd at run time is ``cijoe/`` (the Makefile cd's there before
 invoking cijoe), so the repo root is ``Path.cwd().parent`` and the
@@ -28,10 +30,14 @@ from argparse import ArgumentParser
 from pathlib import Path
 
 # Variant -> destination directory relative to ``bty-media/``.
-# Variants not listed here are skipped with rc=0.
+# Variants not listed here are skipped with rc=0. All three live-
+# build variants share the same chroot tree, so they share the
+# same target dir.
+_LIVE_CHROOT_BTY = Path("live-build") / "config" / "includes.chroot" / "opt" / "bty"
 TARGET_DIRS: dict[str, Path] = {
-    "netboot-x86": Path("live-build") / "config" / "includes.chroot" / "opt" / "bty",
-    "usb-x86": Path("live-build") / "config" / "includes.chroot" / "opt" / "bty",
+    "netboot-x86": _LIVE_CHROOT_BTY,
+    "usb-x86": _LIVE_CHROOT_BTY,
+    "usb-rpi": _LIVE_CHROOT_BTY,
 }
 
 
