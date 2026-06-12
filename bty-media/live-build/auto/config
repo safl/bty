@@ -118,6 +118,51 @@ case "${BTY_VARIANT}" in
         ;;
 esac
 
+# Per-architecture package list, written here rather than in a
+# ``.list.chroot_<arch>``-suffixed file under ``config/package-lists/``
+# because Debian live-build 3.0~a57 (Ubuntu trixie/jammy runners) does
+# NOT consume the underscore-suffix form; the docs imply it should
+# but the runner build that ships with the GHA image does not. To
+# avoid version-specific guesswork, generate a plain
+# ``bty-arch.list.chroot`` based on the resolved ``${ARCH}``. live-
+# build always consumes unsuffixed ``*.list.chroot`` files.
+mkdir -p config/package-lists
+case "${ARCH}" in
+    amd64)
+        # amd64 kernel + Intel/AMD microcode + r8125 DKMS build env.
+        # Why microcode: PXE-booted bare metal has no host-loaded
+        # ucode, and modern Ryzen + recent Intel cores ship factory
+        # microcode missing Spectre/SRBDS/Reptar/Inception mitigations.
+        # Pinned to trixie-backports via
+        # ``config/preferences/backports.pref.chroot``.
+        cat >config/package-lists/bty-arch.list.chroot <<'PKGS'
+linux-image-amd64
+intel-microcode
+amd64-microcode
+dkms
+build-essential
+linux-headers-amd64
+PKGS
+        ;;
+    arm64)
+        # arm64 kernel + raspi-firmware (the Pi boot chain bootcode.bin
+        # + start*.elf + fixup*.dat + Pi DTBs in /usr/lib/raspi-firmware/)
+        # + Pi WiFi/BT firmware (brcm80211 + misc-nonfree). No x86
+        # microcode, no DKMS build env (the r8125 driver is x86-only
+        # and the hook early-exits on non-amd64).
+        cat >config/package-lists/bty-arch.list.chroot <<'PKGS'
+linux-image-arm64
+raspi-firmware
+firmware-brcm80211
+firmware-misc-nonfree
+PKGS
+        ;;
+    *)
+        echo "auto/config: no per-arch package list for ARCH=${ARCH}" >&2
+        exit 2
+        ;;
+esac
+
 # shellcheck disable=SC2086 # BOOTLOADERS_OPTS is intentionally word-split
 lb config noauto \
     --mode debian \

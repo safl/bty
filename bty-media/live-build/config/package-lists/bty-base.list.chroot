@@ -3,12 +3,13 @@
 # (qemu-utils, nvme-cli, parted, zstd, python3, etc.) come from
 # ``bty-flash.list.chroot``.
 #
-# The architecture-specific bits (kernel, microcode, DKMS build
-# environment for amd64; Pi firmware blobs for arm64) live in
-# arch-suffixed sibling files: ``bty-base.list.chroot_amd64`` and
-# ``bty-base.list.chroot_arm64``. live-build only consumes a
-# suffixed file when the matching ``--architectures`` is active,
-# so each variant ends up with exactly the right kernel package.
+# Architecture-specific packages (kernel, microcode, DKMS build env
+# for amd64; raspi-firmware + Pi WiFi/BT firmware for arm64) are
+# emitted at bake time by ``auto/config`` into a sibling file
+# ``bty-arch.list.chroot``. live-build 3.0~a57's per-arch suffix
+# scheme (``.list.chroot_<arch>``) is not honoured reliably on the
+# trixie / Ubuntu lb shipping in our build environment, so the
+# arch split lives in ``auto/config`` (which always runs first).
 live-boot
 live-config
 live-tools
