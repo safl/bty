@@ -97,11 +97,16 @@ case "${BTY_VARIANT}" in
     usb-rpi)
         ARCH=arm64
         # Pi firmware boots directly from FAT32 partition 1, no
-        # bootloader binary involved. lb's ``netboot`` mode emits
-        # the kernel + initrd + squashfs trio which the post-process
-        # step (``bty-media/scripts/pack_rpi_img.py``) wraps into a
-        # Pi-bootable disk image alongside the raspi-firmware blobs.
-        BINARY_IMAGES=netboot
+        # bootloader binary involved. We use ``tar`` (not ``netboot``)
+        # because lb's ``binary_netboot`` stage expects a ``tftpboot/``
+        # directory that the x86-only syslinux/pxelinux pipeline
+        # creates; on arm64 nothing populates it and the stage fails
+        # with ``mv: cannot stat 'tftpboot'``. ``binary_tar`` is a
+        # one-liner that tarballs ``binary/`` without needing any
+        # bootloader machinery; the resulting tarball is unused, but
+        # ``binary/live/{vmlinuz,initrd.img,filesystem.squashfs}``
+        # lands where ``pack_rpi_img.py`` reads from.
+        BINARY_IMAGES=tar
         BOOTLOADERS_OPTS=""
         # ``console=tty1 console=serial0,115200``: Pi firmware
         # overlays ``serial0`` onto the right ``ttyAMAx`` per board

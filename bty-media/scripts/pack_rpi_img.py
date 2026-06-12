@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
-"""Package a live-build netboot trio into a Pi-bootable raw disk image.
+"""Package a live-build chroot's kernel + initrd + squashfs into a Pi-bootable raw disk image.
 
 The Raspberry Pi boot ROM reads ``bootcode.bin`` / ``start*.elf`` /
 ``kernel*.img`` directly from FAT32 partition 1, not via MBR /
 syslinux / grub. live-build has no native Pi image mode, so we run
-``lb build --binary-images netboot --architectures arm64`` to get a
-``vmlinuz`` + ``initrd.img`` + ``filesystem.squashfs`` trio, then
-assemble a 3-partition raw image around them:
+``lb build --binary-images tar --architectures arm64`` to get a
+``vmlinuz`` + ``initrd.img`` + ``filesystem.squashfs`` trio under
+``binary/live/`` (the produced tarball is unused; ``tar`` mode is
+chosen only because lb's netboot stage expects a ``tftpboot/``
+directory the x86-only syslinux pipeline creates), then assemble a
+3-partition raw image around them:
 
 * **p1 FAT32, label ``RPIBOOT``, ~256 MiB, bootable**: the Pi
   firmware files from ``raspi-firmware`` (``bootcode.bin``, all

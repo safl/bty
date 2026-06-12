@@ -15,8 +15,12 @@ Workflow:
    pyproject version (kernel cmdline, /etc/issue / motd, etc.).
 3. Run ``sudo env BTY_VARIANT=usb-rpi lb clean --all && lb
    build``. ``auto/config`` reads ``BTY_VARIANT`` and configures
-   ``--architectures arm64 --binary-images netboot`` + the
-   Pi-flavoured kernel cmdline.
+   ``--architectures arm64 --binary-images tar`` + the
+   Pi-flavoured kernel cmdline. ``tar`` (not ``netboot``)
+   because lb's netboot stage expects a ``tftpboot/`` directory
+   created by the x86-only syslinux pipeline; the tarball lb
+   produces is unused (``pack_rpi_img.py`` reads the kernel /
+   initrd / squashfs straight from ``binary/live/``).
 4. Run ``pack_rpi_img.py`` to assemble the .img from the lb
    output: FAT32 RPIBOOT (firmware + kernel + initrd + config /
    cmdline), ext4 BTY_LIVE (squashfs as /live/filesystem.squashfs),
