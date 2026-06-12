@@ -4,7 +4,8 @@
 # produce a kernel + initrd + squashfs trio that bty-server hosts
 # over HTTP for PXE clients to chain into via iPXE. Same chroot
 # config tree as the ``usb-x86`` variant; only the binary-images
-# output mode differs (selected by the absence of ``BTY_USB_ISO=1``).
+# output mode differs (selected by ``BTY_VARIANT=netboot-x86`` in
+# the live-build env, which is the default).
 #
 # Renamed from ``live-x86`` to ``netboot-x86``: the previous name
 # was ambiguous because ``usb-x86`` is also a "live" image (live-
