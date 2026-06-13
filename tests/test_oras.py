@@ -153,6 +153,73 @@ def test_pick_image_layer_names_multiarch_index() -> None:
         oras.pick_image_layer(index)
 
 
+def test_pick_image_layer_refuses_helm_chart() -> None:
+    """A Helm OCI chart's layer carries mediaType
+    ``application/vnd.cncf.helm.chart.v1.tar+gzip`` and (often) no
+    annotation suffix; without an explicit mediaType refusal the
+    "largest layer" heuristic would pick it and bty.flash would write
+    its tar+gzip bytes -- tar headers and all -- onto the operator's
+    target disk. Refuse, naming the mediaType so the operator points
+    at a real disk-image artifact instead.
+    """
+    helm_manifest: dict[str, Any] = {
+        "layers": [
+            {
+                "digest": "sha256:" + "55" * 32,
+                "size": 4_096,
+                "mediaType": "application/vnd.cncf.helm.chart.v1.tar+gzip",
+            },
+            {
+                "digest": "sha256:" + "66" * 32,
+                "size": 256,
+                "mediaType": "application/vnd.cncf.helm.chart.provenance.v1.prov",
+            },
+        ]
+    }
+    with pytest.raises(oras.OrasError, match="non-disk-image artifact"):
+        oras.pick_image_layer(helm_manifest)
+
+
+def test_pick_image_layer_refuses_cosign_sig() -> None:
+    """Cosign signature artifacts carry only signature/attestation
+    layers. Refuse, don't fall back to dd'ing the sig blob onto disk.
+    """
+    cosign_manifest: dict[str, Any] = {
+        "layers": [
+            {
+                "digest": "sha256:" + "77" * 32,
+                "size": 512,
+                "mediaType": "application/vnd.dev.cosign.simplesigning.v1+json",
+            },
+        ]
+    }
+    with pytest.raises(oras.OrasError, match="non-disk-image artifact"):
+        oras.pick_image_layer(cosign_manifest)
+
+
+def test_pick_image_layer_picks_image_layer_alongside_helm_provenance() -> None:
+    """A future hybrid manifest with one real image layer AND a
+    non-image sidecar (e.g. provenance) should still resolve to the
+    image; only manifests where ALL layers are non-image get refused.
+    """
+    mixed: dict[str, Any] = {
+        "layers": [
+            {
+                "digest": "sha256:" + "aa" * 32,
+                "size": 256,
+                "mediaType": "application/vnd.in-toto+json",
+            },
+            {
+                "digest": "sha256:" + "bb" * 32,
+                "size": 2_000_000,
+                "annotations": {"org.opencontainers.image.title": "appliance.img.gz"},
+            },
+        ]
+    }
+    layer = oras.pick_image_layer(mixed)
+    assert layer["size"] == 2_000_000
+
+
 def test_pick_image_layer_falls_back_when_all_look_like_sidecars() -> None:
     """If the picker filtered everything out (e.g. every layer is
     annotated as .sha256), fall back to picking the largest of the

@@ -116,6 +116,39 @@ _SIDECAR_SUFFIXES = (
     ".json",
 )
 
+# Layer mediaTypes that are NEVER disk images. A manifest whose largest
+# layer carries one of these is a Helm chart, a Cosign signature, an
+# in-toto attestation, a SPDX SBOM, etc. Without this filter
+# ``pick_image_layer`` would happily pick the Helm tarball or the
+# signature blob and ``bty.flash`` would write its bytes onto the
+# operator's target disk (tar headers / signature bytes into the MBR).
+# An operator typing ``oras://`` at a non-image artifact deserves a
+# clear error, not corruption.
+_NON_IMAGE_LAYER_MEDIA_TYPES = (
+    # Helm OCI charts.
+    "application/vnd.cncf.helm.chart.v1.tar+gzip",
+    "application/vnd.cncf.helm.chart.provenance.v1.prov",
+    # Cosign signatures.
+    "application/vnd.dev.cosign.simplesigning.v1+json",
+    "application/vnd.dev.cosign.artifact.sig.v1+json",
+    # in-toto attestations.
+    "application/vnd.in-toto+json",
+    "application/vnd.dev.cosign.artifact.bundle.v1+json",
+    "application/vnd.dsse.envelope.v1+json",
+    # SBOMs.
+    "application/spdx+json",
+    "application/vnd.cyclonedx+json",
+    # OCI empty descriptor (used by artifact references with no payload).
+    "application/vnd.oci.empty.v1+json",
+)
+
+
+def _is_non_image_layer(layer: dict[str, Any]) -> bool:
+    media_type = layer.get("mediaType")
+    if not isinstance(media_type, str):
+        return False
+    return media_type in _NON_IMAGE_LAYER_MEDIA_TYPES
+
 
 class OrasError(OSError):
     """Raised on parse / resolution / fetch errors against an OCI registry.
@@ -396,20 +429,45 @@ def pick_image_layer(manifest: dict[str, Any]) -> dict[str, Any]:
             )
         raise OrasError("manifest has no layers")
 
-    image_like: list[dict[str, Any]] = []
+    # First pass: drop layers whose mediaType is definitively not a
+    # disk image (Helm chart, Cosign sig, SBOM, attestation, ...).
+    # Unlike title-suffix sidecars, these are never the right pick AND
+    # never get a fallback; flashing a Helm chart's tar+gzip into a
+    # disk's MBR is the data-loss scenario this guard exists for.
+    rejected_media_types: list[str] = []
+    image_candidates: list[dict[str, Any]] = []
     for layer in layers:
         if not isinstance(layer, dict):
             continue
+        if _is_non_image_layer(layer):
+            mt = layer.get("mediaType")
+            if isinstance(mt, str):
+                rejected_media_types.append(mt)
+            continue
+        image_candidates.append(layer)
+    if not image_candidates:
+        if rejected_media_types:
+            unique = ", ".join(sorted(set(rejected_media_types)))
+            raise OrasError(
+                f"oras ref resolved to a non-disk-image artifact "
+                f"(layer mediaTypes: {unique}); bty refuses to flash "
+                f"signature / Helm chart / SBOM blobs"
+            )
+        raise OrasError("manifest has no usable layers")
+
+    # Second pass: among the image-eligible layers, prefer ones that
+    # DON'T look like title-annotation sidecars (.sha256 / .sig / ...
+    # filenames). If every remaining layer carries a sidecar-looking
+    # title, fall back to "pick the largest" so the resolver gets a
+    # chance to fail loudly downstream rather than this picker
+    # mis-classifying.
+    image_like: list[dict[str, Any]] = []
+    for layer in image_candidates:
         title = _layer_title(layer)
         if title and any(title.endswith(suffix) for suffix in _SIDECAR_SUFFIXES):
             continue
         image_like.append(layer)
-    # If every layer looked like a sidecar (shouldn't happen for a real
-    # disk-image artifact but tolerate it), fall back to all dict layers
-    # so the size-pick still has something to choose from.
-    candidates = image_like or [layer for layer in layers if isinstance(layer, dict)]
-    if not candidates:
-        raise OrasError("manifest has no usable layers")
+    candidates = image_like or image_candidates
     return max(candidates, key=lambda layer: layer.get("size") or 0)
 
 
