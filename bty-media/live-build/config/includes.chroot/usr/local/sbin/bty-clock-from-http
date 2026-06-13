@@ -129,7 +129,19 @@ parse_to_epoch() {
 mkdir -p "$(dirname "${STATUS}")" 2>/dev/null || true
 : > "${STATUS}" 2>/dev/null || true
 
-candidate_urls | while IFS= read -r url; do
+# Iterate via ``for ... in $(candidate_urls)`` -- the previous shape
+# was ``candidate_urls | while read -r url; do ... done`` which runs
+# the loop body in a SUBSHELL (POSIX sh's pipe-to-while rule). Every
+# ``exit 0`` inside the body only exited the subshell, after which
+# control fell through to the trailing log line, so even when a URL
+# successfully stepped the clock the script always logged "no
+# candidate URL produced a Date: header; clock unchanged" -- an
+# operator chasing a phantom NTP failure read this as proof the
+# script had no effect when in fact it had just adjusted the clock.
+# URLs contain no whitespace (kernel-cmdline + the two HTTPS
+# fallbacks above are all plain ``http(s)://host[:port]/path``
+# tokens), so $()  word-splitting is safe here.
+for url in $(candidate_urls); do
     [ -z "${url}" ] && continue
     log "trying ${url}"
     hdr=$(fetch_date_header "${url}" || true)
