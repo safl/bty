@@ -9,6 +9,133 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.49.0] - 2026-06-13
+
+End-to-end audit sweep covering every surface (web endpoints, TUI +
+flash pipeline, ORAS resolver, live-build, CI workflows, server
+appliance, docs). Three classes of fix landed: real data-loss
+guards, defensive-depth fixes against silent failures, and a
+pre-1.0 cruft cleanup.
+
+### Fixed
+
+- **flash**: every ``dd`` invocation now passes ``oflag=direct``
+  in addition to ``conv=fsync``. With only conv=fsync the kernel
+  page cache shadowed the writes when the target happened to be
+  the disk we booted from; the running OS's binaries kept
+  executing the OLD content until the page was evicted while the
+  on-disk side took the new image. O_DIRECT bypasses the page
+  cache so the in-RAM and on-disk states stay consistent through
+  an in-place reflash.
+- **flash**: gzip's uncompressed-size trailer wraps mod-2^32. For
+  any ``.img.gz`` >= 4 GiB the reported number is a lie;
+  ``validate_plan`` would have happily greenlit flashing a 5 GiB
+  image onto a 4 GiB disk because gzip -l reported 1 GiB.
+  ``_parse_gzip_listing`` now detects the wrap (uncompressed <
+  compressed) and returns None so the size-fits-target check is
+  skipped with a note rather than fooled.
+- **tui**: the wizard's flash worker now passes a cancel callback
+  through to ``execute_plan``. Pre-fix, Ctrl+C during a flash
+  interrupted t.join() in the main thread but the daemon worker's
+  dd / curl / zstd subprocesses kept writing -- the operator's
+  "abort" left a partial-write in flight on the target disk with
+  no cleanup. The wizard now SIGTERMs the pipeline and renders a
+  dedicated "Cancelled -- target holds a partial write" panel.
+- **oras**: ``pick_image_layer`` previously filtered sidecar layers
+  only by title-annotation suffix, then took the largest remaining
+  layer. A Helm OCI chart, Cosign signature, in-toto attestation,
+  or SBOM lacks the sidecar suffix and would be returned as the
+  "image" layer; bty.flash would then dd the chart's tar+gzip
+  headers or the signature bytes into the target's MBR. Add an
+  explicit mediaType refusal pass before the size-pick covering
+  Helm / Cosign / in-toto / DSSE / SPDX / CycloneDX / OCI-empty.
+- **web**: ``ReleaseFetchManager.cancel(tag)`` now validates against
+  ``_TAG_RE`` symmetrically with ``enqueue``. Previously cancel
+  fell through to the base manager's plain ``_states.get(key)``,
+  so attacker-controlled text in a DELETE /boot/releases/{tag}
+  request returned a 404 + logged the literal string as the audit
+  row's subject_id; cancel now raises 422 on malformed tags.
+- **web**: ``fetch_release_catalog`` is an async route that called
+  ``urllib.request.urlopen(timeout=30)`` inline on the event loop.
+  An unreachable release host stalled every other request handler
+  (including the SSE event stream's heartbeat) behind it for the
+  full 30s; wrap in ``asyncio.to_thread``.
+- **web**: ``_release_mgr._backfill_from_events`` soft-failed on
+  any exception with no log line at all. Replace the bare ``return``
+  with a ``log.debug(..., exc_info=True)`` so a real schema/data
+  problem at startup leaves a breadcrumb when debug logging is on;
+  the soft-fail behaviour itself is unchanged.
+- **media**: ``bty-clock-from-http``'s URL loop was ``candidate_urls
+  | while read``: POSIX sh runs the right side of a pipe in a
+  subshell, so every ``exit 0`` inside the loop body only exited
+  the subshell. The trailing ``log "no candidate URL produced a
+  Date: header"`` then ran unconditionally, including after a URL
+  had successfully stepped the clock -- an operator chasing a
+  phantom NTP failure read this as proof the script had no
+  effect when it had actually done its job.
+- **media**: ``pack_rpi_img._locate_lb_output`` used ``rglob`` and
+  took the first match; on filesystems that listed
+  ``binary/EFI/vmlinuz.efi`` before ``binary/live/vmlinuz`` the
+  Pi image would have shipped the wrong kernel against the
+  squashfs. Prefer ``binary/live/`` explicitly.
+- **media**: ``bty-on-tty1.service`` had ``Restart=on-failure /
+  RestartSec=5`` with no ``StartLimit``. A first-frame crash
+  (corrupted catalog stick, malformed bty.toml) would have
+  respawned the bty splash on tty1 every 5 seconds forever with
+  no way for the operator to see the real error short of
+  switching ttys. Add ``StartLimitIntervalSec=60`` +
+  ``StartLimitBurst=5``.
+
+### Changed
+
+- **ci**: ``publish-tftp`` previously needed only ``[test,
+  build-ipxe]`` so a tag whose PXE chain test or USB Ventoy boot
+  test was red still pushed ``ghcr.io/safl/bty-tftp:vX.Y.Z`` and
+  moved ``:latest``. Gate it on the same release-blocking pipeline
+  as ``attach-to-release`` / ``tag-release`` so a red test
+  anywhere blocks the tftp container too.
+- **deploy**: ``bty-lab upgrade`` no longer migrates v0.41
+  ``envvars`` files to v0.42 ``bty.toml``. The migration code
+  (``_envvars_to_bty_toml`` + helpers) is gone; ``upgrade`` now
+  hard-errors with a pointer at ``bty-lab deploy --force`` when
+  ``bty.toml`` is missing.
+- **tui**: drop the no-op ``_print_source_summary`` /
+  ``_print_selection_so_far`` shims and their three call sites.
+
+### Docs
+
+- Replace every legacy ``BTY_STATE_DIR`` / ``BTY_BOOT_DIR`` /
+  ``BTY_BACKUP_DIR`` / ``BTY_CATALOG_FILE`` / ``BTY_WEB_*``
+  reference in doc sources with the canonical section-prefixed
+  names (``BTY_PATHS_STATE_DIR`` etc., ``BTY_SERVER_*``).
+- ``quickstart.md``'s "Flash a USB stick" code block was two
+  ``dd`` invocations spliced together. Replaced with a single
+  ``sudo dd ... oflag=direct conv=fsync`` that matches the
+  in-code rule and copy-pastes cleanly.
+- Catch up to v0.40-bytes-less + v0.46-catalog-source +
+  ``boot_mode`` renames across walkthrough-catalog,
+  walkthrough-server-docker, tutorials/bty-netboot, README,
+  reference, operations, concepts, and bty-media README.
+- Add ``usb-rpi`` to dependencies.md's build-deps table;
+  tutorials/bty-usb-rpi.md's QEMU smoke-test block now creates
+  ``fake-emmc.qcow2`` before referencing it.
+
+### Tests
+
+- Add ``tests/test_pack_rpi_img.py`` -- regression coverage on
+  the pure pieces of the arm64 Pi-image assembler (config.txt
+  invariants, cmdline.txt format, partition-size constants,
+  ``_locate_lb_output``'s preference for binary/live/).
+- Gzip-wrap rejection test, ORAS Helm/Cosign refusal tests, TUI
+  cancel-key validation test.
+
+### Removed
+
+- ``vN.NN+:`` historical version-prefix markers stripped from
+  in-code comments + docstrings + template comments. Per
+  pre-1.0 break-freely the codebase doesn't owe readers a
+  comparison to a prior shape that no longer exists.
+
 ## [0.48.0] - 2026-06-12
 
 Doc + observability sweep after v0.47.0. The /reference release-
