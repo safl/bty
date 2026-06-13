@@ -124,22 +124,30 @@ on usb-x86 and netboot-x86 building cleanly and the chain working end
 to end. Most operators never run this build pipeline themselves -
 ``bty-media/`` exists for contributors who want to modify the image.
 
-- **usb-x86.** The `.iso.gz` decompresses to a hybrid ISO
-  that boots into a Debian live environment with the `bty` wizard
-  installed into `/opt/bty/venv`, and an exFAT `BTY_IMAGES`
-  partition for pre-built images. live-boot's SquashFS + tmpfs
-  overlay provides the ephemeral rootfs (no `overlayroot`
-  package needed). End-to-end use case in
-  [Walkthrough: USB](../docs/src/walkthrough-usb.md).
-- **netboot-x86.** Kernel + initrd + squashfs trio used by PXE clients.
-  The chroot ships `bty-on-tty1.service` (after
+- **usb-x86.** Hybrid ISO that boots into a Debian live environment
+  with the `bty` wizard installed into `/opt/bty/venv`, and an
+  exFAT `BTY_IMAGES` partition for pre-built images. live-boot's
+  SquashFS + tmpfs overlay provides the ephemeral rootfs (no
+  `overlayroot` package needed). End-to-end use case in
+  [`docs/src/tutorials/bty-usb.md`](../docs/src/tutorials/bty-usb.md).
+- **netboot-x86.** Kernel + initrd + squashfs trio used by PXE
+  clients. The chroot ships `bty-on-tty1.service` (after
   `network-online.target`); it reads `bty.server=` + `bty.mac=`
   from `/proc/cmdline` and exec's `bty --server X --mac Y`. ``bty``
-  then GETs `<server>/pxe/<mac>/plan` and dispatches: `mode=auto`
-  downloads + flashes + reboots, `mode=interactive` drops the
-  operator into the wizard, `mode=local` prints a notice and
-  exits. Without `bty.mac` on the cmdline (e.g. USB-local boot),
-  ``bty`` falls back to scanning the local image-root directory.
+  then GETs `<server>/pxe/<mac>/plan` and dispatches: `mode=flash`
+  flashes a server-picked image + reboots, `mode=interactive` drops
+  the operator into the wizard with the server's catalog
+  pre-loaded, `mode=inventory` posts disks then reboots, `mode=exit`
+  prints a notice and exits cleanly. Without `bty.mac` on the
+  cmdline (e.g. USB-local boot), ``bty`` falls back to scanning
+  the local image-root directory.
+- **usb-rpi.** arm64 Pi-bootable raw image (FAT32 firmware + ext4
+  live squashfs + auto-growing exFAT `BTY_IMAGES`). Boots a CM5 /
+  Pi5 / Pi4 from a USB stick into the same bty TUI as usb-x86;
+  the headline use case is reflashing a CM5 in a closed IO-case
+  (eMMC) without the jumper-rpiboot-Etcher disassembly dance.
+  End-to-end use case in
+  [`docs/src/tutorials/bty-usb-rpi.md`](../docs/src/tutorials/bty-usb-rpi.md).
 
   The end-to-end PXE chain (server hands a per-MAC iPXE plan, client
   loads the live trio, flashes a target disk, signals done) is
