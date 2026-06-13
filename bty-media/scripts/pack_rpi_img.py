@@ -184,20 +184,35 @@ def _locate_lb_output(binary_dir: Path) -> tuple[Path | None, Path | None, Path 
     filesystem.squashfs}`` on the netboot path. The exact filenames
     are stable across architectures but the dir layout has drifted
     historically; scan defensively rather than hard-coding paths.
+
+    Prefers matches under ``binary/live/`` first: lb may emit multiple
+    candidates (``binary/live/vmlinuz``, ``binary/EFI/vmlinuz.efi``,
+    a stale copy under ``chroot/boot/``); plain rglob would return
+    whichever the filesystem listed first, which is non-deterministic
+    across runs and could yield a Pi image with the wrong kernel /
+    initrd combo for the squashfs. The ``binary/live/`` triple is
+    what live-build's netboot/tar shape consistently emits, so prefer
+    it explicitly and only fall back to a wider scan if it's empty.
     """
-    vmlinuz = initrd = squashfs = None
-    for candidate in binary_dir.rglob("vmlinuz*"):
-        if candidate.is_file():
-            vmlinuz = candidate
-            break
-    for candidate in binary_dir.rglob("initrd*"):
-        if candidate.is_file():
-            initrd = candidate
-            break
-    for candidate in binary_dir.rglob("filesystem.squashfs"):
-        if candidate.is_file():
-            squashfs = candidate
-            break
+
+    def _first_under(root: Path, pattern: str) -> Path | None:
+        for candidate in sorted(root.glob(pattern)):
+            if candidate.is_file():
+                return candidate
+        return None
+
+    def _first_rglob(root: Path, pattern: str) -> Path | None:
+        for candidate in sorted(root.rglob(pattern)):
+            if candidate.is_file():
+                return candidate
+        return None
+
+    live_dir = binary_dir / "live"
+    vmlinuz = _first_under(live_dir, "vmlinuz*") or _first_rglob(binary_dir, "vmlinuz*")
+    initrd = _first_under(live_dir, "initrd*") or _first_rglob(binary_dir, "initrd*")
+    squashfs = _first_under(live_dir, "filesystem.squashfs") or _first_rglob(
+        binary_dir, "filesystem.squashfs"
+    )
     return vmlinuz, initrd, squashfs
 
 
