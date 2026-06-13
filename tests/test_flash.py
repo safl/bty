@@ -222,15 +222,47 @@ def test_probe_image_gz_parses_gzip_listing(tmp_path: Path) -> None:
     helper that splits on whitespace and takes the second cell."""
     img = tmp_path / "x.img.gz"
     img.write_bytes(b"\0" * 64)
+    # Realistic compression ratio (uncompressed > compressed). The
+    # wrap-detection guard below refuses outputs where uncompressed
+    # < compressed (see test_probe_image_gz_refuses_wrapped_size),
+    # so the synthetic fixture also has to look like a real-world
+    # listing.
     gzip_output = (
         "         compressed        uncompressed  ratio uncompressed_name\n"
-        "                 73                  37 -34.4% x.img\n"
+        "                 73                 200  63.5% x.img\n"
     )
     fake_proc = MagicMock(returncode=0, stdout=gzip_output)
     with patch("bty.flash.subprocess.run", return_value=fake_proc):
         info = flash.probe_image(img)
     assert info.format == "img.gz"
-    assert info.virtual_size_bytes == 37
+    assert info.virtual_size_bytes == 200
+
+
+def test_probe_image_gz_refuses_wrapped_size(tmp_path: Path) -> None:
+    """gzip stores uncompressed size mod 2^32 in the file trailer.
+    When the reported uncompressed value is smaller than the
+    compressed value, the wrap definitely happened and the number
+    is a lie: trusting it would let ``validate_plan`` greenlight a
+    flash of a multi-GiB image onto a target too small to hold it,
+    and ``dd`` would run off the end of the disk mid-write. Refuse
+    the lie (return None) so the size-fits-target check is skipped
+    with a note instead of cheerfully passing on a fake number.
+    """
+    img = tmp_path / "big.img.gz"
+    img.write_bytes(b"\0" * 64)
+    # A 5 GiB raw image (compressed to ~3 GiB) reports uncompressed
+    # = 5 GiB - 4 GiB = 1073741824 bytes in the trailer (wrapped).
+    # 3 GiB compressed > 1 GiB "uncompressed" -> wrap detected.
+    wrapped_output = (
+        "         compressed        uncompressed  ratio uncompressed_name\n"
+        "         3221225472          1073741824 -200.0% big.img\n"
+    )
+    fake_proc = MagicMock(returncode=0, stdout=wrapped_output)
+    with patch("bty.flash.subprocess.run", return_value=fake_proc):
+        info = flash.probe_image(img)
+    assert info.format == "img.gz"
+    # None, not the wrapped 1 GiB lie.
+    assert info.virtual_size_bytes is None
 
 
 def test_probe_image_bz2_returns_unknown_virtual_size(tmp_path: Path) -> None:
