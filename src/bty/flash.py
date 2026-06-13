@@ -919,12 +919,21 @@ def _flash_img(
     progress: ProgressCallback | None = None,
     total_bytes: int | None = None,
 ) -> None:
-    """Write a raw .img to a block device with ``dd``."""
+    """Write a raw .img to a block device with ``dd``.
+
+    ``oflag=direct`` + ``conv=fsync`` are both required: O_DIRECT
+    bypasses the kernel page cache so the running OS's binaries
+    aren't shadowed by stale-pre-flash pages if the target happens
+    to be the disk we booted from, and conv=fsync makes dd return
+    only when its writes have hit disk. Combining the two is the
+    only way an in-place reflash leaves a consistent on-disk state.
+    """
     cmd = [
         "dd",
         f"if={image}",
         f"of={target}",
         "bs=4M",
+        "oflag=direct",
         "conv=fsync",
         "status=progress",
     ]
@@ -979,6 +988,7 @@ def _flash_compressed(
                 "dd",
                 f"of={target}",
                 "bs=4M",
+                "oflag=direct",
                 "conv=fsync",
                 "status=progress",
             ],
@@ -1195,7 +1205,7 @@ def _flash_img_from_url(
     try:
         stderr = subprocess.PIPE if progress is not None else None
         dd_proc = subprocess.Popen(
-            ["dd", f"of={target}", "bs=4M", "conv=fsync", "status=progress"],
+            ["dd", f"of={target}", "bs=4M", "oflag=direct", "conv=fsync", "status=progress"],
             stdin=curl_proc.stdout,
             stderr=stderr,
             text=True,
@@ -1279,7 +1289,7 @@ def _flash_compressed_from_url(
         try:
             stderr = subprocess.PIPE if progress is not None else None
             dd_proc = subprocess.Popen(
-                ["dd", f"of={target}", "bs=4M", "conv=fsync", "status=progress"],
+                ["dd", f"of={target}", "bs=4M", "oflag=direct", "conv=fsync", "status=progress"],
                 stdin=decomp_proc.stdout,
                 stderr=stderr,
                 text=True,
