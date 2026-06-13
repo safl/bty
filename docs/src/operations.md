@@ -114,7 +114,7 @@ Two env vars tune the feature when the in-UI knobs aren't enough:
 | Variable                     | Default                       | Meaning                                                              |
 |------------------------------|-------------------------------|----------------------------------------------------------------------|
 | `BTY_PATHS_BACKUP_DIR`             | `$BTY_PATHS_STATE_DIR/backups`      | Where backup directories land. Move off the OS disk if you want them to survive an OS reflash. |
-| `BTY_BACKUP_MAX_PARALLEL`    | `1`                           | Max concurrent backup jobs. Concurrent exports race on dest dirs; leave at 1 unless you have a reason. |
+| `BTY_TUNING_BACKUP_MAX_PARALLEL` | `1`                       | Max concurrent backup jobs. Concurrent exports race on dest dirs; leave at 1 unless you have a reason. |
 
 History lands in the audit log under `subject_kind=backup` (kinds
 `backup.created` / `backup.failed` / `backup.pruned`); the
@@ -184,7 +184,7 @@ without the marker), `init_db` does:
    `-shm`) so the fresh DB doesn't pick up stale pages.
 3. **Creates** a fresh `state.db` with the running release's schema,
    stamped with `bty.__version__`.
-4. **Records** a `system.schema_reset` event with details
+4. **Records** a `system.schema.reset` event with details
    `{from_version, to_version, archived_at}`. The event surfaces as
    an unacknowledged tripwire on `/ui/dashboard`; acknowledge it
    from `/ui/events`.

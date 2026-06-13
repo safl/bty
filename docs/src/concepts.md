@@ -56,10 +56,12 @@ Windows box (exFAT is read/write on all three) and dropping `.img.gz`,
 the live-boot SquashFS+tmpfs overlay, so files copied there persist.
 
 Fresh sticks ship with an empty BTY_IMAGES partition. The wizard's
-`[d] default` catalog is seven nosi images via `oras://ghcr.io/...`
-(rolling `:latest` tags resolved to content-addressed layer digests at
-flash time). See [`reference.md`](reference.md) for the catalog schema and
-`oras://` URL form.
+`[d] default` catalog is the upstream nosi catalog
+(`oras://ghcr.io/safl/nosi/...`, rolling `:latest` tags resolved to
+content-addressed layer digests at flash time) and currently lists
+~16 entries spanning Debian / Ubuntu / Proxmox / Raspberry Pi OS /
+LXC base variants. See [`reference.md`](reference.md) for the catalog
+schema and `oras://` URL form.
 
 ## Machine record
 
