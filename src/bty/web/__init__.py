@@ -28,7 +28,7 @@ def _run_portability(args: argparse.Namespace) -> None:
     inventory bundle. Server-free: needs only stdlib + ``bty.web``,
     so it works without the ``[web]`` extra.
 
-    v0.33.2+: the bundle is just ``<dest>/inventory.json`` -- no
+    the bundle is just ``<dest>/inventory.json`` -- no
     image bytes. The image-store disk and the catalog handle bytes
     separately.
     """

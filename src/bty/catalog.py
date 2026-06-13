@@ -14,10 +14,10 @@ pinned ``sha256`` digests:
     sha256 = "abc123..."
     format = "img.zst"
 
-v0.40+: bty-web no longer holds image bytes. The live env fetches
-each ``src`` directly (or via withcache when the cache is warm); this
-module is the schema parser + URL canonicaliser + the ``stream_src``
-proxy helper bty-web's /images route uses for oras-style sources.
+bty-web holds no image bytes. The live env fetches each ``src``
+directly (or via withcache when the cache is warm); this module is the
+schema parser + URL canonicaliser + the ``stream_src`` proxy helper
+bty-web's /images route uses for oras-style sources.
 ``image_ref_for_src`` produces the stable provenance id machine
 bindings target -- pure math over the canonical URL.
 

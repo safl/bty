@@ -1153,7 +1153,7 @@ def register_ui_routes(
         sha256, download), the Fetch-artifacts trigger + active-jobs
         table, plus the TFTP daemon control.
 
-        v0.41.2+: the old ``/ui/downloads`` page collapsed into this
+        the old ``/ui/downloads`` page collapsed into this
         one since bty-web's only download workload is the netboot
         artifact trio. ``artifacts_all_cached`` lets the template
         disable the Fetch artifacts button when the trio + sha256
@@ -1325,7 +1325,7 @@ def register_ui_routes(
     ) -> dict[str, Any]:
         """One config row for the Settings page.
 
-        v0.42+: when ``section`` + ``key`` are passed, the row is an
+        when ``section`` + ``key`` are passed, the row is an
         editable Config field; the template renders an inline form
         that POSTs to ``/ui/settings/config/edit`` and write-backs to
         ``cfg.primary_toml`` via ``_config.save_value``. The row is

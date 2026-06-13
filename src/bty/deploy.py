@@ -130,7 +130,7 @@ services:
     ports:
       - "8080:8080"
     environment:
-      # v0.42+: bty-web reads operator config from this TOML file.
+      # bty-web reads operator config from this TOML file.
       # The bind-mount below makes it visible to the container; the
       # operator edits ./bty.toml directly (or via the Settings page).
       # Per-key env overrides (BTY_<SECTION>_<KEY>) still work for
@@ -357,7 +357,7 @@ Image=ghcr.io/safl/bty-web:{version}
 AutoUpdate=registry
 PublishPort=8080:8080
 Volume={data_dir_abs}/bty:/var/lib/bty:Z
-# v0.42+: operator config is a TOML file at ``<dest>/bty.toml``,
+# operator config is a TOML file at ``<dest>/bty.toml``,
 # bind-mounted at ``/etc/bty/bty.toml``. Edit that file directly
 # or via the Settings page (the UI round-trips edits through
 # tomlkit). bty-web re-reads on each restart. The mount is RW
@@ -1265,7 +1265,7 @@ def deploy_main(argv: list[str] | None = None, *, prog: str = "bty-lab deploy") 
     )
     _step("wrote envvars", detail=str(envvars_path))
 
-    # v0.42+: bty.toml is the operator-facing config file. envvars
+    # bty.toml is the operator-facing config file. envvars
     # remains for compose substitution (HOST_ADDR / WITHCACHE_ADMIN_PASSWORD)
     # but every BTY_* knob now lives here. The compose / Quadlet
     # bind-mounts this into the container at /etc/bty/bty.toml.
