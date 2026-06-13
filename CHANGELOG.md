@@ -9,6 +9,22 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [Unreleased]
+
+### Changed
+
+- **usb-rpi**: the Raspberry Pi USB flasher is now built by
+  customizing Raspberry Pi OS Lite (arm64) in place (download +
+  loop-mount + chroot) instead of Debian live-build. RPiOS ships
+  every Pi kernel + every `bcm*.dtb` (incl. the CM5 / CM5IO device
+  trees) + firmware + bootloader, so the image boots Pi 4 / CM4 /
+  Pi 5 / CM5 with no per-board branching. This fixes the previous
+  live-build image, which shipped a boot partition with no device
+  trees at all and could not boot a CM5 ("Device-tree file
+  bcm2712-rpi-cm5-cm5io.dtb not found"). The bty TUI, services, and
+  hooks are unchanged; they are grafted onto the RPiOS rootfs via the
+  same `includes.chroot/` tree and `config/hooks/`.
+
 ## [0.49.0] - 2026-06-13
 
 End-to-end audit sweep covering every surface (web endpoints, TUI +
