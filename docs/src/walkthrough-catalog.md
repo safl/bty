@@ -44,9 +44,10 @@ None of them puts bytes anywhere on bty-web's filesystem.
    manifest survives restarts.
 
 2. **Fetch from release** -- `POST /ui/catalog/fetch-release`. Pulls
-   `releases/latest/download/catalog.toml` from
-   `BTY_BOOT_RELEASE_REPO` (default `safl/bty`) and imports it. This
-   is the "load the default nosi catalog" button.
+   `releases/latest/download/catalog.toml` from the configured
+   upstream catalog repo (default `safl/nosi`; override via
+   `/ui/settings/upstream` > "Catalog repo") and imports it. This is
+   the "load the default nosi catalog" button.
 
 3. **Add by URL** -- `POST /catalog/entries`. Body:
    `{"image_url": "...", "sha_url": "..." | null}`. For an ad-hoc
@@ -127,7 +128,7 @@ the deleted bty-web image-store.
 | `/catalog/entries?src=URL` | DELETE | delete an entry by its `src` URL |
 | `/catalog/import` | POST | import entries from a `source=` catalog (path / URL / oras) |
 | `/ui/catalog/upload` | POST | (form) upload a `catalog.toml` multipart |
-| `/ui/catalog/fetch-release` | POST | (form) pull the default catalog from `BTY_BOOT_RELEASE_REPO` |
+| `/ui/catalog/fetch-release` | POST | (form) pull the default catalog from the configured upstream repo (Settings > Upstream > Catalog repo; default `safl/nosi`) |
 
 All endpoints are auth-gated (the same session cookie as the
 browser UI).
@@ -143,7 +144,7 @@ whatever URL the plan endpoint hands it.
 |---|---|---|
 | `BTY_PATHS_STATE_DIR` | `/var/lib/bty` | state directory (state.db, catalogs, session-secret) |
 | `BTY_PATHS_CATALOG_FILE` | `${BTY_PATHS_STATE_DIR}/catalog.toml` | catalog manifest path |
-| `BTY_BOOT_RELEASE_REPO` | `safl/bty` | GitHub repo the "Fetch latest" button pulls from |
+| `BTY_BOOT_RELEASE_REPO` | `safl/bty` | GitHub repo the "Fetch netboot artifacts" button pulls kernel/initrd/squashfs from (was previously the catalog source too; the catalog source moved to a separate setting in v0.46 -- ``/ui/settings/upstream`` > "Catalog repo", default ``safl/nosi``). |
 
 ## Where the bytes actually live
 

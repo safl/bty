@@ -90,10 +90,14 @@ From a workstation or the USB live env:
 bty --catalog http://<host>:8080/catalog.toml
 ```
 
-The catalog pane fills with whatever the server has under
-`/var/lib/bty/images`. Pick an image (Enter), pick a target disk, confirm
-the flash plan. The server is the catalog source; the write happens on the
-local machine running `bty`.
+The catalog pane fills with whatever the server has imported into its
+catalog (via `/ui/catalog/upload` or "Fetch from release") plus any
+operator-added URL-only entries. bty-web post-v0.40 is bytes-less:
+images aren't kept on the server's filesystem; they materialise on
+demand via the withcache cache-through proxy at flash time. Pick an
+image (Enter), pick a target disk, confirm the flash plan. The server
+is the catalog source; the write happens on the local machine
+running `bty`.
 
 ## Scripted flash via the plan endpoint (no wizard)
 
@@ -133,9 +137,16 @@ The container expects a single volume at `/var/lib/bty`:
 /var/lib/bty/
   state.db           SQLite: machines, MAC -> image bindings, sessions
   session-secret     bty-web cookie key (generated on first start)
-  images/            pre-built image catalog (bind-mountable from host)
-  boot/              kernel / initrd / squashfs (only used by PXE flow)
+  bty.toml           operator-edited config (optional; env still wins)
+  catalog.toml       imported/uploaded catalog manifest
+  backups/           bty-web's exported backup bundles
+  boot/              kernel / initrd / squashfs for the netboot flow
 ```
+
+There's no ``images/`` subdir on a v0.40+ deploy: bty-web doesn't
+keep image bytes locally. Images stream from their published source
+(http(s):// / oras://) through the withcache sidecar at flash
+time; the catalog only carries the *references* + sha pins.
 
 `state.db` is plain SQLite; back it up by stopping the container
 and copying the file. Migrations run automatically on every start.

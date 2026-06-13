@@ -77,7 +77,9 @@ that need:
 
 | Dependency | Used by which variant |
 |---|---|
-| `live-build` + `debootstrap` + `squashfs-tools` + `xorriso` + `exfatprogs` | `usb-x86`, `netboot-x86` |
+| `live-build` + `debootstrap` + `squashfs-tools` + `xorriso` + `exfatprogs` | `usb-x86`, `netboot-x86`, `usb-rpi` |
+| `mtools` | `usb-rpi` (mcopy populates the FAT32 firmware partition) |
+| Native arm64 builder (e.g. GitHub's `ubuntu-24.04-arm` runner, or any Pi / Apple Silicon under Linux) | `usb-rpi` (qemu-user-static cross-debootstrap works but is 5-10x slower + breaks DKMS) |
 | `cijoe` | all variants (orchestration) |
 | Passwordless `sudo` | all variants (live-build / loopback mounts / mkfs need it) |
 

@@ -77,8 +77,20 @@ a firmware / drive-number problem; see
    local disk, POSTs `/pxe/<mac>/done`, reboots.
 
 The server's machine-detail page shows live progress + last flashed timestamp.
-Subsequent boots skip PXE (BIOS falls back to disk) and the target runs whatever
-the freshly-flashed image provisions to.
+What happens on subsequent boots depends on the `boot_mode` you picked:
+
+- `bty-flash-once` (the default for one-shot CI reflashes): the
+  next boot still hits bty's iPXE chain, sees the bound flash has
+  already happened, and serves `ipxe-exit` so the firmware falls
+  through to the freshly-flashed disk.
+- `bty-flash-always` (per-job CI cadence): the iPXE chain
+  alternates flash/sanboot per `/pxe` GET. The PXE-first firmware
+  order stays in effect; the alternation gives a freshly-flashed
+  boot in between every flash so the operator's job runs on the
+  intended image and the next job starts from a clean reflash.
+
+Either way, the freshly-flashed image runs whatever it provisions
+to.
 
 ## What you can do today
 
