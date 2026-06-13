@@ -936,7 +936,12 @@ jobs:
     # The TFTP sidecar is debian + ipxe serving the ~1 MB NBP for BIOS/UEFI
     # PXE bootstrap (deploy/tftp). It bakes bty's custom embedded-chain
     # ipxe.efi over the stock one, so it needs the build-ipxe artifact.
-    needs: [test, build-ipxe]
+    # Gates on the full release-blocking pipeline (test-pxe / test-usb-grow
+    # / test-usb-ventoy / docs / flash-integration) by mirroring
+    # attach-to-release's needs list -- without this a regression that reds
+    # the PXE chain test still ships :latest tags to ghcr.io because publish
+    # was only blocked by the unit-level ``test`` job.
+    needs: [lint, test, flash-integration, build-wheel, build-ipxe, build-media, build-usb-x86, build-usb-rpi, test-pxe, test-usb-grow, test-usb-ventoy, docs]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
