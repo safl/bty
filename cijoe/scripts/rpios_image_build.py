@@ -359,7 +359,23 @@ def _provision(cijoe, bty_media: Path, mnt: Path, version: str) -> int:
     cijoe.run_local(f"sudo chroot {mnt} /bin/sh -c {_q(rpi_tweaks)}")
     _install_ssh_regen(cijoe, mnt)
 
-    # 6. Strip per-instance identity so two flashes are not twins.
+    # 6. This cut ships no BTY_IMAGES partition (the catalog/oras flow
+    #    does not need it). The 0900 hook enabled var-lib-bty-images.mount,
+    #    whose What=/dev/disk/by-label/BTY_IMAGES pulls an implicit .device
+    #    dependency that blocks boot for the full device timeout (~90s) when
+    #    the partition is absent -- ConditionPathExists skips the mount
+    #    action but not that wait. Drop it from the boot transaction;
+    #    bty-images-discover still scans and bty falls back to catalog mode.
+    #    bty-usb-grow.service self-skips via its own ConditionPathExists
+    #    (no What=, so no blocking device dependency) and is left alone.
+    no_btyimages = (
+        "systemctl disable var-lib-bty-images.mount 2>/dev/null || true; "
+        "rm -f /etc/systemd/system/multi-user.target.wants/var-lib-bty-images.mount; "
+        "true"
+    )
+    cijoe.run_local(f"sudo chroot {mnt} /bin/sh -c {_q(no_btyimages)}")
+
+    # 7. Strip per-instance identity so two flashes are not twins.
     #    (0800 already removed the ssh host keys.)
     strip = (
         ": > /etc/machine-id; "
