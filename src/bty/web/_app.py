@@ -146,7 +146,7 @@ def create_app(
         Path(_cfg_backup) if _cfg_backup else (state_path.parent / "backups")
     )
 
-    # v0.33.0+: schema mismatches are handled by ``_db.init_db``
+    # schema mismatches are handled by ``_db.init_db``
     # auto-rotating ``state.db`` to ``state.db.<from>.<ts>.bak`` and
     # creating a fresh DB. The rotation is recorded as a
     # ``system.schema.reset`` event so the dashboard tripwire
@@ -524,7 +524,7 @@ def create_app(
             # on systems with lower clock resolution) BOTH saw
             # is_new=True and both logged a discovery event.
             #
-            # v0.33.25+: split into INSERT-or-skip + UPDATE-touch.
+            # split into INSERT-or-skip + UPDATE-touch.
             # The INSERT carries ``ON CONFLICT DO NOTHING RETURNING
             # 1`` -- the RETURNING row materialises iff the insert
             # actually fired (DO NOTHING suppresses it on conflict).
@@ -646,7 +646,7 @@ def create_app(
             # serve a sanboot + clear the bit. Otherwise serve the
             # live-env chain.
             #
-            # v0.33.24+: the bit ALONE used to gate the sanboot serve.
+            # the bit ALONE used to gate the sanboot serve.
             # If the live env crashed between fetching /boot and POSTing
             # /pxe/{mac}/inventory, the bit stayed armed and the server
             # served sanboot of an empty disk -- the box failed to boot,
@@ -733,7 +733,7 @@ def create_app(
                     #     STAYS bty-flash-once; re-arms only when the
                     #     operator re-saves the machine.
                     #
-                    # v0.33.24+: armed-without-last_flashed_at used to
+                    # armed-without-last_flashed_at used to
                     # also serve sanboot. That sanbooted a half-flashed
                     # disk -- bty-flash-always recovered via the next
                     # cycle (wasted one sanboot); bty-flash-once was
@@ -1569,7 +1569,7 @@ def create_app(
                 (now, mac),
             )
             if cur.rowcount > 0:
-                # v0.33.23+: log the 0->1 transition so operators see
+                # log the 0->1 transition so operators see
                 # "iPXE chain pulled the kernel" in the audit timeline
                 # without correlating /boot fetches to /pxe contacts.
                 # Combined with the v0.33.22 state-label honesty fix,
@@ -1919,7 +1919,7 @@ def create_app(
                     boot_mode          = excluded.boot_mode,
                     sanboot_drive      = excluded.sanboot_drive,
                     target_disk_serial = excluded.target_disk_serial,
-                    -- v0.33.22+: reset the one-shot alternation bit
+                    -- reset the one-shot alternation bit
                     -- ONLY when a policy-affecting field changes.
                     -- Pre-v0.33.22 the reset fired on every upsert,
                     -- so an operator renaming a box mid-cycle (or

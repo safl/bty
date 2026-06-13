@@ -232,7 +232,7 @@ class ImageEntry(BaseModel):
     * Dir-scan file with ``.sha256`` sidecar (or auto-imported)
       -> ``url`` points at the bty-web server (``/images/<sha>``);
       the server serves the bytes.
-    v0.40+: bty-web does not host image bytes. Every entry's
+    bty-web does not host image bytes. Every entry's
     ``url`` is either the upstream origin URL (https:// or
     oras://) or a withcache ``/b/<token>/`` URL when the plan
     endpoint resolves the entry's bytes to a warm cache. The

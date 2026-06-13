@@ -20,9 +20,8 @@ from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 
 # SSE event name reserved for worker state-change notifications.
-# v0.45 worker managers: Backup, release Fetch. (The catalog
-# Download + Hash managers were removed in v0.40 along with the
-# operator-uploaded image-store path.) The payload is a JSON object:
+# Worker managers today: Backup, release Fetch. The payload is a
+# JSON object:
 # ``{"kind": "backup", "key": "<state-key>", "status": "<terminal>"}``.
 # Pages that subscribe to ``/events/workers`` treat each event as
 # a "go refresh your table" signal rather than a patch; the JSON

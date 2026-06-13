@@ -1,10 +1,10 @@
 """Metadata-only portable export / import of bty-web state.
 
-v0.33.2+: the bundle is just ``inventory.json``. No image bytes,
-no ``files/`` subdir. The expensive-and-hard-to-recollect data is
-the per-machine hardware identity (mac + lshw + known_disks);
-image bytes are recoverable from the upstream catalog or already
-on the image-store disk.
+The bundle is just ``inventory.json``: no image bytes, no
+``files/`` subdir. The expensive-and-hard-to-recollect data is the
+per-machine hardware identity (mac + lshw + known_disks); image
+bytes are recoverable from the upstream catalog or already on the
+image-store disk.
 
 Bundle layout::
 

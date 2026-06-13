@@ -277,7 +277,7 @@ class UnifiedImage:
 
     ``names`` collects every label the image goes by; ``sources``
     every fetch path; ``cached`` is True iff a local file exists or
-    the content-addressed cache holds the SHA. v0.40+: bty-web's
+    the content-addressed cache holds the SHA. bty-web's
     ``_list_unified_images`` builds these straight from
     ``catalog_entries`` rows (one row per entry, ``cached=False``
     always); the merge that produced multi-name entries went with

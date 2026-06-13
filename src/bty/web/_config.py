@@ -1,7 +1,7 @@
 """Layered config for bty-web.
 
 Replaces the v0.41-era ``envvars``-shell-file + ~17 ``$BTY_*`` env-var
-reads scattered across the codebase. v0.42+: every operator-tunable
+reads scattered across the codebase. every operator-tunable
 knob is a key in :class:`Config`, sourced from (in increasing
 priority):
 
