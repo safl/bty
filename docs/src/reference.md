@@ -402,13 +402,11 @@ or absent blob leaves any prior one intact).
 
 ### Configuration
 
-v0.42+: the canonical operator config is a ``bty.toml`` file (located
-via ``BTY_CONFIG_FILE`` / ``BTY_CONFIG_DIR``, or the default search
-list ``/etc/bty/conf.d/`` -> ``/etc/bty/bty.toml`` ->
+The canonical operator config is a ``bty.toml`` file (located via
+``BTY_CONFIG_FILE`` / ``BTY_CONFIG_DIR``, or the default search list
+``/etc/bty/conf.d/`` -> ``/etc/bty/bty.toml`` ->
 ``<state_dir>/bty.toml``), with per-key env overrides following the
-``BTY_<SECTION>_<KEY>`` convention. The pre-v0.45.1 flat aliases
-(``BTY_WEB_*``, ``BTY_PATHS_STATE_DIR``, ``BTY_PATHS_BOOT_DIR``) are gone -- use
-the section-prefixed names below.
+``BTY_<SECTION>_<KEY>`` convention.
 
 | Variable | Purpose | Default |
 |---|---|---|

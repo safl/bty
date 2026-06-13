@@ -133,8 +133,7 @@ class NetbootConfig:
     explicitly only when the TFTP daemon lives somewhere else (e.g. a
     co-located host install -> ``127.0.0.1``, or the LAN router). See
     :meth:`Config.effective_tftp_probe_host`.
-    Env: ``BTY_NETBOOT_TFTP_PROBE_HOST`` (legacy alias:
-    ``BTY_TFTP_PROBE_HOST``).
+    Env: ``BTY_NETBOOT_TFTP_PROBE_HOST``.
     """
 
     tftp_probe_host: str = ""

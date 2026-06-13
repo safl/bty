@@ -989,7 +989,6 @@ class BtyTui:
         self._refresh_images()
         self._console.clear()
         self._print_header(stage=2, title="Pick an image to flash")
-        self._print_source_summary()
         if self._state._images:
             self._print_image_table(self._state._images)
         else:
@@ -1033,7 +1032,6 @@ class BtyTui:
         self._refresh_disks()
         self._console.clear()
         self._print_header(stage=3, title="Pick a target disk")
-        self._print_selection_so_far()
         if self._state._disks:
             self._print_disk_table(self._state._disks)
         else:
@@ -1092,7 +1090,6 @@ class BtyTui:
         disk_path = Path(str(disk.get("path") or disk.get("name") or ""))
         self._console.clear()
         self._print_header(stage=4, title="Confirm flash plan")
-        self._print_selection_so_far()
 
         # Probe both ends with a spinner so the screen isn't blank
         # during the lsblk + qemu-img info round-trips.
@@ -1502,29 +1499,6 @@ class BtyTui:
         if self._catalog_load_error:
             self._console.print(f"[{_DANGER}]catalog load failed: {self._catalog_load_error}[/]")
         self._console.print()
-
-    def _print_source_summary(self) -> None:
-        """No-op shim kept for screen call sites.
-
-        Source summary used to be a separate line block printed
-        below ``_print_header``. As of the Panel-header rework it
-        lives inside the header Panel itself, so screens that still
-        call this method get no extra output. Kept (instead of
-        deleted) to avoid churning every screen call site for a
-        no-op.
-        """
-
-    def _print_selection_so_far(self) -> None:
-        """No-op shim kept for screen call sites.
-
-        Selection-so-far (selected image / disk) used to print as
-        a separate line block below the header. As of the Panel-
-        header rework it lives inside the header Panel itself (the
-        ``state_lines`` block in :meth:`_print_header`), so screens
-        that still call this method get no extra output. Kept
-        (instead of deleted) to avoid churning every call site for
-        a no-op.
-        """
 
     def _print_image_table(self, rows: list[_TuiImage]) -> None:
         table = Table(

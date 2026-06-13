@@ -519,117 +519,6 @@ def _emit_deploy_files(
 # ---- Auto-fill envvars + host probe -----------------------------------------
 
 
-def _parse_envvars(envvars_path: Path) -> dict[str, str]:
-    """Read a v0.41-style envvars file into a plain ``key=value``
-    dict. Comments (``#``) + blank lines skipped; quoted values are
-    unwrapped of one outer layer of quotes. Returns ``{}`` if the
-    file is unreadable so callers can treat that as "no overrides
-    to carry across"."""
-    out: dict[str, str] = {}
-    try:
-        text = envvars_path.read_text(encoding="utf-8")
-    except OSError:
-        return out
-    for raw in text.splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, _, value = line.partition("=")
-        v = value.strip().strip('"').strip("'")
-        out[key.strip()] = v
-    return out
-
-
-def _envvars_to_bty_toml(envvars_path: Path, host_addr: str) -> str:
-    """Translate a v0.41 ``envvars`` file into the v0.42 ``bty.toml``
-    shape an in-place upgrade should land.
-
-    Reads the envvars file, picks every BTY_* key the upgrade should
-    carry across (per :data:`_ENVVARS_TO_TOML`), and emits a bty.toml
-    matching :func:`_render_bty_toml`'s shape -- with the operator's
-    actual values where set, schema defaults otherwise. ``host_addr``
-    seeds the [withcache] url + [netboot] tftp_probe_host (those were
-    derived from HOST_ADDR via compose substitution in v0.41; the
-    bty.toml shape stores them as concrete strings).
-    """
-    env = _parse_envvars(envvars_path)
-    admin_pw = env.get("BTY_ADMIN_PASSWORD") or DEFAULT_DEPLOY_PASSWORD
-    session_secret = env.get("BTY_SESSION_SECRET") or _gen_secret(32)
-    server_host = env.get("BTY_WEB_HOST") or "0.0.0.0"
-    server_port = env.get("BTY_WEB_PORT") or "8080"
-    trusted_proxy = env.get("BTY_TRUSTED_PROXY") or ""
-    state_dir = env.get("BTY_STATE_DIR") or "/var/lib/bty"
-    boot_dir = env.get("BTY_BOOT_DIR") or ""
-    backup_dir = env.get("BTY_BACKUP_DIR") or ""
-    catalog_file = env.get("BTY_CATALOG_FILE") or ""
-    withcache_url = env.get("BTY_WITHCACHE_URL") or f"http://{host_addr}:3000"
-    tftp_probe = env.get("BTY_TFTP_PROBE_HOST") or host_addr
-
-    def _opt(key: str, value: str) -> str:
-        """Render an optional string field: comment-out when blank
-        (so the schema default takes over) else set to the value."""
-        return f'{key} = "{value}"' if value else f'# {key} = ""'
-
-    return f"""\
-# bty.toml migrated from envvars by ``bty-lab upgrade``.
-# Edit freely; bty-web re-reads on each restart. The Settings page
-# also round-trips edits through tomlkit so your comments survive.
-
-[admin]
-password = "{admin_pw}"
-
-[server]
-host = "{server_host}"
-port = {server_port}
-{_opt("trusted_proxy", trusted_proxy)}
-session_secret = "{session_secret}"
-
-[paths]
-state_dir = "{state_dir}"
-{_opt("boot_dir", boot_dir)}
-{_opt("backup_dir", backup_dir)}
-{_opt("catalog_file", catalog_file)}
-
-[withcache]
-url = "{withcache_url}"
-
-[netboot]
-tftp_probe_host = "{tftp_probe}"
-
-[release]
-# Pinned in state.db (Settings -> Upstream sources); these defaults
-# seed a fresh install.
-
-[tuning]
-# backup_max_parallel = 1
-# max_upload_bytes = 214748364800
-"""
-
-
-def _read_envvars_host_addr(envvars_path: Path) -> str:
-    """Read ``HOST_ADDR=...`` back out of the preserved envvars file.
-
-    Used by ``upgrade_main`` so a regenerated Quadlet picks up the same
-    LAN IP the operator committed to at deploy time. Falls back to
-    :func:`_detect_host_addr` when the file is unreadable / malformed /
-    missing the key -- mirrors deploy-time behaviour rather than
-    crashing the upgrade.
-    """
-    try:
-        for raw in envvars_path.read_text(encoding="utf-8").splitlines():
-            line = raw.strip()
-            if line.startswith("#") or "=" not in line:
-                continue
-            key, _, value = line.partition("=")
-            if key.strip() == "HOST_ADDR":
-                v = value.strip().strip('"').strip("'")
-                if v:
-                    return v
-    except OSError:
-        pass
-    return _detect_host_addr()
-
-
 def _detect_host_addr() -> str:
     """Best-effort LAN IP detection.
 
@@ -1581,11 +1470,6 @@ def upgrade_main(argv: list[str] | None = None, *, prog: str = "bty-lab upgrade"
         f"regenerating compose files [bty {version}]",
         detail="Quadlet-managed" if quadlet_managed else "compose-managed",
     )
-    # Read HOST_ADDR back out of the preserved envvars so the regenerated
-    # Quadlet keeps the operator's committed value (re-detecting would
-    # flap if the host's interface order or LAN address changed since
-    # the original deploy).
-    host_addr = _read_envvars_host_addr(envvars_path)
     # Bake the default into the regenerated Quadlet so it matches the
     # rest of the stack. (Pre-v1.0: we don't bother preserving an
     # operator-customised withcache password across an upgrade.)
@@ -1601,23 +1485,20 @@ def upgrade_main(argv: list[str] | None = None, *, prog: str = "bty-lab upgrade"
         print(f"  {p.relative_to(dest.parent) if dest.parent != Path() else p}", file=sys.stderr)
     _step("envvars preserved", detail=str(envvars_path))
 
-    # v0.42 in-place upgrade path: v0.41 deploys don't have a
-    # bty.toml on disk but the regenerated compose / Quadlet expect
-    # one at <dest>/bty.toml (the container bind-mount target).
-    # Migrate from the existing envvars so operator-tuned values
-    # (admin password, session secret) carry over to the TOML; an
-    # already-present bty.toml is preserved as-is (operator may have
-    # edited it via the Settings page).
+    # bty-web reads ``bty.toml`` (a sibling of envvars in <dest>) for
+    # its operator-visible config. A current deploy always has both;
+    # an older deploy that pre-dates the TOML config is no longer
+    # an upgrade target -- re-run ``bty-lab deploy --force`` instead.
     bty_toml_path = dest / "bty.toml"
-    if bty_toml_path.exists():
-        _step("bty.toml preserved", detail=str(bty_toml_path))
-    else:
-        bty_toml_path.write_text(
-            _envvars_to_bty_toml(envvars_path, host_addr=host_addr),
-            encoding="utf-8",
+    if not bty_toml_path.exists():
+        print(
+            f"\n{prog}: no bty.toml under {dest} -- re-run "
+            f"``bty-lab deploy --force {dest}`` to regenerate the stack "
+            f"from scratch.\n",
+            file=sys.stderr,
         )
-        bty_toml_path.chmod(0o640)
-        _step("migrated bty.toml from envvars", detail=str(bty_toml_path))
+        sys.exit(2)
+    _step("bty.toml preserved", detail=str(bty_toml_path))
 
     # Same data-dir prep as deploy_main -- idempotent, so re-running
     # upgrade on an already-running stack is a no-op.
