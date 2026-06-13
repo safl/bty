@@ -1228,10 +1228,26 @@ class BtyTui:
                     # without corrupting it.
                     self._console.print(f"[{_MUTED}]{ev.note}[/]")
 
+            # ``cancel_event`` lets the main thread (which holds
+            # KeyboardInterrupt) tell the worker thread's flash pipeline
+            # to SIGTERM its subprocesses. Without this, hitting Ctrl+C
+            # during a flash interrupts only the main thread's join();
+            # the daemon worker keeps its dd/curl/zstd children running
+            # and the operator's "abort" leaves a partial-write in flight
+            # on the target disk with no cleanup.
+            cancel_event = threading.Event()
+
             def _runner() -> None:
                 try:
-                    flash.execute_plan(plan, progress=_on_progress)
+                    flash.execute_plan(
+                        plan,
+                        progress=_on_progress,
+                        cancel=cancel_event.is_set,
+                    )
                     shared["result"] = "ok"
+                except flash.FlashCancelled as exc:
+                    shared["result"] = "cancelled"
+                    shared["error"] = str(exc)
                 except flash.FlashError as exc:
                     shared["result"] = "failed"
                     shared["error"] = str(exc)
@@ -1241,7 +1257,20 @@ class BtyTui:
 
             t = threading.Thread(target=_runner, name="bty-flash", daemon=True)
             t.start()
-            t.join()
+            try:
+                t.join()
+            except KeyboardInterrupt:
+                # Operator pressed Ctrl+C while the flash was running.
+                # Set the cancel flag; ``execute_plan``'s watchdog will
+                # SIGTERM its subprocesses (1s grace then SIGKILL) and
+                # the runner will land ``FlashCancelled`` on shared.
+                # Re-join with no timeout so we don't return while the
+                # subprocesses are still tearing down: a partially-killed
+                # dd that's still flushing the page cache wedges the
+                # screen redraw if we race past it.
+                cancel_event.set()
+                self._console.print(f"[{_MUTED}]Cancelling -- waiting for dd/curl to exit...[/]")
+                t.join()
 
         # Defensive: Rich's ``Live`` (which ``Progress`` uses) hides
         # the cursor while running via ANSI ``\033[?25l`` and is
@@ -1262,6 +1291,22 @@ class BtyTui:
             self._register_uefi_boot_entry(plan)
             self._post_pxe_done_if_configured()
             self._state.post_flash = True
+        elif shared["result"] == "cancelled":
+            # Surface cancellation distinctly from a pipeline failure
+            # so the operator knows the disk is in a partial-write
+            # state that needs a re-flash (vs. a true error they'd
+            # report). dd's subprocesses were SIGTERM'd; the on-disk
+            # state is the prefix that dd had written + flushed.
+            self._console.print(
+                Panel(
+                    f"[{_DANGER}]Flash cancelled.[/]\n\n"
+                    f"[{_MUTED}]The target disk holds a partial write. "
+                    f"Re-flash before booting.[/]",
+                    border_style=_DANGER,
+                    title="Cancelled",
+                )
+            )
+            self._pause_for_ack()
         else:
             self._console.print(
                 Panel(
