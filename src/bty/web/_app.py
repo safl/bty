@@ -2947,14 +2947,23 @@ def create_app(
         """
         with _db.open_db(state_path) as conn:
             catalog_url = _settings_store.resolve_catalog_url(conn)
-        try:
+
+        def _fetch_sync() -> bytes:
+            # urllib.request.urlopen is blocking; run it on a worker
+            # thread via asyncio.to_thread so a slow/unreachable
+            # release page doesn't stall the event loop for the full
+            # 30-second timeout. Other requests (including SSE
+            # heartbeats) would otherwise queue behind it.
             with urllib.request.urlopen(catalog_url, timeout=30) as resp:
                 # Bound the read at the catalog upload cap + 1 byte
                 # so a release page that responds with a huge
                 # unexpected body (HTML, a binary asset that
                 # somehow got the catalog.toml URL pointed at it)
                 # can't OOM the worker.
-                content = resp.read(_CATALOG_UPLOAD_MAX_BYTES + 1)
+                return resp.read(_CATALOG_UPLOAD_MAX_BYTES + 1)
+
+        try:
+            content = await asyncio.to_thread(_fetch_sync)
         except (urllib.error.URLError, TimeoutError) as exc:
             return RedirectResponse(
                 "/ui/images?error=" + urllib.parse.quote(f"release fetch failed: {exc}", safe=""),
