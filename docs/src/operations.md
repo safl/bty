@@ -5,13 +5,13 @@ and move it to new hardware (or a new host).
 
 ## What counts as state
 
-bty-web keeps everything in one directory, `BTY_STATE_DIR` (default
+bty-web keeps everything in one directory, `BTY_PATHS_STATE_DIR` (default
 `/var/lib/bty`; the `bty-data` named volume in the container deploy):
 
 | Path | What | Backup? |
 |---|---|---|
 | `state.db` | The SQLite database: machine records, MAC->image assignments, catalog metadata, server settings, sessions, and the audit log. | **Yes** -- this is the irreplaceable bit. |
-| `boot/` | The netboot artifacts (`BTY_BOOT_DIR`: kernel / initrd / squashfs). | Optional -- re-fetchable via "Fetch netboot artifacts". |
+| `boot/` | The netboot artifacts (`BTY_PATHS_BOOT_DIR`: kernel / initrd / squashfs). | Optional -- re-fetchable via "Fetch netboot artifacts". |
 | `catalog.toml` | The active catalog manifest. | Optional -- re-fetchable from the upstream. |
 
 bty-web (v0.40+) holds no image bytes. Image bytes live in
@@ -25,7 +25,7 @@ A minimal backup is just `state.db`; a full backup is the whole
 ## Data separation and read-only-OS readiness
 
 bty-web is built so that **all mutable runtime state lives under
-`BTY_STATE_DIR` (`/var/lib/bty`)** -- a single writable volume. In the
+`BTY_PATHS_STATE_DIR` (`/var/lib/bty`)** -- a single writable volume. In the
 container deploy that volume is `bty-data`: the container image is
 immutable and recovery is "pull a new image, re-attach the volume." The
 rest of this section is the readiness checklist for that split.
@@ -99,8 +99,8 @@ The `/ui/backups` page carries a **Back up now** trigger plus a
 The scheduler ticks every 60s; a change in Settings takes effect
 on the next tick without restarting bty-web.
 
-Each backup is a directory written under `$BTY_BACKUP_DIR`
-(default `$BTY_STATE_DIR/backups`) named after the ISO-8601
+Each backup is a directory written under `$BTY_PATHS_BACKUP_DIR`
+(default `$BTY_PATHS_STATE_DIR/backups`) named after the ISO-8601
 timestamp, e.g. `2026-05-24T08-00-00Z/`. The bundle layout is
 identical to what `bty-web export` produces (a single
 `inventory.json` carrying per-machine `mac` + `hw_lshw` +
@@ -113,7 +113,7 @@ Two env vars tune the feature when the in-UI knobs aren't enough:
 
 | Variable                     | Default                       | Meaning                                                              |
 |------------------------------|-------------------------------|----------------------------------------------------------------------|
-| `BTY_BACKUP_DIR`             | `$BTY_STATE_DIR/backups`      | Where backup directories land. Move off the OS disk if you want them to survive an OS reflash. |
+| `BTY_PATHS_BACKUP_DIR`             | `$BTY_PATHS_STATE_DIR/backups`      | Where backup directories land. Move off the OS disk if you want them to survive an OS reflash. |
 | `BTY_BACKUP_MAX_PARALLEL`    | `1`                           | Max concurrent backup jobs. Concurrent exports race on dest dirs; leave at 1 unless you have a reason. |
 
 History lands in the audit log under `subject_kind=backup` (kinds
@@ -132,7 +132,7 @@ server (possibly a newer version) without dragging stale bty internals
 along, or to back up just the parts you typed in.
 
 ```bash
-# On the old server (reads BTY_STATE_DIR):
+# On the old server (reads BTY_PATHS_STATE_DIR):
 bty-web export /tmp/bty-bundle
 
 # Copy /tmp/bty-bundle to the new server, then:
@@ -191,8 +191,8 @@ without the marker), `init_db` does:
 
 Operator-irreplaceable state lives outside `state.db`:
 
-- **Netboot artifacts** under `BTY_BOOT_DIR` -- not touched.
-- **Backup bundles** under `${BTY_STATE_DIR}/backups/` -- not touched.
+- **Netboot artifacts** under `BTY_PATHS_BOOT_DIR` -- not touched.
+- **Backup bundles** under `${BTY_PATHS_STATE_DIR}/backups/` -- not touched.
 - **Withcache blobs** under the separate withcache data dir -- not
   touched (different process).
 
@@ -240,7 +240,7 @@ sudo systemctl restart bty-web
 ```
 
 **Re-fetch the netboot artifacts after upgrading.** The live-env
-artifacts in `BTY_BOOT_DIR` (kernel / initrd / squashfs) are versioned
+artifacts in `BTY_PATHS_BOOT_DIR` (kernel / initrd / squashfs) are versioned
 and fetched separately from bty-web -- the package upgrade does NOT
 touch them. So a freshly-upgraded server keeps serving the *previous*
 live env until you refresh it: open `/ui/netboot` and click **Fetch

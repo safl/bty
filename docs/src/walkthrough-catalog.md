@@ -40,7 +40,7 @@ None of them puts bytes anywhere on bty-web's filesystem.
 
 1. **Upload a `catalog.toml`** -- `POST /ui/catalog/upload`. Use this
    when you have a curated multi-entry manifest. bty-web parses the
-   TOML, imports every row, then replaces `BTY_CATALOG_FILE` so the
+   TOML, imports every row, then replaces `BTY_PATHS_CATALOG_FILE` so the
    manifest survives restarts.
 
 2. **Fetch from release** -- `POST /ui/catalog/fetch-release`. Pulls
@@ -141,8 +141,8 @@ whatever URL the plan endpoint hands it.
 
 | Var | Default | Purpose |
 |---|---|---|
-| `BTY_STATE_DIR` | `/var/lib/bty` | state directory (state.db, catalogs, session-secret) |
-| `BTY_CATALOG_FILE` | `${BTY_STATE_DIR}/catalog.toml` | catalog manifest path |
+| `BTY_PATHS_STATE_DIR` | `/var/lib/bty` | state directory (state.db, catalogs, session-secret) |
+| `BTY_PATHS_CATALOG_FILE` | `${BTY_PATHS_STATE_DIR}/catalog.toml` | catalog manifest path |
 | `BTY_BOOT_RELEASE_REPO` | `safl/bty` | GitHub repo the "Fetch latest" button pulls from |
 
 ## Where the bytes actually live
@@ -150,7 +150,7 @@ whatever URL the plan endpoint hands it.
 | File / dir | Owner | Purpose |
 |---|---|---|
 | `state.db:catalog_entries` | bty-web | the catalog (rows) |
-| `${BTY_STATE_DIR}/catalog.toml` | bty-web | the operator-uploaded manifest (re-importable) |
+| `${BTY_PATHS_STATE_DIR}/catalog.toml` | bty-web | the operator-uploaded manifest (re-importable) |
 | withcache's data dir | withcache | cached image blobs, keyed by origin URL |
 | upstream origin | publisher | the source of truth when withcache is cold |
 

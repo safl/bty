@@ -409,7 +409,7 @@ requesting `source_ip`, the `actor` (`operator` / `pxe-client` /
 | Delete a machine record                   | `POST /ui/machines/{mac}/delete`     | DELETE row. Records `machine.deleted`.                                                              |
 | Add catalog entry by URL                  | `POST /ui/catalog/entries`           | sha-resolve (if `sha_url` given) -> INSERT `catalog_entries`. Records `catalog.entry.{added,add_failed}`. |
 | Delete a catalog entry                    | `DELETE /catalog/entries?src=...`    | Removes the row. v0.40+: no on-disk cached bytes to clean up; withcache evicts on its own schedule. Records `catalog.entry.deleted`. |
-| Upload a `catalog.toml` manifest          | `POST /ui/catalog/upload`            | Validates + atomic-renames into `${BTY_STATE_DIR}/catalog.toml`.                                     |
+| Upload a `catalog.toml` manifest          | `POST /ui/catalog/upload`            | Validates + atomic-renames into `${BTY_PATHS_STATE_DIR}/catalog.toml`.                                     |
 | Fetch `catalog.toml` from the project release | `POST /ui/catalog/fetch-release` | Pulls `releases/latest/download/catalog.toml`, same persist as upload.                              |
 | Fetch boot artifacts (kernel + initrd + squashfs) | `POST /ui/netboot/fetch-release` | Pulls release artifacts into `BTY_BOOT_ROOT`. Records `netboot.artifacts.{fetched,fetch_failed}`.        |
 | Start / Stop / Restart the TFTP daemon    | `POST /ui/settings/tftp-control`     | `sudo bty-web-tftp <action>` -> `systemctl <action> dnsmasq`. Records `settings.tftp.{controlled,control_failed}`. |

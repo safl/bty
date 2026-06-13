@@ -13,7 +13,7 @@ copy; substitute `latest` for a specific tag (e.g. `v0.11.1`) to pin.
 | `bty-usb-x86_64-v*.iso` (+ `.sha256`) | Bootable USB live ISO with a built-in writable `BTY_IMAGES` exFAT partition (32 MiB at bake; auto-grows to fill the stick on first boot via `bty-usb-grow.service`). Uncompressed: open in Etcher / RPi Imager / Rufus / dd directly. CLI: `dd if=bty-usb-x86_64-v*.iso of=/dev/sdX bs=4M`. | <https://github.com/safl/bty/releases/latest/download/bty-usb-x86_64.iso> |
 | `bty-usb-rpi-arm64-v*.img.gz` (+ `.sha256`) | arm64 Raspberry-Pi flasher: a Pi-bootable raw disk image (FAT32 firmware + ext4 live squashfs + auto-growing exFAT `BTY_IMAGES`). Boots on CM5 / Pi5 / Pi4 from USB and runs the same bty TUI as `usb-x86`; targets local eMMC / NVMe / SD. CLI: `gunzip -c bty-usb-rpi-arm64-v*.img.gz \| sudo dd of=/dev/sdX bs=4M conv=fsync`. | <https://github.com/safl/bty/releases/latest/download/bty-usb-rpi-arm64.img.gz> |
 | `bty-ipxe-x86_64-v*.efi` | bty's custom iPXE UEFI binary with the embedded chain to `/pxe-bootstrap.ipxe`. Served by bty-web over HTTP for UEFI HTTP Boot and baked into the `bty-tftp` sidecar image. | <https://github.com/safl/bty/releases> |
-| `bty-netboot-x86_64-v*.{vmlinuz,initrd,squashfs}` (+ `.sha256`) | Netboot trio for PXE-flash clients. Drop into the server's `BTY_BOOT_DIR` (or click "Fetch netboot artifacts" on `/ui/netboot`). | <https://github.com/safl/bty/releases/latest/download/bty-netboot-x86_64.vmlinuz> |
+| `bty-netboot-x86_64-v*.{vmlinuz,initrd,squashfs}` (+ `.sha256`) | Netboot trio for PXE-flash clients. Drop into the server's `BTY_PATHS_BOOT_DIR` (or click "Fetch netboot artifacts" on `/ui/netboot`). | <https://github.com/safl/bty/releases/latest/download/bty-netboot-x86_64.vmlinuz> |
 | `catalog.toml` | The default image catalog (`oras://ghcr.io/safl/nosi/...` entries) the `bty` wizard offers as `[d] default`. Published by the upstream image-builder, not by bty itself. | <https://github.com/safl/nosi/releases/latest/download/catalog.toml> |
 | `release.toml` | Release manifest: the version plus the asset filenames for the tag. Stable URL for "what's the latest". | <https://github.com/safl/bty/releases/latest/download/release.toml> |
 | `bty.pdf` | Offline copy of the docs (this site, rendered by Sphinx + LaTeX). | <https://github.com/safl/bty/releases/latest/download/bty.pdf> |
@@ -173,7 +173,7 @@ not listed above as internal.
 ## HTTP API
 
 `bty-web` exposes a FastAPI server, backed by a single SQLite file at
-`$BTY_STATE_DIR/state.db` (default `/var/lib/bty/state.db`).
+`$BTY_PATHS_STATE_DIR/state.db` (default `/var/lib/bty/state.db`).
 
 ### Auth
 
@@ -231,7 +231,7 @@ carry a session cookie:
  `chain http://<host>/pxe/${net0/mac:hexhyp}` where `<host>` is the
  request's `Host` header, so the client always loops back to whichever IP
  / hostname / .local name it used to reach the server.
-- `GET /boot/{name}` - serve a live-env artifact from `BTY_BOOT_DIR`
+- `GET /boot/{name}` - serve a live-env artifact from `BTY_PATHS_BOOT_DIR`
  (default `/var/lib/bty/boot/`). Same trust model as `/pxe/*`. Operators
  populate the dir via the browser UI's "Fetch netboot artifacts" button on
  the Netboot page, or with the auth-gated `PUT /boot/{name}` upload route.
@@ -406,16 +406,17 @@ v0.42+: the canonical operator config is a ``bty.toml`` file (located
 via ``BTY_CONFIG_FILE`` / ``BTY_CONFIG_DIR``, or the default search
 list ``/etc/bty/conf.d/`` -> ``/etc/bty/bty.toml`` ->
 ``<state_dir>/bty.toml``), with per-key env overrides following the
-``BTY_<SECTION>_<KEY>`` convention. The flat names below keep working
-as legacy aliases for one release.
+``BTY_<SECTION>_<KEY>`` convention. The pre-v0.45.1 flat aliases
+(``BTY_WEB_*``, ``BTY_PATHS_STATE_DIR``, ``BTY_PATHS_BOOT_DIR``) are gone -- use
+the section-prefixed names below.
 
 | Variable | Purpose | Default |
 |---|---|---|
-| `BTY_STATE_DIR` | Where `state.db` lives | `/var/lib/bty` |
-| `BTY_BOOT_DIR` | Live-env artifacts (`/boot/{name}` source) | `${BTY_STATE_DIR}/boot` |
+| `BTY_PATHS_STATE_DIR` | Where `state.db` lives | `/var/lib/bty` |
+| `BTY_PATHS_BOOT_DIR` | Live-env artifacts (`/boot/{name}` source) | `${BTY_PATHS_STATE_DIR}/boot` |
 | `BTY_BOOT_RELEASE_REPO` | GitHub repo (`<owner>/<name>`) the "Fetch netboot artifacts" UI pulls live-env artifacts from | `safl/bty` |
-| `BTY_WEB_HOST` | uvicorn bind address | `0.0.0.0` |
-| `BTY_WEB_PORT` | uvicorn port | `8080` |
+| `BTY_SERVER_HOST` | uvicorn bind address | `0.0.0.0` |
+| `BTY_SERVER_PORT` | uvicorn port | `8080` |
 
 ### Browser UI (`/ui`)
 
@@ -474,7 +475,7 @@ Bootstrap CSS, HTMX form posts).
  `vmlinuz`/`initrd`/`squashfs`/`sha256` from
  `https://github.com/<BTY_BOOT_RELEASE_REPO>/releases/<tag>/download/`
  (default `safl/bty`, default tag `latest`); verifies the manifest
- and atomically installs into `BTY_BOOT_DIR`.
+ and atomically installs into `BTY_PATHS_BOOT_DIR`.
 - `GET /ui/settings` -> the config map: read-only groups for every bty
  magic value (where each comes from: env var / derived path / default),
  the editable **Upstream sources** (release repo / catalog URL / release

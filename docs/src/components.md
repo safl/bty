@@ -103,7 +103,7 @@ flashes.
 
 State (machine records, MAC <-> image assignments, image catalog metadata,
 server settings, sessions, audit-log events) is persisted in a single
-SQLite database under the configured `BTY_STATE_DIR`. Backup or migrate by
+SQLite database under the configured `BTY_PATHS_STATE_DIR`. Backup or migrate by
 copying the file.
 
 The runtime is sized for modest x86 hardware: lightweight Python web

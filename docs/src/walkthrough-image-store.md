@@ -5,7 +5,7 @@ bty-web's mutable state under `/var/lib/bty` is small and metadata-only:
 - `state.db` -- SQLite database (machine inventory, catalog entries,
   boot-mode assignments, audit log, settings).
 - `boot/` -- netboot artifacts (kernel / initrd / squashfs) served via
-  TFTP + HTTP-Boot. `BTY_BOOT_DIR` overrides the path.
+  TFTP + HTTP-Boot. `BTY_PATHS_BOOT_DIR` overrides the path.
 - `catalog.toml` -- the manifest the operator uploaded (or that
   fetch-from-release pulled). Re-importable; not load-bearing once
   rows are in `catalog_entries`.

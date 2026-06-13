@@ -108,9 +108,14 @@ and boots a generic arm64 VM):
 
 ```sh
 mkdir -p /tmp/rpi-extract && cd /tmp/rpi-extract
-gunzip -c ~/Downloads/bty-usb-rpi-arm64-v0.47.0.img.gz > image.img
+# Substitute the version you downloaded. Latest is
+# https://github.com/safl/bty/releases/latest/download/bty-usb-rpi-arm64.img.gz
+gunzip -c ~/Downloads/bty-usb-rpi-arm64-v*.img.gz > image.img
 mcopy -i image.img@@1M ::/vmlinuz .
 mcopy -i image.img@@1M ::/initrd.img .
+
+# Stand in for an eMMC / NVMe target the wizard can flash to.
+qemu-img create -f qcow2 fake-emmc.qcow2 8G
 
 qemu-system-aarch64 \
     -M virt -cpu cortex-a72 -m 2G -smp 2 \
