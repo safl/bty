@@ -19,27 +19,22 @@
 #     boot has no bty-server URL or self-MAC to pin, and
 #     ``bty-on-tty1.service`` fires unconditionally
 #     (v0.22.10+ retired the ConditionKernelCommandLine gating).
-#   - ``usb-rpi``: arm64 kernel + initrd + squashfs for a
-#     Raspberry-Pi USB-flasher. lb produces the netboot trio; the
-#     bty-media post-processing step (``pack_rpi_img.py``) assembles
-#     a Pi-bootable raw disk image with a FAT32 firmware partition
-#     and the squashfs on its own ext4 partition. The kernel
-#     cmdline uses ``console=serial0,115200`` (Pi firmware overlays
-#     the right ``ttyAMAx`` per board revision, so the same image
-#     boots Pi4 / Pi5 / CM5 without per-board branching).
+# The arm64 ``usb-rpi`` flasher is NOT a live-build variant. It
+# customizes Raspberry Pi OS Lite in place (loop-mount + chroot; see
+# ``cijoe/scripts/rpios_image_build.py``) so it never reaches this
+# config -- RPiOS already ships every Pi kernel + dtb + firmware,
+# which a live image cannot supply cleanly across the split per-SoC
+# vendor kernels. live-build here builds only the amd64 x86 variants.
 #
-# All variants share the same chroot package set + hooks. Per-arch
-# package divergence (linux-image-amd64 vs linux-image-arm64, the
-# x86-only r8125 DKMS hook, the Pi firmware blobs from
-# raspi-firmware) lives in arch-suffixed .list.chroot files that
-# live-build only consumes when the matching ``--architectures`` is
-# active.
+# Both x86 variants share the same chroot package set + hooks; the
+# amd64 kernel + microcode + r8125 DKMS build env live in the
+# generated ``bty-arch.list.chroot``.
 #
 # ``lb build`` re-runs this script during its internal ``lb config``
 # step, so ``BTY_VARIANT`` must be set in the build invocation's
 # environment, not just at the initial config call (sudo strips env
-# by default; ``cijoe/scripts/usb_iso_build.py`` and the new
-# ``usb_rpi_build.py`` use ``sudo env BTY_VARIANT=...``).
+# by default; ``cijoe/scripts/usb_iso_build.py`` uses
+# ``sudo env BTY_VARIANT=...``).
 #
 # Requires live-build 20240208+ (Debian trixie or newer) which
 # fetches ``dists/<release>/main/Contents-<arch>.gz`` from the
@@ -94,31 +89,9 @@ case "${BTY_VARIANT}" in
         # writes are dropped.
         BOOTAPPEND="boot=live components noeject plymouth.enable=0 modprobe.blacklist=nouveau nouveau.modeset=0 systemd.gpt_auto=0 console=tty0 console=ttyS0,115200 bty.version=__BTY_VERSION__"
         ;;
-    usb-rpi)
-        ARCH=arm64
-        # Pi firmware boots directly from FAT32 partition 1, no
-        # bootloader binary involved. We use ``tar`` (not ``netboot``)
-        # because lb's ``binary_netboot`` stage expects a ``tftpboot/``
-        # directory that the x86-only syslinux/pxelinux pipeline
-        # creates; on arm64 nothing populates it and the stage fails
-        # with ``mv: cannot stat 'tftpboot'``. ``binary_tar`` is a
-        # one-liner that tarballs ``binary/`` without needing any
-        # bootloader machinery; the resulting tarball is unused, but
-        # ``binary/live/{vmlinuz,initrd.img,filesystem.squashfs}``
-        # lands where ``pack_rpi_img.py`` reads from.
-        BINARY_IMAGES=tar
-        BOOTLOADERS_OPTS=""
-        # ``console=tty1 console=serial0,115200``: Pi firmware
-        # overlays ``serial0`` onto the right ``ttyAMAx`` per board
-        # revision (ttyAMA0 on Pi4, ttyAMA10 on Pi5/CM5), so one
-        # cmdline boots every supported board. The bty-usb-grow
-        # service is also live here so the BTY_IMAGES partition
-        # auto-grows on first boot.
-        BOOTAPPEND="boot=live components plymouth.enable=0 systemd.gpt_auto=0 console=tty1 console=serial0,115200 bty.version=__BTY_VERSION__"
-        ;;
     *)
         echo "auto/config: unknown BTY_VARIANT=${BTY_VARIANT}" >&2
-        echo "  valid: netboot-x86 | usb-x86 | usb-rpi" >&2
+        echo "  valid: netboot-x86 | usb-x86" >&2
         exit 2
         ;;
 esac
@@ -147,19 +120,6 @@ amd64-microcode
 dkms
 build-essential
 linux-headers-amd64
-PKGS
-        ;;
-    arm64)
-        # arm64 kernel + raspi-firmware (the Pi boot chain bootcode.bin
-        # + start*.elf + fixup*.dat + Pi DTBs in /usr/lib/raspi-firmware/)
-        # + Pi WiFi/BT firmware (brcm80211 + misc-nonfree). No x86
-        # microcode, no DKMS build env (the r8125 driver is x86-only
-        # and the hook early-exits on non-amd64).
-        cat >config/package-lists/bty-arch.list.chroot <<'PKGS'
-linux-image-arm64
-raspi-firmware
-firmware-brcm80211
-firmware-misc-nonfree
 PKGS
         ;;
     *)

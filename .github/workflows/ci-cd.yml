@@ -402,12 +402,12 @@ jobs:
 
   # Pi-flasher arm64 image. Native arm64 (``ubuntu-24.04-arm``, free
   # for public repos since Jan 2024) rather than cross-build via
-  # qemu-user-static: live-build's chroot-stage hooks are
-  # binfmt-fragile and 5-10x slower under qemu. The build flow is
-  # the same shape as usb-x86 (apt + live-build .deb + cijoe + uv +
-  # ``make build``); the divergence is in ``cijoe/tasks/usb-rpi.yaml``
-  # which calls ``pack_rpi_img.py`` to wrap the lb output into a
-  # Pi-bootable raw image.
+  # qemu-user-static: the RPiOS chroot hooks are binfmt-fragile and
+  # 5-10x slower under qemu. Unlike the x86 variants this does NOT use
+  # live-build: ``cijoe/tasks/usb-rpi.yaml`` -> ``rpios_image_build.py``
+  # customizes Raspberry Pi OS Lite in place (download + loop-mount +
+  # chroot), so the host only needs the loop/partition/decompress
+  # tools, not the live-build stack.
   build-usb-rpi:
     name: Build usb-rpi image
     needs: test
@@ -416,26 +416,16 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Install build dependencies (live + Pi-image pack)
+      - name: Install build dependencies (RPiOS customization)
         run: |
           set -eu
           sudo apt-get update
+          # losetup/util-linux + growpart (cloud-guest-utils) + the fs
+          # tools for the root grow, plus xz/curl/gzip for fetch +
+          # decompress + publish.
           sudo apt-get install -y --no-install-recommends \
-            debootstrap squashfs-tools xorriso debian-archive-keyring \
-            exfatprogs exfat-fuse dosfstools e2fsprogs mount util-linux \
-            gzip
-          POOL=http://ftp.debian.org/debian/pool/main/l/live-build
-          LB_DEB=$(curl -s "$POOL/" \
-              | grep -oE 'live-build_[0-9][^"<]*\.deb' \
-              | sort -V | tail -1)
-          if [ -z "$LB_DEB" ]; then
-              echo "could not find live-build .deb in $POOL/" >&2
-              exit 1
-          fi
-          echo "Fetching $LB_DEB"
-          wget -q "$POOL/$LB_DEB"
-          sudo dpkg -i "$LB_DEB"
-          lb --version
+            cloud-guest-utils util-linux mount parted gdisk \
+            e2fsprogs dosfstools xz-utils curl gzip
 
       - name: Install cijoe
         run: pipx install --force cijoe

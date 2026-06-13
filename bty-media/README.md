@@ -16,12 +16,14 @@ Source content for the bty media images. Three variants:
   then GETs `<server>/pxe/<mac>/plan` and dispatches (auto-flash,
   interactive wizard, or no-op).
 - **Raspberry-Pi USB flasher** (`VARIANT=usb-rpi`) - arm64 image that
-  boots a CM5 / Pi5 / Pi4 from a USB stick into the same bty TUI as
-  `usb-x86`, sized for in-situ flashing of local eMMC / NVMe.
-  Built via live-build (`--architectures arm64 --binary-images tar`)
-  then wrapped into a Pi-bootable raw image by
-  `scripts/pack_rpi_img.py`. Shipped gzip-compressed as
-  `bty-usb-rpi-arm64.img.gz`.
+  boots a Pi 4 / CM4 / Pi 5 / CM5 from a USB stick into the same bty
+  TUI as `usb-x86`, sized for in-situ flashing of local eMMC / NVMe.
+  Unlike the x86 variants this is NOT a live image: it customizes the
+  official Raspberry Pi OS Lite (arm64) image in place (download +
+  loop-mount + chroot), so it inherits every Pi kernel + `bcm*.dtb`
+  (incl. the CM5 / CM5IO device trees) + firmware and boots every
+  supported board with no per-board branching. Shipped gzip-compressed
+  as `bty-usb-rpi-arm64.img.gz`.
 
 This directory holds the **content** baked into the images: the rootfs
 trees that live-build folds in and the live-build config tree. The cijoe
@@ -35,11 +37,11 @@ Operators drive everything via the top-level Makefile:
 
 - `auxiliary/cloudinit-metadata.meta` - shared cloud-init metadata.
 - `rootfs/common/` - files baked into every variant.
-- `live-build/` - live-build config tree shared across every
-  variant. The ``BTY_VARIANT`` env var selects the shape:
+- `live-build/` - live-build config tree shared by the two x86
+  variants. The ``BTY_VARIANT`` env var selects the shape:
   ``usb-x86`` -> amd64 iso-hybrid; ``netboot-x86`` -> amd64 netboot
-  trio; ``usb-rpi`` -> arm64 netboot trio (wrapped into a
-  Pi-bootable raw image by ``scripts/pack_rpi_img.py`` after lb).
+  trio. (``usb-rpi`` does not use live-build; it reuses this tree's
+  ``includes.chroot/`` + ``config/hooks/`` inside an RPiOS chroot.)
 
 ## Pipeline
 
@@ -64,22 +66,22 @@ right one based on the variant:
   on the build host: no QEMU, no cloud-init. Output is the kernel
   + initrd + squashfs trio for PXE chain-boot.
 
-- `usb-rpi` -> `cijoe tasks/usb-rpi.yaml`. Drives `live-build`
-  with `BTY_VARIANT=usb-rpi` (`--architectures arm64
-  --binary-images tar`) on a native arm64 builder, then
-  `scripts/pack_rpi_img.py` assembles a Pi-bootable raw disk
-  image: FAT32 partition with `raspi-firmware` blobs + kernel
-  + initrd + `config.txt` + `cmdline.txt`, an ext4 partition
-  carrying the squashfs as `/live/filesystem.squashfs`, and a
-  small exFAT `BTY_IMAGES` partition. Output is
-  `bty-usb-rpi-arm64.img.gz`. Operator dd's it to a USB stick
-  and boots a CM5 / Pi5 / Pi4 from it.
+- `usb-rpi` -> `cijoe tasks/usb-rpi.yaml`. Does NOT use live-build.
+  `scripts/rpios_image_build.py` downloads Raspberry Pi OS Lite
+  (arm64) on a native arm64 builder, grows the root for headroom,
+  loop-mounts + chroots, installs the bty runtime + flash tooling,
+  drops in this tree's `includes.chroot/` and runs the bty
+  `config/hooks/` verbatim, masks RPiOS's first-boot user wizard so
+  the box boots straight into the bty TUI, then gzips the raw image.
+  Output is `bty-usb-rpi-arm64.img.gz`. Operator dd's it to a USB
+  stick and boots a Pi 4 / CM4 / Pi 5 / CM5 from it.
 
-All three variants stage the bty-lab wheel via `bty_wheel_stage`
-into the live-build chroot includes, then drive live-build via
-`live_build`; usb-x86 additionally runs `usb_iso_build` for the
-exFAT `BTY_IMAGES` post-processing, and usb-rpi runs
-`usb_rpi_build` to wrap the lb output into a Pi-bootable image.
+The x86 variants stage the bty-lab wheel via `bty_wheel_stage` into
+the live-build chroot includes, then drive live-build via
+`live_build` (usb-x86 additionally runs `usb_iso_build` for the
+exFAT `BTY_IMAGES` post-processing). usb-rpi also runs
+`bty_wheel_stage` first, then `rpios_image_build` consumes the same
+staged wheel inside the RPiOS chroot.
 
 ## Build prerequisites
 

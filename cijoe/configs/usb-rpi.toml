@@ -1,21 +1,20 @@
 # bty USB-Pi flasher (arm64) - build configuration
 #
-# Drives Debian's live-build (arm64, ``--binary-images netboot``) on
-# a native arm64 host to produce the kernel + initrd + squashfs trio,
-# then ``bty-media/scripts/pack_rpi_img.py`` assembles a Pi-bootable
-# 3-partition raw disk image around them (FAT32 RPIBOOT with the Pi
-# firmware + kernel + cmdline + config, ext4 BTY_LIVE carrying the
-# squashfs, exFAT BTY_IMAGES for operator image files).
+# Customizes the official Raspberry Pi OS Lite (arm64) image in place
+# (loop-mount + chroot) rather than building a live image: RPiOS already
+# ships every Pi kernel + every ``bcm*.dtb`` (incl. the CM5 / CM5IO
+# device trees) + firmware + bootloader, so the result boots Pi 4 / CM4
+# / Pi 5 / CM5 / Zero 2 W with no per-board branching. bty is grafted on
+# top (runtime + flash tooling + the bty-on-tty1 TUI launcher).
 #
-# Output is ``bty-usb-rpi-arm64-v<version>.img.gz``. Operator
-# workflow:
+# Output is ``bty-usb-rpi-arm64-v<version>.img.gz``. Operator workflow:
 #
-#     gunzip -c bty-usb-rpi-arm64-v0.47.0.img.gz | sudo dd of=/dev/sdX bs=4M conv=fsync
+#     gunzip -c bty-usb-rpi-arm64-v0.49.0.img.gz | sudo dd of=/dev/sdX bs=4M conv=fsync
 #
-# Then plug into a CM5 (on IO-board) / Pi5 / Pi4 and power on.
-# Once the bty TUI is up the operator picks a nosi rpios image
-# from the default catalog (``safl/nosi``) and flashes to
-# ``/dev/mmcblk0`` (CM5 eMMC) or ``/dev/nvme0n1`` (Pi5 NVMe HAT).
+# Then plug into a Pi 4 / CM4 / Pi 5 / CM5 (on IO-board) and power on.
+# Once the bty TUI is up the operator picks a nosi rpios image from the
+# default catalog (``safl/nosi``) and flashes to ``/dev/mmcblk0`` (CM5
+# eMMC) or ``/dev/nvme0n1`` (Pi5 NVMe HAT).
 #
 # Usage:
 #   cijoe tasks/usb-rpi.yaml --config configs/usb-rpi.toml --monitor
@@ -29,7 +28,15 @@ timezone = "UTC"
 [cijoe.workflow]
 fail_fast = true
 
-# Where the published artifact lands. Mirrors the other variants
-# so all images live under one tree.
 [system-imaging.images.bty-usb-rpi-arm64]
+# Raspberry Pi OS Lite (arm64). The ``_latest`` endpoint redirects to
+# the current dated image; cached at cloud.path between builds.
+cloud.url = "https://downloads.raspberrypi.com/raspios_lite_arm64_latest"
+cloud.path = "{{ local.env.HOME }}/system_imaging/cloud/raspios-arm64-lite.img.xz"
+# Working raw image (customized in place, then gzipped to publish.dir).
+disk.path = "{{ local.env.HOME }}/system_imaging/disk/bty-usb-rpi-arm64.img"
+# Root headroom added at bake for the bty venv + flash tooling; RPiOS's
+# own first-boot resize then expands root to fill the USB on the target.
+grow = "3G"
+# Where the published .img.gz + .sha256 land. Mirrors the other variants.
 publish.dir = "{{ local.env.HOME }}/system_imaging/disk"
