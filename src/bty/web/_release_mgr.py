@@ -254,6 +254,24 @@ class ReleaseFetchManager(_BaseAsyncManager[ReleaseFetchState]):
         """
         if not _TAG_RE.match(tag):
             raise ValueError(f"invalid release tag {tag!r}: must match [A-Za-z0-9._-]+")
+        return await self._enqueue_validated(tag)
+
+    async def cancel(self, key: str) -> ReleaseFetchState | None:
+        """Cancel a running / queued release fetch by tag.
+
+        Symmetric with ``enqueue``: an attacker-controlled key
+        (a path-traversal substring slipped past the HTTP route)
+        is rejected here too, instead of falling through to the
+        base manager's ``_states.get(key)`` lookup with garbage
+        text. Returns ``None`` for an unknown tag so the HTTP
+        layer can render a 404; raises :class:`ValueError` for an
+        outright invalid tag so the HTTP layer can render 422.
+        """
+        if not _TAG_RE.match(key):
+            raise ValueError(f"invalid release tag {key!r}: must match [A-Za-z0-9._-]+")
+        return await super().cancel(key)
+
+    async def _enqueue_validated(self, tag: str) -> ReleaseFetchState:
         if self._boot_root is None:
             raise RuntimeError("ReleaseFetchManager not started")
         async with self._lock:
