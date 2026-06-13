@@ -2971,7 +2971,8 @@ def create_app(
                 # unexpected body (HTML, a binary asset that
                 # somehow got the catalog.toml URL pointed at it)
                 # can't OOM the worker.
-                return resp.read(_CATALOG_UPLOAD_MAX_BYTES + 1)
+                body: bytes = resp.read(_CATALOG_UPLOAD_MAX_BYTES + 1)
+                return body
 
         try:
             content = await asyncio.to_thread(_fetch_sync)
