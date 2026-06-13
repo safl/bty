@@ -116,8 +116,8 @@ piggybacks on that without dragging in the docker / podman runtime.
 
   Note that interactive picks (operator chooses an image at tty1)
   are not reported back to the server: bty-server tracks "what
-  image is this MAC supposed to have" only when a flash policy
-  (`boot_policy=bty-flash-always` / `bty-flash-once`) binds it.
+  image is this MAC supposed to have" only when a flash mode
+  (`boot_mode=bty-flash-always` / `bty-flash-once`) binds it.
   Interactive runs are operator-driven and stay local.
   See `docs/src/concepts.md` for the asymmetry.
 - **OS-agnostic by design.** Linux, FreeBSD, Windows - if it boots

@@ -89,13 +89,15 @@ exFAT partition, and gzip-compresses the result. Emits:
 lsblk
 
 # /dev/sdX is the USB stick (NOT your local system disk).
-dd if=~/system_imaging/disk/bty-usb-x86_64-v$VERSION.iso \
-       sudo dd of=/dev/sdX bs=4M status=progress conv=fsync
+sudo dd if=~/system_imaging/disk/bty-usb-x86_64-v$VERSION.iso \
+        of=/dev/sdX bs=4M status=progress oflag=direct conv=fsync
 sync
 ```
 
-The stick now has the bty live-boot ISO9660 + EFI partitions plus a 2.1 GiB
-exFAT partition labelled `BTY_IMAGES`. The wizard's `[d] default` catalog
+The stick now has the bty live-boot ISO9660 + EFI partitions plus a small
+exFAT partition labelled `BTY_IMAGES` that auto-grows to fill the stick on
+first boot (32 MiB at bake, then up to the disk's tail). The wizard's
+`[d] default` catalog
 (nosi Debian / Ubuntu / Fedora / FreeBSD headless images plus a Fedora
 desktop, via `oras://ghcr.io/safl/nosi/...`) streams from GHCR at flash
 time, so the partition starts empty and has room for a typical headless
@@ -186,7 +188,7 @@ checkout you can also run it directly:
 
 ```bash
 # On the server (or any box you're testing on):
-export BTY_STATE_DIR=/var/lib/bty
+export BTY_PATHS_STATE_DIR=/var/lib/bty
 bty-web   # listens on 0.0.0.0:8080 by default
 ```
 
