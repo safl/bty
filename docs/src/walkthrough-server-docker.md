@@ -157,8 +157,7 @@ The canonical config is a ``bty.toml`` file mounted into the container
 and pointed at via ``BTY_CONFIG_FILE`` (the generated compose / Quadlet
 deploys do exactly this). Individual settings can also be overridden
 via ``BTY_<SECTION>_<KEY>`` env vars; the table below names the ones
-most operators reach for. The pre-v0.45.1 flat aliases (``BTY_WEB_*``,
-``BTY_PATHS_STATE_DIR``) are gone -- set the section-prefixed names below.
+most operators reach for.
 
 | Var | Default | Purpose |
 |---|---|---|

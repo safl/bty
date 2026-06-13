@@ -225,10 +225,9 @@ def fetch_release(
     fetch.
     """
     repo = repo or os.environ.get(ENV_RELEASE_REPO) or DEFAULT_NETBOOT_REPO
-    # "latest" is the UI form's historical default; it can't actually
-    # work (see docstring) so we normalise it to the running version's
-    # tag, which is the only tag whose asset filenames match what this
-    # server asks for.
+    # ``latest`` and an empty tag both mean "what this server runs":
+    # the UI form accepts either, and the only tag whose asset
+    # filenames match what bty-web asks for is the running release.
     if not tag or tag == "latest":
         tag = f"v{_BTY_VERSION}"
     if base_url is None:
