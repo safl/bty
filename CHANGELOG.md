@@ -9,7 +9,7 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
-## [Unreleased]
+## [0.50.0] - 2026-06-13
 
 ### Changed
 
