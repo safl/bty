@@ -71,9 +71,25 @@ name: CI
 on:
   pull_request:
     branches: [main]
+    # Docs-only changes don't affect the images; skip the heavy build +
+    # release pipeline. docs.yml builds/deploys the site independently.
+    paths-ignore:
+      - 'docs/**'
+      - 'README.md'
+      - 'CHANGELOG.md'
+      - 'LICENSE'
+      - '.github/workflows/docs.yml'
   push:
     branches: [main]
     tags: ["v*"]
+    # A release commit always bumps pyproject.toml (never ignored), so a v*
+    # tag still builds + publishes; docs-only main pushes skip the build.
+    paths-ignore:
+      - 'docs/**'
+      - 'README.md'
+      - 'CHANGELOG.md'
+      - 'LICENSE'
+      - '.github/workflows/docs.yml'
   workflow_dispatch:
 
 jobs:
