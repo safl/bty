@@ -234,9 +234,3 @@ host; bty serves TFTP (via the sidecar) but does not run DHCP.
 
 All client-side assets (Bootstrap CSS, Bootstrap Icons, HTMX, htmx-ext-sse)
 are vendored in the wheel - bty-web contacts no external CDN at runtime.
-
-## What is coming
-
-See [`PLAN.md`](https://github.com/safl/bty/blob/main/PLAN.md) for the live
-roadmap. First-boot bring-up of flashed targets is the image builder's job
-(cloud-init / NoCloud user-data); bty stays a flasher.
