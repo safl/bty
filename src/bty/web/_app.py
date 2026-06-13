@@ -1356,7 +1356,18 @@ def create_app(
 
     @app.delete("/boot/releases/{tag}", dependencies=[Depends(require_auth)])
     async def cancel_release_fetch(tag: str, request: Request) -> dict[str, Any]:
-        state = await release_fetch_manager.cancel(tag)
+        try:
+            state = await release_fetch_manager.cancel(tag)
+        except ValueError as exc:
+            # Symmetric with enqueue: a malformed tag (path traversal,
+            # whitespace, escaped slashes) hits the same _TAG_RE guard
+            # and surfaces as 422 here rather than the previous 404
+            # plus an audit-log row carrying the attacker-controlled
+            # text in subject_id.
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=str(exc),
+            ) from exc
         if state is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,

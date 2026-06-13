@@ -284,6 +284,25 @@ def test_enqueue_unexpected_exception_is_failed_not_crashed(
 # ---------- cancel branch ---------------------------------------------------
 
 
+def test_cancel_rejects_malformed_tag(tmp_path: Path) -> None:
+    """cancel(tag) is symmetric with enqueue(tag): a malformed tag
+    (path traversal, whitespace, escaped slashes) raises ValueError
+    rather than silently falling through to a 404 + an audit row
+    that records the attacker-controlled text as subject_id."""
+    del tmp_path
+
+    async def _drive() -> None:
+        mgr = ReleaseFetchManager(max_parallel=1)
+        with pytest.raises(ValueError, match="invalid release tag"):
+            await mgr.cancel("../etc/passwd")
+        with pytest.raises(ValueError, match="invalid release tag"):
+            await mgr.cancel("v1.2.3 OR 1=1")
+        with pytest.raises(ValueError, match="invalid release tag"):
+            await mgr.cancel("")
+
+    _run(_drive())
+
+
 def test_enqueue_cancel_lands_cancelled(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A FetchCancelled from the fetcher (operator-pressed Cancel
     flipped the threading.Event between chunks) lands as
