@@ -276,7 +276,7 @@ When bty-web starts and finds a `state.db` whose `bty_version`
 disagrees with the running release (or no marker at all -- a
 pre-versioning DB), `bty.web._db.init_db` rotates the old DB to
 `state.db.<from>.<UTC-iso>.bak` and creates a fresh one. A
-`system.schema_reset` event with `details = {from_version,
+`system.schema.reset` event with `details = {from_version,
 to_version, archived_at}` is recorded in the fresh DB.
 
 The rotation surfaces as an unacknowledged event on the dashboard
