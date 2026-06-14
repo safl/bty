@@ -388,3 +388,66 @@ def test_flash_gz_url_verifies_declared_expected_sha(
 
     flash._flash_gz_from_url(_file_url(gz), loop_dev, total_bytes=len(payload), expected_sha=sha)
     assert backing.read_bytes()[: len(payload)] == payload
+
+
+# ---------- Issue #10: qcow2-from-URL verification --------------------------
+#
+# qcow2 can't stream (random-access), so it lands on a temp file and the
+# integrity check hashes that file via ``sha256sum`` BEFORE conversion --
+# the one path that fails *before* touching the target, not after.
+
+
+def test_flash_qcow2_url_verifies_matching_digest(
+    tmp_path: Path,
+    loop_device: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    if shutil.which("curl") is None or shutil.which("qemu-img") is None:
+        pytest.skip("curl / qemu-img not available")
+    loop_dev, backing = loop_device
+
+    payload = b"QCOWVER!" * 1024
+    raw = tmp_path / "ref.raw"
+    raw.write_bytes(payload)
+    qcow2 = tmp_path / "ref.qcow2"
+    subprocess.run(["qemu-img", "convert", "-O", "qcow2", str(raw), str(qcow2)], check=True)
+    digest = _sha256_ref(qcow2)  # hash of the qcow2 container file
+
+    monkeypatch.setattr(
+        flash,
+        "_curl_args_for_source",
+        lambda _u: (["curl", "-fsSL", _file_url(qcow2)], None, digest),
+    )
+
+    flash._flash_qcow2_from_url(_file_url(qcow2), loop_dev)
+    assert backing.read_bytes()[: len(payload)] == payload
+
+
+def test_flash_qcow2_url_rejects_tampered_digest_before_writing(
+    tmp_path: Path,
+    loop_device: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    if shutil.which("curl") is None or shutil.which("qemu-img") is None:
+        pytest.skip("curl / qemu-img not available")
+    loop_dev, backing = loop_device
+
+    payload = b"QCOWBAD!" * 1024
+    raw = tmp_path / "ref.raw"
+    raw.write_bytes(payload)
+    qcow2 = tmp_path / "ref.qcow2"
+    subprocess.run(["qemu-img", "convert", "-O", "qcow2", str(raw), str(qcow2)], check=True)
+
+    before = backing.read_bytes()
+    monkeypatch.setattr(
+        flash,
+        "_curl_args_for_source",
+        lambda _u: (["curl", "-fsSL", _file_url(qcow2)], None, None),
+    )
+
+    # Declared sha (no oras digest) that doesn't match -> raises, and
+    # because qcow2 verifies the temp file before qemu-img convert, the
+    # target is left untouched.
+    with pytest.raises(flash.FlashIntegrityError):
+        flash._flash_qcow2_from_url(_file_url(qcow2), loop_dev, expected_sha="sha256:" + "00" * 32)
+    assert backing.read_bytes() == before

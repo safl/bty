@@ -27,6 +27,17 @@ Two distinct identifiers on every catalog entry:
   catalog-publish time and carry `sha256 = None`. Pinned entries
   carry the digest the publisher computed.
 
+When an entry has a `sha256` (or the source is an `oras://` ref, whose
+layer digest is resolved at flash time), bty **verifies the streamed
+bytes against it during the flash** and aborts with an error on
+mismatch, so a corrupted or tampered download never silently lands on a
+disk. The hash is computed in the pipe (`curl | tee | sha256sum | dd`),
+adding no measurable overhead. Entries with no known sha flash without
+verification. For PXE flashes the server passes the content sha to the
+live env as `disk_image_sha` in the boot plan, so verification holds
+even when the image is served from a cache or direct origin whose URL
+doesn't carry the digest.
+
 The merge collapses entries by `ref`: two manifest entries with the
 same canonical src are one row. Same content under multiple refs
 (operator catalogs the same image as both `oras://a` and
