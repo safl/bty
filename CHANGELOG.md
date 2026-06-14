@@ -9,6 +9,22 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.51.0] - 2026-06-14
+
+### Added
+
+- **Integrity verification during flash**: when an image source
+  commits to a content digest, bty now verifies the streamed bytes
+  against it on the wire and aborts with an error on mismatch, instead
+  of silently writing a corrupted or tampered download. The hash is
+  computed in the pipeline (`curl | tee | sha256sum | dd`), so it adds
+  no measurable overhead and the payload never passes through Python.
+  Two sources are covered: `oras://` references (the layer digest,
+  frozen at resolve time) and plain-HTTP catalog / bty-web images
+  carrying a declared `sha256` (the interactive catalog entry's field
+  and the PXE plan's new `disk_image_sha`). Sources with no declared
+  digest keep the existing zero-copy stream unchanged.
+
 ## [0.50.0] - 2026-06-13
 
 ### Changed

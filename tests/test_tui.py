@@ -86,7 +86,10 @@ def test_load_catalog_from_source_parses_http_toml(monkeypatch: pytest.MonkeyPat
     assert rows[0].size_bytes == 1024
     assert rows[0].url == "http://server:8080/images/abc123def456"
     assert rows[0].path is None  # remote rows never get a local path
+    # The catalog's declared sha rides into the row so the flash verifies it.
+    assert rows[0].sha == "abc123abc123abc123abc123abc123abc123abc123abc123abc123abc123def4"
     assert rows[1].url == "https://github.com/safl/bty-images/releases/download/v1/live.img.zst"
+    assert rows[1].sha == "fedcba98fedcba98fedcba98fedcba98fedcba98fedcba98fedcba98fedcba98"
 
 
 def test_load_catalog_from_source_parses_local_path(tmp_path: Path) -> None:
@@ -679,7 +682,8 @@ def test_fetch_and_dispatch_plan_auto_populates_auto_image_and_serial(
         return _fake_bytes_resp(
             b'{"mode": "flash", '
             b'"image": "http://bty-server:8080/images/abc/demo.img.gz", '
-            b'"target_disk_serial": "WD-WX12345"}'
+            b'"target_disk_serial": "WD-WX12345", '
+            b'"disk_image_sha": "abc"}'
         )
 
     monkeypatch.setattr(tui_app.urllib.request, "urlopen", fake_urlopen)
@@ -688,6 +692,8 @@ def test_fetch_and_dispatch_plan_auto_populates_auto_image_and_serial(
     assert app._auto is True
     assert app._auto_image == "http://bty-server:8080/images/abc/demo.img.gz"
     assert app._auto_target_disk_serial == "WD-WX12345"
+    # The plan's content sha is captured for on-wire verification.
+    assert app._auto_image_sha == "abc"
 
 
 def test_fetch_and_dispatch_plan_inventory_returns_inventory(

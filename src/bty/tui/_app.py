@@ -128,6 +128,11 @@ class _TuiImage:
     size_bytes: int
     path: Path | None = None
     url: str | None = None
+    # Declared content sha256 (bare hex) for a URL source, when the
+    # catalog or PXE plan committed to one. Threaded into the flash so
+    # the bytes are verified on the wire. ``None`` for local files and
+    # sources with no declared digest.
+    sha: str | None = None
 
 
 def _normalise_server_url(server: str) -> str:
@@ -220,6 +225,7 @@ def load_catalog_from_source(source: str, *, timeout: float = 30.0) -> list[_Tui
             fmt=entry.format,
             size_bytes=entry.size_bytes or 0,
             url=entry.src,
+            sha=entry.sha256,
         )
         for entry in parsed_catalog.entries
     ]
@@ -548,6 +554,10 @@ class BtyTui:
         # server's plan says ``mode=flash``. Without a mac, stays False.
         self._auto = False
         self._auto_image: str | None = None
+        # Declared content sha256 from the plan (``disk_image_sha``), so
+        # the auto-flash verifies even when the image URL is a withcache
+        # or direct origin that doesn't embed the digest in its path.
+        self._auto_image_sha: str | None = None
         self._auto_target_disk_serial: str | None = None
         # Image format from the plan. The image URL's name segment can be
         # a descriptive title (oras) with no extension, so format can't be
@@ -718,6 +728,7 @@ class BtyTui:
             self._auto_target_disk_serial = payload.get("target_disk_serial")
             self._auto_format = payload.get("format")
             self._auto_name = payload.get("name")
+            self._auto_image_sha = payload.get("disk_image_sha")
             if not self._auto_image or not self._auto_target_disk_serial:
                 self._catalog_load_error = (
                     f"server returned mode=flash but missing image/target_disk_serial: {payload!r}"
@@ -786,6 +797,7 @@ class BtyTui:
                 fmt=self._auto_format,
                 size_bytes=0,
                 url=image_arg,
+                sha=self._auto_image_sha,
             )
         else:
             image_path = Path(image_arg)
@@ -1834,7 +1846,9 @@ class BtyTui:
         ):
             try:
                 if image.url is not None:
-                    image_info = flash.probe_image_url(image.url, format_hint=image.fmt)
+                    image_info = flash.probe_image_url(
+                        image.url, format_hint=image.fmt, expected_sha=image.sha
+                    )
                 else:
                     assert image.path is not None  # local row guarantees a path
                     image_info = flash.probe_image(image.path)

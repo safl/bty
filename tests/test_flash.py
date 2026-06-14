@@ -1105,3 +1105,70 @@ def test_sha256_file_matches_hashlib(tmp_path: Path) -> None:
     f = tmp_path / "blob.qcow2"
     f.write_bytes(payload)
     assert flash._sha256_file(f) == "sha256:" + hashlib.sha256(payload).hexdigest()
+
+
+# ---------- Integrity: declared-sha threading (issue #10 PR2) -----------------
+
+
+def test_normalize_digest_variants() -> None:
+    h = "ab" * 32
+    assert flash._normalize_digest(None) is None
+    assert flash._normalize_digest(h) == f"sha256:{h}"
+    assert flash._normalize_digest(f"sha256:{h}") == f"sha256:{h}"
+    # Catalog shas are lower-cased hex, but normalise defensively.
+    assert flash._normalize_digest(h.upper()) == f"sha256:{h}"
+
+
+class _FakeHeadResp:
+    """Minimal stand-in for ``urlopen(...)`` used as a context manager."""
+
+    headers: ClassVar[dict[str, str]] = {"Content-Length": "1024"}
+
+    def __enter__(self) -> _FakeHeadResp:
+        return self
+
+    def __exit__(self, *_a: object) -> bool:
+        return False
+
+
+def test_probe_image_url_stores_normalized_expected_sha(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("urllib.request.urlopen", lambda _req, timeout=30: _FakeHeadResp())
+    h = "cd" * 32
+    info = flash.probe_image_url("https://example.test/x.img", expected_sha=h)
+    assert info.url == "https://example.test/x.img"
+    assert info.expected_sha == f"sha256:{h}"
+
+
+def test_probe_image_url_without_sha_leaves_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("urllib.request.urlopen", lambda _req, timeout=30: _FakeHeadResp())
+    info = flash.probe_image_url("https://example.test/x.img")
+    assert info.expected_sha is None
+
+
+def test_probe_image_url_oras_ignores_expected_sha(monkeypatch: pytest.MonkeyPatch) -> None:
+    sentinel = flash.ImageInfo(
+        path=None,
+        url="oras://reg.test/r:tag",
+        format="img.gz",
+        size_bytes=0,
+        virtual_size_bytes=None,
+    )
+    monkeypatch.setattr(flash, "_probe_image_url_oras", lambda _u: sentinel)
+    out = flash.probe_image_url("oras://reg.test/r:tag", expected_sha="ab" * 32)
+    # oras resolves its own digest; the http declared-sha is not applied.
+    assert out is sentinel
+    assert out.expected_sha is None
+
+
+def test_to_dict_includes_expected_sha() -> None:
+    digest = "sha256:" + "ab" * 32
+    img = flash.ImageInfo(
+        path=None,
+        url="https://example.test/i.img",
+        format="img",
+        size_bytes=1,
+        virtual_size_bytes=1,
+        expected_sha=digest,
+    )
+    plan = flash.make_plan(img, _tgt())
+    assert plan.to_dict()["image"]["expected_sha"] == digest
