@@ -13,14 +13,16 @@ operator-facing summary.
 
 ### Fixed
 
-- **Three environment variables in the deploy template / docs were dead
+- **Five environment variables in the deploy template / docs were dead
   names** the server never reads. Operators following `bty-lab init`'s
   `envvars` (or the docs) were setting variables bty-web ignored:
   `BTY_TRUSTED_PROXY` -> `BTY_SERVER_TRUSTED_PROXY` (real client IP in
   audit logs behind a proxy), `BTY_MAX_UPLOAD_BYTES` ->
   `BTY_TUNING_MAX_UPLOAD_BYTES` (raise the upload cap; the 413 error
-  message named the wrong var too), and `BTY_SESSION_SECRET` ->
-  `BTY_SERVER_SESSION_SECRET`. The session-secret one was emitted
+  message named the wrong var too), `BTY_SESSION_SECRET` ->
+  `BTY_SERVER_SESSION_SECRET`, `BTY_BACKUP_MAX_PARALLEL` ->
+  `BTY_TUNING_BACKUP_MAX_PARALLEL`, and `BTY_TFTP_PROBE_HOST` ->
+  `BTY_NETBOOT_TFTP_PROBE_HOST`. The session-secret one was emitted
   uncommented, so a pinned secret was silently dropped, breaking cookie
   continuity across a multi-instance / blue-green deployment.
 

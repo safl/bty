@@ -222,7 +222,7 @@ WITHCACHE_ADMIN_PASSWORD=change-me
 
 # Concurrent-worker cap for the backup scheduler. Default is sane
 # for most fleets; raise if the host has the CPU + disk bandwidth.
-# BTY_BACKUP_MAX_PARALLEL=1
+# BTY_TUNING_BACKUP_MAX_PARALLEL=1
 """
 
 
@@ -683,7 +683,7 @@ BTY_SERVER_SESSION_SECRET={session_secret}
 # HOST_ADDR (the bty-tftp sidecar binds host networking, so udp/69
 # sits on the host's LAN address). Override if TFTP runs elsewhere,
 # e.g. on the LAN router or a dedicated PXE host.
-# BTY_TFTP_PROBE_HOST=192.168.1.1
+# BTY_NETBOOT_TFTP_PROBE_HOST=192.168.1.1
 
 # Override which GitHub repo bty fetches netboot artifacts from.
 # BTY_BOOT_RELEASE_REPO=your-fork/bty
@@ -695,7 +695,7 @@ BTY_SERVER_SESSION_SECRET={session_secret}
 # BTY_TUNING_MAX_UPLOAD_BYTES=214748364800
 
 # Concurrent-worker cap for the backup scheduler.
-# BTY_BACKUP_MAX_PARALLEL=1
+# BTY_TUNING_BACKUP_MAX_PARALLEL=1
 """
 
 
@@ -1190,7 +1190,7 @@ def deploy_main(argv: list[str] | None = None, *, prog: str = "bty-lab deploy") 
     _step("install mode", detail=mode_label)
 
     # Detect host_addr BEFORE emitting Quadlets so the bty-web unit can
-    # bake the LAN IP into BTY_WITHCACHE_URL + BTY_TFTP_PROBE_HOST.
+    # bake the LAN IP into BTY_WITHCACHE_URL + BTY_NETBOOT_TFTP_PROBE_HOST.
     # Quadlets don't expand env-file references the way Compose does, so
     # without this baked value the unit lands with a literal hostname
     # placeholder and bty-web's withcache + TFTP probe targets fail to
