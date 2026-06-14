@@ -3201,7 +3201,7 @@ def _serve_safe_file(root: Path, name: str) -> FileResponse:
 # real OS images (decompressed Windows is the largest target at
 # ~50 GiB; everything Linux-y fits in single-digit GB) but caps
 # the worst case at "the disk fills up before bty-web does
-# anything useful". Operators can raise via ``BTY_MAX_UPLOAD_BYTES``
+# anything useful". Operators can raise via ``BTY_TUNING_MAX_UPLOAD_BYTES``
 # if they have a legitimate use case for bigger images.
 _DEFAULT_MAX_UPLOAD_BYTES = 200 * 1024 * 1024 * 1024
 
@@ -3242,7 +3242,7 @@ async def _stream_upload(request: Request, root: Path, name: str) -> dict[str, o
     -> final name.
 
     Caps the body at :data:`_DEFAULT_MAX_UPLOAD_BYTES` (200 GiB by
-    default; ``BTY_MAX_UPLOAD_BYTES`` overrides). A runaway script
+    default; ``BTY_TUNING_MAX_UPLOAD_BYTES`` overrides). A runaway script
     or hostile request that streams forever otherwise fills the
     image-root partition; the cap kills the upload + unlinks the
     partial well before that. The partial is also unlinked
@@ -3264,7 +3264,7 @@ async def _stream_upload(request: Request, root: Path, name: str) -> dict[str, o
                             status_code=status.HTTP_413_CONTENT_TOO_LARGE,
                             detail=(
                                 f"upload exceeded {max_bytes} bytes "
-                                f"(BTY_MAX_UPLOAD_BYTES). Aborted at {size} bytes."
+                                f"(BTY_TUNING_MAX_UPLOAD_BYTES). Aborted at {size} bytes."
                             ),
                         )
         partial.replace(candidate)

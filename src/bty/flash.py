@@ -899,6 +899,19 @@ def register_uefi_boot_entry(target_disk: Path, *, label: str = "bty flashed") -
     )
 
 
+# Defensive scrub for subprocess stderr surfaced to the operator: an
+# ``oras://`` flash injects a short-lived bearer via ``-H Authorization:
+# Bearer <token>``, and curl could echo that header (e.g. on a verbose
+# build or some error paths). Redact the token before it reaches the
+# progress UI / logs so a captured stream can't replay the credential.
+_BEARER_RE = re.compile(r"(?i)(authorization:\s*bearer\s+|bearer\s+)[A-Za-z0-9._~+/=-]+")
+
+
+def _redact_secrets(line: str) -> str:
+    """Replace any ``Bearer <token>`` in a log line with a placeholder."""
+    return _BEARER_RE.sub(r"\1<redacted>", line)
+
+
 def _start_subprocess_log_pump(
     proc: subprocess.Popen[Any],
     progress: ProgressCallback | None,
@@ -935,7 +948,7 @@ def _start_subprocess_log_pump(
             line = line.rstrip("\r\n")
             if not line:
                 continue
-            _emit(progress, "subprocess_log", note=f"{label}: {line}")
+            _emit(progress, "subprocess_log", note=f"{label}: {_redact_secrets(line)}")
 
     thread = threading.Thread(target=_pump, daemon=True, name=f"bty-{label}-stderr")
     thread.start()

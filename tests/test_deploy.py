@@ -159,9 +159,9 @@ def test_env_example_has_required_keys(tmp_path: Path) -> None:
     # will have to grep the bty-web source to discover the var name.
     for var in (
         "BTY_BOOT_RELEASE_REPO",
-        "BTY_TRUSTED_PROXY",
-        "BTY_SESSION_SECRET",
-        "BTY_MAX_UPLOAD_BYTES",
+        "BTY_SERVER_TRUSTED_PROXY",
+        "BTY_SERVER_SESSION_SECRET",
+        "BTY_TUNING_MAX_UPLOAD_BYTES",
         "BTY_BACKUP_MAX_PARALLEL",
     ):
         assert f"# {var}=" in body, f"{var} not documented in envvars.example"
@@ -172,7 +172,7 @@ def test_compose_does_not_plumb_per_knob_env_vars(tmp_path: Path) -> None:
     individual env vars. The compose env block carries ONE entry --
     ``BTY_CONFIG_FILE`` pointing at the bind-mounted TOML; the rest
     that used to live here (``BTY_ADMIN_PASSWORD`` /
-    ``BTY_SESSION_SECRET`` / ...) were removed.
+    ``BTY_SERVER_SESSION_SECRET`` / ...) were removed.
 
     Per-key env overrides still work for operators who want them
     (the loader recognises ``BTY_<SECTION>_<KEY>`` on top of TOML),
@@ -185,8 +185,8 @@ def test_compose_does_not_plumb_per_knob_env_vars(tmp_path: Path) -> None:
     assert "BTY_CONFIG_FILE: /etc/bty/bty.toml" in body
     for var in (
         "BTY_ADMIN_PASSWORD",
-        "BTY_SESSION_SECRET",
-        "BTY_MAX_UPLOAD_BYTES",
+        "BTY_SERVER_SESSION_SECRET",
+        "BTY_TUNING_MAX_UPLOAD_BYTES",
         "BTY_BACKUP_MAX_PARALLEL",
     ):
         assert f"{var}: ${{{var}:-}}" not in body, (
@@ -422,7 +422,7 @@ def test_deploy_emits_envvars_and_runs_compose(
     assert f"\nWITHCACHE_ADMIN_PASSWORD={deploy_mod.DEFAULT_DEPLOY_PASSWORD}\n" in envvars
     # Session secret is random crypto material -- just assert it's filled.
     session_line = next(
-        line for line in envvars.splitlines() if line.startswith("BTY_SESSION_SECRET=")
+        line for line in envvars.splitlines() if line.startswith("BTY_SERVER_SESSION_SECRET=")
     )
     assert len(session_line.split("=", 1)[1]) >= 32
 
@@ -616,13 +616,13 @@ def test_deploy_force_overwrites_envvars(tmp_path: Path, _patched_runtime: dict[
     sess1 = next(
         line
         for line in (dest / "envvars").read_text().splitlines()
-        if line.startswith("BTY_SESSION_SECRET=")
+        if line.startswith("BTY_SERVER_SESSION_SECRET=")
     )
     deploy_mod.deploy_main([str(dest), "--force"])
     sess2 = next(
         line
         for line in (dest / "envvars").read_text().splitlines()
-        if line.startswith("BTY_SESSION_SECRET=")
+        if line.startswith("BTY_SERVER_SESSION_SECRET=")
     )
     # Session secret rotates on --force (it's fresh random each time).
     assert sess1 != sess2

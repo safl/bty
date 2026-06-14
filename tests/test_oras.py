@@ -138,6 +138,27 @@ def test_pick_image_layer_raises_on_empty_layers() -> None:
         oras.pick_image_layer({"layers": []})
 
 
+def test_pick_image_layer_raises_on_non_list_layers() -> None:
+    """A registry returning a malformed manifest (``layers`` not a list)
+    must fail cleanly, not crash on iteration."""
+    with pytest.raises(oras.OrasError, match="no layers"):
+        oras.pick_image_layer({"layers": "not-a-list"})
+
+
+def test_pick_image_layer_skips_non_dict_layer_entries() -> None:
+    """Garbage layer entries (null / string) from an untrusted manifest
+    are skipped; the one real image layer still wins."""
+    manifest: dict[str, Any] = {
+        "layers": [
+            None,
+            "garbage",
+            {"digest": "sha256:" + "33" * 32, "size": 4096, "annotations": {}},
+        ]
+    }
+    layer = oras.pick_image_layer(manifest)
+    assert layer["size"] == 4096
+
+
 def test_pick_image_layer_names_multiarch_index() -> None:
     """A multi-arch image index (``manifests``, no ``layers``) gets a
     specific error pointing the operator at a concrete digest, not the

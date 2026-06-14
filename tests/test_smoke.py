@@ -147,7 +147,7 @@ def test_resolve_secret_key_generates_and_persists(tmp_path: Path) -> None:
 def test_resolve_secret_key_rejects_empty_env(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """REGRESSION (v0.33.8): an empty ``BTY_SESSION_SECRET`` env var
+    """REGRESSION (v0.33.8): an empty ``BTY_SERVER_SESSION_SECRET`` env var
     must be treated as unset, falling through to file / generation.
     SessionMiddleware silently accepts an empty HMAC key, which
     makes the resulting session cookies forgeable by anyone on the
@@ -155,7 +155,7 @@ def test_resolve_secret_key_rejects_empty_env(
     empty value came from."""
     from bty.web import _resolve_secret_key
 
-    monkeypatch.setenv("BTY_SESSION_SECRET", "")
+    monkeypatch.setenv("BTY_SERVER_SESSION_SECRET", "")
     fresh = tmp_path / "new-state"
     key = _resolve_secret_key(fresh)
     assert key  # generated, non-empty
@@ -173,7 +173,7 @@ def test_resolve_secret_key_rejects_whitespace_env(
     empty, SessionMiddleware would accept it)."""
     from bty.web import _resolve_secret_key
 
-    monkeypatch.setenv("BTY_SESSION_SECRET", "   \n\t  ")
+    monkeypatch.setenv("BTY_SERVER_SESSION_SECRET", "   \n\t  ")
     fresh = tmp_path / "new-state"
     key = _resolve_secret_key(fresh)
     assert key.strip() != ""
@@ -189,7 +189,7 @@ def test_resolve_secret_key_rejects_empty_file(
     + atomically rewrite, leaving a NON-empty file behind."""
     from bty.web import _resolve_secret_key
 
-    monkeypatch.delenv("BTY_SESSION_SECRET", raising=False)
+    monkeypatch.delenv("BTY_SERVER_SESSION_SECRET", raising=False)
     secret_file = tmp_path / "session-secret"
     secret_file.write_text("", encoding="utf-8")
 
@@ -208,7 +208,7 @@ def test_resolve_secret_key_rejects_whitespace_file(
     HMAC purposes; treat it as missing and regenerate."""
     from bty.web import _resolve_secret_key
 
-    monkeypatch.delenv("BTY_SESSION_SECRET", raising=False)
+    monkeypatch.delenv("BTY_SERVER_SESSION_SECRET", raising=False)
     secret_file = tmp_path / "session-secret"
     secret_file.write_text("\n\n   \t\n", encoding="utf-8")
 
@@ -226,7 +226,7 @@ def test_resolve_secret_key_persist_is_atomic(
     assert no ``.tmp`` debris is left after a successful generate."""
     from bty.web import _resolve_secret_key
 
-    monkeypatch.delenv("BTY_SESSION_SECRET", raising=False)
+    monkeypatch.delenv("BTY_SERVER_SESSION_SECRET", raising=False)
     fresh = tmp_path / "new-state"
     _resolve_secret_key(fresh)
 

@@ -283,3 +283,23 @@ Stop bty-web on the old host, copy the deploy directory's `data/` tree
 there. The MAC->image assignments and audit log come with it; only the
 host's own IP changes. Re-point your LAN DHCP at the new host's IP and
 re-fetch the netboot artifacts on the new instance.
+
+## Recovering from a failed or interrupted flash
+
+A flash writes directly to the target disk; bty has no rollback. If a flash
+fails partway - network drop, integrity mismatch, operator Ctrl+C, a wedged
+disk - **assume the target holds partial, unbootable data** and re-flash it
+from a trusted source. There is nothing to clean up first: the next flash
+overwrites from byte 0.
+
+- **Integrity mismatch** (`FlashIntegrityError`): the streamed bytes did not
+  match the source's digest. The disk was already written (a stream can't be
+  checked before it's written), so it is suspect. Re-flash from a source you
+  trust; if it recurs with the same source, the upstream artifact or its
+  published digest is wrong.
+- **Interrupted download / cancel**: re-run the flash. For a server-driven
+  PXE box, just let it boot again - the plan re-flashes.
+- **Stuck on the live env after a crash mid-flash**: if a machine fetched its
+  boot artifacts but never POSTed `/pxe/{mac}/done`, its `saw_flasher_boot`
+  bit stays set and it keeps booting the flasher. Re-save the machine record
+  in `/ui/machines` (or fix `boot_mode`) to clear the state.
