@@ -150,3 +150,155 @@ def test_flash_zst_to_loop_device_byte_correct(
 # bty has no post-flash provisioning step. Image-side first-boot
 # bring-up is the image builder's job (cloud-init / NoCloud);
 # bty itself only writes bytes.
+
+
+# ---------- Issue #10 PR1: in-pipeline integrity verification ----------------
+#
+# These drive the URL-streaming writers directly through the real
+# ``curl | tee | sha256sum | dd`` (and ``| gzip -d |``) pipeline, with
+# ``_curl_args_for_source`` stubbed to point curl at a local ``file://``
+# source carrying a chosen digest. That keeps the test hermetic (no
+# registry) while exercising the exact subprocess wiring production uses;
+# the oras-resolve -> digest threading is covered by the unit tests.
+
+
+def _file_url(p: Path) -> str:
+    return "file://" + str(p)
+
+
+def _sha256_ref(p: Path) -> str:
+    import hashlib
+
+    return "sha256:" + hashlib.sha256(p.read_bytes()).hexdigest()
+
+
+def test_flash_img_url_verifies_matching_digest(
+    tmp_path: Path,
+    loop_device: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    if shutil.which("curl") is None:
+        pytest.skip("curl not available")
+    loop_dev, backing = loop_device
+
+    payload = b"DIGESTOK" * 1024
+    ref = tmp_path / "ref.img"
+    ref.write_bytes(payload)
+    digest = _sha256_ref(ref)
+
+    monkeypatch.setattr(
+        flash,
+        "_curl_args_for_source",
+        lambda _u: (["curl", "-fsSL", _file_url(ref)], len(payload), digest),
+    )
+
+    # Correct digest: the tee|sha256sum splice agrees, so the flash
+    # completes and the bytes land byte-correct.
+    flash._flash_img_from_url("oras://example/ref:tag", loop_dev, total_bytes=len(payload))
+    assert backing.read_bytes()[: len(payload)] == payload
+
+
+def test_flash_img_url_rejects_tampered_digest(
+    tmp_path: Path,
+    loop_device: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    if shutil.which("curl") is None:
+        pytest.skip("curl not available")
+    loop_dev, _backing = loop_device
+
+    payload = b"TAMPERED" * 1024
+    ref = tmp_path / "ref.img"
+    ref.write_bytes(payload)
+    wrong = "sha256:" + "00" * 32
+
+    monkeypatch.setattr(
+        flash,
+        "_curl_args_for_source",
+        lambda _u: (["curl", "-fsSL", _file_url(ref)], len(payload), wrong),
+    )
+
+    # Wrong digest: the on-wire hash disagrees -> FlashIntegrityError.
+    with pytest.raises(flash.FlashIntegrityError):
+        flash._flash_img_from_url("oras://example/ref:tag", loop_dev, total_bytes=len(payload))
+
+
+def test_flash_img_url_no_digest_keeps_zero_copy_path(
+    tmp_path: Path,
+    loop_device: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    if shutil.which("curl") is None:
+        pytest.skip("curl not available")
+    loop_dev, backing = loop_device
+
+    payload = b"ZEROCOPY" * 1024
+    ref = tmp_path / "ref.img"
+    ref.write_bytes(payload)
+
+    # digest=None -> gate closed: no tee/sha spliced, the existing
+    # curl|dd path runs unchanged and writes byte-correct.
+    monkeypatch.setattr(
+        flash,
+        "_curl_args_for_source",
+        lambda _u: (["curl", "-fsSL", _file_url(ref)], len(payload), None),
+    )
+
+    flash._flash_img_from_url("https://example/ref.img", loop_dev, total_bytes=len(payload))
+    assert backing.read_bytes()[: len(payload)] == payload
+
+
+def test_flash_gz_url_verifies_matching_digest(
+    tmp_path: Path,
+    loop_device: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    if shutil.which("curl") is None or shutil.which("gzip") is None:
+        pytest.skip("curl / gzip not available")
+    loop_dev, backing = loop_device
+
+    payload = b"GZDIGEST" * 1024
+    raw = tmp_path / "ref.img"
+    raw.write_bytes(payload)
+    subprocess.run(["gzip", "-k", "-f", str(raw)], check=True)
+    gz = tmp_path / "ref.img.gz"
+    # The digest covers the COMPRESSED blob (the splice hashes curl's
+    # output, before decompression), so hash the .gz, not the raw image.
+    digest = _sha256_ref(gz)
+
+    monkeypatch.setattr(
+        flash,
+        "_curl_args_for_source",
+        lambda _u: (["curl", "-fsSL", _file_url(gz)], None, digest),
+    )
+
+    flash._flash_gz_from_url("oras://example/ref.img.gz:tag", loop_dev, total_bytes=len(payload))
+    assert backing.read_bytes()[: len(payload)] == payload
+
+
+def test_flash_gz_url_rejects_tampered_digest(
+    tmp_path: Path,
+    loop_device: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    if shutil.which("curl") is None or shutil.which("gzip") is None:
+        pytest.skip("curl / gzip not available")
+    loop_dev, _backing = loop_device
+
+    payload = b"GZTAMPER" * 1024
+    raw = tmp_path / "ref.img"
+    raw.write_bytes(payload)
+    subprocess.run(["gzip", "-k", "-f", str(raw)], check=True)
+    gz = tmp_path / "ref.img.gz"
+    wrong = "sha256:" + "ff" * 32
+
+    monkeypatch.setattr(
+        flash,
+        "_curl_args_for_source",
+        lambda _u: (["curl", "-fsSL", _file_url(gz)], None, wrong),
+    )
+
+    with pytest.raises(flash.FlashIntegrityError):
+        flash._flash_gz_from_url(
+            "oras://example/ref.img.gz:tag", loop_dev, total_bytes=len(payload)
+        )
