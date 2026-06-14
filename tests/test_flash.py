@@ -1009,3 +1009,99 @@ def test_register_uefi_boot_entry_happy_path(monkeypatch: pytest.MonkeyPatch) ->
     assert any("--create-only" in c for c in calls)
     assert ["efibootmgr", "-n", "0009"] in calls
     assert not any(c[:2] == ["efibootmgr", "-o"] for c in calls)
+
+
+# ---------- Integrity: digest threading + verification -----------------------
+#
+# PR1 of issue #10: ``oras://`` references commit to a content digest, and
+# the flash pipeline verifies it on the wire via a ``tee | sha256sum``
+# splice (the bytes stay in the subprocess plane; Python only reads the
+# final ~65-byte digest line). These cover the pure logic; the end-to-end
+# pipeline behaviour lives in tests/test_flash_integration.py.
+
+
+def test_curl_args_for_source_plain_url_carries_no_digest() -> None:
+    argv, size, digest = flash._curl_args_for_source("https://example.test/x.img")
+    assert argv == ["curl", "-fsSL", "https://example.test/x.img"]
+    assert size is None
+    # No digest for a plain URL -> the caller keeps its zero-copy path.
+    assert digest is None
+
+
+def test_curl_args_for_source_oras_threads_digest(monkeypatch: pytest.MonkeyPatch) -> None:
+    resolved = flash.oras.ResolvedBlob(
+        blob_url="https://reg.test/v2/r/blobs/sha256:abc",
+        headers={"Authorization": "Bearer t"},
+        digest="sha256:" + "ab" * 32,
+        size=4096,
+        title="x.img.gz",
+    )
+    monkeypatch.setattr(flash.oras, "is_oras_url", lambda _u: True)
+    monkeypatch.setattr(flash.oras, "resolve_ref", lambda _u: resolved)
+
+    argv, size, digest = flash._curl_args_for_source("oras://reg.test/r:tag")
+    assert argv[-1] == resolved.blob_url
+    assert "-H" in argv and "Authorization: Bearer t" in argv
+    assert size == 4096
+    # The layer's frozen digest is threaded out for the streaming check.
+    assert digest == resolved.digest
+
+
+def test_verify_digest_match_is_silent() -> None:
+    d = "sha256:" + "cd" * 32
+    flash._verify_digest(d, d, "oras://x")  # must not raise
+
+
+def test_verify_digest_mismatch_raises_integrity_error() -> None:
+    with pytest.raises(flash.FlashIntegrityError) as ei:
+        flash._verify_digest("sha256:" + "00" * 32, "sha256:" + "11" * 32, "oras://x")
+    assert "integrity check failed" in str(ei.value)
+    # Integrity failures are flash failures for plain ``except FlashError``.
+    assert isinstance(ei.value, flash.FlashError)
+
+
+def test_verify_digest_none_observed_is_silent() -> None:
+    # When the tee wasn't spliced there is no observed digest; the caller
+    # only verifies when it actually ran the hash, so this is a no-op.
+    flash._verify_digest("sha256:" + "00" * 32, None, "oras://x")
+
+
+def test_spawn_hash_tee_forwards_bytes_and_hashes(tmp_path: Path) -> None:
+    import hashlib
+    import shutil as _shutil
+
+    if _shutil.which("tee") is None or _shutil.which("sha256sum") is None:
+        pytest.skip("tee / sha256sum not available")
+
+    # >64 KiB so the bytes cross a pipe buffer (proves both consumers
+    # drain concurrently; a single-buffer test could hide a deadlock).
+    payload = b"hash-tee-roundtrip\x00\x01\x02" * 4096
+    src = tmp_path / "payload.bin"
+    src.write_bytes(payload)
+
+    with src.open("rb") as fh:
+        tee_proc, sha_proc = flash._spawn_hash_tee(fh)
+        assert tee_proc.stdout is not None
+        forwarded = tee_proc.stdout.read()
+        tee_proc.stdout.close()
+        observed = flash._read_observed_digest(sha_proc)
+        assert tee_proc.wait() == 0
+        assert sha_proc.wait() == 0
+
+    # tee forwards every byte unchanged to the next stage...
+    assert forwarded == payload
+    # ...and sha256sum hashes the same bytes to the expected digest.
+    assert observed == "sha256:" + hashlib.sha256(payload).hexdigest()
+
+
+def test_sha256_file_matches_hashlib(tmp_path: Path) -> None:
+    import hashlib
+    import shutil as _shutil
+
+    if _shutil.which("sha256sum") is None:
+        pytest.skip("sha256sum not available")
+
+    payload = b"qcow2-temp-file-hash" * 512
+    f = tmp_path / "blob.qcow2"
+    f.write_bytes(payload)
+    assert flash._sha256_file(f) == "sha256:" + hashlib.sha256(payload).hexdigest()

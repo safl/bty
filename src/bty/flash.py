@@ -507,6 +507,18 @@ class FlashCancelled(FlashError):
     """
 
 
+class FlashIntegrityError(FlashError):
+    """The fetched bytes did not hash to the source's declared digest.
+
+    Raised after a stream finishes when an ``oras://`` reference (or a
+    catalog entry carrying a ``sha256``) committed to a content digest
+    and the ``sha256sum`` computed on the wire disagrees. Subclassing
+    :class:`FlashError` means existing ``except FlashError`` handlers
+    treat a corrupted / tampered download as a flash failure; callers
+    that care can branch on the integrity-specific type.
+    """
+
+
 def _spawn_cancel_watchdog(
     procs: list[subprocess.Popen[Any]],
     cancel: CancelCheck | None,
@@ -1160,25 +1172,84 @@ def _flash_qcow2(image: Path, target: Path) -> None:
 _CURL_BASE = ("curl", "-fsSL")
 
 
-def _curl_args_for_source(url: str) -> tuple[list[str], int | None]:
+def _curl_args_for_source(url: str) -> tuple[list[str], int | None, str | None]:
     """Build curl arguments for a fetch source.
 
     Plain http(s) URLs pass through unchanged. ``oras://`` references
     go through :mod:`bty.oras` to resolve the manifest layer, and the
     resulting bearer token is injected as a ``-H Authorization``
-    header on the curl call. Returns ``(argv, expected_size_or_None)``
-    -- the size is the manifest's declared layer size when known, so
-    callers can use it as a fallback ``total_bytes`` when HEAD wasn't
-    run beforehand.
+    header on the curl call. Returns ``(argv, expected_size_or_None,
+    expected_digest_or_None)`` -- the size is the manifest's declared
+    layer size when known (a fallback ``total_bytes`` for callers that
+    skipped HEAD), and the digest (``sha256:<hex>``) is the layer's
+    content address, frozen at resolve time, for the streaming
+    integrity check. Plain URLs carry neither, so both come back
+    ``None`` and the caller keeps its zero-copy path.
     """
     if not oras.is_oras_url(url):
-        return [*_CURL_BASE, url], None
+        return [*_CURL_BASE, url], None, None
     resolved = oras.resolve_ref(url)
     args = [*_CURL_BASE]
     for header_name, header_value in resolved.headers.items():
         args.extend(["-H", f"{header_name}: {header_value}"])
     args.append(resolved.blob_url)
-    return args, resolved.size
+    return args, resolved.size, resolved.digest
+
+
+def _spawn_hash_tee(src: IO[bytes]) -> tuple[subprocess.Popen[bytes], subprocess.Popen[bytes]]:
+    """Splice ``tee | sha256sum`` onto ``src`` (curl's read pipe).
+
+    Returns ``(tee_proc, sha_proc)``. ``tee_proc.stdout`` carries the
+    bytes onward to the next stage (dd / decompressor); ``sha_proc``
+    hashes the duplicated copy and emits ``<hex>  -`` once the stream
+    drains. The hash runs entirely in subprocesses -- payload bytes
+    never pass through the Python process. ``tee`` writes to
+    ``/dev/fd/N`` (N = the sha pipe's write end, kept open across the
+    fork via ``pass_fds``); the parent's copy of that write end is
+    dropped here so ``sha256sum`` sees EOF when ``tee`` exits.
+    """
+    sha_proc = subprocess.Popen(["sha256sum"], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+    assert sha_proc.stdin is not None
+    sha_fd = sha_proc.stdin.fileno()
+    tee_proc = subprocess.Popen(
+        ["tee", f"/dev/fd/{sha_fd}"],
+        stdin=src,
+        stdout=subprocess.PIPE,
+        pass_fds=(sha_fd,),
+    )
+    sha_proc.stdin.close()
+    return tee_proc, sha_proc
+
+
+def _read_observed_digest(sha_proc: subprocess.Popen[bytes]) -> str:
+    """Read the ``sha256:<hex>`` digest from a finished ``sha256sum``.
+
+    ``sha256sum`` emits ``<hex>  -`` once; its output is ~65 bytes so
+    it fits the pipe buffer and never blocks the upstream pipeline.
+    """
+    out, _ = sha_proc.communicate()
+    return "sha256:" + out.split()[0].decode()
+
+
+def _sha256_file(path: Path) -> str:
+    """Hash a local file via ``sha256sum``; return ``sha256:<hex>``.
+
+    Used by the qcow2-from-URL path, which lands the download on disk
+    before conversion. Shelling out keeps the bytes out of Python, the
+    same plane as the streaming ``tee | sha256sum`` splice.
+    """
+    out = subprocess.run(
+        ["sha256sum", str(path)], capture_output=True, text=True, check=True
+    ).stdout
+    return "sha256:" + out.split()[0]
+
+
+def _verify_digest(expected: str, observed: str | None, url: str) -> None:
+    """Raise :class:`FlashIntegrityError` if ``observed`` != ``expected``."""
+    if observed is not None and observed != expected:
+        raise FlashIntegrityError(
+            f"integrity check failed for {url}: expected {expected}, computed {observed}"
+        )
 
 
 def _flash_img_from_url(
@@ -1190,7 +1261,7 @@ def _flash_img_from_url(
     cancel: CancelCheck | None = None,
 ) -> None:
     """Stream a raw .img from URL straight to a block device with dd."""
-    curl_args, resolved_size = _curl_args_for_source(url)
+    curl_args, resolved_size, digest = _curl_args_for_source(url)
     if total_bytes is None:
         total_bytes = resolved_size
     # Pipe curl's stderr through the subprocess-log pump so ``bty``
@@ -1202,27 +1273,47 @@ def _flash_img_from_url(
     curl_stderr = subprocess.PIPE if progress is not None else None
     curl_proc = subprocess.Popen(curl_args, stdout=subprocess.PIPE, stderr=curl_stderr)
     curl_log_pump = _start_subprocess_log_pump(curl_proc, progress, "curl")
+    tee_proc: subprocess.Popen[bytes] | None = None
+    sha_proc: subprocess.Popen[bytes] | None = None
+    observed: str | None = None
     try:
+        # When the source committed to a content digest, splice
+        # ``tee | sha256sum`` so the hash is computed on the wire;
+        # dd then reads from tee instead of curl directly.
+        dd_stdin = curl_proc.stdout
+        if digest is not None:
+            assert curl_proc.stdout is not None
+            tee_proc, sha_proc = _spawn_hash_tee(curl_proc.stdout)
+            dd_stdin = tee_proc.stdout
         stderr = subprocess.PIPE if progress is not None else None
         dd_proc = subprocess.Popen(
             ["dd", f"of={target}", "bs=4M", "oflag=direct", "conv=fsync", "status=progress"],
-            stdin=curl_proc.stdout,
+            stdin=dd_stdin,
             stderr=stderr,
             text=True,
         )
-        watchdog = _spawn_cancel_watchdog([curl_proc, dd_proc], cancel)
+        procs: list[subprocess.Popen[Any]] = [curl_proc, dd_proc]
+        if tee_proc is not None and sha_proc is not None:
+            procs += [tee_proc, sha_proc]
+        watchdog = _spawn_cancel_watchdog(procs, cancel)
         pump = _start_dd_progress_thread(dd_proc, progress, total_bytes)
-        # Hand the read end fully to dd; closing our copy lets the kernel
-        # propagate EOF / SIGPIPE correctly when one end finishes first.
+        # Hand the read ends fully to their consumers; closing our copies
+        # lets the kernel propagate EOF / SIGPIPE when one end finishes.
         if curl_proc.stdout is not None:
             curl_proc.stdout.close()
+        if tee_proc is not None and tee_proc.stdout is not None:
+            tee_proc.stdout.close()
         dd_rc = dd_proc.wait()
+        if sha_proc is not None:
+            observed = _read_observed_digest(sha_proc)
         if pump is not None:
             pump.join(timeout=2)
         if watchdog is not None:
             watchdog.join(timeout=2)
     finally:
         curl_rc = curl_proc.wait()
+        tee_rc = tee_proc.wait() if tee_proc is not None else 0
+        sha_rc = sha_proc.wait() if sha_proc is not None else 0
         if curl_log_pump is not None:
             curl_log_pump.join(timeout=2)
     # Cancel takes precedence over non-zero exit codes: SIGTERM
@@ -1232,8 +1323,14 @@ def _flash_img_from_url(
         raise FlashCancelled("flash cancelled by operator")
     if curl_rc != 0:
         raise FlashError(f"curl exited {curl_rc} fetching {url}")
+    if tee_rc != 0:
+        raise FlashError(f"tee exited {tee_rc} fetching {url}")
+    if sha_rc != 0:
+        raise FlashError(f"sha256sum exited {sha_rc} hashing {url}")
     if dd_rc != 0:
         raise FlashError(f"dd exited {dd_rc} writing {url} -> {target}")
+    if digest is not None:
+        _verify_digest(digest, observed, url)
 
 
 def _flash_compressed_from_url(
@@ -1267,7 +1364,7 @@ def _flash_compressed_from_url(
     progress bar overshoot to ~6x for highly compressible .img.gz
     inputs.
     """
-    curl_args, _resolved_compressed_size = _curl_args_for_source(url)
+    curl_args, _resolved_compressed_size, digest = _curl_args_for_source(url)
     # Pipe both curl + decompressor stderr through subprocess-log
     # pumps. The ``bty`` wizard prints each line above its progress
     # widget via Rich's ``console.print`` (which Rich routes around
@@ -1276,16 +1373,29 @@ def _flash_compressed_from_url(
     pipeline_stderr = subprocess.PIPE if progress is not None else None
     curl_proc = subprocess.Popen(curl_args, stdout=subprocess.PIPE, stderr=pipeline_stderr)
     curl_log_pump = _start_subprocess_log_pump(curl_proc, progress, "curl")
+    tee_proc: subprocess.Popen[bytes] | None = None
+    sha_proc: subprocess.Popen[bytes] | None = None
+    observed: str | None = None
     try:
+        # The digest covers the COMPRESSED blob (the oras layer), so
+        # the tee splices between curl and the decompressor -- it
+        # hashes the bytes curl fetched, not the expanded image.
+        decomp_stdin = curl_proc.stdout
+        if digest is not None:
+            assert curl_proc.stdout is not None
+            tee_proc, sha_proc = _spawn_hash_tee(curl_proc.stdout)
+            decomp_stdin = tee_proc.stdout
         decomp_proc = subprocess.Popen(
             decompress_cmd,
-            stdin=curl_proc.stdout,
+            stdin=decomp_stdin,
             stdout=subprocess.PIPE,
             stderr=pipeline_stderr,
         )
         decomp_log_pump = _start_subprocess_log_pump(decomp_proc, progress, decompress_name)
         if curl_proc.stdout is not None:
             curl_proc.stdout.close()
+        if tee_proc is not None and tee_proc.stdout is not None:
+            tee_proc.stdout.close()
         try:
             stderr = subprocess.PIPE if progress is not None else None
             dd_proc = subprocess.Popen(
@@ -1294,11 +1404,16 @@ def _flash_compressed_from_url(
                 stderr=stderr,
                 text=True,
             )
-            watchdog = _spawn_cancel_watchdog([curl_proc, decomp_proc, dd_proc], cancel)
+            procs: list[subprocess.Popen[Any]] = [curl_proc, decomp_proc, dd_proc]
+            if tee_proc is not None and sha_proc is not None:
+                procs += [tee_proc, sha_proc]
+            watchdog = _spawn_cancel_watchdog(procs, cancel)
             pump = _start_dd_progress_thread(dd_proc, progress, total_bytes)
             if decomp_proc.stdout is not None:
                 decomp_proc.stdout.close()
             dd_rc = dd_proc.wait()
+            if sha_proc is not None:
+                observed = _read_observed_digest(sha_proc)
             if pump is not None:
                 pump.join(timeout=2)
             if watchdog is not None:
@@ -1309,6 +1424,8 @@ def _flash_compressed_from_url(
                 decomp_log_pump.join(timeout=2)
     finally:
         curl_rc = curl_proc.wait()
+        tee_rc = tee_proc.wait() if tee_proc is not None else 0
+        sha_rc = sha_proc.wait() if sha_proc is not None else 0
         if curl_log_pump is not None:
             curl_log_pump.join(timeout=2)
     # Cancel takes precedence over non-zero exit codes: the SIGTERM
@@ -1319,10 +1436,16 @@ def _flash_compressed_from_url(
         raise FlashCancelled("flash cancelled by operator")
     if curl_rc != 0:
         raise FlashError(f"curl exited {curl_rc} fetching {url}")
+    if tee_rc != 0:
+        raise FlashError(f"tee exited {tee_rc} fetching {url}")
+    if sha_rc != 0:
+        raise FlashError(f"sha256sum exited {sha_rc} hashing {url}")
     if decomp_rc != 0:
         raise FlashError(f"{decompress_name} -d exited {decomp_rc} decompressing {url}")
     if dd_rc != 0:
         raise FlashError(f"dd exited {dd_rc} writing {url} -> {target}")
+    if digest is not None:
+        _verify_digest(digest, observed, url)
 
 
 def _flash_zst_from_url(
@@ -1423,7 +1546,7 @@ def _flash_qcow2_from_url(url: str, target: Path, *, cancel: CancelCheck | None 
     with tempfile.NamedTemporaryFile(suffix=".qcow2", delete=False) as tmp:
         tmp_path = Path(tmp.name)
     try:
-        curl_args, _ = _curl_args_for_source(url)
+        curl_args, _, digest = _curl_args_for_source(url)
         curl_argv = [*curl_args[:-1], "--output", str(tmp_path), curl_args[-1]]
         # Popen + watchdog (rather than subprocess.run) so the cancel
         # callback can terminate the download mid-stream. qcow2 can't
@@ -1439,6 +1562,10 @@ def _flash_qcow2_from_url(url: str, target: Path, *, cancel: CancelCheck | None 
             raise FlashCancelled("flash cancelled by operator")
         if rc != 0:
             raise FlashError(f"curl exited {rc} fetching {url}")
+        # qcow2 lands on disk before conversion (it can't stream), so the
+        # integrity check hashes the temp file rather than tee-ing a pipe.
+        if digest is not None:
+            _verify_digest(digest, _sha256_file(tmp_path), url)
         _flash_qcow2(tmp_path, target)
     finally:
         with contextlib.suppress(FileNotFoundError):
