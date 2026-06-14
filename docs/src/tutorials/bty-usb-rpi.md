@@ -85,11 +85,33 @@ and power back on. The Pi falls through the BOOT_ORDER to the
 target you just flashed (eMMC or NVMe), and the freshly-imaged
 OS comes up.
 
-## Reflashing onto eMMC where USB-boot is configured to win
+## Reflashing: keep USB ahead of eMMC / NVMe
 
-If you set `BOOT_ORDER=0xf421` (eMMC ahead of USB) to bias
-post-flash boots away from USB, you can't USB-boot into bty
-again without changing it back. Two ways out:
+Once the first flash succeeds, internal storage is bootable, and the
+Pi's default boot order prefers it -- the next power-on boots the
+freshly-flashed eMMC (or NVMe) instead of re-entering the USB flasher.
+To reflash on demand, bias the bootloader to try USB first. Set it in
+the EEPROM from any working Pi OS (or the target you just flashed):
+
+```bash
+sudo rpi-eeprom-config --edit
+```
+
+```ini
+# Read right-to-left: 4=USB-MSD, 1=SD/eMMC, 6=NVMe, f=restart (loop).
+# So: try USB first, then eMMC, then NVMe, then loop.
+BOOT_ORDER=0xf614
+# Probe the PCIe NVMe HAT when the EEPROM wouldn't otherwise (CM5 IO
+# board / some carriers). Drop it if you have no NVMe.
+PCIE_PROBE=1
+```
+
+With USB first, the flasher always wins while the stick is inserted,
+and the target still boots normally once you remove it -- no jumper or
+SD-card dance between flashes.
+
+Alternatives if you'd rather not change the EEPROM (or you keep eMMC
+ahead of USB, e.g. `BOOT_ORDER=0xf421`):
 
 - Pull the USB stick before each flash run; the BOOT_ORDER
   falls through to USB only when prior targets fail.
