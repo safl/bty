@@ -101,10 +101,17 @@ sudo rpi-eeprom-config --edit
 # Read right-to-left: 4=USB-MSD, 1=SD/eMMC, 6=NVMe, f=restart (loop).
 # So: try USB first, then eMMC, then NVMe, then loop.
 BOOT_ORDER=0xf614
-# Probe the PCIe NVMe HAT when the EEPROM wouldn't otherwise (CM5 IO
-# board / some carriers). Drop it if you have no NVMe.
+# NVMe-over-PCIe only: needed on a Pi5 with a non-HAT+ adapter or on a
+# CM4/CM5 carrier board. Omit it on a Pi4 (no PCIe) or if you only
+# target eMMC/SD/USB.
 PCIE_PROBE=1
 ```
+
+`BOOT_ORDER` is the same mechanism on **Pi4, Pi5, CM4, and CM5** -- one
+EEPROM bootloader, identical nibble meanings -- so the USB-first value
+above works on all of them (the `6` NVMe nibble is simply inert on a
+Pi4, which has no PCIe). Only `PCIE_PROBE` is hardware-specific, as
+noted above.
 
 With USB first, the flasher always wins while the stick is inserted,
 and the target still boots normally once you remove it -- no jumper or
