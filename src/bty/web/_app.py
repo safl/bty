@@ -1073,14 +1073,20 @@ def create_app(
             # path. is_cached's network HEAD stays OUTSIDE the connection.
             with _db.open_db(state_path) as conn:
                 _b = conn.execute(
-                    "SELECT name, format, src, resolved_src FROM catalog_entries "
-                    "WHERE bty_image_ref = ?",
+                    "SELECT name, format, src, resolved_src, disk_image_sha "
+                    "FROM catalog_entries WHERE bty_image_ref = ?",
                     (str(ref),),
                 ).fetchone()
                 image_name = str(_b["name"]) if _b and _b["name"] else None
                 fmt = str(_b["format"]) if _b and _b["format"] else None
                 src = str(_b["src"]) if _b and _b["src"] else None
                 resolved_src = str(_b["resolved_src"]) if _b and _b["resolved_src"] else None
+                # Content hash for on-wire verification. Distinct from
+                # ``ref`` (= bty_image_ref = sha256 of the canonical URL,
+                # an identifier, NOT the bytes). NULL when the entry was
+                # imported without a known sha -> omitted below so the
+                # live env flashes without verifying.
+                disk_image_sha = str(_b["disk_image_sha"]) if _b and _b["disk_image_sha"] else None
                 withcache_url = (
                     _settings_store.resolve_withcache_url(conn)
                     if image_name is not None and target_disk_serial and resolved_src
@@ -1157,11 +1163,13 @@ def create_app(
                     # the client can detect format), which is uninformative
                     # on the flash screen. ``name`` carries the real title.
                     "name": image_name,
-                    # Content sha (``bty_image_ref``) so the live env verifies
-                    # the bytes on the wire even when ``image`` is a withcache
-                    # or direct-origin URL that doesn't embed the digest.
-                    "disk_image_sha": ref,
                 }
+                # Content sha so the live env verifies the bytes on the
+                # wire even when ``image`` is a withcache / direct-origin
+                # URL that doesn't embed the digest. Omitted when unknown
+                # (the live env then flashes without verification).
+                if disk_image_sha:
+                    plan["disk_image_sha"] = disk_image_sha
                 # Also pass it explicitly for newer clients.
                 if fmt:
                     plan["format"] = fmt
