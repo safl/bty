@@ -420,6 +420,11 @@ def test_flash_qcow2_url_verifies_matching_digest(
     )
 
     flash._flash_qcow2_from_url(_file_url(qcow2), loop_dev)
+    # qemu-img convert writes buffered (no O_DIRECT/fsync, unlike the dd
+    # paths), so flush the loop device's buffer cache to the backing file
+    # before reading it back -- otherwise the read can race the cache and
+    # see stale zeros. Production does this via execute_plan's _sync_target.
+    subprocess.run(["blockdev", "--flushbufs", str(loop_dev)], check=True)
     assert backing.read_bytes()[: len(payload)] == payload
 
 
