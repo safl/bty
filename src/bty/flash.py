@@ -195,6 +195,12 @@ class ImageInfo:
     size_bytes: int
     virtual_size_bytes: int | None  # what would be written to disk; None = unknown
     url: str | None = None
+    # Declared content digest (``sha256:<hex>``) for a URL source whose
+    # catalog / server committed to one. Verified on the wire during the
+    # flash. ``oras://`` refs resolve their own digest at flash time, so
+    # this stays ``None`` for them; it carries the catalog ``sha256`` for
+    # plain HTTP sources. ``None`` => no declared digest to check.
+    expected_sha: str | None = None
 
     @property
     def display(self) -> str:
@@ -229,6 +235,7 @@ class FlashPlan:
                 "format": self.image.format,
                 "size_bytes": self.image.size_bytes,
                 "virtual_size_bytes": self.image.virtual_size_bytes,
+                "expected_sha": self.image.expected_sha,
             },
             "target": {
                 "path": str(self.target.path),
@@ -257,7 +264,9 @@ def probe_image(path: Path) -> ImageInfo:
     )
 
 
-def probe_image_url(url: str, format_hint: str | None = None) -> ImageInfo:
+def probe_image_url(
+    url: str, format_hint: str | None = None, *, expected_sha: str | None = None
+) -> ImageInfo:
     """Inspect an image at an HTTP/HTTPS or ``oras://`` URL.
 
     For http(s): HEAD request, format from URL path, size from
@@ -280,6 +289,12 @@ def probe_image_url(url: str, format_hint: str | None = None) -> ImageInfo:
     caller (which read the catalog and knows the format) supply
     it as a fallback so the probe doesn't fail just because the
     URL's decorative filename lacks an extension.
+
+    ``expected_sha`` is the catalog / server's declared content digest
+    (bare 64-hex or ``sha256:<hex>``) for a plain-HTTP source; it is
+    normalised onto ``ImageInfo.expected_sha`` and verified on the wire
+    at flash time. ``oras://`` refs ignore it (they resolve their own
+    digest from the manifest).
 
     Raises ``FileNotFoundError`` if the server doesn't respond or
     returns 4xx / 5xx for the HEAD (http) or any registry call
@@ -333,7 +348,22 @@ def probe_image_url(url: str, format_hint: str | None = None) -> ImageInfo:
         format=fmt,
         size_bytes=size_bytes,
         virtual_size_bytes=virtual_size_bytes,
+        expected_sha=_normalize_digest(expected_sha),
     )
+
+
+def _normalize_digest(sha: str | None) -> str | None:
+    """Normalise a declared digest to ``sha256:<hex>`` (or ``None``).
+
+    Catalog ``sha256`` fields carry a bare 64-char hex string; the oras
+    resolver and the on-wire ``sha256sum`` both speak ``sha256:<hex>``.
+    Normalise so :func:`_verify_digest` compares like with like. A value
+    already carrying the ``sha256:`` prefix passes through unchanged.
+    """
+    if sha is None:
+        return None
+    sha = sha.strip().lower()
+    return sha if sha.startswith("sha256:") else f"sha256:{sha}"
 
 
 def _probe_image_url_oras(url: str) -> ImageInfo:
@@ -627,6 +657,7 @@ def execute_plan(
             # qcow2 can't stream-convert (random-access), so it's downloaded
             # to a temp file first and then handed to the existing local
             # qcow2 path.
+            expected_sha = plan.image.expected_sha
             if fmt == "img":
                 _flash_img_from_url(
                     plan.image.url,
@@ -634,6 +665,7 @@ def execute_plan(
                     progress=progress,
                     total_bytes=total_bytes,
                     cancel=cancel,
+                    expected_sha=expected_sha,
                 )
             elif fmt == "img.zst":
                 _flash_zst_from_url(
@@ -642,6 +674,7 @@ def execute_plan(
                     progress=progress,
                     total_bytes=total_bytes,
                     cancel=cancel,
+                    expected_sha=expected_sha,
                 )
             elif fmt == "img.xz":
                 _flash_xz_from_url(
@@ -650,6 +683,7 @@ def execute_plan(
                     progress=progress,
                     total_bytes=total_bytes,
                     cancel=cancel,
+                    expected_sha=expected_sha,
                 )
             elif fmt == "img.gz":
                 _flash_gz_from_url(
@@ -658,6 +692,7 @@ def execute_plan(
                     progress=progress,
                     total_bytes=total_bytes,
                     cancel=cancel,
+                    expected_sha=expected_sha,
                 )
             elif fmt == "img.bz2":
                 _flash_bz2_from_url(
@@ -666,9 +701,15 @@ def execute_plan(
                     progress=progress,
                     total_bytes=total_bytes,
                     cancel=cancel,
+                    expected_sha=expected_sha,
                 )
             elif fmt == "qcow2":
-                _flash_qcow2_from_url(plan.image.url, plan.target.path, cancel=cancel)
+                _flash_qcow2_from_url(
+                    plan.image.url,
+                    plan.target.path,
+                    cancel=cancel,
+                    expected_sha=expected_sha,
+                )
             else:
                 raise FlashError(f"cannot flash image of format {fmt!r}")
         else:
@@ -1266,9 +1307,14 @@ def _flash_img_from_url(
     progress: ProgressCallback | None = None,
     total_bytes: int | None = None,
     cancel: CancelCheck | None = None,
+    expected_sha: str | None = None,
 ) -> None:
     """Stream a raw .img from URL straight to a block device with dd."""
-    curl_args, resolved_size, digest = _curl_args_for_source(url)
+    curl_args, resolved_size, oras_digest = _curl_args_for_source(url)
+    # oras refs resolve their own layer digest; a plain-HTTP source
+    # carries the catalog's declared sha instead. Either gates the
+    # tee | sha256sum splice and the post-write verification.
+    digest = oras_digest or expected_sha
     if total_bytes is None:
         total_bytes = resolved_size
     # Pipe curl's stderr through the subprocess-log pump so ``bty``
@@ -1349,6 +1395,7 @@ def _flash_compressed_from_url(
     progress: ProgressCallback | None = None,
     total_bytes: int | None = None,
     cancel: CancelCheck | None = None,
+    expected_sha: str | None = None,
 ) -> None:
     """Pipeline ``curl URL | <decompress_cmd> | dd of=TARGET ...``.
 
@@ -1371,7 +1418,11 @@ def _flash_compressed_from_url(
     progress bar overshoot to ~6x for highly compressible .img.gz
     inputs.
     """
-    curl_args, _resolved_compressed_size, digest = _curl_args_for_source(url)
+    curl_args, _resolved_compressed_size, oras_digest = _curl_args_for_source(url)
+    # The digest covers the compressed blob: oras resolves its own, a
+    # plain-HTTP source carries the catalog's declared sha. Either gates
+    # the integrity splice.
+    digest = oras_digest or expected_sha
     # Pipe both curl + decompressor stderr through subprocess-log
     # pumps. The ``bty`` wizard prints each line above its progress
     # widget via Rich's ``console.print`` (which Rich routes around
@@ -1462,6 +1513,7 @@ def _flash_zst_from_url(
     progress: ProgressCallback | None = None,
     total_bytes: int | None = None,
     cancel: CancelCheck | None = None,
+    expected_sha: str | None = None,
 ) -> None:
     """Pipeline ``curl URL | zstd -d --stdout | dd of=TARGET ...``.
 
@@ -1478,6 +1530,7 @@ def _flash_zst_from_url(
         progress=progress,
         total_bytes=total_bytes,
         cancel=cancel,
+        expected_sha=expected_sha,
     )
 
 
@@ -1488,6 +1541,7 @@ def _flash_xz_from_url(
     progress: ProgressCallback | None = None,
     total_bytes: int | None = None,
     cancel: CancelCheck | None = None,
+    expected_sha: str | None = None,
 ) -> None:
     """Pipeline ``curl URL | xz -d --stdout | dd of=TARGET ...``."""
     _flash_compressed_from_url(
@@ -1498,6 +1552,7 @@ def _flash_xz_from_url(
         progress=progress,
         total_bytes=total_bytes,
         cancel=cancel,
+        expected_sha=expected_sha,
     )
 
 
@@ -1508,6 +1563,7 @@ def _flash_gz_from_url(
     progress: ProgressCallback | None = None,
     total_bytes: int | None = None,
     cancel: CancelCheck | None = None,
+    expected_sha: str | None = None,
 ) -> None:
     """Pipeline ``curl URL | gzip -d --stdout | dd of=TARGET ...``."""
     _flash_compressed_from_url(
@@ -1518,6 +1574,7 @@ def _flash_gz_from_url(
         progress=progress,
         total_bytes=total_bytes,
         cancel=cancel,
+        expected_sha=expected_sha,
     )
 
 
@@ -1528,6 +1585,7 @@ def _flash_bz2_from_url(
     progress: ProgressCallback | None = None,
     total_bytes: int | None = None,
     cancel: CancelCheck | None = None,
+    expected_sha: str | None = None,
 ) -> None:
     """Pipeline ``curl URL | bzip2 -d --stdout | dd of=TARGET ...``."""
     _flash_compressed_from_url(
@@ -1538,10 +1596,17 @@ def _flash_bz2_from_url(
         progress=progress,
         total_bytes=total_bytes,
         cancel=cancel,
+        expected_sha=expected_sha,
     )
 
 
-def _flash_qcow2_from_url(url: str, target: Path, *, cancel: CancelCheck | None = None) -> None:
+def _flash_qcow2_from_url(
+    url: str,
+    target: Path,
+    *,
+    cancel: CancelCheck | None = None,
+    expected_sha: str | None = None,
+) -> None:
     """Download a qcow2 to a temp file, then ``qemu-img convert`` it.
 
     qcow2 is random-access (the converter seeks all over the source),
@@ -1553,7 +1618,8 @@ def _flash_qcow2_from_url(url: str, target: Path, *, cancel: CancelCheck | None 
     with tempfile.NamedTemporaryFile(suffix=".qcow2", delete=False) as tmp:
         tmp_path = Path(tmp.name)
     try:
-        curl_args, _, digest = _curl_args_for_source(url)
+        curl_args, _, oras_digest = _curl_args_for_source(url)
+        digest = oras_digest or expected_sha
         curl_argv = [*curl_args[:-1], "--output", str(tmp_path), curl_args[-1]]
         # Popen + watchdog (rather than subprocess.run) so the cancel
         # callback can terminate the download mid-stream. qcow2 can't
@@ -1746,7 +1812,6 @@ def _parse_gzip_listing(gzip_output: str) -> int | None:
             # the on-disk compressed bytes. Refuse the lie.
             return None
         return uncompressed
-    return None
     return None
 
 

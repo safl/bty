@@ -302,3 +302,89 @@ def test_flash_gz_url_rejects_tampered_digest(
         flash._flash_gz_from_url(
             "oras://example/ref.img.gz:tag", loop_dev, total_bytes=len(payload)
         )
+
+
+# ---------- Issue #10 PR2: declared-sha (non-oras) verification --------------
+#
+# Plain-HTTP sources carry no oras digest; the catalog / PXE plan supplies a
+# declared sha that reaches the writer as ``expected_sha``. Same on-wire
+# splice, gated on the declared digest instead of the resolved oras one.
+
+
+def test_flash_img_url_verifies_declared_expected_sha(
+    tmp_path: Path,
+    loop_device: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    if shutil.which("curl") is None:
+        pytest.skip("curl not available")
+    loop_dev, backing = loop_device
+
+    payload = b"DECLARED" * 1024
+    ref = tmp_path / "ref.img"
+    ref.write_bytes(payload)
+    sha = _sha256_ref(ref)
+
+    # Plain URL -> no oras digest; expected_sha drives the verification.
+    monkeypatch.setattr(
+        flash,
+        "_curl_args_for_source",
+        lambda _u: (["curl", "-fsSL", _file_url(ref)], len(payload), None),
+    )
+
+    flash._flash_img_from_url(_file_url(ref), loop_dev, total_bytes=len(payload), expected_sha=sha)
+    assert backing.read_bytes()[: len(payload)] == payload
+
+
+def test_flash_img_url_declared_expected_sha_mismatch_raises(
+    tmp_path: Path,
+    loop_device: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    if shutil.which("curl") is None:
+        pytest.skip("curl not available")
+    loop_dev, _backing = loop_device
+
+    payload = b"DECLBAD!" * 1024
+    ref = tmp_path / "ref.img"
+    ref.write_bytes(payload)
+
+    monkeypatch.setattr(
+        flash,
+        "_curl_args_for_source",
+        lambda _u: (["curl", "-fsSL", _file_url(ref)], len(payload), None),
+    )
+
+    with pytest.raises(flash.FlashIntegrityError):
+        flash._flash_img_from_url(
+            _file_url(ref),
+            loop_dev,
+            total_bytes=len(payload),
+            expected_sha="sha256:" + "00" * 32,
+        )
+
+
+def test_flash_gz_url_verifies_declared_expected_sha(
+    tmp_path: Path,
+    loop_device: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    if shutil.which("curl") is None or shutil.which("gzip") is None:
+        pytest.skip("curl / gzip not available")
+    loop_dev, backing = loop_device
+
+    payload = b"DECLGZOK" * 1024
+    raw = tmp_path / "ref.img"
+    raw.write_bytes(payload)
+    subprocess.run(["gzip", "-k", "-f", str(raw)], check=True)
+    gz = tmp_path / "ref.img.gz"
+    sha = _sha256_ref(gz)  # digest covers the compressed blob
+
+    monkeypatch.setattr(
+        flash,
+        "_curl_args_for_source",
+        lambda _u: (["curl", "-fsSL", _file_url(gz)], None, None),
+    )
+
+    flash._flash_gz_from_url(_file_url(gz), loop_dev, total_bytes=len(payload), expected_sha=sha)
+    assert backing.read_bytes()[: len(payload)] == payload

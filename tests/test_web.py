@@ -749,6 +749,9 @@ def test_pxe_plan_flash_policy_with_target_returns_auto(
     assert body["target_disk_serial"] == "WD-WX12345"
     # No withcache configured -> live env fetches direct from origin.
     assert body["image"] == "https://example.invalid/demo.img.gz"
+    # The content sha rides along so the live env verifies the bytes
+    # even though the origin URL doesn't embed the digest in its path.
+    assert body["disk_image_sha"] == ref
 
 
 def test_pxe_plan_flash_uses_withcache_url_when_blob_is_cached(

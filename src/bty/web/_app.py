@@ -961,10 +961,11 @@ def create_app(
 
         Plan shapes (mode is the dispatch token):
 
-        * ``{"mode": "flash", "image": URL, "target_disk_serial": S}``
-          -- boot_mode in (bty-flash-always, bty-flash-once) with a bindable ref
-          AND a target_disk_serial picked. ``bty`` runs the flash
-          without prompts.
+        * ``{"mode": "flash", "image": URL, "target_disk_serial": S,
+          "disk_image_sha": HEX}`` -- boot_mode in (bty-flash-always,
+          bty-flash-once) with a bindable ref AND a target_disk_serial
+          picked. ``bty`` runs the flash without prompts and verifies the
+          streamed bytes against ``disk_image_sha``.
         * ``{"mode": "interactive", "catalog": URL}`` -- boot_mode
           ``tui``, OR a flash policy that can't be auto-resolved
           (no target serial, orphan ref). ``bty`` drops the operator
@@ -1156,6 +1157,10 @@ def create_app(
                     # the client can detect format), which is uninformative
                     # on the flash screen. ``name`` carries the real title.
                     "name": image_name,
+                    # Content sha (``bty_image_ref``) so the live env verifies
+                    # the bytes on the wire even when ``image`` is a withcache
+                    # or direct-origin URL that doesn't embed the digest.
+                    "disk_image_sha": ref,
                 }
                 # Also pass it explicitly for newer clients.
                 if fmt:
