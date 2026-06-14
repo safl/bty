@@ -1226,8 +1226,15 @@ def _read_observed_digest(sha_proc: subprocess.Popen[bytes]) -> str:
 
     ``sha256sum`` emits ``<hex>  -`` once; its output is ~65 bytes so
     it fits the pipe buffer and never blocks the upstream pipeline.
+
+    Reads ``stdout`` directly rather than via ``communicate()``:
+    :func:`_spawn_hash_tee` already closed the parent's copy of
+    ``stdin`` (to hand sha256sum its EOF), and ``communicate()`` would
+    try to flush that closed handle and raise ``ValueError``.
     """
-    out, _ = sha_proc.communicate()
+    assert sha_proc.stdout is not None
+    out = sha_proc.stdout.read()
+    sha_proc.stdout.close()
     return "sha256:" + out.split()[0].decode()
 
 
