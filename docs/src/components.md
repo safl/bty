@@ -213,7 +213,7 @@ homelab activity fit. Operators with strict retention needs run `DELETE
 FROM events WHERE ts < ?` themselves.
 
 **Behind a reverse proxy.** When bty-web sits behind nginx / caddy /
-Traefik, set `BTY_TRUSTED_PROXY=1` so audit rows record the real client IP
+Traefik, set `BTY_SERVER_TRUSTED_PROXY=1` so audit rows record the real client IP
 from `X-Forwarded-For` rather than the proxy's loopback. Off by default
 because the header is client-spoofable - only enable it when the proxy
 strips inbound `X-Forwarded-For` from external requests.

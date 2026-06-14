@@ -73,8 +73,9 @@ class CatalogEntry:
     /images proxy flash from ``src`` without ever requiring a
     sha. Digest verification happens at flash time for ``oras://``
     (the manifest layer digest is the URL); for ``http(s)://`` TLS
-    is the in-flight guarantee. The optional ``sha256`` exists for
-    a future stream-verify check (issue #10) and for UI display.
+    is the in-flight guarantee. When ``sha256`` is set, the flash
+    verifies the streamed bytes against it on the wire (see
+    ``bty.flash``); it is also shown in the UI.
 
     The schema decoupling is intentional: rolling tags (``oras://
     ...:latest``, ``github.com/.../releases/latest/download/...``)

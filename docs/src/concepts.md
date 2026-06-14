@@ -214,3 +214,29 @@ is on each box, surface "this MAC will re-flash on next boot" in
 bind a `bty_image_ref`, and pick a `target_disk_serial` on the server side.
 Interactive mode is for "give me a box that boots `bty`, I'll decide
 locally" - the local pick stays local.
+
+## Integrity and trust model
+
+What bty verifies, and what it trusts:
+
+- **Image bytes are verified when a digest is known.** An `oras://` source
+  carries a content digest (the manifest layer digest, frozen at resolve
+  time); a catalog entry can carry a `sha256`; a server-driven flash carries
+  it as `disk_image_sha` in the boot plan. When any of these is present, bty
+  hashes the streamed bytes in the pipe (`curl | tee | sha256sum | dd`) and
+  aborts the flash on mismatch, so a corrupted or tampered download never
+  silently lands on a disk. A source with no known digest (a rolling tag, a
+  plain URL with no `sha256`) flashes **without** verification; for those,
+  HTTPS/TLS is the only in-flight guarantee.
+- **The catalog itself is trusted, not authenticated.** bty does not verify a
+  signature on `catalog.toml`. Entries (and their `src` URLs) are trusted as
+  delivered; serve the catalog over HTTPS from a host you control.
+- **The `/pxe/*` surface is unauthenticated by design.** `GET /pxe/{mac}`,
+  `/pxe/{mac}/plan`, `/pxe/{mac}/inventory`, and `/pxe/{mac}/done` carry no
+  auth - a PXE client can't present credentials before it has booted. Only
+  the operator UI / mutation API is gated by `BTY_ADMIN_PASSWORD`. bty-web
+  therefore assumes a **trusted LAN** (homelab / CI / provisioning VLAN), not
+  the public internet. Put it on a segment only your machines and operators
+  can reach; do not port-forward it. Set `BTY_ADMIN_PASSWORD` before exposing
+  it past your own workstation (it defaults to `bty-lab` with a startup
+  warning).

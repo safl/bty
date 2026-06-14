@@ -1188,6 +1188,39 @@ def test_probe_image_url_oras_ignores_expected_sha(monkeypatch: pytest.MonkeyPat
     assert out.expected_sha is None
 
 
+def test_redact_secrets_scrubs_bearer_tokens() -> None:
+    # An oras flash injects a bearer; curl could echo the header. The
+    # log pump must not leak the token to the progress UI / logs.
+    assert (
+        flash._redact_secrets("Authorization: Bearer abc.DEF-123_~+/=")
+        == "Authorization: Bearer <redacted>"
+    )
+    assert (
+        flash._redact_secrets("note: using bearer eyJ.foo_bar") == "note: using bearer <redacted>"
+    )
+    # Non-secret lines pass through untouched.
+    assert flash._redact_secrets("curl: (22) HTTP 404 on blob") == "curl: (22) HTTP 404 on blob"
+
+
+def test_probe_image_url_malformed_content_length_is_unknown_size(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _BadCLResp:
+        headers: ClassVar[dict[str, str]] = {"Content-Length": "not-a-number"}
+
+        def __enter__(self) -> _BadCLResp:
+            return self
+
+        def __exit__(self, *_a: object) -> bool:
+            return False
+
+    monkeypatch.setattr("urllib.request.urlopen", lambda _req, timeout=30: _BadCLResp())
+    info = flash.probe_image_url("https://example.test/x.img")
+    # Malformed Content-Length folds to "unknown size" (0), no crash.
+    assert info.size_bytes == 0
+    assert info.virtual_size_bytes is None
+
+
 def test_to_dict_includes_expected_sha() -> None:
     digest = "sha256:" + "ab" * 32
     img = flash.ImageInfo(
