@@ -162,7 +162,7 @@ def test_env_example_has_required_keys(tmp_path: Path) -> None:
         "BTY_SERVER_TRUSTED_PROXY",
         "BTY_SERVER_SESSION_SECRET",
         "BTY_TUNING_MAX_UPLOAD_BYTES",
-        "BTY_BACKUP_MAX_PARALLEL",
+        "BTY_TUNING_BACKUP_MAX_PARALLEL",
     ):
         assert f"# {var}=" in body, f"{var} not documented in envvars.example"
 
@@ -187,7 +187,7 @@ def test_compose_does_not_plumb_per_knob_env_vars(tmp_path: Path) -> None:
         "BTY_ADMIN_PASSWORD",
         "BTY_SERVER_SESSION_SECRET",
         "BTY_TUNING_MAX_UPLOAD_BYTES",
-        "BTY_BACKUP_MAX_PARALLEL",
+        "BTY_TUNING_BACKUP_MAX_PARALLEL",
     ):
         assert f"{var}: ${{{var}:-}}" not in body, (
             f"{var} should not be plumbed through compose any more"
