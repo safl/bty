@@ -755,6 +755,34 @@ def test_execute_plan_dispatches_to_url_writers_for_url_images(
             assert local_marker not in calls
 
 
+def test_execute_plan_forwards_expected_sha_to_url_writer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The plan's ``image.expected_sha`` must reach the streaming writer
+    as ``expected_sha`` -- otherwise declared-sha verification is wired
+    up to a value the writer never sees."""
+    seen: dict[str, object] = {}
+    monkeypatch.setattr(flash, "probe_target", _stub_block_target)
+    monkeypatch.setattr(
+        flash,
+        "_flash_img_from_url",
+        lambda _u, _t, **kw: seen.update(kw),
+    )
+    _stub_post_write(monkeypatch, [])
+
+    digest = "sha256:" + "ab" * 32
+    img = flash.ImageInfo(
+        path=None,
+        url="http://server.local/x.img",
+        format="img",
+        size_bytes=1024,
+        virtual_size_bytes=1024,
+        expected_sha=digest,
+    )
+    flash.execute_plan(flash.make_plan(img, _tgt()))
+    assert seen.get("expected_sha") == digest
+
+
 def test_execute_plan_refuses_when_target_no_longer_block(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

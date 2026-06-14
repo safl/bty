@@ -1293,10 +1293,16 @@ def _sha256_file(path: Path) -> str:
 
 
 def _verify_digest(expected: str, observed: str | None, url: str) -> None:
-    """Raise :class:`FlashIntegrityError` if ``observed`` != ``expected``."""
+    """Raise :class:`FlashIntegrityError` if ``observed`` != ``expected``.
+
+    Verification happens after ``dd`` has already written (a stream
+    can't be checked before it's written), so the message warns that
+    the target now holds unverified bytes and must be re-flashed.
+    """
     if observed is not None and observed != expected:
         raise FlashIntegrityError(
-            f"integrity check failed for {url}: expected {expected}, computed {observed}"
+            f"integrity check failed for {url}: expected {expected}, computed {observed}. "
+            "The target now holds unverified data; re-flash from a trusted source."
         )
 
 
