@@ -924,7 +924,15 @@ jobs:
       - name: Extract version from tag
         id: version
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
-      - uses: docker/build-push-action@v6
+      # v0.55.0 publish-tftp shipped half: GHCR's auth path occasionally
+      # times out with ``failed to authorize: DeadlineExceeded`` during
+      # the buildx push; v0.55.0 lost its tftp container that way.
+      # ``continue-on-error`` on the first try plus a no-cache rebuild
+      # on the second tames that transient class without hand-running
+      # ``gh run rerun --failed``.
+      - id: push_web_attempt1
+        uses: docker/build-push-action@v6
+        continue-on-error: true
         with:
           context: .
           file: docker/Dockerfile
@@ -943,6 +951,21 @@ jobs:
             BTY_VERSION=${{ steps.version.outputs.version }}
           # Cache layers across runs so subsequent tags only rebuild
           # what changed (typically just the wheel install layer).
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - id: push_web_attempt2
+        if: steps.push_web_attempt1.outcome == 'failure'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ghcr.io/safl/bty-web:${{ steps.version.outputs.version }}
+            ghcr.io/safl/bty-web:latest
+          build-args: |
+            BTY_VERSION=${{ steps.version.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -985,7 +1008,25 @@ jobs:
       - name: Extract version from tag
         id: version
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
-      - uses: docker/build-push-action@v6
+      # Same transient-auth guard as publish-docker above: one retry
+      # after ``failed to authorize: DeadlineExceeded`` on the push
+      # so v0.55.0-style partial releases don't recur.
+      - id: push_tftp_attempt1
+        uses: docker/build-push-action@v6
+        continue-on-error: true
+        with:
+          context: deploy/tftp
+          file: deploy/tftp/Containerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ghcr.io/safl/bty-tftp:${{ steps.version.outputs.version }}
+            ghcr.io/safl/bty-tftp:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - id: push_tftp_attempt2
+        if: steps.push_tftp_attempt1.outcome == 'failure'
+        uses: docker/build-push-action@v6
         with:
           context: deploy/tftp
           file: deploy/tftp/Containerfile
