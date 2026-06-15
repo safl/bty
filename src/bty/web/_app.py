@@ -2121,6 +2121,7 @@ def create_app(
                     ref=u.ref,
                     sha_short=u.sha256[:12] if u.sha256 else None,
                     cached=u.cached,
+                    arch=u.arch,
                 )
             )
         return out
@@ -2195,6 +2196,8 @@ def create_app(
                 lines.append(f'format = "{u.format}"')
             if u.size_bytes is not None:
                 lines.append(f"size_bytes = {u.size_bytes}")
+            if u.arch:
+                lines.append(f'arch = "{u.arch}"')
             lines.append("")
         body = "\n".join(lines).rstrip() + "\n"
         return PlainTextResponse(content=body, media_type="application/toml")
@@ -2252,6 +2255,7 @@ def create_app(
                 format=row["format"],
                 size_bytes=row["size_bytes"],
                 description=row["description"],
+                arch=images.detect_arch_from_name(row["name"]),
             )
             for row in rows
         )
@@ -2278,6 +2282,7 @@ def create_app(
                     size_bytes=entry.size_bytes,
                     sources=(source,),
                     cached=False,
+                    arch=entry.arch,
                 )
             )
         return out

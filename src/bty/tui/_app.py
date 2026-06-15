@@ -133,6 +133,10 @@ class _TuiImage:
     # the bytes are verified on the wire. ``None`` for local files and
     # sources with no declared digest.
     sha: str | None = None
+    # Informational architecture hint (``x86_64`` / ``arm64`` / ...).
+    # Shown as a column in the image table; never restricts flash
+    # eligibility -- bty writes whatever bytes the operator picks.
+    arch: str | None = None
 
 
 def _normalise_server_url(server: str) -> str:
@@ -226,6 +230,7 @@ def load_catalog_from_source(source: str, *, timeout: float = 30.0) -> list[_Tui
             size_bytes=entry.size_bytes or 0,
             url=entry.src,
             sha=entry.sha256,
+            arch=entry.arch,
         )
         for entry in parsed_catalog.entries
     ]
@@ -427,6 +432,7 @@ def _list_local_images(image_root: Path) -> list[_TuiImage]:
             fmt=img.format,
             size_bytes=img.size_bytes or 0,
             path=img.path,
+            arch=img.arch,
         )
         for img in images.list_images(image_root)
     ]
@@ -1522,6 +1528,7 @@ class BtyTui:
         table.add_column("#", justify="right", style=_ACCENT, no_wrap=True)
         table.add_column("Name")
         table.add_column("Format", style=_PRIMARY, no_wrap=True)
+        table.add_column("Arch", style=_PRIMARY, no_wrap=True)
         table.add_column("Size", justify="right", no_wrap=True)
         table.add_column("Source", style=_MUTED)
         for i, row in enumerate(rows, start=1):
@@ -1530,6 +1537,7 @@ class BtyTui:
                 str(i),
                 row.name,
                 row.fmt or "?",
+                row.arch or "?",
                 _format_mib(row.size_bytes) if row.size_bytes else "-",
                 source,
             )

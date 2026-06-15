@@ -75,6 +75,7 @@
                     <th>Name</th>
                     <th>Content SHA</th>
                     <th>Format</th>
+                    <th>Arch</th>
                     <th>Source</th>
                     <th>Status</th>
                     <th class="text-end" style="width: 1%; white-space: nowrap;">Action</th>
@@ -102,6 +103,13 @@
                         {% endif %}
                     </td>
                     <td><span class="badge bg-secondary">{{ u.format or "?" }}</span></td>
+                    <td>
+                        {% if u.arch %}
+                        <span class="badge bg-light text-dark border" title="Best-effort architecture hint derived from the image filename (informational; never restricts flashing).">{{ u.arch }}</span>
+                        {% else %}
+                        <span class="text-muted">&mdash;</span>
+                        {% endif %}
+                    </td>
                     <td class="small">
                         {% if entry_src %}
                         {% if entry_src.startswith('oras://') %}
@@ -136,7 +144,7 @@
                 </tr>
                 {% endfor %}
                 {% if not unified %}
-                <tr><td colspan="6" class="text-muted text-center py-3">
+                <tr><td colspan="7" class="text-muted text-center py-3">
                     No catalog entries yet. Use <strong>Add image</strong>,
                     <strong>Upload catalog</strong>, or
                     <strong>Fetch latest catalog</strong> in the header above.

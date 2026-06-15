@@ -90,6 +90,13 @@ class CatalogEntry:
     format: str | None = None
     size_bytes: int | None = None
     description: str | None = None
+    # Informational architecture hint (``x86_64`` / ``arm64`` / ...);
+    # operator-facing display only, never used to filter or restrict
+    # the flash. Explicit ``arch = "..."`` in the manifest wins;
+    # otherwise inferred from ``name`` via
+    # :func:`bty.images.detect_arch_from_name`. ``None`` when neither
+    # source resolves a recognised token.
+    arch: str | None = None
 
     @property
     def ref(self) -> str:
@@ -147,13 +154,15 @@ class CatalogEntry:
                     f"canonicalisation differs from ours or the entry was "
                     f"tampered with."
                 )
+        name = str(raw["name"])
         return cls(
-            name=str(raw["name"]),
+            name=name,
             src=src,
             sha256=sha,
-            format=raw.get("format") or _images.detect_format(Path(raw["name"])),
+            format=raw.get("format") or _images.detect_format(Path(name)),
             size_bytes=int(raw["size_bytes"]) if raw.get("size_bytes") is not None else None,
             description=raw.get("description"),
+            arch=raw.get("arch") or _images.detect_arch_from_name(name),
         )
 
 

@@ -11,6 +11,19 @@ operator-facing summary.
 
 ## [0.53.0] - 2026-06-15
 
+### Added
+
+- **Architecture column on the catalog / image listings**. The bty TUI's
+  image table and bty-web's `/ui/images` page now show a best-effort
+  arch hint (`x86_64`, `arm64`, `i386`, `arm`, `riscv64`, etc.) for each
+  catalog entry. Operator-facing display only -- bty never restricts or
+  filters flash eligibility on it; the column just makes it visible at
+  a glance which images target which platform. Sources, in order:
+  explicit `arch = "..."` field in catalog manifests (publishers like
+  nosi should populate it for accuracy), then a filename heuristic
+  fallback that recognises the common token spellings. `?` / `-` when
+  nothing resolves.
+
 ### Changed (BREAKING)
 
 - **Variant naming streamlined along two axes**: boot source

@@ -259,6 +259,9 @@ class ImageEntry(BaseModel):
     ref: str = Field(..., pattern=r"^[0-9a-f]{64}$")
     sha_short: str | None = None
     cached: bool = False
+    # Informational architecture hint (``x86_64`` / ``arm64`` / ...);
+    # operator-facing display only.
+    arch: str | None = None
 
 
 class HealthResponse(BaseModel):
