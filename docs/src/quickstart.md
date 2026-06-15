@@ -7,7 +7,8 @@ then on that host stand up the bty-lab server.
 ## bty via USB
 
 Write the bty USB ISO to a stick, boot the target from it, pick a
-NOSI image, flash:
+NOSI image -- e.g. `debian-13-headless` for a minimal Debian server
+without a desktop -- and flash:
 
 ```bash
 curl -fLO https://github.com/safl/bty/releases/latest/download/bty-usbboot-pc-x86_64.iso
