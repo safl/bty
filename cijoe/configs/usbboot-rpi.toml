@@ -7,9 +7,9 @@
 # / Pi 5 / CM5 / Zero 2 W with no per-board branching. bty is grafted on
 # top (runtime + flash tooling + the bty-on-tty1 TUI launcher).
 #
-# Output is ``bty-usb-rpi-arm64-v<version>.img.gz``. Operator workflow:
+# Output is ``bty-usbboot-rpi-arm64-v<version>.img.gz``. Operator workflow:
 #
-#     gunzip -c bty-usb-rpi-arm64-v0.49.0.img.gz | sudo dd of=/dev/sdX bs=4M conv=fsync
+#     gunzip -c bty-usbboot-rpi-arm64-v0.49.0.img.gz | sudo dd of=/dev/sdX bs=4M conv=fsync
 #
 # Then plug into a Pi 4 / CM4 / Pi 5 / CM5 (on IO-board) and power on.
 # Once the bty TUI is up the operator picks a nosi rpios image from the
@@ -17,24 +17,24 @@
 # eMMC) or ``/dev/nvme0n1`` (Pi5 NVMe HAT).
 #
 # Usage:
-#   cijoe tasks/usb-rpi.yaml --config configs/usb-rpi.toml --monitor
-# (or via the Makefile dispatcher: ``make build VARIANT=usb-rpi``)
+#   cijoe tasks/usbboot-rpi.yaml --config configs/usbboot-rpi.toml --monitor
+# (or via the Makefile dispatcher: ``make build VARIANT=usbboot-rpi``)
 
 [bty]
-variant = "usb-rpi"
+variant = "usbboot-rpi"
 hostname = "bty-usb"
 timezone = "UTC"
 
 [cijoe.workflow]
 fail_fast = true
 
-[system-imaging.images.bty-usb-rpi-arm64]
+[system-imaging.images.bty-usbboot-rpi-arm64]
 # Raspberry Pi OS Lite (arm64). The ``_latest`` endpoint redirects to
 # the current dated image; cached at cloud.path between builds.
 cloud.url = "https://downloads.raspberrypi.com/raspios_lite_arm64_latest"
 cloud.path = "{{ local.env.HOME }}/system_imaging/cloud/raspios-arm64-lite.img.xz"
 # Working raw image (customized in place, then gzipped to publish.dir).
-disk.path = "{{ local.env.HOME }}/system_imaging/disk/bty-usb-rpi-arm64.img"
+disk.path = "{{ local.env.HOME }}/system_imaging/disk/bty-usbboot-rpi-arm64.img"
 # Root headroom added at bake for the bty venv + flash tooling; RPiOS's
 # own first-boot resize then expands root to fill the USB on the target.
 grow = "3G"

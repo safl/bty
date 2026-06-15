@@ -27,7 +27,7 @@ plugged into the server's USB port.
 The bty release artifact lives at a stable, GitHub-CDN-backed URL:
 
 ```
-https://github.com/safl/bty/releases/download/v$VERSION/bty-usb-x86_64-v$VERSION.iso
+https://github.com/safl/bty/releases/download/v$VERSION/bty-usbboot-pc-x86_64-v$VERSION.iso
 ```
 
 Replace `$VERSION` with the release you want (e.g. `0.39.0`), or
@@ -36,7 +36,7 @@ look up the latest via `release.toml`:
 ```bash
 VERSION=$(curl -fsSL https://github.com/safl/bty/releases/latest/download/release.toml \
   | grep -oP 'version = "\K[^"]+')
-echo "https://github.com/safl/bty/releases/download/v$VERSION/bty-usb-x86_64-v$VERSION.iso"
+echo "https://github.com/safl/bty/releases/download/v$VERSION/bty-usbboot-pc-x86_64-v$VERSION.iso"
 ```
 
 ## piKVM (load by URL)
@@ -78,7 +78,7 @@ For bty's published default catalog without typing the URL, type
 Fedora desktop).
 
 If you don't already have a `bty-web` instance, see
-[bty via netboot](bty-netboot.md) -- one `sudo uvx bty-lab deploy
+[bty via netboot](bty-netboot-pc.md) -- one `sudo uvx bty-lab deploy
 /opt/bty` and you have one.
 
 ## JetKVM (load by URL)

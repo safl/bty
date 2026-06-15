@@ -2,7 +2,7 @@
 Stage the test disk for the USB auto-grow QEMU test
 ====================================================
 
-Copies the freshly-baked ``bty-usb-x86_64-v*.iso`` into
+Copies the freshly-baked ``bty-usbboot-pc-x86_64-v*.iso`` into
 ``{qemu.guests.usb-grow.path}/disk.img`` and truncates the file to
 4 GiB so ``bty-usb-grow.service`` (running inside the live env once
 the guest boots) sees ~3 GiB of free space behind BTY_IMAGES and
@@ -26,7 +26,7 @@ import shutil
 from argparse import ArgumentParser
 from pathlib import Path
 
-ISO_BASENAME_GLOB = "bty-usb-x86_64-v*.iso"
+ISO_BASENAME_GLOB = "bty-usbboot-pc-x86_64-v*.iso"
 TEST_DISK_BYTES = 4 * 1024 * 1024 * 1024  # 4 GiB target stick
 
 
@@ -41,7 +41,7 @@ def main(args, cijoe):
     )
     candidates = sorted(iso_dir.glob(ISO_BASENAME_GLOB))
     if not candidates:
-        log.error(f"no {ISO_BASENAME_GLOB} found in {iso_dir} (did the usb-x86 build run?)")
+        log.error(f"no {ISO_BASENAME_GLOB} found in {iso_dir} (did the usbboot-pc build run?)")
         return errno.ENOENT
     src_iso = candidates[-1]  # sorted: highest-version .iso wins
     log.info(f"using {src_iso.name} ({src_iso.stat().st_size} bytes)")

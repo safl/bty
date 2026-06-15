@@ -3,29 +3,29 @@
 # Drives Debian's live-build (``--binary-images netboot``) to
 # produce a kernel + initrd + squashfs trio that bty-server hosts
 # over HTTP for PXE clients to chain into via iPXE. Same chroot
-# config tree as the ``usb-x86`` variant; only the binary-images
-# output mode differs (selected by ``BTY_VARIANT=netboot-x86`` in
+# config tree as the ``usbboot-pc`` variant; only the binary-images
+# output mode differs (selected by ``BTY_VARIANT=netboot-pc`` in
 # the live-build env, which is the default).
 #
-# Renamed from ``live-x86`` to ``netboot-x86``: the previous name
-# was ambiguous because ``usb-x86`` is also a "live" image (live-
+# Renamed from ``live-x86`` to ``netboot-pc``: the previous name
+# was ambiguous because ``usbboot-pc`` is also a "live" image (live-
 # build, ephemeral squashfs+tmpfs); the actual distinction is the
 # delivery mechanism (network boot vs USB stick).
 #
 # Usage:
-#   cijoe tasks/netboot.yaml --config configs/netboot-x86.toml --monitor
-# (or via the Makefile dispatcher: ``make build VARIANT=netboot-x86``)
+#   cijoe tasks/netboot-pc.yaml --config configs/netboot-pc.toml --monitor
+# (or via the Makefile dispatcher: ``make build VARIANT=netboot-pc``)
 
 [bty]
-variant = "netboot-x86"
+variant = "netboot-pc"
 hostname = "bty-netboot"
 timezone = "UTC"
 
 [cijoe.workflow]
 fail_fast = true
 
-# Where the published artifacts land. Mirrors the usb-x86
+# Where the published artifacts land. Mirrors the usbboot-pc
 # variant's default so all images live under one
 # directory tree.
-[system-imaging.images.bty-netboot-x86_64]
+[system-imaging.images.bty-netboot-pc-x86_64]
 publish.dir = "{{ local.env.HOME }}/system_imaging/disk"

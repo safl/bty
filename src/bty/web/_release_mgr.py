@@ -64,7 +64,7 @@ class ReleaseArtifactState:
     increments the counter by 4, finishing one drops it to 3).
     """
 
-    name: str  # filename, e.g. "bty-netboot-x86_64-v0.26.0.vmlinuz"
+    name: str  # filename, e.g. "bty-netboot-pc-x86_64-v0.26.0.vmlinuz"
     status: str = "queued"  # queued | running | completed | cancelled | failed
     bytes_done: int = 0
     bytes_total: int | None = None

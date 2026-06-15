@@ -1,8 +1,8 @@
-# bty via bty-usb-rpi (Raspberry Pi flasher)
+# bty via bty-usbboot-rpi (Raspberry Pi flasher)
 
 A USB-bootable arm64 image that runs the bty flash TUI on a Pi
 itself. The headline use case is the **Compute Module 5 mounted
-in a CM5 IO-board inside an enclosure**: with bty-usb-rpi the
+in a CM5 IO-board inside an enclosure**: with bty-usbboot-rpi the
 operator no longer has to disassemble the case, set the eMMC
 boot jumper, run `rpiboot` from a host PC, flash via Etcher,
 and reassemble. Plug the USB stick into one of the IO-board's
@@ -36,8 +36,8 @@ asset. `releases/latest/download/` always redirects to the newest
 version:
 
 ```
-https://github.com/safl/bty/releases/latest/download/bty-usb-rpi-arm64-vX.Y.Z.img.gz
-https://github.com/safl/bty/releases/latest/download/bty-usb-rpi-arm64-vX.Y.Z.img.gz.sha256
+https://github.com/safl/bty/releases/latest/download/bty-usbboot-rpi-arm64-vX.Y.Z.img.gz
+https://github.com/safl/bty/releases/latest/download/bty-usbboot-rpi-arm64-vX.Y.Z.img.gz.sha256
 ```
 
 Verify the sha256 before writing.
@@ -45,7 +45,7 @@ Verify the sha256 before writing.
 ## Step 2: Write the image to a USB stick
 
 ```sh
-gunzip -c bty-usb-rpi-arm64-vX.Y.Z.img.gz | sudo dd of=/dev/sdX bs=4M conv=fsync
+gunzip -c bty-usbboot-rpi-arm64-vX.Y.Z.img.gz | sudo dd of=/dev/sdX bs=4M conv=fsync
 sudo sync
 ```
 
@@ -138,8 +138,8 @@ and boots a generic arm64 VM):
 ```sh
 mkdir -p /tmp/rpi-extract && cd /tmp/rpi-extract
 # Substitute the version you downloaded. Latest is
-# https://github.com/safl/bty/releases/latest/download/bty-usb-rpi-arm64.img.gz
-gunzip -c ~/Downloads/bty-usb-rpi-arm64-v*.img.gz > image.img
+# https://github.com/safl/bty/releases/latest/download/bty-usbboot-rpi-arm64.img.gz
+gunzip -c ~/Downloads/bty-usbboot-rpi-arm64-v*.img.gz > image.img
 mcopy -i image.img@@1M ::/vmlinuz .
 mcopy -i image.img@@1M ::/initrd.img .
 

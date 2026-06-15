@@ -18,7 +18,7 @@ doc: |
 
   Run locally with the same command CI runs:
 
-      sudo -v && make build VARIANT=usb-x86 && make test-usb-grow
+      sudo -v && make build VARIANT=usbboot-pc && make test-usb-grow
 
   (The bake stages a fresh .iso under ~/system_imaging/disk/;
   ``usb_grow_stage`` copies + truncates it into the qemu guest

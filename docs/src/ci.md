@@ -27,8 +27,8 @@ Everything below must be green before anything publishes.
 - **flash-integration** -- the flash pipeline against a loop device.
 - **build-wheel** -- `uv build` of the `bty-lab` wheel + sdist.
 - **build-ipxe** -- compiles bty's custom embedded-chain `ipxe.efi` (see below).
-- **build-media** -- the netboot live image (kernel + initrd + squashfs).
-- **build-usb-x86** -- the bootable USB live ISO.
+- **build-netboot-pc** -- the netboot live image (kernel + initrd + squashfs).
+- **build-usbboot-pc** -- the bootable USB live ISO.
 - **test-pxe** -- the end-to-end PXE chain test (see below).
 - **test-usb-grow** -- boots the USB ISO in QEMU and asserts the first-boot
   service grows `BTY_IMAGES` to fill the stick.
@@ -98,5 +98,5 @@ A version bump on `main` releases itself, but only off a green build:
 make ci          # lint + format-check + typecheck + test (the package side)
 make test-pxe    # the end-to-end PXE chain test (needs QEMU + KVM + podman)
 make ipxe        # build the custom ipxe.efi -> dist/ipxe/ipxe.efi
-make build VARIANT=netboot-x86   # the netboot live image
+make build VARIANT=netboot-pc   # the netboot live image
 ```

@@ -10,16 +10,16 @@
 #
 # Variants:
 #
-#   - ``netboot-x86`` (default): amd64 kernel + initrd + squashfs
+#   - ``netboot-pc`` (default): amd64 kernel + initrd + squashfs
 #     trio for the PXE flow. Server hosts these three files over
 #     HTTP and clients chain into them via iPXE.
-#   - ``usb-x86``: amd64 hybrid ISO image bootable from CD or USB
+#   - ``usbboot-pc``: amd64 hybrid ISO image bootable from CD or USB
 #     (BIOS + UEFI). Adds ``--bootloaders syslinux,grub-efi`` for
 #     dual-firmware boot. No ``bty.*`` cmdline params: USB-local
 #     boot has no bty-server URL or self-MAC to pin, and
 #     ``bty-on-tty1.service`` fires unconditionally
 #     (v0.22.10+ retired the ConditionKernelCommandLine gating).
-# The arm64 ``usb-rpi`` flasher is NOT a live-build variant. It
+# The arm64 ``usbboot-rpi`` flasher is NOT a live-build variant. It
 # customizes Raspberry Pi OS Lite in place (loop-mount + chroot; see
 # ``cijoe/scripts/rpios_image_build.py``) so it never reaches this
 # config -- RPiOS already ships every Pi kernel + dtb + firmware,
@@ -62,10 +62,10 @@ set -e
 # hiding init output makes operator debugging harder, polish is not
 # worth the opacity.
 
-BTY_VARIANT="${BTY_VARIANT:-netboot-x86}"
+BTY_VARIANT="${BTY_VARIANT:-netboot-pc}"
 
 case "${BTY_VARIANT}" in
-    netboot-x86)
+    netboot-pc)
         ARCH=amd64
         BINARY_IMAGES=netboot
         BOOTLOADERS_OPTS=""
@@ -75,7 +75,7 @@ case "${BTY_VARIANT}" in
         # them.
         BOOTAPPEND="boot=live components plymouth.enable=0 modprobe.blacklist=nouveau nouveau.modeset=0 systemd.gpt_auto=0 bty.version=__BTY_VERSION__"
         ;;
-    usb-x86)
+    usbboot-pc)
         ARCH=amd64
         BINARY_IMAGES=iso-hybrid
         BOOTLOADERS_OPTS="--bootloaders syslinux,grub-efi"
@@ -91,7 +91,7 @@ case "${BTY_VARIANT}" in
         ;;
     *)
         echo "auto/config: unknown BTY_VARIANT=${BTY_VARIANT}" >&2
-        echo "  valid: netboot-x86 | usb-x86" >&2
+        echo "  valid: netboot-pc | usbboot-pc" >&2
         exit 2
         ;;
 esac

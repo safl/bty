@@ -5,7 +5,7 @@ Stage the bty-lab wheel for variants that bake bty into their image
 Builds a wheel from the parent repo via ``uv build`` and copies it
 into a per-variant staging directory under ``bty-media/``:
 
-- ``netboot-x86`` / ``usb-x86`` / ``usb-rpi`` ->
+- ``netboot-pc`` / ``usbboot-pc`` / ``usbboot-rpi`` ->
   ``bty-media/live-build/config/includes.chroot/opt/bty/`` (consumed
   by the live-build hook ``0500-bty-install.hook.chroot``, which
   ``pip install``s it into the chroot's ``/opt/bty/venv``). All
@@ -35,9 +35,9 @@ from pathlib import Path
 # same target dir.
 _LIVE_CHROOT_BTY = Path("live-build") / "config" / "includes.chroot" / "opt" / "bty"
 TARGET_DIRS: dict[str, Path] = {
-    "netboot-x86": _LIVE_CHROOT_BTY,
-    "usb-x86": _LIVE_CHROOT_BTY,
-    "usb-rpi": _LIVE_CHROOT_BTY,
+    "netboot-pc": _LIVE_CHROOT_BTY,
+    "usbboot-pc": _LIVE_CHROOT_BTY,
+    "usbboot-rpi": _LIVE_CHROOT_BTY,
 }
 
 
@@ -51,7 +51,7 @@ def main(args, cijoe):
     repo_root = cijoe_dir.parent
     bty_media = repo_root / "bty-media"
 
-    variant = cijoe.getconf("bty", {}).get("variant", "usb-x86")
+    variant = cijoe.getconf("bty", {}).get("variant", "usbboot-pc")
     target_rel = TARGET_DIRS.get(variant)
     if target_rel is None:
         log.info(f"Skipping wheel stage (variant={variant!r}; nothing to bake)")

@@ -2,13 +2,13 @@
 Build the bty USB-Pi flasher by customizing Raspberry Pi OS in-place
 ====================================================================
 
-The x86 bty variants (netboot-x86 / usb-x86) are live-build images: a
+The x86 bty variants (netboot-pc / usbboot-pc) are live-build images: a
 squashfs + a live-boot initrd that mounts it. That model fights the
 Raspberry Pi badly -- the Pi boots via the VideoCore firmware +
 ``config.txt`` chain, the vendor kernels are split per-SoC
 (``linux-image-rpi-2712`` for BCM2712 vs ``linux-image-rpi-v8`` for
 BCM2711/2837), and a single live-initrd can only carry one kernel's
-modules. The previous live-build ``usb-rpi`` path shipped a boot
+modules. The previous live-build ``usbboot-rpi`` path shipped a boot
 partition with no device trees at all and could not boot a CM5.
 
 This build takes the opposite, much simpler tack -- the same one
@@ -35,7 +35,7 @@ and the bootloader, so the result boots Pi 4 / CM4 / Pi 5 / CM5 / Zero
      identity, clean caches,
   7. unmount and gzip the raw ``.img`` to ``.img.gz`` (+ sha256).
 
-Output: ``bty-usb-rpi-arm64-v<version>.img.gz``. Operators ``dd`` it to
+Output: ``bty-usbboot-rpi-arm64-v<version>.img.gz``. Operators ``dd`` it to
 a USB stick, plug into any supported Pi, and land in the bty TUI to
 flash the box's eMMC / NVMe from the catalog.
 
@@ -54,7 +54,7 @@ import os
 from argparse import ArgumentParser
 from pathlib import Path
 
-PUBLISH_BASENAME_FMT = "bty-usb-rpi-arm64-v{version}.img.gz"
+PUBLISH_BASENAME_FMT = "bty-usbboot-rpi-arm64-v{version}.img.gz"
 
 # bty runtime + flash tooling installed into the RPiOS chroot. Union of
 # the live-build lists bty-base.list.chroot (the arch-agnostic runtime)
@@ -117,26 +117,26 @@ def main(args, cijoe) -> int:
     bty_media = repo_root / "bty-media"
 
     variant = cijoe.getconf("bty", {}).get("variant", "")
-    if variant != "usb-rpi":
+    if variant != "usbboot-rpi":
         log.info(
-            f"Skipping rpios_image_build (variant={variant!r}; only 'usb-rpi' customizes RPiOS)"
+            f"Skipping rpios_image_build (variant={variant!r}; only 'usbboot-rpi' customizes RPiOS)"
         )
         return 0
 
     images = cijoe.getconf("system-imaging.images", {})
-    image = images.get("bty-usb-rpi-arm64")
+    image = images.get("bty-usbboot-rpi-arm64")
     if not image:
-        log.error("missing system-imaging.images.bty-usb-rpi-arm64 in config")
+        log.error("missing system-imaging.images.bty-usbboot-rpi-arm64 in config")
         return errno.EINVAL
 
     publish_dir = Path(image.get("publish", {}).get("dir", ""))
     if not str(publish_dir):
-        log.error("system-imaging.images.bty-usb-rpi-arm64.publish.dir is unset")
+        log.error("system-imaging.images.bty-usbboot-rpi-arm64.publish.dir is unset")
         return errno.EINVAL
     publish_dir.mkdir(parents=True, exist_ok=True)
 
     version = _read_bty_version(cijoe_dir)
-    log.info(f"bty-usb-rpi: build version {version}")
+    log.info(f"bty-usbboot-rpi: build version {version}")
 
     # ---- 1. obtain a decompressed RPiOS base image (cached) ---------------
     base_img = _fetch_base_image(cijoe, image)
@@ -179,7 +179,7 @@ def main(args, cijoe) -> int:
         return err
 
     log.info("Published artifacts:")
-    cijoe.run_local(f"ls -la {publish_dir}/bty-usb-rpi-arm64-*")
+    cijoe.run_local(f"ls -la {publish_dir}/bty-usbboot-rpi-arm64-*")
     return 0
 
 
@@ -195,7 +195,7 @@ def _fetch_base_image(cijoe, image: dict) -> Path | None:
     url = cloud.get("url")
     xz_path = Path(cloud.get("path", ""))
     if not url or not str(xz_path):
-        log.error("system-imaging.images.bty-usb-rpi-arm64.cloud.{url,path} unset")
+        log.error("system-imaging.images.bty-usbboot-rpi-arm64.cloud.{url,path} unset")
         return None
 
     if not xz_path.exists():

@@ -154,7 +154,7 @@ cloud-init bases, live-build config).
 
 Four shipping variants:
 
-**`usb-x86`** - bootable USB stick carrying the `bty` runtime
+**`usbboot-pc`** - bootable USB stick carrying the `bty` runtime
 and an exFAT `BTY_IMAGES` partition for pre-built images. The
 operator plugs it into a target machine, boots it; `bty`
 auto-launches on tty1 (via `bty-on-tty1.service`) and walks
@@ -174,13 +174,13 @@ Raspberry Pi OS Lite image and customising it in a
 `qemu-aarch64-static` chroot (no QEMU full-system bake needed).
 Booting a Pi off SD is the homelab-friendliest server-deployment path.
 
-**`netboot-x86`** - kernel + initrd + squashfs trio that PXE
+**`netboot-pc`** - kernel + initrd + squashfs trio that PXE
 clients chain into via the server's HTTP boot stack. The chroot
 ships `bty-on-tty1.service` (unconditional; runs on every
 boot). The cmdline carries `bty.server` + `bty.mac` only; `bty`
 GETs `<server>/pxe/<mac>/plan` to decide whether to auto-flash,
 interact, or exit. Renamed from `live-x86` to disambiguate from
-`usb-x86` (which is also a live image).
+`usbboot-pc` (which is also a live image).
 
 The intended operator experience for the server variants is
 appliance-grade:
@@ -349,7 +349,7 @@ and `release`.
 - **`v*` tags** - single unified release. `uv build` produces the
   wheel and sdist (PyPI publish via trusted publishing); the same
   workflow builds the four `bty-media` variants in parallel
-  (`usb-x86`, `server-x86`, `server-rpi`, `netboot-x86`), runs the
+  (`usbboot-pc`, `server-x86`, `server-rpi`, `netboot-pc`), runs the
   end-to-end PXE chain test against the freshly-built artifacts,
   builds HTML + PDF docs, and attaches every release-bound artifact
   to the GitHub release at the same tag. Operators get one release
@@ -442,22 +442,22 @@ Landed after the original 1.0 list:
     Bearer scheme, and the custom `sessions` SQLite table. Replaced
     with Starlette's `SessionMiddleware` (server-signed cookie, no
     DB hop). Net ~760 LOC deleted with no browser-flow regression.
-19. **[done]** Ported `usb-x86` from cloud-init + `overlayroot`
+19. **[done]** Ported `usbboot-pc` from cloud-init + `overlayroot`
     to live-build. The previous path stitched a stock Debian
     cloud image, an ext4 rootfs, and the `overlayroot` package's
     initramfs hook; that hook was fragile across kernel /
     hardware combos (kernel panic on GMKtec MiniBoxXS, kernel
     6.12.85+deb13-amd64). live-boot's SquashFS + tmpfs overlay is
     the canonical Debian path for ephemeral live media and is
-    what `netboot-x86` already uses. Shipped over v0.2.16 ->
+    what `netboot-pc` already uses. Shipped over v0.2.16 ->
     v0.3.1 across seven phases.
 
     1. **[done]** Add an `iso-hybrid` output target to the existing
        live-build config (parallel to the current `--binary-images
-       netboot` output). Output: `bty-usb-x86_64.iso`. Most of the
-       chroot is shared with `netboot-x86` - this is genuinely a
+       netboot` output). Output: `bty-usbboot-pc-x86_64.iso`. Most of the
+       chroot is shared with `netboot-pc` - this is genuinely a
        packaging variant. Driven by a new `usb-iso` cijoe variant
-       (`cijoe/configs/usb-iso.toml`, `cijoe/tasks/usb.yaml`,
+       (`cijoe/configs/usb-iso.toml`, `cijoe/tasks/usbboot-pc.yaml`,
        `cijoe/scripts/usb_iso_build.py`); marked experimental in
        the ci-cd.yml media matrix until proven on real hardware.
     2. **[done]** Make `bty-on-tty1.service` graceful when no
@@ -475,7 +475,7 @@ Landed after the original 1.0 list:
        to the GPT, `losetup -fP` + `mkfs.exfat` to format. The
        single artifact `dd`'s onto a stick with a writable area
        the operator can drop `*.img.zst` files onto from any host
-       OS - same UX the legacy cloud-init `usb-x86` provided, but
+       OS - same UX the legacy cloud-init `usbboot-pc` provided, but
        baked statically instead of carved by cloud-init runcmd.
     4. **[done]** Mount BTY_IMAGES at boot.
        `var-lib-bty-images.mount` mounts the partition RO at
@@ -489,27 +489,27 @@ Landed after the original 1.0 list:
        in v0.8.0 for Ventoy / piKVM / JetKVM friendliness); operators
        who want more grow with gparted on their host.)
     5. **[done]** Documented delivery options + renamed
-       `live-x86` -> `netboot-x86` (both deferred work folded
+       `live-x86` -> `netboot-pc` (both deferred work folded
        into the same commit). Stock hybrid ISO with built-in
        writable area; operators write it with their existing
        tooling (`dd`, Balena Etcher, Rufus) or drop it onto an
        existing Ventoy stick alongside their other rescue ISOs.
        The project does not ship a stick-writing tool of its
        own. The `live-x86` rename addressed a long-standing
-       naming bug: both `usb-x86` and `live-x86` produced live
+       naming bug: both `usbboot-pc` and `live-x86` produced live
        envs, so calling one "live" was ambiguous; the actual
        distinguishing axis is delivery mechanism (USB vs PXE).
        Artifact name dropped the redundant `-netboot` suffix:
        `bty-live-x86_64-netboot/bty-live-x86_64.*` ->
-       `bty-netboot-x86_64/bty-netboot-x86_64.*`.
+       `bty-netboot-pc-x86_64/bty-netboot-pc-x86_64.*`.
     6. **[done]** Retired the `overlayroot` dependency, the
-       cloud-init usb-x86 bake (`cloudinit-base-usb.user`,
-       `rootfs/usb/`, the cloud-init `usb-x86.toml` config,
+       cloud-init usbboot-pc bake (`cloudinit-base-usb.user`,
+       `rootfs/usb/`, the cloud-init `usbboot-pc.toml` config,
        `docs/asciinema/usb-build.sh`), and the legacy
-       `bty-usb-x86_64-img-zst` release artifact. The `usb-x86`
+       `bty-usbboot-pc-x86_64-img-zst` release artifact. The `usbboot-pc`
        variant name now points at the live-build path that was
        called `usb-iso` during phases 1-5; the cijoe config moved
-       from `usb-iso.toml` to `usb-x86.toml`. Gated on hardware
+       from `usb-iso.toml` to `usbboot-pc.toml`. Gated on hardware
        verification of the v0.2.20 release; landed after the
        GMKtec MiniBoxXS booted cleanly with the live-build
        artifact and the BTY_IMAGES partition mounted at
@@ -829,7 +829,7 @@ implementation is in flight.
   job (no state to drift); rescue / recovery boots to a
   known-good environment; lab benchmarking on machines that
   have no disk or shouldn't be written to. The artifacts
-  already exist (`netboot-x86` variant) and `bty-web`'s
+  already exist (`netboot-pc` variant) and `bty-web`'s
   per-MAC `boot_policy` field already routes to different
   iPXE scripts; this mode would add a new policy value (e.g.
   `boot_policy=netrun`) that renders an iPXE script that

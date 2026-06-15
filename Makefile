@@ -2,25 +2,27 @@
 #
 # All common operations in one place; ``make help`` lists them.
 # Operators run everything from the repo root: ``make build
-# VARIANT=usb-x86``, ``make test``, ``make ci``, etc.
+# VARIANT=usbboot-pc``, ``make test``, ``make ci``, etc.
 
 UV      ?= uv
-VARIANT ?= usb-x86
+VARIANT ?= usbboot-pc
 
-# Per-variant cijoe workflow file under cijoe/tasks/.
-#  - usb-x86 uses the live-build iso-hybrid pipeline (usb.yaml).
-#  - netboot-x86 uses the live-build netboot pipeline (netboot.yaml).
-#    Renamed from live-x86 to disambiguate from usb-x86 (also "live").
-#  - usb-rpi uses the live-build arm64 netboot pipeline plus the
-#    Pi-image packaging step (usb-rpi.yaml). Build host MUST be
-#    native arm64 (``ubuntu-24.04-arm`` on GHA; a local Pi5 / etc.
-#    for dev). Cross-build via qemu-user is not supported.
-ifeq ($(VARIANT),netboot-x86)
-MEDIA_TASK := tasks/netboot.yaml
-else ifeq ($(VARIANT),usb-rpi)
-MEDIA_TASK := tasks/usb-rpi.yaml
+# Per-variant cijoe workflow file under cijoe/tasks/. The variant
+# string carries the hardware family (``pc`` for generic x86 BIOS /
+# UEFI boxes, ``rpi`` for Raspberry Pi SBCs) and the boot source
+# (``netboot`` for PXE-chain clients, ``usbboot`` for direct disk media).
+#  - usbboot-pc uses the live-build iso-hybrid pipeline.
+#  - netboot-pc uses the live-build netboot pipeline.
+#  - usbboot-rpi customizes Raspberry Pi OS in place (NOT live-build);
+#    the build host MUST be native arm64 (``ubuntu-24.04-arm`` on GHA;
+#    a local Pi5 / etc. for dev). Cross-build via qemu-user is not
+#    supported.
+ifeq ($(VARIANT),netboot-pc)
+MEDIA_TASK := tasks/netboot-pc.yaml
+else ifeq ($(VARIANT),usbboot-rpi)
+MEDIA_TASK := tasks/usbboot-rpi.yaml
 else
-MEDIA_TASK := tasks/usb.yaml
+MEDIA_TASK := tasks/usbboot-pc.yaml
 endif
 
 .DEFAULT_GOAL := help
@@ -56,10 +58,10 @@ help:
 	@echo "  test-pxe      end-to-end PXE chain test (server + client QEMU VMs)"
 	@echo "                  (needs QEMU + KVM; ~5-10 min wall clock)"
 	@echo ""
-	@echo "Variant: $(VARIANT)  (override with VARIANT=netboot-x86, ...)"
-	@echo "  usb-x86      - bootable USB live ISO via live-build (.iso.gz, x86_64)"
-	@echo "  netboot-x86  - kernel + initrd + squashfs trio for PXE-flash clients (x86_64)"
-	@echo "  usb-rpi      - Raspberry-Pi USB-bootable flasher (.img.gz, arm64; CM5/Pi5/Pi4)"
+	@echo "Variant: $(VARIANT)  (override with VARIANT=netboot-pc, ...)"
+	@echo "  usbboot-pc   - bootable USB live ISO via live-build (.iso, x86_64)"
+	@echo "  netboot-pc   - kernel + initrd + squashfs trio for PXE-flash clients (x86_64)"
+	@echo "  usbboot-rpi  - Raspberry-Pi USB-bootable flasher (.img.gz, arm64; CM5/Pi5/Pi4)"
 	@echo ""
 	@echo "Docker (trial / image-library bty-web container):"
 	@echo "  docker-build  uv build + docker build -> bty-web:dev (single-arch, local)"
@@ -172,14 +174,14 @@ media-deps:
 	pipx ensurepath
 
 # Build a media image. Pick the variant via ``VARIANT=...``:
-#   make build VARIANT=usb-x86      - bootable USB live ISO (.iso.gz, x86_64)
-#   make build VARIANT=netboot-x86  - kernel + initrd + squashfs for PXE clients
-#   make build VARIANT=usb-rpi      - Raspberry-Pi USB-bootable flasher
+#   make build VARIANT=usbboot-pc      - bootable USB live ISO (.iso.gz, x86_64)
+#   make build VARIANT=netboot-pc  - kernel + initrd + squashfs for PXE clients
+#   make build VARIANT=usbboot-rpi      - Raspberry-Pi USB-bootable flasher
 #                                     (.img.gz, arm64; build host MUST be
 #                                     native arm64)
 #
-# All variants use live-build (cijoe/tasks/netboot.yaml,
-# cijoe/tasks/usb.yaml, cijoe/tasks/usb-rpi.yaml) and need
+# All variants use live-build (cijoe/tasks/netboot-pc.yaml,
+# cijoe/tasks/usbboot-pc.yaml, cijoe/tasks/usbboot-rpi.yaml) and need
 # ``live-build`` on the host plus passwordless sudo.
 build:
 	cd cijoe && cijoe $(MEDIA_TASK) --monitor -c configs/$(VARIANT).toml
@@ -198,15 +200,15 @@ ipxe:
 # client QEMU VM PXE-booting against it over a host bridge. Test-side
 # dnsmasq does DHCP + TFTP for the isolated segment (bty never runs
 # DHCP). Requires podman + QEMU + KVM and the netboot artifacts under
-# ~/system_imaging/disk/ (build with ``make build VARIANT=netboot-x86``).
+# ~/system_imaging/disk/ (build with ``make build VARIANT=netboot-pc``).
 # Wall clock 5-10 min per run.
 test-pxe:
 	cd cijoe && cijoe tasks/test-pxe.yaml --monitor -c configs/test-pxe.toml
 
 # ---------- USB auto-grow QEMU test -------------------------------------
 # Verifies bty-usb-grow.service extends BTY_IMAGES from 1 MiB at bake
-# to fill the underlying disk on first boot. Needs the bty-usb-x86_64.iso
-# built locally (``make build VARIANT=usb-x86``) or pre-staged under
+# to fill the underlying disk on first boot. Needs the bty-usbboot-pc-x86_64.iso
+# built locally (``make build VARIANT=usbboot-pc``) or pre-staged under
 # ~/system_imaging/disk/. Wall clock ~3-4 min per run.
 test-usb-grow:
 	cd cijoe && cijoe tasks/test-usb-grow.yaml --monitor -c configs/test-usb-grow.toml

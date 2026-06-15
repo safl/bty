@@ -9,11 +9,11 @@
 #   - PXE chain test (qemu-system + KVM helpers + sshpass for debug)
 #   - bty-media bake pipelines:
 #       * server-x86: qemu-system + genisoimage for cloud-init seed
-#       * usb-x86 / netboot-x86: live-build + debootstrap +
+#       * usbboot-pc / netboot-pc: live-build + debootstrap +
 #                squashfs-tools + xorriso + exfatprogs (plus root for
 #                the chroot phase - sudo prompts you interactively
-#                when ``sudo make build VARIANT=usb-x86`` /
-#                ``netboot-x86``)
+#                when ``sudo make build VARIANT=usbboot-pc`` /
+#                ``netboot-pc``)
 #       * server-rpi: qemu-user-static + binfmt-support + xz-utils
 #                for the arm64 chroot customisation of Raspberry Pi
 #                OS Lite
@@ -81,9 +81,9 @@ PACKAGES=(
     # bty-media server-x86 bake (cloud-init in QEMU + NoCloud cidata ISO).
     genisoimage
 
-    # bty-media usb-x86 + netboot-x86 bakes (live-build's debootstrap
+    # bty-media usbboot-pc + netboot-pc bakes (live-build's debootstrap
     # / chroot / squashfs / xorriso pipeline). xz-utils is kept for
-    # the server-rpi variant below (Pi OS Lite ships .xz); usb-x86
+    # the server-rpi variant below (Pi OS Lite ships .xz); usbboot-pc
     # now publishes .iso.gz (gzip ships in coreutils, no extra dep).
     live-build
     debootstrap
@@ -123,13 +123,13 @@ cat <<'EOF'
     uv sync --all-extras --group dev    # project venv + deps
     uv run pytest                       # unit tests (~7s)
     make ci                             # lint + types + tests
-    sudo make build VARIANT=usb-x86         # USB live ISO via live-build (~15m, root)
+    sudo make build VARIANT=usbboot-pc         # USB live ISO via live-build (~15m, root)
     make build VARIANT=server-x86           # server appliance (~15m, cloud-init)
     make build VARIANT=server-rpi           # RPi 4/5 server appliance
-    sudo make build VARIANT=netboot-x86     # PXE netboot trio (~10m, root)
+    sudo make build VARIANT=netboot-pc     # PXE netboot trio (~10m, root)
     make test-pxe                       # end-to-end PXE chain
 
-  Note: ``make build VARIANT=usb-x86`` and ``netboot-x86`` need root
+  Note: ``make build VARIANT=usbboot-pc`` and ``netboot-pc`` need root
   because live-build does a chroot + mount-bind dance; ``server-x86``
   and ``server-rpi`` don't (cloud-init in QEMU and qemu-user-static
   chroot, both unprivileged).
