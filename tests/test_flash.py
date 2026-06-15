@@ -869,6 +869,33 @@ def test_pump_dd_progress_handles_empty_stream() -> None:
     assert events == []
 
 
+def test_pump_dd_progress_supports_download_event_relabel() -> None:
+    """The pump drives both the disk-write progress bar (defaults)
+    and the network-side download bar (the ``dd`` spliced between
+    curl and the next pipeline stage). Confirm the ``event`` +
+    ``bytes_field`` overrides land on the emitted FlashProgress
+    record so callers can tell the two bars apart."""
+    stream = io.StringIO(
+        "524288 bytes (524 kB, 512 KiB) copied, 0.1 s, 5.2 MB/s\r"
+        "1048576 bytes (1.0 MB, 1.0 MiB) copied, 0.2 s, 5.2 MB/s\r"
+    )
+    events: list[flash.FlashProgress] = []
+    flash._pump_dd_progress(
+        stream,
+        events.append,
+        total_bytes=10_000_000,
+        event="downloading_progress",
+        bytes_field="bytes_downloaded",
+    )
+
+    # Same one-event-per-chunk semantics as the default, but on the
+    # download channel: bytes_downloaded set, bytes_written unset.
+    assert [e.event for e in events] == ["downloading_progress"]
+    assert events[0].bytes_downloaded == 1048576
+    assert events[0].bytes_written is None
+    assert events[0].total_bytes == 10_000_000
+
+
 # --------------------------------------------------------------------------
 # Cancel plumbing (FlashCancelled + watchdog)
 # --------------------------------------------------------------------------

@@ -60,6 +60,16 @@ class FlashProgress:
       through from ``started`` so consumers can compute percent /
       ETA without holding state. Emitted ~1/sec from a daemon
       thread that parses ``dd``'s ``status=progress`` stderr.
+    - ``downloading_progress`` - byte-level progress from the
+      network-side ``dd`` spliced between ``curl`` and the rest
+      of the URL-streaming pipeline. ``bytes_downloaded`` is set
+      and ``total_bytes`` carries the **compressed** payload size
+      (curl's Content-Length / oras layer size); compare against
+      ``writing_progress``'s decompressed total to see network
+      throughput separately from disk-write throughput. Only
+      emitted on the URL-streaming flash paths
+      (``_flash_*_from_url``); local-file flashes have no
+      download stage.
     - ``synced``            - kernel buffers flushed.
     - ``partprobed``        - partition table re-read; flash
       hardware-complete.
@@ -81,15 +91,19 @@ class FlashProgress:
       Rich progress bar uncluttered while still surfacing real
       errors + end-of-run stats.
 
-    ``total_bytes`` is the image's virtual size when known (set on
-    ``started`` and carried on ``writing_progress``). ``bytes_written``
-    is set only on ``writing_progress``.
+    ``total_bytes`` is set on ``started`` (the image's virtual /
+    decompressed size when known) and on ``writing_progress``.
+    On ``downloading_progress`` it carries the COMPRESSED payload
+    size, which differs from the decompressed total for compressed
+    images. ``bytes_written`` is set only on ``writing_progress``;
+    ``bytes_downloaded`` only on ``downloading_progress``.
     """
 
     event: str
     note: str = ""
     total_bytes: int | None = None
     bytes_written: int | None = None
+    bytes_downloaded: int | None = None
 
 
 ProgressCallback: TypeAlias = Callable[[FlashProgress], None]
@@ -113,10 +127,18 @@ def _pump_dd_progress(
     stream: IO[str],
     progress: ProgressCallback,
     total_bytes: int | None,
+    *,
+    event: str = "writing_progress",
+    bytes_field: str = "bytes_written",
 ) -> None:
-    """Read ``dd``'s stderr and emit ``writing_progress`` events.
+    """Read ``dd``'s stderr and emit byte-level progress events.
 
-    Designed to run in a daemon thread alongside the writer process.
+    Designed to run in a daemon thread alongside a ``dd`` process.
+    Defaults emit the disk-write ``writing_progress`` events; pass
+    ``event="downloading_progress"`` + ``bytes_field="bytes_downloaded"``
+    when the dd being pumped is the network-side splice that counts
+    bytes coming out of curl.
+
     ``dd`` separates progress lines with ``\\r`` (so each line
     overwrites the previous one in a terminal); we replace ``\\r``
     with ``\\n`` before splitting so we get one progress line per
@@ -124,6 +146,15 @@ def _pump_dd_progress(
 
     Returns when ``stream`` closes (i.e. dd has exited).
     """
+
+    def _publish(byte_count: int) -> None:
+        _emit(
+            progress,
+            event,
+            **{bytes_field: byte_count},
+            total_bytes=total_bytes,
+        )
+
     buf = ""
     while True:
         chunk = stream.read(256)
@@ -132,12 +163,7 @@ def _pump_dd_progress(
             for line in buf.replace("\r", "\n").splitlines():
                 m = _DD_PROGRESS_RE.match(line.strip())
                 if m:
-                    _emit(
-                        progress,
-                        "writing_progress",
-                        bytes_written=int(m.group(1)),
-                        total_bytes=total_bytes,
-                    )
+                    _publish(int(m.group(1)))
             return
         buf += chunk
         # Use the LAST progress line in the buffer as the most recent
@@ -156,12 +182,7 @@ def _pump_dd_progress(
         for line in reversed(lines):
             m = _DD_PROGRESS_RE.match(line.strip())
             if m:
-                _emit(
-                    progress,
-                    "writing_progress",
-                    bytes_written=int(m.group(1)),
-                    total_bytes=total_bytes,
-                )
+                _publish(int(m.group(1)))
                 break
 
 
@@ -959,6 +980,9 @@ def _start_dd_progress_thread(
     proc: subprocess.Popen[str],
     progress: ProgressCallback | None,
     total_bytes: int | None,
+    *,
+    event: str = "writing_progress",
+    bytes_field: str = "bytes_written",
 ) -> threading.Thread | None:
     """Spawn the dd-stderr pump if a progress callback is provided.
 
@@ -966,16 +990,65 @@ def _start_dd_progress_thread(
     or ``None`` if no callback was given. When ``progress`` is ``None``
     the caller leaves dd's stderr inherited and dd's status=progress
     output goes to the operator's terminal as before.
+
+    ``event`` + ``bytes_field`` are forwarded to :func:`_pump_dd_progress`
+    so the same helper can drive either the disk-write progress bar
+    (defaults) or the network-side download progress bar
+    (``"downloading_progress"`` / ``"bytes_downloaded"``).
     """
     if progress is None or proc.stderr is None:
         return None
     thread = threading.Thread(
         target=_pump_dd_progress,
         args=(proc.stderr, progress, total_bytes),
+        kwargs={"event": event, "bytes_field": bytes_field},
         daemon=True,
     )
     thread.start()
     return thread
+
+
+def _spawn_download_meter(
+    upstream_stdout: IO[bytes],
+    progress: ProgressCallback | None,
+    total_bytes: int | None,
+) -> tuple[subprocess.Popen[Any] | None, threading.Thread | None]:
+    """Insert a ``dd bs=1M status=progress`` between curl and the next
+    pipeline stage so the operator gets a download progress bar
+    distinct from the disk-write one.
+
+    The interposed dd just shuffles bytes through: it reads curl's
+    output in 1 MiB chunks and writes them to its own stdout
+    (which the caller then feeds into the next stage's stdin). The
+    progress meter on its stderr is what we mine for the
+    ``downloading_progress`` events; total throughput is unaffected
+    in practice -- the pipe is byte-flow-bound by network speed,
+    not by dd's passthrough.
+
+    Returns ``(proc, pump_thread)``. When ``progress`` is None the
+    caller does not want a download bar; we return ``(None, None)``
+    and the caller uses ``upstream_stdout`` directly.
+    """
+    if progress is None:
+        return None, None
+    proc = subprocess.Popen(
+        # ``iflag=fullblock`` makes dd accumulate a full 1 MiB before
+        # writing, avoiding short-read chunks that would partial-count
+        # against the progress meter on a slow pipe.
+        ["dd", "bs=1M", "status=progress", "iflag=fullblock"],
+        stdin=upstream_stdout,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    pump = _start_dd_progress_thread(
+        proc,
+        progress,
+        total_bytes,
+        event="downloading_progress",
+        bytes_field="bytes_downloaded",
+    )
+    return proc, pump
 
 
 def _flash_img(
@@ -1345,18 +1418,24 @@ def _flash_img_from_url(
     curl_stderr = subprocess.PIPE if progress is not None else None
     curl_proc = subprocess.Popen(curl_args, stdout=subprocess.PIPE, stderr=curl_stderr)
     curl_log_pump = _start_subprocess_log_pump(curl_proc, progress, "curl")
+    # Interpose a ``dd`` between curl and the next stage so the
+    # network-side throughput surfaces as a separate progress bar.
+    # ``resolved_size`` (curl's Content-Length / oras layer size) is
+    # the network total even when the decompressed payload is larger.
+    assert curl_proc.stdout is not None
+    dl_proc, dl_pump = _spawn_download_meter(curl_proc.stdout, progress, resolved_size)
     tee_proc: subprocess.Popen[bytes] | None = None
     sha_proc: subprocess.Popen[bytes] | None = None
     observed: str | None = None
     try:
-        # When the source committed to a content digest, splice
-        # ``tee | sha256sum`` so the hash is computed on the wire;
-        # dd then reads from tee instead of curl directly.
-        dd_stdin = curl_proc.stdout
+        # Bytes go curl -> (dl_proc, when progress is on) -> [tee | sha256sum] -> dd.
+        downstream_source = dl_proc.stdout if dl_proc is not None else curl_proc.stdout
+        assert downstream_source is not None
         if digest is not None:
-            assert curl_proc.stdout is not None
-            tee_proc, sha_proc = _spawn_hash_tee(curl_proc.stdout)
+            tee_proc, sha_proc = _spawn_hash_tee(downstream_source)
             dd_stdin = tee_proc.stdout
+        else:
+            dd_stdin = downstream_source
         stderr = subprocess.PIPE if progress is not None else None
         dd_proc = subprocess.Popen(
             ["dd", f"of={target}", "bs=4M", "oflag=direct", "conv=fsync", "status=progress"],
@@ -1365,6 +1444,8 @@ def _flash_img_from_url(
             text=True,
         )
         procs: list[subprocess.Popen[Any]] = [curl_proc, dd_proc]
+        if dl_proc is not None:
+            procs.append(dl_proc)
         if tee_proc is not None and sha_proc is not None:
             procs += [tee_proc, sha_proc]
         watchdog = _spawn_cancel_watchdog(procs, cancel)
@@ -1373,6 +1454,8 @@ def _flash_img_from_url(
         # lets the kernel propagate EOF / SIGPIPE when one end finishes.
         if curl_proc.stdout is not None:
             curl_proc.stdout.close()
+        if dl_proc is not None and dl_proc.stdout is not None:
+            dl_proc.stdout.close()
         if tee_proc is not None and tee_proc.stdout is not None:
             tee_proc.stdout.close()
         dd_rc = dd_proc.wait()
@@ -1380,10 +1463,13 @@ def _flash_img_from_url(
             observed = _read_observed_digest(sha_proc)
         if pump is not None:
             pump.join(timeout=2)
+        if dl_pump is not None:
+            dl_pump.join(timeout=2)
         if watchdog is not None:
             watchdog.join(timeout=2)
     finally:
         curl_rc = curl_proc.wait()
+        dl_rc = dl_proc.wait() if dl_proc is not None else 0
         tee_rc = tee_proc.wait() if tee_proc is not None else 0
         sha_rc = sha_proc.wait() if sha_proc is not None else 0
         if curl_log_pump is not None:
@@ -1395,6 +1481,8 @@ def _flash_img_from_url(
         raise FlashCancelled("flash cancelled by operator")
     if curl_rc != 0:
         raise FlashError(f"curl exited {curl_rc} fetching {url}")
+    if dl_rc != 0:
+        raise FlashError(f"download meter exited {dl_rc} fetching {url}")
     if tee_rc != 0:
         raise FlashError(f"tee exited {tee_rc} fetching {url}")
     if sha_rc != 0:
@@ -1437,7 +1525,7 @@ def _flash_compressed_from_url(
     progress bar overshoot to ~6x for highly compressible .img.gz
     inputs.
     """
-    curl_args, _resolved_compressed_size, oras_digest = _curl_args_for_source(url)
+    curl_args, resolved_compressed_size, oras_digest = _curl_args_for_source(url)
     # The digest covers the compressed blob: oras resolves its own, a
     # plain-HTTP source carries the catalog's declared sha. Either gates
     # the integrity splice.
@@ -1450,18 +1538,27 @@ def _flash_compressed_from_url(
     pipeline_stderr = subprocess.PIPE if progress is not None else None
     curl_proc = subprocess.Popen(curl_args, stdout=subprocess.PIPE, stderr=pipeline_stderr)
     curl_log_pump = _start_subprocess_log_pump(curl_proc, progress, "curl")
+    # Insert a download meter so the operator sees network throughput
+    # separately from the disk-write throughput (especially valuable
+    # here: for compressed images the two numbers differ by the
+    # compression ratio).
+    assert curl_proc.stdout is not None
+    dl_proc, dl_pump = _spawn_download_meter(curl_proc.stdout, progress, resolved_compressed_size)
     tee_proc: subprocess.Popen[bytes] | None = None
     sha_proc: subprocess.Popen[bytes] | None = None
     observed: str | None = None
     try:
         # The digest covers the COMPRESSED blob (the oras layer), so
-        # the tee splices between curl and the decompressor -- it
-        # hashes the bytes curl fetched, not the expanded image.
-        decomp_stdin = curl_proc.stdout
+        # the tee splices between curl (via the download meter, when
+        # active) and the decompressor; it hashes the bytes curl
+        # fetched, not the expanded image.
+        downstream_source = dl_proc.stdout if dl_proc is not None else curl_proc.stdout
+        assert downstream_source is not None
         if digest is not None:
-            assert curl_proc.stdout is not None
-            tee_proc, sha_proc = _spawn_hash_tee(curl_proc.stdout)
+            tee_proc, sha_proc = _spawn_hash_tee(downstream_source)
             decomp_stdin = tee_proc.stdout
+        else:
+            decomp_stdin = downstream_source
         decomp_proc = subprocess.Popen(
             decompress_cmd,
             stdin=decomp_stdin,
@@ -1471,6 +1568,8 @@ def _flash_compressed_from_url(
         decomp_log_pump = _start_subprocess_log_pump(decomp_proc, progress, decompress_name)
         if curl_proc.stdout is not None:
             curl_proc.stdout.close()
+        if dl_proc is not None and dl_proc.stdout is not None:
+            dl_proc.stdout.close()
         if tee_proc is not None and tee_proc.stdout is not None:
             tee_proc.stdout.close()
         try:
@@ -1482,6 +1581,8 @@ def _flash_compressed_from_url(
                 text=True,
             )
             procs: list[subprocess.Popen[Any]] = [curl_proc, decomp_proc, dd_proc]
+            if dl_proc is not None:
+                procs.append(dl_proc)
             if tee_proc is not None and sha_proc is not None:
                 procs += [tee_proc, sha_proc]
             watchdog = _spawn_cancel_watchdog(procs, cancel)
@@ -1493,6 +1594,8 @@ def _flash_compressed_from_url(
                 observed = _read_observed_digest(sha_proc)
             if pump is not None:
                 pump.join(timeout=2)
+            if dl_pump is not None:
+                dl_pump.join(timeout=2)
             if watchdog is not None:
                 watchdog.join(timeout=2)
         finally:

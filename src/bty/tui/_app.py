@@ -71,6 +71,7 @@ from rich.panel import Panel
 from rich.progress import (
     BarColumn,
     Progress,
+    TaskID,
     TaskProgressColumn,
     TextColumn,
     TimeElapsedColumn,
@@ -1203,16 +1204,26 @@ class BtyTui:
         shared: dict[str, Any] = {"result": None, "error": None, "stage": "starting"}
 
         with progress:
+            # The write task always exists (every flash writes to disk).
+            # The download task is added lazily on the first
+            # ``downloading_progress`` event so local-file flashes do
+            # not show a permanently-empty network bar. Once the URL
+            # flash pipeline emits its first download tick, the
+            # download bar appears above the write bar; once writing
+            # starts, both update concurrently and the operator sees
+            # network throughput separately from disk-write throughput.
             task_id = progress.add_task(
                 "queued",
                 total=plan.image.virtual_size_bytes or plan.image.size_bytes or None,
                 bytes_human="0 / ?",
             )
+            download_task_id: TaskID | None = None
 
             def _on_progress(ev: flash.FlashProgress) -> None:
                 # Called from the flash thread. ``progress`` is
                 # thread-safe (Rich's Progress mutex), so direct
                 # updates are fine.
+                nonlocal download_task_id
                 shared["stage"] = ev.event
                 if ev.event == "started":
                     if ev.total_bytes:
@@ -1227,12 +1238,35 @@ class BtyTui:
                             completed=ev.bytes_written,
                             bytes_human=_format_progress_bytes(ev.bytes_written, ev.total_bytes),
                         )
+                elif ev.event == "downloading_progress":
+                    if ev.bytes_downloaded is None:
+                        return
+                    if download_task_id is None:
+                        # Rich renders tasks in insertion order; we
+                        # want download above writing, but the write
+                        # task was created first. Workaround: a new
+                        # task added at runtime lands at the bottom,
+                        # which is fine -- the operator still sees
+                        # both bars and the labels disambiguate.
+                        download_task_id = progress.add_task(
+                            "downloading",
+                            total=ev.total_bytes,
+                            bytes_human=_format_progress_bytes(ev.bytes_downloaded, ev.total_bytes),
+                        )
+                    progress.update(
+                        download_task_id,
+                        completed=ev.bytes_downloaded,
+                        total=ev.total_bytes,
+                        bytes_human=_format_progress_bytes(ev.bytes_downloaded, ev.total_bytes),
+                    )
                 elif ev.event == "synced":
                     progress.update(task_id, description="syncing buffers")
                 elif ev.event == "partprobed":
                     progress.update(task_id, description="partprobed")
                 elif ev.event == "done":
                     progress.update(task_id, description="done")
+                    if download_task_id is not None:
+                        progress.update(download_task_id, description="downloaded")
                 elif ev.event == "failed":
                     progress.update(task_id, description=f"FAILED: {ev.note}")
                 elif ev.event == "subprocess_log":
