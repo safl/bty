@@ -9,6 +9,30 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.55.0] - 2026-06-15
+
+### Fixed
+
+- **Flash write progress bar no longer freezes at 100%**. The write
+  total is fundamentally unknowable in advance (gzip wraps its
+  uncompressed-size trailer mod 2^32, qcow2 virtual_size need not
+  equal the bytes dd ends up writing, the compressed-size fallback
+  is smaller than the decompressed write count). Init the write task
+  with `total=None` so Rich's `BarColumn` draws a pulsing scanner
+  (a KITT / Knight Rider look) and add a `TransferSpeedColumn` so
+  the operator still sees the running byte count, live bandwidth,
+  and elapsed time. The download bar stays determinate because
+  `Content-Length` is reliable. Hardware-spotted on v0.54.0 against
+  a debian-13-headless.img.gz served via piKVM virt-mount.
+- **"Back up now" button on `/ui/backups` now visibly does
+  something**. A v3 metadata-only backup completes in milliseconds,
+  faster than the active-jobs poll cadence, so the page never
+  registered the active-to-inactive transition that drives the
+  auto-reload; the server-rendered "Backups on disk" card did not
+  pick up the new bundle. The click handler now reloads the page
+  after a successful enqueue so the new bundle and refreshed
+  cadence indicators surface immediately.
+
 ## [0.54.0] - 2026-06-15
 
 ### Added
