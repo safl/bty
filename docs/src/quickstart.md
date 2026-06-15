@@ -1,11 +1,13 @@
 # Quickstart
 
-## bty via USB
+## Flash OS images via USB
 
 Put bty on a USB stick with `curl | dd`. The stick boots any x86 box
-into the bty wizard, which lets you pick a [NOSI](https://github.com/safl/nosi)
-image (e.g. `debian-13-headless` for a minimal Debian server) and
-flash it to the target's local disk.
+into the bty wizard, which flashes OS images onto the target's local
+disk. The default catalog is the [NOSI](https://github.com/safl/nosi)
+image set -- e.g. pick `debian-13-headless` for a minimal Debian
+server -- but bty accepts any URL- or oras-served image, so swap in
+your own catalog when you have one.
 
 ```bash
 curl -fL https://github.com/safl/bty/releases/latest/download/bty-usbboot-pc-x86_64.iso \
