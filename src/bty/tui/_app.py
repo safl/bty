@@ -76,6 +76,7 @@ from rich.progress import (
     TextColumn,
     TimeElapsedColumn,
     TimeRemainingColumn,
+    TransferSpeedColumn,
 )
 from rich.prompt import Prompt
 from rich.table import Table
@@ -1191,6 +1192,7 @@ class BtyTui:
             BarColumn(bar_width=None),
             TaskProgressColumn(),
             TextColumn("[{task.fields[bytes_human]}]"),
+            TransferSpeedColumn(),
             TimeElapsedColumn(),
             TimeRemainingColumn(),
             console=self._console,
@@ -1204,18 +1206,25 @@ class BtyTui:
         shared: dict[str, Any] = {"result": None, "error": None, "stage": "starting"}
 
         with progress:
-            # The write task always exists (every flash writes to disk).
-            # The download task is added lazily on the first
-            # ``downloading_progress`` event so local-file flashes do
-            # not show a permanently-empty network bar. Once the URL
-            # flash pipeline emits its first download tick, the
-            # download bar appears above the write bar; once writing
-            # starts, both update concurrently and the operator sees
-            # network throughput separately from disk-write throughput.
+            # The write bar is always indeterminate. The "total" for
+            # the writer is fundamentally unreliable: gzip wraps its
+            # uncompressed-size trailer mod 2^32, qcow2 virtual size
+            # need not equal the bytes dd ends up writing, and the
+            # ``size_bytes`` fallback is the COMPRESSED upstream size
+            # which is always smaller than the decompressed write
+            # count. Rather than show a percentage that misleads,
+            # leave ``total=None`` so Rich's BarColumn draws the
+            # pulsing scanner block; the bytes-human counter shows
+            # the running write count so the operator can still see
+            # the disk is being written. The download bar IS
+            # determinate (Content-Length is reliable) and gets added
+            # lazily on the first ``downloading_progress`` event so
+            # local-file flashes do not show a permanently-empty
+            # network bar.
             task_id = progress.add_task(
                 "queued",
-                total=plan.image.virtual_size_bytes or plan.image.size_bytes or None,
-                bytes_human="0 / ?",
+                total=None,
+                bytes_human="0",
             )
             download_task_id: TaskID | None = None
 
@@ -1226,17 +1235,17 @@ class BtyTui:
                 nonlocal download_task_id
                 shared["stage"] = ev.event
                 if ev.event == "started":
-                    if ev.total_bytes:
-                        progress.update(task_id, total=ev.total_bytes)
                     progress.update(task_id, description="starting flash")
                 elif ev.event == "writing":
                     progress.update(task_id, description=f"writing ({ev.note or '?'})")
                 elif ev.event == "writing_progress":
                     if ev.bytes_written is not None:
+                        # Indeterminate bar; just surface the running
+                        # byte count alongside the pulse.
                         progress.update(
                             task_id,
                             completed=ev.bytes_written,
-                            bytes_human=_format_progress_bytes(ev.bytes_written, ev.total_bytes),
+                            bytes_human=_format_mib(ev.bytes_written),
                         )
                 elif ev.event == "downloading_progress":
                     if ev.bytes_downloaded is None:
@@ -1246,7 +1255,7 @@ class BtyTui:
                         # want download above writing, but the write
                         # task was created first. Workaround: a new
                         # task added at runtime lands at the bottom,
-                        # which is fine -- the operator still sees
+                        # which is fine; the operator still sees
                         # both bars and the labels disambiguate.
                         download_task_id = progress.add_task(
                             "downloading",
