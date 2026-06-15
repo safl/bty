@@ -31,5 +31,22 @@ dedicated secondary drive for state):
 
 - [bty-lab server setup](tutorials/bty-lab-deploy.md)
 
-After deploy, point PXE clients at the new server: see
-[bty via netboot](tutorials/bty-netboot-pc.md).
+## Next steps
+
+The lab is up and you've flashed your first target. From here:
+
+- **Alternate delivery shapes** for the operator-side flash:
+  - [bty via Ventoy](tutorials/bty-ventoy.md) -- multi-boot USB
+    carrying the bty boot env plus pre-staged target images.
+  - [bty via BMC / OOB-MGMT](tutorials/bmc.md) -- piKVM / JetKVM /
+    server BMCs that mount the bty ISO as virtual media.
+- **Network-flash a fleet** from the server you just deployed:
+  - [bty via netboot](tutorials/bty-netboot-pc.md).
+- **How the pieces fit** -- read these once when you want to know
+  why bty-web holds no image bytes, how catalogs travel, and what
+  the container deploy actually wires:
+  - [Persistent state and where image bytes live](walkthrough-image-store.md)
+  - [Walkthrough: catalogs](walkthrough-catalog.md)
+  - [Walkthrough: bty-web container deploy](walkthrough-server-docker.md)
+- **Day 2** -- backup, upgrade, move to a new host:
+  [Operations](operations.md).
