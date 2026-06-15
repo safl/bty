@@ -2370,7 +2370,7 @@ operator-pointed-out shortcoming of the prior polish rounds.
 
 `/pxe/{mac}` and `/pxe/{mac}/plan` did:
 
-```python
+```text
 row = SELECT * FROM machines WHERE mac = ?
 if row is None:
     INSERT INTO machines (mac, ...) VALUES (?, ...)

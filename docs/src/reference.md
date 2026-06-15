@@ -536,9 +536,10 @@ v0.33.2+ (`bty_export_version = 3`): a directory containing a single
 `inventory.json`. No image bytes; v1 (pre-v0.31.0) and v2
 (v0.31.0..v0.33.1, with image bytes) bundles are refused on import.
 
-`inventory.json` shape:
+`inventory.json` shape (the `...` placeholders below stand in for
+elided keys / nested children; the live file is strict JSON):
 
-```json
+```text
 {
   "bty_export_version": 3,
   "exported_at": "2026-05-25T14:30:00+00:00",
