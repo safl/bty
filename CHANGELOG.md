@@ -9,6 +9,34 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.54.0] - 2026-06-15
+
+### Added
+
+- **Two progress bars during a URL flash**: download and write run in
+  parallel as a streaming pipeline (curl, optional decompressor, dd to
+  target). Before this release a single bar tracked the writer side
+  only, so a slow upstream and a slow target disk looked identical to
+  the operator and compressed images underreported network throughput
+  by the compression ratio. A small dd is now interposed between curl
+  and the rest of the pipeline; its progress feeds a new
+  `downloading_progress` event family alongside the existing
+  `writing_progress`. The TUI lazily adds a second Rich progress task
+  on the first download tick, so local-file flashes keep the
+  single-bar layout while URL flashes get a download bar above the
+  write bar.
+
+### Fixed
+
+- **GitHub Pages docs deploy survives a job re-run**. A re-attempt of
+  the `Deploy to GitHub Pages` job inside the same workflow run left
+  the prior `github-pages` artifact in place; the next
+  `upload-pages-artifact` added a second copy and `deploy-pages`
+  aborted with "Multiple artifacts named github-pages were
+  unexpectedly found for this workflow run". The deploy job now
+  deletes any pre-existing `github-pages` artifact for the current
+  run before uploading, so a re-run is idempotent.
+
 ## [0.53.0] - 2026-06-15
 
 ### Added
