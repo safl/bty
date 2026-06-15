@@ -1,47 +1,39 @@
 # Quickstart
 
-Two paths into bty: a one-command server deploy on the host, then any
-of the per-flow tutorials for the operator side (USB stick on x86 or
-a Pi, or netboot).
+Two steps to a working bty-lab:
 
-## Deploy the bty server
+1. **Bootstrap a host** -- use bty's own USB flasher to install a
+   [NOSI](https://github.com/safl/nosi) image onto a Linux box.
+   Result: a clean system to land the lab on.
+2. **Deploy bty-lab** -- on that host, run `bty-lab deploy` to
+   stand up the network-flash server (`bty-web` + `withcache`
+   via docker-compose).
+
+## 1. Bootstrap: flash a NOSI image
+
+Write the bty USB ISO to a stick, boot the target from it, pick a
+NOSI image, flash:
 
 ```bash
-sudo uvx bty-lab deploy /opt/bty
-#   bty-web:   http://<host>:8080/ui     (login: bty-lab / bty-lab)
-#   withcache: http://<host>:3000/       (login: bty-lab / bty-lab)
+curl -fLO https://github.com/safl/bty/releases/latest/download/bty-usbboot-pc-x86_64.iso
+sudo dd if=bty-usbboot-pc-x86_64.iso of=/dev/sdX bs=4M conv=fsync status=progress
 ```
 
-That's it. `deploy` auto-detects install mode from your euid:
+Replace `/dev/sdX` with your USB stick (check `lsblk` first). Plug
+into the target, boot from USB, run the wizard.
 
-- **As root (recommended)** -- full **system install**: writes
-  `envvars`, brings up the stack *with* the TFTP sidecar, installs
-  Podman Quadlet units to `/etc/containers/systemd/`, and starts the
-  services via systemctl. Stack survives host reboots.
-- **As a regular user** -- **user install**: compose-only. No TFTP
-  sidecar (binds privileged UDP/69), no autostart. Operator must
-  re-run `podman compose up -d` after host reboot. UEFI HTTP Boot
-  works; legacy BIOS PXE clients won't. The CLI prints exactly what
-  was skipped and how to promote to a system install at the end.
+Full step-by-step (sha256 check, BIOS boot keys, troubleshooting):
 
-`HOST_ADDR` is detected from the host's outbound-route IP; admin
-passwords default to `bty-lab`. Change the passwords in `/opt/bty/envvars`
-before exposing past trusted LAN.
+- [bty via bty-usbboot-pc](tutorials/bty-usbboot-pc.md) -- x86 target
+- [bty via bty-usbboot-rpi](tutorials/bty-usbboot-rpi.md) -- Raspberry Pi target
 
-- `uvx bty-lab upgrade /opt/bty` -- in-place upgrade. Auto-detects
-  compose- vs Quadlet-managed; preserves `envvars` + `data/`.
-- `uvx bty-lab init /opt/bty` -- emit files only, no side effects
-  (inspect / customise before applying).
+## 2. Deploy bty-lab on the freshly-installed host
 
-Bind-mount layout, env vars, the full subcommand surface:
-[`deploy/README.md`](https://github.com/safl/bty/blob/main/deploy/README.md)
-and [walkthrough-server-docker.md](walkthrough-server-docker.md).
+Once the host is up, run the server-side deploy. The tutorial
+covers both storage layouts (one disk for everything, or a
+dedicated secondary drive for state):
 
-## Flash a target from a USB stick
+- [bty-lab server setup](tutorials/bty-lab-deploy.md)
 
-The fastest no-server path: write the bty USB ISO to a stick, boot
-the target, pick image + disk, done. Full operator walkthrough --
-download, `dd`, BIOS boot keys, troubleshooting -- in the
-[bty via bty-usbboot-pc tutorial](tutorials/bty-usbboot-pc.md). For a
-Raspberry Pi target see [bty via bty-usbboot-rpi](tutorials/bty-usbboot-rpi.md).
-For the server-driven netboot flow, [bty via netboot](tutorials/bty-netboot-pc.md).
+After deploy, point PXE clients at the new server: see
+[bty via netboot](tutorials/bty-netboot-pc.md).
