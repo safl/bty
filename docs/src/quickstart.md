@@ -30,7 +30,7 @@ One command on a Linux host:
 sudo uvx bty-lab deploy /opt/bty
 ```
 
-That stands up `bty-web` + `withcache` via docker-compose. Unlocks
+That sets up `bty-web` + `withcache` via docker-compose. Unlocks
 PXE-boot for a fleet, image-byte caching across repeat flashes,
 and hosting a custom catalog (your own image-builder, an internal
 mirror, ...) on top of the USB flow. State lives under

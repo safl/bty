@@ -20,7 +20,7 @@ The operator UI is gated by `$BTY_ADMIN_PASSWORD` (unset = open, with a startup
 warning). End state after `up`: a browser URL ready to register machines and
 serve images.
 
-## Stand it up
+## Set it up
 
 ```sh
 sudo uvx bty-lab deploy /opt/bty
