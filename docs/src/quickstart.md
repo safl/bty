@@ -22,20 +22,22 @@ Full step-by-step (sha256 check, BIOS boot keys, troubleshooting):
 - [bty via bty-usbboot-pc](tutorials/bty-usbboot-pc.md) -- x86 target
 - [bty via bty-usbboot-rpi](tutorials/bty-usbboot-rpi.md) -- Raspberry Pi target
 
-## Deploy the bty-lab server
+## Deploy bty-server
 
-Stand up `bty-web` + `withcache` on a Linux host -- unlocks
-PXE-boot for a fleet, image-byte caching across repeat flashes,
-and hosting a custom catalog (your own image-builder, an internal
-mirror, ...) on top of the USB flow.
+One command on a Linux host:
 
 ```bash
 sudo uvx bty-lab deploy /opt/bty
 ```
 
-That's a single-disk deploy: state lives under `/opt/bty/data/`.
-For a fleet you typically want state on a dedicated drive so an
-OS reflash leaves the lab intact -- prepare the drive first, then
+That stands up `bty-web` + `withcache` via docker-compose. Unlocks
+PXE-boot for a fleet, image-byte caching across repeat flashes,
+and hosting a custom catalog (your own image-builder, an internal
+mirror, ...) on top of the USB flow. State lives under
+`/opt/bty/data/`.
+
+For a fleet you typically want state on a dedicated drive so an OS
+reflash leaves the lab intact -- prepare the drive first, then
 point `--data-dir` at the mount:
 
 ```bash
