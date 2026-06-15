@@ -9,6 +9,39 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.53.0] - 2026-06-15
+
+### Changed (BREAKING)
+
+- **Variant naming streamlined along two axes**: boot source
+  (`netboot` over PXE, `usbboot` from a stick) and hardware family
+  (`pc` for generic x86 BIOS / UEFI, `rpi` for Raspberry Pi SBCs).
+  Previously `netboot-x86` mixed an arch suffix with the boot source
+  while `usb-rpi` used a HW-family suffix, hiding that the `rpi`
+  variant is platform-specific (RPiOS + Pi firmware + per-SoC kernels)
+  rather than just arch-specific. New variant names:
+
+  | Old | New |
+  |-----|-----|
+  | `netboot-x86` | `netboot-pc` |
+  | `usb-x86`     | `usbboot-pc` |
+  | `usb-rpi`     | `usbboot-rpi` |
+
+  Operators with custom `BTY_VARIANT=...` env settings (e.g. CI scripts
+  invoking `make build VARIANT=...`) must update them. The release
+  artifact filenames change in lockstep: `bty-netboot-pc-x86_64-v*.{vmlinuz,initrd,squashfs}`,
+  `bty-usbboot-pc-x86_64-v*.iso`, `bty-usbboot-rpi-arm64-v*.img.gz`.
+  Existing files in `BTY_PATHS_BOOT_DIR` from prior releases are
+  ignored by the new bty-web (which now looks for the `-pc-` prefix);
+  upgrade workflow is "fetch netboot artifacts" from the UI after
+  bumping the container, same as any other release upgrade.
+
+- **Wheel asset dropped from GitHub releases**. `bty-lab` is
+  distributed via PyPI; the wheel on the GH release was redundant
+  with `pipx install bty-lab` and nothing in the tree consumed it
+  from there. The sdist (`bty_lab-X.Y.Z.tar.gz`) is kept as the
+  archival source release for distro packagers and offline mirrors.
+
 ## [0.52.0] - 2026-06-14
 
 ### Fixed
