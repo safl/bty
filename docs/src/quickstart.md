@@ -46,6 +46,7 @@ sudo mkfs.ext4 -L bty-data /dev/sdX
 sudo mkdir -p /srv/bty
 UUID=$(sudo blkid -o value -s UUID /dev/sdX)
 echo "UUID=$UUID  /srv/bty  ext4  defaults,noatime,nofail  0 2" | sudo tee -a /etc/fstab
+sudo systemctl daemon-reload
 sudo mount -a
 
 sudo uvx bty-lab deploy /opt/bty --data-dir /srv/bty
