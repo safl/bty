@@ -1,18 +1,15 @@
 # Quickstart
 
-Two steps to a working bty-lab: use bty's USB flasher to install a
-clean [NOSI](https://github.com/safl/nosi) image on a Linux host,
-then on that host stand up the bty-lab server.
-
 ## bty via USB
 
-Write the bty USB ISO to a stick, boot the target from it, pick a
-NOSI image -- e.g. `debian-13-headless` for a minimal Debian server
-without a desktop -- and flash:
+Put bty on a USB stick with `curl | dd`. The stick boots any x86 box
+into the bty wizard, which lets you pick a [NOSI](https://github.com/safl/nosi)
+image (e.g. `debian-13-headless` for a minimal Debian server) and
+flash it to the target's local disk.
 
 ```bash
-curl -fLO https://github.com/safl/bty/releases/latest/download/bty-usbboot-pc-x86_64.iso
-sudo dd if=bty-usbboot-pc-x86_64.iso of=/dev/sdX bs=4M conv=fsync status=progress
+curl -fL https://github.com/safl/bty/releases/latest/download/bty-usbboot-pc-x86_64.iso \
+  | sudo dd of=/dev/sdX bs=4M conv=fsync
 ```
 
 Replace `/dev/sdX` with your USB stick (check `lsblk` first). Plug
@@ -25,9 +22,20 @@ Full step-by-step (sha256 check, BIOS boot keys, troubleshooting):
 
 ## Deploy the bty-lab server
 
-Once the host is up, run the server-side deploy. The tutorial
-covers both storage layouts (one disk for everything, or a
-dedicated secondary drive for state):
+Standing up a bty-lab server (`bty-web` + `withcache` via
+docker-compose) unlocks three things on top of the USB flow:
+
+- **PXE-boot a fleet** -- no USB-stick-per-machine; targets boot
+  from the network, fetch their assigned image, flash, reboot.
+- **Cache downloaded image bytes** -- `withcache` warms on first
+  flash so the same image isn't re-pulled by every subsequent
+  target.
+- **Host a custom catalog** -- point bty-web at your own
+  image-builder output, an internal mirror, or any TOML manifest
+  shape `bty.catalog` accepts.
+
+The tutorial covers both storage layouts (one disk for everything,
+or a dedicated secondary drive for state):
 
 - [bty-lab server setup](tutorials/bty-lab-deploy.md)
 
