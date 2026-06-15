@@ -96,6 +96,14 @@ class Image:
     a cached value is available (sidecar ``.sha256`` file or
     in-memory). ``None`` means "no sidecar present"; callers compute
     on demand if they need it.
+
+    ``arch`` is an informational architecture hint (``x86_64`` /
+    ``arm64`` / etc.) derived from the filename via
+    :func:`detect_arch_from_name`. Never restricts flash eligibility
+    -- bty writes whatever bytes the operator points at; arch is a
+    display-only column so the operator can see at a glance what
+    platform an image targets. ``None`` when the filename carries
+    no recognised arch token.
     """
 
     name: str
@@ -103,6 +111,7 @@ class Image:
     format: str
     size_bytes: int
     sha256: str | None = None
+    arch: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -111,6 +120,7 @@ class Image:
             "format": self.format,
             "size_bytes": self.size_bytes,
             "sha256": self.sha256,
+            "arch": self.arch,
         }
 
 
@@ -129,6 +139,52 @@ def detect_format(path: Path) -> str | None:
     for ext, fmt in _EXTENSIONS:
         if name.endswith(ext):
             return fmt
+    return None
+
+
+# Filename arch tokens, mapped to a canonical short name. Order
+# matters: scan the LONGEST tokens first so ``x86_64`` wins over a
+# spurious match on ``x86`` in (say) ``x86_64-thing``. The canonical
+# names match what ``uname -m`` reports on Linux for the same
+# platform, so the displayed value lines up with what an operator
+# sees logging into a flashed target.
+_ARCH_TOKENS: tuple[tuple[str, str], ...] = (
+    ("x86_64", "x86_64"),
+    ("x86-64", "x86_64"),
+    ("aarch64", "arm64"),
+    ("amd64", "x86_64"),
+    ("arm64", "arm64"),
+    ("armhf", "arm"),
+    ("armv7l", "arm"),
+    ("armv6l", "armv6"),
+    ("riscv64", "riscv64"),
+    ("ppc64le", "ppc64le"),
+    ("s390x", "s390x"),
+    ("i686", "i386"),
+    ("i386", "i386"),
+)
+
+
+def detect_arch_from_name(name: str) -> str | None:
+    """Best-effort architecture hint from an image filename.
+
+    Returns a canonical short arch name (matching ``uname -m`` on
+    Linux: ``x86_64``, ``arm64``, ``i386``, ``arm``, ``riscv64``,
+    etc.) or ``None`` when nothing is recognised.
+
+    Pure substring match, case-insensitive, longest token first.
+    Informational only -- callers do not filter or restrict based
+    on it (bty writes whatever bytes the operator points at).
+    Common token forms map to one canonical:
+
+    * ``amd64`` / ``x86_64`` / ``x86-64`` -> ``x86_64``
+    * ``arm64`` / ``aarch64`` -> ``arm64``
+    * ``armhf`` / ``armv7l`` -> ``arm``
+    """
+    lower = name.lower()
+    for token, canonical in _ARCH_TOKENS:
+        if token in lower:
+            return canonical
     return None
 
 
@@ -176,6 +232,7 @@ def list_images(root: Path) -> list[Image]:
                 format=fmt,
                 size_bytes=size_bytes,
                 sha256=_read_sidecar_sha(p),
+                arch=detect_arch_from_name(p.name),
             )
         )
     return out
@@ -291,6 +348,7 @@ class UnifiedImage:
     size_bytes: int | None
     sources: tuple[ImageSource, ...]
     cached: bool
+    arch: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -301,6 +359,7 @@ class UnifiedImage:
             "size_bytes": self.size_bytes,
             "sources": [s.to_dict() for s in self.sources],
             "cached": self.cached,
+            "arch": self.arch,
         }
 
 

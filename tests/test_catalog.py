@@ -77,6 +77,47 @@ def test_load_format_auto_detected_from_name(tmp_path: Path) -> None:
     assert entry.format == "qcow2"
 
 
+def test_catalog_entry_arch_falls_back_to_filename_heuristic() -> None:
+    """No ``arch =`` declared: the parser back-fills from the
+    filename heuristic so display surfaces never show ``?`` for
+    images whose name carries an arch token."""
+    entry = catalog.CatalogEntry.from_dict(
+        {
+            "name": "debian-13-amd64.qcow2.zst",
+            "src": "https://example.com/debian-13-amd64.qcow2.zst",
+        }
+    )
+    assert entry.arch == "x86_64"
+
+
+def test_catalog_entry_arch_explicit_field_wins_over_heuristic() -> None:
+    """An explicit ``arch =`` value declared by the catalog publisher
+    (the case the nosi catalog will use once its publisher is updated)
+    is treated as authoritative. The filename heuristic only fills the
+    field when the publisher said nothing."""
+    entry = catalog.CatalogEntry.from_dict(
+        {
+            "name": "ambiguous-name.img.gz",
+            "src": "https://example.com/ambiguous-name.img.gz",
+            "arch": "riscv64",
+        }
+    )
+    assert entry.arch == "riscv64"
+
+
+def test_catalog_entry_arch_none_when_neither_source_resolves() -> None:
+    """No ``arch =`` and no recognised filename token: ``None``,
+    which the display layers render as ``?`` / ``-``. Better than
+    guessing and putting the wrong value in front of the operator."""
+    entry = catalog.CatalogEntry.from_dict(
+        {
+            "name": "appliance.qcow2",
+            "src": "https://example.com/appliance.qcow2",
+        }
+    )
+    assert entry.arch is None
+
+
 def test_load_rejects_unknown_version(tmp_path: Path) -> None:
     path = _write(tmp_path / "catalog.toml", "version = 99\n")
     with pytest.raises(catalog.CatalogError, match="version"):

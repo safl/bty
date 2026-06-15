@@ -39,6 +39,58 @@ def test_detect_format_prefers_multi_suffix_over_bare_img() -> None:
     assert images.detect_format(Path("debian.img.bz2")) == "img.bz2"
 
 
+def test_detect_arch_from_name_canonicalises_common_tokens() -> None:
+    """The heuristic maps the common token spellings to a single
+    canonical name per arch, matching ``uname -m`` on Linux. The
+    canonical names are what surfaces in the TUI / bty-web Arch
+    column."""
+    # x86_64 family
+    assert images.detect_arch_from_name("debian-13-amd64.qcow2.zst") == "x86_64"
+    assert images.detect_arch_from_name("bty-usbboot-pc-x86_64-v0.53.0.iso") == "x86_64"
+    assert images.detect_arch_from_name("foo-x86-64-bar.img") == "x86_64"
+    # arm64 family
+    assert images.detect_arch_from_name("rpios-arm64-headless.img.xz") == "arm64"
+    assert images.detect_arch_from_name("ubuntu-aarch64-server.img.gz") == "arm64"
+    # 32-bit arm
+    assert images.detect_arch_from_name("debian-armhf-rpi3.img.gz") == "arm"
+    assert images.detect_arch_from_name("foo-armv7l.img") == "arm"
+    # Misc Linux arches
+    assert images.detect_arch_from_name("debian-riscv64-sid.qcow2") == "riscv64"
+    assert images.detect_arch_from_name("debian-ppc64le.qcow2") == "ppc64le"
+    assert images.detect_arch_from_name("debian-s390x.qcow2") == "s390x"
+    assert images.detect_arch_from_name("debian-i386-legacy.img") == "i386"
+    assert images.detect_arch_from_name("debian-i686-old.img") == "i386"
+
+
+def test_detect_arch_from_name_returns_none_for_unrecognised() -> None:
+    """No arch token present -> None. Callers display this as ``?``
+    or ``-`` so an operator can see at a glance the metadata is
+    absent (rather than missing or wrong)."""
+    assert images.detect_arch_from_name("rolling-base.img.zst") is None
+    assert images.detect_arch_from_name("appliance.qcow2") is None
+    assert images.detect_arch_from_name("") is None
+
+
+def test_detect_arch_from_name_is_case_insensitive() -> None:
+    """Operators sometimes use mixed case in filenames; the heuristic
+    shouldn't miss those."""
+    assert images.detect_arch_from_name("Debian-AMD64.qcow2") == "x86_64"
+    assert images.detect_arch_from_name("ARM64-image.img.gz") == "arm64"
+
+
+def test_list_images_populates_arch_field(tmp_path: Path) -> None:
+    """A real list_images scan threads arch through onto the Image
+    record. Catches a regression where the field was added to the
+    dataclass but no caller populated it."""
+    _touch(tmp_path / "alpha-amd64.img.gz", size=64)
+    _touch(tmp_path / "beta-arm64.img.zst", size=64)
+    _touch(tmp_path / "no-arch-here.qcow2", size=64)
+    imgs = {img.name: img for img in images.list_images(tmp_path)}
+    assert imgs["alpha-amd64.img.gz"].arch == "x86_64"
+    assert imgs["beta-arm64.img.zst"].arch == "arm64"
+    assert imgs["no-arch-here.qcow2"].arch is None
+
+
 def test_list_images_walks_root(tmp_path: Path) -> None:
     _touch(tmp_path / "alpha.qcow2", size=1024)
     _touch(tmp_path / "beta.img", size=2048)
