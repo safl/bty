@@ -22,22 +22,32 @@ Full step-by-step (sha256 check, BIOS boot keys, troubleshooting):
 
 ## Deploy the bty-lab server
 
-Standing up a bty-lab server (`bty-web` + `withcache` via
-docker-compose) unlocks three things on top of the USB flow:
+Stand up `bty-web` + `withcache` on a Linux host -- unlocks
+PXE-boot for a fleet, image-byte caching across repeat flashes,
+and hosting a custom catalog (your own image-builder, an internal
+mirror, ...) on top of the USB flow.
 
-- **PXE-boot a fleet** -- no USB-stick-per-machine; targets boot
-  from the network, fetch their assigned image, flash, reboot.
-- **Cache downloaded image bytes** -- `withcache` warms on first
-  flash so the same image isn't re-pulled by every subsequent
-  target.
-- **Host a custom catalog** -- point bty-web at your own
-  image-builder output, an internal mirror, or any TOML manifest
-  shape `bty.catalog` accepts.
+```bash
+sudo uvx bty-lab deploy /opt/bty
+```
 
-The tutorial covers both storage layouts (one disk for everything,
-or a dedicated secondary drive for state):
+That's a single-disk deploy: state lives under `/opt/bty/data/`.
+For a fleet you typically want state on a dedicated drive so an
+OS reflash leaves the lab intact -- prepare the drive first, then
+point `--data-dir` at the mount:
 
-- [bty-lab server setup](tutorials/bty-lab-deploy.md)
+```bash
+sudo wipefs -a /dev/sdX
+sudo mkfs.ext4 -L bty-data /dev/sdX
+sudo mkdir -p /srv/bty
+UUID=$(sudo blkid -o value -s UUID /dev/sdX)
+echo "UUID=$UUID  /srv/bty  ext4  defaults,noatime,nofail  0 2" | sudo tee -a /etc/fstab
+sudo mount -a
+
+sudo uvx bty-lab deploy /opt/bty --data-dir /srv/bty
+```
+
+Full tutorial: [bty-lab server setup](tutorials/bty-lab-deploy.md).
 
 ## Next steps
 
