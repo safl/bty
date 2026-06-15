@@ -29,7 +29,6 @@ quickstart
 walkthrough-catalog
 walkthrough-image-store
 walkthrough-server-docker
-walkthrough-storage-disk
 ```
 
 ```{toctree}
@@ -40,6 +39,7 @@ tutorials/bty-usbboot-pc
 tutorials/bty-usbboot-rpi
 tutorials/bty-ventoy
 tutorials/bmc
+tutorials/bty-lab-deploy
 tutorials/bty-netboot-pc
 ```
 
