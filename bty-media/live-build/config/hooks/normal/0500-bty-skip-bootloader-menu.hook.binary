@@ -31,7 +31,7 @@
 # Hook stage: ``binary``. Runs after live-build has assembled
 # ``binary/isolinux/`` and ``binary/boot/grub/`` from its
 # bootloader templates, before xorriso wraps everything into
-# the hybrid ISO. No-op on the netboot-x86 build since that
+# the hybrid ISO. No-op on the netboot-pc build since that
 # variant doesn't use a bootloader menu at all (PXE chain
 # loads the kernel directly).
 
@@ -52,8 +52,8 @@ set -eu
 cd ..
 
 # No-op on builds that don't emit an isolinux/grub-efi tree:
-# the netboot-x86 variant emits a plain kernel+initrd+squashfs
-# trio (PXE chains the kernel directly), and the usb-rpi arm64
+# the netboot-pc variant emits a plain kernel+initrd+squashfs
+# trio (PXE chains the kernel directly), and the usbboot-rpi arm64
 # variant boots via the Pi firmware chain (no syslinux / no grub).
 # In both cases ``binary/isolinux/`` and ``binary/boot/grub/``
 # never exist, so this hook has nothing to do. Skip cleanly so

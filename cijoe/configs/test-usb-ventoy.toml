@@ -2,7 +2,7 @@
 #
 # Verifies an operator's realistic Ventoy workflow:
 #   1. Install Ventoy onto a USB stick.
-#   2. Drop bty-usb-x86_64.iso + image files + a catalog.toml onto the
+#   2. Drop bty-usbboot-pc-x86_64.iso + image files + a catalog.toml onto the
 #      Ventoy data partition (under bty-images/).
 #   3. Boot the stick; Ventoy menu auto-selects the only ISO + chains
 #      into the bty live env.

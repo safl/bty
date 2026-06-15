@@ -17,7 +17,7 @@ name: CI
 #                                   of sync.
 #   1. ``test``                   - lint + typecheck + pytest matrix.
 #   2. ``build-wheel`` (gated)    - uv build of the bty-lab wheel + sdist.
-#   3. ``build-media`` (gated)    - the netboot live image (usb-x86
+#   3. ``build-netboot-pc`` (gated)    - the netboot live image (usbboot-pc
 #                                   builds in its own job below).
 #   4. ``test-pxe`` (gated)       - brings bty up as containers and
 #                                   PXE-boots a client QEMU VM against
@@ -56,7 +56,7 @@ name: CI
 #
 # ``workflow_dispatch`` runs ``test`` + ``build-wheel`` only - smoke
 # test of the package side. Ad-hoc media builds happen locally via
-# the top-level Makefile (``make build VARIANT=usb-x86|netboot-x86``).
+# the top-level Makefile (``make build VARIANT=usbboot-pc|netboot-pc``).
 #
 # First publish (claiming the bty-lab name) requires a one-time PyPI
 # setup: register a Pending Publisher on https://pypi.org targeting:
@@ -243,11 +243,11 @@ jobs:
           path: dist/ipxe/bty-ipxe-x86_64-v*.efi
           if-no-files-found: error
 
-  build-media:
+  build-netboot-pc:
     name: Build ${{ matrix.variant }} image
     needs: test
     runs-on: ubuntu-latest
-    # The netboot-x86 live build finishes in <30 min. The failure mode is a
+    # The netboot-pc live build finishes in <30 min. The failure mode is a
     # HANG, not slowness (the in-VM apt / git clone / pip steps have no
     # timeout), so a 45 min cap fails a stuck build fast; the ``cijoe-output``
     # artifact (uploaded below, if: always()) carries the captured console +
@@ -257,10 +257,10 @@ jobs:
       fail-fast: false
       matrix:
         # ``variant`` is the user-facing name (``make build VARIANT=...``).
-        # ``usb-x86`` lives in the dedicated ``build-usb-x86`` job below so
+        # ``usbboot-pc`` lives in the dedicated ``build-usbboot-pc`` job below so
         # ``test-usb-grow`` can fire as soon as the .iso is built.
         include:
-          - variant: netboot-x86
+          - variant: netboot-pc
             kind: live
     steps:
       - uses: actions/checkout@v6
@@ -282,9 +282,9 @@ jobs:
           sudo apt-get update
           # ``debootstrap squashfs-tools xorriso debian-archive-keyring``
           # are live-build's required deps. ``exfatprogs`` (mkfs.exfat)
-          # is needed by the usb-x86 variant's post-build step that
+          # is needed by the usbboot-pc variant's post-build step that
           # appends a writable BTY_IMAGES partition to the cooked
-          # hybrid ISO; harmless on the netboot-x86 build that doesn't
+          # hybrid ISO; harmless on the netboot-pc build that doesn't
           # run that step. (sfdisk + xz, also used by the post-build
           # step, are in util-linux + xz-utils, always present on
           # Ubuntu runners.) ``exfat-fuse`` (the FUSE mount helper)
@@ -338,25 +338,25 @@ jobs:
           path: cijoe/cijoe-output/report.html
           if-no-files-found: warn
 
-      - name: Upload artifact (netboot-x86 variant)
-        if: matrix.variant == 'netboot-x86'
+      - name: Upload artifact (netboot-pc variant)
+        if: matrix.variant == 'netboot-pc'
         uses: actions/upload-artifact@v7
         with:
-          name: bty-netboot-x86_64
+          name: bty-netboot-pc-x86_64
           path: |
-            ~/system_imaging/disk/bty-netboot-x86_64-v*.vmlinuz
-            ~/system_imaging/disk/bty-netboot-x86_64-v*.initrd
-            ~/system_imaging/disk/bty-netboot-x86_64-v*.squashfs
-            ~/system_imaging/disk/bty-netboot-x86_64-v*.sha256
+            ~/system_imaging/disk/bty-netboot-pc-x86_64-v*.vmlinuz
+            ~/system_imaging/disk/bty-netboot-pc-x86_64-v*.initrd
+            ~/system_imaging/disk/bty-netboot-pc-x86_64-v*.squashfs
+            ~/system_imaging/disk/bty-netboot-pc-x86_64-v*.sha256
 
-  # ---------------- usb-x86 (split out for early test-usb-grow gate) -------
-  # Same content as the matrix's previous ``usb-x86`` entry but as a
+  # ---------------- usbboot-pc (split out for early test-usb-grow gate) -------
+  # Same content as the matrix's previous ``usbboot-pc`` entry but as a
   # standalone job so ``test-usb-grow`` can depend on just this (and
   # not wait on the other build jobs). Dedup-vs-DRY
   # tradeoff: a little YAML repetition for ~10 min off the test's
   # critical path.
-  build-usb-x86:
-    name: Build usb-x86 image
+  build-usbboot-pc:
+    name: Build usbboot-pc image
     needs: test
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -389,14 +389,14 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v8.1.0
 
-      - name: Build usb-x86 image
-        run: make build VARIANT=usb-x86
+      - name: Build usbboot-pc image
+        run: make build VARIANT=usbboot-pc
 
       - name: Upload cijoe output
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: cijoe-output-usb-x86
+          name: cijoe-output-usbboot-pc
           path: cijoe/cijoe-output
           if-no-files-found: warn
 
@@ -404,28 +404,28 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: cijoe-report-usb-x86
+          name: cijoe-report-usbboot-pc
           path: cijoe/cijoe-output/report.html
           if-no-files-found: warn
 
-      - name: Upload artifact (bty-usb-x86_64.iso)
+      - name: Upload artifact (bty-usbboot-pc-x86_64.iso)
         uses: actions/upload-artifact@v7
         with:
-          name: bty-usb-x86_64-iso
+          name: bty-usbboot-pc-x86_64-iso
           path: |
-            ~/system_imaging/disk/bty-usb-x86_64-v*.iso
-            ~/system_imaging/disk/bty-usb-x86_64-v*.iso.sha256
+            ~/system_imaging/disk/bty-usbboot-pc-x86_64-v*.iso
+            ~/system_imaging/disk/bty-usbboot-pc-x86_64-v*.iso.sha256
 
   # Pi-flasher arm64 image. Native arm64 (``ubuntu-24.04-arm``, free
   # for public repos since Jan 2024) rather than cross-build via
   # qemu-user-static: the RPiOS chroot hooks are binfmt-fragile and
   # 5-10x slower under qemu. Unlike the x86 variants this does NOT use
-  # live-build: ``cijoe/tasks/usb-rpi.yaml`` -> ``rpios_image_build.py``
+  # live-build: ``cijoe/tasks/usbboot-rpi.yaml`` -> ``rpios_image_build.py``
   # customizes Raspberry Pi OS Lite in place (download + loop-mount +
   # chroot), so the host only needs the loop/partition/decompress
   # tools, not the live-build stack.
-  build-usb-rpi:
-    name: Build usb-rpi image
+  build-usbboot-rpi:
+    name: Build usbboot-rpi image
     needs: test
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 30
@@ -449,14 +449,14 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v8.1.0
 
-      - name: Build usb-rpi image
-        run: make build VARIANT=usb-rpi
+      - name: Build usbboot-rpi image
+        run: make build VARIANT=usbboot-rpi
 
       - name: Upload cijoe output
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: cijoe-output-usb-rpi
+          name: cijoe-output-usbboot-rpi
           path: cijoe/cijoe-output
           if-no-files-found: warn
 
@@ -464,22 +464,22 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: cijoe-report-usb-rpi
+          name: cijoe-report-usbboot-rpi
           path: cijoe/cijoe-output/report.html
           if-no-files-found: warn
 
-      - name: Upload artifact (bty-usb-rpi-arm64.img.gz)
+      - name: Upload artifact (bty-usbboot-rpi-arm64.img.gz)
         uses: actions/upload-artifact@v7
         with:
-          name: bty-usb-rpi-arm64
+          name: bty-usbboot-rpi-arm64
           path: |
-            ~/system_imaging/disk/bty-usb-rpi-arm64-v*.img.gz
-            ~/system_imaging/disk/bty-usb-rpi-arm64-v*.img.gz.sha256
+            ~/system_imaging/disk/bty-usbboot-rpi-arm64-v*.img.gz
+            ~/system_imaging/disk/bty-usbboot-rpi-arm64-v*.img.gz.sha256
 
   # ---------------- verify ------------------------------------------------
   test-pxe:
     name: PXE chain test (containerized bty + client QEMU VM)
-    needs: build-media
+    needs: build-netboot-pc
     runs-on: ubuntu-latest
     timeout-minutes: 30
     # The bty-web container (built from this checkout) is the server; a QEMU
@@ -517,7 +517,7 @@ jobs:
       - name: Download netboot artifacts
         uses: actions/download-artifact@v8
         with:
-          name: bty-netboot-x86_64
+          name: bty-netboot-pc-x86_64
           path: ~/system_imaging/disk/
 
       - name: Run PXE chain test (builds the bty-web image, runs the chain)
@@ -548,7 +548,7 @@ jobs:
   # not a silently-eaten Popen stderr.
   test-usb-grow:
     name: USB auto-grow test (QEMU boot + parted)
-    needs: build-usb-x86
+    needs: build-usbboot-pc
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -577,7 +577,7 @@ jobs:
       - name: Download bty-usb ISO artifact
         uses: actions/download-artifact@v8
         with:
-          name: bty-usb-x86_64-iso
+          name: bty-usbboot-pc-x86_64-iso
           path: ~/system_imaging/disk/
 
       - name: Run USB auto-grow test
@@ -611,7 +611,7 @@ jobs:
   # the test commit -- CI is the verification path).
   test-usb-ventoy:
     name: USB Ventoy-boot test (QEMU + in-VM TUI/catalog asserts)
-    needs: build-usb-x86
+    needs: build-usbboot-pc
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -641,7 +641,7 @@ jobs:
       - name: Download bty-usb ISO artifact
         uses: actions/download-artifact@v8
         with:
-          name: bty-usb-x86_64-iso
+          name: bty-usbboot-pc-x86_64-iso
           path: ~/system_imaging/disk/
 
       - name: Run USB Ventoy-boot test
@@ -715,7 +715,7 @@ jobs:
   # a failing test-pxe) never gets tagged. The tag is pushed with RELEASE_PAT
   # because a GITHUB_TOKEN push would not trigger this workflow.
   tag-release:
-    needs: [lint, test, flash-integration, build-wheel, build-ipxe, build-media, build-usb-x86, build-usb-rpi, test-pxe, test-usb-grow, test-usb-ventoy, docs]
+    needs: [lint, test, flash-integration, build-wheel, build-ipxe, build-netboot-pc, build-usbboot-pc, build-usbboot-rpi, test-pxe, test-usb-grow, test-usb-ventoy, docs]
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
@@ -742,7 +742,7 @@ jobs:
   # ---------------- ship ---------------------------------------------------
   attach-to-release:
     name: Attach artifacts to GitHub release
-    needs: [build-wheel, build-ipxe, build-media, build-usb-x86, build-usb-rpi, test-pxe, test-usb-grow, test-usb-ventoy, docs]
+    needs: [build-wheel, build-ipxe, build-netboot-pc, build-usbboot-pc, build-usbboot-rpi, test-pxe, test-usb-grow, test-usb-ventoy, docs]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
@@ -757,7 +757,16 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           path: gathered/
-          pattern: '{dist,bty-ipxe-x86_64,bty-netboot-x86_64,bty-usb-x86_64-iso,bty-usb-rpi-arm64,docs-pdf}'
+          pattern: '{dist,bty-ipxe-x86_64,bty-netboot-pc-x86_64,bty-usbboot-pc-x86_64-iso,bty-usbboot-rpi-arm64,docs-pdf}'
+      - name: Drop the wheel from the release set
+        # bty-lab is distributed via PyPI (``pipx install bty-lab``);
+        # the wheel asset on the GitHub release was redundant with
+        # PyPI and nothing in the repo consumes it from there. The
+        # sdist (``.tar.gz``) is kept as the archival source release
+        # for distro packagers / offline mirrors. Strip the wheel
+        # before the manifest emitter walks gathered/ so release.toml
+        # stays in sync with what's actually uploaded.
+        run: rm -f gathered/dist/*.whl
       - name: List gathered artifacts
         run: find gathered -type f | sort
       - name: Generate release.toml manifest
@@ -822,11 +831,11 @@ jobs:
           # ``catalog.toml`` mirror; bty-web pulls the catalog from
           # the upstream image-builder (``safl/nosi``) directly.
           files: |
-            gathered/dist/*
+            gathered/dist/*.tar.gz
             gathered/bty-ipxe-x86_64/*
-            gathered/bty-usb-x86_64-iso/*
-            gathered/bty-netboot-x86_64/*
-            gathered/bty-usb-rpi-arm64/*
+            gathered/bty-usbboot-pc-x86_64-iso/*
+            gathered/bty-netboot-pc-x86_64/*
+            gathered/bty-usbboot-rpi-arm64/*
             gathered/docs-pdf/*
             release.toml
           fail_on_unmatched_files: true
@@ -838,7 +847,7 @@ jobs:
 
   publish-pypi:
     name: Publish to PyPI
-    # Strictly last: every prior job (test, build-wheel, build-media,
+    # Strictly last: every prior job (test, build-wheel, build-netboot-pc,
     # test-pxe, docs, attach-to-release) must have succeeded. PyPI is
     # for life - a published version cannot be re-uploaded - so we
     # only ship there after the whole release-page has gone up
@@ -947,7 +956,7 @@ jobs:
     # attach-to-release's needs list -- without this a regression that reds
     # the PXE chain test still ships :latest tags to ghcr.io because publish
     # was only blocked by the unit-level ``test`` job.
-    needs: [lint, test, flash-integration, build-wheel, build-ipxe, build-media, build-usb-x86, build-usb-rpi, test-pxe, test-usb-grow, test-usb-ventoy, docs]
+    needs: [lint, test, flash-integration, build-wheel, build-ipxe, build-netboot-pc, build-usbboot-pc, build-usbboot-rpi, test-pxe, test-usb-grow, test-usb-ventoy, docs]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:

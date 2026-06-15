@@ -97,7 +97,7 @@ to.
 - PXE-flash any number of targets to a registered image, hands-free, in
   parallel.
 - Mix the network-flash flow (this walkthrough) with the USB-stick flow
-  ([bty via bty-usb](bty-usb.md)): both run the same `bty` flash code,
+  ([bty via bty-usb](bty-usbboot-pc.md)): both run the same `bty` flash code,
   driven by the plan endpoint vs the local wizard.
 - Swap images per-target without rebooting the server.
 

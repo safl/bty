@@ -140,7 +140,7 @@ def test_fetch_release_normalises_latest_to_running_version(
     GitHub's ``/releases/latest/download/`` redirects to whatever
     release is current. A bty-web v0.33.4 calling fetch_release with
     tag="latest" used to construct
-    ``/releases/latest/download/bty-netboot-x86_64-v0.33.4.vmlinuz``,
+    ``/releases/latest/download/bty-netboot-pc-x86_64-v0.33.4.vmlinuz``,
     which 404'd whenever the "latest" release had a different
     version in its asset names (which it always did after the very
     first release).

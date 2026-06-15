@@ -6,7 +6,7 @@
 # The amd64 kernel + microcode + r8125 DKMS build env are emitted at
 # bake time by ``auto/config`` into a sibling file
 # ``bty-arch.list.chroot`` (both live-build variants are amd64; the
-# arm64 usb-rpi flasher does not use live-build). live-build 3.0~a57's
+# arm64 usbboot-rpi flasher does not use live-build). live-build 3.0~a57's
 # per-arch suffix scheme (``.list.chroot_<arch>``) is not honoured
 # reliably on the trixie / Ubuntu lb shipping in our build
 # environment, so the package list lives in ``auto/config`` (which

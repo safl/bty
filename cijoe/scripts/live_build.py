@@ -18,7 +18,7 @@ Workflow:
    runner or local dev) must have passwordless sudo.
 3. Publish ``binary/live/{vmlinuz,initrd.img,filesystem.squashfs}``
    to the ``publish.dir`` from the cijoe config, renamed to
-   ``bty-netboot-x86_64.{vmlinuz,initrd,squashfs}``.
+   ``bty-netboot-pc-x86_64.{vmlinuz,initrd,squashfs}``.
 4. Write a single sha256 manifest covering all three artifacts.
 
 The cwd at run time is ``cijoe/`` (the Makefile cd's there before
@@ -26,7 +26,7 @@ invoking cijoe), so the bty-media tree lives at
 ``Path.cwd().parent / "bty-media"`` and the build scratch dir is
 ``Path.cwd() / "_build" / "netboot"``.
 
-Skipped for any variant other than ``netboot-x86``.
+Skipped for any variant other than ``netboot-pc``.
 
 Retargetable: False
 """
@@ -48,9 +48,9 @@ from pathlib import Path
 from usb_iso_build import _read_bty_version
 
 PUBLISH_BASENAME_FMTS = (
-    "bty-netboot-x86_64-v{version}.vmlinuz",
-    "bty-netboot-x86_64-v{version}.initrd",
-    "bty-netboot-x86_64-v{version}.squashfs",
+    "bty-netboot-pc-x86_64-v{version}.vmlinuz",
+    "bty-netboot-pc-x86_64-v{version}.initrd",
+    "bty-netboot-pc-x86_64-v{version}.squashfs",
 )
 
 
@@ -64,19 +64,19 @@ def main(args, cijoe):
     bty_media = cijoe_dir.parent / "bty-media"
 
     variant = cijoe.getconf("bty", {}).get("variant", "")
-    if variant != "netboot-x86":
-        log.info(f"Skipping live_build (variant={variant!r}; only 'netboot-x86' runs lb netboot)")
+    if variant != "netboot-pc":
+        log.info(f"Skipping live_build (variant={variant!r}; only 'netboot-pc' runs lb netboot)")
         return 0
 
     images = cijoe.getconf("system-imaging.images", {})
-    image = images.get("bty-netboot-x86_64")
+    image = images.get("bty-netboot-pc-x86_64")
     if not image:
-        log.error("missing system-imaging.images.bty-netboot-x86_64 in config")
+        log.error("missing system-imaging.images.bty-netboot-pc-x86_64 in config")
         return errno.EINVAL
 
     publish_dir_str = image.get("publish", {}).get("dir")
     if not publish_dir_str:
-        log.error("system-imaging.images.bty-netboot-x86_64.publish.dir is unset")
+        log.error("system-imaging.images.bty-netboot-pc-x86_64.publish.dir is unset")
         return errno.EINVAL
     publish_dir = Path(publish_dir_str)
     publish_dir.mkdir(parents=True, exist_ok=True)
@@ -114,7 +114,7 @@ def main(args, cijoe):
     # release.
     bty_version = _read_bty_version(cijoe_dir)
     publish_basenames = tuple(fmt.format(version=bty_version) for fmt in PUBLISH_BASENAME_FMTS)
-    sha256_basename = f"bty-netboot-x86_64-v{bty_version}.sha256"
+    sha256_basename = f"bty-netboot-pc-x86_64-v{bty_version}.sha256"
     log.info(f"Stamping bty version {bty_version} into live-build tree")
     err, _ = cijoe.run_local(
         f"sh -c 'grep -rlF __BTY_VERSION__ {build_dir} | "
@@ -189,6 +189,6 @@ def main(args, cijoe):
         return err
 
     cijoe.run_local(f"cat {sha256_path}")
-    cijoe.run_local(f"ls -la {publish_dir}/bty-netboot-x86_64.*")
+    cijoe.run_local(f"ls -la {publish_dir}/bty-netboot-pc-x86_64.*")
 
     return 0

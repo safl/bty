@@ -544,14 +544,14 @@ def test_release_artifact_state_to_dict_round_trip() -> None:
     the field set so a refactor can't silently drop fields the
     /ui/netboot progress bar relies on."""
     art = ReleaseArtifactState(
-        name="bty-netboot-x86_64-v1.0.0.vmlinuz",
+        name="bty-netboot-pc-x86_64-v1.0.0.vmlinuz",
         status="running",
         bytes_done=42,
         bytes_total=100,
     )
     d = art.to_dict()
     assert d == {
-        "name": "bty-netboot-x86_64-v1.0.0.vmlinuz",
+        "name": "bty-netboot-pc-x86_64-v1.0.0.vmlinuz",
         "status": "running",
         "bytes_done": 42,
         "bytes_total": 100,

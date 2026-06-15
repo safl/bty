@@ -10,9 +10,9 @@ doc: |
   dispatches on the JSON response (auto-flash, interactive wizard,
   or local-boot exit -- whatever the server's machine record says).
 
-  Renamed from ``tasks/live.yaml`` to ``tasks/netboot.yaml``: the
-  variant moved from ``live-x86`` to ``netboot-x86`` to disambiguate
-  from ``usb-x86`` (which is also a live image).
+  Renamed from ``tasks/live.yaml`` to ``tasks/netboot-pc.yaml``: the
+  variant moved from ``live-x86`` to ``netboot-pc`` to disambiguate
+  from ``usbboot-pc`` (which is also a live image).
 
   Steps:
 
@@ -24,7 +24,7 @@ doc: |
   2. ``live_build`` - copies ``live-build/`` into a working dir,
      runs ``lb clean --all && lb build`` (debootstrap, mksquashfs,
      mkinitramfs), and publishes
-     ``bty-netboot-x86_64.{vmlinuz,initrd,squashfs}`` plus a sha256
+     ``bty-netboot-pc-x86_64.{vmlinuz,initrd,squashfs}`` plus a sha256
      manifest under ``publish.dir``.
 
   Requires: live-build on the build host (``apt install live-build``)

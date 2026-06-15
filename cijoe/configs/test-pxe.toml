@@ -4,8 +4,8 @@
 #   cijoe tasks/test-pxe.yaml --monitor -c configs/test-pxe.toml
 #
 # Pre-conditions:
-# - bty-netboot-x86_64.{vmlinuz,initrd,squashfs} pre-built under
-#   ``~/system_imaging/disk/`` (run ``make build VARIANT=netboot-x86`` first).
+# - bty-netboot-pc-x86_64.{vmlinuz,initrd,squashfs} pre-built under
+#   ``~/system_imaging/disk/`` (run ``make build VARIANT=netboot-pc`` first).
 # - podman, qemu-system-x86_64, dnsmasq, ipxe (NBPs), iproute2 on PATH.
 # - passwordless sudo (the test creates a bridge/tap + runs dnsmasq).
 # - KVM accessible.
@@ -55,7 +55,7 @@ needle = "pxe-bootstrap.ipxe"
 
 [[test.pxe.chain_markers]]
 key = "kernel-initrd-fetched"
-needle = "bty-netboot-x86_64-v"
+needle = "bty-netboot-pc-x86_64-v"
 
 [[test.pxe.chain_markers]]
 key = "squashfs-fetched"

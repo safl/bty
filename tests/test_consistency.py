@@ -847,7 +847,7 @@ def test_live_env_chains_tag_boot_urls_with_mac() -> None:
     # placeholder form so the test stays meaningful before and after
     # rendering.
     artifact_re = re.compile(
-        r"/boot/bty-netboot-x86_64-v[^.]+\.(vmlinuz|initrd|squashfs)"
+        r"/boot/bty-netboot-pc-x86_64-v[^.]+\.(vmlinuz|initrd|squashfs)"
         r"(\?mac=\{\{ mac \}\})?"
     )
     violations: list[str] = []

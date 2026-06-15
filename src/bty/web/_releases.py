@@ -35,18 +35,18 @@ from bty import __version__ as _BTY_VERSION
 
 # Artifact filenames carry bty-web's running version so an operator can
 # tell which release each file came from at a glance, and so multiple
-# versions can coexist in BTY_BOOT_DIR during upgrades. The ``netboot-x86``
+# versions can coexist in BTY_BOOT_DIR during upgrades. The ``netboot-pc``
 # variant publishes the matching names (see
 # ``cijoe/scripts/live_build.py::PUBLISH_BASENAME_FMTS``); bty-web fetches
 # the trio that matches its OWN version (not "latest") so the kernel,
 # initrd, and squashfs the iPXE template references are guaranteed to
 # be the ones built for this server's version.
 ARTIFACT_NAMES: tuple[str, ...] = (
-    f"bty-netboot-x86_64-v{_BTY_VERSION}.vmlinuz",
-    f"bty-netboot-x86_64-v{_BTY_VERSION}.initrd",
-    f"bty-netboot-x86_64-v{_BTY_VERSION}.squashfs",
+    f"bty-netboot-pc-x86_64-v{_BTY_VERSION}.vmlinuz",
+    f"bty-netboot-pc-x86_64-v{_BTY_VERSION}.initrd",
+    f"bty-netboot-pc-x86_64-v{_BTY_VERSION}.squashfs",
 )
-SHA256_NAME = f"bty-netboot-x86_64-v{_BTY_VERSION}.sha256"
+SHA256_NAME = f"bty-netboot-pc-x86_64-v{_BTY_VERSION}.sha256"
 ALL_NAMES = (*ARTIFACT_NAMES, SHA256_NAME)
 
 # Netboot release repo: the kernel / initrd / squashfs artifacts. These
@@ -153,7 +153,7 @@ def inspect_boot_dir(boot_dir: Path) -> list[ArtifactState]:
 
 
 def boot_artifact_shas(boot_dir: Path) -> dict[str, str]:
-    """Parse the ``bty-netboot-x86_64.sha256`` manifest in ``boot_dir``
+    """Parse the ``bty-netboot-pc-x86_64.sha256`` manifest in ``boot_dir``
     into ``{filename: sha256}``.
 
     The manifest is sha256sum-format (``<64-hex>  <name>`` per line);
@@ -202,7 +202,7 @@ def fetch_release(
     whose version-pinned asset filenames would not match what the
     running bty-web asked for, returning 404. A bty-web v0.33.4
     fetching from a "latest" that resolved to v0.33.6 would ask for
-    ``bty-netboot-x86_64-v0.33.4.vmlinuz`` in v0.33.6's asset list and
+    ``bty-netboot-pc-x86_64-v0.33.4.vmlinuz`` in v0.33.6's asset list and
     miss every time. Operators only ever want THIS server's artifacts,
     so we now always pin to the running version.
 

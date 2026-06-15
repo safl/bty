@@ -49,7 +49,7 @@ the unit of persistence: it outlives the container, so
 catalogs, netboot artifacts, and machine inventory stay put. See
 [`deploy/README.md`](https://github.com/safl/bty/blob/main/deploy/README.md)
 for the layout and the upgrade flow, and
-[bty via netboot](tutorials/bty-netboot.md) for standing the stack up.
+[bty via netboot](tutorials/bty-netboot-pc.md) for standing the stack up.
 
 ## Adding images
 

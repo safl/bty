@@ -104,7 +104,7 @@ somewhere with the catalog, an operator at home with a browser tab.
 
 [Ventoy](https://www.ventoy.net/) replaces the bootloader on a USB stick
 with a menu that boots any `.iso` dropped onto its data partition.
-bty-usb.iso works there: boot the stick, pick `bty-usb-x86_64.iso` from the
+bty-usb.iso works there: boot the stick, pick `bty-usbboot-pc-x86_64.iso` from the
 Ventoy menu, and the target boots into the bty live env exactly as if
 `dd`'d directly.
 

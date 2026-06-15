@@ -20,9 +20,9 @@ from argparse import ArgumentParser
 from pathlib import Path
 
 ARTIFACT_NAME_FMTS = (
-    "bty-netboot-x86_64-v{version}.vmlinuz",
-    "bty-netboot-x86_64-v{version}.initrd",
-    "bty-netboot-x86_64-v{version}.squashfs",
+    "bty-netboot-pc-x86_64-v{version}.vmlinuz",
+    "bty-netboot-pc-x86_64-v{version}.initrd",
+    "bty-netboot-pc-x86_64-v{version}.squashfs",
 )
 
 
@@ -55,7 +55,7 @@ def main(args, cijoe):
     for name in artifact_names:
         if not (artifact_dir / name).is_file():
             log.error(f"live artifact missing: {artifact_dir / name}")
-            log.error("Run `make build VARIANT=netboot-x86` from the repo root first")
+            log.error("Run `make build VARIANT=netboot-pc` from the repo root first")
             return errno.ENOENT
 
     # Fresh workspace under cijoe/_build/test-pxe/ (gitignored).

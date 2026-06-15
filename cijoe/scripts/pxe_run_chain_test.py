@@ -40,9 +40,9 @@ from argparse import ArgumentParser
 from pathlib import Path
 
 ARTIFACT_NAME_FMTS = (
-    "bty-netboot-x86_64-v{version}.vmlinuz",
-    "bty-netboot-x86_64-v{version}.initrd",
-    "bty-netboot-x86_64-v{version}.squashfs",
+    "bty-netboot-pc-x86_64-v{version}.vmlinuz",
+    "bty-netboot-pc-x86_64-v{version}.initrd",
+    "bty-netboot-pc-x86_64-v{version}.squashfs",
 )
 
 # bty-web publishes :8080; the test reaches it on the host (seeding via

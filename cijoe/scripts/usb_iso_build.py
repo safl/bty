@@ -11,8 +11,8 @@ target (``iso-hybrid`` vs ``netboot``) and the bootloader selection.
 Workflow:
 
 1. Copy ``bty-media/live-build/`` (the live-build config tree) into
-   a fresh ``cijoe/_build/usb-x86/`` working dir.
-2. Run ``sudo env BTY_VARIANT=usb-x86 lb clean --all && lb build``.
+   a fresh ``cijoe/_build/usbboot-pc/`` working dir.
+2. Run ``sudo env BTY_VARIANT=usbboot-pc lb clean --all && lb build``.
    The env var drives ``auto/config`` into iso-hybrid mode (binary
    images, bootloaders, kernel cmdline appendices); ``sudo env``
    is needed because sudo strips the environment by default. The
@@ -20,7 +20,7 @@ Workflow:
    internally re-runs ``lb config`` (which re-invokes
    ``auto/config``).
 3. Publish the resulting hybrid ISO to ``publish.dir`` from the
-   cijoe config, renamed to ``bty-usb-x86_64.iso``.
+   cijoe config, renamed to ``bty-usbboot-pc-x86_64.iso``.
 4. Append a writable BTY_IMAGES exFAT partition to the trailing
    edge of the artifact (sfdisk + losetup + mkfs.exfat) so the
    single dd-able file carries both the boot path and the
@@ -32,9 +32,9 @@ Workflow:
 The cwd at run time is ``cijoe/`` (the Makefile cd's there before
 invoking cijoe), so the bty-media tree lives at
 ``Path.cwd().parent / "bty-media"`` and the build scratch dir is
-``Path.cwd() / "_build" / "usb-x86"``.
+``Path.cwd() / "_build" / "usbboot-pc"``.
 
-Skipped for any variant other than ``usb-x86``.
+Skipped for any variant other than ``usbboot-pc``.
 
 Retargetable: False
 """
@@ -49,7 +49,7 @@ import shutil
 from argparse import ArgumentParser
 from pathlib import Path
 
-PUBLISH_BASENAME_FMT = "bty-usb-x86_64-v{version}.iso"
+PUBLISH_BASENAME_FMT = "bty-usbboot-pc-x86_64-v{version}.iso"
 
 # Just the BTY_IMAGES partition stub; the bake doesn't populate it.
 # Operators drop their own image files (.qcow2 / .img.gz / .img / .iso /
@@ -78,24 +78,26 @@ def main(args, cijoe):
     bty_media = cijoe_dir.parent / "bty-media"
 
     variant = cijoe.getconf("bty", {}).get("variant", "")
-    if variant != "usb-x86":
-        log.info(f"Skipping usb_iso_build (variant={variant!r}; only 'usb-x86' runs lb iso-hybrid)")
+    if variant != "usbboot-pc":
+        log.info(
+            f"Skipping usb_iso_build (variant={variant!r}; only 'usbboot-pc' runs lb iso-hybrid)"
+        )
         return 0
 
     images = cijoe.getconf("system-imaging.images", {})
-    image = images.get("bty-usb-x86_64-iso")
+    image = images.get("bty-usbboot-pc-x86_64-iso")
     if not image:
-        log.error("missing system-imaging.images.bty-usb-x86_64-iso in config")
+        log.error("missing system-imaging.images.bty-usbboot-pc-x86_64-iso in config")
         return errno.EINVAL
 
     publish_dir_str = image.get("publish", {}).get("dir")
     if not publish_dir_str:
-        log.error("system-imaging.images.bty-usb-x86_64-iso.publish.dir is unset")
+        log.error("system-imaging.images.bty-usbboot-pc-x86_64-iso.publish.dir is unset")
         return errno.EINVAL
     publish_dir = Path(publish_dir_str)
     publish_dir.mkdir(parents=True, exist_ok=True)
 
-    build_dir = cijoe_dir / "_build" / "usb-x86"
+    build_dir = cijoe_dir / "_build" / "usbboot-pc"
     if build_dir.exists():
         # ``lb`` writes a chroot tree owned by root; rm needs sudo.
         err, _ = cijoe.run_local(f"sudo rm -rf {build_dir}")
@@ -137,9 +139,9 @@ def main(args, cijoe):
         return err
 
     # Drive auto/config into iso-hybrid mode via the ``BTY_VARIANT``
-    # env var (``BTY_VARIANT=usb-x86`` selects iso-hybrid + syslinux +
-    # grub-efi; ``netboot-x86`` selects the netboot trio;
-    # ``usb-rpi`` selects arm64 + netboot for the Pi flasher). The
+    # env var (``BTY_VARIANT=usbboot-pc`` selects iso-hybrid + syslinux +
+    # grub-efi; ``netboot-pc`` selects the netboot trio;
+    # ``usbboot-rpi`` selects arm64 + netboot for the Pi flasher). The
     # env var has to be set in the invocation environment of every
     # ``lb`` call, because ``lb build`` re-runs ``lb config`` (which
     # re-runs ``auto/config``) during its own setup; flag-based
@@ -156,11 +158,11 @@ def main(args, cijoe):
     # assignment) because sudo strips environment by default; ``env``
     # ensures BTY_VARIANT is in the invoked process's environment
     # under root rather than the caller's.
-    log.info(f"Running lb build in {build_dir} (BTY_VARIANT=usb-x86)")
+    log.info(f"Running lb build in {build_dir} (BTY_VARIANT=usbboot-pc)")
     err, _ = cijoe.run_local(
         f"sh -c 'cd {build_dir} && "
-        "sudo env BTY_VARIANT=usb-x86 lb clean --all && "
-        "sudo env BTY_VARIANT=usb-x86 lb build'"
+        "sudo env BTY_VARIANT=usbboot-pc lb clean --all && "
+        "sudo env BTY_VARIANT=usbboot-pc lb build'"
     )
     if err:
         log.error("lb build failed; see live-build.log under the build dir")
@@ -260,7 +262,7 @@ def _verify_bootloader_suppression(cijoe, build_dir: Path) -> int:
     -- live-build discovers binary-stage hooks under
     ``config/hooks/normal/`` with a ``.binary`` suffix; a hook at
     the wrong path produces a green build with no menu suppression
-    applied. Runs against ``_build/usb-x86/binary/`` after
+    applied. Runs against ``_build/usbboot-pc/binary/`` after
     ``lb build`` completes so we fail the bake locally instead of
     waiting for a hardware test to surface the issue.
 

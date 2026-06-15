@@ -114,13 +114,13 @@ framework, no heavy front-end build pipeline, no JVM dependencies.
 Sibling directory at the repo root. Not a Python package. Builds the boot
 media from a shared rootfs overlay:
 
-**USB live image (`usb-x86`).** Bootable USB stick carrying the `bty`
+**USB live image (`usbboot-pc`).** Bootable USB stick carrying the `bty`
 runtime and an exFAT `BTY_IMAGES` partition for pre-built images. Operator
 plugs it in, boots a target; ``bty`` auto-launches on tty1 and walks
 through pick + flash. Self-contained and offline. Direct-flash delivery
 vehicle.
 
-**Network-flash live env (`netboot-x86`).** Kernel + initrd + squashfs trio
+**Network-flash live env (`netboot-pc`).** Kernel + initrd + squashfs trio
 that PXE clients chain into. Built via Debian's `live-build`. The chroot
 ships `bty-on-tty1.service` (unconditional; runs on every boot), which
 exec's `bty --server X --mac Y` (values from `/proc/cmdline`); ``bty`` GETs

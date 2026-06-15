@@ -2,28 +2,28 @@
 
 Source content for the bty media images. Three variants:
 
-- **USB live image** (`VARIANT=usb-x86`) - bootable USB carrying the
+- **USB live image** (`VARIANT=usbboot-pc`) - bootable USB carrying the
   bty runtime + a writable exFAT `BTY_IMAGES` partition for pre-built
   images. Built via Debian's live-build (`iso-hybrid` output);
-  shipped gzip-compressed as `bty-usb-x86_64.iso.gz` (Etcher / Rufus
+  shipped gzip-compressed as `bty-usbboot-pc-x86_64.iso.gz` (Etcher / Rufus
   / Raspberry Pi Imager all decompress `.gz` natively; xz tripped
   Etcher's bundled handler regardless of preset).
-- **Network-flash live env** (`VARIANT=netboot-x86`) - kernel + initrd +
+- **Network-flash live env** (`VARIANT=netboot-pc`) - kernel + initrd +
   squashfs that PXE clients chain into. Built via live-build
   (`netboot` output). Carries the bty runtime plus a
   `bty-on-tty1.service` unit that reads `bty.server` + `bty.mac`
   from `/proc/cmdline` and exec's `bty --server X --mac Y`; ``bty``
   then GETs `<server>/pxe/<mac>/plan` and dispatches (auto-flash,
   interactive wizard, or no-op).
-- **Raspberry-Pi USB flasher** (`VARIANT=usb-rpi`) - arm64 image that
+- **Raspberry-Pi USB flasher** (`VARIANT=usbboot-rpi`) - arm64 image that
   boots a Pi 4 / CM4 / Pi 5 / CM5 from a USB stick into the same bty
-  TUI as `usb-x86`, sized for in-situ flashing of local eMMC / NVMe.
+  TUI as `usbboot-pc`, sized for in-situ flashing of local eMMC / NVMe.
   Unlike the x86 variants this is NOT a live image: it customizes the
   official Raspberry Pi OS Lite (arm64) image in place (download +
   loop-mount + chroot), so it inherits every Pi kernel + `bcm*.dtb`
   (incl. the CM5 / CM5IO device trees) + firmware and boots every
   supported board with no per-board branching. Shipped gzip-compressed
-  as `bty-usb-rpi-arm64.img.gz`.
+  as `bty-usbboot-rpi-arm64.img.gz`.
 
 This directory holds the **content** baked into the images: the rootfs
 trees that live-build folds in and the live-build config tree. The cijoe
@@ -31,7 +31,7 @@ trees that live-build folds in and the live-build config tree. The cijoe
 content lives at `cijoe/` at the repo root.
 
 Operators drive everything via the top-level Makefile:
-`make build VARIANT=usb-x86|netboot-x86|usb-rpi`.
+`make build VARIANT=usbboot-pc|netboot-pc|usbboot-rpi`.
 
 ## Layout
 
@@ -39,8 +39,8 @@ Operators drive everything via the top-level Makefile:
 - `rootfs/common/` - files baked into every variant.
 - `live-build/` - live-build config tree shared by the two x86
   variants. The ``BTY_VARIANT`` env var selects the shape:
-  ``usb-x86`` -> amd64 iso-hybrid; ``netboot-x86`` -> amd64 netboot
-  trio. (``usb-rpi`` does not use live-build; it reuses this tree's
+  ``usbboot-pc`` -> amd64 iso-hybrid; ``netboot-pc`` -> amd64 netboot
+  trio. (``usbboot-rpi`` does not use live-build; it reuses this tree's
   ``includes.chroot/`` + ``config/hooks/`` inside an RPiOS chroot.)
 
 ## Pipeline
@@ -48,38 +48,38 @@ Operators drive everything via the top-level Makefile:
 From the repo root:
 
 ```
-make build VARIANT=usb-x86|netboot-x86|usb-rpi
+make build VARIANT=usbboot-pc|netboot-pc|usbboot-rpi
 ```
 
 dispatches to one of three cijoe task files. The Makefile picks the
 right one based on the variant:
 
-- `usb-x86` -> `cijoe tasks/usb.yaml`. Drives Debian's `live-build`
-  with `BTY_VARIANT=usb-x86` selecting `iso-hybrid` output, then
+- `usbboot-pc` -> `cijoe tasks/usbboot-pc.yaml`. Drives Debian's `live-build`
+  with `BTY_VARIANT=usbboot-pc` selecting `iso-hybrid` output, then
   post-processes the pre-built ISO to append a writable exFAT
   `BTY_IMAGES` partition (`sfdisk --append`, `losetup -fP`,
   `mkfs.exfat`) and gzip-compresses it. Output is
-  `bty-usb-x86_64.iso.gz`. No QEMU full-system bake.
+  `bty-usbboot-pc-x86_64.iso.gz`. No QEMU full-system bake.
 
-- `netboot-x86` -> `cijoe tasks/netboot.yaml`. Drives Debian's
+- `netboot-pc` -> `cijoe tasks/netboot-pc.yaml`. Drives Debian's
   `live-build` (debootstrap + mksquashfs + mkinitramfs) directly
   on the build host: no QEMU, no cloud-init. Output is the kernel
   + initrd + squashfs trio for PXE chain-boot.
 
-- `usb-rpi` -> `cijoe tasks/usb-rpi.yaml`. Does NOT use live-build.
+- `usbboot-rpi` -> `cijoe tasks/usbboot-rpi.yaml`. Does NOT use live-build.
   `scripts/rpios_image_build.py` downloads Raspberry Pi OS Lite
   (arm64) on a native arm64 builder, grows the root for headroom,
   loop-mounts + chroots, installs the bty runtime + flash tooling,
   drops in this tree's `includes.chroot/` and runs the bty
   `config/hooks/` verbatim, masks RPiOS's first-boot user wizard so
   the box boots straight into the bty TUI, then gzips the raw image.
-  Output is `bty-usb-rpi-arm64.img.gz`. Operator dd's it to a USB
+  Output is `bty-usbboot-rpi-arm64.img.gz`. Operator dd's it to a USB
   stick and boots a Pi 4 / CM4 / Pi 5 / CM5 from it.
 
 The x86 variants stage the bty-lab wheel via `bty_wheel_stage` into
 the live-build chroot includes, then drive live-build via
-`live_build` (usb-x86 additionally runs `usb_iso_build` for the
-exFAT `BTY_IMAGES` post-processing). usb-rpi also runs
+`live_build` (usbboot-pc additionally runs `usb_iso_build` for the
+exFAT `BTY_IMAGES` post-processing). usbboot-rpi also runs
 `bty_wheel_stage` first, then `rpios_image_build` consumes the same
 staged wheel inside the RPiOS chroot.
 
@@ -89,9 +89,9 @@ All three variants (live-build):
 - `live-build` (`sudo apt install live-build`)
 - `debootstrap`, `squashfs-tools`, `xorriso` (pulled in by
   `live-build`'s recommends, or install explicitly)
-- `exfatprogs` for the usb-x86 post-build BTY_IMAGES exFAT step
+- `exfatprogs` for the usbboot-pc post-build BTY_IMAGES exFAT step
   (`mkfs.exfat`)
-- `xz-utils` for compressing the final usb-x86 artifact (always
+- `xz-utils` for compressing the final usbboot-pc artifact (always
   present on Ubuntu/Debian; listed for completeness)
 - `uv` for `bty_wheel_stage` to build the bty-lab wheel; install
   with `pipx install uv` if needed
@@ -103,36 +103,36 @@ All variants:
 
 ## Output
 
-usb-x86:
-- `~/system_imaging/disk/bty-usb-x86_64.iso.gz` - final artifact.
+usbboot-pc:
+- `~/system_imaging/disk/bty-usbboot-pc-x86_64.iso.gz` - final artifact.
   Open in Balena Etcher / Raspberry Pi Imager / Rufus DD-mode
   (those tools decompress `.gz` natively), or pipe via CLI:
-  `gunzip -d --stdout bty-usb-x86_64.iso.gz | sudo dd of=/dev/sdX bs=4M`.
+  `gunzip -d --stdout bty-usbboot-pc-x86_64.iso.gz | sudo dd of=/dev/sdX bs=4M`.
   Decompress to `.iso` first (`gunzip ...`) before dropping onto a
   Ventoy stick; Ventoy doesn't auto-decompress.
 
-netboot-x86:
-- `~/system_imaging/disk/bty-netboot-x86_64.vmlinuz` - kernel
-- `~/system_imaging/disk/bty-netboot-x86_64.initrd` - initramfs
-- `~/system_imaging/disk/bty-netboot-x86_64.squashfs` - overlay rootfs
-- `~/system_imaging/disk/bty-netboot-x86_64.sha256` - manifest
+netboot-pc:
+- `~/system_imaging/disk/bty-netboot-pc-x86_64.vmlinuz` - kernel
+- `~/system_imaging/disk/bty-netboot-pc-x86_64.initrd` - initramfs
+- `~/system_imaging/disk/bty-netboot-pc-x86_64.squashfs` - overlay rootfs
+- `~/system_imaging/disk/bty-netboot-pc-x86_64.sha256` - manifest
 
 ## Status
 
 Both variants ship on every tagged release at
 [the GitHub releases page](https://github.com/safl/bty/releases).
 The end-to-end PXE chain test (``make test-pxe``) gates each release
-on usb-x86 and netboot-x86 building cleanly and the chain working end
+on usbboot-pc and netboot-pc building cleanly and the chain working end
 to end. Most operators never run this build pipeline themselves -
 ``bty-media/`` exists for contributors who want to modify the image.
 
-- **usb-x86.** Hybrid ISO that boots into a Debian live environment
+- **usbboot-pc.** Hybrid ISO that boots into a Debian live environment
   with the `bty` wizard installed into `/opt/bty/venv`, and an
   exFAT `BTY_IMAGES` partition for pre-built images. live-boot's
   SquashFS + tmpfs overlay provides the ephemeral rootfs (no
   `overlayroot` package needed). End-to-end use case in
-  [`docs/src/tutorials/bty-usb.md`](../docs/src/tutorials/bty-usb.md).
-- **netboot-x86.** Kernel + initrd + squashfs trio used by PXE
+  [`docs/src/tutorials/bty-usbboot-pc.md`](../docs/src/tutorials/bty-usbboot-pc.md).
+- **netboot-pc.** Kernel + initrd + squashfs trio used by PXE
   clients. The chroot ships `bty-on-tty1.service` (after
   `network-online.target`); it reads `bty.server=` + `bty.mac=`
   from `/proc/cmdline` and exec's `bty --server X --mac Y`. ``bty``
@@ -143,13 +143,13 @@ to end. Most operators never run this build pipeline themselves -
   prints a notice and exits cleanly. Without `bty.mac` on the
   cmdline (e.g. USB-local boot), ``bty`` falls back to scanning
   the local image-root directory.
-- **usb-rpi.** arm64 Pi-bootable raw image (FAT32 firmware + ext4
+- **usbboot-rpi.** arm64 Pi-bootable raw image (FAT32 firmware + ext4
   live squashfs + auto-growing exFAT `BTY_IMAGES`). Boots a CM5 /
-  Pi5 / Pi4 from a USB stick into the same bty TUI as usb-x86;
+  Pi5 / Pi4 from a USB stick into the same bty TUI as usbboot-pc;
   the headline use case is reflashing a CM5 in a closed IO-case
   (eMMC) without the jumper-rpiboot-Etcher disassembly dance.
   End-to-end use case in
-  [`docs/src/tutorials/bty-usb-rpi.md`](../docs/src/tutorials/bty-usb-rpi.md).
+  [`docs/src/tutorials/bty-usbboot-rpi.md`](../docs/src/tutorials/bty-usbboot-rpi.md).
 
   The end-to-end PXE chain (server hands a per-MAC iPXE plan, client
   loads the live trio, flashes a target disk, signals done) is

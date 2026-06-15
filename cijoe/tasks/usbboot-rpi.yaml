@@ -30,7 +30,7 @@ doc: |
      runs the bty hooks, masks RPiOS's first-boot user wizard so the
      box boots straight into the bty TUI, strips per-instance
      identity, and gzips the raw .img. Publishes
-     ``bty-usb-rpi-arm64-v<version>.img.gz`` plus a sha256 manifest
+     ``bty-usbboot-rpi-arm64-v<version>.img.gz`` plus a sha256 manifest
      under ``publish.dir``.
 
   Requires passwordless sudo (loop-mount + chroot are privileged)

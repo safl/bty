@@ -63,6 +63,6 @@ hostname = "localhost"
 port = 12222
 
 # Used by ``usb_grow_stage`` to locate the freshly-baked .iso. Mirrors
-# the usb-x86 build's default publish dir.
+# the usbboot-pc build's default publish dir.
 [test.usb_grow]
 iso_dir = "{{ local.env.HOME }}/system_imaging/disk"

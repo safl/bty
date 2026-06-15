@@ -55,9 +55,9 @@ curl -fsSL -o release.toml \
 VERSION=$(grep -E '^version *=' release.toml | head -1 | cut -d'"' -f2)
 echo "Latest bty release: v$VERSION"
 
-curl -fLO https://github.com/safl/bty/releases/download/v$VERSION/bty-usb-x86_64-v$VERSION.iso
-curl -fLO https://github.com/safl/bty/releases/download/v$VERSION/bty-usb-x86_64-v$VERSION.iso.sha256
-sha256sum -c bty-usb-x86_64-v$VERSION.iso.sha256
+curl -fLO https://github.com/safl/bty/releases/download/v$VERSION/bty-usbboot-pc-x86_64-v$VERSION.iso
+curl -fLO https://github.com/safl/bty/releases/download/v$VERSION/bty-usbboot-pc-x86_64-v$VERSION.iso.sha256
+sha256sum -c bty-usbboot-pc-x86_64-v$VERSION.iso.sha256
 ```
 
 `releases/latest/download/release.toml` is a stable URL (GitHub
@@ -71,16 +71,16 @@ releases. To pin a specific version, swap `latest` for a tag (e.g.
 # prerequisites: live-build, debootstrap, squashfs-tools, xorriso,
 # exfatprogs, pipx, passwordless sudo
 make media-deps                    # one-time: pipx install cijoe
-sudo make build VARIANT=usb-x86    # 15-25 min
+sudo make build VARIANT=usbboot-pc    # 15-25 min
 ```
 
 The build runs Debian's `live-build` (debootstrap + mksquashfs +
 mkinitramfs) to produce a hybrid ISO, appends a writable `BTY_IMAGES`
 exFAT partition, and gzip-compresses the result. Emits:
 
-- `~/system_imaging/disk/bty-usb-x86_64-v<version>.iso` - distributable
+- `~/system_imaging/disk/bty-usbboot-pc-x86_64-v<version>.iso` - distributable
   artifact (the file you decompress + `dd` to a USB stick).
-- `~/system_imaging/disk/bty-usb-x86_64-v<version>.iso.sha256` - checksum.
+- `~/system_imaging/disk/bty-usbboot-pc-x86_64-v<version>.iso.sha256` - checksum.
 
 ## Flash a USB stick
 
@@ -89,7 +89,7 @@ exFAT partition, and gzip-compresses the result. Emits:
 lsblk
 
 # /dev/sdX is the USB stick (NOT your local system disk).
-sudo dd if=~/system_imaging/disk/bty-usb-x86_64-v$VERSION.iso \
+sudo dd if=~/system_imaging/disk/bty-usbboot-pc-x86_64-v$VERSION.iso \
         of=/dev/sdX bs=4M status=progress oflag=direct conv=fsync
 sync
 ```

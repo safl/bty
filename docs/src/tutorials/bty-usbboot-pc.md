@@ -29,9 +29,9 @@ GitHub release asset. The `releases/latest/download/<name>`
 URLs always redirect to the newest version.
 
 ```bash
-curl -fLO https://github.com/safl/bty/releases/latest/download/bty-usb-x86_64.iso
-curl -fLO https://github.com/safl/bty/releases/latest/download/bty-usb-x86_64.iso.sha256
-sha256sum -c bty-usb-x86_64.iso.sha256
+curl -fLO https://github.com/safl/bty/releases/latest/download/bty-usbboot-pc-x86_64.iso
+curl -fLO https://github.com/safl/bty/releases/latest/download/bty-usbboot-pc-x86_64.iso.sha256
+sha256sum -c bty-usbboot-pc-x86_64.iso.sha256
 ```
 
 For a specific version, replace `latest` with the tag (e.g.
@@ -50,7 +50,7 @@ Find the USB stick (typically `sda` / `sdb`, sized to your
 stick). **Do not** confuse it with your laptop's internal disk.
 
 ```bash
-sudo dd if=bty-usb-x86_64.iso of=/dev/sdX bs=4M status=progress conv=fsync
+sudo dd if=bty-usbboot-pc-x86_64.iso of=/dev/sdX bs=4M status=progress conv=fsync
 sync
 ```
 
@@ -63,7 +63,7 @@ a half-written stick.
 
 If you'd rather click than type, [Balena Etcher],
 [Raspberry Pi Imager], or [Rufus] (in DD mode) all accept
-`bty-usb-x86_64.iso` directly. They handle device selection
+`bty-usbboot-pc-x86_64.iso` directly. They handle device selection
 and flushing for you.
 
 [Balena Etcher]: https://etcher.balena.io/
@@ -190,7 +190,7 @@ The same bty `.iso` also works in:
 - [bty via BMC / OOB-MGMT](bmc.md) -- piKVM / JetKVM /
   proprietary server BMCs that mount the `.iso` as virtual
   media.
-- [bty via netboot](bty-netboot.md) -- skip the USB stick
+- [bty via netboot](bty-netboot-pc.md) -- skip the USB stick
   entirely; PXE-boot a fleet from a bty-web server.
 
 ## Troubleshooting
@@ -237,7 +237,7 @@ sudo umount /dev/sdX*
 ## What's next
 
 * For provisioning many machines at once over the network, see
-  [bty via netboot](bty-netboot.md) and the in-depth
+  [bty via netboot](bty-netboot-pc.md) and the in-depth
   [bty-web container guide](../walkthrough-server-docker.md).
 * For the full CLI surface, see [Reference](../reference.md).
 * For how the live env works under the hood, see

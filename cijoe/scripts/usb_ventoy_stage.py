@@ -7,7 +7,7 @@ Mirrors what an operator does in practice:
   1. Download Ventoy.
   2. Install Ventoy onto a USB stick (here: a 4 GiB sparse file
      loop-attached so ``Ventoy2Disk.sh`` sees a block device).
-  3. Drop ``bty-usb-x86_64-v*.iso`` onto the Ventoy data partition
+  3. Drop ``bty-usbboot-pc-x86_64-v*.iso`` onto the Ventoy data partition
      so the Ventoy menu offers it.
   4. Drop a ``bty-images/`` subdir with one sentinel image + a
      ``catalog.toml`` -- the operator's image catalog the live env
@@ -31,7 +31,7 @@ import urllib.request
 from argparse import ArgumentParser
 from pathlib import Path
 
-ISO_BASENAME_GLOB = "bty-usb-x86_64-v*.iso"
+ISO_BASENAME_GLOB = "bty-usbboot-pc-x86_64-v*.iso"
 DISK_BYTES = 4 * 1024 * 1024 * 1024  # 4 GiB
 
 # Sentinel image: a 1 MiB sparse file with a recognisable extension.
@@ -64,7 +64,7 @@ def main(args, cijoe):
     iso_dir = Path(cfg.get("iso_dir") or (Path.home() / "system_imaging" / "disk"))
     candidates = sorted(iso_dir.glob(ISO_BASENAME_GLOB))
     if not candidates:
-        log.error(f"no {ISO_BASENAME_GLOB} found in {iso_dir} (did usb-x86 build run?)")
+        log.error(f"no {ISO_BASENAME_GLOB} found in {iso_dir} (did usbboot-pc build run?)")
         return errno.ENOENT
     src_iso = candidates[-1]
     log.info(f"using {src_iso.name} ({src_iso.stat().st_size} bytes)")
