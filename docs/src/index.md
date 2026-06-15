@@ -21,11 +21,16 @@ cloud-init / kickstart / preseed; the companion project
 of pre-built images works. bty just writes the bytes.
 
 ```{toctree}
+:maxdepth: 1
+
+quickstart
+```
+
+```{toctree}
 :maxdepth: 2
-:caption: Get started
+:caption: Walkthroughs
 
 overview
-quickstart
 walkthrough-catalog
 walkthrough-image-store
 walkthrough-server-docker
