@@ -2027,24 +2027,40 @@ def _format_progress_bytes(written: int | None, total: int | None) -> str:
 
 
 def _emit_console_marker(line: str) -> None:
-    """Write a chain-test marker line to the kernel console.
+    """Write a chain-test marker line to every kernel console.
 
     The PXE chain test (cijoe/configs/test-pxe.toml) reads the
     client VM's QEMU serial log -- which is whatever the kernel
-    cmdline names with ``console=ttyS0,115200``. The bty live env
-    aliases that as ``/dev/console``. Writing to /dev/console
-    reaches the chain-test observer; writing only to stderr would
-    stay on /dev/tty1 because bty-on-tty1.service routes
-    ``StandardError=tty`` -> ``TTYPath=/dev/tty1``.
+    cmdline names with the LAST ``console=ttyS*,115200`` token.
+    Writing only to ``stderr`` would stay on /dev/tty1 because
+    bty-on-tty1.service routes ``StandardError=tty`` ->
+    ``TTYPath=/dev/tty1``.
 
-    Also mirrors to stderr so an operator running ``bty`` on a
-    workstation (no /dev/console as a writable kernel console)
-    still sees the marker. Both writes are best-effort: if
-    /dev/console is missing or unwritable (workstation runs
-    under a non-root user, sandboxed test) we just skip the
-    console write and rely on stderr.
+    Three sinks, each best-effort (any can be missing or
+    unwritable on a workstation run):
+
+    * ``stderr`` -- the operator-facing path; appears on /dev/tty1
+      under the service, on the terminal under a bare ``bty`` run.
+    * ``/dev/kmsg`` -- the kernel log device. Writes here go
+      through ``printk`` which broadcasts to ALL registered
+      consoles regardless of which one /dev/console happens to
+      resolve to. This is the one the chain test actually needs
+      when the cmdline lists more than one ``console=ttyS*`` and
+      Linux's preferred-console-vs-/dev/console picks an
+      unexpected sink. Prefixed with a syslog priority so kmsg
+      accepts it as a single line.
+    * ``/dev/console`` -- the historical path; kept because on a
+      single-serial-console live env it's the most direct route
+      to the captured log and one fewer hop than printk.
     """
     print(line, file=sys.stderr, flush=True)
+    # ``<6>`` = LOG_INFO; ``/dev/kmsg`` parses a leading
+    # ``<prio>`` token so the line shows up as a normal kernel-log
+    # entry on every registered console without raising the log
+    # level. Without the prefix the write still succeeds but the
+    # priority defaults to LOG_NOTICE.
+    with contextlib.suppress(OSError), open("/dev/kmsg", "w", encoding="utf-8") as kmsg:
+        kmsg.write("<6>" + line + "\n")
     with contextlib.suppress(OSError), open("/dev/console", "w", encoding="utf-8") as console:
         console.write(line + "\n")
         console.flush()
