@@ -9,6 +9,41 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.55.2] - 2026-06-16
+
+### Fixed
+
+- **PXE kernel console now reaches Supermicro BMC SoL**. The PXE
+  templates only emitted to `ttyS0`, which matches Dell / iLO
+  (they bridge COM1 to SoL) but not boards that wire SoL to the
+  BMC's dedicated UART (Linux sees it as `ttyS1`). On those
+  boards the BMC web UI sometimes exposes only "COM1 or SOL" with
+  no usable COM1 wiring, so the operator can't redirect from the
+  BMC side either; the cmdline is the only place to fix it.
+  `ipxe_flash.j2` and `ipxe_tui.j2` now emit
+  `console=ttyS1,115200 console=ttyS0,115200`: the kernel writes
+  to both UARTs regardless of order, so whichever the BMC bridges
+  sees the boot stream, while `/dev/console` (which follows the
+  last-listed console) stays on ttyS0 so the cijoe chain test's
+  marker scan still works. Also adds `earlyprintk=ttyS0,115200`
+  so the kernel's own console-registration messages reach the
+  captured serial log before the printk console-list is
+  reshuffled, leaving a diagnostic trail for any future ordering
+  regression.
+
+### Changed
+
+- **PXE chain test now binds QEMU COM2 explicitly to a null
+  backend**. The i440FX SuperIO emulation has two UARTs
+  unconditionally, but a single `-serial` directive only binds
+  the first. The second was previously left without a chardev,
+  which made the kernel-side 8250 probe of ttyS1 behave
+  inconsistently when the PXE templates listed both
+  `console=ttyS0` and `console=ttyS1`. An explicit
+  `-serial null` for COM2 gives ttyS1 a defined "writes go to
+  /dev/null" backend, so the chain test is deterministic
+  regardless of how the cmdline orders the consoles.
+
 ## [0.55.1] - 2026-06-16
 
 ### Fixed
