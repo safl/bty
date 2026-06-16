@@ -1,4 +1,4 @@
-# Flash images onto target disks, offline or networked with and without PXE
+# Flash OS images onto target disks
 
 ```{only} html
 [![CI](https://github.com/safl/bty/actions/workflows/ci-cd.yml/badge.svg?branch=main)](https://github.com/safl/bty/actions/workflows/ci-cd.yml)
