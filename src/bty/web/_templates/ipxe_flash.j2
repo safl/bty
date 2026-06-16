@@ -20,10 +20,29 @@
 set bty-base http://{{ host }}
 # fetch= tells live-boot's initramfs to download the squashfs over
 # HTTP and mount it as the rootfs (no local disk needed).
-# console=tty0 console=ttyS0,115200 sends kernel + systemd messages
-# to both the screen and the serial port. The serial mirror is
-# essential for headless bare-metal flashing (operator watches via
-# IPMI / serial console) and for the PXE chain test.
+# console=tty0 console=ttyS1,115200 console=ttyS0,115200 sends
+# kernel messages to the framebuffer AND to BOTH first UARTs. The
+# serial mirror is essential for headless bare-metal flashing
+# (operator watches via IPMI / serial console) and for the PXE
+# chain test. Listing both ttyS0 and ttyS1 covers the two default
+# BMC SoL bridges in the field: Dell / iLO usually bridge COM1
+# (ttyS0), Supermicro / older Intel boards typically bridge COM2
+# (ttyS1) -- on the latter the BMC SoL UI sometimes exposes only
+# "COM1 or SOL" with no working COM1 wiring, so SoL is wired to
+# the BMC's dedicated UART (Linux sees it as ttyS1). Writing to
+# both gets the kernel output onto whichever UART the BMC
+# happens to be bridging without per-vendor BIOS twiddling. The
+# kernel writes to every registered ``console=`` regardless of
+# order; only userspace ``/dev/console`` (init banners, bty's
+# stdout) follows the last-listed rule. ttyS0 is LAST on purpose
+# so that ``/dev/console`` lands on the UART the cijoe PXE chain
+# test attaches to (a ``file:`` chardev on COM1); a future edit
+# that reorders these must also re-verify the chain test.
+# ``earlyprintk=ttyS0,115200`` forces the kernel's own
+# console-registration messages onto ttyS0 BEFORE the printk
+# console-list is reshuffled, so a future order-related regression
+# leaves a diagnostic trail in the captured serial log even if
+# something later goes wrong.
 # Transparency: NO ``quiet`` -- bty wants the full kernel + systemd
 # boot stream visible. See ipxe_tui.j2 + live-build/auto/config for
 # the matching rationale.
@@ -47,6 +66,6 @@ set bty-base http://{{ host }}
 # target already mounted; bty unmounts as a backstop, but not mounting
 # it in the first place is the correct fix. Served by bty-web, so this
 # takes effect on the next PXE boot with no media rebake.
-kernel ${bty-base}/boot/bty-netboot-pc-x86_64-v{{ bty_version }}.vmlinuz?mac={{ mac }} boot=live fetch=${bty-base}/boot/bty-netboot-pc-x86_64-v{{ bty_version }}.squashfs components console=tty0 console=ttyS0,115200 plymouth.enable=0 modprobe.blacklist=nouveau nouveau.modeset=0 systemd.gpt_auto=0 bty.server=${bty-base} bty.mac={{ mac }}
+kernel ${bty-base}/boot/bty-netboot-pc-x86_64-v{{ bty_version }}.vmlinuz?mac={{ mac }} boot=live fetch=${bty-base}/boot/bty-netboot-pc-x86_64-v{{ bty_version }}.squashfs components console=tty0 console=ttyS1,115200 console=ttyS0,115200 earlyprintk=ttyS0,115200 plymouth.enable=0 modprobe.blacklist=nouveau nouveau.modeset=0 systemd.gpt_auto=0 bty.server=${bty-base} bty.mac={{ mac }}
 initrd ${bty-base}/boot/bty-netboot-pc-x86_64-v{{ bty_version }}.initrd?mac={{ mac }}
 boot
