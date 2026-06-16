@@ -232,7 +232,18 @@ def test_ipxe_templates_share_baseline_cmdline_tokens() -> None:
         f"fetch=${{bty-base}}/boot/{ARTIFACT_NAMES[2]}",
         "components",
         "console=tty0",
+        # Both UARTs: Dell / iLO bridge COM1 (ttyS0) for SoL,
+        # Supermicro / older Intel boards typically bridge COM2
+        # (ttyS1). Emitting to both gets kernel output onto
+        # whichever UART the BMC happens to be bridging without
+        # per-vendor BIOS twiddling.
         "console=ttyS0,115200",
+        "console=ttyS1,115200",
+        # earlyprintk on ttyS0 captures the kernel's own console-
+        # registration messages BEFORE the printk console-list is
+        # reshuffled, so an order-related regression leaves a
+        # diagnostic trail in the captured serial log.
+        "earlyprintk=ttyS0,115200",
         "plymouth.enable=0",
         "modprobe.blacklist=nouveau",
         "nouveau.modeset=0",
@@ -245,6 +256,21 @@ def test_ipxe_templates_share_baseline_cmdline_tokens() -> None:
     for token in baseline_tokens:
         assert token in tui, f"ipxe_tui.j2 kernel line missing token {token!r}: {tui!r}"
         assert token in flash, f"ipxe_flash.j2 kernel line missing token {token!r}: {flash!r}"
+
+    # Order invariant: ttyS0 must come AFTER ttyS1 on the cmdline.
+    # Linux uses the LAST ``console=`` as the systemd default-stdout
+    # sink (/dev/console). The cijoe PXE chain test captures only
+    # the ttyS0 chardev; if ttyS1 were last, init banners and
+    # bty's flash markers would route to the null-backend ttyS1
+    # and the marker scan would time out. Kernel boot messages go
+    # to ALL listed consoles regardless of order, so a Supermicro
+    # BMC bridging COM2 still sees the boot stream; only userspace
+    # init banners follow the last-listed rule.
+    for label, line in (("ipxe_tui.j2", tui), ("ipxe_flash.j2", flash)):
+        assert line.index("console=ttyS0,115200") > line.index("console=ttyS1,115200"), (
+            f"{label} kernel line lists ttyS0 before ttyS1; ttyS0 must be "
+            f"last so /dev/console is captured by the PXE chain test: {line!r}"
+        )
 
     # Transparency invariant: NEITHER template ships ``quiet`` on
     # the kernel cmdline. v0.22.1 retired plymouth + dropped quiet
