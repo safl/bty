@@ -212,6 +212,14 @@
             {% endif %}
         </p>
 
+        {# Local ``dnsmasq.service`` is only meaningful on a bare-metal
+           install. In a container deploy bty-web sits in its own mount
+           namespace and the host unit (or the sidecar's) is invisible,
+           so the row would just read ``unknown`` forever; the network
+           probe above is the canonical signal there. Hide the
+           subsection entirely in that case rather than render a
+           permanently-grey badge with an apology underneath. #}
+        {% if not in_container %}
         <h3 class="h6 mt-3 mb-2">Local <code>dnsmasq.service</code></h3>
         <div class="d-flex align-items-center gap-2 mb-2">
             {% if tftp.state == 'active' %}
@@ -227,14 +235,14 @@
                 {% if tftp.state == 'active' %}
                 co-located dnsmasq is running on this host
                 {% elif tftp.state in ('inactive', 'unknown') %}
-                no local dnsmasq (normal in container deploys; the
-                bty-tftp sidecar runs separately and the probe above
-                is the canonical signal there)
+                no local dnsmasq running; <code>systemctl status
+                dnsmasq.service</code> for detail
                 {% else %}
                 check <code>journalctl -u dnsmasq.service</code>
                 {% endif %}
             </small>
         </div>
+        {% endif %}
         <p class="text-muted small mb-0">
             <a href="/ui/settings#dhcp-pxe">
                 <i class="bi bi-box-arrow-up-right me-1"></i>DHCP / PXE cheatsheet

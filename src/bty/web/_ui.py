@@ -1180,6 +1180,14 @@ def register_ui_routes(
             flash=flash,
             flash_kind=flash_kind,
             tftp=_sysconfig.tftp_status(),
+            # In a container deploy bty-web's view of the host's
+            # ``dnsmasq.service`` is meaningless (the sidecar dnsmasq
+            # is in a different mount namespace, the local probe is
+            # always ``unknown``); the network probe below is the
+            # canonical signal there. Template uses this to hide the
+            # local-unit subsection in that mode so the page doesn't
+            # carry a permanently-grey row.
+            in_container=_sysconfig.running_in_container(),
             # Diagnostic probe: TFTP host reachable + ipxe.efi present?
             # Target resolves from config (explicit [netboot]
             # tftp_probe_host, else the withcache URL host) -- one source
