@@ -35,14 +35,18 @@ reflash leaves the lab intact; prepare the drive first, then point
 `--data-dir` at the mount:
 
 ```bash
+# Dedicate a device for bty data-dir
 sudo wipefs -a /dev/sdX
 sudo mkfs.ext4 -L bty-data /dev/sdX
+
+# Mount bty data-dir at /srv/bty
 sudo mkdir -p /srv/bty
 UUID=$(sudo blkid -o value -s UUID /dev/sdX)
 echo "UUID=$UUID  /srv/bty  ext4  defaults,noatime,nofail  0 2" | sudo tee -a /etc/fstab
 sudo systemctl daemon-reload
 sudo mount -a
 
+# Deploy bty with a non-default data-dir
 sudo uvx bty-lab deploy /opt/bty --data-dir /srv/bty
 ```
 
