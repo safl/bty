@@ -9,6 +9,28 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.55.1] - 2026-06-16
+
+### Fixed
+
+- **Netboot page no longer renders a permanently-grey "Local
+  dnsmasq.service" row on container deploys**. bty-web running in a
+  container can't see the host's `dnsmasq.service` (different mount
+  namespace) and the bty-tftp sidecar's dnsmasq lives in yet
+  another container, so the local-unit probe was always `unknown`
+  there. The network probe above the row is the canonical signal
+  in that mode, so the subsection is now hidden when bty-web
+  detects it is running inside a container. Bare-metal installs
+  see the same row as before.
+
+### Changed
+
+- **Docs landing-page title aligned with the README**. The Sphinx
+  index page carried a longer, descriptive title; the README and
+  `pyproject.toml` description used the shorter elevator pitch.
+  All three surfaces now read the same one-liner so the project's
+  identity is consistent wherever a new operator lands first.
+
 ## [0.55.0] - 2026-06-15
 
 ### Fixed
