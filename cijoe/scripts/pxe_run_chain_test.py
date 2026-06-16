@@ -398,8 +398,22 @@ def _start_client_vm(workspace, cfg, log_path, firmware="bios"):
         "-device",
         "virtio-blk-pci,drive=flashdrive,serial=BTYTEST",
         "-nographic",
+        # Two ``-serial`` directives so QEMU emulates BOTH UARTs with a
+        # well-defined backend: COM1 (ttyS0) writes to the log we tail
+        # for chain markers, COM2 (ttyS1) drops bytes onto a null
+        # backend. Without the second ``-serial null``, QEMU still
+        # emulates the COM2 register set (the i440FX SuperIO has two
+        # UARTs unconditionally) but with no chardev attached, and the
+        # kernel-side 8250 driver's view of that port becomes
+        # configuration-dependent. The PXE templates list both
+        # ``console=ttyS0`` and ``console=ttyS1`` to cover Dell / iLO
+        # (COM1) and Supermicro (COM2) SoL bridges in the field; the
+        # explicit null backend here makes the in-CI behavior
+        # deterministic regardless of which order they're listed.
         "-serial",
         f"file:{log_path}",
+        "-serial",
+        "null",
         "-boot",
         "n",
         # PXE NIC on the host bridge via a pre-created, user-owned tap.
