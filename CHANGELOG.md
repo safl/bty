@@ -9,6 +9,28 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.55.4] - 2026-06-17
+
+### Fixed
+
+- **Supermicro / Aspeed BMC USB Virtual NIC no longer hijacks
+  live-boot's network**. Boards with an Aspeed BMC (Supermicro
+  H12SSL-I, X11/X12 generations, several others) expose a "USB
+  Virtual NIC" gadget that presents over RNDIS. The kernel
+  claimed it via `rndis_host`, udev renamed it to `enxbe...`,
+  live-boot saw two connected ethernets, picked the
+  alphabetically-first one (the BMC virtual NIC, sorts before
+  `eno*`), tried to DHCP+fetch the squashfs over the BMC's
+  internal USB net, timed out, and panicked init with
+  `Unable to find a live file system on the network`.
+  `modprobe.blacklist=rndis_host` now sits next to the existing
+  `nouveau` blacklist on every live-env cmdline (both iPXE
+  templates and both live-build BOOTAPPEND lines), so the
+  virtual NIC never registers as a network device and live-boot
+  only sees the real wire. Real USB-Ethernet dongles (Realtek
+  r8152, ASIX AX88179) are unaffected; they use chip-specific
+  drivers, not the generic `rndis_host`.
+
 ## [0.55.3] - 2026-06-17
 
 ### Fixed
