@@ -154,4 +154,32 @@ def main(argv: list[str] | None = None, *, prog: str = "bty") -> None:
         _progress(f"server-driven mode: server={args.server} mac={args.mac}")
     _progress("starting interface (first paint may take a few seconds)...")
 
-    BtyTui(server=args.server, mac=args.mac, catalog=args.catalog).run()
+    # Lifecycle bookends, broadcast via /dev/kmsg + /dev/console
+    # (the same fanout the chain-test markers + flash milestones
+    # use). The pair lets an operator on IPMI SoL, on the kernel
+    # serial log, or tailing ``journalctl -u bty-on-tty1`` follow
+    # along regardless of which bty mode runs (auto-flash from a
+    # plan, interactive wizard, USB-local). The mid-flight
+    # markers (``auto-flash starting``, ``download NN%``,
+    # ``write NN%``, ``flash complete; rebooting``) fire between
+    # these bookends as they always have.
+    #
+    # The import lives here, not at module top, because the
+    # missing-dep branch above must still produce a clean
+    # "reinstall with extras" message instead of crashing on the
+    # import itself; once we reach this line, ``_app`` is known
+    # to import cleanly.
+    from bty.tui._app import _emit_console_marker
+
+    _emit_console_marker(f"bty: entered v{bty.__version__}")
+    try:
+        BtyTui(server=args.server, mac=args.mac, catalog=args.catalog).run()
+    finally:
+        # ``finally`` so the marker fires for every exit path:
+        # clean run, SystemExit from a sys.exit(N) deep inside
+        # the wizard, KeyboardInterrupt, an unhandled exception,
+        # and the post-flash ``_do_reboot`` (which returns
+        # promptly before systemd kills us). Best-effort under
+        # contextlib.suppress inside ``_emit_console_marker``;
+        # never raises.
+        _emit_console_marker(f"bty: exiting v{bty.__version__}")
