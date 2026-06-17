@@ -9,6 +9,22 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.55.6] - 2026-06-17
+
+### Added
+
+- **Lifecycle bookends on every bty run**. The 0.55.5 milestone
+  markers only fire on the auto-flash path; an operator
+  following IPMI SoL through an interactive wizard, a USB-local
+  run, or a hand-driven `bty --catalog X` had no marker to
+  follow. `bty.tui:main` now emits `bty: entered v<X>` right
+  before the wizard launches and `bty: exiting v<X>` in a
+  `finally` so it fires for every exit path (clean run,
+  `sys.exit` deep in the wizard, KeyboardInterrupt, post-flash
+  reboot, unhandled exception). Same `/dev/kmsg` + `/dev/console`
+  fanout as the rest of the markers, so the pair lands on every
+  registered console regardless of mode.
+
 ## [0.55.5] - 2026-06-17
 
 ### Added
