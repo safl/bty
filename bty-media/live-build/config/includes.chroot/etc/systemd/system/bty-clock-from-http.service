@@ -15,7 +15,10 @@ Before=apt-daily.service bty-on-tty1.service
 
 [Service]
 Type=oneshot
+# bty-trace hooks: see bty-usb-grow.service for the rationale.
+ExecStartPre=/usr/local/sbin/bty-trace bty-clock-from-http starting
 ExecStart=/usr/local/sbin/bty-clock-from-http
+ExecStartPost=/usr/local/sbin/bty-trace bty-clock-from-http ready
 RemainAfterExit=yes
 StandardOutput=journal
 StandardError=journal
