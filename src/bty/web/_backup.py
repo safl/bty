@@ -55,7 +55,8 @@ import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from types import TracebackType
+from typing import Any, Self
 
 from bty.web import _db, _portability, _settings_store
 from bty.web._events_log import record as _log_event
@@ -662,14 +663,14 @@ class _suppress_oserror:
     Used around best-effort filesystem cleanup so the original
     exception isn't masked by a cleanup failure."""
 
-    def __enter__(self) -> _suppress_oserror:
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(
         self,
         exc_type: type[BaseException] | None,
         exc: BaseException | None,
-        tb: Any,
+        tb: TracebackType | None,
     ) -> bool:
         if exc_type is None:
             return False
