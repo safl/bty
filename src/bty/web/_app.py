@@ -21,7 +21,7 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -1693,7 +1693,36 @@ def create_app(
                 detail=f"image source not reachable: {src} ({exc})",
             ) from exc
         headers = {"Content-Length": str(total)} if total else {}
-        return StreamingResponse(chunks, media_type="application/octet-stream", headers=headers)
+
+        def _observed_chunks() -> Iterator[bytes]:
+            # Wrap the upstream iterator so a mid-stream
+            # ``CatalogError`` from stream_src (upstream short-read
+            # before Content-Length was reached) gets logged here
+            # AND recorded as an ``image.upstream.truncated`` event
+            # before the connection drops. Without this wrapper the
+            # exception still propagates -- Starlette aborts the
+            # response, the client sees curl exit 18 -- but the
+            # bty-web journal contains no record of WHICH blob
+            # truncated. The operator has to ssh in and grep dmesg.
+            try:
+                yield from chunks
+            except _catalog.CatalogError as exc:
+                with contextlib.suppress(Exception), _db.open_db(state_path) as conn:
+                    _log_event(
+                        conn,
+                        kind="image.upstream.truncated",
+                        summary=f"upstream truncated while streaming {src}",
+                        subject_kind="catalog",
+                        subject_id=src,
+                        actor="system",
+                        details={"error": str(exc)},
+                    )
+                    conn.commit()
+                raise
+
+        return StreamingResponse(
+            _observed_chunks(), media_type="application/octet-stream", headers=headers
+        )
 
     def _flash_target_for_ref(ref: str) -> str | None:
         """Resolve a ``bty_image_ref`` to a display name so the iPXE

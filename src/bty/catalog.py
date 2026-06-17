@@ -542,14 +542,36 @@ def stream_src(
         total = None
 
     def _chunks() -> Iterator[bytes]:
+        # Track emitted bytes so an upstream close that arrives before
+        # ``Content-Length`` is reached surfaces as a hard error
+        # instead of a silent short-read. Without this, the
+        # StreamingResponse downstream finishes cleanly while the
+        # client (curl / dd) detects the mismatch as exit 18; the
+        # bty-web journal contains no record of WHICH blob truncated
+        # OR by how much. Mirrors withcache's ``TruncatedDownload``
+        # guard on its own fill path (safl/withcache#7), but for the
+        # bty-web -> oras-registry hop which bypasses withcache.
+        emitted = 0
         try:
             while True:
                 chunk = resp.read(chunk_size)
                 if not chunk:
                     break
+                emitted += len(chunk)
                 yield chunk
         finally:
             resp.close()
+        if total is not None and emitted < total:
+            # Raise AFTER ``resp.close()`` so the upstream connection
+            # is reaped cleanly; the in-flight HTTP response has
+            # already been emitted up to ``emitted`` bytes, so the
+            # client sees a connection-cut before Content-Length is
+            # reached (curl exit 18). The exception propagates up
+            # through Starlette's StreamingResponse machinery and is
+            # caught by the call site (``_stream_remote_image``) which
+            # logs it + records an ``image.upstream.truncated`` event
+            # so the operator sees WHICH blob and by how much.
+            raise CatalogError(f"upstream short read on {src!r}: got {emitted} of {total} bytes")
 
     return _chunks(), total
 

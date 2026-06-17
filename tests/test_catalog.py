@@ -499,3 +499,91 @@ def test_image_ref_for_src_distinguishes_local_vs_remote_with_same_name() -> Non
     a = catalog.image_ref_for_src("file://debian.img.gz")
     b = catalog.image_ref_for_src("https://example.com/debian.img.gz")
     assert a != b
+
+
+# --------------------------------------------------------------------------
+# stream_src truncation detection (safl/bty#XX, paralleling
+# safl/withcache#7's TruncatedDownload guard).
+# --------------------------------------------------------------------------
+
+
+class _FakeResp:
+    """Stand-in for ``http.client.HTTPResponse`` driven by a fixed
+    body buffer. Returns one ``chunk_size`` slice per ``read`` call;
+    when the body is exhausted returns ``b""`` (the Python-level
+    surface of an upstream close)."""
+
+    def __init__(self, body: bytes, declared_length: int) -> None:
+        self._buf = body
+        self._pos = 0
+        self.headers = {"Content-Length": str(declared_length)}
+        self.closed = False
+
+    def read(self, n: int) -> bytes:
+        chunk = self._buf[self._pos : self._pos + n]
+        self._pos += len(chunk)
+        return chunk
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def test_stream_src_raises_on_upstream_short_read(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The upstream stops at 100 bytes but advertised 200 in
+    Content-Length. ``stream_src``'s iterator must raise CatalogError
+    so the caller (bty-web's ``_stream_remote_image``) can log the
+    truncation + record an ``image.upstream.truncated`` event rather
+    than silently passing a short body to a flashing client.
+    """
+    fake = _FakeResp(body=b"x" * 100, declared_length=200)
+    monkeypatch.setattr(catalog.urllib.request, "urlopen", lambda *_a, **_kw: fake)
+
+    chunks, total = catalog.stream_src("https://example.com/img.gz")
+    assert total == 200
+
+    with pytest.raises(catalog.CatalogError, match=r"short read.*got 100 of 200"):
+        for _chunk in chunks:
+            pass
+    # Even on the failure path, the underlying response was closed.
+    assert fake.closed
+
+
+def test_stream_src_succeeds_when_body_matches_content_length(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Happy path: when the body matches Content-Length exactly,
+    no exception is raised and all bytes are yielded."""
+    body = b"y" * 1024
+    fake = _FakeResp(body=body, declared_length=len(body))
+    monkeypatch.setattr(catalog.urllib.request, "urlopen", lambda *_a, **_kw: fake)
+
+    chunks, total = catalog.stream_src("https://example.com/img.gz", chunk_size=256)
+    assert total == len(body)
+    received = b"".join(chunks)
+    assert received == body
+    assert fake.closed
+
+
+def test_stream_src_no_total_means_no_truncation_check(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When the upstream omits Content-Length (chunked transfer
+    encoding, server that doesn't set it), there's no expected total
+    to compare against. The iterator must finish cleanly on the first
+    empty read; we can't detect truncation in that case but also
+    must not raise on a perfectly fine but length-less response."""
+
+    class _Headers(dict):
+        def get(self, key, default=None):  # mimics http.client.HTTPMessage.get
+            return super().get(key, default)
+
+    body = b"z" * 64
+    fake = _FakeResp(body=body, declared_length=0)
+    # Drop the declared length entirely.
+    fake.headers = _Headers()
+    monkeypatch.setattr(catalog.urllib.request, "urlopen", lambda *_a, **_kw: fake)
+
+    chunks, total = catalog.stream_src("https://example.com/img.gz")
+    assert total is None
+    received = b"".join(chunks)
+    assert received == body
