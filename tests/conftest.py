@@ -9,15 +9,13 @@ body -- the autouse fixture's default install does NOT block that.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-
 import pytest
 
 from bty.web import _config
 
 
 @pytest.fixture(autouse=True)
-def _default_active_config(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+def _default_active_config(monkeypatch: pytest.MonkeyPatch) -> None:
     """Install a default-only LoadedConfig before every test.
 
     The fixture clears any ``BTY_*`` env vars first so a host-level
@@ -26,6 +24,10 @@ def _default_active_config(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     re-set them via ``monkeypatch.setenv(...)`` inside the test body
     AND call ``reload_config()`` (below) for the change to land in
     the active config.
+
+    No explicit teardown: the next test's autouse setup overwrites
+    the singleton, and ``monkeypatch`` undoes its env mutations on
+    its own teardown.
     """
     import os
 
@@ -33,10 +35,6 @@ def _default_active_config(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
         if k.startswith("BTY_"):
             monkeypatch.delenv(k, raising=False)
     _config.set_active_config(_config.load_config([]))
-    yield
-    # No explicit teardown -- the next test's setup overwrites the
-    # singleton. Leaving _ACTIVE non-None between tests is harmless
-    # (each test installs a fresh one).
 
 
 def _reload() -> None:

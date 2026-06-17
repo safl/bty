@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import asyncio
 import sqlite3
-from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -578,9 +577,8 @@ def test_release_fetch_state_to_dict_includes_artifacts() -> None:
 
 
 @pytest.fixture
-def _unused_iterator() -> Iterator[None]:
+def _unused_iterator() -> None:
     """Placeholder for parity with sibling test files that yield
     HTTP servers / temp state. This file's tests use monkeypatch
     + tmp_path directly so no fixture is needed; the import-time
     presence of this stub keeps the file pattern consistent."""
-    yield None
