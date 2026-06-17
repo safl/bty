@@ -18,6 +18,26 @@ After=dev-disk-by\x2dlabel-BTY_IMAGES.device
 # Must run BEFORE the mount unit so it sees the grown partition.
 Before=var-lib-bty-images.mount bty-images-discover.service bty-on-tty1.service
 After=local-fs.target systemd-udev-settle.service
+# Cap the JOB (dep wait + ExecStart) at 20s. The ``After=...
+# BTY_IMAGES.device`` above is essential on USB-boot (it gives
+# udev time to create the by-label symlink before the
+# ConditionPathExists check), but on a netboot-only boot the
+# label never appears -- systemd's DefaultDeviceTimeoutSec (90s)
+# would otherwise tick down before downstream units could
+# proceed, wasting ~87s of every PXE boot for no benefit.
+# Measured empirically on a local QEMU PXE boot of 0.55.8: the
+# gap between bty-clock-from-http ready and bty-images-discover
+# starting was 86.8s, almost entirely this device wait. With
+# JobTimeoutSec=20s, the job aborts at 20s when the device
+# never appears; the unit is marked failed (harmless: the
+# ConditionPathExists would have skipped the ExecStart anyway,
+# and downstream units depending on bty-usb-grow check unit
+# active-or-failed, not just active). 20s rather than the
+# tight 10s the project memory suggested because the legitimate
+# USB path's ExecStart (mount + sfdisk + mkfs.exfat + mount +
+# touch + umount) takes 8-18s on typical hardware; 20s leaves
+# enough headroom that a successful grow lands inside the cap.
+JobTimeoutSec=20s
 
 [Service]
 Type=oneshot
