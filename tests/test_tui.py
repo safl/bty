@@ -617,6 +617,61 @@ def test_emit_console_marker_writes_to_stderr_and_swallows_console_failure(
     # propagated to here.
 
 
+def test_milestone_emitter_fires_each_threshold_once_in_order(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """``_MilestoneEmitter`` is the SoL-friendly progress heartbeat. It
+    must emit ``bty: <stage> NN%`` lines on 25/50/75/100 crossings, at
+    most once per crossing, in increasing order. This is what an
+    operator watching IPMI SoL during an auto-flash actually sees
+    between the ``starting`` and ``complete`` bookends.
+    """
+    em = tui_app._MilestoneEmitter("write")
+    # Cross a couple of thresholds at once (a real flash can emit
+    # tens of MiB between progress events when the write is fast).
+    em.update(30, 100)  # 30% -> fires 25
+    em.update(60, 100)  # 60% -> fires 50
+    em.update(80, 100)  # 80% -> fires 75
+    em.update(100, 100)  # 100% -> fires 100
+    err = capsys.readouterr().err
+    lines = [line for line in err.splitlines() if line.startswith("bty: write")]
+    assert lines == [
+        "bty: write 25%",
+        "bty: write 50%",
+        "bty: write 75%",
+        "bty: write 100%",
+    ]
+
+
+def test_milestone_emitter_skips_when_total_unknown(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Some write paths can't pre-compute the decompressed total
+    (gzip-without-trailer-trust, qcow2 with sparse virtual size).
+    The emitter must silently no-op rather than divide-by-zero or
+    emit bogus percentages."""
+    em = tui_app._MilestoneEmitter("download")
+    em.update(1024, None)
+    em.update(1024, 0)
+    em.update(1024, -1)
+    err = capsys.readouterr().err
+    assert "bty: download" not in err
+
+
+def test_milestone_emitter_jumping_past_threshold_still_fires_all(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A single fast-path event can jump from 0% to 60% (the dd
+    progress thread fires at ~1Hz; a fast NVMe target writes hundreds
+    of MiB between two events). The emitter still fires 25 AND 50 in
+    order, not just the highest threshold crossed."""
+    em = tui_app._MilestoneEmitter("download")
+    em.update(60, 100)  # crosses both 25 and 50
+    err = capsys.readouterr().err
+    lines = [line for line in err.splitlines() if line.startswith("bty: download")]
+    assert lines == ["bty: download 25%", "bty: download 50%"]
+
+
 # --------------------------------------------------------------------------
 # Plan dispatch: /pxe/<mac>/plan response is correctly consumed
 # --------------------------------------------------------------------------

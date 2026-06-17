@@ -1228,6 +1228,20 @@ class BtyTui:
             )
             download_task_id: TaskID | None = None
 
+            # SoL-friendly milestone markers. The Rich progress bars
+            # above are rendered to /dev/tty1 (the framebuffer VT) and
+            # invisible to an operator watching via IPMI SoL or
+            # following journalctl. The milestone emitter writes plain
+            # ``bty: download NN%`` / ``bty: write NN%`` lines via
+            # /dev/kmsg at 25/50/75/100 crossings so the same operator
+            # gets at most four heartbeats per stage on whichever
+            # serial console the kernel is registered with. Skipped
+            # silently when the total is unknown (some write paths
+            # can't pre-compute decompressed size); the ``starting``
+            # and ``flash complete; rebooting`` bookends still fire.
+            download_emitter = _MilestoneEmitter("download")
+            write_emitter = _MilestoneEmitter("write")
+
             def _on_progress(ev: flash.FlashProgress) -> None:
                 # Called from the flash thread. ``progress`` is
                 # thread-safe (Rich's Progress mutex), so direct
@@ -1247,6 +1261,7 @@ class BtyTui:
                             completed=ev.bytes_written,
                             bytes_human=_format_mib(ev.bytes_written),
                         )
+                        write_emitter.update(ev.bytes_written, ev.total_bytes)
                 elif ev.event == "downloading_progress":
                     if ev.bytes_downloaded is None:
                         return
@@ -1268,6 +1283,7 @@ class BtyTui:
                         total=ev.total_bytes,
                         bytes_human=_format_progress_bytes(ev.bytes_downloaded, ev.total_bytes),
                     )
+                    download_emitter.update(ev.bytes_downloaded, ev.total_bytes)
                 elif ev.event == "synced":
                     progress.update(task_id, description="syncing buffers")
                 elif ev.event == "partprobed":
@@ -2064,6 +2080,37 @@ def _emit_console_marker(line: str) -> None:
     with contextlib.suppress(OSError), open("/dev/console", "w", encoding="utf-8") as console:
         console.write(line + "\n")
         console.flush()
+
+
+class _MilestoneEmitter:
+    """Emit a percentage milestone marker once per 25 / 50 / 75 / 100
+    crossing, via :func:`_emit_console_marker`.
+
+    The flash progress callback fires many times per second. Calling
+    ``_emit_console_marker`` on every event would flood the kernel log
+    and the SoL stream. This helper fires AT MOST four times per stage
+    (25, 50, 75, 100), at the first event that crosses each boundary.
+
+    Skipped silently when the total is unknown (``None`` or ``<= 0``)
+    -- some write paths (gzip, qcow2) can't pre-compute the post-
+    decompression size, so we emit just the ``starting`` / ``complete``
+    bookends in that case. Cheap enough to construct unconditionally.
+    """
+
+    def __init__(self, stage: str) -> None:
+        self._stage = stage
+        # Milestones to fire, in order. Popped from the front as
+        # each one fires so a single ``update`` that jumps past two
+        # thresholds at once still emits both in order.
+        self._pending = [25, 50, 75, 100]
+
+    def update(self, done: int, total: int | None) -> None:
+        if not total or total <= 0:
+            return
+        pct = min(100, (done * 100) // total)
+        while self._pending and pct >= self._pending[0]:
+            _emit_console_marker(f"bty: {self._stage} {self._pending[0]}%")
+            self._pending.pop(0)
 
 
 __all__ = [
