@@ -9,6 +9,30 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.55.7] - 2026-06-17
+
+### Fixed
+
+- **Upstream truncation during oras:// image streaming now fails
+  loudly server-side**. Field failure on a Supermicro H12SSL-I
+  flashing `nosi-fedora-44-desktop`: ghcr.io closed the TCP
+  connection 1,504 MiB into a multi-GB oras blob, bty-web's
+  `_chunks()` treated the empty read as clean EOF, the
+  StreamingResponse finished tidily, and the live env's curl
+  detected the Content-Length mismatch only client-side as exit
+  18. The bty-web journal had no record of which blob truncated.
+  `stream_src` now tracks emitted bytes and raises `CatalogError`
+  when the upstream stops before `Content-Length` is reached;
+  the call site in `_stream_remote_image` catches it, records
+  an `image.upstream.truncated` event against the offending src
+  URL, and propagates so the live env still detects the failure
+  via curl exit 18 (so a partial image never reaches `dd`).
+  Same shape as safl/withcache#7's `TruncatedDownload` guard,
+  but for the bty-web -> oras-registry hop which bypasses
+  withcache entirely. Mitigation: the operator should
+  pre-cache via `/ui/images` "Download" before flashing
+  upstream-unstable images so the LAN-only path is taken.
+
 ## [0.55.6] - 2026-06-17
 
 ### Added
