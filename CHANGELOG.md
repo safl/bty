@@ -9,6 +9,29 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.55.3] - 2026-06-17
+
+### Fixed
+
+- **Respawn cap on `bty-on-tty1.service` actually applies again**.
+  `StartLimitIntervalSec=60` + `StartLimitBurst=5` were in the
+  `[Service]` section, where systemd 257 silently ignores them
+  (visible in the CI log capture as `Unknown key
+  'StartLimitIntervalSec' in section [Service], ignoring`). Moved
+  to `[Unit]` so a wedge in the first bty frame no longer
+  respawns the splash forever and bury the actual error.
+
+### Changed
+
+- Internal housekeeping: dropped 19 redundant local imports that
+  shadowed module-level imports in the test suite, switched
+  `_suppress_oserror.__enter__` / `__exit__` annotations to
+  `Self` + `TracebackType | None` per the textbook
+  context-manager pattern, and addressed three ruff findings
+  (D413 docstring spacing, PLR1730 `max()` over `if`, PT022
+  fixture `return` vs `yield`). No behavior change in production
+  code; the full pytest suite stays green.
+
 ## [0.55.2] - 2026-06-16
 
 ### Fixed
