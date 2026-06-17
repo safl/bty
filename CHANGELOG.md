@@ -9,6 +9,26 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.55.5] - 2026-06-17
+
+### Added
+
+- **Auto-flash now emits 25 / 50 / 75 / 100% milestone markers**.
+  Operators watching a Supermicro / Aspeed-BMC PXE flash over
+  IPMI SoL previously only saw the `auto-flash starting` and
+  `flash complete; rebooting` bookends, with nothing between them
+  while the multi-gigabyte download + write was running on
+  `/dev/tty1` (the framebuffer VT, invisible to a serial
+  console). bty now fires `bty: download NN%` and
+  `bty: write NN%` lines via the same `/dev/kmsg` + `/dev/console`
+  fanout the bookends use, once per 25 / 50 / 75 / 100 crossing.
+  At most 8 extra kmsg writes per flash. Skipped silently when
+  the total is unknown (some write paths can't pre-compute the
+  decompressed size). Identical behavior for interactive flashes
+  on tty1: the markers also land in `journalctl -u bty-on-tty1`
+  so a remote operator tailing the journal gets the same
+  heartbeat.
+
 ## [0.55.4] - 2026-06-17
 
 ### Fixed
