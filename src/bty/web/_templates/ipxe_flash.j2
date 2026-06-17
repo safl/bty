@@ -66,6 +66,16 @@ set bty-base http://{{ host }}
 # target already mounted; bty unmounts as a backstop, but not mounting
 # it in the first place is the correct fix. Served by bty-web, so this
 # takes effect on the next PXE boot with no media rebake.
-kernel ${bty-base}/boot/bty-netboot-pc-x86_64-v{{ bty_version }}.vmlinuz?mac={{ mac }} boot=live fetch=${bty-base}/boot/bty-netboot-pc-x86_64-v{{ bty_version }}.squashfs components console=tty0 console=ttyS1,115200 console=ttyS0,115200 earlyprintk=ttyS0,115200 plymouth.enable=0 modprobe.blacklist=nouveau nouveau.modeset=0 systemd.gpt_auto=0 bty.server=${bty-base} bty.mac={{ mac }}
+# ``modprobe.blacklist=nouveau,rndis_host``: nouveau is blacklisted
+# because the open-source Nvidia driver wedges on several iGPUs in the
+# flasher's framebuffer-only context (MS-01, GMKTec G5). ``rndis_host``
+# is blacklisted because Supermicro / Aspeed BMCs expose a "USB Virtual
+# NIC" gadget that presents over RNDIS; live-boot sees it as a connected
+# Ethernet, picks it (sorts before ``eno*``), tries to DHCP+fetch the
+# squashfs over the BMC's internal USB network (which can't reach the
+# bty server), and panics with ``Unable to find a live file system on
+# the network``. Real USB-Ethernet dongles (Realtek r8152, ASIX
+# AX88179) use chip-specific drivers and are unaffected.
+kernel ${bty-base}/boot/bty-netboot-pc-x86_64-v{{ bty_version }}.vmlinuz?mac={{ mac }} boot=live fetch=${bty-base}/boot/bty-netboot-pc-x86_64-v{{ bty_version }}.squashfs components console=tty0 console=ttyS1,115200 console=ttyS0,115200 earlyprintk=ttyS0,115200 plymouth.enable=0 modprobe.blacklist=nouveau,rndis_host nouveau.modeset=0 systemd.gpt_auto=0 bty.server=${bty-base} bty.mac={{ mac }}
 initrd ${bty-base}/boot/bty-netboot-pc-x86_64-v{{ bty_version }}.initrd?mac={{ mac }}
 boot
