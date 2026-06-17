@@ -194,7 +194,7 @@ def test_verify_sha256_manifest_rejects_malformed_line(tmp_path: Path) -> None:
     ValueError. Operators see this when the upstream release ships
     a corrupted manifest (rare but real -- partial uploads, CDN
     truncation)."""
-    from bty.web._releases import SHA256_NAME, _verify_sha256_manifest
+    from bty.web._releases import _verify_sha256_manifest
 
     (tmp_path / SHA256_NAME).write_text("just-one-token-no-filename\n")
     with pytest.raises(ValueError, match="malformed line"):
@@ -206,7 +206,7 @@ def test_verify_sha256_manifest_rejects_missing_target(tmp_path: Path) -> None:
     is a clear operator-facing failure (the upstream release is
     incomplete or the local tempdir lost a file mid-fetch). Surface
     via ValueError with the offending filename in the message."""
-    from bty.web._releases import SHA256_NAME, _verify_sha256_manifest
+    from bty.web._releases import _verify_sha256_manifest
 
     (tmp_path / SHA256_NAME).write_text(
         "0000000000000000000000000000000000000000000000000000000000000000  not-on-disk.bin\n"
@@ -222,7 +222,7 @@ def test_verify_sha256_manifest_skips_self_and_blank_lines(tmp_path: Path) -> No
     also skipped."""
     import hashlib
 
-    from bty.web._releases import SHA256_NAME, _verify_sha256_manifest
+    from bty.web._releases import _verify_sha256_manifest
 
     payload = b"art"
     (tmp_path / "art.bin").write_bytes(payload)
@@ -241,7 +241,7 @@ def test_verify_sha256_manifest_strips_star_and_dotslash_prefix(tmp_path: Path) 
     must be tolerated (the canonical filename is what's on disk)."""
     import hashlib
 
-    from bty.web._releases import SHA256_NAME, _verify_sha256_manifest
+    from bty.web._releases import _verify_sha256_manifest
 
     payload = b"contents"
     (tmp_path / "thing.bin").write_bytes(payload)
@@ -256,7 +256,7 @@ def test_verify_sha256_manifest_empty_manifest_raises(tmp_path: Path) -> None:
     release would "pass verification" by being empty -- the
     operator would think the fetch succeeded and the live env
     would later fail to boot."""
-    from bty.web._releases import SHA256_NAME, _verify_sha256_manifest
+    from bty.web._releases import _verify_sha256_manifest
 
     (tmp_path / SHA256_NAME).write_text("\n\n\n")
     with pytest.raises(ValueError, match="empty"):
@@ -274,9 +274,7 @@ def test_verify_sha256_manifest_streams_large_files(tmp_path: Path) -> None:
     instrumentation, but we CAN assert the function happily
     verifies a file larger than the chunk size (1 MiB) -- which
     exercises the streaming loop's iteration."""
-    import hashlib
-
-    from bty.web._releases import SHA256_NAME, _verify_sha256_manifest
+    from bty.web._releases import _verify_sha256_manifest
 
     files_dir = tmp_path
     # 3 MiB of varied bytes so the streaming loop runs 3 chunks.
@@ -303,7 +301,7 @@ def test_missing_netboot_artifacts_empty_when_all_present(tmp_path: Path) -> Non
     """An empty list means "PXE clients can boot": kernel + initrd
     + squashfs are all on disk. The .sha256 manifest is verification
     metadata and intentionally not included in the trio."""
-    from bty.web._releases import ARTIFACT_NAMES, missing_netboot_artifacts
+    from bty.web._releases import missing_netboot_artifacts
 
     for name in ARTIFACT_NAMES:
         (tmp_path / name).write_bytes(b"fake")
@@ -314,7 +312,7 @@ def test_missing_netboot_artifacts_reports_each_gap(tmp_path: Path) -> None:
     """``missing_netboot_artifacts`` returns the names NOT on disk
     so the /ui/settings warning can list which fetches the
     operator still owes."""
-    from bty.web._releases import ARTIFACT_NAMES, missing_netboot_artifacts
+    from bty.web._releases import missing_netboot_artifacts
 
     # Plant only the first; the rest should show up as missing.
     (tmp_path / ARTIFACT_NAMES[0]).write_bytes(b"fake")
@@ -327,7 +325,7 @@ def test_missing_netboot_artifacts_reports_each_gap(tmp_path: Path) -> None:
 def test_missing_netboot_artifacts_empty_dir_returns_all(tmp_path: Path) -> None:
     """A boot_dir with none of the artifacts -- every name shows
     up in the list. The helper must not raise."""
-    from bty.web._releases import ARTIFACT_NAMES, missing_netboot_artifacts
+    from bty.web._releases import missing_netboot_artifacts
 
     missing = missing_netboot_artifacts(tmp_path)
     assert set(missing) == set(ARTIFACT_NAMES)

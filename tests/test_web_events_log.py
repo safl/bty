@@ -332,7 +332,6 @@ def test_known_actors_covers_every_actor_emitted_by_the_codebase() -> None:
     drift-check against the source tree.
     """
     import re
-    from pathlib import Path
 
     src_root = Path(__file__).resolve().parent.parent / "src" / "bty"
     pattern = re.compile(r'actor="([a-z][a-z0-9_-]+)"')
@@ -358,7 +357,6 @@ def test_known_subject_kinds_covers_every_kind_emitted_by_the_codebase() -> None
     to the operator filtering by subject.
     """
     import re
-    from pathlib import Path
 
     src_root = Path(__file__).resolve().parent.parent / "src" / "bty"
     pattern = re.compile(r'subject_kind="([a-z][a-z0-9_]+)"')
@@ -386,7 +384,6 @@ def test_known_event_kinds_covers_every_kind_emitted_by_the_codebase() -> None:
     catalogue against drift by grepping the source tree.
     """
     import re
-    from pathlib import Path
 
     src_root = Path(__file__).resolve().parent.parent / "src" / "bty"
     pattern = re.compile(r'kind="([a-z][a-z0-9._]+)"')
@@ -424,7 +421,6 @@ def _broad_attr_scan(attr: str) -> set[str]:
     emitted, so we lean wide and filter by the catalogue.
     """
     import re
-    from pathlib import Path
 
     src_root = Path(__file__).resolve().parent.parent / "src" / "bty"
     found: set[str] = set()

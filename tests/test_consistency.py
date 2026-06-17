@@ -614,8 +614,6 @@ def test_subnav_pill_keys_match_route_validator_whitelist() -> None:
     and asserts each is present in the matching
     ``if section not in (...)`` whitelist in ``_ui.py``.
     """
-    import re
-
     ui_dir = REPO_ROOT / "src" / "bty" / "web" / "_templates" / "ui"
     ui_py = (REPO_ROOT / "src" / "bty" / "web" / "_ui.py").read_text()
 

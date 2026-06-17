@@ -252,7 +252,6 @@ def test_etc_issue_uses_only_documented_agetty_escapes() -> None:
     else outside of comments fails the test.
     """
     import re
-    from pathlib import Path
 
     repo_root = Path(__file__).resolve().parents[1]
     # ``\S{...}`` is multi-char; treat as one allowed token.
