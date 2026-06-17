@@ -9,6 +9,44 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.55.8] - 2026-06-17
+
+### Added
+
+- **`bty-trace` boot-phase markers** for empirical timing on slow
+  boots. A tiny helper at `/usr/local/sbin/bty-trace` writes one
+  line via `/dev/kmsg` per invocation (same fanout as the
+  existing `_emit_console_marker`), so the line shows up on
+  every registered console -- SoL on ttyS0/ttyS1, framebuffer on
+  tty0 -- carrying the kernel's `[ T ]` boot-time prefix for
+  free. Wired as `ExecStartPre` / `ExecStartPost` on
+  `bty-usb-grow.service`, `bty-clock-from-http.service`,
+  `bty-images-discover.service`, and `bty-on-tty1.service`.
+  Subtracting consecutive `[ T ]` timestamps in dmesg / SoL now
+  tells the operator which unit actually ate a slow boot's
+  wall-clock budget -- triangulating between the existing
+  `bty-banner-{early,mid,late}` phase boundaries (sysinit /
+  network-online / multi-user). Visible on every PXE / USB boot
+  because bty's cmdline deliberately omits `quiet`.
+
+### Fixed
+
+- **PXE-only boots no longer waste 67 seconds waiting for a USB
+  stick that doesn't exist**. Empirically confirmed via the new
+  `bty-trace` markers on a local QEMU PXE boot: an 86.8 s gap
+  between `bty-clock-from-http ready` and `bty-images-discover
+  starting` -- which is systemd's default 90 s
+  `DefaultDeviceTimeoutSec` ticking down on
+  `dev-disk-by-label-BTY_IMAGES.device`. On a PXE-only boot the
+  BTY_IMAGES label never appears; the .device unit sits at
+  "expected" until the global timeout, holding up everything
+  ordered after it. `bty-usb-grow.service` now sets
+  `JobTimeoutSec=20s` so the job aborts at 20s when the device
+  never materialises; downstream units (which depend on
+  bty-usb-grow's job completion, not its success) proceed
+  immediately. Predicted in memory
+  `project_ventoy_90s_boot_delay.md` but never landed.
+
 ## [0.55.7] - 2026-06-17
 
 ### Fixed
