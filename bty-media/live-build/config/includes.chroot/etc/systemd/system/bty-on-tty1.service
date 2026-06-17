@@ -33,6 +33,17 @@ Wants=network-online.target
 # getty never gets a chance to start in the first place.
 Conflicts=getty@tty1.service
 Before=getty@tty1.service
+# Bound the respawn loop. If bty crashes on the first frame (e.g.
+# a corrupted state.db or a malformed catalog stick), without a
+# limit systemd would respawn the splash every 5s forever and the
+# operator would see the bty banner repaint with no way to break
+# out short of switching ttys and ``systemctl stop``. After 5
+# failures in 60s, give up so the actual error surfaces on the
+# tty + in journalctl. StartLimit* live in [Unit], NOT [Service];
+# systemd 257+ logs ``Unknown key 'StartLimitIntervalSec' in
+# section [Service], ignoring`` and the cap silently does nothing.
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Service]
 # Type=simple (not idle): with Type=idle systemd delays ExecStart
@@ -46,15 +57,6 @@ Type=simple
 ExecStart=/usr/local/sbin/bty-on-tty1
 Restart=on-failure
 RestartSec=5
-# Bound the respawn loop. If bty crashes on the first frame (e.g.
-# a corrupted state.db or a malformed catalog stick), without a
-# limit systemd would respawn the splash every 5s forever and the
-# operator would see the bty banner repaint with no way to break
-# out short of switching ttys and ``systemctl stop``. After 5
-# failures in 60s, give up so the actual error surfaces on the
-# tty + in journalctl.
-StartLimitIntervalSec=60
-StartLimitBurst=5
 # Plumb tty1 in as the controlling terminal so bty's Rich
 # Prompt.ask reads from the right tty.
 StandardInput=tty
