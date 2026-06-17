@@ -21,7 +21,16 @@ After=local-fs.target systemd-udev-settle.service
 
 [Service]
 Type=oneshot
+# bty-trace hooks bracket the real work with [ T ] bty-trace:
+# ``bty-usb-grow starting`` / ``bty-usb-grow ready`` lines via
+# /dev/kmsg, so an operator following IPMI SoL or running
+# ``dmesg -T`` post-boot can see the per-unit wall-clock cost of
+# this step. Same hooks live on bty-clock-from-http,
+# bty-images-discover, and bty-on-tty1; together they triangulate
+# where multi-second boot delays actually live.
+ExecStartPre=/usr/local/sbin/bty-trace bty-usb-grow starting
 ExecStart=/usr/local/sbin/bty-usb-grow
+ExecStartPost=/usr/local/sbin/bty-trace bty-usb-grow ready
 RemainAfterExit=yes
 StandardOutput=journal
 StandardError=journal

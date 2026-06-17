@@ -54,6 +54,14 @@ StartLimitBurst=5
 # Conflicts=getty@tty1 + TTYVHangup combo already takes the tty
 # cleanly.
 Type=simple
+# bty-trace hook: emits ``bty-on-tty1 starting`` via /dev/kmsg
+# right before the Python launch, so the gap between this marker
+# and the existing ``bty: entered v<X>`` marker (emitted by
+# ``bty.tui:main`` once Rich + Textual have loaded) shows the
+# Python-cold-start cost. No "ready" hook because Type=simple
+# units' ExecStartPost runs as soon as ExecStart starts -- not
+# after the wizard exits -- so it wouldn't time anything useful.
+ExecStartPre=/usr/local/sbin/bty-trace bty-on-tty1 starting
 ExecStart=/usr/local/sbin/bty-on-tty1
 Restart=on-failure
 RestartSec=5

@@ -21,7 +21,10 @@ Before=bty-on-tty1.service
 [Service]
 Type=oneshot
 RemainAfterExit=yes
+# bty-trace hooks: see bty-usb-grow.service for the rationale.
+ExecStartPre=/usr/local/sbin/bty-trace bty-images-discover starting
 ExecStart=/usr/local/sbin/bty-images-discover
+ExecStartPost=/usr/local/sbin/bty-trace bty-images-discover ready
 # A scan that fails to mount or finds nothing is not an error -- the
 # operator may have launched the live env without a catalog stick
 # attached.
