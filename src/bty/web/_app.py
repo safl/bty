@@ -2658,6 +2658,7 @@ def create_app(
              "skipped": 1,
              "errors": [{"name": "...", "error": "..."}]
            }
+
         """
         try:
             parsed = _catalog.load_source(source)

@@ -75,8 +75,7 @@ def main(args, cijoe):
                 continue
             if parts[2] != "part":
                 continue
-            if size > largest:
-                largest = size
+            largest = max(largest, size)
     finally:
         cijoe.run_local(f"sudo losetup -d {loop_dev}")
 
