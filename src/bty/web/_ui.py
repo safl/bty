@@ -2095,8 +2095,6 @@ def _delete_toml_key(path: Path, section: str, key: str) -> None:
     on-disk path).
 
     Atomic via tempfile + rename, same shape as ``save_value``."""
-    import os
-
     import tomlkit
 
     if not path.is_file():
