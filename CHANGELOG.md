@@ -9,6 +9,16 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.55.10] - 2026-06-18
+
+### Changed
+
+- Internal housekeeping: dropped redundant empty-string arg from
+  three `print("", file=sys.stderr)` calls in `src/bty/deploy.py`
+  (FURB105 auto-fix). Same behaviour. Only finding from a fresh
+  tech-debt sweep across all code added since v0.55.3; the rest
+  of the codebase came back clean.
+
 ## [0.55.9] - 2026-06-18
 
 ### Fixed
