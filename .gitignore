@@ -15,8 +15,13 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+# Anchored to repo root: ``lib/`` and ``lib64/`` are Python
+# setup.py build artifacts at the project top. Unanchored, this
+# rule would also exclude unrelated tracked dirs like
+# ``bty-media/live-build/config/includes.chroot/usr/lib/``
+# (chroot-staged systemd generators land there).
+/lib/
+/lib64/
 parts/
 sdist/
 var/
