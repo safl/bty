@@ -2042,7 +2042,7 @@ def _format_progress_bytes(written: int | None, total: int | None) -> str:
     return f"{_format_mib(written)} / {_format_mib(total)}"
 
 
-def _emit_console_marker(line: str) -> None:
+def _emit_console_marker(line: str, *, local_tty: bool = True) -> None:
     """Write a chain-test marker line to every kernel console.
 
     The PXE chain test (cijoe/configs/test-pxe.toml) reads the
@@ -2068,8 +2068,17 @@ def _emit_console_marker(line: str) -> None:
     * ``/dev/console`` -- the historical path; kept because on a
       single-serial-console live env it's the most direct route
       to the captured log and one fewer hop than printk.
+
+    ``local_tty=False`` skips the stderr + /dev/console sinks and
+    leaves only /dev/kmsg active. Used by the in-flash milestone
+    emitter so its lines don't scramble the Rich Live progress
+    bar painted on the same /dev/tty1 that stderr resolves to
+    under bty-on-tty1.service. The kmsg path still fans out via
+    ``printk`` to every registered serial console, which is what
+    a SoL / IPMI observer needs.
     """
-    print(line, file=sys.stderr, flush=True)
+    if local_tty:
+        print(line, file=sys.stderr, flush=True)
     # ``<6>`` = LOG_INFO; ``/dev/kmsg`` parses a leading
     # ``<prio>`` token so the line shows up as a normal kernel-log
     # entry on every registered console without raising the log
@@ -2077,9 +2086,10 @@ def _emit_console_marker(line: str) -> None:
     # priority defaults to LOG_NOTICE.
     with contextlib.suppress(OSError), open("/dev/kmsg", "w", encoding="utf-8") as kmsg:
         kmsg.write("<6>" + line + "\n")
-    with contextlib.suppress(OSError), open("/dev/console", "w", encoding="utf-8") as console:
-        console.write(line + "\n")
-        console.flush()
+    if local_tty:
+        with contextlib.suppress(OSError), open("/dev/console", "w", encoding="utf-8") as console:
+            console.write(line + "\n")
+            console.flush()
 
 
 class _MilestoneEmitter:
@@ -2109,7 +2119,18 @@ class _MilestoneEmitter:
             return
         pct = min(100, (done * 100) // total)
         while self._pending and pct >= self._pending[0]:
-            _emit_console_marker(f"bty: {self._stage} {self._pending[0]}%")
+            # ``local_tty=False``: milestones fire from inside the
+            # Rich Live context that paints the progress bar on
+            # /dev/tty1. Writing the marker to stderr (which
+            # bty-on-tty1.service routes to that same tty) would
+            # inject raw text mid-frame and stack a duplicate
+            # progress-bar block below each milestone. The kmsg
+            # path still carries the line out to the serial
+            # console for SoL / IPMI observers.
+            _emit_console_marker(
+                f"bty: {self._stage} {self._pending[0]}%",
+                local_tty=False,
+            )
             self._pending.pop(0)
 
 
