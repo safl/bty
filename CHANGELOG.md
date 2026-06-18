@@ -9,6 +9,33 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.55.9] - 2026-06-18
+
+### Fixed
+
+- **Netboot wait for the missing BTY_IMAGES device is now zero,
+  not 20 seconds**. 0.55.8 capped
+  `bty-usb-grow.service`'s `JobTimeoutSec` at 20 s; the
+  `var-lib-bty-images.mount` unit's own auto-generated `Wants=`
+  on the same device still triggered a 20 s wait. A tiny systemd
+  generator at
+  `/usr/lib/systemd/system-generators/bty-skip-usb-only-units-on-netboot`
+  now masks **both** units when `fetch=` is on the kernel
+  command line (the reliable netboot discriminator). With nothing
+  Wanting= the device, systemd never activates it and the
+  `Expecting device dev-disk-by-label-BTY_IMAGES.device` line is
+  gone from the boot log. Empirically measured on a local QEMU
+  PXE boot: `bty: entered` moved from ~33 s (0.55.8) to ~13 s
+  (this fix), an 87 s improvement vs 0.55.7. The generator
+  self-traces via `/dev/kmsg` so an operator can verify in
+  `dmesg` whether it ran and what verdict it reached. USB-boot
+  path unchanged (no `fetch=` cmdline -> generator no-ops ->
+  units run normally).
+- `.gitignore` anchored `lib/` and `lib64/` to the repo root.
+  Unanchored, the Python setup.py boilerplate rules also matched
+  `bty-media/.../includes.chroot/usr/lib/` and silently dropped
+  the new systemd generator from `git add`.
+
 ## [0.55.8] - 2026-06-17
 
 ### Added
