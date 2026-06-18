@@ -1346,7 +1346,7 @@ def deploy_main(argv: list[str] | None = None, *, prog: str = "bty-lab deploy") 
         _step("starting stack")
         _compose(dest, [*compose_args, "up", "-d"])
 
-    print("", file=sys.stderr)
+    print(file=sys.stderr)
     _step("deploy complete", detail=mode_label)
     print(
         f"  bty-web UI:  http://{host_addr}:8080/ui   (login: {admin_pw} / {admin_pw})\n"
@@ -1530,7 +1530,7 @@ def upgrade_main(argv: list[str] | None = None, *, prog: str = "bty-lab upgrade"
         _step("restarting stack")
         _compose(dest, [*compose_args, "up", "-d"])
 
-    print("", file=sys.stderr)
+    print(file=sys.stderr)
     _step(f"upgrade to bty {version} complete", detail=mode_label)
 
     if not is_root and not quadlet_managed:
@@ -1756,7 +1756,7 @@ def purge_main(argv: list[str] | None = None, *, prog: str = "bty-lab purge") ->
         else:
             print(f"  (absent) {dest}", file=sys.stderr)
 
-    print("", file=sys.stderr)
+    print(file=sys.stderr)
     _step("purge complete", detail=mode_label)
 
 
