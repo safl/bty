@@ -9,6 +9,26 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.55.11] - 2026-06-18
+
+### Fixed
+
+- **Auto-flash milestone markers no longer scramble the on-screen
+  Rich progress bar**. `bty-on-tty1.service` routes
+  `StandardError=tty` to `/dev/tty1`, so the v0.55.5 milestone
+  emitter's `print(..., file=sys.stderr)` injected raw
+  `bty: download NN%` lines into the same TTY Rich was painting
+  on; each line shifted the cursor and stacked a duplicate
+  `writing` / `downloading` bar pair below. The milestone path
+  now writes only to `/dev/kmsg`, which still fans out via
+  `printk` to every registered serial console (SoL / IPMI
+  observers keep their 25/50/75/100% heartbeats, the local
+  HDMI operator sees a single clean progress bar). Lifecycle
+  bookends (`bty: entered`, `bty: exiting`,
+  `bty: auto-flash starting`, `bty: flash complete; rebooting`)
+  still write to all three sinks: they fire outside the Rich
+  Live context and SHOULD appear on the local tty.
+
 ## [0.55.10] - 2026-06-18
 
 ### Changed

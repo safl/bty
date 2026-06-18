@@ -618,14 +618,23 @@ def test_emit_console_marker_writes_to_stderr_and_swallows_console_failure(
 
 
 def test_milestone_emitter_fires_each_threshold_once_in_order(
-    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """``_MilestoneEmitter`` is the SoL-friendly progress heartbeat. It
     must emit ``bty: <stage> NN%`` lines on 25/50/75/100 crossings, at
-    most once per crossing, in increasing order. This is what an
+    most once per crossing, in increasing order, and it must pass
+    ``local_tty=False`` so the line lands on /dev/kmsg but does NOT
+    scramble the Rich progress bar painted on /dev/tty1 (the same TTY
+    stderr resolves to under bty-on-tty1.service). This is what an
     operator watching IPMI SoL during an auto-flash actually sees
     between the ``starting`` and ``complete`` bookends.
     """
+    calls: list[tuple[str, bool]] = []
+    monkeypatch.setattr(
+        tui_app,
+        "_emit_console_marker",
+        lambda line, *, local_tty=True: calls.append((line, local_tty)),
+    )
     em = tui_app._MilestoneEmitter("write")
     # Cross a couple of thresholds at once (a real flash can emit
     # tens of MiB between progress events when the write is fast).
@@ -633,43 +642,64 @@ def test_milestone_emitter_fires_each_threshold_once_in_order(
     em.update(60, 100)  # 60% -> fires 50
     em.update(80, 100)  # 80% -> fires 75
     em.update(100, 100)  # 100% -> fires 100
-    err = capsys.readouterr().err
-    lines = [line for line in err.splitlines() if line.startswith("bty: write")]
-    assert lines == [
-        "bty: write 25%",
-        "bty: write 50%",
-        "bty: write 75%",
-        "bty: write 100%",
+    assert calls == [
+        ("bty: write 25%", False),
+        ("bty: write 50%", False),
+        ("bty: write 75%", False),
+        ("bty: write 100%", False),
     ]
 
 
 def test_milestone_emitter_skips_when_total_unknown(
-    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Some write paths can't pre-compute the decompressed total
     (gzip-without-trailer-trust, qcow2 with sparse virtual size).
     The emitter must silently no-op rather than divide-by-zero or
     emit bogus percentages."""
+    calls: list[str] = []
+    monkeypatch.setattr(
+        tui_app,
+        "_emit_console_marker",
+        lambda line, **_kw: calls.append(line),
+    )
     em = tui_app._MilestoneEmitter("download")
     em.update(1024, None)
     em.update(1024, 0)
     em.update(1024, -1)
-    err = capsys.readouterr().err
-    assert "bty: download" not in err
+    assert calls == []
 
 
 def test_milestone_emitter_jumping_past_threshold_still_fires_all(
-    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A single fast-path event can jump from 0% to 60% (the dd
     progress thread fires at ~1Hz; a fast NVMe target writes hundreds
     of MiB between two events). The emitter still fires 25 AND 50 in
     order, not just the highest threshold crossed."""
+    calls: list[str] = []
+    monkeypatch.setattr(
+        tui_app,
+        "_emit_console_marker",
+        lambda line, **_kw: calls.append(line),
+    )
     em = tui_app._MilestoneEmitter("download")
     em.update(60, 100)  # crosses both 25 and 50
-    err = capsys.readouterr().err
-    lines = [line for line in err.splitlines() if line.startswith("bty: download")]
-    assert lines == ["bty: download 25%", "bty: download 50%"]
+    assert calls == ["bty: download 25%", "bty: download 50%"]
+
+
+def test_emit_console_marker_local_tty_false_skips_stderr(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The ``local_tty=False`` kwarg is the screen-corruption fix for
+    in-flash milestone markers. With it set, the line must NOT land
+    on stderr (which bty-on-tty1.service routes to /dev/tty1, the
+    same TTY Rich is painting the progress bar on); the /dev/kmsg
+    write is still attempted so SoL / IPMI observers keep their
+    heartbeats."""
+    tui_app._emit_console_marker("bty: download 25%", local_tty=False)
+    captured = capsys.readouterr()
+    assert "bty: download 25%" not in captured.err
 
 
 # --------------------------------------------------------------------------
