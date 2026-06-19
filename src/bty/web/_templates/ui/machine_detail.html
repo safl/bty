@@ -21,6 +21,7 @@
 </nav>
 {% endblock %}
 
+{% from "ui/_table_macros.html" import copy_chip with context %}
 {% block content %}
 <nav aria-label="breadcrumb">
     <ol class="breadcrumb">
@@ -31,7 +32,14 @@
 
 <div class="card mb-4" id="machine-identity">
     <div class="card-header bg-light fw-semibold">
-        <i class="bi bi-pc-display me-1"></i><code>{{ m.mac }}</code>{% if m.hostname %}
+        <i class="bi bi-pc-display me-1"></i><code>{{ m.mac }}</code>
+        <button type="button"
+                class="btn btn-sm btn-link p-0 align-baseline bty-copy text-muted"
+                data-copy="{{ m.mac }}"
+                title="Click to copy {{ m.mac }} to the clipboard.">
+            <i class="bi bi-clipboard"></i>
+        </button>
+        {% if m.hostname %}
         <span class="fw-normal text-muted ms-2">{{ m.hostname }}</span>{% endif %}
     </div>
     <div class="card-body">
@@ -44,7 +52,9 @@
                    title="View in the image catalog">{{ bound.name }}</a>
                 <span class="text-muted">({{ bound.format or "?" }}{% if bound.size_bytes %}, {{ bound.size_bytes | filesizeformat(true) }}{% endif %})</span>
                 {% elif m.bty_image_ref %}
-                <span class="text-muted">ref {{ m.bty_image_ref[:12] }}... (no catalog entry)</span>
+                <span class="text-muted">ref</span>
+                {{ copy_chip(m.bty_image_ref, shown=m.bty_image_ref[:12] ~ '...') }}
+                <span class="text-muted">(no catalog entry)</span>
                 {% else %}
                 <span class="text-muted">none (boots from the local disk)</span>
                 {% endif %}

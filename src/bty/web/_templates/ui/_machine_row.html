@@ -1,13 +1,20 @@
+{% from "ui/_table_macros.html" import copy_chip with context %}
 <tr id="row-{{ m.mac|replace(':', '-') }}">
     <td>
         <a href="/ui/machines/{{ m.mac }}" class="text-decoration-none">
             <code>{{ m.mac }}</code>
         </a>
+        <button type="button"
+                class="btn btn-sm btn-link p-0 align-baseline bty-copy text-muted"
+                data-copy="{{ m.mac }}"
+                title="Click to copy {{ m.mac }} to the clipboard.">
+            <i class="bi bi-clipboard"></i>
+        </button>
     </td>
     <td>
         {% if m.bty_image_ref %}
         <i class="bi bi-disc text-secondary me-1"></i>
-        <code title="{{ m.bty_image_ref }}">{{ m.bty_image_ref[:12] }}...</code>
+        {{ copy_chip(m.bty_image_ref, shown=m.bty_image_ref[:12] ~ '...') }}
         {% else %}
         <span class="badge bg-warning text-dark"><i class="bi bi-question-circle me-1"></i>discovered</span>
         {% endif %}
