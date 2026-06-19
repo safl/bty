@@ -108,6 +108,12 @@ def register_ui_routes(
         # them.
         ctx.setdefault("build_query_string", _table_state.build_query_string)
         ctx.setdefault("per_page_choices", _table_state.PER_PAGE_CHOICES)
+        # Cap of the embedded "Last N Events" card. Single source of
+        # truth in ``_events_log.RECENT_EVENTS_LIMIT``; reaching the
+        # value from the template lets the card title and the SQL
+        # ``limit=`` stay in lockstep (change the constant -> both
+        # update).
+        ctx.setdefault("recent_events_limit", _events_log.RECENT_EVENTS_LIMIT)
         template = jinja.get_template(name)
         return HTMLResponse(template.render(**ctx))
 
@@ -230,7 +236,7 @@ def register_ui_routes(
             # styling matches the per-machine and per-image cards;
             # the dashboard renders at request time only (no SSE
             # update) so a reload is the refresh gesture.
-            recent_events = _events_log.list_events(conn, limit=10)
+            recent_events = _events_log.list_events(conn, limit=_events_log.RECENT_EVENTS_LIMIT)
         # Health Monitoring: the conditions that must hold for PXE +
         # flash to work, plus an error-events tripwire. One glance at
         # "is this server ready to do its job", each row deep-
@@ -445,7 +451,9 @@ def register_ui_routes(
             ).fetchall()
             # Recent machine activity (discoveries, flashes, inventory
             # posts) for the page's "Activity" table.
-            machine_events = _events_log.list_events(conn, subject_kind="machine", limit=10)
+            machine_events = _events_log.list_events(
+                conn, subject_kind="machine", limit=_events_log.RECENT_EVENTS_LIMIT
+            )
         machines = [_row_to_dict(r) for r in rows]
         # v0.32.4: ``?deleted=<mac>`` / ``?missing=<mac>`` carried over
         # from ``POST /ui/machines/{mac}/delete`` so the operator gets a
@@ -807,7 +815,9 @@ def register_ui_routes(
         catalog_manifest_path = str(_config.cfg().catalog_file)
         with _db.open_db(state_path) as conn:
             catalog_url = _settings_store.resolve_catalog_url(conn)
-            image_events = _events_log.list_events(conn, subject_kind="catalog", limit=10)
+            image_events = _events_log.list_events(
+                conn, subject_kind="catalog", limit=_events_log.RECENT_EVENTS_LIMIT
+            )
 
         # ``?q=<text>`` is a substring filter across the name, format,
         # arch, and ref so an operator typing "freebsd" sees only the
@@ -901,7 +911,9 @@ def register_ui_routes(
             backup_cadence = _settings_store.resolve_backup_cadence(conn)
             backup_retention = _settings_store.resolve_backup_retention(conn)
             backup_last_run_at = _settings_store.get_backup_last_run_at(conn)
-            backup_events = _events_log.list_events(conn, subject_kind="backup", limit=10)
+            backup_events = _events_log.list_events(
+                conn, subject_kind="backup", limit=_events_log.RECENT_EVENTS_LIMIT
+            )
         backups_on_disk = _backup.list_backups_on_disk(backups_root)
         return render(
             "ui/backups.html",
@@ -1329,7 +1341,9 @@ def register_ui_routes(
             netboot_repo = _settings_store.resolve_netboot_repo(conn)
             netboot_tag = _settings_store.resolve_netboot_tag(conn)
             # Recent netboot activity for the page's "Activity" table.
-            boot_events = _events_log.list_events(conn, subject_kind="netboot", limit=10)
+            boot_events = _events_log.list_events(
+                conn, subject_kind="netboot", limit=_events_log.RECENT_EVENTS_LIMIT
+            )
         return render(
             "ui/netboot.html",
             request,

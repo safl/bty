@@ -222,6 +222,13 @@ def record(
     return int(cur.lastrowid or 0)
 
 
+RECENT_EVENTS_LIMIT = 10
+"""How many rows the embedded "Last N Events" card on each page
+renders. Shared so the handler ``limit=`` and the Jinja card
+title (rendered as ``Last {{ recent_events_limit }} Events``)
+stay in sync; bump this in one place to change everywhere."""
+
+
 def _q_predicate(q: str) -> tuple[str, list[Any]]:
     """SQL fragment + args matching the free-text events search.
 

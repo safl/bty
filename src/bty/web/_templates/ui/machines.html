@@ -170,7 +170,7 @@
    "Activity" sub-nav anchor jumps here; always rendered (empty-state
    row when there's nothing yet). #}
 {% with events=machine_events,
-        title="Last 10 Events",
+        title="Last " + recent_events_limit|string + " Events",
         link_to_full="/ui/events?q=machine",
         card_id="machines-activity" %}
 {% include "ui/_events_card.html" %}

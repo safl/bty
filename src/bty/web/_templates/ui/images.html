@@ -330,7 +330,7 @@
 
 {# Catalog event slice (entry adds / deletes / imports). #}
 {% with events=image_events,
-        title="Last 10 Events",
+        title="Last " + recent_events_limit|string + " Events",
         link_to_full="/ui/events?q=catalog",
         card_id="images-activity" %}
 {% include "ui/_events_card.html" %}
