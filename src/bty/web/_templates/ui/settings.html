@@ -19,8 +19,6 @@
             <span class="vr"></span>
             <a href="#settings-network">Network</a>
             <span class="vr"></span>
-            <a href="#settings-background-workers">Background workers</a>
-            <span class="vr"></span>
             <a href="#dhcp-pxe">DHCP / Network boot</a>
         </span>
     </div>
@@ -50,55 +48,13 @@
    way to associate fields with a non-ancestor form. Submitting
    from EITHER card saves all three fields in one round-trip. #}
 <form method="post" action="/ui/settings/upstream" id="upstream-form"></form>
-<div class="row g-3 mb-3">
-<div class="col-md-6">
-<div class="card h-100" id="netboot-release">
-    <div class="card-header bg-light fw-semibold">
-        <i class="bi bi-hdd-network me-1"></i>Netboot release
-    </div>
-    <div class="card-body">
-        <p class="small text-muted mb-3">
-            The GitHub release that the <em>Fetch artifacts</em>
-            button on the <a href="/ui/netboot">Netboot</a> page pulls
-            <code>vmlinuz</code>, <code>initrd</code>, and
-            <code>squashfs</code> from. Repo + tag are independent so
-            an operator can pin netboot to a known-good release while
-            the catalog rolls forward.
-        </p>
-        <div class="mb-3">
-            <label for="netboot_repo" class="form-label">Netboot repo</label>
-            <input type="text" class="form-control font-monospace" id="netboot_repo"
-                   name="netboot_repo" placeholder="{{ upstream.netboot_repo_default }}"
-                   value="{{ upstream.netboot_repo_override or '' }}"
-                   form="upstream-form">
-            <div class="form-text small">
-                GitHub <code>owner/repo</code>. Effective:
-                <code>{{ upstream.netboot_repo }}</code>{% if not upstream.netboot_repo_override %}
-                (default; leave blank to keep){% endif %}.
-            </div>
-        </div>
-        <div class="mb-3">
-            <label for="netboot_tag" class="form-label">Netboot release tag</label>
-            <input type="text" class="form-control font-monospace" id="netboot_tag"
-                   name="netboot_tag" placeholder="{{ upstream.netboot_tag_default }}"
-                   value="{{ upstream.netboot_tag_override or '' }}"
-                   form="upstream-form">
-            <div class="form-text small">
-                <code>latest</code> or a tag like <code>v0.23.0</code>.
-                Effective:
-                <code>{{ upstream.netboot_tag }}</code>{% if not upstream.netboot_tag_override %}
-                (default; leave blank to keep){% endif %}.
-            </div>
-        </div>
-        <button type="submit" class="btn btn-primary" form="upstream-form">
-            <i class="bi bi-save me-1"></i>Save
-        </button>
-        <span class="form-text small ms-2">Clear a field to revert.</span>
-    </div>
-</div>
-</div>{# /col netboot-release #}
 
-<div class="col-md-6">
+{# Row 1: Catalog spans full width. The card carries an
+   explanatory callout about the dual-flavour nosi catalog model
+   plus the single URL input, so giving it full width keeps the
+   call-out readable on wide screens. #}
+<div class="row g-3 mb-3">
+<div class="col-12">
 <div class="card h-100" id="catalog-source">
     <div class="card-header bg-light fw-semibold">
         <i class="bi bi-collection me-1"></i>Catalog
@@ -157,6 +113,56 @@
     </div>
 </div>
 </div>{# /col catalog-source #}
+</div>{# /row catalog #}
+
+{# Row 2: Netboot release + Backup schedule side-by-side. #}
+<div class="row g-3 mb-3">
+<div class="col-md-6">
+<div class="card h-100" id="netboot-release">
+    <div class="card-header bg-light fw-semibold">
+        <i class="bi bi-hdd-network me-1"></i>Netboot release
+    </div>
+    <div class="card-body">
+        <p class="small text-muted mb-3">
+            The GitHub release that the <em>Fetch artifacts</em>
+            button on the <a href="/ui/netboot">Netboot</a> page pulls
+            <code>vmlinuz</code>, <code>initrd</code>, and
+            <code>squashfs</code> from. Repo + tag are independent so
+            an operator can pin netboot to a known-good release while
+            the catalog rolls forward.
+        </p>
+        <div class="mb-3">
+            <label for="netboot_repo" class="form-label">Netboot repo</label>
+            <input type="text" class="form-control font-monospace" id="netboot_repo"
+                   name="netboot_repo" placeholder="{{ upstream.netboot_repo_default }}"
+                   value="{{ upstream.netboot_repo_override or '' }}"
+                   form="upstream-form">
+            <div class="form-text small">
+                GitHub <code>owner/repo</code>. Effective:
+                <code>{{ upstream.netboot_repo }}</code>{% if not upstream.netboot_repo_override %}
+                (default; leave blank to keep){% endif %}.
+            </div>
+        </div>
+        <div class="mb-3">
+            <label for="netboot_tag" class="form-label">Netboot release tag</label>
+            <input type="text" class="form-control font-monospace" id="netboot_tag"
+                   name="netboot_tag" placeholder="{{ upstream.netboot_tag_default }}"
+                   value="{{ upstream.netboot_tag_override or '' }}"
+                   form="upstream-form">
+            <div class="form-text small">
+                <code>latest</code> or a tag like <code>v0.23.0</code>.
+                Effective:
+                <code>{{ upstream.netboot_tag }}</code>{% if not upstream.netboot_tag_override %}
+                (default; leave blank to keep){% endif %}.
+            </div>
+        </div>
+        <button type="submit" class="btn btn-primary" form="upstream-form">
+            <i class="bi bi-save me-1"></i>Save
+        </button>
+        <span class="form-text small ms-2">Clear a field to revert.</span>
+    </div>
+</div>
+</div>{# /col netboot-release #}
 
 <div class="col-md-6">
 {# Editable: scheduled backup knobs. ``enabled`` + ``cadence`` +
@@ -236,7 +242,7 @@
     </div>
 </div>
 </div>{# /col backup-schedule #}
-</div>{# /row netboot + catalog + backup #}
+</div>{# /row netboot + backup #}
 
 {# Four-up row of the config groups (Identity / Storage / Network /
    Background workers). Each card uses a compact list-group layout
@@ -254,7 +260,7 @@
    keep the read-only shape. #}
 <div class="row g-3 mb-3">
 {% for group in config_groups %}
-<div class="col-md-6 col-lg-3">
+<div class="col-md-6 col-lg-4">
 <div class="card h-100" id="settings-{{ group.title|lower|replace(' ', '-') }}">
     <div class="card-header bg-light fw-semibold">
         <i class="bi bi-{{ group.icon }} me-1"></i>{{ group.title }}
@@ -364,7 +370,7 @@
         {% endif %}
 
         <h3 class="h6 mt-3">This host</h3>
-        <table class="table table-sm mb-3">
+        <table class="table table-striped table-sm mb-3">
             <thead class="table-light">
                 <tr>
                     <th scope="col">Interface</th>
@@ -410,7 +416,7 @@
             Legacy BIOS and UEFI PXE. The firmware TFTPs the iPXE binary
             from this host, then iPXE chains on over HTTP.
         </p>
-        <table class="table table-sm">
+        <table class="table table-striped table-sm">
             <thead class="table-light">
                 <tr>
                     <th scope="col">Option</th>
@@ -450,7 +456,7 @@
             these instead of the PXE options above. Everything after iPXE
             loads is identical to the PXE flow.
         </p>
-        <table class="table table-sm">
+        <table class="table table-striped table-sm">
             <thead class="table-light">
                 <tr>
                     <th scope="col">Option</th>

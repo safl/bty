@@ -1648,18 +1648,6 @@ def register_ui_routes(
                     ),
                 ],
             },
-            {
-                "title": "Background workers",
-                "icon": "cpu",
-                "rows": [
-                    _config_row(
-                        "Release-fetch user agent",
-                        _releases.DEFAULT_USER_AGENT,
-                        None,
-                        "bty-web release-fetcher",
-                    ),
-                ],
-            },
         ]
         # Network context for the DHCP / PXE cheatsheet (moved here from
         # the Netboot page): the server's interfaces + the address the

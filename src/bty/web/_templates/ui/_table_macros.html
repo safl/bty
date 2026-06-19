@@ -6,6 +6,34 @@
    other query param via ``preserved`` so an active filter survives
    a click on a column header. #}
 
+{# Copy-to-clipboard chip.
+
+   - ``value``: the full string to copy (sha256, MAC, image-ref, URL, ...).
+   - ``shown`` (optional): the truncated text rendered inside ``<code>``.
+     Defaults to the first 8 chars of ``value`` (matches the existing
+     sha256 short-hash convention). Pass ``shown=value`` to render the
+     full string.
+   - ``title`` (optional): tooltip override; defaults to
+     ``Click to copy {full-value} to the clipboard.``.
+
+   The click handler lives in ``bty-utils.js`` and binds via
+   event-delegation so a freshly-swapped DOM node (htmx / SSE)
+   needs no re-bind. The icon pulses to a check mark on success. #}
+{% macro copy_chip(value, shown=None, title=None) %}
+  {% if value %}
+    {% set _label = shown if shown is not none else value[:8] %}
+    {% set _title = title or ("Click to copy " ~ value ~ " to the clipboard.") %}
+    <button type="button"
+            class="btn btn-sm btn-link p-0 align-baseline bty-copy text-decoration-none"
+            data-copy="{{ value }}"
+            title="{{ _title }}">
+      <code>{{ _label }}</code><i class="bi bi-clipboard ms-1"></i>
+    </button>
+  {% else %}
+    <span class="text-muted small">-</span>
+  {% endif %}
+{% endmacro %}
+
 {# Sortable column header.
 
    - ``label``: human text shown in the header cell.
