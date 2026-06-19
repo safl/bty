@@ -105,13 +105,35 @@
     </div>
     <div class="card-body">
         <p class="small text-muted mb-3">
-            The single URL that the <em>Fetch latest catalog</em>
-            button on the <a href="/ui/images">Images</a> page GETs.
-            Bytes at that URL must parse as a
-            <code>catalog.toml</code>; the rows are imported into the
-            local catalog table. To point at a fork or a private
-            catalog server, just edit the URL.
+            The single URL that the <em>Fetch catalog</em> button
+            on the <a href="/ui/images">Images</a> page GETs. Bytes
+            at that URL must parse as a <code>catalog.toml</code>;
+            the rows are imported into the local catalog table.
+            To point at a fork or a private catalog server, just
+            edit the URL.
         </p>
+        <div class="alert alert-info py-2 px-3 small mb-3" role="note">
+            <strong>The default catalog URL says <code>latest</code>,
+            but the image refs inside are pinned to a specific
+            ISO-week tag</strong> (e.g. <code>:2026.W25</code>). nosi
+            publishes two catalog flavours per release and the bty
+            default fetches the pinned one:
+            <ul class="mb-0 mt-1">
+                <li><code>catalog.toml</code> (<strong>default</strong>):
+                    image refs are pinned to that release's
+                    ISO-week tag, so bty re-fetches the same bytes
+                    every flash for as long as the week-tag exists
+                    on ghcr. The URL itself rolls forward each
+                    week.</li>
+                <li><code>catalog-latest.toml</code>: image refs
+                    point at the rolling <code>:latest</code> tag
+                    on ghcr; bty flashes whatever ghcr currently
+                    serves. Swap the URL suffix to opt in.</li>
+            </ul>
+            To pin to a specific past release, use
+            <code>/releases/download/&lt;tag&gt;/catalog.toml</code>
+            instead of <code>/releases/latest/...</code>.
+        </div>
         <div class="mb-3">
             <label for="catalog_url" class="form-label">Catalog URL</label>
             <input type="url" class="form-control font-monospace" id="catalog_url"
