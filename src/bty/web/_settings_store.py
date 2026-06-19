@@ -44,20 +44,22 @@ KEY_CATALOG_URL = "upstream.catalog_url"
 # ``latest`` to the most recent non-prerelease, non-draft tag.
 DEFAULT_TAG = "latest"
 
-# Default URL the "Fetch catalog" button pulls bytes from. Points at
-# nosi's auto-generated catalog asset on the latest release.
+# Default URL the "Fetch catalog" button pulls bytes from.
 #
-# nosi publishes two catalog files per release: ``catalog.toml`` is
-# pinned to that release's ISO-week tag (refs like
-# ``oras://...:2026.W25``) and ``catalog-latest.toml`` carries refs
-# as ``:latest``. The bty default URL fetches the pinned variant:
-# the URL itself rolls forward each week (so the operator gets the
-# newest images without maintaining a pin), and once fetched the
-# catalog rows reference frozen W-tag bytes so a flash is
-# reproducible until the next refetch. The Settings card explains
-# the trade-off so an operator who wants the rolling-:latest
-# variant knows to swap the URL suffix.
-DEFAULT_CATALOG_URL = "https://github.com/safl/nosi/releases/latest/download/catalog.toml"
+# Pinned to a specific nosi release: the URL carries an explicit
+# ISO-week tag rather than ``/latest/``. The bty version this
+# default ships with permanently encodes which catalog week it
+# was built against, so two operators running the same bty
+# version get byte-identical catalog content. Upgrading bty (or
+# editing the URL in Settings) is the only way to roll the
+# catalog forward; ``/latest/`` would silently roll under the
+# operator's feet, which we no longer do for the default.
+#
+# Bump this URL whenever the bty version bumps. The pinned week
+# is chosen at bty release time (typically the current
+# ``date -u +'%G.W%V'``); the nosi release for that week is what
+# the bty release was tested against.
+DEFAULT_CATALOG_URL = "https://github.com/safl/nosi/releases/download/2026.W25/catalog.toml"
 
 # Optional withcache cache-host. When set, bty prefers it as the image
 # *source* for artifacts it already holds (else serves the artifact as

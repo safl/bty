@@ -2677,18 +2677,18 @@ def test_events_filter_by_subject_id(app_client: TestClient) -> None:
 
 
 def test_ui_events_page_renders(app_client: TestClient) -> None:
-    """The /ui/events page renders without 500-ing. Filter the view
-    down to a kind that has no rows yet to exercise the empty-state
-    'no events match' branch (auto-import emits ``image.hashed`` so
-    the unfiltered list isn't empty)."""
-    r = app_client.get("/ui/events", params={"kind": "machine.deleted"}, cookies=AUTH)
+    """The /ui/events page renders without 500-ing. Search for a
+    string that has no rows yet to exercise the empty-state
+    branch (auto-import emits ``image.hashed`` so the unfiltered
+    list isn't empty)."""
+    r = app_client.get("/ui/events", params={"q": "machine.deleted"}, cookies=AUTH)
     assert r.status_code == 200
     body = r.text
-    # Title + filter form land in the markup.
+    # Title + search input land in the markup.
     assert "Event log" in body
     assert "/ui/events" in body
-    # Empty-state alert.
-    assert "No events match" in body
+    # Inline-pagination empty-state text.
+    assert "No events." in body
 
 
 def test_ui_events_page_renders_filtered(app_client: TestClient) -> None:
@@ -2696,7 +2696,7 @@ def test_ui_events_page_renders_filtered(app_client: TestClient) -> None:
     app_client.get("/pxe/aa:bb:cc:dd:ee:ff")
     r = app_client.get(
         "/ui/events",
-        params={"kind": "machine.discovered"},
+        params={"q": "machine.discovered"},
         cookies=AUTH,
     )
     assert r.status_code == 200
@@ -2705,31 +2705,27 @@ def test_ui_events_page_renders_filtered(app_client: TestClient) -> None:
     assert "aa:bb:cc:dd:ee:ff" in body
 
 
-def test_ui_events_page_footer_shows_filtered_when_filter_active(
+def test_ui_events_page_search_narrows_results(
     app_client: TestClient,
 ) -> None:
-    """When any filter param is active the footer appends
-    ``(filtered)`` so the operator can tell whether ``Showing N
-    events`` is the full set or a slice. Important on long
-    timelines where a small N is ambiguous without context."""
-    # Trigger both an operator event and a pxe-client event so each
-    # filtered slice has at least one row (the footer only renders
-    # when ``events`` is truthy).
+    """The single ``?q=`` substring search is the only filter on
+    /ui/events after the v0.57 simplification. Typing an actor /
+    kind / IP / subject substring narrows the table; clearing the
+    search restores the full view."""
     app_client.get("/pxe/aa:bb:cc:dd:ee:f9")
     app_client.put(
         "/machines/aa:bb:cc:dd:ee:f9",
         json={"boot_mode": "ipxe-exit"},
         cookies=AUTH,
     )
-    # Unfiltered view: no "(filtered)" suffix.
-    r = app_client.get("/ui/events", cookies=AUTH)
-    assert "Showing" in r.text
-    assert "(filtered)" not in r.text
-    # Filtered view: suffix appears.
-    r = app_client.get("/ui/events", params={"actor": "operator"}, cookies=AUTH)
-    body = r.text
-    assert "Showing" in body
-    assert "(filtered)" in body
+    # Unfiltered view: rows exist; the inline-pagination total line
+    # shows the full count (no "of <N> events" prefix tied to a
+    # filter).
+    full = app_client.get("/ui/events", cookies=AUTH).text
+    assert "aa:bb:cc:dd:ee:f9" in full
+    # Search by actor: only operator-recorded rows match.
+    filtered = app_client.get("/ui/events", params={"q": "operator"}, cookies=AUTH).text
+    assert "operator" in filtered
 
 
 def test_ui_events_page_renders_failure_with_danger_badge(
@@ -2758,7 +2754,7 @@ def test_ui_events_page_renders_failure_with_danger_badge(
     )
     r = app_client.get(
         "/ui/events",
-        params={"kind": "netboot.artifacts.fetch.failed"},
+        params={"q": "netboot.artifacts.fetch.failed"},
         cookies=AUTH,
     )
     assert r.status_code == 200
@@ -2770,8 +2766,10 @@ def test_ui_events_page_renders_failure_with_danger_badge(
 
 def test_ui_events_page_shows_source_ip_column(app_client: TestClient) -> None:
     """The ``Source IP`` column is in the table header and populated
-    cells render as click-pivot links to ``/ui/events?source_ip=...``
-    so the operator can drill into a single client's activity."""
+    cells render as click-pivot links to ``/ui/events?q=<ip>`` so
+    the operator can drill into a single client's activity. Post-
+    v0.57 the click-pivot uses the unified ``?q=`` substring
+    search (was ``?source_ip=``)."""
     app_client.get("/pxe/aa:bb:cc:dd:ee:fc")
     r = app_client.get("/ui/events", cookies=AUTH)
     assert r.status_code == 200
@@ -2779,7 +2777,7 @@ def test_ui_events_page_shows_source_ip_column(app_client: TestClient) -> None:
     # Column header.
     assert "Source IP" in body
     # Click-pivot link with the test client's host.
-    assert "/ui/events?source_ip=testclient" in body
+    assert "/ui/events?q=testclient" in body
 
 
 # ---------- /boot and /images file serving --------------------

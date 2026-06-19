@@ -96,7 +96,7 @@
    Static at request time (reload to refresh); the live SSE
    stream is wired to the counters above, not here. #}
 {% with events=recent_events,
-        title="Recent Events",
+        title="Last 10 Events",
         link_to_full="/ui/events",
         card_id="dash-activity" %}
 {% include "ui/_events_card.html" %}

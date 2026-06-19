@@ -52,7 +52,7 @@
             <dt class="col-sm-3">Discovered</dt>
             <dd class="col-sm-9" title="{{ m.discovered_at }}">{{ m.discovered_at | fmt_ts if m.discovered_at else "-" }}</dd>
             <dt class="col-sm-3">Last seen</dt>
-            <dd class="col-sm-9"><span title="{{ m.last_seen_at }}">{{ m.last_seen_at | fmt_ts if m.last_seen_at else "-" }}</span>{% if m.last_seen_ip %} from <a class="text-decoration-none" href="/ui/events?source_ip={{ m.last_seen_ip|urlencode }}" title="Show every event from this IP"><code>{{ m.last_seen_ip }}</code></a>{% endif %}</dd>
+            <dd class="col-sm-9"><span title="{{ m.last_seen_at }}">{{ m.last_seen_at | fmt_ts if m.last_seen_at else "-" }}</span>{% if m.last_seen_ip %} from <a class="text-decoration-none" href="/ui/events?q={{ m.last_seen_ip|urlencode }}" title="Show every event from this IP"><code>{{ m.last_seen_ip }}</code></a>{% endif %}</dd>
             <dt class="col-sm-3">Last flashed</dt>
             <dd class="col-sm-9" title="{{ m.last_flashed_at }}">{{ m.last_flashed_at | fmt_ts if m.last_flashed_at else "-" }}</dd>
             <dt class="col-sm-3">Created</dt>
@@ -333,9 +333,9 @@
    ``subject_id=this MAC`` server-side; the link forwards the
    same filter to /ui/events for drill-down. #}
 {% with events=machine_events,
-        title="Recent Events",
+        title="Last 10 Events",
         card_id="machine-activity",
-        link_to_full="/ui/events?subject_kind=machine&subject_id=" + m.mac %}
+        link_to_full="/ui/events?q=" + m.mac %}
 {% include "ui/_events_card.html" %}
 {% endwith %}
 {% endblock %}

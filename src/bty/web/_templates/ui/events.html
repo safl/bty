@@ -1,15 +1,12 @@
 {% extends "ui/_layout.html" %}
+{% from "ui/_table_macros.html" import pagination_inline with context %}
 {% block title %}Event log - bty-web{% endblock %}
 
 {% block subnav %}
-{# In-page jump links to the event list + the filter card, separated by
-   a vertical rule. #}
 <nav class="navbar subnav-strip" aria-label="Section sub-navigation">
     <div class="container">
         <span class="subnav-jumps d-flex align-items-center flex-wrap">
             <a href="#events-list">List</a>
-            <span class="vr"></span>
-            <a href="#events-filter">Filter</a>
         </span>
     </div>
 </nav>
@@ -20,104 +17,16 @@
 {% call intro_box() %}
     Append-only audit trail of operator + machine activity:
     PXE check-ins, image uploads, catalog edits, settings
-    changes, auth attempts. Filter by kind / subject / actor /
-    source IP via the form below. Newest first.
+    changes, auth attempts. Type a substring in the search box
+    to filter by kind, subject, actor, source IP, or summary
+    text. Newest first.
 {% endcall %}
 {% endblock %}
 
 {% block content %}
-<div class="card mb-3" id="events-filter">
-    <div class="card-header bg-light fw-semibold">
-        <i class="bi bi-funnel me-1"></i>Filter
-    </div>
-    <div class="card-body">
-        {# Filter form. GET so links stay shareable + back-button friendly. #}
-        <form method="get" action="/ui/events" class="row g-2 align-items-end">
-            <div class="col-md-2">
-                <label for="kind" class="form-label small mb-1">Kind</label>
-                <select name="kind" id="kind" class="form-select form-select-sm">
-                    <option value="" {% if not kind %}selected{% endif %}>(any)</option>
-                    {% for k in known_kinds %}
-                    <option value="{{ k }}" {% if k == kind %}selected{% endif %}>{{ k }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div class="col-md-2">
-                <label for="subject_kind" class="form-label small mb-1">Subject kind</label>
-                <select name="subject_kind" id="subject_kind" class="form-select form-select-sm">
-                    <option value="" {% if not subject_kind %}selected{% endif %}>(any)</option>
-                    {% for sk in known_subject_kinds %}
-                    <option value="{{ sk }}" {% if sk == subject_kind %}selected{% endif %}>{{ sk }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div class="col-md-2">
-                <label for="subject_id" class="form-label small mb-1">Subject id</label>
-                <input type="text" name="subject_id" id="subject_id"
-                       class="form-control form-control-sm"
-                       value="{{ subject_id or '' }}"
-                       placeholder="aa:bb:cc:dd:ee:ff">
-            </div>
-            <div class="col-md-2">
-                <label for="actor" class="form-label small mb-1">Actor</label>
-                <select name="actor" id="actor" class="form-select form-select-sm">
-                    <option value="" {% if not actor %}selected{% endif %}>(any)</option>
-                    {% for a in known_actors %}
-                    <option value="{{ a }}" {% if a == actor %}selected{% endif %}>{{ a }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div class="col-md-2">
-                <label for="source_ip" class="form-label small mb-1">Source IP</label>
-                <input type="text" name="source_ip" id="source_ip"
-                       class="form-control form-control-sm font-monospace"
-                       value="{{ source_ip or '' }}"
-                       placeholder="192.168.1.5">
-            </div>
-            <div class="col-md-2 d-flex gap-2">
-                <button type="submit" class="btn btn-sm btn-primary flex-grow-1"
-                        title="Filter" aria-label="Filter">
-                    <i class="bi bi-funnel"></i>
-                </button>
-                <a href="/ui/events" class="btn btn-sm btn-outline-secondary"
-                   title="Clear filters" aria-label="Clear filters">
-                    <i class="bi bi-x-lg"></i>
-                </a>
-            </div>
-            <div class="col-12">
-                <div class="form-check small">
-                    <input class="form-check-input" type="checkbox" name="failed" value="1"
-                           id="failed-only" {% if failed_only %}checked{% endif %}>
-                    <label class="form-check-label text-muted" for="failed-only">
-                        Failures only (any kind ending in <code>.failed</code> /
-                        <code>_failed</code>)
-                    </label>
-                </div>
-            </div>
-        </form>
-    </div>
-</div>
-
-{% if not events %}
-<div class="alert alert-light border" id="events-list">
-    <i class="bi bi-info-circle me-2"></i>
-    {% if kind or subject_kind or subject_id or actor or source_ip or failed_only %}
-    No events match the current filter.
-    <a href="/ui/events" class="ms-1">Clear filter</a>
-    to see all events.
-    {% else %}
-    The log is empty. Rows appear as machines check in, operators
-    make changes, and async-managers complete. If you've just
-    started bty-web, hit a few endpoints and refresh.
-    {% endif %}
-</div>
-{% else %}
-
 <div class="card" id="events-list">
     <div class="card-header bg-light fw-semibold d-flex justify-content-between align-items-center flex-wrap gap-2">
-        <span><i class="bi bi-list-ul me-1"></i>All Events</span>
-        {# Bulk action on the checked rows. "Action:" prefixes the two
-           buttons; both no-op (with a hint) if nothing is checked. #}
+        <span><i class="bi bi-list-ul me-1"></i>Events</span>
         <span class="d-flex align-items-center gap-2">
             <span class="text-muted small">Action:</span>
             <button type="button" class="btn btn-sm btn-outline-primary text-nowrap" id="bulk-ack"
@@ -129,6 +38,27 @@
                 <i class="bi bi-arrow-counterclockwise me-1"></i>Clear
             </button>
         </span>
+    </div>
+    {# Same toolbar shape as /ui/machines and /ui/images: one plain-
+       text search input + pagination, all in one row above the
+       table. The search does substring match across kind,
+       subject_kind, subject_id, actor, source_ip, and summary, so
+       every previously-dropdown pivot is reachable by typing the
+       value. #}
+    <div class="card-body py-2 border-bottom d-flex flex-wrap align-items-center gap-3">
+        <form method="get" class="d-flex align-items-center gap-2 m-0 flex-grow-1" style="min-width: 18rem;">
+            {% if page.per_page != per_page_choices[0] %}<input type="hidden" name="per_page" value="{{ page.per_page }}">{% endif %}
+            <input type="search" name="q" value="{{ q or '' }}"
+                   class="form-control form-control-sm" style="max-width: 28rem;"
+                   placeholder="Search kind / subject / actor / IP / summary (e.g. failed, machine, aa:bb:cc:dd:ee:ff)">
+            <button type="submit" class="btn btn-sm btn-outline-secondary">
+                <i class="bi bi-search me-1"></i>Search
+            </button>
+            {% if q %}
+            <a href="?" class="btn btn-sm btn-link">Clear</a>
+            {% endif %}
+        </form>
+        {{ pagination_inline(page, preserved, label='events') }}
     </div>
     <div class="table-responsive">
         <table class="table table-hover mb-0 align-middle">
@@ -193,7 +123,7 @@
                            subject so the operator can see
                            everything that touched it. #}
                         <a class="text-decoration-none"
-                           href="/ui/events?subject_kind={{ e.subject_kind|urlencode }}&amp;subject_id={{ e.subject_id|urlencode }}"
+                           href="/ui/events?q={{ e.subject_id|urlencode }}"
                            title="Filter by this {{ e.subject_kind }}">
                             <code>{{ e.subject_id }}</code>
                         </a>
@@ -207,7 +137,7 @@
                            rows with this actor (operator / system /
                            pxe-client). #}
                         <a class="text-decoration-none small"
-                           href="/ui/events?actor={{ e.actor|urlencode }}"
+                           href="/ui/events?q={{ e.actor|urlencode }}"
                            title="Filter by this actor">
                             {{ e.actor }}
                         </a>
@@ -221,7 +151,7 @@
                            down to this IP. Useful for "what else did
                            this workstation / target do?". #}
                         <a class="text-decoration-none"
-                           href="/ui/events?source_ip={{ e.source_ip|urlencode }}"
+                           href="/ui/events?q={{ e.source_ip|urlencode }}"
                            title="Filter by this IP">
                             <code class="small">{{ e.source_ip }}</code>
                         </a>
@@ -252,16 +182,6 @@
                 {% endfor %}
             </tbody>
         </table>
-    </div>
-    <div class="card-footer d-flex justify-content-between small">
-        <span class="text-muted">
-            Showing {{ events|length }} event{{ "s" if events|length != 1 else "" }}{% if kind or subject_kind or subject_id or actor or source_ip or failed_only %} (filtered){% endif %}.
-        </span>
-        {% if older_url %}
-        <a href="{{ older_url }}" class="text-decoration-none">
-            Older <i class="bi bi-arrow-right"></i>
-        </a>
-        {% endif %}
     </div>
 </div>
 
@@ -314,5 +234,4 @@
 })();
 </script>
 
-{% endif %}
 {% endblock %}

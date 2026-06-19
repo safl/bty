@@ -47,7 +47,6 @@ from bty.web import (
     _table_state,
 )
 from bty.web._auth import SESSION_AUTHED_KEY
-from bty.web._events_log import KNOWN_ACTORS, KNOWN_EVENT_KINDS, KNOWN_SUBJECT_KINDS
 from bty.web._models import (
     BOOT_MODES,
     DEFAULT_BOOT_MODE,
@@ -324,8 +323,8 @@ def register_ui_routes(
                     else f"{error_event_count} unacknowledged failure(s); "
                     "review and acknowledge to clear."
                 ),
-                "href": "/ui/events?failed=1",
-                "fix_href": "/ui/events?failed=1",
+                "href": "/ui/events?q=failed",
+                "fix_href": "/ui/events?q=failed",
                 "fix_label": "Review errors",
             },
             {
@@ -538,7 +537,7 @@ def register_ui_routes(
                 conn,
                 subject_kind="machine",
                 subject_id=normalised,
-                limit=20,
+                limit=10,
             )
         return render(
             "ui/machine_detail.html",
@@ -808,7 +807,7 @@ def register_ui_routes(
         catalog_manifest_path = str(_config.cfg().catalog_file)
         with _db.open_db(state_path) as conn:
             catalog_url = _settings_store.resolve_catalog_url(conn)
-            image_events = _events_log.list_events(conn, subject_kind="catalog", limit=15)
+            image_events = _events_log.list_events(conn, subject_kind="catalog", limit=10)
 
         # ``?q=<text>`` is a substring filter across the name, format,
         # arch, and ref so an operator typing "freebsd" sees only the
@@ -902,7 +901,7 @@ def register_ui_routes(
             backup_cadence = _settings_store.resolve_backup_cadence(conn)
             backup_retention = _settings_store.resolve_backup_retention(conn)
             backup_last_run_at = _settings_store.get_backup_last_run_at(conn)
-            backup_events = _events_log.list_events(conn, subject_kind="backup", limit=15)
+            backup_events = _events_log.list_events(conn, subject_kind="backup", limit=10)
         backups_on_disk = _backup.list_backups_on_disk(backups_root)
         return render(
             "ui/backups.html",
@@ -1378,81 +1377,42 @@ def register_ui_routes(
         include_in_schema=False,
         dependencies=[Depends(require_ui_auth)],
     )
-    def ui_events(
-        request: Request,
-        kind: str | None = None,
-        subject_kind: str | None = None,
-        subject_id: str | None = None,
-        actor: str | None = None,
-        source_ip: str | None = None,
-        failed: str | None = None,
-        before_id: int | None = None,
-    ) -> HTMLResponse:
+    def ui_events(request: Request) -> HTMLResponse:
         """Event log page.
 
-        Cursor pagination: each page shows ``_PAGE_SIZE`` rows;
-        the "Older" link carries ``before_id`` = the smallest id
-        on the current page so the next page picks up where this
-        one ended. New events arriving while the operator pages
-        through don't disturb the cursor (they get id values
-        higher than the cursor and would only appear on page 1).
-
-        Empty filter values come in as empty strings from the form;
-        normalise them to ``None`` so the SQL builder skips the
-        clause.
+        Single ``?q=<text>`` substring search across the columns
+        an operator typically pivots on (kind, subject_kind,
+        subject_id, actor, source_ip, summary), plus the same
+        ``?page=`` + ``?per_page=`` offset pagination as
+        /ui/machines and /ui/images. The earlier multi-dropdown
+        filter form was retired in v0.57: the single search input
+        is the same shape across all three event-style pages and
+        every previously-dropdown selector (kind, actor, subject)
+        is reachable by typing a substring.
         """
-        page_size = 50
-        kind_norm = kind or None
-        subject_kind_norm = subject_kind or None
-        subject_id_norm = subject_id or None
-        actor_norm = actor or None
-        source_ip_norm = source_ip or None
-        # ``?failed=1`` is the cross-kind "show me all failures"
-        # toggle. Anything truthy enables it; absent / empty
-        # leaves it off.
-        failed_only = bool(failed)
+        q_raw = request.query_params.get("q") or ""
+        q_norm = q_raw.strip()
         with _db.open_db(state_path) as conn:
-            events = _events_log.list_events(
-                conn,
-                kind=kind_norm,
-                subject_kind=subject_kind_norm,
-                subject_id=subject_id_norm,
-                actor=actor_norm,
-                source_ip=source_ip_norm,
-                failed_only=failed_only,
-                before_id=before_id,
-                limit=page_size,
+            total = _events_log.count_events(conn, q=q_norm)
+            page_state = _table_state.parse_pagination(request.query_params, total=total)
+            events = _events_log.search_events(
+                conn, q=q_norm, offset=page_state.offset, limit=page_state.limit
             )
-        # The "Older" link is meaningful only if we got a full
-        # page of results; if we got fewer, there's nothing
-        # older to fetch.
-        older_url: str | None = None
-        if len(events) == page_size:
-            params = {
-                "kind": kind_norm or "",
-                "subject_kind": subject_kind_norm or "",
-                "subject_id": subject_id_norm or "",
-                "actor": actor_norm or "",
-                "source_ip": source_ip_norm or "",
-                "failed": "1" if failed_only else "",
-                "before_id": str(events[-1].id),
-            }
-            non_empty = {k: v for k, v in params.items() if v}
-            older_url = "/ui/events?" + urllib.parse.urlencode(non_empty)
+        preserved = {
+            "q": q_norm,
+            "per_page": (
+                str(page_state.per_page)
+                if page_state.per_page != _table_state.DEFAULT_PER_PAGE
+                else ""
+            ),
+        }
         return render(
             "ui/events.html",
             request,
             events=events,
-            kind=kind_norm,
-            subject_kind=subject_kind_norm,
-            subject_id=subject_id_norm,
-            actor=actor_norm,
-            source_ip=source_ip_norm,
-            failed_only=failed_only,
-            known_kinds=KNOWN_EVENT_KINDS,
-            known_subject_kinds=KNOWN_SUBJECT_KINDS,
-            known_actors=KNOWN_ACTORS,
-            older_url=older_url,
+            q=q_norm,
+            page=page_state,
+            preserved=preserved,
         )
 
     @app.post(

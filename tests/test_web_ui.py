@@ -150,8 +150,9 @@ def test_ui_dashboard_renders_after_login(client: TestClient) -> None:
     assert "Images" in body
     # Health Monitoring panel (renamed from "Sanity checklist").
     assert "Health Monitoring" in body
-    # Recent-activity card title.
-    assert "Recent Events" in body
+    # Recent-activity card title (renamed in v0.57: distance in
+    # time is subject to the row's age, not the card label).
+    assert "Last 10 Events" in body
     # Navbar still carries the Machines nav-btn.
     assert 'href="/ui/machines">' in body
     assert "Machines" in body
@@ -172,7 +173,11 @@ def test_ui_images_renders_default_catalog_url(
     assert r.status_code == 200
     body = r.text
     assert "safl/nosi" in body
-    assert "/releases/latest/download/catalog.toml" in body
+    # Default pins to a specific nosi ISO-week release at the time
+    # bty was cut (not /latest/), so two operators on the same bty
+    # version see byte-identical catalog content.
+    assert "/releases/download/" in body
+    assert "/catalog.toml" in body
     assert 'action="/ui/catalog/fetch-release"' in body
 
 
@@ -223,7 +228,7 @@ def test_ui_dashboard_shows_recent_activity_after_a_pxe_event(client: TestClient
     r = client.get("/ui/dashboard")
     assert r.status_code == 200
     body = r.text
-    assert "Recent Events" in body
+    assert "Last 10 Events" in body
     assert "machine.discovered" in body
     assert 'href="/ui/events"' in body
 
@@ -960,9 +965,9 @@ def test_ui_machines_pagination_slices_rows(client: TestClient) -> None:
     assert "aa:bb:cc:dd:00:00" in list1
     assert "aa:bb:cc:dd:00:18" in list1
     assert "aa:bb:cc:dd:00:1a" in list2
-    # Footer "Showing X-Y of Z" reflects the slice.
-    assert "Showing <strong>1</strong>" in page1
-    assert "Showing <strong>26</strong>" in page2
+    # Inline pagination "<a>-<b> of <total>" reflects the slice.
+    assert "<strong>1</strong>&ndash;<strong>25</strong>" in page1
+    assert "<strong>26</strong>&ndash;<strong>27</strong>" in page2
 
 
 def test_ui_machines_filter_discovered_excludes_assigned(client: TestClient) -> None:
@@ -2370,23 +2375,26 @@ def test_ui_machine_detail_inventory_state_requires_actual_inventory(
     assert "live env running; awaiting inventory" not in body
 
 
-def test_ui_events_renders_older_link_when_full_page(
+def test_ui_events_renders_pagination_nav_when_full_page(
     client: TestClient,
 ) -> None:
-    """The /ui/events page renders an "Older" link with
-    ``?before_id=<smallest-id-on-page>`` when a full page of 50
-    rows comes back. Without the cursor an operator on a busy
-    appliance can't page back beyond the first 50 events."""
+    """The /ui/events page renders the offset-pagination footer
+    (Page 2 / Next / Last buttons) when more than ``per_page``
+    rows exist. Replaces the old cursor-pagination ``before_id``
+    contract retired in v0.57."""
     _login(client)
-    # 60 PXE check-ins -> 120 events (machine.discovered +
-    # pxe.offered per MAC) -- well past page_size=50.
-    for i in range(60):
+    # 12 PXE check-ins emit several events each, easily filling more
+    # than one page at the default per_page=10.
+    for i in range(12):
         client.get(f"/pxe/aa:bb:cc:dd:ee:{i:02x}")
     r = client.get("/ui/events", cookies=AUTH)
     assert r.status_code == 200
     body = r.text
-    # Cursor link present.
-    assert "before_id=" in body
+    # Page-N anchor links from the inline-pagination macro.
+    assert "page=2" in body
+    # The /ui/events url with explicit ?page=2 lands on page 2.
+    r2 = client.get("/ui/events?page=2", cookies=AUTH)
+    assert r2.status_code == 200
 
 
 def test_ui_events_pagination_cursor_returns_older_rows(

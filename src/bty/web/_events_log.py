@@ -222,6 +222,61 @@ def record(
     return int(cur.lastrowid or 0)
 
 
+def _q_predicate(q: str) -> tuple[str, list[Any]]:
+    """SQL fragment + args matching the free-text events search.
+
+    ``q`` is the operator's plain-text input; matched as a
+    case-insensitive substring across the columns that are useful
+    for filtering: ``kind``, ``subject_kind``, ``subject_id``,
+    ``actor``, ``source_ip``, ``summary``. An empty / whitespace
+    ``q`` returns an empty fragment + args so callers can splice
+    unconditionally.
+    """
+    needle = q.strip()
+    if not needle:
+        return "", []
+    like = f"%{needle.lower()}%"
+    cols = ("kind", "subject_kind", "subject_id", "actor", "source_ip", "summary")
+    clause = "(" + " OR ".join(f"LOWER(IFNULL({c}, '')) LIKE ?" for c in cols) + ")"
+    return clause, [like] * len(cols)
+
+
+def count_events(conn: sqlite3.Connection, *, q: str = "") -> int:
+    """Number of events matching the free-text search (or all, when
+    ``q`` is empty). Used by /ui/events for offset pagination."""
+    clause, args = _q_predicate(q)
+    sql = "SELECT COUNT(*) FROM events"
+    if clause:
+        sql += " WHERE " + clause
+    row = conn.execute(sql, args).fetchone()
+    return int(row[0]) if row else 0
+
+
+def search_events(
+    conn: sqlite3.Connection, *, q: str = "", offset: int = 0, limit: int = 50
+) -> list[Event]:
+    """Offset-paginated event listing with a free-text predicate.
+
+    Powers the /ui/events page after the v0.57 simplification: a
+    single search input replaced the dropdown filter set; the
+    fields it covers match :func:`_q_predicate`. Newest first
+    (``ORDER BY id DESC``) regardless of ``q``."""
+    if limit < 1:
+        limit = 1
+    elif limit > 500:
+        limit = 500
+    if offset < 0:
+        offset = 0
+    clause, args = _q_predicate(q)
+    sql = "SELECT * FROM events"
+    if clause:
+        sql += " WHERE " + clause
+    sql += " ORDER BY id DESC LIMIT ? OFFSET ?"
+    args.extend([limit, offset])
+    rows = conn.execute(sql, args).fetchall()
+    return [_row_to_event(row) for row in rows]
+
+
 def list_events(
     conn: sqlite3.Connection,
     *,
