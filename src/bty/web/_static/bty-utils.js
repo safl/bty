@@ -70,7 +70,20 @@
     }
 
     function flashCopy(el) {
+        // Immediate visual: pulse the whole chip + swap the
+        // clipboard icon to a green check. The pulse runs on a
+        // CSS keyframe (.bty-copy-pulse below) so it fires
+        // synchronously with the click; the icon swap stays on
+        // for ~1.2s so the operator can confirm the action
+        // landed without having to glance for the precise frame.
         var icon = el.querySelector(".bi-clipboard");
+        el.classList.remove("bty-copy-pulse");
+        // Force a reflow so the animation re-triggers on a
+        // second click in quick succession (CSS animations don't
+        // restart unless the class is removed + re-added across
+        // a reflow boundary).
+        void el.offsetWidth;
+        el.classList.add("bty-copy-pulse");
         if (!icon) return;
         icon.classList.remove("bi-clipboard");
         icon.classList.add("bi-clipboard-check", "text-success");

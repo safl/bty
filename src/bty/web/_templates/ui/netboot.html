@@ -15,6 +15,21 @@
             <span class="vr"></span>
             <a href="#netboot-activity">Activity</a>
         </span>
+        {# Page-level fetch action lives in the page chrome so the
+           card body stays focused on the artifact inventory. The
+           JS still picks the button up by id. #}
+        <button type="button" class="btn btn-sm btn-primary text-nowrap ms-auto"
+                id="bty-downloads-fetch-artifacts-btn"
+                data-tag="{{ netboot_tag }}"
+
+                {% if artifacts_all_cached %}disabled
+                title="Netboot artifacts for tag '{{ netboot_tag }}' are already cached. Remove a file from the boot directory below to re-fetch."
+                {% else %}
+                title="Fetch netboot artifacts for tag '{{ netboot_tag }}' from {{ netboot_repo }}"
+                {% endif %}>
+            <i class="bi bi-cloud-download me-1"></i>Fetch '<strong>{{ netboot_tag }}</strong>' artifacts
+            {% if artifacts_all_cached %}<i class="bi bi-check-circle ms-1" title="cached"></i>{% endif %}
+        </button>
     </div>
 </nav>
 {% endblock %}
@@ -38,22 +53,10 @@
     <div class="card-header bg-light fw-semibold d-flex justify-content-between align-items-center flex-wrap gap-2 py-2">
         <span><i class="bi bi-box-seam me-1"></i>Netboot artifacts
               <span class="text-muted small bty-workers-poll-status ms-1">refreshing...</span></span>
-        {# Fetch artifacts: enqueues the netboot trio + sha256 manifest.
-           The release tag is an editable magic value (Settings ->
-           Upstream sources). Disabled when all four files are already
-           cached on disk; re-enables when one disappears (operator
-           ``rm``, state-dir migrate, etc.). #}
-        <button type="button" class="btn btn-sm btn-primary text-nowrap"
-                id="bty-downloads-fetch-artifacts-btn"
-                data-tag="{{ netboot_tag }}"
-                {% if artifacts_all_cached %}disabled
-                title="Netboot artifacts for tag '{{ netboot_tag }}' are already cached. Remove a file from the boot directory below to re-fetch."
-                {% else %}
-                title="Fetch netboot artifacts for tag '{{ netboot_tag }}' from {{ netboot_repo }}"
-                {% endif %}>
-            <i class="bi bi-cloud-download me-1"></i>Fetch '<strong>{{ netboot_tag }}</strong>' artifacts
-            {% if artifacts_all_cached %}<i class="bi bi-check-circle ms-1" title="cached"></i>{% endif %}
-        </button>
+        {# The Fetch-artifacts button used to live here. It moved to
+           the subnav strip (page-level action) so the card-header
+           stays focused on the inventory; the JS that drives the
+           button picks it up by id from anywhere in the DOM. #}
     </div>
     <div class="table-responsive">
         <table class="table table-striped mb-0 align-middle">

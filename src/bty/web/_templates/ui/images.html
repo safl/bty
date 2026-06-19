@@ -3,12 +3,47 @@
 {% block title %}Images - bty-web{% endblock %}
 
 {% block subnav %}
+{# Left: in-page jump links. Right: the three add-paths (Add image
+   / Upload catalog / Fetch catalog), moved here from the card
+   header so the page-level actions live in the page chrome and
+   the card-body stays focused on the catalog table. #}
 <nav class="navbar subnav-strip" aria-label="Section sub-navigation">
     <div class="container">
         <span class="subnav-jumps d-flex align-items-center flex-wrap">
             <a href="#images-list">List</a>
             <span class="vr"></span>
             <a href="#images-activity">Activity</a>
+        </span>
+        <span class="subnav-actions d-flex flex-wrap align-items-center gap-2 ms-auto">
+            <form method="post" action="/ui/catalog/entries"
+                  class="d-flex align-items-center gap-1 m-0">
+                <input type="text" required class="form-control form-control-sm"
+                       id="image_url" name="image_url"
+                       style="max-width: 18rem; min-width: 0;"
+                       placeholder="https://...img.gz | oras://owner/repo:tag"
+                       title="http(s):// trusts the upstream bytes on first flash; oras:// resolves the OCI manifest digest at add time.">
+                <button type="submit" class="btn btn-sm btn-primary flex-shrink-0 text-nowrap">
+                    <i class="bi bi-cloud-plus me-1"></i>Add image
+                </button>
+            </form>
+            <span class="vr"></span>
+            <form method="post" action="/ui/catalog/upload" enctype="multipart/form-data"
+                  class="d-flex align-items-center gap-1 m-0">
+                <input type="file" required name="file" accept=".toml"
+                       class="form-control form-control-sm"
+                       style="max-width: 12rem; min-width: 0;"
+                       title="catalog.toml: parsed before replacing {{ manifest_path }}">
+                <button type="submit" class="btn btn-sm btn-primary flex-shrink-0 text-nowrap">
+                    <i class="bi bi-upload me-1"></i>Upload
+                </button>
+            </form>
+            <span class="vr"></span>
+            <form method="post" action="/ui/catalog/fetch-release" class="m-0">
+                <button type="submit" class="btn btn-sm btn-primary flex-shrink-0 text-nowrap"
+                        title="GET {{ catalog_url }} and import its entries">
+                    <i class="bi bi-cloud-download me-1"></i>Fetch catalog
+                </button>
+            </form>
         </span>
     </div>
 </nav>
@@ -30,62 +65,25 @@
 {% block content %}
 
 <div class="card mb-3" id="images-list">
-    <div class="card-header bg-light fw-semibold d-flex justify-content-between align-items-center flex-nowrap gap-2 py-1">
-        <span class="text-nowrap"><i class="bi bi-list-ul me-1"></i>Images</span>
-        <span class="d-flex flex-nowrap align-items-center gap-2" style="min-width: 0;">
-            {# Single-entry add: http(s):// trusts the upstream bytes on
-               first flash; oras:// resolves the OCI manifest at add time.
-               ``type="text"`` not ``url`` since browsers reject oras://
-               under HTML5 URL validation; the server-side Pydantic still
-               validates. The most common add-path lives first so the
-               operator's eye lands on it. #}
-            <form method="post" action="/ui/catalog/entries"
-                  class="d-flex align-items-center gap-1 m-0" style="min-width: 0;">
-                <input type="text" required class="form-control form-control-sm"
-                       id="image_url" name="image_url"
-                       style="max-width: 18rem; min-width: 0;"
-                       placeholder="https://...img.gz  |  oras://owner/repo:tag"
-                       title="http(s):// trusts the upstream bytes on first flash; oras:// resolves the OCI manifest digest at add time.">
-                <button type="submit" class="btn btn-sm btn-primary flex-shrink-0 text-nowrap">
-                    <i class="bi bi-cloud-plus me-1"></i>Add image
-                </button>
-            </form>
-            <div class="vr"></div>
-            <form method="post" action="/ui/catalog/upload" enctype="multipart/form-data"
-                  class="d-flex align-items-center gap-1 m-0" style="min-width: 0;">
-                <input type="file" required name="file" accept=".toml"
-                       class="form-control form-control-sm" style="max-width: 12rem; min-width: 0;"
-                       title="catalog.toml: parsed before replacing {{ manifest_path }}">
-                <button type="submit" class="btn btn-sm btn-primary flex-shrink-0 text-nowrap">
-                    <i class="bi bi-upload me-1"></i>Upload catalog
-                </button>
-            </form>
-            <div class="vr"></div>
-            <form method="post" action="/ui/catalog/fetch-release" class="m-0">
-                <button type="submit" class="btn btn-sm btn-primary flex-shrink-0 text-nowrap"
-                        title="GET {{ catalog_url }} and import its entries">
-                    <i class="bi bi-cloud-download me-1"></i>Fetch catalog
-                </button>
-            </form>
-        </span>
-    </div>
-    {# One toolbar row carrying search + pagination above the table,
-       the same shape as machines + events. Single plain-text input
-       does substring match across name / format / arch / source /
-       sha. #}
-    <div class="card-body py-2 border-bottom d-flex flex-wrap align-items-center gap-3">
-        <form method="get" class="d-flex align-items-center gap-2 m-0 flex-grow-1" style="min-width: 18rem;">
+    {# Card header: "Images | Filter: <input> <search>" flexes to
+       fill the left side; pagination sits on the right. The three
+       add-paths moved up into the subnav strip. #}
+    <div class="card-header bg-light fw-semibold d-flex flex-wrap align-items-center gap-3 py-2">
+        <form method="get" class="d-flex align-items-center gap-2 m-0 flex-grow-1" style="min-width: 14rem;">
             {% if sort.column != 'name' %}<input type="hidden" name="sort" value="{{ sort.column }}">{% endif %}
             {% if sort.direction != 'asc' %}<input type="hidden" name="dir" value="{{ sort.direction }}">{% endif %}
             {% if page.per_page != per_page_choices[0] %}<input type="hidden" name="per_page" value="{{ page.per_page }}">{% endif %}
-            <input type="search" name="q" value="{{ q or '' }}"
-                   class="form-control form-control-sm" style="max-width: 28rem;"
-                   placeholder="Search name / format / arch (e.g. freebsd)">
-            <button type="submit" class="btn btn-sm btn-outline-secondary">
-                <i class="bi bi-search me-1"></i>Search
+            <span class="text-nowrap"><i class="bi bi-list-ul me-1"></i>Images</span>
+            <span class="vr"></span>
+            <label for="images-q" class="text-nowrap text-muted small mb-0">Filter:</label>
+            <input type="search" name="q" id="images-q" value="{{ q or '' }}"
+                   class="form-control form-control-sm flex-grow-1"
+                   placeholder="name / format / arch (e.g. freebsd)">
+            <button type="submit" class="btn btn-sm btn-outline-secondary" title="Search">
+                <i class="bi bi-search"></i>
             </button>
             {% if q %}
-            <a href="?" class="btn btn-sm btn-link">Clear</a>
+            <a href="?" class="btn btn-sm btn-link text-nowrap">Clear</a>
             {% endif %}
         </form>
         {{ pagination_inline(page, preserved, label='images') }}
@@ -181,17 +179,11 @@
     // before that helper existed. Page-local JS now only owns the
     // catalog-entry actions (Check / Delete) below.
 
-    var esc = (window.btyUtils && window.btyUtils.esc) || function (s) {
-        return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) {
-            return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
-        });
-    };
-    var fmtBytes = (window.btyUtils && window.btyUtils.fmtBytes) || function (n) {
-        if (!n || n <= 0) return "";
-        var u = ["B", "KiB", "MiB", "GiB", "TiB"], i = 0, v = n;
-        while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
-        return v.toFixed(i ? 1 : 0) + " " + u[i];
-    };
+    // esc + fmtBytes come from /static/bty-utils.js (loaded by the
+    // layout in <head>; always present by the time this script
+    // runs at the bottom of <body>).
+    var esc = window.btyUtils.esc;
+    var fmtBytes = window.btyUtils.fmtBytes;
 
     function badge(cls, text, title) {
         return '<span class="badge ' + cls + '"'
