@@ -16,8 +16,9 @@
    - ``th_attrs`` (optional): extra attributes for the ``<th>`` (e.g.
      ``style="white-space: nowrap;"``) so narrow columns stay narrow.
 
-   The active column gets an arrow indicator (▲ asc, ▼ desc). All
-   other columns show a faded ⇅ to hint the header is clickable. #}
+   The active column gets an arrow indicator (up triangle = asc,
+   down triangle = desc). All other columns show a faded
+   up-down glyph to hint the header is clickable. #}
 {% macro sort_header(label, column, sort, preserved, th_attrs='') %}
   {% set qs = build_query_string(
       preserved,
