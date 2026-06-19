@@ -291,7 +291,7 @@
 </script>
 
 {% with events=backup_events,
-        title="Last 10 Events",
+        title="Last " + recent_events_limit|string + " Events",
         link_to_full="/ui/events?q=backup",
         card_id="backups-activity" %}
 {% include "ui/_events_card.html" %}

@@ -333,7 +333,7 @@
    ``subject_id=this MAC`` server-side; the link forwards the
    same filter to /ui/events for drill-down. #}
 {% with events=machine_events,
-        title="Last 10 Events",
+        title="Last " + recent_events_limit|string + " Events",
         card_id="machine-activity",
         link_to_full="/ui/events?q=" + m.mac %}
 {% include "ui/_events_card.html" %}

@@ -407,7 +407,7 @@
 
 {# Recent netboot activity (release fetches + fetch failures). #}
 {% with events=boot_events,
-        title="Last 10 Events",
+        title="Last " + recent_events_limit|string + " Events",
         link_to_full="/ui/events?q=netboot",
         card_id="netboot-activity" %}
 {% include "ui/_events_card.html" %}
