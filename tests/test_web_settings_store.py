@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from bty.web import _db, _settings_store
-from bty.web._releases import DEFAULT_CATALOG_REPO, DEFAULT_NETBOOT_REPO, ENV_RELEASE_REPO
+from bty.web._releases import DEFAULT_NETBOOT_REPO, ENV_RELEASE_REPO
 
 
 def _conn(tmp_path: Path) -> sqlite3.Connection:
@@ -47,66 +47,34 @@ def test_netboot_repo_db_override_wins_over_env(
         assert _settings_store.resolve_netboot_repo(conn) == "other/repo"
 
 
-def test_catalog_repo_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """No override -> the built-in default catalog repo (safl/nosi).
-    The catalog repo has NO env-layer fallback; only an explicit
-    Settings override beats the default."""
+def test_catalog_url_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """No override -> the built-in default catalog URL (nosi's
+    /releases/latest/download/catalog.toml). The catalog URL has NO
+    env-layer fallback; only an explicit Settings override beats it."""
     monkeypatch.delenv(ENV_RELEASE_REPO, raising=False)
     with _conn(tmp_path) as conn:
-        assert _settings_store.resolve_catalog_repo(conn) == DEFAULT_CATALOG_REPO
+        assert _settings_store.resolve_catalog_url(conn) == _settings_store.DEFAULT_CATALOG_URL
 
 
-def test_catalog_repo_independent_of_netboot_env(
+def test_catalog_url_independent_of_netboot_env(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """``$BTY_BOOT_RELEASE_REPO`` only repoints the netboot repo;
-    the catalog repo stays on its own default until explicitly
-    overridden."""
+    the catalog URL stays on its default until explicitly overridden."""
     monkeypatch.setenv(ENV_RELEASE_REPO, "acme/widgets")
     with _conn(tmp_path) as conn:
         assert _settings_store.resolve_netboot_repo(conn) == "acme/widgets"
-        assert _settings_store.resolve_catalog_repo(conn) == DEFAULT_CATALOG_REPO
+        assert _settings_store.resolve_catalog_url(conn) == _settings_store.DEFAULT_CATALOG_URL
 
 
-def test_catalog_url_derives_from_catalog_repo(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """With no overrides, the catalog URL is built from the catalog
-    repo + the default tag (``latest``). The catalog URL is NOT
-    affected by ``$BTY_BOOT_RELEASE_REPO`` (which only points the
-    netboot fetch)."""
-    monkeypatch.delenv(ENV_RELEASE_REPO, raising=False)
+def test_catalog_url_override_wins(tmp_path: Path) -> None:
+    """A ``KEY_CATALOG_URL`` override replaces the default verbatim;
+    no repo/tag composition, no URL rewriting. The fetch handler GETs
+    whatever string the operator pasted."""
+    custom = "https://example.invalid/path/catalog.toml"
     with _conn(tmp_path) as conn:
-        url = _settings_store.resolve_catalog_url(conn)
-    assert url == f"https://github.com/{DEFAULT_CATALOG_REPO}/releases/latest/download/catalog.toml"
-
-
-def test_catalog_url_uses_catalog_repo_override(tmp_path: Path) -> None:
-    """A ``KEY_CATALOG_REPO`` override repoints the catalog URL; the
-    netboot fetch is untouched."""
-    with _conn(tmp_path) as conn:
-        _settings_store.set_value(conn, _settings_store.KEY_CATALOG_REPO, "acme/widgets")
-        url = _settings_store.resolve_catalog_url(conn)
-    assert url == "https://github.com/acme/widgets/releases/latest/download/catalog.toml"
-
-
-def test_catalog_tag_override_changes_url(tmp_path: Path) -> None:
-    """Pinning the catalog tag flips the URL to the explicit-tag
-    ``releases/download/<tag>/`` form."""
-    with _conn(tmp_path) as conn:
-        _settings_store.set_value(conn, _settings_store.KEY_CATALOG_REPO, "acme/widgets")
-        _settings_store.set_value(conn, _settings_store.KEY_CATALOG_TAG, "v1.2.3")
-        assert _settings_store.resolve_catalog_tag(conn) == "v1.2.3"
-        assert (
-            _settings_store.resolve_catalog_url(conn)
-            == "https://github.com/acme/widgets/releases/download/v1.2.3/catalog.toml"
-        )
-
-
-def test_catalog_tag_default(tmp_path: Path) -> None:
-    """No override -> ``latest``."""
-    with _conn(tmp_path) as conn:
-        assert _settings_store.resolve_catalog_tag(conn) == _settings_store.DEFAULT_TAG
+        _settings_store.set_value(conn, _settings_store.KEY_CATALOG_URL, custom)
+        assert _settings_store.resolve_catalog_url(conn) == custom
 
 
 def test_netboot_tag_default_and_override(tmp_path: Path) -> None:
@@ -118,15 +86,16 @@ def test_netboot_tag_default_and_override(tmp_path: Path) -> None:
 
 def test_clear_reverts_overrides(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv(ENV_RELEASE_REPO, raising=False)
+    custom = "https://example.invalid/forks/catalog.toml"
     with _conn(tmp_path) as conn:
         _settings_store.set_value(conn, _settings_store.KEY_NETBOOT_REPO, "fork/netboot")
-        _settings_store.set_value(conn, _settings_store.KEY_CATALOG_REPO, "fork/catalog")
+        _settings_store.set_value(conn, _settings_store.KEY_CATALOG_URL, custom)
         assert _settings_store.resolve_netboot_repo(conn) == "fork/netboot"
-        assert _settings_store.resolve_catalog_repo(conn) == "fork/catalog"
+        assert _settings_store.resolve_catalog_url(conn) == custom
         _settings_store.clear(conn, _settings_store.KEY_NETBOOT_REPO)
-        _settings_store.clear(conn, _settings_store.KEY_CATALOG_REPO)
+        _settings_store.clear(conn, _settings_store.KEY_CATALOG_URL)
         assert _settings_store.resolve_netboot_repo(conn) == DEFAULT_NETBOOT_REPO
-        assert _settings_store.resolve_catalog_repo(conn) == DEFAULT_CATALOG_REPO
+        assert _settings_store.resolve_catalog_url(conn) == _settings_store.DEFAULT_CATALOG_URL
 
 
 # ----- Backup schedule resolvers ----------------------------------------

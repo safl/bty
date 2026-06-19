@@ -7,7 +7,9 @@
 <nav class="navbar subnav-strip" aria-label="Settings sections">
     <div class="container">
         <span class="subnav-jumps d-flex align-items-center flex-wrap">
-            <a href="#upstream-sources">Upstream sources</a>
+            <a href="#netboot-release">Netboot release</a>
+            <span class="vr"></span>
+            <a href="#catalog-source">Catalog</a>
             <span class="vr"></span>
             <a href="#backup-schedule">Backup schedule</a>
             <span class="vr"></span>
@@ -30,88 +32,105 @@
 {% call intro_box() %}
     Where every bty magic value comes from. Most are read-only (set via
     environment variable or derived from the state directory); the
-    <strong>Upstream sources</strong> card is editable and persists in
-    the database. The <strong>DHCP / Network boot</strong> cheatsheet below
-    is the router-side config to point PXE / HTTP-Boot clients at this
-    host. Operator
-    authentication lives on the <a href="/ui/account">Account</a> page.
+    <strong>Netboot release</strong> and <strong>Catalog</strong> cards
+    are editable and persist in the database. The
+    <strong>DHCP / Network boot</strong> cheatsheet below is the
+    router-side config to point PXE / HTTP-Boot clients at this host.
+    Operator authentication lives on the
+    <a href="/ui/account">Account</a> page.
 {% endcall %}
 {% endblock %}
 
 {% block content %}
-{# Two-up row: the editable Upstream sources + Backup schedule cards.
-   ``h-100`` + the wrapping ``row g-3`` keep both cards the same height
-   regardless of which one's content is longer. #}
+{# Both editable cards share the same POST handler (/ui/settings/upstream)
+   but render as visually-distinct cards so the operator's mental model
+   (netboot artifacts vs image catalog) maps onto the UI. The form
+   element lives outside the row and is referenced by ``form=
+   "upstream-form"`` on every input + button, which is the HTML5
+   way to associate fields with a non-ancestor form. Submitting
+   from EITHER card saves all three fields in one round-trip. #}
+<form method="post" action="/ui/settings/upstream" id="upstream-form"></form>
 <div class="row g-3 mb-3">
 <div class="col-md-6">
-<div class="card h-100" id="upstream-sources">
+<div class="card h-100" id="netboot-release">
     <div class="card-header bg-light fw-semibold">
-        <i class="bi bi-cloud-arrow-down me-1"></i>Upstream sources
+        <i class="bi bi-hdd-network me-1"></i>Netboot release
     </div>
     <div class="card-body">
-        <form method="post" action="/ui/settings/upstream">
-            <div class="mb-3">
-                <label for="netboot_repo" class="form-label">Netboot repo</label>
-                <input type="text" class="form-control font-monospace" id="netboot_repo"
-                       name="netboot_repo" placeholder="{{ upstream.netboot_repo_default }}"
-                       value="{{ upstream.netboot_repo_override or '' }}">
-                <div class="form-text small">
-                    GitHub <code>owner/repo</code> the netboot artifacts
-                    (vmlinuz / initrd / squashfs) are pulled from.
-                    Effective: <code>{{ upstream.netboot_repo }}</code>{% if not upstream.netboot_repo_override %}
-                    (default; leave blank to keep){% endif %}.
-                </div>
+        <p class="small text-muted mb-3">
+            The GitHub release that the <em>Fetch artifacts</em>
+            button on the <a href="/ui/netboot">Netboot</a> page pulls
+            <code>vmlinuz</code>, <code>initrd</code>, and
+            <code>squashfs</code> from. Repo + tag are independent so
+            an operator can pin netboot to a known-good release while
+            the catalog rolls forward.
+        </p>
+        <div class="mb-3">
+            <label for="netboot_repo" class="form-label">Netboot repo</label>
+            <input type="text" class="form-control font-monospace" id="netboot_repo"
+                   name="netboot_repo" placeholder="{{ upstream.netboot_repo_default }}"
+                   value="{{ upstream.netboot_repo_override or '' }}"
+                   form="upstream-form">
+            <div class="form-text small">
+                GitHub <code>owner/repo</code>. Effective:
+                <code>{{ upstream.netboot_repo }}</code>{% if not upstream.netboot_repo_override %}
+                (default; leave blank to keep){% endif %}.
             </div>
-            <div class="mb-3">
-                <label for="catalog_repo" class="form-label">Catalog repo</label>
-                <input type="text" class="form-control font-monospace" id="catalog_repo"
-                       name="catalog_repo" placeholder="{{ upstream.catalog_repo_default }}"
-                       value="{{ upstream.catalog_repo_override or '' }}">
-                <div class="form-text small">
-                    GitHub <code>owner/repo</code> the
-                    <code>catalog.toml</code> is pulled from. Defaults
-                    to the upstream image-builder
-                    (<code>{{ upstream.catalog_repo_default }}</code>);
-                    point at a fork for a custom image set. Effective:
-                    <code>{{ upstream.catalog_repo }}</code>{% if not upstream.catalog_repo_override %}
-                    (default; leave blank to keep){% endif %}.
-                </div>
+        </div>
+        <div class="mb-3">
+            <label for="netboot_tag" class="form-label">Netboot release tag</label>
+            <input type="text" class="form-control font-monospace" id="netboot_tag"
+                   name="netboot_tag" placeholder="{{ upstream.netboot_tag_default }}"
+                   value="{{ upstream.netboot_tag_override or '' }}"
+                   form="upstream-form">
+            <div class="form-text small">
+                <code>latest</code> or a tag like <code>v0.23.0</code>.
+                Effective:
+                <code>{{ upstream.netboot_tag }}</code>{% if not upstream.netboot_tag_override %}
+                (default; leave blank to keep){% endif %}.
             </div>
-            <div class="mb-3">
-                <label for="catalog_tag" class="form-label">Catalog release tag</label>
-                <input type="text" class="form-control font-monospace" id="catalog_tag"
-                       name="catalog_tag" placeholder="{{ upstream.catalog_tag_default }}"
-                       value="{{ upstream.catalog_tag_override or '' }}">
-                <div class="form-text small">
-                    Which release the <em>Fetch '{{ upstream.catalog_tag }}' catalog</em>
-                    button on the <a href="/ui/images">Images</a> page pulls:
-                    <code>latest</code> or a tag like <code>v0.23.0</code>. Effective:
-                    <code>{{ upstream.catalog_tag }}</code>{% if not upstream.catalog_tag_override %}
-                    (default; leave blank to keep){% endif %}. Resolves to:
-                    <code>{{ upstream.catalog_url }}</code>.
-                </div>
-            </div>
-            <div class="mb-3">
-                <label for="netboot_tag" class="form-label">Netboot release tag</label>
-                <input type="text" class="form-control font-monospace" id="netboot_tag"
-                       name="netboot_tag" placeholder="{{ upstream.netboot_tag_default }}"
-                       value="{{ upstream.netboot_tag_override or '' }}">
-                <div class="form-text small">
-                    Which release the <em>Fetch '{{ upstream.netboot_tag }}' artifacts</em>
-                    button on the <a href="/ui/netboot">Netboot</a> page pulls:
-                    <code>latest</code> or a tag like <code>v0.23.0</code>. Effective:
-                    <code>{{ upstream.netboot_tag }}</code>{% if not upstream.netboot_tag_override %}
-                    (default; leave blank to keep){% endif %}.
-                </div>
-            </div>
-            <button type="submit" class="btn btn-primary">
-                <i class="bi bi-save me-1"></i>Save upstream sources
-            </button>
-            <span class="form-text small ms-2">Clear a field to revert it to the default.</span>
-        </form>
+        </div>
+        <button type="submit" class="btn btn-primary" form="upstream-form">
+            <i class="bi bi-save me-1"></i>Save
+        </button>
+        <span class="form-text small ms-2">Clear a field to revert.</span>
     </div>
 </div>
-</div>{# /col upstream-sources #}
+</div>{# /col netboot-release #}
+
+<div class="col-md-6">
+<div class="card h-100" id="catalog-source">
+    <div class="card-header bg-light fw-semibold">
+        <i class="bi bi-collection me-1"></i>Catalog
+    </div>
+    <div class="card-body">
+        <p class="small text-muted mb-3">
+            The single URL that the <em>Fetch latest catalog</em>
+            button on the <a href="/ui/images">Images</a> page GETs.
+            Bytes at that URL must parse as a
+            <code>catalog.toml</code>; the rows are imported into the
+            local catalog table. To point at a fork or a private
+            catalog server, just edit the URL.
+        </p>
+        <div class="mb-3">
+            <label for="catalog_url" class="form-label">Catalog URL</label>
+            <input type="url" class="form-control font-monospace" id="catalog_url"
+                   name="catalog_url" placeholder="{{ upstream.catalog_url_default }}"
+                   value="{{ upstream.catalog_url_override or '' }}"
+                   form="upstream-form">
+            <div class="form-text small">
+                Effective:
+                <code>{{ upstream.catalog_url }}</code>{% if not upstream.catalog_url_override %}
+                (default; leave blank to keep){% endif %}.
+            </div>
+        </div>
+        <button type="submit" class="btn btn-primary" form="upstream-form">
+            <i class="bi bi-save me-1"></i>Save
+        </button>
+        <span class="form-text small ms-2">Clear to revert.</span>
+    </div>
+</div>
+</div>{# /col catalog-source #}
 
 <div class="col-md-6">
 {# Editable: scheduled backup knobs. ``enabled`` + ``cadence`` +
@@ -191,7 +210,7 @@
     </div>
 </div>
 </div>{# /col backup-schedule #}
-</div>{# /row upstream + backup #}
+</div>{# /row netboot + catalog + backup #}
 
 {# Four-up row of the config groups (Identity / Storage / Network /
    Background workers). Each card uses a compact list-group layout
