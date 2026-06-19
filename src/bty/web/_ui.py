@@ -44,6 +44,7 @@ from bty.web import (
     _releases,
     _settings_store,
     _sysconfig,
+    _table_state,
 )
 from bty.web._auth import SESSION_AUTHED_KEY
 from bty.web._events_log import KNOWN_ACTORS, KNOWN_EVENT_KINDS, KNOWN_SUBJECT_KINDS
@@ -102,6 +103,12 @@ def register_ui_routes(
         ctx.setdefault("nav_active", nav_active)
         ctx.setdefault("flash", None)
         ctx.setdefault("flash_kind", None)
+        # Globals consumed by the shared table-pagination macros.
+        # Setting these on every render keeps the call sites in the
+        # individual page handlers from having to remember to pass
+        # them.
+        ctx.setdefault("build_query_string", _table_state.build_query_string)
+        ctx.setdefault("per_page_choices", _table_state.PER_PAGE_CHOICES)
         template = jinja.get_template(name)
         return HTMLResponse(template.render(**ctx))
 
@@ -358,6 +365,20 @@ def register_ui_routes(
             **counts,
         )
 
+    # Sortable column allowlist for ``/ui/machines``: maps the URL
+    # ``?sort=<key>`` value to the SQL ORDER BY expression. ``mac``
+    # rides every expression as the stable tie-breaker so the
+    # paginated view is deterministic when two rows share the
+    # primary sort key (very common for ``boot_mode``).
+    _MACHINES_SORT_COLUMNS = {
+        "mac": "mac",
+        "bty_image_ref": "bty_image_ref, mac",
+        "boot_mode": "boot_mode, mac",
+        "hostname": "hostname, mac",
+        "last_seen_at": "last_seen_at, mac",
+        "last_flashed_at": "last_flashed_at, mac",
+    }
+
     @app.get(
         "/ui/machines",
         response_class=HTMLResponse,
@@ -375,23 +396,54 @@ def register_ui_routes(
         # symmetric "operator-bound" view. Anything else (no
         # filter, empty value, an unrecognised value) shows the
         # full list and surfaces no active-filter banner.
+        clauses: list[str] = []
+        params: list[object] = []
         if filter == "discovered":
-            sql = "SELECT * FROM machines WHERE bty_image_ref IS NULL ORDER BY mac"
+            clauses.append("bty_image_ref IS NULL")
             active_filter: str | None = filter
         elif filter == "assigned":
-            sql = "SELECT * FROM machines WHERE bty_image_ref IS NOT NULL ORDER BY mac"
+            clauses.append("bty_image_ref IS NOT NULL")
             active_filter = filter
         else:
-            sql = "SELECT * FROM machines ORDER BY mac"
             active_filter = None
+        # ``?q=<text>`` is a free-text contains-match across the
+        # MAC, hostname, bty_image_ref, and last-seen IP. SQLite's
+        # LIKE is case-insensitive for ASCII (the only characters
+        # those columns hold). Parameterised so the query keeps
+        # the SQL-injection guard the rest of the route relies on.
+        q_raw = request.query_params.get("q") or ""
+        q_norm = q_raw.strip()
+        if q_norm:
+            clauses.append(
+                "(LOWER(mac) LIKE ? OR LOWER(IFNULL(hostname, '')) LIKE ? "
+                "OR LOWER(IFNULL(bty_image_ref, '')) LIKE ? "
+                "OR LOWER(IFNULL(last_seen_ip, '')) LIKE ?)"
+            )
+            like = f"%{q_norm.lower()}%"
+            params.extend([like, like, like, like])
+        where_sql = ("WHERE " + " AND ".join(clauses)) if clauses else ""
         # Sub-nav: ``?section=list`` (default) is the live table,
         # ``?section=add`` is the form for staging a machine before
         # it PXE-boots. Unrecognised sections fall back to list.
         section = request.query_params.get("section") or "list"
         if section not in ("list",):
             section = "list"
+        # Sortable column allowlist. The value strings go straight
+        # into ORDER BY; ``mac`` rides along as the stable tie-
+        # breaker on every column so paginated views are
+        # deterministic when two rows share the primary sort key.
+        sort = _table_state.parse_sort(
+            request.query_params,
+            allowed=_MACHINES_SORT_COLUMNS,
+            default_column="mac",
+        )
         with _db.open_db(state_path) as conn:
-            rows = conn.execute(sql).fetchall()
+            total = conn.execute(f"SELECT COUNT(*) FROM machines {where_sql}", params).fetchone()[0]
+            page_state = _table_state.parse_pagination(request.query_params, total=int(total))
+            rows = conn.execute(
+                f"SELECT * FROM machines {where_sql} ORDER BY {sort.order_by_sql} LIMIT ? OFFSET ?",
+                (*params, page_state.limit, page_state.offset),
+            ).fetchall()
             # Recent machine activity (discoveries, flashes, inventory
             # posts) for the page's "Activity" table.
             machine_events = _events_log.list_events(conn, subject_kind="machine", limit=10)
@@ -402,13 +454,47 @@ def register_ui_routes(
         # silent redirect.
         flash_deleted = request.query_params.get("deleted")
         flash_missing = request.query_params.get("missing")
+        # Query params that must survive a click on a column header or
+        # a page-nav link: the active filter, the free-text search,
+        # and the operator's per-page choice. ``sort`` + ``dir`` +
+        # ``page`` are managed by the macros themselves.
+        preserved = {
+            "filter": active_filter or "",
+            "q": q_norm,
+            "per_page": (
+                str(page_state.per_page)
+                if page_state.per_page != _table_state.DEFAULT_PER_PAGE
+                else ""
+            ),
+            "sort": sort.column,
+            "dir": sort.direction,
+        }
+        # The /events/machines SSE stream pushes the FULL un-sorted /
+        # un-paginated tbody. Plumbing the operator's sort + page into
+        # the long-lived connection isn't worth the complexity, so the
+        # SSE wiring runs only on the default view (no filter, no
+        # search, default sort, page 1, default per_page). Anything
+        # else makes the page static until the operator reloads.
+        sse_eligible = (
+            not active_filter
+            and not q_norm
+            and sort.column == "mac"
+            and sort.direction == "asc"
+            and page_state.page == 1
+            and page_state.per_page == _table_state.DEFAULT_PER_PAGE
+        )
         return render(
             "ui/machines.html",
             request,
             machines=machines,
             active_filter=active_filter,
+            q=q_norm,
             section=section,
             machine_events=machine_events,
+            sort=sort,
+            page=page_state,
+            preserved=preserved,
+            sse_eligible=sse_eligible,
             flash_deleted=flash_deleted,
             flash_missing=flash_missing,
         )
@@ -676,6 +762,34 @@ def register_ui_routes(
             status_code=status.HTTP_303_SEE_OTHER,
         )
 
+    # Sortable column allowlist for ``/ui/images``. Values are keys
+    # into the in-memory sort helper below (NOT raw SQL): the page
+    # builds the row list in Python from the unified-image helper,
+    # so sorting is a list ``sorted()`` rather than ``ORDER BY``.
+    _IMAGES_SORT_KEYS = ("name", "sha256", "format", "arch", "ref")
+
+    def _images_sort_key(column: str):
+        """Return a ``key=`` callable for sorting ``UnifiedImage`` records
+        by one of the allowlisted columns. Pulls the first ``name``
+        from the tuple (the human label shown in the cell) and
+        case-folds for stable alphabetic sort; ``None``-valued
+        fields sort last regardless of direction so unknown values
+        cluster together."""
+
+        def _key(img: object):
+            # Read attributes off the dataclass; treat None as a high
+            # sentinel so missing values pile at the end of an ASC sort.
+            if column == "name":
+                names = getattr(img, "names", ())
+                primary = names[0] if names else ""
+                return (False, primary.casefold())
+            value = getattr(img, column, None)
+            if value is None:
+                return (True, "")
+            return (False, str(value).casefold())
+
+        return _key
+
     def _render_images_page(request: Request) -> HTMLResponse:
         """Build the context for ``/ui/images`` and render the template.
 
@@ -696,14 +810,65 @@ def register_ui_routes(
             catalog_repo = _settings_store.resolve_catalog_repo(conn)
             catalog_tag = _settings_store.resolve_catalog_tag(conn)
             image_events = _events_log.list_events(conn, subject_kind="catalog", limit=15)
+
+        # ``?q=<text>`` is a substring filter across the name, format,
+        # arch, and ref so an operator typing "freebsd" sees only the
+        # freebsd-named images. Case-insensitive; trimmed; empty
+        # silently disables.
+        q_raw = request.query_params.get("q") or ""
+        q_norm = q_raw.strip()
+        if q_norm:
+            needle = q_norm.casefold()
+
+            def _matches(img: object) -> bool:
+                fields = (
+                    " ".join(getattr(img, "names", ()) or ()),
+                    getattr(img, "format", None) or "",
+                    getattr(img, "arch", None) or "",
+                    getattr(img, "ref", None) or "",
+                    getattr(img, "sha256", None) or "",
+                )
+                return needle in " ".join(fields).casefold()
+
+            unified = [u for u in unified if _matches(u)]
+
+        # Sort + paginate the (already filtered) in-memory list. The
+        # catalog rarely exceeds ~30 rows today, so a Python sort +
+        # slice is cheap; the operator still gets bookmarkable URL
+        # state and consistent table chrome with the other pages.
+        sort = _table_state.parse_sort(
+            request.query_params,
+            allowed={k: k for k in _IMAGES_SORT_KEYS},
+            default_column="name",
+        )
+        sorted_unified = sorted(
+            unified,
+            key=_images_sort_key(sort.column),
+            reverse=sort.direction == "desc",
+        )
+        page_state = _table_state.parse_pagination(request.query_params, total=len(sorted_unified))
+        preserved = {
+            "sort": sort.column,
+            "dir": sort.direction,
+            "q": q_norm,
+            "per_page": (
+                str(page_state.per_page)
+                if page_state.per_page != _table_state.DEFAULT_PER_PAGE
+                else ""
+            ),
+        }
         return render(
             "ui/images.html",
             request,
-            unified=unified,
+            unified=sorted_unified[page_state.offset : page_state.offset + page_state.limit],
             image_events=image_events,
             manifest_path=catalog_manifest_path,
             catalog_repo=catalog_repo,
             catalog_tag=catalog_tag,
+            q=q_norm,
+            sort=sort,
+            page=page_state,
+            preserved=preserved,
             flash=flash,
             flash_kind="danger" if flash else None,
         )

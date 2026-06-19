@@ -1,0 +1,146 @@
+{# Reusable Jinja macros for paginated + sortable tables on /ui/.
+
+   Caller passes a ``SortState`` and a ``PageState`` from
+   ``bty.web._table_state``. The macros render Bootstrap-flavoured
+   table-header links and a pagination footer that preserve every
+   other query param via ``preserved`` so an active filter survives
+   a click on a column header. #}
+
+{# Sortable column header.
+
+   - ``label``: human text shown in the header cell.
+   - ``column``: SQL column key matching one of the page's allowlist
+     entries (see _table_state.parse_sort).
+   - ``sort``: the SortState parsed for this request.
+   - ``preserved``: query-param dict to keep (filters, per_page, ...).
+   - ``th_attrs`` (optional): extra attributes for the ``<th>`` (e.g.
+     ``style="white-space: nowrap;"``) so narrow columns stay narrow.
+
+   The active column gets an arrow indicator (▲ asc, ▼ desc). All
+   other columns show a faded ⇅ to hint the header is clickable. #}
+{% macro sort_header(label, column, sort, preserved, th_attrs='') %}
+  {% set qs = build_query_string(
+      preserved,
+      {'sort': column, 'dir': sort.next_direction(column), 'page': None}
+  ) %}
+  <th{% if th_attrs %} {{ th_attrs|safe }}{% endif %}>
+    <a href="?{{ qs }}" class="text-decoration-none text-reset"
+       aria-label="Sort by {{ label }}">
+      {{ label }}
+      {% if sort.is_active(column) %}
+        <span class="text-primary" aria-hidden="true">{% if sort.direction == 'asc' %}&#9650;{% else %}&#9660;{% endif %}</span>
+      {% else %}
+        <span class="text-muted" aria-hidden="true">&#8645;</span>
+      {% endif %}
+    </a>
+  </th>
+{% endmacro %}
+
+{# Pagination footer.
+
+   - ``page``: the PageState (see _table_state.parse_pagination).
+   - ``preserved``: query-param dict to keep across the nav links.
+   - ``label`` (optional): noun for the "Showing X-Y of Z" line; defaults
+     to "rows".
+
+   Renders nothing when there's only one page and no per-page choice
+   the operator could change. Always renders the totals line when there
+   are rows. #}
+{% macro pagination_footer(page, preserved, label='rows') %}
+  {# Always render the footer so an empty (filtered / searched) view
+     shows the operator a "No <label>." line plus a per-page selector
+     they can fall back to. The pagination nav itself only renders
+     when there is more than one page. #}
+  <nav aria-label="Table pagination"
+       class="d-flex flex-wrap align-items-center justify-content-between gap-2 mt-2">
+    <small class="text-muted">
+      {% if page.total == 0 %}
+        No {{ label }}.
+      {% else %}
+        Showing <strong>{{ page.first_row }}</strong>&ndash;<strong>{{ page.last_row }}</strong>
+        of <strong>{{ page.total }}</strong> {{ label }}.
+      {% endif %}
+    </small>
+
+    {% if page.last_page > 1 %}
+    <ul class="pagination pagination-sm mb-0">
+      {# First / Prev #}
+      <li class="page-item{% if not page.has_prev %} disabled{% endif %}">
+        <a class="page-link"
+           href="?{{ build_query_string(preserved, {'page': 1}) }}"
+           aria-label="First page">&laquo;&laquo;</a>
+      </li>
+      <li class="page-item{% if not page.has_prev %} disabled{% endif %}">
+        <a class="page-link"
+           href="?{{ build_query_string(preserved, {'page': page.page - 1}) }}"
+           aria-label="Previous page">&laquo;</a>
+      </li>
+
+      {# Numbered window. If the window doesn't already include 1,
+         emit an explicit "1 ..." prefix; same for "... N" suffix. #}
+      {% set nums = page.numbered_pages() %}
+      {% if nums[0] > 1 %}
+        <li class="page-item">
+          <a class="page-link"
+             href="?{{ build_query_string(preserved, {'page': 1}) }}">1</a>
+        </li>
+        {% if nums[0] > 2 %}
+          <li class="page-item disabled"><span class="page-link">&hellip;</span></li>
+        {% endif %}
+      {% endif %}
+      {% for n in nums %}
+        <li class="page-item{% if n == page.page %} active{% endif %}">
+          <a class="page-link"
+             href="?{{ build_query_string(preserved, {'page': n}) }}"
+             {% if n == page.page %}aria-current="page"{% endif %}>{{ n }}</a>
+        </li>
+      {% endfor %}
+      {% if nums[-1] < page.last_page %}
+        {% if nums[-1] < page.last_page - 1 %}
+          <li class="page-item disabled"><span class="page-link">&hellip;</span></li>
+        {% endif %}
+        <li class="page-item">
+          <a class="page-link"
+             href="?{{ build_query_string(preserved, {'page': page.last_page}) }}">{{ page.last_page }}</a>
+        </li>
+      {% endif %}
+
+      {# Next / Last #}
+      <li class="page-item{% if not page.has_next %} disabled{% endif %}">
+        <a class="page-link"
+           href="?{{ build_query_string(preserved, {'page': page.page + 1}) }}"
+           aria-label="Next page">&raquo;</a>
+      </li>
+      <li class="page-item{% if not page.has_next %} disabled{% endif %}">
+        <a class="page-link"
+           href="?{{ build_query_string(preserved, {'page': page.last_page}) }}"
+           aria-label="Last page">&raquo;&raquo;</a>
+      </li>
+    </ul>
+    {% endif %}
+
+    {# Per-page dropdown. Submits via plain <form> so the choice is
+       just another query param: no JS required, the redirect goes
+       through the same handler and is bookmarkable. #}
+    <form method="get" class="d-flex align-items-center gap-2 mb-0">
+      {# Re-emit the preserved params as hidden inputs so the form
+         submission keeps every filter + the current sort. The new
+         per_page value comes from the select itself. Drop ``page``
+         on purpose so a per-page change always lands on page 1. #}
+      {% for k, v in preserved.items() %}
+        {% if v and k not in ('per_page', 'page') %}
+          <input type="hidden" name="{{ k }}" value="{{ v }}">
+        {% endif %}
+      {% endfor %}
+      <label for="per_page" class="form-label mb-0 small text-muted">Per page</label>
+      <select name="per_page" id="per_page"
+              class="form-select form-select-sm" style="width: auto;"
+              onchange="this.form.submit()">
+        {% for choice in per_page_choices %}
+          <option value="{{ choice }}"
+                  {% if choice == page.per_page %}selected{% endif %}>{{ choice }}</option>
+        {% endfor %}
+      </select>
+    </form>
+  </nav>
+{% endmacro %}

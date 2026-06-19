@@ -1,4 +1,5 @@
 {% extends "ui/_layout.html" %}
+{% from "ui/_table_macros.html" import sort_header, pagination_footer with context %}
 {% block title %}Images - bty-web{% endblock %}
 
 {% block subnav %}
@@ -68,15 +69,35 @@
             </form>
         </span>
     </div>
+    {# Free-text search across name / format / arch / source. Typing
+       "freebsd" narrows the list to just the freebsd images. Carries
+       the active sort + per_page through hidden inputs. #}
+    <div class="card-body py-2 border-bottom">
+        <form method="get" class="d-flex align-items-center gap-2 m-0">
+            {% if sort.column != 'name' %}<input type="hidden" name="sort" value="{{ sort.column }}">{% endif %}
+            {% if sort.direction != 'asc' %}<input type="hidden" name="dir" value="{{ sort.direction }}">{% endif %}
+            {% if page.per_page != per_page_choices[1] %}<input type="hidden" name="per_page" value="{{ page.per_page }}">{% endif %}
+            <input type="search" name="q" value="{{ q or '' }}"
+                   class="form-control form-control-sm" style="max-width: 24rem;"
+                   placeholder="Search name / format / arch (e.g. freebsd)">
+            <button type="submit" class="btn btn-sm btn-outline-secondary">
+                <i class="bi bi-search me-1"></i>Search
+            </button>
+            {% if q %}
+            <a href="?" class="btn btn-sm btn-link">Clear</a>
+            <span class="text-muted small">Filtered by &ldquo;<code>{{ q }}</code>&rdquo;</span>
+            {% endif %}
+        </form>
+    </div>
     <div class="table-responsive">
         <table class="table table-hover mb-0 align-middle">
             <thead class="table-light">
                 <tr>
-                    <th>Name</th>
-                    <th>Content SHA</th>
-                    <th>Format</th>
-                    <th>Arch</th>
-                    <th>Source</th>
+                    {{ sort_header('Name', 'name', sort, preserved) }}
+                    {{ sort_header('Content SHA', 'sha256', sort, preserved) }}
+                    {{ sort_header('Format', 'format', sort, preserved) }}
+                    {{ sort_header('Arch', 'arch', sort, preserved) }}
+                    {{ sort_header('Source', 'ref', sort, preserved) }}
                     <th>Status</th>
                     <th class="text-end" style="width: 1%; white-space: nowrap;">Action</th>
                 </tr>
@@ -153,6 +174,7 @@
             </tbody>
         </table>
     </div>
+    {{ pagination_footer(page, preserved, label='images') }}
 </div>
 
 <script>

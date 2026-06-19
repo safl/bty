@@ -1,4 +1,5 @@
 {% extends "ui/_layout.html" %}
+{% from "ui/_table_macros.html" import sort_header, pagination_footer with context %}
 {% block title %}Machines - bty-web{% endblock %}
 
 {% block subnav %}
@@ -77,6 +78,29 @@
             </button>
         </form>
     </div>
+    {# Free-text search across MAC / hostname / image ref / last-seen
+       IP. Submits via GET so the result URL is bookmarkable. Carries
+       the active filter + sort + per_page through hidden inputs so a
+       search inside a filtered/sorted view preserves the operator's
+       view. #}
+    <div class="card-body py-2 border-bottom">
+        <form method="get" class="d-flex align-items-center gap-2 m-0">
+            {% if active_filter %}<input type="hidden" name="filter" value="{{ active_filter }}">{% endif %}
+            {% if sort.column != 'mac' %}<input type="hidden" name="sort" value="{{ sort.column }}">{% endif %}
+            {% if sort.direction != 'asc' %}<input type="hidden" name="dir" value="{{ sort.direction }}">{% endif %}
+            {% if page.per_page != per_page_choices[1] %}<input type="hidden" name="per_page" value="{{ page.per_page }}">{% endif %}
+            <input type="search" name="q" value="{{ q or '' }}"
+                   class="form-control form-control-sm" style="max-width: 24rem;"
+                   placeholder="Search MAC / hostname / image / IP">
+            <button type="submit" class="btn btn-sm btn-outline-secondary">
+                <i class="bi bi-search me-1"></i>Search
+            </button>
+            {% if q %}
+            <a href="?{% if active_filter %}filter={{ active_filter }}{% endif %}" class="btn btn-sm btn-link">Clear</a>
+            <span class="text-muted small">Filtered by &ldquo;<code>{{ q }}</code>&rdquo;</span>
+            {% endif %}
+        </form>
+    </div>
     <div class="table-responsive">
         <table class="table table-hover mb-0 align-middle">
             <thead class="table-light">
@@ -85,12 +109,12 @@
                    Image / Hostname absorb the slack -- otherwise the
                    header columns stretch evenly and look oversized. #}
                 <tr>
-                    <th style="white-space: nowrap;">MAC</th>
-                    <th>Image</th>
-                    <th style="width: 1%; white-space: nowrap;">Boot</th>
-                    <th>Hostname</th>
-                    <th style="width: 1%; white-space: nowrap;">Last seen</th>
-                    <th style="width: 1%; white-space: nowrap;">Last flashed</th>
+                    {{ sort_header('MAC', 'mac', sort, preserved, 'style="white-space: nowrap;"') }}
+                    {{ sort_header('Image', 'bty_image_ref', sort, preserved) }}
+                    {{ sort_header('Boot', 'boot_mode', sort, preserved, 'style="width: 1%; white-space: nowrap;"') }}
+                    {{ sort_header('Hostname', 'hostname', sort, preserved) }}
+                    {{ sort_header('Last seen', 'last_seen_at', sort, preserved, 'style="width: 1%; white-space: nowrap;"') }}
+                    {{ sort_header('Last flashed', 'last_flashed_at', sort, preserved, 'style="width: 1%; white-space: nowrap;"') }}
                     <th style="width: 1%;"></th>
                 </tr>
             </thead>
@@ -107,7 +131,7 @@
                becomes static under filter; reload to refresh. #}
             <tbody id="machines-tbody"
                    class="sse-target"
-                   {% if not active_filter %}
+                   {% if sse_eligible %}
                    hx-ext="sse"
                    sse-connect="/events/machines"
                    sse-swap="machines-update"
@@ -116,6 +140,7 @@
             </tbody>
         </table>
     </div>
+    {{ pagination_footer(page, preserved, label='machines') }}
 </div>
 
 <script>
