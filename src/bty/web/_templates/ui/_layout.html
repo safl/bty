@@ -238,14 +238,14 @@
         .subnav-strip {
             background-color: #495057;
             border-bottom: 1px solid rgba(255, 255, 255, 0.10);
-            /* Roomier vertical padding so embedded form controls
-               (the page-level add / fetch actions on machines /
-               images / netboot) have breathing space around
-               them. The strip is still clearly thinner than the
-               main navbar above, just not razor-thin. */
-            padding-top: 0.5rem;
-            padding-bottom: 0.5rem;
-            font-size: 0.78rem;
+            /* Tightened pass: subnav reads as quieter chrome again,
+               with form controls still breathing thanks to the
+               .form-control-sm override below. Font scaled up
+               slightly so jump-links and form labels stay
+               readable at the smaller padding. */
+            padding-top: 0.25rem;
+            padding-bottom: 0.25rem;
+            font-size: 0.82rem;
         }
         /* Pin the strip's inner container's minimum height so the
            strip stays the same height regardless of whether it
@@ -256,21 +256,22 @@
            adding / removing pills doesn't shift ``main`` content
            up or down. */
         .subnav-strip > .container {
-            min-height: 2.5rem;
+            min-height: 2rem;
             display: flex;
             align-items: center;
             gap: 0.6rem;
         }
-        /* Form inputs + buttons embedded in the subnav: a hair
-           taller than the default ``form-control-sm`` so they
-           don't read as cramped against the strip's new padding.
-           Targets ONLY descendants so non-subnav form-control-sm
-           usage (tables, cards) is untouched. */
+        /* Form inputs + buttons embedded in the subnav: pick up
+           the same slightly-larger type the strip uses, with a
+           tight vertical rhythm that lines up against the
+           half-height padding above. Targets ONLY descendants so
+           non-subnav form-control-sm usage (tables, cards) is
+           untouched. */
         .subnav-strip .form-control-sm,
         .subnav-strip .btn-sm {
-            font-size: 0.78rem;
-            padding-top: 0.2rem;
-            padding-bottom: 0.2rem;
+            font-size: 0.82rem;
+            padding-top: 0.15rem;
+            padding-bottom: 0.15rem;
         }
         .subnav-strip .nav-pills {
             /* Match the inter-button spacing the top nav uses
