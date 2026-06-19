@@ -1,5 +1,5 @@
 {% extends "ui/_layout.html" %}
-{% from "ui/_table_macros.html" import sort_header, pagination_footer with context %}
+{% from "ui/_table_macros.html" import sort_header, pagination_inline with context %}
 {% block title %}Images - bty-web{% endblock %}
 
 {% block subnav %}
@@ -69,25 +69,26 @@
             </form>
         </span>
     </div>
-    {# Free-text search across name / format / arch / source. Typing
-       "freebsd" narrows the list to just the freebsd images. Carries
-       the active sort + per_page through hidden inputs. #}
-    <div class="card-body py-2 border-bottom">
-        <form method="get" class="d-flex align-items-center gap-2 m-0">
+    {# One toolbar row carrying search + pagination above the table,
+       the same shape as machines + events. Single plain-text input
+       does substring match across name / format / arch / source /
+       sha. #}
+    <div class="card-body py-2 border-bottom d-flex flex-wrap align-items-center gap-3">
+        <form method="get" class="d-flex align-items-center gap-2 m-0 flex-grow-1" style="min-width: 18rem;">
             {% if sort.column != 'name' %}<input type="hidden" name="sort" value="{{ sort.column }}">{% endif %}
             {% if sort.direction != 'asc' %}<input type="hidden" name="dir" value="{{ sort.direction }}">{% endif %}
-            {% if page.per_page != per_page_choices[1] %}<input type="hidden" name="per_page" value="{{ page.per_page }}">{% endif %}
+            {% if page.per_page != per_page_choices[0] %}<input type="hidden" name="per_page" value="{{ page.per_page }}">{% endif %}
             <input type="search" name="q" value="{{ q or '' }}"
-                   class="form-control form-control-sm" style="max-width: 24rem;"
+                   class="form-control form-control-sm" style="max-width: 28rem;"
                    placeholder="Search name / format / arch (e.g. freebsd)">
             <button type="submit" class="btn btn-sm btn-outline-secondary">
                 <i class="bi bi-search me-1"></i>Search
             </button>
             {% if q %}
             <a href="?" class="btn btn-sm btn-link">Clear</a>
-            <span class="text-muted small">Filtered by &ldquo;<code>{{ q }}</code>&rdquo;</span>
             {% endif %}
         </form>
+        {{ pagination_inline(page, preserved, label='images') }}
     </div>
     <div class="table-responsive">
         <table class="table table-hover mb-0 align-middle">
@@ -174,7 +175,6 @@
             </tbody>
         </table>
     </div>
-    {{ pagination_footer(page, preserved, label='images') }}
 </div>
 
 <script>
@@ -330,8 +330,8 @@
 
 {# Catalog event slice (entry adds / deletes / imports). #}
 {% with events=image_events,
-        title="Recent Events",
-        link_to_full="/ui/events?subject_kind=catalog",
+        title="Last 10 Events",
+        link_to_full="/ui/events?q=catalog",
         card_id="images-activity" %}
 {% include "ui/_events_card.html" %}
 {% endwith %}

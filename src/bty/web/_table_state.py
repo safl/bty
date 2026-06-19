@@ -33,8 +33,8 @@ from dataclasses import dataclass
 # entry is the default. Kept small so the table fits in a single
 # scroll window on a 14" laptop without forcing the operator to
 # expand a giant 200-row page.
-PER_PAGE_CHOICES: tuple[int, ...] = (25, 50, 100)
-DEFAULT_PER_PAGE = PER_PAGE_CHOICES[1]  # 50
+PER_PAGE_CHOICES: tuple[int, ...] = (10, 25, 50, 100)
+DEFAULT_PER_PAGE = PER_PAGE_CHOICES[0]  # 10
 
 # Number of numeric page-buttons shown around the current page in
 # the footer. ``window=2`` gives ``... 3 4 [5] 6 7 ...`` (the

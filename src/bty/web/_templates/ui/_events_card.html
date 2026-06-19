@@ -56,7 +56,7 @@
                     <td>
                         {% if e.source_ip %}
                         <a class="text-decoration-none"
-                           href="/ui/events?source_ip={{ e.source_ip|urlencode }}"
+                           href="/ui/events?q={{ e.source_ip|urlencode }}"
                            title="Filter by this IP">
                             <code class="small">{{ e.source_ip }}</code>
                         </a>

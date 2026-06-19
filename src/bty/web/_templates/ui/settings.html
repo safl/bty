@@ -112,27 +112,31 @@
             To point at a fork or a private catalog server, just
             edit the URL.
         </p>
-        <div class="alert alert-info py-2 px-3 small mb-3" role="note">
-            <strong>The default catalog URL says <code>latest</code>,
-            but the image refs inside are pinned to a specific
-            ISO-week tag</strong> (e.g. <code>:2026.W25</code>). nosi
-            publishes two catalog flavours per release and the bty
-            default fetches the pinned one:
+        <div class="border-start border-info border-3 ps-3 small mb-3" role="note">
+            <p class="mb-1">
+                <strong>The default URL pins to the nosi release this
+                bty version was built against</strong>, so two
+                operators on the same bty version see byte-identical
+                catalog content; upgrading bty is what rolls the
+                catalog forward. Three options if you want something
+                else:
+            </p>
             <ul class="mb-0 mt-1">
-                <li><code>catalog.toml</code> (<strong>default</strong>):
-                    image refs are pinned to that release's
-                    ISO-week tag, so bty re-fetches the same bytes
-                    every flash for as long as the week-tag exists
-                    on ghcr. The URL itself rolls forward each
-                    week.</li>
-                <li><code>catalog-latest.toml</code>: image refs
-                    point at the rolling <code>:latest</code> tag
-                    on ghcr; bty flashes whatever ghcr currently
-                    serves. Swap the URL suffix to opt in.</li>
+                <li><strong>Pin to a newer week.</strong> Browse
+                    <a href="https://github.com/safl/nosi/releases"
+                       target="_blank" rel="noopener">safl/nosi releases</a>,
+                    pick a tag (e.g. <code>2026.W26</code>), paste
+                    <code>/releases/download/&lt;tag&gt;/catalog.toml</code>.</li>
+                <li><strong>Always-newest (rolls under your feet).</strong>
+                    Use <code>/releases/latest/download/catalog.toml</code>;
+                    each fetch is internally W-tag-pinned but the
+                    URL roll-forwards with each new nosi release.</li>
+                <li><strong>Rolling oras :latest refs.</strong>
+                    Use <code>/releases/latest/download/catalog-latest.toml</code>
+                    (or <code>/releases/download/&lt;tag&gt;/catalog-latest.toml</code>);
+                    image refs are <code>:latest</code> so bty flashes
+                    whatever ghcr currently serves, every flash.</li>
             </ul>
-            To pin to a specific past release, use
-            <code>/releases/download/&lt;tag&gt;/catalog.toml</code>
-            instead of <code>/releases/latest/...</code>.
         </div>
         <div class="mb-3">
             <label for="catalog_url" class="form-label">Catalog URL</label>
