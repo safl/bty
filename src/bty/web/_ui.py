@@ -768,7 +768,7 @@ def register_ui_routes(
     # so sorting is a list ``sorted()`` rather than ``ORDER BY``.
     _IMAGES_SORT_KEYS = ("name", "sha256", "format", "arch", "ref")
 
-    def _images_sort_key(column: str):
+    def _images_sort_key(column: str) -> Callable[[object], tuple[bool, str]]:
         """Return a ``key=`` callable for sorting ``UnifiedImage`` records
         by one of the allowlisted columns. Pulls the first ``name``
         from the tuple (the human label shown in the cell) and
@@ -776,7 +776,7 @@ def register_ui_routes(
         fields sort last regardless of direction so unknown values
         cluster together."""
 
-        def _key(img: object):
+        def _key(img: object) -> tuple[bool, str]:
             # Read attributes off the dataclass; treat None as a high
             # sentinel so missing values pile at the end of an ASC sort.
             if column == "name":
