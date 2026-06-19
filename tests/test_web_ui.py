@@ -866,6 +866,103 @@ def test_ui_machines_filter_unrecognised_value_falls_back_to_full_list(
     assert 'sse-connect="/events/machines"' in body
 
 
+def _machines_tbody(body: str) -> str:
+    """Extract the inner contents of the ``<tbody id="machines-tbody">``.
+    Other parts of the page (the inline-add form's placeholder, JS
+    snippets, the Activity card) mention MACs too, so a body-wide
+    ``index()`` matches the wrong text. Scoping to the tbody keeps the
+    sort/search assertions tied to the rows that actually rendered."""
+    head = 'id="machines-tbody"'
+    start = body.index(head)
+    open_close = body.index(">", start)
+    end = body.index("</tbody>", open_close)
+    return body[open_close + 1 : end]
+
+
+def test_ui_machines_sort_by_column_orders_table(client: TestClient) -> None:
+    """``?sort=<col>&dir=<asc|desc>`` orders the machines table by the
+    chosen column. The column allowlist is the SQL-injection guard;
+    here we just confirm the happy path: two MACs added in one order
+    appear in the requested order in the response."""
+    _login(client)
+    # Stage two machines: discovery order gives ee:ff then ee:11.
+    client.get("/pxe/aa:bb:cc:dd:ee:ff")
+    client.get("/pxe/aa:bb:cc:dd:ee:11")
+    # Default sort is mac ASC; ee:11 < ee:ff so ee:11 appears first.
+    tbody = _machines_tbody(client.get("/ui/machines").text)
+    assert tbody.index("aa:bb:cc:dd:ee:11") < tbody.index("aa:bb:cc:dd:ee:ff")
+    # ``?dir=desc`` flips the order.
+    tbody = _machines_tbody(client.get("/ui/machines?sort=mac&dir=desc").text)
+    assert tbody.index("aa:bb:cc:dd:ee:ff") < tbody.index("aa:bb:cc:dd:ee:11")
+
+
+def test_ui_machines_sort_unknown_column_falls_back_to_default(client: TestClient) -> None:
+    """A ``?sort=`` value not in the page's allowlist falls back to the
+    default (mac) rather than being interpolated into the SQL. This
+    is the SQL-injection guard; a bogus column must not 500 or leak."""
+    _login(client)
+    client.get("/pxe/aa:bb:cc:dd:ee:aa")
+    # Garbage column name; default-mac ASC should still render the row.
+    r = client.get("/ui/machines?sort=%3B+DROP+TABLE+machines%3B--&dir=asc")
+    assert r.status_code == 200
+    assert "aa:bb:cc:dd:ee:aa" in r.text
+
+
+def test_ui_machines_search_filters_by_mac_or_hostname(client: TestClient) -> None:
+    """``?q=<text>`` is a substring filter across MAC, hostname,
+    image ref, and last-seen IP. Typing a few hex of one MAC narrows
+    the table to just that machine; clearing the query restores the
+    full list."""
+    _login(client)
+    client.get("/pxe/aa:bb:cc:dd:ee:11")
+    client.get("/pxe/aa:bb:cc:dd:ee:ff")
+    body = client.get("/ui/machines?q=ee%3Aff").text
+    list_part = body.split('id="machines-activity"')[0]
+    assert "aa:bb:cc:dd:ee:ff" in list_part
+    assert "aa:bb:cc:dd:ee:11" not in list_part
+    # The "Clear" anchor is rendered while a query is active.
+    assert "Clear" in body
+    # Without the q the second MAC reappears.
+    body = client.get("/ui/machines").text
+    list_part = body.split('id="machines-activity"')[0]
+    assert "aa:bb:cc:dd:ee:11" in list_part
+
+
+def test_ui_machines_search_with_no_matches_renders_empty_state(client: TestClient) -> None:
+    """A search that matches nothing must not 500; it should render
+    the table chrome with zero rows and the active-search chip so
+    the operator can see why the table looks empty."""
+    _login(client)
+    client.get("/pxe/aa:bb:cc:dd:ee:11")
+    r = client.get("/ui/machines?q=zzzzz")
+    assert r.status_code == 200
+    body = r.text
+    assert "aa:bb:cc:dd:ee:11" not in body.split('id="machines-activity"')[0]
+    # Footer says "No machines."
+    assert "No machines." in body
+
+
+def test_ui_machines_pagination_slices_rows(client: TestClient) -> None:
+    """``?per_page=25&page=2`` slices the machines list to a 25-row
+    window starting at row 26. Stage enough rows that two pages
+    exist and assert the first row of page 2 lands."""
+    _login(client)
+    # 27 machines so the 25-per-page slicing has a meaningful page 2.
+    for i in range(27):
+        client.get(f"/pxe/aa:bb:cc:dd:00:{i:02x}")
+    # Page 1: first 25 (00:00..00:18). Page 2: 00:19, 00:1a.
+    page1 = client.get("/ui/machines?per_page=25&page=1").text
+    page2 = client.get("/ui/machines?per_page=25&page=2").text
+    list1 = page1.split('id="machines-activity"')[0]
+    list2 = page2.split('id="machines-activity"')[0]
+    assert "aa:bb:cc:dd:00:00" in list1
+    assert "aa:bb:cc:dd:00:18" in list1
+    assert "aa:bb:cc:dd:00:1a" in list2
+    # Footer "Showing X-Y of Z" reflects the slice.
+    assert "Showing <strong>1</strong>" in page1
+    assert "Showing <strong>26</strong>" in page2
+
+
 def test_ui_machines_filter_discovered_excludes_assigned(client: TestClient) -> None:
     """``?filter=discovered`` (the dashboard counter card link)
     only shows machines without an assigned image, and drops the
@@ -2150,9 +2247,15 @@ def test_ui_machines_list_shows_boot_mode_badge(client: TestClient) -> None:
     assert "bg-dark" in body and ">ipxe-exit<" in body
     assert "bg-info text-dark" in body and ">bty-tui<" in body
     assert "bg-primary" in body and ">bty-inventory<" in body
-    # Table header has Boot column + Last flashed column.
-    assert ">Boot</th>" in body
-    assert ">Last flashed</th>" in body
+    # Table header has Boot column + Last flashed column. The
+    # sortable-header macro wraps each label in an ``<a>``, so the
+    # closing ``</th>`` isn't adjacent to the label any more; the
+    # label text plus the sort-arrow span are enough to confirm the
+    # column shipped.
+    assert "Boot\n" in body or "Boot " in body
+    assert "Last flashed\n" in body or "Last flashed " in body
+    assert 'href="?' in body and "sort=boot_mode" in body
+    assert "sort=last_flashed_at" in body
 
 
 def test_ui_machine_detail_shows_boot_state_tracking_signals(client: TestClient) -> None:

@@ -9,6 +9,41 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.56.0] - 2026-06-19
+
+### Added
+
+- **Paginated + sortable tables on /ui/machines and /ui/images, plus
+  free-text search across both.** Operators running a real lab fleet
+  end up with hundreds of `machines` rows and a catalog of dozens of
+  images; the old "render everything in one scroll" approach was
+  becoming painful. Now:
+
+  - Every column header is a sort toggle (click once to sort, click
+    again to flip direction). The active column shows an arrow; the
+    others show a faded `⇅` to advertise that they're clickable.
+  - A per-page selector (25 / 50 / 100) plus a Prev / 1..N / Next /
+    Last pagination strip lives under each table. The footer also
+    shows `Showing 26-50 of 178 machines`.
+  - A free-text search box (`?q=`) above each table narrows by
+    substring across the columns the operator usually pivots on:
+    MAC / hostname / image-ref / last-seen IP for machines, name /
+    format / arch / source / sha256 for images. Typing `freebsd`
+    shows only the freebsd images; typing the last hex of a MAC
+    finds that one machine.
+  - All state (sort, direction, page, per_page, q, filter) lives in
+    the URL, so the view is bookmarkable and survives a refresh.
+  - The `?sort=` column is allowlisted per-page; an out-of-list
+    value silently falls back to the default rather than being
+    interpolated into SQL.
+  - SSE auto-refresh on /ui/machines stays on only for the default
+    view (no filter / no search / default sort / page 1); operators
+    drilling into a slice of the fleet now get a stable static view
+    instead of having the SSE push wipe their sort.
+
+  The existing categorical `?filter=` (discovered / assigned) keeps
+  working and composes with the new search + sort + pagination.
+
 ## [0.55.12] - 2026-06-19
 
 ### Fixed
