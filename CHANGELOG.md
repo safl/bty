@@ -21,7 +21,8 @@ operator-facing summary.
 
   - Every column header is a sort toggle (click once to sort, click
     again to flip direction). The active column shows an arrow; the
-    others show a faded `⇅` to advertise that they're clickable.
+    others show a faded up-down glyph to advertise that they're
+    clickable.
   - A per-page selector (25 / 50 / 100) plus a Prev / 1..N / Next /
     Last pagination strip lives under each table. The footer also
     shows `Showing 26-50 of 178 machines`.
