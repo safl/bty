@@ -49,6 +49,32 @@ size_bytes = 4096
 """
 
 
+def _patch_open_for_console(fake_path: Path):
+    """``builtins.open`` replacement that diverts ``/dev/console``
+    writes to ``fake_path`` and passes everything else through to the
+    real ``open``. Lets the milestone-emitter tests assert on the
+    bytes the wizard would have sent to the serial console without
+    actually needing a writable /dev/console (which is root-only in
+    real life, missing in containers/CI).
+
+    /dev/console is a chardev: opening it with mode "w" does NOT
+    truncate prior writes (consecutive milestone calls all land in
+    order on the UART). Mirror that semantics on the fake by
+    promoting "w" to "a" -- without it the second milestone write
+    would wipe the first on a regular-file backing.
+    """
+    real_open = open
+
+    def fake_open(path, mode="r", *args, **kwargs):
+        if path == "/dev/console":
+            if mode == "w":
+                mode = "a"
+            return real_open(fake_path, mode, *args, **kwargs)
+        return real_open(path, mode, *args, **kwargs)
+
+    return fake_open
+
+
 def _fake_bytes_resp(raw: bytes):
     """urllib.request.urlopen replacement that returns ``raw`` as the
     response body. Compatible with the ``with urlopen(...) as resp``
@@ -618,23 +644,20 @@ def test_emit_console_marker_writes_to_stderr_and_swallows_console_failure(
 
 
 def test_milestone_emitter_fires_each_threshold_once_in_order(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """``_MilestoneEmitter`` is the SoL-friendly progress heartbeat. It
     must emit ``bty: <stage> NN%`` lines on 25/50/75/100 crossings, at
-    most once per crossing, in increasing order, and it must pass
-    ``local_tty=False`` so the line lands on /dev/kmsg but does NOT
-    scramble the Rich progress bar painted on /dev/tty1 (the same TTY
-    stderr resolves to under bty-on-tty1.service). This is what an
-    operator watching IPMI SoL during an auto-flash actually sees
-    between the ``starting`` and ``complete`` bookends.
+    most once per crossing, in increasing order, and write directly to
+    /dev/console (which resolves to the LAST ``console=`` cmdline
+    target, ttyS0 on every bty cmdline -- so the bytes land on the
+    serial UART, not on the framebuffer tty0 Rich is painting on).
+    Routing through /dev/kmsg (v0.55.11) caused stacked bar pairs
+    because the printk fanout reached tty0 too; the direct
+    /dev/console write skips printk entirely.
     """
-    calls: list[tuple[str, bool]] = []
-    monkeypatch.setattr(
-        tui_app,
-        "_emit_console_marker",
-        lambda line, *, local_tty=True: calls.append((line, local_tty)),
-    )
+    fake = tmp_path / "console"
+    monkeypatch.setattr("builtins.open", _patch_open_for_console(fake))
     em = tui_app._MilestoneEmitter("write")
     # Cross a couple of thresholds at once (a real flash can emit
     # tens of MiB between progress events when the write is fast).
@@ -642,64 +665,57 @@ def test_milestone_emitter_fires_each_threshold_once_in_order(
     em.update(60, 100)  # 60% -> fires 50
     em.update(80, 100)  # 80% -> fires 75
     em.update(100, 100)  # 100% -> fires 100
-    assert calls == [
-        ("bty: write 25%", False),
-        ("bty: write 50%", False),
-        ("bty: write 75%", False),
-        ("bty: write 100%", False),
-    ]
+    assert fake.read_text() == ("bty: write 25%\nbty: write 50%\nbty: write 75%\nbty: write 100%\n")
 
 
 def test_milestone_emitter_skips_when_total_unknown(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Some write paths can't pre-compute the decompressed total
     (gzip-without-trailer-trust, qcow2 with sparse virtual size).
     The emitter must silently no-op rather than divide-by-zero or
     emit bogus percentages."""
-    calls: list[str] = []
-    monkeypatch.setattr(
-        tui_app,
-        "_emit_console_marker",
-        lambda line, **_kw: calls.append(line),
-    )
+    fake = tmp_path / "console"
+    monkeypatch.setattr("builtins.open", _patch_open_for_console(fake))
     em = tui_app._MilestoneEmitter("download")
     em.update(1024, None)
     em.update(1024, 0)
     em.update(1024, -1)
-    assert calls == []
+    assert not fake.exists() or fake.read_text() == ""
 
 
 def test_milestone_emitter_jumping_past_threshold_still_fires_all(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """A single fast-path event can jump from 0% to 60% (the dd
     progress thread fires at ~1Hz; a fast NVMe target writes hundreds
     of MiB between two events). The emitter still fires 25 AND 50 in
     order, not just the highest threshold crossed."""
-    calls: list[str] = []
-    monkeypatch.setattr(
-        tui_app,
-        "_emit_console_marker",
-        lambda line, **_kw: calls.append(line),
-    )
+    fake = tmp_path / "console"
+    monkeypatch.setattr("builtins.open", _patch_open_for_console(fake))
     em = tui_app._MilestoneEmitter("download")
     em.update(60, 100)  # crosses both 25 and 50
-    assert calls == ["bty: download 25%", "bty: download 50%"]
+    assert fake.read_text() == "bty: download 25%\nbty: download 50%\n"
 
 
-def test_emit_console_marker_local_tty_false_skips_stderr(
-    capsys: pytest.CaptureFixture[str],
+def test_milestone_emitter_swallows_unwritable_console(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The ``local_tty=False`` kwarg is the screen-corruption fix for
-    in-flash milestone markers. With it set, the line must NOT land
-    on stderr (which bty-on-tty1.service routes to /dev/tty1, the
-    same TTY Rich is painting the progress bar on); the /dev/kmsg
-    write is still attempted so SoL / IPMI observers keep their
-    heartbeats."""
-    tui_app._emit_console_marker("bty: download 25%", local_tty=False)
-    captured = capsys.readouterr()
-    assert "bty: download 25%" not in captured.err
+    """A workstation run without a writable /dev/console (laptop, CI
+    container, non-Linux) must not crash the wizard: the OSError
+    from ``open('/dev/console', 'w')`` is suppressed and the
+    milestone simply doesn't land."""
+    real_open = open
+
+    def broken_open(path, *args, **kwargs):
+        if path == "/dev/console":
+            raise PermissionError(13, "permission denied", "/dev/console")
+        return real_open(path, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.open", broken_open)
+    em = tui_app._MilestoneEmitter("download")
+    em.update(60, 100)  # crosses 25 and 50; both writes raise + are swallowed
+    # made it here without raising = pass
 
 
 # --------------------------------------------------------------------------

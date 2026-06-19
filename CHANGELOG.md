@@ -9,6 +9,31 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.55.12] - 2026-06-19
+
+### Fixed
+
+- **Auto-flash milestone markers no longer stack the Rich progress
+  bar -- the residual case from v0.55.11**. The v0.55.11 fix
+  removed the visible stderr text leak by routing milestones
+  through `/dev/kmsg` only, but `/dev/kmsg` writes go through
+  `printk` and fan out to every registered console -- including
+  `/dev/tty0`, where the kernel-timestamped line landed on the
+  framebuffer between Rich repaint cycles. The text itself was
+  covered by Rich's next paint within ~100 ms (so invisible to
+  the operator's eye), but the framebuffer cursor had already
+  advanced one line and Rich's internal cursor tracker was now
+  out of sync with the screen. Each milestone shifted the next
+  bar render one line down: three milestones, three stacked
+  pairs. The new path writes milestones **directly** to
+  `/dev/console`, which resolves to the LAST `console=` cmdline
+  target (`ttyS0` on every bty cmdline -- USB, PXE, chain test).
+  That hits the serial UART only: SoL / IPMI observers and the
+  chain test still capture the heartbeat through the same UART
+  they watch for everything else, and `/dev/tty0` is never
+  touched. The local HDMI screen finally stays a single clean
+  bar pair through 25/50/75/100%.
+
 ## [0.55.11] - 2026-06-18
 
 ### Fixed

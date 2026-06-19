@@ -2119,18 +2119,39 @@ class _MilestoneEmitter:
             return
         pct = min(100, (done * 100) // total)
         while self._pending and pct >= self._pending[0]:
-            # ``local_tty=False``: milestones fire from inside the
-            # Rich Live context that paints the progress bar on
-            # /dev/tty1. Writing the marker to stderr (which
-            # bty-on-tty1.service routes to that same tty) would
-            # inject raw text mid-frame and stack a duplicate
-            # progress-bar block below each milestone. The kmsg
-            # path still carries the line out to the serial
-            # console for SoL / IPMI observers.
-            _emit_console_marker(
-                f"bty: {self._stage} {self._pending[0]}%",
-                local_tty=False,
-            )
+            # Write the milestone DIRECTLY to /dev/console, which
+            # resolves to the LAST ``console=`` cmdline target
+            # (ttyS0 on every bty cmdline -- USB, PXE, chain
+            # test). That means the bytes hit the serial UART
+            # only: a SoL / IPMI operator still sees the heartbeat
+            # via the same UART they're watching for everything
+            # else, and the chain test still captures it via
+            # QEMU's ``-serial file:``.
+            #
+            # v0.55.11 routed milestones through /dev/kmsg to
+            # reach all registered consoles, but kmsg goes
+            # through ``printk`` which fans out to /dev/tty0 too.
+            # The kernel timestamp + line text WAS landing on
+            # the framebuffer console, just covered by Rich's
+            # next paint within ~100ms -- invisible to the
+            # operator's eye but enough to displace the
+            # framebuffer cursor by one line. Rich's internal
+            # cursor tracker then thought the top of its render
+            # region was higher than it was, and the next bar
+            # render landed below the prior one. Three milestones
+            # = three stacked bar pairs.
+            #
+            # Direct /dev/console write skips printk entirely,
+            # so /dev/tty0 (and Rich's render region) is never
+            # touched. Best-effort: a workstation run without
+            # /dev/console writable swallows the OSError.
+            line = f"bty: {self._stage} {self._pending[0]}%\n"
+            with (
+                contextlib.suppress(OSError),
+                open("/dev/console", "w", encoding="utf-8") as console,
+            ):
+                console.write(line)
+                console.flush()
             self._pending.pop(0)
 
 
