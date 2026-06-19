@@ -9,6 +9,24 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.57.1] - 2026-06-19
+
+### Changed
+
+- **Subnav strip vertical rhythm + text uniformity.** v0.57.0
+  bumped the strip padding to give the new page-level forms
+  breathing room, but the result read as too generous against
+  the rest of the chrome. Cut top / bottom padding to 0.25rem,
+  dropped the inner container's ``min-height`` to 2rem, and
+  set every text-bearing descendant
+  (``form-control-sm`` / ``btn-sm`` / ``a`` / ``label`` /
+  ``.small`` / ``small``) to ``font-size: inherit`` so the
+  strip's single 0.85rem applies to anchors, labels, inputs,
+  and buttons alike. Before the fix three slightly-different
+  sizes (subnav-jumps anchors at 0.82rem, Bootstrap form
+  controls at their own 0.875rem, ``.small`` Filter labels at
+  0.875em of the parent) lived in the same row.
+
 ## [0.57.0] - 2026-06-19
 
 ### Changed
