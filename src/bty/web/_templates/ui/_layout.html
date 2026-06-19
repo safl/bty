@@ -240,12 +240,18 @@
             border-bottom: 1px solid rgba(255, 255, 255, 0.10);
             /* Tightened pass: subnav reads as quieter chrome again,
                with form controls still breathing thanks to the
-               .form-control-sm override below. Font scaled up
-               slightly so jump-links and form labels stay
-               readable at the smaller padding. */
+               .form-control-sm override below. The single
+               ``font-size`` here is the canonical type size for
+               EVERY descendant (jump-links, embedded form labels,
+               inputs, buttons) so the strip reads as one flat
+               row of text. The descendant overrides below
+               (form-control-sm / btn-sm / label.small) all
+               re-pin to the same value rather than honouring
+               Bootstrap's defaults. */
             padding-top: 0.25rem;
             padding-bottom: 0.25rem;
-            font-size: 0.82rem;
+            font-size: 0.85rem;
+            line-height: 1.4;
         }
         /* Pin the strip's inner container's minimum height so the
            strip stays the same height regardless of whether it
@@ -261,15 +267,25 @@
             align-items: center;
             gap: 0.6rem;
         }
-        /* Form inputs + buttons embedded in the subnav: pick up
-           the same slightly-larger type the strip uses, with a
-           tight vertical rhythm that lines up against the
-           half-height padding above. Targets ONLY descendants so
-           non-subnav form-control-sm usage (tables, cards) is
-           untouched. */
+        /* Re-pin every text-bearing element in the subnav to the
+           strip's own font-size so jump-links, form labels,
+           inputs, and buttons all line up at one size.
+           ``small`` defaults to ``0.875em`` which would scale
+           inputs / labels smaller than the anchors -- explicit
+           ``inherit`` keeps them on the strip's 0.85rem. Targets
+           ONLY descendants so non-subnav form-control-sm usage
+           (tables, cards) is untouched. */
+        .subnav-strip .form-control-sm,
+        .subnav-strip .btn-sm,
+        .subnav-strip a,
+        .subnav-strip label,
+        .subnav-strip .small,
+        .subnav-strip small {
+            font-size: inherit;
+            line-height: inherit;
+        }
         .subnav-strip .form-control-sm,
         .subnav-strip .btn-sm {
-            font-size: 0.82rem;
             padding-top: 0.15rem;
             padding-bottom: 0.15rem;
         }
