@@ -25,10 +25,15 @@
             z-index: 1030;
         }
         /* In-page ``#anchor`` jumps (the sub-nav section links) land
-           below the sticky header instead of under it. Matches the
-           combined accent + navbar + sub-nav height with a little slack. */
+           below the sticky header instead of under it. The actual
+           value is updated by JS at the bottom of this template to
+           match ``.bty-sticky-header``'s measured height plus a
+           little slack -- so when the subnav grows / shrinks (e.g.
+           a page-level action moves in) the jump still lands at
+           the right vertical offset. The default below is a sane
+           fallback for the no-JS path. */
         html {
-            scroll-padding-top: 5.5rem;
+            scroll-padding-top: 6.5rem;
             scroll-behavior: smooth;
         }
         /* Brand pill keeps the same padding + radius on every
@@ -195,10 +200,29 @@
         .bty-jump-flash {
             animation: bty-jump-flash 1s ease-out;
         }
+        /* Copy-to-clipboard click feedback. The icon swap to a
+           green check happens in bty-utils.js; this CSS pulses
+           the chip so the operator sees the click landed even on
+           a small clipboard glyph. ``transform-origin: left``
+           keeps the inline text anchored so the pulse doesn't
+           shift surrounding layout. */
+        @keyframes bty-copy-pulse {
+            0%   { transform: scale(1.0); }
+            30%  { transform: scale(1.18); }
+            100% { transform: scale(1.0); }
+        }
+        .bty-copy {
+            transform-origin: left center;
+            transition: color 0.15s;
+        }
+        .bty-copy-pulse {
+            animation: bty-copy-pulse 0.35s ease-out;
+        }
         @media (prefers-reduced-motion: reduce) {
             .nav-live.pulsing i,
             .sse-target.flashing,
-            .bty-jump-flash {
+            .bty-jump-flash,
+            .bty-copy-pulse {
                 animation: none;
             }
         }
@@ -214,27 +238,39 @@
         .subnav-strip {
             background-color: #495057;
             border-bottom: 1px solid rgba(255, 255, 255, 0.10);
-            /* The sub-nav reads as a thinner, quieter tier than the
-               main navbar: ~2/3 its height, with text scaled down to
-               match (the top nav is the default ~1rem). */
-            padding-top: 0.1rem;
-            padding-bottom: 0.1rem;
-            font-size: 0.72rem;
+            /* Roomier vertical padding so embedded form controls
+               (the page-level add / fetch actions on machines /
+               images / netboot) have breathing space around
+               them. The strip is still clearly thinner than the
+               main navbar above, just not razor-thin. */
+            padding-top: 0.5rem;
+            padding-bottom: 0.5rem;
+            font-size: 0.78rem;
         }
         /* Pin the strip's inner container's minimum height so the
            strip stays the same height regardless of whether it
            carries pills, right-side meta, or just an empty
-           placeholder. The value matches a pill's rendered height:
-           line-height (1.5 * 1rem) + vertical padding
-           (0.4rem * 2) = 2.3rem. ``min-height`` on the inner
-           container (rather than on ``.subnav-strip`` itself) lets
-           the navbar's own ``py-1`` padding sit outside the
-           reservation, so adding/removing pills doesn't shift
-           ``main`` content up or down. */
+           placeholder. ``min-height`` on the inner container
+           (rather than on ``.subnav-strip`` itself) lets the
+           navbar's own padding sit outside the reservation, so
+           adding / removing pills doesn't shift ``main`` content
+           up or down. */
         .subnav-strip > .container {
-            min-height: 1.7rem;
+            min-height: 2.5rem;
             display: flex;
             align-items: center;
+            gap: 0.6rem;
+        }
+        /* Form inputs + buttons embedded in the subnav: a hair
+           taller than the default ``form-control-sm`` so they
+           don't read as cramped against the strip's new padding.
+           Targets ONLY descendants so non-subnav form-control-sm
+           usage (tables, cards) is untouched. */
+        .subnav-strip .form-control-sm,
+        .subnav-strip .btn-sm {
+            font-size: 0.78rem;
+            padding-top: 0.2rem;
+            padding-bottom: 0.2rem;
         }
         .subnav-strip .nav-pills {
             /* Match the inter-button spacing the top nav uses
@@ -263,13 +299,20 @@
             color: #fff;
             background-color: rgba(255, 255, 255, 0.10);
         }
-        .subnav-strip .subnav-jumps .vr {
+        .subnav-strip .subnav-jumps .vr,
+        .subnav-strip .subnav-actions .vr {
             background-color: rgba(255, 255, 255, 0.5);
             opacity: 1;
             width: 1px;
             min-height: 1.4em;
             align-self: center;
             margin: 0 0.3rem;
+        }
+        /* The actions group sits on the right side of the strip;
+           give it a touch more breathing room between forms than
+           the tighter jumps gap. */
+        .subnav-strip .subnav-actions .vr {
+            margin: 0 0.5rem;
         }
         .subnav-strip .nav-pills .nav-link:hover {
             color: #fff;
@@ -543,6 +586,24 @@
         var target = document.getElementById(a.getAttribute("href").slice(1));
         if (target) blink(target, "bty-jump-flash");
     });
+
+    // Keep ``scroll-padding-top`` in lockstep with the actual height
+    // of the sticky header. With the v0.58 subnav growing to fit the
+    // page-level action forms, the static CSS value drifted: anchor
+    // jumps either peeked under the bar (value too small) or
+    // overshot with empty space above the target (value too large).
+    // Measure on load + on resize so a window-shrink that wraps a
+    // longer subnav onto two lines is handled too.
+    function syncScrollPadding() {
+        var header = document.querySelector(".bty-sticky-header");
+        if (!header) return;
+        var h = header.offsetHeight + 6; // +6px slack so the target
+                                         // doesn't kiss the header
+        document.documentElement.style.scrollPaddingTop = h + "px";
+    }
+    syncScrollPadding();
+    window.addEventListener("resize", syncScrollPadding);
+    document.body.addEventListener("htmx:afterSwap", syncScrollPadding);
 })();
 
 // Top-nav background-worker indicator. Polls the three manager

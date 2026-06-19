@@ -3,8 +3,12 @@
 {% block title %}Machines - bty-web{% endblock %}
 
 {% block subnav %}
-{# In-page jump links to the two tables on this page, separated by a
-   vertical rule (same style as the Settings section nav). #}
+{# Left: in-page jump links (List | Activity).
+   Right: the inline add-by-MAC action, moved here from the card
+   header so the page-level "create a new machine" action lives in
+   the page chrome and the card-body stays focused on the data
+   table. The form's id + JS submit are unchanged so the existing
+   upsert handler + the inline-add tests keep working. #}
 <nav class="navbar subnav-strip" aria-label="Section sub-navigation">
     <div class="container">
         <span class="subnav-jumps d-flex align-items-center flex-wrap">
@@ -12,6 +16,20 @@
             <span class="vr"></span>
             <a href="#machines-activity">Activity</a>
         </span>
+        <form id="add-machine-form"
+              class="subnav-actions d-flex align-items-center gap-1 m-0 ms-auto"
+              style="min-width: 0;"
+              onsubmit="return submitAddMachine(event);">
+            <input type="text" required class="form-control form-control-sm font-monospace"
+                   id="add-mac" name="mac"
+                   style="max-width: 14rem; min-width: 0;"
+                   pattern="^([0-9a-fA-F]{2}[:-]){5}[0-9a-fA-F]{2}$"
+                   placeholder="aa:bb:cc:dd:ee:ff"
+                   title="Stage a machine by MAC before it boots; boot mode defaults to 'ipxe-exit' (set image + mode on the detail page)">
+            <button type="submit" class="btn btn-sm btn-primary flex-shrink-0 text-nowrap">
+                <i class="bi bi-plus-lg me-1"></i>Add machine by MAC
+            </button>
+        </form>
     </div>
 </nav>
 {% endblock %}
@@ -55,48 +73,27 @@
    field in the header. Machines also auto-appear on first PXE
    contact; the inline Add just stages a row early. #}
 <div class="card mb-3" id="machines-list">
-    {# ``py-1`` + ``flex-nowrap`` keep the header a single tight row
-       around the inline add-MAC form: default padding plus a wrap to a
-       second line made the bar much taller than a table row. The input
-       shrinks rather than wrapping on a narrow window. #}
-    <div class="card-header bg-light fw-semibold d-flex justify-content-between align-items-center flex-nowrap gap-2 py-1">
-        <span class="text-nowrap"><i class="bi bi-pc-display me-1"></i>Machines</span>
-        {# Minimal add-by-MAC: MAC only. boot_mode defaults to the
-           safe "ipxe-exit" (never a flash policy from here); hostname,
-           image binding + policy are set on the detail page. The
-           upsert handler creates the row with discovered_at=NULL; it
-           flips to first-seen on the box's first PXE contact. #}
-        <form id="add-machine-form" class="d-flex align-items-center gap-1 m-0" style="min-width: 0;"
-              onsubmit="return submitAddMachine(event);">
-            <input type="text" required class="form-control form-control-sm font-monospace"
-                   id="add-mac" name="mac" style="max-width: 14rem; min-width: 0;"
-                   pattern="^([0-9a-fA-F]{2}[:-]){5}[0-9a-fA-F]{2}$"
-                   placeholder="aa:bb:cc:dd:ee:ff"
-                   title="Stage a machine by MAC before it boots; boot mode defaults to 'ipxe-exit' (set image + mode on the detail page)">
-            <button type="submit" class="btn btn-sm btn-primary flex-shrink-0 text-nowrap">
-                <i class="bi bi-plus-lg me-1"></i>Add
-            </button>
-        </form>
-    </div>
-    {# One toolbar row carrying search + pagination above the table.
-       The search submits via GET; the pagination links re-build the
-       URL via build_query_string so the active search / sort survive
-       page changes. Hidden inputs preserve the rest of the state
-       through the submit. #}
-    <div class="card-body py-2 border-bottom d-flex flex-wrap align-items-center gap-3">
-        <form method="get" class="d-flex align-items-center gap-2 m-0 flex-grow-1" style="min-width: 18rem;">
+    {# Card header: "Machines | Filter: <input> <search>" flexes
+       to fill the left side; pagination sits on the right. The
+       Add-MAC action moved into the subnav strip; this card
+       stays focused on the data view. #}
+    <div class="card-header bg-light fw-semibold d-flex flex-wrap align-items-center gap-3 py-2">
+        <form method="get" class="d-flex align-items-center gap-2 m-0 flex-grow-1" style="min-width: 14rem;">
             {% if active_filter %}<input type="hidden" name="filter" value="{{ active_filter }}">{% endif %}
             {% if sort.column != 'mac' %}<input type="hidden" name="sort" value="{{ sort.column }}">{% endif %}
             {% if sort.direction != 'asc' %}<input type="hidden" name="dir" value="{{ sort.direction }}">{% endif %}
             {% if page.per_page != per_page_choices[0] %}<input type="hidden" name="per_page" value="{{ page.per_page }}">{% endif %}
-            <input type="search" name="q" value="{{ q or '' }}"
-                   class="form-control form-control-sm" style="max-width: 28rem;"
-                   placeholder="Search MAC / hostname / image / IP">
-            <button type="submit" class="btn btn-sm btn-outline-secondary">
-                <i class="bi bi-search me-1"></i>Search
+            <span class="text-nowrap"><i class="bi bi-pc-display me-1"></i>Machines</span>
+            <span class="vr"></span>
+            <label for="machines-q" class="text-nowrap text-muted small mb-0">Filter:</label>
+            <input type="search" name="q" id="machines-q" value="{{ q or '' }}"
+                   class="form-control form-control-sm flex-grow-1"
+                   placeholder="MAC / hostname / image / IP">
+            <button type="submit" class="btn btn-sm btn-outline-secondary" title="Search">
+                <i class="bi bi-search"></i>
             </button>
             {% if q %}
-            <a href="?{% if active_filter %}filter={{ active_filter }}{% endif %}" class="btn btn-sm btn-link">Clear</a>
+            <a href="?{% if active_filter %}filter={{ active_filter }}{% endif %}" class="btn btn-sm btn-link text-nowrap">Clear</a>
             {% endif %}
         </form>
         {{ pagination_inline(page, preserved, label='machines') }}
