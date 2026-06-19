@@ -157,21 +157,22 @@ def test_ui_dashboard_renders_after_login(client: TestClient) -> None:
     assert "Machines" in body
 
 
-def test_ui_images_renders_default_catalog_repo(
+def test_ui_images_renders_default_catalog_url(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The /ui/images Fetch control surfaces the catalog repo
-    (default ``safl/nosi``, the upstream image-builder) in the
-    button title + the fetch-release form action. v0.46 split the
-    catalog repo away from the netboot repo so the catalog comes
-    from nosi while netboot artifacts stay on safl/bty."""
+    """The /ui/images Fetch control surfaces the catalog URL (the
+    default points at nosi's /releases/latest/download/catalog.toml,
+    the upstream image-builder) in the button title + the fetch-
+    release form action. ``$BTY_BOOT_RELEASE_REPO`` controls only
+    the netboot repo, not the catalog URL."""
     monkeypatch.setenv("BTY_BOOT_RELEASE_REPO", "")
     _login(client)
     r = client.get("/ui/images")
     assert r.status_code == 200
     body = r.text
     assert "safl/nosi" in body
+    assert "/releases/latest/download/catalog.toml" in body
     assert 'action="/ui/catalog/fetch-release"' in body
 
 
@@ -480,7 +481,8 @@ def test_subnavs_drop_the_redundant_list_pill(client: TestClient) -> None:
     # Settings carries its own section-jump sub-nav (anchor links + rules).
     settings = client.get("/ui/settings").text
     assert 'aria-label="Settings sections"' in settings
-    assert 'href="#upstream-sources"' in settings
+    assert 'href="#netboot-release"' in settings
+    assert 'href="#catalog-source"' in settings
     assert 'href="#dhcp-pxe"' in settings
 
 
@@ -1794,16 +1796,18 @@ def test_ui_settings_renders_when_authed(client: TestClient) -> None:
     r = client.get("/ui/settings")
     assert r.status_code == 200
     body = r.text
-    # Editable upstream card: netboot repo + catalog repo + the two
-    # tag fields + the save form. v0.46+ split the release repo into
-    # separate netboot + catalog repos so a default deploy can pull
-    # the catalog from nosi while netboot artifacts stay on safl/bty.
-    assert "Upstream sources" in body
+    # Editable upstream cards: separate Netboot release (repo + tag)
+    # and Catalog (single URL) panels. The catalog has no repo/tag
+    # split: the URL is the only knob.
+    assert "Netboot release" in body
+    assert ">Catalog<" in body  # the card header label
     assert 'action="/ui/settings/upstream"' in body
     assert 'id="netboot_repo"' in body
-    assert 'id="catalog_repo"' in body
-    assert 'id="catalog_tag"' in body
     assert 'id="netboot_tag"' in body
+    assert 'id="catalog_url"' in body
+    # No catalog repo / tag fields any more.
+    assert 'id="catalog_repo"' not in body
+    assert 'id="catalog_tag"' not in body
     # Read-only config groups: storage + the Identity magic values.
     assert "Storage paths" in body
     # v0.42+: the convention is BTY_<SECTION>_<KEY>; the legacy
@@ -1975,17 +1979,18 @@ def test_ui_settings_upstream_override_round_trips(client: TestClient) -> None:
     """Saving upstream overrides persists them; the Settings page then
     shows them, and clearing the fields reverts to the defaults.
 
-    v0.46+: the form takes ``netboot_repo`` (default ``safl/bty``)
-    and ``catalog_repo`` (default ``safl/nosi``) as separate knobs.
+    The form takes ``netboot_repo`` + ``netboot_tag`` (defaults
+    ``safl/bty`` / ``latest``) and a single ``catalog_url`` (default
+    nosi's ``/releases/latest/download/catalog.toml``).
     """
     _login(client)
+    custom_catalog = "https://example.invalid/forks/catalog.toml"
     r = client.post(
         "/ui/settings/upstream",
         data={
             "netboot_repo": "acme/bty-fork",
-            "catalog_repo": "acme/nosi-fork",
-            "catalog_tag": "v1.2.3",
             "netboot_tag": "v1.2.3",
+            "catalog_url": custom_catalog,
         },
         follow_redirects=False,
     )
@@ -1993,24 +1998,17 @@ def test_ui_settings_upstream_override_round_trips(client: TestClient) -> None:
     assert r.headers["location"] == "/ui/settings?saved=upstream"
     body = client.get("/ui/settings").text
     assert "acme/bty-fork" in body
-    assert "acme/nosi-fork" in body
     assert "v1.2.3" in body
-    # The derived catalog URL uses the catalog repo + explicit-tag form.
-    assert "https://github.com/acme/nosi-fork/releases/download/v1.2.3/catalog.toml" in body
+    assert custom_catalog in body
     # Clearing every field reverts to defaults.
     client.post(
         "/ui/settings/upstream",
-        data={
-            "netboot_repo": "",
-            "catalog_repo": "",
-            "catalog_tag": "",
-            "netboot_tag": "",
-        },
+        data={"netboot_repo": "", "netboot_tag": "", "catalog_url": ""},
     )
     body2 = client.get("/ui/settings").text
     assert "acme/bty-fork" not in body2
-    assert "acme/nosi-fork" not in body2
-    # Both built-in defaults visible again.
+    assert custom_catalog not in body2
+    # Built-in defaults visible again (netboot repo, catalog URL).
     assert "safl/bty" in body2
     assert "safl/nosi" in body2
 
@@ -2018,19 +2016,19 @@ def test_ui_settings_upstream_override_round_trips(client: TestClient) -> None:
 def test_ui_settings_upstream_audit_event_captures_old_and_new(
     client: TestClient,
 ) -> None:
-    """``settings.upstream.updated`` event details carries both
-    ``old`` and ``new`` for each of the four knobs (netboot_repo,
-    catalog_repo, catalog_tag, netboot_tag). v0.46+ split the
-    release repo into separate netboot + catalog repos."""
+    """``settings.upstream.updated`` event details carry both
+    ``old`` and ``new`` for each of the three editable knobs
+    (netboot_repo, netboot_tag, catalog_url)."""
     _login(client)
+    catalog_v1 = "https://example.invalid/v1/catalog.toml"
+    catalog_v2 = "https://example.invalid/v2/catalog.toml"
     # Initial save: olds are all None (defaults in effect).
     r1 = client.post(
         "/ui/settings/upstream",
         data={
             "netboot_repo": "acme/bty-fork",
-            "catalog_repo": "acme/nosi-fork",
-            "catalog_tag": "v1.0.0",
             "netboot_tag": "v1.0.0",
+            "catalog_url": catalog_v1,
         },
         follow_redirects=False,
     )
@@ -2040,9 +2038,8 @@ def test_ui_settings_upstream_audit_event_captures_old_and_new(
         "/ui/settings/upstream",
         data={
             "netboot_repo": "acme/bty-fork",  # unchanged
-            "catalog_repo": "acme/nosi-fork",  # unchanged
-            "catalog_tag": "v1.1.0",  # changed
             "netboot_tag": "",  # cleared
+            "catalog_url": catalog_v2,  # changed
         },
         follow_redirects=False,
     )
@@ -2055,9 +2052,8 @@ def test_ui_settings_upstream_audit_event_captures_old_and_new(
     newest = events[0]
     d = newest["details"]
     assert d["netboot_repo"] == {"old": "acme/bty-fork", "new": "acme/bty-fork"}
-    assert d["catalog_repo"] == {"old": "acme/nosi-fork", "new": "acme/nosi-fork"}
-    assert d["catalog_tag"] == {"old": "v1.0.0", "new": "v1.1.0"}
     assert d["netboot_tag"] == {"old": "v1.0.0", "new": None}
+    assert d["catalog_url"] == {"old": catalog_v1, "new": catalog_v2}
 
 
 def test_ui_settings_renders_backup_schedule_card(client: TestClient) -> None:
@@ -2156,21 +2152,17 @@ def test_ui_settings_backup_invalid_retention_rejects(client: TestClient) -> Non
 def test_settings_upstream_override_drives_catalog_fetch_url(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The catalog-fetch handler resolves its URL from the catalog
-    repo + catalog tag overrides at request time. v0.46+: the
-    catalog repo is its own knob, independent of the netboot repo."""
+    """The catalog-fetch handler resolves its URL from the
+    ``catalog_url`` override at request time. The URL is the only
+    catalog knob: no repo/tag composition, no rewriting."""
     import urllib.error
     import urllib.request
 
     _login(client)
+    custom = "https://example.invalid/forks/catalog.toml"
     client.post(
         "/ui/settings/upstream",
-        data={
-            "netboot_repo": "",
-            "catalog_repo": "acme/widgets",
-            "catalog_tag": "v9.9.9",
-            "netboot_tag": "",
-        },
+        data={"netboot_repo": "", "netboot_tag": "", "catalog_url": custom},
     )
     seen: list[str] = []
 
@@ -2180,7 +2172,7 @@ def test_settings_upstream_override_drives_catalog_fetch_url(
 
     monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen)
     client.post("/ui/catalog/fetch-release", follow_redirects=False)
-    assert seen == ["https://github.com/acme/widgets/releases/download/v9.9.9/catalog.toml"]
+    assert seen == [custom]
 
 
 def test_ui_settings_requires_auth(client: TestClient) -> None:

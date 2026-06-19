@@ -807,8 +807,7 @@ def register_ui_routes(
         flash = request.query_params.get("error")
         catalog_manifest_path = str(_config.cfg().catalog_file)
         with _db.open_db(state_path) as conn:
-            catalog_repo = _settings_store.resolve_catalog_repo(conn)
-            catalog_tag = _settings_store.resolve_catalog_tag(conn)
+            catalog_url = _settings_store.resolve_catalog_url(conn)
             image_events = _events_log.list_events(conn, subject_kind="catalog", limit=15)
 
         # ``?q=<text>`` is a substring filter across the name, format,
@@ -863,8 +862,7 @@ def register_ui_routes(
             unified=sorted_unified[page_state.offset : page_state.offset + page_state.limit],
             image_events=image_events,
             manifest_path=catalog_manifest_path,
-            catalog_repo=catalog_repo,
-            catalog_tag=catalog_tag,
+            catalog_url=catalog_url,
             q=q_norm,
             sort=sort,
             page=page_state,
@@ -1556,28 +1554,21 @@ def register_ui_routes(
         catalog_file = str(cfg.catalog_file)
         with _db.open_db(state_path) as conn:
             netboot_repo = _settings_store.resolve_netboot_repo(conn)
-            catalog_repo = _settings_store.resolve_catalog_repo(conn)
-            catalog_url = _settings_store.resolve_catalog_url(conn)
-            catalog_tag = _settings_store.resolve_catalog_tag(conn)
             netboot_tag = _settings_store.resolve_netboot_tag(conn)
+            catalog_url = _settings_store.resolve_catalog_url(conn)
             netboot_repo_override = _settings_store.get(conn, _settings_store.KEY_NETBOOT_REPO)
-            catalog_repo_override = _settings_store.get(conn, _settings_store.KEY_CATALOG_REPO)
-            catalog_tag_override = _settings_store.get(conn, _settings_store.KEY_CATALOG_TAG)
             netboot_tag_override = _settings_store.get(conn, _settings_store.KEY_NETBOOT_TAG)
+            catalog_url_override = _settings_store.get(conn, _settings_store.KEY_CATALOG_URL)
         upstream = {
             "netboot_repo": netboot_repo,
             "netboot_repo_override": netboot_repo_override,
             "netboot_repo_default": _settings_store.default_netboot_repo(),
-            "catalog_repo": catalog_repo,
-            "catalog_repo_override": catalog_repo_override,
-            "catalog_repo_default": _settings_store.default_catalog_repo(),
-            "catalog_tag": catalog_tag,
-            "catalog_tag_override": catalog_tag_override,
-            "catalog_tag_default": _settings_store.DEFAULT_TAG,
-            "catalog_url": catalog_url,  # derived view (catalog_repo + catalog_tag)
             "netboot_tag": netboot_tag,
             "netboot_tag_override": netboot_tag_override,
             "netboot_tag_default": _settings_store.DEFAULT_TAG,
+            "catalog_url": catalog_url,
+            "catalog_url_override": catalog_url_override,
+            "catalog_url_default": _settings_store.DEFAULT_CATALOG_URL,
         }
         config_groups = [
             {
@@ -1934,33 +1925,30 @@ def register_ui_routes(
     def ui_settings_upstream(
         request: Request,
         netboot_repo: Annotated[str, Form()] = "",
-        catalog_repo: Annotated[str, Form()] = "",
-        catalog_tag: Annotated[str, Form()] = "",
         netboot_tag: Annotated[str, Form()] = "",
+        catalog_url: Annotated[str, Form()] = "",
     ) -> RedirectResponse:
-        """Save (or clear) the four editable upstream overrides:
-        netboot repo, catalog repo, catalog tag, netboot tag. An empty
-        field clears that override, reverting to the built-in default.
-        All four take effect on the next fetch without a restart,
-        since the fetch sites resolve from this store at request time.
+        """Save (or clear) the three editable upstream overrides:
+        netboot repo, netboot release tag, and the catalog URL. An
+        empty field clears that override, reverting to the built-in
+        default. All three take effect on the next fetch without a
+        restart, since the fetch sites resolve from this store at
+        request time.
         """
         nr = netboot_repo.strip()
-        cr = catalog_repo.strip()
-        ct = catalog_tag.strip()
         nt = netboot_tag.strip()
+        cu = catalog_url.strip()
         with _db.open_db(state_path) as conn:
             # Snapshot the previous explicit overrides (None = was on
             # default) BEFORE the writes so the audit event can carry
             # both before + after.
             old_nr = _settings_store.get(conn, _settings_store.KEY_NETBOOT_REPO)
-            old_cr = _settings_store.get(conn, _settings_store.KEY_CATALOG_REPO)
-            old_ct = _settings_store.get(conn, _settings_store.KEY_CATALOG_TAG)
             old_nt = _settings_store.get(conn, _settings_store.KEY_NETBOOT_TAG)
+            old_cu = _settings_store.get(conn, _settings_store.KEY_CATALOG_URL)
             for value, key in (
                 (nr, _settings_store.KEY_NETBOOT_REPO),
-                (cr, _settings_store.KEY_CATALOG_REPO),
-                (ct, _settings_store.KEY_CATALOG_TAG),
                 (nt, _settings_store.KEY_NETBOOT_TAG),
+                (cu, _settings_store.KEY_CATALOG_URL),
             ):
                 if value:
                     _settings_store.set_value(conn, key, value)
@@ -1971,9 +1959,8 @@ def register_ui_routes(
                 kind="settings.upstream.updated",
                 summary=(
                     f"upstream sources set: netboot_repo={nr or '(default)'}, "
-                    f"catalog_repo={cr or '(default)'}, "
-                    f"catalog_tag={ct or '(default)'}, "
-                    f"netboot_tag={nt or '(default)'}"
+                    f"netboot_tag={nt or '(default)'}, "
+                    f"catalog_url={cu or '(default)'}"
                 ),
                 subject_kind="settings",
                 subject_id="upstream",
@@ -1981,9 +1968,8 @@ def register_ui_routes(
                 source_ip=_client_ip(request),
                 details={
                     "netboot_repo": {"old": old_nr, "new": nr or None},
-                    "catalog_repo": {"old": old_cr, "new": cr or None},
-                    "catalog_tag": {"old": old_ct, "new": ct or None},
                     "netboot_tag": {"old": old_nt, "new": nt or None},
+                    "catalog_url": {"old": old_cu, "new": cu or None},
                 },
             )
             conn.commit()

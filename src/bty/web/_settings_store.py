@@ -9,23 +9,20 @@ persisted across restarts without touching the systemd unit:
 - :data:`KEY_NETBOOT_REPO` -- the GitHub ``owner/repo`` the netboot
   artifact fetch (vmlinuz / initrd / squashfs) pulls from. Default
   ``safl/bty``.
-- :data:`KEY_CATALOG_REPO` -- the GitHub ``owner/repo`` the catalog
-  fetch pulls ``catalog.toml`` from. Default ``safl/nosi``: bty
-  consumes the upstream image-builder's auto-generated catalog
-  rather than republishing a hand-maintained mirror.
-- :data:`KEY_CATALOG_TAG` -- the release tag the "Fetch catalog"
-  action targets (``latest`` by default).
 - :data:`KEY_NETBOOT_TAG` -- the release tag the "Fetch artifacts"
-  action targets (``latest`` by default). The two tags are
-  independent so an operator can pin netboot artifacts to a known-
-  good release while still pulling the moving catalog tip.
+  action targets (``latest`` by default).
+- :data:`KEY_CATALOG_URL` -- the URL the "Fetch catalog" action
+  pulls ``catalog.toml`` bytes from. Default
+  :data:`DEFAULT_CATALOG_URL` (the latest nosi release's
+  ``catalog.toml`` asset). A single URL is the natural shape here;
+  unlike netboot (which fetches several assets per release), the
+  catalog is one file. An operator pointing at a fork's catalog
+  just edits the URL.
 
 Resolution order is override (this table) -> environment variable ->
-built-in default, so an unset key transparently falls back to the
-existing behaviour. Only :data:`KEY_NETBOOT_REPO` has an env layer
-(:data:`ENV_RELEASE_REPO` is ``BTY_BOOT_RELEASE_REPO``); the catalog
-repo and the two tag keys resolve straight from override to their
-built-in defaults.
+built-in default. Only :data:`KEY_NETBOOT_REPO` has an env layer
+(:data:`ENV_RELEASE_REPO` is ``BTY_BOOT_RELEASE_REPO``); the netboot
+tag and the catalog URL resolve straight from override to default.
 """
 
 from __future__ import annotations
@@ -34,19 +31,24 @@ import os
 import sqlite3
 from datetime import UTC, datetime
 
-from bty.web._releases import DEFAULT_CATALOG_REPO, DEFAULT_NETBOOT_REPO, ENV_RELEASE_REPO
+from bty.web._releases import DEFAULT_NETBOOT_REPO, ENV_RELEASE_REPO
 
 # ``ENV_RELEASE_REPO`` is imported from :mod:`bty.web._releases` so the
 # env-var name has a single definition; ``KEY_NETBOOT_REPO`` falls back
 # to it (via :func:`default_netboot_repo`) before the built-in default.
 KEY_NETBOOT_REPO = "upstream.netboot_repo"
-KEY_CATALOG_REPO = "upstream.catalog_repo"
-KEY_CATALOG_TAG = "upstream.catalog_tag"
 KEY_NETBOOT_TAG = "upstream.netboot_tag"
+KEY_CATALOG_URL = "upstream.catalog_url"
 
-# Default tag for both catalog and netboot fetches. GitHub resolves
+# Default tag for the netboot artifact fetch. GitHub resolves
 # ``latest`` to the most recent non-prerelease, non-draft tag.
 DEFAULT_TAG = "latest"
+
+# Default URL the "Fetch catalog" button pulls bytes from. Points at
+# nosi's auto-generated catalog asset on the latest release. An
+# operator pointing at a fork (or a private catalog server) just
+# replaces this from the Settings page.
+DEFAULT_CATALOG_URL = "https://github.com/safl/nosi/releases/latest/download/catalog.toml"
 
 # Optional withcache cache-host. When set, bty prefers it as the image
 # *source* for artifacts it already holds (else serves the artifact as
@@ -112,45 +114,16 @@ def default_netboot_repo() -> str:
     return os.environ.get(ENV_RELEASE_REPO) or DEFAULT_NETBOOT_REPO
 
 
-def default_catalog_repo() -> str:
-    """The catalog repo's built-in default. bty consumes the upstream
-    nosi project's auto-generated ``catalog.toml`` rather than
-    republishing a mirror. No env-layer override: operators with a
-    different upstream override via the Settings page (the resulting
-    DB row beats this default)."""
-    return DEFAULT_CATALOG_REPO
-
-
 def resolve_netboot_repo(conn: sqlite3.Connection) -> str:
     """The effective netboot release repo: override -> env -> default."""
     return get(conn, KEY_NETBOOT_REPO) or default_netboot_repo()
 
 
-def resolve_catalog_repo(conn: sqlite3.Connection) -> str:
-    """The effective catalog repo: override -> default."""
-    return get(conn, KEY_CATALOG_REPO) or default_catalog_repo()
-
-
-def catalog_url_for(repo: str, tag: str) -> str:
-    """The catalog.toml URL bty fetches for a given repo + tag.
-    ``latest`` uses GitHub's redirect path (``releases/latest/download/``);
-    everything else uses the explicit ``releases/download/<tag>/`` form."""
-    if tag == "latest":
-        return f"https://github.com/{repo}/releases/latest/download/catalog.toml"
-    return f"https://github.com/{repo}/releases/download/{tag}/catalog.toml"
-
-
-def resolve_catalog_tag(conn: sqlite3.Connection) -> str:
-    """The effective catalog release tag to fetch: override ->
-    :data:`DEFAULT_TAG` (``latest``)."""
-    return get(conn, KEY_CATALOG_TAG) or DEFAULT_TAG
-
-
 def resolve_catalog_url(conn: sqlite3.Connection) -> str:
-    """The effective catalog URL, derived from the current catalog repo
-    + tag. There is no separate override for the URL itself; operators
-    tweak the catalog repo and/or the tag instead."""
-    return catalog_url_for(resolve_catalog_repo(conn), resolve_catalog_tag(conn))
+    """The effective catalog URL: override -> :data:`DEFAULT_CATALOG_URL`.
+    The single URL is what the "Fetch catalog" button GETs; pointing at
+    a fork is just a Settings-page edit, no repo + tag composition."""
+    return get(conn, KEY_CATALOG_URL) or DEFAULT_CATALOG_URL
 
 
 def resolve_netboot_tag(conn: sqlite3.Connection) -> str:

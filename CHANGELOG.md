@@ -9,6 +9,31 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.57.0] - 2026-06-19
+
+### Changed
+
+- **Settings page: the upstream sources panel is now two visually
+  distinct cards.** The single mixed "Upstream sources" form was
+  hard to scan because netboot artifacts and the image catalog
+  share nothing operationally. They now live in
+  ``#netboot-release`` (netboot repo + tag) and ``#catalog-source``
+  (catalog URL); the Settings sub-nav has matching jump links.
+  Both cards still submit through one POST handler so saving from
+  either side persists all three fields in one round-trip.
+
+- **Catalog setting collapses to a single URL field.** The
+  ``catalog_repo`` + ``catalog_tag`` pair (and the URL-composition
+  logic on top of them) is gone; the operator now sets one
+  ``catalog_url`` value, defaulting to
+  ``https://github.com/safl/nosi/releases/latest/download/catalog.toml``.
+  The ``Fetch latest catalog`` button GETs whatever string the
+  Settings page holds: pointing at a fork or a private catalog
+  server is a single-field edit, not a repo-and-tag puzzle. Pre-1.0
+  break-freely: any existing ``upstream.catalog_repo`` and
+  ``upstream.catalog_tag`` rows in ``state.db`` are now dead keys
+  (harmless, ignored on read).
+
 ## [0.56.0] - 2026-06-19
 
 ### Added
