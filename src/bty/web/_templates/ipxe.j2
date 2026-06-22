@@ -2,7 +2,7 @@
 # bty-web - per-MAC iPXE config for {{ mac }}
 # Assignment:
 #   image (ref):       {{ machine.bty_image_ref or "(none)" }}
-#   hostname:          {{ machine.hostname or "(none)" }}
+#   labels:            {{ (machine.labels | join(", ")) or "(none)" }}
 #   boot_mode:       {{ machine.boot_mode }}
 #
 # This template is the exit-to-firmware fallback, rendered for a

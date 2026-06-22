@@ -47,6 +47,7 @@ from bty import oras as _oras
 from bty.web import (
     _backup,
     _db,
+    _labels,
     _models,
     _release_mgr,
     _security,
@@ -442,7 +443,14 @@ def create_app(
         """Render the rows fragment used by /ui/machines and the SSE stream."""
         with _db.open_db(state_path) as conn:
             rows = conn.execute("SELECT * FROM machines ORDER BY mac").fetchall()
-        machines = [_ui._row_to_dict(r) for r in rows]
+            # Batch-fetch labels for the SSE-pushed tbody too (the
+            # request-time list endpoint does the same).
+            label_map: dict[str, list[str]] = {}
+            for r in conn.execute(
+                "SELECT mac, label FROM machine_labels ORDER BY mac, label"
+            ).fetchall():
+                label_map.setdefault(r["mac"], []).append(r["label"])
+        machines = [_ui._row_to_dict(r, label_map.get(r["mac"], [])) for r in rows]
         return jinja.get_template("ui/_machines_tbody.html").render(machines=machines)
 
     def render_dashboard_panels() -> tuple[str, str]:
@@ -585,13 +593,18 @@ def create_app(
                         "bty_image_ref": None,
                         "boot_mode": "bty-inventory",
                         "sanboot_drive": None,
-                        "hostname": None,
+                        "labels": [],
                         "target_disk_serial": None,
                     },
                 )
             conn.commit()
 
         machine = dict(row)
+        # The ipxe templates render ``machine.labels`` in the
+        # comment header. labels live in a side-table, so they
+        # aren't on the row; fetch + plumb them in here.
+        with _db.open_db(state_path) as _conn:
+            machine["labels"] = _labels.get_labels(_conn, normalised)
         publish_state_changed()
         # Boot-mode decision tree (highest priority first):
         #   - bty-tui                       -> live env, interactive wizard
@@ -1046,13 +1059,18 @@ def create_app(
                         "bty_image_ref": None,
                         "boot_mode": "bty-inventory",
                         "sanboot_drive": None,
-                        "hostname": None,
+                        "labels": [],
                         "target_disk_serial": None,
                     },
                 )
             conn.commit()
 
         machine = dict(row)
+        # The ipxe templates render ``machine.labels`` in the
+        # comment header. labels live in a side-table, so they
+        # aren't on the row; fetch + plumb them in here.
+        with _db.open_db(state_path) as _conn:
+            machine["labels"] = _labels.get_labels(_conn, normalised)
         publish_state_changed()
 
         host = _request_host(request)
@@ -1853,7 +1871,14 @@ def create_app(
     def list_machines() -> list[_models.Machine]:
         with _db.open_db(state_path) as conn:
             rows = conn.execute("SELECT * FROM machines ORDER BY mac").fetchall()
-        return [_row_to_machine(r) for r in rows]
+            # Batch-fetch labels for every MAC in a single query. The
+            # alternative (a per-row ``get_labels`` call) is N+1 SELECTs.
+            label_map: dict[str, list[str]] = {}
+            for r in conn.execute(
+                "SELECT mac, label FROM machine_labels ORDER BY mac, label"
+            ).fetchall():
+                label_map.setdefault(r["mac"], []).append(r["label"])
+        return [_row_to_machine(r, label_map.get(r["mac"], [])) for r in rows]
 
     @app.get(
         "/machines/{mac}",
@@ -1864,12 +1889,13 @@ def create_app(
         normalised = _normalise_mac(mac)
         with _db.open_db(state_path) as conn:
             row = conn.execute("SELECT * FROM machines WHERE mac = ?", (normalised,)).fetchone()
+            labels = _labels.get_labels(conn, normalised) if row is not None else []
         if row is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"no machine record for {normalised}",
             )
-        return _row_to_machine(row)
+        return _row_to_machine(row, labels)
 
     @app.get(
         "/machines/{mac}/lshw.json",
@@ -1952,12 +1978,11 @@ def create_app(
             conn.execute(
                 """
                 INSERT INTO machines
-                    (mac, bty_image_ref, hostname, boot_mode, sanboot_drive,
+                    (mac, bty_image_ref, boot_mode, sanboot_drive,
                      target_disk_serial, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(mac) DO UPDATE SET
                     bty_image_ref      = excluded.bty_image_ref,
-                    hostname           = excluded.hostname,
                     boot_mode          = excluded.boot_mode,
                     sanboot_drive      = excluded.sanboot_drive,
                     target_disk_serial = excluded.target_disk_serial,
@@ -1977,7 +2002,7 @@ def create_app(
                     --   * target_disk_serial -- the target changed;
                     --     same reason, the cycle's identity moved.
                     --
-                    -- Hostname / sanboot_drive are display + boot
+                    -- labels / sanboot_drive are display + boot
                     -- modifiers that don't invalidate the cycle.
                     -- saw_flasher_boot resets on any of the three
                     -- policy-affecting changes; same CASE expression
@@ -2021,7 +2046,6 @@ def create_app(
                 (
                     normalised,
                     body.bty_image_ref,
-                    body.hostname,
                     body.boot_mode,
                     body.sanboot_drive,
                     body.target_disk_serial,
@@ -2029,6 +2053,7 @@ def create_app(
                     now,
                 ),
             )
+            _labels.set_labels(conn, normalised, body.labels)
             _log_event(
                 conn,
                 kind="machine.created" if existing is None else "machine.upserted",
@@ -2041,15 +2066,16 @@ def create_app(
                     "bty_image_ref": body.bty_image_ref,
                     "boot_mode": body.boot_mode,
                     "sanboot_drive": body.sanboot_drive,
-                    "hostname": body.hostname,
+                    "labels": list(body.labels),
                     "target_disk_serial": body.target_disk_serial,
                 },
             )
             conn.commit()
             row = conn.execute("SELECT * FROM machines WHERE mac = ?", (normalised,)).fetchone()
+            labels = _labels.get_labels(conn, normalised) if row is not None else []
         assert row is not None
         publish_state_changed()
-        return _row_to_machine(row)
+        return _row_to_machine(row, labels)
 
     @app.delete(
         "/machines/{mac}",
@@ -2060,7 +2086,10 @@ def create_app(
         normalised = _normalise_mac(mac)
         with _db.open_db(state_path) as conn:
             cur = conn.execute("DELETE FROM machines WHERE mac = ?", (normalised,))
+            # sqlite isn't running with FK enforcement, so the
+            # cascade to ``machine_labels`` is explicit.
             if cur.rowcount > 0:
+                _labels.delete_labels(conn, normalised)
                 _log_event(
                     conn,
                     kind="machine.deleted",
@@ -3068,13 +3097,18 @@ def create_app(
 # ---------- helpers -----------------------------------------------------------
 
 
-def _row_to_machine(row: sqlite3.Row) -> _models.Machine:
+def _row_to_machine(row: sqlite3.Row, labels: list[str]) -> _models.Machine:
     """Decode a sqlite3.Row into a ``_models.Machine``.
 
     ``known_disks`` is stored as a JSON string in the column;
     deserialise it lazily here so callers don't have to juggle the
     text/list distinction. A None or unparseable column means "no
     inventory yet"; missing fields don't crash the model.
+
+    ``labels`` is sourced from the ``machine_labels`` side-table by
+    the caller; it's plumbed in rather than fetched here so the
+    list endpoint can read them in one batch (a JOIN) instead of
+    N+1 queries.
     """
     raw_disks = row["known_disks"]
     parsed_disks: list[dict[str, object]] | None = None
@@ -3091,7 +3125,7 @@ def _row_to_machine(row: sqlite3.Row) -> _models.Machine:
     return _models.Machine(
         mac=row["mac"],
         bty_image_ref=row["bty_image_ref"],
-        hostname=row["hostname"],
+        labels=labels,
         discovered_at=_iso_or_none(row["discovered_at"]),
         last_seen_at=_iso_or_none(row["last_seen_at"]),
         last_seen_ip=row["last_seen_ip"],

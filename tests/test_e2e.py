@@ -1239,14 +1239,14 @@ def test_e2e_machine_put_is_full_replace_not_partial_update(
     app_client: TestClient,
 ) -> None:
     """PUT /machines/<mac> is REST-spec full replace. A PUT with
-    only ``{"hostname": ...}`` resets every other field to its
+    only ``{"labels": [...]}`` resets every other field to its
     Pydantic default (bty_image_ref=None, boot_mode=ipxe-exit).
 
     Pin the contract: the UI's machine-edit form sends every
     field every time precisely because the API is full-replace.
     A future "let's accept partial updates" refactor must update
     both the API + the form together, or operators will lose
-    bindings when editing hostname / other unrelated fields.
+    bindings when editing labels / other unrelated fields.
     """
     mac = "44:44:44:44:44:44"
     state_path: Path = app_client.app.state.state_path  # type: ignore[attr-defined]
@@ -1282,17 +1282,17 @@ def test_e2e_machine_put_is_full_replace_not_partial_update(
             "bty_image_ref": ref,
             "boot_mode": "bty-flash-once",
             "target_disk_serial": "SER-Z",
-            "hostname": "first-name",
+            "labels": ["first-name"],
         },
         cookies=AUTH,
     )
     assert r.status_code == 200, r.text
 
-    # Partial PUT -- only hostname. Per the REST spec semantics
+    # Partial PUT -- only the labels. Per the REST spec semantics
     # we've pinned, this RESETS everything else to defaults.
     r = app_client.put(
         f"/machines/{mac}",
-        json={"hostname": "second-name"},
+        json={"labels": ["second-name"]},
         cookies=AUTH,
     )
     assert r.status_code == 200, r.text
@@ -1300,7 +1300,7 @@ def test_e2e_machine_put_is_full_replace_not_partial_update(
     r = app_client.get(f"/machines/{mac}", cookies=AUTH)
     assert r.status_code == 200, r.text
     m = r.json()
-    assert m["hostname"] == "second-name", m
+    assert m["labels"] == ["second-name"], m
     # Full-replace contract: omitted fields reset to defaults.
     assert m["bty_image_ref"] is None, m
     assert m["boot_mode"] == "ipxe-exit", m
@@ -1314,7 +1314,7 @@ def test_e2e_machine_put_is_full_replace_not_partial_update(
             "bty_image_ref": ref,
             "boot_mode": "bty-flash-once",
             "target_disk_serial": "SER-Z",
-            "hostname": "third-name",
+            "labels": ["third-name"],
         },
         cookies=AUTH,
     )
@@ -1322,7 +1322,7 @@ def test_e2e_machine_put_is_full_replace_not_partial_update(
     r = app_client.get(f"/machines/{mac}", cookies=AUTH)
     m = r.json()
     assert m["bty_image_ref"] == ref, m
-    assert m["hostname"] == "third-name", m
+    assert m["labels"] == ["third-name"], m
 
 
 # ----------------------------------------------------------------------

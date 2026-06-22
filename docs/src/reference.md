@@ -302,7 +302,10 @@ Machine = {
   "bty_image_ref": "<64-hex>" | null,        # null = discovered but unassigned
                                              # references catalog_entries.bty_image_ref
                                              # (sha256 of canonicalised src URL)
-  "hostname": "..." | null,
+  "labels": ["rack-3", "noisy", ...],        # free-form display tags; each
+                                             # alnum-leading + alnum/space/-/_/.,
+                                             # max 64 chars per tag, 16 per machine,
+                                             # alphabetical on read
   "discovered_at": "<ISO 8601>" | null,      # first /pxe contact; null if PUT-only
   "last_seen_at":  "<ISO 8601>" | null,      # most recent /pxe contact
   "last_seen_ip":  "203.0.113.42" | null,
@@ -328,7 +331,10 @@ Machine = {
 
 MachineUpsert = {
   "bty_image_ref": "<64-hex>" | null,
-  "hostname": str | null,
+  "labels": [str, ...],                        # free-form display tags;
+                                               # set-semantic (the list replaces
+                                               # all prior labels for this MAC).
+                                               # Default [] when omitted.
   "boot_mode": "ipxe-exit"                 # default "ipxe-exit" on PUT;
               | "bty-flash-always"           # auto-discovery sets
               | "bty-flash-once"             # "bty-inventory"; the

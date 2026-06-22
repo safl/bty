@@ -93,7 +93,6 @@ CREATE TABLE IF NOT EXISTS machines (
     -- bind rolling-tag oras refs and URL-only entries that have
     -- no pre-known content sha.
     bty_image_ref             TEXT,
-    hostname                  TEXT,
     discovered_at             TEXT,    -- first /pxe/{mac} contact (NULL if PUT-created)
     last_seen_at              TEXT,    -- most recent /pxe/{mac} contact
     last_seen_ip              TEXT,    -- source IP of most recent /pxe contact
@@ -140,6 +139,24 @@ CREATE TABLE IF NOT EXISTS machines (
     created_at                TEXT NOT NULL,
     updated_at                TEXT NOT NULL
 );
+
+-- Operator-applied labels per machine. Plural by design: a box can
+-- carry several tags at once ("rack-3", "noisy", "gmktec-g10"), so
+-- filtering by any one of them surfaces every box that wears it.
+-- Cosmetic; the boot chain never reads them. Replaced the singular
+-- ``machines.hostname`` (RFC-1123-shaped) in v0.58.0.
+--
+-- Composite primary key prevents the same label being applied twice
+-- to a MAC. Sqlite doesn't enforce foreign keys by default (no
+-- ``PRAGMA foreign_keys=ON`` here), so the ``DELETE /machines/<mac>``
+-- path is responsible for cleaning up label rows -- the assertion is
+-- in tests so a future refactor that forgets it can't ship.
+CREATE TABLE IF NOT EXISTS machine_labels (
+    mac    TEXT NOT NULL,
+    label  TEXT NOT NULL,
+    PRIMARY KEY (mac, label)
+);
+CREATE INDEX IF NOT EXISTS machine_labels_label_idx ON machine_labels(label);
 
 -- Operator-curated catalog entries.
 --

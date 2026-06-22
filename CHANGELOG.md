@@ -9,6 +9,38 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.58.0] - 2026-06-22
+
+### Changed
+
+- **Machine record: `hostname` replaced by plural `labels`.** The
+  field has always been described as "cosmetic; not consumed by the
+  boot chain", but the column was a singular `hostname` with an
+  RFC-1123 validator. In practice operators want to tag a box with
+  several non-overlapping things at once (rack location, hardware
+  vendor, ad-hoc notes), and the DNS regex rejected reasonable
+  inputs (underscores, spaces, mixed case). Reshaped end-to-end:
+  the `machines.hostname` column is gone, replaced by a `machine_labels`
+  side table; the JSON API takes `labels: list[str]`; the UI form
+  is a comma-separated input; the row renders chip badges; each
+  chip is a `/ui/machines?q=<tag>` link. Per-label shape is
+  alnum-leading + alnum/space/`-`/`_`/`.`, max 64 chars; cap of 16
+  labels per machine. **Breaking, pre-1.0:** `state.db` auto-rotates
+  on upgrade (the existing schema-mismatch path) so machine bindings
+  reset; export with `bty-web export` before upgrading if you want
+  to preserve the hardware-inventory side.
+
+- **Machines table: new "Last IP" column + column reordering.** The
+  last-seen source IP was already captured (`last_seen_ip`, populated
+  on every `GET /pxe/{mac}`) but only shown on the detail page. It
+  now has its own sortable column, and the overall order is identity
+  (MAC, Labels) -> configuration (Image, Boot) -> timeline (Last
+  seen, Last IP, Last flashed) so the eye scans left-to-right in
+  the same "which box / what is it set up to do / what has it done"
+  order operators ask. Each IP cell deep-links to
+  `/ui/events?q=<ip>` so the "this MAC is on .42 -- what else has
+  .42 done?" pivot is one click.
+
 ## [0.57.1] - 2026-06-19
 
 ### Changed

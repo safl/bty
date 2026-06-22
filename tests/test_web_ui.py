@@ -915,8 +915,8 @@ def test_ui_machines_sort_unknown_column_falls_back_to_default(client: TestClien
     assert "aa:bb:cc:dd:ee:aa" in r.text
 
 
-def test_ui_machines_search_filters_by_mac_or_hostname(client: TestClient) -> None:
-    """``?q=<text>`` is a substring filter across MAC, hostname,
+def test_ui_machines_search_filters_by_mac_or_label(client: TestClient) -> None:
+    """``?q=<text>`` is a substring filter across MAC, any label,
     image ref, and last-seen IP. Typing a few hex of one MAC narrows
     the table to just that machine; clearing the query restores the
     full list."""
@@ -1041,10 +1041,10 @@ def test_ui_machine_detail_renders(client: TestClient) -> None:
     assert "aa:bb:cc:dd:ee:ff" in r.text
 
 
-def test_ui_machine_detail_shows_bound_image_and_hostname(client: TestClient) -> None:
+def test_ui_machine_detail_shows_bound_image_and_labels(client: TestClient) -> None:
     """The identity card shows the bound image human-readably (name +
-    format + human size) linked to the catalog, and the hostname next to
-    the MAC -- not a bare cut-off ref/sha."""
+    format + human size) linked to the catalog, and the labels (as
+    chips) next to the MAC -- not a bare cut-off ref/sha."""
     from bty.web import _db as _bty_db
 
     _login(client)
@@ -1070,14 +1070,14 @@ def test_ui_machine_detail_shows_bound_image_and_hostname(client: TestClient) ->
         conn.commit()
     client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
-        json={"bty_image_ref": ref, "hostname": "lab-fedora-01"},
+        json={"bty_image_ref": ref, "labels": ["lab-fedora-01"]},
         cookies=AUTH,
     )
     body = client.get("/ui/machines/aa:bb:cc:dd:ee:ff").text
     assert "nosi fedora-sysdev (x86_64, rolling)" in body  # human name
     assert 'href="/ui/images"' in body  # links to the catalog
     assert "GiB" in body  # 2.6e9 bytes -> filesizeformat "2.4 GiB"
-    assert "lab-fedora-01" in body  # hostname next to the MAC
+    assert "lab-fedora-01" in body  # label chip next to the MAC
 
 
 def test_ui_machine_detail_404(client: TestClient) -> None:
@@ -1421,7 +1421,9 @@ def test_ui_machine_upsert_via_form(client: TestClient) -> None:
         "/ui/machines/aa:bb:cc:dd:ee:ff",
         data={
             "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            "hostname": "bty-ui-test",
+            # Form encodes labels as a single comma-separated string; the
+            # server splits + dedupes.
+            "labels": "bty-ui-test, rack-3",
         },
     )
     assert r.status_code == 303
@@ -1436,7 +1438,8 @@ def test_ui_machine_upsert_via_form(client: TestClient) -> None:
         api.json()["bty_image_ref"]
         == "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
     )
-    assert api.json()["hostname"] == "bty-ui-test"
+    # Alphabetical read-back.
+    assert api.json()["labels"] == ["bty-ui-test", "rack-3"]
     # Form omits boot_mode -> dependency default applies (sanboot).
     assert api.json()["boot_mode"] == "ipxe-exit"
 
@@ -1491,7 +1494,7 @@ def test_ui_machine_upsert_persists_boot_mode_flash(client: TestClient) -> None:
         "/ui/machines/aa:bb:cc:dd:ee:ff",
         data={
             "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            "hostname": "",
+            "labels": "",
             "boot_mode": "bty-flash-always",
             "target_disk_serial": "ATA-WDC-123456",
         },

@@ -66,7 +66,7 @@ schema and `oras://` URL form.
 ## Machine record
 
 A `bty-web`-only concept. A persistent entry in the server's state keyed by
-MAC address that captures: assigned image, optional hostname, boot mode,
+MAC address that captures: assigned image, optional labels, boot mode,
 and (after first PXE contact) last-seen IP + discovery timestamp. The
 server uses machine records to render per-MAC iPXE configurations.
 

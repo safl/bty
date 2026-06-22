@@ -27,7 +27,6 @@ def test_init_db_creates_machines_table(tmp_path: Path) -> None:
     expected = {
         "mac",
         "bty_image_ref",
-        "hostname",
         "discovered_at",
         "last_seen_at",
         "last_seen_ip",
@@ -37,6 +36,26 @@ def test_init_db_creates_machines_table(tmp_path: Path) -> None:
         "updated_at",
     }
     assert expected <= cols, f"missing columns: {expected - cols}"
+    # Labels live in their own side-table since v0.58.0; the singular
+    # ``hostname`` / ``label`` column is gone.
+    assert "label" not in cols, (
+        "label column should have been dropped in v0.58.0 -- "
+        "labels now live in the machine_labels side table"
+    )
+
+
+def test_init_db_creates_machine_labels_table(tmp_path: Path) -> None:
+    """The plural-labels side table replaced the singular column in
+    v0.58.0. Composite primary key (mac, label) so the same tag can't
+    be applied twice; index on label so ``WHERE label = ?`` lookups
+    don't full-scan."""
+    state = tmp_path / "state.db"
+    _db.init_db(state)
+    with sqlite3.connect(state) as conn:
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(machine_labels)")}
+        indexes = {row[1] for row in conn.execute("PRAGMA index_list(machine_labels)")}
+    assert cols == {"mac", "label"}
+    assert "machine_labels_label_idx" in indexes
 
 
 def test_init_db_creates_catalog_entries_table(tmp_path: Path) -> None:

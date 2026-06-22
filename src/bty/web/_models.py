@@ -8,8 +8,9 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
+from typing import Annotated
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 
 
 def _enum_pattern(values: tuple[str, ...]) -> str:
@@ -83,6 +84,24 @@ DEFAULT_SANBOOT_DRIVE = "0x80"
 BOOT_MODE_PATTERN = _enum_pattern(BOOT_MODES)
 DEFAULT_BOOT_MODE = BOOT_MODES[0]
 
+# Per-label shape: alnum-leading then alnum / space / hyphen / underscore
+# / dot, up to 64 chars. Stricter than "anything goes" (a blank or
+# whitespace-only label would surface as a meaningless empty chip)
+# but loose enough for the labels operators actually type ("rack-3",
+# "the loud one", "GMKTec G10", "lab.fedora.01").
+LABEL_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9 ._-]*$"
+LABEL_MAX_LENGTH = 64
+LabelStr = Annotated[
+    str,
+    StringConstraints(min_length=1, max_length=LABEL_MAX_LENGTH, pattern=LABEL_PATTERN),
+]
+
+# Cap on labels per machine: high enough that an operator who wants
+# to dump role + rack + vendor + a couple of ad-hoc notes never hits
+# it, low enough that a forgotten comma in a 200-tag paste bounces
+# loudly rather than landing.
+MAX_LABELS_PER_MACHINE = 16
+
 
 class MachineUpsert(BaseModel):
     """Request body for ``PUT /machines/{mac}``.
@@ -106,15 +125,16 @@ class MachineUpsert(BaseModel):
     # Same hex shape as a sha256 because the ref IS a sha256 (of the
     # canonicalised src URL, not of content).
     bty_image_ref: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
-    # RFC-1123-ish: each dot-separated label is alnum, hyphen-
-    # internal-only (no leading / trailing / bare hyphen, no
-    # consecutive dots). ``max_length=253`` matches DNS.
-    hostname: str | None = Field(
-        default=None,
-        min_length=1,
-        max_length=253,
-        pattern=r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$",
-    )
+    # Free-form display labels (replaced the singular ``hostname``
+    # in v0.58.0). A box can carry several at once ("rack-3",
+    # "noisy", "gmktec-g10") so filtering or searching by any tag
+    # surfaces every box that wears it. Each label is alnum-leading
+    # + alnum/space/``-``/``_``/``.``, max 64 chars; empty strings
+    # rejected per-item. Cap at 16 per machine -- well past the
+    # operator-meaningful count, low enough that a typo (e.g. a
+    # missing comma in a 200-tag dump) bounces with a 422 instead
+    # of landing.
+    labels: list[LabelStr] = Field(default_factory=list, max_length=MAX_LABELS_PER_MACHINE)
     boot_mode: str = Field(default=DEFAULT_BOOT_MODE, pattern=BOOT_MODE_PATTERN)
     # iPXE BIOS drive the ``ipxe-exit`` mode sanboots on legacy BIOS
     # (``0x80`` first disk, ``0x81`` second, ...). ``None`` = the default
@@ -195,7 +215,7 @@ class Machine(BaseModel):
 
     mac: str = Field(..., pattern=MAC_PATTERN)
     bty_image_ref: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
-    hostname: str | None = None
+    labels: list[str] = Field(default_factory=list)
     # Set the first time bty-web sees a ``GET /pxe/{mac}`` for this MAC.
     # ``None`` for machines that were created via ``PUT`` and have not
     # yet PXE-booted through bty-web.
