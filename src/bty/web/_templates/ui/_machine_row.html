@@ -1,4 +1,9 @@
 {% from "ui/_table_macros.html" import copy_chip with context %}
+{# Column order is identity (MAC, Labels) -> configuration (Image, Boot)
+   -> timeline (Last seen, Last IP, Last flashed) -> actions. Labels
+   sits next to MAC because the two answer "which machine is this?";
+   Image / Boot say "what is it set up to do?"; the trailing three are
+   the observed-state slice. #}
 <tr id="row-{{ m.mac|replace(':', '-') }}">
     <td>
         <a href="/ui/machines/{{ m.mac }}" class="text-decoration-none">
@@ -10,6 +15,17 @@
                 title="Click to copy {{ m.mac }} to the clipboard.">
             <i class="bi bi-clipboard"></i>
         </button>
+    </td>
+    <td>
+        {% if m.labels %}
+        {% for tag in m.labels %}
+        <a class="badge bg-secondary text-decoration-none me-1"
+           href="?q={{ tag|urlencode }}"
+           title="Filter the table to machines wearing this tag">{{ tag }}</a>
+        {% endfor %}
+        {% else %}
+        <small class="text-muted">-</small>
+        {% endif %}
     </td>
     <td>
         {% if m.bty_image_ref %}
@@ -36,12 +52,19 @@
         {% set _state = m | boot_state %}
         {% if _state %}<div><small class="text-muted">{{ _state }}</small></div>{% endif %}
     </td>
-    <td>{{ m.hostname or "-" }}</td>
     <td>
         {% if m.last_seen_at %}
         <small class="text-muted" title="{{ m.last_seen_at }}">{{ m.last_seen_at | fmt_ts }}</small>
         {% else %}
         <small class="text-muted">never</small>
+        {% endif %}
+    </td>
+    <td>
+        {% if m.last_seen_ip %}
+        <a class="text-decoration-none" href="/ui/events?q={{ m.last_seen_ip|urlencode }}"
+           title="Show every event from this IP"><code>{{ m.last_seen_ip }}</code></a>
+        {% else %}
+        <small class="text-muted">-</small>
         {% endif %}
     </td>
     <td>

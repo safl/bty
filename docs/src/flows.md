@@ -234,7 +234,7 @@ plus three timestamps the server maintains:
 | Field                | Meaning                                                                 |
 |----------------------|--------------------------------------------------------------------------|
 | `bty_image_ref`      | sha256 of canonicalised catalog `src`. Stable provenance ID; binds the image to flash. |
-| `hostname`           | RFC-1123 hostname (optional). Cosmetic; not consumed by the flash chain. |
+| `labels`             | Free-form display tags (a set per machine; max 64 chars each, 16 per machine). Cosmetic; not consumed by the flash chain. |
 | `boot_mode`        | One of `ipxe-exit` / `bty-flash-always` / `bty-flash-once` / `bty-tui` / `bty-inventory` (PUT default `ipxe-exit`; auto-discovery default `bty-inventory`). |
 | `sanboot_drive`      | iPXE BIOS drive for the legacy-BIOS disk boot (e.g. `0x80`; null = default first disk). BIOS only; on UEFI the box exits to firmware. |
 | `target_disk_serial` | Operator-picked serial number from the most recent inventory post.       |

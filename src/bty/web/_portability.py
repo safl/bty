@@ -34,7 +34,7 @@ The bundle deliberately does NOT carry:
   - image bytes (re-fetch from catalog or copy the image disk);
   - catalog entries (re-import the catalog on the new host);
   - per-machine bindings (``boot_mode``, ``bty_image_ref``,
-    ``target_disk_serial``, ``sanboot_drive``, ``hostname``) --
+    ``target_disk_serial``, ``sanboot_drive``, ``labels``) --
     operator re-binds on the new host;
   - ``saw_flasher_boot`` state, audit log, settings, backups.
 """
@@ -200,16 +200,25 @@ def import_bundle(
     n_m = 0
     with _db.open_db(state_path) as conn:
         for m in inventory.get("machines", []):
+            # INSERT OR REPLACE on the machines row only replaces the
+            # row in the machines table; the ``machine_labels`` side
+            # table needs an explicit clear so a re-import doesn't
+            # carry forward stale labels from a previous bundle for
+            # the same MAC.
+            conn.execute(
+                "DELETE FROM machine_labels WHERE mac = ?",
+                (m.get("mac"),),
+            )
             conn.execute(
                 """
                 INSERT OR REPLACE INTO machines
-                    (mac, hostname, bty_image_ref, target_disk_serial,
+                    (mac, bty_image_ref, target_disk_serial,
                      sanboot_drive, known_disks, known_disks_at,
                      hw_lshw, hw_lshw_at,
                      boot_mode, saw_flasher_boot, last_flashed_at,
                      discovered_at, last_seen_at, last_seen_ip,
                      created_at, updated_at)
-                VALUES (?, NULL, NULL, NULL,
+                VALUES (?, NULL, NULL,
                         NULL, ?, ?, ?, ?,
                         'bty-inventory', 0, NULL,
                         NULL, NULL, NULL, ?, ?)

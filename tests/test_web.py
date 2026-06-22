@@ -197,7 +197,7 @@ def test_machine_crud_round_trip(app_client: TestClient) -> None:
     mac = "aa:bb:cc:dd:ee:ff"
     body = {
         "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-        "hostname": "bty-test-01",
+        "labels": ["rack-3", "bty-test-01"],
     }
 
     # Create / upsert
@@ -209,7 +209,8 @@ def test_machine_crud_round_trip(app_client: TestClient) -> None:
         created["bty_image_ref"]
         == "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
     )
-    assert created["hostname"] == "bty-test-01"
+    # Side-table read order is alphabetical, regardless of insert order.
+    assert created["labels"] == ["bty-test-01", "rack-3"]
 
     # Read back
     r = app_client.get(f"/machines/{mac}", cookies=AUTH)
@@ -236,7 +237,7 @@ def test_machine_upsert_normalises_mac(app_client: TestClient) -> None:
     """Upper-case input + dashes get normalised to canonical form."""
     r = app_client.put(
         "/machines/AA-BB-CC-DD-EE-FF",
-        json={"hostname": "n"},
+        json={"labels": ["n"]},
         cookies=AUTH,
     )
     assert r.status_code == 200
@@ -448,65 +449,92 @@ def test_machine_upsert_rejects_malformed_sha256(app_client: TestClient) -> None
         assert r.status_code == 422, f"expected 422 for {bad!r}, got {r.status_code}"
 
 
-def test_machine_upsert_rejects_empty_hostname(app_client: TestClient) -> None:
-    """``hostname = ""`` would land in state.db blank and surface
-    in the dashboard / banner as a meaningless empty cell. Reject
-    explicit empty strings (a missing field still gets ``None``)."""
+def test_machine_upsert_rejects_empty_label_in_list(app_client: TestClient) -> None:
+    """A blank string inside ``labels`` would land as a meaningless
+    empty chip on the row. Per-item ``min_length=1`` rejects it at
+    PUT time so the side table never holds a phantom row."""
     r = app_client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
         json={
             "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            "hostname": "",
+            "labels": [""],
         },
         cookies=AUTH,
     )
     assert r.status_code == 422
 
 
-def test_machine_upsert_rejects_invalid_hostname_shapes(app_client: TestClient) -> None:
-    """Hostname must be RFC-1123-ish: each dot-separated label is
-    alnum, hyphen-internal-only (no leading / trailing / bare
-    hyphen, no consecutive dots). Invalid shapes like ``-foo``,
-    ``foo-``, ``..``, ``.foo``, bare ``-`` must 422 at PUT
-    rather than landing in state.db where they confuse the agetty
-    \\S{name} renderer at console banner time."""
+def test_machine_upsert_rejects_invalid_label_shapes(app_client: TestClient) -> None:
+    """Each label is free-form (replaced the singular ``hostname`` in
+    v0.58.0) but still constrained: first char alnum, body alnum +
+    ``-``/``_``/``.``/space, max 64 chars. Off-pattern inputs (leading
+    punctuation, control chars, > 64 chars) must 422 at PUT."""
     valid_sha = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
     for bad in (
-        "-foo",  # leading hyphen
-        "foo-",  # trailing hyphen
-        ".foo",  # leading dot
-        "foo.",  # trailing dot
-        "foo..bar",  # consecutive dots
-        "-",  # bare hyphen
-        "..",  # bare dots
-        "host_with_underscore",  # underscore not in pattern
+        "-leading-dash",  # first char must be alnum
+        ".leading-dot",  # ditto
+        "_leading-underscore",
+        " leading-space",
+        "has\ttab",  # control char outside the class
+        "has\nnewline",
+        "x" * 65,  # one over max_length
     ):
         r = app_client.put(
             "/machines/aa:bb:cc:dd:ee:ff",
-            json={"bty_image_ref": valid_sha, "hostname": bad},
+            json={"bty_image_ref": valid_sha, "labels": [bad]},
             cookies=AUTH,
         )
         assert r.status_code == 422, f"expected 422 for {bad!r}, got {r.status_code}"
 
 
-def test_machine_upsert_accepts_real_hostname_shapes(app_client: TestClient) -> None:
-    """The tightened pattern still accepts shapes operators
-    actually use: short alnum, hyphenated, FQDN, single-label."""
+def test_machine_upsert_accepts_real_label_shapes(app_client: TestClient) -> None:
+    """The per-item label pattern accepts free-form operator tags:
+    hostnames, snake_case, dotted FQDNs, mixed-case, spaces."""
     valid_sha = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
     for ok in (
         "host",
         "host01",
         "rack-01",
         "node-1.lab.example.org",
-        "single",
+        "host_with_underscore",
+        "lab box 3",
+        "Lab-Box.3",
         "a",  # one-char label
     ):
         r = app_client.put(
             "/machines/aa:bb:cc:dd:ee:ff",
-            json={"bty_image_ref": valid_sha, "hostname": ok},
+            json={"bty_image_ref": valid_sha, "labels": [ok]},
             cookies=AUTH,
         )
         assert r.status_code == 200, f"expected 200 for {ok!r}, got {r.status_code} {r.text}"
+
+
+def test_machine_upsert_accepts_multiple_labels(app_client: TestClient) -> None:
+    """Multiple tags coexist on one machine ("rack-3" + "noisy" +
+    "gmktec-g10"), read back in alphabetical order."""
+    valid_sha = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    r = app_client.put(
+        "/machines/aa:bb:cc:dd:ee:ff",
+        json={
+            "bty_image_ref": valid_sha,
+            "labels": ["rack-3", "noisy", "gmktec-g10"],
+        },
+        cookies=AUTH,
+    )
+    assert r.status_code == 200
+    assert r.json()["labels"] == ["gmktec-g10", "noisy", "rack-3"]
+
+
+def test_machine_upsert_rejects_too_many_labels(app_client: TestClient) -> None:
+    """The ``MAX_LABELS_PER_MACHINE`` cap (16) bounces 17+ at validation
+    time. A forgotten comma in a 200-tag paste shouldn't land 200 rows."""
+    valid_sha = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    r = app_client.put(
+        "/machines/aa:bb:cc:dd:ee:ff",
+        json={"bty_image_ref": valid_sha, "labels": [f"tag{i}" for i in range(17)]},
+        cookies=AUTH,
+    )
+    assert r.status_code == 422
 
 
 def test_machine_upsert_rejects_unknown_fields(app_client: TestClient) -> None:
@@ -1415,13 +1443,17 @@ def test_upsert_resets_saw_flasher_boot_on_target_disk_serial_change(
     assert _saw_flasher_bit_for(app_client, mac) == 0
 
 
-def test_upsert_preserves_saw_flasher_boot_on_hostname_only_change(
+def test_upsert_preserves_saw_flasher_boot_on_labels_only_change(
     app_client: TestClient,
 ) -> None:
     """REGRESSION (v0.33.22): pre-fix, ANY upsert reset
     saw_flasher_boot. An operator renaming a box mid-flash (or
     tweaking sanboot_drive) silently interrupted the in-flight
-    cycle. Post-fix, cosmetic-only changes preserve the bit."""
+    cycle. Post-fix, cosmetic-only changes preserve the bit.
+
+    Labels live in a side-table since v0.58.0, so set-labels is
+    distinct from the machines-row UPDATE entirely; the CASE-WHEN
+    guard never fires for label edits."""
     mac = "aa:bb:cc:dd:ee:c7"
     ref = "d" * 64
     app_client.put(
@@ -1436,19 +1468,19 @@ def test_upsert_preserves_saw_flasher_boot_on_hostname_only_change(
     app_client.get(f"/boot/{ARTIFACT_NAMES[0]}?mac={mac}", headers={"Host": "bty.local:8080"})
     assert _saw_flasher_bit_for(app_client, mac) == 1
 
-    # Only hostname changes; the cycle-invalidating fields stay.
+    # Only the label changes; the cycle-invalidating fields stay.
     app_client.put(
         f"/machines/{mac}",
         json={
             "boot_mode": "bty-flash-always",
             "bty_image_ref": ref,
             "target_disk_serial": "SN1",
-            "hostname": "lab-box-1",
+            "labels": ["lab-box-1"],
         },
         cookies=AUTH,
     )
     assert _saw_flasher_bit_for(app_client, mac) == 1, (
-        "REGRESSION: hostname-only upsert must not disrupt the in-flight cycle. "
+        "REGRESSION: labels-only upsert must not disrupt the in-flight cycle. "
         "Pre-v0.33.22 the saw_flasher_boot=0 unconditional reset meant the next "
         "/pxe served the flash chain instead of the post-flash sanboot."
     )
@@ -1658,7 +1690,7 @@ def test_upsert_clears_completion_signals_on_target_disk_change(
 def test_upsert_preserves_completion_signals_on_cosmetic_change(
     app_client: TestClient,
 ) -> None:
-    """Hostname / sanboot_drive are display modifiers; they don't
+    """labels / sanboot_drive are display modifiers; they don't
     invalidate the cycle. Pre-fix CASE-WHEN gates this on PUT for
     saw_flasher_boot; v0.33.28 extends the same to completion
     signals -- those must NOT clear on cosmetic edits or operators
@@ -1670,7 +1702,7 @@ def test_upsert_preserves_completion_signals_on_cosmetic_change(
             "bty_image_ref": "3333333333333333333333333333333333333333333333333333333333333333",
             "boot_mode": "bty-flash-once",
             "target_disk_serial": "SN-DDD",
-            "hostname": "node-a",
+            "labels": ["node-a"],
         },
         cookies=AUTH,
     )
@@ -1680,14 +1712,14 @@ def test_upsert_preserves_completion_signals_on_cosmetic_change(
     before = app_client.get(f"/machines/{mac}", cookies=AUTH).json()
     last_flashed_t0 = before["last_flashed_at"]
     assert last_flashed_t0 is not None
-    # Hostname-only edit: preserves last_flashed_at.
+    # Labels-only edit: preserves last_flashed_at.
     app_client.put(
         f"/machines/{mac}",
         json={
             "bty_image_ref": "3333333333333333333333333333333333333333333333333333333333333333",
             "boot_mode": "bty-flash-once",
             "target_disk_serial": "SN-DDD",
-            "hostname": "node-a-renamed",
+            "labels": ["node-a-renamed"],
         },
         cookies=AUTH,
     )
@@ -1698,7 +1730,7 @@ def test_upsert_preserves_completion_signals_on_cosmetic_change(
 def test_upsert_preserves_saw_flasher_boot_on_sanboot_drive_only_change(
     app_client: TestClient,
 ) -> None:
-    """Same as the hostname case but for sanboot_drive. The drive
+    """Same as the labels case but for sanboot_drive. The drive
     selector is read at sanboot template render time; changing it
     doesn't invalidate the in-flight flash."""
     mac = "aa:bb:cc:dd:ee:c8"
@@ -2152,7 +2184,7 @@ def test_machine_discovered_details_mirror_upserted_shape(app_client: TestClient
     """v0.33.27+: the ``machine.discovered`` audit event carries the
     same 5-key details payload shape as ``machine.created`` /
     ``machine.upserted`` (bty_image_ref, boot_mode, sanboot_drive,
-    hostname, target_disk_serial). At discovery time only boot_mode
+    labels, target_disk_serial). At discovery time only boot_mode
     has a value (the auto-default ``bty-inventory``); the rest are
     explicitly NULL so an operator pivoting on a MAC across the
     audit log sees a consistent payload shape, not a missing-keys
@@ -2174,7 +2206,7 @@ def test_machine_discovered_details_mirror_upserted_shape(app_client: TestClient
         "bty_image_ref": None,
         "boot_mode": "bty-inventory",
         "sanboot_drive": None,
-        "hostname": None,
+        "labels": [],
         "target_disk_serial": None,
     }
 
@@ -2201,7 +2233,7 @@ def test_machine_discovered_via_plan_endpoint_carries_same_details(
         "bty_image_ref": None,
         "boot_mode": "bty-inventory",
         "sanboot_drive": None,
-        "hostname": None,
+        "labels": [],
         "target_disk_serial": None,
     }
 

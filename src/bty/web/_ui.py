@@ -41,6 +41,7 @@ from bty.web import (
     _config,
     _db,
     _events_log,
+    _labels,
     _releases,
     _settings_store,
     _sysconfig,
@@ -379,8 +380,8 @@ def register_ui_routes(
         "mac": "mac",
         "bty_image_ref": "bty_image_ref, mac",
         "boot_mode": "boot_mode, mac",
-        "hostname": "hostname, mac",
         "last_seen_at": "last_seen_at, mac",
+        "last_seen_ip": "last_seen_ip, mac",
         "last_flashed_at": "last_flashed_at, mac",
     }
 
@@ -412,15 +413,19 @@ def register_ui_routes(
         else:
             active_filter = None
         # ``?q=<text>`` is a free-text contains-match across the
-        # MAC, hostname, bty_image_ref, and last-seen IP. SQLite's
-        # LIKE is case-insensitive for ASCII (the only characters
-        # those columns hold). Parameterised so the query keeps
-        # the SQL-injection guard the rest of the route relies on.
+        # MAC, any of the machine's labels, bty_image_ref, and
+        # last-seen IP. SQLite's LIKE is case-insensitive for ASCII
+        # (the only characters those columns hold). Labels live in a
+        # side-table so the predicate is an EXISTS over machine_labels;
+        # parameterised so the query keeps the SQL-injection guard
+        # the rest of the route relies on.
         q_raw = request.query_params.get("q") or ""
         q_norm = q_raw.strip()
         if q_norm:
             clauses.append(
-                "(LOWER(mac) LIKE ? OR LOWER(IFNULL(hostname, '')) LIKE ? "
+                "(LOWER(mac) LIKE ? "
+                "OR EXISTS (SELECT 1 FROM machine_labels ml "
+                "           WHERE ml.mac = machines.mac AND LOWER(ml.label) LIKE ?) "
                 "OR LOWER(IFNULL(bty_image_ref, '')) LIKE ? "
                 "OR LOWER(IFNULL(last_seen_ip, '')) LIKE ?)"
             )
@@ -449,12 +454,19 @@ def register_ui_routes(
                 f"SELECT * FROM machines {where_sql} ORDER BY {sort.order_by_sql} LIMIT ? OFFSET ?",
                 (*params, page_state.limit, page_state.offset),
             ).fetchall()
+            # Batch-fetch labels for every MAC on this page in a single
+            # query; per-row ``get_labels`` would be N+1 SELECTs.
+            label_map: dict[str, list[str]] = {}
+            for r in conn.execute(
+                "SELECT mac, label FROM machine_labels ORDER BY mac, label"
+            ).fetchall():
+                label_map.setdefault(r["mac"], []).append(r["label"])
             # Recent machine activity (discoveries, flashes, inventory
             # posts) for the page's "Activity" table.
             machine_events = _events_log.list_events(
                 conn, subject_kind="machine", limit=_events_log.RECENT_EVENTS_LIMIT
             )
-        machines = [_row_to_dict(r) for r in rows]
+        machines = [_row_to_dict(r, label_map.get(r["mac"], [])) for r in rows]
         # v0.32.4: ``?deleted=<mac>`` / ``?missing=<mac>`` carried over
         # from ``POST /ui/machines/{mac}/delete`` so the operator gets a
         # success / no-op-but-acknowledged flash banner instead of a
@@ -516,6 +528,7 @@ def register_ui_routes(
         normalised = _normalise_mac(mac)
         with _db.open_db(state_path) as conn:
             row = conn.execute("SELECT * FROM machines WHERE mac = ?", (normalised,)).fetchone()
+            machine_labels = _labels.get_labels(conn, normalised) if row is not None else []
         if row is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -550,7 +563,7 @@ def register_ui_routes(
         return render(
             "ui/machine_detail.html",
             request,
-            m=_row_to_dict(row),
+            m=_row_to_dict(row, machine_labels),
             images=catalog_options,
             boot_policies=list(BOOT_MODES),
             machine_events=machine_events,
@@ -568,7 +581,7 @@ def register_ui_routes(
         mac: str,
         request: Request,
         bty_image_ref: Annotated[str, Form()] = "",
-        hostname: Annotated[str, Form()] = "",
+        labels: Annotated[str, Form()] = "",
         boot_mode: Annotated[str, Form()] = DEFAULT_BOOT_MODE,
         sanboot_drive: Annotated[str, Form()] = "",
         target_disk_serial: Annotated[str, Form()] = "",
@@ -576,14 +589,15 @@ def register_ui_routes(
         normalised = _normalise_mac(mac)
         # Run the form inputs through the same Pydantic model the
         # JSON ``PUT /machines/{mac}`` uses so the two paths stay in
-        # sync: non-hex ``bty_image_ref`` and out-of-shape
-        # ``hostname`` are rejected here too. Empty-form fields
-        # normalise to ``None`` (Pydantic accepts ``None`` for
-        # optional fields, sqlite stores NULL).
+        # sync: non-hex ``bty_image_ref`` and out-of-shape labels
+        # are rejected here too. The form encodes labels as a
+        # comma-separated string; parse into a deduped list and let
+        # Pydantic validate per-item.
+        parsed_labels = _labels.parse_form_value(labels)
         try:
             validated = MachineUpsert(
                 bty_image_ref=bty_image_ref or None,
-                hostname=hostname or None,
+                labels=parsed_labels,
                 boot_mode=boot_mode,
                 sanboot_drive=sanboot_drive or None,
                 target_disk_serial=target_disk_serial or None,
@@ -649,19 +663,18 @@ def register_ui_routes(
             conn.execute(
                 """
                 INSERT INTO machines
-                    (mac, bty_image_ref, hostname, boot_mode, sanboot_drive,
+                    (mac, bty_image_ref, boot_mode, sanboot_drive,
                      target_disk_serial, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(mac) DO UPDATE SET
                     bty_image_ref      = excluded.bty_image_ref,
-                    hostname           = excluded.hostname,
                     boot_mode          = excluded.boot_mode,
                     sanboot_drive      = excluded.sanboot_drive,
                     target_disk_serial = excluded.target_disk_serial,
                     -- Reset the one-shot alternation bit + completion
                     -- signals ONLY when a policy-affecting field
                     -- changes (boot_mode, bty_image_ref,
-                    -- target_disk_serial). Hostname / sanboot_drive
+                    -- target_disk_serial). labels / sanboot_drive
                     -- don't invalidate the in-flight cycle. Mirrors
                     -- the JSON PUT /machines path; both must stay
                     -- in sync. See PUT for the rationale on why
@@ -697,7 +710,6 @@ def register_ui_routes(
                 (
                     normalised,
                     validated.bty_image_ref,
-                    validated.hostname,
                     validated.boot_mode,
                     validated.sanboot_drive,
                     validated.target_disk_serial,
@@ -705,6 +717,7 @@ def register_ui_routes(
                     now,
                 ),
             )
+            _labels.set_labels(conn, normalised, list(validated.labels))
             # Audit the change (mirrors PUT /machines) so a UI policy
             # edit shows up on /ui/events like the JSON path does.
             _events_log.record(
@@ -719,7 +732,7 @@ def register_ui_routes(
                     "bty_image_ref": validated.bty_image_ref,
                     "boot_mode": validated.boot_mode,
                     "sanboot_drive": validated.sanboot_drive,
-                    "hostname": validated.hostname,
+                    "labels": list(validated.labels),
                     "target_disk_serial": validated.target_disk_serial,
                 },
             )
@@ -752,6 +765,9 @@ def register_ui_routes(
             cur = conn.execute("DELETE FROM machines WHERE mac = ?", (normalised,))
             deleted = cur.rowcount > 0
             if deleted:
+                # Mirror the JSON delete: cascade the per-MAC label
+                # rows (sqlite isn't running with FK enforcement).
+                _labels.delete_labels(conn, normalised)
                 _events_log.record(
                     conn,
                     kind="machine.deleted",
@@ -2223,7 +2239,7 @@ def _delete_toml_key(path: Path, section: str, key: str) -> None:
     tmp.replace(path)
 
 
-def _row_to_dict(row: Any) -> dict[str, Any]:
+def _row_to_dict(row: Any, labels: list[str]) -> dict[str, Any]:
     """Decode a sqlite3.Row of ``machines`` into a plain dict.
 
     ``known_disks`` is stored as JSON text in the column;
@@ -2237,6 +2253,10 @@ def _row_to_dict(row: Any) -> dict[str, Any]:
     version, so by the time this function runs the row always
     matches the schema defined in ``_db.SCHEMA``. We can index
     directly.
+
+    ``labels`` is the per-MAC list from the ``machine_labels`` side
+    table, plumbed in by the caller so list views can batch-fetch
+    instead of doing N+1 queries.
     """
     raw_disks = row["known_disks"]
     parsed_disks: list[dict[str, Any]] | None = None
@@ -2252,7 +2272,7 @@ def _row_to_dict(row: Any) -> dict[str, Any]:
     return {
         "mac": row["mac"],
         "bty_image_ref": row["bty_image_ref"],
-        "hostname": row["hostname"],
+        "labels": labels,
         "discovered_at": row["discovered_at"],
         "last_seen_at": row["last_seen_at"],
         "last_seen_ip": row["last_seen_ip"],

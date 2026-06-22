@@ -88,7 +88,7 @@
             <label for="machines-q" class="text-nowrap text-muted small mb-0">Filter:</label>
             <input type="search" name="q" id="machines-q" value="{{ q or '' }}"
                    class="form-control form-control-sm flex-grow-1"
-                   placeholder="MAC / hostname / image / IP">
+                   placeholder="MAC / label / image / IP">
             <button type="submit" class="btn btn-sm btn-outline-secondary" title="Search">
                 <i class="bi bi-search"></i>
             </button>
@@ -101,16 +101,20 @@
     <div class="table-responsive">
         <table class="table table-striped table-hover mb-0 align-middle">
             <thead class="table-light">
-                {# Pin the narrow columns to width:1% + nowrap (as the
-                   other tables do) so they stay tight and only MAC /
-                   Image / Hostname absorb the slack -- otherwise the
-                   header columns stretch evenly and look oversized. #}
+                {# Column order is identity (MAC, Labels) -> configuration
+                   (Image, Boot) -> timeline (Last seen, Last IP, Last
+                   flashed) -> actions. Narrow columns get width:1% +
+                   nowrap so they stay tight and only MAC / Labels /
+                   Image absorb the slack. Labels is unsortable -- a
+                   machine carries a SET of tags, "sort by labels" has
+                   no natural meaning when each row has several. #}
                 <tr>
                     {{ sort_header('MAC', 'mac', sort, preserved, 'style="white-space: nowrap;"') }}
+                    <th>Labels</th>
                     {{ sort_header('Image', 'bty_image_ref', sort, preserved) }}
                     {{ sort_header('Boot', 'boot_mode', sort, preserved, 'style="width: 1%; white-space: nowrap;"') }}
-                    {{ sort_header('Hostname', 'hostname', sort, preserved) }}
                     {{ sort_header('Last seen', 'last_seen_at', sort, preserved, 'style="width: 1%; white-space: nowrap;"') }}
+                    {{ sort_header('Last IP', 'last_seen_ip', sort, preserved, 'style="width: 1%; white-space: nowrap;"') }}
                     {{ sort_header('Last flashed', 'last_flashed_at', sort, preserved, 'style="width: 1%; white-space: nowrap;"') }}
                     <th style="width: 1%;"></th>
                 </tr>
@@ -145,9 +149,9 @@
         var mac = document.getElementById("add-mac").value.trim().toLowerCase();
         var data = new FormData();
         // Minimal: MAC only. boot_mode defaults to the safe "ipxe-exit"
-        // (never a flash policy from this inline form); hostname +
+        // (never a flash policy from this inline form); labels +
         // image binding + policy are set on the machine's detail page.
-        data.append("hostname", "");
+        data.append("labels", "");
         data.append("boot_mode", "ipxe-exit");
         fetch("/ui/machines/" + encodeURIComponent(mac), {
             method: "POST",

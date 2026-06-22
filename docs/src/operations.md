@@ -149,7 +149,7 @@ What a bundle carries, and what it deliberately leaves behind:
 | Travels | Stays behind (fresh on the destination) |
 |---|---|
 | Machine `mac` + `lshw` + disk inventory | The **boot mode** (every machine imports as `bty-inventory`) |
-| Image binding + `target_disk_serial` + `hostname` | The `saw_flasher_boot` state bit + `last_flashed_at` |
+| Image binding + `target_disk_serial` + `labels` | The `saw_flasher_boot` state bit + `last_flashed_at` |
 | The image catalog (`catalog_entries`) | The netboot artifacts (re-fetch to match the new version) |
 |  | Server settings + the audit log |
 
@@ -196,7 +196,7 @@ Operator-irreplaceable state lives outside `state.db`:
 - **Withcache blobs** under the separate withcache data dir -- not
   touched (different process).
 
-What rotation discards: machine bindings, hostnames, the audit log,
+What rotation discards: machine bindings, the audit log,
 operator-overridden settings, the catalog cache index. Bindings
 re-discover on the next PXE contact from each machine.
 

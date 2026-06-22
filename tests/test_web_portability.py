@@ -41,13 +41,12 @@ def _seed(state_path: Path) -> None:
             ),
         )
         conn.execute(
-            "INSERT INTO machines (mac, bty_image_ref, hostname, boot_mode, sanboot_drive, "
+            "INSERT INTO machines (mac, bty_image_ref, boot_mode, sanboot_drive, "
             "saw_flasher_boot, known_disks, known_disks_at, hw_lshw, hw_lshw_at, "
-            "target_disk_serial, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "target_disk_serial, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 "aa:bb:cc:dd:ee:ff",
                 "ref-demo",
-                "lab-box",
                 "bty-flash-once",
                 "0x80",
                 1,
@@ -59,6 +58,16 @@ def _seed(state_path: Path) -> None:
                 "2026-05-22T00:00:00+00:00",
                 "2026-05-22T00:30:00+00:00",
             ),
+        )
+        # Sample labels in the side table so the "labels stay behind on
+        # import" assertion has something to test against.
+        conn.execute(
+            "INSERT INTO machine_labels (mac, label) VALUES (?, ?)",
+            ("aa:bb:cc:dd:ee:ff", "rack-3"),
+        )
+        conn.execute(
+            "INSERT INTO machine_labels (mac, label) VALUES (?, ?)",
+            ("aa:bb:cc:dd:ee:ff", "noisy"),
         )
         conn.commit()
 
@@ -90,7 +99,7 @@ def test_export_import_round_trip(tmp_path: Path) -> None:
         "bty_image_ref",
         "target_disk_serial",
         "sanboot_drive",
-        "hostname",
+        "labels",
         "saw_flasher_boot",
         "last_flashed_at",
     ):
@@ -121,11 +130,19 @@ def test_export_import_round_trip(tmp_path: Path) -> None:
             conn.execute("SELECT * FROM machines WHERE mac=?", ("aa:bb:cc:dd:ee:ff",)).fetchone()
         )
         c_count = conn.execute("SELECT COUNT(*) FROM catalog_entries").fetchone()[0]
+        dst_labels = [
+            r[0]
+            for r in conn.execute(
+                "SELECT label FROM machine_labels WHERE mac=? ORDER BY label",
+                ("aa:bb:cc:dd:ee:ff",),
+            ).fetchall()
+        ]
     # Slim import: hardware fingerprint carried, NOTHING else.
     assert m["hw_lshw"] == '{"id": "system"}'
     assert "/dev/sda" in m["known_disks"]
     # Bindings reset on import (operator re-binds on the new appliance).
-    assert m["hostname"] is None
+    # Labels are bindings: they don't travel.
+    assert dst_labels == []
     assert m["bty_image_ref"] is None
     assert m["target_disk_serial"] is None
     assert m["sanboot_drive"] is None
