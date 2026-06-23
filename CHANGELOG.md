@@ -13,19 +13,57 @@ operator-facing summary.
 
 ### Changed
 
-- **Docs: corrected the backup-bundle "Travels" table.** The
-  `operations.md` table was overstating what a v3 bundle carries
-  (claiming image binding / `target_disk_serial` / `labels` /
-  `catalog_entries` travel) -- the actual export shape per
-  `_portability.py` is just `mac` + `lshw` + `known_disks`. Operators
-  reading the doc would have expected their bindings + catalog to
-  survive an export/import; the code has always reset all of that
-  on import. Table rewritten to match the export shape.
+- **Docs: corrected the backup-bundle "Travels" table + the bty-web
+  export description.** `operations.md` was overstating what a v3
+  bundle carries (claiming image binding / `target_disk_serial` /
+  `labels` / `catalog_entries` travel) and calling the export tool
+  "selective" with "image bindings, catalog, and local image files".
+  The actual export shape per `_portability.py` is just `mac` +
+  `lshw` + `known_disks`; the catalog and bindings reset on import.
+  The "full tar backup" example was also claiming it captured cached
+  image bytes -- bty-web exited the bytes plane in v0.40, so cached
+  blobs live in withcache's own data dir now. All three rewritten.
+
+- **Docs: aligned components / flows / reference with current routes
+  and event kinds.** Several pages had drifted post-v0.57:
+
+  - `flows.md`'s audit-log table listed a TFTP-control kind pair
+    that was removed (`netboot.tftp.controlled` / `.control_failed`),
+    two "kinds" that are actually `netboot.pxe.offered` rows with
+    `details.reason` flags (`orphan_ref` / `no_target_disk`), and
+    used the old underscore form on `.failed` kinds; new
+    `.requested` / `.started` / `.cancelled` lifecycle kinds + the
+    `system.schema.reset` tripwire were missing. Operator-UI table
+    pointed at the removed `/ui/settings/tftp-control` and was
+    missing the new `/ui/settings/{upstream,backup,config/edit}`
+    rows.
+  - `components.md`'s "Failure symmetry" listed underscore-form
+    kinds and event kinds that the code never emits (`image.upload*`,
+    `image.hash*`, `settings.tftp.control_failed`); "Filtering"
+    described the retired multi-dropdown form instead of the
+    `?q=` substring search.
+  - `reference.md` documented two routes that don't exist
+    (`POST /ui/settings/flash`, `POST /ui/settings/tftp-control`)
+    and described the old single Upstream-sources card layout.
 
 - **Search-input placeholder spells out what matches.** The
   `/ui/machines` Filter input now reads `MAC / label / image / IP
   (any field, substring)` so it's clear that typing one term hits any
   field of any row, including any of the machine's labels.
+
+- **Images table: cleaner explanation of the "unset" sha badge.** The
+  title-attr tooltip was promising "an opt-in v0.41 verifier will
+  hash the stream and compare against this column when set" -- the
+  verifier shipped in v0.41 (`bty.flash._spawn_hash_tee`); the
+  tooltip now describes what actually happens (the live env
+  `curl | tee | sha256sum | dd` refuses on a mismatch when this
+  column is set, skips the check when unset).
+
+- **Stale env-var alias removed.** `_app.py` + the Backup-schedule
+  card comment claimed `BTY_BACKUP_DIR` was a "legacy" alias for
+  `BTY_PATHS_BACKUP_DIR`; the legacy var is not read anywhere. An
+  operator who tried it would have seen no effect. Mention dropped
+  so the documented surface matches the consumed surface.
 
 ## [0.58.0] - 2026-06-22
 
