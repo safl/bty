@@ -10,14 +10,14 @@ Three rendering surfaces consume the same rows:
 2. ``/ui/machines/{mac}`` -- the most recent events touching this
    MAC, embedded in the machine-detail card.
 3. ``/ui/images`` -- the most recent events touching the image
-   catalog (uploads, catalog adds / deletes, hash completions).
+   catalog (catalog adds / deletes, manifest imports).
 
 Conventions:
 
 - ``kind`` is a dotted lowercase namespace, e.g.
-  ``machine.discovered``, ``machine.flashed``, ``image.uploaded``,
-  ``catalog.entry.added``. Stable strings; the UI keys badge
-  colours off them.
+  ``machine.discovered``, ``machine.flashed``,
+  ``catalog.entry.added``, ``netboot.artifacts.fetched``. Stable
+  strings; the UI keys badge colours off them.
 - ``subject_kind`` + ``subject_id`` together identify the entity
   the event is about. ``machine`` / mac, ``image`` / sha or name,
   ``catalog`` / src URL, ``boot`` / release-tag, ``settings`` /
@@ -333,13 +333,13 @@ def list_events(
         where.append("source_ip = ?")
         args.append(source_ip)
     if failed_only:
-        # Failure kinds end either in ``.failed`` (e.g.
-        # ``machine.task.failed``) or ``_failed`` (e.g.
-        # ``image.hash.failed``). LIKE matches both via the
-        # ``%failed`` suffix; a stricter check would need an
-        # OR of two LIKE clauses but the simpler form is
-        # sufficient here -- ``failed`` is rare enough as a
-        # full-token suffix that false positives are unlikely.
+        # Every failure kind ends in ``.failed`` (dotted, since
+        # v0.33.x normalised the earlier underscore form):
+        # ``auth.login.failed``, ``catalog.entry.add.failed``,
+        # ``netboot.artifacts.fetch.failed``, ``backup.failed``, etc.
+        # ``%failed`` matches the suffix; a stricter check (``%.failed``)
+        # would be marginally cleaner but ``failed`` as a full-token
+        # suffix has no false positives in the current kind set.
         where.append("kind LIKE ?")
         args.append("%failed")
     if before_id is not None:

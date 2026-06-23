@@ -2763,13 +2763,13 @@ def test_ui_events_page_search_narrows_results(
 def test_ui_events_page_renders_failure_with_danger_badge(
     app_client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Failure-kind events (anything ending ``.failed`` or
-    ``_failed``) render with the ``bg-danger`` Bootstrap badge so
-    they pop in a long log instead of blending in with their
-    success siblings (``image.hashed`` vs ``image.hash.failed``,
-    same family / different colour). Guards the
-    failed-kind branch in the events / per-machine templates
-    against a future refactor of the badge map."""
+    """Failure-kind events (anything ending ``.failed``) render
+    with the ``bg-danger`` Bootstrap badge so they pop in a long
+    log instead of blending in with their success siblings
+    (``netboot.artifacts.fetched`` vs ``netboot.artifacts.fetch.failed``,
+    same family / different colour). Guards the failed-kind branch
+    in the events / per-machine templates against a future refactor
+    of the badge map."""
     # Trigger a netboot.artifacts.fetch.failed event (deterministic --
     # monkeypatch the fetch to raise FetchError).
     from bty.web import _releases

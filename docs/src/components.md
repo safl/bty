@@ -220,13 +220,12 @@ strips inbound `X-Forwarded-For` from external requests.
 
 **Failure symmetry.** Every async-manager + operator-driven action that
 can fail emits a paired ``<kind>.failed`` event (`auth.login.failed`,
-`image.upload.failed`, `image.hash.failed`, `backup.failed`,
-`netboot.artifacts.fetch.failed`, `settings.config.failed`,
-`catalog.entry.add.failed`). Dotted-namespace (``<noun>.<verb>.failed``)
-since v0.33.x normalised the earlier underscore-form (``_failed``).
-Failed kinds render with a danger-coloured badge so they pop in a long
-log, and the dashboard's Health Monitoring tripwire counts only the
-unacknowledged ones.
+`backup.failed`, `netboot.artifacts.fetch.failed`,
+`settings.config.failed`, `catalog.entry.add.failed`).
+Dotted-namespace (``<noun>.<verb>.failed``) since v0.33.x normalised
+the earlier underscore-form (``_failed``). Failed kinds render with a
+danger-coloured badge so they pop in a long log, and the dashboard's
+Health Monitoring tripwire counts only the unacknowledged ones.
 
 **Filtering.** The ``/ui/events`` page (since v0.57) uses a single
 ``?q=<text>`` substring search across kind / subject_kind / subject_id /

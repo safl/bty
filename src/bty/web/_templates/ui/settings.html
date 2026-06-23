@@ -169,7 +169,8 @@
    ``retention`` persist in the settings table; the scheduler loop
    reads them on every tick so a change here propagates within one
    tick (60s) without restart. The on-disk destination is read-only
-   (env-overridable via BTY_BACKUP_DIR). #}
+   here (set via ``[paths] backup_dir`` in bty.toml or
+   ``BTY_PATHS_BACKUP_DIR``). #}
 <div class="card h-100" id="backup-schedule">
     <div class="card-header bg-light fw-semibold">
         <i class="bi bi-shield-check me-1"></i>Backup schedule

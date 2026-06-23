@@ -134,7 +134,7 @@ def create_app(
     # state.db so they survive the same migrate-the-state-dir flow as
     # the image cache. Operators wanting them off the OS disk override
     # via ``[paths] backup_dir`` in bty.toml (env override:
-    # ``BTY_PATHS_BACKUP_DIR`` / legacy ``BTY_BACKUP_DIR``). The cfg
+    # ``BTY_PATHS_BACKUP_DIR``). The cfg
     # field's blank-default resolves to ``<state_dir>/backups`` but
     # state_path here may diverge from cfg.state_dir (test fixtures
     # pass a temp state_path without setting cfg.state_dir), so honour
