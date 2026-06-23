@@ -9,20 +9,9 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
-## [0.58.1] - 2026-06-23
+## [0.58.2] - 2026-06-23
 
 ### Changed
-
-- **Docs: corrected the backup-bundle "Travels" table + the bty-web
-  export description.** `operations.md` was overstating what a v3
-  bundle carries (claiming image binding / `target_disk_serial` /
-  `labels` / `catalog_entries` travel) and calling the export tool
-  "selective" with "image bindings, catalog, and local image files".
-  The actual export shape per `_portability.py` is just `mac` +
-  `lshw` + `known_disks`; the catalog and bindings reset on import.
-  The "full tar backup" example was also claiming it captured cached
-  image bytes -- bty-web exited the bytes plane in v0.40, so cached
-  blobs live in withcache's own data dir now. All three rewritten.
 
 - **Docs: aligned components / flows / reference with current routes
   and event kinds.** Several pages had drifted post-v0.57:
@@ -46,10 +35,14 @@ operator-facing summary.
     (`POST /ui/settings/flash`, `POST /ui/settings/tftp-control`)
     and described the old single Upstream-sources card layout.
 
-- **Search-input placeholder spells out what matches.** The
-  `/ui/machines` Filter input now reads `MAC / label / image / IP
-  (any field, substring)` so it's clear that typing one term hits any
-  field of any row, including any of the machine's labels.
+- **Operations docs: corrected the bty-web export description.** The
+  doc called the export tool "selective" with "image bindings,
+  catalog, and local image files". The actual export shape per
+  `_portability.py` is just `mac` + `lshw` + `known_disks`; the
+  catalog and bindings reset on import. The "full tar backup"
+  example was also claiming it captured cached image bytes --
+  bty-web exited the bytes plane in v0.40, so cached blobs live in
+  withcache's own data dir now. Both rewritten.
 
 - **Images table: cleaner explanation of the "unset" sha badge.** The
   title-attr tooltip was promising "an opt-in v0.41 verifier will
@@ -64,6 +57,31 @@ operator-facing summary.
   `BTY_PATHS_BACKUP_DIR`; the legacy var is not read anywhere. An
   operator who tried it would have seen no effect. Mention dropped
   so the documented surface matches the consumed surface.
+
+- **Audit-log docstrings + comments dropped references to event
+  kinds the code never emits** (`image.upload.failed`,
+  `image.hash.failed`, `settings.tftp.controlled`). Only
+  `image.upstream.truncated` is a real image-namespaced kind;
+  uploads + hashing left the bty-web scope when v0.40 took it out
+  of the bytes plane, and the TFTP-control route was removed.
+
+## [0.58.1] - 2026-06-23
+
+### Changed
+
+- **Docs: corrected the backup-bundle "Travels" table.** The
+  `operations.md` table was overstating what a v3 bundle carries
+  (claiming image binding / `target_disk_serial` / `labels` /
+  `catalog_entries` travel) -- the actual export shape per
+  `_portability.py` is just `mac` + `lshw` + `known_disks`. Operators
+  reading the doc would have expected their bindings + catalog to
+  survive an export/import; the code has always reset all of that
+  on import. Table rewritten to match the export shape.
+
+- **Search-input placeholder spells out what matches.** The
+  `/ui/machines` Filter input now reads `MAC / label / image / IP
+  (any field, substring)` so it's clear that typing one term hits any
+  field of any row, including any of the machine's labels.
 
 ## [0.58.0] - 2026-06-22
 
