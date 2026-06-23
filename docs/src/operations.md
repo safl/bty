@@ -79,14 +79,21 @@ cp -a /var/lib/bty/state.db ~/bty-state-backup.db
 sudo systemctl start bty-web
 ```
 
-For a full backup (records + cached images + netboot artifacts), copy
-the whole directory while bty-web is stopped:
+For a full backup of everything `bty-web` manages (records + netboot
+artifacts + any on-disk backup bundles), copy the whole directory while
+bty-web is stopped:
 
 ```bash
 sudo systemctl stop bty-web
 sudo tar -C /var/lib -czf ~/bty-state-$(date +%F).tar.gz bty
 sudo systemctl start bty-web
 ```
+
+This does NOT include cached image bytes -- since v0.40, bty-web is
+out of the image-bytes plane; cached blobs live in the separate
+withcache data dir (its own container volume). Back that up
+independently if you need the cache to survive (otherwise withcache
+re-fills on demand from the upstream catalog).
 
 Restore by putting the file(s) back under `/var/lib/bty` (bty-web
 stopped) and starting the service.
@@ -124,12 +131,14 @@ the bottom.
 ## Portable export / import (operator data only)
 
 `tar`-copying the whole tree (above) is the verbatim option. The
-`bty-web export` / `import` subcommands are the **selective** one: they
-move only the operator-owned half of the state -- the machine hardware
-identities + image bindings, the catalog, and the local image files --
-and nothing bty manages itself. Reach for them to migrate to a new
-server (possibly a newer version) without dragging stale bty internals
-along, or to back up just the parts you typed in.
+`bty-web export` / `import` subcommands are the **slim** one: they move
+only the expensive-to-recollect half -- per-machine hardware identity
+(`mac` + `lshw` + `known_disks` from the box's last live-env boot) --
+and nothing else. The catalog, machine bindings, audit log, settings,
+and netboot artifacts are deliberately left behind so an upgrade lands
+on a fresh, regenerable state and the operator re-binds. Reach for
+this to migrate hardware fingerprints across an upgrade or to a new
+host without dragging the rest along.
 
 ```bash
 # On the old server (reads BTY_PATHS_STATE_DIR):
@@ -215,10 +224,13 @@ sudo bty-web export /var/lib/bty/backups/pre-$(date +%Y%m%d)
 sudo bty-web import /var/lib/bty/backups/pre-$(date +%Y%m%d)
 ```
 
-The slim bundle format carries a minimal per-machine record
-(`mac` + `hw_lshw` + `known_disks`) plus the catalog rows;
-bindings (`boot_mode`, `bty_image_ref`, `target_disk_serial`)
-reset to defaults and the operator re-binds. See "Backup".
+The slim bundle carries a minimal per-machine record
+(`mac` + `hw_lshw` + `known_disks`) and nothing else: bindings
+(`boot_mode`, `bty_image_ref`, `target_disk_serial`, `sanboot_drive`,
+`labels`) reset on import and the operator re-binds; the image catalog
+(`catalog_entries`) does **not** travel either -- re-import the catalog
+on the new appliance via the Settings page's "Fetch latest catalog"
+button (or upload a `catalog.toml` directly). See "Backup".
 
 ### Recovering an old `.bak`
 

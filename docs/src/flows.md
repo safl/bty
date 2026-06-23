@@ -373,26 +373,22 @@ Conditional:
 | `machine.deleted`               | Operator `DELETE /machines/{mac}`.                                                                          |
 | `machine.flashed`               | Live env `POST /pxe/{mac}/done`.                                                                            |
 | `machine.inventory`             | Live env `POST /pxe/{mac}/inventory`.                                                                       |
-| `netboot.pxe.offered`                   | Every `GET /pxe/{mac}` hit. Details record what was returned.                                              |
+| `netboot.pxe.offered`                   | Every `GET /pxe/{mac}` hit. `details.offer` records what was returned (`flash` / `sanboot` / `tui` / `inventory` / `ipxe-exit`) and `details.reason` annotates refusals (`no_target_disk` / `orphan_ref`). |
 | `netboot.pxe.plan`                      | `GET /pxe/{mac}/plan` resolved a flash plan (image / target disk / boot args) for an auto-flash request.   |
-| `netboot.pxe.flash.orphan_ref`          | Flash chain refused due to dangling `bty_image_ref`.                                                       |
-| `netboot.pxe.flash.no_target_disk`      | Flash chain refused due to empty `target_disk_serial`.                                                     |
+| `netboot.flasher.armed`                 | First `/boot/<artifact>?mac=` fetch in a cycle armed `saw_flasher_boot=1` (the live env booted). Idempotent; only the 0->1 transition lands a row. |
 | `catalog.entry.added`           | Operator `POST /catalog/entries` (form or JSON) succeeds.                                                  |
-| `catalog.entry.add_failed`      | sha resolve / oras resolve failed on `/catalog/entries`.                                                   |
+| `catalog.entry.add.failed`      | sha resolve / oras resolve / duplicate-src on `POST /catalog/entries`.                                     |
 | `catalog.entry.deleted`         | Operator `DELETE /catalog/entries`.                                                                         |
 | `catalog.entries.imported`      | `POST /catalog/import` or the form-style `/ui/catalog/upload` / `/ui/catalog/fetch-release` ingested a catalog.toml. |
-| `netboot.artifacts.fetched`          | `/ui/netboot/fetch-release` (or `POST /boot/releases`) successfully pulled artifacts.                          |
-| `netboot.artifacts.fetch_failed`     | Same path failed (404, sha mismatch, etc.).                                                                 |
-| `netboot.tftp.controlled`      | Operator `POST /ui/settings/tftp-control` succeeded.                                                        |
-| `netboot.tftp.control_failed`  | Same path failed (`sudo -n` denied, helper exit non-zero, etc.).                                            |
+| `netboot.artifacts.fetch.requested` / `.started` / `.cancelled` / `.failed` / `netboot.artifacts.fetched` | Lifecycle events for the release-artifact fetch worker (`POST /workers/releases` or `POST /boot/releases`); terminal success kind is bare `netboot.artifacts.fetched`. |
 | `settings.upstream.updated`     | Operator `POST /ui/settings/upstream` saved the release-repo / catalog-URL / release-tag overrides.        |
 | `settings.backup.updated`       | Operator `POST /ui/settings/backup` saved the scheduled-backup knobs (enabled / cadence / retention).      |
-| `backup.created`                | BackupManager wrote a fresh bundle directory under `backups_root` (manual or scheduled).                   |
-| `backup.failed`                 | BackupManager export errored; the partial bundle (if any) is cleaned up.                                   |
-| `backup.pruned`                 | Retention pass deleted an old backup directory after a successful run.                                     |
+| `settings.config.updated` / `.failed` | Operator `POST /ui/settings/config/edit` round-tripped a `bty.toml` field through tomlkit.            |
+| `backup.create.requested` / `.started` / `.cancelled` / `backup.created` / `backup.failed` / `backup.deleted` / `backup.pruned` | BackupManager lifecycle; terminal success is bare `backup.created`. `backup.pruned` fires when retention deletes an old bundle after a successful run. |
 | `auth.login.succeeded`          | Operator `POST /ui/login` with a password matching `$BTY_ADMIN_PASSWORD`.                                    |
 | `auth.login.failed`             | Same path with a mismatched password.                                                                       |
 | `auth.logout`                   | Operator `POST /ui/logout` from an authed session.                                                          |
+| `system.schema.reset`           | `init_db` rotated `state.db` on a version mismatch (auto-rotate on schema mismatch -- see `operations.md`). |
 
 Every row carries `subject_kind` (`machine` / `image` / `catalog` /
 `netboot` / `settings` / `auth` / `backup`), a `subject_id`, the
@@ -407,12 +403,14 @@ requesting `source_ip`, the `actor` (`operator` / `pxe-client` /
 | Log out                                   | `POST /ui/logout`                    | Clears session cookie. Records `auth.logout`.                                                       |
 | Bind image + disk + policy on a machine   | `POST /ui/machines/{mac}`            | UPSERT. Refuses `boot_mode=bty-flash-always` without `target_disk_serial`. Records `machine.{created,upserted}`. |
 | Delete a machine record                   | `POST /ui/machines/{mac}/delete`     | DELETE row. Records `machine.deleted`.                                                              |
-| Add catalog entry by URL                  | `POST /ui/catalog/entries`           | sha-resolve (if `sha_url` given) -> INSERT `catalog_entries`. Records `catalog.entry.{added,add_failed}`. |
+| Add catalog entry by URL                  | `POST /ui/catalog/entries`           | sha-resolve (if `sha_url` given) -> INSERT `catalog_entries`. Records `catalog.entry.{added,add.failed}`. |
 | Delete a catalog entry                    | `DELETE /catalog/entries?src=...`    | Removes the row. v0.40+: no on-disk cached bytes to clean up; withcache evicts on its own schedule. Records `catalog.entry.deleted`. |
 | Upload a `catalog.toml` manifest          | `POST /ui/catalog/upload`            | Validates + atomic-renames into `${BTY_PATHS_STATE_DIR}/catalog.toml`.                                     |
-| Fetch `catalog.toml` from the project release | `POST /ui/catalog/fetch-release` | Pulls `releases/latest/download/catalog.toml`, same persist as upload.                              |
-| Fetch boot artifacts (kernel + initrd + squashfs) | `POST /ui/netboot/fetch-release` | Pulls release artifacts into `BTY_BOOT_ROOT`. Records `netboot.artifacts.{fetched,fetch_failed}`.        |
-| Start / Stop / Restart the TFTP daemon    | `POST /ui/settings/tftp-control`     | `sudo bty-web-tftp <action>` -> `systemctl <action> dnsmasq`. Records `settings.tftp.{controlled,control_failed}`. |
+| Fetch `catalog.toml` from the configured URL | `POST /ui/catalog/fetch-release` | GETs the operator's `[upstream] catalog_url` (defaults to a pinned nosi release), same persist as upload.                              |
+| Fetch boot artifacts (kernel + initrd + squashfs) | `POST /ui/netboot/fetch-release` | Pulls release artifacts into `BTY_PATHS_BOOT_DIR`. Lifecycle events `netboot.artifacts.{requested,started,fetched,failed,cancelled}`.        |
+| Save upstream sources (netboot repo / tag, catalog URL) | `POST /ui/settings/upstream` | Persists overrides into `state.db` (settings table); fetch routes resolve from this at request time. Records `settings.upstream.updated`. |
+| Save scheduled-backup knobs (enabled / cadence / retention) | `POST /ui/settings/backup` | Same persistence; scheduler picks up changes on the next 60s tick. Records `settings.backup.updated`. |
+| Edit a `bty.toml` config field            | `POST /ui/settings/config/edit`      | Per-row inline form on `/ui/settings`; rounds the value through tomlkit to preserve operator formatting + reloads the active config. Records `settings.config.{updated,failed}`. |
 
 ## Safety gates summary
 

@@ -114,7 +114,7 @@
                         {{ copy_chip(u.sha256) }}
                         {% else %}
                         <span class="badge bg-light text-dark border"
-                              title="no sha declared in the catalog entry. The live env still flashes the URL; an opt-in v0.41 verifier will hash the stream and compare against this column when set.">unset</span>
+                              title="no sha declared in the catalog entry. The live env still flashes the URL, but skips the stream-hash check it would perform if this column were set (curl | tee | sha256sum | dd would refuse on a mismatch).">unset</span>
                         {% endif %}
                     </td>
                     <td><span class="badge bg-secondary">{{ u.format or "?" }}</span></td>

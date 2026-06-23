@@ -480,22 +480,30 @@ Bootstrap CSS, HTMX form posts).
  `https://github.com/<BTY_BOOT_RELEASE_REPO>/releases/<tag>/download/`
  (default `safl/bty`, default tag `latest`); verifies the manifest
  and atomically installs into `BTY_PATHS_BOOT_DIR`.
-- `GET /ui/settings` -> the config map: read-only groups for every bty
- magic value (where each comes from: env var / derived path / default),
- the editable **Upstream sources** (release repo / catalog URL / release
- tag) card, and the **DHCP / Network boot** router cheatsheet. Operator
- authentication is on the separate Account page (`/ui/account`, reached
- via the user pill): the credential is ``[admin] password`` in
- ``bty.toml`` (env override `BTY_ADMIN_PASSWORD`), rotated by changing
- the value and restarting bty-web; to invalidate every session at
- once, rotate the cookie-signing secret with `rm
- /var/lib/bty/session-secret && systemctl restart bty-web`.
-- `POST /ui/settings/upstream` / `POST /ui/settings/flash` -> persist
- the editable Upstream-sources / settle-policy overrides.
-- `POST /ui/settings/tftp-control` -> drives `bty-web-tftp <action>`
- (allowlist `start` / `stop` / `restart`), the sole sudoers
- grant in `/etc/sudoers.d/bty-web`. URL is unchanged for
- backwards compat though the panel lives on /ui/netboot now.
+- `GET /ui/settings` -> the config page: the editable **Catalog** card
+ (single `catalog_url` field) full-width on top, **Netboot release**
+ (release repo + tag) and **Backup schedule** (enabled / cadence /
+ retention) cards side-by-side, then read-only **Identity / Storage /
+ Network** config groups (each row's source: env var / TOML / default,
+ with an inline edit form when sourced from TOML), plus the
+ **DHCP / Network boot** router cheatsheet. Operator authentication
+ is on the separate Account page (`/ui/account`, reached via the user
+ pill): the credential is ``[admin] password`` in ``bty.toml`` (env
+ override `BTY_ADMIN_PASSWORD`), rotated by changing the value and
+ restarting bty-web; to invalidate every session at once, rotate the
+ cookie-signing secret with `rm /var/lib/bty/session-secret &&
+ systemctl restart bty-web`.
+- `POST /ui/settings/upstream` -> persists the netboot repo / tag and
+ the catalog URL into the `settings` table; fetch routes resolve from
+ this at request time so the changes take effect without a restart.
+- `POST /ui/settings/backup` -> persists the scheduled-backup knobs
+ (enabled / cadence / retention); the scheduler picks them up on the
+ next 60s tick.
+- `POST /ui/settings/config/edit` -> per-row inline edit form for the
+ read-only config groups (rows whose source is `toml` carry an Edit
+ affordance); the handler validates the field, round-trips the value
+ through tomlkit to preserve operator formatting, and reloads the
+ active config inline so the next render reflects the change.
 
 The auth dependency checks ``request.session.get("bty_authed")``; the
 session is a Starlette ``SessionMiddleware``-signed payload carried in the

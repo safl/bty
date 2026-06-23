@@ -218,22 +218,29 @@ from `X-Forwarded-For` rather than the proxy's loopback. Off by default
 because the header is client-spoofable - only enable it when the proxy
 strips inbound `X-Forwarded-For` from external requests.
 
-**Failure symmetry.** Every async-manager + operator-driven action that can
-fail emits a paired `<kind>_failed` event (`auth.login.failed`,
-`image.upload_failed`, `image.hash_failed`,
-`netboot.artifacts.fetch_failed`, `netboot.tftp.control_failed`,
-`catalog.entry.add_failed`). Failed kinds render with a danger-coloured
-badge so they pop in a long log.
+**Failure symmetry.** Every async-manager + operator-driven action that
+can fail emits a paired ``<kind>.failed`` event (`auth.login.failed`,
+`image.upload.failed`, `image.hash.failed`, `backup.failed`,
+`netboot.artifacts.fetch.failed`, `settings.config.failed`,
+`catalog.entry.add.failed`). Dotted-namespace (``<noun>.<verb>.failed``)
+since v0.33.x normalised the earlier underscore-form (``_failed``).
+Failed kinds render with a danger-coloured badge so they pop in a long
+log, and the dashboard's Health Monitoring tripwire counts only the
+unacknowledged ones.
 
-**Filtering.** The `/ui/events` filter form and the JSON API both accept
-`kind`, `subject_kind`, `subject_id`, `actor`, `source_ip`. Click-pivot
-links on each cell jump to the timeline filtered by that value, so an
-operator can ask "everything from 192.168.1.5" or "everything that touched
-image X" with one click.
+**Filtering.** The ``/ui/events`` page (since v0.57) uses a single
+``?q=<text>`` substring search across kind / subject_kind / subject_id /
+actor / source_ip / summary -- one input replaces the earlier
+multi-dropdown form. Click-pivot links on each cell (kind, actor,
+source IP, MAC) are ``?q=<value>`` so the "everything from 192.168.1.5"
+or "everything that touched this MAC" jump is one click. The JSON
+``GET /events`` API still accepts the structured params (``kind``,
+``subject_kind``, ``subject_id``, ``actor``, ``source_ip``, ``failed``,
+``before_id``, ``limit``) for scripting.
 
-**Recent-activity cards** on `/ui/dashboard`, `/ui/machines/{mac}`,
-`/ui/images`, and `/ui/netboot` (list + fetch sections) all embed the same
-`_events_card.html` partial filtered to the relevant subject, so each page
-has a short timeline of context-relevant rows. ``/ui/settings`` is now a
-thin operator-account page and omits the card; the global timeline lives
-under ``/ui/events``.
+**Recent-activity cards** on ``/ui/dashboard``, ``/ui/machines``
+(list + per-MAC detail), ``/ui/images``, ``/ui/netboot``, and
+``/ui/backups`` all embed the same ``_events_card.html`` partial filtered
+to the relevant subject, so each page has a short context-local timeline
+without leaving for the full log. The global timeline lives at
+``/ui/events``.
