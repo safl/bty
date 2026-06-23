@@ -148,9 +148,11 @@ What a bundle carries, and what it deliberately leaves behind:
 
 | Travels | Stays behind (fresh on the destination) |
 |---|---|
-| Machine `mac` + `lshw` + disk inventory | The **boot mode** (every machine imports as `bty-inventory`) |
-| Image binding + `target_disk_serial` + `labels` | The `saw_flasher_boot` state bit + `last_flashed_at` |
-| The image catalog (`catalog_entries`) | The netboot artifacts (re-fetch to match the new version) |
+| Machine `mac` | **Boot mode** (every machine imports as `bty-inventory`) |
+| `lshw` hardware tree (CPU / RAM / NICs) | Image binding + `target_disk_serial` + `sanboot_drive` + `labels` |
+| `known_disks` (lsblk inventory + serials) | The `saw_flasher_boot` state bit + `last_flashed_at` |
+|  | The image catalog (`catalog_entries`) - re-import on the new host |
+|  | The netboot artifacts (re-fetch to match the new version) |
 |  | Server settings + the audit log |
 
 Resetting the boot mode is the point: a freshly-migrated machine
