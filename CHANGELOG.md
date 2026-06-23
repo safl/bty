@@ -9,6 +9,24 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.58.1] - 2026-06-23
+
+### Changed
+
+- **Docs: corrected the backup-bundle "Travels" table.** The
+  `operations.md` table was overstating what a v3 bundle carries
+  (claiming image binding / `target_disk_serial` / `labels` /
+  `catalog_entries` travel) -- the actual export shape per
+  `_portability.py` is just `mac` + `lshw` + `known_disks`. Operators
+  reading the doc would have expected their bindings + catalog to
+  survive an export/import; the code has always reset all of that
+  on import. Table rewritten to match the export shape.
+
+- **Search-input placeholder spells out what matches.** The
+  `/ui/machines` Filter input now reads `MAC / label / image / IP
+  (any field, substring)` so it's clear that typing one term hits any
+  field of any row, including any of the machine's labels.
+
 ## [0.58.0] - 2026-06-22
 
 ### Changed
