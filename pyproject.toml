@@ -16,7 +16,15 @@ classifiers = [
     "Programming Language :: Python :: 3.14",
     "Operating System :: POSIX :: Linux",
 ]
-dependencies = []
+dependencies = [
+    # ``withcache`` owns the OCI / ORAS dance for us. Operators can run a
+    # cache-host on the LAN to absorb ghcr.io's CDN-stream-cut behaviour
+    # (signed-URL TTL kills HTTP/2 transfers mid-stream) and bty calls
+    # ``withcache.oras`` directly for catalog-import-time digest
+    # resolution. bty previously vendored its own ``bty.oras``; that
+    # module was moved upstream in withcache 0.6.0.
+    "withcache>=0.6.0",
+]
 
 [project.optional-dependencies]
 # ``bty`` (the wizard) is built on Rich (no Textual). Rich is widely deployed
@@ -104,6 +112,15 @@ python_version = "3.11"
 strict = true
 explicit_package_bases = true
 mypy_path = "src"
+
+# ``withcache.oras`` and ``withcache`` overall don't yet ship a ``py.typed``
+# marker. The APIs are typed in practice (we wrote them) but mypy treats
+# the package as untyped without the marker. Silence the import-untyped
+# complaint here rather than scatter ``# type: ignore`` across every
+# import site; revisit when withcache ships the marker upstream.
+[[tool.mypy.overrides]]
+module = ["withcache", "withcache.oras"]
+ignore_missing_imports = true
 
 [tool.pyright]
 include = ["src", "tests", "docs/tooling/src"]

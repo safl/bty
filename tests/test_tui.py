@@ -390,7 +390,7 @@ def test_oras_error_is_an_os_error() -> None:
     it. ``urllib.error.URLError`` already follows this pattern;
     keeping OrasError on the same family closes the "TUI freezes
     after oras failure" class of bugs at the type level."""
-    from bty import oras as _oras_module
+    from withcache import oras as _oras_module
 
     assert issubclass(_oras_module.OrasError, OSError)
     # And it remains catchable as itself for the call sites that

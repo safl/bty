@@ -1042,8 +1042,9 @@ def register_ui_routes(
         into its background fetch worker (withcache 0.4.0+), so the
         cache fills against a token-gated origin in one probe.
         """
+        from withcache import oras as _oras
+
         from bty import flash as _flash
-        from bty import oras as _oras
         from bty.web import _withcache
 
         origin: dict[str, Any]
@@ -1126,8 +1127,9 @@ def register_ui_routes(
         Pydantic model the JSON endpoint uses, so the form rejects
         ``ftp://`` / host-less URLs / non-http schemes identically.
         """
+        from withcache import oras as _oras
+
         from bty import catalog as _catalog
-        from bty import oras as _oras
         from bty.web._app import _head_content_length  # local import: avoid cycle at module load
 
         cleaned_sha_url = sha_url.strip() or None
