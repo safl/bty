@@ -40,18 +40,15 @@ def test_fetch_routes_accept_head() -> None:
     """Routes that return a ``FileResponse`` (or other large-body
     response) should accept HEAD as well as GET. Clients use HEAD
     to size buffers and check liveness without paying the byte
-    transfer cost:
-
-      * ``bty.flash.probe_image_url`` HEADs the URL before
-        streaming. v0.20.7's "image URL not reachable" bug was
-        ``/images/{key}/{name}`` returning 405 on HEAD.
-      * UEFI HTTP-Boot firmware HEADs the bootfile URL to size
-        its fetch buffer before the GET (already wired for
-        ``/boot/{name}``).
+    transfer cost. UEFI HTTP-Boot firmware HEADs the bootfile URL
+    to size its fetch buffer before the GET (wired for
+    ``/boot/{name}``).
 
     Heuristic: any route whose handler returns a ``FileResponse``
-    (or whose path starts with ``/images`` or ``/boot``) should
-    have HEAD in its allowed methods.
+    (or whose path starts with ``/boot``) should have HEAD in its
+    allowed methods. The ``/images/{key}[/{name}]`` family was
+    removed in v0.60.0; the v0.20.7 regression that motivated the
+    HEAD heuristic was on that route, but it no longer exists.
 
     Locates the routes by AST-parsing ``src/bty/web/_app.py`` --
     cheap, no live-app needed. The check is "if the route is in
@@ -60,7 +57,7 @@ def test_fetch_routes_accept_head() -> None:
     src = (REPO_ROOT / "src" / "bty" / "web" / "_app.py").read_text()
     tree = ast.parse(src)
 
-    fetch_route_paths = ("/images/", "/boot/")
+    fetch_route_paths = ("/boot/",)
     violations: list[str] = []
 
     def _check_decorator(deco: ast.expr, func_name: str) -> None:

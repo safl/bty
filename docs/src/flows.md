@@ -207,9 +207,10 @@ demand, or on failure.
 5. `bty-on-tty1.service` exec's `bty --server URL --mac MAC`. ``bty`` GETs
    `/pxe/<mac>/plan`, sees ``mode=flash`` with the image URL +
    target_disk_serial filled in, resolves the serial to a `/dev/...` path
-   via lsblk, fetches the assigned image from `GET /images/{ref}/{name}`,
-   runs the flash, `POST`s `/pxe/{mac}/done` to update `last_flashed_at`,
-   then reboots automatically.
+   via lsblk, fetches the assigned image from whatever URL the plan
+   carries (withcache when configured + warm; the raw upstream `oras://`
+   or `https://` otherwise), runs the flash, `POST`s `/pxe/{mac}/done` to
+   update `last_flashed_at`, then reboots automatically.
 6. The reboot lands back on PXE (PXE-first firmware). Because the box
    fetched the live-env artifacts during steps 4-5,
    `boot_mode=bty-flash-always` now serves a one-shot boot of the

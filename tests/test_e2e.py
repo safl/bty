@@ -339,8 +339,13 @@ def test_e2e_pxe_flash_chain_plan_carries_image_url_and_target_serial(
     plan = plan_resp.json()
     assert plan["mode"] == "flash"
     assert plan["target_disk_serial"] == "WD-WX12345"
-    assert "/images/" in plan["image"]
-    assert bty_image_ref in plan["image"]
+    # v0.60.0: the bty-web /images proxy was dropped. The plan ships
+    # the catalog row's src directly; the live env's bty handles it
+    # (oras:// via withcache.oras, http(s):// via curl). file:// here
+    # is a degenerate case -- the live env can't reach a file:// URL
+    # on the bty-web host, but the catalog binding shape is what the
+    # rest of this test pins.
+    assert plan["image"] == "file://demo.qcow2"
     # The catalog format rides along so the client can flash an image
     # whose URL name has no detectable extension (e.g. an oras title).
     assert plan["format"] == "qcow2"
@@ -371,11 +376,12 @@ def test_e2e_pxe_flash_chain_plan_carries_image_url_and_target_serial(
 
 def test_e2e_plan_handles_extensionless_oras_name(app_client: TestClient) -> None:
     """An oras entry's name is a descriptive title with no file
-    extension ("nosi fedora-sysdev (x86_64, rolling)"). The flash plan
-    must still let the client detect the format -- otherwise the flash
-    is rejected as "format not recognised" (the observed symptom). The
-    plan synthesises a URL name carrying the catalog format AND passes
-    the format explicitly."""
+    extension ("nosi fedora-sysdev (x86_64, rolling)"). The plan
+    must let the client detect the format. v0.60.0: the bty-web
+    /images proxy with its synthesised URL filename is gone; the
+    plan ships the raw oras:// URL (the live env's bty handles
+    OCI via withcache.oras) and the ``format`` field is the
+    authoritative format hint."""
     state_path: Path = app_client.app.state.state_path  # type: ignore[attr-defined]
     src = "oras://ghcr.io/safl/nosi/fedora-sysdev:latest"
     bty_image_ref = _catalog.image_ref_for_src(src)
@@ -410,11 +416,10 @@ def test_e2e_plan_handles_extensionless_oras_name(app_client: TestClient) -> Non
     plan = app_client.get("/pxe/0c:bf:b4:c0:4b:42/plan", headers={"Host": "bty.local:8080"}).json()
     assert plan["mode"] == "flash"
     assert plan["format"] == "img.gz"
-    # URL name carries the format extension so even a client that detects
-    # format from the URL alone (no plan["format"]) succeeds.
-    assert plan["image"].endswith("/image.img.gz")
-    # ...but the descriptive title still rides along so the flash screen
-    # shows it instead of the synthesised "image.img.gz".
+    # The raw oras:// URL: no withcache configured for this test, so
+    # the plan hands the live env the catalog src directly.
+    assert plan["image"] == src
+    # The descriptive title rides along so the flash screen shows it.
     assert plan["name"] == "nosi fedora-sysdev (x86_64, rolling)"
 
 
@@ -1102,7 +1107,10 @@ def test_e2e_pxe_unknown_mac_then_inventory_then_flash_chain(
     plan = app_client.get(f"/pxe/{mac}/plan", headers={"Host": "bty.local:8080"}).json()
     assert plan["mode"] == "flash"
     assert plan["target_disk_serial"] == "SER-1"
-    assert f"/images/{ref}/" in plan["image"]
+    # v0.60.0: plan ships the catalog src directly (bty-web /images
+    # proxy removed). For a file:// entry that's the file:// URL
+    # verbatim; the test pins the binding shape, not network reach.
+    assert plan["image"] == "file://bound.img.gz"
     # Done records the flash but does NOT mutate the mode -- flash-once
     # stays flash-once (the saw_flasher_boot bit handles the post-flash
     # disk boot, not a policy mutation).

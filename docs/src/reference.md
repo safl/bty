@@ -235,16 +235,13 @@ carry a session cookie:
  (default `/var/lib/bty/boot/`). Same trust model as `/pxe/*`. Operators
  populate the dir via the browser UI's "Fetch netboot artifacts" button on
  the Netboot page, or with the auth-gated `PUT /boot/{name}` upload route.
-- `GET /images/{key}` and `GET /images/{key}/{name}` - oras-only
- stream-proxy. ``key`` must be a 64-hex ``bty_image_ref`` or
- ``disk_image_sha`` whose catalog row carries an ``oras://`` src.
- The trailing ``{name}`` form is decorative (preserves
- format-by-extension client-side). https:// catalog entries hand
- the live env the origin URL directly (or a withcache rewrite) via
- the plan endpoint, so they never reach /images.
-- `GET /images` - list the catalog (array of `ImageEntry`). Open for the
- same reason as `GET /images/{key}`: the PXE-booted ``bty`` flow needs to
- enumerate from inside the live env without bootstrapping a session.
+- `GET /images` - list the catalog (array of `ImageEntry`). Open so the
+ PXE-booted ``bty`` flow can enumerate from inside the live env without
+ bootstrapping a session. The companion `GET /images/{key}[/{name}]`
+ stream-proxy was removed in v0.60.0: oras catalog entries now reach
+ the live env either through withcache (when configured) or as the raw
+ `oras://` URL the live env's bty TUI handles itself via
+ `withcache.oras` (resolve + bearer + curl).
 - `GET /catalog.toml` - same row set as `GET /images`, serialised as a
  `bty.catalog.Catalog` TOML manifest (``version = 1``, ``[[images]]``
  tables). Open for the same reason; consumed by `bty --catalog` so the

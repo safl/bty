@@ -34,11 +34,14 @@ bty-web's plan endpoint returns one of two URLs to the live env:
 2. **withcache cold or unconfigured** -- the origin URL itself.
    bty-web is out of the bytes path; the live env streams direct.
 
-For `oras://` catalog entries bty-web stays in the bytes path: it
-proxies through `/images/<ref>` because withcache speaks plain HTTP
-and can't pull an OCI manifest + inject the bearer token. (A v0.41+
-follow-up could teach withcache about oras and shrink /images
-further.)
+For `oras://` catalog entries the plan ships either the withcache
+serve URL (when withcache is configured) or the raw `oras://` URL
+(otherwise). withcache 0.6.0+ is oras-aware -- it parses the ref,
+mints its own bearer, and absorbs ghcr.io's mid-stream cuts via
+Range-resume. Without withcache, the live env's bty TUI does the
+same OCI dance itself via `withcache.oras`. The v0.41-era
+`/images/<ref>` stream-proxy was removed in v0.60.0 once both
+backstops landed.
 
 ## Container deploy
 

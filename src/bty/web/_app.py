@@ -21,7 +21,7 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -1119,47 +1119,33 @@ def create_app(
                 # stored format so even older clients detect it; the
                 # ``{ref}`` segment is what actually resolves the bytes,
                 # so the name is free to change.
-                if fmt and images.detect_format(Path(image_name)) is None:
-                    url_name = f"image.{fmt}"
-                else:
-                    url_name = image_name
-                image_name_encoded = urllib.parse.quote(url_name, safe="")
-                # Default fallback: bty-web's /images proxy. Used for
-                # oras catalog entries when withcache is unconfigured or
-                # cold (bty-web does the oras dance + stream-proxies the
-                # bytes), and as the catch-all for any catalog row whose
-                # ``resolved_src`` is NULL (legacy schema / failed import).
-                # An https origin is reset back to its direct URL just
-                # below; oras stays on the proxy by design when withcache
-                # is cold (the live env curl can't follow oras://).
-                image_url = f"{base}/images/{ref}/{image_name_encoded}"
+                # The live env reaches the bytes one of three ways:
+                # withcache (when configured + warm), the canonical
+                # plain-HTTPS ``resolved_src`` (for catalog rows whose
+                # import-time resolution populated it), or the original
+                # ``src`` -- ``oras://`` URLs included, which the live
+                # env's bty TUI handles via ``withcache.oras`` (resolve
+                # + bearer mint + curl in the same process).
                 is_oras = src is not None and src.startswith("oras://")
+                image_url = src or ""
                 if src is not None:
-                    # Cache key for withcache is the original catalog src
-                    # (oras:// or https://). Withcache 0.6.0+ is oras-aware
-                    # and mints its own anonymous OCI bearer on a cold
-                    # fetch, so bty doesn't pre-resolve a bearer here.
                     if withcache_url and _withcache.is_cached(withcache_url, src):
                         image_url = _withcache.blob_url(withcache_url, src)
                         cache_hit = True
-                    elif not is_oras and resolved_src is not None:
-                        # Cold cache / no cache for an https origin: let
-                        # the live env fetch direct, bty-web is out of the
-                        # bytes path. For oras the default ``/images/{ref}``
-                        # proxy stays in place (the live env's curl has
-                        # no ``oras://`` scheme handler).
-                        image_url = resolved_src
+                    elif resolved_src is not None:
+                        # Plain-HTTPS canonical URL stored at import
+                        # time. Same URL as src for an http(s) entry;
+                        # the resolved blob URL for oras (which the
+                        # live env can't fetch anonymously, so prefer
+                        # ``src`` below if no withcache).
+                        image_url = resolved_src if not is_oras else src
                         cache_hit = False
                     else:
                         cache_hit = False
                     cache_decision = {
                         "configured": bool(withcache_url),
                         "hit": cache_hit if withcache_url else None,
-                        "served_from": (
-                            "withcache"
-                            if cache_hit
-                            else ("origin" if not is_oras else "bty-web-proxy")
-                        ),
+                        "served_from": "withcache" if cache_hit else "origin",
                     }
                 plan = {
                     "mode": "flash",
@@ -1638,109 +1624,15 @@ def create_app(
             _arm_flasher_boot(raw_mac, _client_ip(request))
         return _serve_safe_file(resolved_boot_root, name)
 
-    def _serve_image_by_key(key: str, request: Request) -> Response:
-        """Stream-proxy an oras:// catalog entry by 64-hex ref / sha.
-
-        v0.40: bty-web is out of the bytes path for https sources (the
-        plan endpoint hands the live env the origin URL directly, or
-        a withcache URL when the cache is warm). The only thing
-        ``/images/{key}`` still does is proxy oras:// blobs, because
-        withcache speaks plain HTTP and can't resolve an OCI manifest
-        + inject the bearer token. Unknown / non-oras keys 404."""
-        if images.is_sha256_hex(key.lower()):
-            src = _remote_src_for_key(key)
-            if src is not None and src.startswith("oras://"):
-                return _stream_remote_image(src, request)
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"no such image: {key}",
-        )
-
-    def _remote_src_for_key(key: str) -> str | None:
-        """The oras:// src for a 64-hex key (bty_image_ref or
-        disk_image_sha), or ``None``. Non-oras srcs go through the
-        plan endpoint (origin URL or withcache rewrite); ``/images``
-        never serves them."""
-        key_lower = key.lower()
-        with _db.open_db(state_path) as conn:
-            row = conn.execute(
-                "SELECT src FROM catalog_entries WHERE bty_image_ref = ? OR disk_image_sha = ?",
-                (key_lower, key_lower),
-            ).fetchone()
-        if row is None:
-            return None
-        src = str(row["src"])
-        return src if src.startswith("oras://") else None
-
-    def _stream_remote_image(src: str, request: Request) -> Response:
-        """Proxy a remote image straight through to the client, no cache.
-
-        HEAD resolves just the size (source HEAD / oras manifest); GET
-        pipes the source bytes as they arrive. A source that can't be
-        reached surfaces as 502 (the live env shows it on tty1) rather
-        than hanging.
-        """
-        if request.method == "HEAD":
-            from bty import flash as _flash
-
-            try:
-                info = _flash.probe_image_url(src)
-            except Exception as exc:
-                raise HTTPException(
-                    status_code=status.HTTP_502_BAD_GATEWAY,
-                    detail=f"image source not reachable: {src} ({exc})",
-                ) from exc
-            headers = {"Content-Length": str(info.size_bytes)} if info.size_bytes else {}
-            return Response(headers=headers, media_type="application/octet-stream")
-        try:
-            chunks, total = _catalog.stream_src(src)
-        except Exception as exc:
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"image source not reachable: {src} ({exc})",
-            ) from exc
-        headers = {"Content-Length": str(total)} if total else {}
-
-        def _observed_chunks() -> Iterator[bytes]:
-            # Wrap the upstream iterator so a mid-stream
-            # ``CatalogError`` from stream_src (upstream short-read
-            # before Content-Length was reached) gets logged here
-            # AND recorded as an ``image.upstream.truncated`` event
-            # before the connection drops. Without this wrapper the
-            # exception still propagates -- Starlette aborts the
-            # response, the client sees curl exit 18 -- but the
-            # bty-web journal contains no record of WHICH blob
-            # truncated. The operator has to ssh in and grep dmesg.
-            try:
-                yield from chunks
-            except _catalog.CatalogError as exc:
-                with contextlib.suppress(Exception), _db.open_db(state_path) as conn:
-                    _log_event(
-                        conn,
-                        kind="image.upstream.truncated",
-                        summary=f"upstream truncated while streaming {src}",
-                        subject_kind="catalog",
-                        subject_id=src,
-                        actor="system",
-                        details={"error": str(exc)},
-                    )
-                    conn.commit()
-                raise
-
-        return StreamingResponse(
-            _observed_chunks(), media_type="application/octet-stream", headers=headers
-        )
-
     def _flash_target_for_ref(ref: str) -> str | None:
-        """Resolve a ``bty_image_ref`` to a display name so the iPXE
-        flash template can build the ``/images/<ref>/<name>`` URL.
+        """Resolve a ``bty_image_ref`` to a display name for the iPXE
+        flash template's URL emit step (still emitted as a stable
+        identifier for the live env to look up, even though the bytes
+        path no longer goes through bty-web).
 
         Returns the entry's ``name`` (preserves format-by-extension
-        on the live-env side) or ``None`` for an orphaned binding (no
-        catalog row matches this ref). The URL uses the ref itself,
-        not the content sha. The serve path returns a local file when
-        present and otherwise stream-proxies the remote source, so the
-        URL works whether or not the image has been downloaded yet.
+        on the live-env side) or ``None`` for an orphaned binding
+        (no catalog row matches this ref).
         """
         with _db.open_db(state_path) as conn:
             row = conn.execute(
@@ -1751,53 +1643,15 @@ def create_app(
             return None
         return str(row["name"])
 
-    # The flash plan resolves name/format/src in one query inline (see
-    # pxe_plan); ``_flash_target_for_ref`` is kept as a single-field
-    # helper because the iPXE ``/pxe`` handler needs only the name.
-
-    @app.api_route(
-        "/images/{key}",
-        methods=["GET", "HEAD"],
-        include_in_schema=False,
-    )
-    def serve_image(key: str, request: Request) -> Response:
-        """Serve image bytes by filename OR by SHA-256.
-
-        Same trust model as /boot. The live env curls this to
-        get the bytes that ``bty.image_url`` points at.
-
-        HEAD is accepted alongside GET because
-        ``bty.flash.probe_image_url`` HEADs the URL before
-        streaming to learn Content-Length without downloading
-        the bytes. Without HEAD support, the server returns
-        405 Method Not Allowed; ``bty`` catches that as
-        ``URLError`` and surfaces "image URL not reachable" --
-        which obscures the actual cause (HEAD blocked).
-        Starlette's FileResponse handles HEAD shape (200 +
-        Content-Length, empty body) automatically.
-        """
-        return _serve_image_by_key(key, request)
-
-    @app.api_route(
-        "/images/{key}/{name:path}",
-        methods=["GET", "HEAD"],
-        include_in_schema=False,
-    )
-    def serve_image_with_name(key: str, name: str, request: Request) -> Response:
-        """``/images/<sha>/<filename>`` form. The ``key`` (SHA-256)
-        binds the bytes; ``name`` is purely decorative -- it lets
-        clients that derive image format from URL filename
-        extension (``bty.flash.probe_image_url``) keep working
-        when bty-web emits SHA-keyed URLs. The server ignores
-        ``name`` for the actual lookup; it's there so
-        ``Path(url.path).name`` returns ``foo.img.zst`` instead
-        of a bare 64-hex SHA.
-
-        HEAD support: see the sibling ``/images/{key}`` route
-        for the rationale.
-        """
-        del name  # informational only; lookup is by ``key``
-        return _serve_image_by_key(key, request)
+    # The ``/images/{key}[/{name}]`` oras-fallback stream-proxy was
+    # removed in v0.60.0. Its historical role was "let bty-web do the
+    # OCI manifest dance for the live env on cold withcache"; both
+    # backstops are gone now -- withcache 0.6.0 is oras-aware on the
+    # cache-host side, and the live env's bty TUI handles ``oras://``
+    # itself via ``withcache.oras`` (resolve + bearer + curl) when it
+    # gets the raw URL from the plan endpoint. The plan endpoint
+    # therefore ships the ``oras://`` src directly on cold / no-cache
+    # paths now; see ``pxe_plan`` above.
 
     @app.get(
         "/events/machines",
