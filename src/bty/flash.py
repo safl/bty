@@ -1284,6 +1284,19 @@ def _flash_qcow2(image: Path, target: Path) -> None:
 # rows above the Rich progress bar; ``-s`` silences that, ``-S``
 # keeps real error lines flowing through.
 #
+# ``--http1.1``: force HTTP/1.1 on every streaming fetch.
+#
+# GHCR's blob CDN (pkg-containers.githubusercontent.com) and other OCI
+# registries fronted by HTTP/2-capable CDNs will RST_STREAM a
+# long-running blob transfer once the pre-signed redirect URL's TTL
+# expires, surfacing here as ``curl exited 92`` (CURLE_HTTP2_STREAM)
+# after a roughly fixed number of minutes regardless of bytes
+# transferred. Operators on bty-usbboot reported this with
+# multi-GiB ``oras://ghcr.io/...`` images that aborted at the same
+# point every retry. HTTP/1.1 transfers are not subject to that
+# framing-layer reset, and HTTP/2 multiplexing buys us nothing for a
+# single large stream-to-dd transfer, so the cost is zero.
+#
 # NO ``--retry``: every curl invocation here streams into a running
 # ``dd`` pipeline. If curl retries on a transient network failure,
 # it re-fetches from byte 0; those bytes get written to disk a
@@ -1296,7 +1309,7 @@ def _flash_qcow2(image: Path, target: Path) -> None:
 # target. ``--retry`` would only make sense if we also passed
 # ``--continue-at`` and made dd resumable, which is a much bigger
 # refactor for a much rarer win.
-_CURL_BASE = ("curl", "-fsSL")
+_CURL_BASE = ("curl", "-fsSL", "--http1.1")
 
 
 def _curl_args_for_source(url: str) -> tuple[list[str], int | None, str | None]:

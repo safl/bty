@@ -1077,7 +1077,9 @@ def test_register_uefi_boot_entry_happy_path(monkeypatch: pytest.MonkeyPatch) ->
 
 def test_curl_args_for_source_plain_url_carries_no_digest() -> None:
     argv, size, digest = flash._curl_args_for_source("https://example.test/x.img")
-    assert argv == ["curl", "-fsSL", "https://example.test/x.img"]
+    # ``--http1.1`` is on the base argv to dodge HTTP/2 stream resets
+    # (CURLE_HTTP2_STREAM) on long blob transfers from HTTP/2 CDNs.
+    assert argv == ["curl", "-fsSL", "--http1.1", "https://example.test/x.img"]
     assert size is None
     # No digest for a plain URL -> the caller keeps its zero-copy path.
     assert digest is None
