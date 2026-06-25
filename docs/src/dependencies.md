@@ -41,7 +41,9 @@ live env where root is already there).
 
 The `--catalog SOURCE` mode (a local TOML path, HTTP URL, or `oras://`
 reference) adds nothing host-side: it's a plain HTTP client, and `oras://`
-uses stdlib urllib through `bty.oras`.
+uses stdlib urllib through `withcache.oras` (the OCI registry adapter
+bty re-uses from its sibling [withcache](https://github.com/safl/withcache)
+since v0.59.0).
 
 ## To run bty-web
 

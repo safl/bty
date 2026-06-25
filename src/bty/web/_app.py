@@ -2398,7 +2398,7 @@ def create_app(
         - Inserts a row keyed by image_url.
 
         ``oras://`` short-circuit: when ``image_url`` starts with
-        ``oras://``, the server runs ``bty.oras.resolve_ref`` at add
+        ``oras://``, the server runs ``withcache.oras.resolve_ref`` at add
         time. The picked layer's digest becomes the entry's
         ``disk_image_sha``, the layer's title annotation becomes
         ``name``, the layer's declared size becomes ``size_bytes``,

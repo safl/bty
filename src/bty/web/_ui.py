@@ -1128,7 +1128,7 @@ def register_ui_routes(
         sha256: str | None = None
         fmt: str | None = None
         size_bytes: int | None = None
-        # ``oras://`` short-circuit: resolve via bty.oras and write
+        # ``oras://`` short-circuit: resolve via withcache.oras and write
         # the row with the manifest-derived digest / name / size /
         # format. Mirrors the JSON endpoint's oras branch verbatim.
         if image_url.startswith("oras://"):

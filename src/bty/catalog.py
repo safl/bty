@@ -297,7 +297,7 @@ def fetch_bytes(source: str, *, timeout: float = 30.0) -> bytes:
     """Fetch a catalog TOML's raw bytes from a path / http(s) / oras source.
 
     Caps remote responses at :data:`REMOTE_CATALOG_MAX_BYTES`. Resolves
-    ``oras://`` references through :mod:`bty.oras` (anonymous-pull flow
+    ``oras://`` references through :mod:`withcache.oras` (anonymous-pull flow
     against the OCI registry). Returns the raw TOML bytes; the caller
     feeds these to :func:`load_bytes`.
     """
@@ -308,7 +308,7 @@ def fetch_bytes(source: str, *, timeout: float = 30.0) -> bytes:
         return path.read_bytes()
     if kind == "oras":
         # Defer the import so callers that never use oras don't pay
-        # the import cost. (``bty.oras`` is pure-stdlib, so this is
+        # the import cost. (``withcache.oras`` is pure-stdlib, so this is
         # mostly cosmetic, but keeps the load graph tidy.)
         from withcache import oras as _oras
 
@@ -421,7 +421,7 @@ def _canonicalise_oras(src: str) -> str:
     - lower-case host + repository (DNS / OCI distribution spec)
     - preserve tag literally (OCI tags are case-sensitive)
     - preserve digest literally
-    - validates structure via ``bty.oras.parse_ref`` so a malformed
+    - validates structure via ``withcache.oras.parse_ref`` so a malformed
       ref errors here rather than mid-flash
 
     Lower-cases the ``<host>/<repo>`` prefix BEFORE handing to
