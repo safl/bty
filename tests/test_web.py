@@ -2661,7 +2661,7 @@ def test_catalog_entry_add_oras_populates_resolved_src_with_blob_url(
     ``bty.oras.resolve_ref`` at import time. Withcache sees a plain
     HTTPS URL it can warm against; nothing downstream needs to know
     the source was ``oras://``."""
-    from bty import oras as _oras
+    from withcache import oras as _oras
 
     blob_url = "https://ghcr.io/v2/safl/nosi/freebsd-14-headless/blobs/sha256:abc123"
     monkeypatch.setattr(
@@ -3467,7 +3467,7 @@ def test_pxe_plan_synthesises_url_filename_for_extensionless_name(
     Without this pin a refactor that simplifies the URL-name path
     silently breaks oras entries with descriptive titles.
     """
-    from bty import oras as _oras
+    from withcache import oras as _oras
 
     fake_blob = _oras.ResolvedBlob(
         blob_url="https://ghcr.io/v2/safl/nosi/blobs/sha256:" + "a" * 64,

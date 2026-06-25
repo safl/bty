@@ -310,7 +310,7 @@ def fetch_bytes(source: str, *, timeout: float = 30.0) -> bytes:
         # Defer the import so callers that never use oras don't pay
         # the import cost. (``bty.oras`` is pure-stdlib, so this is
         # mostly cosmetic, but keeps the load graph tidy.)
-        from bty import oras as _oras
+        from withcache import oras as _oras
 
         resolved = _oras.resolve_ref(source, timeout=timeout)
         req = urllib.request.Request(resolved.blob_url, headers=resolved.headers)
@@ -430,7 +430,7 @@ def _canonicalise_oras(src: str) -> str:
     (which enforces the OCI spec but is stricter than what real
     registries accept).
     """
-    from bty import oras as _oras
+    from withcache import oras as _oras
 
     body = src[len("oras://") :]
     if not body:
@@ -526,7 +526,7 @@ def stream_src(
     exhausted (or when the consumer stops iterating + it's GC'd).
     """
     if src.startswith("oras://"):
-        from bty import oras as _oras
+        from withcache import oras as _oras
 
         resolved = _oras.resolve_ref(src, timeout=timeout)
         req = urllib.request.Request(resolved.blob_url, headers=resolved.headers)

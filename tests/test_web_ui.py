@@ -1179,7 +1179,7 @@ def test_ui_catalog_entry_form_oras_branch(
     the JSON ``POST /catalog/entries`` oras path but exercises the
     Form-based UI handler (913-975 of _ui.py was the uncovered
     block)."""
-    from bty import oras as _oras
+    from withcache import oras as _oras
 
     fake_blob = _oras.ResolvedBlob(
         blob_url="https://ghcr.io/v2/safl/nosi/blobs/sha256:" + "a" * 64,
@@ -1219,7 +1219,7 @@ def test_ui_catalog_entry_form_oras_resolve_failure(
     the operator gets a 303 back to /ui/images with an ``?error=``
     query param -- NOT a 500 traceback. Pin the error-channel
     shape so a refactor can't silently regress to a wedge."""
-    from bty import oras as _oras
+    from withcache import oras as _oras
 
     def _boom(url: str) -> _oras.ResolvedBlob:
         raise _oras.OrasError("simulated registry unreachable")
@@ -1246,7 +1246,7 @@ def test_ui_catalog_entry_form_oras_duplicate_redirects_with_error(
     constraint. The handler catches the IntegrityError and
     redirects with ``?error=already+exists`` rather than 500'ing.
     """
-    from bty import oras as _oras
+    from withcache import oras as _oras
 
     fake_blob = _oras.ResolvedBlob(
         blob_url="x",
@@ -3017,8 +3017,9 @@ def test_catalog_entry_check_oras_with_resolved_src_warms_withcache(
     ``Authorization`` header. From withcache 0.4.0 the header is
     forwarded into the background fetch worker so the cache fills on
     the first probe."""
+    from withcache import oras as _oras
+
     from bty import flash as _flash
-    from bty import oras as _oras
     from bty.web import _settings_store, _withcache
 
     src = "oras://ghcr.io/safl/nosi/freebsd-14-headless:latest"
