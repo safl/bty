@@ -108,7 +108,7 @@ def main(argv: list[str] | None = None, *, prog: str = "bty") -> None:
     # operator stares at without feedback otherwise:
     #
     #   1. ``from bty.tui._app import BtyTui`` (1-3s): pulls Rich
-    #      + bty.catalog + bty.flash + bty.oras into the
+    #      + bty.catalog + bty.flash + withcache.oras into the
     #      interpreter. On slower hardware (low-end mini-PCs, EPYC
     #      bringup boxes) this is several seconds of "blinking
     #      cursor".

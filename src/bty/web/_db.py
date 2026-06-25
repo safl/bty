@@ -179,7 +179,7 @@ CREATE INDEX IF NOT EXISTS machine_labels_label_idx ON machine_labels(label);
 -- fetches from. For ``http(s)://`` srcs this equals ``src``. For
 -- ``oras://`` srcs this is the registry blob URL (e.g.
 -- ``https://ghcr.io/v2/<repo>/blobs/sha256:<digest>``) that bty-web
--- resolves once at catalog import via ``bty.oras.resolve_ref``;
+-- resolves once at catalog import via ``withcache.oras.resolve_ref``;
 -- everything downstream (the withcache HEAD probe, the PXE plan's
 -- ``serve_url`` rewrite, the ``/images/{ref}`` proxy fallback) keys
 -- on this URL so withcache stays oras-blind. NULL only for legacy

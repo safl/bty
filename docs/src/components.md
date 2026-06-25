@@ -45,15 +45,19 @@ Three delivery shapes, the same `bty` library at the centre:
 ```
 
 The `bty` package implements the flashing logic (`bty.flash`,
-`bty.images`, `bty.disks`, `bty.catalog`, `bty.oras`) consumed by both
-shipping flows. ``bty`` (the operator wizard) and ``bty-web`` (the HTTP
-server) are the two UI shells; in the netboot live env, ``bty`` is launched
-on tty1 by `bty-on-tty1.service` and dispatches via the bty-web plan
-endpoint - no separate auto-flash service. Same operations, different
-delivery vehicles. The middle shape (`--catalog SOURCE`, typically pointed
-at a bty-web instance's `/catalog.toml`) is where the container
-fits: a single command on a workstation gives a small team a shared image
-catalog without the full PXE deploy.
+`bty.images`, `bty.disks`, `bty.catalog`) consumed by both shipping
+flows. OCI / `oras://` URLs are handled by `withcache.oras` (since
+v0.59.0; previously a vendored `bty.oras`); ``bty`` imports it as a
+library and the cache-host uses the same module to resolve refs on
+cold misses. ``bty`` (the operator wizard) and ``bty-web`` (the HTTP
+server) are the two UI shells; in the netboot live env, ``bty`` is
+launched on tty1 by `bty-on-tty1.service` and dispatches via the
+bty-web plan endpoint - no separate auto-flash service. Same
+operations, different delivery vehicles. The middle shape
+(`--catalog SOURCE`, typically pointed at a bty-web instance's
+`/catalog.toml`) is where the container fits: a single command on a
+workstation gives a small team a shared image catalog without the
+full PXE deploy.
 
 ## `bty` (wizard + library)
 
@@ -62,7 +66,9 @@ target disk and flashes; the same code also runs in scripted /
 server-driven mode via the bty-web plan endpoint. Single source of truth
 for image inspection, target-disk discovery, flashing, and remote-catalog
 ingestion. Library modules (`bty.flash`, `bty.images`, `bty.catalog`,
-`bty.disks`, `bty.oras`) are stable Python API for in-process scripting.
+`bty.disks`) are stable Python API for in-process scripting; OCI / oras
+handling lives in `withcache.oras` (re-used from the sibling withcache
+project, hard dep since v0.59.0).
 
 Three invocation shapes:
 

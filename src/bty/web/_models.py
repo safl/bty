@@ -367,7 +367,7 @@ class CatalogEntryAdd(BaseModel):
     # The oras alternative also requires at least one ``/`` in the
     # path (host/owner/repo) since GHCR-style refs need owner+repo
     # under the host. The CLI / API entry point later runs
-    # ``bty.oras.parse_ref`` for stricter shape validation.
+    # ``withcache.oras.parse_ref`` for stricter shape validation.
     image_url: str = Field(
         ...,
         pattern=r"^(?:https?://[^\s/?#]+(?:[/?#]\S*)?|oras://[^\s/?#]+/\S+)$",

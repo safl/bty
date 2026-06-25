@@ -7,7 +7,7 @@ Top-level package. Subpackages:
 - ``bty.web`` - HTTP server with browser UI (``bty-web`` console
   script); requires the ``[web]`` extra.
 - ``bty.flash`` / ``bty.images`` / ``bty.catalog`` / ``bty.disks``
-  / ``bty.oras`` - the library modules ``bty.tui`` + ``bty.web``
+  / ``withcache.oras`` - the library modules ``bty.tui`` + ``bty.web``
   share.
 """
 
