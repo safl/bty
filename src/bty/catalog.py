@@ -564,13 +564,9 @@ def stream_src(
         if total is not None and emitted < total:
             # Raise AFTER ``resp.close()`` so the upstream connection
             # is reaped cleanly; the in-flight HTTP response has
-            # already been emitted up to ``emitted`` bytes, so the
-            # client sees a connection-cut before Content-Length is
-            # reached (curl exit 18). The exception propagates up
-            # through Starlette's StreamingResponse machinery and is
-            # caught by the call site (``_stream_remote_image``) which
-            # logs it + records an ``image.upstream.truncated`` event
-            # so the operator sees WHICH blob and by how much.
+            # already been emitted up to ``emitted`` bytes. The
+            # exception propagates up to the caller as a CatalogError
+            # which they can surface / log as they see fit.
             raise CatalogError(f"upstream short read on {src!r}: got {emitted} of {total} bytes")
 
     return _chunks(), total
