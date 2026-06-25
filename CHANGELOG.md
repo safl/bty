@@ -9,6 +9,38 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.60.0] - 2026-06-25
+
+### Removed
+
+- **`/images/{key}[/{name}]` route + the `_stream_remote_image`
+  oras stream-proxy.** The route's historical role was "let
+  bty-web do the OCI manifest dance for the live env on cold
+  withcache". Both backstops are gone:
+
+  - withcache 0.6.0 (v0.59.0's hard dep) is oras-aware on the
+    cache-host side, so a withcache deploy absorbs the OCI work
+    transparently;
+  - The live env's bty TUI handles `oras://` itself via
+    `withcache.oras` (resolve + bearer + curl) when the plan
+    endpoint hands it the raw URL.
+
+  `pxe_plan` therefore ships the original `src` (oras:// or
+  https://) on cold-cache or no-withcache paths now; no more
+  bty-web in the bytes path for oras. Operators on the default
+  withcache deploy see no change. Operators running bty-web
+  without withcache who had oras catalog entries: the live env
+  now needs egress to the OCI registry directly (previously the
+  bty-web host did the registry talk, the live env stayed
+  LAN-only). Configure withcache (the default deploy stack) to
+  keep the LAN-only property.
+
+### Changed
+
+- `cache_decision.served_from` no longer carries `"bty-web-proxy"`
+  as a value (the proxy is gone). The two surviving values are
+  `"withcache"` and `"origin"`.
+
 ## [0.59.0] - 2026-06-25
 
 ### Changed
