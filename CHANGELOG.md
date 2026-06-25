@@ -9,6 +9,55 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.59.0] - 2026-06-25
+
+### Changed
+
+- **OCI handling moved upstream to `withcache.oras`.** `bty.oras`
+  was deleted. The OCI registry adapter (parse_ref,
+  fetch_anonymous_token, fetch_manifest, pick_image_layer,
+  resolve_ref, sidecar + mediaType filters) now lives in withcache
+  0.6.0+ and bty imports it as a library. Same surface, same
+  semantics, just one implementation across the bty ecosystem.
+
+  `bty-lab` now declares `withcache>=0.6.0` as a hard runtime
+  dependency. withcache is stdlib-only so the install graph stays
+  light, and the default `bty-lab init` deploy stack has shipped
+  withcache as a sidecar since v0.40, so most operators won't
+  notice. The mypy override for the un-typed import lives in
+  `pyproject.toml` until withcache ships a `py.typed` marker.
+
+- **`/catalog.toml` rewrites every remote src through withcache
+  when configured.** Previously cached entries went through
+  `<bty-web>/images/<sha>/<name>` and uncached entries shipped the
+  raw upstream URL (oras + https alike). With withcache 0.6.0+
+  oras-aware, the rewrite is uniform: every remote entry becomes
+  `<withcache>/b/<b64(origin)>/<basename>` regardless of original
+  scheme. The live env consuming the catalog sees only plain HTTPS
+  URLs on the LAN cache; withcache absorbs the ghcr.io stream-cut
+  class internally via its Range-resume loop. Falls back to the
+  pre-existing direct-origin behaviour when `BTY_WITHCACHE_URL`
+  is not configured.
+
+- **Withcache HEAD probes drop bty-side bearer minting.**
+  `/pxe/{mac}/plan` and `/ui/catalog/entries/check` used to
+  pre-resolve an OCI bearer and pass it on the HEAD's
+  `Authorization` header so withcache 0.4.0's background fetch
+  worker could forward it. Withcache 0.6.0+ mints its own bearer
+  when the cache key is `oras://...`, so both endpoints now HEAD
+  against the original `src` (oras or https) with no bearer
+  plumbing. The `head_headers` + `fetch_anonymous_token` paths in
+  `_app.py` and `_ui.py` were removed.
+
+### Fixed
+
+- HTTP/2 stream-resets on multi-GiB `oras://ghcr.io/...` flashes
+  now have two backstops: the surgical `--http1.1` from v0.58.3
+  (already shipped) on the bty client side, and withcache's
+  Range-resume on the cache-host side once the catalog routes
+  through it (this release). Operators on the default withcache
+  deploy get the resume path transparently.
+
 ## [0.58.3] - 2026-06-25
 
 ### Fixed
